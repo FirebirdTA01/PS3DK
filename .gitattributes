@@ -1,0 +1,42 @@
+# Default: let git handle text normally, but force LF in the repo.
+* text=auto eol=lf
+
+# Never convert patch line endings — patches must apply byte-exactly upstream.
+patches/** -text
+*.patch -text
+*.diff -text
+
+# Shell scripts stay LF on disk regardless of platform.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows scripts stay CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets — never touch.
+*.a binary
+*.o binary
+*.so binary
+*.so.* binary
+*.dll binary
+*.exe binary
+*.lib binary
+*.obj binary
+*.self binary
+*.sprx binary
+*.pkg binary
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.tar binary
+*.tar.gz binary
+*.tar.bz2 binary
+*.tar.xz binary
+*.tar.zst binary
+*.zip binary

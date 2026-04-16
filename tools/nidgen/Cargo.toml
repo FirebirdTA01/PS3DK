@@ -1,0 +1,28 @@
+[package]
+name = "nidgen"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "PS3 FNID/NID calculator, YAML database, and stub generator"
+
+[[bin]]
+name = "nidgen"
+path = "src/main.rs"
+
+[lib]
+name = "nidgen"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+sha1.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
