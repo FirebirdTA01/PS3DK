@@ -1,0 +1,100 @@
+# LV2 kernel syscalls — partial seed file.
+#
+# These entries are placeholders derived from public PSDevWiki and PSL1GHT
+# sources. The `nid` values marked with a TODO comment have not yet been
+# cross-checked against Sony's stub archive — do that with
+# `nidgen verify nids/sys_lv2.yaml` after mounting reference/sony-sdk/.
+#
+# Signature paraphrase follows PSL1GHT's cleaned-up style. Semantics summary
+# only — never copy verbatim from Sony headers.
+
+library: sys_lv2
+version: 1
+module: sys_lv2
+
+exports:
+  # ---- PPU thread management ----
+  - name: sys_ppu_thread_create
+    nid: 0xdb6b3250
+    signature: |
+      int sys_ppu_thread_create(sys_ppu_thread_t *tid,
+                                void (*entry)(void *), uint64_t arg,
+                                int prio, size_t stacksize, uint64_t flags,
+                                const char *threadname);
+    notes: "TODO verify NID against libsysmodule_stub.a"
+
+  - name: sys_ppu_thread_exit
+    nid: 0x3ad66f3f
+    signature: "void sys_ppu_thread_exit(uint64_t val) __attribute__((noreturn));"
+    notes: "TODO verify"
+
+  - name: sys_ppu_thread_join
+    nid: 0xa0f3b23b
+    signature: "int sys_ppu_thread_join(sys_ppu_thread_t tid, uint64_t *vptr);"
+    notes: "TODO verify"
+
+  - name: sys_ppu_thread_yield
+    nid: 0x3989e65e
+    signature: "int sys_ppu_thread_yield(void);"
+    notes: "TODO verify"
+
+  # ---- SPU thread group management ----
+  - name: sys_spu_thread_group_create
+    nid: 0x27860d8c
+    signature: |
+      int sys_spu_thread_group_create(sys_spu_thread_group_t *group_id,
+                                      uint32_t num, int prio,
+                                      sys_spu_thread_group_attribute_t *attr);
+    notes: "TODO verify"
+
+  - name: sys_spu_thread_group_destroy
+    nid: 0xd36ca7ec
+    signature: "int sys_spu_thread_group_destroy(sys_spu_thread_group_t group_id);"
+    notes: "TODO verify"
+
+  - name: sys_spu_thread_initialize
+    nid: 0x5d7ad40a
+    signature: |
+      int sys_spu_thread_initialize(sys_spu_thread_t *thread,
+                                    sys_spu_thread_group_t group,
+                                    uint32_t spu_num,
+                                    sys_spu_image_t *img,
+                                    sys_spu_thread_attribute_t *attr,
+                                    sys_spu_thread_argument_t *args);
+    notes: "TODO verify"
+
+  # ---- PRX loading ----
+  - name: sys_prx_load_module
+    nid: 0xfa2e3b9a
+    signature: "int sys_prx_load_module(const char *path, uint64_t flags, void *pOpt);"
+    notes: "TODO verify"
+
+  - name: sys_prx_start_module
+    nid: 0x20d0cf78
+    signature: |
+      int sys_prx_start_module(sys_prx_id_t id, size_t args, void *argv,
+                               int *modres, uint64_t flags, void *pOpt);
+    notes: "TODO verify"
+
+  - name: sys_prx_stop_module
+    nid: 0x8a3f2d97
+    signature: |
+      int sys_prx_stop_module(sys_prx_id_t id, size_t args, void *argv,
+                              int *modres, uint64_t flags, void *pOpt);
+    notes: "TODO verify"
+
+  - name: sys_prx_unload_module
+    nid: 0x57b46d50
+    signature: "int sys_prx_unload_module(sys_prx_id_t id, uint64_t flags, void *pOpt);"
+    notes: "TODO verify"
+
+  # ---- Memory ----
+  - name: sys_memory_allocate
+    nid: 0x6fe2e04b
+    signature: "int sys_memory_allocate(size_t size, uint64_t flags, sys_addr_t *alloc_addr);"
+    notes: "TODO verify"
+
+  - name: sys_memory_free
+    nid: 0x9d8c4f79
+    signature: "int sys_memory_free(sys_addr_t alloc_addr);"
+    notes: "TODO verify"

@@ -1,0 +1,76 @@
+# JSON Schema (in YAML form) for the NID database files under nids/.
+# Validates each <library>.yaml.
+
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "PS3 Library NID Database"
+type: object
+required: [library, module, exports]
+additionalProperties: false
+
+properties:
+  library:
+    type: string
+    description: "PSL1GHT/Sony library prefix (e.g. cellNetCtl, sys_lv2)."
+    pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
+
+  version:
+    type: integer
+    description: "Schema version. Current: 1."
+    minimum: 1
+    default: 1
+
+  module:
+    type: string
+    description: "Sony SPRX module that resolves these imports at runtime."
+    pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
+
+  exports:
+    type: array
+    description: "Symbols exported by this library."
+    items:
+      $ref: "#/$defs/symbol"
+
+  imports:
+    type: array
+    description: "Optional: symbols this library itself imports from others."
+    items:
+      $ref: "#/$defs/symbol"
+
+$defs:
+  symbol:
+    type: object
+    required: [name, nid]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        description: "C symbol name."
+        pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
+      nid:
+        description: |
+          Authoritative NID from Sony stub archive. Accepts hex string
+          ("0xbd5a59fc", "bd5a59fc") or integer.
+        oneOf:
+          - type: string
+            pattern: "^(0x)?[0-9a-fA-F]{1,8}$"
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+      fnid:
+        description: "Optional computed FNID — populated by `nidgen verify`."
+        oneOf:
+          - type: string
+            pattern: "^(0x)?[0-9a-fA-F]{1,8}$"
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+      signature:
+        type: string
+        description: "C function signature (documentation)."
+      ordinal:
+        type: integer
+        description: "Optional ordinal for import-by-ordinal libs."
+        minimum: 0
+      notes:
+        type: string
+        description: "Deprecation, caveats, missing fields, links."

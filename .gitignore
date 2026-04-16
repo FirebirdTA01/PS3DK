@@ -1,0 +1,82 @@
+# Source trees (vendored upstream + forks; reproducible via scripts/bootstrap.sh)
+/src/
+
+# Build intermediates
+/build/
+
+# Staging prefix ($PS3DEV install root)
+/stage/
+
+# Sony SDK reference mount — MUST NEVER be committed
+/reference/sony-sdk/
+/reference/sony-sdk
+
+# Tarball cache
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+*.zip
+
+# Build tool outputs
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.exp
+*.lib
+*.obj
+*.pdb
+*.self
+*.sprx
+*.pkg
+*.ko
+*.map
+
+# Rust / Cargo (tools/nidgen, stubgen, coverage-report)
+target/
+Cargo.lock
+!/tools/*/Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+!/CMakeLists.txt
+!/cmake/**/*.cmake
+
+# Editor / IDE
+.vscode/
+.vs/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and diagnostics
+*.log
+*.tmp
+.build-stamps/
+
+# CI scratch
+.ccache/
+.sccache/
+
+# Claude Code local-only settings (per-user; team-shared settings.json is OK to commit)
+.claude/settings.local.json

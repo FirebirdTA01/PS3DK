@@ -1,0 +1,23 @@
+[package]
+name = "coverage-report"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Sony SDK vs PSL1GHT API coverage matrix generator"
+
+[[bin]]
+name = "coverage-report"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+walkdir.workspace = true
+# Note: clang-sys / bindgen will be added once Sony SDK mount is available and
+# we start walking real headers. For now the binary emits a PSL1GHT-only report
+# via simple header regex scanning.
+regex = "1.10"
