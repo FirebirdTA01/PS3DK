@@ -72,15 +72,40 @@ Artifacts:
 
 ## Running
 
+`make` produces three artifacts per sample; pick the one that matches your
+target.
+
+| Artifact | Target | How to launch |
+|---|---|---|
+| `<sample>.elf` | Raw PPU ELF — for `ps3load` or GDB debugging | `make run` (ps3load) or `rpcs3 <sample>.elf` |
+| `<sample>.self` | CEX-signed SELF — boots on RPCS3 or signed hardware | `rpcs3 --no-gui <sample>.self` |
+| `<sample>.fake.self` | Fake-signed SELF — for jailbroken/CFW hardware via `ps3load` | `make run` (streams over LAN) |
+
 **RPCS3 (preferred for quick iteration):**
 ```bash
 rpcs3 --no-gui <sample>.self
 ```
+The `.self` boots directly — no install step.  Stdout goes to the RPCS3
+terminal window.
 
-**Jailbroken hardware via ps3load:**
+**Jailbroken hardware via `ps3load` (fastest turnaround on real HW):**
 ```bash
-make run   # requires ps3load on PATH and PS3LOADIP pointing at your console
+export PS3LOADIP=<console IP>
+make run   # streams <sample>.fake.self to the running ps3load on the console
 ```
+
+**Jailbroken hardware via XMB Package Installer (persistent install):**
+```bash
+make <sample>.pkg   # produces <sample>.pkg + <sample>.gnpdrm.pkg
+```
+Copy the `.pkg` to a USB stick at `/PS3/GAME/` or similar, boot the
+console, and install via *Game → Package Installer*.  The app shows up in
+XMB under the sample's `TITLE` (see the Makefile) and can be launched
+like a normal game.  Uninstall via *Game → Game → Delete*.
+
+`.pkg` isn't a default `make` target because the `.self` already covers
+both RPCS3 and dev-iteration flows; only build it when you want a
+persistent retail-style install.
 
 ## Retest matrix after major rebuilds
 

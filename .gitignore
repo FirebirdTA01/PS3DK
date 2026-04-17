@@ -8,6 +8,8 @@
 samples/*/build/
 samples/*/*.elf
 samples/*/*.fake.self
+samples/*/*.pkg
+samples/*/*.gnpdrm.pkg
 
 # Staging prefix ($PS3DEV install root)
 /stage/
