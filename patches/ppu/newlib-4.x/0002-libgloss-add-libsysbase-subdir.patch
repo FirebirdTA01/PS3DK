@@ -1,0 +1,14 @@
+diff --git a/libgloss/configure.ac b/libgloss/configure.ac
+index 268d86c..216fad7 100644
+--- a/libgloss/configure.ac
++++ b/libgloss/configure.ac
+@@ -114,6 +114,9 @@ case "${target}" in
+ 	subdirs="$subdirs rs6000"
+ 	host_makefile_frag=${srcdir}/config/ppc.mh
+ 	;;
++  powerpc64-ps3-elf*)
++	subdirs="$subdirs libsysbase"
++	;;
+   mn10200-*-*)
+ 	AC_CONFIG_FILES([mn10200/Makefile])
+ 	subdirs="$subdirs mn10200"

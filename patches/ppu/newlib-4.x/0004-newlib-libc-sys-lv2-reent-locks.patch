@@ -1,0 +1,565 @@
+diff --git a/newlib/libc/sys/lv2/Makefile.am b/newlib/libc/sys/lv2/Makefile.am
+new file mode 100644
+index 0000000..fb1795d
+--- /dev/null
++++ b/newlib/libc/sys/lv2/Makefile.am
+@@ -0,0 +1,18 @@
++## Process this file with automake to generate Makefile.in
++
++AUTOMAKE_OPTIONS = cygnus
++
++INCLUDES = $(NEWLIB_CFLAGS) $(CROSS_CFLAGS) $(TARGET_CFLAGS)
++
++AM_CCASFLAGS = $(INCLUDES)
++
++noinst_LIBRARIES = lib.a
++
++lib_a_SOURCES = getreent.c lock.c lock_recursive.c lock_internal.c realpath.c
++lib_a_CCASFLAGS = $(AM_CCASFLAGS)
++lib_a_CFLAGS = $(AM_CFLAGS)
++
++all-local: crt0.o
++
++ACLOCAL_AMFLAGS = -I ../../.. -I ../../../..
++CONFIG_STATUS_DEPENDENCIES = $(newlib_basedir)/configure.host
+diff --git a/newlib/libc/sys/lv2/Makefile.inc b/newlib/libc/sys/lv2/Makefile.inc
+new file mode 100644
+index 0000000..60ca36c
+--- /dev/null
++++ b/newlib/libc/sys/lv2/Makefile.inc
+@@ -0,0 +1,6 @@
++libc_a_SOURCES += \
++	%D%/getreent.c \
++	%D%/lock.c \
++	%D%/lock_internal.c \
++	%D%/lock_recursive.c \
++	%D%/realpath.c
+diff --git a/newlib/libc/sys/lv2/configure.in b/newlib/libc/sys/lv2/configure.in
+new file mode 100644
+index 0000000..8f596b3
+--- /dev/null
++++ b/newlib/libc/sys/lv2/configure.in
+@@ -0,0 +1,13 @@
++dnl This is the newlib/libc/sys/rtems configure.in file.
++dnl Process this file with autoconf to produce a configure script.
++
++AC_PREREQ(2.59)
++AC_INIT([newlib],[NEWLIB_VERSION])
++
++dnl Can't be done in NEWLIB_CONFIGURE because that confuses automake.
++AC_CONFIG_AUX_DIR(../../../..)
++
++NEWLIB_CONFIGURE(../../..)
++
++AC_CONFIG_FILES([Makefile])
++AC_OUTPUT
+diff --git a/newlib/libc/sys/lv2/getreent.c b/newlib/libc/sys/lv2/getreent.c
+new file mode 100644
+index 0000000..59f3ef4
+--- /dev/null
++++ b/newlib/libc/sys/lv2/getreent.c
+@@ -0,0 +1,15 @@
++#include <reent.h>
++
++static __thread struct _reent t_reent;
++static __thread struct _reent *t_reentp = 0;
++
++struct _reent* __getreent(void)
++{
++  struct _reent *r = t_reentp;
++
++	if(!r) {
++    t_reentp = r = &t_reent;
++    _REENT_INIT_PTR(r);
++  }
++  return r;
++}
+diff --git a/newlib/libc/sys/lv2/lock.c b/newlib/libc/sys/lv2/lock.c
+new file mode 100644
+index 0000000..4e32e44
+--- /dev/null
++++ b/newlib/libc/sys/lv2/lock.c
+@@ -0,0 +1,37 @@
++#include <stdint.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/lock.h>
++
++#include "lock_internal.h"
++
++int __libc_lock_init(__libc_lock_t *lock)
++{
++	return sys_lwmutex_create(lock,&__libc_lock_attributes);
++}
++
++int __libc_lock_close(__libc_lock_t *lock)
++{
++  return sys_lwmutex_destroy(lock);
++}
++
++int __libc_lock_acquire(__libc_lock_t *lock)
++{
++	if(SYS_LWMUTEX_UNINITIALIZED(lock))
++    __libc_auto_lock_allocate(lock);
++	return  sys_lwmutex_lock(lock,0);
++}
++
++int __libc_lock_try_acquire(__libc_lock_t *lock)
++{
++	if(SYS_LWMUTEX_UNINITIALIZED(lock))
++    __libc_auto_lock_allocate(lock);
++  return sys_lwmutex_trylock(lock);
++}
++
++int __libc_lock_release(__libc_lock_t *lock)
++{
++	if(SYS_LWMUTEX_UNINITIALIZED(lock))
++    __libc_auto_lock_allocate(lock);
++  return sys_lwmutex_unlock(lock);
++}
+diff --git a/newlib/libc/sys/lv2/lock_internal.c b/newlib/libc/sys/lv2/lock_internal.c
+new file mode 100644
+index 0000000..7a07e3e
+--- /dev/null
++++ b/newlib/libc/sys/lv2/lock_internal.c
+@@ -0,0 +1,29 @@
++#include <stdint.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/lock.h>
++
++#include "lock_internal.h"
++
++static sys_lwmutex_t metaLock;
++
++static void init_metalock(void) __attribute__((constructor(105)));
++static void init_metalock(void)
++{
++	if(sys_lwmutex_create(&metaLock,&__libc_lock_attributes))
++		abort();
++}
++
++void __libc_auto_lock_allocate(sys_lwmutex_t *lwmutex)
++{
++	if(sys_lwmutex_lock(&metaLock,0))
++		abort();
++
++	if(SYS_LWMUTEX_UNINITIALIZED(lwmutex)) {
++		if(sys_lwmutex_create(lwmutex,&__libc_lock_attributes))
++			abort();
++	}
++
++	if(sys_lwmutex_unlock(&metaLock))
++		abort();
++}
+diff --git a/newlib/libc/sys/lv2/lock_internal.h b/newlib/libc/sys/lv2/lock_internal.h
+new file mode 100644
+index 0000000..f7cdadc
+--- /dev/null
++++ b/newlib/libc/sys/lv2/lock_internal.h
+@@ -0,0 +1,32 @@
++#ifndef __SYS_LOCK_INTERNAL_H__
++#define __SYS_LOCK_INTERNAL_H__
++
++#include <stdint.h>
++
++#define SYS_LWMUTEX_ATTR_PROTOCOL			0x0002
++#define SYS_LWMUTEX_ATTR_RECURSIVE			0x0010
++
++#define SYS_LWMUTEX_UNINITIALIZED(plwm)		(!((plwm)->attribute))
++
++typedef struct _sys_lwmutex sys_lwmutex_t;
++
++typedef struct _sys_lwmutex_attr
++{
++	uint32_t attr_protocol;
++	uint32_t attr_recursive;
++	char name[8];
++}sys_lwmutex_attr_t;
++
++static const sys_lwmutex_attr_t __libc_lock_attributes = {
++	SYS_LWMUTEX_ATTR_PROTOCOL,SYS_LWMUTEX_ATTR_RECURSIVE,""
++};
++
++extern void __libc_auto_lock_allocate(sys_lwmutex_t *lwmutex);
++
++extern int32_t sys_lwmutex_create(sys_lwmutex_t *lwmutex,const sys_lwmutex_attr_t *attr);
++extern int32_t sys_lwmutex_destroy(sys_lwmutex_t *lwmutex);
++extern int32_t sys_lwmutex_lock(sys_lwmutex_t *lwmutex, uint64_t timeout);
++extern int32_t sys_lwmutex_trylock(sys_lwmutex_t *lwmutex);
++extern int32_t sys_lwmutex_unlock(sys_lwmutex_t *lwmutex);
++
++#endif
+diff --git a/newlib/libc/sys/lv2/lock_recursive.c b/newlib/libc/sys/lv2/lock_recursive.c
+new file mode 100644
+index 0000000..8fd9096
+--- /dev/null
++++ b/newlib/libc/sys/lv2/lock_recursive.c
+@@ -0,0 +1,37 @@
++#include <stdint.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/lock.h>
++
++#include "lock_internal.h"
++
++int __libc_lock_init_recursive(__libc_lock_t *lock)
++{
++	return sys_lwmutex_create(lock,&__libc_lock_attributes);
++}
++
++int __libc_lock_close_recursive(__libc_lock_t *lock)
++{
++  return sys_lwmutex_destroy(lock);
++}
++
++int __libc_lock_acquire_recursive(__libc_lock_t *lock)
++{
++	if(SYS_LWMUTEX_UNINITIALIZED(lock))
++    __libc_auto_lock_allocate(lock);
++	return  sys_lwmutex_lock(lock,0);
++}
++
++int __libc_lock_try_acquire_recursive(__libc_lock_t *lock)
++{
++	if(SYS_LWMUTEX_UNINITIALIZED(lock))
++    __libc_auto_lock_allocate(lock);
++  return sys_lwmutex_trylock(lock);
++}
++
++int __libc_lock_release_recursive(__libc_lock_t *lock)
++{
++	if(SYS_LWMUTEX_UNINITIALIZED(lock))
++    __libc_auto_lock_allocate(lock);
++  return sys_lwmutex_unlock(lock);
++}
+diff --git a/newlib/libc/sys/lv2/machine/_types.h b/newlib/libc/sys/lv2/machine/_types.h
+new file mode 100644
+index 0000000..f1240c1
+--- /dev/null
++++ b/newlib/libc/sys/lv2/machine/_types.h
+@@ -0,0 +1,16 @@
++#ifndef _MACHINE__TYPES_H
++#define _MACHINE__TYPES_H
++
++#include <machine/_default_types.h>
++
++#ifndef FD_SETSIZE
++#define FD_SETSIZE 1024
++#endif
++
++#define __fpos_t_defined
++typedef long long _fpos_t;
++
++#define __off_t_defined
++typedef long long _off_t;
++
++#endif // _MACHINE__TYPES_H
+diff --git a/newlib/libc/sys/lv2/realpath.c b/newlib/libc/sys/lv2/realpath.c
+new file mode 100644
+index 0000000..2ec3540
+--- /dev/null
++++ b/newlib/libc/sys/lv2/realpath.c
+@@ -0,0 +1,76 @@
++#include <errno.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/syslimits.h>
++#include <unistd.h>
++
++static int resolve_path(char *path, char *result, char *pos)
++{
++	if (*path == '/') {
++		*result = '/';
++		pos = result+1;
++		++path;
++	}
++
++	*pos = 0;
++	if (!*path)
++		return 0;
++
++	while (1) {
++		char *slash = *path ? strchr(path,'/') : NULL;
++		if (slash)
++			*slash = 0;
++
++		if (!path[0] || (path[0] == '.' &&	(!path[1] || (path[1] == '.' && !path[2])))) {
++			--pos;
++			if (pos != result && path[0] && path[1])
++				while (*--pos != '/');
++		}
++		else {
++			strcpy(pos,path);
++			pos = strchr(result,0);
++		}
++
++		if (slash) {
++	    	*pos++ = '/';
++	    	path = slash + 1;
++		}
++
++		*pos = 0;
++		if (!slash)
++			break;
++    }
++
++	return 0;
++}
++
++char *realpath(const char *path, char *resolved_path)
++{
++	char cwd[PATH_MAX + 1];
++	char *path_copy;
++	int res;
++
++	if (!*path) {
++		errno = ENOENT;
++		return NULL;
++	}
++
++	if (!getcwd(cwd, sizeof(cwd)))
++		return NULL;
++
++	strcpy(resolved_path, "/");
++	if (resolve_path(cwd, resolved_path, resolved_path))
++		return NULL;
++
++	strcat(resolved_path, "/");
++	path_copy = strdup(path);
++	if (!path_copy)
++		return NULL;
++
++	res = resolve_path(path_copy, resolved_path, strchr(resolved_path, 0));
++	free(path_copy);
++	if (res)
++		return NULL;
++
++	return resolved_path;
++}
+diff --git a/newlib/libc/sys/lv2/sys/dirent.h b/newlib/libc/sys/lv2/sys/dirent.h
+new file mode 100644
+index 0000000..8cd78a1
+--- /dev/null
++++ b/newlib/libc/sys/lv2/sys/dirent.h
+@@ -0,0 +1,62 @@
++#ifndef __SYS_DIRENT_H__
++#define __SYS_DIRENT_H__
++
++#include <stdint.h>
++#include <unistd.h>
++#include <sys/types.h>
++
++#define DT_INVALID			0xff
++#define DT_UNKNOWN			0
++#define DT_FIFO				DT_INVALID
++#define DT_CHR				DT_INVALID
++#define DT_DIR				1
++#define DT_BLK				DT_INVALID
++#define DT_REG				2
++#define DT_LNK				3
++#define DT_SOCK				DT_INVALID
++#define DT_WHT				DT_INVALID
++
++#define dirfd(dp)			((dp)->dd_fd)
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct _dirdesc
++{
++	int32_t	dd_fd;
++	int32_t	dd_loc;
++	int32_t	dd_size;
++	void *dd_buf;
++	size_t	dd_len;
++	int32_t	dd_seek;
++	int32_t	dd_rewind;
++	int32_t	dd_flags;
++} DIR;
++
++struct dirent
++{
++	union {
++		ino_t		d_ino;
++		ino_t		d_fileno;
++	};
++	uint8_t		d_type;
++	uint16_t	d_seekoff;
++	uint16_t	d_reclen;
++	uint16_t	d_namlen;
++	char		d_name[MAXPATHLEN + 1];
++};
++
++int closedir(DIR *dirp);
++DIR *opendir(const char *dirname);
++struct dirent *readdir(DIR *dirp);
++int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result);
++void rewinddir(DIR *dirp);
++void seekdir(DIR *dirp, long int loc);
++long int telldir(DIR *dirp);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif //__DIRENT_H__
+diff --git a/newlib/libc/sys/lv2/sys/lock.h b/newlib/libc/sys/lv2/sys/lock.h
+new file mode 100644
+index 0000000..ca20728
+--- /dev/null
++++ b/newlib/libc/sys/lv2/sys/lock.h
+@@ -0,0 +1,47 @@
++#ifndef __SYS_LOCK_H__
++#define __SYS_LOCK_H__
++
++#include <stdint.h>
++
++struct _sys_lwmutex
++{
++  uint64_t lock_var;
++  uint32_t attribute;
++  uint32_t recursive_count;
++  uint32_t sleep_queue;
++	uint32_t _pad;
++};
++
++typedef struct _sys_lwmutex __libc_lock_t, __libc_lock_recursive_t;
++
++#define __libc_lock_define_initialized(CLASS,NAME) CLASS __libc_lock_t NAME = {0,};
++#define __libc_lock_define_initialized_recursive(CLASS,NAME) CLASS __libc_lock_recursive_t NAME = {0,};
++
++int __libc_lock_init(__libc_lock_t *lock);
++int __libc_lock_init_recursive(__libc_lock_recursive_t *lock);
++int __libc_lock_close(__libc_lock_t *lock);
++int __libc_lock_close_recursive(__libc_lock_recursive_t *lock);
++int __libc_lock_acquire(__libc_lock_t *lock);
++int __libc_lock_acquire_recursive(__libc_lock_recursive_t *lock);
++int __libc_lock_try_acquire(__libc_lock_t *lock);
++int __libc_lock_try_acquire_recursive(__libc_lock_recursive_t *lock);
++int __libc_lock_release(__libc_lock_t *lock);
++int __libc_lock_release_recursive(__libc_lock_recursive_t *lock);
++
++typedef __libc_lock_t _LOCK_T;
++typedef __libc_lock_recursive_t _LOCK_RECURSIVE_T;
++
++#define __LOCK_INIT(CLASS, NAME) __libc_lock_define_initialized(CLASS, NAME)
++#define __LOCK_INIT_RECURSIVE(CLASS, NAME) __libc_lock_define_initialized_recursive(CLASS, NAME)
++#define __lock_init(NAME) __libc_lock_init(&(NAME))
++#define __lock_init_recursive(NAME) __libc_lock_init_recursive(&(NAME))
++#define __lock_close(NAME) __libc_lock_close(&(NAME))
++#define __lock_close_recursive(NAME) __libc_lock_close_recursive(&(NAME))
++#define __lock_acquire(NAME) __libc_lock_acquire(&(NAME))
++#define __lock_acquire_recursive(NAME) __libc_lock_acquire_recursive(&(NAME))
++#define __lock_try_acquire(NAME) __libc_lock_try_acquire(&(NAME))
++#define __lock_try_acquire_recursive(NAME) __libc_lock_try_acquire_recursive(&(NAME))
++#define __lock_release(NAME) __libc_lock_release(&(NAME))
++#define __lock_release_recursive(NAME) __libc_lock_release_recursive(&(NAME))
++
++#endif /* __SYS_LOCK_H__ */
+diff --git a/newlib/libc/sys/lv2/sys/syscalls.h b/newlib/libc/sys/lv2/sys/syscalls.h
+new file mode 100644
+index 0000000..16cf790
+--- /dev/null
++++ b/newlib/libc/sys/lv2/sys/syscalls.h
+@@ -0,0 +1,73 @@
++#ifndef __SYSCALLS_H__
++#define __SYSCALLS_H__
++
++#include <sys/reent.h>
++#include <sys/types.h>
++#include <sys/time.h>
++#include <sys/times.h>
++#include <sys/stat.h>
++#include <sys/dirent.h>
++#include <sys/resource.h>
++#include <utime.h>
++
++typedef struct _sys_lwmutex sys_lwmutex_t;
++typedef struct _sys_lwmutex_attr sys_lwmutex_attr_t;
++
++struct __syscalls_t {
++	caddr_t (*sbrk_r)(struct _reent *r,ptrdiff_t incr);
++	int (*close_r)(struct _reent *r,int fd);
++	int (*open_r)(struct _reent *r,const char *file,int flags,int mode);
++	_ssize_t (*read_r)(struct _reent *r,int fd,void *ptr,size_t len);
++	_ssize_t (*write_r)(struct _reent *r,int fd,const void *ptr,size_t len);
++	_off_t (*lseek_r)(struct _reent *r,int fd,_off_t pos,int dir);
++	_off64_t (*lseek64_r)(struct _reent *r,int fd,_off64_t pos,int dir);
++	int (*fstat_r)(struct _reent *r,int fd,struct stat *st);
++	int (*fstat64_r)(struct _reent *r,int fd,struct stat *st);
++	int (*stat_r)(struct _reent *r,const char *path,struct stat *st);
++	int (*stat64_r)(struct _reent *r,const char *path,struct stat *st);
++	int (*ftruncate_r)(struct _reent *r,int fd,off_t len);
++	int (*truncate_r)(struct _reent *r,const char *path,off_t len);
++	int (*fsync_r)(struct _reent *r,int fd);
++	int (*link_r)(struct _reent *r,const char *old,const char *new);
++	int (*unlink_r)(struct _reent *r,const char *name);
++	int (*chmod_r)(struct _reent *r,const char *path,mode_t mode);
++	int (*rename_r)(struct _reent *r,const char *old,const char *new);
++	int (*utime_r)(struct _reent *r,const char *path,const struct utimbuf *times);
++
++	mode_t (*umask_r)(struct _reent *r,mode_t cmask);
++
++	int (*mkdir_r)(struct _reent *r,const char *path,mode_t mode);
++	int (*rmdir_r)(struct _reent *r,const char *dirname);
++	int (*chdir_r)(struct _reent *r,const char *dirname);
++	char* (*getcwd_r)(struct _reent *r,char *buf,size_t size);
++
++	int (*closedir_r)(struct _reent *r,DIR *dirp);
++	DIR* (*opendir_r)(struct _reent *r,const char *dirname);
++	struct dirent* (*readdir_r)(struct _reent *r,DIR *dirp);
++	int (*readdir_r_r)(struct _reent *r,DIR *dirp,struct dirent *entry,struct dirent **result);
++	void (*rewinddir_r)(struct _reent *r,DIR *dirp);
++	void (*seekdir_r)(struct _reent *r,DIR *dirp,long int loc);
++	long int (*telldir_r)(struct _reent *r,DIR *dirp);
++
++	int (*getpid_r)(struct _reent *r);
++	int (*isatty_r)(struct _reent *r,int fd);
++	int (*execve_r)(struct _reent *r,char *name,char **argv,char **env);
++	int (*gettod_r)(struct _reent *r,struct timeval *ptimeval,void *ptimezone);
++	int (*settod_r)(struct _reent *r,const struct timeval *ptimeval,const struct timezone *ptimezone);
++	int (*usleep_r)(struct _reent *r,useconds_t usec);
++	int (*getrusage_r)(struct _reent *r,int who,struct rusage *r_usage);
++	unsigned int (*sleep_r)(struct _reent *r,unsigned int sec);
++	clock_t (*times_r)(struct _reent *r,struct tms *buf);
++
++	int (*sys_lwmutex_create_r)(struct _reent *r,sys_lwmutex_t *lwmutex,const sys_lwmutex_attr_t *attr);
++	int (*sys_lwmutex_destroy_r)(struct _reent *r,sys_lwmutex_t *lwmutex);
++	int (*sys_lwmutex_lock_r)(struct _reent *r,sys_lwmutex_t *lwmutex,unsigned long long timeout);
++	int (*sys_lwmutex_trylock_r)(struct _reent *r,sys_lwmutex_t *lwmutex);
++	int (*sys_lwmutex_unlock_r)(struct _reent *r,sys_lwmutex_t *lwmutex);
++
++	void (*exit)(int rc);
++};
++
++extern struct __syscalls_t __syscalls;
++
++#endif
+diff --git a/newlib/libc/sys/lv2/sys/utime.h b/newlib/libc/sys/lv2/sys/utime.h
+new file mode 100644
+index 0000000..7c1fa76
+--- /dev/null
++++ b/newlib/libc/sys/lv2/sys/utime.h
+@@ -0,0 +1,20 @@
++#ifndef _SYS_UTIME_H
++#define _SYS_UTIME_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct utimbuf
++{
++  time_t actime;
++  time_t modtime;
++};
++
++int utime(const char *path, const struct utimbuf *times);
++
++#ifdef __cplusplus
++};
++#endif
++
++#endif /* _SYS_UTIME_H */

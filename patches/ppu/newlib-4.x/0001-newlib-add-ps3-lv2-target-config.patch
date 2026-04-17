@@ -1,0 +1,69 @@
+diff --git a/newlib/configure.host b/newlib/configure.host
+index 3861834..eeab93d 100644
+--- a/newlib/configure.host
++++ b/newlib/configure.host
+@@ -293,6 +293,12 @@ case "${host_cpu}" in
+ 	machine_dir=powerpc
+ 	libm_machine_dir=powerpc
+ 	;;
++  powerpc64-ps3-elf)
++	default_newlib_io_long_long="yes"
++	newlib_cflags="${newlib_cflags} -DREENTRANT_SYSCALLS_PROVIDED"
++	newlib_cflags="${newlib_cflags} -ffunction-sections -fdata-sections"
++	syscall_dir=syscalls
++	;;
+   pru*)
+ 	newlib_cflags="${newlib_cflags} -DPREFER_SIZE_OVER_SPEED"
+ 	newlib_cflags="${newlib_cflags} -DNO_EXEC"
+@@ -541,6 +547,10 @@ case "${host}" in
+ 	newlib_cflags="${newlib_cflags} -DREENTRANT_SYSCALLS_PROVIDED "
+ 	have_crt0="no"
+ 	;;
++  *-ps3-*)
++	sys_dir=lv2
++	have_crt0="no"
++	;;
+   powerpcle-*-pe)
+ 	posix_dir=posix
+ 	;;
+diff --git a/newlib/libc/acinclude.m4 b/newlib/libc/acinclude.m4
+index 24148b1..f325611 100644
+--- a/newlib/libc/acinclude.m4
++++ b/newlib/libc/acinclude.m4
+@@ -16,6 +16,7 @@ m4_foreach_w([SYS_DIR], [
+   d10v
+   epiphany
+   h8300hms h8500hms
++  lv2
+   m88kbug mmixware
+   netware
+   or1k
+diff --git a/newlib/libc/include/sys/config.h b/newlib/libc/include/sys/config.h
+index 5dcc77a..431e825 100644
+--- a/newlib/libc/include/sys/config.h
++++ b/newlib/libc/include/sys/config.h
+@@ -12,6 +12,10 @@
+ #define __DYNAMIC_REENT__
+ #endif
+ 
++#if defined(__PPU__) || defined(__lv2ppu__)
++#define __DYNAMIC_REENT__
++#endif
++
+ /* exceptions first */
+ #if defined(__H8500__) || defined(__W65__)
+ #define __SMALL_BITFIELDS
+diff --git a/newlib/libc/sys/Makefile.inc b/newlib/libc/sys/Makefile.inc
+index 24d8407..0ec1b64 100644
+--- a/newlib/libc/sys/Makefile.inc
++++ b/newlib/libc/sys/Makefile.inc
+@@ -19,6 +19,9 @@ endif
+ if HAVE_LIBC_SYS_H8500HMS_DIR
+ include %D%/h8500hms/Makefile.inc
+ endif
++if HAVE_LIBC_SYS_LV2_DIR
++include %D%/lv2/Makefile.inc
++endif
+ if HAVE_LIBC_SYS_M88KBUG_DIR
+ include %D%/m88kbug/Makefile.inc
+ endif
