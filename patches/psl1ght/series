@@ -18,3 +18,4 @@
 0018-cell-sysmodule-sony-decl-only.patch
 0019-cell-l10n-sony-decl-only-minimal.patch
 0020-cell-sysutil-phase6_5-backfill-batch.patch
+0021-sys-lv2-sync-compat-shims.patch
