@@ -1,0 +1,5 @@
+0001-newlib-add-ps3-lv2-target-config.patch
+0002-libgloss-add-libsysbase-subdir.patch
+0003-libsysbase-ps3-syscall-wrappers.patch
+0004-newlib-libc-sys-lv2-reent-locks.patch
+0005-libm-sine-overflow-range-reduction.patch

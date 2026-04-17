@@ -1,0 +1,84 @@
+diff --git a/newlib/libm/mathfp/s_sine.c b/newlib/libm/mathfp/s_sine.c
+index 7a5f4dd..afb2fb4 100644
+--- a/newlib/libm/mathfp/s_sine.c
++++ b/newlib/libm/mathfp/s_sine.c
+@@ -62,6 +62,7 @@ QUICKREF
+ 
+ static const double HALF_PI = 1.57079632679489661923;
+ static const double ONE_OVER_PI = 0.31830988618379067154;
++static const double ONE_OVER_2PI = 0.15915494309189533577;
+ static const double r[] = { -0.16666666666666665052,
+                              0.83333333333331650314e-02,
+                             -0.19841269841201840457e-03,
+@@ -86,7 +87,14 @@ sine (double x,
+         return (x);
+       case INF:
+         errno = EDOM;
+-        return (z_notanum.d); 
++        return (z_notanum.d);
++    }
++
++  /* Check for values of x that will overflow here. */
++  if (fabs (x) > YMAX)
++    {
++      double m = floor (x * ONE_OVER_2PI);
++      x -= (m * 2 * M_PI);
+     }
+ 
+   /* Use sin and cos properties to ease computations. */
+@@ -109,12 +117,7 @@ sine (double x,
+         }
+     }
+ 
+-  /* Check for values of y that will overflow here. */
+-  if (y > YMAX)
+-    {
+-      errno = ERANGE;
+-      return (x);
+-    }
++  /* Range reduction already handled above for large x.  */
+ 
+   /* Calculate the exponent. */
+   if (y < 0.0)
+diff --git a/newlib/libm/mathfp/sf_sine.c b/newlib/libm/mathfp/sf_sine.c
+index 8dd34d9..3f367f5 100644
+--- a/newlib/libm/mathfp/sf_sine.c
++++ b/newlib/libm/mathfp/sf_sine.c
+@@ -26,6 +26,7 @@
+ 
+ static const float HALF_PI = 1.570796326;
+ static const float ONE_OVER_PI = 0.318309886;
++static const float ONE_OVER_2PI = 0.159154943;
+ static const float r[] = { -0.1666665668,
+                             0.8333025139e-02,
+                            -0.1980741872e-03,
+@@ -46,7 +47,14 @@ sinef (float x,
+         return (x);
+       case INF:
+         errno = EDOM;
+-        return (z_notanum_f.f); 
++        return (z_notanum_f.f);
++    }
++
++  /* Check for values of x that will overflow here. */
++  if (fabsf (x) > YMAX)
++    {
++      float m = floorf (x * ONE_OVER_2PI);
++      x -= (m * 2 * (float) M_PI);
+     }
+ 
+   /* Use sin and cos properties to ease computations. */
+@@ -69,12 +77,7 @@ sinef (float x,
+         }
+     }
+ 
+-  /* Check for values of y that will overflow here. */
+-  if (y > YMAX)
+-    {
+-      errno = ERANGE;
+-      return (x);
+-    }
++  /* Range reduction already handled above for large x.  */
+ 
+   /* Calculate the exponent. */
+   if (y < 0.0)
