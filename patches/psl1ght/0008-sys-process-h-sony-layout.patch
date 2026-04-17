@@ -1,0 +1,100 @@
+Subject: [PATCH] ppu/include/sys/process.h: adopt Sony's 36-byte layout
+
+PSL1GHT's sys_process_param_t was an 8-field / 32-byte struct with the
+`version` field set to SYS_PROCESS_SPAWN_VERSION_090 (0x00009000) and no
+trailing `crash_dump_param_addr` slot.  Sony's reference SDK 475.001
+has been shipping a 9-field / 36-byte struct with version 0x00330000
+since firmware 3.30 — the retail PS3 loader reads the size + version
+pair to decide which schema the SELF is asking for, and will reject a
+process whose `.sys_proc_param` section doesn't match.  RPCS3 is more
+permissive, which is why PSL1GHT's historical layout happened to work.
+
+This patch:
+  - grows sys_process_param_t by one `u32 crash_dump_param_addr` field
+    at the end, matching reference/sony-sdk/target/ppu/include/sys/process.h;
+  - bumps the SYS_PROCESS_PARAM / _OVLM / _FIXED macros to emit
+    VERSION_330 (0x00330000) instead of VERSION_090, sdk_version =
+    0xffffffff (SDK_VERSION_UNKNOWN — matches Sony's macro default when
+    CELL_SDK_VERSION isn't defined), and initialise crash_dump_param_addr
+    to 0 ("no callback", which is the semantics when the weak
+    __sys_process_crash_dump_param symbol is unresolved);
+  - adds SYS_PROCESS_SPAWN_SDK_VERSION_UNKNOWN for symmetry with the
+    existing _FW_VERSION_UNKNOWN constant, and because the code now
+    references it by name.
+
+Task #7 (emit `crash_dump_param_addr` as a link-time constant pointing at
+the weak __sys_process_crash_dump_param symbol via `.init_array` or an
+ld-script PROVIDE) remains open; until it lands this sample stays with
+the 0 placeholder.  Samples expecting a non-zero pointer can initialise
+the struct manually.
+
+
+diff --git a/ppu/include/sys/process.h b/ppu/include/sys/process.h
+index bb64e45..5bc4de8 100644
+--- a/ppu/include/sys/process.h
++++ b/ppu/include/sys/process.h
+@@ -26,6 +26,7 @@
+ #define SYS_PROCESS_SPAWN_FW_VERSION_192         0x00192001
+ #define SYS_PROCESS_SPAWN_FW_VERSION_330         0x00330000
+ #define SYS_PROCESS_SPAWN_FW_VERSION_UNKNOWN     0xffffffff
++#define SYS_PROCESS_SPAWN_SDK_VERSION_UNKNOWN    0xffffffff
+ 
+ #define SYS_PROCESS_SPAWN_PPC_SEG_DEFAULT        0x00000000
+ #define SYS_PROCESS_SPAWN_PPC_SEG_OVLM           0x00000001
+@@ -67,36 +68,39 @@ Typically call this macro outside function declarations.
+ 	sys_process_param_t __sys_process_param __attribute__((aligned(8), section(".sys_proc_param"), unused)) = { \
+ 		sizeof(sys_process_param_t), \
+ 		SYS_PROCESS_SPAWN_MAGIC, \
+-		SYS_PROCESS_SPAWN_VERSION_090, \
+-		SYS_PROCESS_SPAWN_FW_VERSION_192, \
++		SYS_PROCESS_SPAWN_VERSION_330, \
++		SYS_PROCESS_SPAWN_SDK_VERSION_UNKNOWN, \
+ 		prio, \
+ 		stacksize, \
+ 		SYS_PROCESS_SPAWN_MALLOC_PAGE_SIZE_1M, \
+-		SYS_PROCESS_SPAWN_PPC_SEG_DEFAULT\
++		SYS_PROCESS_SPAWN_PPC_SEG_DEFAULT, \
++		0 \
+ 	};
+ 
+ #define SYS_PROCESS_PARAM_OVLM(prio,stacksize) \
+ 	sys_process_param_t __sys_process_param __attribute__((aligned(8), section(".sys_proc_param"), unused)) = { \
+ 		sizeof(sys_process_param_t), \
+ 		SYS_PROCESS_SPAWN_MAGIC, \
+-		SYS_PROCESS_SPAWN_VERSION_090, \
+-		SYS_PROCESS_SPAWN_FW_VERSION_192, \
++		SYS_PROCESS_SPAWN_VERSION_330, \
++		SYS_PROCESS_SPAWN_SDK_VERSION_UNKNOWN, \
+ 		prio, \
+ 		stacksize, \
+ 		SYS_PROCESS_SPAWN_MALLOC_PAGE_SIZE_1M, \
+-		SYS_PROCESS_SPAWN_PPC_SEG_OVLM \
++		SYS_PROCESS_SPAWN_PPC_SEG_OVLM, \
++		0 \
+ 	};
+ 
+ #define SYS_PROCESS_PARAM_FIXED(prio,stacksize) \
+ 	sys_process_param_t __sys_process_param __attribute__((aligned(8), section(".sys_proc_param"), unused)) = { \
+ 		sizeof(sys_process_param_t), \
+ 		SYS_PROCESS_SPAWN_MAGIC, \
+-		SYS_PROCESS_SPAWN_VERSION_090, \
+-		SYS_PROCESS_SPAWN_FW_VERSION_192, \
++		SYS_PROCESS_SPAWN_VERSION_330, \
++		SYS_PROCESS_SPAWN_SDK_VERSION_UNKNOWN, \
+ 		prio, \
+ 		stacksize, \
+ 		SYS_PROCESS_SPAWN_MALLOC_PAGE_SIZE_1M, \
+-		SYS_PROCESS_SPAWN_PPC_SEG_PRX \
++		SYS_PROCESS_SPAWN_PPC_SEG_PRX, \
++		0 \
+ 	};
+ 
+ /* process objects */
+@@ -135,6 +139,7 @@ typedef struct _sys_process_param
+ 	u32 stacksize;
+ 	u32 malloc_pagesize;
+ 	u32 ppc_seg;
++	u32 crash_dump_param_addr;
+ } sys_process_param_t;
+ 
+ 
