@@ -1,6 +1,6 @@
-library: adec
+library: cellAdec
 version: 1
-module: adec
+module: cellAdec
 exports:
 - name: cellAdecClose
   nid: '0x847d2380'

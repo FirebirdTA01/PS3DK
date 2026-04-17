@@ -1,6 +1,6 @@
-library: mic
+library: cellMic
 version: 1
-module: mic
+module: cellMic
 exports:
 - name: cellMicClose
   nid: '0x8d229f8e'

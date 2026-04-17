@@ -1,6 +1,6 @@
-library: sysutil_music_export
+library: cellMusicExportUtility
 version: 1
-module: sysutil_music_export
+module: cellMusicExportUtility
 exports:
 - name: cellMusicExportFinalize
   nid: '0xe90effea'

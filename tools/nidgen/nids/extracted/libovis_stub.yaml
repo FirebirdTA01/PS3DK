@@ -1,6 +1,6 @@
-library: ovis
+library: cellOvis
 version: 1
-module: ovis
+module: cellOvis
 exports:
 - name: cellOvisFixSpuSegments
   nid: '0xce6cb776'

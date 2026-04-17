@@ -1,6 +1,6 @@
-library: voice
+library: cellVoice
 version: 1
-module: voice
+module: cellVoice
 exports:
 - name: cellVoiceConnectIPortToOPort
   nid: '0xae6a21d5'

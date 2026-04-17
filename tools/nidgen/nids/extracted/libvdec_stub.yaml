@@ -1,6 +1,6 @@
-library: vdec
+library: libvdec
 version: 1
-module: vdec
+module: libvdec
 exports:
 - name: cellVdecClose
   nid: '0x16698e83'

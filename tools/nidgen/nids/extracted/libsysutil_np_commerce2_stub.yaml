@@ -1,6 +1,6 @@
-library: sysutil_np_commerce2
+library: sceNpCommerce2
 version: 1
-module: sysutil_np_commerce2
+module: sceNpCommerce2
 exports:
 - name: sceNpCommerce2AbortReq
   nid: '0x8df0057f'

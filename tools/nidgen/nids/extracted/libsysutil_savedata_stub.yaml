@@ -1,6 +1,6 @@
-library: sysutil_savedata
+library: cellSaveData
 version: 1
-module: sysutil_savedata
+module: cellSaveData
 exports:
 - name: cellSaveDataFixedExport
   nid: '0x46a2d878'

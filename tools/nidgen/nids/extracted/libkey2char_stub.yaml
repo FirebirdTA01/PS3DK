@@ -1,6 +1,6 @@
-library: key2char
+library: cellKey2char
 version: 1
-module: key2char
+module: cellKey2char
 exports:
 - name: cellKey2CharClose
   nid: '0x14bf2dc1'

@@ -1,6 +1,6 @@
-library: sysutil_music_decode
+library: cellMusicDecodeUtility
 version: 1
-module: sysutil_music_decode
+module: cellMusicDecodeUtility
 exports:
 - name: cellMusicDecodeFinalize
   nid: '0xa8615dc8'

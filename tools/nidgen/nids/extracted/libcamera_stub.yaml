@@ -1,6 +1,6 @@
-library: camera
+library: cellCamera
 version: 1
-module: camera
+module: cellCamera
 exports:
 - name: cellCameraClose
   nid: '0x379c5dd6'

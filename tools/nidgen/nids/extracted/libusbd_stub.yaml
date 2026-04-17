@@ -1,6 +1,6 @@
-library: usbd
+library: cellUsbd
 version: 1
-module: usbd
+module: cellUsbd
 exports:
 - name: cellUsbdAllocateMemory
   nid: '0x074dbb39'

@@ -1,6 +1,6 @@
-library: medi
+library: libmedi
 version: 1
-module: medi
+module: libmedi
 exports:
 - name: cellMediatorCloseContext
   nid: '0xc324f60c'

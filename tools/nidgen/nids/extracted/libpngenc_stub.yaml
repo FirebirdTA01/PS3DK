@@ -1,6 +1,6 @@
-library: pngenc
+library: cellPngEnc
 version: 1
-module: pngenc
+module: cellPngEnc
 exports:
 - name: cellPngEncClose
   nid: '0x117cd726'

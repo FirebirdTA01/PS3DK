@@ -1,6 +1,6 @@
-library: sysutil_ap
+library: cellSysutilAp
 version: 1
-module: sysutil_ap
+module: cellSysutilAp
 exports:
 - name: cellSysutilApGetRequiredMemSize
   nid: '0x9e67e0dd'

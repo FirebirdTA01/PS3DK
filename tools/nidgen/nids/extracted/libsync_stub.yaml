@@ -1,6 +1,6 @@
-library: sync
+library: cellSync
 version: 1
-module: sync
+module: cellSync
 exports:
 - name: _cellSyncLFQueueAttachLv2EventQueue
   nid: '0x54fc2032'

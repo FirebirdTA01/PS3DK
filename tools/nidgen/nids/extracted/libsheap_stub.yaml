@@ -1,6 +1,6 @@
-library: sheap
+library: cellSheap
 version: 1
-module: sheap
+module: cellSheap
 exports:
 - name: cellKeySheapBarrierDelete
   nid: '0xf6f5fbca'

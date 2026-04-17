@@ -1,6 +1,6 @@
-library: netctl
+library: cellNetCtl
 version: 1
-module: netctl
+module: cellNetCtl
 exports:
 - name: cellGameUpdateCheckAbort
   nid: '0x3e359ab6'

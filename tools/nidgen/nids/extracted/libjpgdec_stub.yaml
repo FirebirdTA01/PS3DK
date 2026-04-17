@@ -1,6 +1,6 @@
-library: jpgdec
+library: cellJpgDec
 version: 1
-module: jpgdec
+module: cellJpgDec
 exports:
 - name: cellJpgDecClose
   nid: '0x9338a07a'

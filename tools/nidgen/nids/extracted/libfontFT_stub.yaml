@@ -1,6 +1,6 @@
-library: fontFT
+library: cellFontFT
 version: 1
-module: fontFT
+module: cellFontFT
 exports:
 - name: cellFontFTGetInitializedRevisionFlags
   nid: '0xfa0c2de0'

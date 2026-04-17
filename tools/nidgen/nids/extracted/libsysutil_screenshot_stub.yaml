@@ -1,6 +1,6 @@
-library: sysutil_screenshot
+library: cellScreenShotUtility
 version: 1
-module: sysutil_screenshot
+module: cellScreenShotUtility
 exports:
 - name: cellScreenShotDisable
   nid: '0xfc6f4e74'

@@ -1,6 +1,6 @@
-library: sysutil_np
+library: sceNp
 version: 1
-module: sysutil_np
+module: sceNp
 exports:
 - name: _Z27_sce_np_sysutil_recv_packetiRN4cxml8DocumentERNS_7ElementE
   nid: '0x48b3774f'

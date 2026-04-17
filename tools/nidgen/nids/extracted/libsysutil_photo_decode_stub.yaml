@@ -1,6 +1,6 @@
-library: sysutil_photo_decode
+library: cellPhotoDecodeUtil
 version: 1
-module: sysutil_photo_decode
+module: cellPhotoDecodeUtil
 exports:
 - name: cellPhotoDecodeFinalize
   nid: '0xad7d8f38'

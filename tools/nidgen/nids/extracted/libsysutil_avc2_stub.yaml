@@ -1,6 +1,6 @@
-library: sysutil_avc2
+library: cellSysutilAvc2
 version: 1
-module: sysutil_avc2
+module: cellSysutilAvc2
 exports:
 - name: cellSysutilAvc2ChangeVideoResolution
   nid: '0x07236c83'

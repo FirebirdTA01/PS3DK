@@ -1,6 +1,6 @@
-library: sysutil_np_clans
+library: sceNpClans
 version: 1
-module: sysutil_np_clans
+module: sceNpClans
 exports:
 - name: sceNpClansAbortRequest
   nid: '0xe82969e2'

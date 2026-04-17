@@ -1,6 +1,6 @@
-library: sysutil_userinfo
+library: cellUserInfo
 version: 1
-module: sysutil_userinfo
+module: cellUserInfo
 exports:
 - name: cellUserInfoEnableOverlay
   nid: '0xb3516536'

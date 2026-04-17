@@ -1,6 +1,6 @@
-library: io
+library: sys_io
 version: 1
-module: io
+module: sys_io
 exports:
 - name: cellKbClearBuf
   nid: '0x2073b7f6'

@@ -1,6 +1,6 @@
-library: sysutil_video_export
+library: cellVideoExportUtility
 version: 1
-module: sysutil_video_export
+module: cellVideoExportUtility
 exports:
 - name: cellVideoExportFinalize
   nid: '0xc15be817'

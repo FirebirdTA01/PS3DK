@@ -1,6 +1,6 @@
-library: http
+library: cellHttp
 version: 1
-module: http
+module: cellHttp
 exports:
 - name: cellHttpAddCookieWithClientId
   nid: '0x1b5bdcc6'

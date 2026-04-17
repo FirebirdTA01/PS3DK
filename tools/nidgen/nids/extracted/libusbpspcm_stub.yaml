@@ -1,6 +1,6 @@
-library: usbpspcm
+library: cellUsbPspcm
 version: 1
-module: usbpspcm
+module: cellUsbPspcm
 exports:
 - name: cellUsbPspcmBind
   nid: '0xabe090e3'

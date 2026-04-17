@@ -1,6 +1,6 @@
-library: m
+library: sys_libm
 version: 1
-module: m
+module: sys_libm
 exports:
 - name: _Atan
   nid: '0xc7369fce'

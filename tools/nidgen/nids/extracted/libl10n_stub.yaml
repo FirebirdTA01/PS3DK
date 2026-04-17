@@ -1,6 +1,6 @@
-library: l10n
+library: cellL10n
 version: 1
-module: l10n
+module: cellL10n
 exports:
 - name: ARIBstoUCS2s
   nid: '0xeb41cc68'

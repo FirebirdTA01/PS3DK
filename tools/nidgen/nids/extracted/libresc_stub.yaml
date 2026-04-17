@@ -1,6 +1,6 @@
-library: resc
+library: cellResc
 version: 1
-module: resc
+module: cellResc
 exports:
 - name: cellRescAdjustAspectRatio
   nid: '0x22ae06d8'

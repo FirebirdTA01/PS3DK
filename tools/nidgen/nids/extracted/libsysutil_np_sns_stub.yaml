@@ -1,6 +1,6 @@
-library: sysutil_np_sns
+library: sceNpSns
 version: 1
-module: sysutil_np_sns
+module: sceNpSns
 exports:
 - name: sceNpSnsFbAbortHandle
   nid: '0x3711833f'

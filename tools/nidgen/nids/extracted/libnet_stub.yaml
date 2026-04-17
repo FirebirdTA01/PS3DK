@@ -1,6 +1,6 @@
-library: net
+library: sys_net
 version: 1
-module: net
+module: sys_net
 exports:
 - name: _sys_net_errno_loc
   nid: '0x6005cde1'

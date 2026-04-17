@@ -1,6 +1,6 @@
-library: rudp
+library: cellRudp
 version: 1
-module: rudp
+module: cellRudp
 exports:
 - name: cellRudpActivate
   nid: '0xc1ad7ced'

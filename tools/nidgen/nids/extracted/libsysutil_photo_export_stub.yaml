@@ -1,6 +1,6 @@
-library: sysutil_photo_export
+library: cellPhotoUtility
 version: 1
-module: sysutil_photo_export
+module: cellPhotoUtility
 exports:
 - name: cellPhotoExportFinalize
   nid: '0xed4a0148'

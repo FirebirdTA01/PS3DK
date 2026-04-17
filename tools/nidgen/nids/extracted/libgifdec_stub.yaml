@@ -1,6 +1,6 @@
-library: gifdec
+library: cellGifDec
 version: 1
-module: gifdec
+module: cellGifDec
 exports:
 - name: cellGifDecClose
   nid: '0x116a7da9'
