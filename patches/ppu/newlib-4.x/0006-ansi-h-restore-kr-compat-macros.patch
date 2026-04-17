@@ -1,0 +1,41 @@
+Subject: [PATCH] newlib: restore _DEFUN/_AND/_NOARGS/_VOID in <_ansi.h>
+
+libgloss/libsysbase (the newlib side of PSL1GHT's _r syscall
+dispatchers) and PSL1GHT's own ppu/librt both still use the K&R-vs-
+ANSI compatibility macros _DEFUN, _AND, _NOARGS, and _VOID.  Those
+macros lived in newlib's <_ansi.h> through newlib 3.x and were
+dropped in 4.x on the theory that the K&R compiler path is dead.
+
+Modernizing every call site would touch ~75 files across libgloss
+and PSL1GHT librt; the PSL1GHT v3 RFC already plans a naming pass
+on top of that code.  Restore the macros in newlib's own <_ansi.h>
+so both libgloss/libsysbase and PSL1GHT's librt compile cleanly
+without carrying a separate shim header.
+
+This supersedes the PSL1GHT-side _ansi.h interposition in
+patches/psl1ght/0004 for the libgloss case; the PSL1GHT shim stays
+in place because it interposes on PSL1GHT's own include path
+(newlib is pulled via #include_next), and would in any case be
+harmless even after this newlib patch lands.
+
+diff --git a/newlib/libc/include/_ansi.h b/newlib/libc/include/_ansi.h
+--- a/newlib/libc/include/_ansi.h
++++ b/newlib/libc/include/_ansi.h
+@@ -79,4 +79,17 @@
+ #define _NOINLINE_STATIC
+ #endif
+
++/* PS3 toolchain: restore K&R-vs-ANSI compat macros newlib dropped in 4.x.
++   libgloss/libsysbase and PSL1GHT's librt both still use these.  Harmless
++   for any other consumer — they fall through #ifndef guards. */
++#ifndef _DEFUN
++# define _DEFUN(name, args, parms) name(parms)
++# define _AND   ,
++# define _NOARGS void
++#endif
++
++#ifndef _VOID
++# define _VOID void
++#endif
++
+ #endif /* _ANSIDECL_H_ */

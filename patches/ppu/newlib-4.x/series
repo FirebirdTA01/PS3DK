@@ -3,3 +3,5 @@
 0003-libsysbase-ps3-syscall-wrappers.patch
 0004-newlib-libc-sys-lv2-reent-locks.patch
 0005-libm-sine-overflow-range-reduction.patch
+0006-ansi-h-restore-kr-compat-macros.patch
+0007-libsysbase-static-config-and-makefile-cleanup.patch
