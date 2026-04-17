@@ -235,10 +235,10 @@ index 0000000..8fd9096
 +}
 diff --git a/newlib/libc/sys/lv2/machine/_types.h b/newlib/libc/sys/lv2/machine/_types.h
 new file mode 100644
-index 0000000..f1240c1
+index 0000000..7bdda69
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/machine/_types.h
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,17 @@
 +#ifndef _MACHINE__TYPES_H
 +#define _MACHINE__TYPES_H
 +
@@ -248,13 +248,14 @@ index 0000000..f1240c1
 +#define FD_SETSIZE 1024
 +#endif
 +
-+#define __fpos_t_defined
-+typedef long long _fpos_t;
++/* On PPC64, long is 64-bit — use the newlib 4.x guard macros. */
++#define __machine_fpos_t_defined
++typedef long _fpos_t;
 +
-+#define __off_t_defined
-+typedef long long _off_t;
++#define __machine_off_t_defined
++typedef long _off_t;
 +
-+#endif // _MACHINE__TYPES_H
++#endif /* _MACHINE__TYPES_H */
 diff --git a/newlib/libc/sys/lv2/realpath.c b/newlib/libc/sys/lv2/realpath.c
 new file mode 100644
 index 0000000..2ec3540
