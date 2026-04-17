@@ -73,22 +73,34 @@ static void on_stat(CellSaveDataCBResult *cbResult,
 	cbResult->invalidMsg = NULL;
 }
 
+static int g_file_cb_invocations = 0;
+
 static void on_file(CellSaveDataCBResult *cbResult,
                     CellSaveDataFileGet  *get,
                     CellSaveDataFileSet  *set)
 {
-	printf("  file cb: prevOpWrote=%u\n", (unsigned)get->excSize);
+	g_file_cb_invocations++;
+	printf("  file cb #%d: prevOpWrote=%u\n",
+	       g_file_cb_invocations, (unsigned)get->excSize);
 
-	/* Request one write of our payload into SAVEDATA.BIN. */
-	set->fileOperation = CELL_SAVEDATA_FILEOP_WRITE;
-	set->fileType      = CELL_SAVEDATA_FILETYPE_NORMALFILE;
-	set->fileName      = (char *)kFileName;
-	set->fileOffset    = 0;
-	set->fileSize      = (unsigned int)sizeof(g_payload);
-	set->fileBufSize   = (unsigned int)sizeof(g_payload);
-	set->fileBuf       = g_payload;
-
-	cbResult->result = CELL_SAVEDATA_CBRESULT_OK_LAST;
+	if (g_file_cb_invocations == 1) {
+		/* First call — submit the write.  OK_NEXT tells the SPRX to
+		 * perform this op and then call us back so we can confirm
+		 * (or queue another op). */
+		set->fileOperation = CELL_SAVEDATA_FILEOP_WRITE;
+		set->fileType      = CELL_SAVEDATA_FILETYPE_NORMALFILE;
+		set->fileName      = (char *)kFileName;
+		set->fileOffset    = 0;
+		set->fileSize      = (unsigned int)sizeof(g_payload);
+		set->fileBufSize   = (unsigned int)sizeof(g_payload);
+		set->fileBuf       = g_payload;
+		cbResult->result   = CELL_SAVEDATA_CBRESULT_OK_NEXT;
+	} else {
+		/* Subsequent call — previous write done (prevOpWrote should be
+		 * == sizeof(g_payload)).  Nothing else to write; return OK_LAST
+		 * to close the utility. */
+		cbResult->result = CELL_SAVEDATA_CBRESULT_OK_LAST;
+	}
 	cbResult->invalidMsg = NULL;
 }
 
@@ -121,6 +133,7 @@ int main(int argc, char **argv)
 		NULL /* userdata */);
 
 	printf("cellSaveDataAutoSave2 returned: 0x%08x\n", (unsigned)rc);
+	printf("file cb fired %d times\n", g_file_cb_invocations);
 	printf("result: %s\n",
 	       (rc == CELL_SAVEDATA_RET_OK) ? "PASS" : "FAIL");
 	return (rc == CELL_SAVEDATA_RET_OK) ? 0 : 1;
