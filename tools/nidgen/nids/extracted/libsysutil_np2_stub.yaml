@@ -1,6 +1,6 @@
-library: sysutil_np2
+library: sceNp2
 version: 1
-module: sysutil_np2
+module: sceNp2
 exports:
 - name: sceNp2Init
   nid: '0x41251f74'

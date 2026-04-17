@@ -1,6 +1,6 @@
-library: prof
+library: cellLibprof
 version: 1
-module: prof
+module: cellLibprof
 exports:
 - name: cellUserTraceInit
   nid: '0x0252efcc'

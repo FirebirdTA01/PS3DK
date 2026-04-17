@@ -1,6 +1,6 @@
-library: ssl
+library: cellSsl
 version: 1
-module: ssl
+module: cellSsl
 exports:
 - name: cellSslCertGetIssuerName
   nid: '0xae6eb491'

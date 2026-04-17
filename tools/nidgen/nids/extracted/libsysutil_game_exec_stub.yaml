@@ -1,6 +1,6 @@
-library: sysutil_game_exec
+library: cellGameExec
 version: 1
-module: sysutil_game_exec
+module: cellGameExec
 exports:
 - name: cellGameGetBootGameInfo
   nid: '0xf6acd0bc'

@@ -1,6 +1,6 @@
-library: sysutil_np_tus
+library: sceNpTus
 version: 1
-module: sysutil_np_tus
+module: sceNpTus
 exports:
 - name: sceNpTssGetData
   nid: '0x56d3a5ab'

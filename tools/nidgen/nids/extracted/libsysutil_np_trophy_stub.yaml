@@ -1,6 +1,6 @@
-library: sysutil_np_trophy
+library: sceNpTrophy
 version: 1
-module: sysutil_np_trophy
+module: sceNpTrophy
 exports:
 - name: sceNpTrophyAbortHandle
   nid: '0x48bd97c7'

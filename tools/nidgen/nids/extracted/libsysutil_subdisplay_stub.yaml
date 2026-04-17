@@ -1,6 +1,6 @@
-library: sysutil_subdisplay
+library: cellSubDisplay
 version: 1
-module: sysutil_subdisplay
+module: cellSubDisplay
 exports:
 - name: cellSubDisplayAudioOutBlocking
   nid: '0xaee1e0c2'

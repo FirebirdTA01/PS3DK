@@ -1,6 +1,6 @@
-library: stdc++
+library: sys_libstdcxx
 version: 1
-module: stdc++
+module: sys_libstdcxx
 exports:
 - name: _Deletegloballocale
   nid: '0x9dc040e4'

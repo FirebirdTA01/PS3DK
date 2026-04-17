@@ -1,6 +1,6 @@
-library: sysutil_np_util
+library: sceNpUtil
 version: 1
-module: sysutil_np_util
+module: sceNpUtil
 exports:
 - name: sceNpUtilBandwidthTestAbort
   nid: '0xc99ee313'

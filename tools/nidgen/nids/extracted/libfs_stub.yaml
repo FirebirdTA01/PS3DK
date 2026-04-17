@@ -1,6 +1,6 @@
-library: fs
+library: sys_fs
 version: 1
-module: fs
+module: sys_fs
 exports:
 - name: cellFsAioCancel
   nid: '0x7f13fc8c'

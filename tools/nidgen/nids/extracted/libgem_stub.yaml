@@ -1,6 +1,6 @@
-library: gem
+library: libgem
 version: 1
-module: gem
+module: libgem
 exports:
 - name: cellGemCalibrate
   nid: '0xafa99ead'

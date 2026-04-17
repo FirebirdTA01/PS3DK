@@ -1,6 +1,6 @@
-library: sysutil_bgdl
+library: cellBGDLUtility
 version: 1
-module: sysutil_bgdl
+module: cellBGDLUtility
 exports:
 - name: cellBGDLGetMode
   nid: '0x74e57bdf'

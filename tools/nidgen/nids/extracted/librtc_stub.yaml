@@ -1,6 +1,6 @@
-library: rtc
+library: cellRtc
 version: 1
-module: rtc
+module: cellRtc
 exports:
 - name: cellRtcCheckValid
   nid: '0x7f1086e6'

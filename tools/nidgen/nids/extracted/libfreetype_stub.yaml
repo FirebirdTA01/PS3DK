@@ -1,6 +1,6 @@
-library: freetype
+library: cell_FreeType2
 version: 1
-module: freetype
+module: cell_FreeType2
 exports:
 - name: FTC_CMapCache_Lookup
   nid: '0x8b14be9c'

@@ -1,6 +1,6 @@
-library: http_util
+library: cellHttpUtil
 version: 1
-module: http_util
+module: cellHttpUtil
 exports:
 - name: cellHttpUtilAppendHeaderValue
   nid: '0x37bb53a2'

@@ -1,6 +1,6 @@
-library: dmux
+library: cellDmux
 version: 1
-module: dmux
+module: cellDmux
 exports:
 - name: cellDmuxClose
   nid: '0x8c692521'

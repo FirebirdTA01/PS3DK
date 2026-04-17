@@ -1,6 +1,6 @@
-library: vpost
+library: cellVpost
 version: 1
-module: vpost
+module: cellVpost
 exports:
 - name: cellVpostClose
   nid: '0x10ef39f6'

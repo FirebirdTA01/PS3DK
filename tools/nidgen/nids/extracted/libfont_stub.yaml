@@ -1,6 +1,6 @@
-library: font
+library: cellFont
 version: 1
-module: font
+module: cellFont
 exports:
 - name: cellFontAdjustFontScaling
   nid: '0x47ca71ef'

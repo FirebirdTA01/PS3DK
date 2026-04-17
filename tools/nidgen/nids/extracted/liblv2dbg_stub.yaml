@@ -1,6 +1,6 @@
-library: lv2dbg
+library: sys_lv2dbg
 version: 1
-module: lv2dbg
+module: sys_lv2dbg
 exports:
 - name: sys_dbg_disable_floating_point_enabled_exception
   nid: '0xf254768c'

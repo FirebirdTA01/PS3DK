@@ -1,6 +1,6 @@
-library: spudll
+library: cellSpudll
 version: 1
-module: spudll
+module: cellSpudll
 exports:
 - name: cellSpudllGetImageSize
   nid: '0xcccd3257'

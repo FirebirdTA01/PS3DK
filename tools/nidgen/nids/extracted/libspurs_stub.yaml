@@ -1,6 +1,6 @@
-library: spurs
+library: cellSpurs
 version: 1
-module: spurs
+module: cellSpurs
 exports:
 - name: _cellSpursAttributeInitialize
   nid: '0x95180230'

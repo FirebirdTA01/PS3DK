@@ -1,6 +1,6 @@
-library: sysutil_rec
+library: cellRec
 version: 1
-module: sysutil_rec
+module: cellRec
 exports:
 - name: cellRecClose
   nid: '0x4ac76585'

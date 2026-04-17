@@ -1,6 +1,6 @@
-library: c
+library: sys_libc
 version: 1
-module: c
+module: sys_libc
 exports:
 - name: TlsGetValue
   nid: '0x6660fc8d'

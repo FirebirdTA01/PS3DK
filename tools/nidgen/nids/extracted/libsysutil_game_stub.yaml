@@ -1,6 +1,6 @@
-library: sysutil_game
+library: cellGame
 version: 1
-module: sysutil_game
+module: cellGame
 exports:
 - name: cellGameBootCheck
   nid: '0xf52639ea'

@@ -1,6 +1,6 @@
-library: dbg_libio
+library: sys_io_debug
 version: 1
-module: dbg_libio
+module: sys_io_debug
 exports:
 - name: cellPadDbgGetData
   nid: '0xcf3051f7'

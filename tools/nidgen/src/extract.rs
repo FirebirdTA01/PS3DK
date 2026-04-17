@@ -42,6 +42,10 @@ use crate::db::{Export, Library};
 
 const MARKFUNC_SECTION: &str = ".psp_libgen_markfunc";
 const NID_OFFSET_IN_MARKFUNC: usize = 8;
+const RESIDENT_SECTION: &str = ".rodata.sceResident";
+/// Sony's `_head.o` starts `.rodata.sceResident` with a 4-byte version word,
+/// then the library-name C string.
+const RESIDENT_NAME_OFFSET: usize = 4;
 
 /// One extracted (export name, NID) pair plus source metadata.
 #[derive(Debug, Clone)]
@@ -53,18 +57,19 @@ pub struct ExtractedExport {
 }
 
 /// Extract a full `Library` from a `lib<name>_stub.a` path.  The `library`
-/// field is derived from the archive filename (`libcellAudio_stub.a` →
-/// `cellAudio`); `module` defaults to the library name and should be
-/// hand-edited in the YAML once the SPRX module mapping is known.
+/// field is read from the head object's `.rodata.sceResident` string (e.g.
+/// `cellAudio`, not the archive filename's `audio`); the archive filename
+/// is only a fallback.  `module` defaults to the library name and should
+/// be hand-edited in the YAML once the SPRX module mapping is known.
 pub fn extract_archive(archive_path: &Path) -> Result<Library> {
     let file = File::open(archive_path)
         .with_context(|| format!("opening {}", archive_path.display()))?;
     let mut archive = ar::Archive::new(file);
 
-    let library_name = library_from_archive_name(archive_path)?;
+    let filename_fallback = library_from_archive_name(archive_path)?;
 
     let mut exports: Vec<Export> = Vec::new();
-    let mut head_seen = false;
+    let mut head_library_name: Option<String> = None;
 
     while let Some(entry) = archive.next_entry() {
         let mut entry = entry.with_context(|| format!("reading member in {}", archive_path.display()))?;
@@ -79,12 +84,15 @@ pub fn extract_archive(archive_path: &Path) -> Result<Library> {
             .with_context(|| format!("reading member {member_name}"))?;
 
         if member_name.ends_with("_head.o") {
-            head_seen = true;
-            // The head carries library-level metadata, not an export.  We do
-            // not currently read it — archive filename is authoritative for
-            // the library name, and the module mapping is not recoverable
-            // from the head alone (the SPRX name → PRX ID table lives
-            // elsewhere in the SDK).  Kept here as a hook for future work.
+            // The head object carries the library-level `.rodata.sceResident`
+            // whose tail is the authoritative library name as the PS3 loader
+            // will read it.  Use it when present; fall back to the filename
+            // derivation if parsing fails.
+            match extract_head_library_name(&member_name, &data) {
+                Ok(Some(name)) => head_library_name = Some(name),
+                Ok(None) => {}
+                Err(e) => eprintln!("warn: {member_name}: {e}"),
+            }
             continue;
         }
 
@@ -96,6 +104,7 @@ pub fn extract_archive(archive_path: &Path) -> Result<Library> {
                 signature: String::new(),
                 ordinal: None,
                 notes: Some(format!("extracted from {}", e.source_member)),
+                impl_status: crate::db::ImplStatus::Unknown,
             }),
             None => {
                 // Non-stub member (e.g. a BSS-only filler) — silently skip.
@@ -107,12 +116,14 @@ pub fn extract_archive(archive_path: &Path) -> Result<Library> {
         bail!(
             "archive {} yielded no extractable stub exports{}",
             archive_path.display(),
-            if head_seen { "" } else { " (no _head.o either — wrong archive format?)" }
+            if head_library_name.is_some() { "" } else { " (no _head.o either — wrong archive format?)" }
         );
     }
 
     // Deterministic order so repeated extractions produce the same YAML.
     exports.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let library_name = head_library_name.unwrap_or(filename_fallback);
 
     Ok(Library {
         library: library_name.clone(),
@@ -121,6 +132,31 @@ pub fn extract_archive(archive_path: &Path) -> Result<Library> {
         exports,
         imports: Vec::new(),
     })
+}
+
+/// Parse `_head.o` to recover the library's canonical name from
+/// `.rodata.sceResident`.  Returns `None` if the section is absent or too
+/// short; returns an error only on malformed ELF.
+fn extract_head_library_name(member_name: &str, data: &[u8]) -> Result<Option<String>> {
+    let elf = ElfFile::<'_, FileHeader64<Endianness>>::parse(data)
+        .with_context(|| format!("parsing {member_name}"))?;
+    let Some(section) = elf.section_by_name(RESIDENT_SECTION) else {
+        return Ok(None);
+    };
+    let data = section
+        .data()
+        .with_context(|| format!("reading {RESIDENT_SECTION} in {member_name}"))?;
+    if data.len() <= RESIDENT_NAME_OFFSET {
+        return Ok(None);
+    }
+    let bytes = &data[RESIDENT_NAME_OFFSET..];
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    let name = std::str::from_utf8(&bytes[..end])
+        .with_context(|| format!("{RESIDENT_SECTION} name is not UTF-8 in {member_name}"))?;
+    if name.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(name.to_owned()))
 }
 
 /// Parse one per-symbol `.o` archive member, returning the `(name, nid)` pair
