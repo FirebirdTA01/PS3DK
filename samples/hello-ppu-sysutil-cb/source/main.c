@@ -54,6 +54,12 @@ static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
 	case CELL_SYSUTIL_SYSTEM_MENU_CLOSE:
 		printf("  event: SYSTEM_MENU_CLOSE\n");
 		break;
+	case CELL_SYSUTIL_BGMPLAYBACK_PLAY:
+		printf("  event: BGMPLAYBACK_PLAY\n");
+		break;
+	case CELL_SYSUTIL_BGMPLAYBACK_STOP:
+		printf("  event: BGMPLAYBACK_STOP\n");
+		break;
 	default:
 		printf("  event: 0x%04llx (not one we handle)\n",
 		       (unsigned long long)status);
@@ -76,10 +82,12 @@ int main(int argc, char **argv)
 	}
 	printf("  callback registered on slot 0\n");
 
-	/* Poll for a bounded duration (~10 seconds) so the process exits
+	/* Poll for a bounded duration (~30 seconds) so the process exits
 	 * even when run headless.  On RPCS3 you have this much time to press
-	 * the PS button / quit from XMB to drive events through the handler. */
-	for (int i = 0; i < 100 && !g_exit_requested; i++) {
+	 * the PS button / navigate XMB / quit to drive events through the
+	 * handler.  10s was too tight — XMB open/close takes a few seconds
+	 * of its own. */
+	for (int i = 0; i < 300 && !g_exit_requested; i++) {
 		cellSysutilCheckCallback();
 		usleep(100 * 1000); /* 100ms */
 	}
