@@ -1,6 +1,7 @@
 library: cellMusicUtility
 version: 1
 module: cellMusicUtility
+archive_name: sysutil_music
 exports:
 - name: cellMusicFinalize
   nid: '0x6f2104f3'

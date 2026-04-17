@@ -1,6 +1,7 @@
 library: cellImeJpUtility
 version: 1
 module: cellImeJpUtility
+archive_name: sysutil_imejp
 exports:
 - name: cellImeJpAllConfirm
   nid: '0x7189430b'
