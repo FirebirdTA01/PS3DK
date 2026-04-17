@@ -1,0 +1,79 @@
+Subject: [PATCH] libsysbase: add getentropy() stub and wire it into the archive
+
+Patch 0001 turns on `syscall_dir=syscalls` for `*-ps3-*`, which pulls
+newlib's POSIX connectors (sysread.c, syswrite.c, etc.) into libc.a.
+That solves `undefined reference to read / write` from both libsysbase's
+abort.c and libstdc++'s <random>.
+
+It does NOT solve `getentropy`, because newlib's sysgetentropy.c looks
+like this:
+
+    int getentropy(void *buf, size_t buflen) {
+        return _getentropy_r(_REENT, buf, buflen);
+    }
+
+and with -DREENTRANT_SYSCALLS_PROVIDED set at newlib build time,
+<reent.h> defines `_getentropy_r` as a macro that expands back into
+`getentropy(buf, buflen)` — infinite self-recursion at runtime.  There
+is no `-DHAVE_GETENTROPY` / opt-out knob in newlib for this; the
+intended escape hatch is that the target provides its own `getentropy`
+earlier in the link line.  The GCC spec (cell64lv2.h) already does that:
+
+    --start-group -lsysbase -lc -lrt -llv2 --end-group
+
+so a libsysbase-local definition of `getentropy` wins the group-resolve
+against newlib's broken sysgetentropy.c.
+
+For now, return -1/ENOSYS.  Callers we know about —
+  * libstdc++ random_device (falls back to /dev/urandom then software PRNG)
+  * newlib arc4random (calls `_getentropy_fail` -> abort, but at least
+    there's no stack-smash before that)
+  * libssp stack_protector (falls back to the "terminator canary")
+— all handle the failure gracefully.
+
+Phase 3 followup: replace this stub with a real implementation backed by
+lv2 `sys_ss_random_number_generator` (NID 0xEBA9F175) once the sys_ss
+syscall stub lands.  The file path stays; only the function body changes.
+
+diff --git a/libgloss/libsysbase/Makefile.in b/libgloss/libsysbase/Makefile.in
+--- a/libgloss/libsysbase/Makefile.in
++++ b/libgloss/libsysbase/Makefile.in
+@@ -70,7 +70,7 @@ OBJS = abort.o close.o environ.o sbrk.o syscalls.o _exit.o fstat.o isatty.o \
+ 	   wait.o unlink.o execve.o kill.o gettod.o fork.o chmod.o sleep.o dup.o glob.o \
+ 	   getrusage.o globfree.o closedir.o fstat64.o link.o lseek64.o opendir.o readdir.o \
+ 	   readdir_r.o rmdir.o rewinddir.o rename.o seekdir.o settod.o stat.o stat64.o telldir.o \
+-	   truncate.o mkdir.o umask.o utime.o times.o access.o
++	   truncate.o mkdir.o umask.o utime.o times.o access.o getentropy.o
+
+ # Object files specific to particular targets.
+ EVALOBJS = ${OBJS}
+diff --git a/libgloss/libsysbase/getentropy.c b/libgloss/libsysbase/getentropy.c
+new file mode 100644
+--- /dev/null
++++ b/libgloss/libsysbase/getentropy.c
+@@ -0,0 +1,26 @@
++#include <errno.h>
++#include <stddef.h>
++#include <unistd.h>
++
++/*
++ * Stub for getentropy(3).  Returns -1 with errno = ENOSYS so callers
++ * (libstdc++'s random_device, newlib's arc4random, libc's stack_protector)
++ * take their fallback path instead of infinite-recursing through newlib's
++ * libc/syscalls/sysgetentropy.c, which -DREENTRANT_SYSCALLS_PROVIDED turns
++ * into `getentropy -> _getentropy_r(...) -> getentropy -> ...`.
++ *
++ * A real implementation backed by PS3 lv2's sys_ss_random_number_generator
++ * (NID 0xEBA9F175) is Phase 3 / libsysutil work, not a newlib hook.  When
++ * that lands, this stub is replaced in-place, not dropped — it still has to
++ * be linked ahead of newlib/libc/syscalls/sysgetentropy.c so the toolchain
++ * spec's `--start-group -lsysbase -lc ...` group picks the libsysbase copy.
++ */
++int
++getentropy(void *buf, size_t buflen)
++{
++	(void)buf;
++	(void)buflen;
++	errno = ENOSYS;
++	return -1;
++}
