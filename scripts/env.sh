@@ -12,7 +12,7 @@
 #   PSL1GHT              $PS3DEV/psl1ght      (PSL1GHT install root; tools look here)
 #   PS3_BUILD_ROOT       short path used for intermediate builds to avoid MAX_PATH
 #
-# Adds $PS3DEV/bin to PATH.
+# Adds $PS3DEV/bin, $PPU_PREFIX/bin, and $SPU_PREFIX/bin to PATH.
 
 # Resolve the repo root from this script's location.
 _env_self="${BASH_SOURCE[0]}"
@@ -32,11 +32,17 @@ export PSL1GHT="$PS3DEV/psl1ght"
 # Override in your shell if C:/ps3tc is unsuitable.
 export PS3_BUILD_ROOT="${PS3_BUILD_ROOT:-$HOME/ps3tc/build}"
 
-# Prepend $PS3DEV/bin so ppu-gcc/spu-gcc/etc. shadow any system copies.
-case ":$PATH:" in
-    *":$PS3DEV/bin:"*) ;;
-    *) export PATH="$PS3DEV/bin:$PATH" ;;
-esac
+# Prepend toolchain bin dirs so powerpc64-ps3-elf-* / spu-elf-* / ppu-* /
+# spu-* shadow any system copies.  Target-specific prefixes first (that's
+# where GCC/binutils actually install), then the umbrella $PS3DEV/bin which
+# is a future home for unified symlinks / PSL1GHT helpers.
+for _p in "$PS3DEV/bin" "$PPU_PREFIX/bin" "$SPU_PREFIX/bin"; do
+    case ":$PATH:" in
+        *":$_p:"*) ;;
+        *) export PATH="$_p:$PATH" ;;
+    esac
+done
+unset _p
 
 # MSYS2 safety net: if we're in MSYS2, make sure the mingw64 toolchain comes first
 # (mingw's gcc is the host compiler used to build the cross toolchain).
