@@ -57,6 +57,47 @@ pub struct Export {
     /// Optional notes (deprecation, caveats, missing fields, etc.).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+
+    /// Implementation status of this symbol in our SDK.  Hand-curated: the
+    /// extractor writes `unknown` for everything, then gets bumped as
+    /// libraries land.  Read by coverage-report to produce the
+    /// "what's left to write" dashboard.
+    #[serde(default, skip_serializing_if = "ImplStatus::is_unknown")]
+    pub impl_status: ImplStatus,
+}
+
+/// Where this symbol stands in our implementation pipeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImplStatus {
+    /// Not classified yet (extractor default).
+    #[default]
+    Unknown,
+    /// A stub archive with the right NID + section layout exists, but no
+    /// real implementation — calls would dispatch to an ENOSYS / abort path.
+    Stub,
+    /// A real implementation exists in our tree (PSL1GHT, nidgen-built SPRX,
+    /// or a hand-written replacement).  Signature parity not guaranteed;
+    /// see `verified` for that.
+    Impl,
+    /// Implementation exists AND has been checked against Sony's signature
+    /// and runtime behaviour (automated test, RPCS3 run, or hardware run).
+    Verified,
+}
+
+impl ImplStatus {
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, ImplStatus::Unknown)
+    }
+
+    pub fn as_short(&self) -> &'static str {
+        match self {
+            ImplStatus::Unknown => "?",
+            ImplStatus::Stub => "stub",
+            ImplStatus::Impl => "impl",
+            ImplStatus::Verified => "✓",
+        }
+    }
 }
 
 /// Load a library YAML file and deserialize it.
@@ -152,6 +193,7 @@ mod tests {
                 signature: "int cellNetCtlInit(void)".into(),
                 ordinal: None,
                 notes: None,
+                impl_status: ImplStatus::Unknown,
             }],
             imports: vec![],
         };
@@ -160,6 +202,8 @@ mod tests {
         let round: Library = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(round.exports.len(), 1);
         assert_eq!(round.exports[0].nid, 0xbd5a59fc);
+        // Unknown is the default and should be omitted from serialization.
+        assert!(!yaml.contains("impl_status"));
     }
 
     #[test]

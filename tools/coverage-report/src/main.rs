@@ -215,6 +215,34 @@ struct SonyLibrary {
     name: String,                          // e.g. "audio"
     archive_filename: String,              // e.g. "libaudio_stub"
     exports: BTreeMap<String, u32>,        // name -> NID
+    impl_counts: ImplCounts,               // how many of each status across exports
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ImplCounts {
+    unknown: usize,
+    stub: usize,
+    r#impl: usize,
+    verified: usize,
+}
+
+impl ImplCounts {
+    fn tally(&mut self, status: nidgen::db::ImplStatus) {
+        use nidgen::db::ImplStatus::*;
+        match status {
+            Unknown => self.unknown += 1,
+            Stub => self.stub += 1,
+            Impl => self.r#impl += 1,
+            Verified => self.verified += 1,
+        }
+    }
+
+    fn add(&mut self, other: &ImplCounts) {
+        self.unknown += other.unknown;
+        self.stub += other.stub;
+        self.r#impl += other.r#impl;
+        self.verified += other.verified;
+    }
 }
 
 /// Load all YAMLs under `dir`, one SonyLibrary per file.
@@ -238,6 +266,11 @@ fn load_sony_db(dir: &Path) -> Result<Vec<SonyLibrary>> {
             .map(|e| (e.name.clone(), e.nid))
             .collect();
 
+        let mut impl_counts = ImplCounts::default();
+        for e in &lib.exports {
+            impl_counts.tally(e.impl_status);
+        }
+
         let archive_filename = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -248,6 +281,7 @@ fn load_sony_db(dir: &Path) -> Result<Vec<SonyLibrary>> {
             name: lib.library,
             archive_filename,
             exports,
+            impl_counts,
         });
     }
 
@@ -400,6 +434,11 @@ fn render_report(
     )
     .ok();
     writeln!(out).ok();
+    let mut impl_total = ImplCounts::default();
+    for lib in sony_libs {
+        impl_total.add(&lib.impl_counts);
+    }
+
     writeln!(out, "## Summary").ok();
     writeln!(out, "- Libraries tracked: **{}**", sony_libs.len()).ok();
     writeln!(out, "- Sony exports total: **{sony_total}**").ok();
@@ -415,6 +454,12 @@ fn render_report(
     } else {
         writeln!(out, "- Alias map: *not loaded*").ok();
     }
+    writeln!(
+        out,
+        "- Impl status (per YAML annotations): unknown {} · stub {} · impl {} · verified {}",
+        impl_total.unknown, impl_total.stub, impl_total.r#impl, impl_total.verified
+    )
+    .ok();
     writeln!(out).ok();
 
     // Per-library matrix.
