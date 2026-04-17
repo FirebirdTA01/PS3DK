@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sony_process_param.h"
+#include <sys/sony_process_param.h>
 
 SONY_PROCESS_PARAM(1001, 0x10000);
 

@@ -4,3 +4,4 @@
 0004-librt-ansi-compat-macros.patch
 0005-ps3load-stdbool.patch
 0006-ps3py-gcc-direct.patch
+0007-add-sys-sony-process-param-header.patch
