@@ -1,0 +1,41 @@
+library: celp8enc
+version: 1
+module: celp8enc
+exports:
+- name: cellCelp8EncClose
+  nid: '0xfd2566b4'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_9.o
+- name: cellCelp8EncEncodeFrame
+  nid: '0x2099f86e'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_2.o
+- name: cellCelp8EncEnd
+  nid: '0xbbbc2c1c'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_7.o
+- name: cellCelp8EncGetAu
+  nid: '0x48c5020d'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_6.o
+- name: cellCelp8EncOpen
+  nid: '0x2eb6efee'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_5.o
+- name: cellCelp8EncOpenEx
+  nid: '0xcd48ad62'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_8.o
+- name: cellCelp8EncQueryAttr
+  nid: '0x2d677e0c'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_4.o
+- name: cellCelp8EncStart
+  nid: '0x0f6ab57b'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_1.o
+- name: cellCelp8EncWaitForOutput
+  nid: '0x29da1ea6'
+  signature: ''
+  notes: extracted from _cellCelp8Enc_0001_3.o
+imports: []

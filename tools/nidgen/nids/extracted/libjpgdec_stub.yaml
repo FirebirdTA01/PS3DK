@@ -1,0 +1,53 @@
+library: jpgdec
+version: 1
+module: jpgdec
+exports:
+- name: cellJpgDecClose
+  nid: '0x9338a07a'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_5.o
+- name: cellJpgDecCreate
+  nid: '0xa7978f59'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_7.o
+- name: cellJpgDecDecodeData
+  nid: '0xaf8bb012'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_9.o
+- name: cellJpgDecDestroy
+  nid: '0xd8ea91f8'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_11.o
+- name: cellJpgDecExtCreate
+  nid: '0x8b300f66'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_4.o
+- name: cellJpgDecExtDecodeData
+  nid: '0x716f8792'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_3.o
+- name: cellJpgDecExtOpen
+  nid: '0xa9f703e3'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_8.o
+- name: cellJpgDecExtReadHeader
+  nid: '0xb91eb3d2'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_10.o
+- name: cellJpgDecExtSetParameter
+  nid: '0x65cbbb16'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_1.o
+- name: cellJpgDecOpen
+  nid: '0x976ca5c2'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_6.o
+- name: cellJpgDecReadHeader
+  nid: '0x6d9ebccf'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_2.o
+- name: cellJpgDecSetParameter
+  nid: '0xe08f3910'
+  signature: ''
+  notes: extracted from _cellJpgDec_0001_12.o
+imports: []

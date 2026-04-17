@@ -1,0 +1,341 @@
+library: gcm_sys
+version: 1
+module: gcm_sys
+exports:
+- name: _cellGcmFunc1
+  nid: '0x5f909b17'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_30.o
+- name: _cellGcmFunc12
+  nid: '0x661fe266'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_35.o
+- name: _cellGcmFunc13
+  nid: '0xbb42a9dd'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_60.o
+- name: _cellGcmFunc15
+  nid: '0x3a33c1fd'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_21.o
+- name: _cellGcmFunc2
+  nid: '0x8effb7fd'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_43.o
+- name: _cellGcmFunc3
+  nid: '0x1bd633f8'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_10.o
+- name: _cellGcmFunc38
+  nid: '0x688b8ac9'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_36.o
+- name: _cellGcmFunc4
+  nid: '0x7fc034bc'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_40.o
+- name: _cellGcmInitBody
+  nid: '0x15bae46b'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_7.o
+- name: _cellGcmSetFlipCommand
+  nid: '0x21397818'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_12.o
+- name: _cellGcmSetFlipCommandWithWaitLabel
+  nid: '0xd8f88e1a'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_71.o
+- name: cellGcmAddressToOffset
+  nid: '0x21ac3697'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_13.o
+- name: cellGcmBindTile
+  nid: '0x4524cccd'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_23.o
+- name: cellGcmBindZcull
+  nid: '0x9dc04436'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_48.o
+- name: cellGcmDumpGraphicsError
+  nid: '0x1f61b3ff'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_11.o
+- name: cellGcmGetConfiguration
+  nid: '0xe315a0b2'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_77.o
+- name: cellGcmGetControlRegister
+  nid: '0xa547adde'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_53.o
+- name: cellGcmGetCurrentDisplayBufferId
+  nid: '0x93806525'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_44.o
+- name: cellGcmGetCurrentField
+  nid: '0xc8f3bd09'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_66.o
+- name: cellGcmGetDefaultCommandWordSize
+  nid: '0x5e2ee0f0'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_29.o
+- name: cellGcmGetDefaultSegmentWordSize
+  nid: '0x8cdf8c70'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_42.o
+- name: cellGcmGetDisplayBufferByFlipIndex
+  nid: '0x371674cf'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_20.o
+- name: cellGcmGetDisplayInfo
+  nid: '0x0e6b0dae'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_5.o
+- name: cellGcmGetFlipStatus
+  nid: '0x72a577ce'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_39.o
+- name: cellGcmGetLabelAddress
+  nid: '0xf80196c1'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_80.o
+- name: cellGcmGetLastFlipTime
+  nid: '0x63387071'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_32.o
+- name: cellGcmGetLastSecondVTime
+  nid: '0x23ae55a3'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_15.o
+- name: cellGcmGetMaxIoMapSize
+  nid: '0xfb81c03e'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_82.o
+- name: cellGcmGetNotifyDataAddress
+  nid: '0x21cee035'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_14.o
+- name: cellGcmGetOffsetTable
+  nid: '0x2922aed0'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_17.o
+- name: cellGcmGetReport
+  nid: '0x99d397ac'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_45.o
+- name: cellGcmGetReportDataAddress
+  nid: '0x9a0159af'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_46.o
+- name: cellGcmGetReportDataAddressLocation
+  nid: '0x8572bce2'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_41.o
+- name: cellGcmGetReportDataLocation
+  nid: '0xa6b180ac'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_54.o
+- name: cellGcmGetTileInfo
+  nid: '0x657571f7'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_34.o
+- name: cellGcmGetTiledPitchSize
+  nid: '0x055bd74d'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_1.o
+- name: cellGcmGetTimeStamp
+  nid: '0x5a41c10f'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_28.o
+- name: cellGcmGetTimeStampLocation
+  nid: '0x2ad4951b'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_19.o
+- name: cellGcmGetVBlankCount
+  nid: '0x723bbc7e'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_38.o
+- name: cellGcmGetZcullInfo
+  nid: '0xd9a0a879'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_72.o
+- name: cellGcmInitCursor
+  nid: '0x107bf3a1'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_6.o
+- name: cellGcmInitDefaultFifoMode
+  nid: '0xcaabd992'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_67.o
+- name: cellGcmInitSystemMode
+  nid: '0xfce9e764'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_83.o
+- name: cellGcmIoOffsetToAddress
+  nid: '0x2a6fba9c'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_18.o
+- name: cellGcmMapEaIoAddress
+  nid: '0x63441cb4'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_33.o
+- name: cellGcmMapEaIoAddressWithFlags
+  nid: '0x626e8518'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_31.o
+- name: cellGcmMapLocalMemory
+  nid: '0xdb769b32'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_75.o
+- name: cellGcmMapMainMemory
+  nid: '0xa114ec67'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_49.o
+- name: cellGcmReserveIoMapSize
+  nid: '0xa7ede268'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_56.o
+- name: cellGcmResetFlipStatus
+  nid: '0xb2e761d4'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_59.o
+- name: cellGcmSetCursorDisable
+  nid: '0x69c6cc82'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_37.o
+- name: cellGcmSetCursorEnable
+  nid: '0xc47d0812'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_65.o
+- name: cellGcmSetCursorImageOffset
+  nid: '0xf9bfdc72'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_81.o
+- name: cellGcmSetCursorPosition
+  nid: '0x1a0de550'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_9.o
+- name: cellGcmSetDebugOutputLevel
+  nid: '0x51c9d62b'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_26.o
+- name: cellGcmSetDefaultCommandBuffer
+  nid: '0xbc982946'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_61.o
+- name: cellGcmSetDefaultCommandBufferAndSegmentWordSize
+  nid: '0x172c3197'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_8.o
+- name: cellGcmSetDefaultFifoSize
+  nid: '0x9ba451e4'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_47.o
+- name: cellGcmSetDisplayBuffer
+  nid: '0xa53d12ae'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_52.o
+- name: cellGcmSetFlipHandler
+  nid: '0xa41ef7e8'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_50.o
+- name: cellGcmSetFlipImmediate
+  nid: '0xacee8542'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_58.o
+- name: cellGcmSetFlipMode
+  nid: '0x4ae8d215'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_24.o
+- name: cellGcmSetFlipStatus
+  nid: '0xa47c09ff'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_51.o
+- name: cellGcmSetGraphicsHandler
+  nid: '0xd01b570d'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_68.o
+- name: cellGcmSetInvalidateTile
+  nid: '0xbd6d60d9'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_64.o
+- name: cellGcmSetPrepareFlip
+  nid: '0x0b4b62d5'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_4.o
+- name: cellGcmSetQueueHandler
+  nid: '0x0a862772'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_3.o
+- name: cellGcmSetSecondVFrequency
+  nid: '0x4d7ce993'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_25.o
+- name: cellGcmSetSecondVHandler
+  nid: '0xdc494430'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_76.o
+- name: cellGcmSetTile
+  nid: '0xd0b1d189'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_69.o
+- name: cellGcmSetTileInfo
+  nid: '0xbd100dbc'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_62.o
+- name: cellGcmSetUserHandler
+  nid: '0x06edea9e'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_2.o
+- name: cellGcmSetVBlankFrequency
+  nid: '0xffe0160e'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_84.o
+- name: cellGcmSetVBlankHandler
+  nid: '0xa91b0402'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_57.o
+- name: cellGcmSetZcull
+  nid: '0xd34a420d'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_70.o
+- name: cellGcmSortRemapEaIoAddress
+  nid: '0x25b40ab4'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_16.o
+- name: cellGcmSysGetLastVBlankTime
+  nid: '0xe44874f3'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_78.o
+- name: cellGcmTerminate
+  nid: '0x527c6439'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_27.o
+- name: cellGcmUnbindTile
+  nid: '0xd9b7653e'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_73.o
+- name: cellGcmUnbindZcull
+  nid: '0xa75640e8'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_55.o
+- name: cellGcmUnmapEaIoAddress
+  nid: '0xefd00f54'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_79.o
+- name: cellGcmUnmapIoAddress
+  nid: '0xdb23e867'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_74.o
+- name: cellGcmUnreserveIoMapSize
+  nid: '0x3b9bd5bd'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_22.o
+- name: cellGcmUpdateCursor
+  nid: '0xbd2fa0a7'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_63.o
+imports: []

@@ -1,0 +1,113 @@
+library: usbpspcm
+version: 1
+module: usbpspcm
+exports:
+- name: cellUsbPspcmBind
+  nid: '0xabe090e3'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_19.o
+- name: cellUsbPspcmBindAsync
+  nid: '0x17f42197'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_4.o
+- name: cellUsbPspcmCalcPoolSize
+  nid: '0xf20df7fc'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_25.o
+- name: cellUsbPspcmCancelBind
+  nid: '0xa4a5ddb4'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_18.o
+- name: cellUsbPspcmCancelWaitData
+  nid: '0xe76e79ab'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_23.o
+- name: cellUsbPspcmClose
+  nid: '0xfa07d320'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_27.o
+- name: cellUsbPspcmEnd
+  nid: '0x0f7b3b6d'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_3.o
+- name: cellUsbPspcmGetAddr
+  nid: '0x97670a90'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_17.o
+- name: cellUsbPspcmInit
+  nid: '0x657fcd36'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_11.o
+- name: cellUsbPspcmPollBindAsync
+  nid: '0x01a4cde0'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_1.o
+- name: cellUsbPspcmPollData
+  nid: '0x816799dd'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_16.o
+- name: cellUsbPspcmPollRecvAsync
+  nid: '0x7b249315'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_13.o
+- name: cellUsbPspcmPollResetAsync
+  nid: '0x3f22403e'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_6.o
+- name: cellUsbPspcmPollSendAsync
+  nid: '0x7f0a3eaf'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_14.o
+- name: cellUsbPspcmRecv
+  nid: '0xf9883d3b'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_26.o
+- name: cellUsbPspcmRecvAsync
+  nid: '0x02955295'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_2.o
+- name: cellUsbPspcmRegister
+  nid: '0xe3fbf64d'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_21.o
+- name: cellUsbPspcmReset
+  nid: '0xe68a65ac'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_22.o
+- name: cellUsbPspcmResetAsync
+  nid: '0x4ef182dd'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_10.o
+- name: cellUsbPspcmSend
+  nid: '0x7277d7c3'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_12.o
+- name: cellUsbPspcmSendAsync
+  nid: '0x4af23efa'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_9.o
+- name: cellUsbPspcmUnregister
+  nid: '0x7ff72b42'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_15.o
+- name: cellUsbPspcmWaitBindAsync
+  nid: '0x4abe830e'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_8.o
+- name: cellUsbPspcmWaitData
+  nid: '0xdb864d11'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_20.o
+- name: cellUsbPspcmWaitRecvAsync
+  nid: '0x461dc8cc'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_7.o
+- name: cellUsbPspcmWaitResetAsync
+  nid: '0xe840f449'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_24.o
+- name: cellUsbPspcmWaitSendAsync
+  nid: '0x3caddf6c'
+  signature: ''
+  notes: extracted from _cellUsbPspcm_0001_5.o
+imports: []

@@ -1,0 +1,13 @@
+library: spudll
+version: 1
+module: spudll
+exports:
+- name: cellSpudllGetImageSize
+  nid: '0xcccd3257'
+  signature: ''
+  notes: extracted from _cellSpudll_0001_2.o
+- name: cellSpudllHandleConfigSetDefaultValues
+  nid: '0x3fbcf1d6'
+  signature: ''
+  notes: extracted from _cellSpudll_0001_1.o
+imports: []

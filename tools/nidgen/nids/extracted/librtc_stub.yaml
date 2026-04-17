@@ -1,0 +1,137 @@
+library: rtc
+version: 1
+module: rtc
+exports:
+- name: cellRtcCheckValid
+  nid: '0x7f1086e6'
+  signature: ''
+  notes: extracted from _cellRtc_0001_14.o
+- name: cellRtcCompareTick
+  nid: '0xfb51fc61'
+  signature: ''
+  notes: extracted from _cellRtc_0001_33.o
+- name: cellRtcConvertLocalTimeToUtc
+  nid: '0x46ca7fe0'
+  signature: ''
+  notes: extracted from _cellRtc_0001_7.o
+- name: cellRtcConvertUtcToLocalTime
+  nid: '0xc48d5002'
+  signature: ''
+  notes: extracted from _cellRtc_0001_21.o
+- name: cellRtcFormatRfc2822
+  nid: '0x5491b9d5'
+  signature: ''
+  notes: extracted from _cellRtc_0001_9.o
+- name: cellRtcFormatRfc2822LocalTime
+  nid: '0xa07c3d2f'
+  signature: ''
+  notes: extracted from _cellRtc_0001_18.o
+- name: cellRtcFormatRfc3339
+  nid: '0xd9c0b463'
+  signature: ''
+  notes: extracted from _cellRtc_0001_28.o
+- name: cellRtcFormatRfc3339LocalTime
+  nid: '0x1324948a'
+  signature: ''
+  notes: extracted from _cellRtc_0001_1.o
+- name: cellRtcGetCurrentClock
+  nid: '0x32c941cf'
+  signature: ''
+  notes: extracted from _cellRtc_0001_5.o
+- name: cellRtcGetCurrentClockLocalTime
+  nid: '0x2cce9cf5'
+  signature: ''
+  notes: extracted from _cellRtc_0001_3.o
+- name: cellRtcGetCurrentTick
+  nid: '0x9dafc0d9'
+  signature: ''
+  notes: extracted from _cellRtc_0001_17.o
+- name: cellRtcGetDayOfWeek
+  nid: '0xc2d8cf95'
+  signature: ''
+  notes: extracted from _cellRtc_0001_20.o
+- name: cellRtcGetDaysInMonth
+  nid: '0x5b6a0a1d'
+  signature: ''
+  notes: extracted from _cellRtc_0001_10.o
+- name: cellRtcGetDosTime
+  nid: '0xdfff32cf'
+  signature: ''
+  notes: extracted from _cellRtc_0001_29.o
+- name: cellRtcGetTick
+  nid: '0xc7bdb7eb'
+  signature: ''
+  notes: extracted from _cellRtc_0001_23.o
+- name: cellRtcGetTime_t
+  nid: '0xcb90c761'
+  signature: ''
+  notes: extracted from _cellRtc_0001_24.o
+- name: cellRtcGetWin32FileTime
+  nid: '0xe7086f05'
+  signature: ''
+  notes: extracted from _cellRtc_0001_31.o
+- name: cellRtcIsLeapYear
+  nid: '0x5316b4a8'
+  signature: ''
+  notes: extracted from _cellRtc_0001_8.o
+- name: cellRtcParseDateTime
+  nid: '0xc5bc0fac'
+  signature: ''
+  notes: extracted from _cellRtc_0001_22.o
+- name: cellRtcParseRfc3339
+  nid: '0xcf11c3d6'
+  signature: ''
+  notes: extracted from _cellRtc_0001_26.o
+- name: cellRtcSetDosTime
+  nid: '0x9598d4b3'
+  signature: ''
+  notes: extracted from _cellRtc_0001_15.o
+- name: cellRtcSetTick
+  nid: '0x99b13034'
+  signature: ''
+  notes: extracted from _cellRtc_0001_16.o
+- name: cellRtcSetTime_t
+  nid: '0xbb543189'
+  signature: ''
+  notes: extracted from _cellRtc_0001_19.o
+- name: cellRtcSetWin32FileTime
+  nid: '0x5f68c268'
+  signature: ''
+  notes: extracted from _cellRtc_0001_11.o
+- name: cellRtcTickAddDays
+  nid: '0x75744e2a'
+  signature: ''
+  notes: extracted from _cellRtc_0001_13.o
+- name: cellRtcTickAddHours
+  nid: '0xd41d3bd2'
+  signature: ''
+  notes: extracted from _cellRtc_0001_27.o
+- name: cellRtcTickAddMicroseconds
+  nid: '0xf8509925'
+  signature: ''
+  notes: extracted from _cellRtc_0001_32.o
+- name: cellRtcTickAddMinutes
+  nid: '0x2f010bfa'
+  signature: ''
+  notes: extracted from _cellRtc_0001_4.o
+- name: cellRtcTickAddMonths
+  nid: '0xe0ecbb45'
+  signature: ''
+  notes: extracted from _cellRtc_0001_30.o
+- name: cellRtcTickAddSeconds
+  nid: '0xccce71bd'
+  signature: ''
+  notes: extracted from _cellRtc_0001_25.o
+- name: cellRtcTickAddTicks
+  nid: '0x269a1882'
+  signature: ''
+  notes: extracted from _cellRtc_0001_2.o
+- name: cellRtcTickAddWeeks
+  nid: '0x64c63fd5'
+  signature: ''
+  notes: extracted from _cellRtc_0001_12.o
+- name: cellRtcTickAddYears
+  nid: '0x332a74dd'
+  signature: ''
+  notes: extracted from _cellRtc_0001_6.o
+imports: []

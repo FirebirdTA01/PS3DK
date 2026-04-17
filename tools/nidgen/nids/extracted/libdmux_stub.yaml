@@ -1,0 +1,85 @@
+library: dmux
+version: 1
+module: dmux
+exports:
+- name: cellDmuxClose
+  nid: '0x8c692521'
+  signature: ''
+  notes: extracted from _cellDmux_0001_16.o
+- name: cellDmuxDisableEs
+  nid: '0x05371c8d'
+  signature: ''
+  notes: extracted from _cellDmux_0001_4.o
+- name: cellDmuxEnableEs
+  nid: '0x7b56dc3f'
+  signature: ''
+  notes: extracted from _cellDmux_0001_15.o
+- name: cellDmuxFlushEs
+  nid: '0xebb3b2bd'
+  signature: ''
+  notes: extracted from _cellDmux_0001_19.o
+- name: cellDmuxGetAu
+  nid: '0x42c716b5'
+  signature: ''
+  notes: extracted from _cellDmux_0001_11.o
+- name: cellDmuxGetAuEx
+  nid: '0x2c9a5857'
+  signature: ''
+  notes: extracted from _cellDmux_0001_9.o
+- name: cellDmuxOpen
+  nid: '0x68492de9'
+  signature: ''
+  notes: extracted from _cellDmux_0001_14.o
+- name: cellDmuxOpen2
+  nid: '0x11bc3a6c'
+  signature: ''
+  notes: extracted from _cellDmux_0001_5.o
+- name: cellDmuxOpenEx
+  nid: '0xf6c23560'
+  signature: ''
+  notes: extracted from _cellDmux_0001_20.o
+- name: cellDmuxPeekAu
+  nid: '0x2750c5e0'
+  signature: ''
+  notes: extracted from _cellDmux_0001_8.o
+- name: cellDmuxPeekAuEx
+  nid: '0x002e8da2'
+  signature: ''
+  notes: extracted from _cellDmux_0001_1.o
+- name: cellDmuxQueryAttr
+  nid: '0xa2d4189b'
+  signature: ''
+  notes: extracted from _cellDmux_0001_17.o
+- name: cellDmuxQueryAttr2
+  nid: '0x3f76e3cd'
+  signature: ''
+  notes: extracted from _cellDmux_0001_10.o
+- name: cellDmuxQueryEsAttr
+  nid: '0x02170d1a'
+  signature: ''
+  notes: extracted from _cellDmux_0001_2.o
+- name: cellDmuxQueryEsAttr2
+  nid: '0x52911bcf'
+  signature: ''
+  notes: extracted from _cellDmux_0001_12.o
+- name: cellDmuxReleaseAu
+  nid: '0x24ea6474'
+  signature: ''
+  notes: extracted from _cellDmux_0001_7.o
+- name: cellDmuxResetEs
+  nid: '0x21d424f0'
+  signature: ''
+  notes: extracted from _cellDmux_0001_6.o
+- name: cellDmuxResetStream
+  nid: '0x5d345de9'
+  signature: ''
+  notes: extracted from _cellDmux_0001_13.o
+- name: cellDmuxResetStreamAndWaitDone
+  nid: '0xccff1284'
+  signature: ''
+  notes: extracted from _cellDmux_0001_18.o
+- name: cellDmuxSetStream
+  nid: '0x04e7499f'
+  signature: ''
+  notes: extracted from _cellDmux_0001_3.o
+imports: []

@@ -1,0 +1,21 @@
+library: sysutil_np_util
+version: 1
+module: sysutil_np_util
+exports:
+- name: sceNpUtilBandwidthTestAbort
+  nid: '0xc99ee313'
+  signature: ''
+  notes: extracted from _sceNpUtil_0001_4.o
+- name: sceNpUtilBandwidthTestGetStatus
+  nid: '0xc880f37d'
+  signature: ''
+  notes: extracted from _sceNpUtil_0001_3.o
+- name: sceNpUtilBandwidthTestInitStart
+  nid: '0xc2ced2b7'
+  signature: ''
+  notes: extracted from _sceNpUtil_0001_2.o
+- name: sceNpUtilBandwidthTestShutdown
+  nid: '0x432b3cbf'
+  signature: ''
+  notes: extracted from _sceNpUtil_0001_1.o
+imports: []

@@ -1,0 +1,69 @@
+library: sysutil_avconf_ext
+version: 1
+module: sysutil_avconf_ext
+exports:
+- name: cellAudioInGetAvailableDeviceInfo
+  nid: '0x65bf9ea3'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_8.o
+- name: cellAudioInGetDeviceInfo
+  nid: '0x3d5730ce'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_5.o
+- name: cellAudioInRegisterDevice
+  nid: '0xeb6fcff1'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_14.o
+- name: cellAudioInSetDeviceMode
+  nid: '0xeb6c50fb'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_13.o
+- name: cellAudioInUnregisterDevice
+  nid: '0xfa6bcc17'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_15.o
+- name: cellAudioOutGetAvailableDeviceInfo
+  nid: '0xc3273d9b'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_9.o
+- name: cellAudioOutGetDeviceInfo2
+  nid: '0x18d0ada6'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_2.o
+- name: cellAudioOutRegisterDevice
+  nid: '0xc7087631'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_11.o
+- name: cellAudioOutSetDeviceMode
+  nid: '0xe4645af8'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_12.o
+- name: cellAudioOutUnregisterDevice
+  nid: '0x0bddef7d'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_1.o
+- name: cellVideoOutConvertCursorColor
+  nid: '0x4ec8c141'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_6.o
+- name: cellVideoOutGetGamma
+  nid: '0x655a0364'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_7.o
+- name: cellVideoOutGetScreenSize
+  nid: '0xfaa275a4'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_16.o
+- name: cellVideoOutSetGamma
+  nid: '0xc7020f62'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_10.o
+- name: cellVideoOutSetXVColor
+  nid: '0x1cfa1a11'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_3.o
+- name: cellVideoOutSetupDisplay
+  nid: '0x269ffedd'
+  signature: ''
+  notes: extracted from _cellSysutilAvconfExt_0001_4.o
+imports: []

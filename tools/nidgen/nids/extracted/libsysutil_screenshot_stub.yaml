@@ -1,0 +1,21 @@
+library: sysutil_screenshot
+version: 1
+module: sysutil_screenshot
+exports:
+- name: cellScreenShotDisable
+  nid: '0xfc6f4e74'
+  signature: ''
+  notes: extracted from _cellScreenShotUtility_0001_4.o
+- name: cellScreenShotEnable
+  nid: '0x9e33ab8f'
+  signature: ''
+  notes: extracted from _cellScreenShotUtility_0001_2.o
+- name: cellScreenShotSetOverlayImage
+  nid: '0x7a9c2243'
+  signature: ''
+  notes: extracted from _cellScreenShotUtility_0001_1.o
+- name: cellScreenShotSetParameter
+  nid: '0xd3ad63e4'
+  signature: ''
+  notes: extracted from _cellScreenShotUtility_0001_3.o
+imports: []

@@ -1,0 +1,45 @@
+library: medi
+version: 1
+module: medi
+exports:
+- name: cellMediatorCloseContext
+  nid: '0xc324f60c'
+  signature: ''
+  notes: extracted from _libmedi_0001_9.o
+- name: cellMediatorCreateContext
+  nid: '0x40ad67eb'
+  signature: ''
+  notes: extracted from _libmedi_0001_1.o
+- name: cellMediatorFlushCache
+  nid: '0x5d4431f0'
+  signature: ''
+  notes: extracted from _libmedi_0001_4.o
+- name: cellMediatorGetProviderUrl
+  nid: '0x9d11991d'
+  signature: ''
+  notes: extracted from _libmedi_0001_7.o
+- name: cellMediatorGetSignatureLength
+  nid: '0x4aecea24'
+  signature: ''
+  notes: extracted from _libmedi_0001_2.o
+- name: cellMediatorGetStatus
+  nid: '0xf7e4a50a'
+  signature: ''
+  notes: extracted from _libmedi_0001_10.o
+- name: cellMediatorGetUserInfo
+  nid: '0x4d249136'
+  signature: ''
+  notes: extracted from _libmedi_0001_3.o
+- name: cellMediatorPostReports
+  nid: '0x85dc6981'
+  signature: ''
+  notes: extracted from _libmedi_0001_6.o
+- name: cellMediatorReliablePostReports
+  nid: '0xa14c6000'
+  signature: ''
+  notes: extracted from _libmedi_0001_8.o
+- name: cellMediatorSign
+  nid: '0x6b8f5cb9'
+  signature: ''
+  notes: extracted from _libmedi_0001_5.o
+imports: []

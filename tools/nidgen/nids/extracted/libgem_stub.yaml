@@ -1,0 +1,153 @@
+library: gem
+version: 1
+module: gem
+exports:
+- name: cellGemCalibrate
+  nid: '0xafa99ead'
+  signature: ''
+  notes: extracted from _libgem_0002_27.o
+- name: cellGemClearStatusFlags
+  nid: '0x9b9714a4'
+  signature: ''
+  notes: extracted from _libgem_0002_24.o
+- name: cellGemConvertVideoFinish
+  nid: '0x1a13d010'
+  signature: ''
+  notes: extracted from _libgem_0002_6.o
+- name: cellGemConvertVideoStart
+  nid: '0x6dce048c'
+  signature: ''
+  notes: extracted from _libgem_0002_18.o
+- name: cellGemEnableCameraPitchAngleCorrection
+  nid: '0x4219de31'
+  signature: ''
+  notes: extracted from _libgem_0002_13.o
+- name: cellGemEnableMagnetometer
+  nid: '0x1a2518a2'
+  signature: ''
+  notes: extracted from _libgem_0002_7.o
+- name: cellGemEnd
+  nid: '0xe1f85a80'
+  signature: ''
+  notes: extracted from _libgem_0002_34.o
+- name: cellGemFilterState
+  nid: '0x6fc4c791'
+  signature: ''
+  notes: extracted from _libgem_0002_19.o
+- name: cellGemForceRGB
+  nid: '0xce6d7791'
+  signature: ''
+  notes: extracted from _libgem_0002_31.o
+- name: cellGemGetAccelerometerPositionInDevice
+  nid: '0x6a5b7048'
+  signature: ''
+  notes: extracted from _libgem_0002_16.o
+- name: cellGemGetAllTrackableHues
+  nid: '0x2d2c2764'
+  signature: ''
+  notes: extracted from _libgem_0002_10.o
+- name: cellGemGetCameraState
+  nid: '0x8befac67'
+  signature: ''
+  notes: extracted from _libgem_0002_21.o
+- name: cellGemGetEnvironmentLightingColor
+  nid: '0x02eb41bb'
+  signature: ''
+  notes: extracted from _libgem_0002_1.o
+- name: cellGemGetHuePixels
+  nid: '0xb8ef56a6'
+  signature: ''
+  notes: extracted from _libgem_0002_28.o
+- name: cellGemGetImageState
+  nid: '0x92cc4b34'
+  signature: ''
+  notes: extracted from _libgem_0002_23.o
+- name: cellGemGetInertialState
+  nid: '0xd37b127a'
+  signature: ''
+  notes: extracted from _libgem_0002_32.o
+- name: cellGemGetInfo
+  nid: '0x9e1dff96'
+  signature: ''
+  notes: extracted from _libgem_0002_25.o
+- name: cellGemGetMemorySize
+  nid: '0x2e0a170d'
+  signature: ''
+  notes: extracted from _libgem_0002_11.o
+- name: cellGemGetRGB
+  nid: '0x1b30cc22'
+  signature: ''
+  notes: extracted from _libgem_0002_8.o
+- name: cellGemGetRumble
+  nid: '0x6db6b007'
+  signature: ''
+  notes: extracted from _libgem_0002_17.o
+- name: cellGemGetState
+  nid: '0x6441d38d'
+  signature: ''
+  notes: extracted from _libgem_0002_15.o
+- name: cellGemGetStatusFlags
+  nid: '0xfee33481'
+  signature: ''
+  notes: extracted from _libgem_0002_37.o
+- name: cellGemGetTrackerHue
+  nid: '0x18ea899a'
+  signature: ''
+  notes: extracted from _libgem_0002_5.o
+- name: cellGemHSVtoRGB
+  nid: '0xc7622586'
+  signature: ''
+  notes: extracted from _libgem_0002_30.o
+- name: cellGemInit
+  nid: '0x13ea7c64'
+  signature: ''
+  notes: extracted from _libgem_0002_4.o
+- name: cellGemInvalidateCalibration
+  nid: '0xe3e4f0d6'
+  signature: ''
+  notes: extracted from _libgem_0002_35.o
+- name: cellGemIsTrackableHue
+  nid: '0xfb5887f9'
+  signature: ''
+  notes: extracted from _libgem_0002_36.o
+- name: cellGemPrepareCamera
+  nid: '0xa03ef587'
+  signature: ''
+  notes: extracted from _libgem_0002_26.o
+- name: cellGemPrepareVideoConvert
+  nid: '0xc07896f9'
+  signature: ''
+  notes: extracted from _libgem_0002_29.o
+- name: cellGemReadExternalPortDeviceInfo
+  nid: '0x11077159'
+  signature: ''
+  notes: extracted from _libgem_0002_3.o
+- name: cellGemReset
+  nid: '0xde54e2fc'
+  signature: ''
+  notes: extracted from _libgem_0002_33.o
+- name: cellGemSetRumble
+  nid: '0x49609306'
+  signature: ''
+  notes: extracted from _libgem_0002_14.o
+- name: cellGemSetYaw
+  nid: '0x77e08704'
+  signature: ''
+  notes: extracted from _libgem_0002_20.o
+- name: cellGemTrackHues
+  nid: '0x928ac5f8'
+  signature: ''
+  notes: extracted from _libgem_0002_22.o
+- name: cellGemUpdateFinish
+  nid: '0x41ae9c31'
+  signature: ''
+  notes: extracted from _libgem_0002_12.o
+- name: cellGemUpdateStart
+  nid: '0x0ecd2261'
+  signature: ''
+  notes: extracted from _libgem_0002_2.o
+- name: cellGemWriteExternalPort
+  nid: '0x1f6328d8'
+  signature: ''
+  notes: extracted from _libgem_0002_9.o
+imports: []

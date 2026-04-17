@@ -1,0 +1,77 @@
+library: sheap
+version: 1
+module: sheap
+exports:
+- name: cellKeySheapBarrierDelete
+  nid: '0xf6f5fbca'
+  signature: ''
+  notes: extracted from _cellSheap_0001_18.o
+- name: cellKeySheapBarrierNew
+  nid: '0xe897c835'
+  signature: ''
+  notes: extracted from _cellSheap_0001_15.o
+- name: cellKeySheapBufferDelete
+  nid: '0xe6b37362'
+  signature: ''
+  notes: extracted from _cellSheap_0001_14.o
+- name: cellKeySheapBufferNew
+  nid: '0x4a5b9659'
+  signature: ''
+  notes: extracted from _cellSheap_0001_4.o
+- name: cellKeySheapInitialize
+  nid: '0xa1b25841'
+  signature: ''
+  notes: extracted from _cellSheap_0001_12.o
+- name: cellKeySheapMutexDelete
+  nid: '0x2452679f'
+  signature: ''
+  notes: extracted from _cellSheap_0001_1.o
+- name: cellKeySheapMutexNew
+  nid: '0x3478e1e6'
+  signature: ''
+  notes: extracted from _cellSheap_0001_2.o
+- name: cellKeySheapQueueDelete
+  nid: '0x79a6abd0'
+  signature: ''
+  notes: extracted from _cellSheap_0001_9.o
+- name: cellKeySheapQueueNew
+  nid: '0x987e260e'
+  signature: ''
+  notes: extracted from _cellSheap_0001_11.o
+- name: cellKeySheapRwmDelete
+  nid: '0xed136702'
+  signature: ''
+  notes: extracted from _cellSheap_0001_16.o
+- name: cellKeySheapRwmNew
+  nid: '0xf01ac471'
+  signature: ''
+  notes: extracted from _cellSheap_0001_17.o
+- name: cellKeySheapSemaphoreDelete
+  nid: '0x73a45cf8'
+  signature: ''
+  notes: extracted from _cellSheap_0001_8.o
+- name: cellKeySheapSemaphoreNew
+  nid: '0x69a5861d'
+  signature: ''
+  notes: extracted from _cellSheap_0001_7.o
+- name: cellSheapAllocate
+  nid: '0x4b1383fb'
+  signature: ''
+  notes: extracted from _cellSheap_0001_5.o
+- name: cellSheapFree
+  nid: '0x5c5994bd'
+  signature: ''
+  notes: extracted from _cellSheap_0001_6.o
+- name: cellSheapInitialize
+  nid: '0xbbb47cd8'
+  signature: ''
+  notes: extracted from _cellSheap_0001_13.o
+- name: cellSheapQueryFree
+  nid: '0x7fa23275'
+  signature: ''
+  notes: extracted from _cellSheap_0001_10.o
+- name: cellSheapQueryMax
+  nid: '0x37968718'
+  signature: ''
+  notes: extracted from _cellSheap_0001_3.o
+imports: []

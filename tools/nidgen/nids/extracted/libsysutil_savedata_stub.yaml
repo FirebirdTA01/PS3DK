@@ -1,0 +1,53 @@
+library: sysutil_savedata
+version: 1
+module: sysutil_savedata
+exports:
+- name: cellSaveDataFixedExport
+  nid: '0x46a2d878'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_5.o
+- name: cellSaveDataFixedImport
+  nid: '0x52541151'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_7.o
+- name: cellSaveDataGetListItem
+  nid: '0x04c06fc2'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_1.o
+- name: cellSaveDataListDelete
+  nid: '0x27cb8bc2'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_3.o
+- name: cellSaveDataListExport
+  nid: '0x491cc554'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_6.o
+- name: cellSaveDataListImport
+  nid: '0x6b4e0de6'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_9.o
+- name: cellSaveDataUserFixedExport
+  nid: '0x95ae2cde'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_11.o
+- name: cellSaveDataUserFixedImport
+  nid: '0x529231b0'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_8.o
+- name: cellSaveDataUserGetListItem
+  nid: '0xf6482036'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_12.o
+- name: cellSaveDataUserListDelete
+  nid: '0x7048a9ba'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_10.o
+- name: cellSaveDataUserListExport
+  nid: '0x273d116a'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_2.o
+- name: cellSaveDataUserListImport
+  nid: '0x39d6ee43'
+  signature: ''
+  notes: extracted from _cellSaveData_0001_4.o
+imports: []

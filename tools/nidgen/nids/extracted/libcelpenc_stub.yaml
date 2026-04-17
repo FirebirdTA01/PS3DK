@@ -1,0 +1,41 @@
+library: celpenc
+version: 1
+module: celpenc
+exports:
+- name: cellCelpEncClose
+  nid: '0x15ec0cca'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_1.o
+- name: cellCelpEncEncodeFrame
+  nid: '0x81fe030c'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_6.o
+- name: cellCelpEncEnd
+  nid: '0xf2b85dff'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_9.o
+- name: cellCelpEncGetAu
+  nid: '0x3773692f'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_2.o
+- name: cellCelpEncOpen
+  nid: '0x77b3b29a'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_5.o
+- name: cellCelpEncOpenEx
+  nid: '0x9eb084db'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_8.o
+- name: cellCelpEncQueryAttr
+  nid: '0x6b148570'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_4.o
+- name: cellCelpEncStart
+  nid: '0x55dc23de'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_3.o
+- name: cellCelpEncWaitForOutput
+  nid: '0x9b244272'
+  signature: ''
+  notes: extracted from _cellCelpEnc_0001_7.o
+imports: []

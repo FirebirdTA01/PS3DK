@@ -1,0 +1,81 @@
+library: netctl
+version: 1
+module: netctl
+exports:
+- name: cellGameUpdateCheckAbort
+  nid: '0x3e359ab6'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_9.o
+- name: cellGameUpdateCheckFinishAsync
+  nid: '0xffa3d791'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_19.o
+- name: cellGameUpdateCheckFinishAsyncEx
+  nid: '0xf463981c'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_18.o
+- name: cellGameUpdateCheckStartAsync
+  nid: '0xd0a5d727'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_17.o
+- name: cellGameUpdateCheckStartAsyncEx
+  nid: '0x0791015f'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_2.o
+- name: cellGameUpdateCheckStartWithoutDialogAsync
+  nid: '0xa5e1fa60'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_15.o
+- name: cellGameUpdateCheckStartWithoutDialogAsyncEx
+  nid: '0x558700f6'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_10.o
+- name: cellGameUpdateInit
+  nid: '0x99ab1a26'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_14.o
+- name: cellGameUpdateTerm
+  nid: '0x10dae56d'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_6.o
+- name: cellNetCtlAddHandler
+  nid: '0x0ce13c6b'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_3.o
+- name: cellNetCtlDelHandler
+  nid: '0x901815c3'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_13.o
+- name: cellNetCtlGetInfo
+  nid: '0x1e585b5d'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_7.o
+- name: cellNetCtlGetNatInfo
+  nid: '0x3a12865f'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_8.o
+- name: cellNetCtlGetState
+  nid: '0x8b3eba69'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_12.o
+- name: cellNetCtlInit
+  nid: '0xbd5a59fc'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_16.o
+- name: cellNetCtlNetStartDialogAbortAsync
+  nid: '0x71d53210'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_11.o
+- name: cellNetCtlNetStartDialogLoadAsync
+  nid: '0x04459230'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_1.o
+- name: cellNetCtlNetStartDialogUnloadAsync
+  nid: '0x0f1f13d3'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_4.o
+- name: cellNetCtlTerm
+  nid: '0x105ee2cb'
+  signature: ''
+  notes: extracted from _cellNetCtl_0001_5.o
+imports: []

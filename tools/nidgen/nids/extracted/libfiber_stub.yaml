@@ -1,0 +1,193 @@
+library: fiber
+version: 1
+module: fiber
+exports:
+- name: _cellFiberPpuAttributeInitialize
+  nid: '0xc11f8056'
+  signature: ''
+  notes: extracted from _cellFiber_0001_37.o
+- name: _cellFiberPpuContextAttributeInitialize
+  nid: '0x31252ec3'
+  signature: ''
+  notes: extracted from _cellFiber_0001_7.o
+- name: _cellFiberPpuInitialize
+  nid: '0x55870804'
+  signature: ''
+  notes: extracted from _cellFiber_0001_14.o
+- name: _cellFiberPpuSchedulerAttributeInitialize
+  nid: '0x9e25c72d'
+  signature: ''
+  notes: extracted from _cellFiber_0001_24.o
+- name: _cellFiberPpuUtilWorkerControlAttributeInitialize
+  nid: '0x68ba4568'
+  signature: ''
+  notes: extracted from _cellFiber_0001_18.o
+- name: cellFiberPpuCheckFlags
+  nid: '0xf6c6900c'
+  signature: ''
+  notes: extracted from _cellFiber_0001_45.o
+- name: cellFiberPpuCheckStackLimit
+  nid: '0xf3e81219'
+  signature: ''
+  notes: extracted from _cellFiber_0001_44.o
+- name: cellFiberPpuContextCheckStackLimit
+  nid: '0xb90c871b'
+  signature: ''
+  notes: extracted from _cellFiber_0001_32.o
+- name: cellFiberPpuContextEnterScheduler
+  nid: '0x0a25b6c8'
+  signature: ''
+  notes: extracted from _cellFiber_0001_3.o
+- name: cellFiberPpuContextFinalize
+  nid: '0xb3a48079'
+  signature: ''
+  notes: extracted from _cellFiber_0001_31.o
+- name: cellFiberPpuContextInitialize
+  nid: '0x72086315'
+  signature: ''
+  notes: extracted from _cellFiber_0001_20.o
+- name: cellFiberPpuContextReturnToThread
+  nid: '0x01036193'
+  signature: ''
+  notes: extracted from _cellFiber_0001_1.o
+- name: cellFiberPpuContextRun
+  nid: '0xaba1c563'
+  signature: ''
+  notes: extracted from _cellFiber_0001_28.o
+- name: cellFiberPpuContextRunScheduler
+  nid: '0x081c98be'
+  signature: ''
+  notes: extracted from _cellFiber_0001_2.o
+- name: cellFiberPpuContextSelf
+  nid: '0x34a81091'
+  signature: ''
+  notes: extracted from _cellFiber_0001_9.o
+- name: cellFiberPpuContextSwitch
+  nid: '0xd0066b17'
+  signature: ''
+  notes: extracted from _cellFiber_0001_38.o
+- name: cellFiberPpuCreateFiber
+  nid: '0x7c2f4034'
+  signature: ''
+  notes: extracted from _cellFiber_0001_21.o
+- name: cellFiberPpuExit
+  nid: '0xfa8d5f95'
+  signature: ''
+  notes: extracted from _cellFiber_0001_46.o
+- name: cellFiberPpuFinalizeScheduler
+  nid: '0x8b6baa01'
+  signature: ''
+  notes: extracted from _cellFiber_0001_23.o
+- name: cellFiberPpuGetScheduler
+  nid: '0xb0594b2d'
+  signature: ''
+  notes: extracted from _cellFiber_0001_30.o
+- name: cellFiberPpuHasRunnableFiber
+  nid: '0xe492a675'
+  signature: ''
+  notes: extracted from _cellFiber_0001_39.o
+- name: cellFiberPpuInitializeScheduler
+  nid: '0xee3b604d'
+  signature: ''
+  notes: extracted from _cellFiber_0001_42.o
+- name: cellFiberPpuJoinFiber
+  nid: '0xa6004249'
+  signature: ''
+  notes: extracted from _cellFiber_0001_27.o
+- name: cellFiberPpuRunFibers
+  nid: '0x12b1acf0'
+  signature: ''
+  notes: extracted from _cellFiber_0001_5.o
+- name: cellFiberPpuSchedulerTraceFinalize
+  nid: '0x3860a12a'
+  signature: ''
+  notes: extracted from _cellFiber_0001_10.o
+- name: cellFiberPpuSchedulerTraceInitialize
+  nid: '0xbf9cd933'
+  signature: ''
+  notes: extracted from _cellFiber_0001_34.o
+- name: cellFiberPpuSchedulerTraceStart
+  nid: '0xadedbebf'
+  signature: ''
+  notes: extracted from _cellFiber_0001_29.o
+- name: cellFiberPpuSchedulerTraceStop
+  nid: '0xe665f9a9'
+  signature: ''
+  notes: extracted from _cellFiber_0001_40.o
+- name: cellFiberPpuSelf
+  nid: '0x5d9a7034'
+  signature: ''
+  notes: extracted from _cellFiber_0001_16.o
+- name: cellFiberPpuSendSignal
+  nid: '0x8afb8356'
+  signature: ''
+  notes: extracted from _cellFiber_0001_22.o
+- name: cellFiberPpuSetPriority
+  nid: '0xfbf5fe40'
+  signature: ''
+  notes: extracted from _cellFiber_0001_47.o
+- name: cellFiberPpuUtilWorkerControlCheckFlags
+  nid: '0xea6dc1ad'
+  signature: ''
+  notes: extracted from _cellFiber_0001_41.o
+- name: cellFiberPpuUtilWorkerControlConnectEventQueueToSpurs
+  nid: '0x62a20f0d'
+  signature: ''
+  notes: extracted from _cellFiber_0001_17.o
+- name: cellFiberPpuUtilWorkerControlCreateFiber
+  nid: '0xbfca88d3'
+  signature: ''
+  notes: extracted from _cellFiber_0001_35.o
+- name: cellFiberPpuUtilWorkerControlDisconnectEventQueue
+  nid: '0x4fc86b2c'
+  signature: ''
+  notes: extracted from _cellFiber_0001_13.o
+- name: cellFiberPpuUtilWorkerControlFinalize
+  nid: '0xa27c95ca'
+  signature: ''
+  notes: extracted from _cellFiber_0001_25.o
+- name: cellFiberPpuUtilWorkerControlInitialize
+  nid: '0x3204b146'
+  signature: ''
+  notes: extracted from _cellFiber_0001_8.o
+- name: cellFiberPpuUtilWorkerControlInitializeWithAttribute
+  nid: '0xf2ccad4f'
+  signature: ''
+  notes: extracted from _cellFiber_0001_43.o
+- name: cellFiberPpuUtilWorkerControlJoinFiber
+  nid: '0x3b417f82'
+  signature: ''
+  notes: extracted from _cellFiber_0001_12.o
+- name: cellFiberPpuUtilWorkerControlRunFibers
+  nid: '0x1e7a247a'
+  signature: ''
+  notes: extracted from _cellFiber_0001_6.o
+- name: cellFiberPpuUtilWorkerControlSendSignal
+  nid: '0x5d3992dd'
+  signature: ''
+  notes: extracted from _cellFiber_0001_15.o
+- name: cellFiberPpuUtilWorkerControlSetPollingMode
+  nid: '0x392c5aa5'
+  signature: ''
+  notes: extracted from _cellFiber_0001_11.o
+- name: cellFiberPpuUtilWorkerControlShutdown
+  nid: '0xc04e2438'
+  signature: ''
+  notes: extracted from _cellFiber_0001_36.o
+- name: cellFiberPpuUtilWorkerControlWakeup
+  nid: '0xbabf714b'
+  signature: ''
+  notes: extracted from _cellFiber_0001_33.o
+- name: cellFiberPpuWaitFlag
+  nid: '0xa4599cf3'
+  signature: ''
+  notes: extracted from _cellFiber_0001_26.o
+- name: cellFiberPpuWaitSignal
+  nid: '0x6c164b3b'
+  signature: ''
+  notes: extracted from _cellFiber_0001_19.o
+- name: cellFiberPpuYield
+  nid: '0x0c44f441'
+  signature: ''
+  notes: extracted from _cellFiber_0001_4.o
+imports: []

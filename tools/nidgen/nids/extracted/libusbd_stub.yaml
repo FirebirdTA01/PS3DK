@@ -1,0 +1,101 @@
+library: usbd
+version: 1
+module: usbd
+exports:
+- name: cellUsbdAllocateMemory
+  nid: '0x074dbb39'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_1.o
+- name: cellUsbdBulkTransfer
+  nid: '0xac77eb78'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_17.o
+- name: cellUsbdClosePipe
+  nid: '0x9763e962'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_15.o
+- name: cellUsbdControlTransfer
+  nid: '0x97cf128e'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_16.o
+- name: cellUsbdEnd
+  nid: '0x35f22ac3'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_6.o
+- name: cellUsbdFreeMemory
+  nid: '0x4e456e81'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_7.o
+- name: cellUsbdGetDeviceLocation
+  nid: '0xdb819e03'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_23.o
+- name: cellUsbdGetDeviceSpeed
+  nid: '0xbdbd2428'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_19.o
+- name: cellUsbdGetPrivateData
+  nid: '0x5de3af36'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_9.o
+- name: cellUsbdGetThreadPriority
+  nid: '0xd5263dea'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_22.o
+- name: cellUsbdHSIsochronousTransfer
+  nid: '0x7a1b6eab'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_12.o
+- name: cellUsbdInit
+  nid: '0xd0e766fe'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_21.o
+- name: cellUsbdInterruptTransfer
+  nid: '0x0f411262'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_2.o
+- name: cellUsbdIsochronousTransfer
+  nid: '0xde58c4c2'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_24.o
+- name: cellUsbdOpenPipe
+  nid: '0x254289ac'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_3.o
+- name: cellUsbdRegisterExtraLdd
+  nid: '0x7fe92c54'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_13.o
+- name: cellUsbdRegisterExtraLdd2
+  nid: '0xbd554bcb'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_18.o
+- name: cellUsbdRegisterLdd
+  nid: '0x359befba'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_5.o
+- name: cellUsbdScanStaticDescriptor
+  nid: '0x2fb08e1e'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_4.o
+- name: cellUsbdSetPrivateData
+  nid: '0x63bfdb97'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_10.o
+- name: cellUsbdSetThreadPriority
+  nid: '0xc24af1d7'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_20.o
+- name: cellUsbdSetThreadPriority2
+  nid: '0x5c832bd7'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_8.o
+- name: cellUsbdUnregisterExtraLdd
+  nid: '0x90460081'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_14.o
+- name: cellUsbdUnregisterLdd
+  nid: '0x64951ac7'
+  signature: ''
+  notes: extracted from _cellUsbd_0001_11.o
+imports: []

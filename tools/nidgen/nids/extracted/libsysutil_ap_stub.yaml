@@ -1,0 +1,17 @@
+library: sysutil_ap
+version: 1
+module: sysutil_ap
+exports:
+- name: cellSysutilApGetRequiredMemSize
+  nid: '0x9e67e0dd'
+  signature: ''
+  notes: extracted from _cellSysutilAp_0001_3.o
+- name: cellSysutilApOff
+  nid: '0x90c2bb19'
+  signature: ''
+  notes: extracted from _cellSysutilAp_0001_2.o
+- name: cellSysutilApOn
+  nid: '0x3343824c'
+  signature: ''
+  notes: extracted from _cellSysutilAp_0001_1.o
+imports: []

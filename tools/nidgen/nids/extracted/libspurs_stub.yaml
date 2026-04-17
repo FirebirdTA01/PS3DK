@@ -1,0 +1,553 @@
+library: spurs
+version: 1
+module: spurs
+exports:
+- name: _cellSpursAttributeInitialize
+  nid: '0x95180230'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_90.o
+- name: _cellSpursEventFlagInitialize
+  nid: '0x5ef96465'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_54.o
+- name: _cellSpursJobChainAttributeInitialize
+  nid: '0x3548f483'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_29.o
+- name: _cellSpursLFQueueInitialize
+  nid: '0x011ee38b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_2.o
+- name: _cellSpursLFQueuePopBody
+  nid: '0x35dae22b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_30.o
+- name: _cellSpursLFQueuePushBody
+  nid: '0x8a85674d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_80.o
+- name: _cellSpursQueueInitialize
+  nid: '0x082bfb09'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_5.o
+- name: _cellSpursSemaphoreInitialize
+  nid: '0x77cdac0c'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_67.o
+- name: _cellSpursSendSignal
+  nid: '0xe0a6dbe4'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_125.o
+- name: _cellSpursTaskAttribute2Initialize
+  nid: '0x8adadf65'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_81.o
+- name: _cellSpursTaskAttributeInitialize
+  nid: '0xb8474eff'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_109.o
+- name: _cellSpursTasksetAttribute2Initialize
+  nid: '0xc2acdf43'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_115.o
+- name: _cellSpursTasksetAttributeInitialize
+  nid: '0x16394a4e'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_10.o
+- name: _cellSpursWorkloadAttributeInitialize
+  nid: '0xefeb2679'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_133.o
+- name: _cellSpursWorkloadFlagReceiver
+  nid: '0xa73bf47e'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_99.o
+- name: _cellSpursWorkloadFlagReceiver2
+  nid: '0x2ddbcc0a'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_23.o
+- name: cellSpursAddUrgentCall
+  nid: '0x8fdf50b2'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_83.o
+- name: cellSpursAddUrgentCommand
+  nid: '0x17001000'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_12.o
+- name: cellSpursAddWorkload
+  nid: '0x69726aa2'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_58.o
+- name: cellSpursAddWorkloadWithAttribute
+  nid: '0xc0158d8b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_113.o
+- name: cellSpursAttachLv2EventQueue
+  nid: '0xb9bc6207'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_110.o
+- name: cellSpursAttributeEnableSpuPrintfIfAvailable
+  nid: '0x1051d134'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_7.o
+- name: cellSpursAttributeEnableSystemWorkload
+  nid: '0x9dcbcb5d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_94.o
+- name: cellSpursAttributeSetMemoryContainerForSpuThread
+  nid: '0x82275c1c'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_73.o
+- name: cellSpursAttributeSetNamePrefix
+  nid: '0x07529113'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_4.o
+- name: cellSpursAttributeSetSpuThreadGroupType
+  nid: '0xa839a4d9'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_104.o
+- name: cellSpursBarrierGetTasksetAddress
+  nid: '0x9aeb5432'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_93.o
+- name: cellSpursBarrierInitialize
+  nid: '0x7fdf4fef'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_71.o
+- name: cellSpursCreateJobChainWithAttribute
+  nid: '0x303c19cd'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_25.o
+- name: cellSpursCreateTask
+  nid: '0xbeb600ac'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_112.o
+- name: cellSpursCreateTask2
+  nid: '0xe14ca62d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_126.o
+- name: cellSpursCreateTask2WithBinInfo
+  nid: '0xe4944a1c'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_127.o
+- name: cellSpursCreateTaskWithAttribute
+  nid: '0x1d46fedf'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_16.o
+- name: cellSpursCreateTaskset
+  nid: '0x52cc6c82'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_48.o
+- name: cellSpursCreateTaskset2
+  nid: '0x4a6465e3'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_38.o
+- name: cellSpursCreateTasksetWithAttribute
+  nid: '0xc10931cb'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_114.o
+- name: cellSpursDestroyTaskset2
+  nid: '0x1ebcf459'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_17.o
+- name: cellSpursDetachLv2EventQueue
+  nid: '0x4e66d483'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_46.o
+- name: cellSpursEnableExceptionEventHandler
+  nid: '0x32b94add'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_27.o
+- name: cellSpursEventFlagAttachLv2EventQueue
+  nid: '0x87630976'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_78.o
+- name: cellSpursEventFlagClear
+  nid: '0x4ac7bae4'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_39.o
+- name: cellSpursEventFlagDetachLv2EventQueue
+  nid: '0x22aab31d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_20.o
+- name: cellSpursEventFlagGetClearMode
+  nid: '0x4d1e9373'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_43.o
+- name: cellSpursEventFlagGetDirection
+  nid: '0x890f9e5a'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_79.o
+- name: cellSpursEventFlagGetTasksetAddress
+  nid: '0x947efb0b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_89.o
+- name: cellSpursEventFlagSet
+  nid: '0xf5507729'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_136.o
+- name: cellSpursEventFlagTryWait
+  nid: '0x6d2d9339'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_61.o
+- name: cellSpursEventFlagWait
+  nid: '0x373523d4'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_33.o
+- name: cellSpursFinalize
+  nid: '0xca4c4600'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_118.o
+- name: cellSpursGetInfo
+  nid: '0x1f402f8f'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_18.o
+- name: cellSpursGetJobChainId
+  nid: '0x86c864a2'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_77.o
+- name: cellSpursGetJobChainInfo
+  nid: '0x4ceb9694'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_42.o
+- name: cellSpursGetJobPipelineInfo
+  nid: '0xd86380d8'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_122.o
+- name: cellSpursGetNumSpuThread
+  nid: '0xc56defb5'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_116.o
+- name: cellSpursGetSpuGuid
+  nid: '0x6fcdf6e3'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_62.o
+- name: cellSpursGetSpuThreadGroupId
+  nid: '0x39c173fb'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_34.o
+- name: cellSpursGetSpuThreadId
+  nid: '0x6c960f6d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_60.o
+- name: cellSpursGetTasksetId
+  nid: '0xe7dd87e1'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_131.o
+- name: cellSpursGetTasksetInfo
+  nid: '0x9fcb567b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_96.o
+- name: cellSpursGetWorkloadData
+  nid: '0xa7f9e716'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_103.o
+- name: cellSpursGetWorkloadFlag
+  nid: '0xc765b995'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_117.o
+- name: cellSpursGetWorkloadInfo
+  nid: '0x4e153e3e'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_45.o
+- name: cellSpursInitialize
+  nid: '0xacfc8dbc'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_106.o
+- name: cellSpursInitializeWithAttribute
+  nid: '0xaa6269a8'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_105.o
+- name: cellSpursInitializeWithAttribute2
+  nid: '0x30aa96c4'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_26.o
+- name: cellSpursJobChainAttributeSetHaltOnError
+  nid: '0xbb68d76e'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_111.o
+- name: cellSpursJobChainAttributeSetJobTypeMemoryCheck
+  nid: '0x2cfccb99'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_22.o
+- name: cellSpursJobChainAttributeSetName
+  nid: '0x9fef70c2'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_97.o
+- name: cellSpursJobChainGetError
+  nid: '0x161da6a7'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_9.o
+- name: cellSpursJobChainGetSpursAddress
+  nid: '0x494613c7'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_35.o
+- name: cellSpursJobChainSetExceptionEventHandler
+  nid: '0x5202e53b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_47.o
+- name: cellSpursJobChainUnsetExceptionEventHandler
+  nid: '0x6aa76999'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_59.o
+- name: cellSpursJobGuardInitialize
+  nid: '0x68aaeba9'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_57.o
+- name: cellSpursJobGuardNotify
+  nid: '0xd5d0b256'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_121.o
+- name: cellSpursJobGuardReset
+  nid: '0x00af2519'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_1.o
+- name: cellSpursJobHeaderSetJobbin2Param
+  nid: '0x97a2f6c8'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_91.o
+- name: cellSpursJobSetMaxGrab
+  nid: '0xe7b0e69a'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_130.o
+- name: cellSpursJoinJobChain
+  nid: '0xa7c066de'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_102.o
+- name: cellSpursJoinTask2
+  nid: '0xa7a94892'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_101.o
+- name: cellSpursJoinTaskset
+  nid: '0x9f72add3'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_95.o
+- name: cellSpursLFQueueAttachLv2EventQueue
+  nid: '0x1656d49f'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_11.o
+- name: cellSpursLFQueueDetachLv2EventQueue
+  nid: '0x73e06f91'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_64.o
+- name: cellSpursLFQueueGetTasksetAddress
+  nid: '0xb792ca1a'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_108.o
+- name: cellSpursLookUpTasksetAddress
+  nid: '0x4cce88a9'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_41.o
+- name: cellSpursQueueAttachLv2EventQueue
+  nid: '0xe5443be7'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_128.o
+- name: cellSpursQueueClear
+  nid: '0x247414d0'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_21.o
+- name: cellSpursQueueDepth
+  nid: '0x35f02287'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_31.o
+- name: cellSpursQueueDetachLv2EventQueue
+  nid: '0x039d70b7'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_3.o
+- name: cellSpursQueueGetDirection
+  nid: '0xec68442c'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_132.o
+- name: cellSpursQueueGetEntrySize
+  nid: '0x369fe03d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_32.o
+- name: cellSpursQueueGetTasksetAddress
+  nid: '0x2093252b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_19.o
+- name: cellSpursQueuePopBody
+  nid: '0x91066667'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_85.o
+- name: cellSpursQueuePushBody
+  nid: '0x92cff6ed'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_87.o
+- name: cellSpursQueueSize
+  nid: '0x54876603'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_49.o
+- name: cellSpursReadyCountAdd
+  nid: '0x75211196'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_66.o
+- name: cellSpursReadyCountCompareAndSwap
+  nid: '0xf1d3552d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_134.o
+- name: cellSpursReadyCountStore
+  nid: '0xf843818d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_137.o
+- name: cellSpursReadyCountSwap
+  nid: '0x49a3426d'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_36.o
+- name: cellSpursRemoveWorkload
+  nid: '0x57e4dec3'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_52.o
+- name: cellSpursRequestIdleSpu
+  nid: '0x182d9890'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_13.o
+- name: cellSpursRunJobChain
+  nid: '0xf31731bb'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_135.o
+- name: cellSpursSemaphoreGetTasksetAddress
+  nid: '0x568b2352'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_50.o
+- name: cellSpursSendWorkloadSignal
+  nid: '0x1d2bca4b'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_14.o
+- name: cellSpursSetExceptionEventHandler
+  nid: '0xd2e23fa9'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_120.o
+- name: cellSpursSetGlobalExceptionEventHandler
+  nid: '0x7517724a'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_65.o
+- name: cellSpursSetMaxContention
+  nid: '0x84d2f6d5'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_75.o
+- name: cellSpursSetPreemptionVictimHints
+  nid: '0x4de203e2'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_44.o
+- name: cellSpursSetPriorities
+  nid: '0x80a29e27'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_72.o
+- name: cellSpursSetPriority
+  nid: '0xb52e1bda'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_107.o
+- name: cellSpursShutdownJobChain
+  nid: '0x738e40e6'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_63.o
+- name: cellSpursShutdownTaskset
+  nid: '0xa789e631'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_100.o
+- name: cellSpursShutdownWorkload
+  nid: '0x98d5b343'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_92.o
+- name: cellSpursTaskAttributeSetExitCodeContainer
+  nid: '0xa121a224'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_98.o
+- name: cellSpursTaskExitCodeGet
+  nid: '0x13ae18f3'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_8.o
+- name: cellSpursTaskExitCodeInitialize
+  nid: '0x34552fa6'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_28.o
+- name: cellSpursTaskExitCodeTryGet
+  nid: '0xe717ac73'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_129.o
+- name: cellSpursTaskGenerateLsPattern
+  nid: '0x9197915f'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_86.o
+- name: cellSpursTaskGetContextSaveAreaSize
+  nid: '0x9034e538'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_84.o
+- name: cellSpursTaskGetLoadableSegmentPattern
+  nid: '0x1d344406'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_15.o
+- name: cellSpursTaskGetReadOnlyAreaPattern
+  nid: '0x7cb33c2e'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_69.o
+- name: cellSpursTasksetAttributeEnableClearLS
+  nid: '0xdca13593'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_123.o
+- name: cellSpursTasksetAttributeSetName
+  nid: '0x652b70e2'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_56.o
+- name: cellSpursTasksetAttributeSetTasksetSize
+  nid: '0x8f122ef8'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_82.o
+- name: cellSpursTasksetGetSpursAddress
+  nid: '0x58d58fcf'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_53.o
+- name: cellSpursTasksetSetExceptionEventHandler
+  nid: '0x2edcff92'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_24.o
+- name: cellSpursTasksetUnsetExceptionEventHandler
+  nid: '0x94034c95'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_88.o
+- name: cellSpursTraceFinalize
+  nid: '0x7b9cbb74'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_68.o
+- name: cellSpursTraceInitialize
+  nid: '0x569674e3'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_51.o
+- name: cellSpursTraceStart
+  nid: '0xce853fbf'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_119.o
+- name: cellSpursTraceStop
+  nid: '0xddc81b5a'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_124.o
+- name: cellSpursTryJoinTask2
+  nid: '0x838fa4f0'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_74.o
+- name: cellSpursUnsetExceptionEventHandler
+  nid: '0x4c75deb8'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_40.o
+- name: cellSpursUnsetGlobalExceptionEventHandler
+  nid: '0x861237f8'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_76.o
+- name: cellSpursWaitForWorkloadShutdown
+  nid: '0x5fd43fe4'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_55.o
+- name: cellSpursWakeUp
+  nid: '0x7e4ea023'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_70.o
+- name: cellSpursWorkloadAttributeSetName
+  nid: '0x4a5eab63'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_37.o
+- name: cellSpursWorkloadAttributeSetShutdownCompletionEventHook
+  nid: '0x0eb4bc38'
+  signature: ''
+  notes: extracted from _cellSpurs_0001_6.o
+imports: []

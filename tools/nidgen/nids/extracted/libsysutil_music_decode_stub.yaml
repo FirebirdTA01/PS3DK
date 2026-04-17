@@ -1,0 +1,85 @@
+library: sysutil_music_decode
+version: 1
+module: sysutil_music_decode
+exports:
+- name: cellMusicDecodeFinalize
+  nid: '0xa8615dc8'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_10.o
+- name: cellMusicDecodeFinalize2
+  nid: '0x4aef2877'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_6.o
+- name: cellMusicDecodeGetContentsId
+  nid: '0x58ab1999'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_7.o
+- name: cellMusicDecodeGetContentsId2
+  nid: '0x25ea7ac0'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_3.o
+- name: cellMusicDecodeGetDecodeStatus
+  nid: '0x5af74c50'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_8.o
+- name: cellMusicDecodeGetDecodeStatus2
+  nid: '0x1576e4f2'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_2.o
+- name: cellMusicDecodeGetSelectionContext
+  nid: '0xdbf70550'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_17.o
+- name: cellMusicDecodeGetSelectionContext2
+  nid: '0xf91639f9'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_20.o
+- name: cellMusicDecodeInitialize
+  nid: '0xd55dbc11'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_16.o
+- name: cellMusicDecodeInitialize2
+  nid: '0xf80e31e5'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_19.o
+- name: cellMusicDecodeInitialize2SystemWorkload
+  nid: '0xb641168e'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_13.o
+- name: cellMusicDecodeInitializeSystemWorkload
+  nid: '0x84f154b2'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_9.o
+- name: cellMusicDecodeRead
+  nid: '0xa881b744'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_11.o
+- name: cellMusicDecodeRead2
+  nid: '0xb2d054df'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_12.o
+- name: cellMusicDecodeSelectContents
+  nid: '0xf24cb963'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_18.o
+- name: cellMusicDecodeSelectContents2
+  nid: '0xc22563c4'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_15.o
+- name: cellMusicDecodeSetDecodeCommand
+  nid: '0x066bb1cf'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_1.o
+- name: cellMusicDecodeSetDecodeCommand2
+  nid: '0x2ef701ec'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_4.o
+- name: cellMusicDecodeSetSelectionContext
+  nid: '0xb84f5c81'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_14.o
+- name: cellMusicDecodeSetSelectionContext2
+  nid: '0x491d6ba5'
+  signature: ''
+  notes: extracted from _cellMusicDecodeUtility_0001_5.o
+imports: []

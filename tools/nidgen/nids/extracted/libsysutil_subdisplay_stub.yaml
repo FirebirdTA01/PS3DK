@@ -1,0 +1,49 @@
+library: sysutil_subdisplay
+version: 1
+module: sysutil_subdisplay
+exports:
+- name: cellSubDisplayAudioOutBlocking
+  nid: '0xaee1e0c2'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_9.o
+- name: cellSubDisplayAudioOutNonBlocking
+  nid: '0x5468d6b0'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_2.o
+- name: cellSubDisplayEnd
+  nid: '0x551d80a5'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_3.o
+- name: cellSubDisplayGetPeerList
+  nid: '0xe2485f79'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_10.o
+- name: cellSubDisplayGetPeerNum
+  nid: '0x8a264d71'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_6.o
+- name: cellSubDisplayGetRequiredMemory
+  nid: '0x6595ce22'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_4.o
+- name: cellSubDisplayGetTouchInfo
+  nid: '0x415ed9dc'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_1.o
+- name: cellSubDisplayGetVideoBuffer
+  nid: '0x938ac642'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_7.o
+- name: cellSubDisplayInit
+  nid: '0xf9a7e8a5'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_11.o
+- name: cellSubDisplayStart
+  nid: '0xa5bccb47'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_8.o
+- name: cellSubDisplayStop
+  nid: '0x6d85ddb3'
+  signature: ''
+  notes: extracted from _cellSubDisplay_0001_5.o
+imports: []

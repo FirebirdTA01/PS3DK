@@ -1,0 +1,21 @@
+library: prof
+version: 1
+module: prof
+exports:
+- name: cellUserTraceInit
+  nid: '0x0252efcc'
+  signature: ''
+  notes: extracted from _cellLibprof_0001_1.o
+- name: cellUserTraceRegister
+  nid: '0x05893e7c'
+  signature: ''
+  notes: extracted from _cellLibprof_0001_2.o
+- name: cellUserTraceTerminate
+  nid: '0x898c77bf'
+  signature: ''
+  notes: extracted from _cellLibprof_0001_4.o
+- name: cellUserTraceUnregister
+  nid: '0x6d045c2e'
+  signature: ''
+  notes: extracted from _cellLibprof_0001_3.o
+imports: []

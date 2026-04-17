@@ -1,0 +1,93 @@
+library: sysutil_music
+version: 1
+module: sysutil_music
+exports:
+- name: cellMusicFinalize
+  nid: '0x6f2104f3'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_9.o
+- name: cellMusicFinalize2
+  nid: '0x7be4dc31'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_12.o
+- name: cellMusicGetContentsId
+  nid: '0x4c188caa'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_4.o
+- name: cellMusicGetContentsId2
+  nid: '0x6674de2d'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_8.o
+- name: cellMusicGetPlaybackStatus
+  nid: '0x95f7d9d9'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_15.o
+- name: cellMusicGetPlaybackStatus2
+  nid: '0x648b7611'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_7.o
+- name: cellMusicGetSelectionContext
+  nid: '0x0b461648'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_1.o
+- name: cellMusicGetSelectionContext2
+  nid: '0x8793ef97'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_13.o
+- name: cellMusicGetVolume
+  nid: '0x8aa188e3'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_14.o
+- name: cellMusicGetVolume2
+  nid: '0xf9073a24'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_22.o
+- name: cellMusicInitialize
+  nid: '0x72ec14b5'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_11.o
+- name: cellMusicInitialize2
+  nid: '0xbe50b11e'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_20.o
+- name: cellMusicInitialize2SystemWorkload
+  nid: '0x61865281'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_6.o
+- name: cellMusicInitializeSystemWorkload
+  nid: '0x72876546'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_10.o
+- name: cellMusicSelectContents
+  nid: '0xb2336ba7'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_19.o
+- name: cellMusicSelectContents2
+  nid: '0xad04cddd'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_18.o
+- name: cellMusicSetPlaybackCommand
+  nid: '0xa0661626'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_17.o
+- name: cellMusicSetPlaybackCommand2
+  nid: '0x98947a6e'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_16.o
+- name: cellMusicSetSelectionContext
+  nid: '0x5bff31bf'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_5.o
+- name: cellMusicSetSelectionContext2
+  nid: '0x2bdc5d6b'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_2.o
+- name: cellMusicSetVolume
+  nid: '0xe74ce7bd'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_21.o
+- name: cellMusicSetVolume2
+  nid: '0x4014c246'
+  signature: ''
+  notes: extracted from _cellMusicUtility_0001_3.o
+imports: []

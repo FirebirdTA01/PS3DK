@@ -1,0 +1,37 @@
+library: sysmodule
+version: 1
+module: sysmodule
+exports:
+- name: cellSysmoduleFetchImage
+  nid: '0x3c92be09'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_4.o
+- name: cellSysmoduleFinalize
+  nid: '0x96c07adf'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_7.o
+- name: cellSysmoduleGetImagesize
+  nid: '0x1ef115ef'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_2.o
+- name: cellSysmoduleInitialize
+  nid: '0x63ff6ff9'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_6.o
+- name: cellSysmoduleIsLoaded
+  nid: '0x5a59e258'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_5.o
+- name: cellSysmoduleLoadModule
+  nid: '0x32267a31'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_3.o
+- name: cellSysmoduleSetMemcontainer
+  nid: '0xa193143c'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_8.o
+- name: cellSysmoduleUnloadModule
+  nid: '0x112a5ee9'
+  signature: ''
+  notes: extracted from _cellSysmodule_0001_1.o
+imports: []

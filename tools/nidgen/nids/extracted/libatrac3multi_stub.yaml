@@ -1,0 +1,101 @@
+library: atrac3multi
+version: 1
+module: atrac3multi
+exports:
+- name: cellAtracMultiAddStreamData
+  nid: '0x1ae28192'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_2.o
+- name: cellAtracMultiCreateDecoder
+  nid: '0x0ffb4665'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_1.o
+- name: cellAtracMultiCreateDecoderExt
+  nid: '0xb23f070a'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_15.o
+- name: cellAtracMultiDecode
+  nid: '0xd86acb12'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_19.o
+- name: cellAtracMultiDeleteDecoder
+  nid: '0x780a18bb'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_11.o
+- name: cellAtracMultiGetBitrate
+  nid: '0x6cff1d7f'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_9.o
+- name: cellAtracMultiGetBufferInfoForResetting
+  nid: '0xde9b7905'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_21.o
+- name: cellAtracMultiGetChannel
+  nid: '0xf11b8dd5'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_23.o
+- name: cellAtracMultiGetInternalErrorInfo
+  nid: '0x92d48677'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_14.o
+- name: cellAtracMultiGetLoopInfo
+  nid: '0xb91967bc'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_16.o
+- name: cellAtracMultiGetMaxSample
+  nid: '0xd85f2d10'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_18.o
+- name: cellAtracMultiGetNextDecodePosition
+  nid: '0x489e22f1'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_3.o
+- name: cellAtracMultiGetNextSample
+  nid: '0x77bd901a'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_10.o
+- name: cellAtracMultiGetRemainFrame
+  nid: '0x59431d1b'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_4.o
+- name: cellAtracMultiGetSecondBufferInfo
+  nid: '0xed30f1fa'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_22.o
+- name: cellAtracMultiGetSoundInfo
+  nid: '0xc5c5eed3'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_17.o
+- name: cellAtracMultiGetStreamDataInfo
+  nid: '0x670b2721'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_8.o
+- name: cellAtracMultiGetTrackArray
+  nid: '0x5b6ccf5a'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_5.o
+- name: cellAtracMultiGetVacantSize
+  nid: '0x60b2101d'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_6.o
+- name: cellAtracMultiIsSecondBufferNeeded
+  nid: '0xf8b1ab0c'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_24.o
+- name: cellAtracMultiResetPlayPosition
+  nid: '0x9119cfd1'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_13.o
+- name: cellAtracMultiSetDataAndGetMemSize
+  nid: '0x81b22ca8'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_12.o
+- name: cellAtracMultiSetLoopNum
+  nid: '0xda43f526'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_20.o
+- name: cellAtracMultiSetSecondBuffer
+  nid: '0x659775fb'
+  signature: ''
+  notes: extracted from _cellAtracMulti_0001_7.o
+imports: []

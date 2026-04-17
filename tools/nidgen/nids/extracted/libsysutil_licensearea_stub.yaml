@@ -1,0 +1,9 @@
+library: sysutil_licensearea
+version: 1
+module: sysutil_licensearea
+exports:
+- name: cellSysutilGetLicenseArea
+  nid: '0x571dc686'
+  signature: ''
+  notes: extracted from _cellSysutilMisc_0001_1.o
+imports: []

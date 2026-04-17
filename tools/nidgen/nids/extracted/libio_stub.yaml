@@ -1,0 +1,165 @@
+library: io
+version: 1
+module: io
+exports:
+- name: cellKbClearBuf
+  nid: '0x2073b7f6'
+  signature: ''
+  notes: extracted from _sys_io_0001_5.o
+- name: cellKbCnvRawCode
+  nid: '0x4ab1fa77'
+  signature: ''
+  notes: extracted from _sys_io_0001_14.o
+- name: cellKbEnd
+  nid: '0xbfce3285'
+  signature: ''
+  notes: extracted from _sys_io_0001_33.o
+- name: cellKbGetConfiguration
+  nid: '0x1f71ecbe'
+  signature: ''
+  notes: extracted from _sys_io_0001_4.o
+- name: cellKbGetInfo
+  nid: '0x2f1774d5'
+  signature: ''
+  notes: extracted from _sys_io_0001_9.o
+- name: cellKbInit
+  nid: '0x433f6ec0'
+  signature: ''
+  notes: extracted from _sys_io_0001_13.o
+- name: cellKbRead
+  nid: '0xff0a21b7'
+  signature: ''
+  notes: extracted from _sys_io_0001_40.o
+- name: cellKbSetCodeType
+  nid: '0xa5f85e4d'
+  signature: ''
+  notes: extracted from _sys_io_0001_30.o
+- name: cellKbSetLEDStatus
+  nid: '0x3f72c56e'
+  signature: ''
+  notes: extracted from _sys_io_0001_12.o
+- name: cellKbSetReadMode
+  nid: '0xdeefdfa7'
+  signature: ''
+  notes: extracted from _sys_io_0001_35.o
+- name: cellMouseClearBuf
+  nid: '0x3ef66b95'
+  signature: ''
+  notes: extracted from _sys_io_0001_11.o
+- name: cellMouseEnd
+  nid: '0xe10183ce'
+  signature: ''
+  notes: extracted from _sys_io_0001_36.o
+- name: cellMouseGetData
+  nid: '0x3138e632'
+  signature: ''
+  notes: extracted from _sys_io_0001_10.o
+- name: cellMouseGetDataList
+  nid: '0x6bd131f0'
+  signature: ''
+  notes: extracted from _sys_io_0001_23.o
+- name: cellMouseGetInfo
+  nid: '0x5baf30fb'
+  signature: ''
+  notes: extracted from _sys_io_0001_19.o
+- name: cellMouseGetRawData
+  nid: '0xa328cc35'
+  signature: ''
+  notes: extracted from _sys_io_0001_29.o
+- name: cellMouseGetTabletDataList
+  nid: '0x21a62e9b'
+  signature: ''
+  notes: extracted from _sys_io_0001_7.o
+- name: cellMouseInfoTabletMode
+  nid: '0x4d0b3b1f'
+  signature: ''
+  notes: extracted from _sys_io_0001_16.o
+- name: cellMouseInit
+  nid: '0xc9030138'
+  signature: ''
+  notes: extracted from _sys_io_0001_34.o
+- name: cellMouseSetTabletMode
+  nid: '0x2d16da4f'
+  signature: ''
+  notes: extracted from _sys_io_0001_8.o
+- name: cellPadClearBuf
+  nid: '0x0d5f2c14'
+  signature: ''
+  notes: extracted from _sys_io_0001_2.o
+- name: cellPadEnd
+  nid: '0x4d9b75d5'
+  signature: ''
+  notes: extracted from _sys_io_0001_17.o
+- name: cellPadGetData
+  nid: '0x8b72cda1'
+  signature: ''
+  notes: extracted from _sys_io_0001_27.o
+- name: cellPadGetDataExtra
+  nid: '0x6bc09c61'
+  signature: ''
+  notes: extracted from _sys_io_0001_22.o
+- name: cellPadGetInfo2
+  nid: '0xa703a51d'
+  signature: ''
+  notes: extracted from _sys_io_0001_31.o
+- name: cellPadInit
+  nid: '0x1cf98800'
+  signature: ''
+  notes: extracted from _sys_io_0001_3.o
+- name: cellPadLddDataInsert
+  nid: '0xbafd6409'
+  signature: ''
+  notes: extracted from _sys_io_0001_32.o
+- name: cellPadLddGetPortNo
+  nid: '0x8b8231e5'
+  signature: ''
+  notes: extracted from _sys_io_0001_28.o
+- name: cellPadLddRegisterController
+  nid: '0x20a97ba2'
+  signature: ''
+  notes: extracted from _sys_io_0001_6.o
+- name: cellPadLddUnregisterController
+  nid: '0xe442faa8'
+  signature: ''
+  notes: extracted from _sys_io_0001_37.o
+- name: cellPadPeriphGetData
+  nid: '0x8a00f264'
+  signature: ''
+  notes: extracted from _sys_io_0001_26.o
+- name: cellPadPeriphGetInfo
+  nid: '0x4cc9b68d'
+  signature: ''
+  notes: extracted from _sys_io_0001_15.o
+- name: cellPadSetActDirect
+  nid: '0xf65544ee'
+  signature: ''
+  notes: extracted from _sys_io_0001_39.o
+- name: cellPadSetPortSetting
+  nid: '0x578e3c98'
+  signature: ''
+  notes: extracted from _sys_io_0001_18.o
+- name: sys_config_add_service_listener
+  nid: '0x6ae10596'
+  signature: ''
+  notes: extracted from _sys_io_0001_21.o
+- name: sys_config_register_service
+  nid: '0x78f058a2'
+  signature: ''
+  notes: extracted from _sys_io_0001_25.o
+- name: sys_config_remove_service_listener
+  nid: '0xf5d9d571'
+  signature: ''
+  notes: extracted from _sys_io_0001_38.o
+- name: sys_config_start
+  nid: '0x068fcbc6'
+  signature: ''
+  notes: extracted from _sys_io_0001_1.o
+- name: sys_config_stop
+  nid: '0x6d367953'
+  signature: ''
+  notes: extracted from _sys_io_0001_24.o
+- name: sys_config_unregister_service
+  nid: '0x5f81900c'
+  signature: ''
+  notes: extracted from _sys_io_0001_20.o
+imports: []

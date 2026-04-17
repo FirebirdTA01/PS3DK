@@ -1,0 +1,33 @@
+library: sysutil_rec
+version: 1
+module: sysutil_rec
+exports:
+- name: cellRecClose
+  nid: '0x4ac76585'
+  signature: ''
+  notes: extracted from _cellRec_0001_2.o
+- name: cellRecGetInfo
+  nid: '0x5a8a8b0f'
+  signature: ''
+  notes: extracted from _cellRec_0001_3.o
+- name: cellRecOpen
+  nid: '0x39651e01'
+  signature: ''
+  notes: extracted from _cellRec_0001_1.o
+- name: cellRecQueryMemSize
+  nid: '0xdbf22bd1'
+  signature: ''
+  notes: extracted from _cellRec_0001_6.o
+- name: cellRecSetInfo
+  nid: '0xf0958f73'
+  signature: ''
+  notes: extracted from _cellRec_0001_7.o
+- name: cellRecStart
+  nid: '0x964cd1b8'
+  signature: ''
+  notes: extracted from _cellRec_0001_5.o
+- name: cellRecStop
+  nid: '0x5b45439d'
+  signature: ''
+  notes: extracted from _cellRec_0001_4.o
+imports: []

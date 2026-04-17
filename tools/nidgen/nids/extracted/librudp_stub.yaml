@@ -1,0 +1,121 @@
+library: rudp
+version: 1
+module: rudp
+exports:
+- name: cellRudpActivate
+  nid: '0xc1ad7ced'
+  signature: ''
+  notes: extracted from _cellRudp_0001_20.o
+- name: cellRudpBind
+  nid: '0xee41e16a'
+  signature: ''
+  notes: extracted from _cellRudp_0001_26.o
+- name: cellRudpCreateContext
+  nid: '0x7dadc739'
+  signature: ''
+  notes: extracted from _cellRudp_0001_12.o
+- name: cellRudpEnableInternalIOThread
+  nid: '0x6c0cff03'
+  signature: ''
+  notes: extracted from _cellRudp_0001_9.o
+- name: cellRudpEnd
+  nid: '0xb6bcb4a1'
+  signature: ''
+  notes: extracted from _cellRudp_0001_19.o
+- name: cellRudpFlush
+  nid: '0xa70737da'
+  signature: ''
+  notes: extracted from _cellRudp_0001_17.o
+- name: cellRudpGetContextStatus
+  nid: '0x74bfad12'
+  signature: ''
+  notes: extracted from _cellRudp_0001_11.o
+- name: cellRudpGetLocalInfo
+  nid: '0xd666931f'
+  signature: ''
+  notes: extracted from _cellRudp_0001_23.o
+- name: cellRudpGetMaxSegmentSize
+  nid: '0xfbf7e9e4'
+  signature: ''
+  notes: extracted from _cellRudp_0001_28.o
+- name: cellRudpGetOption
+  nid: '0xff9d259c'
+  signature: ''
+  notes: extracted from _cellRudp_0001_29.o
+- name: cellRudpGetRemoteInfo
+  nid: '0x576831ae'
+  signature: ''
+  notes: extracted from _cellRudp_0001_6.o
+- name: cellRudpGetSizeReadable
+  nid: '0x2cde989f'
+  signature: ''
+  notes: extracted from _cellRudp_0001_1.o
+- name: cellRudpGetSizeWritable
+  nid: '0xa86b28e3'
+  signature: ''
+  notes: extracted from _cellRudp_0001_18.o
+- name: cellRudpGetStatus
+  nid: '0xcd1a3f23'
+  signature: ''
+  notes: extracted from _cellRudp_0001_22.o
+- name: cellRudpInit
+  nid: '0x63f63545'
+  signature: ''
+  notes: extracted from _cellRudp_0001_7.o
+- name: cellRudpInitiate
+  nid: '0xc407844f'
+  signature: ''
+  notes: extracted from _cellRudp_0001_21.o
+- name: cellRudpNetReceived
+  nid: '0x6ee04954'
+  signature: ''
+  notes: extracted from _cellRudp_0001_10.o
+- name: cellRudpPollCancel
+  nid: '0xdf5a2432'
+  signature: ''
+  notes: extracted from _cellRudp_0001_25.o
+- name: cellRudpPollControl
+  nid: '0xa3db855c'
+  signature: ''
+  notes: extracted from _cellRudp_0001_16.o
+- name: cellRudpPollCreate
+  nid: '0x6bc587e9'
+  signature: ''
+  notes: extracted from _cellRudp_0001_8.o
+- name: cellRudpPollDestroy
+  nid: '0x8ac398f1'
+  signature: ''
+  notes: extracted from _cellRudp_0001_14.o
+- name: cellRudpPollWait
+  nid: '0xd8310700'
+  signature: ''
+  notes: extracted from _cellRudp_0001_24.o
+- name: cellRudpProcessEvents
+  nid: '0xfade48b2'
+  signature: ''
+  notes: extracted from _cellRudp_0001_27.o
+- name: cellRudpRead
+  nid: '0x92e4d899'
+  signature: ''
+  notes: extracted from _cellRudp_0001_15.o
+- name: cellRudpSetEventHandler
+  nid: '0x7ed95e60'
+  signature: ''
+  notes: extracted from _cellRudp_0001_13.o
+- name: cellRudpSetMaxSegmentSize
+  nid: '0x54f81789'
+  signature: ''
+  notes: extracted from _cellRudp_0001_5.o
+- name: cellRudpSetOption
+  nid: '0x384ba777'
+  signature: ''
+  notes: extracted from _cellRudp_0001_2.o
+- name: cellRudpTerminate
+  nid: '0x48d3eeac'
+  signature: ''
+  notes: extracted from _cellRudp_0001_4.o
+- name: cellRudpWrite
+  nid: '0x48c001b0'
+  signature: ''
+  notes: extracted from _cellRudp_0001_3.o
+imports: []

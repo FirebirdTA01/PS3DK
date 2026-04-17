@@ -1,0 +1,85 @@
+library: http_util
+version: 1
+module: http_util
+exports:
+- name: cellHttpUtilAppendHeaderValue
+  nid: '0x37bb53a2'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_6.o
+- name: cellHttpUtilBase64Decoder
+  nid: '0x8e52ee08'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_12.o
+- name: cellHttpUtilBase64Encoder
+  nid: '0x83faa354'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_10.o
+- name: cellHttpUtilBuildHeader
+  nid: '0x04accebf'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_1.o
+- name: cellHttpUtilBuildRequestLine
+  nid: '0x1c6e4dbb'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_2.o
+- name: cellHttpUtilBuildUri
+  nid: '0x6f0f7667'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_9.o
+- name: cellHttpUtilCopyHeader
+  nid: '0x97f9fbe5'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_16.o
+- name: cellHttpUtilCopyStatusLine
+  nid: '0x50ea75bc'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_8.o
+- name: cellHttpUtilCopyUri
+  nid: '0xf05df789'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_20.o
+- name: cellHttpUtilEscapeUri
+  nid: '0x9003b1f2'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_15.o
+- name: cellHttpUtilFormUrlDecode
+  nid: '0x8e6c5bb9'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_13.o
+- name: cellHttpUtilFormUrlEncode
+  nid: '0x44d756d6'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_7.o
+- name: cellHttpUtilMergeUriPath
+  nid: '0x8ea23deb'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_14.o
+- name: cellHttpUtilParseHeader
+  nid: '0xe1fb0ebd'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_19.o
+- name: cellHttpUtilParseProxy
+  nid: '0xa3457869'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_17.o
+- name: cellHttpUtilParseStatusLine
+  nid: '0x2bcbced4'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_4.o
+- name: cellHttpUtilParseUri
+  nid: '0x32faaf58'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_5.o
+- name: cellHttpUtilParseUriPath
+  nid: '0x8bb608e4'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_11.o
+- name: cellHttpUtilSweepPath
+  nid: '0xaabeb869'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_18.o
+- name: cellHttpUtilUnescapeUri
+  nid: '0x2763fd66'
+  signature: ''
+  notes: extracted from _cellHttpUtil_0001_3.o
+imports: []

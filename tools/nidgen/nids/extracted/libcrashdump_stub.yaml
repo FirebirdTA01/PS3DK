@@ -1,0 +1,13 @@
+library: crashdump
+version: 1
+module: crashdump
+exports:
+- name: sys_crash_dump_get_user_log_area
+  nid: '0x52696620'
+  signature: ''
+  notes: extracted from _sys_crashdump_0001_1.o
+- name: sys_crash_dump_set_user_log_area
+  nid: '0xb20f87b3'
+  signature: ''
+  notes: extracted from _sys_crashdump_0001_2.o
+imports: []

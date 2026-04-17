@@ -1,0 +1,173 @@
+library: sync
+version: 1
+module: sync
+exports:
+- name: _cellSyncLFQueueAttachLv2EventQueue
+  nid: '0x54fc2032'
+  signature: ''
+  notes: extracted from _cellSync_0001_15.o
+- name: _cellSyncLFQueueCompletePopPointer
+  nid: '0xfe74e8e7'
+  signature: ''
+  notes: extracted from _cellSync_0001_42.o
+- name: _cellSyncLFQueueCompletePopPointer2
+  nid: '0x7a51deee'
+  signature: ''
+  notes: extracted from _cellSync_0001_22.o
+- name: _cellSyncLFQueueCompletePushPointer
+  nid: '0x4e88c68d'
+  signature: ''
+  notes: extracted from _cellSync_0001_14.o
+- name: _cellSyncLFQueueCompletePushPointer2
+  nid: '0x35bbdad2'
+  signature: ''
+  notes: extracted from _cellSync_0001_7.o
+- name: _cellSyncLFQueueDetachLv2EventQueue
+  nid: '0x811d148e'
+  signature: ''
+  notes: extracted from _cellSync_0001_23.o
+- name: _cellSyncLFQueueGetPopPointer
+  nid: '0x74c37666'
+  signature: ''
+  notes: extracted from _cellSync_0001_21.o
+- name: _cellSyncLFQueueGetPopPointer2
+  nid: '0x46356fe0'
+  signature: ''
+  notes: extracted from _cellSync_0001_10.o
+- name: _cellSyncLFQueueGetPushPointer
+  nid: '0xe9bf2110'
+  signature: ''
+  notes: extracted from _cellSync_0001_38.o
+- name: _cellSyncLFQueueGetPushPointer2
+  nid: '0x6bb4ef9d'
+  signature: ''
+  notes: extracted from _cellSync_0001_18.o
+- name: _cellSyncLFQueueGetSignalAddress
+  nid: '0xaff7627a'
+  signature: ''
+  notes: extracted from _cellSync_0001_30.o
+- name: _cellSyncLFQueuePopBody
+  nid: '0xe1bc7add'
+  signature: ''
+  notes: extracted from _cellSync_0001_37.o
+- name: _cellSyncLFQueuePushBody
+  nid: '0xba5961ca'
+  signature: ''
+  notes: extracted from _cellSync_0001_31.o
+- name: cellSyncBarrierInitialize
+  nid: '0x07254fda'
+  signature: ''
+  notes: extracted from _cellSync_0001_1.o
+- name: cellSyncBarrierNotify
+  nid: '0xf06a6415'
+  signature: ''
+  notes: extracted from _cellSync_0001_40.o
+- name: cellSyncBarrierTryNotify
+  nid: '0x268edd6d'
+  signature: ''
+  notes: extracted from _cellSync_0001_5.o
+- name: cellSyncBarrierTryWait
+  nid: '0x6c272124'
+  signature: ''
+  notes: extracted from _cellSync_0001_19.o
+- name: cellSyncBarrierWait
+  nid: '0x35f21355'
+  signature: ''
+  notes: extracted from _cellSync_0001_8.o
+- name: cellSyncLFQueueClear
+  nid: '0x2af0c515'
+  signature: ''
+  notes: extracted from _cellSync_0001_6.o
+- name: cellSyncLFQueueDepth
+  nid: '0xe18c273c'
+  signature: ''
+  notes: extracted from _cellSync_0001_36.o
+- name: cellSyncLFQueueGetDirection
+  nid: '0xd59aa307'
+  signature: ''
+  notes: extracted from _cellSync_0001_35.o
+- name: cellSyncLFQueueGetEntrySize
+  nid: '0x0c7cb9f7'
+  signature: ''
+  notes: extracted from _cellSync_0001_2.o
+- name: cellSyncLFQueueInitialize
+  nid: '0xaa355278'
+  signature: ''
+  notes: extracted from _cellSync_0001_29.o
+- name: cellSyncLFQueueSize
+  nid: '0x167ea63e'
+  signature: ''
+  notes: extracted from _cellSync_0001_3.o
+- name: cellSyncMutexInitialize
+  nid: '0xa9072dee'
+  signature: ''
+  notes: extracted from _cellSync_0001_28.o
+- name: cellSyncMutexLock
+  nid: '0x1bb675c2'
+  signature: ''
+  notes: extracted from _cellSync_0001_4.o
+- name: cellSyncMutexTryLock
+  nid: '0xd06918c4'
+  signature: ''
+  notes: extracted from _cellSync_0001_34.o
+- name: cellSyncMutexUnlock
+  nid: '0x91f2b7b0'
+  signature: ''
+  notes: extracted from _cellSync_0001_24.o
+- name: cellSyncQueueClear
+  nid: '0xa5362e73'
+  signature: ''
+  notes: extracted from _cellSync_0001_25.o
+- name: cellSyncQueueInitialize
+  nid: '0x3929948d'
+  signature: ''
+  notes: extracted from _cellSync_0001_9.o
+- name: cellSyncQueuePeek
+  nid: '0x48154c9b'
+  signature: ''
+  notes: extracted from _cellSync_0001_11.o
+- name: cellSyncQueuePop
+  nid: '0x4da6d7e0'
+  signature: ''
+  notes: extracted from _cellSync_0001_13.o
+- name: cellSyncQueuePush
+  nid: '0x5ae841e5'
+  signature: ''
+  notes: extracted from _cellSync_0001_16.o
+- name: cellSyncQueueSize
+  nid: '0x4da349b2'
+  signature: ''
+  notes: extracted from _cellSync_0001_12.o
+- name: cellSyncQueueTryPeek
+  nid: '0x68af923c'
+  signature: ''
+  notes: extracted from _cellSync_0001_17.o
+- name: cellSyncQueueTryPop
+  nid: '0xa58df87f'
+  signature: ''
+  notes: extracted from _cellSync_0001_26.o
+- name: cellSyncQueueTryPush
+  nid: '0x705985cd'
+  signature: ''
+  notes: extracted from _cellSync_0001_20.o
+- name: cellSyncRwmInitialize
+  nid: '0xfc48b03f'
+  signature: ''
+  notes: extracted from _cellSync_0001_41.o
+- name: cellSyncRwmRead
+  nid: '0xcece771f'
+  signature: ''
+  notes: extracted from _cellSync_0001_33.o
+- name: cellSyncRwmTryRead
+  nid: '0xa6669751'
+  signature: ''
+  notes: extracted from _cellSync_0001_27.o
+- name: cellSyncRwmTryWrite
+  nid: '0xba5bee48'
+  signature: ''
+  notes: extracted from _cellSync_0001_32.o
+- name: cellSyncRwmWrite
+  nid: '0xed773f5f'
+  signature: ''
+  notes: extracted from _cellSync_0001_39.o
+imports: []

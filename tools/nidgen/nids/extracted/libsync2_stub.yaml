@@ -1,0 +1,133 @@
+library: sync2
+version: 1
+module: sync2
+exports:
+- name: _cellSync2CondAttributeInitialize
+  nid: '0xdf3c532a'
+  signature: ''
+  notes: extracted from _cellSync2_0001_29.o
+- name: _cellSync2MutexAttributeInitialize
+  nid: '0x55836e73'
+  signature: ''
+  notes: extracted from _cellSync2_0001_9.o
+- name: _cellSync2QueueAttributeInitialize
+  nid: '0x5e00d433'
+  signature: ''
+  notes: extracted from _cellSync2_0001_12.o
+- name: _cellSync2SemaphoreAttributeInitialize
+  nid: '0x2d77fe17'
+  signature: ''
+  notes: extracted from _cellSync2_0001_7.o
+- name: cellSync2CondEstimateBufferSize
+  nid: '0x5b1e4d7a'
+  signature: ''
+  notes: extracted from _cellSync2_0001_11.o
+- name: cellSync2CondFinalize
+  nid: '0x63062249'
+  signature: ''
+  notes: extracted from _cellSync2_0001_14.o
+- name: cellSync2CondInitialize
+  nid: '0x58be9a0f'
+  signature: ''
+  notes: extracted from _cellSync2_0001_10.o
+- name: cellSync2CondSignal
+  nid: '0x871af804'
+  signature: ''
+  notes: extracted from _cellSync2_0001_19.o
+- name: cellSync2CondSignalAll
+  nid: '0x8aae07c2'
+  signature: ''
+  notes: extracted from _cellSync2_0001_20.o
+- name: cellSync2CondWait
+  nid: '0xbc96d751'
+  signature: ''
+  notes: extracted from _cellSync2_0001_23.o
+- name: cellSync2MutexEstimateBufferSize
+  nid: '0xd51bfae7'
+  signature: ''
+  notes: extracted from _cellSync2_0001_27.o
+- name: cellSync2MutexFinalize
+  nid: '0x27f2d61c'
+  signature: ''
+  notes: extracted from _cellSync2_0001_6.o
+- name: cellSync2MutexInitialize
+  nid: '0xeb81a467'
+  signature: ''
+  notes: extracted from _cellSync2_0001_30.o
+- name: cellSync2MutexLock
+  nid: '0xa400d82e'
+  signature: ''
+  notes: extracted from _cellSync2_0001_21.o
+- name: cellSync2MutexTryLock
+  nid: '0xa69c749c'
+  signature: ''
+  notes: extracted from _cellSync2_0001_22.o
+- name: cellSync2MutexUnlock
+  nid: '0x0080fe88'
+  signature: ''
+  notes: extracted from _cellSync2_0001_1.o
+- name: cellSync2QueueEstimateBufferSize
+  nid: '0xc08cc0f9'
+  signature: ''
+  notes: extracted from _cellSync2_0001_24.o
+- name: cellSync2QueueFinalize
+  nid: '0x6af85cdf'
+  signature: ''
+  notes: extracted from _cellSync2_0001_15.o
+- name: cellSync2QueueGetDepth
+  nid: '0xf0e1471c'
+  signature: ''
+  notes: extracted from _cellSync2_0001_31.o
+- name: cellSync2QueueGetSize
+  nid: '0x12f0a27d'
+  signature: ''
+  notes: extracted from _cellSync2_0001_4.o
+- name: cellSync2QueueInitialize
+  nid: '0xf125e044'
+  signature: ''
+  notes: extracted from _cellSync2_0001_32.o
+- name: cellSync2QueuePop
+  nid: '0xd83ab0c9'
+  signature: ''
+  notes: extracted from _cellSync2_0001_28.o
+- name: cellSync2QueuePush
+  nid: '0x7d967d91'
+  signature: ''
+  notes: extracted from _cellSync2_0001_17.o
+- name: cellSync2QueueTryPop
+  nid: '0x0c9a0ea9'
+  signature: ''
+  notes: extracted from _cellSync2_0001_3.o
+- name: cellSync2QueueTryPush
+  nid: '0x7fd479fe'
+  signature: ''
+  notes: extracted from _cellSync2_0001_18.o
+- name: cellSync2SemaphoreAcquire
+  nid: '0xd1b0d146'
+  signature: ''
+  notes: extracted from _cellSync2_0001_26.o
+- name: cellSync2SemaphoreEstimateBufferSize
+  nid: '0x74c2780f'
+  signature: ''
+  notes: extracted from _cellSync2_0001_16.o
+- name: cellSync2SemaphoreFinalize
+  nid: '0x164843a7'
+  signature: ''
+  notes: extracted from _cellSync2_0001_5.o
+- name: cellSync2SemaphoreGetCount
+  nid: '0x4e2ee031'
+  signature: ''
+  notes: extracted from _cellSync2_0001_8.o
+- name: cellSync2SemaphoreInitialize
+  nid: '0xc5dee254'
+  signature: ''
+  notes: extracted from _cellSync2_0001_25.o
+- name: cellSync2SemaphoreRelease
+  nid: '0x0c2983ac'
+  signature: ''
+  notes: extracted from _cellSync2_0001_2.o
+- name: cellSync2SemaphoreTryAcquire
+  nid: '0x5e4b0f87'
+  signature: ''
+  notes: extracted from _cellSync2_0001_13.o
+imports: []

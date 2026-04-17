@@ -1,0 +1,25 @@
+library: key2char
+version: 1
+module: key2char
+exports:
+- name: cellKey2CharClose
+  nid: '0x14bf2dc1'
+  signature: ''
+  notes: extracted from _cellKey2char_0001_2.o
+- name: cellKey2CharGetChar
+  nid: '0x56776c0d'
+  signature: ''
+  notes: extracted from _cellKey2char_0001_3.o
+- name: cellKey2CharOpen
+  nid: '0xabf629c1'
+  signature: ''
+  notes: extracted from _cellKey2char_0001_4.o
+- name: cellKey2CharSetArrangement
+  nid: '0x0dfbadfa'
+  signature: ''
+  notes: extracted from _cellKey2char_0001_1.o
+- name: cellKey2CharSetMode
+  nid: '0xbfc03768'
+  signature: ''
+  notes: extracted from _cellKey2char_0001_5.o
+imports: []

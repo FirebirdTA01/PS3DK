@@ -1,0 +1,17 @@
+library: fontFT
+version: 1
+module: fontFT
+exports:
+- name: cellFontFTGetInitializedRevisionFlags
+  nid: '0xfa0c2de0'
+  signature: ''
+  notes: extracted from _cellFontFT_0001_3.o
+- name: cellFontFTGetRevisionFlags
+  nid: '0xec89a187'
+  signature: ''
+  notes: extracted from _cellFontFT_0001_2.o
+- name: cellFontInitLibraryFreeTypeWithRevision
+  nid: '0x7a0a83c4'
+  signature: ''
+  notes: extracted from _cellFontFT_0001_1.o
+imports: []

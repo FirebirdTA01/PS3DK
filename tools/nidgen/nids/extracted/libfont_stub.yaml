@@ -1,0 +1,333 @@
+library: font
+version: 1
+module: font
+exports:
+- name: cellFontAdjustFontScaling
+  nid: '0x47ca71ef'
+  signature: ''
+  notes: extracted from _cellFont_0001_26.o
+- name: cellFontAdjustGlyphExpandBuffer
+  nid: '0x9e3b1e16'
+  signature: ''
+  notes: extracted from _cellFont_0001_55.o
+- name: cellFontBindRenderer
+  nid: '0x66a23100'
+  signature: ''
+  notes: extracted from _cellFont_0001_32.o
+- name: cellFontClearFileCache
+  nid: '0x3da90559'
+  signature: ''
+  notes: extracted from _cellFont_0001_24.o
+- name: cellFontCloseFont
+  nid: '0xb276f1f6'
+  signature: ''
+  notes: extracted from _cellFont_0001_63.o
+- name: cellFontCreateRenderer
+  nid: '0x042e74e3'
+  signature: ''
+  notes: extracted from _cellFont_0001_3.o
+- name: cellFontDelete
+  nid: '0xa7b2103a'
+  signature: ''
+  notes: extracted from _cellFont_0001_59.o
+- name: cellFontDeleteGlyph
+  nid: '0xd62f5d76'
+  signature: ''
+  notes: extracted from _cellFont_0001_71.o
+- name: cellFontDestroyRenderer
+  nid: '0x21ebb248'
+  signature: ''
+  notes: extracted from _cellFont_0001_13.o
+- name: cellFontEnd
+  nid: '0x7ab47f7e'
+  signature: ''
+  notes: extracted from _cellFont_0001_40.o
+- name: cellFontEndGraphics
+  nid: '0x8a35c887'
+  signature: ''
+  notes: extracted from _cellFont_0001_46.o
+- name: cellFontEndLibrary
+  nid: '0x40d40544'
+  signature: ''
+  notes: extracted from _cellFont_0001_25.o
+- name: cellFontExtend
+  nid: '0xdee0836c'
+  signature: ''
+  notes: extracted from _cellFont_0001_73.o
+- name: cellFontGenerateCharGlyph
+  nid: '0xc17259de'
+  signature: ''
+  notes: extracted from _cellFont_0001_67.o
+- name: cellFontGenerateCharGlyphVertical
+  nid: '0xcaed32c1'
+  signature: ''
+  notes: extracted from _cellFont_0001_69.o
+- name: cellFontGetBindingRenderer
+  nid: '0xc91c8ece'
+  signature: ''
+  notes: extracted from _cellFont_0001_68.o
+- name: cellFontGetCharGlyphMetrics
+  nid: '0xd8eaee9f'
+  signature: ''
+  notes: extracted from _cellFont_0001_72.o
+- name: cellFontGetCharGlyphMetricsVertical
+  nid: '0xfe9a6dd7'
+  signature: ''
+  notes: extracted from _cellFont_0001_82.o
+- name: cellFontGetEffectSlant
+  nid: '0xe16e679a'
+  signature: ''
+  notes: extracted from _cellFont_0001_75.o
+- name: cellFontGetEffectWeight
+  nid: '0x25dbeff9'
+  signature: ''
+  notes: extracted from _cellFont_0001_19.o
+- name: cellFontGetFontIdCode
+  nid: '0x98ac5524'
+  signature: ''
+  notes: extracted from _cellFont_0001_52.o
+- name: cellFontGetGlyphExpandBufferInfo
+  nid: '0x59ef0073'
+  signature: ''
+  notes: extracted from _cellFont_0001_30.o
+- name: cellFontGetHorizontalLayout
+  nid: '0x1387c45c'
+  signature: ''
+  notes: extracted from _cellFont_0001_10.o
+- name: cellFontGetInitializedRevisionFlags
+  nid: '0x7c5df0d8'
+  signature: ''
+  notes: extracted from _cellFont_0001_41.o
+- name: cellFontGetKerning
+  nid: '0x06be743d'
+  signature: ''
+  notes: extracted from _cellFont_0001_5.o
+- name: cellFontGetLibrary
+  nid: '0x5abd8b1e'
+  signature: ''
+  notes: extracted from _cellFont_0001_31.o
+- name: cellFontGetRenderCharGlyphMetrics
+  nid: '0x2da9fd9d'
+  signature: ''
+  notes: extracted from _cellFont_0001_23.o
+- name: cellFontGetRenderCharGlyphMetricsVertical
+  nid: '0x700e6223'
+  signature: ''
+  notes: extracted from _cellFont_0001_37.o
+- name: cellFontGetRenderEffectSlant
+  nid: '0xced4dda9'
+  signature: ''
+  notes: extracted from _cellFont_0001_70.o
+- name: cellFontGetRenderEffectWeight
+  nid: '0x0109f3d3'
+  signature: ''
+  notes: extracted from _cellFont_0001_1.o
+- name: cellFontGetRenderScalePixel
+  nid: '0x0d106a11'
+  signature: ''
+  notes: extracted from _cellFont_0001_9.o
+- name: cellFontGetRenderScalePoint
+  nid: '0xa165daae'
+  signature: ''
+  notes: extracted from _cellFont_0001_56.o
+- name: cellFontGetRenderScaledKerning
+  nid: '0x0baf90fe'
+  signature: ''
+  notes: extracted from _cellFont_0001_8.o
+- name: cellFontGetResolutionDpi
+  nid: '0x8a632038'
+  signature: ''
+  notes: extracted from _cellFont_0001_47.o
+- name: cellFontGetRevisionFlags
+  nid: '0xb015a84e'
+  signature: ''
+  notes: extracted from _cellFont_0001_62.o
+- name: cellFontGetScalePixel
+  nid: '0x285d30d6'
+  signature: ''
+  notes: extracted from _cellFont_0001_20.o
+- name: cellFontGetScalePoint
+  nid: '0xf7a19060'
+  signature: ''
+  notes: extracted from _cellFont_0001_79.o
+- name: cellFontGetVerticalLayout
+  nid: '0x698897f8'
+  signature: ''
+  notes: extracted from _cellFont_0001_33.o
+- name: cellFontGlyphGetHorizontalShift
+  nid: '0x231d5941'
+  signature: ''
+  notes: extracted from _cellFont_0001_16.o
+- name: cellFontGlyphGetOutlineControlDistance
+  nid: '0xa8fae920'
+  signature: ''
+  notes: extracted from _cellFont_0001_61.o
+- name: cellFontGlyphGetOutlineVertexes
+  nid: '0x9c8d3ff7'
+  signature: ''
+  notes: extracted from _cellFont_0001_53.o
+- name: cellFontGlyphGetScalePixel
+  nid: '0x22e24707'
+  signature: ''
+  notes: extracted from _cellFont_0001_15.o
+- name: cellFontGlyphGetVertexesGlyphSize
+  nid: '0xb4d112af'
+  signature: ''
+  notes: extracted from _cellFont_0001_66.o
+- name: cellFontGlyphGetVerticalShift
+  nid: '0x534e785f'
+  signature: ''
+  notes: extracted from _cellFont_0001_28.o
+- name: cellFontGlyphRenderImage
+  nid: '0xe01b199e'
+  signature: ''
+  notes: extracted from _cellFont_0001_74.o
+- name: cellFontGlyphRenderImageHorizontal
+  nid: '0x97b95244'
+  signature: ''
+  notes: extracted from _cellFont_0001_51.o
+- name: cellFontGlyphRenderImageVertical
+  nid: '0x8e3f2c40'
+  signature: ''
+  notes: extracted from _cellFont_0001_48.o
+- name: cellFontGlyphSetupVertexesGlyph
+  nid: '0x53f529fe'
+  signature: ''
+  notes: extracted from _cellFont_0001_29.o
+- name: cellFontGraphicsGetDrawType
+  nid: '0x03a142b9'
+  signature: ''
+  notes: extracted from _cellFont_0001_2.o
+- name: cellFontGraphicsGetFontRGBA
+  nid: '0xa41342dc'
+  signature: ''
+  notes: extracted from _cellFont_0001_57.o
+- name: cellFontGraphicsGetLineRGBA
+  nid: '0xf7aaa8e2'
+  signature: ''
+  notes: extracted from _cellFont_0001_80.o
+- name: cellFontGraphicsGetScalePixel
+  nid: '0x2388186c'
+  signature: ''
+  notes: extracted from _cellFont_0001_17.o
+- name: cellFontGraphicsSetDrawType
+  nid: '0x87bd650f'
+  signature: ''
+  notes: extracted from _cellFont_0001_44.o
+- name: cellFontGraphicsSetFontRGBA
+  nid: '0x061049ad'
+  signature: ''
+  notes: extracted from _cellFont_0001_4.o
+- name: cellFontGraphicsSetLineRGBA
+  nid: '0x7c83bc15'
+  signature: ''
+  notes: extracted from _cellFont_0001_42.o
+- name: cellFontGraphicsSetScalePixel
+  nid: '0x16322df1'
+  signature: ''
+  notes: extracted from _cellFont_0001_11.o
+- name: cellFontGraphicsSetupDrawContext
+  nid: '0x970d4c22'
+  signature: ''
+  notes: extracted from _cellFont_0001_50.o
+- name: cellFontInitializeWithRevision
+  nid: '0xf03dcc29'
+  signature: ''
+  notes: extracted from _cellFont_0001_77.o
+- name: cellFontOpenFontFile
+  nid: '0x0a7306a4'
+  signature: ''
+  notes: extracted from _cellFont_0001_7.o
+- name: cellFontOpenFontInstance
+  nid: '0x29329541'
+  signature: ''
+  notes: extracted from _cellFont_0001_21.o
+- name: cellFontOpenFontMemory
+  nid: '0x9e19072b'
+  signature: ''
+  notes: extracted from _cellFont_0001_54.o
+- name: cellFontOpenFontset
+  nid: '0xa885cc9b'
+  signature: ''
+  notes: extracted from _cellFont_0001_60.o
+- name: cellFontOpenFontsetOnMemory
+  nid: '0x073fa321'
+  signature: ''
+  notes: extracted from _cellFont_0001_6.o
+- name: cellFontPatchWorks
+  nid: '0xb3d304b2'
+  signature: ''
+  notes: extracted from _cellFont_0001_64.o
+- name: cellFontRenderCharGlyphImage
+  nid: '0x88be4799'
+  signature: ''
+  notes: extracted from _cellFont_0001_45.o
+- name: cellFontRenderCharGlyphImageHorizontal
+  nid: '0x1a218fe4'
+  signature: ''
+  notes: extracted from _cellFont_0001_12.o
+- name: cellFontRenderCharGlyphImageVertical
+  nid: '0xe857a0ca'
+  signature: ''
+  notes: extracted from _cellFont_0001_76.o
+- name: cellFontRenderSurfaceInit
+  nid: '0x90b9465e'
+  signature: ''
+  notes: extracted from _cellFont_0001_49.o
+- name: cellFontRenderSurfaceSetScissor
+  nid: '0xb422b005'
+  signature: ''
+  notes: extracted from _cellFont_0001_65.o
+- name: cellFontSetEffectSlant
+  nid: '0x8657c8f5'
+  signature: ''
+  notes: extracted from _cellFont_0001_43.o
+- name: cellFontSetEffectWeight
+  nid: '0x25253fe4'
+  signature: ''
+  notes: extracted from _cellFont_0001_18.o
+- name: cellFontSetFontOpenMode
+  nid: '0x6cfada83'
+  signature: ''
+  notes: extracted from _cellFont_0001_36.o
+- name: cellFontSetFontsetOpenMode
+  nid: '0x6bf6f832'
+  signature: ''
+  notes: extracted from _cellFont_0001_35.o
+- name: cellFontSetResolutionDpi
+  nid: '0xfb3341ba'
+  signature: ''
+  notes: extracted from _cellFont_0001_81.o
+- name: cellFontSetScalePixel
+  nid: '0x297f0e93'
+  signature: ''
+  notes: extracted from _cellFont_0001_22.o
+- name: cellFontSetScalePoint
+  nid: '0x70f3e728'
+  signature: ''
+  notes: extracted from _cellFont_0001_38.o
+- name: cellFontSetupRenderEffectSlant
+  nid: '0x78d05e08'
+  signature: ''
+  notes: extracted from _cellFont_0001_39.o
+- name: cellFontSetupRenderEffectWeight
+  nid: '0xa6dc25d1'
+  signature: ''
+  notes: extracted from _cellFont_0001_58.o
+- name: cellFontSetupRenderScalePixel
+  nid: '0x227e1e3c'
+  signature: ''
+  notes: extracted from _cellFont_0001_14.o
+- name: cellFontSetupRenderScalePoint
+  nid: '0x4d19c631'
+  signature: ''
+  notes: extracted from _cellFont_0001_27.o
+- name: cellFontUnbindRenderer
+  nid: '0xf16379fa'
+  signature: ''
+  notes: extracted from _cellFont_0001_78.o
+- name: cellFontVertexesGlyphRelocate
+  nid: '0x6bad7a69'
+  signature: ''
+  notes: extracted from _cellFont_0001_34.o
+imports: []

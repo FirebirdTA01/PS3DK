@@ -1,0 +1,169 @@
+library: mic
+version: 1
+module: mic
+exports:
+- name: cellMicClose
+  nid: '0x8d229f8e'
+  signature: ''
+  notes: extracted from _cellMic_0001_21.o
+- name: cellMicCommand
+  nid: '0xc461563c'
+  signature: ''
+  notes: extracted from _cellMic_0001_31.o
+- name: cellMicEnd
+  nid: '0xc6328caa'
+  signature: ''
+  notes: extracted from _cellMic_0001_32.o
+- name: cellMicGetDeviceAttr
+  nid: '0x6a024aa0'
+  signature: ''
+  notes: extracted from _cellMic_0001_13.o
+- name: cellMicGetDeviceGUID
+  nid: '0x017024a8'
+  signature: ''
+  notes: extracted from _cellMic_0001_1.o
+- name: cellMicGetDeviceIdentifier
+  nid: '0xfdbbe469'
+  signature: ''
+  notes: extracted from _cellMic_0001_41.o
+- name: cellMicGetFormat
+  nid: '0x48108a23'
+  signature: ''
+  notes: extracted from _cellMic_0001_10.o
+- name: cellMicGetFormatAux
+  nid: '0xfda12276'
+  signature: ''
+  notes: extracted from _cellMic_0001_40.o
+- name: cellMicGetFormatDsp
+  nid: '0x87a08d29'
+  signature: ''
+  notes: extracted from _cellMic_0001_19.o
+- name: cellMicGetFormatEx
+  nid: '0xad049ecf'
+  signature: ''
+  notes: extracted from _cellMic_0001_25.o
+- name: cellMicGetFormatRaw
+  nid: '0x4e0b69ee'
+  signature: ''
+  notes: extracted from _cellMic_0001_11.o
+- name: cellMicGetSignalAttr
+  nid: '0xac5ba03a'
+  signature: ''
+  notes: extracted from _cellMic_0001_24.o
+- name: cellMicGetSignalState
+  nid: '0xb30780eb'
+  signature: ''
+  notes: extracted from _cellMic_0001_27.o
+- name: cellMicGetStatus
+  nid: '0x25c5723f'
+  signature: ''
+  notes: extracted from _cellMic_0001_6.o
+- name: cellMicGetType
+  nid: '0xa52d2ae4'
+  signature: ''
+  notes: extracted from _cellMic_0001_23.o
+- name: cellMicInit
+  nid: '0x8325e02d'
+  signature: ''
+  notes: extracted from _cellMic_0001_18.o
+- name: cellMicIsAttached
+  nid: '0x1b42101b'
+  signature: ''
+  notes: extracted from _cellMic_0001_5.o
+- name: cellMicIsOpen
+  nid: '0x186cb1fb'
+  signature: ''
+  notes: extracted from _cellMic_0001_4.o
+- name: cellMicOpen
+  nid: '0xdd1b59f0'
+  signature: ''
+  notes: extracted from _cellMic_0001_35.o
+- name: cellMicOpenEx
+  nid: '0x05709bbf'
+  signature: ''
+  notes: extracted from _cellMic_0001_2.o
+- name: cellMicOpenRaw
+  nid: '0xa42ac07a'
+  signature: ''
+  notes: extracted from _cellMic_0001_22.o
+- name: cellMicRead
+  nid: '0x07e1b12c'
+  signature: ''
+  notes: extracted from _cellMic_0001_3.o
+- name: cellMicReadAux
+  nid: '0x3acc118e'
+  signature: ''
+  notes: extracted from _cellMic_0001_8.o
+- name: cellMicReadDsp
+  nid: '0xc414faa5'
+  signature: ''
+  notes: extracted from _cellMic_0001_30.o
+- name: cellMicReadRaw
+  nid: '0x72165a7f'
+  signature: ''
+  notes: extracted from _cellMic_0001_16.o
+- name: cellMicRemoveNotifyEventQueue
+  nid: '0x65336418'
+  signature: ''
+  notes: extracted from _cellMic_0001_12.o
+- name: cellMicReset
+  nid: '0x6bc46aab'
+  signature: ''
+  notes: extracted from _cellMic_0001_14.o
+- name: cellMicSetDeviceAttr
+  nid: '0xb2c16321'
+  signature: ''
+  notes: extracted from _cellMic_0001_26.o
+- name: cellMicSetMultiMicNotifyEventQueue
+  nid: '0x891c6291'
+  signature: ''
+  notes: extracted from _cellMic_0001_20.o
+- name: cellMicSetNotifyEventQueue
+  nid: '0x7903400e'
+  signature: ''
+  notes: extracted from _cellMic_0001_17.o
+- name: cellMicSetNotifyEventQueue2
+  nid: '0x6cc7ae00'
+  signature: ''
+  notes: extracted from _cellMic_0001_15.o
+- name: cellMicSetSignalAttr
+  nid: '0x323deb41'
+  signature: ''
+  notes: extracted from _cellMic_0001_7.o
+- name: cellMicStart
+  nid: '0xdd724314'
+  signature: ''
+  notes: extracted from _cellMic_0001_36.o
+- name: cellMicStartEx
+  nid: '0xddd19a89'
+  signature: ''
+  notes: extracted from _cellMic_0001_37.o
+- name: cellMicStop
+  nid: '0xfcfaf246'
+  signature: ''
+  notes: extracted from _cellMic_0001_39.o
+- name: cellMicSysShareClose
+  nid: '0x3ace58f3'
+  signature: ''
+  notes: extracted from _cellMic_0001_9.o
+- name: cellMicSysShareEnd
+  nid: '0xf82bbf7c'
+  signature: ''
+  notes: extracted from _cellMic_0001_38.o
+- name: cellMicSysShareInit
+  nid: '0xd127cd3e'
+  signature: ''
+  notes: extracted from _cellMic_0001_34.o
+- name: cellMicSysShareOpen
+  nid: '0xc3610dbd'
+  signature: ''
+  notes: extracted from _cellMic_0001_29.o
+- name: cellMicSysShareStart
+  nid: '0xcac7e7d7'
+  signature: ''
+  notes: extracted from _cellMic_0001_33.o
+- name: cellMicSysShareStop
+  nid: '0xbdfd51e2'
+  signature: ''
+  notes: extracted from _cellMic_0001_28.o
+imports: []

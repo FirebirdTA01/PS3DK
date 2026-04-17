@@ -1,0 +1,701 @@
+library: sysutil
+version: 1
+module: sysutil
+exports:
+- name: cellAudioOutConfigure
+  nid: '0x4692ab35'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_49.o
+- name: cellAudioOutGetConfiguration
+  nid: '0xed5d96af'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_156.o
+- name: cellAudioOutGetDeviceInfo
+  nid: '0x7663e368'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_80.o
+- name: cellAudioOutGetNumberOfDevice
+  nid: '0xe5e2b09d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_150.o
+- name: cellAudioOutGetSoundAvailability
+  nid: '0xc01b4e7c'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_133.o
+- name: cellAudioOutGetSoundAvailability2
+  nid: '0x2beac488'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_33.o
+- name: cellAudioOutGetState
+  nid: '0xf4e3caa0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_168.o
+- name: cellAudioOutRegisterCallback
+  nid: '0x68bc4ff3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_67.o
+- name: cellAudioOutSetCopyControl
+  nid: '0xc96e89e9'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_138.o
+- name: cellAudioOutUnregisterCallback
+  nid: '0x9dfdad46'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_109.o
+- name: cellDiscGameGetBootDiscInfo
+  nid: '0xb72bc4e6'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_130.o
+- name: cellDiscGameRegisterDiscChangeCallback
+  nid: '0xdfdd302e'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_147.o
+- name: cellDiscGameUnregisterDiscChangeCallback
+  nid: '0xedc34e1a'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_158.o
+- name: cellGameDataCheckCreate
+  nid: '0xe7951dee'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_151.o
+- name: cellGameDataCheckCreate2
+  nid: '0xc9645c41'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_137.o
+- name: cellGameDataExitBroken
+  nid: '0x9949bf82'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_104.o
+- name: cellGameDataGetSizeKB
+  nid: '0xa9b0c1d9'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_119.o
+- name: cellGameRegisterDiscChangeCallback
+  nid: '0xf8115d69'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_169.o
+- name: cellGameUnregisterDiscChangeCallback
+  nid: '0x21fc0c71'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_25.o
+- name: cellHddGameCheck
+  nid: '0x9117df20'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_98.o
+- name: cellHddGameCheck2
+  nid: '0x4bdec82a'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_52.o
+- name: cellHddGameExitBroken
+  nid: '0xafd605b3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_124.o
+- name: cellHddGameGetSizeKB
+  nid: '0xf82e2ef7'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_171.o
+- name: cellMsgDialogAbort
+  nid: '0x62b0f803'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_66.o
+- name: cellMsgDialogClose
+  nid: '0x20543730'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_23.o
+- name: cellMsgDialogOpen
+  nid: '0xf81eca25'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_170.o
+- name: cellMsgDialogOpen2
+  nid: '0x7603d3db'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_79.o
+- name: cellMsgDialogOpenErrorCode
+  nid: '0x3e22cb4b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_42.o
+- name: cellMsgDialogOpenSimulViewWarning
+  nid: '0x5d883b1c'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_60.o
+- name: cellMsgDialogProgressBarInc
+  nid: '0x94862702'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_103.o
+- name: cellMsgDialogProgressBarReset
+  nid: '0x7bc2c8a8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_84.o
+- name: cellMsgDialogProgressBarSetMsg
+  nid: '0x9d6af72a'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_107.o
+- name: cellOskDialogAbort
+  nid: '0xb6d84526'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_129.o
+- name: cellOskDialogAddSupportLanguage
+  nid: '0x7f21c918'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_86.o
+- name: cellOskDialogDisableDimmer
+  nid: '0x41f20828'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_47.o
+- name: cellOskDialogGetInputText
+  nid: '0x1d99c3ee'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_17.o
+- name: cellOskDialogGetSize
+  nid: '0x35beade0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_38.o
+- name: cellOskDialogLoadAsync
+  nid: '0x7fcfc915'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_90.o
+- name: cellOskDialogSetDeviceMask
+  nid: '0xd3790a86'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_143.o
+- name: cellOskDialogSetInitialInputDevice
+  nid: '0xf3b4b43e'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_164.o
+- name: cellOskDialogSetInitialKeyLayout
+  nid: '0xc427890c'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_135.o
+- name: cellOskDialogSetKeyLayoutOption
+  nid: '0xb53c54fa'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_128.o
+- name: cellOskDialogSetLayoutMode
+  nid: '0xf0ec3ccc'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_161.o
+- name: cellOskDialogSetSeparateWindowOption
+  nid: '0x53e39df3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_57.o
+- name: cellOskDialogUnloadAsync
+  nid: '0x3d1e1931'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_40.o
+- name: cellSaveDataAutoLoad
+  nid: '0xc22c79b5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_134.o
+- name: cellSaveDataAutoLoad2
+  nid: '0xfbd5c856'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_173.o
+- name: cellSaveDataAutoSave
+  nid: '0xf8a175ec'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_172.o
+- name: cellSaveDataAutoSave2
+  nid: '0x8b7ed64b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_95.o
+- name: cellSaveDataDelete
+  nid: '0xa4ed7dfe'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_115.o
+- name: cellSaveDataDelete2
+  nid: '0xedadd797'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_157.o
+- name: cellSaveDataEnableOverlay
+  nid: '0xe7fa820b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_152.o
+- name: cellSaveDataFixedDelete
+  nid: '0xced17573'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_140.o
+- name: cellSaveDataFixedLoad
+  nid: '0x50183b44'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_54.o
+- name: cellSaveDataFixedLoad2
+  nid: '0x2a8eada2'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_30.o
+- name: cellSaveDataFixedSave
+  nid: '0x41bc2ca1'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_46.o
+- name: cellSaveDataFixedSave2
+  nid: '0x2aae9ef5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_32.o
+- name: cellSaveDataListAutoLoad
+  nid: '0x21425307'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_24.o
+- name: cellSaveDataListAutoSave
+  nid: '0x4dd03a4e'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_53.o
+- name: cellSaveDataListLoad
+  nid: '0xef5a353d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_160.o
+- name: cellSaveDataListLoad2
+  nid: '0x1dfbfdd6'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_18.o
+- name: cellSaveDataListSave
+  nid: '0x3dbd2314'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_41.o
+- name: cellSaveDataListSave2
+  nid: '0x2de0d663'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_35.o
+- name: cellSaveDataUserAutoLoad
+  nid: '0xcdc6aefd'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_139.o
+- name: cellSaveDataUserAutoSave
+  nid: '0x52aac4fa'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_55.o
+- name: cellSaveDataUserFixedDelete
+  nid: '0x8b8a2f48'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_96.o
+- name: cellSaveDataUserFixedLoad
+  nid: '0x6e7264ed'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_74.o
+- name: cellSaveDataUserFixedSave
+  nid: '0x40b34847'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_44.o
+- name: cellSaveDataUserListAutoLoad
+  nid: '0x248bd1d8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_28.o
+- name: cellSaveDataUserListAutoSave
+  nid: '0x0e091c36'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_8.o
+- name: cellSaveDataUserListLoad
+  nid: '0x39dd8425'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_39.o
+- name: cellSaveDataUserListSave
+  nid: '0x0f03cfb0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_9.o
+- name: cellStorageDataExport
+  nid: '0xabc3cd2c'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_121.o
+- name: cellStorageDataImport
+  nid: '0x918288fb'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_99.o
+- name: cellStorageDataImportMove
+  nid: '0x27ac51e4'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_29.o
+- name: cellSysCacheClear
+  nid: '0x744c1544'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_76.o
+- name: cellSysCacheMount
+  nid: '0x1e7bff94'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_20.o
+- name: cellSysconfAbort
+  nid: '0x76948bfc'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_81.o
+- name: cellSysconfOpen
+  nid: '0xb2b6cdd0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_126.o
+- name: cellSysutilAvcByeRequest
+  nid: '0xf2c4a425'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_163.o
+- name: cellSysutilAvcCancelByeRequest
+  nid: '0xf4aa8b27'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_167.o
+- name: cellSysutilAvcCancelJoinRequest
+  nid: '0xbccd70dd'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_131.o
+- name: cellSysutilAvcEnumPlayers
+  nid: '0x5e91bc26'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_61.o
+- name: cellSysutilAvcGetAttribute
+  nid: '0xf481967f'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_166.o
+- name: cellSysutilAvcGetLayoutMode
+  nid: '0xeb9d78d8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_154.o
+- name: cellSysutilAvcGetShowStatus
+  nid: '0x08269f37'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_5.o
+- name: cellSysutilAvcGetSpeakerVolumeLevel
+  nid: '0x073b89d5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_4.o
+- name: cellSysutilAvcGetVideoMuting
+  nid: '0x7d94ca36'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_85.o
+- name: cellSysutilAvcGetVoiceMuting
+  nid: '0x5ee3bc26'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_62.o
+- name: cellSysutilAvcHidePanel
+  nid: '0xd9ea5709'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_145.o
+- name: cellSysutilAvcJoinRequest
+  nid: '0x17dbe8b3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_14.o
+- name: cellSysutilAvcLoadAsync
+  nid: '0x15df71ed'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_13.o
+- name: cellSysutilAvcSetAttribute
+  nid: '0xeca938ca'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_155.o
+- name: cellSysutilAvcSetLayoutMode
+  nid: '0x018a1381'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_1.o
+- name: cellSysutilAvcSetSpeakerVolumeLevel
+  nid: '0xaffdadc0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_125.o
+- name: cellSysutilAvcSetVideoMuting
+  nid: '0x71acb8d3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_75.o
+- name: cellSysutilAvcSetVoiceMuting
+  nid: '0x4056c932'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_43.o
+- name: cellSysutilAvcShowPanel
+  nid: '0x2dbc92c7'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_34.o
+- name: cellSysutilAvcUnloadAsync
+  nid: '0x6c673f78'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_69.o
+- name: cellSysutilCheckCallback
+  nid: '0x189a74da'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_15.o
+- name: cellSysutilDisableBgmPlayback
+  nid: '0xcfdd8e87'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_141.o
+- name: cellSysutilDisableBgmPlaybackEx
+  nid: '0xa36335a5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_113.o
+- name: cellSysutilEnableBgmPlayback
+  nid: '0x220894e3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_26.o
+- name: cellSysutilEnableBgmPlaybackEx
+  nid: '0xac58ad2b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_123.o
+- name: cellSysutilGameDataAssignVmc
+  nid: '0x9997e6b6'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_105.o
+- name: cellSysutilGameDataExit
+  nid: '0x1dfcce99'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_19.o
+- name: cellSysutilGameExit_I
+  nid: '0x2a95d8bc'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_31.o
+- name: cellSysutilGamePowerOff_I
+  nid: '0x01f04d94'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_2.o
+- name: cellSysutilGameReboot_I
+  nid: '0x30d3d12b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_36.o
+- name: cellSysutilGetBgmPlaybackStatus
+  nid: '0xa11552f6'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_111.o
+- name: cellSysutilGetBgmPlaybackStatus2
+  nid: '0x6cfd856f'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_70.o
+- name: cellSysutilGetSystemParamInt
+  nid: '0x40e895d3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_45.o
+- name: cellSysutilGetSystemParamString
+  nid: '0x938013a0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_100.o
+- name: cellSysutilRegisterCallback
+  nid: '0x9d98afa0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_108.o
+- name: cellSysutilSetBgmPlaybackExtraParam
+  nid: '0xf3dbf5a7'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_165.o
+- name: cellSysutilUnregisterCallback
+  nid: '0x02ff3c1b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_3.o
+- name: cellVideoOutConfigure
+  nid: '0x0bae8772'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_6.o
+- name: cellVideoOutDebugSetMonitorType
+  nid: '0xcfdf24bb'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_142.o
+- name: cellVideoOutGetConfiguration
+  nid: '0x15b0b0cd'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_12.o
+- name: cellVideoOutGetConvertCursorColorInfo
+  nid: '0x55e425c3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_58.o
+- name: cellVideoOutGetDeviceInfo
+  nid: '0x1e930eef'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_21.o
+- name: cellVideoOutGetNumberOfDevice
+  nid: '0x75bbb672'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_78.o
+- name: cellVideoOutGetResolution
+  nid: '0xe558748d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_149.o
+- name: cellVideoOutGetResolutionAvailability
+  nid: '0xa322db75'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_112.o
+- name: cellVideoOutGetState
+  nid: '0x887572d5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_92.o
+- name: cellVideoOutRegisterCallback
+  nid: '0x8e8bc444'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_97.o
+- name: cellVideoOutUnregisterCallback
+  nid: '0x7871bed4'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_83.o
+- name: cellWebBrowserActivate
+  nid: '0x6d7444e6'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_72.o
+- name: cellWebBrowserConfig
+  nid: '0x83668b8e'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_91.o
+- name: cellWebBrowserConfig2
+  nid: '0x7fb3c6a5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_89.o
+- name: cellWebBrowserConfigGetHeapSize
+  nid: '0xa4dd11cc'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_114.o
+- name: cellWebBrowserConfigGetHeapSize2
+  nid: '0x0c316b87'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_7.o
+- name: cellWebBrowserConfigSetCustomExit
+  nid: '0x7f896a1f'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_88.o
+- name: cellWebBrowserConfigSetDisableTabs
+  nid: '0x3261a9c8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_37.o
+- name: cellWebBrowserConfigSetErrorHook2
+  nid: '0x1f6629e4'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_22.o
+- name: cellWebBrowserConfigSetFullScreen2
+  nid: '0x1a91874b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_16.o
+- name: cellWebBrowserConfigSetFullVersion2
+  nid: '0x52d9457a'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_56.o
+- name: cellWebBrowserConfigSetFunction
+  nid: '0x9c9fe6a4'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_106.o
+- name: cellWebBrowserConfigSetFunction2
+  nid: '0xe22ed55d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_148.o
+- name: cellWebBrowserConfigSetHeapSize
+  nid: '0x76fc8fb1'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_82.o
+- name: cellWebBrowserConfigSetHeapSize2
+  nid: '0xfe669845'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_174.o
+- name: cellWebBrowserConfigSetMimeSet
+  nid: '0x0f8a3b6b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_10.o
+- name: cellWebBrowserConfigSetNotifyHook2
+  nid: '0x93c523c6'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_101.o
+- name: cellWebBrowserConfigSetRequestHook2
+  nid: '0xee7528f3'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_159.o
+- name: cellWebBrowserConfigSetStatusHook2
+  nid: '0xac16777e'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_122.o
+- name: cellWebBrowserConfigSetTabCount2
+  nid: '0x619b1427'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_65.o
+- name: cellWebBrowserConfigSetUnknownMIMETypeHook2
+  nid: '0xa9a439e0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_118.o
+- name: cellWebBrowserConfigSetVersion
+  nid: '0x60a4daab'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_63.o
+- name: cellWebBrowserConfigSetViewCondition2
+  nid: '0xd7a617f5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_144.o
+- name: cellWebBrowserConfigSetViewRect2
+  nid: '0xa9b62ac8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_120.o
+- name: cellWebBrowserConfigWithVer
+  nid: '0x6c1082aa'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_68.o
+- name: cellWebBrowserCreate
+  nid: '0x7f881be1'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_87.o
+- name: cellWebBrowserCreate2
+  nid: '0xa5f12145'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_117.o
+- name: cellWebBrowserCreateRender2
+  nid: '0xf1a443e7'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_162.o
+- name: cellWebBrowserCreateRenderWithRect2
+  nid: '0x4b6e8560'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_51.o
+- name: cellWebBrowserCreateWithConfig
+  nid: '0x8a4cb646'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_93.o
+- name: cellWebBrowserCreateWithConfigFull
+  nid: '0xb53b3d42'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_127.o
+- name: cellWebBrowserCreateWithRect2
+  nid: '0xa58943f8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_116.o
+- name: cellWebBrowserDeactivate
+  nid: '0x46a0285d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_50.o
+- name: cellWebBrowserDestroy
+  nid: '0xbed85cb8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_132.o
+- name: cellWebBrowserDestroy2
+  nid: '0xe8dee79c'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_153.o
+- name: cellWebBrowserEstimate
+  nid: '0x58c89c4a'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_59.o
+- name: cellWebBrowserEstimate2
+  nid: '0x6d087930'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_71.o
+- name: cellWebBrowserGetUsrdataOnGameExit
+  nid: '0x10cabeff'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_11.o
+- name: cellWebBrowserInitialize
+  nid: '0x749c9b5f'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_77.o
+- name: cellWebBrowserNavigate2
+  nid: '0x9fb97b10'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_110.o
+- name: cellWebBrowserSetLocalContentsAdditionalTitleID
+  nid: '0xc8971db5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_136.o
+- name: cellWebBrowserSetSystemCallbackUsrdata
+  nid: '0x6dfff31d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_73.o
+- name: cellWebBrowserShutdown
+  nid: '0x93ced48d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_102.o
+- name: cellWebBrowserUpdatePointerDisplayPos2
+  nid: '0x425fef23'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_48.o
+- name: cellWebBrowserWakeupWithGameExit
+  nid: '0x24644561'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_27.o
+- name: cellWebComponentCreate
+  nid: '0x8a5dbb58'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_94.o
+- name: cellWebComponentCreateAsync
+  nid: '0x6144f033'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_64.o
+- name: cellWebComponentDestroy
+  nid: '0xdce51399'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_146.o
+imports: []

@@ -1,0 +1,65 @@
+library: sysutil_game
+version: 1
+module: sysutil_game
+exports:
+- name: cellGameBootCheck
+  nid: '0xf52639ea'
+  signature: ''
+  notes: extracted from _cellGame_0001_15.o
+- name: cellGameContentErrorDialog
+  nid: '0xb0a1f8c6'
+  signature: ''
+  notes: extracted from _cellGame_0001_7.o
+- name: cellGameContentPermit
+  nid: '0x70acec67'
+  signature: ''
+  notes: extracted from _cellGame_0001_4.o
+- name: cellGameCreateGameData
+  nid: '0x42a2e133'
+  signature: ''
+  notes: extracted from _cellGame_0001_3.o
+- name: cellGameDataCheck
+  nid: '0xdb9819f3'
+  signature: ''
+  notes: extracted from _cellGame_0001_13.o
+- name: cellGameDeleteGameData
+  nid: '0xb367c6e3'
+  signature: ''
+  notes: extracted from _cellGame_0001_8.o
+- name: cellGameGetDiscContentInfoUpdatePath
+  nid: '0x2a8e6b92'
+  signature: ''
+  notes: extracted from _cellGame_0001_1.o
+- name: cellGameGetLocalWebContentPath
+  nid: '0xa80bf223'
+  signature: ''
+  notes: extracted from _cellGame_0001_6.o
+- name: cellGameGetParamInt
+  nid: '0xb7a45caf'
+  signature: ''
+  notes: extracted from _cellGame_0001_9.o
+- name: cellGameGetParamString
+  nid: '0x3a5d726a'
+  signature: ''
+  notes: extracted from _cellGame_0001_2.o
+- name: cellGameGetSizeKB
+  nid: '0xef9d42d5'
+  signature: ''
+  notes: extracted from _cellGame_0001_14.o
+- name: cellGamePatchCheck
+  nid: '0xce4374f6'
+  signature: ''
+  notes: extracted from _cellGame_0001_10.o
+- name: cellGameSetParamString
+  nid: '0xdaa5cd20'
+  signature: ''
+  notes: extracted from _cellGame_0001_12.o
+- name: cellGameThemeInstall
+  nid: '0xd24e3928'
+  signature: ''
+  notes: extracted from _cellGame_0001_11.o
+- name: cellGameThemeInstallFromBuffer
+  nid: '0x87406734'
+  signature: ''
+  notes: extracted from _cellGame_0001_5.o
+imports: []
