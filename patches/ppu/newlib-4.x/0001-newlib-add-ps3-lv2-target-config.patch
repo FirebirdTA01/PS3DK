@@ -1,5 +1,5 @@
 diff --git a/newlib/configure.host b/newlib/configure.host
-index 3861834..eeab93d 100644
+index 3861834..7655d85 100644
 --- a/newlib/configure.host
 +++ b/newlib/configure.host
 @@ -293,6 +293,12 @@ case "${host_cpu}" in
@@ -26,6 +26,17 @@ index 3861834..eeab93d 100644
    powerpcle-*-pe)
  	posix_dir=posix
  	;;
+@@ -809,6 +819,10 @@ newlib_cflags="${newlib_cflags} -DCLOCK_PROVIDED -DMALLOC_PROVIDED -DEXIT_PROVID
+ 	default_newlib_io_long_long="yes"
+ 	newlib_cflags="${newlib_cflags} -DMISSING_SYSCALL_NAMES"
+ 	;;
++  powerpc64-ps3-elf*)
++	default_newlib_io_long_long="yes"
++	newlib_cflags="${newlib_cflags} -mno-eabi -mstrict-align"
++	;;
+   powerpc*-*-eabi* | \
+   powerpc*-*-elf* | \
+   powerpc*-*-linux* | \
 diff --git a/newlib/libc/acinclude.m4 b/newlib/libc/acinclude.m4
 index 24148b1..f325611 100644
 --- a/newlib/libc/acinclude.m4
