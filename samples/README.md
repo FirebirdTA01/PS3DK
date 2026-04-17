@@ -11,6 +11,7 @@ Each sample has one concept; big examples go elsewhere.
 | `hello-ppu-sony-abi/` | `.sys_proc_param` section layout (36-byte Sony 3.30+), malloc/calloc/realloc through libsysbase `_sbrk_r`, printf through `_write_r` | Phase 1 + Phase 3 milestone 1 | **green** |
 | `hello-ppu-sysutil-cb/` | Sony-named `cellSysutilRegisterCallback`/`Check`/`Unregister` through PSL1GHT runtime — first Phase 6 backfill sample, imports Sony FNIDs 0x9d98afa0/0x189a74da/0x02ff3c1b | Phase 3 + patch psl1ght/0011 | **green** + **RPCS3 runtime-verified** (XMB events delivered) |
 | `hello-ppu-msgdialog/` | Sony-named `cellMsgDialogOpen2` Yes/No dialog through PSL1GHT runtime — second Phase 6 backfill sample, imports Sony FNIDs 0xf81eca25 / 0x7603d3db / 0x62b0f803 | Phase 3 + patch psl1ght/0012 | **green** + **RPCS3 runtime-verified** (dialog rendered, YES button routed back) |
+| `hello-ppu-sysparam/` | Sony-named `cellSysutilGetSystemParam{Int,String}` — third Phase 6 backfill sample.  Prints language / nickname / date format / timezone / etc.  Imports Sony FNIDs 0x40e895d3 / 0x938013a0 | Phase 3 + patch psl1ght/0013 | **green** (RPCS3 runtime test pending) |
 | `hello-spu/` | SPU toolchain + intrinsics + DMA back to PPU, combined PPU/SPU build | Phase 2a complete | **green** |
 | `ppu-spu-dma/` (TBD) | Full DMA mailbox exchange patterns | Phase 2a complete | not yet |
 | `rsx-triangle-vs/` (TBD) | Existing PSL1GHT vertex shader pipeline still works | Phase 3 Beta | not yet |
