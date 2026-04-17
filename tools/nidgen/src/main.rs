@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use nidgen::{archive, db, nid, stubgen, verify};
+use nidgen::{archive, db, extract, nid, stubgen, verify};
 
 #[derive(Parser)]
 #[command(name = "nidgen", version, about = "PS3 NID/FNID tooling", long_about = None)]
@@ -38,6 +38,16 @@ enum Command {
         /// Path to one or more library YAML files.
         #[arg(required = true)]
         inputs: Vec<PathBuf>,
+    },
+
+    /// Extract a NID YAML database from a Sony stub archive.
+    Extract {
+        /// Path to the Sony archive (e.g. libaudio_stub.a).
+        #[arg(long)]
+        input: PathBuf,
+        /// Output YAML path.  If omitted, writes to stdout.
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
     },
 
     /// Build a stub archive for a library by running ppu-as + ppu-ar.
@@ -99,6 +109,24 @@ fn main() -> Result<()> {
             }
             if total_mismatches > 0 {
                 std::process::exit(1);
+            }
+        }
+        Command::Extract { input, output } => {
+            let lib = extract::extract_archive(&input)?;
+            let yaml = serde_yaml::to_string(&lib)
+                .with_context(|| format!("serializing {}", lib.library))?;
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, &yaml)
+                        .with_context(|| format!("writing {}", path.display()))?;
+                    eprintln!(
+                        "wrote {} ({} exports from {})",
+                        path.display(),
+                        lib.exports.len(),
+                        input.display(),
+                    );
+                }
+                None => print!("{yaml}"),
             }
         }
         Command::Archive { input, toolchain_bin, asm, ar, out_dir } => {

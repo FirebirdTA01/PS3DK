@@ -17,8 +17,10 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow.workspace = true
+ar.workspace = true
 clap.workspace = true
 hex.workspace = true
+object.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 sha1.workspace = true
