@@ -6,3 +6,4 @@
 0006-ansi-h-restore-kr-compat-macros.patch
 0007-libsysbase-static-config-and-makefile-cleanup.patch
 0008-config-override-allow-modern-autoconf.patch
+0009-libsysbase-getentropy-stub.patch
