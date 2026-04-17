@@ -1,0 +1,1278 @@
+# tools/nidgen/nids/aliases.yaml — PSL1GHT-rename coverage aliases.
+#
+# Maps each Sony canonical symbol name (left of colon) to one or more names
+# that our install tree may define and that semantically satisfy Sony's
+# export (right of colon).  coverage-report uses this to count renamed
+# PSL1GHT wrappers as coverage instead of marking the Sony name as missing.
+#
+# Rename rules applied by `coverage-report --suggest-aliases`:
+#   R1. _sys_<snake>  → sys<CamelSnake>           (e.g. _sys_malloc → sysMalloc)
+#   R2.  sys_<snake>  → sys<CamelSnake>           (e.g.  sys_lwmutex_lock → sysLwMutexLock)
+#   R3. cell<CamelRest> → <camelRest>             (e.g. cellMsgDialogOpen → msgDialogOpen)
+#   R4. cell_<snake>   → <CamelSnake>
+#
+# Regenerate after a significant PSL1GHT or install-tree change:
+#
+#   coverage-report --nid-db tools/nidgen/nids/extracted --install stage/ps3dev \
+#     --suggest-aliases tools/nidgen/nids/aliases.yaml
+#
+# The regenerator filters out candidates that don't actually match anything
+# in the install tree, so committed entries are load-bearing.  Hand edits
+# (adding semantic aliases the rules don't catch) are welcome — just keep
+# the file sorted by key so diffs stay readable.
+
+aliases:
+  _sys_free:
+  - sysFree
+  _sys_heap_alloc_heap_memory:
+  - sysHeapAllocHeapMemory
+  _sys_heap_create_heap:
+  - sysHeapCreateHeap
+  _sys_heap_delete_heap:
+  - sysHeapDeleteHeap
+  _sys_heap_free:
+  - sysHeapFree
+  _sys_heap_get_total_free_size:
+  - sysHeapGetTotalFreeSize
+  _sys_heap_malloc:
+  - sysHeapMalloc
+  _sys_heap_memalign:
+  - sysHeapMemalign
+  _sys_heap_stats:
+  - sysHeapStats
+  _sys_malloc:
+  - sysMalloc
+  _sys_memalign:
+  - sysMemalign
+  _sys_memchr:
+  - sysMemchr
+  _sys_memcmp:
+  - sysMemcmp
+  _sys_memcpy:
+  - sysMemcpy
+  _sys_memmove:
+  - sysMemmove
+  _sys_memset:
+  - sysMemset
+  _sys_printf:
+  - sysPrintf
+  _sys_qsort:
+  - sysQsort
+  _sys_snprintf:
+  - sysSnprintf
+  _sys_sprintf:
+  - sysSprintf
+  _sys_spu_printf_attach_group:
+  - sysSpuPrintfAttachGroup
+  _sys_spu_printf_attach_thread:
+  - sysSpuPrintfAttachThread
+  _sys_spu_printf_detach_group:
+  - sysSpuPrintfDetachGroup
+  _sys_spu_printf_detach_thread:
+  - sysSpuPrintfDetachThread
+  _sys_spu_printf_finalize:
+  - sysSpuPrintfFinalize
+  _sys_spu_printf_initialize:
+  - sysSpuPrintfInitialize
+  _sys_strcat:
+  - sysStrcat
+  _sys_strchr:
+  - sysStrchr
+  _sys_strcmp:
+  - sysStrcmp
+  _sys_strcpy:
+  - sysStrcpy
+  _sys_strlen:
+  - sysStrlen
+  _sys_strncasecmp:
+  - sysStrncasecmp
+  _sys_strncat:
+  - sysStrncat
+  _sys_strncmp:
+  - sysStrncmp
+  _sys_strncpy:
+  - sysStrncpy
+  _sys_strrchr:
+  - sysStrrchr
+  _sys_vprintf:
+  - sysVprintf
+  _sys_vsnprintf:
+  - sysVsnprintf
+  _sys_vsprintf:
+  - sysVsprintf
+  cellAudioAdd2chData:
+  - audioAdd2chData
+  cellAudioAddData:
+  - audioAddData
+  cellAudioCreateNotifyEventQueue:
+  - audioCreateNotifyEventQueue
+  cellAudioGetPortBlockTag:
+  - audioGetPortBlockTag
+  cellAudioGetPortConfig:
+  - audioGetPortConfig
+  cellAudioGetPortTimestamp:
+  - audioGetPortTimestamp
+  cellAudioInit:
+  - audioInit
+  cellAudioMiscSetAccessoryVolume:
+  - audioMiscSetAccessoryVolume
+  cellAudioPortClose:
+  - audioPortClose
+  cellAudioPortOpen:
+  - audioPortOpen
+  cellAudioPortStart:
+  - audioPortStart
+  cellAudioPortStop:
+  - audioPortStop
+  cellAudioQuit:
+  - audioQuit
+  cellAudioRemoveNotifyEventQueue:
+  - audioRemoveNotifyEventQueue
+  cellAudioSetNotifyEventQueue:
+  - audioSetNotifyEventQueue
+  cellAudioSetPortLevel:
+  - audioSetPortLevel
+  cellCameraClose:
+  - cameraClose
+  cellCameraCtrlExtensionUnit:
+  - cameraCtrlExtensionUnit
+  cellCameraEnd:
+  - cameraEnd
+  cellCameraGetAttribute:
+  - cameraGetAttribute
+  cellCameraGetBufferInfoEx:
+  - cameraGetBufferInfoEx
+  cellCameraGetBufferSize:
+  - cameraGetBufferSize
+  cellCameraGetDeviceGUID:
+  - cameraGetDeviceGUID
+  cellCameraGetExtensionUnit:
+  - cameraGetExtensionUnit
+  cellCameraGetType:
+  - cameraGetType
+  cellCameraInit:
+  - cameraInit
+  cellCameraIsAttached:
+  - cameraIsAttached
+  cellCameraIsAvailable:
+  - cameraIsAvailable
+  cellCameraIsOpen:
+  - cameraIsOpen
+  cellCameraIsStarted:
+  - cameraIsStarted
+  cellCameraOpenEx:
+  - cameraOpenEx
+  cellCameraPrepExtensionUnit:
+  - cameraPrepExtensionUnit
+  cellCameraRead:
+  - cameraRead
+  cellCameraReadComplete:
+  - cameraReadComplete
+  cellCameraReadEx:
+  - cameraReadEx
+  cellCameraRemoveNotifyEventQueue:
+  - cameraRemoveNotifyEventQueue
+  cellCameraRemoveNotifyEventQueue2:
+  - cameraRemoveNotifyEventQueue2
+  cellCameraReset:
+  - cameraReset
+  cellCameraSetAttribute:
+  - cameraSetAttribute
+  cellCameraSetExtensionUnit:
+  - cameraSetExtensionUnit
+  cellCameraSetNotifyEventQueue:
+  - cameraSetNotifyEventQueue
+  cellCameraSetNotifyEventQueue2:
+  - cameraSetNotifyEventQueue2
+  cellCameraStart:
+  - cameraStart
+  cellCameraStop:
+  - cameraStop
+  cellFontAdjustFontScaling:
+  - fontAdjustFontScaling
+  cellFontAdjustGlyphExpandBuffer:
+  - fontAdjustGlyphExpandBuffer
+  cellFontBindRenderer:
+  - fontBindRenderer
+  cellFontCloseFont:
+  - fontCloseFont
+  cellFontCreateRenderer:
+  - fontCreateRenderer
+  cellFontDelete:
+  - fontDelete
+  cellFontDeleteGlyph:
+  - fontDeleteGlyph
+  cellFontDestroyRenderer:
+  - fontDestroyRenderer
+  cellFontEnd:
+  - fontEnd
+  cellFontEndLibrary:
+  - fontEndLibrary
+  cellFontFTGetInitializedRevisionFlags:
+  - fontFTGetInitializedRevisionFlags
+  cellFontFTGetRevisionFlags:
+  - fontFTGetRevisionFlags
+  cellFontGenerateCharGlyph:
+  - fontGenerateCharGlyph
+  cellFontGenerateCharGlyphVertical:
+  - fontGenerateCharGlyphVertical
+  cellFontGetBindingRenderer:
+  - fontGetBindingRenderer
+  cellFontGetCharGlyphMetrics:
+  - fontGetCharGlyphMetrics
+  cellFontGetCharGlyphMetricsVertical:
+  - fontGetCharGlyphMetricsVertical
+  cellFontGetEffectSlant:
+  - fontGetEffectSlant
+  cellFontGetEffectWeight:
+  - fontGetEffectWeight
+  cellFontGetFontIdCode:
+  - fontGetFontIdCode
+  cellFontGetGlyphExpandBufferInfo:
+  - fontGetGlyphExpandBufferInfo
+  cellFontGetHorizontalLayout:
+  - fontGetHorizontalLayout
+  cellFontGetInitializedRevisionFlags:
+  - fontGetInitializedRevisionFlags
+  cellFontGetKerning:
+  - fontGetKerning
+  cellFontGetLibrary:
+  - fontGetLibrary
+  cellFontGetRenderCharGlyphMetrics:
+  - fontGetRenderCharGlyphMetrics
+  cellFontGetRenderCharGlyphMetricsVertical:
+  - fontGetRenderCharGlyphMetricsVertical
+  cellFontGetRenderEffectSlant:
+  - fontGetRenderEffectSlant
+  cellFontGetRenderEffectWeight:
+  - fontGetRenderEffectWeight
+  cellFontGetRenderScalePixel:
+  - fontGetRenderScalePixel
+  cellFontGetRenderScalePoint:
+  - fontGetRenderScalePoint
+  cellFontGetRenderScaledKerning:
+  - fontGetRenderScaledKerning
+  cellFontGetResolutionDpi:
+  - fontGetResolutionDpi
+  cellFontGetRevisionFlags:
+  - fontGetRevisionFlags
+  cellFontGetScalePixel:
+  - fontGetScalePixel
+  cellFontGetScalePoint:
+  - fontGetScalePoint
+  cellFontGetVerticalLayout:
+  - fontGetVerticalLayout
+  cellFontGlyphGetHorizontalShift:
+  - fontGlyphGetHorizontalShift
+  cellFontGlyphGetVerticalShift:
+  - fontGlyphGetVerticalShift
+  cellFontGlyphRenderImage:
+  - fontGlyphRenderImage
+  cellFontGlyphRenderImageHorizontal:
+  - fontGlyphRenderImageHorizontal
+  cellFontGlyphRenderImageVertical:
+  - fontGlyphRenderImageVertical
+  cellFontInitLibraryFreeTypeWithRevision:
+  - fontInitLibraryFreeTypeWithRevision
+  cellFontInitializeWithRevision:
+  - fontInitializeWithRevision
+  cellFontOpenFontFile:
+  - fontOpenFontFile
+  cellFontOpenFontInstance:
+  - fontOpenFontInstance
+  cellFontOpenFontMemory:
+  - fontOpenFontMemory
+  cellFontOpenFontset:
+  - fontOpenFontset
+  cellFontOpenFontsetOnMemory:
+  - fontOpenFontsetOnMemory
+  cellFontPatchWorks:
+  - fontPatchWorks
+  cellFontRenderCharGlyphImage:
+  - fontRenderCharGlyphImage
+  cellFontRenderCharGlyphImageHorizontal:
+  - fontRenderCharGlyphImageHorizontal
+  cellFontRenderCharGlyphImageVertical:
+  - fontRenderCharGlyphImageVertical
+  cellFontRenderSurfaceInit:
+  - fontRenderSurfaceInit
+  cellFontRenderSurfaceSetScissor:
+  - fontRenderSurfaceSetScissor
+  cellFontSetEffectSlant:
+  - fontSetEffectSlant
+  cellFontSetEffectWeight:
+  - fontSetEffectWeight
+  cellFontSetResolutionDpi:
+  - fontSetResolutionDpi
+  cellFontSetScalePixel:
+  - fontSetScalePixel
+  cellFontSetScalePoint:
+  - fontSetScalePoint
+  cellFontSetupRenderEffectSlant:
+  - fontSetupRenderEffectSlant
+  cellFontSetupRenderEffectWeight:
+  - fontSetupRenderEffectWeight
+  cellFontSetupRenderScalePixel:
+  - fontSetupRenderScalePixel
+  cellFontSetupRenderScalePoint:
+  - fontSetupRenderScalePoint
+  cellFontUnbindRenderer:
+  - fontUnbindRenderer
+  cellGcmAddressToOffset:
+  - gcmAddressToOffset
+  cellGcmBindTile:
+  - gcmBindTile
+  cellGcmBindZcull:
+  - gcmBindZcull
+  cellGcmDumpGraphicsError:
+  - gcmDumpGraphicsError
+  cellGcmGetConfiguration:
+  - gcmGetConfiguration
+  cellGcmGetControlRegister:
+  - gcmGetControlRegister
+  cellGcmGetCurrentDisplayBufferId:
+  - gcmGetCurrentDisplayBufferId
+  cellGcmGetCurrentField:
+  - gcmGetCurrentField
+  cellGcmGetDefaultCommandWordSize:
+  - gcmGetDefaultCommandWordSize
+  cellGcmGetDefaultSegmentWordSize:
+  - gcmGetDefaultSegmentWordSize
+  cellGcmGetDisplayBufferByFlipIndex:
+  - gcmGetDisplayBufferByFlipIndex
+  cellGcmGetDisplayInfo:
+  - gcmGetDisplayInfo
+  cellGcmGetFlipStatus:
+  - gcmGetFlipStatus
+  cellGcmGetLabelAddress:
+  - gcmGetLabelAddress
+  cellGcmGetLastFlipTime:
+  - gcmGetLastFlipTime
+  cellGcmGetLastSecondVTime:
+  - gcmGetLastSecondVTime
+  cellGcmGetMaxIoMapSize:
+  - gcmGetMaxIoMapSize
+  cellGcmGetNotifyDataAddress:
+  - gcmGetNotifyDataAddress
+  cellGcmGetOffsetTable:
+  - gcmGetOffsetTable
+  cellGcmGetReport:
+  - gcmGetReport
+  cellGcmGetReportDataAddress:
+  - gcmGetReportDataAddress
+  cellGcmGetReportDataAddressLocation:
+  - gcmGetReportDataAddressLocation
+  cellGcmGetReportDataLocation:
+  - gcmGetReportDataLocation
+  cellGcmGetTileInfo:
+  - gcmGetTileInfo
+  cellGcmGetTiledPitchSize:
+  - gcmGetTiledPitchSize
+  cellGcmGetTimeStamp:
+  - gcmGetTimeStamp
+  cellGcmGetTimeStampLocation:
+  - gcmGetTimeStampLocation
+  cellGcmGetVBlankCount:
+  - gcmGetVBlankCount
+  cellGcmGetZcullInfo:
+  - gcmGetZcullInfo
+  cellGcmInitCursor:
+  - gcmInitCursor
+  cellGcmInitDefaultFifoMode:
+  - gcmInitDefaultFifoMode
+  cellGcmInitSystemMode:
+  - gcmInitSystemMode
+  cellGcmIoOffsetToAddress:
+  - gcmIoOffsetToAddress
+  cellGcmMapEaIoAddress:
+  - gcmMapEaIoAddress
+  cellGcmMapEaIoAddressWithFlags:
+  - gcmMapEaIoAddressWithFlags
+  cellGcmMapLocalMemory:
+  - gcmMapLocalMemory
+  cellGcmMapMainMemory:
+  - gcmMapMainMemory
+  cellGcmReserveIoMapSize:
+  - gcmReserveIoMapSize
+  cellGcmResetFlipStatus:
+  - gcmResetFlipStatus
+  cellGcmSetCursorDisable:
+  - gcmSetCursorDisable
+  cellGcmSetCursorEnable:
+  - gcmSetCursorEnable
+  cellGcmSetCursorImageOffset:
+  - gcmSetCursorImageOffset
+  cellGcmSetCursorPosition:
+  - gcmSetCursorPosition
+  cellGcmSetDebugOutputLevel:
+  - gcmSetDebugOutputLevel
+  cellGcmSetDefaultCommandBuffer:
+  - gcmSetDefaultCommandBuffer
+  cellGcmSetDefaultCommandBufferAndSegmentWordSize:
+  - gcmSetDefaultCommandBufferAndSegmentWordSize
+  cellGcmSetDefaultFifoSize:
+  - gcmSetDefaultFifoSize
+  cellGcmSetDisplayBuffer:
+  - gcmSetDisplayBuffer
+  cellGcmSetFlipHandler:
+  - gcmSetFlipHandler
+  cellGcmSetFlipImmediate:
+  - gcmSetFlipImmediate
+  cellGcmSetFlipMode:
+  - gcmSetFlipMode
+  cellGcmSetFlipStatus:
+  - gcmSetFlipStatus
+  cellGcmSetGraphicsHandler:
+  - gcmSetGraphicsHandler
+  cellGcmSetInvalidateTile:
+  - gcmSetInvalidateTile
+  cellGcmSetPrepareFlip:
+  - gcmSetPrepareFlip
+  cellGcmSetQueueHandler:
+  - gcmSetQueueHandler
+  cellGcmSetSecondVFrequency:
+  - gcmSetSecondVFrequency
+  cellGcmSetSecondVHandler:
+  - gcmSetSecondVHandler
+  cellGcmSetTile:
+  - gcmSetTile
+  cellGcmSetTileInfo:
+  - gcmSetTileInfo
+  cellGcmSetUserHandler:
+  - gcmSetUserHandler
+  cellGcmSetVBlankFrequency:
+  - gcmSetVBlankFrequency
+  cellGcmSetVBlankHandler:
+  - gcmSetVBlankHandler
+  cellGcmSetZcull:
+  - gcmSetZcull
+  cellGcmSortRemapEaIoAddress:
+  - gcmSortRemapEaIoAddress
+  cellGcmSysGetLastVBlankTime:
+  - gcmSysGetLastVBlankTime
+  cellGcmTerminate:
+  - gcmTerminate
+  cellGcmUnbindTile:
+  - gcmUnbindTile
+  cellGcmUnbindZcull:
+  - gcmUnbindZcull
+  cellGcmUnmapEaIoAddress:
+  - gcmUnmapEaIoAddress
+  cellGcmUnmapIoAddress:
+  - gcmUnmapIoAddress
+  cellGcmUnreserveIoMapSize:
+  - gcmUnreserveIoMapSize
+  cellGcmUpdateCursor:
+  - gcmUpdateCursor
+  cellGemCalibrate:
+  - gemCalibrate
+  cellGemClearStatusFlags:
+  - gemClearStatusFlags
+  cellGemConvertVideoFinish:
+  - gemConvertVideoFinish
+  cellGemConvertVideoStart:
+  - gemConvertVideoStart
+  cellGemEnableCameraPitchAngleCorrection:
+  - gemEnableCameraPitchAngleCorrection
+  cellGemEnableMagnetometer:
+  - gemEnableMagnetometer
+  cellGemEnd:
+  - gemEnd
+  cellGemFilterState:
+  - gemFilterState
+  cellGemForceRGB:
+  - gemForceRGB
+  cellGemGetAccelerometerPositionInDevice:
+  - gemGetAccelerometerPositionInDevice
+  cellGemGetAllTrackableHues:
+  - gemGetAllTrackableHues
+  cellGemGetCameraState:
+  - gemGetCameraState
+  cellGemGetEnvironmentLightingColor:
+  - gemGetEnvironmentLightingColor
+  cellGemGetHuePixels:
+  - gemGetHuePixels
+  cellGemGetImageState:
+  - gemGetImageState
+  cellGemGetInertialState:
+  - gemGetInertialState
+  cellGemGetInfo:
+  - gemGetInfo
+  cellGemGetMemorySize:
+  - gemGetMemorySize
+  cellGemGetRGB:
+  - gemGetRGB
+  cellGemGetRumble:
+  - gemGetRumble
+  cellGemGetState:
+  - gemGetState
+  cellGemGetStatusFlags:
+  - gemGetStatusFlags
+  cellGemGetTrackerHue:
+  - gemGetTrackerHue
+  cellGemHSVtoRGB:
+  - gemHSVtoRGB
+  cellGemInit:
+  - gemInit
+  cellGemInvalidateCalibration:
+  - gemInvalidateCalibration
+  cellGemIsTrackableHue:
+  - gemIsTrackableHue
+  cellGemPrepareCamera:
+  - gemPrepareCamera
+  cellGemPrepareVideoConvert:
+  - gemPrepareVideoConvert
+  cellGemReset:
+  - gemReset
+  cellGemSetRumble:
+  - gemSetRumble
+  cellGemSetYaw:
+  - gemSetYaw
+  cellGemTrackHues:
+  - gemTrackHues
+  cellGemUpdateFinish:
+  - gemUpdateFinish
+  cellGemUpdateStart:
+  - gemUpdateStart
+  cellGemWriteExternalPort:
+  - gemWriteExternalPort
+  cellHttpAddCookieWithClientId:
+  - httpAddCookieWithClientId
+  cellHttpClientAddHeader:
+  - httpClientAddHeader
+  cellHttpClientCloseAllConnections:
+  - httpClientCloseAllConnections
+  cellHttpClientCloseConnections:
+  - httpClientCloseConnections
+  cellHttpClientDeleteHeader:
+  - httpClientDeleteHeader
+  cellHttpClientGetAllHeaders:
+  - httpClientGetAllHeaders
+  cellHttpClientGetAuthenticationCacheStatus:
+  - httpClientGetAuthenticationCacheStatus
+  cellHttpClientGetAutoAuthentication:
+  - httpClientGetAutoAuthentication
+  cellHttpClientGetAutoRedirect:
+  - httpClientGetAutoRedirect
+  cellHttpClientGetConnTimeout:
+  - httpClientGetConnTimeout
+  cellHttpClientGetCookieStatus:
+  - httpClientGetCookieStatus
+  cellHttpClientGetHeader:
+  - httpClientGetHeader
+  cellHttpClientGetKeepAlive:
+  - httpClientGetKeepAlive
+  cellHttpClientGetPerHostKeepAliveMax:
+  - httpClientGetPerHostKeepAliveMax
+  cellHttpClientGetPerHostPoolSize:
+  - httpClientGetPerHostPoolSize
+  cellHttpClientGetPerPipelineMax:
+  - httpClientGetPerPipelineMax
+  cellHttpClientGetPipeline:
+  - httpClientGetPipeline
+  cellHttpClientGetProxy:
+  - httpClientGetProxy
+  cellHttpClientGetRecvBufferSize:
+  - httpClientGetRecvBufferSize
+  cellHttpClientGetRecvTimeout:
+  - httpClientGetRecvTimeout
+  cellHttpClientGetResponseBufferMax:
+  - httpClientGetResponseBufferMax
+  cellHttpClientGetSendTimeout:
+  - httpClientGetSendTimeout
+  cellHttpClientGetSslVersion:
+  - httpClientGetSslVersion
+  cellHttpClientGetTotalPoolSize:
+  - httpClientGetTotalPoolSize
+  cellHttpClientGetUserAgent:
+  - httpClientGetUserAgent
+  cellHttpClientGetVersion:
+  - httpClientGetVersion
+  cellHttpClientPollConnections:
+  - httpClientPollConnections
+  cellHttpClientSetAuthenticationCacheStatus:
+  - httpClientSetAuthenticationCacheStatus
+  cellHttpClientSetAuthenticationCallback:
+  - httpClientSetAuthenticationCallback
+  cellHttpClientSetAutoAuthentication:
+  - httpClientSetAutoAuthentication
+  cellHttpClientSetAutoRedirect:
+  - httpClientSetAutoRedirect
+  cellHttpClientSetConnTimeout:
+  - httpClientSetConnTimeout
+  cellHttpClientSetCookieRecvCallback:
+  - httpClientSetCookieRecvCallback
+  cellHttpClientSetCookieSendCallback:
+  - httpClientSetCookieSendCallback
+  cellHttpClientSetCookieStatus:
+  - httpClientSetCookieStatus
+  cellHttpClientSetHeader:
+  - httpClientSetHeader
+  cellHttpClientSetKeepAlive:
+  - httpClientSetKeepAlive
+  cellHttpClientSetPerHostKeepAliveMax:
+  - httpClientSetPerHostKeepAliveMax
+  cellHttpClientSetPerHostPoolSize:
+  - httpClientSetPerHostPoolSize
+  cellHttpClientSetPerPipelineMax:
+  - httpClientSetPerPipelineMax
+  cellHttpClientSetPipeline:
+  - httpClientSetPipeline
+  cellHttpClientSetProxy:
+  - httpClientSetProxy
+  cellHttpClientSetRecvBufferSize:
+  - httpClientSetRecvBufferSize
+  cellHttpClientSetRecvTimeout:
+  - httpClientSetRecvTimeout
+  cellHttpClientSetRedirectCallback:
+  - httpClientSetRedirectCallback
+  cellHttpClientSetResponseBufferMax:
+  - httpClientSetResponseBufferMax
+  cellHttpClientSetSendTimeout:
+  - httpClientSetSendTimeout
+  cellHttpClientSetSslCallback:
+  - httpClientSetSslCallback
+  cellHttpClientSetSslClientCertificate:
+  - httpClientSetSslClientCertificate
+  cellHttpClientSetSslVersion:
+  - httpClientSetSslVersion
+  cellHttpClientSetTotalPoolSize:
+  - httpClientSetTotalPoolSize
+  cellHttpClientSetTransactionStateCallback:
+  - httpClientSetTransactionStateCallback
+  cellHttpClientSetUserAgent:
+  - httpClientSetUserAgent
+  cellHttpClientSetVersion:
+  - httpClientSetVersion
+  cellHttpCookieExportWithClientId:
+  - httpCookieExportWithClientId
+  cellHttpCookieImportWithClientId:
+  - httpCookieImportWithClientId
+  cellHttpCreateClient:
+  - httpCreateClient
+  cellHttpCreateTransaction:
+  - httpCreateTransaction
+  cellHttpDestroyClient:
+  - httpDestroyClient
+  cellHttpDestroyTransaction:
+  - httpDestroyTransaction
+  cellHttpEnd:
+  - httpEnd
+  cellHttpEndCookie:
+  - httpEndCookie
+  cellHttpGetProxy:
+  - httpGetProxy
+  cellHttpInit:
+  - httpInit
+  cellHttpInitCookie:
+  - httpInitCookie
+  cellHttpRecvResponse:
+  - httpRecvResponse
+  cellHttpRequestAddHeader:
+  - httpRequestAddHeader
+  cellHttpRequestDeleteHeader:
+  - httpRequestDeleteHeader
+  cellHttpRequestGetAllHeaders:
+  - httpRequestGetAllHeaders
+  cellHttpRequestGetChunkedTransferStatus:
+  - httpRequestGetChunkedTransferStatus
+  cellHttpRequestGetContentLength:
+  - httpRequestGetContentLength
+  cellHttpRequestGetHeader:
+  - httpRequestGetHeader
+  cellHttpRequestSetChunkedTransferStatus:
+  - httpRequestSetChunkedTransferStatus
+  cellHttpRequestSetContentLength:
+  - httpRequestSetContentLength
+  cellHttpRequestSetHeader:
+  - httpRequestSetHeader
+  cellHttpResponseGetAllHeaders:
+  - httpResponseGetAllHeaders
+  cellHttpResponseGetContentLength:
+  - httpResponseGetContentLength
+  cellHttpResponseGetHeader:
+  - httpResponseGetHeader
+  cellHttpResponseGetStatusCode:
+  - httpResponseGetStatusCode
+  cellHttpResponseGetStatusLine:
+  - httpResponseGetStatusLine
+  cellHttpSendRequest:
+  - httpSendRequest
+  cellHttpSessionCookieFlush:
+  - httpSessionCookieFlush
+  cellHttpSetProxy:
+  - httpSetProxy
+  cellHttpTransactionAbortConnection:
+  - httpTransactionAbortConnection
+  cellHttpTransactionCloseConnection:
+  - httpTransactionCloseConnection
+  cellHttpTransactionGetSslCipherBits:
+  - httpTransactionGetSslCipherBits
+  cellHttpTransactionGetSslCipherId:
+  - httpTransactionGetSslCipherId
+  cellHttpTransactionGetSslCipherName:
+  - httpTransactionGetSslCipherName
+  cellHttpTransactionGetSslCipherString:
+  - httpTransactionGetSslCipherString
+  cellHttpTransactionGetSslCipherVersion:
+  - httpTransactionGetSslCipherVersion
+  cellHttpTransactionGetSslId:
+  - httpTransactionGetSslId
+  cellHttpTransactionGetSslVersion:
+  - httpTransactionGetSslVersion
+  cellHttpTransactionGetUri:
+  - httpTransactionGetUri
+  cellHttpTransactionReleaseConnection:
+  - httpTransactionReleaseConnection
+  cellHttpUtilAppendHeaderValue:
+  - httpUtilAppendHeaderValue
+  cellHttpUtilBase64Decoder:
+  - httpUtilBase64Decoder
+  cellHttpUtilBase64Encoder:
+  - httpUtilBase64Encoder
+  cellHttpUtilBuildHeader:
+  - httpUtilBuildHeader
+  cellHttpUtilBuildRequestLine:
+  - httpUtilBuildRequestLine
+  cellHttpUtilBuildUri:
+  - httpUtilBuildUri
+  cellHttpUtilCopyHeader:
+  - httpUtilCopyHeader
+  cellHttpUtilCopyStatusLine:
+  - httpUtilCopyStatusLine
+  cellHttpUtilCopyUri:
+  - httpUtilCopyUri
+  cellHttpUtilEscapeUri:
+  - httpUtilEscapeUri
+  cellHttpUtilFormUrlDecode:
+  - httpUtilFormUrlDecode
+  cellHttpUtilFormUrlEncode:
+  - httpUtilFormUrlEncode
+  cellHttpUtilMergeUriPath:
+  - httpUtilMergeUriPath
+  cellHttpUtilParseHeader:
+  - httpUtilParseHeader
+  cellHttpUtilParseProxy:
+  - httpUtilParseProxy
+  cellHttpUtilParseStatusLine:
+  - httpUtilParseStatusLine
+  cellHttpUtilParseUri:
+  - httpUtilParseUri
+  cellHttpUtilParseUriPath:
+  - httpUtilParseUriPath
+  cellHttpUtilSweepPath:
+  - httpUtilSweepPath
+  cellHttpUtilUnescapeUri:
+  - httpUtilUnescapeUri
+  cellHttpsEnd:
+  - httpsEnd
+  cellHttpsInit:
+  - httpsInit
+  cellJpgDecClose:
+  - jpgDecClose
+  cellJpgDecCreate:
+  - jpgDecCreate
+  cellJpgDecDecodeData:
+  - jpgDecDecodeData
+  cellJpgDecDestroy:
+  - jpgDecDestroy
+  cellJpgDecExtDecodeData:
+  - jpgDecExtDecodeData
+  cellJpgDecExtOpen:
+  - jpgDecExtOpen
+  cellJpgDecExtReadHeader:
+  - jpgDecExtReadHeader
+  cellJpgDecExtSetParameter:
+  - jpgDecExtSetParameter
+  cellJpgDecOpen:
+  - jpgDecOpen
+  cellJpgDecReadHeader:
+  - jpgDecReadHeader
+  cellJpgDecSetParameter:
+  - jpgDecSetParameter
+  cellMsgDialogAbort:
+  - msgDialogAbort
+  cellMsgDialogClose:
+  - msgDialogClose
+  cellMsgDialogOpen:
+  - msgDialogOpen
+  cellMsgDialogOpen2:
+  - msgDialogOpen2
+  cellMsgDialogOpenErrorCode:
+  - msgDialogOpenErrorCode
+  cellMsgDialogProgressBarInc:
+  - msgDialogProgressBarInc
+  cellMsgDialogProgressBarReset:
+  - msgDialogProgressBarReset
+  cellMsgDialogProgressBarSetMsg:
+  - msgDialogProgressBarSetMsg
+  cellNetCtlAddHandler:
+  - netCtlAddHandler
+  cellNetCtlDelHandler:
+  - netCtlDelHandler
+  cellNetCtlGetInfo:
+  - netCtlGetInfo
+  cellNetCtlGetNatInfo:
+  - netCtlGetNatInfo
+  cellNetCtlGetState:
+  - netCtlGetState
+  cellNetCtlInit:
+  - netCtlInit
+  cellNetCtlNetStartDialogAbortAsync:
+  - netCtlNetStartDialogAbortAsync
+  cellNetCtlNetStartDialogLoadAsync:
+  - netCtlNetStartDialogLoadAsync
+  cellNetCtlNetStartDialogUnloadAsync:
+  - netCtlNetStartDialogUnloadAsync
+  cellNetCtlTerm:
+  - netCtlTerm
+  cellPngDecClose:
+  - pngDecClose
+  cellPngDecCreate:
+  - pngDecCreate
+  cellPngDecDecodeData:
+  - pngDecDecodeData
+  cellPngDecDestroy:
+  - pngDecDestroy
+  cellPngDecExtCreate:
+  - pngDecExtCreate
+  cellPngDecExtDecodeData:
+  - pngDecExtDecodeData
+  cellPngDecExtOpen:
+  - pngDecExtOpen
+  cellPngDecExtReadHeader:
+  - pngDecExtReadHeader
+  cellPngDecExtSetParameter:
+  - pngDecExtSetParameter
+  cellPngDecGetPLTE:
+  - pngDecGetPLTE
+  cellPngDecGetTextChunk:
+  - pngDecGetTextChunk
+  cellPngDecGetbKGD:
+  - pngDecGetbKGD
+  cellPngDecGetcHRM:
+  - pngDecGetcHRM
+  cellPngDecGetgAMA:
+  - pngDecGetgAMA
+  cellPngDecGethIST:
+  - pngDecGethIST
+  cellPngDecGetiCCP:
+  - pngDecGetiCCP
+  cellPngDecGetoFFs:
+  - pngDecGetoFFs
+  cellPngDecGetpCAL:
+  - pngDecGetpCAL
+  cellPngDecGetpHYs:
+  - pngDecGetpHYs
+  cellPngDecGetsBIT:
+  - pngDecGetsBIT
+  cellPngDecGetsCAL:
+  - pngDecGetsCAL
+  cellPngDecGetsPLT:
+  - pngDecGetsPLT
+  cellPngDecGetsRGB:
+  - pngDecGetsRGB
+  cellPngDecGettIME:
+  - pngDecGettIME
+  cellPngDecGettRNS:
+  - pngDecGettRNS
+  cellPngDecOpen:
+  - pngDecOpen
+  cellPngDecReadHeader:
+  - pngDecReadHeader
+  cellPngDecSetParameter:
+  - pngDecSetParameter
+  cellRescAdjustAspectRatio:
+  - rescAdjustAspectRatio
+  cellRescCreateInterlaceTable:
+  - rescCreateInterlaceTable
+  cellRescExit:
+  - rescExit
+  cellRescGcmSurface2RescSrc:
+  - rescGcmSurface2RescSrc
+  cellRescGetBufferSize:
+  - rescGetBufferSize
+  cellRescGetFlipStatus:
+  - rescGetFlipStatus
+  cellRescGetLastFlipTime:
+  - rescGetLastFlipTime
+  cellRescGetNumColorBuffers:
+  - rescGetNumColorBuffers
+  cellRescGetRegisterCount:
+  - rescGetRegisterCount
+  cellRescInit:
+  - rescInit
+  cellRescResetFlipStatus:
+  - rescResetFlipStatus
+  cellRescSetBufferAddress:
+  - rescSetBufferAddress
+  cellRescSetConvertAndFlip:
+  - rescSetConvertAndFlip
+  cellRescSetDisplayMode:
+  - rescSetDisplayMode
+  cellRescSetDsts:
+  - rescSetDsts
+  cellRescSetFlipHandler:
+  - rescSetFlipHandler
+  cellRescSetPalInterpolateDropFlexRatio:
+  - rescSetPalInterpolateDropFlexRatio
+  cellRescSetRegisterCount:
+  - rescSetRegisterCount
+  cellRescSetSrc:
+  - rescSetSrc
+  cellRescSetVBlankHandler:
+  - rescSetVBlankHandler
+  cellRescSetWaitFlip:
+  - rescSetWaitFlip
+  cellSpursAddUrgentCall:
+  - spursAddUrgentCall
+  cellSpursAddUrgentCommand:
+  - spursAddUrgentCommand
+  cellSpursAddWorkload:
+  - spursAddWorkload
+  cellSpursAddWorkloadWithAttribute:
+  - spursAddWorkloadWithAttribute
+  cellSpursAttachLv2EventQueue:
+  - spursAttachLv2EventQueue
+  cellSpursAttributeEnableSpuPrintfIfAvailable:
+  - spursAttributeEnableSpuPrintfIfAvailable
+  cellSpursAttributeEnableSystemWorkload:
+  - spursAttributeEnableSystemWorkload
+  cellSpursAttributeSetMemoryContainerForSpuThread:
+  - spursAttributeSetMemoryContainerForSpuThread
+  cellSpursAttributeSetNamePrefix:
+  - spursAttributeSetNamePrefix
+  cellSpursAttributeSetSpuThreadGroupType:
+  - spursAttributeSetSpuThreadGroupType
+  cellSpursBarrierGetTasksetAddress:
+  - spursBarrierGetTasksetAddress
+  cellSpursBarrierInitialize:
+  - spursBarrierInitialize
+  cellSpursCreateJobChainWithAttribute:
+  - spursCreateJobChainWithAttribute
+  cellSpursCreateTask:
+  - spursCreateTask
+  cellSpursCreateTask2:
+  - spursCreateTask2
+  cellSpursCreateTask2WithBinInfo:
+  - spursCreateTask2WithBinInfo
+  cellSpursCreateTaskWithAttribute:
+  - spursCreateTaskWithAttribute
+  cellSpursCreateTaskset:
+  - spursCreateTaskset
+  cellSpursCreateTaskset2:
+  - spursCreateTaskset2
+  cellSpursCreateTasksetWithAttribute:
+  - spursCreateTasksetWithAttribute
+  cellSpursDestroyTaskset2:
+  - spursDestroyTaskset2
+  cellSpursDetachLv2EventQueue:
+  - spursDetachLv2EventQueue
+  cellSpursEnableExceptionEventHandler:
+  - spursEnableExceptionEventHandler
+  cellSpursEventFlagAttachLv2EventQueue:
+  - spursEventFlagAttachLv2EventQueue
+  cellSpursEventFlagClear:
+  - spursEventFlagClear
+  cellSpursEventFlagDetachLv2EventQueue:
+  - spursEventFlagDetachLv2EventQueue
+  cellSpursEventFlagGetClearMode:
+  - spursEventFlagGetClearMode
+  cellSpursEventFlagGetDirection:
+  - spursEventFlagGetDirection
+  cellSpursEventFlagGetTasksetAddress:
+  - spursEventFlagGetTasksetAddress
+  cellSpursEventFlagSet:
+  - spursEventFlagSet
+  cellSpursEventFlagTryWait:
+  - spursEventFlagTryWait
+  cellSpursEventFlagWait:
+  - spursEventFlagWait
+  cellSpursFinalize:
+  - spursFinalize
+  cellSpursGetInfo:
+  - spursGetInfo
+  cellSpursGetJobChainId:
+  - spursGetJobChainId
+  cellSpursGetJobChainInfo:
+  - spursGetJobChainInfo
+  cellSpursGetJobPipelineInfo:
+  - spursGetJobPipelineInfo
+  cellSpursGetNumSpuThread:
+  - spursGetNumSpuThread
+  cellSpursGetSpuGuid:
+  - spursGetSpuGuid
+  cellSpursGetSpuThreadGroupId:
+  - spursGetSpuThreadGroupId
+  cellSpursGetSpuThreadId:
+  - spursGetSpuThreadId
+  cellSpursGetTasksetId:
+  - spursGetTasksetId
+  cellSpursGetTasksetInfo:
+  - spursGetTasksetInfo
+  cellSpursGetWorkloadData:
+  - spursGetWorkloadData
+  cellSpursGetWorkloadFlag:
+  - spursGetWorkloadFlag
+  cellSpursGetWorkloadInfo:
+  - spursGetWorkloadInfo
+  cellSpursInitialize:
+  - spursInitialize
+  cellSpursInitializeWithAttribute:
+  - spursInitializeWithAttribute
+  cellSpursInitializeWithAttribute2:
+  - spursInitializeWithAttribute2
+  cellSpursJobChainAttributeSetHaltOnError:
+  - spursJobChainAttributeSetHaltOnError
+  cellSpursJobChainAttributeSetJobTypeMemoryCheck:
+  - spursJobChainAttributeSetJobTypeMemoryCheck
+  cellSpursJobChainAttributeSetName:
+  - spursJobChainAttributeSetName
+  cellSpursJobChainGetError:
+  - spursJobChainGetError
+  cellSpursJobChainGetSpursAddress:
+  - spursJobChainGetSpursAddress
+  cellSpursJobChainSetExceptionEventHandler:
+  - spursJobChainSetExceptionEventHandler
+  cellSpursJobChainUnsetExceptionEventHandler:
+  - spursJobChainUnsetExceptionEventHandler
+  cellSpursJobGuardInitialize:
+  - spursJobGuardInitialize
+  cellSpursJobGuardNotify:
+  - spursJobGuardNotify
+  cellSpursJobGuardReset:
+  - spursJobGuardReset
+  cellSpursJobHeaderSetJobbin2Param:
+  - spursJobHeaderSetJobbin2Param
+  cellSpursJobSetMaxGrab:
+  - spursJobSetMaxGrab
+  cellSpursJoinJobChain:
+  - spursJoinJobChain
+  cellSpursJoinTask2:
+  - spursJoinTask2
+  cellSpursJoinTaskset:
+  - spursJoinTaskset
+  cellSpursLFQueueAttachLv2EventQueue:
+  - spursLFQueueAttachLv2EventQueue
+  cellSpursLFQueueDetachLv2EventQueue:
+  - spursLFQueueDetachLv2EventQueue
+  cellSpursLFQueueGetTasksetAddress:
+  - spursLFQueueGetTasksetAddress
+  cellSpursLookUpTasksetAddress:
+  - spursLookUpTasksetAddress
+  cellSpursQueueAttachLv2EventQueue:
+  - spursQueueAttachLv2EventQueue
+  cellSpursQueueClear:
+  - spursQueueClear
+  cellSpursQueueDepth:
+  - spursQueueDepth
+  cellSpursQueueDetachLv2EventQueue:
+  - spursQueueDetachLv2EventQueue
+  cellSpursQueueGetDirection:
+  - spursQueueGetDirection
+  cellSpursQueueGetEntrySize:
+  - spursQueueGetEntrySize
+  cellSpursQueueGetTasksetAddress:
+  - spursQueueGetTasksetAddress
+  cellSpursQueuePopBody:
+  - spursQueuePopBody
+  cellSpursQueuePushBody:
+  - spursQueuePushBody
+  cellSpursQueueSize:
+  - spursQueueSize
+  cellSpursReadyCountAdd:
+  - spursReadyCountAdd
+  cellSpursReadyCountCompareAndSwap:
+  - spursReadyCountCompareAndSwap
+  cellSpursReadyCountStore:
+  - spursReadyCountStore
+  cellSpursReadyCountSwap:
+  - spursReadyCountSwap
+  cellSpursRemoveWorkload:
+  - spursRemoveWorkload
+  cellSpursRequestIdleSpu:
+  - spursRequestIdleSpu
+  cellSpursRunJobChain:
+  - spursRunJobChain
+  cellSpursSemaphoreGetTasksetAddress:
+  - spursSemaphoreGetTasksetAddress
+  cellSpursSendWorkloadSignal:
+  - spursSendWorkloadSignal
+  cellSpursSetExceptionEventHandler:
+  - spursSetExceptionEventHandler
+  cellSpursSetGlobalExceptionEventHandler:
+  - spursSetGlobalExceptionEventHandler
+  cellSpursSetMaxContention:
+  - spursSetMaxContention
+  cellSpursSetPreemptionVictimHints:
+  - spursSetPreemptionVictimHints
+  cellSpursSetPriorities:
+  - spursSetPriorities
+  cellSpursShutdownJobChain:
+  - spursShutdownJobChain
+  cellSpursShutdownTaskset:
+  - spursShutdownTaskset
+  cellSpursShutdownWorkload:
+  - spursShutdownWorkload
+  cellSpursTaskAttributeSetExitCodeContainer:
+  - spursTaskAttributeSetExitCodeContainer
+  cellSpursTaskExitCodeGet:
+  - spursTaskExitCodeGet
+  cellSpursTaskExitCodeInitialize:
+  - spursTaskExitCodeInitialize
+  cellSpursTaskExitCodeTryGet:
+  - spursTaskExitCodeTryGet
+  cellSpursTaskGenerateLsPattern:
+  - spursTaskGenerateLsPattern
+  cellSpursTaskGetContextSaveAreaSize:
+  - spursTaskGetContextSaveAreaSize
+  cellSpursTaskGetLoadableSegmentPattern:
+  - spursTaskGetLoadableSegmentPattern
+  cellSpursTaskGetReadOnlyAreaPattern:
+  - spursTaskGetReadOnlyAreaPattern
+  cellSpursTasksetAttributeEnableClearLS:
+  - spursTasksetAttributeEnableClearLS
+  cellSpursTasksetAttributeSetName:
+  - spursTasksetAttributeSetName
+  cellSpursTasksetAttributeSetTasksetSize:
+  - spursTasksetAttributeSetTasksetSize
+  cellSpursTasksetGetSpursAddress:
+  - spursTasksetGetSpursAddress
+  cellSpursTasksetSetExceptionEventHandler:
+  - spursTasksetSetExceptionEventHandler
+  cellSpursTasksetUnsetExceptionEventHandler:
+  - spursTasksetUnsetExceptionEventHandler
+  cellSpursTraceFinalize:
+  - spursTraceFinalize
+  cellSpursTraceInitialize:
+  - spursTraceInitialize
+  cellSpursTraceStart:
+  - spursTraceStart
+  cellSpursTraceStop:
+  - spursTraceStop
+  cellSpursTryJoinTask2:
+  - spursTryJoinTask2
+  cellSpursUnsetExceptionEventHandler:
+  - spursUnsetExceptionEventHandler
+  cellSpursUnsetGlobalExceptionEventHandler:
+  - spursUnsetGlobalExceptionEventHandler
+  cellSpursWaitForWorkloadShutdown:
+  - spursWaitForWorkloadShutdown
+  cellSpursWakeUp:
+  - spursWakeUp
+  cellSpursWorkloadAttributeSetName:
+  - spursWorkloadAttributeSetName
+  cellSpursWorkloadAttributeSetShutdownCompletionEventHook:
+  - spursWorkloadAttributeSetShutdownCompletionEventHook
+  cellSslCertGetIssuerName:
+  - sslCertGetIssuerName
+  cellSslCertGetMd5Fingerprint:
+  - sslCertGetMd5Fingerprint
+  cellSslCertGetNameEntryCount:
+  - sslCertGetNameEntryCount
+  cellSslCertGetNameEntryInfo:
+  - sslCertGetNameEntryInfo
+  cellSslCertGetNotAfter:
+  - sslCertGetNotAfter
+  cellSslCertGetNotBefore:
+  - sslCertGetNotBefore
+  cellSslCertGetPublicKey:
+  - sslCertGetPublicKey
+  cellSslCertGetRsaPublicKeyExponent:
+  - sslCertGetRsaPublicKeyExponent
+  cellSslCertGetRsaPublicKeyModulus:
+  - sslCertGetRsaPublicKeyModulus
+  cellSslCertGetSerialNumber:
+  - sslCertGetSerialNumber
+  cellSslCertGetSubjectName:
+  - sslCertGetSubjectName
+  cellSslCertificateLoader:
+  - sslCertificateLoader
+  cellSslEnd:
+  - sslEnd
+  cellSslInit:
+  - sslInit
+  cellVdecClose:
+  - vdecClose
+  cellVdecDecodeAu:
+  - vdecDecodeAu
+  cellVdecGetPicItem:
+  - vdecGetPicItem
+  cellVdecGetPicture:
+  - vdecGetPicture
+  cellVdecOpen:
+  - vdecOpen
+  cellVdecQueryAttr:
+  - vdecQueryAttr
+  sys_dbg_get_cond_information:
+  - sysDbgGetCondInformation
+  sys_dbg_get_event_queue_information:
+  - sysDbgGetEventQueueInformation
+  sys_dbg_get_mutex_information:
+  - sysDbgGetMutexInformation
+  sys_dbg_get_semaphore_information:
+  - sysDbgGetSemaphoreInformation
+  sys_get_random_number:
+  - sysGetRandomNumber
+  sys_interrupt_thread_disestablish:
+  - sysInterruptThreadDisestablish
+  sys_mempool_allocate_block:
+  - sysMempoolAllocateBlock
+  sys_mempool_create:
+  - sysMempoolCreate
+  sys_mempool_destroy:
+  - sysMempoolDestroy
+  sys_mempool_free_block:
+  - sysMempoolFreeBlock
+  sys_mempool_get_count:
+  - sysMempoolGetCount
+  sys_mempool_try_allocate_block:
+  - sysMempoolTryAllocateBlock
+  sys_process_exit:
+  - sysProcessExit
+  sys_process_is_stack:
+  - sysProcessIsStack
+  sys_prx_get_module_id_by_address:
+  - sysPrxGetModuleIdByAddress
+  sys_prx_get_module_id_by_name:
+  - sysPrxGetModuleIdByName
+  sys_prx_get_module_info:
+  - sysPrxGetModuleInfo
+  sys_prx_get_module_list:
+  - sysPrxGetModuleList
+  sys_prx_load_module:
+  - sysPrxLoadModule
+  sys_prx_load_module_by_fd:
+  - sysPrxLoadModuleByFd
+  sys_prx_load_module_list:
+  - sysPrxLoadModuleList
+  sys_prx_load_module_list_on_memcontainer:
+  - sysPrxLoadModuleListOnMemcontainer
+  sys_prx_load_module_on_memcontainer:
+  - sysPrxLoadModuleOnMemcontainer
+  sys_prx_load_module_on_memcontainer_by_fd:
+  - sysPrxLoadModuleOnMemcontainerByFd
+  sys_prx_register_library:
+  - sysPrxRegisterLibrary
+  sys_prx_start_module:
+  - sysPrxStartModule
+  sys_prx_stop_module:
+  - sysPrxStopModule
+  sys_prx_unload_module:
+  - sysPrxUnloadModule
+  sys_prx_unregister_library:
+  - sysPrxUnregisterLibrary
+  sys_spinlock_initialize:
+  - sysSpinlockInitialize
+  sys_spinlock_lock:
+  - sysSpinlockLock
+  sys_spinlock_unlock:
+  - sysSpinlockUnlock
+  sys_spu_elf_get_information:
+  - sysSpuElfGetInformation
+  sys_spu_elf_get_segments:
+  - sysSpuElfGetSegments
+  sys_spu_image_close:
+  - sysSpuImageClose
+  sys_spu_image_import:
+  - sysSpuImageImport
