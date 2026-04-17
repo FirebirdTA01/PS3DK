@@ -1,0 +1,28 @@
+diff --git a/gcc/config/rs6000/rs6000.cc b/gcc/config/rs6000/rs6000.cc
+index f5db6436d..0a38214eb 100644
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -28880,6 +28880,23 @@ rs6000_opaque_type_invalid_use_p (gimple *stmt)
+   return false;
+ }
+ 
++#ifdef POWERPC_CELL64LV2
++/* PS3 / Cell64 LV2: allow SImode pointers on a 64-bit target so that
++   32-bit effective-address code works correctly.  */
++
++#undef TARGET_VALID_POINTER_MODE
++#define TARGET_VALID_POINTER_MODE rs6000_cell64lv2_valid_pointer_mode
++
++static bool
++rs6000_cell64lv2_valid_pointer_mode (scalar_int_mode mode)
++{
++  return (mode == SImode
++	  || (TARGET_64BIT && mode == DImode)
++	  || mode == ptr_mode
++	  || mode == Pmode);
++}
++#endif
++
+ struct gcc_target targetm = TARGET_INITIALIZER;
+ 
+ #include "gt-rs6000.h"

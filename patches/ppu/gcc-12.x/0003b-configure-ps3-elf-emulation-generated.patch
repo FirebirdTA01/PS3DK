@@ -1,0 +1,17 @@
+--- a/gcc/configure	2026-04-16 21:14:16.181788679 -0500
++++ b/gcc/configure	2026-04-16 21:13:42.213654856 -0500
+@@ -31189,12 +31189,12 @@
+ esac
+ 
+ case "$target:$tm_file" in
+-  powerpc64*-*-freebsd* | powerpc64*-*-linux* | powerpc*-*-linux*rs6000/biarch64.h*)
++  powerpc64*-*-freebsd* | powerpc64*-*-linux* | powerpc64-ps3-elf* | powerpc*-*-linux*rs6000/biarch64.h*)
+   case "$target" in
+      *le-*-linux*)
+      emul_name="-melf64lppc"
+       ;;
+-     *-*-linux*)
++     *-*-linux* | *-ps3-elf*)
+      emul_name="-melf64ppc"
+       ;;
+      *le-*-freebsd*)
