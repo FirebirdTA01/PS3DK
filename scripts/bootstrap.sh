@@ -30,7 +30,7 @@ HOST_KIND="unknown"
 case "$(uname -s)" in
     MINGW*|MSYS*)
         HOST_KIND="msys2"
-        [[ "$MSYSTEM" == "MINGW64" || "$MSYSTEM" == "UCRT64" ]] \
+        [[ "${MSYSTEM:-}" == "MINGW64" || "${MSYSTEM:-}" == "UCRT64" ]] \
             || warn "MSYS2 detected but MSYSTEM=$MSYSTEM — expected MINGW64 or UCRT64."
         ;;
     Linux*)  HOST_KIND="linux" ;;
