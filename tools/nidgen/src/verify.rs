@@ -118,6 +118,7 @@ mod tests {
                 signature: String::new(),
                 ordinal: None,
                 notes: None,
+                impl_status: crate::db::ImplStatus::Unknown,
             }],
             imports: vec![],
         };
@@ -139,6 +140,7 @@ mod tests {
                 signature: String::new(),
                 ordinal: None,
                 notes: None,
+                impl_status: crate::db::ImplStatus::Unknown,
             }],
             imports: vec![],
         };
