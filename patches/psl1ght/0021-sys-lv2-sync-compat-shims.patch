@@ -15,9 +15,15 @@ Five small new headers:
   sys/synchronization.h      sys_event_flag_* lv2syscall wrappers
                              (numbers verified against Sony's
                              sys/syscall.h: 82/83/85/86/87/118/132/139)
-                             plus SYS_EVENT_FLAG_WAIT_* constants,
-                             sys_event_flag_attribute_t,
-                             sys_event_flag_attribute_initialize macro.
+                             plus SYS_EVENT_FLAG_WAIT_* constants and
+                             the 32-byte sys_event_flag_attribute_t
+                             matching Sony's reference SDK exactly
+                             (attr_protocol, attr_pshared, key, flags,
+                             type, name[8]).  The
+                             sys_event_flag_attribute_initialize macro
+                             defaults to SYS_SYNC_PRIORITY +
+                             SYS_SYNC_NOT_PROCESS_SHARED +
+                             SYS_SYNC_WAITER_MULTIPLE per Sony's macro.
                              Mutex/cond/sem/lwmutex Sony-name wrappers
                              can be added as the next sample needs them.
   sys/ppu_thread.h           Inline forwarders from sys_ppu_thread_*
@@ -139,7 +145,7 @@ new file mode 100644
 index 0000000..0000000
 --- /dev/null
 +++ b/ppu/include/sys/synchronization.h
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,170 @@
 +/*! \file sys/synchronization.h
 + \brief Sony-SDK-source-compat synchronisation primitives.
 +
@@ -177,16 +183,29 @@ index 0000000..0000000
 +extern "C" {
 +#endif
 +
-+/* Common attribute / size constants shared with mutex / cond / sem. */
++/* Values for attr_protocol. */
 +#define SYS_SYNC_FIFO                  0x00001
 +#define SYS_SYNC_PRIORITY              0x00002
 +#define SYS_SYNC_PRIORITY_INHERIT      0x00003
 +#define SYS_SYNC_RETRY                 0x00004
-+#define SYS_SYNC_NOT_PROCESS_SHARED    0x00200
-+#define SYS_SYNC_NOT_ADAPTIVE          0x02000
++
++/* Values for attr_recursive. */
 +#define SYS_SYNC_RECURSIVE             0x00010
 +#define SYS_SYNC_NOT_RECURSIVE         0x00020
-+#define SYS_SYNC_NAME_SIZE             8
++
++/* Values for attr_pshared. */
++#define SYS_SYNC_NOT_PROCESS_SHARED    0x00200
++
++/* Values for attr_adaptive. */
++#define SYS_SYNC_ADAPTIVE              0x01000
++#define SYS_SYNC_NOT_ADAPTIVE          0x02000
++
++/* Values for type (event-flag waiter cardinality). */
++#define SYS_SYNC_WAITER_SINGLE         0x10000
++#define SYS_SYNC_WAITER_MULTIPLE       0x20000
++
++#define SYS_SYNC_NAME_LENGTH           7
++#define SYS_SYNC_NAME_SIZE             (SYS_SYNC_NAME_LENGTH + 1)
 +
 +/* Event-flag wait modes (cellOS Lv-2 semantics). */
 +#define SYS_EVENT_FLAG_WAIT_AND        0x000001
@@ -194,34 +213,41 @@ index 0000000..0000000
 +#define SYS_EVENT_FLAG_WAIT_CLEAR      0x000010
 +#define SYS_EVENT_FLAG_WAIT_CLEAR_ALL  0x000020
 +
-+/* Event-flag types (also used elsewhere in sys/event.h). */
-+#define SYS_EVENT_FLAG_TYPE_BIT_PATTERN_VAR   1
-+#define SYS_EVENT_FLAG_TYPE_BIT_PATTERN_FIX   2
-+
 +#define SYS_EVENT_FLAG_ID_INVALID      0xFFFFFFFFU
 +
 +/* No-timeout sentinel — passed to wait calls to block forever. */
 +#define SYS_NO_TIMEOUT                 0ULL
 +
-+/* Protocol values for sys_event_flag_attribute_t.attr_protocol. */
 +typedef u32 sys_protocol_t;
++typedef u32 sys_process_shared_t;
++typedef u64 sys_ipc_key_t;
 +
 +typedef u32 sys_event_flag_t;
 +
++/* Layout matches Sony's reference SDK 475.001 sys/synchronization.h
++ * exactly: 32 bytes (4 + 4 + 8 + 4 + 4 + 8).  RPCS3's
++ * sys_event_flag_create rejects shorter structs with EINVAL — we
++ * verified empirically that the missing pshared/key/flags fields
++ * caused 0x80010002 returns. */
 +typedef struct sys_event_flag_attribute {
-+	sys_protocol_t  attr_protocol;
-+	u32             type;
-+	char            name[SYS_SYNC_NAME_SIZE];
++	sys_protocol_t        attr_protocol;
++	sys_process_shared_t  attr_pshared;
++	sys_ipc_key_t         key;
++	int                   flags;
++	int                   type;
++	char                  name[SYS_SYNC_NAME_SIZE];
 +} sys_event_flag_attribute_t;
 +
-+/* Sony's macro initialiser — fills in sane defaults for both local
-+ * (in-process) and inter-process event flags.  We default to the same
-+ * "FIFO + bit-pattern variable + no name" Sony does. */
-+#define sys_event_flag_attribute_initialize(_attr)         \
-+	do {                                                   \
-+		(_attr).attr_protocol = SYS_SYNC_FIFO;             \
-+		(_attr).type = SYS_EVENT_FLAG_TYPE_BIT_PATTERN_VAR;\
-+		(_attr).name[0] = '\0';                            \
++/* Defaults match Sony's reference SDK macro: priority scheduling,
++ * not process-shared, multiple-waiter event flag, no debug name. */
++#define sys_event_flag_attribute_initialize(_attr)              \
++	do {                                                        \
++		(_attr).attr_protocol = SYS_SYNC_PRIORITY;              \
++		(_attr).attr_pshared  = SYS_SYNC_NOT_PROCESS_SHARED;    \
++		(_attr).key           = 0;                              \
++		(_attr).flags         = 0;                              \
++		(_attr).type          = SYS_SYNC_WAITER_MULTIPLE;       \
++		(_attr).name[0]       = '\0';                           \
 +	} while (0)
 +
 +#define sys_event_flag_attribute_name_set(_attr_name, _name)            \
