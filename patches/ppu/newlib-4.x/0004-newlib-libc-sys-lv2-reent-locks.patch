@@ -343,12 +343,13 @@ new file mode 100644
 index 0000000..8cd78a1
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/sys/dirent.h
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,63 @@
 +#ifndef __SYS_DIRENT_H__
 +#define __SYS_DIRENT_H__
 +
 +#include <stdint.h>
 +#include <unistd.h>
++#include <sys/param.h>
 +#include <sys/types.h>
 +
 +#define DT_INVALID			0xff
