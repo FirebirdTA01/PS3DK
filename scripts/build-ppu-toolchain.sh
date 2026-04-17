@@ -170,6 +170,18 @@ build_gcc_newlib() {
     apply_patches "$gcc_src"    "$PATCHES/gcc-12.x"
     apply_patches "$newlib_src" "$PATCHES/newlib-4.x"
 
+    # Regenerate newlib's configure + Makefile.in from the patched
+    # configure.ac / acinclude.m4 / Makefile.am / Makefile.inc set.  Patch 0001
+    # adds an `lv2` sys_dir conditional and patch 0004 ships the corresponding
+    # libc/sys/lv2/ tree; neither takes effect unless autoreconf rewrites the
+    # pregenerated 5k-line configure and 40k-line Makefile.in.  Patch 0008
+    # relaxes override.m4's strict autoconf-2.69 pin so modern hosts can do this.
+    if [[ ! -f "$newlib_src/newlib/.autoreconf-stamp" ]]; then
+        say "Regenerating newlib autotools (autoreconf -fi)"
+        (cd "$newlib_src/newlib" && autoreconf -fi)
+        touch "$newlib_src/newlib/.autoreconf-stamp"
+    fi
+
     # GCC prereqs: GMP, MPFR, MPC, ISL. Use contrib/download_prerequisites which
     # drops them as in-tree symlinks. Requires network access.
     if [[ ! -d "$gcc_src/gmp" ]]; then

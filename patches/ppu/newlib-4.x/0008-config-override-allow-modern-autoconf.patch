@@ -1,0 +1,41 @@
+Subject: [PATCH] config/override.m4: drop strict autoconf 2.69 version check
+
+newlib ships a Cygnus-era config/override.m4 that asserts the host's
+autoconf is _exactly_ 2.69 via _GCC_AUTOCONF_VERSION_CHECK.  On modern
+distros (CachyOS / Arch ship autoconf 2.73, Fedora 41 ships 2.72, etc.)
+running `autoreconf -fi` fails with
+
+    configure.ac: error: Please use exactly Autoconf 2.69 instead of 2.73.
+
+We run autoreconf on newlib during the PPU toolchain build so that the
+patches which add a new sys_dir (patches 0001/0004, `lv2`) actually
+propagate into the pregenerated configure + Makefile.in.  Pinning to
+2.69 would require every builder to install a parallel legacy autoconf
+— or for us to ship hand-patched 30k-line generated files — neither of
+which is worth the bother for a consumer-grade ABI target.
+
+Replace the strict-equality check with a no-op.  The overridden macros
+earlier in override.m4 are all backports of Autoconf-newer macros into
+older versions; they continue to work unchanged under newer autoconf,
+they're just shadowed by the already-present versions.  Modern autoconf
+output has been verified to produce a working configure + Makefile.in
+for the combined GCC+newlib tree on this target.
+
+diff --git a/config/override.m4 b/config/override.m4
+--- a/config/override.m4
++++ b/config/override.m4
+@@ -39,10 +39,8 @@ dnl   m4_define([_GCC_AUTOCONF_VERSION], [X.Y])
+ dnl in configure.ac before AC_INIT,
+ dnl without rewriting this file.
+ dnl Or for updating the whole tree at once with the definition above.
+-AC_DEFUN([_GCC_AUTOCONF_VERSION_CHECK],
+-[m4_if(m4_defn([_GCC_AUTOCONF_VERSION]),
+-  m4_defn([m4_PACKAGE_VERSION]), [],
+-  [m4_fatal([Please use exactly Autoconf ]_GCC_AUTOCONF_VERSION[ instead of ]m4_defn([m4_PACKAGE_VERSION])[.])])
+-])
++dnl PS3 toolchain: strict-version check dropped so modern autoconf
++dnl (2.70+) can regenerate newlib's configure after patches land.
++AC_DEFUN([_GCC_AUTOCONF_VERSION_CHECK], [])
+ m4_define([AC_INIT], m4_defn([AC_INIT])[
+ _GCC_AUTOCONF_VERSION_CHECK
+ ])
