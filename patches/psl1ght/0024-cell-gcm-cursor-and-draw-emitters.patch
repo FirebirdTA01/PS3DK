@@ -1,0 +1,250 @@
+Subject: [PATCH] ppu/include: Phase 7 step 4 - cursor + draw/texture/transfer emitters
+
+Phase 7 step 4 expands <cell/gcm.h> + <cell/gcm/gcm_command_c.h>:
+
+(4a) Hardware cursor system functions added to cell/gcm.h:
+    cellGcmInitCursor / SetCursorEnable / SetCursorDisable /
+    SetCursorImageOffset / SetCursorPosition / UpdateCursor.
+    Plus #define CELL_GCM_CURSOR_ALIGN_OFFSET 2048 (Sony's
+    required cursor texture alignment in RSX local memory).
+
+(4b) Bulk command emitters added to gcm_command_c.h:
+    Draw:        SetDrawArrays, SetDrawIndexArray, SetDrawBegin,
+                 SetDrawEnd
+    Vertex data: SetVertexData4f, SetVertexAttribOutputMask
+    Vertex prog: SetVertexProgramConstants  (Cg-handle variants
+                 deferred — they need a Cg-runtime bridge layer)
+    Fragment:    SetFragmentProgramGammaEnable
+    Cache:       SetInvalidateVertexCache, SetInvalidateTextureCache
+    2D BLT:      SetTransferDataMode, SetTransferDataOffset,
+                 SetTransferDataFormat, SetTransferData,
+                 SetTransferImage  (full 2D blit path; no shaders
+                 needed — uses RSX's NV0039/NV3062 transfer engines)
+
+Two stubs intentionally have empty bodies for source-compat only
+(SetVertexDataArray, SetVertexAttribInputMask) — PSL1GHT exposes
+them via a different decomposition under <rsx/rsx.h>.  Map the
+bodies once the first sample needs the exact entry point.
+
+samples/hello-ppu-cellgcm-cursor/ exercises the cursor path
+end-to-end: allocates a 32x32 BGRA cursor texture in RSX local memory
+at 2048-byte alignment, calls InitCursor + SetCursorImageOffset +
+SetCursorEnable, then per-frame moves the cursor in a Lissajous
+pattern via SetCursorPosition + UpdateCursor while sweeping the
+background color.  No shaders, no draw calls — pure HW overlay.
+
+Step 4b emitters are smoke-tested via the cross compiler (each
+forwarder instantiates and links to its rsx* counterpart in librsx);
+runtime validation comes when a sample uses each entry point.
+
+Cg-program-handle emitters (cellGcmSetVertexProgram(CGprogram, ...),
+cellGcmSetFragmentProgram(CGprogram, offset), SetVertexProgramParameter,
+etc.) remain deferred.  These need a bridge from Sony's CGprogram +
+CellCgbVertexProgramConfiguration types to PSL1GHT's rsxVertexProgram /
+rsxFragmentProgram structs.  Step 5 work, after the NV40-FP fragment
+compiler.
+
+diff --git a/ppu/include/cell/gcm.h b/ppu/include/cell/gcm.h
+--- a/ppu/include/cell/gcm.h
++++ b/ppu/include/cell/gcm.h
+@@ -262,6 +262,44 @@ static inline void cellGcmSetDebugOutputLevel(int32_t level)
+ }
+ 
+ /* ============================================================
++ * Hardware cursor (RSX overlay, no RSX commands needed)
++ * ============================================================ */
++
++/* Cursor texture must be 2048-byte aligned in RSX local memory.
++ * Texture format is 32x32 BGRA8 = 4096 bytes per image. */
++#define CELL_GCM_CURSOR_ALIGN_OFFSET   2048
++
++static inline int32_t cellGcmInitCursor(void)
++{
++	return (int32_t)gcmInitCursor();
++}
++
++static inline int32_t cellGcmSetCursorEnable(void)
++{
++	return (int32_t)gcmSetCursorEnable();
++}
++
++static inline int32_t cellGcmSetCursorDisable(void)
++{
++	return (int32_t)gcmSetCursorDisable();
++}
++
++static inline int32_t cellGcmSetCursorImageOffset(uint32_t offset)
++{
++	return (int32_t)gcmSetCursorImageOffset(offset);
++}
++
++static inline int32_t cellGcmSetCursorPosition(int32_t x, int32_t y)
++{
++	return (int32_t)gcmSetCursorPosition(x, y);
++}
++
++static inline int32_t cellGcmUpdateCursor(void)
++{
++	return (int32_t)gcmUpdateCursor();
++}
++
++/* ============================================================
+  * Reports / labels (used by samples for fence-style sync)
+  * ============================================================ */
+ 
+
+diff --git a/ppu/include/cell/gcm/gcm_command_c.h b/ppu/include/cell/gcm/gcm_command_c.h
+--- a/ppu/include/cell/gcm/gcm_command_c.h
++++ b/ppu/include/cell/gcm/gcm_command_c.h
+@@ -195,6 +195,156 @@ static inline void cellGcmSetUserClipPlaneControl(CellGcmContextData *thisContex
+ 	rsxSetUserClipPlaneControl(thisContext, plane0, plane1, plane2, plane3, plane4, plane5);
+ }
+ 
++/* ==========================================================
++ * Step 4b: Draw / vertex-data / texture / transfer / cache
++ *
++ * Bulk forwarders for Sony's draw and texture command emitters.
++ * Cg-handle-using variants (cellGcmSetVertexProgram(CGprogram, ...)
++ * etc.) are deliberately not here — they need a Cg-runtime bridge
++ * layer over PSL1GHT's rsxVertexProgram / rsxFragmentProgram structs
++ * which is a separate undertaking.  These below take only POD args
++ * and forward 1:1 to PSL1GHT's rsx* family.
++ * ========================================================== */
++
++/* --- Draw --- */
++
++static inline void cellGcmSetDrawArrays(CellGcmContextData *thisContext,
++                                        uint32_t type, uint32_t start, uint32_t count)
++{
++	rsxDrawVertexArray(thisContext, type, start, count);
++}
++
++static inline void cellGcmSetDrawIndexArray(CellGcmContextData *thisContext,
++                                            uint8_t type, uint32_t offset, uint32_t count,
++                                            uint8_t data_type, uint8_t location)
++{
++	rsxDrawIndexArray(thisContext, type, offset, count, data_type, location);
++}
++
++static inline void cellGcmSetDrawBegin(CellGcmContextData *thisContext, uint32_t type)
++{
++	rsxDrawVertexBegin(thisContext, type);
++}
++
++static inline void cellGcmSetDrawEnd(CellGcmContextData *thisContext)
++{
++	rsxDrawVertexEnd(thisContext);
++}
++
++/* --- Vertex data (per-attribute) --- */
++
++static inline void cellGcmSetVertexData4f(CellGcmContextData *thisContext,
++                                          uint8_t index, const float v[4])
++{
++	rsxDrawVertex4f(thisContext, index, v);
++}
++
++static inline void cellGcmSetVertexDataArray(CellGcmContextData *thisContext,
++                                             uint8_t index, uint16_t frequency,
++                                             uint8_t stride, uint8_t size,
++                                             uint8_t type, uint8_t location,
++                                             uint32_t offset)
++{
++	(void)thisContext; (void)index; (void)frequency;
++	(void)stride; (void)size; (void)type; (void)location; (void)offset;
++	/* PSL1GHT exposes a different decomposition: rsxBindVertexArrayAttrib
++	 * + rsxSetVertexDataArray-like helpers in <rsx/rsx.h>.  Map here once
++	 * the first sample needs this exact entry point — for now, skipping
++	 * the body keeps the symbol resolvable (caller error: TODO). */
++}
++
++static inline void cellGcmSetVertexAttribInputMask(CellGcmContextData *thisContext, uint16_t mask)
++{
++	(void)thisContext; (void)mask;
++	/* PSL1GHT doesn't expose this directly; hardware default is to derive
++	 * it from rsxBindVertexArrayAttrib calls.  Stub for source-compat. */
++}
++
++static inline void cellGcmSetVertexAttribOutputMask(CellGcmContextData *thisContext, uint32_t mask)
++{
++	rsxSetVertexAttribOutputMask(thisContext, mask);
++}
++
++/* --- Vertex program constants (no Cg handle needed) --- */
++
++static inline void cellGcmSetVertexProgramConstants(CellGcmContextData *thisContext,
++                                                    uint32_t start, uint32_t count,
++                                                    const float *data)
++{
++	rsxSetVertexProgramConstants(thisContext, start, count, data);
++}
++
++/* --- Fragment program flags --- */
++
++static inline void cellGcmSetFragmentProgramGammaEnable(CellGcmContextData *thisContext,
++                                                        uint32_t enable)
++{
++	rsxSetFragmentProgramGammaEnable(thisContext, enable);
++}
++
++/* --- Texture cache invalidation --- */
++
++static inline void cellGcmSetInvalidateVertexCache(CellGcmContextData *thisContext)
++{
++	rsxInvalidateVertexCache(thisContext);
++}
++
++static inline void cellGcmSetInvalidateTextureCache(CellGcmContextData *thisContext, uint32_t type)
++{
++	rsxInvalidateTextureCache(thisContext, type);
++}
++
++/* --- 2D transfer engine (BLT path; no shaders required) --- */
++
++static inline void cellGcmSetTransferDataMode(CellGcmContextData *thisContext, uint8_t mode)
++{
++	rsxSetTransferDataMode(thisContext, mode);
++}
++
++static inline void cellGcmSetTransferDataOffset(CellGcmContextData *thisContext,
++                                                uint32_t dst, uint32_t src)
++{
++	rsxSetTransferDataOffset(thisContext, dst, src);
++}
++
++static inline void cellGcmSetTransferDataFormat(CellGcmContextData *thisContext,
++                                                int32_t inpitch, int32_t outpitch,
++                                                uint32_t linelength, uint32_t linecount,
++                                                uint8_t inbytes, uint8_t outbytes)
++{
++	rsxSetTransferDataFormat(thisContext, inpitch, outpitch,
++	                         linelength, linecount, inbytes, outbytes);
++}
++
++static inline void cellGcmSetTransferData(CellGcmContextData *thisContext,
++                                          uint8_t mode, uint32_t dst, uint32_t outpitch,
++                                          uint32_t src, uint32_t inpitch,
++                                          uint32_t linelength, uint32_t linecount)
++{
++	rsxSetTransferData(thisContext, mode, dst, outpitch, src,
++	                   inpitch, linelength, linecount);
++}
++
++static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
++                                           uint8_t mode,
++                                           uint32_t dstOffset, uint32_t dstPitch,
++                                           uint32_t dstX, uint32_t dstY,
++                                           uint32_t srcOffset, uint32_t srcPitch,
++                                           uint32_t srcX, uint32_t srcY,
++                                           uint32_t width, uint32_t height,
++                                           uint32_t bytesPerPixel)
++{
++	rsxSetTransferImage(thisContext, mode,
++	                    dstOffset, dstPitch, dstX, dstY,
++	                    srcOffset, srcPitch, srcX, srcY,
++	                    width, height, bytesPerPixel);
++}
++
+ #ifdef __cplusplus
+ }
+ #endif
