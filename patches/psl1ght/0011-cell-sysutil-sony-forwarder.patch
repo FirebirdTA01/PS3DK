@@ -1,0 +1,105 @@
+Subject: [PATCH] ppu/include: Sony-named forwarder at <cell/sysutil.h>
+
+First Phase 6 backfill.  PSL1GHT's libsysutil.a already embeds Sony's
+authentic FNIDs for cellSysutil*; only the C-level identifiers differ
+(`sysUtilCheckCallback` in PSL1GHT vs `cellSysutilCheckCallback` in
+Sony's SDK).  A final ELF linked against PSL1GHT-renamed symbols
+produces a `.rodata.sceFNID` section byte-identical to a Sony-compiled
+build — the PRX loader reads the FNID, not the C symbol name.
+
+Close the source-compat gap with a thin static-inline forwarder header
+at ppu/include/cell/sysutil.h.  Callers that #include <cell/sysutil.h>
+and call cellSysutilRegisterCallback / cellSysutilCheckCallback /
+cellSysutilUnregisterCallback compile against PSL1GHT's runtime
+unchanged, and the resulting SELF imports Sony's FNIDs 0x9d98afa0,
+0x189a74da, 0x02ff3c1b as it should.
+
+Scope of this commit:
+  - Callback registry (register / check / unregister).
+  - CellSysutilCallback / CellSysutilUserId typedefs.
+  - Common event codes as aliases (CELL_SYSUTIL_REQUEST_EXITGAME etc.).
+
+Out of scope — matching dedicated forwarder headers to follow:
+  - cell/msg_dialog.h   (cellMsgDialogOpen/Abort/Close/...)
+  - cell/save_data.h    (cellSaveDataAutoSave2 etc.)
+  - cell/game_data.h
+  - cell/cell_common.h or the getSystemParam* surface — needs a
+    clean-room port of Sony's param-ID enum before it can forward
+    safely.
+
+New sample samples/hello-ppu-sysutil-cb exercises the forwarder:
+registers a callback on slot 0, polls for 10 seconds, prints each
+event the XMB delivers.  Build is green; ready to run under RPCS3.
+
+diff --git a/ppu/include/cell/sysutil.h b/ppu/include/cell/sysutil.h
+new file mode 100644
+index 0000000..e101801
+--- /dev/null
++++ b/ppu/include/cell/sysutil.h
+@@ -0,0 +1,66 @@
++/*! \file cell/sysutil.h
++ \brief Sony-named forwarder over PSL1GHT's <sysutil/sysutil.h>.
++
++  Re-exports the PSL1GHT system-utility callback API under the Sony
++  reference SDK naming (`cellSysutilRegisterCallback`, etc.) so source
++  written against the Sony SDK compiles against PSL1GHT's runtime with
++  no other changes.  The underlying SPRX linkage is identical — PSL1GHT
++  already uses Sony's FNIDs; only the C-level identifiers differ.
++
++  Scope:
++    - Callback registry: register / check / unregister.
++    - The common event codes (CELL_SYSUTIL_REQUEST_EXITGAME etc.).
++    - The CellSysutilCallback typedef.
++
++  Out of scope here (queued as libsysutil backfill follow-ups):
++    - cellMsgDialog*, cellSaveData*, cellGameData*, etc. — those live
++      in their own Sony sub-headers and each wants a matching forwarder
++      (cell/msg_dialog.h, cell/save_data.h, ...).  Pattern is the same
++      as here.
++    - cellSysutilGetSystemParam{Int,String} — wait on a clean-room
++      match of Sony's param ID enum before forwarding.
++*/
++
++#ifndef __PSL1GHT_CELL_SYSUTIL_H__
++#define __PSL1GHT_CELL_SYSUTIL_H__
++
++#include <sysutil/sysutil.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Sony's callback type; layout-identical to PSL1GHT's sysutilCallback. */
++typedef sysutilCallback CellSysutilCallback;
++
++/* Sony userid alias — most APIs that take a CellSysutilUserId
++ * just pass it through to the underlying SPRX as an opaque uint32. */
++typedef unsigned int CellSysutilUserId;
++
++/* Common event codes — Sony's names over PSL1GHT's symbols.  Values
++ * are identical; only the macro names differ. */
++#define CELL_SYSUTIL_REQUEST_EXITGAME     SYSUTIL_EXIT_GAME
++#define CELL_SYSUTIL_DRAWING_BEGIN        SYSUTIL_DRAW_BEGIN
++#define CELL_SYSUTIL_DRAWING_END          SYSUTIL_DRAW_END
++#define CELL_SYSUTIL_SYSTEM_MENU_OPEN     SYSUTIL_MENU_OPEN
++#define CELL_SYSUTIL_SYSTEM_MENU_CLOSE    SYSUTIL_MENU_CLOSE
++
++/* Callback registry — thin static inlines so Sony-named call sites
++ * compile down to direct branches against PSL1GHT's existing runtime. */
++static inline int cellSysutilCheckCallback(void) {
++	return (int)sysUtilCheckCallback();
++}
++
++static inline int cellSysutilRegisterCallback(int slot, CellSysutilCallback func, void *userdata) {
++	return (int)sysUtilRegisterCallback((s32)slot, func, userdata);
++}
++
++static inline int cellSysutilUnregisterCallback(int slot) {
++	return (int)sysUtilUnregisterCallback((s32)slot);
++}
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __PSL1GHT_CELL_SYSUTIL_H__ */
