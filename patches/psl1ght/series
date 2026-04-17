@@ -21,3 +21,4 @@
 0021-sys-lv2-sync-compat-shims.patch
 0022-cell-gcm-system-function-forwarder.patch
 0023-cell-gcm-command-emitter-forwarders.patch
+0024-cell-gcm-cursor-and-draw-emitters.patch
