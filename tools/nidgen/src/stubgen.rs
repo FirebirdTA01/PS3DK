@@ -1,33 +1,40 @@
-//! Emit PPU assembly that produces PSL1GHT/Sony-compatible stub archives.
+//! Emit PPU assembly that produces complete Sony-compatible stub archives.
 //!
 //! The PS3 PRX loader + sprxlinker + `lv2.ld` expect specific section names
-//! in the final linked ELF — not per-library scoped variants.  The stub
-//! archive we produce here matches that contract exactly, which is the same
-//! contract PSL1GHT's `sprx/common/libexport.c` has always targeted:
+//! in the final linked ELF — not per-library scoped variants.  Sony's
+//! reference stub archives ship one per-export `.o` whose sections add up to
+//! a self-contained import surface; PSL1GHT's `sprx/common/libexport.c` +
+//! `exports.S` reproduce the same surface, split across two source files.
+//! This module reproduces all of it in a single emit:
 //!
 //! ```text
-//!   .data.sceFStub.<library>   one 4-byte slot per export + anchor symbol;
-//!                              each slot is a pointer to the trampoline
-//!                              `__<name>` symbol (defined elsewhere — by
-//!                              PSL1GHT's SPRX build, not here).
-//!   .rodata.sceResident        4-byte version word + the library-name
-//!                              null-terminated string.
+//!   .data.sceFStub.<library>   anchor + one 4-byte slot per export.
+//!                              Each slot is initialised to the trampoline
+//!                              `__<name>` (the PRX loader patches it at
+//!                              module load to the real function descriptor
+//!                              of the resolved SPRX entry).
+//!   .rodata.sceResident        4-byte version word + library-name C-string.
 //!   .lib.stub                  one 44-byte prx_header per library, pointing
 //!                              at the name string, the first fnid, and the
 //!                              fstub table anchor.
-//!   .rodata.sceFNID            one 4-byte NID per export.
+//!   .rodata.sceFNID            per-library anchor symbol + one 4-byte NID
+//!                              per export.
+//!   .sceStub.text              per-export ~60-byte PPC64 trampoline that
+//!                              reads `<name>_stub` (function descriptor),
+//!                              loads entry+TOC, and branches via `bctrl`.
+//!   .opd                       per-export 24-byte function descriptor so
+//!                              the externally-callable C symbol `<name>`
+//!                              resolves to the trampoline.
 //! ```
+//!
+//! The emitted archive is therefore self-contained: no PSL1GHT SPRX support
+//! is required to link against it.  This is what makes Phase 6.5 libraries
+//! (libsysutil_screenshot first; libsysutil_ap / imejp / subdisplay / music\*
+//! to follow) work without a hand-written wrapper.
 //!
 //! Earlier versions of this module emitted `.lib.stub.<library>` + `b <sym>`
 //! placeholders — a format that never matched the linker script and would
 //! never have produced a loader-compatible SELF.  Do not regress to that.
-//!
-//! The `__<name>` trampolines are intentionally out of scope here: they live
-//! in the SPRX build for each library (they're ~32 bytes of PPC64 code that
-//! loads the patched stub slot and branches through it).  A stub archive
-//! produced by this module is the "import half" that user code links
-//! against; the SPRX/crt build is the "export half" that defines the
-//! trampolines and the runtime library behind them.
 
 use crate::db::Library;
 use std::fmt::Write;
@@ -84,11 +91,7 @@ pub fn render_library(lib: &Library) -> String {
     //    the low byte that correspond to export counts, so this is indeed
     //    an export count.
     let header_sym = format!("__nidgen_{}_header", lib.library);
-    let first_fnid_sym = lib
-        .exports
-        .first()
-        .map(|e| format!("{}_fnid", e.name))
-        .unwrap_or_else(|| "0".into());
+    let fnid_anchor_ref = format!("__nidgen_{}_fnid_anchor", lib.library);
     writeln!(out, "\t.section \".lib.stub\",\"aw\"").ok();
     writeln!(out, "\t.align 2").ok();
     writeln!(out, "\t.type {}, @object", header_sym).ok();
@@ -100,7 +103,7 @@ pub fn render_library(lib: &Library) -> String {
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte {}", name_sym).ok();
-    writeln!(out, "\t.4byte {}", first_fnid_sym).ok();
+    writeln!(out, "\t.4byte {}", fnid_anchor_ref).ok();
     writeln!(out, "\t.4byte scefstub").ok();
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte 0").ok();
@@ -108,30 +111,50 @@ pub fn render_library(lib: &Library) -> String {
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out).ok();
 
-    // 4. Per-export stub slot + fnid.  Each export gets:
-    //      <name>_stub  in .data.sceFStub.<library>, 4 bytes, = &__<name>.
-    //      <name>_fnid  in .rodata.sceFNID,         4 bytes, = NID.
-    //    The `__<name>` trampoline is an extern — PSL1GHT's SPRX build
-    //    defines it in each library's sprx.c + sprx crt.  User code that
-    //    calls `<name>` branches through `.sceStub.text:<name>` (generated
-    //    by the GCC PLT / PSL1GHT's librt), which loads the stub slot
-    //    pointer from `<name>_stub` and jumps through it.  The stub slot
-    //    starts out pointing at `__<name>` (the trampoline).  The PRX
-    //    loader patches it at runtime to point at the real implementation
-    //    in the resolved SPRX module.
+    // 4. Anchor symbol for the per-library .rodata.sceFNID block — matches
+    //    PSL1GHT's `LIBRARY_SYMBOL` convention so the .lib.stub header's
+    //    `fnid` field has a deterministic start address.
+    let fnid_anchor = format!("__nidgen_{}_fnid_anchor", lib.library);
+    writeln!(out, "\t.section \".rodata.sceFNID\",\"a\"").ok();
+    writeln!(out, "\t.align 2").ok();
+    writeln!(out, "\t.globl {}", fnid_anchor).ok();
+    writeln!(out, "\t.type {}, @object", fnid_anchor).ok();
+    writeln!(out, "\t.size {}, 0", fnid_anchor).ok();
+    writeln!(out, "{}:", fnid_anchor).ok();
+    writeln!(out).ok();
+
+    // 5. Per-export quartet: slot, fnid, trampoline, opd descriptor.
+    //
+    //    <name>_stub   .data.sceFStub.<library>  4B    = &__<name>
+    //    <name>_fnid   .rodata.sceFNID           4B    = NID
+    //    __<name>      .sceStub.text             ~60B  trampoline (saves LR/r2,
+    //                                                  loads <name>_stub as a
+    //                                                  function descriptor,
+    //                                                  branches via bctrl,
+    //                                                  restores, returns)
+    //    <name>        .opd                      24B   { __<name>, .TOC.@tocbase, 0 }
+    //
+    //    The PRX loader patches <name>_stub at module load to point at the
+    //    real entry's function descriptor in the resolved SPRX.  Until then
+    //    the slot still points at __<name> itself, and calling it would
+    //    re-enter the trampoline forever (stack overflow).  This matches
+    //    PSL1GHT's existing fallback behaviour; it relies on the loader
+    //    actually patching every slot.
     for e in &lib.exports {
         let stub_sym = format!("{}_stub", e.name);
         let fnid_sym = format!("{}_fnid", e.name);
-        let trampoline_sym = format!("__{}", e.name);
+        let tramp_sym = format!("__{}", e.name);
 
+        // 5a. Stub slot.
         writeln!(out, "\t.globl {}", stub_sym).ok();
         writeln!(out, "\t.section \"{}\"", fstub_section).ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.type {}, @object", stub_sym).ok();
         writeln!(out, "\t.size {}, 4", stub_sym).ok();
         writeln!(out, "{}:", stub_sym).ok();
-        writeln!(out, "\t.4byte {}", trampoline_sym).ok();
+        writeln!(out, "\t.4byte {}", tramp_sym).ok();
 
+        // 5b. FNID.
         writeln!(out, "\t.globl {}", fnid_sym).ok();
         writeln!(out, "\t.section \".rodata.sceFNID\",\"a\"").ok();
         writeln!(out, "\t.align 2").ok();
@@ -139,6 +162,41 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "\t.size {}, 4", fnid_sym).ok();
         writeln!(out, "{}:", fnid_sym).ok();
         writeln!(out, "\t.4byte 0x{:08x}", e.nid).ok();
+
+        // 5c. Trampoline — literal port of the PSL1GHT EXPORT() macro at
+        //     src/ps3dev/PSL1GHT/ppu/sprx/common/exports.S:13-37.  15 PPC64
+        //     insns; treats the slot value as a (entry,TOC) function
+        //     descriptor and tail-calls through it.
+        writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
+        writeln!(out, "\t.align 2").ok();
+        writeln!(out, "\t.globl {}", tramp_sym).ok();
+        writeln!(out, "\t.type {}, @function", tramp_sym).ok();
+        writeln!(out, "{}:", tramp_sym).ok();
+        writeln!(out, "\tmflr   0").ok();
+        writeln!(out, "\tstd    0,16(1)").ok();
+        writeln!(out, "\tstd    2,40(1)").ok();
+        writeln!(out, "\tstdu   1,-128(1)").ok();
+        writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
+        writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
+        writeln!(out, "\tlwz    0,0(12)").ok();
+        writeln!(out, "\tlwz    2,4(12)").ok();
+        writeln!(out, "\tmtctr  0").ok();
+        writeln!(out, "\tbctrl").ok();
+        writeln!(out, "\taddi   1,1,128").ok();
+        writeln!(out, "\tld     2,40(1)").ok();
+        writeln!(out, "\tld     0,16(1)").ok();
+        writeln!(out, "\tmtlr   0").ok();
+        writeln!(out, "\tblr").ok();
+        writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
+
+        // 5d. OPD function descriptor for the externally callable symbol.
+        writeln!(out, "\t.section \".opd\",\"aw\"").ok();
+        writeln!(out, "\t.align 3").ok();
+        writeln!(out, "\t.globl {}", e.name).ok();
+        writeln!(out, "\t.type {}, @function", e.name).ok();
+        writeln!(out, "\t.size {}, 24", e.name).ok();
+        writeln!(out, "{}:", e.name).ok();
+        writeln!(out, "\t.quad {}, .TOC.@tocbase, 0", tramp_sym).ok();
         writeln!(out).ok();
     }
 
@@ -155,6 +213,7 @@ mod tests {
             library: "cellPad".into(),
             version: 1,
             module: "sys_io".into(),
+            archive_name: None,
             exports: vec![
                 Export {
                     name: "cellPadInit".into(),
@@ -189,6 +248,8 @@ mod tests {
         assert!(s.contains(".rodata.sceResident"), "missing resident section");
         assert!(s.contains(".rodata.sceFNID"), "missing fnid section");
         assert!(s.contains(".lib.stub\""), "missing lib.stub section");
+        assert!(s.contains(".sceStub.text"), "missing sceStub.text trampoline section");
+        assert!(s.contains(".opd"), "missing opd descriptor section");
         // Must NOT emit the obsolete per-library .lib.stub.<library> form.
         assert!(
             !s.contains(".lib.stub.cellPad"),
@@ -196,17 +257,25 @@ mod tests {
         );
         // Library name in sceResident.
         assert!(s.contains("\"cellPad\""));
-        // Each export has a _stub + _fnid pair pointing at __<name>.
+        // Each export has the full quartet: stub slot, fnid, trampoline, opd.
         assert!(s.contains("cellPadInit_stub:"));
-        assert!(s.contains("__cellPadInit"));
+        assert!(s.contains("__cellPadInit:"), "trampoline label missing");
         assert!(s.contains("cellPadInit_fnid:"));
         assert!(s.contains("0x1e7eb5b3"));
         assert!(s.contains("cellPadEnd_stub:"));
-        assert!(s.contains("__cellPadEnd"));
+        assert!(s.contains("__cellPadEnd:"), "trampoline label missing");
         assert!(s.contains("0x2ba14c6b"));
+        // OPD descriptor lines for both externally-callable symbols.
+        assert!(s.contains(".quad __cellPadInit"), "missing opd descriptor");
+        assert!(s.contains(".quad __cellPadEnd"), "missing opd descriptor");
+        // FNID anchor symbol.
+        assert!(s.contains("__nidgen_cellPad_fnid_anchor"));
         // The prx_header struct body.
         assert!(s.contains("0x2c000001"), "missing prx_header magic word");
         assert!(s.contains(".2byte 2"), "export count should be 2");
+        // Trampoline body must include the bctrl branch and the stub-slot load.
+        assert!(s.contains("bctrl"), "trampoline missing bctrl");
+        assert!(s.contains("cellPadInit_stub@ha"), "trampoline missing stub-slot load");
     }
 
     #[test]
@@ -215,6 +284,7 @@ mod tests {
             library: "empty".into(),
             version: 1,
             module: "empty".into(),
+            archive_name: None,
             exports: vec![],
             imports: vec![],
         };

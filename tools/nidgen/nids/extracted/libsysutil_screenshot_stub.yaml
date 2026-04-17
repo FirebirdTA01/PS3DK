@@ -1,21 +1,27 @@
 library: cellScreenShotUtility
 version: 1
 module: cellScreenShotUtility
+archive_name: sysutil_screenshot
 exports:
 - name: cellScreenShotDisable
   nid: '0xfc6f4e74'
-  signature: ''
+  signature: int cellScreenShotDisable(void)
   notes: extracted from _cellScreenShotUtility_0001_4.o
+  impl_status: stub
 - name: cellScreenShotEnable
   nid: '0x9e33ab8f'
-  signature: ''
+  signature: int cellScreenShotEnable(void)
   notes: extracted from _cellScreenShotUtility_0001_2.o
+  impl_status: stub
 - name: cellScreenShotSetOverlayImage
   nid: '0x7a9c2243'
-  signature: ''
+  signature: int cellScreenShotSetOverlayImage(const char *srcDir, const char *srcFile,
+    int32_t offset_x, int32_t offset_y)
   notes: extracted from _cellScreenShotUtility_0001_1.o
+  impl_status: stub
 - name: cellScreenShotSetParameter
   nid: '0xd3ad63e4'
-  signature: ''
+  signature: int cellScreenShotSetParameter(const CellScreenShotSetParam *param)
   notes: extracted from _cellScreenShotUtility_0001_3.o
+  impl_status: stub
 imports: []

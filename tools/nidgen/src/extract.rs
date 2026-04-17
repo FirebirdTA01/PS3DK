@@ -129,6 +129,7 @@ pub fn extract_archive(archive_path: &Path) -> Result<Library> {
         library: library_name.clone(),
         version: 1,
         module: library_name, // TODO: map to SPRX module via a hand-curated table.
+        archive_name: None,
         exports,
         imports: Vec::new(),
     })

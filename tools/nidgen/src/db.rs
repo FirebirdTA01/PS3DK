@@ -18,6 +18,12 @@ pub struct Library {
     /// "sys_net", "libnetctl"). Used by the PRX loader.
     pub module: String,
 
+    /// Optional override for the archive filename basename (i.e. `lib<basename>_stub.a`).
+    /// When `None`, falls back to `library`. Needed where Sony's archive name diverges
+    /// from the runtime library name — e.g. `sysutil_screenshot` vs `cellScreenShotUtility`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_name: Option<String>,
+
     /// Exported symbols.
     #[serde(default)]
     pub exports: Vec<Export>,
@@ -186,6 +192,7 @@ mod tests {
             library: "cellNetCtl".into(),
             version: 1,
             module: "sys_net".into(),
+            archive_name: None,
             exports: vec![Export {
                 name: "cellNetCtlInit".into(),
                 nid: 0xbd5a59fc,

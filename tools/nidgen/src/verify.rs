@@ -110,6 +110,7 @@ mod tests {
             library: "t".into(),
             version: 1,
             module: "t".into(),
+            archive_name: None,
             exports: vec![Export {
                 name: "_sys_sprintf".into(),
                 // Deliberately wrong — FNID is 0xA1F9EAFE.
@@ -133,6 +134,7 @@ mod tests {
             library: "t".into(),
             version: 1,
             module: "t".into(),
+            archive_name: None,
             exports: vec![Export {
                 name: "_sys_sprintf".into(),
                 nid: 0xA1F9_EAFE,

@@ -133,20 +133,21 @@ fn main() -> Result<()> {
             let lib = db::load_library(&input)?;
             let asm_text = stubgen::render_library(&lib);
             std::fs::create_dir_all(&out_dir)?;
-            let asm_src = out_dir.join(format!("{}.s", lib.library));
+            let basename = lib.archive_name.clone().unwrap_or_else(|| lib.library.clone());
+            let asm_src = out_dir.join(format!("{}.s", basename));
             std::fs::write(&asm_src, asm_text)?;
             archive::build_stub_archive(
                 &toolchain_bin,
                 &asm,
                 &ar,
-                &lib.library,
+                &basename,
                 &asm_src,
                 &out_dir,
             )?;
             eprintln!(
                 "ok: {}/lib{}_stub.a",
                 out_dir.display(),
-                lib.library
+                basename
             );
         }
     }
