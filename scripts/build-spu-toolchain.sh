@@ -83,6 +83,11 @@ apply_patches() {
     fi
     [[ ${#patch_list[@]} -eq 0 ]] && { say "No patches in $patches_dir"; return 0; }
     for p in "${patch_list[@]}"; do
+        # Idempotent: if --dry-run --reverse succeeds, patch is already applied.
+        if (cd "$src" && patch -p1 --dry-run --reverse --silent) < "$patches_dir/$p" >/dev/null 2>&1; then
+            say "Patch $p already applied (skipping)"
+            continue
+        fi
         say "Applying $p to $src"
         (cd "$src" && patch -p1 --forward) < "$patches_dir/$p" || die "Patch $p failed"
     done
@@ -160,8 +165,18 @@ build_gcc_newlib() {
     say "Configuring GCC+newlib -> $PREFIX (target=$TARGET, GCC $GCC_VER)"
     # SPU's libm/machine/spu fenv files use #include "headers/fefpscr.h" relative
     # to their source directory.  Add -I so the compiler finds them.
+    # libc/machine/spu/memcpy.c pulls vec_literal.h from the same dir — also
+    # needs an explicit -I since the build lives in a separate obj tree.
     local newlib_spu_libm="$newlib_src/newlib/libm/machine/spu"
-    (cd "$obj" && CFLAGS_FOR_TARGET="$cflags_target -I$newlib_spu_libm" "$gcc_src/configure" \
+    local newlib_spu_libc="$newlib_src/newlib/libc/machine/spu"
+    local target_includes="-I$newlib_spu_libm -I$newlib_spu_libc"
+    # CXXFLAGS_FOR_TARGET mirrors CFLAGS_FOR_TARGET: libstdc++ is large enough
+    # that without -mno-branch-hints the hbrr instruction's 16-bit displacement
+    # overflows in functexcept.cc / system_error.cc and binutils aborts.
+    (cd "$obj" && \
+        CFLAGS_FOR_TARGET="$cflags_target $target_includes" \
+        CXXFLAGS_FOR_TARGET="$cflags_target $target_includes" \
+        "$gcc_src/configure" \
         --prefix="$PREFIX" \
         --target="$TARGET" \
         --with-newlib \
