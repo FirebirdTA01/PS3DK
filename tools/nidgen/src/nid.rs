@@ -24,7 +24,7 @@ pub const PS3_NID_SUFFIX: [u8; 16] = [
 ///
 /// ```
 /// use nidgen::nid::fnid;
-/// // Arbitrary example — real FNIDs are verified against Sony stub .a tables.
+/// // Arbitrary example — real FNIDs are verified against reference stub .a tables.
 /// let id = fnid("_sys_sprintf");
 /// assert_eq!(id, 0xA1F9_EAFE);
 /// ```

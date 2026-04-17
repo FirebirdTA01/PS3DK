@@ -14,7 +14,7 @@ pub struct Library {
     #[serde(default = "default_version")]
     pub version: u32,
 
-    /// Sony SPRX module this library resolves against at runtime (e.g.
+    /// vendor SPRX module this library resolves against at runtime (e.g.
     /// "sys_net", "libnetctl"). Used by the PRX loader.
     pub module: String,
 
@@ -37,7 +37,7 @@ pub struct Export {
     /// C symbol name, e.g. "cellNetCtlInit".
     pub name: String,
 
-    /// Authoritative NID from Sony's module export table. Hex string accepted:
+    /// Authoritative NID from the reference SDK's module export table. Hex string accepted:
     /// "0xbd5a59fc", "bd5a59fc", or a bare integer.
     #[serde(with = "hex_u32")]
     pub nid: u32,
