@@ -38,6 +38,7 @@ fi
 # Phase 6.5 stub-archive YAMLs.  One entry per zero-PSL1GHT-coverage library.
 STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_screenshot_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_ap_stub.yaml"
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
