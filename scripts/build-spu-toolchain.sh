@@ -33,7 +33,7 @@ BINUTILS_TAG="binutils-2_42"
 BINUTILS_VER="2.42"
 GCC_TAG="releases/gcc-9.5.0"
 GCC_VER="9.5.0"
-NEWLIB_TAG="newlib-4.4.0.20231231"
+NEWLIB_TAG="newlib-4.4.0"
 NEWLIB_VER="4.4.0.20231231"
 
 TARGET="spu-elf"
@@ -150,16 +150,24 @@ build_gcc_newlib() {
     [[ -f "$obj/.installed" ]] && { say "GCC+newlib already built (skipping)"; return 0; }
 
     mkdir -p "$obj"
-    # SPU optimization flags matching ps3dev's proven settings for libgcc/newlib.
-    local cflags_target="-Os -fpic -ffast-math -ftree-vectorize -funroll-loops -fschedule-insns -mdual-nops -mwarn-reloc"
+    # SPU optimization flags for libgcc/newlib.  Note: -fpic is omitted here
+    # because it causes relocation overflows in libgcc's cachemgr.c with
+    # binutils 2.42.  User code should add -fpic as needed in their own CFLAGS.
+    # -mno-branch-hints: prevents hbrr instruction relocation overflows
+    # with binutils 2.42 for large functions (cachemgr, arc4random, etc.)
+    local cflags_target="-Os -ffast-math -ftree-vectorize -funroll-loops -fschedule-insns -mdual-nops -mno-branch-hints"
 
     say "Configuring GCC+newlib -> $PREFIX (target=$TARGET, GCC $GCC_VER)"
-    (cd "$obj" && CFLAGS_FOR_TARGET="$cflags_target" "$gcc_src/configure" \
+    # SPU's libm/machine/spu fenv files use #include "headers/fefpscr.h" relative
+    # to their source directory.  Add -I so the compiler finds them.
+    local newlib_spu_libm="$newlib_src/newlib/libm/machine/spu"
+    (cd "$obj" && CFLAGS_FOR_TARGET="$cflags_target -I$newlib_spu_libm" "$gcc_src/configure" \
         --prefix="$PREFIX" \
         --target="$TARGET" \
         --with-newlib \
         --enable-languages=c,c++ \
         --enable-lto \
+        --enable-obsolete \
         --disable-dependency-tracking \
         --disable-libcc1 \
         --disable-libssp \

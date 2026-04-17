@@ -1,0 +1,15 @@
+--- a/newlib/libc/machine/spu/sys/sched.h	2026-04-17 00:02:05.901477233 -0500
++++ b/newlib/libc/machine/spu/sys/sched.h	2026-04-17 00:02:05.902021435 -0500
+@@ -4,6 +4,12 @@
+ extern "C" {
+ #endif
+ 
++/* Minimal sched_param so that sys/_pthreadtypes.h compiles.
++   SPU has no OS-level thread scheduling.  */
++struct sched_param {
++  int sched_priority;
++};
++
+ int sched_yield(void);
+ 
+ #ifdef __cplusplus

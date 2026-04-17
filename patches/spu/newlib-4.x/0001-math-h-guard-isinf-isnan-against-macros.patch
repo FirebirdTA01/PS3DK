@@ -1,0 +1,20 @@
+--- a/newlib/libc/include/math.h	2026-04-16 23:59:33.409278774 -0500
++++ b/newlib/libc/include/math.h	2026-04-16 23:59:33.415278821 -0500
+@@ -125,13 +125,17 @@
+ extern int isnanl (long double);
+ #endif
+ #if !defined(__cplusplus) || __cplusplus < 201103L
++#ifndef isinf
+ extern int isinf (double);
+ #endif
++#endif
+ #endif /* __MISC_VISIBLE */
+ #if (__MISC_VISIBLE || (__XSI_VISIBLE && __XSI_VISIBLE < 600)) \
+   && (!defined(__cplusplus) || __cplusplus < 201103L)
++#ifndef isnan
+ extern int isnan (double);
+ #endif
++#endif
+ 
+ #if __ISO_C_VISIBLE >= 1999
+ /* ISO C99 types and macros. */
