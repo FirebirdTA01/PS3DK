@@ -1,0 +1,104 @@
+diff --color -ruN a/newlib/libm/fenv/feclearexcept.c b/newlib/libm/fenv/feclearexcept.c
+--- a/newlib/libm/fenv/feclearexcept.c	2026-04-17 00:12:17.759958335 -0500
++++ b/newlib/libm/fenv/feclearexcept.c	2026-04-17 00:12:17.760966889 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -65,3 +66,4 @@
+ {
+   return (excepts  ?  -ENOTSUP : 0);
+ }
++#endif /* !__SPU__ */
+diff --color -ruN a/newlib/libm/fenv/fe_dfl_env.c b/newlib/libm/fenv/fe_dfl_env.c
+--- a/newlib/libm/fenv/fe_dfl_env.c	2026-04-17 00:12:17.762494804 -0500
++++ b/newlib/libm/fenv/fe_dfl_env.c	2026-04-17 00:12:17.762898909 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -40,3 +41,4 @@
+ fenv_t __fe_dfl_env = { 0 };
+ 
+ const fenv_t *_fe_dfl_env = &__fe_dfl_env;
++#endif /* !__SPU__ */
+diff --color -ruN a/newlib/libm/fenv/fegetenv.c b/newlib/libm/fenv/fegetenv.c
+--- a/newlib/libm/fenv/fegetenv.c	2026-04-17 00:12:17.765177036 -0500
++++ b/newlib/libm/fenv/fegetenv.c	2026-04-17 00:12:17.765952064 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -65,3 +66,4 @@
+ {
+   return -ENOTSUP;
+ }
++#endif /* !__SPU__ */
+diff --color -ruN a/newlib/libm/fenv/fegetexceptflag.c b/newlib/libm/fenv/fegetexceptflag.c
+--- a/newlib/libm/fenv/fegetexceptflag.c	2026-04-17 00:12:17.767458379 -0500
++++ b/newlib/libm/fenv/fegetexceptflag.c	2026-04-17 00:12:17.767898902 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -66,3 +67,4 @@
+ {
+   return -ENOTSUP;
+ }
++#endif /* !__SPU__ */
+diff --color -ruN a/newlib/libm/fenv/feraiseexcept.c b/newlib/libm/fenv/feraiseexcept.c
+--- a/newlib/libm/fenv/feraiseexcept.c	2026-04-17 00:12:17.769878061 -0500
++++ b/newlib/libm/fenv/feraiseexcept.c	2026-04-17 00:12:17.769898900 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -65,3 +66,4 @@
+ {
+   return (excepts  ?  -ENOTSUP : 0);
+ }
++#endif /* !__SPU__ */
+diff --color -ruN a/newlib/libm/fenv/fesetenv.c b/newlib/libm/fenv/fesetenv.c
+--- a/newlib/libm/fenv/fesetenv.c	2026-04-17 00:12:17.771576555 -0500
++++ b/newlib/libm/fenv/fesetenv.c	2026-04-17 00:12:17.772011908 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -70,3 +71,4 @@
+ {
+   return -ENOTSUP;
+ }
++#endif /* !__SPU__ */
+diff --color -ruN a/newlib/libm/fenv/fesetexceptflag.c b/newlib/libm/fenv/fesetexceptflag.c
+--- a/newlib/libm/fenv/fesetexceptflag.c	2026-04-17 00:12:17.773368914 -0500
++++ b/newlib/libm/fenv/fesetexceptflag.c	2026-04-17 00:12:17.774017586 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -71,3 +72,4 @@
+ {
+   return -ENOTSUP;
+ }
++#endif /* !__SPU__ */
+diff --color -ruN a/newlib/libm/fenv/feupdateenv.c b/newlib/libm/fenv/feupdateenv.c
+--- a/newlib/libm/fenv/feupdateenv.c	2026-04-17 00:12:17.775440074 -0500
++++ b/newlib/libm/fenv/feupdateenv.c	2026-04-17 00:12:17.776332902 -0500
+@@ -1,3 +1,4 @@
++#ifndef __SPU__
+ /*
+   (c) Copyright 2019 Joel Sherrill <joel@rtems.org
+   All rights reserved.
+@@ -70,3 +71,4 @@
+ {
+   return -ENOTSUP;
+ }
++#endif /* !__SPU__ */

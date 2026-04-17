@@ -1,0 +1,20 @@
+--- a/libgcc/config/spu/t-elf	2026-04-16 23:41:57.666165145 -0500
++++ b/libgcc/config/spu/t-elf	2026-04-16 23:43:17.122173662 -0500
+@@ -29,12 +29,15 @@
+ # Neither gcc or newlib seem to have a standard way to generate multiple
+ # crt*.o files.  So we don't use the standard crt0.o name anymore.
+ 
++# cachemgr.c is large enough that GCC's hbrr branch-hint instructions
++# overflow the 10-bit I10 offset field with binutils >= 2.42.  Disable
++# branch hints for this file only; runtime impact is negligible.
+ cachemgr.o: $(srcdir)/config/spu/cachemgr.c
+-	$(gcc_compile) -c $<
++	$(gcc_compile) -mno-branch-hints -c $<
+ 
+ # Specialised rule to add a -D flag.
+ cachemgr_nonatomic.o: $(srcdir)/config/spu/cachemgr.c
+-	$(gcc_compile) -DNONATOMIC -c $<
++	$(gcc_compile) -mno-branch-hints -DNONATOMIC -c $<
+ 
+ libgcc_%.a: %.o
+ 	$(AR_FOR_TARGET) -rcs $@ $<
