@@ -1,0 +1,53 @@
+Subject: [PATCH] spu: stdio — supply findfp.c globals absent on SPU
+
+In newlib 4.4 the non-small variant of struct _reent no longer embeds an
+__sf member; stdin/stdout/stderr are pointers into the global __FILE __sf[3]
+array defined in newlib/libc/stdio/findfp.c.  The SPU port doesn't build
+libc/stdio (custom FILE I/O — __FILE is struct __sFILE_spu { int _fp; }),
+so two findfp.c globals go missing:
+
+  __FILE __sf[3]           — referenced by _REENT_INIT(_impure_data) static
+                             init in libc/reent/impure.c and needed for our
+                             own __sinit().
+  __stdio_exit_handler     — dereferenced by libc/stdlib/exit.c; leaving it
+                             undefined breaks the link of any program that
+                             calls exit() (i.e. anything with main()).
+
+Define both in libc/machine/spu/stdio.c next to the other SPU stdio
+machinery and point _REENT_STDIN/_REENT_STDOUT/_REENT_STDERR at &__sf[0..2]
+instead of the removed &s->__sf[0..2].
+
+diff --color -ruN a/newlib/libc/machine/spu/stdio.c b/newlib/libc/machine/spu/stdio.c
+--- a/newlib/libc/machine/spu/stdio.c
++++ b/newlib/libc/machine/spu/stdio.c
+@@ -36,6 +36,13 @@
+ #include "c99ppe.h"
+
+
++/* libc/stdio/findfp.c provides these globals on normal targets, but SPU
++   replaces libc/stdio wholesale (__CUSTOM_FILE_IO__), so define them here.
++   __sf[0..2] backs _impure_data's static init in libc/reent/impure.c;
++   __stdio_exit_handler is dereferenced by libc/stdlib/exit.c. */
++__FILE __sf[3];
++void (*__stdio_exit_handler) (void);
++
+ static FILE __fp[SPE_FOPEN_MAX];
+
+ FILE *
+@@ -67,13 +72,13 @@
+ {
+   _REENT_CLEANUP(s) = __cleanup;
+
+-  _REENT_STDIN(s) = &s->__sf[0];
++  _REENT_STDIN(s) = &__sf[0];
+   _REENT_STDIN(s)->_fp = SPE_STDIN;
+
+-  _REENT_STDOUT(s) = &s->__sf[1];
++  _REENT_STDOUT(s) = &__sf[1];
+   _REENT_STDOUT(s)->_fp = SPE_STDOUT;
+
+-  _REENT_STDERR(s) = &s->__sf[2];
++  _REENT_STDERR(s) = &__sf[2];
+   _REENT_STDERR(s)->_fp = SPE_STDERR;
+ }
+

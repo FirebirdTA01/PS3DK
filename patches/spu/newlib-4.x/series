@@ -1,3 +1,4 @@
 0001-math-h-guard-isinf-isnan-against-macros.patch
 0002-spu-sched-h-add-sched-param-struct.patch
 0003-spu-skip-generic-fenv-implementations.patch
+0004-spu-stdio-use-global-sf-array.patch
