@@ -5,9 +5,11 @@
  * output and what Sony's PS3 loader expects:
  *
  *   1. A .sys_proc_param section is emitted, 8-byte aligned, containing
- *      a 36-byte struct with magic=0x13bcc5f6, version=0x00330000.
- *      PSL1GHT's SYS_PROCESS_PARAM produces 32 bytes with version
- *      0x00009000 — visibly different, so we cannot rely on it here.
+ *      a 36-byte struct with magic=0x13bcc5f6, version=0x00330000, and
+ *      a trailing crash_dump_param_addr word.  This now uses PSL1GHT's
+ *      native SYS_PROCESS_PARAM macro from <sys/process.h> — the
+ *      previously-separate <sys/sony_process_param.h> shim has been
+ *      retired in favour of making the PSL1GHT header Sony-correct.
  *
  *   2. newlib's malloc / free / calloc / realloc work through the
  *      libsysbase sbrk_r dispatch layer.  Anything that compiles here
@@ -28,15 +30,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <sys/sony_process_param.h>
+#include <sys/process.h>
 
-SONY_PROCESS_PARAM(1001, 0x10000);
+SYS_PROCESS_PARAM(1001, 0x10000);
 
-static const uint32_t kExpectedMagic = SONY_PROCESS_PARAM_MAGIC;
-static const uint32_t kExpectedVersion = SONY_PROCESS_PARAM_VERSION_330_0;
+static const uint32_t kExpectedMagic = SYS_PROCESS_SPAWN_MAGIC;
+static const uint32_t kExpectedVersion = SYS_PROCESS_SPAWN_VERSION_330;
 static const size_t   kExpectedStructSize = 36;
 
-extern sony_process_param_t __sys_process_param;
+extern sys_process_param_t __sys_process_param;
 
 static int check_proc_param(void)
 {
@@ -49,13 +51,14 @@ static int check_proc_param(void)
 	       (unsigned)__sys_process_param.magic, (unsigned)kExpectedMagic);
 	printf("  version=0x%08x (expected 0x%08x)\n",
 	       (unsigned)__sys_process_param.version, (unsigned)kExpectedVersion);
-	printf("  primary_prio=%d stacksize=0x%x\n",
-	       (int)__sys_process_param.primary_prio,
-	       (unsigned)__sys_process_param.primary_stacksize);
+	printf("  prio=%d stacksize=0x%x crash_dump=0x%x\n",
+	       (int)__sys_process_param.prio,
+	       (unsigned)__sys_process_param.stacksize,
+	       (unsigned)__sys_process_param.crash_dump_param_addr);
 
-	if (sizeof(sony_process_param_t) != kExpectedStructSize) {
+	if (sizeof(sys_process_param_t) != kExpectedStructSize) {
 		printf("  FAIL: sizeof wrong (%zu vs %zu)\n",
-		       sizeof(sony_process_param_t), kExpectedStructSize);
+		       sizeof(sys_process_param_t), kExpectedStructSize);
 		ok = 0;
 	}
 	if (__sys_process_param.size != kExpectedStructSize) ok = 0;
