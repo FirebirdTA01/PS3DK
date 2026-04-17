@@ -11,12 +11,12 @@
 All directories from the plan exist: `scripts/`, `src/{upstream,ps3dev,forks}/`, `patches/{ppu,spu,psl1ght,portlibs}/...`, `tools/{nidgen,coverage-report}/`, `stage/ps3dev/{bin,ppu,spu,psl1ght,portlibs}/`, `samples/`, `ci/{docker,github-actions}/`, `tests/{smoke,conformance,hardware,rpcs3}/`, `cmake/`, `docs/`, `reference/`.
 
 ### Repo conventions
-- `.gitignore` — excludes `src/`, `build/`, `stage/`, `reference/sony-sdk/`, tarballs, build artifacts.
+- `.gitignore` — excludes `src/`, `build/`, `stage/`, `reference/private/`, tarballs, build artifacts.
 - `.gitattributes` — `patches/** -text`, CRLF rules for `.bat`/`.cmd`, binary markers on `.a`, `.self`, `.sprx`, `.pkg`.
 - `README.md` — project overview and quickstart.
 - `LICENSE` — MIT for the glue code.
-- `NOTICE` — component attribution (GCC, binutils, newlib, PSL1GHT, Sony SDK reference-only, etc.).
-- `reference/SONY_SDK_POLICY.md` — hard rules for the private SDK mount (never commit, never ship).
+- `NOTICE` — component attribution (GCC, binutils, newlib, PSL1GHT, reference SDK reference-only, etc.).
+- `reference/REFERENCE_POLICY.md` — hard rules for the private SDK mount (never commit, never ship).
 
 ### Cloned sources (all under `src/`, `.gitignored`)
 - **upstream/** — GCC (365 MB, 12.1/12.2/12.3/12.4/12.5 + 9.5 tags fetched), binutils-gdb (132 MB, binutils-2_42 + gdb-14.2-release), newlib-cygwin (35 MB, newlib-4.4.0.20231231).
@@ -25,7 +25,7 @@ All directories from the plan exist: `scripts/`, `src/{upstream,ps3dev,forks}/`,
 
 ### Scripts (all executable)
 - `scripts/env.sh` — exports `PS3_TOOLCHAIN_ROOT`, `PS3DEV`, `PPU_PREFIX`, `SPU_PREFIX`, `PSL1GHT`, `PS3_BUILD_ROOT`; prepends `$PS3DEV/bin` to PATH.
-- `scripts/bootstrap.sh` — idempotent reproducible setup: dep check, upstream/ps3dev/fork clones with pinned refs, Sony SDK mount guidance, staging layout.
+- `scripts/bootstrap.sh` — idempotent reproducible setup: dep check, upstream/ps3dev/fork clones with pinned refs, reference SDK mount guidance, staging layout.
 - `scripts/build-ppu-toolchain.sh` — binutils 2.42 → GCC 12.4.0 stage-1 → newlib 4.4.0 → GCC 12.4.0 stage-2 → GDB 14.2 → symlink aliases. Reads `patches/ppu/{binutils-2.42,gcc-12.x,newlib-4.x,gdb-14.x}/` series.
 - `scripts/build-spu-toolchain.sh` — binutils 2.42 (spu-elf) → GCC 9.5.0 + newlib combined build. Ships `spu_ps3.ld` linker script.
 - `scripts/build-psl1ght.sh` — applies `patches/psl1ght/` series, runs PSL1GHT's own `make install-ctrl && make && make install` against the new toolchain.
@@ -44,7 +44,7 @@ Workspace at `tools/Cargo.toml`:
   - `src/main.rs` — CLI with `nid`, `stub`, `verify`, `archive` subcommands.
   - `tests/fnid_vectors.rs` — regression tests against known vectors.
   - `nids/` — `schema.yaml`, `sys_lv2.yaml` (seed), `README.md`.
-- `tools/coverage-report/` — Sony-SDK-vs-PSL1GHT matrix generator. Regex-based scan today; libclang path lands when SDK mount is available.
+- `tools/coverage-report/` — reference-vs-PSL1GHT matrix generator. Regex-based scan today; libclang path lands when SDK mount is available.
 
 ### Samples (build after Phase 1 + 2 + 3 land)
 - `samples/hello-ppu-c++17/` — structured bindings, `if constexpr`, `std::string_view`, `std::optional`, CTAD, fold expression, inline variable, `std::array`, PPU thread id.
@@ -72,8 +72,8 @@ Until these land, `build-ppu-toolchain.sh` and `build-spu-toolchain.sh` will hap
 ### Rust toolchain
 Not installed on the host yet. `scripts/bootstrap.sh` warns and documents the MSYS2 install line (`pacman -S mingw-w64-x86_64-rust`). The nidgen Rust code compiles in theory; the FNID algorithm is verified via Python equivalence.
 
-### Sony SDK mount
-Deferred per user choice (`reference/sony-sdk/` is a placeholder). `bootstrap.sh` prints the `mklink /J` + `icacls` commands when the user is ready. Phase 3 coverage tooling and stub verification block on this mount.
+### reference SDK mount
+Deferred per user choice (`reference/private/` is a placeholder). `bootstrap.sh` prints the `mklink /J` + `icacls` commands when the user is ready. Phase 3 coverage tooling and stub verification block on this mount.
 
 ### CMake superbuild
 Plan calls for `CMakeLists.txt` + `cmake/*.cmake` modules orchestrating everything. Scaffolding deferred; the per-phase bash scripts are sufficient to drive the first PPU build.
@@ -85,7 +85,7 @@ Plan calls for `CMakeLists.txt` + `cmake/*.cmake` modules orchestrating everythi
 Long-lead work per the plan. Not started. Tracked as its own independent stream once Phase 2a ships.
 
 ### PSL1GHT v3 RFC patches
-`patches/psl1ght/` is empty. The v3 RFC work (Sony-style naming, NID-driven stubs, fragment shader assembler) is Phase 3 and starts after Phases 1 + 2a produce a working compiler.
+`patches/psl1ght/` is empty. The v3 RFC work (Cell-style naming, NID-driven stubs, fragment shader assembler) is Phase 3 and starts after Phases 1 + 2a produce a working compiler.
 
 ---
 
@@ -122,7 +122,7 @@ Scripts (7): `env.sh`, `bootstrap.sh`, `build-ppu-toolchain.sh`, `build-spu-tool
 
 Rust (9): `tools/Cargo.toml`, `tools/nidgen/Cargo.toml`, `tools/nidgen/src/{lib,nid,db,stubgen,archive,verify,main}.rs`, `tools/nidgen/tests/fnid_vectors.rs`, `tools/coverage-report/Cargo.toml`, `tools/coverage-report/src/main.rs`.
 
-Docs (5): `README.md`, `NOTICE`, `LICENSE`, `reference/SONY_SDK_POLICY.md`, `docs/patches-inventory.md`, `docs/phase-0-status.md` (this file), `samples/README.md`, `tools/nidgen/nids/README.md`.
+Docs (5): `README.md`, `NOTICE`, `LICENSE`, `reference/REFERENCE_POLICY.md`, `docs/patches-inventory.md`, `docs/phase-0-status.md` (this file), `samples/README.md`, `tools/nidgen/nids/README.md`.
 
 Config (3): `.gitignore`, `.gitattributes`, `tools/nidgen/nids/schema.yaml`.
 

@@ -1,5 +1,5 @@
 //! nidgen CLI — drive FNID computation, stub generation, verification, and
-//! coverage against the PSL1GHT-vs-Sony diff.
+//! coverage against the PSL1GHT-vs-reference-SDK diff.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};

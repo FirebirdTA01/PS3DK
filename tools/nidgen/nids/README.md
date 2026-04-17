@@ -10,7 +10,7 @@ libraries. One file per library. The nidgen CLI consumes them to:
 
 ## File naming
 
-`<library>.yaml`, matching the Sony SDK's library prefix:
+`<library>.yaml`, matching the reference SDK's library prefix:
 
 - `sys_lv2.yaml` — lv2 kernel syscalls (`sys_ppu_thread_*`, `sys_spu_*`, etc.)
 - `cellGcmSys.yaml` — RSX GCM runtime
@@ -28,10 +28,10 @@ See `schema.yaml` for the full JSON Schema. Minimum structure:
 ```yaml
 library: cellNetCtl            # PSL1GHT lib prefix
 version: 1                     # schema version
-module: sys_net                # Sony SPRX module the library lives in
+module: sys_net                # vendor SPRX module the library lives in
 exports:
   - name: cellNetCtlInit
-    nid:  0xbd5a59fc           # authoritative NID from Sony stub .a
+    nid:  0xbd5a59fc           # authoritative NID from reference stub .a
     signature: "int cellNetCtlInit(void)"
   - name: cellNetCtlGetInfo
     nid:  0x8ce13854
@@ -40,7 +40,7 @@ exports:
 
 ## Where do NIDs come from?
 
-Sony's official PS3 SDK ships stub `.a` archives under `target/ppu/lib/`. Each
+The reference SDK ships stub `.a` archives under `target/ppu/lib/`. Each
 archive's member objects declare symbols (the function names) and embed the
 NID as a constant in the `.lib.stub.*` section. We extract the (name, NID)
 pair by:
@@ -53,24 +53,24 @@ pair by:
 
 The `nidgen verify` command cross-checks that, for each entry, the computed
 FNID (SHA-1(name || suffix)[0..4], little-endian) matches the stored NID.
-Sony's build pipeline uses the same algorithm to originally assign NIDs, so
-these should always match for symbols Sony named in the SDK.
+the reference SDK's build pipeline uses the same algorithm to originally assign NIDs, so
+these should always match for symbols the vendor named in the SDK.
 
 ## Legal / clean-room note
 
-The YAML files here contain only **names, NIDs, and signatures** — no Sony
+The YAML files here contain only **names, NIDs, and signatures** — no proprietary
 source code or header contents. Names are recovered from public ABI (ELF
 symbol tables and exported ordinals); NIDs are computed hashes of those names.
-Signatures are reimplemented from the Sony header text by clean-room
+Signatures are reimplemented from the reference header text by clean-room
 paraphrase, not copy.
 
-The Sony SDK mount at `reference/sony-sdk/` is never committed.
+The reference SDK mount at `reference/private/` is never committed.
 
 ## Populating a new library
 
-1. Identify the Sony stub archive (`target/ppu/lib/lib<name>_stub.a`).
+1. Identify the reference stub archive (`target/ppu/lib/lib<name>_stub.a`).
 2. Enumerate its defined symbols and their `.lib.stub.*` NIDs (see above).
-3. For each symbol, reimplement the C signature from the Sony header (do not
+3. For each symbol, reimplement the C signature from the reference header (do not
    copy verbatim).
 4. Write the YAML and run `nidgen verify nids/<name>.yaml` — every line should
    report "ok".

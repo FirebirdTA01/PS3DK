@@ -2,7 +2,7 @@
 
 ## What this is
 
-Building a modern, feature-complete open-source PlayStation 3 SDK that supports **C++17 on both PPU (PowerPC 64) and SPU (Cell SPE)**. Replaces the stale ps3dev baseline (GCC 7.2.0 / binutils 2.22 / newlib 1.20.0) with current versions, fills PSL1GHT API gaps, ships fragment shader support, and uses the official Sony PS3 SDK 475.001 privately as a coverage oracle (never committed, never shipped — see `reference/SONY_SDK_POLICY.md`).
+Building a modern, feature-complete open-source PlayStation 3 SDK that supports **C++17 on both PPU (PowerPC 64) and SPU (Cell SPE)**. Replaces the stale ps3dev baseline (GCC 7.2.0 / binutils 2.22 / newlib 1.20.0) with current versions, fills PSL1GHT API gaps, ships fragment shader support, and uses the proprietary reference proprietary reference SDK privately as a coverage oracle (never committed, never shipped — see `reference/REFERENCE_POLICY.md`).
 
 ## Authoritative plan
 
@@ -26,10 +26,10 @@ Building a modern, feature-complete open-source PlayStation 3 SDK that supports 
 | binutils | 2.42 (both PPU and SPU). **No patches needed** — modern binutils handles both targets via existing catchalls (verified). |
 | newlib | 4.4.0.20231231 with PS3 libsysbase glue ported forward |
 | GDB | 14.2 (PPU only; SPU combined-debug orphaned post-2019) |
-| PSL1GHT | v3 RFC: Sony-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`); ships `psl1ght-compat.h` shim for legacy homebrew |
+| PSL1GHT | v3 RFC: Cell-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`); ships `psl1ght-compat.h` shim for legacy homebrew |
 | Fragment shader | NV40-FP assembler first; full GLSL/Cg compiler later |
 | NID/stub tooling | Rust (`tools/nidgen`, `tools/coverage-report`) |
-| Sony SDK mount | Deferred — user provides path later. Phase 3 coverage tooling falls back to PSL1GHT-only mode until then. |
+| reference SDK mount | Deferred — user provides path later. Phase 3 coverage tooling falls back to PSL1GHT-only mode until then. |
 | Eventual host targets | Linux primary for development. **Windows-hosted toolchain binaries needed eventually** — Canadian-cross from Linux to `x86_64-w64-mingw32` to produce `powerpc64-ps3-elf-gcc.exe`. Phase 5 infra concern. |
 
 ## Workspace layout
@@ -40,13 +40,13 @@ PS3_Custom_Toolchain/
 ├── src/                         .gitignored — vendored upstream + ps3dev + forks (re-clone via bootstrap.sh)
 ├── patches/                     ppu/{binutils-2.42,gcc-12.x,newlib-4.x,gdb-14.x}/ + spu/* + psl1ght/ + portlibs/
 ├── tools/                       Rust workspace: nidgen (FNID + stubgen), coverage-report
-├── reference/sony-sdk/          .gitignored read-only mount; never commit
+├── reference/private/          .gitignored read-only mount; never commit
 ├── samples/                     hello-ppu-c++17, hello-spu (build after Phase 1+2)
 ├── docs/                        plan.md, phase-0-status.md, HANDOFF.md, patches-inventory.md
 ├── stage/ps3dev/                .gitignored — $PS3DEV install prefix (bin/, ppu/, spu/, psl1ght/, portlibs/)
 ├── build/                       .gitignored — intermediates (real builds use $PS3_BUILD_ROOT for short paths)
 ├── ci/, cmake/, tests/          scaffolded; populated in later phases
-└── reference/SONY_SDK_POLICY.md hard rules for the private mount
+└── reference/REFERENCE_POLICY.md hard rules for the private mount
 ```
 
 ## Build orchestration
@@ -91,8 +91,8 @@ User-specific memory at `~/.claude/projects/C--<...>--PS3-Custom-Toolchain/memor
 
 ## House rules
 
-- Never commit to `reference/sony-sdk/` (`.gitignore` enforces).
-- Never copy Sony SDK code into the repo. Clean-room only.
+- Never commit to `reference/private/` (`.gitignore` enforces).
+- Never copy reference SDK code into the repo. Clean-room only.
 - `.gitattributes` keeps `patches/**` byte-exact (no CRLF).
 - Build trees go under `$PS3_BUILD_ROOT` (default `/c/ps3tc/build` on Windows, `~/ps3tc/build` on Linux) to dodge MAX_PATH on Windows and keep `stage/` clean.
 - Use `--only` flag on build scripts for incremental work; full rebuild only when patches change.

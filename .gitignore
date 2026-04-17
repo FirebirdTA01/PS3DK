@@ -10,9 +10,11 @@ samples/*/build/
 # Staging prefix ($PS3DEV install root)
 /stage/
 
-# Sony SDK reference mount — MUST NEVER be committed
-/reference/sony-sdk/
-/reference/sony-sdk
+# Proprietary reference material — MUST NEVER be committed.
+# Contains pointers, mount instructions, and the actual reference mount
+# used privately for API coverage/oracle work.  Everything under
+# reference/ stays local to each developer's machine.
+/reference/
 
 # Tarball cache
 *.tar.gz

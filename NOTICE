@@ -60,16 +60,6 @@ GMP, MPFR, MPC, ISL (GCC build prerequisites)
 License: LGPL v3 (GMP dual: LGPLv3 or GPLv2+), LGPL v3 (MPFR, MPC), LGPLv2.1+
 (ISL). Used by GCC internally; not linked into user PS3 binaries.
 
-Reference: Sony Computer Entertainment PS3 SDK
-----------------------------------------------
-The official Sony PS3 SDK is owned by Sony Interactive Entertainment and is
-covered by a separate SCE Developer License Agreement. In this project it is
-used privately and exclusively as a reference (coverage oracle) for API
-names, function signatures, constants, and NID values. No Sony SDK code,
-headers, or binaries are copied, redistributed, or included in this repository
-or its build artifacts. The reference/sony-sdk/ path is excluded from version
-control via .gitignore at the repository root.
-
 NVIDIA NV_fragment_program reference
 ------------------------------------
 Fragment shader assembler (Phase 3) is a clean-room implementation based on
@@ -80,7 +70,7 @@ source code is used.
 IBM Cell Broadband Engine intrinsics and manuals
 ------------------------------------------------
 SPU intrinsic names, ABI, and instruction encodings are based on the public
-IBM Cell Broadband Engine Architecture specification and the Sony/Toshiba/IBM
+IBM Cell Broadband Engine Architecture specification and the STI Consortium
 SPU C/C++ Language Extensions Specification. These are publicly published
 documents; no proprietary IBM source is used.
 

@@ -10,7 +10,7 @@ additionalProperties: false
 properties:
   library:
     type: string
-    description: "PSL1GHT/Sony library prefix (e.g. cellNetCtl, sys_lv2)."
+    description: "PSL1GHT/Cell library prefix (e.g. cellNetCtl, sys_lv2)."
     pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
 
   version:
@@ -21,7 +21,7 @@ properties:
 
   module:
     type: string
-    description: "Sony SPRX module that resolves these imports at runtime."
+    description: "vendor SPRX module that resolves these imports at runtime."
     pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
 
   exports:
@@ -48,7 +48,7 @@ $defs:
         pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
       nid:
         description: |
-          Authoritative NID from Sony stub archive. Accepts hex string
+          Authoritative NID from reference stub archive. Accepts hex string
           ("0xbd5a59fc", "bd5a59fc") or integer.
         oneOf:
           - type: string

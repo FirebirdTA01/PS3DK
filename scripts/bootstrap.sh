@@ -7,8 +7,6 @@
 #      pinned release tags).
 #   3. Clone ps3dev repos into src/ps3dev.
 #   4. Clone community forks into src/forks for patch provenance.
-#   5. Document the Sony SDK mount step (does not execute it automatically —
-#      the user must provide a path when ready).
 #
 # Idempotent: safe to re-run. Existing clones are fast-forwarded or skipped.
 
@@ -161,30 +159,7 @@ clone_shallow "https://github.com/Estwald/PSDK3v2.git"             "$FORKS_DIR/E
 clone_shallow "https://github.com/StrawFox64/PS3Toolchain.git"     "$FORKS_DIR/StrawFox64-PS3Toolchain"
 
 # -----------------------------------------------------------------------------
-# 4. Sony SDK mount (informational — not executed).
-# -----------------------------------------------------------------------------
-say "=== Sony SDK mount (deferred) ==="
-
-if [[ -e "$PS3_TOOLCHAIN_ROOT/reference/sony-sdk" ]]; then
-    say "reference/sony-sdk/ already exists (mounted or placeholder)."
-else
-    cat <<EOF
-The official Sony PS3 SDK is used privately as an API coverage oracle.
-It is never committed and never shipped. When ready to mount it:
-
-  # Windows (MSYS2):
-  cmd //c mklink /J "$(cygpath -w "$PS3_TOOLCHAIN_ROOT/reference/sony-sdk")" "D:\\path\\to\\Sony\\SDK\\475.001"
-  icacls "$(cygpath -w "$PS3_TOOLCHAIN_ROOT/reference/sony-sdk")" /deny "\$USERNAME":(WD,DC)
-
-See reference/SONY_SDK_POLICY.md for the full rules.
-
-Phase 3 coverage reporting and stub verification tooling will run in
-PSL1GHT-only mode until the mount is present.
-EOF
-fi
-
-# -----------------------------------------------------------------------------
-# 5. Build root.
+# 4. Build root.
 # -----------------------------------------------------------------------------
 say "=== Build root ==="
 
@@ -194,7 +169,7 @@ if [[ ! -d "$PS3_BUILD_ROOT" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
-# 6. Stage layout sanity.
+# 5. Stage layout sanity.
 # -----------------------------------------------------------------------------
 say "=== Staging layout ==="
 

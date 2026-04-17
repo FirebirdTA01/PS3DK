@@ -2,11 +2,11 @@
 #
 # These entries are placeholders derived from public PSDevWiki and PSL1GHT
 # sources. The `nid` values marked with a TODO comment have not yet been
-# cross-checked against Sony's stub archive — do that with
-# `nidgen verify nids/sys_lv2.yaml` after mounting reference/sony-sdk/.
+# cross-checked against reference stub archives — do that with
+# `nidgen verify nids/sys_lv2.yaml` after mounting reference/private/.
 #
 # Signature paraphrase follows PSL1GHT's cleaned-up style. Semantics summary
-# only — never copy verbatim from Sony headers.
+# only — never copy verbatim from reference headers.
 
 library: sys_lv2
 version: 1

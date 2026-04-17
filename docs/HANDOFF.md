@@ -4,10 +4,10 @@ This document captures conversational/decision context that doesn't fit `CLAUDE.
 
 ## How we got here (chronological)
 
-1. **User request:** build a modern OSS PS3 SDK supporting C++17 on PPU + SPU. User is a former Sony-licensed dev with legal SDK 475.001. Already had the strategic frame: ps3dev as base, Sony SDK as oracle, GCC 8.5/9.5 as the SPU branching point, accept that SPU is a downstream resurrection.
+1. **User request:** build a modern OSS PS3 SDK supporting C++17 on PPU + SPU. User is a former former licensee with private SDK reference access. Already had the strategic frame: ps3dev as base, reference SDK as oracle, GCC 8.5/9.5 as the SPU branching point, accept that SPU is a downstream resurrection.
 2. **Plan agent + research:** Confirmed PSL1GHT gaps (fragment shaders, networking, ad-hoc naming), cataloged GCC SPU history (obsolete in 9, removed in 10.1; binutils 2.42 still ships spu-elf intact; newlib still ships libgloss/spu).
 3. **AskUserQuestion (round 1):** locked in Native MSYS2, SPU Option C Hybrid, GCC 12.4.0 for PPU, NV40-FP assembler.
-4. **AskUserQuestion (round 2):** Sony SDK mount deferred, Rust tooling, v3 RFC naming with compat shim.
+4. **AskUserQuestion (round 2):** reference SDK mount deferred, Rust tooling, v3 RFC naming with compat shim.
 5. **Plan written + approved** at `~/.claude/plans/i-m-going-to-create-melodic-dawn.md`.
 6. **Phase 0 executed in full** — directory scaffolding, all clones (531 MB upstream + 5 forks + 3 ps3dev), .gitignore/.gitattributes/README/LICENSE/NOTICE, env.sh + bootstrap.sh, build-{ppu,spu,psl1ght,portlibs}-toolchain.sh, Rust nidgen + coverage-report code, NID schema + sys_lv2.yaml, hello-ppu-c++17 + hello-spu samples, docs/patches-inventory.md, docs/phase-0-status.md.
 7. **FNID algorithm proven** against PSDevWiki vectors via Python (Rust impl follows same logic; pending Rust install for `cargo test`).
@@ -23,12 +23,12 @@ This document captures conversational/decision context that doesn't fit `CLAUDE.
 - **Binutils 2.42 for both**: still ships spu-elf and powerpc64-*-elf catchall. No fork needed.
 - **CachyOS over WSL2 Ubuntu**: user dual-boots already. Native Linux beats WSL2 for GCC bootstrap (CPU-bound; ~30-90 min per attempt). Eventual CI is Linux anyway. The `MSYS2 native` original choice fell because Windows shell was Git Bash, not real MSYS2.
 - **Rust over Python for tooling**: load-bearing FNID code; strong typing; single static binary; ships in CI cleanly. Python equivalence test (`hashlib.sha1` etc.) used to validate Rust impl since Rust isn't installed yet.
-- **PSL1GHT v3 naming with compat shim** over keeping legacy: ≥95% Sony API coverage requires Sony names. Shim header keeps homebrew compatibility for 1-2 releases.
+- **PSL1GHT v3 naming with compat shim** over keeping legacy: ≥95% reference-SDK API coverage requires reference-SDK names. Shim header keeps homebrew compatibility for 1-2 releases.
 - **Empty binutils patch over porting the 2012 SPU-PIE patch**: that patch's `config.has_pie` mechanism was completely refactored upstream (now uses `config.has_shared`). PS3 homebrew uses `-fpic` compile-time, not `-pie` link-time, so SPU PIE is unneeded.
 
 ## Outstanding strategic items
 
-- **Sony SDK mount path**: still deferred. Phase 3 (coverage report, NID verification) blocks on this. User indicated SDK is on disk somewhere; will mount via `mklink /J reference\sony-sdk <path>` (Windows) or `ln -s <path> reference/sony-sdk` (Linux).
+- **reference SDK mount path**: still deferred. Phase 3 (coverage report, NID verification) blocks on this. User indicated SDK is on disk somewhere; will mount via `mklink /J reference/private <path>` (Windows) or `ln -s <path> reference/private` (Linux).
 - **Windows-hosted toolchain binaries**: user explicitly noted this is an eventual goal. Approach: Canadian-cross. Build on Linux, configure with `--host=x86_64-w64-mingw32`, install Mingw-w64 cross-compiler in CachyOS host. Belongs to Phase 5 infra (CI matrix).
 - **Phase 2b SPU forward-port to GCC 12+**: 12-24 weeks of compiler engineering. Independent stream from M0-M8. Not started; tracked as M9.
 

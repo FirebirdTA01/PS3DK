@@ -1,8 +1,8 @@
 # PS3 Custom Toolchain
 
-A modern, open-source toolchain and SDK for the Sony PlayStation 3, supporting **C++17** on both the PowerPC 64 PPU (PPE) and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine.
+A modern, open-source toolchain and SDK for the PlayStation 3, supporting **C++17** on both the PowerPC 64 PPU (PPE) and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine.
 
-Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebased onto current-generation compilers, with auto-generated stub libraries driven by a NID/FNID database and a ≥95% coverage target against the official Sony PS3 SDK surface for the subsystems homebrew actually uses.
+Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebased onto current-generation compilers, with auto-generated stub libraries driven by a NID/FNID database and a ≥95% coverage target against the proprietary reference SDK surface for the subsystems homebrew actually uses.
 
 ## What this is
 
@@ -11,9 +11,9 @@ Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebas
 - **Binutils**: 2.42 for both PPU and SPU. Still ships `spu-elf` upstream.
 - **Newlib**: 4.4.0 with PS3 `libsysbase` / `libgloss` syscall glue.
 - **GDB**: 14.2 for PPU-side debugging against RPCS3's gdbstub.
-- **PSL1GHT v3**: Sony-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`) with a compatibility shim for legacy homebrew. Fragment-shader-capable RSX (NV40-FP assembler first, GLSL/Cg compiler later).
+- **PSL1GHT v3**: Cell-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`) with a compatibility shim for legacy homebrew. Fragment-shader-capable RSX (NV40-FP assembler first, GLSL/Cg compiler later).
 - **portlibs**: zlib 1.3.1, libpng 1.6.43, SDL2 2.30, libcurl 8.9, mbedTLS 3.6, and more.
-- **Tooling**: Rust CLIs for NID/FNID generation, stub archive emission, Sony-SDK-vs-PSL1GHT coverage reports.
+- **Tooling**: Rust CLIs for NID/FNID generation, stub archive emission, reference-vs-PSL1GHT coverage reports.
 
 ## Status
 
@@ -64,17 +64,6 @@ source ./scripts/env.sh
 Both toolchain build scripts accept `--only <step>` (binutils | gcc-newlib | gdb | symlinks) and `--clean` to wipe intermediates.
 
 After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).
-
-## Sony SDK reference mount
-
-The official Sony PS3 SDK is used privately as an API coverage oracle. It is **never committed** and **never shipped**. To mount:
-
-```bat
-cmd /c mklink /J reference\sony-sdk "D:\path\to\your\Sony\SDK\475.001"
-icacls reference\sony-sdk /deny %USERNAME%:(WD,DC)
-```
-
-`reference/sony-sdk/` is in `.gitignore` at the top level.
 
 ## Layout
 

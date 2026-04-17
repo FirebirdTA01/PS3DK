@@ -2,7 +2,7 @@
 //!
 //! For each exported symbol, emits a small `.s` file that the PRX loader uses
 //! to resolve the dynamic import at module-load time. The layout follows the
-//! conventions used by PSL1GHT and the Sony SDK:
+//! conventions used by PSL1GHT and the reference SDK:
 //!
 //! ```text
 //!     .section .lib.stub.<library>, "ax"

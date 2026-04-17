@@ -74,6 +74,6 @@ stage/ps3dev/spu-gcc12/ ← GCC 12.4.0 (experimental, when ready)
 
 - GCC 9.5.0 `gcc/config/spu/` — the source of truth for the backend
 - GCC 10.1 removal commit: search for "Remove SPU" in GCC git log
-- Cell BE Architecture documents (in `reference/sony-sdk/HW_doc/`)
+- Cell BE Architecture documents (in `reference/private/HW_doc/`)
 - SPU ISA v1.2 (IBM document)
 - `gcc/doc/tm.texi` — target macros reference for GCC 12

@@ -1,6 +1,6 @@
 //! FNID regression vectors.
 //!
-//! When the Sony SDK mount is available, this test expands to cover every
+//! When the reference SDK mount is available, this test expands to cover every
 //! symbol in the shipped stub archives (generated via `nidgen verify`). For
 //! now, the test is seeded with the two PSDevWiki-published vectors, which
 //! lock the algorithm in place.

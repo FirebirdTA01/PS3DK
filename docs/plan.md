@@ -2,11 +2,11 @@
 
 ## Context
 
-Build a modern, feature-complete open-source PS3 SDK that supports C++17 on both the PowerPC 64 PPU (PPE) and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine. The ps3dev baseline (ps3toolchain + PSL1GHT + ps3libraries) is stale — master is still on GCC 7.2.0 / binutils 2.22 / newlib 1.20.0 — and PSL1GHT has known gaps (fragment shaders, networking, ad-hoc naming that doesn't match Sony's SDK). User is a former licensed Sony developer with legal copies of the official PS3 SDK up to 475.001, which will be used privately as a coverage oracle (read-only, never shipped).
+Build a modern, feature-complete open-source PS3 SDK that supports C++17 on both the PowerPC 64 PPU (PPE) and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine. The ps3dev baseline (ps3toolchain + PSL1GHT + ps3libraries) is stale — master is still on GCC 7.2.0 / binutils 2.22 / newlib 1.20.0 — and PSL1GHT has known gaps (fragment shaders, networking, ad-hoc naming that doesn't match the reference ABI). User is a former PS3 platform licensee with legal copies of a proprietary reference SDK, which will be used privately as a coverage oracle (read-only, never shipped).
 
 The core technical risk is SPU backend support: GCC 9 marked it obsolete, GCC 10.1 removed `gcc/config/spu/` entirely (~34,000 lines). However, **binutils 2.42 still ships `spu-elf`**, **newlib still ships `libgloss/spu`**, and **GCC 9.5.0 has both the C++17 frontend and an intact SPU backend**. This makes a hybrid ship path feasible: modern PPU on GCC 12.4.0, SPU on GCC 9.5.0 in parallel, with a long-lead forward-port of the SPU backend to GCC 12/13 running independently.
 
-Intended outcome: a reproducible MSYS2-native toolchain under `$PS3DEV` that produces valid PS3 SELF/SPRX binaries from modern C++17 sources, a PSL1GHT v3 with Sony-style naming and auto-generated stub libraries (NID/FNID driven), fragment-shader-capable RSX, and a ≥95% coverage matrix against Sony's SDK for the subsystems homebrew actually needs.
+Intended outcome: a reproducible MSYS2-native toolchain under `$PS3DEV` that produces valid PS3 SELF/SPRX binaries from modern C++17 sources, a PSL1GHT v3 with Cell-style naming and auto-generated stub libraries (NID/FNID driven), fragment-shader-capable RSX, and a ≥95% coverage matrix against the reference SDK for the subsystems homebrew actually needs.
 
 ---
 
@@ -18,7 +18,7 @@ Intended outcome: a reproducible MSYS2-native toolchain under `$PS3DEV` that pro
 | SPU strategy | **Option C Hybrid** — Phase 2a ships GCC 9.5.0 SPU; Phase 2b forward-ports `config/spu/` to GCC 12+ in parallel |
 | PPU GCC | **GCC 12.4.0** |
 | Fragment shader scope | **NV40-FP assembler first** (full GLSL/Cg compiler is a later deliverable) |
-| Sony SDK mount | **Deferred** — user provides path later; `reference/sony-sdk/` is a placeholder until then. Phase 3 coverage tooling + stub verification blocks on this. |
+| reference SDK mount | **Deferred** — user provides path later; `reference/private/` is a placeholder until then. Phase 3 coverage tooling + stub verification blocks on this. |
 | NID/stub tooling language | **Rust** (single static binary, strong typing, one-shot CI artifact) |
 | PSL1GHT v3 RFC naming | **Ship with `psl1ght-compat.h` shim** for 1–2 releases so existing homebrew can migrate |
 
@@ -37,7 +37,7 @@ PS3_Custom_Toolchain\
 │                     spu\{gcc-9.5.0, binutils-2.42, newlib-4.x}\*.patch
 │                     psl1ght\ portlibs\
 ├── tools\            nidgen\ (Rust), stubgen\ (Rust), coverage-report\ (Rust)
-├── reference\        sony-sdk\ (read-only symlink; .gitignored; deferred mount)
+├── reference/                   private/ (read-only symlink; .gitignored; deferred mount)
 ├── docs\             quickstart, migration, abi-reference, spu-programming, rsx-programming, coverage
 ├── build\            .gitignored. ppu\, spu\, psl1ght\, portlibs\
 ├── stage\ps3dev\     the $PS3DEV prefix. bin\, ppu\, spu\, psl1ght\, portlibs\
@@ -79,15 +79,15 @@ Forks for patch provenance (into `src/forks/`):
 
 In `scripts/bootstrap.sh`: `pacman -S --needed base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-gmp mingw-w64-x86_64-mpfr mingw-w64-x86_64-mpc mingw-w64-x86_64-isl mingw-w64-x86_64-python mingw-w64-x86_64-rust git wget bison flex texinfo`.
 
-### Sony SDK mount (deferred)
+### reference SDK mount (deferred)
 
-When user provides path: junction it with `cmd /c mklink /J reference\sony-sdk "<user-path>"`, lock it read-only via `icacls reference\sony-sdk /deny %USERNAME%:(WD,DC)`, add pre-commit hook that rejects any diff touching `reference/sony-sdk/`.
+When user provides path: junction it with `cmd /c mklink /J reference/private "<user-path>"`, lock it read-only via `icacls reference/private /deny %USERNAME%:(WD,DC)`, add pre-commit hook that rejects any diff touching `reference/private/`.
 
 ### Critical files
 
 - `scripts\bootstrap.sh` (new)
 - `scripts\env.sh` (new) — exports `PS3DEV`, `PPU_PREFIX`, `SPU_PREFIX`, PATH
-- `.gitignore` (new) — excludes `src/`, `build/`, `stage/`, `reference/sony-sdk/`
+- `.gitignore` (new) — excludes `src/`, `build/`, `stage/`, `reference/private/`
 - `.gitattributes` (new) — `patches/** -text`, CRLF rules
 
 ---
@@ -196,7 +196,7 @@ Ship an explicit linker script at `stage/ps3dev/spu/share/spu_ps3.ld` that defin
 ### Phase 2a risks
 
 - newlib libc too large for LS → provide `libspu_mini.a` (reimplement printf/memcpy/memset/strcmp in ~4 KB).
-- Sony `spu_intrinsics.h` has extensions beyond IBM CBEA → catalog Sony-only intrinsics, provide emulation in `PSL1GHT/spu/include/spu_intrinsics_ps3_extras.h`.
+- Vendor `spu_intrinsics.h` has extensions beyond IBM CBEA → catalog vendor-only intrinsics, provide emulation in `PSL1GHT/spu/include/spu_intrinsics_ps3_extras.h`.
 
 ### Phase 2b: Forward-port `config/spu/` to GCC 12.4.0 (long-lead, parallel)
 
@@ -237,13 +237,13 @@ tools/nidgen/
 │   ├── db.rs            # serde_yaml loader for NID YAML
 │   ├── stubgen.rs       # emit .S stubs per exported symbol
 │   ├── archive.rs       # drive ppu-ar / spu-ar to build .a stubs
-│   └── verify.rs        # cross-check against Sony stub .a symbol tables
+│   └── verify.rs        # cross-check against reference stub .a symbol tables
 ├── nids/
 │   ├── schema.yaml      # JSON Schema
 │   ├── sys_lv2.yaml
 │   ├── cellSysutil.yaml, cellGcmSys.yaml, cellNetCtl.yaml, cellPad.yaml,
 │   ├── cellAudio.yaml, cellSpurs.yaml, cellFs.yaml, ...
-└── tests/fnid-vectors.rs   # (name, fnid) pairs from Sony stub .a
+└── tests/fnid-vectors.rs   # (name, fnid) pairs from reference stub .a
 ```
 
 FNID constant (confirmed from user spec and PSDevWiki):
@@ -254,7 +254,7 @@ ps3_nid_suffix = [0x67,0x59,0x65,0x99,0x04,0x25,0x04,0x90,
 fnid = swap_bytes_u32( SHA-1(symbol || suffix)[0..4] )
 ```
 
-Unit test against known FNIDs extracted from Sony stub .a symbol tables (blocked until Sony SDK path is mounted).
+Unit test against known FNIDs extracted from reference stub .a symbol tables (blocked until reference SDK path is mounted).
 
 ### YAML schema (example)
 
@@ -273,11 +273,11 @@ exports:
 
 ### PSL1GHT v3 RFC naming migration
 
-Implement Sony-style naming per Issue #67: functions `cellXxx`, types `CellXxx`, constants `CELL_XXX_*`, syscalls `sys_*` snake_case. Ship `PSL1GHT/ppu/include/psl1ght-compat.h` that aliases old names → new names; existing homebrew migrates via `sed` scripts documented in `docs/migration-from-psl1ght.md`. Keep the shim for 1–2 releases, then deprecate.
+Implement Cell-style naming per Issue #67: functions `cellXxx`, types `CellXxx`, constants `CELL_XXX_*`, syscalls `sys_*` snake_case. Ship `PSL1GHT/ppu/include/psl1ght-compat.h` that aliases old names → new names; existing homebrew migrates via `sed` scripts documented in `docs/migration-from-psl1ght.md`. Keep the shim for 1–2 releases, then deprecate.
 
-Target renames (non-exhaustive; exhaustive list built during PSL1GHT-vs-Sony diff):
+Target renames (non-exhaustive; exhaustive list built during PSL1GHT-vs-reference-SDK diff):
 
-| Old PSL1GHT | New Sony-compatible |
+| Old PSL1GHT | New reference-compatible |
 |---|---|
 | `netCtlInfoGet` | `cellNetCtlGetInfo` |
 | `NET_CTL_STATE_IPObtained` | `CELL_NET_CTL_STATE_IPObtained` |
@@ -289,9 +289,9 @@ Target renames (non-exhaustive; exhaustive list built during PSL1GHT-vs-Sony dif
 
 ### Coverage matrix tool (`tools/coverage-report/`)
 
-Rust + `clang-sys`. Walks `reference/sony-sdk/target/{ppu,spu}/include/` and `PSL1GHT/{ppu,spu}/include/`, extracts function declarations + struct names + constants, emits `docs/coverage.md` as a matrix (`missing`/`present`/`renamed`/`signature-mismatch`). Target: ≥95% coverage on `cellGcm*`, `cellNetCtl*`, `cellPad*`, `cellAudio*`, `cellSysutil*`, `cellFs*`, `cellSpurs*`, `sys_*`.
+Rust + `clang-sys`. Walks `reference/private/target/{ppu,spu}/include/` and `PSL1GHT/{ppu,spu}/include/`, extracts function declarations + struct names + constants, emits `docs/coverage.md` as a matrix (`missing`/`present`/`renamed`/`signature-mismatch`). Target: ≥95% coverage on `cellGcm*`, `cellNetCtl*`, `cellPad*`, `cellAudio*`, `cellSysutil*`, `cellFs*`, `cellSpurs*`, `sys_*`.
 
-Coverage tool is blocked on Sony SDK mount. Until then it runs in PSL1GHT-only mode (just dumps the current PSL1GHT surface).
+Coverage tool is blocked on reference SDK mount. Until then it runs in PSL1GHT-only mode (just dumps the current PSL1GHT surface).
 
 ### Fragment shader (NV40-FP assembler)
 
@@ -302,7 +302,7 @@ New files in PSL1GHT:
 - `PSL1GHT/ppu/source/rsx/fragment_program.c` — VRAM upload + bind runtime: `cellGcmSetFragmentProgram`, `cellGcmSetFragmentProgramParameter`
 - `samples/rsx-textured-quad-fs/` — end-to-end validation sample
 
-Reference sources: Nouveau `nv40_fragprog.c` (Mesa), public Nvidia `NV_fragment_program` extension docs, Cell OS Lv-2 manual. Clean-room reimplementation, no Sony code copied.
+Reference sources: Nouveau `nv40_fragprog.c` (Mesa), public Nvidia `NV_fragment_program` extension docs, Cell OS Lv-2 manual. Clean-room reimplementation, no proprietary code copied.
 
 ### Networking gap fill
 
@@ -313,7 +313,7 @@ Reference sources: Nouveau `nv40_fragprog.c` (Mesa), public Nvidia `NV_fragment_
 ### Critical files (Phase 3)
 
 - `tools\nidgen\src\nid.rs` (load-bearing FNID algorithm)
-- `tools\nidgen\nids\*.yaml` (NID database — populated from Sony stub .a via `nidgen verify` after SDK mount)
+- `tools\nidgen\nids\*.yaml` (NID database — populated from reference stub .a via `nidgen verify` after SDK mount)
 - `src\ps3dev\PSL1GHT\ppu\include\psl1ght-compat.h` (new compat shim)
 - `src\ps3dev\PSL1GHT\ppu\source\rsx\nv40_fp_assembler.c` (fragment shader enablement)
 - `tools\coverage-report\src\main.rs`
@@ -372,7 +372,7 @@ Invocation: `cmake -B build -S . -G Ninja -DPS3DEV=C:/Users/FirebirdTA01/source/
 
 - `ci/github-actions/build-linux.yml` — matrix `{ppu-gcc: [12.4.0], spu-gcc: [9.5.0]}`, cache `build/`, build Phases 1 + 2, smoke-test Phase 3, upload `stage/ppu.tar.zst` + `stage/spu.tar.zst`.
 - `ci/github-actions/build-msys2.yml` — MSYS2 MinGW64, lower priority.
-- `ci/github-actions/coverage.yml` — runs `tools/coverage-report` on every PR, posts delta as comment. Blocked on Sony SDK mount being available in a secure CI context (or runs PSL1GHT-only until then).
+- `ci/github-actions/coverage.yml` — runs `tools/coverage-report` on every PR, posts delta as comment. Blocked on reference SDK mount being available in a secure CI context (or runs PSL1GHT-only until then).
 
 ### Documentation
 
@@ -404,11 +404,11 @@ Invocation: `cmake -B build -S . -G Ninja -DPS3DEV=C:/Users/FirebirdTA01/source/
 | M1 PPU Alpha | Hello-world C++17 on PPU runs on RPCS3 | M0 |
 | M2 SPU Alpha | hello-spu runs in RPCS3 SPU interpreter | M0 |
 | M3 Joint Alpha | PPU+SPU DMA mailbox exchange works | M1, M2 |
-| M4 PSL1GHT Beta | v3 naming, NID tooling, networking complete | M3, Sony SDK mount |
+| M4 PSL1GHT Beta | v3 naming, NID tooling, networking complete | M3, reference SDK mount |
 | M5 Fragment Shader | NV40-FP assembler + textured-quad sample renders | M4 |
 | M6 Portlibs Beta | All portlibs v1 ship; SDL2 demo runs | M4 |
 | M7 CI Green | Phase 5 complete | M6 |
-| M8 Feature Complete | ≥95% Sony API coverage + 10 samples run on hardware + RPCS3 | M7 |
+| M8 Feature Complete | ≥95% reference-SDK API coverage + 10 samples run on hardware + RPCS3 | M7 |
 | M9 Phase 2b (parallel) | SPU backend on GCC 12.4.0 | independent |
 
 ### "Feature complete" definition
@@ -425,10 +425,10 @@ Invocation: `cmake -B build -S . -G Ninja -DPS3DEV=C:/Users/FirebirdTA01/source/
 
 ## Open Items / Deferred
 
-- **Sony SDK mount path.** User provides when ready. `scripts/bootstrap.sh` will document the `mklink /J` junction command. Phase 3 coverage tooling + stub verification blocks on this; until then it runs in PSL1GHT-only mode.
+- **reference SDK mount path.** User provides when ready. `scripts/bootstrap.sh` will document the `mklink /J` junction command. Phase 3 coverage tooling + stub verification blocks on this; until then it runs in PSL1GHT-only mode.
 - **Phase 2b schedule.** Parallel/long-lead; no hard date. Completes at M9, which may be 6+ months after M8.
 - **Full GLSL/Cg fragment shader compiler.** Follow-up to NV40-FP assembler. Not in this plan.
-- **Public vs private git remote.** Assume fully public OSS; revisit if any Sony-adjacent artifacts need to stay private.
+- **Public vs private git remote.** Assume fully public OSS; revisit if any proprietary-reference-adjacent artifacts need to stay private.
 
 ---
 
@@ -441,7 +441,7 @@ After execution, run in this order:
 3. `scripts/build-spu-toolchain.sh` → produces `$PS3DEV/bin/spu-elf-gcc` (9.5.0). Build `samples/hello-spu/`. Load from PPU host via `sys_spu_image_import`; verify mailbox printf reaches PPU.
 4. `scripts/build-psl1ght.sh` → PSL1GHT with v3 naming + compat shim + NV40-FP assembler. Build `samples/ppu-spu-dma/` and `samples/rsx-triangle-vs/` — both run in RPCS3.
 5. `cargo test -p nidgen` → FNID vectors pass.
-6. `tools/coverage-report` → emits `docs/coverage.md`; manually inspect — Phase 4 ship gate is ≥95% on named subsystems (awaits Sony SDK mount).
+6. `tools/coverage-report` → emits `docs/coverage.md`; manually inspect — Phase 4 ship gate is ≥95% on named subsystems (awaits reference SDK mount).
 7. `cmake --build build` from repo root — full superbuild green.
 8. `samples/rsx-textured-quad-fs/` builds and renders on RPCS3 (M5).
 9. Real-hardware run: deploy 10 samples as PKG to jailbroken PS3; each boots and behaves correctly (M8).
