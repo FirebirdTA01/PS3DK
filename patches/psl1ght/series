@@ -9,3 +9,4 @@
 0009-sys-process-h-crash-dump-reloc.patch
 0010-own-sys-stat-header.patch
 0011-cell-sysutil-sony-forwarder.patch
+0012-cell-msg-dialog-sony-forwarder.patch
