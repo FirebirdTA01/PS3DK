@@ -6,3 +6,4 @@
 0006-ps3py-gcc-direct.patch
 0007-add-sys-sony-process-param-header.patch
 0008-sys-process-h-sony-layout.patch
+0009-sys-process-h-crash-dump-reloc.patch

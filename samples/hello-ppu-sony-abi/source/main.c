@@ -20,6 +20,14 @@
  *      (installed by PSL1GHT crt1).  A bogus route would show garbled
  *      output on RPCS3 stdout; a missing route would hang.
  *
+ *   4. crash_dump_param_addr is filled in at link time with the low 32
+ *      bits of our user-defined __sys_process_crash_dump_param callback.
+ *      The PSL1GHT SYS_PROCESS_PARAM macro emits the struct via inline
+ *      asm with a R_PPC64_ADDR32 relocation against the (weak) callback
+ *      symbol — defining the symbol here in the sample makes the
+ *      relocation resolve to a real address; omitting it leaves the
+ *      field at 0 (Sony's "no callback" value).
+ *
  * This sample is intentionally a C file (not C++) so any libstdc++
  * entanglement is isolated in hello-ppu-c++17 and cannot mask a pure-
  * C ABI regression here.
@@ -33,6 +41,14 @@
 #include <sys/process.h>
 
 SYS_PROCESS_PARAM(1001, 0x10000);
+
+/* User-defined crash-dump callback.  When this symbol is present the PSL1GHT
+ * SYS_PROCESS_PARAM macro's R_PPC64_ADDR32 relocation resolves to its OPD
+ * descriptor address (the low 32 bits of which go into
+ * __sys_process_param.crash_dump_param_addr).  In a real app the loader
+ * would call this on process crash; for the ABI smoke test we just verify
+ * the pointer was wired up correctly. */
+void __sys_process_crash_dump_param(void) { }
 
 static const uint32_t kExpectedMagic = SYS_PROCESS_SPAWN_MAGIC;
 static const uint32_t kExpectedVersion = SYS_PROCESS_SPAWN_VERSION_330;
@@ -64,6 +80,22 @@ static int check_proc_param(void)
 	if (__sys_process_param.size != kExpectedStructSize) ok = 0;
 	if (__sys_process_param.magic != kExpectedMagic) ok = 0;
 	if (__sys_process_param.version != kExpectedVersion) ok = 0;
+
+	/* Confirm the crash-dump relocation actually fired.  The 32-bit field
+	 * should hold the low 32 bits of __sys_process_crash_dump_param's OPD
+	 * descriptor address.  If the relocation silently filled in 0 instead,
+	 * task #7's mechanism has regressed. */
+	uintptr_t cb_addr = (uintptr_t)&__sys_process_crash_dump_param;
+	uint32_t  expected_crash = (uint32_t)cb_addr;
+	if (__sys_process_param.crash_dump_param_addr != expected_crash) {
+		printf("  FAIL: crash_dump_param_addr=0x%08x, expected 0x%08x\n",
+		       (unsigned)__sys_process_param.crash_dump_param_addr,
+		       (unsigned)expected_crash);
+		ok = 0;
+	} else if (expected_crash == 0) {
+		printf("  WARN: crash-dump callback resolved to 0 — unexpected\n");
+		ok = 0;
+	}
 
 	return ok;
 }

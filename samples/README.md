@@ -41,12 +41,20 @@ with `result: PASS`.
 ```
  xxxxx 00000024 13bcc5f6 00330000 ffffffff  ...$.....3......
  xxxxx 000003e9 00010000 00100000 00000000  ................
- xxxxx 00000000                             ....
+ xxxxx XXXXXXXX                             ....
 ```
 
 Fields in order: size=36, magic, version=VERSION_330, sdk_version=UNKNOWN,
 prio=1001, stacksize=0x10000, malloc_pagesize=1M, ppc_seg=DEFAULT,
-crash_dump_param_addr=0 ("no callback" — see Phase 3 task #7).
+crash_dump_param_addr=low 32 bits of `__sys_process_crash_dump_param`'s
+OPD address (the sample defines the callback; omitting it leaves this
+word at 0, which is Sony's "no callback" semantics).
+
+Task #7 delivered via patch `patches/psl1ght/0009`: the
+`SYS_PROCESS_PARAM` macro now emits the whole struct through inline asm
+so the trailing field can be a `R_PPC64_ADDR32` relocation against the
+weak `__sys_process_crash_dump_param` symbol.  User code just defines
+the callback (or doesn't).
 
 ## Building
 
