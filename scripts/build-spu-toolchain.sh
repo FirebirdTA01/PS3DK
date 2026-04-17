@@ -93,6 +93,12 @@ build_binutils() {
     local obj="$BUILD/binutils-$BINUTILS_VER-build"
 
     extract_source "$UPSTREAM/binutils-gdb" "$BINUTILS_TAG" "$src"
+
+    # Remove GDB-only components from the combined binutils-gdb source tree.
+    # The bundled readline fails to compile under GCC 14+ (strict type checking
+    # in signals.c). We build GDB separately, so these aren't needed here.
+    rm -rf "$src/readline" "$src/libdecnumber" "$src/sim" "$src/gdb" "$src/gdbserver" "$src/gdbsupport" "$src/gnulib"
+
     apply_patches "$src" "$PATCHES/binutils-2.42"
 
     [[ -f "$obj/.installed" ]] && { say "Binutils already built (skipping)"; return 0; }
@@ -106,6 +112,9 @@ build_binutils() {
         --disable-shared \
         --disable-werror \
         --disable-dependency-tracking \
+        --disable-gdb \
+        --disable-gdbserver \
+        --disable-sim \
         --with-gcc \
         --with-gnu-as \
         --with-gnu-ld)

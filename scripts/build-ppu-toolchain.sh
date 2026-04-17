@@ -109,6 +109,14 @@ build_binutils() {
     local obj="$BUILD/binutils-$BINUTILS_VER-build"
 
     extract_source "$UPSTREAM/binutils-gdb" "$BINUTILS_TAG" "$src"
+
+    # The binutils-gdb repo bundles readline, libdecnumber, and sim sources that
+    # are only needed for GDB. We build GDB separately in build_gdb(), so remove
+    # these to prevent the top-level Makefile from trying to compile them. The
+    # bundled readline (circa 2023) fails to compile under GCC 14+ due to strict
+    # -Wincompatible-pointer-types enforcement in signals.c.
+    rm -rf "$src/readline" "$src/libdecnumber" "$src/sim" "$src/gdb" "$src/gdbserver" "$src/gdbsupport" "$src/gnulib"
+
     apply_patches "$src" "$PATCHES/binutils-2.42"
 
     if [[ -f "$obj/.installed" ]]; then
@@ -126,6 +134,9 @@ build_binutils() {
         --disable-shared \
         --disable-werror \
         --disable-dependency-tracking \
+        --disable-gdb \
+        --disable-gdbserver \
+        --disable-sim \
         --enable-64-bit-bfd \
         --enable-lto \
         --enable-plugins \

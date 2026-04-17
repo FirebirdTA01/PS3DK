@@ -30,7 +30,7 @@ export PSL1GHT="$PS3DEV/psl1ght"
 
 # Short build root avoids MAX_PATH blow-ups when GCC nests autotools output.
 # Override in your shell if C:/ps3tc is unsuitable.
-export PS3_BUILD_ROOT="${PS3_BUILD_ROOT:-/c/ps3tc/build}"
+export PS3_BUILD_ROOT="${PS3_BUILD_ROOT:-$HOME/ps3tc/build}"
 
 # Prepend $PS3DEV/bin so ppu-gcc/spu-gcc/etc. shadow any system copies.
 case ":$PATH:" in
@@ -40,7 +40,7 @@ esac
 
 # MSYS2 safety net: if we're in MSYS2, make sure the mingw64 toolchain comes first
 # (mingw's gcc is the host compiler used to build the cross toolchain).
-if [[ "$MSYSTEM" == "MINGW64" || "$MSYSTEM" == "UCRT64" ]]; then
+if [[ "${MSYSTEM:-}" == "MINGW64" || "${MSYSTEM:-}" == "UCRT64" ]]; then
     case ":$PATH:" in
         *":/mingw64/bin:"*) ;;
         *) export PATH="/mingw64/bin:$PATH" ;;
