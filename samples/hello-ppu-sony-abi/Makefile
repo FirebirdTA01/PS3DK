@@ -2,9 +2,11 @@
 # hello-ppu-sony-abi — cross-check against Sony's reference SDK ABI.
 #
 # Mirrors hello-ppu-c++17's build infra but targets pure C so any libstdc++
-# entanglement cannot mask an ABI regression.  The include/ subdir hosts a
-# clean-room sony_process_param.h until a toolchain-level rewrite of
-# <sys/process.h> lands (PSL1GHT v3 RFC / Phase 3 milestone).
+# entanglement cannot mask an ABI regression.  Consumes <sys/sony_process_param.h>
+# from the PSL1GHT install tree (added by patches/psl1ght/0007) — the Sony-layout
+# .sys_proc_param struct coexists with PSL1GHT's own <sys/process.h> under a
+# separate SONY_* identifier namespace.  A tree-wide migration that replaces
+# PSL1GHT's <sys/process.h> with the Sony layout is a Phase 3 v3 RFC follow-up.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 
@@ -18,7 +20,7 @@ TARGET      := $(notdir $(CURDIR))
 BUILD       := build
 SOURCES     := source
 DATA        := data
-INCLUDES    := include
+INCLUDES    :=
 
 TITLE       := Hello PPU Sony-ABI
 APPID       := HELSONYABI
