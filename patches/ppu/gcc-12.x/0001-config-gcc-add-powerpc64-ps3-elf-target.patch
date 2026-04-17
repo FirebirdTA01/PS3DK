@@ -1,0 +1,19 @@
+--- a/gcc/config.gcc	2026-04-16 21:32:21.282265336 -0500
++++ b/gcc/config.gcc	2026-04-16 21:31:49.070824129 -0500
+@@ -2919,6 +2919,16 @@
+ 	tmake_file="${tmake_file} ${cpu_type}/t-darwin64-biarch t-slibgcc"
+ 	tm_file="${tm_file} ${cpu_type}/darwin64-biarch.h"
+ 	;;
++powerpc64-ps3-elf*)
++	tm_file="${tm_file} dbxelf.h elfos.h gnu-user.h usegas.h freebsd-spec.h newlib-stdint.h rs6000/sysv4.h rs6000/default64.h"
++	tm_file="rs6000/biarch64.h ${tm_file} rs6000/cell64lv2.h"
++	if test x${enable_secureplt} = xyes; then
++		tm_file="rs6000/secureplt.h ${tm_file}"
++	fi
++	extra_options="${extra_options} rs6000/sysv4.opt rs6000/linux64.opt"
++	tmake_file="rs6000/t-fprules rs6000/t-ppcgas rs6000/t-ppccomm"
++	use_gcc_stdint=wrap
++	;;
+ powerpc*-*-freebsd*)
+ 	tm_file="${tm_file} dbxelf.h elfos.h gnu-user.h ${fbsd_tm_file} rs6000/sysv4.h"
+ 	extra_options="${extra_options} rs6000/sysv4.opt"

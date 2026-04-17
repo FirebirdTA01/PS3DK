@@ -1,0 +1,7 @@
+0001-config-gcc-add-powerpc64-ps3-elf-target.patch
+0002-add-cell64lv2-target-header.patch
+0003-configure-ac-ps3-elf-emulation.patch
+0003b-configure-ps3-elf-emulation-generated.patch
+0004-libgcc-config-host-ps3.patch
+0005-rs6000-cell64lv2-pointer-mode.patch
+0006-libstdcxx-crossconfig-ps3.patch

@@ -1,0 +1,13 @@
+diff --git a/libgcc/config.host b/libgcc/config.host
+index 89e3dbc7c..2ce9ea3e9 100644
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -1240,6 +1240,8 @@ powerpc-*-rtems*)
+ 	tmake_file="${tmake_file} rs6000/t-ppccomm rs6000/t-savresfgpr rs6000/t-crtstuff t-crtstuff-pic t-fdpbit"
+ 	extra_parts="$extra_parts crtbeginS.o crtendS.o crtbeginT.o ecrti.o ecrtn.o ncrti.o ncrtn.o"
+ 	;;
++powerpc64-ps3-elf*)
++	;;
+ powerpc*-*-linux*)
+ 	tmake_file="${tmake_file} rs6000/t-ppccomm rs6000/t-savresfgpr rs6000/t-crtstuff rs6000/t-linux t-dfprules rs6000/t-ppc64-fp t-slibgcc-libgcc"
+ 	tmake_file="${tmake_file} t-stack rs6000/t-stack-rs6000"
