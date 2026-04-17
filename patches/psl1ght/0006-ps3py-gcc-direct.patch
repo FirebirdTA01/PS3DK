@@ -1,0 +1,48 @@
+Subject: [PATCH] tools/ps3py: build pkgcrypt via gcc, drop distutils
+
+Python 3.12 removed distutils and Arch does not ship setuptools
+by default; the setup.py-driven build is unusable on a modern
+Linux host.  Replace with a direct gcc invocation that queries
+the running python3 for its include dir and platform-specific
+EXT_SUFFIX, then produces pkgcrypt<suffix>.so + a pkgcrypt.so
+symlink for install-time consumers that expect the unsuffixed
+name.  No dependency on distutils/setuptools anymore.
+
+diff --git a/tools/ps3py/Makefile b/tools/ps3py/Makefile
+index d0df977..7d71ab5 100644
+--- a/tools/ps3py/Makefile
++++ b/tools/ps3py/Makefile
+@@ -14,11 +14,20 @@ ifneq (,$(findstring MINGW,$(UNAME)))
+ 	OS			:= win32
+ endif
+ 
++# Build the pkgcrypt Python C extension directly via the compiler, avoiding
++# the distutils/setuptools dependency that Python 3.12+ dropped.  Query the
++# running python3 for its include dir and the platform-specific .so suffix.
++PYTHON       ?= $(shell ./find-python)
++PY_INC       := $(shell $(PYTHON) -c 'import sysconfig; print(sysconfig.get_path("include"))')
++PY_EXT_SFX   := $(shell $(PYTHON) -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX") or ".so")')
++PY_SO        := pkgcrypt$(PY_EXT_SFX)
++
+ all: pkgcrypt.so
+ 
+-pkgcrypt.so: crypt.c setup.py
+-	@`./find-python` setup.py build_ext $(COMPILER)
+-	@cp build/lib.*/pkgcrypt.* .
++pkgcrypt.so: crypt.c
++	@echo "  CC      $(PY_SO)"
++	@gcc -shared -fPIC -O2 -I$(PY_INC) crypt.c -o $(PY_SO)
++	@ln -sf $(PY_SO) pkgcrypt.so
+ 
+ clean:
+ 	@echo clean	...
+diff --git a/tools/ps3py/setup.py b/tools/ps3py/setup.py
+index c315b47..481680e 100755
+--- a/tools/ps3py/setup.py
++++ b/tools/ps3py/setup.py
+@@ -1,4 +1,4 @@
+-from distutils.core import setup, Extension
++from setuptools import setup, Extension
+ 
+ module1 = Extension('pkgcrypt', sources = ['crypt.c'])
+ 

@@ -1,0 +1,54 @@
+Subject: [PATCH] ppu/include/_ansi.h: restore _DEFUN/_AND/_NOARGS/_VOID
+
+PSL1GHT's librt uses the K&R-vs-ANSI compatibility macros _DEFUN,
+_AND, _NOARGS, and _VOID in 25+ source files.  Those macros lived
+in newlib's <_ansi.h> through newlib 3.x; newlib 4.x dropped them
+because the K&R compiler path is dead.  Modernizing every librt
+file would be the long-term answer, but it is out of scope for
+toolchain alignment and would churn a codebase that already has a
+pending v3 naming RFC on top.
+
+Interpose a one-screen <_ansi.h> ahead of newlib's copy: it
+#include_next's newlib's real header (so _ATTRIBUTE, _BEGIN_STD_C,
+_ELIDABLE_INLINE etc. are unchanged) and then defines the missing
+macros back with their historical ANSI-mode expansions.  Only
+PSL1GHT code that uses these macros sees any difference; newlib
+itself and other consumers are unaffected.
+
+These macros are not part of Sony's SDK header set either — Sony
+uses plain ANSI prototypes — so nothing we add here conflicts with
+matching Sony's ABI.  The shim exists purely to let PSL1GHT's
+existing librt sources continue to compile without a bulk rewrite.
+
+diff --git a/ppu/include/_ansi.h b/ppu/include/_ansi.h
+new file mode 100644
+index 0000000..f4c1880
+--- /dev/null
++++ b/ppu/include/_ansi.h
+@@ -0,0 +1,26 @@
++/*
++ * PSL1GHT <_ansi.h> compat shim.
++ *
++ * Pulls newlib's real <_ansi.h> via #include_next, then re-adds the
++ * K&R-vs-ANSI compatibility macros (_DEFUN, _AND, _NOARGS, _VOID)
++ * that newlib 4.x dropped.  PSL1GHT's librt sources still use them.
++ *
++ * Placed in ppu/include so the PPU include path finds it before
++ * newlib's copy; #include_next then reaches newlib's real header.
++ */
++#ifndef _PSL1GHT_ANSI_COMPAT_H_
++#define _PSL1GHT_ANSI_COMPAT_H_
++
++#include_next <_ansi.h>
++
++#ifndef _DEFUN
++# define _DEFUN(name, args, parms) name(parms)
++# define _AND   ,
++# define _NOARGS void
++#endif
++
++#ifndef _VOID
++# define _VOID void
++#endif
++
++#endif /* _PSL1GHT_ANSI_COMPAT_H_ */

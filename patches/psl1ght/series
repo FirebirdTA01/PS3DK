@@ -1,1 +1,6 @@
-0001-remove-sys-select-shim.patch
+0001-own-sys-select-header.patch
+0002-libnet-rename-select-to-socketselect.patch
+0003-sysfs-stat-newlib-4-compat.patch
+0004-librt-ansi-compat-macros.patch
+0005-ps3load-stdbool.patch
+0006-ps3py-gcc-direct.patch
