@@ -7,4 +7,5 @@ pub mod nid;
 pub mod db;
 pub mod stubgen;
 pub mod archive;
+pub mod extract;
 pub mod verify;

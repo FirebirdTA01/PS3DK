@@ -46,6 +46,7 @@ samples/*/*.fake.self
 # Rust / Cargo (tools/nidgen, stubgen, coverage-report)
 target/
 Cargo.lock
+!/tools/Cargo.lock
 !/tools/*/Cargo.lock
 
 # Python
