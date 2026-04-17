@@ -1,6 +1,7 @@
 library: cellL10n
 version: 1
 module: cellL10n
+archive_name: l10n
 exports:
 - name: ARIBstoUCS2s
   nid: '0xeb41cc68'
