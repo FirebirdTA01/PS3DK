@@ -1,17 +1,21 @@
 library: cellSysutilAp
 version: 1
 module: cellSysutilAp
+archive_name: sysutil_ap
 exports:
 - name: cellSysutilApGetRequiredMemSize
   nid: '0x9e67e0dd'
-  signature: ''
+  signature: int cellSysutilApGetRequiredMemSize(void)
   notes: extracted from _cellSysutilAp_0001_3.o
+  impl_status: stub
 - name: cellSysutilApOff
   nid: '0x90c2bb19'
-  signature: ''
+  signature: int cellSysutilApOff(void)
   notes: extracted from _cellSysutilAp_0001_2.o
+  impl_status: stub
 - name: cellSysutilApOn
   nid: '0x3343824c'
-  signature: ''
+  signature: int cellSysutilApOn(CellSysutilApParam *pParam, sys_memory_container_t container)
   notes: extracted from _cellSysutilAp_0001_1.o
+  impl_status: stub
 imports: []
