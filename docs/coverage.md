@@ -1,0 +1,4782 @@
+# PS3 SDK Coverage Report
+
+Sony reference SDK 475.001 symbols vs our install tree.  Diff is by symbol name — PSL1GHT-style renamed wrappers (e.g. `sysThreadGetId` vs Sony's `sys_ppu_thread_get_id`) will show as missing here, even though a functional equivalent exists.  A future pass with a curated alias table will fold those in.
+
+## Summary
+- Libraries tracked: **97**
+- Sony exports total: **4981**
+- Covered by our install tree: **798** (16.0%)
+- Our install tree exports: **12703** (all archives, deduplicated)
+
+## Per-library coverage
+
+| Library | Sony exports | Covered | % |
+|---|---:|---:|---:|
+| `libadec_stub` | 9 | 0 | 0.0% |
+| `libatrac3multi_stub` | 24 | 0 | 0.0% |
+| `libatrac3plus_stub` | 23 | 0 | 0.0% |
+| `libaudio_stub` | 23 | 0 | 0.0% |
+| `libc_stub` | 560 | 246 | 43.9% |
+| `libcamera_stub` | 28 | 0 | 0.0% |
+| `libcelp8enc_stub` | 9 | 0 | 0.0% |
+| `libcelpenc_stub` | 9 | 0 | 0.0% |
+| `libcrashdump_stub` | 2 | 0 | 0.0% |
+| `libdaisy_stub` | 52 | 0 | 0.0% |
+| `libdbg_libio_stub` | 4 | 0 | 0.0% |
+| `libdmux_stub` | 20 | 0 | 0.0% |
+| `libfiber_stub` | 47 | 0 | 0.0% |
+| `libfont_stub` | 82 | 0 | 0.0% |
+| `libfontFT_stub` | 3 | 0 | 0.0% |
+| `libfreetype_stub` | 248 | 0 | 0.0% |
+| `libfreetypeTT_stub` | 248 | 0 | 0.0% |
+| `libfs_stub` | 59 | 0 | 0.0% |
+| `libgcm_gpad_stub` | 3 | 0 | 0.0% |
+| `libgcm_sys_stub` | 84 | 0 | 0.0% |
+| `libgem_stub` | 37 | 0 | 0.0% |
+| `libgifdec_stub` | 12 | 0 | 0.0% |
+| `libhttp_stub` | 105 | 0 | 0.0% |
+| `libhttp_util_stub` | 20 | 0 | 0.0% |
+| `libio_stub` | 40 | 6 | 15.0% |
+| `libjpgdec_stub` | 12 | 0 | 0.0% |
+| `libjpgenc_stub` | 10 | 0 | 0.0% |
+| `libkey2char_stub` | 5 | 0 | 0.0% |
+| `libl10n_stub` | 165 | 0 | 0.0% |
+| `liblv2_stub` | 118 | 5 | 4.2% |
+| `liblv2dbg_stub` | 35 | 0 | 0.0% |
+| `libm_stub` | 503 | 288 | 57.3% |
+| `libmedi_stub` | 10 | 0 | 0.0% |
+| `libmic_stub` | 41 | 0 | 0.0% |
+| `libnet_stub` | 55 | 26 | 47.3% |
+| `libnetctl_stub` | 19 | 0 | 0.0% |
+| `libovis_stub` | 4 | 0 | 0.0% |
+| `libpamf_stub` | 23 | 0 | 0.0% |
+| `libpngdec_stub` | 29 | 0 | 0.0% |
+| `libpngenc_stub` | 9 | 0 | 0.0% |
+| `libprof_stub` | 4 | 0 | 0.0% |
+| `libresc_stub` | 22 | 0 | 0.0% |
+| `librtc_stub` | 33 | 0 | 0.0% |
+| `librudp_stub` | 29 | 0 | 0.0% |
+| `libsail_stub` | 119 | 0 | 0.0% |
+| `libsail_rec_stub` | 58 | 0 | 0.0% |
+| `libsheap_stub` | 18 | 0 | 0.0% |
+| `libspudll_stub` | 2 | 0 | 0.0% |
+| `libspurs_stub` | 137 | 0 | 0.0% |
+| `libspurs_jq_stub` | 63 | 0 | 0.0% |
+| `libssl_stub` | 14 | 0 | 0.0% |
+| `libstdc++_stub` | 518 | 227 | 43.8% |
+| `libsync_stub` | 42 | 0 | 0.0% |
+| `libsync2_stub` | 32 | 0 | 0.0% |
+| `libsysmodule_stub` | 8 | 0 | 0.0% |
+| `libsysutil_stub` | 174 | 0 | 0.0% |
+| `libsysutil_ap_stub` | 3 | 0 | 0.0% |
+| `libsysutil_avc2_stub` | 54 | 0 | 0.0% |
+| `libsysutil_avconf_ext_stub` | 16 | 0 | 0.0% |
+| `libsysutil_bgdl_stub` | 2 | 0 | 0.0% |
+| `libsysutil_cross_controller_stub` | 1 | 0 | 0.0% |
+| `libsysutil_game_stub` | 15 | 0 | 0.0% |
+| `libsysutil_game_exec_stub` | 6 | 0 | 0.0% |
+| `libsysutil_imejp_stub` | 41 | 0 | 0.0% |
+| `libsysutil_licensearea_stub` | 1 | 0 | 0.0% |
+| `libsysutil_music_stub` | 22 | 0 | 0.0% |
+| `libsysutil_music_decode_stub` | 20 | 0 | 0.0% |
+| `libsysutil_music_export_stub` | 5 | 0 | 0.0% |
+| `libsysutil_np_stub` | 236 | 0 | 0.0% |
+| `libsysutil_np2_stub` | 79 | 0 | 0.0% |
+| `libsysutil_np_clans_stub` | 39 | 0 | 0.0% |
+| `libsysutil_np_commerce2_stub` | 52 | 0 | 0.0% |
+| `libsysutil_np_sns_stub` | 11 | 0 | 0.0% |
+| `libsysutil_np_trophy_stub` | 17 | 0 | 0.0% |
+| `libsysutil_np_tus_stub` | 62 | 0 | 0.0% |
+| `libsysutil_np_util_stub` | 4 | 0 | 0.0% |
+| `libsysutil_oskdialog_ext_stub` | 17 | 0 | 0.0% |
+| `libsysutil_photo_stub` | 9 | 0 | 0.0% |
+| `libsysutil_photo_decode_stub` | 4 | 0 | 0.0% |
+| `libsysutil_photo_export_stub` | 9 | 0 | 0.0% |
+| `libsysutil_photo_import_stub` | 2 | 0 | 0.0% |
+| `libsysutil_print_stub` | 14 | 0 | 0.0% |
+| `libsysutil_rec_stub` | 7 | 0 | 0.0% |
+| `libsysutil_remoteplay_stub` | 8 | 0 | 0.0% |
+| `libsysutil_savedata_stub` | 12 | 0 | 0.0% |
+| `libsysutil_screenshot_stub` | 4 | 0 | 0.0% |
+| `libsysutil_search_stub` | 21 | 0 | 0.0% |
+| `libsysutil_subdisplay_stub` | 11 | 0 | 0.0% |
+| `libsysutil_sysconf_ext_stub` | 1 | 0 | 0.0% |
+| `libsysutil_userinfo_stub` | 5 | 0 | 0.0% |
+| `libsysutil_video_export_stub` | 6 | 0 | 0.0% |
+| `libsysutil_video_upload_stub` | 1 | 0 | 0.0% |
+| `libusbd_stub` | 24 | 0 | 0.0% |
+| `libusbpspcm_stub` | 27 | 0 | 0.0% |
+| `libvdec_stub` | 11 | 0 | 0.0% |
+| `libvoice_stub` | 35 | 0 | 0.0% |
+| `libvpost_stub` | 5 | 0 | 0.0% |
+
+## Missing symbols by library
+
+### `libadec_stub` (9 / 9 missing)
+
+```
+0x847d2380  cellAdecClose
+0x1529e506  cellAdecDecodeAu
+0xe2ea549b  cellAdecEndSeq
+0x97ff2af1  cellAdecGetPcm
+0xbd75f78b  cellAdecGetPcmItem
+0xd00a6988  cellAdecOpen
+0x8b5551a4  cellAdecOpenEx
+0x7e4a4a49  cellAdecQueryAttr
+0x487b613e  cellAdecStartSeq
+```
+
+### `libatrac3multi_stub` (24 / 24 missing)
+
+```
+0x1ae28192  cellAtracMultiAddStreamData
+0x0ffb4665  cellAtracMultiCreateDecoder
+0xb23f070a  cellAtracMultiCreateDecoderExt
+0xd86acb12  cellAtracMultiDecode
+0x780a18bb  cellAtracMultiDeleteDecoder
+0x6cff1d7f  cellAtracMultiGetBitrate
+0xde9b7905  cellAtracMultiGetBufferInfoForResetting
+0xf11b8dd5  cellAtracMultiGetChannel
+0x92d48677  cellAtracMultiGetInternalErrorInfo
+0xb91967bc  cellAtracMultiGetLoopInfo
+0xd85f2d10  cellAtracMultiGetMaxSample
+0x489e22f1  cellAtracMultiGetNextDecodePosition
+0x77bd901a  cellAtracMultiGetNextSample
+0x59431d1b  cellAtracMultiGetRemainFrame
+0xed30f1fa  cellAtracMultiGetSecondBufferInfo
+0xc5c5eed3  cellAtracMultiGetSoundInfo
+0x670b2721  cellAtracMultiGetStreamDataInfo
+0x5b6ccf5a  cellAtracMultiGetTrackArray
+0x60b2101d  cellAtracMultiGetVacantSize
+0xf8b1ab0c  cellAtracMultiIsSecondBufferNeeded
+0x9119cfd1  cellAtracMultiResetPlayPosition
+0x81b22ca8  cellAtracMultiSetDataAndGetMemSize
+0xda43f526  cellAtracMultiSetLoopNum
+0x659775fb  cellAtracMultiSetSecondBuffer
+```
+
+### `libatrac3plus_stub` (23 / 23 missing)
+
+```
+0x46cfc013  cellAtracAddStreamData
+0xfa293e88  cellAtracCreateDecoder
+0x2642d4cc  cellAtracCreateDecoderExt
+0x8eb0e65f  cellAtracDecode
+0x761cb9be  cellAtracDeleteDecoder
+0x006016da  cellAtracGetBitrate
+0x99fb73d1  cellAtracGetBufferInfoForResetting
+0x0f9667b6  cellAtracGetChannel
+0xb5c11938  cellAtracGetInternalErrorInfo
+0xab6b6dbf  cellAtracGetLoopInfo
+0x5f62d546  cellAtracGetMaxSample
+0x7b22e672  cellAtracGetNextDecodePosition
+0x4797d1ff  cellAtracGetNextSample
+0xdfab73aa  cellAtracGetRemainFrame
+0xbe07f05e  cellAtracGetSecondBufferInfo
+0xcf01d5d4  cellAtracGetSoundInfo
+0x2bfff084  cellAtracGetStreamDataInfo
+0xc9a95fcb  cellAtracGetVacantSize
+0x99efe171  cellAtracIsSecondBufferNeeded
+0x7772eb2b  cellAtracResetPlayPosition
+0x66afc68e  cellAtracSetDataAndGetMemSize
+0x78ba5c41  cellAtracSetLoopNum
+0x06ddb53e  cellAtracSetSecondBuffer
+```
+
+### `libaudio_stub` (23 / 23 missing)
+
+```
+0x9e4b1db8  cellAudioAdd2chData
+0x832df17e  cellAudioAdd6chData
+0xdab029aa  cellAudioAddData
+0x04af134e  cellAudioCreateNotifyEventQueue
+0xa4c9ba65  cellAudioCreateNotifyEventQueueEx
+0xe4046afe  cellAudioGetPortBlockTag
+0x74a66af0  cellAudioGetPortConfig
+0x4109d08c  cellAudioGetPortTimestamp
+0x0b168f92  cellAudioInit
+0x31211f6b  cellAudioMiscSetAccessoryVolume
+0x4129fe2d  cellAudioPortClose
+0xcd7bc431  cellAudioPortOpen
+0x89be28f2  cellAudioPortStart
+0x5b1e2c73  cellAudioPortStop
+0xca5ac370  cellAudioQuit
+0xff3626fd  cellAudioRemoveNotifyEventQueue
+0x2b9bd9ad  cellAudioRemoveNotifyEventQueueEx
+0x17d1213b  cellAudioSendAck
+0x377e0cd9  cellAudioSetNotifyEventQueue
+0xb56ef5a1  cellAudioSetNotifyEventQueueEx
+0x5676f81c  cellAudioSetPersonalDevice
+0x56dfe179  cellAudioSetPortLevel
+0x28bc1409  cellAudioUnsetPersonalDevice
+```
+
+### `libc_stub` (314 / 560 missing)
+
+```
+0x6660fc8d  TlsGetValue
+0xa8a6f615  TlsSetValue
+0xaf89fdbd  _Assert
+0xe469fb20  _Atexit
+0x126656b7  _Btowc
+0xb1cc43e3  _CStrftime
+0x0d8a2de0  _CStrxfrm
+0xab4c7ca1  _CWcsxfrm
+0x9ff08d57  _Clearlocks
+0x7efd420a  _Daysto
+0x03becf3c  _Defloc
+0x9d140351  _Destroytls
+0x18f7b77d  _Dnorm
+0x5f922a30  _Dscale
+0xace90be4  _Dtentox
+0x889d5804  _Dunscale
+0x23d3bca7  _Eadd
+0x8e2484f1  _Emul
+0x2eea9f25  _Esub
+0x89b62f56  _Etentox
+0xde32a334  _Exitspawn
+0x9886810c  _FDnorm
+0xd4912ee3  _FDscale
+0x7994c28d  _FDtentox
+0x296bc72f  _FDunscale
+0xfb8ea4d2  _Fd2rv
+0x6687fba4  _Fgpos
+0xa65886b8  _Findloc
+0xc57337f8  _Fofind
+0x449317ed  _Fopen
+0x7c370679  _Foprep
+0xb2748a9f  _Freeloc
+0x242c603e  _Frprep
+0xcecbcdc4  _Frv2d
+0xe03c7ab1  _Fspos
+0xcf863219  _Fwprep
+0x3e57dfac  _Genld
+0x6539ff6d  _Gentime
+0x34dd6650  _Getcloc
+0xbfcd1b3b  _Getdst
+0x44115dd0  _Geterrno
+0x980d3ea7  _Getfld
+0xe7def231  _Getfloat
+0x4c3f5f29  _Getgloballocale
+0x336b4191  _Getint
+0xbc374779  _Getlname
+0x508e00c6  _Getloc
+0x9a87bb3a  _Getmbcurmax
+0x30fb2899  _Getmem
+0x0b9d04d0  _Getnloc
+0xf5a32994  _Getpcostate
+0x4a0049c6  _Getpctype
+0x53eb43a1  _Getpmbstate
+0x3ec99a66  _Getptimes
+0x1df4732e  _Getptolower
+0xc1c8737c  _Getptoupper
+0xf5ef229c  _Getpwcostate
+0x59c1bb1f  _Getpwcstate
+0xe1858899  _Getpwctrtab
+0x8809cdfd  _Getpwctytab
+0xb37982ea  _Getstr
+0xa1dbb466  _Gettime
+0xad8e9ad0  _Initlocks
+0xe5ea9e2b  _Isdst
+0x3ca81c76  _Iswctype
+0x5751acf9  _LDscale
+0xb5d353e8  _LDtentox
+0x60627fb3  _LDunscale
+0x6075a3c6  _Ld2rv
+0x6995f5e8  _Ldtob
+0xf2bbbee9  _Litob
+0x7aee5acd  _Lockfilelock
+0x7028dea9  _Locksyslock
+0x8cb6bfdc  _Locsum
+0xb24cb8d6  _Locterm
+0x54b383bc  _Locvar
+0x17bc0136  _Lrv2d
+0x882689f2  _Makeloc
+0xc0e27b2c  _Makestab
+0xfb0f0018  _Makewct
+0x5d43c1a3  _Mbtowc
+0x243b52d8  _Mbtowcx
+0x32e4a30a  _Mtxdst
+0xc9471fac  _Mtxinit
+0xf9dba140  _Mtxlock
+0x6cf78f3e  _Mtxunlock
+0x8f5dd179  _Nnl
+0xaf6bdcb0  _Nonfatal_Assert
+0x2caea755  _Once
+0xcab654bf  _Once_ctor
+0xf9e26b72  _Once_dtor
+0x4ab5fbe2  _Printf
+0x7cec7b39  _Putfld
+0xb6002508  _Putstr
+0x2d17ca7f  _Puttxt
+0x7d894764  _Readloc
+0xddc71a75  _SCE_Assert
+0xc41c6e5d  _Scanf
+0xf7ddb471  _Setgloballocale
+0xbbd4582f  _Setloc
+0x77e241bc  _Skip
+0xd1d69cb8  _Stod
+0x51b28904  _Stodx
+0x3ee29d0b  _Stof
+0xfd81f6ca  _Stoflt
+0xb4a54446  _Stofx
+0x5eb95641  _Stold
+0x07c7971d  _Stoldx
+0x36c067c1  _Stoll
+0x22b0e566  _Stollx
+0x0ae275a4  _Stolx
+0xc9607d35  _Stopfx
+0x867275d7  _Stoul
+0xd417eeb5  _Stoull
+0x05d821c4  _Stoullx
+0xa0ddba8e  _Stoulx
+0xdfb52083  _Stoxflt
+0xfae4b063  _Strcollx
+0x3d1460e9  _Strerror
+0x1dcd8609  _Strxfrmx
+0x6ba10474  _Tlsalloc
+0x0891a3fa  _Tlsfree
+0xa82d70da  _Tlsget
+0x2b7ba4ca  _Tlsset
+0xedec777d  _Ttotm
+0x5fa1e497  _Unlockfilelock
+0x34e7c97e  _Unlocksyslock
+0x1ecae195  _Vacopy
+0xb6af290e  _WFrprep
+0xf418ee84  _WFwprep
+0x40e0ff25  _WGenld
+0x8ed71e8b  _WGetfld
+0x77c15441  _WGetfloat
+0xa2945229  _WGetint
+0x344eca7e  _WGetstr
+0x9800573c  _WLdtob
+0x58320830  _WLitob
+0x329a4540  _WPrintf
+0x7b7a687a  _WPutfld
+0xafa39179  _WPutstr
+0x8ef85e47  _WPuttxt
+0x3b8097ac  _WScanf
+0x57ff7dd7  _WStod
+0xecddba69  _WStodx
+0xc94b27e3  _WStof
+0xe2c5274a  _WStoflt
+0xb794631e  _WStofx
+0x5f9a65c7  _WStold
+0x9027fd99  _WStoldx
+0x7345b4be  _WStoll
+0x8d7ffaf1  _WStopfx
+0xb7ba4aeb  _WStoul
+0xc155a73f  _WStoull
+0x96e6303b  _WStoxflt
+0xd69c513d  _Wcscollx
+0x76ed4243  _Wcsftime
+0x3574d37d  _Wcsxfrmx
+0x24e230d2  _Wctob
+0x0264f468  _Wctomb
+0x38426d25  _Wctombx
+0x0df8809f  __call_functions_registered_with_atexit
+0x5e06c3fe  __getpid
+0x25beee5a  __raw_spu_printf
+0x714c9618  __raw_spu_putfld
+0xffbd876b  __raw_spu_puttxt
+0xa6463518  __rename
+0xfc60575c  __spu_thread_printf
+0xd3964a09  __spu_thread_putfld
+0xd8b4eb20  __spu_thread_puttxt
+0xa0ab76d5  _absi4
+0x1f925c41  _allocate_mapped_pages
+0xb4fc7078  _close_all_FILE
+0xc1a71972  _d2rv
+0xcc5e0c72  _divi4
+0x02f52a3c  _filep_close_it
+0x3704840e  _fs_finalize
+0x225702e1  _fs_initialize
+0x418bdfe1  _get_fd
+0xeeeb4f3e  _get_state_TT800
+0x459072c3  _init_TT800
+0x69106fd2  _init_by_array_TT800
+0x0b0d272f  _malloc_finalize
+0xa53800c2  _malloc_finalize_lv2
+0xaa266d35  _malloc_init
+0x312be3b3  _malloc_init_lv2
+0x45efd478  _malloc_stats_fast
+0x81a0a858  _memset_int
+0x8725a1a7  _memset_vmx
+0x82a4561a  _put_fd
+0x6e988e5f  _rand_int31_TT800
+0x0125b2ca  _rand_int32_TT800
+0xb3d98d59  _rand_real1_TT800
+0x253b7210  _rand_real2_TT800
+0xc4178000  _rand_real3_TT800
+0xa483d50d  _rv2d
+0xbe11beaa  _wremove
+0xeeffc9a6  _wrename
+0x11d270d2  exitspawn
+0x2d067448  ftruncate64
+0xb7b793ed  get_state_TT800
+0xeddcee2c  init_TT800
+0xde1bb092  init_by_array_TT800
+0x402f7285  is_heap_empty
+0x7c1bcf37  isalnum_ascii
+0xe89071ad  isalpha_ascii
+0x806fd281  isblank_ascii
+0xb7d3427f  iscntrl_ascii
+0x41283333  isdigit_ascii
+0x15c2e29d  isgraph_ascii
+0xbe251a29  islower_ascii
+0xce7a9e76  isprint_ascii
+0x1096f8f1  ispunct_ascii
+0x609080ec  isspace_ascii
+0xb400f226  isupper_ascii
+0xdef86a83  isxdigit_ascii
+0xbf5bf5ea  lseek64
+0x4ed09b7e  malloc_stats_fast
+0xde7aff7a  memcpy16
+0xa7e9ea47  memset_cs
+0x87e8f748  memset_vmx
+0x468b45dc  mspace_calloc
+0xa45a0313  mspace_create
+0x145853cd  mspace_destroy
+0xfe0261aa  mspace_free
+0x3f650700  mspace_is_heap_empty
+0xcb85ac70  mspace_malloc
+0x7fd325c4  mspace_malloc_stats
+0x2dbfca07  mspace_malloc_stats_fast
+0x0871ffb0  mspace_malloc_usable_size
+0xba62681f  mspace_memalign
+0x1895908d  mspace_realloc
+0xd9674905  mspace_reallocalign
+0x4911ff9c  rand_int31_TT800
+0x5dbceee3  rand_int32_TT800
+0xa3da58f6  rand_real1_TT800
+0xeb40c9ec  rand_real2_TT800
+0xc78df618  rand_real3_TT800
+0x508196b4  raw_spu_printf
+0x313f04ab  raw_spu_read_char
+0xe3d91db3  raw_spu_read_double
+0x44d7cae8  raw_spu_read_float
+0x9234f738  raw_spu_read_int
+0x64aaf016  raw_spu_read_ldouble
+0xfd6a1ddb  raw_spu_read_llong
+0x90457fe3  raw_spu_read_long
+0x128b334f  raw_spu_read_mem
+0xbec43f86  raw_spu_read_ptr
+0x2bc9dee6  raw_spu_read_short
+0x28b92ebf  raw_spu_read_uchar
+0x532b03be  raw_spu_read_uint
+0x59640bc6  raw_spu_read_ullong
+0xb9ed25d4  raw_spu_read_ulong
+0x0ff4722c  raw_spu_read_ushort
+0xc1b4bbb9  raw_spu_write_char
+0x0cae547f  raw_spu_write_double
+0x01508f24  raw_spu_write_float
+0xcbdc3a6d  raw_spu_write_int
+0x5cc71eee  raw_spu_write_ldouble
+0x36feb965  raw_spu_write_llong
+0xe9a2cc40  raw_spu_write_long
+0x498a5036  raw_spu_write_mem
+0x676e3e7a  raw_spu_write_ptr
+0x04a1f19d  raw_spu_write_short
+0x882e7760  raw_spu_write_uchar
+0x7817edf0  raw_spu_write_uint
+0x72236cbc  raw_spu_write_ullong
+0x98f0eeab  raw_spu_write_ulong
+0x4bb8e2b2  raw_spu_write_ushort
+0xb569849d  reallocalign
+0x1dd0d4c5  spu_printf_attach_group
+0x72b84004  spu_printf_attach_thread
+0x7ea8d860  spu_printf_detach_group
+0xcfbfb7a7  spu_printf_detach_thread
+0x00acf0e5  spu_printf_finalize
+0xc3c598e2  spu_printf_initialize
+0x54c2844e  spu_raw_snprintf
+0xc15e657e  spu_raw_sprintf
+0x783636d1  spu_thread_read_char
+0x02f4d325  spu_thread_read_double
+0x5a74f774  spu_thread_read_float
+0x1e9d2b4f  spu_thread_read_int
+0x0a4e2541  spu_thread_read_ldouble
+0xec9e7cb9  spu_thread_read_llong
+0x15362bc9  spu_thread_read_long
+0x96b6baa6  spu_thread_read_mem
+0x206612c4  spu_thread_read_ptr
+0xfd0cb96d  spu_thread_read_short
+0xbe6e5c58  spu_thread_read_uchar
+0x0a1d4b00  spu_thread_read_uint
+0x7b9c592e  spu_thread_read_ullong
+0x17c031d7  spu_thread_read_ulong
+0xa568db82  spu_thread_read_ushort
+0x115e2f70  spu_thread_snprintf
+0x938bfcf7  spu_thread_write_char
+0x67582370  spu_thread_write_double
+0xf8935fe3  spu_thread_write_float
+0x9cab08d1  spu_thread_write_int
+0xfd461e85  spu_thread_write_ldouble
+0xf2fca4b2  spu_thread_write_llong
+0x216984ed  spu_thread_write_long
+0x4544c2de  spu_thread_write_mem
+0x7b5aac20  spu_thread_write_ptr
+0x3f125e2e  spu_thread_write_short
+0x896e1bfd  spu_thread_write_uchar
+0x9c7028a5  spu_thread_write_uint
+0xc7b62ab8  spu_thread_write_ullong
+0xf4207734  spu_thread_write_ulong
+0xd5c8cb55  spu_thread_write_ushort
+0xddbac025  strcasecmp_ascii
+0x99782342  strncasecmp_ascii
+0xbda4dcf0  strncpy_cs
+0x86b4c669  tolower_ascii
+0x0b9ecb98  toupper_ascii
+0x9eee5387  truncate64
+```
+
+### `libcamera_stub` (28 / 28 missing)
+
+```
+0x379c5dd6  cellCameraClose
+0xeb6f95fb  cellCameraCtrlExtensionUnit
+0x5ad46570  cellCameraEnd
+0x532b8aaa  cellCameraGetAttribute
+0x0e63c444  cellCameraGetBufferInfoEx
+0x7dac520c  cellCameraGetBufferSize
+0x602e2052  cellCameraGetDeviceGUID
+0xb602e328  cellCameraGetExtensionUnit
+0x58bc5870  cellCameraGetType
+0xbf47c5dd  cellCameraInit
+0x7e063bbc  cellCameraIsAttached
+0x8ca53dde  cellCameraIsAvailable
+0xfa160f24  cellCameraIsOpen
+0x5eebf24e  cellCameraIsStarted
+0x5d25f866  cellCameraOpenEx
+0x61dfbe83  cellCameraPrepExtensionUnit
+0x3845d39b  cellCameraRead
+0xe28b206b  cellCameraReadComplete
+0x21fc151f  cellCameraReadEx
+0x9b98d258  cellCameraRemoveNotifyEventQueue
+0x44673f07  cellCameraRemoveNotifyEventQueue2
+0x81f83db9  cellCameraReset
+0x8cd56eee  cellCameraSetAttribute
+0x2dea3e9b  cellCameraSetExtensionUnit
+0xb0647e5a  cellCameraSetNotifyEventQueue
+0xa7fd2f5b  cellCameraSetNotifyEventQueue2
+0x456dc4aa  cellCameraStart
+0x02f5ced0  cellCameraStop
+```
+
+### `libcelp8enc_stub` (9 / 9 missing)
+
+```
+0xfd2566b4  cellCelp8EncClose
+0x2099f86e  cellCelp8EncEncodeFrame
+0xbbbc2c1c  cellCelp8EncEnd
+0x48c5020d  cellCelp8EncGetAu
+0x2eb6efee  cellCelp8EncOpen
+0xcd48ad62  cellCelp8EncOpenEx
+0x2d677e0c  cellCelp8EncQueryAttr
+0x0f6ab57b  cellCelp8EncStart
+0x29da1ea6  cellCelp8EncWaitForOutput
+```
+
+### `libcelpenc_stub` (9 / 9 missing)
+
+```
+0x15ec0cca  cellCelpEncClose
+0x81fe030c  cellCelpEncEncodeFrame
+0xf2b85dff  cellCelpEncEnd
+0x3773692f  cellCelpEncGetAu
+0x77b3b29a  cellCelpEncOpen
+0x9eb084db  cellCelpEncOpenEx
+0x6b148570  cellCelpEncQueryAttr
+0x55dc23de  cellCelpEncStart
+0x9b244272  cellCelpEncWaitForOutput
+```
+
+### `libcrashdump_stub` (2 / 2 missing)
+
+```
+0x52696620  sys_crash_dump_get_user_log_area
+0xb20f87b3  sys_crash_dump_set_user_log_area
+```
+
+### `libdaisy_stub` (52 / 52 missing)
+
+```
+0x8921232c  _QN4cell5Daisy15LFQueue2PopOpenEPNS0_8LFQueue2E
+0x43838c2a  _QN4cell5Daisy16LFQueue2PopCloseEPNS0_8LFQueue2EPFiPvjE
+0x437151f0  _QN4cell5Daisy16LFQueue2PushOpenEPNS0_8LFQueue2E
+0xa2e6c4b0  _QN4cell5Daisy17LFQueue2PushCloseEPNS0_8LFQueue2EPFiPvjE
+0x6f564a3d  _QN4cell5Daisy21LFQueue2GetPopPointerEPNS0_8LFQueue2EPij
+0xa98e3c4b  _QN4cell5Daisy22ScatterGatherInterlock21proceedSequenceNumberEv
+0xdeb0d2e6  _QN4cell5Daisy22ScatterGatherInterlock5probeEj
+0xfa46fd99  _QN4cell5Daisy22ScatterGatherInterlock7releaseEv
+0x20586bc0  _QN4cell5Daisy22ScatterGatherInterlockC1EPVNS0_16_AtomicInterlockEjPjjh
+0x8d42fae9  _QN4cell5Daisy22ScatterGatherInterlockC1EPVNS0_16_AtomicInterlockEjPvPFiS5_jE
+0xb8e85009  _QN4cell5Daisy22ScatterGatherInterlockC2EPVNS0_16_AtomicInterlockEjPjjh
+0xa4cd494e  _QN4cell5Daisy22ScatterGatherInterlockC2EPVNS0_16_AtomicInterlockEjPvPFiS5_jE
+0xed37e00a  _QN4cell5Daisy22ScatterGatherInterlockD1Ev
+0x7e639d78  _QN4cell5Daisy22ScatterGatherInterlockD2Ev
+0xce618901  _QN4cell5Daisy26LFQueue2CompletePopPointerEPNS0_8LFQueue2EiPFiPvjEj
+0x72dee049  _QN4cell5Daisy29LFQueue2HasUnfinishedConsumerEPNS0_8LFQueue2Ej
+0x8fd3b122  _QN4cell5Daisy4Lock10initializeEj
+0x163dafeb  _QN4cell5Daisy4Lock15completeConsumeEj
+0x933c2273  _QN4cell5Daisy4Lock15completeProduceEj
+0xc3e29e69  _QN4cell5Daisy4Lock18getNextHeadPointerEv
+0xf88e07db  _QN4cell5Daisy4Lock18getNextTailPointerEv
+0x1cf82d42  _QN4cell5Daisy4Lock7popOpenEv
+0x4c34ec38  _QN4cell5Daisy4Lock8popCloseEv
+0xd888f42a  _QN4cell5Daisy4Lock8pushOpenEv
+0xc6c5f3c6  _QN4cell5Daisy4Lock9pushCloseEv
+0x17348ba6  _QN4cell5Daisy9_snprintfEPcjPKcz
+0xa286b24a  _ZN4cell5Daisy15LFQueue2PopOpenEPNS0_8LFQueue2E
+0x9581b8bc  _ZN4cell5Daisy16LFQueue2PopCloseEPNS0_8LFQueue2EPFiPvjE
+0xf2034429  _ZN4cell5Daisy16LFQueue2PushOpenEPNS0_8LFQueue2E
+0x0563627c  _ZN4cell5Daisy17LFQueue2PushCloseEPNS0_8LFQueue2EPFiPvjE
+0x0d219671  _ZN4cell5Daisy21LFQueue2GetPopPointerEPNS0_8LFQueue2EPij
+0xc0faf91c  _ZN4cell5Daisy22ScatterGatherInterlock21proceedSequenceNumberEv
+0xd2be66e6  _ZN4cell5Daisy22ScatterGatherInterlock5probeEj
+0x1ce8c914  _ZN4cell5Daisy22ScatterGatherInterlock7releaseEv
+0x1e5b1e23  _ZN4cell5Daisy22ScatterGatherInterlockC1EPVNS0_16_AtomicInterlockEjPjjh
+0x3190dfe4  _ZN4cell5Daisy22ScatterGatherInterlockC1EPVNS0_16_AtomicInterlockEjPvPFiS5_jE
+0x34234bf0  _ZN4cell5Daisy22ScatterGatherInterlockC2EPVNS0_16_AtomicInterlockEjPjjh
+0xb190d6ad  _ZN4cell5Daisy22ScatterGatherInterlockC2EPVNS0_16_AtomicInterlockEjPvPFiS5_jE
+0x8dacb8d0  _ZN4cell5Daisy22ScatterGatherInterlockD1Ev
+0x5a93e4e8  _ZN4cell5Daisy22ScatterGatherInterlockD2Ev
+0x1bbcb5b9  _ZN4cell5Daisy26LFQueue2CompletePopPointerEPNS0_8LFQueue2EiPFiPvjEj
+0x2be4dde1  _ZN4cell5Daisy29LFQueue2HasUnfinishedConsumerEPNS0_8LFQueue2Ej
+0x2e8654f8  _ZN4cell5Daisy4Lock10initializeEj
+0xbd091e26  _ZN4cell5Daisy4Lock15completeConsumeEj
+0x41df5d21  _ZN4cell5Daisy4Lock15completeProduceEj
+0x2c967aa1  _ZN4cell5Daisy4Lock18getNextHeadPointerEv
+0x6fc83371  _ZN4cell5Daisy4Lock18getNextTailPointerEv
+0x17c35cc9  _ZN4cell5Daisy4Lock7popOpenEv
+0x566c9460  _ZN4cell5Daisy4Lock8popCloseEv
+0x706feed9  _ZN4cell5Daisy4Lock8pushOpenEv
+0x7b79d6aa  _ZN4cell5Daisy4Lock9pushCloseEv
+0x28acb77f  _ZN4cell5Daisy9_snprintfEPcjPKcz
+```
+
+### `libdbg_libio_stub` (4 / 4 missing)
+
+```
+0xcf3051f7  cellPadDbgGetData
+0xa74396e5  cellPadDbgLddRegisterController
+0x94b98e39  cellPadDbgLddSetDataInsertMode
+0x7c5d5fc1  cellPadDbgPeriphRegisterDevice
+```
+
+### `libdmux_stub` (20 / 20 missing)
+
+```
+0x8c692521  cellDmuxClose
+0x05371c8d  cellDmuxDisableEs
+0x7b56dc3f  cellDmuxEnableEs
+0xebb3b2bd  cellDmuxFlushEs
+0x42c716b5  cellDmuxGetAu
+0x2c9a5857  cellDmuxGetAuEx
+0x68492de9  cellDmuxOpen
+0x11bc3a6c  cellDmuxOpen2
+0xf6c23560  cellDmuxOpenEx
+0x2750c5e0  cellDmuxPeekAu
+0x002e8da2  cellDmuxPeekAuEx
+0xa2d4189b  cellDmuxQueryAttr
+0x3f76e3cd  cellDmuxQueryAttr2
+0x02170d1a  cellDmuxQueryEsAttr
+0x52911bcf  cellDmuxQueryEsAttr2
+0x24ea6474  cellDmuxReleaseAu
+0x21d424f0  cellDmuxResetEs
+0x5d345de9  cellDmuxResetStream
+0xccff1284  cellDmuxResetStreamAndWaitDone
+0x04e7499f  cellDmuxSetStream
+```
+
+### `libfiber_stub` (47 / 47 missing)
+
+```
+0xc11f8056  _cellFiberPpuAttributeInitialize
+0x31252ec3  _cellFiberPpuContextAttributeInitialize
+0x55870804  _cellFiberPpuInitialize
+0x9e25c72d  _cellFiberPpuSchedulerAttributeInitialize
+0x68ba4568  _cellFiberPpuUtilWorkerControlAttributeInitialize
+0xf6c6900c  cellFiberPpuCheckFlags
+0xf3e81219  cellFiberPpuCheckStackLimit
+0xb90c871b  cellFiberPpuContextCheckStackLimit
+0x0a25b6c8  cellFiberPpuContextEnterScheduler
+0xb3a48079  cellFiberPpuContextFinalize
+0x72086315  cellFiberPpuContextInitialize
+0x01036193  cellFiberPpuContextReturnToThread
+0xaba1c563  cellFiberPpuContextRun
+0x081c98be  cellFiberPpuContextRunScheduler
+0x34a81091  cellFiberPpuContextSelf
+0xd0066b17  cellFiberPpuContextSwitch
+0x7c2f4034  cellFiberPpuCreateFiber
+0xfa8d5f95  cellFiberPpuExit
+0x8b6baa01  cellFiberPpuFinalizeScheduler
+0xb0594b2d  cellFiberPpuGetScheduler
+0xe492a675  cellFiberPpuHasRunnableFiber
+0xee3b604d  cellFiberPpuInitializeScheduler
+0xa6004249  cellFiberPpuJoinFiber
+0x12b1acf0  cellFiberPpuRunFibers
+0x3860a12a  cellFiberPpuSchedulerTraceFinalize
+0xbf9cd933  cellFiberPpuSchedulerTraceInitialize
+0xadedbebf  cellFiberPpuSchedulerTraceStart
+0xe665f9a9  cellFiberPpuSchedulerTraceStop
+0x5d9a7034  cellFiberPpuSelf
+0x8afb8356  cellFiberPpuSendSignal
+0xfbf5fe40  cellFiberPpuSetPriority
+0xea6dc1ad  cellFiberPpuUtilWorkerControlCheckFlags
+0x62a20f0d  cellFiberPpuUtilWorkerControlConnectEventQueueToSpurs
+0xbfca88d3  cellFiberPpuUtilWorkerControlCreateFiber
+0x4fc86b2c  cellFiberPpuUtilWorkerControlDisconnectEventQueue
+0xa27c95ca  cellFiberPpuUtilWorkerControlFinalize
+0x3204b146  cellFiberPpuUtilWorkerControlInitialize
+0xf2ccad4f  cellFiberPpuUtilWorkerControlInitializeWithAttribute
+0x3b417f82  cellFiberPpuUtilWorkerControlJoinFiber
+0x1e7a247a  cellFiberPpuUtilWorkerControlRunFibers
+0x5d3992dd  cellFiberPpuUtilWorkerControlSendSignal
+0x392c5aa5  cellFiberPpuUtilWorkerControlSetPollingMode
+0xc04e2438  cellFiberPpuUtilWorkerControlShutdown
+0xbabf714b  cellFiberPpuUtilWorkerControlWakeup
+0xa4599cf3  cellFiberPpuWaitFlag
+0x6c164b3b  cellFiberPpuWaitSignal
+0x0c44f441  cellFiberPpuYield
+```
+
+### `libfont_stub` (82 / 82 missing)
+
+```
+0x47ca71ef  cellFontAdjustFontScaling
+0x9e3b1e16  cellFontAdjustGlyphExpandBuffer
+0x66a23100  cellFontBindRenderer
+0x3da90559  cellFontClearFileCache
+0xb276f1f6  cellFontCloseFont
+0x042e74e3  cellFontCreateRenderer
+0xa7b2103a  cellFontDelete
+0xd62f5d76  cellFontDeleteGlyph
+0x21ebb248  cellFontDestroyRenderer
+0x7ab47f7e  cellFontEnd
+0x8a35c887  cellFontEndGraphics
+0x40d40544  cellFontEndLibrary
+0xdee0836c  cellFontExtend
+0xc17259de  cellFontGenerateCharGlyph
+0xcaed32c1  cellFontGenerateCharGlyphVertical
+0xc91c8ece  cellFontGetBindingRenderer
+0xd8eaee9f  cellFontGetCharGlyphMetrics
+0xfe9a6dd7  cellFontGetCharGlyphMetricsVertical
+0xe16e679a  cellFontGetEffectSlant
+0x25dbeff9  cellFontGetEffectWeight
+0x98ac5524  cellFontGetFontIdCode
+0x59ef0073  cellFontGetGlyphExpandBufferInfo
+0x1387c45c  cellFontGetHorizontalLayout
+0x7c5df0d8  cellFontGetInitializedRevisionFlags
+0x06be743d  cellFontGetKerning
+0x5abd8b1e  cellFontGetLibrary
+0x2da9fd9d  cellFontGetRenderCharGlyphMetrics
+0x700e6223  cellFontGetRenderCharGlyphMetricsVertical
+0xced4dda9  cellFontGetRenderEffectSlant
+0x0109f3d3  cellFontGetRenderEffectWeight
+0x0d106a11  cellFontGetRenderScalePixel
+0xa165daae  cellFontGetRenderScalePoint
+0x0baf90fe  cellFontGetRenderScaledKerning
+0x8a632038  cellFontGetResolutionDpi
+0xb015a84e  cellFontGetRevisionFlags
+0x285d30d6  cellFontGetScalePixel
+0xf7a19060  cellFontGetScalePoint
+0x698897f8  cellFontGetVerticalLayout
+0x231d5941  cellFontGlyphGetHorizontalShift
+0xa8fae920  cellFontGlyphGetOutlineControlDistance
+0x9c8d3ff7  cellFontGlyphGetOutlineVertexes
+0x22e24707  cellFontGlyphGetScalePixel
+0xb4d112af  cellFontGlyphGetVertexesGlyphSize
+0x534e785f  cellFontGlyphGetVerticalShift
+0xe01b199e  cellFontGlyphRenderImage
+0x97b95244  cellFontGlyphRenderImageHorizontal
+0x8e3f2c40  cellFontGlyphRenderImageVertical
+0x53f529fe  cellFontGlyphSetupVertexesGlyph
+0x03a142b9  cellFontGraphicsGetDrawType
+0xa41342dc  cellFontGraphicsGetFontRGBA
+0xf7aaa8e2  cellFontGraphicsGetLineRGBA
+0x2388186c  cellFontGraphicsGetScalePixel
+0x87bd650f  cellFontGraphicsSetDrawType
+0x061049ad  cellFontGraphicsSetFontRGBA
+0x7c83bc15  cellFontGraphicsSetLineRGBA
+0x16322df1  cellFontGraphicsSetScalePixel
+0x970d4c22  cellFontGraphicsSetupDrawContext
+0xf03dcc29  cellFontInitializeWithRevision
+0x0a7306a4  cellFontOpenFontFile
+0x29329541  cellFontOpenFontInstance
+0x9e19072b  cellFontOpenFontMemory
+0xa885cc9b  cellFontOpenFontset
+0x073fa321  cellFontOpenFontsetOnMemory
+0xb3d304b2  cellFontPatchWorks
+0x88be4799  cellFontRenderCharGlyphImage
+0x1a218fe4  cellFontRenderCharGlyphImageHorizontal
+0xe857a0ca  cellFontRenderCharGlyphImageVertical
+0x90b9465e  cellFontRenderSurfaceInit
+0xb422b005  cellFontRenderSurfaceSetScissor
+0x8657c8f5  cellFontSetEffectSlant
+0x25253fe4  cellFontSetEffectWeight
+0x6cfada83  cellFontSetFontOpenMode
+0x6bf6f832  cellFontSetFontsetOpenMode
+0xfb3341ba  cellFontSetResolutionDpi
+0x297f0e93  cellFontSetScalePixel
+0x70f3e728  cellFontSetScalePoint
+0x78d05e08  cellFontSetupRenderEffectSlant
+0xa6dc25d1  cellFontSetupRenderEffectWeight
+0x227e1e3c  cellFontSetupRenderScalePixel
+0x4d19c631  cellFontSetupRenderScalePoint
+0xf16379fa  cellFontUnbindRenderer
+0x6bad7a69  cellFontVertexesGlyphRelocate
+```
+
+### `libfontFT_stub` (3 / 3 missing)
+
+```
+0xfa0c2de0  cellFontFTGetInitializedRevisionFlags
+0xec89a187  cellFontFTGetRevisionFlags
+0x7a0a83c4  cellFontInitLibraryFreeTypeWithRevision
+```
+
+### `libfreetype_stub` (248 / 248 missing)
+
+```
+0x8b14be9c  FTC_CMapCache_Lookup
+0x6377137f  FTC_CMapCache_New
+0xf926d22f  FTC_ImageCache_Lookup
+0xbc8c081d  FTC_ImageCache_New
+0x3d2c0f77  FTC_Image_Cache_Lookup
+0x8b5d6149  FTC_Image_Cache_New
+0xf4cf5435  FTC_Manager_Done
+0x0b411261  FTC_Manager_LookupFace
+0xf638c45e  FTC_Manager_LookupSize
+0x3ecdc98b  FTC_Manager_Lookup_Face
+0xdec4091e  FTC_Manager_Lookup_Size
+0x0c08dd3a  FTC_Manager_New
+0x61405530  FTC_Manager_RemoveFaceID
+0x6525ef63  FTC_Node_Unref
+0x5f7f83aa  FTC_SBitCache_Lookup
+0x15a11d97  FTC_SBitCache_New
+0xf73faa25  FTC_SBit_Cache_Lookup
+0xc747f231  FTC_SBit_Cache_New
+0x06a553df  FT_Activate_Size
+0x68c25868  FT_Add_Default_Modules
+0xa6ec00f4  FT_Add_Module
+0xa26a2e9c  FT_Alloc
+0x1171aa63  FT_Angle_Diff
+0xf78a4a76  FT_Atan2
+0x6e560d59  FT_Attach_File
+0xf9d31f75  FT_Attach_Stream
+0xfd5b7c04  FT_Bitmap_Convert
+0x7ec07f08  FT_Bitmap_Copy
+0xc2261290  FT_Bitmap_Done
+0x1aeb33a5  FT_Bitmap_Embolden
+0x13268e21  FT_Bitmap_New
+0x2b74d0b3  FT_CMap_Done
+0x32a1bd52  FT_CMap_New
+0xafe5ebc4  FT_CeilFix
+0xe46f3662  FT_Cos
+0xe68e4744  FT_DivFix
+0x1cedf8d0  FT_Done_Face
+0xe956bf64  FT_Done_FreeType
+0xdb615095  FT_Done_Glyph
+0xac328493  FT_Done_GlyphSlot
+0x0124a94b  FT_Done_Library
+0x59394806  FT_Done_Memory
+0x9295b0fd  FT_Done_Size
+0x2803abd1  FT_FloorFix
+0x98db2f48  FT_Free
+0x55104762  FT_Get_BDF_Charset_ID
+0xc8b94ee5  FT_Get_BDF_Property
+0x81eed68c  FT_Get_CMap_Language_ID
+0x4f36cf3f  FT_Get_Char_Index
+0x5f8370d7  FT_Get_Charmap_Index
+0x39d44176  FT_Get_First_Char
+0x4b573039  FT_Get_Glyph
+0x1e287e88  FT_Get_Glyph_Name
+0xa6eb0b62  FT_Get_Kerning
+0x8835c3c2  FT_Get_MM_Var
+0x4654e796  FT_Get_Module
+0x011687ee  FT_Get_Module_Interface
+0x4ce3fc00  FT_Get_Multi_Master
+0x4be810bc  FT_Get_Name_Index
+0x37f42e67  FT_Get_Next_Char
+0x184a21da  FT_Get_PFR_Advance
+0xc141037d  FT_Get_PFR_Kerning
+0x50ec3696  FT_Get_PFR_Metrics
+0x8d79a5f9  FT_Get_PS_Font_Info
+0xc3b65d96  FT_Get_PS_Font_Private
+0x9e2b935a  FT_Get_Postscript_Name
+0x492d8224  FT_Get_Renderer
+0x9d74740f  FT_Get_Sfnt_Name
+0x838fe0a5  FT_Get_Sfnt_Name_Count
+0x89fb856e  FT_Get_Sfnt_Table
+0x67d56767  FT_Get_SubGlyph_Info
+0x36f59828  FT_Get_Track_Kerning
+0xdd91f304  FT_Get_TrueType_Engine_Type
+0x9a7a71b5  FT_Get_WinFNT_Header
+0xa29ca82e  FT_Get_X11_Font_Format
+0x5035c921  FT_GlyphLoader_Add
+0x501d1814  FT_GlyphLoader_CheckPoints
+0xab8f6a87  FT_GlyphLoader_CheckSubGlyphs
+0xb67050bc  FT_GlyphLoader_CopyPoints
+0x5c4c5880  FT_GlyphLoader_CreateExtra
+0xacfe51d8  FT_GlyphLoader_Done
+0xe6de720d  FT_GlyphLoader_New
+0x875d29d5  FT_GlyphLoader_Prepare
+0x9fe3dde6  FT_GlyphLoader_Reset
+0xbd59bc75  FT_GlyphLoader_Rewind
+0x9b52f2d1  FT_GlyphSlot_Embolden
+0xf5a883b6  FT_GlyphSlot_Oblique
+0x67618ba2  FT_GlyphSlot_Own_Bitmap
+0x420de176  FT_Glyph_Copy
+0x44951709  FT_Glyph_Get_CBox
+0x66d88c8c  FT_Glyph_Stroke
+0xf7261881  FT_Glyph_StrokeBorder
+0xb499d895  FT_Glyph_To_Bitmap
+0xd912b0f4  FT_Glyph_Transform
+0xaed08db1  FT_Has_PS_Glyph_Names
+0x85a969b6  FT_Init_FreeType
+0x9eba183c  FT_Library_Version
+0xc24e39fc  FT_List_Add
+0x4ee1b202  FT_List_Finalize
+0x4db200ef  FT_List_Find
+0x5923488b  FT_List_Insert
+0xa58c1554  FT_List_Iterate
+0xb6aab704  FT_List_Remove
+0x1827e724  FT_List_Up
+0x9da74bb6  FT_Load_Char
+0xb229e6bf  FT_Load_Glyph
+0x3545bdc1  FT_Load_Sfnt_Table
+0xeac06c4b  FT_Lookup_Renderer
+0xab4747b4  FT_Match_Size
+0xff2d2f98  FT_Matrix_Invert
+0x406d1e1a  FT_Matrix_Multiply
+0x84ce959c  FT_MulDiv
+0x38e8695c  FT_MulFix
+0xcc20195f  FT_New_Face
+0xd5bb8191  FT_New_GlyphSlot
+0xa11ba28b  FT_New_Library
+0xbf97b657  FT_New_Memory
+0x1bfbe848  FT_New_Memory_Face
+0x055c1970  FT_New_Size
+0xb5bbfbea  FT_OpenType_Free
+0xa742c04e  FT_OpenType_Validate
+0x51b09e1d  FT_Open_Face
+0x9c8be729  FT_Outline_Check
+0x3c863b04  FT_Outline_Copy
+0x1fcaeebb  FT_Outline_Decompose
+0x3f2b82df  FT_Outline_Done
+0xfeb2e30e  FT_Outline_Done_Internal
+0x4b4cbf7a  FT_Outline_Embolden
+0x52a1f1ec  FT_Outline_GetInsideBorder
+0x04af4d22  FT_Outline_GetOutsideBorder
+0x889c4159  FT_Outline_Get_BBox
+0x18c23bdf  FT_Outline_Get_Bitmap
+0x1b6f28a5  FT_Outline_Get_CBox
+0x04dd4855  FT_Outline_Get_Orientation
+0xa60023ef  FT_Outline_New
+0x11385230  FT_Outline_New_Internal
+0xf67c1c4b  FT_Outline_Render
+0xeb3b1212  FT_Outline_Reverse
+0xeeb810ec  FT_Outline_Transform
+0x6ef5d792  FT_Outline_Translate
+0x33f54920  FT_QAlloc
+0xee7b7aa7  FT_QRealloc
+0x5a23db5b  FT_Raccess_Get_DataOffsets
+0x2e1f7d0a  FT_Raccess_Get_HeaderInfo
+0x2c272c13  FT_Raccess_Guess
+0x1a789b68  FT_Realloc
+0x99040a1d  FT_Remove_Module
+0x5c36e44f  FT_Render_Glyph
+0xc5792092  FT_Render_Glyph_Internal
+0x6e565b59  FT_Request_Metrics
+0x92342aa4  FT_Request_Size
+0x85c80b7f  FT_RoundFix
+0xa4e6c423  FT_Select_Charmap
+0xd4770b4d  FT_Select_Metrics
+0x576e31a5  FT_Select_Size
+0x46d8826f  FT_Set_Char_Size
+0xb9b430c2  FT_Set_Charmap
+0x72cf95fc  FT_Set_Debug_Hook
+0xcee3c5a0  FT_Set_MM_Blend_Coordinates
+0x0af56d94  FT_Set_MM_Design_Coordinates
+0xd12673a0  FT_Set_Pixel_Sizes
+0x917d6e9b  FT_Set_Renderer
+0x7ea2c657  FT_Set_Transform
+0x9164efd1  FT_Set_Var_Blend_Coordinates
+0xfe7d5e4f  FT_Set_Var_Design_Coordinates
+0x6a48d894  FT_Sfnt_Table_Info
+0x3701f938  FT_Sin
+0xd4c19fdb  FT_Sqrt32
+0x20f438ad  FT_SqrtFixed
+0xbe2789cc  FT_Stream_Close
+0xdd872661  FT_Stream_EnterFrame
+0x8be132ab  FT_Stream_ExitFrame
+0x21182419  FT_Stream_ExtractFrame
+0x29020e75  FT_Stream_Free
+0xf745465c  FT_Stream_GetChar
+0x4f4d2e71  FT_Stream_GetLong
+0xae082411  FT_Stream_GetLongLE
+0x52dd4e82  FT_Stream_GetOffset
+0xc3e611c8  FT_Stream_GetShort
+0x5ebe9fd4  FT_Stream_GetShortLE
+0xc9e2965f  FT_Stream_New
+0xe45c32bd  FT_Stream_Open
+0x459907c4  FT_Stream_OpenGzip
+0x084eb81a  FT_Stream_OpenLZW
+0xbe48875f  FT_Stream_OpenMemory
+0xab1e7527  FT_Stream_Pos
+0xd56b3c5c  FT_Stream_Read
+0x191899d0  FT_Stream_ReadAt
+0xd0e3cbb0  FT_Stream_ReadChar
+0xf70f8a7f  FT_Stream_ReadFields
+0xa5b68c24  FT_Stream_ReadLong
+0xb1a33dea  FT_Stream_ReadLongLE
+0x0553ae54  FT_Stream_ReadOffset
+0x9666b4c0  FT_Stream_ReadShort
+0xcdb50080  FT_Stream_ReadShortLE
+0x0fd3f094  FT_Stream_ReleaseFrame
+0xba363b3e  FT_Stream_Seek
+0xb06bd868  FT_Stream_Skip
+0x6fa37ea0  FT_Stream_TryRead
+0xa4afeb98  FT_Stroker_BeginSubPath
+0xf885420c  FT_Stroker_ConicTo
+0x4bbc14e6  FT_Stroker_CubicTo
+0x0c8cae53  FT_Stroker_Done
+0x6de0efb4  FT_Stroker_EndSubPath
+0x18484dc6  FT_Stroker_Export
+0xc3a7e8f2  FT_Stroker_ExportBorder
+0x773ff791  FT_Stroker_GetBorderCounts
+0xc20a2975  FT_Stroker_GetCounts
+0xd78b41cb  FT_Stroker_LineTo
+0xd9c9f093  FT_Stroker_New
+0x684766e9  FT_Stroker_ParseOutline
+0xcfd82265  FT_Stroker_Rewind
+0xe7ebf1ef  FT_Stroker_Set
+0x7e5f23a4  FT_Tan
+0x58d00078  FT_Trace_Get_Count
+0x37e33878  FT_Trace_Get_Name
+0xd7f0afaa  FT_Vector_From_Polar
+0x615369c3  FT_Vector_Length
+0xfa34723f  FT_Vector_Polarize
+0x0aa1b8de  FT_Vector_Rotate
+0x4bc591d7  FT_Vector_Transform
+0xe4969d9d  FT_Vector_Unit
+0xf8d95c49  cellFreeType2Ex
+0x211248e7  cellFreeType2GetRevisionFlags
+0xfa502b9b  ft_debug_init
+0x416cdbc4  ft_glyphslot_alloc_bitmap
+0x858df484  ft_glyphslot_free_bitmap
+0x09d37f90  ft_glyphslot_set_bitmap
+0x552550e5  ft_highpow2
+0x64243044  ft_lzwstate_done
+0x64f1f292  ft_lzwstate_init
+0xd719f8ee  ft_lzwstate_io
+0x214fe115  ft_lzwstate_reset
+0x26eaafa7  ft_mem_alloc
+0x2aa7a25f  ft_mem_free
+0x808e665f  ft_mem_qalloc
+0xc938c83a  ft_mem_qrealloc
+0xa0237f5e  ft_mem_realloc
+0xfe9bee8c  ft_module_get_service
+0xaee8277c  ft_service_list_lookup
+0x7f9976c7  ft_stub_set_char_sizes
+0xe4347e6b  ft_stub_set_pixel_sizes
+0x5f8bf2cc  ft_synthesize_vertical_metrics
+0x1f9bcbe6  ft_validator_error
+0xd9ab9ae4  ft_validator_init
+0xf1ad8ca5  ft_validator_run
+0xf5e23da4  ftc_node_destroy
+0xf456ad89  ps_hints_apply
+```
+
+### `libfreetypeTT_stub` (248 / 248 missing)
+
+```
+0x8b14be9c  FTC_CMapCache_Lookup
+0x6377137f  FTC_CMapCache_New
+0xf926d22f  FTC_ImageCache_Lookup
+0xbc8c081d  FTC_ImageCache_New
+0x3d2c0f77  FTC_Image_Cache_Lookup
+0x8b5d6149  FTC_Image_Cache_New
+0xf4cf5435  FTC_Manager_Done
+0x0b411261  FTC_Manager_LookupFace
+0xf638c45e  FTC_Manager_LookupSize
+0x3ecdc98b  FTC_Manager_Lookup_Face
+0xdec4091e  FTC_Manager_Lookup_Size
+0x0c08dd3a  FTC_Manager_New
+0x61405530  FTC_Manager_RemoveFaceID
+0x6525ef63  FTC_Node_Unref
+0x5f7f83aa  FTC_SBitCache_Lookup
+0x15a11d97  FTC_SBitCache_New
+0xf73faa25  FTC_SBit_Cache_Lookup
+0xc747f231  FTC_SBit_Cache_New
+0x06a553df  FT_Activate_Size
+0x68c25868  FT_Add_Default_Modules
+0xa6ec00f4  FT_Add_Module
+0xa26a2e9c  FT_Alloc
+0x1171aa63  FT_Angle_Diff
+0xf78a4a76  FT_Atan2
+0x6e560d59  FT_Attach_File
+0xf9d31f75  FT_Attach_Stream
+0xfd5b7c04  FT_Bitmap_Convert
+0x7ec07f08  FT_Bitmap_Copy
+0xc2261290  FT_Bitmap_Done
+0x1aeb33a5  FT_Bitmap_Embolden
+0x13268e21  FT_Bitmap_New
+0x2b74d0b3  FT_CMap_Done
+0x32a1bd52  FT_CMap_New
+0xafe5ebc4  FT_CeilFix
+0xe46f3662  FT_Cos
+0xe68e4744  FT_DivFix
+0x1cedf8d0  FT_Done_Face
+0xe956bf64  FT_Done_FreeType
+0xdb615095  FT_Done_Glyph
+0xac328493  FT_Done_GlyphSlot
+0x0124a94b  FT_Done_Library
+0x59394806  FT_Done_Memory
+0x9295b0fd  FT_Done_Size
+0x2803abd1  FT_FloorFix
+0x98db2f48  FT_Free
+0x55104762  FT_Get_BDF_Charset_ID
+0xc8b94ee5  FT_Get_BDF_Property
+0x81eed68c  FT_Get_CMap_Language_ID
+0x4f36cf3f  FT_Get_Char_Index
+0x5f8370d7  FT_Get_Charmap_Index
+0x39d44176  FT_Get_First_Char
+0x4b573039  FT_Get_Glyph
+0x1e287e88  FT_Get_Glyph_Name
+0xa6eb0b62  FT_Get_Kerning
+0x8835c3c2  FT_Get_MM_Var
+0x4654e796  FT_Get_Module
+0x011687ee  FT_Get_Module_Interface
+0x4ce3fc00  FT_Get_Multi_Master
+0x4be810bc  FT_Get_Name_Index
+0x37f42e67  FT_Get_Next_Char
+0x184a21da  FT_Get_PFR_Advance
+0xc141037d  FT_Get_PFR_Kerning
+0x50ec3696  FT_Get_PFR_Metrics
+0x8d79a5f9  FT_Get_PS_Font_Info
+0xc3b65d96  FT_Get_PS_Font_Private
+0x9e2b935a  FT_Get_Postscript_Name
+0x492d8224  FT_Get_Renderer
+0x9d74740f  FT_Get_Sfnt_Name
+0x838fe0a5  FT_Get_Sfnt_Name_Count
+0x89fb856e  FT_Get_Sfnt_Table
+0x67d56767  FT_Get_SubGlyph_Info
+0x36f59828  FT_Get_Track_Kerning
+0xdd91f304  FT_Get_TrueType_Engine_Type
+0x9a7a71b5  FT_Get_WinFNT_Header
+0xa29ca82e  FT_Get_X11_Font_Format
+0x5035c921  FT_GlyphLoader_Add
+0x501d1814  FT_GlyphLoader_CheckPoints
+0xab8f6a87  FT_GlyphLoader_CheckSubGlyphs
+0xb67050bc  FT_GlyphLoader_CopyPoints
+0x5c4c5880  FT_GlyphLoader_CreateExtra
+0xacfe51d8  FT_GlyphLoader_Done
+0xe6de720d  FT_GlyphLoader_New
+0x875d29d5  FT_GlyphLoader_Prepare
+0x9fe3dde6  FT_GlyphLoader_Reset
+0xbd59bc75  FT_GlyphLoader_Rewind
+0x9b52f2d1  FT_GlyphSlot_Embolden
+0xf5a883b6  FT_GlyphSlot_Oblique
+0x67618ba2  FT_GlyphSlot_Own_Bitmap
+0x420de176  FT_Glyph_Copy
+0x44951709  FT_Glyph_Get_CBox
+0x66d88c8c  FT_Glyph_Stroke
+0xf7261881  FT_Glyph_StrokeBorder
+0xb499d895  FT_Glyph_To_Bitmap
+0xd912b0f4  FT_Glyph_Transform
+0xaed08db1  FT_Has_PS_Glyph_Names
+0x85a969b6  FT_Init_FreeType
+0x9eba183c  FT_Library_Version
+0xc24e39fc  FT_List_Add
+0x4ee1b202  FT_List_Finalize
+0x4db200ef  FT_List_Find
+0x5923488b  FT_List_Insert
+0xa58c1554  FT_List_Iterate
+0xb6aab704  FT_List_Remove
+0x1827e724  FT_List_Up
+0x9da74bb6  FT_Load_Char
+0xb229e6bf  FT_Load_Glyph
+0x3545bdc1  FT_Load_Sfnt_Table
+0xeac06c4b  FT_Lookup_Renderer
+0xab4747b4  FT_Match_Size
+0xff2d2f98  FT_Matrix_Invert
+0x406d1e1a  FT_Matrix_Multiply
+0x84ce959c  FT_MulDiv
+0x38e8695c  FT_MulFix
+0xcc20195f  FT_New_Face
+0xd5bb8191  FT_New_GlyphSlot
+0xa11ba28b  FT_New_Library
+0xbf97b657  FT_New_Memory
+0x1bfbe848  FT_New_Memory_Face
+0x055c1970  FT_New_Size
+0xb5bbfbea  FT_OpenType_Free
+0xa742c04e  FT_OpenType_Validate
+0x51b09e1d  FT_Open_Face
+0x9c8be729  FT_Outline_Check
+0x3c863b04  FT_Outline_Copy
+0x1fcaeebb  FT_Outline_Decompose
+0x3f2b82df  FT_Outline_Done
+0xfeb2e30e  FT_Outline_Done_Internal
+0x4b4cbf7a  FT_Outline_Embolden
+0x52a1f1ec  FT_Outline_GetInsideBorder
+0x04af4d22  FT_Outline_GetOutsideBorder
+0x889c4159  FT_Outline_Get_BBox
+0x18c23bdf  FT_Outline_Get_Bitmap
+0x1b6f28a5  FT_Outline_Get_CBox
+0x04dd4855  FT_Outline_Get_Orientation
+0xa60023ef  FT_Outline_New
+0x11385230  FT_Outline_New_Internal
+0xf67c1c4b  FT_Outline_Render
+0xeb3b1212  FT_Outline_Reverse
+0xeeb810ec  FT_Outline_Transform
+0x6ef5d792  FT_Outline_Translate
+0x33f54920  FT_QAlloc
+0xee7b7aa7  FT_QRealloc
+0x5a23db5b  FT_Raccess_Get_DataOffsets
+0x2e1f7d0a  FT_Raccess_Get_HeaderInfo
+0x2c272c13  FT_Raccess_Guess
+0x1a789b68  FT_Realloc
+0x99040a1d  FT_Remove_Module
+0x5c36e44f  FT_Render_Glyph
+0xc5792092  FT_Render_Glyph_Internal
+0x6e565b59  FT_Request_Metrics
+0x92342aa4  FT_Request_Size
+0x85c80b7f  FT_RoundFix
+0xa4e6c423  FT_Select_Charmap
+0xd4770b4d  FT_Select_Metrics
+0x576e31a5  FT_Select_Size
+0x46d8826f  FT_Set_Char_Size
+0xb9b430c2  FT_Set_Charmap
+0x72cf95fc  FT_Set_Debug_Hook
+0xcee3c5a0  FT_Set_MM_Blend_Coordinates
+0x0af56d94  FT_Set_MM_Design_Coordinates
+0xd12673a0  FT_Set_Pixel_Sizes
+0x917d6e9b  FT_Set_Renderer
+0x7ea2c657  FT_Set_Transform
+0x9164efd1  FT_Set_Var_Blend_Coordinates
+0xfe7d5e4f  FT_Set_Var_Design_Coordinates
+0x6a48d894  FT_Sfnt_Table_Info
+0x3701f938  FT_Sin
+0xd4c19fdb  FT_Sqrt32
+0x20f438ad  FT_SqrtFixed
+0xbe2789cc  FT_Stream_Close
+0xdd872661  FT_Stream_EnterFrame
+0x8be132ab  FT_Stream_ExitFrame
+0x21182419  FT_Stream_ExtractFrame
+0x29020e75  FT_Stream_Free
+0xf745465c  FT_Stream_GetChar
+0x4f4d2e71  FT_Stream_GetLong
+0xae082411  FT_Stream_GetLongLE
+0x52dd4e82  FT_Stream_GetOffset
+0xc3e611c8  FT_Stream_GetShort
+0x5ebe9fd4  FT_Stream_GetShortLE
+0xc9e2965f  FT_Stream_New
+0xe45c32bd  FT_Stream_Open
+0x459907c4  FT_Stream_OpenGzip
+0x084eb81a  FT_Stream_OpenLZW
+0xbe48875f  FT_Stream_OpenMemory
+0xab1e7527  FT_Stream_Pos
+0xd56b3c5c  FT_Stream_Read
+0x191899d0  FT_Stream_ReadAt
+0xd0e3cbb0  FT_Stream_ReadChar
+0xf70f8a7f  FT_Stream_ReadFields
+0xa5b68c24  FT_Stream_ReadLong
+0xb1a33dea  FT_Stream_ReadLongLE
+0x0553ae54  FT_Stream_ReadOffset
+0x9666b4c0  FT_Stream_ReadShort
+0xcdb50080  FT_Stream_ReadShortLE
+0x0fd3f094  FT_Stream_ReleaseFrame
+0xba363b3e  FT_Stream_Seek
+0xb06bd868  FT_Stream_Skip
+0x6fa37ea0  FT_Stream_TryRead
+0xa4afeb98  FT_Stroker_BeginSubPath
+0xf885420c  FT_Stroker_ConicTo
+0x4bbc14e6  FT_Stroker_CubicTo
+0x0c8cae53  FT_Stroker_Done
+0x6de0efb4  FT_Stroker_EndSubPath
+0x18484dc6  FT_Stroker_Export
+0xc3a7e8f2  FT_Stroker_ExportBorder
+0x773ff791  FT_Stroker_GetBorderCounts
+0xc20a2975  FT_Stroker_GetCounts
+0xd78b41cb  FT_Stroker_LineTo
+0xd9c9f093  FT_Stroker_New
+0x684766e9  FT_Stroker_ParseOutline
+0xcfd82265  FT_Stroker_Rewind
+0xe7ebf1ef  FT_Stroker_Set
+0x7e5f23a4  FT_Tan
+0x58d00078  FT_Trace_Get_Count
+0x37e33878  FT_Trace_Get_Name
+0xd7f0afaa  FT_Vector_From_Polar
+0x615369c3  FT_Vector_Length
+0xfa34723f  FT_Vector_Polarize
+0x0aa1b8de  FT_Vector_Rotate
+0x4bc591d7  FT_Vector_Transform
+0xe4969d9d  FT_Vector_Unit
+0xf8d95c49  cellFreeType2Ex
+0x211248e7  cellFreeType2GetRevisionFlags
+0xfa502b9b  ft_debug_init
+0x416cdbc4  ft_glyphslot_alloc_bitmap
+0x858df484  ft_glyphslot_free_bitmap
+0x09d37f90  ft_glyphslot_set_bitmap
+0x552550e5  ft_highpow2
+0x64243044  ft_lzwstate_done
+0x64f1f292  ft_lzwstate_init
+0xd719f8ee  ft_lzwstate_io
+0x214fe115  ft_lzwstate_reset
+0x26eaafa7  ft_mem_alloc
+0x2aa7a25f  ft_mem_free
+0x808e665f  ft_mem_qalloc
+0xc938c83a  ft_mem_qrealloc
+0xa0237f5e  ft_mem_realloc
+0xfe9bee8c  ft_module_get_service
+0xaee8277c  ft_service_list_lookup
+0x7f9976c7  ft_stub_set_char_sizes
+0xe4347e6b  ft_stub_set_pixel_sizes
+0x5f8bf2cc  ft_synthesize_vertical_metrics
+0x1f9bcbe6  ft_validator_error
+0xd9ab9ae4  ft_validator_init
+0xf1ad8ca5  ft_validator_run
+0xf5e23da4  ftc_node_destroy
+0xf456ad89  ps_hints_apply
+```
+
+### `libfs_stub` (59 / 59 missing)
+
+```
+0x7f13fc8c  cellFsAioCancel
+0x9f951810  cellFsAioFinish
+0xdb869f20  cellFsAioInit
+0xc1c507e7  cellFsAioRead
+0x4cef342e  cellFsAioWrite
+0x3394f037  cellFsAllocateFileAreaByFdWithInitialData
+0x2cf1296b  cellFsAllocateFileAreaByFdWithoutZeroFill
+0x103b8632  cellFsAllocateFileAreaWithInitialData
+0x7a0329a1  cellFsAllocateFileAreaWithoutZeroFill
+0x1ea02e2f  cellFsArcadeHddSerialNumber
+0xe15939c3  cellFsChangeFileSizeByFdWithoutAllocation
+0x606f9f42  cellFsChangeFileSizeWithoutAllocation
+0x99406d0b  cellFsChmod
+0x2cb51f0d  cellFsClose
+0xff42dcc3  cellFsClosedir
+0xcb588dba  cellFsFGetBlockSize
+0xef3efa34  cellFsFstat
+0x967a162b  cellFsFsync
+0x0e2939e5  cellFsFtruncate
+0x1a108ab7  cellFsGetBlockSize
+0x9b882495  cellFsGetDirectoryEntries
+0xaa3b4bcd  cellFsGetFreeSize
+0xa397d042  cellFsLseek
+0xba901fe6  cellFsMkdir
+0x718bf5f8  cellFsOpen
+0x3f61245c  cellFsOpendir
+0x4d5ff8e2  cellFsRead
+0x0d5b4a14  cellFsReadWithOffset
+0x5c74903d  cellFsReaddir
+0xa01ee33a  cellFsRegisterConversionCallback
+0xf12eecc8  cellFsRename
+0x2796fdf3  cellFsRmdir
+0xb1840b53  cellFsSdataOpen
+0x6d3bb15b  cellFsSdataOpenByFd
+0x445c878f  cellFsSdataOpenWithVersion
+0x02671310  cellFsSetDefaultContainer
+0x91a1beaa  cellFsSetDiscReadRetrySetting
+0x3140f6e1  cellFsSetIoBuffer
+0x75f16dc5  cellFsSetIoBufferFromDefaultContainer
+0x27800c6b  cellFsStRead
+0xd73938df  cellFsStReadFinish
+0x190912f6  cellFsStReadGetCurrentAddr
+0xbd273a88  cellFsStReadGetRegid
+0xb3afee8b  cellFsStReadGetRingBuf
+0xcf34969c  cellFsStReadGetStatus
+0x2664c8ae  cellFsStReadInit
+0x81f33783  cellFsStReadPutCurrentAddr
+0x8df28ff9  cellFsStReadStart
+0xf8e5d9a0  cellFsStReadStop
+0x8f71c5b2  cellFsStReadWait
+0x866f6aec  cellFsStReadWaitCallback
+0x7de6dced  cellFsStat
+0xc9dc3ac5  cellFsTruncate
+0x3a1c8393  cellFsTruncate2
+0x7f4677a8  cellFsUnlink
+0xf94baa80  cellFsUnregisterL10nCallbacks
+0xbef554a4  cellFsUtime
+0xecdcf2ab  cellFsWrite
+0x8cb722d5  cellFsWriteWithOffset
+```
+
+### `libgcm_gpad_stub` (3 / 3 missing)
+
+```
+0xb5955e77  cellGcmGpadCaptureSnapshot
+0x6c7bed41  cellGcmGpadGetStatus
+0x82df80d1  cellGcmGpadNotifyCaptureSurface
+```
+
+### `libgcm_sys_stub` (84 / 84 missing)
+
+```
+0x5f909b17  _cellGcmFunc1
+0x661fe266  _cellGcmFunc12
+0xbb42a9dd  _cellGcmFunc13
+0x3a33c1fd  _cellGcmFunc15
+0x8effb7fd  _cellGcmFunc2
+0x1bd633f8  _cellGcmFunc3
+0x688b8ac9  _cellGcmFunc38
+0x7fc034bc  _cellGcmFunc4
+0x15bae46b  _cellGcmInitBody
+0x21397818  _cellGcmSetFlipCommand
+0xd8f88e1a  _cellGcmSetFlipCommandWithWaitLabel
+0x21ac3697  cellGcmAddressToOffset
+0x4524cccd  cellGcmBindTile
+0x9dc04436  cellGcmBindZcull
+0x1f61b3ff  cellGcmDumpGraphicsError
+0xe315a0b2  cellGcmGetConfiguration
+0xa547adde  cellGcmGetControlRegister
+0x93806525  cellGcmGetCurrentDisplayBufferId
+0xc8f3bd09  cellGcmGetCurrentField
+0x5e2ee0f0  cellGcmGetDefaultCommandWordSize
+0x8cdf8c70  cellGcmGetDefaultSegmentWordSize
+0x371674cf  cellGcmGetDisplayBufferByFlipIndex
+0x0e6b0dae  cellGcmGetDisplayInfo
+0x72a577ce  cellGcmGetFlipStatus
+0xf80196c1  cellGcmGetLabelAddress
+0x63387071  cellGcmGetLastFlipTime
+0x23ae55a3  cellGcmGetLastSecondVTime
+0xfb81c03e  cellGcmGetMaxIoMapSize
+0x21cee035  cellGcmGetNotifyDataAddress
+0x2922aed0  cellGcmGetOffsetTable
+0x99d397ac  cellGcmGetReport
+0x9a0159af  cellGcmGetReportDataAddress
+0x8572bce2  cellGcmGetReportDataAddressLocation
+0xa6b180ac  cellGcmGetReportDataLocation
+0x657571f7  cellGcmGetTileInfo
+0x055bd74d  cellGcmGetTiledPitchSize
+0x5a41c10f  cellGcmGetTimeStamp
+0x2ad4951b  cellGcmGetTimeStampLocation
+0x723bbc7e  cellGcmGetVBlankCount
+0xd9a0a879  cellGcmGetZcullInfo
+0x107bf3a1  cellGcmInitCursor
+0xcaabd992  cellGcmInitDefaultFifoMode
+0xfce9e764  cellGcmInitSystemMode
+0x2a6fba9c  cellGcmIoOffsetToAddress
+0x63441cb4  cellGcmMapEaIoAddress
+0x626e8518  cellGcmMapEaIoAddressWithFlags
+0xdb769b32  cellGcmMapLocalMemory
+0xa114ec67  cellGcmMapMainMemory
+0xa7ede268  cellGcmReserveIoMapSize
+0xb2e761d4  cellGcmResetFlipStatus
+0x69c6cc82  cellGcmSetCursorDisable
+0xc47d0812  cellGcmSetCursorEnable
+0xf9bfdc72  cellGcmSetCursorImageOffset
+0x1a0de550  cellGcmSetCursorPosition
+0x51c9d62b  cellGcmSetDebugOutputLevel
+0xbc982946  cellGcmSetDefaultCommandBuffer
+0x172c3197  cellGcmSetDefaultCommandBufferAndSegmentWordSize
+0x9ba451e4  cellGcmSetDefaultFifoSize
+0xa53d12ae  cellGcmSetDisplayBuffer
+0xa41ef7e8  cellGcmSetFlipHandler
+0xacee8542  cellGcmSetFlipImmediate
+0x4ae8d215  cellGcmSetFlipMode
+0xa47c09ff  cellGcmSetFlipStatus
+0xd01b570d  cellGcmSetGraphicsHandler
+0xbd6d60d9  cellGcmSetInvalidateTile
+0x0b4b62d5  cellGcmSetPrepareFlip
+0x0a862772  cellGcmSetQueueHandler
+0x4d7ce993  cellGcmSetSecondVFrequency
+0xdc494430  cellGcmSetSecondVHandler
+0xd0b1d189  cellGcmSetTile
+0xbd100dbc  cellGcmSetTileInfo
+0x06edea9e  cellGcmSetUserHandler
+0xffe0160e  cellGcmSetVBlankFrequency
+0xa91b0402  cellGcmSetVBlankHandler
+0xd34a420d  cellGcmSetZcull
+0x25b40ab4  cellGcmSortRemapEaIoAddress
+0xe44874f3  cellGcmSysGetLastVBlankTime
+0x527c6439  cellGcmTerminate
+0xd9b7653e  cellGcmUnbindTile
+0xa75640e8  cellGcmUnbindZcull
+0xefd00f54  cellGcmUnmapEaIoAddress
+0xdb23e867  cellGcmUnmapIoAddress
+0x3b9bd5bd  cellGcmUnreserveIoMapSize
+0xbd2fa0a7  cellGcmUpdateCursor
+```
+
+### `libgem_stub` (37 / 37 missing)
+
+```
+0xafa99ead  cellGemCalibrate
+0x9b9714a4  cellGemClearStatusFlags
+0x1a13d010  cellGemConvertVideoFinish
+0x6dce048c  cellGemConvertVideoStart
+0x4219de31  cellGemEnableCameraPitchAngleCorrection
+0x1a2518a2  cellGemEnableMagnetometer
+0xe1f85a80  cellGemEnd
+0x6fc4c791  cellGemFilterState
+0xce6d7791  cellGemForceRGB
+0x6a5b7048  cellGemGetAccelerometerPositionInDevice
+0x2d2c2764  cellGemGetAllTrackableHues
+0x8befac67  cellGemGetCameraState
+0x02eb41bb  cellGemGetEnvironmentLightingColor
+0xb8ef56a6  cellGemGetHuePixels
+0x92cc4b34  cellGemGetImageState
+0xd37b127a  cellGemGetInertialState
+0x9e1dff96  cellGemGetInfo
+0x2e0a170d  cellGemGetMemorySize
+0x1b30cc22  cellGemGetRGB
+0x6db6b007  cellGemGetRumble
+0x6441d38d  cellGemGetState
+0xfee33481  cellGemGetStatusFlags
+0x18ea899a  cellGemGetTrackerHue
+0xc7622586  cellGemHSVtoRGB
+0x13ea7c64  cellGemInit
+0xe3e4f0d6  cellGemInvalidateCalibration
+0xfb5887f9  cellGemIsTrackableHue
+0xa03ef587  cellGemPrepareCamera
+0xc07896f9  cellGemPrepareVideoConvert
+0x11077159  cellGemReadExternalPortDeviceInfo
+0xde54e2fc  cellGemReset
+0x49609306  cellGemSetRumble
+0x77e08704  cellGemSetYaw
+0x928ac5f8  cellGemTrackHues
+0x41ae9c31  cellGemUpdateFinish
+0x0ecd2261  cellGemUpdateStart
+0x1f6328d8  cellGemWriteExternalPort
+```
+
+### `libgifdec_stub` (12 / 12 missing)
+
+```
+0x116a7da9  cellGifDecClose
+0xb60d42a5  cellGifDecCreate
+0x44b1bc61  cellGifDecDecodeData
+0xe74b2cb1  cellGifDecDestroy
+0x4711cb7f  cellGifDecExtCreate
+0x02e7e03e  cellGifDecExtDecodeData
+0x17fb83c1  cellGifDecExtOpen
+0xe53f91f2  cellGifDecExtReadHeader
+0x95cae771  cellGifDecExtSetParameter
+0x75745079  cellGifDecOpen
+0xf0da95de  cellGifDecReadHeader
+0x41a90dc4  cellGifDecSetParameter
+```
+
+### `libhttp_stub` (105 / 105 missing)
+
+```
+0x1b5bdcc6  cellHttpAddCookieWithClientId
+0x4b33942a  cellHttpClientAddHeader
+0x2033b878  cellHttpClientCloseAllConnections
+0x27f86d70  cellHttpClientCloseConnections
+0x617eec02  cellHttpClientDeleteHeader
+0x0d9c65be  cellHttpClientGetAllHeaders
+0xfce39343  cellHttpClientGetAuthenticationCacheStatus
+0x5980a293  cellHttpClientGetAutoAuthentication
+0x2960e309  cellHttpClientGetAutoRedirect
+0x14bfc765  cellHttpClientGetConnTimeout
+0x431e1407  cellHttpClientGetConnectionWaitStatus
+0x1249c1d1  cellHttpClientGetConnectionWaitTimeout
+0xeb9c1e5e  cellHttpClientGetCookieStatus
+0xd1ec0b25  cellHttpClientGetHeader
+0x591c21a8  cellHttpClientGetKeepAlive
+0x98ce061c  cellHttpClientGetMinSslVersion
+0x46bcc9ff  cellHttpClientGetPerHostKeepAliveMax
+0xffc74003  cellHttpClientGetPerHostPoolSize
+0xd06c90a4  cellHttpClientGetPerPipelineMax
+0x2a1f28f6  cellHttpClientGetPipeline
+0x4d40cf98  cellHttpClientGetProxy
+0x130150ea  cellHttpClientGetRecvBufferSize
+0xba78e51f  cellHttpClientGetRecvTimeout
+0x6884cdb7  cellHttpClientGetResponseBufferMax
+0xd3fcd411  cellHttpClientGetSendBufferSize
+0x271a0b06  cellHttpClientGetSendTimeout
+0xccf57336  cellHttpClientGetSslVersion
+0x070f1020  cellHttpClientGetTotalPoolSize
+0xee05b0c1  cellHttpClientGetUserAgent
+0xdc405507  cellHttpClientGetVersion
+0xadc0a4b2  cellHttpClientPollConnections
+0x6eed4999  cellHttpClientSetAuthenticationCacheStatus
+0x660d42a9  cellHttpClientSetAuthenticationCallback
+0x8eaf47a3  cellHttpClientSetAutoAuthentication
+0x211d8ba3  cellHttpClientSetAutoRedirect
+0xd7471088  cellHttpClientSetConnTimeout
+0x88b71a4c  cellHttpClientSetConnectionWaitStatus
+0xb7cb7d05  cellHttpClientSetConnectionWaitTimeout
+0x13fe767b  cellHttpClientSetCookieRecvCallback
+0x4d915204  cellHttpClientSetCookieSendCallback
+0x434419c8  cellHttpClientSetCookieStatus
+0xa34c4b6f  cellHttpClientSetHeader
+0x5d473170  cellHttpClientSetKeepAlive
+0xe6c7d333  cellHttpClientSetMinSslVersion
+0x595adee9  cellHttpClientSetPerHostKeepAliveMax
+0xab1c55ab  cellHttpClientSetPerHostPoolSize
+0xdc7ed599  cellHttpClientSetPerPipelineMax
+0x296a46cf  cellHttpClientSetPipeline
+0xd7d3cd5d  cellHttpClientSetProxy
+0xbf6e3659  cellHttpClientSetRecvBufferSize
+0x224e1610  cellHttpClientSetRecvTimeout
+0x473cd9f1  cellHttpClientSetRedirectCallback
+0xadd66b5c  cellHttpClientSetResponseBufferMax
+0xbb6c0eb2  cellHttpClientSetSendBufferSize
+0x71714cdc  cellHttpClientSetSendTimeout
+0x1395d8d1  cellHttpClientSetSslCallback
+0xd8352a40  cellHttpClientSetSslClientCertificate
+0x7313c78d  cellHttpClientSetSslIdDestroyCallback
+0x65691795  cellHttpClientSetSslVersion
+0x8aa5fcd3  cellHttpClientSetTotalPoolSize
+0xb6feb84b  cellHttpClientSetTransactionStateCallback
+0xcac9fc34  cellHttpClientSetUserAgent
+0x40547d8b  cellHttpClientSetVersion
+0xf972c733  cellHttpCookieExportWithClientId
+0x0d846d63  cellHttpCookieImportWithClientId
+0x4e4ee53a  cellHttpCreateClient
+0x052a80d9  cellHttpCreateTransaction
+0x980855ac  cellHttpDestroyClient
+0x32f5cae2  cellHttpDestroyTransaction
+0xd276ff1f  cellHttpEnd
+0x61b2bade  cellHttpEndCookie
+0x2a87603a  cellHttpGetProxy
+0x250c386c  cellHttpInit
+0x9638f766  cellHttpInitCookie
+0x61c90691  cellHttpRecvResponse
+0xed993147  cellHttpRequestAddHeader
+0x16214411  cellHttpRequestDeleteHeader
+0x42205fe0  cellHttpRequestGetAllHeaders
+0x4137a1f6  cellHttpRequestGetChunkedTransferStatus
+0x958323cf  cellHttpRequestGetContentLength
+0x0b9fea5f  cellHttpRequestGetHeader
+0x8e3f7ee1  cellHttpRequestSetChunkedTransferStatus
+0xaf73a64e  cellHttpRequestSetContentLength
+0x54f2a4de  cellHttpRequestSetHeader
+0xbea17389  cellHttpResponseGetAllHeaders
+0x464ff889  cellHttpResponseGetContentLength
+0x4f5d8d20  cellHttpResponseGetHeader
+0x10d0d7fc  cellHttpResponseGetStatusCode
+0x6a81b5e4  cellHttpResponseGetStatusLine
+0xa755b005  cellHttpSendRequest
+0xad6a2e5b  cellHttpSessionCookieFlush
+0x0d896b97  cellHttpSetProxy
+0x2d52848b  cellHttpTransactionAbortConnection
+0xa0d9223c  cellHttpTransactionCloseConnection
+0x38954133  cellHttpTransactionGetSslCipherBits
+0x34061e49  cellHttpTransactionGetSslCipherId
+0x895c604c  cellHttpTransactionGetSslCipherName
+0xe3c424b3  cellHttpTransactionGetSslCipherString
+0x93e938e5  cellHttpTransactionGetSslCipherVersion
+0x2a78ff04  cellHttpTransactionGetSslId
+0xad1c6f02  cellHttpTransactionGetSslVersion
+0x0ef17399  cellHttpTransactionGetUri
+0xd47cc666  cellHttpTransactionReleaseConnection
+0xe6d4202f  cellHttpsEnd
+0x522180bc  cellHttpsInit
+```
+
+### `libhttp_util_stub` (20 / 20 missing)
+
+```
+0x37bb53a2  cellHttpUtilAppendHeaderValue
+0x8e52ee08  cellHttpUtilBase64Decoder
+0x83faa354  cellHttpUtilBase64Encoder
+0x04accebf  cellHttpUtilBuildHeader
+0x1c6e4dbb  cellHttpUtilBuildRequestLine
+0x6f0f7667  cellHttpUtilBuildUri
+0x97f9fbe5  cellHttpUtilCopyHeader
+0x50ea75bc  cellHttpUtilCopyStatusLine
+0xf05df789  cellHttpUtilCopyUri
+0x9003b1f2  cellHttpUtilEscapeUri
+0x8e6c5bb9  cellHttpUtilFormUrlDecode
+0x44d756d6  cellHttpUtilFormUrlEncode
+0x8ea23deb  cellHttpUtilMergeUriPath
+0xe1fb0ebd  cellHttpUtilParseHeader
+0xa3457869  cellHttpUtilParseProxy
+0x2bcbced4  cellHttpUtilParseStatusLine
+0x32faaf58  cellHttpUtilParseUri
+0x8bb608e4  cellHttpUtilParseUriPath
+0xaabeb869  cellHttpUtilSweepPath
+0x2763fd66  cellHttpUtilUnescapeUri
+```
+
+### `libio_stub` (34 / 40 missing)
+
+```
+0x2073b7f6  cellKbClearBuf
+0x4ab1fa77  cellKbCnvRawCode
+0xbfce3285  cellKbEnd
+0x1f71ecbe  cellKbGetConfiguration
+0x2f1774d5  cellKbGetInfo
+0x433f6ec0  cellKbInit
+0xff0a21b7  cellKbRead
+0xa5f85e4d  cellKbSetCodeType
+0x3f72c56e  cellKbSetLEDStatus
+0xdeefdfa7  cellKbSetReadMode
+0x3ef66b95  cellMouseClearBuf
+0xe10183ce  cellMouseEnd
+0x3138e632  cellMouseGetData
+0x6bd131f0  cellMouseGetDataList
+0x5baf30fb  cellMouseGetInfo
+0xa328cc35  cellMouseGetRawData
+0x21a62e9b  cellMouseGetTabletDataList
+0x4d0b3b1f  cellMouseInfoTabletMode
+0xc9030138  cellMouseInit
+0x2d16da4f  cellMouseSetTabletMode
+0x0d5f2c14  cellPadClearBuf
+0x4d9b75d5  cellPadEnd
+0x8b72cda1  cellPadGetData
+0x6bc09c61  cellPadGetDataExtra
+0xa703a51d  cellPadGetInfo2
+0x1cf98800  cellPadInit
+0xbafd6409  cellPadLddDataInsert
+0x8b8231e5  cellPadLddGetPortNo
+0x20a97ba2  cellPadLddRegisterController
+0xe442faa8  cellPadLddUnregisterController
+0x8a00f264  cellPadPeriphGetData
+0x4cc9b68d  cellPadPeriphGetInfo
+0xf65544ee  cellPadSetActDirect
+0x578e3c98  cellPadSetPortSetting
+```
+
+### `libjpgdec_stub` (12 / 12 missing)
+
+```
+0x9338a07a  cellJpgDecClose
+0xa7978f59  cellJpgDecCreate
+0xaf8bb012  cellJpgDecDecodeData
+0xd8ea91f8  cellJpgDecDestroy
+0x8b300f66  cellJpgDecExtCreate
+0x716f8792  cellJpgDecExtDecodeData
+0xa9f703e3  cellJpgDecExtOpen
+0xb91eb3d2  cellJpgDecExtReadHeader
+0x65cbbb16  cellJpgDecExtSetParameter
+0x976ca5c2  cellJpgDecOpen
+0x6d9ebccf  cellJpgDecReadHeader
+0xe08f3910  cellJpgDecSetParameter
+```
+
+### `libjpgenc_stub` (10 / 10 missing)
+
+```
+0x969fc5f7  cellJpgEncClose
+0xa9e81214  cellJpgEncEncodePicture
+0x636dc89e  cellJpgEncEncodePicture2
+0x4262e880  cellJpgEncGetStreamInfo
+0xa4bfae51  cellJpgEncOpen
+0x6f2d371c  cellJpgEncOpenEx
+0x12d9b6c5  cellJpgEncQueryAttr
+0x0cf2b78b  cellJpgEncReset
+0x2ae79be8  cellJpgEncWaitForInput
+0x9b4e3a74  cellJpgEncWaitForOutput
+```
+
+### `libkey2char_stub` (5 / 5 missing)
+
+```
+0x14bf2dc1  cellKey2CharClose
+0x56776c0d  cellKey2CharGetChar
+0xabf629c1  cellKey2CharOpen
+0x0dfbadfa  cellKey2CharSetArrangement
+0xbfc03768  cellKey2CharSetMode
+```
+
+### `libl10n_stub` (165 / 165 missing)
+
+```
+0xeb41cc68  ARIBstoUCS2s
+0x32689828  ARIBstoUTF8s
+0xfa4a675a  BIG5stoUCS2s
+0xd990858b  BIG5stoUTF8s
+0x9ec52258  BIG5toUCS2
+0x4b3bbacb  BIG5toUTF8
+0x9cd8135b  EUCCNstoUCS2s
+0x1ae2acee  EUCCNstoUTF8s
+0xd9fb1224  EUCCNtoUCS2
+0x8171c1cc  EUCCNtoUTF8
+0xa34fa0eb  EUCJPstoJISs
+0x511d386b  EUCJPstoSJISs
+0x90e9b5d2  EUCJPstoUCS2s
+0x5ac783dc  EUCJPstoUTF8s
+0x53c71ac2  EUCJPtoSJIS
+0x54f59807  EUCJPtoUCS2
+0x3dabd5a7  EUCJPtoUTF8
+0x14f504b8  EUCKRstoUCS2s
+0x8a56f148  EUCKRstoUHCs
+0x2b84030c  EUCKRstoUTF8s
+0x9a72059d  EUCKRtoUCS2
+0x58246762  EUCKRtoUHC
+0x63219199  EUCKRtoUTF8
+0xa60ff5c9  EucJpHan2Zen
+0x82d5ecdf  EucJpZen2Han
+0x60ffa0ec  GB18030stoUCS2s
+0xd02ef83d  GB18030stoUTF8s
+0xaf18d499  GB18030toUCS2
+0xeabc3d00  GB18030toUTF8
+0x1cb1138f  GBKstoUCS2s
+0x949bb14c  GBKstoUTF8s
+0x1fb50183  GBKtoUCS2
+0x860fc741  GBKtoUTF8
+0x0bf867e2  HZstoUCS2s
+0x42838145  HZstoUTF8s
+0xa609f3e9  JISstoEUCJPs
+0x6169f205  JISstoSJISs
+0xe956dc64  JISstoUCS2s
+0x060ee3b2  JISstoUTF8s
+0x1ac0d23d  L10nConvert
+0x931ff25a  L10nConvertStr
+0xc9b78f58  MSJISstoUCS2s
+0x5a4ab223  MSJISstoUTF8s
+0xb6e45343  MSJIStoUCS2
+0x398a3dee  MSJIStoUTF8
+0x9ce52809  SBCSstoUCS2s
+0x72632e53  SBCSstoUTF8s
+0xc944fa56  SBCStoUCS2
+0x74496718  SBCStoUTF8
+0xd8721e2c  SJISstoEUCJPs
+0x73f2cd21  SJISstoJISs
+0xf9b1896d  SJISstoUCS2s
+0x33435818  SJISstoUTF8s
+0xf439728e  SJIStoEUCJP
+0xbdd44ee3  SJIStoUCS2
+0x6122e000  SJIStoUTF8
+0x638c2fc1  SjisHan2Zen
+0x07168a83  SjisZen2Han
+0x408a622b  ToEucJpHira
+0x41ccf033  ToEucJpKata
+0x3968f176  ToEucJpLower
+0x867f7b8b  ToEucJpUpper
+0x1ec712e0  ToSjisHira
+0x9d14dc46  ToSjisKata
+0x0bc386c8  ToSjisLower
+0x6de4b508  ToSjisUpper
+0xbe8d5485  UCS2stoARIBs
+0xee6c6a39  UCS2stoBIG5s
+0x71804d64  UCS2stoEUCCNs
+0x6e5906fd  UCS2stoEUCJPs
+0xdc54886c  UCS2stoEUCKRs
+0x53764725  UCS2stoGB18030s
+0x55f6921c  UCS2stoGBKs
+0x0ce278fd  UCS2stoHZs
+0x88f8340b  UCS2stoJISs
+0x3a20bc34  UCS2stoMSJISs
+0xebae29c0  UCS2stoSBCSs
+0x0d90a48d  UCS2stoSJISs
+0xf1dcfa71  UCS2stoUHCs
+0x714a9b4a  UCS2stoUTF16s
+0xeb685b83  UCS2stoUTF32s
+0x2ad091c6  UCS2stoUTF8s
+0x5b684dfb  UCS2toBIG5
+0x9a0e7d23  UCS2toEUCCN
+0x005200e6  UCS2toEUCJP
+0xc7bdcb4c  UCS2toEUCKR
+0x0bedf77d  UCS2toGB18030
+0xa0d463c0  UCS2toGBK
+0x65444204  UCS2toMSJIS
+0x256b6861  UCS2toSBCS
+0x596df41c  UCS2toSJIS
+0x6a6f25d1  UCS2toUHC
+0x64a10ec8  UCS2toUTF16
+0x0356038c  UCS2toUTF32
+0xa9a76fb8  UCS2toUTF8
+0x16eaf5f1  UHCstoEUCKRs
+0x41b4a5ae  UHCstoUCS2s
+0x5e1d9330  UHCstoUTF8s
+0x7c5bde1c  UHCtoEUCKR
+0x91a99765  UHCtoUCS2
+0xb3361be6  UHCtoUTF8
+0x53558b6b  UTF16stoUCS2s
+0x2efa7294  UTF16stoUTF32s
+0xe6f5711b  UTF16stoUTF8s
+0x6fc530b3  UTF16toUCS2
+0xa19fb9de  UTF16toUTF32
+0x317ab7c2  UTF16toUTF8
+0xd8cb24cb  UTF32stoUCS2s
+0x8555fe15  UTF32stoUTF16s
+0x21aa3045  UTF32stoUTF8s
+0x6c62d879  UTF32toUCS2
+0x9b1210c6  UTF32toUTF16
+0x9768b6d3  UTF32toUTF8
+0xa5146299  UTF8stoARIBs
+0x52b7883f  UTF8stoBIG5s
+0x8f472054  UTF8stoEUCCNs
+0xc62b758d  UTF8stoEUCJPs
+0x5cd29270  UTF8stoEUCKRs
+0x89236c86  UTF8stoGB18030s
+0x262a5ae2  UTF8stoGBKs
+0xdefa1c17  UTF8stoHZs
+0x9cf1ab77  UTF8stoJISs
+0x62b36bcf  UTF8stoMSJISs
+0xda67b37f  UTF8stoSBCSs
+0xdd5ebdeb  UTF8stoSJISs
+0xfdbf6ac5  UTF8stoUCS2s
+0x9a13d6b8  UTF8stoUHCs
+0xf7681b9a  UTF8stoUTF16s
+0x8ccdba38  UTF8stoUTF32s
+0xe6d9e234  UTF8toBIG5
+0x7d07a1c2  UTF8toEUCCN
+0x6e0705c4  UTF8toEUCJP
+0x2f9eb543  UTF8toEUCKR
+0x058addc8  UTF8toGB18030
+0xb7cef4a6  UTF8toGBK
+0x4931b44e  UTF8toMSJIS
+0xb9cf473d  UTF8toSBCS
+0xeb3dc670  UTF8toSJIS
+0x28724522  UTF8toUCS2
+0x9557ac9b  UTF8toUHC
+0x61fb9442  UTF8toUTF16
+0x74871fe0  UTF8toUTF32
+0x21948c03  eucjp2jis
+0xe2eabb32  eucjp2kuten
+0x3df65b64  eucjp2sjis
+0x1da42d70  eucjphan2zen
+0xbe42e661  eucjpzen2han
+0xa963619c  isEucJpKigou
+0xbefe3869  isSjisKigou
+0x9dcde367  jis2eucjp
+0x05028763  jis2kuten
+0x1758053c  jis2sjis
+0x750c363d  jstrchk
+0x1906ce6b  jstrnchk
+0x0f624540  kuten2eucjp
+0x7c912bda  kuten2jis
+0xb7e08f7a  kuten2sjis
+0x01b0cbf4  l10n_convert
+0xa298cad2  l10n_convert_str
+0xcc1633cc  l10n_get_converter
+0x9874020d  sjis2eucjp
+0x14ee3649  sjis2jis
+0x6621a82c  sjis2kuten
+0x24fd32a9  sjishan2zen
+0x33f8b35c  sjiszen2han
+```
+
+### `liblv2_stub` (113 / 118 missing)
+
+```
+0xf7f7fb20  _sys_free
+0xb9bf1078  _sys_heap_alloc_heap_memory
+0xb2fcf2c8  _sys_heap_create_heap
+0xaede4b03  _sys_heap_delete_heap
+0x8a561d92  _sys_heap_free
+0xd1ad4570  _sys_heap_get_mallinfo
+0xb6369393  _sys_heap_get_total_free_size
+0x35168520  _sys_heap_malloc
+0x44265c08  _sys_heap_memalign
+0x8985b5b6  _sys_heap_stats
+0xbdb18f83  _sys_malloc
+0x318f17e1  _sys_memalign
+0x3bd53c7b  _sys_memchr
+0xfb5db080  _sys_memcmp
+0x6bf66ea7  _sys_memcpy
+0x27427742  _sys_memmove
+0x68b9b011  _sys_memset
+0x9f04f7af  _sys_printf
+0x96328741  _sys_process_at_Exitspawn
+0x2c847572  _sys_process_atexitspawn
+0xc4fd6121  _sys_qsort
+0x06574237  _sys_snprintf
+0xa1f9eafe  _sys_sprintf
+0xdd0c1e09  _sys_spu_printf_attach_group
+0x1ae10b92  _sys_spu_printf_attach_thread
+0x5fdfb2fe  _sys_spu_printf_detach_group
+0xb3bbcf2a  _sys_spu_printf_detach_thread
+0xdd3b27ac  _sys_spu_printf_finalize
+0x45fe2fce  _sys_spu_printf_initialize
+0x052d29a6  _sys_strcat
+0x7498887b  _sys_strchr
+0x459b4393  _sys_strcmp
+0x99c88692  _sys_strcpy
+0x2d36462b  _sys_strlen
+0x1ca525a2  _sys_strncasecmp
+0x996f7cf8  _sys_strncat
+0x04e83d2c  _sys_strncmp
+0xd3039d4d  _sys_strncpy
+0x191f0c4a  _sys_strrchr
+0x4b2f301a  _sys_tolower
+0xeef75113  _sys_toupper
+0xfa7f693d  _sys_vprintf
+0x0618936b  _sys_vsnprintf
+0x791b9219  _sys_vsprintf
+0x8a2f159b  console_getc
+0xe66bac36  console_putc
+0xf57e1d6f  console_write
+0xe76964f5  sys_game_board_storage_read
+0x8bb03ab8  sys_game_board_storage_write
+0x9f950780  sys_game_get_rtc_status
+0x620e35a7  sys_game_get_system_sw_version
+0x3172759d  sys_game_get_temperature
+0xfc52a7a9  sys_game_process_exitspawn
+0x67f9fedb  sys_game_process_exitspawn2
+0xacad8fb6  sys_game_watchdog_clear
+0x9e0623b5  sys_game_watchdog_start
+0x6e05231d  sys_game_watchdog_stop
+0x71a8472a  sys_get_random_number
+0x744680a2  sys_initialize_tls
+0x4a071d98  sys_interrupt_thread_disestablish
+0xda0eb71a  sys_lwcond_create
+0x1c9a942c  sys_lwcond_destroy
+0xef87a695  sys_lwcond_signal
+0xe9a1bd84  sys_lwcond_signal_all
+0x52aadadf  sys_lwcond_signal_to
+0x2a6d9d51  sys_lwcond_wait
+0xa146a143  sys_mempool_allocate_block
+0xca9a60bf  sys_mempool_create
+0x9d3c0f81  sys_mempool_destroy
+0x608212fc  sys_mempool_free_block
+0x25596f51  sys_mempool_get_count
+0x05c65656  sys_mempool_try_allocate_block
+0xb257540b  sys_mmapper_allocate_memory
+0x70258515  sys_mmapper_allocate_memory_from_container
+0x409ad939  sys_mmapper_free_memory
+0xdc578057  sys_mmapper_map_memory
+0x4643ba6e  sys_mmapper_unmap_memory
+0x24a1ea07  sys_ppu_thread_create
+0xaff080a4  sys_ppu_thread_exit
+0x350d454e  sys_ppu_thread_get_id
+0xa3e3be68  sys_ppu_thread_once
+0x3dd4a957  sys_ppu_thread_register_atexit
+0xac6fc404  sys_ppu_thread_unregister_atexit
+0xe6f2c1e7  sys_process_exit
+0x4f7172c9  sys_process_is_stack
+0xa2c7ba64  sys_prx_exitspawn_with_level
+0x0341bb97  sys_prx_get_module_id_by_address
+0xe0998dbf  sys_prx_get_module_id_by_name
+0x84bb6774  sys_prx_get_module_info
+0xa5d06bf0  sys_prx_get_module_list
+0x74311398  sys_prx_get_my_module_id
+0x26090058  sys_prx_load_module
+0xef68c17c  sys_prx_load_module_by_fd
+0xb27c8ae7  sys_prx_load_module_list
+0xe7ef3a80  sys_prx_load_module_list_on_memcontainer
+0xaa6d9bff  sys_prx_load_module_on_memcontainer
+0xa330ad84  sys_prx_load_module_on_memcontainer_by_fd
+0x42b23552  sys_prx_register_library
+0x9f18429d  sys_prx_start_module
+0x80fb0c19  sys_prx_stop_module
+0xf0aece0d  sys_prx_unload_module
+0xd0ea47a7  sys_prx_unregister_library
+0xb995662e  sys_raw_spu_image_load
+0x893305fa  sys_raw_spu_load
+0x8c2bb498  sys_spinlock_initialize
+0xa285139d  sys_spinlock_lock
+0x722a0254  sys_spinlock_trylock
+0x5267cb35  sys_spinlock_unlock
+0x1ed454ce  sys_spu_elf_get_information
+0xdb6b3250  sys_spu_elf_get_segments
+0xe0da8efd  sys_spu_image_close
+0xebe5f72f  sys_spu_image_import
+0x8461e528  sys_time_get_system_time
+```
+
+### `liblv2dbg_stub` (35 / 35 missing)
+
+```
+0xf254768c  sys_dbg_disable_floating_point_enabled_exception
+0x3147c6ca  sys_dbg_enable_floating_point_enabled_exception
+0xc0eb9266  sys_dbg_finalize_ppu_exception_handler
+0xbb0ae221  sys_dbg_get_address_from_dabr
+0x63bd413e  sys_dbg_get_cond_information
+0xb9da87d3  sys_dbg_get_coredump_params
+0xdf856979  sys_dbg_get_event_flag_information
+0x381ae33e  sys_dbg_get_event_queue_information
+0x7bdadb01  sys_dbg_get_lwcond_information
+0xcb377e36  sys_dbg_get_lwmutex_information
+0x50453aa8  sys_dbg_get_mutex_information
+0x113b0bea  sys_dbg_get_ppu_thread_ids
+0x4b55f456  sys_dbg_get_ppu_thread_name
+0x6b413178  sys_dbg_get_ppu_thread_status
+0x9794bb53  sys_dbg_get_rwlock_information
+0xa2d6cbd2  sys_dbg_get_semaphore_information
+0x08ef08a9  sys_dbg_get_spu_thread_group_ids
+0xbd69e584  sys_dbg_get_spu_thread_group_name
+0x9ddb9dc3  sys_dbg_get_spu_thread_group_status
+0x1860f909  sys_dbg_get_spu_thread_ids
+0x3e5eed36  sys_dbg_get_spu_thread_name
+0xc353353a  sys_dbg_initialize_ppu_exception_handler
+0x590a276e  sys_dbg_mat_get_condition
+0x24a3d413  sys_dbg_mat_set_condition
+0xc5eef17f  sys_dbg_read_ppu_thread_context
+0xc21ee635  sys_dbg_read_spu_thread_context
+0x266c2bd3  sys_dbg_read_spu_thread_context2
+0x22916f45  sys_dbg_register_ppu_exception_handler
+0xdb14b37b  sys_dbg_set_address_to_dabr
+0xab475d53  sys_dbg_set_mask_to_ppu_exception_handler
+0x06a840f5  sys_dbg_set_stacksize_ppu_exception_handler
+0xd830062a  sys_dbg_signal_to_coredump_handler
+0x4ded9f6c  sys_dbg_signal_to_ppu_exception_handler
+0xc6d7ec13  sys_dbg_unregister_ppu_exception_handler
+0x580f8203  sys_dbg_vm_get_page_information
+```
+
+### `libm_stub` (215 / 503 missing)
+
+```
+0xc7369fce  _Atan
+0x4ab22a63  _Caddcc
+0x266d2473  _Caddcr
+0xa8d180e8  _Cbuild
+0xeac62795  _Cdivcc
+0xfa765d42  _Cdivcr
+0xcac167a5  _Cmulcc
+0x1498a072  _Cmulcr
+0x7d6191d0  _Cosh
+0x315673f6  _Csubcc
+0xee0db701  _Csubcr
+0x3eeedb0e  _Dclass
+0xad17e787  _Dint
+0xee303936  _Dsign
+0xb94b9d13  _Dtest
+0x0cf9b8bd  _Erfc
+0xdfd41734  _Exp
+0xf16568af  _FAtan
+0x5bfd37be  _FCaddcc
+0xd70df92a  _FCaddcr
+0x01ecef7d  _FCbuild
+0x70f71871  _FCdivcc
+0x33f27f25  _FCdivcr
+0x63bbdfa6  _FCmulcc
+0x241f9337  _FCmulcr
+0x2e69bb2a  _FCosh
+0x95dfecb1  _FCsubcc
+0x6ef6b083  _FCsubcr
+0x007854f4  _FDclass
+0x48d462a9  _FDint
+0xa8c16038  _FDsign
+0x9232baea  _FDtest
+0xfbe88922  _FErfc
+0x05f1dc9e  _FExp
+0xda31fc5d  _FFpcomp
+0x9616e336  _FHypot
+0xad5d3e57  _FLgamma
+0x71293b71  _FLog
+0x6fcc1e27  _FPoly
+0xb5e28191  _FSin
+0xccc66f11  _FSinh
+0x418036e3  _FTgamma
+0x003395d9  _Feraise
+0xe5d2293f  _Force_raise
+0x790c53bd  _Fpcomp
+0xd28ef6dd  _Hypot
+0x89d1d168  _LAtan
+0xd5d38552  _LCaddcc
+0x0d86295d  _LCaddcr
+0x07f400e3  _LCbuild
+0x1be996cc  _LCdivcc
+0xaaa270dc  _LCdivcr
+0xfffe79bf  _LCmulcc
+0xe9ac8223  _LCmulcr
+0xad3a093d  _LCosh
+0x0f721a9d  _LCsubcc
+0x81daf880  _LCsubcr
+0x6b6ab2a9  _LDclass
+0xb412a8dc  _LDint
+0x33e5929b  _LDsign
+0x3c616743  _LDtest
+0x5ee37927  _LErfc
+0x4111b546  _LExp
+0xc7b45a19  _LFpcomp
+0x947ae18e  _LHypot
+0xb348c5c2  _LLgamma
+0x1d35bfe4  _LLog
+0xe584836c  _LPoly
+0xa2c81938  _LSin
+0x1bcdeb47  _LSinh
+0x8bd1deb2  _LTgamma
+0xafcfdad7  _Lgamma
+0xca463458  _Log
+0x3f701e78  _Poly
+0x742f12b4  _Sin
+0xd612fa16  _Sinh
+0xb4f4513e  _Tgamma
+0x9fded78a  _acosf4
+0x6b660894  _acosf4fast
+0x0e53319f  _asinf4
+0x14208b00  _asinf4fast
+0xc90f4bbc  _atan2f4
+0xec7da0c8  _atan2f4fast
+0x76e639ec  _atanf4
+0x70357b12  _atanf4fast
+0x3ec9de23  _cbrtf4
+0xf3bd7d08  _cbrtf4fast
+0x3d901a10  _ceilf4
+0xa0160c30  _copysignf4
+0x0bb036a6  _cosf4
+0xcb6a147e  _cosf4fast
+0x9245e01b  _divf4
+0x71f2bc56  _divf4fast
+0x22c3e308  _exp2f4
+0x4875601d  _exp2f4fast
+0xb8aa984e  _expf4
+0xe3e379b8  _expf4fast
+0x60e9ff3c  _expm1f4
+0x398483aa  _expm1f4fast
+0x9e289062  _f_ceilf
+0xfae9e727  _f_copysignf
+0x734ca589  _f_cosf
+0x8d5858db  _f_exp2f
+0x03593d2c  _f_expf
+0x3cb818fa  _f_fdimf
+0x2df339bc  _f_floorf
+0xe92f3fb8  _f_fmaf
+0xf7844153  _f_fmaxf
+0x8c85369b  _f_fminf
+0x02e68d44  _f_fmodf
+0x414c5ecc  _f_hypotf
+0x48157605  _f_llrintf
+0xbfda6837  _f_log10f
+0xdc151707  _f_log2f
+0xeed82401  _f_logf
+0x358d7f93  _f_lrintf
+0x7919f414  _f_nearbyintf
+0x41d1b236  _f_rintf
+0x90f0242f  _f_sinf
+0xec43b983  _f_sqrtf
+0x40a2e212  _fabsf4
+0x054aae63  _fdimf4
+0x1c11885d  _floorf4
+0xd76a16da  _fmaf4
+0x08139bd2  _fmaxf4
+0x012d0a91  _fminf4
+0xfcedabc3  _fmodf4
+0x642e3d18  _frexpf4
+0xd0fd3ca8  _hypotf4
+0xe31cc0d3  _ilogbf4
+0xc9c536ce  _ldexpf4
+0x6261c0b5  _log10f4
+0xcbdf9afb  _log10f4fast
+0x842cb14d  _log1pf4
+0x405f9727  _log1pf4fast
+0xfe23dbe9  _log2f4
+0xde7833f2  _log2f4fast
+0x72f1f64b  _logbf4
+0x8f2bcdb5  _logf4
+0xc0bcf25e  _logf4fast
+0x1d5bf5d0  _modff4
+0x29685118  _negatef4
+0x12de4e46  _powf4
+0xe5a0be9f  _powf4fast
+0x0522d1af  _recipf4
+0x17cd5d87  _recipf4fast
+0xcfee82d8  _remainderf4
+0x7a893af1  _rsqrtf4
+0xb89863bc  _rsqrtf4fast
+0x6ad1c42b  _sincosf4
+0xb5961d4e  _sincosf4fast
+0x016556df  _sinf4
+0x1e9fd6ba  _sinf4fast
+0x76afaf04  _sqrtf4
+0x8fb7bac7  _sqrtf4fast
+0xc9481758  _tanf4
+0x938fb946  _tanf4fast
+0xf537d837  _truncf4
+0xe8fcf1f8  acosf4fast
+0x91cdfdb0  asinf4fast
+0xdd8660d2  atan2f4fast
+0x178d98dd  atanf4fast
+0xbb208b20  cbrtf4fast
+0xb0fa1592  clog10l
+0x32f994a1  cosf4fast
+0x657d0e83  divf4fast
+0x2ec867b4  exp2f4fast
+0x74902d4b  expf4fast
+0x47433144  expm1f4fast
+0x705d9e24  f_acosf
+0x4b584841  f_asinf
+0xabdccc7a  f_atan2f
+0x1e85ef02  f_atanf
+0xee204ac6  f_ceilf
+0x642f7d6b  f_copysignf
+0x7ab679da  f_cosf
+0x4a5ae27d  f_exp2f
+0xd8d157f5  f_expf
+0x05cb1718  f_fdimf
+0xb4ef29d5  f_floorf
+0xf83a372f  f_fmaf
+0x39ef81c9  f_fmaxf
+0x3f6262b3  f_fminf
+0x10627248  f_fmodf
+0x3adc01d7  f_frexpf
+0x2cbb6f53  f_hypotf
+0x728149e5  f_ldexpf
+0xafa13040  f_llrintf
+0x6f639afb  f_llroundf
+0x6c009c56  f_log10f
+0xbbaa300b  f_log1pf
+0x6764c707  f_log2f
+0xea1e83e3  f_logf
+0xc7fb73d6  f_lrintf
+0xc477c0f6  f_lroundf
+0x961688d1  f_nearbyintf
+0x00fde072  f_powf
+0x4b03d5b2  f_rintf
+0xb54cc9a1  f_sinf
+0x246ea8d0  f_sqrtf
+0xed9d1ac5  f_tanf
+0xd54039cb  fegettrapenable
+0x72a3ed28  fesettrapenable
+0x05e27a13  log10f4fast
+0xfb6e6213  log1pf4fast
+0x96d1b95e  log2f4fast
+0xe913a166  logf4fast
+0xf95b7769  powf4fast
+0x88fb4a66  recipf4fast
+0x4d878773  remainderf4
+0x1a1adede  rsqrtf4fast
+0x6e9eb0dc  sincosf4fast
+0x547fb4a7  sinf4fast
+0x7d02a5ca  sqrtf4fast
+0x7f91cd41  tanf4fast
+```
+
+### `libmedi_stub` (10 / 10 missing)
+
+```
+0xc324f60c  cellMediatorCloseContext
+0x40ad67eb  cellMediatorCreateContext
+0x5d4431f0  cellMediatorFlushCache
+0x9d11991d  cellMediatorGetProviderUrl
+0x4aecea24  cellMediatorGetSignatureLength
+0xf7e4a50a  cellMediatorGetStatus
+0x4d249136  cellMediatorGetUserInfo
+0x85dc6981  cellMediatorPostReports
+0xa14c6000  cellMediatorReliablePostReports
+0x6b8f5cb9  cellMediatorSign
+```
+
+### `libmic_stub` (41 / 41 missing)
+
+```
+0x8d229f8e  cellMicClose
+0xc461563c  cellMicCommand
+0xc6328caa  cellMicEnd
+0x6a024aa0  cellMicGetDeviceAttr
+0x017024a8  cellMicGetDeviceGUID
+0xfdbbe469  cellMicGetDeviceIdentifier
+0x48108a23  cellMicGetFormat
+0xfda12276  cellMicGetFormatAux
+0x87a08d29  cellMicGetFormatDsp
+0xad049ecf  cellMicGetFormatEx
+0x4e0b69ee  cellMicGetFormatRaw
+0xac5ba03a  cellMicGetSignalAttr
+0xb30780eb  cellMicGetSignalState
+0x25c5723f  cellMicGetStatus
+0xa52d2ae4  cellMicGetType
+0x8325e02d  cellMicInit
+0x1b42101b  cellMicIsAttached
+0x186cb1fb  cellMicIsOpen
+0xdd1b59f0  cellMicOpen
+0x05709bbf  cellMicOpenEx
+0xa42ac07a  cellMicOpenRaw
+0x07e1b12c  cellMicRead
+0x3acc118e  cellMicReadAux
+0xc414faa5  cellMicReadDsp
+0x72165a7f  cellMicReadRaw
+0x65336418  cellMicRemoveNotifyEventQueue
+0x6bc46aab  cellMicReset
+0xb2c16321  cellMicSetDeviceAttr
+0x891c6291  cellMicSetMultiMicNotifyEventQueue
+0x7903400e  cellMicSetNotifyEventQueue
+0x6cc7ae00  cellMicSetNotifyEventQueue2
+0x323deb41  cellMicSetSignalAttr
+0xdd724314  cellMicStart
+0xddd19a89  cellMicStartEx
+0xfcfaf246  cellMicStop
+0x3ace58f3  cellMicSysShareClose
+0xf82bbf7c  cellMicSysShareEnd
+0xd127cd3e  cellMicSysShareInit
+0xc3610dbd  cellMicSysShareOpen
+0xcac7e7d7  cellMicSysShareStart
+0xbdfd51e2  cellMicSysShareStop
+```
+
+### `libnet_stub` (29 / 55 missing)
+
+```
+0x6005cde1  _sys_net_errno_loc
+0xc9157d30  _sys_net_h_errno_loc
+0xc9d09c34  recvmsg
+0xad09481b  sendmsg
+0x6db6e8cd  socketclose
+0x051ee3ee  socketpoll
+0x8ccf05ed  sys_net_abort_resolver
+0x8d1b77fb  sys_net_abort_socket
+0x44328aa2  sys_net_close_dump
+0xb68d5625  sys_net_finalize_network
+0xfdb8f926  sys_net_free_thread_context
+0x1d14d6e4  sys_net_get_lib_name_server
+0x368823c0  sys_net_get_netemu_test_param
+0x3b27c780  sys_net_get_sockinfo
+0xa765d029  sys_net_get_sockinfo_ex
+0xa5a86557  sys_net_get_test_param
+0x05bd4438  sys_net_get_udpp2p_test_param
+0x27fb339d  sys_net_if_ctl
+0x139a9e9b  sys_net_initialize_network_ex
+0xab447704  sys_net_open_dump
+0x89c9917c  sys_net_read_dump
+0x9a318259  sys_net_set_lib_name_server
+0xe2434507  sys_net_set_netemu_test_param
+0x7687d48c  sys_net_set_resolver_configurations
+0x4ab0b9b9  sys_net_set_test_param
+0x10b81ed6  sys_net_set_udpp2p_test_param
+0xb48636c4  sys_net_show_ifconfig
+0x5420e419  sys_net_show_nameserver
+0x79b61646  sys_net_show_route
+```
+
+### `libnetctl_stub` (19 / 19 missing)
+
+```
+0x3e359ab6  cellGameUpdateCheckAbort
+0xffa3d791  cellGameUpdateCheckFinishAsync
+0xf463981c  cellGameUpdateCheckFinishAsyncEx
+0xd0a5d727  cellGameUpdateCheckStartAsync
+0x0791015f  cellGameUpdateCheckStartAsyncEx
+0xa5e1fa60  cellGameUpdateCheckStartWithoutDialogAsync
+0x558700f6  cellGameUpdateCheckStartWithoutDialogAsyncEx
+0x99ab1a26  cellGameUpdateInit
+0x10dae56d  cellGameUpdateTerm
+0x0ce13c6b  cellNetCtlAddHandler
+0x901815c3  cellNetCtlDelHandler
+0x1e585b5d  cellNetCtlGetInfo
+0x3a12865f  cellNetCtlGetNatInfo
+0x8b3eba69  cellNetCtlGetState
+0xbd5a59fc  cellNetCtlInit
+0x71d53210  cellNetCtlNetStartDialogAbortAsync
+0x04459230  cellNetCtlNetStartDialogLoadAsync
+0x0f1f13d3  cellNetCtlNetStartDialogUnloadAsync
+0x105ee2cb  cellNetCtlTerm
+```
+
+### `libovis_stub` (4 / 4 missing)
+
+```
+0xce6cb776  cellOvisFixSpuSegments
+0x82f294b2  cellOvisGetOverlayTableSize
+0xa876c911  cellOvisInitializeOverlayTable
+0x629ba0c0  cellOvisInvalidateOverlappedSegments
+```
+
+### `libpamf_stub` (23 / 23 missing)
+
+```
+0x1abeb9d6  cellPamfEpIteratorGetEp
+0x50b83205  cellPamfEpIteratorMove
+0xca8181c1  cellPamfGetHeaderSize
+0x90fc9a59  cellPamfGetHeaderSize2
+0x44f5c9e3  cellPamfGetStreamOffsetAndSize
+0xe8586ec6  cellPamfReaderGetEpIteratorWithIndex
+0x439fba17  cellPamfReaderGetEpIteratorWithTimeStamp
+0x71df326a  cellPamfReaderGetEsFilterId
+0xdb70296c  cellPamfReaderGetMuxRateBound
+0xd9ea3457  cellPamfReaderGetNumberOfEp
+0xd0230671  cellPamfReaderGetNumberOfSpecificStreams
+0x37f723f7  cellPamfReaderGetNumberOfStreams
+0xf61609d6  cellPamfReaderGetPresentationEndTime
+0x4de501b1  cellPamfReaderGetPresentationStartTime
+0x041cc708  cellPamfReaderGetStreamIndex
+0x67fd273b  cellPamfReaderGetStreamInfo
+0x9ab20793  cellPamfReaderGetStreamTypeAndChannel
+0xb8436ee5  cellPamfReaderInitialize
+0x461534b4  cellPamfReaderSetStreamWithIndex
+0x03fd2caa  cellPamfReaderSetStreamWithTypeAndChannel
+0x28b4e2c1  cellPamfReaderSetStreamWithTypeAndIndex
+0x01067e22  cellPamfStreamTypeToEsFilterId
+0xd1a40ef4  cellPamfVerify
+```
+
+### `libpngdec_stub` (29 / 29 missing)
+
+```
+0x5b3d1ff1  cellPngDecClose
+0x157d30c5  cellPngDecCreate
+0x2310f155  cellPngDecDecodeData
+0x820dae1a  cellPngDecDestroy
+0x48436b2d  cellPngDecExtCreate
+0x726fc1d0  cellPngDecExtDecodeData
+0x0c515302  cellPngDecExtOpen
+0x8b33f863  cellPngDecExtReadHeader
+0x9e9d7d42  cellPngDecExtSetParameter
+0xe163977f  cellPngDecGetPLTE
+0xb40ca175  cellPngDecGetTextChunk
+0x609ec7d5  cellPngDecGetUnknownChunks
+0x7585a275  cellPngDecGetbKGD
+0x7a062d26  cellPngDecGetcHRM
+0xb153629c  cellPngDecGetgAMA
+0xb905ebb7  cellPngDecGethIST
+0xf44b6c30  cellPngDecGetiCCP
+0x27c921b5  cellPngDecGetoFFs
+0xb4fe75e1  cellPngDecGetpCAL
+0x3d50016a  cellPngDecGetpHYs
+0x30cb334a  cellPngDecGetsBIT
+0xc41e1198  cellPngDecGetsCAL
+0xa5cdf57e  cellPngDecGetsPLT
+0xe4416e82  cellPngDecGetsRGB
+0x35a6846c  cellPngDecGettIME
+0xb96fb26e  cellPngDecGettRNS
+0xd2bc5bfd  cellPngDecOpen
+0x9ccdcc95  cellPngDecReadHeader
+0xe97c9bd4  cellPngDecSetParameter
+```
+
+### `libpngenc_stub` (9 / 9 missing)
+
+```
+0x117cd726  cellPngEncClose
+0x5b546ca4  cellPngEncEncodePicture
+0x585269bc  cellPngEncGetStreamInfo
+0x19256dc5  cellPngEncOpen
+0xc82558ce  cellPngEncOpenEx
+0x496cfcd0  cellPngEncQueryAttr
+0x6ac91de3  cellPngEncReset
+0x662bd637  cellPngEncWaitForInput
+0x90ef2963  cellPngEncWaitForOutput
+```
+
+### `libprof_stub` (4 / 4 missing)
+
+```
+0x0252efcc  cellUserTraceInit
+0x05893e7c  cellUserTraceRegister
+0x898c77bf  cellUserTraceTerminate
+0x6d045c2e  cellUserTraceUnregister
+```
+
+### `libresc_stub` (22 / 22 missing)
+
+```
+0x22ae06d8  cellRescAdjustAspectRatio
+0xe0cef79e  cellRescCreateInterlaceTable
+0x2ea3061e  cellRescExit
+0x01220224  cellRescGcmSurface2RescSrc
+0x5a338cdb  cellRescGetBufferSize
+0xc47c5c22  cellRescGetFlipStatus
+0x66f5e388  cellRescGetLastFlipTime
+0x0a2069c7  cellRescGetNumColorBuffers
+0x1dd3c4cd  cellRescGetRegisterCount
+0x516ee89e  cellRescInit
+0x129922a0  cellRescResetFlipStatus
+0x8107277c  cellRescSetBufferAddress
+0x25c107e6  cellRescSetConvertAndFlip
+0x23134710  cellRescSetDisplayMode
+0x10db5b1a  cellRescSetDsts
+0x2ea94661  cellRescSetFlipHandler
+0x19a2a967  cellRescSetPalInterpolateDropFlexRatio
+0x7af8a37f  cellRescSetRegisterCount
+0x6cd0f95f  cellRescSetSrc
+0xd3758645  cellRescSetVBlankHandler
+0x0d3c22ce  cellRescSetWaitFlip
+0xd1ca0503  cellRescVideoOutResolutionId2RescBufferMode
+```
+
+### `librtc_stub` (33 / 33 missing)
+
+```
+0x7f1086e6  cellRtcCheckValid
+0xfb51fc61  cellRtcCompareTick
+0x46ca7fe0  cellRtcConvertLocalTimeToUtc
+0xc48d5002  cellRtcConvertUtcToLocalTime
+0x5491b9d5  cellRtcFormatRfc2822
+0xa07c3d2f  cellRtcFormatRfc2822LocalTime
+0xd9c0b463  cellRtcFormatRfc3339
+0x1324948a  cellRtcFormatRfc3339LocalTime
+0x32c941cf  cellRtcGetCurrentClock
+0x2cce9cf5  cellRtcGetCurrentClockLocalTime
+0x9dafc0d9  cellRtcGetCurrentTick
+0xc2d8cf95  cellRtcGetDayOfWeek
+0x5b6a0a1d  cellRtcGetDaysInMonth
+0xdfff32cf  cellRtcGetDosTime
+0xc7bdb7eb  cellRtcGetTick
+0xcb90c761  cellRtcGetTime_t
+0xe7086f05  cellRtcGetWin32FileTime
+0x5316b4a8  cellRtcIsLeapYear
+0xc5bc0fac  cellRtcParseDateTime
+0xcf11c3d6  cellRtcParseRfc3339
+0x9598d4b3  cellRtcSetDosTime
+0x99b13034  cellRtcSetTick
+0xbb543189  cellRtcSetTime_t
+0x5f68c268  cellRtcSetWin32FileTime
+0x75744e2a  cellRtcTickAddDays
+0xd41d3bd2  cellRtcTickAddHours
+0xf8509925  cellRtcTickAddMicroseconds
+0x2f010bfa  cellRtcTickAddMinutes
+0xe0ecbb45  cellRtcTickAddMonths
+0xccce71bd  cellRtcTickAddSeconds
+0x269a1882  cellRtcTickAddTicks
+0x64c63fd5  cellRtcTickAddWeeks
+0x332a74dd  cellRtcTickAddYears
+```
+
+### `librudp_stub` (29 / 29 missing)
+
+```
+0xc1ad7ced  cellRudpActivate
+0xee41e16a  cellRudpBind
+0x7dadc739  cellRudpCreateContext
+0x6c0cff03  cellRudpEnableInternalIOThread
+0xb6bcb4a1  cellRudpEnd
+0xa70737da  cellRudpFlush
+0x74bfad12  cellRudpGetContextStatus
+0xd666931f  cellRudpGetLocalInfo
+0xfbf7e9e4  cellRudpGetMaxSegmentSize
+0xff9d259c  cellRudpGetOption
+0x576831ae  cellRudpGetRemoteInfo
+0x2cde989f  cellRudpGetSizeReadable
+0xa86b28e3  cellRudpGetSizeWritable
+0xcd1a3f23  cellRudpGetStatus
+0x63f63545  cellRudpInit
+0xc407844f  cellRudpInitiate
+0x6ee04954  cellRudpNetReceived
+0xdf5a2432  cellRudpPollCancel
+0xa3db855c  cellRudpPollControl
+0x6bc587e9  cellRudpPollCreate
+0x8ac398f1  cellRudpPollDestroy
+0xd8310700  cellRudpPollWait
+0xfade48b2  cellRudpProcessEvents
+0x92e4d899  cellRudpRead
+0x7ed95e60  cellRudpSetEventHandler
+0x54f81789  cellRudpSetMaxSegmentSize
+0x384ba777  cellRudpSetOption
+0x48d3eeac  cellRudpTerminate
+0x48c001b0  cellRudpWrite
+```
+
+### `libsail_stub` (119 / 119 missing)
+
+```
+0xed58e3ec  cellSailAuReceiverFinalize
+0x3a1132ed  cellSailAuReceiverGet
+0x3dd9639a  cellSailAuReceiverInitialize
+0x10298371  cellSailAviMovieGetHeader
+0x6e83f5c0  cellSailAviMovieGetMovieInfo
+0x3e908c56  cellSailAviMovieGetStreamByIndex
+0xddebd2a5  cellSailAviMovieGetStreamByTypeAndIndex
+0xcc3cca60  cellSailAviStreamGetHeader
+0xc09e2f23  cellSailAviStreamGetMediaType
+0xdf5553ef  cellSailDescriptorClearEs
+0x15fd6a2a  cellSailDescriptorClose
+0x0abb318b  cellSailDescriptorCreateDatabase
+0x28336e89  cellSailDescriptorDestroyDatabase
+0xac9c3b1f  cellSailDescriptorGetCapabilities
+0xbd1635f4  cellSailDescriptorGetMediaInfo
+0xd5f9a15b  cellSailDescriptorGetStreamType
+0x4c191088  cellSailDescriptorGetUri
+0x92590d52  cellSailDescriptorInquireCapability
+0x277adf21  cellSailDescriptorIsAutoSelection
+0xc044fab1  cellSailDescriptorOpen
+0x76b1a425  cellSailDescriptorSetAutoSelection
+0x0d0c2f0c  cellSailDescriptorSetEs
+0xee94b99b  cellSailDescriptorSetParameter
+0x9553af65  cellSailFutureFinalize
+0x3a2d806c  cellSailFutureGet
+0x4cc54f8e  cellSailFutureInitialize
+0x51ecf361  cellSailFutureIsDone
+0x0c4cb439  cellSailFutureReset
+0xa37fed15  cellSailFutureSet
+0x76488bb1  cellSailGraphicsAdapterFinalize
+0xffd58aa4  cellSailGraphicsAdapterGetFormat
+0x0247c69e  cellSailGraphicsAdapterGetFrame
+0x018281a8  cellSailGraphicsAdapterGetFrame2
+0x1c983864  cellSailGraphicsAdapterInitialize
+0x1872331b  cellSailGraphicsAdapterPtsToTimePosition
+0x2e3ccb5e  cellSailGraphicsAdapterSetPreferredFormat
+0x44a20e79  cellSailGraphicsAdapterUpdateAvSync
+0x346ebba3  cellSailMemAllocatorInitialize
+0xb980b76e  cellSailMp4MovieGetBrand
+0x5783a454  cellSailMp4MovieGetMovieInfo
+0x85b07126  cellSailMp4MovieGetTrackById
+0x5faf802b  cellSailMp4MovieGetTrackByIndex
+0xc2d90ec9  cellSailMp4MovieGetTrackByTypeAndIndex
+0xd4049de0  cellSailMp4MovieIsCompatibleBrand
+0xa48be428  cellSailMp4TrackGetTrackInfo
+0x5f44f64f  cellSailMp4TrackGetTrackReference
+0x72236ec1  cellSailMp4TrackGetTrackReferenceCount
+0x7c8dff3b  cellSailPlayerAddDescriptor
+0xbdf21b0f  cellSailPlayerBoot
+0x950d53c1  cellSailPlayerCancel
+0xbf9b8d72  cellSailPlayerCloseEsAudio
+0xaed9d6cd  cellSailPlayerCloseEsUser
+0x07924359  cellSailPlayerCloseEsVideo
+0x85beffcc  cellSailPlayerCloseStream
+0xd7938b8d  cellSailPlayerCreateDescriptor
+0xfc839bd4  cellSailPlayerDestroyDescriptor
+0xcc987ba6  cellSailPlayerDumpImage
+0x18b4629d  cellSailPlayerFinalize
+0x75fca288  cellSailPlayerGetCurrentDescriptor
+0x752f8585  cellSailPlayerGetDescriptorCount
+0x952269c9  cellSailPlayerGetParameter
+0x186b98d3  cellSailPlayerGetRegisteredProtocols
+0x38144ecf  cellSailPlayerGetRepeatMode
+0x17932b26  cellSailPlayerInitialize
+0x23654375  cellSailPlayerInitialize2
+0x09de25fd  cellSailPlayerIsEsAudioMuted
+0xdbe32ed4  cellSailPlayerIsEsVideoMuted
+0xaafa17b8  cellSailPlayerIsPaused
+0x26563ddc  cellSailPlayerNext
+0x145f9b11  cellSailPlayerOpenEsAudio
+0xa849d0a7  cellSailPlayerOpenEsUser
+0x477501f6  cellSailPlayerOpenEsVideo
+0x34ecc1b9  cellSailPlayerOpenStream
+0xbedccc74  cellSailPlayerRegisterSource
+0x9897fbd1  cellSailPlayerRemoveDescriptor
+0x4fa5ad09  cellSailPlayerReopenEsAudio
+0x7b6fa92e  cellSailPlayerReopenEsUser
+0xf60a8a69  cellSailPlayerReopenEsVideo
+0x47632810  cellSailPlayerReplaceEventHandler
+0xf5747e1f  cellSailPlayerSetAuReceiver
+0x91d287f6  cellSailPlayerSetEsAudioMuted
+0xf1446a40  cellSailPlayerSetEsVideoMuted
+0x18bcd21b  cellSailPlayerSetGraphicsAdapter
+0x5f7c7a6f  cellSailPlayerSetParameter
+0xd1d55a90  cellSailPlayerSetPaused
+0x92eaf6ca  cellSailPlayerSetRendererAudio
+0xecf56150  cellSailPlayerSetRendererVideo
+0xfc5baf8a  cellSailPlayerSetRepeatMode
+0x1139a206  cellSailPlayerSetSoundAdapter
+0xe535b0d3  cellSailPlayerStart
+0xeba8d4ec  cellSailPlayerStop
+0x6f0b1002  cellSailPlayerSubscribeEvent
+0x025b4974  cellSailPlayerUnregisterSource
+0x69793952  cellSailPlayerUnsubscribeEvent
+0x06dd4174  cellSailRendererAudioFinalize
+0x67b4d01f  cellSailRendererAudioInitialize
+0xb7b4ecee  cellSailRendererAudioNotifyCallCompleted
+0xf841a537  cellSailRendererAudioNotifyFrameDone
+0x325039b9  cellSailRendererAudioNotifyOutputEos
+0x47055fea  cellSailRendererVideoFinalize
+0x8d1ff475  cellSailRendererVideoInitialize
+0x954f48f8  cellSailRendererVideoNotifyCallCompleted
+0x5f77e8df  cellSailRendererVideoNotifyFrameDone
+0xdff1cda2  cellSailRendererVideoNotifyOutputEos
+0xd1462438  cellSailSoundAdapterFinalize
+0xf25f197d  cellSailSoundAdapterGetFormat
+0x7eb8d6b5  cellSailSoundAdapterGetFrame
+0x3d0d3b72  cellSailSoundAdapterInitialize
+0x4ae979df  cellSailSoundAdapterPtsToTimePosition
+0x1c9d5e5a  cellSailSoundAdapterSetPreferredFormat
+0xeec22809  cellSailSoundAdapterUpdateAvSync
+0xee724c99  cellSailSourceFinalize
+0x9d30bdce  cellSailSourceInitialize
+0x764ec2d2  cellSailSourceNotifyCallCompleted
+0x54c53688  cellSailSourceNotifyInputEos
+0xf4009a94  cellSailSourceNotifyMediaStateChanged
+0xf289f0cd  cellSailSourceNotifySessionError
+0x95ee1695  cellSailSourceNotifyStreamOut
+0xbdb2251a  cellSailSourceSetDiagHandler
+```
+
+### `libsail_rec_stub` (58 / 58 missing)
+
+```
+0xe15f38d9  cellSailComposerFinalize
+0x57390c45  cellSailComposerGetEsAudioAu
+0xd0ebd14f  cellSailComposerGetEsAudioParameter
+0x62ccc64a  cellSailComposerGetEsUserAu
+0x2f7f391f  cellSailComposerGetEsUserParameter
+0xc3b8f109  cellSailComposerGetEsVideoAu
+0xb1991509  cellSailComposerGetEsVideoParameter
+0x9a71e740  cellSailComposerGetStreamParameter
+0x434c5123  cellSailComposerInitialize
+0x3c09716b  cellSailComposerNotifyCallCompleted
+0xf1f0e5da  cellSailComposerNotifySessionError
+0x2707fd60  cellSailComposerReleaseEsAudioAu
+0x25b980a0  cellSailComposerReleaseEsUserAu
+0x6f867071  cellSailComposerReleaseEsVideoAu
+0xb9562c1a  cellSailComposerTryGetEsAudioAu
+0x4c1d59e8  cellSailComposerTryGetEsUserAu
+0xdfd899b7  cellSailComposerTryGetEsVideoAu
+0x899d1587  cellSailFeederAudioFinalize
+0xbd591197  cellSailFeederAudioInitialize
+0xc2e2f30d  cellSailFeederAudioNotifyCallCompleted
+0x3c775cea  cellSailFeederAudioNotifyFrameOut
+0x999c0dc5  cellSailFeederAudioNotifySessionEnd
+0xaf310ae6  cellSailFeederAudioNotifySessionError
+0x81bfeae8  cellSailFeederVideoFinalize
+0x57415dd3  cellSailFeederVideoInitialize
+0xd84daeb9  cellSailFeederVideoNotifyCallCompleted
+0xe5e0572a  cellSailFeederVideoNotifyFrameOut
+0xbff6e8d3  cellSailFeederVideoNotifySessionEnd
+0x86cae679  cellSailFeederVideoNotifySessionError
+0xe14cae97  cellSailProfileSetEsAudioParameter
+0x1422a425  cellSailProfileSetEsVideoParameter
+0xe8d86c43  cellSailProfileSetStreamParameter
+0xc4617ddc  cellSailRecorderBoot
+0xd37fb694  cellSailRecorderCancel
+0xe3f56f62  cellSailRecorderCloseStream
+0x50affdc1  cellSailRecorderCreateProfile
+0x49476a3d  cellSailRecorderCreateVideoConverter
+0x376c3926  cellSailRecorderDestroyProfile
+0x455c4709  cellSailRecorderDestroyVideoConverter
+0x37aad85f  cellSailRecorderDumpImage
+0xf57d74e3  cellSailRecorderFinalize
+0xff20157b  cellSailRecorderGetParameter
+0x7a52bf69  cellSailRecorderInitialize
+0x10c81457  cellSailRecorderOpenStream
+0x80b711ce  cellSailRecorderRegisterComposer
+0xe12a2fbe  cellSailRecorderReplaceEventHandler
+0x3deae857  cellSailRecorderSetFeederAudio
+0x4fec43a9  cellSailRecorderSetFeederVideo
+0x0a3ea2a9  cellSailRecorderSetParameter
+0x4830faf8  cellSailRecorderStart
+0x18ecc741  cellSailRecorderStop
+0x551a95fc  cellSailRecorderSubscribeEvent
+0xea7e20fc  cellSailRecorderUnregisterComposer
+0x54cfb78b  cellSailRecorderUnsubscribeEvent
+0xe16de678  cellSailVideoConverterCanGetResult
+0xb3d30b0d  cellSailVideoConverterCanProcess
+0xe15679fe  cellSailVideoConverterGetResult
+0x855da8c6  cellSailVideoConverterProcess
+```
+
+### `libsheap_stub` (18 / 18 missing)
+
+```
+0xf6f5fbca  cellKeySheapBarrierDelete
+0xe897c835  cellKeySheapBarrierNew
+0xe6b37362  cellKeySheapBufferDelete
+0x4a5b9659  cellKeySheapBufferNew
+0xa1b25841  cellKeySheapInitialize
+0x2452679f  cellKeySheapMutexDelete
+0x3478e1e6  cellKeySheapMutexNew
+0x79a6abd0  cellKeySheapQueueDelete
+0x987e260e  cellKeySheapQueueNew
+0xed136702  cellKeySheapRwmDelete
+0xf01ac471  cellKeySheapRwmNew
+0x73a45cf8  cellKeySheapSemaphoreDelete
+0x69a5861d  cellKeySheapSemaphoreNew
+0x4b1383fb  cellSheapAllocate
+0x5c5994bd  cellSheapFree
+0xbbb47cd8  cellSheapInitialize
+0x7fa23275  cellSheapQueryFree
+0x37968718  cellSheapQueryMax
+```
+
+### `libspudll_stub` (2 / 2 missing)
+
+```
+0xcccd3257  cellSpudllGetImageSize
+0x3fbcf1d6  cellSpudllHandleConfigSetDefaultValues
+```
+
+### `libspurs_stub` (137 / 137 missing)
+
+```
+0x95180230  _cellSpursAttributeInitialize
+0x5ef96465  _cellSpursEventFlagInitialize
+0x3548f483  _cellSpursJobChainAttributeInitialize
+0x011ee38b  _cellSpursLFQueueInitialize
+0x35dae22b  _cellSpursLFQueuePopBody
+0x8a85674d  _cellSpursLFQueuePushBody
+0x082bfb09  _cellSpursQueueInitialize
+0x77cdac0c  _cellSpursSemaphoreInitialize
+0xe0a6dbe4  _cellSpursSendSignal
+0x8adadf65  _cellSpursTaskAttribute2Initialize
+0xb8474eff  _cellSpursTaskAttributeInitialize
+0xc2acdf43  _cellSpursTasksetAttribute2Initialize
+0x16394a4e  _cellSpursTasksetAttributeInitialize
+0xefeb2679  _cellSpursWorkloadAttributeInitialize
+0xa73bf47e  _cellSpursWorkloadFlagReceiver
+0x2ddbcc0a  _cellSpursWorkloadFlagReceiver2
+0x8fdf50b2  cellSpursAddUrgentCall
+0x17001000  cellSpursAddUrgentCommand
+0x69726aa2  cellSpursAddWorkload
+0xc0158d8b  cellSpursAddWorkloadWithAttribute
+0xb9bc6207  cellSpursAttachLv2EventQueue
+0x1051d134  cellSpursAttributeEnableSpuPrintfIfAvailable
+0x9dcbcb5d  cellSpursAttributeEnableSystemWorkload
+0x82275c1c  cellSpursAttributeSetMemoryContainerForSpuThread
+0x07529113  cellSpursAttributeSetNamePrefix
+0xa839a4d9  cellSpursAttributeSetSpuThreadGroupType
+0x9aeb5432  cellSpursBarrierGetTasksetAddress
+0x7fdf4fef  cellSpursBarrierInitialize
+0x303c19cd  cellSpursCreateJobChainWithAttribute
+0xbeb600ac  cellSpursCreateTask
+0xe14ca62d  cellSpursCreateTask2
+0xe4944a1c  cellSpursCreateTask2WithBinInfo
+0x1d46fedf  cellSpursCreateTaskWithAttribute
+0x52cc6c82  cellSpursCreateTaskset
+0x4a6465e3  cellSpursCreateTaskset2
+0xc10931cb  cellSpursCreateTasksetWithAttribute
+0x1ebcf459  cellSpursDestroyTaskset2
+0x4e66d483  cellSpursDetachLv2EventQueue
+0x32b94add  cellSpursEnableExceptionEventHandler
+0x87630976  cellSpursEventFlagAttachLv2EventQueue
+0x4ac7bae4  cellSpursEventFlagClear
+0x22aab31d  cellSpursEventFlagDetachLv2EventQueue
+0x4d1e9373  cellSpursEventFlagGetClearMode
+0x890f9e5a  cellSpursEventFlagGetDirection
+0x947efb0b  cellSpursEventFlagGetTasksetAddress
+0xf5507729  cellSpursEventFlagSet
+0x6d2d9339  cellSpursEventFlagTryWait
+0x373523d4  cellSpursEventFlagWait
+0xca4c4600  cellSpursFinalize
+0x1f402f8f  cellSpursGetInfo
+0x86c864a2  cellSpursGetJobChainId
+0x4ceb9694  cellSpursGetJobChainInfo
+0xd86380d8  cellSpursGetJobPipelineInfo
+0xc56defb5  cellSpursGetNumSpuThread
+0x6fcdf6e3  cellSpursGetSpuGuid
+0x39c173fb  cellSpursGetSpuThreadGroupId
+0x6c960f6d  cellSpursGetSpuThreadId
+0xe7dd87e1  cellSpursGetTasksetId
+0x9fcb567b  cellSpursGetTasksetInfo
+0xa7f9e716  cellSpursGetWorkloadData
+0xc765b995  cellSpursGetWorkloadFlag
+0x4e153e3e  cellSpursGetWorkloadInfo
+0xacfc8dbc  cellSpursInitialize
+0xaa6269a8  cellSpursInitializeWithAttribute
+0x30aa96c4  cellSpursInitializeWithAttribute2
+0xbb68d76e  cellSpursJobChainAttributeSetHaltOnError
+0x2cfccb99  cellSpursJobChainAttributeSetJobTypeMemoryCheck
+0x9fef70c2  cellSpursJobChainAttributeSetName
+0x161da6a7  cellSpursJobChainGetError
+0x494613c7  cellSpursJobChainGetSpursAddress
+0x5202e53b  cellSpursJobChainSetExceptionEventHandler
+0x6aa76999  cellSpursJobChainUnsetExceptionEventHandler
+0x68aaeba9  cellSpursJobGuardInitialize
+0xd5d0b256  cellSpursJobGuardNotify
+0x00af2519  cellSpursJobGuardReset
+0x97a2f6c8  cellSpursJobHeaderSetJobbin2Param
+0xe7b0e69a  cellSpursJobSetMaxGrab
+0xa7c066de  cellSpursJoinJobChain
+0xa7a94892  cellSpursJoinTask2
+0x9f72add3  cellSpursJoinTaskset
+0x1656d49f  cellSpursLFQueueAttachLv2EventQueue
+0x73e06f91  cellSpursLFQueueDetachLv2EventQueue
+0xb792ca1a  cellSpursLFQueueGetTasksetAddress
+0x4cce88a9  cellSpursLookUpTasksetAddress
+0xe5443be7  cellSpursQueueAttachLv2EventQueue
+0x247414d0  cellSpursQueueClear
+0x35f02287  cellSpursQueueDepth
+0x039d70b7  cellSpursQueueDetachLv2EventQueue
+0xec68442c  cellSpursQueueGetDirection
+0x369fe03d  cellSpursQueueGetEntrySize
+0x2093252b  cellSpursQueueGetTasksetAddress
+0x91066667  cellSpursQueuePopBody
+0x92cff6ed  cellSpursQueuePushBody
+0x54876603  cellSpursQueueSize
+0x75211196  cellSpursReadyCountAdd
+0xf1d3552d  cellSpursReadyCountCompareAndSwap
+0xf843818d  cellSpursReadyCountStore
+0x49a3426d  cellSpursReadyCountSwap
+0x57e4dec3  cellSpursRemoveWorkload
+0x182d9890  cellSpursRequestIdleSpu
+0xf31731bb  cellSpursRunJobChain
+0x568b2352  cellSpursSemaphoreGetTasksetAddress
+0x1d2bca4b  cellSpursSendWorkloadSignal
+0xd2e23fa9  cellSpursSetExceptionEventHandler
+0x7517724a  cellSpursSetGlobalExceptionEventHandler
+0x84d2f6d5  cellSpursSetMaxContention
+0x4de203e2  cellSpursSetPreemptionVictimHints
+0x80a29e27  cellSpursSetPriorities
+0xb52e1bda  cellSpursSetPriority
+0x738e40e6  cellSpursShutdownJobChain
+0xa789e631  cellSpursShutdownTaskset
+0x98d5b343  cellSpursShutdownWorkload
+0xa121a224  cellSpursTaskAttributeSetExitCodeContainer
+0x13ae18f3  cellSpursTaskExitCodeGet
+0x34552fa6  cellSpursTaskExitCodeInitialize
+0xe717ac73  cellSpursTaskExitCodeTryGet
+0x9197915f  cellSpursTaskGenerateLsPattern
+0x9034e538  cellSpursTaskGetContextSaveAreaSize
+0x1d344406  cellSpursTaskGetLoadableSegmentPattern
+0x7cb33c2e  cellSpursTaskGetReadOnlyAreaPattern
+0xdca13593  cellSpursTasksetAttributeEnableClearLS
+0x652b70e2  cellSpursTasksetAttributeSetName
+0x8f122ef8  cellSpursTasksetAttributeSetTasksetSize
+0x58d58fcf  cellSpursTasksetGetSpursAddress
+0x2edcff92  cellSpursTasksetSetExceptionEventHandler
+0x94034c95  cellSpursTasksetUnsetExceptionEventHandler
+0x7b9cbb74  cellSpursTraceFinalize
+0x569674e3  cellSpursTraceInitialize
+0xce853fbf  cellSpursTraceStart
+0xddc81b5a  cellSpursTraceStop
+0x838fa4f0  cellSpursTryJoinTask2
+0x4c75deb8  cellSpursUnsetExceptionEventHandler
+0x861237f8  cellSpursUnsetGlobalExceptionEventHandler
+0x5fd43fe4  cellSpursWaitForWorkloadShutdown
+0x7e4ea023  cellSpursWakeUp
+0x4a5eab63  cellSpursWorkloadAttributeSetName
+0x0eb4bc38  cellSpursWorkloadAttributeSetShutdownCompletionEventHook
+```
+
+### `libspurs_jq_stub` (63 / 63 missing)
+
+```
+0xf244e799  _cellSpursCreateJobQueue
+0x983be7fc  _cellSpursCreateJobQueueWithJobDescriptorPool
+0x0d69929e  _cellSpursJobQueueAllocateJobDescriptorBody
+0xc39173a4  _cellSpursJobQueuePort2CopyPushJobBody
+0xe1731df3  _cellSpursJobQueuePort2PushAndReleaseJobBody
+0xcf89f218  _cellSpursJobQueuePort2PushJobBody
+0xb53436e7  _cellSpursJobQueuePort2PushJobListBody
+0x46c3fb5a  _cellSpursJobQueuePortCopyPushBody
+0x1917359d  _cellSpursJobQueuePortCopyPushJobBody
+0xef66c4b7  _cellSpursJobQueuePortCopyPushJobBody2
+0x4e1a17a6  _cellSpursJobQueuePortPushBody
+0xbd1c5d6b  _cellSpursJobQueuePortPushFlush
+0x85cd04cd  _cellSpursJobQueuePortPushJobBody
+0x90e392cf  _cellSpursJobQueuePortPushJobBody2
+0x1b6eea7e  _cellSpursJobQueuePortPushJobListBody
+0x9396be1d  _cellSpursJobQueuePortPushSync
+0x1da890c7  _cellSpursJobQueuePushAndReleaseJobBody
+0x99316997  _cellSpursJobQueuePushBody
+0xdf0120c2  _cellSpursJobQueuePushFlush
+0x36d0a53c  _cellSpursJobQueuePushJob2Body
+0xc4843b74  _cellSpursJobQueuePushJobBody
+0x98203e3c  _cellSpursJobQueuePushJobBody2
+0xaf1c7a1d  _cellSpursJobQueuePushJobListBody
+0x701fd8a9  _cellSpursJobQueuePushSync
+0xc343ee10  cellSpursGetJobQueueId
+0x43ddab4f  cellSpursJobQueueAttributeInitialize
+0x0582338a  cellSpursJobQueueAttributeSetDoBusyWaiting
+0xe70f874e  cellSpursJobQueueAttributeSetGrabParameters
+0xff03cc79  cellSpursJobQueueAttributeSetIsHaltOnError
+0x742cec0d  cellSpursJobQueueAttributeSetIsJobTypeMemoryCheck
+0x5fb9b05d  cellSpursJobQueueAttributeSetMaxGrab
+0x1686957e  cellSpursJobQueueAttributeSetMaxSizeJobDescriptor
+0x0f03f712  cellSpursJobQueueAttributeSetSubmitWithEntryLock
+0x29c2acc5  cellSpursJobQueueClose
+0x2e775550  cellSpursJobQueueGetError
+0x840c5239  cellSpursJobQueueGetHandleCount
+0x5659da82  cellSpursJobQueueGetMaxSizeJobDescriptor
+0x01bbf2e0  cellSpursJobQueueGetSpurs
+0x15934401  cellSpursJobQueueGetSuspendedJobSize
+0xff7a7bd2  cellSpursJobQueueOpen
+0x934abb00  cellSpursJobQueuePort2AllocateJobDescriptor
+0xf11fe0f1  cellSpursJobQueuePort2Create
+0xc485d207  cellSpursJobQueuePort2Destroy
+0x435bff07  cellSpursJobQueuePort2GetJobQueue
+0xbfea28ab  cellSpursJobQueuePort2PushFlush
+0xfc526b72  cellSpursJobQueuePort2PushSync
+0xfacb3ced  cellSpursJobQueuePort2Sync
+0x26fa81b4  cellSpursJobQueuePortFinalize
+0x90c88f84  cellSpursJobQueuePortGetJobQueue
+0x3d1294fc  cellSpursJobQueuePortInitialize
+0xf5de6363  cellSpursJobQueuePortInitializeWithDescriptorBuffer
+0x634b1502  cellSpursJobQueuePortSync
+0x80a0264c  cellSpursJobQueuePortTrySync
+0x6c93ea18  cellSpursJobQueueSemaphoreAcquire
+0x677027af  cellSpursJobQueueSemaphoreInitialize
+0x97409f67  cellSpursJobQueueSemaphoreTryAcquire
+0x915455b3  cellSpursJobQueueSendSignal
+0x9c300489  cellSpursJobQueueSetExceptionEventHandler
+0x6c61bf87  cellSpursJobQueueSetExceptionEventHandler2
+0x13671514  cellSpursJobQueueSetWaitingMode
+0x93248b92  cellSpursJobQueueUnsetExceptionEventHandler
+0x8ce4cffa  cellSpursJoinJobQueue
+0x8c97a96c  cellSpursShutdownJobQueue
+```
+
+### `libssl_stub` (14 / 14 missing)
+
+```
+0xae6eb491  cellSslCertGetIssuerName
+0x5e9253ca  cellSslCertGetMd5Fingerprint
+0x766d3ca1  cellSslCertGetNameEntryCount
+0x006c4900  cellSslCertGetNameEntryInfo
+0x218b64da  cellSslCertGetNotAfter
+0x31d9ba8d  cellSslCertGetNotBefore
+0xf8206492  cellSslCertGetPublicKey
+0x033c4905  cellSslCertGetRsaPublicKeyExponent
+0x8e505175  cellSslCertGetRsaPublicKeyModulus
+0x7b689ebc  cellSslCertGetSerialNumber
+0x32c61bdf  cellSslCertGetSubjectName
+0x571afaca  cellSslCertificateLoader
+0x1650aea4  cellSslEnd
+0xfb02c9d2  cellSslInit
+```
+
+### `libstdc++_stub` (291 / 518 missing)
+
+```
+0x9dc040e4  _Deletegloballocale
+0x4a40969d  _Fac_tidy
+0x496c6f50  _Getctyptab
+0x683ca70a  _ZNKSt12_String_base5_XlenEv
+0xc7931798  _ZNKSt12_String_base5_XranEv
+0x0ba5483c  _ZNKSt12codecvt_base11do_encodingEv
+0x3e18602a  _ZNKSt12codecvt_base13do_max_lengthEv
+0x16df5ecb  _ZNKSt12codecvt_base16do_always_noconvEv
+0x128cd621  _ZNKSt5ctypeIwE10do_scan_isEsPKwS2_
+0xef6f90d8  _ZNKSt5ctypeIwE11do_scan_notEsPKwS2_
+0x26e8e1cf  _ZNKSt5ctypeIwE5do_isEPKwS2_Ps
+0x229a0963  _ZNKSt5ctypeIwE5do_isEsw
+0x0091a3fd  _ZNKSt6locale9_GetfacetEj
+0x2b05b95a  _ZNKSt7_MpunctIcE11do_groupingEv
+0x696b47f2  _ZNKSt7_MpunctIcE13do_neg_formatEv
+0x753c71db  _ZNKSt7_MpunctIcE13do_pos_formatEv
+0xe528a368  _ZNKSt7_MpunctIcE14do_curr_symbolEv
+0x2adccb1a  _ZNKSt7_MpunctIcE14do_frac_digitsEv
+0x7142ad20  _ZNKSt7_MpunctIcE16do_decimal_pointEv
+0xcc79f55d  _ZNKSt7_MpunctIcE16do_negative_signEv
+0x9b5358f9  _ZNKSt7_MpunctIcE16do_positive_signEv
+0x6c19db26  _ZNKSt7_MpunctIcE16do_thousands_sepEv
+0x75a0617c  _ZNKSt7_MpunctIwE11do_groupingEv
+0x1b6a7482  _ZNKSt7_MpunctIwE13do_neg_formatEv
+0x268c3ea5  _ZNKSt7_MpunctIwE13do_pos_formatEv
+0x5102ac61  _ZNKSt7_MpunctIwE14do_curr_symbolEv
+0x3933645f  _ZNKSt7_MpunctIwE14do_frac_digitsEv
+0x040c18ff  _ZNKSt7_MpunctIwE16do_decimal_pointEv
+0x17dd0a4e  _ZNKSt7_MpunctIwE16do_negative_signEv
+0x06bc5b51  _ZNKSt7_MpunctIwE16do_positive_signEv
+0x9891bf45  _ZNKSt7_MpunctIwE16do_thousands_sepEv
+0x550255f7  _ZNKSt7codecvtIccSt9_MbstatetE10do_unshiftERS0_PcS3_RS3_
+0xfc563813  _ZNKSt7codecvtIccSt9_MbstatetE5do_inERS0_PKcS4_RS4_PcS6_RS6_
+0x9f528cd3  _ZNKSt7codecvtIccSt9_MbstatetE6do_outERS0_PKcS4_RS4_PcS6_RS6_
+0x29c11f46  _ZNKSt7codecvtIccSt9_MbstatetE9do_lengthERKS0_PKcS5_j
+0x2354ec0a  _ZNKSt7codecvtIwcSt9_MbstatetE10do_unshiftERS0_PcS3_RS3_
+0x09e73a2a  _ZNKSt7codecvtIwcSt9_MbstatetE11do_encodingEv
+0xd76b2e07  _ZNKSt7codecvtIwcSt9_MbstatetE13do_max_lengthEv
+0x2cf8ea50  _ZNKSt7codecvtIwcSt9_MbstatetE16do_always_noconvEv
+0xf01deff8  _ZNKSt7codecvtIwcSt9_MbstatetE5do_inERS0_PKcS4_RS4_PwS6_RS6_
+0xa700bc7d  _ZNKSt7codecvtIwcSt9_MbstatetE6do_outERS0_PKwS4_RS4_PcS6_RS6_
+0x67948307  _ZNKSt7codecvtIwcSt9_MbstatetE9do_lengthERKS0_PKcS5_j
+0x643e67f4  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERPv
+0x2ac890f4  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERb
+0x2c6ce396  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERd
+0x4827e6be  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERe
+0x5a3ad4bd  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERf
+0xd5c5ee3d  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERj
+0x4a799510  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERl
+0xa9e5bb16  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERm
+0x6437a975  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERt
+0x67c09257  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERx
+0xac6c23c0  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERy
+0x207b56fa  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE8_GetffldEPcRS3_S6_RKSt6locale
+0x23ef7642  _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE8_GetifldEPcRS3_S6_NSt5_IosbIiE9_FmtflagsERKSt6locale
+0x2e2b80c8  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERPv
+0xfff6ef55  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERb
+0x59c77266  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERd
+0x56fac416  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERe
+0xf2b9ab86  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERf
+0x9268d6e7  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERj
+0x3f9cb259  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERl
+0xad6dbac2  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERm
+0x1474ac53  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERt
+0x01aa0cef  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERx
+0xfefd7d3a  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERy
+0x2670b433  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE8_GetffldEPcRS3_S6_RKSt6locale
+0xce6705c3  _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE8_GetifldEPcRS3_S6_NSt5_IosbIiE9_FmtflagsERKSt6locale
+0x21659e45  _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE5_FputES3_RSt8ios_basecPKcjjjj
+0x2af79bd6  _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE5_IputES3_RSt8ios_basecPcj
+0x61a23009  _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE5_FputES3_RSt8ios_basewPKcjjjj
+0x629b8531  _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE5_IputES3_RSt8ios_basewPcj
+0x85b3c6da  _ZNKSt8_Locinfo7_GetcvtEv
+0x0d644dca  _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE11do_get_dateES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0xbd140e12  _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE11do_get_timeES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0x38783beb  _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE11do_get_yearES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0x67fbabf0  _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE14do_get_weekdayES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0x002c338b  _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE16do_get_monthnameES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0x1bccd2ca  _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetintERS3_S5_iiRi
+0x708cf940  _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE11do_get_dateES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0x23a87483  _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE11do_get_timeES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0xebd4b51d  _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE11do_get_yearES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0x9dcb4bcb  _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE14do_get_weekdayES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0xc7d0ee0c  _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE16do_get_monthnameES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+0x01409785  _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetintERS3_S5_iiRi
+0xd1ee6195  _ZNKSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecPKSt2tmcc
+0xe9d7a4ae  _ZNKSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewPKSt2tmcc
+0x12de5772  _ZNKSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERSs
+0xd6ee1090  _ZNKSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERe
+0x9dbbe07d  _ZNKSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE8_GetmfldERS3_S5_bRSt8ios_base
+0xc6f18e84  _ZNKSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERSbIwS2_SaIwEE
+0x49da8c5f  _ZNKSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERe
+0x4148e091  _ZNKSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE8_GetmfldERS3_S5_bRSt8ios_base
+0x273be056  _ZNKSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE8_PutmfldES3_bRSt8ios_basecbSs
+0x7ebad3f0  _ZNKSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE8_PutmfldES3_bRSt8ios_basewbSbIwS2_SaIwEE
+0x4e34cf83  _ZNSbIwSt11char_traitsIwESaIwEE5_GrowEjb
+0xc4c7993b  _ZNSbIwSt11char_traitsIwESaIwEE5_TidyEbj
+0x10dc3f6c  _ZNSbIwSt11char_traitsIwESaIwEE6appendEjw
+0x871506ea  _ZNSbIwSt11char_traitsIwESaIwEE6assignERKS2_jj
+0x64ce0374  _ZNSbIwSt11char_traitsIwESaIwEE7replaceEjjPKwj
+0x668b31c6  _ZNSs5_GrowEjb
+0x31b3e5cc  _ZNSs5_TidyEbj
+0xdd8b1d47  _ZNSs5eraseEjj
+0xa9116516  _ZNSs6appendEjc
+0x6929318d  _ZNSs6assignERKSsjj
+0x22777290  _ZNSs7replaceEjjPKcj
+0xaea59ceb  _ZNSt10ctype_baseD0Ev
+0x18a38254  _ZNSt10ctype_baseD1Ev
+0xf1cff87d  _ZNSt10ctype_baseD2Ev
+0x7a180518  _ZNSt10money_baseD0Ev
+0xab5832fd  _ZNSt10money_baseD1Ev
+0x9afa5d71  _ZNSt10money_baseD2Ev
+0x7fe08910  _ZNSt10moneypunctIcLb0EE7_GetcatEPPKNSt6locale5facetE
+0x8729f617  _ZNSt10ostrstreamC1EPciNSt5_IosbIiE9_OpenmodeE
+0x4bc193c7  _ZNSt10ostrstreamC2EPciNSt5_IosbIiE9_OpenmodeE
+0xad6d839f  _ZNSt12codecvt_baseD0Ev
+0x01f81190  _ZNSt12codecvt_baseD1Ev
+0xfeb4107c  _ZNSt12codecvt_baseD2Ev
+0xd830252c  _ZNSt12strstreambuf5_InitEiPcS0_i
+0x2f29da90  _ZNSt12strstreambuf5_TidyEv
+0x4ef0eb8e  _ZNSt12strstreambuf7seekoffElNSt5_IosbIiE8_SeekdirENS1_9_OpenmodeE
+0x1f3a9ada  _ZNSt12strstreambuf7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+0x4520d6a2  _ZNSt13basic_filebufIcSt11char_traitsIcEE5_LockEv
+0x608abbb5  _ZNSt13basic_filebufIcSt11char_traitsIcEE5uflowEv
+0x409409af  _ZNSt13basic_filebufIcSt11char_traitsIcEE6setbufEPci
+0x3eeb7167  _ZNSt13basic_filebufIcSt11char_traitsIcEE7_UnlockEv
+0xf73f6afc  _ZNSt13basic_filebufIcSt11char_traitsIcEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+0x460e5cb7  _ZNSt13basic_filebufIcSt11char_traitsIcEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+0x3f6a6e68  _ZNSt13basic_filebufIcSt11char_traitsIcEE9_EndwriteEv
+0x8044f596  _ZNSt13basic_filebufIwSt11char_traitsIwEE5_LockEv
+0xf67a7e17  _ZNSt13basic_filebufIwSt11char_traitsIwEE5uflowEv
+0x4b5a8abc  _ZNSt13basic_filebufIwSt11char_traitsIwEE6setbufEPwi
+0xa1c6fc55  _ZNSt13basic_filebufIwSt11char_traitsIwEE7_UnlockEv
+0xf9ff46a1  _ZNSt13basic_filebufIwSt11char_traitsIwEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+0xb6a4d760  _ZNSt13basic_filebufIwSt11char_traitsIwEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+0x8341b529  _ZNSt13basic_filebufIwSt11char_traitsIwEE8overflowEi
+0xa94be0fa  _ZNSt13basic_filebufIwSt11char_traitsIwEE9_EndwriteEv
+0x0e147a9d  _ZNSt13basic_filebufIwSt11char_traitsIwEE9pbackfailEi
+0x9111ec36  _ZNSt13messages_baseD0Ev
+0x9facb533  _ZNSt13messages_baseD1Ev
+0x00c3975e  _ZNSt15basic_streambufIcSt11char_traitsIcEE5_LockEv
+0x709ab035  _ZNSt15basic_streambufIcSt11char_traitsIcEE6setbufEPci
+0x4daf3fcf  _ZNSt15basic_streambufIcSt11char_traitsIcEE6xsgetnEPci
+0xadc2263b  _ZNSt15basic_streambufIcSt11char_traitsIcEE6xsputnEPKci
+0x85ba062f  _ZNSt15basic_streambufIcSt11char_traitsIcEE7_UnlockEv
+0x143048bf  _ZNSt15basic_streambufIcSt11char_traitsIcEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+0x6c386f54  _ZNSt15basic_streambufIcSt11char_traitsIcEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+0x085bff4f  _ZNSt15basic_streambufIwSt11char_traitsIwEE5_LockEv
+0x7b5fce95  _ZNSt15basic_streambufIwSt11char_traitsIwEE6setbufEPwi
+0xb1ac1fa3  _ZNSt15basic_streambufIwSt11char_traitsIwEE6xsgetnEPwi
+0x76e846b2  _ZNSt15basic_streambufIwSt11char_traitsIwEE6xsputnEPKwi
+0x57ef52f0  _ZNSt15basic_streambufIwSt11char_traitsIwEE7_UnlockEv
+0x5a898327  _ZNSt15basic_streambufIwSt11char_traitsIwEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+0x6fe060a0  _ZNSt15basic_streambufIwSt11char_traitsIwEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+0xd9d8af82  _ZNSt15basic_streambufIwSt11char_traitsIwEE8overflowEi
+0xdab0a910  _ZNSt15basic_streambufIwSt11char_traitsIwEE9pbackfailEi
+0x03217f6f  _ZNSt19istreambuf_iteratorIcSt11char_traitsIcEE5_PeekEv
+0x5b71b85d  _ZNSt19istreambuf_iteratorIwSt11char_traitsIwEE4_IncEv
+0x93c638e9  _ZNSt19istreambuf_iteratorIwSt11char_traitsIwEE5_PeekEv
+0xbd58ea5a  _ZNSt19ostreambuf_iteratorIwSt11char_traitsIwEEaSEw
+0xf05df017  _ZNSt5ctypeIcE7_GetcatEPPKNSt6locale5facetE
+0x577c2695  _ZNSt6_Mutex5_LockEv
+0xd356aefd  _ZNSt6_Mutex7_UnlockEv
+0x75824de0  _ZNSt6_MutexC1Ev
+0xce653b6c  _ZNSt6_MutexC2Ev
+0x1c3f1c4f  _ZNSt6_MutexD1Ev
+0xda1b159a  _ZNSt6_MutexD2Ev
+0x8fa764f3  _ZNSt6_WinitC1Ev
+0x767a4e70  _ZNSt6_WinitC2Ev
+0xc612a38e  _ZNSt6_WinitD1Ev
+0xcb7d00a4  _ZNSt6_WinitD2Ev
+0x20a02b6d  _ZNSt6locale2idcvjEv
+0x61119152  _ZNSt6locale5_InitEv
+0x7e7ac30e  _ZNSt6locale5emptyEv
+0xda1088ce  _ZNSt6locale5facet7_IncrefEv
+0xe2b2ac5a  _ZNSt6locale5facet9_RegisterEv
+0x7b1db41e  _ZNSt6locale7_AddfacEPNS_5facetEjj
+0xaa520d9f  _ZNSt6locale7_Locimp7_AddfacEPNS_5facetEj
+0xf584de56  _ZNSt6locale7_Locimp8_MakelocERKSt8_LocinfoiPS0_PKS_
+0x5a6e4e50  _ZNSt6locale7_Locimp9_MakewlocERKSt8_LocinfoiPS0_PKS_
+0x9c486668  _ZNSt6locale7_Locimp9_MakexlocERKSt8_LocinfoiPS0_PKS_
+0x2070a73d  _ZNSt6locale7_LocimpC1ERKS0_
+0x904dbd32  _ZNSt6locale7_LocimpC1Eb
+0xb74f7b8f  _ZNSt6locale7_LocimpC2ERKS0_
+0xcac83a05  _ZNSt6locale7_LocimpC2Eb
+0x002e18d8  _ZNSt6locale7_LocimpD0Ev
+0x07a3bd16  _ZNSt6locale7_LocimpD1Ev
+0x95b43c9d  _ZNSt6locale7_LocimpD2Ev
+0x01d9b3f5  _ZNSt6localeC1EPKci
+0x3d32a7f4  _ZNSt6localeC2EPKci
+0x05a9cef6  _ZNSt7_MpunctIcE5_InitERKSt8_Locinfo
+0x1c8405dc  _ZNSt7_MpunctIcEC2Ejb
+0x47aab531  _ZNSt7_MpunctIcED0Ev
+0xf7845d1c  _ZNSt7_MpunctIcED1Ev
+0x81027e75  _ZNSt7_MpunctIwE5_InitERKSt8_Locinfo
+0x9a449047  _ZNSt7_MpunctIwEC2Ejb
+0x4cdab0ba  _ZNSt7_MpunctIwED0Ev
+0xc06a4cd8  _ZNSt7_MpunctIwED1Ev
+0x6051c802  _ZNSt7codecvtIccSt9_MbstatetED0Ev
+0xf51dc289  _ZNSt7codecvtIccSt9_MbstatetED1Ev
+0xae7d042f  _ZNSt7codecvtIwcSt9_MbstatetE7_GetcatEPPKNSt6locale5facetE
+0x76db6974  _ZNSt7codecvtIwcSt9_MbstatetED0Ev
+0x0e9698af  _ZNSt7codecvtIwcSt9_MbstatetED1Ev
+0x4ec89bf8  _ZNSt7collateIcE7_GetcatEPPKNSt6locale5facetE
+0xabd92bcc  _ZNSt7collateIwE7_GetcatEPPKNSt6locale5facetE
+0xccf14bd5  _ZNSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+0xfc825dda  _ZNSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+0x8a665143  _ZNSt8_Locinfo8_AddcatsEiPKc
+0x605131d5  _ZNSt8_LocinfoC1EPKc
+0x2e84ebb3  _ZNSt8_LocinfoC1EiPKc
+0xd4ba5b31  _ZNSt8_LocinfoC2EPKc
+0x9fd2eea9  _ZNSt8_LocinfoC2EiPKc
+0x5119680b  _ZNSt8_LocinfoD1Ev
+0x47e5c318  _ZNSt8_LocinfoD2Ev
+0x3697bbd3  _ZNSt8ios_base5_InitEv
+0x5949408e  _ZNSt8ios_base5_TidyEv
+0x4952490e  _ZNSt8ios_base5clearENSt5_IosbIiE8_IostateEb
+0xc5977986  _ZNSt8ios_base7_AddstdEv
+0xdc0c889c  _ZNSt8ios_base7copyfmtERKS_
+0xc013acd8  _ZNSt8ios_base8_CallfnsENS_5eventE
+0xaae64804  _ZNSt8ios_base8_FindarrEi
+0xa433147a  _ZNSt8messagesIcE7_GetcatEPPKNSt6locale5facetE
+0x66fcc6f4  _ZNSt8messagesIwE7_GetcatEPPKNSt6locale5facetE
+0xbd316983  _ZNSt8numpunctIcE5_InitERKSt8_Locinfo
+0xc53ab1c0  _ZNSt8numpunctIwE5_InitERKSt8_Locinfo
+0x0490855d  _ZNSt8numpunctIwE7_GetcatEPPKNSt6locale5facetE
+0x9a194306  _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE5_InitERKSt8_Locinfo
+0xa90c4ff2  _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+0x02e40598  _ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE5_InitERKSt8_Locinfo
+0x718977c5  _ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+0x332f8409  _ZNSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+0x3286b855  _ZNSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+0x3ad12959  _ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_Eb
+0x8bfd4395  _ZNSt9basic_iosIwSt11char_traitsIwEE4initEPSt15basic_streambufIwS1_Eb
+0xb8836b50  _ZNSt9exception18_Set_raise_handlerEPFvRKS_E
+0x1b266c3d  _ZNSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+0xabdc2b49  _ZNSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+0x7ff35597  _ZNSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+0x6500d2d5  _ZNSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+0xfb36c588  _ZNSt9strstreamC1EPciNSt5_IosbIiE9_OpenmodeE
+0x55b3ebf2  _ZNSt9strstreamC2EPciNSt5_IosbIiE9_OpenmodeE
+0xda5469b3  _ZNSt9time_baseD0Ev
+0x4cb35e7d  _ZNSt9time_baseD1Ev
+0x5e55ab8c  _ZSt10_GetloctxtIwSt19istreambuf_iteratorIwSt11char_traitsIwEEEiRT0_S5_jPKT_
+0x05ec37c8  _ZSt10_MaklocstrIwEPT_PKcS1_RKSt7_Cvtvec
+0x53693d40  _ZSt11setiosflagsNSt5_IosbIiE9_FmtflagsE
+0x84023c03  _ZSt12setprecisioni
+0x1b6ad260  _ZSt13resetiosflagsNSt5_IosbIiE9_FmtflagsE
+0x4aff73cc  _ZSt14_Debug_messagePKcS0_
+0xbaa15803  _ZSt4setwi
+0x9cb73ee0  _ZSt6_ThrowRKSt9exception
+0x78a142d0  _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi
+0x5015b8d3  _ZSt7_FiopenPKwNSt5_IosbIiE9_OpenmodeEi
+0x6b493669  _ZSt7setbasei
+0x3bac19dc  _ZThn8_NSdD0Ev
+0xa4f6a919  _ZThn8_NSdD1Ev
+0xef959a6d  _ZThn8_NSt9strstreamD0Ev
+0x74a39b4f  _ZThn8_NSt9strstreamD1Ev
+0xfe468b7a  _ZTv0_n12_NSdD0Ev
+0x928fbe36  _ZTv0_n12_NSdD1Ev
+0x65f19631  _ZTv0_n12_NSiD0Ev
+0x281f9107  _ZTv0_n12_NSiD1Ev
+0xffaf3218  _ZTv0_n12_NSoD0Ev
+0x79ad3575  _ZTv0_n12_NSoD1Ev
+0xece969c0  _ZTv0_n12_NSt10istrstreamD0Ev
+0x6e0bf85d  _ZTv0_n12_NSt10istrstreamD1Ev
+0x88052736  _ZTv0_n12_NSt10ostrstreamD0Ev
+0xa1de25c2  _ZTv0_n12_NSt10ostrstreamD1Ev
+0x5ed4fb7a  _ZTv0_n12_NSt13basic_istreamIwSt11char_traitsIwEED0Ev
+0x3783acfa  _ZTv0_n12_NSt13basic_istreamIwSt11char_traitsIwEED1Ev
+0x903afa37  _ZTv0_n12_NSt13basic_ostreamIwSt11char_traitsIwEED0Ev
+0x07b6c924  _ZTv0_n12_NSt13basic_ostreamIwSt11char_traitsIwEED1Ev
+0x19c901ce  _ZTv0_n12_NSt9strstreamD0Ev
+0x2daa5a42  _ZTv0_n12_NSt9strstreamD1Ev
+0x5438d7d8  _ZdaPvS_
+0x868531a3  _ZdaPvj
+0x4b1ad744  _ZdaPvjRKSt9nothrow_t
+0xbd35830b  _ZdaPvjS_
+0x94c49383  _ZdlPvS_
+0x31a81476  _ZdlPvj
+0x67edde2f  _ZdlPvjRKSt9nothrow_t
+0xe7d8449e  _ZdlPvjS_
+0xf58e83a5  _Znaj
+0x2356ef16  _ZnajRKSt9nothrow_t
+0x96bc2578  _Znajj
+0x2c241d13  _ZnajjRKSt9nothrow_t
+0x83b2cc6f  _Znwj
+0xbb712718  _ZnwjRKSt9nothrow_t
+0xed3da02b  _Znwjj
+0xb53fa02e  _ZnwjjRKSt9nothrow_t
+0xb7dcbfdd  __Setgloballocale
+```
+
+### `libsync_stub` (42 / 42 missing)
+
+```
+0x54fc2032  _cellSyncLFQueueAttachLv2EventQueue
+0xfe74e8e7  _cellSyncLFQueueCompletePopPointer
+0x7a51deee  _cellSyncLFQueueCompletePopPointer2
+0x4e88c68d  _cellSyncLFQueueCompletePushPointer
+0x35bbdad2  _cellSyncLFQueueCompletePushPointer2
+0x811d148e  _cellSyncLFQueueDetachLv2EventQueue
+0x74c37666  _cellSyncLFQueueGetPopPointer
+0x46356fe0  _cellSyncLFQueueGetPopPointer2
+0xe9bf2110  _cellSyncLFQueueGetPushPointer
+0x6bb4ef9d  _cellSyncLFQueueGetPushPointer2
+0xaff7627a  _cellSyncLFQueueGetSignalAddress
+0xe1bc7add  _cellSyncLFQueuePopBody
+0xba5961ca  _cellSyncLFQueuePushBody
+0x07254fda  cellSyncBarrierInitialize
+0xf06a6415  cellSyncBarrierNotify
+0x268edd6d  cellSyncBarrierTryNotify
+0x6c272124  cellSyncBarrierTryWait
+0x35f21355  cellSyncBarrierWait
+0x2af0c515  cellSyncLFQueueClear
+0xe18c273c  cellSyncLFQueueDepth
+0xd59aa307  cellSyncLFQueueGetDirection
+0x0c7cb9f7  cellSyncLFQueueGetEntrySize
+0xaa355278  cellSyncLFQueueInitialize
+0x167ea63e  cellSyncLFQueueSize
+0xa9072dee  cellSyncMutexInitialize
+0x1bb675c2  cellSyncMutexLock
+0xd06918c4  cellSyncMutexTryLock
+0x91f2b7b0  cellSyncMutexUnlock
+0xa5362e73  cellSyncQueueClear
+0x3929948d  cellSyncQueueInitialize
+0x48154c9b  cellSyncQueuePeek
+0x4da6d7e0  cellSyncQueuePop
+0x5ae841e5  cellSyncQueuePush
+0x4da349b2  cellSyncQueueSize
+0x68af923c  cellSyncQueueTryPeek
+0xa58df87f  cellSyncQueueTryPop
+0x705985cd  cellSyncQueueTryPush
+0xfc48b03f  cellSyncRwmInitialize
+0xcece771f  cellSyncRwmRead
+0xa6669751  cellSyncRwmTryRead
+0xba5bee48  cellSyncRwmTryWrite
+0xed773f5f  cellSyncRwmWrite
+```
+
+### `libsync2_stub` (32 / 32 missing)
+
+```
+0xdf3c532a  _cellSync2CondAttributeInitialize
+0x55836e73  _cellSync2MutexAttributeInitialize
+0x5e00d433  _cellSync2QueueAttributeInitialize
+0x2d77fe17  _cellSync2SemaphoreAttributeInitialize
+0x5b1e4d7a  cellSync2CondEstimateBufferSize
+0x63062249  cellSync2CondFinalize
+0x58be9a0f  cellSync2CondInitialize
+0x871af804  cellSync2CondSignal
+0x8aae07c2  cellSync2CondSignalAll
+0xbc96d751  cellSync2CondWait
+0xd51bfae7  cellSync2MutexEstimateBufferSize
+0x27f2d61c  cellSync2MutexFinalize
+0xeb81a467  cellSync2MutexInitialize
+0xa400d82e  cellSync2MutexLock
+0xa69c749c  cellSync2MutexTryLock
+0x0080fe88  cellSync2MutexUnlock
+0xc08cc0f9  cellSync2QueueEstimateBufferSize
+0x6af85cdf  cellSync2QueueFinalize
+0xf0e1471c  cellSync2QueueGetDepth
+0x12f0a27d  cellSync2QueueGetSize
+0xf125e044  cellSync2QueueInitialize
+0xd83ab0c9  cellSync2QueuePop
+0x7d967d91  cellSync2QueuePush
+0x0c9a0ea9  cellSync2QueueTryPop
+0x7fd479fe  cellSync2QueueTryPush
+0xd1b0d146  cellSync2SemaphoreAcquire
+0x74c2780f  cellSync2SemaphoreEstimateBufferSize
+0x164843a7  cellSync2SemaphoreFinalize
+0x4e2ee031  cellSync2SemaphoreGetCount
+0xc5dee254  cellSync2SemaphoreInitialize
+0x0c2983ac  cellSync2SemaphoreRelease
+0x5e4b0f87  cellSync2SemaphoreTryAcquire
+```
+
+### `libsysmodule_stub` (8 / 8 missing)
+
+```
+0x3c92be09  cellSysmoduleFetchImage
+0x96c07adf  cellSysmoduleFinalize
+0x1ef115ef  cellSysmoduleGetImagesize
+0x63ff6ff9  cellSysmoduleInitialize
+0x5a59e258  cellSysmoduleIsLoaded
+0x32267a31  cellSysmoduleLoadModule
+0xa193143c  cellSysmoduleSetMemcontainer
+0x112a5ee9  cellSysmoduleUnloadModule
+```
+
+### `libsysutil_stub` (174 / 174 missing)
+
+```
+0x4692ab35  cellAudioOutConfigure
+0xed5d96af  cellAudioOutGetConfiguration
+0x7663e368  cellAudioOutGetDeviceInfo
+0xe5e2b09d  cellAudioOutGetNumberOfDevice
+0xc01b4e7c  cellAudioOutGetSoundAvailability
+0x2beac488  cellAudioOutGetSoundAvailability2
+0xf4e3caa0  cellAudioOutGetState
+0x68bc4ff3  cellAudioOutRegisterCallback
+0xc96e89e9  cellAudioOutSetCopyControl
+0x9dfdad46  cellAudioOutUnregisterCallback
+0xb72bc4e6  cellDiscGameGetBootDiscInfo
+0xdfdd302e  cellDiscGameRegisterDiscChangeCallback
+0xedc34e1a  cellDiscGameUnregisterDiscChangeCallback
+0xe7951dee  cellGameDataCheckCreate
+0xc9645c41  cellGameDataCheckCreate2
+0x9949bf82  cellGameDataExitBroken
+0xa9b0c1d9  cellGameDataGetSizeKB
+0xf8115d69  cellGameRegisterDiscChangeCallback
+0x21fc0c71  cellGameUnregisterDiscChangeCallback
+0x9117df20  cellHddGameCheck
+0x4bdec82a  cellHddGameCheck2
+0xafd605b3  cellHddGameExitBroken
+0xf82e2ef7  cellHddGameGetSizeKB
+0x62b0f803  cellMsgDialogAbort
+0x20543730  cellMsgDialogClose
+0xf81eca25  cellMsgDialogOpen
+0x7603d3db  cellMsgDialogOpen2
+0x3e22cb4b  cellMsgDialogOpenErrorCode
+0x5d883b1c  cellMsgDialogOpenSimulViewWarning
+0x94862702  cellMsgDialogProgressBarInc
+0x7bc2c8a8  cellMsgDialogProgressBarReset
+0x9d6af72a  cellMsgDialogProgressBarSetMsg
+0xb6d84526  cellOskDialogAbort
+0x7f21c918  cellOskDialogAddSupportLanguage
+0x41f20828  cellOskDialogDisableDimmer
+0x1d99c3ee  cellOskDialogGetInputText
+0x35beade0  cellOskDialogGetSize
+0x7fcfc915  cellOskDialogLoadAsync
+0xd3790a86  cellOskDialogSetDeviceMask
+0xf3b4b43e  cellOskDialogSetInitialInputDevice
+0xc427890c  cellOskDialogSetInitialKeyLayout
+0xb53c54fa  cellOskDialogSetKeyLayoutOption
+0xf0ec3ccc  cellOskDialogSetLayoutMode
+0x53e39df3  cellOskDialogSetSeparateWindowOption
+0x3d1e1931  cellOskDialogUnloadAsync
+0xc22c79b5  cellSaveDataAutoLoad
+0xfbd5c856  cellSaveDataAutoLoad2
+0xf8a175ec  cellSaveDataAutoSave
+0x8b7ed64b  cellSaveDataAutoSave2
+0xa4ed7dfe  cellSaveDataDelete
+0xedadd797  cellSaveDataDelete2
+0xe7fa820b  cellSaveDataEnableOverlay
+0xced17573  cellSaveDataFixedDelete
+0x50183b44  cellSaveDataFixedLoad
+0x2a8eada2  cellSaveDataFixedLoad2
+0x41bc2ca1  cellSaveDataFixedSave
+0x2aae9ef5  cellSaveDataFixedSave2
+0x21425307  cellSaveDataListAutoLoad
+0x4dd03a4e  cellSaveDataListAutoSave
+0xef5a353d  cellSaveDataListLoad
+0x1dfbfdd6  cellSaveDataListLoad2
+0x3dbd2314  cellSaveDataListSave
+0x2de0d663  cellSaveDataListSave2
+0xcdc6aefd  cellSaveDataUserAutoLoad
+0x52aac4fa  cellSaveDataUserAutoSave
+0x8b8a2f48  cellSaveDataUserFixedDelete
+0x6e7264ed  cellSaveDataUserFixedLoad
+0x40b34847  cellSaveDataUserFixedSave
+0x248bd1d8  cellSaveDataUserListAutoLoad
+0x0e091c36  cellSaveDataUserListAutoSave
+0x39dd8425  cellSaveDataUserListLoad
+0x0f03cfb0  cellSaveDataUserListSave
+0xabc3cd2c  cellStorageDataExport
+0x918288fb  cellStorageDataImport
+0x27ac51e4  cellStorageDataImportMove
+0x744c1544  cellSysCacheClear
+0x1e7bff94  cellSysCacheMount
+0x76948bfc  cellSysconfAbort
+0xb2b6cdd0  cellSysconfOpen
+0xf2c4a425  cellSysutilAvcByeRequest
+0xf4aa8b27  cellSysutilAvcCancelByeRequest
+0xbccd70dd  cellSysutilAvcCancelJoinRequest
+0x5e91bc26  cellSysutilAvcEnumPlayers
+0xf481967f  cellSysutilAvcGetAttribute
+0xeb9d78d8  cellSysutilAvcGetLayoutMode
+0x08269f37  cellSysutilAvcGetShowStatus
+0x073b89d5  cellSysutilAvcGetSpeakerVolumeLevel
+0x7d94ca36  cellSysutilAvcGetVideoMuting
+0x5ee3bc26  cellSysutilAvcGetVoiceMuting
+0xd9ea5709  cellSysutilAvcHidePanel
+0x17dbe8b3  cellSysutilAvcJoinRequest
+0x15df71ed  cellSysutilAvcLoadAsync
+0xeca938ca  cellSysutilAvcSetAttribute
+0x018a1381  cellSysutilAvcSetLayoutMode
+0xaffdadc0  cellSysutilAvcSetSpeakerVolumeLevel
+0x71acb8d3  cellSysutilAvcSetVideoMuting
+0x4056c932  cellSysutilAvcSetVoiceMuting
+0x2dbc92c7  cellSysutilAvcShowPanel
+0x6c673f78  cellSysutilAvcUnloadAsync
+0x189a74da  cellSysutilCheckCallback
+0xcfdd8e87  cellSysutilDisableBgmPlayback
+0xa36335a5  cellSysutilDisableBgmPlaybackEx
+0x220894e3  cellSysutilEnableBgmPlayback
+0xac58ad2b  cellSysutilEnableBgmPlaybackEx
+0x9997e6b6  cellSysutilGameDataAssignVmc
+0x1dfcce99  cellSysutilGameDataExit
+0x2a95d8bc  cellSysutilGameExit_I
+0x01f04d94  cellSysutilGamePowerOff_I
+0x30d3d12b  cellSysutilGameReboot_I
+0xa11552f6  cellSysutilGetBgmPlaybackStatus
+0x6cfd856f  cellSysutilGetBgmPlaybackStatus2
+0x40e895d3  cellSysutilGetSystemParamInt
+0x938013a0  cellSysutilGetSystemParamString
+0x9d98afa0  cellSysutilRegisterCallback
+0xf3dbf5a7  cellSysutilSetBgmPlaybackExtraParam
+0x02ff3c1b  cellSysutilUnregisterCallback
+0x0bae8772  cellVideoOutConfigure
+0xcfdf24bb  cellVideoOutDebugSetMonitorType
+0x15b0b0cd  cellVideoOutGetConfiguration
+0x55e425c3  cellVideoOutGetConvertCursorColorInfo
+0x1e930eef  cellVideoOutGetDeviceInfo
+0x75bbb672  cellVideoOutGetNumberOfDevice
+0xe558748d  cellVideoOutGetResolution
+0xa322db75  cellVideoOutGetResolutionAvailability
+0x887572d5  cellVideoOutGetState
+0x8e8bc444  cellVideoOutRegisterCallback
+0x7871bed4  cellVideoOutUnregisterCallback
+0x6d7444e6  cellWebBrowserActivate
+0x83668b8e  cellWebBrowserConfig
+0x7fb3c6a5  cellWebBrowserConfig2
+0xa4dd11cc  cellWebBrowserConfigGetHeapSize
+0x0c316b87  cellWebBrowserConfigGetHeapSize2
+0x7f896a1f  cellWebBrowserConfigSetCustomExit
+0x3261a9c8  cellWebBrowserConfigSetDisableTabs
+0x1f6629e4  cellWebBrowserConfigSetErrorHook2
+0x1a91874b  cellWebBrowserConfigSetFullScreen2
+0x52d9457a  cellWebBrowserConfigSetFullVersion2
+0x9c9fe6a4  cellWebBrowserConfigSetFunction
+0xe22ed55d  cellWebBrowserConfigSetFunction2
+0x76fc8fb1  cellWebBrowserConfigSetHeapSize
+0xfe669845  cellWebBrowserConfigSetHeapSize2
+0x0f8a3b6b  cellWebBrowserConfigSetMimeSet
+0x93c523c6  cellWebBrowserConfigSetNotifyHook2
+0xee7528f3  cellWebBrowserConfigSetRequestHook2
+0xac16777e  cellWebBrowserConfigSetStatusHook2
+0x619b1427  cellWebBrowserConfigSetTabCount2
+0xa9a439e0  cellWebBrowserConfigSetUnknownMIMETypeHook2
+0x60a4daab  cellWebBrowserConfigSetVersion
+0xd7a617f5  cellWebBrowserConfigSetViewCondition2
+0xa9b62ac8  cellWebBrowserConfigSetViewRect2
+0x6c1082aa  cellWebBrowserConfigWithVer
+0x7f881be1  cellWebBrowserCreate
+0xa5f12145  cellWebBrowserCreate2
+0xf1a443e7  cellWebBrowserCreateRender2
+0x4b6e8560  cellWebBrowserCreateRenderWithRect2
+0x8a4cb646  cellWebBrowserCreateWithConfig
+0xb53b3d42  cellWebBrowserCreateWithConfigFull
+0xa58943f8  cellWebBrowserCreateWithRect2
+0x46a0285d  cellWebBrowserDeactivate
+0xbed85cb8  cellWebBrowserDestroy
+0xe8dee79c  cellWebBrowserDestroy2
+0x58c89c4a  cellWebBrowserEstimate
+0x6d087930  cellWebBrowserEstimate2
+0x10cabeff  cellWebBrowserGetUsrdataOnGameExit
+0x749c9b5f  cellWebBrowserInitialize
+0x9fb97b10  cellWebBrowserNavigate2
+0xc8971db5  cellWebBrowserSetLocalContentsAdditionalTitleID
+0x6dfff31d  cellWebBrowserSetSystemCallbackUsrdata
+0x93ced48d  cellWebBrowserShutdown
+0x425fef23  cellWebBrowserUpdatePointerDisplayPos2
+0x24644561  cellWebBrowserWakeupWithGameExit
+0x8a5dbb58  cellWebComponentCreate
+0x6144f033  cellWebComponentCreateAsync
+0xdce51399  cellWebComponentDestroy
+```
+
+### `libsysutil_ap_stub` (3 / 3 missing)
+
+```
+0x9e67e0dd  cellSysutilApGetRequiredMemSize
+0x90c2bb19  cellSysutilApOff
+0x3343824c  cellSysutilApOn
+```
+
+### `libsysutil_avc2_stub` (54 / 54 missing)
+
+```
+0x07236c83  cellSysutilAvc2ChangeVideoResolution
+0xa8dc0efa  cellSysutilAvc2CreateWindow
+0x3a37e7f1  cellSysutilAvc2DestroyWindow
+0xb81b9777  cellSysutilAvc2EnumPlayers
+0x2f280883  cellSysutilAvc2EstimateMemoryContainerSize
+0x1be2b4e0  cellSysutilAvc2GetAttribute
+0x02c5417a  cellSysutilAvc2GetPlayerInfo
+0x5f3811f8  cellSysutilAvc2GetPlayerVoiceMuting
+0xe40e3dfc  cellSysutilAvc2GetScreenShowStatus
+0xa9f5b75c  cellSysutilAvc2GetSpeakerMuting
+0x3ef4f668  cellSysutilAvc2GetSpeakerVolumeLevel
+0x0f5a2afb  cellSysutilAvc2GetVideoMuting
+0xdf2ed367  cellSysutilAvc2GetVoiceMuting
+0x103d6b46  cellSysutilAvc2GetWindowAttribute
+0xfc2873a9  cellSysutilAvc2GetWindowPosition
+0x82ced772  cellSysutilAvc2GetWindowShowStatus
+0x8a40a618  cellSysutilAvc2GetWindowSize
+0xb856b63f  cellSysutilAvc2GetWindowString
+0xd7d6272f  cellSysutilAvc2HideScreen
+0xde6afc37  cellSysutilAvc2HideWindow
+0x89456724  cellSysutilAvc2InitParam
+0x4c4b9665  cellSysutilAvc2IsCameraAttached
+0xa26aa437  cellSysutilAvc2IsMicAttached
+0x02dc41ee  cellSysutilAvc2JoinChat
+0x712d51d6  cellSysutilAvc2JoinChatRequest
+0xbf022284  cellSysutilAvc2LeaveChat
+0x97b2da6a  cellSysutilAvc2LeaveChatRequest
+0xc6c93d62  cellSysutilAvc2Load
+0x1d73ab8c  cellSysutilAvc2LoadAsync
+0x55d7bbfd  cellSysutilAvc2MicRead
+0xccf0aeff  cellSysutilAvc2SetAttribute
+0x31fc8b92  cellSysutilAvc2SetPlayerVoiceMuting
+0xc35ed665  cellSysutilAvc2SetSpeakerMuting
+0x207621a8  cellSysutilAvc2SetSpeakerVolumeLevel
+0x8c2f5be3  cellSysutilAvc2SetStreamPriority
+0x3447668a  cellSysutilAvc2SetStreamingTarget
+0x2fc0ab58  cellSysutilAvc2SetVideoMuting
+0x14937714  cellSysutilAvc2SetVoiceMuting
+0x7a69ecc1  cellSysutilAvc2SetWindowAttribute
+0x3c8c827c  cellSysutilAvc2SetWindowPosition
+0xaee75751  cellSysutilAvc2SetWindowSize
+0x225142bd  cellSysutilAvc2SetWindowString
+0x0b45cd84  cellSysutilAvc2ShowScreen
+0xac170042  cellSysutilAvc2ShowWindow
+0x74d22119  cellSysutilAvc2StartStreaming
+0xd42657dd  cellSysutilAvc2StartStreaming2
+0x16ff9ba0  cellSysutilAvc2StartVoiceDetection
+0x04e1e1e4  cellSysutilAvc2StopStreaming
+0x11f071cb  cellSysutilAvc2StopStreaming2
+0x178982d9  cellSysutilAvc2StopVoiceDetection
+0x38f33624  cellSysutilAvc2Unload
+0xf3b5ff77  cellSysutilAvc2Unload2
+0x17481336  cellSysutilAvc2UnloadAsync
+0xce6780c9  cellSysutilAvc2UnloadAsync2
+```
+
+### `libsysutil_avconf_ext_stub` (16 / 16 missing)
+
+```
+0x65bf9ea3  cellAudioInGetAvailableDeviceInfo
+0x3d5730ce  cellAudioInGetDeviceInfo
+0xeb6fcff1  cellAudioInRegisterDevice
+0xeb6c50fb  cellAudioInSetDeviceMode
+0xfa6bcc17  cellAudioInUnregisterDevice
+0xc3273d9b  cellAudioOutGetAvailableDeviceInfo
+0x18d0ada6  cellAudioOutGetDeviceInfo2
+0xc7087631  cellAudioOutRegisterDevice
+0xe4645af8  cellAudioOutSetDeviceMode
+0x0bddef7d  cellAudioOutUnregisterDevice
+0x4ec8c141  cellVideoOutConvertCursorColor
+0x655a0364  cellVideoOutGetGamma
+0xfaa275a4  cellVideoOutGetScreenSize
+0xc7020f62  cellVideoOutSetGamma
+0x1cfa1a11  cellVideoOutSetXVColor
+0x269ffedd  cellVideoOutSetupDisplay
+```
+
+### `libsysutil_bgdl_stub` (2 / 2 missing)
+
+```
+0x74e57bdf  cellBGDLGetMode
+0x7e134a90  cellBGDLSetMode
+```
+
+### `libsysutil_cross_controller_stub` (1 / 1 missing)
+
+```
+0x37e1f502  cellCrossControllerInitialize
+```
+
+### `libsysutil_game_stub` (15 / 15 missing)
+
+```
+0xf52639ea  cellGameBootCheck
+0xb0a1f8c6  cellGameContentErrorDialog
+0x70acec67  cellGameContentPermit
+0x42a2e133  cellGameCreateGameData
+0xdb9819f3  cellGameDataCheck
+0xb367c6e3  cellGameDeleteGameData
+0x2a8e6b92  cellGameGetDiscContentInfoUpdatePath
+0xa80bf223  cellGameGetLocalWebContentPath
+0xb7a45caf  cellGameGetParamInt
+0x3a5d726a  cellGameGetParamString
+0xef9d42d5  cellGameGetSizeKB
+0xce4374f6  cellGamePatchCheck
+0xdaa5cd20  cellGameSetParamString
+0xd24e3928  cellGameThemeInstall
+0x87406734  cellGameThemeInstallFromBuffer
+```
+
+### `libsysutil_game_exec_stub` (6 / 6 missing)
+
+```
+0xf6acd0bc  cellGameGetBootGameInfo
+0x59b1ede1  cellGameGetHomeDataExportPath
+0x72cc6cf7  cellGameGetHomeDataImportPath
+0x94e9f81d  cellGameGetHomeLaunchOptionPath
+0x59bbebd4  cellGameGetHomePath
+0x38579ec9  cellGameSetExitParam
+```
+
+### `libsysutil_imejp_stub` (41 / 41 missing)
+
+```
+0x7189430b  cellImeJpAllConfirm
+0xcbbc20b7  cellImeJpAllConvertCancel
+0x6319eda3  cellImeJpAllDeleteConvertString
+0x8ff02267  cellImeJpAllowExtensionCharacters
+0xaa1d1f57  cellImeJpBackspaceWord
+0x46d1234a  cellImeJpClose
+0xeede898c  cellImeJpConfirmPrediction
+0xc2bb48bc  cellImeJpConvertBackward
+0xeae879dc  cellImeJpConvertCancel
+0x1e29103b  cellImeJpConvertForward
+0x7a18c2b9  cellImeJpCurrentPartConfirm
+0x72257652  cellImeJpDeleteWord
+0x6ccbe3d6  cellImeJpEnterChar
+0x5b6ada55  cellImeJpEnterCharExt
+0x441a1c2b  cellImeJpEnterString
+0x6298b55a  cellImeJpEnterStringExt
+0x37961cc1  cellImeJpExtendConvertArea
+0xe4cc15ba  cellImeJpGetCandidateList
+0xc4796a45  cellImeJpGetCandidateListSize
+0x177bd218  cellImeJpGetCandidateSelect
+0xd3fc3606  cellImeJpGetConfirmString
+0x89f8a567  cellImeJpGetConfirmYomiString
+0xf91abda3  cellImeJpGetConvertString
+0xea2d4881  cellImeJpGetConvertYomiString
+0x5f5b3227  cellImeJpGetFocusLength
+0x0e363ae7  cellImeJpGetFocusTop
+0x1986f2cd  cellImeJpGetPredictList
+0x66c6cc78  cellImeJpGetStatus
+0xe76c9700  cellImeJpModeCaretLeft
+0xac6693d8  cellImeJpModeCaretRight
+0x1e411261  cellImeJpMoveFocusClause
+0x44608862  cellImeJpOpen
+0x47b43dd4  cellImeJpOpen2
+0x1b119958  cellImeJpOpen3
+0x8bb41f47  cellImeJpPostConvert
+0x36d38701  cellImeJpReset
+0xc1786c81  cellImeJpSetFixInputMode
+0xf5992ec8  cellImeJpSetInputCharType
+0x24e9d8fc  cellImeJpSetKanaInputMode
+0xaa2a3287  cellImeJpShortenConvertArea
+0xbd679cc1  cellImeJpTemporalConfirm
+```
+
+### `libsysutil_licensearea_stub` (1 / 1 missing)
+
+```
+0x571dc686  cellSysutilGetLicenseArea
+```
+
+### `libsysutil_music_stub` (22 / 22 missing)
+
+```
+0x6f2104f3  cellMusicFinalize
+0x7be4dc31  cellMusicFinalize2
+0x4c188caa  cellMusicGetContentsId
+0x6674de2d  cellMusicGetContentsId2
+0x95f7d9d9  cellMusicGetPlaybackStatus
+0x648b7611  cellMusicGetPlaybackStatus2
+0x0b461648  cellMusicGetSelectionContext
+0x8793ef97  cellMusicGetSelectionContext2
+0x8aa188e3  cellMusicGetVolume
+0xf9073a24  cellMusicGetVolume2
+0x72ec14b5  cellMusicInitialize
+0xbe50b11e  cellMusicInitialize2
+0x61865281  cellMusicInitialize2SystemWorkload
+0x72876546  cellMusicInitializeSystemWorkload
+0xb2336ba7  cellMusicSelectContents
+0xad04cddd  cellMusicSelectContents2
+0xa0661626  cellMusicSetPlaybackCommand
+0x98947a6e  cellMusicSetPlaybackCommand2
+0x5bff31bf  cellMusicSetSelectionContext
+0x2bdc5d6b  cellMusicSetSelectionContext2
+0xe74ce7bd  cellMusicSetVolume
+0x4014c246  cellMusicSetVolume2
+```
+
+### `libsysutil_music_decode_stub` (20 / 20 missing)
+
+```
+0xa8615dc8  cellMusicDecodeFinalize
+0x4aef2877  cellMusicDecodeFinalize2
+0x58ab1999  cellMusicDecodeGetContentsId
+0x25ea7ac0  cellMusicDecodeGetContentsId2
+0x5af74c50  cellMusicDecodeGetDecodeStatus
+0x1576e4f2  cellMusicDecodeGetDecodeStatus2
+0xdbf70550  cellMusicDecodeGetSelectionContext
+0xf91639f9  cellMusicDecodeGetSelectionContext2
+0xd55dbc11  cellMusicDecodeInitialize
+0xf80e31e5  cellMusicDecodeInitialize2
+0xb641168e  cellMusicDecodeInitialize2SystemWorkload
+0x84f154b2  cellMusicDecodeInitializeSystemWorkload
+0xa881b744  cellMusicDecodeRead
+0xb2d054df  cellMusicDecodeRead2
+0xf24cb963  cellMusicDecodeSelectContents
+0xc22563c4  cellMusicDecodeSelectContents2
+0x066bb1cf  cellMusicDecodeSetDecodeCommand
+0x2ef701ec  cellMusicDecodeSetDecodeCommand2
+0xb84f5c81  cellMusicDecodeSetSelectionContext
+0x491d6ba5  cellMusicDecodeSetSelectionContext2
+```
+
+### `libsysutil_music_export_stub` (5 / 5 missing)
+
+```
+0xe90effea  cellMusicExportFinalize
+0xb202f0e8  cellMusicExportFromFile
+0xb4c9b4f9  cellMusicExportInitialize
+0xe0443a44  cellMusicExportInitialize2
+0x92b50ebc  cellMusicExportProgress
+```
+
+### `libsysutil_np_stub` (236 / 236 missing)
+
+```
+0x48b3774f  _Z27_sce_np_sysutil_recv_packetiRN4cxml8DocumentERNS_7ElementE
+0x25b8bd56  _Z27_sce_np_sysutil_send_packetiRN4cxml8DocumentE
+0x9ba3e97f  _Z29_sce_np_sysutil_cxml_set_npidRN4cxml8DocumentERNS_7ElementEPKcPK7SceNpId
+0xad12e5c9  _Z31_sce_np_sysutil_send_packet_subiRN4cxml8DocumentE
+0xfd61dff5  _Z32_sce_np_sysutil_cxml_prepare_docPN16sysutil_cxmlutil11FixedMemoryERN4cxml8DocumentEPKcRNS2_7ElementES6_i
+0x1fa740db  _Z33_sce_np_sysutil_send_empty_packetiPN16sysutil_cxmlutil11FixedMemoryEPKcS3_
+0x2c5ad7b4  _Z36_sce_np_sysutil_recv_packet_fixedmemiPN16sysutil_cxmlutil11FixedMemoryERN4cxml8DocumentERNS2_7ElementE
+0xadcc5ada  _Z37sce_np_matching_set_matching2_runningb
+0x4299a92c  _Z40_sce_np_sysutil_recv_packet_fixedmem_subiPN16sysutil_cxmlutil11FixedMemoryERN4cxml8DocumentERNS2_7ElementE
+0x816c6a5f  _sceNpSysutilClientFree
+0xee0cc40c  _sceNpSysutilClientMalloc
+0x481ce0e8  sceNpBasicAbortGui
+0x1ae8a549  sceNpBasicAddBlockListEntry
+0x27c69eba  sceNpBasicAddFriend
+0x168a3117  sceNpBasicAddPlayersHistory
+0xbcdbb2ab  sceNpBasicAddPlayersHistoryAsync
+0xf2b3338a  sceNpBasicGetBlockListEntry
+0x73931bd0  sceNpBasicGetBlockListEntryCount
+0x4d9c615d  sceNpBasicGetClanMessageEntry
+0xbf607ec6  sceNpBasicGetClanMessageEntryCount
+0xd053f113  sceNpBasicGetCustomInvitationEntry
+0xa8afa7d4  sceNpBasicGetCustomInvitationEntryCount
+0xe035f7d6  sceNpBasicGetEvent
+0x04372385  sceNpBasicGetFriendListEntry
+0xafef640d  sceNpBasicGetFriendListEntryCount
+0x32c78a6a  sceNpBasicGetFriendPresenceByIndex
+0x6453b27b  sceNpBasicGetFriendPresenceByIndex2
+0xfd39ae13  sceNpBasicGetFriendPresenceByNpId
+0x260caedd  sceNpBasicGetFriendPresenceByNpId2
+0x05af1cb8  sceNpBasicGetMatchingInvitationEntry
+0xaf505def  sceNpBasicGetMatchingInvitationEntryCount
+0x5d543bbe  sceNpBasicGetMessageAttachmentEntry
+0x9153bdf4  sceNpBasicGetMessageAttachmentEntryCount
+0x30d1cbde  sceNpBasicGetMessageEntry
+0xecd503de  sceNpBasicGetMessageEntryCount
+0xbab91fc9  sceNpBasicGetPlayersHistoryEntry
+0xa15f35fe  sceNpBasicGetPlayersHistoryEntryCount
+0xe1c9f675  sceNpBasicMarkMessageAsUsed
+0xb5cb2d56  sceNpBasicRecvMessageAttachment
+0x64a704cc  sceNpBasicRecvMessageAttachmentLoad
+0x806960ab  sceNpBasicRecvMessageCustom
+0x4026eac5  sceNpBasicRegisterContextSensitiveHandler
+0xbcc09fe7  sceNpBasicRegisterHandler
+0xec0a1fbf  sceNpBasicSendMessage
+0x43b989f5  sceNpBasicSendMessageAttachment
+0x01fbbc9b  sceNpBasicSendMessageGui
+0x3f0808aa  sceNpBasicSetPresence
+0xbe81c71c  sceNpBasicSetPresenceDetails
+0x5e849303  sceNpBasicSetPresenceDetails2
+0xacb9ee8e  sceNpBasicUnregisterHandler
+0xfcac355a  sceNpCommerceCreateCtx
+0xe2877bea  sceNpCommerceDestroyCtx
+0x6cb81eb2  sceNpCommerceDestroyProductCategory
+0xaf3eba5a  sceNpCommerceDoCheckoutFinishAsync
+0xe36c660e  sceNpCommerceDoCheckoutStartAsync
+0x359642a6  sceNpCommerceGetCategoryDescription
+0xaee8cf71  sceNpCommerceGetCategoryId
+0x9452f4f8  sceNpCommerceGetCategoryImageURL
+0xeb9df054  sceNpCommerceGetCategoryInfo
+0x6e2ab18b  sceNpCommerceGetCategoryName
+0xba65de6d  sceNpCommerceGetChildCategoryInfo
+0x01cd9cfd  sceNpCommerceGetChildProductSkuInfo
+0x79225aa3  sceNpCommerceGetCurrencyCode
+0xaf57d9c9  sceNpCommerceGetCurrencyDecimals
+0xb1c02d66  sceNpCommerceGetCurrencyInfo
+0x0561448b  sceNpCommerceGetDataFlagAbort
+0x9281e87a  sceNpCommerceGetDataFlagFinish
+0xdbdb909f  sceNpCommerceGetDataFlagStart
+0xd03cea35  sceNpCommerceGetDataFlagState
+0x2be41ece  sceNpCommerceGetNumOfChildCategory
+0x7208dc08  sceNpCommerceGetNumOfChildProductSku
+0x674bb9ff  sceNpCommerceGetProductCategoryAbort
+0xcfd469e4  sceNpCommerceGetProductCategoryFinish
+0x3f195b3a  sceNpCommerceGetProductCategoryResult
+0x26f33146  sceNpCommerceGetProductCategoryStart
+0x936df4aa  sceNpCommerceGetProductId
+0xeb5f2544  sceNpCommerceGetProductName
+0xa85a4951  sceNpCommerceGetSkuDescription
+0x39a69619  sceNpCommerceGetSkuId
+0xccbe2e69  sceNpCommerceGetSkuImageURL
+0xee530059  sceNpCommerceGetSkuName
+0x78d7f9ad  sceNpCommerceGetSkuPrice
+0x1a3fcb69  sceNpCommerceGetSkuUserData
+0x8d1d096c  sceNpCommerceInitProductCategory
+0x8d4518a0  sceNpCommerceSetDataFlagFinish
+0x99ac9952  sceNpCommerceSetDataFlagStart
+0xf9732ac8  sceNpCustomMenuActionSetActivation
+0x45f8f3aa  sceNpCustomMenuRegisterActions
+0x9458f464  sceNpCustomMenuRegisterExceptionList
+0xf283c143  sceNpDrmExecuteGamePurchase
+0xcf51864b  sceNpDrmGetTimelimit
+0xad218faf  sceNpDrmIsAvailable
+0xf042b14f  sceNpDrmIsAvailable2
+0xaa16695f  sceNpDrmProcessExitSpawn
+0xe6c8f3f9  sceNpDrmProcessExitSpawn2
+0x2ecd48ed  sceNpDrmVerifyUpgradeLicense
+0xbe0e3ee2  sceNpDrmVerifyUpgradeLicense2
+0xf0a9182b  sceNpFriendlist
+0xf59e1da8  sceNpFriendlistAbortGui
+0xd7fb1fa6  sceNpFriendlistCustom
+0xbd28fdbf  sceNpInit
+0x3d1760dc  sceNpLookupAbortTransaction
+0xb6017827  sceNpLookupAvatarImage
+0xbf9eea93  sceNpLookupAvatarImageAsync
+0xce81c7f0  sceNpLookupCreateTitleCtx
+0xea2e9ffc  sceNpLookupCreateTransactionCtx
+0x5de61626  sceNpLookupDestroyTitleCtx
+0xfb87cf5e  sceNpLookupDestroyTransactionCtx
+0x5f2d9257  sceNpLookupInit
+0x166dcc11  sceNpLookupNpId
+0xd12e40ae  sceNpLookupNpIdAsync
+0x7508112e  sceNpLookupPollAsync
+0x71e5af7e  sceNpLookupSetTimeout
+0x8440537c  sceNpLookupTerm
+0xca39c4b2  sceNpLookupTitleSmallStorage
+0x860b1756  sceNpLookupTitleSmallStorageAsync
+0x9ee9f97e  sceNpLookupTitleStorage
+0x5e117ed5  sceNpLookupTitleStorageAsync
+0xdfd63b62  sceNpLookupUserProfile
+0xff0a2378  sceNpLookupUserProfileAsync
+0x2fccbfe0  sceNpLookupUserProfileWithAvatarSize
+0x1fdb3ec2  sceNpLookupUserProfileWithAvatarSizeAsync
+0xd737fd2d  sceNpLookupWaitAsync
+0x168fcece  sceNpManagerGetAccountAge
+0xb1e0718b  sceNpManagerGetAccountRegion
+0x36d0c2c5  sceNpManagerGetAvatarUrl
+0x4b9efb7a  sceNpManagerGetCachedInfo
+0xeb7a3d84  sceNpManagerGetChatRestrictionFlag
+0x6ee62ed2  sceNpManagerGetContentRatingFlag
+0xa1709abd  sceNpManagerGetEntitlementById
+0xb66d1c46  sceNpManagerGetEntitlementIdList
+0x32200389  sceNpManagerGetMyLanguages
+0xbdc07fd5  sceNpManagerGetNetworkTime
+0xfe37a7f4  sceNpManagerGetNpId
+0xbe07c708  sceNpManagerGetOnlineId
+0xf42c0df8  sceNpManagerGetOnlineName
+0x16f88a6f  sceNpManagerGetPsHandle
+0xa7bff757  sceNpManagerGetStatus
+0x0968aa36  sceNpManagerGetTicket
+0x58fa4fcd  sceNpManagerGetTicketParam
+0xe7dcd3b4  sceNpManagerRegisterCallback
+0x7e2fef28  sceNpManagerRequestTicket
+0x8297f1ec  sceNpManagerRequestTicket2
+0x442381f7  sceNpManagerSubSignin
+0x60440c73  sceNpManagerSubSigninAbortGui
+0x000e53cc  sceNpManagerSubSignout
+0x52a6b523  sceNpManagerUnregisterCallback
+0x2ad7837d  sceNpMatchingAcceptInvitationGUI
+0xac66568c  sceNpMatchingCreateCtx
+0x3cc8588a  sceNpMatchingCreateRoomGUI
+0x2e1c5068  sceNpMatchingDestroyCtx
+0x03c741a7  sceNpMatchingGetResult
+0x26b3bc94  sceNpMatchingGetResultGUI
+0x691f429d  sceNpMatchingGetRoomInfo
+0xb020684e  sceNpMatchingGetRoomInfoNoLimit
+0xe24eea19  sceNpMatchingGetRoomListLimitGUI
+0x73a2e36b  sceNpMatchingGetRoomMemberListLocal
+0xee64cf8e  sceNpMatchingGetRoomSearchFlag
+0xdae2d351  sceNpMatchingGrantOwnership
+0x474b7b13  sceNpMatchingJoinRoomGUI
+0x34cc0ca4  sceNpMatchingKickRoomMember
+0xd20d7798  sceNpMatchingKickRoomMemberWithOpt
+0xf806c54c  sceNpMatchingLeaveRoom
+0x14497465  sceNpMatchingQuickMatchGUI
+0x32febb4c  sceNpMatchingSearchJoinRoomGUI
+0x8b7bbd73  sceNpMatchingSendInvitationGUI
+0x6f8fd267  sceNpMatchingSetRoomInfo
+0x4a18a89e  sceNpMatchingSetRoomInfoNoLimit
+0xa284bd1d  sceNpMatchingSetRoomSearchFlag
+0x2f2c6b3e  sceNpProfileAbortGui
+0xceeebc7a  sceNpProfileCallGui
+0xee5b20d9  sceNpScoreAbortTransaction
+0x7deb244c  sceNpScoreCensorComment
+0x7be47e61  sceNpScoreCensorCommentAsync
+0xb9f93bbb  sceNpScoreCreateTitleCtx
+0x6f5e8143  sceNpScoreCreateTransactionCtx
+0x259113b8  sceNpScoreDestroyTitleCtx
+0xc5f4cf82  sceNpScoreDestroyTransactionCtx
+0xf4e0f607  sceNpScoreGetBoardInfo
+0xddce7d15  sceNpScoreGetBoardInfoAsync
+0x741fbf24  sceNpScoreGetClanMemberGameData
+0xbef887e5  sceNpScoreGetClanMemberGameDataAsync
+0xded17c26  sceNpScoreGetClansMembersRankingByNpId
+0xe8a67160  sceNpScoreGetClansMembersRankingByNpIdAsync
+0x41ffd4f2  sceNpScoreGetClansMembersRankingByNpIdPcId
+0x433fcb30  sceNpScoreGetClansMembersRankingByNpIdPcIdAsync
+0x6d4adc3b  sceNpScoreGetClansMembersRankingByRange
+0x4d5e0670  sceNpScoreGetClansMembersRankingByRangeAsync
+0x2a76895a  sceNpScoreGetClansRankingByClanId
+0x227f8763  sceNpScoreGetClansRankingByClanIdAsync
+0xb082003b  sceNpScoreGetClansRankingByRange
+0x7b7e9137  sceNpScoreGetClansRankingByRangeAsync
+0xf33291eb  sceNpScoreGetFriendsRanking
+0xcc946d56  sceNpScoreGetFriendsRankingAsync
+0x3b02418d  sceNpScoreGetGameData
+0xdb2e4dc2  sceNpScoreGetGameDataAsync
+0x05d65dff  sceNpScoreGetRankingByNpId
+0x3db7914d  sceNpScoreGetRankingByNpIdAsync
+0xc3a991ee  sceNpScoreGetRankingByNpIdPcId
+0xc4b6cd8f  sceNpScoreGetRankingByNpIdPcIdAsync
+0xfbc82301  sceNpScoreGetRankingByRange
+0x21206642  sceNpScoreGetRankingByRangeAsync
+0x32cf311f  sceNpScoreInit
+0xa7a090e5  sceNpScorePollAsync
+0x04ca5e6a  sceNpScoreRecordGameData
+0xf76847c2  sceNpScoreRecordGameDataAsync
+0x1672170e  sceNpScoreRecordScore
+0xf0b1e399  sceNpScoreRecordScoreAsync
+0xf1b77918  sceNpScoreSanitizeComment
+0x2cd2a1af  sceNpScoreSanitizeCommentAsync
+0x2706eaa1  sceNpScoreSetPlayerCharacterId
+0x29dd45dc  sceNpScoreSetTimeout
+0x9851f805  sceNpScoreTerm
+0x1a2704f7  sceNpScoreWaitAsync
+0x60897c38  sceNpSignalingActivateConnection
+0x50b86d94  sceNpSignalingAddExtendedHandler
+0x64dbb89d  sceNpSignalingCancelPeerNetInfo
+0x6356082e  sceNpSignalingCreateCtx
+0xfd0eb5ae  sceNpSignalingDeactivateConnection
+0xa8cf8451  sceNpSignalingDestroyCtx
+0xe853d388  sceNpSignalingGetConnectionFromNpId
+0x34ce82a0  sceNpSignalingGetConnectionFromPeerAddress
+0x155de760  sceNpSignalingGetConnectionInfo
+0xca0a2d04  sceNpSignalingGetConnectionStatus
+0x2687a127  sceNpSignalingGetCtxOpt
+0x9ad7fbd1  sceNpSignalingGetLocalNetInfo
+0x75eb50cb  sceNpSignalingGetPeerNetInfo
+0xd0958814  sceNpSignalingGetPeerNetInfoResult
+0x276c72b2  sceNpSignalingSetCtxOpt
+0x95c7bba3  sceNpSignalingTerminateConnection
+0x4885aa18  sceNpTerm
+0xd208f91d  sceNpUtilCmpNpId
+0xf5ff5f31  sceNpUtilCmpNpIdInOrder
+0x8c760b52  sceNpUtilCmpOnlineId
+0xc611029a  sceNpUtilGetPlatformType
+0xafc62605  sceNpUtilSetPlatformType
+```
+
+### `libsysutil_np2_stub` (79 / 79 missing)
+
+```
+0x41251f74  sceNp2Init
+0xaadb7c12  sceNp2Term
+0x9db622e8  sceNpAuthAbortOAuthRequest
+0xd7aa552e  sceNpAuthCreateOAuthRequest
+0x2880d8d5  sceNpAuthDeleteOAuthRequest
+0xe8bb13ff  sceNpAuthGetAuthorizationCode
+0xf30ac754  sceNpAuthOAuthInit
+0xc0ab5cbb  sceNpAuthOAuthTerm
+0x430ce063  sceNpMatching2AbortContextStart
+0x2ed909dc  sceNpMatching2AbortRequest
+0xaa6c2c43  sceNpMatching2ClearEventData
+0x12d0b0f9  sceNpMatching2ContextStart
+0x6ba4c668  sceNpMatching2ContextStartAsync
+0xf43c647a  sceNpMatching2ContextStop
+0x9cbce3f2  sceNpMatching2CreateContext
+0xe7a3bc7a  sceNpMatching2CreateJoinRoom
+0x16b3e5a4  sceNpMatching2CreateServerContext
+0xc6b63b7e  sceNpMatching2DeleteServerContext
+0x01379fd7  sceNpMatching2DestroyContext
+0x62d446ac  sceNpMatching2GetCbQueueInfo
+0x12034412  sceNpMatching2GetClanLobbyId
+0x3c00c9d4  sceNpMatching2GetEventData
+0xefbd9357  sceNpMatching2GetLobbyInfoList
+0x129663d0  sceNpMatching2GetLobbyMemberDataInternal
+0x0b2218a3  sceNpMatching2GetLobbyMemberDataInternalList
+0xeffe5a16  sceNpMatching2GetLobbyMemberIdListLocal
+0x196a06f9  sceNpMatching2GetMemoryInfo
+0xe4ac32ca  sceNpMatching2GetRoomDataExternalList
+0x8b209ca2  sceNpMatching2GetRoomDataInternal
+0x2c5b7fc9  sceNpMatching2GetRoomMemberDataExternalList
+0xb0c51412  sceNpMatching2GetRoomMemberDataInternal
+0x58a04247  sceNpMatching2GetRoomMemberDataInternalLocal
+0x490124fd  sceNpMatching2GetRoomMemberIdListLocal
+0xde6d308b  sceNpMatching2GetRoomPasswordLocal
+0x3cc27344  sceNpMatching2GetRoomSlotInfoLocal
+0x8e5cfe9f  sceNpMatching2GetServerIdListLocal
+0x3457c0db  sceNpMatching2GetServerInfo
+0xa2b01449  sceNpMatching2GetSignalingOptParamLocal
+0xac98b03a  sceNpMatching2GetUserInfoList
+0x05bf2fbd  sceNpMatching2GetWorldInfoList
+0x9344d41f  sceNpMatching2GrantRoomOwner
+0x3f62c759  sceNpMatching2Init
+0xf4babd3f  sceNpMatching2Init2
+0x29e78389  sceNpMatching2JoinLobby
+0xba578d19  sceNpMatching2JoinProhibitiveRoom
+0x5721e711  sceNpMatching2JoinRoom
+0x66f19527  sceNpMatching2KickoutRoomMember
+0x02065e3d  sceNpMatching2LeaveLobby
+0x1f372697  sceNpMatching2LeaveRoom
+0x748029a2  sceNpMatching2RegisterContextCallback
+0x0884fc95  sceNpMatching2RegisterLobbyEventCallback
+0x03a2f42a  sceNpMatching2RegisterLobbyMessageCallback
+0xdcb6b27d  sceNpMatching2RegisterRoomEventCallback
+0xfee11e72  sceNpMatching2RegisterRoomMessageCallback
+0xa9e6103e  sceNpMatching2RegisterSignalingCallback
+0x0d22867f  sceNpMatching2SearchRoom
+0x3f3bd413  sceNpMatching2SendLobbyChatMessage
+0xefff8779  sceNpMatching2SendLobbyInvitation
+0x7bf6e152  sceNpMatching2SendRoomChatMessage
+0x28cad8b3  sceNpMatching2SendRoomMessage
+0xdb87b088  sceNpMatching2SetDefaultRequestOptParam
+0xfa0583c6  sceNpMatching2SetLobbyMemberDataInternal
+0x215b0d75  sceNpMatching2SetRoomDataExternal
+0x817d1090  sceNpMatching2SetRoomDataInternal
+0xb851aacf  sceNpMatching2SetRoomMemberDataInternal
+0x6fcd84c1  sceNpMatching2SetSignalingOptParam
+0x1022e6d6  sceNpMatching2SetUserInfo
+0x944b28e8  sceNpMatching2SignalingCancelPeerNetInfo
+0x26ae9ff8  sceNpMatching2SignalingGetConnectionInfo
+0x0ebe4c6b  sceNpMatching2SignalingGetConnectionStatus
+0xe9946648  sceNpMatching2SignalingGetCtxOpt
+0x98f74c9a  sceNpMatching2SignalingGetLocalNetInfo
+0xdbe84071  sceNpMatching2SignalingGetPeerNetInfo
+0x2e42f94a  sceNpMatching2SignalingGetPeerNetInfoResult
+0x8d3f8d49  sceNpMatching2SignalingGetPingInfo
+0xbf014813  sceNpMatching2SignalingSetCtxOpt
+0x2fe0da7d  sceNpMatching2Term
+0x23009d07  sceNpMatching2Term2
+0x8e930999  sceNpUtilBuildCdnUrl
+```
+
+### `libsysutil_np_clans_stub` (39 / 39 missing)
+
+```
+0xe82969e2  sceNpClansAbortRequest
+0x4d06aef7  sceNpClansAddBlacklistEntry
+0x726dffd5  sceNpClansCancelInvitation
+0x299ccc9b  sceNpClansCancelMembershipRequest
+0x9cac2085  sceNpClansChangeMemberRole
+0xa6a31a38  sceNpClansCreateClan
+0x9a72232d  sceNpClansCreateRequest
+0xd6551cd1  sceNpClansDestroyRequest
+0x4826f6d5  sceNpClansDisbandClan
+0x38dadf1f  sceNpClansGetAutoAcceptStatus
+0x56bc5a7c  sceNpClansGetBlacklist
+0x487de998  sceNpClansGetClanInfo
+0xca4181b4  sceNpClansGetClanList
+0x672399a8  sceNpClansGetClanListByNpId
+0x20472da0  sceNpClansGetMemberInfo
+0x856ff5c0  sceNpClansGetMemberList
+0x9b820047  sceNpClansInit
+0xdbf300ca  sceNpClansJoinClan
+0xaa7912b5  sceNpClansKickMember
+0x560f717b  sceNpClansLeaveClan
+0xada45b84  sceNpClansPostAnnouncement
+0x83d65529  sceNpClansPostChallenge
+0xe2590f60  sceNpClansRemoveAnnouncement
+0x5bff9da1  sceNpClansRemoveBlacklistEntry
+0xce6dc0f0  sceNpClansRemoveChallenge
+0xd3346dc4  sceNpClansRemovePostedChallenge
+0x727aa7f8  sceNpClansRetrieveAnnouncements
+0x0df25834  sceNpClansRetrieveChallenges
+0x8e785b97  sceNpClansRetrievePostedChallenges
+0xace0cfba  sceNpClansSearchByName
+0x1221a1bf  sceNpClansSearchByProfile
+0xbc05ef31  sceNpClansSendInvitation
+0x095e12c6  sceNpClansSendInvitationResponse
+0x59743b2b  sceNpClansSendMembershipRequest
+0x942dbdc4  sceNpClansSendMembershipResponse
+0x42332cb7  sceNpClansTerm
+0x5da94854  sceNpClansUpdateAutoAcceptStatus
+0x09f9e1a9  sceNpClansUpdateClanInfo
+0xf4a2d52b  sceNpClansUpdateMemberInfo
+```
+
+### `libsysutil_np_commerce2_stub` (52 / 52 missing)
+
+```
+0x8df0057f  sceNpCommerce2AbortReq
+0xd9fdcec2  sceNpCommerce2CreateCtx
+0x62023e98  sceNpCommerce2CreateSessionAbort
+0x91f8843d  sceNpCommerce2CreateSessionFinish
+0xcc18cd2c  sceNpCommerce2CreateSessionStart
+0x6f67ea80  sceNpCommerce2DestroyCtx
+0x9d9cb96b  sceNpCommerce2DestroyGetCategoryContentsResult
+0xf6139b58  sceNpCommerce2DestroyGetProductInfoListResult
+0xef8eafcd  sceNpCommerce2DestroyGetProductInfoResult
+0x2a910f05  sceNpCommerce2DestroyReq
+0xd43a130e  sceNpCommerce2DoCheckoutFinishAsync
+0x104551a6  sceNpCommerce2DoCheckoutStartAsync
+0x410d42be  sceNpCommerce2DoDlListFinishAsync
+0x6ca9efd4  sceNpCommerce2DoDlListStartAsync
+0xb23e3bd1  sceNpCommerce2DoProductBrowseFinishAsync
+0x9825a0fc  sceNpCommerce2DoProductBrowseStartAsync
+0xa9f945b3  sceNpCommerce2DoProductCodeFinishAsync
+0xde7ab33d  sceNpCommerce2DoProductCodeStartAsync
+0x9050617d  sceNpCommerce2DoServiceListFinishAsync
+0xc7afc42a  sceNpCommerce2DoServiceListStartAsync
+0x1c153e5c  sceNpCommerce2EmptyStoreCheckAbort
+0xc1eb3b92  sceNpCommerce2EmptyStoreCheckFinish
+0x542b74cc  sceNpCommerce2EmptyStoreCheckStart
+0xeef51be0  sceNpCommerce2ExecuteStoreBrowse
+0x3d627d81  sceNpCommerce2GetBGDLAvailability
+0x7370d8d0  sceNpCommerce2GetCategoryContentsCreateReq
+0xca0ea996  sceNpCommerce2GetCategoryContentsGetResult
+0x371a2edd  sceNpCommerce2GetCategoryContentsStart
+0xbd49eab2  sceNpCommerce2GetCategoryInfo
+0xfc216890  sceNpCommerce2GetCategoryInfoFromContentInfo
+0x972ab46c  sceNpCommerce2GetContentInfo
+0x150fdca3  sceNpCommerce2GetContentRatingDescriptor
+0xac78c1f3  sceNpCommerce2GetContentRatingInfoFromCategoryInfo
+0xec324c8f  sceNpCommerce2GetContentRatingInfoFromGameProductInfo
+0xef645654  sceNpCommerce2GetGameProductInfo
+0xe51a4944  sceNpCommerce2GetGameProductInfoFromContentInfo
+0xd9956ce7  sceNpCommerce2GetGameProductInfoFromGetProductInfoListResult
+0xdb19194c  sceNpCommerce2GetGameSkuInfoFromGameProductInfo
+0xda8e322d  sceNpCommerce2GetPrice
+0xa975ebb4  sceNpCommerce2GetProductInfoCreateReq
+0xbf5f58ea  sceNpCommerce2GetProductInfoGetResult
+0xe1e7b5ac  sceNpCommerce2GetProductInfoListCreateReq
+0x146618df  sceNpCommerce2GetProductInfoListGetResult
+0x9cde07cc  sceNpCommerce2GetProductInfoListStart
+0x8f46325b  sceNpCommerce2GetProductInfoStart
+0x1fa1b312  sceNpCommerce2GetStoreBrowseUserdata
+0x3539d233  sceNpCommerce2Init
+0xd8a473a3  sceNpCommerce2InitGetCategoryContentsResult
+0xe0f90e44  sceNpCommerce2InitGetProductInfoListResult
+0xf798f5e3  sceNpCommerce2InitGetProductInfoResult
+0xa5a863fe  sceNpCommerce2SetBGDLAvailability
+0x4d4a094c  sceNpCommerce2Term
+```
+
+### `libsysutil_np_sns_stub` (11 / 11 missing)
+
+```
+0x3711833f  sceNpSnsFbAbortHandle
+0xaa9ed7ff  sceNpSnsFbCheckConfig
+0x53d03ce1  sceNpSnsFbCheckThrottle
+0x8fd1d549  sceNpSnsFbCreateHandle
+0x6e42c0dd  sceNpSnsFbDestroyHandle
+0x702dc876  sceNpSnsFbGetAccessToken
+0xba8c569e  sceNpSnsFbGetLongAccessToken
+0x2c0f3548  sceNpSnsFbInit
+0xaf86c77a  sceNpSnsFbLoadThrottle
+0x021d6c1f  sceNpSnsFbStreamPublish
+0xc05545fd  sceNpSnsFbTerm
+```
+
+### `libsysutil_np_trophy_stub` (17 / 17 missing)
+
+```
+0x48bd97c7  sceNpTrophyAbortHandle
+0xe3bf9a28  sceNpTrophyCreateContext
+0x1c25470d  sceNpTrophyCreateHandle
+0x3741ecc7  sceNpTrophyDestroyContext
+0x623cd2dc  sceNpTrophyDestroyHandle
+0xff299e03  sceNpTrophyGetGameIcon
+0x49d18217  sceNpTrophyGetGameInfo
+0x079f0e87  sceNpTrophyGetGameProgress
+0x370136fe  sceNpTrophyGetRequiredDiskSpace
+0xbaedf689  sceNpTrophyGetTrophyIcon
+0xfce6d30a  sceNpTrophyGetTrophyInfo
+0xb3ac3478  sceNpTrophyGetTrophyUnlockState
+0x39567781  sceNpTrophyInit
+0x1197b52c  sceNpTrophyRegisterContext
+0x27deda93  sceNpTrophySetSoundLevel
+0xa7fabf4d  sceNpTrophyTerm
+0x8ceedd21  sceNpTrophyUnlockTrophy
+```
+
+### `libsysutil_np_tus_stub` (62 / 62 missing)
+
+```
+0x56d3a5ab  sceNpTssGetData
+0x1e0870d1  sceNpTssGetDataAsync
+0xf46d8ae5  sceNpTssGetDataNoLimit
+0x7240c64d  sceNpTssGetDataNoLimitAsync
+0x325c6284  sceNpTusAbortTransaction
+0x94989003  sceNpTusAddAndGetVariable
+0x1fa5c87d  sceNpTusAddAndGetVariableAsync
+0xf60be06f  sceNpTusAddAndGetVariableVUser
+0xa7993bf3  sceNpTusAddAndGetVariableVUserAsync
+0x7caf58ee  sceNpTusCreateTitleCtx
+0x1904435e  sceNpTusCreateTransactionCtx
+0xe0719847  sceNpTusDeleteMultiSlotData
+0x3175af23  sceNpTusDeleteMultiSlotDataAsync
+0x01711e81  sceNpTusDeleteMultiSlotDataVUser
+0xc815b219  sceNpTusDeleteMultiSlotDataVUserAsync
+0xaf985783  sceNpTusDeleteMultiSlotVariable
+0xf5363608  sceNpTusDeleteMultiSlotVariableAsync
+0xc4e51fbf  sceNpTusDeleteMultiSlotVariableVUser
+0xc2e18da8  sceNpTusDeleteMultiSlotVariableVUserAsync
+0x2e162a62  sceNpTusDestroyTitleCtx
+0x44eca8b4  sceNpTusDestroyTransactionCtx
+0x8ddd0d85  sceNpTusGetData
+0x5175abb9  sceNpTusGetDataAsync
+0xae4e590e  sceNpTusGetDataVUser
+0x38f364b0  sceNpTusGetDataVUserAsync
+0x479c65d0  sceNpTusGetFriendsDataStatus
+0x3e4a2075  sceNpTusGetFriendsDataStatusAsync
+0x91a34a5b  sceNpTusGetFriendsVariable
+0x9f67bfbd  sceNpTusGetFriendsVariableAsync
+0xc848d425  sceNpTusGetMultiSlotDataStatus
+0x651fd79f  sceNpTusGetMultiSlotDataStatusAsync
+0xa3abfadb  sceNpTusGetMultiSlotDataStatusVUser
+0x2ab21ea9  sceNpTusGetMultiSlotDataStatusVUserAsync
+0x0423e622  sceNpTusGetMultiSlotVariable
+0xbb2877f2  sceNpTusGetMultiSlotVariableAsync
+0x2357ba9e  sceNpTusGetMultiSlotVariableVUser
+0xfc7d346e  sceNpTusGetMultiSlotVariableVUserAsync
+0x348dbcb4  sceNpTusGetMultiUserDataStatus
+0xc66ba67e  sceNpTusGetMultiUserDataStatusAsync
+0x2d1b9f1a  sceNpTusGetMultiUserDataStatusVUser
+0x368fec59  sceNpTusGetMultiUserDataStatusVUserAsync
+0x0d15043b  sceNpTusGetMultiUserVariable
+0xcc7a31cd  sceNpTusGetMultiUserVariableAsync
+0x6c511024  sceNpTusGetMultiUserVariableVUser
+0x9549d22c  sceNpTusGetMultiUserVariableVUserAsync
+0x8f87a06b  sceNpTusInit
+0x19bce18c  sceNpTusPollAsync
+0x7d5f0f0e  sceNpTusSetData
+0xe847341f  sceNpTusSetDataAsync
+0x0835deb2  sceNpTusSetDataVUser
+0x9cc0cf44  sceNpTusSetDataVUserAsync
+0xcc86a8f6  sceNpTusSetMultiSlotVariable
+0x065b610d  sceNpTusSetMultiSlotVariableAsync
+0xf819be91  sceNpTusSetMultiSlotVariableVUser
+0x96a06212  sceNpTusSetMultiSlotVariableVUserAsync
+0x59432970  sceNpTusSetTimeout
+0x225aed26  sceNpTusTerm
+0x47e9424a  sceNpTusTryAndSetVariable
+0xbbb244b7  sceNpTusTryAndSetVariableAsync
+0x3602bc80  sceNpTusTryAndSetVariableVUser
+0x17db7aa7  sceNpTusTryAndSetVariableVUserAsync
+0xb8e8ff22  sceNpTusWaitAsync
+```
+
+### `libsysutil_np_util_stub` (4 / 4 missing)
+
+```
+0xc99ee313  sceNpUtilBandwidthTestAbort
+0xc880f37d  sceNpUtilBandwidthTestGetStatus
+0xc2ced2b7  sceNpUtilBandwidthTestInitStart
+0x432b3cbf  sceNpUtilBandwidthTestShutdown
+```
+
+### `libsysutil_oskdialog_ext_stub` (17 / 17 missing)
+
+```
+0x23a2ede6  cellOskDialogExtAddJapaneseOptionDictionary
+0x4fe14d09  cellOskDialogExtAddOptionDictionary
+0x9cb12c89  cellOskDialogExtDisableHalfByteKana
+0x40187c25  cellOskDialogExtEnableClipboard
+0xe6c43c58  cellOskDialogExtEnableHalfByteKana
+0x7c95feb8  cellOskDialogExtInputDeviceLock
+0x09565b21  cellOskDialogExtInputDeviceUnlock
+0x8692fcd2  cellOskDialogExtRegisterConfirmWordFilterCallback
+0xe800f586  cellOskDialogExtRegisterForceFinishCallback
+0x1e1b4c97  cellOskDialogExtRegisterKeyboardEventHookCallback
+0xbdcf8383  cellOskDialogExtRegisterKeyboardEventHookCallbackEx
+0x42439db5  cellOskDialogExtSendFinishMessage
+0x7eb292cd  cellOskDialogExtSetBaseColor
+0x75370397  cellOskDialogExtSetInitialScale
+0xc5447a90  cellOskDialogExtSetPointerEnable
+0x8b60c469  cellOskDialogExtUpdateInputText
+0xd3ea496b  cellOskDialogExtUpdatePointerDisplayPos
+```
+
+### `libsysutil_photo_stub` (9 / 9 missing)
+
+```
+0xed4a0148  cellPhotoExportFinalize
+0x09ce84ac  cellPhotoExportFromFile
+0x8d14d09b  cellPhotoExportFromFileWithCopy
+0x4357c77f  cellPhotoExportInitialize
+0x08cbd8e1  cellPhotoExportInitialize2
+0xde509ead  cellPhotoExportProgress
+0x3f7fc0af  cellPhotoFinalize
+0x55c70783  cellPhotoInitialize
+0x42a32983  cellPhotoRegistFromFile
+```
+
+### `libsysutil_photo_decode_stub` (4 / 4 missing)
+
+```
+0xad7d8f38  cellPhotoDecodeFinalize
+0x28b22e44  cellPhotoDecodeFromFile
+0x596f0a56  cellPhotoDecodeInitialize
+0x0f424ecb  cellPhotoDecodeInitialize2
+```
+
+### `libsysutil_photo_export_stub` (9 / 9 missing)
+
+```
+0xed4a0148  cellPhotoExportFinalize
+0x09ce84ac  cellPhotoExportFromFile
+0x8d14d09b  cellPhotoExportFromFileWithCopy
+0x4357c77f  cellPhotoExportInitialize
+0x08cbd8e1  cellPhotoExportInitialize2
+0xde509ead  cellPhotoExportProgress
+0x3f7fc0af  cellPhotoFinalize
+0x55c70783  cellPhotoInitialize
+0x42a32983  cellPhotoRegistFromFile
+```
+
+### `libsysutil_photo_import_stub` (2 / 2 missing)
+
+```
+0x0783bce0  cellPhotoImport
+0x1ab8df55  cellPhotoImport2
+```
+
+### `libsysutil_print_stub` (14 / 14 missing)
+
+```
+0x293d9e9c  cellPrintCancelJob
+0xc04a7d42  cellPrintEndJob
+0x0d44f661  cellPrintEndPage
+0x6e952645  cellPrintGetPrintableArea
+0x6802dfb5  cellPrintGetStatus
+0xc9c3ef14  cellPrintLoadAsync
+0xf0865182  cellPrintLoadAsync2
+0xf9a53f35  cellPrintOpenConfig
+0x0a373522  cellPrintSendBand
+0x795b12b3  cellPrintStartJob
+0x865acf74  cellPrintStartPage
+0xeb51aa38  cellPrintUnloadAsync
+0xcf1aaefa  cellSysutilPrintInit
+0x6d996018  cellSysutilPrintShutdown
+```
+
+### `libsysutil_rec_stub` (7 / 7 missing)
+
+```
+0x4ac76585  cellRecClose
+0x5a8a8b0f  cellRecGetInfo
+0x39651e01  cellRecOpen
+0xdbf22bd1  cellRecQueryMemSize
+0xf0958f73  cellRecSetInfo
+0x964cd1b8  cellRecStart
+0x5b45439d  cellRecStop
+```
+
+### `libsysutil_remoteplay_stub` (8 / 8 missing)
+
+```
+0xfb793f27  cellRemotePlayBreak
+0xd29fe5e3  cellRemotePlayEncryptAllData
+0xe12c8c19  cellRemotePlayGetComparativeVolume
+0xa445cd55  cellRemotePlayGetPeerInfo
+0xc267987b  cellRemotePlayGetSharedMemory
+0x533f41df  cellRemotePlayGetStatus
+0x743918bd  cellRemotePlaySetComparativeVolume
+0xd6f3fc82  cellRemotePlayStopPeerVideoOut
+```
+
+### `libsysutil_savedata_stub` (12 / 12 missing)
+
+```
+0x46a2d878  cellSaveDataFixedExport
+0x52541151  cellSaveDataFixedImport
+0x04c06fc2  cellSaveDataGetListItem
+0x27cb8bc2  cellSaveDataListDelete
+0x491cc554  cellSaveDataListExport
+0x6b4e0de6  cellSaveDataListImport
+0x95ae2cde  cellSaveDataUserFixedExport
+0x529231b0  cellSaveDataUserFixedImport
+0xf6482036  cellSaveDataUserGetListItem
+0x7048a9ba  cellSaveDataUserListDelete
+0x273d116a  cellSaveDataUserListExport
+0x39d6ee43  cellSaveDataUserListImport
+```
+
+### `libsysutil_screenshot_stub` (4 / 4 missing)
+
+```
+0xfc6f4e74  cellScreenShotDisable
+0x9e33ab8f  cellScreenShotEnable
+0x7a9c2243  cellScreenShotSetOverlayImage
+0xd3ad63e4  cellScreenShotSetParameter
+```
+
+### `libsysutil_search_stub` (21 / 21 missing)
+
+```
+0x8fe376a6  cellSearchCancel
+0x774033d6  cellSearchEnd
+0xbfab7616  cellSearchFinalize
+0x94e21701  cellSearchGetContentIdByOffset
+0x9663a44b  cellSearchGetContentInfoByContentId
+0x3b210319  cellSearchGetContentInfoByOffset
+0x35cda406  cellSearchGetContentInfoDeveloperData
+0xd7a7a433  cellSearchGetContentInfoGameComment
+0xffb28491  cellSearchGetContentInfoPath
+0x37b5ba0c  cellSearchGetContentInfoPathMovieThumb
+0x1e989496  cellSearchGetContentInfoSharable
+0x025ce169  cellSearchGetMusicSelectionContext
+0xed20e079  cellSearchGetMusicSelectionContextOfSingleTrack
+0x540d9068  cellSearchGetOffsetByContentId
+0xc81ccf8a  cellSearchInitialize
+0xe73cb0d2  cellSearchPrepareFile
+0x0591826f  cellSearchStartContentSearch
+0x64fb0b76  cellSearchStartContentSearchInList
+0x0a4c8295  cellSearchStartListSearch
+0x13524faa  cellSearchStartSceneSearch
+0xc0ed0522  cellSearchStartSceneSearchInVideo
+```
+
+### `libsysutil_subdisplay_stub` (11 / 11 missing)
+
+```
+0xaee1e0c2  cellSubDisplayAudioOutBlocking
+0x5468d6b0  cellSubDisplayAudioOutNonBlocking
+0x551d80a5  cellSubDisplayEnd
+0xe2485f79  cellSubDisplayGetPeerList
+0x8a264d71  cellSubDisplayGetPeerNum
+0x6595ce22  cellSubDisplayGetRequiredMemory
+0x415ed9dc  cellSubDisplayGetTouchInfo
+0x938ac642  cellSubDisplayGetVideoBuffer
+0xf9a7e8a5  cellSubDisplayInit
+0xa5bccb47  cellSubDisplayStart
+0x6d85ddb3  cellSubDisplayStop
+```
+
+### `libsysutil_sysconf_ext_stub` (1 / 1 missing)
+
+```
+0x08db2adf  cellSysconfBtGetDeviceList
+```
+
+### `libsysutil_userinfo_stub` (5 / 5 missing)
+
+```
+0xb3516536  cellUserInfoEnableOverlay
+0xc55e338b  cellUserInfoGetList
+0x2b761140  cellUserInfoGetStat
+0x3097cc1c  cellUserInfoSelectUser_ListType
+0x55123a25  cellUserInfoSelectUser_SetList
+```
+
+### `libsysutil_video_export_stub` (6 / 6 missing)
+
+```
+0xc15be817  cellVideoExportFinalize
+0x81296524  cellVideoExportFromFile
+0x78946d1f  cellVideoExportFromFileWithCopy
+0x6a24cc70  cellVideoExportInitialize
+0x2f457571  cellVideoExportInitialize2
+0x1bb79ff4  cellVideoExportProgress
+```
+
+### `libsysutil_video_upload_stub` (1 / 1 missing)
+
+```
+0x122e0d0f  cellVideoUploadInitialize
+```
+
+### `libusbd_stub` (24 / 24 missing)
+
+```
+0x074dbb39  cellUsbdAllocateMemory
+0xac77eb78  cellUsbdBulkTransfer
+0x9763e962  cellUsbdClosePipe
+0x97cf128e  cellUsbdControlTransfer
+0x35f22ac3  cellUsbdEnd
+0x4e456e81  cellUsbdFreeMemory
+0xdb819e03  cellUsbdGetDeviceLocation
+0xbdbd2428  cellUsbdGetDeviceSpeed
+0x5de3af36  cellUsbdGetPrivateData
+0xd5263dea  cellUsbdGetThreadPriority
+0x7a1b6eab  cellUsbdHSIsochronousTransfer
+0xd0e766fe  cellUsbdInit
+0x0f411262  cellUsbdInterruptTransfer
+0xde58c4c2  cellUsbdIsochronousTransfer
+0x254289ac  cellUsbdOpenPipe
+0x7fe92c54  cellUsbdRegisterExtraLdd
+0xbd554bcb  cellUsbdRegisterExtraLdd2
+0x359befba  cellUsbdRegisterLdd
+0x2fb08e1e  cellUsbdScanStaticDescriptor
+0x63bfdb97  cellUsbdSetPrivateData
+0xc24af1d7  cellUsbdSetThreadPriority
+0x5c832bd7  cellUsbdSetThreadPriority2
+0x90460081  cellUsbdUnregisterExtraLdd
+0x64951ac7  cellUsbdUnregisterLdd
+```
+
+### `libusbpspcm_stub` (27 / 27 missing)
+
+```
+0xabe090e3  cellUsbPspcmBind
+0x17f42197  cellUsbPspcmBindAsync
+0xf20df7fc  cellUsbPspcmCalcPoolSize
+0xa4a5ddb4  cellUsbPspcmCancelBind
+0xe76e79ab  cellUsbPspcmCancelWaitData
+0xfa07d320  cellUsbPspcmClose
+0x0f7b3b6d  cellUsbPspcmEnd
+0x97670a90  cellUsbPspcmGetAddr
+0x657fcd36  cellUsbPspcmInit
+0x01a4cde0  cellUsbPspcmPollBindAsync
+0x816799dd  cellUsbPspcmPollData
+0x7b249315  cellUsbPspcmPollRecvAsync
+0x3f22403e  cellUsbPspcmPollResetAsync
+0x7f0a3eaf  cellUsbPspcmPollSendAsync
+0xf9883d3b  cellUsbPspcmRecv
+0x02955295  cellUsbPspcmRecvAsync
+0xe3fbf64d  cellUsbPspcmRegister
+0xe68a65ac  cellUsbPspcmReset
+0x4ef182dd  cellUsbPspcmResetAsync
+0x7277d7c3  cellUsbPspcmSend
+0x4af23efa  cellUsbPspcmSendAsync
+0x7ff72b42  cellUsbPspcmUnregister
+0x4abe830e  cellUsbPspcmWaitBindAsync
+0xdb864d11  cellUsbPspcmWaitData
+0x461dc8cc  cellUsbPspcmWaitRecvAsync
+0xe840f449  cellUsbPspcmWaitResetAsync
+0x3caddf6c  cellUsbPspcmWaitSendAsync
+```
+
+### `libvdec_stub` (11 / 11 missing)
+
+```
+0x16698e83  cellVdecClose
+0x2bf4ddd2  cellVdecDecodeAu
+0x824433f0  cellVdecEndSeq
+0x17c702b9  cellVdecGetPicItem
+0x807c861a  cellVdecGetPicture
+0xb6bbcd5d  cellVdecOpen
+0x0053e2d8  cellVdecOpenEx
+0xff6f6ebe  cellVdecQueryAttr
+0xc982a84a  cellVdecQueryAttrEx
+0xe13ef6fc  cellVdecSetFrameRate
+0xc757c2aa  cellVdecStartSeq
+```
+
+### `libvoice_stub` (35 / 35 missing)
+
+```
+0xae6a21d5  cellVoiceConnectIPortToOPort
+0x2a01013e  cellVoiceCreateNotifyEventQueue
+0x2de54871  cellVoiceCreatePort
+0x20bafe31  cellVoiceDebugTopology
+0x9f70c475  cellVoiceDeletePort
+0x18d3df30  cellVoiceDisconnectIPortFromOPort
+0xe0e1ae12  cellVoiceEnd
+0xbef53a2b  cellVoiceGetBitRate
+0x474609e2  cellVoiceGetMuteFlag
+0xf629ed67  cellVoiceGetPortAttr
+0x54ac3519  cellVoiceGetPortInfo
+0xd6811aa7  cellVoiceGetSignalState
+0x762dc193  cellVoiceGetVolume
+0xc7cf1182  cellVoiceInit
+0xb1a2c38f  cellVoiceInitEx
+0x87c71b06  cellVoicePausePort
+0xd14e784d  cellVoicePausePortAll
+0x36472c57  cellVoiceReadFromOPort
+0xdd000886  cellVoiceRemoveNotifyEventQueue
+0xff0fa43a  cellVoiceResetPort
+0x7bf17b15  cellVoiceResumePort
+0x7f3963f7  cellVoiceResumePortAll
+0x7e60adc6  cellVoiceSetBitRate
+0xdde35a0c  cellVoiceSetMuteFlag
+0xd4d80ea5  cellVoiceSetMuteFlagAll
+0x35d84910  cellVoiceSetNotifyEventQueue
+0x9d0f4af1  cellVoiceSetPortAttr
+0xd5ae37d8  cellVoiceSetVolume
+0x0a563878  cellVoiceStart
+0x94d51f92  cellVoiceStartEx
+0xd3a84be1  cellVoiceStop
+0x2f24fea3  cellVoiceUpdatePort
+0x3dad26e7  cellVoiceWriteToIPort
+0x30f0b5ab  cellVoiceWriteToIPortEx
+0xc4f573b8  cellVoiceWriteToIPortEx2
+```
+
+### `libvpost_stub` (5 / 5 missing)
+
+```
+0x10ef39f6  cellVpostClose
+0xabb8cc3d  cellVpostExec
+0xcd33f3e2  cellVpostOpen
+0x40524325  cellVpostOpenEx
+0x95e788c3  cellVpostQueryAttr
+```
+
