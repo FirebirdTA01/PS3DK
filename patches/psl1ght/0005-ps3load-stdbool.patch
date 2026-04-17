@@ -1,0 +1,20 @@
+Subject: [PATCH] tools/ps3load: use <stdbool.h>, not a false/true enum
+
+GCC 15 (and C23 generally) promotes true and false to keywords, so
+the old typedef enum { false, true } bool; now fails to compile.
+Replace with <stdbool.h>; semantically identical and portable back
+to C99.
+
+diff --git a/tools/ps3load/source/main.c b/tools/ps3load/source/main.c
+index 78e8539..deb22e0 100644
+--- a/tools/ps3load/source/main.c
++++ b/tools/ps3load/source/main.c
+@@ -65,7 +65,7 @@ typedef signed short s16;
+ typedef signed int s32;
+ typedef signed long long s64;
+ 
+-typedef enum { false, true } bool;
++#include <stdbool.h>
+ 
+ 
+ static const char *envvar = "PS3LOAD";

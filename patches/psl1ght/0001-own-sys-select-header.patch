@@ -1,0 +1,171 @@
+Subject: [PATCH] ppu/include: PSL1GHT owns <sys/select.h>, matches Sony ABI
+
+On PS3, select() is not a BSD file-descriptor call — the PS3 kernel has
+no file-descriptor select.  The only selectable thing is a sys_net
+socket, via sys_net_bnet_select.  Sony's own SDK ships <sys/select.h>
+with:
+
+  * FD_SETSIZE = 1024        (a 128-byte fd_set struct)
+  * typedef unsigned int fd_mask
+  * struct fd_set { fd_mask fds_bits[FD_SETSIZE/32]; }
+  * canonical function name: socketselect() — Sony never declares
+    select(), so no name collision with any other libc
+
+PSL1GHT historically shipped a one-line <sys/select.h> shim that
+redirected to <net/select.h>, which in turn re-typedef'd fd_set via an
+#undef/#define macro dance and claimed the name select().  That dance
+depended on newlib 1.20's sys/types.h not pulling sys/select.h
+transitively.  Newlib 4.4 does pull it under __BSD_VISIBLE, so the
+shim re-entered <signal.h> before sys/types.h had finished declaring
+pid_t and every TU compiling against PSL1GHT broke at crt1.c.
+
+Cross-checked against target/ppu/include/sys/select.h in the Sony SDK
+475.001 coverage reference.  This patch matches that layout exactly,
+including the use of fds_bits (no underscore prefix) as the struct
+member and the NFDBITS_SHIFT/NFDBITS_MASK pair, so that:
+
+  * code written against the official SDK compiles unchanged against
+    PSL1GHT, and
+  * the on-wire fd_set passed to sys_net_bnet_select is the same
+    struct the kernel expects.
+
+The old PSL1GHT-style call `select(nfds, ...)` is preserved as a weak
+alias for socketselect() in libnet, so existing homebrew continues to
+link.  Declarations for both names live in <sys/select.h>.  The alias
+itself is added in a follow-up patch touching libnet/socket.c.
+
+pselect() was declared but never implemented in PSL1GHT (no backing
+syscall in sys_net), and Sony does not ship it.  Dropped from the
+header; any caller was linking-broken before this patch anyway.
+
+FD_SETSIZE bump from the old effective 64 (inherited from newlib
+defaults the shim let through) to Sony's 1024 is deliberate.  Existing
+PSL1GHT binaries that passed 8-byte fd_sets to the kernel were
+technically under-provisioning the syscall's output buffer; bumping
+to 128 bytes makes us ABI-honest.  nfds gates how many bits the
+kernel actually scans, so small-nfds callers see no behavior change.
+
+diff --git a/ppu/include/sys/select.h b/ppu/include/sys/select.h
+--- a/ppu/include/sys/select.h
++++ b/ppu/include/sys/select.h
+@@ -1 +1,76 @@
+-#include <net/select.h>
++/*
++ * PSL1GHT <sys/select.h> — the PS3 sys_net select header.
++ *
++ * Layout matches Sony SDK 475.001 target/ppu/include/sys/select.h so
++ * that code written against the official SDK and the on-wire struct
++ * passed to sys_net_bnet_select are both identical.
++ *
++ * The PS3 kernel has no file-descriptor select; only sys_net socket
++ * fds are selectable.  Installed ahead of newlib's sys/select.h on
++ * the PPU include path, so any translation unit pulling <sys/select.h>
++ * (directly or via <sys/types.h>) sees this definition rather than
++ * newlib's BSD one.  The include-order precedence is what preempts
++ * newlib — we do not rely on guard-macro collision.
++ */
++#ifndef __SYS_NET_SYS_SELECT_H__
++#define __SYS_NET_SYS_SELECT_H__
++
++#include <sys/_timeval.h>
++#include <sys/timespec.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define FD_SETSIZE      1024
++
++typedef unsigned int fd_mask;
++
++#define NFDBITS         ((int)(sizeof(fd_mask) * 8))
++#define NFDBITS_SHIFT   5
++#define NFDBITS_MASK    (NFDBITS - 1)
++
++typedef struct fd_set {
++    fd_mask fds_bits[FD_SETSIZE >> NFDBITS_SHIFT];
++} fd_set;
++
++#define FD_SET(n, p) \
++    ((p)->fds_bits[(n) >> NFDBITS_SHIFT] |= (1U << ((n) & NFDBITS_MASK)))
++#define FD_CLR(n, p) \
++    ((p)->fds_bits[(n) >> NFDBITS_SHIFT] &= ~(1U << ((n) & NFDBITS_MASK)))
++#define FD_ISSET(n, p) \
++    ((p)->fds_bits[(n) >> NFDBITS_SHIFT] & (1U << ((n) & NFDBITS_MASK)))
++#define FD_ZERO(p) do {                                          \
++    fd_set *__fds = (p);                                         \
++    unsigned int __i;                                            \
++    for (__i = 0; __i < (FD_SETSIZE >> NFDBITS_SHIFT); __i++)    \
++        __fds->fds_bits[__i] = 0;                                \
++} while (0)
++
++/*
++ * Sony's canonical name.  New code should call this.
++ */
++int socketselect(int nfds, fd_set *readfds, fd_set *writefds,
++                 fd_set *exceptfds, struct timeval *timeout);
++
++/*
++ * Back-compat alias for existing PSL1GHT homebrew.  libnet exports
++ * select() as a weak alias of socketselect() (see ppu/sprx/libnet/
++ * socket.c) so that legacy sources continue to link.  New code should
++ * prefer socketselect() to stay symmetric with Sony's SDK.
++ */
++int select(int nfds, fd_set *readfds, fd_set *writefds,
++           fd_set *exceptfds, struct timeval *timeout);
++
++#ifdef __cplusplus
++}
++#endif
++
++/* Newlib's sys/select.h uses this guard; setting it tells any
++ * downstream include (e.g. if a TU somehow manages to pull newlib's
++ * copy too) that select.h has been seen. */
++#ifndef _SYS_SELECT_H
++#define _SYS_SELECT_H
++#endif
++
++#endif /* __SYS_NET_SYS_SELECT_H__ */
+diff --git a/ppu/include/net/select.h b/ppu/include/net/select.h
+--- a/ppu/include/net/select.h
++++ b/ppu/include/net/select.h
+@@ -1,29 +1,10 @@
+-#ifndef __SELECT_H__
+-#define __SELECT_H__
+-
+-#include <time.h>
+-#include <signal.h>
+-#include <sys/time.h>
+-#include <sys/types.h>
+-
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+-typedef unsigned int _net_fd_mask;
+-
+-typedef struct _net_fd_set {
+-	_net_fd_mask fds_bits[howmany(FD_SETSIZE, NFDBITS)];
+-} _net_fd_set;
+-
+-#undef fd_set
+-#define fd_set _net_fd_set
+-
+-int select(int, fd_set*, fd_set*, fd_set*, struct timeval*);
+-int pselect(int, fd_set*, fd_set*, fd_set*, const struct timespec*, const sigset_t*);
+-
+-#ifdef __cplusplus
+-	}
+-#endif
+-
+-#endif
++/*
++ * Back-compat forwarder.  PSL1GHT internal code has historically
++ * included <net/select.h>; the real definitions now live in
++ * <sys/select.h> to match Sony SDK 475.001 (and to avoid redefining
++ * fd_set via a macro dance that conflicts with newlib).
++ */
++#ifndef __SELECT_H__
++#define __SELECT_H__
++#include <sys/select.h>
++#endif

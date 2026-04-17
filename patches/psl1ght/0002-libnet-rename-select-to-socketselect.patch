@@ -1,0 +1,41 @@
+Subject: [PATCH] libnet: rename select() to socketselect(), keep select as alias
+
+Pair to patches/psl1ght/0001-own-sys-select-header.patch.  The header
+now declares both socketselect() and select() with identical signatures
+(Sony SDK uses socketselect; legacy PSL1GHT homebrew uses select).
+This patch makes libnet export both symbols from a single function
+body via an attribute alias, so:
+
+  * Sony-written code calling socketselect() links.
+  * PSL1GHT homebrew calling select() still links.
+  * Only one implementation to maintain.
+
+The alias is marked weak so that an application can provide its own
+select() implementation (e.g. wrapping socketselect() with additional
+stdin/pty logic) without hitting a multiple-definition error.
+
+diff --git a/ppu/sprx/libnet/socket.c b/ppu/sprx/libnet/socket.c
+--- a/ppu/sprx/libnet/socket.c
++++ b/ppu/sprx/libnet/socket.c
+@@ -321,7 +321,7 @@
+ 	return -1;
+ }
+
+-int select(int nfds,fd_set *readfds,fd_set *writefds,fd_set *errorfds,struct timeval *timeout)
++int socketselect(int nfds,fd_set *readfds,fd_set *writefds,fd_set *errorfds,struct timeval *timeout)
+ {
+ 	if(LIBNET_INITIALZED)
+ 		return netErrno(netSelect(FD(nfds),readfds,writefds,errorfds,timeout));
+@@ -330,6 +330,12 @@
+ 	return -1;
+ }
+
++/* PSL1GHT back-compat: legacy code calls select() on sockets. */
++int select(int nfds, fd_set *readfds, fd_set *writefds,
++           fd_set *errorfds, struct timeval *timeout)
++    __attribute__((weak, alias("socketselect")));
++
++
+ int getsockname(int socket,struct sockaddr* address,socklen_t *address_len)
+ {
+ 	s32 ret = 0;
