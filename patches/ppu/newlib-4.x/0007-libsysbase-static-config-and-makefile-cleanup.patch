@@ -1,0 +1,69 @@
+Subject: [PATCH] libsysbase: static config.h; drop broken self-rebuild rules
+
+Two small fixes to the libsysbase subdir we added in patch 0003:
+
+1. Makefile.in shipped from the Cygnus-era template had
+      Makefile: Makefile.in config.status @host_makefile_frag_path@
+      config.status: configure
+   rules that expect libsysbase/configure to exist.  Our build pipeline
+   uses the parent libgloss configure to AC_CONFIG_FILES libsysbase/
+   Makefile directly (patch 0002); there IS no libsysbase/configure,
+   so those rules cause `No rule to make target 'configure'` during
+   make-recursion.  Drop them.
+
+2. libsysbase/*.c do `#include "config.h"` expecting an autoconf-
+   generated header defining HAVE_ELF / HAVE_GNU_LD / REENTRANT_
+   SYSCALLS_PROVIDED / etc.  On a modern GNU PowerPC-ELF toolchain
+   all of those are definitionally true, so ship a static config.h
+   rather than carry libsysbase's broken Cygnus-era configure.in
+   infrastructure just to have autoconf fill in the blanks.
+
+With these two in place plus patches 0002 (parent wiring) and 0006
+(newlib <_ansi.h> compat), libgloss/libsysbase builds cleanly and
+produces libsysbase.a in $PS3DEV/ppu/powerpc64-ps3-elf/lib/.
+
+diff --git a/libgloss/libsysbase/Makefile.in b/libgloss/libsysbase/Makefile.in
+--- a/libgloss/libsysbase/Makefile.in
++++ b/libgloss/libsysbase/Makefile.in
+@@ -141,8 +141,6 @@ info:
+ install-info:
+ clean-info:
+
+-Makefile: Makefile.in config.status @host_makefile_frag_path@
+-	$(SHELL) config.status
+-
+-config.status: configure
+-	$(SHELL) config.status --recheck
++# Parent libgloss configure generates this Makefile via AC_CONFIG_FILES;
++# no subdir-local configure exists, so drop the self-rebuild rules that
++# the Cygnus-era template carried.
+diff --git a/libgloss/libsysbase/config.h b/libgloss/libsysbase/config.h
+new file mode 100644
+--- /dev/null
++++ b/libgloss/libsysbase/config.h
+@@ -0,0 +1,25 @@
++/*
++ * libsysbase static config.h for the PS3 LV2 target.
++ *
++ * Replaces the autoconf-generated header we would otherwise get from
++ * libsysbase's Cygnus-era configure.in.  On a modern GNU PowerPC-ELF
++ * toolchain every HAVE_* below is definitionally true, so we just
++ * hard-code them rather than carry the broken autoconf infrastructure.
++ *
++ * REENTRANT_SYSCALLS_PROVIDED is on because PSL1GHT's librt installs
++ * _r-suffixed syscall hooks into __syscalls at startup (crt1.c).
++ */
++#ifndef _PS3_LIBSYSBASE_CONFIG_H_
++#define _PS3_LIBSYSBASE_CONFIG_H_
++
++#define HAVE_ELF                      1
++#define HAVE_GNU_LD                   1
++#define HAVE_ASM_PREVIOUS_DIRECTIVE   1
++#define HAVE_ASM_POPSECTION_DIRECTIVE 1
++#define HAVE_SECTION_ATTRIBUTES       1
++#define REENTRANT_SYSCALLS_PROVIDED   1
++
++/* No __SYMBOL_PREFIX on PowerPC ELF. */
++#define __SYMBOL_PREFIX ""
++
++#endif /* _PS3_LIBSYSBASE_CONFIG_H_ */

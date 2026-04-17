@@ -4,6 +4,9 @@
 # Build intermediates
 /build/
 
+# Per-sample build output
+samples/*/build/
+
 # Staging prefix ($PS3DEV install root)
 /stage/
 

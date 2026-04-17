@@ -1,14 +1,42 @@
+Subject: [PATCH] libgloss: register libsysbase as a powerpc64-ps3-elf subdir
+
+Adds libsysbase to libgloss's SUBDIRS for the PS3 target, matching the
+pattern used by rs6000/mn10200/mips/etc.  Both the AC_CONFIG_FILES
+registration (so the parent configure processes libsysbase/Makefile.in
+→ Makefile via @var@ substitution) and the `subdirs` assignment (so
+the parent make recurses in via automake's SUBDIRS machinery) are
+needed.
+
+Patches both configure.ac and the pre-generated configure script:
+our build pipeline never runs autoreconf on libgloss, so configure.ac
+changes alone don't reach the running configure.
+
 diff --git a/libgloss/configure.ac b/libgloss/configure.ac
-index 268d86c..216fad7 100644
 --- a/libgloss/configure.ac
 +++ b/libgloss/configure.ac
-@@ -114,6 +114,9 @@ case "${target}" in
+@@ -114,6 +114,10 @@ case "${target}" in
  	subdirs="$subdirs rs6000"
  	host_makefile_frag=${srcdir}/config/ppc.mh
  	;;
 +  powerpc64-ps3-elf*)
++	AC_CONFIG_FILES([libsysbase/Makefile])
 +	subdirs="$subdirs libsysbase"
 +	;;
    mn10200-*-*)
  	AC_CONFIG_FILES([mn10200/Makefile])
  	subdirs="$subdirs mn10200"
+diff --git a/libgloss/configure b/libgloss/configure
+--- a/libgloss/configure
++++ b/libgloss/configure
+@@ -2839,6 +2839,11 @@ case "${target}" in
+ 	subdirs="$subdirs rs6000"
+ 	host_makefile_frag=${srcdir}/config/ppc.mh
+ 	;;
++  powerpc64-ps3-elf*)
++	ac_config_files="$ac_config_files libsysbase/Makefile"
++
++	subdirs="$subdirs libsysbase"
++	;;
+   mn10200-*-*)
+ 	ac_config_files="$ac_config_files mn10200/Makefile"
+
