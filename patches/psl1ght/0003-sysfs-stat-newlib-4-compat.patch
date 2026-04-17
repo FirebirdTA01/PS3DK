@@ -1,36 +1,35 @@
-Subject: [PATCH] lv2/sysfs.h, librt/fstat.c: guard Sony-style st_*time members
+Subject: [PATCH] lv2/sysfs.h: pull <sys/param.h>; librt/fstat.c: write through timespec
 
-sysFSStat and Sony's CellFsStat both use the member names st_atime/
-st_mtime/st_ctime (typed as time_t).  Newlib 4.4's <sys/stat.h> is
-POSIX-2008-style: for non-SVR4 targets it declares timespec members
-st_atim/st_mtim/st_ctim, and then unconditionally #defines
-st_atime -> st_atim.tv_sec (etc).  That macro rewrites EVERY
-subsequent st_atime token, including unrelated struct declarations
-and accesses.
+sysFSStat and Sony's CellFsStat both carry st_atime/st_mtime/st_ctime
+members typed as time_t.  Newlib 4.4's <sys/stat.h> is POSIX-2008:
+for non-SVR4 targets it declares timespec members st_atim/st_mtim/
+st_ctim and then unconditionally #defines st_atime -> st_atim.tv_sec
+etc.  Those macros bleed into every subsequent struct declaration
+that happens to reuse the same member names.
 
-Sony avoids the collision by shipping their own <sys/stat.h> that
-never defines those macros; we do not yet own sys/stat.h wholesale
-(would require shadowing the full newlib libc surface and bloats
-the patch set).  Interpose locally instead:
+Patch 0010 installs a PSL1GHT-owned <sys/stat.h> shadow that pulls
+newlib's declarations via #include_next and then #undefines the
+three legacy macros.  That's the load-bearing fix; the two changes
+in this patch are the residual plumbing:
 
-  * sysfs.h pulls <sys/param.h> so MAXPATHLEN is visible at
-    struct-declaration time.
-  * sysfs.h wraps the sysFSStat typedef in
-    #pragma push_macro("st_atime") / #undef / pop_macro so the
-    struct members declare as literal fields regardless of what
-    newlib's sys/stat.h did before this header was pulled.  POSIX
-    callers outside sysfs.h see the macro unchanged (push/pop
-    restores the prior state).
-  * fstat.c #undefs the three macros TU-wide and writes through
-    dst->st_atim.tv_sec explicitly; this keeps src->st_atime a
-    literal-field access on sysFSStat and leaves dst accessing
-    newlib's literal timespec members.
+  * sysfs.h pulls <sys/param.h> so MAXPATHLEN is visible at the
+    sysFSDirent typedef's declaration site (newlib 4.4 stopped
+    transitively exposing it via <unistd.h> / <time.h>).
 
-When Phase 3 ships a PSL1GHT-owned <sys/stat.h> matching Sony's
-layout, these push/pop/undef guards can be removed wholesale.
+  * librt/fstat.c converts sysFSStat's time_t fields into newlib's
+    timespec members via `dst->st_atim.tv_sec = src->st_atime`.
+    Needs to be an explicit tv_sec write because newlib's struct
+    stat holds timespec members, not bare time_t.  A TU-local
+    #undef of the three macros keeps the assignment robust even in
+    build configurations where the PSL1GHT shadow hasn't landed yet.
+
+The previous version of this patch additionally added a
+#pragma push_macro / #undef / pop_macro block around the sysFSStat
+typedef in sysfs.h.  That was made redundant by 0010 and has been
+removed.
 
 diff --git a/ppu/include/lv2/sysfs.h b/ppu/include/lv2/sysfs.h
-index 9bf0035..484c35e 100644
+index 9bf0035..b43f2d5 100644
 --- a/ppu/include/lv2/sysfs.h
 +++ b/ppu/include/lv2/sysfs.h
 @@ -3,6 +3,7 @@
@@ -41,34 +40,6 @@ index 9bf0035..484c35e 100644
  #include <ppu-types.h>
  
  // Open Flags
-@@ -23,6 +24,16 @@
- 	extern "C" {
- #endif
- 
-+/* Keep Sony-style member names (st_atime/st_mtime/st_ctime) even when
-+ * newlib 4.4's sys/stat.h has rewritten those tokens to st_atim.tv_sec
-+ * etc.  See patches/psl1ght/0005 for rationale. */
-+#pragma push_macro("st_atime")
-+#pragma push_macro("st_mtime")
-+#pragma push_macro("st_ctime")
-+#undef st_atime
-+#undef st_mtime
-+#undef st_ctime
-+
- typedef struct _sys_fs_stat
- {
- 	s32 st_mode;
-@@ -35,6 +46,10 @@ typedef struct _sys_fs_stat
- 	u64 st_blksize;
- } __attribute__((packed)) sysFSStat;
- 
-+#pragma pop_macro("st_ctime")
-+#pragma pop_macro("st_mtime")
-+#pragma pop_macro("st_atime")
-+
- typedef struct _sys_fs_dirent
- {
- 	u8 d_type;
 diff --git a/ppu/librt/fstat.c b/ppu/librt/fstat.c
 index e59f50a..c35d85c 100644
 --- a/ppu/librt/fstat.c
