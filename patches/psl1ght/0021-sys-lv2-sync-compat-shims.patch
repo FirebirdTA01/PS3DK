@@ -1,0 +1,396 @@
+Subject: [PATCH] ppu/include: Sony-name lv2 sync compat shims
+
+Tier-2 Sony-source compat scaffolding.  Sony reference SDK samples
+that include <sys/synchronization.h> + <sys/ppu_thread.h> +
+<sys/time_util.h> need PSL1GHT-side counterparts under those exact
+paths so source compiles unmodified.  PSL1GHT exposes the same lv2
+syscall surface but under different identifiers (sysCondCreate,
+sysThreadCreate, etc.) — these new headers bridge the names without
+duplicating the syscall machinery.
+
+Five small new headers:
+
+  cell/error.h               CELL_OK + CELL_ERROR_CAST.
+  sys/return_code.h          Sony-name forwarder to <cell/error.h>.
+  sys/synchronization.h      sys_event_flag_* lv2syscall wrappers
+                             (numbers verified against Sony's
+                             sys/syscall.h: 82/83/85/86/87/118/132/139)
+                             plus SYS_EVENT_FLAG_WAIT_* constants,
+                             sys_event_flag_attribute_t,
+                             sys_event_flag_attribute_initialize macro.
+                             Mutex/cond/sem/lwmutex Sony-name wrappers
+                             can be added as the next sample needs them.
+  sys/ppu_thread.h           Inline forwarders from sys_ppu_thread_*
+                             to PSL1GHT's sysThread* (cast args; same
+                             ABI on PPC64).  Defines
+                             SYS_PPU_THREAD_CREATE_JOINABLE etc.
+  sys/time_util.h            SYS_TIMEBASE_GET macro reading PowerPC
+                             TBU/TBL with the standard rollover loop.
+
+samples/hello-ppu-event-flag/ ports the PPU half of Sony's
+samples/sdk/lv2/event_flag/event_flag.ppu.c (master + 5 worker
+threads coordinating via two event flags).  SPU half stripped to
+keep scope contained — the PPU-PPU master/worker scenario alone
+exercises every syscall in the new <sys/synchronization.h>.
+__cntlzd → __builtin_clzll (GCC builtin, same insn).
+
+This unlocks the broader lv2-sample category for direct port without
+further per-sample header work — the next event_flag-using or
+threaded sample can `make` immediately.
+
+diff --git a/ppu/include/cell/error.h b/ppu/include/cell/error.h
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/ppu/include/cell/error.h
+@@ -0,0 +1,24 @@
++/*! \file cell/error.h
++ \brief Sony-SDK-source-compat shared error/return-code primitives.
++
++  Tiny header used by Sony reference samples and most cell headers.
++  CELL_OK is the canonical "no error" value (always 0); CELL_ERROR_CAST
++  forces a constant to int when used inside #define CELL_X_ERROR_Y forms
++  to keep the type stable in GCC under -Wsign-compare.
++*/
++
++#ifndef __PSL1GHT_CELL_ERROR_H__
++#define __PSL1GHT_CELL_ERROR_H__
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define CELL_OK                0
++#define CELL_ERROR_CAST(x)     ((int)(x))
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __PSL1GHT_CELL_ERROR_H__ */
+
+diff --git a/ppu/include/sys/return_code.h b/ppu/include/sys/return_code.h
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/ppu/include/sys/return_code.h
+@@ -0,0 +1,14 @@
++/*! \file sys/return_code.h
++ \brief Sony-SDK-source-compat return-code header.
++
++  Sony's reference SDK uses <sys/return_code.h> as the canonical entry
++  point for CELL_OK and the syscall return-code family.  We forward to
++  <cell/error.h> so both spellings work.
++*/
++
++#ifndef __PSL1GHT_SYS_RETURN_CODE_H__
++#define __PSL1GHT_SYS_RETURN_CODE_H__
++
++#include <cell/error.h>
++
++#endif /* __PSL1GHT_SYS_RETURN_CODE_H__ */
+
+diff --git a/ppu/include/sys/time_util.h b/ppu/include/sys/time_util.h
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/ppu/include/sys/time_util.h
+@@ -0,0 +1,37 @@
++/*! \file sys/time_util.h
++ \brief Sony-SDK-source-compat time-base read macro.
++
++  Reads the PowerPC TimeBase register pair into a 64-bit value with the
++  rollover-tolerant loop documented in the PowerPC ISA: read TBU, TBL, TBU
++  again; if TBU changed, retry.  Cost is ~3-4 cycles in the common case.
++*/
++
++#ifndef __PSL1GHT_SYS_TIME_UTIL_H__
++#define __PSL1GHT_SYS_TIME_UTIL_H__
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* SPR numbers for mfspr-based TimeBase read. */
++#define _SYS_TBL_SPR  268
++#define _SYS_TBU_SPR  269
++
++#define SYS_TIMEBASE_GET(_v)                                            \
++	do {                                                                \
++		uint32_t _tbu1, _tbl, _tbu2;                                    \
++		do {                                                            \
++			__asm__ volatile("mfspr %0,269" : "=r"(_tbu1));             \
++			__asm__ volatile("mfspr %0,268" : "=r"(_tbl));              \
++			__asm__ volatile("mfspr %0,269" : "=r"(_tbu2));             \
++		} while (_tbu1 != _tbu2);                                       \
++		(_v) = ((uint64_t)_tbu1 << 32) | (uint64_t)_tbl;                \
++	} while (0)
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __PSL1GHT_SYS_TIME_UTIL_H__ */
+
+diff --git a/ppu/include/sys/synchronization.h b/ppu/include/sys/synchronization.h
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/ppu/include/sys/synchronization.h
+@@ -0,0 +1,150 @@
++/*! \file sys/synchronization.h
++ \brief Sony-SDK-source-compat synchronisation primitives.
++
++  First cut: covers the event-flag surface needed to port Sony's
++  reference samples that include <sys/synchronization.h> and use
++  sys_event_flag_create / wait / set / clear / destroy / get / cancel /
++  trywait / attribute_initialize.
++
++  Mutex / cond / sem / lwmutex / lwcond bits are intentionally NOT
++  re-exported here yet — Sony's source uses them under sys_mutex_*,
++  sys_cond_*, sys_sem_* names while PSL1GHT exposes them as
++  sysMutex* / sysCond* / sysSem* under <sys/mutex.h> / <sys/cond.h> /
++  <sys/sem.h>.  Wrappers can be added here as the next sample needs
++  them.
++
++  Syscall numbers verified against reference/sony-sdk/.../sys/syscall.h:
++    SYS_EVENT_FLAG_CREATE     82
++    SYS_EVENT_FLAG_DESTROY    83
++    SYS_EVENT_FLAG_WAIT       85
++    SYS_EVENT_FLAG_TRYWAIT    86
++    SYS_EVENT_FLAG_SET        87
++    SYS_EVENT_FLAG_CLEAR     118
++    SYS_EVENT_FLAG_CANCEL    132
++    SYS_EVENT_FLAG_GET       139
++*/
++
++#ifndef __PSL1GHT_SYS_SYNCHRONIZATION_H__
++#define __PSL1GHT_SYS_SYNCHRONIZATION_H__
++
++#include <ppu-types.h>
++#include <ppu-lv2.h>
++#include <sys/return_code.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Common attribute / size constants shared with mutex / cond / sem. */
++#define SYS_SYNC_FIFO                  0x00001
++#define SYS_SYNC_PRIORITY              0x00002
++#define SYS_SYNC_PRIORITY_INHERIT      0x00003
++#define SYS_SYNC_RETRY                 0x00004
++#define SYS_SYNC_NOT_PROCESS_SHARED    0x00200
++#define SYS_SYNC_NOT_ADAPTIVE          0x02000
++#define SYS_SYNC_RECURSIVE             0x00010
++#define SYS_SYNC_NOT_RECURSIVE         0x00020
++#define SYS_SYNC_NAME_SIZE             8
++
++/* Event-flag wait modes (cellOS Lv-2 semantics). */
++#define SYS_EVENT_FLAG_WAIT_AND        0x000001
++#define SYS_EVENT_FLAG_WAIT_OR         0x000002
++#define SYS_EVENT_FLAG_WAIT_CLEAR      0x000010
++#define SYS_EVENT_FLAG_WAIT_CLEAR_ALL  0x000020
++
++/* Event-flag types (also used elsewhere in sys/event.h). */
++#define SYS_EVENT_FLAG_TYPE_BIT_PATTERN_VAR   1
++#define SYS_EVENT_FLAG_TYPE_BIT_PATTERN_FIX   2
++
++#define SYS_EVENT_FLAG_ID_INVALID      0xFFFFFFFFU
++
++/* No-timeout sentinel — passed to wait calls to block forever. */
++#define SYS_NO_TIMEOUT                 0ULL
++
++/* Protocol values for sys_event_flag_attribute_t.attr_protocol. */
++typedef u32 sys_protocol_t;
++
++typedef u32 sys_event_flag_t;
++
++typedef struct sys_event_flag_attribute {
++	sys_protocol_t  attr_protocol;
++	u32             type;
++	char            name[SYS_SYNC_NAME_SIZE];
++} sys_event_flag_attribute_t;
++
++/* Sony's macro initialiser — fills in sane defaults for both local
++ * (in-process) and inter-process event flags.  We default to the same
++ * "FIFO + bit-pattern variable + no name" Sony does. */
++#define sys_event_flag_attribute_initialize(_attr)         \
++	do {                                                   \
++		(_attr).attr_protocol = SYS_SYNC_FIFO;             \
++		(_attr).type = SYS_EVENT_FLAG_TYPE_BIT_PATTERN_VAR;\
++		(_attr).name[0] = '\0';                            \
++	} while (0)
++
++#define sys_event_flag_attribute_name_set(_attr_name, _name)            \
++	do {                                                                \
++		const char *_n = (_name);                                       \
++		int _i;                                                         \
++		for (_i = 0; _i < SYS_SYNC_NAME_SIZE - 1 && _n[_i] != '\0'; _i++) \
++			(_attr_name)[_i] = _n[_i];                                  \
++		(_attr_name)[_i] = '\0';                                        \
++	} while (0)
++
++LV2_SYSCALL sys_event_flag_create(sys_event_flag_t *id,
++                                  sys_event_flag_attribute_t *attr,
++                                  u64 init)
++{
++	lv2syscall3(82, (u64)id, (u64)attr, init);
++	return_to_user_prog(s32);
++}
++
++LV2_SYSCALL sys_event_flag_destroy(sys_event_flag_t id)
++{
++	lv2syscall1(83, id);
++	return_to_user_prog(s32);
++}
++
++LV2_SYSCALL sys_event_flag_wait(sys_event_flag_t id, u64 bitptn, u32 mode,
++                                u64 *result, u64 timeout_usec)
++{
++	lv2syscall5(85, id, bitptn, mode, (u64)result, timeout_usec);
++	return_to_user_prog(s32);
++}
++
++LV2_SYSCALL sys_event_flag_trywait(sys_event_flag_t id, u64 bitptn, u32 mode,
++                                   u64 *result)
++{
++	lv2syscall4(86, id, bitptn, mode, (u64)result);
++	return_to_user_prog(s32);
++}
++
++LV2_SYSCALL sys_event_flag_set(sys_event_flag_t id, u64 bitptn)
++{
++	lv2syscall2(87, id, bitptn);
++	return_to_user_prog(s32);
++}
++
++LV2_SYSCALL sys_event_flag_clear(sys_event_flag_t id, u64 bitptn)
++{
++	lv2syscall2(118, id, bitptn);
++	return_to_user_prog(s32);
++}
++
++LV2_SYSCALL sys_event_flag_cancel(sys_event_flag_t id, u32 *num)
++{
++	lv2syscall2(132, id, (u64)num);
++	return_to_user_prog(s32);
++}
++
++LV2_SYSCALL sys_event_flag_get(sys_event_flag_t id, u64 *flags)
++{
++	lv2syscall2(139, id, (u64)flags);
++	return_to_user_prog(s32);
++}
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __PSL1GHT_SYS_SYNCHRONIZATION_H__ */
+
+diff --git a/ppu/include/sys/ppu_thread.h b/ppu/include/sys/ppu_thread.h
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/ppu/include/sys/ppu_thread.h
+@@ -0,0 +1,97 @@
++/*! \file sys/ppu_thread.h
++ \brief Sony-SDK-source-compat PPU-thread API.
++
++  Forwarder header.  Sony's reference samples include <sys/ppu_thread.h>
++  and call sys_ppu_thread_create / join / exit / get_id / get_priority /
++  set_priority / yield / detach.  PSL1GHT exposes the same lv2 syscalls
++  under different identifiers (sysThreadCreate / sysThreadJoin / etc.)
++  in <sys/thread.h> and <lv2/thread.h>.  This header bridges the names.
++
++  Sony's `sys_ppu_thread_create` takes `void (*entry)(uint64_t)` and
++  `uint64_t arg`; PSL1GHT's `sysThreadCreate` takes `void (*entry)(void *)`
++  and `void *arg`.  Both have the same PPC64 ABI (first arg in r3,
++  pointer-and-uint64 are interchangeable on a 64-bit register), so the
++  forwarder casts both function- and arg-pointers freely.  Behaviour is
++  identical.
++*/
++
++#ifndef __PSL1GHT_SYS_PPU_THREAD_H__
++#define __PSL1GHT_SYS_PPU_THREAD_H__
++
++#include <stdint.h>
++#include <ppu-types.h>
++#include <sys/thread.h>
++#include <lv2/thread.h>
++#include <sys/return_code.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Flags accepted by sys_ppu_thread_create. */
++#define SYS_PPU_THREAD_CREATE_JOINABLE   0x0000000000000001ULL
++#define SYS_PPU_THREAD_CREATE_INTERRUPT  0x0000000000000002ULL
++
++#define SYS_PPU_THREAD_ID_INVALID        0xffffffffu
++
++typedef void (*sys_ppu_thread_entry_t)(uint64_t arg);
++
++static inline int sys_ppu_thread_create(sys_ppu_thread_t *thread_id,
++                                        sys_ppu_thread_entry_t entry,
++                                        uint64_t arg, int prio,
++                                        size_t stacksize, uint64_t flags,
++                                        const char *threadname)
++{
++	(void)flags; /* Sony's JOINABLE bit == PSL1GHT THREAD_JOINABLE bit (both 1). */
++	return (int)sysThreadCreate(thread_id,
++	                            (void (*)(void *))entry,
++	                            (void *)(uintptr_t)arg,
++	                            (s32)prio,
++	                            (u64)stacksize,
++	                            flags,
++	                            (char *)threadname);
++}
++
++static inline int sys_ppu_thread_join(sys_ppu_thread_t threadid, uint64_t *retval)
++{
++	return (int)sysThreadJoin(threadid, retval);
++}
++
++static inline void sys_ppu_thread_exit(uint64_t retval)
++{
++	sysThreadExit(retval);
++}
++
++static inline int sys_ppu_thread_get_id(sys_ppu_thread_t *threadid)
++{
++	return (int)sysThreadGetId(threadid);
++}
++
++static inline int sys_ppu_thread_get_priority(sys_ppu_thread_t threadid, int *prio)
++{
++	s32 p;
++	int rc = (int)sysThreadGetPriority(threadid, &p);
++	*prio = (int)p;
++	return rc;
++}
++
++static inline int sys_ppu_thread_set_priority(sys_ppu_thread_t threadid, int prio)
++{
++	return (int)sysThreadSetPriority(threadid, (s32)prio);
++}
++
++static inline int sys_ppu_thread_yield(void)
++{
++	return (int)sysThreadYield();
++}
++
++static inline int sys_ppu_thread_detach(sys_ppu_thread_t threadid)
++{
++	return (int)sysThreadDetach(threadid);
++}
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __PSL1GHT_SYS_PPU_THREAD_H__ */
