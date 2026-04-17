@@ -1,6 +1,7 @@
 library: cellSysmodule
 version: 1
 module: cellSysmodule
+archive_name: sysmodule
 exports:
 - name: cellSysmoduleFetchImage
   nid: '0x3c92be09'
