@@ -1,0 +1,53 @@
+library: gifdec
+version: 1
+module: gifdec
+exports:
+- name: cellGifDecClose
+  nid: '0x116a7da9'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_2.o
+- name: cellGifDecCreate
+  nid: '0xb60d42a5'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_9.o
+- name: cellGifDecDecodeData
+  nid: '0x44b1bc61'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_5.o
+- name: cellGifDecDestroy
+  nid: '0xe74b2cb1'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_11.o
+- name: cellGifDecExtCreate
+  nid: '0x4711cb7f'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_6.o
+- name: cellGifDecExtDecodeData
+  nid: '0x02e7e03e'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_1.o
+- name: cellGifDecExtOpen
+  nid: '0x17fb83c1'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_3.o
+- name: cellGifDecExtReadHeader
+  nid: '0xe53f91f2'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_10.o
+- name: cellGifDecExtSetParameter
+  nid: '0x95cae771'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_8.o
+- name: cellGifDecOpen
+  nid: '0x75745079'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_7.o
+- name: cellGifDecReadHeader
+  nid: '0xf0da95de'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_12.o
+- name: cellGifDecSetParameter
+  nid: '0x41a90dc4'
+  signature: ''
+  notes: extracted from _cellGifDec_0001_4.o
+imports: []

@@ -1,0 +1,425 @@
+library: http
+version: 1
+module: http
+exports:
+- name: cellHttpAddCookieWithClientId
+  nid: '0x1b5bdcc6'
+  signature: ''
+  notes: extracted from _cellHttp_0001_15.o
+- name: cellHttpClientAddHeader
+  nid: '0x4b33942a'
+  signature: ''
+  notes: extracted from _cellHttp_0001_39.o
+- name: cellHttpClientCloseAllConnections
+  nid: '0x2033b878'
+  signature: ''
+  notes: extracted from _cellHttp_0001_16.o
+- name: cellHttpClientCloseConnections
+  nid: '0x27f86d70'
+  signature: ''
+  notes: extracted from _cellHttp_0001_21.o
+- name: cellHttpClientDeleteHeader
+  nid: '0x617eec02'
+  signature: ''
+  notes: extracted from _cellHttp_0001_50.o
+- name: cellHttpClientGetAllHeaders
+  nid: '0x0d9c65be'
+  signature: ''
+  notes: extracted from _cellHttp_0001_6.o
+- name: cellHttpClientGetAuthenticationCacheStatus
+  nid: '0xfce39343'
+  signature: ''
+  notes: extracted from _cellHttp_0001_104.o
+- name: cellHttpClientGetAutoAuthentication
+  nid: '0x5980a293'
+  signature: ''
+  notes: extracted from _cellHttp_0001_48.o
+- name: cellHttpClientGetAutoRedirect
+  nid: '0x2960e309'
+  signature: ''
+  notes: extracted from _cellHttp_0001_22.o
+- name: cellHttpClientGetConnTimeout
+  nid: '0x14bfc765'
+  signature: ''
+  notes: extracted from _cellHttp_0001_13.o
+- name: cellHttpClientGetConnectionWaitStatus
+  nid: '0x431e1407'
+  signature: ''
+  notes: extracted from _cellHttp_0001_34.o
+- name: cellHttpClientGetConnectionWaitTimeout
+  nid: '0x1249c1d1'
+  signature: ''
+  notes: extracted from _cellHttp_0001_9.o
+- name: cellHttpClientGetCookieStatus
+  nid: '0xeb9c1e5e'
+  signature: ''
+  notes: extracted from _cellHttp_0001_100.o
+- name: cellHttpClientGetHeader
+  nid: '0xd1ec0b25'
+  signature: ''
+  notes: extracted from _cellHttp_0001_88.o
+- name: cellHttpClientGetKeepAlive
+  nid: '0x591c21a8'
+  signature: ''
+  notes: extracted from _cellHttp_0001_46.o
+- name: cellHttpClientGetMinSslVersion
+  nid: '0x98ce061c'
+  signature: ''
+  notes: extracted from _cellHttp_0001_69.o
+- name: cellHttpClientGetPerHostKeepAliveMax
+  nid: '0x46bcc9ff'
+  signature: ''
+  notes: extracted from _cellHttp_0001_37.o
+- name: cellHttpClientGetPerHostPoolSize
+  nid: '0xffc74003'
+  signature: ''
+  notes: extracted from _cellHttp_0001_105.o
+- name: cellHttpClientGetPerPipelineMax
+  nid: '0xd06c90a4'
+  signature: ''
+  notes: extracted from _cellHttp_0001_87.o
+- name: cellHttpClientGetPipeline
+  nid: '0x2a1f28f6'
+  signature: ''
+  notes: extracted from _cellHttp_0001_24.o
+- name: cellHttpClientGetProxy
+  nid: '0x4d40cf98'
+  signature: ''
+  notes: extracted from _cellHttp_0001_40.o
+- name: cellHttpClientGetRecvBufferSize
+  nid: '0x130150ea'
+  signature: ''
+  notes: extracted from _cellHttp_0001_10.o
+- name: cellHttpClientGetRecvTimeout
+  nid: '0xba78e51f'
+  signature: ''
+  notes: extracted from _cellHttp_0001_81.o
+- name: cellHttpClientGetResponseBufferMax
+  nid: '0x6884cdb7'
+  signature: ''
+  notes: extracted from _cellHttp_0001_55.o
+- name: cellHttpClientGetSendBufferSize
+  nid: '0xd3fcd411'
+  signature: ''
+  notes: extracted from _cellHttp_0001_90.o
+- name: cellHttpClientGetSendTimeout
+  nid: '0x271a0b06'
+  signature: ''
+  notes: extracted from _cellHttp_0001_20.o
+- name: cellHttpClientGetSslVersion
+  nid: '0xccf57336'
+  signature: ''
+  notes: extracted from _cellHttp_0001_86.o
+- name: cellHttpClientGetTotalPoolSize
+  nid: '0x070f1020'
+  signature: ''
+  notes: extracted from _cellHttp_0001_2.o
+- name: cellHttpClientGetUserAgent
+  nid: '0xee05b0c1'
+  signature: ''
+  notes: extracted from _cellHttp_0001_102.o
+- name: cellHttpClientGetVersion
+  nid: '0xdc405507'
+  signature: ''
+  notes: extracted from _cellHttp_0001_95.o
+- name: cellHttpClientPollConnections
+  nid: '0xadc0a4b2'
+  signature: ''
+  notes: extracted from _cellHttp_0001_76.o
+- name: cellHttpClientSetAuthenticationCacheStatus
+  nid: '0x6eed4999'
+  signature: ''
+  notes: extracted from _cellHttp_0001_57.o
+- name: cellHttpClientSetAuthenticationCallback
+  nid: '0x660d42a9'
+  signature: ''
+  notes: extracted from _cellHttp_0001_54.o
+- name: cellHttpClientSetAutoAuthentication
+  nid: '0x8eaf47a3'
+  signature: ''
+  notes: extracted from _cellHttp_0001_64.o
+- name: cellHttpClientSetAutoRedirect
+  nid: '0x211d8ba3'
+  signature: ''
+  notes: extracted from _cellHttp_0001_17.o
+- name: cellHttpClientSetConnTimeout
+  nid: '0xd7471088'
+  signature: ''
+  notes: extracted from _cellHttp_0001_92.o
+- name: cellHttpClientSetConnectionWaitStatus
+  nid: '0x88b71a4c'
+  signature: ''
+  notes: extracted from _cellHttp_0001_60.o
+- name: cellHttpClientSetConnectionWaitTimeout
+  nid: '0xb7cb7d05'
+  signature: ''
+  notes: extracted from _cellHttp_0001_80.o
+- name: cellHttpClientSetCookieRecvCallback
+  nid: '0x13fe767b'
+  signature: ''
+  notes: extracted from _cellHttp_0001_12.o
+- name: cellHttpClientSetCookieSendCallback
+  nid: '0x4d915204'
+  signature: ''
+  notes: extracted from _cellHttp_0001_41.o
+- name: cellHttpClientSetCookieStatus
+  nid: '0x434419c8'
+  signature: ''
+  notes: extracted from _cellHttp_0001_35.o
+- name: cellHttpClientSetHeader
+  nid: '0xa34c4b6f'
+  signature: ''
+  notes: extracted from _cellHttp_0001_71.o
+- name: cellHttpClientSetKeepAlive
+  nid: '0x5d473170'
+  signature: ''
+  notes: extracted from _cellHttp_0001_49.o
+- name: cellHttpClientSetMinSslVersion
+  nid: '0xe6c7d333'
+  signature: ''
+  notes: extracted from _cellHttp_0001_98.o
+- name: cellHttpClientSetPerHostKeepAliveMax
+  nid: '0x595adee9'
+  signature: ''
+  notes: extracted from _cellHttp_0001_47.o
+- name: cellHttpClientSetPerHostPoolSize
+  nid: '0xab1c55ab'
+  signature: ''
+  notes: extracted from _cellHttp_0001_73.o
+- name: cellHttpClientSetPerPipelineMax
+  nid: '0xdc7ed599'
+  signature: ''
+  notes: extracted from _cellHttp_0001_96.o
+- name: cellHttpClientSetPipeline
+  nid: '0x296a46cf'
+  signature: ''
+  notes: extracted from _cellHttp_0001_23.o
+- name: cellHttpClientSetProxy
+  nid: '0xd7d3cd5d'
+  signature: ''
+  notes: extracted from _cellHttp_0001_93.o
+- name: cellHttpClientSetRecvBufferSize
+  nid: '0xbf6e3659'
+  signature: ''
+  notes: extracted from _cellHttp_0001_84.o
+- name: cellHttpClientSetRecvTimeout
+  nid: '0x224e1610'
+  signature: ''
+  notes: extracted from _cellHttp_0001_18.o
+- name: cellHttpClientSetRedirectCallback
+  nid: '0x473cd9f1'
+  signature: ''
+  notes: extracted from _cellHttp_0001_38.o
+- name: cellHttpClientSetResponseBufferMax
+  nid: '0xadd66b5c'
+  signature: ''
+  notes: extracted from _cellHttp_0001_77.o
+- name: cellHttpClientSetSendBufferSize
+  nid: '0xbb6c0eb2'
+  signature: ''
+  notes: extracted from _cellHttp_0001_82.o
+- name: cellHttpClientSetSendTimeout
+  nid: '0x71714cdc'
+  signature: ''
+  notes: extracted from _cellHttp_0001_58.o
+- name: cellHttpClientSetSslCallback
+  nid: '0x1395d8d1'
+  signature: ''
+  notes: extracted from _cellHttp_0001_11.o
+- name: cellHttpClientSetSslClientCertificate
+  nid: '0xd8352a40'
+  signature: ''
+  notes: extracted from _cellHttp_0001_94.o
+- name: cellHttpClientSetSslIdDestroyCallback
+  nid: '0x7313c78d'
+  signature: ''
+  notes: extracted from _cellHttp_0001_59.o
+- name: cellHttpClientSetSslVersion
+  nid: '0x65691795'
+  signature: ''
+  notes: extracted from _cellHttp_0001_53.o
+- name: cellHttpClientSetTotalPoolSize
+  nid: '0x8aa5fcd3'
+  signature: ''
+  notes: extracted from _cellHttp_0001_62.o
+- name: cellHttpClientSetTransactionStateCallback
+  nid: '0xb6feb84b'
+  signature: ''
+  notes: extracted from _cellHttp_0001_79.o
+- name: cellHttpClientSetUserAgent
+  nid: '0xcac9fc34'
+  signature: ''
+  notes: extracted from _cellHttp_0001_85.o
+- name: cellHttpClientSetVersion
+  nid: '0x40547d8b'
+  signature: ''
+  notes: extracted from _cellHttp_0001_31.o
+- name: cellHttpCookieExportWithClientId
+  nid: '0xf972c733'
+  signature: ''
+  notes: extracted from _cellHttp_0001_103.o
+- name: cellHttpCookieImportWithClientId
+  nid: '0x0d846d63'
+  signature: ''
+  notes: extracted from _cellHttp_0001_4.o
+- name: cellHttpCreateClient
+  nid: '0x4e4ee53a'
+  signature: ''
+  notes: extracted from _cellHttp_0001_42.o
+- name: cellHttpCreateTransaction
+  nid: '0x052a80d9'
+  signature: ''
+  notes: extracted from _cellHttp_0001_1.o
+- name: cellHttpDestroyClient
+  nid: '0x980855ac'
+  signature: ''
+  notes: extracted from _cellHttp_0001_68.o
+- name: cellHttpDestroyTransaction
+  nid: '0x32f5cae2'
+  signature: ''
+  notes: extracted from _cellHttp_0001_28.o
+- name: cellHttpEnd
+  nid: '0xd276ff1f'
+  signature: ''
+  notes: extracted from _cellHttp_0001_89.o
+- name: cellHttpEndCookie
+  nid: '0x61b2bade'
+  signature: ''
+  notes: extracted from _cellHttp_0001_51.o
+- name: cellHttpGetProxy
+  nid: '0x2a87603a'
+  signature: ''
+  notes: extracted from _cellHttp_0001_26.o
+- name: cellHttpInit
+  nid: '0x250c386c'
+  signature: ''
+  notes: extracted from _cellHttp_0001_19.o
+- name: cellHttpInitCookie
+  nid: '0x9638f766'
+  signature: ''
+  notes: extracted from _cellHttp_0001_67.o
+- name: cellHttpRecvResponse
+  nid: '0x61c90691'
+  signature: ''
+  notes: extracted from _cellHttp_0001_52.o
+- name: cellHttpRequestAddHeader
+  nid: '0xed993147'
+  signature: ''
+  notes: extracted from _cellHttp_0001_101.o
+- name: cellHttpRequestDeleteHeader
+  nid: '0x16214411'
+  signature: ''
+  notes: extracted from _cellHttp_0001_14.o
+- name: cellHttpRequestGetAllHeaders
+  nid: '0x42205fe0'
+  signature: ''
+  notes: extracted from _cellHttp_0001_33.o
+- name: cellHttpRequestGetChunkedTransferStatus
+  nid: '0x4137a1f6'
+  signature: ''
+  notes: extracted from _cellHttp_0001_32.o
+- name: cellHttpRequestGetContentLength
+  nid: '0x958323cf'
+  signature: ''
+  notes: extracted from _cellHttp_0001_66.o
+- name: cellHttpRequestGetHeader
+  nid: '0x0b9fea5f'
+  signature: ''
+  notes: extracted from _cellHttp_0001_3.o
+- name: cellHttpRequestSetChunkedTransferStatus
+  nid: '0x8e3f7ee1'
+  signature: ''
+  notes: extracted from _cellHttp_0001_63.o
+- name: cellHttpRequestSetContentLength
+  nid: '0xaf73a64e'
+  signature: ''
+  notes: extracted from _cellHttp_0001_78.o
+- name: cellHttpRequestSetHeader
+  nid: '0x54f2a4de'
+  signature: ''
+  notes: extracted from _cellHttp_0001_45.o
+- name: cellHttpResponseGetAllHeaders
+  nid: '0xbea17389'
+  signature: ''
+  notes: extracted from _cellHttp_0001_83.o
+- name: cellHttpResponseGetContentLength
+  nid: '0x464ff889'
+  signature: ''
+  notes: extracted from _cellHttp_0001_36.o
+- name: cellHttpResponseGetHeader
+  nid: '0x4f5d8d20'
+  signature: ''
+  notes: extracted from _cellHttp_0001_43.o
+- name: cellHttpResponseGetStatusCode
+  nid: '0x10d0d7fc'
+  signature: ''
+  notes: extracted from _cellHttp_0001_8.o
+- name: cellHttpResponseGetStatusLine
+  nid: '0x6a81b5e4'
+  signature: ''
+  notes: extracted from _cellHttp_0001_56.o
+- name: cellHttpSendRequest
+  nid: '0xa755b005'
+  signature: ''
+  notes: extracted from _cellHttp_0001_72.o
+- name: cellHttpSessionCookieFlush
+  nid: '0xad6a2e5b'
+  signature: ''
+  notes: extracted from _cellHttp_0001_75.o
+- name: cellHttpSetProxy
+  nid: '0x0d896b97'
+  signature: ''
+  notes: extracted from _cellHttp_0001_5.o
+- name: cellHttpTransactionAbortConnection
+  nid: '0x2d52848b'
+  signature: ''
+  notes: extracted from _cellHttp_0001_27.o
+- name: cellHttpTransactionCloseConnection
+  nid: '0xa0d9223c'
+  signature: ''
+  notes: extracted from _cellHttp_0001_70.o
+- name: cellHttpTransactionGetSslCipherBits
+  nid: '0x38954133'
+  signature: ''
+  notes: extracted from _cellHttp_0001_30.o
+- name: cellHttpTransactionGetSslCipherId
+  nid: '0x34061e49'
+  signature: ''
+  notes: extracted from _cellHttp_0001_29.o
+- name: cellHttpTransactionGetSslCipherName
+  nid: '0x895c604c'
+  signature: ''
+  notes: extracted from _cellHttp_0001_61.o
+- name: cellHttpTransactionGetSslCipherString
+  nid: '0xe3c424b3'
+  signature: ''
+  notes: extracted from _cellHttp_0001_97.o
+- name: cellHttpTransactionGetSslCipherVersion
+  nid: '0x93e938e5'
+  signature: ''
+  notes: extracted from _cellHttp_0001_65.o
+- name: cellHttpTransactionGetSslId
+  nid: '0x2a78ff04'
+  signature: ''
+  notes: extracted from _cellHttp_0001_25.o
+- name: cellHttpTransactionGetSslVersion
+  nid: '0xad1c6f02'
+  signature: ''
+  notes: extracted from _cellHttp_0001_74.o
+- name: cellHttpTransactionGetUri
+  nid: '0x0ef17399'
+  signature: ''
+  notes: extracted from _cellHttp_0001_7.o
+- name: cellHttpTransactionReleaseConnection
+  nid: '0xd47cc666'
+  signature: ''
+  notes: extracted from _cellHttp_0001_91.o
+- name: cellHttpsEnd
+  nid: '0xe6d4202f'
+  signature: ''
+  notes: extracted from _cellHttp_0001_99.o
+- name: cellHttpsInit
+  nid: '0x522180bc'
+  signature: ''
+  notes: extracted from _cellHttp_0001_44.o
+imports: []

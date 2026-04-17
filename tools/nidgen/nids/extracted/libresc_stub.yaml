@@ -1,0 +1,93 @@
+library: resc
+version: 1
+module: resc
+exports:
+- name: cellRescAdjustAspectRatio
+  nid: '0x22ae06d8'
+  signature: ''
+  notes: extracted from _cellResc_0001_8.o
+- name: cellRescCreateInterlaceTable
+  nid: '0xe0cef79e'
+  signature: ''
+  notes: extracted from _cellResc_0001_22.o
+- name: cellRescExit
+  nid: '0x2ea3061e'
+  signature: ''
+  notes: extracted from _cellResc_0001_11.o
+- name: cellRescGcmSurface2RescSrc
+  nid: '0x01220224'
+  signature: ''
+  notes: extracted from _cellResc_0001_1.o
+- name: cellRescGetBufferSize
+  nid: '0x5a338cdb'
+  signature: ''
+  notes: extracted from _cellResc_0001_14.o
+- name: cellRescGetFlipStatus
+  nid: '0xc47c5c22'
+  signature: ''
+  notes: extracted from _cellResc_0001_19.o
+- name: cellRescGetLastFlipTime
+  nid: '0x66f5e388'
+  signature: ''
+  notes: extracted from _cellResc_0001_15.o
+- name: cellRescGetNumColorBuffers
+  nid: '0x0a2069c7'
+  signature: ''
+  notes: extracted from _cellResc_0001_2.o
+- name: cellRescGetRegisterCount
+  nid: '0x1dd3c4cd'
+  signature: ''
+  notes: extracted from _cellResc_0001_7.o
+- name: cellRescInit
+  nid: '0x516ee89e'
+  signature: ''
+  notes: extracted from _cellResc_0001_13.o
+- name: cellRescResetFlipStatus
+  nid: '0x129922a0'
+  signature: ''
+  notes: extracted from _cellResc_0001_5.o
+- name: cellRescSetBufferAddress
+  nid: '0x8107277c'
+  signature: ''
+  notes: extracted from _cellResc_0001_18.o
+- name: cellRescSetConvertAndFlip
+  nid: '0x25c107e6'
+  signature: ''
+  notes: extracted from _cellResc_0001_10.o
+- name: cellRescSetDisplayMode
+  nid: '0x23134710'
+  signature: ''
+  notes: extracted from _cellResc_0001_9.o
+- name: cellRescSetDsts
+  nid: '0x10db5b1a'
+  signature: ''
+  notes: extracted from _cellResc_0001_4.o
+- name: cellRescSetFlipHandler
+  nid: '0x2ea94661'
+  signature: ''
+  notes: extracted from _cellResc_0001_12.o
+- name: cellRescSetPalInterpolateDropFlexRatio
+  nid: '0x19a2a967'
+  signature: ''
+  notes: extracted from _cellResc_0001_6.o
+- name: cellRescSetRegisterCount
+  nid: '0x7af8a37f'
+  signature: ''
+  notes: extracted from _cellResc_0001_17.o
+- name: cellRescSetSrc
+  nid: '0x6cd0f95f'
+  signature: ''
+  notes: extracted from _cellResc_0001_16.o
+- name: cellRescSetVBlankHandler
+  nid: '0xd3758645'
+  signature: ''
+  notes: extracted from _cellResc_0001_21.o
+- name: cellRescSetWaitFlip
+  nid: '0x0d3c22ce'
+  signature: ''
+  notes: extracted from _cellResc_0001_3.o
+- name: cellRescVideoOutResolutionId2RescBufferMode
+  nid: '0xd1ca0503'
+  signature: ''
+  notes: extracted from _cellResc_0001_20.o
+imports: []

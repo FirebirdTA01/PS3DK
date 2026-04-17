@@ -1,0 +1,21 @@
+library: ovis
+version: 1
+module: ovis
+exports:
+- name: cellOvisFixSpuSegments
+  nid: '0xce6cb776'
+  signature: ''
+  notes: extracted from _cellOvis_0001_4.o
+- name: cellOvisGetOverlayTableSize
+  nid: '0x82f294b2'
+  signature: ''
+  notes: extracted from _cellOvis_0001_2.o
+- name: cellOvisInitializeOverlayTable
+  nid: '0xa876c911'
+  signature: ''
+  notes: extracted from _cellOvis_0001_3.o
+- name: cellOvisInvalidateOverlappedSegments
+  nid: '0x629ba0c0'
+  signature: ''
+  notes: extracted from _cellOvis_0001_1.o
+imports: []

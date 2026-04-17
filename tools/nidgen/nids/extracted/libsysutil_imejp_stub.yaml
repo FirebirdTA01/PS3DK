@@ -1,0 +1,169 @@
+library: sysutil_imejp
+version: 1
+module: sysutil_imejp
+exports:
+- name: cellImeJpAllConfirm
+  nid: '0x7189430b'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_20.o
+- name: cellImeJpAllConvertCancel
+  nid: '0xcbbc20b7'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_33.o
+- name: cellImeJpAllDeleteConvertString
+  nid: '0x6319eda3'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_17.o
+- name: cellImeJpAllowExtensionCharacters
+  nid: '0x8ff02267'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_25.o
+- name: cellImeJpBackspaceWord
+  nid: '0xaa1d1f57'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_26.o
+- name: cellImeJpClose
+  nid: '0x46d1234a'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_12.o
+- name: cellImeJpConfirmPrediction
+  nid: '0xeede898c'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_39.o
+- name: cellImeJpConvertBackward
+  nid: '0xc2bb48bc'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_31.o
+- name: cellImeJpConvertCancel
+  nid: '0xeae879dc'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_38.o
+- name: cellImeJpConvertForward
+  nid: '0x1e29103b'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_5.o
+- name: cellImeJpCurrentPartConfirm
+  nid: '0x7a18c2b9'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_22.o
+- name: cellImeJpDeleteWord
+  nid: '0x72257652'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_21.o
+- name: cellImeJpEnterChar
+  nid: '0x6ccbe3d6'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_19.o
+- name: cellImeJpEnterCharExt
+  nid: '0x5b6ada55'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_14.o
+- name: cellImeJpEnterString
+  nid: '0x441a1c2b'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_10.o
+- name: cellImeJpEnterStringExt
+  nid: '0x6298b55a'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_16.o
+- name: cellImeJpExtendConvertArea
+  nid: '0x37961cc1'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_9.o
+- name: cellImeJpGetCandidateList
+  nid: '0xe4cc15ba'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_35.o
+- name: cellImeJpGetCandidateListSize
+  nid: '0xc4796a45'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_32.o
+- name: cellImeJpGetCandidateSelect
+  nid: '0x177bd218'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_2.o
+- name: cellImeJpGetConfirmString
+  nid: '0xd3fc3606'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_34.o
+- name: cellImeJpGetConfirmYomiString
+  nid: '0x89f8a567'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_23.o
+- name: cellImeJpGetConvertString
+  nid: '0xf91abda3'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_41.o
+- name: cellImeJpGetConvertYomiString
+  nid: '0xea2d4881'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_37.o
+- name: cellImeJpGetFocusLength
+  nid: '0x5f5b3227'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_15.o
+- name: cellImeJpGetFocusTop
+  nid: '0x0e363ae7'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_1.o
+- name: cellImeJpGetPredictList
+  nid: '0x1986f2cd'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_3.o
+- name: cellImeJpGetStatus
+  nid: '0x66c6cc78'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_18.o
+- name: cellImeJpModeCaretLeft
+  nid: '0xe76c9700'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_36.o
+- name: cellImeJpModeCaretRight
+  nid: '0xac6693d8'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_28.o
+- name: cellImeJpMoveFocusClause
+  nid: '0x1e411261'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_6.o
+- name: cellImeJpOpen
+  nid: '0x44608862'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_11.o
+- name: cellImeJpOpen2
+  nid: '0x47b43dd4'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_13.o
+- name: cellImeJpOpen3
+  nid: '0x1b119958'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_4.o
+- name: cellImeJpPostConvert
+  nid: '0x8bb41f47'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_24.o
+- name: cellImeJpReset
+  nid: '0x36d38701'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_8.o
+- name: cellImeJpSetFixInputMode
+  nid: '0xc1786c81'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_30.o
+- name: cellImeJpSetInputCharType
+  nid: '0xf5992ec8'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_40.o
+- name: cellImeJpSetKanaInputMode
+  nid: '0x24e9d8fc'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_7.o
+- name: cellImeJpShortenConvertArea
+  nid: '0xaa2a3287'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_27.o
+- name: cellImeJpTemporalConfirm
+  nid: '0xbd679cc1'
+  signature: ''
+  notes: extracted from _cellImeJpUtility_0001_29.o
+imports: []

@@ -1,0 +1,25 @@
+library: vpost
+version: 1
+module: vpost
+exports:
+- name: cellVpostClose
+  nid: '0x10ef39f6'
+  signature: ''
+  notes: extracted from _cellVpost_0001_1.o
+- name: cellVpostExec
+  nid: '0xabb8cc3d'
+  signature: ''
+  notes: extracted from _cellVpost_0001_4.o
+- name: cellVpostOpen
+  nid: '0xcd33f3e2'
+  signature: ''
+  notes: extracted from _cellVpost_0001_5.o
+- name: cellVpostOpenEx
+  nid: '0x40524325'
+  signature: ''
+  notes: extracted from _cellVpost_0001_2.o
+- name: cellVpostQueryAttr
+  nid: '0x95e788c3'
+  signature: ''
+  notes: extracted from _cellVpost_0001_3.o
+imports: []

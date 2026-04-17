@@ -1,0 +1,2017 @@
+library: m
+version: 1
+module: m
+exports:
+- name: _Atan
+  nid: '0xc7369fce'
+  signature: ''
+  notes: extracted from _sys_libm_0001_383.o
+- name: _Caddcc
+  nid: '0x4ab22a63'
+  signature: ''
+  notes: extracted from _sys_libm_0001_174.o
+- name: _Caddcr
+  nid: '0x266d2473'
+  signature: ''
+  notes: extracted from _sys_libm_0001_79.o
+- name: _Cbuild
+  nid: '0xa8d180e8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_334.o
+- name: _Cdivcc
+  nid: '0xeac62795'
+  signature: ''
+  notes: extracted from _sys_libm_0001_464.o
+- name: _Cdivcr
+  nid: '0xfa765d42'
+  signature: ''
+  notes: extracted from _sys_libm_0001_491.o
+- name: _Cmulcc
+  nid: '0xcac167a5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_399.o
+- name: _Cmulcr
+  nid: '0x1498a072'
+  signature: ''
+  notes: extracted from _sys_libm_0001_47.o
+- name: _Cosh
+  nid: '0x7d6191d0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_264.o
+- name: _Csubcc
+  nid: '0x315673f6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_98.o
+- name: _Csubcr
+  nid: '0xee0db701'
+  signature: ''
+  notes: extracted from _sys_libm_0001_472.o
+- name: _Dclass
+  nid: '0x3eeedb0e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_138.o
+- name: _Dint
+  nid: '0xad17e787'
+  signature: ''
+  notes: extracted from _sys_libm_0001_341.o
+- name: _Dsign
+  nid: '0xee303936'
+  signature: ''
+  notes: extracted from _sys_libm_0001_474.o
+- name: _Dtest
+  nid: '0xb94b9d13'
+  signature: ''
+  notes: extracted from _sys_libm_0001_362.o
+- name: _Erfc
+  nid: '0x0cf9b8bd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_32.o
+- name: _Exp
+  nid: '0xdfd41734'
+  signature: ''
+  notes: extracted from _sys_libm_0001_441.o
+- name: _FAtan
+  nid: '0xf16568af'
+  signature: ''
+  notes: extracted from _sys_libm_0001_478.o
+- name: _FCaddcc
+  nid: '0x5bfd37be'
+  signature: ''
+  notes: extracted from _sys_libm_0001_197.o
+- name: _FCaddcr
+  nid: '0xd70df92a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_423.o
+- name: _FCbuild
+  nid: '0x01ecef7d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_9.o
+- name: _FCdivcc
+  nid: '0x70f71871'
+  signature: ''
+  notes: extracted from _sys_libm_0001_236.o
+- name: _FCdivcr
+  nid: '0x33f27f25'
+  signature: ''
+  notes: extracted from _sys_libm_0001_106.o
+- name: _FCmulcc
+  nid: '0x63bbdfa6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_204.o
+- name: _FCmulcr
+  nid: '0x241f9337'
+  signature: ''
+  notes: extracted from _sys_libm_0001_75.o
+- name: _FCosh
+  nid: '0x2e69bb2a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_95.o
+- name: _FCsubcc
+  nid: '0x95dfecb1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_302.o
+- name: _FCsubcr
+  nid: '0x6ef6b083'
+  signature: ''
+  notes: extracted from _sys_libm_0001_229.o
+- name: _FDclass
+  nid: '0x007854f4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_3.o
+- name: _FDint
+  nid: '0x48d462a9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_170.o
+- name: _FDsign
+  nid: '0xa8c16038'
+  signature: ''
+  notes: extracted from _sys_libm_0001_333.o
+- name: _FDtest
+  nid: '0x9232baea'
+  signature: ''
+  notes: extracted from _sys_libm_0001_296.o
+- name: _FErfc
+  nid: '0xfbe88922'
+  signature: ''
+  notes: extracted from _sys_libm_0001_497.o
+- name: _FExp
+  nid: '0x05f1dc9e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_19.o
+- name: _FFpcomp
+  nid: '0xda31fc5d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_433.o
+- name: _FHypot
+  nid: '0x9616e336'
+  signature: ''
+  notes: extracted from _sys_libm_0001_304.o
+- name: _FLgamma
+  nid: '0xad5d3e57'
+  signature: ''
+  notes: extracted from _sys_libm_0001_343.o
+- name: _FLog
+  nid: '0x71293b71'
+  signature: ''
+  notes: extracted from _sys_libm_0001_237.o
+- name: _FPoly
+  nid: '0x6fcc1e27'
+  signature: ''
+  notes: extracted from _sys_libm_0001_232.o
+- name: _FSin
+  nid: '0xb5e28191'
+  signature: ''
+  notes: extracted from _sys_libm_0001_357.o
+- name: _FSinh
+  nid: '0xccc66f11'
+  signature: ''
+  notes: extracted from _sys_libm_0001_403.o
+- name: _FTgamma
+  nid: '0x418036e3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_149.o
+- name: _Feraise
+  nid: '0x003395d9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_1.o
+- name: _Force_raise
+  nid: '0xe5d2293f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_453.o
+- name: _Fpcomp
+  nid: '0x790c53bd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_257.o
+- name: _Hypot
+  nid: '0xd28ef6dd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_410.o
+- name: _LAtan
+  nid: '0x89d1d168'
+  signature: ''
+  notes: extracted from _sys_libm_0001_280.o
+- name: _LCaddcc
+  nid: '0xd5d38552'
+  signature: ''
+  notes: extracted from _sys_libm_0001_421.o
+- name: _LCaddcr
+  nid: '0x0d86295d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_33.o
+- name: _LCbuild
+  nid: '0x07f400e3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_22.o
+- name: _LCdivcc
+  nid: '0x1be996cc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_61.o
+- name: _LCdivcr
+  nid: '0xaaa270dc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_337.o
+- name: _LCmulcc
+  nid: '0xfffe79bf'
+  signature: ''
+  notes: extracted from _sys_libm_0001_503.o
+- name: _LCmulcr
+  nid: '0xe9ac8223'
+  signature: ''
+  notes: extracted from _sys_libm_0001_461.o
+- name: _LCosh
+  nid: '0xad3a093d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_342.o
+- name: _LCsubcc
+  nid: '0x0f721a9d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_38.o
+- name: _LCsubcr
+  nid: '0x81daf880'
+  signature: ''
+  notes: extracted from _sys_libm_0001_269.o
+- name: _LDclass
+  nid: '0x6b6ab2a9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_222.o
+- name: _LDint
+  nid: '0xb412a8dc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_351.o
+- name: _LDsign
+  nid: '0x33e5929b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_105.o
+- name: _LDtest
+  nid: '0x3c616743'
+  signature: ''
+  notes: extracted from _sys_libm_0001_128.o
+- name: _LErfc
+  nid: '0x5ee37927'
+  signature: ''
+  notes: extracted from _sys_libm_0001_200.o
+- name: _LExp
+  nid: '0x4111b546'
+  signature: ''
+  notes: extracted from _sys_libm_0001_144.o
+- name: _LFpcomp
+  nid: '0xc7b45a19'
+  signature: ''
+  notes: extracted from _sys_libm_0001_385.o
+- name: _LHypot
+  nid: '0x947ae18e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_300.o
+- name: _LLgamma
+  nid: '0xb348c5c2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_350.o
+- name: _LLog
+  nid: '0x1d35bfe4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_63.o
+- name: _LPoly
+  nid: '0xe584836c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_450.o
+- name: _LSin
+  nid: '0xa2c81938'
+  signature: ''
+  notes: extracted from _sys_libm_0001_324.o
+- name: _LSinh
+  nid: '0x1bcdeb47'
+  signature: ''
+  notes: extracted from _sys_libm_0001_60.o
+- name: _LTgamma
+  nid: '0x8bd1deb2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_282.o
+- name: _Lgamma
+  nid: '0xafcfdad7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_346.o
+- name: _Log
+  nid: '0xca463458'
+  signature: ''
+  notes: extracted from _sys_libm_0001_397.o
+- name: _Poly
+  nid: '0x3f701e78'
+  signature: ''
+  notes: extracted from _sys_libm_0001_140.o
+- name: _Sin
+  nid: '0x742f12b4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_245.o
+- name: _Sinh
+  nid: '0xd612fa16'
+  signature: ''
+  notes: extracted from _sys_libm_0001_422.o
+- name: _Tgamma
+  nid: '0xb4f4513e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_353.o
+- name: _acosf4
+  nid: '0x9fded78a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_321.o
+- name: _acosf4fast
+  nid: '0x6b660894'
+  signature: ''
+  notes: extracted from _sys_libm_0001_221.o
+- name: _asinf4
+  nid: '0x0e53319f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_34.o
+- name: _asinf4fast
+  nid: '0x14208b00'
+  signature: ''
+  notes: extracted from _sys_libm_0001_46.o
+- name: _atan2f4
+  nid: '0xc90f4bbc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_390.o
+- name: _atan2f4fast
+  nid: '0xec7da0c8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_468.o
+- name: _atanf4
+  nid: '0x76e639ec'
+  signature: ''
+  notes: extracted from _sys_libm_0001_252.o
+- name: _atanf4fast
+  nid: '0x70357b12'
+  signature: ''
+  notes: extracted from _sys_libm_0001_233.o
+- name: _cbrtf4
+  nid: '0x3ec9de23'
+  signature: ''
+  notes: extracted from _sys_libm_0001_137.o
+- name: _cbrtf4fast
+  nid: '0xf3bd7d08'
+  signature: ''
+  notes: extracted from _sys_libm_0001_481.o
+- name: _ceilf4
+  nid: '0x3d901a10'
+  signature: ''
+  notes: extracted from _sys_libm_0001_132.o
+- name: _copysignf4
+  nid: '0xa0160c30'
+  signature: ''
+  notes: extracted from _sys_libm_0001_322.o
+- name: _cosf4
+  nid: '0x0bb036a6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_28.o
+- name: _cosf4fast
+  nid: '0xcb6a147e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_401.o
+- name: _divf4
+  nid: '0x9245e01b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_297.o
+- name: _divf4fast
+  nid: '0x71f2bc56'
+  signature: ''
+  notes: extracted from _sys_libm_0001_239.o
+- name: _exp2f4
+  nid: '0x22c3e308'
+  signature: ''
+  notes: extracted from _sys_libm_0001_72.o
+- name: _exp2f4fast
+  nid: '0x4875601d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_167.o
+- name: _expf4
+  nid: '0xb8aa984e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_361.o
+- name: _expf4fast
+  nid: '0xe3e379b8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_449.o
+- name: _expm1f4
+  nid: '0x60e9ff3c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_201.o
+- name: _expm1f4fast
+  nid: '0x398483aa'
+  signature: ''
+  notes: extracted from _sys_libm_0001_122.o
+- name: _f_ceilf
+  nid: '0x9e289062'
+  signature: ''
+  notes: extracted from _sys_libm_0001_313.o
+- name: _f_copysignf
+  nid: '0xfae9e727'
+  signature: ''
+  notes: extracted from _sys_libm_0001_493.o
+- name: _f_cosf
+  nid: '0x734ca589'
+  signature: ''
+  notes: extracted from _sys_libm_0001_244.o
+- name: _f_exp2f
+  nid: '0x8d5858db'
+  signature: ''
+  notes: extracted from _sys_libm_0001_285.o
+- name: _f_expf
+  nid: '0x03593d2c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_12.o
+- name: _f_fdimf
+  nid: '0x3cb818fa'
+  signature: ''
+  notes: extracted from _sys_libm_0001_129.o
+- name: _f_floorf
+  nid: '0x2df339bc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_94.o
+- name: _f_fmaf
+  nid: '0xe92f3fb8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_459.o
+- name: _f_fmaxf
+  nid: '0xf7844153'
+  signature: ''
+  notes: extracted from _sys_libm_0001_486.o
+- name: _f_fminf
+  nid: '0x8c85369b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_284.o
+- name: _f_fmodf
+  nid: '0x02e68d44'
+  signature: ''
+  notes: extracted from _sys_libm_0001_10.o
+- name: _f_hypotf
+  nid: '0x414c5ecc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_146.o
+- name: _f_llrintf
+  nid: '0x48157605'
+  signature: ''
+  notes: extracted from _sys_libm_0001_165.o
+- name: _f_log10f
+  nid: '0xbfda6837'
+  signature: ''
+  notes: extracted from _sys_libm_0001_375.o
+- name: _f_log2f
+  nid: '0xdc151707'
+  signature: ''
+  notes: extracted from _sys_libm_0001_435.o
+- name: _f_logf
+  nid: '0xeed82401'
+  signature: ''
+  notes: extracted from _sys_libm_0001_475.o
+- name: _f_lrintf
+  nid: '0x358d7f93'
+  signature: ''
+  notes: extracted from _sys_libm_0001_111.o
+- name: _f_nearbyintf
+  nid: '0x7919f414'
+  signature: ''
+  notes: extracted from _sys_libm_0001_258.o
+- name: _f_rintf
+  nid: '0x41d1b236'
+  signature: ''
+  notes: extracted from _sys_libm_0001_151.o
+- name: _f_sinf
+  nid: '0x90f0242f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_293.o
+- name: _f_sqrtf
+  nid: '0xec43b983'
+  signature: ''
+  notes: extracted from _sys_libm_0001_467.o
+- name: _fabsf4
+  nid: '0x40a2e212'
+  signature: ''
+  notes: extracted from _sys_libm_0001_143.o
+- name: _fdimf4
+  nid: '0x054aae63'
+  signature: ''
+  notes: extracted from _sys_libm_0001_15.o
+- name: _floorf4
+  nid: '0x1c11885d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_62.o
+- name: _fmaf4
+  nid: '0xd76a16da'
+  signature: ''
+  notes: extracted from _sys_libm_0001_425.o
+- name: _fmaxf4
+  nid: '0x08139bd2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_24.o
+- name: _fminf4
+  nid: '0x012d0a91'
+  signature: ''
+  notes: extracted from _sys_libm_0001_6.o
+- name: _fmodf4
+  nid: '0xfcedabc3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_498.o
+- name: _frexpf4
+  nid: '0x642e3d18'
+  signature: ''
+  notes: extracted from _sys_libm_0001_205.o
+- name: _hypotf4
+  nid: '0xd0fd3ca8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_406.o
+- name: _ilogbf4
+  nid: '0xe31cc0d3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_448.o
+- name: _ldexpf4
+  nid: '0xc9c536ce'
+  signature: ''
+  notes: extracted from _sys_libm_0001_395.o
+- name: _log10f4
+  nid: '0x6261c0b5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_203.o
+- name: _log10f4fast
+  nid: '0xcbdf9afb'
+  signature: ''
+  notes: extracted from _sys_libm_0001_402.o
+- name: _log1pf4
+  nid: '0x842cb14d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_273.o
+- name: _log1pf4fast
+  nid: '0x405f9727'
+  signature: ''
+  notes: extracted from _sys_libm_0001_142.o
+- name: _log2f4
+  nid: '0xfe23dbe9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_501.o
+- name: _log2f4fast
+  nid: '0xde7833f2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_439.o
+- name: _logbf4
+  nid: '0x72f1f64b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_243.o
+- name: _logf4
+  nid: '0x8f2bcdb5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_289.o
+- name: _logf4fast
+  nid: '0xc0bcf25e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_377.o
+- name: _modff4
+  nid: '0x1d5bf5d0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_64.o
+- name: _negatef4
+  nid: '0x29685118'
+  signature: ''
+  notes: extracted from _sys_libm_0001_83.o
+- name: _powf4
+  nid: '0x12de4e46'
+  signature: ''
+  notes: extracted from _sys_libm_0001_42.o
+- name: _powf4fast
+  nid: '0xe5a0be9f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_452.o
+- name: _recipf4
+  nid: '0x0522d1af'
+  signature: ''
+  notes: extracted from _sys_libm_0001_14.o
+- name: _recipf4fast
+  nid: '0x17cd5d87'
+  signature: ''
+  notes: extracted from _sys_libm_0001_51.o
+- name: _remainderf4
+  nid: '0xcfee82d8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_405.o
+- name: _rsqrtf4
+  nid: '0x7a893af1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_260.o
+- name: _rsqrtf4fast
+  nid: '0xb89863bc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_360.o
+- name: _sincosf4
+  nid: '0x6ad1c42b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_220.o
+- name: _sincosf4fast
+  nid: '0xb5961d4e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_355.o
+- name: _sinf4
+  nid: '0x016556df'
+  signature: ''
+  notes: extracted from _sys_libm_0001_7.o
+- name: _sinf4fast
+  nid: '0x1e9fd6ba'
+  signature: ''
+  notes: extracted from _sys_libm_0001_67.o
+- name: _sqrtf4
+  nid: '0x76afaf04'
+  signature: ''
+  notes: extracted from _sys_libm_0001_251.o
+- name: _sqrtf4fast
+  nid: '0x8fb7bac7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_291.o
+- name: _tanf4
+  nid: '0xc9481758'
+  signature: ''
+  notes: extracted from _sys_libm_0001_391.o
+- name: _tanf4fast
+  nid: '0x938fb946'
+  signature: ''
+  notes: extracted from _sys_libm_0001_299.o
+- name: _truncf4
+  nid: '0xf537d837'
+  signature: ''
+  notes: extracted from _sys_libm_0001_484.o
+- name: acos
+  nid: '0x1313a420'
+  signature: ''
+  notes: extracted from _sys_libm_0001_44.o
+- name: acosf
+  nid: '0xdece76a6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_440.o
+- name: acosf4
+  nid: '0x1acb2b16'
+  signature: ''
+  notes: extracted from _sys_libm_0001_58.o
+- name: acosf4fast
+  nid: '0xe8fcf1f8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_457.o
+- name: acosh
+  nid: '0x78e4590a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_256.o
+- name: acoshf
+  nid: '0x6c6285c6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_224.o
+- name: acoshl
+  nid: '0xa5d0b260'
+  signature: ''
+  notes: extracted from _sys_libm_0001_329.o
+- name: acosl
+  nid: '0x5516d621'
+  signature: ''
+  notes: extracted from _sys_libm_0001_189.o
+- name: asin
+  nid: '0x05efc660'
+  signature: ''
+  notes: extracted from _sys_libm_0001_18.o
+- name: asinf
+  nid: '0x411434bb'
+  signature: ''
+  notes: extracted from _sys_libm_0001_145.o
+- name: asinf4
+  nid: '0x010818fc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_5.o
+- name: asinf4fast
+  nid: '0x91cdfdb0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_295.o
+- name: asinh
+  nid: '0x26ef50ed'
+  signature: ''
+  notes: extracted from _sys_libm_0001_81.o
+- name: asinhf
+  nid: '0xbd8bb75c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_373.o
+- name: asinhl
+  nid: '0x0829a21d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_25.o
+- name: asinl
+  nid: '0x575e9b6e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_192.o
+- name: atan
+  nid: '0x7f579e03'
+  signature: ''
+  notes: extracted from _sys_libm_0001_266.o
+- name: atan2
+  nid: '0x31db8c89'
+  signature: ''
+  notes: extracted from _sys_libm_0001_100.o
+- name: atan2f
+  nid: '0xfb932a56'
+  signature: ''
+  notes: extracted from _sys_libm_0001_495.o
+- name: atan2f4
+  nid: '0xd8c4096d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_427.o
+- name: atan2f4fast
+  nid: '0xdd8660d2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_436.o
+- name: atan2l
+  nid: '0x3d4efafb'
+  signature: ''
+  notes: extracted from _sys_libm_0001_130.o
+- name: atanf
+  nid: '0x3c057fbd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_127.o
+- name: atanf4
+  nid: '0x347c1ee1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_109.o
+- name: atanf4fast
+  nid: '0x178d98dd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_50.o
+- name: atanh
+  nid: '0x596ab55c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_194.o
+- name: atanhf
+  nid: '0xe1288c47'
+  signature: ''
+  notes: extracted from _sys_libm_0001_443.o
+- name: atanhl
+  nid: '0xa46a70a1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_326.o
+- name: atanl
+  nid: '0xda217d1f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_432.o
+- name: cabs
+  nid: '0xa92bcc85'
+  signature: ''
+  notes: extracted from _sys_libm_0001_335.o
+- name: cabsf
+  nid: '0x812ed488'
+  signature: ''
+  notes: extracted from _sys_libm_0001_268.o
+- name: cabsl
+  nid: '0x43d522f4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_154.o
+- name: cacos
+  nid: '0x8e258fa0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_287.o
+- name: cacosf
+  nid: '0x434881a0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_153.o
+- name: cacosh
+  nid: '0x970a3432'
+  signature: ''
+  notes: extracted from _sys_libm_0001_308.o
+- name: cacoshf
+  nid: '0x8e01379e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_286.o
+- name: cacoshl
+  nid: '0xfdec16e1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_500.o
+- name: cacosl
+  nid: '0x2a4dcbad'
+  signature: ''
+  notes: extracted from _sys_libm_0001_85.o
+- name: carg
+  nid: '0x7048396e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_234.o
+- name: cargf
+  nid: '0x501c412f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_185.o
+- name: cargl
+  nid: '0x904e646b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_292.o
+- name: casin
+  nid: '0x9af30eaf'
+  signature: ''
+  notes: extracted from _sys_libm_0001_312.o
+- name: casinf
+  nid: '0x1225dd31'
+  signature: ''
+  notes: extracted from _sys_libm_0001_41.o
+- name: casinh
+  nid: '0x6cc4bd13'
+  signature: ''
+  notes: extracted from _sys_libm_0001_225.o
+- name: casinhf
+  nid: '0x68a8957f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_216.o
+- name: casinhl
+  nid: '0x5b474c22'
+  signature: ''
+  notes: extracted from _sys_libm_0001_196.o
+- name: casinl
+  nid: '0xdffb4e3c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_442.o
+- name: catan
+  nid: '0xa56557b6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_328.o
+- name: catanf
+  nid: '0x99a6c261'
+  signature: ''
+  notes: extracted from _sys_libm_0001_309.o
+- name: catanh
+  nid: '0x5ee10a95'
+  signature: ''
+  notes: extracted from _sys_libm_0001_199.o
+- name: catanhf
+  nid: '0x0b3f4e90'
+  signature: ''
+  notes: extracted from _sys_libm_0001_27.o
+- name: catanhl
+  nid: '0x89b507b3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_279.o
+- name: catanl
+  nid: '0x61250988'
+  signature: ''
+  notes: extracted from _sys_libm_0001_202.o
+- name: cbrt
+  nid: '0x4020f5ef'
+  signature: ''
+  notes: extracted from _sys_libm_0001_141.o
+- name: cbrtf
+  nid: '0x453f9e91'
+  signature: ''
+  notes: extracted from _sys_libm_0001_159.o
+- name: cbrtf4
+  nid: '0xc406dd09'
+  signature: ''
+  notes: extracted from _sys_libm_0001_379.o
+- name: cbrtf4fast
+  nid: '0xbb208b20'
+  signature: ''
+  notes: extracted from _sys_libm_0001_368.o
+- name: cbrtl
+  nid: '0xc94fcc63'
+  signature: ''
+  notes: extracted from _sys_libm_0001_392.o
+- name: ccos
+  nid: '0x9e8130b6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_315.o
+- name: ccosf
+  nid: '0xe2b596ec'
+  signature: ''
+  notes: extracted from _sys_libm_0001_445.o
+- name: ccosh
+  nid: '0x834f5917'
+  signature: ''
+  notes: extracted from _sys_libm_0001_272.o
+- name: ccoshf
+  nid: '0xf0ab77c1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_477.o
+- name: ccoshl
+  nid: '0xe1c71b05'
+  signature: ''
+  notes: extracted from _sys_libm_0001_444.o
+- name: ccosl
+  nid: '0x38ba5590'
+  signature: ''
+  notes: extracted from _sys_libm_0001_120.o
+- name: ceil
+  nid: '0x21e6d304'
+  signature: ''
+  notes: extracted from _sys_libm_0001_71.o
+- name: ceilf
+  nid: '0xbaf11866'
+  signature: ''
+  notes: extracted from _sys_libm_0001_366.o
+- name: ceilf4
+  nid: '0xeac7ca2c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_465.o
+- name: ceill
+  nid: '0xdd92118e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_437.o
+- name: cexp
+  nid: '0x488df791'
+  signature: ''
+  notes: extracted from _sys_libm_0001_169.o
+- name: cexpf
+  nid: '0x6f5dd7d2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_230.o
+- name: cexpl
+  nid: '0x2118fe46'
+  signature: ''
+  notes: extracted from _sys_libm_0001_69.o
+- name: cimag
+  nid: '0x833e6b0e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_271.o
+- name: cimagf
+  nid: '0xafd9a625'
+  signature: ''
+  notes: extracted from _sys_libm_0001_347.o
+- name: cimagl
+  nid: '0x12e04cd7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_43.o
+- name: clog
+  nid: '0x3593a445'
+  signature: ''
+  notes: extracted from _sys_libm_0001_112.o
+- name: clog10
+  nid: '0x1988732d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_56.o
+- name: clog10f
+  nid: '0xd1a3574c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_408.o
+- name: clog10l
+  nid: '0xb0fa1592'
+  signature: ''
+  notes: extracted from _sys_libm_0001_348.o
+- name: clogf
+  nid: '0x9700d9cd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_307.o
+- name: clogl
+  nid: '0x5b18eded'
+  signature: ''
+  notes: extracted from _sys_libm_0001_195.o
+- name: conj
+  nid: '0xf1aaa2f8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_480.o
+- name: conjf
+  nid: '0xd125b89e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_407.o
+- name: conjl
+  nid: '0x080414bd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_23.o
+- name: copysign
+  nid: '0x4e010403'
+  signature: ''
+  notes: extracted from _sys_libm_0001_182.o
+- name: copysignf
+  nid: '0xacca2f83'
+  signature: ''
+  notes: extracted from _sys_libm_0001_340.o
+- name: copysignf4
+  nid: '0xeda86c48'
+  signature: ''
+  notes: extracted from _sys_libm_0001_471.o
+- name: copysignl
+  nid: '0x645557bd'
+  signature: ''
+  notes: extracted from _sys_libm_0001_207.o
+- name: cos
+  nid: '0x9f78f052'
+  signature: ''
+  notes: extracted from _sys_libm_0001_320.o
+- name: cosf
+  nid: '0x24497c52'
+  signature: ''
+  notes: extracted from _sys_libm_0001_76.o
+- name: cosf4
+  nid: '0xf5cd1e19'
+  signature: ''
+  notes: extracted from _sys_libm_0001_485.o
+- name: cosf4fast
+  nid: '0x32f994a1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_104.o
+- name: cosh
+  nid: '0x8217e783'
+  signature: ''
+  notes: extracted from _sys_libm_0001_270.o
+- name: coshf
+  nid: '0x36778d1b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_115.o
+- name: coshl
+  nid: '0xba84eab5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_365.o
+- name: cosl
+  nid: '0x26deed0b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_80.o
+- name: cpow
+  nid: '0x373054d1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_116.o
+- name: cpowf
+  nid: '0xff036800'
+  signature: ''
+  notes: extracted from _sys_libm_0001_502.o
+- name: cpowl
+  nid: '0xd5adc4b2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_420.o
+- name: cproj
+  nid: '0x729b7269'
+  signature: ''
+  notes: extracted from _sys_libm_0001_241.o
+- name: cprojf
+  nid: '0xcaaf7ae7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_398.o
+- name: cprojl
+  nid: '0xbf23f2e7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_374.o
+- name: creal
+  nid: '0x35d3f688'
+  signature: ''
+  notes: extracted from _sys_libm_0001_114.o
+- name: crealf
+  nid: '0xe9f501df'
+  signature: ''
+  notes: extracted from _sys_libm_0001_462.o
+- name: creall
+  nid: '0x964ac044'
+  signature: ''
+  notes: extracted from _sys_libm_0001_305.o
+- name: csin
+  nid: '0x032cc709'
+  signature: ''
+  notes: extracted from _sys_libm_0001_11.o
+- name: csinf
+  nid: '0xba136594'
+  signature: ''
+  notes: extracted from _sys_libm_0001_364.o
+- name: csinh
+  nid: '0x07274304'
+  signature: ''
+  notes: extracted from _sys_libm_0001_20.o
+- name: csinhf
+  nid: '0x3436f008'
+  signature: ''
+  notes: extracted from _sys_libm_0001_107.o
+- name: csinhl
+  nid: '0x64abdb4d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_208.o
+- name: csinl
+  nid: '0x2c601f3b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_91.o
+- name: csqrt
+  nid: '0x2033eeb7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_68.o
+- name: csqrtf
+  nid: '0xe2de89e6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_446.o
+- name: csqrtl
+  nid: '0x46b66f76'
+  signature: ''
+  notes: extracted from _sys_libm_0001_160.o
+- name: ctan
+  nid: '0xe93abfca'
+  signature: ''
+  notes: extracted from _sys_libm_0001_460.o
+- name: ctanf
+  nid: '0x7793a86b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_254.o
+- name: ctanh
+  nid: '0xd2a666c9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_411.o
+- name: ctanhf
+  nid: '0xf0947035'
+  signature: ''
+  notes: extracted from _sys_libm_0001_476.o
+- name: ctanhl
+  nid: '0x3d549f2a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_131.o
+- name: ctanl
+  nid: '0xa20827a8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_323.o
+- name: divf4
+  nid: '0x03aea906'
+  signature: ''
+  notes: extracted from _sys_libm_0001_13.o
+- name: divf4fast
+  nid: '0x657d0e83'
+  signature: ''
+  notes: extracted from _sys_libm_0001_209.o
+- name: erf
+  nid: '0x8bd67efc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_283.o
+- name: erfc
+  nid: '0x2627d6b2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_78.o
+- name: erfcf
+  nid: '0xa9e039c4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_336.o
+- name: erfcl
+  nid: '0xaddce673'
+  signature: ''
+  notes: extracted from _sys_libm_0001_344.o
+- name: erff
+  nid: '0xd40f3f2c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_413.o
+- name: erfl
+  nid: '0xe58fc9b5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_451.o
+- name: exp
+  nid: '0x18668ce3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_53.o
+- name: exp2
+  nid: '0x4ae52dd3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_176.o
+- name: exp2f
+  nid: '0xcb6599c0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_400.o
+- name: exp2f4
+  nid: '0x5e48dede'
+  signature: ''
+  notes: extracted from _sys_libm_0001_198.o
+- name: exp2f4fast
+  nid: '0x2ec867b4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_96.o
+- name: exp2l
+  nid: '0x9f0efc6e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_317.o
+- name: expf
+  nid: '0xfcf08193'
+  signature: ''
+  notes: extracted from _sys_libm_0001_499.o
+- name: expf4
+  nid: '0x137f7e77'
+  signature: ''
+  notes: extracted from _sys_libm_0001_45.o
+- name: expf4fast
+  nid: '0x74902d4b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_246.o
+- name: expl
+  nid: '0x79ba9b5c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_259.o
+- name: expm1
+  nid: '0xc8dd9279'
+  signature: ''
+  notes: extracted from _sys_libm_0001_389.o
+- name: expm1f
+  nid: '0xbb165807'
+  signature: ''
+  notes: extracted from _sys_libm_0001_367.o
+- name: expm1f4
+  nid: '0x1bbdcd9f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_59.o
+- name: expm1f4fast
+  nid: '0x47433144'
+  signature: ''
+  notes: extracted from _sys_libm_0001_162.o
+- name: expm1l
+  nid: '0x0e8573dc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_35.o
+- name: f_acosf
+  nid: '0x705d9e24'
+  signature: ''
+  notes: extracted from _sys_libm_0001_235.o
+- name: f_asinf
+  nid: '0x4b584841'
+  signature: ''
+  notes: extracted from _sys_libm_0001_178.o
+- name: f_atan2f
+  nid: '0xabdccc7a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_339.o
+- name: f_atanf
+  nid: '0x1e85ef02'
+  signature: ''
+  notes: extracted from _sys_libm_0001_66.o
+- name: f_ceilf
+  nid: '0xee204ac6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_473.o
+- name: f_copysignf
+  nid: '0x642f7d6b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_206.o
+- name: f_cosf
+  nid: '0x7ab679da'
+  signature: ''
+  notes: extracted from _sys_libm_0001_261.o
+- name: f_exp2f
+  nid: '0x4a5ae27d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_172.o
+- name: f_expf
+  nid: '0xd8d157f5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_428.o
+- name: f_fdimf
+  nid: '0x05cb1718'
+  signature: ''
+  notes: extracted from _sys_libm_0001_16.o
+- name: f_floorf
+  nid: '0xb4ef29d5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_352.o
+- name: f_fmaf
+  nid: '0xf83a372f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_487.o
+- name: f_fmaxf
+  nid: '0x39ef81c9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_123.o
+- name: f_fminf
+  nid: '0x3f6262b3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_139.o
+- name: f_fmodf
+  nid: '0x10627248'
+  signature: ''
+  notes: extracted from _sys_libm_0001_39.o
+- name: f_frexpf
+  nid: '0x3adc01d7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_125.o
+- name: f_hypotf
+  nid: '0x2cbb6f53'
+  signature: ''
+  notes: extracted from _sys_libm_0001_92.o
+- name: f_ldexpf
+  nid: '0x728149e5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_240.o
+- name: f_llrintf
+  nid: '0xafa13040'
+  signature: ''
+  notes: extracted from _sys_libm_0001_345.o
+- name: f_llroundf
+  nid: '0x6f639afb'
+  signature: ''
+  notes: extracted from _sys_libm_0001_231.o
+- name: f_log10f
+  nid: '0x6c009c56'
+  signature: ''
+  notes: extracted from _sys_libm_0001_223.o
+- name: f_log1pf
+  nid: '0xbbaa300b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_370.o
+- name: f_log2f
+  nid: '0x6764c707'
+  signature: ''
+  notes: extracted from _sys_libm_0001_214.o
+- name: f_logf
+  nid: '0xea1e83e3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_463.o
+- name: f_lrintf
+  nid: '0xc7fb73d6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_387.o
+- name: f_lroundf
+  nid: '0xc477c0f6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_381.o
+- name: f_nearbyintf
+  nid: '0x961688d1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_303.o
+- name: f_powf
+  nid: '0x00fde072'
+  signature: ''
+  notes: extracted from _sys_libm_0001_4.o
+- name: f_rintf
+  nid: '0x4b03d5b2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_177.o
+- name: f_sinf
+  nid: '0xb54cc9a1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_354.o
+- name: f_sqrtf
+  nid: '0x246ea8d0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_77.o
+- name: f_tanf
+  nid: '0xed9d1ac5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_470.o
+- name: fabs
+  nid: '0x58eb9e57'
+  signature: ''
+  notes: extracted from _sys_libm_0001_193.o
+- name: fabsf
+  nid: '0x3da55602'
+  signature: ''
+  notes: extracted from _sys_libm_0001_133.o
+- name: fabsf4
+  nid: '0xf99da2fc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_489.o
+- name: fabsl
+  nid: '0xd42904b7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_414.o
+- name: fdim
+  nid: '0xd8270894'
+  signature: ''
+  notes: extracted from _sys_libm_0001_426.o
+- name: fdimf
+  nid: '0x46cf72d9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_161.o
+- name: fdimf4
+  nid: '0x9f65bd34'
+  signature: ''
+  notes: extracted from _sys_libm_0001_319.o
+- name: fdiml
+  nid: '0x8b168769'
+  signature: ''
+  notes: extracted from _sys_libm_0001_281.o
+- name: feclearexcept
+  nid: '0x4add664c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_175.o
+- name: fegetenv
+  nid: '0x238af59b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_73.o
+- name: fegetexceptflag
+  nid: '0xbbf7354e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_371.o
+- name: fegetround
+  nid: '0x892f2590'
+  signature: ''
+  notes: extracted from _sys_libm_0001_277.o
+- name: fegettrapenable
+  nid: '0xd54039cb'
+  signature: ''
+  notes: extracted from _sys_libm_0001_419.o
+- name: feholdexcept
+  nid: '0x417851ce'
+  signature: ''
+  notes: extracted from _sys_libm_0001_148.o
+- name: feraiseexcept
+  nid: '0xe5ea65e8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_454.o
+- name: fesetenv
+  nid: '0x0c14cfcc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_29.o
+- name: fesetexceptflag
+  nid: '0x3261de11'
+  signature: ''
+  notes: extracted from _sys_libm_0001_102.o
+- name: fesetround
+  nid: '0xd97ce5d4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_431.o
+- name: fesettrapenable
+  nid: '0x72a3ed28'
+  signature: ''
+  notes: extracted from _sys_libm_0001_242.o
+- name: fetestexcept
+  nid: '0xc977e1ea'
+  signature: ''
+  notes: extracted from _sys_libm_0001_393.o
+- name: feupdateenv
+  nid: '0xfa97afbf'
+  signature: ''
+  notes: extracted from _sys_libm_0001_492.o
+- name: floor
+  nid: '0x519ebb77'
+  signature: ''
+  notes: extracted from _sys_libm_0001_186.o
+- name: floorf
+  nid: '0x23b985f7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_74.o
+- name: floorf4
+  nid: '0x452ac4bb'
+  signature: ''
+  notes: extracted from _sys_libm_0001_158.o
+- name: floorl
+  nid: '0x6df35518'
+  signature: ''
+  notes: extracted from _sys_libm_0001_227.o
+- name: fma
+  nid: '0x4826db61'
+  signature: ''
+  notes: extracted from _sys_libm_0001_166.o
+- name: fmaf
+  nid: '0x476b5591'
+  signature: ''
+  notes: extracted from _sys_libm_0001_164.o
+- name: fmaf4
+  nid: '0xdc14974c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_434.o
+- name: fmal
+  nid: '0xc7f1d407'
+  signature: ''
+  notes: extracted from _sys_libm_0001_386.o
+- name: fmax
+  nid: '0x2af4b73b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_87.o
+- name: fmaxf
+  nid: '0x895cdb49'
+  signature: ''
+  notes: extracted from _sys_libm_0001_278.o
+- name: fmaxf4
+  nid: '0x752fa85e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_248.o
+- name: fmaxl
+  nid: '0x2c45fe6a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_90.o
+- name: fmin
+  nid: '0xa4578433'
+  signature: ''
+  notes: extracted from _sys_libm_0001_325.o
+- name: fminf
+  nid: '0x7c2eaeb5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_262.o
+- name: fminf4
+  nid: '0xc41f01db'
+  signature: ''
+  notes: extracted from _sys_libm_0001_380.o
+- name: fminl
+  nid: '0x00367be0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_2.o
+- name: fmod
+  nid: '0xe769e5cf'
+  signature: ''
+  notes: extracted from _sys_libm_0001_456.o
+- name: fmodf
+  nid: '0x9a81e583'
+  signature: ''
+  notes: extracted from _sys_libm_0001_311.o
+- name: fmodf4
+  nid: '0xca239640'
+  signature: ''
+  notes: extracted from _sys_libm_0001_396.o
+- name: fmodl
+  nid: '0xb598a495'
+  signature: ''
+  notes: extracted from _sys_libm_0001_356.o
+- name: frexp
+  nid: '0x7f381837'
+  signature: ''
+  notes: extracted from _sys_libm_0001_265.o
+- name: frexpf
+  nid: '0x6636c4a5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_212.o
+- name: frexpf4
+  nid: '0x3e7eb58f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_135.o
+- name: frexpl
+  nid: '0xc357b33a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_378.o
+- name: hypot
+  nid: '0x6ddd31b2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_226.o
+- name: hypotf
+  nid: '0xebb4e08a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_466.o
+- name: hypotf4
+  nid: '0x0c9b8305'
+  signature: ''
+  notes: extracted from _sys_libm_0001_30.o
+- name: hypotl
+  nid: '0x7831a2e0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_255.o
+- name: ilogb
+  nid: '0xa823836b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_332.o
+- name: ilogbf
+  nid: '0x65935877'
+  signature: ''
+  notes: extracted from _sys_libm_0001_210.o
+- name: ilogbf4
+  nid: '0x28faaa5a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_82.o
+- name: ilogbl
+  nid: '0xc8910002'
+  signature: ''
+  notes: extracted from _sys_libm_0001_388.o
+- name: ldexp
+  nid: '0xf4ad6ea8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_483.o
+- name: ldexpf
+  nid: '0x430309a1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_152.o
+- name: ldexpf4
+  nid: '0x3b802524'
+  signature: ''
+  notes: extracted from _sys_libm_0001_126.o
+- name: ldexpl
+  nid: '0xd231e30a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_409.o
+- name: lgamma
+  nid: '0x69725dce'
+  signature: ''
+  notes: extracted from _sys_libm_0001_219.o
+- name: lgammaf
+  nid: '0x9f03dd3e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_316.o
+- name: lgammal
+  nid: '0x749440f9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_247.o
+- name: llrint
+  nid: '0xe6c1ff41'
+  signature: ''
+  notes: extracted from _sys_libm_0001_455.o
+- name: llrintf
+  nid: '0x2a89ce33'
+  signature: ''
+  notes: extracted from _sys_libm_0001_86.o
+- name: llrintl
+  nid: '0x0f02f882'
+  signature: ''
+  notes: extracted from _sys_libm_0001_36.o
+- name: llround
+  nid: '0x01b84b27'
+  signature: ''
+  notes: extracted from _sys_libm_0001_8.o
+- name: llroundf
+  nid: '0xa4ca5cf2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_327.o
+- name: llroundl
+  nid: '0x889cccb0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_275.o
+- name: log
+  nid: '0x714adce1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_238.o
+- name: log10
+  nid: '0xd8f79f4c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_429.o
+- name: log10f
+  nid: '0x16bf208a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_48.o
+- name: log10f4
+  nid: '0x3459748b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_108.o
+- name: log10f4fast
+  nid: '0x05e27a13'
+  signature: ''
+  notes: extracted from _sys_libm_0001_17.o
+- name: log10l
+  nid: '0x8f96319e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_290.o
+- name: log1p
+  nid: '0x56c573a8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_191.o
+- name: log1pf
+  nid: '0x21a37b3e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_70.o
+- name: log1pf4
+  nid: '0xa7658186'
+  signature: ''
+  notes: extracted from _sys_libm_0001_331.o
+- name: log1pf4fast
+  nid: '0xfb6e6213'
+  signature: ''
+  notes: extracted from _sys_libm_0001_494.o
+- name: log1pl
+  nid: '0x37345541'
+  signature: ''
+  notes: extracted from _sys_libm_0001_117.o
+- name: log2
+  nid: '0x17316bee'
+  signature: ''
+  notes: extracted from _sys_libm_0001_49.o
+- name: log2f
+  nid: '0xab377381'
+  signature: ''
+  notes: extracted from _sys_libm_0001_338.o
+- name: log2f4
+  nid: '0x07daed62'
+  signature: ''
+  notes: extracted from _sys_libm_0001_21.o
+- name: log2f4fast
+  nid: '0x96d1b95e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_306.o
+- name: log2l
+  nid: '0xfa28434b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_490.o
+- name: logb
+  nid: '0x2bb0f2c9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_89.o
+- name: logbf
+  nid: '0xb24bd2f8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_349.o
+- name: logbf4
+  nid: '0x69040b9b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_218.o
+- name: logbl
+  nid: '0x4930ac11'
+  signature: ''
+  notes: extracted from _sys_libm_0001_171.o
+- name: logf
+  nid: '0xd477852d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_415.o
+- name: logf4
+  nid: '0x30bc7a53'
+  signature: ''
+  notes: extracted from _sys_libm_0001_97.o
+- name: logf4fast
+  nid: '0xe913a166'
+  signature: ''
+  notes: extracted from _sys_libm_0001_458.o
+- name: logl
+  nid: '0x9e3ada21'
+  signature: ''
+  notes: extracted from _sys_libm_0001_314.o
+- name: lrint
+  nid: '0x3ad203fa'
+  signature: ''
+  notes: extracted from _sys_libm_0001_124.o
+- name: lrintf
+  nid: '0x9558ed08'
+  signature: ''
+  notes: extracted from _sys_libm_0001_301.o
+- name: lrintl
+  nid: '0x35b6e70a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_113.o
+- name: lround
+  nid: '0x772f1e4d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_253.o
+- name: lroundf
+  nid: '0xfbb4047a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_496.o
+- name: lroundl
+  nid: '0x3792b12d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_119.o
+- name: modf
+  nid: '0xa713f8cf'
+  signature: ''
+  notes: extracted from _sys_libm_0001_330.o
+- name: modff
+  nid: '0xb79012ba'
+  signature: ''
+  notes: extracted from _sys_libm_0001_359.o
+- name: modff4
+  nid: '0xc4cccd1f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_382.o
+- name: modfl
+  nid: '0x9110708a'
+  signature: ''
+  notes: extracted from _sys_libm_0001_294.o
+- name: nan
+  nid: '0x45034943'
+  signature: ''
+  notes: extracted from _sys_libm_0001_157.o
+- name: nanf
+  nid: '0xce91ff18'
+  signature: ''
+  notes: extracted from _sys_libm_0001_404.o
+- name: nanl
+  nid: '0x2dcab6a4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_93.o
+- name: nearbyint
+  nid: '0x758f33dc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_249.o
+- name: nearbyintf
+  nid: '0xc0609820'
+  signature: ''
+  notes: extracted from _sys_libm_0001_376.o
+- name: nearbyintl
+  nid: '0x75e3e2e9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_250.o
+- name: negatef4
+  nid: '0x664e04b9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_213.o
+- name: nextafter
+  nid: '0x8ecae294'
+  signature: ''
+  notes: extracted from _sys_libm_0001_288.o
+- name: nextafterf
+  nid: '0xb7696143'
+  signature: ''
+  notes: extracted from _sys_libm_0001_358.o
+- name: nextafterl
+  nid: '0x68f72416'
+  signature: ''
+  notes: extracted from _sys_libm_0001_217.o
+- name: nexttoward
+  nid: '0x4cb5fa99'
+  signature: ''
+  notes: extracted from _sys_libm_0001_179.o
+- name: nexttowardf
+  nid: '0x4fa4f5ec'
+  signature: ''
+  notes: extracted from _sys_libm_0001_184.o
+- name: nexttowardl
+  nid: '0x321c55de'
+  signature: ''
+  notes: extracted from _sys_libm_0001_101.o
+- name: pow
+  nid: '0x38e69f09'
+  signature: ''
+  notes: extracted from _sys_libm_0001_121.o
+- name: powf
+  nid: '0x4ddb926b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_181.o
+- name: powf4
+  nid: '0x4a6ca9a6'
+  signature: ''
+  notes: extracted from _sys_libm_0001_173.o
+- name: powf4fast
+  nid: '0xf95b7769'
+  signature: ''
+  notes: extracted from _sys_libm_0001_488.o
+- name: powl
+  nid: '0x34c0371e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_110.o
+- name: recipf4
+  nid: '0xbd7410d9'
+  signature: ''
+  notes: extracted from _sys_libm_0001_372.o
+- name: recipf4fast
+  nid: '0x88fb4a66'
+  signature: ''
+  notes: extracted from _sys_libm_0001_276.o
+- name: remainder
+  nid: '0x44cd6308'
+  signature: ''
+  notes: extracted from _sys_libm_0001_155.o
+- name: remainderf
+  nid: '0xdddabb32'
+  signature: ''
+  notes: extracted from _sys_libm_0001_438.o
+- name: remainderf4
+  nid: '0x4d878773'
+  signature: ''
+  notes: extracted from _sys_libm_0001_180.o
+- name: remainderl
+  nid: '0x18b26998'
+  signature: ''
+  notes: extracted from _sys_libm_0001_54.o
+- name: remquo
+  nid: '0x4189a367'
+  signature: ''
+  notes: extracted from _sys_libm_0001_150.o
+- name: remquof
+  nid: '0xbb761c89'
+  signature: ''
+  notes: extracted from _sys_libm_0001_369.o
+- name: remquol
+  nid: '0xb9d2ad22'
+  signature: ''
+  notes: extracted from _sys_libm_0001_363.o
+- name: rint
+  nid: '0x0f428f0f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_37.o
+- name: rintf
+  nid: '0x54d2fb8c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_188.o
+- name: rintl
+  nid: '0x18ec6099'
+  signature: ''
+  notes: extracted from _sys_libm_0001_55.o
+- name: round
+  nid: '0xf3ec0258'
+  signature: ''
+  notes: extracted from _sys_libm_0001_482.o
+- name: roundf
+  nid: '0xc984bf53'
+  signature: ''
+  notes: extracted from _sys_libm_0001_394.o
+- name: roundl
+  nid: '0x99c228fc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_310.o
+- name: rsqrtf4
+  nid: '0x329ec019'
+  signature: ''
+  notes: extracted from _sys_libm_0001_103.o
+- name: rsqrtf4fast
+  nid: '0x1a1adede'
+  signature: ''
+  notes: extracted from _sys_libm_0001_57.o
+- name: scalbln
+  nid: '0x4152669c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_147.o
+- name: scalblnf
+  nid: '0x31be25c3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_99.o
+- name: scalblnl
+  nid: '0xd48eaae1'
+  signature: ''
+  notes: extracted from _sys_libm_0001_416.o
+- name: scalbn
+  nid: '0xc78ac9d0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_384.o
+- name: scalbnf
+  nid: '0x3e919cba'
+  signature: ''
+  notes: extracted from _sys_libm_0001_136.o
+- name: scalbnl
+  nid: '0x3dfa060f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_134.o
+- name: sin
+  nid: '0x4eb5eb51'
+  signature: ''
+  notes: extracted from _sys_libm_0001_183.o
+- name: sincosf4
+  nid: '0xf19c5e94'
+  signature: ''
+  notes: extracted from _sys_libm_0001_479.o
+- name: sincosf4fast
+  nid: '0x6e9eb0dc'
+  signature: ''
+  notes: extracted from _sys_libm_0001_228.o
+- name: sinf
+  nid: '0x0cbdae68'
+  signature: ''
+  notes: extracted from _sys_libm_0001_31.o
+- name: sinf4
+  nid: '0x0a242ed5'
+  signature: ''
+  notes: extracted from _sys_libm_0001_26.o
+- name: sinf4fast
+  nid: '0x547fb4a7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_187.o
+- name: sinh
+  nid: '0x683cacb3'
+  signature: ''
+  notes: extracted from _sys_libm_0001_215.o
+- name: sinhf
+  nid: '0xd7653782'
+  signature: ''
+  notes: extracted from _sys_libm_0001_424.o
+- name: sinhl
+  nid: '0x376fb27f'
+  signature: ''
+  notes: extracted from _sys_libm_0001_118.o
+- name: sinl
+  nid: '0xd97852b7'
+  signature: ''
+  notes: extracted from _sys_libm_0001_430.o
+- name: sqrt
+  nid: '0x659e011e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_211.o
+- name: sqrtf
+  nid: '0x8451edf0'
+  signature: ''
+  notes: extracted from _sys_libm_0001_274.o
+- name: sqrtf4
+  nid: '0xed05c265'
+  signature: ''
+  notes: extracted from _sys_libm_0001_469.o
+- name: sqrtf4fast
+  nid: '0x7d02a5ca'
+  signature: ''
+  notes: extracted from _sys_libm_0001_263.o
+- name: sqrtl
+  nid: '0x2b282ebb'
+  signature: ''
+  notes: extracted from _sys_libm_0001_88.o
+- name: tan
+  nid: '0xd50277ad'
+  signature: ''
+  notes: extracted from _sys_libm_0001_418.o
+- name: tanf
+  nid: '0x9379e36e'
+  signature: ''
+  notes: extracted from _sys_libm_0001_298.o
+- name: tanf4
+  nid: '0x487bbd1c'
+  signature: ''
+  notes: extracted from _sys_libm_0001_168.o
+- name: tanf4fast
+  nid: '0x7f91cd41'
+  signature: ''
+  notes: extracted from _sys_libm_0001_267.o
+- name: tanh
+  nid: '0xe2f1d4b2'
+  signature: ''
+  notes: extracted from _sys_libm_0001_447.o
+- name: tanhf
+  nid: '0xd4f37b9d'
+  signature: ''
+  notes: extracted from _sys_libm_0001_417.o
+- name: tanhl
+  nid: '0x44cf744b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_156.o
+- name: tanl
+  nid: '0xd3a346a8'
+  signature: ''
+  notes: extracted from _sys_libm_0001_412.o
+- name: tgamma
+  nid: '0x11c51388'
+  signature: ''
+  notes: extracted from _sys_libm_0001_40.o
+- name: tgammaf
+  nid: '0x9f46f5a4'
+  signature: ''
+  notes: extracted from _sys_libm_0001_318.o
+- name: tgammal
+  nid: '0x182cd542'
+  signature: ''
+  notes: extracted from _sys_libm_0001_52.o
+- name: trunc
+  nid: '0x475d855b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_163.o
+- name: truncf
+  nid: '0x2a138d2b'
+  signature: ''
+  notes: extracted from _sys_libm_0001_84.o
+- name: truncf4
+  nid: '0x1e623f95'
+  signature: ''
+  notes: extracted from _sys_libm_0001_65.o
+- name: truncl
+  nid: '0x55c8a549'
+  signature: ''
+  notes: extracted from _sys_libm_0001_190.o
+imports: []

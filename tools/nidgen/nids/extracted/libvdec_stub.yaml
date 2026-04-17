@@ -1,0 +1,49 @@
+library: vdec
+version: 1
+module: vdec
+exports:
+- name: cellVdecClose
+  nid: '0x16698e83'
+  signature: ''
+  notes: extracted from _libvdec_0001_2.o
+- name: cellVdecDecodeAu
+  nid: '0x2bf4ddd2'
+  signature: ''
+  notes: extracted from _libvdec_0001_4.o
+- name: cellVdecEndSeq
+  nid: '0x824433f0'
+  signature: ''
+  notes: extracted from _libvdec_0001_6.o
+- name: cellVdecGetPicItem
+  nid: '0x17c702b9'
+  signature: ''
+  notes: extracted from _libvdec_0001_3.o
+- name: cellVdecGetPicture
+  nid: '0x807c861a'
+  signature: ''
+  notes: extracted from _libvdec_0001_5.o
+- name: cellVdecOpen
+  nid: '0xb6bbcd5d'
+  signature: ''
+  notes: extracted from _libvdec_0001_7.o
+- name: cellVdecOpenEx
+  nid: '0x0053e2d8'
+  signature: ''
+  notes: extracted from _libvdec_0001_1.o
+- name: cellVdecQueryAttr
+  nid: '0xff6f6ebe'
+  signature: ''
+  notes: extracted from _libvdec_0001_11.o
+- name: cellVdecQueryAttrEx
+  nid: '0xc982a84a'
+  signature: ''
+  notes: extracted from _libvdec_0001_9.o
+- name: cellVdecSetFrameRate
+  nid: '0xe13ef6fc'
+  signature: ''
+  notes: extracted from _libvdec_0001_10.o
+- name: cellVdecStartSeq
+  nid: '0xc757c2aa'
+  signature: ''
+  notes: extracted from _libvdec_0001_8.o
+imports: []

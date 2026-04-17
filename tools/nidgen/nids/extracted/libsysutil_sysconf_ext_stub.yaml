@@ -1,0 +1,9 @@
+library: sysutil_sysconf_ext
+version: 1
+module: sysutil_sysconf_ext
+exports:
+- name: cellSysconfBtGetDeviceList
+  nid: '0x08db2adf'
+  signature: ''
+  notes: extracted from _cellSysconfExtUtility_0001_1.o
+imports: []

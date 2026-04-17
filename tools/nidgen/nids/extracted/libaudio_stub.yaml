@@ -1,0 +1,97 @@
+library: audio
+version: 1
+module: audio
+exports:
+- name: cellAudioAdd2chData
+  nid: '0x9e4b1db8'
+  signature: ''
+  notes: extracted from _cellAudio_0001_16.o
+- name: cellAudioAdd6chData
+  nid: '0x832df17e'
+  signature: ''
+  notes: extracted from _cellAudio_0001_14.o
+- name: cellAudioAddData
+  nid: '0xdab029aa'
+  signature: ''
+  notes: extracted from _cellAudio_0001_21.o
+- name: cellAudioCreateNotifyEventQueue
+  nid: '0x04af134e'
+  signature: ''
+  notes: extracted from _cellAudio_0001_1.o
+- name: cellAudioCreateNotifyEventQueueEx
+  nid: '0xa4c9ba65'
+  signature: ''
+  notes: extracted from _cellAudio_0001_17.o
+- name: cellAudioGetPortBlockTag
+  nid: '0xe4046afe'
+  signature: ''
+  notes: extracted from _cellAudio_0001_22.o
+- name: cellAudioGetPortConfig
+  nid: '0x74a66af0'
+  signature: ''
+  notes: extracted from _cellAudio_0001_13.o
+- name: cellAudioGetPortTimestamp
+  nid: '0x4109d08c'
+  signature: ''
+  notes: extracted from _cellAudio_0001_8.o
+- name: cellAudioInit
+  nid: '0x0b168f92'
+  signature: ''
+  notes: extracted from _cellAudio_0001_2.o
+- name: cellAudioMiscSetAccessoryVolume
+  nid: '0x31211f6b'
+  signature: ''
+  notes: extracted from _cellAudio_0001_6.o
+- name: cellAudioPortClose
+  nid: '0x4129fe2d'
+  signature: ''
+  notes: extracted from _cellAudio_0001_9.o
+- name: cellAudioPortOpen
+  nid: '0xcd7bc431'
+  signature: ''
+  notes: extracted from _cellAudio_0001_20.o
+- name: cellAudioPortStart
+  nid: '0x89be28f2'
+  signature: ''
+  notes: extracted from _cellAudio_0001_15.o
+- name: cellAudioPortStop
+  nid: '0x5b1e2c73'
+  signature: ''
+  notes: extracted from _cellAudio_0001_12.o
+- name: cellAudioQuit
+  nid: '0xca5ac370'
+  signature: ''
+  notes: extracted from _cellAudio_0001_19.o
+- name: cellAudioRemoveNotifyEventQueue
+  nid: '0xff3626fd'
+  signature: ''
+  notes: extracted from _cellAudio_0001_23.o
+- name: cellAudioRemoveNotifyEventQueueEx
+  nid: '0x2b9bd9ad'
+  signature: ''
+  notes: extracted from _cellAudio_0001_5.o
+- name: cellAudioSendAck
+  nid: '0x17d1213b'
+  signature: ''
+  notes: extracted from _cellAudio_0001_3.o
+- name: cellAudioSetNotifyEventQueue
+  nid: '0x377e0cd9'
+  signature: ''
+  notes: extracted from _cellAudio_0001_7.o
+- name: cellAudioSetNotifyEventQueueEx
+  nid: '0xb56ef5a1'
+  signature: ''
+  notes: extracted from _cellAudio_0001_18.o
+- name: cellAudioSetPersonalDevice
+  nid: '0x5676f81c'
+  signature: ''
+  notes: extracted from _cellAudio_0001_10.o
+- name: cellAudioSetPortLevel
+  nid: '0x56dfe179'
+  signature: ''
+  notes: extracted from _cellAudio_0001_11.o
+- name: cellAudioUnsetPersonalDevice
+  nid: '0x28bc1409'
+  signature: ''
+  notes: extracted from _cellAudio_0001_4.o
+imports: []

@@ -1,0 +1,41 @@
+library: sysutil_photo
+version: 1
+module: sysutil_photo
+exports:
+- name: cellPhotoExportFinalize
+  nid: '0xed4a0148'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_9.o
+- name: cellPhotoExportFromFile
+  nid: '0x09ce84ac'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_2.o
+- name: cellPhotoExportFromFileWithCopy
+  nid: '0x8d14d09b'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_7.o
+- name: cellPhotoExportInitialize
+  nid: '0x4357c77f'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_5.o
+- name: cellPhotoExportInitialize2
+  nid: '0x08cbd8e1'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_1.o
+- name: cellPhotoExportProgress
+  nid: '0xde509ead'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_8.o
+- name: cellPhotoFinalize
+  nid: '0x3f7fc0af'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_3.o
+- name: cellPhotoInitialize
+  nid: '0x55c70783'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_6.o
+- name: cellPhotoRegistFromFile
+  nid: '0x42a32983'
+  signature: ''
+  notes: extracted from _cellPhotoUtility_0001_4.o
+imports: []

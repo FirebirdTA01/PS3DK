@@ -1,0 +1,97 @@
+library: atrac3plus
+version: 1
+module: atrac3plus
+exports:
+- name: cellAtracAddStreamData
+  nid: '0x46cfc013'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_6.o
+- name: cellAtracCreateDecoder
+  nid: '0xfa293e88'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_23.o
+- name: cellAtracCreateDecoderExt
+  nid: '0x2642d4cc'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_4.o
+- name: cellAtracDecode
+  nid: '0x8eb0e65f'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_14.o
+- name: cellAtracDeleteDecoder
+  nid: '0x761cb9be'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_10.o
+- name: cellAtracGetBitrate
+  nid: '0x006016da'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_1.o
+- name: cellAtracGetBufferInfoForResetting
+  nid: '0x99fb73d1'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_16.o
+- name: cellAtracGetChannel
+  nid: '0x0f9667b6'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_3.o
+- name: cellAtracGetInternalErrorInfo
+  nid: '0xb5c11938'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_18.o
+- name: cellAtracGetLoopInfo
+  nid: '0xab6b6dbf'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_17.o
+- name: cellAtracGetMaxSample
+  nid: '0x5f62d546'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_8.o
+- name: cellAtracGetNextDecodePosition
+  nid: '0x7b22e672'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_13.o
+- name: cellAtracGetNextSample
+  nid: '0x4797d1ff'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_7.o
+- name: cellAtracGetRemainFrame
+  nid: '0xdfab73aa'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_22.o
+- name: cellAtracGetSecondBufferInfo
+  nid: '0xbe07f05e'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_19.o
+- name: cellAtracGetSoundInfo
+  nid: '0xcf01d5d4'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_21.o
+- name: cellAtracGetStreamDataInfo
+  nid: '0x2bfff084'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_5.o
+- name: cellAtracGetVacantSize
+  nid: '0xc9a95fcb'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_20.o
+- name: cellAtracIsSecondBufferNeeded
+  nid: '0x99efe171'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_15.o
+- name: cellAtracResetPlayPosition
+  nid: '0x7772eb2b'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_11.o
+- name: cellAtracSetDataAndGetMemSize
+  nid: '0x66afc68e'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_9.o
+- name: cellAtracSetLoopNum
+  nid: '0x78ba5c41'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_12.o
+- name: cellAtracSetSecondBuffer
+  nid: '0x06ddb53e'
+  signature: ''
+  notes: extracted from _cellAtrac_0001_2.o
+imports: []

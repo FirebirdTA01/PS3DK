@@ -1,0 +1,49 @@
+library: sysutil_np_sns
+version: 1
+module: sysutil_np_sns
+exports:
+- name: sceNpSnsFbAbortHandle
+  nid: '0x3711833f'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_3.o
+- name: sceNpSnsFbCheckConfig
+  nid: '0xaa9ed7ff'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_8.o
+- name: sceNpSnsFbCheckThrottle
+  nid: '0x53d03ce1'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_4.o
+- name: sceNpSnsFbCreateHandle
+  nid: '0x8fd1d549'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_7.o
+- name: sceNpSnsFbDestroyHandle
+  nid: '0x6e42c0dd'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_5.o
+- name: sceNpSnsFbGetAccessToken
+  nid: '0x702dc876'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_6.o
+- name: sceNpSnsFbGetLongAccessToken
+  nid: '0xba8c569e'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_10.o
+- name: sceNpSnsFbInit
+  nid: '0x2c0f3548'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_2.o
+- name: sceNpSnsFbLoadThrottle
+  nid: '0xaf86c77a'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_9.o
+- name: sceNpSnsFbStreamPublish
+  nid: '0x021d6c1f'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_1.o
+- name: sceNpSnsFbTerm
+  nid: '0xc05545fd'
+  signature: ''
+  notes: extracted from _sceNpSns_0001_11.o
+imports: []

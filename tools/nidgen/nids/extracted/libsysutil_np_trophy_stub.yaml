@@ -1,0 +1,73 @@
+library: sysutil_np_trophy
+version: 1
+module: sysutil_np_trophy
+exports:
+- name: sceNpTrophyAbortHandle
+  nid: '0x48bd97c7'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_8.o
+- name: sceNpTrophyCreateContext
+  nid: '0xe3bf9a28'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_15.o
+- name: sceNpTrophyCreateHandle
+  nid: '0x1c25470d'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_3.o
+- name: sceNpTrophyDestroyContext
+  nid: '0x3741ecc7'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_6.o
+- name: sceNpTrophyDestroyHandle
+  nid: '0x623cd2dc'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_10.o
+- name: sceNpTrophyGetGameIcon
+  nid: '0xff299e03'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_17.o
+- name: sceNpTrophyGetGameInfo
+  nid: '0x49d18217'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_9.o
+- name: sceNpTrophyGetGameProgress
+  nid: '0x079f0e87'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_1.o
+- name: sceNpTrophyGetRequiredDiskSpace
+  nid: '0x370136fe'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_5.o
+- name: sceNpTrophyGetTrophyIcon
+  nid: '0xbaedf689'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_14.o
+- name: sceNpTrophyGetTrophyInfo
+  nid: '0xfce6d30a'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_16.o
+- name: sceNpTrophyGetTrophyUnlockState
+  nid: '0xb3ac3478'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_13.o
+- name: sceNpTrophyInit
+  nid: '0x39567781'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_7.o
+- name: sceNpTrophyRegisterContext
+  nid: '0x1197b52c'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_2.o
+- name: sceNpTrophySetSoundLevel
+  nid: '0x27deda93'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_4.o
+- name: sceNpTrophyTerm
+  nid: '0xa7fabf4d'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_12.o
+- name: sceNpTrophyUnlockTrophy
+  nid: '0x8ceedd21'
+  signature: ''
+  notes: extracted from _sceNpTrophy_0001_11.o
+imports: []

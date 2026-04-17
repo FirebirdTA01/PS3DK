@@ -1,0 +1,25 @@
+library: sysutil_userinfo
+version: 1
+module: sysutil_userinfo
+exports:
+- name: cellUserInfoEnableOverlay
+  nid: '0xb3516536'
+  signature: ''
+  notes: extracted from _cellUserInfo_0001_4.o
+- name: cellUserInfoGetList
+  nid: '0xc55e338b'
+  signature: ''
+  notes: extracted from _cellUserInfo_0001_5.o
+- name: cellUserInfoGetStat
+  nid: '0x2b761140'
+  signature: ''
+  notes: extracted from _cellUserInfo_0001_1.o
+- name: cellUserInfoSelectUser_ListType
+  nid: '0x3097cc1c'
+  signature: ''
+  notes: extracted from _cellUserInfo_0001_2.o
+- name: cellUserInfoSelectUser_SetList
+  nid: '0x55123a25'
+  signature: ''
+  notes: extracted from _cellUserInfo_0001_3.o
+imports: []

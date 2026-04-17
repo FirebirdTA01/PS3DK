@@ -1,0 +1,145 @@
+library: lv2dbg
+version: 1
+module: lv2dbg
+exports:
+- name: sys_dbg_disable_floating_point_enabled_exception
+  nid: '0xf254768c'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_35.o
+- name: sys_dbg_enable_floating_point_enabled_exception
+  nid: '0x3147c6ca'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_8.o
+- name: sys_dbg_finalize_ppu_exception_handler
+  nid: '0xc0eb9266'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_26.o
+- name: sys_dbg_get_address_from_dabr
+  nid: '0xbb0ae221'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_24.o
+- name: sys_dbg_get_cond_information
+  nid: '0x63bd413e'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_16.o
+- name: sys_dbg_get_coredump_params
+  nid: '0xb9da87d3'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_23.o
+- name: sys_dbg_get_event_flag_information
+  nid: '0xdf856979'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_34.o
+- name: sys_dbg_get_event_queue_information
+  nid: '0x381ae33e'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_9.o
+- name: sys_dbg_get_lwcond_information
+  nid: '0x7bdadb01'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_18.o
+- name: sys_dbg_get_lwmutex_information
+  nid: '0xcb377e36'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_31.o
+- name: sys_dbg_get_mutex_information
+  nid: '0x50453aa8'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_13.o
+- name: sys_dbg_get_ppu_thread_ids
+  nid: '0x113b0bea'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_3.o
+- name: sys_dbg_get_ppu_thread_name
+  nid: '0x4b55f456'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_11.o
+- name: sys_dbg_get_ppu_thread_status
+  nid: '0x6b413178'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_17.o
+- name: sys_dbg_get_rwlock_information
+  nid: '0x9794bb53'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_19.o
+- name: sys_dbg_get_semaphore_information
+  nid: '0xa2d6cbd2'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_21.o
+- name: sys_dbg_get_spu_thread_group_ids
+  nid: '0x08ef08a9'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_2.o
+- name: sys_dbg_get_spu_thread_group_name
+  nid: '0xbd69e584'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_25.o
+- name: sys_dbg_get_spu_thread_group_status
+  nid: '0x9ddb9dc3'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_20.o
+- name: sys_dbg_get_spu_thread_ids
+  nid: '0x1860f909'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_4.o
+- name: sys_dbg_get_spu_thread_name
+  nid: '0x3e5eed36'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_10.o
+- name: sys_dbg_initialize_ppu_exception_handler
+  nid: '0xc353353a'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_28.o
+- name: sys_dbg_mat_get_condition
+  nid: '0x590a276e'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_15.o
+- name: sys_dbg_mat_set_condition
+  nid: '0x24a3d413'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_6.o
+- name: sys_dbg_read_ppu_thread_context
+  nid: '0xc5eef17f'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_29.o
+- name: sys_dbg_read_spu_thread_context
+  nid: '0xc21ee635'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_27.o
+- name: sys_dbg_read_spu_thread_context2
+  nid: '0x266c2bd3'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_7.o
+- name: sys_dbg_register_ppu_exception_handler
+  nid: '0x22916f45'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_5.o
+- name: sys_dbg_set_address_to_dabr
+  nid: '0xdb14b37b'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_33.o
+- name: sys_dbg_set_mask_to_ppu_exception_handler
+  nid: '0xab475d53'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_22.o
+- name: sys_dbg_set_stacksize_ppu_exception_handler
+  nid: '0x06a840f5'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_1.o
+- name: sys_dbg_signal_to_coredump_handler
+  nid: '0xd830062a'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_32.o
+- name: sys_dbg_signal_to_ppu_exception_handler
+  nid: '0x4ded9f6c'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_12.o
+- name: sys_dbg_unregister_ppu_exception_handler
+  nid: '0xc6d7ec13'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_30.o
+- name: sys_dbg_vm_get_page_information
+  nid: '0x580f8203'
+  signature: ''
+  notes: extracted from _sys_lv2dbg_0001_14.o
+imports: []

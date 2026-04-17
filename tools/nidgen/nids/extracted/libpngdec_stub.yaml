@@ -1,0 +1,121 @@
+library: pngdec
+version: 1
+module: pngdec
+exports:
+- name: cellPngDecClose
+  nid: '0x5b3d1ff1'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_9.o
+- name: cellPngDecCreate
+  nid: '0x157d30c5'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_2.o
+- name: cellPngDecDecodeData
+  nid: '0x2310f155'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_3.o
+- name: cellPngDecDestroy
+  nid: '0x820dae1a'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_14.o
+- name: cellPngDecExtCreate
+  nid: '0x48436b2d'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_8.o
+- name: cellPngDecExtDecodeData
+  nid: '0x726fc1d0'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_11.o
+- name: cellPngDecExtOpen
+  nid: '0x0c515302'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_1.o
+- name: cellPngDecExtReadHeader
+  nid: '0x8b33f863'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_15.o
+- name: cellPngDecExtSetParameter
+  nid: '0x9e9d7d42'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_17.o
+- name: cellPngDecGetPLTE
+  nid: '0xe163977f'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_26.o
+- name: cellPngDecGetTextChunk
+  nid: '0xb40ca175'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_20.o
+- name: cellPngDecGetUnknownChunks
+  nid: '0x609ec7d5'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_10.o
+- name: cellPngDecGetbKGD
+  nid: '0x7585a275'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_12.o
+- name: cellPngDecGetcHRM
+  nid: '0x7a062d26'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_13.o
+- name: cellPngDecGetgAMA
+  nid: '0xb153629c'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_19.o
+- name: cellPngDecGethIST
+  nid: '0xb905ebb7'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_22.o
+- name: cellPngDecGetiCCP
+  nid: '0xf44b6c30'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_29.o
+- name: cellPngDecGetoFFs
+  nid: '0x27c921b5'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_4.o
+- name: cellPngDecGetpCAL
+  nid: '0xb4fe75e1'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_21.o
+- name: cellPngDecGetpHYs
+  nid: '0x3d50016a'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_7.o
+- name: cellPngDecGetsBIT
+  nid: '0x30cb334a'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_5.o
+- name: cellPngDecGetsCAL
+  nid: '0xc41e1198'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_24.o
+- name: cellPngDecGetsPLT
+  nid: '0xa5cdf57e'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_18.o
+- name: cellPngDecGetsRGB
+  nid: '0xe4416e82'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_27.o
+- name: cellPngDecGettIME
+  nid: '0x35a6846c'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_6.o
+- name: cellPngDecGettRNS
+  nid: '0xb96fb26e'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_23.o
+- name: cellPngDecOpen
+  nid: '0xd2bc5bfd'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_25.o
+- name: cellPngDecReadHeader
+  nid: '0x9ccdcc95'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_16.o
+- name: cellPngDecSetParameter
+  nid: '0xe97c9bd4'
+  signature: ''
+  notes: extracted from _cellPngDec_0001_28.o
+imports: []

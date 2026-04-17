@@ -1,0 +1,257 @@
+library: spurs_jq
+version: 1
+module: spurs_jq
+exports:
+- name: _cellSpursCreateJobQueue
+  nid: '0xf244e799'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_58.o
+- name: _cellSpursCreateJobQueueWithJobDescriptorPool
+  nid: '0x983be7fc'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_41.o
+- name: _cellSpursJobQueueAllocateJobDescriptorBody
+  nid: '0x0d69929e'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_3.o
+- name: _cellSpursJobQueuePort2CopyPushJobBody
+  nid: '0xc39173a4'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_49.o
+- name: _cellSpursJobQueuePort2PushAndReleaseJobBody
+  nid: '0xe1731df3'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_54.o
+- name: _cellSpursJobQueuePort2PushJobBody
+  nid: '0xcf89f218'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_52.o
+- name: _cellSpursJobQueuePort2PushJobListBody
+  nid: '0xb53436e7'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_45.o
+- name: _cellSpursJobQueuePortCopyPushBody
+  nid: '0x46c3fb5a'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_18.o
+- name: _cellSpursJobQueuePortCopyPushJobBody
+  nid: '0x1917359d'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_8.o
+- name: _cellSpursJobQueuePortCopyPushJobBody2
+  nid: '0xef66c4b7'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_56.o
+- name: _cellSpursJobQueuePortPushBody
+  nid: '0x4e1a17a6'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_19.o
+- name: _cellSpursJobQueuePortPushFlush
+  nid: '0xbd1c5d6b'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_46.o
+- name: _cellSpursJobQueuePortPushJobBody
+  nid: '0x85cd04cd'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_30.o
+- name: _cellSpursJobQueuePortPushJobBody2
+  nid: '0x90e392cf'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_34.o
+- name: _cellSpursJobQueuePortPushJobListBody
+  nid: '0x1b6eea7e'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_9.o
+- name: _cellSpursJobQueuePortPushSync
+  nid: '0x9396be1d'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_38.o
+- name: _cellSpursJobQueuePushAndReleaseJobBody
+  nid: '0x1da890c7'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_10.o
+- name: _cellSpursJobQueuePushBody
+  nid: '0x99316997'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_42.o
+- name: _cellSpursJobQueuePushFlush
+  nid: '0xdf0120c2'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_53.o
+- name: _cellSpursJobQueuePushJob2Body
+  nid: '0x36d0a53c'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_14.o
+- name: _cellSpursJobQueuePushJobBody
+  nid: '0xc4843b74'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_50.o
+- name: _cellSpursJobQueuePushJobBody2
+  nid: '0x98203e3c'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_40.o
+- name: _cellSpursJobQueuePushJobListBody
+  nid: '0xaf1c7a1d'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_44.o
+- name: _cellSpursJobQueuePushSync
+  nid: '0x701fd8a9'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_26.o
+- name: cellSpursGetJobQueueId
+  nid: '0xc343ee10'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_48.o
+- name: cellSpursJobQueueAttributeInitialize
+  nid: '0x43ddab4f'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_17.o
+- name: cellSpursJobQueueAttributeSetDoBusyWaiting
+  nid: '0x0582338a'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_2.o
+- name: cellSpursJobQueueAttributeSetGrabParameters
+  nid: '0xe70f874e'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_55.o
+- name: cellSpursJobQueueAttributeSetIsHaltOnError
+  nid: '0xff03cc79'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_62.o
+- name: cellSpursJobQueueAttributeSetIsJobTypeMemoryCheck
+  nid: '0x742cec0d'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_27.o
+- name: cellSpursJobQueueAttributeSetMaxGrab
+  nid: '0x5fb9b05d'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_21.o
+- name: cellSpursJobQueueAttributeSetMaxSizeJobDescriptor
+  nid: '0x1686957e'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_7.o
+- name: cellSpursJobQueueAttributeSetSubmitWithEntryLock
+  nid: '0x0f03f712'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_4.o
+- name: cellSpursJobQueueClose
+  nid: '0x29c2acc5'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_12.o
+- name: cellSpursJobQueueGetError
+  nid: '0x2e775550'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_13.o
+- name: cellSpursJobQueueGetHandleCount
+  nid: '0x840c5239'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_29.o
+- name: cellSpursJobQueueGetMaxSizeJobDescriptor
+  nid: '0x5659da82'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_20.o
+- name: cellSpursJobQueueGetSpurs
+  nid: '0x01bbf2e0'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_1.o
+- name: cellSpursJobQueueGetSuspendedJobSize
+  nid: '0x15934401'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_6.o
+- name: cellSpursJobQueueOpen
+  nid: '0xff7a7bd2'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_63.o
+- name: cellSpursJobQueuePort2AllocateJobDescriptor
+  nid: '0x934abb00'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_37.o
+- name: cellSpursJobQueuePort2Create
+  nid: '0xf11fe0f1'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_57.o
+- name: cellSpursJobQueuePort2Destroy
+  nid: '0xc485d207'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_51.o
+- name: cellSpursJobQueuePort2GetJobQueue
+  nid: '0x435bff07'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_16.o
+- name: cellSpursJobQueuePort2PushFlush
+  nid: '0xbfea28ab'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_47.o
+- name: cellSpursJobQueuePort2PushSync
+  nid: '0xfc526b72'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_61.o
+- name: cellSpursJobQueuePort2Sync
+  nid: '0xfacb3ced'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_60.o
+- name: cellSpursJobQueuePortFinalize
+  nid: '0x26fa81b4'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_11.o
+- name: cellSpursJobQueuePortGetJobQueue
+  nid: '0x90c88f84'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_33.o
+- name: cellSpursJobQueuePortInitialize
+  nid: '0x3d1294fc'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_15.o
+- name: cellSpursJobQueuePortInitializeWithDescriptorBuffer
+  nid: '0xf5de6363'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_59.o
+- name: cellSpursJobQueuePortSync
+  nid: '0x634b1502'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_22.o
+- name: cellSpursJobQueuePortTrySync
+  nid: '0x80a0264c'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_28.o
+- name: cellSpursJobQueueSemaphoreAcquire
+  nid: '0x6c93ea18'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_25.o
+- name: cellSpursJobQueueSemaphoreInitialize
+  nid: '0x677027af'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_23.o
+- name: cellSpursJobQueueSemaphoreTryAcquire
+  nid: '0x97409f67'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_39.o
+- name: cellSpursJobQueueSendSignal
+  nid: '0x915455b3'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_35.o
+- name: cellSpursJobQueueSetExceptionEventHandler
+  nid: '0x9c300489'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_43.o
+- name: cellSpursJobQueueSetExceptionEventHandler2
+  nid: '0x6c61bf87'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_24.o
+- name: cellSpursJobQueueSetWaitingMode
+  nid: '0x13671514'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_5.o
+- name: cellSpursJobQueueUnsetExceptionEventHandler
+  nid: '0x93248b92'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_36.o
+- name: cellSpursJoinJobQueue
+  nid: '0x8ce4cffa'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_32.o
+- name: cellSpursShutdownJobQueue
+  nid: '0x8c97a96c'
+  signature: ''
+  notes: extracted from _cellSpursJq_0001_31.o
+imports: []

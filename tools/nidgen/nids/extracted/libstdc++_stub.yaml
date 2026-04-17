@@ -1,0 +1,2077 @@
+library: stdc++
+version: 1
+module: stdc++
+exports:
+- name: _Deletegloballocale
+  nid: '0x9dc040e4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_339.o
+- name: _Fac_tidy
+  nid: '0x4a40969d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_160.o
+- name: _Getctyptab
+  nid: '0x496c6f50'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_156.o
+- name: _ZNKSt11logic_error4whatEv
+  nid: '0x83bca135'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_292.o
+- name: _ZNKSt12_String_base5_XlenEv
+  nid: '0x683ca70a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_239.o
+- name: _ZNKSt12_String_base5_XranEv
+  nid: '0xc7931798'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_427.o
+- name: _ZNKSt12codecvt_base11do_encodingEv
+  nid: '0x0ba5483c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_30.o
+- name: _ZNKSt12codecvt_base13do_max_lengthEv
+  nid: '0x3e18602a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_136.o
+- name: _ZNKSt12codecvt_base16do_always_noconvEv
+  nid: '0x16df5ecb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_52.o
+- name: _ZNKSt13runtime_error4whatEv
+  nid: '0x5333bdc9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_184.o
+- name: _ZNKSt5ctypeIcE10do_tolowerEPcPKc
+  nid: '0xa8f64fdb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_364.o
+- name: _ZNKSt5ctypeIcE10do_tolowerEc
+  nid: '0xf83e8d95'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_509.o
+- name: _ZNKSt5ctypeIcE10do_toupperEPcPKc
+  nid: '0xd9a12c5e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_458.o
+- name: _ZNKSt5ctypeIcE10do_toupperEc
+  nid: '0x6dbbb9de'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_251.o
+- name: _ZNKSt5ctypeIcE8do_widenEPKcS2_Pc
+  nid: '0x5adf9060'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_204.o
+- name: _ZNKSt5ctypeIcE8do_widenEc
+  nid: '0x61f55c30'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_217.o
+- name: _ZNKSt5ctypeIcE9do_narrowEPKcS2_cPc
+  nid: '0xa957adcc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_368.o
+- name: _ZNKSt5ctypeIcE9do_narrowEcc
+  nid: '0x91959ed6'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_315.o
+- name: _ZNKSt5ctypeIwE10do_scan_isEsPKwS2_
+  nid: '0x128cd621'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_44.o
+- name: _ZNKSt5ctypeIwE10do_tolowerEPwPKw
+  nid: '0x9ec88ae6'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_342.o
+- name: _ZNKSt5ctypeIwE10do_tolowerEw
+  nid: '0x9ef60bf3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_343.o
+- name: _ZNKSt5ctypeIwE10do_toupperEPwPKw
+  nid: '0xbf9c3609'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_415.o
+- name: _ZNKSt5ctypeIwE10do_toupperEw
+  nid: '0x7008e209'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_257.o
+- name: _ZNKSt5ctypeIwE11do_scan_notEsPKwS2_
+  nid: '0xef6f90d8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_491.o
+- name: _ZNKSt5ctypeIwE5do_isEPKwS2_Ps
+  nid: '0x26e8e1cf'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_90.o
+- name: _ZNKSt5ctypeIwE5do_isEsw
+  nid: '0x229a0963'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_82.o
+- name: _ZNKSt5ctypeIwE8do_widenEPKcS2_Pw
+  nid: '0xa35033e8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_352.o
+- name: _ZNKSt5ctypeIwE8do_widenEc
+  nid: '0xa37c3e51'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_353.o
+- name: _ZNKSt5ctypeIwE9do_narrowEPKwS2_cPc
+  nid: '0xdf1e09e1'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_471.o
+- name: _ZNKSt5ctypeIwE9do_narrowEwc
+  nid: '0x14e3faa5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_49.o
+- name: _ZNKSt6locale9_GetfacetEj
+  nid: '0x0091a3fd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_3.o
+- name: _ZNKSt6localeeqERKS_
+  nid: '0xa74e5a27'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_361.o
+- name: _ZNKSt7_MpunctIcE11do_groupingEv
+  nid: '0x2b05b95a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_101.o
+- name: _ZNKSt7_MpunctIcE13do_neg_formatEv
+  nid: '0x696b47f2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_242.o
+- name: _ZNKSt7_MpunctIcE13do_pos_formatEv
+  nid: '0x753c71db'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_264.o
+- name: _ZNKSt7_MpunctIcE14do_curr_symbolEv
+  nid: '0xe528a368'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_477.o
+- name: _ZNKSt7_MpunctIcE14do_frac_digitsEv
+  nid: '0x2adccb1a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_99.o
+- name: _ZNKSt7_MpunctIcE16do_decimal_pointEv
+  nid: '0x7142ad20'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_260.o
+- name: _ZNKSt7_MpunctIcE16do_negative_signEv
+  nid: '0xcc79f55d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_434.o
+- name: _ZNKSt7_MpunctIcE16do_positive_signEv
+  nid: '0x9b5358f9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_333.o
+- name: _ZNKSt7_MpunctIcE16do_thousands_sepEv
+  nid: '0x6c19db26'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_246.o
+- name: _ZNKSt7_MpunctIwE11do_groupingEv
+  nid: '0x75a0617c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_266.o
+- name: _ZNKSt7_MpunctIwE13do_neg_formatEv
+  nid: '0x1b6a7482'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_64.o
+- name: _ZNKSt7_MpunctIwE13do_pos_formatEv
+  nid: '0x268c3ea5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_89.o
+- name: _ZNKSt7_MpunctIwE14do_curr_symbolEv
+  nid: '0x5102ac61'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_179.o
+- name: _ZNKSt7_MpunctIwE14do_frac_digitsEv
+  nid: '0x3933645f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_129.o
+- name: _ZNKSt7_MpunctIwE16do_decimal_pointEv
+  nid: '0x040c18ff'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_17.o
+- name: _ZNKSt7_MpunctIwE16do_negative_signEv
+  nid: '0x17dd0a4e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_53.o
+- name: _ZNKSt7_MpunctIwE16do_positive_signEv
+  nid: '0x06bc5b51'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_24.o
+- name: _ZNKSt7_MpunctIwE16do_thousands_sepEv
+  nid: '0x9891bf45'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_328.o
+- name: _ZNKSt7codecvtIccSt9_MbstatetE10do_unshiftERS0_PcS3_RS3_
+  nid: '0x550255f7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_187.o
+- name: _ZNKSt7codecvtIccSt9_MbstatetE5do_inERS0_PKcS4_RS4_PcS6_RS6_
+  nid: '0xfc563813'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_512.o
+- name: _ZNKSt7codecvtIccSt9_MbstatetE6do_outERS0_PKcS4_RS4_PcS6_RS6_
+  nid: '0x9f528cd3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_344.o
+- name: _ZNKSt7codecvtIccSt9_MbstatetE9do_lengthERKS0_PKcS5_j
+  nid: '0x29c11f46'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_95.o
+- name: _ZNKSt7codecvtIwcSt9_MbstatetE10do_unshiftERS0_PcS3_RS3_
+  nid: '0x2354ec0a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_83.o
+- name: _ZNKSt7codecvtIwcSt9_MbstatetE11do_encodingEv
+  nid: '0x09e73a2a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_29.o
+- name: _ZNKSt7codecvtIwcSt9_MbstatetE13do_max_lengthEv
+  nid: '0xd76b2e07'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_449.o
+- name: _ZNKSt7codecvtIwcSt9_MbstatetE16do_always_noconvEv
+  nid: '0x2cf8ea50'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_105.o
+- name: _ZNKSt7codecvtIwcSt9_MbstatetE5do_inERS0_PKcS4_RS4_PwS6_RS6_
+  nid: '0xf01deff8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_495.o
+- name: _ZNKSt7codecvtIwcSt9_MbstatetE6do_outERS0_PKwS4_RS4_PcS6_RS6_
+  nid: '0xa700bc7d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_360.o
+- name: _ZNKSt7codecvtIwcSt9_MbstatetE9do_lengthERKS0_PKcS5_j
+  nid: '0x67948307'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_235.o
+- name: _ZNKSt7collateIcE10do_compareEPKcS2_S2_S2_
+  nid: '0x5656ccff'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_192.o
+- name: _ZNKSt7collateIcE12do_transformEPKcS2_
+  nid: '0xb3f05af3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_390.o
+- name: _ZNKSt7collateIcE7do_hashEPKcS2_
+  nid: '0x05903101'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_21.o
+- name: _ZNKSt7collateIwE10do_compareEPKwS2_S2_S2_
+  nid: '0xbc5ad91c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_409.o
+- name: _ZNKSt7collateIwE12do_transformEPKwS2_
+  nid: '0x33e04d8e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_122.o
+- name: _ZNKSt7collateIwE7do_hashEPKwS2_
+  nid: '0x0bc08c57'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_31.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERPv
+  nid: '0x643e67f4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_224.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERb
+  nid: '0x2ac890f4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_98.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERd
+  nid: '0x2c6ce396'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_104.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERe
+  nid: '0x4827e6be'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_153.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERf
+  nid: '0x5a3ad4bd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_200.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERj
+  nid: '0xd5c5ee3d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_446.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERl
+  nid: '0x4a799510'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_161.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERm
+  nid: '0xa9e5bb16'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_369.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERt
+  nid: '0x6437a975'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_223.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERx
+  nid: '0x67c09257'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_236.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERy
+  nid: '0xac6c23c0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_376.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE8_GetffldEPcRS3_S6_RKSt6locale
+  nid: '0x207b56fa'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_77.o
+- name: _ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE8_GetifldEPcRS3_S6_NSt5_IosbIiE9_FmtflagsERKSt6locale
+  nid: '0x23ef7642'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_86.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERPv
+  nid: '0x2e2b80c8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_109.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERb
+  nid: '0xfff6ef55'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_518.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERd
+  nid: '0x59c77266'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_199.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERe
+  nid: '0x56fac416'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_194.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERf
+  nid: '0xf2b9ab86'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_499.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERj
+  nid: '0x9268d6e7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_317.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERl
+  nid: '0x3f9cb259'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_139.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERm
+  nid: '0xad6dbac2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_380.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERt
+  nid: '0x1474ac53'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_48.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERx
+  nid: '0x01aa0cef'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_7.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateERy
+  nid: '0xfefd7d3a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_516.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE8_GetffldEPcRS3_S6_RKSt6locale
+  nid: '0x2670b433'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_88.o
+- name: _ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE8_GetifldEPcRS3_S6_NSt5_IosbIiE9_FmtflagsERKSt6locale
+  nid: '0xce6705c3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_438.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE5_FputES3_RSt8ios_basecPKcjjjj
+  nid: '0x21659e45'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_80.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE5_IputES3_RSt8ios_basecPcj
+  nid: '0x2af79bd6'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_100.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecPKv
+  nid: '0x0339259c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_14.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecb
+  nid: '0xab211d97'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_372.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecd
+  nid: '0x3fc2324d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_140.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basece
+  nid: '0x258359df'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_87.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecl
+  nid: '0x00cf44f7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_5.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecm
+  nid: '0x3937f2f8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_130.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecx
+  nid: '0xb1550b3c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_385.o
+- name: _ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecy
+  nid: '0x3bda45a7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_133.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE5_FputES3_RSt8ios_basewPKcjjjj
+  nid: '0x61a23009'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_216.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE5_IputES3_RSt8ios_basewPcj
+  nid: '0x629b8531'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_218.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewPKv
+  nid: '0x020b22f3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_11.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewb
+  nid: '0xb8ec13a5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_402.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewd
+  nid: '0xf30d3407'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_500.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewe
+  nid: '0xd2f9d93d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_442.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewl
+  nid: '0x823759d3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_289.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewm
+  nid: '0xd4838fbd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_444.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewx
+  nid: '0x8a85d688'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_305.o
+- name: _ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewy
+  nid: '0x7da7fdb1'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_280.o
+- name: _ZNKSt8_Locinfo7_GetcvtEv
+  nid: '0x85b3c6da'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_296.o
+- name: _ZNKSt8bad_cast4whatEv
+  nid: '0x6c8dc459'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_248.o
+- name: _ZNKSt8messagesIcE6do_getEiiiRKSs
+  nid: '0x95082493'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_322.o
+- name: _ZNKSt8messagesIcE7do_openERKSsRKSt6locale
+  nid: '0x113a515f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_42.o
+- name: _ZNKSt8messagesIcE8do_closeEi
+  nid: '0x63a2b2cc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_221.o
+- name: _ZNKSt8messagesIwE6do_getEiiiRKSbIwSt11char_traitsIwESaIwEE
+  nid: '0x6463d9ea'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_225.o
+- name: _ZNKSt8messagesIwE7do_openERKSsRKSt6locale
+  nid: '0x8c2e6d06'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_307.o
+- name: _ZNKSt8messagesIwE8do_closeEi
+  nid: '0xcbe74ad3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_433.o
+- name: _ZNKSt8numpunctIcE11do_groupingEv
+  nid: '0x30195cf5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_114.o
+- name: _ZNKSt8numpunctIcE11do_truenameEv
+  nid: '0x1a7f963c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_62.o
+- name: _ZNKSt8numpunctIcE12do_falsenameEv
+  nid: '0xb1d696f7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_387.o
+- name: _ZNKSt8numpunctIcE16do_decimal_pointEv
+  nid: '0x18628537'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_54.o
+- name: _ZNKSt8numpunctIcE16do_thousands_sepEv
+  nid: '0x29c90b94'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_96.o
+- name: _ZNKSt8numpunctIwE11do_groupingEv
+  nid: '0x4e5cd916'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_173.o
+- name: _ZNKSt8numpunctIwE11do_truenameEv
+  nid: '0xe82a422d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_482.o
+- name: _ZNKSt8numpunctIwE12do_falsenameEv
+  nid: '0x49d9ddaf'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_157.o
+- name: _ZNKSt8numpunctIwE16do_decimal_pointEv
+  nid: '0x9c40d1f9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_334.o
+- name: _ZNKSt8numpunctIwE16do_thousands_sepEv
+  nid: '0x08e1865c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_28.o
+- name: _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE11do_get_dateES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0x0d644dca'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_34.o
+- name: _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE11do_get_timeES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0xbd140e12'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_410.o
+- name: _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE11do_get_yearES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0x38783beb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_128.o
+- name: _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE13do_date_orderEv
+  nid: '0xef62751c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_490.o
+- name: _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE14do_get_weekdayES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0x67fbabf0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_238.o
+- name: _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE16do_get_monthnameES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0x002c338b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_1.o
+- name: _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetintERS3_S5_iiRi
+  nid: '0x1bccd2ca'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_67.o
+- name: _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE11do_get_dateES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0x708cf940'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_258.o
+- name: _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE11do_get_timeES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0x23a87483'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_85.o
+- name: _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE11do_get_yearES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0xebd4b51d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_486.o
+- name: _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE13do_date_orderEv
+  nid: '0x61248c80'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_215.o
+- name: _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE14do_get_weekdayES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0x9dcb4bcb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_340.o
+- name: _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE16do_get_monthnameES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEPSt2tm
+  nid: '0xc7d0ee0c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_428.o
+- name: _ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetintERS3_S5_iiRi
+  nid: '0x01409785'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_6.o
+- name: _ZNKSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecPKSt2tmcc
+  nid: '0xd1ee6195'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_441.o
+- name: _ZNKSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewPKSt2tmcc
+  nid: '0xe9d7a4ae'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_484.o
+- name: _ZNKSt9bad_alloc4whatEv
+  nid: '0x96634e42'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_324.o
+- name: _ZNKSt9exception4whatEv
+  nid: '0x50b34c09'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_178.o
+- name: _ZNKSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERSs
+  nid: '0x12de5772'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_45.o
+- name: _ZNKSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERe
+  nid: '0xd6ee1090'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_447.o
+- name: _ZNKSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE8_GetmfldERS3_S5_bRSt8ios_base
+  nid: '0x9dbbe07d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_338.o
+- name: _ZNKSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERSbIwS2_SaIwEE
+  nid: '0xc6f18e84'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_425.o
+- name: _ZNKSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_bRSt8ios_baseRNSt5_IosbIiE8_IostateERe
+  nid: '0x49da8c5f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_158.o
+- name: _ZNKSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE8_GetmfldERS3_S5_bRSt8ios_base
+  nid: '0x4148e091'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_143.o
+- name: _ZNKSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_bRSt8ios_basecRKSs
+  nid: '0xb4352488'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_391.o
+- name: _ZNKSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_bRSt8ios_basece
+  nid: '0xb326f699'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_388.o
+- name: _ZNKSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE8_PutmfldES3_bRSt8ios_basecbSs
+  nid: '0x273be056'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_91.o
+- name: _ZNKSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_bRSt8ios_basewRKSbIwS2_SaIwEE
+  nid: '0xa464c70a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_356.o
+- name: _ZNKSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_bRSt8ios_basewe
+  nid: '0x635166c3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_220.o
+- name: _ZNKSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE8_PutmfldES3_bRSt8ios_basewbSbIwS2_SaIwEE
+  nid: '0x7ebad3f0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_282.o
+- name: _ZNSbIwSt11char_traitsIwESaIwEE5_GrowEjb
+  nid: '0x4e34cf83'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_172.o
+- name: _ZNSbIwSt11char_traitsIwESaIwEE5_TidyEbj
+  nid: '0xc4c7993b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_420.o
+- name: _ZNSbIwSt11char_traitsIwESaIwEE6appendEjw
+  nid: '0x10dc3f6c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_41.o
+- name: _ZNSbIwSt11char_traitsIwESaIwEE6assignERKS2_jj
+  nid: '0x871506ea'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_300.o
+- name: _ZNSbIwSt11char_traitsIwESaIwEE7replaceEjjPKwj
+  nid: '0x64ce0374'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_226.o
+- name: _ZNSdD0Ev
+  nid: '0x336e904e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_121.o
+- name: _ZNSdD1Ev
+  nid: '0x5560c79e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_189.o
+- name: _ZNSiD0Ev
+  nid: '0xb0e7c2f3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_384.o
+- name: _ZNSiD1Ev
+  nid: '0x9cfc0eaf'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_337.o
+- name: _ZNSoD0Ev
+  nid: '0x736c5f22'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_262.o
+- name: _ZNSoD1Ev
+  nid: '0x6f1945fc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_255.o
+- name: _ZNSs5_GrowEjb
+  nid: '0x668b31c6'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_232.o
+- name: _ZNSs5_TidyEbj
+  nid: '0x31b3e5cc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_118.o
+- name: _ZNSs5eraseEjj
+  nid: '0xdd8b1d47'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_469.o
+- name: _ZNSs6appendEjc
+  nid: '0xa9116516'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_366.o
+- name: _ZNSs6assignERKSsjj
+  nid: '0x6929318d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_241.o
+- name: _ZNSs7replaceEjjPKcj
+  nid: '0x22777290'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_81.o
+- name: _ZNSsC1ERKSs
+  nid: '0x9e741d47'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_341.o
+- name: _ZNSt10ctype_baseD0Ev
+  nid: '0xaea59ceb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_383.o
+- name: _ZNSt10ctype_baseD1Ev
+  nid: '0x18a38254'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_56.o
+- name: _ZNSt10ctype_baseD2Ev
+  nid: '0xf1cff87d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_498.o
+- name: _ZNSt10istrstreamD0Ev
+  nid: '0x522b0457'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_181.o
+- name: _ZNSt10istrstreamD1Ev
+  nid: '0xf127e816'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_497.o
+- name: _ZNSt10istrstreamD2Ev
+  nid: '0x9aa7a8b3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_331.o
+- name: _ZNSt10money_baseD0Ev
+  nid: '0x7a180518'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_275.o
+- name: _ZNSt10money_baseD1Ev
+  nid: '0xab5832fd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_373.o
+- name: _ZNSt10money_baseD2Ev
+  nid: '0x9afa5d71'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_332.o
+- name: _ZNSt10moneypunctIcLb0EE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x7fe08910'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_283.o
+- name: _ZNSt10moneypunctIcLb0EED0Ev
+  nid: '0x7c391411'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_278.o
+- name: _ZNSt10moneypunctIcLb0EED1Ev
+  nid: '0x1374b8c8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_46.o
+- name: _ZNSt10moneypunctIcLb1EED0Ev
+  nid: '0x45010630'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_146.o
+- name: _ZNSt10moneypunctIcLb1EED1Ev
+  nid: '0xb509ab64'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_393.o
+- name: _ZNSt10moneypunctIwLb0EED0Ev
+  nid: '0x20f7e066'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_79.o
+- name: _ZNSt10moneypunctIwLb0EED1Ev
+  nid: '0x34edd72b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_123.o
+- name: _ZNSt10moneypunctIwLb1EED0Ev
+  nid: '0xcf9b4d80'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_440.o
+- name: _ZNSt10moneypunctIwLb1EED1Ev
+  nid: '0xa5306edb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_358.o
+- name: _ZNSt10ostrstreamC1EPciNSt5_IosbIiE9_OpenmodeE
+  nid: '0x8729f617'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_301.o
+- name: _ZNSt10ostrstreamC2EPciNSt5_IosbIiE9_OpenmodeE
+  nid: '0x4bc193c7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_166.o
+- name: _ZNSt10ostrstreamD0Ev
+  nid: '0x764ceaa4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_267.o
+- name: _ZNSt10ostrstreamD1Ev
+  nid: '0xd73321ed'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_448.o
+- name: _ZNSt10ostrstreamD2Ev
+  nid: '0x0bcc1910'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_32.o
+- name: _ZNSt11logic_errorD0Ev
+  nid: '0x114e9178'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_43.o
+- name: _ZNSt11logic_errorD1Ev
+  nid: '0xbb4599c5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_407.o
+- name: _ZNSt12codecvt_baseD0Ev
+  nid: '0xad6d839f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_379.o
+- name: _ZNSt12codecvt_baseD1Ev
+  nid: '0x01f81190'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_10.o
+- name: _ZNSt12codecvt_baseD2Ev
+  nid: '0xfeb4107c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_515.o
+- name: _ZNSt12length_errorD0Ev
+  nid: '0x0d4290d2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_33.o
+- name: _ZNSt12length_errorD1Ev
+  nid: '0x4aec14d5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_162.o
+- name: _ZNSt12out_of_rangeD0Ev
+  nid: '0x42c40b2f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_145.o
+- name: _ZNSt12out_of_rangeD1Ev
+  nid: '0x604fec95'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_210.o
+- name: _ZNSt12strstreambuf5_InitEiPcS0_i
+  nid: '0xd830252c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_453.o
+- name: _ZNSt12strstreambuf5_TidyEv
+  nid: '0x2f29da90'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_112.o
+- name: _ZNSt12strstreambuf6freezeEb
+  nid: '0xb87c4b43'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_400.o
+- name: _ZNSt12strstreambuf7seekoffElNSt5_IosbIiE8_SeekdirENS1_9_OpenmodeE
+  nid: '0x4ef0eb8e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_175.o
+- name: _ZNSt12strstreambuf7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+  nid: '0x1f3a9ada'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_75.o
+- name: _ZNSt12strstreambuf8overflowEi
+  nid: '0xc862f7c8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_429.o
+- name: _ZNSt12strstreambuf9pbackfailEi
+  nid: '0x6d483b7a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_249.o
+- name: _ZNSt12strstreambuf9underflowEv
+  nid: '0xd78efcc3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_450.o
+- name: _ZNSt12strstreambufD0Ev
+  nid: '0x1c8083c5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_69.o
+- name: _ZNSt12strstreambufD1Ev
+  nid: '0xf001a741'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_493.o
+- name: _ZNSt12strstreambufD2Ev
+  nid: '0xba85ce08'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_405.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE4syncEv
+  nid: '0x2eb5c13a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_111.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE5_LockEv
+  nid: '0x4520d6a2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_147.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE5imbueERKSt6locale
+  nid: '0x4761783a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_150.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE5uflowEv
+  nid: '0x608abbb5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_213.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE6setbufEPci
+  nid: '0x409409af'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_141.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE7_UnlockEv
+  nid: '0x3eeb7167'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_137.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+  nid: '0xf73f6afc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_506.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+  nid: '0x460e5cb7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_149.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE8overflowEi
+  nid: '0xad3777a2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_377.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE9_EndwriteEv
+  nid: '0x3f6a6e68'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_138.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE9pbackfailEi
+  nid: '0xa2fd0ec5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_351.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEE9underflowEv
+  nid: '0xdc981b5f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_468.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEED0Ev
+  nid: '0x5ca98e4a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_207.o
+- name: _ZNSt13basic_filebufIcSt11char_traitsIcEED1Ev
+  nid: '0x8c6b8d39'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_309.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE4syncEv
+  nid: '0xee853baf'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_489.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE5_LockEv
+  nid: '0x8044f596'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_286.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE5imbueERKSt6locale
+  nid: '0xb80ca215'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_399.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE5uflowEv
+  nid: '0xf67a7e17'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_505.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE6setbufEPwi
+  nid: '0x4b5a8abc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_165.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE7_UnlockEv
+  nid: '0xa1c6fc55'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_348.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+  nid: '0xf9ff46a1'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_510.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+  nid: '0xb6a4d760'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_395.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE8overflowEi
+  nid: '0x8341b529'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_290.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE9_EndwriteEv
+  nid: '0xa94be0fa'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_367.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE9pbackfailEi
+  nid: '0x0e147a9d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_35.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEE9underflowEv
+  nid: '0x2954d64d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_94.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEED0Ev
+  nid: '0xe206c08f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_474.o
+- name: _ZNSt13basic_filebufIwSt11char_traitsIwEED1Ev
+  nid: '0x6e61426d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_254.o
+- name: _ZNSt13basic_istreamIwSt11char_traitsIwEED0Ev
+  nid: '0x0e9a5554'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_38.o
+- name: _ZNSt13basic_istreamIwSt11char_traitsIwEED1Ev
+  nid: '0x9f959451'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_345.o
+- name: _ZNSt13basic_ostreamIwSt11char_traitsIwEED0Ev
+  nid: '0xf7ba51fd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_508.o
+- name: _ZNSt13basic_ostreamIwSt11char_traitsIwEED1Ev
+  nid: '0x5c15972f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_206.o
+- name: _ZNSt13messages_baseD0Ev
+  nid: '0x9111ec36'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_314.o
+- name: _ZNSt13messages_baseD1Ev
+  nid: '0x9facb533'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_346.o
+- name: _ZNSt13runtime_errorD0Ev
+  nid: '0x52330fbd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_182.o
+- name: _ZNSt13runtime_errorD1Ev
+  nid: '0x10231873'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_40.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE4syncEv
+  nid: '0x0ff264b9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_39.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE5_LockEv
+  nid: '0x00c3975e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_4.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE5imbueERKSt6locale
+  nid: '0xc79278ec'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_426.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE5uflowEv
+  nid: '0x97911f5f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_326.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE6setbufEPci
+  nid: '0x709ab035'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_259.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE6xsgetnEPci
+  nid: '0x4daf3fcf'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_171.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE6xsputnEPKci
+  nid: '0xadc2263b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_381.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE7_UnlockEv
+  nid: '0x85ba062f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_297.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+  nid: '0x143048bf'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_47.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+  nid: '0x6c386f54'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_247.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE8overflowEi
+  nid: '0xb9a2282d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_403.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE9pbackfailEi
+  nid: '0xeb76301c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_485.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE9showmanycEv
+  nid: '0xcdafdf19'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_436.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEE9underflowEv
+  nid: '0x2d489b47'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_106.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEED0Ev
+  nid: '0xa79c4516'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_362.o
+- name: _ZNSt15basic_streambufIcSt11char_traitsIcEED1Ev
+  nid: '0x055c1462'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_20.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE4syncEv
+  nid: '0x1527fe95'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_50.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE5_LockEv
+  nid: '0x085bff4f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_27.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE5imbueERKSt6locale
+  nid: '0xe5e1dcbc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_478.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE5uflowEv
+  nid: '0x94fa1f5b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_321.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE6setbufEPwi
+  nid: '0x7b5fce95'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_277.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE6xsgetnEPwi
+  nid: '0xb1ac1fa3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_386.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE6xsputnEPKwi
+  nid: '0x76e846b2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_271.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE7_UnlockEv
+  nid: '0x57ef52f0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_196.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
+  nid: '0x5a898327'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_203.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
+  nid: '0x6fe060a0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_256.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE8overflowEi
+  nid: '0xd9d8af82'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_459.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE9pbackfailEi
+  nid: '0xdab0a910'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_463.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE9showmanycEv
+  nid: '0x55481e6f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_188.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEE9underflowEv
+  nid: '0x1f2e9f4e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_74.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEED0Ev
+  nid: '0x2b88f26e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_102.o
+- name: _ZNSt15basic_streambufIwSt11char_traitsIwEED1Ev
+  nid: '0x4fde96de'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_176.o
+- name: _ZNSt19istreambuf_iteratorIcSt11char_traitsIcEE5_PeekEv
+  nid: '0x03217f6f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_13.o
+- name: _ZNSt19istreambuf_iteratorIwSt11char_traitsIwEE4_IncEv
+  nid: '0x5b71b85d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_205.o
+- name: _ZNSt19istreambuf_iteratorIwSt11char_traitsIwEE5_PeekEv
+  nid: '0x93c638e9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_319.o
+- name: _ZNSt19ostreambuf_iteratorIwSt11char_traitsIwEEaSEw
+  nid: '0xbd58ea5a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_413.o
+- name: _ZNSt5ctypeIcE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xf05df017'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_496.o
+- name: _ZNSt5ctypeIcED0Ev
+  nid: '0x581fc95b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_197.o
+- name: _ZNSt5ctypeIcED1Ev
+  nid: '0x6e4a84c1'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_253.o
+- name: _ZNSt5ctypeIwED0Ev
+  nid: '0xe8691be5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_483.o
+- name: _ZNSt5ctypeIwED1Ev
+  nid: '0xdc4d7540'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_466.o
+- name: _ZNSt6_Mutex5_LockEv
+  nid: '0x577c2695'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_195.o
+- name: _ZNSt6_Mutex7_UnlockEv
+  nid: '0xd356aefd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_443.o
+- name: _ZNSt6_MutexC1Ev
+  nid: '0x75824de0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_265.o
+- name: _ZNSt6_MutexC2Ev
+  nid: '0xce653b6c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_437.o
+- name: _ZNSt6_MutexD1Ev
+  nid: '0x1c3f1c4f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_68.o
+- name: _ZNSt6_MutexD2Ev
+  nid: '0xda1b159a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_461.o
+- name: _ZNSt6_WinitC1Ev
+  nid: '0x8fa764f3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_310.o
+- name: _ZNSt6_WinitC2Ev
+  nid: '0x767a4e70'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_268.o
+- name: _ZNSt6_WinitD1Ev
+  nid: '0xc612a38e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_423.o
+- name: _ZNSt6_WinitD2Ev
+  nid: '0xcb7d00a4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_431.o
+- name: _ZNSt6locale2idcvjEv
+  nid: '0x20a02b6d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_78.o
+- name: _ZNSt6locale5_InitEv
+  nid: '0x61119152'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_214.o
+- name: _ZNSt6locale5emptyEv
+  nid: '0x7e7ac30e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_281.o
+- name: _ZNSt6locale5facet7_IncrefEv
+  nid: '0xda1088ce'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_460.o
+- name: _ZNSt6locale5facet9_RegisterEv
+  nid: '0xe2b2ac5a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_475.o
+- name: _ZNSt6locale5facetD0Ev
+  nid: '0x1ee13e83'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_73.o
+- name: _ZNSt6locale5facetD1Ev
+  nid: '0x6863452e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_240.o
+- name: _ZNSt6locale5facetD2Ev
+  nid: '0x83cba890'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_293.o
+- name: _ZNSt6locale6globalERKS_
+  nid: '0xdaf3996f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_464.o
+- name: _ZNSt6locale7_AddfacEPNS_5facetEjj
+  nid: '0x7b1db41e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_276.o
+- name: _ZNSt6locale7_Locimp7_AddfacEPNS_5facetEj
+  nid: '0xaa520d9f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_370.o
+- name: _ZNSt6locale7_Locimp8_MakelocERKSt8_LocinfoiPS0_PKS_
+  nid: '0xf584de56'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_503.o
+- name: _ZNSt6locale7_Locimp9_MakewlocERKSt8_LocinfoiPS0_PKS_
+  nid: '0x5a6e4e50'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_202.o
+- name: _ZNSt6locale7_Locimp9_MakexlocERKSt8_LocinfoiPS0_PKS_
+  nid: '0x9c486668'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_335.o
+- name: _ZNSt6locale7_LocimpC1ERKS0_
+  nid: '0x2070a73d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_76.o
+- name: _ZNSt6locale7_LocimpC1Eb
+  nid: '0x904dbd32'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_313.o
+- name: _ZNSt6locale7_LocimpC2ERKS0_
+  nid: '0xb74f7b8f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_397.o
+- name: _ZNSt6locale7_LocimpC2Eb
+  nid: '0xcac83a05'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_430.o
+- name: _ZNSt6locale7_LocimpD0Ev
+  nid: '0x002e18d8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_2.o
+- name: _ZNSt6locale7_LocimpD1Ev
+  nid: '0x07a3bd16'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_25.o
+- name: _ZNSt6locale7_LocimpD2Ev
+  nid: '0x95b43c9d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_323.o
+- name: _ZNSt6locale7classicEv
+  nid: '0xc6ea0fd0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_424.o
+- name: _ZNSt6localeC1EPKci
+  nid: '0x01d9b3f5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_9.o
+- name: _ZNSt6localeC1ERKS_PKci
+  nid: '0x03cca12f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_16.o
+- name: _ZNSt6localeC1ERKS_S1_i
+  nid: '0x2ff8d101'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_113.o
+- name: _ZNSt6localeC1Ev
+  nid: '0x660882e8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_230.o
+- name: _ZNSt6localeC2EPKci
+  nid: '0x3d32a7f4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_134.o
+- name: _ZNSt6localeC2ERKS_PKci
+  nid: '0x563fd2be'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_191.o
+- name: _ZNSt6localeC2ERKS_S1_i
+  nid: '0x01c4ef01'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_8.o
+- name: _ZNSt6localeC2Ev
+  nid: '0x5a5a9107'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_201.o
+- name: _ZNSt6localeD1Ev
+  nid: '0x1692ae0c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_51.o
+- name: _ZNSt7_MpunctIcE5_InitERKSt8_Locinfo
+  nid: '0x05a9cef6'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_22.o
+- name: _ZNSt7_MpunctIcEC2Ejb
+  nid: '0x1c8405dc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_70.o
+- name: _ZNSt7_MpunctIcED0Ev
+  nid: '0x47aab531'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_151.o
+- name: _ZNSt7_MpunctIcED1Ev
+  nid: '0xf7845d1c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_507.o
+- name: _ZNSt7_MpunctIwE5_InitERKSt8_Locinfo
+  nid: '0x81027e75'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_287.o
+- name: _ZNSt7_MpunctIwEC2Ejb
+  nid: '0x9a449047'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_330.o
+- name: _ZNSt7_MpunctIwED0Ev
+  nid: '0x4cdab0ba'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_170.o
+- name: _ZNSt7_MpunctIwED1Ev
+  nid: '0xc06a4cd8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_417.o
+- name: _ZNSt7codecvtIccSt9_MbstatetED0Ev
+  nid: '0x6051c802'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_212.o
+- name: _ZNSt7codecvtIccSt9_MbstatetED1Ev
+  nid: '0xf51dc289'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_501.o
+- name: _ZNSt7codecvtIwcSt9_MbstatetE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xae7d042f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_382.o
+- name: _ZNSt7codecvtIwcSt9_MbstatetED0Ev
+  nid: '0x76db6974'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_269.o
+- name: _ZNSt7codecvtIwcSt9_MbstatetED1Ev
+  nid: '0x0e9698af'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_37.o
+- name: _ZNSt7collateIcE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x4ec89bf8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_174.o
+- name: _ZNSt7collateIcED0Ev
+  nid: '0x7cdbda48'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_279.o
+- name: _ZNSt7collateIcED1Ev
+  nid: '0x36e7826a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_126.o
+- name: _ZNSt7collateIwE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xabd92bcc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_374.o
+- name: _ZNSt7collateIwED0Ev
+  nid: '0x7882e64e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_272.o
+- name: _ZNSt7collateIwED1Ev
+  nid: '0xf5825c7d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_502.o
+- name: _ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED0Ev
+  nid: '0x854bc7c7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_295.o
+- name: _ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED1Ev
+  nid: '0xa562099c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_359.o
+- name: _ZNSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xccf14bd5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_435.o
+- name: _ZNSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED0Ev
+  nid: '0xb6a7ba7a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_396.o
+- name: _ZNSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED1Ev
+  nid: '0x3da21a90'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_135.o
+- name: _ZNSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEED0Ev
+  nid: '0x46034d2e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_148.o
+- name: _ZNSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEED1Ev
+  nid: '0x76de9b0f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_270.o
+- name: _ZNSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xfc825dda'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_513.o
+- name: _ZNSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED0Ev
+  nid: '0x667d741b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_231.o
+- name: _ZNSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED1Ev
+  nid: '0x197fc348'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_57.o
+- name: _ZNSt8_Locinfo8_AddcatsEiPKc
+  nid: '0x8a665143'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_304.o
+- name: _ZNSt8_LocinfoC1EPKc
+  nid: '0x605131d5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_211.o
+- name: _ZNSt8_LocinfoC1EiPKc
+  nid: '0x2e84ebb3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_110.o
+- name: _ZNSt8_LocinfoC2EPKc
+  nid: '0xd4ba5b31'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_445.o
+- name: _ZNSt8_LocinfoC2EiPKc
+  nid: '0x9fd2eea9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_347.o
+- name: _ZNSt8_LocinfoD1Ev
+  nid: '0x5119680b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_180.o
+- name: _ZNSt8_LocinfoD2Ev
+  nid: '0x47e5c318'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_152.o
+- name: _ZNSt8bad_castD0Ev
+  nid: '0xb33ef042'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_389.o
+- name: _ZNSt8bad_castD1Ev
+  nid: '0xe3edd790'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_476.o
+- name: _ZNSt8ios_base17register_callbackEPFvNS_5eventERS_iEi
+  nid: '0x1989f59c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_58.o
+- name: _ZNSt8ios_base4InitC1Ev
+  nid: '0x4bda379a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_167.o
+- name: _ZNSt8ios_base4InitC2Ev
+  nid: '0xce8c6abc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_439.o
+- name: _ZNSt8ios_base4InitD1Ev
+  nid: '0x186bcc94'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_55.o
+- name: _ZNSt8ios_base4InitD2Ev
+  nid: '0x294779fb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_93.o
+- name: _ZNSt8ios_base5_InitEv
+  nid: '0x3697bbd3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_125.o
+- name: _ZNSt8ios_base5_TidyEv
+  nid: '0x5949408e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_198.o
+- name: _ZNSt8ios_base5clearENSt5_IosbIiE8_IostateEb
+  nid: '0x4952490e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_155.o
+- name: _ZNSt8ios_base5imbueERKSt6locale
+  nid: '0x2a16469d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_97.o
+- name: _ZNSt8ios_base7_AddstdEv
+  nid: '0xc5977986'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_422.o
+- name: _ZNSt8ios_base7copyfmtERKS_
+  nid: '0xdc0c889c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_465.o
+- name: _ZNSt8ios_base7failureD0Ev
+  nid: '0x1a4f2fa6'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_61.o
+- name: _ZNSt8ios_base7failureD1Ev
+  nid: '0x4bee7ba9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_168.o
+- name: _ZNSt8ios_base8_CallfnsENS_5eventE
+  nid: '0xc013acd8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_416.o
+- name: _ZNSt8ios_base8_FindarrEi
+  nid: '0xaae64804'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_371.o
+- name: _ZNSt8ios_baseD0Ev
+  nid: '0x6daed882'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_250.o
+- name: _ZNSt8ios_baseD1Ev
+  nid: '0xdefe3230'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_470.o
+- name: _ZNSt8ios_baseD2Ev
+  nid: '0xd8b23008'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_456.o
+- name: _ZNSt8messagesIcE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xa433147a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_355.o
+- name: _ZNSt8messagesIcED0Ev
+  nid: '0xa22d5dda'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_350.o
+- name: _ZNSt8messagesIcED1Ev
+  nid: '0xd8aeb94a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_455.o
+- name: _ZNSt8messagesIwE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x66fcc6f4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_234.o
+- name: _ZNSt8messagesIwED0Ev
+  nid: '0xe6547e35'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_479.o
+- name: _ZNSt8messagesIwED1Ev
+  nid: '0xc22cebd8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_418.o
+- name: _ZNSt8numpunctIcE5_InitERKSt8_Locinfo
+  nid: '0xbd316983'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_411.o
+- name: _ZNSt8numpunctIcED0Ev
+  nid: '0x30ce43d4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_115.o
+- name: _ZNSt8numpunctIcED1Ev
+  nid: '0x984ce3d7'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_327.o
+- name: _ZNSt8numpunctIwE5_InitERKSt8_Locinfo
+  nid: '0xc53ab1c0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_421.o
+- name: _ZNSt8numpunctIwE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x0490855d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_19.o
+- name: _ZNSt8numpunctIwED0Ev
+  nid: '0x49f7d434'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_159.o
+- name: _ZNSt8numpunctIwED1Ev
+  nid: '0x66f39adb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_233.o
+- name: _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE5_InitERKSt8_Locinfo
+  nid: '0x9a194306'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_329.o
+- name: _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xa90c4ff2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_365.o
+- name: _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED0Ev
+  nid: '0x1b9b3b5c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_66.o
+- name: _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED1Ev
+  nid: '0x033c18f4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_15.o
+- name: _ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE5_InitERKSt8_Locinfo
+  nid: '0x02e40598'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_12.o
+- name: _ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x718977c5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_261.o
+- name: _ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED0Ev
+  nid: '0x493212da'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_154.o
+- name: _ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED1Ev
+  nid: '0x62d6bf82'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_219.o
+- name: _ZNSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x332f8409'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_120.o
+- name: _ZNSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEED0Ev
+  nid: '0xe667985a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_480.o
+- name: _ZNSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEED1Ev
+  nid: '0xd7bc220d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_451.o
+- name: _ZNSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x3286b855'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_119.o
+- name: _ZNSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED0Ev
+  nid: '0x900d1fa4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_311.o
+- name: _ZNSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED1Ev
+  nid: '0xb4a8791f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_392.o
+- name: _ZNSt9bad_allocD0Ev
+  nid: '0x816aebc3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_288.o
+- name: _ZNSt9bad_allocD1Ev
+  nid: '0x56d3d4f0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_193.o
+- name: _ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_Eb
+  nid: '0x3ad12959'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_131.o
+- name: _ZNSt9basic_iosIcSt11char_traitsIcEED0Ev
+  nid: '0xf00401d2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_494.o
+- name: _ZNSt9basic_iosIcSt11char_traitsIcEED1Ev
+  nid: '0x867956a4'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_298.o
+- name: _ZNSt9basic_iosIwSt11char_traitsIwEE4initEPSt15basic_streambufIwS1_Eb
+  nid: '0x8bfd4395'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_306.o
+- name: _ZNSt9basic_iosIwSt11char_traitsIwEED0Ev
+  nid: '0xc3d24eb3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_419.o
+- name: _ZNSt9basic_iosIwSt11char_traitsIwEED1Ev
+  nid: '0xba0b6300'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_404.o
+- name: _ZNSt9exception18_Set_raise_handlerEPFvRKS_E
+  nid: '0xb8836b50'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_401.o
+- name: _ZNSt9exceptionD0Ev
+  nid: '0x87b1f5eb'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_302.o
+- name: _ZNSt9exceptionD1Ev
+  nid: '0x316b7a34'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_116.o
+- name: _ZNSt9exceptionD2Ev
+  nid: '0x1a00f889'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_60.o
+- name: _ZNSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x1b266c3d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_63.o
+- name: _ZNSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED0Ev
+  nid: '0x6adc320a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_244.o
+- name: _ZNSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED1Ev
+  nid: '0x360f8a4f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_124.o
+- name: _ZNSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0xabdc2b49'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_375.o
+- name: _ZNSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED0Ev
+  nid: '0xe196beab'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_473.o
+- name: _ZNSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED1Ev
+  nid: '0x0e744ef5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_36.o
+- name: _ZNSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x7ff35597'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_284.o
+- name: _ZNSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEED0Ev
+  nid: '0xd7d92e51'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_452.o
+- name: _ZNSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEED1Ev
+  nid: '0xdc65ab00'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_467.o
+- name: _ZNSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE7_GetcatEPPKNSt6locale5facetE
+  nid: '0x6500d2d5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_228.o
+- name: _ZNSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED0Ev
+  nid: '0x8006c4ec'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_285.o
+- name: _ZNSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED1Ev
+  nid: '0xd93d52b1'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_457.o
+- name: _ZNSt9strstreamC1EPciNSt5_IosbIiE9_OpenmodeE
+  nid: '0xfb36c588'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_511.o
+- name: _ZNSt9strstreamC2EPciNSt5_IosbIiE9_OpenmodeE
+  nid: '0x55b3ebf2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_190.o
+- name: _ZNSt9strstreamD0Ev
+  nid: '0xbda26024'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_414.o
+- name: _ZNSt9strstreamD1Ev
+  nid: '0x643235cf'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_222.o
+- name: _ZNSt9strstreamD2Ev
+  nid: '0xa3f5c3b2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_354.o
+- name: _ZNSt9time_baseD0Ev
+  nid: '0xda5469b3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_462.o
+- name: _ZNSt9time_baseD1Ev
+  nid: '0x4cb35e7d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_169.o
+- name: _ZSt10_GetloctxtIwSt19istreambuf_iteratorIwSt11char_traitsIwEEEiRT0_S5_jPKT_
+  nid: '0x5e55ab8c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_208.o
+- name: _ZSt10_MaklocstrIwEPT_PKcS1_RKSt7_Cvtvec
+  nid: '0x05ec37c8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_23.o
+- name: _ZSt10unexpectedv
+  nid: '0x8c3afd4c'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_308.o
+- name: _ZSt11setiosflagsNSt5_IosbIiE9_FmtflagsE
+  nid: '0x53693d40'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_185.o
+- name: _ZSt12setprecisioni
+  nid: '0x84023c03'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_294.o
+- name: _ZSt13resetiosflagsNSt5_IosbIiE9_FmtflagsE
+  nid: '0x1b6ad260'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_65.o
+- name: _ZSt13set_terminatePFvvE
+  nid: '0xcb82e0dc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_432.o
+- name: _ZSt14_Debug_messagePKcS0_
+  nid: '0x4aff73cc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_163.o
+- name: _ZSt14set_unexpectedPFvvE
+  nid: '0x91b0e37e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_316.o
+- name: _ZSt15set_new_handlerPFvvE
+  nid: '0x6a6b90c9'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_243.o
+- name: _ZSt4setwi
+  nid: '0xbaa15803'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_406.o
+- name: _ZSt6_ThrowRKSt9exception
+  nid: '0x9cb73ee0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_336.o
+- name: _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi
+  nid: '0x78a142d0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_273.o
+- name: _ZSt7_FiopenPKwNSt5_IosbIiE9_OpenmodeEi
+  nid: '0x5015b8d3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_177.o
+- name: _ZSt7setbasei
+  nid: '0x6b493669'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_245.o
+- name: _ZSt9terminatev
+  nid: '0x64ed868e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_227.o
+- name: _ZSt9use_facetISt10moneypunctIcLb0EEERKT_RKSt6locale
+  nid: '0x417f47af'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_144.o
+- name: _ZSt9use_facetISt10moneypunctIcLb1EEERKT_RKSt6locale
+  nid: '0x2d50650f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_107.o
+- name: _ZSt9use_facetISt10moneypunctIwLb0EEERKT_RKSt6locale
+  nid: '0xa8ece2e0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_363.o
+- name: _ZSt9use_facetISt10moneypunctIwLb1EEERKT_RKSt6locale
+  nid: '0xdf7edb4d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_472.o
+- name: _ZSt9use_facetISt5ctypeIwEERKT_RKSt6locale
+  nid: '0x1cf6785d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_71.o
+- name: _ZSt9use_facetISt8numpunctIcEERKT_RKSt6locale
+  nid: '0x411b923e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_142.o
+- name: _ZSt9use_facetISt8numpunctIwEERKT_RKSt6locale
+  nid: '0x1d43fb44'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_72.o
+- name: _ZThn8_NSdD0Ev
+  nid: '0x3bac19dc'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_132.o
+- name: _ZThn8_NSdD1Ev
+  nid: '0xa4f6a919'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_357.o
+- name: _ZThn8_NSt9strstreamD0Ev
+  nid: '0xef959a6d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_492.o
+- name: _ZThn8_NSt9strstreamD1Ev
+  nid: '0x74a39b4f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_263.o
+- name: _ZTv0_n12_NSdD0Ev
+  nid: '0xfe468b7a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_514.o
+- name: _ZTv0_n12_NSdD1Ev
+  nid: '0x928fbe36'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_318.o
+- name: _ZTv0_n12_NSiD0Ev
+  nid: '0x65f19631'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_229.o
+- name: _ZTv0_n12_NSiD1Ev
+  nid: '0x281f9107'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_92.o
+- name: _ZTv0_n12_NSoD0Ev
+  nid: '0xffaf3218'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_517.o
+- name: _ZTv0_n12_NSoD1Ev
+  nid: '0x79ad3575'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_274.o
+- name: _ZTv0_n12_NSt10istrstreamD0Ev
+  nid: '0xece969c0'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_487.o
+- name: _ZTv0_n12_NSt10istrstreamD1Ev
+  nid: '0x6e0bf85d'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_252.o
+- name: _ZTv0_n12_NSt10ostrstreamD0Ev
+  nid: '0x88052736'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_303.o
+- name: _ZTv0_n12_NSt10ostrstreamD1Ev
+  nid: '0xa1de25c2'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_349.o
+- name: _ZTv0_n12_NSt13basic_istreamIwSt11char_traitsIwEED0Ev
+  nid: '0x5ed4fb7a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_209.o
+- name: _ZTv0_n12_NSt13basic_istreamIwSt11char_traitsIwEED1Ev
+  nid: '0x3783acfa'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_127.o
+- name: _ZTv0_n12_NSt13basic_ostreamIwSt11char_traitsIwEED0Ev
+  nid: '0x903afa37'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_312.o
+- name: _ZTv0_n12_NSt13basic_ostreamIwSt11char_traitsIwEED1Ev
+  nid: '0x07b6c924'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_26.o
+- name: _ZTv0_n12_NSt9strstreamD0Ev
+  nid: '0x19c901ce'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_59.o
+- name: _ZTv0_n12_NSt9strstreamD1Ev
+  nid: '0x2daa5a42'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_108.o
+- name: _ZdaPv
+  nid: '0x045e124a'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_18.o
+- name: _ZdaPvRKSt9nothrow_t
+  nid: '0x5298ef8e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_183.o
+- name: _ZdaPvS_
+  nid: '0x5438d7d8'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_186.o
+- name: _ZdaPvj
+  nid: '0x868531a3'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_299.o
+- name: _ZdaPvjRKSt9nothrow_t
+  nid: '0x4b1ad744'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_164.o
+- name: _ZdaPvjS_
+  nid: '0xbd35830b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_412.o
+- name: _ZdlPv
+  nid: '0xd84b3689'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_454.o
+- name: _ZdlPvRKSt9nothrow_t
+  nid: '0xad382a99'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_378.o
+- name: _ZdlPvS_
+  nid: '0x94c49383'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_320.o
+- name: _ZdlPvj
+  nid: '0x31a81476'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_117.o
+- name: _ZdlPvjRKSt9nothrow_t
+  nid: '0x67edde2f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_237.o
+- name: _ZdlPvjS_
+  nid: '0xe7d8449e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_481.o
+- name: _Znaj
+  nid: '0xf58e83a5'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_504.o
+- name: _ZnajRKSt9nothrow_t
+  nid: '0x2356ef16'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_84.o
+- name: _Znajj
+  nid: '0x96bc2578'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_325.o
+- name: _ZnajjRKSt9nothrow_t
+  nid: '0x2c241d13'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_103.o
+- name: _Znwj
+  nid: '0x83b2cc6f'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_291.o
+- name: _ZnwjRKSt9nothrow_t
+  nid: '0xbb712718'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_408.o
+- name: _Znwjj
+  nid: '0xed3da02b'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_488.o
+- name: _ZnwjjRKSt9nothrow_t
+  nid: '0xb53fa02e'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_394.o
+- name: __Setgloballocale
+  nid: '0xb7dcbfdd'
+  signature: ''
+  notes: extracted from _sys_libstdcxx_0001_398.o
+imports: []

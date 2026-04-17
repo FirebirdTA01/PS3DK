@@ -1,0 +1,37 @@
+library: sysutil_remoteplay
+version: 1
+module: sysutil_remoteplay
+exports:
+- name: cellRemotePlayBreak
+  nid: '0xfb793f27'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_8.o
+- name: cellRemotePlayEncryptAllData
+  nid: '0xd29fe5e3'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_5.o
+- name: cellRemotePlayGetComparativeVolume
+  nid: '0xe12c8c19'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_7.o
+- name: cellRemotePlayGetPeerInfo
+  nid: '0xa445cd55'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_3.o
+- name: cellRemotePlayGetSharedMemory
+  nid: '0xc267987b'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_4.o
+- name: cellRemotePlayGetStatus
+  nid: '0x533f41df'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_1.o
+- name: cellRemotePlaySetComparativeVolume
+  nid: '0x743918bd'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_2.o
+- name: cellRemotePlayStopPeerVideoOut
+  nid: '0xd6f3fc82'
+  signature: ''
+  notes: extracted from _cellRemotePlay_0001_6.o
+imports: []

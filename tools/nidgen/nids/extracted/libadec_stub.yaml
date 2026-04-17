@@ -1,0 +1,41 @@
+library: adec
+version: 1
+module: adec
+exports:
+- name: cellAdecClose
+  nid: '0x847d2380'
+  signature: ''
+  notes: extracted from _cellAdec_0001_4.o
+- name: cellAdecDecodeAu
+  nid: '0x1529e506'
+  signature: ''
+  notes: extracted from _cellAdec_0001_1.o
+- name: cellAdecEndSeq
+  nid: '0xe2ea549b'
+  signature: ''
+  notes: extracted from _cellAdec_0001_9.o
+- name: cellAdecGetPcm
+  nid: '0x97ff2af1'
+  signature: ''
+  notes: extracted from _cellAdec_0001_6.o
+- name: cellAdecGetPcmItem
+  nid: '0xbd75f78b'
+  signature: ''
+  notes: extracted from _cellAdec_0001_7.o
+- name: cellAdecOpen
+  nid: '0xd00a6988'
+  signature: ''
+  notes: extracted from _cellAdec_0001_8.o
+- name: cellAdecOpenEx
+  nid: '0x8b5551a4'
+  signature: ''
+  notes: extracted from _cellAdec_0001_5.o
+- name: cellAdecQueryAttr
+  nid: '0x7e4a4a49'
+  signature: ''
+  notes: extracted from _cellAdec_0001_3.o
+- name: cellAdecStartSeq
+  nid: '0x487b613e'
+  signature: ''
+  notes: extracted from _cellAdec_0001_2.o
+imports: []

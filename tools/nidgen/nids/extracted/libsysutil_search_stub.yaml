@@ -1,0 +1,89 @@
+library: sysutil_search
+version: 1
+module: sysutil_search
+exports:
+- name: cellSearchCancel
+  nid: '0x8fe376a6'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_12.o
+- name: cellSearchEnd
+  nid: '0x774033d6'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_11.o
+- name: cellSearchFinalize
+  nid: '0xbfab7616'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_15.o
+- name: cellSearchGetContentIdByOffset
+  nid: '0x94e21701'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_13.o
+- name: cellSearchGetContentInfoByContentId
+  nid: '0x9663a44b'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_14.o
+- name: cellSearchGetContentInfoByOffset
+  nid: '0x3b210319'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_8.o
+- name: cellSearchGetContentInfoDeveloperData
+  nid: '0x35cda406'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_6.o
+- name: cellSearchGetContentInfoGameComment
+  nid: '0xd7a7a433'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_18.o
+- name: cellSearchGetContentInfoPath
+  nid: '0xffb28491'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_21.o
+- name: cellSearchGetContentInfoPathMovieThumb
+  nid: '0x37b5ba0c'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_7.o
+- name: cellSearchGetContentInfoSharable
+  nid: '0x1e989496'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_5.o
+- name: cellSearchGetMusicSelectionContext
+  nid: '0x025ce169'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_1.o
+- name: cellSearchGetMusicSelectionContextOfSingleTrack
+  nid: '0xed20e079'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_20.o
+- name: cellSearchGetOffsetByContentId
+  nid: '0x540d9068'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_9.o
+- name: cellSearchInitialize
+  nid: '0xc81ccf8a'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_17.o
+- name: cellSearchPrepareFile
+  nid: '0xe73cb0d2'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_19.o
+- name: cellSearchStartContentSearch
+  nid: '0x0591826f'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_2.o
+- name: cellSearchStartContentSearchInList
+  nid: '0x64fb0b76'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_10.o
+- name: cellSearchStartListSearch
+  nid: '0x0a4c8295'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_3.o
+- name: cellSearchStartSceneSearch
+  nid: '0x13524faa'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_4.o
+- name: cellSearchStartSceneSearchInVideo
+  nid: '0xc0ed0522'
+  signature: ''
+  notes: extracted from _cellSearchUtility_0001_16.o
+imports: []

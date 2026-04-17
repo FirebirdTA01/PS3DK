@@ -1,0 +1,481 @@
+library: sail
+version: 1
+module: sail
+exports:
+- name: cellSailAuReceiverFinalize
+  nid: '0xed58e3ec'
+  signature: ''
+  notes: extracted from _cellSail_0001_106.o
+- name: cellSailAuReceiverGet
+  nid: '0x3a1132ed'
+  signature: ''
+  notes: extracted from _cellSail_0001_30.o
+- name: cellSailAuReceiverInitialize
+  nid: '0x3dd9639a'
+  signature: ''
+  notes: extracted from _cellSail_0001_33.o
+- name: cellSailAviMovieGetHeader
+  nid: '0x10298371'
+  signature: ''
+  notes: extracted from _cellSail_0001_10.o
+- name: cellSailAviMovieGetMovieInfo
+  nid: '0x6e83f5c0'
+  signature: ''
+  notes: extracted from _cellSail_0001_52.o
+- name: cellSailAviMovieGetStreamByIndex
+  nid: '0x3e908c56'
+  signature: ''
+  notes: extracted from _cellSail_0001_34.o
+- name: cellSailAviMovieGetStreamByTypeAndIndex
+  nid: '0xddebd2a5'
+  signature: ''
+  notes: extracted from _cellSail_0001_100.o
+- name: cellSailAviStreamGetHeader
+  nid: '0xcc3cca60'
+  signature: ''
+  notes: extracted from _cellSail_0001_92.o
+- name: cellSailAviStreamGetMediaType
+  nid: '0xc09e2f23'
+  signature: ''
+  notes: extracted from _cellSail_0001_90.o
+- name: cellSailDescriptorClearEs
+  nid: '0xdf5553ef'
+  signature: ''
+  notes: extracted from _cellSail_0001_101.o
+- name: cellSailDescriptorClose
+  nid: '0x15fd6a2a'
+  signature: ''
+  notes: extracted from _cellSail_0001_13.o
+- name: cellSailDescriptorCreateDatabase
+  nid: '0x0abb318b'
+  signature: ''
+  notes: extracted from _cellSail_0001_7.o
+- name: cellSailDescriptorDestroyDatabase
+  nid: '0x28336e89'
+  signature: ''
+  notes: extracted from _cellSail_0001_24.o
+- name: cellSailDescriptorGetCapabilities
+  nid: '0xac9c3b1f'
+  signature: ''
+  notes: extracted from _cellSail_0001_80.o
+- name: cellSailDescriptorGetMediaInfo
+  nid: '0xbd1635f4'
+  signature: ''
+  notes: extracted from _cellSail_0001_84.o
+- name: cellSailDescriptorGetStreamType
+  nid: '0xd5f9a15b'
+  signature: ''
+  notes: extracted from _cellSail_0001_97.o
+- name: cellSailDescriptorGetUri
+  nid: '0x4c191088'
+  signature: ''
+  notes: extracted from _cellSail_0001_40.o
+- name: cellSailDescriptorInquireCapability
+  nid: '0x92590d52'
+  signature: ''
+  notes: extracted from _cellSail_0001_67.o
+- name: cellSailDescriptorIsAutoSelection
+  nid: '0x277adf21'
+  signature: ''
+  notes: extracted from _cellSail_0001_23.o
+- name: cellSailDescriptorOpen
+  nid: '0xc044fab1'
+  signature: ''
+  notes: extracted from _cellSail_0001_89.o
+- name: cellSailDescriptorSetAutoSelection
+  nid: '0x76b1a425'
+  signature: ''
+  notes: extracted from _cellSail_0001_59.o
+- name: cellSailDescriptorSetEs
+  nid: '0x0d0c2f0c'
+  signature: ''
+  notes: extracted from _cellSail_0001_9.o
+- name: cellSailDescriptorSetParameter
+  nid: '0xee94b99b'
+  signature: ''
+  notes: extracted from _cellSail_0001_108.o
+- name: cellSailFutureFinalize
+  nid: '0x9553af65'
+  signature: ''
+  notes: extracted from _cellSail_0001_72.o
+- name: cellSailFutureGet
+  nid: '0x3a2d806c'
+  signature: ''
+  notes: extracted from _cellSail_0001_31.o
+- name: cellSailFutureInitialize
+  nid: '0x4cc54f8e'
+  signature: ''
+  notes: extracted from _cellSail_0001_41.o
+- name: cellSailFutureIsDone
+  nid: '0x51ecf361'
+  signature: ''
+  notes: extracted from _cellSail_0001_43.o
+- name: cellSailFutureReset
+  nid: '0x0c4cb439'
+  signature: ''
+  notes: extracted from _cellSail_0001_8.o
+- name: cellSailFutureSet
+  nid: '0xa37fed15'
+  signature: ''
+  notes: extracted from _cellSail_0001_76.o
+- name: cellSailGraphicsAdapterFinalize
+  nid: '0x76488bb1'
+  signature: ''
+  notes: extracted from _cellSail_0001_57.o
+- name: cellSailGraphicsAdapterGetFormat
+  nid: '0xffd58aa4'
+  signature: ''
+  notes: extracted from _cellSail_0001_119.o
+- name: cellSailGraphicsAdapterGetFrame
+  nid: '0x0247c69e'
+  signature: ''
+  notes: extracted from _cellSail_0001_2.o
+- name: cellSailGraphicsAdapterGetFrame2
+  nid: '0x018281a8'
+  signature: ''
+  notes: extracted from _cellSail_0001_1.o
+- name: cellSailGraphicsAdapterInitialize
+  nid: '0x1c983864'
+  signature: ''
+  notes: extracted from _cellSail_0001_19.o
+- name: cellSailGraphicsAdapterPtsToTimePosition
+  nid: '0x1872331b'
+  signature: ''
+  notes: extracted from _cellSail_0001_16.o
+- name: cellSailGraphicsAdapterSetPreferredFormat
+  nid: '0x2e3ccb5e'
+  signature: ''
+  notes: extracted from _cellSail_0001_25.o
+- name: cellSailGraphicsAdapterUpdateAvSync
+  nid: '0x44a20e79'
+  signature: ''
+  notes: extracted from _cellSail_0001_35.o
+- name: cellSailMemAllocatorInitialize
+  nid: '0x346ebba3'
+  signature: ''
+  notes: extracted from _cellSail_0001_27.o
+- name: cellSailMp4MovieGetBrand
+  nid: '0xb980b76e'
+  signature: ''
+  notes: extracted from _cellSail_0001_83.o
+- name: cellSailMp4MovieGetMovieInfo
+  nid: '0x5783a454'
+  signature: ''
+  notes: extracted from _cellSail_0001_45.o
+- name: cellSailMp4MovieGetTrackById
+  nid: '0x85b07126'
+  signature: ''
+  notes: extracted from _cellSail_0001_63.o
+- name: cellSailMp4MovieGetTrackByIndex
+  nid: '0x5faf802b'
+  signature: ''
+  notes: extracted from _cellSail_0001_49.o
+- name: cellSailMp4MovieGetTrackByTypeAndIndex
+  nid: '0xc2d90ec9'
+  signature: ''
+  notes: extracted from _cellSail_0001_91.o
+- name: cellSailMp4MovieIsCompatibleBrand
+  nid: '0xd4049de0'
+  signature: ''
+  notes: extracted from _cellSail_0001_96.o
+- name: cellSailMp4TrackGetTrackInfo
+  nid: '0xa48be428'
+  signature: ''
+  notes: extracted from _cellSail_0001_77.o
+- name: cellSailMp4TrackGetTrackReference
+  nid: '0x5f44f64f'
+  signature: ''
+  notes: extracted from _cellSail_0001_46.o
+- name: cellSailMp4TrackGetTrackReferenceCount
+  nid: '0x72236ec1'
+  signature: ''
+  notes: extracted from _cellSail_0001_54.o
+- name: cellSailPlayerAddDescriptor
+  nid: '0x7c8dff3b'
+  signature: ''
+  notes: extracted from _cellSail_0001_61.o
+- name: cellSailPlayerBoot
+  nid: '0xbdf21b0f'
+  signature: ''
+  notes: extracted from _cellSail_0001_86.o
+- name: cellSailPlayerCancel
+  nid: '0x950d53c1'
+  signature: ''
+  notes: extracted from _cellSail_0001_69.o
+- name: cellSailPlayerCloseEsAudio
+  nid: '0xbf9b8d72'
+  signature: ''
+  notes: extracted from _cellSail_0001_88.o
+- name: cellSailPlayerCloseEsUser
+  nid: '0xaed9d6cd'
+  signature: ''
+  notes: extracted from _cellSail_0001_81.o
+- name: cellSailPlayerCloseEsVideo
+  nid: '0x07924359'
+  signature: ''
+  notes: extracted from _cellSail_0001_5.o
+- name: cellSailPlayerCloseStream
+  nid: '0x85beffcc'
+  signature: ''
+  notes: extracted from _cellSail_0001_64.o
+- name: cellSailPlayerCreateDescriptor
+  nid: '0xd7938b8d'
+  signature: ''
+  notes: extracted from _cellSail_0001_98.o
+- name: cellSailPlayerDestroyDescriptor
+  nid: '0xfc839bd4'
+  signature: ''
+  notes: extracted from _cellSail_0001_118.o
+- name: cellSailPlayerDumpImage
+  nid: '0xcc987ba6'
+  signature: ''
+  notes: extracted from _cellSail_0001_93.o
+- name: cellSailPlayerFinalize
+  nid: '0x18b4629d'
+  signature: ''
+  notes: extracted from _cellSail_0001_17.o
+- name: cellSailPlayerGetCurrentDescriptor
+  nid: '0x75fca288'
+  signature: ''
+  notes: extracted from _cellSail_0001_56.o
+- name: cellSailPlayerGetDescriptorCount
+  nid: '0x752f8585'
+  signature: ''
+  notes: extracted from _cellSail_0001_55.o
+- name: cellSailPlayerGetParameter
+  nid: '0x952269c9'
+  signature: ''
+  notes: extracted from _cellSail_0001_70.o
+- name: cellSailPlayerGetRegisteredProtocols
+  nid: '0x186b98d3'
+  signature: ''
+  notes: extracted from _cellSail_0001_15.o
+- name: cellSailPlayerGetRepeatMode
+  nid: '0x38144ecf'
+  signature: ''
+  notes: extracted from _cellSail_0001_29.o
+- name: cellSailPlayerInitialize
+  nid: '0x17932b26'
+  signature: ''
+  notes: extracted from _cellSail_0001_14.o
+- name: cellSailPlayerInitialize2
+  nid: '0x23654375'
+  signature: ''
+  notes: extracted from _cellSail_0001_21.o
+- name: cellSailPlayerIsEsAudioMuted
+  nid: '0x09de25fd'
+  signature: ''
+  notes: extracted from _cellSail_0001_6.o
+- name: cellSailPlayerIsEsVideoMuted
+  nid: '0xdbe32ed4'
+  signature: ''
+  notes: extracted from _cellSail_0001_99.o
+- name: cellSailPlayerIsPaused
+  nid: '0xaafa17b8'
+  signature: ''
+  notes: extracted from _cellSail_0001_79.o
+- name: cellSailPlayerNext
+  nid: '0x26563ddc'
+  signature: ''
+  notes: extracted from _cellSail_0001_22.o
+- name: cellSailPlayerOpenEsAudio
+  nid: '0x145f9b11'
+  signature: ''
+  notes: extracted from _cellSail_0001_12.o
+- name: cellSailPlayerOpenEsUser
+  nid: '0xa849d0a7'
+  signature: ''
+  notes: extracted from _cellSail_0001_78.o
+- name: cellSailPlayerOpenEsVideo
+  nid: '0x477501f6'
+  signature: ''
+  notes: extracted from _cellSail_0001_38.o
+- name: cellSailPlayerOpenStream
+  nid: '0x34ecc1b9'
+  signature: ''
+  notes: extracted from _cellSail_0001_28.o
+- name: cellSailPlayerRegisterSource
+  nid: '0xbedccc74'
+  signature: ''
+  notes: extracted from _cellSail_0001_87.o
+- name: cellSailPlayerRemoveDescriptor
+  nid: '0x9897fbd1'
+  signature: ''
+  notes: extracted from _cellSail_0001_74.o
+- name: cellSailPlayerReopenEsAudio
+  nid: '0x4fa5ad09'
+  signature: ''
+  notes: extracted from _cellSail_0001_42.o
+- name: cellSailPlayerReopenEsUser
+  nid: '0x7b6fa92e'
+  signature: ''
+  notes: extracted from _cellSail_0001_60.o
+- name: cellSailPlayerReopenEsVideo
+  nid: '0xf60a8a69'
+  signature: ''
+  notes: extracted from _cellSail_0001_115.o
+- name: cellSailPlayerReplaceEventHandler
+  nid: '0x47632810'
+  signature: ''
+  notes: extracted from _cellSail_0001_37.o
+- name: cellSailPlayerSetAuReceiver
+  nid: '0xf5747e1f'
+  signature: ''
+  notes: extracted from _cellSail_0001_114.o
+- name: cellSailPlayerSetEsAudioMuted
+  nid: '0x91d287f6'
+  signature: ''
+  notes: extracted from _cellSail_0001_66.o
+- name: cellSailPlayerSetEsVideoMuted
+  nid: '0xf1446a40'
+  signature: ''
+  notes: extracted from _cellSail_0001_110.o
+- name: cellSailPlayerSetGraphicsAdapter
+  nid: '0x18bcd21b'
+  signature: ''
+  notes: extracted from _cellSail_0001_18.o
+- name: cellSailPlayerSetParameter
+  nid: '0x5f7c7a6f'
+  signature: ''
+  notes: extracted from _cellSail_0001_48.o
+- name: cellSailPlayerSetPaused
+  nid: '0xd1d55a90'
+  signature: ''
+  notes: extracted from _cellSail_0001_95.o
+- name: cellSailPlayerSetRendererAudio
+  nid: '0x92eaf6ca'
+  signature: ''
+  notes: extracted from _cellSail_0001_68.o
+- name: cellSailPlayerSetRendererVideo
+  nid: '0xecf56150'
+  signature: ''
+  notes: extracted from _cellSail_0001_105.o
+- name: cellSailPlayerSetRepeatMode
+  nid: '0xfc5baf8a'
+  signature: ''
+  notes: extracted from _cellSail_0001_117.o
+- name: cellSailPlayerSetSoundAdapter
+  nid: '0x1139a206'
+  signature: ''
+  notes: extracted from _cellSail_0001_11.o
+- name: cellSailPlayerStart
+  nid: '0xe535b0d3'
+  signature: ''
+  notes: extracted from _cellSail_0001_103.o
+- name: cellSailPlayerStop
+  nid: '0xeba8d4ec'
+  signature: ''
+  notes: extracted from _cellSail_0001_104.o
+- name: cellSailPlayerSubscribeEvent
+  nid: '0x6f0b1002'
+  signature: ''
+  notes: extracted from _cellSail_0001_53.o
+- name: cellSailPlayerUnregisterSource
+  nid: '0x025b4974'
+  signature: ''
+  notes: extracted from _cellSail_0001_3.o
+- name: cellSailPlayerUnsubscribeEvent
+  nid: '0x69793952'
+  signature: ''
+  notes: extracted from _cellSail_0001_51.o
+- name: cellSailRendererAudioFinalize
+  nid: '0x06dd4174'
+  signature: ''
+  notes: extracted from _cellSail_0001_4.o
+- name: cellSailRendererAudioInitialize
+  nid: '0x67b4d01f'
+  signature: ''
+  notes: extracted from _cellSail_0001_50.o
+- name: cellSailRendererAudioNotifyCallCompleted
+  nid: '0xb7b4ecee'
+  signature: ''
+  notes: extracted from _cellSail_0001_82.o
+- name: cellSailRendererAudioNotifyFrameDone
+  nid: '0xf841a537'
+  signature: ''
+  notes: extracted from _cellSail_0001_116.o
+- name: cellSailRendererAudioNotifyOutputEos
+  nid: '0x325039b9'
+  signature: ''
+  notes: extracted from _cellSail_0001_26.o
+- name: cellSailRendererVideoFinalize
+  nid: '0x47055fea'
+  signature: ''
+  notes: extracted from _cellSail_0001_36.o
+- name: cellSailRendererVideoInitialize
+  nid: '0x8d1ff475'
+  signature: ''
+  notes: extracted from _cellSail_0001_65.o
+- name: cellSailRendererVideoNotifyCallCompleted
+  nid: '0x954f48f8'
+  signature: ''
+  notes: extracted from _cellSail_0001_71.o
+- name: cellSailRendererVideoNotifyFrameDone
+  nid: '0x5f77e8df'
+  signature: ''
+  notes: extracted from _cellSail_0001_47.o
+- name: cellSailRendererVideoNotifyOutputEos
+  nid: '0xdff1cda2'
+  signature: ''
+  notes: extracted from _cellSail_0001_102.o
+- name: cellSailSoundAdapterFinalize
+  nid: '0xd1462438'
+  signature: ''
+  notes: extracted from _cellSail_0001_94.o
+- name: cellSailSoundAdapterGetFormat
+  nid: '0xf25f197d'
+  signature: ''
+  notes: extracted from _cellSail_0001_111.o
+- name: cellSailSoundAdapterGetFrame
+  nid: '0x7eb8d6b5'
+  signature: ''
+  notes: extracted from _cellSail_0001_62.o
+- name: cellSailSoundAdapterInitialize
+  nid: '0x3d0d3b72'
+  signature: ''
+  notes: extracted from _cellSail_0001_32.o
+- name: cellSailSoundAdapterPtsToTimePosition
+  nid: '0x4ae979df'
+  signature: ''
+  notes: extracted from _cellSail_0001_39.o
+- name: cellSailSoundAdapterSetPreferredFormat
+  nid: '0x1c9d5e5a'
+  signature: ''
+  notes: extracted from _cellSail_0001_20.o
+- name: cellSailSoundAdapterUpdateAvSync
+  nid: '0xeec22809'
+  signature: ''
+  notes: extracted from _cellSail_0001_109.o
+- name: cellSailSourceFinalize
+  nid: '0xee724c99'
+  signature: ''
+  notes: extracted from _cellSail_0001_107.o
+- name: cellSailSourceInitialize
+  nid: '0x9d30bdce'
+  signature: ''
+  notes: extracted from _cellSail_0001_75.o
+- name: cellSailSourceNotifyCallCompleted
+  nid: '0x764ec2d2'
+  signature: ''
+  notes: extracted from _cellSail_0001_58.o
+- name: cellSailSourceNotifyInputEos
+  nid: '0x54c53688'
+  signature: ''
+  notes: extracted from _cellSail_0001_44.o
+- name: cellSailSourceNotifyMediaStateChanged
+  nid: '0xf4009a94'
+  signature: ''
+  notes: extracted from _cellSail_0001_113.o
+- name: cellSailSourceNotifySessionError
+  nid: '0xf289f0cd'
+  signature: ''
+  notes: extracted from _cellSail_0001_112.o
+- name: cellSailSourceNotifyStreamOut
+  nid: '0x95ee1695'
+  signature: ''
+  notes: extracted from _cellSail_0001_73.o
+- name: cellSailSourceSetDiagHandler
+  nid: '0xbdb2251a'
+  signature: ''
+  notes: extracted from _cellSail_0001_85.o
+imports: []

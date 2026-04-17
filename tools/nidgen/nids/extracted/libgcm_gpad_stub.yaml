@@ -1,0 +1,17 @@
+library: gcm_gpad
+version: 1
+module: gcm_gpad
+exports:
+- name: cellGcmGpadCaptureSnapshot
+  nid: '0xb5955e77'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_83.o
+- name: cellGcmGpadGetStatus
+  nid: '0x6c7bed41'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_50.o
+- name: cellGcmGpadNotifyCaptureSurface
+  nid: '0x82df80d1'
+  signature: ''
+  notes: extracted from _cellGcmSys_0001_56.o
+imports: []

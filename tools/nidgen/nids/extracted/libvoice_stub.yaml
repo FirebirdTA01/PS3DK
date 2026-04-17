@@ -1,0 +1,145 @@
+library: voice
+version: 1
+module: voice
+exports:
+- name: cellVoiceConnectIPortToOPort
+  nid: '0xae6a21d5'
+  signature: ''
+  notes: extracted from _cellVoice_0001_21.o
+- name: cellVoiceCreateNotifyEventQueue
+  nid: '0x2a01013e'
+  signature: ''
+  notes: extracted from _cellVoice_0001_4.o
+- name: cellVoiceCreatePort
+  nid: '0x2de54871'
+  signature: ''
+  notes: extracted from _cellVoice_0001_5.o
+- name: cellVoiceDebugTopology
+  nid: '0x20bafe31'
+  signature: ''
+  notes: extracted from _cellVoice_0001_3.o
+- name: cellVoiceDeletePort
+  nid: '0x9f70c475'
+  signature: ''
+  notes: extracted from _cellVoice_0001_20.o
+- name: cellVoiceDisconnectIPortFromOPort
+  nid: '0x18d3df30'
+  signature: ''
+  notes: extracted from _cellVoice_0001_2.o
+- name: cellVoiceEnd
+  nid: '0xe0e1ae12'
+  signature: ''
+  notes: extracted from _cellVoice_0001_33.o
+- name: cellVoiceGetBitRate
+  nid: '0xbef53a2b'
+  signature: ''
+  notes: extracted from _cellVoice_0001_23.o
+- name: cellVoiceGetMuteFlag
+  nid: '0x474609e2'
+  signature: ''
+  notes: extracted from _cellVoice_0001_11.o
+- name: cellVoiceGetPortAttr
+  nid: '0xf629ed67'
+  signature: ''
+  notes: extracted from _cellVoice_0001_34.o
+- name: cellVoiceGetPortInfo
+  nid: '0x54ac3519'
+  signature: ''
+  notes: extracted from _cellVoice_0001_12.o
+- name: cellVoiceGetSignalState
+  nid: '0xd6811aa7'
+  signature: ''
+  notes: extracted from _cellVoice_0001_30.o
+- name: cellVoiceGetVolume
+  nid: '0x762dc193'
+  signature: ''
+  notes: extracted from _cellVoice_0001_13.o
+- name: cellVoiceInit
+  nid: '0xc7cf1182'
+  signature: ''
+  notes: extracted from _cellVoice_0001_25.o
+- name: cellVoiceInitEx
+  nid: '0xb1a2c38f'
+  signature: ''
+  notes: extracted from _cellVoice_0001_22.o
+- name: cellVoicePausePort
+  nid: '0x87c71b06'
+  signature: ''
+  notes: extracted from _cellVoice_0001_17.o
+- name: cellVoicePausePortAll
+  nid: '0xd14e784d'
+  signature: ''
+  notes: extracted from _cellVoice_0001_26.o
+- name: cellVoiceReadFromOPort
+  nid: '0x36472c57'
+  signature: ''
+  notes: extracted from _cellVoice_0001_9.o
+- name: cellVoiceRemoveNotifyEventQueue
+  nid: '0xdd000886'
+  signature: ''
+  notes: extracted from _cellVoice_0001_31.o
+- name: cellVoiceResetPort
+  nid: '0xff0fa43a'
+  signature: ''
+  notes: extracted from _cellVoice_0001_35.o
+- name: cellVoiceResumePort
+  nid: '0x7bf17b15'
+  signature: ''
+  notes: extracted from _cellVoice_0001_14.o
+- name: cellVoiceResumePortAll
+  nid: '0x7f3963f7'
+  signature: ''
+  notes: extracted from _cellVoice_0001_16.o
+- name: cellVoiceSetBitRate
+  nid: '0x7e60adc6'
+  signature: ''
+  notes: extracted from _cellVoice_0001_15.o
+- name: cellVoiceSetMuteFlag
+  nid: '0xdde35a0c'
+  signature: ''
+  notes: extracted from _cellVoice_0001_32.o
+- name: cellVoiceSetMuteFlagAll
+  nid: '0xd4d80ea5'
+  signature: ''
+  notes: extracted from _cellVoice_0001_28.o
+- name: cellVoiceSetNotifyEventQueue
+  nid: '0x35d84910'
+  signature: ''
+  notes: extracted from _cellVoice_0001_8.o
+- name: cellVoiceSetPortAttr
+  nid: '0x9d0f4af1'
+  signature: ''
+  notes: extracted from _cellVoice_0001_19.o
+- name: cellVoiceSetVolume
+  nid: '0xd5ae37d8'
+  signature: ''
+  notes: extracted from _cellVoice_0001_29.o
+- name: cellVoiceStart
+  nid: '0x0a563878'
+  signature: ''
+  notes: extracted from _cellVoice_0001_1.o
+- name: cellVoiceStartEx
+  nid: '0x94d51f92'
+  signature: ''
+  notes: extracted from _cellVoice_0001_18.o
+- name: cellVoiceStop
+  nid: '0xd3a84be1'
+  signature: ''
+  notes: extracted from _cellVoice_0001_27.o
+- name: cellVoiceUpdatePort
+  nid: '0x2f24fea3'
+  signature: ''
+  notes: extracted from _cellVoice_0001_6.o
+- name: cellVoiceWriteToIPort
+  nid: '0x3dad26e7'
+  signature: ''
+  notes: extracted from _cellVoice_0001_10.o
+- name: cellVoiceWriteToIPortEx
+  nid: '0x30f0b5ab'
+  signature: ''
+  notes: extracted from _cellVoice_0001_7.o
+- name: cellVoiceWriteToIPortEx2
+  nid: '0xc4f573b8'
+  signature: ''
+  notes: extracted from _cellVoice_0001_24.o
+imports: []

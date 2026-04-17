@@ -1,0 +1,997 @@
+library: freetype
+version: 1
+module: freetype
+exports:
+- name: FTC_CMapCache_Lookup
+  nid: '0x8b14be9c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_128.o
+- name: FTC_CMapCache_New
+  nid: '0x6377137f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_96.o
+- name: FTC_ImageCache_Lookup
+  nid: '0xf926d22f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_240.o
+- name: FTC_ImageCache_New
+  nid: '0xbc8c081d'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_177.o
+- name: FTC_Image_Cache_Lookup
+  nid: '0x3d2c0f77'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_54.o
+- name: FTC_Image_Cache_New
+  nid: '0x8b5d6149'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_129.o
+- name: FTC_Manager_Done
+  nid: '0xf4cf5435'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_228.o
+- name: FTC_Manager_LookupFace
+  nid: '0x0b411261'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_12.o
+- name: FTC_Manager_LookupSize
+  nid: '0xf638c45e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_231.o
+- name: FTC_Manager_Lookup_Face
+  nid: '0x3ecdc98b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_55.o
+- name: FTC_Manager_Lookup_Size
+  nid: '0xdec4091e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_213.o
+- name: FTC_Manager_New
+  nid: '0x0c08dd3a'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_13.o
+- name: FTC_Manager_RemoveFaceID
+  nid: '0x61405530'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_94.o
+- name: FTC_Node_Unref
+  nid: '0x6525ef63'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_99.o
+- name: FTC_SBitCache_Lookup
+  nid: '0x5f7f83aa'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_91.o
+- name: FTC_SBitCache_New
+  nid: '0x15a11d97'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_19.o
+- name: FTC_SBit_Cache_Lookup
+  nid: '0xf73faa25'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_235.o
+- name: FTC_SBit_Cache_New
+  nid: '0xc747f231'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_190.o
+- name: FT_Activate_Size
+  nid: '0x06a553df'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_7.o
+- name: FT_Add_Default_Modules
+  nid: '0x68c25868'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_104.o
+- name: FT_Add_Module
+  nid: '0xa6ec00f4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_157.o
+- name: FT_Alloc
+  nid: '0xa26a2e9c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_149.o
+- name: FT_Angle_Diff
+  nid: '0x1171aa63'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_17.o
+- name: FT_Atan2
+  nid: '0xf78a4a76'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_237.o
+- name: FT_Attach_File
+  nid: '0x6e560d59'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_107.o
+- name: FT_Attach_Stream
+  nid: '0xf9d31f75'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_241.o
+- name: FT_Bitmap_Convert
+  nid: '0xfd5b7c04'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_244.o
+- name: FT_Bitmap_Copy
+  nid: '0x7ec07f08'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_115.o
+- name: FT_Bitmap_Done
+  nid: '0xc2261290'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_184.o
+- name: FT_Bitmap_Embolden
+  nid: '0x1aeb33a5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_26.o
+- name: FT_Bitmap_New
+  nid: '0x13268e21'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_18.o
+- name: FT_CMap_Done
+  nid: '0x2b74d0b3'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_41.o
+- name: FT_CMap_New
+  nid: '0x32a1bd52'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_44.o
+- name: FT_CeilFix
+  nid: '0xafe5ebc4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_167.o
+- name: FT_Cos
+  nid: '0xe46f3662'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_216.o
+- name: FT_DivFix
+  nid: '0xe68e4744'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_218.o
+- name: FT_Done_Face
+  nid: '0x1cedf8d0'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_29.o
+- name: FT_Done_FreeType
+  nid: '0xe956bf64'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_221.o
+- name: FT_Done_Glyph
+  nid: '0xdb615095'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_210.o
+- name: FT_Done_GlyphSlot
+  nid: '0xac328493'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_162.o
+- name: FT_Done_Library
+  nid: '0x0124a94b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_2.o
+- name: FT_Done_Memory
+  nid: '0x59394806'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_86.o
+- name: FT_Done_Size
+  nid: '0x9295b0fd'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_135.o
+- name: FT_FloorFix
+  nid: '0x2803abd1'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_38.o
+- name: FT_Free
+  nid: '0x98db2f48'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_137.o
+- name: FT_Get_BDF_Charset_ID
+  nid: '0x55104762'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_81.o
+- name: FT_Get_BDF_Property
+  nid: '0xc8b94ee5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_191.o
+- name: FT_Get_CMap_Language_ID
+  nid: '0x81eed68c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_118.o
+- name: FT_Get_Char_Index
+  nid: '0x4f36cf3f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_73.o
+- name: FT_Get_Charmap_Index
+  nid: '0x5f8370d7'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_92.o
+- name: FT_Get_First_Char
+  nid: '0x39d44176'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_52.o
+- name: FT_Get_Glyph
+  nid: '0x4b573039'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_66.o
+- name: FT_Get_Glyph_Name
+  nid: '0x1e287e88'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_30.o
+- name: FT_Get_Kerning
+  nid: '0xa6eb0b62'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_156.o
+- name: FT_Get_MM_Var
+  nid: '0x8835c3c2'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_125.o
+- name: FT_Get_Module
+  nid: '0x4654e796'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_62.o
+- name: FT_Get_Module_Interface
+  nid: '0x011687ee'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_1.o
+- name: FT_Get_Multi_Master
+  nid: '0x4ce3fc00'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_70.o
+- name: FT_Get_Name_Index
+  nid: '0x4be810bc'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_69.o
+- name: FT_Get_Next_Char
+  nid: '0x37f42e67'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_50.o
+- name: FT_Get_PFR_Advance
+  nid: '0x184a21da'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_22.o
+- name: FT_Get_PFR_Kerning
+  nid: '0xc141037d'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_182.o
+- name: FT_Get_PFR_Metrics
+  nid: '0x50ec3696'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_77.o
+- name: FT_Get_PS_Font_Info
+  nid: '0x8d79a5f9'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_131.o
+- name: FT_Get_PS_Font_Private
+  nid: '0xc3b65d96'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_187.o
+- name: FT_Get_Postscript_Name
+  nid: '0x9e2b935a'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_144.o
+- name: FT_Get_Renderer
+  nid: '0x492d8224'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_64.o
+- name: FT_Get_Sfnt_Name
+  nid: '0x9d74740f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_142.o
+- name: FT_Get_Sfnt_Name_Count
+  nid: '0x838fe0a5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_119.o
+- name: FT_Get_Sfnt_Table
+  nid: '0x89fb856e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_127.o
+- name: FT_Get_SubGlyph_Info
+  nid: '0x67d56767'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_102.o
+- name: FT_Get_Track_Kerning
+  nid: '0x36f59828'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_47.o
+- name: FT_Get_TrueType_Engine_Type
+  nid: '0xdd91f304'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_212.o
+- name: FT_Get_WinFNT_Header
+  nid: '0x9a7a71b5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_139.o
+- name: FT_Get_X11_Font_Format
+  nid: '0xa29ca82e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_150.o
+- name: FT_GlyphLoader_Add
+  nid: '0x5035c921'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_76.o
+- name: FT_GlyphLoader_CheckPoints
+  nid: '0x501d1814'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_75.o
+- name: FT_GlyphLoader_CheckSubGlyphs
+  nid: '0xab8f6a87'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_161.o
+- name: FT_GlyphLoader_CopyPoints
+  nid: '0xb67050bc'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_173.o
+- name: FT_GlyphLoader_CreateExtra
+  nid: '0x5c4c5880'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_89.o
+- name: FT_GlyphLoader_Done
+  nid: '0xacfe51d8'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_163.o
+- name: FT_GlyphLoader_New
+  nid: '0xe6de720d'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_219.o
+- name: FT_GlyphLoader_Prepare
+  nid: '0x875d29d5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_124.o
+- name: FT_GlyphLoader_Reset
+  nid: '0x9fe3dde6'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_146.o
+- name: FT_GlyphLoader_Rewind
+  nid: '0xbd59bc75'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_178.o
+- name: FT_GlyphSlot_Embolden
+  nid: '0x9b52f2d1'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_140.o
+- name: FT_GlyphSlot_Oblique
+  nid: '0xf5a883b6'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_229.o
+- name: FT_GlyphSlot_Own_Bitmap
+  nid: '0x67618ba2'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_101.o
+- name: FT_Glyph_Copy
+  nid: '0x420de176'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_59.o
+- name: FT_Glyph_Get_CBox
+  nid: '0x44951709'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_60.o
+- name: FT_Glyph_Stroke
+  nid: '0x66d88c8c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_100.o
+- name: FT_Glyph_StrokeBorder
+  nid: '0xf7261881'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_234.o
+- name: FT_Glyph_To_Bitmap
+  nid: '0xb499d895'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_171.o
+- name: FT_Glyph_Transform
+  nid: '0xd912b0f4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_207.o
+- name: FT_Has_PS_Glyph_Names
+  nid: '0xaed08db1'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_165.o
+- name: FT_Init_FreeType
+  nid: '0x85a969b6'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_122.o
+- name: FT_Library_Version
+  nid: '0x9eba183c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_145.o
+- name: FT_List_Add
+  nid: '0xc24e39fc'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_185.o
+- name: FT_List_Finalize
+  nid: '0x4ee1b202'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_72.o
+- name: FT_List_Find
+  nid: '0x4db200ef'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_71.o
+- name: FT_List_Insert
+  nid: '0x5923488b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_85.o
+- name: FT_List_Iterate
+  nid: '0xa58c1554'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_153.o
+- name: FT_List_Remove
+  nid: '0xb6aab704'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_174.o
+- name: FT_List_Up
+  nid: '0x1827e724'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_20.o
+- name: FT_Load_Char
+  nid: '0x9da74bb6'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_143.o
+- name: FT_Load_Glyph
+  nid: '0xb229e6bf'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_170.o
+- name: FT_Load_Sfnt_Table
+  nid: '0x3545bdc1'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_46.o
+- name: FT_Lookup_Renderer
+  nid: '0xeac06c4b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_222.o
+- name: FT_Match_Size
+  nid: '0xab4747b4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_160.o
+- name: FT_Matrix_Invert
+  nid: '0xff2d2f98'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_248.o
+- name: FT_Matrix_Multiply
+  nid: '0x406d1e1a'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_57.o
+- name: FT_MulDiv
+  nid: '0x84ce959c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_120.o
+- name: FT_MulFix
+  nid: '0x38e8695c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_51.o
+- name: FT_New_Face
+  nid: '0xcc20195f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_194.o
+- name: FT_New_GlyphSlot
+  nid: '0xd5bb8191'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_203.o
+- name: FT_New_Library
+  nid: '0xa11ba28b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_148.o
+- name: FT_New_Memory
+  nid: '0xbf97b657'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_181.o
+- name: FT_New_Memory_Face
+  nid: '0x1bfbe848'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_28.o
+- name: FT_New_Size
+  nid: '0x055c1970'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_6.o
+- name: FT_OpenType_Free
+  nid: '0xb5bbfbea'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_172.o
+- name: FT_OpenType_Validate
+  nid: '0xa742c04e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_158.o
+- name: FT_Open_Face
+  nid: '0x51b09e1d'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_78.o
+- name: FT_Outline_Check
+  nid: '0x9c8be729'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_141.o
+- name: FT_Outline_Copy
+  nid: '0x3c863b04'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_53.o
+- name: FT_Outline_Decompose
+  nid: '0x1fcaeebb'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_32.o
+- name: FT_Outline_Done
+  nid: '0x3f2b82df'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_56.o
+- name: FT_Outline_Done_Internal
+  nid: '0xfeb2e30e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_247.o
+- name: FT_Outline_Embolden
+  nid: '0x4b4cbf7a'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_65.o
+- name: FT_Outline_GetInsideBorder
+  nid: '0x52a1f1ec'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_79.o
+- name: FT_Outline_GetOutsideBorder
+  nid: '0x04af4d22'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_3.o
+- name: FT_Outline_Get_BBox
+  nid: '0x889c4159'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_126.o
+- name: FT_Outline_Get_Bitmap
+  nid: '0x18c23bdf'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_23.o
+- name: FT_Outline_Get_CBox
+  nid: '0x1b6f28a5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_27.o
+- name: FT_Outline_Get_Orientation
+  nid: '0x04dd4855'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_4.o
+- name: FT_Outline_New
+  nid: '0xa60023ef'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_155.o
+- name: FT_Outline_New_Internal
+  nid: '0x11385230'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_16.o
+- name: FT_Outline_Render
+  nid: '0xf67c1c4b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_232.o
+- name: FT_Outline_Reverse
+  nid: '0xeb3b1212'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_223.o
+- name: FT_Outline_Transform
+  nid: '0xeeb810ec'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_225.o
+- name: FT_Outline_Translate
+  nid: '0x6ef5d792'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_109.o
+- name: FT_QAlloc
+  nid: '0x33f54920'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_45.o
+- name: FT_QRealloc
+  nid: '0xee7b7aa7'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_224.o
+- name: FT_Raccess_Get_DataOffsets
+  nid: '0x5a23db5b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_87.o
+- name: FT_Raccess_Get_HeaderInfo
+  nid: '0x2e1f7d0a'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_43.o
+- name: FT_Raccess_Guess
+  nid: '0x2c272c13'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_42.o
+- name: FT_Realloc
+  nid: '0x1a789b68'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_25.o
+- name: FT_Remove_Module
+  nid: '0x99040a1d'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_138.o
+- name: FT_Render_Glyph
+  nid: '0x5c36e44f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_88.o
+- name: FT_Render_Glyph_Internal
+  nid: '0xc5792092'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_189.o
+- name: FT_Request_Metrics
+  nid: '0x6e565b59'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_108.o
+- name: FT_Request_Size
+  nid: '0x92342aa4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_134.o
+- name: FT_RoundFix
+  nid: '0x85c80b7f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_123.o
+- name: FT_Select_Charmap
+  nid: '0xa4e6c423'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_152.o
+- name: FT_Select_Metrics
+  nid: '0xd4770b4d'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_200.o
+- name: FT_Select_Size
+  nid: '0x576e31a5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_83.o
+- name: FT_Set_Char_Size
+  nid: '0x46d8826f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_63.o
+- name: FT_Set_Charmap
+  nid: '0xb9b430c2'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_175.o
+- name: FT_Set_Debug_Hook
+  nid: '0x72cf95fc'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_111.o
+- name: FT_Set_MM_Blend_Coordinates
+  nid: '0xcee3c5a0'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_196.o
+- name: FT_Set_MM_Design_Coordinates
+  nid: '0x0af56d94'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_11.o
+- name: FT_Set_Pixel_Sizes
+  nid: '0xd12673a0'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_199.o
+- name: FT_Set_Renderer
+  nid: '0x917d6e9b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_133.o
+- name: FT_Set_Transform
+  nid: '0x7ea2c657'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_114.o
+- name: FT_Set_Var_Blend_Coordinates
+  nid: '0x9164efd1'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_132.o
+- name: FT_Set_Var_Design_Coordinates
+  nid: '0xfe7d5e4f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_245.o
+- name: FT_Sfnt_Table_Info
+  nid: '0x6a48d894'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_105.o
+- name: FT_Sin
+  nid: '0x3701f938'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_48.o
+- name: FT_Sqrt32
+  nid: '0xd4c19fdb'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_201.o
+- name: FT_SqrtFixed
+  nid: '0x20f438ad'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_33.o
+- name: FT_Stream_Close
+  nid: '0xbe2789cc'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_179.o
+- name: FT_Stream_EnterFrame
+  nid: '0xdd872661'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_211.o
+- name: FT_Stream_ExitFrame
+  nid: '0x8be132ab'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_130.o
+- name: FT_Stream_ExtractFrame
+  nid: '0x21182419'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_35.o
+- name: FT_Stream_Free
+  nid: '0x29020e75'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_39.o
+- name: FT_Stream_GetChar
+  nid: '0xf745465c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_236.o
+- name: FT_Stream_GetLong
+  nid: '0x4f4d2e71'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_74.o
+- name: FT_Stream_GetLongLE
+  nid: '0xae082411'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_164.o
+- name: FT_Stream_GetOffset
+  nid: '0x52dd4e82'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_80.o
+- name: FT_Stream_GetShort
+  nid: '0xc3e611c8'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_188.o
+- name: FT_Stream_GetShortLE
+  nid: '0x5ebe9fd4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_90.o
+- name: FT_Stream_New
+  nid: '0xc9e2965f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_193.o
+- name: FT_Stream_Open
+  nid: '0xe45c32bd'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_215.o
+- name: FT_Stream_OpenGzip
+  nid: '0x459907c4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_61.o
+- name: FT_Stream_OpenLZW
+  nid: '0x084eb81a'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_8.o
+- name: FT_Stream_OpenMemory
+  nid: '0xbe48875f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_180.o
+- name: FT_Stream_Pos
+  nid: '0xab1e7527'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_159.o
+- name: FT_Stream_Read
+  nid: '0xd56b3c5c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_202.o
+- name: FT_Stream_ReadAt
+  nid: '0x191899d0'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_24.o
+- name: FT_Stream_ReadChar
+  nid: '0xd0e3cbb0'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_198.o
+- name: FT_Stream_ReadFields
+  nid: '0xf70f8a7f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_233.o
+- name: FT_Stream_ReadLong
+  nid: '0xa5b68c24'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_154.o
+- name: FT_Stream_ReadLongLE
+  nid: '0xb1a33dea'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_169.o
+- name: FT_Stream_ReadOffset
+  nid: '0x0553ae54'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_5.o
+- name: FT_Stream_ReadShort
+  nid: '0x9666b4c0'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_136.o
+- name: FT_Stream_ReadShortLE
+  nid: '0xcdb50080'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_195.o
+- name: FT_Stream_ReleaseFrame
+  nid: '0x0fd3f094'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_15.o
+- name: FT_Stream_Seek
+  nid: '0xba363b3e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_176.o
+- name: FT_Stream_Skip
+  nid: '0xb06bd868'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_168.o
+- name: FT_Stream_TryRead
+  nid: '0x6fa37ea0'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_110.o
+- name: FT_Stroker_BeginSubPath
+  nid: '0xa4afeb98'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_151.o
+- name: FT_Stroker_ConicTo
+  nid: '0xf885420c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_238.o
+- name: FT_Stroker_CubicTo
+  nid: '0x4bbc14e6'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_67.o
+- name: FT_Stroker_Done
+  nid: '0x0c8cae53'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_14.o
+- name: FT_Stroker_EndSubPath
+  nid: '0x6de0efb4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_106.o
+- name: FT_Stroker_Export
+  nid: '0x18484dc6'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_21.o
+- name: FT_Stroker_ExportBorder
+  nid: '0xc3a7e8f2'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_186.o
+- name: FT_Stroker_GetBorderCounts
+  nid: '0x773ff791'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_112.o
+- name: FT_Stroker_GetCounts
+  nid: '0xc20a2975'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_183.o
+- name: FT_Stroker_LineTo
+  nid: '0xd78b41cb'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_205.o
+- name: FT_Stroker_New
+  nid: '0xd9c9f093'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_209.o
+- name: FT_Stroker_ParseOutline
+  nid: '0x684766e9'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_103.o
+- name: FT_Stroker_Rewind
+  nid: '0xcfd82265'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_197.o
+- name: FT_Stroker_Set
+  nid: '0xe7ebf1ef'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_220.o
+- name: FT_Tan
+  nid: '0x7e5f23a4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_113.o
+- name: FT_Trace_Get_Count
+  nid: '0x58d00078'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_84.o
+- name: FT_Trace_Get_Name
+  nid: '0x37e33878'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_49.o
+- name: FT_Vector_From_Polar
+  nid: '0xd7f0afaa'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_206.o
+- name: FT_Vector_Length
+  nid: '0x615369c3'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_95.o
+- name: FT_Vector_Polarize
+  nid: '0xfa34723f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_242.o
+- name: FT_Vector_Rotate
+  nid: '0x0aa1b8de'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_10.o
+- name: FT_Vector_Transform
+  nid: '0x4bc591d7'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_68.o
+- name: FT_Vector_Unit
+  nid: '0xe4969d9d'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_217.o
+- name: cellFreeType2Ex
+  nid: '0xf8d95c49'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_239.o
+- name: cellFreeType2GetRevisionFlags
+  nid: '0x211248e7'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_34.o
+- name: ft_debug_init
+  nid: '0xfa502b9b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_243.o
+- name: ft_glyphslot_alloc_bitmap
+  nid: '0x416cdbc4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_58.o
+- name: ft_glyphslot_free_bitmap
+  nid: '0x858df484'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_121.o
+- name: ft_glyphslot_set_bitmap
+  nid: '0x09d37f90'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_9.o
+- name: ft_highpow2
+  nid: '0x552550e5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_82.o
+- name: ft_lzwstate_done
+  nid: '0x64243044'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_97.o
+- name: ft_lzwstate_init
+  nid: '0x64f1f292'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_98.o
+- name: ft_lzwstate_io
+  nid: '0xd719f8ee'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_204.o
+- name: ft_lzwstate_reset
+  nid: '0x214fe115'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_36.o
+- name: ft_mem_alloc
+  nid: '0x26eaafa7'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_37.o
+- name: ft_mem_free
+  nid: '0x2aa7a25f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_40.o
+- name: ft_mem_qalloc
+  nid: '0x808e665f'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_117.o
+- name: ft_mem_qrealloc
+  nid: '0xc938c83a'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_192.o
+- name: ft_mem_realloc
+  nid: '0xa0237f5e'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_147.o
+- name: ft_module_get_service
+  nid: '0xfe9bee8c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_246.o
+- name: ft_service_list_lookup
+  nid: '0xaee8277c'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_166.o
+- name: ft_stub_set_char_sizes
+  nid: '0x7f9976c7'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_116.o
+- name: ft_stub_set_pixel_sizes
+  nid: '0xe4347e6b'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_214.o
+- name: ft_synthesize_vertical_metrics
+  nid: '0x5f8bf2cc'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_93.o
+- name: ft_validator_error
+  nid: '0x1f9bcbe6'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_31.o
+- name: ft_validator_init
+  nid: '0xd9ab9ae4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_208.o
+- name: ft_validator_run
+  nid: '0xf1ad8ca5'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_226.o
+- name: ftc_node_destroy
+  nid: '0xf5e23da4'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_230.o
+- name: ps_hints_apply
+  nid: '0xf456ad89'
+  signature: ''
+  notes: extracted from _cell_FreeType2_0001_227.o
+imports: []

@@ -1,0 +1,241 @@
+library: fs
+version: 1
+module: fs
+exports:
+- name: cellFsAioCancel
+  nid: '0x7f13fc8c'
+  signature: ''
+  notes: extracted from _sys_fs_0001_27.o
+- name: cellFsAioFinish
+  nid: '0x9f951810'
+  signature: ''
+  notes: extracted from _sys_fs_0001_38.o
+- name: cellFsAioInit
+  nid: '0xdb869f20'
+  signature: ''
+  notes: extracted from _sys_fs_0001_52.o
+- name: cellFsAioRead
+  nid: '0xc1c507e7'
+  signature: ''
+  notes: extracted from _sys_fs_0001_47.o
+- name: cellFsAioWrite
+  nid: '0x4cef342e'
+  signature: ''
+  notes: extracted from _sys_fs_0001_18.o
+- name: cellFsAllocateFileAreaByFdWithInitialData
+  nid: '0x3394f037'
+  signature: ''
+  notes: extracted from _sys_fs_0001_14.o
+- name: cellFsAllocateFileAreaByFdWithoutZeroFill
+  nid: '0x2cf1296b'
+  signature: ''
+  notes: extracted from _sys_fs_0001_12.o
+- name: cellFsAllocateFileAreaWithInitialData
+  nid: '0x103b8632'
+  signature: ''
+  notes: extracted from _sys_fs_0001_4.o
+- name: cellFsAllocateFileAreaWithoutZeroFill
+  nid: '0x7a0329a1'
+  signature: ''
+  notes: extracted from _sys_fs_0001_25.o
+- name: cellFsArcadeHddSerialNumber
+  nid: '0x1ea02e2f'
+  signature: ''
+  notes: extracted from _sys_fs_0001_7.o
+- name: cellFsChangeFileSizeByFdWithoutAllocation
+  nid: '0xe15939c3'
+  signature: ''
+  notes: extracted from _sys_fs_0001_53.o
+- name: cellFsChangeFileSizeWithoutAllocation
+  nid: '0x606f9f42'
+  signature: ''
+  notes: extracted from _sys_fs_0001_21.o
+- name: cellFsChmod
+  nid: '0x99406d0b'
+  signature: ''
+  notes: extracted from _sys_fs_0001_36.o
+- name: cellFsClose
+  nid: '0x2cb51f0d'
+  signature: ''
+  notes: extracted from _sys_fs_0001_11.o
+- name: cellFsClosedir
+  nid: '0xff42dcc3'
+  signature: ''
+  notes: extracted from _sys_fs_0001_59.o
+- name: cellFsFGetBlockSize
+  nid: '0xcb588dba'
+  signature: ''
+  notes: extracted from _sys_fs_0001_49.o
+- name: cellFsFstat
+  nid: '0xef3efa34'
+  signature: ''
+  notes: extracted from _sys_fs_0001_55.o
+- name: cellFsFsync
+  nid: '0x967a162b'
+  signature: ''
+  notes: extracted from _sys_fs_0001_35.o
+- name: cellFsFtruncate
+  nid: '0x0e2939e5'
+  signature: ''
+  notes: extracted from _sys_fs_0001_3.o
+- name: cellFsGetBlockSize
+  nid: '0x1a108ab7'
+  signature: ''
+  notes: extracted from _sys_fs_0001_6.o
+- name: cellFsGetDirectoryEntries
+  nid: '0x9b882495'
+  signature: ''
+  notes: extracted from _sys_fs_0001_37.o
+- name: cellFsGetFreeSize
+  nid: '0xaa3b4bcd'
+  signature: ''
+  notes: extracted from _sys_fs_0001_41.o
+- name: cellFsLseek
+  nid: '0xa397d042'
+  signature: ''
+  notes: extracted from _sys_fs_0001_40.o
+- name: cellFsMkdir
+  nid: '0xba901fe6'
+  signature: ''
+  notes: extracted from _sys_fs_0001_44.o
+- name: cellFsOpen
+  nid: '0x718bf5f8'
+  signature: ''
+  notes: extracted from _sys_fs_0001_23.o
+- name: cellFsOpendir
+  nid: '0x3f61245c'
+  signature: ''
+  notes: extracted from _sys_fs_0001_16.o
+- name: cellFsRead
+  nid: '0x4d5ff8e2'
+  signature: ''
+  notes: extracted from _sys_fs_0001_19.o
+- name: cellFsReadWithOffset
+  nid: '0x0d5b4a14'
+  signature: ''
+  notes: extracted from _sys_fs_0001_2.o
+- name: cellFsReaddir
+  nid: '0x5c74903d'
+  signature: ''
+  notes: extracted from _sys_fs_0001_20.o
+- name: cellFsRegisterConversionCallback
+  nid: '0xa01ee33a'
+  signature: ''
+  notes: extracted from _sys_fs_0001_39.o
+- name: cellFsRename
+  nid: '0xf12eecc8'
+  signature: ''
+  notes: extracted from _sys_fs_0001_56.o
+- name: cellFsRmdir
+  nid: '0x2796fdf3'
+  signature: ''
+  notes: extracted from _sys_fs_0001_10.o
+- name: cellFsSdataOpen
+  nid: '0xb1840b53'
+  signature: ''
+  notes: extracted from _sys_fs_0001_42.o
+- name: cellFsSdataOpenByFd
+  nid: '0x6d3bb15b'
+  signature: ''
+  notes: extracted from _sys_fs_0001_22.o
+- name: cellFsSdataOpenWithVersion
+  nid: '0x445c878f'
+  signature: ''
+  notes: extracted from _sys_fs_0001_17.o
+- name: cellFsSetDefaultContainer
+  nid: '0x02671310'
+  signature: ''
+  notes: extracted from _sys_fs_0001_1.o
+- name: cellFsSetDiscReadRetrySetting
+  nid: '0x91a1beaa'
+  signature: ''
+  notes: extracted from _sys_fs_0001_34.o
+- name: cellFsSetIoBuffer
+  nid: '0x3140f6e1'
+  signature: ''
+  notes: extracted from _sys_fs_0001_13.o
+- name: cellFsSetIoBufferFromDefaultContainer
+  nid: '0x75f16dc5'
+  signature: ''
+  notes: extracted from _sys_fs_0001_24.o
+- name: cellFsStRead
+  nid: '0x27800c6b'
+  signature: ''
+  notes: extracted from _sys_fs_0001_9.o
+- name: cellFsStReadFinish
+  nid: '0xd73938df'
+  signature: ''
+  notes: extracted from _sys_fs_0001_51.o
+- name: cellFsStReadGetCurrentAddr
+  nid: '0x190912f6'
+  signature: ''
+  notes: extracted from _sys_fs_0001_5.o
+- name: cellFsStReadGetRegid
+  nid: '0xbd273a88'
+  signature: ''
+  notes: extracted from _sys_fs_0001_45.o
+- name: cellFsStReadGetRingBuf
+  nid: '0xb3afee8b'
+  signature: ''
+  notes: extracted from _sys_fs_0001_43.o
+- name: cellFsStReadGetStatus
+  nid: '0xcf34969c'
+  signature: ''
+  notes: extracted from _sys_fs_0001_50.o
+- name: cellFsStReadInit
+  nid: '0x2664c8ae'
+  signature: ''
+  notes: extracted from _sys_fs_0001_8.o
+- name: cellFsStReadPutCurrentAddr
+  nid: '0x81f33783'
+  signature: ''
+  notes: extracted from _sys_fs_0001_29.o
+- name: cellFsStReadStart
+  nid: '0x8df28ff9'
+  signature: ''
+  notes: extracted from _sys_fs_0001_32.o
+- name: cellFsStReadStop
+  nid: '0xf8e5d9a0'
+  signature: ''
+  notes: extracted from _sys_fs_0001_57.o
+- name: cellFsStReadWait
+  nid: '0x8f71c5b2'
+  signature: ''
+  notes: extracted from _sys_fs_0001_33.o
+- name: cellFsStReadWaitCallback
+  nid: '0x866f6aec'
+  signature: ''
+  notes: extracted from _sys_fs_0001_30.o
+- name: cellFsStat
+  nid: '0x7de6dced'
+  signature: ''
+  notes: extracted from _sys_fs_0001_26.o
+- name: cellFsTruncate
+  nid: '0xc9dc3ac5'
+  signature: ''
+  notes: extracted from _sys_fs_0001_48.o
+- name: cellFsTruncate2
+  nid: '0x3a1c8393'
+  signature: ''
+  notes: extracted from _sys_fs_0001_15.o
+- name: cellFsUnlink
+  nid: '0x7f4677a8'
+  signature: ''
+  notes: extracted from _sys_fs_0001_28.o
+- name: cellFsUnregisterL10nCallbacks
+  nid: '0xf94baa80'
+  signature: ''
+  notes: extracted from _sys_fs_0001_58.o
+- name: cellFsUtime
+  nid: '0xbef554a4'
+  signature: ''
+  notes: extracted from _sys_fs_0001_46.o
+- name: cellFsWrite
+  nid: '0xecdcf2ab'
+  signature: ''
+  notes: extracted from _sys_fs_0001_54.o
+- name: cellFsWriteWithOffset
+  nid: '0x8cb722d5'
+  signature: ''
+  notes: extracted from _sys_fs_0001_31.o
+imports: []

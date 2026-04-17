@@ -1,0 +1,9 @@
+library: sysutil_cross_controller
+version: 1
+module: sysutil_cross_controller
+exports:
+- name: cellCrossControllerInitialize
+  nid: '0x37e1f502'
+  signature: ''
+  notes: extracted from _cellCrossController_0001_1.o
+imports: []

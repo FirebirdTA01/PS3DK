@@ -1,0 +1,21 @@
+library: sysutil_photo_decode
+version: 1
+module: sysutil_photo_decode
+exports:
+- name: cellPhotoDecodeFinalize
+  nid: '0xad7d8f38'
+  signature: ''
+  notes: extracted from _cellPhotoDecodeUtil_0001_4.o
+- name: cellPhotoDecodeFromFile
+  nid: '0x28b22e44'
+  signature: ''
+  notes: extracted from _cellPhotoDecodeUtil_0001_2.o
+- name: cellPhotoDecodeInitialize
+  nid: '0x596f0a56'
+  signature: ''
+  notes: extracted from _cellPhotoDecodeUtil_0001_3.o
+- name: cellPhotoDecodeInitialize2
+  nid: '0x0f424ecb'
+  signature: ''
+  notes: extracted from _cellPhotoDecodeUtil_0001_1.o
+imports: []

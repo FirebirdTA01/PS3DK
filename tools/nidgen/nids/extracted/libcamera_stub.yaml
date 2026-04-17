@@ -1,0 +1,117 @@
+library: camera
+version: 1
+module: camera
+exports:
+- name: cellCameraClose
+  nid: '0x379c5dd6'
+  signature: ''
+  notes: extracted from _cellCamera_0001_5.o
+- name: cellCameraCtrlExtensionUnit
+  nid: '0xeb6f95fb'
+  signature: ''
+  notes: extracted from _cellCamera_0001_27.o
+- name: cellCameraEnd
+  nid: '0x5ad46570'
+  signature: ''
+  notes: extracted from _cellCamera_0001_11.o
+- name: cellCameraGetAttribute
+  nid: '0x532b8aaa'
+  signature: ''
+  notes: extracted from _cellCamera_0001_9.o
+- name: cellCameraGetBufferInfoEx
+  nid: '0x0e63c444'
+  signature: ''
+  notes: extracted from _cellCamera_0001_2.o
+- name: cellCameraGetBufferSize
+  nid: '0x7dac520c'
+  signature: ''
+  notes: extracted from _cellCamera_0001_16.o
+- name: cellCameraGetDeviceGUID
+  nid: '0x602e2052'
+  signature: ''
+  notes: extracted from _cellCamera_0001_14.o
+- name: cellCameraGetExtensionUnit
+  nid: '0xb602e328'
+  signature: ''
+  notes: extracted from _cellCamera_0001_24.o
+- name: cellCameraGetType
+  nid: '0x58bc5870'
+  signature: ''
+  notes: extracted from _cellCamera_0001_10.o
+- name: cellCameraInit
+  nid: '0xbf47c5dd'
+  signature: ''
+  notes: extracted from _cellCamera_0001_25.o
+- name: cellCameraIsAttached
+  nid: '0x7e063bbc'
+  signature: ''
+  notes: extracted from _cellCamera_0001_17.o
+- name: cellCameraIsAvailable
+  nid: '0x8ca53dde'
+  signature: ''
+  notes: extracted from _cellCamera_0001_19.o
+- name: cellCameraIsOpen
+  nid: '0xfa160f24'
+  signature: ''
+  notes: extracted from _cellCamera_0001_28.o
+- name: cellCameraIsStarted
+  nid: '0x5eebf24e'
+  signature: ''
+  notes: extracted from _cellCamera_0001_13.o
+- name: cellCameraOpenEx
+  nid: '0x5d25f866'
+  signature: ''
+  notes: extracted from _cellCamera_0001_12.o
+- name: cellCameraPrepExtensionUnit
+  nid: '0x61dfbe83'
+  signature: ''
+  notes: extracted from _cellCamera_0001_15.o
+- name: cellCameraRead
+  nid: '0x3845d39b'
+  signature: ''
+  notes: extracted from _cellCamera_0001_6.o
+- name: cellCameraReadComplete
+  nid: '0xe28b206b'
+  signature: ''
+  notes: extracted from _cellCamera_0001_26.o
+- name: cellCameraReadEx
+  nid: '0x21fc151f'
+  signature: ''
+  notes: extracted from _cellCamera_0001_3.o
+- name: cellCameraRemoveNotifyEventQueue
+  nid: '0x9b98d258'
+  signature: ''
+  notes: extracted from _cellCamera_0001_21.o
+- name: cellCameraRemoveNotifyEventQueue2
+  nid: '0x44673f07'
+  signature: ''
+  notes: extracted from _cellCamera_0001_7.o
+- name: cellCameraReset
+  nid: '0x81f83db9'
+  signature: ''
+  notes: extracted from _cellCamera_0001_18.o
+- name: cellCameraSetAttribute
+  nid: '0x8cd56eee'
+  signature: ''
+  notes: extracted from _cellCamera_0001_20.o
+- name: cellCameraSetExtensionUnit
+  nid: '0x2dea3e9b'
+  signature: ''
+  notes: extracted from _cellCamera_0001_4.o
+- name: cellCameraSetNotifyEventQueue
+  nid: '0xb0647e5a'
+  signature: ''
+  notes: extracted from _cellCamera_0001_23.o
+- name: cellCameraSetNotifyEventQueue2
+  nid: '0xa7fd2f5b'
+  signature: ''
+  notes: extracted from _cellCamera_0001_22.o
+- name: cellCameraStart
+  nid: '0x456dc4aa'
+  signature: ''
+  notes: extracted from _cellCamera_0001_8.o
+- name: cellCameraStop
+  nid: '0x02f5ced0'
+  signature: ''
+  notes: extracted from _cellCamera_0001_1.o
+imports: []

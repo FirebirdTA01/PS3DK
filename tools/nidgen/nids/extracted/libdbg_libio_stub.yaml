@@ -1,0 +1,21 @@
+library: dbg_libio
+version: 1
+module: dbg_libio
+exports:
+- name: cellPadDbgGetData
+  nid: '0xcf3051f7'
+  signature: ''
+  notes: extracted from _sys_io_debug_0001_4.o
+- name: cellPadDbgLddRegisterController
+  nid: '0xa74396e5'
+  signature: ''
+  notes: extracted from _sys_io_debug_0001_3.o
+- name: cellPadDbgLddSetDataInsertMode
+  nid: '0x94b98e39'
+  signature: ''
+  notes: extracted from _sys_io_debug_0001_2.o
+- name: cellPadDbgPeriphRegisterDevice
+  nid: '0x7c5d5fc1'
+  signature: ''
+  notes: extracted from _sys_io_debug_0001_1.o
+imports: []

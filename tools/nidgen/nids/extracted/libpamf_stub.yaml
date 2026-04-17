@@ -1,0 +1,97 @@
+library: pamf
+version: 1
+module: pamf
+exports:
+- name: cellPamfEpIteratorGetEp
+  nid: '0x1abeb9d6'
+  signature: ''
+  notes: extracted from _cellPamf_0001_4.o
+- name: cellPamfEpIteratorMove
+  nid: '0x50b83205'
+  signature: ''
+  notes: extracted from _cellPamf_0001_11.o
+- name: cellPamfGetHeaderSize
+  nid: '0xca8181c1'
+  signature: ''
+  notes: extracted from _cellPamf_0001_17.o
+- name: cellPamfGetHeaderSize2
+  nid: '0x90fc9a59'
+  signature: ''
+  notes: extracted from _cellPamf_0001_14.o
+- name: cellPamfGetStreamOffsetAndSize
+  nid: '0x44f5c9e3'
+  signature: ''
+  notes: extracted from _cellPamf_0001_8.o
+- name: cellPamfReaderGetEpIteratorWithIndex
+  nid: '0xe8586ec6'
+  signature: ''
+  notes: extracted from _cellPamf_0001_22.o
+- name: cellPamfReaderGetEpIteratorWithTimeStamp
+  nid: '0x439fba17'
+  signature: ''
+  notes: extracted from _cellPamf_0001_7.o
+- name: cellPamfReaderGetEsFilterId
+  nid: '0x71df326a'
+  signature: ''
+  notes: extracted from _cellPamf_0001_13.o
+- name: cellPamfReaderGetMuxRateBound
+  nid: '0xdb70296c'
+  signature: ''
+  notes: extracted from _cellPamf_0001_21.o
+- name: cellPamfReaderGetNumberOfEp
+  nid: '0xd9ea3457'
+  signature: ''
+  notes: extracted from _cellPamf_0001_20.o
+- name: cellPamfReaderGetNumberOfSpecificStreams
+  nid: '0xd0230671'
+  signature: ''
+  notes: extracted from _cellPamf_0001_18.o
+- name: cellPamfReaderGetNumberOfStreams
+  nid: '0x37f723f7'
+  signature: ''
+  notes: extracted from _cellPamf_0001_6.o
+- name: cellPamfReaderGetPresentationEndTime
+  nid: '0xf61609d6'
+  signature: ''
+  notes: extracted from _cellPamf_0001_23.o
+- name: cellPamfReaderGetPresentationStartTime
+  nid: '0x4de501b1'
+  signature: ''
+  notes: extracted from _cellPamf_0001_10.o
+- name: cellPamfReaderGetStreamIndex
+  nid: '0x041cc708'
+  signature: ''
+  notes: extracted from _cellPamf_0001_3.o
+- name: cellPamfReaderGetStreamInfo
+  nid: '0x67fd273b'
+  signature: ''
+  notes: extracted from _cellPamf_0001_12.o
+- name: cellPamfReaderGetStreamTypeAndChannel
+  nid: '0x9ab20793'
+  signature: ''
+  notes: extracted from _cellPamf_0001_15.o
+- name: cellPamfReaderInitialize
+  nid: '0xb8436ee5'
+  signature: ''
+  notes: extracted from _cellPamf_0001_16.o
+- name: cellPamfReaderSetStreamWithIndex
+  nid: '0x461534b4'
+  signature: ''
+  notes: extracted from _cellPamf_0001_9.o
+- name: cellPamfReaderSetStreamWithTypeAndChannel
+  nid: '0x03fd2caa'
+  signature: ''
+  notes: extracted from _cellPamf_0001_2.o
+- name: cellPamfReaderSetStreamWithTypeAndIndex
+  nid: '0x28b4e2c1'
+  signature: ''
+  notes: extracted from _cellPamf_0001_5.o
+- name: cellPamfStreamTypeToEsFilterId
+  nid: '0x01067e22'
+  signature: ''
+  notes: extracted from _cellPamf_0001_1.o
+- name: cellPamfVerify
+  nid: '0xd1a40ef4'
+  signature: ''
+  notes: extracted from _cellPamf_0001_19.o
+imports: []

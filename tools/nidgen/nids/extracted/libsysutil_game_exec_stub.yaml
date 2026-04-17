@@ -1,0 +1,29 @@
+library: sysutil_game_exec
+version: 1
+module: sysutil_game_exec
+exports:
+- name: cellGameGetBootGameInfo
+  nid: '0xf6acd0bc'
+  signature: ''
+  notes: extracted from _cellGameExec_0001_6.o
+- name: cellGameGetHomeDataExportPath
+  nid: '0x59b1ede1'
+  signature: ''
+  notes: extracted from _cellGameExec_0001_2.o
+- name: cellGameGetHomeDataImportPath
+  nid: '0x72cc6cf7'
+  signature: ''
+  notes: extracted from _cellGameExec_0001_4.o
+- name: cellGameGetHomeLaunchOptionPath
+  nid: '0x94e9f81d'
+  signature: ''
+  notes: extracted from _cellGameExec_0001_5.o
+- name: cellGameGetHomePath
+  nid: '0x59bbebd4'
+  signature: ''
+  notes: extracted from _cellGameExec_0001_3.o
+- name: cellGameSetExitParam
+  nid: '0x38579ec9'
+  signature: ''
+  notes: extracted from _cellGameExec_0001_1.o
+imports: []

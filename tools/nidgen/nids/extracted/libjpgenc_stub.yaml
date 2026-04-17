@@ -1,0 +1,45 @@
+library: jpgenc
+version: 1
+module: jpgenc
+exports:
+- name: cellJpgEncClose
+  nid: '0x969fc5f7'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_7.o
+- name: cellJpgEncEncodePicture
+  nid: '0xa9e81214'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_10.o
+- name: cellJpgEncEncodePicture2
+  nid: '0x636dc89e'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_5.o
+- name: cellJpgEncGetStreamInfo
+  nid: '0x4262e880'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_4.o
+- name: cellJpgEncOpen
+  nid: '0xa4bfae51'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_9.o
+- name: cellJpgEncOpenEx
+  nid: '0x6f2d371c'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_6.o
+- name: cellJpgEncQueryAttr
+  nid: '0x12d9b6c5'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_2.o
+- name: cellJpgEncReset
+  nid: '0x0cf2b78b'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_1.o
+- name: cellJpgEncWaitForInput
+  nid: '0x2ae79be8'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_3.o
+- name: cellJpgEncWaitForOutput
+  nid: '0x9b4e3a74'
+  signature: ''
+  notes: extracted from _cellJpgEnc_0001_8.o
+imports: []

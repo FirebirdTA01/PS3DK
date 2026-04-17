@@ -1,0 +1,25 @@
+library: sysutil_music_export
+version: 1
+module: sysutil_music_export
+exports:
+- name: cellMusicExportFinalize
+  nid: '0xe90effea'
+  signature: ''
+  notes: extracted from _cellMusicExportUtility_0001_5.o
+- name: cellMusicExportFromFile
+  nid: '0xb202f0e8'
+  signature: ''
+  notes: extracted from _cellMusicExportUtility_0001_2.o
+- name: cellMusicExportInitialize
+  nid: '0xb4c9b4f9'
+  signature: ''
+  notes: extracted from _cellMusicExportUtility_0001_3.o
+- name: cellMusicExportInitialize2
+  nid: '0xe0443a44'
+  signature: ''
+  notes: extracted from _cellMusicExportUtility_0001_4.o
+- name: cellMusicExportProgress
+  nid: '0x92b50ebc'
+  signature: ''
+  notes: extracted from _cellMusicExportUtility_0001_1.o
+imports: []

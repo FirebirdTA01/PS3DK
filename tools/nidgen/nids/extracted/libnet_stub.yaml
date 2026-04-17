@@ -1,0 +1,225 @@
+library: net
+version: 1
+module: net
+exports:
+- name: _sys_net_errno_loc
+  nid: '0x6005cde1'
+  signature: ''
+  notes: extracted from _sys_net_0001_19.o
+- name: _sys_net_h_errno_loc
+  nid: '0xc9157d30'
+  signature: ''
+  notes: extracted from _sys_net_0001_44.o
+- name: accept
+  nid: '0xc94f6939'
+  signature: ''
+  notes: extracted from _sys_net_0001_45.o
+- name: bind
+  nid: '0xb0a59804'
+  signature: ''
+  notes: extracted from _sys_net_0001_40.o
+- name: connect
+  nid: '0x64f66d35'
+  signature: ''
+  notes: extracted from _sys_net_0001_20.o
+- name: gethostbyaddr
+  nid: '0xf7ac8941'
+  signature: ''
+  notes: extracted from _sys_net_0001_52.o
+- name: gethostbyname
+  nid: '0x71f4c717'
+  signature: ''
+  notes: extracted from _sys_net_0001_22.o
+- name: getpeername
+  nid: '0xf9ec2db6'
+  signature: ''
+  notes: extracted from _sys_net_0001_53.o
+- name: getsockname
+  nid: '0x13efe7f5'
+  signature: ''
+  notes: extracted from _sys_net_0001_5.o
+- name: getsockopt
+  nid: '0x5a045bd1'
+  signature: ''
+  notes: extracted from _sys_net_0001_18.o
+- name: inet_addr
+  nid: '0xdabbc2c0'
+  signature: ''
+  notes: extracted from _sys_net_0001_48.o
+- name: inet_aton
+  nid: '0xa9a079e0'
+  signature: ''
+  notes: extracted from _sys_net_0001_37.o
+- name: inet_lnaof
+  nid: '0x566893ce'
+  signature: ''
+  notes: extracted from _sys_net_0001_17.o
+- name: inet_makeaddr
+  nid: '0xb4152c74'
+  signature: ''
+  notes: extracted from _sys_net_0001_41.o
+- name: inet_netof
+  nid: '0xe39a62a7'
+  signature: ''
+  notes: extracted from _sys_net_0001_51.o
+- name: inet_network
+  nid: '0x506ad863'
+  signature: ''
+  notes: extracted from _sys_net_0001_15.o
+- name: inet_ntoa
+  nid: '0x858a930b'
+  signature: ''
+  notes: extracted from _sys_net_0001_25.o
+- name: inet_ntop
+  nid: '0xc98a3146'
+  signature: ''
+  notes: extracted from _sys_net_0001_46.o
+- name: inet_pton
+  nid: '0x8af3825e'
+  signature: ''
+  notes: extracted from _sys_net_0001_28.o
+- name: listen
+  nid: '0x28e208bb'
+  signature: ''
+  notes: extracted from _sys_net_0001_9.o
+- name: recv
+  nid: '0xfba04f37'
+  signature: ''
+  notes: extracted from _sys_net_0001_54.o
+- name: recvfrom
+  nid: '0x1f953b9f'
+  signature: ''
+  notes: extracted from _sys_net_0001_7.o
+- name: recvmsg
+  nid: '0xc9d09c34'
+  signature: ''
+  notes: extracted from _sys_net_0001_47.o
+- name: send
+  nid: '0xdc751b40'
+  signature: ''
+  notes: extracted from _sys_net_0001_49.o
+- name: sendmsg
+  nid: '0xad09481b'
+  signature: ''
+  notes: extracted from _sys_net_0001_39.o
+- name: sendto
+  nid: '0x9647570b'
+  signature: ''
+  notes: extracted from _sys_net_0001_31.o
+- name: setsockopt
+  nid: '0x88f03575'
+  signature: ''
+  notes: extracted from _sys_net_0001_26.o
+- name: shutdown
+  nid: '0xa50777c6'
+  signature: ''
+  notes: extracted from _sys_net_0001_34.o
+- name: socket
+  nid: '0x9c056962'
+  signature: ''
+  notes: extracted from _sys_net_0001_33.o
+- name: socketclose
+  nid: '0x6db6e8cd'
+  signature: ''
+  notes: extracted from _sys_net_0001_21.o
+- name: socketpoll
+  nid: '0x051ee3ee'
+  signature: ''
+  notes: extracted from _sys_net_0001_1.o
+- name: socketselect
+  nid: '0x3f09e20a'
+  signature: ''
+  notes: extracted from _sys_net_0001_12.o
+- name: sys_net_abort_resolver
+  nid: '0x8ccf05ed'
+  signature: ''
+  notes: extracted from _sys_net_0001_29.o
+- name: sys_net_abort_socket
+  nid: '0x8d1b77fb'
+  signature: ''
+  notes: extracted from _sys_net_0001_30.o
+- name: sys_net_close_dump
+  nid: '0x44328aa2'
+  signature: ''
+  notes: extracted from _sys_net_0001_13.o
+- name: sys_net_finalize_network
+  nid: '0xb68d5625'
+  signature: ''
+  notes: extracted from _sys_net_0001_43.o
+- name: sys_net_free_thread_context
+  nid: '0xfdb8f926'
+  signature: ''
+  notes: extracted from _sys_net_0001_55.o
+- name: sys_net_get_lib_name_server
+  nid: '0x1d14d6e4'
+  signature: ''
+  notes: extracted from _sys_net_0001_6.o
+- name: sys_net_get_netemu_test_param
+  nid: '0x368823c0'
+  signature: ''
+  notes: extracted from _sys_net_0001_10.o
+- name: sys_net_get_sockinfo
+  nid: '0x3b27c780'
+  signature: ''
+  notes: extracted from _sys_net_0001_11.o
+- name: sys_net_get_sockinfo_ex
+  nid: '0xa765d029'
+  signature: ''
+  notes: extracted from _sys_net_0001_36.o
+- name: sys_net_get_test_param
+  nid: '0xa5a86557'
+  signature: ''
+  notes: extracted from _sys_net_0001_35.o
+- name: sys_net_get_udpp2p_test_param
+  nid: '0x05bd4438'
+  signature: ''
+  notes: extracted from _sys_net_0001_2.o
+- name: sys_net_if_ctl
+  nid: '0x27fb339d'
+  signature: ''
+  notes: extracted from _sys_net_0001_8.o
+- name: sys_net_initialize_network_ex
+  nid: '0x139a9e9b'
+  signature: ''
+  notes: extracted from _sys_net_0001_4.o
+- name: sys_net_open_dump
+  nid: '0xab447704'
+  signature: ''
+  notes: extracted from _sys_net_0001_38.o
+- name: sys_net_read_dump
+  nid: '0x89c9917c'
+  signature: ''
+  notes: extracted from _sys_net_0001_27.o
+- name: sys_net_set_lib_name_server
+  nid: '0x9a318259'
+  signature: ''
+  notes: extracted from _sys_net_0001_32.o
+- name: sys_net_set_netemu_test_param
+  nid: '0xe2434507'
+  signature: ''
+  notes: extracted from _sys_net_0001_50.o
+- name: sys_net_set_resolver_configurations
+  nid: '0x7687d48c'
+  signature: ''
+  notes: extracted from _sys_net_0001_23.o
+- name: sys_net_set_test_param
+  nid: '0x4ab0b9b9'
+  signature: ''
+  notes: extracted from _sys_net_0001_14.o
+- name: sys_net_set_udpp2p_test_param
+  nid: '0x10b81ed6'
+  signature: ''
+  notes: extracted from _sys_net_0001_3.o
+- name: sys_net_show_ifconfig
+  nid: '0xb48636c4'
+  signature: ''
+  notes: extracted from _sys_net_0001_42.o
+- name: sys_net_show_nameserver
+  nid: '0x5420e419'
+  signature: ''
+  notes: extracted from _sys_net_0001_16.o
+- name: sys_net_show_route
+  nid: '0x79b61646'
+  signature: ''
+  notes: extracted from _sys_net_0001_24.o
+imports: []

@@ -1,0 +1,161 @@
+library: sysutil_np_clans
+version: 1
+module: sysutil_np_clans
+exports:
+- name: sceNpClansAbortRequest
+  nid: '0xe82969e2'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_38.o
+- name: sceNpClansAddBlacklistEntry
+  nid: '0x4d06aef7'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_11.o
+- name: sceNpClansCancelInvitation
+  nid: '0x726dffd5'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_18.o
+- name: sceNpClansCancelMembershipRequest
+  nid: '0x299ccc9b'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_6.o
+- name: sceNpClansChangeMemberRole
+  nid: '0x9cac2085'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_26.o
+- name: sceNpClansCreateClan
+  nid: '0xa6a31a38'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_27.o
+- name: sceNpClansCreateRequest
+  nid: '0x9a72232d'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_24.o
+- name: sceNpClansDestroyRequest
+  nid: '0xd6551cd1'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_35.o
+- name: sceNpClansDisbandClan
+  nid: '0x4826f6d5'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_9.o
+- name: sceNpClansGetAutoAcceptStatus
+  nid: '0x38dadf1f'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_7.o
+- name: sceNpClansGetBlacklist
+  nid: '0x56bc5a7c'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_13.o
+- name: sceNpClansGetClanInfo
+  nid: '0x487de998'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_10.o
+- name: sceNpClansGetClanList
+  nid: '0xca4181b4'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_32.o
+- name: sceNpClansGetClanListByNpId
+  nid: '0x672399a8'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_17.o
+- name: sceNpClansGetMemberInfo
+  nid: '0x20472da0'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_5.o
+- name: sceNpClansGetMemberList
+  nid: '0x856ff5c0'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_21.o
+- name: sceNpClansInit
+  nid: '0x9b820047'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_25.o
+- name: sceNpClansJoinClan
+  nid: '0xdbf300ca'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_36.o
+- name: sceNpClansKickMember
+  nid: '0xaa7912b5'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_28.o
+- name: sceNpClansLeaveClan
+  nid: '0x560f717b'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_12.o
+- name: sceNpClansPostAnnouncement
+  nid: '0xada45b84'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_30.o
+- name: sceNpClansPostChallenge
+  nid: '0x83d65529'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_20.o
+- name: sceNpClansRemoveAnnouncement
+  nid: '0xe2590f60'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_37.o
+- name: sceNpClansRemoveBlacklistEntry
+  nid: '0x5bff9da1'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_15.o
+- name: sceNpClansRemoveChallenge
+  nid: '0xce6dc0f0'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_33.o
+- name: sceNpClansRemovePostedChallenge
+  nid: '0xd3346dc4'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_34.o
+- name: sceNpClansRetrieveAnnouncements
+  nid: '0x727aa7f8'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_19.o
+- name: sceNpClansRetrieveChallenges
+  nid: '0x0df25834'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_3.o
+- name: sceNpClansRetrievePostedChallenges
+  nid: '0x8e785b97'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_22.o
+- name: sceNpClansSearchByName
+  nid: '0xace0cfba'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_29.o
+- name: sceNpClansSearchByProfile
+  nid: '0x1221a1bf'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_4.o
+- name: sceNpClansSendInvitation
+  nid: '0xbc05ef31'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_31.o
+- name: sceNpClansSendInvitationResponse
+  nid: '0x095e12c6'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_1.o
+- name: sceNpClansSendMembershipRequest
+  nid: '0x59743b2b'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_14.o
+- name: sceNpClansSendMembershipResponse
+  nid: '0x942dbdc4'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_23.o
+- name: sceNpClansTerm
+  nid: '0x42332cb7'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_8.o
+- name: sceNpClansUpdateAutoAcceptStatus
+  nid: '0x5da94854'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_16.o
+- name: sceNpClansUpdateClanInfo
+  nid: '0x09f9e1a9'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_2.o
+- name: sceNpClansUpdateMemberInfo
+  nid: '0xf4a2d52b'
+  signature: ''
+  notes: extracted from _sceNpClans_0001_39.o
+imports: []

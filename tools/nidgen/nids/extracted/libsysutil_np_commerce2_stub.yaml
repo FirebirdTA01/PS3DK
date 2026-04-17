@@ -1,0 +1,213 @@
+library: sysutil_np_commerce2
+version: 1
+module: sysutil_np_commerce2
+exports:
+- name: sceNpCommerce2AbortReq
+  nid: '0x8df0057f'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_17.o
+- name: sceNpCommerce2CreateCtx
+  nid: '0xd9fdcec2'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_39.o
+- name: sceNpCommerce2CreateSessionAbort
+  nid: '0x62023e98'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_13.o
+- name: sceNpCommerce2CreateSessionFinish
+  nid: '0x91f8843d'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_20.o
+- name: sceNpCommerce2CreateSessionStart
+  nid: '0xcc18cd2c'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_35.o
+- name: sceNpCommerce2DestroyCtx
+  nid: '0x6f67ea80'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_15.o
+- name: sceNpCommerce2DestroyGetCategoryContentsResult
+  nid: '0x9d9cb96b'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_24.o
+- name: sceNpCommerce2DestroyGetProductInfoListResult
+  nid: '0xf6139b58'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_50.o
+- name: sceNpCommerce2DestroyGetProductInfoResult
+  nid: '0xef8eafcd'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_49.o
+- name: sceNpCommerce2DestroyReq
+  nid: '0x2a910f05'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_6.o
+- name: sceNpCommerce2DoCheckoutFinishAsync
+  nid: '0xd43a130e'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_36.o
+- name: sceNpCommerce2DoCheckoutStartAsync
+  nid: '0x104551a6'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_1.o
+- name: sceNpCommerce2DoDlListFinishAsync
+  nid: '0x410d42be'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_10.o
+- name: sceNpCommerce2DoDlListStartAsync
+  nid: '0x6ca9efd4'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_14.o
+- name: sceNpCommerce2DoProductBrowseFinishAsync
+  nid: '0xb23e3bd1'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_29.o
+- name: sceNpCommerce2DoProductBrowseStartAsync
+  nid: '0x9825a0fc'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_22.o
+- name: sceNpCommerce2DoProductCodeFinishAsync
+  nid: '0xa9f945b3'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_27.o
+- name: sceNpCommerce2DoProductCodeStartAsync
+  nid: '0xde7ab33d'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_42.o
+- name: sceNpCommerce2DoServiceListFinishAsync
+  nid: '0x9050617d'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_19.o
+- name: sceNpCommerce2DoServiceListStartAsync
+  nid: '0xc7afc42a'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_33.o
+- name: sceNpCommerce2EmptyStoreCheckAbort
+  nid: '0x1c153e5c'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_4.o
+- name: sceNpCommerce2EmptyStoreCheckFinish
+  nid: '0xc1eb3b92'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_32.o
+- name: sceNpCommerce2EmptyStoreCheckStart
+  nid: '0x542b74cc'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_12.o
+- name: sceNpCommerce2ExecuteStoreBrowse
+  nid: '0xeef51be0'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_47.o
+- name: sceNpCommerce2GetBGDLAvailability
+  nid: '0x3d627d81'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_9.o
+- name: sceNpCommerce2GetCategoryContentsCreateReq
+  nid: '0x7370d8d0'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_16.o
+- name: sceNpCommerce2GetCategoryContentsGetResult
+  nid: '0xca0ea996'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_34.o
+- name: sceNpCommerce2GetCategoryContentsStart
+  nid: '0x371a2edd'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_8.o
+- name: sceNpCommerce2GetCategoryInfo
+  nid: '0xbd49eab2'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_30.o
+- name: sceNpCommerce2GetCategoryInfoFromContentInfo
+  nid: '0xfc216890'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_52.o
+- name: sceNpCommerce2GetContentInfo
+  nid: '0x972ab46c'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_21.o
+- name: sceNpCommerce2GetContentRatingDescriptor
+  nid: '0x150fdca3'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_3.o
+- name: sceNpCommerce2GetContentRatingInfoFromCategoryInfo
+  nid: '0xac78c1f3'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_28.o
+- name: sceNpCommerce2GetContentRatingInfoFromGameProductInfo
+  nid: '0xec324c8f'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_46.o
+- name: sceNpCommerce2GetGameProductInfo
+  nid: '0xef645654'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_48.o
+- name: sceNpCommerce2GetGameProductInfoFromContentInfo
+  nid: '0xe51a4944'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_45.o
+- name: sceNpCommerce2GetGameProductInfoFromGetProductInfoListResult
+  nid: '0xd9956ce7'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_38.o
+- name: sceNpCommerce2GetGameSkuInfoFromGameProductInfo
+  nid: '0xdb19194c'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_41.o
+- name: sceNpCommerce2GetPrice
+  nid: '0xda8e322d'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_40.o
+- name: sceNpCommerce2GetProductInfoCreateReq
+  nid: '0xa975ebb4'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_26.o
+- name: sceNpCommerce2GetProductInfoGetResult
+  nid: '0xbf5f58ea'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_31.o
+- name: sceNpCommerce2GetProductInfoListCreateReq
+  nid: '0xe1e7b5ac'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_44.o
+- name: sceNpCommerce2GetProductInfoListGetResult
+  nid: '0x146618df'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_2.o
+- name: sceNpCommerce2GetProductInfoListStart
+  nid: '0x9cde07cc'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_23.o
+- name: sceNpCommerce2GetProductInfoStart
+  nid: '0x8f46325b'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_18.o
+- name: sceNpCommerce2GetStoreBrowseUserdata
+  nid: '0x1fa1b312'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_5.o
+- name: sceNpCommerce2Init
+  nid: '0x3539d233'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_7.o
+- name: sceNpCommerce2InitGetCategoryContentsResult
+  nid: '0xd8a473a3'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_37.o
+- name: sceNpCommerce2InitGetProductInfoListResult
+  nid: '0xe0f90e44'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_43.o
+- name: sceNpCommerce2InitGetProductInfoResult
+  nid: '0xf798f5e3'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_51.o
+- name: sceNpCommerce2SetBGDLAvailability
+  nid: '0xa5a863fe'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_25.o
+- name: sceNpCommerce2Term
+  nid: '0x4d4a094c'
+  signature: ''
+  notes: extracted from _sceNpCommerce2_0001_11.o
+imports: []

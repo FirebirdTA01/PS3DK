@@ -1,0 +1,13 @@
+library: sysutil_bgdl
+version: 1
+module: sysutil_bgdl
+exports:
+- name: cellBGDLGetMode
+  nid: '0x74e57bdf'
+  signature: ''
+  notes: extracted from _cellBGDLUtility_0001_1.o
+- name: cellBGDLSetMode
+  nid: '0x7e134a90'
+  signature: ''
+  notes: extracted from _cellBGDLUtility_0001_2.o
+imports: []

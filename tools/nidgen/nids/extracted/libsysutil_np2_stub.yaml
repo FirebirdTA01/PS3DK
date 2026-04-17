@@ -1,0 +1,321 @@
+library: sysutil_np2
+version: 1
+module: sysutil_np2
+exports:
+- name: sceNp2Init
+  nid: '0x41251f74'
+  signature: ''
+  notes: extracted from _sceNp2_0001_31.o
+- name: sceNp2Term
+  nid: '0xaadb7c12'
+  signature: ''
+  notes: extracted from _sceNp2_0001_55.o
+- name: sceNpAuthAbortOAuthRequest
+  nid: '0x9db622e8'
+  signature: ''
+  notes: extracted from _sceNp2_0001_51.o
+- name: sceNpAuthCreateOAuthRequest
+  nid: '0xd7aa552e'
+  signature: ''
+  notes: extracted from _sceNp2_0001_63.o
+- name: sceNpAuthDeleteOAuthRequest
+  nid: '0x2880d8d5'
+  signature: ''
+  notes: extracted from _sceNp2_0001_19.o
+- name: sceNpAuthGetAuthorizationCode
+  nid: '0xe8bb13ff'
+  signature: ''
+  notes: extracted from _sceNp2_0001_70.o
+- name: sceNpAuthOAuthInit
+  nid: '0xf30ac754'
+  signature: ''
+  notes: extracted from _sceNp2_0001_75.o
+- name: sceNpAuthOAuthTerm
+  nid: '0xc0ab5cbb'
+  signature: ''
+  notes: extracted from _sceNp2_0001_61.o
+- name: sceNpMatching2AbortContextStart
+  nid: '0x430ce063'
+  signature: ''
+  notes: extracted from _sceNp2_0001_32.o
+- name: sceNpMatching2AbortRequest
+  nid: '0x2ed909dc'
+  signature: ''
+  notes: extracted from _sceNp2_0001_24.o
+- name: sceNpMatching2ClearEventData
+  nid: '0xaa6c2c43'
+  signature: ''
+  notes: extracted from _sceNp2_0001_54.o
+- name: sceNpMatching2ContextStart
+  nid: '0x12d0b0f9'
+  signature: ''
+  notes: extracted from _sceNp2_0001_12.o
+- name: sceNpMatching2ContextStartAsync
+  nid: '0x6ba4c668'
+  signature: ''
+  notes: extracted from _sceNp2_0001_38.o
+- name: sceNpMatching2ContextStop
+  nid: '0xf43c647a'
+  signature: ''
+  notes: extracted from _sceNp2_0001_76.o
+- name: sceNpMatching2CreateContext
+  nid: '0x9cbce3f2'
+  signature: ''
+  notes: extracted from _sceNp2_0001_50.o
+- name: sceNpMatching2CreateJoinRoom
+  nid: '0xe7a3bc7a'
+  signature: ''
+  notes: extracted from _sceNp2_0001_69.o
+- name: sceNpMatching2CreateServerContext
+  nid: '0x16b3e5a4'
+  signature: ''
+  notes: extracted from _sceNp2_0001_13.o
+- name: sceNpMatching2DeleteServerContext
+  nid: '0xc6b63b7e'
+  signature: ''
+  notes: extracted from _sceNp2_0001_62.o
+- name: sceNpMatching2DestroyContext
+  nid: '0x01379fd7'
+  signature: ''
+  notes: extracted from _sceNp2_0001_1.o
+- name: sceNpMatching2GetCbQueueInfo
+  nid: '0x62d446ac'
+  signature: ''
+  notes: extracted from _sceNp2_0001_36.o
+- name: sceNpMatching2GetClanLobbyId
+  nid: '0x12034412'
+  signature: ''
+  notes: extracted from _sceNp2_0001_10.o
+- name: sceNpMatching2GetEventData
+  nid: '0x3c00c9d4'
+  signature: ''
+  notes: extracted from _sceNp2_0001_27.o
+- name: sceNpMatching2GetLobbyInfoList
+  nid: '0xefbd9357'
+  signature: ''
+  notes: extracted from _sceNp2_0001_72.o
+- name: sceNpMatching2GetLobbyMemberDataInternal
+  nid: '0x129663d0'
+  signature: ''
+  notes: extracted from _sceNp2_0001_11.o
+- name: sceNpMatching2GetLobbyMemberDataInternalList
+  nid: '0x0b2218a3'
+  signature: ''
+  notes: extracted from _sceNp2_0001_6.o
+- name: sceNpMatching2GetLobbyMemberIdListLocal
+  nid: '0xeffe5a16'
+  signature: ''
+  notes: extracted from _sceNp2_0001_73.o
+- name: sceNpMatching2GetMemoryInfo
+  nid: '0x196a06f9'
+  signature: ''
+  notes: extracted from _sceNp2_0001_14.o
+- name: sceNpMatching2GetRoomDataExternalList
+  nid: '0xe4ac32ca'
+  signature: ''
+  notes: extracted from _sceNp2_0001_68.o
+- name: sceNpMatching2GetRoomDataInternal
+  nid: '0x8b209ca2'
+  signature: ''
+  notes: extracted from _sceNp2_0001_43.o
+- name: sceNpMatching2GetRoomMemberDataExternalList
+  nid: '0x2c5b7fc9'
+  signature: ''
+  notes: extracted from _sceNp2_0001_22.o
+- name: sceNpMatching2GetRoomMemberDataInternal
+  nid: '0xb0c51412'
+  signature: ''
+  notes: extracted from _sceNp2_0001_57.o
+- name: sceNpMatching2GetRoomMemberDataInternalLocal
+  nid: '0x58a04247'
+  signature: ''
+  notes: extracted from _sceNp2_0001_35.o
+- name: sceNpMatching2GetRoomMemberIdListLocal
+  nid: '0x490124fd'
+  signature: ''
+  notes: extracted from _sceNp2_0001_33.o
+- name: sceNpMatching2GetRoomPasswordLocal
+  nid: '0xde6d308b'
+  signature: ''
+  notes: extracted from _sceNp2_0001_67.o
+- name: sceNpMatching2GetRoomSlotInfoLocal
+  nid: '0x3cc27344'
+  signature: ''
+  notes: extracted from _sceNp2_0001_28.o
+- name: sceNpMatching2GetServerIdListLocal
+  nid: '0x8e5cfe9f'
+  signature: ''
+  notes: extracted from _sceNp2_0001_45.o
+- name: sceNpMatching2GetServerInfo
+  nid: '0x3457c0db'
+  signature: ''
+  notes: extracted from _sceNp2_0001_26.o
+- name: sceNpMatching2GetSignalingOptParamLocal
+  nid: '0xa2b01449'
+  signature: ''
+  notes: extracted from _sceNp2_0001_52.o
+- name: sceNpMatching2GetUserInfoList
+  nid: '0xac98b03a'
+  signature: ''
+  notes: extracted from _sceNp2_0001_56.o
+- name: sceNpMatching2GetWorldInfoList
+  nid: '0x05bf2fbd'
+  signature: ''
+  notes: extracted from _sceNp2_0001_4.o
+- name: sceNpMatching2GrantRoomOwner
+  nid: '0x9344d41f'
+  signature: ''
+  notes: extracted from _sceNp2_0001_47.o
+- name: sceNpMatching2Init
+  nid: '0x3f62c759'
+  signature: ''
+  notes: extracted from _sceNp2_0001_30.o
+- name: sceNpMatching2Init2
+  nid: '0xf4babd3f'
+  signature: ''
+  notes: extracted from _sceNp2_0001_77.o
+- name: sceNpMatching2JoinLobby
+  nid: '0x29e78389'
+  signature: ''
+  notes: extracted from _sceNp2_0001_21.o
+- name: sceNpMatching2JoinProhibitiveRoom
+  nid: '0xba578d19'
+  signature: ''
+  notes: extracted from _sceNp2_0001_59.o
+- name: sceNpMatching2JoinRoom
+  nid: '0x5721e711'
+  signature: ''
+  notes: extracted from _sceNp2_0001_34.o
+- name: sceNpMatching2KickoutRoomMember
+  nid: '0x66f19527'
+  signature: ''
+  notes: extracted from _sceNp2_0001_37.o
+- name: sceNpMatching2LeaveLobby
+  nid: '0x02065e3d'
+  signature: ''
+  notes: extracted from _sceNp2_0001_2.o
+- name: sceNpMatching2LeaveRoom
+  nid: '0x1f372697'
+  signature: ''
+  notes: extracted from _sceNp2_0001_15.o
+- name: sceNpMatching2RegisterContextCallback
+  nid: '0x748029a2'
+  signature: ''
+  notes: extracted from _sceNp2_0001_40.o
+- name: sceNpMatching2RegisterLobbyEventCallback
+  nid: '0x0884fc95'
+  signature: ''
+  notes: extracted from _sceNp2_0001_5.o
+- name: sceNpMatching2RegisterLobbyMessageCallback
+  nid: '0x03a2f42a'
+  signature: ''
+  notes: extracted from _sceNp2_0001_3.o
+- name: sceNpMatching2RegisterRoomEventCallback
+  nid: '0xdcb6b27d'
+  signature: ''
+  notes: extracted from _sceNp2_0001_66.o
+- name: sceNpMatching2RegisterRoomMessageCallback
+  nid: '0xfee11e72'
+  signature: ''
+  notes: extracted from _sceNp2_0001_79.o
+- name: sceNpMatching2RegisterSignalingCallback
+  nid: '0xa9e6103e'
+  signature: ''
+  notes: extracted from _sceNp2_0001_53.o
+- name: sceNpMatching2SearchRoom
+  nid: '0x0d22867f'
+  signature: ''
+  notes: extracted from _sceNp2_0001_7.o
+- name: sceNpMatching2SendLobbyChatMessage
+  nid: '0x3f3bd413'
+  signature: ''
+  notes: extracted from _sceNp2_0001_29.o
+- name: sceNpMatching2SendLobbyInvitation
+  nid: '0xefff8779'
+  signature: ''
+  notes: extracted from _sceNp2_0001_74.o
+- name: sceNpMatching2SendRoomChatMessage
+  nid: '0x7bf6e152'
+  signature: ''
+  notes: extracted from _sceNp2_0001_41.o
+- name: sceNpMatching2SendRoomMessage
+  nid: '0x28cad8b3'
+  signature: ''
+  notes: extracted from _sceNp2_0001_20.o
+- name: sceNpMatching2SetDefaultRequestOptParam
+  nid: '0xdb87b088'
+  signature: ''
+  notes: extracted from _sceNp2_0001_64.o
+- name: sceNpMatching2SetLobbyMemberDataInternal
+  nid: '0xfa0583c6'
+  signature: ''
+  notes: extracted from _sceNp2_0001_78.o
+- name: sceNpMatching2SetRoomDataExternal
+  nid: '0x215b0d75'
+  signature: ''
+  notes: extracted from _sceNp2_0001_16.o
+- name: sceNpMatching2SetRoomDataInternal
+  nid: '0x817d1090'
+  signature: ''
+  notes: extracted from _sceNp2_0001_42.o
+- name: sceNpMatching2SetRoomMemberDataInternal
+  nid: '0xb851aacf'
+  signature: ''
+  notes: extracted from _sceNp2_0001_58.o
+- name: sceNpMatching2SetSignalingOptParam
+  nid: '0x6fcd84c1'
+  signature: ''
+  notes: extracted from _sceNp2_0001_39.o
+- name: sceNpMatching2SetUserInfo
+  nid: '0x1022e6d6'
+  signature: ''
+  notes: extracted from _sceNp2_0001_9.o
+- name: sceNpMatching2SignalingCancelPeerNetInfo
+  nid: '0x944b28e8'
+  signature: ''
+  notes: extracted from _sceNp2_0001_48.o
+- name: sceNpMatching2SignalingGetConnectionInfo
+  nid: '0x26ae9ff8'
+  signature: ''
+  notes: extracted from _sceNp2_0001_18.o
+- name: sceNpMatching2SignalingGetConnectionStatus
+  nid: '0x0ebe4c6b'
+  signature: ''
+  notes: extracted from _sceNp2_0001_8.o
+- name: sceNpMatching2SignalingGetCtxOpt
+  nid: '0xe9946648'
+  signature: ''
+  notes: extracted from _sceNp2_0001_71.o
+- name: sceNpMatching2SignalingGetLocalNetInfo
+  nid: '0x98f74c9a'
+  signature: ''
+  notes: extracted from _sceNp2_0001_49.o
+- name: sceNpMatching2SignalingGetPeerNetInfo
+  nid: '0xdbe84071'
+  signature: ''
+  notes: extracted from _sceNp2_0001_65.o
+- name: sceNpMatching2SignalingGetPeerNetInfoResult
+  nid: '0x2e42f94a'
+  signature: ''
+  notes: extracted from _sceNp2_0001_23.o
+- name: sceNpMatching2SignalingGetPingInfo
+  nid: '0x8d3f8d49'
+  signature: ''
+  notes: extracted from _sceNp2_0001_44.o
+- name: sceNpMatching2SignalingSetCtxOpt
+  nid: '0xbf014813'
+  signature: ''
+  notes: extracted from _sceNp2_0001_60.o
+- name: sceNpMatching2Term
+  nid: '0x2fe0da7d'
+  signature: ''
+  notes: extracted from _sceNp2_0001_25.o
+- name: sceNpMatching2Term2
+  nid: '0x23009d07'
+  signature: ''
+  notes: extracted from _sceNp2_0001_17.o
+- name: sceNpUtilBuildCdnUrl
+  nid: '0x8e930999'
+  signature: ''
+  notes: extracted from _sceNp2_0001_46.o
+imports: []
