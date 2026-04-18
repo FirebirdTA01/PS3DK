@@ -308,15 +308,20 @@ static inline void cellGcmSetVertexProgramParameter(CellGcmContextData *ctx,
     const unsigned rows  = ps3tc_cg_rows_for_type(pp->type);
     const unsigned words = rows * 4u;
 
-    /* Reserve: UPLOAD_CONST_ID hdr + 1 arg           = 2 words,
-     *          UPLOAD_CONST_X(0) hdr + `words` data  = 1 + words. */
-    uint32_t *w = ps3tc_gcm_reserve(ctx, 2u + 1u + words);
+    /* NV40TCL_VP_UPLOAD_CONST_ID sits at 0x1efc, UPLOAD_CONST_X(0) at
+     * 0x1f00 — i.e. exactly 4 bytes further.  One method header with
+     * count = (1 + words) has the hardware write the ID first, then
+     * auto-increment to 0x1f00 and stream the float payload through
+     * CONST_X(0) / Y(0) / Z(0) / W(0) / X(1) / … in one atomic command.
+     * Issuing UPLOAD_CONST_ID and UPLOAD_CONST_X(0) as two separate
+     * commands doesn't behave the same — the hardware appears to
+     * reset the upload state between them and the subsequent draw
+     * takes stale / undefined constant values. */
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2u + words);
     if (!w) return;
 
-    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, 1);
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, words + 1u);
     *w++ = (uint32_t)pp->resIndex;
-
-    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_CONST_X(0), words);
     memcpy(w, values, words * sizeof(uint32_t));
 }
 
