@@ -369,6 +369,13 @@ static inline uint32_t *cellGcmGetLabelAddress(uint8_t index)
  * separate include, so we pull gcm_cg_func.h in transitively. */
 #include <cell/gcm/gcm_cg_func.h>
 
+/* Cg -> rsx* runtime bridge.  Translates Sony CGprogram / CGparameter
+ * handles to PSL1GHT's rsx{Vertex,Fragment}Program-typed commands so
+ * cellGcmSetVertexProgram / cellGcmSetFragmentProgram /
+ * cellGcmSetVertexProgramParameter resolve against the same runtime
+ * PSL1GHT's rsx_program layer already provides. */
+#include <cell/gcm/gcm_cg_bridge.h>
+
 /* Command-emitter forwarders (Phase 7 step 3).  Sony source includes
  * the command-emitter family transitively through <cell/gcm.h>; we
  * preserve that. */
