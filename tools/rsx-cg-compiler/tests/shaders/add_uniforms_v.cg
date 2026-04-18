@@ -1,0 +1,16 @@
+// Two uniform float4s added together — exercises the NV40 single-const-
+// per-instruction constraint.  sce-cgc lowers this to:
+//   MOV R0, c[col_b];
+//   ADD out_col, c[col_a], R0;
+// with col_a at c[467] and col_b at c[466].  rsx-cg-compiler must match
+// byte-for-byte, including the MOV-to-temp insertion and temp allocation.
+void main(
+    float4 in_pos          : POSITION,
+    uniform float4 col_a,
+    uniform float4 col_b,
+    out float4 out_pos     : POSITION,
+    out float4 out_col     : COLOR)
+{
+    out_pos = in_pos;
+    out_col = col_a + col_b;
+}

@@ -188,7 +188,34 @@ struct MatVecMulBinding
     int         vectorInputIdx = -1; // NV40 input-attribute index of the vec4 operand
 };
 
+// Scalar / vector arithmetic (Add, Sub, Mul) between two values.  Lowered
+// to a single NV40 VEC op; if both operands come from the const bank we
+// pre-move the second into a temp because NV40 allows only one const
+// source per instruction (confirmed by sce-cgc on two_vec4_v.cg).
+enum class ArithOp { Add, Sub, Mul };
+
+struct ArithBinding
+{
+    ArithOp   op;
+    IRValueID srcIds[2];
+};
+
 }  // namespace
+
+// NV40 VP slot map: ADD / SUB fill src0 + src2, leaving src1 unused.
+// MUL fills src0 + src1.  Matches PSL1GHT vpparser.cpp's spec
+// (`{"ADD", OPCODE_ADD, {0, 2, -1}, ...}`) and sce-cgc output.
+// Returned indices are into the 3-slot nvfx_insn::src array.
+static inline void arithSlots(ArithOp op, int& slotA, int& slotB)
+{
+    switch (op)
+    {
+    case ArithOp::Mul: slotA = 0; slotB = 1; break;
+    case ArithOp::Add:
+    case ArithOp::Sub:
+    default:           slotA = 0; slotB = 2; break;
+    }
+}
 
 UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
 {
@@ -210,6 +237,15 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
 
     // MatVecMul results — emit the 4 DP4s once the consumer is known.
     std::unordered_map<IRValueID, MatVecMulBinding> valueToMatVecMul;
+
+    // Arithmetic operations awaiting a consumer.
+    std::unordered_map<IRValueID, ArithBinding> valueToArith;
+
+    // Rolling temp register counter (R0, R1, ...).  No liveness analysis
+    // yet — every dual-const operand allocates a fresh temp.  sce-cgc reuses
+    // temps across instructions when operand lifetimes don't overlap; we'll
+    // match that pattern-by-pattern as real shaders need it.
+    int nextTempReg = 0;
 
     // Deferred store-outputs: sce-cgc emits single-instruction StoreOutputs
     // before multi-instruction ones (so the LAST flag lands on the tail of
@@ -264,6 +300,23 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
 
     bool emittedSomething = false;
 
+    // Build an nvfx_reg for an IR value that was resolved to a simple
+    // source (vertex input or const-bank slot).  Used when lowering an
+    // arithmetic op at the point of consumption.
+    auto regFromValue = [&](IRValueID id, bool& ok) -> struct nvfx_reg
+    {
+        auto it = valueToSource.find(id);
+        if (it == valueToSource.end())
+        {
+            ok = false;
+            return makeReg(NVFXSR_NONE, 0);
+        }
+        ok = true;
+        return (it->second.kind == ValueSource::Kind::Input)
+                   ? makeReg(NVFXSR_INPUT, it->second.regIdx)
+                   : makeReg(NVFXSR_CONST, it->second.regIdx);
+    };
+
     auto emitStoreOutput =
         [&](IRValueID srcId,
             const std::string& semanticName,
@@ -280,6 +333,65 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
 
         const struct nvfx_reg dstReg = makeReg(NVFXSR_OUTPUT, outIndex);
         const struct nvfx_reg none   = makeReg(NVFXSR_NONE, 0);
+
+        // Arithmetic: ADD / SUB / MUL between two values.  If both source
+        // operands are const-bank entries, the second is pre-MOVed into a
+        // temp — NV40 VP can read only one const per instruction.
+        auto arIt = valueToArith.find(srcId);
+        if (arIt != valueToArith.end())
+        {
+            bool okA = false, okB = false;
+            struct nvfx_reg regA = regFromValue(arIt->second.srcIds[0], okA);
+            struct nvfx_reg regB = regFromValue(arIt->second.srcIds[1], okB);
+            if (!okA || !okB)
+            {
+                out.diagnostics.push_back(
+                    "nv40-vp: arithmetic operand did not resolve to a simple source");
+                return false;
+            }
+
+            if (regA.type == NVFXSR_CONST && regB.type == NVFXSR_CONST)
+            {
+                // MOV R_next, c[B] — preload second operand into a temp.
+                const int tempIdx = nextTempReg++;
+                const struct nvfx_reg tempReg = makeReg(NVFXSR_TEMP, tempIdx);
+
+                struct nvfx_src mov_src0 = makeSrc(regB);
+                struct nvfx_src mov_src1 = makeSrc(none);
+                struct nvfx_src mov_src2 = makeSrc(none);
+                struct nvfx_insn movInsn = nvfx_insn(
+                    0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(tempReg),
+                    NVFX_VP_MASK_ALL,
+                    mov_src0, mov_src1, mov_src2);
+                asm_.emit(movInsn, VP_OP(MOV));
+
+                regB = tempReg;
+            }
+
+            // Slot assignment: ADD/SUB → src0+src2, MUL → src0+src1.
+            int slotA = 0, slotB = 0;
+            arithSlots(arIt->second.op, slotA, slotB);
+
+            struct nvfx_src srcs[3] = {
+                makeSrc(none), makeSrc(none), makeSrc(none) };
+            srcs[slotA] = makeSrc(regA);
+            srcs[slotB] = makeSrc(regB);
+
+            struct nvfx_insn opInsn = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dstReg),
+                NVFX_VP_MASK_ALL,
+                srcs[0], srcs[1], srcs[2]);
+
+            uint8_t opcode = VP_OP(ADD);
+            if (arIt->second.op == ArithOp::Sub) opcode = VP_OP(ADD);  // Sub = ADD with neg
+            else if (arIt->second.op == ArithOp::Mul) opcode = VP_OP(MUL);
+            asm_.emit(opInsn, opcode);
+
+            emittedSomething = true;
+            return true;
+        }
 
         auto mvIt = valueToMatVecMul.find(srcId);
         if (mvIt != valueToMatVecMul.end())
@@ -376,6 +488,25 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
                 break;
             }
 
+            case IROp::Add:
+            case IROp::Sub:
+            case IROp::Mul:
+            {
+                if (inst.operands.size() < 2)
+                {
+                    out.diagnostics.push_back("nv40-vp: arithmetic op with <2 operands");
+                    return out;
+                }
+                ArithBinding a;
+                a.op = (inst.op == IROp::Add) ? ArithOp::Add
+                     : (inst.op == IROp::Sub) ? ArithOp::Sub
+                                              : ArithOp::Mul;
+                a.srcIds[0] = inst.operands[0];
+                a.srcIds[1] = inst.operands[1];
+                valueToArith[inst.result] = a;
+                break;
+            }
+
             case IROp::MatVecMul:
             {
                 if (inst.operands.size() < 2)
@@ -417,9 +548,10 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
 
                 const IRValueID srcId = inst.operands[0];
 
-                // Multi-instruction expansions (matvecmul) are deferred until
-                // after all single-instruction StoreOutputs have been emitted.
-                if (valueToMatVecMul.count(srcId))
+                // Multi-instruction expansions (matvecmul, arithmetic needing a
+                // temp) are deferred until after all single-instruction
+                // StoreOutputs have been emitted.
+                if (valueToMatVecMul.count(srcId) || valueToArith.count(srcId))
                 {
                     deferredStores.push_back(
                         { srcId, inst.semanticName, inst.semanticIndex });

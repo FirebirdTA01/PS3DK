@@ -118,7 +118,7 @@ MOV R0, c[b]
 ADD dst, c[a], R0
 ```
 
-Observed in `two_vec4_v.cg` disassembly:
+Observed in `two_vec4_v.cg` / `add_uniforms_v.cg` disassembly:
 
 ```
 MOV o[0], v[0];
@@ -127,9 +127,29 @@ ADD o[1], c[467], R0;  // col_a + R0 — one const, one temp
 END
 ```
 
-Our `rsx-cg-compiler` IR-to-NV40 lowering must honour the same
-constraint — any arithmetic op with two uniform operands has to
-insert a MOV-to-temp first.
+Our `rsx-cg-compiler` IR-to-NV40 lowering honours this in stage 3c
+by inserting a MOV-to-temp before any arithmetic op whose two
+operands both come from the const bank.
+
+## VEC opcode slot map
+
+Different VEC-slot opcodes read operands from different source positions.
+The `nvfx_insn::src[0..2]` array holds the per-operand register / swizzle
+records, and a given opcode reads a specific subset:
+
+| opcode | src slots used |
+|:-------|:---------------|
+| MOV    | `src[0]`                |
+| ADD    | `src[0]`, `src[2]`      |
+| SUB    | `src[0]`, `src[2]` (src[2] negated) |
+| MUL    | `src[0]`, `src[1]`      |
+| MAD    | `src[0]`, `src[1]`, `src[2]` |
+| DP3/DP4| `src[0]`, `src[1]`      |
+
+(Confirmed against PSL1GHT `tools/cgcomp/source/vpparser.cpp`'s
+per-opcode `{0, 2, -1}` etc. spec and sce-cgc byte output for
+`add_uniforms_v.cg` — SRC1 of an ADD decodes as the default INPUT
+filler, not the second operand.)
 
 ## Program header (CgBinaryVertexProgram, 6 u32)
 
