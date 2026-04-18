@@ -159,6 +159,18 @@ clone_shallow "https://github.com/Estwald/PSDK3v2.git"             "$FORKS_DIR/E
 clone_shallow "https://github.com/StrawFox64/PS3Toolchain.git"     "$FORKS_DIR/StrawFox64-PS3Toolchain"
 
 # -----------------------------------------------------------------------------
+# 3b. Phase 8 Cg compiler donor (vita-cg-compiler).
+# -----------------------------------------------------------------------------
+# Front-end donor for tools/cgcomp-v2/.  We adopt the preprocessor / lexer /
+# parser / AST / semantic / IR builder + passes from this project; the
+# Vita-specific USSE back-end + GXP container code are not used (replaced by
+# our NV40 + Sony container code in tools/cgcomp-v2/src/).  See
+# tools/cgcomp-v2/README.md for the architecture.
+say "=== vita-cg-compiler donor ==="
+clone_shallow "https://github.com/FirebirdTA01/Vita-Cg-Compiler.git" \
+    "$PS3_TOOLCHAIN_ROOT/src/vita-cg-compiler"
+
+# -----------------------------------------------------------------------------
 # 4. Build root.
 # -----------------------------------------------------------------------------
 say "=== Build root ==="
