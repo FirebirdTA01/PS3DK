@@ -18,6 +18,7 @@ HEADERS := \
     include/sys/timer.h \
     include/sys/sys_time.h \
     include/sys/return_code.h \
+    include/sys/thread.h \
     include/sys/ppu_thread.h \
     include/sys/process.h \
     include/sysutil/sysutil_sysparam.h \
