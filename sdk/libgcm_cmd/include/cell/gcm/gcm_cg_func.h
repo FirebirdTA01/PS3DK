@@ -63,7 +63,7 @@ int32_t     cellGcmCgGetParameterResourceIndex(CGprogram prog, CGparameter param
 uint32_t    cellGcmCgGetParameterVariability  (CGprogram prog, CGparameter param);
 uint32_t    cellGcmCgGetParameterDirection    (CGprogram prog, CGparameter param);
 int32_t     cellGcmCgGetParameterOrdinalNumber(CGprogram prog, CGparameter param);
-uint32_t    cellGcmCgGetParameterReferenced   (CGprogram prog, CGparameter param);
+CGbool      cellGcmCgGetParameterReferenced   (CGprogram prog, CGparameter param);
 const char *cellGcmCgGetParameterName         (CGprogram prog, CGparameter param);
 const char *cellGcmCgGetParameterSemantic     (CGprogram prog, CGparameter param);
 const float *cellGcmCgGetParameterValues      (CGprogram prog, CGparameter param);
