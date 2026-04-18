@@ -1,14 +1,14 @@
-# cgcomp-v2 — Phase 8 Cg → NV40 compiler
+# rsx-cg-compiler — Phase 8 Cg → NV40 compiler
 #
 # Self-contained build: all donor front-end sources are copied into
-# tools/cgcomp-v2/src/donor/ rather than referenced from a sibling
+# tools/rsx-cg-compiler/src/donor/ rather than referenced from a sibling
 # clone of vita-cg-compiler.  Sync against upstream is a manual `cp`
 # operation when needed.
 
 cmake_minimum_required(VERSION 3.16)
-project(cgcomp-v2
+project(rsx-cg-compiler
     LANGUAGES CXX
-    DESCRIPTION "PS3 Cg-to-NV40 shader compiler (Sony binary-compat)")
+    DESCRIPTION "PS3 Cg-to-RSX (NV40) shader compiler (Sony binary-compat)")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -98,7 +98,7 @@ set(SRC_MAIN
     ${SRC_DIR}/main.cpp
 )
 
-add_executable(cgcomp-v2
+add_executable(rsx-cg-compiler
     ${SRC_FRONTEND_DONOR}
     ${SRC_IR_DONOR}
     ${SRC_NV40}
@@ -107,7 +107,7 @@ add_executable(cgcomp-v2
     ${EMBED_OUTPUT}
 )
 
-target_include_directories(cgcomp-v2 PRIVATE
+target_include_directories(rsx-cg-compiler PRIVATE
     ${DONOR_DIR}
     ${DONOR_DIR}/common
     ${DONOR_DIR}/frontend

@@ -1,0 +1,15 @@
+// Smallest uniform-read vertex shader.  Passes POSITION through and
+// sources COLOR0 directly from a uniform float4.  Exercises:
+//   - uniform declaration → const-bank register allocation
+//   - LoadUniform → NVFXSR_CONST source operand path
+//   - no arithmetic, still a single MOV per output
+// Byte-exact against sce-cgc is the gate — rsx-cg-compiler must match.
+void main(
+    float4 in_pos          : POSITION,
+    uniform float4 col,
+    out float4 out_pos     : POSITION,
+    out float4 out_col     : COLOR)
+{
+    out_pos = in_pos;
+    out_col = col;
+}

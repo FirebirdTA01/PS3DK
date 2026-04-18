@@ -1,9 +1,13 @@
-# cgcomp-v2 — Phase 8 Cg → NV40 compiler
+# rsx-cg-compiler — Phase 8 Cg → RSX (NV40) compiler
 
 Replacement for PSL1GHT's `cgcomp` that drops the NVIDIA Cg toolkit
 dependency and adds full Sony Cg shader-language support, including
 the proprietary `#pragma alphakill` / `#pragma texformat` extensions
 that NVIDIA's stock compiler silently ignores.
+
+The binary is named `rsx-cg-compiler` to mirror Sony's own sce-cgc
+profile names (`sce_vp_rsx`, `sce_fp_rsx`) and the sibling front-end
+donor project `vita-cg-compiler`.
 
 ## Architecture
 
@@ -24,7 +28,7 @@ back-end code authored here:
               │  IRModule
               ▼
 ┌───────────────────────────┐
-│ NV40 back-end (NEW, here) │   tools/cgcomp-v2/src/nv40_*.{h,cpp}
+│ NV40 back-end (NEW, here) │   tools/rsx-cg-compiler/src/nv40/
 │   IR → NV40 lowering →    │   Reads IRModule, produces nvfx_insn[] arrays
 │   NV40 register alloc →   │   for fragment + vertex programs.  Implements
 │   ucode emit              │   Sony pragma semantics (alphakill flag bit on
@@ -33,7 +37,7 @@ back-end code authored here:
               │  nvfx_insn[]
               ▼
 ┌───────────────────────────┐
-│ Container emit (NEW, here)│   tools/cgcomp-v2/src/sony_container_*.{h,cpp}
+│ Container emit (NEW, here)│   tools/rsx-cg-compiler/src/sony_container_*.{h,cpp}
 │   nvfx_insn[] →           │   Emits Sony's CellCgbFragmentProgramConfiguration /
 │   .fpo / .vpo binary      │   CellCgbVertexProgramConfiguration container —
 │                           │   primary target.  Optional rsxFragmentProgram /
@@ -55,8 +59,8 @@ When upstream vita-cg-compiler gains improvements worth pulling in,
 re-sync by hand:
 
 ```sh
-diff -ru tools/cgcomp-v2/src/donor/  src/vita-cg-compiler/src/   # see drift
-cp src/vita-cg-compiler/src/<file>   tools/cgcomp-v2/src/donor/<file>
+diff -ru tools/rsx-cg-compiler/src/donor/  src/vita-cg-compiler/src/   # see drift
+cp src/vita-cg-compiler/src/<file>   tools/rsx-cg-compiler/src/donor/<file>
 ```
 
 `scripts/bootstrap.sh` still clones vita-cg-compiler into
@@ -67,7 +71,7 @@ the build works without it.
 
 PSL1GHT's existing `tools/cgcomp/` keeps working unchanged.  We can
 A/B test our output against it during Phase 8 development.  Once
-cgcomp-v2 reaches feature parity + Sony-byte-compat, the old
+rsx-cg-compiler reaches feature parity + Sony-byte-compat, the old
 cgcomp is retired.
 
 ## Status
@@ -75,14 +79,16 @@ cgcomp is retired.
 - Stage 0: repo + tree skeleton, no code yet. ✓
 - Stage 1: front-end skeleton.  Parses Cg through preprocessor +
   lexer + parser, dumps AST.  No semantic analysis or NV40 emit
-  yet.  Built artifact: `cgcomp-v2 <shader.cg>` produces an AST
+  yet.  Built artifact: `rsx-cg-compiler <shader.cg>` produces an AST
   text dump on stdout.  Donor copied into `src/donor/`. ✓
 - Stage 2: NV40 back-end emits ucode bit-identical to Sony sce-cgc for
-  simple shaders.
-- Stage 3: Sony pragma semantics (alphakill + texformat first).
-- Stage 4: Sony binary container.
-- Stage 5: PSL1GHT runtime container update (parallel-implementation).
-- Stage 6: Sony GCM sample tree compile sweep.
+  simple identity shaders.  ✓
+- Stage 3 (in progress): uniform parameters, arithmetic, mul(matrix,
+  vector) lowered to DP4 chains.
+- Stage 4: Sony pragma semantics (alphakill + texformat first).
+- Stage 5: Sony binary container.
+- Stage 6: PSL1GHT runtime container update (parallel-implementation).
+- Stage 7: Sony GCM sample tree compile sweep.
 
 See `MEMORY/project_phase8_cg_compiler_direction.md` for the rolling
 status notes.

@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 #
-# Byte-diff cgcomp-v2 output against Sony sce-cgc for every .cg in
+# Byte-diff rsx-cg-compiler output against Sony sce-cgc for every .cg in
 # tests/shaders/.  Fails if any shader mismatches.
 #
 # Per project feedback (memory: feedback_byte_exact_shader_output): raw
 # "looks correct" output is not enough — RSX rejects instruction
 # encodings that diverge from sce-cgc in subtle ways that don't show up
 # in functional code review.  This harness is the authoritative pass/
-# fail gate for every cgcomp-v2 change.
+# fail gate for every rsx-cg-compiler change.
 #
 # Scope right now:
-#   - raw NV40 ucode words (what cgcomp-v2 emits)
+#   - raw NV40 ucode words (what rsx-cg-compiler emits)
 #   - extracted from Sony .vpo via the ucode offset recorded in the .vpo
 #     header (u32 at offset 0x00 = total size, instruction count at 0x04,
 #     code blob pointer at 0x0C → 0xD0 for the identity case)
 #
 # We intentionally do *not* compare the full .vpo container until the
-# cgcomp-v2 Sony-container emitter lands (Phase 8 stage 4).
+# rsx-cg-compiler Sony-container emitter lands (Phase 8 stage 4).
 
 set -euo pipefail
 
@@ -24,14 +24,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_DIR="$(cd "$TOOL_DIR/../.." && pwd)"
 
-CGCOMP_V2="$TOOL_DIR/build/cgcomp-v2"
+RSX_CG_COMPILER="$TOOL_DIR/build/rsx-cg-compiler"
 SCE_CGC_EXE="$REPO_DIR/reference/sony-sdk/host-win32/Cg/bin/sce-cgc.exe"
 SHADER_DIR="$SCRIPT_DIR/shaders"
-WORK_DIR="$(mktemp -d -t cgcomp-v2-diff.XXXXXX)"
+WORK_DIR="$(mktemp -d -t rsx-cg-compiler-diff.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-if [[ ! -x "$CGCOMP_V2" ]]; then
-    echo "error: cgcomp-v2 not built; run: cmake --build $TOOL_DIR/build" >&2
+if [[ ! -x "$RSX_CG_COMPILER" ]]; then
+    echo "error: rsx-cg-compiler not built; run: cmake --build $TOOL_DIR/build" >&2
     exit 1
 fi
 if [[ ! -f "$SCE_CGC_EXE" ]]; then
@@ -78,9 +78,9 @@ extract_vpo_ucode() {
     xxd -s "$ucode_off" -l "$ucode_size" -p "$vpo" | tr -d '\n'
 }
 
-collect_cgcomp_ucode() {
+collect_our_ucode() {
     local cg="$1" profile="$2"
-    "$CGCOMP_V2" --profile "$profile" "$cg" \
+    "$RSX_CG_COMPILER" --profile "$profile" "$cg" \
         | awk '/^  / { for (i=2;i<=NF;i++) printf "%s", $i }'
 }
 
@@ -102,7 +102,7 @@ for cg in "$SHADER_DIR"/*.cg; do
             continue
         }
 
-    our_hex=$(collect_cgcomp_ucode "$cg" "$profile")
+    our_hex=$(collect_our_ucode "$cg" "$profile")
     words=$((${#our_hex} / 8))
     sce_hex=$(extract_vpo_ucode "$sce_vpo" "$words")
 

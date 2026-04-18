@@ -120,11 +120,13 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
             hw[1] |= (src.reg.index << NVFX_VP(INST_INPUT_SRC_SHIFT));
             break;
         case NVFXSR_CONST:
-            // Constant-register relocations are stage-3+ work.  Emit
-            // the opcode placeholder so the instruction is still well-
-            // formed, but downstream passes will need to patch hw[2]/[3]
-            // once constant allocation is in place.
+            // CONST_SRC is a 9-bit field at bits 12..20 of hw[1] (not 8 as
+            // the PSL1GHT-ported header suggests — sce-cgc writes the full
+            // absolute c[] register index here, 0..511).  See
+            // docs/REVERSE_ENGINEERING.md for the encoding walkthrough.
             sr |= (NVFX_VP(SRC_REG_TYPE_CONST) << NVFX_VP(SRC_REG_TYPE_SHIFT));
+            hw[1] |= (static_cast<uint32_t>(src.reg.index) & 0x1FF)
+                     << NV40_VP_INST_CONST_SRC_SHIFT;
             break;
         case NVFXSR_NONE:
             sr |= (NVFX_VP(SRC_REG_TYPE_INPUT) << NVFX_VP(SRC_REG_TYPE_SHIFT));

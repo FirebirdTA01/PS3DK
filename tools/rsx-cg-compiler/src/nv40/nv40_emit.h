@@ -1,5 +1,5 @@
-#ifndef CGCOMP_V2_NV40_EMIT_H
-#define CGCOMP_V2_NV40_EMIT_H
+#ifndef RSX_CG_COMPILER_NV40_EMIT_H
+#define RSX_CG_COMPILER_NV40_EMIT_H
 
 /*
  * Public entry points for the NV40 back-end.
@@ -34,4 +34,4 @@ UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry
 
 }  // namespace nv40
 
-#endif  /* CGCOMP_V2_NV40_EMIT_H */
+#endif  /* RSX_CG_COMPILER_NV40_EMIT_H */

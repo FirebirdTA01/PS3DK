@@ -1,0 +1,20 @@
+// Vertex shader with a matrix uniform + per-vertex colour passthrough.
+// Canonical "basic triangle" shape: transform POSITION through a 4x4
+// matrix and forward the input COLOR untouched.  Locks in support
+// for:
+//   - uniform float4x4 (const-bank upload at bind-time)
+//   - mul(matrix, vector) → 4-way DP4 against const rows
+//   - multiple output semantics (POSITION + COLOR0)
+// End-to-end byte-exact target vs sce-cgc.  Clean-room source — not
+// derived from any vendor sample.
+
+void main(
+    float4 in_position      : POSITION,
+    float4 in_color         : COLOR,
+    uniform float4x4 mvp,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    out_position = mul(mvp, in_position);
+    out_color    = in_color;
+}
