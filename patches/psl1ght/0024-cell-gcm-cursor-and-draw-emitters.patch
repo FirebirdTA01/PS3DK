@@ -150,12 +150,11 @@ diff --git a/ppu/include/cell/gcm/gcm_command_c.h b/ppu/include/cell/gcm/gcm_com
 +                                             uint8_t type, uint8_t location,
 +                                             uint32_t offset)
 +{
-+	(void)thisContext; (void)index; (void)frequency;
-+	(void)stride; (void)size; (void)type; (void)location; (void)offset;
-+	/* PSL1GHT exposes a different decomposition: rsxBindVertexArrayAttrib
-+	 * + rsxSetVertexDataArray-like helpers in <rsx/rsx.h>.  Map here once
-+	 * the first sample needs this exact entry point — for now, skipping
-+	 * the body keeps the symbol resolvable (caller error: TODO). */
++	/* Sony and PSL1GHT agree on the param set but order args differently.
++	 * Sony:    (index, freq, stride, size, type, location, offset)
++	 * PSL1GHT: (attr,  freq, offset, stride, elems, dtype, location)  */
++	rsxBindVertexArrayAttrib(thisContext, index, frequency, offset,
++	                         stride, size, type, location);
 +}
 +
 +static inline void cellGcmSetVertexAttribInputMask(CellGcmContextData *thisContext, uint16_t mask)
