@@ -1,0 +1,32 @@
+From: PS3 Custom Toolchain <noreply@example.invalid>
+Subject: [PATCH] rsx/gcm_sys.h: union-alias gcmSurface.antiAlias / .antialias
+
+PSL1GHT's gcmSurface struct names the AA field `antiAlias` (camel);
+Sony samples write it as `antialias` (lower).  Same byte at the same
+offset, same values, same struct layout.
+
+Anonymous union lets both spellings resolve against the same storage
+so sample code written against either convention compiles unchanged
+against the shared struct.  Zero runtime cost — the compiler picks
+a single field to emit; no runtime chooser.
+
+Covers the gap uncovered while bringing Sony
+`samples/sdk/graphics/gcm/basic/main.cpp` through our SDK build.
+
+Signed-off-by: PS3 Custom Toolchain <noreply@example.invalid>
+---
+ ppu/include/rsx/gcm_sys.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ppu/include/rsx/gcm_sys.h b/ppu/include/rsx/gcm_sys.h
+--- a/ppu/include/rsx/gcm_sys.h
++++ b/ppu/include/rsx/gcm_sys.h
+@@ -774,7 +774,7 @@ typedef struct _gcmSurface
+ 	- \ref GCM_SURFACE_SQUARE_CENTERED_4
+ 	- \ref GCM_SURFACE_SQUARE_ROTATED_4
+ 	*/
+-	u8 antiAlias;
++	union { u8 antiAlias; u8 antialias; };
+
+ 	/*! \brief Format of the color buffer.
+

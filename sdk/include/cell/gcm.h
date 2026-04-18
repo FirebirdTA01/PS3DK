@@ -52,6 +52,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <malloc.h>        /* Sony code reaches memalign via this include chain */
 #include <ppu-types.h>
 #include <rsx/gcm_sys.h>
 #include <rsx/rsx.h>
@@ -379,6 +380,33 @@ static inline uint32_t *cellGcmGetLabelAddress(uint8_t index)
  * without affecting name lookup. */
 #ifdef __cplusplus
 namespace cell { namespace Gcm {} }
+#endif
+
+/* Sony-convention no-context command-emitter overloads (C++ only).
+ *
+ * Sony style inline emitters read the current context from the global
+ * gCellGcmCurrentContext rather than taking an explicit first arg.
+ * We ship the explicit-ctx variants via gcm_command_c.h; the
+ * overloads in gcm_cmd_overloads.h let the same function names compile
+ * when called Sony-style — they forward to the ctx variants, pulling
+ * the current context from the global.
+ *
+ * C mode cannot overload by arity, so these stay C++-only.  C callers
+ * continue to use the explicit-ctx forms.
+ */
+#include <cell/gcm/gcm_cmd_overloads.h>
+
+/* SetFlip / SetPrepareFlip are declared in this file (not gcm_command_c.h);
+ * hand-roll their no-context overloads to match. */
+#ifdef __cplusplus
+static inline int32_t cellGcmSetFlip(uint8_t id)
+{ return cellGcmSetFlip(gCellGcmCurrentContext, id); }
+
+static inline uint32_t cellGcmSetPrepareFlip(uint8_t id)
+{ return cellGcmSetPrepareFlip(gCellGcmCurrentContext, id); }
+
+static inline void cellGcmSetWaitFlip(void)
+{ cellGcmSetWaitFlip(gCellGcmCurrentContext); }
 #endif
 
 #endif /* __PSL1GHT_CELL_GCM_H__ */
