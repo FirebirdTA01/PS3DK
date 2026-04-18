@@ -55,27 +55,36 @@ add_custom_command(
 # Source lists.
 # ----------------------------------------------------------------------------
 
-# Donor front-end sources.  Stage 1 ships these; Stage 2 may drop / replace
-# pieces (e.g. semantic analysis if it depends on USSE-specific bits).
+# Donor front-end sources.
 set(SRC_FRONTEND_DONOR
     ${DONOR_DIR}/common/errorHandler.cpp
     ${DONOR_DIR}/common/memoryPool.cpp
     ${DONOR_DIR}/frontend/preprocessor.cpp
     ${DONOR_DIR}/frontend/lexer.cpp
     ${DONOR_DIR}/frontend/parser.cpp
+    ${DONOR_DIR}/frontend/semantic.cpp
     ${DONOR_DIR}/frontend/symbol_table.cpp
     ${DONOR_DIR}/frontend/types.cpp
     ${DONOR_DIR}/builtin_shader_header.cpp
-    # Stage 2:
-    #   semantic.cpp  — needs RSX-aware shader-stage hooks
-    #   ir/*.cpp      — IR builder + passes once we wire NV40 lowering
 )
 
-# NEW: NV40 back-end (this tree).  Populated in Stage 2.
+# Donor IR layer — hardware-independent IRModule built from AST.
+# The donor's USSE back-end (src/backend/, src/gxp/) is not brought in:
+# NV40 lowering lives in the SRC_NV40 list below.
+set(SRC_IR_DONOR
+    ${DONOR_DIR}/ir/ir.cpp
+    ${DONOR_DIR}/ir/ir_builder.cpp
+    ${DONOR_DIR}/ir/ir_passes.cpp
+)
+
+# NV40 back-end (this tree).  Register-file / opcode headers are adopted
+# from Mesa/Nouveau via PSL1GHT cgcomp; per-stage lowering is authored here.
+set(NV40_DIR ${SRC_DIR}/nv40)
 set(SRC_NV40
-    # ${SRC_DIR}/nv40_lowering.cpp
-    # ${SRC_DIR}/nv40_regalloc.cpp
-    # ${SRC_DIR}/nv40_emit.cpp
+    ${NV40_DIR}/nv40_emit.cpp
+    ${NV40_DIR}/nv40_vp_assembler.cpp
+    ${NV40_DIR}/nv40_vp_emit.cpp
+    ${NV40_DIR}/nv40_fp_emit.cpp
 )
 
 # NEW: Sony container emitter (this tree).  Populated in Stage 4.
@@ -91,6 +100,7 @@ set(SRC_MAIN
 
 add_executable(cgcomp-v2
     ${SRC_FRONTEND_DONOR}
+    ${SRC_IR_DONOR}
     ${SRC_NV40}
     ${SRC_CONTAINER}
     ${SRC_MAIN}
@@ -101,5 +111,7 @@ target_include_directories(cgcomp-v2 PRIVATE
     ${DONOR_DIR}
     ${DONOR_DIR}/common
     ${DONOR_DIR}/frontend
+    ${DONOR_DIR}/ir
     ${SRC_DIR}
+    ${NV40_DIR}
 )
