@@ -1,6 +1,7 @@
 library: cellGcmSys
 version: 1
 module: cellGcmSys
+archive_name: gcm_sys
 exports:
 - name: _cellGcmFunc1
   nid: '0x5f909b17'

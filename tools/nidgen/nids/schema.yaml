@@ -24,6 +24,16 @@ properties:
     description: "vendor SPRX module that resolves these imports at runtime."
     pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
 
+  archive_name:
+    type: string
+    description: |
+      Optional override for the stub archive filename basename
+      (i.e. `lib<archive_name>_stub.a`).  When absent, falls back to
+      `library`.  Use when Sony's archive filename diverges from the
+      runtime library/module name — e.g. Sony ships `libgcm_sys_stub.a`
+      but the resident module name is `cellGcmSys`.
+    pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
+
   exports:
     type: array
     description: "Symbols exported by this library."
