@@ -118,6 +118,137 @@ extern "C" {
 #define CELL_GCM_DISPLAY_HSYNC           GCM_FLIP_HSYNC
 #define CELL_GCM_DISPLAY_VSYNC           GCM_FLIP_VSYNC
 
+/* Depth-cull (Zcull) alignment (cellGcmBindZcull / GCM tile setup). */
+#define CELL_GCM_ZCULL_ALIGN_WIDTH       GCM_ZCULL_ALIGN_WIDTH
+#define CELL_GCM_ZCULL_ALIGN_HEIGHT      GCM_ZCULL_ALIGN_HEIGHT
+
+/* Tile region alignment (cellGcmSetTileInfo / BindTile). */
+#define CELL_GCM_TILE_ALIGN_OFFSET       GCM_TILE_ALIGN_OFFSET
+#define CELL_GCM_TILE_ALIGN_SIZE         GCM_TILE_ALIGN_SIZE
+
+/* Tile compression mode (cellGcmSetTileInfo). */
+#define CELL_GCM_COMPMODE_DISABLED              GCM_COMPMODE_DISABLED
+#define CELL_GCM_COMPMODE_Z32_SEPSTENCIL        GCM_COMPMODE_Z32_SEPSTENCIL
+#define CELL_GCM_COMPMODE_Z32_SEPSTENCIL_REGULAR  GCM_COMPMODE_Z32_SEPSTENCIL_REGULAR
+#define CELL_GCM_COMPMODE_Z32_SEPSTENCIL_DIAGONAL GCM_COMPMODE_Z32_SEPSTENCIL_DIAGONAL
+#define CELL_GCM_COMPMODE_Z32_SEPSTENCIL_ROTATED  GCM_COMPMODE_Z32_SEPSTENCIL_ROTATED
+
+/* ============================================================
+ * Texture — cellGcmSetTexture / SetTextureControl /
+ *           SetTextureFilter / SetTextureAddress.
+ *
+ * Numeric values are NV40-hardware constants that sce-cgc and
+ * sce_gcm encode the same way as our PSL1GHT runtime (when PSL1GHT
+ * has an equivalent GCM_TEXTURE_* it's aliased, otherwise the
+ * value is written out directly).
+ * ============================================================ */
+
+/* Texture pixel formats (cellGcmSetTexture.format low byte). */
+#define CELL_GCM_TEXTURE_B8                      0x81
+#define CELL_GCM_TEXTURE_A1R5G5B5                0x82
+#define CELL_GCM_TEXTURE_A4R4G4B4                0x83
+#define CELL_GCM_TEXTURE_R5G6B5                  0x84
+#define CELL_GCM_TEXTURE_A8R8G8B8                0x85
+#define CELL_GCM_TEXTURE_COMPRESSED_DXT1         0x86
+#define CELL_GCM_TEXTURE_COMPRESSED_DXT23        0x87
+#define CELL_GCM_TEXTURE_COMPRESSED_DXT45        0x88
+#define CELL_GCM_TEXTURE_G8B8                    0x8B
+#define CELL_GCM_TEXTURE_R6G5B5                  0x8F
+#define CELL_GCM_TEXTURE_DEPTH24_D8              0x90
+#define CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT        0x91
+#define CELL_GCM_TEXTURE_DEPTH16                 0x92
+#define CELL_GCM_TEXTURE_DEPTH16_FLOAT           0x93
+#define CELL_GCM_TEXTURE_X16                     0x94
+#define CELL_GCM_TEXTURE_Y16_X16                 0x95
+#define CELL_GCM_TEXTURE_R5G5B5A1                0x97
+#define CELL_GCM_TEXTURE_COMPRESSED_HILO8        0x98
+#define CELL_GCM_TEXTURE_COMPRESSED_HILO_S8      0x99
+#define CELL_GCM_TEXTURE_W16_Z16_Y16_X16_FLOAT   0x9A
+#define CELL_GCM_TEXTURE_W32_Z32_Y32_X32_FLOAT   0x9B
+#define CELL_GCM_TEXTURE_X32_FLOAT               0x9C
+#define CELL_GCM_TEXTURE_D1R5G5B5                0x9D
+#define CELL_GCM_TEXTURE_D8R8G8B8                0x9E
+#define CELL_GCM_TEXTURE_Y16_X16_FLOAT           0x9F
+
+/* Format modifiers ORed into the format byte. */
+#define CELL_GCM_TEXTURE_SZ                      0x00
+#define CELL_GCM_TEXTURE_LN                      0x20
+#define CELL_GCM_TEXTURE_NR                      0x00
+#define CELL_GCM_TEXTURE_UN                      0x40
+
+/* Texture dimension (1D/2D/3D/cube). */
+#define CELL_GCM_TEXTURE_DIMENSION_1             1
+#define CELL_GCM_TEXTURE_DIMENSION_2             2
+#define CELL_GCM_TEXTURE_DIMENSION_3             3
+
+/* Remap field encodings (cellGcmSetTexture.remap).
+ * remap is a u32 built from (FROM_A|FROM_R|FROM_G|FROM_B) at shifts
+ * 0/2/4/6 and the per-channel REMAP_{ZERO,ONE,REMAP} at shifts 8..14. */
+#define CELL_GCM_TEXTURE_REMAP_ORDER_XYXY        0
+#define CELL_GCM_TEXTURE_REMAP_ORDER_XXXY        1
+#define CELL_GCM_TEXTURE_REMAP_FROM_A            0
+#define CELL_GCM_TEXTURE_REMAP_FROM_R            1
+#define CELL_GCM_TEXTURE_REMAP_FROM_G            2
+#define CELL_GCM_TEXTURE_REMAP_FROM_B            3
+#define CELL_GCM_TEXTURE_REMAP_ZERO              0
+#define CELL_GCM_TEXTURE_REMAP_ONE               1
+#define CELL_GCM_TEXTURE_REMAP_REMAP             2
+
+#define CELL_GCM_TEXTURE_BORDER_TEXTURE          0
+#define CELL_GCM_TEXTURE_BORDER_COLOR            1
+
+/* Texture filter (cellGcmSetTextureFilter). */
+#define CELL_GCM_TEXTURE_NEAREST                 1
+#define CELL_GCM_TEXTURE_LINEAR                  2
+#define CELL_GCM_TEXTURE_NEAREST_NEAREST         3
+#define CELL_GCM_TEXTURE_LINEAR_NEAREST          4
+#define CELL_GCM_TEXTURE_NEAREST_LINEAR          5
+#define CELL_GCM_TEXTURE_LINEAR_LINEAR           6
+#define CELL_GCM_TEXTURE_CONVOLUTION_MIN         7
+#define CELL_GCM_TEXTURE_CONVOLUTION_MAG         4
+#define CELL_GCM_TEXTURE_CONVOLUTION_QUINCUNX    1
+#define CELL_GCM_TEXTURE_CONVOLUTION_GAUSSIAN    2
+#define CELL_GCM_TEXTURE_CONVOLUTION_QUINCUNX_ALT 3
+
+/* Texture address modes (cellGcmSetTextureAddress). */
+#define CELL_GCM_TEXTURE_WRAP                         1
+#define CELL_GCM_TEXTURE_MIRROR                       2
+#define CELL_GCM_TEXTURE_CLAMP_TO_EDGE                3
+#define CELL_GCM_TEXTURE_BORDER                       4
+#define CELL_GCM_TEXTURE_CLAMP                        5
+#define CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP_TO_EDGE    6
+#define CELL_GCM_TEXTURE_MIRROR_ONCE_BORDER           7
+#define CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP            8
+
+#define CELL_GCM_TEXTURE_UNSIGNED_REMAP_NORMAL   0
+#define CELL_GCM_TEXTURE_UNSIGNED_REMAP_FORCE    1
+
+#define CELL_GCM_TEXTURE_ZFUNC_NEVER             0
+#define CELL_GCM_TEXTURE_ZFUNC_LESS              1
+#define CELL_GCM_TEXTURE_ZFUNC_EQUAL             2
+#define CELL_GCM_TEXTURE_ZFUNC_LEQUAL            3
+#define CELL_GCM_TEXTURE_ZFUNC_GREATER           4
+#define CELL_GCM_TEXTURE_ZFUNC_NOTEQUAL          5
+#define CELL_GCM_TEXTURE_ZFUNC_GEQUAL            6
+#define CELL_GCM_TEXTURE_ZFUNC_ALWAYS            7
+
+#define CELL_GCM_TEXTURE_GAMMA_R                 0x01
+#define CELL_GCM_TEXTURE_GAMMA_G                 0x02
+#define CELL_GCM_TEXTURE_GAMMA_B                 0x04
+#define CELL_GCM_TEXTURE_GAMMA_A                 0x08
+#define CELL_GCM_TEXTURE_GAMMA_NONE              0x00
+#define CELL_GCM_TEXTURE_GAMMA_RGB               0x07
+#define CELL_GCM_TEXTURE_GAMMA_RGBA              0x0F
+
+#define CELL_GCM_TEXTURE_MAX_ANISO_1             0
+#define CELL_GCM_TEXTURE_MAX_ANISO_2             1
+#define CELL_GCM_TEXTURE_MAX_ANISO_4             2
+#define CELL_GCM_TEXTURE_MAX_ANISO_6             3
+#define CELL_GCM_TEXTURE_MAX_ANISO_8             4
+#define CELL_GCM_TEXTURE_MAX_ANISO_10            5
+#define CELL_GCM_TEXTURE_MAX_ANISO_12            6
+#define CELL_GCM_TEXTURE_MAX_ANISO_16            7
+
 #ifdef __cplusplus
 }
 #endif

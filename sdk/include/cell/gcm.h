@@ -72,8 +72,17 @@ typedef gcmContextCallback   CellGcmContextCallback;
 
 /* gcmConfiguration → CellGcmConfig: layout-equal struct with 6 fields
  * (localAddress, ioAddress, localSize, ioSize, memoryFreq/Frequency,
- * coreFreq/Frequency).  Field-name spellings differ; cast through. */
+ * coreFreq/Frequency).  Field-name spellings differ; we paper over
+ * with preprocessor aliases so Sony sample code — which reads
+ * gcmCfg.memoryFrequency / .coreFrequency — compiles unchanged.
+ * These defines are scoped to this file's expansion; disable via
+ * #undef before the include if they clash with user code that has
+ * its own identifiers named memoryFrequency / coreFrequency. */
 typedef gcmConfiguration     CellGcmConfig;
+#ifndef CELL_GCM_NO_FIELD_ALIASES
+#  define memoryFrequency    memoryFreq
+#  define coreFrequency      coreFreq
+#endif
 
 /* CellGcmSurface aliased onto PSL1GHT's gcmSurface.  Layouts are
  * byte-identical (same 33 fields in the same order — verified against
@@ -81,6 +90,52 @@ typedef gcmConfiguration     CellGcmConfig;
  * passes it to cellGcmSetSurface gets reinterpreted as gcmSurface * by
  * the cellGcmSetSurface forwarder. */
 typedef gcmSurface           CellGcmSurface;
+
+/* CellGcmTexture aliased onto PSL1GHT's gcmTexture.  Both have the
+ * same 12-field layout (format u8, mipmap u8, dimension u8, cubemap u8,
+ * remap u32, width u16, height u16, depth u16, location u8, _pad u8,
+ * pitch u32, offset u32) — verified against cell-sdk's gcm_struct.h. */
+typedef gcmTexture           CellGcmTexture;
+
+/* ============================================================
+ * Inline helpers (non-emitter).  No FIFO writes; just math.
+ * ============================================================ */
+
+/* cellGcmAlign(a, v): round `v` up to the next multiple of `a`.
+ * Matches Sony's libgcm helper in <cell/gcm/gcm_helper.h>. */
+static inline uint32_t cellGcmAlign(uint32_t alignment, uint32_t value)
+{
+    return (alignment == 0) ? value
+         : (value == 0)     ? 0
+         : ((((value - 1) / alignment) + 1) * alignment);
+}
+
+/* Tile region + Zcull — forward to PSL1GHT's libgcm_sys wrappers.
+ * These configure the GPU's tile-memory compression and depth-cull
+ * hints.  Signatures line up 1:1. */
+static inline int32_t cellGcmSetTileInfo(uint8_t index, uint8_t location,
+                                         uint32_t offset, uint32_t size, uint32_t pitch,
+                                         uint8_t comp, uint16_t base, uint8_t bank)
+{
+    return (int32_t)gcmSetTileInfo(index, location, offset, size, pitch, comp, base, bank);
+}
+
+static inline int32_t cellGcmBindTile(uint8_t index)
+{
+    return (int32_t)gcmBindTile(index);
+}
+
+static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
+                                       uint32_t width, uint32_t height,
+                                       uint32_t cullStart, uint32_t zFormat,
+                                       uint32_t aaFormat, uint32_t zCullDir,
+                                       uint32_t zCullFormat, uint32_t sFunc,
+                                       uint32_t sRef, uint32_t sMask)
+{
+    return (int32_t)gcmBindZcull(index, offset, width, height,
+                                 cullStart, zFormat, aaFormat,
+                                 zCullDir, zCullFormat, sFunc, sRef, sMask);
+}
 
 /* Sony's "current context" global.  PSL1GHT exposes gGcmContext under
  * the same semantics; we re-bind via #define so user-side l-value uses

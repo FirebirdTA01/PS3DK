@@ -84,6 +84,30 @@ static inline void cellGcmSetViewport(uint16_t x, uint16_t y, uint16_t w, uint16
                                       const float scale[4], const float offset[4])
 { cellGcmSetViewport(gCellGcmCurrentContext, x, y, w, h, min_z, max_z, scale, offset); }
 
+static inline void cellGcmSetScissor(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{ cellGcmSetScissor(gCellGcmCurrentContext, x, y, w, h); }
+
+static inline void cellGcmSetTexture(uint8_t index, const CellGcmTexture *texture)
+{ cellGcmSetTexture(gCellGcmCurrentContext, index, texture); }
+
+static inline void cellGcmSetTextureControl(uint8_t index, uint32_t enable,
+                                            uint16_t minlod, uint16_t maxlod,
+                                            uint8_t maxaniso)
+{ cellGcmSetTextureControl(gCellGcmCurrentContext, index, enable, minlod, maxlod, maxaniso); }
+
+static inline void cellGcmSetTextureFilter(uint8_t index, uint16_t bias,
+                                           uint8_t min, uint8_t mag, uint8_t conv)
+{ cellGcmSetTextureFilter(gCellGcmCurrentContext, index, bias, min, mag, conv); }
+
+static inline void cellGcmSetTextureAddress(uint8_t index,
+                                            uint8_t wraps, uint8_t wrapt, uint8_t wrapr,
+                                            uint8_t unsignedRemap, uint8_t zfunc,
+                                            uint8_t gamma)
+{ cellGcmSetTextureAddress(gCellGcmCurrentContext, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma); }
+
+static inline void cellGcmSetTimeStamp(uint32_t index)
+{ cellGcmSetTimeStamp(gCellGcmCurrentContext, index); }
+
 static inline void cellGcmSetCullFace(uint32_t cfm)
 { cellGcmSetCullFace(gCellGcmCurrentContext, cfm); }
 

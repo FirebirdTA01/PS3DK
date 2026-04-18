@@ -181,6 +181,75 @@ static inline void cellGcmSetViewport(CellGcmContextData *thisContext,
 	rsxSetViewport(thisContext, x, y, w, h, min_z, max_z, scale, offset);
 }
 
+static inline void cellGcmSetScissor(CellGcmContextData *thisContext,
+                                     uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+	rsxSetScissor(thisContext, x, y, w, h);
+}
+
+/* ==========================================================
+ * Texture bind / state emitters.
+ *
+ * PSL1GHT's rsxLoadTexture / rsxTextureControl / rsxTextureFilter
+ * / rsxTextureWrapMode are ABI-identical to the Sony cellGcmSet*
+ * equivalents — same arg order, same types, same method writes.
+ * This layer is a forwarder today; a native NV40 FIFO emitter
+ * (à la gcm_cg_bridge.h) can replace it here when we want to
+ * stop pulling librsx for the texture path. */
+static inline void cellGcmSetTexture(CellGcmContextData *thisContext,
+                                     uint8_t index, const CellGcmTexture *texture)
+{
+	rsxLoadTexture(thisContext, index, (const gcmTexture *)texture);
+}
+
+static inline void cellGcmSetTextureControl(CellGcmContextData *thisContext,
+                                            uint8_t index, uint32_t enable,
+                                            uint16_t minlod, uint16_t maxlod,
+                                            uint8_t maxaniso)
+{
+	rsxTextureControl(thisContext, index, enable, minlod, maxlod, maxaniso);
+}
+
+static inline void cellGcmSetTextureFilter(CellGcmContextData *thisContext,
+                                           uint8_t index, uint16_t bias,
+                                           uint8_t min, uint8_t mag, uint8_t conv)
+{
+	rsxTextureFilter(thisContext, index, bias, min, mag, conv);
+}
+
+static inline void cellGcmSetTextureAddress(CellGcmContextData *thisContext,
+                                            uint8_t index,
+                                            uint8_t wraps, uint8_t wrapt, uint8_t wrapr,
+                                            uint8_t unsignedRemap, uint8_t zfunc,
+                                            uint8_t gamma)
+{
+	rsxTextureWrapMode(thisContext, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma);
+}
+
+/* ==========================================================
+ * Timestamp / report — GPU-side profiling reports.
+ * PSL1GHT gcmGetTimeStamp reads an index.  Sony splits it into a
+ * SetTimeStamp (emits the report-write into the FIFO) and a
+ * GetTimeStamp (reads the 64-bit counter back on the PPU side).
+ * Forwarders today; native NV40 NV40TCL_SET_REPORT emitter later.
+ * ========================================================== */
+static inline void cellGcmSetTimeStamp(CellGcmContextData *thisContext, uint32_t index)
+{
+	rsxSetTimeStamp(thisContext, index);
+}
+
+static inline uint64_t cellGcmGetTimeStamp(uint32_t index)
+{
+	return (uint64_t)gcmGetTimeStamp(index);
+}
+
+/* Debug output verbosity level enum values — the function itself
+ * is declared in <cell/gcm.h> next to the other gcm-system
+ * (non-FIFO) calls it forwards to. */
+#define CELL_GCM_DEBUG_LEVEL0  0
+#define CELL_GCM_DEBUG_LEVEL1  1
+#define CELL_GCM_DEBUG_LEVEL2  2
+
 static inline void cellGcmSetCullFace(CellGcmContextData *thisContext, uint32_t cfm)
 {
 	rsxSetCullFace(thisContext, cfm);
