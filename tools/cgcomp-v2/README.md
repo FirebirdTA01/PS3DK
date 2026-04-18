@@ -44,11 +44,24 @@ back-end code authored here:
         .fpo / .vpo
 ```
 
-The donor front-end lives at `../../src/vita-cg-compiler/` (cloned by
-`scripts/bootstrap.sh`).  We do NOT vendor it here — `src/` is
-gitignored, regenerable from a single git clone.  This tree
-(`tools/cgcomp-v2/`) holds only PS3-specific back-end code +
-build glue.
+The donor front-end is **copied into `src/donor/`** in this tree.
+Both projects (vita-cg-compiler and this PS3 toolchain) share the
+same author + license (MIT), so adopting the donor source directly
+beats a sibling-clone reference: the build is self-contained, no
+bootstrap dependency, and we're free to evolve the front-end for
+RSX without touching the upstream Vita repo.
+
+When upstream vita-cg-compiler gains improvements worth pulling in,
+re-sync by hand:
+
+```sh
+diff -ru tools/cgcomp-v2/src/donor/  src/vita-cg-compiler/src/   # see drift
+cp src/vita-cg-compiler/src/<file>   tools/cgcomp-v2/src/donor/<file>
+```
+
+`scripts/bootstrap.sh` still clones vita-cg-compiler into
+`src/vita-cg-compiler/` for this re-sync workflow, but it's optional —
+the build works without it.
 
 ## Why a separate tree from `tools/cgcomp/`
 
@@ -59,9 +72,11 @@ cgcomp is retired.
 
 ## Status
 
-- Stage 0 (this commit): repo + tree skeleton, no code yet.
-- Stage 1 (next): IR builder reaches a working dump of trivial shaders
-  via the donor front-end, no NV40 emit.
+- Stage 0: repo + tree skeleton, no code yet. ✓
+- Stage 1: front-end skeleton.  Parses Cg through preprocessor +
+  lexer + parser, dumps AST.  No semantic analysis or NV40 emit
+  yet.  Built artifact: `cgcomp-v2 <shader.cg>` produces an AST
+  text dump on stdout.  Donor copied into `src/donor/`. ✓
 - Stage 2: NV40 back-end emits ucode bit-identical to Sony sce-cgc for
   simple shaders.
 - Stage 3: Sony pragma semantics (alphakill + texformat first).
