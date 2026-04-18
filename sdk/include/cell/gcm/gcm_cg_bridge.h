@@ -31,6 +31,22 @@
 #include <rsx/gcm_sys.h>           /* gcmContextData, GCM_LOCATION_*, GCM_ATTRIB_OUTPUT_MASK_* */
 #include <rsx/nv40.h>              /* NV40TCL_* method IDs */
 
+/* Build-time diagnostic trace.  Pass `-DPS3TC_GCM_CG_BRIDGE_TRACE=1` to
+ * dump every bridge call's inputs + first-word command-buffer output
+ * to stdout.  RPCS3 captures stdout in its log; compare against
+ * expected values to find field-decode or emit-order bugs.
+ * Off (no overhead) by default. */
+#ifndef PS3TC_GCM_CG_BRIDGE_TRACE
+#define PS3TC_GCM_CG_BRIDGE_TRACE 0
+#endif
+
+#if PS3TC_GCM_CG_BRIDGE_TRACE
+#  include <stdio.h>
+#  define PS3TC_TRACE(...) do { printf("[cg_bridge] " __VA_ARGS__); fflush(stdout); } while (0)
+#else
+#  define PS3TC_TRACE(...) ((void)0)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -157,6 +173,14 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     if (!w) return;
 
     const uint32_t *src = (const uint32_t *)ucode;
+    const uint32_t result_en = ps3tc_cg_vp_result_en(p) | GCM_ATTRIB_OUTPUT_MASK_POINTSIZE;
+
+    PS3TC_TRACE("SetVP ucode=%p inst=%u start=%u regs=%u in=0x%x out=0x%x reserve=%u\n",
+                ucode, (unsigned)inst_count, (unsigned)inst_start,
+                (unsigned)vp->registerCount, (unsigned)vp->attributeInputMask,
+                (unsigned)result_en, (unsigned)reserve);
+    PS3TC_TRACE("SetVP ucode[0..3]= %08x %08x %08x %08x\n",
+                src[0], src[1], src[2], src[3]);
 
     /* Program the start instruction ID (both args are the start index
      * — the NV40 wants the same value twice). */
@@ -184,7 +208,7 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     *w++ = vp->attributeInputMask;
 
     *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
-    *w++ = ps3tc_cg_vp_result_en(p) | GCM_ATTRIB_OUTPUT_MASK_POINTSIZE;
+    *w++ = result_en;
 
     /* Transform-shader timeout watchdog.  Value is a function of
      * temp-register count — programs using 0..32 temps get the short
@@ -206,6 +230,14 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
     const CgBinaryProgram *p = (const CgBinaryProgram *)prog;
     const CgBinaryFragmentProgram *fp =
         (const CgBinaryFragmentProgram *)((const uint8_t *)p + p->program);
+
+    PS3TC_TRACE("SetFP offset=0x%08x inst=%u regs=%u tc_in=0x%04x tc_2d=0x%04x outH0=%u kil=%u\n",
+                (unsigned)offset, (unsigned)fp->instructionCount,
+                (unsigned)fp->registerCount,
+                (unsigned)fp->texCoordsInputMask,
+                (unsigned)fp->texCoords2D,
+                (unsigned)fp->outputFromH0,
+                (unsigned)fp->pixelKill);
 
     /* Bind the FP ucode address.  The lower 29 bits carry the byte
      * offset within RSX memory; bit 0 of the header-byte carries
@@ -258,6 +290,9 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
                            | (1u << 10)
                            | (num_regs << 24);
 
+        PS3TC_TRACE("SetFP fp_control=0x%08x (low=0x%x num_regs=%u)\n",
+                    (unsigned)fpcontrol, (unsigned)low, (unsigned)num_regs);
+
         uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
         if (!w) return;
         *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_CONTROL, 1);
@@ -307,6 +342,10 @@ static inline void cellGcmSetVertexProgramParameter(CellGcmContextData *ctx,
 
     const unsigned rows  = ps3tc_cg_rows_for_type(pp->type);
     const unsigned words = rows * 4u;
+
+    PS3TC_TRACE("SetVPParam resIndex=%d type=%u rows=%u first=[%g %g %g %g]\n",
+                (int)pp->resIndex, (unsigned)pp->type, rows,
+                values[0], values[1], values[2], values[3]);
 
     /* NV40TCL_VP_UPLOAD_CONST_ID sits at 0x1efc, UPLOAD_CONST_X(0) at
      * 0x1f00 — i.e. exactly 4 bytes further.  One method header with
