@@ -111,6 +111,12 @@ static inline uint32_t ps3tc_cg_vp_result_en(const CgBinaryProgram *p)
     for (uint32_t i = 0; i < p->parameterCount; ++i)
     {
         const CgBinaryParameter *pp = &params[i];
+        PS3TC_TRACE("  param[%u] dir=%u var=%u res=%u resIdx=%d sem=\"%s\"\n",
+                    (unsigned)i, (unsigned)pp->direction, (unsigned)pp->var,
+                    (unsigned)pp->res, (int)pp->resIndex,
+                    pp->semantic
+                      ? (const char *)((const uint8_t *)p + pp->semantic)
+                      : "(null)");
         if (pp->direction != CG_OUT && pp->direction != CG_INOUT) continue;
         if (!pp->semantic) continue;
 
@@ -179,8 +185,17 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
                 ucode, (unsigned)inst_count, (unsigned)inst_start,
                 (unsigned)vp->registerCount, (unsigned)vp->attributeInputMask,
                 (unsigned)result_en, (unsigned)reserve);
-    PS3TC_TRACE("SetVP ucode[0..3]= %08x %08x %08x %08x\n",
-                src[0], src[1], src[2], src[3]);
+#if PS3TC_GCM_CG_BRIDGE_TRACE
+    {
+        unsigned total = inst_count * 4u;
+        for (unsigned k = 0; k < total; k += 4)
+        {
+            PS3TC_TRACE("  insn[%u] %08x %08x %08x %08x  lastBit=%u\n",
+                        k / 4, src[k], src[k + 1], src[k + 2], src[k + 3],
+                        (unsigned)(src[k + 3] & 1u));
+        }
+    }
+#endif
 
     /* Program the start instruction ID (both args are the start index
      * — the NV40 wants the same value twice). */
@@ -272,18 +287,27 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
     }
 
     /* FP_CONTROL:
-     *   bits 0-7 : low-byte flags (output-from-H0 = 0x0e, R0 = 0x40,
-     *              KIL at bit 7)
-     *   bit  10  : "program valid / enable" — must be set for the FP
-     *              to actually execute (observed in PSL1GHT's
-     *              LoadFragmentProgramLocation write)
+     *   bits 0-7 : low-byte flags — historically observed in PSL1GHT
+     *              cgcomp's output as 0x40 for "output from R0" /
+     *              0x0e for "output from H0" / 0x80 for KIL.  BUT
+     *              sce-cgc appears to encode output-register selection
+     *              inside the FP instruction itself (word 0 byte 3),
+     *              not in FP_CONTROL — at least for the trivial
+     *              pass-through fragment shader in Sony's basic
+     *              sample, sce-cgc's word 0 has 0x00 there vs
+     *              PSL1GHT's 0x40.  We therefore only set the KIL
+     *              bit in FP_CONTROL low-byte (since KIL is a global
+     *              FP state flag not a per-instruction bit) and leave
+     *              the R0-vs-H0 choice to the ucode.
+     *   bit  10  : program valid / enable — must be set for the FP
+     *              to actually execute.
      *   bits 24-31: number of temps (register-count, clamped ≥ 2 —
-     *              NV40 requires a minimum of 2 allocated temps) */
+     *              NV40 requires a minimum of 2 allocated temps). */
     {
         const uint32_t num_regs = (fp->registerCount > 2)
                                 ? fp->registerCount : 2u;
 
-        uint32_t low = fp->outputFromH0 ? 0x0eu : 0x40u;
+        uint32_t low = 0;
         if (fp->pixelKill) low |= (1u << 7);
 
         uint32_t fpcontrol = low
