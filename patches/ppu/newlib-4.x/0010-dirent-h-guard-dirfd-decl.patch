@@ -1,0 +1,39 @@
+From: PS3 Custom Toolchain <noreply@example.invalid>
+Subject: [PATCH] dirent.h: guard `int dirfd(DIR *);` against macro collision
+
+Our PS3-custom `<sys/dirent.h>` (added by an earlier patch in this
+series) defines `dirfd` as a function-style macro — `#define dirfd(dp)
+((dp)->dd_fd)` — so callers that include `<sys/dirent.h>` directly (or
+indirectly via `<dirent.h>`) get the zero-cost `dp->dd_fd` read.
+
+FreeBSD-derived `<dirent.h>` then declares `int dirfd(DIR *);` as a
+plain function prototype.  The preprocessor expands the identifier
+against our macro first, yielding `int ((DIR *)->dd_fd);` — a syntax
+error at the dirent.h include site for any TU that transitively pulls
+it in (observed while building Sony samples/common/gcmutil/snaviutil.cpp
+against our SDK).
+
+Fix: guard the prototype with `#ifndef dirfd`.  When the macro is
+active (our PS3 configuration), the prototype is skipped and user
+calls resolve against the macro expansion.  On a hypothetical target
+that ships a real `dirfd()` function and doesn't define the macro,
+the prototype is preserved untouched.
+
+Signed-off-by: PS3 Custom Toolchain <noreply@example.invalid>
+---
+ newlib/libc/include/dirent.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/newlib/libc/include/dirent.h b/newlib/libc/include/dirent.h
+--- a/newlib/libc/include/dirent.h
++++ b/newlib/libc/include/dirent.h
+@@ -45,7 +45,9 @@
+ __BEGIN_DECLS
+ #if __MISC_VISIBLE || __POSIX_VISIBLE >= 200809 || __XSI_VISIBLE >= 700
+ int	 alphasort(const struct dirent **, const struct dirent **);
++#ifndef dirfd
+ int	 dirfd(DIR *);
++#endif
+ #endif
+ #if __BSD_VISIBLE
+ int	 fdclosedir(DIR *);

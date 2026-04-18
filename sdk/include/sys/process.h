@@ -186,15 +186,18 @@ LV2_SYSCALL sysProcessGetPpuGuid(void)
 /* ---- exit / spawn -------------------------------------------------- */
 /* Replace the current process with a new one loaded from `path`,
  * passing `argv` and `envp` through and seeding an optional data
- * buffer for the target.  Mirrors the sys_process_exitspawn2 LV2
- * syscall; `priority` and `flags` are forwarded verbatim. */
+ * buffer (a user-space address — sys_addr_t — not a native pointer)
+ * for the target.  Mirrors the sys_process_exitspawn2 LV2 syscall;
+ * `priority` and `flags` are forwarded verbatim. */
 static inline void exitspawn(const char *path,
                              const char *argv[],
                              const char *envp[],
-                             void *data, size_t size,
+                             sys_addr_t data, size_t size,
                              int priority, u64 flags)
 {
-    sysProcessExitSpawn2(path, argv, envp, data, size, priority, flags);
+    sysProcessExitSpawn2(path, argv, envp,
+                         (void *)(uintptr_t)data, size,
+                         priority, flags);
 }
 
 #ifdef __cplusplus
