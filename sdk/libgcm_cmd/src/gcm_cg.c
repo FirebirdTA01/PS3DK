@@ -215,11 +215,11 @@ int32_t cellGcmCgGetParameterOrdinalNumber(CGprogram prog, CGparameter param)
     return pp ? pp->paramno : -1;
 }
 
-uint32_t cellGcmCgGetParameterReferenced(CGprogram prog, CGparameter param)
+CGbool cellGcmCgGetParameterReferenced(CGprogram prog, CGparameter param)
 {
     (void)prog;
     const CgBinaryParameter *pp = as_parameter(param);
-    return pp ? pp->isReferenced : 0u;
+    return pp ? pp->isReferenced : CG_FALSE;
 }
 
 const char *cellGcmCgGetParameterName(CGprogram prog, CGparameter param)

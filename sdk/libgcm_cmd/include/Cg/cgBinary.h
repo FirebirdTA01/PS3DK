@@ -21,6 +21,7 @@
 #define PS3TC_CG_CGBINARY_H
 
 #include <stdint.h>
+#include <Cg/cg.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,18 +51,18 @@ typedef uint32_t CgBinaryOffset;
  */
 struct CgBinaryParameter
 {
-    uint32_t        type;
-    uint32_t        res;
-    uint32_t        var;
+    CGtype          type;
+    CGresource      res;
+    CGenum          var;
     int32_t         resIndex;
     CgBinaryOffset  name;
     CgBinaryOffset  defaultValue;
     CgBinaryOffset  embeddedConst;
     CgBinaryOffset  semantic;
-    uint32_t        direction;
+    CGenum          direction;
     int32_t         paramno;
-    uint32_t        isReferenced;
-    uint32_t        isShared;
+    CGbool          isReferenced;
+    CGbool          isShared;
 };
 
 /* Fragment-program constant patch list.  The ucodeOffset array is
@@ -104,7 +105,7 @@ struct CgBinaryFragmentProgram
  * and string table all live at offsets measured from `this`. */
 struct CgBinaryProgram
 {
-    uint32_t        profile;
+    CGprofile       profile;
     uint32_t        revision;
     uint32_t        totalSize;
     uint32_t        parameterCount;
@@ -122,13 +123,7 @@ typedef struct CgBinaryVertexProgram     CgBinaryVertexProgram;
 typedef struct CgBinaryFragmentProgram   CgBinaryFragmentProgram;
 typedef struct CgBinaryProgram           CgBinaryProgram;
 
-/* Opaque runtime handles as seen by cellGcmCg*.  CGprogram wraps a
- * pointer to a CgBinaryProgram blob; CGparameter wraps a pointer to
- * a CgBinaryParameter inside that blob.  Both remain `void *` at the
- * ABI boundary so client code that brings its own Cg runtime headers
- * is not forced to agree with ours on struct names. */
-typedef void       *CGprogram;
-typedef const void *CGparameter;
+/* CGprogram / CGparameter are defined in <Cg/cg.h>. */
 
 #ifdef __cplusplus
 }
