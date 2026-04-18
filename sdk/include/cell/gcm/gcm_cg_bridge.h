@@ -63,11 +63,41 @@ extern "C" {
  * gcm callback (which grows the buffer or flushes upstream) when we
  * run up against the current end.  Returns the starting write pointer
  * or NULL on callback failure. */
+/* Invoke the FIFO-refill callback through the PSL1GHT / Sony PRX
+ * calling convention.  The `callback` field is stored as an
+ * `ATTRIBUTE_PRXPTR` (a 32-bit handle pointing to an 8-byte
+ * [entry, toc] descriptor) rather than a full PPC64 ELFv1 OPD.
+ * A direct C function-pointer call on that field lands on garbage.
+ *
+ * Mirrors PSL1GHT's rsxContextCallback (rsx_function_macros.h).
+ * Must be noinline — the asm relies on r3=ctx and r4=count on entry
+ * (standard PPC64 arg convention); inlining would let GCC reorder the
+ * callers' register allocation and break that invariant. */
+__attribute__((noinline))
+static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count)
+{
+    register int32_t result asm("r3");
+    __asm__ __volatile__ (
+        "stdu 1,-128(1)\n"
+        "mr   31,2\n"
+        "lwz  0,0(%3)\n"
+        "lwz  2,4(%3)\n"
+        "mtctr 0\n"
+        "bctrl\n"
+        "mr   2,31\n"
+        "addi 1,1,128\n"
+        : "+r"(result)
+        : "r"(ctx), "r"(count), "b"(ctx->callback)
+        : "r31", "r0", "lr"
+    );
+    return result;
+}
+
 static inline uint32_t *ps3tc_gcm_reserve(CellGcmContextData *ctx, uint32_t count)
 {
     if ((ctx->current + count) > ctx->end)
     {
-        if (ctx->callback && ctx->callback(ctx, count) != 0)
+        if (ctx->callback && ps3tc_gcm_invoke_callback(ctx, count) != 0)
             return 0;
     }
     uint32_t *p = ctx->current;
@@ -84,21 +114,26 @@ static inline uint32_t *ps3tc_gcm_reserve(CellGcmContextData *ctx, uint32_t coun
  * direction = CG_OUT / CG_INOUT, read each one's semantic string, and
  * flip the NV40 bit that the hardware uses for that output channel.
  *
- * NV40 VP_RESULT_EN bit layout (values observed in PSL1GHT's
- * compilervp.cpp emit_dst against the matching method):
+ * NV40 VP_RESULT_EN bit layout (confirmed by PSL1GHT
+ * rsx/gcm_sys.h GCM_ATTRIB_OUTPUT_MASK_*):
  *
- *   bit 0      HPOS            (vertex shader must always output)
- *   bit 0+2    COL0            (dual-bit signal — 0x5 for COL0)
- *   bit 1+3    COL1            (dual-bit — 0xA)
- *   bit 0+2    BFC0            (front/back-face alias of COL0)
- *   bit 1+3    BFC1            (alias of COL1)
+ *   bit 0      FRONTDIFFUSE  (COL0 when writing o[1])
+ *   bit 1      FRONTSPECULAR (COL1)
+ *   bit 2      BACKDIFFUSE   (BFC0 / o[3])
+ *   bit 3      BACKSPECULAR  (BFC1)
  *   bit 4      FOG / FOGC
- *   bit 5      PSIZE / PSZ      (we unconditionally enable via
- *                                GCM_ATTRIB_OUTPUT_MASK_POINTSIZE
- *                                when building the final register
- *                                value — matches the PSL1GHT convention
- *                                of always permitting point-size)
- *   bit 14+n   TEXCOORD<n>      (0x4000 << n, for n = 0 .. 7)
+ *   bit 5      PSIZE / PSZ   (unconditionally enabled via
+ *                             GCM_ATTRIB_OUTPUT_MASK_POINTSIZE)
+ *   bit 6..11  UC0..UC5 (user clip planes)
+ *   bit 12     TEX8
+ *   bit 13     TEX9
+ *   bit 14+n   TEXCOORD<n>    (for n = 0..7)
+ *
+ * Each channel is a single bit.  Earlier revisions of this routine
+ * OR'd in bit (2+idx) for the "back" variant of each colour, which
+ * declared BFC0/BFC1 as outputs the VP never actually writes — the
+ * interpolator then fed zeros down the COL0 path.  Sony basic's
+ * black-triangle symptom (2026-04-18) traced to exactly that.
  */
 static inline uint32_t ps3tc_cg_vp_result_en(const CgBinaryProgram *p)
 {
@@ -127,7 +162,13 @@ static inline uint32_t ps3tc_cg_vp_result_en(const CgBinaryProgram *p)
         {
             const int n   = (strncmp(sem, "COLOR", 5) == 0) ? 5 : 3;
             const int idx = (sem[n] >= '0' && sem[n] <= '9') ? (sem[n] - '0') : 0;
-            mask |= (1u << idx) | (4u << idx);
+            mask |= (1u << idx);  /* front diffuse/specular — single bit */
+        }
+        else if (strncmp(sem, "BCOL", 4) == 0 || strncmp(sem, "BACKCOLOR", 9) == 0)
+        {
+            const int n   = (strncmp(sem, "BACKCOLOR", 9) == 0) ? 9 : 4;
+            const int idx = (sem[n] >= '0' && sem[n] <= '9') ? (sem[n] - '0') : 0;
+            mask |= (4u << idx);  /* back diffuse/specular — bits 2, 3 */
         }
         else if (strncmp(sem, "TEXCOORD", 8) == 0)
         {
@@ -174,6 +215,8 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     const uint32_t reserve = 3u + loop * 33u
                            + (rest ? (1u + rest) : 0u)
                            + 2u + 2u + 2u;
+
+    if (!ucode || inst_count == 0 || inst_count > 512) return;
 
     uint32_t *w = ps3tc_gcm_reserve(ctx, reserve);
     if (!w) return;
@@ -287,18 +330,16 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
     }
 
     /* FP_CONTROL:
-     *   bits 0-7 : low-byte flags — historically observed in PSL1GHT
-     *              cgcomp's output as 0x40 for "output from R0" /
-     *              0x0e for "output from H0" / 0x80 for KIL.  BUT
-     *              sce-cgc appears to encode output-register selection
-     *              inside the FP instruction itself (word 0 byte 3),
-     *              not in FP_CONTROL — at least for the trivial
-     *              pass-through fragment shader in Sony's basic
-     *              sample, sce-cgc's word 0 has 0x00 there vs
-     *              PSL1GHT's 0x40.  We therefore only set the KIL
-     *              bit in FP_CONTROL low-byte (since KIL is a global
-     *              FP state flag not a per-instruction bit) and leave
-     *              the R0-vs-H0 choice to the ucode.
+     *   bits 0-7 : low-byte flags encoding output register mode + KIL.
+     *              Matches PSL1GHT cgcomp (compilerfp.cpp):
+     *                0x40 = output from R0 (32-bit float)
+     *                0x0e = output from H0 (half-precision)
+     *                0x80 = shader uses KIL
+     *              The CgBinaryFragmentProgram.outputFromH0 flag tells
+     *              us which output register sce-cgc compiled for.  2026-
+     *              04-18: Sony basic's FP had outputFromH0=0 (R0) and
+     *              rendered solid black because we weren't setting 0x40
+     *              — the HW then had no defined output register.
      *   bit  10  : program valid / enable — must be set for the FP
      *              to actually execute.
      *   bits 24-31: number of temps (register-count, clamped ≥ 2 —
@@ -308,6 +349,7 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
                                 ? fp->registerCount : 2u;
 
         uint32_t low = 0;
+        low |= (fp->outputFromH0 ? 0x0eu : 0x40u);
         if (fp->pixelKill) low |= (1u << 7);
 
         uint32_t fpcontrol = low
