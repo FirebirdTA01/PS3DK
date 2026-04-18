@@ -70,19 +70,21 @@ extern "C" {
 typedef gcmContextData       CellGcmContextData;
 typedef gcmContextCallback   CellGcmContextCallback;
 
-/* gcmConfiguration → CellGcmConfig: layout-equal struct with 6 fields
- * (localAddress, ioAddress, localSize, ioSize, memoryFreq/Frequency,
- * coreFreq/Frequency).  Field-name spellings differ; we paper over
- * with preprocessor aliases so Sony sample code — which reads
- * gcmCfg.memoryFrequency / .coreFrequency — compiles unchanged.
- * These defines are scoped to this file's expansion; disable via
- * #undef before the include if they clash with user code that has
- * its own identifiers named memoryFrequency / coreFrequency. */
-typedef gcmConfiguration     CellGcmConfig;
-#ifndef CELL_GCM_NO_FIELD_ALIASES
-#  define memoryFrequency    memoryFreq
-#  define coreFrequency      coreFreq
-#endif
+/* CellGcmConfig is NOT aliased to PSL1GHT's gcmConfiguration —
+ * gcmConfiguration's localAddress / ioAddress are `void * __attribute__((mode(SI)))`
+ * (32-bit pointers), which GCC sign-extends when loaded into a 64-bit
+ * register.  A pointer like 0xc0000000 (top bit set) becomes
+ * 0xffffffffc0000000 and crashes on first deref.  Our struct uses
+ * full-width 64-bit pointers; our cellGcmGetConfiguration wrapper
+ * zero-extends from the PSL1GHT fields. */
+typedef struct {
+    void     *localAddress;
+    void     *ioAddress;
+    uint32_t  localSize;
+    uint32_t  ioSize;
+    uint32_t  memoryFrequency;
+    uint32_t  coreFrequency;
+} CellGcmConfig;
 
 /* CellGcmSurface aliased onto PSL1GHT's gcmSurface.  Layouts are
  * byte-identical (same 33 fields in the same order — verified against
@@ -191,7 +193,18 @@ static inline int32_t cellGcmMapMainMemory(const void *address, uint32_t size, u
 
 static inline void cellGcmGetConfiguration(CellGcmConfig *config)
 {
-	gcmGetConfiguration((gcmConfiguration *)config);
+	gcmConfiguration raw;
+	gcmGetConfiguration(&raw);
+	if (!config) return;
+	/* Zero-extend the 32-bit PSL1GHT PRXPTR fields into real 64-bit
+	 * pointers.  Masking with 0xffffffff first truncates any stale
+	 * sign bits GCC may have applied during the SI→DI register load. */
+	config->localAddress    = (void *)(uintptr_t)((uint32_t)(uintptr_t)raw.localAddress);
+	config->ioAddress       = (void *)(uintptr_t)((uint32_t)(uintptr_t)raw.ioAddress);
+	config->localSize       = raw.localSize;
+	config->ioSize          = raw.ioSize;
+	config->memoryFrequency = raw.memoryFreq;
+	config->coreFrequency   = raw.coreFreq;
 }
 
 static inline uint32_t cellGcmGetTiledPitchSize(uint32_t size)
