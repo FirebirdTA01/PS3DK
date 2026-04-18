@@ -1,0 +1,20 @@
+#pragma once
+
+// Version components
+#define VITACGC_VERSION_MAJOR 0
+#define VITACGC_VERSION_MINOR 4
+#define VITACGC_VERSION_PATCH 0
+
+// String helpers
+#define VITACGC_STRINGIFY(x) #x
+#define VITACGC_TOSTRING(x) VITACGC_STRINGIFY(x)
+
+// Composed version string: "x.x.x"
+#define VITACGC_VERSION_STRING \
+    VITACGC_TOSTRING(VITACGC_VERSION_MAJOR) "." \
+    VITACGC_TOSTRING(VITACGC_VERSION_MINOR) "." \
+    VITACGC_TOSTRING(VITACGC_VERSION_PATCH)
+
+// Numeric version for comparisons (e.g., 0x000200 for 0.2.0)
+#define VITACGC_VERSION_NUMBER \
+    ((VITACGC_VERSION_MAJOR << 16) | (VITACGC_VERSION_MINOR << 8) | VITACGC_VERSION_PATCH)
