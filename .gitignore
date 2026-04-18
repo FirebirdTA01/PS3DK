@@ -3,6 +3,7 @@
 
 # Build intermediates
 /build/
+tools/cgcomp-v2/build/
 
 # Per-sample build output
 samples/*/build/

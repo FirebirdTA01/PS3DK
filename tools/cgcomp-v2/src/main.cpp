@@ -1,10 +1,9 @@
 /*
  * cgcomp-v2 — Phase 8 Cg → NV40 compiler driver.
  *
- * Stage 1: front-end skeleton.  Parses a .cg shader through the
- * vita-cg-compiler donor front-end (preprocessor + lexer + parser) and
- * dumps the AST.  No NV40 lowering or codegen yet — those land in
- * Stage 2.
+ * Stage 2 (in progress): front-end + IR pipeline wired.  Parses through
+ * preprocessor + lexer + parser, runs semantic analysis, builds the
+ * hardware-agnostic IRModule.  NV40 lowering + ucode emit land next.
  */
 
 #include <cstdio>
@@ -19,7 +18,11 @@
 #include "ast.h"
 #include "parser.h"
 #include "preprocessor.h"
+#include "semantic.h"
+#include "ir.h"
+#include "ir_builder.h"
 #include "builtin_shader_header_api.h"
+#include "nv40/nv40_emit.h"
 
 namespace
 {
@@ -52,9 +55,10 @@ void usage()
         "  -I <dir>               Add include directory\n"
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
+        "  --dump-ir              Print the generated IR module to stdout\n"
         "  -h, --help             Show this message\n"
         "\n"
-        "Stage 1 produces no shader output — only AST inspection.\n");
+        "Stage 2 (WIP): runs AST → semantic → IR.  NV40 emit not yet wired.\n");
 }
 
 std::string slurpFile(const std::string& path)
@@ -97,7 +101,8 @@ std::string runPreprocessor(const std::string& sourceCode,
 int main(int argc, char** argv)
 {
     CgcV2Context ctx;
-    bool dumpAst = true;  // Stage 1 default — that's the deliverable
+    bool dumpAst = false;
+    bool dumpIr  = false;
 
     int i = 1;
     while (i < argc)
@@ -136,6 +141,10 @@ int main(int argc, char** argv)
         else if (arg == "--dump-ast")
         {
             dumpAst = true;
+        }
+        else if (arg == "--dump-ir")
+        {
+            dumpIr = true;
         }
         else if (!arg.empty() && arg[0] == '-')
         {
@@ -196,9 +205,75 @@ int main(int argc, char** argv)
         std::cout << "----------------------------------------------------------------\n";
     }
 
+    SemanticAnalyzer semantic;
+    const ShaderStage stage =
+        (ctx.profile == CgcV2Context::Profile::FragmentRsx)
+            ? ShaderStage::Fragment
+            : ShaderStage::Vertex;
+    semantic.setShaderStage(stage);
+    semantic.setEntryPoint(ctx.entryName);
+
+    const bool semanticOk = semantic.analyze(*ast);
+    for (const auto& diag : semantic.diagnostics())
+    {
+        std::cerr << diag.toString() << std::endl;
+    }
+    if (!semanticOk)
+    {
+        std::fprintf(stderr, "cgcomp-v2: semantic analysis failed (%u error(s)).\n",
+                     semantic.errorCount());
+        return 1;
+    }
+
+    IRBuilder irBuilder;
+    auto irModule = irBuilder.build(*ast, semantic);
+    if (irBuilder.hasErrors() || !irModule)
+    {
+        for (const auto& err : irBuilder.errors())
+        {
+            std::fprintf(stderr, "%s\n", err.c_str());
+        }
+        std::fprintf(stderr, "cgcomp-v2: IR generation failed.\n");
+        return 1;
+    }
+
+    if (dumpIr)
+    {
+        std::cout << "-- IR -----------------------------------------------------------\n";
+        std::cout << irModule->toString();
+        std::cout << "----------------------------------------------------------------\n";
+    }
+
     if (ast->entryPoint)
     {
         std::cout << "Entry point: " << ast->entryPoint->name << "\n";
+    }
+    std::cout << "Stage: "
+              << (stage == ShaderStage::Fragment ? "fragment" : "vertex")
+              << "\n";
+    std::cout << "IR functions: " << irModule->functions.size() << "\n";
+
+    const nv40::UcodeOutput ucode =
+        (stage == ShaderStage::Fragment)
+            ? nv40::emitFragmentProgram(*irModule, ctx.entryName)
+            : nv40::emitVertexProgram  (*irModule, ctx.entryName);
+
+    for (const auto& diag : ucode.diagnostics)
+    {
+        std::fprintf(stderr, "%s\n", diag.c_str());
+    }
+
+    if (!ucode.ok)
+    {
+        std::cout << "NV40 emit: not ready (skeleton stage).\n";
+        return 0;
+    }
+    std::cout << "NV40 ucode words: " << ucode.words.size() << "\n";
+    for (size_t w = 0; w < ucode.words.size(); ++w)
+    {
+        if ((w % 4) == 0) std::printf("  %3zu:", w / 4);
+        std::printf(" %08x", ucode.words[w]);
+        if ((w % 4) == 3) std::printf("\n");
     }
     return 0;
 }
