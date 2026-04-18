@@ -28,13 +28,18 @@ extern "C" {
 #define THREAD_JOINABLE   1
 #define THREAD_INTERRUPT  2
 
-/* Stack-info record returned by sysThreadGetStackInformation.  Field
- * aliases use anonymous unions; GCC ships `-fms-extensions` support
- * for this pattern in both C and C++. */
+/* Stack-info record returned by sysThreadGetStackInformation.
+ *
+ * Sony's ABI has this as { sys_addr_t pst_addr; size_t pst_size; }.
+ * The stack base is always a user-space address (32-bit fits via
+ * sys_addr_t), and the length is size_t.  We expose both the Sony
+ * pst_* spellings and the long-standing PSL1GHT addr / size spellings
+ * at the same storage offsets via anonymous unions — either name
+ * works on a single `sys_ppu_thread_stack_t` variable. */
 typedef struct _sys_ppu_thread_stack_t
 {
-    union { void *addr;  void *pst_addr; };
-    union { u32   size;  u32   pst_size; };
+    union { sys_addr_t pst_addr; sys_addr_t addr; };
+    union { size_t     pst_size; size_t     size; };
 } sys_ppu_thread_stack_t;
 
 /* --- create / destroy ----------------------------------------------- */
@@ -107,8 +112,8 @@ LV2_SYSCALL sysThreadGetStackInformation(sys_ppu_thread_stack_t *info)
 {
     struct { u32 addr; u32 size; } raw;
     lv2syscall1(49, (u64)(&raw));
-    info->addr = (void *)(uintptr_t)raw.addr;
-    info->size = raw.size;
+    info->pst_addr = (sys_addr_t)raw.addr;
+    info->pst_size = (size_t)raw.size;
     return_to_user_prog(s32);
 }
 
