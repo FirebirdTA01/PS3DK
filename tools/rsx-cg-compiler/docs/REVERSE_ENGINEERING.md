@@ -212,6 +212,42 @@ DP4 o[0].x, v[0], c[256];    # LAST flag here
 deferred list at IR walk, emits the simple ones first, then flushes
 the deferred list.
 
+## Fragment profile (sce_fp_rsx) — ucode on-disk layout
+
+Reference capture from `identity_f.cg` (single-instruction passthrough:
+`MOVR R0, f[COL0]`):
+
+```
+ucode (16 bytes, 1 instruction):
+  3e010100 c8011c9d c8000001 c8003fe1
+```
+
+NV40 FP ucode is stored **halfword-swapped** on disk relative to how
+the GPU / RSX FP-engine decodes the instruction fields.  Each u32 has
+its two 16-bit halves swapped.  To read the "logical" word that maps
+onto the bit layout in `nvfx_shader.h` (`NVFX_FP_OP_*`):
+
+```
+logical_word = (on_disk_word >> 16) | (on_disk_word << 16)
+```
+
+Applied to the identity FP:
+
+| on-disk   | logical    | decoded (from `NVFX_FP_OP_*` layout) |
+|:----------|:-----------|:--------------------------------------|
+| 0x3e010100 | 0x01003e01 | opcode=MOV(0x01), OUT_REG=R0, OUTMASK=0xF, INPUT_SRC=COL0, PROGRAM_END |
+| 0xc8011c9d | 0x1c9dc801 | source-0 operand encoding            |
+| 0xc8000001 | 0x0001c800 | source-1 operand (unused default)    |
+| 0xc8003fe1 | 0x3fe1c800 | source-2 operand (unused default)    |
+
+Bit layout (after halfword-swap) matches `NVFX_FP_OP_OPCODE_SHIFT=24`,
+`OUT_REG_SHIFT=1`, `OUTMASK_SHIFT=9`, `INPUT_SRC_SHIFT=13`,
+`PROGRAM_END=bit 0`.
+
+Implementation note for `rsx-cg-compiler`: emit instruction bytes in
+logical form, then halfword-swap at the last step before writing to
+the `.fpo` ucode blob.  Byte-exact match against sce-cgc is the gate.
+
 ## Open questions
 
 - What's in c[0..255]? (reserved but for what — driver?  card state?)
