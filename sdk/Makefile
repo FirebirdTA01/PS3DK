@@ -22,7 +22,9 @@ HEADERS := \
     include/sys/ppu_thread.h \
     include/sys/process.h \
     include/sysutil/sysutil_sysparam.h \
-    include/cell/pad.h
+    include/cell/pad.h \
+    include/cell/gcm.h \
+    include/cell/gcm/gcm_enum.h
 
 SUBLIBS := libgcm_cmd
 
