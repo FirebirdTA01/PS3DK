@@ -69,14 +69,12 @@ extern "C" {
 #define CELL_GCM_PRIMITIVE_QUAD_STRIP    GCM_TYPE_QUAD_STRIP
 #define CELL_GCM_PRIMITIVE_POLYGON       GCM_TYPE_POLYGON
 
-/* Vertex-attribute element type (cellGcmSetVertexDataArray). */
-#define CELL_GCM_VERTEX_UB               GCM_VERTEX_DATA_TYPE_UB
-#define CELL_GCM_VERTEX_S1               GCM_VERTEX_DATA_TYPE_S1
+/* Vertex-attribute element type (cellGcmSetVertexDataArray).  PSL1GHT
+ * only exposes a subset (U8, F32); Sony's extra tags (S1, SF, CMP,
+ * S32K, UB256) land when we own rsx/gcm_sys.h — for now we only alias
+ * what the runtime can actually handle. */
+#define CELL_GCM_VERTEX_UB               GCM_VERTEX_DATA_TYPE_U8
 #define CELL_GCM_VERTEX_F                GCM_VERTEX_DATA_TYPE_F32
-#define CELL_GCM_VERTEX_SF               GCM_VERTEX_DATA_TYPE_SF
-#define CELL_GCM_VERTEX_UB256            GCM_VERTEX_DATA_TYPE_UB256
-#define CELL_GCM_VERTEX_S32K             GCM_VERTEX_DATA_TYPE_S32K
-#define CELL_GCM_VERTEX_CMP              GCM_VERTEX_DATA_TYPE_CMP
 
 /* Surface / framebuffer format + target tags (cellGcmSetSurface). */
 #define CELL_GCM_SURFACE_A8R8G8B8        GCM_SURFACE_A8R8G8B8

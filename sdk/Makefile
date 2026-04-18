@@ -24,7 +24,9 @@ HEADERS := \
     include/sysutil/sysutil_sysparam.h \
     include/cell/pad.h \
     include/cell/gcm.h \
-    include/cell/gcm/gcm_enum.h
+    include/cell/gcm/gcm_enum.h \
+    include/cell/gcm/gcm_cmd_overloads.h \
+    include/cell/cell_video_out.h
 
 SUBLIBS := libgcm_cmd
 

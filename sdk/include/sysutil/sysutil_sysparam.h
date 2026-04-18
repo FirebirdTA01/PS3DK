@@ -10,5 +10,6 @@
 #define PS3TC_COMPAT_SYSUTIL_SYSUTIL_SYSPARAM_H
 
 #include <cell/sysutil_sysparam.h>
+#include <cell/cell_video_out.h>
 
 #endif
