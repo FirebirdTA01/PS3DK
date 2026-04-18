@@ -34,18 +34,10 @@ extern "C" {
 
 typedef void (*sys_ppu_thread_entry_t)(uint64_t arg);
 
-/* Sony spells the primary-thread stack query struct's fields pst_addr
- * / pst_size; our PSL1GHT-layer sys_ppu_thread_stack_t (in sys/thread.h)
- * uses addr / size.  Ship the Sony-named version here and verify the
- * layouts match so the wrapper below can pass a pointer through. */
-typedef struct _CellPpuThreadStack
-{
-    void *pst_addr;
-    u32   pst_size;
-} CellPpuThreadStack;
-
-_Static_assert(sizeof(CellPpuThreadStack) == sizeof(sys_ppu_thread_stack_t),
-               "Sony-field-named stack struct must match sys_ppu_thread_stack_t layout");
+/* sys_ppu_thread_stack_t is declared in <sys/thread.h> with a union
+ * that makes `.addr / .size` and `.pst_addr / .pst_size` interchangeable
+ * views of the same bytes — samples written against either spelling
+ * compile against the same storage. */
 
 static inline int sys_ppu_thread_create(sys_ppu_thread_t *thread_id,
                                         sys_ppu_thread_entry_t entry,
@@ -102,12 +94,9 @@ static inline int sys_ppu_thread_detach(sys_ppu_thread_t threadid)
     return (int)sysThreadDetach(threadid);
 }
 
-/* Accepts either CellPpuThreadStack* (Sony field names) or a pointer
- * to sys_ppu_thread_stack_t — the layouts are asserted-equal above, so
- * a cast at the API boundary is well-defined. */
-static inline int sys_ppu_thread_get_stack_information(void *stack_info)
+static inline int sys_ppu_thread_get_stack_information(sys_ppu_thread_stack_t *info)
 {
-    return (int)sysThreadGetStackInformation((sys_ppu_thread_stack_t *)stack_info);
+    return (int)sysThreadGetStackInformation(info);
 }
 
 #ifdef __cplusplus
