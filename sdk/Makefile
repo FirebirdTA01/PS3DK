@@ -27,6 +27,7 @@ HEADERS := \
     include/cell/gcm/gcm_enum.h \
     include/cell/gcm/gcm_cmd_overloads.h \
     include/cell/gcm/gcm_cg_bridge.h \
+    include/cell/gcm/gcm_command_c.h \
     include/cell/cell_video_out.h
 
 SUBLIBS := libgcm_cmd
