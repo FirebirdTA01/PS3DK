@@ -32,6 +32,7 @@
 #define PS3TC_CELL_GCM_CG_BRIDGE_H
 
 #include <stdint.h>
+#include <string.h>
 #include <Cg/cg.h>
 #include <Cg/cgBinary.h>
 #include <rsx/gcm_sys.h>
@@ -41,6 +42,75 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* -------------------------------------------------------------------- *
+ * VP output mask
+ * -------------------------------------------------------------------- *
+ *
+ * sce-cgc and PSL1GHT cgcomp encode CgBinaryVertexProgram.
+ * attributeOutputMask differently.  For a pass-through
+ * POSITION + COLOR shader, sce-cgc writes 0x1 (HPOS only), PSL1GHT
+ * cgcomp writes 0x5 (HPOS + COL0's dual-bit signal).  The rsx
+ * runtime consumes the PSL1GHT encoding, so handing sce-cgc's raw
+ * value through leaves COL0 disabled in VP_RESULT_EN and the FP
+ * reads garbage for every varying past position.
+ *
+ * We rebuild the mask from semantics: walk the parameter table,
+ * look at output parameters (direction == CG_OUT / CG_INOUT), and
+ * re-derive the PSL1GHT bit layout.  Format (matching what
+ * PSL1GHT's cgcomp compilervp.cpp emits):
+ *
+ *   HPOS       bit 0   (always set — vertex shader must output it)
+ *   PSZ        bit 5
+ *   FOGC       bit 4
+ *   COL0       bits 0 + 2    (dual-bit signal, 0x5)
+ *   COL1       bits 1 + 3    (dual-bit signal, 0xA)
+ *   BFC0       bits 0 + 2    (alias of COL0 — front/back share)
+ *   BFC1       bits 1 + 3    (alias of COL1)
+ *   TC0..TC7   bits 14 + i   (0x4000 << i)
+ */
+static inline uint32_t ps3tc_cg_output_mask(const CgBinaryProgram *p)
+{
+    if (!p) return 1u;  /* HPOS always */
+    const CgBinaryParameter *params =
+        (const CgBinaryParameter *)((const uint8_t *)p + p->parameterArray);
+
+    uint32_t mask = 1u;  /* HPOS bit always — VP must output position */
+
+    for (uint32_t i = 0; i < p->parameterCount; ++i)
+    {
+        const CgBinaryParameter *pp = &params[i];
+        if (pp->direction != CG_OUT && pp->direction != CG_INOUT) continue;
+        if (!pp->semantic) continue;
+
+        const char *sem = (const char *)((const uint8_t *)p + pp->semantic);
+        if (!sem || !*sem) continue;
+
+        if (strncmp(sem, "COLOR", 5) == 0 || strncmp(sem, "COL", 3) == 0)
+        {
+            const int n = (strncmp(sem, "COLOR", 5) == 0) ? 5 : 3;
+            const int idx = (sem[n] >= '0' && sem[n] <= '9') ? (sem[n] - '0') : 0;
+            mask |= (1u << idx) | (4u << idx);
+        }
+        else if (strncmp(sem, "TEXCOORD", 8) == 0)
+        {
+            const int idx =
+                (sem[8] >= '0' && sem[8] <= '9') ? (sem[8] - '0') : 0;
+            mask |= (0x4000u << idx);
+        }
+        else if (strncmp(sem, "FOG", 3) == 0)
+        {
+            mask |= (1u << 4);
+        }
+        else if (strncmp(sem, "PSIZE", 5) == 0 ||
+                 strncmp(sem, "PSZ", 3) == 0)
+        {
+            mask |= (1u << 5);
+        }
+        /* POSITION / HPOS already covered by the unconditional bit 0. */
+    }
+    return mask;
+}
 
 /* -------------------------------------------------------------------- *
  * Vertex-program binding
@@ -61,7 +131,7 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *thisContext,
     rsx.num_regs    = (uint16_t)vp->registerCount;
     rsx.insn_start  = (uint16_t)vp->instructionSlot;
     rsx.input_mask  = vp->attributeInputMask;
-    rsx.output_mask = vp->attributeOutputMask;
+    rsx.output_mask = ps3tc_cg_output_mask(p);
     /* num_const = 0 → LoadVertexProgram's const-upload loop iterates
      * zero times.  Caller uploads uniforms via SetVertexProgramParameter. */
 
@@ -86,13 +156,19 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *thisContext,
     memset(&rsx, 0, sizeof(rsx));
     rsx.num_insn     = (uint16_t)fp->instructionCount;
     rsx.num_regs     = fp->registerCount;
-    /* fp_control = register-count-in-bottom-byte | depth-replace-at-bit-25 |
-     * output-from-h0-at-bit-26 | pixelkill-at-bit-7.  Layouts the same in
-     * both Sony's RSX_FP_CONTROL and PSL1GHT's fp_control word. */
-    rsx.fp_control   = ((uint32_t)fp->registerCount)
-                     | ((uint32_t)fp->depthReplace  << 25)
-                     | ((uint32_t)fp->outputFromH0  << 26)
-                     | ((uint32_t)fp->pixelKill     <<  7);
+    /* fp_control low byte carries the output-register-select / KIL flags
+     * that PSL1GHT's cgcomp emits inline; the NV40 FP_CONTROL register
+     * itself puts the temp-count in bits 24-31, and rsxLoadFragment-
+     * ProgramLocation OR's `num_regs << 24` in at upload time.  So the
+     * bottom byte here must NOT hold register count — it holds:
+     *   0x40 = output from R0 (full precision, default)
+     *   0x0e = output from H0 (fp16)
+     *   0x80 = KIL (bit 7)
+     * Depth-replace does not live in FP_CONTROL on NV40 — it is set by a
+     * separate command method; revisit when depth-writing samples land. */
+    uint32_t fp_control = fp->outputFromH0 ? 0x0eu : 0x40u;
+    if (fp->pixelKill) fp_control |= (1u << 7);
+    rsx.fp_control   = fp_control;
     rsx.texcoords    = fp->texCoordsInputMask;
     rsx.texcoord2D   = fp->texCoords2D;
     rsx.texcoord3D   = 0;  /* CgBinaryFragmentProgram doesn't split 2D / 3D;
