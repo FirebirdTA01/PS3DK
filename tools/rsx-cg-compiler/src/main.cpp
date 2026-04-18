@@ -1,5 +1,5 @@
 /*
- * cgcomp-v2 — Phase 8 Cg → NV40 compiler driver.
+ * rsx-cg-compiler — Phase 8 Cg → RSX (NV40) compiler driver.
  *
  * Stage 2 (in progress): front-end + IR pipeline wired.  Parses through
  * preprocessor + lexer + parser, runs semantic analysis, builds the
@@ -31,7 +31,7 @@ namespace
 // in the donor's CompilerContext because compiler_options.h transitively
 // drags the USSE back-end types (UsseProgram lives in lowering.h).
 // Our NV40-targeted context will live in a separate header in Stage 2.
-struct CgcV2Context
+struct CompilerContext
 {
     std::string              inputFile;
     std::string              entryName = "main";
@@ -45,9 +45,9 @@ struct CgcV2Context
 void usage()
 {
     std::fprintf(stderr,
-        "cgcomp-v2 (Phase 8 stage 1) — Cg parser front-end\n"
+        "rsx-cg-compiler (Phase 8 stage 2) — Cg → RSX (NV40) compiler\n"
         "\n"
-        "Usage: cgcomp-v2 [options] <shader.cg>\n"
+        "Usage: rsx-cg-compiler [options] <shader.cg>\n"
         "\n"
         "Options:\n"
         "  -p, --profile <name>   sce_fp_rsx | sce_vp_rsx (default: sce_vp_rsx)\n"
@@ -66,7 +66,7 @@ std::string slurpFile(const std::string& path)
     std::ifstream in(path);
     if (!in)
     {
-        std::fprintf(stderr, "cgcomp-v2: cannot open %s\n", path.c_str());
+        std::fprintf(stderr, "rsx-cg-compiler: cannot open %s\n", path.c_str());
         std::exit(1);
     }
     std::stringstream buf;
@@ -75,7 +75,7 @@ std::string slurpFile(const std::string& path)
 }
 
 std::string runPreprocessor(const std::string& sourceCode,
-                            const CgcV2Context& ctx)
+                            const CompilerContext& ctx)
 {
     std::ostringstream composed;
 
@@ -100,7 +100,7 @@ std::string runPreprocessor(const std::string& sourceCode,
 
 int main(int argc, char** argv)
 {
-    CgcV2Context ctx;
+    CompilerContext ctx;
     bool dumpAst = false;
     bool dumpIr  = false;
 
@@ -117,12 +117,12 @@ int main(int argc, char** argv)
         {
             const std::string p = argv[++i];
             if (p == "sce_fp_rsx" || p == "sce_fp_psp2")
-                ctx.profile = CgcV2Context::Profile::FragmentRsx;
+                ctx.profile = CompilerContext::Profile::FragmentRsx;
             else if (p == "sce_vp_rsx" || p == "sce_vp_psp2")
-                ctx.profile = CgcV2Context::Profile::VertexRsx;
+                ctx.profile = CompilerContext::Profile::VertexRsx;
             else
             {
-                std::fprintf(stderr, "cgcomp-v2: unknown profile '%s'\n", p.c_str());
+                std::fprintf(stderr, "rsx-cg-compiler: unknown profile '%s'\n", p.c_str());
                 return 1;
             }
         }
@@ -148,7 +148,7 @@ int main(int argc, char** argv)
         }
         else if (!arg.empty() && arg[0] == '-')
         {
-            std::fprintf(stderr, "cgcomp-v2: unknown option '%s'\n", arg.c_str());
+            std::fprintf(stderr, "rsx-cg-compiler: unknown option '%s'\n", arg.c_str());
             usage();
             return 1;
         }
@@ -156,7 +156,7 @@ int main(int argc, char** argv)
         {
             if (!ctx.inputFile.empty())
             {
-                std::fprintf(stderr, "cgcomp-v2: only one input file allowed\n");
+                std::fprintf(stderr, "rsx-cg-compiler: only one input file allowed\n");
                 return 1;
             }
             ctx.inputFile = arg;
@@ -187,13 +187,13 @@ int main(int argc, char** argv)
     }
     if (errorCount > 0)
     {
-        std::fprintf(stderr, "cgcomp-v2: %d parse error(s).\n", errorCount);
+        std::fprintf(stderr, "rsx-cg-compiler: %d parse error(s).\n", errorCount);
         return 1;
     }
 
     if (!ast)
     {
-        std::fprintf(stderr, "cgcomp-v2: parse produced no AST.\n");
+        std::fprintf(stderr, "rsx-cg-compiler: parse produced no AST.\n");
         return 1;
     }
 
@@ -207,7 +207,7 @@ int main(int argc, char** argv)
 
     SemanticAnalyzer semantic;
     const ShaderStage stage =
-        (ctx.profile == CgcV2Context::Profile::FragmentRsx)
+        (ctx.profile == CompilerContext::Profile::FragmentRsx)
             ? ShaderStage::Fragment
             : ShaderStage::Vertex;
     semantic.setShaderStage(stage);
@@ -220,7 +220,7 @@ int main(int argc, char** argv)
     }
     if (!semanticOk)
     {
-        std::fprintf(stderr, "cgcomp-v2: semantic analysis failed (%u error(s)).\n",
+        std::fprintf(stderr, "rsx-cg-compiler: semantic analysis failed (%u error(s)).\n",
                      semantic.errorCount());
         return 1;
     }
@@ -233,7 +233,7 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "%s\n", err.c_str());
         }
-        std::fprintf(stderr, "cgcomp-v2: IR generation failed.\n");
+        std::fprintf(stderr, "rsx-cg-compiler: IR generation failed.\n");
         return 1;
     }
 

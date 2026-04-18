@@ -1,5 +1,5 @@
-#ifndef CGCOMP_V2_NV40_VP_ASSEMBLER_H
-#define CGCOMP_V2_NV40_VP_ASSEMBLER_H
+#ifndef RSX_CG_COMPILER_NV40_VP_ASSEMBLER_H
+#define RSX_CG_COMPILER_NV40_VP_ASSEMBLER_H
 
 /*
  * Minimal NV40 vertex-program assembler.
@@ -61,4 +61,4 @@ private:
 
 }  // namespace nv40
 
-#endif  /* CGCOMP_V2_NV40_VP_ASSEMBLER_H */
+#endif  /* RSX_CG_COMPILER_NV40_VP_ASSEMBLER_H */

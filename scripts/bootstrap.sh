@@ -161,13 +161,13 @@ clone_shallow "https://github.com/StrawFox64/PS3Toolchain.git"     "$FORKS_DIR/S
 # -----------------------------------------------------------------------------
 # 3b. Phase 8 Cg compiler donor (vita-cg-compiler) — OPTIONAL.
 # -----------------------------------------------------------------------------
-# tools/cgcomp-v2/ now ships its own copies of the donor front-end files
-# under tools/cgcomp-v2/src/donor/.  The build does NOT depend on this
-# clone.  The clone is kept here for re-syncing donor sources by hand
-# when upstream gains improvements worth pulling in:
+# tools/rsx-cg-compiler/ now ships its own copies of the donor front-end
+# files under tools/rsx-cg-compiler/src/donor/.  The build does NOT depend
+# on this clone.  The clone is kept here for re-syncing donor sources by
+# hand when upstream gains improvements worth pulling in:
 #
-#   diff -ru tools/cgcomp-v2/src/donor/  src/vita-cg-compiler/src/   # see drift
-#   cp src/vita-cg-compiler/src/<file>   tools/cgcomp-v2/src/donor/<file>
+#   diff -ru tools/rsx-cg-compiler/src/donor/  src/vita-cg-compiler/src/
+#   cp src/vita-cg-compiler/src/<file>   tools/rsx-cg-compiler/src/donor/<file>
 #
 # Skipped silently if the clone fails (e.g. offline build).
 say "=== vita-cg-compiler donor (re-sync reference, optional) ==="
