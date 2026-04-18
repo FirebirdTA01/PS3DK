@@ -30,7 +30,7 @@ CXXFLAGS = $(CFLAGS)
 
 LDFLAGS  = $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-LIBS    := -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
+LIBS    := -lrsx -lgcm_sys -lio -lsysutil -lsysmodule -lrt -llv2 -lm
 LIBDIRS :=
 
 #---------------------------------------------------------------------------------
