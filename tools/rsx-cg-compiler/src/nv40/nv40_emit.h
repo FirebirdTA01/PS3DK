@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "compile_options.h"
+
 class IRModule;
 
 namespace nv40
@@ -69,10 +71,21 @@ struct VpEmitResult
     VpAttributes attrs;
 };
 
-UcodeOutput  emitVertexProgram    (const IRModule& module, const std::string& entry);
-UcodeOutput  emitFragmentProgram  (const IRModule& module, const std::string& entry);
-FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry);
-VpEmitResult emitVertexProgramEx  (const IRModule& module, const std::string& entry);
+// All emit entry points take a `CompileOptions` that gates
+// optimization behaviour.  Callers that don't care pass a
+// default-constructed value (which matches sce-cgc's defaults).
+UcodeOutput  emitVertexProgram    (const IRModule& module,
+                                   const std::string& entry,
+                                   const rsx_cg::CompileOptions& opts = {});
+UcodeOutput  emitFragmentProgram  (const IRModule& module,
+                                   const std::string& entry,
+                                   const rsx_cg::CompileOptions& opts = {});
+FpEmitResult emitFragmentProgramEx(const IRModule& module,
+                                   const std::string& entry,
+                                   const rsx_cg::CompileOptions& opts = {});
+VpEmitResult emitVertexProgramEx  (const IRModule& module,
+                                   const std::string& entry,
+                                   const rsx_cg::CompileOptions& opts = {});
 
 }  // namespace nv40
 

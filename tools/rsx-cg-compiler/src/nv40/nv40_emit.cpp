@@ -26,12 +26,15 @@ static const IRFunction* findEntryPoint(const IRModule& module, const std::strin
 namespace detail
 {
 UcodeOutput lowerVertexProgram  (const IRModule& module, const IRFunction& entry,
+                                 const rsx_cg::CompileOptions& opts,
                                  VpAttributes* attrsOut);
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
+                                 const rsx_cg::CompileOptions& opts,
                                  FpAttributes* attrsOut);
 }  // namespace detail
 
-UcodeOutput emitVertexProgram(const IRModule& module, const std::string& entry)
+UcodeOutput emitVertexProgram(const IRModule& module, const std::string& entry,
+                              const rsx_cg::CompileOptions& opts)
 {
     UcodeOutput out;
     const IRFunction* fn = findEntryPoint(module, entry);
@@ -40,10 +43,11 @@ UcodeOutput emitVertexProgram(const IRModule& module, const std::string& entry)
         out.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    return detail::lowerVertexProgram(module, *fn, nullptr);
+    return detail::lowerVertexProgram(module, *fn, opts, nullptr);
 }
 
-VpEmitResult emitVertexProgramEx(const IRModule& module, const std::string& entry)
+VpEmitResult emitVertexProgramEx(const IRModule& module, const std::string& entry,
+                                 const rsx_cg::CompileOptions& opts)
 {
     VpEmitResult out;
     const IRFunction* fn = findEntryPoint(module, entry);
@@ -52,11 +56,12 @@ VpEmitResult emitVertexProgramEx(const IRModule& module, const std::string& entr
         out.ucode.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    out.ucode = detail::lowerVertexProgram(module, *fn, &out.attrs);
+    out.ucode = detail::lowerVertexProgram(module, *fn, opts, &out.attrs);
     return out;
 }
 
-UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry)
+UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry,
+                                const rsx_cg::CompileOptions& opts)
 {
     UcodeOutput out;
     const IRFunction* fn = findEntryPoint(module, entry);
@@ -65,10 +70,11 @@ UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry
         out.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    return detail::lowerFragmentProgram(module, *fn, nullptr);
+    return detail::lowerFragmentProgram(module, *fn, opts, nullptr);
 }
 
-FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry)
+FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry,
+                                   const rsx_cg::CompileOptions& opts)
 {
     FpEmitResult out;
     const IRFunction* fn = findEntryPoint(module, entry);
@@ -77,7 +83,7 @@ FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& en
         out.ucode.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    out.ucode = detail::lowerFragmentProgram(module, *fn, &out.attrs);
+    out.ucode = detail::lowerFragmentProgram(module, *fn, opts, &out.attrs);
     return out;
 }
 

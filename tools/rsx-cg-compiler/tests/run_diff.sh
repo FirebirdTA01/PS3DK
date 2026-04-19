@@ -31,6 +31,13 @@ SHADER_DIR="$SCRIPT_DIR/shaders"
 WORK_DIR="$(mktemp -d -t rsx-cg-compiler-diff.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# Test contract: we pin against sce-cgc's DEFAULT optimisation level
+# (`-O2 --fastmath`).  Both sides are invoked with those flags so the
+# contract is explicit — adding a new test shader at a different opt
+# level requires invoking the harness with different flags.  See
+# tools/rsx-cg-compiler/docs/OPTIMIZATION.md for the rationale.
+OPT_FLAGS=(--O2 --fastmath)
+
 if [[ ! -x "$RSX_CG_COMPILER" ]]; then
     echo "error: rsx-cg-compiler not built; run: cmake --build $TOOL_DIR/build" >&2
     exit 1
@@ -81,7 +88,7 @@ extract_vpo_ucode() {
 
 collect_our_ucode() {
     local cg="$1" profile="$2"
-    "$RSX_CG_COMPILER" --profile "$profile" "$cg" \
+    "$RSX_CG_COMPILER" --profile "$profile" "${OPT_FLAGS[@]}" "$cg" \
         | awk '/^  / { for (i=2;i<=NF;i++) printf "%s", $i }'
 }
 
@@ -97,6 +104,7 @@ for cg in "$SHADER_DIR"/*.cg; do
 
     sce_out="$WORK_DIR/${name}_sce.bin"
     WINEDEBUG=-all wine "$SCE_CGC_EXE" --quiet --profile "$profile" \
+        "${OPT_FLAGS[@]}" \
         -o "$sce_out" "$cg" >"$WORK_DIR/${name}.sce.log" 2>&1 || {
             echo "[FAIL] $name: sce-cgc failed — see $WORK_DIR/${name}.sce.log" >&2
             overall_rc=1
@@ -108,6 +116,7 @@ for cg in "$SHADER_DIR"/*.cg; do
     # diff against the ucode region inside sce-cgc's container.
     our_out="$WORK_DIR/${name}_ours.bin"
     if "$RSX_CG_COMPILER" --profile "$profile" \
+            "${OPT_FLAGS[@]}" \
             --emit-container "$our_out" "$cg" \
             >"$WORK_DIR/${name}.our.log" 2>&1 \
        && [[ -s "$our_out" ]]; then

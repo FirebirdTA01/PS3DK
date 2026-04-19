@@ -89,8 +89,13 @@ int fragmentOutputIndex(const std::string& semanticUpper, int /*semanticIndex*/)
 }  // namespace
 
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
+                                 const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
 {
+    // opts is currently unused.  The first real gate will be
+    // `fastmath` — controls MAD fusion + fp16 COLOR varying promote.
+    // Each new optimization pass we write should check `opts` here
+    // (or in a helper module) rather than becoming unconditional.
     UcodeOutput out;
     FpAssembler asm_;
     FpAttributes attrs;

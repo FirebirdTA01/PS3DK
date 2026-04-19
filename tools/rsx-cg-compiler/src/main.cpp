@@ -23,6 +23,7 @@
 #include "ir_builder.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
+#include "compile_options.h"
 #include "sony_container_fp.h"
 #include "sony_container_vp.h"
 
@@ -44,6 +45,8 @@ struct CompilerContext
     enum class Profile { Unknown, FragmentRsx, VertexRsx };
     Profile profile = Profile::VertexRsx;
 
+    rsx_cg::CompileOptions   compileOpts;       // --O0..O3 / --fastmath etc.
+
     // Populated by runPreprocessor — Sony Cg pragma surface that the
     // lexer drops before it reaches the parser.
     std::vector<std::string> alphakillSamplers;
@@ -52,7 +55,7 @@ struct CompilerContext
 void usage()
 {
     std::fprintf(stderr,
-        "rsx-cg-compiler (Phase 8 stage 2) — Cg → RSX (NV40) compiler\n"
+        "rsx-cg-compiler — Cg → RSX (NV40) compiler\n"
         "\n"
         "Usage: rsx-cg-compiler [options] <shader.cg>\n"
         "\n"
@@ -61,11 +64,15 @@ void usage()
         "  -e, --entry <name>     Entry function (default: main)\n"
         "  -I <dir>               Add include directory\n"
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
+        "  --emit-container <p>   Write the Sony .vpo/.fpo container to <p> (binary)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
         "  -h, --help             Show this message\n"
         "\n"
-        "Stage 2 (WIP): runs AST → semantic → IR.  NV40 emit not yet wired.\n");
+        "Optimization (FP only in current sce-cgc; VP insensitive):\n"
+        "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O2)\n"
+        "  --fastmath             Enable fast-math optimizations (default)\n"
+        "  --nofastmath           Disable fast-math optimizations\n");
 }
 
 std::string slurpFile(const std::string& path)
@@ -158,6 +165,30 @@ int main(int argc, char** argv)
         else if (arg == "--emit-container" && i + 1 < argc)
         {
             ctx.containerOutPath = argv[++i];
+        }
+        else if (arg == "-O0" || arg == "--O0")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O0;
+        }
+        else if (arg == "-O1" || arg == "--O1")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O1;
+        }
+        else if (arg == "-O2" || arg == "--O2")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O2;
+        }
+        else if (arg == "-O3" || arg == "--O3")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O3;
+        }
+        else if (arg == "--fastmath")
+        {
+            ctx.compileOpts.fastmath = true;
+        }
+        else if (arg == "--nofastmath")
+        {
+            ctx.compileOpts.fastmath = false;
         }
         else if (!arg.empty() && arg[0] == '-')
         {
@@ -271,13 +302,15 @@ int main(int argc, char** argv)
     nv40::VpAttributes vpAttrs;
     if (stage == ShaderStage::Fragment)
     {
-        nv40::FpEmitResult r = nv40::emitFragmentProgramEx(*irModule, ctx.entryName);
+        nv40::FpEmitResult r = nv40::emitFragmentProgramEx(
+            *irModule, ctx.entryName, ctx.compileOpts);
         ucode   = std::move(r.ucode);
         fpAttrs = r.attrs;
     }
     else
     {
-        nv40::VpEmitResult r = nv40::emitVertexProgramEx(*irModule, ctx.entryName);
+        nv40::VpEmitResult r = nv40::emitVertexProgramEx(
+            *irModule, ctx.entryName, ctx.compileOpts);
         ucode   = std::move(r.ucode);
         vpAttrs = r.attrs;
     }
