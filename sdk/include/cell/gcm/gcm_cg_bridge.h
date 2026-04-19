@@ -73,23 +73,52 @@ extern "C" {
  * Must be noinline — the asm relies on r3=ctx and r4=count on entry
  * (standard PPC64 arg convention); inlining would let GCC reorder the
  * callers' register allocation and break that invariant. */
+/* Invoke the FIFO-wrap callback via the PSL1GHT / Sony PRX calling
+ * convention, explicitly arranging the call frame so GCC can't
+ * silently break the ABI.
+ *
+ * The `callback` field stores a 32-bit handle to an 8-byte PRX OPD
+ * [entry_32, toc_32] — NOT a full PPC64 ELFv1 OPD.  We load entry
+ * into CTR and the TOC into r2 (saving the current TOC in r31),
+ * then `bctrl`.  The firmware callback expects
+ *   r3 = gcmContextData *ctx
+ *   r4 = u32          count
+ * as per the standard PPC64 ELFv1 argument registers.
+ *
+ * Explicit `mr` into r3/r4 from the constraints ensures the ABI-
+ * required arg registers are populated no matter what GCC did with
+ * ctx/count before this asm.  r3 and r4 are in the clobber list
+ * because bctrl replaces r3 with the return value and r4 is
+ * destroyed by the callback; without the clobber GCC assumes they
+ * keep our input values and reads struct fields through a stale
+ * register post-asm (2026-04-18 cube crash).  The mirror copy of
+ * this trampoline in PSL1GHT's rsx_function_macros.h doesn't do
+ * this and only "works" because it happens to have no code before
+ * the asm — adding anything (a printf, a counter write) shifts
+ * GCC's register allocation enough to crash. */
 __attribute__((noinline))
 static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count)
 {
-    register int32_t result asm("r3");
+    int32_t result;
+
     __asm__ __volatile__ (
-        "stdu 1,-128(1)\n"
-        "mr   31,2\n"
-        "lwz  0,0(%3)\n"
-        "lwz  2,4(%3)\n"
+        "mr    3,%1\n"         /* r3 = ctx */
+        "mr    4,%2\n"         /* r4 = count */
+        "stdu  1,-128(1)\n"
+        "mr    31,2\n"
+        "lwz   0,0(%3)\n"      /* r0 = callback entry */
+        "lwz   2,4(%3)\n"      /* r2 = callback TOC   */
         "mtctr 0\n"
         "bctrl\n"
-        "mr   2,31\n"
-        "addi 1,1,128\n"
-        : "+r"(result)
+        "mr    %0,3\n"         /* result = r3 (callback return) */
+        "mr    2,31\n"
+        "addi  1,1,128\n"
+        : "=&r"(result)
         : "r"(ctx), "r"(count), "b"(ctx->callback)
-        : "r31", "r0", "lr"
+        : "r0","r3","r4","r5","r6","r7","r8","r9","r10","r11","r12",
+          "r31","lr","ctr","cr0","cr1","cr5","cr6","cr7","xer","memory"
     );
+
     return result;
 }
 

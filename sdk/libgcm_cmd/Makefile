@@ -18,6 +18,7 @@ PS3DEV   ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 
 CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -mcpu=cell -std=c11 \
+            -I$(PS3DEV)/psl1ght/ppu/include \
             -Iinclude
 ARFLAGS  := rcs
 
@@ -51,7 +52,8 @@ install: $(ARCHIVE)
 	install -m 0644 include/Cg/cg.h       $(INSTALL_INC)/Cg/cg.h
 	install -m 0644 include/Cg/cgBinary.h $(INSTALL_INC)/Cg/cgBinary.h
 	@install -d $(INSTALL_INC)/cell/gcm
-	install -m 0644 include/cell/gcm/gcm_cg_func.h $(INSTALL_INC)/cell/gcm/gcm_cg_func.h
+	install -m 0644 include/cell/gcm/gcm_cg_func.h    $(INSTALL_INC)/cell/gcm/gcm_cg_func.h
+	install -m 0644 include/cell/gcm/ps3tc_fifo_wrap.h $(INSTALL_INC)/cell/gcm/ps3tc_fifo_wrap.h
 	@echo "installed libgcm_cmd.a + headers under $(PS3DEV)/psl1ght/ppu/"
 
 clean:

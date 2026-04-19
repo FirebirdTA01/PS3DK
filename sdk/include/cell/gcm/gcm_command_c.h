@@ -43,6 +43,12 @@
 #include <rsx/gcm_sys.h>
 #include <rsx/commands.h>
 
+/* Native NV40 emitters for the texture-family cellGcmSet* functions —
+ * replaces the rsx* forwarders we shipped while librsx was still the
+ * sole command source.  The header pulls in gcm_cg_bridge.h transitively
+ * (shared ps3tc_gcm_reserve + callback helper). */
+#include <cell/gcm/gcm_tex_bridge.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -190,16 +196,15 @@ static inline void cellGcmSetScissor(CellGcmContextData *thisContext,
 /* ==========================================================
  * Texture bind / state emitters.
  *
- * PSL1GHT's rsxLoadTexture / rsxTextureControl / rsxTextureFilter
- * / rsxTextureWrapMode are ABI-identical to the Sony cellGcmSet*
- * equivalents — same arg order, same types, same method writes.
- * This layer is a forwarder today; a native NV40 FIFO emitter
- * (à la gcm_cg_bridge.h) can replace it here when we want to
- * stop pulling librsx for the texture path. */
+ * Native NV40 FIFO writes — see <cell/gcm/gcm_tex_bridge.h> for the
+ * bit-packing and the ps3tc_gcm_reserve / ps3tc_gcm_invoke_callback
+ * plumbing.  These no longer call into librsx; only the public
+ * cellGcmSet* signatures here preserve Sony ABI/source-compat.
+ * ========================================================== */
 static inline void cellGcmSetTexture(CellGcmContextData *thisContext,
                                      uint8_t index, const CellGcmTexture *texture)
 {
-	rsxLoadTexture(thisContext, index, (const gcmTexture *)texture);
+	ps3tc_gcm_load_texture(thisContext, index, (const gcmTexture *)texture);
 }
 
 static inline void cellGcmSetTextureControl(CellGcmContextData *thisContext,
@@ -207,14 +212,14 @@ static inline void cellGcmSetTextureControl(CellGcmContextData *thisContext,
                                             uint16_t minlod, uint16_t maxlod,
                                             uint8_t maxaniso)
 {
-	rsxTextureControl(thisContext, index, enable, minlod, maxlod, maxaniso);
+	ps3tc_gcm_tex_control(thisContext, index, enable, minlod, maxlod, maxaniso);
 }
 
 static inline void cellGcmSetTextureFilter(CellGcmContextData *thisContext,
                                            uint8_t index, uint16_t bias,
                                            uint8_t min, uint8_t mag, uint8_t conv)
 {
-	rsxTextureFilter(thisContext, index, bias, min, mag, conv);
+	ps3tc_gcm_tex_filter(thisContext, index, bias, min, mag, conv);
 }
 
 static inline void cellGcmSetTextureAddress(CellGcmContextData *thisContext,
@@ -223,19 +228,36 @@ static inline void cellGcmSetTextureAddress(CellGcmContextData *thisContext,
                                             uint8_t unsignedRemap, uint8_t zfunc,
                                             uint8_t gamma)
 {
-	rsxTextureWrapMode(thisContext, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma);
+	ps3tc_gcm_tex_wrap_mode(thisContext, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma);
 }
 
 /* ==========================================================
  * Timestamp / report — GPU-side profiling reports.
- * PSL1GHT gcmGetTimeStamp reads an index.  Sony splits it into a
- * SetTimeStamp (emits the report-write into the FIFO) and a
- * GetTimeStamp (reads the 64-bit counter back on the PPU side).
- * Forwarders today; native NV40 NV40TCL_SET_REPORT emitter later.
+ *
+ * cellGcmSetTimeStamp emits an NV4097_GET_REPORT command that
+ * writes a 64-bit timestamp into the report region at byte offset
+ * (index * 0x10).  Arg encoding per Sony's gcm_implementation_sub.h
+ * / gcm_methods.h: bits 0-23 = offset, bits 24-31 = type (type=1
+ * for timestamp).
+ *
+ * PSL1GHT's rsxSetTimeStamp (librsx/commands_impl.h) is doubly
+ * broken: it reserves 2 FIFO slots but writes to slot [2] instead
+ * of [1] — slot [1] is left uninitialized so RPCS3 reports
+ * "NV4097_GET_REPORT: Bad type 0" every call, and the out-of-
+ * bounds [2] write smashes the next command slot.  Over thousands
+ * of frames the corruption accumulates and GPU-visible state
+ * drifts, which surfaces as sony-cube rendering static content
+ * ~1-2 s in despite the main loop continuing to run.  Native
+ * emitter here sidesteps both bugs; cellGcmGetTimeStamp keeps its
+ * firmware-read path since that's not implicated.
  * ========================================================== */
 static inline void cellGcmSetTimeStamp(CellGcmContextData *thisContext, uint32_t index)
 {
-	rsxSetTimeStamp(thisContext, index);
+	if (!thisContext) return;
+	uint32_t *w = ps3tc_gcm_reserve(thisContext, 2);
+	if (!w) return;
+	w[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_GET, 1);
+	w[1] = ((uint32_t)1u << 24) | ((uint32_t)index * 0x10u);
 }
 
 static inline uint64_t cellGcmGetTimeStamp(uint32_t index)
