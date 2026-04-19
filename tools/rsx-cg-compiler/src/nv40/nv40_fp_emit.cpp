@@ -226,6 +226,44 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         return r;
     };
 
+    // Comparisons and ternary select:
+    //
+    //   `(vcol.x > 0.5f) ? a : b`
+    //
+    // sce-cgc lowers this to three instructions + two inline blocks:
+    //   SGTRC RC.x, f[COL0], {0.5, 0, 0, 0}.x ;  # SGT writes CC, no reg
+    //   <inline {0.5, 0, 0, 0}>
+    //   MOVR R0, a ;                              # unconditional true case
+    //   <inline zero for uniform a>
+    //   MOVR R0(EQ.x), b ;                        # conditional over CC
+    //   <inline zero for uniform b>
+    //
+    // Encoding deltas vs regular MOV/ADD:
+    //   - SGT has OUT_NONE + COND_WRITE_ENABLE + OUT_REG=0x3F (sentinel)
+    //     and OUTMASK=0x1 (only CC.x).  Source 1 (the scalar literal) is
+    //     swizzled .xxxx.
+    //   - The conditional MOV has cc_cond=EQ and cc_swz=(X,X,X,X)
+    //     overriding the default TR / identity.
+    struct ScalarExtract { IRValueID baseId = 0; int lane = 0; };
+    std::unordered_map<IRValueID, ScalarExtract> valueToScalarExtract;
+
+    struct CmpBinding
+    {
+        uint8_t   opcode    = NVFX_FP_OP_OPCODE_SGT;
+        IRValueID lhsBase   = 0;
+        int       lhsLane   = 0;
+        float     rhsConst  = 0.0f;
+    };
+    std::unordered_map<IRValueID, CmpBinding> valueToCmp;
+
+    struct SelectBinding
+    {
+        IRValueID cmpId    = 0;
+        IRValueID trueId   = 0;  // value when condition is TRUE
+        IRValueID falseId  = 0;
+    };
+    std::unordered_map<IRValueID, SelectBinding> valueToSelect;
+
     // Literal `float4(k0, k1, k2, k3)` where all kN are constants —
     // deferred so the consuming StoreOutput can emit FENCBR + MOV +
     // 16-byte inline const block (matches sce-cgc's `FENCBR; MOVR R0,
@@ -355,15 +393,28 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
             case IROp::VecShuffle:
             {
-                // We only recognise identity-prefix shuffles here
-                // (e.g. `.xyz` from a vec4 → vec3, `.xy` from a vec4
-                // → vec2).  These are no-ops at the NV40 level
-                // because the narrower destination op (DP3, etc.)
-                // naturally ignores the trailing lanes.  Non-identity
-                // shuffles need SRC-slot swizzle bit plumbing; lands
-                // in a later stage as more test shaders exercise it.
                 if (inst.operands.size() != 1) break;
                 const int outLanes = inst.resultType.vectorSize;
+
+                // Scalar extract (vcol.x, vcol.y, ...): resultType is
+                // a scalar and the mask's low 2 bits name the source
+                // lane.  Used by comparisons (`x > 0.5`) and scalar
+                // math on vec components.
+                if (outLanes == 1)
+                {
+                    ScalarExtract se;
+                    se.baseId = inst.operands[0];
+                    se.lane   = inst.swizzleMask & 3;
+                    valueToScalarExtract[inst.result] = se;
+                    break;
+                }
+
+                // Identity-prefix shuffle (e.g. `.xyz` from a vec4 →
+                // vec3, `.xy` → vec2).  No-op at the NV40 level
+                // because the narrower destination op (DP3, etc.)
+                // naturally ignores trailing lanes.  Non-identity
+                // vector shuffles need SRC-slot swizzle bit plumbing;
+                // lands in a later stage.
                 bool identity = true;
                 for (int k = 0; k < outLanes && k < 4; ++k)
                 {
@@ -375,6 +426,56 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 SrcMod m;
                 m.baseId = inst.operands[0];
                 valueToMod[inst.result] = m;
+                break;
+            }
+
+            case IROp::CmpGt:
+            case IROp::CmpGe:
+            case IROp::CmpLt:
+            case IROp::CmpLe:
+            case IROp::CmpEq:
+            case IROp::CmpNe:
+            {
+                if (inst.operands.size() < 2) break;
+
+                // LHS: scalar extract of a varying (for `vcol.x > 0.5`).
+                auto seIt = valueToScalarExtract.find(inst.operands[0]);
+                if (seIt == valueToScalarExtract.end()) break;
+                auto inIt = valueToInputSrc.find(seIt->second.baseId);
+                if (inIt == valueToInputSrc.end()) break;
+
+                // RHS: a float constant (only pattern supported today).
+                IRValue* rhsValue = entry.getValue(inst.operands[1]);
+                auto* rhsConst = dynamic_cast<IRConstant*>(rhsValue);
+                if (!rhsConst || !std::holds_alternative<float>(rhsConst->value))
+                    break;
+
+                CmpBinding cb;
+                switch (inst.op)
+                {
+                case IROp::CmpGt: cb.opcode = NVFX_FP_OP_OPCODE_SGT; break;
+                case IROp::CmpGe: cb.opcode = NVFX_FP_OP_OPCODE_SGE; break;
+                case IROp::CmpLt: cb.opcode = NVFX_FP_OP_OPCODE_SLT; break;
+                case IROp::CmpLe: cb.opcode = NVFX_FP_OP_OPCODE_SLE; break;
+                case IROp::CmpEq: cb.opcode = NVFX_FP_OP_OPCODE_SEQ; break;
+                case IROp::CmpNe: cb.opcode = NVFX_FP_OP_OPCODE_SNE; break;
+                default: break;
+                }
+                cb.lhsBase  = seIt->second.baseId;
+                cb.lhsLane  = seIt->second.lane;
+                cb.rhsConst = std::get<float>(rhsConst->value);
+                valueToCmp[inst.result] = cb;
+                break;
+            }
+
+            case IROp::Select:
+            {
+                if (inst.operands.size() < 3) break;
+                SelectBinding sb;
+                sb.cmpId   = inst.operands[0];
+                sb.trueId  = inst.operands[1];
+                sb.falseId = inst.operands[2];
+                valueToSelect[inst.result] = sb;
                 break;
             }
 
@@ -685,6 +786,125 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (texIt->second.projective || texIt->second.cube)
                             attrs.texCoords2D &= ~(uint16_t{1} << n);
                     }
+                    break;
+                }
+
+                // Ternary select `(cond) ? trueV : falseV`:
+                //   SGT RC.x, <input>.<lane>, {cmpConst, 0, 0, 0}.x
+                //   <inline {cmpConst, 0, 0, 0}>
+                //   MOVR R_out, trueV
+                //   <inline trueV (zero block for uniform)>
+                //   MOVR R_out(EQ.x), falseV
+                //   <inline falseV>
+                auto selIt = valueToSelect.find(srcId);
+                if (selIt != valueToSelect.end())
+                {
+                    const auto& sb = selIt->second;
+                    auto cmpIt = valueToCmp.find(sb.cmpId);
+                    if (cmpIt == valueToCmp.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: Select needs a CmpGt/CmpGe/... constant-threshold binding");
+                        return out;
+                    }
+                    const auto& cb = cmpIt->second;
+                    auto inIt = valueToInputSrc.find(cb.lhsBase);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: Select: comparison LHS must be a scalar of a varying");
+                        return out;
+                    }
+
+                    auto trueUni  = valueToFpUniform.find(sb.trueId);
+                    auto falseUni = valueToFpUniform.find(sb.falseId);
+                    if (trueUni == valueToFpUniform.end() ||
+                        falseUni == valueToFpUniform.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: Select: both branches must currently be uniforms");
+                        return out;
+                    }
+
+                    // --- SGT/SGE/... RC.x, varying.<lane>, {lit}.x ---
+                    const struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+                    const struct nvfx_reg inReg = nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    const struct nvfx_reg coReg = nvfx_reg(NVFXSR_CONST, 0);
+
+                    // SRC0 keeps identity swizzle — OUTMASK=X means
+                    // only lane X of the result matters, which reads
+                    // SRC0.x = input.x.  For non-X lhs lanes (e.g.
+                    // `vcol.y > ...`) we'd need to override swz AND
+                    // use a different OUTMASK; not yet supported.
+                    if (cb.lhsLane != 0)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: Select: only scalar-X comparisons supported today");
+                        return out;
+                    }
+                    struct nvfx_src cmpS0 = nvfx_src(const_cast<struct nvfx_reg&>(inReg));
+                    struct nvfx_src cmpS1 = nvfx_src(const_cast<struct nvfx_reg&>(coReg));
+                    cmpS1.swz[0] = cmpS1.swz[1] = cmpS1.swz[2] = cmpS1.swz[3] = 0;  // .x
+                    struct nvfx_src cmpS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    struct nvfx_insn cmpInsn = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(ccDst),
+                        NVFX_FP_MASK_X,    // only CC.x
+                        cmpS0, cmpS1, cmpS2);
+                    cmpInsn.cc_update = 1;     // COND_WRITE_ENABLE
+                    asm_.emit(cmpInsn, cb.opcode);
+                    // Inline the threshold as {cb.rhsConst, 0, 0, 0}.
+                    const float cmpLit[4] = { cb.rhsConst, 0.0f, 0.0f, 0.0f };
+                    asm_.appendConstBlock(cmpLit);
+
+                    // --- MOVR R_out, trueV (unconditional) ---
+                    struct nvfx_src mvS0 = nvfx_src(const_cast<struct nvfx_reg&>(coReg));
+                    struct nvfx_src mvS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mvTrue = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        mvS0, mvS1, mvS2);
+                    mvTrue.precision = dstPrecision;
+                    asm_.emit(mvTrue, NVFX_FP_OP_OPCODE_MOV);
+                    const uint32_t trueOffset = asm_.currentByteSize();
+                    for (auto& eu : attrs.embeddedUniforms)
+                        if (eu.entryParamIndex == trueUni->second)
+                        { eu.ucodeByteOffsets.push_back(trueOffset); break; }
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+
+                    // --- MOVR R_out(EQ.x), falseV (conditional) ---
+                    struct nvfx_src fS0 = nvfx_src(const_cast<struct nvfx_reg&>(coReg));
+                    struct nvfx_src fS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src fS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mvFalse = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        fS0, fS1, fS2);
+                    mvFalse.precision = dstPrecision;
+                    // Execute only when CC.x reports the condition is
+                    // FALSE (i.e. SGT wrote 0 → CC reads as EQ).
+                    mvFalse.cc_test  = 1;
+                    mvFalse.cc_cond  = NVFX_FP_OP_COND_EQ;
+                    mvFalse.cc_swz[0] = cb.lhsLane;
+                    mvFalse.cc_swz[1] = cb.lhsLane;
+                    mvFalse.cc_swz[2] = cb.lhsLane;
+                    mvFalse.cc_swz[3] = cb.lhsLane;
+                    asm_.emit(mvFalse, NVFX_FP_OP_OPCODE_MOV);
+                    const uint32_t falseOffset = asm_.currentByteSize();
+                    for (auto& eu : attrs.embeddedUniforms)
+                        if (eu.entryParamIndex == falseUni->second)
+                        { eu.ucodeByteOffsets.push_back(falseOffset); break; }
+                    asm_.appendConstBlock(zeros);
+
+                    // Track varying-input mask bit for the LHS varying.
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+
+                    emittedSomething = true;
                     break;
                 }
 
