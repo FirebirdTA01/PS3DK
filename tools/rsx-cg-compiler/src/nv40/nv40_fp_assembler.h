@@ -38,9 +38,24 @@ public:
     // NVFX_FP_OP_OPCODE_* value (e.g. NVFX_FP_OP_OPCODE_MOV).
     void emit(const struct nvfx_insn& insn, uint8_t opcode);
 
+    // Emit a Sony-RSX FENCBR instruction — opcode 0x3E, OUT_NONE = 1,
+    // OUT_REG = 0x3F (sce-cgc's sentinel bit pattern), all source
+    // operands default.  Placed before any instruction that reads an
+    // inline-const block to stall the pipeline until the const is
+    // available.  Not in the NV40 opcode header — verified from
+    // sce-cgc output.
+    void emitFencbr();
+
+    // Append a 16-byte inline constant immediately after the most
+    // recent instruction — matches sce-cgc's layout for FP literal
+    // consts.  Values are four fp32s in the caller's natural order
+    // (value[0] is the X lane etc.); the on-disk halfword swap is
+    // applied at words() like for instructions.
+    void appendConstBlock(const float values[4]);
+
     // Stamp the NVFX_FP_OP_PROGRAM_END bit on the most recent
-    // instruction's hw[0].  Must be called exactly once after the
-    // whole program is emitted.
+    // *instruction* (not a const block).  Must be called exactly
+    // once after the whole program is emitted.
     void markEnd();
 
     // Returns the ucode in on-disk halfword-swapped form (matches
@@ -52,8 +67,16 @@ public:
 
 private:
     // Logical bit layout (matches NVFX_FP_OP_* shifts/masks).
-    // 4 u32 per instruction; the disk swap happens in words().
+    // 4 u32 per instruction-or-const-block; the disk swap happens
+    // in words() for both.
     std::vector<uint32_t> logicalWords_;
+
+    // Offset of the most recent *instruction* (not const block).
+    // markEnd() stamps PROGRAM_END here, so inline const blocks that
+    // happen to be the last entry in logicalWords_ don't get
+    // corrupted.
+    size_t lastInstrOffset_ = 0;
+    bool   hasInstruction_  = false;
 
     // R0 is implicitly reserved for result.color, so the live count
     // starts at 1 even if no temp is explicitly written.

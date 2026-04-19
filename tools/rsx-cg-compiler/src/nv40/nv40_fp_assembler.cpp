@@ -33,6 +33,8 @@ void FpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
 {
     const size_t base = logicalWords_.size();
     logicalWords_.resize(base + 4, 0u);
+    lastInstrOffset_ = base;
+    hasInstruction_  = true;
     uint32_t* hw = &logicalWords_[base];
 
     hw[0] |= (static_cast<uint32_t>(opcode) << NVFX_FP_OP_OPCODE_SHIFT);
@@ -95,6 +97,62 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
     hw[0] |= (static_cast<uint32_t>(index) << NVFX_FP_OP_OUT_REG_SHIFT);
 }
 
+void FpAssembler::emitFencbr()
+{
+    const size_t base = logicalWords_.size();
+    logicalWords_.resize(base + 4, 0u);
+    lastInstrOffset_ = base;
+    hasInstruction_  = true;
+    uint32_t* hw = &logicalWords_[base];
+
+    // OPCODE = 0x3E (Sony RSX extension, "fence before read").
+    hw[0] |= (uint32_t{0x3Eu} << NVFX_FP_OP_OPCODE_SHIFT);
+    // OUT_NONE: no destination written.
+    hw[0] |= NV40_FP_OP_OUT_NONE;
+    // sce-cgc sets OUT_REG = 0x3F (sentinel bit pattern when OUT_NONE
+    // is set — the field is otherwise meaningless).
+    hw[0] |= (uint32_t{0x3Fu} << NVFX_FP_OP_OUT_REG_SHIFT);
+    // OUTMASK = 0xF — all channels (also meaningless with OUT_NONE,
+    // but sce-cgc emits it this way and we match byte-for-byte).
+    hw[0] |= (uint32_t{0xFu}  << NVFX_FP_OP_OUTMASK_SHIFT);
+
+    // Source operands are default: TYPE=TEMP(0), identity swizzle,
+    // cond_cond=TR, identity cond_swz.  Mirrors what emitSrc writes
+    // for NVFXSR_NONE — same bits via a direct hw[] write.
+    hw[1] = (uint32_t{NVFX_COND_TR} << NVFX_FP_OP_COND_SHIFT);
+    hw[1] |= ((uint32_t{0} << NVFX_FP_OP_COND_SWZ_X_SHIFT) |
+              (uint32_t{1} << NVFX_FP_OP_COND_SWZ_Y_SHIFT) |
+              (uint32_t{2} << NVFX_FP_OP_COND_SWZ_Z_SHIFT) |
+              (uint32_t{3} << NVFX_FP_OP_COND_SWZ_W_SHIFT));
+    // SRC0 common: TYPE_TEMP(0) + identity swz (0,1,2,3).
+    const uint32_t defaultSrc =
+        (NVFX_FP_REG_TYPE_TEMP << NVFX_FP_REG_TYPE_SHIFT) |
+        (uint32_t{0} << NVFX_FP_REG_SWZ_X_SHIFT) |
+        (uint32_t{1} << NVFX_FP_REG_SWZ_Y_SHIFT) |
+        (uint32_t{2} << NVFX_FP_REG_SWZ_Z_SHIFT) |
+        (uint32_t{3} << NVFX_FP_REG_SWZ_W_SHIFT);
+    hw[1] |= defaultSrc;
+    hw[2] = defaultSrc;
+    hw[3] = defaultSrc;
+}
+
+void FpAssembler::appendConstBlock(const float values[4])
+{
+    // Inline constants are 4×fp32 placed immediately after the
+    // using instruction.  They undergo the same halfword swap as
+    // ucode words at words() time, so store them here in the
+    // caller's natural (big-endian-float) layout.
+    uint32_t raw[4];
+    std::memcpy(raw, values, 16);
+    logicalWords_.push_back(raw[0]);
+    logicalWords_.push_back(raw[1]);
+    logicalWords_.push_back(raw[2]);
+    logicalWords_.push_back(raw[3]);
+    // Deliberately do NOT update lastInstrOffset_ — this block is
+    // data, not an instruction.  markEnd() should stamp PROGRAM_END
+    // on the real instruction that came before.
+}
+
 void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
 {
     uint32_t sr = 0;
@@ -118,11 +176,22 @@ void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
         sr |= (NVFX_FP_REG_TYPE_TEMP << NVFX_FP_REG_TYPE_SHIFT);
         sr |= (static_cast<uint32_t>(src.reg.index) << NVFX_FP_REG_SRC_SHIFT);
         break;
+    case NVFXSR_CONST:
+        // Inline FP constants live in a 16-byte block placed right
+        // after the using instruction.  TYPE_CONST selects the const
+        // bank; SRC-index=0 references the single inline slot.
+        // (Multiple consts in one shader use distinct blocks; we
+        // encode that by emitting them sequentially and each MOV
+        // points to its own following block via SRC-index 0 — the
+        // "current instruction's own inline" — per sce-cgc output.)
+        sr |= (NVFX_FP_REG_TYPE_CONST << NVFX_FP_REG_TYPE_SHIFT);
+        sr |= (static_cast<uint32_t>(src.reg.index) << NVFX_FP_REG_SRC_SHIFT);
+        break;
     case NVFXSR_NONE:
         sr |= (NVFX_FP_REG_TYPE_TEMP << NVFX_FP_REG_TYPE_SHIFT);
         break;
     default:
-        // CONST / IMM / SAMPLER land in later stages; treat as TEMP
+        // IMM / SAMPLER land in later stages; treat as TEMP
         // placeholder so we don't write garbage type bits.
         sr |= (NVFX_FP_REG_TYPE_TEMP << NVFX_FP_REG_TYPE_SHIFT);
         break;
@@ -149,9 +218,8 @@ void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
 
 void FpAssembler::markEnd()
 {
-    if (logicalWords_.empty()) return;
-    const size_t base = logicalWords_.size() - 4;
-    logicalWords_[base] |= NVFX_FP_OP_PROGRAM_END;
+    if (!hasInstruction_) return;
+    logicalWords_[lastInstrOffset_] |= NVFX_FP_OP_PROGRAM_END;
 }
 
 std::vector<uint32_t> FpAssembler::words() const

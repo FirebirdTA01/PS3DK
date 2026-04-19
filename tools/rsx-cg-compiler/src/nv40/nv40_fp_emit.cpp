@@ -121,6 +121,18 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, TexBinding> valueToTex;
 
+    // Literal `float4(k0, k1, k2, k3)` where all kN are constants —
+    // deferred so the consuming StoreOutput can emit FENCBR + MOV +
+    // 16-byte inline const block (matches sce-cgc's `FENCBR; MOVR R0,
+    // {0x...}; END` pattern for a direct-literal shader).  Non-trivial
+    // lifetimes (literal feeding arithmetic or texture sampling) land
+    // in later stages.
+    struct LiteralVec4
+    {
+        float vals[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    };
+    std::unordered_map<IRValueID, LiteralVec4> valueToLiteralVec4;
+
     int nextTexUnit = 0;
 
     for (const auto& param : entry.parameters)
@@ -181,6 +193,33 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
                 // tex2D(sampler, uv) — operands[0] = sampler, [1] = uv.
                 valueToTex[inst.result] = { inst.operands[0], inst.operands[1] };
+                break;
+            }
+
+            case IROp::VecConstruct:
+            {
+                // Recognise `float4(k0, k1, k2, k3)` where every kN is
+                // a scalar float constant.  Other VecConstruct shapes
+                // (mixed input + const, narrower constructors) land
+                // with the arithmetic pass.
+                if (inst.operands.size() != 4) break;
+
+                LiteralVec4 lv;
+                bool allConst = true;
+                for (int k = 0; k < 4; ++k)
+                {
+                    IRValue* v = entry.getValue(inst.operands[k]);
+                    auto* c = dynamic_cast<IRConstant*>(v);
+                    if (!c || !std::holds_alternative<float>(c->value))
+                    {
+                        allConst = false;
+                        break;
+                    }
+                    lv.vals[k] = std::get<float>(c->value);
+                }
+                if (!allConst) break;
+
+                valueToLiteralVec4[inst.result] = lv;
                 break;
             }
 
@@ -256,12 +295,36 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     break;
                 }
 
+                // Literal vec4 going straight to an output: sce-cgc
+                // emits FENCBR + MOV R_out, c[inline] + 16-byte block.
+                auto lcIt = valueToLiteralVec4.find(srcId);
+                if (lcIt != valueToLiteralVec4.end())
+                {
+                    asm_.emitFencbr();
+
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_src src0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    struct nvfx_src src1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    struct nvfx_insn in = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        src0, src1, src2);
+                    asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+
+                    asm_.appendConstBlock(lcIt->second.vals);
+                    emittedSomething = true;
+                    break;
+                }
+
                 auto it = valueToInputSrc.find(srcId);
                 if (it == valueToInputSrc.end())
                 {
                     out.diagnostics.push_back(
-                        "nv40-fp: StoreOutput source is not a direct varying input or "
-                        "tex2D result (arithmetic lowering lands later)");
+                        "nv40-fp: StoreOutput source is not a direct varying input, "
+                        "tex2D result, or literal vec4 (arithmetic lowering lands later)");
                     return out;
                 }
 
