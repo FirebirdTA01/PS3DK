@@ -124,8 +124,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // which writes straight to R0 with no temp).
     struct TexBinding
     {
-        IRValueID samplerId = 0;
-        IRValueID uvId      = 0;
+        IRValueID samplerId  = 0;
+        IRValueID uvId       = 0;
+        bool      projective = false;  // true → emit TXP (0x18) instead of TEX (0x17)
     };
     std::unordered_map<IRValueID, TexBinding> valueToTex;
 
@@ -297,14 +298,20 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             }
 
             case IROp::TexSample:
+            case IROp::TexSampleProj:
             {
                 if (inst.operands.size() < 2)
                 {
                     out.diagnostics.push_back("nv40-fp: TexSample with <2 operands");
                     return out;
                 }
-                // tex2D(sampler, uv) — operands[0] = sampler, [1] = uv.
-                valueToTex[inst.result] = { inst.operands[0], inst.operands[1] };
+                // tex2D(sampler, uv) / tex2Dproj(sampler, uv).
+                // operands[0] = sampler, [1] = uv.
+                TexBinding tb;
+                tb.samplerId    = inst.operands[0];
+                tb.uvId         = inst.operands[1];
+                tb.projective   = (inst.op == IROp::TexSampleProj);
+                valueToTex[inst.result] = tb;
                 break;
             }
 
@@ -625,6 +632,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     struct nvfx_src src1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
                     struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
 
+                    const uint8_t texOpcode =
+                        texIt->second.projective
+                            ? NVFX_FP_OP_OPCODE_TXP
+                            : NVFX_FP_OP_OPCODE_TEX;
+
                     struct nvfx_insn in = nvfx_insn(
                         saturate ? 1 : 0, 0,
                         sampIt->second,  // tex_unit — packed into hw[0] bits 17-20
@@ -633,7 +645,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         NVFX_FP_MASK_ALL,
                         src0, src1, src2);
                     in.precision = dstPrecision;
-                    asm_.emit(in, NVFX_FP_OP_OPCODE_TEX);
+                    asm_.emit(in, texOpcode);
                     emittedSomething = true;
 
                     // Track varying input usage for the container's
@@ -642,8 +654,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
                         uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
                     {
-                        attrs.texCoordsInputMask |=
-                            uint16_t{1} << (uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                        const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                        attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        // sce-cgc clears the texCoords2D bit for any
+                        // TEXCOORD used projectively — the HW needs
+                        // all four lanes (not just xy) for the
+                        // perspective divide.
+                        if (texIt->second.projective)
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                     }
                     break;
                 }
