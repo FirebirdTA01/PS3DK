@@ -23,6 +23,7 @@
 #include "ir_builder.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
+#include "nv40/nv40_if_convert.h"
 #include "compile_options.h"
 #include "sony_container_fp.h"
 #include "sony_container_vp.h"
@@ -280,6 +281,11 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "rsx-cg-compiler: IR generation failed.\n");
         return 1;
     }
+
+    // Run NV40-specific IR transforms before back-end lowering.
+    // Currently: collapse simple if-else diamonds into Select so the
+    // existing FP emit path handles them without IF/ELSE/ENDIF.
+    nv40::convertSimpleIfElse(*irModule);
 
     if (dumpIr)
     {
