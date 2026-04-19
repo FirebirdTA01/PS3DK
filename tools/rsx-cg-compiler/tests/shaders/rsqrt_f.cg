@@ -1,0 +1,9 @@
+// `rsqrt(x)` — reciprocal square root (NV40 RSQ, opcode 0x1B).
+// Same two-step shape as rcp_f: MOVH preload + RSQR read-and-
+// broadcast.
+void main(
+    float4 vcol      : COLOR,
+    out float4 color : COLOR)
+{
+    color = rsqrt(vcol.x);
+}

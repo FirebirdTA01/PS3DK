@@ -1,0 +1,20 @@
+// `normalize(vec3)` = v / length(v) = v / sqrt(dot(v,v)).  With a
+// `float4(..., 1.0f)` wrapper so the `w` lane gets an explicit 1,
+// matching the pattern lighting shaders use.
+//
+// sce-cgc lowers to:
+//
+//   MOVH H0.xyz, f[COL0];                     # fp16 vec3 preload
+//   DP3R R0.z, H0, H0;                        # dot(v, v) → R0.z
+//   MOVR R0.w, {0x3f800000(1), 0, 0, 0}.x;    # w = 1.0 via inline
+//   DIVSQR R0.xyz, H0, R0.z;                  # R0.xyz = H0 / sqrt(R0.z)
+//
+// The `w = 1.0` is always placed BEFORE the final DIVSQR, because
+// DIVSQR is the last instruction (carries END-bit).  The inline
+// {1.0, 0, 0, 0} block is the SRC1 immediate for the MOVR.
+void main(
+    float4 vcol      : COLOR,
+    out float4 color : COLOR)
+{
+    color = float4(normalize(vcol.xyz), 1.0f);
+}

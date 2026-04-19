@@ -288,6 +288,50 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, LiteralVec4> valueToLiteralVec4;
 
+    // Scalar-function-unit unary ops (RCP / RSQ).  Both read one
+    // scalar lane of a varying and broadcast the result to all four
+    // output lanes.  sce-cgc emits the 2-insn shape:
+    //     MOVH H0.<lane>, f[input];
+    //     <OP>R R0, H0;
+    // regardless of whether the source expression was written as
+    // `1.0/x` (Cg Div with lhs=1) or as `rsqrt(x)`; we normalise
+    // both into this binding.
+    struct FpScalarUnaryBinding
+    {
+        enum class Kind { Rcp, Rsq };
+        Kind      kind     = Kind::Rcp;
+        IRValueID inputId  = 0;
+        int       lane     = 0;  // 0..3 — which lane of the input to read
+    };
+    std::unordered_map<IRValueID, FpScalarUnaryBinding> valueToScalarUnary;
+
+    // `length(vec3)` — sce-cgc lowers to MOVH + DP3R + DIVSQR + MOVR.
+    // DIVSQR (Sony NV40+RSX extension, opcode 0x3B) computes
+    // `src0 / sqrt(src1)`; sce-cgc's sqrt(dot(v,v)) trick reads back
+    // the same DP3R result as both `|src0|` and `src1`, exploiting
+    // `|x|/sqrt(x) == sqrt(x)` for x >= 0.
+    struct FpLengthBinding
+    {
+        IRValueID inputId = 0;
+        int       lanes   = 3;   // typically 3 (vec3 length)
+    };
+    std::unordered_map<IRValueID, FpLengthBinding> valueToLength;
+
+    // `normalize(vec3)` — sce-cgc lowers to MOVH + DP3R + MOVR(w=1) +
+    // DIVSQR.  The w=1 MOV fires mid-sequence so DIVSQR is the END-
+    // carrying last instruction.  The binding captures the base
+    // varying and optional "wrap with w=1" flag so StoreOutput can
+    // emit either shape: bare normalize (no w inject) or the more
+    // common `float4(normalize(v), 1.0)` pattern.
+    struct FpNormalizeBinding
+    {
+        IRValueID inputId  = 0;
+        int       lanes    = 3;
+        bool      wrapW1   = false;  // true iff StoreOutput sees
+                                     // `float4(normalize(v), 1.0)`
+    };
+    std::unordered_map<IRValueID, FpNormalizeBinding> valueToNormalize;
+
     int nextTexUnit = 0;
 
     for (size_t pi = 0; pi < entry.parameters.size(); ++pi)
@@ -670,9 +714,117 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 break;
             }
 
+            case IROp::RSqrt:
+            {
+                // `rsqrt(scalar_lane_of_varying)`.  IR shape:
+                //   %a = shuffle float %v   (ScalarExtract{v, lane})
+                //   %b = rsqrt float %a
+                if (inst.operands.size() != 1) break;
+                auto seIt = valueToScalarExtract.find(inst.operands[0]);
+                if (seIt == valueToScalarExtract.end()) break;
+
+                FpScalarUnaryBinding bind;
+                bind.kind    = FpScalarUnaryBinding::Kind::Rsq;
+                bind.inputId = seIt->second.baseId;
+                bind.lane    = seIt->second.lane;
+                valueToScalarUnary[inst.result] = bind;
+                break;
+            }
+
+            case IROp::Div:
+            {
+                // Recognise `1.0 / <scalar>` as reciprocal — sce-cgc
+                // constant-folds Cg's `1.0/x` expression to RCP.  The
+                // scalar RHS must be a ScalarExtract (`v.x`, `v.y`, …)
+                // so we know which lane to pre-load into H0.
+                if (inst.operands.size() != 2) break;
+                IRValue* lhs = entry.getValue(inst.operands[0]);
+                auto* c = dynamic_cast<IRConstant*>(lhs);
+                if (!c || !std::holds_alternative<float>(c->value))  break;
+                if (std::get<float>(c->value) != 1.0f)               break;
+
+                auto seIt = valueToScalarExtract.find(inst.operands[1]);
+                if (seIt == valueToScalarExtract.end())              break;
+
+                FpScalarUnaryBinding bind;
+                bind.kind    = FpScalarUnaryBinding::Kind::Rcp;
+                bind.inputId = seIt->second.baseId;
+                bind.lane    = seIt->second.lane;
+                valueToScalarUnary[inst.result] = bind;
+                break;
+            }
+
+            case IROp::Length:
+            {
+                // `length(vec3)` — resolve the input through SrcMod so
+                // identity-prefix shuffles (`v.xyz`) pass through
+                // transparently.  Lanes come from the shuffle's result
+                // type (same mechanism as Dot's DP3/DP4 pick).
+                if (inst.operands.size() != 1) break;
+                const SrcMod m = resolveSrcMods(inst.operands[0]);
+                if (valueToInputSrc.find(m.baseId) == valueToInputSrc.end())
+                    break;  // non-varying length() lands in a later pass
+
+                int lanes = 3;
+                auto tyIt = valueToType.find(inst.operands[0]);
+                if (tyIt != valueToType.end() && tyIt->second.vectorSize > 0)
+                    lanes = tyIt->second.vectorSize;
+
+                FpLengthBinding bind;
+                bind.inputId = m.baseId;
+                bind.lanes   = lanes;
+                valueToLength[inst.result] = bind;
+                break;
+            }
+
+            case IROp::Normalize:
+            {
+                // `normalize(vec3)` — same input-resolution path as
+                // Length.  The `wrapW1` flag gets set later when
+                // VecConstruct sees this feeding into `float4(nrm, 1)`.
+                if (inst.operands.size() != 1) break;
+                const SrcMod m = resolveSrcMods(inst.operands[0]);
+                if (valueToInputSrc.find(m.baseId) == valueToInputSrc.end())
+                    break;
+
+                int lanes = 3;
+                auto tyIt = valueToType.find(inst.operands[0]);
+                if (tyIt != valueToType.end() && tyIt->second.vectorSize > 0)
+                    lanes = tyIt->second.vectorSize;
+
+                FpNormalizeBinding bind;
+                bind.inputId = m.baseId;
+                bind.lanes   = lanes;
+                valueToNormalize[inst.result] = bind;
+                break;
+            }
+
             case IROp::VecConstruct:
             {
-                // Recognise `float4(k0, k1, k2, k3)` where every kN is
+                // Shape A: `float4(normalize(vec3), 1.0f)` — 2 operands
+                // where operand 0 is a Normalize result and operand 1
+                // is the scalar constant 1.0.  Fold into the
+                // normalize binding with wrapW1=true so StoreOutput
+                // emits sce-cgc's MOVH/DP3/MOVR-w/DIVSQR sequence.
+                if (inst.operands.size() == 2)
+                {
+                    auto nIt = valueToNormalize.find(inst.operands[0]);
+                    if (nIt != valueToNormalize.end())
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[1]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpNormalizeBinding bind = nIt->second;
+                            bind.wrapW1 = true;
+                            valueToNormalize[inst.result] = bind;
+                            break;
+                        }
+                    }
+                }
+
+                // Shape B: `float4(k0, k1, k2, k3)` where every kN is
                 // a scalar float constant.  Other VecConstruct shapes
                 // (mixed input + const, narrower constructors) land
                 // with the arithmetic pass.
@@ -1387,6 +1539,261 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
                     }
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // RCP / RSQ — scalar-function-unit unary ops on a
+                // scalar varying lane.  Two-insn shape:
+                //     MOVH H0.<lane>, f[input];
+                //     <OP>R R0, H0;      (last = END-bit carrier)
+                // Both instructions default-precision (MOVH is FP16
+                // via is_fp16 + precision bit; OP is FP32 since it
+                // broadcasts to R0 at full precision).
+                auto suIt = valueToScalarUnary.find(srcId);
+                if (suIt != valueToScalarUnary.end())
+                {
+                    const auto& bind = suIt->second;
+                    auto inIt = valueToInputSrc.find(bind.inputId);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scalar-unary input failed to resolve");
+                        return out;
+                    }
+
+                    // MOVH H0.<lane>, f[input]
+                    struct nvfx_reg hDst = nvfx_reg(NVFXSR_TEMP, 0);
+                    hDst.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t laneMask =
+                        (bind.lane == 1) ? NVFX_FP_MASK_Y :
+                        (bind.lane == 2) ? NVFX_FP_MASK_Z :
+                        (bind.lane == 3) ? NVFX_FP_MASK_W :
+                                           NVFX_FP_MASK_X;
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1,
+                        hDst, laneMask, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // <RCP|RSQ>R R0, H0
+                    const uint8_t scalarOp =
+                        (bind.kind == FpScalarUnaryBinding::Kind::Rsq)
+                            ? NVFX_FP_OP_OPCODE_RSQ
+                            : NVFX_FP_OP_OPCODE_RCP;
+                    struct nvfx_src opS0 = nvfx_src(hDst);  // H0 (fp16 alias)
+                    struct nvfx_src opS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src opS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn opI = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        opS0, opS1, opS2);
+                    opI.precision = dstPrecision;
+                    asm_.emit(opI, scalarOp);
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `length(vec3)` = sqrt(dot(v,v)) — 4-insn shape:
+                //     MOVH H0.<mask>, f[input];
+                //     DP3R R0.x, H0, H0;
+                //     DIVSQR R0.x, |R0|, R0;       ; sce-cgc's sqrt trick
+                //     MOVR R0, R0.x;               ; broadcast (END-carrier)
+                auto lenIt = valueToLength.find(srcId);
+                if (lenIt != valueToLength.end())
+                {
+                    const auto& bind = lenIt->second;
+                    auto inIt = valueToInputSrc.find(bind.inputId);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: length() input failed to resolve");
+                        return out;
+                    }
+
+                    // MOVH H0.<xyz|xyzw>, f[input]
+                    struct nvfx_reg hDst = nvfx_reg(NVFXSR_TEMP, 0);
+                    hDst.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t loadMask =
+                        (bind.lanes >= 4) ? NVFX_FP_MASK_ALL :
+                        (bind.lanes == 3) ? uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z) :
+                        (bind.lanes == 2) ? uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y) :
+                                             NVFX_FP_MASK_X;
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1,
+                        hDst, loadMask, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // DP3R R0.x, H0, H0
+                    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    struct nvfx_src dpS0 = nvfx_src(hDst);
+                    struct nvfx_src dpS1 = nvfx_src(hDst);
+                    struct nvfx_src dpS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t dpOp =
+                        (bind.lanes >= 4) ? NVFX_FP_OP_OPCODE_DP4
+                                          : NVFX_FP_OP_OPCODE_DP3;
+                    struct nvfx_insn dp = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(r0),
+                        NVFX_FP_MASK_X, dpS0, dpS1, dpS2);
+                    asm_.emit(dp, dpOp);
+
+                    // DIVSQR R0.x, |R0|, R0  →  src0/sqrt(src1).  Both
+                    // reads are R0.x (the DP3 result) — the |.| on
+                    // src0 is what makes sce-cgc's sqrt identity hold.
+                    struct nvfx_src dsS0 = nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                    dsS0.abs = 1;
+                    struct nvfx_src dsS1 = nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                    struct nvfx_src dsS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn ds = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(r0),
+                        NVFX_FP_MASK_X, dsS0, dsS1, dsS2);
+                    asm_.emit(ds, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
+
+                    // MOVR R0, R0.x  (broadcast scalar → vec4)
+                    struct nvfx_src movS0 = nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                    movS0.swz[0] = movS0.swz[1] = movS0.swz[2] = movS0.swz[3] = 0;  // xxxx
+                    struct nvfx_src movS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src movS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mov = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL, movS0, movS1, movS2);
+                    mov.precision = dstPrecision;
+                    asm_.emit(mov, NVFX_FP_OP_OPCODE_MOV);
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `normalize(vec3)` — 4-or-5-insn shape depending on
+                // whether the caller wrapped with `float4(.., 1.0)`:
+                //     MOVH H0.xyz, f[input];
+                //     DP3R R0.z, H0, H0;              (lenSq in .z)
+                //   [ MOVR R0.w, {1.0, 0, 0, 0}.x; ]  (only if wrapW1)
+                //     DIVSQR R0.xyz, H0, R0.z;        (last — END-carrier)
+                auto nrmIt = valueToNormalize.find(srcId);
+                if (nrmIt != valueToNormalize.end())
+                {
+                    const auto& bind = nrmIt->second;
+                    auto inIt = valueToInputSrc.find(bind.inputId);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: normalize() input failed to resolve");
+                        return out;
+                    }
+
+                    // MOVH H0.xyz, f[input]
+                    struct nvfx_reg hDst = nvfx_reg(NVFXSR_TEMP, 0);
+                    hDst.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t loadMask =
+                        (bind.lanes >= 4) ? NVFX_FP_MASK_ALL :
+                        (bind.lanes == 3) ? uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z) :
+                        (bind.lanes == 2) ? uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y) :
+                                             NVFX_FP_MASK_X;
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1,
+                        hDst, loadMask, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // DP3R R0.z, H0, H0  (lenSq lands in .z so the
+                    // final DIVSQR reads R0.z as src1 — matches sce-cgc)
+                    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    struct nvfx_src dpS0 = nvfx_src(hDst);
+                    struct nvfx_src dpS1 = nvfx_src(hDst);
+                    struct nvfx_src dpS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t dpOp =
+                        (bind.lanes >= 4) ? NVFX_FP_OP_OPCODE_DP4
+                                          : NVFX_FP_OP_OPCODE_DP3;
+                    struct nvfx_insn dp = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(r0),
+                        NVFX_FP_MASK_Z, dpS0, dpS1, dpS2);
+                    asm_.emit(dp, dpOp);
+
+                    // Optional: MOVR R0.w = 1.0 via inline const block.
+                    // sce-cgc emits the disasm form `{...}.x` — SRC0 is
+                    // swizzled .xxxx so any dest-mask lane reads the
+                    // first float of the inline block.
+                    if (bind.wrapW1)
+                    {
+                        const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                        struct nvfx_src kS0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        kS0.swz[0] = kS0.swz[1] = kS0.swz[2] = kS0.swz[3] = 0;  // .xxxx
+                        struct nvfx_src kS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src kS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn kMov = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_W, kS0, kS1, kS2);
+                        asm_.emit(kMov, NVFX_FP_OP_OPCODE_MOV);
+
+                        const float oneXyzw[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+                        asm_.appendConstBlock(oneXyzw);
+                    }
+
+                    // DIVSQR R0.xyz, H0, R0.z   (broadcast lenSq via .z swizzle)
+                    struct nvfx_src dsS0 = nvfx_src(hDst);
+                    struct nvfx_src dsS1 = nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                    dsS1.swz[0] = dsS1.swz[1] = dsS1.swz[2] = dsS1.swz[3] = 2;  // zzzz
+                    struct nvfx_src dsS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t dsMask =
+                        (bind.lanes >= 4) ? NVFX_FP_MASK_ALL :
+                        (bind.lanes == 3) ? uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z) :
+                        (bind.lanes == 2) ? uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y) :
+                                             NVFX_FP_MASK_X;
+                    struct nvfx_insn ds = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        dsMask, dsS0, dsS1, dsS2);
+                    ds.precision = dstPrecision;
+                    asm_.emit(ds, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
 
                     emittedSomething = true;
                     break;
