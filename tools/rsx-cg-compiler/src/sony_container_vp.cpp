@@ -171,29 +171,24 @@ VpContainerResult emitVertexContainer(
         return result;
     }
 
-    // Bail out for struct-flattened shaders.  The IR builder turns
-    // `struct VIN { float4 pos : POSITION; }; ... VOUT main(VIN input)`
-    // into a single `void %input` IR parameter plus per-field LdAttr /
-    // StOut instructions, losing the synthesized "input.pos"/"main.pos"
-    // names sce-cgc emits for struct fields.  Until the IR carries
-    // that, leave struct-based VPs to the harness's ucode-only path.
-    bool sawStructLikeParam = false;
-    for (const auto& p : entry->parameters)
-    {
-        if (p.type.baseType == IRType::Void || p.name.empty())
-        {
-            sawStructLikeParam = true;
-            break;
-        }
-    }
-    if (sawStructLikeParam)
-    {
-        result.diagnostics.push_back(
-            "sony-vp: entry uses struct parameters; container emit "
-            "needs IR-level struct-field names (see TODO in "
-            "sony_container_vp.cpp).  Falling back to ucode-only diff.");
-        return result;
-    }
+    // Detect struct-flattened entry params.  If any IR parameter is
+    // typed `void`, the IR builder collapsed an entry-point struct
+    // into a single placeholder + per-field LdAttr/StOut.  In that
+    // case we synthesise the parameter table from the LdAttr/StOut
+    // walk instead of from entry->parameters.
+    //
+    // sce-cgc names struct fields as:
+    //   - inputs:  `<param-instance-name>.<field-name>`  ("input.pos")
+    //   - outputs: `<entry-function-name>.<field-name>`  ("main.pos")
+    //
+    // Both pieces are now carried on each LoadAttribute /
+    // StoreOutput instruction by the IR builder; we synthesise
+    // ParamDescs from them here.
+    const bool isStructFlattened =
+        std::any_of(entry->parameters.begin(), entry->parameters.end(),
+                    [](const IRParameter& p) {
+                        return p.type.baseType == IRType::Void;
+                    });
 
     // ----- Build the parameter list, in the same iteration order as
     // sce-cgc: shader entry parameters in declaration order, with
@@ -220,6 +215,75 @@ VpContainerResult emitVertexContainer(
     int nextMatrixReg = 256;
     int nextVectorReg = 467;
 
+    // ----- Struct-flattened path: synthesize params from
+    // LdAttr / StOut walk.  Per sce-cgc:
+    //   - all input struct fields share the same paramno = 0 (they
+    //     all come from the single struct entry param)
+    //   - output struct fields have paramno = 0xFFFFFFFF — they're
+    //     synthesised from `return o;`, not from a user param
+    if (isStructFlattened)
+    {
+        // Find the user paramno for the struct entry parameter
+        // (typically 0 — it's the only param in struct-style entries).
+        uint32_t inputStructParamNo = 0;
+        for (size_t i = 0; i < entry->parameters.size(); ++i)
+        {
+            if (entry->parameters[i].type.baseType == IRType::Void)
+            {
+                inputStructParamNo = static_cast<uint32_t>(i);
+                break;
+            }
+        }
+
+        for (const auto& blockPtr : entry->blocks)
+        {
+            if (!blockPtr) continue;
+            for (const auto& instPtr : blockPtr->instructions)
+            {
+                if (!instPtr) continue;
+                const IRInstruction& in = *instPtr;
+                if (in.op == IROp::LoadAttribute)
+                {
+                    ParamDesc d;
+                    d.name      = (!in.structParamName.empty() ? in.structParamName + "." : std::string{})
+                                + in.fieldName;
+                    d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+                    d.type      = cgTypeForIRType(in.resultType);
+                    d.var       = kCgVarying;
+                    d.direction = kCgIn;
+                    d.paramno   = inputStructParamNo;
+                    d.res       = vpInputResource(toUpper(in.semanticName), in.semanticIndex);
+                    params.push_back(d);
+                }
+            }
+        }
+        for (const auto& blockPtr : entry->blocks)
+        {
+            if (!blockPtr) continue;
+            for (const auto& instPtr : blockPtr->instructions)
+            {
+                if (!instPtr) continue;
+                const IRInstruction& in = *instPtr;
+                if (in.op == IROp::StoreOutput)
+                {
+                    if (in.fieldName.empty()) continue;  // non-struct out; not in scope here
+                    ParamDesc d;
+                    d.name      = entry->name + "." + in.fieldName;   // sce-cgc convention
+                    d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+                    // Output struct fields are always vec4 in the
+                    // shaders we've seen — refine when narrower-output
+                    // shaders land.
+                    d.type      = kCgFloat4;
+                    d.var       = kCgVarying;
+                    d.direction = kCgOut;
+                    d.paramno   = kInvalidIndex;   // synthetic — no user param number
+                    d.res       = vpOutputResource(toUpper(in.semanticName), in.semanticIndex);
+                    params.push_back(d);
+                }
+            }
+        }
+    }
+    else
     for (size_t i = 0; i < entry->parameters.size(); ++i)
     {
         const auto& p = entry->parameters[i];

@@ -393,22 +393,39 @@ All five share the same `paramno` (the user-visible parameter index).
 Confirmed: 688-byte `mvp_passthrough_v.vpo` byte-matches when emitted
 this way (verified end-to-end via `tests/run_diff.sh`).
 
-### Struct parameters: NOT yet supported in container emit
+### Struct parameters — container naming rules
 
 When a VP entry-point takes a struct (e.g. `VOUT main(VIN input)`),
-sce-cgc names the synthesized field params as `<param-name>.<field>`
-for inputs and `<func-name>.<field>` for outputs (e.g. `input.pos`,
-`main.pos`).  Our IR builder fully flattens struct params into
-`LoadAttribute` / `StoreOutput` instructions and loses the original
-parameter name + struct field name.
+sce-cgc names the synthesized field params:
 
-The container emitter detects this by looking for a `void`-typed or
-nameless IR parameter and bails with a diagnostic.  The diff harness
-falls back to ucode-only diff for those shaders (`identity_v.cg`,
-`identity_color_v.cg`).  Fixing this needs IR-level changes:
-preserve the original entry-point parameter struct as an
-IRParameter, and have LoadAttribute / StoreOutput carry both the
-param name and the field name.
+| field role      | name format                        |
+|:----------------|:-----------------------------------|
+| input field     | `<struct-param-instance>.<field>`  |
+| output field    | `<entry-function-name>.<field>`    |
+
+Probed 2026-04-18 with `myStruct` as the input name and `o` vs `rt`
+as the output local name: inputs use the user's struct-instance name
+(so `myStruct.pos`), outputs always use the function name (so
+`main.pos` regardless of `o` vs `rt`).
+
+Additional rules for the `CgBinaryParameter.paramno` field:
+
+- All input struct fields share the same `paramno` — the user param
+  number of the struct parameter (typically 0, the only entry param).
+- Output struct fields have `paramno = 0xFFFFFFFF` — they're
+  synthesised from the `return` statement, not a user parameter.
+
+Our IR builder now annotates each `LoadAttribute` with
+`structParamName + fieldName` (from the source-level `input.pos`)
+and each `StoreOutput` with `fieldName` (the output prefix is
+recovered by the container emitter from the entry function name).
+See `IRInstruction::structParamName` / `fieldName` in
+`tools/rsx-cg-compiler/src/donor/ir/ir.h`.
+
+The container emitter walks the IR's `LoadAttribute` / `StoreOutput`
+instructions to build the parameter table for struct-flattened
+entry points.  Verified byte-exact on `identity_v.cg` (224 bytes)
+and `identity_color_v.cg` (368 bytes).
 
 ## .fpo container layout (verified 2026-04-18)
 

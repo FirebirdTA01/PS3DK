@@ -807,8 +807,11 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
                             IRTypeInfo fieldType = getIRType(field.type.get());
                             auto inst = std::make_unique<IRInstruction>(IROp::LoadAttribute,
                                 valueId, fieldType);
-                            inst->semanticName = field.semantic.name;
-                            inst->semanticIndex = field.semantic.index;
+                            inst->semanticName     = field.semantic.name;
+                            inst->rawSemanticName  = field.semantic.rawName;
+                            inst->semanticIndex    = field.semantic.index;
+                            inst->structParamName  = param->name;       // e.g. "input"
+                            inst->fieldName        = expr->member;       // e.g. "pos"
                             currentBlock_->addInstruction(std::move(inst));
                             return valueId;
                         }
@@ -1104,8 +1107,9 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                 auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
                     InvalidIRValue, IRTypeInfo::Void());
                 inst->addOperand(value);
-                inst->semanticName = param->semantic.name;
-                inst->semanticIndex = param->semantic.index;
+                inst->semanticName    = param->semantic.name;
+                inst->rawSemanticName = param->semantic.rawName;
+                inst->semanticIndex   = param->semantic.index;
                 currentBlock_->addInstruction(std::move(inst));
             }
         }
@@ -1147,8 +1151,10 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                             auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
                                 InvalidIRValue, IRTypeInfo::Void());
                             inst->addOperand(value);
-                            inst->semanticName = field.semantic.name;
-                            inst->semanticIndex = field.semantic.index;
+                            inst->semanticName    = field.semantic.name;
+                            inst->rawSemanticName = field.semantic.rawName;
+                            inst->semanticIndex   = field.semantic.index;
+                            inst->fieldName       = memberExpr->member;
                             currentBlock_->addInstruction(std::move(inst));
                             break;
                         }
@@ -1365,8 +1371,10 @@ void IRBuilder::emitStructOutputs(ExprNode* structExpr, const std::vector<Struct
             auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
                 InvalidIRValue, IRTypeInfo::Void());
             inst->addOperand(fieldValue);
-            inst->semanticName = field.semantic.name;
-            inst->semanticIndex = field.semantic.index;
+            inst->semanticName    = field.semantic.name;
+            inst->rawSemanticName = field.semantic.rawName;
+            inst->semanticIndex   = field.semantic.index;
+            inst->fieldName       = field.name;
             currentBlock_->addInstruction(std::move(inst));
         }
     }

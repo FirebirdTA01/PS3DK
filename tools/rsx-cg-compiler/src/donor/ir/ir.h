@@ -284,7 +284,15 @@ public:
     int componentIndex = 0;          // For VecExtract/VecInsert
     std::string targetName;          // For branch targets, function calls
     int semanticIndex = 0;           // For shader I/O operations
-    std::string semanticName;        // For shader I/O operations
+    std::string semanticName;        // For shader I/O operations (digit-stripped)
+    std::string rawSemanticName;     // For shader I/O operations (source spelling, e.g. "POSITION0")
+    // Struct-flattened entry params:
+    //   LoadAttribute  for `input.pos` carries structParamName="input", fieldName="pos"
+    //   StoreOutput    for `o.pos = ...` carries fieldName="pos" (parent struct name is
+    //                  implicit — sce-cgc names outputs `<entry-func>.<field>`,
+    //                  not `<struct-instance>.<field>`)
+    std::string structParamName;     // Source struct-instance name (input side only)
+    std::string fieldName;           // Struct member name (input + output)
 
     IRBasicBlock* parentBlock = nullptr;
 
