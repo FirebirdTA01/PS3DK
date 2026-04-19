@@ -92,7 +92,7 @@ set(SRC_NV40
 # (.fpo / .vpo) so the runtime can consume it via cellGcmCgInitProgram.
 set(SRC_CONTAINER
     ${SRC_DIR}/sony_container_fp.cpp
-    # ${SRC_DIR}/sony_container_vp.cpp  — Stage 5
+    ${SRC_DIR}/sony_container_vp.cpp
 )
 
 # Driver / entry point.
