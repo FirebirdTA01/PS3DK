@@ -1,10 +1,15 @@
 #---------------------------------------------------------------------------------
 # hello-ppu-cellgcm-triangle — Phase 7 step 1.5 / parallel-track demo.
 #
-# Compiles Sony's verbatim flip_immediate vpshader.cg / fpshader.cg via
-# PSL1GHT cgcomp + libCg, embeds the resulting .vpo / .fpo binaries
-# into the ELF as binary blobs (bin2s), and links against PSL1GHT's
-# RSX runtime + our cellGcm forwarders.
+# Compiles vpshader.vcg / fpshader.fcg into Sony-format .vpo / .fpo
+# binaries, embeds them into the ELF as binary blobs (bin2s), and
+# links against PSL1GHT's RSX runtime + our cellGcm forwarders.
+#
+# Shader compiler: defaults to PSL1GHT's cgcomp (the in-tree pinned
+# baseline).  Set USE_RSX_CG_COMPILER=1 to swap in our own
+# rsx-cg-compiler instead — its output is byte-identical to sce-cgc
+# for both shaders in this sample (verified end-to-end via
+# tools/rsx-cg-compiler/tests/run_diff.sh).
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 
@@ -13,6 +18,27 @@ $(error "PSL1GHT is not set. Run: source ../../scripts/env.sh")
 endif
 
 include $(PSL1GHT)/ppu_rules
+
+# Optional: build shaders with our compiler instead of PSL1GHT cgcomp.
+# Output is byte-identical to sce-cgc (and a small superset of cgcomp's
+# rules — e.g. emits DPH for `mul(matrix, float4(vec3, 1.0))`).
+#
+# Compute the absolute path here in the outer scope; CURDIR shifts to
+# the BUILD subdir during the recursive make, so we resolve + export.
+ifneq ($(strip $(USE_RSX_CG_COMPILER)),)
+# Recursive make re-evaluates this Makefile with $(CURDIR) shifted to
+# the BUILD subdir.  Using `?=` means the inner pass inherits the
+# value from the outer scope's env (via export) and skips the wrong
+# CURDIR-relative recompute.
+RSX_CG_COMPILER ?= $(abspath $(CURDIR)/../../tools/rsx-cg-compiler/build/rsx-cg-compiler)
+export RSX_CG_COMPILER
+%.vpo: %.vcg
+	@echo "rsx-cg-compiler: $(notdir $<)"
+	$(VERB) $(RSX_CG_COMPILER) --profile sce_vp_rsx --emit-container $@ $<
+%.fpo: %.fcg
+	@echo "rsx-cg-compiler: $(notdir $<)"
+	$(VERB) $(RSX_CG_COMPILER) --profile sce_fp_rsx --emit-container $@ $<
+endif
 
 TARGET      := $(notdir $(CURDIR))
 BUILD       := build

@@ -179,13 +179,34 @@ struct ValueSource
     int  regIdx  = 0;  // input bank index (for Input) or absolute const index (for Const)
 };
 
-// Records a deferred matrix×vector multiply — we emit the 4 DP4s when the
-// result value is consumed by a StoreOutput (matches sce-cgc which writes
-// straight to the output register without a temp).
+// Records a deferred matrix×vector multiply — we emit the per-row dot
+// products when the result value is consumed by a StoreOutput (matches
+// sce-cgc which writes straight to the output register without a temp).
+//
+// Two opcode variants:
+//   * DP4 (default) for `mul(matrix, float4)` — full 4-component dot.
+//   * DPH for the `mul(matrix, float4(vec3, 1.0f))` pattern — dot-
+//     product-homogeneous; treats source W as implicit 1.0, so we can
+//     skip materialising a (vec3.x, vec3.y, vec3.z, 1) temp.  sce-cgc
+//     emits this with a `.xyzx` swizzle on the input to put X in the
+//     ignored W lane (NV40 quirk: source swizzle is mandatory; .xyzx
+//     reuses an existing component rather than reading from past Z).
 struct MatVecMulBinding
 {
-    int         matrixBaseReg = -1;  // absolute const index of matrix row 0
-    int         vectorInputIdx = -1; // NV40 input-attribute index of the vec4 operand
+    int      matrixBaseReg  = -1;             // absolute const index of matrix row 0
+    int      vectorInputIdx = -1;             // NV40 input-attribute index of the vec4 operand
+    uint8_t  inputSwz[4]    = {0, 1, 2, 3};   // identity (xyzw) for DP4; xyzx for DPH
+    uint8_t  vecOpcode      = 0;              // 0 = DP4 (default), set to DPH opcode for vec3+1 promotion
+};
+
+// Records a `float4(vec3 input, scalar 1.0f)` expression — deferred so
+// the consuming MatVecMul can fold it into a DPH (avoids the temp +
+// MOV that PSL1GHT cgcomp emits for the same pattern).  If the result
+// is consumed by anything OTHER than a MatVecMul, the lowering will
+// error out (general VecConstruct support lands later).
+struct VecPromoteBinding
+{
+    int inputAttrIdx = -1;  // the vec3 input's NV40 vertex-attribute index
 };
 
 // Scalar / vector arithmetic (Add, Sub, Mul) between two values.  Lowered
@@ -236,8 +257,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     // entry — matrices don't translate to a single source operand).
     std::unordered_map<IRValueID, int> valueToMatrixBase;
 
-    // MatVecMul results — emit the 4 DP4s once the consumer is known.
+    // MatVecMul results — emit the 4 dots once the consumer is known.
     std::unordered_map<IRValueID, MatVecMulBinding> valueToMatVecMul;
+
+    // VecConstruct(vec3 input, scalar 1.0f) results — folded into DPH
+    // by a consuming MatVecMul.
+    std::unordered_map<IRValueID, VecPromoteBinding> valueToVecPromote;
 
     // Arithmetic operations awaiting a consumer.
     std::unordered_map<IRValueID, ArithBinding> valueToArith;
@@ -399,6 +424,10 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         {
             const struct nvfx_reg vecReg =
                 makeReg(NVFXSR_INPUT, mvIt->second.vectorInputIdx);
+            const uint8_t opcode =
+                mvIt->second.vecOpcode != 0
+                    ? mvIt->second.vecOpcode
+                    : static_cast<uint8_t>(VP_OP(DP4));
             for (int i = 0; i < 4; ++i)
             {
                 const int rowReg =
@@ -406,6 +435,10 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 const struct nvfx_reg rowConst = makeReg(NVFXSR_CONST, rowReg);
 
                 struct nvfx_src src0 = makeSrc(vecReg);
+                src0.swz[0] = mvIt->second.inputSwz[0];
+                src0.swz[1] = mvIt->second.inputSwz[1];
+                src0.swz[2] = mvIt->second.inputSwz[2];
+                src0.swz[3] = mvIt->second.inputSwz[3];
                 struct nvfx_src src1 = makeSrc(rowConst);
                 struct nvfx_src src2 = makeSrc(none);
 
@@ -414,7 +447,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     const_cast<struct nvfx_reg&>(dstReg),
                     kDp4Writemask[i],
                     src0, src1, src2);
-                asm_.emit(in, VP_OP(DP4));
+                asm_.emit(in, opcode);
             }
             emittedSomething = true;
             return true;
@@ -508,6 +541,33 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 break;
             }
 
+            case IROp::VecConstruct:
+            {
+                // Recognise the `float4(vec3 input, 1.0f)` shape so a
+                // consuming MatVecMul can fold it into DPH instead of
+                // materialising the temp.  Other VecConstruct shapes
+                // (literal vec4, mixed components, etc.) land later.
+                if (inst.operands.size() != 2) break;
+
+                auto inputIt = valueToSource.find(inst.operands[0]);
+                if (inputIt == valueToSource.end() ||
+                    inputIt->second.kind != ValueSource::Kind::Input)
+                {
+                    break;
+                }
+
+                IRValue* v = entry.getValue(inst.operands[1]);
+                auto* c = dynamic_cast<IRConstant*>(v);
+                if (!c) break;
+                if (!std::holds_alternative<float>(c->value)) break;
+                if (std::get<float>(c->value) != 1.0f) break;
+
+                VecPromoteBinding pb;
+                pb.inputAttrIdx = inputIt->second.regIdx;
+                valueToVecPromote[inst.result] = pb;
+                break;
+            }
+
             case IROp::MatVecMul:
             {
                 if (inst.operands.size() < 2)
@@ -524,18 +584,39 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     return out;
                 }
 
+                MatVecMulBinding binding;
+                binding.matrixBaseReg = matIt->second;
+
+                // DPH path: vector operand is a vec3+1.0 promotion.
+                auto promoIt = valueToVecPromote.find(inst.operands[1]);
+                if (promoIt != valueToVecPromote.end())
+                {
+                    binding.vectorInputIdx = promoIt->second.inputAttrIdx;
+                    binding.vecOpcode      = static_cast<uint8_t>(VP_OP(DPH));
+                    // sce-cgc emits `.xyzx` on the input — replicates X
+                    // into the (ignored) W lane.  W is mandatory in the
+                    // source-swizzle field but DPH treats it as 1.0.
+                    binding.inputSwz[0] = 0;
+                    binding.inputSwz[1] = 1;
+                    binding.inputSwz[2] = 2;
+                    binding.inputSwz[3] = 0;
+                    valueToMatVecMul[inst.result] = binding;
+                    break;
+                }
+
+                // DP4 path: vector operand is a direct vertex input.
                 auto vecIt = valueToSource.find(inst.operands[1]);
                 if (vecIt == valueToSource.end() ||
                     vecIt->second.kind != ValueSource::Kind::Input)
                 {
                     out.diagnostics.push_back(
                         "nv40-vp: MatVecMul vector operand must be a vertex input "
-                        "(other patterns land later)");
+                        "or a float4(vec3, 1.0f) promotion (other patterns land later)");
                     return out;
                 }
 
-                valueToMatVecMul[inst.result] =
-                    { matIt->second, vecIt->second.regIdx };
+                binding.vectorInputIdx = vecIt->second.regIdx;
+                valueToMatVecMul[inst.result] = binding;
                 break;
             }
 
