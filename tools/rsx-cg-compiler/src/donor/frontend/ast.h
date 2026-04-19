@@ -42,7 +42,8 @@ enum class StorageQualifier
 // Semantic annotations (POSITION, TEXCOORD0, etc.)
 struct Semantic
 {
-    std::string name;      // e.g., "POSITION", "TEXCOORD", "COLOR"
+    std::string name;      // e.g., "POSITION", "TEXCOORD", "COLOR" — digit suffix stripped
+    std::string rawName;   // original source spelling, e.g., "TEXCOORD0" — preserved for byte-exact .vpo/.fpo emit
     int index = 0;         // e.g., 0 for TEXCOORD0, 1 for TEXCOORD1
 
     bool isEmpty() const { return name.empty(); }

@@ -335,6 +335,7 @@ struct IRParameter
     // Shader parameter info
     StorageQualifier storage = StorageQualifier::None;
     std::string semanticName;
+    std::string rawSemanticName;  // original source spelling (e.g. "TEXCOORD0"); empty if absent
     int semanticIndex = 0;
 };
 

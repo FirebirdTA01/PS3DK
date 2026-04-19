@@ -1104,6 +1104,7 @@ Semantic Parser::parseSemantic()
     }
 
     std::string semName = advance().lexeme;
+    sem.rawName = semName;  // preserve source spelling for byte-exact container emit
 
     // Parse semantic name and optional index (e.g., TEXCOORD0)
     // Try to extract trailing digit

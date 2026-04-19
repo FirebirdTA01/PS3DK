@@ -175,8 +175,9 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
 
         if (!param->semantic.isEmpty())
         {
-            irParam.semanticName = param->semantic.name;
-            irParam.semanticIndex = param->semantic.index;
+            irParam.semanticName    = param->semantic.name;
+            irParam.rawSemanticName = param->semantic.rawName;
+            irParam.semanticIndex   = param->semantic.index;
         }
 
         currentFunction_->parameters.push_back(irParam);

@@ -26,7 +26,8 @@ static const IRFunction* findEntryPoint(const IRModule& module, const std::strin
 namespace detail
 {
 UcodeOutput lowerVertexProgram  (const IRModule& module, const IRFunction& entry);
-UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry);
+UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
+                                 FpAttributes* attrsOut);
 }  // namespace detail
 
 UcodeOutput emitVertexProgram(const IRModule& module, const std::string& entry)
@@ -50,7 +51,20 @@ UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry
         out.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    return detail::lowerFragmentProgram(module, *fn);
+    return detail::lowerFragmentProgram(module, *fn, nullptr);
+}
+
+FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry)
+{
+    FpEmitResult out;
+    const IRFunction* fn = findEntryPoint(module, entry);
+    if (!fn)
+    {
+        out.ucode.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
+        return out;
+    }
+    out.ucode = detail::lowerFragmentProgram(module, *fn, &out.attrs);
+    return out;
 }
 
 }  // namespace nv40
