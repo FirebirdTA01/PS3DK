@@ -131,6 +131,17 @@ extern "C" {
  * calling cellGcmUtilAllocateLocalMemory. */
 #define CELL_GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET  GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET
 
+/* Z-cull (early-depth) configuration.  Sony's handle_systemmenu
+ * sample binds these via cellGcmBindZcull. */
+#define CELL_GCM_ZCULL_Z24S8             GCM_ZCULL_Z24S8
+#define CELL_GCM_ZCULL_LESS              GCM_ZCULL_LESS
+#define CELL_GCM_ZCULL_LONES             GCM_ZCULL_LONES
+#define CELL_GCM_SCULL_SFUNC_LESS        GCM_SCULL_SFUNC_LESS
+
+/* Additional flip modes.  HSYNC_WITH_NOISE is Sony's name for what
+ * PSL1GHT calls HSYNC_AND_BREAK_EVERYTHING (both == 3). */
+#define CELL_GCM_DISPLAY_HSYNC_WITH_NOISE  GCM_FLIP_HSYNC_AND_BREAK_EVERYTHING
+
 /* Tile compression mode (cellGcmSetTileInfo). */
 #define CELL_GCM_COMPMODE_DISABLED              GCM_COMPMODE_DISABLED
 #define CELL_GCM_COMPMODE_Z32_SEPSTENCIL        GCM_COMPMODE_Z32_SEPSTENCIL

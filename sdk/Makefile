@@ -29,7 +29,8 @@ HEADERS := \
     include/cell/gcm/gcm_cg_bridge.h \
     include/cell/gcm/gcm_tex_bridge.h \
     include/cell/gcm/gcm_command_c.h \
-    include/cell/cell_video_out.h
+    include/cell/cell_video_out.h \
+    include/cell/dbgfont.h
 
 SUBLIBS := libgcm_cmd
 
