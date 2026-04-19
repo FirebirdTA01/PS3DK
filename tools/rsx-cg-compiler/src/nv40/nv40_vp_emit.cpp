@@ -239,8 +239,13 @@ static inline void arithSlots(ArithOp op, int& slotA, int& slotB)
 }
 
 UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
+                               const rsx_cg::CompileOptions& /*opts*/,
                                VpAttributes* attrsOut)
 {
+    // opts is currently unused — every pass we'd gate on an opt level
+    // (MAD fusion, dead-code removal, reg reuse) lives in future
+    // stages.  Keep the parameter so callers thread it through today
+    // and don't have to change signatures when those passes land.
     UcodeOutput out;
     VpAssembler asm_;
 
