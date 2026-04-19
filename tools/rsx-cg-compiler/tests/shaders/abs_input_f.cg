@@ -1,0 +1,16 @@
+// `abs(x)` source modifier — NV40 FP encodes as SRC0_ABS bit 29.
+//
+// sce-cgc emits:  MOVH R0, |f[COL0]|; END
+//
+// Two encoding deltas vs identity_f.cg:
+//   - word 1 bit 29 (SRC0_ABS) = 1
+//   - word 0 bits 22-23 (PRECISION) = 1 (FP16)
+// The precision switch is a sce-cgc optimization — MOV with ANY
+// source modifier uses FP16 precision even when the destination is
+// R0/fp32.  Verified by byte probes of abs() and -() independently.
+void main(
+    float4 vcol      : COLOR,
+    out float4 color : COLOR)
+{
+    color = abs(vcol);
+}

@@ -1,0 +1,15 @@
+// Subtraction: `vcol - tint` — lowered by sce-cgc to an ADD with the
+// NEGATE bit set on the uniform operand's source slot.
+//
+// sce-cgc emits:  ADDR R0, -tint, f[COL0]; END
+//
+// Same container layout as add_f.cg (single ADD + inline zero block);
+// only difference is REG_NEGATE at bit 17 of word 1 (SRC0).  No
+// FP16 precision promotion — that's MOV-specific.
+void main(
+    float4 vcol      : COLOR,
+    uniform float4 tint,
+    out float4 color : COLOR)
+{
+    color = vcol - tint;
+}

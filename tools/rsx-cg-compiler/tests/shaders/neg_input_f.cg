@@ -1,0 +1,14 @@
+// Unary negate: `-x` source modifier — NV40 FP encodes as the
+// REG_NEGATE bit at position 17 of the SRC word.
+//
+// sce-cgc emits:  MOVH R0, -f[COL0]; END
+//
+// Same precision-promotion rule as abs_input_f.cg (bit 22 set →
+// FP16).  Precision changes are MOV-specific; multi-operand
+// instructions (ADD/MUL/...) with a source modifier stay FP32.
+void main(
+    float4 vcol      : COLOR,
+    out float4 color : COLOR)
+{
+    color = -vcol;
+}

@@ -136,12 +136,20 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   - ADD emits src0=CONST(uniform), src1=INPUT(varying)
     //   - MUL emits src0=INPUT(varying), src1=CONST(uniform)
     //   (operand order in C source is ignored — sce-cgc canonicalises)
-    enum class FpArithOp { Add, Mul };
+    // Per sce-cgc byte probes, all four opcodes take (input, uniform)
+    // canonicalised the same way:
+    //   ADD:      src0 = CONST (uniform),  src1 = INPUT
+    //   MUL/MIN/MAX: src0 = INPUT,           src1 = CONST (uniform)
+    enum class FpArithOp { Add, Mul, Min, Max };
     struct FpArithBinding
     {
         FpArithOp op;
         IRValueID inputId   = 0;
         IRValueID uniformId = 0;
+        bool      inputAbs   = false;
+        bool      inputNeg   = false;
+        bool      uniformAbs = false;
+        bool      uniformNeg = false;
     };
     std::unordered_map<IRValueID, FpArithBinding> valueToArith;
 
@@ -176,6 +184,32 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // saturate flag separately, then look both up at emit time.
     std::unordered_map<IRValueID, IRValueID> saturateAlias;
     std::unordered_set<IRValueID>            saturatedResults;
+
+    // Source-side modifiers: abs (NV40 FP SRC_ABS bit 29/18 by slot)
+    // and negate (NV40 FP REG_NEGATE bit 17 of the common source
+    // bits).  We record a chain map `id → {base, abs, neg}` and
+    // resolve transitively at emit time.
+    //
+    // Combining rules matching sce-cgc (and standard Cg semantics):
+    //   - abs(neg(x)) = abs(x)     → abs wins, neg cleared
+    //   - neg(abs(x)) = -abs(x)    → both flags stay set
+    //   - neg(neg(x)) = x          → neg toggles
+    struct SrcMod { IRValueID baseId = 0; bool absMod = false; bool negMod = false; };
+    std::unordered_map<IRValueID, SrcMod> valueToMod;
+
+    auto resolveSrcMods = [&](IRValueID id)
+    {
+        SrcMod r; r.baseId = id;
+        for (int hops = 0; hops < 16; ++hops)
+        {
+            auto it = valueToMod.find(r.baseId);
+            if (it == valueToMod.end()) break;
+            if (it->second.absMod) { r.absMod = true; r.negMod = false; }
+            if (it->second.negMod) r.negMod = !r.negMod;
+            r.baseId = it->second.baseId;
+        }
+        return r;
+    };
 
     // Literal `float4(k0, k1, k2, k3)` where all kN are constants —
     // deferred so the consuming StoreOutput can emit FENCBR + MOV +
@@ -271,8 +305,23 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 break;
             }
 
+            case IROp::Abs:
+            case IROp::Neg:
+            {
+                if (inst.operands.size() != 1) break;
+                SrcMod m;
+                m.baseId = inst.operands[0];
+                if (inst.op == IROp::Abs) m.absMod = true;
+                else                      m.negMod = true;
+                valueToMod[inst.result] = m;
+                break;
+            }
+
             case IROp::Add:
+            case IROp::Sub:
             case IROp::Mul:
+            case IROp::Min:
+            case IROp::Max:
             {
                 if (inst.operands.size() < 2)
                 {
@@ -309,20 +358,45 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     if (tryMad(a, b) || tryMad(b, a)) break;
                 }
 
-                auto aInput   = valueToInputSrc.find(a);
-                auto bInput   = valueToInputSrc.find(b);
-                auto aUniform = valueToFpUniform.find(a);
-                auto bUniform = valueToFpUniform.find(b);
+                // Resolve source modifiers: the IR might hand us
+                // `abs(input) + uniform`, in which case operand[0] is
+                // an IROp::Abs result but its base is the varying.
+                const SrcMod ma = resolveSrcMods(a);
+                const SrcMod mb = resolveSrcMods(b);
+
+                auto aInput   = valueToInputSrc.find(ma.baseId);
+                auto bInput   = valueToInputSrc.find(mb.baseId);
+                auto aUniform = valueToFpUniform.find(ma.baseId);
+                auto bUniform = valueToFpUniform.find(mb.baseId);
 
                 FpArithBinding bind;
-                bind.op = (inst.op == IROp::Add) ? FpArithOp::Add : FpArithOp::Mul;
+                bind.op = FpArithOp::Add;
+                switch (inst.op)
+                {
+                case IROp::Add: bind.op = FpArithOp::Add; break;
+                case IROp::Sub: bind.op = FpArithOp::Add; break;  // emit as ADD with negate on src1
+                case IROp::Mul: bind.op = FpArithOp::Mul; break;
+                case IROp::Min: bind.op = FpArithOp::Min; break;
+                case IROp::Max: bind.op = FpArithOp::Max; break;
+                default: break;  // unreachable
+                }
                 if (aInput != valueToInputSrc.end() && bUniform != valueToFpUniform.end())
                 {
-                    bind.inputId = a; bind.uniformId = b;
+                    bind.inputId         = ma.baseId;
+                    bind.inputAbs        = ma.absMod;
+                    bind.inputNeg        = ma.negMod;
+                    bind.uniformId       = mb.baseId;
+                    bind.uniformAbs      = mb.absMod;
+                    bind.uniformNeg      = mb.negMod;
                 }
                 else if (aUniform != valueToFpUniform.end() && bInput != valueToInputSrc.end())
                 {
-                    bind.inputId = b; bind.uniformId = a;
+                    bind.inputId         = mb.baseId;
+                    bind.inputAbs        = mb.absMod;
+                    bind.inputNeg        = mb.negMod;
+                    bind.uniformId       = ma.baseId;
+                    bind.uniformAbs      = ma.absMod;
+                    bind.uniformNeg      = ma.negMod;
                 }
                 else
                 {
@@ -331,6 +405,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         "(uniform+uniform / literal arithmetic lands later)");
                     return out;
                 }
+                // Sub lowers to Add with the 2nd operand (the uniform
+                // in our canonical pattern) negated.  NV40 ADD is
+                // commutative so this stays bit-exact regardless of
+                // which Cg source is first.  Verified byte probe:
+                // `vcol - tint` → `ADDR R0, -tint, f[COL0]`.
+                if (inst.op == IROp::Sub)
+                    bind.uniformNeg = !bind.uniformNeg;
+
                 valueToArith[inst.result] = bind;
                 break;
             }
@@ -645,7 +727,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     struct nvfx_src srcConst = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
                     struct nvfx_src src2     = nvfx_src(const_cast<struct nvfx_reg&>(none));
 
-                    uint8_t opcode;
+                    srcIn.abs    = bind.inputAbs   ? 1 : 0;
+                    srcIn.negate = bind.inputNeg   ? 1 : 0;
+                    srcConst.abs    = bind.uniformAbs ? 1 : 0;
+                    srcConst.negate = bind.uniformNeg ? 1 : 0;
+
+                    uint8_t opcode = NVFX_FP_OP_OPCODE_ADD;
                     struct nvfx_src slot0 = srcConst;
                     struct nvfx_src slot1 = srcIn;
                     if (bind.op == FpArithOp::Add)
@@ -657,8 +744,15 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                     else
                     {
-                        opcode = NVFX_FP_OP_OPCODE_MUL;
-                        // MUL: src0=INPUT, src1=CONST (sce-cgc canonical)
+                        // MUL / MIN / MAX share (src0=INPUT, src1=CONST)
+                        // canonical placement — verified against sce-cgc.
+                        switch (bind.op)
+                        {
+                        case FpArithOp::Min: opcode = NVFX_FP_OP_OPCODE_MIN; break;
+                        case FpArithOp::Max: opcode = NVFX_FP_OP_OPCODE_MAX; break;
+                        case FpArithOp::Mul:
+                        default:             opcode = NVFX_FP_OP_OPCODE_MUL; break;
+                        }
                         slot0 = srcIn;
                         slot1 = srcConst;
                     }
@@ -738,7 +832,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     break;
                 }
 
-                auto it = valueToInputSrc.find(srcId);
+                // Resolve abs/neg modifiers on the direct-MOV path so
+                // `color = abs(vcol)` / `color = -vcol` emit correctly.
+                SrcMod mods = resolveSrcMods(srcId);
+                auto it = valueToInputSrc.find(mods.baseId);
                 if (it == valueToInputSrc.end())
                 {
                     out.diagnostics.push_back(
@@ -753,13 +850,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 struct nvfx_src src0 = nvfx_src(const_cast<struct nvfx_reg&>(srcReg));
                 struct nvfx_src src1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
                 struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                src0.abs    = mods.absMod ? 1 : 0;
+                src0.negate = mods.negMod ? 1 : 0;
 
                 struct nvfx_insn in = nvfx_insn(
                     saturate ? 1 : 0, 0, -1, -1,
                     const_cast<struct nvfx_reg&>(dstReg),
                     NVFX_FP_MASK_ALL,
                     src0, src1, src2);
-                in.precision = dstPrecision;
+                // MOV with a source modifier: sce-cgc emits it at
+                // FP16 precision (MOVH variant) even when the dst
+                // stays R0.  Verified via abs_input_f / neg_input_f
+                // byte probes — both produce PRECISION=1 (FP16).
+                in.precision = (mods.absMod || mods.negMod) ? FLOAT16 : dstPrecision;
                 asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
                 emittedSomething = true;
 
