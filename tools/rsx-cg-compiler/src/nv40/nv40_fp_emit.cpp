@@ -145,6 +145,31 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpArithBinding> valueToArith;
 
+    // MAD fusion: Add(Mul(input, uniformMul), addend) where addend is
+    // either a literal vec4 or another uniform.  sce-cgc lowers this
+    // to a four-block sequence:
+    //
+    //   MOVH H0, f[input]        # promote varying to fp16 H-temp
+    //   MOVR R1, preloadSrc      # preload one const-source into R1
+    //   <16-byte zero block for preloadSrc's uniform if any>
+    //   FENCBR
+    //   MADR R_out, H0, <A>, <B> # MAD = H0 * multiplier + addend
+    //   <16-byte inline block for whichever of multiplier/addend wasn't preloaded>
+    //
+    // Scheduling rule (verified from sce-cgc byte probes):
+    //   - If addend is a LITERAL: preload multiplier uniform into R1,
+    //     leave literal inline at MAD SRC2.
+    //   - If addend is a UNIFORM: preload addend uniform into R1,
+    //     leave multiplier inline at MAD SRC1.
+    struct FpMadBinding
+    {
+        IRValueID inputId;               // varying operand to Mul
+        IRValueID multiplierUniformId;   // uniform operand to Mul
+        IRValueID addendId;              // Add's second operand — literal OR uniform
+        bool      addendIsLiteral = false;
+    };
+    std::unordered_map<IRValueID, FpMadBinding> valueToMad;
+
     // Saturate is a modifier on the producing instruction — bit 31 of
     // hw[0].  Rather than plumbing it through every binding type, we
     // alias the saturate-result IR value to its source and track the
@@ -257,6 +282,33 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                 const IRValueID a = inst.operands[0];
                 const IRValueID b = inst.operands[1];
+
+                // MAD-fusion detection — only for Add.  Match
+                // Add(MulBinding, literal_or_uniform); commutative.
+                if (inst.op == IROp::Add)
+                {
+                    auto tryMad = [&](IRValueID mulId, IRValueID addendId) -> bool
+                    {
+                        auto mIt = valueToArith.find(mulId);
+                        if (mIt == valueToArith.end() ||
+                            mIt->second.op != FpArithOp::Mul)
+                            return false;
+
+                        const bool addLit = valueToLiteralVec4.count(addendId) > 0;
+                        const bool addUni = valueToFpUniform.count(addendId)  > 0;
+                        if (!addLit && !addUni) return false;
+
+                        FpMadBinding b;
+                        b.inputId             = mIt->second.inputId;
+                        b.multiplierUniformId = mIt->second.uniformId;
+                        b.addendId            = addendId;
+                        b.addendIsLiteral     = addLit;
+                        valueToMad[inst.result] = b;
+                        return true;
+                    };
+                    if (tryMad(a, b) || tryMad(b, a)) break;
+                }
+
                 auto aInput   = valueToInputSrc.find(a);
                 auto bInput   = valueToInputSrc.find(b);
                 auto aUniform = valueToFpUniform.find(a);
@@ -440,6 +492,128 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
 
                     asm_.appendConstBlock(lcIt->second.vals);
+                    emittedSomething = true;
+                    break;
+                }
+
+                // MAD fusion — emit the MOVH / MOVR / FENCBR / MADR
+                // four-block sequence.  Helper for the uniform-source
+                // ucode-offset bookkeeping.
+                auto recordUniformOffsetHere =
+                    [&](IRValueID uValueId, uint32_t offset) -> bool
+                {
+                    auto uIt = valueToFpUniform.find(uValueId);
+                    if (uIt == valueToFpUniform.end()) return false;
+                    for (auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == uIt->second)
+                        {
+                            eu.ucodeByteOffsets.push_back(offset);
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
+                auto mdIt = valueToMad.find(srcId);
+                if (mdIt != valueToMad.end())
+                {
+                    const auto& mb = mdIt->second;
+                    auto inIt = valueToInputSrc.find(mb.inputId);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: MAD varying operand failed to resolve");
+                        return out;
+                    }
+
+                    // MOVH H0, f[input]
+                    struct nvfx_reg hDst = nvfx_reg(NVFXSR_TEMP, 0);
+                    hDst.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1,
+                        hDst, NVFX_FP_MASK_ALL, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    // Decide which uniform to preload into R1.  See
+                    // the header comment on FpMadBinding.
+                    const IRValueID preloadUniformId =
+                        mb.addendIsLiteral ? mb.multiplierUniformId
+                                           : mb.addendId;
+
+                    // MOVR R1, preloadUniform + 16-byte zero block.
+                    struct nvfx_reg rDst = nvfx_reg(NVFXSR_TEMP, 1);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_src mvrS0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    struct nvfx_src mvrS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvrS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mvr = nvfx_insn(
+                        0, 0, -1, -1,
+                        rDst, NVFX_FP_MASK_ALL, mvrS0, mvrS1, mvrS2);
+                    asm_.emit(mvr, NVFX_FP_OP_OPCODE_MOV);
+
+                    const uint32_t preloadOffset = asm_.currentByteSize();
+                    recordUniformOffsetHere(preloadUniformId, preloadOffset);
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+
+                    // FENCBR
+                    asm_.emitFencbr();
+
+                    // MADR R_out, H0, src1, src2
+                    // - If addend is a LITERAL: src1 = R1 (multiplier), src2 = inline literal
+                    // - If addend is a UNIFORM: src1 = CONST (multiplier inline), src2 = R1 (addend)
+                    struct nvfx_src madS0 = nvfx_src(hDst);         // H0
+                    struct nvfx_src madS1;
+                    struct nvfx_src madS2;
+                    if (mb.addendIsLiteral)
+                    {
+                        madS1 = nvfx_src(rDst);                     // R1 (multiplier preloaded)
+                        madS2 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));  // CONST (inline literal)
+                    }
+                    else
+                    {
+                        madS1 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));  // CONST (multiplier inline)
+                        madS2 = nvfx_src(rDst);                     // R1 (addend preloaded)
+                    }
+
+                    struct nvfx_insn mad = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        madS0, madS1, madS2);
+                    mad.precision = dstPrecision;
+                    asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+
+                    // Inline block after MAD — either the literal or
+                    // the (non-preloaded) uniform.
+                    const uint32_t postMadOffset = asm_.currentByteSize();
+                    if (mb.addendIsLiteral)
+                    {
+                        auto lIt = valueToLiteralVec4.find(mb.addendId);
+                        asm_.appendConstBlock(lIt->second.vals);
+                    }
+                    else
+                    {
+                        recordUniformOffsetHere(mb.multiplierUniformId, postMadOffset);
+                        asm_.appendConstBlock(zeros);
+                    }
+
+                    // Track varying-input mask bits.
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
                     emittedSomething = true;
                     break;
                 }
