@@ -1,25 +1,29 @@
 /*
  * PS3 Custom Toolchain — <cell/dbgfont.h>
  *
- * Stub shim for Sony's libdbgfont runtime — the on-screen debug
- * text overlay (FPS counter, perf stats, etc.).  We don't ship a
- * dbgfont implementation yet; these inline stubs keep Sony sample
- * source that includes <cell/dbgfont.h> compilable and linkable
- * against our SDK, at the cost of the debug text not actually
- * being drawn.  Every function returns success; the sample's main
- * rendering still happens.
+ * Tier-1 stub for Sony's libdbgfont — the on-screen debug text
+ * overlay (FPS counter, timing stats, etc.).  Implementing the
+ * real NV40 renderer (font atlas upload, VP/FP shader pair,
+ * per-glyph-quad vertex stream) is follow-up work; for now the
+ * printf-family entry points forward to host stdout so Sony
+ * sample code that calls cellDbgFontPrintf still produces visible
+ * output — it just lands in RPCS3's TTY.log rather than on top
+ * of the frame.  cellDbgFontDrawGcm stays a no-op since we've
+ * already flushed each line when its Printf ran; there's no
+ * accumulated per-frame state to emit.
  *
- * Replace with a real implementation (vertex + texture upload to
- * local memory, font atlas, text emitter) when we want parity with
- * Sony's overlay.  The struct layout / constants here come from
- * Sony SDK 475.001's <cell/dbgfont.h> so an unchanged runtime can
- * slot in later.
+ * The struct layout / constant values below come from Sony SDK
+ * 475.001's <cell/dbgfont.h>, so when the real runtime lands it
+ * can slot in without touching sample code.  See
+ * docs/known-issues.md for the tier-2 renderer plan.
  */
 
 #ifndef PS3TC_CELL_DBGFONT_H
 #define PS3TC_CELL_DBGFONT_H
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdarg.h>
 #include <sys/process.h>      /* sys_addr_t */
 
 #ifdef __cplusplus
@@ -50,15 +54,45 @@ static inline int32_t cellDbgFontExitGcm(void)
 { return 0; }
 
 static inline int32_t cellDbgFontDrawGcm(void)
-{ return 0; }
+{
+    /* No accumulated state in tier-1; Printf/Puts already flushed.
+     * Tier-2 (real on-screen renderer) will emit per-frame quads here. */
+    return 0;
+}
+
+/* Printf / Puts: redirect to stdout with a tagged prefix so the
+ * sample's intended debug-overlay text lands in RPCS3's TTY.log.
+ * Position is clamped-printed as two decimals since Sony passes
+ * normalized [0..1] screen coords; color is kept hex for easy
+ * tie-back to CELL_GCM_UTIL_COLOR / ARGB literals in the sample
+ * source.  Returns the number of bytes written (Sony's function
+ * returns `int32_t status`, 0 == OK — positive byte counts still
+ * register as "ok" for every caller we've seen). */
+static inline int32_t cellDbgFontPuts(float x, float y, float scale,
+                                      uint32_t color, const char *s)
+{
+    if (!s) return 0;
+    int n = printf("[dbgfont %.2f,%.2f s=%.2f #%08x] %s\n",
+                   x, y, scale, (unsigned)color, s);
+    fflush(stdout);
+    return (n < 0) ? 0 : n;
+}
 
 static inline int32_t cellDbgFontPrintf(float x, float y, float scale,
                                         uint32_t color, const char *fmt, ...)
-{ (void)x; (void)y; (void)scale; (void)color; (void)fmt; return 0; }
-
-static inline int32_t cellDbgFontPuts(float x, float y, float scale,
-                                      uint32_t color, const char *s)
-{ (void)x; (void)y; (void)scale; (void)color; (void)s; return 0; }
+{
+    if (!fmt) return 0;
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    int m = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (m < 0) return 0;
+    if ((size_t)m >= sizeof(buf)) {
+        /* vsnprintf truncated; null-terminator is already in place. */
+    }
+    return cellDbgFontPuts(x, y, scale, color, buf);
+}
 
 #ifdef __cplusplus
 }

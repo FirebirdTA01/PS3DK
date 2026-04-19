@@ -76,6 +76,58 @@ than a mild annoyance.
 
 ---
 
+## <cell/dbgfont.h> tier-1 stub redirects to TTY; real on-screen renderer TBD
+
+**Status:** tier-1 done (text visible in RPCS3.log), tier-2 (on-screen
+text overlay) deferred.
+
+**Tier-1 — what's implemented today.**
+`sdk/include/cell/dbgfont.h` routes `cellDbgFontPuts` / Printf to
+stdout with a tagged prefix:
+
+    [dbgfont 0.05,0.10 s=1.00 #ff00ffff] Drawing Time = 2.3450 msec
+
+— which lands in RPCS3's TTY.log.  `cellDbgFontInitGcm` / ExitGcm
+/ DrawGcm remain no-ops: Printf/Puts already flushed the text
+inline, so there's nothing per-frame to draw yet.  Sample source
+that writes debug overlays via Printf now produces visible output
+without an on-screen renderer.
+
+**Tier-2 — plan.**
+Port PSL1GHT's `samples/graphics/debugfont_renderer/` as a proper
+`libdbgfont.a`.  The inputs it needs are all already in our tree:
+
+- Font bitmap — `samples/graphics/debugfont_renderer/source/
+  debugfontdata.h` (1373-line static array, 8-bit alpha, 128×128
+  atlas, printable ASCII).
+- Vertex-program source — `.../shaders/vpshader_dbgfont.vcg`
+  (passthrough: pos/color/texcoord → NDC with identity transform).
+- Fragment-program source — `.../shaders/fpshader_dbgfont.fcg`
+  (tex2D .w → if > 0.5 emit vertex color, else discard alpha).
+
+Steps:
+
+1. New `sdk/libdbgfont/` directory with the font data + shaders
+   copied in, plus a Makefile that compiles the shaders through
+   sce-cgc (same path the Sony samples use) or our own
+   `rsx-cg-compiler` and embeds them as C byte arrays.
+2. Rewrite PSL1GHT's C++ renderer as C, swapping the rsx* calls
+   for the corresponding cellGcm* names that already exist in our
+   SDK (`cellGcmSetTexture`, `cellGcmSetVertexDataArray`,
+   `cellGcmSetDrawArrays`, etc.).
+3. Move the `<cell/dbgfont.h>` function bodies out of the header
+   and into the library; header becomes pure declarations.
+4. Update `sdk/Makefile` to treat `libdbgfont` as a sublib
+   alongside `libgcm_cmd`.
+5. Samples that want real overlay text link `-ldbgfont` in addition
+   to `-lgcm_cmd -lrsx ...`.
+
+Accept/test criteria: port a Sony sample that uses Printf (cube,
+alphakill) with the tier-2 library and confirm the overlay text
+draws on top of the frame in RPCS3.
+
+---
+
 ## hello-ppu-cellgcm-triangle sample: slow + occasional crash during PS-menu interaction
 
 **Status:** sample-local bug.  Sony samples (`basic`, `cube`,
