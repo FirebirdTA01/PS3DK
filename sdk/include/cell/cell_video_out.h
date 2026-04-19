@@ -14,6 +14,7 @@
 #ifndef PS3TC_CELL_VIDEO_OUT_H
 #define PS3TC_CELL_VIDEO_OUT_H
 
+#include <stdint.h>
 #include <sysutil/video.h>
 #include <ppu-types.h>
 
@@ -37,10 +38,53 @@ extern "C" {
 #define CELL_VIDEO_OUT_ASPECT_4_3         VIDEO_ASPECT_4_3
 #define CELL_VIDEO_OUT_ASPECT_16_9        VIDEO_ASPECT_16_9
 
-/* ---- struct / handle aliases -------------------------------------- */
-typedef videoState          CellVideoOutState;
-typedef videoResolution     CellVideoOutResolution;
-typedef videoConfiguration  CellVideoOutConfiguration;
+/* ---- struct / handle aliases --------------------------------------
+ *
+ * Redefined here as our own structs (NOT typedef'd from PSL1GHT's
+ * video.h) so we can expose both the PSL1GHT field name and the
+ * Sony-sample field name through an anonymous union without
+ * editing the upstream PSL1GHT header.  The storage layouts are
+ * identical to PSL1GHT's videoResolution / videoState /
+ * videoConfiguration / videoDisplayMode down to the last padding
+ * byte, so `(videoState *)cell_state` casts in the forwarders
+ * below are safe.
+ *
+ * Field-name mapping:
+ *   .resolution   (PSL1GHT)  <-->  .resolutionId  (Sony samples)
+ *
+ * Unified via `union { u8 resolution; u8 resolutionId; }` so Sony
+ * source code that writes `.resolutionId = ...` compiles unchanged
+ * against our SDK.  Previously carried as PSL1GHT patch 0026; moved
+ * here 2026-04-19 to keep PSL1GHT's tree unmodified. */
+
+typedef struct _cellVideoOutResolution {
+    uint16_t width;
+    uint16_t height;
+} CellVideoOutResolution;
+
+typedef struct _cellVideoOutDisplayMode {
+    union { uint8_t resolution; uint8_t resolutionId; };
+    uint8_t  scanMode;
+    uint8_t  conversion;
+    uint8_t  aspect;
+    uint8_t  padding[2];
+    uint16_t refreshRates;
+} CellVideoOutDisplayMode;
+
+typedef struct _cellVideoOutState {
+    uint8_t                  state;
+    uint8_t                  colorSpace;
+    uint8_t                  padding[6];
+    CellVideoOutDisplayMode  displayMode;
+} CellVideoOutState;
+
+typedef struct _cellVideoOutConfiguration {
+    union { uint8_t resolution; uint8_t resolutionId; };
+    uint8_t  format;
+    uint8_t  aspect;
+    uint8_t  padding[9];
+    uint32_t pitch;
+} CellVideoOutConfiguration;
 
 /* ---- function forwarders ------------------------------------------ */
 static inline int32_t cellVideoOutGetState(uint32_t videoOut,

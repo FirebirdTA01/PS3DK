@@ -126,6 +126,11 @@ extern "C" {
 #define CELL_GCM_TILE_ALIGN_OFFSET       GCM_TILE_ALIGN_OFFSET
 #define CELL_GCM_TILE_ALIGN_SIZE         GCM_TILE_ALIGN_SIZE
 
+/* Fragment-program ucode placement alignment.  Sony's samples align
+ * the local-memory allocation for FP ucode to this offset when
+ * calling cellGcmUtilAllocateLocalMemory. */
+#define CELL_GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET  GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET
+
 /* Tile compression mode (cellGcmSetTileInfo). */
 #define CELL_GCM_COMPMODE_DISABLED              GCM_COMPMODE_DISABLED
 #define CELL_GCM_COMPMODE_Z32_SEPSTENCIL        GCM_COMPMODE_Z32_SEPSTENCIL
