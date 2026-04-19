@@ -249,10 +249,22 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
     struct CmpBinding
     {
-        uint8_t   opcode    = NVFX_FP_OP_OPCODE_SGT;
-        IRValueID lhsBase   = 0;
-        int       lhsLane   = 0;
-        float     rhsConst  = 0.0f;
+        uint8_t   opcode      = NVFX_FP_OP_OPCODE_SGT;
+        IRValueID lhsBase     = 0;
+        int       lhsLane     = 0;
+        // RHS shape:
+        //   Literal: inline {rhsLiteral, 0, 0, 0} as a const block
+        //   Uniform: append zero block, record ucode offset for rhsUniformId
+        //   Varying: no inline block — RHS feeds through SRC1 as a
+        //            second INPUT varying; needs a MOVH promote of the
+        //            LHS lane into an H-reg temp because NV40 FP can
+        //            only route ONE per-instruction INPUT varying.
+        enum class RhsKind { Literal, Uniform, Varying };
+        RhsKind   rhsKind        = RhsKind::Literal;
+        float     rhsLiteral     = 0.0f;
+        IRValueID rhsUniformId   = 0;
+        IRValueID rhsVaryingBase = 0;
+        int       rhsVaryingLane = 0;
     };
     std::unordered_map<IRValueID, CmpBinding> valueToCmp;
 
@@ -438,18 +450,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             {
                 if (inst.operands.size() < 2) break;
 
-                // LHS: scalar extract of a varying (for `vcol.x > 0.5`).
+                // LHS: scalar extract of a varying (for `vcol.x > k`).
                 auto seIt = valueToScalarExtract.find(inst.operands[0]);
                 if (seIt == valueToScalarExtract.end()) break;
                 auto inIt = valueToInputSrc.find(seIt->second.baseId);
                 if (inIt == valueToInputSrc.end()) break;
 
-                // RHS: a float constant (only pattern supported today).
-                IRValue* rhsValue = entry.getValue(inst.operands[1]);
-                auto* rhsConst = dynamic_cast<IRConstant*>(rhsValue);
-                if (!rhsConst || !std::holds_alternative<float>(rhsConst->value))
-                    break;
-
+                // RHS: either a float constant or an FP uniform.
                 CmpBinding cb;
                 switch (inst.op)
                 {
@@ -461,9 +468,37 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 case IROp::CmpNe: cb.opcode = NVFX_FP_OP_OPCODE_SNE; break;
                 default: break;
                 }
-                cb.lhsBase  = seIt->second.baseId;
-                cb.lhsLane  = seIt->second.lane;
-                cb.rhsConst = std::get<float>(rhsConst->value);
+                cb.lhsBase = seIt->second.baseId;
+                cb.lhsLane = seIt->second.lane;
+
+                IRValue* rhsValue = entry.getValue(inst.operands[1]);
+                if (auto* rhsConst = dynamic_cast<IRConstant*>(rhsValue);
+                    rhsConst && std::holds_alternative<float>(rhsConst->value))
+                {
+                    cb.rhsKind    = CmpBinding::RhsKind::Literal;
+                    cb.rhsLiteral = std::get<float>(rhsConst->value);
+                }
+                else if (auto uIt = valueToFpUniform.find(inst.operands[1]);
+                         uIt != valueToFpUniform.end())
+                {
+                    cb.rhsKind      = CmpBinding::RhsKind::Uniform;
+                    cb.rhsUniformId = inst.operands[1];
+                }
+                else if (auto rhsSe = valueToScalarExtract.find(inst.operands[1]);
+                         rhsSe != valueToScalarExtract.end())
+                {
+                    auto rhsBaseIn = valueToInputSrc.find(rhsSe->second.baseId);
+                    if (rhsBaseIn == valueToInputSrc.end()) break;
+                    cb.rhsKind         = CmpBinding::RhsKind::Varying;
+                    cb.rhsVaryingBase  = rhsSe->second.baseId;
+                    cb.rhsVaryingLane  = rhsSe->second.lane;
+                }
+                else
+                {
+                    // Unknown shape — leave unlowered; Select emit
+                    // will diagnose.
+                    break;
+                }
                 valueToCmp[inst.result] = cb;
                 break;
             }
@@ -826,23 +861,172 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
 
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+                    auto recordUniformOffset =
+                        [&](unsigned paramIdx, uint32_t offset)
+                    {
+                        for (auto& eu : attrs.embeddedUniforms)
+                            if (eu.entryParamIndex == paramIdx)
+                            { eu.ucodeByteOffsets.push_back(offset); break; }
+                    };
+
+                    auto maskTcBit = [&](int inputSrc)
+                    {
+                        if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        }
+                    };
+
+                    // ============ Varying-RHS path ============
+                    // Sce-cgc reshapes the compare for a varying RHS
+                    // because NV40 FP can only route ONE INPUT varying
+                    // per instruction.  The LHS varying gets promoted
+                    // to an H-reg temp via MOVH (with per-lane
+                    // writemask), then the RHS varying is read via
+                    // SRC1=INPUT on the SGT.  Sequence:
+                    //   MOVH H2.x, f[lhs_input]        (fp16 promote)
+                    //   MOVR R0, trueUniform           (preload moved early)
+                    //   <inline zero block for trueUniform>
+                    //   SGTRC RC.x, H2, f[rhs_input]
+                    //   FENCBR
+                    //   MOVR R0(EQ.x), falseUniform    (conditional overwrite)
+                    //   <inline zero block for falseUniform>
+                    //
+                    // H2 chosen because H0/H1 alias R0 which we need
+                    // to write as the final output.
+                    if (cb.rhsKind == CmpBinding::RhsKind::Varying)
+                    {
+                        auto rhsIn = valueToInputSrc.find(cb.rhsVaryingBase);
+                        if (rhsIn == valueToInputSrc.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select varying RHS did not resolve to an input");
+                            return out;
+                        }
+
+                        // --- MOVH H2.x, f[lhs_input] ---
+                        struct nvfx_reg h2Dst = nvfx_reg(NVFXSR_TEMP, 2);
+                        h2Dst.is_fp16 = 1;
+                        const struct nvfx_reg lhsIn = nvfx_reg(NVFXSR_INPUT, inIt->second);
+                        struct nvfx_src movhS0 = nvfx_src(const_cast<struct nvfx_reg&>(lhsIn));
+                        if (cb.lhsLane != 0)
+                        {
+                            movhS0.swz[0] = movhS0.swz[1] = movhS0.swz[2] = movhS0.swz[3] =
+                                static_cast<uint8_t>(cb.lhsLane);
+                        }
+                        struct nvfx_src movhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src movhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn movh = nvfx_insn(
+                            0, 0, -1, -1, h2Dst,
+                            NVFX_FP_MASK_X, movhS0, movhS1, movhS2);
+                        movh.precision = FLOAT16;
+                        asm_.emit(movh, NVFX_FP_OP_OPCODE_MOV);
+
+                        // --- MOVR R0, trueUniform (preload) ---
+                        const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                        struct nvfx_src preS0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        struct nvfx_src preS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src preS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn preIn = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_ALL, preS0, preS1, preS2);
+                        preIn.precision = dstPrecision;
+                        asm_.emit(preIn, NVFX_FP_OP_OPCODE_MOV);
+                        recordUniformOffset(trueUni->second, asm_.currentByteSize());
+                        asm_.appendConstBlock(zeros);
+
+                        // --- SGT RC.x, H2, f[rhs_input] ---
+                        const struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+                        // SRC0 = H2 (TEMP idx 2 with HALF)
+                        struct nvfx_reg h2Src = nvfx_reg(NVFXSR_TEMP, 2);
+                        h2Src.is_fp16 = 1;
+                        struct nvfx_src cS0 = nvfx_src(h2Src);
+                        // SRC1 = INPUT (the RHS varying's attribute index
+                        // will be driven by INPUT_SRC on hw[0]).  No
+                        // per-lane swizzle needed for lane 0; replicate
+                        // otherwise.
+                        const struct nvfx_reg rhsIn_reg = nvfx_reg(NVFXSR_INPUT, rhsIn->second);
+                        struct nvfx_src cS1 = nvfx_src(const_cast<struct nvfx_reg&>(rhsIn_reg));
+                        if (cb.rhsVaryingLane != 0)
+                        {
+                            cS1.swz[0] = cS1.swz[1] = cS1.swz[2] = cS1.swz[3] =
+                                static_cast<uint8_t>(cb.rhsVaryingLane);
+                        }
+                        struct nvfx_src cS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn cmpV = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(ccDst),
+                            NVFX_FP_MASK_X, cS0, cS1, cS2);
+                        cmpV.cc_update = 1;
+                        asm_.emit(cmpV, cb.opcode);
+
+                        // --- FENCBR ---
+                        asm_.emitFencbr();
+
+                        // --- MOVR R0(EQ.x), falseUniform ---
+                        struct nvfx_src fS0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        struct nvfx_src fS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src fS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn mvFalseV = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_ALL, fS0, fS1, fS2);
+                        mvFalseV.precision = dstPrecision;
+                        mvFalseV.cc_test  = 1;
+                        mvFalseV.cc_cond  = NVFX_FP_OP_COND_EQ;
+                        mvFalseV.cc_swz[0] = 0;
+                        mvFalseV.cc_swz[1] = 0;
+                        mvFalseV.cc_swz[2] = 0;
+                        mvFalseV.cc_swz[3] = 0;
+                        asm_.emit(mvFalseV, NVFX_FP_OP_OPCODE_MOV);
+                        recordUniformOffset(falseUni->second, asm_.currentByteSize());
+                        asm_.appendConstBlock(zeros);
+
+                        // Container flags: both LHS and RHS varyings
+                        // contribute to attributeInputMask; for TC
+                        // lanes, also update texCoordsInputMask.
+                        // sce-cgc clears texCoords2D for any TC used
+                        // as a comparison source (not as a 2D uv).
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(rhsIn->second);
+                        maskTcBit(inIt->second);
+                        maskTcBit(rhsIn->second);
+                        if (rhsIn->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            rhsIn->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = rhsIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+
+                        emittedSomething = true;
+                        break;
+                    }
+
                     // --- SGT/SGE/... RC.x, varying.<lane>, {lit}.x ---
                     const struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
                     const struct nvfx_reg inReg = nvfx_reg(NVFXSR_INPUT, inIt->second);
                     const struct nvfx_reg coReg = nvfx_reg(NVFXSR_CONST, 0);
 
-                    // SRC0 keeps identity swizzle — OUTMASK=X means
-                    // only lane X of the result matters, which reads
-                    // SRC0.x = input.x.  For non-X lhs lanes (e.g.
-                    // `vcol.y > ...`) we'd need to override swz AND
-                    // use a different OUTMASK; not yet supported.
+                    struct nvfx_src cmpS0 = nvfx_src(const_cast<struct nvfx_reg&>(inReg));
+                    // For `vcol.<lane> > k`, OUTMASK stays at .x (the
+                    // scalar compare still writes only CC.x) and the
+                    // conditional-MOV's cc_swz stays at (X,X,X,X) —
+                    // BUT we route the chosen lane of the input into
+                    // SRC0.x by setting the source swizzle to
+                    // (lane, lane, lane, lane).  For the X case
+                    // specifically, sce-cgc keeps the default identity
+                    // swizzle (.xyzw); only non-X lanes replicate.
                     if (cb.lhsLane != 0)
                     {
-                        out.diagnostics.push_back(
-                            "nv40-fp: Select: only scalar-X comparisons supported today");
-                        return out;
+                        cmpS0.swz[0] = cmpS0.swz[1] =
+                        cmpS0.swz[2] = cmpS0.swz[3] =
+                            static_cast<uint8_t>(cb.lhsLane);
                     }
-                    struct nvfx_src cmpS0 = nvfx_src(const_cast<struct nvfx_reg&>(inReg));
                     struct nvfx_src cmpS1 = nvfx_src(const_cast<struct nvfx_reg&>(coReg));
                     cmpS1.swz[0] = cmpS1.swz[1] = cmpS1.swz[2] = cmpS1.swz[3] = 0;  // .x
                     struct nvfx_src cmpS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
@@ -854,9 +1038,31 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         cmpS0, cmpS1, cmpS2);
                     cmpInsn.cc_update = 1;     // COND_WRITE_ENABLE
                     asm_.emit(cmpInsn, cb.opcode);
-                    // Inline the threshold as {cb.rhsConst, 0, 0, 0}.
-                    const float cmpLit[4] = { cb.rhsConst, 0.0f, 0.0f, 0.0f };
-                    asm_.appendConstBlock(cmpLit);
+
+                    // RHS inline block — either a literal vec4 (with
+                    // the threshold in .x) or a zero-initialised block
+                    // patched by the runtime with the uniform's value.
+                    if (cb.rhsKind == CmpBinding::RhsKind::Literal)
+                    {
+                        const float cmpLit[4] =
+                            { cb.rhsLiteral, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(cmpLit);
+                    }
+                    else  // RhsKind::Uniform
+                    {
+                        auto rhsUIt = valueToFpUniform.find(cb.rhsUniformId);
+                        if (rhsUIt == valueToFpUniform.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select RHS uniform did not resolve");
+                            return out;
+                        }
+                        const uint32_t rhsOffset = asm_.currentByteSize();
+                        for (auto& eu : attrs.embeddedUniforms)
+                            if (eu.entryParamIndex == rhsUIt->second)
+                            { eu.ucodeByteOffsets.push_back(rhsOffset); break; }
+                        asm_.appendConstBlock(zeros);
+                    }
 
                     // --- MOVR R_out, trueV (unconditional) ---
                     struct nvfx_src mvS0 = nvfx_src(const_cast<struct nvfx_reg&>(coReg));
@@ -873,7 +1079,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     for (auto& eu : attrs.embeddedUniforms)
                         if (eu.entryParamIndex == trueUni->second)
                         { eu.ucodeByteOffsets.push_back(trueOffset); break; }
-                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
                     asm_.appendConstBlock(zeros);
 
                     // --- MOVR R_out(EQ.x), falseV (conditional) ---
@@ -888,12 +1093,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     mvFalse.precision = dstPrecision;
                     // Execute only when CC.x reports the condition is
                     // FALSE (i.e. SGT wrote 0 → CC reads as EQ).
+                    //
+                    // cc_swz is (X,X,X,X) regardless of the chosen
+                    // LHS lane — SGT always writes CC.x (because our
+                    // OUTMASK is .x) and the conditional MOV tests
+                    // the same CC.x bit for all four output lanes.
+                    // Sce-cgc verified byte-exact across lanes
+                    // .x/.y/.z/.w.
                     mvFalse.cc_test  = 1;
                     mvFalse.cc_cond  = NVFX_FP_OP_COND_EQ;
-                    mvFalse.cc_swz[0] = cb.lhsLane;
-                    mvFalse.cc_swz[1] = cb.lhsLane;
-                    mvFalse.cc_swz[2] = cb.lhsLane;
-                    mvFalse.cc_swz[3] = cb.lhsLane;
+                    mvFalse.cc_swz[0] = 0;
+                    mvFalse.cc_swz[1] = 0;
+                    mvFalse.cc_swz[2] = 0;
+                    mvFalse.cc_swz[3] = 0;
                     asm_.emit(mvFalse, NVFX_FP_OP_OPCODE_MOV);
                     const uint32_t falseOffset = asm_.currentByteSize();
                     for (auto& eu : attrs.embeddedUniforms)

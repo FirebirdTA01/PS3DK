@@ -1,0 +1,10 @@
+// FP ternary select using .w — SGT SRC0 swizzle (W,W,W,W).  See
+// lane_y_select_f.cg for the shape.
+void main(
+    float4 vcol      : COLOR,
+    uniform float4 a,
+    uniform float4 b,
+    out float4 color : COLOR)
+{
+    color = (vcol.w > 0.5f) ? a : b;
+}
