@@ -1,0 +1,20 @@
+// FP samplerCUBE: cube-map sampling — the TEXCOORD is a 3D
+// direction vector, the HW figures out the face + 2D lookup.
+//
+// sce-cgc emits:  TEXR R0, g[TEX0], TEX0; END
+// (same opcode 0x17 as tex2D, but hw[3] bit 31 — DISABLE_PC — is set
+// to tell the HW the coord is a direction, not a 2D uv.  The disasm
+// annotates this as `g[TEX0]` instead of `f[TEX0]`.)
+//
+// Container deltas from texture_sample_f.cg:
+//   - sampler type = CG_SAMPLERCUBE (0x042d) instead of CG_SAMPLER2D (0x042a)
+//   - uv type      = CG_FLOAT3      (0x0417) instead of CG_FLOAT2    (0x0416)
+//   - texCoords2D  bit for the referenced TEXCOORD cleared
+//   - ucode word 3 bit 31 = 1 (DISABLE_PC)
+void main(
+    float3 uv         : TEXCOORD0,
+    uniform samplerCUBE tex,
+    out float4 color  : COLOR)
+{
+    color = texCUBE(tex, uv);
+}

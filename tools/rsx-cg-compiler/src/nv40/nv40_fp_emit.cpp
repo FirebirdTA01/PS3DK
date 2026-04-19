@@ -127,7 +127,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         IRValueID samplerId  = 0;
         IRValueID uvId       = 0;
         bool      projective = false;  // true → emit TXP (0x18) instead of TEX (0x17)
+        bool      cube       = false;  // true → sampler is samplerCUBE; sets
+                                       //         DISABLE_PC bit 31 on hw[3]
     };
+
+    // IR value → type, for samplers we populate from the param list
+    // (already done via `valueToType` seeded above).  The TexSample
+    // handler reads `samplerId`'s type to decide TEX vs cube.
     std::unordered_map<IRValueID, TexBinding> valueToTex;
 
     // Deferred arithmetic op with one INPUT (varying) operand and one
@@ -305,12 +311,21 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     out.diagnostics.push_back("nv40-fp: TexSample with <2 operands");
                     return out;
                 }
-                // tex2D(sampler, uv) / tex2Dproj(sampler, uv).
+                // tex2D(sampler, uv) / tex2Dproj / texCUBE.
                 // operands[0] = sampler, [1] = uv.
                 TexBinding tb;
-                tb.samplerId    = inst.operands[0];
-                tb.uvId         = inst.operands[1];
-                tb.projective   = (inst.op == IROp::TexSampleProj);
+                tb.samplerId  = inst.operands[0];
+                tb.uvId       = inst.operands[1];
+                tb.projective = (inst.op == IROp::TexSampleProj);
+
+                // Look up the sampler's type to detect cube.
+                auto sTyIt = valueToType.find(tb.samplerId);
+                if (sTyIt != valueToType.end() &&
+                    sTyIt->second.baseType == IRType::SamplerCube)
+                {
+                    tb.cube = true;
+                }
+
                 valueToTex[inst.result] = tb;
                 break;
             }
@@ -645,6 +660,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         NVFX_FP_MASK_ALL,
                         src0, src1, src2);
                     in.precision = dstPrecision;
+                    // samplerCUBE: the HW needs to know the input is a
+                    // 3-component direction, not a 2D (u,v).  sce-cgc
+                    // signals that by setting DISABLE_PC (bit 31 of
+                    // hw[3]) — via nvfx_insn's `disable_pc` field.
+                    if (texIt->second.cube)
+                        in.disable_pc = 1;
                     asm_.emit(in, texOpcode);
                     emittedSomething = true;
 
@@ -657,10 +678,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
                         // sce-cgc clears the texCoords2D bit for any
-                        // TEXCOORD used projectively — the HW needs
-                        // all four lanes (not just xy) for the
-                        // perspective divide.
-                        if (texIt->second.projective)
+                        // TEXCOORD used projectively or as a cube-map
+                        // direction — the HW needs more than just xy
+                        // (perspective divide for TXP; 3D direction
+                        // for cube).
+                        if (texIt->second.projective || texIt->second.cube)
                             attrs.texCoords2D &= ~(uint16_t{1} << n);
                     }
                     break;
