@@ -569,6 +569,21 @@ void Preprocessor::processPragma(const std::string& directive, std::string& outp
 			includeGuards.insert(currentProcessingFile);
 		}
 	}
+	else if (content.rfind("alphakill", 0) == 0)
+	{
+		// #pragma alphakill <samplerName>
+		// Sony Cg extension: tells the runtime to discard fragments
+		// where the named sampler returns alpha == 0.  Container-only
+		// (ucode unchanged) — recorded here so the .fpo emitter can
+		// inject one synthetic $kill_NNNN CgBinaryParameter per sampler
+		// in declaration order.  See REVERSE_ENGINEERING.md.
+		std::string rest = trim(content.substr(9));
+		// Strip a trailing semicolon if the user wrote one.
+		if (!rest.empty() && rest.back() == ';') rest.pop_back();
+		rest = trim(rest);
+		if (!rest.empty() && alphakillSeen_.insert(rest).second)
+			alphakillSamplers_.push_back(rest);
+	}
 	else if (content.find("warning") == 0)
 	{
 		// TO DO: Pass through for now, but could track warning state

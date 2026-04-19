@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <unordered_map>
 
@@ -67,6 +68,12 @@ constexpr uint32_t kInvalidIndex           = 0xFFFFFFFFu;
 constexpr uint32_t kCgTexUnit0   = 2048u;  // 0x0800
 constexpr uint32_t kCgColor0     = 2757u;  // 0x0ac5  (FP COLOR semantic)
 constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
+
+// Sce-cgc's "kill marker" resource code — used on the synthetic
+// $kill_NNNN parameter that #pragma alphakill <samplerName> produces.
+// Not in the documented CG_BINDLOCATION_MACRO table; reverse-engineered
+// from sce-cgc output (see REVERSE_ENGINEERING.md "alphakill" section).
+constexpr uint32_t kCgKillMarker = 0x0cb8u;
 
 // CGtype values.
 constexpr uint32_t kCgFloat       = 1045u;
@@ -149,7 +156,8 @@ ContainerResult emitFragmentContainer(
     const IRModule&              module,
     const std::string&           entryName,
     const std::vector<uint32_t>& ucode,
-    const nv40::FpAttributes&    attrs)
+    const nv40::FpAttributes&    attrs,
+    const ContainerOptions&      opts)
 {
     ContainerResult result;
 
@@ -219,6 +227,31 @@ ContainerResult emitFragmentContainer(
             d.direction = isOut ? kCgOut : kCgIn;
             d.res       = fpResourceFor(toUpper(p.semanticName), p.semanticIndex);
         }
+        params.push_back(d);
+    }
+
+    // Append one synthetic $kill_NNNN parameter per #pragma alphakill
+    // sampler (in source-order, which sce-cgc preserves and indexes
+    // sequentially regardless of the original sampler's position).  These
+    // params have no name/semantic in the source — sce-cgc generates the
+    // name and sets paramno = 0xFFFFFFFF (no user param number).  The
+    // unique resource code 0x0cb8 is what the runtime keys off of.
+    for (size_t k = 0; k < opts.alphakillSamplers.size(); ++k)
+    {
+        ParamDesc d;
+        // sce-cgc names these `$kill_<4-digit zero-padded index>`.
+        // 32-byte buffer covers any practical sampler count without
+        // -Wformat-truncation noise.
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "$kill_%04zu", k);
+        d.name         = buf;
+        d.semantic     = "";  // sce-cgc emits no semantic string for these
+        d.type         = kCgFloat4;
+        d.res          = kCgKillMarker;
+        d.var          = kCgVarying;
+        d.direction    = kCgOut;
+        d.paramno      = kInvalidIndex;
+        d.isReferenced = 0;
         params.push_back(d);
     }
 

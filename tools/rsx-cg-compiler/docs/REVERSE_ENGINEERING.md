@@ -410,24 +410,36 @@ also store the raw source spelling in `Semantic::rawName` →
   that uses them, per the renouveau notes in nvfx_shader.h's header
   comment, but sce-cgc's specific layout and `embeddedConst` field
   haven't been mapped against real shaders yet).
-- `#pragma alphakill <samplerName>`: **container-level only** (verified
-  2026-04-18 against sce-cgc).  Probed `tex2D` shader with and without
-  `#pragma alphakill tex` — ucode bytes are bit-identical
+- `#pragma alphakill <samplerName>`: **container-level only**, implemented
+  2026-04-18.  Probed `tex2D` shader with and without `#pragma alphakill
+  tex` — ucode bytes are bit-identical
   (`9e011700 c8011c9d c8000001 c8003fe1` in both).  The pragma adds a
   single extra `CgBinaryParameter` entry to the `.fpo`:
-    - `type = 0x418` (CG_FLOAT4)
-    - `res = 0x0cb8` (kill marker — new resource code, not in the
+    - `type = 0x0418` (CG_FLOAT4)
+    - `res  = 0x0cb8` (kill marker — new resource code, not in the
       previously catalogued enum)
-    - `var = 0x1005` (varying)
-    - `name = "$kill_0000"` (synthetic, indexed by sampler order)
-    - `direction = 0x1002` (CG_OUT)
-    - `paramno = 0xFFFFFFFF` (synthetic, no user param number)
-    - `resIndex = 0xFFFFFFFF`
-  The runtime presumably scans for parameters with `res=0xcb8` and
-  configures the GCM RSX state to discard fragments where that
-  sampler returns alpha == 0.  Implementation lands once the `.fpo`
-  container emitter exists — until then the diff harness (which
-  compares ucode only) cannot exercise this feature.
+    - `var  = 0x1005` (CG_VARYING)
+    - `name = "$kill_<NNNN>"` (synthetic; `NNNN` zero-padded to 4 digits,
+      indexed in source-order of the pragma occurrences, NOT by the
+      sampler's position in the parameter list)
+    - `direction    = 0x1002` (CG_OUT)
+    - `paramno      = 0xFFFFFFFF` (synthetic — no user param number)
+    - `resIndex     = 0xFFFFFFFF`
+    - `isReferenced = 0` (the user code doesn't refer to it directly)
+    - no semantic string
+  The runtime presumably scans for parameters with `res=0x0cb8` and
+  configures the GCM RSX state to discard fragments where the
+  corresponding sampler returns alpha == 0.
+
+  Wired into `rsx-cg-compiler` via:
+  - `Preprocessor` collects samplers from `#pragma alphakill <name>`
+    lines and exposes them via `alphakillSamplers()` (insertion-order
+    preserved, deduped on name).
+  - `sony::ContainerOptions::alphakillSamplers` carries the list to the
+    container emitter; one `$kill_NNNN` `CgBinaryParameter` per name is
+    appended to the parameter table after the entry-point's params.
+  - Test: `tests/shaders/alphakill_f.cg` (320-byte .fpo, byte-exact
+    against sce-cgc).
 
   Previous-session hypothesis about a "byte-1 bit 0x80" toggle in
   TEXR encoding was wrong — superseded by this finding.

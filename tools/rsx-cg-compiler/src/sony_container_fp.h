@@ -34,11 +34,20 @@ struct ContainerResult
     bool                     ok = false;
 };
 
+struct ContainerOptions
+{
+    // Sampler names listed via `#pragma alphakill <name>` (in source-order
+    // of appearance in the .cg file).  Each becomes one synthetic
+    // $kill_NNNN CgBinaryParameter appended to the table.
+    std::vector<std::string> alphakillSamplers;
+};
+
 ContainerResult emitFragmentContainer(
     const IRModule&             module,
     const std::string&          entryName,
     const std::vector<uint32_t>& ucode,
-    const nv40::FpAttributes&   attrs);
+    const nv40::FpAttributes&   attrs,
+    const ContainerOptions&     opts = {});
 
 }  // namespace sony
 

@@ -1,0 +1,19 @@
+// Sony Cg `#pragma alphakill <samplerName>` extension test.
+//
+// Tells the runtime to discard fragments where the named sampler
+// returns alpha == 0.  Container-only feature: ucode is bit-identical
+// to texture_sample_f.cg, but the .fpo gets one extra synthetic
+// `$kill_0000` CgBinaryParameter (type=CG_FLOAT4, res=0x0cb8 "kill
+// marker", direction=CG_OUT, paramno=0xFFFFFFFF, no semantic string).
+//
+// Verified byte-for-byte against sce-cgc 475.001 — 320 bytes total
+// (vs 256 for the non-alphakill variant: +48 for the extra
+// CgBinaryParameter, +12 for the "$kill_0000" string + padding).
+#pragma alphakill tex
+void main(
+    float2 uv          : TEXCOORD0,
+    uniform sampler2D tex,
+    out float4 color   : COLOR)
+{
+    color = tex2D(tex, uv);
+}

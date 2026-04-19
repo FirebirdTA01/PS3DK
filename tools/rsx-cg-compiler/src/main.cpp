@@ -42,6 +42,10 @@ struct CompilerContext
 
     enum class Profile { Unknown, FragmentRsx, VertexRsx };
     Profile profile = Profile::VertexRsx;
+
+    // Populated by runPreprocessor — Sony Cg pragma surface that the
+    // lexer drops before it reaches the parser.
+    std::vector<std::string> alphakillSamplers;
 };
 
 void usage()
@@ -77,7 +81,7 @@ std::string slurpFile(const std::string& path)
 }
 
 std::string runPreprocessor(const std::string& sourceCode,
-                            const CompilerContext& ctx)
+                            CompilerContext& ctx)
 {
     std::ostringstream composed;
 
@@ -95,7 +99,9 @@ std::string runPreprocessor(const std::string& sourceCode,
     {
         pp.addIncludePath(dir);
     }
-    return pp.process(composed.str(), ctx.inputFile);
+    std::string out = pp.process(composed.str(), ctx.inputFile);
+    ctx.alphakillSamplers = pp.alphakillSamplers();
+    return out;
 }
 
 }  // namespace
@@ -291,8 +297,10 @@ int main(int argc, char** argv)
                 "rsx-cg-compiler: --emit-container only supports sce_fp_rsx for now\n");
             return 1;
         }
+        sony::ContainerOptions copts;
+        copts.alphakillSamplers = ctx.alphakillSamplers;
         sony::ContainerResult cr = sony::emitFragmentContainer(
-            *irModule, ctx.entryName, ucode.words, fpAttrs);
+            *irModule, ctx.entryName, ucode.words, fpAttrs, copts);
         for (const auto& d : cr.diagnostics)
             std::fprintf(stderr, "%s\n", d.c_str());
         if (!cr.ok)
