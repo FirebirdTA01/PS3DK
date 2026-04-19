@@ -60,20 +60,22 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
 
         case NVFXSR_OUTPUT:
         {
-            // Track output bindings for container metadata.  Only the
-            // cases we can currently produce via the IR lowering are
-            // enumerated; PSL1GHT's compilervp.cpp handles CLP/PSZ/FOGC
-            // edge cases and we'll fold those in when needed.
+            // Container `attributeOutputMask`: sce-cgc encodes one bit
+            // per *front-face* output, with HPOS implicit (= no bit).
+            // Verified 2026-04-18 against identity_v / identity_color_v
+            // / mvp_passthrough_v / probe_tc_v .vpo dumps.
+            //
+            // PSL1GHT cgcomp also sets a "back-face" bit for COL/BFC
+            // (doubling 0x01 → 0x05 for COL0, etc.); sce-cgc does not,
+            // so we don't either.  HPOS contributes 0.
             switch (dst.index)
             {
             case NV40_VP_INST_DEST_COL0:
             case NV40_VP_INST_DEST_COL1:
                 outputMask_ |= (1u << (dst.index - NV40_VP_INST_DEST_COL0));
-                outputMask_ |= (4u << (dst.index - NV40_VP_INST_DEST_COL0));
                 break;
             case NV40_VP_INST_DEST_BFC0:
             case NV40_VP_INST_DEST_BFC1:
-                outputMask_ |= (1u << (dst.index - NV40_VP_INST_DEST_BFC0));
                 outputMask_ |= (4u << (dst.index - NV40_VP_INST_DEST_BFC0));
                 break;
             case NV40_VP_INST_DEST_FOGC: outputMask_ |= (1u << 4); break;

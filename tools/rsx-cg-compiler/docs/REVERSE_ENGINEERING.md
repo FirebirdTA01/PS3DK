@@ -304,6 +304,112 @@ Our `lowerFragmentProgram` mirrors this with a `nextTexUnit`
 counter that bumps on each `Uniform` parameter whose IRType is
 `Sampler2D` or `SamplerCube`.
 
+## .vpo container layout (verified 2026-04-18)
+
+Same overall structure as .fpo (header + parameter table + strings +
+program subtype + ucode, all big-endian, 16-byte aligned sections).
+Differences from FP, all confirmed against `const_out_v.vpo`,
+`add_uniforms_v.vpo`, `mvp_passthrough_v.vpo`, and `probe_tc_v.vpo`:
+
+### CgBinaryVertexProgram fields (cgBinary.h, 24 bytes content)
+
+| offset | size | field                  | notes                                    |
+|-------:|-----:|:-----------------------|:-----------------------------------------|
+|  0     | 4    | instructionCount       | total NV40 VP instructions               |
+|  4     | 4    | instructionSlot        | load address; non-zero enables indexed reads (sce-cgc default 0) |
+|  8     | 4    | registerCount          | R-register count; sce-cgc minimum is 1   |
+| 12     | 4    | attributeInputMask     | bit n iff `v[n]` is read                 |
+| 16     | 4    | attributeOutputMask    | front-face only (HPOS = no bit, COL0 = bit 0, TC0 = bit 14, ...) |
+| 20     | 4    | userClipMask           | clip plane enables (sce-cgc default 0)   |
+
+### attributeOutputMask: front-face only, HPOS implicit
+
+Decoded against the `# attributeOutputMask` line in
+`sce-cgcdisasm` output:
+
+```
+identity_v       (HPOS only)        → 0x0000  ("nothing" — HPOS implicit)
+identity_color_v (HPOS + COL0)      → 0x0001  ("FrontDiffuse")
+mvp_passthrough_v(HPOS + COL0)      → 0x0001
+probe_tc_v       (HPOS + TC0)       → 0x4000
+```
+
+Bit layout: bit 0 = COL0 (FrontDiffuse), bit 1 = COL1 (FrontSpecular),
+bit 2 = BFC0 (BackDiffuse), bit 3 = BFC1 (BackSpecular), bit 4 = FOGC,
+bit 5 = PSZ, bits 14-21 = TC0..TC7.  HPOS contributes nothing.
+
+PSL1GHT cgcomp also sets the back-face bit when COL0/COL1 is written
+(`outputMask |= (4 << ...)`), making it `0x0005` for COL0.  sce-cgc
+does NOT — only the front-face bit.  Our `VpAssembler` follows
+sce-cgc.
+
+### VP semantic → CGresource mapping
+
+Inputs use NVIDIA's auto-bind to vertex attributes (CG_ATTR0..ATTR15):
+
+| Cg semantic    | CGresource enum | numeric        |
+|:---------------|:----------------|---------------:|
+| `: POSITION`   | CG_ATTR0        | 2113 (0x0841)  |
+| `: BLENDWEIGHT`| CG_ATTR1        | 2114 (0x0842)  |
+| `: NORMAL`     | CG_ATTR2        | 2115 (0x0843)  |
+| `: COLOR`      | CG_ATTR3        | 2116 (0x0844)  |
+| `: COLOR1`     | CG_ATTR4        | 2117 (0x0845)  |
+| `: TEXCOORDn`  | CG_ATTR(8+n)    | 2121+n (0x0848+n)|
+
+Outputs use the post-rasteriser bank (CG_HPOS, CG_COL0, CG_TEX0+n):
+
+| Cg semantic    | CGresource enum | numeric        |
+|:---------------|:----------------|---------------:|
+| out `: POSITION` / `: HPOS` | CG_HPOS  | 2243 (0x08c3) |
+| out `: COLOR` / `: COL0`    | CG_COL0  | 2245 (0x08c5) |
+| out `: COLOR1`              | CG_COL1  | 2246 (0x08c6) |
+| out `: TEXCOORDn` / `: TEXn`| CG_TEX0+n | 2179+n (0x0883+n) |
+
+(Note: VP `out : TEXCOORDn` uses CG_TEX0+n = 0x0883+n, NOT
+CG_TEXCOORD0+n = 0x0c94+n which is the FP input variant.  Different
+resource class for different roles.)
+
+Uniforms land in the const bank — single resource code:
+
+| param kind                  | CGresource | numeric       | resIndex                       |
+|:----------------------------|:-----------|--------------:|:--------------------------------|
+| `uniform float4 / scalar`   | CG_C       | 2178 (0x0882) | absolute c[N] (top-down from 467) |
+| `uniform float4x4`          | CG_C       | 2178 (0x0882) | first row's c[N] (bottom-up from 256) |
+
+### Matrix uniforms expand to parent + N rows
+
+A `uniform float4x4 mvp` becomes 5 CgBinaryParameter entries in the
+table:
+
+| index | type      | name      | resIndex |
+|------:|:----------|:----------|---------:|
+| n     | CG_FLOAT4x4 (0x428) | `mvp`     | base    |
+| n+1   | CG_FLOAT4   (0x418) | `mvp[0]`  | base    |
+| n+2   | CG_FLOAT4   (0x418) | `mvp[1]`  | base+1  |
+| n+3   | CG_FLOAT4   (0x418) | `mvp[2]`  | base+2  |
+| n+4   | CG_FLOAT4   (0x418) | `mvp[3]`  | base+3  |
+
+All five share the same `paramno` (the user-visible parameter index).
+Confirmed: 688-byte `mvp_passthrough_v.vpo` byte-matches when emitted
+this way (verified end-to-end via `tests/run_diff.sh`).
+
+### Struct parameters: NOT yet supported in container emit
+
+When a VP entry-point takes a struct (e.g. `VOUT main(VIN input)`),
+sce-cgc names the synthesized field params as `<param-name>.<field>`
+for inputs and `<func-name>.<field>` for outputs (e.g. `input.pos`,
+`main.pos`).  Our IR builder fully flattens struct params into
+`LoadAttribute` / `StoreOutput` instructions and loses the original
+parameter name + struct field name.
+
+The container emitter detects this by looking for a `void`-typed or
+nameless IR parameter and bails with a diagnostic.  The diff harness
+falls back to ucode-only diff for those shaders (`identity_v.cg`,
+`identity_color_v.cg`).  Fixing this needs IR-level changes:
+preserve the original entry-point parameter struct as an
+IRParameter, and have LoadAttribute / StoreOutput carry both the
+param name and the field name.
+
 ## .fpo container layout (verified 2026-04-18)
 
 Reading SDK 475.001's `Cg/cgBinary.h` for the struct definitions and

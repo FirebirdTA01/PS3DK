@@ -24,6 +24,7 @@
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
 #include "sony_container_fp.h"
+#include "sony_container_vp.h"
 
 namespace
 {
@@ -267,6 +268,7 @@ int main(int argc, char** argv)
 
     nv40::UcodeOutput  ucode;
     nv40::FpAttributes fpAttrs;
+    nv40::VpAttributes vpAttrs;
     if (stage == ShaderStage::Fragment)
     {
         nv40::FpEmitResult r = nv40::emitFragmentProgramEx(*irModule, ctx.entryName);
@@ -275,7 +277,9 @@ int main(int argc, char** argv)
     }
     else
     {
-        ucode = nv40::emitVertexProgram(*irModule, ctx.entryName);
+        nv40::VpEmitResult r = nv40::emitVertexProgramEx(*irModule, ctx.entryName);
+        ucode   = std::move(r.ucode);
+        vpAttrs = r.attrs;
     }
 
     for (const auto& diag : ucode.diagnostics)
@@ -291,19 +295,33 @@ int main(int argc, char** argv)
 
     if (!ctx.containerOutPath.empty())
     {
-        if (stage != ShaderStage::Fragment)
+        std::vector<uint8_t>     containerBytes;
+        std::vector<std::string> diagnostics;
+        bool                     containerOk = false;
+
+        if (stage == ShaderStage::Fragment)
         {
-            std::fprintf(stderr,
-                "rsx-cg-compiler: --emit-container only supports sce_fp_rsx for now\n");
-            return 1;
+            sony::ContainerOptions copts;
+            copts.alphakillSamplers = ctx.alphakillSamplers;
+            sony::ContainerResult cr = sony::emitFragmentContainer(
+                *irModule, ctx.entryName, ucode.words, fpAttrs, copts);
+            containerBytes = std::move(cr.bytes);
+            diagnostics    = std::move(cr.diagnostics);
+            containerOk    = cr.ok;
         }
-        sony::ContainerOptions copts;
-        copts.alphakillSamplers = ctx.alphakillSamplers;
-        sony::ContainerResult cr = sony::emitFragmentContainer(
-            *irModule, ctx.entryName, ucode.words, fpAttrs, copts);
-        for (const auto& d : cr.diagnostics)
+        else
+        {
+            sony::VpContainerResult cr = sony::emitVertexContainer(
+                *irModule, ctx.entryName, ucode.words, vpAttrs);
+            containerBytes = std::move(cr.bytes);
+            diagnostics    = std::move(cr.diagnostics);
+            containerOk    = cr.ok;
+        }
+
+        for (const auto& d : diagnostics)
             std::fprintf(stderr, "%s\n", d.c_str());
-        if (!cr.ok)
+
+        if (!containerOk)
         {
             std::fprintf(stderr,
                 "rsx-cg-compiler: container emit failed for %s\n",
@@ -318,8 +336,8 @@ int main(int argc, char** argv)
                 ctx.containerOutPath.c_str());
             return 1;
         }
-        of.write(reinterpret_cast<const char*>(cr.bytes.data()),
-                 static_cast<std::streamsize>(cr.bytes.size()));
+        of.write(reinterpret_cast<const char*>(containerBytes.data()),
+                 static_cast<std::streamsize>(containerBytes.size()));
         if (!of)
         {
             std::fprintf(stderr, "rsx-cg-compiler: write failed\n");

@@ -51,9 +51,28 @@ struct FpEmitResult
     FpAttributes attrs;
 };
 
+// Fields needed to populate the CgBinaryVertexProgram subtype of a
+// .vpo container.  Filled by lowerVertexProgram alongside ucode
+// emission and surfaced via emitVertexProgramEx.
+struct VpAttributes
+{
+    uint32_t instructionSlot     = 0;        // load address; non-zero enables indexed reads
+    uint32_t registerCount       = 1;        // R registers used; sce-cgc minimum is 1
+    uint32_t attributeInputMask  = 0;        // bit n iff v[n] is read
+    uint32_t attributeOutputMask = 0;        // SET_VERTEX_ATTRIB_OUTPUT_MASK bits, front-face only
+    uint32_t userClipMask        = 0;        // user clip plane enables
+};
+
+struct VpEmitResult
+{
+    UcodeOutput  ucode;
+    VpAttributes attrs;
+};
+
 UcodeOutput  emitVertexProgram    (const IRModule& module, const std::string& entry);
 UcodeOutput  emitFragmentProgram  (const IRModule& module, const std::string& entry);
 FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry);
+VpEmitResult emitVertexProgramEx  (const IRModule& module, const std::string& entry);
 
 }  // namespace nv40
 

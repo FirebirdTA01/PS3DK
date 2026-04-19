@@ -217,7 +217,8 @@ static inline void arithSlots(ArithOp op, int& slotA, int& slotB)
     }
 }
 
-UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
+UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
+                               VpAttributes* attrsOut)
 {
     UcodeOutput out;
     VpAssembler asm_;
@@ -589,6 +590,17 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry)
     asm_.markLast();
     out.words = asm_.words();
     out.ok    = true;
+
+    if (attrsOut)
+    {
+        VpAttributes attrs;
+        attrs.attributeInputMask  = asm_.inputMask();
+        attrs.attributeOutputMask = asm_.outputMask();
+        const int regs = asm_.numTempRegs();
+        attrs.registerCount = regs > 0 ? static_cast<uint32_t>(regs) : 1u;
+        // instructionSlot / userClipMask remain at sce-cgc defaults (0).
+        *attrsOut = attrs;
+    }
     return out;
 }
 
