@@ -1,0 +1,15 @@
+// Ternary Select where the false-branch is an inline literal vec4.
+//
+// Same three-block SGT + MOV + MOV(EQ.x) pattern as
+// ternary_select_f.cg — only the final conditional MOV's inline
+// tail block is a literal `{0.1, 0.2, 0.3, 1.0}` instead of a
+// zero-init uniform slot.  Literal branches need no
+// CgBinaryEmbeddedConstant record (no runtime patching) and do not
+// appear in the parameter table.
+void main(
+    float4 vcol      : COLOR,
+    uniform float4 a,
+    out float4 color : COLOR)
+{
+    color = (vcol.x > 0.5f) ? a : float4(0.1f, 0.2f, 0.3f, 1.0f);
+}
