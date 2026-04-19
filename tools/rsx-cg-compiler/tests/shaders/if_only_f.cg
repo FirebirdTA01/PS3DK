@@ -1,0 +1,18 @@
+// If-without-else, uniform default.  The entry-block StoreOutput
+// becomes the "default" branch of the synthesised Select; the then-
+// block stout becomes the "true" branch.  Unlike a full if-else,
+// sce-cgc schedules this as a ternary — preload the TRUE branch,
+// conditional EQ overwrite with the default (when the condition was
+// false).  See nv40_if_convert.cpp Shape 2 for the rationale.
+void main(
+    float4 vcol : COLOR,
+    uniform float4 defaultColor,
+    uniform float4 a,
+    out float4 color : COLOR)
+{
+    color = defaultColor;
+    if (vcol.x > 0.5f)
+    {
+        color = a;
+    }
+}

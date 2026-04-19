@@ -273,6 +273,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         IRValueID cmpId    = 0;
         IRValueID trueId   = 0;  // value when condition is TRUE
         IRValueID falseId  = 0;
+        // sce-cgc schedules ternary vs if-else differently:
+        //   ternary  → preload `trueId`, conditional EQ-write `falseId`
+        //   if-else  → preload `falseId`, conditional NE-write `trueId`
+        // The IR conveys the choice through IRInstruction::componentIndex
+        // (set by nv40_if_convert).
+        bool      ifElseSchedule = false;
     };
     std::unordered_map<IRValueID, SelectBinding> valueToSelect;
 
@@ -551,9 +557,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             {
                 if (inst.operands.size() < 3) break;
                 SelectBinding sb;
-                sb.cmpId   = inst.operands[0];
-                sb.trueId  = inst.operands[1];
-                sb.falseId = inst.operands[2];
+                sb.cmpId           = inst.operands[0];
+                sb.trueId          = inst.operands[1];
+                sb.falseId         = inst.operands[2];
+                sb.ifElseSchedule  = (inst.componentIndex == 1);
                 valueToSelect[inst.result] = sb;
                 break;
             }
@@ -1291,12 +1298,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
 
                     // Decide which branch goes in the unconditional
-                    // (preload) MOV vs the conditional MOV — varyings
-                    // can't be preloaded (they're read via SRC0=INPUT,
-                    // no inline block), so they always ride the
-                    // conditional slot.  Flip the test code when the
-                    // trueBranch is the varying — the MOV with CC
-                    // tests NE (condition-was-true) instead of EQ.
+                    // (preload) MOV vs the conditional MOV.  Three
+                    // ordering constraints, in priority order:
+                    //   1. Varyings can't be preloaded (they route via
+                    //      SRC0=INPUT, no inline block).  If the true
+                    //      branch is a varying and the false isn't,
+                    //      swap so the varying rides the conditional
+                    //      slot and flip EQ → NE to match semantics.
+                    //   2. If the Select was synthesized from an
+                    //      if-else statement (componentIndex=1 set by
+                    //      nv40_if_convert), match sce-cgc's if-else
+                    //      schedule: preload false, conditional NE-
+                    //      write true.  Ternary expressions keep the
+                    //      "preload true" default.
                     BranchInfo preloadBr      = trueBr;
                     BranchInfo conditionalBr  = falseBr;
                     uint8_t    condCode       = NVFX_FP_OP_COND_EQ;
@@ -1313,6 +1327,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         out.diagnostics.push_back(
                             "nv40-fp: Select: two varying branches not yet supported");
                         return out;
+                    }
+                    else if (sb.ifElseSchedule)
+                    {
+                        preloadBr     = falseBr;
+                        conditionalBr = trueBr;
+                        condCode      = NVFX_FP_OP_COND_NE;
                     }
 
                     auto makeBranchSrc0 = [&](const BranchInfo& bi,
