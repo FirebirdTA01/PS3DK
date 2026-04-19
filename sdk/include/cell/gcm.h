@@ -86,12 +86,35 @@ typedef struct {
     uint32_t  coreFrequency;
 } CellGcmConfig;
 
-/* CellGcmSurface aliased onto PSL1GHT's gcmSurface.  Layouts are
- * byte-identical (same 33 fields in the same order — verified against
- * Sony's gcm_struct.h); user code that fills a CellGcmSurface and
- * passes it to cellGcmSetSurface gets reinterpreted as gcmSurface * by
- * the cellGcmSetSurface forwarder. */
-typedef gcmSurface           CellGcmSurface;
+/* CellGcmSurface is byte-identical to PSL1GHT's gcmSurface (same 33
+ * fields in the same order — verified against Sony's gcm_struct.h);
+ * user code that fills a CellGcmSurface and passes it to
+ * cellGcmSetSurface gets reinterpreted as gcmSurface * by the
+ * cellGcmSetSurface forwarder.
+ *
+ * Defined here as our own struct (not a typedef of gcmSurface) so we
+ * can expose Sony's lower-case `.antialias` alongside PSL1GHT's
+ * `.antiAlias` via an anonymous union without editing PSL1GHT's
+ * header.  Previously carried as PSL1GHT patch 0025; moved here
+ * 2026-04-19 to keep upstream unmodified. */
+typedef struct _cellGcmSurface {
+    uint8_t  type;
+    union { uint8_t antiAlias; uint8_t antialias; };
+    uint8_t  colorFormat;
+    uint8_t  colorTarget;
+    uint8_t  colorLocation[4];    /* GCM_MAX_MRT_COUNT == 4 */
+    uint32_t colorOffset[4];
+    uint32_t colorPitch[4];
+    uint8_t  depthFormat;
+    uint8_t  depthLocation;
+    uint8_t  _pad[2];
+    uint32_t depthOffset;
+    uint32_t depthPitch;
+    uint16_t width;
+    uint16_t height;
+    uint16_t x;
+    uint16_t y;
+} CellGcmSurface;
 
 /* CellGcmTexture aliased onto PSL1GHT's gcmTexture.  Both have the
  * same 12-field layout (format u8, mipmap u8, dimension u8, cubemap u8,
@@ -161,12 +184,20 @@ static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
  * via a full-width local then mirror-assign with a cast so Sony source
  * that subsequently reads `gCellGcmCurrentContext` (== gGcmContext)
  * finds the same pointer PSL1GHT stored. */
+/* Forward declaration: the native FIFO-wrap callback installer lives
+ * in libgcm_cmd.  We override the firmware default installed by
+ * rsxInit / gcmInitBodyEx because it doesn't advance PUT in the
+ * wrap sequence (see <cell/gcm/ps3tc_fifo_wrap.h> for the bug
+ * details). */
+#include <cell/gcm/ps3tc_fifo_wrap.h>
+
 static inline int32_t cellGcmInit(uint32_t cmdSize, uint32_t ioSize, void *ioAddress)
 {
 	gcmContextData *tmp = NULL;
 	s32 rc = rsxInit(&tmp, cmdSize, ioSize, ioAddress);
 	if (rc == 0) {
 		gGcmContext = (gcmContextData *)(uintptr_t)tmp;
+		ps3tc_fifo_wrap_install(tmp);
 	}
 	return (int32_t)rc;
 }
