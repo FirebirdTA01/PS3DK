@@ -84,13 +84,15 @@ set(SRC_NV40
     ${NV40_DIR}/nv40_emit.cpp
     ${NV40_DIR}/nv40_vp_assembler.cpp
     ${NV40_DIR}/nv40_vp_emit.cpp
+    ${NV40_DIR}/nv40_fp_assembler.cpp
     ${NV40_DIR}/nv40_fp_emit.cpp
 )
 
-# NEW: Sony container emitter (this tree).  Populated in Stage 4.
+# Sony container emitter — wraps NV40 ucode in a CgBinaryProgram
+# (.fpo / .vpo) so the runtime can consume it via cellGcmCgInitProgram.
 set(SRC_CONTAINER
-    # ${SRC_DIR}/sony_container_fp.cpp
-    # ${SRC_DIR}/sony_container_vp.cpp
+    ${SRC_DIR}/sony_container_fp.cpp
+    # ${SRC_DIR}/sony_container_vp.cpp  — Stage 5
 )
 
 # Driver / entry point.

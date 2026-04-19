@@ -248,11 +248,189 @@ Implementation note for `rsx-cg-compiler`: emit instruction bytes in
 logical form, then halfword-swap at the last step before writing to
 the `.fpo` ucode blob.  Byte-exact match against sce-cgc is the gate.
 
+### Source-operand encoding (identity_f.cg ground truth)
+
+Cross-referenced sce-cgc's bytes against PSL1GHT cgcomp's
+`emit_src` (compilerfp.cpp) and decoded each src word:
+
+| logical word    | role                               | meaning |
+|:----------------|:-----------------------------------|:--------|
+| `hw[1] = 0x1c9dc801` | SRC0 = INPUT bank, COL0       | TYPE_INPUT(1) at bits 0-1; identity swizzle (XYZW) at bits 9-16; cc_cond=NVFX_COND_TR(7) at bits 18-20; identity cond_swz (X,Y,Z,W) at bits 21-28 |
+| `hw[2] = 0x0001c800` | SRC1 = NONE (unused default)  | TYPE_TEMP(0) + identity swizzle.  All other bits clear. |
+| `hw[3] = 0x3fe1c800` | SRC2 = NONE + ADDR_INDEX default | TYPE_TEMP(0) + identity swizzle, plus the high bits `0x7fc << NV40_FP_OP_ADDR_INDEX_SHIFT` (= `0x3fe00000`). |
+
+The high bits in `hw[3]` are key: PSL1GHT cgcomp only writes
+`(0x7fc << NV40_FP_OP_ADDR_INDEX_SHIFT)` when the input source is a
+TC (texcoord) varying — gating perspective-correct interpolation.
+**sce-cgc applies the same mask whenever ANY varying input is read**,
+including COL0/COL1/POSITION/etc.  The bits are inert when the
+INDEX_INPUT bit (1<<30) isn't set, so this is a "default safe value"
+sce-cgc emits unconditionally for varying reads.
+
+Our `FpAssembler::emitSrc` writes the mask in the `NVFXSR_INPUT`
+arm, matching sce-cgc.  If a future shader is byte-exact with sce-cgc
+*without* the mask in some case, the rule will need narrowing.
+
+### TEX opcode (sampler2D `tex2D(tex, uv)` → `TEXR R0, f[TEX0], TEX0`)
+
+Captured from `texture_sample_f.cg`:
+
+```
+ucode (16 bytes, 1 instruction):
+  9e011700 c8011c9d c8000001 c8003fe1   (on disk)
+  17009e01 1c9dc801 0001c800 3fe1c800   (logical, after halfword swap)
+```
+
+Decoded against `NVFX_FP_OP_*`:
+
+| field         | bits   | value | meaning                        |
+|:--------------|:-------|------:|:-------------------------------|
+| PROGRAM_END   | 0      | 1     | last instruction               |
+| OUT_REG       | 1-6    | 0     | R0 (= result.color)            |
+| OUT_REG_HALF  | 7      | 0     | fp32 result (TEX**R**)         |
+| OUTMASK       | 9-12   | 0xF   | xyzw                           |
+| INPUT_SRC     | 13-16  | 4     | TC0 (NVFX_FP_OP_INPUT_SRC_TC0) |
+| TEX_UNIT      | 17-20  | 0     | sampler bound to tex unit 0    |
+| OPCODE        | 24-29  | 0x17  | TEX (NVFX_FP_OP_OPCODE_TEX)    |
+
+The SRC0 / SRC1 / SRC2 words are bit-identical to `identity_f`'s.
+The TEX instruction is essentially "MOV with opcode swapped + TC0
+input + TEX_UNIT field" — no new source-operand encoding to learn.
+
+**Sampler → tex-unit binding:** sce-cgc assigns texture units in
+declaration order starting from 0.  Single sampler `tex` →
+`TEXUNIT0` (visible in disasm: `#1: sampler2D: tex: : TEXUNIT0`).
+Our `lowerFragmentProgram` mirrors this with a `nextTexUnit`
+counter that bumps on each `Uniform` parameter whose IRType is
+`Sampler2D` or `SamplerCube`.
+
+## .fpo container layout (verified 2026-04-18)
+
+Reading SDK 475.001's `Cg/cgBinary.h` for the struct definitions and
+cross-checking against `identity_f.fpo` and `tex_f.fpo` from sce-cgc:
+
+```
++------------------------------------------------------------+
+| 0x00  CgBinaryProgram header (32 bytes, big-endian)        |
+|       profile / revision / totalSize / parameterCount /    |
+|       parameterArray / program / ucodeSize / ucode         |
++------------------------------------------------------------+
+| 0x20  CgBinaryParameter[parameterCount] (48 bytes each)    |
++------------------------------------------------------------+
+| <X>   strings region (per-param: semantic\0 then name\0)   |
+|       padded with NULs to a 16-byte boundary               |
++------------------------------------------------------------+
+| <Y>   CgBinaryFragmentProgram subtype (22 bytes content    |
+|       + padding to a 16-byte boundary)                     |
++------------------------------------------------------------+
+| <Z>   ucode (16-byte aligned, halfword-swapped on disk)    |
++------------------------------------------------------------+
+```
+
+### CgBinaryFragmentProgram fields (cgBinary.h):
+
+| offset | size | field                  | notes                                    |
+|-------:|-----:|:-----------------------|:-----------------------------------------|
+|  0     | 4    | instructionCount       | total NV40 FP instructions               |
+|  4     | 4    | attributeInputMask     | SET_VERTEX_ATTRIB_OUTPUT_MASK bits — bits 0+2 for COLOR (front+back diffuse), bit 14+n for TC*n* |
+|  8     | 4    | partialTexType         | 2 bits per texunit, 0=full load (default) |
+| 12     | 2    | texCoordsInputMask     | bit n iff TEXCOORD*n* read                |
+| 14     | 2    | texCoords2D            | bit n iff TEXCOORD*n* sampled as 2D — sce-cgc default is `0xFFFF` (all set) |
+| 16     | 2    | texCoordsCentroid      | (`0` for everything we've seen)          |
+| 18     | 1    | registerCount          | R-register count, sce-cgc minimum is 2   |
+| 19     | 1    | outputFromH0           | 1 iff R0 is fp16 (= H0 in disasm)        |
+| 20     | 1    | depthReplace           | 1 iff DEPTH output written               |
+| 21     | 1    | pixelKill              | 1 iff KIL opcode emitted                 |
+
+### Strings — per-parameter, NOT deduplicated
+
+Order: walk parameters in declaration order; for each, emit the
+semantic string (if non-empty) followed by the name string.  Both
+NUL-terminated.  Region padded with NULs to a 16-byte boundary.
+
+`identity_f.fpo` (two `: COLOR` params) emits "COLOR" twice — sce-cgc
+does NOT collapse duplicates.  Verified:
+
+```
+0x80: COLOR\0color_in\0COLOR\0color_out\0\0
+```
+
+### Strings preserve source spelling
+
+sce-cgc keeps the user's exact spelling for the semantic string:
+- Source `: TEXCOORD0` → string "TEXCOORD0"
+- Source `: TEXCOORD`  → string "TEXCOORD"
+
+The resource code (`res` field) is the same in both cases
+(CG_TEXCOORD0 = 3220 / 0x0c94), only the string differs.  Our front
+end's stripped `semanticName` collapses both to "TEXCOORD"; we now
+also store the raw source spelling in `Semantic::rawName` →
+`IRParameter::rawSemanticName` and use it in the container emitter.
+
+### Resource code mapping (FP profile)
+
+| Cg semantic                | CGresource enum  | numeric |
+|:---------------------------|:-----------------|--------:|
+| `: COLOR` / `: COLOR0`     | CG_COLOR0        | 2757 (0x0ac5) |
+| `: COLOR1`                 | CG_COLOR1        | 2758 (0x0ac6) |
+| `: TEXCOORD` *n*           | CG_TEXCOORD0+n   | 3220+n (0x0c94+n) |
+| sampler bound to TEXUNIT n | CG_TEXUNIT0+n    | 2048+n (0x0800+n) |
+
+(VP profile uses different codes — `: COLOR` there is CG_COL0 =
+2245 / 0x08c5.  The two profiles have disjoint enum subsets.)
+
+### CGtype values (subset, from cg_datatypes.h, base = 1024)
+
+| CG type        | numeric |
+|:---------------|--------:|
+| CG_FLOAT       | 1045 (0x0415) |
+| CG_FLOAT2      | 1046 (0x0416) |
+| CG_FLOAT3      | 1047 (0x0417) |
+| CG_FLOAT4      | 1048 (0x0418) |
+| CG_FLOAT4x4    | 1064 (0x0428) |
+| CG_SAMPLER2D   | 1066 (0x042a) |
+| CG_SAMPLERCUBE | 1069 (0x042d) |
+
+### CGenum values (subset, from cg_enums.h)
+
+| name        | numeric |
+|:------------|--------:|
+| CG_IN       | 4097 (0x1001) |
+| CG_OUT      | 4098 (0x1002) |
+| CG_INOUT    | 4099 (0x1003) |
+| CG_VARYING  | 4101 (0x1005) |
+| CG_UNIFORM  | 4102 (0x1006) |
+
 ## Open questions
 
 - What's in c[0..255]? (reserved but for what — driver?  card state?)
 - Full `attributeOutputMask` bit encoding — need more shader variants.
-- Fragment profile (`sce_fp_rsx`) const allocation — not yet investigated.
+- Fragment profile (`sce_fp_rsx`) const allocation — not yet investigated
+  (FP consts are inserted as inline 16-byte blocks AFTER the instruction
+  that uses them, per the renouveau notes in nvfx_shader.h's header
+  comment, but sce-cgc's specific layout and `embeddedConst` field
+  haven't been mapped against real shaders yet).
+- `#pragma alphakill <samplerName>`: **container-level only** (verified
+  2026-04-18 against sce-cgc).  Probed `tex2D` shader with and without
+  `#pragma alphakill tex` — ucode bytes are bit-identical
+  (`9e011700 c8011c9d c8000001 c8003fe1` in both).  The pragma adds a
+  single extra `CgBinaryParameter` entry to the `.fpo`:
+    - `type = 0x418` (CG_FLOAT4)
+    - `res = 0x0cb8` (kill marker — new resource code, not in the
+      previously catalogued enum)
+    - `var = 0x1005` (varying)
+    - `name = "$kill_0000"` (synthetic, indexed by sampler order)
+    - `direction = 0x1002` (CG_OUT)
+    - `paramno = 0xFFFFFFFF` (synthetic, no user param number)
+    - `resIndex = 0xFFFFFFFF`
+  The runtime presumably scans for parameters with `res=0xcb8` and
+  configures the GCM RSX state to discard fragments where that
+  sampler returns alpha == 0.  Implementation lands once the `.fpo`
+  container emitter exists — until then the diff harness (which
+  compares ucode only) cannot exercise this feature.
+
+  Previous-session hypothesis about a "byte-1 bit 0x80" toggle in
+  TEXR encoding was wrong — superseded by this finding.
 - Array uniforms (`uniform float4 arr[8]`) — do they occupy contiguous
   slots in one region or the other?
 - Is "simple first / multi-insn last" the complete ordering rule, or

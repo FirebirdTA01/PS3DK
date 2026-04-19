@@ -23,6 +23,7 @@
 #include "ir_builder.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
+#include "sony_container_fp.h"
 
 namespace
 {
@@ -36,6 +37,7 @@ struct CompilerContext
     std::string              inputFile;
     std::string              entryName = "main";
     std::vector<std::string> includeDirs;
+    std::string              containerOutPath;  // --emit-container <path>
     bool                     noStdLib = false;
 
     enum class Profile { Unknown, FragmentRsx, VertexRsx };
@@ -146,6 +148,10 @@ int main(int argc, char** argv)
         {
             dumpIr = true;
         }
+        else if (arg == "--emit-container" && i + 1 < argc)
+        {
+            ctx.containerOutPath = argv[++i];
+        }
         else if (!arg.empty() && arg[0] == '-')
         {
             std::fprintf(stderr, "rsx-cg-compiler: unknown option '%s'\n", arg.c_str());
@@ -253,10 +259,18 @@ int main(int argc, char** argv)
               << "\n";
     std::cout << "IR functions: " << irModule->functions.size() << "\n";
 
-    const nv40::UcodeOutput ucode =
-        (stage == ShaderStage::Fragment)
-            ? nv40::emitFragmentProgram(*irModule, ctx.entryName)
-            : nv40::emitVertexProgram  (*irModule, ctx.entryName);
+    nv40::UcodeOutput  ucode;
+    nv40::FpAttributes fpAttrs;
+    if (stage == ShaderStage::Fragment)
+    {
+        nv40::FpEmitResult r = nv40::emitFragmentProgramEx(*irModule, ctx.entryName);
+        ucode   = std::move(r.ucode);
+        fpAttrs = r.attrs;
+    }
+    else
+    {
+        ucode = nv40::emitVertexProgram(*irModule, ctx.entryName);
+    }
 
     for (const auto& diag : ucode.diagnostics)
     {
@@ -268,6 +282,44 @@ int main(int argc, char** argv)
         std::cout << "NV40 emit: not ready (skeleton stage).\n";
         return 0;
     }
+
+    if (!ctx.containerOutPath.empty())
+    {
+        if (stage != ShaderStage::Fragment)
+        {
+            std::fprintf(stderr,
+                "rsx-cg-compiler: --emit-container only supports sce_fp_rsx for now\n");
+            return 1;
+        }
+        sony::ContainerResult cr = sony::emitFragmentContainer(
+            *irModule, ctx.entryName, ucode.words, fpAttrs);
+        for (const auto& d : cr.diagnostics)
+            std::fprintf(stderr, "%s\n", d.c_str());
+        if (!cr.ok)
+        {
+            std::fprintf(stderr,
+                "rsx-cg-compiler: container emit failed for %s\n",
+                ctx.inputFile.c_str());
+            return 1;
+        }
+        std::ofstream of(ctx.containerOutPath, std::ios::binary | std::ios::trunc);
+        if (!of)
+        {
+            std::fprintf(stderr,
+                "rsx-cg-compiler: cannot open %s for writing\n",
+                ctx.containerOutPath.c_str());
+            return 1;
+        }
+        of.write(reinterpret_cast<const char*>(cr.bytes.data()),
+                 static_cast<std::streamsize>(cr.bytes.size()));
+        if (!of)
+        {
+            std::fprintf(stderr, "rsx-cg-compiler: write failed\n");
+            return 1;
+        }
+        return 0;
+    }
+
     std::cout << "NV40 ucode words: " << ucode.words.size() << "\n";
     for (size_t w = 0; w < ucode.words.size(); ++w)
     {

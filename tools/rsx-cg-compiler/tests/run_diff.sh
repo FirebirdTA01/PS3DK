@@ -9,14 +9,15 @@
 # in functional code review.  This harness is the authoritative pass/
 # fail gate for every rsx-cg-compiler change.
 #
-# Scope right now:
-#   - raw NV40 ucode words (what rsx-cg-compiler emits)
-#   - extracted from Sony .vpo via the ucode offset recorded in the .vpo
-#     header (u32 at offset 0x00 = total size, instruction count at 0x04,
-#     code blob pointer at 0x0C → 0xD0 for the identity case)
-#
-# We intentionally do *not* compare the full .vpo container until the
-# rsx-cg-compiler Sony-container emitter lands (Phase 8 stage 4).
+# Scope:
+#   - VP shaders (*_v.cg): raw NV40 ucode words diff'd against the
+#     ucode region of sce-cgc's .vpo (extracted via the container's
+#     ucode offset/size fields).  Container-level diff for VP lands
+#     once tools/rsx-cg-compiler/src/sony_container_vp.cpp exists.
+#   - FP shaders (*_f.cg): full .fpo container diff (header +
+#     parameter table + strings + program subtype + ucode), via
+#     `--emit-container`.  This catches any deviation in the container
+#     bytes — exactly what the runtime consumes via cellGcmCgInitProgram.
 
 set -euo pipefail
 
@@ -94,26 +95,49 @@ for cg in "$SHADER_DIR"/*.cg; do
     name="$(basename "$cg" .cg)"
     profile=$(profile_of "$name.cg")
 
-    sce_vpo="$WORK_DIR/${name}_sce.vpo"
+    sce_out="$WORK_DIR/${name}_sce.bin"
     WINEDEBUG=-all wine "$SCE_CGC_EXE" --quiet --profile "$profile" \
-        -o "$sce_vpo" "$cg" >"$WORK_DIR/${name}.sce.log" 2>&1 || {
+        -o "$sce_out" "$cg" >"$WORK_DIR/${name}.sce.log" 2>&1 || {
             echo "[FAIL] $name: sce-cgc failed — see $WORK_DIR/${name}.sce.log" >&2
             overall_rc=1
             continue
         }
 
-    our_hex=$(collect_our_ucode "$cg" "$profile")
-    words=$((${#our_hex} / 8))
-    sce_hex=$(extract_vpo_ucode "$sce_vpo" "$words")
-
-    if [[ "$our_hex" == "$sce_hex" ]]; then
-        echo "[OK  ] $name ($words words match)"
-        passed=$((passed + 1))
+    if [[ "$profile" == "sce_fp_rsx" ]]; then
+        # Full-container diff for FP — captures header + params + strings + ucode.
+        our_out="$WORK_DIR/${name}_ours.bin"
+        if ! "$RSX_CG_COMPILER" --profile "$profile" \
+                --emit-container "$our_out" "$cg" \
+                >"$WORK_DIR/${name}.our.log" 2>&1; then
+            echo "[FAIL] $name: rsx-cg-compiler failed — see $WORK_DIR/${name}.our.log" >&2
+            overall_rc=1
+            continue
+        fi
+        if cmp -s "$our_out" "$sce_out"; then
+            sce_size=$(stat -c%s "$sce_out")
+            echo "[OK  ] $name ($sce_size bytes container match)"
+            passed=$((passed + 1))
+        else
+            echo "[FAIL] $name: .fpo container diverges from sce-cgc"
+            echo "       hex diff (ours -> sce):"
+            diff <(xxd "$our_out") <(xxd "$sce_out") | sed 's/^/         /' | head -20
+            overall_rc=1
+        fi
     else
-        echo "[FAIL] $name: ucode diverges from sce-cgc"
-        echo "       ours: $our_hex"
-        echo "       sce : $sce_hex"
-        overall_rc=1
+        # Ucode-only diff for VP (container emit not yet implemented).
+        our_hex=$(collect_our_ucode "$cg" "$profile")
+        words=$((${#our_hex} / 8))
+        sce_hex=$(extract_vpo_ucode "$sce_out" "$words")
+
+        if [[ "$our_hex" == "$sce_hex" ]]; then
+            echo "[OK  ] $name ($words ucode words match)"
+            passed=$((passed + 1))
+        else
+            echo "[FAIL] $name: ucode diverges from sce-cgc"
+            echo "       ours: $our_hex"
+            echo "       sce : $sce_hex"
+            overall_rc=1
+        fi
     fi
 done
 

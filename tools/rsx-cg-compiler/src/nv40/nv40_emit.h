@@ -29,8 +29,31 @@ struct UcodeOutput
     bool hasOutput() const { return ok && !words.empty(); }
 };
 
-UcodeOutput emitVertexProgram  (const IRModule& module, const std::string& entry);
-UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry);
+// Fields needed to populate the CgBinaryFragmentProgram subtype of a
+// .fpo container.  Filled by lowerFragmentProgram alongside ucode
+// emission and surfaced via emitFragmentProgramEx.
+struct FpAttributes
+{
+    uint32_t attributeInputMask  = 0;        // bits per FP varying read
+    uint32_t partialTexType      = 0;        // 2 bits per texunit; 0 = full load
+    uint16_t texCoordsInputMask  = 0;        // bit n = TEXCOORDn used
+    uint16_t texCoords2D         = 0xFFFFu;  // bit n = TEXCOORDn is 2D (sce-cgc default: all 1)
+    uint16_t texCoordsCentroid   = 0;
+    uint8_t  registerCount       = 2;        // sce-cgc minimum
+    uint8_t  outputFromH0        = 0;        // 1 iff R0 is fp16 (H0)
+    uint8_t  depthReplace        = 0;        // 1 iff DEPTH output written
+    uint8_t  pixelKill           = 0;        // 1 iff KIL opcode emitted
+};
+
+struct FpEmitResult
+{
+    UcodeOutput  ucode;
+    FpAttributes attrs;
+};
+
+UcodeOutput  emitVertexProgram    (const IRModule& module, const std::string& entry);
+UcodeOutput  emitFragmentProgram  (const IRModule& module, const std::string& entry);
+FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry);
 
 }  // namespace nv40
 
