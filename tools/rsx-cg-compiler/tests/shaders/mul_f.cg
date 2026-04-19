@@ -1,0 +1,18 @@
+// FP MUL: varying * uniform, single instruction.
+//
+// sce-cgc lowers to:
+//   MULR R0, f[COL0], tint;         # src0=INPUT(COL0), src1=CONST(inlined tint)
+//   <16 bytes zero-initialised — runtime patches tint>
+//
+// Operand-order canonicalisation differs from ADD: MUL uses
+// src0=INPUT, src1=CONST (opposite of ADD's src0=CONST, src1=INPUT).
+// Verified against sce-cgc byte probes — the canonical order is
+// independent of source-code operand order (tint*vcol and vcol*tint
+// produce identical bytes).
+void main(
+    float4 vcol      : COLOR,
+    uniform float4 tint,
+    out float4 color : COLOR)
+{
+    color = vcol * tint;
+}

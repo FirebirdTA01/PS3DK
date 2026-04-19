@@ -69,11 +69,12 @@ constexpr uint32_t kCgTexUnit0   = 2048u;  // 0x0800
 constexpr uint32_t kCgColor0     = 2757u;  // 0x0ac5  (FP COLOR semantic)
 constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
 
-// Sce-cgc's "kill marker" resource code — used on the synthetic
-// $kill_NNNN parameter that #pragma alphakill <samplerName> produces.
-// Not in the documented CG_BINDLOCATION_MACRO table; reverse-engineered
-// from sce-cgc output (see REVERSE_ENGINEERING.md "alphakill" section).
-constexpr uint32_t kCgKillMarker = 0x0cb8u;
+// CG_UNDEFINED = 3256 = 0x0cb8 — sce-cgc uses this resource code for
+// two cases: (1) FP uniforms without a specific binding, (2) the
+// synthetic `$kill_NNNN` parameters emitted by #pragma alphakill.
+// The runtime distinguishes via var / direction / embeddedConst.
+constexpr uint32_t kCgUndefined  = 3256u;  // 0x0cb8
+constexpr uint32_t kCgKillMarker = kCgUndefined;  // alphakill is res=UNDEFINED too
 
 // CGtype values.
 constexpr uint32_t kCgFloat       = 1045u;
@@ -186,6 +187,12 @@ ContainerResult emitFragmentContainer(
         uint32_t    direction;
         uint32_t    paramno;
         uint32_t    isReferenced = 1;
+        // Set by the FP-uniform pass below.  When non-empty, the
+        // string-region layout emits a CgBinaryEmbeddedConstant
+        // record right after the semantic (or at the start of the
+        // param's slot if no semantic) and writes its offset into
+        // the param entry's embeddedConst field.
+        std::vector<uint32_t> embeddedConstUcodeOffsets;
     };
 
     std::vector<ParamDesc> params;
@@ -216,9 +223,23 @@ ContainerResult emitFragmentContainer(
         }
         else if (p.storage == StorageQualifier::Uniform)
         {
-            d.res       = 0;  // const-bank resource code TBD
+            // FP non-sampler uniforms use res=CG_UNDEFINED because
+            // they're patched via the CgBinaryEmbeddedConstant inline
+            // blob mechanism rather than bound to a fixed slot.  The
+            // runtime identifies them by the embeddedConst offset.
+            d.res       = kCgUndefined;
             d.var       = kCgUniform;
             d.direction = kCgIn;
+
+            // Attach the per-use ucode offsets from the lowering pass.
+            for (const auto& eu : attrs.embeddedUniforms)
+            {
+                if (eu.entryParamIndex == i)
+                {
+                    d.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                    break;
+                }
+            }
         }
         else
         {
@@ -263,9 +284,21 @@ ContainerResult emitFragmentContainer(
     const uint32_t stringsStart   = headerSize + paramTableSize;
 
     std::vector<uint8_t> stringsBlob;
-    struct StringSlots { uint32_t semanticOffset = 0; uint32_t nameOffset = 0; };
+    struct StringSlots
+    {
+        uint32_t semanticOffset = 0;
+        uint32_t nameOffset     = 0;
+        uint32_t embeddedConstOffset = 0;
+    };
     std::vector<StringSlots> slots(params.size());
 
+    // Per-param sce-cgc layout order (verified 2026-04-18):
+    //   1. Semantic string (if any)
+    //   2. CgBinaryEmbeddedConstant record (if any) — 8-byte aligned
+    //      { u32 ucodeCount; u32 ucodeOffset[ucodeCount]; }
+    //   3. Name string
+    // Strings region as a whole is padded to a 16-byte boundary at the
+    // end (see padTo(out, 16) below).
     for (size_t i = 0; i < params.size(); ++i)
     {
         if (!params[i].semantic.empty())
@@ -273,6 +306,17 @@ ContainerResult emitFragmentContainer(
             slots[i].semanticOffset =
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             putString(stringsBlob, params[i].semantic);
+        }
+        if (!params[i].embeddedConstUcodeOffsets.empty())
+        {
+            // 8-byte align before the record.
+            while (stringsBlob.size() % 8) stringsBlob.push_back(0);
+            slots[i].embeddedConstOffset =
+                stringsStart + static_cast<uint32_t>(stringsBlob.size());
+            put32(stringsBlob,
+                  static_cast<uint32_t>(params[i].embeddedConstUcodeOffsets.size()));
+            for (uint32_t off : params[i].embeddedConstUcodeOffsets)
+                put32(stringsBlob, off);
         }
         if (!params[i].name.empty())
         {
@@ -319,7 +363,7 @@ ContainerResult emitFragmentContainer(
         put32(out, kInvalidIndex);              // resIndex (-1: not allocated by compiler)
         put32(out, slots[i].nameOffset);        // 0 if no name
         put32(out, 0);                          // defaultValue
-        put32(out, 0);                          // embeddedConst
+        put32(out, slots[i].embeddedConstOffset);
         put32(out, slots[i].semanticOffset);    // 0 if no semantic
         put32(out, d.direction);
         put32(out, d.paramno);

@@ -111,6 +111,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // single-sampler tex_f.cg case (sampler `tex` → TEXUNIT0).
     std::unordered_map<IRValueID, int> valueToTexUnit;
 
+    // FP uniform IR value → index into the entry's parameter list.
+    // FP uniforms (non-sampler) are inlined as 16-byte zero-initialised
+    // const blocks after each using instruction; the container emitter
+    // stitches the per-use offsets into CgBinaryEmbeddedConstant
+    // records so the runtime can patch the uniform's value in.
+    std::unordered_map<IRValueID, unsigned> valueToFpUniform;
+
     // Records a deferred TexSample — emit the TEX instruction at the
     // point of consumption (matches sce-cgc's `TEXR R0, f[TEX0], TEX0`
     // which writes straight to R0 with no temp).
@@ -120,6 +127,22 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         IRValueID uvId      = 0;
     };
     std::unordered_map<IRValueID, TexBinding> valueToTex;
+
+    // Deferred arithmetic op with one INPUT (varying) operand and one
+    // FP-uniform operand.  Emit at the point of consumption by a
+    // StoreOutput so the arithmetic result can flow straight to the
+    // output register.  Per sce-cgc byte probes:
+    //   - ADD emits src0=CONST(uniform), src1=INPUT(varying)
+    //   - MUL emits src0=INPUT(varying), src1=CONST(uniform)
+    //   (operand order in C source is ignored — sce-cgc canonicalises)
+    enum class FpArithOp { Add, Mul };
+    struct FpArithBinding
+    {
+        FpArithOp op;
+        IRValueID inputId   = 0;
+        IRValueID uniformId = 0;
+    };
+    std::unordered_map<IRValueID, FpArithBinding> valueToArith;
 
     // Literal `float4(k0, k1, k2, k3)` where all kN are constants —
     // deferred so the consuming StoreOutput can emit FENCBR + MOV +
@@ -135,13 +158,21 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
     int nextTexUnit = 0;
 
-    for (const auto& param : entry.parameters)
+    for (size_t pi = 0; pi < entry.parameters.size(); ++pi)
     {
+        const auto& param = entry.parameters[pi];
         const bool isSampler = (param.type.baseType == IRType::Sampler2D ||
                                 param.type.baseType == IRType::SamplerCube);
         if (param.storage == StorageQualifier::Uniform && isSampler)
         {
             valueToTexUnit[param.valueId] = nextTexUnit++;
+            continue;
+        }
+        if (param.storage == StorageQualifier::Uniform)
+        {
+            // Non-sampler FP uniform: inline-const block per use.
+            valueToFpUniform[param.valueId] = static_cast<unsigned>(pi);
+            attrs.embeddedUniforms.push_back({ static_cast<unsigned>(pi), {} });
             continue;
         }
 
@@ -193,6 +224,43 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
                 // tex2D(sampler, uv) — operands[0] = sampler, [1] = uv.
                 valueToTex[inst.result] = { inst.operands[0], inst.operands[1] };
+                break;
+            }
+
+            case IROp::Add:
+            case IROp::Mul:
+            {
+                if (inst.operands.size() < 2)
+                {
+                    out.diagnostics.push_back("nv40-fp: arithmetic op with <2 operands");
+                    return out;
+                }
+
+                const IRValueID a = inst.operands[0];
+                const IRValueID b = inst.operands[1];
+                auto aInput   = valueToInputSrc.find(a);
+                auto bInput   = valueToInputSrc.find(b);
+                auto aUniform = valueToFpUniform.find(a);
+                auto bUniform = valueToFpUniform.find(b);
+
+                FpArithBinding bind;
+                bind.op = (inst.op == IROp::Add) ? FpArithOp::Add : FpArithOp::Mul;
+                if (aInput != valueToInputSrc.end() && bUniform != valueToFpUniform.end())
+                {
+                    bind.inputId = a; bind.uniformId = b;
+                }
+                else if (aUniform != valueToFpUniform.end() && bInput != valueToInputSrc.end())
+                {
+                    bind.inputId = b; bind.uniformId = a;
+                }
+                else
+                {
+                    out.diagnostics.push_back(
+                        "nv40-fp: arithmetic ops supported only for (varying, uniform) pairs "
+                        "(uniform+uniform / literal arithmetic lands later)");
+                    return out;
+                }
+                valueToArith[inst.result] = bind;
                 break;
             }
 
@@ -315,6 +383,124 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
 
                     asm_.appendConstBlock(lcIt->second.vals);
+                    emittedSomething = true;
+                    break;
+                }
+
+                // Arithmetic (ADD / MUL) with one varying + one uniform:
+                // sce-cgc emits a single instruction with the uniform
+                // inlined as a zero-initialised 16-byte block after it.
+                // NO FENCBR here — sce-cgc only emits FENCBR before
+                // pure const-reading MOVs, verified against add_f and
+                // mul_f ucode byte probes.
+                auto arIt = valueToArith.find(srcId);
+                if (arIt != valueToArith.end())
+                {
+                    const auto& bind = arIt->second;
+                    auto iIt = valueToInputSrc.find(bind.inputId);
+                    auto uIt = valueToFpUniform.find(bind.uniformId);
+                    if (iIt == valueToInputSrc.end() ||
+                        uIt == valueToFpUniform.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: arithmetic operand failed to resolve");
+                        return out;
+                    }
+
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg inputReg = nvfx_reg(NVFXSR_INPUT, iIt->second);
+
+                    struct nvfx_src srcIn    = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src srcConst = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    struct nvfx_src src2     = nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    uint8_t opcode;
+                    struct nvfx_src slot0 = srcConst;
+                    struct nvfx_src slot1 = srcIn;
+                    if (bind.op == FpArithOp::Add)
+                    {
+                        opcode = NVFX_FP_OP_OPCODE_ADD;
+                        // ADD: src0=CONST, src1=INPUT (sce-cgc canonical)
+                        slot0 = srcConst;
+                        slot1 = srcIn;
+                    }
+                    else
+                    {
+                        opcode = NVFX_FP_OP_OPCODE_MUL;
+                        // MUL: src0=INPUT, src1=CONST (sce-cgc canonical)
+                        slot0 = srcIn;
+                        slot1 = srcConst;
+                    }
+
+                    struct nvfx_insn in = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        slot0, slot1, src2);
+                    asm_.emit(in, opcode);
+
+                    const uint32_t ucodeByteOffset = asm_.currentByteSize();
+                    for (auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == uIt->second)
+                        {
+                            eu.ucodeByteOffsets.push_back(ucodeByteOffset);
+                            break;
+                        }
+                    }
+
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+
+                    // Track varying-input mask bits.
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(iIt->second);
+                    if (iIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        iIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (iIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // FP uniform consumed directly (MOV R_out, uniform).
+                // Sce-cgc pattern:
+                //   FENCBR ;
+                //   MOVR R_out, c[inline] ;
+                //   <16 bytes zero-initialised — runtime patches>
+                auto uIt = valueToFpUniform.find(srcId);
+                if (uIt != valueToFpUniform.end())
+                {
+                    asm_.emitFencbr();
+
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_src src0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    struct nvfx_src src1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    struct nvfx_insn in = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        src0, src1, src2);
+                    asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+
+                    // Record the ucode offset of the inline-const
+                    // block we're about to append (4 u32 per block).
+                    const uint32_t ucodeByteOffset = asm_.currentByteSize();
+                    for (auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == uIt->second)
+                        {
+                            eu.ucodeByteOffsets.push_back(ucodeByteOffset);
+                            break;
+                        }
+                    }
+
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
                     emittedSomething = true;
                     break;
                 }

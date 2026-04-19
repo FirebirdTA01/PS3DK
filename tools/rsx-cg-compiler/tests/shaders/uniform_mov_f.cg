@@ -1,0 +1,23 @@
+// Simplest FP uniform use: write a uniform straight to the output.
+//
+// sce-cgc emits:
+//   FENCBR ;
+//   MOVR R0, tint;          # src0 = TYPE_CONST, inline block follows
+//   <16 bytes zero-initialised — runtime patches with tint's value>
+//
+// The CgBinaryParameter for `tint` has:
+//   type = CG_FLOAT4
+//   res  = CG_UNDEFINED  (0x0cb8 — no fixed binding)
+//   var  = CG_UNIFORM
+//   embeddedConst → CgBinaryEmbeddedConstant { count = 1, offset = 32 }
+//
+// The embeddedConst record lives in the container's strings region,
+// 8-byte aligned, AFTER any semantic string for this param.  The
+// runtime uses the offset list to patch the inline-const blocks when
+// the uniform is assigned at draw time.
+void main(
+    uniform float4 tint,
+    out float4 color : COLOR)
+{
+    color = tint;
+}

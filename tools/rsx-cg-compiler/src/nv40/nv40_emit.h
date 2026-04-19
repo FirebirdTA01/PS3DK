@@ -31,6 +31,19 @@ struct UcodeOutput
     bool hasOutput() const { return ok && !words.empty(); }
 };
 
+// Records every FP-uniform inline-const slot so the container emitter
+// can fill in CgBinaryEmbeddedConstant records + each param's
+// `embeddedConst` offset field.  Each entry is one FP uniform (keyed
+// by IR parameter index at the entry-point level), with the list of
+// byte offsets WITHIN THE UCODE BLOB where the uniform's value is
+// inlined as a 16-byte zero-initialised block.  The runtime patches
+// those offsets when the uniform is assigned.
+struct FpEmbeddedUniform
+{
+    unsigned              entryParamIndex = 0;  // index into entry->parameters
+    std::vector<uint32_t> ucodeByteOffsets;     // offsets relative to start of ucode blob
+};
+
 // Fields needed to populate the CgBinaryFragmentProgram subtype of a
 // .fpo container.  Filled by lowerFragmentProgram alongside ucode
 // emission and surfaced via emitFragmentProgramEx.
@@ -45,6 +58,8 @@ struct FpAttributes
     uint8_t  outputFromH0        = 0;        // 1 iff R0 is fp16 (H0)
     uint8_t  depthReplace        = 0;        // 1 iff DEPTH output written
     uint8_t  pixelKill           = 0;        // 1 iff KIL opcode emitted
+
+    std::vector<FpEmbeddedUniform> embeddedUniforms;
 };
 
 struct FpEmitResult

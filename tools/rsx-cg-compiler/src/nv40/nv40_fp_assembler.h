@@ -62,8 +62,13 @@ public:
     // sce-cgc output and what RSX expects in the .fpo blob).
     std::vector<uint32_t> words() const;
 
-    int  numTempRegs() const { return numTempRegs_; }
-    bool empty()       const { return logicalWords_.empty(); }
+    int      numTempRegs()     const { return numTempRegs_; }
+    bool     empty()           const { return logicalWords_.empty(); }
+    // Current buffer size in bytes — used by the lowering pass to
+    // record CgBinaryEmbeddedConstant ucode offsets just before
+    // calling appendConstBlock().
+    uint32_t currentByteSize() const
+    { return static_cast<uint32_t>(logicalWords_.size() * 4u); }
 
 private:
     // Logical bit layout (matches NVFX_FP_OP_* shifts/masks).
