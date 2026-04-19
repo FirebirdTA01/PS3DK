@@ -23,6 +23,7 @@
 #include <cctype>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace nv40::detail
 {
@@ -144,6 +145,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpArithBinding> valueToArith;
 
+    // Saturate is a modifier on the producing instruction — bit 31 of
+    // hw[0].  Rather than plumbing it through every binding type, we
+    // alias the saturate-result IR value to its source and track the
+    // saturate flag separately, then look both up at emit time.
+    std::unordered_map<IRValueID, IRValueID> saturateAlias;
+    std::unordered_set<IRValueID>            saturatedResults;
+
     // Literal `float4(k0, k1, k2, k3)` where all kN are constants —
     // deferred so the consuming StoreOutput can emit FENCBR + MOV +
     // 16-byte inline const block (matches sce-cgc's `FENCBR; MOVR R0,
@@ -224,6 +232,17 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
                 // tex2D(sampler, uv) — operands[0] = sampler, [1] = uv.
                 valueToTex[inst.result] = { inst.operands[0], inst.operands[1] };
+                break;
+            }
+
+            case IROp::Saturate:
+            {
+                if (inst.operands.size() != 1) break;
+                // Alias the saturate result to its source so binding
+                // lookups resolve transparently; flag the result as
+                // saturated so the emit site sets insn.sat = 1.
+                saturateAlias[inst.result]     = inst.operands[0];
+                saturatedResults.insert(inst.result);
                 break;
             }
 
@@ -308,9 +327,45 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     return out;
                 }
 
-                const IRValueID srcId = inst.operands[0];
-                const struct nvfx_reg dstReg = nvfx_reg(NVFXSR_OUTPUT, outIndex);
+                IRValueID srcId = inst.operands[0];
+                // Resolve saturate-alias chain: `%B = sat %A`, `stout %B`
+                // should emit the instruction that produces %A with
+                // insn.sat = 1.
+                bool saturate = false;
+                while (true)
+                {
+                    auto sIt = saturateAlias.find(srcId);
+                    if (sIt == saturateAlias.end()) break;
+                    if (saturatedResults.count(srcId)) saturate = true;
+                    srcId = sIt->second;
+                }
+
+                // Determine if the target output is half-typed — that
+                // promotes to MOVH / writes H0 instead of R0 (bit 7
+                // OUT_REG_HALF + bit 22 PRECISION=FP16).  We only
+                // detect this for the entry-point output parameter
+                // carrying the matching semantic.
+                bool halfOutput = false;
+                for (const auto& p : entry.parameters)
+                {
+                    if (p.storage != StorageQualifier::Out) continue;
+                    if (toUpper(p.semanticName) != semUpper)  continue;
+                    if (p.semanticIndex != inst.semanticIndex) continue;
+                    if (p.type.elementType == IRType::Float16) halfOutput = true;
+                    break;
+                }
+
+                const struct nvfx_reg dstReg = halfOutput
+                    ? [&]{ struct nvfx_reg r = nvfx_reg(NVFXSR_OUTPUT, outIndex); r.is_fp16 = 1; return r; }()
+                    : nvfx_reg(NVFXSR_OUTPUT, outIndex);
+                const uint8_t dstPrecision = halfOutput ? FLOAT16 : FLOAT32;
                 const struct nvfx_reg none   = nvfx_reg(NVFXSR_NONE, 0);
+
+                // CgBinaryFragmentProgram.outputFromH0: 1 iff the
+                // result.color sink (output index 0) is written at
+                // half precision (H0 rather than R0).
+                if (halfOutput && outIndex == 0)
+                    attrs.outputFromH0 = 1;
 
                 // tex2D result consumed by StoreOutput: emit TEX writing
                 // straight to the output register (sce-cgc's pattern —
@@ -342,12 +397,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
 
                     struct nvfx_insn in = nvfx_insn(
-                        0, 0,
+                        saturate ? 1 : 0, 0,
                         sampIt->second,  // tex_unit — packed into hw[0] bits 17-20
                         -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_ALL,
                         src0, src1, src2);
+                    in.precision = dstPrecision;
                     asm_.emit(in, NVFX_FP_OP_OPCODE_TEX);
                     emittedSomething = true;
 
@@ -376,10 +432,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
 
                     struct nvfx_insn in = nvfx_insn(
-                        0, 0, -1, -1,
+                        saturate ? 1 : 0, 0, -1, -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_ALL,
                         src0, src1, src2);
+                    in.precision = dstPrecision;
                     asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
 
                     asm_.appendConstBlock(lcIt->second.vals);
@@ -433,10 +490,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
 
                     struct nvfx_insn in = nvfx_insn(
-                        0, 0, -1, -1,
+                        saturate ? 1 : 0, 0, -1, -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_ALL,
                         slot0, slot1, src2);
+                    in.precision = dstPrecision;
                     asm_.emit(in, opcode);
 
                     const uint32_t ucodeByteOffset = asm_.currentByteSize();
@@ -481,10 +539,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
 
                     struct nvfx_insn in = nvfx_insn(
-                        0, 0, -1, -1,
+                        saturate ? 1 : 0, 0, -1, -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_ALL,
                         src0, src1, src2);
+                    in.precision = dstPrecision;
                     asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
 
                     // Record the ucode offset of the inline-const
@@ -522,10 +581,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
 
                 struct nvfx_insn in = nvfx_insn(
-                    0, 0, -1, -1,
+                    saturate ? 1 : 0, 0, -1, -1,
                     const_cast<struct nvfx_reg&>(dstReg),
                     NVFX_FP_MASK_ALL,
                     src0, src1, src2);
+                in.precision = dstPrecision;
                 asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
                 emittedSomething = true;
 
