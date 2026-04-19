@@ -1,0 +1,14 @@
+// FP ternary select with '<=' (CmpGl/Ll/...).
+// Lowers to the same three-block SGT/SGE/SLT/SLE/SEQ/SNE + MOV +
+// MOV(EQ.x) pattern as ternary_select_f.cg; only the comparison
+// opcode byte differs.  Part of the comparison-opcode coverage
+// sweep so the suite locks down all six NV40 FP scalar-compare
+// opcodes byte-exact.
+void main(
+    float4 vcol      : COLOR,
+    uniform float4 a,
+    uniform float4 b,
+    out float4 color : COLOR)
+{
+    color = (vcol.x <= 0.5f) ? a : b;
+}
