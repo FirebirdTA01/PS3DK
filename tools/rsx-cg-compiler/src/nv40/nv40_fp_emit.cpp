@@ -851,13 +851,59 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
 
-                    auto trueUni  = valueToFpUniform.find(sb.trueId);
-                    auto falseUni = valueToFpUniform.find(sb.falseId);
-                    if (trueUni == valueToFpUniform.end() ||
-                        falseUni == valueToFpUniform.end())
+                    // Each branch may be a uniform, a literal vec4, or
+                    // a varying.  We enumerate the shape per branch;
+                    // emit dispatches later.
+                    enum class BranchKind { Uniform, Literal, Varying, Unknown };
+                    struct BranchInfo
+                    {
+                        BranchKind  kind        = BranchKind::Unknown;
+                        unsigned    uniformIdx  = 0;    // entry param index (Uniform)
+                        const float* literalVals = nullptr;  // (Literal)
+                        int         inputSrc    = 0;    // NVFX INPUT_SRC_* (Varying)
+                    };
+                    auto classifyBranch = [&](IRValueID id) -> BranchInfo
+                    {
+                        BranchInfo bi;
+                        if (auto uIt = valueToFpUniform.find(id);
+                            uIt != valueToFpUniform.end())
+                        {
+                            bi.kind = BranchKind::Uniform;
+                            bi.uniformIdx = uIt->second;
+                        }
+                        else if (auto lIt = valueToLiteralVec4.find(id);
+                                 lIt != valueToLiteralVec4.end())
+                        {
+                            bi.kind = BranchKind::Literal;
+                            bi.literalVals = lIt->second.vals;
+                        }
+                        else if (auto vIt = valueToInputSrc.find(id);
+                                 vIt != valueToInputSrc.end())
+                        {
+                            bi.kind = BranchKind::Varying;
+                            bi.inputSrc = vIt->second;
+                        }
+                        return bi;
+                    };
+                    BranchInfo trueBr  = classifyBranch(sb.trueId);
+                    BranchInfo falseBr = classifyBranch(sb.falseId);
+                    if (trueBr.kind  == BranchKind::Unknown ||
+                        falseBr.kind == BranchKind::Unknown)
                     {
                         out.diagnostics.push_back(
-                            "nv40-fp: Select: both branches must currently be uniforms");
+                            "nv40-fp: Select: branches must be uniforms, literal vec4s, or varyings");
+                        return out;
+                    }
+                    // Both-literal sce-cgc uses a swizzle-share trick
+                    // we don't reproduce yet.  Literal trueBr plus any
+                    // other branch is fine — sce-cgc just lays the
+                    // literal out as a fresh inline block.
+                    if (trueBr.kind == BranchKind::Literal &&
+                        falseBr.kind == BranchKind::Literal)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: Select: both-literal branches need a "
+                            "swizzle-sharing trick we don't emit yet");
                         return out;
                     }
 
@@ -869,6 +915,26 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         for (auto& eu : attrs.embeddedUniforms)
                             if (eu.entryParamIndex == paramIdx)
                             { eu.ucodeByteOffsets.push_back(offset); break; }
+                    };
+
+                    // Helper: emit the post-instruction inline block
+                    // for a branch value at its appropriate ucode
+                    // offset.  Uniforms get a zero block + offset
+                    // record; literals get the raw 4-float inline.
+                    // Varyings don't have a tail block (they feed via
+                    // INPUT_SRC / SRC0).  Must be called IMMEDIATELY
+                    // after the emit that reads the value.
+                    auto appendBranchTail = [&](const BranchInfo& bi)
+                    {
+                        if (bi.kind == BranchKind::Uniform)
+                        {
+                            recordUniformOffset(bi.uniformIdx, asm_.currentByteSize());
+                            asm_.appendConstBlock(zeros);
+                        }
+                        else if (bi.kind == BranchKind::Literal)
+                        {
+                            asm_.appendConstBlock(bi.literalVals);
+                        }
                     };
 
                     auto maskTcBit = [&](int inputSrc)
@@ -900,6 +966,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // to write as the final output.
                     if (cb.rhsKind == CmpBinding::RhsKind::Varying)
                     {
+                        if (trueBr.kind != BranchKind::Uniform ||
+                            falseBr.kind != BranchKind::Uniform)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select: varying-RHS compare currently "
+                                "requires both branches to be uniforms");
+                            return out;
+                        }
                         auto rhsIn = valueToInputSrc.find(cb.rhsVaryingBase);
                         if (rhsIn == valueToInputSrc.end())
                         {
@@ -937,7 +1011,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             NVFX_FP_MASK_ALL, preS0, preS1, preS2);
                         preIn.precision = dstPrecision;
                         asm_.emit(preIn, NVFX_FP_OP_OPCODE_MOV);
-                        recordUniformOffset(trueUni->second, asm_.currentByteSize());
+                        recordUniformOffset(trueBr.uniformIdx, asm_.currentByteSize());
                         asm_.appendConstBlock(zeros);
 
                         // --- SGT RC.x, H2, f[rhs_input] ---
@@ -984,7 +1058,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         mvFalseV.cc_swz[2] = 0;
                         mvFalseV.cc_swz[3] = 0;
                         asm_.emit(mvFalseV, NVFX_FP_OP_OPCODE_MOV);
-                        recordUniformOffset(falseUni->second, asm_.currentByteSize());
+                        recordUniformOffset(falseBr.uniformIdx, asm_.currentByteSize());
                         asm_.appendConstBlock(zeros);
 
                         // Container flags: both LHS and RHS varyings
@@ -1064,56 +1138,107 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         asm_.appendConstBlock(zeros);
                     }
 
-                    // --- MOVR R_out, trueV (unconditional) ---
-                    struct nvfx_src mvS0 = nvfx_src(const_cast<struct nvfx_reg&>(coReg));
+                    // Decide which branch goes in the unconditional
+                    // (preload) MOV vs the conditional MOV — varyings
+                    // can't be preloaded (they're read via SRC0=INPUT,
+                    // no inline block), so they always ride the
+                    // conditional slot.  Flip the test code when the
+                    // trueBranch is the varying — the MOV with CC
+                    // tests NE (condition-was-true) instead of EQ.
+                    BranchInfo preloadBr      = trueBr;
+                    BranchInfo conditionalBr  = falseBr;
+                    uint8_t    condCode       = NVFX_FP_OP_COND_EQ;
+                    if (trueBr.kind == BranchKind::Varying &&
+                        falseBr.kind != BranchKind::Varying)
+                    {
+                        preloadBr     = falseBr;
+                        conditionalBr = trueBr;
+                        condCode      = NVFX_FP_OP_COND_NE;
+                    }
+                    else if (trueBr.kind == BranchKind::Varying &&
+                             falseBr.kind == BranchKind::Varying)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: Select: two varying branches not yet supported");
+                        return out;
+                    }
+
+                    auto makeBranchSrc0 = [&](const BranchInfo& bi,
+                                              uint32_t* hw0InputSrcOut) -> struct nvfx_src
+                    {
+                        // Reset INPUT_SRC output; only Varying sets it.
+                        if (hw0InputSrcOut) *hw0InputSrcOut = 0;
+                        if (bi.kind == BranchKind::Varying)
+                        {
+                            if (hw0InputSrcOut) *hw0InputSrcOut = 1;
+                            struct nvfx_reg r = nvfx_reg(NVFXSR_INPUT, bi.inputSrc);
+                            return nvfx_src(r);
+                        }
+                        // Uniform or Literal → CONST source slot 0.
+                        struct nvfx_reg r = nvfx_reg(NVFXSR_CONST, 0);
+                        return nvfx_src(r);
+                    };
+
+                    // --- MOVR R_out, preloadBr (unconditional) ---
+                    uint32_t preIs = 0;
+                    struct nvfx_src mvS0 = makeBranchSrc0(preloadBr, &preIs);
                     struct nvfx_src mvS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
                     struct nvfx_src mvS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_insn mvTrue = nvfx_insn(
+                    struct nvfx_insn mvPre = nvfx_insn(
                         0, 0, -1, -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_ALL,
                         mvS0, mvS1, mvS2);
-                    mvTrue.precision = dstPrecision;
-                    asm_.emit(mvTrue, NVFX_FP_OP_OPCODE_MOV);
-                    const uint32_t trueOffset = asm_.currentByteSize();
-                    for (auto& eu : attrs.embeddedUniforms)
-                        if (eu.entryParamIndex == trueUni->second)
-                        { eu.ucodeByteOffsets.push_back(trueOffset); break; }
-                    asm_.appendConstBlock(zeros);
+                    mvPre.precision = dstPrecision;
+                    asm_.emit(mvPre, NVFX_FP_OP_OPCODE_MOV);
+                    appendBranchTail(preloadBr);
+                    if (preloadBr.kind == BranchKind::Varying)
+                    {
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(preloadBr.inputSrc);
+                        if (preloadBr.inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            preloadBr.inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = preloadBr.inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
 
-                    // --- MOVR R_out(EQ.x), falseV (conditional) ---
-                    struct nvfx_src fS0 = nvfx_src(const_cast<struct nvfx_reg&>(coReg));
+                    // --- MOVR R_out(COND.x), conditionalBr ---
+                    uint32_t condIs = 0;
+                    struct nvfx_src fS0 = makeBranchSrc0(conditionalBr, &condIs);
                     struct nvfx_src fS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
                     struct nvfx_src fS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_insn mvFalse = nvfx_insn(
+                    struct nvfx_insn mvCond = nvfx_insn(
                         0, 0, -1, -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_ALL,
                         fS0, fS1, fS2);
-                    mvFalse.precision = dstPrecision;
-                    // Execute only when CC.x reports the condition is
-                    // FALSE (i.e. SGT wrote 0 → CC reads as EQ).
-                    //
-                    // cc_swz is (X,X,X,X) regardless of the chosen
-                    // LHS lane — SGT always writes CC.x (because our
-                    // OUTMASK is .x) and the conditional MOV tests
-                    // the same CC.x bit for all four output lanes.
-                    // Sce-cgc verified byte-exact across lanes
-                    // .x/.y/.z/.w.
-                    mvFalse.cc_test  = 1;
-                    mvFalse.cc_cond  = NVFX_FP_OP_COND_EQ;
-                    mvFalse.cc_swz[0] = 0;
-                    mvFalse.cc_swz[1] = 0;
-                    mvFalse.cc_swz[2] = 0;
-                    mvFalse.cc_swz[3] = 0;
-                    asm_.emit(mvFalse, NVFX_FP_OP_OPCODE_MOV);
-                    const uint32_t falseOffset = asm_.currentByteSize();
-                    for (auto& eu : attrs.embeddedUniforms)
-                        if (eu.entryParamIndex == falseUni->second)
-                        { eu.ucodeByteOffsets.push_back(falseOffset); break; }
-                    asm_.appendConstBlock(zeros);
+                    mvCond.precision = dstPrecision;
+                    mvCond.cc_test   = 1;
+                    mvCond.cc_cond   = condCode;
+                    // cc_swz is always (X,X,X,X) — SGT writes CC.x
+                    // regardless of lhs lane (OUTMASK stays .x).
+                    mvCond.cc_swz[0] = 0;
+                    mvCond.cc_swz[1] = 0;
+                    mvCond.cc_swz[2] = 0;
+                    mvCond.cc_swz[3] = 0;
+                    asm_.emit(mvCond, NVFX_FP_OP_OPCODE_MOV);
+                    appendBranchTail(conditionalBr);
+                    if (conditionalBr.kind == BranchKind::Varying)
+                    {
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(conditionalBr.inputSrc);
+                        if (conditionalBr.inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            conditionalBr.inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = conditionalBr.inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
 
-                    // Track varying-input mask bit for the LHS varying.
+                    // Track varying-input mask bit for the LHS varying
+                    // of the compare itself.
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
 
                     emittedSomething = true;

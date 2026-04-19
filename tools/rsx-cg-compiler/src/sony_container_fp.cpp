@@ -309,8 +309,13 @@ ContainerResult emitFragmentContainer(
         }
         if (!params[i].embeddedConstUcodeOffsets.empty())
         {
-            // 8-byte align before the record.
-            while (stringsBlob.size() % 8) stringsBlob.push_back(0);
+            // Sce-cgc aligns CgBinaryEmbeddedConstant records to the
+            // LESSER of 8-byte and "next 16 if the 8-byte slot would
+            // be mid-16-byte line" — in practice observed probes
+            // always land on 16-byte boundaries.  Using 16 here
+            // matches byte-for-byte on the tests we have (add_f,
+            // uniform_mov_f, mad_*_f, rhs_*_f, branch_varying_f).
+            while (stringsBlob.size() % 16) stringsBlob.push_back(0);
             slots[i].embeddedConstOffset =
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             put32(stringsBlob,
