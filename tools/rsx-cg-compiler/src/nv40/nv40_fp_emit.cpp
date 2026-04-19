@@ -136,11 +136,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   - ADD emits src0=CONST(uniform), src1=INPUT(varying)
     //   - MUL emits src0=INPUT(varying), src1=CONST(uniform)
     //   (operand order in C source is ignored — sce-cgc canonicalises)
-    // Per sce-cgc byte probes, all four opcodes take (input, uniform)
-    // canonicalised the same way:
-    //   ADD:      src0 = CONST (uniform),  src1 = INPUT
-    //   MUL/MIN/MAX: src0 = INPUT,           src1 = CONST (uniform)
-    enum class FpArithOp { Add, Mul, Min, Max };
+    // Per sce-cgc byte probes, all (input, uniform) binary opcodes
+    // canonicalise the same way:
+    //   ADD:                src0 = CONST (uniform), src1 = INPUT
+    //   MUL/MIN/MAX/DP3/DP4: src0 = INPUT,          src1 = CONST (uniform)
+    enum class FpArithOp { Add, Mul, Min, Max, Dot3, Dot4 };
     struct FpArithBinding
     {
         FpArithOp op;
@@ -196,6 +196,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   - neg(neg(x)) = x          → neg toggles
     struct SrcMod { IRValueID baseId = 0; bool absMod = false; bool negMod = false; };
     std::unordered_map<IRValueID, SrcMod> valueToMod;
+
+    // Lookup map for value → type info.  IRFunction::getValue() only
+    // returns stored values (constants + parameters), not instruction
+    // results; we fill this as we walk the block so later handlers
+    // (e.g. Dot choosing DP3 vs DP4) can probe the producer's type.
+    std::unordered_map<IRValueID, IRTypeInfo> valueToType;
+    for (const auto& p : entry.parameters)
+        valueToType[p.valueId] = p.type;
 
     auto resolveSrcMods = [&](IRValueID id)
     {
@@ -265,6 +273,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             if (!instPtr) continue;
             const IRInstruction& inst = *instPtr;
 
+            // Record the instruction's result type so downstream
+            // lowerings can look it up (e.g. Dot uses the operand's
+            // vectorSize to pick DP3 vs DP4).
+            if (inst.result != InvalidIRValue)
+                valueToType[inst.result] = inst.resultType;
+
             switch (inst.op)
             {
             case IROp::LoadAttribute:
@@ -314,6 +328,87 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 if (inst.op == IROp::Abs) m.absMod = true;
                 else                      m.negMod = true;
                 valueToMod[inst.result] = m;
+                break;
+            }
+
+            case IROp::VecShuffle:
+            {
+                // We only recognise identity-prefix shuffles here
+                // (e.g. `.xyz` from a vec4 → vec3, `.xy` from a vec4
+                // → vec2).  These are no-ops at the NV40 level
+                // because the narrower destination op (DP3, etc.)
+                // naturally ignores the trailing lanes.  Non-identity
+                // shuffles need SRC-slot swizzle bit plumbing; lands
+                // in a later stage as more test shaders exercise it.
+                if (inst.operands.size() != 1) break;
+                const int outLanes = inst.resultType.vectorSize;
+                bool identity = true;
+                for (int k = 0; k < outLanes && k < 4; ++k)
+                {
+                    const int idx = (inst.swizzleMask >> (k * 2)) & 3;
+                    if (idx != k) { identity = false; break; }
+                }
+                if (!identity) break;   // leave unlowered — caller will error
+                // Alias with no modifier flags: pass-through.
+                SrcMod m;
+                m.baseId = inst.operands[0];
+                valueToMod[inst.result] = m;
+                break;
+            }
+
+            case IROp::Dot:
+            {
+                if (inst.operands.size() < 2)
+                {
+                    out.diagnostics.push_back("nv40-fp: Dot with <2 operands");
+                    return out;
+                }
+
+                const SrcMod ma = resolveSrcMods(inst.operands[0]);
+                const SrcMod mb = resolveSrcMods(inst.operands[1]);
+
+                auto aInput   = valueToInputSrc.find(ma.baseId);
+                auto bInput   = valueToInputSrc.find(mb.baseId);
+                auto aUniform = valueToFpUniform.find(ma.baseId);
+                auto bUniform = valueToFpUniform.find(mb.baseId);
+
+                // Determine DP3 vs DP4 from the operand's original
+                // (pre-resolve) IR type — the .xyz shuffle narrows
+                // the type to vec3 so DP3 is correct even when the
+                // underlying base is a vec4 varying.
+                auto tyIt = valueToType.find(inst.operands[0]);
+                const int lanes =
+                    (tyIt != valueToType.end()) ? tyIt->second.vectorSize : 4;
+                const FpArithOp dotOp =
+                    (lanes == 3) ? FpArithOp::Dot3 : FpArithOp::Dot4;
+
+                FpArithBinding bind;
+                bind.op = dotOp;
+                if (aInput != valueToInputSrc.end() && bUniform != valueToFpUniform.end())
+                {
+                    bind.inputId    = ma.baseId;
+                    bind.inputAbs   = ma.absMod;
+                    bind.inputNeg   = ma.negMod;
+                    bind.uniformId  = mb.baseId;
+                    bind.uniformAbs = mb.absMod;
+                    bind.uniformNeg = mb.negMod;
+                }
+                else if (aUniform != valueToFpUniform.end() && bInput != valueToInputSrc.end())
+                {
+                    bind.inputId    = mb.baseId;
+                    bind.inputAbs   = mb.absMod;
+                    bind.inputNeg   = mb.negMod;
+                    bind.uniformId  = ma.baseId;
+                    bind.uniformAbs = ma.absMod;
+                    bind.uniformNeg = ma.negMod;
+                }
+                else
+                {
+                    out.diagnostics.push_back(
+                        "nv40-fp: Dot supported only for (varying, uniform) pairs today");
+                    return out;
+                }
+                valueToArith[inst.result] = bind;
                 break;
             }
 
@@ -744,14 +839,17 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                     else
                     {
-                        // MUL / MIN / MAX share (src0=INPUT, src1=CONST)
-                        // canonical placement — verified against sce-cgc.
+                        // MUL / MIN / MAX / DP3 / DP4 share
+                        // (src0=INPUT, src1=CONST) canonical placement —
+                        // verified against sce-cgc.
                         switch (bind.op)
                         {
-                        case FpArithOp::Min: opcode = NVFX_FP_OP_OPCODE_MIN; break;
-                        case FpArithOp::Max: opcode = NVFX_FP_OP_OPCODE_MAX; break;
+                        case FpArithOp::Min:  opcode = NVFX_FP_OP_OPCODE_MIN; break;
+                        case FpArithOp::Max:  opcode = NVFX_FP_OP_OPCODE_MAX; break;
+                        case FpArithOp::Dot3: opcode = NVFX_FP_OP_OPCODE_DP3; break;
+                        case FpArithOp::Dot4: opcode = NVFX_FP_OP_OPCODE_DP4; break;
                         case FpArithOp::Mul:
-                        default:             opcode = NVFX_FP_OP_OPCODE_MUL; break;
+                        default:              opcode = NVFX_FP_OP_OPCODE_MUL; break;
                         }
                         slot0 = srcIn;
                         slot1 = srcConst;

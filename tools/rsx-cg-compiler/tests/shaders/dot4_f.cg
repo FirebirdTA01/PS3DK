@@ -1,0 +1,12 @@
+// FP DP4: `dot(vec4, vec4)` → `DP4R R0, f[COL0], weights;` (opcode 0x06).
+//
+// Same (src0=INPUT, src1=CONST) canonicalisation as MUL / MIN / MAX.
+// Result is a scalar replicated into the destination write-mask by
+// NV40's DP opcode semantics.
+void main(
+    float4 vcol       : COLOR,
+    uniform float4 weights,
+    out float4 color  : COLOR)
+{
+    color = dot(vcol, weights);
+}
