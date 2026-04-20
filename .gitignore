@@ -94,3 +94,32 @@ desktop.ini
 
 # Claude Code local-only settings (per-user; team-shared settings.json is OK to commit)
 .claude/settings.local.json
+
+# Private developer notes — phase/stage narrative kept out of the public tree.
+/docs/dev-notes.md
+
+# Session / planning / provenance docs that assume access to the reference
+# cell SDK or carry too much internal phase narrative for the public tree.
+# Kept locally; never tracked.
+/docs/HANDOFF.md
+/docs/phase-0-status.md
+/docs/plan.md
+/docs/building-sony-sdk-samples.md
+/docs/building-reference-samples.md
+
+# rsx-cg-compiler reverse-engineering diary + diff-test harness.
+# Both are local-only: REVERSE_ENGINEERING.md will be replaced by a public
+# ARCHITECTURE.md; run_diff.sh drives a byte-match against the reference
+# compiler and depends on a proprietary tool.
+/tools/rsx-cg-compiler/docs/REVERSE_ENGINEERING.md
+/tools/rsx-cg-compiler/tests/
+
+# Claude project-context file — tracks internal phase narrative, kept
+# local-only.
+/CLAUDE.md
+
+# Superseded PSL1GHT patches — functionality folded elsewhere.  Kept
+# locally as historical reference; not applied by build-psl1ght.sh.
+/patches/psl1ght/0007-add-sys-sony-process-param-header.patch
+/patches/psl1ght/0008-sys-process-h-sony-layout.patch
+/patches/psl1ght/0009-sys-process-h-crash-dump-reloc.patch
