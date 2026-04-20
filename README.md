@@ -4,6 +4,28 @@ A modern, open-source toolchain and SDK for the PlayStation 3, supporting **C++1
 
 Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebased onto current-generation compilers, with auto-generated stub libraries driven by a NID/FNID database and a ≥95% coverage target against the reference cell-SDK surface for the subsystems homebrew actually uses.
 
+## Direction
+
+This project started fully on PSL1GHT and is incrementally growing out
+from it.  Our own SDK lives under `sdk/` and replaces pieces of the
+PSL1GHT runtime one subsystem at a time — GCM command emitters, the
+sysutil forwarder family, stub archives built from a NID database, the
+RSX Cg compiler, etc.  The long-term shape is:
+
+- **Our own runtime + libraries** carry the bulk of the SDK surface,
+  written against the reference cell-SDK ABI where that matters for
+  binary / SPRX compatibility.
+- **PSL1GHT stays a first-class, permanently-supported front-end.** A
+  source-compat shim keeps PSL1GHT-targeted homebrew building
+  unchanged even as the runtime underneath it is replaced.  Existing
+  homebrew codebases do not have to migrate; new code can pick either
+  the PSL1GHT-style or the cell-SDK-style surface and both land on the
+  same runtime.
+
+Nothing about PSL1GHT is getting deprecated — it stays a supported
+input forever.  What's changing is how much of the runtime behind it
+is ours.
+
 ## Toolchain components
 
 | Component | Version | Target | Purpose |
