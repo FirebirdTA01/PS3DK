@@ -239,6 +239,10 @@ exports:
   nid: '0xa53d12ae'
   signature: ''
   notes: extracted from _cellGcmSys_0001_52.o
+- name: cellGcmSetFlip
+  nid: '0xdc09357e'
+  signature: ''
+  notes: matches PSL1GHT's gcmSetFlip NID; added by hand so the legacy-wrapper surface preserves PSL1GHT's exact runtime behavior on RPCS3 (this NID resolves to a working kernel entry point used by every PSL1GHT flip sample).
 - name: cellGcmSetFlipHandler
   nid: '0xa41ef7e8'
   signature: ''
@@ -299,6 +303,10 @@ exports:
   nid: '0xa91b0402'
   signature: ''
   notes: extracted from _cellGcmSys_0001_57.o
+- name: cellGcmSetWaitFlip
+  nid: '0x983fb9aa'
+  signature: ''
+  notes: matches PSL1GHT's gcmSetWaitFlip NID; added by hand so the legacy-wrapper gcmSetWaitFlip preserves PSL1GHT's exact runtime behavior on RPCS3 (this NID resolves in the cellGcmSys emulation) rather than substituting our own SetWaitLabel(1,0) emitter.
 - name: cellGcmSetZcull
   nid: '0xd34a420d'
   signature: ''
