@@ -32,7 +32,7 @@ HEADERS := \
     include/cell/cell_video_out.h \
     include/cell/dbgfont.h
 
-SUBLIBS := libgcm_cmd
+SUBLIBS := libgcm_cmd libdbgfont
 
 .PHONY: all install clean $(SUBLIBS)
 
