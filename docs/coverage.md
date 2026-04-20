@@ -5,10 +5,10 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **97**
 - Cell SDK exports total: **4981**
-- Covered by our install tree: **1425** (28.6%) — 798 by exact name, 627 via alias
-- Our install tree exports: **12703** (all archives, deduplicated)
+- Covered by our install tree: **1715** (34.4%) — 1161 by exact name, 554 via alias
+- Our install tree exports: **14204** (all archives, deduplicated)
 - Alias map entries loaded: **627**
-- Impl status (per YAML annotations): unknown 4981 · stub 0 · impl 0 · verified 0
+- Impl status (per YAML annotations): unknown 4974 · stub 7 · impl 0 · verified 0
 
 ## Per-library coverage
 
@@ -30,20 +30,20 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libfontFT_stub` | 3 | 0 | 3 | 3 | 100.0% |
 | `libsysutil_game_stub` | 15 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_game_exec_stub` | 6 | 0 | 0 | 0 | 0.0% |
-| `libgcm_sys_stub` | 84 | 0 | 73 | 73 | 86.9% |
+| `libgcm_sys_stub` | 84 | 84 | 0 | 84 | 100.0% |
 | `libgifdec_stub` | 12 | 0 | 0 | 0 | 0.0% |
 | `libhttp_stub` | 105 | 0 | 96 | 96 | 91.4% |
 | `libhttp_util_stub` | 20 | 0 | 20 | 20 | 100.0% |
-| `libsysutil_imejp_stub` | 41 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_imejp_stub` | 41 | 41 | 0 | 41 | 100.0% |
 | `libjpgdec_stub` | 12 | 0 | 11 | 11 | 91.7% |
 | `libjpgenc_stub` | 10 | 0 | 0 | 0 | 0.0% |
 | `libkey2char_stub` | 5 | 0 | 0 | 0 | 0.0% |
-| `libl10n_stub` | 165 | 0 | 0 | 0 | 0.0% |
+| `libl10n_stub` | 165 | 165 | 0 | 165 | 100.0% |
 | `libprof_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `libmic_stub` | 41 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_music_decode_stub` | 20 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_music_export_stub` | 5 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_music_stub` | 22 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_music_decode_stub` | 20 | 20 | 0 | 20 | 100.0% |
+| `libsysutil_music_export_stub` | 5 | 5 | 0 | 5 | 100.0% |
+| `libsysutil_music_stub` | 22 | 22 | 0 | 22 | 100.0% |
 | `libnetctl_stub` | 19 | 0 | 10 | 10 | 52.6% |
 | `libsysutil_oskdialog_ext_stub` | 17 | 0 | 0 | 0 | 0.0% |
 | `libovis_stub` | 4 | 0 | 0 | 0 | 0.0% |
@@ -63,20 +63,20 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsail_stub` | 119 | 0 | 0 | 0 | 0.0% |
 | `libsail_rec_stub` | 58 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_savedata_stub` | 12 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_screenshot_stub` | 4 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_screenshot_stub` | 4 | 4 | 0 | 4 | 100.0% |
 | `libsysutil_search_stub` | 21 | 0 | 0 | 0 | 0.0% |
 | `libsheap_stub` | 18 | 0 | 0 | 0 | 0.0% |
 | `libspudll_stub` | 2 | 0 | 0 | 0 | 0.0% |
 | `libspurs_stub` | 137 | 0 | 120 | 120 | 87.6% |
 | `libspurs_jq_stub` | 63 | 0 | 0 | 0 | 0.0% |
 | `libssl_stub` | 14 | 0 | 14 | 14 | 100.0% |
-| `libsysutil_subdisplay_stub` | 11 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_subdisplay_stub` | 11 | 11 | 0 | 11 | 100.0% |
 | `libsync_stub` | 42 | 0 | 0 | 0 | 0.0% |
 | `libsync2_stub` | 32 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_sysconf_ext_stub` | 1 | 0 | 0 | 0 | 0.0% |
-| `libsysmodule_stub` | 8 | 0 | 0 | 0 | 0.0% |
+| `libsysmodule_stub` | 8 | 8 | 0 | 8 | 100.0% |
 | `libsysutil_stub` | 174 | 0 | 8 | 8 | 4.6% |
-| `libsysutil_ap_stub` | 3 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_ap_stub` | 3 | 3 | 0 | 3 | 100.0% |
 | `libsysutil_avc2_stub` | 54 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_avconf_ext_stub` | 16 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_licensearea_stub` | 1 | 0 | 0 | 0 | 0.0% |
@@ -428,22 +428,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x38579ec9  cellGameSetExitParam
 ```
 
-### `libgcm_sys_stub` (11 / 84 missing)
-
-```
-0x5f909b17  _cellGcmFunc1
-0x661fe266  _cellGcmFunc12
-0xbb42a9dd  _cellGcmFunc13
-0x3a33c1fd  _cellGcmFunc15
-0x8effb7fd  _cellGcmFunc2
-0x1bd633f8  _cellGcmFunc3
-0x688b8ac9  _cellGcmFunc38
-0x7fc034bc  _cellGcmFunc4
-0x15bae46b  _cellGcmInitBody
-0x21397818  _cellGcmSetFlipCommand
-0xd8f88e1a  _cellGcmSetFlipCommandWithWaitLabel
-```
-
 ### `libgifdec_stub` (12 / 12 missing)
 
 ```
@@ -475,52 +459,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x7313c78d  cellHttpClientSetSslIdDestroyCallback
 ```
 
-### `libsysutil_imejp_stub` (41 / 41 missing)
-
-```
-0x7189430b  cellImeJpAllConfirm
-0xcbbc20b7  cellImeJpAllConvertCancel
-0x6319eda3  cellImeJpAllDeleteConvertString
-0x8ff02267  cellImeJpAllowExtensionCharacters
-0xaa1d1f57  cellImeJpBackspaceWord
-0x46d1234a  cellImeJpClose
-0xeede898c  cellImeJpConfirmPrediction
-0xc2bb48bc  cellImeJpConvertBackward
-0xeae879dc  cellImeJpConvertCancel
-0x1e29103b  cellImeJpConvertForward
-0x7a18c2b9  cellImeJpCurrentPartConfirm
-0x72257652  cellImeJpDeleteWord
-0x6ccbe3d6  cellImeJpEnterChar
-0x5b6ada55  cellImeJpEnterCharExt
-0x441a1c2b  cellImeJpEnterString
-0x6298b55a  cellImeJpEnterStringExt
-0x37961cc1  cellImeJpExtendConvertArea
-0xe4cc15ba  cellImeJpGetCandidateList
-0xc4796a45  cellImeJpGetCandidateListSize
-0x177bd218  cellImeJpGetCandidateSelect
-0xd3fc3606  cellImeJpGetConfirmString
-0x89f8a567  cellImeJpGetConfirmYomiString
-0xf91abda3  cellImeJpGetConvertString
-0xea2d4881  cellImeJpGetConvertYomiString
-0x5f5b3227  cellImeJpGetFocusLength
-0x0e363ae7  cellImeJpGetFocusTop
-0x1986f2cd  cellImeJpGetPredictList
-0x66c6cc78  cellImeJpGetStatus
-0xe76c9700  cellImeJpModeCaretLeft
-0xac6693d8  cellImeJpModeCaretRight
-0x1e411261  cellImeJpMoveFocusClause
-0x44608862  cellImeJpOpen
-0x47b43dd4  cellImeJpOpen2
-0x1b119958  cellImeJpOpen3
-0x8bb41f47  cellImeJpPostConvert
-0x36d38701  cellImeJpReset
-0xc1786c81  cellImeJpSetFixInputMode
-0xf5992ec8  cellImeJpSetInputCharType
-0x24e9d8fc  cellImeJpSetKanaInputMode
-0xaa2a3287  cellImeJpShortenConvertArea
-0xbd679cc1  cellImeJpTemporalConfirm
-```
-
 ### `libjpgdec_stub` (1 / 12 missing)
 
 ```
@@ -550,176 +488,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xabf629c1  cellKey2CharOpen
 0x0dfbadfa  cellKey2CharSetArrangement
 0xbfc03768  cellKey2CharSetMode
-```
-
-### `libl10n_stub` (165 / 165 missing)
-
-```
-0xeb41cc68  ARIBstoUCS2s
-0x32689828  ARIBstoUTF8s
-0xfa4a675a  BIG5stoUCS2s
-0xd990858b  BIG5stoUTF8s
-0x9ec52258  BIG5toUCS2
-0x4b3bbacb  BIG5toUTF8
-0x9cd8135b  EUCCNstoUCS2s
-0x1ae2acee  EUCCNstoUTF8s
-0xd9fb1224  EUCCNtoUCS2
-0x8171c1cc  EUCCNtoUTF8
-0xa34fa0eb  EUCJPstoJISs
-0x511d386b  EUCJPstoSJISs
-0x90e9b5d2  EUCJPstoUCS2s
-0x5ac783dc  EUCJPstoUTF8s
-0x53c71ac2  EUCJPtoSJIS
-0x54f59807  EUCJPtoUCS2
-0x3dabd5a7  EUCJPtoUTF8
-0x14f504b8  EUCKRstoUCS2s
-0x8a56f148  EUCKRstoUHCs
-0x2b84030c  EUCKRstoUTF8s
-0x9a72059d  EUCKRtoUCS2
-0x58246762  EUCKRtoUHC
-0x63219199  EUCKRtoUTF8
-0xa60ff5c9  EucJpHan2Zen
-0x82d5ecdf  EucJpZen2Han
-0x60ffa0ec  GB18030stoUCS2s
-0xd02ef83d  GB18030stoUTF8s
-0xaf18d499  GB18030toUCS2
-0xeabc3d00  GB18030toUTF8
-0x1cb1138f  GBKstoUCS2s
-0x949bb14c  GBKstoUTF8s
-0x1fb50183  GBKtoUCS2
-0x860fc741  GBKtoUTF8
-0x0bf867e2  HZstoUCS2s
-0x42838145  HZstoUTF8s
-0xa609f3e9  JISstoEUCJPs
-0x6169f205  JISstoSJISs
-0xe956dc64  JISstoUCS2s
-0x060ee3b2  JISstoUTF8s
-0x1ac0d23d  L10nConvert
-0x931ff25a  L10nConvertStr
-0xc9b78f58  MSJISstoUCS2s
-0x5a4ab223  MSJISstoUTF8s
-0xb6e45343  MSJIStoUCS2
-0x398a3dee  MSJIStoUTF8
-0x9ce52809  SBCSstoUCS2s
-0x72632e53  SBCSstoUTF8s
-0xc944fa56  SBCStoUCS2
-0x74496718  SBCStoUTF8
-0xd8721e2c  SJISstoEUCJPs
-0x73f2cd21  SJISstoJISs
-0xf9b1896d  SJISstoUCS2s
-0x33435818  SJISstoUTF8s
-0xf439728e  SJIStoEUCJP
-0xbdd44ee3  SJIStoUCS2
-0x6122e000  SJIStoUTF8
-0x638c2fc1  SjisHan2Zen
-0x07168a83  SjisZen2Han
-0x408a622b  ToEucJpHira
-0x41ccf033  ToEucJpKata
-0x3968f176  ToEucJpLower
-0x867f7b8b  ToEucJpUpper
-0x1ec712e0  ToSjisHira
-0x9d14dc46  ToSjisKata
-0x0bc386c8  ToSjisLower
-0x6de4b508  ToSjisUpper
-0xbe8d5485  UCS2stoARIBs
-0xee6c6a39  UCS2stoBIG5s
-0x71804d64  UCS2stoEUCCNs
-0x6e5906fd  UCS2stoEUCJPs
-0xdc54886c  UCS2stoEUCKRs
-0x53764725  UCS2stoGB18030s
-0x55f6921c  UCS2stoGBKs
-0x0ce278fd  UCS2stoHZs
-0x88f8340b  UCS2stoJISs
-0x3a20bc34  UCS2stoMSJISs
-0xebae29c0  UCS2stoSBCSs
-0x0d90a48d  UCS2stoSJISs
-0xf1dcfa71  UCS2stoUHCs
-0x714a9b4a  UCS2stoUTF16s
-0xeb685b83  UCS2stoUTF32s
-0x2ad091c6  UCS2stoUTF8s
-0x5b684dfb  UCS2toBIG5
-0x9a0e7d23  UCS2toEUCCN
-0x005200e6  UCS2toEUCJP
-0xc7bdcb4c  UCS2toEUCKR
-0x0bedf77d  UCS2toGB18030
-0xa0d463c0  UCS2toGBK
-0x65444204  UCS2toMSJIS
-0x256b6861  UCS2toSBCS
-0x596df41c  UCS2toSJIS
-0x6a6f25d1  UCS2toUHC
-0x64a10ec8  UCS2toUTF16
-0x0356038c  UCS2toUTF32
-0xa9a76fb8  UCS2toUTF8
-0x16eaf5f1  UHCstoEUCKRs
-0x41b4a5ae  UHCstoUCS2s
-0x5e1d9330  UHCstoUTF8s
-0x7c5bde1c  UHCtoEUCKR
-0x91a99765  UHCtoUCS2
-0xb3361be6  UHCtoUTF8
-0x53558b6b  UTF16stoUCS2s
-0x2efa7294  UTF16stoUTF32s
-0xe6f5711b  UTF16stoUTF8s
-0x6fc530b3  UTF16toUCS2
-0xa19fb9de  UTF16toUTF32
-0x317ab7c2  UTF16toUTF8
-0xd8cb24cb  UTF32stoUCS2s
-0x8555fe15  UTF32stoUTF16s
-0x21aa3045  UTF32stoUTF8s
-0x6c62d879  UTF32toUCS2
-0x9b1210c6  UTF32toUTF16
-0x9768b6d3  UTF32toUTF8
-0xa5146299  UTF8stoARIBs
-0x52b7883f  UTF8stoBIG5s
-0x8f472054  UTF8stoEUCCNs
-0xc62b758d  UTF8stoEUCJPs
-0x5cd29270  UTF8stoEUCKRs
-0x89236c86  UTF8stoGB18030s
-0x262a5ae2  UTF8stoGBKs
-0xdefa1c17  UTF8stoHZs
-0x9cf1ab77  UTF8stoJISs
-0x62b36bcf  UTF8stoMSJISs
-0xda67b37f  UTF8stoSBCSs
-0xdd5ebdeb  UTF8stoSJISs
-0xfdbf6ac5  UTF8stoUCS2s
-0x9a13d6b8  UTF8stoUHCs
-0xf7681b9a  UTF8stoUTF16s
-0x8ccdba38  UTF8stoUTF32s
-0xe6d9e234  UTF8toBIG5
-0x7d07a1c2  UTF8toEUCCN
-0x6e0705c4  UTF8toEUCJP
-0x2f9eb543  UTF8toEUCKR
-0x058addc8  UTF8toGB18030
-0xb7cef4a6  UTF8toGBK
-0x4931b44e  UTF8toMSJIS
-0xb9cf473d  UTF8toSBCS
-0xeb3dc670  UTF8toSJIS
-0x28724522  UTF8toUCS2
-0x9557ac9b  UTF8toUHC
-0x61fb9442  UTF8toUTF16
-0x74871fe0  UTF8toUTF32
-0x21948c03  eucjp2jis
-0xe2eabb32  eucjp2kuten
-0x3df65b64  eucjp2sjis
-0x1da42d70  eucjphan2zen
-0xbe42e661  eucjpzen2han
-0xa963619c  isEucJpKigou
-0xbefe3869  isSjisKigou
-0x9dcde367  jis2eucjp
-0x05028763  jis2kuten
-0x1758053c  jis2sjis
-0x750c363d  jstrchk
-0x1906ce6b  jstrnchk
-0x0f624540  kuten2eucjp
-0x7c912bda  kuten2jis
-0xb7e08f7a  kuten2sjis
-0x01b0cbf4  l10n_convert
-0xa298cad2  l10n_convert_str
-0xcc1633cc  l10n_get_converter
-0x9874020d  sjis2eucjp
-0x14ee3649  sjis2jis
-0x6621a82c  sjis2kuten
-0x24fd32a9  sjishan2zen
-0x33f8b35c  sjiszen2han
 ```
 
 ### `libprof_stub` (4 / 4 missing)
@@ -775,68 +543,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xc3610dbd  cellMicSysShareOpen
 0xcac7e7d7  cellMicSysShareStart
 0xbdfd51e2  cellMicSysShareStop
-```
-
-### `libsysutil_music_decode_stub` (20 / 20 missing)
-
-```
-0xa8615dc8  cellMusicDecodeFinalize
-0x4aef2877  cellMusicDecodeFinalize2
-0x58ab1999  cellMusicDecodeGetContentsId
-0x25ea7ac0  cellMusicDecodeGetContentsId2
-0x5af74c50  cellMusicDecodeGetDecodeStatus
-0x1576e4f2  cellMusicDecodeGetDecodeStatus2
-0xdbf70550  cellMusicDecodeGetSelectionContext
-0xf91639f9  cellMusicDecodeGetSelectionContext2
-0xd55dbc11  cellMusicDecodeInitialize
-0xf80e31e5  cellMusicDecodeInitialize2
-0xb641168e  cellMusicDecodeInitialize2SystemWorkload
-0x84f154b2  cellMusicDecodeInitializeSystemWorkload
-0xa881b744  cellMusicDecodeRead
-0xb2d054df  cellMusicDecodeRead2
-0xf24cb963  cellMusicDecodeSelectContents
-0xc22563c4  cellMusicDecodeSelectContents2
-0x066bb1cf  cellMusicDecodeSetDecodeCommand
-0x2ef701ec  cellMusicDecodeSetDecodeCommand2
-0xb84f5c81  cellMusicDecodeSetSelectionContext
-0x491d6ba5  cellMusicDecodeSetSelectionContext2
-```
-
-### `libsysutil_music_export_stub` (5 / 5 missing)
-
-```
-0xe90effea  cellMusicExportFinalize
-0xb202f0e8  cellMusicExportFromFile
-0xb4c9b4f9  cellMusicExportInitialize
-0xe0443a44  cellMusicExportInitialize2
-0x92b50ebc  cellMusicExportProgress
-```
-
-### `libsysutil_music_stub` (22 / 22 missing)
-
-```
-0x6f2104f3  cellMusicFinalize
-0x7be4dc31  cellMusicFinalize2
-0x4c188caa  cellMusicGetContentsId
-0x6674de2d  cellMusicGetContentsId2
-0x95f7d9d9  cellMusicGetPlaybackStatus
-0x648b7611  cellMusicGetPlaybackStatus2
-0x0b461648  cellMusicGetSelectionContext
-0x8793ef97  cellMusicGetSelectionContext2
-0x8aa188e3  cellMusicGetVolume
-0xf9073a24  cellMusicGetVolume2
-0x72ec14b5  cellMusicInitialize
-0xbe50b11e  cellMusicInitialize2
-0x61865281  cellMusicInitialize2SystemWorkload
-0x72876546  cellMusicInitializeSystemWorkload
-0xb2336ba7  cellMusicSelectContents
-0xad04cddd  cellMusicSelectContents2
-0xa0661626  cellMusicSetPlaybackCommand
-0x98947a6e  cellMusicSetPlaybackCommand2
-0x5bff31bf  cellMusicSetSelectionContext
-0x2bdc5d6b  cellMusicSetSelectionContext2
-0xe74ce7bd  cellMusicSetVolume
-0x4014c246  cellMusicSetVolume2
 ```
 
 ### `libnetctl_stub` (9 / 19 missing)
@@ -1302,15 +1008,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x39d6ee43  cellSaveDataUserListImport
 ```
 
-### `libsysutil_screenshot_stub` (4 / 4 missing)
-
-```
-0xfc6f4e74  cellScreenShotDisable
-0x9e33ab8f  cellScreenShotEnable
-0x7a9c2243  cellScreenShotSetOverlayImage
-0xd3ad63e4  cellScreenShotSetParameter
-```
-
 ### `libsysutil_search_stub` (21 / 21 missing)
 
 ```
@@ -1457,22 +1154,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x8c97a96c  cellSpursShutdownJobQueue
 ```
 
-### `libsysutil_subdisplay_stub` (11 / 11 missing)
-
-```
-0xaee1e0c2  cellSubDisplayAudioOutBlocking
-0x5468d6b0  cellSubDisplayAudioOutNonBlocking
-0x551d80a5  cellSubDisplayEnd
-0xe2485f79  cellSubDisplayGetPeerList
-0x8a264d71  cellSubDisplayGetPeerNum
-0x6595ce22  cellSubDisplayGetRequiredMemory
-0x415ed9dc  cellSubDisplayGetTouchInfo
-0x938ac642  cellSubDisplayGetVideoBuffer
-0xf9a7e8a5  cellSubDisplayInit
-0xa5bccb47  cellSubDisplayStart
-0x6d85ddb3  cellSubDisplayStop
-```
-
 ### `libsync_stub` (42 / 42 missing)
 
 ```
@@ -1561,19 +1242,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 
 ```
 0x08db2adf  cellSysconfBtGetDeviceList
-```
-
-### `libsysmodule_stub` (8 / 8 missing)
-
-```
-0x3c92be09  cellSysmoduleFetchImage
-0x96c07adf  cellSysmoduleFinalize
-0x1ef115ef  cellSysmoduleGetImagesize
-0x63ff6ff9  cellSysmoduleInitialize
-0x5a59e258  cellSysmoduleIsLoaded
-0x32267a31  cellSysmoduleLoadModule
-0xa193143c  cellSysmoduleSetMemcontainer
-0x112a5ee9  cellSysmoduleUnloadModule
 ```
 
 ### `libsysutil_stub` (166 / 174 missing)
@@ -1745,14 +1413,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x8a5dbb58  cellWebComponentCreate
 0x6144f033  cellWebComponentCreateAsync
 0xdce51399  cellWebComponentDestroy
-```
-
-### `libsysutil_ap_stub` (3 / 3 missing)
-
-```
-0x9e67e0dd  cellSysutilApGetRequiredMemSize
-0x90c2bb19  cellSysutilApOff
-0x3343824c  cellSysutilApOn
 ```
 
 ### `libsysutil_avc2_stub` (54 / 54 missing)
