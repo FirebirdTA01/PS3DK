@@ -1,37 +1,38 @@
 # Samples
 
-Minimal programs that exercise the toolchain, PSL1GHT, and Sony-ABI conformance.
-Each sample has one concept; big examples go elsewhere.
+Minimal programs that exercise the toolchain, PSL1GHT, and reference-cell-SDK
+ABI conformance.  Each sample has one concept; big examples go elsewhere.
 
 ## Current samples
 
-| Sample | Validates | Depends on | Status |
-|---|---|---|---|
-| `hello-ppu-c++17/` | PPU C++17 front- and back-end, libstdc++ link, PPU thread id | Phase 1 complete | **green** |
-| `hello-ppu-sony-abi/` | `.sys_proc_param` section layout (36-byte Sony 3.30+), malloc/calloc/realloc through libsysbase `_sbrk_r`, printf through `_write_r` | Phase 1 + Phase 3 milestone 1 | **green** |
-| `hello-ppu-sysutil-cb/` | Sony-named `cellSysutilRegisterCallback`/`Check`/`Unregister` through PSL1GHT runtime — first Phase 6 backfill sample, imports Sony FNIDs 0x9d98afa0/0x189a74da/0x02ff3c1b | Phase 3 + patch psl1ght/0011 | **green** + **RPCS3 runtime-verified** (XMB events delivered) |
-| `hello-ppu-msgdialog/` | Sony-named `cellMsgDialogOpen2` Yes/No dialog through PSL1GHT runtime — second Phase 6 backfill sample, imports Sony FNIDs 0xf81eca25 / 0x7603d3db / 0x62b0f803 | Phase 3 + patch psl1ght/0012 | **green** + **RPCS3 runtime-verified** (dialog rendered, YES button routed back) |
-| `hello-ppu-sysparam/` | Sony-named `cellSysutilGetSystemParam{Int,String}` — third Phase 6 backfill sample.  Prints language / nickname / date format / timezone / etc.  Imports Sony FNIDs 0x40e895d3 / 0x938013a0 | Phase 3 + patch psl1ght/0013 | **green** + **RPCS3 runtime-verified** (numeric + string params round-trip) |
-| `hello-ppu-savedata/` | Sony-SDK-source-compat `cellSaveDataAutoSave2` — fourth Phase 6 backfill sample.  Full stat + file callback dance writing a 256-byte payload into an autosave slot.  Imports Sony FNID 0x8b7ed64b | Phase 3 + patch psl1ght/0014 | **green** + **RPCS3 runtime-verified** (PARAM.SFO + SAVEDATA.BIN both land; 256 bytes written via 2-callback protocol) |
-| `hello-ppu-gamedata/` | Sony-SDK-source-compat `cellGameBootCheck` + `ContentPermit` + `GetParam{Int,String}` — fifth Phase 6 backfill sample.  Probes how the running app was launched and reports its PARAM.SFO.  Imports Sony FNIDs 0xf52639ea / 0x70acec67 / 0x3a5d726a / 0xb7a45caf | Phase 3 + patch psl1ght/0015 | **green** + **RPCS3 runtime-verified** (all calls return 0; Boot-SELF run returns empty context as expected — launch via `.pkg` install to see populated fields) |
-| `hello-ppu-screenshot/` | Sony-SDK-source-compat `cellScreenShotEnable` / `Disable` / `SetParameter` — first Phase 6.5 sample.  Validates the nidgen-archive pipeline end-to-end: `libsysutil_screenshot_stub.a` (slots + FNIDs + `.lib.stub` + sceResident + `.sceStub.text` trampolines + `.opd` descriptors) is the only library backing — no PSL1GHT SPRX wrapper.  Imports Sony FNIDs 0x9e33ab8f / 0xfc6f4e74 / 0xd3ad63e4 (overlay 0x7a9c2243 declared, not called) | Phase 3 + patch psl1ght/0016 + `scripts/build-cell-stub-archives.sh` | **green** + **RPCS3 runtime-verified** (all three calls return 0x00000000; loader resolved cellScreenShotUtility SPRX, patched stub slots, trampolines ran clean) |
-| `hello-ppu-ap/` | Sony-SDK-source-compat `cellSysutilApGetRequiredMemSize` + `Off` — second Phase 6.5 sample.  Second consumer of the nidgen-archive pipeline; backs onto `libsysutil_ap_stub.a`.  Imports Sony FNIDs 0x9e67e0dd / 0x90c2bb19 (and 0x3343824c via whole-archive include) | Phase 3 + patch psl1ght/0017 + `scripts/build-cell-stub-archives.sh` | **green** + **RPCS3 runtime-verified** (GetRequiredMemSize returns exactly 0x100000 = 1 MiB matching the header constant; Off returns 0x00000000) |
-| `hello-ppu-l10n/` | Port of Sony's `samples/sdk/l10n/eucjp2sjis.c` — first Sony-SDK-source port.  Calls `cellSysmoduleLoadModule(CELL_SYSMODULE_L10N)` then `eucjp2sjis()` for a few hardcoded EUC-JP code points, then unloads.  First nidgen-archive consumer above ~10 exports (libl10n_stub: 165 exports, archive scales fine).  Imports Sony FNIDs 0x32267a31 / 0x112a5ee9 + libl10n's `eucjp2sjis` FNID | Phase 3 + patches psl1ght/0018 + 0019 + `scripts/build-cell-stub-archives.sh` | **green** + **RPCS3 runtime-verified** (all four EUC-JP→SJIS conversions match expected: a4a2→82a0, a4a4→82a2, c6fc→93fa, cbdc→967b — proves SPRX-resolved Sony code is executing) |
-| `hello-ppu-backfill/` | Phase 6.5 batch link smoke test — pulls one symbol from each of the five new stub archives (subdisplay / music / music_decode / music_export / imejp; 99 exports across 5 SPRX modules) into a non-call sink so the FNID + sceResident entries land in the ELF.  Functions are pointer-anchored, never invoked, so RPCS3 doesn't need the SPRX modules LLE'd for the smoke test to pass | Phase 3 + patch psl1ght/0020 + `scripts/build-cell-stub-archives.sh` | **green** + **RPCS3 runtime-verified** (all 10 `.opd` addresses non-null, well-spread; process boots, prints, exits clean — confirms the loader parsed all five new `.lib.stub` headers without error) |
-| `hello-ppu-event-flag/` | Port of Sony's `samples/sdk/lv2/event_flag/event_flag.ppu.c` (PPU half).  Master + 5 worker PPU threads coordinate via two `sys_event_flag_*` event flags.  Tier-2 Sony-source port: pure lv2 syscall sample, no SPRX/stub-archive needed — only the new Sony-name sync compat headers (`<sys/synchronization.h>`, `<sys/ppu_thread.h>`, `<sys/time_util.h>`) | Phase 3 + patch psl1ght/0021 | **green** + **RPCS3 runtime-verified** (master + all 5 workers exchange event-flag signals; every worker prints "succeeded my job"; threads exit cleanly — proves the lv2-sync compat layer is wire-compatible with RPCS3's syscall emulation) |
-| `hello-ppu-rsx-clear/` | **Phase 7 GCM kickoff.**  Brings up the RSX command stream and cycles a clear-color over the framebuffer using `rsxClearSurface` (no shaders).  Adapted from PSL1GHT's `cairo` sample's `rsxutil.c`.  Native PSL1GHT gcm/rsx API for now; Sony-name `cellGcm*` forwarders to follow.  Cycles 6 colors × 60 frames each (~6 s), exits clean.  Press START to exit early | Phase 3 (libgcm_sys + librsx) | **green** + **RPCS3 runtime-verified** (RSX up at 1280x720, 360 frames drawn, all 6 colors visible on screen, exited clean — confirms the full PSL1GHT GCM/RSX stack works: libgcm_sys command-buffer FIFO, librsx command emitters, libsysutil/video mode setup, libio/pad input, lv2 memory containers, SPRX flip controller) |
-| `hello-ppu-cellgcm-clear/` | **Phase 7 step 3 validation.**  Same flow as `hello-ppu-rsx-clear` but spelled with Sony's `cellGcm*` identifiers wherever a forwarder exists in `<cell/gcm.h>` + `<cell/gcm/gcm_command_c.h>`.  Only `rsxMemalign`/`rsxFree` stay PSL1GHT-named (no Sony equivalent) | Phase 3 + patches psl1ght/0022 + 0023 | **green** + **RPCS3 runtime-verified** (ctx populated at 0x2e0ccc, 1280x720 init, 360 frames drawn, all 6 colors visible — bit-identical visual result to rsx-clear proves the Sony-name forwarders emit identical RSX command-stream bytes) |
-| `hello-ppu-cellgcm-cursor/` | **Phase 7 step 4a validation.**  Exercises the `cellGcmInitCursor` / `SetCursor*` / `UpdateCursor` family — PS3's RSX hardware cursor is a video overlay, no shaders needed.  Allocates a 32×32 BGRA cursor texture in RSX local memory at `CELL_GCM_CURSOR_ALIGN_OFFSET` (2048-byte) alignment, animates it in a Lissajous pattern over a sweeping background color for ~6 s | Phase 3 + patch psl1ght/0024 | **green** + **RPCS3 API-verified** (all six cellGcm cursor calls return 0x00000000; texture allocates 2048-aligned at expected offset; 360 frames drawn clean exit). **HW cursor overlay not rendered by RPCS3** — known emulator limitation; the RSX hardware cursor is a separate scanout-time overlay that RPCS3 doesn't visually emulate. API contract is satisfied; would render on real PS3 hardware |
-| `hello-ppu-cellgcm-triangle/` | **Phase 7 step 1.5 / Phase 8 parallel-track demo.**  First sample to put **Sony's actual `.cg` shaders** through our toolchain end-to-end: copies `vpshader.cg` + `fpshader.cg` verbatim from Sony SDK 475.001 `samples/sdk/graphics/gcm/flip_immediate/`, compiles them via PSL1GHT `cgcomp` + NVIDIA Cg toolkit, embeds the resulting `.vpo` / `.fpo` binaries with `bin2s`, and renders a colored triangle using `rsxLoadVertexProgram` / `rsxLoadFragmentProgramLocation` (the Sony-name `cellGcmSetVertexProgram` Cg-handle forwarders are deferred to a later Phase 7 step) | Phase 3 + Phase 7 (libgcm_sys + librsx + cgcomp + nvidia-cg-toolkit) | **green** (RPCS3 runtime test pending) |
-| `hello-spu/` | SPU toolchain + intrinsics + DMA back to PPU, combined PPU/SPU build | Phase 2a complete | **green** |
-| `ppu-spu-dma/` (TBD) | Full DMA mailbox exchange patterns | Phase 2a complete | not yet |
-| `rsx-triangle-vs/` (TBD) | Existing PSL1GHT vertex shader pipeline still works | Phase 3 Beta | not yet |
-| `rsx-textured-quad-fs/` (TBD) | New NV40-FP fragment shader assembler | Phase 3 M5 | not yet |
-| `net-http-get/` (TBD) | Networking + mbedTLS HTTPS | Phase 4 + Phase 3 networking | not yet |
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-c++17/` | PPU C++17 front- and back-end, libstdc++ link, PPU thread id | **green** |
+| `hello-ppu-abi-check/` | `.sys_proc_param` section layout (36-byte firmware-3.30+), malloc/calloc/realloc through libsysbase `_sbrk_r`, printf through `_write_r` | **green** |
+| `hello-ppu-sysutil-cb/` | `cellSysutilRegisterCallback` / `Check` / `Unregister` over the PSL1GHT runtime; imports FNIDs 0x9d98afa0 / 0x189a74da / 0x02ff3c1b | **green** + RPCS3 runtime-verified (XMB events delivered) |
+| `hello-ppu-msgdialog/` | `cellMsgDialogOpen2` Yes/No dialog over the PSL1GHT runtime; imports FNIDs 0xf81eca25 / 0x7603d3db / 0x62b0f803 | **green** + RPCS3 runtime-verified (dialog rendered, YES button routed back) |
+| `hello-ppu-sysparam/` | `cellSysutilGetSystemParam{Int,String}` — prints language / nickname / date format / timezone etc.  Imports FNIDs 0x40e895d3 / 0x938013a0 | **green** + RPCS3 runtime-verified (numeric + string params round-trip) |
+| `hello-ppu-savedata/` | `cellSaveDataAutoSave2` — full stat + file callback dance writing a 256-byte payload into an autosave slot.  Imports FNID 0x8b7ed64b | **green** + RPCS3 runtime-verified (PARAM.SFO + SAVEDATA.BIN both land; 256 bytes written via 2-callback protocol) |
+| `hello-ppu-gamedata/` | `cellGameBootCheck` + `ContentPermit` + `GetParam{Int,String}` — probes how the running app was launched and reports its PARAM.SFO.  Imports FNIDs 0xf52639ea / 0x70acec67 / 0x3a5d726a / 0xb7a45caf | **green** + RPCS3 runtime-verified (all calls return 0; Boot-SELF run returns empty context as expected — launch via `.pkg` install to see populated fields) |
+| `hello-ppu-screenshot/` | `cellScreenShotEnable` / `Disable` / `SetParameter` — validates the nidgen-archive pipeline end-to-end: `libsysutil_screenshot_stub.a` is the only library backing.  Imports FNIDs 0x9e33ab8f / 0xfc6f4e74 / 0xd3ad63e4 (overlay 0x7a9c2243 declared, not called) | **green** + RPCS3 runtime-verified (all three calls return 0; loader resolved cellScreenShotUtility SPRX, patched stub slots, trampolines ran clean) |
+| `hello-ppu-ap/` | `cellSysutilApGetRequiredMemSize` + `Off`, backed by `libsysutil_ap_stub.a`.  Imports FNIDs 0x9e67e0dd / 0x90c2bb19 (and 0x3343824c via whole-archive include) | **green** + RPCS3 runtime-verified (GetRequiredMemSize returns exactly 0x100000 = 1 MiB; Off returns 0) |
+| `hello-ppu-l10n/` | A small `eucjp2sjis` port: `cellSysmoduleLoadModule(CELL_SYSMODULE_L10N)` then `eucjp2sjis()` over a few EUC-JP code points, then unload.  Libl10n_stub has 165 exports — scales the nidgen-archive pipeline past small-size cases.  Imports FNIDs 0x32267a31 / 0x112a5ee9 + libl10n's `eucjp2sjis` FNID | **green** + RPCS3 runtime-verified (all four EUC-JP→SJIS conversions match expected) |
+| `hello-ppu-backfill/` | Batch link smoke test — pulls one symbol from each of five stub archives (subdisplay / music / music_decode / music_export / imejp; 99 exports across 5 SPRX modules) into a non-call sink so the FNID + sceResident entries land in the ELF | **green** + RPCS3 runtime-verified (all 10 `.opd` addresses non-null, well-spread; process boots, prints, exits clean) |
+| `hello-ppu-event-flag/` | Port of the `lv2/event_flag` reference sample (PPU half): master + 5 worker PPU threads coordinate via two `sys_event_flag_*` event flags.  Pure lv2 syscall sample, no SPRX/stub-archive needed | **green** + RPCS3 runtime-verified (master + all 5 workers exchange event-flag signals; every worker prints "succeeded my job"; threads exit cleanly) |
+| `hello-ppu-rsx-clear/` | Brings up the RSX command stream and cycles a clear-color over the framebuffer using `rsxClearSurface` (no shaders).  Adapted from PSL1GHT's `cairo` sample's `rsxutil.c`.  Cycles 6 colors × 60 frames each (~6 s), exits clean.  Press START to exit early | **green** + RPCS3 runtime-verified (RSX up at 1280×720, 360 frames drawn, all 6 colors visible on screen, exited clean) |
+| `hello-ppu-cellgcm-clear/` | Same flow as `hello-ppu-rsx-clear` but spelled with `cellGcm*` identifiers wherever a forwarder exists in `<cell/gcm.h>` + `<cell/gcm/gcm_command_c.h>`.  Only `rsxMemalign`/`rsxFree` stay PSL1GHT-named (no cellGcm equivalent) | **green** + RPCS3 runtime-verified (ctx populated at 0x2e0ccc, 1280×720 init, 360 frames drawn, all 6 colors visible — bit-identical visual result to rsx-clear) |
+| `hello-ppu-cellgcm-cursor/` | Exercises the `cellGcmInitCursor` / `SetCursor*` / `UpdateCursor` family — PS3 RSX hardware cursor is a video overlay, no shaders.  Allocates a 32×32 BGRA cursor texture at `CELL_GCM_CURSOR_ALIGN_OFFSET` (2048-byte) alignment, animates it in a Lissajous pattern over a sweeping background for ~6 s | **green** + RPCS3 API-verified (all six cellGcm cursor calls return 0; texture allocates 2048-aligned at expected offset; 360 frames drawn clean exit).  HW cursor overlay is a separate scanout-time overlay that RPCS3 doesn't visually emulate; API contract is satisfied and would render on real PS3 hardware |
+| `hello-ppu-cellgcm-triangle/` | A basic GCM flip_immediate example.  Vertex + fragment shaders in `shaders/*.{vcg,fcg}` are compiled via PSL1GHT `cgcomp` (or our own `rsx-cg-compiler` with `USE_RSX_CG_COMPILER=1`), embedded via `bin2s`, and rendered as a coloured triangle | **green** (RPCS3 runtime test pending) |
+| `hello-spu/` | SPU toolchain + intrinsics + DMA back to PPU, combined PPU/SPU build | **green** |
+| `ppu-spu-dma/` (TBD) | Full DMA mailbox exchange patterns | not yet |
+| `rsx-triangle-vs/` (TBD) | Existing PSL1GHT vertex shader pipeline still works | not yet |
+| `rsx-textured-quad-fs/` (TBD) | New NV40-FP fragment shader assembler | not yet |
+| `net-http-get/` (TBD) | Networking + mbedTLS HTTPS | not yet |
 
-## What `hello-ppu-sony-abi` checks
+## What `hello-ppu-abi-check` checks
 
-It is the ABI oracle: if it regresses, our output drifted from Sony's expectations.
+It is the ABI oracle: if it regresses, our output drifted from the reference
+loader's expectations.
 
 - **`.sys_proc_param` section size** is 0x24 (36 bytes), 8-byte aligned.
 - **Magic** `0x13bcc5f6`.
@@ -50,7 +51,7 @@ Run under RPCS3 with `--no-gui` to watch the stdout; a passing run ends
 with `result: PASS`.
 
 `.sys_proc_param` hex dump under `powerpc64-ps3-elf-objdump -s -j
-.sys_proc_param hello-ppu-sony-abi.elf` should look like:
+.sys_proc_param hello-ppu-abi-check.elf` should look like:
 
 ```
  xxxxx 00000024 13bcc5f6 00330000 ffffffff  ...$.....3......
@@ -62,10 +63,9 @@ Fields in order: size=36, magic, version=VERSION_330, sdk_version=UNKNOWN,
 prio=1001, stacksize=0x10000, malloc_pagesize=1M, ppc_seg=DEFAULT,
 crash_dump_param_addr=low 32 bits of `__sys_process_crash_dump_param`'s
 OPD address (the sample defines the callback; omitting it leaves this
-word at 0, which is Sony's "no callback" semantics).
+word at 0, which is the "no callback" value).
 
-Task #7 delivered via patch `patches/psl1ght/0009`: the
-`SYS_PROCESS_PARAM` macro now emits the whole struct through inline asm
+The `SYS_PROCESS_PARAM` macro emits the whole struct through inline asm
 so the trailing field can be a `R_PPC64_ADDR32` relocation against the
 weak `__sys_process_crash_dump_param` symbol.  User code just defines
 the callback (or doesn't).
@@ -126,9 +126,9 @@ After any rebuild of binutils / GCC+newlib / PSL1GHT, all three green
 samples must still link and (where possible) run:
 
 1. `hello-ppu-c++17` — our own toolchain smoke test (C++17 + PSL1GHT runtime).
-2. `hello-ppu-sony-abi` — Sony-ABI oracle.  A regression here means we
-   drifted from Sony's loader expectations even if RPCS3 still loads the
-   binary.
+2. `hello-ppu-abi-check` — reference-ABI oracle.  A regression here means we
+   drifted from the reference loader's expectations even if RPCS3 still loads
+   the binary.
 3. PSL1GHT's own `sample/` tree (once built) — verifies downstream
    homebrew still compiles against the modernised headers.
 
@@ -139,9 +139,8 @@ A rebuild isn't "done" until all three still pass.
 1. Create `samples/<name>/` with `Makefile`, `source/main.c` (or `.cpp`).
 2. Use `include $(PSL1GHT)/ppu_rules` for PPU-only; add `spu/` subdir with
    `include $(PSL1GHT)/spu_rules` for SPU code.
-3. Add a row in the table above with what it validates and which phase
-   must be complete before it can build.
+3. Add a row in the table above with what it validates.
 4. Keep samples minimal — one concept per sample.  Big examples go
    elsewhere.
-5. If the sample exercises a Sony-ABI boundary, document the hex-dump
+5. If the sample exercises an ABI boundary, document the hex-dump
    shape it expects so future regressions are visible in `objdump -s`.

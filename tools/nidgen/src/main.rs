@@ -40,9 +40,9 @@ enum Command {
         inputs: Vec<PathBuf>,
     },
 
-    /// Extract a NID YAML database from a Sony stub archive.
+    /// Extract a NID YAML database from a cell-SDK stub archive.
     Extract {
-        /// Path to the Sony archive (e.g. libaudio_stub.a).
+        /// Path to the archive (e.g. libaudio_stub.a).
         #[arg(long)]
         input: PathBuf,
         /// Output YAML path.  If omitted, writes to stdout.

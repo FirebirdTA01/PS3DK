@@ -1,7 +1,7 @@
 /*
  * hello-ppu-screenshot — first non-PSL1GHT-backed sysutil sample.
  *
- * Validates the Phase 6.5 nidgen-archive pipeline end-to-end:
+ * Validates the nidgen-archive pipeline end-to-end:
  *   - cell/sysutil_screenshot.h compiles.
  *   - libsysutil_screenshot_stub.a (built by scripts/build-cell-stub-archives.sh)
  *     resolves cellScreenShotEnable / Disable / SetParameter at link time.
@@ -10,8 +10,8 @@
  *       cellScreenShotDisable         0xfc6f4e74
  *       cellScreenShotSetParameter    0xd3ad63e4
  *       cellScreenShotSetOverlayImage 0x7a9c2243   (declared, not called)
- *   - cellScreenShotUtility appears in .rodata.sceResident so the PRX loader
- *     pulls in Sony's SPRX module at runtime.
+ *   - cellScreenShotUtility appears in .rodata.sceResident so the PRX
+ *     loader pulls in the SPRX module at runtime.
  *
  * Runtime expectation in RPCS3:
  *   1. Enable screenshots.
@@ -51,7 +51,7 @@ int main(int argc, char **argv)
 	(void)argc;
 	(void)argv;
 
-	printf("hello-ppu-screenshot: Phase 6.5 stub-archive validation\n");
+	printf("hello-ppu-screenshot: stub-archive validation\n");
 
 	int rc = cellSysutilRegisterCallback(0, on_sysutil_event, NULL);
 	if (rc != 0) {
@@ -69,7 +69,7 @@ int main(int argc, char **argv)
 	CellScreenShotSetParam param = {
 		.photo_title  = "PS3 Custom Toolchain test photo",
 		.game_title   = "hello-ppu-screenshot",
-		.game_comment = "Phase 6.5 — first non-PSL1GHT-backed sysutil",
+		.game_comment = "first non-PSL1GHT-backed sysutil",
 		.reserved     = NULL,
 	};
 	rc = cellScreenShotSetParameter(&param);

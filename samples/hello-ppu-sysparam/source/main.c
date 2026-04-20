@@ -1,10 +1,10 @@
 /*
  * hello-ppu-sysparam — exercise cellSysutilGetSystemParam{Int,String}.
- * Third Phase 6 backfill sample.  Queries a handful of system
- * parameters and prints them to TTY.log.  No UI — runs to completion
- * in a few milliseconds.
  *
- * ELF imports Sony FNIDs:
+ * Queries a handful of system parameters and prints them to TTY.log.
+ * No UI — runs to completion in a few milliseconds.
+ *
+ * ELF imports FNIDs:
  *   cellSysutilGetSystemParamInt    0x40e895d3
  *   cellSysutilGetSystemParamString 0x938013a0
  */

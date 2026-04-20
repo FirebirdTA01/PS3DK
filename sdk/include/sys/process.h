@@ -8,8 +8,8 @@
  * syscalls accept).  Function wrappers forward to the numbered LV2
  * syscalls declared in <lv2/syscalls.h>.
  *
- * Sony-name aliases (SYS_PROCESS_PRIMARY_STACK_SIZE_*, exitspawn) are
- * threaded in alongside the long-standing PSL1GHT spellings so code
+ * Cell-SDK-name aliases (SYS_PROCESS_PRIMARY_STACK_SIZE_*, exitspawn)
+ * are threaded in alongside the long-standing PSL1GHT spellings so code
  * authored against either surface builds unchanged.
  */
 
@@ -47,7 +47,7 @@
 /* Primary-thread stack-size tags written into the .sys_proc_param
  * header.  These are byte-values the loader interprets as 32K … 1M
  * requests.  Both PSL1GHT's long-standing SPAWN_STACK_SIZE_* names
- * and the Sony-spelled PRIMARY_STACK_SIZE_* names resolve to the same
+ * and the cell-SDK PRIMARY_STACK_SIZE_* names resolve to the same
  * underlying constants. */
 #define SYS_PROCESS_SPAWN_STACK_SIZE_32K         0x10
 #define SYS_PROCESS_SPAWN_STACK_SIZE_64K         0x20

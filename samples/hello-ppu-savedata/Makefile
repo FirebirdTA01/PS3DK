@@ -1,7 +1,7 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-savedata — Fourth Phase 6 backfill sample.
+# hello-ppu-savedata — cellSaveDataAutoSave2 smoke test.
 #
-# Sony-SDK-source-compat use of cellSaveDataAutoSave2 through PSL1GHT's
+# Cell-SDK-source-compat use of cellSaveDataAutoSave2 through PSL1GHT's
 # runtime via the <cell/sysutil_savedata.h> forwarder.  Writes a 256-byte
 # "save" into a fixed auto-save slot using the full callback dance.
 #---------------------------------------------------------------------------------

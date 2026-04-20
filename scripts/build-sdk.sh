@@ -4,7 +4,7 @@
 # Single entry point for the entire sdk/ tree: libraries plus header-
 # only subsystems.  Runs after the PSL1GHT runtime is in place
 # (build-psl1ght.sh), since today's SDK headers forward to PSL1GHT
-# symbols.  As we phase PSL1GHT out, the forwarding details change
+# symbols.  As we wean off PSL1GHT, the forwarding details change
 # behind this command but the interface does not.
 #
 #   source ./scripts/env.sh

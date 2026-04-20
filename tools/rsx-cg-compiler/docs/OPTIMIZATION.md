@@ -1,46 +1,41 @@
 # Optimization Architecture
 
-How `rsx-cg-compiler` models `sce-cgc`'s compile-time knobs, and where
-future optimization passes plug in.
+How `rsx-cg-compiler` organises its optimisation levels and fast-math
+behaviour, and where future optimisation passes plug in.
 
-## Today's reality (probed 2026-04-18, SDK 475.001)
+## Flag matrix
 
-Of the ~60 flags `sce-cgc --help` documents, exactly **one** actually
-changes output bytes on the shaders we currently lower:
+`rsx-cg-compiler` exposes two orthogonal compile-time knobs:
 
-| flag                  | effect                                    |
-|:----------------------|:------------------------------------------|
+| flag                  | effect                                                |
+|:----------------------|:------------------------------------------------------|
 | `--fastmath` (default)| MAD fusion; register reuse; fp16 promotion of COLOR varyings |
 | `--nofastmath`        | Literal expression tree; no fusion; more temps |
+| `-O0 … -O3`           | Progressive optimisation tiers; `-O2` is the default |
 
-Everything else — `--O0`/`--O1`/`--O2`/`--O3`, `--partial-reg-alloc`,
-`--reduce-dp-size`, `--noreduce-dp-size` — produced byte-identical
-output on both simple and complex FP probes and on VP across the
-board.  That's NOT because they're broken; it's because our test
-shaders don't exercise the optimisation paths those flags gate.
+`-O1` gates dead-code elimination and constant folding; `-O2` adds MAD
+fusion, disjoint-lifetime register reuse, and common-subexpression
+elimination; `-O3` also does cross-basic-block propagation and more
+speculative register reuse.  Not every gate has fired yet — the test
+shaders used to regression-check output are simple enough that many of
+these transformations have no observable effect on them.  The gates
+are in place so real-world shaders start exercising them cleanly.
 
-The shape will change as we add **real-world** shader lowering:
-
-- Dead code elimination needs a shader with unused IR to prune (O1).
-- Register reuse needs shaders with disjoint temp lifetimes (O2).
-- Cross-basic-block propagation needs branching / conditional code (O3).
-- Loop unrolling / function inlining need, well, loops + functions.
-
-Keep the `OptLevel` axis intact; the gates just haven't fired yet.
+The defaults were chosen to match the reference compiler's behaviour
+so the byte-diff harness can compare like-for-like without either side
+passing extra flags.
 
 ## The CompileOptions surface
 
 Defined in [`src/compile_options.h`](../src/compile_options.h) under
-`namespace rsx_cg`.  Defaults match sce-cgc's defaults so the
-byte-diff harness compares like-for-like without either side passing
-extra flags.
+`namespace rsx_cg`:
 
 ```cpp
 struct CompileOptions {
-    OptLevel opt      = OptLevel::O2;   // sce-cgc default
-    bool     fastmath = true;           // default ON
+    OptLevel opt      = OptLevel::O2;   // default optimisation level
+    bool     fastmath = true;           // fast-math default ON
     bool     backFaceColorBits = false; // attributeOutputMask: front-face only
-    bool     keepUnusedParams = false;  // sce-cgc strips unused by default
+    bool     keepUnusedParams = false;  // strip unused params by default
     bool     useNrmh           = true;
     bool     earlyKills        = true;
     bool     maxPsizeWorkaround= true;
@@ -57,8 +52,7 @@ nv40::emitVertexProgram    (module, entry, opts);
 nv40::emitVertexProgramEx  (module, entry, opts);  // + VpAttributes
 ```
 
-Pass a default-constructed `CompileOptions{}` if you don't care —
-it's equivalent to running sce-cgc with no flags.
+Pass a default-constructed `CompileOptions{}` if you don't care.
 
 ## CLI surface
 
@@ -70,12 +64,12 @@ Flags are parsed in `src/main.cpp` and stored on `CompilerContext`:
 --nofastmath
 ```
 
-sce-cgc's code-gen flags (`--bcolor`, `--fkeep-unused`, `--fuse-nrmh`,
-`--fearly-kills`, `--fmax-psize`, `--disablepc`, etc.) aren't wired to
+Code-gen flags like `--bcolor`, `--fkeep-unused`, `--fuse-nrmh`,
+`--fearly-kills`, `--fmax-psize`, `--disablepc`, etc. aren't wired to
 the CLI yet — add them as the corresponding behaviour lands in the
 back-end.  The `CompileOptions` struct already has slots for them.
 
-## Adding a new optimization pass
+## Adding a new optimisation pass
 
 1. Add the gate to `CompileOptions` if a finer toggle is needed; for
    most passes just reading `opts.opt` + `opts.fastmath` is enough.
@@ -88,34 +82,11 @@ back-end.  The `CompileOptions` struct already has slots for them.
        fuseMulAddIntoMad(...);
    }
    ```
-4. Add a test shader that exercises the difference.  Give it a
-   telling name (`mad_fused_f.cg`) and make sure the diff harness
-   invokes sce-cgc with matching flags.
+4. Add a test shader that exercises the difference.  Give it a telling
+   name (`mad_fused_f.cg`).
 
-**Hard rule:** every new optimization must still produce byte-exact
-output against sce-cgc at the same `(OptLevel, fastmath)` tuple.
-Our diff harness is the gate; optimizations that pass functional
-tests but diverge from sce-cgc are bugs.
-
-## The test contract
-
-`tests/run_diff.sh` pins against `--O2 --fastmath` on **both** sides
-(our compiler and sce-cgc).  This is documented at the top of the
-script via the `OPT_FLAGS` array.
-
-When we add real-shader tests that need to exercise a different level
-(e.g. a `mad_fused_f.cg` written to work at both `-O0` and `-O2` and
-validate that the lowering differs), the harness should grow a
-per-shader override — probably a sidecar `.flags` file or a naming
-convention.  That mechanism doesn't exist yet; the current `OPT_FLAGS`
-is a repo-wide knob.
-
-## Why no `--fastmath` behaviour implemented yet
-
-Every shader in `tests/shaders/` today is simple enough that sce-cgc
-produces identical output at `--fastmath` and `--nofastmath`.  We
-match sce-cgc at `--fastmath` by construction because that's what
-sce-cgc emits as the baseline.  When we land the first shader that
-DOES differ (e.g. a 3-term `MUL+ADD` expression sce-cgc fuses into a
-MAD), implementing the `fastmath`-gated MAD fusion is a correctness
-requirement, not just an optimization.
+**Hard rule:** every new optimisation must still produce byte-exact
+output against the reference compiler at the same
+`(OptLevel, fastmath)` tuple.  Our diff harness is the gate;
+optimisations that pass functional tests but diverge from the
+reference are bugs.

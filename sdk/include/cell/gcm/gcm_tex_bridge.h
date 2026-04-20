@@ -1,7 +1,7 @@
 /*
  * PS3 Custom Toolchain — <cell/gcm/gcm_tex_bridge.h>
  *
- * Native RSX command emitter for Sony's cellGcmSetTexture /
+ * Native RSX command emitter for the cellGcmSetTexture /
  * cellGcmSetTextureControl / cellGcmSetTextureFilter /
  * cellGcmSetTextureAddress surface.  Replaces the rsxLoadTexture /
  * rsxTextureControl / rsxTextureFilter / rsxTextureWrapMode forwarders

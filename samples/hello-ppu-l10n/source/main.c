@@ -1,19 +1,18 @@
 /*
- * hello-ppu-l10n — port of Sony's samples/sdk/l10n/eucjp2sjis.c.
+ * hello-ppu-l10n — a small eucjp2sjis port.
  *
- * Validates the full Phase 6.5 stack end-to-end on a *real* Sony sample:
- *   - Sony-named cellSysmoduleLoadModule / UnloadModule via
- *     <cell/sysmodule.h>, backed by libsysmodule_stub.a.
- *   - Sony-named L10N converter eucjp2sjis() via <cell/l10n.h>,
- *     backed by libl10n_stub.a (165 exports — first nidgen-archive
- *     consumer above ~10 exports).
+ * Validates the stub-archive stack end-to-end:
+ *   - cellSysmoduleLoadModule / UnloadModule via <cell/sysmodule.h>,
+ *     backed by libsysmodule_stub.a.
+ *   - L10N converter eucjp2sjis() via <cell/l10n.h>, backed by
+ *     libl10n_stub.a (165 exports).
  *
- * Differences from Sony's eucjp2sjis.c:
+ * Differences from the reference eucjp2sjis.c:
  *   - No argv parsing (RPCS3 launches don't pass args reliably);
  *     hardcode a few EUC-JP code points instead.
  *   - Diagnostics adjusted for our printf style; logic identical.
  *
- * Imports Sony FNIDs:
+ * Imports FNIDs:
  *   cellSysmoduleLoadModule    0x32267a31
  *   cellSysmoduleUnloadModule  0x112a5ee9
  *   eucjp2sjis                 (computed at runtime; FNID lives in the .a)
@@ -35,7 +34,7 @@ int main(int argc, char **argv)
 	(void)argc;
 	(void)argv;
 
-	printf("hello-ppu-l10n: port of Sony eucjp2sjis sample\n");
+	printf("hello-ppu-l10n: eucjp2sjis port\n");
 
 	int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_L10N);
 	printf("  cellSysmoduleLoadModule(L10N) -> 0x%08x\n", (unsigned)rc);

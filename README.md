@@ -2,7 +2,7 @@
 
 A modern, open-source toolchain and SDK for the PlayStation 3, supporting **C++17** on both the PowerPC 64 PPU (PPE) and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine.
 
-Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebased onto current-generation compilers, with auto-generated stub libraries driven by a NID/FNID database and a ≥95% coverage target against the proprietary reference SDK surface for the subsystems homebrew actually uses.
+Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebased onto current-generation compilers, with auto-generated stub libraries driven by a NID/FNID database and a ≥95% coverage target against the reference cell-SDK surface for the subsystems homebrew actually uses.
 
 ## What this is
 
@@ -17,15 +17,14 @@ Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebas
 
 ## Status
 
-Early development. See `docs/coverage.md` once Phase 3 lands for an up-to-date API coverage matrix.
-
-The authoritative implementation plan is at `C:/Users/FirebirdTA01/.claude/plans/i-m-going-to-create-melodic-dawn.md`.
+Early development.  See `docs/coverage.md` for an up-to-date API
+coverage matrix once the PSL1GHT runtime has been built.
 
 ## Build host
 
 **Native Linux** is the primary build host (CachyOS / any Arch derivative or Ubuntu 22.04+). Linux gives the cleanest GCC cross-build experience and matches CI.
 
-The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by Canadian-cross builds — building on Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 cross-compiler. This is a Phase 5 infra deliverable; the initial shipment is Linux-hosted only.
+The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by Canadian-cross builds — building on Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 cross-compiler.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
 
 ## Getting started
 
@@ -50,11 +49,12 @@ source ./scripts/env.sh
 # First-time setup (clones upstream + ps3dev repos)
 ./scripts/bootstrap.sh
 
-# Phase 1a smoke test — binutils only
+# Smoke test — binutils only
 ./scripts/build-ppu-toolchain.sh --only binutils
 ./scripts/build-spu-toolchain.sh --only binutils
 
-# Full Phase 1+2+3+4 (each takes 10s of minutes; gcc-newlib is the longest)
+# Full toolchain + PSL1GHT + portlibs
+# (each takes 10s of minutes; gcc-newlib is the longest)
 ./scripts/build-ppu-toolchain.sh
 ./scripts/build-spu-toolchain.sh
 ./scripts/build-psl1ght.sh

@@ -1,12 +1,10 @@
 /*
- * hello-ppu-cellgcm-triangle — Phase 7 step 1.5 / parallel-track demo.
+ * hello-ppu-cellgcm-triangle — basic GCM flip_immediate demo.
  *
- * First sample to put **Sony's actual .cg shaders** (verbatim from
- * SDK 475.001 samples/sdk/graphics/gcm/flip_immediate/) through our
- * toolchain end-to-end:
+ * Puts .cg vertex + fragment shaders through our toolchain end-to-end:
  *
- *   .cg source (Sony)
- *     -> cgcomp (PSL1GHT cgcomp + libCg, Path-3 pipeline)
+ *   .cg source
+ *     -> cgcomp (PSL1GHT cgcomp + libCg)
  *     -> .vpo / .fpo binary (NV40 + container)
  *     -> bin2s + as -> .o
  *     -> linked into PPU ELF
@@ -14,17 +12,17 @@
  *        rsxLoadFragmentProgramLocation
  *     -> RSX renders a triangle on screen
  *
- * Flip protocol mirrors Sony's flip_immediate sample exactly:
+ * Flip protocol follows the canonical flip_immediate pattern:
  *   - 4 colour buffers, queue depth 1 (PPU never more than 1 frame ahead)
  *   - cellGcmSetPrepareFlip + WriteBackEndLabel + Flush + label-based
  *     PPU/GPU sync (cellGcmSetWaitLabel / cellGcmSetWriteCommandLabel)
  *   - VBlank handler reads the prepared-buffer label and issues
  *     cellGcmSetFlipImmediate; flip handler clears buffer-busy state
- *   - HSYNC flip mode (matches Sony)
+ *   - HSYNC flip mode
  *
- * cellGcmSetFlip (without these handlers) is non-standard — neither
- * Sony nor PSL1GHT samples use it.  Using it here desyncs the FIFO
- * after the first frame because the PUT/GET handshake is missing.
+ * cellGcmSetFlip (without these handlers) is non-standard — no
+ * canonical sample uses it.  Using it here desyncs the FIFO after the
+ * first frame because the PUT/GET handshake is missing.
  */
 
 #include <stdint.h>
@@ -53,7 +51,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define COLOR_BUFFER_NUM     4
 #define MAX_QUEUE_FRAMES     1
 
-/* Labels — same offsets Sony's flip_immediate uses. */
+/* Labels — same offsets the canonical flip_immediate sample uses. */
 #define LABEL_PREPARED_BUFFER_OFFSET   0x41
 #define LABEL_BUFFER_STATUS_OFFSET     0x42
 #define BUFFER_IDLE                    0
@@ -71,7 +69,7 @@ static u32  depth_pitch;
 static u32  color_offset[COLOR_BUFFER_NUM];
 static u32  depth_offset;
 
-/* Local-memory bump allocator (matches Sony's localMemoryAlloc). */
+/* Local-memory bump allocator (matches the reference localMemoryAlloc). */
 static u32 g_local_mem_heap;
 static void *local_alloc(u32 size)
 {
@@ -115,7 +113,7 @@ static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
 }
 
 /* ----------------------------------------------------------------
- * VBlank + Flip handlers — Sony's flip_immediate pattern.
+ * VBlank + Flip handlers — canonical flip_immediate pattern.
  * VBlank reads the "prepared buffer" label and issues an immediate
  * flip if there is a new buffer ready.  Flip handler marks all
  * scanned-out buffers IDLE so the main loop can reuse them.
@@ -232,7 +230,7 @@ static void set_render_state(CellGcmContextData *ctx)
 }
 
 /* ----------------------------------------------------------------
- * flip() — Sony's flip_immediate pattern.
+ * flip() — canonical flip_immediate pattern.
  *  1. SetPrepareFlip enqueues a PREPARE_FLIP command in the CB.
  *  2. WriteBackEndLabel writes (frame_index<<8 | qid) to label
  *     LABEL_PREPARED_BUFFER_OFFSET so VBlank handler knows what to flip.
@@ -368,7 +366,7 @@ int main(int argc, const char **argv)
 	void               *host_addr;
 	CellGcmContextData *ctx;
 
-	printf("hello-ppu-cellgcm-triangle: Sony shaders + PSL1GHT cgcomp\n");
+	printf("hello-ppu-cellgcm-triangle: cg shaders + PSL1GHT cgcomp\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (cellGcmInit(CB_SIZE, HOST_SIZE, host_addr) != 0) {

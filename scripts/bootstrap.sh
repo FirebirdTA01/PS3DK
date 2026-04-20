@@ -159,7 +159,7 @@ clone_shallow "https://github.com/Estwald/PSDK3v2.git"             "$FORKS_DIR/E
 clone_shallow "https://github.com/StrawFox64/PS3Toolchain.git"     "$FORKS_DIR/StrawFox64-PS3Toolchain"
 
 # -----------------------------------------------------------------------------
-# 3b. Phase 8 Cg compiler donor (vita-cg-compiler) — OPTIONAL.
+# 3b. rsx-cg-compiler front-end donor (vita-cg-compiler) — OPTIONAL.
 # -----------------------------------------------------------------------------
 # tools/rsx-cg-compiler/ now ships its own copies of the donor front-end
 # files under tools/rsx-cg-compiler/src/donor/.  The build does NOT depend
@@ -196,10 +196,10 @@ say "=== Done ==="
 cat <<EOF
 Next steps:
   source ./scripts/env.sh
-  ./scripts/build-ppu-toolchain.sh      # Phase 1 (hours)
-  ./scripts/build-spu-toolchain.sh      # Phase 2a (hours)
-  ./scripts/build-psl1ght.sh            # Phase 3 (minutes)
-  ./scripts/build-portlibs.sh           # Phase 4 (tens of minutes)
+  ./scripts/build-ppu-toolchain.sh      # PPU toolchain (hours)
+  ./scripts/build-spu-toolchain.sh      # SPU toolchain (hours)
+  ./scripts/build-psl1ght.sh            # PSL1GHT runtime (minutes)
+  ./scripts/build-portlibs.sh           # portlibs (tens of minutes)
 
 See README.md for the project overview and docs/ for deeper references.
 EOF

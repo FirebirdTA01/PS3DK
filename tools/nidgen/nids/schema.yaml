@@ -29,9 +29,9 @@ properties:
     description: |
       Optional override for the stub archive filename basename
       (i.e. `lib<archive_name>_stub.a`).  When absent, falls back to
-      `library`.  Use when Sony's archive filename diverges from the
-      runtime library/module name — e.g. Sony ships `libgcm_sys_stub.a`
-      but the resident module name is `cellGcmSys`.
+      `library`.  Use when the archive filename diverges from the
+      runtime library/module name — e.g. `libgcm_sys_stub.a` but the
+      resident module name is `cellGcmSys`.
     pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
 
   exports:

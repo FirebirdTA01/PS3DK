@@ -1,7 +1,7 @@
 /*
- * PS3 Custom Toolchain — <sys/sys_time.h> Sony-SDK compat shim.
+ * PS3 Custom Toolchain — <sys/sys_time.h> cell-SDK compat shim.
  *
- * Sony samples read a 64-bit microsecond monotonic counter via
+ * Cell-SDK samples read a 64-bit microsecond monotonic counter via
  * `sys_time_get_system_time()`.  Our PSL1GHT tree exposes the same
  * underlying LV2 syscall through <sys/systime.h>'s `sysGetCurrentTime`
  * (seconds + nanoseconds), so we compose the microsecond counter from

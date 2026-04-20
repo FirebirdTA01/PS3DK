@@ -5,8 +5,8 @@
  * command emitter shipped under gcm_command_c.h, add a sibling
  * overload without the leading CellGcmContextData* argument that
  * forwards the call through gCellGcmCurrentContext.  Matches
- * Sony's no-context convention so unmodified Sony sample code
- * compiles against our SDK.
+ * the cell-SDK no-context convention so unmodified cell-SDK sample
+ * code compiles against our SDK.
  *
  * Regenerate with the sdk build system if gcm_command_c.h's
  * signature list changes.

@@ -1,14 +1,14 @@
-Subject: [PATCH] ppu/include: Sony-named forwarder at <cell/sysutil_sysparam.h>
+Subject: [PATCH] ppu/include: cell-SDK-named forwarder at <cell/sysutil_sysparam.h>
 
-Third Phase 6 backfill; same pattern as 0011 / 0012.  PSL1GHT's
+Third the backfill workstream backfill; same pattern as 0011 / 0012.  PSL1GHT's
 sysUtilGetSystemParamInt_fnid and sysUtilGetSystemParamString_fnid
-symbols carry Sony's authentic FNIDs (0x40e895d3, 0x938013a0) for
+symbols carry authentic cell-SDK FNIDs (0x40e895d3, 0x938013a0) for
 cellSysutilGetSystemParamInt and cellSysutilGetSystemParamString.
 This header closes the C-level source-compat gap.
 
 Covered:
   - cellSysutilGetSystemParamInt / String forwarders.
-  - CELL_SYSUTIL_SYSTEMPARAM_ID_* 0x0111..0x0157 (Sony's parameter
+  - CELL_SYSUTIL_SYSTEMPARAM_ID_* 0x0111..0x0157 (the cell-SDK parameter
     identifiers for language, button-assign, nickname, date/time
     format, timezone, summertime, parental level, username,
     keyboard, pad rumble, magnetometer, etc.).  Values verified bit-
@@ -39,20 +39,20 @@ index 0000000..398b822
 +++ b/ppu/include/cell/sysutil_sysparam.h
 @@ -0,0 +1,105 @@
 +/*! \file cell/sysutil_sysparam.h
-+ \brief Sony-named forwarder for cellSysutilGetSystemParam{Int,String}.
++ \brief cell-SDK-named forwarder for cellSysutilGetSystemParam{Int,String}.
 +
 +  Thin static-inline forwarders over PSL1GHT's sysUtilGetSystemParamInt
-+  / String.  Verified: PSL1GHT's *_fnid symbols hold Sony's FNIDs —
++  / String.  Verified: PSL1GHT's *_fnid symbols hold cell-SDK FNIDs —
 +    sysUtilGetSystemParamInt_fnid    = 0x40e895d3  (cellSysutilGetSystemParamInt)
 +    sysUtilGetSystemParamString_fnid = 0x938013a0  (cellSysutilGetSystemParamString)
 +
 +  CELL_SYSUTIL_SYSTEMPARAM_ID_* constants are bit-identical to
-+  PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_* set; aliased here so Sony-SDK
-+  source writes the identifiers Sony's headers document.
++  PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_* set; aliased here so cell-SDK
++  source writes the identifiers the cell SDK's headers document.
 +
 +  Not covered — values that cellSysutilGetSystemParam{Int,String}
 +  returns (enum values for language, button-assign, date format, etc.)
-+  have dedicated CELL_SYSUTIL_* constants in Sony's header but are
++  have dedicated CELL_SYSUTIL_* constants in the cell SDK's header but are
 +  just documentation-facing integers.  A full translation would blow
 +  up this header; the important ones (LANG_*, ENTER_BUTTON_ASSIGN_*)
 +  are included here so user code isn't forced to recall magic numbers.
@@ -69,7 +69,7 @@ index 0000000..398b822
 +#endif
 +
 +/* Param-ID constants.  Values match PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_*
-+ * 0x0111..0x0157; just re-exported under Sony's naming. */
++ * 0x0111..0x0157; just re-exported under cell-SDK naming. */
 +#define CELL_SYSUTIL_SYSTEMPARAM_ID_LANG                                SYSUTIL_SYSTEMPARAM_ID_LANG
 +#define CELL_SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN                 SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN
 +#define CELL_SYSUTIL_SYSTEMPARAM_ID_NICKNAME                            SYSUTIL_SYSTEMPARAM_ID_NICKNAME
@@ -94,7 +94,7 @@ index 0000000..398b822
 +#define CELL_SYSUTIL_SYSTEMPARAM_CURRENT_USERNAME_SIZE  64
 +
 +/* Language enum values — what LANG returns.  PSL1GHT defines these as
-+ * SYSUTIL_LANG_*; aliasing to Sony names for source compat. */
++ * SYSUTIL_LANG_*; aliasing to cell-SDK names for source compat. */
 +#define CELL_SYSUTIL_LANG_JAPANESE          SYSUTIL_LANG_JAPANESE
 +#define CELL_SYSUTIL_LANG_ENGLISH_US        SYSUTIL_LANG_ENGLISH_US
 +#define CELL_SYSUTIL_LANG_FRENCH            SYSUTIL_LANG_FRENCH

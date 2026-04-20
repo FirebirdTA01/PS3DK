@@ -1,15 +1,14 @@
 /*
- * hello-ppu-cellgcm-clear — Sony-name port of hello-ppu-rsx-clear.
+ * hello-ppu-cellgcm-clear — cellGcm-name port of hello-ppu-rsx-clear.
  *
  * Same RSX init + clear-and-flip flow as the rsx-clear sample, but
- * spelled with Sony's cellGcm* identifiers everywhere a forwarder
- * exists in <cell/gcm.h> + <cell/gcm/gcm_command_c.h>.  The two
- * functions still spelled rsxFoo are PSL1GHT extensions with no Sony
- * equivalent (rsxMemalign / rsxFree are the local-memory allocator;
- * Sony's pattern is to manage cellGcmGetConfiguration().localAddress
- * by hand).
+ * spelled with cellGcm* identifiers everywhere a forwarder exists in
+ * <cell/gcm.h> + <cell/gcm/gcm_command_c.h>.  The two functions still
+ * spelled rsxFoo are PSL1GHT extensions with no cellGcm equivalent
+ * (rsxMemalign / rsxFree are the local-memory allocator; the cellGcm
+ * pattern is to manage cellGcmGetConfiguration().localAddress by hand).
  *
- * Validates the Phase 7 step-2 + step-3 forwarders end-to-end:
+ * Validates the system + command-emitter forwarders end-to-end:
  *   - cellGcmInit                  — system init (mirrors gGcmContext)
  *   - cellGcmAddressToOffset       — RSX-local-addr -> RSX-offset
  *   - cellGcmSetDisplayBuffer      — register flip buffer
@@ -24,8 +23,8 @@
  *   - cellGcmSetClearColor         — set ARGB clear value
  *   - cellGcmSetClearSurface       — submit clear command (uses
  *                                    GCM_CLEAR_R|G|B|A mask)
- *   - cellGcmSetWriteBackEndLabel  — write a label (note Sony's "BackEnd"
- *                                    capitalisation)
+ *   - cellGcmSetWriteBackEndLabel  — write a label (note "BackEnd"
+ *                                    capitalisation — cell-SDK style)
  *   - cellGcmSetWaitLabel          — wait on a label
  *   - cellGcmGetLabelAddress       — read label slot for the busy-wait
  *
@@ -198,7 +197,7 @@ int main(int argc, const char **argv)
 	padData              paddata;
 	CellGcmContextData  *ctx;
 
-	printf("hello-ppu-cellgcm-clear: Phase 7 step-3 Sony-name validation\n");
+	printf("hello-ppu-cellgcm-clear: cellGcm-name validation\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (!init_screen(host_addr, HOST_SIZE, &width, &height)) {

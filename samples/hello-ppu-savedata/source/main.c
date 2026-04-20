@@ -1,13 +1,13 @@
 /*
- * hello-ppu-savedata — Sony-SDK-source-compat cellSaveDataAutoSave2.
+ * hello-ppu-savedata — cellSaveDataAutoSave2 smoke test.
  *
  * Writes a 256-byte "save" into a fixed directory, using the full
  * CellSaveDataSetBuf / CellSaveDataStatSet / CellSaveDataFileSet
  * dance that a real game would follow.  The source here is intended
- * to compile against Sony's reference sysutil_savedata.h unchanged
- * — the only PSL1GHT-ism is the #include path.
+ * to compile against the reference sysutil_savedata.h unchanged —
+ * the only PSL1GHT-ism is the #include path.
  *
- * ELF imports Sony FNID 0x8b7ed64b (cellSaveDataAutoSave2).
+ * ELF imports FNID 0x8b7ed64b (cellSaveDataAutoSave2).
  *
  * Runtime on RPCS3:
  *   - RPCS3 creates (or opens) the savedata directory under its
@@ -60,7 +60,7 @@ static void on_stat(CellSaveDataCBResult *cbResult,
 	CellSaveDataSystemFileParam *param = &get->getParam;
 	strncpy(param->title,    "hello-ppu-savedata",
 	        sizeof(param->title) - 1);
-	strncpy(param->subTitle, "Phase 6 savedata smoke test",
+	strncpy(param->subTitle, "savedata smoke test",
 	        sizeof(param->subTitle) - 1);
 	strncpy(param->detail,   "256 bytes of deterministic payload written by cellSaveDataAutoSave2",
 	        sizeof(param->detail) - 1);
@@ -120,7 +120,7 @@ int main(int argc, char **argv)
 	setBuf.bufSize     = sizeof(g_sd_buf);
 	setBuf.buf         = g_sd_buf;
 
-	/* Sony-recommended pattern: "GAMEID-NAME" is 20 chars or less.
+	/* Canonical pattern: "GAMEID-NAME" is 20 chars or less.
 	 * RPCS3 will map this into its save-root when running headless. */
 	int rc = cellSaveDataAutoSave2(
 		CELL_SAVEDATA_VERSION_CURRENT,

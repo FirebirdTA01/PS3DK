@@ -105,7 +105,7 @@ void FpAssembler::emitFencbr()
     hasInstruction_  = true;
     uint32_t* hw = &logicalWords_[base];
 
-    // OPCODE = 0x3E (Sony RSX extension, "fence before read").
+    // OPCODE = 0x3E (RSX extension, "fence before read").
     hw[0] |= (uint32_t{0x3Eu} << NVFX_FP_OP_OPCODE_SHIFT);
     // OUT_NONE: no destination written.
     hw[0] |= NV40_FP_OP_OUT_NONE;

@@ -1,15 +1,17 @@
 /*
  * PS3 Custom Toolchain — <cell/gcm/gcm_cg_bridge.h>
  *
- * Native RSX command emitter for Sony's cellGcmSetVertexProgram /
+ * Native RSX command emitter for the cellGcmSetVertexProgram /
  * cellGcmSetFragmentProgram / cellGcmSetVertexProgramParameter surface.
- * Reads CgBinaryProgram blobs (sce-cgc output) directly and writes NV40
- * command words to the current gcm command buffer — no PSL1GHT
- * rsx{Vertex,Fragment}Program intermediate, no rsxLoad* forwarding.
+ * Reads CgBinaryProgram blobs (reference-Cg-compiler output) directly
+ * and writes NV40 command words to the current gcm command buffer —
+ * no PSL1GHT rsx{Vertex,Fragment}Program intermediate, no rsxLoad*
+ * forwarding.
  *
- * Sce-cgc output is the source of truth; the hardware register encoding
- * is derived here from the parameter-table semantics and container
- * fields rather than being consumed from PSL1GHT-style struct fields.
+ * Reference-compiler output is the source of truth; the hardware
+ * register encoding is derived here from the parameter-table semantics
+ * and container fields rather than being consumed from PSL1GHT-style
+ * struct fields.
  * When PSL1GHT's librsx is eventually replaced wholesale, the only
  * piece of this file that changes is which gcmContextData / NV40
  * method macros we include — the command sequences stay put.
@@ -63,7 +65,7 @@ extern "C" {
  * gcm callback (which grows the buffer or flushes upstream) when we
  * run up against the current end.  Returns the starting write pointer
  * or NULL on callback failure. */
-/* Invoke the FIFO-refill callback through the PSL1GHT / Sony PRX
+/* Invoke the FIFO-refill callback through the PSL1GHT / cell-SDK PRX
  * calling convention.  The `callback` field is stored as an
  * `ATTRIBUTE_PRXPTR` (a 32-bit handle pointing to an 8-byte
  * [entry, toc] descriptor) rather than a full PPC64 ELFv1 OPD.
@@ -73,7 +75,7 @@ extern "C" {
  * Must be noinline — the asm relies on r3=ctx and r4=count on entry
  * (standard PPC64 arg convention); inlining would let GCC reorder the
  * callers' register allocation and break that invariant. */
-/* Invoke the FIFO-wrap callback via the PSL1GHT / Sony PRX calling
+/* Invoke the FIFO-wrap callback via the PSL1GHT / cell-SDK PRX calling
  * convention, explicitly arranging the call frame so GCC can't
  * silently break the ABI.
  *
@@ -161,8 +163,9 @@ static inline uint32_t *ps3tc_gcm_reserve(CellGcmContextData *ctx, uint32_t coun
  * Each channel is a single bit.  Earlier revisions of this routine
  * OR'd in bit (2+idx) for the "back" variant of each colour, which
  * declared BFC0/BFC1 as outputs the VP never actually writes — the
- * interpolator then fed zeros down the COL0 path.  Sony basic's
- * black-triangle symptom (2026-04-18) traced to exactly that.
+ * interpolator then fed zeros down the COL0 path.  The reference
+ * basic-triangle sample's black-triangle symptom traced to exactly
+ * that.
  */
 static inline uint32_t ps3tc_cg_vp_result_en(const CgBinaryProgram *p)
 {
@@ -329,7 +332,7 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
     /* Bind the FP ucode address.  The lower 29 bits carry the byte
      * offset within RSX memory; bit 0 of the header-byte carries
      * location (LOCAL vs RSX) — PSL1GHT writes (location+1) | offset
-     * which matches Sony's convention. */
+     * which matches the reference-runtime convention. */
     {
         uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
         if (!w) return;
@@ -365,9 +368,10 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
      *                0x0e = output from H0 (half-precision)
      *                0x80 = shader uses KIL
      *              The CgBinaryFragmentProgram.outputFromH0 flag tells
-     *              us which output register sce-cgc compiled for.  2026-
-     *              04-18: Sony basic's FP had outputFromH0=0 (R0) and
-     *              rendered solid black because we weren't setting 0x40
+     *              us which output register the reference Cg compiler
+     *              used.  Observed: the reference basic-triangle FP had
+     *              outputFromH0=0 (R0) and rendered solid black because
+     *              we weren't setting 0x40
      *              — the HW then had no defined output register.
      *   bit  10  : program valid / enable — must be set for the FP
      *              to actually execute.
@@ -463,7 +467,7 @@ static inline void cellGcmSetVertexProgramParameter(CellGcmContextData *ctx,
 }
 #endif
 
-/* Sony-convention no-context C++ overloads — forward through the
+/* Cell-SDK-convention no-context C++ overloads — forward through the
  * gCellGcmCurrentContext global. */
 #ifdef __cplusplus
 

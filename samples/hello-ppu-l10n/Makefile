@@ -1,10 +1,10 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-l10n — port of Sony's samples/sdk/l10n/eucjp2sjis.c sample.
+# hello-ppu-l10n — a small eucjp2sjis port.
 #
-# First Sony-SDK-source port.  Links against libl10n_stub.a + libsysmodule_stub.a
-# (both built via scripts/build-cell-stub-archives.sh).  At runtime,
-# cellSysmoduleLoadModule(CELL_SYSMODULE_L10N) brings the SPRX in; eucjp2sjis
-# dispatches through the FNID stub slot to the loaded module.
+# Links against libl10n_stub.a + libsysmodule_stub.a (both built via
+# scripts/build-cell-stub-archives.sh).  At runtime,
+# cellSysmoduleLoadModule(CELL_SYSMODULE_L10N) brings the SPRX in;
+# eucjp2sjis dispatches through the FNID stub slot to the loaded module.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 

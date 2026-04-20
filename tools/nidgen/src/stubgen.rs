@@ -1,8 +1,8 @@
-//! Emit PPU assembly that produces complete Sony-compatible stub archives.
+//! Emit PPU assembly that produces complete cell-SDK-compatible stub archives.
 //!
 //! The PS3 PRX loader + sprxlinker + `lv2.ld` expect specific section names
-//! in the final linked ELF — not per-library scoped variants.  Sony's
-//! reference stub archives ship one per-export `.o` whose sections add up to
+//! in the final linked ELF — not per-library scoped variants.  The reference
+//! cell-SDK stub archives ship one per-export `.o` whose sections add up to
 //! a self-contained import surface; PSL1GHT's `sprx/common/libexport.c` +
 //! `exports.S` reproduce the same surface, split across two source files.
 //! This module reproduces all of it in a single emit:
@@ -28,9 +28,9 @@
 //! ```
 //!
 //! The emitted archive is therefore self-contained: no PSL1GHT SPRX support
-//! is required to link against it.  This is what makes Phase 6.5 libraries
-//! (libsysutil_screenshot first; libsysutil_ap / imejp / subdisplay / music\*
-//! to follow) work without a hand-written wrapper.
+//! is required to link against it.  This is what makes stub-only cell-SDK
+//! libraries (libsysutil_screenshot, libsysutil_ap, imejp, subdisplay,
+//! music\*) work without a hand-written wrapper.
 //!
 //! Earlier versions of this module emitted `.lib.stub.<library>` + `b <sym>`
 //! placeholders — a format that never matched the linker script and would
@@ -86,7 +86,7 @@ pub fn render_library(lib: &Library) -> String {
     //
     //    header2 = number of exports per PSL1GHT convention; sprxlinker
     //    recomputes this from the fnid spacing, so either value is fine on
-    //    well-formed inputs.  We use the Sony-observed 0x0009 family (count
+    //    well-formed inputs.  We use the reference-observed 0x0009 family (count
     //    of exports); dumps across all 97 stub archives show variations in
     //    the low byte that correspond to export counts, so this is indeed
     //    an export count.
@@ -239,11 +239,11 @@ mod tests {
     }
 
     #[test]
-    fn emits_sony_compatible_sections() {
+    fn emits_cell_sdk_compatible_sections() {
         let s = render_library(&sample());
         // Header preamble.
         assert!(s.contains("Library: cellPad"));
-        // Sony-compatible section names.
+        // Cell-SDK-compatible section names.
         assert!(s.contains(".data.sceFStub.cellPad"), "missing fstub section");
         assert!(s.contains(".rodata.sceResident"), "missing resident section");
         assert!(s.contains(".rodata.sceFNID"), "missing fnid section");

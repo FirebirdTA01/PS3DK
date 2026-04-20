@@ -3,7 +3,7 @@
 Running list of things the SDK currently works around, defers, or does
 in a less-than-ideal way — each entry pairs the observed symptom with
 the planned fix so we don't lose track of them when moving on to the
-next phase.
+next surface.
 
 ---
 
@@ -12,7 +12,7 @@ next phase.
 **Status:** works correctly (no hangs, no desync), but drops the
 occasional frame on a wrap.
 
-**Symptom.** The `sony-cube` sample runs indefinitely with our native
+**Symptom.** The `spinning-cube` sample runs indefinitely with our native
 wrap callback, but exhibits an occasional mild flicker — one dropped
 frame each time the command FIFO wraps. In practice this lands
 roughly every ~1.25 s at 60 fps with the sample's default
@@ -27,52 +27,123 @@ blocked until the GPU has processed every command ahead of it. If
 the wait lands mid-frame, the frame's budget blows past VSYNC and
 you see a visible stutter.
 
-**Why the simple double-buffered version didn't help.** An attempt
-at splitting the FIFO into two halves made it *worse*, not better.
-Halving the buffer doubled the wrap frequency (~2-3x more frequent),
-and each half-wrap still does the full drain-wait, which meant the
-drain-stall was happening two to three times as often. Combined
-with the sample's `cellGcmFinish(1)` using a constant reference
-value (effectively a no-op after frame 0, so PPU races ahead), the
-PPU/GPU timing went bursty and the cube visibly jumped between
-rotation states on every wrap cycle. Reverted.
+**Four async-wrap attempts, all reverted.** We've tried to replace
+the drain-wait with double-buffered back-end-label sync three
+times.  Each attempt failed differently and each failure pointed
+at a real constraint the final design has to satisfy:
 
-**The correct fix — back-end-label / semaphore async sync.** The
-drain-wait has to go. The canonical way libgcm does this on real
-PS3 is:
+1. **PUT set past the JUMP** — first attempt advanced PUT to a
+   point inside the target half (so the GPU would follow the JUMP
+   and keep consuming into new commands).  Symptom: cube rendered
+   correctly at first, then entered a visible "rotation loop" —
+   cube rotated forward, skipped backward, rotated forward again.
+   Cause: PUT pointed into memory the PPU hadn't rewritten yet;
+   GPU re-consumed whatever commands happened to still be sitting
+   in the target half from the previous pass.  Fix direction: PUT
+   after wrap must sit exactly at the JUMP target (where GET will
+   catch up and idle), never past it.
 
-1. At a safe reuse point inside each half of the FIFO (e.g. the
-   midpoint or a few commands before the JUMP), emit
-   `cellGcmSetWriteBackEndLabel(label_idx, sentinel_value)`. When
-   the GPU processes that command it writes `sentinel_value` into a
-   memory slot PPU can read via `cellGcmGetLabelAddress(label_idx)`.
-2. Our wrap callback maintains a separate sentinel per half.
-   Before reusing half A, it polls the half-A label address; if it
-   already holds the expected sentinel, GPU has finished with half
-   A and PPU can start writing it immediately — **no wait**. Only
-   if the GPU is still catching up does the callback spin, and
-   then it spins on the label address (fast memory read) rather
-   than the GPU control register.
-3. This is what Sony's sample code that uses `PrepareFlip` already
-   does implicitly via buffer-state labels. Our wrap just has to
-   do the equivalent for its own command-buffer halves.
+2. **No PUT advance at wrap** — second attempt emitted the label
+   + JUMP into ctx but left PUT untouched, assuming the next
+   app-side `cellGcmFlush` would cover both the JUMP and the new
+   commands in one bump.  Symptom: hard freeze before the first
+   rendered frame.  Cause: by the time ctx->current advanced past
+   the JUMP the wrap callback had already returned; the firmware
+   at that point expected PUT to be coherent with ctx->current on
+   the next flush, but our JUMP was "behind" PUT in ring order,
+   so the GPU never saw it.  Fix direction: PUT has to move at
+   the wrap itself, not be deferred to the caller.
 
-In steady state (GPU within a frame of PPU, which is what VSYNC +
-`waitFlip` enforce), the label is already written by the time PPU
-wraps back, and the callback collapses to a single memory load +
-comparison. No drain, no frame drops.
+3. **PUT = target_off, label-poll wait** — third attempt (closest
+   to the design above).  Emit label-write + JUMP at ctx->current
+   in the exiting half, set PUT = target_off (the entering
+   half's begin), then poll the entering half's "I'm-done" label.
+   Symptom: rendered ~17 frames, then froze mid-run; PPU still
+   live (PS button worked), GPU stopped advancing GET.
 
-**Why we're not doing it right now.** It's a meaningful chunk of
-work: lazy label-slot allocation, emission of the label-write
-commands at the right points in the stream, one-per-half
-bookkeeping. It's worth waiting until we have more Sony samples
-running so we can be sure the design generalizes (e.g. some games
-use more than two FIFO halves, or very large FIFOs where the
-back-label pattern needs different spacing). The current
-single-buffer-with-drain-wait version is correct under all
-observed workloads; it just flickers. We revisit when the next
-sample shows a case where the flicker becomes a blocker rather
-than a mild annoyance.
+4. **Retest of #3 with verified clean build/install** — after
+   diagnosing that earlier "fix" tests had been contaminated by
+   stale archives in `$PS3DEV/psl1ght/ppu/lib/` (the sample was
+   linking against a not-yet-installed change), iteration 3 was
+   rebuilt with explicit `make install` + symbol verification
+   in the ELF (`g_half_a_begin` etc. present) and re-tested.
+   Same freeze at the same ~17 frame mark.  This confirms the
+   failure is a real design bug, not a build artefact.  Most
+   likely causes, in priority order:
+
+   - **~~Semaphore byte-swap mismatch.~~** Ruled out.  RPCS3's
+     `nv4097::back_end_write_semaphore_release`
+     (`rpcs3/Emu/RSX/NV47/HW/nv4097.cpp`) applies the exact same
+     self-inverse permutation PSL1GHT emits:
+     `val = (arg & 0xff00ff00) | ((arg & 0xff) << 16) | ((arg >> 16) & 0xff);`
+     The two swaps cancel, so polling for the raw ticker is the
+     correct shape.  Texture-read release writes `arg` verbatim
+     — if we ever want a non-swapping path (easier to reason
+     about) we can use `SEMAPHORE_TEXTUREREAD_RELEASE` instead,
+     but the swap itself is not the bug.
+   - **Label slot collision.**  We picked slots 253/254 on the
+     reasoning that retail-app labels stay in 0..127, but the sample's
+     `cellGcmFinish(n)` path and PSL1GHT's flip machinery both
+     use labels in higher ranges.  If either touches 253/254
+     the value flips under us.  A safer choice is to query
+     `cellGcmGetLabelAddress` at install time, remember the two
+     pointers, and reset them only through those pointers.
+   - **GPU stops before reaching the label-write.**  Our label
+     emit sits just before the JUMP, so if the GPU halts on an
+     earlier command in the half (e.g. the surface setup in
+     frame 0 triggers a state we don't handle) the label never
+     fires and we wait forever.  The right mitigation is a
+     bounded wait (fall back to drain-wait on timeout) — but
+     that shouldn't be the first-line design, just a
+     belt-and-suspenders backstop.
+
+   - **First-wrap JUMP lands in unwritten half-B memory.**
+     Most likely theory after ruling out the swap.  Our
+     `ps3tc_fifo_wrap_install` shrinks `ctx->end` to half-A's
+     limit but doesn't prime half-B with a valid "idle" command
+     stream.  On the first wrap we point PUT at B_begin; GPU
+     follows our JUMP there and finds `GET == PUT`, so it idles
+     correctly *that time*.  But the firmware's preamble in
+     half A may have included commands whose processing
+     extends past what we think "A_end" means, and if GPU
+     ends up reading any unwritten byte in B's reserve area
+     as a method-0 command with a non-zero arg count, it can
+     stall waiting for data that never comes.  Fix direction:
+     pre-write a safe placeholder (JUMP-back-to-self or a
+     single RETURN/NOP pair) at every half's reserve area at
+     install time, so any stray read lands on a well-defined
+     no-op.
+
+**What the correct fix needs.**  In order:
+
+1. Confirm on RPCS3 exactly how `NV4097_SET_SEMAPHORE_RELEASE`
+   writes the value — swapped or un-swapped — so the PPU-side
+   poll compare is the right shape.  Same check for real PS3 if
+   we get hardware access later.
+2. Reserve label slots through `cellGcmSetDefaultCommandBuffer` /
+   `cellGcmGetLabelAddress` rather than hard-coding 253/254, and
+   make sure nothing else in our stack (sysutil, flip path,
+   dbgfont tier-2) touches the same slots.
+3. Keep the single-buffer drain-wait as the fallback — not
+   removed from the file, just behind a compile-time switch —
+   so a broken async path can be reverted without a rebuild of
+   the whole SDK.
+4. Test against spinning-cube (tight wraps, small CB), flip_immediate
+   (larger CB, flip-synced), and our own triangle sample
+   simultaneously before declaring it fixed.  The failure modes
+   so far have all been "works for N frames then desyncs", so
+   a short smoke test is not sufficient.
+
+**Why we're not doing it right now.** Three iterations without
+progress indicates the issue is in our understanding of how
+SEMAPHORE_BACKENDWRITE_RELEASE lands on RPCS3 / real hardware,
+not in the callback glue.  Resolving that is more about reading
+the RPCS3 source / NV40 docs than writing more code.  The
+current single-buffer-with-drain-wait version is correct under
+all observed workloads; it just flickers on each ~1.25 s wrap.
+We revisit when either the flicker blocks a sample we care
+about, or we have independent verification of the semaphore
+encoding on both targets.
 
 ---
 
@@ -109,7 +180,7 @@ Steps:
 
 1. New `sdk/libdbgfont/` directory with the font data + shaders
    copied in, plus a Makefile that compiles the shaders through
-   sce-cgc (same path the Sony samples use) or our own
+   sce-cgc (same path the reference samples use) or our own
    `rsx-cg-compiler` and embeds them as C byte arrays.
 2. Rewrite PSL1GHT's C++ renderer as C, swapping the rsx* calls
    for the corresponding cellGcm* names that already exist in our
@@ -122,7 +193,7 @@ Steps:
 5. Samples that want real overlay text link `-ldbgfont` in addition
    to `-lgcm_cmd -lrsx ...`.
 
-Accept/test criteria: port a Sony sample that uses Printf (cube,
+Accept/test criteria: port a reference sample that uses Printf (cube,
 alphakill) with the tier-2 library and confirm the overlay text
 draws on top of the frame in RPCS3.
 
@@ -130,14 +201,14 @@ draws on top of the frame in RPCS3.
 
 ## hello-ppu-cellgcm-triangle sample: slow + occasional crash during PS-menu interaction
 
-**Status:** sample-local bug.  Sony samples (`basic`, `cube`,
+**Status:** sample-local bug.  Reference samples (`basic`, `cube`,
 `flip_immediate`) that go through the same SDK code paths run cleanly;
 only our in-tree `samples/hello-ppu-cellgcm-triangle` exhibits this.
 
 **Symptoms.** The triangle renders correctly, but the PS home menu is
 sluggish to appear, inputs respond slowly while the sample is running,
 and navigating back and forth in the menu a few times occasionally
-crashes the emulator.  Sony samples in the same session with the
+crashes the emulator.  Reference samples in the same session with the
 same SDK install don't reproduce any of it.
 
 **Likely causes to check first when revisiting:**
@@ -154,14 +225,14 @@ same SDK install don't reproduce any of it.
    vblank handler's `on_flip` guard flag may race with the rapid
    re-entry when the PS-menu overlay is active.
 
-**Why we're not fixing it now.** Doesn't block any Sony-sample work or
+**Why we're not fixing it now.** Doesn't block any reference-sample work or
 SDK progress — the triangle is our own test harness, not a user
 deliverable.  Revisit when the next SDK surface we touch is flip /
 pad related so the triage sits naturally in that session.
 
 ---
 
-## Sony-compat struct-field aliases live in SDK, not in PSL1GHT
+## Cell-SDK-compat struct-field aliases live in SDK, not in PSL1GHT
 
 **Status:** fixed. Documented here for the history of how it
 evolved, because the patches/psl1ght/ tree still carries two
@@ -169,7 +240,7 @@ retired patches (0025, 0026) that describe the original PSL1GHT
 edits before the fix moved over.
 
 PSL1GHT's struct fields use camelCase (`antiAlias`,
-`resolution`); Sony's sample code writes them lower (`antialias`,
+`resolution`); the cell-SDK sample code writes them lower (`antialias`,
 `resolutionId`). The PSL1GHT patches added anonymous unions so
 both names resolve to the same u8; we've since moved that aliasing
 into our own SDK structs (`CellGcmSurface`, `CellVideoOut*`) so
@@ -186,13 +257,12 @@ PSL1GHT's `rsxSetTimeStamp` (in `librsx/commands_impl.h`) reserves
 past the reservation and leaving the arg word uninitialized. On
 RPCS3 that surfaces as `NV4097_GET_REPORT: Bad type 0` spam every
 frame and, over thousands of frames, accumulates into enough FIFO
-corruption that the `sony-cube` sample visibly stops rendering
+corruption that the `spinning-cube` sample visibly stops rendering
 without crashing. Replaced by a native emitter in
 `sdk/include/cell/gcm/gcm_command_c.h::cellGcmSetTimeStamp` that
-uses our own `ps3tc_gcm_reserve` helper — arg encoding matches
-Sony's canonical
-`offset | (type << 24)` from `reference/sony-sdk/target/ppu/
-include/cell/gcm/gcm_methods.h`.
+uses our own `ps3tc_gcm_reserve` helper — arg encoding matches the
+canonical `offset | (type << 24)` from the reference cell SDK's
+`gcm_methods.h`.
 
 ---
 

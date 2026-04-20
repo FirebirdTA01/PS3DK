@@ -1,8 +1,8 @@
-Subject: [PATCH] ppu/include: <cell/sysutil_gamecontent.h> Sony-source compat
+Subject: [PATCH] ppu/include: <cell/sysutil_gamecontent.h> cell-SDK-source compat
 
-Fifth Phase 6 SDK header.  Same Sony-source-compat pattern as
-psl1ght/0014 (savedata): Sony struct types with Sony field names,
-Sony callback typedefs, Sony enum surface, forwarders that cast
+Fifth the backfill workstream SDK header.  Same cell-SDK-source-compat pattern as
+psl1ght/0014 (savedata): cell-SDK struct types with cell-SDK field names,
+cell-SDK callback typedefs, cell-SDK enum surface, forwarders that cast
 pointers to PSL1GHT's sysGame* types and delegate.
 
 Covers:
@@ -29,7 +29,7 @@ Covers:
     ThemeInstallFromBuffer, GetLocalWebContentPath, DeleteGameData,
     RegisterDiscChangeCallback, UnregisterDiscChangeCallback.
 
-Verified: samples/hello-ppu-gamedata ELF imports Sony FNIDs
+Verified: samples/hello-ppu-gamedata ELF imports cell-SDK FNIDs
 0xf52639ea, 0x42a2e133, 0xdb9819f3, 0x70acec67, 0xb7a45caf,
 0x3a5d726a — all present in .rodata.sceFNID as expected.
 
@@ -45,11 +45,11 @@ index 0000000..45c2c29
 +++ b/ppu/include/cell/sysutil_gamecontent.h
 @@ -0,0 +1,303 @@
 +/*! \file cell/sysutil_gamecontent.h
-+ \brief Sony-SDK-source-compat cellGame* API — Phase 6 forwarder.
++ \brief cell-SDK-source-compat cellGame* API — the backfill workstream forwarder.
 +
-+  Sony's sysutil_gamecontent.h + sysutil_game_common.h surface over
-+  PSL1GHT's libsysutil.a (which embeds Sony FNIDs under renamed
-+  sysGame* wrappers).  Source written against Sony's reference headers
++  the reference sysutil_gamecontent.h + sysutil_game_common.h surface over
++  PSL1GHT's libsysutil.a (which embeds cell-SDK FNIDs under renamed
++  sysGame* wrappers).  Source written against the reference cell-SDK headers
 +  compiles unchanged against this header.
 +
 +  Verified FNIDs imported by user code:
@@ -224,7 +224,7 @@ index 0000000..45c2c29
 +#define CELL_GAME_THEMEINSTALL_BUFSIZE_MIN  4096
 +
 +/* ============================================================
-+ * Sony struct types.  Layouts byte-identical to PSL1GHT's
++ * cell-SDK struct types.  Layouts byte-identical to PSL1GHT's
 + * sysGame* per the _Static_asserts below.
 + * ============================================================ */
 +

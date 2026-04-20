@@ -1,10 +1,10 @@
 /*! \file cell/gcm.h
- \brief Sony-SDK-source-compat libgcm system surface.
+ \brief cell-SDK-source-compat libgcm system surface.
 
-  Phase 7 step-2 forwarder.  Maps the Sony cellGcm* "system function"
-  surface (init / address-translation / display-buffer / flip-control /
-  handlers / I/O-map management) to PSL1GHT's gcm* equivalents in
-  libgcm_sys.a + librsx.
+  Maps the cellGcm* "system function" surface (init /
+  address-translation / display-buffer / flip-control / handlers /
+  I/O-map management) to PSL1GHT's gcm* equivalents in libgcm_sys.a +
+  librsx.
 
   Scope is intentionally narrow:
 
@@ -15,7 +15,7 @@
     {begin, end, current, callback}).
   - **Deferred**: the entire command-emitter family (cellGcmSetSurface /
     cellGcmSetClearSurface / cellGcmSetClearColor / cellGcmSetTexture /
-    cellGcmSetVertexProgram / etc., several hundred functions).  Sony's
+    cellGcmSetVertexProgram / etc., several hundred functions).  Their
     declarations live in <cell/gcm/gcm_command_c.h>; PSL1GHT's
     equivalents live in <rsx/commands_inc.h> under rsx* names.  These
     are inline command-buffer writers, not SPRX exports — porting them
@@ -23,15 +23,16 @@
     the command stream must call rsxFoo directly even if everything
     else is cellGcmFoo.
 
-  Also deferred: cellGcmInit's "global current context" model.  Sony
-  exposes gCellGcmCurrentContext as a global the inline command-emitters
-  read; PSL1GHT exposes gGcmContext for the same purpose.  We alias the
-  symbol so both names resolve to the same address.
+  Also deferred: cellGcmInit's "global current context" model.  The
+  cell SDK exposes gCellGcmCurrentContext as a global the inline
+  command-emitters read; PSL1GHT exposes gGcmContext for the same
+  purpose.  We alias the symbol so both names resolve to the same
+  address.
 
   Function-level mapping notes:
 
   - cellGcmInit(cmd, io, ioAddr) wraps gcmInitBody(&gGcmContext, ...).
-    Sony's flavour returns int32_t; PSL1GHT's returns s32; same width.
+    The cell-SDK flavour returns int32_t; PSL1GHT's returns s32; same width.
   - cellGcmAddressToOffset / cellGcmIoOffsetToAddress / cellGcmGetConfiguration
     / cellGcmGetTiledPitchSize / cellGcmMapMainMemory /
     cellGcmMapEaIoAddress / cellGcmUnmapIoAddress /
@@ -52,7 +53,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <malloc.h>        /* Sony code reaches memalign via this include chain */
+#include <malloc.h>        /* cell-SDK code reaches memalign via this include chain */
 #include <ppu-types.h>
 #include <rsx/gcm_sys.h>
 #include <rsx/rsx.h>
@@ -65,7 +66,7 @@ extern "C" {
 #endif
 
 /* CellGcmContextData == gcmContextData (byte-identical: {begin, end,
- * current, callback}).  Sony's name aliased onto PSL1GHT's struct so
+ * current, callback}).  Cell-SDK name aliased onto PSL1GHT's struct so
  * `CellGcmContextData *ctx = gCellGcmCurrentContext;` works. */
 typedef gcmContextData       CellGcmContextData;
 typedef gcmContextCallback   CellGcmContextCallback;
@@ -87,16 +88,15 @@ typedef struct {
 } CellGcmConfig;
 
 /* CellGcmSurface is byte-identical to PSL1GHT's gcmSurface (same 33
- * fields in the same order — verified against Sony's gcm_struct.h);
- * user code that fills a CellGcmSurface and passes it to
- * cellGcmSetSurface gets reinterpreted as gcmSurface * by the
+ * fields in the same order — verified against the reference SDK's
+ * gcm_struct.h); user code that fills a CellGcmSurface and passes it
+ * to cellGcmSetSurface gets reinterpreted as gcmSurface * by the
  * cellGcmSetSurface forwarder.
  *
  * Defined here as our own struct (not a typedef of gcmSurface) so we
- * can expose Sony's lower-case `.antialias` alongside PSL1GHT's
+ * can expose the cell-SDK lower-case `.antialias` alongside PSL1GHT's
  * `.antiAlias` via an anonymous union without editing PSL1GHT's
- * header.  Previously carried as PSL1GHT patch 0025; moved here
- * 2026-04-19 to keep upstream unmodified. */
+ * header. */
 typedef struct _cellGcmSurface {
     uint8_t  type;
     union { uint8_t antiAlias; uint8_t antialias; };
@@ -119,7 +119,7 @@ typedef struct _cellGcmSurface {
 /* CellGcmTexture aliased onto PSL1GHT's gcmTexture.  Both have the
  * same 12-field layout (format u8, mipmap u8, dimension u8, cubemap u8,
  * remap u32, width u16, height u16, depth u16, location u8, _pad u8,
- * pitch u32, offset u32) — verified against cell-sdk's gcm_struct.h. */
+ * pitch u32, offset u32) — verified against the reference SDK's gcm_struct.h. */
 typedef gcmTexture           CellGcmTexture;
 
 /* ============================================================
@@ -127,7 +127,7 @@ typedef gcmTexture           CellGcmTexture;
  * ============================================================ */
 
 /* cellGcmAlign(a, v): round `v` up to the next multiple of `a`.
- * Matches Sony's libgcm helper in <cell/gcm/gcm_helper.h>. */
+ * Matches the reference libgcm helper in <cell/gcm/gcm_helper.h>. */
 static inline uint32_t cellGcmAlign(uint32_t alignment, uint32_t value)
 {
     return (alignment == 0) ? value
@@ -162,14 +162,15 @@ static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
                                  zCullDir, zCullFormat, sFunc, sRef, sMask);
 }
 
-/* Sony's "current context" global.  PSL1GHT exposes gGcmContext under
- * the same semantics; we re-bind via #define so user-side l-value uses
- * (gCellGcmCurrentContext->current = ..., etc.) and rvalue reads both
- * resolve to PSL1GHT's actual storage.  No symbol-aliasing tricks at
- * link time — just identifier substitution at compile. */
+/* The cell-SDK "current context" global.  PSL1GHT exposes gGcmContext
+ * under the same semantics; we re-bind via #define so user-side
+ * l-value uses (gCellGcmCurrentContext->current = ..., etc.) and
+ * rvalue reads both resolve to PSL1GHT's actual storage.  No
+ * symbol-aliasing tricks at link time — just identifier substitution
+ * at compile. */
 #define gCellGcmCurrentContext  gGcmContext
 
-/* CELL_GCM_CURRENT macro Sony source uses to fetch the current
+/* CELL_GCM_CURRENT macro cell-SDK source uses to fetch the current
  * context for inline command emitters. */
 #define CELL_GCM_CURRENT        gCellGcmCurrentContext
 
@@ -181,8 +182,8 @@ static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
  * (`gcmContextData * ATTRIBUTE_PRXPTR` == `mode(SI)`).  Taking its
  * address yields a `u32 *`, not a true `gcmContextData **`, so we
  * can't hand it to gcmInitBody directly without GCC warning.  Init
- * via a full-width local then mirror-assign with a cast so Sony source
- * that subsequently reads `gCellGcmCurrentContext` (== gGcmContext)
+ * via a full-width local then mirror-assign with a cast so cell-SDK
+ * source that subsequently reads `gCellGcmCurrentContext` (== gGcmContext)
  * finds the same pointer PSL1GHT stored. */
 /* Forward declaration: the native FIFO-wrap callback installer lives
  * in libgcm_cmd.  We override the firmware default installed by
@@ -305,9 +306,9 @@ static inline void cellGcmResetFlipStatus(void)
  * (1) cellGcmSetFlip(ctx, id)  — synchronous, in-stream flip.
  *     Embeds a FLIP_COMMAND directly into the GPU command buffer.
  *     The RSX swaps the displayed buffer when it processes the
- *     command.  No queue, no PPU/GPU handshake.  Sony documents the
- *     API but **does not use it in any sample**, and PSL1GHT samples
- *     don't either.
+ *     command.  No queue, no PPU/GPU handshake.  The cell SDK
+ *     documents the API but **does not use it in any sample**, and
+ *     PSL1GHT samples don't either.
  *
  *     Observed failure mode (RPCS3, 2026-04-17): using SetFlip
  *     without supporting handlers + buffer-status labels desyncs the
@@ -339,8 +340,9 @@ static inline void cellGcmResetFlipStatus(void)
  *       - cellGcmSetWaitLabel + cellGcmSetWriteCommandLabel around
  *         render-target switches so the GPU itself stalls before
  *         reusing a buffer that's still being scanned out.
- *     This is the protocol Sony's flip_immediate sample uses end to
- *     end, and what samples/hello-ppu-cellgcm-triangle implements.
+ *     This is the protocol the reference flip_immediate sample uses
+ *     end to end, and what samples/hello-ppu-cellgcm-triangle
+ *     implements.
  *
  * (3) cellGcmSetFlipImmediate(id)  — CPU-side immediate flip, no
  *     FIFO command.  Only meant to be called from a VBlank handler
@@ -458,44 +460,44 @@ static inline uint32_t *cellGcmGetLabelAddress(uint8_t index)
 }
 #endif
 
-/* Sony-style constant spellings (CELL_GCM_*).  Header-only; lives
+/* Cell-SDK-style constant spellings (CELL_GCM_*).  Header-only; lives
  * next to the GCM_* originals our runtime layer exposes. */
 #include <cell/gcm/gcm_enum.h>
 
-/* cellGcmCg* struct-walker API (libgcm_cmd.a in our stage).  Sony
+/* cellGcmCg* struct-walker API (libgcm_cmd.a in our stage).  Cell-SDK
  * samples include <cell/gcm.h> and call cellGcmCgInitProgram /
  * cellGcmCgGetUCode / cellGcmCgGetNamedParameter / etc. without a
  * separate include, so we pull gcm_cg_func.h in transitively. */
 #include <cell/gcm/gcm_cg_func.h>
 
-/* Cg -> rsx* runtime bridge.  Translates Sony CGprogram / CGparameter
- * handles to PSL1GHT's rsx{Vertex,Fragment}Program-typed commands so
- * cellGcmSetVertexProgram / cellGcmSetFragmentProgram /
+/* Cg -> rsx* runtime bridge.  Translates cell-SDK CGprogram /
+ * CGparameter handles to PSL1GHT's rsx{Vertex,Fragment}Program-typed
+ * commands so cellGcmSetVertexProgram / cellGcmSetFragmentProgram /
  * cellGcmSetVertexProgramParameter resolve against the same runtime
  * PSL1GHT's rsx_program layer already provides. */
 #include <cell/gcm/gcm_cg_bridge.h>
 
-/* Command-emitter forwarders (Phase 7 step 3).  Sony source includes
- * the command-emitter family transitively through <cell/gcm.h>; we
+/* Command-emitter forwarders.  Cell-SDK source includes the
+ * command-emitter family transitively through <cell/gcm.h>; we
  * preserve that. */
 #include <cell/gcm/gcm_command_c.h>
 
-/* Sony wraps the public libgcm API in the cell::Gcm C++ namespace;
- * our C-side surface already lives at global scope, so an empty
- * namespace is enough to let `using namespace cell::Gcm;` compile
- * without affecting name lookup. */
+/* The cell SDK wraps the public libgcm API in the cell::Gcm C++
+ * namespace; our C-side surface already lives at global scope, so an
+ * empty namespace is enough to let `using namespace cell::Gcm;`
+ * compile without affecting name lookup. */
 #ifdef __cplusplus
 namespace cell { namespace Gcm {} }
 #endif
 
-/* Sony-convention no-context command-emitter overloads (C++ only).
+/* Cell-SDK-convention no-context command-emitter overloads (C++ only).
  *
- * Sony style inline emitters read the current context from the global
- * gCellGcmCurrentContext rather than taking an explicit first arg.
- * We ship the explicit-ctx variants via gcm_command_c.h; the
+ * Cell-SDK style inline emitters read the current context from the
+ * global gCellGcmCurrentContext rather than taking an explicit first
+ * arg.  We ship the explicit-ctx variants via gcm_command_c.h; the
  * overloads in gcm_cmd_overloads.h let the same function names compile
- * when called Sony-style — they forward to the ctx variants, pulling
- * the current context from the global.
+ * when called cell-SDK-style — they forward to the ctx variants,
+ * pulling the current context from the global.
  *
  * C mode cannot overload by arity, so these stay C++-only.  C callers
  * continue to use the explicit-ctx forms.

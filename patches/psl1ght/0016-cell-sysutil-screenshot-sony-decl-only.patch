@@ -1,7 +1,7 @@
-Subject: [PATCH] ppu/include: <cell/sysutil_screenshot.h> — Sony-compat header
+Subject: [PATCH] ppu/include: <cell/sysutil_screenshot.h> — cell-SDK-compat header
 
-Sixth Phase 6 SDK header.  Companion to scripts/build-cell-stub-archives.sh
-(Phase 6.5), which produces a self-contained libsysutil_screenshot_stub.a
+Sixth the backfill workstream SDK header.  Companion to scripts/build-cell-stub-archives.sh
+(the stub-archive workstream), which produces a self-contained libsysutil_screenshot_stub.a
 via `nidgen archive` — slots, FNIDs, .lib.stub header, sceResident name,
 .sceStub.text trampolines, and .opd descriptors all in one .a so user code
 links with `-lsysutil_screenshot_stub`.  No PSL1GHT SPRX wrapper is needed;
@@ -28,9 +28,9 @@ index 0000000..cf68b1b
 +++ b/ppu/include/cell/sysutil_screenshot.h
 @@ -0,0 +1,63 @@
 +/*! \file cell/sysutil_screenshot.h
-+ \brief Sony-SDK-source-compat cellScreenShot API.
++ \brief cell-SDK-source-compat cellScreenShot API.
 +
-+  PSL1GHT ships no wrappers for libsysutil_screenshot.  Phase 6.5
++  PSL1GHT ships no wrappers for libsysutil_screenshot.  the stub-archive workstream
 +  closes the gap with a self-contained stub archive
 +  (libsysutil_screenshot_stub.a) emitted by `nidgen archive` —
 +  slots, FNIDs, .lib.stub header, sceResident name, .sceStub.text
@@ -38,7 +38,7 @@ index 0000000..cf68b1b
 +  with `-lsysutil_screenshot_stub` and the loader resolves the four
 +  exports against the cellScreenShotUtility SPRX module at runtime.
 +
-+  FNIDs (verified against reference/sony-sdk/.../libsysutil_screenshot_stub.a
++  FNIDs (verified against $REF_SDK/.../libsysutil_screenshot_stub.a
 +  and tools/nidgen/nids/extracted/libsysutil_screenshot_stub.yaml):
 +    cellScreenShotEnable            0x9e33ab8f
 +    cellScreenShotDisable           0xfc6f4e74

@@ -3,22 +3,18 @@
  *
  * Walks an IRFunction and produces an NV40 ucode stream via VpAssembler.
  *
- * Stage 2 scope: identity passthrough (LoadAttribute → StoreOutput with
- * matching semantic).
- *
- * Stage 3a: uniform reads.
- *   - `uniform float4` allocated top-down from c[467]
- *   - `uniform float4x4` allocated bottom-up from c[256] (four rows)
- *   - StoreOutput whose source is a LoadUniform emits MOV o[N], c[K]
- *
- * Stage 3b: matrix × vector → 4 DP4s.
- *   - IROp::MatVecMul against a uniform matrix defers emit until we see
- *     StoreOutput consume it; then emit 4 DP4s writing W, Z, Y, X to the
- *     destination output, pulling successive matrix rows (base+3..base+0).
- *   - Matches sce-cgc's observed layout — component order, rows descending.
- *
- * sce-cgc's allocator + ucode CONST_SRC encoding are documented in
- * docs/REVERSE_ENGINEERING.md.
+ * Handles:
+ *   - identity passthrough (LoadAttribute → StoreOutput with matching semantic)
+ *   - uniform reads:
+ *       `uniform float4` allocated top-down from c[467]
+ *       `uniform float4x4` allocated bottom-up from c[256] (four rows)
+ *       StoreOutput whose source is a LoadUniform emits MOV o[N], c[K]
+ *   - matrix × vector → 4 DP4s:
+ *       IROp::MatVecMul against a uniform matrix defers emit until we see
+ *       StoreOutput consume it; then emit 4 DP4s writing W, Z, Y, X to the
+ *       destination output, pulling successive matrix rows (base+3..base+0).
+ *       Matches the reference compiler's layout — component order, rows
+ *       descending.
  */
 
 #include "nv40_emit.h"
@@ -655,7 +651,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
             default:
                 out.diagnostics.push_back(
-                    "nv40-vp: unsupported IR op (stage 3a handles MOV from attr/uniform only)");
+                    "nv40-vp: unsupported IR op (handles MOV from attr/uniform only)");
                 return out;
             }
         }

@@ -1,8 +1,8 @@
-Subject: [PATCH] ppu/include: Phase 6.5 backfill — subdisplay + music* + imejp
+Subject: [PATCH] ppu/include: the stub-archive workstream backfill — subdisplay + music* + imejp
 
 Five new cell/sysutil_*.h forwarder headers landing as one batch
-(per the Phase 6.5 backfill plan).  All five are declaration-only
-Sony-name surfaces backed by self-contained stub archives produced
+(per the the stub-archive workstream backfill plan).  All five are declaration-only
+cell-SDK-name surfaces backed by self-contained stub archives produced
 by `nidgen archive` and installed via scripts/build-cell-stub-archives.sh.
 
   - sysutil_subdisplay.h  — 11 exports (PSP-as-secondary-display)
@@ -29,7 +29,7 @@ index 0000000..0000000
 +++ b/ppu/include/cell/sysutil_subdisplay.h
 @@ -0,0 +1,149 @@
 +/*! \file cell/sysutil_subdisplay.h
-+ \brief Sony-SDK-source-compat libsysutil_subdisplay (PSP-as-secondary-display) API.
++ \brief cell-SDK-source-compat libsysutil_subdisplay (PSP-as-secondary-display) API.
 +
 +  Backed by libsysutil_subdisplay_stub.a — the loader resolves the
 +  eleven exports against the cellSubDisplay SPRX module at runtime.
@@ -104,7 +104,7 @@ index 0000000..0000000
 +#define CELL_SUBDISPLAY_TOUCH_STATUS_MOVE     3
 +#define CELL_SUBDISPLAY_TOUCH_STATUS_ABORT    4
 +
-+/* sys_memory_container_t bridge (shared with other Phase 6.5 headers). */
++/* sys_memory_container_t bridge (shared with other the stub-archive workstream headers). */
 +#ifndef _SYS_MEMORY_CONTAINER_T_DEFINED
 +#define _SYS_MEMORY_CONTAINER_T_DEFINED
 +typedef sys_mem_container_t sys_memory_container_t;
@@ -185,7 +185,7 @@ index 0000000..0000000
 +++ b/ppu/include/cell/sysutil_music.h
 @@ -0,0 +1,137 @@
 +/*! \file cell/sysutil_music.h
-+ \brief Sony-SDK-source-compat libsysutil_music (XMB BGM playback) API.
++ \brief cell-SDK-source-compat libsysutil_music (XMB BGM playback) API.
 +
 +  Backed by libsysutil_music_stub.a — the loader resolves the 22 exports
 +  (v1 + v2 variants) against the cellMusicUtility SPRX module at runtime.
@@ -272,7 +272,7 @@ index 0000000..0000000
 +
 +/* Forward decls for types defined by other headers (search, SPURS,
 + * music_playback_common).  Users that need their full definitions must
-+ * include the appropriate Sony header. */
++ * include the appropriate cell-SDK header. */
 +typedef struct CellMusicSelectionContext  CellMusicSelectionContext;
 +typedef struct CellMusicSelectionContext2 CellMusicSelectionContext2;
 +typedef struct CellSearchContentId        CellSearchContentId;
@@ -299,7 +299,7 @@ index 0000000..0000000
 +int cellMusicGetContentsId(CellSearchContentId *contents_id);
 +
 +/* v2 surface — same shape, distinct FNIDs.  See sysutil_music2.h in
-+ * Sony's reference SDK for the full v2 docs. */
++ * the reference cell SDK for the full v2 docs. */
 +int cellMusicInitialize2(int mode, sys_memory_container_t container, int spuPriority,
 +                         CellMusicCallback func, void *userData);
 +int cellMusicInitialize2SystemWorkload(int mode, sys_memory_container_t container,
@@ -329,7 +329,7 @@ index 0000000..0000000
 +++ b/ppu/include/cell/sysutil_music_decode.h
 @@ -0,0 +1,78 @@
 +/*! \file cell/sysutil_music_decode.h
-+ \brief Sony-SDK-source-compat libsysutil_music_decode (XMB BGM decode-to-memory) API.
++ \brief cell-SDK-source-compat libsysutil_music_decode (XMB BGM decode-to-memory) API.
 +
 +  Backed by libsysutil_music_decode_stub.a — the loader resolves the 20
 +  exports (v1 + v2 variants) against the cellMusicDecodeUtility SPRX
@@ -356,7 +356,7 @@ index 0000000..0000000
 +typedef sys_mem_container_t sys_memory_container_t;
 +#endif
 +
-+/* Forward decls — full layouts live in unshipped Sony headers. */
++/* Forward decls — full layouts live in unshipped cell-SDK headers. */
 +typedef struct CellMusicDecodeSelectionContext  CellMusicDecodeSelectionContext;
 +typedef struct CellMusicDecodeSelectionContext2 CellMusicDecodeSelectionContext2;
 +typedef struct CellSearchContentId              CellSearchContentId;
@@ -414,7 +414,7 @@ index 0000000..0000000
 +++ b/ppu/include/cell/sysutil_music_export.h
 @@ -0,0 +1,76 @@
 +/*! \file cell/sysutil_music_export.h
-+ \brief Sony-SDK-source-compat libsysutil_music_export (export track to XMB) API.
++ \brief cell-SDK-source-compat libsysutil_music_export (export track to XMB) API.
 +
 +  Backed by libsysutil_music_export_stub.a — five exports against the
 +  cellMusicExportUtility SPRX module.  No PSL1GHT runtime wrapper.
@@ -497,7 +497,7 @@ index 0000000..0000000
 +++ b/ppu/include/cell/sysutil_imejp.h
 @@ -0,0 +1,158 @@
 +/*! \file cell/sysutil_imejp.h
-+ \brief Sony-SDK-source-compat libsysutil_imejp (Japanese IME) API.
++ \brief cell-SDK-source-compat libsysutil_imejp (Japanese IME) API.
 +
 +  Backed by libsysutil_imejp_stub.a — 41 exports against the cellSysutilMisc
 +  SPRX module.  No PSL1GHT runtime wrapper.

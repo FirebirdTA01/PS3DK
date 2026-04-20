@@ -1,19 +1,19 @@
 /*
  * PS3 Custom Toolchain — <cell/dbgfont.h>
  *
- * Tier-1 stub for Sony's libdbgfont — the on-screen debug text
+ * Tier-1 stub for the reference libdbgfont — the on-screen debug text
  * overlay (FPS counter, timing stats, etc.).  Implementing the
  * real NV40 renderer (font atlas upload, VP/FP shader pair,
  * per-glyph-quad vertex stream) is follow-up work; for now the
- * printf-family entry points forward to host stdout so Sony
+ * printf-family entry points forward to host stdout so cell-SDK
  * sample code that calls cellDbgFontPrintf still produces visible
  * output — it just lands in RPCS3's TTY.log rather than on top
  * of the frame.  cellDbgFontDrawGcm stays a no-op since we've
  * already flushed each line when its Printf ran; there's no
  * accumulated per-frame state to emit.
  *
- * The struct layout / constant values below come from Sony SDK
- * 475.001's <cell/dbgfont.h>, so when the real runtime lands it
+ * The struct layout / constant values below match a 3.55-4.75-era
+ * cell SDK's <cell/dbgfont.h>, so when the real runtime lands it
  * can slot in without touching sample code.  See
  * docs/known-issues.md for the tier-2 renderer plan.
  */
@@ -62,12 +62,12 @@ static inline int32_t cellDbgFontDrawGcm(void)
 
 /* Printf / Puts: redirect to stdout with a tagged prefix so the
  * sample's intended debug-overlay text lands in RPCS3's TTY.log.
- * Position is clamped-printed as two decimals since Sony passes
- * normalized [0..1] screen coords; color is kept hex for easy
- * tie-back to CELL_GCM_UTIL_COLOR / ARGB literals in the sample
- * source.  Returns the number of bytes written (Sony's function
- * returns `int32_t status`, 0 == OK — positive byte counts still
- * register as "ok" for every caller we've seen). */
+ * Position is clamped-printed as two decimals since the reference
+ * runtime passes normalized [0..1] screen coords; color is kept hex
+ * for easy tie-back to CELL_GCM_UTIL_COLOR / ARGB literals in the
+ * sample source.  Returns the number of bytes written (the reference
+ * function returns `int32_t status`, 0 == OK — positive byte counts
+ * still register as "ok" for every caller we've seen). */
 static inline int32_t cellDbgFontPuts(float x, float y, float scale,
                                       uint32_t color, const char *s)
 {

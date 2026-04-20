@@ -1,13 +1,13 @@
-Subject: [PATCH] ppu/include: <cell/sysmodule.h> — Sony-compat header
+Subject: [PATCH] ppu/include: <cell/sysmodule.h> — cell-SDK-compat header
 
-Phase 6.5 third non-PSL1GHT-backed library.  PSL1GHT already has
+the stub-archive workstream third non-PSL1GHT-backed library.  PSL1GHT already has
 <sysmodule/sysmodule.h> with its own naming (sysModule*, SYSMODULE_*).
-This header gives Sony-named entry points (cellSysmodule*,
+This header gives cell-SDK-named entry points (cellSysmodule*,
 CELL_SYSMODULE_*) backed by libsysmodule_stub.a, which the loader
 resolves against the cellSysmodule SPRX module at runtime.
 
 Eight exports total — small library, but a foundational one because
-nearly every Sony SDK sample begins with cellSysmoduleLoadModule()
+nearly every cell SDK sample begins with cellSysmoduleLoadModule()
 to bring in the SPRX it needs (l10n, font, fs, etc.).
 
 The shared sys_memory_container_t typedef is gated by
@@ -22,15 +22,15 @@ index 0000000..b0d1e2f
 +++ b/ppu/include/cell/sysmodule.h
 @@ -0,0 +1,113 @@
 +/*! \file cell/sysmodule.h
-+ \brief Sony-SDK-source-compat cellSysmodule API.
++ \brief cell-SDK-source-compat cellSysmodule API.
 +
 +  PSL1GHT ships a similar surface under <sysmodule/sysmodule.h> with
 +  PSL1GHT-style naming (sysModule*, SYSMODULE_*).  This header gives
-+  Sony-named entry points (cellSysmodule*, CELL_SYSMODULE_*) backed
++  cell-SDK-named entry points (cellSysmodule*, CELL_SYSMODULE_*) backed
 +  by libsysmodule_stub.a — the loader resolves the eight exports
 +  against the cellSysmodule SPRX module at runtime.
 +
-+  FNIDs (verified against reference/sony-sdk/.../libsysmodule_stub.a):
++  FNIDs (verified against $REF_SDK/.../libsysmodule_stub.a):
 +    cellSysmoduleLoadModule     0x32267a31
 +    cellSysmoduleUnloadModule   0x112a5ee9
 +    cellSysmoduleIsLoaded       0x5a59e258
@@ -51,7 +51,7 @@ index 0000000..b0d1e2f
 +extern "C" {
 +#endif
 +
-+/* PRX module IDs (subset; full list lives in Sony's reference header). */
++/* PRX module IDs (subset; full list lives in the reference cell-SDK header). */
 +#define CELL_SYSMODULE_INVALID            0xffff
 +#define CELL_SYSMODULE_NET                0x0000
 +#define CELL_SYSMODULE_HTTP               0x0001
@@ -113,7 +113,7 @@ index 0000000..b0d1e2f
 +#define CELL_SYSMODULE_ERROR_INVALID_MEMCONTAINER      0x80012004
 +#define CELL_SYSMODULE_ERROR_FATAL                     0x800120ff
 +
-+/* Sony's `sys_memory_container_t` — in PSL1GHT this is
++/* the cell-SDK `sys_memory_container_t` — in PSL1GHT this is
 + * `sys_mem_container_t` from <sys/memory.h>. */
 +#ifndef _SYS_MEMORY_CONTAINER_T_DEFINED
 +#define _SYS_MEMORY_CONTAINER_T_DEFINED

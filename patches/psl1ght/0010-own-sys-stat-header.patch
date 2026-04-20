@@ -5,7 +5,7 @@ Newlib 4.4's <sys/stat.h> unconditionally #defines the legacy
 aliases for the POSIX-2008 `st_atim.tv_sec` etc. timespec-member
 forms.  Those #defines bleed into every subsequent translation-unit
 token — including unrelated struct declarations (PSL1GHT's
-sysFSStat, Sony's CellFsStat, or any user-defined struct whose
+sysFSStat, the reference CellFsStat, or any user-defined struct whose
 author happened to pick the same member name).  The original
 `patches/psl1ght/0003` dodged the collision per-site with a
 `#pragma push_macro / #undef / pop_macro` dance around the sysFSStat
@@ -22,7 +22,7 @@ member names as literal fields, and no per-site pragma is needed.
 
 Callers that were relying on the macro to access `sb.st_atime` as a
 shortcut for `sb.st_atim.tv_sec` must migrate to the full timespec
-form.  Matches Sony's SDK convention (Sony never defined those
+form.  Matches the reference cell SDK convention (the cell SDK never defined those
 macros either) and POSIX.1-2017 guidance.  Inside PSL1GHT itself only
 librt/fstat.c and lv2/sysfs.h ever mentioned the tokens; both sites
 accept the new rule.
@@ -43,11 +43,11 @@ index 0000000..88173ff
 +  then undefines the POSIX-2008-compat macros that otherwise rewrite
 +  `st_atime` / `st_mtime` / `st_ctime` into `st_atim.tv_sec` etc.
 +  wherever those tokens appear in subsequent source — including in
-+  unrelated structs (PSL1GHT's sysFSStat, Sony's CellFsStat, any
++  unrelated structs (PSL1GHT's sysFSStat, the reference CellFsStat, any
 +  user-defined struct that happens to use the same member name).
 +
 +  Rationale:
-+    - Sony's reference SDK (475.001) never defined these macros.
++    - the reference cell SDK never defined these macros.
 +    - Newlib 4.4's unconditional #defines made it impossible to
 +      declare `st_atime` as a struct member without pragma gymnastics
 +      (see the original patches/psl1ght/0003 push_macro/pop_macro dance).
@@ -59,7 +59,7 @@ index 0000000..88173ff
 +      still works; those are real struct members.
 +    - `sb.st_atime` as a shortcut for `sb.st_atim.tv_sec` NO LONGER
 +      compiles.  Migrate to the full timespec form.  This matches the
-+      Sony SDK convention and POSIX.1-2017 guidance.
++      cell SDK convention and POSIX.1-2017 guidance.
 +*/
 +#ifndef _PSL1GHT_SYS_STAT_H
 +#define _PSL1GHT_SYS_STAT_H

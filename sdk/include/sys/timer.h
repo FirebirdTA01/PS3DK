@@ -1,7 +1,7 @@
 /*
- * PS3 Custom Toolchain — <sys/timer.h> Sony-SDK compat shim.
+ * PS3 Custom Toolchain — <sys/timer.h> cell-SDK compat shim.
  *
- * Sony samples call `sys_timer_usleep(n)` / `sys_timer_sleep(n)` for
+ * Cell-SDK samples call `sys_timer_usleep(n)` / `sys_timer_sleep(n)` for
  * coarse-grained waits (frame throttling, sleep-between-retries, etc).
  * Both are thin wrappers around the LV2 sleep syscall.  We forward to
  * POSIX `usleep` from libsysbase, which newlib implements on top of the

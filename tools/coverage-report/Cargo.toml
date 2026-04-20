@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Sony SDK vs our install tree API coverage matrix"
+description = "Cell SDK vs our install tree API coverage matrix"
 
 [[bin]]
 name = "coverage-report"

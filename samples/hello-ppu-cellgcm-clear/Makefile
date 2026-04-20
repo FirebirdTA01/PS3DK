@@ -1,11 +1,10 @@
 #---------------------------------------------------------------------------------
 
-# hello-ppu-cellgcm-clear — Phase 7 step-3 Sony-name forwarder validation.
+# hello-ppu-cellgcm-clear — cellGcm-name forwarder validation.
 #
 # Same flow as hello-ppu-rsx-clear, spelled with cellGcm* identifiers
 # everywhere a forwarder exists in <cell/gcm.h> + <cell/gcm/gcm_command_c.h>.
-# Only rsxMemalign / rsxFree are still PSL1GHT-named (no Sony equivalent
-# under cellGcm).
+# Only rsxMemalign / rsxFree are still PSL1GHT-named (no cellGcm equivalent).
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 

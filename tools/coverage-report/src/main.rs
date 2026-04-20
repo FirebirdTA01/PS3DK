@@ -1,7 +1,7 @@
-//! coverage-report — Sony SDK 475.001 vs our install tree API coverage.
+//! coverage-report — reference cell SDK vs our install tree API coverage.
 //!
 //! Takes (a) the NID database under `tools/nidgen/nids/extracted/`, which is
-//! the ground truth of what symbols Sony's reference stub archives export per
+//! the ground truth of what symbols the reference stub archives export per
 //! library; and (b) our install tree (`stage/ps3dev/{ppu,psl1ght}/lib/*.a`,
 //! optionally `stage/ps3dev/ppu/powerpc64-ps3-elf/lib/*.a`).  Emits a
 //! Markdown report comparing the two.
@@ -26,9 +26,9 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Parser)]
-#[command(name = "coverage-report", about = "Sony SDK vs our install tree coverage matrix")]
+#[command(name = "coverage-report", about = "Reference cell SDK vs our install tree coverage matrix")]
 struct Cli {
-    /// Directory of extracted Sony NID YAMLs (tools/nidgen/nids/extracted/).
+    /// Directory of extracted reference NID YAMLs (tools/nidgen/nids/extracted/).
     #[arg(long)]
     nid_db: PathBuf,
 
@@ -44,8 +44,8 @@ struct Cli {
     #[arg(long, default_value = "500")]
     list_missing: usize,
 
-    /// Optional alias map YAML (PSL1GHT-rename → Sony-name).  If the file is
-    /// absent the tool runs without aliases.
+    /// Optional alias map YAML (PSL1GHT-rename → cell-SDK-name).  If the file
+    /// is absent the tool runs without aliases.
     #[arg(long, default_value = "tools/nidgen/nids/aliases.yaml")]
     alias_map: PathBuf,
 
@@ -56,11 +56,12 @@ struct Cli {
     suggest_aliases: Option<PathBuf>,
 }
 
-/// YAML form of the alias map.  One entry per Sony symbol that a PSL1GHT-
-/// style rename resolves for.  A single Sony name may have multiple aliases.
+/// YAML form of the alias map.  One entry per reference-cell-SDK symbol
+/// that a PSL1GHT-style rename resolves for.  A single canonical name may
+/// have multiple aliases.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct AliasMap {
-    /// Sony canonical name → list of names that satisfy its coverage.
+    /// Canonical cell-SDK name → list of names that satisfy its coverage.
     #[serde(default)]
     aliases: BTreeMap<String, Vec<String>>,
 }
@@ -78,9 +79,9 @@ impl AliasMap {
     }
 
     /// Returns the first alias that is defined in `ours`, if any.
-    fn resolve<'a>(&'a self, sony_name: &str, ours: &BTreeMap<String, Vec<PathBuf>>) -> Option<&'a str> {
+    fn resolve<'a>(&'a self, cell_sdk_name: &str, ours: &BTreeMap<String, Vec<PathBuf>>) -> Option<&'a str> {
         self.aliases
-            .get(sony_name)?
+            .get(cell_sdk_name)?
             .iter()
             .find(|alias| ours.contains_key(alias.as_str()))
             .map(String::as_str)
@@ -90,11 +91,11 @@ impl AliasMap {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let sony_libs = load_sony_db(&cli.nid_db)?;
+    let cell_sdk_libs = load_cell_sdk_db(&cli.nid_db)?;
     let our_symbols = scan_install_tree(&cli.install)?;
 
     if let Some(path) = cli.suggest_aliases.as_ref() {
-        let suggestions = suggest_aliases(&sony_libs, &our_symbols);
+        let suggestions = suggest_aliases(&cell_sdk_libs, &our_symbols);
         let yaml = serde_yaml::to_string(&suggestions)?;
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -117,7 +118,7 @@ fn main() -> Result<()> {
         eprintln!("note: alias map {} not found — running raw-name coverage", cli.alias_map.display());
     }
 
-    let report = render_report(&sony_libs, &our_symbols, aliases.as_ref(), cli.list_missing);
+    let report = render_report(&cell_sdk_libs, &our_symbols, aliases.as_ref(), cli.list_missing);
     if let Some(parent) = cli.output.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
@@ -130,8 +131,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Generate algorithmic PSL1GHT-style rename candidates for every Sony symbol
-/// and check them against the install tree.  Rules applied:
+/// Generate algorithmic PSL1GHT-style rename candidates for every cell-SDK
+/// symbol and check them against the install tree.  Rules applied:
 ///
 ///   R1. `_sys_<snake>` → `sys<CamelSnake>`   (drop leading `_`, `_x` → `X`)
 ///   R2. `sys_<snake>`  → `sys<CamelSnake>`
@@ -140,21 +141,21 @@ fn main() -> Result<()> {
 ///
 /// Emits only aliases that match at least one symbol in `ours`.  The caller
 /// reviews the output before committing.
-fn suggest_aliases(sony_libs: &[SonyLibrary], ours: &BTreeMap<String, Vec<PathBuf>>) -> AliasMap {
+fn suggest_aliases(cell_sdk_libs: &[CellSdkLibrary], ours: &BTreeMap<String, Vec<PathBuf>>) -> AliasMap {
     let mut map = AliasMap::default();
 
-    for lib in sony_libs {
-        for sony_name in lib.exports.keys() {
-            if ours.contains_key(sony_name.as_str()) {
+    for lib in cell_sdk_libs {
+        for cell_sdk_name in lib.exports.keys() {
+            if ours.contains_key(cell_sdk_name.as_str()) {
                 continue; // already matches by exact name
             }
-            let candidates = rename_candidates(sony_name);
+            let candidates = rename_candidates(cell_sdk_name);
             let resolved: Vec<String> = candidates
                 .into_iter()
                 .filter(|c| ours.contains_key(c.as_str()))
                 .collect();
             if !resolved.is_empty() {
-                map.aliases.insert(sony_name.clone(), resolved);
+                map.aliases.insert(cell_sdk_name.clone(), resolved);
             }
         }
     }
@@ -162,18 +163,18 @@ fn suggest_aliases(sony_libs: &[SonyLibrary], ours: &BTreeMap<String, Vec<PathBu
     map
 }
 
-fn rename_candidates(sony_name: &str) -> Vec<String> {
+fn rename_candidates(cell_sdk_name: &str) -> Vec<String> {
     let mut out = Vec::new();
 
     // R1 / R2: sys prefix variants → lowerCamelCase starting with "sys".
-    let trimmed = sony_name.strip_prefix('_').unwrap_or(sony_name);
+    let trimmed = cell_sdk_name.strip_prefix('_').unwrap_or(cell_sdk_name);
     if let Some(rest) = trimmed.strip_prefix("sys_") {
         let camel = snake_to_upper_camel(rest);
         out.push(format!("sys{camel}"));
     }
 
     // R3: cell prefix → lower-first-letter.
-    if let Some(rest) = sony_name.strip_prefix("cell") {
+    if let Some(rest) = cell_sdk_name.strip_prefix("cell") {
         if let Some(c) = rest.chars().next() {
             if c.is_ascii_uppercase() {
                 let mut s = String::with_capacity(rest.len());
@@ -185,7 +186,7 @@ fn rename_candidates(sony_name: &str) -> Vec<String> {
     }
 
     // R4: cell_snake_case → CamelCase (uppercase first letter).
-    if let Some(rest) = sony_name.strip_prefix("cell_") {
+    if let Some(rest) = cell_sdk_name.strip_prefix("cell_") {
         out.push(snake_to_upper_camel(rest));
     }
 
@@ -210,8 +211,8 @@ fn snake_to_upper_camel(snake: &str) -> String {
     out
 }
 
-/// A single Sony library loaded from an extracted YAML.
-struct SonyLibrary {
+/// A single cell-SDK library loaded from an extracted YAML.
+struct CellSdkLibrary {
     name: String,                          // e.g. "audio"
     archive_filename: String,              // e.g. "libaudio_stub"
     exports: BTreeMap<String, u32>,        // name -> NID
@@ -245,8 +246,8 @@ impl ImplCounts {
     }
 }
 
-/// Load all YAMLs under `dir`, one SonyLibrary per file.
-fn load_sony_db(dir: &Path) -> Result<Vec<SonyLibrary>> {
+/// Load all YAMLs under `dir`, one CellSdkLibrary per file.
+fn load_cell_sdk_db(dir: &Path) -> Result<Vec<CellSdkLibrary>> {
     let mut libs = Vec::new();
 
     for entry in std::fs::read_dir(dir)
@@ -277,7 +278,7 @@ fn load_sony_db(dir: &Path) -> Result<Vec<SonyLibrary>> {
             .unwrap_or(&lib.library)
             .to_owned();
 
-        libs.push(SonyLibrary {
+        libs.push(CellSdkLibrary {
             name: lib.library,
             archive_filename,
             exports,
@@ -386,7 +387,7 @@ fn scan_archive(archive_path: &Path) -> Result<BTreeSet<String>> {
 // ---- rendering ----------------------------------------------------------
 
 fn render_report(
-    sony_libs: &[SonyLibrary],
+    cell_sdk_libs: &[CellSdkLibrary],
     our: &OurSymbols,
     aliases: Option<&AliasMap>,
     list_missing: usize,
@@ -408,25 +409,25 @@ fn render_report(
     let mut out = String::new();
 
     // Totals.
-    let sony_total: usize = sony_libs.iter().map(|l| l.exports.len()).sum();
-    let exact_total: usize = sony_libs
+    let cell_sdk_total: usize = cell_sdk_libs.iter().map(|l| l.exports.len()).sum();
+    let exact_total: usize = cell_sdk_libs
         .iter()
         .map(|l| l.exports.keys().filter(|n| our.contains_key(n.as_str())).count())
         .sum();
-    let covered_total: usize = sony_libs
+    let covered_total: usize = cell_sdk_libs
         .iter()
         .map(|l| l.exports.keys().filter(|n| is_covered(n)).count())
         .sum();
-    let pct = if sony_total == 0 { 0.0 } else { 100.0 * covered_total as f64 / sony_total as f64 };
+    let pct = if cell_sdk_total == 0 { 0.0 } else { 100.0 * covered_total as f64 / cell_sdk_total as f64 };
     let via_alias = covered_total.saturating_sub(exact_total);
 
     writeln!(out, "# PS3 SDK Coverage Report").ok();
     writeln!(out).ok();
     writeln!(
         out,
-        "Sony reference SDK 475.001 symbols vs our install tree.  Primary diff \
-         is by exact symbol name, backed by `tools/nidgen/nids/aliases.yaml` \
-         for PSL1GHT-style renames (`sys_lwmutex_lock` → `sysLwMutexLock`, \
+        "Reference cell SDK symbols vs our install tree.  Primary diff is by \
+         exact symbol name, backed by `tools/nidgen/nids/aliases.yaml` for \
+         PSL1GHT-style renames (`sys_lwmutex_lock` → `sysLwMutexLock`, \
          `cellMsgDialogOpen` → `msgDialogOpen`, ...).  Alias entries are \
          regenerated by `coverage-report --suggest-aliases` and are \
          load-bearing: a candidate only commits if it actually resolves to a \
@@ -435,13 +436,13 @@ fn render_report(
     .ok();
     writeln!(out).ok();
     let mut impl_total = ImplCounts::default();
-    for lib in sony_libs {
+    for lib in cell_sdk_libs {
         impl_total.add(&lib.impl_counts);
     }
 
     writeln!(out, "## Summary").ok();
-    writeln!(out, "- Libraries tracked: **{}**", sony_libs.len()).ok();
-    writeln!(out, "- Sony exports total: **{sony_total}**").ok();
+    writeln!(out, "- Libraries tracked: **{}**", cell_sdk_libs.len()).ok();
+    writeln!(out, "- Cell SDK exports total: **{cell_sdk_total}**").ok();
     writeln!(
         out,
         "- Covered by our install tree: **{covered_total}** ({pct:.1}%) — \
@@ -465,9 +466,9 @@ fn render_report(
     // Per-library matrix.
     writeln!(out, "## Per-library coverage").ok();
     writeln!(out).ok();
-    writeln!(out, "| Library | Sony exports | Exact | Alias | Total | % |").ok();
+    writeln!(out, "| Library | Cell SDK exports | Exact | Alias | Total | % |").ok();
     writeln!(out, "|---|---:|---:|---:|---:|---:|").ok();
-    for lib in sony_libs {
+    for lib in cell_sdk_libs {
         let exact = lib.exports.keys().filter(|n| our.contains_key(n.as_str())).count();
         let covered = lib.exports.keys().filter(|n| is_covered(n)).count();
         let alias_only = covered.saturating_sub(exact);
@@ -493,7 +494,7 @@ fn render_report(
     // Missing by library.
     writeln!(out, "## Missing symbols by library").ok();
     writeln!(out).ok();
-    for lib in sony_libs {
+    for lib in cell_sdk_libs {
         let missing: Vec<(&String, u32)> = lib
             .exports
             .iter()

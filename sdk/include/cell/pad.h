@@ -1,11 +1,11 @@
 /*
  * PS3 Custom Toolchain — <cell/pad.h>
  *
- * Sony-style pad / controller input surface in our SDK's cell/
+ * Cell-SDK-style pad / controller input surface in our SDK's cell/
  * namespace.  At present the runtime lives in the PSL1GHT-derived
  * libio.a (ioPad* symbols from the PS3's sys_io SPRX); this header
- * presents the Sony-spelled API on top.  As the SDK is weaned off
- * PSL1GHT, the backing symbols migrate into our own stubs / PRX
+ * presents the cell-SDK-spelled API on top.  As the SDK is weaned
+ * off PSL1GHT, the backing symbols migrate into our own stubs / PRX
  * modules — but the interface stays stable.
  *
  * Exposed surface:
@@ -103,7 +103,7 @@ extern "C" {
 #define CELL_PAD_CTRL_R2                   PAD_CTRL_R2
 #define CELL_PAD_CTRL_L2                   PAD_CTRL_L2
 
-/* ---- structs with Sony field names --------------------------------- */
+/* ---- structs with cell-SDK field names ----------------------------- */
 /*
  * Layout matches PSL1GHT's padInfo / padInfo2 / padData — the
  * underlying SPRX ABI is identical, only field spellings differ —
@@ -150,7 +150,7 @@ _Static_assert(sizeof(CellPadData)  == sizeof(padData),
 /* ---- function wrappers --------------------------------------------- */
 /*
  * We use inline thunks rather than `#define`s so argument-type
- * checking still catches mistakes at the Sony-named boundary.  GCC
+ * checking still catches mistakes at the cell-SDK-named boundary.  GCC
  * inlines these away at -O2, so the generated code is identical to
  * a direct call.
  */
@@ -171,7 +171,7 @@ static inline s32 cellPadGetInfo2(CellPadInfo2 *info)
 { return ioPadGetInfo2((padInfo2 *)info); }
 
 /* padCapabilityInfo (PSL1GHT) holds the capability bitmask + reserved
- * words; its layout matches what Sony's callers expect through
+ * words; its layout matches what cell-SDK callers expect through
  * CellPadCapabilityInfo, so we expose the same type under both names. */
 typedef padCapabilityInfo  CellPadCapabilityInfo;
 typedef padActParam        CellPadActParam;

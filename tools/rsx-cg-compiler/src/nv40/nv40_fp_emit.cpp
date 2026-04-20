@@ -1,15 +1,10 @@
 /*
  * NV40 fragment-program lowering.
  *
- * Stage 4 scope: identity varying passthrough (a single
- * `out color = in color;` style assignment).  Walks the IRFunction,
- * resolves IR value IDs to their NV40 FP input-source codes, and
- * emits a single MOV via FpAssembler.
- *
- * Container emit (.fpo / CgBinaryFragmentProgram) and the alphakill /
- * texformat / sample family land in subsequent stage-4 commits;
- * those features need their own reverse-engineering passes against
- * sce-cgc — recorded incrementally in docs/REVERSE_ENGINEERING.md.
+ * Walks the IRFunction, resolves IR value IDs to their NV40 FP
+ * input-source codes, and emits the ucode stream via FpAssembler.
+ * Handles identity varying passthrough, arithmetic, TXP, samplerCube,
+ * and Select lowering.
  */
 
 #include "nv40_emit.h"
@@ -312,7 +307,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<IRValueID, FpScalarUnaryBinding> valueToScalarUnary;
 
     // `length(vec3)` — sce-cgc lowers to MOVH + DP3R + DIVSQR + MOVR.
-    // DIVSQR (Sony NV40+RSX extension, opcode 0x3B) computes
+    // DIVSQR (NV40+RSX extension, opcode 0x3B) computes
     // `src0 / sqrt(src1)`; sce-cgc's sqrt(dot(v,v)) trick reads back
     // the same DP3R result as both `|src0|` and `src1`, exploiting
     // `|x|/sqrt(x) == sqrt(x)` for x >= 0.
@@ -2003,8 +1998,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
             default:
                 out.diagnostics.push_back(
-                    "nv40-fp: unsupported IR op (stage 4 handles direct varying "
-                    "passthrough only)");
+                    "nv40-fp: unsupported IR op");
                 return out;
             }
         }

@@ -1,14 +1,15 @@
 /*
  * PS3 Custom Toolchain — <cell/cell_video_out.h>
  *
- * Sony-style surface for the video-output subsystem (resolution query,
- * mode configuration, scan-mode / aspect / buffer-format constants).
- * Runtime forwards to PSL1GHT's sysutil/video.h — CellVideoOut*
- * structs are byte-identical to the lower-case video* versions.
+ * Cell-SDK-style surface for the video-output subsystem (resolution
+ * query, mode configuration, scan-mode / aspect / buffer-format
+ * constants).  Runtime forwards to PSL1GHT's sysutil/video.h —
+ * CellVideoOut* structs are byte-identical to the lower-case
+ * video* versions.
  *
- * Sony bundles this surface into <sysutil/sysutil_sysparam.h>; our
- * shim under the same path re-exports it so Sony sample code that
- * only includes sysutil_sysparam.h still gets the full video API.
+ * The cell SDK bundles this surface into <sysutil/sysutil_sysparam.h>;
+ * our shim under the same path re-exports it so cell-SDK sample code
+ * that only includes sysutil_sysparam.h still gets the full video API.
  */
 
 #ifndef PS3TC_CELL_VIDEO_OUT_H
@@ -27,7 +28,7 @@ extern "C" {
 #define CELL_VIDEO_OUT_SECONDARY          VIDEO_SECONDARY
 
 /* ---- buffer color formats ----------------------------------------- */
-/* Sony names the component ordering; we alias onto PSL1GHT's enum. */
+/* The cell SDK names the component ordering; we alias onto PSL1GHT's enum. */
 #define CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_X8R8G8B8  VIDEO_BUFFER_FORMAT_XRGB
 #define CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_X8B8G8R8  VIDEO_BUFFER_FORMAT_XBGR
 #define CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_R16G16B16X16_FLOAT \
@@ -42,7 +43,7 @@ extern "C" {
  *
  * Redefined here as our own structs (NOT typedef'd from PSL1GHT's
  * video.h) so we can expose both the PSL1GHT field name and the
- * Sony-sample field name through an anonymous union without
+ * cell-SDK-sample field name through an anonymous union without
  * editing the upstream PSL1GHT header.  The storage layouts are
  * identical to PSL1GHT's videoResolution / videoState /
  * videoConfiguration / videoDisplayMode down to the last padding
@@ -50,12 +51,11 @@ extern "C" {
  * below are safe.
  *
  * Field-name mapping:
- *   .resolution   (PSL1GHT)  <-->  .resolutionId  (Sony samples)
+ *   .resolution   (PSL1GHT)  <-->  .resolutionId  (cell SDK samples)
  *
- * Unified via `union { u8 resolution; u8 resolutionId; }` so Sony
+ * Unified via `union { u8 resolution; u8 resolutionId; }` so cell-SDK
  * source code that writes `.resolutionId = ...` compiles unchanged
- * against our SDK.  Previously carried as PSL1GHT patch 0026; moved
- * here 2026-04-19 to keep PSL1GHT's tree unmodified. */
+ * against our SDK. */
 
 typedef struct _cellVideoOutResolution {
     uint16_t width;

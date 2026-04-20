@@ -1,6 +1,6 @@
-Subject: [PATCH] ppu/include: <cell/sysutil_ap.h> — Sony-compat header
+Subject: [PATCH] ppu/include: <cell/sysutil_ap.h> — cell-SDK-compat header
 
-Phase 6.5 second non-PSL1GHT-backed library.  Companion to
+the stub-archive workstream second non-PSL1GHT-backed library.  Companion to
 scripts/build-cell-stub-archives.sh, which produces a self-contained
 libsysutil_ap_stub.a via `nidgen archive`.  No PSL1GHT SPRX wrapper is
 needed; the loader resolves the three exports against the cellSysutilAp
@@ -23,15 +23,15 @@ index 0000000..a1b2c3d
 +++ b/ppu/include/cell/sysutil_ap.h
 @@ -0,0 +1,89 @@
 +/*! \file cell/sysutil_ap.h
-+ \brief Sony-SDK-source-compat libsysutil_ap (software access-point) API.
++ \brief cell-SDK-source-compat libsysutil_ap (software access-point) API.
 +
-+  PSL1GHT ships no wrappers for libsysutil_ap.  Phase 6.5 backs the
++  PSL1GHT ships no wrappers for libsysutil_ap.  the stub-archive workstream backs the
 +  three exports with a self-contained stub archive
 +  (libsysutil_ap_stub.a) emitted by `nidgen archive`; user code links
 +  with `-lsysutil_ap_stub` and the loader resolves against the
 +  cellSysutilAp SPRX module at runtime.
 +
-+  FNIDs (verified against reference/sony-sdk/.../libsysutil_ap_stub.a
++  FNIDs (verified against $REF_SDK/.../libsysutil_ap_stub.a
 +  and tools/nidgen/nids/extracted/libsysutil_ap_stub.yaml):
 +    cellSysutilApGetRequiredMemSize  0x9e67e0dd
 +    cellSysutilApOn                  0x3343824c
@@ -74,7 +74,7 @@ index 0000000..a1b2c3d
 +/* Memory container size cellSysutilApOn requires (1 MiB). */
 +#define CELL_SYSUTIL_AP_MEMORY_CONTAINER_SIZE        (1 * 1024 * 1024)
 +
-+/* Sony's `sys_memory_container_t` — in PSL1GHT this is
++/* the cell-SDK `sys_memory_container_t` — in PSL1GHT this is
 + * `sys_mem_container_t` from <sys/memory.h>. */
 +typedef sys_mem_container_t sys_memory_container_t;
 +

@@ -40,10 +40,10 @@ public:
 	// For dependency generation
 	const std::set<std::string> getIncludedFiles() const;
 
-	// PSL1GHT/Sony Cg pragma surface — collected during preprocess so the
-	// back-end can pick them up (lexer drops #pragma lines, so they don't
-	// reach the parser).  Insertion order is preserved; matters for the
-	// $kill_NNNN parameter index in the .fpo container.
+	// PSL1GHT / cell-SDK Cg pragma surface — collected during preprocess
+	// so the back-end can pick them up (lexer drops #pragma lines, so
+	// they don't reach the parser).  Insertion order is preserved; it
+	// matters for the $kill_NNNN parameter index in the .fpo container.
 	const std::vector<std::string>& alphakillSamplers() const { return alphakillSamplers_; }
 
 private:
@@ -56,7 +56,7 @@ private:
 	bool noLineMarkers;
 	bool keepComments;
 
-	// Sony-specific Cg pragma collectors.  Populated by processPragma.
+	// cell-SDK Cg pragma collectors.  Populated by processPragma.
 	std::vector<std::string> alphakillSamplers_;
 	std::set<std::string>    alphakillSeen_;     // dedup helper
 

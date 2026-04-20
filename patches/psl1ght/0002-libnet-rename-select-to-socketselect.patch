@@ -2,11 +2,11 @@ Subject: [PATCH] libnet: rename select() to socketselect(), keep select as alias
 
 Pair to patches/psl1ght/0001-own-sys-select-header.patch.  The header
 now declares both socketselect() and select() with identical signatures
-(Sony SDK uses socketselect; legacy PSL1GHT homebrew uses select).
+(cell SDK uses socketselect; legacy PSL1GHT homebrew uses select).
 This patch makes libnet export both symbols from a single function
 body via an attribute alias, so:
 
-  * Sony-written code calling socketselect() links.
+  * cell-SDK-written code calling socketselect() links.
   * PSL1GHT homebrew calling select() still links.
   * Only one implementation to maintain.
 

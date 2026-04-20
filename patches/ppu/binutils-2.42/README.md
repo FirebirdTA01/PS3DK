@@ -52,4 +52,4 @@ Open a new patch in `patches/spu/binutils-2.42/` that:
 2. Extends the `OPTION_PIE` case in `ld/lexsup.c` to recognize an SPU-specific
    opt-in.
 
-Neither is required for Phase 2a.
+Neither is required today.

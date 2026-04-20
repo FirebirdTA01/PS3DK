@@ -1,9 +1,10 @@
 # tools/nidgen/nids/aliases.yaml — PSL1GHT-rename coverage aliases.
 #
-# Maps each Sony canonical symbol name (left of colon) to one or more names
-# that our install tree may define and that semantically satisfy Sony's
-# export (right of colon).  coverage-report uses this to count renamed
-# PSL1GHT wrappers as coverage instead of marking the Sony name as missing.
+# Maps each cell-SDK canonical symbol name (left of colon) to one or more
+# names that our install tree may define and that semantically satisfy the
+# cell-SDK export (right of colon).  coverage-report uses this to count
+# renamed PSL1GHT wrappers as coverage instead of marking the cell-SDK
+# name as missing.
 #
 # Rename rules applied by `coverage-report --suggest-aliases`:
 #   R1. _sys_<snake>  → sys<CamelSnake>           (e.g. _sys_malloc → sysMalloc)

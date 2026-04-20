@@ -15,9 +15,9 @@ macros back with their historical ANSI-mode expansions.  Only
 PSL1GHT code that uses these macros sees any difference; newlib
 itself and other consumers are unaffected.
 
-These macros are not part of Sony's SDK header set either — Sony
-uses plain ANSI prototypes — so nothing we add here conflicts with
-matching Sony's ABI.  The shim exists purely to let PSL1GHT's
+These macros are not part of the reference cell SDK header set either — the
+reference headers use plain ANSI prototypes — so nothing we add here conflicts with
+matching the cell-SDK ABI.  The shim exists purely to let PSL1GHT's
 existing librt sources continue to compile without a bulk rewrite.
 
 diff --git a/ppu/include/_ansi.h b/ppu/include/_ansi.h

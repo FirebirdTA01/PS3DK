@@ -1,6 +1,6 @@
-//! Extract a NID database YAML from a Sony-built `lib<name>_stub.a`.
+//! Extract a NID database YAML from a reference-built `lib<name>_stub.a`.
 //!
-//! Sony's static stub archives ship one ELF object per exported symbol plus a
+//! The reference static stub archives ship one ELF object per exported symbol plus a
 //! `_<library>_NNNN_head.o` anchor that holds library-level metadata.  Each
 //! per-symbol object carries sections:
 //!
@@ -43,8 +43,8 @@ use crate::db::{Export, Library};
 const MARKFUNC_SECTION: &str = ".psp_libgen_markfunc";
 const NID_OFFSET_IN_MARKFUNC: usize = 8;
 const RESIDENT_SECTION: &str = ".rodata.sceResident";
-/// Sony's `_head.o` starts `.rodata.sceResident` with a 4-byte version word,
-/// then the library-name C string.
+/// The reference `_head.o` starts `.rodata.sceResident` with a 4-byte version
+/// word, then the library-name C string.
 const RESIDENT_NAME_OFFSET: usize = 4;
 
 /// One extracted (export name, NID) pair plus source metadata.
@@ -161,7 +161,7 @@ fn extract_head_library_name(member_name: &str, data: &[u8]) -> Result<Option<St
 }
 
 /// Parse one per-symbol `.o` archive member, returning the `(name, nid)` pair
-/// if it is a Sony stub member.  Returns `None` for members that don't carry
+/// if it is a stub-archive member.  Returns `None` for members that don't carry
 /// a `.psp_libgen_markfunc` section (e.g. alignment padding, non-stub content).
 fn extract_member(member_name: &str, data: &[u8]) -> Result<Option<ExtractedExport>> {
     let header = FileHeader64::<Endianness>::parse(data)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PS3 Custom Toolchain — Phase 6.5: stub-only Sony libraries
+# PS3 Custom Toolchain — stub-only cell-SDK libraries
 #
 # Builds self-contained `lib<name>_stub.a` archives for libraries that have no
 # PSL1GHT runtime backing (i.e. cell/* headers ship as declaration-only and
@@ -35,7 +35,7 @@ if [[ ! -x "$NIDGEN_BIN" ]]; then
     cargo build --release --manifest-path "$PS3_TOOLCHAIN_ROOT/tools/nidgen/Cargo.toml"
 fi
 
-# Phase 6.5 stub-archive YAMLs.  One entry per zero-PSL1GHT-coverage library.
+# Stub-archive YAMLs.  One entry per zero-PSL1GHT-coverage library.
 STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_screenshot_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_ap_stub.yaml"

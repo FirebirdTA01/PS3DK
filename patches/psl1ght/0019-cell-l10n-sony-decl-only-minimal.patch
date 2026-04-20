@@ -1,23 +1,23 @@
-Subject: [PATCH] ppu/include: <cell/l10n.h> — minimal Sony-compat header
+Subject: [PATCH] ppu/include: <cell/l10n.h> — minimal cell-SDK-compat header
 
-Phase 6.5 fourth non-PSL1GHT-backed library and first Sony-SDK-source
+the stub-archive workstream fourth non-PSL1GHT-backed library and first cell-SDK-source
 port.  Backed by libl10n_stub.a (165 exports — first nidgen-archive
 consumer above ~10 exports; archive scales fine: a 16 KiB .a with all
 165 trampolines + opd descriptors).
 
-Minimal first cut: covers the surface needed to port Sony's smallest
+Minimal first cut: covers the surface needed to port the smallest reference-cell-SDK
 l10n samples (eucjp2sjis, jis2sjis, etc.) and the UTF/SBCS/UCS2
-converter family.  Sony's reference header is ~635 lines with every
+converter family.  the reference cell-SDK header is ~635 lines with every
 codepage table; this header ships only what samples actually call —
 extend as more samples land.
 
 Visible decisions:
-  - L10nResult / L10nCode enums match Sony's flag-bit layout.
+  - L10nResult / L10nCode enums match the cell-SDK flag-bit layout.
   - Codepage placeholders (737/775/852/...) intentionally omitted
     (writing them as `= 0` would alias L10N_UTF8 = 1; better to leave
     them undefined until needed).
   - eucjp2sjis et al. declared as functions (they are also real
-    libl10n exports); Sony's header defines a couple as macros over
+    libl10n exports); the cell SDK's header defines a couple as macros over
     other primitives, but the function form is link-compatible and
     cleaner.
 
@@ -28,13 +28,13 @@ index 0000000..c1d2e3f
 +++ b/ppu/include/cell/l10n.h
 @@ -0,0 +1,92 @@
 +/*! \file cell/l10n.h
-+ \brief Sony-SDK-source-compat cellL10n localisation API.
++ \brief cell-SDK-source-compat cellL10n localisation API.
 +
-+  Minimal first-cut: covers the surface needed to port Sony's smallest
++  Minimal first-cut: covers the surface needed to port the smallest reference-cell-SDK
 +  l10n samples (eucjp2sjis, jis2sjis, etc.) and the UTF/SBCS/UCS2
-+  converter family.  The complete Sony header is ~635 lines with
++  converter family.  The complete cell-SDK header is ~635 lines with
 +  every codepage table; we ship only what samples actually need plus
-+  the L10nCode enum.  The full surface is on the Phase 6.5 backfill
++  the L10nCode enum.  The full surface is on the the stub-archive workstream backfill
 +  list — extend here as more l10n calls land in samples.
 +
 +  All declarations are resolved at link time by libl10n_stub.a (see
@@ -95,7 +95,7 @@ index 0000000..c1d2e3f
 +	L10N_CODEPAGE_1252 = 0x20000000,
 +	L10N_EUC_CN        = 0x40000000,
 +	L10N_EUC_JP        = 0x80000000,
-+	/* Sony's full enum has more codepages (737/775/852/855/857/858/860/861/
++	/* the reference full enum has more codepages (737/775/852/855/857/858/860/861/
 +	 * 865/869/1250/1253/1254/1257 etc.); add them here as samples need them. */
 +} L10nCode;
 +

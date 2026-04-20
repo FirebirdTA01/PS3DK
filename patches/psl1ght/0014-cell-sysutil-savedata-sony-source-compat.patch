@@ -1,20 +1,20 @@
-Subject: [PATCH] ppu/include: <cell/sysutil_savedata.h> — Sony-SDK-source-compat
+Subject: [PATCH] ppu/include: <cell/sysutil_savedata.h> — cell-SDK-source-compat
 
-Fourth Phase 6 SDK header.  Unlike the earlier three cell/*.h
+Fourth the backfill workstream SDK header.  Unlike the earlier three cell/*.h
 forwarders (sysutil.h, msg_dialog.h, sysutil_sysparam.h) which stayed
 close to PSL1GHT's public shape, this header is written to the
-architectural goal memorialised 2026-04-17: Sony-SDK sources should
+architectural goal memorialised 2026-04-17: cell-SDK sources should
 compile unchanged.  PSL1GHT becomes a shrinking thin shim; cell/*.h
 is the primary SDK surface going forward.
 
 What lands:
-  - Full Sony struct set (CellSaveDataSetList, SetBuf, CBResult,
+  - Full cell-SDK struct set (CellSaveDataSetList, SetBuf, CBResult,
     DirList, ListGet, ListSet, FixedSet, DirStat, SystemFileParam,
     FileStat, StatGet, StatSet, FileGet, FileSet, DoneGet,
-    NewDataIcon, ListNewData, AutoIndicator) with Sony field names.
-  - Full Sony callback typedefs (ListCallback, FixedCallback,
+    NewDataIcon, ListNewData, AutoIndicator) with cell-SDK field names.
+  - Full cell-SDK callback typedefs (ListCallback, FixedCallback,
     StatCallback, FileCallback, DoneCallback).
-  - Sony enum + constant surface: VERSION_*, DIRNAME_SIZE,
+  - cell-SDK enum + constant surface: VERSION_*, DIRNAME_SIZE,
     FILENAME_SIZE, SORTTYPE_*, SORTORDER_*, FOCUSPOS_*, ICONPOS_*,
     ISNEWDATA_*, ERRDIALOG_*, RECREATE_*, FILETYPE_*, FILEOP_*,
     ATTR_*, BINDSTAT_ERR_*, OPTION_*.
@@ -25,17 +25,17 @@ What lands:
     AutoSave2 / AutoLoad2 / ListAutoSave / ListAutoLoad / Delete2.
 
 Verified imports in samples/hello-ppu-savedata.elf's
-.rodata.sceFNID: 0x8b7ed64b (cellSaveDataAutoSave2) — Sony's FNID
+.rodata.sceFNID: 0x8b7ed64b (cellSaveDataAutoSave2) — cell-SDK FNID
 as expected.
 
-Mechanism — each forwarder is a `static inline` that casts Sony
+Mechanism — each forwarder is a `static inline` that casts cell-SDK
 struct pointers and callback function pointers to PSL1GHT's
 `sysSave*` types and calls PSL1GHT's existing runtime.  Struct
 layouts are pinned byte-identical to PSL1GHT's by 15
 `_Static_assert` checks; any ABI drift (PSL1GHT change,
 ATTRIBUTE_PRXPTR semantics change, our struct typo) fails the
 build rather than producing silently-wrong output.  Function-
-pointer casts are legal because the corresponding Sony and
+pointer casts are legal because the corresponding the cell SDK and
 PSL1GHT callback types have ABI-identical parameter lists per the
 struct assertions.
 
@@ -53,26 +53,26 @@ index 0000000..c32a227
 +++ b/ppu/include/cell/sysutil_savedata.h
 @@ -0,0 +1,541 @@
 +/*! \file cell/sysutil_savedata.h
-+ \brief Sony-name-compatible cellSaveData API.
++ \brief cell-SDK-name-compatible cellSaveData API.
 +
-+  This header exposes the full Sony SDK 475.001 cellSaveData surface —
-+  Sony-named structs with Sony-named fields, Sony-named callbacks,
-+  Sony-named constants — over PSL1GHT's runtime.  Source written
-+  against Sony's reference sysutil_savedata.h compiles unchanged
++  This header exposes the full reference cell SDK cellSaveData surface —
++  cell-SDK-named structs with cell-SDK-named fields, cell-SDK-named callbacks,
++  cell-SDK-named constants — over PSL1GHT's runtime.  Source written
++  against the reference cell SDK's reference sysutil_savedata.h compiles unchanged
 +  (modulo `#include` paths) and links against PSL1GHT's existing
 +  `libsysutil.a`.
 +
 +  Mechanism:
-+    - PSL1GHT's struct layouts are byte-identical to Sony's (Sony's
++    - PSL1GHT's struct layouts are byte-identical to the cell SDK's (the cell SDK's
 +      were the source; PSL1GHT transcribed them with different C
 +      identifiers).  _Static_assert below pins the critical layouts;
 +      a regression would fail the build.
 +    - PSL1GHT's sysUtilSaveAutoSave2 etc. are wrappers over the
-+      `*Ex` SPRX trampolines that carry Sony's FNIDs.  So calling
-+      into PSL1GHT's runtime with Sony-shaped structs just works —
++      `*Ex` SPRX trampolines that carry cell-SDK FNIDs.  So calling
++      into PSL1GHT's runtime with cell-SDK-shaped structs just works —
 +      the SPRX emulation on RPCS3 / real hardware reads the bytes
 +      at the same offsets either way.
-+    - `static inline` forwarders cast Sony struct pointers and
++    - `static inline` forwarders cast cell-SDK struct pointers and
 +      callback function pointers to PSL1GHT's types.  C permits
 +      function-pointer casts; the argument types are ABI-identical
 +      (same number, same underlying bit widths) so the cast is a
@@ -102,8 +102,8 @@ index 0000000..c32a227
 +#endif
 +
 +/* ============================================================
-+ * Sizes, enums, constants.  Values paraphrased from Sony SDK
-+ * 475.001 sysutil_savedata.h; the bit positions and numeric
++ * Sizes, enums, constants.  Values paraphrased from cell SDK
++ * 3.55-4.75-era sysutil_savedata.h; the bit positions and numeric
 + * values match bit-for-bit (verified against PSL1GHT's
 + * SYS_SAVE_* set where they overlap).
 + * ============================================================ */
@@ -190,7 +190,7 @@ index 0000000..c32a227
 +	CELL_SAVEDATA_FILEOP_WRITE_NOTRUNC  = 3,
 +};
 +
-+/* Return codes (Sony names over PSL1GHT equivalents). */
++/* Return codes (cell-SDK names over PSL1GHT equivalents). */
 +#define CELL_SAVEDATA_RET_OK                    0
 +#define CELL_SAVEDATA_RET_CANCEL                1
 +
@@ -238,7 +238,7 @@ index 0000000..c32a227
 +#define CELL_SAVEDATA_OPTION_NOCONFIRM              (1 << 0)
 +
 +/* ============================================================
-+ * Sony struct types.  Layouts match PSL1GHT's sysSave*
++ * cell-SDK struct types.  Layouts match PSL1GHT's sysSave*
 + * structs byte-for-byte (verified by _Static_assert below).
 + * Pointer fields use ATTRIBUTE_PRXPTR so the SPRX boundary sees
 + * 32-bit pointer slots on our 64-bit PPU target — same treatment
@@ -415,8 +415,8 @@ index 0000000..c32a227
 +_Static_assert(sizeof(CellSaveDataSystemFileParam) == 1552,                        "SystemFileParam size drift");
 +
 +/* ============================================================
-+ * Sony callback typedefs.  ABI-identical to PSL1GHT's, just
-+ * named after Sony's arg types.  We cast function pointers when
++ * cell-SDK callback typedefs.  ABI-identical to PSL1GHT's, just
++ * named after cell-SDK arg types.  We cast function pointers when
 + * forwarding (legal in C; arg-type compatibility is guaranteed by
 + * the struct-layout static asserts above).
 + * ============================================================ */
@@ -440,12 +440,12 @@ index 0000000..c32a227
 +typedef void (*CellSaveDataDoneCallback)(CellSaveDataCBResult *cbResult,
 +                                         CellSaveDataDoneGet *get);
 +
-+/* Sony's `sys_memory_container_t` — in PSL1GHT this is
++/* the cell-SDK `sys_memory_container_t` — in PSL1GHT this is
 + * `sys_mem_container_t` from <sys/mempool.h>. */
 +typedef sys_mem_container_t sys_memory_container_t;
 +
 +/* ============================================================
-+ * Function forwarders.  Each casts Sony struct pointers and
++ * Function forwarders.  Each casts cell-SDK struct pointers and
 + * callback function pointers to PSL1GHT's types and forwards.
 + * Layout compat is enforced by _Static_asserts above.
 + * ============================================================ */

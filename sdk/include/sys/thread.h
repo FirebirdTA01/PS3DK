@@ -2,13 +2,13 @@
  * PS3 Custom Toolchain — <sys/thread.h>
  *
  * Underlying LV2 syscall surface for PPU threads.  <sys/ppu_thread.h>
- * layers the Sony-style sys_ppu_thread_* wrapper names on top of
+ * layers the cell-SDK-style sys_ppu_thread_* wrapper names on top of
  * these; most user code should #include the higher-level header
  * rather than going directly to the syscalls.
  *
  * The stack-info struct carries both the long-standing addr / size
- * field spellings and Sony's pst_addr / pst_size aliases through a
- * transparent union, so callers that declare
+ * field spellings and the cell-SDK pst_addr / pst_size aliases through
+ * a transparent union, so callers that declare
  *   sys_ppu_thread_stack_t info;
  * can read either `info.addr` or `info.pst_addr` and get the same
  * bytes.  Layout (pointer + u32) is unchanged.
@@ -30,9 +30,9 @@ extern "C" {
 
 /* Stack-info record returned by sysThreadGetStackInformation.
  *
- * Sony's ABI has this as { sys_addr_t pst_addr; size_t pst_size; }.
+ * The reference ABI has this as { sys_addr_t pst_addr; size_t pst_size; }.
  * The stack base is always a user-space address (32-bit fits via
- * sys_addr_t), and the length is size_t.  We expose both the Sony
+ * sys_addr_t), and the length is size_t.  We expose both the reference
  * pst_* spellings and the long-standing PSL1GHT addr / size spellings
  * at the same storage offsets via anonymous unions — either name
  * works on a single `sys_ppu_thread_stack_t` variable. */

@@ -1,10 +1,10 @@
-Subject: [PATCH] ppu/include: Sony-named forwarder at <cell/sysutil.h>
+Subject: [PATCH] ppu/include: cell-SDK-named forwarder at <cell/sysutil.h>
 
-First Phase 6 backfill.  PSL1GHT's libsysutil.a already embeds Sony's
+First backfill.  PSL1GHT's libsysutil.a already embeds the cell SDK's
 authentic FNIDs for cellSysutil*; only the C-level identifiers differ
 (`sysUtilCheckCallback` in PSL1GHT vs `cellSysutilCheckCallback` in
-Sony's SDK).  A final ELF linked against PSL1GHT-renamed symbols
-produces a `.rodata.sceFNID` section byte-identical to a Sony-compiled
+the reference cell SDK).  A final ELF linked against PSL1GHT-renamed symbols
+produces a `.rodata.sceFNID` section byte-identical to a reference-cell-SDK-compiled
 build — the PRX loader reads the FNID, not the C symbol name.
 
 Close the source-compat gap with ppu/include/cell/sysutil.h: thin
@@ -27,11 +27,11 @@ Event codes covered (2026-04-17):
 Runtime-verified on RPCS3 0.0.40 against samples/hello-ppu-sysutil-cb:
 pressing the mapped PS button in the emulator produced DRAWING_BEGIN +
 SYSTEM_MENU_OPEN + BGMPLAYBACK_PLAY events, delivered to the user-
-installed callback via the full cell-alias → PSL1GHT wrapper → Sony
+installed callback via the full cell-alias → PSL1GHT wrapper → cell-SDK
 FNID → RPCS3 SPRX dispatch chain.  The `.rodata.sceFNID` bytes the
-sample's ELF imports are exactly Sony's 0x9d98afa0 / 0x189a74da /
-0x02ff3c1b — confirming byte-level PRX-import parity with a Sony-
-compiled build.  First Phase 6 runtime milestone.
+sample's ELF imports are exactly the cell SDK's 0x9d98afa0 / 0x189a74da /
+0x02ff3c1b — confirming byte-level PRX-import parity with a cell-SDK-
+compiled build.  First the backfill workstream runtime milestone.
 
 Scope of this commit:
   - Callback registry (register / check / unregister).
@@ -44,7 +44,7 @@ pattern each time:
   - cell/save_data.h    (cellSaveDataAutoSave2 etc.)
   - cell/game_data.h
   - cell/sysutil_sysparam.h  (getSystemParamInt/String — wait on
-    clean-room port of Sony's param-ID enum)
+    clean-room port of the cell SDK's param-ID enum)
 
 diff --git a/ppu/include/cell/sysutil.h b/ppu/include/cell/sysutil.h
 new file mode 100644
@@ -53,13 +53,13 @@ index 0000000..97d4129
 +++ b/ppu/include/cell/sysutil.h
 @@ -0,0 +1,77 @@
 +/*! \file cell/sysutil.h
-+ \brief Sony-named forwarder over PSL1GHT's <sysutil/sysutil.h>.
++ \brief cell-SDK-named forwarder over PSL1GHT's <sysutil/sysutil.h>.
 +
-+  Re-exports the PSL1GHT system-utility callback API under the Sony
-+  reference SDK naming (`cellSysutilRegisterCallback`, etc.) so source
-+  written against the Sony SDK compiles against PSL1GHT's runtime with
++  Re-exports the PSL1GHT system-utility callback API under the
++  reference cell-SDK naming (`cellSysutilRegisterCallback`, etc.) so source
++  written against the cell SDK compiles against PSL1GHT's runtime with
 +  no other changes.  The underlying SPRX linkage is identical — PSL1GHT
-+  already uses Sony's FNIDs; only the C-level identifiers differ.
++  already uses cell-SDK FNIDs; only the C-level identifiers differ.
 +
 +  Scope:
 +    - Callback registry: register / check / unregister.
@@ -68,11 +68,11 @@ index 0000000..97d4129
 +
 +  Out of scope here (queued as libsysutil backfill follow-ups):
 +    - cellMsgDialog*, cellSaveData*, cellGameData*, etc. — those live
-+      in their own Sony sub-headers and each wants a matching forwarder
++      in their own cell-SDK sub-headers and each wants a matching forwarder
 +      (cell/msg_dialog.h, cell/save_data.h, ...).  Pattern is the same
 +      as here.
 +    - cellSysutilGetSystemParam{Int,String} — wait on a clean-room
-+      match of Sony's param ID enum before forwarding.
++      match of the cell-SDK param ID enum before forwarding.
 +*/
 +
 +#ifndef __PSL1GHT_CELL_SYSUTIL_H__
@@ -84,16 +84,16 @@ index 0000000..97d4129
 +extern "C" {
 +#endif
 +
-+/* Sony's callback type; layout-identical to PSL1GHT's sysutilCallback. */
++/* the cell SDK's callback type; layout-identical to PSL1GHT's sysutilCallback. */
 +typedef sysutilCallback CellSysutilCallback;
 +
-+/* Sony userid alias — most APIs that take a CellSysutilUserId
++/* cell-SDK userid alias — most APIs that take a CellSysutilUserId
 + * just pass it through to the underlying SPRX as an opaque uint32. */
 +typedef unsigned int CellSysutilUserId;
 +
-+/* Common event codes — Sony's names over PSL1GHT's symbols.  Values
-+ * are identical across the rename; code paraphrased from Sony SDK
-+ * 475.001 sysutil_common.h.  RPCS3 fires (at minimum)
++/* Common event codes — cell-SDK names over PSL1GHT's symbols.  Values
++ * are identical across the rename; code paraphrased from cell SDK
++ * 3.55-4.75-era sysutil_common.h.  RPCS3 fires (at minimum)
 + * DRAWING_BEGIN / SYSTEM_MENU_OPEN / BGMPLAYBACK_PLAY when the XMB
 + * opens and the matching _END / _CLOSE / _STOP on close. */
 +#define CELL_SYSUTIL_REQUEST_EXITGAME         SYSUTIL_EXIT_GAME
@@ -110,7 +110,7 @@ index 0000000..97d4129
 +#define CELL_SYSUTIL_SYSCHAT_VOICE_STREAMING_RESUMED     0x0163
 +#define CELL_SYSUTIL_SYSCHAT_VOICE_STREAMING_PAUSED      0x0164
 +
-+/* Callback registry — thin static inlines so Sony-named call sites
++/* Callback registry — thin static inlines so cell-SDK-named call sites
 + * compile down to direct branches against PSL1GHT's existing runtime. */
 +static inline int cellSysutilCheckCallback(void) {
 +	return (int)sysUtilCheckCallback();

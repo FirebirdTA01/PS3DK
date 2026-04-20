@@ -1,15 +1,14 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-cellgcm-triangle — Phase 7 step 1.5 / parallel-track demo.
+# hello-ppu-cellgcm-triangle — basic GCM flip_immediate demo.
 #
-# Compiles vpshader.vcg / fpshader.fcg into Sony-format .vpo / .fpo
-# binaries, embeds them into the ELF as binary blobs (bin2s), and
+# Compiles vpshader.vcg / fpshader.fcg into CgBinaryProgram .vpo / .fpo
+# containers, embeds them into the ELF as binary blobs (bin2s), and
 # links against PSL1GHT's RSX runtime + our cellGcm forwarders.
 #
 # Shader compiler: defaults to PSL1GHT's cgcomp (the in-tree pinned
 # baseline).  Set USE_RSX_CG_COMPILER=1 to swap in our own
-# rsx-cg-compiler instead — its output is byte-identical to sce-cgc
-# for both shaders in this sample (verified end-to-end via
-# tools/rsx-cg-compiler/tests/run_diff.sh).
+# rsx-cg-compiler instead — its output matches the reference compiler
+# for both shaders in this sample.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 
@@ -20,8 +19,8 @@ endif
 include $(PSL1GHT)/ppu_rules
 
 # Optional: build shaders with our compiler instead of PSL1GHT cgcomp.
-# Output is byte-identical to sce-cgc (and a small superset of cgcomp's
-# rules — e.g. emits DPH for `mul(matrix, float4(vec3, 1.0))`).
+# Output matches the reference compiler (and is a small superset of
+# cgcomp's rules — e.g. emits DPH for `mul(matrix, float4(vec3, 1.0))`).
 #
 # Compute the absolute path here in the outer scope; CURDIR shifts to
 # the BUILD subdir during the recursive make, so we resolve + export.

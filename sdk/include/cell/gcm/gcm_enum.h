@@ -1,9 +1,9 @@
 /*
  * PS3 Custom Toolchain — <cell/gcm/gcm_enum.h>
  *
- * Sony-style spellings of the libgcm constants our PSL1GHT runtime
+ * Cell-SDK-style spellings of the libgcm constants our PSL1GHT runtime
  * layer exposes under plain `GCM_` names.  Adds the `CELL_GCM_`
- * prefix so Sony-authored sample code compiles unchanged; numerics
+ * prefix so cell-SDK-authored sample code compiles unchanged; numerics
  * are preserved via macro aliases.
  *
  * This header stays header-only — no functions, no struct defs.
@@ -70,9 +70,9 @@ extern "C" {
 #define CELL_GCM_PRIMITIVE_POLYGON       GCM_TYPE_POLYGON
 
 /* Vertex-attribute element type (cellGcmSetVertexDataArray).  PSL1GHT
- * only exposes a subset (U8, F32); Sony's extra tags (S1, SF, CMP,
- * S32K, UB256) land when we own rsx/gcm_sys.h — for now we only alias
- * what the runtime can actually handle. */
+ * only exposes a subset (U8, F32); the cell SDK's extra tags (S1, SF,
+ * CMP, S32K, UB256) land when we own rsx/gcm_sys.h — for now we only
+ * alias what the runtime can actually handle. */
 #define CELL_GCM_VERTEX_UB               GCM_VERTEX_DATA_TYPE_U8
 #define CELL_GCM_VERTEX_F                GCM_VERTEX_DATA_TYPE_F32
 
@@ -91,11 +91,11 @@ extern "C" {
 #define CELL_GCM_SURFACE_F_X16Z16Y16X16  GCM_SURFACE_F_X16Z16Y16X16
 #define CELL_GCM_SURFACE_F_X32           GCM_SURFACE_F_X32
 
-/* Depth/stencil formats — PSL1GHT uses the ZETA infix; Sony omits it. */
+/* Depth/stencil formats — PSL1GHT uses the ZETA infix; the cell SDK omits it. */
 #define CELL_GCM_SURFACE_Z16             GCM_SURFACE_ZETA_Z16
 #define CELL_GCM_SURFACE_Z24S8           GCM_SURFACE_ZETA_Z24S8
 
-/* Surface addressing mode.  Sony calls the row-major layout "PITCH";
+/* Surface addressing mode.  The cell SDK calls the row-major layout "PITCH";
  * PSL1GHT exposes it as TYPE_LINEAR.  Semantics identical. */
 #define CELL_GCM_SURFACE_PITCH           GCM_SURFACE_TYPE_LINEAR
 #define CELL_GCM_SURFACE_SWIZZLE         GCM_SURFACE_TYPE_SWIZZLE
@@ -126,19 +126,19 @@ extern "C" {
 #define CELL_GCM_TILE_ALIGN_OFFSET       GCM_TILE_ALIGN_OFFSET
 #define CELL_GCM_TILE_ALIGN_SIZE         GCM_TILE_ALIGN_SIZE
 
-/* Fragment-program ucode placement alignment.  Sony's samples align
+/* Fragment-program ucode placement alignment.  Cell-SDK samples align
  * the local-memory allocation for FP ucode to this offset when
  * calling cellGcmUtilAllocateLocalMemory. */
 #define CELL_GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET  GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET
 
-/* Z-cull (early-depth) configuration.  Sony's handle_systemmenu
+/* Z-cull (early-depth) configuration.  The handle_systemmenu cell-SDK
  * sample binds these via cellGcmBindZcull. */
 #define CELL_GCM_ZCULL_Z24S8             GCM_ZCULL_Z24S8
 #define CELL_GCM_ZCULL_LESS              GCM_ZCULL_LESS
 #define CELL_GCM_ZCULL_LONES             GCM_ZCULL_LONES
 #define CELL_GCM_SCULL_SFUNC_LESS        GCM_SCULL_SFUNC_LESS
 
-/* Additional flip modes.  HSYNC_WITH_NOISE is Sony's name for what
+/* Additional flip modes.  HSYNC_WITH_NOISE is the cell-SDK name for what
  * PSL1GHT calls HSYNC_AND_BREAK_EVERYTHING (both == 3). */
 #define CELL_GCM_DISPLAY_HSYNC_WITH_NOISE  GCM_FLIP_HSYNC_AND_BREAK_EVERYTHING
 
@@ -153,10 +153,10 @@ extern "C" {
  * Texture — cellGcmSetTexture / SetTextureControl /
  *           SetTextureFilter / SetTextureAddress.
  *
- * Numeric values are NV40-hardware constants that sce-cgc and
- * sce_gcm encode the same way as our PSL1GHT runtime (when PSL1GHT
- * has an equivalent GCM_TEXTURE_* it's aliased, otherwise the
- * value is written out directly).
+ * Numeric values are NV40-hardware constants that the reference
+ * Cg compiler and libgcm encode the same way as our PSL1GHT runtime
+ * (when PSL1GHT has an equivalent GCM_TEXTURE_* it's aliased,
+ * otherwise the value is written out directly).
  * ============================================================ */
 
 /* Texture pixel formats (cellGcmSetTexture.format low byte). */

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# PS3 Custom Toolchain — Phase 3: PSL1GHT
+# PS3 Custom Toolchain — PSL1GHT runtime
 #
 # Builds the PSL1GHT runtime (PPU + SPU libraries, tools, samples) against our
 # new toolchain. Applies the v3 RFC patch series from patches/psl1ght/ to:
-#   - Migrate symbol/type/constant naming to Sony-style (cellXxx, CellXxx,
+#   - Migrate symbol/type/constant naming to cell-SDK style (cellXxx, CellXxx,
 #     CELL_XXX_*).
 #   - Ship psl1ght-compat.h aliasing legacy names for 1-2 releases.
 #   - Add the NV40-FP fragment shader assembler.

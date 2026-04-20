@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PS3 Custom Toolchain — Phase 1: PPU toolchain (powerpc64-ps3-elf)
+# PS3 Custom Toolchain — PPU toolchain (powerpc64-ps3-elf)
 #
 # Builds:
 #   binutils 2.42  -> $PS3DEV/ppu
@@ -203,8 +203,8 @@ build_gcc_newlib() {
     mkdir -p "$obj"
     say "Configuring GCC+newlib -> $PREFIX (target=$TARGET, GCC $GCC_VER)"
 
-    # Threading strategy: start with --enable-threads=single to unblock Phase 1d.
-    # Phase 1e swaps in --enable-threads=posix after libsysbase gthr shim lands.
+    # Threading strategy: start with --enable-threads=single.  A follow-up
+    # swaps in --enable-threads=posix once the libsysbase gthr shim lands.
     local threads_mode="${PS3_GCC_THREADS:-single}"
 
     (cd "$obj" && "$gcc_src/configure" \
@@ -298,7 +298,7 @@ create_symlinks() {
 # -----------------------------------------------------------------------------
 # Run
 # -----------------------------------------------------------------------------
-say "=== Phase 1: PPU toolchain ==="
+say "=== PPU toolchain ==="
 say "binutils $BINUTILS_VER  gcc $GCC_VER  newlib $NEWLIB_VER  gdb $GDB_VER"
 say "prefix=$PREFIX  build=$BUILD"
 [[ -n "$ONLY" ]] && say "Running only: $ONLY"

@@ -2,7 +2,7 @@
  * PS3 Custom Toolchain — Cg binary program layout.
  *
  * Describes the on-disk format of the .vpo / .fpo shader blobs that
- * the Sony / NVIDIA Cg compiler (sce-cgc) emits and that `cellGcmCg*`
+ * the NVIDIA Cg compiler (sce-cgc) emits and that `cellGcmCg*`
  * runtime helpers walk at load time.  This is a binary-data-format
  * specification; implementations of walkers over it must match the
  * layout bit-for-bit to interoperate with compiled shaders.

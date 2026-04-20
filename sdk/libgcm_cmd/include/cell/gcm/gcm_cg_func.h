@@ -24,7 +24,7 @@ extern "C" {
 
 /* One-time fix-up of a freshly-loaded CgBinaryProgram blob.  On PPU
  * the payload is already big-endian so the conversion is a no-op; we
- * keep the entry point for source compatibility with Sony-style
+ * keep the entry point for source compatibility with cell-SDK-style
  * samples that call it unconditionally. */
 void cellGcmCgInitProgram(CGprogram prog);
 

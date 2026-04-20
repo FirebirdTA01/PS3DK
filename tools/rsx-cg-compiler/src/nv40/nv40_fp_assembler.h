@@ -38,12 +38,12 @@ public:
     // NVFX_FP_OP_OPCODE_* value (e.g. NVFX_FP_OP_OPCODE_MOV).
     void emit(const struct nvfx_insn& insn, uint8_t opcode);
 
-    // Emit a Sony-RSX FENCBR instruction — opcode 0x3E, OUT_NONE = 1,
-    // OUT_REG = 0x3F (sce-cgc's sentinel bit pattern), all source
-    // operands default.  Placed before any instruction that reads an
-    // inline-const block to stall the pipeline until the const is
-    // available.  Not in the NV40 opcode header — verified from
-    // sce-cgc output.
+    // Emit an RSX FENCBR instruction — opcode 0x3E, OUT_NONE = 1,
+    // OUT_REG = 0x3F (sentinel bit pattern used by the reference
+    // compiler), all source operands default.  Placed before any
+    // instruction that reads an inline-const block to stall the
+    // pipeline until the const is available.  Not in the NV40 opcode
+    // header — verified from reference-compiler output.
     void emitFencbr();
 
     // Append a 16-byte inline constant immediately after the most

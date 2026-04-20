@@ -1,12 +1,12 @@
 /*
  * PS3 Custom Toolchain — <sys/ppu_thread.h>
  *
- * Sony-style PPU-thread API.  sys_ppu_thread_* wrappers forward to the
- * underlying lv2 syscall set that our PSL1GHT-derived `sys/thread.h`
- * exposes as sysThread*.  A thin alias layer gives callers Sony's
- * identifiers without changing the runtime.
+ * Cell-SDK-style PPU-thread API.  sys_ppu_thread_* wrappers forward to
+ * the underlying lv2 syscall set that our PSL1GHT-derived `sys/thread.h`
+ * exposes as sysThread*.  A thin alias layer gives callers the
+ * cell-SDK identifiers without changing the runtime.
  *
- * The stack-info struct ships with Sony's `pst_addr` / `pst_size`
+ * The stack-info struct ships with the cell-SDK `pst_addr` / `pst_size`
  * field names and a static_assert proves it remains layout-compatible
  * with `sys_ppu_thread_stack_t` as declared in <sys/thread.h> — the
  * wrapper that calls sysThreadGetStackInformation can therefore pass
@@ -45,7 +45,7 @@ static inline int sys_ppu_thread_create(sys_ppu_thread_t *thread_id,
                                         size_t stacksize, uint64_t flags,
                                         const char *threadname)
 {
-    /* Sony's JOINABLE bit == PSL1GHT THREAD_JOINABLE bit (both 1). */
+    /* Reference ABI JOINABLE bit == PSL1GHT THREAD_JOINABLE bit (both 1). */
     (void)flags;
     return (int)sysThreadCreate(thread_id,
                                 (void (*)(void *))entry,

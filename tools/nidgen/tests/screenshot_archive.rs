@@ -1,5 +1,5 @@
 //! Integration test: load the screenshot YAML and assert the rendered stub
-//! archive source contains every Sony-compatible section + per-export quartet.
+//! archive source contains every cell-SDK-compatible section + per-export quartet.
 //!
 //! This test does NOT invoke the PPU toolchain (avoids needing $PS3DEV on CI);
 //! the assembled-archive sanity check happens in scripts/build-cell-stub-archives.sh
@@ -17,7 +17,7 @@ fn yaml_path() -> PathBuf {
 }
 
 #[test]
-fn screenshot_yaml_renders_complete_sony_stub() {
+fn screenshot_yaml_renders_complete_cell_sdk_stub() {
     let lib = db::load_library(&yaml_path()).expect("yaml loads");
 
     assert_eq!(lib.library, "cellScreenShotUtility");

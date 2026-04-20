@@ -1,11 +1,11 @@
 #---------------------------------------------------------------------------------
 
-# hello-ppu-rsx-clear — Phase 7 GCM kickoff.
+# hello-ppu-rsx-clear — GCM bring-up smoke test.
 #
 # Brings up the RSX command stream end-to-end and cycles a clear-color
 # over the framebuffer.  No shaders — uses the rsxClearSurface fixed-
-# function path.  Native PSL1GHT GCM/RSX API for now; Sony-name
-# (cellGcm*) forwarders to follow.
+# function path.  Native PSL1GHT GCM/RSX API for now; cellGcm*
+# forwarders to follow.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 

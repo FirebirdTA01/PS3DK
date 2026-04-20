@@ -1,9 +1,9 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-event-flag — port of Sony's lv2/event_flag PPU sample.
+# hello-ppu-event-flag — port of a reference lv2/event_flag PPU sample.
 #
-# Tier-2 Sony-source port: pure lv2 syscall sample.  No SPRX modules,
-# no nidgen-built stub archives — just the new Sony-name sync compat
-# headers (sys/synchronization.h + sys/ppu_thread.h + sys/time_util.h)
+# Pure lv2 syscall sample.  No SPRX modules, no nidgen-built stub
+# archives — just the new cell-SDK-name sync compat headers
+# (sys/synchronization.h + sys/ppu_thread.h + sys/time_util.h)
 # layered over PSL1GHT's existing lv2 syscall surface.
 #---------------------------------------------------------------------------------
 .SUFFIXES:

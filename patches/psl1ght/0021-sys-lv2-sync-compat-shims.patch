@@ -1,6 +1,6 @@
-Subject: [PATCH] ppu/include: Sony-name lv2 sync compat shims
+Subject: [PATCH] ppu/include: cell-SDK-name lv2 sync compat shims
 
-Tier-2 Sony-source compat scaffolding.  Sony reference SDK samples
+Tier-2 cell-SDK-source compat scaffolding.  reference cell SDK samples
 that include <sys/synchronization.h> + <sys/ppu_thread.h> +
 <sys/time_util.h> need PSL1GHT-side counterparts under those exact
 paths so source compiles unmodified.  PSL1GHT exposes the same lv2
@@ -11,20 +11,20 @@ duplicating the syscall machinery.
 Five small new headers:
 
   cell/error.h               CELL_OK + CELL_ERROR_CAST.
-  sys/return_code.h          Sony-name forwarder to <cell/error.h>.
+  sys/return_code.h          cell-SDK-name forwarder to <cell/error.h>.
   sys/synchronization.h      sys_event_flag_* lv2syscall wrappers
-                             (numbers verified against Sony's
+                             (numbers verified against the reference cell SDK's
                              sys/syscall.h: 82/83/85/86/87/118/132/139)
                              plus SYS_EVENT_FLAG_WAIT_* constants and
                              the 32-byte sys_event_flag_attribute_t
-                             matching Sony's reference SDK exactly
+                             matching the reference cell SDK exactly
                              (attr_protocol, attr_pshared, key, flags,
                              type, name[8]).  The
                              sys_event_flag_attribute_initialize macro
                              defaults to SYS_SYNC_PRIORITY +
                              SYS_SYNC_NOT_PROCESS_SHARED +
-                             SYS_SYNC_WAITER_MULTIPLE per Sony's macro.
-                             Mutex/cond/sem/lwmutex Sony-name wrappers
+                             SYS_SYNC_WAITER_MULTIPLE per the cell SDK's macro.
+                             Mutex/cond/sem/lwmutex cell-SDK-name wrappers
                              can be added as the next sample needs them.
   sys/ppu_thread.h           Inline forwarders from sys_ppu_thread_*
                              to PSL1GHT's sysThread* (cast args; same
@@ -33,7 +33,7 @@ Five small new headers:
   sys/time_util.h            SYS_TIMEBASE_GET macro reading PowerPC
                              TBU/TBL with the standard rollover loop.
 
-samples/hello-ppu-event-flag/ ports the PPU half of Sony's
+samples/hello-ppu-event-flag/ ports the PPU half of the cell SDK's
 samples/sdk/lv2/event_flag/event_flag.ppu.c (master + 5 worker
 threads coordinating via two event flags).  SPU half stripped to
 keep scope contained — the PPU-PPU master/worker scenario alone
@@ -51,9 +51,9 @@ index 0000000..0000000
 +++ b/ppu/include/cell/error.h
 @@ -0,0 +1,24 @@
 +/*! \file cell/error.h
-+ \brief Sony-SDK-source-compat shared error/return-code primitives.
++ \brief cell-SDK-source-compat shared error/return-code primitives.
 +
-+  Tiny header used by Sony reference samples and most cell headers.
++  Tiny header used by reference cell-SDK samples and most cell headers.
 +  CELL_OK is the canonical "no error" value (always 0); CELL_ERROR_CAST
 +  forces a constant to int when used inside #define CELL_X_ERROR_Y forms
 +  to keep the type stable in GCC under -Wsign-compare.
@@ -82,9 +82,9 @@ index 0000000..0000000
 +++ b/ppu/include/sys/return_code.h
 @@ -0,0 +1,14 @@
 +/*! \file sys/return_code.h
-+ \brief Sony-SDK-source-compat return-code header.
++ \brief cell-SDK-source-compat return-code header.
 +
-+  Sony's reference SDK uses <sys/return_code.h> as the canonical entry
++  the reference cell SDK uses <sys/return_code.h> as the canonical entry
 +  point for CELL_OK and the syscall return-code family.  We forward to
 +  <cell/error.h> so both spellings work.
 +*/
@@ -103,7 +103,7 @@ index 0000000..0000000
 +++ b/ppu/include/sys/time_util.h
 @@ -0,0 +1,37 @@
 +/*! \file sys/time_util.h
-+ \brief Sony-SDK-source-compat time-base read macro.
++ \brief cell-SDK-source-compat time-base read macro.
 +
 +  Reads the PowerPC TimeBase register pair into a 64-bit value with the
 +  rollover-tolerant loop documented in the PowerPC ISA: read TBU, TBL, TBU
@@ -147,21 +147,21 @@ index 0000000..0000000
 +++ b/ppu/include/sys/synchronization.h
 @@ -0,0 +1,170 @@
 +/*! \file sys/synchronization.h
-+ \brief Sony-SDK-source-compat synchronisation primitives.
++ \brief cell-SDK-source-compat synchronisation primitives.
 +
-+  First cut: covers the event-flag surface needed to port Sony's
++  First cut: covers the event-flag surface needed to port the cell SDK's
 +  reference samples that include <sys/synchronization.h> and use
 +  sys_event_flag_create / wait / set / clear / destroy / get / cancel /
 +  trywait / attribute_initialize.
 +
 +  Mutex / cond / sem / lwmutex / lwcond bits are intentionally NOT
-+  re-exported here yet — Sony's source uses them under sys_mutex_*,
++  re-exported here yet — the cell SDK's source uses them under sys_mutex_*,
 +  sys_cond_*, sys_sem_* names while PSL1GHT exposes them as
 +  sysMutex* / sysCond* / sysSem* under <sys/mutex.h> / <sys/cond.h> /
 +  <sys/sem.h>.  Wrappers can be added here as the next sample needs
 +  them.
 +
-+  Syscall numbers verified against reference/sony-sdk/.../sys/syscall.h:
++  Syscall numbers verified against $REF_SDK/.../sys/syscall.h:
 +    SYS_EVENT_FLAG_CREATE     82
 +    SYS_EVENT_FLAG_DESTROY    83
 +    SYS_EVENT_FLAG_WAIT       85
@@ -224,7 +224,7 @@ index 0000000..0000000
 +
 +typedef u32 sys_event_flag_t;
 +
-+/* Layout matches Sony's reference SDK 475.001 sys/synchronization.h
++/* Layout matches the reference cell SDK sys/synchronization.h
 + * exactly: 32 bytes (4 + 4 + 8 + 4 + 4 + 8).  RPCS3's
 + * sys_event_flag_create rejects shorter structs with EINVAL — we
 + * verified empirically that the missing pshared/key/flags fields
@@ -238,7 +238,7 @@ index 0000000..0000000
 +	char                  name[SYS_SYNC_NAME_SIZE];
 +} sys_event_flag_attribute_t;
 +
-+/* Defaults match Sony's reference SDK macro: priority scheduling,
++/* Defaults match the reference cell SDK macro: priority scheduling,
 + * not process-shared, multiple-waiter event flag, no debug name. */
 +#define sys_event_flag_attribute_initialize(_attr)              \
 +	do {                                                        \
@@ -324,15 +324,15 @@ index 0000000..0000000
 +++ b/ppu/include/sys/ppu_thread.h
 @@ -0,0 +1,97 @@
 +/*! \file sys/ppu_thread.h
-+ \brief Sony-SDK-source-compat PPU-thread API.
++ \brief cell-SDK-source-compat PPU-thread API.
 +
-+  Forwarder header.  Sony's reference samples include <sys/ppu_thread.h>
++  Forwarder header.  the cell SDK's reference samples include <sys/ppu_thread.h>
 +  and call sys_ppu_thread_create / join / exit / get_id / get_priority /
 +  set_priority / yield / detach.  PSL1GHT exposes the same lv2 syscalls
 +  under different identifiers (sysThreadCreate / sysThreadJoin / etc.)
 +  in <sys/thread.h> and <lv2/thread.h>.  This header bridges the names.
 +
-+  Sony's `sys_ppu_thread_create` takes `void (*entry)(uint64_t)` and
++  the cell SDK's `sys_ppu_thread_create` takes `void (*entry)(uint64_t)` and
 +  `uint64_t arg`; PSL1GHT's `sysThreadCreate` takes `void (*entry)(void *)`
 +  and `void *arg`.  Both have the same PPC64 ABI (first arg in r3,
 +  pointer-and-uint64 are interchangeable on a 64-bit register), so the
@@ -367,7 +367,7 @@ index 0000000..0000000
 +                                        size_t stacksize, uint64_t flags,
 +                                        const char *threadname)
 +{
-+	(void)flags; /* Sony's JOINABLE bit == PSL1GHT THREAD_JOINABLE bit (both 1). */
++	(void)flags; /* the cell SDK's JOINABLE bit == PSL1GHT THREAD_JOINABLE bit (both 1). */
 +	return (int)sysThreadCreate(thread_id,
 +	                            (void (*)(void *))entry,
 +	                            (void *)(uintptr_t)arg,

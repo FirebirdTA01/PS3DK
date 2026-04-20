@@ -1,6 +1,6 @@
 Subject: [PATCH] lv2/sysfs.h: pull <sys/param.h>; librt/fstat.c: write through timespec
 
-sysFSStat and Sony's CellFsStat both carry st_atime/st_mtime/st_ctime
+sysFSStat and the reference CellFsStat both carry st_atime/st_mtime/st_ctime
 members typed as time_t.  Newlib 4.4's <sys/stat.h> is POSIX-2008:
 for non-SVR4 targets it declares timespec members st_atim/st_mtim/
 st_ctim and then unconditionally #defines st_atime -> st_atim.tv_sec
