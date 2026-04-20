@@ -6,11 +6,13 @@
 tools/rsx-cg-compiler/build/
 
 # Per-sample build output
-samples/*/build/
-samples/*/*.elf
-samples/*/*.fake.self
-samples/*/*.pkg
-samples/*/*.gnpdrm.pkg
+samples/**/build/
+samples/**/*.elf
+samples/**/*.self
+samples/**/*.fake.self
+samples/**/*.map
+samples/**/*.pkg
+samples/**/*.gnpdrm.pkg
 
 # Staging prefix ($PS3DEV install root)
 /stage/

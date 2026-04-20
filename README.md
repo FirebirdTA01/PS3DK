@@ -168,7 +168,7 @@ All four checks should succeed silently (or print the expected version).  If any
 Samples under `samples/` each build with `make` from inside their own directory:
 
 ```bash
-cd samples/hello-ppu-c++17
+cd samples/toolchain/hello-ppu-c++17
 make
 # Produces: hello-ppu-c++17.elf / .self / .fake.self
 ```
@@ -184,7 +184,7 @@ Each sample produces three artefacts:
 Quickest end-to-end check under RPCS3:
 
 ```bash
-cd samples/hello-ppu-abi-check
+cd samples/toolchain/hello-ppu-abi-check
 make
 rpcs3 --no-gui hello-ppu-abi-check.self
 # Stdout lands in ~/.cache/rpcs3/TTY.log — a clean run ends with
