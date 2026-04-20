@@ -1,0 +1,18 @@
+// hello-ppu-cellgcm-sysmenu — vertex program.
+//
+// Identity-projected 2D triangle with per-vertex colour.  A single 4x4
+// uniform `transform` is applied to `float4(in_position.xy, 0, 1)`.  The
+// PPU fills `transform` with a rotation-about-Z matrix each frame so the
+// triangle spins; while the system menu is open the PPU freezes the
+// angle and rewrites the uniform with the same matrix.
+
+void main(
+    float2 in_position      : POSITION,
+    float4 in_color         : COLOR,
+    uniform float4x4 transform,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    out_position = mul(transform, float4(in_position.x, in_position.y, 0.0f, 1.0f));
+    out_color    = in_color;
+}

@@ -1,0 +1,16 @@
+// hello-ppu-cellgcm-quad — vertex program.
+//
+// Identity-projected screen-space position + texcoord passthrough.
+// The PPU writes vertex positions in NDC directly, so there's no
+// matrix to apply — the vertex program just copies the 2D position
+// into a 4-component POSITION output and hands the UV through.
+
+void main(
+    float2 in_position      : POSITION,
+    float2 in_texcoord      : TEXCOORD0,
+    out float4 out_position : POSITION,
+    out float2 out_texcoord : TEXCOORD0)
+{
+    out_position = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    out_texcoord = in_texcoord;
+}

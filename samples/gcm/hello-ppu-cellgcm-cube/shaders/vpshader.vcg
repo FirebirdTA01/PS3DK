@@ -1,0 +1,15 @@
+// hello-ppu-cellgcm-cube — vertex program.
+//
+// Standard MVP-transform + per-vertex colour passthrough.  The PPU
+// fills `modelViewProj` each frame with perspective * view * rotation.
+
+void main(
+    float3 in_position      : POSITION,
+    float4 in_color         : COLOR,
+    uniform float4x4 modelViewProj,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    out_position = mul(modelViewProj, float4(in_position, 1.0f));
+    out_color    = in_color;
+}
