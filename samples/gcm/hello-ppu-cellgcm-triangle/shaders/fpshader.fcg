@@ -2,9 +2,6 @@
 //
 // Emits the interpolated vertex colour.  No textures, no uniforms —
 // the rasteriser already did the colour interpolation for us.
-//
-// Clean-room: written against the sample's documented contract, not
-// derived from any vendor shader source.
 
 void main(
     float4 in_color      : COLOR,

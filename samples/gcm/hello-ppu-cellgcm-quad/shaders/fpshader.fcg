@@ -1,0 +1,12 @@
+// hello-ppu-cellgcm-quad — fragment program.
+//
+// Single-texture passthrough: sample the bound 2D texture at the
+// interpolated UV and emit the sampled colour.
+
+void main(
+    float2 in_texcoord    : TEXCOORD0,
+    uniform sampler2D tex : TEXUNIT0,
+    out float4 out_color  : COLOR)
+{
+    out_color = tex2D(tex, in_texcoord);
+}

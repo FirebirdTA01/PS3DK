@@ -4,9 +4,6 @@
 // attribute layout (POSITION float3, COLOR0 float4) and the uniform
 // name "modelViewProj" are dictated by our source/main.c — see
 // rsxBindVertexArrayAttrib() and rsxVertexProgramGetConst() calls.
-//
-// Clean-room: written against the sample's documented contract, not
-// derived from any vendor shader source.
 
 void main(
     float3 in_position      : POSITION,

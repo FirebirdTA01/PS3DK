@@ -1,0 +1,10 @@
+// hello-ppu-cellgcm-sysmenu — fragment program.
+//
+// Passthrough of the interpolated vertex colour.
+
+void main(
+    float4 in_color      : COLOR,
+    out float4 out_color : COLOR)
+{
+    out_color = in_color;
+}
