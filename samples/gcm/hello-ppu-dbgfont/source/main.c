@@ -225,58 +225,31 @@ int main(int argc, const char **argv)
 
 		float t = frame / 60.0f;
 
-		/* ---- Top row: title + stats -------------------------------- */
-		cellDbgFontPrintf(0.03f, 0.03f, 1.40f, 0xffffffff,
-		                  "hello-ppu-dbgfont");
-		cellDbgFontPrintf(0.03f, 0.10f, 0.90f, 0xffc0c0c0,
-		                  "cellDbgFont* on-screen overlay demo");
-		cellDbgFontPrintf(0.75f, 0.04f, 0.80f, 0xff80ffff,
-		                  "frame %4d", frame);
-		cellDbgFontPrintf(0.75f, 0.09f, 0.80f, 0xff80ffff,
-		                  "t = %5.2f s", t);
+		/* 3x3 grid of static labels (all Printf so they go through the
+		 * same rendering path) plus one slowly-animated line.  Short
+		 * strings and positions well inside the safe area so they
+		 * stay on-screen regardless of where the library draws its
+		 * origin. */
 
-		/* ---- Left column: colour swatches -------------------------- */
-		cellDbgFontPrintf(0.04f, 0.22f, 1.00f, 0xffff4040, "red");
-		cellDbgFontPrintf(0.04f, 0.28f, 1.00f, 0xff40ff40, "green");
-		cellDbgFontPrintf(0.04f, 0.34f, 1.00f, 0xff4080ff, "blue");
-		cellDbgFontPrintf(0.04f, 0.40f, 1.00f, 0xffffff40, "yellow");
-		cellDbgFontPrintf(0.04f, 0.46f, 1.00f, 0xffff40ff, "magenta");
-		cellDbgFontPrintf(0.04f, 0.52f, 1.00f, 0xff40ffff, "cyan");
-		cellDbgFontPrintf(0.04f, 0.58f, 1.00f, 0xffff8040, "orange");
-		cellDbgFontPrintf(0.04f, 0.64f, 1.00f, 0xffc080ff, "violet");
+		/* ---- top row -------------------------------------------- */
+		cellDbgFontPrintf(0.10f, 0.15f, 1.50f, 0xffffffff, "WHITE");
+		cellDbgFontPrintf(0.40f, 0.15f, 1.50f, 0xffff4040, "RED");
+		cellDbgFontPrintf(0.70f, 0.15f, 1.50f, 0xff40ff40, "GREEN");
 
-		/* ---- Centre: size ramp ------------------------------------ */
-		cellDbgFontPrintf(0.36f, 0.22f, 0.60f, 0xffffffff, "scale 0.60");
-		cellDbgFontPrintf(0.36f, 0.27f, 0.90f, 0xffffffff, "scale 0.90");
-		cellDbgFontPrintf(0.36f, 0.34f, 1.30f, 0xffffffff, "scale 1.30");
-		cellDbgFontPrintf(0.36f, 0.43f, 1.80f, 0xffffffff, "scale 1.80");
-		cellDbgFontPrintf(0.36f, 0.56f, 2.40f, 0xffffffff, "scale 2.40");
+		/* ---- middle row ----------------------------------------- */
+		cellDbgFontPrintf(0.10f, 0.45f, 1.50f, 0xff40a0ff, "BLUE");
+		cellDbgFontPrintf(0.40f, 0.45f, 2.00f, 0xffffff40, "YELLOW");
+		cellDbgFontPrintf(0.70f, 0.45f, 1.50f, 0xffff40ff, "PINK");
 
-		/* ---- Right column: animated tints ------------------------- */
-		float pulse = 0.5f + 0.5f * sinf(t * 3.0f);
-		uint8_t cv  = (uint8_t)(80 + 175 * pulse);
-		uint32_t pulse_col = 0xff000000u | ((uint32_t)cv << 16)
-		                                 | ((uint32_t)cv << 0);
-		cellDbgFontPrintf(0.70f, 0.22f, 1.00f, pulse_col,
-		                  "pulsing   %3d", cv);
-		cellDbgFontPrintf(0.70f, 0.28f, 1.00f, 0xff40ff80,
-		                  "sin(t*3)  %+0.2f", sinf(t * 3.0f));
-		cellDbgFontPrintf(0.70f, 0.34f, 1.00f, 0xffff8040,
-		                  "cos(t*2)  %+0.2f", cosf(t * 2.0f));
+		/* ---- bottom row ----------------------------------------- */
+		cellDbgFontPrintf(0.10f, 0.75f, 1.20f, 0xff40ffff, "CYAN");
+		cellDbgFontPrintf(0.40f, 0.75f, 1.20f, 0xffff8040, "ORANGE");
+		cellDbgFontPrintf(0.70f, 0.75f, 1.20f, 0xffc0c0c0, "GREY");
 
-		/* ---- Mid-screen moving banner ----------------------------- */
-		float bx = 0.25f + 0.15f * sinf(t * 1.5f);
-		float by = 0.74f + 0.03f * sinf(t * 2.3f);
-		cellDbgFontPrintf(bx, by, 1.60f, 0xffffe040,
-		                  "** drifting text **");
-
-		/* ---- Bottom row: corners + footer ------------------------- */
-		cellDbgFontPrintf(0.03f, 0.90f, 0.80f, 0xff80ff80,
-		                  "bottom-left (x=0.03, y=0.90)");
-		cellDbgFontPrintf(0.38f, 0.92f, 0.90f, 0xffffc0c0,
-		                  "press START to exit early");
-		cellDbgFontPrintf(0.75f, 0.90f, 0.80f, 0xff80c0ff,
-		                  "bottom-right");
+		/* ---- slow animated line --------------------------------- */
+		float bx = 0.35f + 0.08f * sinf(t * 0.4f);
+		cellDbgFontPrintf(bx, 0.90f, 1.00f, 0xffffffff,
+		                  "frame %d", frame);
 
 		cellDbgFontDrawGcm();
 
