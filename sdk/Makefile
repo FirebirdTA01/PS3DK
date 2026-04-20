@@ -30,7 +30,21 @@ HEADERS := \
     include/cell/gcm/gcm_tex_bridge.h \
     include/cell/gcm/gcm_command_c.h \
     include/cell/cell_video_out.h \
-    include/cell/dbgfont.h
+    include/cell/dbgfont.h \
+    include/cell/sysutil.h \
+    include/cell/msg_dialog.h \
+    include/cell/sysutil_sysparam.h \
+    include/cell/sysutil_savedata.h \
+    include/cell/sysutil_gamecontent.h \
+    include/cell/sysutil_screenshot.h \
+    include/cell/sysutil_ap.h \
+    include/cell/sysmodule.h \
+    include/cell/l10n.h \
+    include/cell/sysutil_subdisplay.h \
+    include/cell/sysutil_music.h \
+    include/cell/sysutil_music_decode.h \
+    include/cell/sysutil_music_export.h \
+    include/cell/sysutil_imejp.h
 
 SUBLIBS := libgcm_cmd libdbgfont
 

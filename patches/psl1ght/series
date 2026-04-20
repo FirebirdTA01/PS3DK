@@ -5,14 +5,4 @@
 0005-ps3load-stdbool.patch
 0006-ps3py-gcc-direct.patch
 0010-own-sys-stat-header.patch
-0011-cell-sysutil-sony-forwarder.patch
-0012-cell-msg-dialog-sony-forwarder.patch
-0013-cell-sysutil-sysparam-sony-forwarder.patch
-0014-cell-sysutil-savedata-sony-source-compat.patch
-0015-cell-sysutil-gamecontent-sony-source-compat.patch
-0016-cell-sysutil-screenshot-sony-decl-only.patch
-0017-cell-sysutil-ap-sony-decl-only.patch
-0018-cell-sysmodule-sony-decl-only.patch
-0019-cell-l10n-sony-decl-only-minimal.patch
-0020-cell-sysutil-phase6_5-backfill-batch.patch
 0021-sys-lv2-sync-compat-shims.patch
