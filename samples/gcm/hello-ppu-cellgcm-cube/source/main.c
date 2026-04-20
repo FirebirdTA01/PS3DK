@@ -35,8 +35,13 @@
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
-#define CB_SIZE              0x10000
-#define HOST_SIZE            (1 * 1024 * 1024)
+/* CB_SIZE / HOST_SIZE chosen to match cellgcm-clear: 64 KB command
+ * buffers and a 1 MB I/O map hit the FIFO-wrap drain-wait quickly on
+ * draw-heavy samples (see docs/known-issues.md).  1 MB CB + 32 MB
+ * I/O keep the wrap rare enough that the known stutter isn't
+ * observable in practice. */
+#define CB_SIZE              0x100000
+#define HOST_SIZE            (32 * 1024 * 1024)
 #define COLOR_BUFFER_NUM     4
 #define MAX_QUEUE_FRAMES     1
 

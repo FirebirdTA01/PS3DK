@@ -33,8 +33,11 @@
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
-#define CB_SIZE              0x10000
-#define HOST_SIZE            (1 * 1024 * 1024)
+/* 1 MB command buffer + 32 MB I/O map — keeps the FIFO-wrap
+ * drain-wait rare enough that the known wrap stutter doesn't hit
+ * this sample (see docs/known-issues.md). */
+#define CB_SIZE              0x100000
+#define HOST_SIZE            (32 * 1024 * 1024)
 #define COLOR_BUFFER_NUM     4
 #define MAX_QUEUE_FRAMES     1
 
