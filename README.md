@@ -13,7 +13,7 @@ Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebas
 | Binutils | **2.42** | both targets | Assembler, linker, `ar` / `objcopy` / `nm` / `strip` for both PPU and SPU; `spu-elf` ships upstream intact |
 | Newlib | **4.4.0.20231231** | both targets | C standard library + PS3 `libsysbase` / `libgloss` lv2 syscall glue (CRT0, `_write_r` / `_sbrk_r` / `_read_r` etc.) |
 | GDB | **14.2** | PPU | Debugger for RPCS3's gdbstub and (eventually) real-hardware targets |
-| PSL1GHT (v3) | main | PPU + SPU runtime | Homebrew runtime rebased for cell-SDK-style naming; source-compat shim retained for legacy homebrew |
+| PSL1GHT (v3) | main | PPU + SPU runtime | Homebrew runtime rebased for cell-SDK-style naming; source-compat shim keeps PSL1GHT-targeted homebrew building |
 | portlibs | current stable | PPU | zlib 1.3.1, libpng 1.6.43, SDL2 2.30, libcurl 8.9, mbedTLS 3.6, etc. |
 | Tooling | in-tree | host | Rust CLIs for NID/FNID generation, stub-archive emission, coverage reports |
 
@@ -31,9 +31,7 @@ Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebas
 
 ### Other components
 
-- **PSL1GHT v3**: cell-SDK-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`) with a compatibility shim that keeps legacy homebrew building for 1–2 releases.  Fragment-shader-capable RSX (NV40-FP assembler first, full Cg compiler at `tools/rsx-cg-compiler/`).
-
-Terminology note: "SPE" (Synergistic Processing Element) refers to the physical Cell tile — the SPU core, its 256 KiB Local Store, and the Memory Flow Controller (MFC).  The compiler target `spu-elf` addresses the SPU core; "SPU" and "SPE" are used interchangeably when talking about the compiler / toolchain unless local-store or DMA hardware is the subject.
+- **PSL1GHT v3**: cell-SDK-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`) alongside a source-compat shim so PSL1GHT-targeted homebrew continues to build unchanged — PSL1GHT stays a supported front-end even as we replace most of its runtime behind the scenes.  Fragment-shader-capable RSX (NV40-FP assembler first, full Cg compiler at `tools/rsx-cg-compiler/`).
 
 ## Status
 
