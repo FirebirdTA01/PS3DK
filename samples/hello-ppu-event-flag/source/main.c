@@ -1,16 +1,16 @@
 /*
- * hello-ppu-event-flag — port of Sony's samples/sdk/lv2/event_flag/event_flag.ppu.c.
+ * hello-ppu-event-flag — PPU port of a reference lv2/event_flag sample.
  *
  * PPU master/worker synchronisation via sys_event_flag_*.  The SPU
- * half of Sony's original (which sets event-flag bits via
+ * half of the original (which sets event-flag bits via
  * sys_spu_thread_write_snr) is dropped; this is the "PPU - PPU"
- * scenario described in Sony's header comment.
+ * scenario.
  *
- * Tier-2 Sony-source port: needed five new compat headers under
- * <sys/synchronization.h> + <sys/ppu_thread.h> + <sys/time_util.h> +
- * <sys/return_code.h> + <cell/error.h> on top of the existing
- * <sys/process.h> already shipped by PSL1GHT.  Source flow is otherwise
- * identical to Sony's reference sample minus the SPU bits.
+ * Needed five new compat headers under <sys/synchronization.h> +
+ * <sys/ppu_thread.h> + <sys/time_util.h> + <sys/return_code.h> +
+ * <cell/error.h> on top of the existing <sys/process.h> already
+ * shipped by PSL1GHT.  Source flow is otherwise identical to the
+ * reference sample minus the SPU bits.
  *
  * Imports lv2 syscalls only — no SPRX modules, no nidgen-built stub
  * archives.  Each sys_event_flag_* call goes straight into the lv2
@@ -146,7 +146,7 @@ int main(int argc, char **argv)
 	uint64_t          val;
 	sys_event_flag_attribute_t attr;
 
-	printf("hello-ppu-event-flag: Sony lv2/event_flag PPU port\n");
+	printf("hello-ppu-event-flag: lv2/event_flag PPU port\n");
 
 	sys_event_flag_attribute_initialize(attr);
 

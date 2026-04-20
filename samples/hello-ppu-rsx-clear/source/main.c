@@ -1,5 +1,5 @@
 /*
- * hello-ppu-rsx-clear — Phase 7 GCM kickoff sample.
+ * hello-ppu-rsx-clear — GCM bring-up smoke test.
  *
  * Brings up the RSX command stream end-to-end and cycles a clear-color
  * over the framebuffer.  No shaders involved — uses the fixed-function
@@ -190,7 +190,7 @@ int main(int argc, const char **argv)
 	padInfo         padinfo;
 	padData         paddata;
 
-	printf("hello-ppu-rsx-clear: Phase 7 GCM kickoff\n");
+	printf("hello-ppu-rsx-clear: GCM smoke test\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	ctx       = init_screen(host_addr, HOST_SIZE, &width, &height);

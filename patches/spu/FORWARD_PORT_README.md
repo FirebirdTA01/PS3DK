@@ -1,6 +1,6 @@
 # SPU Backend: GCC 9.5.0 Now, GCC 12+ Later
 
-## Current state (Phase 2a)
+## Current state
 
 The SPU toolchain uses **GCC 9.5.0** — the last GCC release with an intact Cell SPE
 backend. This gives us:
@@ -14,7 +14,7 @@ For typical SPU workloads (256 KB local store, tight computational kernels), GCC
 is more than adequate. The SPU doesn't benefit from GCC 12's improved autovectorization
 or LTO as much as PPU does.
 
-## Long-term goal (Phase 2b): Forward-port SPU backend to GCC 12+
+## Long-term goal: Forward-port SPU backend to GCC 12+
 
 GCC 10.1 (released May 2020) removed the SPU backend entirely:
 
@@ -74,6 +74,6 @@ stage/ps3dev/spu-gcc12/ ← GCC 12.4.0 (experimental, when ready)
 
 - GCC 9.5.0 `gcc/config/spu/` — the source of truth for the backend
 - GCC 10.1 removal commit: search for "Remove SPU" in GCC git log
-- Cell BE Architecture documents (in `reference/private/HW_doc/`)
+- Cell BE Architecture documents (see the public CBEA Handbook / SPU ISA PDFs from IBM)
 - SPU ISA v1.2 (IBM document)
 - `gcc/doc/tm.texi` — target macros reference for GCC 12

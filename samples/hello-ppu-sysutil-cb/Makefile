@@ -1,9 +1,9 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-sysutil-cb — first Phase 6 backfill sample.
+# hello-ppu-sysutil-cb — cellSysutilRegisterCallback smoke test.
 #
-# Exercises Sony-named cellSysutilRegisterCallback over PSL1GHT's runtime
-# via the thin forwarder at <cell/sysutil.h>.  No RSX, no dialogs — just
-# a callback loop that prints XMB events as they arrive.
+# Exercises cellSysutilRegisterCallback over PSL1GHT's runtime via the
+# thin forwarder at <cell/sysutil.h>.  No RSX, no dialogs — just a
+# callback loop that prints XMB events as they arrive.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PS3 Custom Toolchain — Phase 2a: SPU toolchain (spu-elf)
+# PS3 Custom Toolchain — SPU toolchain (spu-elf)
 #
 # Builds:
 #   binutils 2.42  -> $PS3DEV/spu  (spu-elf target; upstream still intact)
@@ -11,7 +11,7 @@
 #   - GCC 9.5.0 is the newest 9.x patch release; includes C++17 complete and
 #     partial C++20.
 #   - GCC 10 removed ~34k lines of SPU backend. Forward-porting to 12.4.0 is
-#     Phase 2b (long-lead), kept in a separate branch.
+#     a long-lead workstream, kept in a separate branch.
 #
 # SPU C++ constraints (256 KB local store budget):
 #   - Default spec file adds -fno-exceptions -fno-rtti -Os for size.
@@ -230,7 +230,7 @@ install_linker_script() {
     fi
 }
 
-say "=== Phase 2a: SPU toolchain ==="
+say "=== SPU toolchain ==="
 say "binutils $BINUTILS_VER  gcc $GCC_VER  newlib $NEWLIB_VER"
 say "prefix=$PREFIX  build=$BUILD"
 [[ -n "$ONLY" ]] && say "Running only: $ONLY"

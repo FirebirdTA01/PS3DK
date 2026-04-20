@@ -25,5 +25,6 @@ support (`spu_icache.S`, `spu_ovl.S`) are all present.
 ## What's missing upstream
 
 The assembler/linker story for SPU is complete. Only GCC's SPU backend is
-absent from modern upstream (Phase 2a pins GCC 9.5.0 to work around this; the
-Phase 2b forward-port is the long-lead stream).
+absent from modern upstream — we pin GCC 9.5.0 to work around this; a
+forward-port to GCC 12+ is the long-lead stream (see
+`patches/spu/FORWARD_PORT_README.md`).

@@ -1,10 +1,10 @@
 /*
- * hello-ppu-backfill — Phase 6.5 batch link smoke test.
+ * hello-ppu-backfill — batch link smoke test.
  *
- * Includes the five new Phase 6.5 sysutil headers (subdisplay, music,
- * music_decode, music_export, imejp) and references one function from
- * each library so the linker pulls in the corresponding stub archive
- * and writes its FNID + sceResident entries into the ELF.
+ * Includes five sysutil headers (subdisplay, music, music_decode,
+ * music_export, imejp) and references one function from each library
+ * so the linker pulls in the corresponding stub archive and writes
+ * its FNID + sceResident entries into the ELF.
  *
  * The references are *taken* (function pointers stored in a volatile
  * sink) but never *called*.  This proves linkage end-to-end without
@@ -48,7 +48,7 @@ int main(int argc, char **argv)
 	(void)argv;
 
 	const size_t n = sizeof(g_link_anchors) / sizeof(g_link_anchors[0]);
-	printf("hello-ppu-backfill: %zu Phase 6.5 stub-archive symbols anchored\n", n);
+	printf("hello-ppu-backfill: %zu stub-archive symbols anchored\n", n);
 	printf("  subdisplay  : Init=%p, End=%p\n",
 	       g_link_anchors[0], g_link_anchors[1]);
 	printf("  music       : Initialize=%p, Finalize=%p\n",

@@ -12,8 +12,8 @@
  *     - NVFX_VP_INST_LAST stamp on the final instruction
  *
  * Relocations, merged vec+sca slots, condition codes, branching, and
- * the temp/const register allocator are deliberately out of scope for
- * this skeleton — stage 3+ will add them as real Cg programs need.
+ * the temp/const register allocator get added as real Cg programs
+ * need them.
  */
 
 #include <cstdint>

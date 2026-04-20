@@ -1,9 +1,9 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-msgdialog — Second Phase 6 backfill sample.
+# hello-ppu-msgdialog — cellMsgDialogOpen2 smoke test.
 #
-# Opens a Sony-named cellMsgDialogOpen2 Yes/No dialog through PSL1GHT's
-# runtime via the <cell/msg_dialog.h> forwarder.  Waits for the user to
-# pick a button, prints the result.
+# Opens a cellMsgDialogOpen2 Yes/No dialog through PSL1GHT's runtime
+# via the <cell/msg_dialog.h> forwarder.  Waits for the user to pick a
+# button, prints the result.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 

@@ -2,7 +2,7 @@
  * NV40 back-end top-level dispatch.
  *
  * Routes the IRModule to the vertex- or fragment-program emitter.  The
- * per-stage emitters live in nv40_vp_emit.cpp / nv40_fp_emit.cpp.  This
+ * per-profile emitters live in nv40_vp_emit.cpp / nv40_fp_emit.cpp.  This
  * file exists so main.cpp only has to include one header.
  */
 

@@ -10,7 +10,7 @@
  * defaults so our byte-exact diff harness compares like-for-like
  * without requiring extra flags on either side of the test.
  *
- * Today's reality check (probed 2026-04-18 against SDK the reference SDK):
+ * Today's reality check (probed against a 3.55-4.75-era the reference SDK):
  *
  *   - Of the ~60 the reference compiler CLI flags, exactly ONE actually changes
  *     output on the shaders we emit:

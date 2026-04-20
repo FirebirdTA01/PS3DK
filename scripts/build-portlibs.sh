@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PS3 Custom Toolchain — Phase 4: portlibs
+# PS3 Custom Toolchain — portlibs
 #
 # Drives per-library recipes under scripts/portlibs/*.sh. Each recipe is
 # self-contained: it fetches its tarball, verifies checksum, applies patches

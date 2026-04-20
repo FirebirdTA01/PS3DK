@@ -1,11 +1,11 @@
 /*
  * hello-ppu-msgdialog — exercise cellMsgDialogOpen2 through PSL1GHT's
- * runtime.  Second Phase 6 backfill sample: opens a Yes/No dialog,
- * waits for the user to pick a button, prints which one they pressed.
+ * runtime.  Opens a Yes/No dialog, waits for the user to pick a
+ * button, prints which one they pressed.
  *
  * Exercises the <cell/msg_dialog.h> forwarder:
  *     cellMsgDialogOpen2  → msgDialogOpen2 → msgDialogOpen2Ex
- *     .rodata.sceFNID imports Sony FNID 0x7603d3db
+ *     .rodata.sceFNID imports FNID 0x7603d3db
  *
  * Runtime on RPCS3 / real HW:
  *   - A Yes/No system dialog appears with our prompt string.

@@ -7,7 +7,7 @@
  * back to begin but does not advance the PUT register to make the
  * JUMP visible to the GPU.  If the wrap fires at a moment when PUT
  * is already at the buffer end (which is what happens in the
- * sony-cube sample after ~140 frames of rendering), the GPU is idle
+ * spinning-cube test after ~140 frames of rendering), the GPU is idle
  * at PUT = GET = end, the callback spins in sys_timer_usleep
  * forever waiting for GET to wrap around, and the app deadlocks.
  *

@@ -1,6 +1,5 @@
 /*
- * hello-ppu-gamedata — Sony-SDK-source-compat cellGameBootCheck +
- * cellGameGetParamString probes.  Fifth Phase 6 backfill sample.
+ * hello-ppu-gamedata — cellGameBootCheck + cellGameGetParamString probes.
  *
  * cellGameBootCheck reports how the game was launched (disc, HDD,
  * patch, gamedata, app_home) and what attributes (debug, PS Store
@@ -8,7 +7,7 @@
  * cellGameGetParamString reads entries from the running PARAM.SFO —
  * title-ID, version, per-language titles.
  *
- * ELF imports Sony FNIDs:
+ * ELF imports FNIDs:
  *   cellGameBootCheck      0xf52639ea
  *   cellGameGetParamString 0x3a5d726a
  *   cellGameContentPermit  0x70acec67

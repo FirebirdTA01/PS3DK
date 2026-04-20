@@ -1,5 +1,5 @@
 /*
- * hello-ppu-cellgcm-cursor — Phase 7 step 4a HW-cursor sample.
+ * hello-ppu-cellgcm-cursor — HW-cursor sample.
  *
  * Validates the cellGcmInitCursor / SetCursor* family added in this
  * commit.  The PS3 RSX has a hardware cursor overlay that draws on top
@@ -211,7 +211,7 @@ int main(int argc, const char **argv)
 	padData              paddata;
 	CellGcmContextData  *ctx;
 
-	printf("hello-ppu-cellgcm-cursor: Phase 7 step-4a HW-cursor validation\n");
+	printf("hello-ppu-cellgcm-cursor: HW-cursor validation\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (!init_screen(host_addr, HOST_SIZE, &width, &height)) {

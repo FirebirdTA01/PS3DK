@@ -19,7 +19,7 @@ pub struct Library {
     pub module: String,
 
     /// Optional override for the archive filename basename (i.e. `lib<basename>_stub.a`).
-    /// When `None`, falls back to `library`. Needed where Sony's archive name diverges
+    /// When `None`, falls back to `library`. Needed where the archive name diverges
     /// from the runtime library name — e.g. `sysutil_screenshot` vs `cellScreenShotUtility`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive_name: Option<String>,
@@ -86,8 +86,9 @@ pub enum ImplStatus {
     /// or a hand-written replacement).  Signature parity not guaranteed;
     /// see `verified` for that.
     Impl,
-    /// Implementation exists AND has been checked against Sony's signature
-    /// and runtime behaviour (automated test, RPCS3 run, or hardware run).
+    /// Implementation exists AND has been checked against the reference
+    /// signature and runtime behaviour (automated test, RPCS3 run, or
+    /// hardware run).
     Verified,
 }
 

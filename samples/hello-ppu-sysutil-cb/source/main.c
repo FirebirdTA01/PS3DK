@@ -1,7 +1,7 @@
 /*
  * hello-ppu-sysutil-cb — exercise cellSysutilRegisterCallback over
- * PSL1GHT's runtime.  First Phase 6 backfill sample: Sony-named API
- * call, PSL1GHT SPRX dispatch underneath.
+ * PSL1GHT's runtime.  cellGcm-named API call, PSL1GHT SPRX dispatch
+ * underneath.
  *
  * Expected runtime behaviour on RPCS3:
  *   1. Program registers a callback in slot 0.
