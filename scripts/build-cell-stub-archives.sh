@@ -87,9 +87,28 @@ for yaml in "${STUB_YAMLS[@]}"; do
     # ppu_rules -L order places $PS3DK before $PSL1GHT), shadowing PSL1GHT's
     # legacy libgcm_sys.a entirely.  Samples then pull zero bytes from the
     # PSL1GHT tree for the GCM surface.
+    #
+    # We also fold in sdk/libgcm_sys_legacy/build/gcm_legacy_wrappers.o so
+    # the combined archive resolves both the Sony cellGcm* names (from
+    # nidgen) and the PSL1GHT gcm* names that <cell/gcm.h>'s static-inline
+    # forwarders still emit — until the cell-SDK-primary surface reaches
+    # everywhere and those forwarders go away.
     if [[ "$name" == "libgcm_sys_stub" ]]; then
-        install -m 0644 "${produced[0]}" "$INSTALL_LIB_PS3DK/libgcm_sys.a"
-        say "installed libgcm_sys.a -> $INSTALL_LIB_PS3DK/ (renamed from $(basename "${produced[0]}"))"
+        legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libgcm_sys_legacy"
+        say "building legacy-name wrappers (libgcm_sys_legacy)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" make -C "$legacy_dir" all >/dev/null
+        legacy_obj="$legacy_dir/build/gcm_legacy_wrappers.o"
+        [[ -f "$legacy_obj" ]] \
+            || die "legacy wrappers object missing after build: $legacy_obj"
+
+        target="$INSTALL_LIB_PS3DK/libgcm_sys.a"
+        # Start from the nidgen archive so its object layout is preserved,
+        # then ar-r the legacy wrappers on top.  'ar r' updates members in
+        # place, so reruns replace rather than duplicate.
+        install -m 0644 "${produced[0]}" "$target"
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
+        say "installed libgcm_sys.a -> $INSTALL_LIB_PS3DK/ (nidgen + legacy wrappers)"
     else
         install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
         say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
