@@ -94,6 +94,8 @@ The toolchain itself is targeted at running on **both Linux and Windows** for en
 
 ## Getting started
 
+### Host dependencies
+
 On CachyOS / Arch:
 ```bash
 sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl python rust \
@@ -107,29 +109,111 @@ sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build texinfo \
     git wget rustc cargo patch
 ```
 
-Then:
+### Building the toolchain + SDK
+
 ```bash
-# Activate the toolchain environment
+# Activate the toolchain environment (exports PS3DEV, PPU_PREFIX, ...)
 source ./scripts/env.sh
 
-# First-time setup (clones upstream + ps3dev repos)
+# First-time setup (clones upstream + ps3dev repos under src/).
 ./scripts/bootstrap.sh
 
-# Smoke test — binutils only
+# Smoke test — binutils only, both targets (~1 minute total).
 ./scripts/build-ppu-toolchain.sh --only binutils
 ./scripts/build-spu-toolchain.sh --only binutils
 
-# Full toolchain + PSL1GHT + portlibs
-# (each takes 10s of minutes; gcc-newlib is the longest)
+# Full toolchain + PSL1GHT + portlibs + our SDK.  Plan for roughly
+# 45–90 minutes on a modern multicore box; gcc-newlib is the longest
+# single step.
 ./scripts/build-ppu-toolchain.sh
 ./scripts/build-spu-toolchain.sh
 ./scripts/build-psl1ght.sh
 ./scripts/build-portlibs.sh
+./scripts/build-sdk.sh
 ```
 
-Both toolchain build scripts accept `--only <step>` (binutils | gcc-newlib | gdb | symlinks) and `--clean` to wipe intermediates.
+Both toolchain build scripts accept `--only <step>` (binutils | gcc-newlib | gdb | symlinks) and `--clean` to wipe intermediates before rebuilding.
 
-After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).
+After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).  Our own SDK headers and `libgcm_cmd.a` land under `$PS3DEV/psl1ght/ppu/` alongside the PSL1GHT runtime.
+
+### Verify the install
+
+```bash
+# Toolchain binaries respond with their version banner.
+$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc --version   # -> 12.4.0
+$PS3DEV/spu/bin/spu-elf-gcc         --version     # -> 9.5.0
+
+# SDK headers + libraries are in place.
+ls $PS3DEV/psl1ght/ppu/lib/libgcm_cmd.a
+ls $PS3DEV/psl1ght/ppu/include/cell/gcm.h
+```
+
+All four checks should succeed silently (or print the expected version).  If any fails, the corresponding build step didn't finish cleanly — rerun it with `--clean` to wipe stale intermediates.
+
+### Building and running samples
+
+Samples under `samples/` each build with `make` from inside their own directory:
+
+```bash
+cd samples/hello-ppu-c++17
+make
+# Produces: hello-ppu-c++17.elf / .self / .fake.self
+```
+
+Each sample produces three artefacts:
+
+| Artefact | Target | How to run |
+|---|---|---|
+| `<name>.elf` | raw PPU ELF | `ps3load` or GDB against RPCS3's gdbstub |
+| `<name>.self` | CEX-signed SELF | `rpcs3 --no-gui <name>.self` (boots on RPCS3 or signed hardware) |
+| `<name>.fake.self` | fake-signed SELF | `ps3load` / XMB install on CFW hardware |
+
+Quickest end-to-end check under RPCS3:
+
+```bash
+cd samples/hello-ppu-abi-check
+make
+rpcs3 --no-gui hello-ppu-abi-check.self
+# Stdout lands in ~/.cache/rpcs3/TTY.log — a clean run ends with
+#   result: PASS
+```
+
+`samples/README.md` has the full sample index plus per-sample notes on what each one validates.
+
+### Optional: Rust tooling
+
+The repo ships Rust CLIs under `tools/` that drive the stub-archive pipeline and the coverage report:
+
+- `nidgen` — NID extraction from reference stub archives, stub-archive emission, FNID verification.
+- `coverage-report` — cell-SDK export set vs. our install tree coverage matrix → `docs/coverage.md`.
+
+A normal toolchain + SDK + sample build doesn't need them.  Build them when you want to regenerate stub archives for non-PSL1GHT-backed sysutil libraries, or rerun the coverage report:
+
+```bash
+cd tools
+cargo build --release
+# Binaries land in tools/target/release/{nidgen,coverage-report}
+```
+
+Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub archives the declaration-only cell headers (libsysutil_screenshot, libsysutil_ap, libsysutil_music*, libl10n, …) need at link time:
+
+```bash
+./scripts/build-cell-stub-archives.sh
+```
+
+### Optional: rsx-cg-compiler (experimental)
+
+`tools/rsx-cg-compiler/` is a clean-room Cg → RSX (NV40) shader compiler we're growing as an eventual drop-in replacement for PSL1GHT's `cgcomp`.
+
+**It is experimental and not yet feature-complete.** Simple vertex-passthrough, fragment-arithmetic, TXP, samplerCube, and Select shaders round-trip cleanly today; loops, length / normalize / rcp / rsqrt lowering, and various higher-order operators are in progress.  For now, production shader builds should stick with PSL1GHT's `cgcomp`; the `hello-ppu-cellgcm-triangle` sample can opt into the experimental compiler with `make USE_RSX_CG_COMPILER=1` as a smoke test.
+
+To build it:
+
+```bash
+cmake -B tools/rsx-cg-compiler/build -S tools/rsx-cg-compiler
+cmake --build tools/rsx-cg-compiler/build
+# Binary: tools/rsx-cg-compiler/build/rsx-cg-compiler
+```
 
 ## Layout
 
