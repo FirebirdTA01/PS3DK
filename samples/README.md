@@ -3,9 +3,9 @@
 Minimal programs that exercise the toolchain, PSL1GHT, and reference-cell-SDK
 ABI conformance.  One concept per sample; big examples go elsewhere.
 
-Samples are grouped by subsystem so the tree stays navigable as it grows.
-New subsystems (audio, pad, network, video, spurs, …) will get their own
-subdirectory when the first sample for them lands.
+Samples are grouped by subsystem.  New subsystems (audio, pad, network,
+video, spurs, …) will get their own subdirectory when the first sample
+for them lands.
 
 ## Layout
 
