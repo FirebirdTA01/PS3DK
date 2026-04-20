@@ -152,55 +152,53 @@ encoding on both targets.
 
 ---
 
-## <cell/dbgfont.h> tier-1 stub redirects to TTY; real on-screen renderer TBD
+## <cell/dbgfont.h> on-screen renderer — per-glyph rotation pending
 
-**Status:** tier-1 done (text visible in RPCS3.log), tier-2 (on-screen
-text overlay) deferred.
+**Status:** tier-2 shipped.  `sdk/libdbgfont/libdbgfont.a` draws real
+text over the frame via NV40 through the native `cellGcm*` surface
+(128×128 alpha atlas, passthrough VP + alpha-kill FP compiled by
+cgcomp, 8-bit unit remapped to RGBA, QUADS draws).  Header is now
+pure declarations; samples link `-ldbgfont`.  Verified in
+`samples/gcm/hello-ppu-dbgfont` with rainbow / pulse / rigid-word-
+spin animations.
 
-**Tier-1 — what's implemented today.**
-`sdk/include/cell/dbgfont.h` routes `cellDbgFontPuts` / Printf to
-stdout with a tagged prefix:
+**Enhancement — `cellDbgFontPutsRotated`.**  The current Printf/Puts
+API emits axis-aligned quads, so callers can rotate where a *word*
+sits on screen (reposition each letter along a rotating direction
+vector — what the dbgfont sample's SPIN line does) but cannot tilt
+the *glyphs themselves*.  The natural extension is a new entry:
 
-    [dbgfont 0.05,0.10 s=1.00 #ff00ffff] Drawing Time = 2.3450 msec
+```c
+int32_t cellDbgFontPutsRotated(float x, float y, float scale,
+                               float angle_rad,
+                               uint32_t color, const char *s);
+```
 
-— which lands in RPCS3's TTY.log.  `cellDbgFontInitGcm` / ExitGcm
-/ DrawGcm remain no-ops: Printf/Puts already flushed the text
-inline, so there's nothing per-frame to draw yet.  Sample source
-that writes debug overlays via Printf now produces visible output
-without an on-screen renderer.
+Implementation shape (in `sdk/libdbgfont/src/dbgfont.c`):
 
-**Tier-2 — plan.**
-Port PSL1GHT's `samples/graphics/debugfont_renderer/` as a proper
-`libdbgfont.a`.  The inputs it needs are all already in our tree:
+1. Compute `cosθ, sinθ` once per call.
+2. For each glyph, compute the four quad corners relative to the
+   glyph's local pivot, rotate each by `(cosθ, sinθ)`, then add the
+   glyph's anchor point in screen NDC.  The quad becomes a rotated
+   parallelogram instead of an axis-aligned rectangle — same UV
+   assignments as today, different positions.
+3. Advance the horizontal layout cursor in the word's local frame
+   (rotated basis), so successive glyphs stay neighbours even when
+   the whole string is tilted.
+4. Factor `append_glyph` so Puts (no rotation) and PutsRotated share
+   the UV / color / pool-push bookkeeping — only the four positions
+   differ.
 
-- Font bitmap — `samples/graphics/debugfont_renderer/source/
-  debugfontdata.h` (1373-line static array, 8-bit alpha, 128×128
-  atlas, printable ASCII).
-- Vertex-program source — `.../shaders/vpshader_dbgfont.vcg`
-  (passthrough: pos/color/texcoord → NDC with identity transform).
-- Fragment-program source — `.../shaders/fpshader_dbgfont.fcg`
-  (tex2D .w → if > 0.5 emit vertex color, else discard alpha).
+No shader changes needed — the rotation happens on CPU in the vertex
+write-out, and the existing passthrough VP carries the already-rotated
+positions straight to NDC.  Aspect-ratio correction for non-square
+screens is the caller's responsibility (same as the word-rotation
+pattern in the sample) unless we want to bake in a screen-aspect
+uniform; keeping it explicit keeps the API orthogonal.
 
-Steps:
-
-1. New `sdk/libdbgfont/` directory with the font data + shaders
-   copied in, plus a Makefile that compiles the shaders through
-   sce-cgc (same path the reference samples use) or our own
-   `rsx-cg-compiler` and embeds them as C byte arrays.
-2. Rewrite PSL1GHT's C++ renderer as C, swapping the rsx* calls
-   for the corresponding cellGcm* names that already exist in our
-   SDK (`cellGcmSetTexture`, `cellGcmSetVertexDataArray`,
-   `cellGcmSetDrawArrays`, etc.).
-3. Move the `<cell/dbgfont.h>` function bodies out of the header
-   and into the library; header becomes pure declarations.
-4. Update `sdk/Makefile` to treat `libdbgfont` as a sublib
-   alongside `libgcm_cmd`.
-5. Samples that want real overlay text link `-ldbgfont` in addition
-   to `-lgcm_cmd -lrsx ...`.
-
-Accept/test criteria: port a reference sample that uses Printf (cube,
-alphakill) with the tier-2 library and confirm the overlay text
-draws on top of the frame in RPCS3.
+Follow-up after this: add `cellDbgFontPrintfRotated` (va_list form)
+and optionally a pivot-offset variant for rotating around a glyph-
+local anchor other than the baseline.
 
 ---
 
