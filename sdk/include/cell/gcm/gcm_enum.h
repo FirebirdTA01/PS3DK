@@ -76,12 +76,21 @@ extern "C" {
 #define CELL_GCM_VERTEX_UB               GCM_VERTEX_DATA_TYPE_U8
 #define CELL_GCM_VERTEX_F                GCM_VERTEX_DATA_TYPE_F32
 /* Additional cell-SDK-named vertex-data types verified against the
- * reference cell SDK's gcm_enum.h (CELL_GCM_VERTEX_S32K = 5).  PSL1GHT
- * only defines F32=2 and U8=4 — these fill in the gaps NV40 supports. */
-#define CELL_GCM_VERTEX_S1               (1)
-#define CELL_GCM_VERTEX_SF               (3)
-#define CELL_GCM_VERTEX_CMP              (5)
-#define CELL_GCM_VERTEX_S32K             (5)
+ * reference cell SDK's gcm_enum.h.  PSL1GHT only aliased F32=2 and
+ * U8=4 — NV40 supports more element kinds. */
+#define CELL_GCM_VERTEX_S1               (1)   /* signed 16-bit normalised */
+#define CELL_GCM_VERTEX_SF               (3)   /* half float (16-bit) */
+#define CELL_GCM_VERTEX_S32K             (5)   /* signed 16-bit scaled "keep" */
+#define CELL_GCM_VERTEX_CMP              (6)   /* s11_11_10 packed */
+#define CELL_GCM_VERTEX_UB256            (7)   /* unsigned byte * 256 */
+/* Long-form aliases matching the reference cell SDK's alt names. */
+#define CELL_GCM_VERTEX_S16_NR           CELL_GCM_VERTEX_S1
+#define CELL_GCM_VERTEX_F32              CELL_GCM_VERTEX_F
+#define CELL_GCM_VERTEX_F16              CELL_GCM_VERTEX_SF
+#define CELL_GCM_VERTEX_U8_NR            CELL_GCM_VERTEX_UB
+#define CELL_GCM_VERTEX_S16_UN           CELL_GCM_VERTEX_S32K
+#define CELL_GCM_VERTEX_S11_11_10_NR     CELL_GCM_VERTEX_CMP
+#define CELL_GCM_VERTEX_U8_UN            CELL_GCM_VERTEX_UB256
 
 /* Draw-index array element size (cellGcmSetDrawIndexArray). */
 #define CELL_GCM_DRAW_INDEX_ARRAY_TYPE_32   (0)

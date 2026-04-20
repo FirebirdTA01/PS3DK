@@ -12,11 +12,16 @@ next surface.
 **Status:** works correctly (no hangs, no desync), but drops the
 occasional frame on a wrap.
 
-**Symptom.** The `spinning-cube` sample runs indefinitely with our native
-wrap callback, but exhibits an occasional mild flicker — one dropped
-frame each time the command FIFO wraps. In practice this lands
-roughly every ~1.25 s at 60 fps with the sample's default
-`CB_SIZE = 0x10000` (64 KB) and ~800 FIFO bytes per frame.
+**Symptom.** All ported samples that exercise the FIFO wrap path
+(`spinning-cube`, the textured-quad port, every other
+cellGcm-driven render with CB_SIZE around 64 KB) run indefinitely
+with our native wrap callback, but exhibit an occasional mild
+flicker — one dropped frame each time the command FIFO wraps. In
+practice this lands roughly every ~1.25 s at 60 fps with the
+sample's default `CB_SIZE = 0x10000` (64 KB) and ~800 FIFO bytes
+per frame.  The failure mode is SDK-wide, not sample-specific:
+any draw-loop that issues enough FIFO commands to wrap the ring
+triggers the drain-wait spin.
 
 **Where it is.** `sdk/libgcm_cmd/src/ps3tc_fifo_wrap.c` —
 `ps3tc_fifo_wrap_callback`. It's a single-buffer in-place wrap:

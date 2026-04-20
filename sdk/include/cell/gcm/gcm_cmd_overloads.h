@@ -143,9 +143,10 @@ static inline void cellGcmSetUserClipPlaneControl(uint32_t plane0, uint32_t plan
 static inline void cellGcmSetDrawArrays(uint32_t type, uint32_t start, uint32_t count)
 { cellGcmSetDrawArrays(gCellGcmCurrentContext, type, start, count); }
 
-static inline void cellGcmSetDrawIndexArray(uint8_t type, uint32_t offset, uint32_t count,
-                                            uint8_t data_type, uint8_t location)
-{ cellGcmSetDrawIndexArray(gCellGcmCurrentContext, type, offset, count, data_type, location); }
+static inline void cellGcmSetDrawIndexArray(uint8_t mode, uint32_t count,
+                                            uint8_t type, uint8_t location,
+                                            uint32_t indicies)
+{ cellGcmSetDrawIndexArray(gCellGcmCurrentContext, mode, count, type, location, indicies); }
 
 static inline void cellGcmSetDrawBegin(uint32_t type)
 { cellGcmSetDrawBegin(gCellGcmCurrentContext, type); }

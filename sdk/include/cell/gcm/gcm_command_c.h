@@ -351,11 +351,17 @@ static inline void cellGcmSetDrawArrays(CellGcmContextData *thisContext,
 	rsxDrawVertexArray(thisContext, type, start, count);
 }
 
+/* Sony signature: (mode, count, type, location, indicies).
+ * PSL1GHT:        (type, offset, count, data_type, location).
+ * Shuffle the args so Sony callers end up calling rsxDrawIndexArray
+ * with the order PSL1GHT expects — the positional mismatch otherwise
+ * pipes `count` into `offset`'s slot and draws zero quads. */
 static inline void cellGcmSetDrawIndexArray(CellGcmContextData *thisContext,
-                                            uint8_t type, uint32_t offset, uint32_t count,
-                                            uint8_t data_type, uint8_t location)
+                                            uint8_t mode, uint32_t count,
+                                            uint8_t type, uint8_t location,
+                                            uint32_t indicies)
 {
-	rsxDrawIndexArray(thisContext, type, offset, count, data_type, location);
+	rsxDrawIndexArray(thisContext, mode, indicies, count, type, location);
 }
 
 static inline void cellGcmSetDrawBegin(CellGcmContextData *thisContext, uint32_t type)
