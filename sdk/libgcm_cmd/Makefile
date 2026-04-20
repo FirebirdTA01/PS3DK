@@ -27,6 +27,14 @@ OBJ_DIR  := build
 SRCS     := $(wildcard $(SRC_DIR)/*.c)
 OBJS     := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
+# Absorbed rsx emitters (source-level snapshot of PSL1GHT's librsx,
+# MIT-licensed — see src/rsx_legacy/LICENSE).  These land in the same
+# libgcm_cmd.a so samples drop -lrsx and match the Sony SDK's layout
+# (one libgcm_cmd.a, no separate rsx library).
+LEGACY_DIR  := $(SRC_DIR)/rsx_legacy
+LEGACY_SRCS := $(wildcard $(LEGACY_DIR)/*.c)
+LEGACY_OBJS := $(patsubst $(LEGACY_DIR)/%.c,$(OBJ_DIR)/rsx_legacy_%.o,$(LEGACY_SRCS))
+
 ARCHIVE        := $(OBJ_DIR)/libgcm_cmd.a
 INSTALL_LIB    := $(PS3DEV)/psl1ght/ppu/lib
 INSTALL_INC    := $(PS3DEV)/psl1ght/ppu/include
@@ -35,12 +43,36 @@ INSTALL_INC    := $(PS3DEV)/psl1ght/ppu/include
 
 all: $(ARCHIVE)
 
-$(ARCHIVE): $(OBJS)
+$(ARCHIVE): $(OBJS) $(LEGACY_OBJS)
 	$(AR) $(ARFLAGS) $@ $^
 	$(RANLIB) $@
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# rsx_legacy needs PSL1GHT's internal header layout: its commands.c
+# includes <nv40.h> bare (not <rsx/nv40.h>) and expects LIBRSX_INTERNAL
+# defined to unlock the function-pointer side of rsxSetUserCallback.
+# Match PSL1GHT's librsx build flags exactly so the absorbed objects are
+# ABI-identical to what librsx.a shipped — same float ABI (-mhard-float),
+# same codegen (-fmodulo-sched, -ffunction-sections, -fdata-sections),
+# same dialect.  A mismatch on -mhard-float against the rest of the
+# runtime caused flip-sync samples to stutter badly after absorption
+# until this was aligned.  -std=gnu11 unlocks the `register ... asm("r3")`
+# extension in rsx_function_macros.h; -Wno-implicit-{fallthrough,
+# function-declaration} silence known-intentional warnings in
+# commands_impl.h.
+LEGACY_CFLAGS := -O2 -Wall -mcpu=cell -mregnames -Wa,-mcell -std=gnu11 \
+                 -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections \
+                 -Wno-unused-parameter -Wno-implicit-fallthrough \
+                 -Wno-implicit-function-declaration \
+                 -I$(PS3DEV)/psl1ght/ppu/include \
+                 -I$(PS3DEV)/psl1ght/ppu/include/rsx \
+                 -Iinclude \
+                 -DLIBRSX_INTERNAL
+
+$(OBJ_DIR)/rsx_legacy_%.o: $(LEGACY_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(LEGACY_CFLAGS) -c -o $@ $<
 
 $(OBJ_DIR):
 	@mkdir -p $@
