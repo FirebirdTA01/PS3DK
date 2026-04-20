@@ -75,6 +75,42 @@ extern "C" {
  * alias what the runtime can actually handle. */
 #define CELL_GCM_VERTEX_UB               GCM_VERTEX_DATA_TYPE_U8
 #define CELL_GCM_VERTEX_F                GCM_VERTEX_DATA_TYPE_F32
+/* Additional cell-SDK-named vertex-data types verified against the
+ * reference cell SDK's gcm_enum.h (CELL_GCM_VERTEX_S32K = 5).  PSL1GHT
+ * only defines F32=2 and U8=4 — these fill in the gaps NV40 supports. */
+#define CELL_GCM_VERTEX_S1               (1)
+#define CELL_GCM_VERTEX_SF               (3)
+#define CELL_GCM_VERTEX_CMP              (5)
+#define CELL_GCM_VERTEX_S32K             (5)
+
+/* Draw-index array element size (cellGcmSetDrawIndexArray). */
+#define CELL_GCM_DRAW_INDEX_ARRAY_TYPE_32   (0)
+#define CELL_GCM_DRAW_INDEX_ARRAY_TYPE_16   (1)
+
+/* Polygon-fill mode (cellGcmSetFront/BackPolygonMode). */
+#define CELL_GCM_POLYGON_MODE_POINT      (0x1B00)
+#define CELL_GCM_POLYGON_MODE_LINE       (0x1B01)
+#define CELL_GCM_POLYGON_MODE_FILL       (0x1B02)
+
+/* Debug-output verbosity tags (cellGcmSetDebugOutputLevel). */
+#define CELL_GCM_DEBUG_LEVEL0            (0)
+#define CELL_GCM_DEBUG_LEVEL1            (1)
+#define CELL_GCM_DEBUG_LEVEL2            (2)
+
+/* Additional tile / surface alignment constants beyond what's aliased
+ * further below.  Values match PSL1GHT's GCM_* (verified). */
+#define CELL_GCM_TILE_ALIGN_BUFFER_START_BOUNDARY  GCM_TILE_ALIGN_BUFFER_START_BOUNDARY
+#define CELL_GCM_TILE_LOCAL_ALIGN_HEIGHT           GCM_TILE_LOCAL_ALIGN_HEIGHT
+#define CELL_GCM_SURFACE_LINEAR_ALIGN_OFFSET       GCM_SURFACE_LINEAR_ALIGN_OFFSET
+
+/* Texture remap field helper — the cell SDK builds the u32 remap value
+ * inline via this macro; PSL1GHT exposes individual bit constants and
+ * the user assembles them.  Provide the cell-SDK helper verbatim — it
+ * just packs its nine 2-bit args into the canonical layout. */
+#define CELL_GCM_REMAP_MODE(order, inputA, inputR, inputG, inputB, outputA, outputR, outputG, outputB) \
+    (((order) << 16) | ((inputA)) | ((inputR) << 2) | ((inputG) << 4) | \
+     ((inputB) << 6) | ((outputA) << 8) | ((outputR) << 10) | \
+     ((outputG) << 12) | ((outputB) << 14))
 
 /* Surface / framebuffer format + target tags (cellGcmSetSurface). */
 #define CELL_GCM_SURFACE_A8R8G8B8        GCM_SURFACE_A8R8G8B8
