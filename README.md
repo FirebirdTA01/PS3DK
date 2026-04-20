@@ -133,9 +133,11 @@ source ./scripts/env.sh
 ./scripts/build-ppu-toolchain.sh --only binutils
 ./scripts/build-spu-toolchain.sh --only binutils
 
-# Full toolchain + PSL1GHT + portlibs + our SDK.  Plan for roughly
-# 45–90 minutes on a modern multicore box; gcc-newlib is the longest
-# single step.
+# Full toolchain + PSL1GHT + portlibs + our SDK.
+#
+# ** Heads-up: this takes a while. **  Bootstrapping GCC+newlib twice
+# (once for PPU, once for SPU) is CPU-bound and is the bulk of the
+# wait.  Kick it off and go do something else.
 ./scripts/build-ppu-toolchain.sh
 ./scripts/build-spu-toolchain.sh
 ./scripts/build-psl1ght.sh
