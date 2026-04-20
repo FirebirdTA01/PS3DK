@@ -18,6 +18,7 @@ PS3DEV   ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 
 CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -mcpu=cell -std=c11 \
+            -I$(PS3DK)/ppu/include \
             -I$(PS3DEV)/psl1ght/ppu/include \
             -Iinclude
 ARFLAGS  := rcs
@@ -36,8 +37,9 @@ LEGACY_SRCS := $(wildcard $(LEGACY_DIR)/*.c)
 LEGACY_OBJS := $(patsubst $(LEGACY_DIR)/%.c,$(OBJ_DIR)/rsx_legacy_%.o,$(LEGACY_SRCS))
 
 ARCHIVE        := $(OBJ_DIR)/libgcm_cmd.a
-INSTALL_LIB    := $(PS3DEV)/psl1ght/ppu/lib
-INSTALL_INC    := $(PS3DEV)/psl1ght/ppu/include
+PS3DK          ?= $(PS3DEV)/ps3dk
+INSTALL_LIB    := $(PS3DK)/ppu/lib
+INSTALL_INC    := $(PS3DK)/ppu/include
 
 .PHONY: all install clean
 
@@ -66,6 +68,7 @@ LEGACY_CFLAGS := -O2 -Wall -mcpu=cell -mregnames -Wa,-mcell -std=gnu11 \
                  -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections \
                  -Wno-unused-parameter -Wno-implicit-fallthrough \
                  -Wno-implicit-function-declaration \
+                 -I$(PS3DK)/ppu/include \
                  -I$(PS3DEV)/psl1ght/ppu/include \
                  -I$(PS3DEV)/psl1ght/ppu/include/rsx \
                  -Iinclude \
@@ -86,7 +89,7 @@ install: $(ARCHIVE)
 	@install -d $(INSTALL_INC)/cell/gcm
 	install -m 0644 include/cell/gcm/gcm_cg_func.h    $(INSTALL_INC)/cell/gcm/gcm_cg_func.h
 	install -m 0644 include/cell/gcm/ps3tc_fifo_wrap.h $(INSTALL_INC)/cell/gcm/ps3tc_fifo_wrap.h
-	@echo "installed libgcm_cmd.a + headers under $(PS3DEV)/psl1ght/ppu/"
+	@echo "installed libgcm_cmd.a + headers under $(PS3DK)/ppu/"
 
 clean:
 	rm -rf $(OBJ_DIR)
