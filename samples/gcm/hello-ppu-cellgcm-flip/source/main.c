@@ -33,8 +33,10 @@
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
-#define CB_SIZE              0x10000
-#define HOST_SIZE            (1 * 1024 * 1024)
+/* 1 MB / 32 MB so the FIFO wrap is rare; see docs/known-issues.md
+ * for the wrap-stutter discussion. */
+#define CB_SIZE              0x100000
+#define HOST_SIZE            (32 * 1024 * 1024)
 #define COLOR_BUFFER_NUM     4
 #define MAX_QUEUE_FRAMES     2
 
