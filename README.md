@@ -1,6 +1,6 @@
 # PS3 Custom Toolchain
 
-A modern, open-source toolchain and SDK for the PlayStation 3, supporting **C++17** on both the PowerPC 64 PPU (PPE) and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine.
+A modern, open-source toolchain and SDK for the PlayStation 3, supporting **C++20** on the PowerPC 64 PPU (PPE) and **C++17** on both the PPE and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine.
 
 Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebased onto current-generation compilers, with auto-generated stub libraries driven by a NID/FNID database and a ≥95% coverage target against the reference cell-SDK surface for the subsystems homebrew actually uses.
 
