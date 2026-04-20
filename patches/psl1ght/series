@@ -4,5 +4,3 @@
 0004-librt-ansi-compat-macros.patch
 0005-ps3load-stdbool.patch
 0006-ps3py-gcc-direct.patch
-0010-own-sys-stat-header.patch
-0021-sys-lv2-sync-compat-shims.patch
