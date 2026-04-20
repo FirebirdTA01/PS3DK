@@ -1,4 +1,4 @@
-# rsx-cg-compiler — Phase 8 Cg → NV40 compiler
+# rsx-cg-compiler — Cg → NV40 compiler
 #
 # Self-contained build: all donor front-end sources are copied into
 # tools/rsx-cg-compiler/src/donor/ rather than referenced from a sibling
@@ -8,7 +8,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(rsx-cg-compiler
     LANGUAGES CXX
-    DESCRIPTION "PS3 Cg-to-RSX (NV40) shader compiler (Sony binary-compat)")
+    DESCRIPTION "PS3 Cg-to-RSX (NV40) shader compiler (CgBinaryProgram compat)")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -89,11 +89,11 @@ set(SRC_NV40
     ${NV40_DIR}/nv40_if_convert.cpp
 )
 
-# Sony container emitter — wraps NV40 ucode in a CgBinaryProgram
+# Cg-binary container emitter — wraps NV40 ucode in a CgBinaryProgram
 # (.fpo / .vpo) so the runtime can consume it via cellGcmCgInitProgram.
 set(SRC_CONTAINER
-    ${SRC_DIR}/sony_container_fp.cpp
-    ${SRC_DIR}/sony_container_vp.cpp
+    ${SRC_DIR}/cg_container_fp.cpp
+    ${SRC_DIR}/cg_container_vp.cpp
 )
 
 # Driver / entry point.

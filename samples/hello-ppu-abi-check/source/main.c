@@ -1,15 +1,12 @@
 /*
- * hello-ppu-sony-abi — Sony reference SDK ABI cross-check.
+ * hello-ppu-abi-check — reference cell SDK ABI cross-check.
  *
- * Verifies three concrete pieces of ABI alignment between our toolchain
- * output and what Sony's PS3 loader expects:
+ * Verifies four concrete pieces of ABI alignment between our toolchain
+ * output and what the PS3 loader expects:
  *
  *   1. A .sys_proc_param section is emitted, 8-byte aligned, containing
  *      a 36-byte struct with magic=0x13bcc5f6, version=0x00330000, and
- *      a trailing crash_dump_param_addr word.  This now uses PSL1GHT's
- *      native SYS_PROCESS_PARAM macro from <sys/process.h> — the
- *      previously-separate <sys/sony_process_param.h> shim has been
- *      retired in favour of making the PSL1GHT header Sony-correct.
+ *      a trailing crash_dump_param_addr word.
  *
  *   2. newlib's malloc / free / calloc / realloc work through the
  *      libsysbase sbrk_r dispatch layer.  Anything that compiles here
@@ -26,7 +23,7 @@
  *      asm with a R_PPC64_ADDR32 relocation against the (weak) callback
  *      symbol — defining the symbol here in the sample makes the
  *      relocation resolve to a real address; omitting it leaves the
- *      field at 0 (Sony's "no callback" value).
+ *      field at 0 (the "no callback" value).
  *
  * This sample is intentionally a C file (not C++) so any libstdc++
  * entanglement is isolated in hello-ppu-c++17 and cannot mask a pure-
@@ -84,7 +81,7 @@ static int check_proc_param(void)
 	/* Confirm the crash-dump relocation actually fired.  The 32-bit field
 	 * should hold the low 32 bits of __sys_process_crash_dump_param's OPD
 	 * descriptor address.  If the relocation silently filled in 0 instead,
-	 * task #7's mechanism has regressed. */
+	 * the crash-dump relocation mechanism has regressed. */
 	uintptr_t cb_addr = (uintptr_t)&__sys_process_crash_dump_param;
 	uint32_t  expected_crash = (uint32_t)cb_addr;
 	if (__sys_process_param.crash_dump_param_addr != expected_crash) {
@@ -138,7 +135,7 @@ int main(int argc, char **argv)
 	(void)argc;
 	(void)argv;
 
-	printf("hello-ppu-sony-abi\n");
+	printf("hello-ppu-abi-check\n");
 
 	printf("proc_param:\n");
 	int param_ok = check_proc_param();

@@ -8,7 +8,7 @@
  * the donor front-end and returns raw ucode words plus diagnostics.
  * The container format (.fpo/.vpo — CellCgbVertexProgramConfiguration
  * / CellCgbFragmentProgramConfiguration) is produced by a separate
- * sony_container_* layer once emit is stable.
+ * cg_container_* layer once emit is stable.
  */
 
 #include <cstdint>

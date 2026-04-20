@@ -1,7 +1,7 @@
 /*
- * Sony .vpo (CgBinaryProgram + CgBinaryVertexProgram) emitter.
+ * .vpo (CgBinaryProgram + CgBinaryVertexProgram) emitter.
  *
- * Layout mirrors sony_container_fp.cpp; see that file for the section
+ * Layout mirrors cg_container_fp.cpp; see that file for the section
  * map and alignment rules.  Only the differences are noted here:
  *
  *   - Subtype `CgBinaryVertexProgram` (cgBinary.h): 6 u32 fields,
@@ -34,13 +34,13 @@
  *     the same paramno.
  *
  * Bails out when entry parameters look struct-flattened (single
- * `void` param + ldattr/stout in the IR) — sce-cgc names struct
- * fields as `<param>.<field>` and `<func>.<field>`, which our
- * front-end doesn't yet preserve.  The diff harness falls back to
- * ucode-only diff for those shaders.
+ * `void` param + ldattr/stout in the IR) — the reference compiler
+ * names struct fields as `<param>.<field>` and `<func>.<field>`,
+ * which our front-end doesn't yet preserve.  The diff harness falls
+ * back to ucode-only diff for those shaders.
  */
 
-#include "sony_container_vp.h"
+#include "cg_container_vp.h"
 #include "nv40/nv40_emit.h"
 
 #include "ir.h"
@@ -50,7 +50,7 @@
 #include <cstring>
 #include <unordered_map>
 
-namespace sony
+namespace cg_container
 {
 
 namespace
@@ -167,7 +167,7 @@ VpContainerResult emitVertexContainer(
     if (!entry)
     {
         result.diagnostics.push_back(
-            "sony-vp: entry '" + entryName + "' not in IR module");
+            "cg-container-vp: entry '" + entryName + "' not in IR module");
         return result;
     }
 
@@ -428,7 +428,7 @@ VpContainerResult emitVertexContainer(
     if (out.size() != totalSize)
     {
         result.diagnostics.push_back(
-            "sony-vp: emitted " + std::to_string(out.size()) +
+            "cg-container-vp: emitted " + std::to_string(out.size()) +
             " bytes, expected " + std::to_string(totalSize));
         return result;
     }
@@ -437,4 +437,4 @@ VpContainerResult emitVertexContainer(
     return result;
 }
 
-}  // namespace sony
+}  // namespace cg_container

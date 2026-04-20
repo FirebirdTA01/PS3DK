@@ -1,8 +1,8 @@
-#ifndef RSX_CG_COMPILER_SONY_CONTAINER_VP_H
-#define RSX_CG_COMPILER_SONY_CONTAINER_VP_H
+#ifndef RSX_CG_COMPILER_CG_CONTAINER_VP_H
+#define RSX_CG_COMPILER_CG_CONTAINER_VP_H
 
 /*
- * Sony .vpo (CgBinaryProgram) emitter for vertex programs.
+ * .vpo (CgBinaryProgram) emitter for vertex programs.
  *
  * Same pattern as the FP container: header + parameter table +
  * strings + CgBinaryVertexProgram subtype + ucode, all big-endian
@@ -20,7 +20,7 @@
  *     u32 fields — instructionCount, instructionSlot, registerCount,
  *     attributeInputMask, attributeOutputMask, userClipMask.
  *
- * sce-cgc cross-checked: 2026-04-18 against const_out_v.vpo,
+ * Reference-compiler cross-checked against const_out_v.vpo,
  * add_uniforms_v.vpo, mvp_passthrough_v.vpo, and probe_tc_v.vpo.
  */
 
@@ -32,7 +32,7 @@ class IRModule;
 
 namespace nv40 { struct VpAttributes; }
 
-namespace sony
+namespace cg_container
 {
 
 struct VpContainerResult
@@ -48,6 +48,6 @@ VpContainerResult emitVertexContainer(
     const std::vector<uint32_t>& ucode,
     const nv40::VpAttributes&    attrs);
 
-}  // namespace sony
+}  // namespace cg_container
 
-#endif  /* RSX_CG_COMPILER_SONY_CONTAINER_VP_H */
+#endif  /* RSX_CG_COMPILER_CG_CONTAINER_VP_H */

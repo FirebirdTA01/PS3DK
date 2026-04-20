@@ -1,19 +1,16 @@
-#ifndef RSX_CG_COMPILER_SONY_CONTAINER_FP_H
-#define RSX_CG_COMPILER_SONY_CONTAINER_FP_H
+#ifndef RSX_CG_COMPILER_CG_CONTAINER_FP_H
+#define RSX_CG_COMPILER_CG_CONTAINER_FP_H
 
 /*
- * Sony .fpo (CgBinaryProgram) emitter for fragment programs.
+ * .fpo (CgBinaryProgram) emitter for fragment programs.
  *
  * Produces the byte-exact container that wraps an NV40 FP ucode blob:
  * a CgBinaryProgram header, a CgBinaryParameter table, a string region,
  * and a CgBinaryFragmentProgram subtype, each laid out per
- * cgBinary.h's documented offsets.  The header / param / subtype
- * field semantics + byte layout are recorded in
- * docs/REVERSE_ENGINEERING.md, "CgBinaryProgram header layout" and
- * "CgBinaryParameter layout" sections.
+ * cgBinary.h's documented offsets.
  *
- * sce-cgc cross-checked: 2026-04-18 against identity_f.cg and
- * tex_f.cg .fpo dumps from SDK 475.001's sce-cgc.exe.
+ * Reference-compiler cross-checked against identity_f.cg and tex_f.cg
+ * .fpo dumps.
  */
 
 #include <cstdint>
@@ -24,7 +21,7 @@ class IRModule;
 
 namespace nv40 { struct FpAttributes; }
 
-namespace sony
+namespace cg_container
 {
 
 struct ContainerResult
@@ -49,6 +46,6 @@ ContainerResult emitFragmentContainer(
     const nv40::FpAttributes&   attrs,
     const ContainerOptions&     opts = {});
 
-}  // namespace sony
+}  // namespace cg_container
 
-#endif  /* RSX_CG_COMPILER_SONY_CONTAINER_FP_H */
+#endif  /* RSX_CG_COMPILER_CG_CONTAINER_FP_H */

@@ -1,9 +1,8 @@
 /*
- * rsx-cg-compiler — Phase 8 Cg → RSX (NV40) compiler driver.
+ * rsx-cg-compiler — Cg → RSX (NV40) compiler driver.
  *
- * Stage 2 (in progress): front-end + IR pipeline wired.  Parses through
- * preprocessor + lexer + parser, runs semantic analysis, builds the
- * hardware-agnostic IRModule.  NV40 lowering + ucode emit land next.
+ * Parses through preprocessor + lexer + parser, runs semantic analysis,
+ * builds the hardware-agnostic IRModule, then lowers + emits NV40 ucode.
  */
 
 #include <cstdio>
@@ -25,16 +24,15 @@
 #include "nv40/nv40_emit.h"
 #include "nv40/nv40_if_convert.h"
 #include "compile_options.h"
-#include "sony_container_fp.h"
-#include "sony_container_vp.h"
+#include "cg_container_fp.h"
+#include "cg_container_vp.h"
 
 namespace
 {
 
-// Stage 1 carries its own minimal context.  We deliberately do NOT pull
-// in the donor's CompilerContext because compiler_options.h transitively
-// drags the USSE back-end types (UsseProgram lives in lowering.h).
-// Our NV40-targeted context will live in a separate header in Stage 2.
+// Minimal driver context.  We deliberately do NOT pull in the donor's
+// CompilerContext because compiler_options.h transitively drags the
+// USSE back-end types (UsseProgram lives in lowering.h).
 struct CompilerContext
 {
     std::string              inputFile;
@@ -48,8 +46,8 @@ struct CompilerContext
 
     rsx_cg::CompileOptions   compileOpts;       // --O0..O3 / --fastmath etc.
 
-    // Populated by runPreprocessor — Sony Cg pragma surface that the
-    // lexer drops before it reaches the parser.
+    // Populated by runPreprocessor — Cg pragma surface that the lexer
+    // drops before it reaches the parser.
     std::vector<std::string> alphakillSamplers;
 };
 
@@ -65,12 +63,12 @@ void usage()
         "  -e, --entry <name>     Entry function (default: main)\n"
         "  -I <dir>               Add include directory\n"
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
-        "  --emit-container <p>   Write the Sony .vpo/.fpo container to <p> (binary)\n"
+        "  --emit-container <p>   Write the .vpo/.fpo container to <p> (binary)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
         "  -h, --help             Show this message\n"
         "\n"
-        "Optimization (FP only in current sce-cgc; VP insensitive):\n"
+        "Optimization (FP only in current reference compiler; VP insensitive):\n"
         "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O2)\n"
         "  --fastmath             Enable fast-math optimizations (default)\n"
         "  --nofastmath           Disable fast-math optimizations\n");
@@ -340,9 +338,9 @@ int main(int argc, char** argv)
 
         if (stage == ShaderStage::Fragment)
         {
-            sony::ContainerOptions copts;
+            cg_container::ContainerOptions copts;
             copts.alphakillSamplers = ctx.alphakillSamplers;
-            sony::ContainerResult cr = sony::emitFragmentContainer(
+            cg_container::ContainerResult cr = cg_container::emitFragmentContainer(
                 *irModule, ctx.entryName, ucode.words, fpAttrs, copts);
             containerBytes = std::move(cr.bytes);
             diagnostics    = std::move(cr.diagnostics);
@@ -350,7 +348,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            sony::VpContainerResult cr = sony::emitVertexContainer(
+            cg_container::VpContainerResult cr = cg_container::emitVertexContainer(
                 *irModule, ctx.entryName, ucode.words, vpAttrs);
             containerBytes = std::move(cr.bytes);
             diagnostics    = std::move(cr.diagnostics);

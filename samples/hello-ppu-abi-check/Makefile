@@ -1,12 +1,9 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-sony-abi — cross-check against Sony's reference SDK ABI.
+# hello-ppu-abi-check — cross-check against the reference cell SDK's ABI.
 #
 # Mirrors hello-ppu-c++17's build infra but targets pure C so any libstdc++
-# entanglement cannot mask an ABI regression.  Consumes <sys/sony_process_param.h>
-# from the PSL1GHT install tree (added by patches/psl1ght/0007) — the Sony-layout
-# .sys_proc_param struct coexists with PSL1GHT's own <sys/process.h> under a
-# separate SONY_* identifier namespace.  A tree-wide migration that replaces
-# PSL1GHT's <sys/process.h> with the Sony layout is a Phase 3 v3 RFC follow-up.
+# entanglement cannot mask an ABI regression.  Verifies the .sys_proc_param
+# section's layout matches what the PS3 loader expects.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 
@@ -22,8 +19,8 @@ SOURCES     := source
 DATA        := data
 INCLUDES    :=
 
-TITLE       := Hello PPU Sony-ABI
-APPID       := HELSONYABI
+TITLE       := Hello PPU ABI-Check
+APPID       := HELABICHK1
 CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 
 CFLAGS   = -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)

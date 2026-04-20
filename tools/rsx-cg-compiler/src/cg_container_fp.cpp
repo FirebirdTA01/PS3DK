@@ -1,12 +1,12 @@
 /*
- * Sony .fpo (CgBinaryProgram + CgBinaryFragmentProgram) emitter.
+ * .fpo (CgBinaryProgram + CgBinaryFragmentProgram) emitter.
  *
  * Layout (offsets in the resulting blob, big-endian throughout):
  *
  *   0x00  CgBinaryProgram header (32 bytes — see cgBinary.h)
  *   0x20  CgBinaryParameter[parameterCount] (48 bytes each)
- *         (immediately after the header — sce-cgc lays this out
- *          contiguously without any pad, parameterArray = 0x20)
+ *         (immediately after the header — the reference compiler lays
+ *          this out contiguously without any pad, parameterArray = 0x20)
  *   <X>   string region (zero-terminated names + semantics, in
  *         per-parameter declaration order: emit semantic, then name).
  *         Padded with NUL bytes so the next section starts at a
@@ -15,9 +15,9 @@
  *         padding to a 16-byte boundary).
  *   <Z>   raw ucode (16-byte aligned).
  *
- * Strings are NOT deduplicated — sce-cgc emits a fresh copy of each
- * semantic + name per parameter, even when two parameters share the
- * same semantic ("COLOR" appears twice in identity_f.fpo).
+ * Strings are NOT deduplicated — the reference compiler emits a fresh
+ * copy of each semantic + name per parameter, even when two parameters
+ * share the same semantic ("COLOR" appears twice in identity_f.fpo).
  *
  * Resource codes (CGresource enum, from cg_bindlocations.h):
  *   - FP COLOR / COLOR0 → CG_COLOR0  = 2757 = 0x0ac5
@@ -38,7 +38,7 @@
  *   - CG_UNIFORM = 4102 = 0x1006
  */
 
-#include "sony_container_fp.h"
+#include "cg_container_fp.h"
 #include "nv40/nv40_emit.h"
 
 #include "ir.h"
@@ -49,7 +49,7 @@
 #include <cstring>
 #include <unordered_map>
 
-namespace sony
+namespace cg_container
 {
 
 namespace
@@ -171,7 +171,7 @@ ContainerResult emitFragmentContainer(
     if (!entry)
     {
         result.diagnostics.push_back(
-            "sony-fp: entry '" + entryName + "' not in IR module");
+            "cg-container-fp: entry '" + entryName + "' not in IR module");
         return result;
     }
 
@@ -401,7 +401,7 @@ ContainerResult emitFragmentContainer(
     if (out.size() != totalSize)
     {
         result.diagnostics.push_back(
-            "sony-fp: emitted " + std::to_string(out.size()) +
+            "cg-container-fp: emitted " + std::to_string(out.size()) +
             " bytes, expected " + std::to_string(totalSize));
         return result;
     }
@@ -410,4 +410,4 @@ ContainerResult emitFragmentContainer(
     return result;
 }
 
-}  // namespace sony
+}  // namespace cg_container
