@@ -147,7 +147,7 @@ source ./scripts/env.sh
 
 Both toolchain build scripts accept `--only <step>` (binutils | gcc-newlib | gdb | symlinks) and `--clean` to wipe intermediates before rebuilding.
 
-After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).  Our own SDK headers and `libgcm_cmd.a` land under `$PS3DEV/psl1ght/ppu/` alongside the PSL1GHT runtime.
+After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).  The PSL1GHT runtime lands under `$PS3DEV/psl1ght/ppu/`; our own SDK headers and archives (e.g. `libgcm_cmd.a`, `libdbgfont.a`) land under `$PS3DEV/ps3dk/ppu/` next to it.
 
 ### Verify the install
 
@@ -157,8 +157,8 @@ $PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc --version   # -> 12.4.0
 $PS3DEV/spu/bin/spu-elf-gcc         --version     # -> 9.5.0
 
 # SDK headers + libraries are in place.
-ls $PS3DEV/psl1ght/ppu/lib/libgcm_cmd.a
-ls $PS3DEV/psl1ght/ppu/include/cell/gcm.h
+ls $PS3DEV/ps3dk/ppu/lib/libgcm_cmd.a
+ls $PS3DEV/ps3dk/ppu/include/cell/gcm.h
 ```
 
 All four checks should succeed silently (or print the expected version).  If any fails, the corresponding build step didn't finish cleanly — rerun it with `--clean` to wipe stale intermediates.
@@ -234,7 +234,7 @@ cmake --build tools/rsx-cg-compiler/build
 - `src/` — vendored upstream and ps3dev sources (reproducible via `bootstrap.sh`; `.gitignored`)
 - `patches/` — rebased and new patches against upstream sources
 - `tools/` — Rust CLIs: `nidgen`, `stubgen`, `coverage-report`
-- `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, psl1ght, portlibs)
+- `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, psl1ght, ps3dk, portlibs)
 - `samples/` — minimal C++17 demos for validation
 - `ci/` — Docker images and GitHub Actions
 - `docs/` — quickstart, migration guide, ABI reference

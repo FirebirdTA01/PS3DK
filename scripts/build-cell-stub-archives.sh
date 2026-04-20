@@ -7,6 +7,12 @@
 # YAML in $STUB_YAMLS, then installs the resulting archive under
 # $PS3DEV/psl1ght/ppu/lib/ so samples can link with `-l<archive_name>_stub`.
 #
+# Exception: libgcm_sys_stub.a is installed into $PS3DK/ppu/lib/ as
+# libgcm_sys.a (renamed — _stub suffix dropped) so `-lgcm_sys` in sample
+# Makefiles finds our nidgen-generated archive first (via -L$(PS3DK)/ppu/lib
+# ordering) and shadows PSL1GHT's legacy libgcm_sys.a.  This cuts the last
+# PSL1GHT bytes from the rendering path at the binary level.
+#
 # Add a YAML to $STUB_YAMLS as new zero-coverage libraries land
 # (libsysutil_ap, libsysutil_imejp, libsysutil_subdisplay, libsysutil_music*,
 # etc.).
@@ -50,9 +56,10 @@ STUB_YAMLS=(
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
-INSTALL_LIB="$PS3DEV/psl1ght/ppu/lib"
+INSTALL_LIB_DEFAULT="$PS3DEV/psl1ght/ppu/lib"
+INSTALL_LIB_PS3DK="$PS3DK/ppu/lib"
 
-mkdir -p "$OUT_ROOT" "$INSTALL_LIB"
+mkdir -p "$OUT_ROOT" "$INSTALL_LIB_DEFAULT" "$INSTALL_LIB_PS3DK"
 
 for yaml in "${STUB_YAMLS[@]}"; do
     [[ -f "$yaml" ]] || die "missing YAML: $yaml"
@@ -74,8 +81,19 @@ for yaml in "${STUB_YAMLS[@]}"; do
     [[ ${#produced[@]} -eq 1 ]] \
         || die "expected exactly one archive in $out_dir, got ${#produced[@]}"
 
-    install -m 0644 "${produced[0]}" "$INSTALL_LIB/"
-    say "installed $(basename "${produced[0]}") -> $INSTALL_LIB/"
+    # libgcm_sys_stub.a gets a special home + rename: it lives in
+    # $PS3DK/ppu/lib/ under the PSL1GHT-compat filename libgcm_sys.a so
+    # -lgcm_sys in sample Makefiles finds our nidgen archive first (the
+    # ppu_rules -L order places $PS3DK before $PSL1GHT), shadowing PSL1GHT's
+    # legacy libgcm_sys.a entirely.  Samples then pull zero bytes from the
+    # PSL1GHT tree for the GCM surface.
+    if [[ "$name" == "libgcm_sys_stub" ]]; then
+        install -m 0644 "${produced[0]}" "$INSTALL_LIB_PS3DK/libgcm_sys.a"
+        say "installed libgcm_sys.a -> $INSTALL_LIB_PS3DK/ (renamed from $(basename "${produced[0]}"))"
+    else
+        install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
+        say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
+    fi
 done
 
 say "done — ${#STUB_YAMLS[@]} stub archive(s) installed"
