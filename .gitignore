@@ -118,8 +118,3 @@ desktop.ini
 # local-only.
 /CLAUDE.md
 
-# Superseded PSL1GHT patches — functionality folded elsewhere.  Kept
-# locally as historical reference; not applied by build-psl1ght.sh.
-/patches/psl1ght/0007-add-sys-sony-process-param-header.patch
-/patches/psl1ght/0008-sys-process-h-sony-layout.patch
-/patches/psl1ght/0009-sys-process-h-crash-dump-reloc.patch
