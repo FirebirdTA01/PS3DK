@@ -9,7 +9,12 @@
 #   PS3DEV               install prefix ($PS3_TOOLCHAIN_ROOT/stage/ps3dev)
 #   PPU_PREFIX           $PS3DEV/ppu          (newlib sysroot for PPU)
 #   SPU_PREFIX           $PS3DEV/spu          (newlib sysroot for SPU)
-#   PSL1GHT              $PS3DEV/psl1ght      (PSL1GHT install root; tools look here)
+#   PSL1GHT              $PS3DEV/psl1ght      (PSL1GHT install root; still
+#                                               used for toolchain bootstrap
+#                                               and ppu_rules/base_rules)
+#   PS3DK                $PS3DEV/ps3dk        (our SDK's install root — where
+#                                               libgcm_cmd.a, libdbgfont.a, and
+#                                               the cell/* + sys/* headers land)
 #   PS3_BUILD_ROOT       short path used for intermediate builds to avoid MAX_PATH
 #
 # Adds $PS3DEV/bin, $PPU_PREFIX/bin, and $SPU_PREFIX/bin to PATH.
@@ -27,6 +32,7 @@ export PS3DEV="${PS3DEV:-$PS3_TOOLCHAIN_ROOT/stage/ps3dev}"
 export PPU_PREFIX="$PS3DEV/ppu"
 export SPU_PREFIX="$PS3DEV/spu"
 export PSL1GHT="$PS3DEV/psl1ght"
+export PS3DK="$PS3DEV/ps3dk"
 
 # Short build root avoids MAX_PATH blow-ups when GCC nests autotools output.
 # Override in your shell if C:/ps3tc is unsuitable.

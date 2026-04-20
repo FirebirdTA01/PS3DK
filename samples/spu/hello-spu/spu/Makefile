@@ -46,10 +46,12 @@ export OFILES := $(CPPFILES:.cpp=.o) $(CFILES:.c=.o) \
 
 export INCLUDE := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
                   $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
+                  -I$(PS3DK)/ppu/include \
                   $(LIBPSL1GHT_INC) \
                   -I$(CURDIR)/$(BUILD)
 
 export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
+                   -L$(PS3DK)/ppu/lib \
                    $(LIBPSL1GHT_LIB)
 
 .PHONY: $(BUILD) clean

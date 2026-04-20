@@ -12,7 +12,8 @@
 # tree but the contract here stays the same.
 
 PS3DEV      ?= $(error PS3DEV is not set — run: source scripts/env.sh)
-INSTALL_INC := $(PS3DEV)/psl1ght/ppu/include
+PS3DK       ?= $(PS3DEV)/ps3dk
+INSTALL_INC := $(PS3DK)/ppu/include
 
 HEADERS := \
     include/sys/timer.h \

@@ -29,6 +29,7 @@ BIN2S    := $(PS3DEV)/bin/bin2s
 
 CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -mcpu=cell -std=c11 \
+            -I$(PS3DK)/ppu/include \
             -I$(PS3DEV)/psl1ght/ppu/include \
             -Iinclude
 ARFLAGS  := rcs
@@ -46,7 +47,8 @@ VPO_OBJS    := $(patsubst $(SHADER_DIR)/%.vcg,$(OBJ_DIR)/%.vpo.o,$(VPO_SRCS))
 FPO_OBJS    := $(patsubst $(SHADER_DIR)/%.fcg,$(OBJ_DIR)/%.fpo.o,$(FPO_SRCS))
 
 ARCHIVE     := $(OBJ_DIR)/libdbgfont.a
-INSTALL_LIB := $(PS3DEV)/psl1ght/ppu/lib
+PS3DK       ?= $(PS3DEV)/ps3dk
+INSTALL_LIB := $(PS3DK)/ppu/lib
 
 .PHONY: all install clean
 
@@ -77,7 +79,7 @@ $(OBJ_DIR):
 install: $(ARCHIVE)
 	@install -d $(INSTALL_LIB)
 	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libdbgfont.a
-	@echo "installed libdbgfont.a into $(PS3DEV)/psl1ght/ppu/lib/"
+	@echo "installed libdbgfont.a into $(INSTALL_LIB)/"
 
 clean:
 	rm -rf $(OBJ_DIR)
