@@ -24,10 +24,36 @@ Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebas
 
 ### Upgrade roadmap
 
-- **PPU GCC 13 / 14.** Feasible without an architectural jump.  Main friction is rebasing the ~700-line PPU patch set across GCC 13's middle-end-to-backend interface shifts and GCC 14's further `machine_mode` / `target hook` API tightening.  Would buy modules in libstdc++, fuller C++23 library, and more complete C++26 paper coverage.  Low priority until a concrete feature blocker appears.
-- **SPU GCC 12+ forward-port.** A separate long-lead workstream (see `patches/spu/FORWARD_PORT_README.md`).  Resurrecting the SPE backend from GCC 9 into GCC 12 is roughly 12–24 weeks of compiler engineering — middle-end API drift (`rs6000.c` → `rs6000.cc` pattern), new pass infrastructure, `machine_mode` → `scalar_int_mode` / `scalar_float_mode` tightening, libgcc build-system updates, and intrinsic-header validation.  Target output is a unified GCC version across PPU + SPU; pay-off is full C++20 / partial C++23 on SPU and easier CI matrix.
-- **Newlib.** Tracking upstream; 4.4.0 is the current pin.  Next bump is re-evaluated when a feature we need lands upstream or when the PS3 `libsysbase` glue needs a material rewrite.
-- **GDB.** Same — 14.2 is the current pin; bumps happen when RPCS3's gdbstub gains features we want to drive.
+We intend to track upstream GCC over time for **both** PPU and SPU —
+the current version pins are a starting point, not a ceiling.  Each
+upgrade is gated on the PPU patch set rebasing cleanly and the SPE
+backend coming along for the ride, but both are active goals.
+
+- **PPU: GCC 13 → 14 → current stable.** Routine patch-set rebase
+  work across GCC 13's middle-end-to-backend interface shifts and GCC
+  14's further `machine_mode` / `target hook` API tightening.  Pay-off
+  is modules in libstdc++, fuller C++23 library coverage, and
+  progressively more C++26 paper coverage.  Planned as the PPU patch
+  stack stabilises.
+- **SPU: resurrect the SPE backend and track GCC forward.** GCC 10
+  removed `gcc/config/spu/`, `libgcc/config/spu/`, the SPU intrinsic
+  headers, and the SPU test suite (≈34 000 lines total); the
+  forward-port workstream (see `patches/spu/FORWARD_PORT_README.md`)
+  picks 9.5.0's SPE backend up, modernises it against GCC 12's
+  middle-end (the `rs6000.c` → `rs6000.cc` split pattern, new pass
+  infrastructure, `machine_mode` → `scalar_int_mode` /
+  `scalar_float_mode` tightening, libgcc build-system updates, and
+  intrinsic-header validation), and then tracks upstream alongside
+  PPU.  End state is a unified GCC version across PPU + SPU, full
+  C++20 / partial C++23 on SPU, and a single CI matrix.  This is a
+  substantial compiler-engineering effort, but it *is* the plan — not
+  a perpetual maybe.
+- **Newlib.** Tracking upstream; 4.4.0 is the current pin.  Next bump
+  is re-evaluated when a feature we need lands upstream or when the
+  PS3 `libsysbase` glue needs a material rewrite.
+- **GDB.** Same — 14.2 is the current pin; bumps happen when RPCS3's
+  gdbstub gains features we want to drive, or to track debugger
+  improvements upstream.
 
 ### Other components
 
