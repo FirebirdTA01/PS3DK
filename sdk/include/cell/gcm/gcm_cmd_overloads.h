@@ -58,6 +58,24 @@ static inline void cellGcmSetWriteBackEndLabel(uint8_t index, uint32_t value)
 static inline void cellGcmSetWriteTextureLabel(uint8_t index, uint32_t value)
 { cellGcmSetWriteTextureLabel(gCellGcmCurrentContext, index, value); }
 
+static inline void cellGcmSetJumpCommand(uint32_t offset)
+{ cellGcmSetJumpCommand(gCellGcmCurrentContext, offset); }
+
+static inline void cellGcmSetCallCommand(uint32_t offset)
+{ cellGcmSetCallCommand(gCellGcmCurrentContext, offset); }
+
+static inline void cellGcmSetReturnCommand(void)
+{ cellGcmSetReturnCommand(gCellGcmCurrentContext); }
+
+static inline void cellGcmSetNopCommand(uint32_t count)
+{ cellGcmSetNopCommand(gCellGcmCurrentContext, count); }
+
+static inline void cellGcmSetFrontPolygonMode(uint32_t mode)
+{ cellGcmSetFrontPolygonMode(gCellGcmCurrentContext, mode); }
+
+static inline void cellGcmSetBackPolygonMode(uint32_t mode)
+{ cellGcmSetBackPolygonMode(gCellGcmCurrentContext, mode); }
+
 static inline void cellGcmSetColorMask(uint32_t mask)
 { cellGcmSetColorMask(gCellGcmCurrentContext, mask); }
 

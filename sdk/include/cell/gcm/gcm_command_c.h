@@ -137,6 +137,33 @@ static inline void cellGcmSetWriteTextureLabel(CellGcmContextData *thisContext, 
 }
 
 /* ==========================================================
+ * Flow control — JUMP / CALL / RETURN / NOP for command buffer
+ * subroutines and in-place jumps.  Used by state-buffer patterns
+ * (record a block of state-setting commands, then CALL its offset
+ * per frame) and by our FIFO-wrap callback.
+ * ========================================================== */
+
+static inline void cellGcmSetJumpCommand(CellGcmContextData *thisContext, uint32_t offset)
+{
+	rsxSetJumpCommand(thisContext, offset);
+}
+
+static inline void cellGcmSetCallCommand(CellGcmContextData *thisContext, uint32_t offset)
+{
+	rsxSetCallCommand(thisContext, offset);
+}
+
+static inline void cellGcmSetReturnCommand(CellGcmContextData *thisContext)
+{
+	rsxSetReturnCommand(thisContext);
+}
+
+static inline void cellGcmSetNopCommand(CellGcmContextData *thisContext, uint32_t count)
+{
+	rsxSetNopCommand(thisContext, count);
+}
+
+/* ==========================================================
  * Color / depth state
  * ========================================================== */
 
@@ -271,6 +298,16 @@ static inline uint64_t cellGcmGetTimeStamp(uint32_t index)
 #define CELL_GCM_DEBUG_LEVEL0  0
 #define CELL_GCM_DEBUG_LEVEL1  1
 #define CELL_GCM_DEBUG_LEVEL2  2
+
+static inline void cellGcmSetFrontPolygonMode(CellGcmContextData *thisContext, uint32_t mode)
+{
+	rsxSetFrontPolygonMode(thisContext, mode);
+}
+
+static inline void cellGcmSetBackPolygonMode(CellGcmContextData *thisContext, uint32_t mode)
+{
+	rsxSetBackPolygonMode(thisContext, mode);
+}
 
 static inline void cellGcmSetCullFace(CellGcmContextData *thisContext, uint32_t cfm)
 {
