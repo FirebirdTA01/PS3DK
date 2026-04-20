@@ -88,7 +88,7 @@ coverage matrix once the PSL1GHT runtime has been built.
 
 ## Build host
 
-**Native Linux** is the primary build host (CachyOS / any Arch derivative or Ubuntu 22.04+). Linux gives the cleanest GCC cross-build experience and matches CI.
+**Native Linux** is the primary build host — any reasonably current distribution (`glibc` ≥ 2.31, GCC ≥ 11 on the host, Python 3, Rust 1.70+) works.  Linux gives the cleanest GCC cross-build experience and matches CI.
 
 The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by Canadian-cross builds — building on Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 cross-compiler.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
 
@@ -96,18 +96,29 @@ The toolchain itself is targeted at running on **both Linux and Windows** for en
 
 ### Host dependencies
 
-On CachyOS / Arch:
-```bash
-sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl python rust \
-    git wget bison flex texinfo cmake ninja patch
-```
+Pick the command that matches your distribution.  Any recent version of the listed distros works; older LTS releases may need a PPA / module / COPR for a modern Rust toolchain.
 
-On Ubuntu/Debian:
+Debian / Ubuntu (`apt`):
 ```bash
 sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build texinfo \
     bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev python3 \
     git wget rustc cargo patch
 ```
+
+Fedora / RHEL / Rocky / Alma (`dnf`):
+```bash
+sudo dnf install -y @development-tools gcc gcc-c++ gmp-devel mpfr-devel \
+    libmpc-devel isl-devel python3 rust cargo git wget bison flex \
+    texinfo cmake ninja-build patch
+```
+
+Arch / Manjaro / EndeavourOS (`pacman`):
+```bash
+sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl python rust \
+    git wget bison flex texinfo cmake ninja patch
+```
+
+On any other distribution, install equivalents of: a C/C++ host toolchain, GMP / MPFR / MPC / ISL development headers, Python 3, Rust + Cargo, Git, Wget, Bison, Flex, Texinfo, CMake, Ninja, and Patch.
 
 ### Building the toolchain + SDK
 
