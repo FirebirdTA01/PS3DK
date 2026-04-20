@@ -21,8 +21,12 @@ HEADERS := \
     include/sys/thread.h \
     include/sys/ppu_thread.h \
     include/sys/process.h \
+    include/sys/stat.h \
+    include/sys/synchronization.h \
+    include/sys/time_util.h \
     include/sysutil/sysutil_sysparam.h \
     include/cell/pad.h \
+    include/cell/error.h \
     include/cell/gcm.h \
     include/cell/gcm/gcm_enum.h \
     include/cell/gcm/gcm_cmd_overloads.h \
