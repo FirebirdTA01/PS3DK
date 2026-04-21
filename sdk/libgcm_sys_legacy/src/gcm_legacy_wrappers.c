@@ -19,6 +19,7 @@
 #include <ppu-types.h>
 #include <ppu-asm.h>
 #include <rsx/gcm_sys.h>
+#include <sys/lv2_types.h>
 
 /* ====================================================================
  * cellGcm* NID-bound externs — provided by libgcm_sys_stub's
@@ -133,6 +134,22 @@ s32 gcmGetConfiguration(gcmConfiguration *config)
      * <cell/gcm.h> inline. */
     cellGcmGetConfiguration((void *)config);
     return 0;
+}
+
+/* _cellGcmGetConfigurationRaw: type-neutral variant for cell/gcm.h's
+ * widener. The header declares CellGcmConfigRaw (24 bytes, lv2_ea32_t
+ * for the two EA fields) and asks us to fill it. Lv-2 writes exactly
+ * 24 bytes (empirically confirmed via samples/toolchain/gcm-config-abi
+ * under RPCS3; see docs/abi/cellos-lv2-abi-spec.md section 4.1), so
+ * a void * at this boundary is sufficient. This path avoids leaning
+ * on PSL1GHT's gcmConfiguration type (void * mode(SI)) in our inline.
+ *
+ * Symbol name is `_cellGcmGetConfigurationRaw` — underscore-prefixed
+ * to mark it as internal detail of the cellGcmGetConfiguration
+ * widener, not a caller-facing API. */
+void _cellGcmGetConfigurationRaw(void *raw24)
+{
+    cellGcmGetConfiguration(raw24);
 }
 
 gcmControlRegister *gcmGetControlRegister(void)
@@ -288,14 +305,16 @@ s32 gcmSetFlip(gcmContextData *context, const u8 id)
     return (s32)cellGcmSetFlip((void *)context, id);
 }
 
-/* Handler setters — PSL1GHT's wrappers apply __get_opd32 to the user's
- * 64-bit function pointer before handing it to the kernel stub (the
- * cellGcmSys module's register-handler path expects the 32-bit OPD
- * descriptor form, not a raw function pointer).  Match PSL1GHT's
- * behavior exactly. */
+/* Handler setters — the kernel-visible callback registration path
+ * expects a 32-bit EA pointing at an 8-byte compact descriptor
+ * (entry_ea, toc_ea). Our sprx-linker packs that compact block at
+ * offset +16 of the 24-byte ELFv1 descriptor; lv2_fn_to_callback_ea
+ * returns the EA of that packed block. Byte-identical to PSL1GHT's
+ * __get_opd32 path, just typed with lv2_ea32_t at every boundary.
+ * See docs/abi/compact-opd-migration.md for the end state. */
 void gcmSetFlipHandler(void (*handler)(const u32 head))
 {
-    cellGcmSetFlipHandler((void *)__get_opd32(handler));
+    cellGcmSetFlipHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
 }
 
 s32 gcmSetFlipImmediate(u8 id)
@@ -310,7 +329,7 @@ void gcmSetFlipMode(const u32 mode)
 
 void gcmSetGraphicsHandler(void (*handler)(const u32 val))
 {
-    cellGcmSetGraphicsHandler((void *)__get_opd32(handler));
+    cellGcmSetGraphicsHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
 }
 
 u32 gcmSetPrepareFlip(gcmContextData *context, const u8 id)
@@ -320,12 +339,12 @@ u32 gcmSetPrepareFlip(gcmContextData *context, const u8 id)
 
 void gcmSetQueueHandler(void (*handler)(const u32 head))
 {
-    cellGcmSetQueueHandler((void *)__get_opd32(handler));
+    cellGcmSetQueueHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
 }
 
 void gcmSetSecondVHandler(void (*handler)(const u32 head))
 {
-    cellGcmSetSecondVHandler((void *)__get_opd32(handler));
+    cellGcmSetSecondVHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
 }
 
 s32 gcmSetTileInfo(const u8 index, const u8 location,
@@ -338,12 +357,12 @@ s32 gcmSetTileInfo(const u8 index, const u8 location,
 
 void gcmSetUserHandler(void (*handler)(const u32 cause))
 {
-    cellGcmSetUserHandler((void *)__get_opd32(handler));
+    cellGcmSetUserHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
 }
 
 void gcmSetVBlankHandler(void (*handler)(const u32 head))
 {
-    cellGcmSetVBlankHandler((void *)__get_opd32(handler));
+    cellGcmSetVBlankHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
 }
 
 /* gcmSetWaitFlip — PSL1GHT's own NID (0x983fb9aa), added to the nidgen

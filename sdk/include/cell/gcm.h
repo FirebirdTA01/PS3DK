@@ -60,6 +60,7 @@
 #include <cell/error.h>
 #include <Cg/cg.h>
 #include <Cg/cgBinary.h>
+#include <sys/lv2_types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,7 +78,8 @@ typedef gcmContextCallback   CellGcmContextCallback;
  * register.  A pointer like 0xc0000000 (top bit set) becomes
  * 0xffffffffc0000000 and crashes on first deref.  Our struct uses
  * full-width 64-bit pointers; our cellGcmGetConfiguration wrapper
- * zero-extends from the PSL1GHT fields. */
+ * zero-extends from the raw 24-byte kernel payload (see
+ * CellGcmConfigRaw below). */
 typedef struct {
     void     *localAddress;
     void     *ioAddress;
@@ -86,6 +88,30 @@ typedef struct {
     uint32_t  memoryFrequency;
     uint32_t  coreFrequency;
 } CellGcmConfig;
+
+/* CellGcmConfigRaw: the kernel-interface view of the gcm config
+ * syscall payload.  Empirically 24 bytes (see gcm-config-abi probe
+ * and docs/abi/cellos-lv2-abi-spec.md section 4.1), with the two
+ * pointer-shaped fields carrying 32-bit effective addresses.
+ *
+ * This type exists so the widener in cellGcmGetConfiguration (below)
+ * can describe the raw layout without leaning on PSL1GHT's
+ * gcmConfiguration (which uses `void * mode(SI)`).  Same 24-byte
+ * on-the-wire layout; cleaner C-level types. */
+typedef struct {
+    lv2_ea32_t localAddress_ea;
+    lv2_ea32_t ioAddress_ea;
+    uint32_t   localSize;
+    uint32_t   ioSize;
+    uint32_t   memoryFrequency;
+    uint32_t   coreFrequency;
+} CellGcmConfigRaw;
+
+/* Implemented in sdk/libgcm_sys_legacy/src/gcm_legacy_wrappers.c —
+ * a TU that doesn't include this header, so it can reach the nidgen
+ * NID stub `cellGcmGetConfiguration` without shadowing from the
+ * inline below.  Fills the 24 bytes at `raw`. */
+extern void _cellGcmGetConfigurationRaw(CellGcmConfigRaw *raw);
 
 /* CellGcmSurface is byte-identical to PSL1GHT's gcmSurface (same 33
  * fields in the same order — verified against the reference SDK's
@@ -225,18 +251,19 @@ static inline int32_t cellGcmMapMainMemory(const void *address, uint32_t size, u
 
 static inline void cellGcmGetConfiguration(CellGcmConfig *config)
 {
-	gcmConfiguration raw;
-	gcmGetConfiguration(&raw);
 	if (!config) return;
-	/* Zero-extend the 32-bit PSL1GHT PRXPTR fields into real 64-bit
-	 * pointers.  Masking with 0xffffffff first truncates any stale
-	 * sign bits GCC may have applied during the SI→DI register load. */
-	config->localAddress    = (void *)(uintptr_t)((uint32_t)(uintptr_t)raw.localAddress);
-	config->ioAddress       = (void *)(uintptr_t)((uint32_t)(uintptr_t)raw.ioAddress);
+	CellGcmConfigRaw raw;
+	_cellGcmGetConfigurationRaw(&raw);
+	/* Zero-extend the 32-bit EA fields into full 64-bit native
+	 * pointers via lv2_ea32_expand — no implicit casts, no
+	 * sign-extension risk.  The trailing scalar fields are
+	 * straight copies. */
+	config->localAddress    = lv2_ea32_expand(raw.localAddress_ea);
+	config->ioAddress       = lv2_ea32_expand(raw.ioAddress_ea);
 	config->localSize       = raw.localSize;
 	config->ioSize          = raw.ioSize;
-	config->memoryFrequency = raw.memoryFreq;
-	config->coreFrequency   = raw.coreFreq;
+	config->memoryFrequency = raw.memoryFrequency;
+	config->coreFrequency   = raw.coreFrequency;
 }
 
 static inline uint32_t cellGcmGetTiledPitchSize(uint32_t size)

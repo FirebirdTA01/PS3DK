@@ -1,0 +1,308 @@
+{
+  "path": "reference/crt1.o",
+  "elf": {
+    "class": "ELF64",
+    "endian": "big",
+    "machine": "PowerPC64",
+    "os_abi": 102,
+    "abi_version": 0,
+    "elf_type": "REL",
+    "flags": 16777216
+  },
+  "sections": [
+    {
+      "name": "",
+      "sh_type": "NULL",
+      "size": 0,
+      "addralign": 0,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".text",
+      "sh_type": "PROGBITS",
+      "size": 724,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".rela.text",
+      "sh_type": "RELA",
+      "size": 1080,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".data",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".bss",
+      "sh_type": "NOBITS",
+      "size": 20,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".toc",
+      "sh_type": "PROGBITS",
+      "size": 48,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.toc",
+      "sh_type": "RELA",
+      "size": 288,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".opd",
+      "sh_type": "PROGBITS",
+      "size": 56,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.opd",
+      "sh_type": "RELA",
+      "size": 336,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".lib.ent.top",
+      "sh_type": "PROGBITS",
+      "size": 4,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".lib.ent.btm",
+      "sh_type": "PROGBITS",
+      "size": 4,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".lib.stub.top",
+      "sh_type": "PROGBITS",
+      "size": 4,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".lib.stub.btm",
+      "sh_type": "PROGBITS",
+      "size": 4,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".sys_proc_prx_param",
+      "sh_type": "PROGBITS",
+      "size": 64,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".rela.sys_proc_prx_param",
+      "sh_type": "RELA",
+      "size": 144,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".comment",
+      "sh_type": "PROGBITS",
+      "size": 41,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".sceversion",
+      "sh_type": "PROGBITS",
+      "size": 12,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".shstrtab",
+      "sh_type": "STRTAB",
+      "size": 169,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".symtab",
+      "sh_type": "SYMTAB",
+      "size": 1824,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".strtab",
+      "sh_type": "STRTAB",
+      "size": 999,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    }
+  ],
+  "opd": {
+    "entry_size": 8,
+    "entries": 7,
+    "descriptors": [
+      {
+        "offset": 0,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".getargc",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 8,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".getargv",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 16,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".__exit_user_prx_modules",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 24,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".__finalize_libc",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 32,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".__exit_handler",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 40,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "._exit",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 48,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "._initialize",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      }
+    ]
+  },
+  "sys_proc_prx_param": {
+    "size": 64,
+    "magic": 457395436,
+    "version": 4,
+    "sdk_version": 4673537,
+    "relocs": [
+      {
+        "offset": 16,
+        "r_type": "R_PPC64_ADDR32",
+        "symbol": "__begin_of_section_lib_ent",
+        "addend": 4
+      },
+      {
+        "offset": 20,
+        "r_type": "R_PPC64_ADDR32",
+        "symbol": "__end_of_section_lib_ent",
+        "addend": 0
+      },
+      {
+        "offset": 24,
+        "r_type": "R_PPC64_ADDR32",
+        "symbol": "__begin_of_section_lib_stub",
+        "addend": 4
+      },
+      {
+        "offset": 28,
+        "r_type": "R_PPC64_ADDR32",
+        "symbol": "__end_of_section_lib_stub",
+        "addend": 0
+      },
+      {
+        "offset": 36,
+        "r_type": "R_PPC64_ADDR32",
+        "symbol": "__PPU_GUID",
+        "addend": 0
+      },
+      {
+        "offset": 40,
+        "r_type": "R_PPC64_ADDR32",
+        "symbol": "__sys_process_enable_cp_43454c4c__",
+        "addend": 0
+      }
+    ]
+  }
+}
