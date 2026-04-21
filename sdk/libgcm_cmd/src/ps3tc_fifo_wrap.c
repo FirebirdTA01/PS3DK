@@ -23,6 +23,7 @@
 
 #include <stdint.h>
 #include <sys/timer.h>
+#include <sys/lv2_types.h>
 #include <ppu-asm.h>
 #include <rsx/gcm_sys.h>
 #include <cell/gcm/ps3tc_fifo_wrap.h>
@@ -54,5 +55,5 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
 void ps3tc_fifo_wrap_install(gcmContextData *ctx)
 {
     if (!ctx) return;
-    ctx->callback = (gcmContextCallback)__get_opd32(ps3tc_fifo_wrap_callback);
+    ctx->callback = (gcmContextCallback)(uintptr_t)lv2_fn_to_callback_ea(ps3tc_fifo_wrap_callback);
 }

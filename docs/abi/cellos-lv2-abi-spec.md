@@ -36,6 +36,19 @@ Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
 
 ## 2. Compact function-descriptor format (`.opd`)
 
+> **Status — target state.** This section is normative for what the
+> toolchain will emit once the compact-opd migration lands. Current
+> output still uses the upstream PPC64 ELFv1 24-byte 3-doubleword
+> form, plus a sprx-linker post-link step that packs an 8-byte
+> compact block into the descriptor's env slot at offset +16 so the
+> Lv-2 kernel's callback path still finds a compact descriptor at
+> the EA it is given. See `docs/abi/compact-opd-migration.md` for
+> the coordinated GCC + binutils changes required to reach the
+> target state. `lv2_fn_to_callback_ea` in `<sys/lv2_types.h>` is
+> the single switching point — its `+16` offset disappears when
+> the target state lands, and every caller is correct by the same
+> source change.
+
 CellOS Lv-2 uses an **8-byte compact function descriptor**, not the
 PowerPC ELFv1 24-byte 3-doubleword form. Every `.opd` entry is exactly
 8 bytes and is laid out as:
@@ -187,7 +200,7 @@ sentinel — the kernel writes **exactly 24 bytes**.
   in the 32-byte struct come from the same 24-byte syscall payload,
   just mapped into the trailing portion of the wider struct.
 
-Subsequent Phase 3 work on libgcm_sys internals must preserve the
+Subsequent libgcm_sys work must preserve the
 24-byte kernel calling convention. The `mode(SI)` attribute on
 `gcmConfiguration`'s pointer fields is semantically correct — it
 captures the kernel's 32-bit EA contract. Our own `gcmConfiguration`

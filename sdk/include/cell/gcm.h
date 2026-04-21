@@ -90,8 +90,8 @@ typedef struct {
 } CellGcmConfig;
 
 /* CellGcmConfigRaw: the kernel-interface view of the gcm config
- * syscall payload.  Empirically 24 bytes (see Phase 3a probe —
- * docs/abi/cellos-lv2-abi-spec.md section 4.1), with the two
+ * syscall payload.  Empirically 24 bytes (see gcm-config-abi probe
+ * and docs/abi/cellos-lv2-abi-spec.md section 4.1), with the two
  * pointer-shaped fields carrying 32-bit effective addresses.
  *
  * This type exists so the widener in cellGcmGetConfiguration (below)
