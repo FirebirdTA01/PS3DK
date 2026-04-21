@@ -1,0 +1,86 @@
+{
+  "path": "reference/crtid.o",
+  "elf": {
+    "class": "ELF64",
+    "endian": "big",
+    "machine": "PowerPC64",
+    "os_abi": 102,
+    "abi_version": 0,
+    "elf_type": "REL",
+    "flags": 16777216
+  },
+  "sections": [
+    {
+      "name": "",
+      "sh_type": "NULL",
+      "size": 0,
+      "addralign": 0,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".text",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".data",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".bss",
+      "sh_type": "NOBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".PpuGUID",
+      "sh_type": "PROGBITS",
+      "size": 32,
+      "addralign": 8,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".sceversion",
+      "sh_type": "PROGBITS",
+      "size": 13,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".shstrtab",
+      "sh_type": "STRTAB",
+      "size": 65,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".symtab",
+      "sh_type": "SYMTAB",
+      "size": 192,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".strtab",
+      "sh_type": "STRTAB",
+      "size": 98,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    }
+  ]
+}

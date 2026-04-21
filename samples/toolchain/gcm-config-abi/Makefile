@@ -1,9 +1,9 @@
 #---------------------------------------------------------------------------------
-# hello-ppu-abi-check — cross-check against the reference cell SDK's ABI.
+# gcm-config-abi — kernel-ABI probe for cellGcmGetConfiguration.
 #
-# Mirrors hello-ppu-c++17's build infra but targets pure C so any libstdc++
-# entanglement cannot mask an ABI regression.  Verifies the .sys_proc_param
-# section's layout matches what the PS3 loader expects.
+# Runs under RPCS3 (see scripts/rpcs3-run.sh). Interprets what byte
+# layout the LV2 kernel writes into the caller buffer. See source
+# header for the hypothesis space.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 
@@ -19,23 +19,20 @@ SOURCES     := source
 DATA        := data
 INCLUDES    :=
 
-TITLE       := Hello PPU ABI-Check
-APPID       := HELABICHK1
+TITLE       := GCM Config ABI Probe
+APPID       := GCMCFGABI1
 CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 
 CFLAGS   = -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
 CXXFLAGS = $(CFLAGS)
 
-#  -B $(PS3DK)/ppu/lib/ makes GCC's startfile lookup prefer our native
-#  runtime objects (today: lv2-sprx.o) over PSL1GHT's copies.
+# -B $(PS3DK)/ppu/lib/ — prefer our native lv2-sprx.o.
 LDFLAGS  = $(MACHDEP) -B $(PS3DK)/ppu/lib/ -Wl,-Map,$(notdir $@).map
 
-# Use our forked sprx-linker (accepts the spec-correct 64-byte
-# .sys_proc_prx_param). PATH-based override isn't reliable through the
-# PSL1GHT ppu_rules recipes, so we override by absolute path.
+# Our forked sprxlinker accepts the 64-byte .sys_proc_prx_param.
 SPRX     := $(PS3DK)/bin/sprxlinker
 
-LIBS    := -lsysutil -lrt -llv2
+LIBS    := -lgcm_cmd -lgcm_sys -lio -lsysutil -lrt -llv2
 LIBDIRS :=
 
 #---------------------------------------------------------------------------------
@@ -81,7 +78,7 @@ $(BUILD):
 
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).self
+	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).self $(OUTPUT).fake.self
 
 run:
 	ps3load $(OUTPUT).self

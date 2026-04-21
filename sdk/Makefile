@@ -16,6 +16,7 @@ PS3DK       ?= $(PS3DEV)/ps3dk
 INSTALL_INC := $(PS3DK)/ppu/include
 
 HEADERS := \
+    include/sys/lv2_types.h \
     include/sys/timer.h \
     include/sys/sys_time.h \
     include/sys/return_code.h \

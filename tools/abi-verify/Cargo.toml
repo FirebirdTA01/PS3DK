@@ -1,0 +1,25 @@
+[package]
+name = "abi-verify"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "CellOS Lv-2 ABI conformance verifier: ELF/archive structural checks and reference-fixture diffing"
+
+[[bin]]
+name = "abi-verify"
+path = "src/main.rs"
+
+[lib]
+name = "abi_verify"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+ar.workspace = true
+clap.workspace = true
+object.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

@@ -1,6 +1,7 @@
 #include <rsx/mm.h>
 #include <rsx/gcm_sys.h>
 #include <ppu-asm.h>
+#include <sys/lv2_types.h>
 
 gcmContextData *gGcmContext ATTRIBUTE_PRXPTR = NULL;
 
@@ -35,7 +36,7 @@ void rsxSetupContextData(gcmContextData *context,const u32 *addr,u32 size,gcmCon
 	context->begin = (u32*)addr;
 	context->current = (u32*)addr;
 	context->end = (u32*)(addr + alignedSize - 4);
-	context->callback = (gcmContextCallback)__get_opd32(cb);
+	context->callback = (gcmContextCallback)(uintptr_t)lv2_fn_to_callback_ea(cb);
 }
 
 void rsxSetCurrentBuffer(gcmContextData **context,const u32 *addr,u32 size)
