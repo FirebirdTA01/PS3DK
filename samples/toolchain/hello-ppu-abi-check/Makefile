@@ -30,6 +30,11 @@ CXXFLAGS = $(CFLAGS)
 #  runtime objects (today: lv2-sprx.o) over PSL1GHT's copies.
 LDFLAGS  = $(MACHDEP) -B $(PS3DK)/ppu/lib/ -Wl,-Map,$(notdir $@).map
 
+# Use our forked sprx-linker (accepts the spec-correct 64-byte
+# .sys_proc_prx_param). PATH-based override isn't reliable through the
+# PSL1GHT ppu_rules recipes, so we override by absolute path.
+SPRX     := $(PS3DK)/bin/sprxlinker
+
 LIBS    := -lsysutil -lrt -llv2
 LIBDIRS :=
 
