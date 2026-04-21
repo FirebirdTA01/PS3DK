@@ -126,8 +126,8 @@ space. This spec treats those as two distinct notions:
 
 - **Effective-address fields (`lv2_ea32_t`)**: a small number of
   ABI-fixed metadata fields hold a 32-bit EA value as a `uint32_t`. The
-  canonical typedef is `lv2_ea32_t` (see `sdk/include/sys/lv2_types.h`
-  once added). Examples: `sys_process_param_t::crash_dump_param_addr`,
+  canonical typedef is `lv2_ea32_t`, defined in
+  `sdk/include/sys/lv2_types.h`. Examples: `sys_process_param_t::crash_dump_param_addr`,
   every reloc target in `.sys_proc_prx_param`, every `.opd` entry-point
   slot.
 
@@ -144,6 +144,36 @@ Normative rules:
    is a transitional workaround. Once `lv2_ea32_t` replaces every
    legitimate use, the hook override is removed and strict-profile
    binaries MUST build without it.
+
+### 4.1 Kernel-side struct ABI (open question)
+
+PSL1GHT declares several kernel-interface structs (notably
+`gcmConfiguration`) with `void * __attribute__((mode(SI)))` fields,
+yielding a packed 24-byte struct with 32-bit pointers. Reference SDK
+headers declare the analogous struct (`CellGcmConfig`) as 32 bytes
+with native 64-bit pointers.
+
+The two layouts are not reconcilable by field-reordering — they
+represent two different views of what the Lv-2 kernel writes when a
+syscall like `cellGcmGetConfiguration` fills the caller-supplied
+buffer. Until that is empirically validated on RPCS3 or hardware:
+
+- Public API in `cell/*.h` SHALL use the spec-conformant 64-bit
+  layout (`CellGcmConfig` with `void *` fields). That matches the
+  reference SDK headers and is the authoritative contract.
+- Internal translation from any PSL1GHT-style struct (`mode(SI)`
+  fields, packed 24-byte layout) to the public API type is
+  permitted as a **structural bridge**, not a hack. The widener in
+  `sdk/include/cell/gcm.h` currently fills this role.
+- The bridge goes away when we either (a) call a Lv-2 syscall
+  that writes the 32-byte native layout directly, or (b) confirm
+  the kernel writes the 24-byte layout and update our public
+  struct to match (unlikely given reference-header evidence).
+
+Resolving this requires a targeted RPCS3 sample that calls the NID
+stub with a 32-byte `CellGcmConfig *` buffer, prints the result,
+and inspects whether bytes 24-31 carry real data. That work is
+tracked in project memory, not this spec.
 
 ---
 
