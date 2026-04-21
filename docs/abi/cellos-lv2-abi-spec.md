@@ -145,7 +145,7 @@ Normative rules:
    legitimate use, the hook override is removed and strict-profile
    binaries MUST build without it.
 
-### 4.1 Kernel-side struct ABI (open question)
+### 4.1 Kernel-side struct ABI (settled 2026-04-20)
 
 PSL1GHT declares several kernel-interface structs (notably
 `gcmConfiguration`) with `void * __attribute__((mode(SI)))` fields,
@@ -153,27 +153,47 @@ yielding a packed 24-byte struct with 32-bit pointers. Reference SDK
 headers declare the analogous struct (`CellGcmConfig`) as 32 bytes
 with native 64-bit pointers.
 
-The two layouts are not reconcilable by field-reordering — they
-represent two different views of what the Lv-2 kernel writes when a
-syscall like `cellGcmGetConfiguration` fills the caller-supplied
-buffer. Until that is empirically validated on RPCS3 or hardware:
+`samples/toolchain/gcm-config-abi/` was built to settle which layout
+the LV2 kernel actually writes. The test allocates a 64-byte
+`0xAA`-filled buffer, calls `cellGcmGetConfiguration` via the nidgen
+NID stub, and dumps the buffer. RPCS3 result:
 
-- Public API in `cell/*.h` SHALL use the spec-conformant 64-bit
-  layout (`CellGcmConfig` with `void *` fields). That matches the
-  reference SDK headers and is the authoritative contract.
-- Internal translation from any PSL1GHT-style struct (`mode(SI)`
-  fields, packed 24-byte layout) to the public API type is
-  permitted as a **structural bridge**, not a hack. The widener in
-  `sdk/include/cell/gcm.h` currently fills this role.
-- The bridge goes away when we either (a) call a Lv-2 syscall
-  that writes the 32-byte native layout directly, or (b) confirm
-  the kernel writes the 24-byte layout and update our public
-  struct to match (unlikely given reference-header evidence).
+```
+[00..07] c0 00 00 00 40 10 00 00   localAddress=0xC0000000, ioAddress=0x40100000
+[08..15] 0f 90 00 00 02 00 00 00   localSize=~249 MB, ioSize=32 MB
+[16..23] 26 be 36 80 1d cd 65 00   memoryFreq=650 MHz, coreFreq=500 MHz
+[24..31] aa aa aa aa aa aa aa aa   UNTOUCHED
+[32..63] aa aa aa ...              UNTOUCHED
+```
 
-Resolving this requires a targeted RPCS3 sample that calls the NID
-stub with a 32-byte `CellGcmConfig *` buffer, prints the result,
-and inspects whether bytes 24-31 carry real data. That work is
-tracked in project memory, not this spec.
+All 24 bytes decode to physically meaningful PS3 RSX values
+(GDDR3 clock is 650 MHz, RSX core is 500 MHz, `0xC0000000` is the
+RSX local-memory base in PPU EA space). Bytes 24-63 remain at the
+sentinel — the kernel writes **exactly 24 bytes**.
+
+**Normative consequence:**
+
+- The public API in `cell/*.h` exposes the 32-byte `CellGcmConfig`
+  with native 64-bit pointers (matches the reference SDK header
+  caller-contract and keeps user code portable).
+- The kernel-interface struct the Lv-2 syscall writes is 24 bytes
+  with 32-bit pointers.
+- The widener in `sdk/include/cell/gcm.h:226-240` IS a structural
+  bridge and MUST remain in place. It zero-extends the two
+  32-bit EA fields and populates the trailing `memoryFrequency`
+  / `coreFrequency` words. This is correct, documented behaviour,
+  not a workaround.
+- Reference-SDK-visible `memoryFrequency` / `coreFrequency` fields
+  in the 32-byte struct come from the same 24-byte syscall payload,
+  just mapped into the trailing portion of the wider struct.
+
+Subsequent Phase 3 work on libgcm_sys internals must preserve the
+24-byte kernel calling convention. The `mode(SI)` attribute on
+`gcmConfiguration`'s pointer fields is semantically correct — it
+captures the kernel's 32-bit EA contract. Our own `gcmConfiguration`
+type (if/when we ship one) may use `lv2_ea32_t` instead of
+`void * mode(SI)` to avoid leaning on the GCC pointer-mode patch,
+but the field widths stay 32 bits.
 
 ---
 
