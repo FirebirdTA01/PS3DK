@@ -1,0 +1,55 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] elf64-ppc: tag Cell OS Lv-2 ELF headers on output
+
+When the output ELF contains a .sys_proc_prx_param section — which
+indicates it is a Cell OS Lv-2 userland binary — write the Cell OS
+Lv-2 OS/ABI identifier (byte 0x66) into e_ident[EI_OSABI] and set
+e_flags to exactly 0x01000000. Both values are required by the Lv-2
+loader and are documented in docs/abi/cellos-lv2-abi-spec.md in the
+PS3 Custom Toolchain tree.
+
+Note that e_flags is assigned rather than OR'd: the Lv-2 ABI does
+not use the EF_PPC64_ABI low bits that the ppc64 backend otherwise
+sets to mark ELFv1 / ELFv2. Reference Lv-2 binaries carry
+e_flags = 0x01000000 exactly.
+
+Gating on the presence of .sys_proc_prx_param keeps standard ppc64
+output (Linux, FreeBSD, bare-metal) unaffected — only PS3 userland
+binaries, which uniquely ship that section, receive the tags.
+
+--- a/bfd/elf64-ppc.c
++++ b/bfd/elf64-ppc.c
+@@ -133,6 +133,7 @@
+ #define elf_backend_section_flags	      ppc64_elf_section_flags
+ #define elf_backend_merge_symbol_attribute    ppc64_elf_merge_symbol_attribute
+ #define elf_backend_merge_symbol	      ppc64_elf_merge_symbol
++#define elf_backend_final_write_processing    ppc64_elf_final_write_processing
+ #define elf_backend_get_reloc_section	      bfd_get_section_by_name
+
+ /* The name of the dynamic interpreter.  This is put in the .interp
+@@ -18407,6 +18408,25 @@
+   return _bfd_elf_free_cached_info (abfd);
+ }
+
++/* Tag Cell OS Lv-2 userland output with its OS/ABI identifier and
++   the e_flags value required by the Lv-2 loader. Detected by the
++   presence of .sys_proc_prx_param in the output — a section unique
++   to Lv-2 process parameter blocks — so standard ppc64 targets
++   (Linux, FreeBSD, bare-metal) are unaffected. e_flags is assigned
++   rather than OR'd because Lv-2 does not use the EF_PPC64_ABI low
++   bits that otherwise mark ELFv1 / ELFv2.  */
++
++static bool
++ppc64_elf_final_write_processing (bfd *abfd)
++{
++  if (bfd_get_section_by_name (abfd, ".sys_proc_prx_param") != NULL)
++    {
++      elf_elfheader (abfd)->e_ident[EI_OSABI] = 0x66;
++      elf_elfheader (abfd)->e_flags = 0x01000000;
++    }
++  return _bfd_elf_final_write_processing (abfd);
++}
++
+ #include "elf64-target.h"
+
+ /* FreeBSD support */
