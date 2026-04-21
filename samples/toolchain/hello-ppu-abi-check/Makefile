@@ -26,7 +26,9 @@ CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 CFLAGS   = -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
 CXXFLAGS = $(CFLAGS)
 
-LDFLAGS  = $(MACHDEP) -Wl,-Map,$(notdir $@).map
+#  -B $(PS3DK)/ppu/lib/ makes GCC's startfile lookup prefer our native
+#  runtime objects (today: lv2-sprx.o) over PSL1GHT's copies.
+LDFLAGS  = $(MACHDEP) -B $(PS3DK)/ppu/lib/ -Wl,-Map,$(notdir $@).map
 
 LIBS    := -lsysutil -lrt -llv2
 LIBDIRS :=
