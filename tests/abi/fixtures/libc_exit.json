@@ -1,0 +1,136 @@
+{
+  "path": "reference/libc.a(exit.o)",
+  "elf": {
+    "class": "ELF64",
+    "endian": "big",
+    "machine": "PowerPC64",
+    "os_abi": 102,
+    "abi_version": 0,
+    "elf_type": "REL",
+    "flags": 16777216
+  },
+  "sections": [
+    {
+      "name": "",
+      "sh_type": "NULL",
+      "size": 0,
+      "addralign": 0,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".text",
+      "sh_type": "PROGBITS",
+      "size": 72,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".rela.text",
+      "sh_type": "RELA",
+      "size": 96,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".data",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".bss",
+      "sh_type": "NOBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".toc",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".opd",
+      "sh_type": "PROGBITS",
+      "size": 8,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.opd",
+      "sh_type": "RELA",
+      "size": 48,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".comment",
+      "sh_type": "PROGBITS",
+      "size": 41,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".sceversion",
+      "sh_type": "PROGBITS",
+      "size": 12,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".shstrtab",
+      "sh_type": "STRTAB",
+      "size": 85,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".symtab",
+      "sh_type": "SYMTAB",
+      "size": 336,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".strtab",
+      "sh_type": "STRTAB",
+      "size": 93,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    }
+  ],
+  "opd": {
+    "entry_size": 8,
+    "entries": 1,
+    "descriptors": [
+      {
+        "offset": 0,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".exit",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_TLSGD",
+          "addend": 0
+        }
+      }
+    ]
+  }
+}
