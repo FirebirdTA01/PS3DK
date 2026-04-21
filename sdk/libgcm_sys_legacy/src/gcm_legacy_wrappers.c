@@ -135,6 +135,22 @@ s32 gcmGetConfiguration(gcmConfiguration *config)
     return 0;
 }
 
+/* _cellGcmGetConfigurationRaw: type-neutral variant for cell/gcm.h's
+ * widener. The header declares CellGcmConfigRaw (24 bytes, lv2_ea32_t
+ * for the two EA fields) and asks us to fill it. Lv-2 writes exactly
+ * 24 bytes per the empirical Phase 3a probe (see
+ * docs/abi/cellos-lv2-abi-spec.md section 4.1), so a void * at this
+ * boundary is sufficient. This path avoids leaning on PSL1GHT's
+ * gcmConfiguration type (void * mode(SI)) in our inline.
+ *
+ * Symbol name is `_cellGcmGetConfigurationRaw` — underscore-prefixed
+ * to mark it as internal detail of the cellGcmGetConfiguration
+ * widener, not a caller-facing API. */
+void _cellGcmGetConfigurationRaw(void *raw24)
+{
+    cellGcmGetConfiguration(raw24);
+}
+
 gcmControlRegister *gcmGetControlRegister(void)
 {
     return (gcmControlRegister *)cellGcmGetControlRegister();
