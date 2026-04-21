@@ -76,6 +76,37 @@ static inline void *lv2_ea32_expand(lv2_ea32_t ea)
 }
 
 /*
+ * Convert a C function pointer into the 32-bit EA the Lv-2 kernel
+ * expects when a callback is being registered (VBlank / Flip / Queue
+ * handlers, FIFO callback slots, etc).
+ *
+ * Mechanism (current, transitional): on ELFv1 PPU64 the C `&func`
+ * yields a pointer to a 24-byte function descriptor. The kernel's
+ * callback registry dereferences the value it is given to read an
+ * 8-byte compact descriptor `[entry_ea_32, toc_ea_32]`. Our post-
+ * link step (tools/sprx-linker) writes that 8-byte block into the
+ * env slot at offset +16 of the 24-byte descriptor — it is
+ * pre-packed and waiting. So the correct kernel-facing EA is
+ * `&func + 16`.
+ *
+ * This is a typed, documented replacement for PSL1GHT's
+ * `__get_opd32` macro. Behaviour is byte-identical; what changes is
+ * that the return type is `lv2_ea32_t`, making the EA-ness of the
+ * value explicit at every call site.
+ *
+ * Future state: when GCC emits a 2-read indirect-call sequence and
+ * binutils emits 8-byte `.opd` entries natively, a C function
+ * pointer IS the 32-bit descriptor EA already. This helper then
+ * becomes a bare cast with no +16, and every caller keeps the same
+ * source. See `docs/abi/compact-opd-migration.md`.
+ */
+static inline lv2_ea32_t lv2_fn_to_callback_ea(const void *fn)
+{
+    if (!fn) return 0;
+    return (lv2_ea32_t)(uintptr_t)((const uint8_t *)fn + 16);
+}
+
+/*
  * Compile-time size + layout invariants. If these ever fail, the ABI
  * contract has drifted and the caller needs to re-read the spec doc.
  */
