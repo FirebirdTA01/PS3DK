@@ -36,30 +36,21 @@ Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
 
 ## 2. Compact function-descriptor format (`.opd`)
 
-> **Status — target state.** This section is normative for what the
-> toolchain will emit once the compact-opd migration lands. Current
-> output still uses the upstream PPC64 ELFv1 24-byte 3-doubleword
-> form, plus a sprx-linker post-link step that packs an 8-byte
-> compact block into the descriptor's env slot at offset +16 so the
-> Lv-2 kernel's callback path still finds a compact descriptor at
-> the EA it is given. See `docs/abi/compact-opd-migration.md` for
-> the coordinated GCC + binutils changes required to reach the
-> target state. `lv2_fn_to_callback_ea` in `<sys/lv2_types.h>` is
-> the single switching point — its `+16` offset disappears when
-> the target state lands, and every caller is correct by the same
-> source change.
-
-CellOS Lv-2 uses an **8-byte compact function descriptor**, not the
-PowerPC ELFv1 24-byte 3-doubleword form. Every `.opd` entry is exactly
-8 bytes and is laid out as:
+> **Status — achieved.** The toolchain now emits 8-byte compact function
+> descriptors natively via GCC's `-mps3-opd-compact` flag (default for the
+> `powerpc64-ps3-elf` target). Every `.opd` entry is exactly 8 bytes and is
+> laid out as:
 
 ```
 offset  size  contents
 ------  ----  -----------------------------------------------
 0x00    4     Function entry-point EA (32-bit) — R_PPC64_ADDR32
-0x04    4     TOC/module token, filled at link time
-              — R_PPC64_TLSGD marker (size-0 reloc, addend 0)
+0x04    4     Module TOC base EA (32-bit) — R_PPC64_TLSGD *ABS* marker
 ```
+
+The `R_PPC64_TLSGD *ABS*` relocation at offset +4 is a binutils hook that
+resolves at link time to the module's TOC base EA. Every descriptor in a
+given module carries the same TOC value (module-level constant, not per-function).
 
 Normative rules:
 
@@ -71,21 +62,19 @@ Normative rules:
    reference tree; our toolchain may emit with or without the dot prefix as
    long as the symbol resolves).
 4. Each descriptor's tail reloc is `R_PPC64_TLSGD` with no symbol and addend 0
-   — a marker the loader uses to fill in the 4-byte TOC/module token.
+   — a link-time directive that writes the module TOC base EA into the slot.
 5. No entry uses `R_PPC64_ADDR64`. Any 64-bit descriptor reloc is a conformance
    error and indicates upstream-ELFv1 leakage.
 
 ### Implementation consequences
 
-- The PSL1GHT `__get_opd32` helper exists because PSL1GHT emits 24-byte
-  upstream-ELFv1 descriptors and then laundering extracts an 8-byte view.
-  Native code MUST emit 8-byte descriptors directly; `__get_opd32` has no
-  place in strict-profile binaries.
-- GCC's default PPC64 backend emits 24-byte descriptors. The binutils
-  linker (or a small post-process step) is responsible for rewriting them
-  to the compact form, or GCC must be told to emit 8-byte entries via a
-  target-specific hook. This is open work; see the `feature/lv2-abi-native`
-  branch plan.
+- The PSL1GHT `__get_opd32` helper can be retired; native code MUST emit
+  8-byte descriptors directly.
+- GCC's `-mps3-opd-compact` flag (or default on `powerpc64-ps3-elf`) emits
+  the compact form natively. The binutils linker resolves `R_PPC64_TLSGD`
+  by writing the module TOC base EA at link time.
+- `lv2_fn_to_callback_ea(fn)` is now a bare cast — the `+16` offset is
+  obsolete and should be removed from `<sys/lv2_types.h>`.
 
 ---
 
@@ -105,7 +94,7 @@ offset  size  field               value / reloc
 0x14    4     lib_ent.end         R_PPC64_ADDR32 __end_of_section_lib_ent
 0x18    4     lib_stub.begin      R_PPC64_ADDR32 __begin_of_section_lib_stub + 4
 0x1c    4     lib_stub.end        R_PPC64_ADDR32 __end_of_section_lib_stub
-0x20    4     reserved / flags    0x00000000
+0x20    4     reserved / flags    0x00000000 (observed 0x01010000 in shipping binaries)
 0x24    4     ppu_guid_addr       R_PPC64_ADDR32 __PPU_GUID
 0x28    4     sys_process_enable  R_PPC64_ADDR32 __sys_process_enable_*
 0x2c    4     reserved            0
