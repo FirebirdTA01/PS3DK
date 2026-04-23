@@ -1,4 +1,4 @@
-# CellOS Lv-2 PPU ABI — normative specification
+# CellOS Lv-2 PPU ABI - normative specification
 
 Authoritative binary contract that every toolchain component in this project
 (GCC PPU target, binutils, newlib, CRT, runtime, SDK, nidgen, stub archives)
@@ -27,16 +27,24 @@ binaries, SELF/SPRX payloads prior to post-processing) MUST satisfy:
 | `EI_OSABI`       | `0x66` (CellOS Lv-2)                |
 | `EI_ABIVERSION`  | `0`                                 |
 | `e_machine`      | `EM_PPC64` (21)                     |
-| `e_flags`        | `0x01000000`                        |
+| `e_flags`        | `0x00000000`                        |
 
-Upstream readelf prints the OS/ABI byte as `<unknown: 66>` — this is expected.
+Upstream readelf prints the OS/ABI byte as `<unknown: 66>` - this is expected.
 Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
+
+> **Note (2026-04-23 revision):** `e_flags` was previously documented as
+> `0x01000000`. Cross-checking decrypted CEX SELFs built with the reference
+> SDK (ftpd, cellftp, mount_hdd, setmonitor, db_backup, and the BD / PS1 /
+> PS2 / PSP emulator shells) shows every binary carrying `e_flags = 0x0`.
+> Our `0001-elf64-ppc-tag-cellos-lv2-headers.patch` hardcoded the non-zero
+> value based on an earlier (incorrect) reading of the spec; that path is
+> being reverted in a follow-up.
 
 ---
 
 ## 2. Compact function-descriptor format (`.opd`)
 
-> **Status — achieved.** The toolchain now emits 8-byte compact function
+> **Status - achieved.** The toolchain now emits 8-byte compact function
 > descriptors natively via GCC's `-mps3-opd-compact` flag (default for the
 > `powerpc64-ps3-elf` target). Every `.opd` entry is exactly 8 bytes and is
 > laid out as:
@@ -44,8 +52,8 @@ Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
 ```
 offset  size  contents
 ------  ----  -----------------------------------------------
-0x00    4     Function entry-point EA (32-bit) — R_PPC64_ADDR32
-0x04    4     Module TOC base EA (32-bit) — R_PPC64_TLSGD *ABS* marker
+0x00    4     Function entry-point EA (32-bit) - R_PPC64_ADDR32
+0x04    4     Module TOC base EA (32-bit) - R_PPC64_TLSGD *ABS* marker
 ```
 
 The `R_PPC64_TLSGD *ABS*` relocation at offset +4 is a binutils hook that
@@ -62,7 +70,7 @@ Normative rules:
    reference tree; our toolchain may emit with or without the dot prefix as
    long as the symbol resolves).
 4. Each descriptor's tail reloc is `R_PPC64_TLSGD` with no symbol and addend 0
-   — a link-time directive that writes the module TOC base EA into the slot.
+   - a link-time directive that writes the module TOC base EA into the slot.
 5. No entry uses `R_PPC64_ADDR64`. Any 64-bit descriptor reloc is a conformance
    error and indicates upstream-ELFv1 leakage.
 
@@ -73,7 +81,7 @@ Normative rules:
 - GCC's `-mps3-opd-compact` flag (or default on `powerpc64-ps3-elf`) emits
   the compact form natively. The binutils linker resolves `R_PPC64_TLSGD`
   by writing the module TOC base EA at link time.
-- `lv2_fn_to_callback_ea(fn)` is now a bare cast — the `+16` offset is
+- `lv2_fn_to_callback_ea(fn)` is now a bare cast - the `+16` offset is
   obsolete and should be removed from `<sys/lv2_types.h>`.
 
 ---
@@ -94,7 +102,7 @@ offset  size  field               value / reloc
 0x14    4     lib_ent.end         R_PPC64_ADDR32 __end_of_section_lib_ent
 0x18    4     lib_stub.begin      R_PPC64_ADDR32 __begin_of_section_lib_stub + 4
 0x1c    4     lib_stub.end        R_PPC64_ADDR32 __end_of_section_lib_stub
-0x20    4     reserved / flags    0x00000000 (observed 0x01010000 in shipping binaries)
+0x20    4     abi_version         0x01010000 (REQUIRED - see rule 5)
 0x24    4     ppu_guid_addr       R_PPC64_ADDR32 __PPU_GUID
 0x28    4     sys_process_enable  R_PPC64_ADDR32 __sys_process_enable_*
 0x2c    4     reserved            0
@@ -105,7 +113,7 @@ Normative rules:
 
 1. `size` and `magic` are literal values stored in the section bytes at
    link time; they are **not** relocated.
-2. Every pointer field is a `R_PPC64_ADDR32` relocation — no `ADDR64`.
+2. Every pointer field is a `R_PPC64_ADDR32` relocation - no `ADDR64`.
 3. The `+4` addends on the `lib_ent.begin` and `lib_stub.begin` fields
    account for a 4-byte section header prefix at the start of
    `.lib.ent.top` / `.lib.stub.top`; samples MUST preserve that layout.
@@ -113,6 +121,14 @@ Normative rules:
    a publisher/company token (e.g. `__sys_process_enable_cp_43454c4c__`
    encodes ASCII `CELL`). Our toolchain selects the token at link time
    via a linker-script symbol; the value is not fixed by this spec.
+5. `abi_version` at offset `0x20` is the 32-bit literal `0x01010000`.
+   Reference-SDK `crt1.o` emits this value hardcoded in every shipping
+   CEX binary surveyed (ftpd, cellftp, mount_hdd, setmonitor, etc.).
+   Zero here causes the loader - both on hardware and RPCS3 - to
+   stall inside `_sys_prx_register_module` before the module's entry
+   point is invoked. The two bytes encode a major/minor pair
+   (`0x01` / `0x01`) but the meaning is not yet spec-clear; the
+   normative requirement is the literal value, not the interpretation.
 
 ---
 
@@ -137,7 +153,7 @@ Normative rules:
 
 1. `lv2_ea32_t` is `uint32_t`. Conversion helpers (`lv2_ea32_pack(ptr)`,
    `lv2_ea32_expand(ea)`) do explicit narrow/widen with assertable range
-   checks; implicit pointer → `uint32_t` narrowing is flagged by
+   checks; implicit pointer -> `uint32_t` narrowing is flagged by
    `-Wps3-ea32-truncation` when that warning is introduced.
 2. No public API in `cell/*.h` or `sys/*.h` SHALL declare a `void *`
    field with `mode(SI)`. Any such declaration is a conformance bug.
@@ -171,7 +187,7 @@ NID stub, and dumps the buffer. RPCS3 result:
 All 24 bytes decode to physically meaningful PS3 RSX values
 (GDDR3 clock is 650 MHz, RSX core is 500 MHz, `0xC0000000` is the
 RSX local-memory base in PPU EA space). Bytes 24-63 remain at the
-sentinel — the kernel writes **exactly 24 bytes**.
+sentinel - the kernel writes **exactly 24 bytes**.
 
 **Normative consequence:**
 
@@ -191,7 +207,7 @@ sentinel — the kernel writes **exactly 24 bytes**.
 
 Subsequent libgcm_sys work must preserve the
 24-byte kernel calling convention. The `mode(SI)` attribute on
-`gcmConfiguration`'s pointer fields is semantically correct — it
+`gcmConfiguration`'s pointer fields is semantically correct - it
 captures the kernel's 32-bit EA contract. Our own `gcmConfiguration`
 type (if/when we ship one) may use `lv2_ea32_t` instead of
 `void * mode(SI)` to avoid leaning on the GCC pointer-mode patch,
@@ -253,5 +269,5 @@ Every release candidate MUST:
 
 Deviations from this spec require either (a) a fixture update with
 documented rationale, or (b) a change to `abi-verify` with a regression
-test. The spec is authoritative — tools and code change to match it,
+test. The spec is authoritative - tools and code change to match it,
 not the other way around.

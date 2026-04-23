@@ -18,6 +18,11 @@ use serde::{Deserialize, Serialize};
 pub const ELFOSABI_CELL_LV2: u8 = 0x66;
 /// `.sys_proc_prx_param` magic value (BE).
 pub const SYS_PROC_PARAM_MAGIC: u32 = 0x1b43_4cec;
+
+/// Required value at `.sys_proc_prx_param` offset 0x20. Observed in every
+/// reference-SDK CEX binary surveyed; zero stalls the PRX loader. See
+/// docs/abi/cellos-lv2-abi-spec.md section 3 rule 5.
+pub const SYS_PROC_PRX_PARAM_ABI_VERSION: u32 = 0x0101_0000;
 /// CellOS Lv-2 compact `.opd` descriptor size in bytes.
 pub const LV2_OPD_ENTRY_SIZE: u64 = 8;
 
@@ -78,6 +83,10 @@ pub struct SysProcPrxParamSummary {
     pub magic: u32,
     pub version: u32,
     pub sdk_version: u32,
+    /// 32-bit value at offset 0x20 (spec section 3 rule 5).
+    /// Reference CEX binaries consistently have 0x01010000 here; zero
+    /// causes the PRX loader to stall before the entry point runs.
+    pub abi_version: u32,
     pub relocs: Vec<RelocAt>,
 }
 
@@ -345,11 +354,21 @@ fn summarize_sys_proc_prx_param(
         }
     }
 
+    // abi_version lives at offset 0x20, inside the 64-byte struct but
+    // past the 16-byte header guarded above. Guard independently so a
+    // stub-only prx_param (unusual, but possible) doesn't underflow.
+    let abi_version = if section_data.len() >= 0x24 {
+        be_u32(0x20)
+    } else {
+        0
+    };
+
     Ok(SysProcPrxParamSummary {
         size: be_u32(0),
         magic: be_u32(4),
         version: be_u32(8),
         sdk_version: be_u32(12),
+        abi_version,
         relocs: relocs_vec,
     })
 }
@@ -502,6 +521,17 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
             failures.push(format!(
                 ".sys_proc_prx_param size = 0x{:x}, expected 0x40",
                 p.size
+            ));
+        }
+        if p.abi_version == SYS_PROC_PRX_PARAM_ABI_VERSION {
+            passes.push(format!(
+                ".sys_proc_prx_param abi_version@0x20 = 0x{:08x}",
+                p.abi_version
+            ));
+        } else {
+            failures.push(format!(
+                ".sys_proc_prx_param abi_version@0x20 = 0x{:08x}, expected 0x{:08x}",
+                p.abi_version, SYS_PROC_PRX_PARAM_ABI_VERSION
             ));
         }
     }

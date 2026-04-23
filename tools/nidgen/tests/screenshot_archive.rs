@@ -55,12 +55,8 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
         assert!(asm.contains(&format!("{name}_fnid:")), "missing fnid: {name}");
         assert!(asm.contains(&format!("__{name}:")), "missing trampoline: {name}");
         assert!(
-            asm.contains(&format!(".quad __{name}")),
-            "missing opd entry EA: {name}",
-        );
-        assert!(
-            asm.contains(".long .TOC.@tocbase"),
-            "missing opd TOC marker",
+            asm.contains(&format!(".long __{name}, .TOC.")),
+            "missing opd entry EA+TOC: {name}",
         );
         assert!(asm.contains(nid), "missing nid value {nid} for {name}");
     }
