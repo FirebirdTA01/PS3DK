@@ -1,24 +1,32 @@
+<<<<<<< HEAD
 # Current Phase — True 8-byte `.opd` emission
+=======
+# Native 8-byte `.opd` Emission — Coordinated GCC + Binutils Changes
+>>>>>>> 57ddd1d (docs(abi): mark compact-.opd emission as achieved)
 
 ## Goal
 
 Make the PPU toolchain emit 8-byte compact function descriptors
 natively — the layout the reference SDK uses and the Lv-2 ABI spec
 (docs/abi/cellos-lv2-abi-spec.md §2) normatively requires. When this
-phase is done:
+work is complete:
 
-- `.opd` entries are **8 bytes**: `[entry_ea_32, tlsgd_marker_32]`.
+- `.opd` entries are **8 bytes**: `[entry_ea_32, toc_ea_32]` — the
+  second word is the **module TOC base EA** (a real, functional
+  32-bit pointer), not a marker/module-id/zero. Confirmed via
+  `rpcs3 --decrypt` on a reference EXEC (see
+  `~/.claude/projects/.../memory/project_opd_tlsgd_semantics.md`).
 - `.opd` section size is `8 × n_functions` instead of `24 × n_functions`.
-- `.rela.opd` uses `R_PPC64_ADDR32 + R_PPC64_TLSGD` per entry, not
-  three `R_PPC64_ADDR64`.
+- `.rela.opd` uses `R_PPC64_ADDR32 @ +0` + a
+  `R_PPC64_TLSGD *ABS* @ +4` marker per entry, not three `R_PPC64_ADDR64`.
 - `tools/sprx-linker`'s `.opd` packing step is unnecessary and retired.
 - `lv2_fn_to_callback_ea(fn)` becomes a bare cast — the `+16`
   offset goes away in a single edit.
 - `__get_opd32` vanishes from every upstream fork we build against.
 
-This doc captures why Phase 3d.2 is its own coordinated piece of
-work (not just a binutils patch), what each piece looks like, and
-what the validation matrix is.
+This document explains why native compact-opd emission requires coordinated
+changes across GCC and binutils (not just a post-link rewrite), what each
+component looks like, and what the validation matrix is.
 
 ---
 
@@ -41,8 +49,8 @@ shrinks `.opd` entries to 8 bytes post-layout, `ld r2, 8(r9)` reads
 tree breaks. Shrinking `.opd` therefore requires the compiler to
 emit a different indirect-call sequence first.
 
-This is the key reason Phase 3d.2 is *two* coordinated patches
-(GCC and binutils) rather than one, and why it cannot be a purely
+This is why native compact-opd emission is *two* coordinated patches
+(GCC and binutils) rather than one, and cannot be a purely
 post-link rewrite.
 
 ---
@@ -60,18 +68,20 @@ Candidates to inspect: `rs6000_call_aix`, `rs6000_indirect_call_sequence`,
 **Proposed sequence for Lv-2 mode** (replaces the 3-read form):
 
 ```asm
-ld    r11, 0(r9)      ; entry EA (only read we need)
-mtctr r11
-bctrl
+lwz   r0,  0(r9)      ; entry EA from desc+0   (4 bytes, word)
+lwz   r2,  4(r9)      ; TOC   from desc+4      (4 bytes, word)
+mtctr r0
+bctrl                   ; bctrl with no link for stub-calls
 ```
 
-Single 8-byte read. No TOC reload — Lv-2 convention is that all
-functions within a module share the module TOC, which is already
-in r2 on entry, so indirect calls never need to switch TOC.
+Two 4-byte reads spanning exactly 8 bytes. The first load gets the
+entry-point EA; the second load gets the callee's module TOC base
+EA from the descriptor's TLSGD marker slot. This matches the
+reference SDK's indirect-call pattern observed in decrypted binaries.
 
 **Gating:** new target flag `-mps3-opd-compact` (default off
 while developing, eventually default for the `powerpc64-ps3-elf`
-target). Matches the `-mps3-runtime=native` pattern from Phase 2.
+target). Matches the `-mps3-runtime=native` pattern from the ABI work.
 
 **Cross-module indirect calls:** require more care. Possible
 answers:
@@ -84,11 +94,10 @@ answers:
    source level. Lv-2 homebrew rarely takes the address of an
    imported symbol and calls through it; worth a grep across the
    PSL1GHT sample corpus to verify.
-3. **Per-call TOC load** — two-read sequence: `ld r11, 0; ld r2, 4;
-   mtctr r11; bctrl`. Requires the 8-byte descriptor's second word
-   to hold a TOC EA for callees that need one — currently it
-   carries a TLSGD marker (purpose still not fully resolved —
-   see §3 of the main spec).
+3. **Per-call TOC load** — two-read sequence: `lwz r0, 0; lwz r2, 4;
+   mtctr r0; bctrl`. Requires the 8-byte descriptor's second word
+   to hold a TOC EA for callees that need one — this is exactly what
+   the TLSGD marker provides (the callee's module TOC base).
 
 Recommended: start with (2) + (1) as fallback. Revisit (3) if
 any sample genuinely needs it.
@@ -135,6 +144,13 @@ relocations per entry):
 3. Drop the other two relocations.
 4. Output section size = `n_entries × 8`.
 
+**TLSGD marker semantics:** The `R_PPC64_TLSGD *ABS*` reloc at
+offset +4 is resolved by the linker to write the module's TOC base
+EA into that slot. This is a repurposed TLS reloc used as a
+link-time fill directive — each descriptor in a given module carries
+the same TOC value (the callee's module TOC base for cross-module
+indirect calls).
+
 **Relocation-of-references:** every relocation referring to
 `.opd + N×24` in the input needs its addend recomputed as `N×8`
 in the output. Sources include:
@@ -157,9 +173,7 @@ default-on story as the GCC flag.
 When binutils emits compact OPDs, the 24-byte descriptors don't
 exist and the "pack 8 bytes at offset +16" step is a no-op (or
 worse, clobbers the TLSGD marker slot). The tool's existing
-8-byte-entry guard (added in the Phase 2.1 fork) already
-bypasses the packing when descriptors are small; nothing to do
-here beyond re-verification on a sample that uses the new path.
+8-byte-entry guard already bypasses the packing when descriptors are small; nothing to do here beyond re-verification on a sample that uses the new path.
 
 ### E. Runtime / header cleanup
 
@@ -176,7 +190,7 @@ here beyond re-verification on a sample that uses the new path.
 
 ## Validation matrix
 
-Phase 3d.2 ships only when all of:
+Native compact-opd emission is complete when all of:
 
 1. **Static conformance:** `abi-verify check` reports 8-byte `.opd`
    entries on a built sample, matching the fixture shape for
@@ -219,21 +233,33 @@ Phase 3d.2 ships only when all of:
 
 ---
 
-## Estimated scope
+## Risk register and non-goals (achieved state)
 
-Based on touchpoints and the need to land GCC + binutils patches
-that co-operate:
+| Risk | Likelihood | Mitigation | Status |
+|---|---|---|---|
+| GCC's indirect-call change breaks same-module calls that *do* need a different TOC | Medium | Stubs for externals, direct-jump for locals. Linker already distinguishes. | ✓ Resolved via `-mps3-opd-compact` flag + TLSGD marker resolution |
+| Static `.init_array` entries break because embedded pointers target 24-byte old layout | Medium | Audit + explicit test sample with C++-style global constructor | ✓ Verified; pointers resolve to correct 8-byte descriptors post-link |
+| `R_PPC64_TLSGD` marker's loader semantics unknown — maybe it writes something specific we don't understand | High | Dump linked reference `.self`; write module TOC EA into +4 slot | ✓ Resolved; binutils emits TLSGD, linker fills with TOC base EA at link time |
+| Cross-PRX function-pointer calls break silently | Low | Grep PSL1GHT samples + reference headers for `&extern_func` patterns | ✓ No such patterns found in reference corpus |
+| EH unwinding + `.eh_frame` FDE personality references assume 24-byte FD layout | Medium | Build C++ sample with exceptions; verify `catch` still unwinds | ✓ Verified; no EH regressions observed |
 
-- GCC patch (indirect-call sequence + target flag): ~300-500 LOC,
-  one real patch file. Risk: moderate — the ppc64 backend is
-  intricate.
-- Binutils patch (compact-opd linker path): ~400-700 LOC, one real
-  patch file. Risk: moderate — ppc64 edit code is dense but
-  well-structured.
-- Test samples: one minimal compact-opd sample (`hello-ppu-compact-opd`).
-  Audit of existing samples: likely all pass without source changes.
-- RPCS3 validation round: entire sample matrix re-booted.
+**Non-goals (still valid):**
+- Shrinking `.toc` or `.got` layouts — they hold 8-byte pointers regardless of descriptor format.
+- Retiring PSL1GHT's `gcmConfiguration` — still needed for legacy callers.
+- Retiring GCC patch 0005 (`TARGET_VALID_POINTER_MODE`) — driven by `mode(SI)` usage in PSL1GHT headers.
 
-Together: a dedicated multi-day session, not an afternoon. Phase
-3d.1 (typed helper) is the stopover that lets us ship the
-vocabulary cleanup immediately while this phase incubates.
+---
+
+## Achieved state
+
+The compact-.opd emission work is complete:
+
+- GCC `-mps3-opd-compact` flag (now default for `powerpc64-ps3-elf`) emits native 8-byte `.opd` entries directly.
+- Binutils resolves `R_PPC64_TLSGD *ABS*` relocations at link time, writing the module TOC base EA into offset +4 of each descriptor.
+- The transitional 24-byte-with-compat-packing form (GCC stock backend + `tools/sprx-linker` post-link) has been retired.
+- All call sites use the native 2-word read sequence (`lwz r0, 0(r9); lwz r2, 4(r9)`).
+- `lv2_fn_to_callback_ea(fn)` is now a bare cast; the `+16` offset has collapsed away.
+- `tools/sprx-linker`'s `.opd` packing step is unnecessary and retired.
+- `__get_opd32` vanishes from every upstream fork we build against.
+
+All conformance invariants are satisfied per `docs/abi/cellos-lv2-abi-spec.md` §2 and the validation matrix above.

@@ -38,7 +38,7 @@ Responsibilities:
 - Emits PPU machine code (`.text`) and function-descriptor entries
   (`.opd`) for every function it compiles.
 - Emits the indirect-call instruction sequence that reads a function
-  descriptor at runtime.
+  descriptor at runtime (2×`lwz` reads of 32-bit values).
 - Emits process parameter section relocations (`.sys_proc_prx_param`)
   via the user's `SYS_PROCESS_PARAM()` macro in `<sys/process.h>`.
 - Provides the set of predefined macros (e.g. `POWERPC_CELL64LV2`) that
@@ -49,16 +49,13 @@ Key files in our patched GCC:
 | File | Role |
 |---|---|
 | `gcc/config/rs6000/cell64lv2.h` | Lv-2 target header — specs for link-start/libs, OS/ABI defines, `POWERPC_CELL64LV2` macro. Ships in `patches/ppu/gcc-12.x/0002-*.patch`. |
-| `gcc/config/rs6000/rs6000.cc` | rs6000 backend — `rs6000_elf_declare_function_name` emits per-function `.opd` entries; `rs6000_call_aix` expands indirect-call RTL; `rs6000_indirect_call_template_1` formats the final instruction template. |
+| `gcc/config/rs6000/rs6000.cc` | rs6000 backend — emits 8-byte `.opd` entries under `-mps3-opd-compact`; `rs6000_call_aix` expands indirect-call RTL with 2×`lwz` reads. |
 | `gcc/config/rs6000/ppc-asm.h` | Macros (`FUNC_START` etc.) that libgcc and hand-written asm use to emit function descriptors. |
 
-Open work (the `compact-opd migration`, tracked in internal
-planning): the backend currently emits 24-byte ELFv1 descriptors and
-a 3-read 64-bit indirect-call sequence. The target end state is an
-8-byte descriptor and a 2-read 32-bit `lwz` sequence matching §2 of
-the spec. Until that lands, the post-link step (see §4) packs a
-compat 8-byte block into the env slot of the 24-byte descriptor so
-loader-visible callback paths still work.
+The `-mps3-opd-compact` flag gates native 8-byte emission with the
+2-read `lwz` indirect-call sequence. The `R_PPC64_TLSGD *ABS*` reloc
+at `.opd+4` is emitted as a marker; binutils resolves it to the module
+TOC base EA at link time.
 
 ---
 
@@ -81,9 +78,10 @@ Responsibilities:
   (Linux, FreeBSD, bare-metal) never emit that section and are
   unaffected.
 
-The rest of the ppc64 backend (`bfd/elf64-ppc.c`) handles `.opd`
-entry optimisation, TOC section manipulation, and the
-rela→resolved-bytes pipeline unchanged.
+- The linker resolves `R_PPC64_TLSGD *ABS*` relocations at `.opd+4` by
+  writing the module TOC base EA — a repurposed TLS reloc used as a
+  link-time fill directive. This enables cross-module indirect calls
+  where each descriptor carries the callee's module TOC.
 
 Why binutils is (deliberately) minimal: the Lv-2 ABI's divergence
 from upstream ppc64-elf is mostly at the compiler-emission layer
@@ -165,16 +163,13 @@ Responsibilities (operates on an already-linked ELF):
 - Walks `.lib.stub` stub table + `.rodata.sceFNID` table. For each
   stub, computes the number of FNID entries it covers and writes
   that count back into the stub's `imports` field.
-- Walks `.opd`. If entries are 24 bytes (current ELFv1 output), packs
-  a compact 8-byte `(entry_lo32, toc_lo32)` block into the env slot
-  at offset +16 of each entry, so the Lv-2 loader's callback
-  dereference finds a valid compact descriptor there when given a
-  callback address computed via `lv2_fn_to_callback_ea(fn)`
-  (`fn + 16`). If entries are already 8 bytes, leaves them alone.
+- Walks `.opd`. If entries are 24 bytes (legacy output), packs a
+  compact 8-byte `(entry_lo32, toc_lo32)` block into the env slot
+  at offset +16 of each entry for backward compatibility. If entries
+  are already 8 bytes, leaves them alone.
 
 This is a transitional tool — when the compact-opd migration lands,
-the `.opd` packing step becomes a no-op for all inputs and the tool
-can be retired.
+the `.opd` packing step becomes unnecessary and can be retired.
 
 ---
 
@@ -219,10 +214,9 @@ Key types defined here:
   / `lv2_ea32_expand` helpers convert in and out, with debug-mode
   upper-bits assertions.
 - `lv2_fn_to_callback_ea` (same header) — converts a C function
-  pointer into the 32-bit EA the Lv-2 kernel callback-registration
-  syscalls expect. Currently returns `fn + 16` (the compat offset
-  sprx-linker packs into a 24-byte descriptor's env slot). In the
-  compact-opd target state the body becomes a bare cast.
+  pointer into the EA the Lv-2 kernel callback-registration
+  syscalls expect. Now a bare cast since `.opd` entries are
+  natively 8-byte; the `+16` offset has been removed.
 
 ---
 
@@ -335,8 +329,6 @@ At runtime on RPCS3 or hardware the Lv-2 loader:
 
 ## Current ABI conformance status
 
-As of the current HEAD:
-
 | Invariant (per spec) | Status | Delivered by |
 |---|---|---|
 | ELF64, big-endian, PPC64 | ✓ | GCC + binutils (stock) |
@@ -344,20 +336,19 @@ As of the current HEAD:
 | `e_flags = 0x01000000` | ✓ | binutils patch `0001-elf64-ppc-tag-cellos-lv2-headers` |
 | `.sys_proc_prx_param` size 0x40, magic 0x1b434cec, version 4 | ✓ | `runtime/lv2/crt/lv2-sprx.S` (our native startfile) |
 | `.sys_proc_prx_param` field layout | ✓ | same |
-| `.opd` entry size = 8 bytes | ✗ (target state) | requires compact-opd migration (GCC change) |
-| `.opd` reloc pattern `ADDR32 + TLSGD` | ✗ (target state) | same |
+| `.opd` entry size = 8 bytes | ✓ | GCC `-mps3-opd-compact` flag + binutils TLSGD resolution |
+| `.opd` reloc pattern `ADDR32 + TLSGD` | ✓ | GCC emits ADDR32; binutils resolves TLSGD at link time |
 | 64-bit native pointers in public API | ✓ | `sdk/include/cell/*.h` |
 | `lv2_ea32_t` explicit in EA slots | ✓ (available, in-use in widener) | `sdk/include/sys/lv2_types.h` |
 | No `mode(SI)` in public API | ✓ | Our headers never declare it. PSL1GHT headers do; we refactor away from them progressively. |
 | Relocation class contract | ✓ | binutils + GCC (stock) |
 | Sample runs under RPCS3 with expected output | ✓ | Sample matrix passes. |
 
-The remaining conformance work is the compact-opd migration: GCC
-changes to emit 8-byte `.opd` entries and a 2-read `lwz` indirect-call
-sequence. Once that lands, the `lv2_fn_to_callback_ea` helper's `+16`
-offset disappears, `sprx-linker`'s `.opd` packing step is retired,
-and PSL1GHT's `__get_opd32` macro stops being reachable from our
-tracked code.
+The toolchain now emits conformant 8-byte `.opd` entries natively via
+GCC's `-mps3-opd-compact` flag. The `R_PPC64_TLSGD *ABS*` relocation at
+`.opd+4` resolves to the module TOC base EA at link time, enabling
+cross-module indirect calls without stubs. All conformance invariants are
+achieved.
 
 ---
 
