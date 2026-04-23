@@ -51,7 +51,7 @@ diff --git a/libgloss/libsysbase/getentropy.c b/libgloss/libsysbase/getentropy.c
 new file mode 100644
 --- /dev/null
 +++ b/libgloss/libsysbase/getentropy.c
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,25 @@
 +#include <errno.h>
 +#include <stddef.h>
 +#include <unistd.h>

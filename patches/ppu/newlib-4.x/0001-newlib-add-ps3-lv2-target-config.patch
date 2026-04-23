@@ -2,7 +2,7 @@ diff --git a/newlib/configure.host b/newlib/configure.host
 index 3861834..7655d85 100644
 --- a/newlib/configure.host
 +++ b/newlib/configure.host
-@@ -541,6 +541,12 @@ case "${host}" in
+@@ -541,6 +541,13 @@ case "${host}" in
  	newlib_cflags="${newlib_cflags} -DREENTRANT_SYSCALLS_PROVIDED "
  	have_crt0="no"
  	;;

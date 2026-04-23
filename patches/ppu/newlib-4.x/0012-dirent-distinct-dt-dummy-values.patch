@@ -1,0 +1,49 @@
+Subject: [PATCH] lv2 dirent.h: give DT_* placeholders distinct values
+
+The LV2 dirent.h declares DT_FIFO, DT_CHR, DT_BLK, DT_SOCK, DT_WHT
+all as the same DT_INVALID (0xff) sentinel, since the LV2 filesystem
+does not expose those file types.  libstdc++ 12.x's
+<filesystem/dir-common.h> has a switch statement that branches on
+all eight DT_* values:
+
+    switch (d.d_type) {
+      case DT_BLK: ...
+      case DT_CHR: ...
+      case DT_FIFO: ...
+      ...
+    }
+
+With the DT_INVALID aliasing these compile-time-equal values produce
+"duplicate case value" errors and libstdc++ fails to build.
+
+Give each placeholder a distinct dummy value outside the normal
+d_type range (0xf1..0xf5) so the switch statement compiles cleanly.
+Run-time no LV2 directory read ever produces these values, so the
+case labels are never hit.
+
+diff --git a/newlib/libc/sys/lv2/sys/dirent.h b/newlib/libc/sys/lv2/sys/dirent.h
+--- a/newlib/libc/sys/lv2/sys/dirent.h
++++ b/newlib/libc/sys/lv2/sys/dirent.h
+@@ -8,13 +8,17 @@
+
+ #define DT_INVALID			0xff
+ #define DT_UNKNOWN			0
+-#define DT_FIFO				DT_INVALID
+-#define DT_CHR				DT_INVALID
+ #define DT_DIR				1
+-#define DT_BLK				DT_INVALID
+ #define DT_REG				2
+ #define DT_LNK				3
+-#define DT_SOCK				DT_INVALID
+-#define DT_WHT				DT_INVALID
++/* Distinct dummy values for file types the LV2 filesystem does not
++ * report.  Kept outside the normal d_type range so no LV2 directory
++ * read produces them at runtime; the labels exist only so libstdc++
++ * and other consumers with switch-on-d_type code compile cleanly. */
++#define DT_FIFO				0xf1
++#define DT_CHR				0xf2
++#define DT_BLK				0xf3
++#define DT_SOCK				0xf4
++#define DT_WHT				0xf5
+
+ #define dirfd(dp)			((dp)->dd_fd)
