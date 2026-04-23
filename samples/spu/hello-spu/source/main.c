@@ -29,17 +29,17 @@ int main(int argc, char **argv)
     sysSpuImageImport(&image, hello_spu_bin, 0);
 
     sysSpuThreadGroupAttribute grpattr = {
-        .nsize = 8,
-        .name  = ptr2ea("hello_grp"),
-        .type  = 0,
-        .ct    = 0,
+        .nsize     = 8,
+        .name      = (const char *)ptr2ea("hello_grp"),
+        .type      = 0,
+        .option.ct = 0,
     };
     sysSpuThreadGroupCreate(&group_id, 1, 100, &grpattr);
 
     sysSpuThreadAttribute attr = {
-        .name     = ptr2ea("hello_thr"),
-        .nsize    = 9,
-        .attribute = SPU_THREAD_ATTR_NONE,
+        .name   = (const char *)ptr2ea("hello_thr"),
+        .nsize  = 9,
+        .option = SPU_THREAD_ATTR_NONE,
     };
     sysSpuThreadArgument arg = {
         .arg0 = ptr2ea(&spu_done),

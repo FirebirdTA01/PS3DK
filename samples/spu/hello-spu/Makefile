@@ -38,8 +38,11 @@ export VPATH    := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
 export DEPSDIR  := $(CURDIR)/$(BUILD)
 export BUILDDIR := $(CURDIR)/$(BUILD)
 
-# SPU binary artifact: spu/hello_spu.elf -> hello_spu.bin -> hello_spu_bin.{h,o}
+# SPU binary artifact: spu/hello_spu.elf is copied to data/hello_spu.bin so
+# VPATH's DATA entry picks it up; the bin2o rule in the build sub-make then
+# embeds it into the PPU ELF as an object.
 SPU_ELF := $(CURDIR)/spu/hello_spu.elf
+SPU_BIN := $(CURDIR)/$(firstword $(DATA))/hello_spu.bin
 
 CFILES    := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES  := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
@@ -69,11 +72,13 @@ export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
 
 .PHONY: $(BUILD) clean run spu
 
-$(BUILD): spu
+$(BUILD): $(SPU_BIN)
 	@[ -d $@ ] || mkdir -p $@
-	@cp -f $(SPU_ELF) hello_spu.elf
-	@sprxlinker hello_spu.elf || true
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+
+$(SPU_BIN): spu
+	@mkdir -p $(dir $@)
+	@cp -f $(SPU_ELF) $@
 
 spu:
 	@$(MAKE) --no-print-directory -C spu
@@ -81,7 +86,7 @@ spu:
 clean:
 	@echo clean ...
 	@$(MAKE) --no-print-directory -C spu clean
-	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).self hello_spu.elf hello_spu.bin
+	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).self $(SPU_BIN)
 
 run:
 	ps3load $(OUTPUT).self
