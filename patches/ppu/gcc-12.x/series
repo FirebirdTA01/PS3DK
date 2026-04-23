@@ -5,3 +5,4 @@
 0004-libgcc-config-host-ps3.patch
 0005-rs6000-cell64lv2-pointer-mode.patch
 0006-libstdcxx-crossconfig-ps3.patch
+0007-rs6000-cell64lv2-compact-opd.patch
