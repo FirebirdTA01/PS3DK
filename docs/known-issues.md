@@ -7,6 +7,21 @@ next surface.
 
 ---
 
+## Compact `.opd` emission: achieved (retired from issues list)
+
+**Status:** complete.  GCC `-mps3-opd-compact` flag emits native 8-byte
+`.opd` entries; binutils resolves `R_PPC64_TLSGD *ABS*` at link time to
+write the module TOC base into offset +4. The transitional 24-byte-with-
+compat-packing form (GCC stock backend + sprx-linker post-link) has been
+retired; all call sites now use the native 2-word read sequence.
+
+**Validation.** See `docs/abi/compact-opd-migration.md` for conformance
+notes and test plan. The ABI spec (`docs/abi/cellos-lv2-abi-spec.md`)
+and architecture overview (`docs/abi/toolchain-architecture.md`) have
+been updated to reflect the achieved state.
+
+---
+
 ## FIFO wrap drain-wait causes occasional frame flicker
 
 **Status:** works correctly (no hangs, no desync), but drops the

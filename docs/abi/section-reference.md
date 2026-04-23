@@ -7,7 +7,7 @@ this toolchain emits or consumes. Companion to
 
 Two things this document covers that the spec doesn't:
 
-1. The **current** on-disk layouts (24-byte ELFv1 `.opd` plus a
+1. The **current** on-disk layouts (8-byte ELFv1 `.opd` plus a
    compat packing trick), not just the target-state layouts.
 2. The full relationship between the relocation-level contract, the
    instruction-level contract, and the loader-level contract for
@@ -105,20 +105,41 @@ it requires no binutils patch and produces byte-identical output.
 
 ### 1.4 Why two reads, not three
 
-A previous ABI generation used the PowerPC ELFv1 24-byte
-three-doubleword descriptor: `[entry_addr_64, toc_addr_64, env_64]`.
-GCC's default ppc64 indirect-call sequence reads all three
-doublewords (`ld r10, 0(r9); ld r11, 16(r9); ld r2, 8(r9)`).
+The PowerPC ELFv1 standard defined a 24-byte function descriptor:
+`[entry_addr_64, toc_addr_64, env_64]`. GCC's default ppc64 indirect-call
+sequence reads all three doublewords (`ld r10, 0(r9); ld r11, 16(r9);
+ld r2, 8(r9)`).
 
 Lv-2 dropped the `env` doubleword — the upper 8 bytes of a 24-byte
 entry were unused for non-nested-function callees. Shrinking to 8
 bytes (2×`.long` instead of 3×`.quad`) halved `.opd` size and
 adjusted the call sequence to `lwz` reads of the low 32 bits.
 
-### 1.5 Transitional 24-byte-with-compat-packing form
+### 1.5 Native 8-byte `.opd` emission (achieved)
 
-A transitional output format, produced by GCC 12's stock ppc64
-backend plus our `tools/sprx-linker` post-link pass:
+The current toolchain emits native 8-byte `.opd` entries:
+
+```
+offset  size  contents                               reloc
+------  ----  ----------------------------------     ------------------
+0x00    4     Function entry-point EA (32-bit)       R_PPC64_ADDR32 .funcname
+0x04    4     Module TOC base EA (32-bit)            R_PPC64_TLSGD *ABS* +0
+```
+
+The `R_PPC64_TLSGD *ABS*` reloc at offset +4 is resolved by the linker
+to write the module's TOC base EA into that slot. This is a repurposed
+TLS reloc used as a link-time fill directive — each descriptor in a
+given module carries the same TOC value (the callee's module TOC base
+for cross-module indirect calls).
+
+The 8-byte layout matches what the reference SDK produces and what the
+Lv-2 ABI spec (§2) normatively requires. The `.opd` section size is
+`8 × n_functions`, not `24 × n_functions`.
+
+### 1.6 Transitional form — retired
+
+A transitional output format, produced by GCC 12's stock ppc64 backend
+plus `tools/sprx-linker` post-link pass:
 
 ```
 offset  size  contents                        reloc
@@ -130,21 +151,37 @@ offset  size  contents                        reloc
               slot written as .quad 0 by the compiler)
 ```
 
-The 8-byte block at offset +16 matches the Lv-2 compact format
-byte-for-byte. Callback-registration paths (see
-`sdk/include/sys/lv2_types.h`'s `lv2_fn_to_callback_ea`) add 16 to
-the function pointer to reach this compact block; the Lv-2 kernel
-sees a valid compact descriptor at the EA it was given.
+This form has been retired. GCC now emits native 8-byte `.opd` entries
+directly; `lv2_fn_to_callback_ea`'s `+16` offset has collapsed to a bare
+cast. The packing step in sprx-linker is no longer needed.
 
-This form is a bridge. When GCC and the assembly emitters are
-switched to native 8-byte `.opd` emission, the packing step in
-sprx-linker becomes a no-op and `lv2_fn_to_callback_ea`'s `+16`
-offset collapses to a bare cast.
+### 1.7 Instruction sequence for native 8-byte `.opd`
 
-### 1.6 Instruction sequence for 24-byte `.opd`
+The indirect-call sequence the current toolchain emits:
 
-For completeness, the 3-read sequence the current (transitional)
-toolchain emits:
+```asm
+std   r2, 40(r1)     ; save caller TOC (standard ABI stack slot)
+lwz   r0, 0(r9)      ; r0 = entry EA (zero-extends word to full reg)
+mtctr r0
+lwz   r2, 4(r9)      ; r2 = callee's module TOC base
+bctrl                ; call
+ld    r2, 40(r1)     ; restore caller TOC (emitted in function epilogue
+                     ; or at the next call site that needs r2)
+```
+
+Four instructions on the call path plus two for TOC save/restore.
+`lwz` is the 32-bit load-zero-extend instruction — it reads 4 bytes
+and zeroes the upper 32 bits of the 64-bit register, which is
+correct for Lv-2 userland EAs that fit in 32 bits.
+
+Note that TOC switching happens automatically on every indirect
+call: the caller's TOC is saved to the standard stack slot at
+`40(r1)`, and the callee's TOC is loaded from the descriptor.
+Cross-module indirect calls therefore work without any stub or
+trampoline — the descriptor itself carries the right TOC.
+
+For completeness, the 3-read sequence that was used with the
+transitional (retired) toolchain:
 
 ```asm
 std   r2, 40(r1)     ; save caller TOC
@@ -156,7 +193,7 @@ bctrl
 ```
 
 Five instructions plus TOC save, using `ld` (64-bit load) instead of
-`lwz`. Works with the current output. Breaks if `.opd` entries are
+`lwz`. Works with the transitional output. Breaks if `.opd` entries are
 shrunk without a GCC change.
 
 ---
@@ -410,9 +447,12 @@ headers) can still be dispatched.
   (what MUST be true).
 - `docs/abi/toolchain-architecture.md` — which toolchain component
   emits or consumes which section.
+- `docs/abi/compact-opd-migration.md` — coordinated GCC + binutils
+  changes for native 8-byte `.opd` emission.
 - `tools/abi-verify/src/lib.rs` — structural checker that enforces
   these layouts on built artifacts.
 - `tools/sprx-linker/sprx-linker.c` — post-link fix-ups (`.lib.stub`
-  import counts, transitional `.opd` packing).
+  import counts). The transitional `.opd` packing step has been
+  retired; native GCC emission is used directly.
 - `runtime/lv2/crt/lv2-sprx.S` — our native `.sys_proc_prx_param`
   emitter.
