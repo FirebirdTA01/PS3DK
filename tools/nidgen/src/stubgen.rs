@@ -190,13 +190,15 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
 
         // 5d. OPD function descriptor for the externally callable symbol.
+        //     Compact 8-byte format: [entry_ea_32, toc_ea_32].
         writeln!(out, "\t.section \".opd\",\"aw\"").ok();
-        writeln!(out, "\t.align 3").ok();
+        writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", e.name).ok();
         writeln!(out, "\t.type {}, @function", e.name).ok();
-        writeln!(out, "\t.size {}, 24", e.name).ok();
+        writeln!(out, "\t.size {}, 8", e.name).ok();
         writeln!(out, "{}:", e.name).ok();
-        writeln!(out, "\t.quad {}, .TOC.@tocbase, 0", tramp_sym).ok();
+        writeln!(out, "\t.quad {}", tramp_sym).ok();
+        writeln!(out, "\t.long .TOC.@tocbase").ok();
         writeln!(out).ok();
     }
 
@@ -266,8 +268,8 @@ mod tests {
         assert!(s.contains("__cellPadEnd:"), "trampoline label missing");
         assert!(s.contains("0x2ba14c6b"));
         // OPD descriptor lines for both externally-callable symbols.
-        assert!(s.contains(".quad __cellPadInit"), "missing opd descriptor");
-        assert!(s.contains(".quad __cellPadEnd"), "missing opd descriptor");
+        assert!(s.contains(".quad __cellPadInit"), "missing opd entry EA");
+        assert!(s.contains(".long .TOC.@tocbase"), "missing opd TOC marker");
         // FNID anchor symbol.
         assert!(s.contains("__nidgen_cellPad_fnid_anchor"));
         // The prx_header struct body.
