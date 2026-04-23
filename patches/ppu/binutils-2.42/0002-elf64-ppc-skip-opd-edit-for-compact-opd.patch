@@ -1,0 +1,38 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] elf64-ppc: skip OPD optimisation for compact 8-byte .opd
+
+CellOS Lv-2 uses a compact 8-byte function-descriptor format in
+.opd ([entry_ea_32, toc_ea_32] with R_PPC64_ADDR32 relocs at
+offsets 0 and 4).  ppc64_elf_edit_opd() assumes the standard
+PPC64 ELFv1 24-byte three-doubleword layout with
+R_PPC64_ADDR64+R_PPC64_TOC pairs at offsets 0 and 8, and emits
+".opd is not a regular array of opd entries" when the compact
+layout is present.
+
+Skip the OPD optimisation pass for compact .opd sections,
+detected by the section alignment_power: ELFv1 .opd uses
+alignment 8 (power=3), compact .opd uses alignment 4 (power=2).
+Compact .opd sections are much smaller than ELFv1 ones, so the
+lost optimisation is not material.
+
+--- a/bfd/elf64-ppc.c
++++ b/bfd/elf64-ppc.c
+@@ -7400,6 +7400,18 @@
+       if (sec->output_section == bfd_abs_section_ptr)
+ 	continue;
+ 
++      /* CellOS Lv-2 uses a compact 8-byte .opd layout
++	 [entry_ea_32, toc_ea_32] with 4-byte alignment and only
++	 R_PPC64_ADDR32 relocations -- incompatible with the
++	 24-byte ELFv1 layout this pass assumes.  Detected via
++	 alignment power: ELFv1 .opd uses 8-byte alignment
++	 (power=3); compact .opd uses 4-byte (power=2).  Skip
++	 OPD optimisation entirely for compact sections; they
++	 are small enough that the lost optimisation does not
++	 matter.  */
++      if (sec->alignment_power < 3)
++	continue;
++
+       /* Look through the section relocs.  */
+       if ((sec->flags & SEC_RELOC) == 0 || sec->reloc_count == 0)
+ 	continue;

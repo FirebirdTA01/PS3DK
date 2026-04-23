@@ -17,6 +17,13 @@ Gating on the presence of .sys_proc_prx_param keeps standard ppc64
 output (Linux, FreeBSD, bare-metal) unaffected — only PS3 userland
 binaries, which uniquely ship that section, receive the tags.
 
+Additionally gate on e_type != ET_REL: relocatable objects that
+carry .sys_proc_prx_param (for example, the Lv-2 SPRX startfile
+object) must keep default e_flags / EI_OSABI so the linker can
+merge them with other REL inputs -- otherwise ld rejects the merge
+with "unknown e_flags". The tags belong on the final linked
+executable or shared object only.
+
 --- a/bfd/elf64-ppc.c
 +++ b/bfd/elf64-ppc.c
 @@ -133,6 +133,7 @@
@@ -27,7 +34,7 @@ binaries, which uniquely ship that section, receive the tags.
  #define elf_backend_get_reloc_section	      bfd_get_section_by_name
 
  /* The name of the dynamic interpreter.  This is put in the .interp
-@@ -18407,6 +18408,25 @@
+@@ -18407,6 +18408,32 @@
    return _bfd_elf_free_cached_info (abfd);
  }
 
@@ -37,12 +44,19 @@ binaries, which uniquely ship that section, receive the tags.
 +   to Lv-2 process parameter blocks — so standard ppc64 targets
 +   (Linux, FreeBSD, bare-metal) are unaffected. e_flags is assigned
 +   rather than OR'd because Lv-2 does not use the EF_PPC64_ABI low
-+   bits that otherwise mark ELFv1 / ELFv2.  */
++   bits that otherwise mark ELFv1 / ELFv2.
++
++   Only tag fully linked outputs (ET_EXEC, ET_DYN). Relocatable REL
++   objects that happen to contribute the .sys_proc_prx_param section
++   must keep their default e_flags / EI_OSABI so the linker can merge
++   them with other REL inputs -- tagging them breaks the merge with
++   "unknown e_flags" at ld time.  */
 +
 +static bool
 +ppc64_elf_final_write_processing (bfd *abfd)
 +{
-+  if (bfd_get_section_by_name (abfd, ".sys_proc_prx_param") != NULL)
++  if (elf_elfheader (abfd)->e_type != ET_REL
++      && bfd_get_section_by_name (abfd, ".sys_proc_prx_param") != NULL)
 +    {
 +      elf_elfheader (abfd)->e_ident[EI_OSABI] = 0x66;
 +      elf_elfheader (abfd)->e_flags = 0x01000000;
