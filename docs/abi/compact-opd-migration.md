@@ -1,4 +1,4 @@
-# Phase 3d.2 — True 8-byte `.opd` emission
+# Current Phase — True 8-byte `.opd` emission
 
 ## Goal
 
