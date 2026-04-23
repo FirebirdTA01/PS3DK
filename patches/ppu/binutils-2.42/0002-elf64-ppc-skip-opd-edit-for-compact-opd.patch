@@ -1,23 +1,74 @@
 From: PS3 Custom Toolchain
-Subject: [PATCH] elf64-ppc: skip OPD optimisation for compact 8-byte .opd
+Subject: [PATCH] elf64-ppc: compact-OPD support for Cell OS Lv-2
 
-CellOS Lv-2 uses a compact 8-byte function-descriptor format in
-.opd ([entry_ea_32, toc_ea_32] with R_PPC64_ADDR32 relocs at
-offsets 0 and 4).  ppc64_elf_edit_opd() assumes the standard
-PPC64 ELFv1 24-byte three-doubleword layout with
-R_PPC64_ADDR64+R_PPC64_TOC pairs at offsets 0 and 8, and emits
-".opd is not a regular array of opd entries" when the compact
-layout is present.
+CellOS Lv-2 uses a compact 8-byte function-descriptor format in .opd
+([entry_ea_32, toc_ea_32] with R_PPC64_ADDR32 relocs at offsets 0 and 4,
+4-byte alignment). Upstream binutils assumes 24-byte ELFv1 descriptors
+(R_PPC64_ADDR64 + R_PPC64_TOC, 8-byte alignment). Two touchpoints need
+compact-awareness for Lv-2 userland ELFs to link correctly:
 
-Skip the OPD optimisation pass for compact .opd sections,
-detected by the section alignment_power: ELFv1 .opd uses
-alignment 8 (power=3), compact .opd uses alignment 4 (power=2).
-Compact .opd sections are much smaller than ELFv1 ones, so the
-lost optimisation is not material.
+  1. ppc64_elf_edit_opd() validates / rewrites .opd assuming the ELFv1
+     layout; its checks reject compact descriptors as "not a regular
+     array of opd entries". We skip the pass entirely for compact
+     sections (detected by alignment_power < 3); they are small enough
+     that the lost unused-entry trimming is not material.
 
---- a/bfd/elf64-ppc.c
-+++ b/bfd/elf64-ppc.c
-@@ -7400,6 +7400,18 @@
+  2. opd_entry_value() is the canonical way the linker walks a .opd
+     entry to learn the callee's code-section address. Both the BL
+     call-redirect path in ppc64_elf_relocate_section and the debug
+     / addr2line plumbing route through this function. The upstream
+     implementation dereferences the entry with bfd_get_64 in the
+     no-relocs path and keys the relocs-path on a (R_PPC64_ADDR64,
+     R_PPC64_TOC) pair; neither matches compact layout, so every
+     `bl foo' where foo resolves to a compact OPD symbol silently
+     falls through to a direct branch at the OPD's data address -
+     the branch lands in .opd (W-A, no execute) and faults the
+     instant the instruction fetches.
+
+Fix: make opd_entry_value read the first 4 bytes as the callee entry
+EA when the OPD section is compact, and accept a standalone
+R_PPC64_ADDR32 at the entry offset (ignoring the paired TOC reloc at
++4) as the entry reloc. The BL-redirect path then works for compact
+binaries exactly as it does for classic ELFv1.
+
+--- a/bfd/elf64-ppc.c	2026-04-23 17:54:53.784004496 -0500
++++ b/bfd/elf64-ppc.c	2026-04-23 17:55:25.861197466 -0500
+@@ -5578,7 +5578,15 @@
+       if (offset + 7 >= opd_sec->size || offset + 7 < offset)
+ 	return (bfd_vma) -1;
+ 
+-      val = bfd_get_64 (opd_bfd, contents + offset);
++      /* CellOS Lv-2 uses a compact 8-byte descriptor [entry_ea_32,
++	 toc_ea_32] at 4-byte alignment.  Upstream ELFv1 descriptors
++	 are 24-byte at 8-byte alignment.  Detect by alignment_power:
++	 < 3 means compact, read the 32-bit entry EA; otherwise read
++	 the 64-bit ELFv1 func field.  */
++      if (opd_sec->alignment_power < 3)
++	val = bfd_get_32 (opd_bfd, contents + offset);
++      else
++	val = bfd_get_64 (opd_bfd, contents + offset);
+       if (code_sec != NULL)
+ 	{
+ 	  asection *sec, *likely = NULL;
+@@ -5630,8 +5638,15 @@
+ 	{
+ 	  Elf_Internal_Shdr *symtab_hdr = &elf_symtab_hdr (opd_bfd);
+ 
+-	  if (ELF64_R_TYPE (look->r_info) == R_PPC64_ADDR64
+-	      && ELF64_R_TYPE ((look + 1)->r_info) == R_PPC64_TOC)
++	  /* Accept either the ELFv1 (R_PPC64_ADDR64, R_PPC64_TOC) pair
++	     or a Cell compact R_PPC64_ADDR32 at the entry offset (the
++	     paired R_PPC64_ADDR32 against .TOC. at +4 is the per-entry
++	     TOC slot and is not consulted here - the callee's code
++	     section is what we want to return).  */
++	  if ((ELF64_R_TYPE (look->r_info) == R_PPC64_ADDR64
++	       && ELF64_R_TYPE ((look + 1)->r_info) == R_PPC64_TOC)
++	      || (ELF64_R_TYPE (look->r_info) == R_PPC64_ADDR32
++		  && opd_sec->alignment_power < 3))
+ 	    {
+ 	      unsigned long symndx = ELF64_R_SYM (look->r_info);
+ 	      asection *sec = NULL;
+@@ -7399,6 +7414,19 @@
        if (sec->output_section == bfd_abs_section_ptr)
  	continue;
  
@@ -29,7 +80,8 @@ lost optimisation is not material.
 +	 (power=3); compact .opd uses 4-byte (power=2).  Skip
 +	 OPD optimisation entirely for compact sections; they
 +	 are small enough that the lost optimisation does not
-+	 matter.  */
++	 matter.  The BL-redirect path in relocate_section still
++	 works for compact .opd via opd_entry_value().  */
 +      if (sec->alignment_power < 3)
 +	continue;
 +
