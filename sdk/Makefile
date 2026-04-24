@@ -54,7 +54,8 @@ HEADERS := \
     include/cell/sysutil_music_decode.h \
     include/cell/sysutil_music_export.h \
     include/cell/sysutil_imejp.h \
-    include/cell/codec/jpgdec.h
+    include/cell/codec/jpgdec.h \
+    include/cell/cgb.h
 
 SUBLIBS := libgcm_cmd libdbgfont
 
