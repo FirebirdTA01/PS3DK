@@ -173,13 +173,20 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	/* .opd compat packing. Only apply to 24-byte ELFv1 descriptors —
-	   the spec-correct 8-byte descriptors need no post-processing. */
+	/* .opd compat packing. Only apply to 24-byte ELFv1 descriptors -
+	   the spec-correct 8-byte descriptors need no post-processing.
+	   Distinguish via section alignment: ELFv1 descriptors are 8-byte
+	   aligned (sh_addralign >= 8), compact descriptors are 4-byte
+	   aligned. Divisibility-by-24 on the section size alone is not
+	   a reliable detector because a compact-OPD section of N*3
+	   entries is also divisible by 24, and treating it as ELFv1
+	   corrupts every third compact entry. */
 	Elf_Scn *opdsection = getSection(elf, ".opd");
 	if(opdsection) {
 		Elf_Data *opddata = elf_getdata(opdsection, NULL);
 		Elf64_Shdr *opdshdr = elf64_getshdr(opdsection);
-		if(opddata && opddata->d_size % sizeof(Opd24) == 0
+		if(opddata && opdshdr && opdshdr->sh_addralign >= 8
+		   && opddata->d_size % sizeof(Opd24) == 0
 		   && opddata->d_size >= sizeof(Opd24)) {
 			Opd24 *opdbase = (Opd24 *)opddata->d_buf;
 			size_t opdcount = opddata->d_size / sizeof(Opd24);
@@ -195,7 +202,7 @@ int main(int argc, char *argv[])
 				}
 			}
 		}
-		/* else: 8-byte entries or empty — leave alone. */
+		/* else: compact 8-byte entries or empty - leave alone. */
 	}
 
 	elf_end(elf);
