@@ -27,6 +27,7 @@ HEADERS := \
     include/sys/stat.h \
     include/sys/synchronization.h \
     include/sys/time_util.h \
+    include/sys/paths.h \
     include/sysutil/sysutil_sysparam.h \
     include/cell/pad.h \
     include/cell/error.h \
