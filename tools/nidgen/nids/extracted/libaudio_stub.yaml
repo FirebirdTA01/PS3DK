@@ -1,6 +1,7 @@
 library: cellAudio
 version: 1
 module: cellAudio
+archive_name: audio
 exports:
 - name: cellAudioAdd2chData
   nid: '0x9e4b1db8'
