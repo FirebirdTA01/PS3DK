@@ -171,9 +171,24 @@ default-on story as the GCC flag.
 ### D. `tools/sprx-linker` — stop packing
 
 When binutils emits compact OPDs, the 24-byte descriptors don't
-exist and the "pack 8 bytes at offset +16" step is a no-op (or
-worse, clobbers the TLSGD marker slot). The tool's existing
-8-byte-entry guard already bypasses the packing when descriptors are small; nothing to do here beyond re-verification on a sample that uses the new path.
+exist and the "pack 8 bytes at offset +16" step is a no-op - or,
+as we hit, worse: the divisibility-by-24 guard fires on any
+compact-OPD section whose entry count is a multiple of 3 (which
+is most of them in real binaries), and the packer then overwrites
+every third compact entry's 8 bytes with `[TOC, TOC]`. The
+observable symptom was `bctrl` through a corrupted descriptor
+landing at the TOC base address: e.g. `__syscalls_init`'s OPD
+pointing at 0x49500 instead of its `.text` entry, so the
+compiler-generated `__do_global_ctors_aux` loop crashed on the
+first constructor that happened to be the third entry in its
+input file's `.opd`.
+
+The fix is to gate the packer on `.opd` section `sh_addralign`:
+ELFv1 24-byte descriptors use 8-byte alignment (power = 3);
+compact 8-byte descriptors use 4-byte alignment (power = 2).
+Size-divisibility alone cannot distinguish them, because
+`N * 8 == M * 24` whenever N is a multiple of 3 - which is most
+real inputs.
 
 ### E. Runtime / header cleanup
 
