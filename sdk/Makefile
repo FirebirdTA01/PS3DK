@@ -38,6 +38,7 @@ HEADERS := \
     include/cell/gcm/gcm_tex_bridge.h \
     include/cell/gcm/gcm_command_c.h \
     include/cell/cell_video_out.h \
+    include/cell/cell_audio_out.h \
     include/cell/dbgfont.h \
     include/cell/sysutil.h \
     include/cell/msg_dialog.h \

@@ -1,0 +1,44 @@
+library: sysutil_audio_out
+version: 1
+module: cellSysutil
+exports:
+- name: cellAudioOutConfigure
+  nid: '0x4692ab35'
+  signature: ''
+  notes: cellSysutil subset — audio-out configure/commit
+- name: cellAudioOutGetConfiguration
+  nid: '0xed5d96af'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutGetDeviceInfo
+  nid: '0x7663e368'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutGetNumberOfDevice
+  nid: '0xe5e2b09d'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutGetSoundAvailability
+  nid: '0xc01b4e7c'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutGetSoundAvailability2
+  nid: '0x2beac488'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutGetState
+  nid: '0xf4e3caa0'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutRegisterCallback
+  nid: '0x68bc4ff3'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutSetCopyControl
+  nid: '0xc96e89e9'
+  signature: ''
+  notes: cellSysutil subset
+- name: cellAudioOutUnregisterCallback
+  nid: '0x9dfdad46'
+  signature: ''
+  notes: cellSysutil subset
