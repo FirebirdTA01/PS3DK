@@ -23,6 +23,31 @@
 extern "C" {
 #endif
 
+/* ---- error codes --------------------------------------------------- */
+#define CELL_VIDEO_OUT_SUCCEEDED                        0
+#define CELL_VIDEO_OUT_ERROR_NOT_IMPLEMENTED            0x8002b220
+#define CELL_VIDEO_OUT_ERROR_ILLEGAL_CONFIGURATION      0x8002b221
+#define CELL_VIDEO_OUT_ERROR_ILLEGAL_PARAMETER          0x8002b222
+#define CELL_VIDEO_OUT_ERROR_PARAMETER_OUT_OF_RANGE     0x8002b223
+#define CELL_VIDEO_OUT_ERROR_DEVICE_NOT_FOUND           0x8002b224
+#define CELL_VIDEO_OUT_ERROR_UNSUPPORTED_VIDEO_OUT      0x8002b225
+#define CELL_VIDEO_OUT_ERROR_UNSUPPORTED_DISPLAY_MODE   0x8002b226
+#define CELL_VIDEO_OUT_ERROR_CONDITION_BUSY             0x8002b227
+#define CELL_VIDEO_OUT_ERROR_VALUE_IS_NOT_SET           0x8002b228
+
+/* ---- output / device states --------------------------------------- */
+#define CELL_VIDEO_OUT_OUTPUT_STATE_ENABLED   0
+#define CELL_VIDEO_OUT_OUTPUT_STATE_DISABLED  1
+#define CELL_VIDEO_OUT_OUTPUT_STATE_PREPARING 2
+
+#define CELL_VIDEO_OUT_DEVICE_STATE_UNAVAILABLE 0
+#define CELL_VIDEO_OUT_DEVICE_STATE_AVAILABLE   1
+
+/* ---- color space -------------------------------------------------- */
+#define CELL_VIDEO_OUT_COLOR_SPACE_RGB   0x01
+#define CELL_VIDEO_OUT_COLOR_SPACE_YUV   0x02
+#define CELL_VIDEO_OUT_COLOR_SPACE_XVYCC 0x04
+
 /* ---- port / identity constants ------------------------------------ */
 #define CELL_VIDEO_OUT_PRIMARY            VIDEO_PRIMARY
 #define CELL_VIDEO_OUT_SECONDARY          VIDEO_SECONDARY

@@ -11,5 +11,6 @@
 
 #include <cell/sysutil_sysparam.h>
 #include <cell/cell_video_out.h>
+#include <cell/cell_audio_out.h>
 
 #endif
