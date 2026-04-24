@@ -59,6 +59,7 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libjpgdec_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libspurs_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libspurs_jq_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libspu_printf_stub.yaml"
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
