@@ -14,6 +14,9 @@ samples/**/*.map
 samples/**/*.pkg
 samples/**/*.gnpdrm.pkg
 
+# Derived sample assets copied from sdk/assets at pkg-build time.
+samples/sysutil/hello-ppu-png/pkg_files/USRDIR/ps3dk.png
+
 # Staging prefix ($PS3DEV install root)
 /stage/
 
