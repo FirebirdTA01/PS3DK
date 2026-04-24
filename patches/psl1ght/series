@@ -5,3 +5,4 @@
 0005-ps3load-stdbool.patch
 0006-ps3py-gcc-direct.patch
 0007-ppu-asm-compact-opd-no-widen.patch
+0008-ppu-strict-c-asm-keyword.patch
