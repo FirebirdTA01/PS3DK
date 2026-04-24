@@ -15,7 +15,8 @@ samples/
 ├── gcm/           RSX / cellGcm graphics (libgcm + libgcm_cmd + librsx)
 ├── sysutil/       sysutil callbacks, dialogs, save/game/system data
 ├── lv2/           lv2 syscall primitives (threading, synchronisation)
-└── spu/           SPU toolchain + PPU/SPU interop
+├── spu/           SPU toolchain + PPU/SPU interop
+└── spurs/         libspurs sync primitives + Spurs task runtime
 ```
 
 ## toolchain/
@@ -85,6 +86,29 @@ machinery.
 |---|---|---|
 | `hello-spu` | SPU toolchain + `spu_*`/`mfc_*` intrinsics + DMA write back to PPU | **green** |
 
+## spurs/
+
+libspurs sync primitives + Spurs task runtime.  PPU side goes through
+`<cell/spurs.h>` (Spurs / Spurs2 attribute + scheduler bring-up,
+Taskset class-0 and class-1, event-flag / queue / semaphore / barrier
+sub-surfaces, task + workload APIs) linking against
+`libspurs_stub.a`.  The Spurs-task samples additionally link their
+SPU-side ELF against `libspurs_task.a` (our clean-room SPU task
+runtime: `__spurs_task_start` crt + `cellSpursExit` /
+`cellSpursTaskExit` / `cellSpursGet{TaskId,TasksetAddress}` /
+`cellSpursYield` / `cellSpursTaskPoll` dispatching through the
+SPRX-owned control block at LS 0x2fb0) using the
+`$PS3DK/spu/ldscripts/spurs_task.ld` linker script that places task
+code at `CELL_SPURS_TASK_TOP` (LS 0x3000).
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-spurs-core` | Spurs2 4-SPU bring-up + SPU thread-id enumeration + finalize via the `cell::Spurs::SpursAttribute` / `Spurs2` C++ class wrappers | **green** + RPCS3 runtime-verified |
+| `hello-ppu-spurs-event-flag` | `cellSpursEventFlag*` IWL variant end-to-end: set + wait + GetTasksetAddress | **green** + RPCS3 runtime-verified |
+| `hello-ppu-spurs-queue` | `cellSpursQueue*` IWL variant: init, size/depth/entry-size/direction queries, TryPop-busy return path | **green** + RPCS3 runtime-verified |
+| `hello-ppu-spurs-semaphore` | `cellSpursSemaphore*` IWL variant: init + GetTasksetAddress | **green** + RPCS3 runtime-verified |
+| `hello-spurs-task` | Full PPU + SPU round-trip.  PPU spawns an embedded SPU task via `cellSpursCreateTask` on a class-0 taskset.  SPU task receives a PPU-visible flag EA in `argTask.u64[0]`, DMAs `0xC0FFEE` via `mfc_put`, exits via `cellSpursTaskExit(0)`; PPU observes the flag, Shutdown+Join, finalize | **green** + RPCS3 runtime-verified |
+
 ## Ideas for growth
 
 Planned additions follow the same per-subsystem pattern.  Representative
@@ -94,7 +118,6 @@ near-term candidates:
 - **`pad/`** — `cellPad` init + poll + actuator (force-feedback)
 - **`net/`** — `cellNetCtl` link check, HTTPS GET via mbedTLS + libcurl
 - **`video/`** — `cellVideoOut` mode detection + resolution switch
-- **`spurs/`** — SPU-thread-group scheduling via libspurs
 
 Each new subsystem gets its own subdirectory; new samples within an
 existing subsystem drop into the relevant directory.
