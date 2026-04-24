@@ -80,6 +80,7 @@ compile_commands.json
 .vscode/
 .vs/
 .idea/
+.qwen/
 *.swp
 *.swo
 *~
