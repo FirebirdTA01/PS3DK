@@ -18,6 +18,7 @@ INSTALL_INC := $(PS3DK)/ppu/include
 HEADERS := \
     include/types.h \
     include/sys/lv2_types.h \
+    include/sys/lv2_syscall.h \
     include/sys/timer.h \
     include/sys/sys_time.h \
     include/sys/return_code.h \
