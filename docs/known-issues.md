@@ -250,6 +250,42 @@ pad related so the triage sits naturally in that session.
 
 ---
 
+## Struct pointer fields crossing Cell SPRX boundary need ATTRIBUTE_PRXPTR
+
+**Status:** operational note. Applies to every new `cell/*.h` struct
+whose memory layout is consumed by a runtime-loaded Cell SPRX
+(cellJpgDec, cellAudio, cellPngDec, etc).
+
+The reference SDK compiles with a 32-bit-pointer ABI globally; every
+Cell SPRX expects "4-byte pointer at offset X" from the caller's
+struct. Our PPU64 toolchain uses natural 8-byte pointers, so a plain
+`void *field;` occupies 8 bytes and shifts every downstream field by
+4 (plus alignment padding). The SPRX reads offsets that no longer
+match and dereferences junk.
+
+**Fix:** every pointer field (including function pointers) in a
+struct that the SPRX reads must be tagged `ATTRIBUTE_PRXPTR` (expands
+to `__attribute__((mode(SI)))`). Include `<ppu-types.h>` for the
+macro. Pure-output structs the caller only reads (CellXxxInfo,
+CellXxxOutParam returned from ReadHeader / SetParameter) don't need
+it unless they chain into a later SPRX call.
+
+**Symptom:** crash inside the SPRX reading an address shaped like
+`0x00000000XX000000` or `0x0000000XXX00000000` (32-bit value landing
+in the high half of a 64-bit read). Runs fine up to the first SPRX
+call that consumes the malformed struct. Discovered on jpg_dec port
+(2026-04-24), applied to `sdk/include/cell/codec/jpgdec.h` for
+`CellJpgDecThreadInParam` / `CellJpgDecSrc` / `CellJpgDecInParam`.
+
+Handle types warrant the related pattern: when the reference header
+declares a handle as `void *`, prefer `typedef uint32_t CellXxxHandle;`
+in ours. The SPRX writes 4 bytes into `*handlePtr` at Create; a
+`uint64_t` or `void *` destination leaves the low 4 bytes undefined
+and handle-roundtrip fails with `CELL_XXX_ERROR_ARG`. Pattern already
+in pngdec and jpgdec handles.
+
+---
+
 ## Cell-SDK-compat struct-field aliases live in SDK, not in PSL1GHT
 
 **Status:** fixed. Documented here for the history of how it
