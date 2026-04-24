@@ -16,6 +16,7 @@ PS3DK       ?= $(PS3DEV)/ps3dk
 INSTALL_INC := $(PS3DK)/ppu/include
 
 HEADERS := \
+    include/types.h \
     include/sys/lv2_types.h \
     include/sys/timer.h \
     include/sys/sys_time.h \
@@ -52,7 +53,8 @@ HEADERS := \
     include/cell/sysutil_music.h \
     include/cell/sysutil_music_decode.h \
     include/cell/sysutil_music_export.h \
-    include/cell/sysutil_imejp.h
+    include/cell/sysutil_imejp.h \
+    include/cell/codec/jpgdec.h
 
 SUBLIBS := libgcm_cmd libdbgfont
 

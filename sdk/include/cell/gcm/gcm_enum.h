@@ -310,6 +310,14 @@ extern "C" {
 #define CELL_GCM_TEXTURE_MAX_ANISO_12            6
 #define CELL_GCM_TEXTURE_MAX_ANISO_16            7
 
+/* Shade model (NV40 shade-mode method arg). */
+#define CELL_GCM_FLAT                            0x1D00
+#define CELL_GCM_SMOOTH                          0x1D01
+
+/* Texture-cache invalidation flag (cellGcmSetInvalidateTextureCache arg). */
+#define CELL_GCM_INVALIDATE_TEXTURE              1
+#define CELL_GCM_INVALIDATE_VERTEX_TEXTURE       2
+
 #ifdef __cplusplus
 }
 #endif
