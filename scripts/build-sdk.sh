@@ -27,4 +27,16 @@ die() { printf "[sdk] ERROR: %s\n" "$*" >&2; exit 1; }
 say "building + installing SDK"
 make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
 
+# Replace PSL1GHT's default ICON0.PNG with our PS3DK-branded one.
+# Samples that don't override ICON0 in their Makefile pick up whatever
+# lives at $PS3DEV/bin/ICON0.PNG; this install makes that our icon
+# instead of the PSL1GHT logo PSL1GHT itself drops there during its
+# own tool install.  Re-run this after any build-psl1ght.sh since that
+# restores the PSL1GHT default on top of us.
+icon_src="$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG"
+if [[ -f "$icon_src" ]]; then
+    install -m 0644 "$icon_src" "$PS3DEV/bin/ICON0.PNG"
+    say "installed sdk/assets/ICON0.PNG -> $PS3DEV/bin/ICON0.PNG"
+fi
+
 say "done"
