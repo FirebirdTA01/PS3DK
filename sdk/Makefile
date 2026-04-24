@@ -45,6 +45,7 @@ HEADERS := \
     include/cell/sysutil_screenshot.h \
     include/cell/sysutil_ap.h \
     include/cell/audio.h \
+    include/cell/pngdec.h \
     include/cell/sysmodule.h \
     include/cell/l10n.h \
     include/cell/sysutil_subdisplay.h \

@@ -1,6 +1,7 @@
 library: cellPngDec
 version: 1
 module: cellPngDec
+archive_name: pngdec
 exports:
 - name: cellPngDecClose
   nid: '0x5b3d1ff1'
