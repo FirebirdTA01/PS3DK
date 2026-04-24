@@ -29,6 +29,7 @@
 #define __PS3DK_CELL_PAD_H__
 
 #include <stdint.h>
+#include <cell/error.h>     /* CELL_OK + CELL_PAD_ERROR_* */
 
 #ifdef __cplusplus
 extern "C" {
