@@ -36,6 +36,7 @@ tools/rsx-cg-compiler/src/donor/builtin_shader_header_embedded.inc
 # Build tool outputs
 *.o
 *.a
+*.d
 *.so
 *.so.*
 *.dylib

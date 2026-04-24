@@ -20,6 +20,9 @@ CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -mcpu=cell -std=c11 \
             -I$(PS3DK)/ppu/include \
             -I$(PS3DEV)/psl1ght/ppu/include
+# -MMD/-MP emit per-object .d files so editing a shared header (e.g.
+# sdk/include/sys/lv2_types.h) correctly invalidates the .o.
+DEPFLAGS := -MMD -MP
 
 SRC_DIR  := src
 OBJ_DIR  := build
@@ -31,10 +34,12 @@ OBJS     := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 all: $(OBJS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(OBJ_DIR):
 	@mkdir -p $@
 
 clean:
 	rm -rf $(OBJ_DIR)
+
+-include $(wildcard $(OBJ_DIR)/*.d)
