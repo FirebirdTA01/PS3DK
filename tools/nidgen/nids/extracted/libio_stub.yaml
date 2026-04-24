@@ -1,6 +1,7 @@
 library: sys_io
 version: 1
 module: sys_io
+archive_name: io
 exports:
 - name: cellKbClearBuf
   nid: '0x2073b7f6'
@@ -94,14 +95,34 @@ exports:
   nid: '0x8b72cda1'
   signature: ''
   notes: extracted from _sys_io_0001_27.o
+- name: cellPadGetCapabilityInfo
+  nid: '0xdbf4c59c'
+  signature: ''
+  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadGetCapabilityInfo
 - name: cellPadGetDataExtra
   nid: '0x6bc09c61'
   signature: ''
   notes: extracted from _sys_io_0001_22.o
+- name: cellPadGetInfo
+  nid: '0x3aaad464'
+  signature: ''
+  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadGetInfo
 - name: cellPadGetInfo2
   nid: '0xa703a51d'
   signature: ''
   notes: extracted from _sys_io_0001_31.o
+- name: cellPadGetRawData
+  nid: '0x3f797dff'
+  signature: ''
+  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadGetRawData
+- name: cellPadInfoPressMode
+  nid: '0x0e2dfaad'
+  signature: ''
+  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadInfoPressMode
+- name: cellPadInfoSensorMode
+  nid: '0x78200559'
+  signature: ''
+  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadInfoSensorMode
 - name: cellPadInit
   nid: '0x1cf98800'
   signature: ''
@@ -138,6 +159,14 @@ exports:
   nid: '0x578e3c98'
   signature: ''
   notes: extracted from _sys_io_0001_18.o
+- name: cellPadSetPressMode
+  nid: '0xf83f8182'
+  signature: ''
+  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadSetPressMode
+- name: cellPadSetSensorMode
+  nid: '0xbe5be3ba'
+  signature: ''
+  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadSetSensorMode
 - name: sys_config_add_service_listener
   nid: '0x6ae10596'
   signature: ''
