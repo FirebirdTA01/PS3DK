@@ -34,6 +34,14 @@ export SPU_PREFIX="$PS3DEV/spu"
 export PSL1GHT="$PS3DEV/psl1ght"
 export PS3DK="$PS3DEV/ps3dk"
 
+# Default pkg icon for every sample that doesn't set ICON0 itself.
+# PSL1GHT's ppu_rules does `ICON0 ?= $(PS3DEV)/bin/ICON0.PNG` - exporting
+# ICON0 here wins the ?= and makes the pkg pipeline read directly from
+# sdk/assets/ instead of the staged copy.  Editing sdk/assets/ICON0.PNG
+# then immediately propagates to every sample's next `make pkg`, no
+# build-sdk.sh step required.
+export ICON0="$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG"
+
 # Short build root avoids MAX_PATH blow-ups when GCC nests autotools output.
 # Override in your shell if C:/ps3tc is unsuitable.
 export PS3_BUILD_ROOT="${PS3_BUILD_ROOT:-$HOME/ps3tc/build}"
