@@ -1,45 +1,47 @@
 /*! \file cell/sysutil_sysparam.h
- \brief Sony-named forwarder for cellSysutilGetSystemParam{Int,String}.
+ \brief Cell-SDK forwarder for cellSysutilGetSystemParam{Int,String}.
 
   Thin static-inline forwarders over PSL1GHT's sysUtilGetSystemParamInt
-  / String.  Verified: PSL1GHT's *_fnid symbols hold Sony's FNIDs —
+  / String.  Verified: PSL1GHT's *_fnid symbols hold the reference
+  FNIDs —
     sysUtilGetSystemParamInt_fnid    = 0x40e895d3  (cellSysutilGetSystemParamInt)
     sysUtilGetSystemParamString_fnid = 0x938013a0  (cellSysutilGetSystemParamString)
 
   CELL_SYSUTIL_SYSTEMPARAM_ID_* constants are bit-identical to
-  PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_* set; aliased here so Sony-SDK
-  source writes the identifiers Sony's headers document.
+  PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_* set; aliased here so reference-SDK
+  source writes the identifiers the reference headers document.
 
   Not covered — values that cellSysutilGetSystemParam{Int,String}
   returns (enum values for language, button-assign, date format, etc.)
-  have dedicated CELL_SYSUTIL_* constants in Sony's header but are
-  just documentation-facing integers.  A full translation would blow
-  up this header; the important ones (LANG_*, ENTER_BUTTON_ASSIGN_*)
+  have dedicated CELL_SYSUTIL_* constants in the reference header but
+  are just documentation-facing integers.  A full translation would
+  blow up this header; the important ones (LANG_*, ENTER_BUTTON_ASSIGN_*)
   are included here so user code isn't forced to recall magic numbers.
 */
 
 #ifndef __PSL1GHT_CELL_SYSUTIL_SYSPARAM_H__
 #define __PSL1GHT_CELL_SYSUTIL_SYSPARAM_H__
 
-#include <sysutil/sysutil.h>
 #include <cell/sysutil.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Param-ID constants.  Values match PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_*
- * 0x0111..0x0157; just re-exported under Sony's naming. */
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_LANG                                SYSUTIL_SYSTEMPARAM_ID_LANG
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN                 SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_NICKNAME                            SYSUTIL_SYSTEMPARAM_ID_NICKNAME
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_DATE_FORMAT                         SYSUTIL_SYSTEMPARAM_ID_DATE_FORMAT
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_TIME_FORMAT                         SYSUTIL_SYSTEMPARAM_ID_TIME_FORMAT
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_TIMEZONE                            SYSUTIL_SYSTEMPARAM_ID_TIMEZONE
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_SUMMERTIME                          SYSUTIL_SYSTEMPARAM_ID_SUMMERTIME
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_GAME_PARENTAL_LEVEL                 SYSUTIL_SYSTEMPARAM_ID_GAME_PARENTAL_LEVEL
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_GAME_PARENTAL_LEVEL0_RESTRICT       SYSUTIL_SYSTEMPARAM_ID_GAME_PARENTAL_LEVEL0_RESTRICT
-#define CELL_SYSUTIL_SYSTEMPARAM_ID_INTERNET_BROWSER_START_RESTRICT     SYSUTIL_SYSTEMPARAM_ID_INTERNET_BROWSER_START_RESTRICT
+/* Param-ID constants - direct numeric values so this header doesn't
+ * need <sysutil/sysutil.h>.  Values are the stable cell-SDK IDs the
+ * SPRX recognizes (0x0111..0x0157 for the enumerated PSN/XMB
+ * settings; 0x0131..0x0157 for per-user and peripheral prefs). */
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_LANG                                0x0111
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN                 0x0112
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_NICKNAME                            0x0113
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_DATE_FORMAT                         0x0114
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_TIME_FORMAT                         0x0115
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_TIMEZONE                            0x0116
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_SUMMERTIME                          0x0117
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_GAME_PARENTAL_LEVEL                 0x0121
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_GAME_PARENTAL_LEVEL0_RESTRICT       0x0123
+#define CELL_SYSUTIL_SYSTEMPARAM_ID_INTERNET_BROWSER_START_RESTRICT     0x0125
 #define CELL_SYSUTIL_SYSTEMPARAM_ID_CURRENT_USERNAME                    0x0131
 #define CELL_SYSUTIL_SYSTEMPARAM_ID_CURRENT_USER_HAS_NP_ACCOUNT         0x0141
 #define CELL_SYSUTIL_SYSTEMPARAM_ID_CAMERA_PLFREQ                       0x0151
@@ -53,28 +55,29 @@ extern "C" {
 #define CELL_SYSUTIL_SYSTEMPARAM_NICKNAME_SIZE          128
 #define CELL_SYSUTIL_SYSTEMPARAM_CURRENT_USERNAME_SIZE  64
 
-/* Language enum values — what LANG returns.  PSL1GHT defines these as
- * SYSUTIL_LANG_*; aliasing to Sony names for source compat. */
-#define CELL_SYSUTIL_LANG_JAPANESE          SYSUTIL_LANG_JAPANESE
-#define CELL_SYSUTIL_LANG_ENGLISH_US        SYSUTIL_LANG_ENGLISH_US
-#define CELL_SYSUTIL_LANG_FRENCH            SYSUTIL_LANG_FRENCH
-#define CELL_SYSUTIL_LANG_SPANISH           SYSUTIL_LANG_SPANISH
-#define CELL_SYSUTIL_LANG_GERMAN            SYSUTIL_LANG_GERMAN
-#define CELL_SYSUTIL_LANG_ITALIAN           SYSUTIL_LANG_ITALIAN
-#define CELL_SYSUTIL_LANG_DUTCH             SYSUTIL_LANG_DUTCH
-#define CELL_SYSUTIL_LANG_PORTUGUESE_PT     SYSUTIL_LANG_PORTUGUESE_PT
-#define CELL_SYSUTIL_LANG_RUSSIAN           SYSUTIL_LANG_RUSSIAN
-#define CELL_SYSUTIL_LANG_KOREAN            SYSUTIL_LANG_KOREAN
-#define CELL_SYSUTIL_LANG_CHINESE_T         SYSUTIL_LANG_CHINESE_T
-#define CELL_SYSUTIL_LANG_CHINESE_S         SYSUTIL_LANG_CHINESE_S
-#define CELL_SYSUTIL_LANG_FINNISH           SYSUTIL_LANG_FINNISH
-#define CELL_SYSUTIL_LANG_SWEDISH           SYSUTIL_LANG_SWEDISH
-#define CELL_SYSUTIL_LANG_DANISH            SYSUTIL_LANG_DANISH
-#define CELL_SYSUTIL_LANG_NORWEGIAN         SYSUTIL_LANG_NORWEGIAN
-#define CELL_SYSUTIL_LANG_POLISH            SYSUTIL_LANG_POLISH
-#define CELL_SYSUTIL_LANG_PORTUGUESE_BR     SYSUTIL_LANG_PORTUGUESE_BR
-#define CELL_SYSUTIL_LANG_ENGLISH_GB        SYSUTIL_LANG_ENGLISH_GB
-#define CELL_SYSUTIL_LANG_TURKISH           SYSUTIL_LANG_TURKISH
+/* Language enum values — what LANG returns.  Direct numeric values
+ * so this header doesn't need PSL1GHT's SYSUTIL_LANG_* symbols in
+ * scope. */
+#define CELL_SYSUTIL_LANG_JAPANESE          0
+#define CELL_SYSUTIL_LANG_ENGLISH_US        1
+#define CELL_SYSUTIL_LANG_FRENCH            2
+#define CELL_SYSUTIL_LANG_SPANISH           3
+#define CELL_SYSUTIL_LANG_GERMAN            4
+#define CELL_SYSUTIL_LANG_ITALIAN           5
+#define CELL_SYSUTIL_LANG_DUTCH             6
+#define CELL_SYSUTIL_LANG_PORTUGUESE_PT     7
+#define CELL_SYSUTIL_LANG_RUSSIAN           8
+#define CELL_SYSUTIL_LANG_KOREAN            9
+#define CELL_SYSUTIL_LANG_CHINESE_T         10
+#define CELL_SYSUTIL_LANG_CHINESE_S         11
+#define CELL_SYSUTIL_LANG_FINNISH           12
+#define CELL_SYSUTIL_LANG_SWEDISH           13
+#define CELL_SYSUTIL_LANG_DANISH            14
+#define CELL_SYSUTIL_LANG_NORWEGIAN         15
+#define CELL_SYSUTIL_LANG_POLISH            16
+#define CELL_SYSUTIL_LANG_PORTUGUESE_BR     17
+#define CELL_SYSUTIL_LANG_ENGLISH_GB        18
+#define CELL_SYSUTIL_LANG_TURKISH           19
 
 /* Enter-button-assign values. */
 #define CELL_SYSUTIL_ENTER_BUTTON_ASSIGN_CIRCLE   0
@@ -89,13 +92,20 @@ extern "C" {
 #define CELL_SYSUTIL_TIME_FMT_CLOCK12             0
 #define CELL_SYSUTIL_TIME_FMT_CLOCK24             1
 
+/* PSL1GHT-side entry points declared locally so this header doesn't
+ * need <sysutil/sysutil.h> (which pollutes the global namespace with
+ * the `sysutilCallback` typedef and clashes with reference-SDK
+ * sample code). */
+extern int sysUtilGetSystemParamInt(int id, int *value);
+extern int sysUtilGetSystemParamString(int id, char *buf, unsigned int bufsize);
+
 /* Function forwarders. */
 static inline int cellSysutilGetSystemParamInt(int id, int *value) {
-	return (int)sysUtilGetSystemParamInt((s32)id, (s32 *)value);
+	return sysUtilGetSystemParamInt(id, value);
 }
 
 static inline int cellSysutilGetSystemParamString(int id, char *buf, unsigned int bufsize) {
-	return (int)sysUtilGetSystemParamString((s32)id, buf, (u32)bufsize);
+	return sysUtilGetSystemParamString(id, buf, bufsize);
 }
 
 #ifdef __cplusplus
