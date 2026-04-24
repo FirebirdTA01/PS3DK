@@ -1,6 +1,7 @@
 library: cellJpgDec
 version: 1
 module: cellJpgDec
+archive_name: jpgdec
 exports:
 - name: cellJpgDecClose
   nid: '0x9338a07a'

@@ -30,6 +30,8 @@
 #include <ppu-types.h>
 #include <ppu-lv2.h>
 #include <sys/return_code.h>
+#include <sys/mutex.h>    /* PSL1GHT: sys_mutex_t type + syscalls (100-104) */
+#include <sys/cond.h>     /* PSL1GHT: sys_cond_t type + syscalls (105-109)  */
 
 #ifdef __cplusplus
 extern "C" {
@@ -72,6 +74,8 @@ extern "C" {
 
 typedef u32 sys_protocol_t;
 typedef u32 sys_process_shared_t;
+typedef u32 sys_recursive_t;
+typedef u32 sys_adaptive_t;
 typedef u64 sys_ipc_key_t;
 
 typedef u32 sys_event_flag_t;
@@ -160,6 +164,117 @@ LV2_SYSCALL sys_event_flag_cancel(sys_event_flag_t id, u32 *num)
 LV2_SYSCALL sys_event_flag_get(sys_event_flag_t id, u64 *flags)
 {
 	lv2syscall2(139, id, (u64)flags);
+	return_to_user_prog(s32);
+}
+
+/* ------------------------------------------------------------------ *
+ * Mutex - Sony-name surface over PSL1GHT sys_mutex_t + syscalls 100-104.
+ * sys_mutex_attribute_t is the Sony spelling; binary-compatible with
+ * PSL1GHT's sys_mutex_attr_t (same field order + sizes).
+ * ------------------------------------------------------------------ */
+
+typedef struct sys_mutex_attribute {
+	sys_protocol_t        attr_protocol;
+	sys_recursive_t       attr_recursive;
+	sys_process_shared_t  attr_pshared;
+	sys_adaptive_t        attr_adaptive;
+	sys_ipc_key_t         key;
+	int                   flags;
+	u32                   pad;
+	char                  name[SYS_SYNC_NAME_SIZE];
+} sys_mutex_attribute_t;
+
+#define sys_mutex_attribute_initialize(_a)                      \
+	do {                                                        \
+		(_a).attr_protocol  = SYS_SYNC_PRIORITY;                \
+		(_a).attr_recursive = SYS_SYNC_NOT_RECURSIVE;           \
+		(_a).attr_pshared   = SYS_SYNC_NOT_PROCESS_SHARED;      \
+		(_a).attr_adaptive  = SYS_SYNC_NOT_ADAPTIVE;            \
+		(_a).key            = 0;                                \
+		(_a).flags          = 0;                                \
+		(_a).pad            = 0;                                \
+		(_a).name[0]        = '\0';                             \
+	} while (0)
+
+LV2_SYSCALL sys_mutex_create(sys_mutex_t *mutex, sys_mutex_attribute_t *attr)
+{
+	lv2syscall2(100, (u64)mutex, (u64)attr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mutex_destroy(sys_mutex_t mutex)
+{
+	lv2syscall1(101, mutex);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mutex_lock(sys_mutex_t mutex, u64 timeout_usec)
+{
+	lv2syscall2(102, mutex, timeout_usec);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mutex_trylock(sys_mutex_t mutex)
+{
+	lv2syscall1(103, mutex);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mutex_unlock(sys_mutex_t mutex)
+{
+	lv2syscall1(104, mutex);
+	return_to_user_prog(s32);
+}
+
+/* ------------------------------------------------------------------ *
+ * Condition variable - Sony-name surface over PSL1GHT sys_cond_t +
+ * syscalls 105-109.  Layout binary-compatible with PSL1GHT's
+ * sys_cond_attr_t.
+ * ------------------------------------------------------------------ */
+
+typedef struct sys_cond_attribute {
+	sys_process_shared_t  attr_pshared;
+	int                   flags;
+	sys_ipc_key_t         key;
+	char                  name[SYS_SYNC_NAME_SIZE];
+} sys_cond_attribute_t;
+
+#define sys_cond_attribute_initialize(_a)                       \
+	do {                                                        \
+		(_a).attr_pshared = SYS_SYNC_NOT_PROCESS_SHARED;        \
+		(_a).flags        = 0;                                  \
+		(_a).key          = 0;                                  \
+		(_a).name[0]      = '\0';                               \
+	} while (0)
+
+LV2_SYSCALL sys_cond_create(sys_cond_t *cond, sys_mutex_t mutex,
+                            sys_cond_attribute_t *attr)
+{
+	lv2syscall3(105, (u64)cond, mutex, (u64)attr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_cond_destroy(sys_cond_t cond)
+{
+	lv2syscall1(106, cond);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_cond_wait(sys_cond_t cond, u64 timeout_usec)
+{
+	lv2syscall2(107, cond, timeout_usec);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_cond_signal(sys_cond_t cond)
+{
+	lv2syscall1(108, cond);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_cond_signal_all(sys_cond_t cond)
+{
+	lv2syscall1(109, cond);
 	return_to_user_prog(s32);
 }
 
