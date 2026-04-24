@@ -9,5 +9,8 @@
 #define __PS3DK_CELL_SPURS_H__
 
 #include <cell/spurs/types.h>
+#include <cell/spurs/event_flag.h>
+#include <cell/spurs/queue.h>
+#include <cell/spurs/semaphore.h>
 
 #endif /* __PS3DK_CELL_SPURS_H__ */

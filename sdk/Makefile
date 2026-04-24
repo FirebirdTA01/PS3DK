@@ -58,6 +58,9 @@ HEADERS := \
     include/cell/cgb.h \
     include/cell/spurs.h \
     include/cell/spurs/types.h \
+    include/cell/spurs/event_flag.h \
+    include/cell/spurs/queue.h \
+    include/cell/spurs/semaphore.h \
     include/sys/spu_thread.h \
     include/sys/spu_thread_group.h \
     include/spu_printf.h
