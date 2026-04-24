@@ -76,6 +76,15 @@ over PSL1GHT's existing lv2 syscall surface.  No SPRX modules required.
 |---|---|---|
 | `hello-ppu-event-flag` | Master + 5 worker PPU threads coordinate via two `sys_event_flag_*` flags; every worker prints "succeeded my job" and exits cleanly | **green** + RPCS3 runtime-verified |
 
+## audio/
+
+cellAudio mixer + cellAudioOut configuration / discovery.
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-audio` | cellAudio Init / PortOpen / PortStart / Stop / NotifyEventQueue / AddData chain; plays a chip-tune melody via direct ring fills against `libaudio_stub.a` | **green** + RPCS3 runtime-verified |
+| `hello-ppu-audio-out` | cellAudioOut surface in `<cell/cell_audio_out.h>`: GetNumberOfDevice / GetDeviceInfo / GetState / GetConfiguration via `libsysutil_audio_out_stub.a`, then a 1 s 440 Hz sine tone through cellAudio so both the discovery API and the mixer downstream get exercised in the same boot | **green** + RPCS3 runtime-verified (nDevice=0 is an RPCS3 HLE quirk; FNIDs resolve and tone plays) |
+
 ## spu/
 
 SPU toolchain, SPU intrinsics, and PPU/SPU interop (DMA, mailboxes,
