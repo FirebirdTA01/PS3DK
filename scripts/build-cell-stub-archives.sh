@@ -55,6 +55,7 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgcm_sys_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libaudio_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libpngdec_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libio_stub.yaml"
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
@@ -111,6 +112,28 @@ for yaml in "${STUB_YAMLS[@]}"; do
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
         say "installed libgcm_sys.a -> $INSTALL_LIB_PS3DK/ (nidgen + legacy wrappers)"
+    elif [[ "$name" == "libio_stub" ]]; then
+        # Mirror of the libgcm_sys story: nidgen emits sys_io SPRX stubs
+        # under Sony cellPad / cellKb / cellMouse names; the libio_legacy
+        # TU adds PSL1GHT-flavoured ioPad / ioKb / ioMouse pass-throughs.
+        # Combined into libio.a at $PS3DK/ppu/lib/ which, via the sample
+        # Makefiles' -L$(PS3DK)/ppu/lib ordering, shadows PSL1GHT's own
+        # libio.a so the pad/kb/mouse surface resolves fully through our
+        # nidgen-emitted NIDs.  Homebrew built against either -lio spelling
+        # works; code linking cellPad* gets Sony names, code linking ioPad*
+        # gets the wrappers that call the same cellPad* stubs.
+        legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libio_legacy"
+        say "building legacy-name wrappers (libio_legacy)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" make -C "$legacy_dir" all >/dev/null
+        legacy_obj="$legacy_dir/build/io_legacy_wrappers.o"
+        [[ -f "$legacy_obj" ]] \
+            || die "legacy wrappers object missing after build: $legacy_obj"
+
+        target="$INSTALL_LIB_PS3DK/libio.a"
+        install -m 0644 "${produced[0]}" "$target"
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
+        say "installed libio.a -> $INSTALL_LIB_PS3DK/ (nidgen + legacy wrappers)"
     else
         install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
         say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
