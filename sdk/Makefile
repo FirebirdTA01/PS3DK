@@ -69,7 +69,7 @@ HEADERS := \
     include/sys/spu_thread_group.h \
     include/spu_printf.h
 
-SUBLIBS := libgcm_cmd libdbgfont
+SUBLIBS := libgcm_cmd libdbgfont libspurs_task
 
 .PHONY: all install clean $(SUBLIBS)
 
