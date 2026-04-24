@@ -1,0 +1,42 @@
+Subject: [PATCH] ppu-asm.h: drop +16 in __get_opd32 for compact OPDs
+
+Historical context: classic PPC64 ELFv1 emitted 24-byte OPDs
+{func, toc, data} at 8-byte alignment.  sprxlinker then packed the
+kernel-visible 8-byte {entry_ea, toc_ea} descriptor into the last
+8 bytes (offset +16) of that 24-byte block, and __get_opd32 stepped
+over the {func, toc} words to reach it.
+
+This toolchain now emits genuine 8-byte compact OPDs directly
+({entry_ea, toc_ea} at offset 0, 4-byte aligned); a C function
+pointer IS the 32-bit kernel-visible descriptor EA already.  The
++16 step over no longer makes sense -- it walks past the end of
+the compact descriptor into whichever OPD entry happens to sit
+next, so a function-pointer callback registered via
+cellGcmSetVBlankHandler/msgDialogOpen2/sysThreadCreate/etc. resolves
+to an arbitrary callee.  Symptoms observed in RPCS3: _gcm_intr_thread
+faulting reading address 0x9 or executing 0x4801d810, msgdialog
+callback firing into bogus code, etc.
+
+Fix: make __get_opd32 return the descriptor pointer unchanged.
+Preserve the NULL-in/NULL-out behaviour so callers that pass NULL
+handlers (meaning "no callback") keep the same semantics.
+
+--- a/ppu/include/ppu-asm.h
++++ b/ppu/include/ppu-asm.h
+@@ -5,7 +5,15 @@
+
+ #define PPU_ALIGNMENT			8
+
+-#define __get_opd32(opd64)		((unsigned long long)((intptr_t)(opd64) ? (((intptr_t)(opd64)) + 16) : 0L))
++/* With compact 8-byte .opd descriptors, a C function pointer already
++ * IS the 32-bit descriptor EA: bytes 0..3 = entry_ea, 4..7 = toc_ea.
++ * Historically (24-byte ELFv1 + sprxlinker packing) the compact 8-byte
++ * form was packed into the last 8 bytes of the 24-byte descriptor, so
++ * this macro added 16 to step over {func,rtoc} into {packed-entry,toc}.
++ * Now there is nothing to step over; return the pointer unchanged.
++ * Preserve NULL. Keep the u64 return type so callers that stash the
++ * value in registers before narrowing still compile. */
++#define __get_opd32(opd64)		((unsigned long long)((intptr_t)(opd64) ? (intptr_t)(opd64) : 0L))
+
+ #define __get_addr32(addr)		(unsigned int)((unsigned long long)(addr))
+

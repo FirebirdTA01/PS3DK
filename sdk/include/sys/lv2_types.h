@@ -103,7 +103,9 @@ static inline void *lv2_ea32_expand(lv2_ea32_t ea)
 static inline lv2_ea32_t lv2_fn_to_callback_ea(const void *fn)
 {
     if (!fn) return 0;
-    return (lv2_ea32_t)(uintptr_t)((const uint8_t *)fn + 16);
+    /* Compact 8-byte .opd: bytes 0..3 = entry_ea, 4..7 = toc_ea.
+     * The function pointer is already the descriptor EA; no +16 step. */
+    return (lv2_ea32_t)(uintptr_t)fn;
 }
 
 /*
