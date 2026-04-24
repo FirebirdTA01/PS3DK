@@ -323,11 +323,10 @@ int main(int argc, const char **argv) {
 	mat_perspective(1.0472f, (float)width / (float)height, 0.1f, 100.0f, proj);
 	mat_translate(0.0f, 0.0f, -2.5f, view);
 
-	const int total = 60 * 12;
-	int       frame = 0;
-	float     a     = 0.0f;
+	int   frame = 0;
+	float a     = 0.0f;
 
-	while (frame < total && !g_exit_request) {
+	while (!g_exit_request) {
 		cellSysutilCheckCallback();
 
 		padInfo padinfo;
