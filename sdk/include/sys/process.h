@@ -101,14 +101,18 @@
         ".long __sys_process_crash_dump_param\n"                             \
     )
 
+/* Trailing `;` inside the macro lets callers use either convention at
+ * file scope: `SYS_PROCESS_PARAM(...)` (Sony reference-sample style)
+ * or `SYS_PROCESS_PARAM(...);` (our own samples).  The second `;` at
+ * file scope is a GCC-accepted empty declaration. */
 #define SYS_PROCESS_PARAM(prio, stacksize) \
-    PS3TC_SYS_PROCESS_PARAM_EMIT(prio, stacksize, SYS_PROCESS_SPAWN_PPC_SEG_DEFAULT)
+    PS3TC_SYS_PROCESS_PARAM_EMIT(prio, stacksize, SYS_PROCESS_SPAWN_PPC_SEG_DEFAULT);
 
 #define SYS_PROCESS_PARAM_OVLM(prio, stacksize) \
-    PS3TC_SYS_PROCESS_PARAM_EMIT(prio, stacksize, SYS_PROCESS_SPAWN_PPC_SEG_OVLM)
+    PS3TC_SYS_PROCESS_PARAM_EMIT(prio, stacksize, SYS_PROCESS_SPAWN_PPC_SEG_OVLM);
 
 #define SYS_PROCESS_PARAM_FIXED(prio, stacksize) \
-    PS3TC_SYS_PROCESS_PARAM_EMIT(prio, stacksize, SYS_PROCESS_SPAWN_PPC_SEG_PRX)
+    PS3TC_SYS_PROCESS_PARAM_EMIT(prio, stacksize, SYS_PROCESS_SPAWN_PPC_SEG_PRX);
 
 /* ---- object-class identifiers (SYS_OBJECT_*) ------------------------ */
 /* sysProcessGetNumberOfObject reports population per class. */

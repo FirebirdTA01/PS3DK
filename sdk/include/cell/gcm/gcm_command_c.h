@@ -202,6 +202,12 @@ static inline void cellGcmSetShadeModel(CellGcmContextData *thisContext, uint32_
 	rsxSetShadeModel(thisContext, model);
 }
 
+/* Reference SDK name (without trailing 'l'); aliased to SetShadeModel. */
+static inline void cellGcmSetShadeMode(CellGcmContextData *thisContext, uint32_t mode)
+{
+	rsxSetShadeModel(thisContext, mode);
+}
+
 /* ==========================================================
  * Geometry / viewport / culling
  * ========================================================== */
