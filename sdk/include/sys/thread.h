@@ -17,7 +17,7 @@
 #ifndef PS3TC_SYS_THREAD_H
 #define PS3TC_SYS_THREAD_H
 
-#include <ppu-lv2.h>
+#include <sys/lv2_syscall.h>
 #include <lv2/thread.h>
 
 #ifdef __cplusplus
