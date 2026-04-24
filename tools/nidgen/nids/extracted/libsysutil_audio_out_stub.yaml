@@ -1,6 +1,7 @@
-library: sysutil_audio_out
+library: cellSysutil
 version: 1
 module: cellSysutil
+archive_name: sysutil_audio_out
 exports:
 - name: cellAudioOutConfigure
   nid: '0x4692ab35'
