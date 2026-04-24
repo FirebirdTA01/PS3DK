@@ -1,6 +1,7 @@
 library: cellSpursJq
 version: 1
 module: cellSpursJq
+archive_name: spurs_jq
 exports:
 - name: _cellSpursCreateJobQueue
   nid: '0xf244e799'
