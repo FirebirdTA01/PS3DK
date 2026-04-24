@@ -10,8 +10,25 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <ppu-types.h>   /* ATTRIBUTE_PRXPTR */
+
+/* ATTRIBUTE_PRXPTR comes from <ppu-types.h> on PPU so cross-SPRX
+ * pointer fields shrink from our LP64 8-byte storage to the 4-byte
+ * EA the SPRX expects.  On SPU (natively 32-bit pointers) it is a
+ * no-op - the storage width already matches. */
+#ifdef __PPU__
+#include <ppu-types.h>
 #include <cell/spurs/types.h>
+#else
+#ifndef ATTRIBUTE_PRXPTR
+#define ATTRIBUTE_PRXPTR
+#endif
+/* SPU side doesn't need the full types.h (no CellSpursAttribute, etc) -
+ * just the handful of typedefs sub-structures here reference. */
+typedef unsigned int CellSpursWorkloadId;
+typedef unsigned int CellSpursTaskId;
+struct CellSpurs;
+typedef struct CellSpurs CellSpurs;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
