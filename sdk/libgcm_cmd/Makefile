@@ -21,6 +21,11 @@ CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -I$(PS3DK)/ppu/include \
             -I$(PS3DEV)/psl1ght/ppu/include \
             -Iinclude
+# -MMD/-MP emit per-object .d files.  Without these, editing a header
+# like sdk/include/sys/lv2_types.h leaves the dependent .o stale; make
+# sees matching timestamps and the rebuild silently skips the affected
+# translation units.  Bit us once on lv2_fn_to_callback_ea.
+DEPFLAGS := -MMD -MP
 ARFLAGS  := rcs
 
 SRC_DIR  := src
@@ -50,7 +55,7 @@ $(ARCHIVE): $(OBJS) $(LEGACY_OBJS)
 	$(RANLIB) $@
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 # rsx_legacy needs PSL1GHT's internal header layout: its commands.c
 # includes <nv40.h> bare (not <rsx/nv40.h>) and expects LIBRSX_INTERNAL
@@ -75,7 +80,7 @@ LEGACY_CFLAGS := -O2 -Wall -mcpu=cell -mregnames -Wa,-mcell -std=gnu11 \
                  -DLIBRSX_INTERNAL
 
 $(OBJ_DIR)/rsx_legacy_%.o: $(LEGACY_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(LEGACY_CFLAGS) -c -o $@ $<
+	$(CC) $(LEGACY_CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(OBJ_DIR):
 	@mkdir -p $@
@@ -93,3 +98,5 @@ install: $(ARCHIVE)
 
 clean:
 	rm -rf $(OBJ_DIR)
+
+-include $(wildcard $(OBJ_DIR)/*.d)

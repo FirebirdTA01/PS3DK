@@ -32,6 +32,9 @@ CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -I$(PS3DK)/ppu/include \
             -I$(PS3DEV)/psl1ght/ppu/include \
             -Iinclude
+# -MMD/-MP emit per-object .d files so editing a shared header correctly
+# invalidates the .o.
+DEPFLAGS := -MMD -MP
 ARFLAGS  := rcs
 
 SRC_DIR     := src
@@ -59,7 +62,7 @@ $(ARCHIVE): $(C_OBJS) $(VPO_OBJS) $(FPO_OBJS)
 	$(RANLIB) $@
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(OBJ_DIR)/%.vpo: $(SHADER_DIR)/%.vcg | $(OBJ_DIR)
 	$(CGCOMP) -v $< $@
@@ -83,3 +86,5 @@ install: $(ARCHIVE)
 
 clean:
 	rm -rf $(OBJ_DIR)
+
+-include $(wildcard $(OBJ_DIR)/*.d)
