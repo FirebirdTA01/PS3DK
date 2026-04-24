@@ -37,6 +37,16 @@ extern "C" {
 #define CELL_SPURS_SIZE2                   8192
 
 typedef unsigned CellSpursWorkloadId;
+typedef unsigned CellSpursTaskId;
+
+/* Forward declaration only - the full CellSpursTaskset definition
+ * lives in cell/spurs/task_types.h which we haven't ported yet.
+ * Sub-primitives (barrier, event_flag, queue, semaphore) take
+ * CellSpursTaskset* in their taskset-variant initializers; samples
+ * can reach them via the IWL (in-workload) variants that take
+ * CellSpurs* instead until task_types.h lands. */
+struct CellSpursTaskset;
+typedef struct CellSpursTaskset CellSpursTaskset;
 
 typedef struct CellSpursAttribute {
     unsigned char skip[CELL_SPURS_ATTRIBUTE_SIZE];
