@@ -55,7 +55,12 @@ HEADERS := \
     include/cell/sysutil_music_export.h \
     include/cell/sysutil_imejp.h \
     include/cell/codec/jpgdec.h \
-    include/cell/cgb.h
+    include/cell/cgb.h \
+    include/cell/spurs.h \
+    include/cell/spurs/types.h \
+    include/sys/spu_thread.h \
+    include/sys/spu_thread_group.h \
+    include/spu_printf.h
 
 SUBLIBS := libgcm_cmd libdbgfont
 

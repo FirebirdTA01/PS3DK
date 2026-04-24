@@ -1,0 +1,13 @@
+library: sys_libc
+version: 1
+module: sys_libc
+archive_name: spu_printf
+exports:
+- name: spu_printf_initialize
+  nid: '0xc3c598e2'
+  signature: ''
+  notes: sys_libc export; extracted from libc_stub.yaml for standalone link
+- name: spu_printf_finalize
+  nid: '0x00acf0e5'
+  signature: ''
+  notes: sys_libc export; extracted from libc_stub.yaml for standalone link
