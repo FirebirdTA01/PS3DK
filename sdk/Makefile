@@ -58,6 +58,10 @@ HEADERS := \
     include/cell/cgb.h \
     include/cell/spurs.h \
     include/cell/spurs/types.h \
+    include/cell/spurs/task_types.h \
+    include/cell/spurs/task.h \
+    include/cell/spurs/workload.h \
+    include/cell/spurs/barrier.h \
     include/cell/spurs/event_flag.h \
     include/cell/spurs/queue.h \
     include/cell/spurs/semaphore.h \
