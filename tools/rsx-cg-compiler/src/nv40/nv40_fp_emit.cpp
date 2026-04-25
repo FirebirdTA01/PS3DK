@@ -2093,8 +2093,189 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
 
                 // `float4(scale_scalar, k1, k2, k3)` lane-elision —
-                // sce-cgc accumulator-fold output shape.  Either 2 or
-                // 3 instructions depending on whether the non-scaled
+                // shape depends on scaledLane (the lane the MAD writes):
+                //
+                //   scaledLane=X (0):  3 insts MOVH + MOVR + MAD[END]    (or 2 insts if all-zero)
+                //   scaledLane=W (3):  3 insts MOVH + MAD + MOVR[END]    (no FENCBR)
+                //   scaledLane=Y (1):  4 insts MOVH + MAD + FENCBR + MOVR[END]
+                //   scaledLane=Z (2):  4 insts MOVH + MAD + FENCBR + MOVR[END]
+                //
+                // Const packing for scaledLane != 0 (verified against
+                // sce-cgc probes for 2-3 unique values): walk the
+                // non-scaled dst lanes in order, each value gets the
+                // next free inline slot (X, Y, Z) on first sight; the
+                // swz position at the *scaled* lane re-uses the slot
+                // that the next non-scaled lane picked (or W slot 3
+                // when the scaled lane is W and no "next" exists).
+                //
+                // 2-unique scaledLane=W has a "shift by 1" allocation
+                // sce-cgc uses (inline.X is filler, real values land
+                // in slots 1..2) — not yet implemented; bails out.
+                auto slIt = valueToScaledLanes.find(srcId);
+                if (slIt != valueToScaledLanes.end() &&
+                    slIt->second.scale.lane >= 0 &&
+                    slIt->second.scale.scale >= 2 &&
+                    slIt->second.scaledLane != 0)
+                {
+                    const auto& sl = slIt->second;
+                    const auto& sb = sl.scale;
+                    auto inIt = valueToInputSrc.find(sb.inputId);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-lanes input failed to resolve");
+                        return out;
+                    }
+
+                    // Pack non-scaled dst lanes (skip scaledLane) in
+                    // order; record per-dst-lane swz position.
+                    float inlinePack[4] = {0,0,0,0};
+                    int   swzPos[4]     = {0,0,0,0};
+                    int   slotCount     = 0;
+                    bool  packOk        = true;
+                    int   firstNonScaledAfterScaled = -1;
+                    for (int dstLane = 0; dstLane < 4; ++dstLane)
+                    {
+                        if (dstLane == sl.scaledLane) continue;
+                        const float v = sl.consts[dstLane];
+                        int slot = -1;
+                        for (int s = 0; s < slotCount; ++s)
+                            if (inlinePack[s] == v) { slot = s; break; }
+                        if (slot < 0)
+                        {
+                            if (slotCount >= 3) { packOk = false; break; }
+                            slot = slotCount++;
+                            inlinePack[slot] = v;
+                        }
+                        swzPos[dstLane] = slot;
+                        if (firstNonScaledAfterScaled < 0 &&
+                            dstLane > sl.scaledLane)
+                            firstNonScaledAfterScaled = dstLane;
+                    }
+                    if (!packOk)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-lanes (scaledLane != 0) needs ≤ 3 "
+                            "unique const values across non-scaled lanes");
+                        return out;
+                    }
+
+                    // 2-unique scaledLane=W has a shift-by-1 allocation
+                    // sce-cgc uses; we don't implement it yet.  3-unique
+                    // is fine because every slot gets used naturally.
+                    if (sl.scaledLane == 3 && slotCount < 3)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-lanes scaledLane=W with < 3 "
+                            "unique values not yet supported (sce-cgc shift-by-1)");
+                        return out;
+                    }
+
+                    // scaledLane=Z reorders MOVR before MAD AND preloads
+                    // to H1 instead of H0 — needs its own emit handler;
+                    // bail until it lands.
+                    if (sl.scaledLane == 2)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-lanes scaledLane=Z not yet "
+                            "supported (sce-cgc reorders + H1 preload)");
+                        return out;
+                    }
+
+                    // Swz at the scaled-lane position: matches the swz
+                    // of the first non-scaled lane > scaledLane (i.e.
+                    // the lane that "comes next").  For scaledLane=W,
+                    // there's no "next" — sce-cgc uses W (slot 3 = filler).
+                    if (sl.scaledLane == 3)
+                        swzPos[sl.scaledLane] = 3;
+                    else if (firstNonScaledAfterScaled >= 0)
+                        swzPos[sl.scaledLane] = swzPos[firstNonScaledAfterScaled];
+
+                    // ── Inst 1: MOVH H0.<lane>, f[input] ──
+                    struct nvfx_reg hReg = nvfx_reg(NVFXSR_TEMP, 0);
+                    hReg.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t laneMask = uint8_t(1 << sb.lane);
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1, hReg,
+                        laneMask, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // ── Inst 2: MAD R0.<scaledLane>, H0.xxxx, c[scale-1].xxxx, H0.xxxx ──
+                    // SRC0/SRC2 must broadcast lane X (the only loaded
+                    // H0 lane) to the destination lane.  For
+                    // scaledLane=0 the existing path uses the .xyzw
+                    // identity which "happens to" pick H0.x, but for
+                    // any other scaledLane an identity swizzle would
+                    // read an undefined H0 lane.
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_src madS0 = nvfx_src(hReg);
+                    madS0.swz[0] = madS0.swz[1] = madS0.swz[2] = madS0.swz[3] = 0;
+                    struct nvfx_src madS1 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    madS1.swz[0] = madS1.swz[1] = madS1.swz[2] = madS1.swz[3] = 0;
+                    struct nvfx_src madS2 = nvfx_src(hReg);
+                    madS2.swz[0] = madS2.swz[1] = madS2.swz[2] = madS2.swz[3] = 0;
+                    const uint8_t scaledMask = uint8_t(1 << sl.scaledLane);
+                    // For scaledLane=Y/Z, MAD does NOT carry END
+                    // (FENCBR + MOVR follow).  For scaledLane=W, MAD
+                    // also does not carry END (MOVR follows).  Only
+                    // markEnd() at the function tail decides.
+                    struct nvfx_insn mad = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        scaledMask, madS0, madS1, madS2);
+                    mad.precision = dstPrecision;
+                    asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+                    const float scaleInline[4] = {
+                        static_cast<float>(sb.scale - 1), 0.0f, 0.0f, 0.0f
+                    };
+                    asm_.appendConstBlock(scaleInline);
+
+                    // ── Inst 3 (only Y / Z): FENCBR ──
+                    if (sl.scaledLane == 1 || sl.scaledLane == 2)
+                        asm_.emitFencbr();
+
+                    // ── Final inst [END]: MOVR R0.<const_mask>, c[0].<swz> + inline ──
+                    struct nvfx_src constMovS0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    constMovS0.swz[0] = (uint8_t)swzPos[0];
+                    constMovS0.swz[1] = (uint8_t)swzPos[1];
+                    constMovS0.swz[2] = (uint8_t)swzPos[2];
+                    constMovS0.swz[3] = (uint8_t)swzPos[3];
+                    struct nvfx_src constMovS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src constMovS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t constMask =
+                        uint8_t(NVFX_FP_MASK_ALL ^ (1 << sl.scaledLane));
+                    struct nvfx_insn constMov = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        constMask, constMovS0, constMovS1, constMovS2);
+                    constMov.precision = dstPrecision;
+                    asm_.emit(constMov, NVFX_FP_OP_OPCODE_MOV);
+                    asm_.appendConstBlock(inlinePack);
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `float4(scale_scalar, k1, k2, k3)` lane-elision (scaledLane=0
+                // path) — sce-cgc accumulator-fold output shape.  Either
+                // 2 or 3 instructions depending on whether the non-scaled
                 // lanes are all zero:
                 //
                 //   MOVH H0.<scaledLane>, f[input]
@@ -2110,9 +2291,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 //   1 unique:  inline=(v,0,0,0), swz=.xxxx
                 //   2 unique:  inline=(u0,u1,0,0), swz mixes X / Y
                 //   3 unique:  inline=(u0,u1,u2,0), swz mixes X / Y / Z
-                // Currently restricted to scaledLane=0 — non-zero
-                // scaledLane needs a different 4-insn FENCBR-pattern.
-                auto slIt = valueToScaledLanes.find(srcId);
                 if (slIt != valueToScaledLanes.end() &&
                     slIt->second.scaledLane == 0 &&
                     slIt->second.scale.lane >= 0 &&
