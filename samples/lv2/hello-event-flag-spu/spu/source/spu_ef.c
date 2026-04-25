@@ -38,7 +38,9 @@ int main(void)
 			 * Do any work here.
 			 */
 
-			spu_printf("SPU Worker finished my job\n");
+			spu_printf("SPU Worker finished my job (bit=%d, ef=0x%llx, tag=%s)\n",
+			           (int)GET_BITNUM(snr), (unsigned long long)ef,
+			           "done");
 			/*E
 			 * Step 2. 
 			 * Workers have finished their own job. 
