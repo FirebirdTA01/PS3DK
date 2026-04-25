@@ -1,0 +1,35 @@
+// hello-ppu-cellgcm-laneelision — fragment program.
+//
+// Validates rsx-cg-compiler's 3-unique-values lane-elision shape:
+//   float4(scale*vcol.x, k1, k2, k3) where {k1, k2, k3} are three
+// distinct non-zero floats.  Exercises the const-packing algorithm at
+// its widest — each unique value lands in its own inline slot
+// (inline.x = k1, inline.y = k2, inline.z = k3) and SRC0 swizzle is
+// .xxyz so the dst Y/Z/W lanes read inline.X/Y/Z in order.
+//
+// Lowering (matches sce-cgc byte-for-byte at --O2 --fastmath):
+//
+//   MOVH H0.x, f[COL0]                                   # preload vcol.x as fp16
+//   MOVR R0.yzw, c[0].xxyz + inline(0.2, 0.4, 1.0, 0)    # 3-unique const lanes
+//   MAD  R0.x [END], H0, c[0].xxxx, H0 + inline(2.0, 0, 0, 0)  # 3*vcol.x
+//
+// Visual: R channel is `3 * input.r` clamped (top vertex red was 1.0
+// → output R = 1.0; bottom corners → 0.0).  G is forced to 0.2, B to
+// 0.4, A to 1.0 across all pixels.  Compare to hello-ppu-cellgcm-
+// loops, which forces G=B=0 (the simpler 2-unique-values pattern).
+// The dim teal-blue background tint with a red gradient on top is
+// the byte-identical output of the const-packing algorithm in
+// `valueToScaledLanes`.
+//
+// Sister test in the byte-diff harness:
+//   tools/rsx-cg-compiler/tests/shaders/loop_static3_three_unique_f.cg
+void main(
+    float4 vcol      : COLOR,
+    out float4 color : COLOR)
+{
+    float acc = 0.0f;
+    for (int i = 0; i < 3; i++) {
+        acc += vcol.x;
+    }
+    color = float4(acc, 0.2f, 0.4f, 1.0f);
+}

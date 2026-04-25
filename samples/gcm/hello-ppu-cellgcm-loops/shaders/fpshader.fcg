@@ -1,0 +1,29 @@
+// hello-ppu-cellgcm-loops — fragment program.
+//
+// Validates rsx-cg-compiler's static-loop unroll + scale-fold + lane-
+// elision pipeline end-to-end on real hardware (the byte-diff harness
+// at tools/rsx-cg-compiler/tests/run_diff.sh proves bytes match
+// sce-cgc, this sample proves those bytes execute correctly on RSX).
+//
+// Compiler features exercised:
+//   1. Static for-loop unroll                  (the for(i<3) block).
+//   2. CSE on repeated `vcol.x` swizzles       (3 reads → 1 SSA).
+//   3. Algebraic 0+x simplification            (drops the initial Add).
+//   4. Repeated-add scalar-lane scale fold     (3*vcol.x → MUL by 3).
+//   5. VecConstruct lane-elision MOVR          (float4(s,0,0,1) shape).
+//
+// Visual: input vertex colour's R channel is tripled (clamped to 1) and
+// emitted on R only (G/B forced to 0, A=1).  Compared to the canonical
+// triangle sample's RGB-gradient output, the bottom-left and bottom-
+// right vertices' green/blue contributions go away — the triangle is
+// pure red at the top, fading to black at the lower corners.
+void main(
+    float4 vcol      : COLOR,
+    out float4 color : COLOR)
+{
+    float acc = 0.0f;
+    for (int i = 0; i < 3; i++) {
+        acc += vcol.x;
+    }
+    color = float4(acc, 0, 0, 1);
+}
