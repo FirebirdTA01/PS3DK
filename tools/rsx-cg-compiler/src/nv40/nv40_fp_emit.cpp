@@ -198,8 +198,22 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     {
         IRValueID inputId = 0;   // the repeated varying (resolves via valueToInputSrc)
         int       scale   = 0;   // ≥ 2; literal multiplier in (scale-1, 0, 0, 0)
+        int       lane    = -1;  // -1 = full vec4; 0..3 = scalar lane (.x/.y/.z/.w)
     };
     std::unordered_map<IRValueID, FpScaleVaryingBinding> valueToScale;
+
+    // `float4(scale_scalar, k1, k2, k3)` — VecConstruct that mixes a
+    // scalar scale-fold result with float constants in the other
+    // lanes.  Lowers to a 3-insn shape (single-lane MOVH preload,
+    // lane-elided MOVR for the constant lanes, single-lane MAD for
+    // the scaled lane); see the StoreOutput handler for details.
+    struct FpScaledLanesBinding
+    {
+        FpScaleVaryingBinding scale;
+        int                   scaledLane = 0;     // which output lane gets the MAD
+        float                 consts[4]  = {0,0,0,0}; // ignored at scaledLane
+    };
+    std::unordered_map<IRValueID, FpScaledLanesBinding> valueToScaledLanes;
 
     // MAD fusion: Add(Mul(input, uniformMul), addend) where addend is
     // either a literal vec4 or another uniform.  sce-cgc lowers this
@@ -792,9 +806,58 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             FpScaleVaryingBinding b;
                             b.inputId = ma.baseId;
                             b.scale   = 2;
+                            b.lane    = -1;  // full vec4
                             valueToScale[inst.result] = b;
                             break;
                         }
+
+                        // Shape C: scalar-lane variant — `Add(v.x, v.x)`
+                        // after CSE collapses identical ScalarExtract
+                        // results.  Both operands must be the same
+                        // ScalarExtract value-ID, the underlying
+                        // varying must be a direct INPUT, and no
+                        // abs/neg mods.  Lane is propagated to emit
+                        // time so MOVH/MAD use the right OUTMASK.
+                        if (ma.baseId == mb.baseId &&
+                            valueToScalarExtract.count(ma.baseId) &&
+                            !ma.absMod && !ma.negMod &&
+                            !mb.absMod && !mb.negMod)
+                        {
+                            const auto& se = valueToScalarExtract[ma.baseId];
+                            if (valueToInputSrc.count(se.baseId))
+                            {
+                                FpScaleVaryingBinding b;
+                                b.inputId = se.baseId;
+                                b.scale   = 2;
+                                b.lane    = se.lane;
+                                valueToScale[inst.result] = b;
+                                break;
+                            }
+                        }
+
+                        // Shape D: extend a scalar-lane scale binding
+                        // when the next link is the same ScalarExtract
+                        // value (or any ScalarExtract that resolves to
+                        // the same varying + lane).
+                        auto extendScalarLane = [&](IRValueID prevId,
+                                                    IRValueID rhsId) -> bool
+                        {
+                            auto sIt = valueToScale.find(prevId);
+                            if (sIt == valueToScale.end()) return false;
+                            if (sIt->second.lane < 0)       return false;
+                            if (sIt->second.scale >= kMaxScale) return false;
+                            auto seIt = valueToScalarExtract.find(rhsId);
+                            if (seIt == valueToScalarExtract.end()) return false;
+                            if (seIt->second.baseId != sIt->second.inputId ||
+                                seIt->second.lane   != sIt->second.lane)
+                                return false;
+                            FpScaleVaryingBinding b = sIt->second;
+                            b.scale += 1;
+                            valueToScale[inst.result] = b;
+                            return true;
+                        };
+                        if (extendScalarLane(ma.baseId, mb.baseId)) break;
+                        if (extendScalarLane(mb.baseId, ma.baseId)) break;
                     }
 
                     // Chain detection — only meaningful for Add today.
@@ -1000,6 +1063,52 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // (mixed input + const, narrower constructors) land
                 // with the arithmetic pass.
                 if (inst.operands.size() != 4) break;
+
+                // Shape C: `float4(scale_scalar, k1, k2, k3)` —
+                // exactly one operand is a scalar-lane scale binding,
+                // the other three are float constants.  Captures the
+                // sce-cgc accumulator-fold output shape (see
+                // loop_static3_f).  Detect first so the all-const
+                // path doesn't fire on mixed inputs.
+                {
+                    int scaleSlot = -1;
+                    FpScaleVaryingBinding scaleBind;
+                    float consts[4] = {0,0,0,0};
+                    bool allOk = true;
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        const IRValueID op = inst.operands[k];
+                        auto sIt = valueToScale.find(op);
+                        if (sIt != valueToScale.end() && sIt->second.lane >= 0)
+                        {
+                            if (scaleSlot >= 0) { allOk = false; break; }
+                            scaleSlot = k;
+                            scaleBind = sIt->second;
+                            continue;
+                        }
+                        IRValue* v = entry.getValue(op);
+                        auto* c = dynamic_cast<IRConstant*>(v);
+                        if (!c) { allOk = false; break; }
+                        // Cg integer literals in a float4 constructor
+                        // (e.g. `float4(acc, 0, 0, 1)`) reach the IR as
+                        // int32_t constants; the front-end leaves the
+                        // implicit int→float promotion to lowering.
+                        if (std::holds_alternative<float>(c->value))
+                            consts[k] = std::get<float>(c->value);
+                        else if (std::holds_alternative<int32_t>(c->value))
+                            consts[k] = static_cast<float>(std::get<int32_t>(c->value));
+                        else { allOk = false; break; }
+                    }
+                    if (allOk && scaleSlot >= 0)
+                    {
+                        FpScaledLanesBinding b;
+                        b.scale       = scaleBind;
+                        b.scaledLane  = scaleSlot;
+                        for (int k = 0; k < 4; ++k) b.consts[k] = consts[k];
+                        valueToScaledLanes[inst.result] = b;
+                        break;
+                    }
+                }
 
                 LiteralVec4 lv;
                 bool allConst = true;
@@ -1978,6 +2087,134 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         dsMask, dsS0, dsS1, dsS2);
                     ds.precision = dstPrecision;
                     asm_.emit(ds, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `float4(scale_scalar, k1, k2, k3)` lane-elision —
+                // the sce-cgc accumulator-fold output shape.  3
+                // instructions:
+                //
+                //   MOVH H0.<scaledLane>, f[input]                    # preload single varying lane to fp16
+                //   MOVR R0.<const_mask>, c[0].<swz> + inline(consts) # write the const lanes
+                //   MAD R0.<scaledLane> [END], H0.xyzw, c[0].xxxx, H0.xyzw + inline(scale-1, 0, 0, 0)
+                //
+                // The MOVR uses sce-cgc's lane-packing trick: when
+                // exactly two unique values appear across the
+                // non-scaled lanes, pack them in inline.x / inline.y
+                // and pick swizzle .xx[X|Y][X|Y] to broadcast each
+                // dst lane from its source lane.  Currently restricted
+                // to scaledLane=0 and the 2-unique-values shape;
+                // anything else falls through (no emit, will error).
+                auto slIt = valueToScaledLanes.find(srcId);
+                if (slIt != valueToScaledLanes.end() &&
+                    slIt->second.scaledLane == 0 &&
+                    slIt->second.scale.lane >= 0 &&
+                    slIt->second.scale.scale >= 2)
+                {
+                    const auto& sl = slIt->second;
+                    const auto& sb = sl.scale;
+                    auto inIt = valueToInputSrc.find(sb.inputId);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-lanes input failed to resolve");
+                        return out;
+                    }
+
+                    // Find the (up to) 2 unique const values in lanes
+                    // 1..3 (the non-scaled lanes).  Only the
+                    // 2-unique-values pattern matches sce-cgc's known
+                    // packing today.
+                    const float v1 = sl.consts[1];
+                    const float v2 = sl.consts[2];
+                    const float v3 = sl.consts[3];
+                    float u0 = v1;
+                    float u1 = 0.0f;
+                    bool  haveU1 = false;
+                    auto pickSlot = [&](float v) -> int {
+                        if (v == u0) return 0;            // inline.x
+                        if (haveU1 && v == u1) return 1;  // inline.y
+                        if (!haveU1) { u1 = v; haveU1 = true; return 1; }
+                        return -1;                        // 3+ unique → unsupported
+                    };
+                    const int slotY = pickSlot(v1);
+                    const int slotZ = pickSlot(v2);
+                    const int slotW = pickSlot(v3);
+                    if (slotY < 0 || slotZ < 0 || slotW < 0)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-lanes needs ≤ 2 unique const values "
+                            "across non-scaled lanes");
+                        return out;
+                    }
+
+                    // ── Inst 1: MOVH H0.<lane>, f[input] ──
+                    struct nvfx_reg hReg = nvfx_reg(NVFXSR_TEMP, 0);
+                    hReg.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    const uint8_t laneMask = uint8_t(1 << sb.lane);  // X→1, Y→2, Z→4, W→8
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1, hReg,
+                        laneMask, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // ── Inst 2: MOVR R0.<const_mask>, c[0].<swz> + inline ──
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_src constMovS0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    constMovS0.swz[0] = 0;            // dst.x unused (mask omits .x)
+                    constMovS0.swz[1] = (uint8_t)slotY;
+                    constMovS0.swz[2] = (uint8_t)slotZ;
+                    constMovS0.swz[3] = (uint8_t)slotW;
+                    struct nvfx_src constMovS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src constMovS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    // Const mask = .yzw for scaledLane=0.  General-
+                    // case (other scaledLane values) lands later.
+                    const uint8_t constMask = uint8_t(NVFX_FP_MASK_ALL ^ (1 << sl.scaledLane));
+                    struct nvfx_insn constMov = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        constMask, constMovS0, constMovS1, constMovS2);
+                    constMov.precision = dstPrecision;
+                    asm_.emit(constMov, NVFX_FP_OP_OPCODE_MOV);
+
+                    const float laneInline[4] = { u0, haveU1 ? u1 : 0.0f, 0.0f, 0.0f };
+                    asm_.appendConstBlock(laneInline);
+
+                    // ── Inst 3 [END]: MAD R0.<scaledLane>, H0, c[0].xxxx, H0 ──
+                    struct nvfx_src madS0 = nvfx_src(hReg);   // H0.xyzw
+                    struct nvfx_src madS1 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    madS1.swz[0] = madS1.swz[1] = madS1.swz[2] = madS1.swz[3] = 0;  // .xxxx
+                    struct nvfx_src madS2 = nvfx_src(hReg);   // H0.xyzw
+                    const uint8_t scaledMask = uint8_t(1 << sl.scaledLane);
+                    struct nvfx_insn mad = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        scaledMask, madS0, madS1, madS2);
+                    mad.precision = dstPrecision;
+                    asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+
+                    const float scaleInline[4] = {
+                        static_cast<float>(sb.scale - 1), 0.0f, 0.0f, 0.0f
+                    };
+                    asm_.appendConstBlock(scaleInline);
 
                     emittedSomething = true;
                     break;
