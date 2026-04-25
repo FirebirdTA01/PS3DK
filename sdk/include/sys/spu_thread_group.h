@@ -35,4 +35,77 @@ typedef sysSpuThreadArgument       sys_spu_thread_argument_t;
 typedef sysSpuThreadAttribute      sys_spu_thread_attribute_t;
 typedef sysSpuThreadGroupAttribute sys_spu_thread_group_attribute_t;
 
+/* SPU thread option constants (reference-SDK names). */
+#ifndef SYS_SPU_THREAD_OPTION_NONE
+#define SYS_SPU_THREAD_OPTION_NONE              0x0u
+#endif
+#ifndef SYS_SPU_THREAD_OPTION_ASYNC_INTR_ENABLE
+#define SYS_SPU_THREAD_OPTION_ASYNC_INTR_ENABLE 0x1u
+#endif
+#ifndef SYS_SPU_THREAD_OPTION_DEC_SYNC_TB_ENABLE
+#define SYS_SPU_THREAD_OPTION_DEC_SYNC_TB_ENABLE 0x2u
+#endif
+
+/* ------------------------------------------------------------------ *
+ * Reference-SDK initialize macros.
+ *
+ * PSL1GHT ships the same set under sysSpuThread{Attribute,Argument,
+ * GroupAttribute}{Initialize,Name}.  Reference samples expect the
+ * snake_case spelling.  The macros poke struct fields directly, so
+ * the PSL1GHT field-name layout is what we follow:
+ *
+ *   sysSpuThreadArgument fields are arg0..arg3 (PSL1GHT) — the
+ *   reference SDK names them arg1..arg4 but the layout is identical;
+ *   the initialize macro just zeros all four so it doesn't matter
+ *   which name space callers reach for.
+ * ------------------------------------------------------------------ */
+#define sys_spu_thread_attribute_initialize(x) \
+    do {                                       \
+        (x).name   = NULL;                     \
+        (x).nsize  = 0;                        \
+        (x).option = SYS_SPU_THREAD_OPTION_NONE; \
+    } while (0)
+
+#define sys_spu_thread_attribute_name(x, s)    \
+    do {                                       \
+        (x).name = (s);                        \
+        if ((s) == NULL) {                     \
+            (x).nsize = 0;                     \
+        } else {                               \
+            int _n = 0;                        \
+            for (; (_n < 127) && ((s)[_n] != '\0'); _n++) {} \
+            (x).nsize = _n + 1;                \
+        }                                      \
+    } while (0)
+
+#define sys_spu_thread_attribute_option(x, f)  \
+    do { (x).option = (f); } while (0)
+
+#define sys_spu_thread_argument_initialize(x)  \
+    do {                                       \
+        (x).arg0 = (x).arg1 = (x).arg2 = (x).arg3 = 0; \
+    } while (0)
+
+#define sys_spu_thread_group_attribute_initialize(x) \
+    do {                                             \
+        (x).name  = NULL;                            \
+        (x).nsize = 0;                               \
+        (x).type  = SYS_SPU_THREAD_GROUP_TYPE_NORMAL; \
+    } while (0)
+
+#define sys_spu_thread_group_attribute_name(x, s)    \
+    do {                                             \
+        (x).name = (s);                              \
+        if ((s) == NULL) {                           \
+            (x).nsize = 0;                           \
+        } else {                                     \
+            int _n = 0;                              \
+            for (; (_n < 127) && ((s)[_n] != '\0'); _n++) {} \
+            (x).nsize = _n + 1;                      \
+        }                                            \
+    } while (0)
+
+#define sys_spu_thread_group_attribute_type(x, t)    \
+    do { (x).type = (t); } while (0)
+
 #endif /* __PS3DK_SYS_SPU_THREAD_GROUP_H__ */
