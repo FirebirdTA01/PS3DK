@@ -27,13 +27,39 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <errno.h>
 
 #include <ppu-types.h>
 #include <sys/spu.h>                  /* sysSpuThread* + types */
 #include <sys/event_queue.h>          /* sys_event_queue_attr_t etc. */
 #include <sys/thread.h>               /* sysThreadCreate / Join / Exit */
-#include <sys/spu_thread_printf.h>    /* spu_thread_printf — formats LS args */
+#include <sys/lv2_syscall.h>          /* lv2syscall4 for SYS_SPU_THREAD_READ_LS */
+
+/* sys_spu_thread_read_ls - kernel syscall 182.  Reads `type`-byte
+ * value from SPU LS at `lsa` of the given thread.  Type=4 means
+ * 32-bit word, type=8 means 64-bit dword.  RPCS3 implements this
+ * (see Emu/Cell/lv2/sys_spu.cpp:1864). */
+#define SYSCALL_SPU_THREAD_READ_LS    182
+
+static inline int sys_spu_thread_read_ls_word(unsigned int id, unsigned int lsa, uint32_t *out)
+{
+    uint64_t buf = 0;
+    lv2syscall4(SYSCALL_SPU_THREAD_READ_LS, id, lsa, (u64)(uintptr_t)&buf, 4);
+    /* read_ls writes the read value into *value; for type=4 it's in
+     * the low 32 bits of the 64-bit slot.  Some kernels write the
+     * value into the high half instead — handle both by combining. */
+    *out = (uint32_t)(buf | (buf >> 32));
+    return (int)p1;  /* lv2syscall result */
+}
+
+static inline int sys_spu_thread_read_ls_byte(unsigned int id, unsigned int lsa, uint8_t *out)
+{
+    uint64_t buf = 0;
+    lv2syscall4(SYSCALL_SPU_THREAD_READ_LS, id, lsa, (u64)(uintptr_t)&buf, 1);
+    *out = (uint8_t)buf;
+    return (int)p1;
+}
 
 /* ---- internal state (single global server) ----------------------- */
 static int               s_initialized;
@@ -54,10 +80,17 @@ static sys_ppu_thread_t  s_handler_thread;
  * concurrently attached.  The event-port 1 mask is fixed across all
  * connections so the simple table is enough. */
 #define SPU_PRINTF_PORT               1u
-/* sys_spu_thread_group_connect_event_all_threads `req` mask: the
- * kernel matches the bit at position (63 - port_number) when the
- * caller asks for a specific port.  Port 1 -> bit 62 -> 0x4000... */
-#define SPU_PRINTF_PORT_REQ           ((u64)1 << (63 - SPU_PRINTF_PORT))
+/* sys_spu_thread_group_connect_event_all_threads `req` mask: open
+ * up the entire low half of the port range and let the kernel pick.
+ * The mask is bit N <-> port N (LSB-aligned); 0xffff..0000 with the
+ * top 48 bits set requests any of ports 16..63.  We ask for ports
+ * 0..63 here; the kernel returns the assigned port in *spup, and we
+ * connect that to our queue.  But the SPU's `_spu_call_event_va_arg`
+ * is hard-coded to send on port 1 — so if the kernel doesn't hand
+ * back port 1 specifically, the SPU printf path won't deliver.
+ * PSL1GHT solved this by requesting only the bit for the desired
+ * port; we follow the same pattern. */
+#define SPU_PRINTF_PORT_REQ           ((u64)1 << SPU_PRINTF_PORT)
 
 /* ---- server thread ----------------------------------------------- *
  *
@@ -91,8 +124,35 @@ static void spu_printf_server_entry(void *arg)
         sys_spu_thread_t thread_id = (sys_spu_thread_t)event.data_1;
         u32              arg_addr  = (u32)event.data_3;
 
-        s32 sret = spu_thread_printf(thread_id, arg_addr);
-        rc = sysSpuThreadWriteMb(thread_id, (u32)sret);
+        /* The arg block at SPU LS offset arg_addr was laid down by
+         * _spu_call_event_va_arg — first 4 bytes hold the LS address
+         * of the format string.  Read the fmt-ptr, then walk the LS
+         * byte-by-byte until null and print as-is.
+         *
+         * Caveat: this minimal implementation prints the format
+         * STRING verbatim — it doesn't parse %X conversion specs
+         * or pull va_args from the saved register block.  Adequate
+         * for log-style messages without conversions; richer printf
+         * support would need the full format-walk + per-spec LS
+         * read of subsequent args. */
+        uint32_t fmt_addr = 0;
+        if (sys_spu_thread_read_ls_word(thread_id, arg_addr, &fmt_addr) == 0
+            && fmt_addr != 0) {
+            char buf[256];
+            unsigned i = 0;
+            for (; i < sizeof(buf) - 1; i++) {
+                uint8_t b = 0;
+                if (sys_spu_thread_read_ls_byte(thread_id, fmt_addr + i, &b) != 0
+                    || b == 0) {
+                    break;
+                }
+                buf[i] = (char)b;
+            }
+            buf[i] = '\0';
+            fputs(buf, stdout);
+        }
+
+        rc = sysSpuThreadWriteMb(thread_id, 0);
         if (rc) {
             sysThreadExit(rc);
         }
