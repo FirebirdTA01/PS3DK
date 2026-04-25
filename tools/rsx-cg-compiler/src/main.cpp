@@ -20,12 +20,14 @@
 #include "semantic.h"
 #include "ir.h"
 #include "ir_builder.h"
+#include "ir_passes.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
 #include "nv40/nv40_if_convert.h"
 #include "compile_options.h"
 #include "cg_container_fp.h"
 #include "cg_container_vp.h"
+#include "version.h"
 
 namespace
 {
@@ -54,7 +56,7 @@ struct CompilerContext
 void usage()
 {
     std::fprintf(stderr,
-        "rsx-cg-compiler — Cg → RSX (NV40) compiler\n"
+        "rsx-cg-compiler — Cg → RSX (NV40) compiler (%s)\n"
         "\n"
         "Usage: rsx-cg-compiler [options] <shader.cg>\n"
         "\n"
@@ -67,6 +69,9 @@ void usage()
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
         "  -h, --help             Show this message\n"
+        "  -V, --version          Print version and exit\n",
+        RSX_CG_COMPILER_VERSION);
+    std::fprintf(stderr,
         "\n"
         "Optimization (FP only in current reference compiler; VP insensitive):\n"
         "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O2)\n"
@@ -126,6 +131,11 @@ int main(int argc, char** argv)
         if (arg == "-h" || arg == "--help")
         {
             usage();
+            return 0;
+        }
+        else if (arg == "-V" || arg == "--version")
+        {
+            std::printf("rsx-cg-compiler %s\n", RSX_CG_COMPILER_VERSION);
             return 0;
         }
         else if ((arg == "-p" || arg == "--profile") && i + 1 < argc)
@@ -278,6 +288,17 @@ int main(int argc, char** argv)
         }
         std::fprintf(stderr, "rsx-cg-compiler: IR generation failed.\n");
         return 1;
+    }
+
+    // Drop instructions whose results are never used. After loop
+    // unrolling, dead-store iterations leave behind orphan Add/Load
+    // chains that the NV40 emit path would otherwise try to lower.
+    {
+        DeadCodeElimination dce;
+        for (auto& fn : irModule->functions)
+        {
+            if (fn->isEntryPoint) dce.runOnFunction(*fn);
+        }
     }
 
     // Run NV40-specific IR transforms before back-end lowering.

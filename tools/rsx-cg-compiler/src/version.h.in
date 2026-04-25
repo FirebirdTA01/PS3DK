@@ -1,0 +1,17 @@
+/* version.h.in — populated by CMake configure_file().
+ *
+ * The values come from scripts/version.sh at configure time.  See
+ * tools/rsx-cg-compiler/CMakeLists.txt and ../../scripts/version.sh.
+ */
+
+#ifndef RSX_CG_COMPILER_VERSION_H
+#define RSX_CG_COMPILER_VERSION_H
+
+#define RSX_CG_COMPILER_VERSION              "@PS3SDK_VERSION@"
+#define RSX_CG_COMPILER_VERSION_BARE         "@PS3SDK_VERSION_BARE@"
+#define RSX_CG_COMPILER_VERSION_MAJOR        @PS3SDK_VERSION_MAJOR@
+#define RSX_CG_COMPILER_VERSION_MINOR        @PS3SDK_VERSION_MINOR@
+#define RSX_CG_COMPILER_VERSION_PATCH        @PS3SDK_VERSION_PATCH@
+#define RSX_CG_COMPILER_VERSION_COMMIT_SHORT "@PS3SDK_VERSION_COMMIT_SHORT@"
+
+#endif /* RSX_CG_COMPILER_VERSION_H */

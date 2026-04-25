@@ -15,6 +15,9 @@ PS3DEV      ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 PS3DK       ?= $(PS3DEV)/ps3dk
 INSTALL_INC := $(PS3DK)/ppu/include
 
+# Path to the version generator (relative to this Makefile).
+VERSION_SH  := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../scripts/version.sh)
+
 HEADERS := \
     include/types.h \
     include/sys/lv2_types.h \
@@ -31,6 +34,7 @@ HEADERS := \
     include/sys/time_util.h \
     include/sys/paths.h \
     include/sysutil/sysutil_sysparam.h \
+    include/cell/cell.h \
     include/cell/pad.h \
     include/cell/error.h \
     include/cell/gcm.h \
@@ -75,11 +79,11 @@ HEADERS := \
 
 SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread
 
-.PHONY: all install clean $(SUBLIBS)
+.PHONY: all install clean version-header $(SUBLIBS)
 
 all: $(SUBLIBS)
 
-install: install-headers install-sublibs
+install: install-headers install-version install-sublibs
 
 install-headers:
 	@for h in $(HEADERS); do \
@@ -89,6 +93,18 @@ install-headers:
 	    install -m 0644 "$$h" "$$dst"; \
 	    echo "  header  $$rel"; \
 	done
+
+# cell/sdk_version.h is generated from the current git state at install
+# time so every consumer sees the same version macros that the rest of
+# the SDK was tagged at.  Also write a plain-text VERSION file at the
+# install root for human/script consumers.
+install-version:
+	@install -d "$(INSTALL_INC)/cell"
+	@"$(VERSION_SH)" --format=header > "$(INSTALL_INC)/cell/sdk_version.h"
+	@echo "  header  cell/sdk_version.h (generated)"
+	@install -d "$(PS3DK)"
+	@"$(VERSION_SH)" --format=plain > "$(PS3DK)/VERSION"
+	@echo "  marker  $(PS3DK)/VERSION ($$(cat $(PS3DK)/VERSION))"
 
 install-sublibs:
 	@for lib in $(SUBLIBS); do \

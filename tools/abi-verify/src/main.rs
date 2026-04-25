@@ -9,7 +9,11 @@ use clap::{Parser, Subcommand};
 use abi_verify::{check_invariants, parse_elf_file};
 
 #[derive(Parser)]
-#[command(name = "abi-verify", about = "PS3 CellOS Lv-2 ABI conformance verifier")]
+#[command(
+    name = "abi-verify",
+    version,
+    about = "PS3 CellOS Lv-2 ABI conformance verifier"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
