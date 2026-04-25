@@ -19,6 +19,7 @@ HEADERS := \
     include/types.h \
     include/sys/lv2_types.h \
     include/sys/lv2_syscall.h \
+    include/sys/spu_image.h \
     include/sys/timer.h \
     include/sys/sys_time.h \
     include/sys/return_code.h \
