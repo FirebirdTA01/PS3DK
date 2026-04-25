@@ -53,11 +53,54 @@
 #include <sys/paths.h>
 
 /* SPU ELF embedded into the PPU ELF via PSL1GHT's bin2o macro
- * (see Makefile + data/spu_ef_bin).  The reference Sony sample loads
- * an SPU SELF off /app_home/ via sys_spu_image_open; we keep the
+ * (see Makefile + data/spu_ef_bin).  The reference sample loads an
+ * SPU SELF off /app_home/ via sys_spu_image_open; we keep the
  * sample self-contained by importing an embedded blob with
  * sys_spu_image_import instead. */
 #include "spu_ef_bin.h"
+
+/* ------------------------------------------------------------------ *
+ * spu_printf paths exercised by this sample.
+ *
+ * The SPU thread emits one log line per SET_BIT command via:
+ *
+ *   spu_printf("SPU Worker finished my job\n");
+ *
+ * which expands to `_spu_call_event_va_arg(EVENT_PRINTF_PORT << 24,
+ * fmt, ...)`.  That triggers an event on SPU port 1 carrying the LS
+ * address of a saved-args block.  A PPU-side server thread (started
+ * by spu_printf_initialize() from libc_stub.a) consumes the event,
+ * reads the format string out of SPU LS, and writes it to PPU stdio.
+ *
+ * There are TWO PPU-side strategies for the read-and-format step;
+ * the SDK ships both, selected by SPU_PRINTF_USE_SPRX_FORMATTER at
+ * build time inside libc_stub_extras/src/spu_printf.c:
+ *
+ *   Path A — real-hardware-canonical
+ *     Calls spu_thread_printf(thread_id, arg_addr) from libc.sprx
+ *     (FNID 0xb1f4779d).  Real PS3 firmware implements this and
+ *     returns a fully-formatted line with %d / %s / %lld varargs
+ *     pulled from the saved register block in SPU LS.
+ *     **Status on RPCS3 at the time of writing: NOT IMPLEMENTED.**
+ *     The HLE for that NID logs `PPU: Unregistered function called`
+ *     and produces no output.
+ *
+ *   Path B — RPCS3 workaround (sample default)
+ *     Calls sys_spu_thread_read_ls (kernel syscall 182, RPCS3 *does*
+ *     implement this) directly: read the 4-byte fmt-string pointer
+ *     at arg_addr, then walk the LS byte-by-byte to copy the format
+ *     string, fputs to stdout.  Works on RPCS3 today; produces only
+ *     the literal format-string text (no %X conversions).  Adequate
+ *     for log-style messages without specifiers — like the line this
+ *     sample emits.
+ *
+ * Default build uses Path B so the message surfaces under RPCS3.
+ * Override with -DSPU_PRINTF_USE_SPRX_FORMATTER=1 in the Makefile to
+ * test Path A on real hardware (or any future RPCS3 with NID
+ * 0xb1f4779d implemented).  The user-facing API
+ * (spu_printf_initialize / _attach_group / etc.) is identical
+ * either way; only the libc_stub_extras internals change.
+ * ------------------------------------------------------------------ */
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
