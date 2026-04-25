@@ -64,6 +64,9 @@ private:
     void buildBlockStmt(BlockStmt* stmt);
     void buildIfStmt(IfStmt* stmt);
     void buildForStmt(ForStmt* stmt);
+    // Static-count for-loop unroll. Returns true if the loop was fully
+    // unrolled into straight-line IR — caller skips the real-branch path.
+    bool tryUnrollStaticFor(ForStmt* stmt);
     void buildWhileStmt(WhileStmt* stmt);
     void buildDoWhileStmt(DoWhileStmt* stmt);
     void buildSwitchStmt(SwitchStmt* stmt);

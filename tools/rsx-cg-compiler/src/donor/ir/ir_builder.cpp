@@ -318,8 +318,181 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     currentBlock_ = mergeBlock;
 }
 
+namespace {
+
+bool stmtContainsBreakOrContinue(StmtNode* stmt)
+{
+    if (!stmt) return false;
+    switch (stmt->kind)
+    {
+    case StmtKind::Break:
+    case StmtKind::Continue:
+        return true;
+    case StmtKind::Block: {
+        auto* b = static_cast<BlockStmt*>(stmt);
+        for (auto& s : b->statements)
+            if (stmtContainsBreakOrContinue(s.get())) return true;
+        return false;
+    }
+    case StmtKind::If: {
+        auto* i = static_cast<IfStmt*>(stmt);
+        return stmtContainsBreakOrContinue(i->thenBranch.get()) ||
+               stmtContainsBreakOrContinue(i->elseBranch.get());
+    }
+    // Inner loops/switch shadow the enclosing loop's break/continue
+    // targets, so anything found there does not escape.
+    case StmtKind::For:
+    case StmtKind::While:
+    case StmtKind::DoWhile:
+    case StmtKind::Switch:
+        return false;
+    default:
+        return false;
+    }
+}
+
+bool exprIsIntLiteral(ExprNode* e, int32_t* out)
+{
+    if (!e || e->kind != ExprKind::Literal) return false;
+    auto* lit = static_cast<LiteralExpr*>(e);
+    if (lit->literalKind != LiteralExpr::LiteralKind::Int) return false;
+    *out = static_cast<int32_t>(std::get<int64_t>(lit->value));
+    return true;
+}
+
+}  // namespace
+
+bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
+{
+    if (!stmt->init || !stmt->condition || !stmt->increment || !stmt->body)
+        return false;
+
+    std::string varName;
+    int32_t curVal = 0;
+
+    // Init: `int i = K` (DeclStmt) or `i = K` (ExprStmt assignment).
+    if (stmt->init->kind == StmtKind::Decl)
+    {
+        auto* declStmt = static_cast<DeclStmt*>(stmt->init.get());
+        if (!declStmt->declaration ||
+            declStmt->declaration->kind != DeclKind::Variable)
+            return false;
+        auto* var = static_cast<VarDecl*>(declStmt->declaration.get());
+        if (!var->initializer) return false;
+        if (!exprIsIntLiteral(var->initializer.get(), &curVal)) return false;
+        varName = var->name;
+    }
+    else if (stmt->init->kind == StmtKind::Expr)
+    {
+        auto* exprStmt = static_cast<ExprStmt*>(stmt->init.get());
+        if (!exprStmt->expr || exprStmt->expr->kind != ExprKind::Binary)
+            return false;
+        auto* be = static_cast<BinaryExpr*>(exprStmt->expr.get());
+        if (be->op != BinaryOp::Assign) return false;
+        if (be->left->kind != ExprKind::Identifier) return false;
+        varName = static_cast<IdentifierExpr*>(be->left.get())->name;
+        if (!exprIsIntLiteral(be->right.get(), &curVal)) return false;
+    }
+    else
+    {
+        return false;
+    }
+
+    // Condition: `varName CMP int_literal`.
+    if (stmt->condition->kind != ExprKind::Binary) return false;
+    auto* cond = static_cast<BinaryExpr*>(stmt->condition.get());
+    BinaryOp cmpOp = cond->op;
+    if (cmpOp != BinaryOp::Less && cmpOp != BinaryOp::LessEqual &&
+        cmpOp != BinaryOp::Greater && cmpOp != BinaryOp::GreaterEqual &&
+        cmpOp != BinaryOp::Equal && cmpOp != BinaryOp::NotEqual)
+        return false;
+    if (cond->left->kind != ExprKind::Identifier) return false;
+    if (static_cast<IdentifierExpr*>(cond->left.get())->name != varName)
+        return false;
+    int32_t cmpVal = 0;
+    if (!exprIsIntLiteral(cond->right.get(), &cmpVal)) return false;
+
+    // Increment: `i++`, `++i`, `i--`, `--i`, `i += K`, `i -= K`.
+    int32_t incDelta = 0;
+    auto* incExpr = stmt->increment.get();
+    if (incExpr->kind == ExprKind::Unary)
+    {
+        auto* un = static_cast<UnaryExpr*>(incExpr);
+        if (un->operand->kind != ExprKind::Identifier) return false;
+        if (static_cast<IdentifierExpr*>(un->operand.get())->name != varName)
+            return false;
+        switch (un->op)
+        {
+        case UnaryOp::PreIncrement:
+        case UnaryOp::PostIncrement: incDelta = 1; break;
+        case UnaryOp::PreDecrement:
+        case UnaryOp::PostDecrement: incDelta = -1; break;
+        default: return false;
+        }
+    }
+    else if (incExpr->kind == ExprKind::Binary)
+    {
+        auto* be = static_cast<BinaryExpr*>(incExpr);
+        if (be->left->kind != ExprKind::Identifier) return false;
+        if (static_cast<IdentifierExpr*>(be->left.get())->name != varName)
+            return false;
+        int32_t k = 0;
+        if (!exprIsIntLiteral(be->right.get(), &k)) return false;
+        if (be->op == BinaryOp::AddAssign) incDelta = k;
+        else if (be->op == BinaryOp::SubAssign) incDelta = -k;
+        else return false;
+    }
+    else
+    {
+        return false;
+    }
+    if (incDelta == 0) return false;
+
+    // Body must not break/continue out of this loop level.
+    if (stmtContainsBreakOrContinue(stmt->body.get())) return false;
+
+    auto evalCmp = [&](int32_t lhs, int32_t rhs) -> bool {
+        switch (cmpOp)
+        {
+        case BinaryOp::Less:         return lhs <  rhs;
+        case BinaryOp::LessEqual:    return lhs <= rhs;
+        case BinaryOp::Greater:      return lhs >  rhs;
+        case BinaryOp::GreaterEqual: return lhs >= rhs;
+        case BinaryOp::Equal:        return lhs == rhs;
+        case BinaryOp::NotEqual:     return lhs != rhs;
+        default:                     return false;
+        }
+    };
+
+    constexpr int kMaxUnroll = 64;
+    int32_t simulated = curVal;
+    int trip = 0;
+    while (evalCmp(simulated, cmpVal))
+    {
+        ++trip;
+        if (trip > kMaxUnroll) return false;
+        simulated += incDelta;
+    }
+
+    for (int iter = 0; iter < trip; ++iter)
+    {
+        nameToValue_[varName] = createConstant(curVal);
+        buildStmt(stmt->body.get());
+        if (currentBlock_->hasTerminator()) return true;
+        curVal += incDelta;
+    }
+    nameToValue_[varName] = createConstant(curVal);
+    return true;
+}
+
 void IRBuilder::buildForStmt(ForStmt* stmt)
 {
+    // Static-count loops with literal init/condition/increment and no
+    // break/continue are fully unrolled into straight-line IR. This
+    // matches sce-cgc's lowering and lets the existing emit pipeline
+    // handle each iteration as ordinary scalar code.
+    if (tryUnrollStaticFor(stmt)) return;
+
     // Build initializer
     if (stmt->init)
     {
