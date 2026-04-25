@@ -290,15 +290,32 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Drop instructions whose results are never used. After loop
-    // unrolling, dead-store iterations leave behind orphan Add/Load
-    // chains that the NV40 emit path would otherwise try to lower.
+    // Generic IR cleanup: iterate AlgebraicSimplification +
+    // CommonSubexprElimination + DeadCodeElimination until fixpoint.
+    // Each individual pass currently applies one replacement per call
+    // (see ir_passes.cpp), so a manual loop is needed.  Cap at 8
+    // iterations as a sanity stop — typical entry points settle in 2-3.
+    //
+    // After loop unrolling, dead-store iterations leave behind orphan
+    // Add / LoadAttribute chains that DCE drops.  AlgebraicSimplification
+    // collapses `0 + x` (the leading constant of an `acc = 0; acc += ...`
+    // pattern) and CSE deduplicates the repeated `shuffle vcol .x`
+    // results — both prerequisites for the scale-fold detector to
+    // recognise an unrolled scalar accumulator.
+    for (int iter = 0; iter < 8; ++iter)
     {
-        DeadCodeElimination dce;
+        bool changed = false;
         for (auto& fn : irModule->functions)
         {
-            if (fn->isEntryPoint) dce.runOnFunction(*fn);
+            if (!fn->isEntryPoint) continue;
+            AlgebraicSimplification algsimp;
+            if (algsimp.runOnFunction(*fn))     changed = true;
+            CommonSubexprElimination cse;
+            if (cse.runOnFunction(*fn))         changed = true;
+            DeadCodeElimination dce;
+            if (dce.runOnFunction(*fn))         changed = true;
         }
+        if (!changed) break;
     }
 
     // Run NV40-specific IR transforms before back-end lowering.
