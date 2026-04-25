@@ -293,6 +293,20 @@ jobs:
       - uses: actions/download-artifact@v5
         with:
           path: artifacts
+          merge-multiple: true   # flatten all artifacts into artifacts/ directly
+
+      - name: Show downloaded artifacts
+        run: |
+          echo "=== Workspace root ==="
+          ls -la
+          echo
+          echo "=== Artifacts tree ==="
+          if [ -d artifacts ]; then
+            find artifacts -type f | sort
+          else
+            echo "ERROR: artifacts/ directory does not exist."
+            exit 1
+          fi
 
       - name: Extract CHANGELOG section for this tag
         id: notes
@@ -314,10 +328,31 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           version="${{ needs.verify-version.outputs.version }}"
-          assets=( $(find artifacts -type f \( \
+
+          # Collect every release asset.  Listed alphabetically so the GH
+          # release page renders them in a stable order.
+          mapfile -t assets < <(find artifacts -type f \( \
               -name '*.tar.xz' -o -name '*.tar.xz.sha256' -o \
-              -name '*.zip'    -o -name '*.zip.sha256' \)) )
+              -name '*.zip'    -o -name '*.zip.sha256' \) | sort)
+
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "::error::No release assets found under artifacts/. Check the download-artifact step output above."
+            exit 1
+          fi
+
+          echo "Will upload ${#assets[@]} release assets:"
+          printf '  %s\n' "${assets[@]}"
+
+          # If a release already exists for this tag (e.g. from a previous
+          # workflow run that we want to retry), delete it first so we
+          # start with a clean slate.  The git tag itself is preserved.
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "Release $version already exists — deleting before recreating."
+            gh release delete "$version" --yes --cleanup-tag=false
+          fi
+
           gh release create "$version" \
               --title "$version" \
               --notes-file "${{ steps.notes.outputs.notes_path }}" \
