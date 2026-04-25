@@ -83,8 +83,34 @@ backend coming along for the ride, but both are active goals.
 
 ## Status
 
-Early development.  See `docs/coverage.md` for an up-to-date API
-coverage matrix once the PSL1GHT runtime has been built.
+Active development; toolchain and core SDK are usable end-to-end.
+
+- **Toolchain (PPU + SPU):** built and validated.  Both cross-compilers,
+  `binutils`, `newlib`, and PPU `gdb` produce working artefacts; the SPU
+  GCC 9.5.0 fork is patched and stable on `spu-elf`.
+- **SDK surface:** 41.6% of the reference cell-SDK export set across 98
+  libraries (1981 / 4758 symbols), driven by the NID/FNID database and
+  the stub-archive pipeline.  Several subsystems are at 100% — `libaudio`,
+  `libgcm_sys` (with legacy-name shims), `libio` (pad/kb/mouse), `libc`,
+  `liblv2`, `libspurs` (PPU + SPU task runtime), `libsysutil_audio_out`,
+  and a dozen more.  See `docs/coverage.md` for the full matrix.
+- **Runtime path:** native compact-OPD ELFv1 LV2 runtime (`runtime/lv2/`)
+  ships and is the default for new PPU samples; PSL1GHT's runtime stays
+  available as a fallback.  Compact `.opd` (8-byte descriptors) is end-
+  to-end runnable in RPCS3 with full `printf` output.
+- **Samples:** 34 samples build green and a representative subset
+  (cellGcm rendering, cellAudio playback, cellPad input, Spurs taskset
+  + SPU task, lv2 event-flag with PPU↔SPU sync, sysutil callbacks,
+  msgdialog, savedata, gamedata, screenshot, l10n, jpg/png decode,
+  cellGcmDbgFont) runs end-to-end in RPCS3.
+- **rsx-cg-compiler:** 46/46 test shaders byte-identical to the
+  reference Cg compiler at `--O2 --fastmath`.  Open work: loops +
+  multi-instruction if/else diamonds.  See "Optional: rsx-cg-compiler"
+  below for what's covered.
+
+For the up-to-date API coverage matrix, regenerate
+`docs/coverage.md` after a build with
+`cargo run --release --bin coverage-report` from `tools/`.
 
 ## Build host
 
@@ -218,7 +244,7 @@ Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub 
 
 `tools/rsx-cg-compiler/` is a clean-room Cg → RSX (NV40) shader compiler we're growing as an eventual drop-in replacement for PSL1GHT's `cgcomp`.
 
-**It is experimental and not yet feature-complete.** Simple vertex-passthrough, fragment-arithmetic, TXP, samplerCube, and Select shaders round-trip cleanly today; loops, length / normalize / rcp / rsqrt lowering, and various higher-order operators are in progress.  For now, production shader builds should stick with PSL1GHT's `cgcomp`; the `hello-ppu-cellgcm-triangle` sample can opt into the experimental compiler with `make USE_RSX_CG_COMPILER=1` as a smoke test.
+**It is experimental and growing.** The byte-diff harness against the reference Cg compiler at `--O2 --fastmath` reports **46 / 46 shaders byte-identical** today, covering vertex passthrough, MVP transforms, struct-flattened VP inputs, FP arithmetic + MAD fusion, saturation + fp16 precision, dot products, min/max, abs/neg, TXP (projective texture), samplerCUBE, the full Select scope (all 6 compare ops × all lanes × uniform/literal/varying RHS, ternary, if-only and if-else diamonds via if-conversion), and the SFU unaries `length` / `normalize` / `rcp` / `rsqrt`.  Open gaps: `for`/`while` loops (blocked on loop-carry SSA in the IR builder), multi-instruction if/else diamonds (only single-`stout` branches if-convert today), and varying-default if-only.  For production shader builds the recommendation is still PSL1GHT's `cgcomp` until the loop work lands; the `hello-ppu-cellgcm-triangle` sample can opt into our compiler with `make USE_RSX_CG_COMPILER=1` and renders byte-identically end-to-end in RPCS3.
 
 To build it:
 
@@ -233,7 +259,7 @@ cmake --build tools/rsx-cg-compiler/build
 - `scripts/` — build orchestrators and environment setup
 - `src/` — vendored upstream and ps3dev sources (reproducible via `bootstrap.sh`; `.gitignored`)
 - `patches/` — rebased and new patches against upstream sources
-- `tools/` — Rust CLIs: `nidgen`, `stubgen`, `coverage-report`
+- `tools/` — Rust CLIs: `nidgen` (NID + stub-archive emit), `coverage-report`, `abi-verify`, `sprx-linker`; plus the C++ `rsx-cg-compiler`
 - `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, psl1ght, ps3dk, portlibs)
 - `samples/` — minimal C++17 demos for validation
 - `ci/` — Docker images and GitHub Actions
