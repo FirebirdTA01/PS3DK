@@ -45,6 +45,9 @@ HEADERS := \
     include/cell/gcm/gcm_command_c.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \
+    include/cell/cell_fs.h \
+    include/cell/fs/cell_fs_file_api.h \
+    include/cell/fs/cell_fs_errno.h \
     include/cell/dbgfont.h \
     include/cell/sysutil.h \
     include/cell/msg_dialog.h \
