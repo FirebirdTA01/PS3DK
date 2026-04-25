@@ -26,7 +26,11 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Parser)]
-#[command(name = "coverage-report", about = "Reference cell SDK vs our install tree coverage matrix")]
+#[command(
+    name = "coverage-report",
+    version,
+    about = "Reference cell SDK vs our install tree coverage matrix"
+)]
 struct Cli {
     /// Directory of extracted reference NID YAMLs (tools/nidgen/nids/extracted/).
     #[arg(long)]

@@ -1,0 +1,324 @@
+name: Release
+
+# Triggered on every v-prefixed tag push.  Verifies version metadata is
+# consistent, builds the host tools (Linux + Windows), and publishes a
+# GitHub Release with sources + tool binaries attached.
+#
+# PPU/SPU toolchain binaries and the SDK runtime libraries are deferred
+# to v0.2.x / v0.3.x — see docs/VERSIONING.md "Release-payload roadmap".
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write   # create releases + upload assets
+
+jobs:
+  verify-version:
+    name: Verify version metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      bare:    ${{ steps.v.outputs.bare }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # version.sh needs full tag history
+
+      - id: v
+        name: Run scripts/version.sh
+        run: |
+          version="$(./scripts/version.sh --format=plain)"
+          bare="$(./scripts/version.sh --format=bare)"
+          tag="${GITHUB_REF##*/}"
+          echo "Tag:           $tag"
+          echo "Generator out: $version"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::version.sh ($version) does not match the pushed tag ($tag). The tag must point at a commit where version.sh emits exactly that tag."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "bare=$bare" >> "$GITHUB_OUTPUT"
+
+      - name: Check Rust workspace version is in sync
+        run: ./scripts/sync-versions.sh --check
+
+  build-host-tools-linux:
+    name: Build host tools (linux x86_64)
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libelf-dev cmake ninja-build python3
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/target
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('tools/Cargo.lock') }}
+
+      - name: Build Rust workspace (release)
+        working-directory: tools
+        run: cargo build --release --workspace
+
+      - name: Build sprx-linker
+        run: make -C tools/sprx-linker
+
+      - name: Build rsx-cg-compiler
+        run: |
+          cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
+              -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
+
+      - name: Smoke-test --version flags
+        run: |
+          tools/target/release/nidgen --version
+          tools/target/release/abi-verify --version
+          tools/target/release/coverage-report --version
+          tools/rsx-cg-compiler/build/rsx-cg-compiler --version
+          # sprx-linker has no --version yet; just confirm it's a runnable ELF.
+          file tools/sprx-linker/sprxlinker
+
+      - name: Stage tool tarball
+        run: |
+          version="${{ needs.verify-version.outputs.version }}"
+          stage="ps3-sdk-tools-${version}-linux-x86_64"
+          mkdir -p "$stage/bin"
+          # Rust binaries.
+          for bin in nidgen abi-verify coverage-report; do
+            cp "tools/target/release/$bin" "$stage/bin/"
+          done
+          # C/C++ binaries.
+          cp tools/sprx-linker/sprxlinker "$stage/bin/"
+          cp tools/rsx-cg-compiler/build/rsx-cg-compiler "$stage/bin/"
+          # Strip everything (best-effort).
+          strip "$stage/bin/"* || true
+          # Bundle a tiny README that lists runtime deps.
+          cat > "$stage/README.txt" <<EOF
+          PS3 Custom Toolchain — host tools, ${version}, linux x86_64.
+
+          Drop the contents of bin/ into \$PS3DEV/bin/ on a host where the
+          toolchain is already built, or anywhere on \$PATH for ad-hoc use.
+
+          Runtime dependencies (dynamic):
+            * sprxlinker         — libelf, libz, libzstd
+            * rsx-cg-compiler    — libstdc++ (system)
+            * nidgen, abi-verify, coverage-report — none beyond glibc
+
+          See CHANGELOG.md for what changed in this release.
+          EOF
+          cp CHANGELOG.md "$stage/" || true
+          tar -cJf "${stage}.tar.xz" "$stage"
+          sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
+          ls -l "${stage}".*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-tools-linux-x86_64
+          path: ps3-sdk-tools-*-linux-x86_64.tar.*
+
+  build-host-tools-windows:
+    name: Build host tools (windows x86_64)
+    needs: verify-version
+    runs-on: windows-latest
+    defaults:
+      run:
+        # All run: steps execute inside the MSYS2 mingw64 shell.  This
+        # gives us a single ABI (gnu) for every binary in the tarball
+        # and access to mingw-w64's libelf, which sprx-linker needs.
+        shell: 'msys2 {0}'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up MSYS2 / mingw64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            base-devel
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-libelf
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-rust
+
+      - name: Probe toolchain
+        run: |
+          set -e
+          gcc --version | head -1
+          g++ --version | head -1
+          cargo --version
+          rustc --version
+          cmake --version | head -1
+          pkg-config --modversion libelf || true
+
+      - name: Build Rust workspace (release)
+        working-directory: tools
+        env:
+          CARGO_BUILD_JOBS: '4'
+        run: cargo build --release --workspace
+
+      - name: Build sprx-linker (statically linked)
+        run: |
+          set -e
+          cd tools/sprx-linker
+          # Static link so the resulting .exe doesn't depend on
+          # libelf-0.dll, libz-1.dll, libzstd.dll, libwinpthread, etc.
+          # being on the user's PATH.  Plain `make` would dynamic-link.
+          gcc -O2 -Wall -std=gnu99 -static -o sprxlinker.exe sprx-linker.c \
+              -lelf -lz -lzstd
+          file sprxlinker.exe
+
+      - name: Build rsx-cg-compiler (statically linked)
+        run: |
+          set -e
+          cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
+          file tools/rsx-cg-compiler/build/rsx-cg-compiler.exe
+
+      - name: Smoke-test --version flags
+        run: |
+          set -e
+          tools/target/release/nidgen.exe --version
+          tools/target/release/abi-verify.exe --version
+          tools/target/release/coverage-report.exe --version
+          tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
+          file tools/sprx-linker/sprxlinker.exe
+
+      - name: Stage tool zip
+        run: |
+          set -e
+          version="${{ needs.verify-version.outputs.version }}"
+          stage="ps3-sdk-tools-${version}-windows-x86_64"
+          mkdir -p "$stage/bin"
+          for bin in nidgen abi-verify coverage-report; do
+            cp "tools/target/release/${bin}.exe" "$stage/bin/"
+          done
+          cp tools/sprx-linker/sprxlinker.exe                       "$stage/bin/"
+          cp tools/rsx-cg-compiler/build/rsx-cg-compiler.exe        "$stage/bin/"
+          # Strip best-effort.
+          strip "$stage/bin/"*.exe || true
+          # Bundled README.
+          cat > "$stage/README.txt" <<EOF
+          PS3 Custom Toolchain — host tools, ${version}, windows x86_64.
+
+          Drop the contents of bin\\ into %PS3DEV%\\bin\\ on a Windows host
+          where the toolchain is already built, or anywhere on %PATH% for
+          ad-hoc use.
+
+          All .exe files are statically linked against MinGW-w64 runtime
+          and libelf / zlib / zstd; they have no DLL runtime dependencies
+          beyond what every Windows install ships (kernel32, msvcrt).
+
+          See CHANGELOG.md for what changed in this release.
+          EOF
+          cp CHANGELOG.md "$stage/" || true
+          # Use zip (canonical Windows distribution format) rather than
+          # tar.xz — Windows users can double-click it.
+          /mingw64/bin/zip -r -9 "${stage}.zip" "$stage"
+          sha256sum "${stage}.zip" > "${stage}.zip.sha256"
+          ls -l "${stage}".*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-tools-windows-x86_64
+          path: |
+            ps3-sdk-tools-*-windows-x86_64.zip
+            ps3-sdk-tools-*-windows-x86_64.zip.sha256
+
+  build-source-bundle:
+    name: Build source bundle
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Stage source bundle
+        run: |
+          version="${{ needs.verify-version.outputs.version }}"
+          stage="ps3-sdk-src-${version}"
+          # Curated archive: the parts actually authored in this repo.
+          # Excludes vendored upstream (src/ via .gitignore) and the
+          # private reference mount (reference/ via .gitignore).
+          git archive --format=tar --prefix="${stage}/" HEAD \
+              | xz -T0 > "${stage}.tar.xz"
+          sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
+          ls -l "${stage}".*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-bundle
+          path: ps3-sdk-src-*.tar.*
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - verify-version
+      - build-host-tools-linux
+      - build-host-tools-windows
+      - build-source-bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Extract CHANGELOG section for this tag
+        id: notes
+        run: |
+          version="${{ needs.verify-version.outputs.version }}"
+          # Pull the section between '## [<version>]' and the next '## ['.
+          # If extraction fails for any reason, fall back to a generic body.
+          awk -v want="$version" '
+              $0 ~ "^## \\[" want "\\]" { capture = 1; next }
+              capture && /^## \[/        { exit }
+              capture                    { print }
+          ' CHANGELOG.md > .release-notes.md
+          if [ ! -s .release-notes.md ]; then
+            echo "Release ${version}." > .release-notes.md
+          fi
+          echo "notes_path=.release-notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create release + upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ needs.verify-version.outputs.version }}"
+          assets=( $(find artifacts -type f \( \
+              -name '*.tar.xz' -o -name '*.tar.xz.sha256' -o \
+              -name '*.zip'    -o -name '*.zip.sha256' \)) )
+          gh release create "$version" \
+              --title "$version" \
+              --notes-file "${{ steps.notes.outputs.notes_path }}" \
+              "${assets[@]}"
