@@ -69,12 +69,16 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 
 lv2 syscall-layer primitives: threading, synchronisation, event flags,
 timers.  These samples use the cell-SDK-name sync compat headers
-(`<sys/synchronization.h>`, `<sys/ppu_thread.h>`, `<sys/time_util.h>`)
-over PSL1GHT's existing lv2 syscall surface.  No SPRX modules required.
+(`<sys/synchronization.h>`, `<sys/ppu_thread.h>`, `<sys/time_util.h>`,
+`<sys/lv2_syscall.h>`) over our own / PSL1GHT's lv2 syscall surface.
+The `hello-event-flag-spu` sample additionally pulls in our
+`libsputhread.a` (SPU-side lv2 syscall wrappers) and `libc_stub.a`
+(working `spu_printf_*` event-queue surface).
 
 | Sample | Validates | Status |
 |---|---|---|
 | `hello-ppu-event-flag` | Master + 5 worker PPU threads coordinate via two `sys_event_flag_*` flags; every worker prints "succeeded my job" and exits cleanly | **green** + RPCS3 runtime-verified |
+| `hello-event-flag-spu` | Full PPU + SPU sync round-trip.  Master + 5 PPU workers coordinate via `sys_event_flag_*`, then master spawns one SPU thread (linked against `libsputhread.a`) which takes commands via SNR1/SNR2 and uses `sys_event_flag_set_bit_impatient` to notify the master.  SPU thread also emits `spu_printf("SPU Worker finished my job\n")` which the PPU surfaces via our `libc_stub.a`-resident server thread (see `sdk/libc_stub_extras/src/spu_printf.c` for the dual-path impl: real-HW-canonical via `spu_thread_printf` + RPCS3-friendly direct LS read) | **green** + RPCS3 runtime-verified |
 
 ## audio/
 
