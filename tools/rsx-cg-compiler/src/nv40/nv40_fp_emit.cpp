@@ -2171,17 +2171,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
 
-                    // scaledLane=Z reorders MOVR before MAD AND preloads
-                    // to H1 instead of H0 — needs its own emit handler;
-                    // bail until it lands.
-                    if (sl.scaledLane == 2)
-                    {
-                        out.diagnostics.push_back(
-                            "nv40-fp: scaled-lanes scaledLane=Z not yet "
-                            "supported (sce-cgc reorders + H1 preload)");
-                        return out;
-                    }
-
                     // Swz at the scaled-lane position: matches the swz
                     // of the first non-scaled lane > scaledLane (i.e.
                     // the lane that "comes next").  For scaledLane=W,
@@ -2191,8 +2180,17 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     else if (firstNonScaledAfterScaled >= 0)
                         swzPos[sl.scaledLane] = swzPos[firstNonScaledAfterScaled];
 
-                    // ── Inst 1: MOVH H0.<lane>, f[input] ──
-                    struct nvfx_reg hReg = nvfx_reg(NVFXSR_TEMP, 0);
+                    // Per-scaledLane shape selection:
+                    //   X  (0) — handled by the scaledLane=0 branch below
+                    //   Y  (1) — MOVH H0 → MAD → FENCBR → MOVR[END]
+                    //   Z  (2) — MOVH H1 → MOVR → FENCBR → MAD[END]
+                    //   W  (3) — MOVH H0 → MAD → MOVR[END]   (no FENCBR)
+                    const int  hRegIdx     = (sl.scaledLane == 2) ? 1 : 0;
+                    const bool needsFencbr = (sl.scaledLane == 1 || sl.scaledLane == 2);
+                    const bool madFirst    = (sl.scaledLane != 2);
+
+                    // ── Inst 1: MOVH H<idx>.<lane>, f[input] ──
+                    struct nvfx_reg hReg = nvfx_reg(NVFXSR_TEMP, hRegIdx);
                     hReg.is_fp16 = 1;
                     const struct nvfx_reg inputReg =
                         nvfx_reg(NVFXSR_INPUT, inIt->second);
@@ -2215,59 +2213,64 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
                     }
 
-                    // ── Inst 2: MAD R0.<scaledLane>, H0.xxxx, c[scale-1].xxxx, H0.xxxx ──
-                    // SRC0/SRC2 must broadcast lane X (the only loaded
-                    // H0 lane) to the destination lane.  For
-                    // scaledLane=0 the existing path uses the .xyzw
-                    // identity which "happens to" pick H0.x, but for
-                    // any other scaledLane an identity swizzle would
-                    // read an undefined H0 lane.
                     const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
-                    struct nvfx_src madS0 = nvfx_src(hReg);
-                    madS0.swz[0] = madS0.swz[1] = madS0.swz[2] = madS0.swz[3] = 0;
-                    struct nvfx_src madS1 =
-                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
-                    madS1.swz[0] = madS1.swz[1] = madS1.swz[2] = madS1.swz[3] = 0;
-                    struct nvfx_src madS2 = nvfx_src(hReg);
-                    madS2.swz[0] = madS2.swz[1] = madS2.swz[2] = madS2.swz[3] = 0;
-                    const uint8_t scaledMask = uint8_t(1 << sl.scaledLane);
-                    // For scaledLane=Y/Z, MAD does NOT carry END
-                    // (FENCBR + MOVR follow).  For scaledLane=W, MAD
-                    // also does not carry END (MOVR follows).  Only
-                    // markEnd() at the function tail decides.
-                    struct nvfx_insn mad = nvfx_insn(
-                        0, 0, -1, -1,
-                        const_cast<struct nvfx_reg&>(dstReg),
-                        scaledMask, madS0, madS1, madS2);
-                    mad.precision = dstPrecision;
-                    asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
-                    const float scaleInline[4] = {
-                        static_cast<float>(sb.scale - 1), 0.0f, 0.0f, 0.0f
+
+                    // Closure-style: emit MAD R0.<scaledLane> = H<idx> * c.xxxx + H<idx>.
+                    // SRC0/SRC2 must broadcast .xxxx — the only preloaded H lane.
+                    auto emitMad = [&]() {
+                        struct nvfx_src madS0 = nvfx_src(hReg);
+                        madS0.swz[0] = madS0.swz[1] = madS0.swz[2] = madS0.swz[3] = 0;
+                        struct nvfx_src madS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        madS1.swz[0] = madS1.swz[1] = madS1.swz[2] = madS1.swz[3] = 0;
+                        struct nvfx_src madS2 = nvfx_src(hReg);
+                        madS2.swz[0] = madS2.swz[1] = madS2.swz[2] = madS2.swz[3] = 0;
+                        const uint8_t scaledMask = uint8_t(1 << sl.scaledLane);
+                        struct nvfx_insn mad = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            scaledMask, madS0, madS1, madS2);
+                        mad.precision = dstPrecision;
+                        asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+                        const float scaleInline[4] = {
+                            static_cast<float>(sb.scale - 1), 0.0f, 0.0f, 0.0f
+                        };
+                        asm_.appendConstBlock(scaleInline);
                     };
-                    asm_.appendConstBlock(scaleInline);
+                    auto emitMovr = [&]() {
+                        struct nvfx_src constMovS0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        constMovS0.swz[0] = (uint8_t)swzPos[0];
+                        constMovS0.swz[1] = (uint8_t)swzPos[1];
+                        constMovS0.swz[2] = (uint8_t)swzPos[2];
+                        constMovS0.swz[3] = (uint8_t)swzPos[3];
+                        struct nvfx_src constMovS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src constMovS2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        const uint8_t constMask =
+                            uint8_t(NVFX_FP_MASK_ALL ^ (1 << sl.scaledLane));
+                        struct nvfx_insn constMov = nvfx_insn(
+                            saturate ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            constMask, constMovS0, constMovS1, constMovS2);
+                        constMov.precision = dstPrecision;
+                        asm_.emit(constMov, NVFX_FP_OP_OPCODE_MOV);
+                        asm_.appendConstBlock(inlinePack);
+                    };
 
-                    // ── Inst 3 (only Y / Z): FENCBR ──
-                    if (sl.scaledLane == 1 || sl.scaledLane == 2)
-                        asm_.emitFencbr();
-
-                    // ── Final inst [END]: MOVR R0.<const_mask>, c[0].<swz> + inline ──
-                    struct nvfx_src constMovS0 =
-                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
-                    constMovS0.swz[0] = (uint8_t)swzPos[0];
-                    constMovS0.swz[1] = (uint8_t)swzPos[1];
-                    constMovS0.swz[2] = (uint8_t)swzPos[2];
-                    constMovS0.swz[3] = (uint8_t)swzPos[3];
-                    struct nvfx_src constMovS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_src constMovS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    const uint8_t constMask =
-                        uint8_t(NVFX_FP_MASK_ALL ^ (1 << sl.scaledLane));
-                    struct nvfx_insn constMov = nvfx_insn(
-                        saturate ? 1 : 0, 0, -1, -1,
-                        const_cast<struct nvfx_reg&>(dstReg),
-                        constMask, constMovS0, constMovS1, constMovS2);
-                    constMov.precision = dstPrecision;
-                    asm_.emit(constMov, NVFX_FP_OP_OPCODE_MOV);
-                    asm_.appendConstBlock(inlinePack);
+                    if (madFirst)
+                    {
+                        emitMad();
+                        if (needsFencbr) asm_.emitFencbr();
+                        emitMovr();
+                    }
+                    else
+                    {
+                        emitMovr();
+                        if (needsFencbr) asm_.emitFencbr();
+                        emitMad();
+                    }
 
                     emittedSomething = true;
                     break;
