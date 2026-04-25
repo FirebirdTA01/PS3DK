@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **98**
 - Cell SDK exports total: **4758**
-- Covered by our install tree: **1981** (41.6%) — 1673 by exact name, 308 via alias
-- Our install tree exports: **17196** (all archives, deduplicated)
+- Covered by our install tree: **2040** (42.9%) — 1732 by exact name, 308 via alias
+- Our install tree exports: **17433** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4751 · stub 7 · impl 0 · verified 0
 
@@ -104,7 +104,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsysutil_np_util_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `liblv2_stub` | 118 | 118 | 0 | 118 | 100.0% |
 | `libcrashdump_stub` | 2 | 0 | 0 | 0 | 0.0% |
-| `libfs_stub` | 59 | 0 | 0 | 0 | 0.0% |
+| `libfs_stub` | 59 | 59 | 0 | 59 | 100.0% |
 | `libio_stub` | 47 | 47 | 0 | 47 | 100.0% |
 | `libdbg_libio_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `libc_stub` | 318 | 318 | 0 | 318 | 100.0% |
@@ -2606,70 +2606,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ```
 0x52696620  sys_crash_dump_get_user_log_area
 0xb20f87b3  sys_crash_dump_set_user_log_area
-```
-
-### `libfs_stub` (59 / 59 missing)
-
-```
-0x7f13fc8c  cellFsAioCancel
-0x9f951810  cellFsAioFinish
-0xdb869f20  cellFsAioInit
-0xc1c507e7  cellFsAioRead
-0x4cef342e  cellFsAioWrite
-0x3394f037  cellFsAllocateFileAreaByFdWithInitialData
-0x2cf1296b  cellFsAllocateFileAreaByFdWithoutZeroFill
-0x103b8632  cellFsAllocateFileAreaWithInitialData
-0x7a0329a1  cellFsAllocateFileAreaWithoutZeroFill
-0x1ea02e2f  cellFsArcadeHddSerialNumber
-0xe15939c3  cellFsChangeFileSizeByFdWithoutAllocation
-0x606f9f42  cellFsChangeFileSizeWithoutAllocation
-0x99406d0b  cellFsChmod
-0x2cb51f0d  cellFsClose
-0xff42dcc3  cellFsClosedir
-0xcb588dba  cellFsFGetBlockSize
-0xef3efa34  cellFsFstat
-0x967a162b  cellFsFsync
-0x0e2939e5  cellFsFtruncate
-0x1a108ab7  cellFsGetBlockSize
-0x9b882495  cellFsGetDirectoryEntries
-0xaa3b4bcd  cellFsGetFreeSize
-0xa397d042  cellFsLseek
-0xba901fe6  cellFsMkdir
-0x718bf5f8  cellFsOpen
-0x3f61245c  cellFsOpendir
-0x4d5ff8e2  cellFsRead
-0x0d5b4a14  cellFsReadWithOffset
-0x5c74903d  cellFsReaddir
-0xa01ee33a  cellFsRegisterConversionCallback
-0xf12eecc8  cellFsRename
-0x2796fdf3  cellFsRmdir
-0xb1840b53  cellFsSdataOpen
-0x6d3bb15b  cellFsSdataOpenByFd
-0x445c878f  cellFsSdataOpenWithVersion
-0x02671310  cellFsSetDefaultContainer
-0x91a1beaa  cellFsSetDiscReadRetrySetting
-0x3140f6e1  cellFsSetIoBuffer
-0x75f16dc5  cellFsSetIoBufferFromDefaultContainer
-0x27800c6b  cellFsStRead
-0xd73938df  cellFsStReadFinish
-0x190912f6  cellFsStReadGetCurrentAddr
-0xbd273a88  cellFsStReadGetRegid
-0xb3afee8b  cellFsStReadGetRingBuf
-0xcf34969c  cellFsStReadGetStatus
-0x2664c8ae  cellFsStReadInit
-0x81f33783  cellFsStReadPutCurrentAddr
-0x8df28ff9  cellFsStReadStart
-0xf8e5d9a0  cellFsStReadStop
-0x8f71c5b2  cellFsStReadWait
-0x866f6aec  cellFsStReadWaitCallback
-0x7de6dced  cellFsStat
-0xc9dc3ac5  cellFsTruncate
-0x3a1c8393  cellFsTruncate2
-0x7f4677a8  cellFsUnlink
-0xf94baa80  cellFsUnregisterL10nCallbacks
-0xbef554a4  cellFsUtime
-0xecdcf2ab  cellFsWrite
-0x8cb722d5  cellFsWriteWithOffset
 ```
 
 ### `libdbg_libio_stub` (4 / 4 missing)
