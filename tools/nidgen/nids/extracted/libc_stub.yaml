@@ -1,6 +1,7 @@
 library: sys_libc
 version: 1
 module: sys_libc
+archive_name: c
 exports:
 - name: TlsGetValue
   nid: '0x6660fc8d'
@@ -82,10 +83,6 @@ exports:
   nid: '0x89b62f56'
   signature: ''
   notes: extracted from _sys_libc_0001_293.o
-- name: _Exit
-  nid: '0xc63c354f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_438.o
 - name: _Exitspawn
   nid: '0xde32a334'
   signature: ''
@@ -650,18 +647,12 @@ exports:
   nid: '0x0df8809f'
   signature: ''
   notes: extracted from _sys_libc_0001_26.o
-- name: __cxa_atexit
-  nid: '0xa835be11'
-  signature: ''
-  notes: extracted from _sys_libc_0001_355.o
-- name: __getpid
-  nid: '0x5e06c3fe'
-  signature: ''
-  notes: extracted from _sys_libc_0001_196.o
-- name: __raw_spu_printf
-  nid: '0x25beee5a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_84.o
+# __getpid (0x5e06c3fe) elided: stub-impl symbol mangles to __getpid,
+# which collides with the unprefixed `getpid` entry's OPD descriptor.
+# The unprefixed name is the user-facing API; the __ variant is an
+# internal alias the SPRX exports for compatibility but apps don't
+# normally call directly.  Same elision applied to __raw_spu_printf,
+# __rename, __spu_thread_printf below.
 - name: __raw_spu_putfld
   nid: '0x714c9618'
   signature: ''
@@ -670,14 +661,8 @@ exports:
   nid: '0xffbd876b'
   signature: ''
   notes: extracted from _sys_libc_0001_560.o
-- name: __rename
-  nid: '0xa6463518'
-  signature: ''
-  notes: extracted from _sys_libc_0001_348.o
-- name: __spu_thread_printf
-  nid: '0xfc60575c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_548.o
+# __rename (0xa6463518) and __spu_thread_printf (0xfc60575c) elided
+# for the same naming-collision reason as __getpid above.
 - name: __spu_thread_putfld
   nid: '0xd3964a09'
   signature: ''
@@ -798,206 +783,30 @@ exports:
   nid: '0xeeffc9a6'
   signature: ''
   notes: extracted from _sys_libc_0001_514.o
-- name: abort
-  nid: '0x8a6830e7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_295.o
-- name: abs
-  nid: '0x24c9e021'
-  signature: ''
-  notes: extracted from _sys_libc_0001_80.o
 - name: absi4
   nid: '0x14052ae0'
   signature: ''
   notes: extracted from _sys_libc_0001_41.o
-- name: asctime
-  nid: '0xffbae95e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_559.o
-- name: atexit
-  nid: '0x1b4c3ff0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_60.o
-- name: atof
-  nid: '0xe44bf0bf'
-  signature: ''
-  notes: extracted from _sys_libc_0001_492.o
-- name: atoff
-  nid: '0xd9a4f812'
-  signature: ''
-  notes: extracted from _sys_libc_0001_473.o
-- name: atoi
-  nid: '0x3d541975'
-  signature: ''
-  notes: extracted from _sys_libc_0001_128.o
-- name: atol
-  nid: '0x40a2599a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_139.o
-- name: atoll
-  nid: '0xbc1d69c5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_412.o
-- name: bsearch
-  nid: '0x5e7888f0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_197.o
-- name: btowc
-  nid: '0x077cdb23'
-  signature: ''
-  notes: extracted from _sys_libc_0001_12.o
-- name: calloc
-  nid: '0xa72a7595'
-  signature: ''
-  notes: extracted from _sys_libc_0001_351.o
 - name: chmod
   nid: '0x1f913e8d'
   signature: ''
   notes: extracted from _sys_libc_0001_69.o
-- name: clearerr
-  nid: '0x8b439438'
-  signature: ''
-  notes: extracted from _sys_libc_0001_298.o
-- name: clock
-  nid: '0x24f6cbdd'
-  signature: ''
-  notes: extracted from _sys_libc_0001_82.o
-- name: close
-  nid: '0xb120f6ca'
-  signature: ''
-  notes: extracted from _sys_libc_0001_376.o
 - name: closedir
   nid: '0xa3440924'
   signature: ''
   notes: extracted from _sys_libc_0001_340.o
-- name: ctime
-  nid: '0xbc7b4b8e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_415.o
-- name: difftime
-  nid: '0x4217b4cf'
-  signature: ''
-  notes: extracted from _sys_libc_0001_144.o
-- name: div
-  nid: '0x1abd0985'
-  signature: ''
-  notes: extracted from _sys_libc_0001_58.o
 - name: divi4
   nid: '0x14348b57'
   signature: ''
   notes: extracted from _sys_libc_0001_42.o
-- name: exit
-  nid: '0xc291e698'
-  signature: ''
-  notes: extracted from _sys_libc_0001_431.o
 - name: exitspawn
   nid: '0x11d270d2'
   signature: ''
   notes: extracted from _sys_libc_0001_35.o
-- name: fclose
-  nid: '0xe1bd3587'
-  signature: ''
-  notes: extracted from _sys_libc_0001_485.o
-- name: fdopen
-  nid: '0xe3812672'
-  signature: ''
-  notes: extracted from _sys_libc_0001_488.o
-- name: feof
-  nid: '0x4ffba189'
-  signature: ''
-  notes: extracted from _sys_libc_0001_169.o
-- name: ferror
-  nid: '0x33d6ae54'
-  signature: ''
-  notes: extracted from _sys_libc_0001_109.o
-- name: fflush
-  nid: '0x814d8cb0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_274.o
-- name: fgetc
-  nid: '0xac893127'
-  signature: ''
-  notes: extracted from _sys_libc_0001_367.o
-- name: fgetpos
-  nid: '0x6545b7de'
-  signature: ''
-  notes: extracted from _sys_libc_0001_211.o
-- name: fgets
-  nid: '0xaf44a615'
-  signature: ''
-  notes: extracted from _sys_libc_0001_372.o
-- name: fgetwc
-  nid: '0xbc5af0b5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_414.o
-- name: fgetws
-  nid: '0x55d4866e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_180.o
-- name: fileno
-  nid: '0xd360dcb4'
-  signature: ''
-  notes: extracted from _sys_libc_0001_462.o
-- name: fopen
-  nid: '0x69c27c12'
-  signature: ''
-  notes: extracted from _sys_libc_0001_223.o
-- name: fprintf
-  nid: '0xfaec8c60'
-  signature: ''
-  notes: extracted from _sys_libc_0001_542.o
-- name: fputc
-  nid: '0x79819dbf'
-  signature: ''
-  notes: extracted from _sys_libc_0001_253.o
-- name: fputs
-  nid: '0x4d348427'
-  signature: ''
-  notes: extracted from _sys_libc_0001_165.o
-- name: fputwc
-  nid: '0xc95b20d3'
-  signature: ''
-  notes: extracted from _sys_libc_0001_444.o
-- name: fputws
-  nid: '0xe60ee9e5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_498.o
-- name: fread
-  nid: '0xd40723d6'
-  signature: ''
-  notes: extracted from _sys_libc_0001_464.o
-- name: free
-  nid: '0x77a602dd'
-  signature: ''
-  notes: extracted from _sys_libc_0001_247.o
-- name: freopen
-  nid: '0xb18cc115'
-  signature: ''
-  notes: extracted from _sys_libc_0001_378.o
-- name: fscanf
-  nid: '0xfe88e97e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_557.o
-- name: fseek
-  nid: '0x69ff1b9b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_224.o
-- name: fsetpos
-  nid: '0xed6ec979'
-  signature: ''
-  notes: extracted from _sys_libc_0001_510.o
-- name: fstat
-  nid: '0xab77019f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_364.o
 - name: fsync
   nid: '0x3bd9ce0a'
   signature: ''
   notes: extracted from _sys_libc_0001_125.o
-- name: ftell
-  nid: '0x26f023d5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_88.o
 - name: ftruncate
   nid: '0x76da0c84'
   signature: ''
@@ -1006,62 +815,10 @@ exports:
   nid: '0x2d067448'
   signature: ''
   notes: extracted from _sys_libc_0001_97.o
-- name: fwide
-  nid: '0x40d04e4e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_140.o
-- name: fwprintf
-  nid: '0xe9137453'
-  signature: ''
-  notes: extracted from _sys_libc_0001_502.o
-- name: fwrite
-  nid: '0xf88f26c4'
-  signature: ''
-  notes: extracted from _sys_libc_0001_534.o
-- name: fwscanf
-  nid: '0x433fe2a9'
-  signature: ''
-  notes: extracted from _sys_libc_0001_145.o
 - name: get_state_TT800
   nid: '0xb7b793ed'
   signature: ''
   notes: extracted from _sys_libc_0001_405.o
-- name: getc
-  nid: '0xf0e022c6'
-  signature: ''
-  notes: extracted from _sys_libc_0001_518.o
-- name: getchar
-  nid: '0xa5bc0e19'
-  signature: ''
-  notes: extracted from _sys_libc_0001_347.o
-- name: getpid
-  nid: '0x1970cd7e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_55.o
-- name: gets
-  nid: '0x90010029'
-  signature: ''
-  notes: extracted from _sys_libc_0001_306.o
-- name: getwc
-  nid: '0x1c2ef212'
-  signature: ''
-  notes: extracted from _sys_libc_0001_62.o
-- name: getwchar
-  nid: '0x2fecec13'
-  signature: ''
-  notes: extracted from _sys_libc_0001_102.o
-- name: gmtime
-  nid: '0xeb26298c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_505.o
-- name: imaxabs
-  nid: '0xb3c495bd'
-  signature: ''
-  notes: extracted from _sys_libc_0001_386.o
-- name: imaxdiv
-  nid: '0x86532174'
-  signature: ''
-  notes: extracted from _sys_libc_0001_281.o
 - name: init_TT800
   nid: '0xeddcee2c'
   signature: ''
@@ -1074,270 +831,66 @@ exports:
   nid: '0x402f7285'
   signature: ''
   notes: extracted from _sys_libc_0001_138.o
-- name: isalnum
-  nid: '0xb529d259'
-  signature: ''
-  notes: extracted from _sys_libc_0001_393.o
 - name: isalnum_ascii
   nid: '0x7c1bcf37'
   signature: ''
   notes: extracted from _sys_libc_0001_262.o
-- name: isalpha
-  nid: '0xb17b79d0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_377.o
 - name: isalpha_ascii
   nid: '0xe89071ad'
   signature: ''
   notes: extracted from _sys_libc_0001_501.o
-- name: isblank
-  nid: '0xfe630fd9'
-  signature: ''
-  notes: extracted from _sys_libc_0001_556.o
 - name: isblank_ascii
   nid: '0x806fd281'
   signature: ''
   notes: extracted from _sys_libc_0001_271.o
-- name: iscntrl
-  nid: '0x25da8fbb'
-  signature: ''
-  notes: extracted from _sys_libc_0001_85.o
 - name: iscntrl_ascii
   nid: '0xb7d3427f'
   signature: ''
   notes: extracted from _sys_libc_0001_407.o
-- name: isdigit
-  nid: '0x3f4ccdc7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_136.o
 - name: isdigit_ascii
   nid: '0x41283333'
   signature: ''
   notes: extracted from _sys_libc_0001_142.o
-- name: isgraph
-  nid: '0xaa1e687d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_360.o
 - name: isgraph_ascii
   nid: '0x15c2e29d'
   signature: ''
   notes: extracted from _sys_libc_0001_47.o
-- name: islower
-  nid: '0x118712ea'
-  signature: ''
-  notes: extracted from _sys_libc_0001_34.o
 - name: islower_ascii
   nid: '0xbe251a29'
   signature: ''
   notes: extracted from _sys_libc_0001_418.o
-- name: isprint
-  nid: '0xd2a99b1e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_460.o
 - name: isprint_ascii
   nid: '0xce7a9e76'
   signature: ''
   notes: extracted from _sys_libc_0001_454.o
-- name: ispunct
-  nid: '0x744d2505'
-  signature: ''
-  notes: extracted from _sys_libc_0001_239.o
 - name: ispunct_ascii
   nid: '0x1096f8f1'
   signature: ''
   notes: extracted from _sys_libc_0001_29.o
-- name: isspace
-  nid: '0x97896359'
-  signature: ''
-  notes: extracted from _sys_libc_0001_318.o
 - name: isspace_ascii
   nid: '0x609080ec'
   signature: ''
   notes: extracted from _sys_libc_0001_204.o
-- name: isupper
-  nid: '0xd784459d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_469.o
 - name: isupper_ascii
   nid: '0xb400f226'
   signature: ''
   notes: extracted from _sys_libc_0001_388.o
-- name: iswalnum
-  nid: '0xd2ac48d7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_461.o
-- name: iswalpha
-  nid: '0x1cf4d80a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_63.o
-- name: iswblank
-  nid: '0x7aaab95c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_256.o
-- name: iswcntrl
-  nid: '0x24802244'
-  signature: ''
-  notes: extracted from _sys_libc_0001_79.o
-- name: iswctype
-  nid: '0x5516bbbf'
-  signature: ''
-  notes: extracted from _sys_libc_0001_179.o
-- name: iswdigit
-  nid: '0x6287ac6a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_206.o
-- name: iswgraph
-  nid: '0x74fe4a7b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_240.o
-- name: iswlower
-  nid: '0xfb81426d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_545.o
-- name: iswprint
-  nid: '0x6823c180'
-  signature: ''
-  notes: extracted from _sys_libc_0001_219.o
-- name: iswpunct
-  nid: '0x8b9d8dd2'
-  signature: ''
-  notes: extracted from _sys_libc_0001_299.o
-- name: iswspace
-  nid: '0xa57cc615'
-  signature: ''
-  notes: extracted from _sys_libc_0001_346.o
-- name: iswupper
-  nid: '0x4c7dc863'
-  signature: ''
-  notes: extracted from _sys_libc_0001_164.o
-- name: iswxdigit
-  nid: '0xb57bdf7b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_395.o
-- name: isxdigit
-  nid: '0x3b22e88a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_122.o
 - name: isxdigit_ascii
   nid: '0xdef86a83'
   signature: ''
   notes: extracted from _sys_libc_0001_481.o
-- name: kill
-  nid: '0x809a143f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_272.o
-- name: labs
-  nid: '0xc69b2427'
-  signature: ''
-  notes: extracted from _sys_libc_0001_439.o
-- name: ldiv
-  nid: '0xad62a342'
-  signature: ''
-  notes: extracted from _sys_libc_0001_369.o
-- name: link
-  nid: '0x8713c859'
-  signature: ''
-  notes: extracted from _sys_libc_0001_284.o
-- name: llabs
-  nid: '0xe5f09c80'
-  signature: ''
-  notes: extracted from _sys_libc_0001_497.o
-- name: lldiv
-  nid: '0xb30042ce'
-  signature: ''
-  notes: extracted from _sys_libc_0001_384.o
-- name: localeconv
-  nid: '0x1098a99d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_30.o
-- name: localtime
-  nid: '0x266311a0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_86.o
-- name: longjmp
-  nid: '0x4e4be299'
-  signature: ''
-  notes: extracted from _sys_libc_0001_166.o
-- name: lseek
-  nid: '0xaec7c970'
-  signature: ''
-  notes: extracted from _sys_libc_0001_371.o
 - name: lseek64
   nid: '0xbf5bf5ea'
   signature: ''
   notes: extracted from _sys_libc_0001_421.o
-- name: malloc
-  nid: '0x759e0635'
-  signature: ''
-  notes: extracted from _sys_libc_0001_241.o
-- name: malloc_stats
-  nid: '0x4569518c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_151.o
 - name: malloc_stats_fast
   nid: '0x4ed09b7e'
   signature: ''
   notes: extracted from _sys_libc_0001_168.o
-- name: malloc_usable_size
-  nid: '0x79eadf05'
-  signature: ''
-  notes: extracted from _sys_libc_0001_255.o
-- name: mblen
-  nid: '0x70b0e833'
-  signature: ''
-  notes: extracted from _sys_libc_0001_231.o
-- name: mbrlen
-  nid: '0xb81cd66a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_408.o
-- name: mbrtowc
-  nid: '0x12a55fb7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_38.o
-- name: mbsinit
-  nid: '0xb4225825'
-  signature: ''
-  notes: extracted from _sys_libc_0001_389.o
-- name: mbsrtowcs
-  nid: '0xfc606237'
-  signature: ''
-  notes: extracted from _sys_libc_0001_549.o
-- name: mbstowcs
-  nid: '0xfcac2e8e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_550.o
-- name: mbtowc
-  nid: '0x355fd1fd'
-  signature: ''
-  notes: extracted from _sys_libc_0001_113.o
-- name: memalign
-  nid: '0x6137d196'
-  signature: ''
-  notes: extracted from _sys_libc_0001_205.o
-- name: memchr
-  nid: '0xcbac7ad7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_450.o
-- name: memcmp
-  nid: '0xc3e14cbe'
-  signature: ''
-  notes: extracted from _sys_libc_0001_433.o
-- name: memcpy
-  nid: '0x831d70a5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_278.o
 - name: memcpy16
   nid: '0xde7aff7a'
   signature: ''
   notes: extracted from _sys_libc_0001_479.o
-- name: memmove
-  nid: '0x5b162b7f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_191.o
-- name: memset
-  nid: '0x5909e3c4'
-  signature: ''
-  notes: extracted from _sys_libc_0001_186.o
 - name: memset_cs
   nid: '0xa7e9ea47'
   signature: ''
@@ -1350,10 +903,6 @@ exports:
   nid: '0x153b364a'
   signature: ''
   notes: extracted from _sys_libc_0001_45.o
-- name: mktime
-  nid: '0x19ccbb81'
-  signature: ''
-  notes: extracted from _sys_libc_0001_56.o
 - name: mspace_calloc
   nid: '0x468b45dc'
   signature: ''
@@ -1402,50 +951,10 @@ exports:
   nid: '0xd9674905'
   signature: ''
   notes: extracted from _sys_libc_0001_472.o
-- name: open
-  nid: '0xf356418c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_521.o
 - name: opendir
   nid: '0x3dbc3bee'
   signature: ''
   notes: extracted from _sys_libc_0001_131.o
-- name: perror
-  nid: '0x692b497f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_221.o
-- name: printf
-  nid: '0xc01d9f97'
-  signature: ''
-  notes: extracted from _sys_libc_0001_423.o
-- name: putc
-  nid: '0x3bce073b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_124.o
-- name: putchar
-  nid: '0x2677568c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_87.o
-- name: puts
-  nid: '0xe3cc73f3'
-  signature: ''
-  notes: extracted from _sys_libc_0001_489.o
-- name: putwc
-  nid: '0xcca68e9c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_453.o
-- name: putwchar
-  nid: '0x78429d81'
-  signature: ''
-  notes: extracted from _sys_libc_0001_252.o
-- name: qsort
-  nid: '0xa9f68eff'
-  signature: ''
-  notes: extracted from _sys_libc_0001_359.o
-- name: rand
-  nid: '0x15bdcc00'
-  signature: ''
-  notes: extracted from _sys_libc_0001_46.o
 - name: rand_int31_TT800
   nid: '0x4911ff9c'
   signature: ''
@@ -1590,90 +1099,30 @@ exports:
   nid: '0x4bb8e2b2'
   signature: ''
   notes: extracted from _sys_libc_0001_162.o
-- name: read
-  nid: '0xfa00d211'
-  signature: ''
-  notes: extracted from _sys_libc_0001_540.o
 - name: readdir
   nid: '0x2b81fb7f'
   signature: ''
   notes: extracted from _sys_libc_0001_94.o
-- name: realloc
-  nid: '0xf7a14a22'
-  signature: ''
-  notes: extracted from _sys_libc_0001_531.o
 - name: reallocalign
   nid: '0xb569849d'
   signature: ''
   notes: extracted from _sys_libc_0001_394.o
-- name: remove
-  nid: '0x8a71132c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_296.o
-- name: rename
-  nid: '0x75d4485c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_242.o
-- name: rewind
-  nid: '0x54f57626'
-  signature: ''
-  notes: extracted from _sys_libc_0001_178.o
 - name: rmdir
   nid: '0x7e7017b1'
   signature: ''
   notes: extracted from _sys_libc_0001_266.o
-- name: scanf
-  nid: '0xf7d51596'
-  signature: ''
-  notes: extracted from _sys_libc_0001_532.o
-- name: setbuf
-  nid: '0x93427cb9'
-  signature: ''
-  notes: extracted from _sys_libc_0001_311.o
-- name: setjmp
-  nid: '0xf9dae72c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_537.o
-- name: setlocale
-  nid: '0x1855b9b1'
-  signature: ''
-  notes: extracted from _sys_libc_0001_51.o
-- name: setvbuf
-  nid: '0x703ec767'
-  signature: ''
-  notes: extracted from _sys_libc_0001_230.o
-- name: snprintf
-  nid: '0x3a840ae3'
-  signature: ''
-  notes: extracted from _sys_libc_0001_121.o
-- name: sprintf
-  nid: '0x273b9711'
-  signature: ''
-  notes: extracted from _sys_libc_0001_89.o
-- name: spu_printf_attach_group
-  nid: '0x1dd0d4c5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_65.o
-- name: spu_printf_attach_thread
-  nid: '0x72b84004'
-  signature: ''
-  notes: extracted from _sys_libc_0001_235.o
-- name: spu_printf_detach_group
-  nid: '0x7ea8d860'
-  signature: ''
-  notes: extracted from _sys_libc_0001_267.o
-- name: spu_printf_detach_thread
-  nid: '0xcfbfb7a7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_457.o
-- name: spu_printf_finalize
-  nid: '0x00acf0e5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_1.o
-- name: spu_printf_initialize
-  nid: '0xc3c598e2'
-  signature: ''
-  notes: extracted from _sys_libc_0001_432.o
+# spu_printf_{initialize,finalize,attach_group,attach_thread,
+# detach_group,detach_thread} elided from the FNID stub set: their
+# routine in libc.sprx (and the parallel HLE in RPCS3) does not wire
+# the SPU thread group's printf event-port (port 1) to a PPU event
+# queue via sys_spu_thread_group_connect_event_all_threads, so SPU
+# code calling spu_printf() ends up with sys_spu_thread_send_event
+# returning CELL_ENOTCONN.  We provide working real-PPU
+# implementations under sdk/libc_stub_extras/ that the
+# scripts/build-cell-stub-archives.sh pipeline appends to
+# libc_stub.a after the FNID stub generation step; the archive ends
+# up with the same six user-facing names but with a real
+# event-queue-driven handler behind them.
 - name: spu_raw_snprintf
   nid: '0x54c2844e'
   signature: ''
@@ -1814,194 +1263,26 @@ exports:
   nid: '0xd5c8cb55'
   signature: ''
   notes: extracted from _sys_libc_0001_467.o
-- name: srand
-  nid: '0x0d2a593b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_24.o
-- name: sscanf
-  nid: '0xe9b560a5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_504.o
-- name: stat
-  nid: '0x717b2502'
-  signature: ''
-  notes: extracted from _sys_libc_0001_233.o
-- name: strcasecmp
-  nid: '0xb6d92ac3'
-  signature: ''
-  notes: extracted from _sys_libc_0001_401.o
 - name: strcasecmp_ascii
   nid: '0xddbac025'
   signature: ''
   notes: extracted from _sys_libc_0001_475.o
-- name: strcat
-  nid: '0xaa9635d7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_362.o
-- name: strchr
-  nid: '0xdebee2af'
-  signature: ''
-  notes: extracted from _sys_libc_0001_480.o
-- name: strcmp
-  nid: '0x3d85d6f8'
-  signature: ''
-  notes: extracted from _sys_libc_0001_130.o
-- name: strcoll
-  nid: '0x9eb25e00'
-  signature: ''
-  notes: extracted from _sys_libc_0001_332.o
-- name: strcpy
-  nid: '0x04a183fc'
-  signature: ''
-  notes: extracted from _sys_libc_0001_9.o
-- name: strcspn
-  nid: '0xf7908e27'
-  signature: ''
-  notes: extracted from _sys_libc_0001_530.o
-- name: strdup
-  nid: '0xfc0428a6'
-  signature: ''
-  notes: extracted from _sys_libc_0001_547.o
-- name: strerror
-  nid: '0x44796e5c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_147.o
-- name: strftime
-  nid: '0xcb9c535b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_449.o
-- name: strlen
-  nid: '0x2f45d39c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_101.o
-- name: strncasecmp
-  nid: '0xb6257e3d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_398.o
 - name: strncasecmp_ascii
   nid: '0x99782342'
   signature: ''
   notes: extracted from _sys_libc_0001_323.o
-- name: strncat
-  nid: '0x589b5314'
-  signature: ''
-  notes: extracted from _sys_libc_0001_185.o
-- name: strncmp
-  nid: '0xe1e83c65'
-  signature: ''
-  notes: extracted from _sys_libc_0001_486.o
-- name: strncpy
-  nid: '0x8ab0abc6'
-  signature: ''
-  notes: extracted from _sys_libc_0001_297.o
 - name: strncpy_cs
   nid: '0xbda4dcf0'
   signature: ''
   notes: extracted from _sys_libc_0001_416.o
-- name: strpbrk
-  nid: '0xf89dc648'
-  signature: ''
-  notes: extracted from _sys_libc_0001_536.o
-- name: strrchr
-  nid: '0x73eae03d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_238.o
-- name: strspn
-  nid: '0x112ea8ea'
-  signature: ''
-  notes: extracted from _sys_libc_0001_31.o
-- name: strstr
-  nid: '0xc5c09834'
-  signature: ''
-  notes: extracted from _sys_libc_0001_437.o
-- name: strtod
-  nid: '0xd7dc3a8f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_470.o
-- name: strtof
-  nid: '0x67d6334b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_218.o
-- name: strtoimax
-  nid: '0xff689124'
-  signature: ''
-  notes: extracted from _sys_libc_0001_558.o
-- name: strtok
-  nid: '0xe40ba755'
-  signature: ''
-  notes: extracted from _sys_libc_0001_491.o
-- name: strtok_r
-  nid: '0xb738027a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_402.o
-- name: strtol
-  nid: '0xd14ece90'
-  signature: ''
-  notes: extracted from _sys_libc_0001_458.o
-- name: strtold
-  nid: '0x9c9d7b0d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_329.o
-- name: strtoll
-  nid: '0x59e8dd58'
-  signature: ''
-  notes: extracted from _sys_libc_0001_189.o
-- name: strtoul
-  nid: '0xda5a7eb8'
-  signature: ''
-  notes: extracted from _sys_libc_0001_474.o
-- name: strtoull
-  nid: '0x36f2b4ed'
-  signature: ''
-  notes: extracted from _sys_libc_0001_116.o
-- name: strtoumax
-  nid: '0x90b27880'
-  signature: ''
-  notes: extracted from _sys_libc_0001_309.o
-- name: strxfrm
-  nid: '0x09cbee1e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_16.o
-- name: swprintf
-  nid: '0x62bf1d6c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_207.o
-- name: swscanf
-  nid: '0x3a210c93'
-  signature: ''
-  notes: extracted from _sys_libc_0001_120.o
-- name: time
-  nid: '0x89f6f026'
-  signature: ''
-  notes: extracted from _sys_libc_0001_294.o
-- name: tolower
-  nid: '0x93a3e3ac'
-  signature: ''
-  notes: extracted from _sys_libc_0001_313.o
 - name: tolower_ascii
   nid: '0x86b4c669'
   signature: ''
   notes: extracted from _sys_libc_0001_283.o
-- name: toupper
-  nid: '0xa650df19'
-  signature: ''
-  notes: extracted from _sys_libc_0001_349.o
 - name: toupper_ascii
   nid: '0x0b9ecb98'
   signature: ''
   notes: extracted from _sys_libc_0001_22.o
-- name: towctrans
-  nid: '0x21807b8e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_73.o
-- name: towlower
-  nid: '0x130d20a5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_39.o
-- name: towupper
-  nid: '0xf5f7dda8'
-  signature: ''
-  notes: extracted from _sys_libc_0001_528.o
 - name: truncate
   nid: '0x1ab01ea8'
   signature: ''
@@ -2010,236 +1291,8 @@ exports:
   nid: '0x9eee5387'
   signature: ''
   notes: extracted from _sys_libc_0001_333.o
-- name: ungetc
-  nid: '0xe6a7de0a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_499.o
-- name: ungetwc
-  nid: '0x813a9666'
-  signature: ''
-  notes: extracted from _sys_libc_0001_273.o
-- name: unlink
-  nid: '0xef110b6b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_515.o
 - name: utime
   nid: '0x8342b757'
   signature: ''
   notes: extracted from _sys_libc_0001_279.o
-- name: vfprintf
-  nid: '0xfb2081fd'
-  signature: ''
-  notes: extracted from _sys_libc_0001_544.o
-- name: vfscanf
-  nid: '0x4b36c0e0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_160.o
-- name: vfwprintf
-  nid: '0x3d5fdea7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_129.o
-- name: vfwscanf
-  nid: '0x0f60eb63'
-  signature: ''
-  notes: extracted from _sys_libc_0001_27.o
-- name: vprintf
-  nid: '0xe48348e9'
-  signature: ''
-  notes: extracted from _sys_libc_0001_494.o
-- name: vscanf
-  nid: '0xf7583d67'
-  signature: ''
-  notes: extracted from _sys_libc_0001_529.o
-- name: vsnprintf
-  nid: '0x99a72146'
-  signature: ''
-  notes: extracted from _sys_libc_0001_324.o
-- name: vsprintf
-  nid: '0x7ae82e0f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_257.o
-- name: vsscanf
-  nid: '0xc97a17d7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_446.o
-- name: vswprintf
-  nid: '0x4b6a4010'
-  signature: ''
-  notes: extracted from _sys_libc_0001_161.o
-- name: vswscanf
-  nid: '0x1c0e8ab6'
-  signature: ''
-  notes: extracted from _sys_libc_0001_61.o
-- name: vwprintf
-  nid: '0x88e009f5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_291.o
-- name: vwscanf
-  nid: '0xeb8abe73'
-  signature: ''
-  notes: extracted from _sys_libc_0001_507.o
-- name: wcrtomb
-  nid: '0xb2702e15'
-  signature: ''
-  notes: extracted from _sys_libc_0001_382.o
-- name: wcscat
-  nid: '0x7fdcf73e'
-  signature: ''
-  notes: extracted from _sys_libc_0001_270.o
-- name: wcschr
-  nid: '0x82a3cc30'
-  signature: ''
-  notes: extracted from _sys_libc_0001_276.o
-- name: wcscmp
-  nid: '0xf0776a44'
-  signature: ''
-  notes: extracted from _sys_libc_0001_517.o
-- name: wcscoll
-  nid: '0x75f98579'
-  signature: ''
-  notes: extracted from _sys_libc_0001_243.o
-- name: wcscpy
-  nid: '0xf41355f9'
-  signature: ''
-  notes: extracted from _sys_libc_0001_523.o
-- name: wcscspn
-  nid: '0xf3ef3678'
-  signature: ''
-  notes: extracted from _sys_libc_0001_522.o
-- name: wcsftime
-  nid: '0x17752bab'
-  signature: ''
-  notes: extracted from _sys_libc_0001_48.o
-- name: wcslen
-  nid: '0x65e8d4d0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_212.o
-- name: wcsncat
-  nid: '0x9439e4cd'
-  signature: ''
-  notes: extracted from _sys_libc_0001_314.o
-- name: wcsncmp
-  nid: '0x6d5115b0'
-  signature: ''
-  notes: extracted from _sys_libc_0001_227.o
-- name: wcsncpy
-  nid: '0x84378ddc'
-  signature: ''
-  notes: extracted from _sys_libc_0001_280.o
-- name: wcspbrk
-  nid: '0x5b4b6d6d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_192.o
-- name: wcsrchr
-  nid: '0xb7ab5127'
-  signature: ''
-  notes: extracted from _sys_libc_0001_404.o
-- name: wcsrtombs
-  nid: '0x2b45cb34'
-  signature: ''
-  notes: extracted from _sys_libc_0001_92.o
-- name: wcsspn
-  nid: '0x66b71b17'
-  signature: ''
-  notes: extracted from _sys_libc_0001_215.o
-- name: wcsstr
-  nid: '0xa797790f'
-  signature: ''
-  notes: extracted from _sys_libc_0001_352.o
-- name: wcstod
-  nid: '0xc08cc41d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_424.o
-- name: wcstof
-  nid: '0xa874036a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_356.o
-- name: wcstoimax
-  nid: '0xe4c51d4c'
-  signature: ''
-  notes: extracted from _sys_libc_0001_495.o
-- name: wcstok
-  nid: '0x13808972'
-  signature: ''
-  notes: extracted from _sys_libc_0001_40.o
-- name: wcstol
-  nid: '0x116cda13'
-  signature: ''
-  notes: extracted from _sys_libc_0001_33.o
-- name: wcstold
-  nid: '0x6514dbe5'
-  signature: ''
-  notes: extracted from _sys_libc_0001_209.o
-- name: wcstoll
-  nid: '0xa30d4797'
-  signature: ''
-  notes: extracted from _sys_libc_0001_339.o
-- name: wcstombs
-  nid: '0xb680e240'
-  signature: ''
-  notes: extracted from _sys_libc_0001_399.o
-- name: wcstoul
-  nid: '0xabc27420'
-  signature: ''
-  notes: extracted from _sys_libc_0001_365.o
-- name: wcstoull
-  nid: '0xb43c25c7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_390.o
-- name: wcstoumax
-  nid: '0x1ae06860'
-  signature: ''
-  notes: extracted from _sys_libc_0001_59.o
-- name: wcsxfrm
-  nid: '0x4595c42b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_153.o
-- name: wctob
-  nid: '0x73096858'
-  signature: ''
-  notes: extracted from _sys_libc_0001_236.o
-- name: wctomb
-  nid: '0x96ea4de6'
-  signature: ''
-  notes: extracted from _sys_libc_0001_317.o
-- name: wctrans
-  nid: '0x575fb268'
-  signature: ''
-  notes: extracted from _sys_libc_0001_182.o
-- name: wctype
-  nid: '0x770bfaee'
-  signature: ''
-  notes: extracted from _sys_libc_0001_246.o
-- name: wmemchr
-  nid: '0x4e72f810'
-  signature: ''
-  notes: extracted from _sys_libc_0001_167.o
-- name: wmemcmp
-  nid: '0xac758d20'
-  signature: ''
-  notes: extracted from _sys_libc_0001_366.o
-- name: wmemcpy
-  nid: '0xa8b07f1b'
-  signature: ''
-  notes: extracted from _sys_libc_0001_358.o
-- name: wmemmove
-  nid: '0x99b38ce7'
-  signature: ''
-  notes: extracted from _sys_libc_0001_325.o
-- name: wmemset
-  nid: '0xf06eed36'
-  signature: ''
-  notes: extracted from _sys_libc_0001_516.o
-- name: wprintf
-  nid: '0x9abe8c74'
-  signature: ''
-  notes: extracted from _sys_libc_0001_327.o
-- name: write
-  nid: '0x526a496a'
-  signature: ''
-  notes: extracted from _sys_libc_0001_173.o
-- name: wscanf
-  nid: '0x18e48b5d'
-  signature: ''
-  notes: extracted from _sys_libc_0001_53.o
 imports: []

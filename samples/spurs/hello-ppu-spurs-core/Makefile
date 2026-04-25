@@ -26,7 +26,7 @@ CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 
 LDFLAGS  = $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-LIBS    := -lspurs_stub -lspu_printf_stub -lsysmodule_stub -lsysutil -lrt -llv2 -lm
+LIBS    := -lspurs_stub -lc_stub -lsysmodule_stub -lsysutil -lrt -llv2 -lm
 LIBDIRS :=
 
 #---------------------------------------------------------------------------------

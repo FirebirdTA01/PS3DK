@@ -1,6 +1,7 @@
 library: sysPrxForUser
 version: 1
 module: sysPrxForUser
+archive_name: lv2
 exports:
 - name: _sys_free
   nid: '0xf7f7fb20'

@@ -59,8 +59,9 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libjpgdec_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libspurs_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libspurs_jq_stub.yaml"
-    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libspu_printf_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_audio_out_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libc_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/liblv2_stub.yaml"
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
@@ -139,6 +140,32 @@ for yaml in "${STUB_YAMLS[@]}"; do
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
         say "installed libio.a -> $INSTALL_LIB_PS3DK/ (nidgen + legacy wrappers)"
+    elif [[ "$name" == "libc_stub" ]]; then
+        # The reference SDK ships spu_printf_{initialize,finalize,
+        # attach_group,attach_thread,detach_group,detach_thread} in
+        # libc.sprx, but the actual SPRX-side / RPCS3 HLE
+        # implementation does not connect the SPU thread group's
+        # printf event-port (port 1) via
+        # sys_spu_thread_group_connect_event_all_threads — so SPU
+        # printfs silently drop with CELL_ENOTCONN.  The yaml has
+        # those six entries removed; this branch builds a real
+        # PPU-side replacement out of sdk/libc_stub_extras and
+        # ar-appends it into libc_stub.a so the resulting archive
+        # has the same six user-facing names but with a working
+        # event-queue + connect_event_all_threads handler behind
+        # them.
+        extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libc_stub_extras"
+        say "building libc_stub_extras (real spu_printf_*)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DEV/psl1ght" \
+            make -C "$extras_dir" all >/dev/null
+        for extras_obj in "$extras_dir/build/"*.o; do
+            [[ -f "$extras_obj" ]] || continue
+            "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "${produced[0]}" \
+                "$extras_obj" 2>/dev/null
+        done
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
+        install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
+        say "installed libc_stub.a -> $INSTALL_LIB_DEFAULT/ (nidgen + extras)"
     else
         install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
         say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
