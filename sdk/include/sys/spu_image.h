@@ -22,6 +22,7 @@
 
 #include <stdint.h>
 #include <ppu-types.h>          /* sys_addr_t, u32, etc. */
+#include <sys/spu.h>            /* PSL1GHT sysSpuImage* inline syscall forwarders */
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,16 +66,33 @@ typedef struct sys_spu_image {
     int                nsegs;       /* number of valid segments */
 } sys_spu_image_t;
 
-/* Equivalent to PSL1GHT's sysSpuImageImport / Close at the FNID
- * boundary; both forward to the same lv2 syscall numbers. */
-extern int sys_spu_image_import(sys_spu_image_t *img,
-                                const void *src,
-                                uint32_t type);
-extern int sys_spu_image_close(sys_spu_image_t *img);
-extern int sys_spu_image_open(sys_spu_image_t *img, const char *path);
-extern int sys_spu_image_open_by_fd(sys_spu_image_t *img,
-                                    int fd,
-                                    uint64_t offset);
+/* Reference-SDK snake_case forwarders over PSL1GHT's sysSpuImage*
+ * inline syscall wrappers.  Both sets bind to the same FNIDs - the
+ * lv2 kernel exposes one set of entry points; only the C-level names
+ * differ. */
+static inline int sys_spu_image_import(sys_spu_image_t *img,
+                                       const void *src,
+                                       uint32_t type)
+{
+    return (int)sysSpuImageImport((sysSpuImage *)img, src, type);
+}
+
+static inline int sys_spu_image_close(sys_spu_image_t *img)
+{
+    return (int)sysSpuImageClose((sysSpuImage *)img);
+}
+
+static inline int sys_spu_image_open(sys_spu_image_t *img, const char *path)
+{
+    return (int)sysSpuImageOpen((sysSpuImage *)img, path);
+}
+
+static inline int sys_spu_image_open_by_fd(sys_spu_image_t *img,
+                                           int fd,
+                                           uint64_t offset)
+{
+    return (int)sysSpuImageOpenFd((sysSpuImage *)img, fd, offset);
+}
 
 #ifdef __cplusplus
 }

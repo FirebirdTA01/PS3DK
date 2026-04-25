@@ -21,6 +21,15 @@ extern "C" {
 extern int spu_printf_initialize(int priority, void (*handler)(const char *));
 extern int spu_printf_finalize(void);
 
+/* Attach the running PPU printf-server thread to a specific SPU thread
+ * group (or single thread).  Once attached, spu_printf() calls in the
+ * SPU code route through to PPU-side stdio.  Detach before destroying
+ * the SPU group/thread or printf data may end up orphaned. */
+extern int spu_printf_attach_group(unsigned int group);
+extern int spu_printf_attach_thread(unsigned int thread);
+extern int spu_printf_detach_group(unsigned int group);
+extern int spu_printf_detach_thread(unsigned int thread);
+
 #ifdef __cplusplus
 }
 #endif
