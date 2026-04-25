@@ -2093,20 +2093,25 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
 
                 // `float4(scale_scalar, k1, k2, k3)` lane-elision —
-                // the sce-cgc accumulator-fold output shape.  3
-                // instructions:
+                // sce-cgc accumulator-fold output shape.  Either 2 or
+                // 3 instructions depending on whether the non-scaled
+                // lanes are all zero:
                 //
-                //   MOVH H0.<scaledLane>, f[input]                    # preload single varying lane to fp16
-                //   MOVR R0.<const_mask>, c[0].<swz> + inline(consts) # write the const lanes
-                //   MAD R0.<scaledLane> [END], H0.xyzw, c[0].xxxx, H0.xyzw + inline(scale-1, 0, 0, 0)
+                //   MOVH H0.<scaledLane>, f[input]
+                //   [MOVR R0.<const_mask>, c[0].<swz> + inline]      # skipped if all consts == 0
+                //   MAD R0.<scaledLane> [END], H0, c[0].xxxx, H0 + inline(scale-1, 0, 0, 0)
                 //
-                // The MOVR uses sce-cgc's lane-packing trick: when
-                // exactly two unique values appear across the
-                // non-scaled lanes, pack them in inline.x / inline.y
-                // and pick swizzle .xx[X|Y][X|Y] to broadcast each
-                // dst lane from its source lane.  Currently restricted
-                // to scaledLane=0 and the 2-unique-values shape;
-                // anything else falls through (no emit, will error).
+                // Const packing follows sce-cgc's canonical order
+                // (verified against ten byte-probes): walk the
+                // non-scaled lanes in order; each value gets the next
+                // free inline slot (X, Y, Z) on first sight, with
+                // later occurrences re-using the prior slot.  This
+                // gives:
+                //   1 unique:  inline=(v,0,0,0), swz=.xxxx
+                //   2 unique:  inline=(u0,u1,0,0), swz mixes X / Y
+                //   3 unique:  inline=(u0,u1,u2,0), swz mixes X / Y / Z
+                // Currently restricted to scaledLane=0 — non-zero
+                // scaledLane needs a different 4-insn FENCBR-pattern.
                 auto slIt = valueToScaledLanes.find(srcId);
                 if (slIt != valueToScaledLanes.end() &&
                     slIt->second.scaledLane == 0 &&
@@ -2123,29 +2128,32 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
 
-                    // Find the (up to) 2 unique const values in lanes
-                    // 1..3 (the non-scaled lanes).  Only the
-                    // 2-unique-values pattern matches sce-cgc's known
-                    // packing today.
-                    const float v1 = sl.consts[1];
-                    const float v2 = sl.consts[2];
-                    const float v3 = sl.consts[3];
-                    float u0 = v1;
-                    float u1 = 0.0f;
-                    bool  haveU1 = false;
-                    auto pickSlot = [&](float v) -> int {
-                        if (v == u0) return 0;            // inline.x
-                        if (haveU1 && v == u1) return 1;  // inline.y
-                        if (!haveU1) { u1 = v; haveU1 = true; return 1; }
-                        return -1;                        // 3+ unique → unsupported
-                    };
-                    const int slotY = pickSlot(v1);
-                    const int slotZ = pickSlot(v2);
-                    const int slotW = pickSlot(v3);
-                    if (slotY < 0 || slotZ < 0 || slotW < 0)
+                    // Pack non-scaled-lane consts into ≤ 3 inline
+                    // slots, recording the per-dst-lane swz position.
+                    float    inlinePack[4] = {0,0,0,0};
+                    int      swzPos[4]     = {0,0,0,0};
+                    int      slotCount     = 0;
+                    bool     allZero       = true;
+                    bool     packOk        = true;
+                    for (int dstLane = 1; dstLane < 4; ++dstLane)
+                    {
+                        const float v = sl.consts[dstLane];
+                        if (v != 0.0f) allZero = false;
+                        int slot = -1;
+                        for (int s = 0; s < slotCount; ++s)
+                            if (inlinePack[s] == v) { slot = s; break; }
+                        if (slot < 0)
+                        {
+                            if (slotCount >= 3) { packOk = false; break; }
+                            slot = slotCount++;
+                            inlinePack[slot] = v;
+                        }
+                        swzPos[dstLane] = slot;
+                    }
+                    if (!packOk)
                     {
                         out.diagnostics.push_back(
-                            "nv40-fp: scaled-lanes needs ≤ 2 unique const values "
+                            "nv40-fp: scaled-lanes needs ≤ 3 unique const values "
                             "across non-scaled lanes");
                         return out;
                     }
@@ -2174,30 +2182,30 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
                     }
 
-                    // ── Inst 2: MOVR R0.<const_mask>, c[0].<swz> + inline ──
                     const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
-                    struct nvfx_src constMovS0 =
-                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
-                    constMovS0.swz[0] = 0;            // dst.x unused (mask omits .x)
-                    constMovS0.swz[1] = (uint8_t)slotY;
-                    constMovS0.swz[2] = (uint8_t)slotZ;
-                    constMovS0.swz[3] = (uint8_t)slotW;
-                    struct nvfx_src constMovS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_src constMovS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    // Const mask = .yzw for scaledLane=0.  General-
-                    // case (other scaledLane values) lands later.
-                    const uint8_t constMask = uint8_t(NVFX_FP_MASK_ALL ^ (1 << sl.scaledLane));
-                    struct nvfx_insn constMov = nvfx_insn(
-                        0, 0, -1, -1,
-                        const_cast<struct nvfx_reg&>(dstReg),
-                        constMask, constMovS0, constMovS1, constMovS2);
-                    constMov.precision = dstPrecision;
-                    asm_.emit(constMov, NVFX_FP_OP_OPCODE_MOV);
 
-                    const float laneInline[4] = { u0, haveU1 ? u1 : 0.0f, 0.0f, 0.0f };
-                    asm_.appendConstBlock(laneInline);
+                    // ── Inst 2 (skipped when allZero): MOVR R0.<const_mask>, c[0].<swz> + inline ──
+                    if (!allZero)
+                    {
+                        struct nvfx_src constMovS0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        constMovS0.swz[0] = 0;            // dst.x unused (mask omits .x)
+                        constMovS0.swz[1] = (uint8_t)swzPos[1];
+                        constMovS0.swz[2] = (uint8_t)swzPos[2];
+                        constMovS0.swz[3] = (uint8_t)swzPos[3];
+                        struct nvfx_src constMovS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src constMovS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        const uint8_t constMask = uint8_t(NVFX_FP_MASK_ALL ^ (1 << sl.scaledLane));
+                        struct nvfx_insn constMov = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            constMask, constMovS0, constMovS1, constMovS2);
+                        constMov.precision = dstPrecision;
+                        asm_.emit(constMov, NVFX_FP_OP_OPCODE_MOV);
+                        asm_.appendConstBlock(inlinePack);
+                    }
 
-                    // ── Inst 3 [END]: MAD R0.<scaledLane>, H0, c[0].xxxx, H0 ──
+                    // ── Final inst [END]: MAD R0.<scaledLane>, H0, c[0].xxxx, H0 ──
                     struct nvfx_src madS0 = nvfx_src(hReg);   // H0.xyzw
                     struct nvfx_src madS1 =
                         nvfx_src(const_cast<struct nvfx_reg&>(constReg));
