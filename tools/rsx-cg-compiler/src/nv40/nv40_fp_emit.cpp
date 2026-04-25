@@ -155,6 +155,52 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpArithBinding> valueToArith;
 
+    // N-ary arithmetic chain: e.g. `vcol + a + b + c` (3 adds, one root
+    // varying, three uniform addends).  sce-cgc lowers this with an
+    // fp16 preload then a sequence of ADDR R0 = (prev_temp) + c[inline]:
+    //
+    //   MOVH H0.xyzw, f[input]                           # preload root
+    //   ADDR R0.xyzw, H0.xyzw, c[u0]   <16-byte zero>    # link 0
+    //   ADDR R0.xyzw, R0.xyzw, c[u1]   <16-byte zero>    # link 1
+    //   ADDR R0.xyzw [END], R0.xyzw, c[uN]<16-byte zero> # last link carries END
+    //
+    // Per-link op currently restricted to Add — chained Mul / mixed-op
+    // chains lower to the existing arith path one at a time.  Each
+    // link's RHS must be a uniform; chain-of-temps and chain-of-
+    // varyings land later (NV40 FP only allows one INPUT_SRC per
+    // instruction, so a `varying + varying` chain link needs its own
+    // preload sequence).
+    struct FpChainBinding
+    {
+        IRValueID rootInputId   = 0;     // base varying preloaded into H0
+        bool      rootInputAbs  = false;
+        bool      rootInputNeg  = false;
+        struct Link
+        {
+            FpArithOp op;
+            IRValueID uniformId   = 0;
+            bool      uniformAbs  = false;
+            bool      uniformNeg  = false;
+        };
+        std::vector<Link> links;
+    };
+    std::unordered_map<IRValueID, FpChainBinding> valueToChain;
+
+    // Repeated-add fold: `vcol + vcol + vcol` (3 SSA references to the
+    // same varying) collapses to `MAD R0 = H0 * 2.0 + H0` — i.e. a
+    // 2-insn MOVH+MAD shape with a single inline literal block holding
+    // (scale-1, 0, 0, 0).  Built up as the IR walks consecutive Adds:
+    //   Add(x, x)       → scale=2, varyingId=x
+    //   Add(scale, x)   → scale+=1
+    // Future: handle the `0 + x + x + x` shape produced by static-for
+    // unroll once an algebraic-simplification pass runs `0+x → x`.
+    struct FpScaleVaryingBinding
+    {
+        IRValueID inputId = 0;   // the repeated varying (resolves via valueToInputSrc)
+        int       scale   = 0;   // ≥ 2; literal multiplier in (scale-1, 0, 0, 0)
+    };
+    std::unordered_map<IRValueID, FpScaleVaryingBinding> valueToScale;
+
     // MAD fusion: Add(Mul(input, uniformMul), addend) where addend is
     // either a literal vec4 or another uniform.  sce-cgc lowers this
     // to a four-block sequence:
@@ -699,6 +745,129 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
                 else
                 {
+                    // Repeated-add fold: `Add(x, x)` where x is a
+                    // direct varying — emit later as MOVH+MAD with
+                    // multiplier (scale-1).  Extends through chained
+                    // `Add(scale, x)` to grow the scale by 1 per link.
+                    // Restricted to Add (Sub flips a sign; Mul/Min/Max
+                    // don't have the linear-scale identity).
+                    if (inst.op == IROp::Add)
+                    {
+                        // Shape A: extend an existing scale binding.
+                        // `Add(scale, x)` where x is the same direct
+                        // varying that the scale tracks (compared as
+                        // SSA value-ID; emit-time will resolve to the
+                        // INPUT_SRC code via valueToInputSrc).
+                        // Capped at scale=3 — sce-cgc switches lowering
+                        // shapes for N>=4 (4-insn MUL+FENCBR+MAD) and
+                        // we have no byte-probe for that path yet.
+                        constexpr int kMaxScale = 3;
+                        if (valueToScale.count(ma.baseId) &&
+                            valueToScale[ma.baseId].inputId == mb.baseId &&
+                            valueToScale[ma.baseId].scale < kMaxScale)
+                        {
+                            FpScaleVaryingBinding b = valueToScale[ma.baseId];
+                            b.scale += 1;
+                            valueToScale[inst.result] = b;
+                            break;
+                        }
+                        if (valueToScale.count(mb.baseId) &&
+                            valueToScale[mb.baseId].inputId == ma.baseId &&
+                            valueToScale[mb.baseId].scale < kMaxScale)
+                        {
+                            FpScaleVaryingBinding b = valueToScale[mb.baseId];
+                            b.scale += 1;
+                            valueToScale[inst.result] = b;
+                            break;
+                        }
+
+                        // Shape B: seed a fresh scale binding for
+                        // `Add(x, x)` where both operands resolve to
+                        // the same direct varying.
+                        if (ma.baseId == mb.baseId &&
+                            valueToInputSrc.count(ma.baseId) &&
+                            !ma.absMod && !ma.negMod &&
+                            !mb.absMod && !mb.negMod)
+                        {
+                            FpScaleVaryingBinding b;
+                            b.inputId = ma.baseId;
+                            b.scale   = 2;
+                            valueToScale[inst.result] = b;
+                            break;
+                        }
+                    }
+
+                    // Chain detection — only meaningful for Add today.
+                    // Shape A: extend an existing chain: operand[0] is
+                    //         already a chain binding, operand[1] is a
+                    //         uniform.  Adds one Link.
+                    // Shape B: promote an arith binding into a fresh
+                    //         chain: operand[0] is a deferred Add
+                    //         arith with (varying, uniform), operand[1]
+                    //         is a uniform.  This becomes a 2-link
+                    //         chain.
+                    // Sub treated like Add via uniformNeg toggle so
+                    // mixed `vcol + a - b + c` chains lower correctly
+                    // once Sub is allowed at the IR-level chain check.
+                    if (inst.op == IROp::Add || inst.op == IROp::Sub)
+                    {
+                        auto promoteOrExtend = [&](IRValueID prevId,
+                                                   IRValueID rhsUniformId,
+                                                   const SrcMod& rhsMod) -> bool
+                        {
+                            auto cIt = valueToChain.find(prevId);
+                            if (cIt != valueToChain.end())
+                            {
+                                FpChainBinding ch = cIt->second;
+                                FpChainBinding::Link link;
+                                link.op         = FpArithOp::Add;
+                                link.uniformId  = rhsUniformId;
+                                link.uniformAbs = rhsMod.absMod;
+                                link.uniformNeg = rhsMod.negMod;
+                                if (inst.op == IROp::Sub)
+                                    link.uniformNeg = !link.uniformNeg;
+                                ch.links.push_back(link);
+                                valueToChain[inst.result] = std::move(ch);
+                                return true;
+                            }
+                            auto aIt = valueToArith.find(prevId);
+                            if (aIt != valueToArith.end() &&
+                                aIt->second.op == FpArithOp::Add)
+                            {
+                                const auto& prior = aIt->second;
+                                FpChainBinding ch;
+                                ch.rootInputId  = prior.inputId;
+                                ch.rootInputAbs = prior.inputAbs;
+                                ch.rootInputNeg = prior.inputNeg;
+                                FpChainBinding::Link l0;
+                                l0.op         = FpArithOp::Add;
+                                l0.uniformId  = prior.uniformId;
+                                l0.uniformAbs = prior.uniformAbs;
+                                l0.uniformNeg = prior.uniformNeg;
+                                ch.links.push_back(l0);
+                                FpChainBinding::Link l1;
+                                l1.op         = FpArithOp::Add;
+                                l1.uniformId  = rhsUniformId;
+                                l1.uniformAbs = rhsMod.absMod;
+                                l1.uniformNeg = rhsMod.negMod;
+                                if (inst.op == IROp::Sub)
+                                    l1.uniformNeg = !l1.uniformNeg;
+                                ch.links.push_back(l1);
+                                valueToChain[inst.result] = std::move(ch);
+                                return true;
+                            }
+                            return false;
+                        };
+                        // Either ordering — chain on left or right.
+                        if (bUniform != valueToFpUniform.end() &&
+                            promoteOrExtend(ma.baseId, mb.baseId, mb))
+                            break;
+                        if (aUniform != valueToFpUniform.end() &&
+                            inst.op == IROp::Add &&
+                            promoteOrExtend(mb.baseId, ma.baseId, ma))
+                            break;
+                    }
+
                     out.diagnostics.push_back(
                         "nv40-fp: arithmetic ops supported only for (varying, uniform) pairs "
                         "(uniform+uniform / literal arithmetic lands later)");
@@ -1809,6 +1978,186 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         dsMask, dsS0, dsS1, dsS2);
                     ds.precision = dstPrecision;
                     asm_.emit(ds, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // Repeated-add fold: `vcol + vcol + ... (N copies)`
+                // → MOVH H0 = vcol; MAD R0 = H0 * (N-1).xxxx + H0
+                // with a single inline (N-1, 0, 0, 0) literal block.
+                // Single-instruction MAD form skips the 4-insn
+                // FENCBR-style preload path used when the multiplier
+                // is a runtime uniform.
+                auto scIt = valueToScale.find(srcId);
+                if (scIt != valueToScale.end() && scIt->second.scale >= 2)
+                {
+                    const auto& sb = scIt->second;
+                    auto inIt = valueToInputSrc.find(sb.inputId);
+                    if (inIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scale-fold input failed to resolve");
+                        return out;
+                    }
+
+                    // MOVH H0.xyzw, f[input]
+                    struct nvfx_reg hReg = nvfx_reg(NVFXSR_TEMP, 0);
+                    hReg.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1, hReg,
+                        NVFX_FP_MASK_ALL, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // MAD R0.xyzw, H0.xyzw, c[0].xxxx, H0.xyzw
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_src madS0 = nvfx_src(hReg);
+                    struct nvfx_src madS1 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    // SRC1 reads c[0].xxxx — broadcasts lane X of the
+                    // inline literal block (which holds scale-1 in
+                    // lane X, padded with zeros).  nvfx_src() defaults
+                    // to .xyzw identity, so override explicitly.
+                    madS1.swz[0] = madS1.swz[1] = madS1.swz[2] = madS1.swz[3] = 0;
+                    struct nvfx_src madS2 = nvfx_src(hReg);
+                    struct nvfx_insn mad = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_ALL,
+                        madS0, madS1, madS2);
+                    mad.precision = dstPrecision;
+                    asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+
+                    const float lit[4] = {
+                        static_cast<float>(sb.scale - 1),
+                        0.0f, 0.0f, 0.0f
+                    };
+                    asm_.appendConstBlock(lit);
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // N-ary chain `vcol + a + b + c` — preload root
+                // varying into H0 once, then a sequence of ADDR
+                // R0,(prev),c[inline] linking through R0.  Each link
+                // emits its own 16-byte zero block (uniform patch slot)
+                // exactly like the single-arith path; markEnd() stamps
+                // PROGRAM_END on whichever ADDR ends up last.
+                auto chIt = valueToChain.find(srcId);
+                if (chIt != valueToChain.end())
+                {
+                    const auto& chain = chIt->second;
+                    auto inIt = valueToInputSrc.find(chain.rootInputId);
+                    if (inIt == valueToInputSrc.end() || chain.links.empty())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: chain root failed to resolve");
+                        return out;
+                    }
+
+                    // Resolve all uniform IDs up front so we bail
+                    // before emitting anything if any link is broken.
+                    std::vector<unsigned> linkUniformParam;
+                    linkUniformParam.reserve(chain.links.size());
+                    for (const auto& link : chain.links)
+                    {
+                        auto uIt = valueToFpUniform.find(link.uniformId);
+                        if (uIt == valueToFpUniform.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: chain link uniform failed to resolve");
+                            return out;
+                        }
+                        linkUniformParam.push_back(uIt->second);
+                    }
+
+                    // MOVH H0.xyzw, f[input]
+                    struct nvfx_reg hReg = nvfx_reg(NVFXSR_TEMP, 0);
+                    hReg.is_fp16 = 1;
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    mvhS0.abs    = chain.rootInputAbs ? 1 : 0;
+                    mvhS0.negate = chain.rootInputNeg ? 1 : 0;
+                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1, hReg,
+                        NVFX_FP_MASK_ALL, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inIt->second);
+                    if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // ADDR R0, (H0 first iter / R0 thereafter), c[inline]
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg r0Full   = nvfx_reg(NVFXSR_TEMP, 0);
+
+                    for (size_t i = 0; i < chain.links.size(); ++i)
+                    {
+                        const auto& link = chain.links[i];
+
+                        // First iter reads H0; later iters read R0 (the
+                        // running accumulator).  Either way SRC0 is
+                        // TEMP — which canonicalises ADD as
+                        // (TEMP, CONST), reverse of the lone-add
+                        // (CONST, INPUT) order verified in add_f.
+                        struct nvfx_reg accReg = (i == 0) ? hReg : r0Full;
+                        struct nvfx_src srcAcc = nvfx_src(accReg);
+                        struct nvfx_src srcCnst =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        srcCnst.abs    = link.uniformAbs ? 1 : 0;
+                        srcCnst.negate = link.uniformNeg ? 1 : 0;
+                        struct nvfx_src srcUnused =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                        const bool isLast = (i + 1 == chain.links.size());
+                        // Saturate is a StoreOutput-side modifier that
+                        // only the final write should carry.
+                        struct nvfx_insn add = nvfx_insn(
+                            (isLast && saturate) ? 1 : 0,
+                            0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_ALL,
+                            srcAcc, srcCnst, srcUnused);
+                        add.precision = isLast ? dstPrecision : FLOAT32;
+                        asm_.emit(add, NVFX_FP_OP_OPCODE_ADD);
+
+                        const uint32_t ucodeByteOffset = asm_.currentByteSize();
+                        for (auto& eu : attrs.embeddedUniforms)
+                        {
+                            if (eu.entryParamIndex == linkUniformParam[i])
+                            {
+                                eu.ucodeByteOffsets.push_back(ucodeByteOffset);
+                                break;
+                            }
+                        }
+                        static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                        asm_.appendConstBlock(zeros);
+                    }
 
                     emittedSomething = true;
                     break;
