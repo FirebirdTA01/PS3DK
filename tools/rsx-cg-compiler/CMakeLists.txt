@@ -42,12 +42,17 @@ set(DONOR_DIR ${SRC_DIR}/donor)
 set(_repo_root ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 set(_version_sh ${_repo_root}/scripts/version.sh)
 
+# Find a bash interpreter explicitly.  On Linux execute_process can launch
+# a .sh via its shebang, but on Windows CreateProcess refuses .sh outright
+# even inside MSYS2 — we have to invoke bash by name.
+find_program(_bash_exe NAMES bash REQUIRED)
+
 # Run the generator in --format=cmake mode and include the result, which
 # defines PS3SDK_VERSION* variables.  The file is regenerated on every
 # configure step so a new commit picks up immediately.
 set(_version_cmake ${CMAKE_CURRENT_BINARY_DIR}/ps3sdk_version.cmake)
 execute_process(
-    COMMAND ${_version_sh} --format=cmake
+    COMMAND ${_bash_exe} ${_version_sh} --format=cmake
     OUTPUT_FILE ${_version_cmake}
     WORKING_DIRECTORY ${_repo_root}
     RESULT_VARIABLE _version_rc)
