@@ -1,280 +1,202 @@
-<<<<<<< HEAD
-# Current Phase — True 8-byte `.opd` emission
-=======
-# Native 8-byte `.opd` Emission — Coordinated GCC + Binutils Changes
->>>>>>> 57ddd1d (docs(abi): mark compact-.opd emission as achieved)
+# Native compact `.opd` emission
 
-## Goal
+This document records the current state of the compact function-descriptor
+migration for the PPU `powerpc64-ps3-elf` toolchain.
 
-Make the PPU toolchain emit 8-byte compact function descriptors
-natively — the layout the reference SDK uses and the Lv-2 ABI spec
-(docs/abi/cellos-lv2-abi-spec.md §2) normatively requires. When this
-work is complete:
+The migration is no longer a proposal: PS3DK now targets native 8-byte CellOS
+Lv-2 function descriptors directly. The old PSL1GHT-style compatibility trick
+of emitting standard 24-byte PPC64 ELFv1 descriptors and storing a compact
+descriptor copy in the environment slot is no longer the normal ABI path.
 
-- `.opd` entries are **8 bytes**: `[entry_ea_32, toc_ea_32]` — the
-  second word is the **module TOC base EA** (a real, functional
-  32-bit pointer), not a marker/module-id/zero. Confirmed via
-  `rpcs3 --decrypt` on a reference EXEC (see
-  `~/.claude/projects/.../memory/project_opd_tlsgd_semantics.md`).
-- `.opd` section size is `8 × n_functions` instead of `24 × n_functions`.
-- `.rela.opd` uses `R_PPC64_ADDR32 @ +0` + a
-  `R_PPC64_TLSGD *ABS* @ +4` marker per entry, not three `R_PPC64_ADDR64`.
-- `tools/sprx-linker`'s `.opd` packing step is unnecessary and retired.
-- `lv2_fn_to_callback_ea(fn)` becomes a bare cast — the `+16`
-  offset goes away in a single edit.
-- `__get_opd32` vanishes from every upstream fork we build against.
-
-This document explains why native compact-opd emission requires coordinated
-changes across GCC and binutils (not just a post-link rewrite), what each
-component looks like, and what the validation matrix is.
+For the normative byte-level contract, see `docs/abi/cellos-lv2-abi-spec.md`.
+For section layouts, see `docs/abi/section-reference.md`. For which component
+emits or consumes each piece, see `docs/abi/toolchain-architecture.md`.
 
 ---
 
-## Why it is not a single patch
+## Current state
 
-`samples/toolchain/hello-ppu-abi-check/hello-ppu-abi-check.elf`
-disassembles to the standard PPC64 ELFv1 indirect-call sequence:
+A conforming PPU object or linked binary uses an 8-byte `.opd` descriptor:
+
+```text
+offset  size  contents
+------  ----  -----------------------------------------------
+0x00    4     function entry EA, 32-bit
+0x04    4     module TOC base EA, 32-bit
+```
+
+The descriptor stride is 8 bytes and the `.opd` section alignment is 4 bytes.
+A C function pointer is still a native 64-bit PPU pointer, but the address it
+contains points at this compact descriptor instead of a 24-byte PPC64 ELFv1
+descriptor.
+
+The practical results are:
+
+- `lv2_fn_to_callback_ea(fn)` is a bare cast to the descriptor EA.
+- The old `+16` callback offset is retired for native PS3DK output.
+- `__get_opd32` is not part of the native path.
+- The linker script keeps `.opd` at `ALIGN(4)` so compact descriptors are not
+  promoted back into the legacy 24-byte-edit path.
+- `tools/sprx-linker` leaves compact `.opd` sections alone.
+
+---
+
+## Why this needed coordinated compiler/linker/runtime work
+
+Stock PPC64 ELFv1 code expects a 24-byte function descriptor:
+
+```text
+offset  size  contents
+------  ----  ----------------
+0x00    8     entry address
+0x08    8     TOC address
+0x10    8     environment pointer
+```
+
+The corresponding indirect-call sequence reads across all three slots:
 
 ```asm
-ld    r10, 0(r9)      ; entry EA from desc+0  (8 bytes)
-ld    r11, 16(r9)     ; env slot from desc+16 (8 bytes)
+ld    r10, 0(r9)
+ld    r11, 16(r9)
 mtctr r10
-ld    r2,  8(r9)      ; TOC from desc+8       (8 bytes)
+ld    r2,  8(r9)
 bctrl
 ```
 
-Three loads spanning bytes 0-23 of the descriptor. If the linker
-shrinks `.opd` entries to 8 bytes post-layout, `ld r2, 8(r9)` reads
-**into the next descriptor** — every function-pointer call in the
-tree breaks. Shrinking `.opd` therefore requires the compiler to
-emit a different indirect-call sequence first.
+Shrinking `.opd` at link or post-link time without changing the compiler would
+make those loads read into adjacent descriptors. That is why the compact format
+requires both:
 
-This is why native compact-opd emission is *two* coordinated patches
-(GCC and binutils) rather than one, and cannot be a purely
-post-link rewrite.
+1. native 8-byte descriptor emission; and
+2. an indirect-call sequence that reads two 32-bit words from the compact
+   descriptor.
 
----
-
-## Workstreams
-
-### A. GCC — indirect-call sequence change
-
-**Target file(s):** `gcc/config/rs6000/rs6000*.{c,cc,md}`, specifically
-whichever routine expands indirect calls under the AIX/ELFv1 path.
-Candidates to inspect: `rs6000_call_aix`, `rs6000_indirect_call_sequence`,
-`rs6000_expand_call`, and the `call_indirect_aix` /
-`call_value_indirect_aix` patterns.
-
-**Proposed sequence for Lv-2 mode** (replaces the 3-read form):
+The compact call path is:
 
 ```asm
-lwz   r0,  0(r9)      ; entry EA from desc+0   (4 bytes, word)
-lwz   r2,  4(r9)      ; TOC   from desc+4      (4 bytes, word)
+std   r2, 40(r1)
+lwz   r0, 0(r9)
 mtctr r0
-bctrl                   ; bctrl with no link for stub-calls
+lwz   r2, 4(r9)
+bctrl
+ld    r2, 40(r1)
 ```
 
-Two 4-byte reads spanning exactly 8 bytes. The first load gets the
-entry-point EA; the second load gets the callee's module TOC base
-EA from the descriptor's TLSGD marker slot. This matches the
-reference SDK's indirect-call pattern observed in decrypted binaries.
-
-**Gating:** new target flag `-mps3-opd-compact` (default off
-while developing, eventually default for the `powerpc64-ps3-elf`
-target). Matches the `-mps3-runtime=native` pattern from the ABI work.
-
-**Cross-module indirect calls:** require more care. Possible
-answers:
-
-1. **Stubs** — keep the existing `.sceStub.text` model; indirect
-   calls to external functions get rewritten to go through a stub
-   that sets r2 before branching. PSL1GHT already generates these
-   for direct calls; extending them is straightforward.
-2. **Banned** — declare cross-module indirect calls unsupported at
-   source level. Lv-2 homebrew rarely takes the address of an
-   imported symbol and calls through it; worth a grep across the
-   PSL1GHT sample corpus to verify.
-3. **Per-call TOC load** — two-read sequence: `lwz r0, 0; lwz r2, 4;
-   mtctr r0; bctrl`. Requires the 8-byte descriptor's second word
-   to hold a TOC EA for callees that need one — this is exactly what
-   the TLSGD marker provides (the callee's module TOC base).
-
-Recommended: start with (2) + (1) as fallback. Revisit (3) if
-any sample genuinely needs it.
-
-### B. GCC — static function-pointer storage
-
-Some C constructs lay down function descriptors (or references to
-them) in data sections:
-
-- `.init_array`, `.fini_array`, `.ctors`, `.dtors` — constructor /
-  destructor arrays. Each entry is traditionally an 8-byte pointer
-  to a `.opd` entry.
-- `void (*arr[])() = { a, b, c };` — C-level function-pointer
-  tables. Each entry is an 8-byte pointer.
-- `.eh_frame` / `.gcc_except_table` FDE personality routines —
-  some back-ends emit a function-descriptor reference.
-
-In compact mode these stay 8-byte pointers, but the *target* they
-point at is now an 8-byte descriptor rather than a 24-byte one.
-The compiler change is mostly about where those pointers are
-resolved — the linker will still place them at correct offsets
-given correct `.opd` layout. Audit required; not necessarily
-additional compiler work.
-
-### C. Binutils — `.opd` emission + reloc rewrite
-
-**Target file:** `bfd/elf64-ppc.c`. The ppc64 backend already has
-an `elf_backend_early_size_sections` hook (`ppc64_elf_edit`) that
-does opd optimization; compact-opd emission is a natural addition
-to the same pipeline.
-
-**Transformation:**
-
-For every input `.opd` section (24-byte entries, 3×ADDR64
-relocations per entry):
-
-1. Identify each 24-byte entry and its three relocations:
-   `R_PPC64_ADDR64 @ +0  →  .funcname`
-   `R_PPC64_ADDR64 @ +8  →  .TOC.@tocbase`
-   `R_PPC64_ADDR64 @ +16 →  <env, usually 0>`
-2. Emit an 8-byte entry:
-   `R_PPC64_ADDR32 @ +0  →  .funcname` (truncate the +0 dword)
-   `R_PPC64_TLSGD  @ +4  → no symbol, addend 0`
-3. Drop the other two relocations.
-4. Output section size = `n_entries × 8`.
-
-**TLSGD marker semantics:** The `R_PPC64_TLSGD *ABS*` reloc at
-offset +4 is resolved by the linker to write the module's TOC base
-EA into that slot. This is a repurposed TLS reloc used as a
-link-time fill directive — each descriptor in a given module carries
-the same TOC value (the callee's module TOC base for cross-module
-indirect calls).
-
-**Relocation-of-references:** every relocation referring to
-`.opd + N×24` in the input needs its addend recomputed as `N×8`
-in the output. Sources include:
-
-- `.toc` / `.got` entries holding function-descriptor pointers.
-- `.init_array` / similar static tables.
-- Any code-embedded constants (rare under -fPIC / -fPIE but
-  possible).
-
-The ppc64 backend already walks these during link via
-`ppc64_elf_edit_toc`; hooking the compact-opd adjust into the
-same iteration is natural.
-
-**Gating:** new linker emulation / option.
-`ld -m elf64lv2ppc` or `--ps3-compact-opd`. Same default-off /
-default-on story as the GCC flag.
-
-### D. `tools/sprx-linker` — stop packing
-
-When binutils emits compact OPDs, the 24-byte descriptors don't
-exist and the "pack 8 bytes at offset +16" step is a no-op - or,
-as we hit, worse: the divisibility-by-24 guard fires on any
-compact-OPD section whose entry count is a multiple of 3 (which
-is most of them in real binaries), and the packer then overwrites
-every third compact entry's 8 bytes with `[TOC, TOC]`. The
-observable symptom was `bctrl` through a corrupted descriptor
-landing at the TOC base address: e.g. `__syscalls_init`'s OPD
-pointing at 0x49500 instead of its `.text` entry, so the
-compiler-generated `__do_global_ctors_aux` loop crashed on the
-first constructor that happened to be the third entry in its
-input file's `.opd`.
-
-The fix is to gate the packer on `.opd` section `sh_addralign`:
-ELFv1 24-byte descriptors use 8-byte alignment (power = 3);
-compact 8-byte descriptors use 4-byte alignment (power = 2).
-Size-divisibility alone cannot distinguish them, because
-`N * 8 == M * 24` whenever N is a multiple of 3 - which is most
-real inputs.
-
-### E. Runtime / header cleanup
-
-- Retire `lv2_fn_to_callback_ea`'s `+16` body — it becomes a bare
-  cast `(lv2_ea32_t)(uintptr_t)fn`. All nine current call sites
-  keep the same source, get new correct behaviour for free.
-- Update `docs/abi/cellos-lv2-abi-spec.md §2` to remove the
-  "target state / current output 24-byte" status note.
-- Update `abi-verify` to handle linked EXEC/DYN `.opd` entries by
-  reading bytes (not relocations, which are resolved), verifying
-  8-byte stride.
+`lwz` is intentional: Lv-2 user effective addresses fit in 32 bits, while the
+PPU ABI still uses 64-bit registers and native 64-bit C pointers.
 
 ---
 
-## Validation matrix
+## Implemented pieces
 
-Native compact-opd emission is complete when all of:
+### GCC
 
-1. **Static conformance:** `abi-verify check` reports 8-byte `.opd`
-   entries on a built sample, matching the fixture shape for
-   `crt1.o` / `libc.a(exit.o)` from `tests/abi/fixtures/`.
-2. **Linker structural check:** `powerpc64-ps3-elf-objdump -d`
-   shows indirect calls using the 1-read sequence (not 3-read).
-3. **Sample smoke:** every sample in `samples/` listed in
-   `feedback_retest_samples_after_rebuild.md` builds green AND
-   runs in RPCS3 to clean exit.
-4. **Callback correctness:** `samples/gcm/hello-ppu-cellgcm-clear`
-   continues to render its 6-color 360-frame cycle under
-   compact-opd mode. (This sample exercises the VBlank handler —
-   the path that `__get_opd32` used to cover.)
-5. **No regressions in existing tests:** `hello-ppu-abi-check`
-   still passes 8/8 `abi-verify` invariants.
+The PPU GCC target emits compact descriptors and the matching compact
+indirect-call sequence for `powerpc64-ps3-elf`.
+
+The important compiler-side ABI properties are:
+
+- `.opd` descriptors are emitted with an 8-byte stride.
+- descriptor fields are 32-bit effective addresses;
+- indirect calls load entry and TOC with `lwz`;
+- public C/C++ function pointers remain native 64-bit pointers to descriptors.
+
+### Binutils / linker
+
+The linker is responsible for normal section layout, relocation resolution, and
+the final ELF identity bytes. For compact `.opd`, the relevant properties are:
+
+- `.opd` must remain 4-byte aligned in final output;
+- descriptor entry fields resolve to 32-bit code EAs;
+- descriptor TOC fields resolve to the module TOC base EA;
+- `R_PPC64_ADDR64` must not leak into `.opd` in conforming output.
+
+Some inputs may encode the TOC field with a direct `.TOC.` relocation, while
+the compiler/binutils path may use the CellOS-specific marker described in the
+ABI spec. The final linked descriptor bytes are the important contract: two
+32-bit words, `[entry_ea, toc_ea]`.
+
+### Runtime start files
+
+`runtime/lv2/crt/crt0.S` provides a compact `__start` descriptor and explicitly
+loads the TOC from descriptor offset `+4`, not the PPC64 ELFv1 `+8` slot.
+
+`runtime/lv2/crt/lv2.ld` keeps `.opd` at `ALIGN(4)`. This matters because the
+post-link tool uses section alignment to distinguish native compact descriptors
+from legacy 24-byte ELFv1 descriptors.
+
+`build-runtime-lv2.sh` currently installs native `lv2-sprx.o`, native
+`lv2-crti.o`, native `crt0.o` merged into `lv2-crt0.o`, and the native
+`lv2.ld`. The current `lv2-crt0.o` still reuses PSL1GHT's `crt1.o` for the
+unchanged newlib/syscall glue, so the CRT is not yet completely PSL1GHT-free.
+
+### `tools/sprx-linker`
+
+`sprx-linker` is still part of the build, but its role is narrower than it used
+to be.
+
+Current responsibilities:
+
+- verify that `.sys_proc_prx_param` exists and has the Lv-2 magic word;
+- fill per-library import counts in `.lib.stub`;
+- leave native compact `.opd` sections untouched;
+- preserve a compatibility fallback for legacy 24-byte ELFv1 `.opd` inputs.
+
+The legacy fallback is gated on `.opd` section alignment. Compact descriptors
+are 4-byte aligned; legacy ELFv1 descriptors are 8-byte aligned. Size
+divisibility alone is not reliable because an 8-byte compact section with a
+multiple of three entries is also divisible by 24.
 
 ---
 
-## Risk register
+## Retired transitional form
 
-| Risk | Likelihood | Mitigation |
-|---|---|---|
-| GCC's indirect-call change breaks same-module calls that *do* need a different TOC (e.g., weak-linked externals) | Medium | Start with stubs for externals, keep direct-jump for locals. Linker already distinguishes. |
-| Static `.init_array` entries break because the embedded pointer targets are 24-byte old layout | Medium | Audit + explicit test sample with a C++-style global constructor. |
-| The `R_PPC64_TLSGD` marker's actual loader semantics are still unknown — maybe it writes something specific we don't understand | High | Dump linked reference `.self` to see what bytes end up at +4 post-load. May need to write a specific value (e.g., module TOC EA) rather than leave it zero. |
-| Cross-PRX function-pointer calls (theoretical) break silently | Low | Grep PSL1GHT samples + reference headers for patterns that take `&extern_func`. |
-| EH unwinding + `.eh_frame` FDE personality references assume 24-byte FD layout | Medium | Build one C++ sample with exceptions; verify `catch` still unwinds. |
+The retired PSL1GHT compatibility form was:
 
----
+```text
+offset  size  contents
+------  ----  ---------------------------------------------------------
+0x00    8     PPC64 ELFv1 entry address
+0x08    8     PPC64 ELFv1 TOC address
+0x10    8     packed compact descriptor: { entry_lo32, toc_lo32 }
+```
 
-## Non-goals (for this phase)
+That form existed so Lv-2 callbacks could pass `descriptor + 16` to the kernel
+while GCC still generated normal PPC64 ELFv1 descriptors. Native PS3DK output no
+longer relies on that layout.
 
-- Shrinking `.toc` or `.got` layouts. They hold 8-byte pointers
-  regardless of descriptor format; only the values change.
-- Retiring PSL1GHT's `gcmConfiguration` (still needed for legacy
-  callers; not connected to `.opd` format).
-- Retiring GCC patch 0005 (`TARGET_VALID_POINTER_MODE`). That's
-  driven by `mode(SI)` usage in PSL1GHT headers; orthogonal to
-  descriptor shape.
+The post-link packer is retained only as a compatibility path for any legacy
+24-byte input that still reaches `sprx-linker`.
 
 ---
 
-## Risk register and non-goals (achieved state)
+## Validation checklist
 
-| Risk | Likelihood | Mitigation | Status |
-|---|---|---|---|
-| GCC's indirect-call change breaks same-module calls that *do* need a different TOC | Medium | Stubs for externals, direct-jump for locals. Linker already distinguishes. | ✓ Resolved via `-mps3-opd-compact` flag + TLSGD marker resolution |
-| Static `.init_array` entries break because embedded pointers target 24-byte old layout | Medium | Audit + explicit test sample with C++-style global constructor | ✓ Verified; pointers resolve to correct 8-byte descriptors post-link |
-| `R_PPC64_TLSGD` marker's loader semantics unknown — maybe it writes something specific we don't understand | High | Dump linked reference `.self`; write module TOC EA into +4 slot | ✓ Resolved; binutils emits TLSGD, linker fills with TOC base EA at link time |
-| Cross-PRX function-pointer calls break silently | Low | Grep PSL1GHT samples + reference headers for `&extern_func` patterns | ✓ No such patterns found in reference corpus |
-| EH unwinding + `.eh_frame` FDE personality references assume 24-byte FD layout | Medium | Build C++ sample with exceptions; verify `catch` still unwinds | ✓ Verified; no EH regressions observed |
+Compact `.opd` output should be considered healthy when:
 
-**Non-goals (still valid):**
-- Shrinking `.toc` or `.got` layouts — they hold 8-byte pointers regardless of descriptor format.
-- Retiring PSL1GHT's `gcmConfiguration` — still needed for legacy callers.
-- Retiring GCC patch 0005 (`TARGET_VALID_POINTER_MODE`) — driven by `mode(SI)` usage in PSL1GHT headers.
+1. `.opd` has 8-byte descriptor stride and 4-byte alignment.
+2. no `.opd` relocation resolves through `R_PPC64_ADDR64`;
+3. indirect-call disassembly uses the compact `lwz` load sequence;
+4. `lv2_fn_to_callback_ea(fn)` returns the descriptor EA directly;
+5. `sprx-linker` does not rewrite compact `.opd` sections;
+6. `abi-verify check` passes for representative samples;
+7. callback-using samples, such as GCM/vblank paths, run under RPCS3 or hardware.
 
 ---
 
-## Achieved state
+## Still not solved by this migration
 
-The compact-.opd emission work is complete:
+Compact `.opd` was the largest ABI wart, but it is not the whole SDK/runtime
+migration.
 
-- GCC `-mps3-opd-compact` flag (now default for `powerpc64-ps3-elf`) emits native 8-byte `.opd` entries directly.
-- Binutils resolves `R_PPC64_TLSGD *ABS*` relocations at link time, writing the module TOC base EA into offset +4 of each descriptor.
-- The transitional 24-byte-with-compat-packing form (GCC stock backend + `tools/sprx-linker` post-link) has been retired.
-- All call sites use the native 2-word read sequence (`lwz r0, 0(r9); lwz r2, 4(r9)`).
-- `lv2_fn_to_callback_ea(fn)` is now a bare cast; the `+16` offset has collapsed away.
-- `tools/sprx-linker`'s `.opd` packing step is unnecessary and retired.
-- `__get_opd32` vanishes from every upstream fork we build against.
+Still separate from this document:
 
-All conformance invariants are satisfied per `docs/abi/cellos-lv2-abi-spec.md` §2 and the validation matrix above.
+- replacing the remaining PSL1GHT `crt1.o` dependency;
+- removing all remaining `mode(SI)`-style pointer declarations from legacy
+  interfaces in favor of explicit `lv2_ea32_t` kernel-side fields;
+- replacing or retiring PSL1GHT compatibility wrapper libraries where native
+  Cell SDK-style APIs are complete;
+- expanding NID stub coverage and implementation verification.
+
+So the compact-descriptor ABI path is implemented, but the broader goal of a
+fully PSL1GHT-free runtime and SDK is still ongoing.
