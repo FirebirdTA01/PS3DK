@@ -103,6 +103,33 @@ static inline int sys_spu_thread_read_ls_byte(unsigned int id, unsigned int lsa,
     return (int)p1;
 }
 
+static inline int sys_spu_thread_read_ls_dword(unsigned int id, unsigned int lsa, uint64_t *out)
+{
+    uint64_t buf = 0;
+    lv2syscall4(SYSCALL_SPU_THREAD_READ_LS, id, lsa, (u64)(uintptr_t)&buf, 8);
+    *out = buf;
+    return (int)p1;
+}
+
+/* Read up to `cap-1` bytes of a null-terminated string from SPU LS
+ * starting at `lsa` into `buf`.  Always null-terminates.  Used for
+ * both the format string itself and any `%s` arg pointers. */
+static unsigned read_spu_ls_string(unsigned int thread_id, uint32_t lsa,
+                                   char *buf, size_t cap)
+{
+    unsigned i = 0;
+    if (cap == 0) return 0;
+    for (; i < cap - 1; i++) {
+        uint8_t b = 0;
+        if (sys_spu_thread_read_ls_byte(thread_id, lsa + i, &b) != 0 || b == 0) {
+            break;
+        }
+        buf[i] = (char)b;
+    }
+    buf[i] = '\0';
+    return i;
+}
+
 /* ---- internal state (single global server) ----------------------- */
 static int               s_initialized;
 static sys_event_queue_t s_event_queue;
@@ -134,15 +161,207 @@ static sys_ppu_thread_t  s_handler_thread;
  * port; we follow the same pattern. */
 #define SPU_PRINTF_PORT_REQ           ((u64)1 << SPU_PRINTF_PORT)
 
+/* ---- format walker (Path B's printf-spec handler) --------------- *
+ *
+ * The arg block at SPU LS offset `arg_addr` was laid down by
+ * `_spu_call_event_va_arg`.  Layout (16 quadwords, 256 bytes total):
+ *
+ *   arg_addr +   0..15: caller's $4 — fmt pointer in bytes 0..3
+ *                      (preferred-slot for 32-bit values on SPU)
+ *   arg_addr +  16..31: $5 — first vararg slot
+ *   arg_addr +  32..47: $6 — second vararg slot
+ *   ...
+ *   arg_addr + 240..255: $19 — fifteenth vararg slot
+ *
+ * Within a slot, the SPU SysV ABI puts:
+ *   32-bit int / pointer / float (varargs DON'T default-promote
+ *     float -> double on SPU like they do on PPC, but the compiler
+ *     emits doubles to %f anyway when fed a float — meh, depends on
+ *     caller; treat %f as 8-byte to match standard C printf
+ *     conventions): bytes 0..3 of slot
+ *   64-bit long long / double: bytes 0..7 of slot
+ *
+ * The walker copies non-format text verbatim and for each %-spec:
+ *   1) collects the spec ('%' through conversion char) into a tiny
+ *      buffer
+ *   2) sniffs the length-modifier (none, l, ll, h, hh, j, z, t)
+ *   3) reads the appropriate-sized value from the next slot via
+ *      sys_spu_thread_read_ls (8-byte read for %lld/%llu/%llx/%f
+ *      family, 4-byte read otherwise)
+ *   4) hands it to snprintf with the collected spec
+ *   5) advances the slot index by 1 (each vararg consumes one
+ *      16-byte slot regardless of size)
+ *
+ * %s gets a second LS round-trip: the slot holds a 32-bit pointer
+ * into SPU LS where the actual string lives.  Read up to 256 bytes
+ * of it before snprintf'ing.
+ *
+ * Output is collected into `out_buf` and written to PPU stdout via
+ * a single fputs at the end so partial writes can't interleave with
+ * other threads' output. */
+
+#define SPU_PRINTF_OUT_BUFCAP   1024
+#define SPU_PRINTF_SPEC_BUFCAP  64
+#define SPU_PRINTF_S_BUFCAP     256
+#define SPU_PRINTF_MAX_VARARGS  15  /* slots $5..$19 */
+
+static int is_spu_printf_conversion(char c)
+{
+    switch (c) {
+    case 'd': case 'i': case 'u': case 'o': case 'x': case 'X':
+    case 'c': case 's': case 'p':
+    case 'f': case 'F': case 'e': case 'E': case 'g': case 'G':
+    case 'a': case 'A':
+    case 'n':
+    case '%':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void append(char *buf, size_t cap, size_t *len, const char *src)
+{
+    size_t avail = cap - *len - 1;
+    size_t n = strlen(src);
+    if (n > avail) n = avail;
+    memcpy(buf + *len, src, n);
+    *len += n;
+    buf[*len] = '\0';
+}
+
+/* Format-aware version of the SPU printf path.  Returns the number
+ * of bytes written to `out_buf` (excluding trailing null), or -1 on
+ * read-LS failure.  Does NOT call fputs; the caller is responsible
+ * for emitting the buffer.  Stays under SPU_PRINTF_OUT_BUFCAP-1
+ * bytes and always null-terminates. */
+static int format_spu_printf(unsigned int thread_id, uint32_t arg_addr,
+                             char *out_buf)
+{
+    out_buf[0] = '\0';
+    size_t out_len = 0;
+
+    /* fmt pointer is in bytes 0..3 of the first slot (caller's $4). */
+    uint32_t fmt_addr = 0;
+    if (sys_spu_thread_read_ls_word(thread_id, arg_addr, &fmt_addr) != 0
+        || fmt_addr == 0) {
+        return -1;
+    }
+
+    /* Read the entire format string into a local buffer up front so
+     * we don't pay an LS read per character of literal text. */
+    char fmt[SPU_PRINTF_OUT_BUFCAP];
+    read_spu_ls_string(thread_id, fmt_addr, fmt, sizeof(fmt));
+
+    int slot = 1;  /* next vararg lives at slot 1 (offset 16); slot 0 was fmt */
+
+    for (const char *p = fmt; *p; ) {
+        if (*p != '%') {
+            char one[2] = { *p++, '\0' };
+            append(out_buf, SPU_PRINTF_OUT_BUFCAP, &out_len, one);
+            continue;
+        }
+        /* '%' — collect spec up to and including the conversion char. */
+        char spec[SPU_PRINTF_SPEC_BUFCAP];
+        size_t sp = 0;
+        spec[sp++] = '%';
+        p++;
+        while (*p && sp < sizeof(spec) - 1 && !is_spu_printf_conversion(*p)) {
+            spec[sp++] = *p++;
+        }
+        if (!*p) break;  /* truncated spec */
+        char conv = *p++;
+        spec[sp++] = conv;
+        spec[sp]   = '\0';
+
+        if (conv == '%') {
+            append(out_buf, SPU_PRINTF_OUT_BUFCAP, &out_len, "%");
+            continue;
+        }
+        if (slot > SPU_PRINTF_MAX_VARARGS) {
+            /* Out of saved-register slots; print spec verbatim and stop. */
+            append(out_buf, SPU_PRINTF_OUT_BUFCAP, &out_len, spec);
+            continue;
+        }
+
+        /* Detect length modifier.  We only need to distinguish
+         * "needs 8-byte read" from "needs 4-byte read" — snprintf
+         * will respect the actual modifier in `spec` for output
+         * formatting. */
+        int is_ll = 0;
+        for (size_t i = 1; i + 1 < sp; i++) {
+            if (spec[i] == 'l' && spec[i+1] == 'l') { is_ll = 1; break; }
+        }
+        int is_double = (conv == 'f' || conv == 'F' || conv == 'e' ||
+                         conv == 'E' || conv == 'g' || conv == 'G' ||
+                         conv == 'a' || conv == 'A');
+
+        uint32_t slot_addr = arg_addr + (uint32_t)(slot * 16);
+        char piece[SPU_PRINTF_S_BUFCAP];
+
+        if (conv == 's') {
+            uint32_t s_addr = 0;
+            if (sys_spu_thread_read_ls_word(thread_id, slot_addr, &s_addr) != 0) {
+                snprintf(piece, sizeof(piece), "(spu-ls-read-fail)");
+            } else if (s_addr == 0) {
+                snprintf(piece, sizeof(piece), spec, "(null)");
+            } else {
+                char sbuf[SPU_PRINTF_S_BUFCAP];
+                read_spu_ls_string(thread_id, s_addr, sbuf, sizeof(sbuf));
+                snprintf(piece, sizeof(piece), spec, sbuf);
+            }
+        } else if (conv == 'c') {
+            uint32_t v = 0;
+            sys_spu_thread_read_ls_word(thread_id, slot_addr, &v);
+            snprintf(piece, sizeof(piece), spec, (int)(v & 0xff));
+        } else if (conv == 'p') {
+            uint32_t v = 0;
+            sys_spu_thread_read_ls_word(thread_id, slot_addr, &v);
+            /* Print SPU pointers as 8-hex-digits with a 0x prefix so
+             * the output is unambiguous; ignore caller's spec width
+             * for %p (snprintf("%p", ptr) is implementation-defined
+             * and not portable to a 32-bit SPU pointer anyway). */
+            snprintf(piece, sizeof(piece), "0x%08x", (unsigned)v);
+        } else if (is_double) {
+            uint64_t v64 = 0;
+            sys_spu_thread_read_ls_dword(thread_id, slot_addr, &v64);
+            double d;
+            memcpy(&d, &v64, sizeof(d));
+            snprintf(piece, sizeof(piece), spec, d);
+        } else if (is_ll) {
+            uint64_t v64 = 0;
+            sys_spu_thread_read_ls_dword(thread_id, slot_addr, &v64);
+            if (conv == 'd' || conv == 'i') {
+                snprintf(piece, sizeof(piece), spec, (long long)v64);
+            } else {
+                snprintf(piece, sizeof(piece), spec, (unsigned long long)v64);
+            }
+        } else {
+            uint32_t v = 0;
+            sys_spu_thread_read_ls_word(thread_id, slot_addr, &v);
+            if (conv == 'd' || conv == 'i') {
+                snprintf(piece, sizeof(piece), spec, (int)v);
+            } else {
+                snprintf(piece, sizeof(piece), spec, (unsigned)v);
+            }
+        }
+        piece[sizeof(piece) - 1] = '\0';
+        append(out_buf, SPU_PRINTF_OUT_BUFCAP, &out_len, piece);
+        slot++;
+    }
+
+    return (int)out_len;
+}
+
 /* ---- server thread ----------------------------------------------- *
  *
  * Loops forever receiving events from s_event_queue.  When an SPU
  * printf event arrives, sys_event_t.data_1 is the originating SPU
  * thread id and data_3 is the LS address of the saved-args block.
- * spu_thread_printf reads the format string + args from SPU LS and
- * delegates to vprintf-equivalent.  A non-zero return must be
- * mailbox'd back to the SPU so its `_spu_call_event_va_arg` can
- * unblock; PSL1GHT's helper does that for us via sysSpuThreadWriteMb.
+ * Path A hands the LS address to libc.sprx; Path B walks the args
+ * here.  A non-zero return must be mailbox'd back to the SPU so its
+ * `_spu_call_event_va_arg` can unblock — sysSpuThreadWriteMb does
+ * that.
  *
  * The terminate signal arrives as event.source ==
  * SPU_PRINTF_TERMINATE_TAG, sent by spu_printf_finalize via
@@ -180,35 +399,18 @@ static void spu_printf_server_entry(void *arg)
         s32 sret = spu_thread_printf(thread_id, arg_addr);
         rc = sysSpuThreadWriteMb(thread_id, (u32)sret);
 #else
-        /* Path B — RPCS3 workaround.
+        /* Path B — RPCS3 workaround with full format-string parsing.
          * The arg block at SPU LS offset arg_addr was laid down by
          * _spu_call_event_va_arg — first 4 bytes hold the LS address
-         * of the format string.  Read the fmt-ptr via sys_spu_thread_read_ls
-         * (kernel syscall 182, RPCS3 *does* implement this), then walk
-         * the LS byte-by-byte until null and fputs as-is.
-         *
-         * Caveat: this minimal implementation prints the format STRING
-         * verbatim — it doesn't parse %X conversion specs or pull
-         * va_args from the saved register block.  Adequate for
-         * log-style messages without conversions; richer printf would
-         * need the full format-walk + per-spec LS read of subsequent
-         * args (and would essentially re-implement what Path A's
-         * SPRX helper already does on real HW). */
-        uint32_t fmt_addr = 0;
-        if (sys_spu_thread_read_ls_word(thread_id, arg_addr, &fmt_addr) == 0
-            && fmt_addr != 0) {
-            char buf[256];
-            unsigned i = 0;
-            for (; i < sizeof(buf) - 1; i++) {
-                uint8_t b = 0;
-                if (sys_spu_thread_read_ls_byte(thread_id, fmt_addr + i, &b) != 0
-                    || b == 0) {
-                    break;
-                }
-                buf[i] = (char)b;
-            }
-            buf[i] = '\0';
-            fputs(buf, stdout);
+         * of the format string, and each subsequent 16-byte slot holds
+         * one vararg in its preferred-slot position.  `format_spu_printf`
+         * walks the format string, pulls each spec's value out of LS
+         * via syscall 182, and snprintfs into out_buf.  One fputs at
+         * the end so concurrent server threads can't interleave. */
+        char out_buf[SPU_PRINTF_OUT_BUFCAP];
+        int n = format_spu_printf(thread_id, arg_addr, out_buf);
+        if (n > 0) {
+            fputs(out_buf, stdout);
         }
         rc = sysSpuThreadWriteMb(thread_id, 0);
 #endif
@@ -240,8 +442,12 @@ int spu_printf_initialize(int priority, void *unused)
         return rc;
     }
 
+    /* 16 KB stack: format_spu_printf keeps ~2 KB of buffers live
+     * (out_buf + fmt + piece + sbuf), plus PPC64 ELFv1 linkage frames
+     * and the sys_event_t struct.  4 KB (the old value) overflowed
+     * and the handler crashed on the first event with fmt specifiers. */
     rc = sysThreadCreate(&s_handler_thread, spu_printf_server_entry, NULL,
-                         priority, 4096, THREAD_JOINABLE,
+                         priority, 16 * 1024, THREAD_JOINABLE,
                          "spu_printf_handler");
     if (rc) {
         sysEventQueueDestroy(s_event_queue, 0);
