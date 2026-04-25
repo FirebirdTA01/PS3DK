@@ -4,26 +4,32 @@
  *
  *   ch28 (SPU_WrOutMbox)      - syscall arg 1 (here: sys_event_flag_t ef)
  *   ch29 (SPU_RdInMbox)       - syscall return slot
- *   ch30 (SPU_WrOutIntrMbox)  - magic-tagged syscall id; writing this
- *                                wakes the kernel.  High half 0x8001
- *                                marks "lv2 syscall"; low half holds
- *                                the opcode.  An additional 0x80000000
- *                                bit on top of the bitn arg requests
- *                                the BLOCKING flavour (waits for a
- *                                free FIFO slot if the receiver is
- *                                full); without it the IMPATIENT path
- *                                runs which can drop and return EBUSY.
+ *   ch30 (SPU_WrOutIntrMbox)  - tagged opcode; writing this wakes the
+ *                                kernel to service the syscall
  *
- * sys_event_flag_set_bit waits for ch29 to drain (rchcnt $ch29 != 0)
- * before issuing the syscall, so it'll spin against EBUSY internally
- * and only return CELL_OK or a parameter-validation error.
+ * For sys_event_flag_set_bit the protocol is:
+ *
+ *   $5 = 0x80010002          ("EBUSY-ish" return code on early-out paths)
+ *   bitn must be in 0..63 or we early-return $5
+ *   if there is already a pending value queued in $ch29 we early-return $5
+ *   otherwise:
+ *     wrch $ch28, ef
+ *     wrch $ch30, bitn | 0x80000000   (set the BLOCKING flag)
+ *     rdch $5, $ch29                  (kernel writes result here)
+ *     return $5
+ *
+ * Note: the reference shape branches to the early-return path (which
+ * just sets $3 = $5 and returns) from BOTH "pending in queue" and
+ * "after-rdch" paths.  The first uses $5 = 0x80010002, the second
+ * uses $5 = whatever the kernel wrote.  Same exit code in both cases.
  */
 	.text
 
 /* int sys_event_flag_set_bit(sys_event_flag_t ef, uint8_t bitn)
- *   r3 = ef (sys_event_flag_t)
+ *   r3 = ef
  *   r4 = bitn
- * Returns CELL_OK in r3 on success, parameter error otherwise. */
+ * Returns CELL_OK in r3 on success, error code on early-out / kernel
+ * rejection. */
 	.globl	sys_event_flag_set_bit
 	.type	sys_event_flag_set_bit, @function
 	.align	3
@@ -31,25 +37,28 @@ sys_event_flag_set_bit:
 	clgtbi	$6, $4, 63           /* bit > 63 ? */
 	ilhu	$5, 0x8001
 	xsbh	$2, $6
-	ori	$5, $5, 2            /* $5 = 0x80010002 = SYS_EVENT_FLAG_SET_BIT */
-	brhz	$2, 1f               /* fall through to spinning loop if valid */
-	ori	$3, $5, 0            /* invalid: return the syscall id-marker as error */
-	nop	$127
+	ori	$5, $5, 2            /* $5 = 0x80010002 (early-exit return code) */
+	brhz	$2, .Lefsb_loop      /* valid bit: enter the syscall body */
+.Lefsb_ret:
+	ori	$3, $5, 0            /* $3 = $5; return */
+	nop	$0
 	bi	$0
-1:	ori	$6, $3, 0            /* save ef in $6 */
-	rchcnt	$7, $ch29            /* result-mailbox depth */
-	andi	$3, $4, 0xff
-	hbrr	2f, 1b
+.Lefsb_loop:
+	ori	$6, $3, 0            /* save ef in $6 */
+	rchcnt	$7, $ch29            /* depth of result mailbox */
+	andi	$3, $4, 0xff         /* bitn (low byte) */
+	hbrr	.Lefsb_post, .Lefsb_ret  /* hint: post-syscall branch goes to ret */
 	ilhu	$8, 0x8001
-	ilhu	$4, 0x8000           /* BLOCKING request bit */
-	ori	$5, $8, 10
+	ilhu	$4, 0x8000           /* BLOCKING flag */
+	ori	$5, $8, 10           /* unused-but-matches-reference scratch */
 	lnop
 	or	$3, $3, $4           /* arg = bitn | 0x80000000 */
-	brnz	$7, 1b               /* drain pending result first */
-	wrch	$ch28, $6
-	wrch	$ch30, $3            /* fire syscall */
-2:	rdch	$5, $ch29            /* read result */
-	br	1b                   /* loop on EBUSY */
+	brnz	$7, .Lefsb_ret       /* result already pending: bail with $5 */
+	wrch	$ch28, $6            /* arg1: ef */
+	wrch	$ch30, $3            /* arg2: bitn|BLOCKING; this fires the syscall */
+.Lefsb_post:
+	rdch	$5, $ch29            /* result -> $5 */
+	br	.Lefsb_ret           /* return $5 */
 	.size	sys_event_flag_set_bit, . - sys_event_flag_set_bit
 
 
@@ -64,17 +73,17 @@ sys_event_flag_set_bit:
 sys_event_flag_set_bit_impatient:
 	clgtbi	$7, $4, 63           /* bit > 63 ? */
 	hbr	1f, $0
-	ilhu	$2, 0xc000
+	ilhu	$2, 0xc000           /* IMPATIENT marker */
 	andi	$4, $4, 0xff
 	ilhu	$6, 0x8001
 	xsbh	$5, $7
-	or	$4, $4, $2           /* arg = bitn | 0xc0000000 (impatient marker) */
-	shlqbyi	$2, $3, 0
-	ori	$6, $6, 2            /* syscall id 0x80010002 */
-	brhnz	$5, 2f               /* invalid bit: skip syscall */
-	il	$6, 0                /* preset CELL_OK return */
-	wrch	$ch28, $2
-	wrch	$ch30, $4            /* fire syscall, no result wait */
+	or	$4, $4, $2           /* arg = bitn | 0xc0000000 */
+	shlqbyi	$2, $3, 0            /* $2 = ef */
+	ori	$6, $6, 2            /* $6 = 0x80010002 (return code on invalid) */
+	brhnz	$5, 2f               /* invalid: skip syscall, return $6 */
+	il	$6, 0                /* CELL_OK */
+	wrch	$ch28, $2            /* arg1: ef */
+	wrch	$ch30, $4            /* arg2: bitn|IMPATIENT */
 2:	ori	$3, $6, 0
 1:	bi	$0
 	.size	sys_event_flag_set_bit_impatient, . - sys_event_flag_set_bit_impatient
