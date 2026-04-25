@@ -15,14 +15,14 @@ RSX Cg compiler, etc.  The long-term shape is:
 - **Our own runtime + libraries** carry the bulk of the SDK surface,
   written against the reference cell-SDK ABI where that matters for
   binary / SPRX compatibility.
-- **PSL1GHT stays a first-class, permanently-supported front-end.** A
+- **PSL1GHT stays a permanently-supported front-end.** A
   source-compat shim keeps PSL1GHT-targeted homebrew building
   unchanged even as the runtime underneath it is replaced.  Existing
   homebrew codebases do not have to migrate; new code can pick either
   the PSL1GHT-style or the cell-SDK-style surface and both land on the
   same runtime.
 
-Nothing about PSL1GHT is getting deprecated — it stays a supported
+Nothing about PSL1GHT API is getting deprecated — it stays a supported
 input forever.  What's changing is how much of the runtime behind it
 is ours.
 
@@ -47,9 +47,9 @@ is ours.
 ### Upgrade roadmap
 
 We intend to track upstream GCC over time for **both** PPU and SPU —
-the current version pins are a starting point, not a ceiling.  Each
-upgrade is gated on the PPU patch set rebasing cleanly and the SPE
-backend coming along for the ride, but both are active goals.
+the current version pins are a starting point.  Each upgrade is gated 
+on the PPU patch set rebasing cleanly and the SPE backend coming 
+along for the ride, but both are active goals.
 
 - **PPU: GCC 13 → 14 → current stable.** Routine patch-set rebase
   work across GCC 13's middle-end-to-backend interface shifts and GCC
@@ -98,14 +98,13 @@ Active development; toolchain and core SDK are usable end-to-end.
   ships and is the default for new PPU samples; PSL1GHT's runtime stays
   available as a fallback.  Compact `.opd` (8-byte descriptors) is end-
   to-end runnable in RPCS3 with full `printf` output.
-- **Samples:** 34 samples build green and a representative subset
+- **Samples:** 34 samples build successfully and a representative subset
   (cellGcm rendering, cellAudio playback, cellPad input, Spurs taskset
   + SPU task, lv2 event-flag with PPU↔SPU sync, sysutil callbacks,
   msgdialog, savedata, gamedata, screenshot, l10n, jpg/png decode,
   cellGcmDbgFont) runs end-to-end in RPCS3.
-- **rsx-cg-compiler:** 46/46 test shaders byte-identical to the
-  reference Cg compiler at `--O2 --fastmath`.  Open work: loops +
-  multi-instruction if/else diamonds.  See "Optional: rsx-cg-compiler"
+- **rsx-cg-compiler:** 57/57 test shaders byte-identical to the
+  reference Cg compiler at `--O2 --fastmath`. See "Optional: rsx-cg-compiler"
   below for what's covered.
 
 For the up-to-date API coverage matrix, regenerate
@@ -273,9 +272,7 @@ The SDK ships a single version string sourced from the most recent
 `vMAJOR.MINOR.PATCH` git tag.  See `docs/VERSIONING.md` for the cut-a-release
 workflow and `CHANGELOG.md` for the release-by-release history.  Tagged
 releases are published on the GitHub Releases page; pre-release tarballs of
-the source tree and the Rust tools are attached automatically by CI.  Binary
-toolchain-prefix tarballs (the contents of `$PS3DEV`) land once the Phase 5
-Canadian-cross to Windows is in place.
+the source tree and the Rust tools are attached automatically by CI.
 
 ## License
 
