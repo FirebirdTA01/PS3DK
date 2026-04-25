@@ -155,6 +155,7 @@ jobs:
           install: >-
             base-devel
             git
+            zip
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
@@ -240,7 +241,7 @@ jobs:
           cp CHANGELOG.md "$stage/" || true
           # Use zip (canonical Windows distribution format) rather than
           # tar.xz — Windows users can double-click it.
-          /mingw64/bin/zip -r -9 "${stage}.zip" "$stage"
+          zip -r -9 "${stage}.zip" "$stage"
           sha256sum "${stage}.zip" > "${stage}.zip.sha256"
           ls -l "${stage}".*
 
