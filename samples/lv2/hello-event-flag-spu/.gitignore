@@ -1,0 +1,8 @@
+build/
+data/
+spu/build/
+spu/spu_ef.elf
+*.elf
+*.self
+*.fake.self
+*.map
