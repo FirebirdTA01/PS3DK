@@ -3,6 +3,7 @@
 #include "ir.h"
 #include "ast.h"
 #include "semantic.h"
+#include <cstdint>
 #include <unordered_map>
 #include <stack>
 
