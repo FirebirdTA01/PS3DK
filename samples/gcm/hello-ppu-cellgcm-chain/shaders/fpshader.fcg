@@ -1,0 +1,31 @@
+// hello-ppu-cellgcm-chain — fragment program.
+//
+// Validates rsx-cg-compiler's FP arithmetic-chain emit: vcol + a + b + c
+// with three runtime-patched uniforms.  Cannot be folded since the
+// uniforms are dynamic, so sce-cgc emits the full 4-instruction chain
+// shape:
+//
+//   MOVH H0.xyzw, f[COL0]                      # preload varying as fp16
+//   ADDR R0.xyzw, H0.xyzw, c[a]<inline>        # link 0
+//   ADDR R0.xyzw, R0.xyzw, c[b]<inline>        # link 1
+//   ADDR R0.xyzw [END], R0.xyzw, c[c]<inline>  # link 2 (last carries END)
+//
+// Note the canonical operand order flips vs the lone-add `vcol + tint`
+// case: chain ADDR has SRC0=TEMP, SRC1=CONST (instead of CONST, INPUT)
+// — once the running accumulator lives in R0 there is no varying SRC
+// slot to fill on link >= 1.  R0 is intentionally reused as both dst
+// and src of every link to avoid extra temp allocation.
+//
+// Visual: each uniform contributes a small bias to the per-vertex RGB
+// gradient.  source/main.c sets a/b/c so the triangle is visibly
+// brighter (roughly +0.1 to each channel) compared to the canonical
+// triangle sample.
+void main(
+    float4 vcol      : COLOR,
+    uniform float4 a,
+    uniform float4 b,
+    uniform float4 c,
+    out float4 color : COLOR)
+{
+    color = vcol + a + b + c;
+}
