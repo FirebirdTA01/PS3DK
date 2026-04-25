@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  version-pipeline:
+    name: Version pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: scripts/version.sh — all formats
+        run: |
+          ./scripts/version.sh --format=plain
+          ./scripts/version.sh --format=bare
+          ./scripts/version.sh --format=cmake
+          ./scripts/version.sh --format=header
+          ./scripts/version.sh --format=json
+
+      - name: scripts/sync-versions.sh --dry-run
+        run: ./scripts/sync-versions.sh --dry-run
+
+  rust-tools:
+    name: Rust tools build + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/target
+          key: cargo-ci-${{ runner.os }}-${{ hashFiles('tools/Cargo.lock') }}
+
+      - name: cargo build
+        working-directory: tools
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test
+        working-directory: tools
+        run: cargo test --workspace
+
+  host-tools-cxx:
+    name: C/C++ host tools build (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libelf-dev cmake ninja-build python3
+
+      - name: Build sprx-linker
+        run: make -C tools/sprx-linker
+
+      - name: Build rsx-cg-compiler
+        run: |
+          cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
+              -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
+
+      - name: Smoke-test rsx-cg-compiler --version
+        run: tools/rsx-cg-compiler/build/rsx-cg-compiler --version
+
+  host-tools-windows:
+    name: Host tools build (windows mingw64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: 'msys2 {0}'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2 / mingw64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            base-devel
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-libelf
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-rust
+
+      - name: cargo build (windows)
+        working-directory: tools
+        run: cargo build --workspace --all-targets
+
+      - name: Build sprx-linker (static)
+        run: |
+          set -e
+          cd tools/sprx-linker
+          gcc -O2 -Wall -std=gnu99 -static -o sprxlinker.exe sprx-linker.c \
+              -lelf -lz -lzstd
+
+      - name: Build rsx-cg-compiler (static)
+        run: |
+          set -e
+          cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
+
+      - name: Smoke --version
+        run: |
+          set -e
+          tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
+          file tools/sprx-linker/sprxlinker.exe

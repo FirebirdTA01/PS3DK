@@ -263,7 +263,19 @@ cmake --build tools/rsx-cg-compiler/build
 - `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, psl1ght, ps3dk, portlibs)
 - `samples/` — minimal C++17 demos for validation
 - `ci/` — Docker images and GitHub Actions
-- `docs/` — quickstart, migration guide, ABI reference
+- `.github/workflows/` — CI (`ci.yml`) + tag-driven release (`release.yml`)
+- `docs/` — quickstart, migration guide, ABI reference, `VERSIONING.md`
+- `CHANGELOG.md` — release-by-release history (Keep a Changelog format)
+
+## Versioning and releases
+
+The SDK ships a single version string sourced from the most recent
+`vMAJOR.MINOR.PATCH` git tag.  See `docs/VERSIONING.md` for the cut-a-release
+workflow and `CHANGELOG.md` for the release-by-release history.  Tagged
+releases are published on the GitHub Releases page; pre-release tarballs of
+the source tree and the Rust tools are attached automatically by CI.  Binary
+toolchain-prefix tarballs (the contents of `$PS3DEV`) land once the Phase 5
+Canadian-cross to Windows is in place.
 
 ## License
 
