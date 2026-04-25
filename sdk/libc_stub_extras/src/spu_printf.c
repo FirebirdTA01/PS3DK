@@ -1,12 +1,15 @@
 /* libc_stub_extras: spu_printf_* — working PPU-side replacement for the
  * libc.sprx wrappers that ship in the same library.
  *
- * Why this file exists.  SPU code emits its printfs through
- * `_spu_call_event_va_arg(EVENT_PRINTF_PORT << EVENT_PORT_SHIFT, fmt, ...)`,
- * which under the hood does `sys_spu_thread_send_event(spup=1, ...)`.
- * For that send to deliver, port 1 of every thread in the group must
- * be connected to a PPU-side event queue via
- * `sys_spu_thread_group_connect_event_all_threads(group, queue, mask, &spup)`.
+ * Why this file exists (part 1: connect-event).  SPU code emits its
+ * printfs through `_spu_call_event_va_arg(EVENT_PRINTF_PORT <<
+ * EVENT_PORT_SHIFT, fmt, ...)`, which under the hood does
+ * `sys_spu_thread_send_event(spup=1, ...)`.  For that send to deliver,
+ * port 1 of every thread in the group must be connected to a PPU-side
+ * event queue via `sys_spu_thread_group_connect_event_all_threads(group,
+ * queue, mask, &spup)` with `mask = (1ULL << 1)` for port 1
+ * specifically (the kernel iterates ports 0..63 in ascending order
+ * and connects the first port whose bit is set in `mask`; LSB-aligned).
  *
  * Both PSL1GHT's wrappers and (as observed in RPCS3 traces) the
  * libc.sprx HLE attempt the connection through the wrong syscall —
@@ -15,14 +18,49 @@
  * SPU's send_event then fails with CELL_ENOTCONN and the printf is
  * silently dropped.
  *
+ * Why this file exists (part 2: format-string read).  Once the event
+ * is delivered to our queue, we still have to walk the SPU thread's
+ * Local Storage at the address the event carried to extract the
+ * format string + args.  The reference SDK ships a helper for this:
+ * `spu_thread_printf(thread_id, arg_addr)` (in libc.sprx, NID
+ * 0xb1f4779d).  RPCS3's HLE for that NID is **unimplemented at the
+ * time of writing** — calling it logs `PPU: Unregistered function
+ * called` and returns nothing useful.  On real PS3 hardware (and any
+ * future RPCS3 build that implements the NID) it formats the message
+ * correctly with full %d/%s/%lld variadic support.
+ *
+ * The `SPU_PRINTF_USE_SPRX_FORMATTER` build-time switch picks between
+ * the two paths:
+ *
+ *   0 (default, RPCS3-friendly): call sys_spu_thread_read_ls (kernel
+ *     syscall 182, RPCS3 *does* implement this) directly to read the
+ *     fmt-string pointer + bytes from SPU LS, then fputs to PPU
+ *     stdout.  Limitation: prints the format string verbatim — no
+ *     %d / %s / %lld conversion.  Adequate for log-style strings
+ *     without specifiers.
+ *
+ *   1 (real-hardware-canonical): call `spu_thread_printf` directly.
+ *     Works on real HW and any RPCS3 with HLE for NID 0xb1f4779d;
+ *     produces nothing on current RPCS3.  Drop-in if/when that HLE
+ *     gap closes.
+ *
  * This translation unit defines the user-facing
  * spu_printf_{initialize,finalize,attach_group,attach_thread,
  * detach_group,detach_thread} as real PPU functions doing the right
  * thing, and gets ar-appended to libc_stub.a after the FNID stub
  * generation step (see scripts/build-cell-stub-archives.sh).  The
- * yaml entries for these six exports have been elided so there is
- * no competing FNID stub to collide with.
+ * yaml entries for those six exports have been elided so there is
+ * no competing FNID stub to collide with.  The seventh entry
+ * (spu_thread_printf, NID 0xb1f4779d) is left in the FNID stub set
+ * so users who want the SPRX path on real HW can call it directly.
  */
+
+/* Default: use the RPCS3-friendly direct-LS-read path.  Set to 1 in
+ * a downstream Makefile or `-DSPU_PRINTF_USE_SPRX_FORMATTER=1` to
+ * route through libc.sprx's spu_thread_printf instead. */
+#ifndef SPU_PRINTF_USE_SPRX_FORMATTER
+#define SPU_PRINTF_USE_SPRX_FORMATTER 0
+#endif
 
 #include <stdio.h>
 #include <stddef.h>
@@ -35,6 +73,10 @@
 #include <sys/event_queue.h>          /* sys_event_queue_attr_t etc. */
 #include <sys/thread.h>               /* sysThreadCreate / Join / Exit */
 #include <sys/lv2_syscall.h>          /* lv2syscall4 for SYS_SPU_THREAD_READ_LS */
+
+#if SPU_PRINTF_USE_SPRX_FORMATTER
+#include <sys/spu_thread_printf.h>    /* spu_thread_printf — libc.sprx helper */
+#endif
 
 /* sys_spu_thread_read_ls - kernel syscall 182.  Reads `type`-byte
  * value from SPU LS at `lsa` of the given thread.  Type=4 means
@@ -124,17 +166,34 @@ static void spu_printf_server_entry(void *arg)
         sys_spu_thread_t thread_id = (sys_spu_thread_t)event.data_1;
         u32              arg_addr  = (u32)event.data_3;
 
-        /* The arg block at SPU LS offset arg_addr was laid down by
-         * _spu_call_event_va_arg — first 4 bytes hold the LS address
-         * of the format string.  Read the fmt-ptr, then walk the LS
-         * byte-by-byte until null and print as-is.
+#if SPU_PRINTF_USE_SPRX_FORMATTER
+        /* Path A — real-hardware-canonical.
+         * Hand off to libc.sprx's spu_thread_printf which reads the
+         * format string + args from SPU LS and produces the formatted
+         * line on PPU stdio with full %d / %s / %lld support.
          *
-         * Caveat: this minimal implementation prints the format
-         * STRING verbatim — it doesn't parse %X conversion specs
-         * or pull va_args from the saved register block.  Adequate
-         * for log-style messages without conversions; richer printf
-         * support would need the full format-walk + per-spec LS
-         * read of subsequent args. */
+         * NOTE: At the time of writing, RPCS3's HLE for this NID
+         * (0xb1f4779d, sys_libc.spu_thread_printf) is unimplemented;
+         * calling it logs `PPU: Unregistered function called` and
+         * returns garbage / 0 with no output.  Pick the other branch
+         * (default) when targeting RPCS3. */
+        s32 sret = spu_thread_printf(thread_id, arg_addr);
+        rc = sysSpuThreadWriteMb(thread_id, (u32)sret);
+#else
+        /* Path B — RPCS3 workaround.
+         * The arg block at SPU LS offset arg_addr was laid down by
+         * _spu_call_event_va_arg — first 4 bytes hold the LS address
+         * of the format string.  Read the fmt-ptr via sys_spu_thread_read_ls
+         * (kernel syscall 182, RPCS3 *does* implement this), then walk
+         * the LS byte-by-byte until null and fputs as-is.
+         *
+         * Caveat: this minimal implementation prints the format STRING
+         * verbatim — it doesn't parse %X conversion specs or pull
+         * va_args from the saved register block.  Adequate for
+         * log-style messages without conversions; richer printf would
+         * need the full format-walk + per-spec LS read of subsequent
+         * args (and would essentially re-implement what Path A's
+         * SPRX helper already does on real HW). */
         uint32_t fmt_addr = 0;
         if (sys_spu_thread_read_ls_word(thread_id, arg_addr, &fmt_addr) == 0
             && fmt_addr != 0) {
@@ -151,8 +210,8 @@ static void spu_printf_server_entry(void *arg)
             buf[i] = '\0';
             fputs(buf, stdout);
         }
-
         rc = sysSpuThreadWriteMb(thread_id, 0);
+#endif
         if (rc) {
             sysThreadExit(rc);
         }
