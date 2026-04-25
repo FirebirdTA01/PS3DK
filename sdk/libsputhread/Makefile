@@ -29,9 +29,25 @@ LIB     := $(BUILD)/libsputhread.a
 
 all: $(LIB)
 
-$(LIB): $(OBJS)
+$(LIB): $(OBJS) | $(BUILD)
 	@echo "  AR    $(notdir $@)"
 	@$(AR) rcs $@ $(OBJS)
+	@# Bundle in PSL1GHT's _spu_call_event_va_arg.o (used by spu_printf
+	@# macro expansion).  Lets samples that call spu_printf() link
+	@# against -lsputhread alone without needing PSL1GHT's full
+	@# libsputhread.a on the link line - our archive becomes the
+	@# canonical SPU lv2-syscall lib in the install tree.
+	@if [ -f "$(PSL1GHT_LIBSPUTHREAD)" ]; then \
+	    tmp_dir="$(BUILD)/_psl1ght_extract"; \
+	    mkdir -p "$$tmp_dir"; \
+	    (cd "$$tmp_dir" && $(AR) x "$(PSL1GHT_LIBSPUTHREAD)" spu_call_event_va_arg.o 2>/dev/null) || true; \
+	    if [ -f "$$tmp_dir/spu_call_event_va_arg.o" ]; then \
+	        $(AR) r $@ "$$tmp_dir/spu_call_event_va_arg.o" 2>/dev/null; \
+	        echo "  AR    + spu_call_event_va_arg.o (from PSL1GHT)"; \
+	    fi; \
+	fi
+
+PSL1GHT_LIBSPUTHREAD := $(PS3DEV)/psl1ght/spu/lib/libsputhread.a
 
 $(BUILD)/%.o: src/%.S | $(BUILD)
 	@echo "  AS    $(notdir $<)"
