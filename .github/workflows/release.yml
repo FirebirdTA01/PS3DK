@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       bare:    ${{ steps.v.outputs.bare }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0   # version.sh needs full tag history
 
@@ -51,7 +51,7 @@ jobs:
     needs: verify-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -64,7 +64,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -127,7 +127,7 @@ jobs:
           sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
           ls -l "${stage}".*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: host-tools-linux-x86_64
           path: ps3-sdk-tools-*-linux-x86_64.tar.*
@@ -143,7 +143,7 @@ jobs:
         # and access to mingw-w64's libelf, which sprx-linker needs.
         shell: 'msys2 {0}'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -244,7 +244,7 @@ jobs:
           sha256sum "${stage}.zip" > "${stage}.zip.sha256"
           ls -l "${stage}".*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: host-tools-windows-x86_64
           path: |
@@ -256,7 +256,7 @@ jobs:
     needs: verify-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -272,7 +272,7 @@ jobs:
           sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
           ls -l "${stage}".*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: source-bundle
           path: ps3-sdk-src-*.tar.*
@@ -286,11 +286,11 @@ jobs:
       - build-source-bundle
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
 
