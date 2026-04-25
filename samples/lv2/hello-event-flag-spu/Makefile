@@ -37,7 +37,7 @@ CFLAGS   = -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 LDFLAGS  = $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-LIBS    := -lrt -llv2 -lm
+LIBS    := -lc_stub -lrt -llv2 -lm
 LIBDIRS :=
 
 # SPU side: standard spu-elf-gcc build using PSL1GHT's spu_rules,

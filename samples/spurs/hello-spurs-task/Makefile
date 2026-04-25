@@ -29,7 +29,7 @@ CFLAGS   = -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 LDFLAGS  = $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-LIBS    := -lspurs_stub -lspu_printf_stub -lsysmodule_stub -lsysutil -lrt -llv2 -lm
+LIBS    := -lspurs_stub -lc_stub -lsysmodule_stub -lsysutil -lrt -llv2 -lm
 LIBDIRS :=
 
 # SPU-side build: produce spu_task.elf then stage to data/spu_task.bin
