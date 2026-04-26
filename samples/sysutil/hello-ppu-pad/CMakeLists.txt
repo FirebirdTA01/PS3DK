@@ -1,4 +1,4 @@
-# hello-ppu-pad — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-pad — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

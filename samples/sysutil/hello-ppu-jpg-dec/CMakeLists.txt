@@ -1,4 +1,4 @@
-# hello-ppu-jpg-dec — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-jpg-dec — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

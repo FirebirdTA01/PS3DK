@@ -1,4 +1,4 @@
-# hello-ppu-savedata — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-savedata — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

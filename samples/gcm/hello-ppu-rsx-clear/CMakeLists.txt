@@ -1,4 +1,4 @@
-# hello-ppu-rsx-clear — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-rsx-clear — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

@@ -1,4 +1,4 @@
-# hello-ppu-screenshot — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-screenshot — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

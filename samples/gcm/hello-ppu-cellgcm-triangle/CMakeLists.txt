@@ -1,4 +1,4 @@
-# hello-ppu-cellgcm-triangle — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-cellgcm-triangle — CMake build.
 #
 # Compiles vpshader.vcg / fpshader.fcg via cgcomp, embeds them via
 # bin2s, and links against the cellGcm forwarders + RSX runtime.

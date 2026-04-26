@@ -1,4 +1,4 @@
-# hello-ppu-cellgcm-cube — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-cellgcm-cube — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

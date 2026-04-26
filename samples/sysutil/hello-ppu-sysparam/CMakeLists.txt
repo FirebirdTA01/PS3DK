@@ -1,4 +1,4 @@
-# hello-ppu-sysparam — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-sysparam — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

@@ -1,4 +1,4 @@
-# hello-ppu-abi-check — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-abi-check — CMake build.
 #
 # Build:
 #   cmake -S . -B build \
