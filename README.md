@@ -113,9 +113,9 @@ For the up-to-date API coverage matrix, regenerate
 
 ## Build host
 
-**Native Linux** is the primary build host — any reasonably current distribution (`glibc` ≥ 2.31, GCC ≥ 11 on the host, Python 3, Rust 1.70+) works.  Linux gives the cleanest GCC cross-build experience and matches CI.
+**Native Linux** is the primary build host — any reasonably current distribution (`glibc` ≥ 2.31, GCC ≥ 11 on the host, Python 3, Rust 1.70+) works.  Linux gives the cleanest GCC cross-build experience and matches CI.  **Windows users should build inside WSL2** (Ubuntu 24.04 recommended; see [Windows (via WSL2)](#windows-via-wsl2) below); native MSYS2 is not a supported bootstrap path.  macOS is untested.
 
-The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by Canadian-cross builds — building on Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 cross-compiler.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
+The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by cross-building from Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 toolchain.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
 
 ## Getting started
 
@@ -126,24 +126,61 @@ Pick the command that matches your distribution.  Any recent version of the list
 Debian / Ubuntu (`apt`):
 ```bash
 sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build texinfo \
-    bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev python3 \
-    git wget rustc cargo patch
+    bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev zlib1g-dev \
+    libreadline-dev libncurses-dev libexpat1-dev python3 python3-dev git wget \
+    rustc cargo patch autoconf automake libtool zip unzip
 ```
 
 Fedora / RHEL / Rocky / Alma (`dnf`):
 ```bash
 sudo dnf install -y @development-tools gcc gcc-c++ gmp-devel mpfr-devel \
-    libmpc-devel isl-devel python3 rust cargo git wget bison flex \
-    texinfo cmake ninja-build patch
+    libmpc-devel isl-devel zlib-devel readline-devel ncurses-devel \
+    expat-devel python3 python3-devel rust cargo git wget bison flex \
+    texinfo cmake ninja-build patch zip unzip
 ```
 
 Arch / Manjaro / EndeavourOS (`pacman`):
 ```bash
-sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl python rust \
-    git wget bison flex texinfo cmake ninja patch
+sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl zlib readline \
+    ncurses expat python rust git wget bison flex texinfo cmake ninja patch \
+    zip unzip
 ```
 
-On any other distribution, install equivalents of: a C/C++ host toolchain, GMP / MPFR / MPC / ISL development headers, Python 3, Rust + Cargo, Git, Wget, Bison, Flex, Texinfo, CMake, Ninja, and Patch.
+On any other distribution, install equivalents of: a C/C++ host toolchain, GMP / MPFR / MPC / ISL / zlib / readline / ncurses / expat development headers, Python 3, Rust + Cargo, Git, Wget, Bison, Flex, Texinfo, CMake, Ninja, and Patch.
+
+### Windows (via WSL2)
+
+Native Windows builds aren't supported for the toolchain bootstrap — autotools and GCC's combined-tree build are reliable on Linux and brittle under MSYS2.  The recommended path for Windows users is **WSL2** with one of the supported Linux distributions.
+
+End users who just want to *use* a prebuilt toolchain on Windows do not need WSL — tagged releases will ship `ps3-sdk-vX.Y.Z-windows-x86_64.zip` with native `.exe` binaries (planned for v0.4.x; see [`docs/VERSIONING.md`](docs/VERSIONING.md)).  WSL2 is required only when *building from source*.
+
+1. **Install WSL2 and a distro** from an elevated PowerShell or `cmd`:
+   ```powershell
+   wsl --install -d Ubuntu-24.04
+   # other supported picks: archlinux, Debian, Fedora-43
+   ```
+   The first run prompts for a Linux username and password.
+
+2. **Open the WSL shell** (`wsl -d Ubuntu-24.04`) and install the distro's host dependencies using the matching command from [Host dependencies](#host-dependencies) above.  Everything from `bootstrap.sh` onward runs identically to a native Linux host.
+
+3. **Clone inside the WSL filesystem**, not on `/mnt/c/`.  GCC bootstrap performs millions of small-file operations and ext4 finishes in minutes where the 9P-bridged Windows volume can take hours:
+   ```bash
+   git clone https://github.com/FirebirdTA01/PS3_Custom_Toolchain.git ~/PS3_Custom_Toolchain
+   cd ~/PS3_Custom_Toolchain
+   ```
+   If you also keep the repo checked out on the Windows side for editing, add it as a remote so you can pull edits in without round-tripping through GitHub:
+   ```bash
+   git remote add windows /mnt/c/path/to/PS3_Custom_Toolchain
+   git fetch windows && git pull windows main   # after committing on the Windows side
+   ```
+
+4. **Continue with the normal build**: `source scripts/env.sh`, then `./scripts/bootstrap.sh`, then `./scripts/build-ppu-toolchain.sh` etc. as in [Building the toolchain + SDK](#building-the-toolchain--sdk).
+
+A few WSL2-specific notes:
+
+- The default `PS3_BUILD_ROOT` (`$HOME/ps3tc/build`) already lives in ext4 — no override needed.
+- If you want to use the Linux-hosted toolchain from Windows-native tools, copy or expose `stage/ps3dev/` back to the Windows side: `cp -r stage/ps3dev /mnt/c/ps3dev`, then set `PS3DEV=C:\ps3dev` in your Windows shell.
+- Cross-building the Windows toolchain release (the `.exe` binaries) requires the additional `mingw-w64 g++-mingw-w64-x86-64` packages on top of the standard Ubuntu install line (Debian/Fedora analogues exist).  This is documented separately under the v0.4.x build flow.
 
 ### Building the toolchain + SDK
 

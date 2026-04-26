@@ -69,7 +69,8 @@ MSYS2 MinGW64 install line:
 Ubuntu 22.04 install line:
   sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build \
     texinfo bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev \
-    python3 git wget rustc cargo
+    zlib1g-dev libreadline-dev libncurses-dev libexpat1-dev python3 \
+    python3-dev git wget rustc cargo patch autoconf automake libtool zip unzip
 
 EOF
     die "Install the missing dependencies above, then re-run bootstrap."

@@ -161,7 +161,7 @@ hosts:
 
 The host *tools* (rsx-cg-compiler, sprx-linker, the Rust binaries) are
 already shipping for Windows in v0.1.x.  What v0.4.x adds is the
-PPC/SPU **target compilers** themselves, which require a Canadian-cross
+PPC/SPU **target compilers** themselves, which require a cross-build
 from Linux to `x86_64-w64-mingw32`.  Cost: build infrastructure laid
 out in the plan; the cross requires building binutils/GCC/newlib twice
 (once Linux→PPC, once Linux→MinGW), but each only once per release.
