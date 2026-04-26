@@ -172,19 +172,28 @@ word at 0, which is the "no callback" value).
 
 ## Building
 
+Samples build with **CMake**.  Each sample is a standalone project:
+
 ```bash
-source ../../../scripts/env.sh     # exports PS3DEV, PSL1GHT
+source ../../../scripts/env.sh     # exports PS3DEV, PS3DK
 cd samples/toolchain/hello-ppu-c++17
-make
+cmake -S . -B cmake-build \
+      -DCMAKE_TOOLCHAIN_FILE=../../../cmake/ps3-ppu-toolchain.cmake \
+      -G Ninja
+cmake --build cmake-build
 ```
+
+Final artefacts land at the sample directory next to `CMakeLists.txt`;
+`cmake-build/` holds intermediates (the unstripped CMake target binary,
+object files, generated bin2s sources, compiled shaders, etc.).
 
 Each sample produces three artefacts:
 
 | Artefact | Target | How to launch |
 |---|---|---|
-| `<sample>.elf` | Raw PPU ELF | `ps3load` / GDB against RPCS3's gdbstub / `rpcs3 <sample>.elf` |
+| `<sample>.elf` | Stripped PPU ELF | `ps3load` / GDB against RPCS3's gdbstub / `rpcs3 <sample>.elf` |
 | `<sample>.self` | CEX-signed SELF | `rpcs3 --no-gui <sample>.self` |
-| `<sample>.fake.self` | Fake-signed SELF | `make run` (streams over LAN to `ps3load` on CFW hardware) |
+| `<sample>.fake.self` | Fake-signed SELF | `ps3load` over LAN / XMB install on CFW hardware |
 
 **RPCS3 (preferred for quick iteration):**
 ```bash
@@ -195,22 +204,16 @@ RPCS3 terminal window (and `~/.cache/rpcs3/TTY.log`).
 
 **Jailbroken hardware via `ps3load` (fastest turnaround on real HW):**
 ```bash
-export PS3LOADIP=<console IP>
-make run
+PS3LOADIP=<console IP> ps3load <sample>.fake.self
 ```
 
 **Jailbroken hardware via XMB Package Installer (persistent install):**
-```bash
-make <sample>.pkg    # produces <sample>.pkg + <sample>.gnpdrm.pkg
-```
-Copy the `.pkg` to a USB stick at `/PS3/GAME/`, boot the console, and
-install via *Game → Package Installer*.  The app shows up in XMB under
-the sample's `TITLE` (see the Makefile) and can be launched like a
-normal game.  Uninstall via *Game → Game → Delete*.
-
-`.pkg` isn't a default `make` target because the `.self` already covers
-both RPCS3 and dev-iteration flows; only build it when you want a
-persistent retail-style install.
+`.pkg` generation isn't yet wired into the CMake build; it's coming as
+a follow-on `ps3_add_pkg(<target>)` helper.  Until then, drive the
+`make_self_npdrm` + `sfo.py` + `pkg.py` + `package_finalize` chain by
+hand against the stripped `.elf` produced above (see the *Manual / direct
+toolchain invocation* section in the top-level `README.md` for the exact
+command sequence).
 
 ## Retest matrix after major rebuilds
 
@@ -227,10 +230,15 @@ A rebuild isn't "done" until all three still pass.
 ## Contributing a new sample
 
 1. Pick (or create) the right subsystem directory.
-2. Create `<subsystem>/<name>/` with `Makefile` and `source/main.c`
+2. Create `<subsystem>/<name>/` with `CMakeLists.txt` and `source/main.c`
    (or `.cpp`).
-3. Use `include $(PSL1GHT)/ppu_rules` for PPU-only; add a `spu/` subdir
-   with `include $(PSL1GHT)/spu_rules` for SPU code.
+3. The `CMakeLists.txt` boilerplate is short — `cmake_minimum_required`,
+   `project(<name> C [ASM])` (add `ASM` if `bin2s` / shader / SPU
+   embedding is involved), `include(ps3-self)`, `add_executable`,
+   `target_link_libraries`, then `ps3_add_self(<target>)`.  Copy from a
+   neighbouring sample with similar requirements.  For embedded SPU
+   code, call `ps3_add_spu_image(<target> NAME <name> SOURCES ...)`
+   instead of maintaining a `spu/` subdir.
 4. Add a row in the relevant table above with what it validates.
 5. Keep samples minimal — one concept per sample.  Big examples go
    elsewhere.

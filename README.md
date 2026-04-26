@@ -119,7 +119,7 @@ The toolchain itself is targeted at running on **both Linux and Windows** for en
 
 ## Using a prebuilt Windows release
 
-End users who don't need to build the toolchain from source can grab `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page (planned for v0.4.x — see [`docs/VERSIONING.md`](docs/VERSIONING.md)) instead.  The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the PSL1GHT-style Makefile rule fragments, portlibs, and the `samples/` source tree.
+End users who don't need to build the toolchain from source can grab `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page (planned for v0.3.0 — see [`docs/VERSIONING.md`](docs/VERSIONING.md)) instead.  The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the CMake toolchain files + helper modules under `cmake\`, portlibs, and the `samples/` source tree.
 
 ### Install
 
@@ -149,39 +149,36 @@ End users who don't need to build the toolchain from source can grab `ps3-sdk-vX
 
 The bundled `%PS3DK%\samples\` tree contains the same samples as `samples/` in this repo — `hello-ppu-c++17`, `hello-spu`, `hello-ppu-cellgcm-triangle`, the Spurs taskset demos, sysutil callbacks, savedata, etc.
 
-The samples ship with `make`-driven `Makefile`s that use bash patterns and `include $(PSL1GHT)/ppu_rules`.  To use those Makefiles, you need GNU `make` and `bash` available on `PATH`.  Any Windows POSIX environment works:
+Samples build with **CMake**.  You need `cmake` (3.20+) and a generator on `PATH` — Ninja is recommended, but Unix Makefiles or "MinGW Makefiles" also work.  None of these ship in the toolchain zip; install via `choco install cmake ninja`, the Visual Studio installer's optional CMake/Ninja components, or any equivalent.
 
-* **Git Bash** (already installed by Git for Windows).  Ships `bash` but not `make` — install GNU make separately (e.g. `choco install make`, or drop a `make.exe` build on `PATH`).
-* **MSYS2** (<https://www.msys2.org/>).  Full POSIX environment including `make` out of the box.
+Each sample is its own standalone CMake project — `cd` into a sample, point CMake at the PPU toolchain file, and build:
 
-Either way, the build invocation is the same:
-```bash
-# In Git Bash or MSYS2 — adjust PS3DK to wherever you extracted the zip
-export PS3DK="/c/path/to/extracted/PS3DK"
-export PSL1GHT="$PS3DK"   # back-compat alias for sample Makefiles
-export PATH="$PS3DK/bin:$PS3DK/ppu/bin:$PS3DK/spu/bin:$PATH"
-
-cd "$PS3DK/samples/toolchain/hello-ppu-c++17"
-make
+```cmd
+:: From a cmd shell after running %PS3DK%\setup.cmd
+cd "%PS3DK%\samples\toolchain\hello-ppu-c++17"
+cmake -S . -B cmake-build -DCMAKE_TOOLCHAIN_FILE="%PS3DK%\cmake\ps3-ppu-toolchain.cmake" -G Ninja
+cmake --build cmake-build
 ```
 
-Each sample produces three artefacts:
+The toolchain file (`cmake\ps3-ppu-toolchain.cmake` for PPU, `cmake\ps3-spu-toolchain.cmake` for standalone SPU work) reads `%PS3DK%` from the environment, sets the cross-compiler, and adds the SDK include / library search paths.  Each sample's `CMakeLists.txt` then `include(ps3-self)` to pull in the helper module that drives the strip → `sprxlinker` → `make_self` / `fself` post-build chain (and `bin2s` / SPU embedding / Cg shader compilation when needed).
+
+Final artefacts land at the sample directory next to `CMakeLists.txt`; `cmake-build/` holds intermediates only:
 
 | Artefact            | Target              | How to run                                     |
 |---|---|---|
-| `<name>.elf`        | raw PPU ELF         | `ps3load` or GDB against RPCS3's gdbstub       |
+| `<name>.elf`        | stripped PPU ELF    | `ps3load` or GDB against RPCS3's gdbstub       |
 | `<name>.self`       | CEX-signed SELF     | `rpcs3 --no-gui <name>.self` (RPCS3 / signed HW) |
 | `<name>.fake.self`  | fake-signed SELF    | `ps3load` / XMB install on CFW hardware        |
 
 `samples\README.md` has the full sample index plus per-sample notes on what each one validates.
 
-### Manual / direct toolchain invocation (no `make`)
+### Manual / direct toolchain invocation (no CMake)
 
-If you don't want to install `make` + `bash`, the toolchain can be driven directly from `cmd` or PowerShell.  This is also the right path for IDE integration, custom build systems, or one-off compiles outside the Makefile-driven sample tree.
+If you don't want to use CMake, the toolchain can be driven directly from `cmd` or PowerShell.  This is also the right path for IDE integration, custom build systems, or one-off compiles outside the CMake-driven sample tree.
 
-The end-to-end pipeline for a typical PS3 homebrew app is **compile → link → strip → sprxlinker → sign**.  Below shows the command sequence for a PPU C/C++ sample; replace `powerpc64-ps3-elf-` with `spu-elf-` for SPU code.  Variable names match the PSL1GHT-style Makefile rules so the docs translate one-to-one.
+The end-to-end pipeline for a typical PS3 homebrew app is **compile → link → strip → sprxlinker → sign**.  Below shows the command sequence for a PPU C/C++ sample; replace `powerpc64-ps3-elf-` with `spu-elf-` for SPU code.  Flag set matches what `cmake/ps3-ppu-toolchain.cmake` exports via `CMAKE_C_FLAGS_INIT` so the docs translate one-to-one.
 
-**1. Compile each source file** (loop over .c / .cpp).  These are the same flags `ppu_rules` would emit:
+**1. Compile each source file** (loop over .c / .cpp).  These are the same flags the PPU toolchain file emits:
 
 ```cmd
 powerpc64-ps3-elf-gcc.exe ^
@@ -201,14 +198,14 @@ rsx-cg-compiler.exe -p sce_vp_rsx --emit-container build\vpshader.vpo shaders\vp
 rsx-cg-compiler.exe -p sce_fp_rsx --emit-container build\fpshader.fpo shaders\fpshader.fcg
 ```
 
-**3. Embed binary data** (shaders, images, fonts, anything `bin2o`-fied by `data_rules`).  Each `.vpo` / `.fpo` / `.png` / `.jpg` / `.bin` becomes an object file the linker pulls in:
+**3. Embed binary data** (shaders, images, fonts — anything the CMake helper `ps3_bin2s()` would handle).  Each `.vpo` / `.fpo` / `.png` / `.jpg` / `.bin` becomes an object file the linker pulls in:
 
 ```cmd
 bin2s.exe -a 64 build\vpshader.vpo > build\vpshader_vpo.s
 powerpc64-ps3-elf-as.exe -o build\vpshader_vpo.o build\vpshader_vpo.s
 ```
 
-PSL1GHT also expects a generated header alongside each `.bin.o`; see the `bin2o` macro in `base_rules` for the exact form (three `extern const u8`/`u32` declarations per blob, derived from the input filename).
+The CMake helper additionally writes a header (three `extern const u8`/`u32` declarations per blob, derived from the input filename) so C/C++ code can `#include "<name>_<ext>.h"` and reference the symbols.  When driving the toolchain by hand, generate or hand-write that header to match.
 
 **4. Link everything into a PPU ELF.**  The linker spec inside `powerpc64-ps3-elf-gcc` reads `%PS3DK%` via `getenv()` and auto-includes `-L%PS3DK%\ppu\lib --start-group -lsysbase -lc -lrt -llv2 --end-group` plus the LV2 CRT objects (`lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`, `lv2-sprx.o`) and the linker script `lv2.ld`.  You only need to specify the *additional* libs the sample uses:
 
@@ -247,7 +244,7 @@ package_finalize.exe sample.gnpdrm.pkg
 
 `sample.pkg` is unsigned (debug-installable on CFW); `sample.gnpdrm.pkg` after `package_finalize` is the npdrm-finalised version.
 
-The exact flag set each sample needs (extra `-l` libs, additional `-I` include paths, `CXXFLAGS` overrides, etc.) is in that sample's `Makefile`.  `make VERBOSE=1` prints every command verbatim, so you can copy the lines you need and skip `make` entirely.
+The exact flag set each sample needs (extra `-l` libs, additional `-I` include paths, C++ standard overrides, etc.) is in that sample's `CMakeLists.txt`.  `cmake --build cmake-build --verbose` prints every command verbatim, so you can copy the lines you need and skip CMake entirely.
 
 ## Getting started
 
@@ -336,7 +333,7 @@ source ./scripts/env.sh
 
 Native Windows builds aren't supported for the toolchain bootstrap — autotools and GCC's combined-tree build are reliable on Linux and brittle under MSYS2.  The recommended path for Windows users is **WSL2** with one of the supported Linux distributions.
 
-End users who just want to *use* a prebuilt toolchain on Windows do not need WSL — tagged releases will ship `ps3-sdk-vX.Y.Z-windows-x86_64.zip` with native `.exe` binaries (planned for v0.4.x; see [`docs/VERSIONING.md`](docs/VERSIONING.md)).  WSL2 is required only when *building from source*.
+End users who just want to *use* a prebuilt toolchain on Windows do not need WSL — tagged releases will ship `ps3-sdk-vX.Y.Z-windows-x86_64.zip` with native `.exe` binaries (planned for v0.3.0; see [`docs/VERSIONING.md`](docs/VERSIONING.md)).  WSL2 is required only when *building from source*.
 
 1. **Install WSL2 and a distro** from an elevated PowerShell or `cmd`:
    ```powershell
@@ -364,7 +361,7 @@ A few WSL2-specific notes:
 
 - The default `PS3_BUILD_ROOT` (`$HOME/ps3tc/build`) already lives in ext4 — no override needed.
 - If you want to use the Linux-hosted toolchain from Windows-native tools, copy or expose `stage/ps3dev/` back to the Windows side: `cp -r stage/ps3dev /mnt/c/ps3dev`, then set `PS3DEV=C:\ps3dev` in your Windows shell.
-- Cross-building the Windows toolchain release (the `.exe` binaries) requires the additional `mingw-w64 g++-mingw-w64-x86-64` packages on top of the standard Ubuntu install line (Debian/Fedora analogues exist).  This is documented separately under the v0.4.x build flow.
+- Cross-building the Windows toolchain release (the `.exe` binaries) requires the additional `mingw-w64 g++-mingw-w64-x86-64` packages on top of the standard Ubuntu install line (Debian/Fedora analogues exist).  This is documented separately under the v0.3.0 build flow.
 
 ### Building the toolchain + SDK
 
@@ -411,19 +408,24 @@ All four checks should succeed silently (or print the expected version).  If any
 
 ### Building and running samples
 
-Samples under `samples/` each build with `make` from inside their own directory:
+Samples under `samples/` each build with **CMake** from inside their own directory:
 
 ```bash
 cd samples/toolchain/hello-ppu-c++17
-make
-# Produces: hello-ppu-c++17.elf / .self / .fake.self
+cmake -S . -B cmake-build \
+      -DCMAKE_TOOLCHAIN_FILE=$PS3DK/../cmake/ps3-ppu-toolchain.cmake \
+      -G Ninja
+cmake --build cmake-build
+# Produces: hello-ppu-c++17.elf / .self / .fake.self next to CMakeLists.txt
 ```
 
-Each sample produces three artefacts:
+The toolchain file under `cmake/ps3-ppu-toolchain.cmake` reads `$PS3DEV` / `$PS3DK` from the environment (set by `source scripts/env.sh` at repo root or `setup.cmd` on Windows), points CMake at the cross-compiler, and adds the SDK include / library search paths.  Each sample's `CMakeLists.txt` calls `include(ps3-self)` and `ps3_add_self(<target>)` to wire up the strip → `sprxlinker` → `make_self` / `fself` post-build chain — and adds `ps3_add_cg_shader(...)`, `ps3_add_spu_image(...)`, or `ps3_bin2s(...)` for samples that need shader compilation, embedded SPU code, or data embedding.
+
+Each sample produces three artefacts at the sample root (`cmake-build/` holds intermediates only):
 
 | Artefact | Target | How to run |
 |---|---|---|
-| `<name>.elf` | raw PPU ELF | `ps3load` or GDB against RPCS3's gdbstub |
+| `<name>.elf` | stripped PPU ELF | `ps3load` or GDB against RPCS3's gdbstub |
 | `<name>.self` | CEX-signed SELF | `rpcs3 --no-gui <name>.self` (boots on RPCS3 or signed hardware) |
 | `<name>.fake.self` | fake-signed SELF | `ps3load` / XMB install on CFW hardware |
 
@@ -431,7 +433,10 @@ Quickest end-to-end check under RPCS3:
 
 ```bash
 cd samples/toolchain/hello-ppu-abi-check
-make
+cmake -S . -B cmake-build \
+      -DCMAKE_TOOLCHAIN_FILE=../../../cmake/ps3-ppu-toolchain.cmake \
+      -G Ninja
+cmake --build cmake-build
 rpcs3 --no-gui hello-ppu-abi-check.self
 # Stdout lands in ~/.cache/rpcs3/TTY.log — a clean run ends with
 #   result: PASS

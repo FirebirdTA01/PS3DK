@@ -2,7 +2,7 @@
 
 **Status:** draft, awaiting review
 **Owner:** FirebirdTA01
-**Target milestone:** v0.4.x ("Windows toolchain release") per `docs/VERSIONING.md`
+**Target milestone:** v0.3.0 ("Linux + Windows toolchain release") per `docs/VERSIONING.md`
 
 ## Goal
 
@@ -15,12 +15,13 @@ our own SDK) bundled in the same archive.
 
 End-user flow: extract the zip somewhere, set `PS3DEV` to the extract
 root, prepend `%PS3DEV%\bin;%PS3DEV%\ppu\bin;%PS3DEV%\spu\bin` to PATH,
-and `make` inside `samples/` works.
+and `cmake -S . -B cmake-build -DCMAKE_TOOLCHAIN_FILE=...\cmake\ps3-ppu-toolchain.cmake`
+inside any `samples/<name>/` directory works.
 
 ## Non-goals
 
 - Macros installer (`.msi`, `setup.exe`) — out of scope; a zip + `setup.cmd`
-  per the v0.4.x roadmap is enough.
+  per the v0.3.0 roadmap is enough.
 - Native MSYS2 toolchain build directly on Windows. We pick cross-build
   from Linux instead because (a) autotools and GCC's combined-tree build
   are more reliable on real Linux, (b) CI uses Linux runners, and (c) it
@@ -192,10 +193,7 @@ On Windows, in a fresh `cmd` / `pwsh`:
 2. `cd C:\ps3sdk\ps3-sdk-vX.Y.Z-windows-x86_64 && setup.cmd`.
 3. `powerpc64-ps3-elf-gcc.exe --version` → reports 12.4.0.
 4. `spu-elf-gcc.exe --version` → reports 9.5.0.
-5. `cd samples\toolchain\hello-ppu-c++17 && make` (under MSYS2 or git-bash;
-   the `Makefile`s are bash-makefile not nmake-style — see open question
-   on whether to ship a Windows-native build path or document MSYS2 as a
-   prerequisite).
+5. `cd samples\toolchain\hello-ppu-c++17 && cmake -S . -B cmake-build -DCMAKE_TOOLCHAIN_FILE="%PS3DK%\..\cmake\ps3-ppu-toolchain.cmake" -G Ninja && cmake --build cmake-build`.
 6. Run the resulting `.self` in RPCS3 — expect `result: PASS`.
 
 ## Open questions
@@ -216,14 +214,12 @@ On Windows, in a fresh `cmd` / `pwsh`:
    the build to compile newlib, which fails when the target compiler
    isn't on PATH at the build site. Recommendation: (a).
 
-3. **Sample build on Windows.** Existing sample Makefiles use bash
-   patterns (`shell`, `sed`, `find`). On Windows the user needs MSYS2 or
-   Git Bash to drive `make`. Two options:
-   - Ship MSYS2 in the zip (huge — out).
-   - Document MSYS2 / Git Bash as a prerequisite for sample builds.
-   Recommendation: document the prerequisite. The toolchain itself
-   (gcc.exe etc.) does not require MSYS2 — only the `make`-driven
-   sample workflow does.
+3. **Sample build on Windows.** RESOLVED via the CMake migration:
+   samples now build with CMake instead of bash-driven Makefiles. The
+   user installs `cmake` + `ninja` (e.g. `choco install cmake ninja` or
+   the Visual Studio installer's CMake/Ninja components) and runs
+   `cmake -S . -B cmake-build -DCMAKE_TOOLCHAIN_FILE=...` from a plain
+   `cmd` or PowerShell. No MSYS2 / Git Bash required.
 
 4. **Source-tree location for WSL builds.** /mnt/c is unusably slow for
    GCC bootstraps. Recommendation: clone the repo into ext4 at
