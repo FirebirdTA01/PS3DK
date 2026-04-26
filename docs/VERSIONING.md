@@ -47,7 +47,7 @@ Logic:
 | **SDK install marker** | `$PS3DK/VERSION` plain-text file written at install time.  Useful for shell scripts and tarball naming. |
 | **Rust workspace** (`tools/Cargo.toml`) | `[workspace.package] version` is the canonical Rust-side value.  `scripts/sync-versions.sh` rewrites it from `version.sh --format=bare` idempotently.  Each Rust binary picks it up via `CARGO_PKG_VERSION` (clap's `version` attribute exposes `--version` automatically). |
 | **rsx-cg-compiler** (CMake) | `tools/rsx-cg-compiler/CMakeLists.txt` calls `version.sh --format=cmake` at configure time, includes the result, and `configure_file`s `src/version.h.in` → `<build>/version.h`.  `main.cpp` includes the generated header for `RSX_CG_COMPILER_VERSION`, exposed via `--version` / `-V`. |
-| **Toolchain prefix tarball** (Phase 5+) | Will name itself `ps3-sdk-vX.Y.Z-<host>-<arch>.tar.zst` using `version.sh --format=plain`. |
+| **Toolchain prefix tarball** (post-v0.3.0) | Will name itself `ps3-sdk-vX.Y.Z-<host>-<arch>.tar.zst` using `version.sh --format=plain`. |
 
 ## Cutting a release
 
@@ -139,32 +139,28 @@ self-hosted runner (or in a one-shot GitHub Actions job with `ccache` +
 **non-released** workflow artifact, then have the per-release jobs pull
 it as a build cache.
 
-### v0.3.x — full Linux toolchain tarball (target)
+### v0.3.0 — full Linux + Windows toolchain tarballs (target)
 
-Bundle everything `$PS3DEV` for Linux x86_64:
+Bundle everything under `$PS3DEV` for both Linux x86_64 and Windows
+x86_64 in the same release:
 
 - `ps3-sdk-vX.Y.Z-linux-x86_64.tar.xz` — `$PS3DEV/{ppu,spu,psl1ght,
   ps3dk,bin,portlibs}` end-to-end, ready to `tar -xf` into `~/ps3sdk`,
   source `env.sh`, and start writing samples.
-
-Cost: high build minutes (toolchains take hours to build from source).
-Likely needs a self-hosted runner or paid Actions tier.  Worth it once
-the SDK surface is stable enough that releases don't churn weekly.
-
-### v0.4.x — Windows host toolchain tarball (Phase 5)
-
-Add the PPU + SPU toolchains and `$PS3DEV` runtime libs for Windows
-hosts:
-
-- `ps3-sdk-vX.Y.Z-windows-x86_64.zip` — same shape as the Linux tarball
-  but with `.exe` toolchain binaries and a `setup.cmd` for `%PS3DEV%`.
+- `ps3-sdk-vX.Y.Z-windows-x86_64.zip` — same shape as the Linux
+  tarball but with `.exe` toolchain binaries and a `setup.cmd` for
+  `%PS3DEV%`.
 
 The host *tools* (rsx-cg-compiler, sprx-linker, the Rust binaries) are
-already shipping for Windows in v0.1.x.  What v0.4.x adds is the
+already shipping for Windows in v0.1.x.  What v0.3.0 adds is the
 PPC/SPU **target compilers** themselves, which require a cross-build
-from Linux to `x86_64-w64-mingw32`.  Cost: build infrastructure laid
-out in the plan; the cross requires building binutils/GCC/newlib twice
-(once Linux→PPC, once Linux→MinGW), but each only once per release.
+from Linux to `x86_64-w64-mingw32` — binutils/GCC/newlib are bootstrapped
+twice (once Linux→PPC, once Linux→MinGW), but each only once per release.
+
+Cost: high build minutes (toolchains take hours to build from source,
+and the Windows cross adds another 2-3h on top of the native build).
+Likely needs a self-hosted runner or paid Actions tier.  Worth it once
+the SDK surface is stable enough that releases don't churn weekly.
 
 ### v1.0.0 — verified out-of-the-box experience
 
