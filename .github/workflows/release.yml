@@ -364,25 +364,188 @@ jobs:
           name: source-bundle
           path: ps3-sdk-src-*.tar.*
 
+  # -------------------------------------------------------------------
+  # Native PPU + SPU toolchain builds, run in PARALLEL.  Each emits a
+  # tarball of $PS3DEV/{ppu,spu} that the downstream
+  # build-toolchain-windows job downloads and stitches together.
+  #
+  # Splitting these out cuts the v0.4.x-style serial pipeline from
+  # ~2.5-3h to ~60-90 min wall-clock by overlapping the two GCC
+  # bootstraps.  Each job also wires up:
+  #
+  #   * actions/cache for src/upstream — saves 5-10 min of git clones
+  #     per run when the cache is warm.  Key includes the build script
+  #     hashes so a version-pin bump invalidates correctly.
+  #   * ccache (CC=ccache gcc / CXX=ccache g++) — wraps the host
+  #     compilation of GCC's own .cc files (the bulk of the bootstrap
+  #     cost).  Target-library compile (libgcc / libstdc++ / newlib)
+  #     goes through xgcc and bypasses ccache; that's expected and
+  #     unavoidable without a more invasive ccache wrapper.  Subsequent
+  #     tags should see 70-90% hit rates on the host bootstrap when
+  #     GCC versions don't change.
+  # -------------------------------------------------------------------
+  build-native-ppu:
+    name: Build native PPU toolchain (linux)
+    if: github.event_name == 'push' || github.event.inputs.run_toolchain_windows == 'true'
+    needs: verify-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential gcc-12 g++-12 cmake ninja-build texinfo \
+              bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev \
+              zlib1g-dev libreadline-dev libncurses-dev libexpat1-dev \
+              libssl-dev libelf-dev python3 python3-dev git wget patch \
+              autoconf automake libtool zip unzip ccache
+
+      - name: Cache upstream sources (gcc/binutils-gdb/newlib-cygwin)
+        uses: actions/cache@v5
+        with:
+          path: src/upstream
+          key: upstream-${{ hashFiles('scripts/bootstrap.sh', 'scripts/build-ppu-toolchain.sh', 'scripts/build-spu-toolchain.sh') }}
+          restore-keys: |
+            upstream-
+
+      - name: Cache ccache (ppu)
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          # run_number bakes uniqueness into the save key so each run
+          # writes a fresh cache; restore-keys pulls the latest matching
+          # prefix at restore time.
+          key: ccache-ppu-${{ hashFiles('scripts/build-ppu-toolchain.sh', 'patches/ppu/**') }}-${{ github.run_number }}
+          restore-keys: |
+            ccache-ppu-${{ hashFiles('scripts/build-ppu-toolchain.sh', 'patches/ppu/**') }}-
+            ccache-ppu-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=2G
+          ccache --zero-stats
+          # Plumb ccache into the host-side gcc/g++ that build-ppu-toolchain.sh
+          # invokes.  GCC's own bootstrap (compiling gcc/*.cc with the host
+          # compiler) is the slowest single step; this is where ccache
+          # earns its keep.
+          echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          echo "CXX=ccache g++" >> "$GITHUB_ENV"
+
+      - name: Bootstrap upstream sources
+        run: |
+          source scripts/env.sh
+          ./scripts/bootstrap.sh
+
+      - name: Build PPU toolchain
+        run: |
+          source scripts/env.sh
+          ./scripts/build-ppu-toolchain.sh
+          ccache --show-stats
+
+      - name: Tar $PS3DEV/ppu
+        run: |
+          source scripts/env.sh
+          cd "$(dirname "$PS3DEV")"
+          tar -cJf /tmp/ps3dev-ppu.tar.xz "$(basename "$PS3DEV")/ppu"
+          ls -lh /tmp/ps3dev-ppu.tar.xz
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ps3dev-ppu-native
+          path: /tmp/ps3dev-ppu.tar.xz
+          retention-days: 1
+
+  build-native-spu:
+    name: Build native SPU toolchain (linux)
+    if: github.event_name == 'push' || github.event.inputs.run_toolchain_windows == 'true'
+    needs: verify-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential gcc-12 g++-12 cmake ninja-build texinfo \
+              bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev \
+              zlib1g-dev libreadline-dev libncurses-dev libexpat1-dev \
+              libssl-dev libelf-dev python3 python3-dev git wget patch \
+              autoconf automake libtool zip unzip ccache
+
+      - name: Cache upstream sources (gcc/binutils-gdb/newlib-cygwin)
+        uses: actions/cache@v5
+        with:
+          path: src/upstream
+          key: upstream-${{ hashFiles('scripts/bootstrap.sh', 'scripts/build-ppu-toolchain.sh', 'scripts/build-spu-toolchain.sh') }}
+          restore-keys: |
+            upstream-
+
+      - name: Cache ccache (spu)
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: ccache-spu-${{ hashFiles('scripts/build-spu-toolchain.sh', 'patches/spu/**') }}-${{ github.run_number }}
+          restore-keys: |
+            ccache-spu-${{ hashFiles('scripts/build-spu-toolchain.sh', 'patches/spu/**') }}-
+            ccache-spu-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=2G
+          ccache --zero-stats
+          echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          echo "CXX=ccache g++" >> "$GITHUB_ENV"
+
+      - name: Bootstrap upstream sources
+        run: |
+          source scripts/env.sh
+          ./scripts/bootstrap.sh
+
+      - name: Build SPU toolchain
+        run: |
+          source scripts/env.sh
+          ./scripts/build-spu-toolchain.sh
+          ccache --show-stats
+
+      - name: Tar $PS3DEV/spu
+        run: |
+          source scripts/env.sh
+          cd "$(dirname "$PS3DEV")"
+          tar -cJf /tmp/ps3dev-spu.tar.xz "$(basename "$PS3DEV")/spu"
+          ls -lh /tmp/ps3dev-spu.tar.xz
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ps3dev-spu-native
+          path: /tmp/ps3dev-spu.tar.xz
+          retention-days: 1
+
+  # -------------------------------------------------------------------
+  # Combine + cross-build + package.  Downloads the parallel native
+  # PPU/SPU artifacts, runs PSL1GHT / portlibs / our SDK / stub archives
+  # / cross-builds / package_windows_release.  ccache is plumbed here
+  # too — the cross-build re-runs GCC's bootstrap with --host=mingw and
+  # benefits from the same host-side .cc cache.
+  # -------------------------------------------------------------------
   build-toolchain-windows:
     name: Build toolchain (windows x86_64)
-    # Single-job, serial PPU+SPU build of the Windows-hosted toolchain release.
-    # Stage 0 (native Linux PPU+SPU+PSL1GHT+portlibs+SDK+stub-archives) feeds
-    # stage 1 (cross-build PPU+SPU to mingw-w64), then package-windows-release.sh
-    # combines that with the Windows host-tools artifact from
-    # build-host-tools-windows into a single release zip.  Wall-clock ~2-3h.
-    # Caching + PPU/SPU parallelisation are deferred to a follow-up task — this
-    # is the first-pass green build.
-    #
-    # Runs unconditionally on tag push.  On manual workflow_dispatch the user
-    # must opt in via the run_toolchain_windows input (defaulting false) so
-    # casual "test the publish flow" dispatches don't burn a 3-hour runner.
     if: github.event_name == 'push' || github.event.inputs.run_toolchain_windows == 'true'
     needs:
       - verify-version
       - build-host-tools-windows
+      - build-native-ppu
+      - build-native-spu
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v5
         with:
@@ -396,7 +559,7 @@ jobs:
               bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev \
               zlib1g-dev libreadline-dev libncurses-dev libexpat1-dev \
               libssl-dev libelf-dev python3 python3-dev git wget patch \
-              autoconf automake libtool zip unzip \
+              autoconf automake libtool zip unzip ccache \
               mingw-w64 g++-mingw-w64-x86-64
           # Verify the mingw cross compiler resolves before anything is built —
           # cross-build silently degrades into "build only host bits then
@@ -412,20 +575,57 @@ jobs:
           rustc --version
           cmake --version | head -1
 
+      - name: Cache upstream sources
+        uses: actions/cache@v5
+        with:
+          path: src/upstream
+          key: upstream-${{ hashFiles('scripts/bootstrap.sh', 'scripts/build-ppu-toolchain.sh', 'scripts/build-spu-toolchain.sh') }}
+          restore-keys: |
+            upstream-
+
+      - name: Cache ccache (cross)
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: ccache-cross-${{ hashFiles('scripts/build-ppu-toolchain.sh', 'scripts/build-spu-toolchain.sh', 'patches/**') }}-${{ github.run_number }}
+          restore-keys: |
+            ccache-cross-${{ hashFiles('scripts/build-ppu-toolchain.sh', 'scripts/build-spu-toolchain.sh', 'patches/**') }}-
+            ccache-cross-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=2G
+          ccache --zero-stats
+          echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          echo "CXX=ccache g++" >> "$GITHUB_ENV"
+
       - name: Bootstrap upstream sources
         run: |
           source scripts/env.sh
           ./scripts/bootstrap.sh
 
-      - name: Stage 0 — native PPU toolchain
-        run: |
-          source scripts/env.sh
-          ./scripts/build-ppu-toolchain.sh
+      - name: Download native PPU artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ps3dev-ppu-native
+          path: artifacts/ps3dev-ppu
 
-      - name: Stage 0 — native SPU toolchain
+      - name: Download native SPU artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ps3dev-spu-native
+          path: artifacts/ps3dev-spu
+
+      - name: Extract native PPU + SPU into stage/ps3dev
         run: |
           source scripts/env.sh
-          ./scripts/build-spu-toolchain.sh
+          mkdir -p stage
+          tar -C stage -xf artifacts/ps3dev-ppu/ps3dev-ppu.tar.xz
+          tar -C stage -xf artifacts/ps3dev-spu/ps3dev-spu.tar.xz
+          test -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc"
+          test -x "$PS3DEV/spu/bin/spu-elf-gcc"
+          "$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc" --version | head -1
+          "$PS3DEV/spu/bin/spu-elf-gcc" --version | head -1
 
       - name: Stage 0 — PSL1GHT runtime
         run: |
@@ -456,6 +656,9 @@ jobs:
         run: |
           source scripts/env.sh
           ./scripts/build-spu-toolchain.sh --host=x86_64-w64-mingw32
+
+      - name: ccache stats post-build
+        run: ccache --show-stats || true
 
       - name: Download host-tools-windows artifact
         uses: actions/download-artifact@v5
@@ -489,6 +692,8 @@ jobs:
       - verify-version
       - build-host-tools-linux
       - build-host-tools-windows
+      - build-native-ppu
+      - build-native-spu
       - build-toolchain-windows
       - build-source-bundle
     runs-on: ubuntu-latest
