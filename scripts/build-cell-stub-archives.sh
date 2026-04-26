@@ -32,8 +32,8 @@ die() { printf "[stub-archives] ERROR: %s\n" "$*" >&2; exit 1; }
 
 [[ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-as" ]] \
     || die "PPU toolchain not installed. Run scripts/build-ppu-toolchain.sh first."
-[[ -d "$PS3DEV/psl1ght/ppu/lib" ]] \
-    || die "PSL1GHT not installed. Run scripts/build-psl1ght.sh first."
+[[ -d "$PS3DK/ppu/lib" ]] \
+    || die "PSL1GHT runtime not installed at \$PS3DK/ppu/lib. Run scripts/build-psl1ght.sh first."
 
 NIDGEN_BIN="$PS3_TOOLCHAIN_ROOT/tools/target/release/nidgen"
 if [[ ! -x "$NIDGEN_BIN" ]]; then
@@ -66,7 +66,10 @@ STUB_YAMLS=(
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
-INSTALL_LIB_DEFAULT="$PS3DEV/psl1ght/ppu/lib"
+# After the PSL1GHT->PS3DK install consolidation both targets resolve to
+# the same directory, but the script still installs to both names so any
+# downstream Makefile referring to either still works.
+INSTALL_LIB_DEFAULT="$PS3DK/ppu/lib"
 INSTALL_LIB_PS3DK="$PS3DK/ppu/lib"
 
 mkdir -p "$OUT_ROOT" "$INSTALL_LIB_DEFAULT" "$INSTALL_LIB_PS3DK"

@@ -21,8 +21,8 @@ die() { printf "[sdk] ERROR: %s\n" "$*" >&2; exit 1; }
 
 [[ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc" ]] \
     || die "PPU toolchain not installed. Run scripts/build-ppu-toolchain.sh first."
-[[ -d "$PS3DEV/psl1ght/ppu/include" ]] \
-    || die "PSL1GHT runtime not installed. Run scripts/build-psl1ght.sh first."
+[[ -d "$PS3DK/ppu/include" ]] \
+    || die "PSL1GHT runtime not installed at \$PS3DK/ppu/include. Run scripts/build-psl1ght.sh first."
 
 say "building + installing SDK"
 make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
