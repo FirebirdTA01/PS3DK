@@ -97,7 +97,23 @@ extern "C" {
  * this trampoline in PSL1GHT's rsx_function_macros.h doesn't do
  * this and only "works" because it happens to have no code before
  * the asm — adding anything (a printf, a counter write) shifts
- * GCC's register allocation enough to crash. */
+ * GCC's register allocation enough to crash.
+ *
+ * TOC save / restore goes through the PPC64 ELFv1 TOC slot at
+ * +24(r1) inside the 128-byte frame we allocate, rather than via
+ * r31.  An earlier revision used `mr 31,2` / `mr 2,31` and listed
+ * r31 in the clobber list — that forced every consuming TU to
+ * compile with -fomit-frame-pointer, because GCC at -O0 pins r31
+ * as the frame pointer and rejects the clobber with the diagnostic
+ * "31 cannot be used in 'asm' here".  Optimised builds (-O1+)
+ * auto-enabled omit-frame-pointer and skated past the issue, but
+ * debug builds broke at the include site of <cell/gcm.h> and the
+ * usual workaround was a per-TU
+ * `#pragma GCC optimize("omit-frame-pointer")` in five separate
+ * GCM-using TUs of the consumer (cube-crash-pragma, EMP engine,
+ * etc.).  Stack-save costs one extra std/ld on the slow callback
+ * path, has no register-pressure side effects, and lets debug
+ * builds compile cleanly without any per-TU pragma. */
 __attribute__((noinline))
 static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count)
 {
@@ -107,18 +123,18 @@ static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count
         "mr    3,%1\n"         /* r3 = ctx */
         "mr    4,%2\n"         /* r4 = count */
         "stdu  1,-128(1)\n"
-        "mr    31,2\n"
+        "std   2,24(1)\n"      /* save caller TOC to our frame */
         "lwz   0,0(%3)\n"      /* r0 = callback entry */
         "lwz   2,4(%3)\n"      /* r2 = callback TOC   */
         "mtctr 0\n"
         "bctrl\n"
         "mr    %0,3\n"         /* result = r3 (callback return) */
-        "mr    2,31\n"
+        "ld    2,24(1)\n"      /* restore caller TOC */
         "addi  1,1,128\n"
         : "=&r"(result)
         : "r"(ctx), "r"(count), "b"(ctx->callback)
         : "r0","r3","r4","r5","r6","r7","r8","r9","r10","r11","r12",
-          "r31","lr","ctr","cr0","cr1","cr5","cr6","cr7","xer","memory"
+          "lr","ctr","cr0","cr1","cr5","cr6","cr7","xer","memory"
     );
 
     return result;
