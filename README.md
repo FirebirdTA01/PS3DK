@@ -117,6 +117,64 @@ For the up-to-date API coverage matrix, regenerate
 
 The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by cross-building from Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 toolchain.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
 
+## Using a prebuilt Windows release
+
+End users who don't need to build the toolchain from source can grab `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page (planned for v0.4.x — see [`docs/VERSIONING.md`](docs/VERSIONING.md)) instead.  The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the PSL1GHT-style Makefile rule fragments, portlibs, and the `samples/` source tree.
+
+### Install
+
+1. **Extract the archive** somewhere stable.  The path you pick is the value of `%PS3DK%`.
+
+2. **Set `PS3DK` permanently** for your user account.  In a regular `cmd` window:
+   ```cmd
+   setx PS3DK "C:\path\to\extracted\PS3DK"
+   ```
+   `setx` writes to the registry but does not update the shell that runs it — open a new terminal afterwards.  The PPU GCC driver reads `%PS3DK%` via `getenv()` in its link spec, so `-L` resolves directly against `%PS3DK%\ppu\lib` at link time.
+
+3. **Activate the environment** in each new shell:
+   ```cmd
+   cd "%PS3DK%"
+   setup.cmd
+   ```
+   `setup.cmd` prepends `bin\`, `ppu\bin\`, and `spu\bin\` to `%PATH%` for the current session and exports `PS3DEV` / `PSL1GHT` as in-session aliases for `%PS3DK%` (some legacy code paths still read those names).
+
+4. **Smoke-test the toolchain:**
+   ```cmd
+   powerpc64-ps3-elf-gcc.exe --version
+   spu-elf-gcc.exe --version
+   ```
+   You should see `(GCC) 12.4.0` and `(GCC) 9.5.0`.
+
+### Building samples from the prebuilt release
+
+The bundled `%PS3DK%\samples\` tree contains the same samples as `samples/` in this repo — `hello-ppu-c++17`, `hello-spu`, `hello-ppu-cellgcm-triangle`, the Spurs taskset demos, sysutil callbacks, savedata, etc.
+
+The samples ship with `make`-driven `Makefile`s that use bash patterns and `include $(PSL1GHT)/ppu_rules`.  To use those Makefiles, you need GNU `make` and `bash` available on `PATH`.  Any Windows POSIX environment works:
+
+* **Git Bash** (already installed by Git for Windows).  Ships `bash` but not `make` — install GNU make separately (e.g. `choco install make`, or drop a `make.exe` build on `PATH`).
+* **MSYS2** (<https://www.msys2.org/>).  Full POSIX environment including `make` out of the box.
+
+Either way, the build invocation is the same:
+```bash
+# In Git Bash or MSYS2 — adjust PS3DK to wherever you extracted the zip
+export PS3DK="/c/path/to/extracted/PS3DK"
+export PSL1GHT="$PS3DK"   # back-compat alias for sample Makefiles
+export PATH="$PS3DK/bin:$PS3DK/ppu/bin:$PS3DK/spu/bin:$PATH"
+
+cd "$PS3DK/samples/toolchain/hello-ppu-c++17"
+make
+```
+
+Each sample produces three artefacts:
+
+| Artefact            | Target              | How to run                                     |
+|---|---|---|
+| `<name>.elf`        | raw PPU ELF         | `ps3load` or GDB against RPCS3's gdbstub       |
+| `<name>.self`       | CEX-signed SELF     | `rpcs3 --no-gui <name>.self` (RPCS3 / signed HW) |
+| `<name>.fake.self`  | fake-signed SELF    | `ps3load` / XMB install on CFW hardware        |
+
+`samples\README.md` has the full sample index plus per-sample notes on what each one validates.
+
 ## Getting started
 
 ### Host dependencies

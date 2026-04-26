@@ -83,12 +83,28 @@ STAGE_NAME="ps3-sdk-${VERSION}-windows-x86_64"
 STAGE_DIR="$OUTPUT_DIR/$STAGE_NAME"
 ZIP_PATH="$OUTPUT_DIR/${STAGE_NAME}.zip"
 mkdir -p "$OUTPUT_DIR"
+
+# Defensive guard: refuse to wipe a path that doesn't match our expected
+# staging-name pattern.  Catches accidental misuse like
+# --output-dir=/ or --output-dir=$HOME.
+case "$STAGE_DIR" in
+    */ps3-sdk-*-windows-x86_64) ;;
+    *) die "Refusing to rm -rf '$STAGE_DIR' — does not match the expected ps3-sdk-*-windows-x86_64 pattern" ;;
+esac
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 
 say "Staging into $STAGE_DIR"
 
-# 1. Toolchain (PPU + SPU).  Copy verbatim from the cross-built prefix.
+# Layout philosophy: the resulting zip extracts to a single directory the
+# user sets %PS3DK% to.  PS3DK is the umbrella — toolchain binaries live
+# under PS3DK/ppu/bin and PS3DK/spu/bin, runtime libraries (libsysbase,
+# librt, liblv2, ...) live under PS3DK/ppu/lib, and the PSL1GHT-style
+# Makefile rule fragments (ppu_rules, spu_rules, base_rules, data_rules)
+# sit at PS3DK/.  The PPU GCC driver reads %PS3DK% via getenv() in
+# LIB_LV2_SPEC and -L resolves directly against PS3DK/ppu/lib.
+
+# 1. Cross-built toolchain (PPU + SPU host binaries + per-arch lib trees).
 say "Copying PPU toolchain from $WIN_PREFIX/ppu"
 cp -a "$WIN_PREFIX/ppu" "$STAGE_DIR/ppu"
 say "Copying SPU toolchain from $WIN_PREFIX/spu"
@@ -109,17 +125,34 @@ for arch_pair in "ppu:powerpc64-ps3-elf" "spu:spu-elf"; do
     fi
 done
 
-# 2. Host-agnostic runtime + SDK + portlibs from the native install.
-for sub in psl1ght ps3dk portlibs; do
-    if [[ -d "$PS3DEV/$sub" ]]; then
-        say "Copying $sub from $PS3DEV/$sub"
-        cp -a "$PS3DEV/$sub" "$STAGE_DIR/$sub"
-    else
-        warn "Native install has no $sub/ at $PS3DEV/$sub — skipping"
-    fi
-done
+# 2. Merge PSL1GHT runtime + SDK from $PS3DK into the install tree at the
+# root level (no nested ps3dk/ subdir).  This puts:
+#   $PS3DK/ppu/lib/*    -> $STAGE_DIR/ppu/lib/*    (alongside libgcc.a)
+#   $PS3DK/spu/lib/*    -> $STAGE_DIR/spu/lib/*
+#   $PS3DK/ppu/include  -> $STAGE_DIR/ppu/include
+#   $PS3DK/spu/include  -> $STAGE_DIR/spu/include
+#   $PS3DK/{ppu,spu,base,data}_rules -> $STAGE_DIR/{ppu,spu,base,data}_rules
+if [[ -d "$PS3DK" && -n "$(ls -A "$PS3DK" 2>/dev/null)" ]]; then
+    say "Merging PSL1GHT runtime + SDK from $PS3DK"
+    cp -a "$PS3DK/." "$STAGE_DIR/"
+else
+    warn "$PS3DK is empty / unbuilt — release will ship without runtime libs (libsysbase, librt, liblv2). Run build-psl1ght.sh + build-portlibs.sh + build-sdk.sh on a native install first."
+fi
 
-# 3. Umbrella bin/ — ICON0.PNG + Windows host tools.
+# 3. portlibs (zlib, libpng, SDL2, libcurl, mbedTLS, ...).
+if [[ -d "$PS3DEV/portlibs" && -n "$(ls -A "$PS3DEV/portlibs" 2>/dev/null)" ]]; then
+    say "Copying portlibs from $PS3DEV/portlibs"
+    cp -a "$PS3DEV/portlibs" "$STAGE_DIR/portlibs"
+fi
+
+# 4. Sample sources.  Useful enough to ship alongside the toolchain so
+# users have something to build straight after install.
+if [[ -d "$PS3_TOOLCHAIN_ROOT/samples" ]]; then
+    say "Copying samples from $PS3_TOOLCHAIN_ROOT/samples"
+    cp -a "$PS3_TOOLCHAIN_ROOT/samples" "$STAGE_DIR/samples"
+fi
+
+# 5. Umbrella bin/ — ICON0.PNG + Windows host tools.
 mkdir -p "$STAGE_DIR/bin"
 if [[ -f "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" ]]; then
     cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/bin/ICON0.PNG"
@@ -149,29 +182,26 @@ cat > "$STAGE_DIR/setup.cmd" <<'EOF'
 @echo off
 REM PS3 Custom Toolchain — Windows environment activator.
 REM
-REM First run: prints instructions if PS3DEV and PS3DK aren't set yet.
-REM Once both are set (typically via "setx" at user scope), subsequent
-REM runs prepend the toolchain bin dirs to %PATH% for the current shell.
+REM First run: prints instructions if PS3DK isn't set yet.
+REM Once PS3DK is set (typically via "setx" at user scope), subsequent
+REM runs prepend the toolchain bin dirs to %PATH% for the current shell
+REM and export PS3DEV / PSL1GHT as in-session aliases for code that
+REM still reads those names.
 setlocal enabledelayedexpansion
 
-set "_missing="
-if not defined PS3DEV set "_missing=!_missing! PS3DEV"
-if not defined PS3DK  set "_missing=!_missing! PS3DK"
-
-if defined _missing (
+if not defined PS3DK (
     echo.
     echo PS3 Custom Toolchain — environment not yet configured.
-    echo The following variables are not set:!_missing!
+    echo PS3DK is not set.
     echo.
-    echo Set them permanently for your user account.  Open a regular cmd
+    echo Set it permanently for your user account.  Open a regular cmd
     echo window ^(NOT this one^) and run:
     echo.
-    echo     setx PS3DEV "%~dp0."
-    echo     setx PS3DK  "%%PS3DEV%%\ps3dk"
+    echo     setx PS3DK "%~dp0."
     echo.
-    echo PS3DEV should point at the extracted release root ^(this directory^),
-    echo and PS3DK at the SDK install root inside it ^(used by the PPU GCC
-    echo driver to locate libsysbase, libc, librt, liblv2 at link time^).
+    echo PS3DK should point at the extracted release root ^(this directory^).
+    echo The PPU GCC driver reads it via getenv^(^) in its link spec, and
+    echo -L resolves against %%PS3DK%%\ppu\lib at link time.
     echo.
     echo "setx" writes to the registry but does NOT update the current
     echo shell.  Open a NEW terminal afterwards and re-run setup.cmd to
@@ -180,14 +210,15 @@ if defined _missing (
     exit /b 1
 )
 
-REM PSL1GHT is a back-compat alias for PS3DK — sample Makefiles still
-REM include $(PSL1GHT)/ppu_rules and the runtime tree now lives under
-REM PS3DK.  We export it for this session only; users who want it
-REM permanently can `setx PSL1GHT "%PS3DK%"`.
-endlocal & set "PATH=%PS3DEV%\bin;%PS3DEV%\ppu\bin;%PS3DEV%\spu\bin;%PATH%" & set "PSL1GHT=%PS3DK%"
-echo PS3DEV:  %PS3DEV%
+REM PS3DEV and PSL1GHT are back-compat aliases — code that still reads
+REM them sees the same install root.  We export at the parent shell
+REM scope only for this session; permanent setx is optional.  Windows
+REM tolerates double-separator paths (...\\ppu\\bin) so we don't bother
+REM trimming a trailing backslash off PS3DK.
+endlocal & set "PATH=%PS3DK%\bin;%PS3DK%\ppu\bin;%PS3DK%\spu\bin;%PATH%" & set "PS3DEV=%PS3DK%" & set "PSL1GHT=%PS3DK%"
 echo PS3DK:   %PS3DK%
-echo PSL1GHT: %PSL1GHT%   ^(back-compat alias for PS3DK^)
+echo PS3DEV:  %PS3DEV%   ^(in-session alias^)
+echo PSL1GHT: %PSL1GHT%   ^(in-session alias^)
 echo Toolchain bin dirs prepended to PATH for this session.
 echo.
 where powerpc64-ps3-elf-gcc.exe 1>nul 2>nul && powerpc64-ps3-elf-gcc.exe --version
@@ -205,40 +236,75 @@ PS3 Custom Toolchain — ${VERSION}, windows-x86_64
 This archive bundles a ready-to-use PS3 toolchain for Windows hosts,
 cross-built from Linux to ${HOST_TRIPLE}.
 
-Layout:
-  bin\\          Host tools (rsx-cg-compiler.exe, sprxlinker.exe, ...) + ICON0.PNG
-  ppu\\bin\\     powerpc64-ps3-elf-{gcc,g++,as,ld,gdb,...}.exe
-  ppu\\         libgcc, newlib libc, libstdc++ (PowerPC ELF target libs)
-  spu\\bin\\     spu-elf-{gcc,g++,as,ld,...}.exe
-  spu\\         libgcc, newlib libc, libstdc++ (SPU ELF target libs)
-  psl1ght\\     PSL1GHT runtime + headers
-  ps3dk\\       Our SDK headers + libraries (libgcm_cmd.a, libdbgfont.a, ...)
-  portlibs\\    zlib, libpng, SDL2, libcurl, mbedTLS, ...
-  setup.cmd     Environment activator (prepends toolchain bins to PATH)
-  CHANGELOG.md  Release-by-release history
+Layout (everything below is anchored at %PS3DK% once installed):
+  bin\\               Host tools (rsx-cg-compiler.exe, sprxlinker.exe,
+                      nidgen.exe, ...) + ICON0.PNG
+  ppu\\bin\\          powerpc64-ps3-elf-{gcc,g++,as,ld,...}.exe
+  ppu\\lib\\          libsysbase, libc, librt, liblv2, libgcm, libio,
+                      libsysutil*, libfont, ... (PSL1GHT + SDK runtime)
+                      + libgcc.a (toolchain) under lib\\gcc\\powerpc64-ps3-elf\\
+  ppu\\powerpc64-ps3-elf\\
+                      Target sysroot — newlib libc/libm, libstdc++,
+                      lv2-crt0.o, lv2.ld linker script
+  ppu\\include\\      PSL1GHT + SDK PPU headers (cell/*.h, sys/*.h, etc.)
+  spu\\               Same shape as ppu\\, for spu-elf
+  ppu_rules           PSL1GHT-style Makefile fragments included by samples
+  spu_rules
+  base_rules
+  data_rules
+  portlibs\\          zlib, libpng, SDL2, libcurl, mbedTLS, ...
+  samples\\           Source for hello-ppu, hello-spu, cellGcm,
+                      Spurs, sysutil, etc.  Build inside each sample dir
+                      with "make" (requires Git Bash or MSYS2 — see below).
+  setup.cmd           Environment activator (prepends toolchain bins to PATH)
+  README.txt
+  CHANGELOG.md
 
 Quick start:
-  1. Extract this archive somewhere (e.g. C:\\ps3sdk\\${STAGE_NAME}\\).
-  2. Set the toolchain environment variables permanently for your user
-     account.  In a regular cmd window run:
-         setx PS3DEV "C:\\ps3sdk\\${STAGE_NAME}"
-         setx PS3DK  "%PS3DEV%\\ps3dk"
-     PS3DEV points at the extract root; PS3DK is the SDK install root
-     inside it (used by the PPU GCC driver to find libsysbase, libc,
-     librt, liblv2 at link time).
-  3. Open a NEW terminal so the setx values take effect, then:
-         cd C:\\ps3sdk\\${STAGE_NAME}
+  1. Extract this archive somewhere — common choice is
+     C:\\SDKs\\Sony\\Homebrew\\PS3DK\\.
+  2. Set PS3DK permanently for your user account.  In a regular cmd
+     window run:
+         setx PS3DK "C:\\SDKs\\Sony\\Homebrew\\PS3DK"
+     The PPU GCC driver reads this via getenv() at link time and
+     resolves -L against %PS3DK%\\ppu\\lib.
+  3. Open a NEW terminal so the setx value takes effect, then:
+         cd "%PS3DK%"
          setup.cmd
-     This prepends bin\\, ppu\\bin\\ and spu\\bin\\ to PATH for the
-     current shell session.
+     This prepends bin\\, ppu\\bin\\ and spu\\bin\\ to PATH and exports
+     PS3DEV / PSL1GHT as in-session aliases (some legacy code paths
+     still read those names).
   4. powerpc64-ps3-elf-gcc.exe --version    (-> 12.4.0)
      spu-elf-gcc.exe            --version    (-> 9.5.0)
 
-Sample builds use bash-style Makefiles; install MSYS2 or Git Bash if you
-want to run "make" against the samples/ directory.  The toolchain itself
-(gcc.exe etc.) does not require MSYS2.
+Building the samples:
+  Sample Makefiles use GNU bash patterns and "include \$(PSL1GHT)/ppu_rules",
+  so a POSIX environment is required to invoke "make".  Two options:
 
-See https://github.com/FirebirdTA01/PS3_Custom_Toolchain for docs.
+  * MSYS2 (recommended) — full POSIX toolchain with make/bash/etc.
+    Install from https://www.msys2.org/, then in an MSYS2 shell:
+        export PS3DK="/c/SDKs/Sony/Homebrew/PS3DK"
+        cd "\$PS3DK/samples/toolchain/hello-ppu-c++17"
+        make
+
+  * Git Bash — already installed by Git for Windows but does NOT ship
+    "make".  Install GNU make separately (e.g. via choco install make
+    or by dropping a make.exe build on PATH), then:
+        export PS3DK="/c/SDKs/Sony/Homebrew/PS3DK"
+        cd "\$PS3DK/samples/toolchain/hello-ppu-c++17"
+        make
+
+  Each sample produces three artefacts: <name>.elf (raw PPU ELF),
+  <name>.self (CEX-signed for RPCS3 + signed hardware), and
+  <name>.fake.self (fake-signed for CFW hardware).  Run on RPCS3 with
+      rpcs3 --no-gui <name>.self
+
+  The toolchain itself (gcc.exe / g++.exe / ld.exe etc.) does NOT
+  require Git Bash or MSYS2 — only the Makefile-driven sample workflow
+  does.  Standalone compile + link from cmd or PowerShell works fine:
+      powerpc64-ps3-elf-gcc.exe -O2 hello.c -o hello.elf
+
+See https://github.com/FirebirdTA01/PS3_Custom_Toolchain for full docs.
 EOF
 
 if [[ -f "$PS3_TOOLCHAIN_ROOT/CHANGELOG.md" ]]; then
