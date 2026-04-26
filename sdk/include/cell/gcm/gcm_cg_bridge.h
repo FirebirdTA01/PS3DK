@@ -107,13 +107,10 @@ extern "C" {
  * as the frame pointer and rejects the clobber with the diagnostic
  * "31 cannot be used in 'asm' here".  Optimised builds (-O1+)
  * auto-enabled omit-frame-pointer and skated past the issue, but
- * debug builds broke at the include site of <cell/gcm.h> and the
- * usual workaround was a per-TU
- * `#pragma GCC optimize("omit-frame-pointer")` in five separate
- * GCM-using TUs of the consumer (cube-crash-pragma, EMP engine,
- * etc.).  Stack-save costs one extra std/ld on the slow callback
- * path, has no register-pressure side effects, and lets debug
- * builds compile cleanly without any per-TU pragma. */
+ * debug builds broke at the include site of <cell/gcm.h>.  Stack-
+ * save costs one extra std/ld on the slow callback path, has no
+ * register-pressure side effects, and lets debug builds compile
+ * cleanly without any per-TU pragma. */
 __attribute__((noinline))
 static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count)
 {
