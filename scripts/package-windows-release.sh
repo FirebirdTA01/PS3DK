@@ -135,6 +135,19 @@ done
 if [[ -d "$PS3DK" && -n "$(ls -A "$PS3DK" 2>/dev/null)" ]]; then
     say "Merging PSL1GHT runtime + SDK from $PS3DK"
     cp -a "$PS3DK/." "$STAGE_DIR/"
+    # PSL1GHT (and our SDK) install host tools at $PS3DK/bin/ as native
+    # Linux ELFs (sprxlinker, sometimes others).  Those have no business
+    # in a Windows release zip — Windows host-tool .exe's land here via
+    # --tools-zip below.  Strip any ELF that snuck in from the merge.
+    if [[ -d "$STAGE_DIR/bin" ]]; then
+        while IFS= read -r f; do
+            [[ -n "$f" ]] || continue
+            if file -b "$f" 2>/dev/null | grep -q '^ELF '; then
+                say "Removing leaked Linux binary from bin/: ${f#"$STAGE_DIR/"}"
+                rm -f "$f"
+            fi
+        done < <(find "$STAGE_DIR/bin" -maxdepth 1 -type f)
+    fi
 else
     warn "$PS3DK is empty / unbuilt — release will ship without runtime libs (libsysbase, librt, liblv2). Run build-psl1ght.sh + build-portlibs.sh + build-sdk.sh on a native install first."
 fi
@@ -158,7 +171,11 @@ if [[ -f "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" ]]; then
     cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/bin/ICON0.PNG"
 fi
 
-# 4. Host tools zip (from CI's build-host-tools-windows job).
+# 4. Host tools zip (from CI's build-host-tools-windows job) OR locally
+#    cross-built tools staged at $STAGE_HOST_TOOLS_BIN by
+#    scripts/build-host-tools-windows.sh.  CI takes the zip path; local
+#    runs typically use the staged dir.
+STAGE_HOST_TOOLS_BIN="$PS3_TOOLCHAIN_ROOT/stage/host-tools-windows/bin"
 if [[ -n "$TOOLS_ZIP" ]]; then
     [[ -f "$TOOLS_ZIP" ]] || die "Tools zip not found: $TOOLS_ZIP"
     say "Merging Windows host tools from $TOOLS_ZIP"
@@ -173,8 +190,11 @@ if [[ -n "$TOOLS_ZIP" ]]; then
     else
         warn "Tools zip $TOOLS_ZIP has no bin/ subdir — skipping merge"
     fi
+elif [[ -d "$STAGE_HOST_TOOLS_BIN" && -n "$(ls -A "$STAGE_HOST_TOOLS_BIN" 2>/dev/null)" ]]; then
+    say "Merging Windows host tools from $STAGE_HOST_TOOLS_BIN (local cross-build)"
+    cp -a "$STAGE_HOST_TOOLS_BIN/." "$STAGE_DIR/bin/"
 else
-    warn "No --tools-zip provided.  The release zip will ship without rsx-cg-compiler.exe / sprxlinker.exe / nidgen.exe / etc.  Pass --tools-zip=PATH to include them, or run release.yml's build-host-tools-windows job to produce one."
+    warn "No --tools-zip provided and $STAGE_HOST_TOOLS_BIN is empty.  The release zip will ship without rsx-cg-compiler.exe / make_self.exe / nidgen.exe / etc.  Either run scripts/build-host-tools-windows.sh first (to populate the staged dir), or pass --tools-zip=PATH pointing at release.yml's build-host-tools-windows artifact."
 fi
 
 # 5. setup.cmd: a one-shot environment activator for Windows users.
