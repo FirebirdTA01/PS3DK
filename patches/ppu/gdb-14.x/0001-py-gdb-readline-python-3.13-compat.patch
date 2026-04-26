@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Apr 26 00:00:00 2026
+Subject: [PATCH] gdb/python: guard _PyOS_ReadlineTState for Python 3.13+
+
+Python 3.13 stopped nulling the interpreter thread state during
+PyOS_Readline and dropped _PyOS_ReadlineTState from the public API
+(see CPython gh-105908).  GDB 14.2's py-gdb-readline.c still references
+the variable unconditionally, which fails to compile on hosts shipping
+Python 3.13 / 3.14 (CachyOS, Arch).
+
+Guard the save/restore pair on PY_VERSION_HEX < 3.13.0.  On older
+Pythons the dance is still required; on 3.13+ the thread state is
+already valid in the catch handler so the explicit restore would be a
+no-op anyway.
+
+This matches the upstream GDB fix on master and Fedora's gdb-14
+backport.
+
+--- a/gdb/python/py-gdb-readline.c
++++ b/gdb/python/py-gdb-readline.c
+@@ -56,12 +56,16 @@ gdbpy_readline_wrapper (FILE *sys_stdin, FILE *sys_stdout,
+       if (except.reason == RETURN_QUIT)
+ 	return NULL;
+
++#if PY_VERSION_HEX < 0x030d0000
+       /* The thread state is nulled during gdbpy_readline_wrapper,
+ 	 with the original value saved in the following undocumented
+ 	 variable (see Python's Parser/myreadline.c and
+ 	 Modules/readline.c).  */
+       PyEval_RestoreThread (_PyOS_ReadlineTState);
++#endif
+       gdbpy_convert_exception (except);
++#if PY_VERSION_HEX < 0x030d0000
+       PyEval_SaveThread ();
++#endif
+       return NULL;
+     }
+
