@@ -219,7 +219,20 @@ enum class IROp
 
     // Special
     Nop,            // No operation
-    Comment         // Debug comment (not emitted)
+    Comment,        // Debug comment (not emitted)
+
+    // Predicated execution — emitted by nv40_if_convert for multi-
+    // instruction THEN blocks of an if-only diamond with explicit
+    // default value.  Each PredCarry represents one THEN-block step
+    // and lowers to two NV40 FP instructions: an unconditional
+    // MOVR carrying the default into the chain dst, then the inner
+    // op (encoded in `predOp`) re-executed against `dst(NE.x)` so
+    // the conditional only commits when the predicate fires.
+    //
+    // Operand layout: [cond, defaultVal, op_arg0, op_arg1, ...].
+    // `predOp` carries the inner op (Add / Mul / Mad / etc.) that
+    // would have run unconditionally inside the THEN block.
+    PredCarry
 };
 
 const char* irOpToString(IROp op);
@@ -282,6 +295,7 @@ public:
     // Additional data for specific instructions
     int swizzleMask = 0;            // For VecShuffle: encoded swizzle pattern
     int componentIndex = 0;          // For VecExtract/VecInsert
+    IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
     std::string targetName;          // For branch targets, function calls
     int semanticIndex = 0;           // For shader I/O operations
     std::string semanticName;        // For shader I/O operations (digit-stripped)

@@ -272,6 +272,7 @@ const char* irOpToString(IROp op)
     case IROp::Call:         return "call";
     case IROp::Nop:          return "nop";
     case IROp::Comment:      return "// ";
+    case IROp::PredCarry:    return "predcarry";
     default:                 return "???";
     }
 }
@@ -803,6 +804,7 @@ int getOperandCount(IROp op)
     case IROp::Call:
     case IROp::TexSampleGrad:
     case IROp::TexFetch:
+    case IROp::PredCarry:    // [cond, default, op_arg0, op_arg1, ...]
         return -1;  // Variable number of operands
 
     default:
