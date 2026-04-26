@@ -55,18 +55,6 @@ beats a sibling-clone reference: the build is self-contained, no
 bootstrap dependency, and we're free to evolve the front-end for
 RSX without touching the upstream Vita repo.
 
-When upstream vita-cg-compiler gains improvements worth pulling in,
-re-sync by hand:
-
-```sh
-diff -ru tools/rsx-cg-compiler/src/donor/  src/vita-cg-compiler/src/   # see drift
-cp src/vita-cg-compiler/src/<file>   tools/rsx-cg-compiler/src/donor/<file>
-```
-
-`scripts/bootstrap.sh` still clones vita-cg-compiler into
-`src/vita-cg-compiler/` for this re-sync workflow, but it's optional —
-the build works without it.
-
 ## Why a separate tree from `tools/cgcomp/`
 
 PSL1GHT's existing `tools/cgcomp/` keeps working unchanged.  We can

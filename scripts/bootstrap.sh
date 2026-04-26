@@ -160,22 +160,6 @@ clone_shallow "https://github.com/Estwald/PSDK3v2.git"             "$FORKS_DIR/E
 clone_shallow "https://github.com/StrawFox64/PS3Toolchain.git"     "$FORKS_DIR/StrawFox64-PS3Toolchain"
 
 # -----------------------------------------------------------------------------
-# 3b. rsx-cg-compiler front-end donor (vita-cg-compiler) — OPTIONAL.
-# -----------------------------------------------------------------------------
-# tools/rsx-cg-compiler/ now ships its own copies of the donor front-end
-# files under tools/rsx-cg-compiler/src/donor/.  The build does NOT depend
-# on this clone.  The clone is kept here for re-syncing donor sources by
-# hand when upstream gains improvements worth pulling in:
-#
-#   diff -ru tools/rsx-cg-compiler/src/donor/  src/vita-cg-compiler/src/
-#   cp src/vita-cg-compiler/src/<file>   tools/rsx-cg-compiler/src/donor/<file>
-#
-# Skipped silently if the clone fails (e.g. offline build).
-say "=== vita-cg-compiler donor (re-sync reference, optional) ==="
-clone_shallow "https://github.com/FirebirdTA01/Vita-Cg-Compiler.git" \
-    "$PS3_TOOLCHAIN_ROOT/src/vita-cg-compiler" || true
-
-# -----------------------------------------------------------------------------
 # 4. Build root.
 # -----------------------------------------------------------------------------
 say "=== Build root ==="
