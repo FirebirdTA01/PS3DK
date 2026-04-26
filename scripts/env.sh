@@ -9,12 +9,19 @@
 #   PS3DEV               install prefix ($PS3_TOOLCHAIN_ROOT/stage/ps3dev)
 #   PPU_PREFIX           $PS3DEV/ppu          (newlib sysroot for PPU)
 #   SPU_PREFIX           $PS3DEV/spu          (newlib sysroot for SPU)
-#   PSL1GHT              $PS3DEV/psl1ght      (PSL1GHT install root; still
-#                                               used for toolchain bootstrap
-#                                               and ppu_rules/base_rules)
-#   PS3DK                $PS3DEV/ps3dk        (our SDK's install root — where
-#                                               libgcm_cmd.a, libdbgfont.a, and
-#                                               the cell/* + sys/* headers land)
+#   PS3DK                $PS3DEV/ps3dk        (unified runtime + SDK install
+#                                               root — libsysbase, libc, librt,
+#                                               liblv2, libgcm_cmd, libdbgfont,
+#                                               cell/* + sys/* headers, and the
+#                                               ppu_rules / spu_rules / base_rules
+#                                               Makefile fragments all land here.
+#                                               Read by the PPU GCC driver via
+#                                               getenv() in LIB_LV2_SPEC.)
+#   PSL1GHT              $PS3DK               (back-compat alias for sample
+#                                               Makefiles that still include
+#                                               $(PSL1GHT)/ppu_rules; same path
+#                                               as PS3DK now that build-psl1ght.sh
+#                                               installs into the unified tree)
 #   PS3_BUILD_ROOT       short path used for intermediate builds to avoid MAX_PATH
 #
 # Adds $PS3DEV/bin, $PPU_PREFIX/bin, and $SPU_PREFIX/bin to PATH.
@@ -31,8 +38,11 @@ export PS3_TOOLCHAIN_ROOT="$(cd "$_env_dir/.." && pwd -P)"
 export PS3DEV="${PS3DEV:-$PS3_TOOLCHAIN_ROOT/stage/ps3dev}"
 export PPU_PREFIX="$PS3DEV/ppu"
 export SPU_PREFIX="$PS3DEV/spu"
-export PSL1GHT="$PS3DEV/psl1ght"
 export PS3DK="$PS3DEV/ps3dk"
+# PSL1GHT is now a back-compat alias for PS3DK — sample Makefiles
+# include $(PSL1GHT)/ppu_rules, and build-psl1ght.sh installs the
+# runtime + Makefile rules into PS3DK.
+export PSL1GHT="$PS3DK"
 
 # Default pkg icon for every sample that doesn't set ICON0 itself.
 # PSL1GHT's ppu_rules does `ICON0 ?= $(PS3DEV)/bin/ICON0.PNG` - exporting
