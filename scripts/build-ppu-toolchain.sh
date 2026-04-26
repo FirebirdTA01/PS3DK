@@ -81,14 +81,41 @@ if [[ -n "$HOST_TRIPLE" ]]; then
     say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
 fi
 
-# Cross-build linker-flag injection: statically link host libstdc++/libgcc/
-# winpthread so the resulting .exe files have no DLL runtime dependency.
-# CROSS_LDFLAGS_ARGS is empty for native builds (so we don't clobber any
-# distro-supplied LDFLAGS in the user's env) and a single "VAR=value" element
-# for cross-builds (passed to env(1) verbatim, preserving spaces).
+# Cross-build env injection: passed to `env(1)` before configure so each
+# `VAR=value` element survives wordsplitting (LDFLAGS contains spaces).
+# Empty for native builds — don't clobber distro-supplied LDFLAGS in
+# the user's env.
+#
+# For cross-builds we MUST override CC/CXX explicitly: when CI sets a
+# global `CC=ccache gcc` (so native object compiles benefit from ccache),
+# configure honors that env var and probes the *build* compiler as the
+# *host* compiler — binutils' `checking for ${HOST}-gcc... ccache gcc`
+# log line, followed by "C compiler cannot create executables".  Forcing
+# CC/CXX to the cross-compiler restores the autoconf default
+# (`AC_CHECK_TOOL(CC, ${host_alias}-gcc)`) while still letting ccache
+# wrap the actual mingw invocations.  CC_FOR_BUILD points back at the
+# build-machine native gcc so configure's own internal probes (e.g.
+# the libsframe build-system compile tests) keep working.
+#
+# Static linkage: -static-libgcc / -static-libstdc++ removes the .exe's
+# runtime DLL dependency on libgcc_s_seh-1.dll / libstdc++-6.dll.
+# -static does the same for winpthread when GCC was built with
+# --enable-threads=posix.
 CROSS_LDFLAGS_ARGS=()
 if [[ -n "$HOST_TRIPLE" ]]; then
-    CROSS_LDFLAGS_ARGS=("LDFLAGS=-static -static-libgcc -static-libstdc++")
+    # ccache is optional — use it when on PATH, drop it cleanly otherwise.
+    _ccache=""
+    if command -v ccache >/dev/null 2>&1; then
+        _ccache="ccache "
+    fi
+    CROSS_LDFLAGS_ARGS=(
+        "CC=${_ccache}${HOST_TRIPLE}-gcc"
+        "CXX=${_ccache}${HOST_TRIPLE}-g++"
+        "CC_FOR_BUILD=${_ccache}gcc"
+        "CXX_FOR_BUILD=${_ccache}g++"
+        "LDFLAGS=-static -static-libgcc -static-libstdc++"
+    )
+    unset _ccache
 fi
 
 mkdir -p "$BUILD" "$PREFIX"
