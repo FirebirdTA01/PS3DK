@@ -72,11 +72,25 @@ if [[ -n "$HOST_TRIPLE" ]]; then
     say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
 fi
 
-# See build-ppu-toolchain.sh for the rationale on this array form vs.
-# a plain LDFLAGS variable.
+# See build-ppu-toolchain.sh for the rationale on the env-array form vs.
+# plain CC / CXX / LDFLAGS variables.  Forcing CC/CXX is mandatory under
+# CI: the workflow exports CC=ccache gcc globally so native compiles get
+# cached, and configure would otherwise pick that up as the host
+# compiler when --host=mingw.
 CROSS_LDFLAGS_ARGS=()
 if [[ -n "$HOST_TRIPLE" ]]; then
-    CROSS_LDFLAGS_ARGS=("LDFLAGS=-static -static-libgcc -static-libstdc++")
+    _ccache=""
+    if command -v ccache >/dev/null 2>&1; then
+        _ccache="ccache "
+    fi
+    CROSS_LDFLAGS_ARGS=(
+        "CC=${_ccache}${HOST_TRIPLE}-gcc"
+        "CXX=${_ccache}${HOST_TRIPLE}-g++"
+        "CC_FOR_BUILD=${_ccache}gcc"
+        "CXX_FOR_BUILD=${_ccache}g++"
+        "LDFLAGS=-static -static-libgcc -static-libstdc++"
+    )
+    unset _ccache
 fi
 
 mkdir -p "$BUILD" "$PREFIX"
