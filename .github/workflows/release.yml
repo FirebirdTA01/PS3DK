@@ -65,7 +65,20 @@ jobs:
           echo "bare=$bare" >> "$GITHUB_OUTPUT"
 
       - name: Check Rust workspace version is in sync
-        run: ./scripts/sync-versions.sh --check
+        # Same rationale as the tag/version check above — the sync test
+        # gates that tools/Cargo.toml has been bumped to the upcoming
+        # tag's version before the tag was pushed.  On
+        # workflow_dispatch the working tree's version is whatever
+        # version.sh derives from "tag + commits-since" and Cargo.toml
+        # legitimately lags.  The dispatch never publishes, so we just
+        # log the gap and move on.
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            ./scripts/sync-versions.sh --check
+          else
+            echo "Manual dispatch — running sync-versions.sh in write mode so the build picks up the current version, but not failing on drift."
+            ./scripts/sync-versions.sh
+          fi
 
   build-host-tools-linux:
     name: Build host tools (linux x86_64)
