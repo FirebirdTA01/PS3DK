@@ -127,23 +127,24 @@ Debian / Ubuntu (`apt`):
 ```bash
 sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build texinfo \
     bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev zlib1g-dev \
-    libreadline-dev libncurses-dev libexpat1-dev python3 python3-dev git wget \
-    rustc cargo patch autoconf automake libtool zip unzip
+    libreadline-dev libncurses-dev libexpat1-dev libssl-dev libelf-dev \
+    python3 python3-dev git wget rustc cargo patch autoconf automake libtool \
+    zip unzip
 ```
 
 Fedora / RHEL / Rocky / Alma (`dnf`):
 ```bash
 sudo dnf install -y @development-tools gcc gcc-c++ gmp-devel mpfr-devel \
     libmpc-devel isl-devel zlib-devel readline-devel ncurses-devel \
-    expat-devel python3 python3-devel rust cargo git wget bison flex \
-    texinfo cmake ninja-build patch zip unzip
+    expat-devel openssl-devel elfutils-libelf-devel python3 python3-devel \
+    rust cargo git wget bison flex texinfo cmake ninja-build patch zip unzip
 ```
 
 Arch / Manjaro / EndeavourOS (`pacman`):
 ```bash
 sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl zlib readline \
-    ncurses expat python rust git wget bison flex texinfo cmake ninja patch \
-    zip unzip
+    ncurses expat openssl libelf python rust git wget bison flex texinfo \
+    cmake ninja patch zip unzip
 ```
 
 On any other distribution, install equivalents of: a C/C++ host toolchain, GMP / MPFR / MPC / ISL / zlib / readline / ncurses / expat development headers, Python 3, Rust + Cargo, Git, Wget, Bison, Flex, Texinfo, CMake, Ninja, and Patch.
