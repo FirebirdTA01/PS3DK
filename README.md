@@ -260,9 +260,19 @@ Debian / Ubuntu (`apt`):
 sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build texinfo \
     bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev zlib1g-dev \
     libreadline-dev libncurses-dev libexpat1-dev libssl-dev libelf-dev \
-    python3 python3-dev git wget rustc cargo patch autoconf automake libtool \
+    python3 python3-dev git wget patch autoconf automake libtool \
     zip unzip
 ```
+
+Ubuntu 24.04 ships `rustc` 1.75 in apt, which can't build the Rust workspace under `tools/` (`clap_lex` 1.1+ requires Rust 1.85+).  Install Rust via `rustup` instead:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+. "$HOME/.cargo/env"
+rustc --version    # should report 1.85+
+```
+
+(CI uses `dtolnay/rust-toolchain@stable` and CachyOS / Fedora / Arch already ship a recent enough `rustc` — this only matters when bootstrapping on a stale Debian/Ubuntu host.)
 
 Fedora / RHEL / Rocky / Alma (`dnf`):
 ```bash
@@ -280,6 +290,47 @@ sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl zlib readline \
 ```
 
 On any other distribution, install equivalents of: a C/C++ host toolchain, GMP / MPFR / MPC / ISL / zlib / readline / ncurses / expat development headers, Python 3, Rust + Cargo, Git, Wget, Bison, Flex, Texinfo, CMake, Ninja, and Patch.
+
+#### Optional: cross-build the Windows-hosted toolchain release
+
+These extras are **only required** if you plan to run `./scripts/build-ppu-toolchain.sh --host=x86_64-w64-mingw32` (and the SPU equivalent) followed by `./scripts/package-windows-release.sh` to produce `ps3-sdk-vX.Y.Z-windows-x86_64.zip`.  A normal native Linux build does not need them.
+
+`zip` is also listed below — it is already part of the main host-deps line above, repeated here so this section is self-contained for someone wiring up Windows-release builds on a host that hasn't run the full host-deps install.
+
+Debian / Ubuntu (`apt`):
+```bash
+sudo apt install -y mingw-w64 g++-mingw-w64-x86-64 zip
+```
+
+Fedora / RHEL / Rocky / Alma (`dnf`):
+```bash
+sudo dnf install -y mingw64-gcc mingw64-gcc-c++ mingw64-binutils \
+    mingw64-headers mingw64-crt mingw64-winpthreads zip
+```
+
+Arch / Manjaro / EndeavourOS (`pacman`):
+```bash
+sudo pacman -S --needed mingw-w64-gcc zip
+```
+
+After installing, confirm the cross compiler resolves:
+```bash
+which x86_64-w64-mingw32-gcc       # /usr/bin/x86_64-w64-mingw32-gcc
+x86_64-w64-mingw32-gcc --version
+```
+
+The end-to-end Windows-release flow then runs as:
+
+```bash
+source ./scripts/env.sh
+./scripts/build-ppu-toolchain.sh --host=x86_64-w64-mingw32   # ~15-30 min
+./scripts/build-spu-toolchain.sh --host=x86_64-w64-mingw32   # ~10-20 min
+./scripts/build-host-tools-windows.sh                        # ~10-15 min
+./scripts/package-windows-release.sh                         # ~5 min
+# stage/release/ps3-sdk-vX.Y.Z-windows-x86_64.zip ready to ship
+```
+
+`build-host-tools-windows.sh` cross-compiles `make_self.exe`, `make_self_npdrm.exe`, `package_finalize.exe`, `fself.exe`, and `rsx-cg-compiler.exe` plus their static `zlib`/`gmp`/`openssl` deps from upstream tarballs — those land under `stage/host-tools-windows/bin/` and `package-windows-release.sh` picks them up automatically.  The Rust workspace (`nidgen.exe`/`abi-verify.exe`/`coverage-report.exe`) requires a `rustup`-managed Rust because Arch's `rust` package and Ubuntu apt's `rustc` ship only the host's std lib; install rustup (`pacman -S rustup` on Arch, `curl https://sh.rustup.rs | sh` elsewhere) then `rustup default stable && rustup target add x86_64-pc-windows-gnu` before re-running.  Without rustup, `build-host-tools-windows.sh` skips the Rust step gracefully — pull those `.exe`s from the CI `host-tools-windows-x86_64` artifact instead and pass it via `package-windows-release.sh --tools-zip=PATH`.
 
 ### Windows (via WSL2)
 
