@@ -145,7 +145,11 @@ function(ps3_bin2s target file)
         set(_input "${CMAKE_CURRENT_SOURCE_DIR}/${file}")
     endif()
     if(NOT EXISTS "${_input}")
-        message(FATAL_ERROR "ps3_bin2s: input file does not exist: ${_input}")
+        # File may be a build-time generated artifact (e.g. an SPU
+        # ELF produced by ps3_add_spu_image).  Don't FATAL_ERROR at
+        # configure time; the dependency arrow will surface a clear
+        # error at build time if the source genuinely doesn't exist.
+        # Still skip the EXISTS check on absolute generated paths.
     endif()
 
     get_filename_component(_basename "${_input}" NAME)
@@ -171,4 +175,211 @@ function(ps3_bin2s target file)
 
     target_sources(${target} PRIVATE "${_s}")
     target_include_directories(${target} PRIVATE "${_outdir}")
+endfunction()
+
+# -----------------------------------------------------------------------------
+# ps3_add_spu_image(target NAME <name> SOURCES <files...> [LIBS <libs...>])
+# -----------------------------------------------------------------------------
+# Compiles SPU sources via $PS3DEV/spu/bin/spu-elf-gcc into a single
+# spu/${NAME}.elf, then bin2s-embeds that ELF into <target> (the PPU
+# executable).  PPU code can `#include "${NAME}_elf.h"` and reference
+# the symbols (${NAME}_elf, ${NAME}_elf_end, ${NAME}_elf_size) to
+# pass to sys_spu_image_import.
+#
+# This avoids the recursive-cmake / ExternalProject_Add dance —
+# SPU compilation is small (typically 1-3 files) and the spu-elf
+# toolchain is in a known location alongside the PPU one, so we
+# invoke it directly with add_custom_command.  Flags mirror the
+# spu_rules MACHDEP defaults (-Os, -fpic, -fno-exceptions / -fno-rtti
+# for C++).
+#
+# SOURCES paths are resolved against CMAKE_CURRENT_SOURCE_DIR.  LIBS
+# are -l-style names that exist in $PS3DEV/spu/powerpc-..-lib or
+# $PS3DK/spu/lib (e.g. simdmath, sputhread).  The SPU link command
+# adds -L for both directories automatically.
+if(NOT _PS3_SPU_TOOLS_PROBED)
+    set(_PS3_SPU_TOOLS_PROBED TRUE)
+    set(_ps3_self_exe "")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_self_exe ".exe")
+    endif()
+    find_program(PS3_SPU_GCC
+        NAMES "spu-elf-gcc${_ps3_self_exe}" "spu-elf-gcc"
+        PATHS "${PS3DEV}/spu/bin"
+        NO_DEFAULT_PATH)
+    # Optional — only samples that embed SPU code need the SPU compiler.
+endif()
+
+function(ps3_add_spu_image target)
+    cmake_parse_arguments(_PSI
+        "NOSTARTFILES;FREESTANDING"            # boolean flags
+        "NAME;LDSCRIPT"                         # single-value
+        "SOURCES;LIBS;CFLAGS;LDFLAGS"           # multi-value
+        ${ARGN})
+
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "ps3_add_spu_image: target '${target}' does not exist")
+    endif()
+    if(NOT _PSI_NAME)
+        message(FATAL_ERROR "ps3_add_spu_image: NAME is required")
+    endif()
+    if(NOT _PSI_SOURCES)
+        message(FATAL_ERROR "ps3_add_spu_image: SOURCES is required")
+    endif()
+    if(NOT PS3_SPU_GCC)
+        message(FATAL_ERROR "ps3_add_spu_image: spu-elf-gcc not found at ${PS3DEV}/spu/bin")
+    endif()
+
+    set(_spu_dir "${CMAKE_CURRENT_BINARY_DIR}/spu/${_PSI_NAME}")
+    file(MAKE_DIRECTORY "${_spu_dir}")
+    # Output name uses the .bin extension so bin2s emits symbols
+    # that match the existing Makefile-driven convention
+    # (<NAME>_bin / <NAME>_bin_end / <NAME>_bin_size + <NAME>_bin.h).
+    # PPU code that does `#include "<NAME>_bin.h"` keeps working
+    # without source edits.
+    set(_spu_elf "${_spu_dir}/${_PSI_NAME}.bin")
+
+    # SPU compile flags.  Defaults match PSL1GHT spu_rules MACHDEP
+    # (code-size, position-independent, no C++ EH/RTTI).  Caller can
+    # extend via CFLAGS or replace the freestanding/-fpic posture
+    # entirely with FREESTANDING.
+    set(_spu_cflags -Os -Wall -ffunction-sections -fdata-sections)
+    if(_PSI_FREESTANDING)
+        list(APPEND _spu_cflags -ffreestanding -fno-exceptions)
+    else()
+        list(APPEND _spu_cflags -fpic -fno-exceptions -fno-rtti)
+    endif()
+    list(APPEND _spu_cflags "-I${PS3DK}/spu/include" ${_PSI_CFLAGS})
+
+    # Compile each source -> .o via add_custom_command
+    set(_spu_objs)
+    foreach(src ${_PSI_SOURCES})
+        if(IS_ABSOLUTE "${src}")
+            set(_in "${src}")
+        else()
+            set(_in "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
+        endif()
+        get_filename_component(_in_name "${src}" NAME)
+        set(_out "${_spu_dir}/${_in_name}.o")
+        add_custom_command(
+            OUTPUT "${_out}"
+            COMMAND "${PS3_SPU_GCC}" ${_spu_cflags} -c "${_in}" -o "${_out}"
+            DEPENDS "${_in}"
+            COMMENT "ps3-spu: ${_PSI_NAME}/${_in_name}"
+            VERBATIM)
+        list(APPEND _spu_objs "${_out}")
+    endforeach()
+
+    # Link flags + libs
+    set(_spu_link_flags)
+    if(NOT _PSI_FREESTANDING)
+        list(APPEND _spu_link_flags -fpic)
+    endif()
+    list(APPEND _spu_link_flags -Wl,--gc-sections "-L${PS3DK}/spu/lib" ${_PSI_LDFLAGS})
+    if(_PSI_NOSTARTFILES)
+        list(APPEND _spu_link_flags -nostartfiles)
+    endif()
+    set(_link_deps ${_spu_objs})
+    if(_PSI_LDSCRIPT)
+        list(APPEND _spu_link_flags "-T" "${_PSI_LDSCRIPT}")
+        list(APPEND _link_deps "${_PSI_LDSCRIPT}")
+    endif()
+    set(_spu_libs)
+    foreach(lib ${_PSI_LIBS})
+        list(APPEND _spu_libs "-l${lib}")
+    endforeach()
+
+    add_custom_command(
+        OUTPUT "${_spu_elf}"
+        COMMAND "${PS3_SPU_GCC}"
+                ${_spu_link_flags}
+                ${_spu_objs} ${_spu_libs}
+                -o "${_spu_elf}"
+        DEPENDS ${_link_deps}
+        COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
+        VERBATIM)
+
+    # Embed the SPU ELF into the PPU target via bin2s.  Symbol
+    # prefix derives from the basename: "<NAME>.bin" → "<NAME>_bin".
+    ps3_bin2s(${target} "${_spu_elf}")
+endfunction()
+
+# -----------------------------------------------------------------------------
+# Cg shader compilation: .vcg / .fcg → .vpo / .fpo → bin2s-embedded
+# -----------------------------------------------------------------------------
+# ps3_add_cg_shader(<target> <file>)
+#
+# Compiles a Cg shader through the cgcomp host tool (PSL1GHT-installed
+# at $PS3DEV/bin/cgcomp) and embeds the resulting compiled-shader
+# blob (.vpo for vertex / .fpo for fragment) into the PPU target via
+# bin2s.  PPU code references the shader via the bin2s symbol set:
+#
+#   `vpshader.vcg` → bin2s output `vpshader_vpo[]` etc., header
+#                    `vpshader_vpo.h`
+#   `fpshader.fcg` → bin2s output `fpshader_fpo[]` etc., header
+#                    `fpshader_fpo.h`
+#
+# Profile is auto-detected from the file extension: .vcg → -v
+# (vertex), .fcg → -f (fragment).  rsx-cg-compiler is on the
+# longer-term roadmap as a drop-in replacement for cgcomp; until
+# every test shader is byte-identical between the two, cgcomp stays
+# the default here.
+if(NOT _PS3_CG_PROBED)
+    set(_PS3_CG_PROBED TRUE)
+    set(_ps3_self_exe "")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_self_exe ".exe")
+    endif()
+    find_program(PS3_TOOL_cgcomp
+        NAMES "cgcomp${_ps3_self_exe}" "cgcomp"
+        PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+        NO_DEFAULT_PATH)
+    # cgcomp is optional — only Cg-shader-using samples need it.
+endif()
+
+function(ps3_add_cg_shader target file)
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "ps3_add_cg_shader: target '${target}' does not exist")
+    endif()
+    if(NOT PS3_TOOL_cgcomp)
+        message(FATAL_ERROR "ps3_add_cg_shader: cgcomp not found at ${PS3DEV}/bin or ${PS3DK}/bin")
+    endif()
+
+    if(IS_ABSOLUTE "${file}")
+        set(_input "${file}")
+    else()
+        set(_input "${CMAKE_CURRENT_SOURCE_DIR}/${file}")
+    endif()
+    if(NOT EXISTS "${_input}")
+        message(FATAL_ERROR "ps3_add_cg_shader: input file does not exist: ${_input}")
+    endif()
+
+    # Detect profile from extension.
+    get_filename_component(_ext "${_input}" EXT)
+    get_filename_component(_stem "${_input}" NAME_WE)
+    if(_ext STREQUAL ".vcg")
+        set(_profile_arg "-v")
+        set(_out_ext "vpo")
+    elseif(_ext STREQUAL ".fcg")
+        set(_profile_arg "-f")
+        set(_out_ext "fpo")
+    else()
+        message(FATAL_ERROR "ps3_add_cg_shader: ${file} has unrecognised extension ${_ext} (expected .vcg or .fcg)")
+    endif()
+
+    set(_outdir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+    file(MAKE_DIRECTORY "${_outdir}")
+    set(_compiled "${_outdir}/${_stem}.${_out_ext}")
+
+    add_custom_command(
+        OUTPUT  "${_compiled}"
+        COMMAND "${PS3_TOOL_cgcomp}" "${_profile_arg}" "${_input}" "${_compiled}"
+        DEPENDS "${_input}"
+        COMMENT "ps3-cg: ${_stem}.${_ext} → ${_stem}.${_out_ext}"
+        VERBATIM)
+
+    # Embed the compiled shader blob into the target.  bin2s names
+    # the symbols off the file basename — `<stem>.<out_ext>` becomes
+    # `<stem>_<out_ext>` per the dot-to-underscore convention.
+    ps3_bin2s(${target} "${_compiled}")
 endfunction()
