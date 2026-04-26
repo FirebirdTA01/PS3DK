@@ -94,6 +94,21 @@ cp -a "$WIN_PREFIX/ppu" "$STAGE_DIR/ppu"
 say "Copying SPU toolchain from $WIN_PREFIX/spu"
 cp -a "$WIN_PREFIX/spu" "$STAGE_DIR/spu"
 
+# 1b. Refresh target sysroots from the native install.  The cross-build's
+# target-lib snapshot was taken at cross-build time; PSL1GHT / SDK installs
+# that landed afterwards (lv2-crt*.o, lv2.ld, additional .a's) live only
+# in the native tree.  Overlay them onto the Windows package so the
+# resulting toolchain sees the latest target-side artefacts.  Target libs
+# are PowerPC / SPU ELF — host-agnostic.
+for arch_pair in "ppu:powerpc64-ps3-elf" "spu:spu-elf"; do
+    arch="${arch_pair%%:*}"
+    target="${arch_pair##*:}"
+    if [[ -d "$PS3DEV/$arch/$target" ]]; then
+        say "Refreshing $arch/$target sysroot from native install"
+        cp -a "$PS3DEV/$arch/$target/." "$STAGE_DIR/$arch/$target/"
+    fi
+done
+
 # 2. Host-agnostic runtime + SDK + portlibs from the native install.
 for sub in psl1ght ps3dk portlibs; do
     if [[ -d "$PS3DEV/$sub" ]]; then
@@ -165,9 +180,14 @@ if defined _missing (
     exit /b 1
 )
 
-endlocal & set "PATH=%PS3DEV%\bin;%PS3DEV%\ppu\bin;%PS3DEV%\spu\bin;%PATH%"
-echo PS3DEV: %PS3DEV%
-echo PS3DK:  %PS3DK%
+REM PSL1GHT is a back-compat alias for PS3DK — sample Makefiles still
+REM include $(PSL1GHT)/ppu_rules and the runtime tree now lives under
+REM PS3DK.  We export it for this session only; users who want it
+REM permanently can `setx PSL1GHT "%PS3DK%"`.
+endlocal & set "PATH=%PS3DEV%\bin;%PS3DEV%\ppu\bin;%PS3DEV%\spu\bin;%PATH%" & set "PSL1GHT=%PS3DK%"
+echo PS3DEV:  %PS3DEV%
+echo PS3DK:   %PS3DK%
+echo PSL1GHT: %PSL1GHT%   ^(back-compat alias for PS3DK^)
 echo Toolchain bin dirs prepended to PATH for this session.
 echo.
 where powerpc64-ps3-elf-gcc.exe 1>nul 2>nul && powerpc64-ps3-elf-gcc.exe --version
