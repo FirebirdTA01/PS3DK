@@ -80,31 +80,20 @@ static inline void *lv2_ea32_expand(lv2_ea32_t ea)
  * expects when a callback is being registered (VBlank / Flip / Queue
  * handlers, FIFO callback slots, etc).
  *
- * Mechanism (current, transitional): on ELFv1 PPU64 the C `&func`
- * yields a pointer to a 24-byte function descriptor. The kernel's
- * callback registry dereferences the value it is given to read an
- * 8-byte compact descriptor `[entry_ea_32, toc_ea_32]`. Our post-
- * link step (tools/sprx-linker) writes that 8-byte block into the
- * env slot at offset +16 of the 24-byte descriptor — it is
- * pre-packed and waiting. So the correct kernel-facing EA is
- * `&func + 16`.
+ * Under the native compact-OPD ABI, a C function pointer on PPU64 IS
+ * the 32-bit EA of an 8-byte `.opd` descriptor `[entry_ea_32, toc_ea_32]`,
+ * which is exactly what the kernel callback registry dereferences. So
+ * this helper is a bare cast — its job is type discipline (return
+ * `lv2_ea32_t` so EA-ness is explicit at every call site), not arithmetic.
  *
- * This is a typed, documented replacement for PSL1GHT's
- * `__get_opd32` macro. Behaviour is byte-identical; what changes is
- * that the return type is `lv2_ea32_t`, making the EA-ness of the
- * value explicit at every call site.
- *
- * Future state: when GCC emits a 2-read indirect-call sequence and
- * binutils emits 8-byte `.opd` entries natively, a C function
- * pointer IS the 32-bit descriptor EA already. This helper then
- * becomes a bare cast with no +16, and every caller keeps the same
- * source. See `docs/abi/compact-opd-migration.md`.
+ * The retired transitional form added `+16` to address an env-slot
+ * inside a 24-byte ELFv1 descriptor. That path is gone for native
+ * output; `tools/sprx-linker` now only rewrites legacy 24-byte input
+ * if any reaches the final image. See `docs/abi/compact-opd-migration.md`.
  */
 static inline lv2_ea32_t lv2_fn_to_callback_ea(const void *fn)
 {
     if (!fn) return 0;
-    /* Compact 8-byte .opd: bytes 0..3 = entry_ea, 4..7 = toc_ea.
-     * The function pointer is already the descriptor EA; no +16 step. */
     return (lv2_ea32_t)(uintptr_t)fn;
 }
 

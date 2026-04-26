@@ -307,11 +307,10 @@ s32 gcmSetFlip(gcmContextData *context, const u8 id)
 
 /* Handler setters — the kernel-visible callback registration path
  * expects a 32-bit EA pointing at an 8-byte compact descriptor
- * (entry_ea, toc_ea). Our sprx-linker packs that compact block at
- * offset +16 of the 24-byte ELFv1 descriptor; lv2_fn_to_callback_ea
- * returns the EA of that packed block. Byte-identical to PSL1GHT's
- * __get_opd32 path, just typed with lv2_ea32_t at every boundary.
- * See docs/abi/compact-opd-migration.md for the end state. */
+ * (entry_ea, toc_ea). Under our native compact-OPD ABI a C function
+ * pointer already IS that EA, so lv2_fn_to_callback_ea is a bare cast
+ * (typed for clarity at the boundary). Replaces PSL1GHT's __get_opd32
+ * + (descriptor + 16) form; see docs/abi/compact-opd-migration.md. */
 void gcmSetFlipHandler(void (*handler)(const u32 head))
 {
     cellGcmSetFlipHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
