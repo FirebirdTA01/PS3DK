@@ -1,9 +1,7 @@
 # rsx-cg-compiler — Cg → NV40 compiler
 #
-# Self-contained build: all donor front-end sources are copied into
-# tools/rsx-cg-compiler/src/donor/ rather than referenced from a sibling
-# clone of vita-cg-compiler.  Sync against upstream is a manual `cp`
-# operation when needed.
+# Self-contained build: all donor front-end sources are vendored under
+# tools/rsx-cg-compiler/src/donor/.
 
 cmake_minimum_required(VERSION 3.16)
 project(rsx-cg-compiler
