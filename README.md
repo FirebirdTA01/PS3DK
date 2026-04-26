@@ -175,6 +175,80 @@ Each sample produces three artefacts:
 
 `samples\README.md` has the full sample index plus per-sample notes on what each one validates.
 
+### Manual / direct toolchain invocation (no `make`)
+
+If you don't want to install `make` + `bash`, the toolchain can be driven directly from `cmd` or PowerShell.  This is also the right path for IDE integration, custom build systems, or one-off compiles outside the Makefile-driven sample tree.
+
+The end-to-end pipeline for a typical PS3 homebrew app is **compile → link → strip → sprxlinker → sign**.  Below shows the command sequence for a PPU C/C++ sample; replace `powerpc64-ps3-elf-` with `spu-elf-` for SPU code.  Variable names match the PSL1GHT-style Makefile rules so the docs translate one-to-one.
+
+**1. Compile each source file** (loop over .c / .cpp).  These are the same flags `ppu_rules` would emit:
+
+```cmd
+powerpc64-ps3-elf-gcc.exe ^
+    -O2 -Wall -mcpu=cell ^
+    -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections ^
+    -I"%PS3DK%\ppu\include" ^
+    -I"%PS3DK%\ppu\include\simdmath" ^
+    -c source\main.c -o build\main.o
+```
+
+For C++ swap `-gcc` → `-g++` and append `-std=c++17` (or whichever standard the sample's `Makefile` sets in `CXXFLAGS`).
+
+**2. Compile shaders** (only for samples with `.vcg` / `.fcg` files under `shaders\`).  Vertex profile is `sce_vp_rsx`, fragment profile is `sce_fp_rsx`:
+
+```cmd
+rsx-cg-compiler.exe -p sce_vp_rsx --emit-container build\vpshader.vpo shaders\vpshader.vcg
+rsx-cg-compiler.exe -p sce_fp_rsx --emit-container build\fpshader.fpo shaders\fpshader.fcg
+```
+
+**3. Embed binary data** (shaders, images, fonts, anything `bin2o`-fied by `data_rules`).  Each `.vpo` / `.fpo` / `.png` / `.jpg` / `.bin` becomes an object file the linker pulls in:
+
+```cmd
+bin2s.exe -a 64 build\vpshader.vpo > build\vpshader_vpo.s
+powerpc64-ps3-elf-as.exe -o build\vpshader_vpo.o build\vpshader_vpo.s
+```
+
+PSL1GHT also expects a generated header alongside each `.bin.o`; see the `bin2o` macro in `base_rules` for the exact form (three `extern const u8`/`u32` declarations per blob, derived from the input filename).
+
+**4. Link everything into a PPU ELF.**  The linker spec inside `powerpc64-ps3-elf-gcc` reads `%PS3DK%` via `getenv()` and auto-includes `-L%PS3DK%\ppu\lib --start-group -lsysbase -lc -lrt -llv2 --end-group` plus the LV2 CRT objects (`lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`, `lv2-sprx.o`) and the linker script `lv2.ld`.  You only need to specify the *additional* libs the sample uses:
+
+```cmd
+powerpc64-ps3-elf-gcc.exe ^
+    build\main.o build\vpshader_vpo.o build\fpshader_fpo.o ^
+    -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections ^
+    -Wl,-Map,sample.elf.map ^
+    -L"%PS3DK%\ppu\lib" ^
+    -lgcm_cmd -lgcm_sys -lio -lsysutil -lsysmodule -lrt -llv2 -lm ^
+    -o sample.elf
+```
+
+**5. Strip + sprxlinker + SELF signing.**  Three host tools (shipped in `%PS3DK%\bin\`):
+
+```cmd
+powerpc64-ps3-elf-strip.exe sample.elf -o build\sample.elf
+sprxlinker.exe              build\sample.elf
+make_self.exe               build\sample.elf sample.self
+fself.exe                   build\sample.elf sample.fake.self
+```
+
+`sample.self` boots on RPCS3 / signed HW; `sample.fake.self` boots on CFW hardware via XMB install or `ps3load`.
+
+**6. (Optional) Build a `.pkg`** for installing the app on CFW hardware.  Requires `make_self_npdrm`, `sfo.py`, `pkg.py`, and `package_finalize`:
+
+```cmd
+mkdir build\pkg\USRDIR
+copy "%PS3DK%\bin\ICON0.PNG" build\pkg\ICON0.PNG
+make_self_npdrm.exe build\sample.elf build\pkg\USRDIR\EBOOT.BIN UP0001-HELPPU017_00-0000000000000000
+sfo.py --title "Hello PPU" --appid HELPPU017 -f "%PS3DK%\bin\sfo.xml" build\pkg\PARAM.SFO
+pkg.py  --contentid UP0001-HELPPU017_00-0000000000000000 build\pkg\ sample.pkg
+copy sample.pkg sample.gnpdrm.pkg
+package_finalize.exe sample.gnpdrm.pkg
+```
+
+`sample.pkg` is unsigned (debug-installable on CFW); `sample.gnpdrm.pkg` after `package_finalize` is the npdrm-finalised version.
+
+The exact flag set each sample needs (extra `-l` libs, additional `-I` include paths, `CXXFLAGS` overrides, etc.) is in that sample's `Makefile`.  `make VERBOSE=1` prints every command verbatim, so you can copy the lines you need and skip `make` entirely.
+
 ## Getting started
 
 ### Host dependencies
