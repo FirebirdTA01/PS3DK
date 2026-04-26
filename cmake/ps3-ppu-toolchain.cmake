@@ -78,12 +78,20 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 # -----------------------------------------------------------------------------
 # -mcpu=cell selects the Cell PPE; -mhard-float / -fmodulo-sched are
 # the same flags ppu_rules emits via $(MACHDEP).  -ffunction-sections /
-# -fdata-sections + -Wl,--gc-sections keep the binary tight.
+# -fdata-sections match ppu_rules so each function/object lands in its
+# own section — but we deliberately do NOT pass --gc-sections to the
+# linker.  PSL1GHT's ppu_rules doesn't either, and for good reason: GCM
+# samples place command buffers / vertex buffers / TLS scratch in BSS
+# that the kernel callback path (registered via cellGcmSetFlipHandler
+# etc., reaching .opd through 32-bit EAs) reaches without a static
+# reference the linker can trace.  --gc-sections silently strips them
+# — observed symptom is a black-screen + emulator crash on exit
+# (hello-ppu-cellgcm-cube .bss collapsed from ~256 KiB to ~1 KiB).
 set(_ps3_ppu_machdep "-mcpu=cell -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections")
 set(CMAKE_C_FLAGS_INIT   "${_ps3_ppu_machdep}")
 set(CMAKE_CXX_FLAGS_INIT "${_ps3_ppu_machdep}")
 set(CMAKE_ASM_FLAGS_INIT "-mcpu=cell")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "${_ps3_ppu_machdep} -Wl,--gc-sections")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "${_ps3_ppu_machdep}")
 
 # Per-config defaults.  Release-with-warnings matches the
 # samples/.../Makefile's CFLAGS = -O2 -Wall.
