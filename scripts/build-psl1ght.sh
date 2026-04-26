@@ -72,6 +72,55 @@ make -j"$(nproc 2>/dev/null || echo 4)"
 say "make install"
 make install
 
+# --------------------------------------------------------------------
+# CRT override — PSL1GHT-stale-runtime regression guard
+# --------------------------------------------------------------------
+# PSL1GHT's `make install` writes its own lv2-sprx.o / lv2-crti.o /
+# lv2-crt0.o / lv2.ld into $PS3DEV/ppu/powerpc64-ps3-elf/lib/ — the
+# directory GCC searches via the "%s" suffix in STARTFILE_LV2_SPEC.
+# Those files predate our compact-OPD migration and our cellos-lv2 ABI
+# spec work:
+#
+#   * lv2-sprx.o has a 40-byte .sys_proc_prx_param (PSL1GHT-era);
+#     the modern Lv-2 loader (and RPCS3) require the 64-byte form per
+#     docs/abi/cellos-lv2-abi-spec.md section 3.  Symptom: PSL1GHT's
+#     own make_self refuses with "elf does not have a prx parameter
+#     section.", or the SELF builds and RPCS3 segfaults during load
+#     ("Segfault reading 0x0 at <host_addr>" with PC stuck at the
+#     ELF's ._start) because the loader can't parse the 40-byte
+#     descriptor and bails before transferring control.
+#
+#   * lv2-crti.o emits ELFv1 24-byte .opd entries with section flags
+#     "ax".  Mixed with our compact 8-byte .opd from C / C++ TUs, the
+#     binutils edit_opd path produces a Frankenstein .opd whose first
+#     few entries have entry_ea_32 = 0 (the high zero-bytes of the
+#     64-bit entry_ea), so anything walking those entries via
+#     bl-redirect or __init_array crashes.
+#
+#   * lv2-crt0.o reads TOC from offset +8 of the __start descriptor
+#     (assumes 24-byte ELFv1 layout).  In compact-OPD output the TOC
+#     field is at offset +4 (32-bit, lwz-loaded into r2).
+#
+# The fix is run-it-after-PSL1GHT, encoded here so a fresh
+# build-psl1ght.sh leaves a working tree.  scripts/build-runtime-lv2.sh
+# rebuilds runtime/lv2/crt/{lv2-sprx,lv2-crti,crt0}.S into compact-OPD
+# objects (along with the 64-byte .sys_proc_prx_param payload) and
+# overwrites PSL1GHT's stale copies at the GCC startfile path and the
+# $PS3DK mirror, plus replaces $PS3DEV/bin/sprxlinker with our fork
+# from tools/sprx-linker/.
+#
+# Skipping this step is the regression mode that surfaced in the
+# Apr 25 WSL2/cross-build commit train — PSL1GHT got rebuilt, the
+# CRT override step was missing from the orchestration, every C++
+# sample crashed during SELF load, and the symptom looked like a
+# compiler / .opd / .TOC. issue (it isn't — the .opd looked broken
+# only because PSL1GHT's 24-byte lv2-crti.o was being merged with our
+# compact entries).  See the commit message for build(toolchain):
+# wire build-runtime-lv2.sh into build-psl1ght.sh for the full
+# investigation log.
+say "running build-runtime-lv2.sh to override PSL1GHT's CRT with our compact-OPD runtime"
+"$script_dir/build-runtime-lv2.sh"
+
 say "=== Done ==="
 say "PSL1GHT installed at: $INSTALL"
 say "Try: cd samples/hello-ppu-c++17 && make"
