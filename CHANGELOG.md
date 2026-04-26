@@ -13,8 +13,176 @@ The version stamped into builds is generated from the most recent
 
 ## [Unreleased]
 
-<!-- New entries go here while work is in progress; promote them to a
-     dated, version-tagged section at release time. -->
+### Sample build system — Makefile → CMake
+
+Every sample under `samples/` now builds via standalone CMake projects;
+the per-sample PSL1GHT-style Makefiles + `ppu_rules` / `spu_rules`
+include path are gone.  Highlights:
+
+- New `cmake/ps3-ppu-toolchain.cmake` and `cmake/ps3-spu-toolchain.cmake`
+  cross-compilation toolchain files.  Each reads `$PS3DEV` / `$PS3DK`
+  from the environment, points CMake at the cross-compiler, sets
+  defaults that match the legacy `MACHDEP` flag set, and adds the
+  SDK include / library search paths.
+- New `cmake/ps3-self.cmake` helper module exposing four primitives:
+  - `ps3_add_self(<target>)` — strip → sprxlinker → make_self / fself
+    post-build chain.  Final `.elf` / `.self` / `.fake.self` artefacts
+    land at the sample source directory next to `CMakeLists.txt`,
+    matching the legacy Makefile placement.  Build intermediates stay
+    in `cmake-build/`.
+  - `ps3_bin2s(<target> <file>)` — embed an arbitrary binary blob into
+    the target via the `bin2s` host tool plus a generated header that
+    declares the three externs (`<id>` / `<id>_end` / `<id>_size`).
+  - `ps3_add_spu_image(<target> NAME <name> SOURCES <files…>
+    [LIBS <libs…>])` — compiles SPU sources via `spu-elf-gcc`, embeds
+    the resulting LS image into the PPU executable, and surfaces it
+    under the `<name>_bin*` symbol set.  Replaces the legacy `spu/`
+    sub-Makefile pattern.
+  - `ps3_add_cg_shader(<target> <file>)` — drives `cgcomp` for `.vcg`
+    / `.fcg` shaders, then embeds the compiled blob.
+- 39 samples ported, including the GCM Cg-shader and Spurs-task
+  samples that previously depended on bespoke Makefile-only data and
+  SPU sub-trees.
+- README, samples README, and the direct-toolchain (no-CMake)
+  fallback path all refreshed for the new build flow.
+
+### Windows-host toolchain release pipeline
+
+End-to-end cross-build of the PPU + SPU toolchains from Linux to
+`x86_64-w64-mingw32` is now wired into the release workflow:
+
+- New `--host=x86_64-w64-mingw32` mode for
+  `scripts/build-ppu-toolchain.sh` and `scripts/build-spu-toolchain.sh`.
+  The first pass builds the native Linux compiler so target libraries
+  (libgcc, newlib, libstdc++) are available; the second pass reuses
+  those target libraries while re-bootstrapping a Windows-hosted
+  binutils + GCC + GDB.
+- New `scripts/build-host-tools-windows.sh` cross-builds the host
+  utilities (`make_self`, `make_self_npdrm`, `package_finalize`,
+  `fself`, `rsx-cg-compiler`, plus their static `zlib` / `gmp` /
+  `openssl` deps) for Windows.
+- New `scripts/package-windows-release.sh` collects the
+  Linux-cross-built compilers, the Windows-cross-built host tools,
+  and the SDK runtime into a self-contained
+  `ps3-sdk-vX.Y.Z-windows-x86_64.zip` plus a `setup.cmd` that exports
+  `%PS3DEV%` / `%PS3DK%` / `%PSL1GHT%` and prepends `bin\`,
+  `ppu\bin\`, and `spu\bin\` to `%PATH%`.
+- `release.yml` grew a `build-toolchain-windows` job (with optional
+  opt-in via the `run_toolchain_windows` boolean for non-tag
+  `workflow_dispatch` runs) that drives the full cross-build +
+  packaging flow on tag pushes.  Native Linux PPU/SPU toolchain
+  builds split into two parallel CI jobs sharing a `ccache` cache;
+  binutils-mingw and gcc-mingw run as discrete jobs whose outputs
+  the `build-toolchain-windows` job stitches together.
+
+### `rsx-cg-compiler` — shader byte-match coverage
+
+The byte-diff suite against `sce-cgc` at `--O2 --fastmath` grows from
+59/59 to **65/65** byte-identical:
+
+- **Repeated-add scale-fold (full vec4)** generalises the pattern
+  matcher to N=2..64.  The N≤3 path keeps the short MOVH+MAD shape;
+  longer chains lower to `MOVH H0; MULR R1 = H0*2; (MADR R1 += H0*2)
+  × (K-1); [FENCBR if K odd]; (ADD/MAD) R0[END]`.  Final write picks
+  ADD vs MAD by carry parity.  Scalar-lane N≥4 stays capped at 3 —
+  `sce-cgc` switches to a DP2R shape there which is documented in
+  `KNOWN_ISSUES.md`.
+- **Multi-instruction if-only-with-default + N-insn THEN diamonds**
+  predicate end-to-end via a new `IROp::PredCarry`.
+  `nv40_if_convert` Shape 3 detects the `entry{stout default; brc}
+  → then{(compute, stout) × N} → ret` shape and synthesises a chain
+  of `PredCarry` ops; the FP emit handler walks the chain, emits
+  the SGTRC compare + per-link `MOVR carry; <OP>(NE.x)` pair,
+  alternates dst R-temps to land at R0, picks the H-promote register
+  to dodge the R0 alias, and inserts FENCBR before the last
+  predicated OP for chain length ≥ 2.
+
+### Build correctness — runtime fixes
+
+- `cmake/ps3-ppu-toolchain.cmake` pre-links `librt` so libc's
+  `init_metalock` ctor runs before librt's `__glob_file_init` ctor.
+  Both share `__attribute__((constructor(105)))` and the legacy
+  Makefiles got the right order from explicit `-lrt` in `$(LIBS)`;
+  the CMake path inherited only the GCC spec's `--start-group`
+  injection, which pulled libc first and made the init path call
+  `strdup` → `malloc` → `__libc_auto_lock_allocate` on a still-zero
+  metaLock → `abort()`.  Fix lands `init_metalock` at the correct
+  `.ctors` slot.
+- `cmake/ps3-ppu-toolchain.cmake` drops `-Wl,--gc-sections`.  The
+  flag stripped BSS arrays the GCM/sysutil callback path reaches
+  via 32-bit EAs (`cellGcmSetFlipHandler` etc.) — the linker has no
+  static reference to trace, so the sections were silently
+  collected.  PSL1GHT's `ppu_rules` never passed `--gc-sections` for
+  the same reason; the SPU side keeps it (LS-image case is bounded).
+  Visible symptom on `hello-ppu-cellgcm-cube`: `.bss` collapsed from
+  0x40638 to 0x538, and the SELF black-screened in RPCS3.
+- `samples/spu/hello-spu` SPU side now reads
+  `sysSpuThreadArgument.arg0` (passed via `$3`) instead of `arg1`
+  (`$4`) for the done-flag EA, and exits via libsputhread's
+  `sys_spu_thread_exit()` — which traps with the LV2-recognised
+  `stop 0x102` — instead of the spu-elf default crt0's `stop
+  0x2000`, which RPCS3 rejects as a fatal STOP code.
+- `samples/sysutil/hello-ppu-png` `configure_file()`s
+  `sdk/assets/ICON0.PNG` into `pkg_files/USRDIR/ps3dk.png` at
+  CMake-generation time, so direct-boot of the `.self` resolves the
+  asset (which the legacy Makefile pkg-build chain copied as a side
+  effect, lost in the CMake migration).
+- `sdk/libgcm_sys_legacy` callback trampoline saves the caller's
+  TOC via the PPC64 ELFv1 stack save area instead of clobbering
+  `r31`.  The old form lost the TOC when the wrapped GCM callback
+  itself made a function call.
+- `scripts/build-ppu-toolchain.sh` patches the bundled GDB
+  py-readline build for Python 3.13+ hosts (where the previous
+  `_PyOS_ReadlineTState` symbol moved).
+
+### SDK runtime install layout
+
+- `$PS3DK` is now the unified runtime install root for everything
+  PSL1GHT and our own SDK ship: `ppu/`, `spu/`, `bin/`, `lib/`,
+  `include/`, `samples/`, plus a top-level `setup.cmd`.  The legacy
+  `$PSL1GHT` directory remains as a back-compat alias for downstream
+  homebrew that still reads it.
+- New `scripts/build-runtime-lv2.sh` step inside
+  `scripts/build-psl1ght.sh` builds the LV2 CRT objects (`lv2-crt0.o`
+  / `lv2-crti.o` / `lv2-crtn.o` / `lv2-sprx.o`) and the linker
+  script (`lv2.ld`) into `$PS3DK/ppu/lib/` so the GCC driver's
+  `STARTFILE_LV2_SPEC %s` search resolves them ahead of any
+  PSL1GHT-stock copies still on disk.
+- Default sample `ICON0.PNG` redrawn.
+
+### CI / release infrastructure
+
+- `release.yml` honours a manual workspace-version override on
+  `workflow_dispatch` runs so test releases tagged off branches
+  don't fail the version-stamp check.
+- MSYS2 setup retries up to 3× on transient HTTP 502s during the
+  Windows host-tools build.
+- Portlibs build falls back through three zlib mirrors (`zlib.net`,
+  GitHub release, Sourceforge) so a transient one-mirror outage no
+  longer aborts the SDK build.
+- `release.yml` pins `CC=<host>-gcc` / `CXX=<host>-g++` alongside
+  `CC_FOR_BUILD=gcc` / `CXX_FOR_BUILD=g++` for the mingw cross-build,
+  defeating the workflow's global `CC=ccache gcc` setting that
+  otherwise leaked into the cross-host probe and made
+  `binutils --host=mingw` configure error out at "C compiler cannot
+  create executables".
+- Bootstrap `git clone` no longer uses `--filter=blob:none` (saves
+  the periodic re-clone when later `git archive` calls hit the
+  partial-clone slow path).
+- `apt` / `dnf` / `pacman` host-deps lists refreshed: `libssl-dev`,
+  `libelf-dev` for PSL1GHT host tools.
+- Shell scripts marked executable in the git index so fresh clones
+  stay runnable on Linux without an explicit `chmod`.
+- `vita-cg-compiler` clone references dropped from
+  `scripts/bootstrap.sh`; the upstream donor for early `rsx-cg-compiler`
+  bring-up is no longer cloned at bootstrap time.
+
+### Known issues
+
+- `samples/gcm/hello-ppu-cellgcm-{triangle,loops,chain,laneelision}`
+  render correctly in RPCS3 but stutter PS-button menu navigation —
+  same per-frame VP-ucode upload + missing sysutil
+  `DRAWING_BEGIN/END` handling carried forward from v0.2.0.
 
 ## [v0.2.0] — 2026-04-25
 
