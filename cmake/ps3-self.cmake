@@ -10,15 +10,21 @@
 #
 #     ps3_add_self(my_app)
 #
-# Produces (in the build directory):
-#     my_app                # raw .elf (CMake's executable target)
-#     my_app.stripped.elf   # post-strip + sprxlinker
-#     my_app.self           # CEX-signed (boots in RPCS3 / signed HW)
-#     my_app.fake.self      # fake-signed (boots in CFW / ps3load)
+# Produces:
+#     <build>/my_app          # raw unstripped .elf  (CMake's executable target)
+#     <source>/my_app.elf     # stripped + sprxlinker-rewritten .elf
+#     <source>/my_app.self    # CEX-signed (boots in RPCS3 / signed HW)
+#     <source>/my_app.fake.self  # fake-signed (boots in CFW / ps3load)
 #
-# All four artefacts land in the same directory as the CMake target's
-# binary output (i.e. the build dir, not source).  Match the existing
-# Makefile-driven sample's ${TARGET}.{self,fake.self} convention.
+# Final artefacts (.elf, .self, .fake.self) land at the sample source
+# directory — matching the legacy `make`-driven convention where the
+# stripped .elf and signed .self / .fake.self sat next to the
+# Makefile.  The unstripped CMake-target binary stays in the build
+# dir as an intermediate (and isn't useful on its own — it lacks the
+# sprxlinker post-link rewrite that LV2 expects).
+#
+# Sample dirs already gitignore *.elf / *.self / *.fake.self so the
+# generated files never show up in `git status`.
 
 include_guard(GLOBAL)
 
@@ -71,20 +77,17 @@ function(ps3_add_self target)
         message(FATAL_ERROR "ps3_add_self: target '${target}' does not exist")
     endif()
 
-    # Resolve the .elf path via $<TARGET_FILE:..> at build time, but
-    # use the target's RUNTIME_OUTPUT_DIRECTORY (or the binary dir as
-    # fallback) for the post-build artefacts so BYPRODUCTS can be a
-    # plain string — generator expressions in BYPRODUCTS are accepted
-    # but the support is uneven across CMake versions and Ninja.
-    get_target_property(_outdir ${target} RUNTIME_OUTPUT_DIRECTORY)
-    if(NOT _outdir)
-        set(_outdir "${CMAKE_BINARY_DIR}")
-    endif()
-
+    # The unstripped .elf comes from CMake's add_executable target and
+    # lives in the build dir; only the post-build artefacts move out
+    # to the sample source dir (next to CMakeLists.txt) so they sit
+    # exactly where the legacy Makefile placed `${TARGET}.{elf,self}`.
+    # CMAKE_CURRENT_SOURCE_DIR is the dir containing the calling
+    # CMakeLists, which is what we want for samples invoked via
+    # `cmake -S <sample-dir>`.
     set(_elf       "$<TARGET_FILE:${target}>")
-    set(_stripped  "${_outdir}/${target}.stripped.elf")
-    set(_self      "${_outdir}/${target}.self")
-    set(_fake_self "${_outdir}/${target}.fake.self")
+    set(_stripped  "${CMAKE_CURRENT_SOURCE_DIR}/${target}.elf")
+    set(_self      "${CMAKE_CURRENT_SOURCE_DIR}/${target}.self")
+    set(_fake_self "${CMAKE_CURRENT_SOURCE_DIR}/${target}.fake.self")
 
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_STRIP}" "${_elf}" -o "${_stripped}"
