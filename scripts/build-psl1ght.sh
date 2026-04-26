@@ -23,7 +23,14 @@ die() { printf "[psl1ght] ERROR: %s\n" "$*" >&2; exit 1; }
 
 SRC="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT"
 PATCHES="$PS3_TOOLCHAIN_ROOT/patches/psl1ght"
-INSTALL="$PS3DEV/psl1ght"
+# PSL1GHT runtime now installs into $PS3DK so libsysbase / libc / librt /
+# liblv2 land at $PS3DK/ppu/lib — the path the PPU GCC driver reads from
+# the PS3DK env var via getenv() in its LIB_LV2_SPEC.  Same for SPU libs
+# and the ppu_rules / spu_rules / base_rules Makefile fragments used by
+# sample builds.  Older builds installed under $PS3DEV/psl1ght; the
+# previous tree can be deleted by hand once a fresh PS3DK install is
+# verified.
+INSTALL="$PS3DK"
 
 # Verify toolchains are built.
 [[ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc" ]] \

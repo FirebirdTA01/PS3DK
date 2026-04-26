@@ -157,7 +157,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         # them.
         extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libc_stub_extras"
         say "building libc_stub_extras (real spu_printf_*)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DEV/psl1ght" \
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
             make -C "$extras_dir" all >/dev/null
         for extras_obj in "$extras_dir/build/"*.o; do
             [[ -f "$extras_obj" ]] || continue

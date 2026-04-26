@@ -322,11 +322,13 @@
 +#undef	LINK_OS_DEFAULT_SPEC
 +#define LINK_OS_DEFAULT_SPEC "%(link_os_lv2)"
 +
-+/* PSL1GHT libraries: the %:getenv() spec function reads $PSL1GHT at
-+   build time.  --start-group / --end-group resolve circular deps
-+   between newlib, lv2 stubs, and libsysbase.  */
++/* LV2 runtime libraries: the %:getenv() spec function reads $PS3DK at
++   compile time and resolves -L against $PS3DK/ppu/lib (which is where
++   build-psl1ght.sh / build-sdk.sh install libsysbase, librt, liblv2,
++   libc, and the cell-SDK stub archives).  --start-group / --end-group
++   resolve circular deps between newlib, lv2 stubs, and libsysbase.  */
 +#define LIB_LV2_SPEC \
-+  "-L %:getenv(PSL1GHT /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 --end-group"
++  "-L %:getenv(PS3DK /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 --end-group"
 +
 +#define STARTFILE_LV2_SPEC \
 +  "lv2-crti.o%s crtbegin.o%s lv2-crt0.o%s lv2-sprx.o%s"
