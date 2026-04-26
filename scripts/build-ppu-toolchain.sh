@@ -46,15 +46,50 @@ say "Using $JOBS parallel jobs."
 
 # CLI: optional --clean wipes build dir; --only <step> runs only that step.
 # Steps: binutils | gcc-newlib | gdb | symlinks (default: all in order).
+#
+# Cross-build mode (Windows-hosted toolchain):
+#   --host=x86_64-w64-mingw32   produce .exe binaries that run on Windows.
+#   --build=<triple>            (optional) override the build triple; default
+#                               $(uname -m)-pc-linux-gnu.
+# Cross-build requires the native PPU toolchain to already be installed
+# (stage 0): target libraries (libgcc, libstdc++, newlib) are reused from
+# the native tree rather than rebuilt, so the cross-compiler ships with
+# host-agnostic PowerPC ELF libs sourced from the native build.
 ONLY=""
+HOST_TRIPLE=""
+BUILD_TRIPLE=""
 for arg in "$@"; do
     case "$arg" in
         --clean) say "Cleaning $BUILD"; rm -rf "$BUILD" ;;
         --only=*) ONLY="${arg#--only=}" ;;
         --only) shift; ONLY="${1:-}" ;;
+        --host=*) HOST_TRIPLE="${arg#--host=}" ;;
+        --build=*) BUILD_TRIPLE="${arg#--build=}" ;;
         binutils|gcc-newlib|gdb|symlinks) ONLY="$arg" ;;
     esac
 done
+
+# When cross-building, install into a parallel prefix and use a separate
+# build directory so the native install tree is untouched and reusable.
+NATIVE_PREFIX="$PREFIX"
+if [[ -n "$HOST_TRIPLE" ]]; then
+    PREFIX="${PS3DEV}.win/ppu"
+    BUILD="$PS3_BUILD_ROOT/ppu-${HOST_TRIPLE}"
+    BUILD_TRIPLE="${BUILD_TRIPLE:-$(uname -m)-pc-linux-gnu}"
+    [[ -x "$NATIVE_PREFIX/bin/$TARGET-gcc" ]] \
+        || die "Native PPU toolchain not present at $NATIVE_PREFIX/bin/$TARGET-gcc. Run without --host first to produce stage 0."
+    say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
+fi
+
+# Cross-build linker-flag injection: statically link host libstdc++/libgcc/
+# winpthread so the resulting .exe files have no DLL runtime dependency.
+# CROSS_LDFLAGS_ARGS is empty for native builds (so we don't clobber any
+# distro-supplied LDFLAGS in the user's env) and a single "VAR=value" element
+# for cross-builds (passed to env(1) verbatim, preserving spaces).
+CROSS_LDFLAGS_ARGS=()
+if [[ -n "$HOST_TRIPLE" ]]; then
+    CROSS_LDFLAGS_ARGS=("LDFLAGS=-static -static-libgcc -static-libstdc++")
+fi
 
 mkdir -p "$BUILD" "$PREFIX"
 
@@ -75,10 +110,20 @@ extract_source() {
 }
 
 # Apply patches from a directory. Honors a 'series' file if present (quilt-style).
+# Idempotent via a per-patches-dir stamp: once all patches succeed, a stamp file
+# is created at $src/.patches-applied-<patches_dir basename>; subsequent runs
+# detect the stamp and short-circuit.  If a run is interrupted between patches,
+# the source tree is left in a partial state — recover with `--clean` and re-run.
 apply_patches() {
     local src="$1" patches_dir="$2"
     if [[ ! -d "$patches_dir" ]]; then
         say "No patches directory at $patches_dir (skipping)"
+        return 0
+    fi
+
+    local stamp="$src/.patches-applied-${patches_dir##*/}"
+    if [[ -f "$stamp" ]]; then
+        say "Patches from $patches_dir already applied (stamp present)"
         return 0
     fi
 
@@ -97,8 +142,10 @@ apply_patches() {
     for p in "${patch_list[@]}"; do
         say "Applying $p to $src"
         (cd "$src" && patch -p1 --forward) < "$patches_dir/$p" \
-            || die "Patch $p failed"
+            || die "Patch $p failed (consider --clean to wipe build root and re-extract)"
     done
+
+    touch "$stamp"
 }
 
 # -----------------------------------------------------------------------------
@@ -125,10 +172,19 @@ build_binutils() {
     fi
 
     mkdir -p "$obj"
-    say "Configuring binutils -> $PREFIX (target=$TARGET)"
-    (cd "$obj" && "$src/configure" \
+    say "Configuring binutils -> $PREFIX (target=$TARGET${HOST_TRIPLE:+, host=$HOST_TRIPLE})"
+
+    local cross_args=()
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        cross_args+=(--host="$HOST_TRIPLE" --build="$BUILD_TRIPLE")
+    fi
+
+    (cd "$obj" && \
+        env "${CROSS_LDFLAGS_ARGS[@]}" \
+        "$src/configure" \
         --prefix="$PREFIX" \
         --target="$TARGET" \
+        "${cross_args[@]}" \
         --with-cpu=cell \
         --disable-nls \
         --disable-shared \
@@ -164,22 +220,27 @@ build_gcc_newlib() {
     local newlib_src="$BUILD/newlib-$NEWLIB_VER-src"
     local obj="$BUILD/gcc-$GCC_VER-build"
 
-    extract_source "$UPSTREAM/gcc"            "$GCC_TAG"    "$gcc_src"
-    extract_source "$UPSTREAM/newlib-cygwin"  "$NEWLIB_TAG" "$newlib_src"
+    extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$gcc_src"
+    apply_patches "$gcc_src" "$PATCHES/gcc-12.x"
 
-    apply_patches "$gcc_src"    "$PATCHES/gcc-12.x"
-    apply_patches "$newlib_src" "$PATCHES/newlib-4.x"
+    # Newlib is only built in the native (stage 0) flow.  Cross-builds reuse
+    # the PowerPC ELF target libraries from the already-installed native
+    # toolchain — they're host-agnostic.
+    if [[ -z "$HOST_TRIPLE" ]]; then
+        extract_source "$UPSTREAM/newlib-cygwin" "$NEWLIB_TAG" "$newlib_src"
+        apply_patches "$newlib_src" "$PATCHES/newlib-4.x"
 
-    # Regenerate newlib's configure + Makefile.in from the patched
-    # configure.ac / acinclude.m4 / Makefile.am / Makefile.inc set.  Patch 0001
-    # adds an `lv2` sys_dir conditional and patch 0004 ships the corresponding
-    # libc/sys/lv2/ tree; neither takes effect unless autoreconf rewrites the
-    # pregenerated 5k-line configure and 40k-line Makefile.in.  Patch 0008
-    # relaxes override.m4's strict autoconf-2.69 pin so modern hosts can do this.
-    if [[ ! -f "$newlib_src/newlib/.autoreconf-stamp" ]]; then
-        say "Regenerating newlib autotools (autoreconf -fi)"
-        (cd "$newlib_src/newlib" && autoreconf -fi)
-        touch "$newlib_src/newlib/.autoreconf-stamp"
+        # Regenerate newlib's configure + Makefile.in from the patched
+        # configure.ac / acinclude.m4 / Makefile.am / Makefile.inc set.  Patch 0001
+        # adds an `lv2` sys_dir conditional and patch 0004 ships the corresponding
+        # libc/sys/lv2/ tree; neither takes effect unless autoreconf rewrites the
+        # pregenerated 5k-line configure and 40k-line Makefile.in.  Patch 0008
+        # relaxes override.m4's strict autoconf-2.69 pin so modern hosts can do this.
+        if [[ ! -f "$newlib_src/newlib/.autoreconf-stamp" ]]; then
+            say "Regenerating newlib autotools (autoreconf -fi)"
+            (cd "$newlib_src/newlib" && autoreconf -fi)
+            touch "$newlib_src/newlib/.autoreconf-stamp"
+        fi
     fi
 
     # GCC prereqs: GMP, MPFR, MPC, ISL. Use contrib/download_prerequisites which
@@ -189,58 +250,125 @@ build_gcc_newlib() {
         (cd "$gcc_src" && ./contrib/download_prerequisites)
     fi
 
-    # Symlink newlib and libgloss into the GCC tree for combined build.
-    if [[ ! -e "$gcc_src/newlib" ]]; then
+    # Symlink newlib + libgloss into the GCC tree for the native combined build.
+    # Cross-build doesn't compile target libs, so the symlinks are irrelevant.
+    if [[ -z "$HOST_TRIPLE" && ! -e "$gcc_src/newlib" ]]; then
         ln -sf "$newlib_src/newlib"   "$gcc_src/newlib"
         ln -sf "$newlib_src/libgloss" "$gcc_src/libgloss"
     fi
 
     if [[ -f "$obj/.installed" ]]; then
-        say "GCC+newlib already built and installed (skipping)"
+        say "GCC already built and installed (skipping)"
         return 0
     fi
 
     mkdir -p "$obj"
-    say "Configuring GCC+newlib -> $PREFIX (target=$TARGET, GCC $GCC_VER)"
+    say "Configuring GCC -> $PREFIX (target=$TARGET, GCC $GCC_VER${HOST_TRIPLE:+, host=$HOST_TRIPLE})"
 
-    # Threading strategy: start with --enable-threads=single.  A follow-up
-    # swaps in --enable-threads=posix once the libsysbase gthr shim lands.
-    local threads_mode="${PS3_GCC_THREADS:-single}"
+    local conf_args=(
+        --prefix="$PREFIX"
+        --target="$TARGET"
+        --with-cpu=cell
+        --enable-languages=c,c++
+        --enable-lto
+        --enable-long-double-128
+        --disable-dependency-tracking
+        --disable-libcc1
+        --disable-libssp
+        --disable-libstdcxx-pch
+        --disable-libstdcxx-filesystem-ts
+        --disable-multilib
+        --disable-nls
+        --disable-shared
+        --disable-win32-registry
+    )
 
-    (cd "$obj" && "$gcc_src/configure" \
-        --prefix="$PREFIX" \
-        --target="$TARGET" \
-        --with-cpu=cell \
-        --with-newlib \
-        --enable-languages=c,c++ \
-        --enable-lto \
-        --enable-threads="$threads_mode" \
-        --enable-long-double-128 \
-        --enable-newlib-io-long-long \
-        --enable-newlib-io-c99-formats \
-        --disable-dependency-tracking \
-        --disable-libcc1 \
-        --disable-libssp \
-        --disable-libstdcxx-pch \
-        --disable-libstdcxx-filesystem-ts \
-        --disable-multilib \
-        --disable-nls \
-        --disable-shared \
-        --disable-win32-registry \
-        --with-system-zlib)
+    local target_env=()
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        # Cross-build: host binaries only, no target libs.  --disable-bootstrap
+        # is mandatory when --host != --build — the standard 3-stage GCC
+        # bootstrap can't run a Windows .exe on Linux.  Use GCC's bundled zlib
+        # (drop --with-system-zlib) so we don't need mingw-w64 zlib headers.
+        conf_args+=(
+            --host="$HOST_TRIPLE"
+            --build="$BUILD_TRIPLE"
+            --disable-bootstrap
+        )
+        # CC_FOR_BUILD/CXX_FOR_BUILD identify the build-host compiler so
+        # auxiliary tools like genmddeps compile with the local gcc, not the
+        # mingw cross compiler.
+        target_env=(
+            CC_FOR_BUILD=gcc
+            CXX_FOR_BUILD=g++
+        )
+    else
+        conf_args+=(--with-system-zlib)
+        # Native combined-tree: build libgcc, newlib, libstdc++ in one pass.
+        # Threading strategy: start with --enable-threads=single.  A follow-up
+        # swaps in --enable-threads=posix once the libsysbase gthr shim lands.
+        local threads_mode="${PS3_GCC_THREADS:-single}"
+        conf_args+=(
+            --with-newlib
+            --enable-threads="$threads_mode"
+            --enable-newlib-io-long-long
+            --enable-newlib-io-c99-formats
+        )
+    fi
 
-    say "Building GCC+newlib (this takes a while — ~30-90 minutes)"
-    (cd "$obj" && make -j"$JOBS" all)
+    (cd "$obj" && \
+        env "${target_env[@]}" "${CROSS_LDFLAGS_ARGS[@]}" \
+        "$gcc_src/configure" "${conf_args[@]}")
 
-    say "Installing GCC+newlib"
-    (cd "$obj" && make install)
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        say "Building GCC host-only (~15-30 minutes)"
+        (cd "$obj" && make -j"$JOBS" all-host)
+        say "Installing GCC host-only"
+        (cd "$obj" && make install-host)
+        copy_target_libs_from_native
+    else
+        say "Building GCC+newlib (this takes a while — ~30-90 minutes)"
+        (cd "$obj" && make -j"$JOBS" all)
+        say "Installing GCC+newlib"
+        (cd "$obj" && make install)
+    fi
     touch "$obj/.installed"
+}
+
+# When cross-building, target-library trees (newlib, libgcc, libstdc++) come
+# from the native install — they're host-agnostic PowerPC ELF.  Copy them
+# into the Windows-hosted prefix so the resulting toolchain ships with a
+# complete sysroot.
+copy_target_libs_from_native() {
+    [[ -n "$HOST_TRIPLE" ]] || return 0
+    say "Copying target libraries: $NATIVE_PREFIX -> $PREFIX"
+
+    # Target sysroot ($PREFIX/$TARGET/{lib,include,sys-include,...}).
+    if [[ -d "$NATIVE_PREFIX/$TARGET" ]]; then
+        mkdir -p "$PREFIX/$TARGET"
+        cp -a "$NATIVE_PREFIX/$TARGET/." "$PREFIX/$TARGET/"
+    fi
+
+    # libgcc lives under lib/gcc/$TARGET/$GCC_VER/.
+    if [[ -d "$NATIVE_PREFIX/lib/gcc/$TARGET" ]]; then
+        mkdir -p "$PREFIX/lib/gcc/$TARGET"
+        cp -a "$NATIVE_PREFIX/lib/gcc/$TARGET/." "$PREFIX/lib/gcc/$TARGET/"
+    fi
 }
 
 # -----------------------------------------------------------------------------
 # 3. GDB 14.2
 # -----------------------------------------------------------------------------
 build_gdb() {
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        # GDB 14 requires GMP and MPFR for its expression evaluator.  Ubuntu
+        # doesn't ship mingw-w64 builds of those, so we'd have to add a
+        # separate prerequisites build for the cross GDB.  Defer until
+        # there's demand: Windows users can debug via WSL-hosted gdb or
+        # RPCS3's built-in debugger.
+        say "Skipping GDB cross-build (host=$HOST_TRIPLE) — mingw-w64 GMP/MPFR not yet packaged; deferred."
+        return 0
+    fi
+
     local src="$BUILD/gdb-$GDB_VER-src"
     local obj="$BUILD/gdb-$GDB_VER-build"
 
@@ -253,15 +381,35 @@ build_gdb() {
     fi
 
     mkdir -p "$obj"
-    say "Configuring GDB -> $PREFIX (target=$TARGET)"
-    (cd "$obj" && "$src/configure" \
+    say "Configuring GDB -> $PREFIX (target=$TARGET${HOST_TRIPLE:+, host=$HOST_TRIPLE})"
+
+    local cross_args=()
+    local python_arg="--with-python=yes"
+    local readline_arg="--with-system-readline"
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        cross_args+=(--host="$HOST_TRIPLE" --build="$BUILD_TRIPLE")
+        # Cross-built GDB skips Python integration: configure runs python-config
+        # against the build host, which produces Linux libpython refs the
+        # Windows .exe can't link against.  Re-add via a Windows libpython
+        # bundled in a follow-up.
+        python_arg="--without-python"
+        # mingw-w64 ships its own readline; let GDB use it via curses.
+        readline_arg=""
+    fi
+
+    (cd "$obj" && \
+        env "${CROSS_LDFLAGS_ARGS[@]}" \
+        "$src/configure" \
         --prefix="$PREFIX" \
         --target="$TARGET" \
+        "${cross_args[@]}" \
         --disable-nls \
         --disable-werror \
         --disable-dependency-tracking \
-        --with-python=yes \
-        --with-system-readline)
+        --disable-sim \
+        --disable-gdbserver \
+        "$python_arg" \
+        ${readline_arg:+"$readline_arg"})
 
     say "Building GDB"
     # Build only the gdb subdir — we already built binutils/ld/gas/bfd above.
@@ -276,6 +424,13 @@ build_gdb() {
 # 4. Short-name symlinks (ppu-gcc, ppu-g++, etc.)
 # -----------------------------------------------------------------------------
 create_symlinks() {
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        # Windows-hosted toolchain: NTFS symlinks need elevated perms and the
+        # short ppu-* aliases are a Linux convenience.  Users invoke
+        # powerpc64-ps3-elf-gcc.exe directly on Windows.
+        say "Skipping ppu-* alias creation (cross-build target=$HOST_TRIPLE)"
+        return 0
+    fi
     local bin="$PREFIX/bin"
     if [[ ! -d "$bin" ]]; then
         warn "No $bin to symlink — skipping alias creation"

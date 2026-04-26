@@ -47,14 +47,37 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 say "Using $JOBS parallel jobs."
 
 ONLY=""
+HOST_TRIPLE=""
+BUILD_TRIPLE=""
 for arg in "$@"; do
     case "$arg" in
         --clean) say "Cleaning $BUILD"; rm -rf "$BUILD" ;;
         --only=*) ONLY="${arg#--only=}" ;;
         --only) shift; ONLY="${1:-}" ;;
+        --host=*) HOST_TRIPLE="${arg#--host=}" ;;
+        --build=*) BUILD_TRIPLE="${arg#--build=}" ;;
         binutils|gcc-newlib|symlinks|linker-script) ONLY="$arg" ;;
     esac
 done
+
+# Cross-build mode (Windows-hosted toolchain): see build-ppu-toolchain.sh's
+# header comment for the same option semantics.
+NATIVE_PREFIX="$PREFIX"
+if [[ -n "$HOST_TRIPLE" ]]; then
+    PREFIX="${PS3DEV}.win/spu"
+    BUILD="$PS3_BUILD_ROOT/spu-${HOST_TRIPLE}"
+    BUILD_TRIPLE="${BUILD_TRIPLE:-$(uname -m)-pc-linux-gnu}"
+    [[ -x "$NATIVE_PREFIX/bin/$TARGET-gcc" ]] \
+        || die "Native SPU toolchain not present at $NATIVE_PREFIX/bin/$TARGET-gcc. Run without --host first to produce stage 0."
+    say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
+fi
+
+# See build-ppu-toolchain.sh for the rationale on this array form vs.
+# a plain LDFLAGS variable.
+CROSS_LDFLAGS_ARGS=()
+if [[ -n "$HOST_TRIPLE" ]]; then
+    CROSS_LDFLAGS_ARGS=("LDFLAGS=-static -static-libgcc -static-libstdc++")
+fi
 
 mkdir -p "$BUILD" "$PREFIX"
 
@@ -75,6 +98,13 @@ apply_patches() {
         say "No patches directory at $patches_dir (skipping)"
         return 0
     fi
+
+    local stamp="$src/.patches-applied-${patches_dir##*/}"
+    if [[ -f "$stamp" ]]; then
+        say "Patches from $patches_dir already applied (stamp present)"
+        return 0
+    fi
+
     local patch_list
     if [[ -f "$patches_dir/series" ]]; then
         mapfile -t patch_list < <(grep -v '^#' "$patches_dir/series" | grep -v '^\s*$')
@@ -83,14 +113,11 @@ apply_patches() {
     fi
     [[ ${#patch_list[@]} -eq 0 ]] && { say "No patches in $patches_dir"; return 0; }
     for p in "${patch_list[@]}"; do
-        # Idempotent: if --dry-run --reverse succeeds, patch is already applied.
-        if (cd "$src" && patch -p1 --dry-run --reverse --silent) < "$patches_dir/$p" >/dev/null 2>&1; then
-            say "Patch $p already applied (skipping)"
-            continue
-        fi
         say "Applying $p to $src"
-        (cd "$src" && patch -p1 --forward) < "$patches_dir/$p" || die "Patch $p failed"
+        (cd "$src" && patch -p1 --forward) < "$patches_dir/$p" \
+            || die "Patch $p failed (consider --clean to wipe build root and re-extract)"
     done
+    touch "$stamp"
 }
 
 build_binutils() {
@@ -109,10 +136,19 @@ build_binutils() {
     [[ -f "$obj/.installed" ]] && { say "Binutils already built (skipping)"; return 0; }
 
     mkdir -p "$obj"
-    say "Configuring binutils -> $PREFIX (target=$TARGET)"
-    (cd "$obj" && "$src/configure" \
+    say "Configuring binutils -> $PREFIX (target=$TARGET${HOST_TRIPLE:+, host=$HOST_TRIPLE})"
+
+    local cross_args=()
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        cross_args+=(--host="$HOST_TRIPLE" --build="$BUILD_TRIPLE")
+    fi
+
+    (cd "$obj" && \
+        env "${CROSS_LDFLAGS_ARGS[@]}" \
+        "$src/configure" \
         --prefix="$PREFIX" \
         --target="$TARGET" \
+        "${cross_args[@]}" \
         --disable-nls \
         --disable-shared \
         --disable-werror \
@@ -136,73 +172,129 @@ build_gcc_newlib() {
     local newlib_src="$BUILD/newlib-$NEWLIB_VER-src"
     local obj="$BUILD/gcc-$GCC_VER-build"
 
-    extract_source "$UPSTREAM/gcc"           "$GCC_TAG"    "$gcc_src"
-    extract_source "$UPSTREAM/newlib-cygwin" "$NEWLIB_TAG" "$newlib_src"
+    extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$gcc_src"
+    apply_patches "$gcc_src" "$PATCHES/gcc-9.5.0"
 
-    apply_patches "$gcc_src"    "$PATCHES/gcc-9.5.0"
-    apply_patches "$newlib_src" "$PATCHES/newlib-4.x"
+    # Newlib only built in the native (stage 0) flow.  Cross-builds reuse
+    # the SPU ELF target libs from the native install.
+    if [[ -z "$HOST_TRIPLE" ]]; then
+        extract_source "$UPSTREAM/newlib-cygwin" "$NEWLIB_TAG" "$newlib_src"
+        apply_patches "$newlib_src" "$PATCHES/newlib-4.x"
+    fi
 
     if [[ ! -d "$gcc_src/gmp" ]]; then
         say "Downloading GCC prerequisites"
         (cd "$gcc_src" && ./contrib/download_prerequisites)
     fi
 
-    if [[ ! -e "$gcc_src/newlib" ]]; then
+    if [[ -z "$HOST_TRIPLE" && ! -e "$gcc_src/newlib" ]]; then
         ln -sf "$newlib_src/newlib"   "$gcc_src/newlib"
         ln -sf "$newlib_src/libgloss" "$gcc_src/libgloss"
     fi
 
-    [[ -f "$obj/.installed" ]] && { say "GCC+newlib already built (skipping)"; return 0; }
+    [[ -f "$obj/.installed" ]] && { say "GCC already built (skipping)"; return 0; }
 
     mkdir -p "$obj"
-    # SPU optimization flags for libgcc/newlib.  Note: -fpic is omitted here
-    # because it causes relocation overflows in libgcc's cachemgr.c with
-    # binutils 2.42.  User code should add -fpic as needed in their own CFLAGS.
-    # -mno-branch-hints: prevents hbrr instruction relocation overflows
-    # with binutils 2.42 for large functions (cachemgr, arc4random, etc.)
-    local cflags_target="-Os -ffast-math -ftree-vectorize -funroll-loops -fschedule-insns -mdual-nops -mno-branch-hints"
+    say "Configuring GCC -> $PREFIX (target=$TARGET, GCC $GCC_VER${HOST_TRIPLE:+, host=$HOST_TRIPLE})"
 
-    say "Configuring GCC+newlib -> $PREFIX (target=$TARGET, GCC $GCC_VER)"
-    # SPU's libm/machine/spu fenv files use #include "headers/fefpscr.h" relative
-    # to their source directory.  Add -I so the compiler finds them.
-    # libc/machine/spu/memcpy.c pulls vec_literal.h from the same dir — also
-    # needs an explicit -I since the build lives in a separate obj tree.
-    local newlib_spu_libm="$newlib_src/newlib/libm/machine/spu"
-    local newlib_spu_libc="$newlib_src/newlib/libc/machine/spu"
-    local target_includes="-I$newlib_spu_libm -I$newlib_spu_libc"
-    # CXXFLAGS_FOR_TARGET mirrors CFLAGS_FOR_TARGET: libstdc++ is large enough
-    # that without -mno-branch-hints the hbrr instruction's 16-bit displacement
-    # overflows in functexcept.cc / system_error.cc and binutils aborts.
+    local conf_args=(
+        --prefix="$PREFIX"
+        --target="$TARGET"
+        --enable-languages=c,c++
+        --enable-lto
+        --enable-obsolete
+        --disable-dependency-tracking
+        --disable-libcc1
+        --disable-libssp
+        --disable-libstdcxx-pch
+        --disable-libstdcxx-filesystem-ts
+        --disable-multilib
+        --disable-nls
+        --disable-shared
+        --disable-threads
+        --disable-win32-registry
+        --with-pic
+    )
+
+    local target_env=()
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        # Cross-build: host binaries only, no target libs (reused from native).
+        conf_args+=(
+            --host="$HOST_TRIPLE"
+            --build="$BUILD_TRIPLE"
+            --disable-bootstrap
+        )
+        # Export enable_obsolete=yes so gcc/config.gcc accepts the obsolete
+        # spu-elf target during the gcc/ sub-configure that `make all-host`
+        # spawns — the top-level --enable-obsolete flag doesn't propagate
+        # to that sub-configure under cross-build.  CC_FOR_BUILD / CXX_FOR_BUILD
+        # ensure build-machine auxiliary tools (genmddeps etc.) compile with
+        # the local Linux gcc, not the mingw cross compiler.
+        export enable_obsolete=yes
+        target_env=(
+            CC_FOR_BUILD=gcc
+            CXX_FOR_BUILD=g++
+        )
+    else
+        conf_args+=(--with-newlib)
+        # SPU optimization flags for libgcc/newlib.  Note: -fpic is omitted
+        # because it causes relocation overflows in libgcc's cachemgr.c with
+        # binutils 2.42.  User code should add -fpic as needed in their own
+        # CFLAGS.  -mno-branch-hints: prevents hbrr instruction relocation
+        # overflows with binutils 2.42 for large functions (cachemgr, etc.)
+        local cflags_target="-Os -ffast-math -ftree-vectorize -funroll-loops -fschedule-insns -mdual-nops -mno-branch-hints"
+        # SPU's libm/machine/spu fenv files use #include "headers/fefpscr.h"
+        # relative to their source directory.  libc/machine/spu/memcpy.c pulls
+        # vec_literal.h the same way — add -I so the compiler finds them.
+        local target_includes="-I$newlib_src/newlib/libm/machine/spu -I$newlib_src/newlib/libc/machine/spu"
+        # CXXFLAGS_FOR_TARGET mirrors CFLAGS_FOR_TARGET: libstdc++ is large
+        # enough that without -mno-branch-hints the hbrr instruction's 16-bit
+        # displacement overflows in functexcept.cc / system_error.cc and
+        # binutils aborts.
+        target_env=(
+            CFLAGS_FOR_TARGET="$cflags_target $target_includes"
+            CXXFLAGS_FOR_TARGET="$cflags_target $target_includes"
+        )
+    fi
+
     (cd "$obj" && \
-        CFLAGS_FOR_TARGET="$cflags_target $target_includes" \
-        CXXFLAGS_FOR_TARGET="$cflags_target $target_includes" \
-        "$gcc_src/configure" \
-        --prefix="$PREFIX" \
-        --target="$TARGET" \
-        --with-newlib \
-        --enable-languages=c,c++ \
-        --enable-lto \
-        --enable-obsolete \
-        --disable-dependency-tracking \
-        --disable-libcc1 \
-        --disable-libssp \
-        --disable-libstdcxx-pch \
-        --disable-libstdcxx-filesystem-ts \
-        --disable-multilib \
-        --disable-nls \
-        --disable-shared \
-        --disable-threads \
-        --disable-win32-registry \
-        --with-pic)
+        env "${target_env[@]}" "${CROSS_LDFLAGS_ARGS[@]}" \
+        "$gcc_src/configure" "${conf_args[@]}")
 
-    say "Building GCC+newlib (SPU; ~20-40 minutes)"
-    (cd "$obj" && make -j"$JOBS" all)
-    say "Installing GCC+newlib"
-    (cd "$obj" && make install)
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        say "Building GCC host-only (~15-25 minutes)"
+        (cd "$obj" && make -j"$JOBS" all-host)
+        say "Installing GCC host-only"
+        (cd "$obj" && make install-host)
+        copy_target_libs_from_native
+    else
+        say "Building GCC+newlib (SPU; ~20-40 minutes)"
+        (cd "$obj" && make -j"$JOBS" all)
+        say "Installing GCC+newlib"
+        (cd "$obj" && make install)
+    fi
     touch "$obj/.installed"
 }
 
+# Cross-build helper: reuse target libs from the native install.
+copy_target_libs_from_native() {
+    [[ -n "$HOST_TRIPLE" ]] || return 0
+    say "Copying target libraries: $NATIVE_PREFIX -> $PREFIX"
+    if [[ -d "$NATIVE_PREFIX/$TARGET" ]]; then
+        mkdir -p "$PREFIX/$TARGET"
+        cp -a "$NATIVE_PREFIX/$TARGET/." "$PREFIX/$TARGET/"
+    fi
+    if [[ -d "$NATIVE_PREFIX/lib/gcc/$TARGET" ]]; then
+        mkdir -p "$PREFIX/lib/gcc/$TARGET"
+        cp -a "$NATIVE_PREFIX/lib/gcc/$TARGET/." "$PREFIX/lib/gcc/$TARGET/"
+    fi
+}
+
 create_symlinks() {
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        say "Skipping spu-* alias creation (cross-build target=$HOST_TRIPLE)"
+        return 0
+    fi
     local bin="$PREFIX/bin"
     [[ -d "$bin" ]] || { warn "No $bin to symlink"; return 0; }
     say "Creating spu-* aliases in $bin"
