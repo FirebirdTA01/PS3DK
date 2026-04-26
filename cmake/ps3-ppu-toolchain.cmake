@@ -118,6 +118,30 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 
 # -----------------------------------------------------------------------------
+# Always link librt explicitly before the GCC driver's auto-injected
+# `--start-group -lsysbase -lc -lrt -llv2 --end-group`.
+# -----------------------------------------------------------------------------
+# Both libc's `init_metalock` (lock_internal.c) and librt's
+# `__glob_file_init` (globfile.c) are declared `__attribute__((constructor(105)))`,
+# i.e. the same priority.  Within a priority bucket, .ctors order is
+# input-link order.  __do_global_ctors_aux iterates .ctors in REVERSE,
+# so the entry pulled in *first* runs *last*.  When the link line
+# only contains the spec-injected group, libc's lock_internal.c.o is
+# pulled before librt's globfile.c.o, which means __glob_file_init
+# ends up running before init_metalock.  __glob_file_init calls
+# `strdup("/")` → `malloc` → `__libc_auto_lock_allocate(metaLock)`,
+# which then `sys_lwmutex_lock`s a still-zero metaLock → returns
+# error → `abort()`.  Symptom: the SELF prints only "Abort called."
+# from sys_tty_write before exit.
+#
+# An explicit `-lrt` placed before the user's libs forces librt's
+# globfile.c.o into the link first, so its .ctors entry sorts before
+# libc's, and reverse iteration runs init_metalock first.  The legacy
+# Makefile-driven samples were quietly relying on this — every sample
+# Makefile placed `-lrt` ahead of the spec's group via $(LIBS).
+link_libraries(rt)
+
+# -----------------------------------------------------------------------------
 # Make ps3-self.cmake findable via include() from sample CMakeLists
 # -----------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
