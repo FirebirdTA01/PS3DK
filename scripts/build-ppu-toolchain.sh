@@ -98,15 +98,31 @@ mkdir -p "$BUILD" "$PREFIX"
 # -----------------------------------------------------------------------------
 
 # Extract a pinned tag from a git mirror into a fresh source tree.
+# Retries on transient failure: `git archive` against a sometimes-online
+# promisor remote can hit RPC blips ("curl 18 transfer closed") that
+# truncate the tar stream and leave $dest half-populated.  Three
+# attempts with `git fetch --refetch` between each give us coverage
+# against momentary network glitches without the script just dying.
 extract_source() {
     local repo="$1" tag="$2" dest="$3"
     if [[ -d "$dest" ]]; then
         say "Source $dest already extracted (skipping — delete to re-extract)"
         return 0
     fi
-    say "Extracting $tag from $repo -> $dest"
-    mkdir -p "$dest"
-    git -C "$repo" archive --format=tar "$tag" | tar -x -C "$dest"
+
+    local attempt
+    for attempt in 1 2 3; do
+        say "Extracting $tag from $repo -> $dest (attempt $attempt)"
+        rm -rf "$dest"
+        mkdir -p "$dest"
+        if git -C "$repo" archive --format=tar "$tag" | tar -x -C "$dest"; then
+            return 0
+        fi
+        warn "git archive failed; refetching tag and retrying"
+        (cd "$repo" && git fetch --depth 1 origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null) || true
+        sleep 5
+    done
+    die "Failed to extract $tag from $repo after 3 attempts"
 }
 
 # Apply patches from a directory. Honors a 'series' file if present (quilt-style).

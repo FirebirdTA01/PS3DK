@@ -82,14 +82,29 @@ fi
 mkdir -p "$BUILD" "$PREFIX"
 
 extract_source() {
+    # See build-ppu-toolchain.sh's extract_source for the retry-on-RPC
+    # rationale.  `git archive` can hit promisor-remote curl blips
+    # mid-stream and corrupt the tar pipe; three attempts with a tag
+    # refetch between each rides those out without failing CI.
     local repo="$1" tag="$2" dest="$3"
     if [[ -d "$dest" ]]; then
         say "Source $dest already extracted (skipping)"
         return 0
     fi
-    say "Extracting $tag from $repo -> $dest"
-    mkdir -p "$dest"
-    git -C "$repo" archive --format=tar "$tag" | tar -x -C "$dest"
+
+    local attempt
+    for attempt in 1 2 3; do
+        say "Extracting $tag from $repo -> $dest (attempt $attempt)"
+        rm -rf "$dest"
+        mkdir -p "$dest"
+        if git -C "$repo" archive --format=tar "$tag" | tar -x -C "$dest"; then
+            return 0
+        fi
+        warn "git archive failed; refetching tag and retrying"
+        (cd "$repo" && git fetch --depth 1 origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null) || true
+        sleep 5
+    done
+    die "Failed to extract $tag from $repo after 3 attempts"
 }
 
 apply_patches() {

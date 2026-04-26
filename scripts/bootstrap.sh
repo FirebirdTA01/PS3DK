@@ -94,15 +94,32 @@ clone_shallow() {
 }
 
 clone_partial() {
-    # Use blob:none filtering for large upstreams (gcc, binutils-gdb) so we pay
-    # blob bandwidth only for files we actually check out.
+    # Shallow + all-blobs clone of large upstreams (gcc, binutils-gdb,
+    # newlib-cygwin).  --depth 1 keeps the initial clone bandwidth low
+    # by skipping history; we then layer specific tags on via
+    # fetch_tag's `git fetch --depth 1 origin refs/tags/<tag>:...`.
+    #
+    # Crucially we DO NOT use --filter=blob:none here.  An earlier
+    # revision did, on the theory that we'd save bandwidth by fetching
+    # blobs lazily — but `git archive` (called by extract_source in
+    # build-{ppu,spu}-toolchain.sh) needs the full blob set for the
+    # tagged tree, and fetching those on-demand from the promisor
+    # remote (sourceware.org / gcc.gnu.org) is fragile: a single curl
+    # blip mid-archive corrupts the tar pipe.  Symptom in CI:
+    #   error: RPC failed; curl 18 transfer closed
+    #   fatal: could not fetch <oid> from promisor remote
+    #   tar: This does not look like a tar archive
+    # Bandwidth penalty for full-blob shallow clone is ~5-10x larger
+    # than partial, but stays well under the actions/cache 10 GB limit
+    # (gcc.git ~1.5 GB shallow, binutils-gdb ~250 MB, newlib-cygwin
+    # ~80 MB) and CI cache amortises it across runs.
     local url="$1" dir="$2"
     if [[ -d "$dir/.git" ]]; then
         say "Updating $dir"
-        git -C "$dir" fetch --all --tags --prune
+        git -C "$dir" fetch --depth 1 --all --tags --prune
     else
-        say "Cloning (partial) $url -> $dir"
-        git clone --filter=blob:none "$url" "$dir"
+        say "Cloning (shallow) $url -> $dir"
+        git clone --depth 1 "$url" "$dir"
     fi
 }
 
