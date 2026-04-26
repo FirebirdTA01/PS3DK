@@ -13,6 +13,11 @@ The version stamped into builds is generated from the most recent
 
 ## [Unreleased]
 
+<!-- New entries go here while work is in progress; promote them to a
+     dated, version-tagged section at release time. -->
+
+## [v0.3.0] — 2026-04-26
+
 ### Sample build system — Makefile → CMake
 
 Every sample under `samples/` now builds via standalone CMake projects;
@@ -347,6 +352,7 @@ Assets attached to this release:
 - `spu_printf` TTY visibility on RPCS3 still routes through the
   PSL1GHT-shape path; native channel-protocol path works on real HW.
 
-[Unreleased]: https://github.com/FirebirdTA01/PS3_Custom_Toolchain/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/FirebirdTA01/PS3_Custom_Toolchain/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/FirebirdTA01/PS3_Custom_Toolchain/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/FirebirdTA01/PS3_Custom_Toolchain/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/FirebirdTA01/PS3_Custom_Toolchain/releases/tag/v0.1.0
