@@ -4,6 +4,11 @@ name: Release
 # consistent, builds the host tools (Linux + Windows), and publishes a
 # GitHub Release with sources + tool binaries attached.
 #
+# Also exposed via workflow_dispatch so each job can be exercised without
+# burning a tag — useful when first wiring a new job (e.g. the
+# build-toolchain-windows long-pole) into the release pipeline.  Manual
+# dispatch builds and uploads artifacts but skips the publish step.
+#
 # PPU/SPU toolchain binaries and the SDK runtime libraries are deferred
 # to v0.2.x / v0.3.x — see docs/VERSIONING.md "Release-payload roadmap".
 
@@ -12,6 +17,12 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      run_toolchain_windows:
+        description: 'Run build-toolchain-windows (long, ~2-3h)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # create releases + upload assets
@@ -33,12 +44,22 @@ jobs:
         run: |
           version="$(./scripts/version.sh --format=plain)"
           bare="$(./scripts/version.sh --format=bare)"
-          tag="${GITHUB_REF##*/}"
-          echo "Tag:           $tag"
           echo "Generator out: $version"
-          if [ "$version" != "$tag" ]; then
-            echo "::error::version.sh ($version) does not match the pushed tag ($tag). The tag must point at a commit where version.sh emits exactly that tag."
-            exit 1
+          # On a tag push the GITHUB_REF is refs/tags/<tag> and we enforce
+          # version.sh exactly matches the tag.  On manual dispatch
+          # (workflow_dispatch) GITHUB_REF is refs/heads/<branch> and we
+          # skip the match — the dispatch is for testing the pipeline, not
+          # publishing a real release, and the publish job is gated below
+          # so nothing ships.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            tag="${GITHUB_REF##*/}"
+            echo "Tag:           $tag"
+            if [ "$version" != "$tag" ]; then
+              echo "::error::version.sh ($version) does not match the pushed tag ($tag). The tag must point at a commit where version.sh emits exactly that tag."
+              exit 1
+            fi
+          else
+            echo "Manual dispatch — skipping tag/version match check."
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "bare=$bare" >> "$GITHUB_OUTPUT"
@@ -278,12 +299,132 @@ jobs:
           name: source-bundle
           path: ps3-sdk-src-*.tar.*
 
+  build-toolchain-windows:
+    name: Build toolchain (windows x86_64)
+    # Single-job, serial PPU+SPU build of the Windows-hosted toolchain release.
+    # Stage 0 (native Linux PPU+SPU+PSL1GHT+portlibs+SDK+stub-archives) feeds
+    # stage 1 (cross-build PPU+SPU to mingw-w64), then package-windows-release.sh
+    # combines that with the Windows host-tools artifact from
+    # build-host-tools-windows into a single release zip.  Wall-clock ~2-3h.
+    # Caching + PPU/SPU parallelisation are deferred to a follow-up task — this
+    # is the first-pass green build.
+    #
+    # Runs unconditionally on tag push.  On manual workflow_dispatch the user
+    # must opt in via the run_toolchain_windows input (defaulting false) so
+    # casual "test the publish flow" dispatches don't burn a 3-hour runner.
+    if: github.event_name == 'push' || github.event.inputs.run_toolchain_windows == 'true'
+    needs:
+      - verify-version
+      - build-host-tools-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps + mingw-w64 cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential gcc-12 g++-12 cmake ninja-build texinfo \
+              bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev \
+              zlib1g-dev libreadline-dev libncurses-dev libexpat1-dev \
+              libssl-dev libelf-dev python3 python3-dev git wget patch \
+              autoconf automake libtool zip unzip \
+              mingw-w64 g++-mingw-w64-x86-64
+          # Verify the mingw cross compiler resolves before anything is built —
+          # cross-build silently degrades into "build only host bits then
+          # complain at install time" if the cross gcc isn't on PATH.
+          which x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Probe build env
+        run: |
+          gcc --version | head -1
+          x86_64-w64-mingw32-gcc --version | head -1
+          rustc --version
+          cmake --version | head -1
+
+      - name: Bootstrap upstream sources
+        run: |
+          source scripts/env.sh
+          ./scripts/bootstrap.sh
+
+      - name: Stage 0 — native PPU toolchain
+        run: |
+          source scripts/env.sh
+          ./scripts/build-ppu-toolchain.sh
+
+      - name: Stage 0 — native SPU toolchain
+        run: |
+          source scripts/env.sh
+          ./scripts/build-spu-toolchain.sh
+
+      - name: Stage 0 — PSL1GHT runtime
+        run: |
+          source scripts/env.sh
+          ./scripts/build-psl1ght.sh
+
+      - name: Stage 0 — portlibs
+        run: |
+          source scripts/env.sh
+          ./scripts/build-portlibs.sh
+
+      - name: Stage 0 — our SDK
+        run: |
+          source scripts/env.sh
+          ./scripts/build-sdk.sh
+
+      - name: Stage 0 — cell stub archives
+        run: |
+          source scripts/env.sh
+          ./scripts/build-cell-stub-archives.sh
+
+      - name: Stage 1 — cross-build PPU toolchain (mingw-w64)
+        run: |
+          source scripts/env.sh
+          ./scripts/build-ppu-toolchain.sh --host=x86_64-w64-mingw32
+
+      - name: Stage 1 — cross-build SPU toolchain (mingw-w64)
+        run: |
+          source scripts/env.sh
+          ./scripts/build-spu-toolchain.sh --host=x86_64-w64-mingw32
+
+      - name: Download host-tools-windows artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: host-tools-windows-x86_64
+          path: artifacts/host-tools-windows
+
+      - name: Stage 2 — package Windows release zip
+        run: |
+          source scripts/env.sh
+          tools_zip="$(find artifacts/host-tools-windows -type f -name 'ps3-sdk-tools-*-windows-x86_64.zip' | head -n1)"
+          [ -n "$tools_zip" ] || { echo "::error::host-tools-windows zip not found"; exit 1; }
+          ./scripts/package-windows-release.sh --tools-zip="$tools_zip"
+          ls -lh stage/release/
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: toolchain-windows-x86_64
+          path: |
+            stage/release/ps3-sdk-*-windows-x86_64.zip
+            stage/release/ps3-sdk-*-windows-x86_64.zip.sha256
+
   publish:
     name: Publish GitHub Release
+    # Only publish on a real tag push — workflow_dispatch runs the pipeline
+    # for verification and uploads artifacts, but never touches the GitHub
+    # Releases page.  This lets us test the build-toolchain-windows job
+    # without accidentally minting a release.
+    if: github.event_name == 'push'
     needs:
       - verify-version
       - build-host-tools-linux
       - build-host-tools-windows
+      - build-toolchain-windows
       - build-source-bundle
     runs-on: ubuntu-latest
     steps:
