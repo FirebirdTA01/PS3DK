@@ -393,6 +393,23 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpNormalizeBinding> valueToNormalize;
 
+    // Multi-instruction if-else predication chain — see header
+    // comments + nv40_if_convert.h Shape 3 for the IR shape, and
+    // the StoreOutput PredCarry handler for the lowering scheme.
+    struct PredCarryBinding
+    {
+        IRValueID cmpId;
+        IRValueID defaultId;       // initial default OR prior PredCarry result
+        IROp      innerOp = IROp::Nop;
+        std::vector<IRValueID> opArgs;  // original inner-op operands (with prior-link IDs remapped)
+    };
+    std::unordered_map<IRValueID, PredCarryBinding> valueToPredCarry;
+
+    // Maps a PredCarry result SSA → R-temp index it lives in after
+    // the chain emit.  Populated lazily as chains are emitted; lets
+    // subsequent links resolve "prior link's result" → TEMP[idx].
+    std::unordered_map<IRValueID, int> predCarryDstReg;
+
     int nextTexUnit = 0;
 
     for (size_t pi = 0; pi < entry.parameters.size(); ++pi)
@@ -620,6 +637,30 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 break;
             }
 
+            case IROp::PredCarry:
+            {
+                // Defer everything to the consuming StoreOutput's
+                // chain emitter — at this point we just record the
+                // shape (cond, default, inner op + args).  Carry
+                // dst register allocation only makes sense once we
+                // know the chain length, which we discover when the
+                // StoreOutput pulls the last link.
+                if (inst.operands.size() < 2)
+                {
+                    out.diagnostics.push_back(
+                        "nv40-fp: PredCarry needs cond + default operand");
+                    return out;
+                }
+                PredCarryBinding pcb;
+                pcb.cmpId     = inst.operands[0];
+                pcb.defaultId = inst.operands[1];
+                pcb.innerOp   = inst.predOp;
+                for (size_t i = 2; i < inst.operands.size(); ++i)
+                    pcb.opArgs.push_back(inst.operands[i]);
+                valueToPredCarry[inst.result] = pcb;
+                break;
+            }
+
             case IROp::Dot:
             {
                 if (inst.operands.size() < 2)
@@ -772,13 +813,22 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         // varying that the scale tracks (compared as
                         // SSA value-ID; emit-time will resolve to the
                         // INPUT_SRC code via valueToInputSrc).
-                        // Capped at scale=3 — sce-cgc switches lowering
-                        // shapes for N>=4 (4-insn MUL+FENCBR+MAD) and
-                        // we have no byte-probe for that path yet.
-                        constexpr int kMaxScale = 3;
+                        // Full-vec4 path (lane == -1): capped at 64,
+                        // emitter switches from MOVH+MAD (N<=3) to
+                        // MOVH+MULR+chain+[FENCBR]+ADD/MAD (N>=4).
+                        // Scalar-lane path (lane >= 0): capped at 3 —
+                        // sce-cgc uses a different DP2R-based shape
+                        // for N>=4 we haven't implemented yet.
+                        constexpr int kMaxScalarLaneScale = 3;
+                        constexpr int kMaxFullVec4Scale   = 64;
+                        auto scaleCap = [](const FpScaleVaryingBinding& b) {
+                            return b.lane >= 0 ? kMaxScalarLaneScale
+                                               : kMaxFullVec4Scale;
+                        };
                         if (valueToScale.count(ma.baseId) &&
                             valueToScale[ma.baseId].inputId == mb.baseId &&
-                            valueToScale[ma.baseId].scale < kMaxScale)
+                            valueToScale[ma.baseId].scale <
+                                scaleCap(valueToScale[ma.baseId]))
                         {
                             FpScaleVaryingBinding b = valueToScale[ma.baseId];
                             b.scale += 1;
@@ -787,7 +837,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         }
                         if (valueToScale.count(mb.baseId) &&
                             valueToScale[mb.baseId].inputId == ma.baseId &&
-                            valueToScale[mb.baseId].scale < kMaxScale)
+                            valueToScale[mb.baseId].scale <
+                                scaleCap(valueToScale[mb.baseId]))
                         {
                             FpScaleVaryingBinding b = valueToScale[mb.baseId];
                             b.scale += 1;
@@ -845,7 +896,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             auto sIt = valueToScale.find(prevId);
                             if (sIt == valueToScale.end()) return false;
                             if (sIt->second.lane < 0)       return false;
-                            if (sIt->second.scale >= kMaxScale) return false;
+                            if (sIt->second.scale >= kMaxScalarLaneScale) return false;
                             auto seIt = valueToScalarExtract.find(rhsId);
                             if (seIt == valueToScalarExtract.end()) return false;
                             if (seIt->second.baseId != sIt->second.inputId ||
@@ -1253,6 +1304,411 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (texIt->second.projective || texIt->second.cube)
                             attrs.texCoords2D &= ~(uint16_t{1} << n);
                     }
+                    break;
+                }
+
+                // Multi-instruction predicated chain (PredCarry).
+                // Lowering for `if (cond) { r = OP1; r = OP2; ... }`
+                // with explicit default before the if statement.
+                //
+                // sce-cgc shape (probed against if_then_2add /
+                // if_then_3insn / fenc_R0R1_n4 / n5):
+                //
+                //   MOVH H<i>, f[lhs]                      (LHS varying → H-temp)
+                //   SGTRC RC.x, H<i>, {cmpConst,...}.x
+                //   <preload of any varying read by the chain>
+                //   MOVR Rdst[0], src(default)             (carry default)
+                //   <OP1>R Rdst[0](NE.x), srcs_1
+                //   MOVR Rdst[1], Rdst[0]                  (carry running)
+                //   <OP2>R Rdst[1](NE.x), srcs_2
+                //   ...
+                //   MOVR Rdst[N-1], Rdst[N-2]              (carry running)
+                //   FENCBR                                 (iff N >= 2)
+                //   <OPN>R Rdst[N-1](NE.x), srcs_N      ; PROGRAM_END
+                //
+                // Register allocation: the chain alternates R0 / R1
+                // with the LAST link writing R0.  The LHS-promote
+                // register is H0 when N is even (first dst is R1,
+                // R0 not touched until link 2) or H2 when N is odd
+                // (first dst is R0, would alias H0).  See KNOWN_ISSUES
+                // for the no-FENCBR / preload-displaced register case.
+                auto pcIt = valueToPredCarry.find(srcId);
+                if (pcIt != valueToPredCarry.end())
+                {
+                    // Walk backwards through the chain (each link's
+                    // defaultId points to the prior link or to the
+                    // initial default).  Build the chain in
+                    // first-to-last order.
+                    std::vector<IRValueID> chainIds;
+                    IRValueID curr = srcId;
+                    while (true)
+                    {
+                        chainIds.push_back(curr);
+                        auto it = valueToPredCarry.find(curr);
+                        if (it == valueToPredCarry.end()) break;
+                        IRValueID nextDefault = it->second.defaultId;
+                        if (valueToPredCarry.find(nextDefault) ==
+                            valueToPredCarry.end())
+                            break;          // hit the initial default
+                        curr = nextDefault;
+                    }
+                    std::reverse(chainIds.begin(), chainIds.end());
+                    const int N = static_cast<int>(chainIds.size());
+                    if (N < 1)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: PredCarry chain walked to empty");
+                        return out;
+                    }
+
+                    const PredCarryBinding& firstBind = valueToPredCarry[chainIds[0]];
+                    IRValueID condId        = firstBind.cmpId;
+                    IRValueID initialDefault = firstBind.defaultId;
+
+                    auto cmpIt = valueToCmp.find(condId);
+                    if (cmpIt == valueToCmp.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: PredCarry needs CmpGt/CmpGe/... binding");
+                        return out;
+                    }
+                    const CmpBinding& cb = cmpIt->second;
+                    if (cb.rhsKind != CmpBinding::RhsKind::Literal)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: PredCarry only handles literal-RHS comparisons today");
+                        return out;
+                    }
+                    auto lhsInIt = valueToInputSrc.find(cb.lhsBase);
+                    if (lhsInIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: PredCarry compare LHS must be a varying scalar");
+                        return out;
+                    }
+
+                    // Allocate dst regs: alternate R0/R1 ending at R0.
+                    std::vector<int> dstRegs(N);
+                    for (int i = 0; i < N; ++i)
+                        dstRegs[N - 1 - i] = (i % 2 == 0) ? 0 : 1;
+
+                    // LHS-promote H index — choose so it doesn't
+                    // alias the first dst (which is read as the
+                    // carry source for link 0).
+                    const int hIdx = (N % 2 == 1) ? 2 : 0;
+
+                    // Initial default's source register: must be
+                    // resolvable to either INPUT (varying) or a
+                    // promoted H-temp.  For if-only-with-default
+                    // shape the default is the value stored to the
+                    // semantic before the cmp — almost always the
+                    // same varying we're about to MOVH into H<hIdx>.
+                    auto defaultInIt = valueToInputSrc.find(initialDefault);
+                    const bool defaultIsLhsVarying =
+                        (defaultInIt != valueToInputSrc.end() &&
+                         defaultInIt->second == lhsInIt->second);
+                    if (!defaultIsLhsVarying)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: PredCarry default must currently equal the LHS varying");
+                        return out;
+                    }
+
+                    // ── MOVH H<hIdx>, f[lhs_input] ──
+                    struct nvfx_reg hReg = nvfx_reg(NVFXSR_TEMP, hIdx);
+                    hReg.is_fp16 = 1;
+                    const struct nvfx_reg lhsInReg =
+                        nvfx_reg(NVFXSR_INPUT, lhsInIt->second);
+                    struct nvfx_src mvhS0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(lhsInReg));
+                    struct nvfx_src mvhS1 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_src mvhS2 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn mvh = nvfx_insn(
+                        0, 0, -1, -1, hReg,
+                        NVFX_FP_MASK_ALL, mvhS0, mvhS1, mvhS2);
+                    mvh.precision = FLOAT16;
+                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(lhsInIt->second);
+                    if (lhsInIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        lhsInIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (lhsInIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+
+                    // ── SGTRC RC.x, H<hIdx>, {cmpConst,...}.x  + inline const ──
+                    const struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_reg hSrc = nvfx_reg(NVFXSR_TEMP, hIdx);
+                    hSrc.is_fp16 = 1;
+                    struct nvfx_src cS0 = nvfx_src(hSrc);
+                    if (cb.lhsLane != 0)
+                        cS0.swz[0] = cS0.swz[1] = cS0.swz[2] = cS0.swz[3] =
+                            static_cast<uint8_t>(cb.lhsLane);
+                    struct nvfx_src cS1 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    cS1.swz[0] = cS1.swz[1] = cS1.swz[2] = cS1.swz[3] = 0;
+                    struct nvfx_src cS2 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn cmpInsn = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(ccDst),
+                        NVFX_FP_MASK_X, cS0, cS1, cS2);
+                    cmpInsn.cc_update = 1;
+                    asm_.emit(cmpInsn, cb.opcode);
+                    const float cmpInline[4] = { cb.rhsLiteral, 0.0f, 0.0f, 0.0f };
+                    asm_.appendConstBlock(cmpInline);
+
+                    // Decide which non-LHS varyings need preloading
+                    // into R-temps.  For the chain to fit the
+                    // "always FENCBR before last" pattern we use one
+                    // preload register: R2.  Each unique varying
+                    // operand (other than the LHS varying we just
+                    // promoted to H) gets a single MOVR R2 preload.
+                    //
+                    // Today's restriction (matches our current test
+                    // surface): all chain links share the same
+                    // single non-LHS varying.  Multiple distinct
+                    // non-LHS varyings would need an R-temp per
+                    // varying + an allocator we don't have yet.
+                    int preloadVaryingInput = -1;     // INPUT_SRC index, -1 = none
+                    IRValueID preloadVaryingId = InvalidIRValue;
+                    for (int i = 0; i < N; ++i)
+                    {
+                        const auto& bind = valueToPredCarry[chainIds[i]];
+                        for (IRValueID arg : bind.opArgs)
+                        {
+                            if (valueToPredCarry.count(arg)) continue;     // prior pred result
+                            auto inIt = valueToInputSrc.find(arg);
+                            if (inIt == valueToInputSrc.end()) continue;
+                            if (inIt->second == lhsInIt->second) continue; // LHS in H-temp
+                            if (preloadVaryingInput < 0)
+                            {
+                                preloadVaryingInput = inIt->second;
+                                preloadVaryingId    = arg;
+                            }
+                            else if (preloadVaryingInput != inIt->second)
+                            {
+                                out.diagnostics.push_back(
+                                    "nv40-fp: PredCarry chain references multiple "
+                                    "non-LHS varyings — single-preload allocator only");
+                                return out;
+                            }
+                        }
+                    }
+
+                    constexpr int kPreloadReg = 2;
+                    if (preloadVaryingInput >= 0)
+                    {
+                        const struct nvfx_reg preDst = nvfx_reg(NVFXSR_TEMP, kPreloadReg);
+                        const struct nvfx_reg preIn  = nvfx_reg(NVFXSR_INPUT, preloadVaryingInput);
+                        struct nvfx_src preS0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(preIn));
+                        struct nvfx_src preS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src preS2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn preInsn = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(preDst),
+                            NVFX_FP_MASK_ALL, preS0, preS1, preS2);
+                        preInsn.precision = FLOAT32;
+                        asm_.emit(preInsn, NVFX_FP_OP_OPCODE_MOV);
+
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(preloadVaryingInput);
+                        if (preloadVaryingInput >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            preloadVaryingInput <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = preloadVaryingInput - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            // sce-cgc clears the texCoords2D bit for any
+                            // TC read full-width via direct INPUT (vs the
+                            // MOVH-promote path which carries .xyzw on
+                            // its OUTMASK already).  Matches the
+                            // varying-Select handlers above.
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
+
+                    // ── Emit each chain link: carry-MOVR + predicated OP ──
+                    auto regSourceFor = [&](IRValueID id, struct nvfx_reg& outReg) -> bool
+                    {
+                        // PredCarry result: lives in its dst R-temp.
+                        if (auto pIt = predCarryDstReg.find(id);
+                            pIt != predCarryDstReg.end())
+                        {
+                            outReg = nvfx_reg(NVFXSR_TEMP, pIt->second);
+                            return true;
+                        }
+                        // Initial-default (= LHS varying): in H<hIdx>.
+                        if (id == initialDefault)
+                        {
+                            outReg = nvfx_reg(NVFXSR_TEMP, hIdx);
+                            outReg.is_fp16 = 1;
+                            return true;
+                        }
+                        // Preloaded non-LHS varying: in R2.
+                        if (id == preloadVaryingId)
+                        {
+                            outReg = nvfx_reg(NVFXSR_TEMP, kPreloadReg);
+                            return true;
+                        }
+                        // Direct LHS varying not promoted (shouldn't
+                        // happen given the default-equals-LHS check
+                        // above, but be safe): treat as H<hIdx>.
+                        if (auto inIt = valueToInputSrc.find(id);
+                            inIt != valueToInputSrc.end() &&
+                            inIt->second == lhsInIt->second)
+                        {
+                            outReg = nvfx_reg(NVFXSR_TEMP, hIdx);
+                            outReg.is_fp16 = 1;
+                            return true;
+                        }
+                        return false;
+                    };
+
+                    for (int i = 0; i < N; ++i)
+                    {
+                        const PredCarryBinding& bind = valueToPredCarry[chainIds[i]];
+                        const int dst = dstRegs[i];
+
+                        // Source for the carry MOVR: either the prior
+                        // link's dst (i > 0) or the initial default
+                        // (i == 0, which always equals the LHS varying
+                        // in H<hIdx>).
+                        struct nvfx_reg carrySrc;
+                        if (i == 0)
+                        {
+                            carrySrc = nvfx_reg(NVFXSR_TEMP, hIdx);
+                            carrySrc.is_fp16 = 1;
+                        }
+                        else
+                        {
+                            carrySrc = nvfx_reg(NVFXSR_TEMP, dstRegs[i - 1]);
+                        }
+
+                        // ── MOVR Rdst, carrySrc ──
+                        const struct nvfx_reg dstReg2 = nvfx_reg(NVFXSR_TEMP, dst);
+                        struct nvfx_src cS0c = nvfx_src(carrySrc);
+                        struct nvfx_src cS1c =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src cS2c =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn carryInsn = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg2),
+                            NVFX_FP_MASK_ALL, cS0c, cS1c, cS2c);
+                        carryInsn.precision = FLOAT32;
+                        asm_.emit(carryInsn, NVFX_FP_OP_OPCODE_MOV);
+
+                        // FENCBR before the LAST predicated OP if
+                        // chain has >= 2 links (matches sce-cgc's
+                        // pattern for R0/R1-alternation chains).
+                        const bool isLast = (i == N - 1);
+                        if (isLast && N >= 2)
+                            asm_.emitFencbr();
+
+                        // ── <OP> Rdst(NE.x), op_args ──
+                        // Resolve op args to nvfx_src.  Today: 2 args
+                        // (Add/Sub/Mul); 3 for Mad (deferred).
+                        if (bind.opArgs.size() < 2 || bind.opArgs.size() > 3)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: PredCarry inner op needs 2-3 args");
+                            return out;
+                        }
+
+                        // Canonicalisation: ADD's two sources get
+                        // reordered so the PRELOADED-or-INPUT side is
+                        // src0 and the CARRY side (initial default OR
+                        // prior pred result) is src1.  MUL keeps the
+                        // original IR operand order — sce-cgc doesn't
+                        // canonicalise it the same way (probed against
+                        // if_then_3insn pred 1 / pred 3 which keep
+                        // `MUL carry, preload` as written).  Sub is
+                        // modelled as ADD with src1.negate; we don't
+                        // canonicalise it (the swap would also flip the
+                        // sign).
+                        std::vector<IRValueID> orderedArgs = bind.opArgs;
+                        auto isCarryArg = [&](IRValueID id) {
+                            if (id == initialDefault) return true;
+                            return predCarryDstReg.count(id) != 0;
+                        };
+                        if (bind.innerOp == IROp::Add &&
+                            orderedArgs.size() == 2 &&
+                            isCarryArg(orderedArgs[0]) &&
+                            !isCarryArg(orderedArgs[1]))
+                        {
+                            std::swap(orderedArgs[0], orderedArgs[1]);
+                        }
+
+                        struct nvfx_reg src0Reg, src1Reg, src2Reg = nvfx_reg(NVFXSR_NONE, 0);
+                        if (!regSourceFor(orderedArgs[0], src0Reg))
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: PredCarry op arg 0 unresolved");
+                            return out;
+                        }
+                        if (!regSourceFor(orderedArgs[1], src1Reg))
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: PredCarry op arg 1 unresolved");
+                            return out;
+                        }
+                        if (orderedArgs.size() == 3 &&
+                            !regSourceFor(orderedArgs[2], src2Reg))
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: PredCarry op arg 2 unresolved");
+                            return out;
+                        }
+
+                        struct nvfx_src oS0 = nvfx_src(src0Reg);
+                        struct nvfx_src oS1 = nvfx_src(src1Reg);
+                        struct nvfx_src oS2 = (bind.opArgs.size() == 3)
+                            ? nvfx_src(src2Reg)
+                            : nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                        uint8_t opcode = NVFX_FP_OP_OPCODE_MOV;
+                        switch (bind.innerOp)
+                        {
+                        case IROp::Add: opcode = NVFX_FP_OP_OPCODE_ADD; break;
+                        case IROp::Sub: opcode = NVFX_FP_OP_OPCODE_ADD; oS1.negate = 1; break;
+                        case IROp::Mul: opcode = NVFX_FP_OP_OPCODE_MUL; break;
+                        case IROp::Mad: opcode = NVFX_FP_OP_OPCODE_MAD; break;
+                        default:
+                            out.diagnostics.push_back(
+                                "nv40-fp: PredCarry inner op not yet supported");
+                            return out;
+                        }
+
+                        struct nvfx_insn predInsn = nvfx_insn(
+                            (isLast && saturate) ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg2),
+                            NVFX_FP_MASK_ALL, oS0, oS1, oS2);
+                        predInsn.precision = isLast ? dstPrecision : FLOAT32;
+                        predInsn.cc_test  = 1;
+                        predInsn.cc_cond  = NVFX_FP_OP_COND_NE;
+                        predInsn.cc_swz[0] = 0;
+                        predInsn.cc_swz[1] = 0;
+                        predInsn.cc_swz[2] = 0;
+                        predInsn.cc_swz[3] = 0;
+                        asm_.emit(predInsn, opcode);
+
+                        predCarryDstReg[chainIds[i]] = dst;
+                    }
+
+                    // The final predicated OP wrote to R0 (which IS
+                    // the COLOR0 output for fragment shaders).  No
+                    // separate stout instruction needed — markEnd()
+                    // will stamp PROGRAM_END on whichever instruction
+                    // landed last (the predicated final OP).
+                    emittedSomething = true;
                     break;
                 }
 
@@ -2409,12 +2865,30 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     break;
                 }
 
-                // Repeated-add fold: `vcol + vcol + ... (N copies)`
-                // → MOVH H0 = vcol; MAD R0 = H0 * (N-1).xxxx + H0
-                // with a single inline (N-1, 0, 0, 0) literal block.
-                // Single-instruction MAD form skips the 4-insn
-                // FENCBR-style preload path used when the multiplier
-                // is a runtime uniform.
+                // Repeated-add fold: `vcol + vcol + ... (N copies)`.
+                //
+                // sce-cgc uses two distinct shapes depending on N:
+                //
+                //   N=2,3 (short shape):
+                //     MOVH H0, f[input]
+                //     MAD  R0 [END], H0, c[0].xxxx, H0       + inline (N-1, 0, 0, 0)
+                //
+                //   N>=4 (long shape — verified via probes
+                //   /tmp/rsx-cg-chain-probe/pent_n{4..12}_f.fpo):
+                //     MOVH H0, f[input]
+                //     MUL  R1, H0, c[0].xxxx                 + inline (2, 0, 0, 0)
+                //     [MAD R1, H0, c[0].xxxx, R1            + inline (2, 0, 0, 0)]  × (K-1)
+                //     [FENCBR]                               -- iff K is odd
+                //     ADD  R0 [END], H0, R1                            (if N odd)
+                //   OR
+                //     MAD  R0 [END], H0, c[0].xxxx, R1      + inline (2, 0, 0, 0)  (if N even)
+                //
+                //   where K = (N - 1) / 2 (chain steps that double R1
+                //   from 2v to 2K·v).  The final ADD adds 1·v, the
+                //   final MAD adds 2·v, giving N·v overall.  FENCBR
+                //   appears between the chain and the final write iff
+                //   K is odd (a back-end pipeline-stall pattern; see
+                //   probes for the exact rule).
                 auto scIt = valueToScale.find(srcId);
                 if (scIt != valueToScale.end() && scIt->second.scale >= 2)
                 {
@@ -2450,30 +2924,110 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
                     }
 
-                    // MAD R0.xyzw, H0.xyzw, c[0].xxxx, H0.xyzw
                     const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
-                    struct nvfx_src madS0 = nvfx_src(hReg);
-                    struct nvfx_src madS1 =
-                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
-                    // SRC1 reads c[0].xxxx — broadcasts lane X of the
-                    // inline literal block (which holds scale-1 in
-                    // lane X, padded with zeros).  nvfx_src() defaults
-                    // to .xyzw identity, so override explicitly.
-                    madS1.swz[0] = madS1.swz[1] = madS1.swz[2] = madS1.swz[3] = 0;
-                    struct nvfx_src madS2 = nvfx_src(hReg);
-                    struct nvfx_insn mad = nvfx_insn(
-                        saturate ? 1 : 0, 0, -1, -1,
-                        const_cast<struct nvfx_reg&>(dstReg),
-                        NVFX_FP_MASK_ALL,
-                        madS0, madS1, madS2);
-                    mad.precision = dstPrecision;
-                    asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+                    const struct nvfx_reg r1Reg    = nvfx_reg(NVFXSR_TEMP, 1);
 
-                    const float lit[4] = {
-                        static_cast<float>(sb.scale - 1),
-                        0.0f, 0.0f, 0.0f
-                    };
-                    asm_.appendConstBlock(lit);
+                    if (sb.scale <= 3)
+                    {
+                        // Short shape: single MAD R0 = H0 * (N-1) + H0.
+                        struct nvfx_src madS0 = nvfx_src(hReg);
+                        struct nvfx_src madS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        // SRC1 reads c[0].xxxx — broadcasts lane X of
+                        // the inline literal block (which holds
+                        // scale-1 in lane X, padded with zeros).
+                        // nvfx_src() defaults to .xyzw identity, so
+                        // override explicitly.
+                        madS1.swz[0] = madS1.swz[1] = madS1.swz[2] = madS1.swz[3] = 0;
+                        struct nvfx_src madS2 = nvfx_src(hReg);
+                        struct nvfx_insn mad = nvfx_insn(
+                            saturate ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_ALL,
+                            madS0, madS1, madS2);
+                        mad.precision = dstPrecision;
+                        asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+
+                        const float lit[4] = {
+                            static_cast<float>(sb.scale - 1),
+                            0.0f, 0.0f, 0.0f
+                        };
+                        asm_.appendConstBlock(lit);
+                    }
+                    else
+                    {
+                        // Long shape (N >= 4): chain MUL/MAD into R1
+                        // doubling each step, then a final ADD or MAD
+                        // onto R0 that contributes the leftover 1 or
+                        // 2 copies of H0.
+                        const int N = sb.scale;
+                        const int K = (N - 1) / 2;     // chain length
+                        const bool needFencbr = (K % 2) == 1;
+                        const bool finalIsMad = (N % 2) == 0;
+                        static const float twoLit[4] = { 2.0f, 0.0f, 0.0f, 0.0f };
+
+                        // Helper: emit one R1 chain step (MUL on first,
+                        // MAD on subsequent) with the inline {2,0,0,0}
+                        // multiplier at c[0].xxxx.
+                        auto emitChainStep = [&](bool isFirst)
+                        {
+                            struct nvfx_src s0 = nvfx_src(hReg);
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                            s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
+                            struct nvfx_src s2 = isFirst
+                                ? nvfx_src(const_cast<struct nvfx_reg&>(none))
+                                : nvfx_src(const_cast<struct nvfx_reg&>(r1Reg));
+                            struct nvfx_insn step = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(r1Reg),
+                                NVFX_FP_MASK_ALL, s0, s1, s2);
+                            step.precision = FLOAT32;
+                            asm_.emit(step, isFirst ? NVFX_FP_OP_OPCODE_MUL
+                                                    : NVFX_FP_OP_OPCODE_MAD);
+                            asm_.appendConstBlock(twoLit);
+                        };
+
+                        for (int i = 0; i < K; ++i)
+                            emitChainStep(/*isFirst=*/i == 0);
+
+                        if (needFencbr)
+                            asm_.emitFencbr();
+
+                        // Final write to R0 — last instruction.
+                        if (finalIsMad)
+                        {
+                            // MAD R0 [END], H0, c[0].xxxx, R1 + inline {2,0,0,0}
+                            struct nvfx_src s0 = nvfx_src(hReg);
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                            s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(r1Reg));
+                            struct nvfx_insn mad = nvfx_insn(
+                                saturate ? 1 : 0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_ALL, s0, s1, s2);
+                            mad.precision = dstPrecision;
+                            asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+                            asm_.appendConstBlock(twoLit);
+                        }
+                        else
+                        {
+                            // ADD R0 [END], H0, R1 — no inline block.
+                            struct nvfx_src s0 = nvfx_src(hReg);
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(r1Reg));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn add = nvfx_insn(
+                                saturate ? 1 : 0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_ALL, s0, s1, s2);
+                            add.precision = dstPrecision;
+                            asm_.emit(add, NVFX_FP_OP_OPCODE_ADD);
+                        }
+                    }
 
                     emittedSomething = true;
                     break;

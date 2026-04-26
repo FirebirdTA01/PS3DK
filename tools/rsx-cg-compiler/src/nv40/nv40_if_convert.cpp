@@ -130,10 +130,27 @@ IRTypeInfo lookupType(const std::unordered_map<IRValueID, IRTypeInfo>& types,
     return (it != types.end()) ? it->second : fallback;
 }
 
+// Inner ops sce-cgc allows inside a multi-insn predicated THEN chain
+// today.  Anything else triggers a clean fail-out so we keep the
+// existing single-stout fast paths byte-exact.
+bool isPredicatableInnerOp(IROp op)
+{
+    switch (op)
+    {
+    case IROp::Add:
+    case IROp::Sub:
+    case IROp::Mul:
+    case IROp::Mad:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Attempt if-conversion on a single block's CondBranch terminator.
 // Returns true iff the diamond was rewritten.
 //
-// Two patterns handled (see header):
+// Three patterns handled (see header):
 //   1. Full diamond  — entry's last-non-terminator is the cmp; terminator
 //                       branches to two blocks that each do a single
 //                       stout-to-same-semantic and merge at a return.
@@ -141,6 +158,9 @@ IRTypeInfo lookupType(const std::unordered_map<IRValueID, IRTypeInfo>& types,
 //                       the compare, then branches to a then-block that
 //                       does a single stout-to-same-semantic and falls
 //                       through to the return block.
+//   3. If-only multi — same as (2), but the then-block contains N>1
+//                       (compute, stout) pairs forming a running-update
+//                       chain.  Lowers to a chain of PredCarry ops.
 bool tryConvertBlock(IRFunction& fn,
                      const std::unordered_map<IRValueID, IRTypeInfo>& types,
                      IRBasicBlock* entry)
@@ -227,11 +247,14 @@ bool tryConvertBlock(IRFunction& fn,
 
     // Shape 2: if-only — `falseTarget` is the return-only join block,
     // `thenBlock` overrides.  The default value comes from an earlier
-    // StoreOutput in the entry block itself.
-    if (isReturnOnly(falseTarget))
+    // StoreOutput in the entry block itself.  Falls through to Shape 3
+    // when the then-block has more than one StoreOutput.
+    IRInstruction* thenStout =
+        isReturnOnly(falseTarget)
+            ? matchSingleStoutThenBranch(thenBlock, falseTarget)
+            : nullptr;
+    if (thenStout)
     {
-        IRInstruction* thenStout = matchSingleStoutThenBranch(thenBlock, falseTarget);
-        if (!thenStout) return false;
 
         // Find the most recent StoreOutput in entry matching the same
         // semantic.  That's the "default" value.
@@ -287,6 +310,145 @@ bool tryConvertBlock(IRFunction& fn,
         entry->addInstruction(std::move(stout));
 
         // ret
+        auto ret = std::make_unique<IRInstruction>(
+            IROp::Return, InvalidIRValue, IRTypeInfo::Void());
+        entry->addInstruction(std::move(ret));
+
+        entry->successors.clear();
+        eraseBlock(fn, thenBlock);
+        eraseBlock(fn, falseTarget);
+        return true;
+    }
+
+    // Shape 3: if-only with multi-instruction THEN.  Same outer
+    // shape as Shape 2 (entry has explicit default stout, ELSE
+    // target is return-only) but the then-block has N >= 1
+    // (compute, stout) pairs forming a running-update chain on
+    // the same semantic.  Each pair becomes a PredCarry; the
+    // FP emitter lowers the chain to alternating R-temp predicated
+    // writes (see header for the full picture).
+    if (isReturnOnly(falseTarget) && thenBlock)
+    {
+        // The then-block must end with `br -> falseTarget` after
+        // K pairs of (computational, StoreOutput).  Each StoreOutput
+        // must operate on the same semantic and consume its
+        // immediately-preceding computational instruction's result.
+        if (thenBlock->successors.size() != 1) return false;
+        if (thenBlock->successors[0] != falseTarget) return false;
+        if (thenBlock->instructions.size() < 3)      return false;  // need >= 1 pair + Branch
+        if ((thenBlock->instructions.size() % 2) != 1) return false; // pairs + 1 terminator
+
+        // Last instruction must be Branch.
+        IRInstruction* term = thenBlock->instructions.back().get();
+        if (!term || term->op != IROp::Branch) return false;
+
+        struct ChainLink {
+            IRInstruction* compute;
+            IRInstruction* stout;
+        };
+        std::vector<ChainLink> chain;
+        const size_t pairCount = (thenBlock->instructions.size() - 1) / 2;
+        chain.reserve(pairCount);
+        for (size_t i = 0; i < pairCount; ++i)
+        {
+            IRInstruction* compute = thenBlock->instructions[2 * i].get();
+            IRInstruction* stout   = thenBlock->instructions[2 * i + 1].get();
+            if (!compute || !stout) return false;
+            if (!isPredicatableInnerOp(compute->op)) return false;
+            if (compute->result == InvalidIRValue)   return false;
+            if (stout->op != IROp::StoreOutput)      return false;
+            if (stout->operands.size() != 1)         return false;
+            if (stout->operands[0] != compute->result) return false;
+            chain.push_back({compute, stout});
+        }
+        if (chain.empty()) return false;
+
+        // Reject if any chain compute references an SSA value
+        // produced inside this then-block other than the
+        // immediately-prior link's compute (would need full
+        // dependency resolution we don't do yet).  For chain[i],
+        // any operand that isn't the prior compute's result, the
+        // default value, or a value defined OUTSIDE the then-block
+        // is unsupported today.
+        std::unordered_map<IRValueID, IRValueID> innerProducer;
+        for (const auto& link : chain)
+            innerProducer[link.compute->result] = link.compute->result;
+
+        for (size_t i = 0; i < chain.size(); ++i)
+        {
+            for (IRValueID operand : chain[i].compute->operands)
+            {
+                if (innerProducer.count(operand) == 0) continue;
+                // operand was produced inside the then-block.
+                // Allowed only if it's the immediately-prior link.
+                if (i == 0) return false;
+                if (operand != chain[i - 1].compute->result) return false;
+            }
+        }
+
+        // Every link's StoreOutput must hit the same semantic.
+        for (size_t i = 1; i < chain.size(); ++i)
+            if (!sameSemantic(chain[i].stout, chain[0].stout)) return false;
+
+        // Find the entry's default stout for the same semantic.
+        IRInstruction* defaultStout = nullptr;
+        size_t         defaultIdx   = 0;
+        for (size_t i = 0; i + 1 < entry->instructions.size(); ++i)
+        {
+            IRInstruction* p = entry->instructions[i].get();
+            if (p && p->op == IROp::StoreOutput && sameSemantic(p, chain[0].stout))
+            {
+                defaultStout = p;
+                defaultIdx   = i;
+            }
+        }
+        if (!defaultStout) return false;
+        if (defaultStout->operands.empty()) return false;
+
+        IRValueID defaultVal = defaultStout->operands[0];
+
+        // Erase the entry default stout + the CondBranch.
+        entry->instructions.pop_back();                     // CondBranch
+        entry->instructions.erase(entry->instructions.begin() + defaultIdx);
+
+        // Build the PredCarry chain.  For each link: predOp = the
+        // original compute op, operand[0] = cond, operand[1] =
+        // running value (defaultVal for the first link, prior
+        // PredCarry's result thereafter), operand[2..] = the
+        // original compute's operands with prior-link result IDs
+        // remapped to the corresponding PredCarry IDs.
+        std::unordered_map<IRValueID, IRValueID> remap;
+        IRValueID running = defaultVal;
+        for (size_t i = 0; i < chain.size(); ++i)
+        {
+            const IRInstruction* compute = chain[i].compute;
+            IRValueID predId = fn.allocateValueId();
+            auto pred = std::make_unique<IRInstruction>(
+                IROp::PredCarry, predId, compute->resultType);
+            pred->predOp = compute->op;
+            pred->addOperand(condId);
+            pred->addOperand(running);
+            for (IRValueID o : compute->operands)
+            {
+                auto it = remap.find(o);
+                pred->addOperand(it != remap.end() ? it->second : o);
+            }
+            entry->addInstruction(std::move(pred));
+            remap[compute->result] = predId;
+            running = predId;
+        }
+
+        // Final stout %running SEM (carries the last PredCarry's value).
+        const IRInstruction* lastStout = chain.back().stout;
+        auto stout = std::make_unique<IRInstruction>(
+            IROp::StoreOutput, InvalidIRValue, IRTypeInfo::Void());
+        stout->addOperand(running);
+        stout->semanticName    = lastStout->semanticName;
+        stout->rawSemanticName = lastStout->rawSemanticName;
+        stout->semanticIndex   = lastStout->semanticIndex;
+        stout->fieldName       = lastStout->fieldName;
+        entry->addInstruction(std::move(stout));
+
         auto ret = std::make_unique<IRInstruction>(
             IROp::Return, InvalidIRValue, IRTypeInfo::Void());
         entry->addInstruction(std::move(ret));

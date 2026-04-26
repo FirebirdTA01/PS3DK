@@ -11,33 +11,29 @@ silent miscompilation.
 
 ---
 
-## Repeated-add scale fold capped at scale = 3
+## Scalar-lane repeated-add fold (`v.x + v.x + v.x + v.x`)
 
-The `valueToScale` deferred binding (in `nv40_fp_emit.cpp`) collapses
-chains of `Add(x, x …)` over a single varying into a single MOVH +
-MAD pair (`MAD H0 * (N-1).xxxx + H0`).  Capped at `kMaxScale = 3`.
+The full-vec4 `valueToScale` path now covers N ∈ [2, 64] (short
+MOVH+MAD shape for N ≤ 3, long MOVH+MUL+chain+[FENCBR]+ADD/MAD for
+N ≥ 4 — see `triple_vcol_f`, `quad_vcol_f`, `septuple_vcol_f` in the
+test suite).  **The scalar-lane variant is still capped at 3.**
 
-**What happens at N ≥ 4**: the reference compiler switches to a
-4-instruction shape using a different scheduler path:
+At scalar-lane N=4 sce-cgc switches to a 2-instruction DP2R shape
+that doesn't share any structure with the full-vec4 chain:
 
 ```
-MOVH H0.xyzw, f[COL0]
-MUL  R0.xyzw, H0, c[2.0].xxxx       # MUL not MAD on this link
-FENCBR                              # opcode 0x3E + OUT_NONE
-MAD  R0.xyzw [END], H0, c[(N-1).0].xxxx, R0
+MOVH H0.x, f[COL0]
+DP2R R0.x [END], H0.x, {2,0,0,0}.x      # 2-component dot: 2*x*x = 4x
 ```
 
-Verified against `vcol+vcol+vcol+vcol` (4-copy probe at
-`/tmp/rsx-cg-chain-probe/quad_vcol_f.fpo`).  Adding a fourth-link
-extension to `valueToScale` would need a new emit branch that picks
-between the current MOVH+MAD shape (N ≤ 3) and the 4-insn
-MUL+FENCBR+MAD shape (N ≥ 4).
+Probe at `/tmp/rsx-cg-chain-probe/scalar_x4_f.fpo`.  Higher scalar
+counts (5, 6 …) almost certainly use a related DP-then-ADD shape
+that hasn't been probed yet.
 
-Today the seed/extend logic in the Add walker just refuses to grow
-past `kMaxScale = 3`, so `vcol + vcol + vcol + vcol` falls through
-the existing arithmetic-chain check and ends up in the chain-add path
-(which then fails because the chain wants uniforms not a repeated
-varying).  Result: a clear diagnostic, no miscompilation.
+The IR detector caps scalar-lane at `kMaxScalarLaneScale = 3` (see
+the `scaleCap` helper in `nv40_fp_emit.cpp`); past that, the chain
+falls through to other handlers or produces a clear diagnostic, never
+a miscompile.
 
 ---
 
@@ -77,6 +73,59 @@ the emitter bails with a `scaled-lanes scaledLane=W with < 3 unique
 values not yet supported` diagnostic; the natural extension is a
 small dispatch in the const-packing routine that allocates from
 slot 1 instead of slot 0 when scaledLane=W and slotCount < 3.
+
+---
+
+## Multi-instruction if-else (predicated execution)
+
+The simplest if-only-with-default + multi-insn-THEN shape is now
+handled end-to-end via `IROp::PredCarry` (`nv40_if_convert.cpp` Shape
+3 + the StoreOutput PredCarry handler in `nv40_fp_emit.cpp`).
+Coverage today (all in the harness, byte-exact vs sce-cgc):
+
+- `if_then_2add_f.cg` — 2-insn THEN, R1/R0 alternation, FENCBR.
+- `if_then_3insn_f.cg` — 3-insn THEN, H2 LHS promote (R0/R1/R0).
+- `if_then_4add_f.cg` — 4-insn THEN.
+- `if_then_5add_f.cg` — 5-insn THEN.
+
+The implementation enforces three restrictions; cases that hit any
+of them currently fall through with a clear diagnostic, not a
+miscompile:
+
+1. **Default must equal the LHS varying of the comparison.**  Today
+   we only handle `color = vcol; if (vcol.x > k) { color = ...; }`
+   shapes — the default is `vcol` and the cmp LHS is `vcol.x`,
+   which lets us reuse the MOVH-promoted H-temp as both the cmp
+   source and the first carry source.  Generalising to an
+   arbitrary default needs a separate carry-source register and
+   the matching probe data.
+
+2. **At most one non-LHS varying read across the chain.**  The
+   chain links may all read the same preloaded varying (e.g. `vt`
+   loaded once into R2), but two distinct non-LHS varyings would
+   need an R-temp allocator that picks fresh slots per varying.
+   Probes `fenc_skip2_f.fpo` show sce-cgc inserting interstitial
+   preloads which also disable the FENCBR-before-last rule — so
+   it's a coupled change, not just an allocator extension.
+
+3. **Always emits FENCBR before the last predicated OP for chains
+   of length >= 2.**  Matches sce-cgc when the chain uses R0/R1
+   alternation (the most common shape).  Probes
+   `if_then_multi_f.fpo` and `fenc_skip2_f.fpo` show no FENCBR
+   when the alternation displaces to R2/R0 because of preload
+   pressure — the rule appears tied to NV40's R-temp hazard window
+   but the exact trigger is still unclear.
+
+**Full if-else with multi-insn both branches** is the next tier and
+remains deferred.  Probe `if_multi2_f.fpo` shows sce-cgc
+*interleaving* THEN and ELSE instructions to share register
+pressure: the THEN result is computed unconditionally into R1 via
+two ALU instructions, then the ELSE result conditionally
+overwrites R1 with `(EQ.x)`, then R0 carries forward, and the
+final ELSE step also fires under `(EQ.x)`.  Implementing that
+needs a second `PredCarry`-style chain in the rewrite for the ELSE
+arm, an R-temp allocator that interleaves both chains over the
+same registers, and the same hazard-aware FENCBR rule as above.
 
 ---
 
