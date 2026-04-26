@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "abi-verify"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ar",
@@ -140,7 +140,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "coverage-report"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ar",
@@ -251,7 +251,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "nidgen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ar",
