@@ -30,6 +30,6 @@ target_link_libraries(hello-spu PRIVATE
 ps3_add_spu_image(hello-spu
     NAME hello_spu
     SOURCES spu/source/main.c
-    LIBS simdmath)
+    LIBS sputhread simdmath)
 
 ps3_add_self(hello-spu)
