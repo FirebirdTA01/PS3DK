@@ -1,4 +1,4 @@
-# hello-ppu-audio-out — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-audio-out — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

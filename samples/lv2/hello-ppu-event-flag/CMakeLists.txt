@@ -1,4 +1,4 @@
-# hello-ppu-event-flag — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-event-flag — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

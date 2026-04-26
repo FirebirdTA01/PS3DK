@@ -1,4 +1,4 @@
-# hello-ppu-backfill — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-backfill — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

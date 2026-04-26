@@ -1,4 +1,4 @@
-# compact-opd-probe — CMake build (mirrors Makefile; both coexist until phase 7e).
+# compact-opd-probe — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

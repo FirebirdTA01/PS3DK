@@ -1,4 +1,4 @@
-# hello-ppu-ap — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-ap — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

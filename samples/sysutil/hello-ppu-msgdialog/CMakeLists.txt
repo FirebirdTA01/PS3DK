@@ -1,4 +1,4 @@
-# hello-ppu-msgdialog — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-msgdialog — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

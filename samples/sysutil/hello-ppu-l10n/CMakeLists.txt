@@ -1,4 +1,4 @@
-# hello-ppu-l10n — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-l10n — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

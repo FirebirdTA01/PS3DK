@@ -1,4 +1,4 @@
-# hello-ppu-cellgcm-sysmenu — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-cellgcm-sysmenu — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

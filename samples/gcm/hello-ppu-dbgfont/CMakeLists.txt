@@ -1,4 +1,4 @@
-# hello-ppu-dbgfont — CMake build (mirrors Makefile; both coexist until phase 7e).
+# hello-ppu-dbgfont — CMake build.
 #
 # Build:
 #   cmake -S . -B build \

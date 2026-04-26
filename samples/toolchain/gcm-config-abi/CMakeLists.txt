@@ -1,4 +1,4 @@
-# gcm-config-abi — CMake build (mirrors Makefile; both coexist until phase 7e).
+# gcm-config-abi — CMake build.
 #
 # Build:
 #   cmake -S . -B build \
