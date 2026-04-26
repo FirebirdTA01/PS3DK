@@ -169,10 +169,62 @@ jobs:
           fetch-depth: 0
 
       - name: Set up MSYS2 / mingw64
+        # The MSYS2 download server (repo.msys2.org) intermittently returns
+        # HTTP 502 from its CDN.  Action's built-in retry is two attempts
+        # over ~30s, which sometimes isn't enough to ride out a transient
+        # gateway flap.  We give it three full action invocations
+        # (continue-on-error on the first two) and turn on the action's
+        # own cache so a successful run sticks in the runner cache and
+        # later runs skip the network entirely.
+        id: msys2_attempt1
+        continue-on-error: true
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: false
+          cache: true
+          install: >-
+            base-devel
+            git
+            zip
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-libelf
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-rust
+
+      - name: Set up MSYS2 / mingw64 (retry 1)
+        id: msys2_attempt2
+        if: steps.msys2_attempt1.outcome == 'failure'
+        continue-on-error: true
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          cache: true
+          install: >-
+            base-devel
+            git
+            zip
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-libelf
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-rust
+
+      - name: Set up MSYS2 / mingw64 (retry 2)
+        if: steps.msys2_attempt1.outcome == 'failure' && steps.msys2_attempt2.outcome == 'failure'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          cache: true
           install: >-
             base-devel
             git
