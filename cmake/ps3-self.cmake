@@ -95,3 +95,80 @@ function(ps3_add_self target)
         COMMENT "ps3-self: ${target}.{self,fake.self}"
         VERBATIM)
 endfunction()
+
+# -----------------------------------------------------------------------------
+# bin2s tool probe + ps3_bin2s(target file)
+# -----------------------------------------------------------------------------
+# bin2s converts a binary file into a .s assembly source (with byte
+# data + extern symbols) plus a generated .h declaring three externs:
+# <id>[], <id>_end[], <id>_size.  The generated .o is then linked
+# into the target like any other source file, so the C/C++ code can
+# `#include "<id>.h"` and reference the symbols directly.
+#
+# ID derivation matches PSL1GHT's data_rules: replace dots with
+# underscores and prefix a leading-digit name with `_` (so `9.png`
+# becomes `_9_png`).
+if(NOT _PS3_BIN2S_PROBED)
+    set(_PS3_BIN2S_PROBED TRUE)
+    set(_ps3_self_exe "")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_self_exe ".exe")
+    endif()
+    find_program(PS3_TOOL_bin2s
+        NAMES "bin2s${_ps3_self_exe}" "bin2s"
+        PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+        NO_DEFAULT_PATH)
+    # bin2s is optional — only samples that embed binary data need it.
+    # We don't FATAL_ERROR if it's missing; ps3_bin2s will surface a
+    # clear error if anyone calls it.
+endif()
+
+# Path to the cmake -P implementation script — runs in a child CMake
+# process so we can use execute_process(... OUTPUT_FILE ...) and
+# file(WRITE ...) cross-platform without resorting to bash -c / shell
+# redirection.
+set(_PS3_BIN2S_IMPL "${CMAKE_CURRENT_LIST_DIR}/ps3-bin2s-impl.cmake")
+
+function(ps3_bin2s target file)
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "ps3_bin2s: target '${target}' does not exist")
+    endif()
+    if(NOT PS3_TOOL_bin2s)
+        message(FATAL_ERROR "ps3_bin2s: bin2s host tool not found in ${PS3DEV}/bin or ${PS3DK}/bin")
+    endif()
+
+    # Resolve absolute path of the input file (relative to source dir
+    # if not already absolute).
+    if(IS_ABSOLUTE "${file}")
+        set(_input "${file}")
+    else()
+        set(_input "${CMAKE_CURRENT_SOURCE_DIR}/${file}")
+    endif()
+    if(NOT EXISTS "${_input}")
+        message(FATAL_ERROR "ps3_bin2s: input file does not exist: ${_input}")
+    endif()
+
+    get_filename_component(_basename "${_input}" NAME)
+    string(REGEX REPLACE "^([0-9])" "_\\1" _id "${_basename}")
+    string(REPLACE "." "_" _id "${_id}")
+
+    set(_outdir "${CMAKE_CURRENT_BINARY_DIR}")
+    set(_s   "${_outdir}/${_basename}.s")
+    set(_hdr "${_outdir}/${_id}.h")
+
+    add_custom_command(
+        OUTPUT  "${_s}" "${_hdr}"
+        COMMAND "${CMAKE_COMMAND}"
+                "-DPS3_BIN2S_TOOL=${PS3_TOOL_bin2s}"
+                "-DPS3_BIN2S_INPUT=${_input}"
+                "-DPS3_BIN2S_S=${_s}"
+                "-DPS3_BIN2S_HDR=${_hdr}"
+                "-DPS3_BIN2S_ID=${_id}"
+                -P "${_PS3_BIN2S_IMPL}"
+        DEPENDS "${_input}"
+        COMMENT "ps3-bin2s: ${_basename} -> ${_id}.{s,h}"
+        VERBATIM)
+
+    target_sources(${target} PRIVATE "${_s}")
+    target_include_directories(${target} PRIVATE "${_outdir}")
+endfunction()
