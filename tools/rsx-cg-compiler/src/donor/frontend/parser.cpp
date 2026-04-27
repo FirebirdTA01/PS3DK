@@ -1107,6 +1107,56 @@ Semantic Parser::parseSemantic()
     std::string semName = advance().lexeme;
     sem.rawName = semName;  // preserve source spelling for byte-exact container emit
 
+    // HLSL/Cg explicit binding: `: register(BANK<N>)`.  The reference
+    // compiler accepts CN (const), SN (sampler), VN (varying) — we
+    // capture the bank letter + numeric index and let the container
+    // emitter override the auto-allocator with this binding.
+    if (semName == "register" && check(TokenType::LPAREN))
+    {
+        advance();  // consume '('
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error("Expected register binding (e.g. C0) inside register(...)");
+        }
+        else
+        {
+            std::string body = advance().lexeme;
+            // Body looks like "C0", "C255", "s0", etc.  The lexer fuses
+            // the bank letter with the digits into a single identifier.
+            if (!body.empty() && std::isalpha(static_cast<unsigned char>(body[0])))
+            {
+                size_t cut = 1;
+                while (cut < body.size() && std::isdigit(static_cast<unsigned char>(body[cut])))
+                    ++cut;
+                sem.explicitRegisterBank  = static_cast<char>(std::toupper(static_cast<unsigned char>(body[0])));
+                if (cut < body.size())
+                {
+                    error("Unexpected suffix in register binding '" + body + "'");
+                }
+                else if (cut > 1)
+                {
+                    sem.explicitRegisterIndex = std::stoi(body.substr(1));
+                }
+                else
+                {
+                    error("Expected register index after bank letter in '" + body + "'");
+                }
+            }
+            else
+            {
+                error("Register binding must start with a bank letter (got '" + body + "')");
+            }
+        }
+        consume(TokenType::RPAREN, "Expected ')' after register binding");
+        // Surface the parsed binding through the existing fields too so
+        // that downstream code that only inspects name/index sees a
+        // sensible non-empty semantic.  Keep rawName as just "register"
+        // — the container emitter writes the binding separately.
+        sem.name  = "register";
+        sem.index = sem.explicitRegisterIndex;
+        return sem;
+    }
+
     // Parse semantic name and optional index (e.g., TEXCOORD0)
     // Try to extract trailing digit
     size_t digitStart = semName.length();
