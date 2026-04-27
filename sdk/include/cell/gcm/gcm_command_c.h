@@ -197,6 +197,35 @@ static inline void cellGcmSetBlendEnable(CellGcmContextData *thisContext, uint32
 	rsxSetBlendEnable(thisContext, enable);
 }
 
+static inline void cellGcmSetBlendFunc(CellGcmContextData *thisContext,
+                                       uint16_t sfcolor, uint16_t dfcolor,
+                                       uint16_t sfalpha, uint16_t dfalpha)
+{
+	rsxSetBlendFunc(thisContext, sfcolor, dfcolor, sfalpha, dfalpha);
+}
+
+static inline void cellGcmSetBlendEquation(CellGcmContextData *thisContext,
+                                           uint16_t color, uint16_t alpha)
+{
+	rsxSetBlendEquation(thisContext, color, alpha);
+}
+
+static inline void cellGcmSetBlendColor(CellGcmContextData *thisContext,
+                                        uint32_t color0, uint32_t color1)
+{
+	rsxSetBlendColor(thisContext, color0, color1);
+}
+
+static inline void cellGcmSetLogicOp(CellGcmContextData *thisContext, uint32_t op)
+{
+	rsxSetLogicOp(thisContext, op);
+}
+
+static inline void cellGcmSetLogicOpEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetLogicOpEnable(thisContext, enable);
+}
+
 static inline void cellGcmSetShadeModel(CellGcmContextData *thisContext, uint32_t model)
 {
 	rsxSetShadeModel(thisContext, model);

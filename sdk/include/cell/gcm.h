@@ -188,6 +188,26 @@ static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
                                  zCullDir, zCullFormat, sFunc, sRef, sMask);
 }
 
+/* Reference-SDK names — same call shape as our SetTileInfo / BindZcull. */
+static inline int32_t cellGcmSetTile(uint8_t index, uint8_t location,
+                                     uint32_t offset, uint32_t size, uint32_t pitch,
+                                     uint8_t comp, uint16_t base, uint8_t bank)
+{
+    return cellGcmSetTileInfo(index, location, offset, size, pitch, comp, base, bank);
+}
+
+static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
+                                      uint32_t width, uint32_t height,
+                                      uint32_t cullStart, uint32_t zFormat,
+                                      uint32_t aaFormat, uint32_t zCullDir,
+                                      uint32_t zCullFormat, uint32_t sFunc,
+                                      uint32_t sRef, uint32_t sMask)
+{
+    return cellGcmBindZcull(index, offset, width, height,
+                            cullStart, zFormat, aaFormat,
+                            zCullDir, zCullFormat, sFunc, sRef, sMask);
+}
+
 /* The cell-SDK "current context" global.  PSL1GHT exposes gGcmContext
  * under the same semantics; we re-bind via #define so user-side
  * l-value uses (gCellGcmCurrentContext->current = ..., etc.) and

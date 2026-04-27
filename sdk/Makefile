@@ -88,7 +88,14 @@ HEADERS := \
     include/cell/spurs/semaphore.h \
     include/sys/spu_thread.h \
     include/sys/spu_thread_group.h \
-    include/spu_printf.h
+    include/spu_printf.h \
+    include/simdmath.h \
+    include/sys/cdefs.h \
+    include/sys/event.h \
+    include/sys/sce_cdefs.h \
+    include/sysutil/sysutil_common.h \
+    include/cell/keyboard.h \
+    include/cell/mouse.h
 
 SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread
 

@@ -318,6 +318,51 @@ extern "C" {
 #define CELL_GCM_INVALIDATE_TEXTURE              1
 #define CELL_GCM_INVALIDATE_VERTEX_TEXTURE       2
 
+/* Blend factors / equations / logic ops (NV40 method args).
+ * Values match PSL1GHT's GCM_* defines in <rsx/gcm_sys.h>. */
+#define CELL_GCM_ZERO                            0x0000
+#define CELL_GCM_ONE                             0x0001
+#define CELL_GCM_SRC_COLOR                       0x0300
+#define CELL_GCM_ONE_MINUS_SRC_COLOR             0x0301
+#define CELL_GCM_SRC_ALPHA                       0x0302
+#define CELL_GCM_ONE_MINUS_SRC_ALPHA             0x0303
+#define CELL_GCM_DST_ALPHA                       0x0304
+#define CELL_GCM_ONE_MINUS_DST_ALPHA             0x0305
+#define CELL_GCM_DST_COLOR                       0x0306
+#define CELL_GCM_ONE_MINUS_DST_COLOR             0x0307
+#define CELL_GCM_SRC_ALPHA_SATURATE              0x0308
+#define CELL_GCM_CONSTANT_COLOR                  0x8001
+#define CELL_GCM_ONE_MINUS_CONSTANT_COLOR        0x8002
+#define CELL_GCM_CONSTANT_ALPHA                  0x8003
+#define CELL_GCM_ONE_MINUS_CONSTANT_ALPHA        0x8004
+
+#define CELL_GCM_FUNC_ADD                        0x8006
+#define CELL_GCM_MIN                             0x8007
+#define CELL_GCM_MAX                             0x8008
+#define CELL_GCM_FUNC_SUBTRACT                   0x800a
+#define CELL_GCM_FUNC_REVERSE_SUBTRACT           0x800b
+#define CELL_GCM_FUNC_REVERSE_SUBTRACT_SIGNED    0x0000f005
+#define CELL_GCM_FUNC_ADD_SIGNED                 0x0000f006
+#define CELL_GCM_FUNC_REVERSE_ADD_SIGNED         0x0000f007
+
+/* Logic-op opcodes (NV40 method args). */
+#define CELL_GCM_CLEAR                           0x1500
+#define CELL_GCM_AND                             0x1501
+#define CELL_GCM_AND_REVERSE                     0x1502
+#define CELL_GCM_COPY                            0x1503
+#define CELL_GCM_AND_INVERTED                    0x1504
+#define CELL_GCM_NOOP                            0x1505
+#define CELL_GCM_XOR                             0x1506
+#define CELL_GCM_OR                              0x1507
+#define CELL_GCM_NOR                             0x1508
+#define CELL_GCM_EQUIV                           0x1509
+#define CELL_GCM_INVERT                          0x150a
+#define CELL_GCM_OR_REVERSE                      0x150b
+#define CELL_GCM_COPY_INVERTED                   0x150c
+#define CELL_GCM_OR_INVERTED                     0x150d
+#define CELL_GCM_NAND                            0x150e
+#define CELL_GCM_SET                             0x150f
+
 #ifdef __cplusplus
 }
 #endif

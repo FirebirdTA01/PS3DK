@@ -1,0 +1,12 @@
+// hello-ppu-cellgcm-blend — fragment program.
+//
+// Emits the interpolated vertex RGBA verbatim — alpha component is
+// what the cellGcmSetBlendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA) state
+// reads to compute the blend factor.
+
+void main(
+    float4 in_color      : COLOR,
+    out float4 out_color : COLOR)
+{
+    out_color = in_color;
+}

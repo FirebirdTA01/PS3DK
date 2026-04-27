@@ -94,6 +94,22 @@ static inline void cellGcmSetDepthMask(uint32_t mask)
 static inline void cellGcmSetBlendEnable(uint32_t enable)
 { cellGcmSetBlendEnable(gCellGcmCurrentContext, enable); }
 
+static inline void cellGcmSetBlendFunc(uint16_t sfcolor, uint16_t dfcolor,
+                                       uint16_t sfalpha, uint16_t dfalpha)
+{ cellGcmSetBlendFunc(gCellGcmCurrentContext, sfcolor, dfcolor, sfalpha, dfalpha); }
+
+static inline void cellGcmSetBlendEquation(uint16_t color, uint16_t alpha)
+{ cellGcmSetBlendEquation(gCellGcmCurrentContext, color, alpha); }
+
+static inline void cellGcmSetBlendColor(uint32_t color0, uint32_t color1)
+{ cellGcmSetBlendColor(gCellGcmCurrentContext, color0, color1); }
+
+static inline void cellGcmSetLogicOp(uint32_t op)
+{ cellGcmSetLogicOp(gCellGcmCurrentContext, op); }
+
+static inline void cellGcmSetLogicOpEnable(uint32_t enable)
+{ cellGcmSetLogicOpEnable(gCellGcmCurrentContext, enable); }
+
 static inline void cellGcmSetShadeModel(uint32_t model)
 { cellGcmSetShadeModel(gCellGcmCurrentContext, model); }
 
