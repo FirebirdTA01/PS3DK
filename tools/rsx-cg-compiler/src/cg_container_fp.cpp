@@ -208,7 +208,13 @@ ContainerResult emitFragmentContainer(
         // when the user wrote "TEXCOORD0", and "TEXCOORD" when they wrote
         // "TEXCOORD".  Falls back to the bare name if the front-end
         // didn't capture the raw form.
-        d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
+        // Suppress the semantic string when the front-end inferred the
+        // binding from an unbound entry-point param: the .fpo carries
+        // the resource code (e.g. TEXCOORD0 → 0x0c94) but writes a zero
+        // semantic-string offset, matching the reference compiler.
+        d.semantic  = p.inferredSemantic
+                        ? std::string{}
+                        : (p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName);
         d.type      = cgTypeForIRType(p.type);
         d.paramno   = static_cast<uint32_t>(i);
 

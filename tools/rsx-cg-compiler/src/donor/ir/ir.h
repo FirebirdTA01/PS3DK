@@ -359,6 +359,7 @@ struct IRParameter
     std::string semanticName;
     std::string rawSemanticName;  // original source spelling (e.g. "TEXCOORD0"); empty if absent
     int semanticIndex = 0;
+    bool inferredSemantic = false;  // semantic was assigned by the unbound-input default pass
 };
 
 class IRFunction

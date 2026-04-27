@@ -3316,8 +3316,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 if (it->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
                     it->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
                 {
-                    attrs.texCoordsInputMask |=
-                        uint16_t{1} << (it->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    const int n = it->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                    attrs.texCoordsInputMask |= uint16_t{1} << n;
+                    // 4-component varying read of TEXCOORDn — sce-cgc
+                    // clears the 2D bit (bit only stays set when the
+                    // slot is consumed by a non-projective 2D tex2D).
+                    attrs.texCoords2D &= ~(uint16_t{1} << n);
                 }
                 break;
             }
@@ -3327,7 +3331,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
             default:
                 out.diagnostics.push_back(
-                    "nv40-fp: unsupported IR op");
+                    "nv40-fp: unsupported IR op #" +
+                    std::to_string(static_cast<int>(inst.op)));
                 return out;
             }
         }

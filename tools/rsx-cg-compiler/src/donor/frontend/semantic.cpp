@@ -1,6 +1,7 @@
 #include "semantic.h"
 #include <algorithm>
 #include <cctype>
+#include <set>
 #include <sstream>
 #include <iostream>  // For debug output
 
@@ -1086,6 +1087,25 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     // Counter for assigning default semantics to undecorated parameters
     int defaultAttrIndex = 0;
 
+    // Fragment-stage default-binding rule (matches reference compiler):
+    // each non-uniform input parameter without an explicit semantic gets
+    // the next-available TEXCOORD<N> slot — skipping any TEXCOORD<N>
+    // already explicitly used by a sibling. Verified via byte probes of
+    // unbound / mixed-binding shapes; resource code 0x0c94+N is written
+    // but the semantic *string* is suppressed in the .fpo container.
+    std::set<int> usedTexCoordIndices;
+    if (shaderInfo_.stage == ShaderStage::Fragment)
+    {
+        for (const auto& param : entryPoint->parameters)
+        {
+            if (param->semantic.isEmpty()) continue;
+            const std::string& sn = param->semantic.name;
+            if (sn == "TEXCOORD" || sn == "texcoord" || sn == "TexCoord")
+                usedTexCoordIndices.insert(param->semantic.index);
+        }
+    }
+    int nextTexCoordIndex = 0;
+
     // DEBUG: Enable to trace parameter collection (keep commented when not debugging)
     #define DEBUG_SHADER_IO_COLLECTION 0
     #if DEBUG_SHADER_IO_COLLECTION
@@ -1180,13 +1200,40 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
         }
         else if (!isOutput)
         {
-            // Non-struct input parameter without explicit semantic
-            // Assign a default semantic based on parameter position
-            // This handles cases like: float4 main(float2 position) : POSITION
-            // where the input has no semantic but is still a shader input
-            std::string defaultSemantic = "ATTR" + std::to_string(defaultAttrIndex++);
+            // Non-struct input parameter without explicit semantic.
+            // Assign a default binding the IR builder + emitter can
+            // recognise:
+            //   - fragment stage: TEXCOORD<N>, skipping any TEXCOORD<N>
+            //     already used by a sibling parameter. Matches the
+            //     reference compiler.
+            //   - vertex stage: ATTR<N> in declaration order (existing
+            //     behaviour, no test shader exercises it but kept).
+            // The inferred semantic is written back into the AST so the
+            // IR builder picks it up via param->semantic, and marked
+            // `inferred = true` so the .fpo container emitter suppresses
+            // the semantic *string* (the resource code carries enough
+            // for the runtime to bind the slot).
+            std::string defaultSemantic;
+            int defaultIndex = 0;
+            if (shaderInfo_.stage == ShaderStage::Fragment)
+            {
+                while (usedTexCoordIndices.count(nextTexCoordIndex))
+                    ++nextTexCoordIndex;
+                defaultSemantic = "TEXCOORD";
+                defaultIndex    = nextTexCoordIndex++;
+            }
+            else
+            {
+                defaultSemantic = "ATTR";
+                defaultIndex    = defaultAttrIndex++;
+            }
 
-            ShaderIOParam ioParam(param->name, defaultSemantic, 0, paramType, false);
+            param->semantic.name     = defaultSemantic;
+            param->semantic.rawName  = defaultSemantic + std::to_string(defaultIndex);
+            param->semantic.index    = defaultIndex;
+            param->semantic.inferred = true;
+
+            ShaderIOParam ioParam(param->name, defaultSemantic, defaultIndex, paramType, false);
             shaderInfo_.inputParams.push_back(ioParam);
         }
     }

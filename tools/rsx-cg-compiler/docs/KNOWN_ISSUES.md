@@ -129,76 +129,86 @@ same registers, and the same hazard-aware FENCBR rule as above.
 
 ---
 
-## FP entry-point gap: implicit varying semantics
+## FP entry-point implicit varying inference — DONE (2026-04-27)
 
-The original Cg compiler accepts FP entry-point parameters with no
-explicit binding semantic and infers a varying input slot:
+Unbound FP entry-point inputs (no `: TEXCOORD<N>` / `: COLOR`
+semantic) now infer to sequential `TEXCOORD<N>` slots in declaration
+order, skipping any `TEXCOORD<N>` already explicitly used by a
+sibling parameter.  The resource code (e.g. `0x0c94` = TEXCOORD0)
+is written into the `.fpo` parameter table; the semantic *string*
+is suppressed via the new `Semantic.inferred` flag, matching the
+reference compiler's behaviour on probed `clear_fpshader.cg`,
+`mixed_unbound_f.cg`, `two_unbound_f.cg`.  Test:
+`tests/shaders/implicit_varying_f.cg`.
 
-```cg
-void main(float4 v2f_color, out float4 color : COLOR)
-{ color = v2f_color; }
-```
-
-Our front-end currently requires explicit semantics on every input
-(`: COLOR`, `: TEXCOORD0`, etc.) — without one, the variable is
-parsed as a generic local rather than a varying-input read, and the
-NV40 emitter bails:
-
-```
-nv40-fp: StoreOutput source is not a direct varying input,
-         tex2D result, or literal vec4 (arithmetic lowering lands later)
-```
-
-Reproduces on FP shaders written for older SDKs that left entry-point
-parameters unbound and relied on the front-end inferring varying slots.
-Adding `: COLOR` to the input parameter compiles cleanly — but we
-should match the reference compiler's inference rule rather than
-require source edits.
-
-**Fix shape:** the front-end needs a "default-varying-binding" pass
-that walks unbound entry-point inputs and assigns them sequential
-varying slots in declaration order (matching what the reference
-compiler does).
-Once the input is recognised as a varying read, the existing
-StoreOutput-from-varying path in `nv40_fp_emit.cpp` handles the
-emit.  No new NV40 encoding work — purely a front-end inference
-rule.
+The TEXCOORD<N> 2D bit also gets cleared on a 4-component varying
+read (was previously only cleared in projective / cube tex paths).
 
 ---
 
-## FP texture sampling — `tex2D` not yet emitted
+## FP basic tex2D / cube / proj — DONE
+
+The `texture_sample_f.cg`, `texture_cube_f.cg`, and `texture_proj_f.cg`
+shapes (a single `tex2D` / `texCUBE` / `tex2Dproj` whose result flows
+*directly* into a `StoreOutput`) are byte-exact against the reference
+compiler.  The remaining tex2D gaps live further along in the
+dataflow — see "FP texture-result feeding compare / arithmetic"
+below.
+
+---
+
+## FP texture-result feeding compare / arithmetic — PENDING
 
 ```cg
-uniform sampler2D texture;
-float4 c = tex2D(texture, uv);
+float4 tex = tex2D(texture, texcoord);
+if (tex.a <= 0.5) { oColor = float4(0); }
+else              { oColor = color;     }
 ```
 
-Front-end parses the call.  IR builder emits a `Tex2D` op.  NV40
-emitter currently bails:
+Today the `TexSample` IR result feeds straight into a `StoreOutput`
+in every test we've probed.  Real shaders (e.g. the alpha-masked
+text shader from the reference SDK's `fw` framework) feed the result
+into a `VecShuffle` (`tex.a`), then a `CmpLe` against a literal,
+then drive an if-else.  Three coupled gaps:
 
-```
-nv40-fp: unsupported IR op
-```
+1. **`CmpBinding` LHS is varying-only.**  `nv40_fp_emit.cpp`'s
+   comparison handler only records a `CmpBinding` when the LHS is a
+   scalar-extract of a value resolvable through `valueToInputSrc` —
+   tex-sample results live in `valueToTex`, so the binding is
+   silently dropped and the downstream `Select` bails with
+   "Select needs a CmpGt/CmpGe/... constant-threshold binding".
 
-The NV40 FP `TEX` instruction itself is well-documented (`opcode=0x17`
-in the `_FP_OPCODE` family, sampler index in the `tex_id` field of
-the second word, lod-bias / cubemap variants in the third) — gap is
-purely on the emitter side.  Implementation needs:
+2. **`if-convert` rejects multi-instruction THEN/ELSE arms.**  The
+   pass requires each arm to be exactly `[stout; br]`.  The dbgfont
+   shape's THEN arm is `[vec %14 ...; stout %14; br]` (a
+   `VecConstruct` of four float consts before the stout), so the
+   diamond never collapses to a `Select` and `CondBranch` reaches
+   the emitter unlowered (`unsupported IR op #78`).  Fix shape:
+   hoist side-effect-free instructions from each arm into entry
+   before synthesising the Select.
 
-1. Sampler-register allocator: each `uniform sampler*` declaration
-   binds to a `texture[N]` slot.  Reference allocates in declaration
-   order from slot 0; verified against probe `tex2D_basic_f.fpo`.
-2. NV40 `TEX` instruction encoding in `nv40_fp_emit.cpp` —
-   destination R-temp, sampler id, source UV from interpolator.
-3. `StoreOutput` path needs to accept a `Tex2D` result as a direct
-   source (already documented in the bail-out diagnostic — the
-   "tex2D result" branch is the missing bit of bookkeeping).
-4. Variants: `tex2Dlod`, `tex2Dproj`, cubemap, 3D sampler — separate
-   encodings, queued behind the basic case.
+3. **Reference encoding for tex-result-as-cmp-LHS isn't probed.**
+   `dbgfont_fpshader.cg` ucode (3 instructions, 64 bytes) at
+   `--O2 --fastmath`:
+   ```
+   inst 1 (16B): TEX R0, f[TEX0], TEX0
+   inst 2 (32B): SLE [OUT_NONE | COND_WRITE_ENABLE], R0.w, {0.5}.x
+   inst 3 (16B): MOV R0[CC.?], <something>            # END
+   ```
+   inst 1 is the same shape as our existing `texture_sample_f.cg`
+   path.  inst 2 is an SLE writing only the condition code (no
+   register destination — the OUT_NONE bit at 30 is set; same
+   pattern as our existing SGTRC-based varying-cmp path but with
+   the LHS sourced from a tempreg, not a varying input).  inst 3
+   is a conditional MOV; it needs decoding to confirm whether it
+   reads the COL0 varying directly or routes through a temp.
+   Probe: invoke the reference Cg compiler (the binary under
+   `reference/sony-sdk/host-win32/Cg/bin/`) under `wine` with
+   `--profile sce_fp_rsx --O2 --fastmath` against the alpha-mask
+   shader to capture a fresh `.fpo`.
 
-Reproduces on any FP shader that samples a texture — text rendering,
-sprite blits, lit / shaded materials, anything past flat-shaded
-geometry.
+Captured separately as session prompt
+`docs/next-session-prompt-dbgfont.md`.
 
 ---
 
