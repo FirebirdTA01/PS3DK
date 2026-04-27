@@ -28,6 +28,13 @@
 
 include_guard(GLOBAL)
 
+# Captured once at file load so functions defined below resolve their
+# default asset / template paths against the toolchain root rather
+# than against the caller's CMakeLists dir.  CMAKE_CURRENT_LIST_DIR
+# inside a function body evaluates lazily at the call site.
+set(_PS3_SELF_CMAKE_DIR    "${CMAKE_CURRENT_LIST_DIR}")
+get_filename_component(_PS3_TOOLCHAIN_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
 # -----------------------------------------------------------------------------
 # One-time host-tool probe
 # -----------------------------------------------------------------------------
@@ -385,4 +392,219 @@ function(ps3_add_cg_shader target file)
     # the symbols off the file basename — `<stem>.<out_ext>` becomes
     # `<stem>_<out_ext>` per the dot-to-underscore convention.
     ps3_bin2s(${target} "${_compiled}")
+endfunction()
+
+
+# ps3_add_cg_shader_rsxcgc(<target> <file>)
+#
+# Same as ps3_add_cg_shader but compiles through rsx-cg-compiler instead
+# of cgcomp.  Use this when the consumer code calls into the cellGcmCg*
+# program-handle API (cellGcmCgInitProgram, cellGcmCgGetUCode,
+# cellGcmCgGetNamedParameter, cellGcmSetVertexProgram, ...).
+#
+# Why a separate function instead of a flag on the cgcomp variant:
+# rsx-cg-compiler emits CgBinaryProgram blobs (sce-cgc-compatible —
+# magic 0x00001b5b for VP, 0x00001b5c for FP).  cgcomp emits a
+# different layout starting with "VP\0\0".  The cellGcmCg* helpers in
+# libgcm_cmd.a walk the CgBinaryProgram layout directly; passing them
+# a cgcomp blob crashes with a VM access violation in cellGcmCgGetUCode
+# (the helper reads `prog->ucode` at +28, which lands on a cgcomp
+# header byte that's not a valid offset).
+#
+# rsxLoadVertexProgram / rsxLoadFragmentProgramLocation (PSL1GHT) only
+# understand the cgcomp layout, so samples that use the rsxLoad* path
+# must keep using ps3_add_cg_shader.
+if(NOT _PS3_RSXCGC_PROBED)
+    set(_PS3_RSXCGC_PROBED TRUE)
+    set(_ps3_rsxcgc_exe "")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_rsxcgc_exe ".exe")
+    endif()
+    find_program(PS3_TOOL_rsxcgc
+        NAMES "rsx-cg-compiler${_ps3_rsxcgc_exe}" "rsx-cg-compiler"
+        PATHS
+            "${PS3DEV}/bin"
+            "${PS3DK}/bin"
+            "${CMAKE_CURRENT_LIST_DIR}/../tools/rsx-cg-compiler/build"
+        NO_DEFAULT_PATH)
+endif()
+
+function(ps3_add_cg_shader_rsxcgc target file)
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "ps3_add_cg_shader_rsxcgc: target '${target}' does not exist")
+    endif()
+    if(NOT PS3_TOOL_rsxcgc)
+        message(FATAL_ERROR "ps3_add_cg_shader_rsxcgc: rsx-cg-compiler not found "
+                            "(checked ${PS3DEV}/bin, ${PS3DK}/bin, tools/rsx-cg-compiler/build)")
+    endif()
+
+    if(IS_ABSOLUTE "${file}")
+        set(_input "${file}")
+    else()
+        set(_input "${CMAKE_CURRENT_SOURCE_DIR}/${file}")
+    endif()
+    if(NOT EXISTS "${_input}")
+        message(FATAL_ERROR "ps3_add_cg_shader_rsxcgc: input file does not exist: ${_input}")
+    endif()
+
+    get_filename_component(_ext "${_input}" EXT)
+    get_filename_component(_stem "${_input}" NAME_WE)
+    if(_ext STREQUAL ".vcg")
+        set(_profile_arg "sce_vp_rsx")
+        set(_out_ext "vpo")
+    elseif(_ext STREQUAL ".fcg")
+        set(_profile_arg "sce_fp_rsx")
+        set(_out_ext "fpo")
+    else()
+        message(FATAL_ERROR "ps3_add_cg_shader_rsxcgc: ${file} has unrecognised extension "
+                            "${_ext} (expected .vcg or .fcg)")
+    endif()
+
+    set(_outdir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+    file(MAKE_DIRECTORY "${_outdir}")
+    set(_compiled "${_outdir}/${_stem}.${_out_ext}")
+
+    add_custom_command(
+        OUTPUT  "${_compiled}"
+        COMMAND "${PS3_TOOL_rsxcgc}" "-p" "${_profile_arg}"
+                                      "--emit-container" "${_compiled}" "${_input}"
+        DEPENDS "${_input}"
+        COMMENT "ps3-rsxcgc: ${_stem}${_ext} → ${_stem}.${_out_ext}"
+        VERBATIM)
+
+    ps3_bin2s(${target} "${_compiled}")
+endfunction()
+
+
+# ps3_add_pkg(<target> CONTENTID str
+#                       [TITLE str] [APPID str]
+#                       [ICON path] [SFOXML path] [PKGFILES dir])
+#
+# Builds an installable PS3 .pkg (the artifact a PS3 sees on a memory
+# stick / USB / a .pkg drag onto RPCS3) for `target`, which must
+# already have ps3_add_self() applied.
+#
+# Pipeline (matches the PSL1GHT ppu_rules .pkg recipe):
+#
+#   1. make_self_npdrm <stripped.elf> <pkg/USRDIR/EBOOT.BIN> <CONTENTID>
+#   2. sfo.py --title "..." --appid "..." -f <SFOXML> <pkg/PARAM.SFO>
+#   3. cp <ICON> <pkg/ICON0.PNG>
+#   4. cp -r <PKGFILES>/* <pkg/>     (if PKGFILES dir exists)
+#   5. pkg.py --contentid <CONTENTID> <pkg/> <target>.pkg
+#   6. package_finalize <target>.gnpdrm.pkg
+#
+# CONTENTID is required (36 chars: "XX0000-AAAAAAAAA_00-USERNAMEXXXXXX0").
+# RPCS3 namespaces its shader cache + per-game data by the title-id
+# portion (chars 8..16 of the contentid), which is the reason this
+# helper exists — installing as a .pkg lets RPCS3 cache shaders against
+# a stable id rather than the .self path.
+#
+# TITLE defaults to the target name; APPID defaults to the title-id
+# extracted from the contentid; ICON defaults to sdk/assets/ICON0.PNG;
+# SFOXML defaults to cmake/templates/sfo.xml; PKGFILES defaults to
+# the sample's pkg_files/ subdir if it exists.
+if(NOT _PS3_PKG_PROBED)
+    set(_PS3_PKG_PROBED TRUE)
+    set(_ps3_self_exe "")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_self_exe ".exe")
+    endif()
+    foreach(tool make_self_npdrm pkg.py sfo.py package_finalize)
+        find_program(PS3_TOOL_${tool}
+            NAMES "${tool}${_ps3_self_exe}" "${tool}"
+            PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+            NO_DEFAULT_PATH)
+    endforeach()
+endif()
+
+function(ps3_add_pkg target)
+    cmake_parse_arguments(_PSP "" "TITLE;APPID;CONTENTID;ICON;SFOXML;PKGFILES" "" ${ARGN})
+
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "ps3_add_pkg: target '${target}' does not exist")
+    endif()
+    foreach(tool make_self_npdrm pkg.py sfo.py package_finalize)
+        if(NOT PS3_TOOL_${tool})
+            message(FATAL_ERROR
+                "ps3_add_pkg: required host tool '${tool}' not found.\n"
+                "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
+        endif()
+    endforeach()
+
+    if(NOT _PSP_CONTENTID)
+        message(FATAL_ERROR "ps3_add_pkg(${target}): CONTENTID is required (36-char "
+                            "XX0000-AAAAAAAAA_00-USERNAMEXXXXXX0 string)")
+    endif()
+    string(LENGTH "${_PSP_CONTENTID}" _cid_len)
+    if(NOT _cid_len EQUAL 36)
+        message(WARNING "ps3_add_pkg(${target}): CONTENTID is ${_cid_len} chars, "
+                        "expected 36.  Real PS3 hardware will reject the .pkg.")
+    endif()
+
+    if(NOT _PSP_TITLE)
+        set(_PSP_TITLE "${target}")
+    endif()
+    if(NOT _PSP_APPID)
+        # Extract the 9-char title-id from the contentid (chars 8..16).
+        string(SUBSTRING "${_PSP_CONTENTID}" 7 9 _PSP_APPID)
+    endif()
+
+    # Default icon: the toolchain's branded sdk/assets/ICON0.PNG.
+    if(NOT _PSP_ICON)
+        set(_PSP_ICON "${_PS3_TOOLCHAIN_ROOT}/sdk/assets/ICON0.PNG")
+    endif()
+    if(NOT EXISTS "${_PSP_ICON}")
+        message(FATAL_ERROR "ps3_add_pkg(${target}): ICON not found: ${_PSP_ICON}")
+    endif()
+
+    # Default SFO XML — PSL1GHT-style template; TITLE/APPID overridable
+    # from the command line via sfo.py's --title / --appid flags.
+    if(NOT _PSP_SFOXML)
+        set(_PSP_SFOXML "${_PS3_SELF_CMAKE_DIR}/templates/sfo.xml")
+    endif()
+    if(NOT EXISTS "${_PSP_SFOXML}")
+        message(FATAL_ERROR "ps3_add_pkg(${target}): SFOXML not found: ${_PSP_SFOXML}")
+    endif()
+
+    # The .self post-build chain lands a stripped .elf at
+    # <src>/<target>.elf — that's what make_self_npdrm signs.
+    set(_stripped  "${CMAKE_CURRENT_SOURCE_DIR}/${target}.elf")
+    set(_pkg_dir   "${CMAKE_CURRENT_BINARY_DIR}/pkg")
+    set(_pkg_out   "${CMAKE_CURRENT_SOURCE_DIR}/${target}.pkg")
+    set(_pkg_npdrm "${CMAKE_CURRENT_SOURCE_DIR}/${target}.gnpdrm.pkg")
+
+    # Optional pkg_files/ overlay (e.g. hello-ppu-png uses this).
+    if(NOT _PSP_PKGFILES)
+        set(_PSP_PKGFILES "${CMAKE_CURRENT_SOURCE_DIR}/pkg_files")
+    endif()
+    if(EXISTS "${_PSP_PKGFILES}")
+        set(_pkg_overlay_cmd
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                    "${_PSP_PKGFILES}" "${_pkg_dir}")
+    else()
+        set(_pkg_overlay_cmd "")
+    endif()
+
+    add_custom_command(
+        OUTPUT "${_pkg_out}"
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_pkg_dir}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_pkg_dir}/USRDIR"
+        COMMAND "${PS3_TOOL_make_self_npdrm}" "${_stripped}"
+                "${_pkg_dir}/USRDIR/EBOOT.BIN" "${_PSP_CONTENTID}"
+        COMMAND "${PS3_TOOL_sfo.py}"
+                --title "${_PSP_TITLE}" --appid "${_PSP_APPID}"
+                -f "${_PSP_SFOXML}" "${_pkg_dir}/PARAM.SFO"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${_PSP_ICON}" "${_pkg_dir}/ICON0.PNG"
+        ${_pkg_overlay_cmd}
+        COMMAND "${PS3_TOOL_pkg.py}"
+                --contentid "${_PSP_CONTENTID}" "${_pkg_dir}/" "${_pkg_out}"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${_pkg_out}" "${_pkg_npdrm}"
+        COMMAND "${PS3_TOOL_package_finalize}" "${_pkg_npdrm}"
+        DEPENDS "${_stripped}" "${_PSP_ICON}" "${_PSP_SFOXML}"
+        BYPRODUCTS "${_pkg_dir}" "${_pkg_npdrm}"
+        COMMENT "ps3-pkg: ${target}.pkg (CONTENTID=${_PSP_CONTENTID})"
+        VERBATIM)
+
+    add_custom_target(${target}_pkg ALL DEPENDS "${_pkg_out}")
+    add_dependencies(${target}_pkg ${target})
 endfunction()
