@@ -248,18 +248,20 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
 
     const uint32_t inst_count = vp->instructionCount;
     const uint32_t inst_start = vp->instructionSlot;
-    const uint32_t loop       = inst_count >> 3;             /* full 8-insn chunks */
-    const uint32_t rest       = (inst_count & 7u) * 4u;      /* remainder words */
 
-    /* Reservation: UPLOAD_FROM_ID hdr + 2 args                     = 3 words,
-     * per loop iter: UPLOAD_INST hdr + 32 data words               = 33 words,
-     * remainder:    UPLOAD_INST hdr + rest data words              = 1+rest,
-     * VP_ATTRIB_EN hdr + arg                                       = 2 words,
-     * VP_RESULT_EN hdr + arg                                       = 2 words,
-     * TRANSFORM_TIMEOUT hdr + arg                                  = 2 words. */
-    const uint32_t reserve = 3u + loop * 33u
-                           + (rest ? (1u + rest) : 0u)
-                           + 2u + 2u + 2u;
+    /* One method packet per VP instruction (count=4 each).  RPCS3
+     * desyncs on consecutive count=32 packets (verified with VPs of
+     * num_insn >= 16); the small-packet shape every shipping sample
+     * uses (count <= 28) is empirically safe on both hardware and
+     * RPCS3.  See sdk/libgcm_cmd/src/rsx_legacy/commands_impl.h:
+     * LoadVertexProgramBlock for the matching change in the
+     * rsxLoad* path. */
+    /* Reservation: UPLOAD_FROM_ID hdr + 2 args         = 3 words,
+     * per insn:    UPLOAD_INST hdr + 4 data words     = 5 words,
+     * VP_ATTRIB_EN hdr + arg                          = 2 words,
+     * VP_RESULT_EN hdr + arg                          = 2 words,
+     * TRANSFORM_TIMEOUT hdr + arg                     = 2 words. */
+    const uint32_t reserve = 3u + inst_count * 5u + 2u + 2u + 2u;
 
     if (!ucode || inst_count == 0 || inst_count > 512) return;
 
@@ -291,20 +293,16 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     *w++ = inst_start;
     *w++ = inst_start;
 
-    /* Upload 8 instructions (32 words) per iteration. */
-    for (uint32_t i = 0; i < loop; ++i)
+    /* One UPLOAD_INST packet per VP instruction (count=4) — see
+     * reservation comment above for the why. */
+    for (uint32_t i = 0; i < inst_count; ++i)
     {
-        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), 32);
-        memcpy(w,      src,      16 * sizeof(uint32_t));
-        memcpy(w + 16, src + 16, 16 * sizeof(uint32_t));
-        w   += 32;
-        src += 32;
-    }
-    if (rest)
-    {
-        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), rest);
-        memcpy(w, src, rest * sizeof(uint32_t));
-        w += rest;
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), 4);
+        *w++ = src[0];
+        *w++ = src[1];
+        *w++ = src[2];
+        *w++ = src[3];
+        src += 4;
     }
 
     *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_ATTRIB_EN, 1);

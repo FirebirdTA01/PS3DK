@@ -605,35 +605,38 @@ void RSX_FUNC(SetDitherEnable)(gcmContextData *context,u32 enable)
 void RSX_FUNC(LoadVertexProgramBlock)(gcmContextData *context,const rsxVertexProgram *program,const void *ucode)
 {
 	u32 pos = 0;
-	u32 loop, rest;
 	const u32 *data = (const u32*)ucode;
 	u32 startIndex = program->insn_start;
-	u32 i,j,instCount = program->num_insn;
-	
-	loop = instCount/8;
-	rest = (instCount%8)*4;
-	
-	RSX_CONTEXT_CURRENT_BEGIN(9 + loop*33 + (rest!=0 ? rest + 1 : 0));
-	
+	u32 i,instCount = program->num_insn;
+
+	/* One method packet per VP instruction (count=4).  The
+	 * historical PSL1GHT shape was 8-instruction batches (count=32),
+	 * which RPCS3 desyncs on for VPs with >= 16 instructions
+	 * (= 2+ consecutive count=32 packets) — verified at
+	 * samples/gcm/hello-ppu-cellgcm-vp-loop, fingerprint:
+	 *   "RSX: FIFO error: possible desync event (last cmd =
+	 *    0x1c0000d)" appearing once we cross the second loop iter.
+	 * Real hardware accepts both shapes; the small-packet form is
+	 * the empirically-safe option that every shipping sample also
+	 * uses (rest branch, count <= 28). Per-instruction overhead is
+	 * one extra header dword (5 dwords / insn vs 4 in batched form).
+	 */
+	RSX_CONTEXT_CURRENT_BEGIN(9 + instCount*5);
+
 	RSX_CONTEXT_CURRENTP[pos++] = RSX_METHOD(NV40TCL_VP_UPLOAD_FROM_ID,2);
 	RSX_CONTEXT_CURRENTP[pos++] = startIndex;
 	RSX_CONTEXT_CURRENTP[pos++] = startIndex;
-	
-	for(i=0;i<loop;i++) {
-		RSX_CONTEXT_CURRENTP[pos] = RSX_METHOD(NV40TCL_VP_UPLOAD_INST(0),32);
-		RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[pos+1],&data[0],sizeof(u32)*16);
-		RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[pos+17],&data[16],sizeof(u32)*16);
-		pos += (1+32);
-		data += 32;
+
+	for(i=0;i<instCount;i++) {
+		RSX_CONTEXT_CURRENTP[pos]   = RSX_METHOD(NV40TCL_VP_UPLOAD_INST(0),4);
+		RSX_CONTEXT_CURRENTP[pos+1] = data[0];
+		RSX_CONTEXT_CURRENTP[pos+2] = data[1];
+		RSX_CONTEXT_CURRENTP[pos+3] = data[2];
+		RSX_CONTEXT_CURRENTP[pos+4] = data[3];
+		pos  += 5;
+		data += 4;
 	}
 
-	if(rest>0) {
-		RSX_CONTEXT_CURRENTP[pos] = RSX_METHOD(NV40TCL_VP_UPLOAD_INST(0),rest);
-		for(j=0;j<rest;j++)
-			RSX_CONTEXT_CURRENTP[pos+j+1] = data[j];
-		pos += (1+rest);
-	}
-	
 	RSX_CONTEXT_CURRENTP[pos++] = RSX_METHOD(NV40TCL_VP_ATTRIB_EN,1);
 	RSX_CONTEXT_CURRENTP[pos++] = program->input_mask;
 	RSX_CONTEXT_CURRENTP[pos++] = RSX_METHOD(NV40TCL_VP_RESULT_EN,1);
@@ -645,7 +648,7 @@ void RSX_FUNC(LoadVertexProgramBlock)(gcmContextData *context,const rsxVertexPro
 	else
 		RSX_CONTEXT_CURRENTP[pos++] = 0x0030FFFF;
 
-	RSX_CONTEXT_CURRENT_END(9 + loop*33 + (rest!=0 ? rest + 1 : 0));
+	RSX_CONTEXT_CURRENT_END(9 + instCount*5);
 }
 
 void RSX_FUNC(LoadFragmentProgramLocation)(gcmContextData *context,const rsxFragmentProgram *program,u32 offset,u32 location)
