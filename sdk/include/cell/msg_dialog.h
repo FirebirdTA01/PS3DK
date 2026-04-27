@@ -17,10 +17,9 @@
       msgType layout (verified bit-for-bit against Sony's
       sysutil_msgdialog.h).
 
-  Not covered:
-    - cellMsgDialogOpenSimulViewWarning — Sony-only; PSL1GHT has no
-      wrapper.  A forwarder would need a Sony-named stub archive
-      (Phase 6 next layer).
+  Late-SDK additions:
+    - cellMsgDialogOpenSimulViewWarning — declared as a plain extern
+      and resolved by libsysutil_stub.a (no PSL1GHT counterpart).
 */
 
 #ifndef __PSL1GHT_CELL_MSG_DIALOG_H__
@@ -120,6 +119,12 @@ static inline int cellMsgDialogProgressBarInc(unsigned int progressbar_index,
                                               unsigned int percent) {
 	return (int)msgDialogProgressBarInc(progressbar_index, percent);
 }
+
+/* Stereoscopic-3D "please remove glasses" splash.  Resolves directly
+ * to libsysutil_stub.a; no PSL1GHT shim. */
+extern int cellMsgDialogOpenSimulViewWarning(CellMsgDialogCallback callback,
+                                             void *userdata,
+                                             void *extparam);
 
 #ifdef __cplusplus
 }
