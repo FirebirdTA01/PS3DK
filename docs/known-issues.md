@@ -217,6 +217,84 @@ local anchor other than the baseline.
 
 ---
 
+## SPRX stub trampolines: frame-less wrapping shape, not bctr tail-call
+
+**Status:** fixed 2026-04-27 in `tools/nidgen/src/stubgen.rs`. Documented
+here because the divergence from the reference SDK stub shape is
+load-bearing and easy to regress.
+
+**Symptom.** With a `bctr` tail-call leaf trampoline (the reference
+SDK's stub shape, byte-identical to `libspurs_stub.a`), every SPRX call
+that touches the TOC after returning crashes — `r2` is left holding the
+SPRX's TOC instead of the caller's.  With an `stdu`-allocated wrapping
+trampoline (our original shape), every SPRX function with **>8
+arguments** (the spillover lives at `caller_sp+112+`) returns
+`CELL_*_ERROR_INVAL` because the SP shift moves the parameter-save area
+out from under the SPRX's argument loads.  The canonical reproducer is
+`cellSpursJobChainAttributeInitialize` (14 args, 6 spilled).
+
+**Why the reference shape doesn't work in our toolchain.**
+The reference's `bctr` tail-call assumes the caller's compiler emits
+`ld r2, 40(r1)` immediately after every `bl __<name>` to restore TOC
+across a cross-module call.  The reference SCE compiler does this; our
+PPU GCC + PSL1GHT linker treats the stub archive as intra-DSO (because
+it's statically linked into the same binary) and leaves the trailing
+`nop` un-rewritten.  Without the caller-side restore, `r2` holds the
+SPRX TOC after return and the next TOC-relative load reads garbage.
+
+**Why `stdu`-frame wrapping doesn't work either.**
+A wrapping trampoline (`stdu r1,-N(r1); ...; bctrl; addi r1,r1,N; ...; blr`)
+fixes `r2` (it's restored before `blr`) but shifts SP across the
+`bctrl`.  The SPRX prologue does its own `stdu r1,-frame(r1)` and
+accesses caller-passed stack args at `NEW_r1 + frame + 112`, expecting
+that to equal the original `caller_sp + 112`.  Our extra frame shifts
+that by `N` so the SPRX reads garbage from the wrong offsets.
+
+**Working shape — frame-less wrapping.**
+```asm
+mflr   0
+std    0, 24(1)        ; save caller LR in caller-frame scratch slot
+std    2, 40(1)        ; save caller TOC in standard slot
+lis    12, slot@ha
+lwz    12, slot@l(12)
+lwz    0, 0(12)        ; SPRX entry EA
+lwz    2, 4(12)        ; SPRX TOC
+mtctr  0
+bctrl                  ; call SPRX (LR clobbered, comes back here)
+ld     2, 40(1)        ; restore caller TOC
+ld     0, 24(1)        ; restore caller LR
+mtlr   0
+blr
+```
+
+Key invariants — break any of them and one class of caller starts
+crashing again:
+
+- **No `stdu`.**  SP unchanged across `bctrl` so the SPRX finds caller-
+  passed stack args at `caller_sp+112+`.
+- **`bctrl`, not `bctr`.**  We need to re-enter the trampoline post-call
+  to restore `r2` and LR ourselves; we can't depend on caller TOC restore.
+- **LR save at `sp+24`, NOT `sp+16`.**  The SPRX's prologue writes its
+  own LR to caller's `sp+16` (per ELFv1) and would clobber ours; `sp+24`
+  is reserved scratch the SPRX never touches.
+- **`r2` save at `sp+40`.**  Standard ELFv1 TOC save area, untouched by
+  SPRX.
+
+**How to validate after touching the stub generator.** Rebuild a sample
+that exercises a >8-arg SPRX function and run it on RPCS3.
+`samples/spurs/hello-ppu-spurs-job-chain` is the canonical regression
+test — its `cellSpursJobChainAttributeInitialize` call has 14 args and
+won't return success unless both invariants above hold.
+
+**Future work.** If we ever bring up a Canadian-cross host toolchain
+(MinGW-hosted PPU compiler) or migrate to ELFv2, this assumption needs
+revisiting.  The "PPU GCC linker rewrites the trailing `nop` after
+cross-module `bl`" path was load-bearing for the reference stub shape
+and is currently false in our setup; if we ever fix it we can switch to
+the smaller `bctr` tail-call form.
+
+---
+
 ## Struct pointer fields crossing Cell SPRX boundary need ATTRIBUTE_PRXPTR
 
 **Status:** operational note. Applies to every new `cell/*.h` struct
@@ -325,3 +403,57 @@ in the RPCS3 log. Documented in
 `sdk/libgcm_cmd/src/ps3tc_fifo_wrap.c`. Our native callback
 (`ps3tc_fifo_wrap_install`) takes over `ctx->callback` right
 after `cellGcmInit` to dodge this entirely.
+
+---
+
+## PSGL bindings — not shipped (maybe later)
+
+**Status:** open question; intentionally deferred.
+
+The original PS3 runtime offered two graphics paths: low-level GCM
+(direct command-buffer construction, what our SDK targets) and PSGL
+(an OpenGL-ES-1.1-flavoured wrapper sitting on top of GCM, with its
+own header tree, runtime library, and shader-build pipeline via
+`psgl_shader_builder`).  Our SDK ships the GCM surface only.  Code
+written for older SDKs that imports `<PSGL/psgl.h>`, calls
+`psglInit` / `psglGetDeviceDimensions`, or expects `glActiveTexture`
+/ `glClientActiveTexture` / `GLuint` against an OpenGL-ES symbol set
+won't link.
+
+Symptoms when porting such code:
+
+```
+error: 'glActiveTexture' was not declared in this scope
+error: 'psglGetDeviceDimensions' was not declared in this scope
+error: 'GLuint' was not declared in this scope
+```
+
+Reproduces today on framework code that includes both a GCM-shape
+window class (`FWCellGCMWindow`) and a PSGL-shape one
+(`FWCellGLWindow`); the framework's own Makefile builds both
+unconditionally.  Workaround for a sample build is to drop the GL
+window source from the framework's source list — the GCM window
+covers everything most samples actually use at runtime.
+
+**Why it's a maybe rather than a no.**  Some older code paths
+(particularly UI overlays, font rendering helpers, and a handful of
+graphics-tutorial samples) lean on PSGL's higher-level API surface.
+A future PSGL implementation could either:
+
+1. Author a thin PSGL-on-GCM shim that maps the PSGL entry points
+   onto our existing GCM surface (the original PSGL was implemented
+   roughly this way; the OpenGL-ES-style state machine is a thin
+   layer over the underlying RSX command stream).  Practical scope:
+   roughly the same order of magnitude as our current `libgcm_cmd`
+   plus the `cellGcmCg*` helpers.
+2. Skip PSGL entirely and migrate any code that needs it to direct
+   GCM, treating the PSGL absence as a permanent deprecation.
+
+We haven't decided.  Today's stance: build samples that need PSGL
+fail at link with a clear "no PSGL" indicator; if a real port shows
+up needing the bindings, we'll re-evaluate based on its scope.
+
+**For homebrew/sample porting today:** if the sample only uses
+PSGL for the window-and-input scaffolding (the common case for the
+graphics tutorials), drop the GL framework files and switch to the
+GCM window class — the rendering inside still uses GCM regardless.
