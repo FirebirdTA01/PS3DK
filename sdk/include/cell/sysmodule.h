@@ -44,6 +44,7 @@ extern "C" {
 #define CELL_SYSMODULE_OVIS               0x000b
 #define CELL_SYSMODULE_SHEAP              0x000c
 #define CELL_SYSMODULE_SYNC               0x000d
+#define CELL_SYSMODULE_SYNC2              0x0055
 #define CELL_SYSMODULE_FS                 0x000e
 #define CELL_SYSMODULE_JPGDEC             0x000f
 #define CELL_SYSMODULE_GCM_SYS            0x0010
