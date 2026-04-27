@@ -1,0 +1,114 @@
+library: cellSysutilSaveDataExtra
+version: 1
+module: cellSysutil
+archive_name: sysutil_savedata_extra
+exports:
+- name: cellSaveDataAutoLoad
+  nid: '0xc22c79b5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_134.o
+- name: cellSaveDataAutoLoad2
+  nid: '0xfbd5c856'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_173.o
+- name: cellSaveDataAutoSave
+  nid: '0xf8a175ec'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_172.o
+- name: cellSaveDataAutoSave2
+  nid: '0x8b7ed64b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_95.o
+- name: cellSaveDataDelete
+  nid: '0xa4ed7dfe'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_115.o
+- name: cellSaveDataDelete2
+  nid: '0xedadd797'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_157.o
+- name: cellSaveDataEnableOverlay
+  nid: '0xe7fa820b'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_152.o
+- name: cellSaveDataFixedDelete
+  nid: '0xced17573'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_140.o
+- name: cellSaveDataFixedLoad
+  nid: '0x50183b44'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_54.o
+- name: cellSaveDataFixedLoad2
+  nid: '0x2a8eada2'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_30.o
+- name: cellSaveDataFixedSave
+  nid: '0x41bc2ca1'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_46.o
+- name: cellSaveDataFixedSave2
+  nid: '0x2aae9ef5'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_32.o
+- name: cellSaveDataListAutoLoad
+  nid: '0x21425307'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_24.o
+- name: cellSaveDataListAutoSave
+  nid: '0x4dd03a4e'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_53.o
+- name: cellSaveDataListLoad
+  nid: '0xef5a353d'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_160.o
+- name: cellSaveDataListLoad2
+  nid: '0x1dfbfdd6'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_18.o
+- name: cellSaveDataListSave
+  nid: '0x3dbd2314'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_41.o
+- name: cellSaveDataListSave2
+  nid: '0x2de0d663'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_35.o
+- name: cellSaveDataUserAutoLoad
+  nid: '0xcdc6aefd'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_139.o
+- name: cellSaveDataUserAutoSave
+  nid: '0x52aac4fa'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_55.o
+- name: cellSaveDataUserFixedDelete
+  nid: '0x8b8a2f48'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_96.o
+- name: cellSaveDataUserFixedLoad
+  nid: '0x6e7264ed'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_74.o
+- name: cellSaveDataUserFixedSave
+  nid: '0x40b34847'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_44.o
+- name: cellSaveDataUserListAutoLoad
+  nid: '0x248bd1d8'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_28.o
+- name: cellSaveDataUserListAutoSave
+  nid: '0x0e091c36'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_8.o
+- name: cellSaveDataUserListLoad
+  nid: '0x39dd8425'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_39.o
+- name: cellSaveDataUserListSave
+  nid: '0x0f03cfb0'
+  signature: ''
+  notes: extracted from _cellSysutil_0001_9.o
+imports: []
