@@ -43,7 +43,7 @@ SYS_PROCESS_PARAM(1001, 0x10000);
  * SYS_PROCESS_PARAM macro's R_PPC64_ADDR32 relocation resolves to its OPD
  * descriptor address (the low 32 bits of which go into
  * __sys_process_param.crash_dump_param_addr).  In a real app the loader
- * would call this on process crash; for the ABI smoke test we just verify
+ * would call this on process crash; for the ABI validation test we just verify
  * the pointer was wired up correctly. */
 void __sys_process_crash_dump_param(void) { }
 

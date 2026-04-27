@@ -276,5 +276,5 @@ At runtime, the Lv-2 loader:
   compatibility libraries under `sdk/`.
 - Structural regression checks: `tools/abi-verify/`.
 
-Always run `abi-verify check` and at least one RPCS3/hardware smoke sample after
+Always run `abi-verify check` and at least one RPCS3/hardware validation sample after
 changing any ABI-facing layer.

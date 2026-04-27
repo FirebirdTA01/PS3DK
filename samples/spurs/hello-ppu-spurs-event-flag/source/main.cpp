@@ -4,7 +4,7 @@
  * Stands up a 4-SPU Spurs2 instance, creates an event flag with
  * ANY2ANY direction (so PPU can drive set / wait / clear), exercises
  * the PPU-facing ops, then tears down.  No SPU code involved; this
- * is a smoke test that our cell/spurs/event_flag.h header surface
+ * is a test that our cell/spurs/event_flag.h header surface
  * and libspurs SPRX match up for the in-workload event-flag path.
  */
 

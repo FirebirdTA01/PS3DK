@@ -219,7 +219,7 @@ Highlights:
   3-unique-value shapes including zero-skip, `scaledLane` X / Y / Z /
   W, and the FENCBR-bracketed sequence the reference compiler emits
   when the scaled lane lives at non-canonical positions.
-- **Three new GCM smoke samples** that exercise the above features
+- **Three new GCM validation samples** that exercise the above features
   end-to-end on hardware:
   `samples/gcm/hello-ppu-cellgcm-{loops,chain,laneelision}` — each
   defaults to `USE_RSX_CG_COMPILER=1` and renders a visibly distinct
@@ -279,7 +279,7 @@ First public, version-tagged snapshot.  Status:
 - **PPU toolchain (Phase 1):** binutils 2.42, GCC 12.4.0, newlib 4.4.0,
   GDB 14.2.  Targets `powerpc64-ps3-elf`.  C++17 PPU host runs in RPCS3.
 - **SPU toolchain (Phase 2a):** GCC 9.5.0 + binutils 2.42 + newlib 4.4.
-  Targets `spu-elf`.  C/C++17 SPU smoke samples pass.
+  Targets `spu-elf`.  C/C++17 SPU validation samples pass.
 - **PSL1GHT (Phase 3):** v3 RFC tree builds clean against the new
   toolchain; one local patch (`patches/psl1ght/0008`) tightens parsing
   for strict C99/C++17.

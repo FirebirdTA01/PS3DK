@@ -152,7 +152,7 @@ at a real constraint the final design has to satisfy:
    (larger CB, flip-synced), and our own triangle sample
    simultaneously before declaring it fixed.  The failure modes
    so far have all been "works for N frames then desyncs", so
-   a short smoke test is not sufficient.
+   a short validation run is not sufficient.
 
 **Why we're not doing it right now.** Three iterations without
 progress indicates the issue is in our understanding of how

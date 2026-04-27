@@ -165,7 +165,7 @@ the SDK surface is stable enough that releases don't churn weekly.
 ### v1.0.0 — verified out-of-the-box experience
 
 - All three host tarballs (Linux + Windows, plus macOS if reasonable).
-- A `samples/` smoke-build is part of the release workflow: every
+- A `samples/` validation build is part of the release workflow: every
   candidate release tarball is round-tripped through a clean container,
   used to build hello-ppu-c++17 + hello-spurs-task + the reference
   basic.cpp, and the resulting `.self`s are run under RPCS3 in CI.
@@ -181,7 +181,7 @@ Pre-release suffixes (e.g. `v0.2.0-rc1`) are supported by the release
 workflow's tag pattern but not yet used in practice.  When we start
 shipping release candidates ahead of a major Phase landing, prefer:
 
-- `vX.Y.Z-rcN` for late-cycle smoke testing.
+- `vX.Y.Z-rcN` for late-cycle validation runs.
 - `vX.Y.Z-betaN` for earlier feature-complete previews.
 
 `scripts/version.sh` does **not** currently parse suffixes — adjust the

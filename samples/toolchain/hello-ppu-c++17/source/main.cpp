@@ -1,4 +1,4 @@
-// hello-ppu-c++17 — smoke test for the modernized PPU toolchain.
+// hello-ppu-c++17 — validation test for the modernized PPU toolchain.
 //
 // Exercises C++17 features that would not compile under GCC 7.2.0 in -std=c++14:
 //   - structured bindings
