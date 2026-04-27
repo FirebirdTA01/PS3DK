@@ -42,9 +42,14 @@ uint32_t cellGcmCgGetProgramProfile(CGprogram prog);
 /* Vertex-program attributes — only valid when the profile is vertex. */
 uint32_t cellGcmCgGetRegisterCount(CGprogram prog);
 uint32_t cellGcmCgGetInstructionSlot(CGprogram prog);
+uint32_t cellGcmCgGetInstructions(CGprogram prog);
 uint32_t cellGcmCgGetVertexAttribInputMask(CGprogram prog);
 uint32_t cellGcmCgGetAttribOutputMask(CGprogram prog);
 uint32_t cellGcmCgGetVertexUserClipMask(CGprogram prog);
+
+/* Mutators — patch the FP / VP container header in place after load. */
+void cellGcmCgSetRegisterCount(CGprogram prog, uint32_t count);
+void cellGcmCgSetAttribOutputMask(CGprogram prog, uint32_t mask);
 
 /* Parameter table iteration. */
 uint32_t    cellGcmCgGetCountParameter(CGprogram prog);

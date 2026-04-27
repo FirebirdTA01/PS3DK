@@ -121,6 +121,50 @@ uint32_t cellGcmCgGetVertexUserClipMask(CGprogram prog)
     return vh ? vh->userClipMask : 0u;
 }
 
+/* Total instruction count.  Both VP and FP container headers expose
+ * instructionCount at offset 0 of the program-specific header — a
+ * single uint32_t read works for both profiles. */
+uint32_t cellGcmCgGetInstructions(CGprogram prog)
+{
+    const CgBinaryProgram *p = as_program(prog);
+    if (!p) return 0u;
+    const uint32_t *hdr = (const uint32_t *)resolve(p, p->program);
+    return hdr ? hdr[0] : 0u;
+}
+
+/* Mutators — write into the (caller-owned) container header in place.
+ * Container is in main memory until uploaded to the GPU, so a normal
+ * cast-away-const + assign is safe.  Both VP and FP header layouts
+ * carry registerCount + attributeOutputMask but at different offsets
+ * and widths, so dispatch on the program's profile tag. */
+static int prog_is_fp(const CgBinaryProgram *p)
+{
+    return p && (p->profile == CG_PROFILE_SCE_FP_RSX);
+}
+
+void cellGcmCgSetRegisterCount(CGprogram prog, uint32_t count)
+{
+    const CgBinaryProgram *p = as_program(prog);
+    if (!p) return;
+    void *hdr = (void *)resolve(p, p->program);
+    if (!hdr) return;
+    if (prog_is_fp(p))
+        ((CgBinaryFragmentProgram *)hdr)->registerCount = (uint8_t)count;
+    else
+        ((CgBinaryVertexProgram *)hdr)->registerCount = count;
+}
+
+void cellGcmCgSetAttribOutputMask(CGprogram prog, uint32_t mask)
+{
+    const CgBinaryProgram *p = as_program(prog);
+    if (!p) return;
+    void *hdr = (void *)resolve(p, p->program);
+    if (!hdr) return;
+    /* FP doesn't have attributeOutputMask; the call is a no-op there. */
+    if (!prog_is_fp(p))
+        ((CgBinaryVertexProgram *)hdr)->attributeOutputMask = mask;
+}
+
 /* ---------- parameter iteration ---------------------------------------- */
 
 uint32_t cellGcmCgGetCountParameter(CGprogram prog)
