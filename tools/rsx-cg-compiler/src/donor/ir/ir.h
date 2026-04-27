@@ -416,6 +416,12 @@ struct IRGlobal
     // For uniforms: buffer index and offset
     int bufferIndex = -1;
     int bufferOffset = 0;
+
+    // HLSL/Cg `: register(BANK<N>)` explicit binding.  Bank is 'C' for
+    // const, 'S' for sampler, 'V' for varying; 0 means no binding and
+    // the const allocator picks the slot.
+    char explicitRegisterBank  = 0;
+    int  explicitRegisterIndex = 0;
 };
 
 class IRModule

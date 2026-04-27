@@ -120,19 +120,25 @@ public:
     // Sce-cgc allocates in declaration order.  Both top-level `uniform`
     // globals and `uniform` function parameters participate — process the
     // entry-point params first (that's their declaration order), then any
-    // module-level globals the front-end may have split off.
+    // module-level globals the front-end may have split off.  An explicit
+    // `: register(CN)` binding on a global pins that uniform to c[N] and
+    // skips the auto-allocator entirely.
     void allocate(const IRFunction& entry, const IRModule& module)
     {
         for (const auto& param : entry.parameters)
         {
             if (param.storage == StorageQualifier::Uniform)
-                assign(param.name, param.type);
+                assign(param.name, param.type, /*explicitBase=*/-1);
         }
         for (const auto& global : module.globals)
         {
             if (global.storage != StorageQualifier::Uniform) continue;
             if (bindings_.count(global.name)) continue;
-            assign(global.name, global.type);
+            const int explicitBase =
+                (global.explicitRegisterBank == 'C')
+                    ? global.explicitRegisterIndex
+                    : -1;
+            assign(global.name, global.type, explicitBase);
         }
     }
 
@@ -143,20 +149,34 @@ public:
     }
 
 private:
-    void assign(const std::string& name, const IRTypeInfo& type)
+    void assign(const std::string& name, const IRTypeInfo& type, int explicitBase)
     {
         ConstBinding b;
         if (type.isMatrix())
         {
             b.rowCount = type.matrixRows;
-            b.baseReg  = nextMatrixReg_;
-            nextMatrixReg_ += b.rowCount;
+            if (explicitBase >= 0)
+            {
+                b.baseReg = explicitBase;
+            }
+            else
+            {
+                b.baseReg = nextMatrixReg_;
+                nextMatrixReg_ += b.rowCount;
+            }
         }
         else
         {
             b.rowCount = 1;
-            b.baseReg  = nextVectorReg_;
-            nextVectorReg_ -= 1;
+            if (explicitBase >= 0)
+            {
+                b.baseReg = explicitBase;
+            }
+            else
+            {
+                b.baseReg = nextVectorReg_;
+                nextVectorReg_ -= 1;
+            }
         }
         bindings_[name] = b;
     }

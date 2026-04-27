@@ -86,11 +86,27 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 global.semanticIndex = varDecl->semantic.index;
             }
 
+            // Carry explicit `: register(CN)` binding into the global so
+            // the const allocator can pin the matrix/vector to the
+            // requested constant register instead of the default.
+            if (varDecl->semantic.hasExplicitRegister())
+            {
+                global.explicitRegisterBank  = varDecl->semantic.explicitRegisterBank;
+                global.explicitRegisterIndex = varDecl->semantic.explicitRegisterIndex;
+            }
+
             module_->addGlobal(global);
 
-            // Map declaration to value
+            // Map declaration to value.  Uniform globals are intentionally
+            // *not* inserted into nameToValue_ — buildIdentifierExpr falls
+            // through to module_->findGlobal() and emits a LoadUniform so
+            // the lowering can resolve the source const-bank slot.  Other
+            // globals stay in nameToValue_ (existing behaviour).
             declToValue_[varDecl] = global.valueId;
-            nameToValue_[varDecl->name] = global.valueId;
+            if (varDecl->storage != StorageQualifier::Uniform)
+            {
+                nameToValue_[varDecl->name] = global.valueId;
+            }
 
             // For uniform struct types, also flatten members into separate globals
             // so that "u_data.color" and "u_data.scale" get their own uniform slots

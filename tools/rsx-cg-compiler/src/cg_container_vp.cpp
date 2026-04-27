@@ -137,15 +137,40 @@ uint32_t vpInputResource(const std::string& semUpper, int semIndex)
     return 0;
 }
 
-// VP output semantic → CGresource.
-uint32_t vpOutputResource(const std::string& semUpper, int semIndex)
+// CG_TEXCOORD0..7 — VP output binding code emitted when the source
+// uses the `TEXCOORD<N>` spelling (3220+N).  Distinct from CG_TEX0
+// (2179+N), which the reference compiler picks when the source spells
+// the semantic as `TEX<N>`.  We honour the source spelling so the
+// container is byte-exact against the reference compiler.
+constexpr uint32_t kCgTexCoord0 = 3220u;  // 0x0c94
+
+// VP output semantic → CGresource.  `rawSpelling` carries the user's
+// original lexeme (e.g. "TEXCOORD0" vs "TEX0") so we can pick between
+// CG_TEXCOORD<N> (0x0c94) and CG_TEX<N> (0x0883) per the reference
+// compiler's encoding table.  `semUpper` is the digit-stripped form.
+uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
+                          const std::string& rawSpelling = std::string{})
 {
     if (semUpper == "POSITION" || semUpper == "HPOS")
         return kCgHpos;
     if (semUpper == "COLOR" || semUpper == "COL")
         return kCgCol0 + (semIndex == 1 ? 1 : 0);
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
-        return kCgTex0 + semIndex;
+    {
+        // Source spelling decides the bank: "TEXCOORD<N>" → CG_TEXCOORD0,
+        // "TEX<N>" → CG_TEX0.  Default to CG_TEX0 if the spelling is
+        // ambiguous (e.g. the IR didn't carry a raw name through).
+        const bool wroteTexCoord =
+            rawSpelling.size() >= 8 &&
+            (rawSpelling[0] == 'T' || rawSpelling[0] == 't') &&
+            std::equal(rawSpelling.begin(), rawSpelling.begin() + 8,
+                       "TEXCOORD",
+                       [](char a, char b) {
+                           return std::toupper(static_cast<unsigned char>(a))
+                                  == static_cast<unsigned char>(b);
+                       });
+        return (wroteTexCoord ? kCgTexCoord0 : kCgTex0) + semIndex;
+    }
     return 0;
 }
 
@@ -204,6 +229,7 @@ VpContainerResult emitVertexContainer(
         uint32_t    paramno;
         uint32_t    resIndex    = kInvalidIndex;
         uint32_t    isReferenced = 1;
+        uint32_t    isShared     = 0;
     };
 
     std::vector<ParamDesc> params;
@@ -257,6 +283,83 @@ VpContainerResult emitVertexContainer(
                 }
             }
         }
+        // File-scope uniforms — sce-cgc emits these between the
+        // struct-flat inputs and outputs.  They're treated as
+        // "shared" (constant-buffer linkage rather than function
+        // parameters): paramno = 0xFFFFFFFF (synthetic) and isShared
+        // = 1.  Matrices expand into a parent float4x4 entry plus N
+        // float4 row entries that share the parent's semantic
+        // string.  An explicit `: register(CN)` binding pins
+        // resIndex to the requested const slot; otherwise the auto-
+        // allocator picks one (matrices grow up from c[256]).
+        for (const auto& g : module.globals)
+        {
+            if (g.storage != StorageQualifier::Uniform) continue;
+
+            const bool hasExplicit = (g.explicitRegisterBank == 'C');
+            std::string semantic;
+            if (hasExplicit)
+            {
+                semantic = "C" + std::to_string(g.explicitRegisterIndex);
+            }
+
+            ParamDesc d;
+            d.name      = g.name;
+            d.semantic  = semantic;
+            d.type      = cgTypeForIRType(g.type);
+            d.var       = kCgUniform;
+            d.direction = kCgIn;
+            d.res       = kCgConst;
+            d.paramno   = kInvalidIndex;
+            d.isReferenced = 1;
+            d.isShared     = 1;
+
+            if (g.type.isMatrix())
+            {
+                int base;
+                if (hasExplicit)
+                {
+                    base = g.explicitRegisterIndex;
+                }
+                else
+                {
+                    base = nextMatrixReg;
+                    nextMatrixReg += g.type.matrixRows;
+                }
+                d.resIndex = static_cast<uint32_t>(base);
+                params.push_back(d);
+                for (int row = 0; row < g.type.matrixRows; ++row)
+                {
+                    ParamDesc r;
+                    r.name      = g.name + "[" + std::to_string(row) + "]";
+                    r.semantic  = semantic;
+                    r.type      = kCgFloat4;
+                    r.var       = kCgUniform;
+                    r.direction = kCgIn;
+                    r.res       = kCgConst;
+                    r.paramno   = kInvalidIndex;
+                    r.isReferenced = 1;
+                    r.isShared     = 1;
+                    r.resIndex     = static_cast<uint32_t>(base + row);
+                    params.push_back(r);
+                }
+            }
+            else
+            {
+                int reg;
+                if (hasExplicit)
+                {
+                    reg = g.explicitRegisterIndex;
+                }
+                else
+                {
+                    reg = nextVectorReg--;
+                }
+                d.resIndex = static_cast<uint32_t>(reg);
+                params.push_back(d);
+            }
+        }
+
         for (const auto& blockPtr : entry->blocks)
         {
             if (!blockPtr) continue;
@@ -277,7 +380,9 @@ VpContainerResult emitVertexContainer(
                     d.var       = kCgVarying;
                     d.direction = kCgOut;
                     d.paramno   = kInvalidIndex;   // synthetic — no user param number
-                    d.res       = vpOutputResource(toUpper(in.semanticName), in.semanticIndex);
+                    d.res       = vpOutputResource(toUpper(in.semanticName),
+                                                   in.semanticIndex,
+                                                   in.rawSemanticName);
                     params.push_back(d);
                 }
             }
@@ -406,7 +511,7 @@ VpContainerResult emitVertexContainer(
         put32(out, d.direction);
         put32(out, d.paramno);
         put32(out, d.isReferenced);
-        put32(out, 0);                       // isShared
+        put32(out, d.isShared);
     }
 
     // Strings + padding.

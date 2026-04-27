@@ -53,6 +53,14 @@ struct Semantic
     // container emitter consults this flag to suppress the string.
     bool inferred = false;
 
+    // HLSL/Cg explicit binding: `: register(CN)` on a file-scope uniform
+    // pins the constant to a specific register bank + index instead of
+    // the auto-allocator (matrices growing up from c[256], scalars
+    // growing down from c[467]).  Empty bank means no explicit binding.
+    char explicitRegisterBank = 0;  // 'C' for const, 'S' for sampler, 'V' for varying; 0 = none
+    int  explicitRegisterIndex = 0;
+
+    bool hasExplicitRegister() const { return explicitRegisterBank != 0; }
     bool isEmpty() const { return name.empty(); }
 };
 
