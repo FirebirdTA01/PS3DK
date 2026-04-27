@@ -16,6 +16,122 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.4.0] — 2026-04-27
+
+### SDK surface — four new cell-named libraries land at 100% coverage
+
+Headline: 4 stub-only libraries promoted from 0% to 100% in this
+release, plus one fully-rounded out.  Aggregate coverage across the
+tracked Sony export set climbs **46.2% -> ~52.0%** (+254 covered
+exports across 5 libraries).
+
+- **libsysutil_stub (cellSysutil PRX) — 174/174.**  Full PRX surface
+  through nidgen archive flow; covers `cellVideoOut*` late-SDK
+  extensions (DeviceInfo, callbacks, monitor type, cursor-color
+  range), `cellMsgDialogOpenSimulViewWarning`, `cellSysCache*`,
+  `cellSysconf*`, `cellStorageData*`, `cellSysutilAvc*` (legacy
+  voice-chat panel), `cellSysutil*BgmPlayback*`, `cellOskDialog*`
+  extension entries, `cellSysutilGame{Exit,PowerOff,Reboot}_I`,
+  `cellSysutilGameDataExit/AssignVmc`.  Eight new
+  `samples/sysutil/hello-ppu-{videoout-info, syscache, bgm, osk,
+  avc, sysconf, storagedata, msgdialog-3d}` exercise the surface.
+  AVC signatures cross-checked against the only available
+  reverse-engineered reference (RPCS3's `cellSysutilAvc.{h,cpp}`)
+  since the 475-era headers stripped them.
+
+- **librtc_stub (cellRtc) — 33/33.**  Real-time clock surface:
+  calendar conversion (`CellRtcDateTime` <-> `CellRtcTick`),
+  arithmetic (add/sub days/hours/seconds), day-of-week / leap-year
+  helpers, parse/format ISO-style strings.  New
+  `samples/sysutil/hello-ppu-rtc` exercises the round-trip path.
+
+- **libsync_stub (cellSync) — 42/42.**  User-space sync primitives:
+  `CellSyncMutex`, `CellSyncBarrier`, `CellSyncRwm`,
+  `CellSyncSemaphore`, `CellSyncQueue`, plus the LFQueue family.
+  `CellSyncQueue` requires 32-byte and 128-byte alignment to satisfy
+  SPRX-side asserts; documented in `cell/sync.h`.  New
+  `samples/sysutil/hello-ppu-sync` round-trips each primitive.
+
+- **libsync2_stub (cellSync2) — 32/32.**  Thread-pluggable sync
+  layer over any thread library.  RPCS3's HLE is partial — basic
+  create/destroy/lock paths work, the thread-pluggability layer is
+  incomplete.
+
+- **libsysutil_savedata_extra_stub — 27/27** (and the existing
+  `libsysutil_savedata_stub` direct-extern surface filled in).
+  39 new entry points exposed as plain externs in
+  `cell/sysutil_savedata.h` (legacy v1 entries, the
+  `cellSysutilSaveDataExtra` family, `cellSaveDataEnableOverlay`).
+  New `samples/sysutil/hello-ppu-savedata-link` is a link-time
+  test that pulls every declared symbol so name typos surface as
+  link errors rather than runtime ones.  Link line for downstreams:
+  `-lsysutil_savedata_stub -lsysutil_savedata_extra_stub -lsysutil`.
+
+### Bug fix — RPCS3 vertex-program upload desync
+
+PSL1GHT's `rsxLoadVertexProgramBlock` historically batched 8
+instructions per UPLOAD_INST method packet (count=32 method words).
+RPCS3 desyncs on the second consecutive count=32 packet — once a VP
+crosses 16 instructions the FIFO trips with `RSX: FIFO error:
+possible desync event (last cmd = 0x1c0000d)`.  Real hardware
+accepts both shapes; the small-packet form (count=4, one per VP
+instruction) is what every shipping reference sample uses, so it's
+the empirically-safe option.
+
+- `patches/psl1ght/0009-librsx-vp-upload-count4.patch` rewrites
+  `rsxLoadVertexProgramBlock` to emit one count=4 packet per insn.
+- `sdk/libgcm_cmd/src/rsx_legacy/commands_impl.h` — matching change
+  in the rsx-legacy code path so libgcm_cmd-built emitters stay
+  aligned with PSL1GHT.
+- `sdk/include/cell/gcm/gcm_cg_bridge.h::cellGcmSetVertexProgram`
+  inline emitter rewritten to the same shape; reservation
+  recomputed (`3 + N*5 + 6` words instead of `3 + loop*33 + ...`).
+- `samples/gcm/hello-ppu-cellgcm-vp-loop` reproduces the failure
+  on unpatched PSL1GHT and renders cleanly on patched.
+
+### GCM samples — XMB-pause render-loop yield
+
+PS-menu sluggishness during GCM samples (the symptom previously
+tracked as a `hello-ppu-cellgcm-triangle` known-issue) was caused
+by the render loop contending with the XMB for the FIFO.  Five
+existing GCM samples (chain, laneelision, loops, triangle,
+rsx-clear) now switch on the sysutil callback's `DRAWING_BEGIN` /
+`SYSTEM_MENU_OPEN` events to set a paused flag, drain the current
+frame, and idle until `DRAWING_END` / `SYSTEM_MENU_CLOSE` clear it.
+PS-button navigation is now smooth.  The previously-deferred
+known issue has been retired from `docs/known-issues.md`.
+
+### Build helpers — `ps3_add_pkg`, `ps3_add_cg_shader_rsxcgc`
+
+- `ps3_add_pkg(target)` wraps `make_self_npdrm` + `sfo.py` + `pkg.py`
+  end-to-end, using a default `PARAM.SFO` from
+  `cmake/templates/sfo.xml` and an ICON0 from `sdk/assets/`.
+- `ps3_add_cg_shader_rsxcgc(target file)` compiles via
+  rsx-cg-compiler instead of cgcomp.  Mandatory for samples
+  calling `cellGcmCgInitProgram` / `cellGcmCgGetUCode` —
+  rsx-cg-compiler emits the `CgBinaryProgram` layout (magic
+  0x1b5b/0x1b5c) those helpers walk; cgcomp's `"VP\0\0"` header
+  crashes the helper at +28.
+- Three GCM samples updated to use the new helpers.  New
+  `samples/gcm/hello-ppu-cellgcm-{drawenv,textured-cube,vp-loop}`
+  build PKGs and exercise the new paths end-to-end.
+- `cmake/ps3-self.cmake` captures `CMAKE_CURRENT_LIST_DIR` at file
+  load time so default asset paths resolve relative to the
+  toolchain root rather than the caller's CMakeLists.
+- `scripts/package-windows-release.sh` stages `cmake/`, `templates/`,
+  and `sdk/assets/ICON0.PNG` inside the release tarball so the
+  `ps3_add_pkg` defaults work for users who unpack and run
+  `cmake -S sample`.
+
+### Other
+
+- `cell/sysmodule.h` — add `CELL_SYSMODULE_SYNC2 = 0x0055`.
+- `tools/Cargo.lock` synced to workspace 0.4.0 (was missed in the
+  v0.3.0 round).
+- Comment-only sweep: rename "smoke test" -> "validation" across
+  12 samples and 5 docs to match what the samples actually are
+  (end-to-end functional validation, not minimal smoke-tests).
+
 ## [v0.3.0] — 2026-04-26
 
 ### Sample build system — Makefile → CMake

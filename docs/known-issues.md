@@ -217,39 +217,6 @@ local anchor other than the baseline.
 
 ---
 
-## hello-ppu-cellgcm-triangle sample: slow + occasional crash during PS-menu interaction
-
-**Status:** sample-local bug.  Reference samples (`basic`, `cube`,
-`flip_immediate`) that go through the same SDK code paths run cleanly;
-only our in-tree `samples/hello-ppu-cellgcm-triangle` exhibits this.
-
-**Symptoms.** The triangle renders correctly, but the PS home menu is
-sluggish to appear, inputs respond slowly while the sample is running,
-and navigating back and forth in the menu a few times occasionally
-crashes the emulator.  Reference samples in the same session with the
-same SDK install don't reproduce any of it.
-
-**Likely causes to check first when revisiting:**
-
-1. Our `ioPadGetInfo` / `ioPadGetData` calls in the main loop may be
-   hitting the pad subsystem without an explicit `ioPadInit` setup,
-   so PS-menu overlay input contends with our polling.
-2. The buffer-state labels (`LABEL_BUFFER_STATUS_OFFSET + idx`) aren't
-   pre-seeded to `BUFFER_IDLE` before the main loop.  The first
-   `cellGcmSetWaitLabel(..., BUFFER_IDLE)` inside `flip()` may stall
-   waiting for a value that only arrives after a flip that can't
-   happen yet.
-3. `GCM_FLIP_HSYNC` fires flip events more often than vblank; our
-   vblank handler's `on_flip` guard flag may race with the rapid
-   re-entry when the PS-menu overlay is active.
-
-**Why we're not fixing it now.** Doesn't block any reference-sample work or
-SDK progress — the triangle is our own test harness, not a user
-deliverable.  Revisit when the next SDK surface we touch is flip /
-pad related so the triage sits naturally in that session.
-
----
-
 ## Struct pointer fields crossing Cell SPRX boundary need ATTRIBUTE_PRXPTR
 
 **Status:** operational note. Applies to every new `cell/*.h` struct
