@@ -1,10 +1,10 @@
 /*
- * hello-ppu-rsx-clear — GCM bring-up smoke test.
+ * hello-ppu-rsx-clear — GCM bring-up validation.
  *
  * Brings up the RSX command stream end-to-end and cycles a clear-color
  * over the framebuffer.  No shaders involved — uses the fixed-function
  * `rsxClearSurface` path that hits the ROP unit directly.  This is the
- * simplest possible "GCM works" smoke test:
+ * simplest possible "GCM works" validation:
  *
  *   - rsxInit              — set up command buffer + I/O memory
  *   - videoConfigure       — set display mode (XRGB, current resolution)
@@ -190,7 +190,7 @@ int main(int argc, const char **argv)
 	padInfo         padinfo;
 	padData         paddata;
 
-	printf("hello-ppu-rsx-clear: GCM smoke test\n");
+	printf("hello-ppu-rsx-clear: GCM validation test\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	ctx       = init_screen(host_addr, HOST_SIZE, &width, &height);

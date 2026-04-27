@@ -1,0 +1,7 @@
+// Minimal pass-through fragment program — trivial COL0 forward.
+void main(
+    float4 vcol      : COLOR,
+    out float4 color : COLOR)
+{
+    color = vcol;
+}

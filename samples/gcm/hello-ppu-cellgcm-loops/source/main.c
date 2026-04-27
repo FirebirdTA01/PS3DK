@@ -1,5 +1,5 @@
 /*
- * hello-ppu-cellgcm-loops — rsx-cg-compiler shader-feature smoke test.
+ * hello-ppu-cellgcm-loops — rsx-cg-compiler shader-feature validation.
  *
  * Same render plumbing as hello-ppu-cellgcm-loops (flip_immediate,
  * 4 colour buffers, MVP-uniform VP) — the interesting bits live in
@@ -102,15 +102,32 @@ static volatile u32 g_buffer_flipped    = 0;
 static volatile u32 g_on_flip           = 0;
 static u32          g_frame_index       = 0;
 
-/* Sysutil exit signal. */
-static volatile int g_exit_request = 0;
+/* Sysutil event signals. DRAWING_PAUSED is set while the XMB owns the
+ * FIFO (between DRAWING_BEGIN and DRAWING_END / SYSTEM_MENU_CLOSE).
+ * The render loop yields the FIFO while paused to avoid stuttering
+ * PS-button menu navigation. */
+static volatile int g_exit_request   = 0;
+static volatile int g_drawing_paused = 0;
 
 static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
 {
 	(void)param;
 	(void)userdata;
-	if (status == CELL_SYSUTIL_REQUEST_EXITGAME)
+	switch (status) {
+	case CELL_SYSUTIL_REQUEST_EXITGAME:
 		g_exit_request = 1;
+		break;
+	case CELL_SYSUTIL_DRAWING_BEGIN:
+	case CELL_SYSUTIL_SYSTEM_MENU_OPEN:
+		g_drawing_paused = 1;
+		break;
+	case CELL_SYSUTIL_DRAWING_END:
+	case CELL_SYSUTIL_SYSTEM_MENU_CLOSE:
+		g_drawing_paused = 0;
+		break;
+	default:
+		break;
+	}
 }
 
 /* ----------------------------------------------------------------
@@ -377,7 +394,7 @@ int main(int argc, const char **argv)
 	void               *host_addr;
 	CellGcmContextData *ctx;
 
-	printf("hello-ppu-cellgcm-loops: rsx-cg-compiler shader-feature smoke\n");
+	printf("hello-ppu-cellgcm-loops: rsx-cg-compiler shader-feature validation\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (cellGcmInit(CB_SIZE, HOST_SIZE, host_addr) != 0) {
@@ -422,6 +439,12 @@ int main(int argc, const char **argv)
 					break;
 				}
 			}
+		}
+
+		/* Yield the FIFO to the XMB while it owns the overlay. */
+		if (g_drawing_paused) {
+			usleep(16000);
+			continue;
 		}
 
 		cellGcmSetClearColor(ctx, 0xff404040);
