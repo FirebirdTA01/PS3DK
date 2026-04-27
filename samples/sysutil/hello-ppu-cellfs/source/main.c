@@ -1,5 +1,5 @@
 /*
- * hello-ppu-cellfs — file-system surface smoke test.
+ * hello-ppu-cellfs — file-system surface validation test.
  *
  * Round-trips a small payload through cellFs:
  *
@@ -35,7 +35,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define SCRATCH_PATH  "/dev_hdd0/tmp/ps3tc_cellfs.txt"
 
 static const char k_payload[] =
-    "PS3 Custom Toolchain — cellFs smoke test\n"
+    "PS3 Custom Toolchain — cellFs validation\n"
     "If you can read this, libfs_stub linked, the SPRX resolved every NID,\n"
     "and CellFsStat / CellFsErrno marshalled across the SPRX boundary cleanly.\n";
 
@@ -46,7 +46,7 @@ int main(int argc, const char **argv)
     (void)argc;
     (void)argv;
 
-    printf("hello-ppu-cellfs: cellFs surface smoke test\n");
+    printf("hello-ppu-cellfs: cellFs surface validation test\n");
     printf("  scratch:   %s\n", SCRATCH_PATH);
     printf("  payload:   %u bytes\n", (unsigned)PAYLOAD_LEN);
 

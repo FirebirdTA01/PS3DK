@@ -5,11 +5,11 @@
  * standing up a 4-SPU Spurs2 instance without a preemption context
  * (EXCLUSIVE_NON_CONTEXT), enumerating its SPU thread IDs, and
  * finalising.  No SPU-side code - this is purely a PPU scheduler
- * smoke test that proves our clean-room Spurs header matches the
+ * test that proves our clean-room Spurs header matches the
  * libspurs SPRX's ABI expectations end-to-end.
  *
  * Expected output:
- *   hello-ppu-spurs-core: Spurs bring-up smoke test
+ *   hello-ppu-spurs-core: Spurs bring-up test
  *     spu_printf_initialize ok
  *     SpursAttribute::initialize ok
  *     Spurs2::initialize ok
@@ -88,7 +88,7 @@ static void print_spurs_info(cell::Spurs::Spurs2 *spurs)
 
 int main(void)
 {
-    std::printf("hello-ppu-spurs-core: Spurs bring-up smoke test\n");
+    std::printf("hello-ppu-spurs-core: Spurs bring-up test\n");
 
     int rc = spu_printf_initialize(kSpuPrintfPriority, 0);
     if (rc) {

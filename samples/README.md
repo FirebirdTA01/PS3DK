@@ -11,7 +11,7 @@ for them lands.
 
 ```
 samples/
-├── toolchain/     toolchain + ABI smoke tests
+├── toolchain/     toolchain + ABI validation tests
 ├── gcm/           RSX / cellGcm graphics (libgcm + libgcm_cmd + librsx)
 ├── sysutil/       sysutil callbacks, dialogs, save/game/system data
 ├── lv2/           lv2 syscall primitives (threading, synchronisation)
@@ -28,7 +28,7 @@ These are the "does the compiler work" tier — don't touch RSX / sysutil.
 |---|---|---|
 | `hello-ppu-c++17` | PPU C++17 front- and back-end, libstdc++ link, PPU thread id | **green** |
 | `hello-ppu-abi-check` | `.sys_proc_param` 36-byte firmware-3.30+ layout; malloc/calloc/realloc through libsysbase `_sbrk_r`; printf through `_write_r` | **green** |
-| `hello-ppu-backfill` | Batch link smoke test — anchors one symbol from each of five stub archives (subdisplay / music / music_decode / music_export / imejp) so FNID + sceResident entries land in the ELF | **green** + RPCS3 runtime-verified |
+| `hello-ppu-backfill` | Batch link test — anchors one symbol from each of five stub archives (subdisplay / music / music_decode / music_export / imejp) so FNID + sceResident entries land in the ELF | **green** + RPCS3 runtime-verified |
 
 ## gcm/
 
@@ -220,7 +220,7 @@ command sequence).
 After any rebuild of binutils / GCC+newlib / PSL1GHT, the three canonical
 green samples must still link and (where possible) run:
 
-1. `toolchain/hello-ppu-c++17` — toolchain smoke test.
+1. `toolchain/hello-ppu-c++17` — toolchain validation test.
 2. `toolchain/hello-ppu-abi-check` — ABI oracle.
 3. PSL1GHT's own `sample/` tree — verifies downstream homebrew still
    compiles against the modernised headers.

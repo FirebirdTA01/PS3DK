@@ -1,5 +1,5 @@
 /*
- * hello-ppu-backfill — batch link smoke test.
+ * hello-ppu-backfill — batch link validation test.
  *
  * Includes five sysutil headers (subdisplay, music, music_decode,
  * music_export, imejp) and references one function from each library

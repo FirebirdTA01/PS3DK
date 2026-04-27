@@ -14,7 +14,7 @@
  *      /dev_hdd0/game/HELPPUPNG1/USRDIR/ps3dk.png when installed as a
  *      .pkg, /app_home/pkg_files/USRDIR/ps3dk.png when launched
  *      directly; falls back to an 8x8 embedded test.png for the
- *      no-file smoke test.
+ *      no-file fallback test.
  *   4. Blit the decoded RGBA into both display buffers as XRGB, then
  *      flip until the user presses START.
  */

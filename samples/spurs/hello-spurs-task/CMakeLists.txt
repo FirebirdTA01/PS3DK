@@ -1,4 +1,4 @@
-# hello-spurs-task — Spurs Taskset / Task framework smoke test.
+# hello-spurs-task — Spurs Taskset / Task framework validation test.
 #
 # The SPU side is a Spurs Task (not a regular SPU thread): linked
 # with `-nostartfiles` against our spurs_task.ld script + libspurs_task.a

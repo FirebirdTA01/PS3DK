@@ -5,7 +5,7 @@
  * 16-byte entries (in-workload variant - no taskset needed), then
  * reads back the size / depth / direction through the Get accessors.
  * No actual queueing - the SPU side is needed to push real entries,
- * but this smoke test confirms the queue-init path and read-back
+ * but this test confirms the queue-init path and read-back
  * surface reach the SPRX correctly.
  */
 

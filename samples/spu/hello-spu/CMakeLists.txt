@@ -1,4 +1,4 @@
-# hello-spu — minimal PPU+SPU smoke test (CMake build).
+# hello-spu — minimal PPU+SPU validation test (CMake build).
 #
 # The SPU side (spu/source/main.c) compiles to an SPU ELF, which gets
 # embedded into the PPU executable via bin2s under the symbols

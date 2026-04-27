@@ -1,7 +1,7 @@
 /*
  * hello-ppu-spurs-semaphore - PPU-visible SPURS semaphore bring-up.
  *
- * Counting semaphore smoke test.  Initialize with total=3, read back
+ * Counting semaphore validation test.  Initialize with total=3, read back
  * the taskset-address via GetTasksetAddress (returns null for IWL-
  * initialized semaphores, which is fine - the call still has to reach
  * the SPRX), tear down.  Actual P/V lives on the SPU side; this

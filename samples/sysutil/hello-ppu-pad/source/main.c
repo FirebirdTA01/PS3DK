@@ -1,5 +1,5 @@
 /*
- * hello-ppu-pad - cellPad API smoke test via nidgen stub archive.
+ * hello-ppu-pad - cellPad API validation test via nidgen stub archive.
  *
  * Validates the libio.a pipeline end-to-end: the nidgen archive built
  * from tools/nidgen/nids/extracted/libio_stub.yaml resolves every
