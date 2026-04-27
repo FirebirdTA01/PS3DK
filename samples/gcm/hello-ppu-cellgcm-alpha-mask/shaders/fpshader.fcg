@@ -1,0 +1,43 @@
+// hello-ppu-cellgcm-alpha-mask — fragment program.
+//
+// Two rsx-cg-compiler features under test, end-to-end:
+//
+//   1) Implicit varying-binding inference.  `texcoord` has no explicit
+//      `: TEXCOORD0` semantic; the front-end infers it because it is
+//      the only unbound entry-point input on the FP side.  The
+//      reference compiler does the same; both emit a parameter-table
+//      entry whose resource code is 0x0c94 (TEXCOORD0) but whose
+//      semantic *string* is suppressed (the user did not write one).
+//
+//   2) Alpha-mask if-else (tex-result-as-cmp-LHS).  The reference
+//      compiler lowers this 3-instruction shape and elides the
+//      literal-vec4(0,0,0,0) THEN-branch by exploiting R0's implicit
+//      zero default at FP entry:
+//
+//        TEX  R1.<lane>{MASK_lane}, f[TC0], TEX0
+//        SLE  [OUT_NONE | COND_WRITE | OUTMASK=lane] R1.<lane>, c[0].x
+//             + inline {0.5, 0, 0, 0}
+//        MOV(EQ.x) [END] R0.xyzw, f[COL0]
+//
+//      The conditional MOV only fires when CC == 0 (LE compare was
+//      FALSE) — otherwise R0 retains its zero default and the pixel
+//      drops to (0,0,0,0).
+//
+// Visible behaviour: pixels where the texture's alpha is below 0.5
+// are masked out (rendered black with alpha=0); the rest read the
+// per-vertex colour from the VP, so the live pixels show a smooth
+// 4-corner colour gradient.
+
+void main(
+    float2 texcoord,
+    float4 color    : COLOR,
+    uniform sampler2D texture,
+    out float4 oColor : COLOR)
+{
+    float4 tex = tex2D(texture, texcoord);
+    if (tex.a <= 0.5) {
+        oColor = float4(0.0, 0.0, 0.0, 0.0);
+    } else {
+        oColor = color;
+    }
+}
