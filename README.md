@@ -44,6 +44,60 @@ is ours.
 - **PPU at GCC 12.4.0.** 12.x is the highest line that rebases onto the PSL1GHT PPU patch set without middle-end churn bleeding into the backend.  12.4.0 gives full **C++17**, substantially complete **C++20**, and partial **C++23** (`-std=c++2b`).  libstdc++ ships with ranges, `<format>`, concepts, coroutines, most of the parallel algorithms, and the `<chrono>` calendar/time-zone surface.
 - **SPU at GCC 9.5.0.** 9.5.0 is the **last upstream GCC that still ships a working Cell SPE backend** — GCC 10 removed `gcc/config/spu/`, `libgcc/config/spu/`, the SPU intrinsic headers, and the SPU test suite outright (≈34 000 lines total).  9.5.0 gives full **C++17** (core language + libstdc++).  C++20 support is **early / partial**: some constexpr extensions, aggregate-init fixes, three-way-comparison groundwork, and experimental `-std=c++2a` are in; the bulk of C++20 (finalised concepts, ranges, `<format>`, spaceship library, `constinit` / `consteval`, modules, coroutines) landed in GCC 10+ and is **not** available on SPU today.  Usability is constrained mostly by the 256 KiB local-store budget rather than the compiler version: libstdc++ headers are available but feature selection is pragmatic (no RTTI / no exceptions / `-Os` by default).
 
+### True 64-bit PPU ABI
+
+The PPE is a 64-bit core, but the original PS3 runtime configured GCC
+for an effectively-32-bit pointer ABI — naked `void *`, `int *`,
+`T *` were 4 bytes everywhere by default, function arguments and
+locals included.  Our toolchain takes the modern path:
+`powerpc64-ps3-elf-gcc` is genuinely 64-bit, so naked pointers are
+8 bytes everywhere.
+
+The PRX boundary, LV2 syscall register layout, OPD format, FNID
+hashing, `_OPENSPRX_*` import shape, struct-field ABI — every
+published interface still speaks the documented 32-bit-effective-
+address conventions.  We satisfy them through `ATTRIBUTE_PRXPTR`
+(= `__attribute__((mode(SI)))`) on the specific struct fields that
+cross the SPRX boundary, while keeping naked pointers in user code
+as 64 bits.  Memory-container ids, event-queue ids, and other LV2
+handles are all 64 bits as the kernel specifies.  The `abi-verify`
+harness pins eight invariants and runs on every build.
+
+What this means for code written for older SDKs (anything that
+assumed the historical PPU32 setup — `void *` as 4 bytes, casts
+between `int` and pointer treated as no-ops):
+
+- **`(int)void *` and `(void *)int` casts now lose precision.**  GCC
+  flags them under `-Wconversion` / `-Wint-to-pointer-cast` /
+  `-Wpointer-to-int-cast`.  The fix is to widen the local to
+  `intptr_t` / `uintptr_t` (or `long`).  Adding `-fpermissive` to
+  the build downgrades the diagnostics to warnings so the build
+  proceeds — the casts are well-defined when the pointer fits in
+  32 bits, which it does for in-process pointers on PS3 hardware
+  (LPAR memory map tops out at ~256 MiB main + 256 MiB RSX).  Use
+  `-fpermissive` when porting code written for older SDKs; use the
+  widened type when writing new code.
+- **`sizeof(void *) == 8`, not 4.**  Structs that hand-roll padding
+  with `int padX[N]` after a pointer field need to be inspected.  If
+  the struct crosses the SPRX boundary, tag the pointer field
+  `ATTRIBUTE_PRXPTR` and the layout matches the kernel's expectations
+  exactly.  If it stays in-process, just let it be 8 bytes.
+- **Function pointers (e.g., callback typedefs in struct fields) are
+  also 8 bytes.**  Same `ATTRIBUTE_PRXPTR` tag if the field crosses
+  to a SPRX.  Our `cell/*.h` shipped struct definitions already do
+  this for every cross-SPRX pointer.
+- **`-m32` doesn't apply.**  GCC's PPC64 backend doesn't support a
+  silent 32-bit-pointer mode the way x86_64 does.  PPU32 on the PS3
+  was a downstream patch, not an upstream feature.  `intptr_t` /
+  `uintptr_t` / `ATTRIBUTE_PRXPTR` are the migration path.
+
+The trade is intentional: full 64-bit `size_t`, address sanitiser
+sanity, modern libstdc++ headers (which assume `sizeof(size_t) ==
+sizeof(void *)`), and a single PPU64 + SPU code-generation matrix.
+The cost is some `-fpermissive` flags when porting code written for
+older SDKs — and that cost is bounded to the casts; types and ABI
+stay clean.
+
 ### Upgrade roadmap
 
 We intend to track upstream GCC over time for **both** PPU and SPU —
