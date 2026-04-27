@@ -12,6 +12,7 @@
  */
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,14 @@ struct FpAttributes
     uint8_t  pixelKill           = 0;        // 1 iff KIL opcode emitted
 
     std::vector<FpEmbeddedUniform> embeddedUniforms;
+
+    // Indices into the entry function's parameter list that are
+    // actually consumed by the IR.  The container emitter writes
+    // isReferenced=1 for these and 0 for parameters that exist in the
+    // signature but have no IR uses (mirrors the reference compiler).
+    // `out` / `inout` parameters are always added to this set since
+    // they correspond to a StoreOutput in any well-formed shader.
+    std::set<unsigned> referencedParamIndices;
 };
 
 struct FpEmitResult
