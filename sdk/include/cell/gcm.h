@@ -148,6 +148,12 @@ typedef struct _cellGcmSurface {
  * pitch u32, offset u32) — verified against the reference SDK's gcm_struct.h. */
 typedef gcmTexture           CellGcmTexture;
 
+/* Tile / Zcull descriptors used by cellGcmGetTileInfo / cellGcmGetZcullInfo
+ * helpers in samples/common/gcmutil.  Layout-equivalent to the PSL1GHT
+ * lower-case aliases. */
+typedef gcmTileInfo          CellGcmTileInfo;
+typedef gcmZcullInfo         CellGcmZcullInfo;
+
 /* ============================================================
  * Inline helpers (non-emitter).  No FIFO writes; just math.
  * ============================================================ */
@@ -175,6 +181,48 @@ static inline int32_t cellGcmBindTile(uint8_t index)
 {
     return (int32_t)gcmBindTile(index);
 }
+
+/* Reference SDK exposes the full tile / zcull tables as
+ * read-only arrays.  Forwards to the PSL1GHT lower-case wrappers. */
+static inline const CellGcmTileInfo *cellGcmGetTileInfo(void)
+{
+    return (const CellGcmTileInfo *)gcmGetTileInfo();
+}
+
+static inline const CellGcmZcullInfo *cellGcmGetZcullInfo(void)
+{
+    return (const CellGcmZcullInfo *)gcmGetZcullInfo();
+}
+
+/* Maximum number of tile / zcull regions the hardware tracks
+ * (sample code uses these as the bound on index<->descriptor maps).
+ * Reference SDK values; PSL1GHT doesn't name the constants. */
+#define CELL_GCM_MAX_TILE_INDEX        15
+#define CELL_GCM_MAX_ZCULL_INDEX        7
+#define CELL_GCM_ZCULL_RAM_SIZE_MAX     GCM_ZCULL_RAM_SIZE_MAX
+
+/* Tile / zcull region bind release.  Forwards to PSL1GHT's gcmUnbindTile
+ * and gcmUnbindZcull. */
+static inline int32_t cellGcmUnbindTile(uint8_t index)
+{
+    return (int32_t)gcmUnbindTile(index);
+}
+
+static inline int32_t cellGcmUnbindZcull(uint8_t index)
+{
+    return (int32_t)gcmUnbindZcull(index);
+}
+
+/* FIFO operating-mode setter — must be called before cellGcmInit.
+ * `mode` is one of CELL_GCM_DEFAULT_FIFO_MODE_*. */
+static inline int32_t cellGcmInitDefaultFifoMode(int32_t mode)
+{
+    return (int32_t)gcmInitDefaultFifoMode(mode);
+}
+
+#define CELL_GCM_DEFAULT_FIFO_MODE_TRADITIONAL  GCM_DEFAULT_FIFO_MODE_TRADITIONAL
+#define CELL_GCM_DEFAULT_FIFO_MODE_OPTIMIZE     GCM_DEFAULT_FIFO_MODE_OPTIMIZE
+#define CELL_GCM_DEFAULT_FIFO_MODE_CONDITIONAL  GCM_DEFAULT_FIFO_MODE_CONDITIONAL
 
 static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
                                        uint32_t width, uint32_t height,

@@ -30,6 +30,7 @@
 #include <sys/sem.h>
 #include <sys/mutex.h>
 #include <sys/synchronization.h>
+#include <sys/process.h>
 
 #ifdef __cplusplus
 extern "C" {

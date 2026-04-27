@@ -474,6 +474,57 @@ static inline void cellGcmSetVertexProgramParameter(CellGcmContextData *ctx,
     memcpy(w, values, words * sizeof(uint32_t));
 }
 
+/* Multi-register VP constant write — single packet, count*4 floats.
+ * Used by skinning paths to bind joint-matrix arrays.  Forwards to
+ * PSL1GHT's rsxLoadVertexProgramParameterBlock since the encoding is
+ * the same auto-incrementing UPLOAD_CONST_ID stream as our single-
+ * register variant above. */
+static inline void cellGcmSetVertexProgramParameterBlock(CellGcmContextData *ctx,
+                                                         uint32_t baseConst,
+                                                         uint32_t constCount,
+                                                         const float *values)
+{
+    rsxLoadVertexProgramParameterBlock(ctx, baseConst, constCount, values);
+}
+
+/* Patch a fragment-program embedded constant in-place (FP code in
+ * memory at addrOffset).  Reference SDK signature; the patch happens
+ * on the CPU side, then the hardware re-fetches via the next FP load.
+ * Walks the param's embeddedConst[] table and writes 4 floats per
+ * entry into the FP ucode at the encoded offsets. */
+static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
+                                                      CGprogram prog,
+                                                      CGparameter param,
+                                                      const float *values,
+                                                      uint32_t addrOffset)
+{
+    (void)ctx; (void)addrOffset;
+    if (!prog || !param || !values) return;
+
+    const CgBinaryProgram   *bp = (const CgBinaryProgram *)prog;
+    const CgBinaryParameter *pp = (const CgBinaryParameter *)param;
+
+    /* Locate the FP ucode payload — same resolver gCellGcmCurrentContext-
+     * based callers use after cellGcmCgInitProgram has set it up. */
+    const uint8_t *base   = (const uint8_t *)bp;
+    const uint8_t *ucode  = base + bp->ucode;
+    const uint32_t *embed = (const uint32_t *)(base + pp->embeddedConst);
+
+    if (!embed) return;
+
+    const uint32_t cnt = embed[0];
+    for (uint32_t i = 1; i <= cnt; ++i) {
+        uint32_t off = embed[i];
+        uint32_t *slot = (uint32_t *)(ucode + off);
+        /* FP constants are stored in big-endian word order with each
+         * 4-component vector dword-swapped per NV40 FP convention. */
+        slot[0] = ((const uint32_t *)values)[1];
+        slot[1] = ((const uint32_t *)values)[0];
+        slot[2] = ((const uint32_t *)values)[3];
+        slot[3] = ((const uint32_t *)values)[2];
+    }
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -491,6 +542,19 @@ static inline void cellGcmSetFragmentProgram(CGprogram prog, uint32_t offset)
 static inline void cellGcmSetVertexProgramParameter(CGparameter param,
                                                     const float *values)
 { cellGcmSetVertexProgramParameter(gCellGcmCurrentContext, param, values); }
+
+static inline void cellGcmSetVertexProgramParameterBlock(uint32_t baseConst,
+                                                         uint32_t constCount,
+                                                         const float *values)
+{ cellGcmSetVertexProgramParameterBlock(gCellGcmCurrentContext, baseConst,
+                                        constCount, values); }
+
+static inline void cellGcmSetFragmentProgramParameter(CGprogram prog,
+                                                      CGparameter param,
+                                                      const float *values,
+                                                      uint32_t addrOffset)
+{ cellGcmSetFragmentProgramParameter(gCellGcmCurrentContext, prog, param,
+                                     values, addrOffset); }
 
 #endif  /* __cplusplus */
 

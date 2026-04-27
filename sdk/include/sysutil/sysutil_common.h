@@ -10,6 +10,7 @@
 #ifndef PS3TC_SYSUTIL_SYSUTIL_COMMON_H
 #define PS3TC_SYSUTIL_SYSUTIL_COMMON_H
 
+#include <stdint.h>
 #include <sys/types.h>
 
 #ifdef __cplusplus
@@ -35,6 +36,24 @@ extern "C" {
 #define CELL_SYSUTIL_ERROR_BASE_STORAGEDATA       0x8002be00
 #define CELL_SYSUTIL_ERROR_BASE_BGMPLAYBACK_EX    0x8002d300
 #define CELL_SYSUTIL_ERROR_BASE_AP                0x8002cd00
+
+/* ---- Sysutil callback type + entry points ----
+ * Reference SDK declares these in sysutil_common.h; sample code
+ * reaches them transitively without #include <cell/sysutil.h>.
+ * Reproduce the prototypes here. */
+#define CELL_SYSUTIL_USERID_MAX  99999999
+
+typedef unsigned int CellSysutilUserId;
+typedef void (*CellSysutilCallback)(uint64_t status, uint64_t param,
+                                    void *userdata);
+
+int cellSysutilCheckCallback(void);
+int cellSysutilRegisterCallback(int slot, CellSysutilCallback func,
+                                void *userdata);
+int cellSysutilUnregisterCallback(int slot);
+
+int cellSysutilGetSystemParamInt(int id, int *value);
+int cellSysutilGetSystemParamString(int id, char *buf, unsigned int bufsize);
 
 /* ---- Sysutil callback request / event status codes ----
  * Mirror the values in <cell/sysutil.h>; reproduced here so source

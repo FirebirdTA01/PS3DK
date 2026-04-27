@@ -204,6 +204,14 @@ static inline void exitspawn(const char *path,
                          priority, flags);
 }
 
+/* sys_process_exit — reference-SDK snake_case spelling for the
+ * sysProcessExit syscall already declared via <lv2/process.h>. */
+static inline __attribute__((noreturn)) void sys_process_exit(int status)
+{
+    sysProcessExit(status);
+    __builtin_unreachable();
+}
+
 #ifdef __cplusplus
 }
 #endif
