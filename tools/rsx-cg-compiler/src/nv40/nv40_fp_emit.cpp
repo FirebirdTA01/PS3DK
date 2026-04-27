@@ -305,8 +305,20 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     struct CmpBinding
     {
         uint8_t   opcode      = NVFX_FP_OP_OPCODE_SGT;
+        // LHS shape:
+        //   Varying: scalar lane of an entry-point varying (the
+        //            existing case — `vcol.x > 0.5`).
+        //   TexResult: scalar lane of a tex2D / texCUBE / tex2Dproj
+        //             result.  The tex sample emits as TEX into an
+        //             R-temp (NOT R0) at the cmp evaluation point;
+        //             the cmp then sources from that temp with a
+        //             smeared lane swizzle.  See the Select tex-LHS
+        //             schedule in the StoreOutput emit.
+        enum class LhsKind { Varying, TexResult };
+        LhsKind   lhsKind     = LhsKind::Varying;
         IRValueID lhsBase     = 0;
         int       lhsLane     = 0;
+        IRValueID lhsTexId    = 0;  // (TexResult only) the TexSample IR value
         // RHS shape:
         //   Literal: inline {rhsLiteral, 0, 0, 0} as a const block
         //   Uniform: append zero block, record ucode offset for rhsUniformId
@@ -572,14 +584,32 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             {
                 if (inst.operands.size() < 2) break;
 
-                // LHS: scalar extract of a varying (for `vcol.x > k`).
+                // LHS: scalar extract of either an entry-point varying
+                // (`vcol.x > k`) or a tex2D / texCUBE / tex2Dproj
+                // result (`tex.a > k`).  Either way, the cmp records
+                // an LhsKind so the StoreOutput emit can dispatch the
+                // right schedule.
                 auto seIt = valueToScalarExtract.find(inst.operands[0]);
                 if (seIt == valueToScalarExtract.end()) break;
-                auto inIt = valueToInputSrc.find(seIt->second.baseId);
-                if (inIt == valueToInputSrc.end()) break;
+
+                CmpBinding cb;
+                if (auto inIt = valueToInputSrc.find(seIt->second.baseId);
+                    inIt != valueToInputSrc.end())
+                {
+                    cb.lhsKind = CmpBinding::LhsKind::Varying;
+                }
+                else if (auto txIt = valueToTex.find(seIt->second.baseId);
+                         txIt != valueToTex.end())
+                {
+                    cb.lhsKind  = CmpBinding::LhsKind::TexResult;
+                    cb.lhsTexId = seIt->second.baseId;
+                }
+                else
+                {
+                    break;  // unknown LHS shape — leave unlowered
+                }
 
                 // RHS: either a float constant or an FP uniform.
-                CmpBinding cb;
                 switch (inst.op)
                 {
                 case IROp::CmpGt: cb.opcode = NVFX_FP_OP_OPCODE_SGT; break;
@@ -1731,6 +1761,192 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
                     const auto& cb = cmpIt->second;
+
+                    // Tex-result-LHS Select schedule (alpha-mask shape):
+                    //   `if (tex.<lane> CMP scalar) trueBr = literal_vec4(0)
+                    //    else                       falseBr = varying`
+                    //
+                    // Reference compiler lowers this to 3 instructions
+                    // (verified byte-for-byte on the alpha-mask probe):
+                    //
+                    //   TEX  R1.xyzw, f[TC<m>], TEX<m>
+                    //   SLE  [OUT_NONE | COND_WRITE | OUTMASK=X]
+                    //         R1.<lane>{smeared}, c[0].xxxx
+                    //         + inline {scalar, 0, 0, 0}
+                    //   MOV(EQ.xxxx) [END] R0.xyzw, f[falseBranch]
+                    //
+                    // The literal trueBr is *elided*: R0 starts at
+                    // (0,0,0,0) per FP convention, and the conditional
+                    // MOV only fires when the cmp was FALSE — so when
+                    // it doesn't fire, R0 stays at the zero default,
+                    // matching the source's literal-vec4(0,0,0,0)
+                    // TRUE-branch.
+                    if (cb.lhsKind == CmpBinding::LhsKind::TexResult)
+                    {
+                        // Verify trueBr is the implicit zero default.
+                        auto isLitZero = [&](IRValueID id) -> bool
+                        {
+                            auto it = valueToLiteralVec4.find(id);
+                            if (it == valueToLiteralVec4.end()) return false;
+                            return it->second.vals[0] == 0.0f &&
+                                   it->second.vals[1] == 0.0f &&
+                                   it->second.vals[2] == 0.0f &&
+                                   it->second.vals[3] == 0.0f;
+                        };
+                        auto findVarying = [&](IRValueID id) -> int
+                        {
+                            auto it = valueToInputSrc.find(id);
+                            return it == valueToInputSrc.end() ? -1 : it->second;
+                        };
+                        if (!isLitZero(sb.trueId))
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select tex-LHS: TRUE branch must be literal "
+                                "vec4(0,0,0,0) (elided as the R0 default) — non-zero "
+                                "literal not yet supported");
+                            return out;
+                        }
+                        const int falseInputSrc = findVarying(sb.falseId);
+                        if (falseInputSrc < 0)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select tex-LHS: FALSE branch must be a "
+                                "varying input today");
+                            return out;
+                        }
+                        if (cb.rhsKind != CmpBinding::RhsKind::Literal)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select tex-LHS: RHS must be a scalar literal today");
+                            return out;
+                        }
+                        if (cb.opcode != NVFX_FP_OP_OPCODE_SLE)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select tex-LHS: only cmple ↔ SLE wired today");
+                            return out;
+                        }
+
+                        auto txIt    = valueToTex.find(cb.lhsTexId);
+                        auto sampIt  = (txIt != valueToTex.end())
+                            ? valueToTexUnit.find(txIt->second.samplerId)
+                            : valueToTexUnit.end();
+                        auto uvInIt  = (txIt != valueToTex.end())
+                            ? valueToInputSrc.find(txIt->second.uvId)
+                            : valueToInputSrc.end();
+                        if (txIt == valueToTex.end() ||
+                            sampIt == valueToTexUnit.end() ||
+                            uvInIt == valueToInputSrc.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select tex-LHS: tex sampler / UV / unit "
+                                "binding did not resolve");
+                            return out;
+                        }
+
+                        // ----- Inst 1: TEX R1, f[TC<m>], TEX<m> -----
+                        struct nvfx_reg r1Dst = nvfx_reg(NVFXSR_TEMP, 1);
+                        const struct nvfx_reg uvReg =
+                            nvfx_reg(NVFXSR_INPUT, uvInIt->second);
+                        struct nvfx_src texS0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(uvReg));
+                        struct nvfx_src texS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src texS2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        // Only the lane consumed by the SLE compare needs
+                        // to be written — the reference compiler narrows
+                        // OUTMASK accordingly so the other lanes of R1
+                        // stay undefined (they're never read).
+                        const uint32_t texMask =
+                            uint32_t{1} << static_cast<uint32_t>(cb.lhsLane);
+                        struct nvfx_insn texIn = nvfx_insn(
+                            0, 0, sampIt->second, -1,
+                            r1Dst, texMask,
+                            texS0, texS1, texS2);
+                        if (txIt->second.cube) texIn.disable_pc = 1;
+                        const uint8_t texOpcode = txIt->second.projective
+                            ? NVFX_FP_OP_OPCODE_TXP
+                            : NVFX_FP_OP_OPCODE_TEX;
+                        asm_.emit(texIn, texOpcode);
+
+                        // Tex-coord 2D bit STAYS SET — TEXCOORD<m> is
+                        // consumed as a 2D tex-sample uv, not a
+                        // 4-component varying read.
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(uvInIt->second);
+                        if (uvInIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            uvInIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = uvInIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            if (txIt->second.projective || txIt->second.cube)
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+
+                        // ----- Inst 2: SLE-CC R1.<lane>, c[0].xxxx -----
+                        const struct nvfx_reg ccDst =
+                            nvfx_reg(NVFXSR_NONE, 0x3F);
+                        const struct nvfx_reg constReg =
+                            nvfx_reg(NVFXSR_CONST, 0);
+                        struct nvfx_src cmpS0 = nvfx_src(r1Dst);
+                        cmpS0.swz[0] = cmpS0.swz[1] =
+                        cmpS0.swz[2] = cmpS0.swz[3] =
+                            static_cast<uint8_t>(cb.lhsLane);
+                        struct nvfx_src cmpS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        cmpS1.swz[0] = cmpS1.swz[1] =
+                        cmpS1.swz[2] = cmpS1.swz[3] = 0;  // .xxxx
+                        struct nvfx_src cmpS2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn cmpIn = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(ccDst),
+                            NVFX_FP_MASK_X, cmpS0, cmpS1, cmpS2);
+                        cmpIn.cc_update = 1;  // COND_WRITE_ENABLE
+                        asm_.emit(cmpIn, cb.opcode);
+                        const float cmpInline[4] =
+                            { cb.rhsLiteral, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(cmpInline);
+
+                        // ----- Inst 3: MOV(EQ.xxxx) R0, f[falseBr] -----
+                        const struct nvfx_reg movInReg =
+                            nvfx_reg(NVFXSR_INPUT, falseInputSrc);
+                        struct nvfx_src movS0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(movInReg));
+                        struct nvfx_src movS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src movS2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn movIn = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_ALL, movS0, movS1, movS2);
+                        // SLE writes 1 ⟺ LE; the CC value is therefore 1
+                        // when the LE comparison was true.  We want the
+                        // MOV to fire when LE was FALSE (the "else" arm).
+                        // NV40 COND_EQ is "execute when CC == 0" — i.e.
+                        // when SLE wrote 0 — i.e. when LE was FALSE.
+                        movIn.cc_test  = 1;
+                        movIn.cc_cond  = NVFX_FP_OP_COND_EQ;
+                        movIn.cc_swz[0] = movIn.cc_swz[1] =
+                        movIn.cc_swz[2] = movIn.cc_swz[3] = 0;  // all .x
+                        asm_.emit(movIn, NVFX_FP_OP_OPCODE_MOV);
+
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(falseInputSrc);
+                        if (falseInputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+
+                        emittedSomething = true;
+                        break;
+                    }
+
                     auto inIt = valueToInputSrc.find(cb.lhsBase);
                     if (inIt == valueToInputSrc.end())
                     {

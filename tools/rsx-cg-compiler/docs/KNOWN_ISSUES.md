@@ -157,7 +157,7 @@ below.
 
 ---
 
-## FP texture-result feeding compare / arithmetic — PENDING
+## FP alpha-mask if-else (tex-result-as-cmp-LHS) — DONE (2026-04-27)
 
 ```cg
 float4 tex = tex2D(texture, texcoord);
@@ -165,50 +165,41 @@ if (tex.a <= 0.5) { oColor = float4(0); }
 else              { oColor = color;     }
 ```
 
-Today the `TexSample` IR result feeds straight into a `StoreOutput`
-in every test we've probed.  Real shaders (e.g. the alpha-masked
-text shader from the reference SDK's `fw` framework) feed the result
-into a `VecShuffle` (`tex.a`), then a `CmpLe` against a literal,
-then drive an if-else.  Three coupled gaps:
+This shape — `tex2D` result fed through `VecShuffle` → `CmpLe`
+against a literal → if-else with literal-vec4(0) THEN and varying
+ELSE — now byte-matches the reference compiler.  Three coupled
+changes landed together:
 
-1. **`CmpBinding` LHS is varying-only.**  `nv40_fp_emit.cpp`'s
-   comparison handler only records a `CmpBinding` when the LHS is a
-   scalar-extract of a value resolvable through `valueToInputSrc` —
-   tex-sample results live in `valueToTex`, so the binding is
-   silently dropped and the downstream `Select` bails with
-   "Select needs a CmpGt/CmpGe/... constant-threshold binding".
+- **`if-convert`**: `matchSingleStoutThenBranch` now accepts up to
+  N hoistable (pure, side-effect-free) instructions before the stout
+  in each arm and re-roots them into entry before synthesising the
+  Select.  Hoistable set today: `Const`, `VecConstruct`,
+  `VecExtract`, `VecShuffle`.
+- **`CmpBinding`**: gained `LhsKind { Varying, TexResult }` so the
+  cmp handler records a tex-LHS binding even though the base value
+  lives in `valueToTex` rather than `valueToInputSrc`.
+- **Select StoreOutput emit**: new tex-LHS schedule produces the
+  reference's 3-instruction shape:
+  ```
+  TEX  R1.<lane>{MASK_lane}, f[TC<m>], TEX<m>
+  SLE  [OUT_NONE | COND_WRITE | OUTMASK=X], R1.<lane>, c[0].x
+       + inline {scalar, 0, 0, 0}
+  MOV(EQ.xxxx) [END] R0.xyzw, f[falseBranch]
+  ```
+  The `vec4(0,0,0,0)` THEN branch is *elided*: R0 starts at
+  `(0,0,0,0)` per FP convention, and the conditional MOV only fires
+  when the cmp was FALSE — when it doesn't fire, R0 keeps the zero
+  default.  COND_EQ matches "CC == 0" which equals "SLE wrote 0"
+  which equals "the LE comparison was FALSE".
 
-2. **`if-convert` rejects multi-instruction THEN/ELSE arms.**  The
-   pass requires each arm to be exactly `[stout; br]`.  The dbgfont
-   shape's THEN arm is `[vec %14 ...; stout %14; br]` (a
-   `VecConstruct` of four float consts before the stout), so the
-   diamond never collapses to a `Select` and `CondBranch` reaches
-   the emitter unlowered (`unsupported IR op #78`).  Fix shape:
-   hoist side-effect-free instructions from each arm into entry
-   before synthesising the Select.
+Today's restrictions (each rejects with a clean diagnostic):
+- TRUE branch must be literal `vec4(0,0,0,0)` (the elided default).
+- FALSE branch must be a varying input.
+- RHS of the cmp must be a scalar literal.
+- Cmp opcode must be `cmple` (other ops need different COND_<X>
+  swizzles in the conditional MOV; queued behind the basic case).
 
-3. **Reference encoding for tex-result-as-cmp-LHS isn't probed.**
-   `dbgfont_fpshader.cg` ucode (3 instructions, 64 bytes) at
-   `--O2 --fastmath`:
-   ```
-   inst 1 (16B): TEX R0, f[TEX0], TEX0
-   inst 2 (32B): SLE [OUT_NONE | COND_WRITE_ENABLE], R0.w, {0.5}.x
-   inst 3 (16B): MOV R0[CC.?], <something>            # END
-   ```
-   inst 1 is the same shape as our existing `texture_sample_f.cg`
-   path.  inst 2 is an SLE writing only the condition code (no
-   register destination — the OUT_NONE bit at 30 is set; same
-   pattern as our existing SGTRC-based varying-cmp path but with
-   the LHS sourced from a tempreg, not a varying input).  inst 3
-   is a conditional MOV; it needs decoding to confirm whether it
-   reads the COL0 varying directly or routes through a temp.
-   Probe: invoke the reference Cg compiler (the binary under
-   `reference/sony-sdk/host-win32/Cg/bin/`) under `wine` with
-   `--profile sce_fp_rsx --O2 --fastmath` against the alpha-mask
-   shader to capture a fresh `.fpo`.
-
-Captured separately as session prompt
-`docs/next-session-prompt-dbgfont.md`.
+Test: `tools/rsx-cg-compiler/tests/shaders/alpha_mask_tex_f.cg`.
 
 ---
 
