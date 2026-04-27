@@ -20,6 +20,14 @@ extern "C" {
 
 /* sys_spu_image_* live in <sys/spu_image.h>, which we include above. */
 
+/* SPU thread argument-passing helpers — pack a host-side scalar into
+ * the high 32 bits of the 64-bit argument register the SPU sees in
+ * its r3..r6 entry-point parameters. */
+#define SYS_SPU_THREAD_ARGUMENT_LET_8(x)   (((uint64_t)(x)) << 32U)
+#define SYS_SPU_THREAD_ARGUMENT_LET_16(x)  (((uint64_t)(x)) << 32U)
+#define SYS_SPU_THREAD_ARGUMENT_LET_32(x)  (((uint64_t)(x)) << 32U)
+#define SYS_SPU_THREAD_ARGUMENT_LET_64(x)  ((uint64_t)(x))
+
 /* ------------------------------------------------------------------ *
  * sys_spu_thread_group_*
  * ------------------------------------------------------------------ */
@@ -47,6 +55,11 @@ static inline int sys_spu_thread_group_join(sys_spu_thread_group_t gid,
 static inline int sys_spu_thread_group_destroy(sys_spu_thread_group_t id)
 {
     return (int)sysSpuThreadGroupDestroy(id);
+}
+
+static inline int sys_spu_thread_group_terminate(sys_spu_thread_group_t id, int value)
+{
+    return (int)sysSpuThreadGroupTerminate(id, (u32)value);
 }
 
 /* ------------------------------------------------------------------ *

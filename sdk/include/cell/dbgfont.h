@@ -51,13 +51,21 @@ extern "C" {
 #define CELL_DBGFONT_TEXTURE_LOCAL    0x00000002u
 #define CELL_DBGFONT_VERTEX_MAIN      0x00000004u
 #define CELL_DBGFONT_TEXTURE_MAIN     0x00000008u
-#define CELL_DBGFONT_SYNC_ON          0x00000010u
+#define CELL_DBGFONT_SYNC_ON           0x00000010u
+#define CELL_DBGFONT_SYNC_OFF           0x00000000u
+#define CELL_DBGFONT_VIEWPORT_ON        0x00000020u
+#define CELL_DBGFONT_MINFILTER_LINEAR   0x00000040u
+#define CELL_DBGFONT_MINFILTER_NEAREST  0x00000000u
+#define CELL_DBGFONT_MAGFILTER_LINEAR   0x00000080u
+#define CELL_DBGFONT_MAGFILTER_NEAREST  0x00000000u
 
 typedef struct CellDbgFontConfigGcm {
     sys_addr_t localBufAddr;
     uint32_t   localBufSize;
     sys_addr_t mainBufAddr;
     uint32_t   mainBufSize;
+    uint16_t   screenWidth;
+    uint16_t   screenHeight;
     uint32_t   option;
 } CellDbgFontConfigGcm;
 

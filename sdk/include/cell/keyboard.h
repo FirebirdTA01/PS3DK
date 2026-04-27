@@ -17,15 +17,40 @@
 extern "C" {
 #endif
 
-/* ---- type aliases (byte-identical layouts) ---------------------- */
-typedef KbData      CellKbData;
-typedef KbInfo      CellKbInfo;
+/* ---- type aliases ---------------------------------------------- */
 typedef KbMkey      CellKbMkey;
 typedef KbLed       CellKbLed;
 typedef KbConfig    CellKbConfig;
 typedef KbRmode     CellKbReadMode;
 typedef KbCodeType  CellKbCodeType;
 typedef KbMapping   CellKbMappingType;
+
+/* CellKbData uses an anonymous union to expose both field names —
+ * `len` (reference SDK) and `nb_keycode` (PSL1GHT) — at the same
+ * offset.  Layout is byte-identical to PSL1GHT's KbData. */
+typedef struct CellKbData {
+    CellKbLed   led;
+    CellKbMkey  mkey;
+    union {
+        int32_t len;
+        int32_t nb_keycode;
+    };
+    uint16_t    keycode[MAX_KEYCODES];
+} CellKbData;
+_Static_assert(sizeof(CellKbData) == sizeof(KbData),
+               "CellKbData / KbData layout drift");
+
+/* CellKbInfo: same union trick to expose Sony names (max_connect /
+ * now_connect) alongside PSL1GHT's (max / connected).  Status array
+ * sized to MAX_KEYBOARDS to match PSL1GHT's KbInfo layout exactly. */
+typedef struct CellKbInfo {
+    union { uint32_t max;       uint32_t max_connect; };
+    union { uint32_t connected; uint32_t now_connect; };
+    uint32_t info;
+    uint8_t  status[MAX_KEYBOARDS];
+} CellKbInfo;
+_Static_assert(sizeof(CellKbInfo) == sizeof(KbInfo),
+               "CellKbInfo / KbInfo layout drift");
 
 /* ---- constants -------------------------------------------------- */
 #define CELL_KB_RAWDAT                  KB_RAWDAT

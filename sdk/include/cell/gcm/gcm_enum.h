@@ -110,6 +110,18 @@ extern "C" {
  * further below.  Values match PSL1GHT's GCM_* (verified). */
 #define CELL_GCM_TILE_ALIGN_BUFFER_START_BOUNDARY  GCM_TILE_ALIGN_BUFFER_START_BOUNDARY
 #define CELL_GCM_TILE_LOCAL_ALIGN_HEIGHT           GCM_TILE_LOCAL_ALIGN_HEIGHT
+#define CELL_GCM_TILE_MAIN_ALIGN_HEIGHT            GCM_TILE_MAIN_ALIGN_HEIGHT
+#define CELL_GCM_ZCULL_ALIGN_OFFSET                GCM_ZCULL_ALIGN_OFFSET
+#define CELL_GCM_ZCULL_Z16                         GCM_ZCULL_Z16
+#define CELL_GCM_ZCULL_Z24S8                       2
+#define CELL_GCM_TEXTURE_SWIZZLED_CUBEMAP_FACE_ALIGN_OFFSET \
+    GCM_TEXTURE_SWIZZLED_CUBEMAP_FACE_ALIGN_OFFSET
+
+/* libgcm error codes (cell-SDK numbering — out-of-band from
+ * CELL_OK / sysmodule errors). */
+#define CELL_GCM_ERROR_FAILURE                  0x802b0001
+#define CELL_GCM_ERROR_INVALID_VALUE            0x802b0002
+#define CELL_GCM_ERROR_NOT_SUPPORTED            0x802b0003
 #define CELL_GCM_SURFACE_LINEAR_ALIGN_OFFSET       GCM_SURFACE_LINEAR_ALIGN_OFFSET
 
 /* Texture remap field helper — the cell SDK builds the u32 remap value
@@ -123,6 +135,22 @@ extern "C" {
 
 /* Surface / framebuffer format + target tags (cellGcmSetSurface). */
 #define CELL_GCM_SURFACE_A8R8G8B8        GCM_SURFACE_A8R8G8B8
+#define CELL_GCM_SURFACE_B8              GCM_SURFACE_B8
+#define CELL_GCM_SURFACE_G8B8            GCM_SURFACE_G8B8
+
+/* PSL1GHT mis-spells reference NV40-tag 3 as "R5G5B5"; the correct
+ * reference name is R5G6B5 (5 red / 6 green / 5 blue), and the same
+ * applies to format 5 which the reference SDK calls X8R8G8B8_O8R8G8B8
+ * (overlay second-buffer), not bare X8R8G8B8.  Add both to the global
+ * (non-CELL-prefixed) namespace so cell-SDK source that references
+ * the bare GCM_* name finds it. */
+#ifndef GCM_SURFACE_R5G6B5
+#  define GCM_SURFACE_R5G6B5             3
+#endif
+#ifndef GCM_SURFACE_X8R8G8B8_O8R8G8B8
+#  define GCM_SURFACE_X8R8G8B8_O8R8G8B8  5
+#endif
+
 #define CELL_GCM_SURFACE_R5G6B5          GCM_SURFACE_R5G6B5
 #define CELL_GCM_SURFACE_F_W16Z16Y16X16  GCM_SURFACE_F_W16Z16Y16X16
 #define CELL_GCM_SURFACE_F_W32Z32Y32X32  GCM_SURFACE_F_W32Z32Y32X32
@@ -362,6 +390,72 @@ extern "C" {
 #define CELL_GCM_OR_INVERTED                     0x150d
 #define CELL_GCM_NAND                            0x150e
 #define CELL_GCM_SET                             0x150f
+
+/* Front-face direction (cellGcmSetFrontFace). */
+#define CELL_GCM_CW                              GCM_FRONTFACE_CW
+#define CELL_GCM_CCW                             GCM_FRONTFACE_CCW
+
+/* Cull-face mode (cellGcmSetCullFace). */
+#define CELL_GCM_FRONT                           GCM_CULL_FRONT
+#define CELL_GCM_BACK                            GCM_CULL_BACK
+#define CELL_GCM_FRONT_AND_BACK                  GCM_CULL_ALL
+
+/* Frequency-divider operation (cellGcmSetFrequencyDividerOperation).
+ * MODULO mode: per-attribute frequency = vertex_index / divisor;
+ * used to bind joint matrices that update per-instance, not per-vertex. */
+#define CELL_GCM_FREQUENCY_DIVIDE                0
+#define CELL_GCM_FREQUENCY_MODULO                GCM_FREQUENCY_MODULO
+
+/* Z-cull / S-cull surface-function tags (cellGcmSetScullControl). */
+#define CELL_GCM_SCULL_SFUNC_ALWAYS              GCM_SCULL_SFUNC_ALWAYS
+#define CELL_GCM_SCULL_SFUNC_NEVER               0
+#define CELL_GCM_SCULL_SFUNC_LESS_THAN           1
+#define CELL_GCM_SCULL_SFUNC_LESS_OR_EQUAL       2
+#define CELL_GCM_SCULL_SFUNC_EQUAL               3
+#define CELL_GCM_SCULL_SFUNC_GREATER_OR_EQUAL    4
+#define CELL_GCM_SCULL_SFUNC_GREATER_THAN        5
+#define CELL_GCM_SCULL_SFUNC_NOT_EQUAL           6
+
+/* Vertex-program attribute output mask bits — TEX0..7 are the
+ * texture-coord output channels VP writes that FP picks up via
+ * TEXCOORD<N> bindings. */
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE   GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTSPECULAR  GCM_ATTRIB_OUTPUT_MASK_FRONTSPECULAR
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_BACKDIFFUSE    GCM_ATTRIB_OUTPUT_MASK_BACKDIFFUSE
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_BACKSPECULAR   GCM_ATTRIB_OUTPUT_MASK_BACKSPECULAR
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_FOG            GCM_ATTRIB_OUTPUT_MASK_FOG
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_POINTSIZE      GCM_ATTRIB_OUTPUT_MASK_POINTSIZE
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_UC0            GCM_ATTRIB_OUTPUT_MASK_UC0
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_UC1            GCM_ATTRIB_OUTPUT_MASK_UC1
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_UC2            GCM_ATTRIB_OUTPUT_MASK_UC2
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_UC3            GCM_ATTRIB_OUTPUT_MASK_UC3
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_UC4            GCM_ATTRIB_OUTPUT_MASK_UC4
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_UC5            GCM_ATTRIB_OUTPUT_MASK_UC5
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX0           GCM_ATTRIB_OUTPUT_MASK_TEX0
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX1           GCM_ATTRIB_OUTPUT_MASK_TEX1
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX2           GCM_ATTRIB_OUTPUT_MASK_TEX2
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX3           GCM_ATTRIB_OUTPUT_MASK_TEX3
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX4           GCM_ATTRIB_OUTPUT_MASK_TEX4
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX5           GCM_ATTRIB_OUTPUT_MASK_TEX5
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX6           (1<<20)
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX7           (1<<21)
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX8           GCM_ATTRIB_OUTPUT_MASK_TEX8
+#define CELL_GCM_ATTRIB_OUTPUT_MASK_TEX9           GCM_ATTRIB_OUTPUT_MASK_TEX9
+
+/* Conditional render / z-pass-pixel-count report tag
+ * (cellGcmSetRenderEnable / cellGcmSetReport / cellGcmSetClearReport). */
+#define CELL_GCM_CONDITIONAL                     GCM_CONDITIONAL
+#define CELL_GCM_ZPASS_PIXEL_CNT                 GCM_ZPASS_PIXEL_CNT
+
+/* Compression-mode tag (cellGcmSetTileInfo extra). */
+#define CELL_GCM_COMPMODE_C32_2X2                GCM_COMPMODE_C32_2X2
+
+/* Texture unsigned-remap tag (cellGcmSetTextureAddress). The reference
+ * SDK adds a BIASED sampling mode the PSL1GHT enum doesn't name; the
+ * NV40 register encodes it as bit 1 set, NORMAL is 0, FORCE is 1. */
+#ifndef CELL_GCM_TEXTURE_UNSIGNED_REMAP_BIASED
+#define CELL_GCM_TEXTURE_UNSIGNED_REMAP_BIASED   2
+#endif
 
 #ifdef __cplusplus
 }

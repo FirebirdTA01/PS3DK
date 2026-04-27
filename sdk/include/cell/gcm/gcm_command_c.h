@@ -517,6 +517,175 @@ static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
 	                    width, height, bytesPerPixel);
 }
 
+/* ==========================================================
+ * Stencil — front + two-sided.  Reference SDK names map 1:1
+ * onto the rsx* low-level emitters.
+ * ========================================================== */
+
+static inline void cellGcmSetStencilTestEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetStencilTestEnable(thisContext, enable);
+}
+
+static inline void cellGcmSetTwoSidedStencilTestEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetTwoSidedStencilTestEnable(thisContext, enable);
+}
+
+static inline void cellGcmSetStencilFunc(CellGcmContextData *thisContext,
+                                         uint32_t func, int32_t ref, uint32_t mask)
+{
+	rsxSetStencilFunc(thisContext, func, ref, mask);
+}
+
+static inline void cellGcmSetStencilOp(CellGcmContextData *thisContext,
+                                       uint32_t fail, uint32_t zfail, uint32_t zpass)
+{
+	rsxSetStencilOp(thisContext, fail, zfail, zpass);
+}
+
+static inline void cellGcmSetStencilMask(CellGcmContextData *thisContext, uint32_t mask)
+{
+	rsxSetStencilMask(thisContext, mask);
+}
+
+static inline void cellGcmSetBackStencilFunc(CellGcmContextData *thisContext,
+                                             uint32_t func, int32_t ref, uint32_t mask)
+{
+	rsxSetBackStencilFunc(thisContext, func, ref, mask);
+}
+
+static inline void cellGcmSetBackStencilOp(CellGcmContextData *thisContext,
+                                           uint32_t fail, uint32_t zfail, uint32_t zpass)
+{
+	rsxSetBackStencilOp(thisContext, fail, zfail, zpass);
+}
+
+static inline void cellGcmSetBackStencilMask(CellGcmContextData *thisContext, uint32_t mask)
+{
+	rsxSetBackStencilMask(thisContext, mask);
+}
+
+/* ==========================================================
+ * Alpha test.
+ * ========================================================== */
+
+static inline void cellGcmSetAlphaTestEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetAlphaTestEnable(thisContext, enable);
+}
+
+static inline void cellGcmSetAlphaFunc(CellGcmContextData *thisContext, uint32_t func, uint32_t ref)
+{
+	rsxSetAlphaFunc(thisContext, func, ref);
+}
+
+/* ==========================================================
+ * Polygon offset / smoothing.
+ * ========================================================== */
+
+static inline void cellGcmSetPolygonOffsetFillEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetPolygonOffsetFillEnable(thisContext, enable);
+}
+
+static inline void cellGcmSetPolygonOffset(CellGcmContextData *thisContext,
+                                           float factor, float units)
+{
+	rsxSetPolygonOffset(thisContext, factor, units);
+}
+
+/* ==========================================================
+ * Frequency-divider operation — controls per-attribute frequency
+ * divisor mode.  Used by GPU skinning paths to bind joint-matrix
+ * arrays whose stride differs from the index stream.
+ * ========================================================== */
+
+static inline void cellGcmSetFrequencyDividerOperation(CellGcmContextData *thisContext, uint16_t op)
+{
+	rsxSetFrequencyDividerOperation(thisContext, op);
+}
+
+/* ==========================================================
+ * Fragment-program location update (forces a re-fetch of FP code
+ * from the new offset/location, used when patching FP at runtime).
+ * ========================================================== */
+
+static inline void cellGcmSetUpdateFragmentProgramParameter(CellGcmContextData *thisContext, uint32_t offset)
+{
+	rsxUpdateFragmentProgramLocation(thisContext, offset, GCM_LOCATION_RSX);
+}
+
+/* ==========================================================
+ * Z-cull / S-cull surface controls + invalidate.
+ * ========================================================== */
+
+static inline void cellGcmSetInvalidateZcull(CellGcmContextData *thisContext)
+{
+	rsxSetZCullInvalidate(thisContext);
+}
+
+static inline void cellGcmSetZcullControl(CellGcmContextData *thisContext, uint8_t cullDir, uint8_t cullFmt)
+{
+	rsxSetZCullControl(thisContext, cullDir, cullFmt);
+}
+
+static inline void cellGcmSetZcullEnable(CellGcmContextData *thisContext,
+                                         uint32_t depth, uint32_t stencil)
+{
+	rsxSetZCullEnable(thisContext, depth, stencil);
+}
+
+static inline void cellGcmSetScullControl(CellGcmContextData *thisContext,
+                                          uint16_t func, uint8_t ref, uint8_t mask)
+{
+	rsxSetSCullControl(thisContext, func, ref, mask);
+}
+
+/* ==========================================================
+ * Conditional / Z-pass-pixel-count rendering — predicated draws
+ * via the report register.
+ * ========================================================== */
+
+static inline void cellGcmSetRenderEnable(CellGcmContextData *thisContext,
+                                          uint32_t enable, uint32_t offset)
+{
+	rsxSetRenderEnable(thisContext, enable, offset);
+}
+
+static inline void cellGcmSetZpassPixelCountEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetZPixelCountEnable(thisContext, enable);
+}
+
+static inline void cellGcmSetReport(CellGcmContextData *thisContext, uint8_t type, uint32_t index)
+{
+	rsxSetReport(thisContext, type, index);
+}
+
+static inline void cellGcmSetClearReport(CellGcmContextData *thisContext, uint8_t type)
+{
+	rsxSetClearReport(thisContext, type);
+}
+
+/* ==========================================================
+ * Control register accessor — exposes PUT/GET/REF for the FIFO.
+ * ========================================================== */
+
+typedef gcmControlRegister CellGcmControl;
+
+static inline CellGcmControl *cellGcmGetControlRegister(void)
+{
+	return (CellGcmControl *)gcmGetControlRegister();
+}
+
+/* ==========================================================
+ * Generic enum-typed POD (used by cell-SDK source where the
+ * type-tag arg's expected width is opaque).  uint8_t matches the
+ * NV40 packet field width and the rsx* signatures we forward to.
+ * ========================================================== */
+typedef uint8_t CellGcmEnum;
+
 #ifdef __cplusplus
 }
 #endif
