@@ -155,6 +155,91 @@ static inline int32_t cellVideoOutGetResolutionAvailability(uint32_t videoOut,
                                                    aspect, option);
 }
 
+/* ---- late-SDK additions ------------------------------------------- *
+ * The five forwarders above resolve through PSL1GHT's video* shim;
+ * the entry points below have no PSL1GHT counterpart and resolve
+ * directly to libsysutil_stub.a (cellSysutil PRX). */
+
+#define CELL_VIDEO_OUT_PORT_NONE           0x00
+#define CELL_VIDEO_OUT_PORT_HDMI           0x01
+#define CELL_VIDEO_OUT_PORT_NETWORK        0x41
+#define CELL_VIDEO_OUT_PORT_COMPOSITE_S    0x81
+#define CELL_VIDEO_OUT_PORT_D              0x82
+#define CELL_VIDEO_OUT_PORT_COMPONENT      0x83
+#define CELL_VIDEO_OUT_PORT_RGB            0x84
+#define CELL_VIDEO_OUT_PORT_AVMULTI_SCART  0x85
+#define CELL_VIDEO_OUT_PORT_DSUB           0x86
+
+#define CELL_VIDEO_OUT_EVENT_DEVICE_CHANGED        0
+#define CELL_VIDEO_OUT_EVENT_OUTPUT_DISABLED       1
+#define CELL_VIDEO_OUT_EVENT_DEVICE_AUTHENTICATED  2
+#define CELL_VIDEO_OUT_EVENT_OUTPUT_ENABLED        3
+
+#define CELL_VIDEO_OUT_RGB_OUTPUT_RANGE_LIMITED  0
+#define CELL_VIDEO_OUT_RGB_OUTPUT_RANGE_FULL     1
+
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_UNDEFINED      0
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_480I_59_94HZ   1
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_576I_50HZ      2
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_480P_59_94HZ   3
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_576P_50HZ      4
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_1080I_59_94HZ  5
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_720P_59_94HZ   7
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_1080P_59_94HZ  9
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_WXGA_60HZ      11
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_SXGA_60HZ      12
+#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_WUXGA_60HZ     13
+
+typedef struct _cellVideoOutColorInfo {
+    uint16_t  redX;
+    uint16_t  redY;
+    uint16_t  greenX;
+    uint16_t  greenY;
+    uint16_t  blueX;
+    uint16_t  blueY;
+    uint16_t  whiteX;
+    uint16_t  whiteY;
+    uint32_t  gamma;
+} CellVideoOutColorInfo;
+
+typedef struct _cellVideoOutKSVList {
+    uint8_t   ksv[32 * 5];
+    uint8_t   reserved[4];
+    uint32_t  count;
+} CellVideoOutKSVList;
+
+typedef struct _cellVideoOutDeviceInfo {
+    uint8_t                  portType;
+    uint8_t                  colorSpace;
+    uint16_t                 latency;
+    uint8_t                  availableModeCount;
+    uint8_t                  state;
+    uint8_t                  rgbOutputRange;
+    uint8_t                  reserved[5];
+    CellVideoOutColorInfo    colorInfo;
+    CellVideoOutDisplayMode  availableModes[32];
+    CellVideoOutKSVList      ksvList;
+} CellVideoOutDeviceInfo;
+
+typedef int (*CellVideoOutCallback)(uint32_t slot,
+                                    uint32_t videoOut,
+                                    uint32_t deviceIndex,
+                                    uint32_t event,
+                                    CellVideoOutDeviceInfo *info,
+                                    void *userData);
+
+extern int cellVideoOutGetNumberOfDevice(uint32_t videoOut);
+extern int cellVideoOutGetDeviceInfo(uint32_t videoOut,
+                                     uint32_t deviceIndex,
+                                     CellVideoOutDeviceInfo *info);
+extern int cellVideoOutRegisterCallback(uint32_t slot,
+                                        CellVideoOutCallback function,
+                                        void *userData);
+extern int cellVideoOutUnregisterCallback(uint32_t slot);
+extern int cellVideoOutDebugSetMonitorType(uint32_t videoOut,
+                                           uint32_t monitorType);
+extern int cellVideoOutGetConvertCursorColorInfo(uint8_t *rgbOutputRange);
+
 #ifdef __cplusplus
 }
 #endif

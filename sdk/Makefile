@@ -55,6 +55,16 @@ HEADERS := \
     include/cell/sysutil_savedata.h \
     include/cell/sysutil_gamecontent.h \
     include/cell/sysutil_screenshot.h \
+    include/cell/sysutil_oskdialog.h \
+    include/cell/sysutil_bgmplayback.h \
+    include/cell/sysutil_syscache.h \
+    include/cell/sysutil_sysconf.h \
+    include/cell/sysutil_storagedata.h \
+    include/cell/sysutil_avc.h \
+    include/cell/sysutil_game_internal.h \
+    include/cell/rtc.h \
+    include/cell/sync.h \
+    include/cell/sync2.h \
     include/cell/sysutil_ap.h \
     include/cell/audio.h \
     include/cell/pngdec.h \

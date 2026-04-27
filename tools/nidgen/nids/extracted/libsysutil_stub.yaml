@@ -1,6 +1,7 @@
 library: cellSysutil
 version: 1
 module: cellSysutil
+archive_name: sysutil
 exports:
 - name: cellAudioOutConfigure
   nid: '0x4692ab35'
