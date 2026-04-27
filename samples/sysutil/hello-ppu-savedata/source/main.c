@@ -1,5 +1,5 @@
 /*
- * hello-ppu-savedata — cellSaveDataAutoSave2 smoke test.
+ * hello-ppu-savedata — cellSaveDataAutoSave2 validation test.
  *
  * Writes a 256-byte "save" into a fixed directory, using the full
  * CellSaveDataSetBuf / CellSaveDataStatSet / CellSaveDataFileSet
@@ -60,7 +60,7 @@ static void on_stat(CellSaveDataCBResult *cbResult,
 	CellSaveDataSystemFileParam *param = &get->getParam;
 	strncpy(param->title,    "hello-ppu-savedata",
 	        sizeof(param->title) - 1);
-	strncpy(param->subTitle, "savedata smoke test",
+	strncpy(param->subTitle, "savedata validation",
 	        sizeof(param->subTitle) - 1);
 	strncpy(param->detail,   "256 bytes of deterministic payload written by cellSaveDataAutoSave2",
 	        sizeof(param->detail) - 1);

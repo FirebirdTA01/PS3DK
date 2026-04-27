@@ -534,6 +534,201 @@ static inline int cellSaveDataDelete2(sys_memory_container_t container) {
 	return (int)sysSaveDelete2(container);
 }
 
+/* ============================================================
+ * Direct externs.  All entry points below resolve via the
+ * libsysutil_savedata_extra_stub.a (cellSysutil-module FNIDs) and
+ * libsysutil_savedata_stub.a (cellSaveData-module FNIDs) emitted
+ * by `nidgen archive` from the matching YAMLs.
+ *
+ * Link with `-lsysutil_savedata_stub -lsysutil_savedata_extra_stub`.
+ * ============================================================ */
+
+/* CellSysutilUserId comes from cell/sysutil.h.  Forward-declared as
+ * the underlying uint32 to avoid pulling the whole sysutil header in
+ * for callers that only want the savedata surface. */
+#ifndef _CELL_SYSUTIL_USER_ID_T_DEFINED
+#define _CELL_SYSUTIL_USER_ID_T_DEFINED
+typedef unsigned int CellSysutilUserId;
+#endif
+
+/* Legacy v1 entry points.  Sony stripped these from the 475 reference
+ * header but the SPRX still exports the FNIDs.  Old-style empty-paren
+ * declarations because the v1 argument shapes were never documented in
+ * the public surface; downstreams that need them call by hand-rolled
+ * matching prototypes. */
+int cellSaveDataAutoLoad();
+int cellSaveDataAutoSave();
+int cellSaveDataListLoad();
+int cellSaveDataListSave();
+int cellSaveDataFixedLoad();
+int cellSaveDataFixedSave();
+int cellSaveDataDelete();
+
+/* Documented entry points missing from PSL1GHT's surface. */
+void cellSaveDataEnableOverlay(int enable);
+
+int cellSaveDataFixedDelete(CellSaveDataSetList *setList,
+                            CellSaveDataSetBuf *setBuf,
+                            CellSaveDataFixedCallback funcFixed,
+                            CellSaveDataDoneCallback funcDone,
+                            sys_memory_container_t container,
+                            void *userdata);
+
+int cellSaveDataListDelete(CellSaveDataSetList *setList,
+                           CellSaveDataSetBuf *setBuf,
+                           CellSaveDataListCallback funcList,
+                           CellSaveDataDoneCallback funcDone,
+                           sys_memory_container_t container,
+                           void *userdata);
+
+int cellSaveDataListImport(CellSaveDataSetList *setList,
+                           unsigned int maxSizeKB,
+                           CellSaveDataDoneCallback funcDone,
+                           sys_memory_container_t container,
+                           void *userdata);
+int cellSaveDataListExport(CellSaveDataSetList *setList,
+                           unsigned int maxSizeKB,
+                           CellSaveDataDoneCallback funcDone,
+                           sys_memory_container_t container,
+                           void *userdata);
+int cellSaveDataFixedImport(const char *dirName,
+                            unsigned int maxSizeKB,
+                            CellSaveDataDoneCallback funcDone,
+                            sys_memory_container_t container,
+                            void *userdata);
+int cellSaveDataFixedExport(const char *dirName,
+                            unsigned int maxSizeKB,
+                            CellSaveDataDoneCallback funcDone,
+                            sys_memory_container_t container,
+                            void *userdata);
+
+int cellSaveDataGetListItem(const char *dirName,
+                            CellSaveDataDirStat *dir,
+                            CellSaveDataSystemFileParam *sysFileParam,
+                            unsigned int *bind,
+                            int *sizeKB);
+
+/* Per-user (PSN-account-scoped) variants. */
+int cellSaveDataUserListSave(unsigned int version,
+                             CellSysutilUserId userId,
+                             CellSaveDataSetList *setList,
+                             CellSaveDataSetBuf *setBuf,
+                             CellSaveDataListCallback funcList,
+                             CellSaveDataStatCallback funcStat,
+                             CellSaveDataFileCallback funcFile,
+                             sys_memory_container_t container,
+                             void *userdata);
+int cellSaveDataUserListLoad(unsigned int version,
+                             CellSysutilUserId userId,
+                             CellSaveDataSetList *setList,
+                             CellSaveDataSetBuf *setBuf,
+                             CellSaveDataListCallback funcList,
+                             CellSaveDataStatCallback funcStat,
+                             CellSaveDataFileCallback funcFile,
+                             sys_memory_container_t container,
+                             void *userdata);
+int cellSaveDataUserFixedSave(unsigned int version,
+                              CellSysutilUserId userId,
+                              CellSaveDataSetList *setList,
+                              CellSaveDataSetBuf *setBuf,
+                              CellSaveDataFixedCallback funcFixed,
+                              CellSaveDataStatCallback funcStat,
+                              CellSaveDataFileCallback funcFile,
+                              sys_memory_container_t container,
+                              void *userdata);
+int cellSaveDataUserFixedLoad(unsigned int version,
+                              CellSysutilUserId userId,
+                              CellSaveDataSetList *setList,
+                              CellSaveDataSetBuf *setBuf,
+                              CellSaveDataFixedCallback funcFixed,
+                              CellSaveDataStatCallback funcStat,
+                              CellSaveDataFileCallback funcFile,
+                              sys_memory_container_t container,
+                              void *userdata);
+int cellSaveDataUserAutoSave(unsigned int version,
+                             CellSysutilUserId userId,
+                             const char *dirName,
+                             unsigned int errDialog,
+                             CellSaveDataSetBuf *setBuf,
+                             CellSaveDataStatCallback funcStat,
+                             CellSaveDataFileCallback funcFile,
+                             sys_memory_container_t container,
+                             void *userdata);
+int cellSaveDataUserAutoLoad(unsigned int version,
+                             CellSysutilUserId userId,
+                             const char *dirName,
+                             unsigned int errDialog,
+                             CellSaveDataSetBuf *setBuf,
+                             CellSaveDataStatCallback funcStat,
+                             CellSaveDataFileCallback funcFile,
+                             sys_memory_container_t container,
+                             void *userdata);
+int cellSaveDataUserListAutoSave(unsigned int version,
+                                 CellSysutilUserId userId,
+                                 unsigned int errDialog,
+                                 CellSaveDataSetList *setList,
+                                 CellSaveDataSetBuf *setBuf,
+                                 CellSaveDataFixedCallback funcFixed,
+                                 CellSaveDataStatCallback funcStat,
+                                 CellSaveDataFileCallback funcFile,
+                                 sys_memory_container_t container,
+                                 void *userdata);
+int cellSaveDataUserListAutoLoad(unsigned int version,
+                                 CellSysutilUserId userId,
+                                 unsigned int errDialog,
+                                 CellSaveDataSetList *setList,
+                                 CellSaveDataSetBuf *setBuf,
+                                 CellSaveDataFixedCallback funcFixed,
+                                 CellSaveDataStatCallback funcStat,
+                                 CellSaveDataFileCallback funcFile,
+                                 sys_memory_container_t container,
+                                 void *userdata);
+int cellSaveDataUserFixedDelete(CellSysutilUserId userId,
+                                CellSaveDataSetList *setList,
+                                CellSaveDataSetBuf *setBuf,
+                                CellSaveDataFixedCallback funcFixed,
+                                CellSaveDataDoneCallback funcDone,
+                                sys_memory_container_t container,
+                                void *userdata);
+
+int cellSaveDataUserListDelete(CellSysutilUserId userId,
+                               CellSaveDataSetList *setList,
+                               CellSaveDataSetBuf *setBuf,
+                               CellSaveDataListCallback funcList,
+                               CellSaveDataDoneCallback funcDone,
+                               sys_memory_container_t container,
+                               void *userdata);
+int cellSaveDataUserListImport(CellSysutilUserId userId,
+                               CellSaveDataSetList *setList,
+                               unsigned int maxSizeKB,
+                               CellSaveDataDoneCallback funcDone,
+                               sys_memory_container_t container,
+                               void *userdata);
+int cellSaveDataUserListExport(CellSysutilUserId userId,
+                               CellSaveDataSetList *setList,
+                               unsigned int maxSizeKB,
+                               CellSaveDataDoneCallback funcDone,
+                               sys_memory_container_t container,
+                               void *userdata);
+int cellSaveDataUserFixedImport(CellSysutilUserId userId,
+                                const char *dirName,
+                                unsigned int maxSizeKB,
+                                CellSaveDataDoneCallback funcDone,
+                                sys_memory_container_t container,
+                                void *userdata);
+int cellSaveDataUserFixedExport(CellSysutilUserId userId,
+                                const char *dirName,
+                                unsigned int maxSizeKB,
+                                CellSaveDataDoneCallback funcDone,
+                                sys_memory_container_t container,
+                                void *userdata);
+int cellSaveDataUserGetListItem(CellSysutilUserId userId,
+                                const char *dirName,
+                                CellSaveDataDirStat *dir,
+                                CellSaveDataSystemFileParam *sysFileParam,
+                                unsigned int *bind,
+                                int *sizeKB);
+
 #ifdef __cplusplus
 }
 #endif
