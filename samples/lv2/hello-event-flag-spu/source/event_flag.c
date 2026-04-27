@@ -124,6 +124,10 @@ int main(int argc, char *argv[])
     }
 
     /* ----- bring up the SPU side ----------------------------------- */
+    /* Equivalent reference-SDK spelling lives in <sys/spu_initialize.h>:
+     *   rc = sys_spu_initialize(6, 0);
+     * Both bind to syscall 169; pick whichever matches the surrounding
+     * naming style. */
     rc = sysSpuInitialize(/*max_usable_spu=*/6, /*max_raw_spu=*/0);
     if (rc != CELL_OK && rc != (int)0x80010030 /* already initialised */) {
         fprintf(stderr, "sysSpuInitialize failed: 0x%08x\n", (unsigned)rc);

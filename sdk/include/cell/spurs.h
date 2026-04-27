@@ -16,5 +16,13 @@
 #include <cell/spurs/event_flag.h>
 #include <cell/spurs/queue.h>
 #include <cell/spurs/semaphore.h>
+#include <cell/spurs/exception_types.h>
+#include <cell/spurs/version.h>
+#include <cell/spurs/error.h>
+#include <cell/spurs/job_commands.h>
+#include <cell/spurs/job_descriptor.h>
+#include <cell/spurs/job_guard.h>
+#include <cell/spurs/job_chain_types.h>
+#include <cell/spurs/job_chain.h>
 
 #endif /* __PS3DK_CELL_SPURS_H__ */
