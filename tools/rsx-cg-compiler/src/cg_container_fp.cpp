@@ -186,7 +186,7 @@ ContainerResult emitFragmentContainer(
         uint32_t    var;
         uint32_t    direction;
         uint32_t    paramno;
-        uint32_t    isReferenced = 1;
+        uint32_t    isReferenced = 0;
         // Set by the FP-uniform pass below.  When non-empty, the
         // string-region layout emits a CgBinaryEmbeddedConstant
         // record right after the semantic (or at the start of the
@@ -254,6 +254,12 @@ ContainerResult emitFragmentContainer(
             d.direction = isOut ? kCgOut : kCgIn;
             d.res       = fpResourceFor(toUpper(p.semanticName), p.semanticIndex);
         }
+        // isReferenced reflects whether the IR actually consumes the
+        // param.  Synthesised inside emitFragmentProgramEx by walking
+        // every instruction's operand list; `out` params are added
+        // unconditionally (StoreOutput keys off semantic, not operand).
+        d.isReferenced = attrs.referencedParamIndices.count(
+                             static_cast<unsigned>(i)) ? 1u : 0u;
         params.push_back(d);
     }
 

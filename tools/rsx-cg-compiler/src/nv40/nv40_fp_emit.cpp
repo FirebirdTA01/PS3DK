@@ -454,6 +454,35 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             valueToInputSrc[param.valueId] = srcCode;
     }
 
+    // Determine which entry parameters are actually consumed by the
+    // IR.  A param is "referenced" iff its IR valueId appears as an
+    // operand of any instruction in the function.  `out` / `inout`
+    // params are always referenced (StoreOutput consumes them by
+    // semantic, not as an operand).  Mirrors the reference compiler:
+    // a varying or uniform that's declared but never read drops to
+    // isReferenced=0 in the parameter table.
+    {
+        std::unordered_set<IRValueID> usedValueIds;
+        for (const auto& blockPtr : entry.blocks)
+        {
+            if (!blockPtr) continue;
+            for (const auto& instPtr : blockPtr->instructions)
+            {
+                if (!instPtr) continue;
+                for (IRValueID id : instPtr->operands)
+                    usedValueIds.insert(id);
+            }
+        }
+        for (size_t pi = 0; pi < entry.parameters.size(); ++pi)
+        {
+            const auto& p = entry.parameters[pi];
+            const bool isOut = (p.storage == StorageQualifier::Out ||
+                                p.storage == StorageQualifier::InOut);
+            if (isOut || usedValueIds.count(p.valueId))
+                attrs.referencedParamIndices.insert(static_cast<unsigned>(pi));
+        }
+    }
+
     bool emittedSomething = false;
 
     for (const auto& blockPtr : entry.blocks)
