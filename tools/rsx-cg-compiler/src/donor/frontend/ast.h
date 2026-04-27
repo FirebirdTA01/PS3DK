@@ -46,6 +46,12 @@ struct Semantic
     std::string name;      // e.g., "POSITION", "TEXCOORD", "COLOR" — digit suffix stripped
     std::string rawName;   // original source spelling, e.g., "TEXCOORD0" — preserved for byte-exact .vpo/.fpo emit
     int index = 0;         // e.g., 0 for TEXCOORD0, 1 for TEXCOORD1
+    // True when assigned by the front-end's default-binding pass for an
+    // entry-point parameter the user left unbound. The reference compiler
+    // resolves the resource code (e.g. TEXCOORD0 → 0x0c94) but writes a
+    // *zero* semantic-string offset into the .fpo/.vpo container — the
+    // container emitter consults this flag to suppress the string.
+    bool inferred = false;
 
     bool isEmpty() const { return name.empty(); }
 };
