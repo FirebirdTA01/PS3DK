@@ -64,6 +64,7 @@ HEADERS := \
     include/cell/sysutil_game_internal.h \
     include/cell/rtc.h \
     include/cell/sync.h \
+    include/cell/sync/barrier.h \
     include/cell/sync2.h \
     include/cell/sysutil_ap.h \
     include/cell/audio.h \
@@ -86,16 +87,29 @@ HEADERS := \
     include/cell/spurs/event_flag.h \
     include/cell/spurs/queue.h \
     include/cell/spurs/semaphore.h \
+    include/cell/spurs/exception_types.h \
+    include/cell/spurs/version.h \
+    include/cell/spurs/error.h \
+    include/cell/spurs/job_commands.h \
+    include/cell/spurs/job_descriptor.h \
+    include/cell/spurs/job_guard.h \
+    include/cell/spurs/job_chain_types.h \
+    include/cell/spurs/job_chain.h \
+    include/sys/spu_initialize.h \
     include/sys/spu_thread.h \
     include/sys/spu_thread_group.h \
+    include/sys/spu_utility.h \
     include/spu_printf.h \
     include/simdmath.h \
+    include/sdk_version.h \
+    include/vectormath/cpp/vectormath_soa.h \
     include/sys/cdefs.h \
     include/sys/event.h \
     include/sys/sce_cdefs.h \
     include/sysutil/sysutil_common.h \
     include/cell/keyboard.h \
-    include/cell/mouse.h
+    include/cell/mouse.h \
+    include/cell/padfilter.h
 
 SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread
 
