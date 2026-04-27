@@ -57,26 +57,64 @@ IRBasicBlock* findBlock(IRFunction& fn, const std::string& name)
     return nullptr;
 }
 
-// A block has exactly one non-terminator StoreOutput and then an
-// unconditional Branch to `expectedJoin`.  Returns the StoreOutput
-// instruction pointer iff the shape matches; otherwise nullptr.
+// True for IR ops that are pure (no side effects, no memory / I/O)
+// and therefore safe to hoist out of a conditional arm into the
+// preceding entry block: they will run unconditionally instead of
+// only when the predicate fires, but their result is the same in
+// either case.  Restricted set today — extend as new shapes need it.
+bool isHoistableOp(IROp op)
+{
+    switch (op)
+    {
+    case IROp::Const:
+    case IROp::VecConstruct:
+    case IROp::VecExtract:
+    case IROp::VecShuffle:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// A block has up to N hoistable instructions, then a single
+// non-terminator StoreOutput, then an unconditional Branch to
+// `expectedJoin`.  When the shape matches, returns the StoreOutput
+// pointer and pushes any pre-stout hoistables (in order) into
+// `outHoistable`; otherwise returns nullptr.  The 2-instruction
+// case (stout + br only, no hoistables) is the original
+// matchSingleStoutThenBranch shape preserved verbatim.
 IRInstruction* matchSingleStoutThenBranch(IRBasicBlock* block,
-                                          IRBasicBlock* expectedJoin)
+                                          IRBasicBlock* expectedJoin,
+                                          std::vector<IRInstruction*>* outHoistable = nullptr)
 {
     if (!block) return nullptr;
-    if (block->instructions.size() != 2) return nullptr;
+    if (block->instructions.size() < 2) return nullptr;
 
-    IRInstruction* stout = block->instructions[0].get();
-    IRInstruction* term  = block->instructions[1].get();
-    if (!stout || !term) return nullptr;
-    if (stout->op != IROp::StoreOutput) return nullptr;
-    if (stout->operands.size() != 1) return nullptr;
-    if (term->op != IROp::Branch) return nullptr;
-
-    // CFG successor check — the Branch must point at the expected join.
+    // Last instruction must be the unconditional Branch to the join.
+    IRInstruction* term = block->instructions.back().get();
+    if (!term || term->op != IROp::Branch) return nullptr;
     if (block->successors.size() != 1) return nullptr;
     if (block->successors[0] != expectedJoin) return nullptr;
 
+    // Second-to-last must be the StoreOutput.
+    const size_t stoutIdx = block->instructions.size() - 2;
+    IRInstruction* stout  = block->instructions[stoutIdx].get();
+    if (!stout || stout->op != IROp::StoreOutput) return nullptr;
+    if (stout->operands.size() != 1) return nullptr;
+
+    // Anything between block start and the stout must be hoistable.
+    for (size_t i = 0; i < stoutIdx; ++i)
+    {
+        IRInstruction* p = block->instructions[i].get();
+        if (!p || !isHoistableOp(p->op)) return nullptr;
+    }
+
+    if (outHoistable)
+    {
+        outHoistable->clear();
+        for (size_t i = 0; i < stoutIdx; ++i)
+            outHoistable->push_back(block->instructions[i].get());
+    }
     return stout;
 }
 
@@ -190,8 +228,11 @@ bool tryConvertBlock(IRFunction& fn,
 
     if (joinBlock && isReturnOnly(joinBlock))
     {
-        IRInstruction* thenStout = matchSingleStoutThenBranch(thenBlock,  joinBlock);
-        IRInstruction* elseStout = matchSingleStoutThenBranch(falseTarget, joinBlock);
+        std::vector<IRInstruction*> thenHoistable, elseHoistable;
+        IRInstruction* thenStout =
+            matchSingleStoutThenBranch(thenBlock,  joinBlock, &thenHoistable);
+        IRInstruction* elseStout =
+            matchSingleStoutThenBranch(falseTarget, joinBlock, &elseHoistable);
         if (thenStout && elseStout && sameSemantic(thenStout, elseStout))
         {
             IRValueID trueVal  = thenStout->operands[0];
@@ -199,6 +240,29 @@ bool tryConvertBlock(IRFunction& fn,
 
             // Pop the CondBranch (last instruction of entry).
             entry->instructions.pop_back();
+
+            // Hoist any pre-stout pure ops from the THEN/ELSE arms
+            // into entry before synthesising the Select.  These ran
+            // conditionally inside the arm; running them
+            // unconditionally is safe because isHoistableOp restricts
+            // the set to side-effect-free instructions.  Steal the
+            // unique_ptr from each arm's vector so the IRInstruction
+            // owners get re-rooted under entry.
+            auto stealPreStout = [](IRBasicBlock* arm,
+                                    IRBasicBlock* dst,
+                                    size_t hoistableCount)
+            {
+                for (size_t i = 0; i < hoistableCount; ++i)
+                {
+                    dst->addInstruction(std::move(arm->instructions[i]));
+                }
+                arm->instructions.erase(
+                    arm->instructions.begin(),
+                    arm->instructions.begin() +
+                        static_cast<std::ptrdiff_t>(hoistableCount));
+            };
+            stealPreStout(thenBlock,   entry, thenHoistable.size());
+            stealPreStout(falseTarget, entry, elseHoistable.size());
 
             // %sel = select %cond ? %trueVal : %falseVal — pick the
             // result type from the value map, not the StoreOutput
