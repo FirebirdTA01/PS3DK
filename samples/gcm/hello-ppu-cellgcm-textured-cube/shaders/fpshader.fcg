@@ -1,0 +1,11 @@
+// hello-ppu-cellgcm-textured-cube — fragment program.
+//
+// Samples a 2D texture from TEXUNIT0 at the interpolated UV.
+
+void main(
+    float2 in_texcoord    : TEXCOORD0,
+    uniform sampler2D tex,
+    out   float4 out_color : COLOR)
+{
+    out_color = tex2D(tex, in_texcoord);
+}

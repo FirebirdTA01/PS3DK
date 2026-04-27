@@ -101,15 +101,32 @@ static volatile u32 g_buffer_flipped    = 0;
 static volatile u32 g_on_flip           = 0;
 static u32          g_frame_index       = 0;
 
-/* Sysutil exit signal. */
-static volatile int g_exit_request = 0;
+/* Sysutil event signals. DRAWING_PAUSED is set while the XMB is rendering
+ * its overlay (between DRAWING_BEGIN and DRAWING_END / SYSTEM_MENU_CLOSE).
+ * Apps that keep emitting draw commands while the overlay is up race the
+ * XMB for the FIFO and visibly stutter on PS-button menu navigation. */
+static volatile int g_exit_request   = 0;
+static volatile int g_drawing_paused = 0;
 
 static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
 {
 	(void)param;
 	(void)userdata;
-	if (status == CELL_SYSUTIL_REQUEST_EXITGAME)
+	switch (status) {
+	case CELL_SYSUTIL_REQUEST_EXITGAME:
 		g_exit_request = 1;
+		break;
+	case CELL_SYSUTIL_DRAWING_BEGIN:
+	case CELL_SYSUTIL_SYSTEM_MENU_OPEN:
+		g_drawing_paused = 1;
+		break;
+	case CELL_SYSUTIL_DRAWING_END:
+	case CELL_SYSUTIL_SYSTEM_MENU_CLOSE:
+		g_drawing_paused = 0;
+		break;
+	default:
+		break;
+	}
 }
 
 /* ----------------------------------------------------------------
@@ -411,6 +428,14 @@ int main(int argc, const char **argv)
 					break;
 				}
 			}
+		}
+
+		/* Yield the FIFO to the XMB while it owns the overlay. usleep
+		 * matches a vblank interval so we still service callbacks and
+		 * pad input promptly when the overlay closes. */
+		if (g_drawing_paused) {
+			usleep(16000);
+			continue;
 		}
 
 		cellGcmSetClearColor(ctx, 0xff404040);

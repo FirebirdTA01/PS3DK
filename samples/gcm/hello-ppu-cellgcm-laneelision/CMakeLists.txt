@@ -17,7 +17,7 @@ target_link_libraries(hello-ppu-cellgcm-laneelision PRIVATE
     gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m
 )
 
-ps3_add_cg_shader(hello-ppu-cellgcm-laneelision shaders/vpshader.vcg)
-ps3_add_cg_shader(hello-ppu-cellgcm-laneelision shaders/fpshader.fcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-laneelision shaders/vpshader.vcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-laneelision shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-cellgcm-laneelision)

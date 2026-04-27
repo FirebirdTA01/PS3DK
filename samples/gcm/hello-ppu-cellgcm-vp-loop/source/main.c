@@ -1,31 +1,28 @@
 /*
- * hello-ppu-cellgcm-laneelision — rsx-cg-compiler 3-unique-values
- * lane-elision validation test.
+ * hello-ppu-cellgcm-vp-loop — basic GCM flip_immediate demo.
  *
- * Same render plumbing as hello-ppu-cellgcm-loops (flip_immediate,
- * 4 colour buffers, MVP-uniform VP) — the new ground covered lives
- * in shaders/fpshader.fcg, where StoreOutput is now
- * `float4(3*vcol.x, 0.2, 0.4, 1.0)`.  Three distinct non-zero floats
- * across the non-scaled lanes drive the const-packing algorithm in
- * the lane-elision emitter at its widest: each unique value lands in
- * its own inline slot, with SRC0 swizzle .xxyz reading them out in
- * order.
+ * Puts .cg vertex + fragment shaders through our toolchain end-to-end:
  *
- * Compiler features exercised (incremental over hello-ppu-cellgcm-
- * loops, which used the simpler 2-unique-values pattern):
+ *   .cg source
+ *     -> cgcomp (PSL1GHT cgcomp + libCg)
+ *     -> .vpo / .fpo binary (NV40 + container)
+ *     -> bin2s + as -> .o
+ *     -> linked into PPU ELF
+ *     -> loaded at runtime via rsxLoadVertexProgram /
+ *        rsxLoadFragmentProgramLocation
+ *     -> RSX renders a triangle on screen
  *
- *   - static for-loop unroll
- *   - CSE on repeated swizzle reads
- *   - 0+x algebraic simplification
- *   - repeated-add scalar-lane scale fold (3*x)
- *   - VecConstruct lane-elision MOVR with 3-unique-values packing
+ * Flip protocol follows the canonical flip_immediate pattern:
+ *   - 4 colour buffers, queue depth 1 (PPU never more than 1 frame ahead)
+ *   - cellGcmSetPrepareFlip + WriteBackEndLabel + Flush + label-based
+ *     PPU/GPU sync (cellGcmSetWaitLabel / cellGcmSetWriteCommandLabel)
+ *   - VBlank handler reads the prepared-buffer label and issues
+ *     cellGcmSetFlipImmediate; flip handler clears buffer-busy state
+ *   - HSYNC flip mode
  *
- * The byte-diff harness at tools/rsx-cg-compiler/tests/run_diff.sh
- * proves our compiler's output matches sce-cgc.  This sample proves
- * those bytes execute correctly on RSX: the triangle's R channel
- * carries the tripled-and-clamped vertex.r (1.0 at top → 0.0 at the
- * lower corners), with a uniform teal-blue tint (G=0.2, B=0.4)
- * everywhere from the const-MOV step.
+ * cellGcmSetFlip (without these handlers) is non-standard — no
+ * canonical sample uses it.  Using it here desyncs the FIFO after the
+ * first frame because the PUT/GET handshake is missing.
  */
 
 #include <stdint.h>
@@ -42,7 +39,7 @@
 #include <io/pad.h>
 #include <cell/gcm.h>
 #include <cell/sysutil.h>
-#include <Cg/cg.h>
+#include <rsx/rsx.h>
 
 #include "vpshader_vpo.h"
 #include "fpshader_fpo.h"
@@ -87,19 +84,18 @@ static void *local_align(u32 alignment, u32 size)
 	return local_alloc(size);
 }
 
-/* Shader objects.  CgBinaryProgram blobs from rsx-cg-compiler's
- * --emit-container output — the cellGcmCg* / cellGcmSet* path
- * (mirrors what the reference SDK basic.cpp uses) is the matching
- * runtime API; PSL1GHT's rsxVertexProgramGetUCode would misparse the
- * Sony container header. */
-static CGprogram   vpo;
-static CGprogram   fpo;
-static void       *vp_ucode;
-static void       *fp_ucode;
-static u32         fp_offset;
-static CGparameter modelViewProjConst;
-static int         position_index;
-static int         color_index;
+/* Shader objects. */
+static rsxVertexProgram   *vpo;
+static rsxFragmentProgram *fpo;
+static void               *vp_ucode;
+static void               *fp_ucode;
+static u32                 fp_offset;
+static rsxProgramConst    *modelViewProjConst;
+static rsxProgramConst    *biasConst;
+static rsxProgramConst    *scaleConst;
+static rsxProgramConst    *rotConst;
+static rsxProgramConst    *tweakConst;
+static rsxProgramConst    *offsetConst;
 
 static vertex_t *vertex_buffer;
 static u32       vertex_buffer_offset;
@@ -110,10 +106,10 @@ static volatile u32 g_buffer_flipped    = 0;
 static volatile u32 g_on_flip           = 0;
 static u32          g_frame_index       = 0;
 
-/* Sysutil event signals. DRAWING_PAUSED is set while the XMB owns the
- * FIFO (between DRAWING_BEGIN and DRAWING_END / SYSTEM_MENU_CLOSE).
- * The render loop yields the FIFO while paused to avoid stuttering
- * PS-button menu navigation. */
+/* Sysutil event signals. DRAWING_PAUSED is set while the XMB is rendering
+ * its overlay (between DRAWING_BEGIN and DRAWING_END / SYSTEM_MENU_CLOSE).
+ * Apps that keep emitting draw commands while the overlay is up race the
+ * XMB for the FIFO and visibly stutter on PS-button menu navigation. */
 static volatile int g_exit_request   = 0;
 static volatile int g_drawing_paused = 0;
 
@@ -233,24 +229,43 @@ static void set_draw_env(CellGcmContextData *ctx)
 
 static void set_render_state(CellGcmContextData *ctx)
 {
-	static const float mvp[16] = {
+	/* Identity defaults for the four mat4 uniforms — visually a no-op
+	 * for position math, but each multiply still costs hardware
+	 * instructions in the compiled VP, which is what gets us past the
+	 * 7-instruction "rest" branch in LoadVertexProgramBlock and into
+	 * the count=4-per-instruction loop branch this sample exists to
+	 * exercise. */
+	static const float identity[16] = {
 		1, 0, 0, 0,
 		0, 1, 0, 0,
 		0, 0, 1, 0,
 		0, 0, 0, 1,
 	};
+	/* tweak.x = 1.0 → c.r/g/b * 1 (passthrough); .yzw = 0 → no per-
+	 * channel bias; offset.xyzw = 0 → no per-channel translation. The
+	 * vertex colours come through unchanged, so we keep the canonical
+	 * RGB-gradient triangle. */
+	static const float tweak[4]  = { 1.0f, 0.0f, 0.0f, 0.0f };
+	static const float offset[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-	cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
-	cellGcmSetVertexProgramParameter(ctx, modelViewProjConst, mvp);
+	rsxLoadVertexProgram(ctx, vpo, vp_ucode);
+	rsxSetVertexProgramParameter(ctx, vpo, modelViewProjConst, identity);
+	if (biasConst)   rsxSetVertexProgramParameter(ctx, vpo, biasConst,   identity);
+	if (scaleConst)  rsxSetVertexProgramParameter(ctx, vpo, scaleConst,  identity);
+	if (rotConst)    rsxSetVertexProgramParameter(ctx, vpo, rotConst,    identity);
+	if (tweakConst)  rsxSetVertexProgramParameter(ctx, vpo, tweakConst,  tweak);
+	if (offsetConst) rsxSetVertexProgramParameter(ctx, vpo, offsetConst, offset);
 
-	cellGcmSetVertexDataArray(ctx, position_index, 0, sizeof(vertex_t), 3,
-	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
-	                          vertex_buffer_offset + offsetof(vertex_t, pos));
-	cellGcmSetVertexDataArray(ctx, color_index, 0, sizeof(vertex_t), 4,
-	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
-	                          vertex_buffer_offset + offsetof(vertex_t, color));
+	rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_POS, 0,
+	                         vertex_buffer_offset + offsetof(vertex_t, pos),
+	                         sizeof(vertex_t), 3,
+	                         GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+	rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_COLOR0, 0,
+	                         vertex_buffer_offset + offsetof(vertex_t, color),
+	                         sizeof(vertex_t), 4,
+	                         GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
 
-	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
+	rsxLoadFragmentProgramLocation(ctx, fpo, fp_offset, GCM_LOCATION_RSX);
 }
 
 /* ----------------------------------------------------------------
@@ -348,32 +363,25 @@ static int init_display(void)
 static void init_shaders(void)
 {
 	u32 vpsize = 0, fpsize = 0;
-	vpo = (CGprogram)vpshader_vpo;
-	fpo = (CGprogram)fpshader_fpo;
+	vpo = (rsxVertexProgram   *)vpshader_vpo;
+	fpo = (rsxFragmentProgram *)fpshader_fpo;
 
-	cellGcmCgInitProgram(vpo);
-	cellGcmCgInitProgram(fpo);
-
-	cellGcmCgGetUCode(vpo, &vp_ucode, &vpsize);
-	modelViewProjConst = cellGcmCgGetNamedParameter(vpo, "modelViewProj");
+	rsxVertexProgramGetUCode(vpo, &vp_ucode, &vpsize);
+	modelViewProjConst = rsxVertexProgramGetConst(vpo, "modelViewProj");
+	biasConst          = rsxVertexProgramGetConst(vpo, "bias");
+	scaleConst         = rsxVertexProgramGetConst(vpo, "scale");
+	rotConst           = rsxVertexProgramGetConst(vpo, "rot");
+	tweakConst         = rsxVertexProgramGetConst(vpo, "tweak");
+	offsetConst        = rsxVertexProgramGetConst(vpo, "offset");
 
 	void *fp_ucode_blob;
-	cellGcmCgGetUCode(fpo, &fp_ucode_blob, &fpsize);
+	rsxFragmentProgramGetUCode(fpo, &fp_ucode_blob, &fpsize);
 	fp_ucode = local_align(64, fpsize);
 	memcpy(fp_ucode, fp_ucode_blob, fpsize);
 	cellGcmAddressToOffset(fp_ucode, &fp_offset);
 
-	/* Vertex-attribute slots come from the parameter resource: the VP
-	 * tags `in_position` / `in_color` with CG_ATTR0 + N at compile time;
-	 * the resource value minus CG_ATTR0 is the hardware attribute index. */
-	CGparameter pos = cellGcmCgGetNamedParameter(vpo, "in_position");
-	CGparameter col = cellGcmCgGetNamedParameter(vpo, "in_color");
-	position_index  = pos ? (int)cellGcmCgGetParameterResource(vpo, pos) - CG_ATTR0 : 0;
-	color_index     = col ? (int)cellGcmCgGetParameterResource(vpo, col) - CG_ATTR0 : 3;
-
 	printf("  vp ucode: %u bytes; mvp uniform: %p\n", vpsize, (void *)modelViewProjConst);
 	printf("  fp ucode: %u bytes (rsx-local at offset 0x%08x)\n", fpsize, fp_offset);
-	printf("  vp attribs: position@%d color@%d\n", position_index, color_index);
 }
 
 static void init_geometry(void)
@@ -402,7 +410,7 @@ int main(int argc, const char **argv)
 	void               *host_addr;
 	CellGcmContextData *ctx;
 
-	printf("hello-ppu-cellgcm-laneelision: rsx-cg-compiler lane-elision validation\n");
+	printf("hello-ppu-cellgcm-vp-loop: cg shaders + PSL1GHT cgcomp\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (cellGcmInit(CB_SIZE, HOST_SIZE, host_addr) != 0) {
@@ -449,7 +457,9 @@ int main(int argc, const char **argv)
 			}
 		}
 
-		/* Yield the FIFO to the XMB while it owns the overlay. */
+		/* Yield the FIFO to the XMB while it owns the overlay. usleep
+		 * matches a vblank interval so we still service callbacks and
+		 * pad input promptly when the overlay closes. */
 		if (g_drawing_paused) {
 			usleep(16000);
 			continue;
@@ -474,6 +484,6 @@ int main(int argc, const char **argv)
 	free(host_addr);
 	ioPadEnd();
 
-	printf("hello-ppu-cellgcm-loops: done\n");
+	printf("hello-ppu-cellgcm-vp-loop: done\n");
 	return 0;
 }

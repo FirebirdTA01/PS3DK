@@ -1,0 +1,34 @@
+// hello-ppu-cellgcm-vp-loop — vertex program designed to exceed the
+// 7-instruction "rest" branch in libgcm_cmd's LoadVertexProgramBlock,
+// forcing the loop branch (count=32 method packet, 8-insn batches).
+//
+// Several mat4x4 multiplies + per-channel arithmetic to produce 10+
+// instructions after sce-cgc / rsx-cg-compiler optimization.
+
+void main(
+    float3 in_position      : POSITION,
+    float4 in_color         : COLOR,
+    uniform float4x4        modelViewProj,
+    uniform float4x4        bias,
+    uniform float4x4        scale,
+    uniform float4x4        rot,
+    uniform float4          tweak,
+    uniform float4          offset,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    float4 p = float4(in_position, 1.0f);
+    p = mul(modelViewProj, p);
+    p = mul(bias, p);
+    p = mul(scale, p);
+    p = mul(rot, p);
+
+    float4 c = in_color;
+    c.r = c.r * tweak.x + tweak.y + offset.x;
+    c.g = c.g * tweak.x + tweak.z + offset.y;
+    c.b = c.b * tweak.x + tweak.w + offset.z;
+    c.a = c.a + offset.w;
+
+    out_position = p;
+    out_color    = c;
+}

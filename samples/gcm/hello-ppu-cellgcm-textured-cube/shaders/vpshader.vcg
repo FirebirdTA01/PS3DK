@@ -1,0 +1,16 @@
+// hello-ppu-cellgcm-textured-cube — vertex program.
+//
+// MVP transform + UV passthrough.  Per-frame rotation lives on the
+// PPU; here we just multiply position by the matrix and pipe the
+// per-vertex UV through to the fragment program.
+
+void main(
+    float3 in_position      : POSITION,
+    float2 in_texcoord      : TEXCOORD0,
+    uniform float4x4 modelViewProj,
+    out float4 out_position : POSITION,
+    out float2 out_texcoord : TEXCOORD0)
+{
+    out_position = mul(modelViewProj, float4(in_position, 1.0f));
+    out_texcoord = in_texcoord;
+}
