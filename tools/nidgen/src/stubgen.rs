@@ -163,28 +163,43 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "{}:", fnid_sym).ok();
         writeln!(out, "\t.4byte 0x{:08x}", e.nid).ok();
 
-        // 5c. Trampoline — literal port of the PSL1GHT EXPORT() macro at
-        //     src/ps3dev/PSL1GHT/ppu/sprx/common/exports.S:13-37.  15 PPC64
-        //     insns; treats the slot value as a (entry,TOC) function
-        //     descriptor and tail-calls through it.
+        // 5c. Trampoline — frame-less wrapping stub.
+        //     The reference Sony stub is a `bctr` tail-call leaf and
+        //     relies on the caller emitting `ld r2,40(r1)` after the
+        //     `bl <stub>` to restore the TOC.  Our PPU GCC + linker
+        //     treat `bl __<name>` as an intra-DSO call (since the stub
+        //     archive is linked statically) and do NOT rewrite the
+        //     trailing `nop` to a TOC restore.  So we have to restore
+        //     r2 ourselves, which means re-entering the trampoline
+        //     after the SPRX returns - i.e. `bctrl` not `bctr`.
+        //
+        //     But `bctrl` clobbers LR, so we need to save+restore LR
+        //     somewhere too.  The OLD shape `stdu r1,-128(r1)` shifted
+        //     SP and broke parameter passing for any function with >8
+        //     args (the SPRX accesses stack params at caller_sp+112+).
+        //
+        //     This shape uses zero stack frame: stash LR in caller's
+        //     reserved-area slot at sp+24 (ELFv1 PPC64 reserves
+        //     sp+24..+39 for caller-frame scratch and the SPRX never
+        //     writes there), and r2 at sp+40 (TOC save area).  SP is
+        //     unchanged across the call, so the SPRX finds stack args
+        //     where the caller put them.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();
         writeln!(out, "\t.type {}, @function", tramp_sym).ok();
         writeln!(out, "{}:", tramp_sym).ok();
         writeln!(out, "\tmflr   0").ok();
-        writeln!(out, "\tstd    0,16(1)").ok();
-        writeln!(out, "\tstd    2,40(1)").ok();
-        writeln!(out, "\tstdu   1,-128(1)").ok();
+        writeln!(out, "\tstd    0,24(1)").ok();          // save caller LR
+        writeln!(out, "\tstd    2,40(1)").ok();          // save caller TOC
         writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
         writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
-        writeln!(out, "\tlwz    0,0(12)").ok();
-        writeln!(out, "\tlwz    2,4(12)").ok();
+        writeln!(out, "\tlwz    0,0(12)").ok();          // SPRX entry
+        writeln!(out, "\tlwz    2,4(12)").ok();          // SPRX TOC
         writeln!(out, "\tmtctr  0").ok();
-        writeln!(out, "\tbctrl").ok();
-        writeln!(out, "\taddi   1,1,128").ok();
-        writeln!(out, "\tld     2,40(1)").ok();
-        writeln!(out, "\tld     0,16(1)").ok();
+        writeln!(out, "\tbctrl").ok();                   // call SPRX
+        writeln!(out, "\tld     2,40(1)").ok();          // restore caller TOC
+        writeln!(out, "\tld     0,24(1)").ok();          // restore caller LR
         writeln!(out, "\tmtlr   0").ok();
         writeln!(out, "\tblr").ok();
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
@@ -279,8 +294,15 @@ mod tests {
         // The prx_header struct body.
         assert!(s.contains("0x2c000001"), "missing prx_header magic word");
         assert!(s.contains(".2byte 2"), "export count should be 2");
-        // Trampoline body must include the bctrl branch and the stub-slot load.
+        // Trampoline body must be the frame-less wrapping form: uses
+        // bctrl (so r2 + LR can be restored), but does not stdu the SP.
         assert!(s.contains("bctrl"), "trampoline missing bctrl");
+        assert!(!s.contains("stdu"),
+                "trampoline must not allocate a stack frame (would shift SP + break stack-arg passing)");
+        assert!(s.contains("std    0,24(1)") || s.contains("std 0,24(1)"),
+                "trampoline must save caller LR at sp+24");
+        assert!(s.contains("std    2,40(1)") || s.contains("std 2,40(1)"),
+                "trampoline must save caller TOC at sp+40");
         assert!(s.contains("cellPadInit_stub@ha"), "trampoline missing stub-slot load");
     }
 

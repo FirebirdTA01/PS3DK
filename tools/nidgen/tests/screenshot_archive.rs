@@ -61,8 +61,10 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
         assert!(asm.contains(nid), "missing nid value {nid} for {name}");
     }
 
-    // Trampoline body must include the bctrl branch and a stub-slot HAT load.
+    // Trampoline body must be the frame-less wrapping form: bctrl
+    // (so r2 + LR get restored) but no stdu of SP.
     assert!(asm.contains("bctrl"), "trampoline missing bctrl");
+    assert!(!asm.contains("stdu"), "trampoline must not allocate a frame");
     assert!(
         asm.contains("cellScreenShotEnable_stub@ha"),
         "trampoline missing stub-slot load",
