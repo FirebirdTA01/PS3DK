@@ -169,6 +169,24 @@ fi
 mkdir -p "$STAGE_DIR/bin"
 if [[ -f "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" ]]; then
     cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/bin/ICON0.PNG"
+    # Also stage at sdk/assets/ICON0.PNG so cmake/ps3-self.cmake's
+    # ps3_add_pkg() default ICON path (${_PS3_TOOLCHAIN_ROOT}/sdk/assets/ICON0.PNG,
+    # which resolves to cmake/.. = $STAGE_DIR) finds it.
+    mkdir -p "$STAGE_DIR/sdk/assets"
+    cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/sdk/assets/ICON0.PNG"
+fi
+
+# 5b. CMake toolchain files + helper modules.  Samples build with
+#     -DCMAKE_TOOLCHAIN_FILE="%PS3DK%\cmake\ps3-ppu-toolchain.cmake"
+#     and the helpers (ps3-self.cmake, ps3-bin2s-impl.cmake) plus
+#     templates/sfo.xml are pulled in via include(ps3-self) and
+#     ps3_add_pkg().  Without this directory the README's quickstart
+#     fails immediately with "could not load cache file ps3-ppu-toolchain.cmake".
+if [[ -d "$PS3_TOOLCHAIN_ROOT/cmake" ]]; then
+    say "Copying cmake/ toolchain files + helpers"
+    cp -a "$PS3_TOOLCHAIN_ROOT/cmake" "$STAGE_DIR/cmake"
+else
+    warn "$PS3_TOOLCHAIN_ROOT/cmake missing — release will ship without CMake toolchain files; samples won't build out of the box."
 fi
 
 # 4. Host tools zip (from CI's build-host-tools-windows job) OR locally
@@ -268,24 +286,27 @@ Layout (everything below is anchored at %PS3DK% once installed):
                       lv2-crt0.o, lv2.ld linker script
   ppu\\include\\      PSL1GHT + SDK PPU headers (cell/*.h, sys/*.h, etc.)
   spu\\               Same shape as ppu\\, for spu-elf
-  ppu_rules           PSL1GHT-style Makefile fragments included by samples
+  cmake\\             CMake toolchain files + helpers
+                      (ps3-ppu-toolchain.cmake, ps3-spu-toolchain.cmake,
+                      ps3-self.cmake, ps3-bin2s-impl.cmake, templates\\)
+  ppu_rules           PSL1GHT-style Makefile fragments (legacy build path)
   spu_rules
   base_rules
   data_rules
   portlibs\\          zlib, libpng, SDL2, libcurl, mbedTLS, ...
   samples\\           Source for hello-ppu, hello-spu, cellGcm,
-                      Spurs, sysutil, etc.  Build inside each sample dir
-                      with "make" (requires Git Bash or MSYS2 — see below).
+                      Spurs, sysutil, etc.  Build with CMake — see below.
   setup.cmd           Environment activator (prepends toolchain bins to PATH)
   README.txt
   CHANGELOG.md
 
 Quick start:
-  1. Extract this archive somewhere — common choice is
-     C:\\SDKs\\Sony\\Homebrew\\PS3DK\\.
+  1. Extract this archive somewhere stable.  The path you pick is the
+     value of %PS3DK% — pick whatever you like (e.g. C:\\PS3DK\\,
+     D:\\dev\\ps3dk\\, %USERPROFILE%\\ps3dk\\, ...).
   2. Set PS3DK permanently for your user account.  In a regular cmd
-     window run:
-         setx PS3DK "C:\\SDKs\\Sony\\Homebrew\\PS3DK"
+     window run (substituting the path you extracted to):
+         setx PS3DK "C:\\path\\to\\extracted\\PS3DK"
      The PPU GCC driver reads this via getenv() at link time and
      resolves -L against %PS3DK%\\ppu\\lib.
   3. Open a NEW terminal so the setx value takes effect, then:
@@ -297,32 +318,41 @@ Quick start:
   4. powerpc64-ps3-elf-gcc.exe --version    (-> 12.4.0)
      spu-elf-gcc.exe            --version    (-> 9.5.0)
 
-Building the samples:
-  Sample Makefiles use GNU bash patterns and "include \$(PSL1GHT)/ppu_rules",
-  so a POSIX environment is required to invoke "make".  Two options:
+Building the samples (CMake — recommended):
+  Samples build with CMake.  You need cmake (3.20+) and a generator on
+  PATH.  Common picks: Ninja, "MinGW Makefiles", or "Unix Makefiles"
+  (under MSYS2 / Git Bash).  None of these ship in this archive; install
+  via "choco install cmake ninja", the Visual Studio installer's
+  optional CMake/Ninja components, MSYS2 (https://www.msys2.org/), or
+  any equivalent.
 
-  * MSYS2 (recommended) — full POSIX toolchain with make/bash/etc.
-    Install from https://www.msys2.org/, then in an MSYS2 shell:
-        export PS3DK="/c/SDKs/Sony/Homebrew/PS3DK"
-        cd "\$PS3DK/samples/toolchain/hello-ppu-c++17"
-        make
+  Each sample is a standalone CMake project.  From a cmd shell after
+  running %PS3DK%\\setup.cmd (replace -G with whichever generator you
+  installed):
 
-  * Git Bash — already installed by Git for Windows but does NOT ship
-    "make".  Install GNU make separately (e.g. via choco install make
-    or by dropping a make.exe build on PATH), then:
-        export PS3DK="/c/SDKs/Sony/Homebrew/PS3DK"
-        cd "\$PS3DK/samples/toolchain/hello-ppu-c++17"
-        make
+      cd "%PS3DK%\\samples\\toolchain\\hello-ppu-c++17"
+      cmake -S . -B cmake-build ^
+            -DCMAKE_TOOLCHAIN_FILE="%PS3DK%\\cmake\\ps3-ppu-toolchain.cmake" ^
+            -G Ninja
+      cmake --build cmake-build
 
-  Each sample produces three artefacts: <name>.elf (raw PPU ELF),
-  <name>.self (CEX-signed for RPCS3 + signed hardware), and
-  <name>.fake.self (fake-signed for CFW hardware).  Run on RPCS3 with
+  Each sample produces three artefacts at the sample directory next to
+  CMakeLists.txt: <name>.elf (raw PPU ELF), <name>.self (CEX-signed for
+  RPCS3 + signed hardware), and <name>.fake.self (fake-signed for CFW
+  hardware).  Run on RPCS3 with:
       rpcs3 --no-gui <name>.self
 
+  For standalone SPU work, swap in cmake\\ps3-spu-toolchain.cmake.
+
+Direct toolchain invocation (no CMake):
   The toolchain itself (gcc.exe / g++.exe / ld.exe etc.) does NOT
-  require Git Bash or MSYS2 — only the Makefile-driven sample workflow
-  does.  Standalone compile + link from cmd or PowerShell works fine:
+  require any extra tools.  Standalone compile + link from cmd or
+  PowerShell works fine:
       powerpc64-ps3-elf-gcc.exe -O2 hello.c -o hello.elf
+
+  The full strip + sprxlinker + make_self / fself signing chain is
+  documented in the project README's "Manual / direct toolchain
+  invocation (no CMake)" section.
 
 See https://github.com/FirebirdTA01/PS3_Custom_Toolchain for full docs.
 EOF
