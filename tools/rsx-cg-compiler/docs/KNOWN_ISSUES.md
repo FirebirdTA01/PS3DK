@@ -129,6 +129,100 @@ same registers, and the same hazard-aware FENCBR rule as above.
 
 ---
 
+## FP entry-point gap: implicit varying semantics
+
+The original Cg compiler accepts FP entry-point parameters with no
+explicit binding semantic and infers a varying input slot:
+
+```cg
+void main(float4 v2f_color, out float4 color : COLOR)
+{ color = v2f_color; }
+```
+
+Our front-end currently requires explicit semantics on every input
+(`: COLOR`, `: TEXCOORD0`, etc.) — without one, the variable is
+parsed as a generic local rather than a varying-input read, and the
+NV40 emitter bails:
+
+```
+nv40-fp: StoreOutput source is not a direct varying input,
+         tex2D result, or literal vec4 (arithmetic lowering lands later)
+```
+
+Reproduces on FP shaders written for older SDKs that left entry-point
+parameters unbound and relied on the front-end inferring varying slots.
+Adding `: COLOR` to the input parameter compiles cleanly — but we
+should match the reference compiler's inference rule rather than
+require source edits.
+
+**Fix shape:** the front-end needs a "default-varying-binding" pass
+that walks unbound entry-point inputs and assigns them sequential
+varying slots in declaration order (matching what the reference
+compiler does).
+Once the input is recognised as a varying read, the existing
+StoreOutput-from-varying path in `nv40_fp_emit.cpp` handles the
+emit.  No new NV40 encoding work — purely a front-end inference
+rule.
+
+---
+
+## FP texture sampling — `tex2D` not yet emitted
+
+```cg
+uniform sampler2D texture;
+float4 c = tex2D(texture, uv);
+```
+
+Front-end parses the call.  IR builder emits a `Tex2D` op.  NV40
+emitter currently bails:
+
+```
+nv40-fp: unsupported IR op
+```
+
+The NV40 FP `TEX` instruction itself is well-documented (`opcode=0x17`
+in the `_FP_OPCODE` family, sampler index in the `tex_id` field of
+the second word, lod-bias / cubemap variants in the third) — gap is
+purely on the emitter side.  Implementation needs:
+
+1. Sampler-register allocator: each `uniform sampler*` declaration
+   binds to a `texture[N]` slot.  Reference allocates in declaration
+   order from slot 0; verified against probe `tex2D_basic_f.fpo`.
+2. NV40 `TEX` instruction encoding in `nv40_fp_emit.cpp` —
+   destination R-temp, sampler id, source UV from interpolator.
+3. `StoreOutput` path needs to accept a `Tex2D` result as a direct
+   source (already documented in the bail-out diagnostic — the
+   "tex2D result" branch is the missing bit of bookkeeping).
+4. Variants: `tex2Dlod`, `tex2Dproj`, cubemap, 3D sampler — separate
+   encodings, queued behind the basic case.
+
+Reproduces on any FP shader that samples a texture — text rendering,
+sprite blits, lit / shaded materials, anything past flat-shaded
+geometry.
+
+---
+
+## FP optimisation gap: arithmetic-lowering for non-passthrough writes
+
+```cg
+out_color = pow(texColor.rgb * lightIntensity, 2.2.xxx);
+```
+
+Today `StoreOutput` is byte-exact for three input shapes: direct
+varying read, `tex2D` result (once tex2D ships), or literal `vec4`.
+Anything in between — vector arithmetic, swizzle compositions,
+multi-step expressions — currently bails with the
+"arithmetic lowering lands later" diagnostic.
+
+The fix is incremental rather than a single shape: each new arith
+op (`mul`, `add`, `dot`, `lerp`, etc.) lands in `nv40_fp_emit.cpp`
+with a focused test under `tests/shaders/` and a byte probe from
+the reference compiler to pin the encoding.  See the FENCBR /
+accumulator-fold sections above for examples of how that gets
+staged.
+
+---
+
 ## How to close one of these
 
 1. Pick the case, gather a fresh byte probe from sce-cgc to confirm
