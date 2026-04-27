@@ -1,6 +1,7 @@
 library: cellSync2
 version: 1
 module: cellSync2
+archive_name: sync2
 exports:
 - name: _cellSync2CondAttributeInitialize
   nid: '0xdf3c532a'
