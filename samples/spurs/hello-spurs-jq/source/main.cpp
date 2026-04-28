@@ -1,13 +1,13 @@
 /*
  * hello-spurs-jq - SPURS job-queue end-to-end runtime test.
  *
- * Pushes N jobs through a Port2.  Each job carries a per-slot
- * sentinel EA + a per-slot magic value in userData[].  The SPU
- * worker (spu/source/main.c) DMA-PUTs the magic to the sentinel
- * EA.  PPU side polls until every slot's magic shows up, then
- * tears down.
+ * Pushes N jobs through a CellSpursJobQueueHandle, each carrying a
+ * per-slot sentinel EA + magic value in userData[].  The SPU worker
+ * (spu/source/main.c) DMA-PUTs the magic to the sentinel EA.  PPU
+ * blocks on a CellSpursJobQueueSemaphore until all N jobs have
+ * decremented the count, then verifies sentinels and tears down.
  *
- * On JQ halt or sentinel timeout we sys_process_exit() so the
+ * On JQ halt or semaphore failure we sys_process_exit() so the
  * emulator shuts down without the user having to PS-button out.
  */
 
@@ -17,7 +17,6 @@
 #include <sys/process.h>
 #include <cell/spurs.h>
 #include <cell/spurs/job_queue.h>
-#include <cell/spurs/job_queue_port2.h>
 #include <cell/spurs/job_queue_semaphore.h>
 #include <cell/sysmodule.h>
 #include <spu_printf.h>
@@ -32,9 +31,8 @@ static const uint32_t kMagicBase         = 0xC0FFEE00u;  /* + slot id */
 static const unsigned kNumJobs           = 6;
 
 #define _JQ_DEPTH 16
-static CellSpursJobQueue       s_jq    __attribute__((aligned(128)));
-static CellSpursJobQueuePort2  s_port  __attribute__((aligned(128)));
-static CellSpursJobQueueSemaphore s_sem __attribute__((aligned(128)));
+static CellSpursJobQueue          s_jq   __attribute__((aligned(128)));
+static CellSpursJobQueueSemaphore s_sem  __attribute__((aligned(128)));
 static CellSpursJob128         s_jobs[kNumJobs] __attribute__((aligned(128)));
 static uint64_t                s_chain[CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER(_JQ_DEPTH) / sizeof(uint64_t)]
     __attribute__((aligned(CELL_SPURS_JOBQUEUE_COMMAND_BUFFER_ALIGN)));

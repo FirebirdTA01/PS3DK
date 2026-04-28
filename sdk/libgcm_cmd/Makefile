@@ -19,7 +19,6 @@ PS3DEV   ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -mcpu=cell -std=c11 \
             -I$(PS3DK)/ppu/include \
-            -I$(PS3DEV)/psl1ght/ppu/include \
             -Iinclude
 # -MMD/-MP emit per-object .d files.  Without these, editing a header
 # like sdk/include/sys/lv2_types.h leaves the dependent .o stale; make
@@ -74,8 +73,7 @@ LEGACY_CFLAGS := -O2 -Wall -mcpu=cell -mregnames -Wa,-mcell -std=gnu11 \
                  -Wno-unused-parameter -Wno-implicit-fallthrough \
                  -Wno-implicit-function-declaration \
                  -I$(PS3DK)/ppu/include \
-                 -I$(PS3DEV)/psl1ght/ppu/include \
-                 -I$(PS3DEV)/psl1ght/ppu/include/rsx \
+                 -I$(PS3DK)/ppu/include/rsx \
                  -Iinclude \
                  -DLIBRSX_INTERNAL
 
