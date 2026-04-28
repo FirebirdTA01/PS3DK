@@ -120,6 +120,7 @@ desktop.ini
 /docs/plan.md
 /docs/building-sony-sdk-samples.md
 /docs/building-reference-samples.md
+/docs/spurs-job-binary2-re.md
 
 # rsx-cg-compiler reverse-engineering diary + diff-test harness.
 # Both are local-only: REVERSE_ENGINEERING.md will be replaced by a public
