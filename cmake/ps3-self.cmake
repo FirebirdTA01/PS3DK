@@ -314,16 +314,23 @@ function(ps3_add_spu_image target)
         list(APPEND _spu_link_flags "-T" "${_PSI_LDSCRIPT}")
         list(APPEND _link_deps "${_PSI_LDSCRIPT}")
     endif()
-    # Wrap user-supplied libs in --start-group/--end-group so the
-    # linker re-scans for cross-archive symbols (e.g. libspurs_job's
-    # _start references cellSpursJobMain2 which lives in libspurs_jq).
+    # Wrap multi-lib lists in --start-group/--end-group so the linker
+    # re-scans for cross-archive symbols (e.g. libspurs_job's _start
+    # references cellSpursJobMain2 which lives in libspurs_jq).
+    # Single-lib lists go through unwrapped - --start-group breaks
+    # JOB CHAIN's hello-spu-job for unknown reasons.
     set(_spu_libs)
-    if(_PSI_LIBS)
+    list(LENGTH _PSI_LIBS _spu_libs_count)
+    if(_spu_libs_count GREATER 1)
         list(APPEND _spu_libs "-Wl,--start-group")
         foreach(lib ${_PSI_LIBS})
             list(APPEND _spu_libs "-l${lib}")
         endforeach()
         list(APPEND _spu_libs "-Wl,--end-group")
+    else()
+        foreach(lib ${_PSI_LIBS})
+            list(APPEND _spu_libs "-l${lib}")
+        endforeach()
     endif()
 
     add_custom_command(

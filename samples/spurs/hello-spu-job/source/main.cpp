@@ -241,15 +241,18 @@ int main(void)
         }
 
         /* If the dispatcher halted on us, Shutdown unblocks Join.  If
-         * the chain ended normally Join is fine on its own. */
+         * the chain ended normally Join is fine on its own.  When
+         * the SPU side never wrote back, force-exit so RPCS3 closes
+         * cleanly without the user having to PS-button out. */
         cellSpursShutdownJobChain(jc);
+        if (!got_sentinel) {
+            std::printf("  TIMED OUT waiting for sentinel; force-exit\n");
+            spu_printf_finalize();
+            sys_process_exit(1);
+        }
         rc = cellSpursJoinJobChain(jc);
         if (rc) std::printf("  JoinJobChain: %#x\n", rc);
         else    std::printf("  Joined ok\n");
-
-        if (!got_sentinel) {
-            std::printf("  TIMED OUT waiting for sentinel\n");
-        }
 
         delete jc;
     }

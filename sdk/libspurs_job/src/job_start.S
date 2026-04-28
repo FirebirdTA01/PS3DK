@@ -8,17 +8,7 @@
  * The xori pair leaves $80 bitwise unchanged so caller-saved state
  * round-trips intact; the linker zero-pads .before_text out to its
  * 32-byte alignment.
- *
- * The 16-byte .SpuGUID section that the linker script anchors at
- * vaddr 0 (pushing _start to vaddr 0x10) is also emitted here so
- * every job binary that links libspurs_job picks one up automatically;
- * without it the binary entry point would land at 0 and dispatcher
- * checks that require e_entry != 0 reject the image with PERM.
  */
-
-	.section	.SpuGUID, "ax", @progbits
-	.balign	1
-	.long	0x436e8402, 0x42569682, 0x43d9e302, 0x43f75f82
 
 	.section	.before_text, "ax", @progbits
 	.global	_start
@@ -30,5 +20,13 @@ _start:
 1:
 	xori	$80, $80, 4
 	br	cellSpursJobMain2
+	/* Pad .before_text to 32 bytes so .text always lands at LS 0x30
+	 * (= .SpuGUID 0x10 + .before_text 0x20).  The JOB CHAIN
+	 * dispatcher rejects images whose code section starts elsewhere
+	 * with CELL_SPURS_JOB_ERROR_JOB_DESCRIPTOR. */
+	nop
+	nop
+	nop
+	nop
 
 	.size	_start, . - _start

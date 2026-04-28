@@ -30,7 +30,6 @@ BIN2S    := $(PS3DEV)/bin/bin2s
 CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -mcpu=cell -std=c11 \
             -I$(PS3DK)/ppu/include \
-            -I$(PS3DEV)/psl1ght/ppu/include \
             -Iinclude
 # -MMD/-MP emit per-object .d files so editing a shared header correctly
 # invalidates the .o.

@@ -47,7 +47,7 @@ $(LIB): $(OBJS) | $(BUILD)
 	    fi; \
 	fi
 
-PSL1GHT_LIBSPUTHREAD := $(PS3DEV)/psl1ght/spu/lib/libsputhread.a
+PSL1GHT_LIBSPUTHREAD := $(PS3DK)/spu/lib/libsputhread.a
 
 $(BUILD)/%.o: src/%.S | $(BUILD)
 	@echo "  AS    $(notdir $<)"
