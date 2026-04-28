@@ -38,9 +38,10 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
     buf[2] = (uint32_t)(job->header.eaBinary);
     buf[3] = (uint32_t)(job->header.eaBinary >> 32);
 
-    /* Use tag 0 - the real runtime would assign one from the JQ tag
-     * pool via __initialize, but with our skeleton we just pick a
-     * fixed slot so the DMA goes through. */
+    /* Use tag 0 - the runtime's per-job DMA tag pool isn't wired yet;
+     * fixed-slot DMA works for the throughput test even with multiple
+     * jobs racing because we wait for our own put to drain before
+     * returning. */
     mfc_put(buf, out_ea, sizeof(buf), 0, 0, 0);
     mfc_write_tag_mask(1u << 0);
     mfc_read_tag_status_all();
