@@ -31,22 +31,43 @@
 
 #define _UNUSED(x) ((void)(x))
 
-/* -- JQ job-side entry stubs ----------------------------------------- */
-/* cellSpursJobMain2 here is the JQ-aware variant: the SPRX dispatcher
- * jumps into _start of the SPU job binary, which tail-calls into this
- * function.  Real implementation calls SysCall::__initialize, runs
- * cellSpursJobQueueMain (the consumer loop), then SysCall::__finalize.
- * Stubbed to immediate return so the link succeeds. */
+/* -- JQ entry-point framework wrapper ------------------------------- */
+/* JQ binaries follow a per-invocation init/run/finalize convention:
+ * the dispatcher jumps to _start (in libspurs_job's job_start.o),
+ * which tail-calls cellSpursJobMain2 (defined here, in libspurs_jq).
+ * We initialise the per-job context, dispatch the user's
+ * cellSpursJobQueueMain, then finalise on the way out.  The user MUST
+ * define cellSpursJobQueueMain in their job source - it carries the
+ * per-job logic (pull data via DMA, run, write results back). */
+extern int  _spurs_jq_syscall_initialize(CellSpursJobContext2 *ctx,
+                                         CellSpursJob256 *job);
+extern void _spurs_jq_syscall_finalize  (CellSpursJobContext2 *ctx);
+extern void  cellSpursJobQueueMain      (CellSpursJobContext2 *ctx,
+                                         CellSpursJob256 *job);
+
 void cellSpursJobMain2(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
-    _UNUSED(ctx);
-    _UNUSED(job);
+    if (_spurs_jq_syscall_initialize(ctx, job) != 0)
+        return;
+    cellSpursJobQueueMain(ctx, job);
+    _spurs_jq_syscall_finalize(ctx);
 }
 
-void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
+/* SysCall::__initialize / __finalize - per-invocation context setup
+ * + teardown.  Real bodies are large (~700 bytes for init): set up
+ * trace + memcheck state, parse the job descriptor, populate
+ * pContext fields the user job reads.  Stubbed to return CELL_OK so
+ * cellSpursJobMain2 doesn't bail before reaching user code. */
+int _spurs_jq_syscall_initialize(CellSpursJobContext2 *ctx,
+                                 CellSpursJob256 *job)
+{
+    _UNUSED(ctx); _UNUSED(job);
+    return _STUB_OK;
+}
+
+void _spurs_jq_syscall_finalize(CellSpursJobContext2 *ctx)
 {
     _UNUSED(ctx);
-    _UNUSED(job);
 }
 
 int cellSpursJobQueueWaitSignal(uint64_t eaSuspendedJob)
