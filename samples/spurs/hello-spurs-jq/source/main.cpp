@@ -1,12 +1,17 @@
 /*
- * hello-spurs-jq — cell/spurs/job_queue*.h header validation probe.
+ * hello-spurs-jq - SPURS job-queue end-to-end runtime test.
  *
- * Compile-and-link test that touches every entry point declared
- * across the four cell/spurs/job_queue*.h PPU headers + their cpp
- * wrapper classes.  Each call site is gated by `if (false)` so the
- * sample doesn't actually try to drive the queue at runtime — the
- * SPU runtime (libspurs_jq.a) isn't ported yet.  Purpose: surface
- * header / struct ABI errors before the runtime work.
+ * PPU side: spin up a CellSpurs2 instance, create a JobQueue + Port2,
+ * push a single CellSpursJob256 carrying a sentinel buffer EA + magic
+ * value in userData[], wait for the SPU side to write the magic back,
+ * then tear down.
+ *
+ * SPU side (spu/source/main.c): cellSpursJobQueueMain reads the EA +
+ * magic out of the descriptor and DMAs them back.
+ *
+ * Currently a probe of how far our libspurs_jq runtime skeleton +
+ * SysCall::__initialize stub get before the SPURS LLE in RPCS3 trips
+ * a check.  Iteration target.
  */
 
 #include <cstdio>
@@ -15,174 +20,201 @@
 #include <sys/process.h>
 #include <cell/spurs.h>
 #include <cell/spurs/job_queue.h>
-#include <cell/spurs/job_queue_port.h>
 #include <cell/spurs/job_queue_port2.h>
-#include <cell/spurs/job_queue_semaphore.h>
+#include <cell/sysmodule.h>
+#include <spu_printf.h>
+
+/* JOBBIN_WRAP produces two bin2s blobs:
+ *   <name>_bin               - the wrapped jobbin2 blob (0x100-byte ELF
+ *                              prefix + SPU LS image bytes)
+ *   <name>_jobheader_bin     - the 48-byte CellSpursJobHeader template
+ *                              the reference packager generated, with
+ *                              eaBinary low32 = 0x100 (unresolved reloc
+ *                              addend; we add the runtime blob start)
+ *
+ * Build glue is in cmake/ps3-self.cmake (ps3_add_spu_image / JOBBIN_WRAP). */
+#include "hello_spurs_jq_bin.h"
+#include "hello_spurs_jq_jobheader_bin.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 
-static CellSpursJobQueue          s_jq          __attribute__((aligned(128)));
-static CellSpursJobQueueAttribute s_jqAttr      __attribute__((aligned(8)));
-static CellSpursJobQueuePort      s_port        __attribute__((aligned(128)));
-static CellSpursJobQueuePort2     s_port2       __attribute__((aligned(128)));
-static CellSpursJobQueueSemaphore s_sem         __attribute__((aligned(128)));
-static CellSpursJob256            s_job         __attribute__((aligned(128)));
-static uint64_t                   s_chain[16]   __attribute__((aligned(16)));
-static const uint8_t              s_priority[8] = {8, 0, 0, 0, 0, 0, 0, 0};
+static const int      kSpuPrintfPriority = 999;
+static const uint32_t kMagic             = 0xC0FFEE99u;
 
-/* Force the linker to keep every entry point we can call from headers
- * - if any signature is wrong the link fails with an "undefined NID
- * reference" or a duplicate-definition error. */
-static int touch_ppu_api(cell::Spurs::Spurs *spurs)
+/* Queue command-buffer needs to be sized via CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER
+ * - the runtime reserves a per-client tail-pointer region in addition
+ * to the depth*sizeof(uint64_t) command slots. */
+#define _JQ_DEPTH 16
+static CellSpursJobQueue       s_jq    __attribute__((aligned(128)));
+static CellSpursJobQueuePort2  s_port  __attribute__((aligned(128)));
+/* Reference JQ sample uses CellSpursJob128 (smaller; userData[10]).
+ * Keep maxSizeJobDescriptor=256 for both create + check, but the
+ * actual descriptor is 128 bytes. */
+static CellSpursJob128         s_job   __attribute__((aligned(128)));
+static uint64_t                s_chain[CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER(_JQ_DEPTH) / sizeof(uint64_t)]
+    __attribute__((aligned(CELL_SPURS_JOBQUEUE_COMMAND_BUFFER_ALIGN)));
+static volatile uint32_t       s_out[4] __attribute__((aligned(128))) = { 0, 0, 0, 0 };
+static const uint8_t           s_priority[8] = { 8, 0, 0, 0, 0, 0, 0, 0 };
+
+/* JobDescriptor pool the JQ uses to hold copy-pushed descriptors. */
+#define _JQ_POOL_NUM_JOB256  3
+static uint8_t s_jqPool[
+    CELL_SPURS_JOBQUEUE_JOB_DESCRIPTOR_POOL_SIZE(0, 0, _JQ_POOL_NUM_JOB256, 0, 0, 0, 0, 0)
+] __attribute__((aligned(CELL_SPURS_JOBQUEUE_JOB_DESCRIPTOR_POOL_ALIGN)));
+
+static void dump_hex(const char *tag, const void *p, unsigned bytes)
 {
-    int rc = 0;
-
-    /* attribute setters (every variant) */
-    rc |= cellSpursJobQueueAttributeInitialize(&s_jqAttr);
-    rc |= cellSpursJobQueueAttributeSetMaxGrab(&s_jqAttr, 4);
-    rc |= cellSpursJobQueueAttributeSetSubmitWithEntryLock(&s_jqAttr, false);
-    rc |= cellSpursJobQueueAttributeSetDoBusyWaiting(&s_jqAttr, false);
-    rc |= cellSpursJobQueueAttributeSetIsHaltOnError(&s_jqAttr, true);
-    rc |= cellSpursJobQueueAttributeSetIsJobTypeMemoryCheck(&s_jqAttr, false);
-    rc |= cellSpursJobQueueAttributeSetMaxSizeJobDescriptor(&s_jqAttr, 256);
-    rc |= cellSpursJobQueueAttributeSetGrabParameters(&s_jqAttr, 16, 4);
-
-    /* descriptor pool size helper */
-    CellSpursJobQueueJobDescriptorPool pool = {};
-    pool.nJob256 = 8;
-    int poolBytes = cellSpursJobQueueGetJobDescriptorPoolSize(&pool);
-    rc |= (poolBytes < 0 ? poolBytes : 0);
-
-    /* lifecycle (inline wrappers + underlying NIDs) */
-    rc |= cellSpursCreateJobQueue((CellSpurs *)spurs, &s_jq, &s_jqAttr,
-                                  "hello-jq", s_chain, 8, 1, s_priority);
-    rc |= cellSpursShutdownJobQueue(&s_jq);
-    int exitCode = 0;
-    rc |= cellSpursJoinJobQueue(&s_jq, &exitCode);
-
-    /* handle open/close */
-    CellSpursJobQueueHandle h = CELL_SPURS_JOBQUEUE_HANDLE_INVALID;
-    rc |= cellSpursJobQueueOpen(&s_jq, &h);
-    rc |= cellSpursJobQueueClose(&s_jq, h);
-
-    /* info */
-    CellSpurs *spursPtr = cellSpursJobQueueGetSpurs(&s_jq); (void)spursPtr;
-    rc |= cellSpursJobQueueGetHandleCount(&s_jq);
-    void *cause = nullptr;
-    rc |= cellSpursJobQueueGetError(&s_jq, &exitCode, &cause);
-    rc |= cellSpursJobQueueGetMaxSizeJobDescriptor(&s_jq);
-    CellSpursWorkloadId wid = 0;
-    rc |= cellSpursGetJobQueueId(&s_jq, &wid);
-    unsigned int suspSize = 0;
-    rc |= cellSpursJobQueueGetSuspendedJobSize(
-        &s_job.header, sizeof(s_job),
-        CELL_SPURS_JOBQUEUE_JOB_SAVE_ALL, &suspSize);
-
-    /* exception handler */
-    rc |= cellSpursJobQueueSetExceptionEventHandler(&s_jq, nullptr, nullptr);
-    rc |= cellSpursJobQueueSetExceptionEventHandler2(&s_jq, nullptr, nullptr);
-    rc |= cellSpursJobQueueUnsetExceptionEventHandler(&s_jq);
-
-    /* state */
-    rc |= cellSpursJobQueueSetWaitingMode(&s_jq, CELL_SPURS_JOBQUEUE_WAITING_MODE_SLEEP);
-
-    /* push variants (handle-side direct push) */
-    CellSpursJobHeader *allocated = nullptr;
-    rc |= cellSpursJobQueueAllocateJobDescriptor(&s_jq, h, sizeof(s_job), 0, &allocated);
-    rc |= cellSpursJobQueuePushAndReleaseJob(&s_jq, h, &s_job.header, sizeof(s_job),
-                                             0, 0, &s_sem);
-    rc |= cellSpursJobQueuePushJob2(&s_jq, h, &s_job.header, sizeof(s_job),
-                                    0, 0, &s_sem);
-    rc |= cellSpursJobQueuePush(&s_jq, h, &s_job.header, sizeof(s_job), &s_sem);
-    rc |= cellSpursJobQueuePushJob(&s_jq, h, &s_job.header, sizeof(s_job), 0, &s_sem);
-    rc |= cellSpursJobQueuePushExclusiveJob(&s_jq, h, &s_job.header, sizeof(s_job), 0, &s_sem);
-    rc |= cellSpursJobQueueTryPush(&s_jq, h, &s_job.header, sizeof(s_job), &s_sem);
-    rc |= cellSpursJobQueueTryPushJob(&s_jq, h, &s_job.header, sizeof(s_job), 0, &s_sem);
-    rc |= cellSpursJobQueueTryPushExclusiveJob(&s_jq, h, &s_job.header, sizeof(s_job), 0, &s_sem);
-    rc |= cellSpursJobQueuePushFlush(&s_jq, h);
-    rc |= cellSpursJobQueueTryPushFlush(&s_jq, h);
-    rc |= cellSpursJobQueuePushSync(&s_jq, h, 0xffffffffu);
-    rc |= cellSpursJobQueueTryPushSync(&s_jq, h, 0xffffffffu);
-    rc |= cellSpursJobQueueSendSignal((CellSpursJobQueueWaitingJob *)&s_job);
-
-    /* port (port_types + port.h) */
-    rc |= cellSpursJobQueuePortInitialize(&s_port, &s_jq, true);
-    rc |= cellSpursJobQueuePortInitializeWithDescriptorBuffer(
-        &s_port, &s_jq, &s_job.header, 256, 4, true);
-    rc |= cellSpursJobQueuePortFinalize(&s_port);
-    CellSpursJobQueue *portQ = cellSpursJobQueuePortGetJobQueue(&s_port); (void)portQ;
-    rc |= cellSpursJobQueuePortPush(&s_port, &s_job.header, sizeof(s_job), false);
-    rc |= cellSpursJobQueuePortCopyPush(&s_port, &s_job.header, sizeof(s_job), false);
-    rc |= cellSpursJobQueuePortPushJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortPushExclusiveJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortCopyPushJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortCopyPushExclusiveJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortTryPush(&s_port, &s_job.header, sizeof(s_job), false);
-    rc |= cellSpursJobQueuePortTryCopyPush(&s_port, &s_job.header, sizeof(s_job), false);
-    rc |= cellSpursJobQueuePortTryPushJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortTryPushExclusiveJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortTryCopyPushJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortTryCopyPushExclusiveJob(&s_port, &s_job.header, sizeof(s_job), 0, false);
-    rc |= cellSpursJobQueuePortSync(&s_port);
-    rc |= cellSpursJobQueuePortTrySync(&s_port);
-    rc |= cellSpursJobQueuePortPushFlush(&s_port);
-    rc |= cellSpursJobQueuePortTryPushFlush(&s_port);
-    rc |= cellSpursJobQueuePortPushSync(&s_port, 0xffffffffu);
-    rc |= cellSpursJobQueuePortTryPushSync(&s_port, 0xffffffffu);
-
-    /* port2 (port2_types + port2.h) */
-    rc |= cellSpursJobQueuePort2Create(&s_port2, &s_jq);
-    rc |= cellSpursJobQueuePort2Destroy(&s_port2);
-    CellSpursJobQueue *port2Q = cellSpursJobQueuePort2GetJobQueue(&s_port2); (void)port2Q;
-    rc |= cellSpursJobQueuePort2PushJob(&s_port2, &s_job.header, sizeof(s_job), 0, 0);
-    rc |= cellSpursJobQueuePort2CopyPushJob(&s_port2, &s_job.header, sizeof(s_job), 256, 0, 0);
-    rc |= cellSpursJobQueuePort2PushAndReleaseJob(&s_port2, &s_job.header, sizeof(s_job), 0, 0);
-    CellSpursJobHeader *p2alloc = nullptr;
-    rc |= cellSpursJobQueuePort2AllocateJobDescriptor(&s_port2, sizeof(s_job), 0, &p2alloc);
-    rc |= cellSpursJobQueuePort2Sync(&s_port2, 0);
-    rc |= cellSpursJobQueuePort2PushFlush(&s_port2, 0);
-    rc |= cellSpursJobQueuePort2PushSync(&s_port2, 0xffffffffu, 0);
-
-    /* semaphore */
-    rc |= cellSpursJobQueueSemaphoreInitialize(&s_sem, &s_jq);
-    rc |= cellSpursJobQueueSemaphoreAcquire(&s_sem, 1);
-    rc |= cellSpursJobQueueSemaphoreTryAcquire(&s_sem, 1);
-
-    /* C++ wrapper class instantiations (also exercise the inline
-     * forwarders + size constants) */
-    using cell::Spurs::JobQueue::JobQueueBase;
-    using cell::Spurs::JobQueue::Port;
-    using cell::Spurs::JobQueue::Port2;
-    using cell::Spurs::JobQueue::PortWithDescriptorBuffer;
-
-    static_assert(JobQueueBase::kAlign == CELL_SPURS_JOBQUEUE_ALIGN, "");
-    static_assert(JobQueueBase::kSize  == CELL_SPURS_JOBQUEUE_SIZE,  "");
-    static_assert(Port::kAlign  == CELL_SPURS_JOBQUEUE_PORT_ALIGN,  "");
-    static_assert(Port::kSize   == CELL_SPURS_JOBQUEUE_PORT_SIZE,   "");
-    static_assert(Port2::kAlign == CELL_SPURS_JOBQUEUE_PORT2_ALIGN, "");
-    static_assert(Port2::kSize  == CELL_SPURS_JOBQUEUE_PORT2_SIZE,  "");
-
-    /* PortWithDescriptorBuffer<JobT, N> instantiation - just compile-test. */
-    using PortBuf = PortWithDescriptorBuffer<CellSpursJob256, 4>;
-    static PortBuf s_portBuf __attribute__((aligned(128)));
-    rc |= s_portBuf.initialize(&s_jq, true);
-
-    return rc;
+    const uint8_t *b = (const uint8_t *)p;
+    std::printf("  %s [%u bytes]:\n", tag, bytes);
+    for (unsigned row = 0; row < bytes; row += 16) {
+        std::printf("    %04x:", row);
+        for (unsigned col = 0; col < 16 && row + col < bytes; ++col)
+            std::printf(" %02x", b[row + col]);
+        std::printf("\n");
+    }
 }
 
 int main(void)
 {
-    std::printf("hello-spurs-jq: header validation probe (link-only)\n");
+    std::printf("hello-spurs-jq: bring-up\n");
 
-    /* Skip runtime exercise — SPU runtime not yet ported.  We just
-     * need the link to succeed. */
-    if (false) {
-        cell::Spurs::Spurs *spurs = new cell::Spurs::Spurs;
-        int rc = touch_ppu_api(spurs);
-        delete spurs;
-        return rc;
+    int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_SPURS_JQ);
+    if (rc) {
+        std::printf("  SysmoduleLoad SPURS_JQ: %#x\n", rc);
+        return 1;
     }
 
-    std::printf("OK (compile + link succeeded; runtime wired, awaiting SPU lib)\n");
-    return 0;
+    rc = spu_printf_initialize(kSpuPrintfPriority, 0);
+    if (rc) { std::printf("  spu_printf_initialize: %#x\n", rc); return 1; }
+
+    /* --- Spurs2 up --- */
+    cell::Spurs::SpursAttribute sattr;
+    rc = cell::Spurs::SpursAttribute::initialize(&sattr, 4, 100, 2, false);
+    if (rc) { std::printf("  SpursAttribute init: %#x\n", rc); return 1; }
+    sattr.setNamePrefix("SpursJq", 7);
+    sattr.setSpuThreadGroupType(SYS_SPU_THREAD_GROUP_TYPE_EXCLUSIVE_NON_CONTEXT);
+    sattr.enableSpuPrintfIfAvailable();
+
+    cell::Spurs::Spurs *spurs = new cell::Spurs::Spurs;
+    rc = cell::Spurs::Spurs::initialize(spurs, &sattr);
+    if (rc) { std::printf("  Spurs::initialize: %#x\n", rc); return 1; }
+    std::printf("  Spurs2 up\n");
+
+    /* --- JobQueue attribute + create --- */
+    CellSpursJobQueueAttribute jqAttr;
+    rc = cellSpursJobQueueAttributeInitialize(&jqAttr);
+    if (rc) { std::printf("  JQ AttrInit: %#x\n", rc); goto teardown_spurs; }
+    cellSpursJobQueueAttributeSetMaxSizeJobDescriptor(&jqAttr, 256);
+    cellSpursJobQueueAttributeSetIsHaltOnError(&jqAttr, true);
+
+    {
+        CellSpursJobQueueJobDescriptorPool poolDesc = {0};
+        poolDesc.nJob256 = _JQ_POOL_NUM_JOB256;
+        rc = cellSpursCreateJobQueueWithJobDescriptorPool(
+            (CellSpurs *)spurs, &s_jq, &jqAttr, s_jqPool, &poolDesc,
+            "hello-jq", s_chain, _JQ_DEPTH, /*numSpus*/1, s_priority);
+    }
+    if (rc) {
+        std::printf("  CreateJobQueue: %#x\n", rc);
+        goto teardown_spurs;
+    }
+    std::printf("  JobQueue created\n");
+
+    /* --- Port2 create --- */
+    rc = cellSpursJobQueuePort2Create(&s_port, &s_jq);
+    if (rc) {
+        std::printf("  Port2Create: %#x\n", rc);
+        goto teardown_jq;
+    }
+    std::printf("  Port2 created\n");
+
+    /* --- Build the job --- */
+    std::memset(&s_job, 0, sizeof(s_job));
+    /* Stamp in the reference-packager-produced jobheader template,
+     * then patch eaBinary by adding the runtime blob start (the
+     * template's low32 carries the +0x100 reloc addend). */
+    std::memcpy(&s_job.header, hello_spurs_jq_jobheader_bin,
+                sizeof(CellSpursJobHeader));
+    s_job.header.eaBinary += (uint64_t)(uintptr_t)hello_spurs_jq_bin;
+    s_job.workArea.userData[0] = (uint64_t)(uintptr_t)&s_out[0];
+    s_job.workArea.userData[1] = kMagic;
+
+    dump_hex("s_job header", &s_job, 64);
+
+    /* --- Push the job: plain pushJob with flag=0.  Simpler than the
+     * copyPushJob+SYNC+pool path; if this also halts we know the
+     * issue isn't in the push variant. --- */
+    rc = cellSpursJobQueuePort2PushJob(&s_port, &s_job.header,
+                                       sizeof(s_job), /*tag*/0,
+                                       /*flag*/0);
+    if (rc) {
+        std::printf("  Port2PushJob: %#x\n", rc);
+        goto teardown_port;
+    }
+    std::printf("  Job pushed (pushJob, flag=0)\n");
+
+    /* --- Wait for the SPU side to write back --- */
+    {
+        bool got_sentinel = false;
+        bool jq_halted    = false;
+        for (int round = 0; round < 200; ++round) {
+            for (int spins = 0; spins < 200000 && s_out[0] != kMagic; ++spins) {
+                __asm__ volatile ("" ::: "memory");
+            }
+            if (s_out[0] == kMagic) { got_sentinel = true; break; }
+            int err = 0; void *cause = 0;
+            int erc = cellSpursJobQueueGetError(&s_jq, &err, &cause);
+            if (erc == 0 && err) {
+                std::printf("  [round %d] JQ halted: err=%#x cause=%p\n",
+                            round, err,
+                            (void *)(uintptr_t)(unsigned)(uintptr_t)cause);
+                jq_halted = true;
+                break;
+            }
+        }
+        if (got_sentinel) {
+            std::printf("  Sentinel received: s_out=[%#x %#x %#x %#x]\n",
+                        (unsigned)s_out[0], (unsigned)s_out[1],
+                        (unsigned)s_out[2], (unsigned)s_out[3]);
+        } else {
+            std::printf("  TIMED OUT waiting for sentinel\n");
+        }
+
+        /* If the JQ halted or we timed out, the Shutdown/Join path
+         * below may block forever waiting on the stuck SPU kernel.
+         * Bail straight to process exit so the emulator can shut down. */
+        if (jq_halted || !got_sentinel) {
+            std::printf("FAILURE: bypassing teardown to force exit\n");
+            spu_printf_finalize();
+            cellSysmoduleUnloadModule(CELL_SYSMODULE_SPURS_JQ);
+            sys_process_exit(1);
+        }
+    }
+
+    /* --- Sync-flush the port + drain --- */
+    cellSpursJobQueuePort2Sync(&s_port, 0);
+
+teardown_port:
+    cellSpursJobQueuePort2Destroy(&s_port);
+teardown_jq:
+    cellSpursShutdownJobQueue(&s_jq);
+    {
+        int exitCode = 0;
+        rc = cellSpursJoinJobQueue(&s_jq, &exitCode);
+        if (rc) std::printf("  JoinJobQueue: %#x\n", rc);
+        else    std::printf("  JoinJobQueue ok (exit=%#x)\n", exitCode);
+    }
+teardown_spurs:
+    rc = spurs->finalize();
+    if (rc) std::printf("  Spurs::finalize: %#x\n", rc);
+    delete spurs;
+    spu_printf_finalize();
+    cellSysmoduleUnloadModule(CELL_SYSMODULE_SPURS_JQ);
+
+    if (s_out[0] == kMagic) {
+        std::printf("SUCCESS\n");
+        return 0;
+    }
+    std::printf("FAILURE: SPU side did not return the sentinel\n");
+    return 1;
 }

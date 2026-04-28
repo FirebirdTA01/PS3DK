@@ -23,18 +23,20 @@ target_link_libraries(hello-spurs-jq PRIVATE
     spurs_jq_stub spurs_stub c_stub sysmodule_stub sysutil rt lv2 m
 )
 
-# SPU side - currently a link-validation stub that pulls in
-# libspurs_jq.a.  The real JQ scheduler entry point comes from
-# libspurs_jq's cellSpursJobMain2; user code only fills in per-job
-# bodies dispatched from inside the scheduler.
+# SPU side - JOBBIN_WRAP: SPURS JOB-QUEUE workloads need the
+# reference jobbin2 wrapper format (0x100-byte ELF prefix in front
+# of the LS image).  ps3_add_spu_image runs wine spu_elf-to-ppu_obj.exe
+# to produce a .ppu.o exposing _binary_<NAME>_jobbin2_jobheader and
+# the embedded blob.  PPU code copies the jobheader symbol directly
+# into the descriptor (no manual descriptor build).
 ps3_add_spu_image(hello-spurs-jq
     NAME hello_spurs_jq
     SOURCES spu/source/main.c
     NOSTARTFILES
-    JOBBIN
-    CFLAGS -mspurs-job
-    LDFLAGS -mspurs-job -Wl,-q
+    JOBBIN_WRAP
+    CFLAGS -mspurs-job-initialize
+    LDFLAGS -mspurs-job-initialize -Wl,-q -Wl,--gc-sections
     LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_job.ld
-    LIBS spurs_jq spurs_job)
+    LIBS spurs_jq)
 
 ps3_add_self(hello-spurs-jq)

@@ -11,11 +11,10 @@
  * and the job descriptor.  It uses DMAs to read input data, do work,
  * and write results back to main memory.
  *
- * Until the SPU runtime is fleshed out beyond stubs, the SysCall
- * init/finalize bodies don't actually populate ctx; this function
- * is reached only via the cellSpursJobMain2 wrapper and won't see
- * meaningful arguments yet.  Kept minimal so the link succeeds and
- * a future RPCS3 run can validate the wrapper plumbing.
+ * Test body: read userData[0..1] from the descriptor (out_ea, magic),
+ * write the magic + a few diagnostic words back to *out_ea, signal
+ * the PPU via DMA-PUT.  Mirrors hello-spu-job's pattern so this is
+ * directly comparable when iterating runtime issues.
  */
 
 #include <stdint.h>
@@ -27,9 +26,22 @@
 
 void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
-    (void)ctx;
-    (void)job;
-    /* TODO: real job body once SysCall::__initialize populates ctx.
-     * For now this is just the link anchor that brings in
-     * libspurs_jq's cellSpursJobMain2 wrapper. */
+    if (job == 0)
+        return;
+
+    uint64_t out_ea = job->workArea.userData[0];
+    uint64_t magic  = job->workArea.userData[1];
+
+    __attribute__((aligned(16))) uint32_t buf[4];
+    buf[0] = (uint32_t)magic;
+    buf[1] = (ctx != 0) ? ctx->dmaTag : 0xDEADBEEFu;
+    buf[2] = (uint32_t)(job->header.eaBinary);
+    buf[3] = (uint32_t)(job->header.eaBinary >> 32);
+
+    /* Use tag 0 - the real runtime would assign one from the JQ tag
+     * pool via __initialize, but with our skeleton we just pick a
+     * fixed slot so the DMA goes through. */
+    mfc_put(buf, out_ea, sizeof(buf), 0, 0, 0);
+    mfc_write_tag_mask(1u << 0);
+    mfc_read_tag_status_all();
 }

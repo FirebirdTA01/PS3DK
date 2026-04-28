@@ -23,10 +23,12 @@ AR := spu-elf-ar
 
 CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -fpic \
           -falign-functions=8 -mno-branch-hints \
+          -ffunction-sections -fdata-sections \
           -I$(PS3DK)/spu/include
+SFLAGS := -fpic
 
 BUILD := build
-OBJS  := $(BUILD)/stubs.o
+OBJS  := $(BUILD)/stubs.o $(BUILD)/job_start_w_crt.o $(BUILD)/job_crt.o
 LIB   := $(BUILD)/libspurs_jq.a
 
 .PHONY: all install clean
@@ -40,6 +42,10 @@ $(LIB): $(OBJS)
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	@echo "  CC    $(notdir $<)"
 	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/%.o: src/%.S | $(BUILD)
+	@echo "  AS    $(notdir $<)"
+	@$(CC) $(SFLAGS) -c $< -o $@
 
 $(BUILD):
 	@mkdir -p $@
