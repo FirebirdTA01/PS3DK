@@ -1,0 +1,57 @@
+SPU GCC: -mspurs-job / -mspurs-job-initialize / -mspurs-task driver flags
+
+Adds three driver flags that propagate through to the linker so the
+final SPU ELF carries the e_flags value the SPRX dispatcher uses to
+identify the program type.
+
+    -mspurs-job             -> ld --spurs-job             (e_flags = 1)
+    -mspurs-job-initialize  -> ld --spurs-job-initialize  (e_flags = 2)
+    -mspurs-task            -> ld --spurs-task            (e_flags = 3)
+
+Pairs with the binutils patch
+patches/spu/binutils-2.42/0001-spu-elf-spurs-job-flags.patch which
+implements the corresponding linker options.
+
+Spec semantics match the documented ABI in
+docs/abi/spurs-job-entry-point.md.  Stock SPU GCC + binutils emits
+e_flags=0 which the jobbin2 packaging path treats as "unspecified".
+
+gcc/config/spu/spu.opt   - three new -m driver flags
+gcc/config/spu/spu-elf.h - extend LINK_SPEC to forward the flags
+
+--- a/gcc/config/spu/spu.opt
++++ b/gcc/config/spu/spu.opt
+@@ -47,6 +47,18 @@
+ Target Report Mask(STD_MAIN)
+ Use standard main function as entry for startup.
+ 
++mspurs-job
++Target Report RejectNegative
++Build as a SPURS Job 2.0 binary (without job CRT). Sets ELF e_flags=1.
++
++mspurs-job-initialize
++Target Report RejectNegative
++Build as a SPURS Job 2.0 binary with job CRT. Sets ELF e_flags=2.
++
++mspurs-task
++Target Report RejectNegative
++Build as a SPURS Task binary. Sets ELF e_flags=3.
++
+ mbranch-hints
+ Target Report Mask(BRANCH_HINTS)
+ Generate branch hints for branches.
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -63,7 +63,11 @@
+ 
+ #define EH_FRAME_THROUGH_COLLECT2 1
+ 
+-#define LINK_SPEC "%{mlarge-mem: --defsym __stack=0xfffffff0 }"
++#define LINK_SPEC "%{mlarge-mem: --defsym __stack=0xfffffff0 }\
++ %{mspurs-job: --spurs-job}\
++ %{mspurs-job-initialize: --spurs-job-initialize}\
++ %{mspurs-task: --spurs-task}\
++"
+ 
+ #define LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -) \
+     %{mno-atomic-updates:-lgcc_cachemgr_nonatomic; :-lgcc_cachemgr} \

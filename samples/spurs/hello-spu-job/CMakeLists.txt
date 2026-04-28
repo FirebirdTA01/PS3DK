@@ -30,14 +30,13 @@ ps3_add_spu_image(hello-spu-job
     SOURCES spu/source/main.c
     NOSTARTFILES
     JOBBIN
-    # Reference SDK's SPURS_JOB_LDFLAGS = -fpic -mspurs-job -Wl,-q.
-    # We get -fpic by default (non-FREESTANDING macro path) and
-    # spell -Wl,-q (--emit-relocs) here to keep .rela* sections in
-    # the linked ELF; the SPRX dispatcher / objcopy chain consults
-    # them when relocating into LS at non-zero offsets.  -mspurs-job
-    # is a Sony GCC patch we don't have - the effect we need from it
-    # (PIC code + retained relocs) is already covered by -fpic + -Wl,-q.
-    LDFLAGS -Wl,-q
+    # SPURS_JOB build posture: -fpic comes from the macro's non-FREESTANDING
+    # default; -mspurs-job sets ELF e_flags=1 (= "SPURS Job 2.0 w/o CRT")
+    # via our patched SPU GCC + binutils; -Wl,-q (--emit-relocs) keeps
+    # .rela* sections in the linked ELF for any runtime fix-up the
+    # dispatcher applies.
+    CFLAGS -mspurs-job
+    LDFLAGS -mspurs-job -Wl,-q
     LDSCRIPT $ENV{PS3DEV}/ps3dk/spu/ldscripts/spurs_job.ld
     LIBS spurs_job)
 

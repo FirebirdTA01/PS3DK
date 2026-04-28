@@ -1,0 +1,124 @@
+SPU ELF: emit ABI-defined e_flags for spurs-job binaries
+
+Adds three new linker options that set the SPU ELF header's e_flags
+field to the value the SPRX dispatcher uses to identify the program
+type:
+
+    --spurs-job             -> e_flags = 1 (SPURS Job 2.0 w/o CRT)
+    --spurs-job-initialize  -> e_flags = 2 (SPURS Job 2.0 with CRT)
+    --spurs-task            -> e_flags = 3 (SPURS Task)
+
+Matches the e_flags semantics documented in
+docs/abi/spurs-job-entry-point.md.  Stock SPU GCC + binutils emits
+e_flags=0 which is treated as "unspecified" and rejected by jobbin2
+packaging.
+
+The driver-side wiring lives in the matching gcc patch
+(0003-spu-spurs-job-driver-flags.patch), which makes gcc's
+-mspurs-job / -mspurs-job-initialize / -mspurs-task pass the
+appropriate --spurs-* linker option through LINK_SPEC.
+
+bfd/elf32-spu.h     - declare the setter
+bfd/elf32-spu.c     - add a static int + setter, consult it from
+                      spu_elf_init_file_header and stamp e_flags
+                      when nonzero
+ld/emultempl/spuelf.em - three new --spurs-* command-line options
+
+--- a/bfd/elf32-spu.h
++++ b/bfd/elf32-spu.h
+@@ -115,6 +115,7 @@
+ 
+ extern void spu_elf_setup (struct bfd_link_info *, struct spu_elf_params *);
+ extern void spu_elf_plugin (int);
++extern void spu_elf_set_spurs_job_type (int);
+ extern bool spu_elf_open_builtin_lib (bfd **, const struct _ovl_stream *);
+ extern bool spu_elf_create_sections (struct bfd_link_info *);
+ extern bool spu_elf_size_sections (bfd *, struct bfd_link_info *);
+--- a/bfd/elf32-spu.c
++++ b/bfd/elf32-spu.c
+@@ -5179,6 +5179,18 @@
+ 
+ static int spu_plugin = 0;
+ 
++/* SPURS program-type tag (e_flags) - 0 = unset, 1 = job, 2 = job-with-CRT,
++   3 = task.  Set via the --spurs-job / --spurs-job-initialize /
++   --spurs-task linker options (driven by gcc's -mspurs-* flags).  When
++   nonzero, spu_elf_init_file_header writes the value to e_flags.  */
++static int spu_spurs_job_type = 0;
++
++void
++spu_elf_set_spurs_job_type (int val)
++{
++  spu_spurs_job_type = val;
++}
++
+ void
+ spu_elf_plugin (int val)
+ {
+@@ -5199,6 +5211,12 @@
+ 
+       i_ehdrp->e_type = ET_DYN;
+     }
++
++  if (spu_spurs_job_type != 0)
++    {
++      Elf_Internal_Ehdr *i_ehdrp = elf_elfheader (abfd);
++      i_ehdrp->e_flags = (unsigned int) spu_spurs_job_type;
++    }
+   return true;
+ }
+ 
+--- a/ld/emultempl/spuelf.em
++++ b/ld/emultempl/spuelf.em
+@@ -611,6 +611,9 @@
+ #define OPTION_SPU_EXTRA_STACK		(OPTION_SPU_RESERVED_SPACE + 1)
+ #define OPTION_SPU_NO_AUTO_OVERLAY	(OPTION_SPU_EXTRA_STACK + 1)
+ #define OPTION_SPU_EMIT_FIXUPS		(OPTION_SPU_NO_AUTO_OVERLAY + 1)
++#define OPTION_SPU_SPURS_JOB		(OPTION_SPU_EMIT_FIXUPS + 1)
++#define OPTION_SPU_SPURS_JOB_INIT	(OPTION_SPU_SPURS_JOB + 1)
++#define OPTION_SPU_SPURS_TASK		(OPTION_SPU_SPURS_JOB_INIT + 1)
+ '
+ 
+ PARSE_AND_LIST_LONGOPTS='
+@@ -637,6 +640,9 @@
+   { "extra-stack-space", required_argument, NULL, OPTION_SPU_EXTRA_STACK },
+   { "no-auto-overlay", optional_argument, NULL, OPTION_SPU_NO_AUTO_OVERLAY },
+   { "emit-fixups", optional_argument, NULL, OPTION_SPU_EMIT_FIXUPS },
++  { "spurs-job", no_argument, NULL, OPTION_SPU_SPURS_JOB },
++  { "spurs-job-initialize", no_argument, NULL, OPTION_SPU_SPURS_JOB_INIT },
++  { "spurs-task", no_argument, NULL, OPTION_SPU_SPURS_TASK },
+ '
+ 
+ PARSE_AND_LIST_OPTIONS='
+@@ -686,6 +692,12 @@
+   --non-ia-text               Allow non-icache code in icache lines\n"));
+   fprintf (file, _("\
+   --lrlive-analysis           Scan function prologue for lr liveness\n"));
++  fprintf (file, _("\
++  --spurs-job                 Set ELF e_flags=1 (SPURS Job 2.0 w/o CRT)\n"));
++  fprintf (file, _("\
++  --spurs-job-initialize      Set ELF e_flags=2 (SPURS Job 2.0 with CRT)\n"));
++  fprintf (file, _("\
++  --spurs-task                Set ELF e_flags=3 (SPURS Task)\n"));
+ '
+ 
+ PARSE_AND_LIST_ARGS_CASES='
+@@ -693,6 +705,18 @@
+       spu_elf_plugin (1);
+       break;
+ 
++    case OPTION_SPU_SPURS_JOB:
++      spu_elf_set_spurs_job_type (1);
++      break;
++
++    case OPTION_SPU_SPURS_JOB_INIT:
++      spu_elf_set_spurs_job_type (2);
++      break;
++
++    case OPTION_SPU_SPURS_TASK:
++      spu_elf_set_spurs_job_type (3);
++      break;
++
+     case OPTION_SPU_NO_OVERLAYS:
+       no_overlays = 1;
+       break;
