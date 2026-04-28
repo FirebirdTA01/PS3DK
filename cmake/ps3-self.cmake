@@ -217,6 +217,10 @@ if(NOT _PS3_SPU_TOOLS_PROBED)
         NAMES "spu-elf-gcc${_ps3_self_exe}" "spu-elf-gcc"
         PATHS "${PS3DEV}/spu/bin"
         NO_DEFAULT_PATH)
+    find_program(PS3_SPU_OBJCOPY
+        NAMES "spu-elf-objcopy${_ps3_self_exe}" "spu-elf-objcopy"
+        PATHS "${PS3DEV}/spu/bin"
+        NO_DEFAULT_PATH)
     # Optional — only samples that embed SPU code need the SPU compiler.
 endif()
 
@@ -309,55 +313,22 @@ function(ps3_add_spu_image target)
         COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
         VERBATIM)
 
-    # JOBBIN: SPRX job dispatcher expects a raw memory image, not an
-    # ELF.  Run spu-elf-objcopy -O binary to drop the ELF wrapper and
-    # leave just the loaded sections (.before_text + .text + .data),
-    # placing the result at a sibling .raw path.  Then bin2s-embed
-    # that flat blob using a sibling .bin name so the generated header
-    # symbols stay "<NAME>_bin*" (consistent with the ELF path).
+    # JOBBIN: the SPRX job dispatcher DMAs raw bytes from descriptor.eaBinary
+    # straight into LS — it does NOT parse an ELF wrapper.  Convert the linked
+    # SPU ELF to a flat binary image via objcopy -O binary so eaBinary points
+    # at the LS-image start (.SpuGUID magic at offset 0).
     if(_PSI_JOBBIN)
-        find_program(PS3_SPU_OBJCOPY
-            NAMES "spu-elf-objcopy${_ps3_self_exe}" "spu-elf-objcopy"
-            PATHS "${PS3DEV}/spu/bin"
-            NO_DEFAULT_PATH)
         if(NOT PS3_SPU_OBJCOPY)
-            message(FATAL_ERROR "ps3_add_spu_image(JOBBIN): spu-elf-objcopy not found at ${PS3DEV}/spu/bin")
+            message(FATAL_ERROR "ps3_add_spu_image: JOBBIN requires spu-elf-objcopy at ${PS3DEV}/spu/bin")
         endif()
-        # Re-path: produce raw at <name>.raw, then copy to <name>.bin
-        # so the bin2s symbol stays <name>_bin*.  The intermediate ELF
-        # stays at <name>.elf.
-        set(_spu_jobelf "${_spu_dir}/${_PSI_NAME}.elf")
-        # Reissue the link to the .elf path (the previous add_custom_command
-        # above wrote to .bin which we no longer want for jobbin builds).
-        # Easier: rename .bin -> .elf via a copy step, then objcopy from .elf,
-        # leaving the canonical .bin path holding the raw image bin2s consumes.
-        set(_spu_raw "${_spu_dir}/${_PSI_NAME}.raw")
-        add_custom_command(
-            OUTPUT "${_spu_raw}"
-            COMMAND "${PS3_SPU_OBJCOPY}" -O binary "${_spu_elf}" "${_spu_raw}"
-            DEPENDS "${_spu_elf}"
-            COMMENT "ps3-spu: objcopy ${_PSI_NAME} ELF -> raw image"
-            VERBATIM)
-        # Overwrite the .bin slot with the raw image so the existing
-        # bin2s call point + symbol naming all work unchanged.
-        set(_spu_bin_for_embed "${_spu_dir}/${_PSI_NAME}.bin.raw")
-        add_custom_command(
-            OUTPUT "${_spu_bin_for_embed}"
-            COMMAND "${CMAKE_COMMAND}" -E copy "${_spu_raw}" "${_spu_bin_for_embed}"
-            DEPENDS "${_spu_raw}"
-            VERBATIM)
-        # bin2s ID rule (from ps3_bin2s above) is "replace . with _ in
-        # basename": "<name>.bin.raw" → "<name>_bin_raw" — wrong.  So
-        # symlink/copy to "<name>.bin" instead in a sibling jobbin/
-        # subdirectory to avoid clobbering the ELF link target.
         set(_spu_jobbin_dir "${_spu_dir}/jobbin")
         file(MAKE_DIRECTORY "${_spu_jobbin_dir}")
         set(_spu_jobbin "${_spu_jobbin_dir}/${_PSI_NAME}.bin")
         add_custom_command(
             OUTPUT "${_spu_jobbin}"
-            COMMAND "${CMAKE_COMMAND}" -E copy "${_spu_raw}" "${_spu_jobbin}"
-            DEPENDS "${_spu_raw}"
-            COMMENT "ps3-spu: stage ${_PSI_NAME}.bin (raw jobbin)"
+            COMMAND "${PS3_SPU_OBJCOPY}" -O binary "${_spu_elf}" "${_spu_jobbin}"
+            DEPENDS "${_spu_elf}"
+            COMMENT "ps3-spu: objcopy ${_PSI_NAME}.bin (flat job image)"
             VERBATIM)
         ps3_bin2s(${target} "${_spu_jobbin}")
     else()
