@@ -1,2 +1,3 @@
 0001-spu-cachemgr-disable-branch-hints.patch
 0002-system-h-no-abort-macro-on-mingw.patch
+0003-spu-spurs-job-driver-flags.patch
