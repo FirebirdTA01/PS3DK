@@ -96,6 +96,18 @@ HEADERS := \
     include/cell/spurs/job_guard.h \
     include/cell/spurs/job_chain_types.h \
     include/cell/spurs/job_chain.h \
+    include/cell/spurs/job_queue_define.h \
+    include/cell/spurs/job_queue_types.h \
+    include/cell/spurs/job_queue_cpp_types.h \
+    include/cell/spurs/job_queue_port_types.h \
+    include/cell/spurs/job_queue_port_cpp_types.h \
+    include/cell/spurs/job_queue_port2_types.h \
+    include/cell/spurs/job_queue_port2_cpp_types.h \
+    include/cell/spurs/job_queue.h \
+    include/cell/spurs/job_queue_port.h \
+    include/cell/spurs/job_queue_port2.h \
+    include/cell/spurs/job_queue_semaphore.h \
+    include/cell/trace/trace_types.h \
     include/sys/spu_initialize.h \
     include/sys/spu_thread.h \
     include/sys/spu_thread_group.h \
@@ -125,7 +137,19 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/spurs/job_commands.h \
     include/cell/spurs/job_chain_types.h \
     include/cell/spurs/error.h \
-    include/cell/spurs/version.h
+    include/cell/spurs/version.h \
+    include/cell/spurs/job_queue_define.h \
+    include/cell/spurs/job_queue_types.h \
+    include/cell/spurs/job_queue_cpp_types.h \
+    include/cell/spurs/job_queue_port_types.h \
+    include/cell/spurs/job_queue_port_cpp_types.h \
+    include/cell/spurs/job_queue_port2_types.h \
+    include/cell/spurs/job_queue_port2_cpp_types.h \
+    include/cell/spurs/job_queue.h \
+    include/cell/spurs/job_queue_port.h \
+    include/cell/spurs/job_queue_port2.h \
+    include/cell/spurs/job_queue_semaphore.h \
+    include/cell/trace/trace_types.h
 
 # SPU-side headers: SIMD class wrappers (simd + bits/simd_*.h).
 # Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
@@ -193,14 +217,24 @@ install-version:
 	@"$(VERSION_SH)" --format=plain > "$(PS3DK)/VERSION"
 	@echo "  marker  $(PS3DK)/VERSION ($$(cat $(PS3DK)/VERSION))"
 
+# Bail on first sublib failure.  A bare `for ... done` loop's exit
+# status is the last iteration's, which silently masks earlier
+# failures: a libgcm_cmd build break with libspurs_job succeeding
+# afterwards looks like "make install" returning 0.  Explicit
+# `|| exit 1` makes the loop fail-fast.
 install-sublibs:
 	@for lib in $(SUBLIBS); do \
 	    echo "  sublib  $$lib"; \
-	    $(MAKE) -C $$lib install; \
+	    $(MAKE) -C $$lib install || exit 1; \
 	done
 
 $(SUBLIBS):
 	$(MAKE) -C $@
 
+# libdbgfont's sources transitively include <Cg/cg.h>, which is
+# installed by libgcm_cmd.  Force the order so a parallel `make all`
+# can't race.
+libdbgfont: libgcm_cmd
+
 clean:
-	@for lib in $(SUBLIBS); do $(MAKE) -C $$lib clean; done
+	@for lib in $(SUBLIBS); do $(MAKE) -C $$lib clean || exit 1; done
