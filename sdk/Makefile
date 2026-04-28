@@ -124,7 +124,7 @@ HEADERS := \
     include/cell/mouse.h \
     include/cell/padfilter.h
 
-SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job
+SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -133,6 +133,8 @@ SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
     include/cell/error.h \
+    include/cell/spurs/types.h \
+    include/cell/spurs/exception_types.h \
     include/cell/spurs/job_descriptor.h \
     include/cell/spurs/job_commands.h \
     include/cell/spurs/job_chain_types.h \
