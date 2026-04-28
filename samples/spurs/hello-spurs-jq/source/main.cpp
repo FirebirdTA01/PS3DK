@@ -18,6 +18,7 @@
 #include <cell/spurs.h>
 #include <cell/spurs/job_queue.h>
 #include <cell/spurs/job_queue_port2.h>
+#include <cell/spurs/job_queue_semaphore.h>
 #include <cell/sysmodule.h>
 #include <spu_printf.h>
 
@@ -33,6 +34,7 @@ static const unsigned kNumJobs           = 6;
 #define _JQ_DEPTH 16
 static CellSpursJobQueue       s_jq    __attribute__((aligned(128)));
 static CellSpursJobQueuePort2  s_port  __attribute__((aligned(128)));
+static CellSpursJobQueueSemaphore s_sem __attribute__((aligned(128)));
 static CellSpursJob128         s_jobs[kNumJobs] __attribute__((aligned(128)));
 static uint64_t                s_chain[CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER(_JQ_DEPTH) / sizeof(uint64_t)]
     __attribute__((aligned(CELL_SPURS_JOBQUEUE_COMMAND_BUFFER_ALIGN)));
@@ -48,6 +50,10 @@ static uint8_t s_jqPool[
 
 int main(void)
 {
+    /* All locals up front so gotos to later labels don't cross a
+     * variable initialization (C++ forbids that). */
+    CellSpursJobQueueHandle h = CELL_SPURS_JOBQUEUE_HANDLE_INVALID;
+
     std::printf("hello-spurs-jq: bring-up (%u jobs)\n", kNumJobs);
 
     int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_SPURS_JQ);
@@ -84,9 +90,17 @@ int main(void)
     if (rc) { std::printf("  CreateJobQueue: %#x\n", rc); goto teardown_spurs; }
     std::printf("  JobQueue created\n");
 
-    rc = cellSpursJobQueuePort2Create(&s_port, &s_jq);
-    if (rc) { std::printf("  Port2Create: %#x\n", rc); goto teardown_jq; }
-    std::printf("  Port2 created\n");
+    /* Open a handle directly on the JQ - the handle-side push API is
+     * the one that takes an eaSemaphore parameter for per-job
+     * completion signalling.  Port2 lacks a semaphore arg. */
+    rc = cellSpursJobQueueOpen(&s_jq, &h);
+    if (rc) { std::printf("  JobQueueOpen: %#x\n", rc); goto teardown_jq; }
+    std::printf("  Handle opened (%d)\n", (int)h);
+
+    /* Semaphore the JQ runtime decrements per completed job. */
+    rc = cellSpursJobQueueSemaphoreInitialize(&s_sem, &s_jq);
+    if (rc) { std::printf("  SemaphoreInit: %#x\n", rc); goto teardown_handle; }
+    std::printf("  Semaphore initialized\n");
 
     /* --- Build N descriptors, one per job --- */
     for (unsigned i = 0; i < kNumJobs; ++i) {
@@ -98,46 +112,33 @@ int main(void)
         s_jobs[i].workArea.userData[1] = (uint64_t)(kMagicBase + i);
     }
 
-    /* --- Push them all --- */
+    /* --- Push them all with the semaphore attached --- */
     for (unsigned i = 0; i < kNumJobs; ++i) {
-        rc = cellSpursJobQueuePort2PushJob(&s_port, &s_jobs[i].header,
-                                           sizeof(s_jobs[i]),
-                                           /*tag*/0, /*flag*/0);
+        rc = cellSpursJobQueuePushJob(&s_jq, h, &s_jobs[i].header,
+                                      sizeof(s_jobs[i]),
+                                      /*tag*/0, &s_sem);
         if (rc) {
-            std::printf("  Port2PushJob[%u]: %#x\n", i, rc);
-            goto teardown_port;
+            std::printf("  PushJob[%u]: %#x\n", i, rc);
+            goto teardown_handle;
         }
     }
-    std::printf("  %u jobs pushed\n", kNumJobs);
+    rc = cellSpursJobQueuePushFlush(&s_jq, h);
+    if (rc) std::printf("  PushFlush: %#x\n", rc);
+    std::printf("  %u jobs pushed (with semaphore)\n", kNumJobs);
 
-    /* --- Wait for every slot's magic --- */
+    /* --- Acquire on the semaphore: blocks until all kNumJobs have
+     * decremented it.  Replaces the spin-poll-on-sentinel loop. --- */
+    rc = cellSpursJobQueueSemaphoreAcquire(&s_sem, kNumJobs);
+    if (rc) {
+        std::printf("  SemaphoreAcquire: %#x\n", rc);
+        spu_printf_finalize();
+        cellSysmoduleUnloadModule(CELL_SYSMODULE_SPURS_JQ);
+        sys_process_exit(1);
+    }
+    std::printf("  All %u jobs completed (semaphore acquired)\n", kNumJobs);
+
     {
-        bool jq_halted = false;
-        unsigned slots_filled = 0;
-        for (int round = 0; round < 400 && slots_filled < kNumJobs; ++round) {
-            for (int spins = 0; spins < 200000; ++spins) {
-                __asm__ volatile ("" ::: "memory");
-                slots_filled = 0;
-                for (unsigned i = 0; i < kNumJobs; ++i) {
-                    if (s_out[i * 4] == kMagicBase + i) ++slots_filled;
-                }
-                if (slots_filled >= kNumJobs) break;
-            }
-            if (slots_filled >= kNumJobs) break;
-
-            int err = 0; void *cause = 0;
-            int erc = cellSpursJobQueueGetError(&s_jq, &err, &cause);
-            if (erc == 0 && err) {
-                std::printf("  [round %d] JQ halted: err=%#x cause=%p (slots=%u/%u)\n",
-                            round, err,
-                            (void *)(uintptr_t)(unsigned)(uintptr_t)cause,
-                            slots_filled, kNumJobs);
-                jq_halted = true;
-                break;
-            }
-        }
-
-        std::printf("  slots filled: %u/%u\n", slots_filled, kNumJobs);
+        unsigned ok = 0;
         for (unsigned i = 0; i < kNumJobs; ++i) {
             std::printf("    job[%u] magic=%#x dmaTag=%#x eaBin=%#x_%#x\n",
                         i,
@@ -145,20 +146,13 @@ int main(void)
                         (unsigned)s_out[i * 4 + 1],
                         (unsigned)s_out[i * 4 + 3],
                         (unsigned)s_out[i * 4 + 2]);
+            if (s_out[i * 4] == kMagicBase + i) ++ok;
         }
-
-        if (jq_halted || slots_filled < kNumJobs) {
-            std::printf("FAILURE: bypassing teardown to force exit\n");
-            spu_printf_finalize();
-            cellSysmoduleUnloadModule(CELL_SYSMODULE_SPURS_JQ);
-            sys_process_exit(1);
-        }
+        std::printf("  %u/%u sentinels match\n", ok, kNumJobs);
     }
 
-    cellSpursJobQueuePort2Sync(&s_port, 0);
-
-teardown_port:
-    cellSpursJobQueuePort2Destroy(&s_port);
+teardown_handle:
+    cellSpursJobQueueClose(&s_jq, h);
 teardown_jq:
     cellSpursShutdownJobQueue(&s_jq);
     {
