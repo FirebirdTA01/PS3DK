@@ -53,18 +53,75 @@ void cellSpursJobMain2(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
     _spurs_jq_syscall_finalize(ctx);
 }
 
-/* SysCall::__initialize / __finalize - per-invocation context setup
- * + teardown.  Real bodies are large (~700 bytes for init): set up
- * trace + memcheck state, parse the job descriptor, populate
- * pContext fields the user job reads.  Stubbed to return CELL_OK so
- * cellSpursJobMain2 doesn't bail before reaching user code. */
-int _spurs_jq_syscall_initialize(CellSpursJobContext2 *ctx,
-                                 CellSpursJob256 *job)
+/* CRT-Aux init/finalize - the outer CRT-layer wrappers __job_start
+ * (in job_crt.S) calls before/after the SysCall layer.  Reference
+ * bodies (~700 / ~250 bytes) snapshot job header + context quadwords
+ * into _g_cellSpursJobMemoryCheckJob{Header,Context} markers, set
+ * up trace state, configure cooperative-yield function pointers,
+ * etc.  Stubbed to immediate return until those are wired. */
+int _cellSpursJobCrtAuxInitialize(CellSpursJobContext2 *ctx,
+                                  CellSpursJob256 *job)
 {
     _UNUSED(ctx); _UNUSED(job);
     return _STUB_OK;
 }
 
+void _cellSpursJobCrtAuxFinalize(CellSpursJobContext2 *ctx)
+{
+    _UNUSED(ctx);
+}
+
+/* CRT0 ctors / dtors - normally driven by .ctors / .dtors lists.
+ * For a freestanding JQ job there's nothing to construct or destruct,
+ * so these are no-ops. */
+void _init(void)  { /* no-op */ }
+void _fini(void)  { /* no-op */ }
+
+/* atexit hook - reference SDK uses this for fini-time cleanup; we
+ * have no atexit registrations. */
+void __do_atexit(void) { /* no-op */ }
+
+/* SysCall::__initialize - minimal per-invocation context setup.
+ *
+ * Populates the CellSpursJobContext2 fields a hello-class job
+ * actually reads:
+ *   - numIoBuffer / numCacheBuffer = 0 (no I/O buffer setup yet)
+ *   - dmaTag inherited from the job descriptor's high-tag field
+ *     (CellSpursJobHeader doesn't carry a per-job dmaTag explicitly;
+ *     reuse a fixed slot - the real runtime allocates from a pool)
+ *   - eaJobDescriptor = whatever the dispatcher passed via $4
+ *
+ * The reference SDK's __initialize additionally sets up trace +
+ * memcheck globals, allocates LS regions for I/O buffers when the
+ * descriptor declares them, and issues the input-side DMAs.  Those
+ * paths are deferred to a successor pass.  Returns CELL_OK so
+ * cellSpursJobMain2 falls through to the user body. */
+int _spurs_jq_syscall_initialize(CellSpursJobContext2 *ctx,
+                                 CellSpursJob256 *job)
+{
+    if (ctx == 0)
+        return CELL_SPURS_JOB_ERROR_NULL_POINTER;
+
+    ctx->ioBuffer        = 0;
+    ctx->cacheBuffer[0]  = 0;
+    ctx->cacheBuffer[1]  = 0;
+    ctx->cacheBuffer[2]  = 0;
+    ctx->cacheBuffer[3]  = 0;
+    ctx->numIoBuffer     = 0;
+    ctx->numCacheBuffer  = 0;
+    ctx->oBuffer         = 0;
+    ctx->sBuffer         = 0;
+    ctx->dmaTag          = 0;
+    ctx->eaJobDescriptor = (job != 0) ? (uint64_t)(uintptr_t)job : 0;
+
+    return _STUB_OK;
+}
+
+/* SysCall::__finalize - per-invocation teardown.
+ *
+ * Reference body (~60 bytes) flushes the trace ring buffer and a
+ * memcheck assertion before returning to the cellSpursJobMain2
+ * tail-call.  Until trace/memcheck are wired we just no-op. */
 void _spurs_jq_syscall_finalize(CellSpursJobContext2 *ctx)
 {
     _UNUSED(ctx);
