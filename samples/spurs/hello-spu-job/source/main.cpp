@@ -1,23 +1,28 @@
 /*
  * hello-spu-job - PPU side.
  *
- * STATUS: header surface + libspurs_job.a + spurs_job.ld + raw-image
- * objcopy chain are all in place and produce a byte-correct SPU job
- * binary.  The SPRX dispatcher however still rejects the descriptor
- * with JOB_DESCRIPTOR (0x80410a0b) - the BINARY2 binaryInfo[10] wire
- * format expected by the runtime contains additional fields whose
- * exact layout the reference SDK's job_elf-to-bin tool produces from
- * inputs that depend on the -mspurs-job GCC patch (e_flags=1 in the
- * SPU ELF header, plus a _cell_spu_ls_param symbol layout we don't
- * synthesise).  Resolving that needs either RPCS3 dispatcher source
- * cross-reference or a job_elf-to-bin reimplementation; both are out
- * of scope for this iteration.
+ * STATUS: two of three known dispatcher gates cleared.
+ *   - JOB_DESCRIPTOR (0x80410a0b) gate: cleared by setting
+ *     binaryInfo[0..3] = "bin2" magic.
+ *   - SPU ELF acceptance gate: the SPU ELF passes the reference
+ *     wrapping tool cleanly (see sdk/libspurs_job linker script).
+ *   - MEMORY_SIZE (0x80410a17) gate: STILL FIRING.  Reported value
+ *     at jobChain+0x84 is constant 0x0003F700 across every
+ *     descriptor variation we've tried.  The dispatcher rejects
+ *     ANY non-zero binaryInfo[4..7] regardless of binary content
+ *     (flat raw / ELF / jobbin2-wrapped), sizeBinary, or the other
+ *     descriptor size fields.  See docs/spurs-job-binary2-re.md
+ *     Sessions 5 + 6 for the full probe matrix and decoded
+ *     dispatcher disassembly; next-session approaches need either
+ *     a memory-write watchpoint at &jobChain.error via RPCS3's GDB
+ *     stub, or SPU instruction trace logging to capture which of
+ *     the four 0xa17 sites fires and what register state preceded
+ *     it.
  *
- * The sample below still drives the JobChain machinery end-to-end -
- * Spurs2 init, attribute/chain create + run + halt-diagnose + join +
- * teardown - it just times out waiting for the SPU sentinel rather
- * than printing SUCCESS.  The diagnostic loop reports the real halt
- * statusCode + dispatcher PC so this stays useful as a reproducer.
+ * Sample drives the JobChain machinery end-to-end and prints a
+ * halt diagnostic + the full job-descriptor + chain-info bytes so
+ * it stays useful as a reproducer until the dispatcher's
+ * MEMORY_SIZE trigger is decoded.
  */
 
 #include <cstdio>
@@ -33,6 +38,22 @@ SYS_PROCESS_PARAM(1001, 0x10000);
 
 static const int kSpuPrintfPriority = 999;
 static const uint32_t kMagic        = 0xC0FFEE99u;
+
+/* Dump 0x70..0xa0 of the CellSpursJobChain to confirm what value is
+ * actually parked at +0x80 (RPCS3's CellSpursJobChain.error field) and
+ * +0x88 (cause).  Helps separate "struct-offset misread" from "real
+ * write of 0x80410a0b". */
+static void dump_jc(const void *jc_, const char *tag)
+{
+    const uint8_t *jc = (const uint8_t *)jc_;
+    std::printf("  jc[%s] raw bytes [0x70..0xa0]:\n", tag);
+    for (int row = 0; row < 3; ++row) {
+        std::printf("    %02x:", 0x70 + row * 16);
+        for (int col = 0; col < 16; ++col)
+            std::printf(" %02x", jc[0x70 + row * 16 + col]);
+        std::printf("\n");
+    }
+}
 
 /* The job descriptor and the chain entry both need 128-byte alignment. */
 static CellSpursJob256 s_job __attribute__((aligned(128)));
@@ -70,44 +91,52 @@ int main(void)
 
     /* --- Build the CellSpursJob256 descriptor --- */
     std::memset(&s_job, 0, sizeof(s_job));
-    /* cellSpursJobHeaderSetJobbin2Param validates against a
-     * make_jobbin2-wrapped binary (with magic + metadata header).
-     * Our toolchain embeds a flat raw image instead — so the helper
-     * returns CELL_SPURS_JOB_ERROR_INVAL (0x80410a02) and we fall
-     * back to filling binaryInfo[] by hand.  This is the canonical
-     * path until make_jobbin2 ships. */
-    /* BINARY2-format job descriptor.  Our raw image starts with the
-     * canonical xori-dance signature in .before_text, which the SPRX
-     * recognises as a valid jobbin2 entry stub.  Layout for BINARY2:
-     *   binaryInfo[0..3] = additional bss/extension size, in 16-byte
-     *                       units (we don't need any extra space)
-     *   binaryInfo[4..7] = eaBinary (32-bit EA of the raw image)
-     *   binaryInfo[8..9] = sizeBinary = file size in 16-byte units
-     * Legacy jobType=0 was reproducibly returning CELL_SPURS_JOB_ERROR_PERM
-     * from the SPRX dispatcher; BINARY2 is what cellSpursJobHeaderSetJobbin2Param
-     * produces and what the dispatcher seems to want. */
-    {
-        uint8_t *bi = s_job.header.binaryInfo;
-        const uint32_t extraSize16 = 0;
-        const uint32_t eaBin       = (uint32_t)(uintptr_t)hello_spu_job_bin;
-        const uint16_t sizeBin16   = CELL_SPURS_GET_SIZE_BINARY(hello_spu_job_bin_size);
-        bi[0] = (uint8_t)(extraSize16 >> 24);
-        bi[1] = (uint8_t)(extraSize16 >> 16);
-        bi[2] = (uint8_t)(extraSize16 >> 8);
-        bi[3] = (uint8_t)(extraSize16);
-        bi[4] = (uint8_t)(eaBin >> 24);
-        bi[5] = (uint8_t)(eaBin >> 16);
-        bi[6] = (uint8_t)(eaBin >> 8);
-        bi[7] = (uint8_t)(eaBin);
-        bi[8] = (uint8_t)(sizeBin16 >> 8);
-        bi[9] = (uint8_t)(sizeBin16);
-    }
-    s_job.header.jobType = CELL_SPURS_JOB_TYPE_BINARY2;
+    /* CellSpursJobHeader.binaryInfo[10] is a UNION over the leading
+     * fields of the BINARY2-format header:
+     *   offset 0..7  uint64_t eaBinary    (full 64-bit EA of the image)
+     *   offset 8..9  uint16_t sizeBinary  (image size in 16-byte units)
+     * Setting binaryInfo[0..3] to a magic word writes the high 32 bits
+     * of eaBinary, parking the EA in unmapped memory and tripping the
+     * dispatcher's MEMORY_SIZE gate when it tries to DMA the image.
+     * Use the union member directly. */
+    s_job.header.eaBinary   = (uint64_t)(uintptr_t)hello_spu_job_bin;
+    s_job.header.sizeBinary = CELL_SPURS_GET_SIZE_BINARY(hello_spu_job_bin_size);
+    s_job.header.jobType    = CELL_SPURS_JOB_TYPE_BINARY2;
     std::printf("  BINARY2 jobbin fill: eaBin=%#x sizeBin16=%u (=%u bytes) jobType=%#x\n",
                 (unsigned)(uintptr_t)hello_spu_job_bin,
                 (unsigned)CELL_SPURS_GET_SIZE_BINARY(hello_spu_job_bin_size),
                 (unsigned)hello_spu_job_bin_size,
                 (unsigned)s_job.header.jobType);
+
+    /* Dump the first 64 bytes of the job descriptor so we can see the
+     * exact CellSpursJobHeader layout the dispatcher will DMA. */
+    {
+        const uint8_t *jb = (const uint8_t *)&s_job;
+        std::printf("  s_job raw bytes [0x00..0x40]:\n");
+        for (int row = 0; row < 4; ++row) {
+            std::printf("    %02x:", row * 16);
+            for (int col = 0; col < 16; ++col)
+                std::printf(" %02x", jb[row * 16 + col]);
+            std::printf("\n");
+        }
+        std::printf("  CellSpursJobHeader sizeof=%u  offsets:\n",
+                    (unsigned)sizeof(CellSpursJobHeader));
+        std::printf("    binaryInfo=%u sizeDmaList=%u eaHighInput=%u\n",
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, binaryInfo),
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, sizeDmaList),
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, eaHighInput));
+        std::printf("    useInOutBuffer=%u sizeInOrInOut=%u sizeOut=%u\n",
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, useInOutBuffer),
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, sizeInOrInOut),
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, sizeOut));
+        std::printf("    sizeStack=%u sizeScratch=%u eaHighCache=%u\n",
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, sizeStack),
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, sizeScratch),
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, eaHighCache));
+        std::printf("    sizeCacheDmaList=%u jobType=%u\n",
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, sizeCacheDmaList),
+                    (unsigned)__builtin_offsetof(CellSpursJobHeader, jobType));
+    }
 
     /* SPU side reads workArea.userData[0..1] for {out_ea, magic}.
      * sizeDmaList stays 0 - no input list this round, so the SPU job
@@ -118,7 +147,11 @@ int main(void)
     /* Job stack / scratch: the dispatcher allocates per-job, but the
      * descriptor needs minimum quadword counts.  4 KB stack + no
      * scratch is plenty for our 4-instruction job. */
-    s_job.header.sizeStack   = 256;  /* in 16-byte units => 4096 bytes */
+    /* Reference job_hello descriptor leaves these all at zero (the
+     * dispatcher provisions stack/scratch from the job buffer it
+     * already sized).  Setting sizeStack=256 above pushed the
+     * dispatcher past its budget and reproduced as MEMORY_SIZE. */
+    s_job.header.sizeStack   = 0;
     s_job.header.sizeScratch = 0;
     s_job.header.useInOutBuffer = 0;
     s_job.header.sizeInOrInOut  = 0;
@@ -135,15 +168,15 @@ int main(void)
     std::memset(&jcAttr, 0, sizeof(jcAttr));
     rc = cellSpursJobChainAttributeInitialize(&jcAttr, s_chain,
                                               /*sizeJobDescriptor       */ 256,
-                                              /*maxGrabbedJob           */ 1,
+                                              /*maxGrabbedJob           */ 16,
                                               s_priorityTable,
-                                              /*maxContention           */ 1,
+                                              /*maxContention           */ 4,
                                               /*autoRequestSpuCount     */ true,
                                               /*tag1                    */ 0,
                                               /*tag2                    */ 1,
                                               /*isFixedMemAlloc         */ false,
                                               /*maxSizeJobDescriptor    */ 256,
-                                              /*initialRequestSpuCount  */ 1);
+                                              /*initialRequestSpuCount  */ 0);
     if (rc) { std::printf("  JobChainAttribute init: %#x\n", rc); goto teardown; }
     cellSpursJobChainAttributeSetName(&jcAttr, "spu-job");
     cellSpursJobChainAttributeSetHaltOnError(&jcAttr);
@@ -158,6 +191,7 @@ int main(void)
         rc = cellSpursRunJobChain(jc);
         if (rc) { std::printf("  RunJobChain: %#x\n", rc); delete jc; goto teardown; }
         std::printf("  RunJobChain ok; polling for sentinel ...\n");
+        dump_jc(jc, "post-Run");
 
         /* Poll on s_out[0] but also peek at chain info so a silent
          * dispatcher reject (isHalted=1) tells us why nothing's
@@ -196,7 +230,10 @@ int main(void)
                     std::printf("           GetError: cause=%p\n", errCause);
                 else
                     std::printf("           GetError: %#x\n", gerc);
-                if (info.isHalted) break;
+                if (info.isHalted) {
+                    dump_jc(jc, "halted");
+                    break;
+                }
             } else {
                 std::printf("  [round %d] no sentinel; GetJobChainInfo: %#x\n",
                             round, qrc);
