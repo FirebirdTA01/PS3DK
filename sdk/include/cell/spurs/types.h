@@ -13,10 +13,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+
+#ifndef __SPU__
 #include <sys/types.h>
 #include <sys/spu_thread.h>
 #include <sys/spu_thread_group.h>
 #include <ppu-types.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,10 +71,13 @@ typedef struct CellSpurs2 {
 #endif
 
 /* C entry points consumed by the C++ wrappers + direct-C callers.
- * All resolve to NIDs in libspurs_stub.a. */
+ * All resolve to NIDs in libspurs_stub.a.  PPU-side only - SPU code
+ * sees a CellSpurs* purely as an opaque EA target. */
 
 #define _CELL_SPURS_ATTRIBUTE_REVISION     0x02
 #define _CELL_SPURS_INTERNAL_VERSION       0x330000
+
+#ifndef __SPU__
 
 extern int _cellSpursAttributeInitialize(CellSpursAttribute *attr,
                                          unsigned int revision,
@@ -232,5 +238,7 @@ public:
 }   /* namespace cell */
 
 #endif /* __cplusplus */
+
+#endif /* __SPU__ */
 
 #endif /* __PS3DK_CELL_SPURS_TYPES_H__ */

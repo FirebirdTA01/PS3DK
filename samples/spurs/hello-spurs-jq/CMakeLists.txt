@@ -12,7 +12,7 @@
 #   cmake --build build
 
 cmake_minimum_required(VERSION 3.20)
-project(hello-spurs-jq CXX)
+project(hello-spurs-jq C CXX ASM)
 
 include(ps3-self)
 
@@ -22,5 +22,19 @@ target_compile_features(hello-spurs-jq PRIVATE cxx_std_17)
 target_link_libraries(hello-spurs-jq PRIVATE
     spurs_jq_stub spurs_stub c_stub sysmodule_stub sysutil rt lv2 m
 )
+
+# SPU side - currently a link-validation stub that pulls in
+# libspurs_jq.a.  The real JQ scheduler entry point comes from
+# libspurs_jq's cellSpursJobMain2; user code only fills in per-job
+# bodies dispatched from inside the scheduler.
+ps3_add_spu_image(hello-spurs-jq
+    NAME hello_spurs_jq
+    SOURCES spu/source/main.c
+    NOSTARTFILES
+    JOBBIN
+    CFLAGS -mspurs-job
+    LDFLAGS -mspurs-job -Wl,-q
+    LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_job.ld
+    LIBS spurs_jq spurs_job)
 
 ps3_add_self(hello-spurs-jq)
