@@ -13,7 +13,8 @@
 
 PS3DEV      ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 PS3DK       ?= $(PS3DEV)/ps3dk
-INSTALL_INC := $(PS3DK)/ppu/include
+INSTALL_INC     := $(PS3DK)/ppu/include
+INSTALL_INC_SPU := $(PS3DK)/spu/include
 
 # Path to the version generator (relative to this Makefile).
 VERSION_SH  := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../scripts/version.sh)
@@ -113,11 +114,32 @@ HEADERS := \
 
 SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread
 
+# SPU-side headers: SIMD class wrappers (simd + bits/simd_*.h).
+# Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
+# we mirror that under $(PS3DK)/spu/include/.
+SPU_HEADERS := \
+    include-spu/simd \
+    include-spu/bits/simd_scalars.h \
+    include-spu/bits/simd_bool2.h \
+    include-spu/bits/simd_bool4.h \
+    include-spu/bits/simd_bool8.h \
+    include-spu/bits/simd_bool16.h \
+    include-spu/bits/simd_char16.h \
+    include-spu/bits/simd_uchar16.h \
+    include-spu/bits/simd_short8.h \
+    include-spu/bits/simd_ushort8.h \
+    include-spu/bits/simd_int4.h \
+    include-spu/bits/simd_uint4.h \
+    include-spu/bits/simd_llong2.h \
+    include-spu/bits/simd_ullong2.h \
+    include-spu/bits/simd_float4.h \
+    include-spu/bits/simd_double2.h
+
 .PHONY: all install clean version-header $(SUBLIBS)
 
 all: $(SUBLIBS)
 
-install: install-headers install-version install-sublibs
+install: install-headers install-spu-headers install-version install-sublibs
 
 install-headers:
 	@for h in $(HEADERS); do \
@@ -126,6 +148,15 @@ install-headers:
 	    install -d "$$(dirname $$dst)"; \
 	    install -m 0644 "$$h" "$$dst"; \
 	    echo "  header  $$rel"; \
+	done
+
+install-spu-headers:
+	@for h in $(SPU_HEADERS); do \
+	    rel="$${h#include-spu/}"; \
+	    dst="$(INSTALL_INC_SPU)/$$rel"; \
+	    install -d "$$(dirname $$dst)"; \
+	    install -m 0644 "$$h" "$$dst"; \
+	    echo "  spu hdr $$rel"; \
 	done
 
 # cell/sdk_version.h is generated from the current git state at install
