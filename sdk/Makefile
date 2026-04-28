@@ -112,7 +112,19 @@ HEADERS := \
     include/cell/mouse.h \
     include/cell/padfilter.h
 
-SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread
+SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job
+
+# Headers shared across PPU + SPU sides - the SPU job runtime needs to
+# see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
+# definitions the PPU control surface uses.  These get installed into
+# both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
+# (via this list).
+SHARED_SPURS_SPU_HEADERS := \
+    include/cell/spurs/job_descriptor.h \
+    include/cell/spurs/job_commands.h \
+    include/cell/spurs/job_chain_types.h \
+    include/cell/spurs/error.h \
+    include/cell/spurs/version.h
 
 # SPU-side headers: SIMD class wrappers (simd + bits/simd_*.h).
 # Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
@@ -139,7 +151,7 @@ SPU_HEADERS := \
 
 all: $(SUBLIBS)
 
-install: install-headers install-spu-headers install-version install-sublibs
+install: install-headers install-spu-headers install-shared-spurs-spu-headers install-version install-sublibs
 
 install-headers:
 	@for h in $(HEADERS); do \
@@ -157,6 +169,15 @@ install-spu-headers:
 	    install -d "$$(dirname $$dst)"; \
 	    install -m 0644 "$$h" "$$dst"; \
 	    echo "  spu hdr $$rel"; \
+	done
+
+install-shared-spurs-spu-headers:
+	@for h in $(SHARED_SPURS_SPU_HEADERS); do \
+	    rel="$${h#include/}"; \
+	    dst="$(INSTALL_INC_SPU)/$$rel"; \
+	    install -d "$$(dirname $$dst)"; \
+	    install -m 0644 "$$h" "$$dst"; \
+	    echo "  shared  $$rel (spu)"; \
 	done
 
 # cell/sdk_version.h is generated from the current git state at install
