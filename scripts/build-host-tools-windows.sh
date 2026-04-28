@@ -14,6 +14,8 @@
 #   * make_self_npdrm.exe — NPDRM-signed SELF builder (same libs)
 #   * package_finalize.exe — npdrm pkg finalisation (same libs)
 #   * fself.exe           — fake-signed SELF builder (zlib only)
+#   * bin2s.exe           — PSL1GHT binary-to-assembly helper
+#   * cgcomp.exe          — legacy PSL1GHT Cg shader compiler
 #
 # Tools we skip locally:
 #   * sprxlinker.exe — needs libelf cross.  Mingw-w64 doesn't ship libelf
@@ -141,6 +143,32 @@ extract_once() {
     fi
     say "Extracting $tarball -> $SRC_ROOT/$dirname"
     tar -xf "$SRC_ROOT/$tarball" -C "$SRC_ROOT"
+}
+
+ensure_psl1ght_source() {
+    local psl1ght_src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT"
+    if [[ -f "$psl1ght_src/tools/generic/bin2s.c" && -d "$psl1ght_src/tools/cgcomp/source" ]]; then
+        return 0
+    fi
+
+    if [[ -e "$psl1ght_src" && ! -d "$psl1ght_src/.git" ]]; then
+        die "PSL1GHT source at $psl1ght_src is incomplete and is not a git checkout. Run scripts/bootstrap.sh or remove that directory and re-run."
+    fi
+
+    command -v git >/dev/null \
+        || die "git not on PATH and PSL1GHT source is missing. Run scripts/bootstrap.sh first."
+
+    mkdir -p "$(dirname "$psl1ght_src")"
+    if [[ -d "$psl1ght_src/.git" ]]; then
+        say "Updating PSL1GHT source for legacy host tools"
+        git -C "$psl1ght_src" pull --ff-only --depth 1
+    else
+        say "Fetching PSL1GHT source for legacy host tools"
+        git clone --depth 1 https://github.com/ps3dev/PSL1GHT.git "$psl1ght_src"
+    fi
+
+    [[ -f "$psl1ght_src/tools/generic/bin2s.c" && -d "$psl1ght_src/tools/cgcomp/source" ]] \
+        || die "PSL1GHT legacy host-tool sources missing after fetch"
 }
 
 # -----------------------------------------------------------------------------
@@ -393,7 +421,45 @@ build_psl1ght_tools() {
 }
 
 # -----------------------------------------------------------------------------
-# 7. Host-side Python + assets that the .self / .pkg pipeline needs.
+# 7. PSL1GHT legacy sample helpers: bin2s and cgcomp.
+#
+#    CMake sample helpers call these from $PS3DK/bin on Windows.  They are
+#    small host-side tools with no dependency on the target SDK build.
+# -----------------------------------------------------------------------------
+build_psl1ght_legacy_tools() {
+    say "Cross-compiling PSL1GHT legacy host tools (bin2s + cgcomp)"
+
+    ensure_psl1ght_source
+
+    local psl1ght_src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT"
+    local bin2s_src="$psl1ght_src/tools/generic/bin2s.c"
+    local cgcomp_src="$psl1ght_src/tools/cgcomp"
+    local cgcomp_srcs=()
+
+    [[ -f "$bin2s_src" ]] || die "bin2s source missing: $bin2s_src"
+    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc \
+        "$bin2s_src" -o "$STAGE_BIN/bin2s.exe"
+    say "  staged bin2s.exe"
+
+    mapfile -t cgcomp_srcs < <(find "$cgcomp_src/source" -maxdepth 1 -name '*.cpp' -print | sort)
+    [[ ${#cgcomp_srcs[@]} -gt 0 ]] || die "no cgcomp .cpp sources under $cgcomp_src/source"
+    "$HOST_TRIPLE-g++" -std=c++11 -O2 -Wall -DWIN32 \
+        -static -static-libgcc -static-libstdc++ \
+        -I"$cgcomp_src/include" \
+        "${cgcomp_srcs[@]}" \
+        -o "$STAGE_BIN/cgcomp.exe"
+    say "  staged cgcomp.exe"
+
+    if [[ -f "$cgcomp_src/cg.dll" ]]; then
+        install -m 0644 "$cgcomp_src/cg.dll" "$STAGE_BIN/cg.dll"
+        say "  staged cg.dll"
+    else
+        warn "cg.dll not found next to cgcomp.exe source output. cgcomp.exe will start but legacy Cg shader samples need cg.dll beside it in the final Windows SDK."
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# 8. Host-side Python + assets that the .self / .pkg pipeline needs.
 # -----------------------------------------------------------------------------
 stage_python_and_assets() {
     say "Staging host Python tools + assets"
@@ -427,6 +493,7 @@ build_openssl
 build_rust_tools
 build_rsx_cg_compiler
 build_psl1ght_tools
+build_psl1ght_legacy_tools
 stage_python_and_assets
 
 say "=== Done ==="

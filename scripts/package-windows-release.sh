@@ -215,6 +215,82 @@ else
     warn "No --tools-zip provided and $STAGE_HOST_TOOLS_BIN is empty.  The release zip will ship without rsx-cg-compiler.exe / make_self.exe / nidgen.exe / etc.  Either run scripts/build-host-tools-windows.sh first (to populate the staged dir), or pass --tools-zip=PATH pointing at release.yml's build-host-tools-windows artifact."
 fi
 
+validate_windows_release_payload() {
+    say "Validating Windows release payload"
+
+    local missing=0
+    local required_bins=(
+        abi-verify.exe
+        bin2s.exe
+        cg.dll
+        cgcomp.exe
+        coverage-report.exe
+        fself.exe
+        make_self.exe
+        make_self_npdrm.exe
+        nidgen.exe
+        package_finalize.exe
+        rsx-cg-compiler.exe
+        sprxlinker.exe
+    )
+    local required_ppu_libs=(
+        libaudio_stub.a
+        libc_stub.a
+        libfs_stub.a
+        libgcm_sys.a
+        libio.a
+        libjpgdec_stub.a
+        libl10n_stub.a
+        liblv2_stub.a
+        libpngdec_stub.a
+        librtc_stub.a
+        libspurs_jq_stub.a
+        libspurs_stub.a
+        libsync2_stub.a
+        libsync_stub.a
+        libsysmodule_stub.a
+        libsysutil_ap_stub.a
+        libsysutil_audio_out_stub.a
+        libsysutil_imejp_stub.a
+        libsysutil_music_decode_stub.a
+        libsysutil_music_export_stub.a
+        libsysutil_music_stub.a
+        libsysutil_savedata_extra_stub.a
+        libsysutil_savedata_stub.a
+        libsysutil_screenshot_stub.a
+        libsysutil_stub.a
+        libsysutil_subdisplay_stub.a
+    )
+
+    for exe in "${required_bins[@]}"; do
+        if [[ ! -f "$STAGE_DIR/bin/$exe" ]]; then
+            warn "Missing required Windows host tool: bin/$exe"
+            missing=1
+        fi
+    done
+
+    for lib in "${required_ppu_libs[@]}"; do
+        if [[ ! -f "$STAGE_DIR/ppu/lib/$lib" ]]; then
+            warn "Missing required PPU stub/archive: ppu/lib/$lib"
+            missing=1
+        fi
+    done
+
+    if command -v file >/dev/null 2>&1; then
+        for exe in "${required_bins[@]}"; do
+            [[ -f "$STAGE_DIR/bin/$exe" ]] || continue
+            if file -b "$STAGE_DIR/bin/$exe" | grep -q '^ELF '; then
+                warn "Windows release contains Linux ELF in bin/$exe"
+                missing=1
+            fi
+        done
+    fi
+
+    [[ "$missing" -eq 0 ]] || die "Windows release payload is incomplete. Run scripts/build-cell-stub-archives.sh and provide the complete Windows host-tools artifact via --tools-zip, or run scripts/build-host-tools-windows.sh before packaging."
+}
+
+validate_windows_release_payload
+
 # 5. setup.cmd: a one-shot environment activator for Windows users.
 cat > "$STAGE_DIR/setup.cmd" <<'EOF'
 @echo off

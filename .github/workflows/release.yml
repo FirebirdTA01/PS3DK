@@ -261,6 +261,17 @@ jobs:
           cmake --version | head -1
           pkg-config --modversion libelf || true
 
+      - name: Fetch PSL1GHT host-tool sources
+        run: |
+          set -e
+          mkdir -p src/ps3dev
+          if [ ! -d src/ps3dev/PSL1GHT/.git ]; then
+            git clone --depth 1 https://github.com/ps3dev/PSL1GHT.git src/ps3dev/PSL1GHT
+          else
+            git -C src/ps3dev/PSL1GHT fetch --depth 1 origin
+            git -C src/ps3dev/PSL1GHT reset --hard FETCH_HEAD
+          fi
+
       - name: Build Rust workspace (release)
         working-directory: tools
         env:
@@ -288,6 +299,25 @@ jobs:
           cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
           file tools/rsx-cg-compiler/build/rsx-cg-compiler.exe
 
+      - name: Build PSL1GHT legacy host tools (statically linked)
+        run: |
+          set -e
+          gcc -O2 -Wall -static -static-libgcc \
+              src/ps3dev/PSL1GHT/tools/generic/bin2s.c \
+              -o src/ps3dev/PSL1GHT/tools/generic/bin2s.exe
+          g++ -std=c++11 -O2 -Wall -DWIN32 \
+              -static -static-libgcc -static-libstdc++ \
+              -Isrc/ps3dev/PSL1GHT/tools/cgcomp/include \
+              src/ps3dev/PSL1GHT/tools/cgcomp/source/*.cpp \
+              -o src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe
+          if [ -f src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll ]; then
+            file src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll
+          else
+            echo "::warning::src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll is missing; Windows release packaging will fail unless the host-tools artifact supplies it."
+          fi
+          file src/ps3dev/PSL1GHT/tools/generic/bin2s.exe
+          file src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe
+
       - name: Smoke-test --version flags
         run: |
           set -e
@@ -296,6 +326,11 @@ jobs:
           tools/target/release/coverage-report.exe --version
           tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
           file tools/sprx-linker/sprxlinker.exe
+          file src/ps3dev/PSL1GHT/tools/generic/bin2s.exe
+          file src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe
+          if [ -f src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll ]; then
+            file src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll
+          fi
 
       - name: Stage tool zip
         run: |
@@ -308,6 +343,11 @@ jobs:
           done
           cp tools/sprx-linker/sprxlinker.exe                       "$stage/bin/"
           cp tools/rsx-cg-compiler/build/rsx-cg-compiler.exe        "$stage/bin/"
+          cp src/ps3dev/PSL1GHT/tools/generic/bin2s.exe             "$stage/bin/"
+          cp src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe             "$stage/bin/"
+          if [ -f src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll ]; then
+            cp src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll               "$stage/bin/"
+          fi
           # Strip best-effort.
           strip "$stage/bin/"*.exe || true
           # Bundled README.
