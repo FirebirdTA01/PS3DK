@@ -1,0 +1,23 @@
+// simd - SPU C++ SIMD class wrappers around vec_* types.
+//
+// Use:  #include <simd>     and types live in namespace simd.
+
+#ifndef PS3TC_SPU_SIMD
+#define PS3TC_SPU_SIMD
+
+#include "bits/simd_bool16.h"
+#include "bits/simd_bool8.h"
+#include "bits/simd_bool4.h"
+#include "bits/simd_bool2.h"
+#include "bits/simd_char16.h"
+#include "bits/simd_uchar16.h"
+#include "bits/simd_short8.h"
+#include "bits/simd_ushort8.h"
+#include "bits/simd_int4.h"
+#include "bits/simd_uint4.h"
+#include "bits/simd_llong2.h"
+#include "bits/simd_ullong2.h"
+#include "bits/simd_float4.h"
+#include "bits/simd_double2.h"
+
+#endif
