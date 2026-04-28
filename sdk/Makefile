@@ -120,6 +120,7 @@ SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job
 # both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
+    include/cell/error.h \
     include/cell/spurs/job_descriptor.h \
     include/cell/spurs/job_commands.h \
     include/cell/spurs/job_chain_types.h \

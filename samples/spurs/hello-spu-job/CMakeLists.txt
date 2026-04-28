@@ -37,7 +37,7 @@ ps3_add_spu_image(hello-spu-job
     # dispatcher applies.
     CFLAGS -mspurs-job
     LDFLAGS -mspurs-job -Wl,-q
-    LDSCRIPT $ENV{PS3DEV}/ps3dk/spu/ldscripts/spurs_job.ld
+    LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_job.ld
     LIBS spurs_job)
 
 ps3_add_self(hello-spu-job)
