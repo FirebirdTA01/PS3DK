@@ -124,7 +124,15 @@ fetch() {
     fi
     for url in "$@"; do
         say "Fetching $url"
-        if wget --quiet --continue -O "$SRC_ROOT/$tarball" "$url"; then
+        if wget --quiet \
+            --timeout=30 \
+            --dns-timeout=15 \
+            --connect-timeout=15 \
+            --read-timeout=30 \
+            --tries=3 \
+            --waitretry=5 \
+            --continue \
+            -O "$SRC_ROOT/$tarball" "$url"; then
             return 0
         fi
         rm -f "$SRC_ROOT/$tarball"
@@ -577,8 +585,11 @@ stage_python_and_assets() {
     # Make the Python entry-point scripts executable so they can be invoked
     # directly when Python is on PATH (Windows still respects the +x bit).
     for f in pkg.py sfo.py fself.py; do
-        [[ -f "$STAGE_BIN/$f" ]] && chmod +x "$STAGE_BIN/$f"
+        if [[ -f "$STAGE_BIN/$f" ]]; then
+            chmod +x "$STAGE_BIN/$f"
+        fi
     done
+    return 0
 }
 
 # -----------------------------------------------------------------------------
