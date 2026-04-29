@@ -222,7 +222,6 @@ validate_windows_release_payload() {
     local required_bins=(
         abi-verify.exe
         bin2s.exe
-        cg.dll
         cgcomp.exe
         coverage-report.exe
         fself.exe
@@ -268,6 +267,9 @@ validate_windows_release_payload() {
             missing=1
         fi
     done
+    if [[ ! -f "$STAGE_DIR/bin/cg.dll" ]]; then
+        warn "Optional legacy Cg runtime not staged: bin/cg.dll. cgcomp.exe may not run, but rsx-cg-compiler.exe is packaged and is the supported shader compiler."
+    fi
 
     for lib in "${required_ppu_libs[@]}"; do
         if [[ ! -f "$STAGE_DIR/ppu/lib/$lib" ]]; then
