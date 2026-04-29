@@ -111,11 +111,17 @@ static struct {
     int       num_verts;
     int       max_verts;
 
-    /* Shader handles — the vp_ucode pointer is sys-mem delivered by
-     * cgcomp-compiled vpo; the fp got memcpy'd into fp_ucode_mem. */
-    rsxVertexProgram   *vp;
-    rsxFragmentProgram *fp;
-    void               *vp_ucode;
+    /* Shader handles.  The .vpo / .fpo blobs we ship are CgBinaryProgram
+     * containers (rsx-cg-compiler output), so we consume them through
+     * the cellGcmCg* / cellGcmSet* API rather than the legacy cgcomp-
+     * format `rsxVertexProgram` struct walkers (the layouts differ —
+     * feeding a CgBinaryProgram to rsxLoadVertexProgram crashes the
+     * GPU).  vp_ucode is a sys-mem pointer into the VP blob; the FP
+     * ucode is memcpy'd into fp_ucode_mem so RSX can read it from
+     * vidmem. */
+    CGprogram vp;
+    CGprogram fp;
+    void     *vp_ucode;
 
     /* Shader attribute slot indices (resolved via rsx*ProgramGetAttrib
      * against the shader names "position", "color", "texcoord",
@@ -205,36 +211,40 @@ int32_t cellDbgFontInitGcm(const CellDbgFontConfigGcm *cfg)
      * region is 256x256; we only use the top-left 128x128. */
     memcpy(g_dbgfont.atlas_mem, dbgfont_atlas_data, DBGFONT_ATLAS_BYTES);
 
-    /* The compiled .vpo/.fpo are cgBinaryProgram blobs.  Cast to the
-     * opaque PSL1GHT/Sony shader types; rsxVertexProgramGetUCode
-     * returns the sysmem-resident ucode pointer from inside the blob,
-     * and rsxFragmentProgramGetUCode returns an in-blob pointer we
-     * then copy into vidmem because the fragment program must be
-     * bound at an RSX-visible offset. */
-    g_dbgfont.vp = (rsxVertexProgram   *)vpshader_dbgfont_vpo;
-    g_dbgfont.fp = (rsxFragmentProgram *)fpshader_dbgfont_fpo;
+    /* The compiled .vpo / .fpo are CgBinaryProgram blobs from
+     * rsx-cg-compiler.  Walk them via the cellGcmCg* API: the FP ucode
+     * blob lives inside the .fpo container — copy it into vidmem and
+     * leave fp_offset for cellGcmSetFragmentProgram; the VP ucode is
+     * read straight from sysmem at draw time. */
+    g_dbgfont.vp = (CGprogram)vpshader_dbgfont_vpo;
+    g_dbgfont.fp = (CGprogram)fpshader_dbgfont_fpo;
+
+    cellGcmCgInitProgram(g_dbgfont.vp);
+    cellGcmCgInitProgram(g_dbgfont.fp);
 
     void *fp_src = NULL;
     uint32_t fp_size = 0;
-    rsxFragmentProgramGetUCode(g_dbgfont.fp, &fp_src, &fp_size);
+    cellGcmCgGetUCode(g_dbgfont.fp, &fp_src, &fp_size);
     if (!fp_src || fp_size > frag_bytes) return -1;
     memcpy(g_dbgfont.fp_ucode_mem, fp_src, fp_size);
 
     uint32_t vp_size = 0;
-    rsxVertexProgramGetUCode(g_dbgfont.vp, &g_dbgfont.vp_ucode, &vp_size);
+    cellGcmCgGetUCode(g_dbgfont.vp, &g_dbgfont.vp_ucode, &vp_size);
 
-    /* Resolve attribute slots.  The VP / FP sources declare these
-     * by name — the shader compiler records the binding register,
-     * and rsx*ProgramGetAttrib retrieves it at runtime. */
-    rsxProgramAttrib *pa = rsxVertexProgramGetAttrib(g_dbgfont.vp, "position");
-    rsxProgramAttrib *ca = rsxVertexProgramGetAttrib(g_dbgfont.vp, "color");
-    rsxProgramAttrib *ta = rsxVertexProgramGetAttrib(g_dbgfont.vp, "texcoord");
-    rsxProgramAttrib *tu = rsxFragmentProgramGetAttrib(g_dbgfont.fp, "texture");
+    /* Resolve attribute slots from the CgBinary parameter table.
+     * cellGcmCgGetParameterResource returns CG_ATTR0..15 for vertex
+     * inputs and CG_TEXUNIT0..15 for fragment-program samplers; we
+     * subtract the bank base so the result is a plain attribute /
+     * texture-unit index. */
+    CGparameter pa = cellGcmCgGetNamedParameter(g_dbgfont.vp, "position");
+    CGparameter ca = cellGcmCgGetNamedParameter(g_dbgfont.vp, "color");
+    CGparameter ta = cellGcmCgGetNamedParameter(g_dbgfont.vp, "texcoord");
+    CGparameter tu = cellGcmCgGetNamedParameter(g_dbgfont.fp, "texture");
     if (!pa || !ca || !ta || !tu) return -1;
-    g_dbgfont.pos_attrib = pa->index;
-    g_dbgfont.col_attrib = ca->index;
-    g_dbgfont.uv_attrib  = ta->index;
-    g_dbgfont.tex_unit   = tu->index;
+    g_dbgfont.pos_attrib = (int)cellGcmCgGetParameterResource(g_dbgfont.vp, pa) - CG_ATTR0;
+    g_dbgfont.col_attrib = (int)cellGcmCgGetParameterResource(g_dbgfont.vp, ca) - CG_ATTR0;
+    g_dbgfont.uv_attrib  = (int)cellGcmCgGetParameterResource(g_dbgfont.vp, ta) - CG_ATTR0;
+    g_dbgfont.tex_unit   = (int)cellGcmCgGetParameterResource(g_dbgfont.fp, tu) - CG_TEXUNIT0;
 
     g_dbgfont.initialized = 1;
     return 0;
@@ -367,10 +377,8 @@ int32_t cellDbgFontDrawGcm(void)
     rsxSetDepthTestEnable(ctx, GCM_FALSE);
 
     /* Bind the vertex + fragment shaders. */
-    rsxLoadVertexProgram(ctx, g_dbgfont.vp, g_dbgfont.vp_ucode);
-    rsxLoadFragmentProgramLocation(ctx, g_dbgfont.fp,
-                                   g_dbgfont.fp_ucode_off,
-                                   GCM_LOCATION_RSX);
+    cellGcmSetVertexProgram(ctx, g_dbgfont.vp, g_dbgfont.vp_ucode);
+    cellGcmSetFragmentProgram(ctx, g_dbgfont.fp, g_dbgfont.fp_ucode_off);
 
     /* Describe the font atlas as a 2D 8-bit alpha texture.  The
      * fragment shader samples it and uses .w as the alpha-kill
