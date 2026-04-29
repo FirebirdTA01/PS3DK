@@ -22,11 +22,13 @@ target_link_libraries(hello-ppu-cellgcm-vp-loop PRIVATE
     rsx gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m
 )
 
-# Still on cgcomp — blocked on rsx-cg-compiler shader-feature work.
-# vpshader.vcg chains four mul() calls across float4x4 matrices to
-# stretch the program past 7 instructions; the rsx-cg-compiler IR
-# doesn't yet lower the chained-mul pattern (skeleton-stage failure).
-# Migrate once that gap closes.  See samples/gcm/hello-ppu-cellgcm-triangle
+# Still on cgcomp.  rsx-cg-compiler now handles chained mul() for the
+# matrix-only case (mul_chain4_passthrough_v in tests/shaders byte-
+# matches sce-cgc).  vp-loop adds per-channel colour arithmetic
+# (`c.r = c.r * tweak.x + tweak.y + offset.x; ...`) that needs MAD
+# fusion + interleaved emit ordering — captured in
+# tests/shaders/mul_chain4_v.cg as the failing fixture.  Migrate once
+# the MAD fusion path lands.  See samples/gcm/hello-ppu-cellgcm-cube
 # for the canonical migration template.
 ps3_add_cg_shader(hello-ppu-cellgcm-vp-loop shaders/vpshader.vcg)
 ps3_add_cg_shader(hello-ppu-cellgcm-vp-loop shaders/fpshader.fcg)

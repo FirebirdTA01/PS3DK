@@ -17,11 +17,7 @@ target_link_libraries(hello-ppu-cellgcm-sysmenu PRIVATE
     dbgfont gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m
 )
 
-# Still on cgcomp — blocked on the same float2-based vec4 ctor /
-# swizzle-assign pattern that hello-ppu-cellgcm-quad uses.  Migrate
-# once rsx-cg-compiler covers it.  See samples/gcm/hello-ppu-cellgcm-triangle
-# for the canonical migration template.
-ps3_add_cg_shader(hello-ppu-cellgcm-sysmenu shaders/vpshader.vcg)
-ps3_add_cg_shader(hello-ppu-cellgcm-sysmenu shaders/fpshader.fcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-sysmenu shaders/vpshader.vcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-sysmenu shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-cellgcm-sysmenu)
