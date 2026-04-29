@@ -368,6 +368,12 @@ int main(int argc, const char **argv) {
 	init_texture();
 	init_geometry();
 
+	/* Push the VP literal-pool slots (e.g. c[467] = [0,1,0,0] for the
+	 * `float4(x, y, 0, 1)` position output) into the const bank exactly
+	 * once, before the first draw.  These are immutable shader literals;
+	 * binding the program every frame does not need to re-upload them. */
+	cellGcmCgUploadInternalConsts(ctx, vpo);
+
 	set_draw_env(ctx);
 	set_render_state(ctx);
 	set_render_target(ctx, g_frame_index);
