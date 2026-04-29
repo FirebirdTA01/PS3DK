@@ -100,22 +100,41 @@ The dispatcher branches to the binary's `_start` symbol with:
 | `$4` | `CellSpursJob256 *` (argument 2)               |
 | `$80..$127` | callee-saved; preserve bitwise across `_start` |
 
-Canonical `_start` body — exactly 16 bytes (4 instructions); the
-`.before_text` section is zero-padded out to its 32-byte alignment.
-With `.SpuGUID` at vaddr 0..0xF and `.before_text` at vaddr 0x10..0x2F
-the bytes are:
+Canonical `_start` body — exactly 16 bytes (4 instructions) at LS
+0x10..0x1f, followed by a 16-byte `.before_text` tail at LS 0x20..0x2f
+that carries the `BINARY2` magic.  With `.SpuGUID` at vaddr 0..0xF and
+`.before_text` at vaddr 0x10..0x2F the bytes are:
 
 ```
 LS 0x10:  44 01 28 50  xori $80, $80, 4         ; toggle bit 2 of $80
 LS 0x14:  32 00 00 80  br   _start+0x8           ; (forward no-op branch)
 LS 0x18:  44 01 28 50  xori $80, $80, 4         ; toggle back -> net no-op
 LS 0x1c:  32 00 ?? ??  br   cellSpursJobMain2    ; tail-jump (REL16)
-LS 0x20..0x2f: 0x00 padding (alignment fill — no magic, no metadata)
+LS 0x20:  62 69 6e 32  "bin2"                    ; BINARY2 magic word
+LS 0x24..0x2f: 0x00 padding (12 bytes; alignment fill)
 ```
 
 The xori-pair toggles bit 2 of `$80` and toggles it back — net no-op
 on the register. The dispatcher recognises this exact 4-instruction
 byte signature as a valid job entry stub.
+
+### 3.1 BINARY2 magic word at LS 0x20
+
+The dispatcher's deferred descriptor validator reads a 16-byte block
+from LS 0x20 of the loaded job image and compares its leading word
+against `"BIN2"` (`0x42494e32`) and `"bin2"` (`0x62696e32`).  Images
+whose LS 0x20 word matches neither magic are rejected with
+`CELL_SPURS_JOB_ERROR_JOB_DESCRIPTOR` (`0x80410a0b`) written to
+`CellSpursJobChain.error` (`+0x80`); the SPU side never enters the
+user job's `_start`.
+
+The magic is emitted by the trampoline assembler in
+`sdk/libspurs_job/src/job_start.S` immediately after `_start`, so
+linking with `-T spurs_job.ld` and pulling `libspurs_job` into the
+job ELF places the four bytes at the correct LS offset automatically.
+Job binaries built with stand-alone `_start` stubs MUST replicate the
+magic — `0x40200000` (SPU NOP) or `0x00000000` zero padding at LS
+0x20 trips the check.
 
 `cellSpursJobMain2` is responsible for normal stack-frame setup and
 returns via `bi $0` to the dispatcher's per-job epilogue.
