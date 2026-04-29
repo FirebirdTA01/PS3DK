@@ -81,6 +81,7 @@ HEADERS := \
     include/cell/cgb.h \
     include/cell/spurs.h \
     include/cell/spurs/types.h \
+    include/cell/spurs/common.h \
     include/cell/spurs/task_types.h \
     include/cell/spurs/task.h \
     include/cell/spurs/workload.h \
@@ -134,6 +135,7 @@ SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job libspur
 SHARED_SPURS_SPU_HEADERS := \
     include/cell/error.h \
     include/cell/spurs/types.h \
+    include/cell/spurs/common.h \
     include/cell/spurs/exception_types.h \
     include/cell/spurs/job_descriptor.h \
     include/cell/spurs/job_commands.h \

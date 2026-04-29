@@ -19,13 +19,15 @@ CC      := spu-elf-gcc
 AR      := spu-elf-ar
 
 CFLAGS  := -O2 -Wall -Wextra -fno-exceptions -ffreestanding \
-           -falign-functions=8 -mno-branch-hints
+           -falign-functions=8 -mno-branch-hints \
+           -I../include
 SFLAGS  := -Wall
 
 BUILD   := build
 OBJS    := $(BUILD)/crt_spurs_task.o \
            $(BUILD)/spurs_task_exit.o \
-           $(BUILD)/spurs_task_runtime.o
+           $(BUILD)/spurs_task_runtime.o \
+           $(BUILD)/spurs_module_runtime.o
 
 LIB     := $(BUILD)/libspurs_task.a
 
@@ -58,6 +60,8 @@ install: $(LIB)
 	@echo "  header cell/spurs/spu_task.h"
 	@install -m 0644 ../include/cell/spurs/task_types.h $(INSTALL_INC)/cell/spurs/task_types.h
 	@echo "  header cell/spurs/task_types.h"
+	@install -m 0644 ../include/cell/spurs/common.h $(INSTALL_INC)/cell/spurs/common.h
+	@echo "  header cell/spurs/common.h"
 
 clean:
 	@rm -rf $(BUILD)
