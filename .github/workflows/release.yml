@@ -392,6 +392,15 @@ jobs:
 
       - name: Configure ccache
         run: |
+          # Pin CCACHE_DIR to ~/.ccache so it matches the cache action's
+          # `path:` above.  Modern ccache (4.x on the runner) defaults to
+          # $XDG_CACHE_HOME/ccache (~/.cache/ccache), which the cache step
+          # would never see — cache save would skip with "path does not
+          # exist".  Setting CCACHE_DIR for this step covers the
+          # ccache-config commands below, and writing it to $GITHUB_ENV
+          # propagates to the build step that actually populates it.
+          export CCACHE_DIR="$HOME/.ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
           ccache --max-size=2G
           ccache --zero-stats
           # Plumb ccache into the host-side gcc/g++ that build-ppu-toolchain.sh
@@ -465,6 +474,10 @@ jobs:
 
       - name: Configure ccache
         run: |
+          # See PPU job for rationale — pin CCACHE_DIR so it matches the
+          # cache action's `path:`.
+          export CCACHE_DIR="$HOME/.ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
           ccache --max-size=2G
           ccache --zero-stats
           echo "CC=ccache gcc" >> "$GITHUB_ENV"
@@ -559,6 +572,10 @@ jobs:
 
       - name: Configure ccache
         run: |
+          # See PPU job for rationale — pin CCACHE_DIR so it matches the
+          # cache action's `path:`.
+          export CCACHE_DIR="$HOME/.ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
           ccache --max-size=2G
           ccache --zero-stats
           echo "CC=ccache gcc" >> "$GITHUB_ENV"
