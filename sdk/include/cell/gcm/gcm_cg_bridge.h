@@ -316,37 +316,50 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
      * timeout, programs using 33+ get the longer one. */
     *w++ = PS3TC_GCM_METHOD(NV40TCL_TRANSFORM_TIMEOUT, 1);
     *w++ = (vp->registerCount <= 32u) ? 0x0020FFFFu : 0x0030FFFFu;
+}
 
-    /* Upload internal-constant parameters (literal-pool slots that the
-     * compiler packed into the const bank).  These are emitted by
-     * rsx-cg-compiler / sce-cgc whenever a shader needs literal float
-     * values — without this upload the shader reads stale const-bank
-     * data and writes garbage to the output (e.g. the canonical
-     * `out_position = float4(in.x, in.y, 0, 1)` shape relies on a
-     * literal-pool entry holding [0, 1, 0, 0] at c[467]).
-     *
-     * Internal-constants are flagged with paramno == 0xFFFFFFFE in the
-     * param table; their defaultValue offset points at a 16-byte
-     * float[4] block, and resIndex names the const-bank register.
-     * See cellGcmSetVertexProgramConstants for the matching upload
-     * NV40TCL_VP_UPLOAD_CONST_ID encoding. */
+/* -------------------------------------------------------------------- *
+ * Upload literal-pool / "internal-constant" entries for a vertex
+ * program.  These are vec4 slots the compiler packed at the top of the
+ * const bank (c[467] downward) to hold float literals from the source —
+ * without this upload, the bound shader reads stale const-bank data and
+ * writes garbage (e.g. `out_position = float4(x, y, 0, 1)` reads the
+ * 0/1 from a literal-pool slot).
+ *
+ * Designed to be called once per program load (after
+ * cellGcmCgInitProgram), not once per frame.  Internal-constants are
+ * immutable shader literals — uploading them every frame is pure
+ * overhead and can blow the FIFO budget on tight render loops.
+ *
+ * Param-table convention: paramno == 0xFFFFFFFE flags an internal
+ * constant; defaultValue offsets a 16-byte float[4] block; resIndex
+ * names the absolute const-bank slot the ucode reads.
+ * -------------------------------------------------------------------- */
+static inline void cellGcmCgUploadInternalConsts(CellGcmContextData *ctx,
+                                                 CGprogram prog)
+{
+    if (!ctx || !prog) return;
+
+    const CgBinaryProgram *p = (const CgBinaryProgram *)prog;
+    const CgBinaryParameter *params =
+        (const CgBinaryParameter *)((const uint8_t *)p + p->parameterArray);
+
+    for (uint32_t i = 0; i < p->parameterCount; ++i)
     {
-        const CgBinaryParameter *params =
-            (const CgBinaryParameter *)((const uint8_t *)p + p->parameterArray);
-        for (uint32_t i = 0; i < p->parameterCount; ++i)
-        {
-            if (params[i].paramno != (int)0xFFFFFFFEu) continue;
-            const float *vals =
-                (const float *)((const uint8_t *)p + params[i].defaultValue);
-            uint32_t *cw = ps3tc_gcm_reserve(ctx, 6u);
-            if (!cw) return;
-            cw[0] = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, 5);
-            cw[1] = (uint32_t)params[i].resIndex;
-            ((uint32_t *)cw)[2] = ((const uint32_t *)vals)[0];
-            ((uint32_t *)cw)[3] = ((const uint32_t *)vals)[1];
-            ((uint32_t *)cw)[4] = ((const uint32_t *)vals)[2];
-            ((uint32_t *)cw)[5] = ((const uint32_t *)vals)[3];
-        }
+        if (params[i].paramno != (int32_t)0xFFFFFFFEu) continue;
+        if (params[i].defaultValue == 0u)            continue;
+
+        const uint32_t *vals =
+            (const uint32_t *)((const uint8_t *)p + params[i].defaultValue);
+
+        uint32_t *cw = ps3tc_gcm_reserve(ctx, 6u);
+        if (!cw) return;
+        cw[0] = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, 5);
+        cw[1] = (uint32_t)params[i].resIndex;
+        cw[2] = vals[0];
+        cw[3] = vals[1];
+        cw[4] = vals[2];
+        cw[5] = vals[3];
     }
 }
 
@@ -587,6 +600,9 @@ static inline void cellGcmSetFragmentProgramParameter(CGprogram prog,
                                                       uint32_t addrOffset)
 { cellGcmSetFragmentProgramParameter(gCellGcmCurrentContext, prog, param,
                                      values, addrOffset); }
+
+static inline void cellGcmCgUploadInternalConsts(CGprogram prog)
+{ cellGcmCgUploadInternalConsts(gCellGcmCurrentContext, prog); }
 
 #endif  /* __cplusplus */
 
