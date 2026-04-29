@@ -151,7 +151,15 @@ extract_once() {
 
 ensure_psl1ght_source() {
     local psl1ght_src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT"
-    if [[ -f "$psl1ght_src/tools/generic/bin2s.c" && -d "$psl1ght_src/tools/cgcomp/source" ]]; then
+    # Probe the full set of sources every PSL1GHT-derived tool needs:
+    # geohot/make_self.c + fself/source/ (build_psl1ght_tools), and
+    # generic/bin2s.c + cgcomp/source (build_psl1ght_legacy_tools).
+    # If any are missing we re-fetch — a partial / stale checkout would
+    # otherwise pass the old narrower probe and fail mid-build.
+    if [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
+       && -d "$psl1ght_src/tools/cgcomp/source" \
+       && -f "$psl1ght_src/tools/geohot/make_self.c" \
+       && -d "$psl1ght_src/tools/fself/source" ]]; then
         return 0
     fi
 
@@ -164,15 +172,18 @@ ensure_psl1ght_source() {
 
     mkdir -p "$(dirname "$psl1ght_src")"
     if [[ -d "$psl1ght_src/.git" ]]; then
-        say "Updating PSL1GHT source for legacy host tools"
+        say "Updating PSL1GHT source for host tools"
         git -C "$psl1ght_src" pull --ff-only --depth 1
     else
-        say "Fetching PSL1GHT source for legacy host tools"
+        say "Fetching PSL1GHT source for host tools"
         git clone --depth 1 https://github.com/ps3dev/PSL1GHT.git "$psl1ght_src"
     fi
 
-    [[ -f "$psl1ght_src/tools/generic/bin2s.c" && -d "$psl1ght_src/tools/cgcomp/source" ]] \
-        || die "PSL1GHT legacy host-tool sources missing after fetch"
+    [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
+    && -d "$psl1ght_src/tools/cgcomp/source" \
+    && -f "$psl1ght_src/tools/geohot/make_self.c" \
+    && -d "$psl1ght_src/tools/fself/source" ]] \
+        || die "PSL1GHT host-tool sources missing after fetch"
 }
 
 # -----------------------------------------------------------------------------
@@ -477,12 +488,14 @@ build_sprx_linker() {
 build_psl1ght_tools() {
     say "Cross-compiling PSL1GHT host tools (geohot + fself)"
 
+    ensure_psl1ght_source
+
     local geohot_src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT/tools/geohot"
     local fself_src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT/tools/fself"
     [[ -f "$geohot_src/make_self.c" ]] \
-        || die "PSL1GHT geohot tools source missing — run scripts/bootstrap.sh"
+        || die "PSL1GHT geohot tools source missing after ensure_psl1ght_source — upstream layout changed?"
     [[ -d "$fself_src/source" ]] \
-        || die "PSL1GHT fself source missing — run scripts/bootstrap.sh"
+        || die "PSL1GHT fself source missing after ensure_psl1ght_source — upstream layout changed?"
 
     local cflags="-O2 -I$DEPS_ROOT/include"
     # -static-libgcc keeps libgcc_s_seh-1.dll out of the dependency list.
