@@ -59,11 +59,17 @@ static u32  depth_pitch;
 static u32  depth_offset;
 static u32 *depth_buffer;
 
-static rsxVertexProgram   *vpo;
-static rsxFragmentProgram *fpo;
-static void               *vp_ucode, *fp_ucode;
-static u32                 fp_offset;
-static rsxProgramConst    *transformConst;
+/* CgBinaryProgram blobs from rsx-cg-compiler — consumed via the
+ * cellGcmCg* / cellGcmSet* API so the runtime parses our CgBinary
+ * header instead of mis-reading it through the legacy cgcomp
+ * `rsxVertexProgram` struct. */
+static CGprogram   vpo;
+static CGprogram   fpo;
+static void       *vp_ucode, *fp_ucode;
+static u32         fp_offset;
+static CGparameter transformConst;
+static int         position_index;
+static int         color_index;
 
 static vertex_t *vertex_buffer;
 static u32       vertex_buffer_offset;
@@ -196,17 +202,25 @@ static void set_draw_env(CellGcmContextData *ctx, uint32_t width, uint32_t heigh
 
 static void init_shaders(void) {
 	u32 vpsize = 0, fpsize = 0;
-	vpo = (rsxVertexProgram   *)vpshader_vpo;
-	fpo = (rsxFragmentProgram *)fpshader_fpo;
+	vpo = (CGprogram)vpshader_vpo;
+	fpo = (CGprogram)fpshader_fpo;
 
-	rsxVertexProgramGetUCode(vpo, &vp_ucode, &vpsize);
-	transformConst = rsxVertexProgramGetConst(vpo, "transform");
+	cellGcmCgInitProgram(vpo);
+	cellGcmCgInitProgram(fpo);
+
+	cellGcmCgGetUCode(vpo, &vp_ucode, &vpsize);
+	transformConst = cellGcmCgGetNamedParameter(vpo, "transform");
 
 	void *fp_ucode_blob;
-	rsxFragmentProgramGetUCode(fpo, &fp_ucode_blob, &fpsize);
+	cellGcmCgGetUCode(fpo, &fp_ucode_blob, &fpsize);
 	fp_ucode = rsxMemalign(64, fpsize);
 	memcpy(fp_ucode, fp_ucode_blob, fpsize);
 	cellGcmAddressToOffset(fp_ucode, &fp_offset);
+
+	CGparameter pos = cellGcmCgGetNamedParameter(vpo, "in_position");
+	CGparameter col = cellGcmCgGetNamedParameter(vpo, "in_color");
+	position_index  = pos ? (int)cellGcmCgGetParameterResource(vpo, pos) - CG_ATTR0 : 0;
+	color_index     = col ? (int)cellGcmCgGetParameterResource(vpo, col) - CG_ATTR0 : 3;
 }
 
 static void init_geometry(void) {
@@ -297,17 +311,15 @@ int main(int argc, const char **argv) {
 			float mtx[16];
 			rotz_matrix(angle, mtx);
 
-			rsxLoadVertexProgram(ctx, vpo, vp_ucode);
-			rsxSetVertexProgramParameter(ctx, vpo, transformConst, mtx);
-			rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_POS, 0,
-			                         vertex_buffer_offset + offsetof(vertex_t, pos),
-			                         sizeof(vertex_t), 3,
-			                         GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-			rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_COLOR0, 0,
-			                         vertex_buffer_offset + offsetof(vertex_t, color),
-			                         sizeof(vertex_t), 4,
-			                         GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-			rsxLoadFragmentProgramLocation(ctx, fpo, fp_offset, GCM_LOCATION_RSX);
+			cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
+			cellGcmSetVertexProgramParameter(ctx, transformConst, mtx);
+			cellGcmSetVertexDataArray(ctx, position_index, 0, sizeof(vertex_t), 3,
+			                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
+			                          vertex_buffer_offset + offsetof(vertex_t, pos));
+			cellGcmSetVertexDataArray(ctx, color_index, 0, sizeof(vertex_t), 4,
+			                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
+			                          vertex_buffer_offset + offsetof(vertex_t, color));
+			cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
 
 			rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, 0, 3);
 			angle += 0.04f;
