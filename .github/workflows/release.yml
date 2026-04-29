@@ -718,16 +718,7 @@ jobs:
         id: notes
         run: |
           version="${{ needs.verify-version.outputs.version }}"
-          # Pull the section between '## [<version>]' and the next '## ['.
-          # If extraction fails for any reason, fall back to a generic body.
-          awk -v want="$version" '
-              $0 ~ "^## \\[" want "\\]" { capture = 1; next }
-              capture && /^## \[/        { exit }
-              capture                    { print }
-          ' CHANGELOG.md > .release-notes.md
-          if [ ! -s .release-notes.md ]; then
-            echo "Release ${version}." > .release-notes.md
-          fi
+          ./scripts/extract-release-notes.sh "$version" CHANGELOG.md .release-notes.md
           echo "notes_path=.release-notes.md" >> "$GITHUB_OUTPUT"
 
       - name: Create release + upload assets
