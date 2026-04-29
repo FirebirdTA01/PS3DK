@@ -232,6 +232,13 @@ validate_windows_release_payload() {
         rsx-cg-compiler.exe
         sprxlinker.exe
     )
+    local required_host_files=(
+        pkg.py
+        sfo.py
+        fself.py
+        Struct.py
+        sfo.xml
+    )
     local required_ppu_libs=(
         libaudio_stub.a
         libc_stub.a
@@ -264,6 +271,12 @@ validate_windows_release_payload() {
     for exe in "${required_bins[@]}"; do
         if [[ ! -f "$STAGE_DIR/bin/$exe" ]]; then
             warn "Missing required Windows host tool: bin/$exe"
+            missing=1
+        fi
+    done
+    for file in "${required_host_files[@]}"; do
+        if [[ ! -f "$STAGE_DIR/bin/$file" ]]; then
+            warn "Missing required Windows host helper: bin/$file"
             missing=1
         fi
     done
