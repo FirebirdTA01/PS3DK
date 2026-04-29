@@ -20,6 +20,7 @@
 #include <sys/process.h>
 #include <cell/sysmodule.h>
 #include <cell/sync.h>
+#include <cell/sync/barrier.h>
 #include <cell/sync2.h>
 
 SYS_PROCESS_PARAM(1001, 0x10000);
