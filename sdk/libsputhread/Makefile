@@ -21,6 +21,7 @@ SFLAGS  := -Wall
 
 BUILD   := build
 OBJS    := $(BUILD)/event_flag.o \
+           $(BUILD)/event_port.o \
            $(BUILD)/spu_thread_exit.o
 
 LIB     := $(BUILD)/libsputhread.a
@@ -64,6 +65,8 @@ install: $(LIB)
 	@echo "  header sys/event_flag.h"
 	@install -m 0644 include/sys/spu_thread.h $(INSTALL_INC)/sys/spu_thread.h
 	@echo "  header sys/spu_thread.h"
+	@install -m 0644 include/sys/spu_event.h $(INSTALL_INC)/sys/spu_event.h
+	@echo "  header sys/spu_event.h"
 	@install -m 0644 include/spu_printf.h $(INSTALL_INC)/spu_printf.h
 	@echo "  header spu_printf.h"
 	@install -m 0644 ../include/sys/return_code.h $(INSTALL_INC)/sys/return_code.h

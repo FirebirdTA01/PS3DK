@@ -1,17 +1,20 @@
-/* libsputhread SPU thread / group exit traps.
+/* libsputhread SPU thread / group exit + yield traps.
  *
- * Both routines synchronise with the kernel via SPU event channels
+ * Exit routines synchronise with the kernel via SPU event channels
  * (ch22 = WrEventMask, ch23 = WrEventAck, ch24 = RdEventStat) and
  * then deliver the exit code through the regular outbound mailbox
  * (ch28) before issuing a `stop` instruction.  The `stop` trap code
  * tells the kernel which exit operation it is:
  *
- *   stop 0x102  -> sys_spu_thread_exit       (this thread only)
- *   stop 0x101  -> sys_spu_thread_group_exit (whole thread group)
+ *   stop 0x100  -> sys_spu_thread_group_yield (cooperative yield)
+ *   stop 0x101  -> sys_spu_thread_group_exit  (whole thread group)
+ *   stop 0x102  -> sys_spu_thread_exit        (this thread only)
  *
- * Both functions are byte-identical apart from that one constant.
- * `stop` is a no-return instruction; the trailing `bi $0` exists for
- * symmetry / unwind metadata only.
+ * The two exit functions are byte-identical apart from the `stop`
+ * code; group_yield is a one-instruction barrier with no event-
+ * channel handshake (the kernel handles re-entry from the yield
+ * trap site directly).  `stop` is a no-return instruction; the
+ * trailing `bi $0` exists for symmetry / unwind metadata only.
  */
 	.text
 
@@ -65,3 +68,59 @@ sys_spu_thread_group_exit:
 	stop	0x101                /* trap: thread-group exit */
 2:	bi	$0
 	.size	sys_spu_thread_group_exit, . - sys_spu_thread_group_exit
+
+
+/* void sys_spu_thread_group_yield(void)
+ * Cooperative yield: trap to the kernel, which may re-schedule the
+ * group, then resume execution at the instruction after `stop`. */
+	.globl	sys_spu_thread_group_yield
+	.type	sys_spu_thread_group_yield, @function
+	.align	3
+sys_spu_thread_group_yield:
+	stop	0x100                /* trap: yield */
+	bi	$0
+	.size	sys_spu_thread_group_yield, . - sys_spu_thread_group_yield
+
+
+/* int sys_spu_thread_switch_system_module(uint32_t newAddress)
+ *   r3 = address of the new system module image to swap into LS
+ * Driver-level: requests the kernel to replace the running SPU
+ * image with a new one.  Same channel handshake as exit (ch22/23/24)
+ * plus a `stop 0x120` trap; on EAGAIN the kernel asks us to retry,
+ * so the body loops back into the handshake until either CELL_OK
+ * or a hard error returns.  Returns the kernel's status code. */
+	.globl	sys_spu_thread_switch_system_module
+	.type	sys_spu_thread_switch_system_module, @function
+	.align	3
+sys_spu_thread_switch_system_module:
+	ilhu	$4, 0x8001
+	rchcnt	$2, $ch29           /* mailbox already pending? */
+	ori	$4, $4, 10          /* $4 = 0x8001000a (EAGAIN) */
+	brz	$2, 1f
+.Lssm_ret:
+	ori	$3, $4, 0
+	bi	$0
+1:	il	$5, 0
+	wrch	$ch23, $5           /* ack=0: reset event-state */
+2:	rchcnt	$7, $ch24
+	ceqi	$6, $7, 1
+	.long	0x4020007f          /* nop $127 */
+	brz	$6, 2b              /* spin until ch24 has one event */
+	il	$9, -1
+	hbrr	3f, .Lssm_retry     /* hint: brnz at 3f goes back to retry */
+	ori	$6, $3, 0           /* $6 = new module address */
+	rdch	$2, $ch24           /* drain ch24 */
+	il	$3, 2
+	wrch	$ch22, $9           /* mask all events */
+	ilhu	$8, 0x8001
+	wrch	$ch23, $3           /* ack=2: arm */
+	ori	$5, $8, 10          /* $5 = 0x8001000a (EAGAIN compare value) */
+	rdch	$2, $ch24           /* wait for kernel ack */
+.Lssm_retry:
+	wrch	$ch28, $6           /* arg = new module address */
+	stop	0x120               /* trap: switch_system_module */
+	rdch	$4, $ch29           /* result code */
+	ceq	$10, $4, $5         /* kernel asks retry? */
+3:	brnz	$10, .Lssm_retry    /* loop on EAGAIN */
+	br	.Lssm_ret           /* otherwise return $4 */
+	.size	sys_spu_thread_switch_system_module, . - sys_spu_thread_switch_system_module
