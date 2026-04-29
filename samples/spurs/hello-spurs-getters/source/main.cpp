@@ -47,8 +47,12 @@ struct Result {
     uint32_t tagId;
     uint32_t workloadId;
     uint32_t spuCount;
+    uint32_t pad0;
+    uint64_t elfAddress;
+    uint32_t iwlTaskId;
+    uint32_t modulePollResult;
+    uint32_t cellSpursPoll_b;
     uint32_t sentinel;
-    uint32_t pad;
 };
 
 alignas(128) static volatile Result g_result;
@@ -134,15 +138,25 @@ static bool run_task(cell::Spurs::Spurs *spurs)
                     (unsigned)g_result.workloadId);
         std::printf("  cellSpursGetSpuCount()     = %u   (expect %u)\n",
                     (unsigned)g_result.spuCount, (unsigned)kNumSpu);
+        std::printf("  cellSpursGetElfAddress()   = %#llx\n",
+                    (unsigned long long)g_result.elfAddress);
+        std::printf("  _cellSpursGetIWLTaskId()   = %#x   (= workloadId<<8 | taskId)\n",
+                    (unsigned)g_result.iwlTaskId);
+        std::printf("  cellSpursModulePoll()      = %u\n",
+                    (unsigned)g_result.modulePollResult);
+        std::printf("  cellSpursPoll()            = %u\n",
+                    (unsigned)g_result.cellSpursPoll_b);
 
         /* Sanity validation. */
         bool addr_ok    = (g_result.spursAddress == reinterpret_cast<uint64_t>(spurs));
         bool spu_id_ok  = (g_result.currentSpuId < kNumSpu);
         bool count_ok   = (g_result.spuCount == kNumSpu);
+        bool iwl_ok     = (g_result.iwlTaskId == ((g_result.workloadId << 8) | 0));
         std::printf("\n  SpursAddress match: %s\n", addr_ok   ? "OK" : "MISMATCH");
         std::printf("  CurrentSpuId range: %s\n", spu_id_ok ? "OK" : "OUT OF RANGE");
         std::printf("  SpuCount match:     %s\n", count_ok  ? "OK" : "MISMATCH");
-        ok = addr_ok && spu_id_ok && count_ok;
+        std::printf("  IWLTaskId encoding: %s\n", iwl_ok    ? "OK" : "MISMATCH");
+        ok = addr_ok && spu_id_ok && count_ok && iwl_ok;
     }
 
     rc = taskset->shutdown();
