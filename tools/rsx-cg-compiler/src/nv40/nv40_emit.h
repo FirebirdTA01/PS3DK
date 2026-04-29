@@ -77,6 +77,19 @@ struct FpEmitResult
     FpAttributes attrs;
 };
 
+// One internal-constant pool slot.  sce-cgc packs unique float
+// literals (e.g. 0.0f and 1.0f from a `float4(scalar, scalar, 0, 1)`
+// constructor) into a single c[N] register and references them via
+// per-instruction swizzles — keeping ucode short and avoiding per-
+// constant temp materialisation.  Surfaced so cg_container_vp can
+// emit the matching `internal-constant-N` parameter table entries.
+struct VpLiteralPoolSlot
+{
+    uint32_t constReg = 0;     // absolute c[] register index (256..467)
+    uint32_t usedLanes = 0;    // count of meaningful lanes (1..4) — drives the param's CGtype
+    float    values[4] = {0, 0, 0, 0};
+};
+
 // Fields needed to populate the CgBinaryVertexProgram subtype of a
 // .vpo container.  Filled by lowerVertexProgram alongside ucode
 // emission and surfaced via emitVertexProgramEx.
@@ -87,6 +100,10 @@ struct VpAttributes
     uint32_t attributeInputMask  = 0;        // bit n iff v[n] is read
     uint32_t attributeOutputMask = 0;        // SET_VERTEX_ATTRIB_OUTPUT_MASK bits, front-face only
     uint32_t userClipMask        = 0;        // user clip plane enables
+
+    // Per-shader pool of unique float literals consumed during emit.
+    // One entry per c[] register hand-allocated for literals.
+    std::vector<VpLiteralPoolSlot> literalPool;
 };
 
 struct VpEmitResult

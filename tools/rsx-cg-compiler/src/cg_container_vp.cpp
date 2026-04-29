@@ -62,7 +62,16 @@ constexpr uint32_t kCgIn                   = 0x00001001u;
 constexpr uint32_t kCgOut                  = 0x00001002u;
 constexpr uint32_t kCgVarying              = 0x00001005u;
 constexpr uint32_t kCgUniform              = 0x00001006u;
+// Literal-pool param marker (sce-cgc emits this for `internal-constant-N`):
+//   - var field = 0x1007 (a third class beside Varying/Uniform)
+//   - paramno   = 0xFFFFFFFE (~kInvalidIndex - 1, meaning "synthesised
+//                              by the compiler, not a user parameter")
+//   - defaultValue field of the param entry points at a 16-byte
+//     float[4] block embedded between the user-visible strings and
+//     the param's own name string.
+constexpr uint32_t kCgInternalConst        = 0x00001007u;
 constexpr uint32_t kInvalidIndex           = 0xFFFFFFFFu;
+constexpr uint32_t kLiteralPoolParamno     = 0xFFFFFFFEu;
 
 // CGresource codes (from cg_bindlocations.h).
 constexpr uint32_t kCgAttr0       = 2113u;  // 0x0841 — VP POSITION input
@@ -230,6 +239,13 @@ VpContainerResult emitVertexContainer(
         uint32_t    resIndex    = kInvalidIndex;
         uint32_t    isReferenced = 1;
         uint32_t    isShared     = 0;
+        // Literal-pool slot — non-empty only for `internal-constant-N`
+        // params.  Holds the four packed float values; the param's
+        // `defaultValue` table field will be backfilled with the
+        // offset of the embedded 16-byte block during strings emit.
+        bool        isLiteralPool = false;
+        float       litValues[4]   = {0, 0, 0, 0};
+        uint32_t    defaultValueOffset = 0;
     };
 
     std::vector<ParamDesc> params;
@@ -440,13 +456,47 @@ VpContainerResult emitVertexContainer(
             const bool isOut = (p.storage == StorageQualifier::Out);
             d.direction = isOut ? kCgOut : kCgIn;
             const std::string semUpper = toUpper(p.semanticName);
-            d.res = isOut ? vpOutputResource(semUpper, p.semanticIndex)
+            d.res = isOut ? vpOutputResource(semUpper, p.semanticIndex,
+                                             p.rawSemanticName)
                           : vpInputResource (semUpper, p.semanticIndex);
         }
         params.push_back(d);
     }
 
-    // ----- Strings region: per-param, semantic\0 then name\0. -----
+    // ----- Append literal-pool params (one per c[N] reg the back-end
+    // reserved for unique float literals).  These follow user-declared
+    // params in the param table and get their own embedded 16-byte
+    // default-value blocks in the strings region. -----
+    for (size_t i = 0; i < attrs.literalPool.size(); ++i)
+    {
+        const auto& slot = attrs.literalPool[i];
+        ParamDesc d;
+        d.name      = "internal-constant-" + std::to_string(i);
+        d.semantic  = "";
+        d.type      = (slot.usedLanes == 1) ? kCgFloat
+                    : (slot.usedLanes == 2) ? kCgFloat2
+                    : (slot.usedLanes == 3) ? kCgFloat3
+                    :                         kCgFloat4;
+        d.res       = kCgConst;
+        d.var       = kCgInternalConst;
+        d.direction = kCgIn;
+        d.paramno   = kLiteralPoolParamno;
+        d.resIndex  = slot.constReg;
+        d.isReferenced = 1;
+        d.isShared     = 0;
+        d.isLiteralPool = true;
+        d.litValues[0] = slot.values[0];
+        d.litValues[1] = slot.values[1];
+        d.litValues[2] = slot.values[2];
+        d.litValues[3] = slot.values[3];
+        params.push_back(d);
+    }
+
+    // ----- Strings region: per-param, semantic\0 then name\0.
+    // Literal-pool params interleave a 16-byte float[4] block between
+    // the prior strings and the param's own name string (sce-cgc lays
+    // it out exactly like that — defaultValue points at the floats,
+    // nameOffset points at the trailing name). -----
     const uint32_t headerSize     = 0x20u;
     const uint32_t paramTableSize = static_cast<uint32_t>(params.size() * 48u);
     const uint32_t stringsStart   = headerSize + paramTableSize;
@@ -455,8 +505,32 @@ VpContainerResult emitVertexContainer(
     struct StringSlots { uint32_t semanticOffset = 0; uint32_t nameOffset = 0; };
     std::vector<StringSlots> slots(params.size());
 
+    auto padBlobTo = [&](size_t alignment)
+    {
+        while (stringsBlob.size() % alignment) stringsBlob.push_back(0);
+    };
+
     for (size_t i = 0; i < params.size(); ++i)
     {
+        if (params[i].isLiteralPool)
+        {
+            // Pad to 16-byte alignment, emit float[4] block, point
+            // defaultValueOffset at it.  The 16-byte alignment is what
+            // sce-cgc uses; without it the runtime's load step picks
+            // up garbage from the prior string's tail.
+            padBlobTo(16);
+            params[i].defaultValueOffset =
+                stringsStart + static_cast<uint32_t>(stringsBlob.size());
+            for (int j = 0; j < 4; ++j)
+            {
+                uint32_t bits;
+                std::memcpy(&bits, &params[i].litValues[j], sizeof(bits));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >> 24) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >> 16) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >>  8) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >>  0) & 0xFF));
+            }
+        }
         if (!params[i].semantic.empty())
         {
             slots[i].semanticOffset =
@@ -505,7 +579,7 @@ VpContainerResult emitVertexContainer(
         put32(out, d.var);
         put32(out, d.resIndex);
         put32(out, slots[i].nameOffset);
-        put32(out, 0);                       // defaultValue
+        put32(out, d.defaultValueOffset);    // 0 unless this is a literal-pool entry
         put32(out, 0);                       // embeddedConst
         put32(out, slots[i].semanticOffset);
         put32(out, d.direction);
