@@ -62,10 +62,11 @@ License: LGPL v3 (GMP dual: LGPLv3 or GPLv2+), LGPL v3 (MPFR, MPC), LGPLv2.1+
 
 NVIDIA NV_fragment_program reference
 ------------------------------------
-Fragment shader assembler (Phase 3) is a clean-room implementation based on
-publicly documented NVIDIA NV_fragment_program OpenGL extensions and the
-Nouveau project's reverse-engineered Mesa drivers. No NVIDIA proprietary
-source code is used.
+Fragment shader assembler is an implementation based on publicly documented 
+NVIDIA NV_fragment_program OpenGL extensions and the Nouveau project's 
+reverse-engineered Mesa drivers. No NVIDIA proprietary source code is used. 
+This comes from PSL1GHT in the form of cgcomp and is planned for deprecation 
+and removal once a replacement is ready.
 
 IBM Cell Broadband Engine intrinsics and manuals
 ------------------------------------------------
