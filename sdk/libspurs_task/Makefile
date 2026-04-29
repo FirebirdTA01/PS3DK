@@ -37,7 +37,13 @@ BUILD   := build
 OBJS    := $(BUILD)/crt_spurs_task.o \
            $(BUILD)/spurs_task_exit.o \
            $(BUILD)/spurs_task_runtime.o \
-           $(BUILD)/spurs_module_runtime.o
+           $(BUILD)/spurs_module_runtime.o \
+           $(BUILD)/spurs_can_call_block_wait.o \
+           $(BUILD)/spurs_get_workload_flag.o \
+           $(BUILD)/spurs_send_workload_signal.o \
+           $(BUILD)/spurs_send_signal.o \
+           $(BUILD)/spurs_semaphore_p.o \
+           $(BUILD)/spurs_semaphore_v.o
 
 LIB     := $(BUILD)/libspurs_task.a
 
@@ -72,6 +78,8 @@ install: $(LIB)
 	@echo "  header cell/spurs/task_types.h"
 	@install -m 0644 ../include/cell/spurs/common.h $(INSTALL_INC)/cell/spurs/common.h
 	@echo "  header cell/spurs/common.h"
+	@install -m 0644 ../include/cell/spurs/semaphore.h $(INSTALL_INC)/cell/spurs/semaphore.h
+	@echo "  header cell/spurs/semaphore.h"
 
 clean:
 	@rm -rf $(BUILD)
