@@ -82,9 +82,7 @@ static const uint8_t dbgfont_atlas_data[128 * 128] = {
 
 /* ----- bin2s-emitted shader binaries ------------------------------ */
 extern const uint8_t vpshader_dbgfont_vpo[];
-extern const uint8_t vpshader_dbgfont_vpo_end[];
 extern const uint8_t fpshader_dbgfont_fpo[];
-extern const uint8_t fpshader_dbgfont_fpo_end[];
 
 /* ----- renderer state --------------------------------------------- */
 

@@ -169,167 +169,79 @@ jobs:
   build-host-tools-windows:
     name: Build host tools (windows x86_64)
     needs: verify-version
-    runs-on: windows-latest
-    defaults:
-      run:
-        # All run: steps execute inside the MSYS2 mingw64 shell.  This
-        # gives us a single ABI (gnu) for every binary in the tarball
-        # and access to mingw-w64's libelf, which sprx-linker needs.
-        shell: 'msys2 {0}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Set up MSYS2 / mingw64
-        # The MSYS2 download server (repo.msys2.org) intermittently returns
-        # HTTP 502 from its CDN.  Action's built-in retry is two attempts
-        # over ~30s, which sometimes isn't enough to ride out a transient
-        # gateway flap.  We give it three full action invocations
-        # (continue-on-error on the first two) and turn on the action's
-        # own cache so a successful run sticks in the runner cache and
-        # later runs skip the network entirely.
-        id: msys2_attempt1
-        continue-on-error: true
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: false
-          cache: true
-          install: >-
-            base-devel
-            git
-            zip
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-libelf
-            mingw-w64-x86_64-zlib
-            mingw-w64-x86_64-zstd
-            mingw-w64-x86_64-python
-            mingw-w64-x86_64-rust
+      - name: Install build deps + mingw-w64 cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential cmake ninja-build git wget zip unzip xz-utils \
+              file perl pkg-config mingw-w64 g++-mingw-w64-x86-64
+          which x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++ x86_64-w64-mingw32-windres
 
-      - name: Set up MSYS2 / mingw64 (retry 1)
-        id: msys2_attempt2
-        if: steps.msys2_attempt1.outcome == 'failure'
-        continue-on-error: true
-        uses: msys2/setup-msys2@v2
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          msystem: MINGW64
-          update: false
-          cache: true
-          install: >-
-            base-devel
-            git
-            zip
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-libelf
-            mingw-w64-x86_64-zlib
-            mingw-w64-x86_64-zstd
-            mingw-w64-x86_64-python
-            mingw-w64-x86_64-rust
+          targets: x86_64-pc-windows-gnu
 
-      - name: Set up MSYS2 / mingw64 (retry 2)
-        if: steps.msys2_attempt1.outcome == 'failure' && steps.msys2_attempt2.outcome == 'failure'
-        uses: msys2/setup-msys2@v2
+      - name: Cache cargo
+        uses: actions/cache@v5
         with:
-          msystem: MINGW64
-          update: false
-          cache: true
-          install: >-
-            base-devel
-            git
-            zip
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-libelf
-            mingw-w64-x86_64-zlib
-            mingw-w64-x86_64-zstd
-            mingw-w64-x86_64-python
-            mingw-w64-x86_64-rust
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/target
+          key: cargo-release-host-tools-windows-${{ runner.os }}-${{ hashFiles('tools/Cargo.lock') }}
 
-      - name: Probe toolchain
+      - name: Probe toolchains
         run: |
           set -e
           gcc --version | head -1
-          g++ --version | head -1
+          x86_64-w64-mingw32-gcc --version | head -1
           cargo --version
           rustc --version
           cmake --version | head -1
-          pkg-config --modversion libelf || true
 
-      - name: Fetch PSL1GHT host-tool sources
+      - name: Cross-build Windows host tools
         run: |
           set -e
-          mkdir -p src/ps3dev
-          if [ ! -d src/ps3dev/PSL1GHT/.git ]; then
-            git clone --depth 1 https://github.com/ps3dev/PSL1GHT.git src/ps3dev/PSL1GHT
+          ./scripts/build-host-tools-windows.sh
+
+      - name: Validate staged host tools
+        run: |
+          set -e
+          bin_dir="stage/host-tools-windows/bin"
+          required_bins=(
+            abi-verify.exe
+            bin2s.exe
+            cgcomp.exe
+            coverage-report.exe
+            fself.exe
+            make_self.exe
+            make_self_npdrm.exe
+            nidgen.exe
+            package_finalize.exe
+            rsx-cg-compiler.exe
+            sprxlinker.exe
+          )
+          missing=0
+          for bin in "${required_bins[@]}"; do
+            if [ ! -f "$bin_dir/$bin" ]; then
+              echo "::error::missing required Windows host tool: $bin_dir/$bin"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+          file "$bin_dir"/*.exe
+          if [ -f "$bin_dir/cg.dll" ]; then
+            file "$bin_dir/cg.dll"
           else
-            git -C src/ps3dev/PSL1GHT fetch --depth 1 origin
-            git -C src/ps3dev/PSL1GHT reset --hard FETCH_HEAD
-          fi
-
-      - name: Build Rust workspace (release)
-        working-directory: tools
-        env:
-          CARGO_BUILD_JOBS: '4'
-        run: cargo build --release --workspace
-
-      - name: Build sprx-linker (statically linked)
-        run: |
-          set -e
-          cd tools/sprx-linker
-          # Static link so the resulting .exe doesn't depend on
-          # libelf-0.dll, libz-1.dll, libzstd.dll, libwinpthread, etc.
-          # being on the user's PATH.  Plain `make` would dynamic-link.
-          gcc -O2 -Wall -std=gnu99 -static -o sprxlinker.exe sprx-linker.c \
-              -lelf -lz -lzstd
-          file sprxlinker.exe
-
-      - name: Build rsx-cg-compiler (statically linked)
-        run: |
-          set -e
-          cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
-              -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
-          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
-          file tools/rsx-cg-compiler/build/rsx-cg-compiler.exe
-
-      - name: Build PSL1GHT legacy host tools (statically linked)
-        run: |
-          set -e
-          gcc -O2 -Wall -static -static-libgcc \
-              src/ps3dev/PSL1GHT/tools/generic/bin2s.c \
-              -o src/ps3dev/PSL1GHT/tools/generic/bin2s.exe
-          g++ -std=c++11 -O2 -Wall -DWIN32 \
-              -static -static-libgcc -static-libstdc++ \
-              -Isrc/ps3dev/PSL1GHT/tools/cgcomp/include \
-              src/ps3dev/PSL1GHT/tools/cgcomp/source/*.cpp \
-              -o src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe
-          if [ -f src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll ]; then
-            file src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll
-          else
-            echo "::warning::src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll is missing; Windows release packaging will fail unless the host-tools artifact supplies it."
-          fi
-          file src/ps3dev/PSL1GHT/tools/generic/bin2s.exe
-          file src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe
-
-      - name: Smoke-test --version flags
-        run: |
-          set -e
-          tools/target/release/nidgen.exe --version
-          tools/target/release/abi-verify.exe --version
-          tools/target/release/coverage-report.exe --version
-          tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
-          file tools/sprx-linker/sprxlinker.exe
-          file src/ps3dev/PSL1GHT/tools/generic/bin2s.exe
-          file src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe
-          if [ -f src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll ]; then
-            file src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll
+            echo "::warning::cg.dll is not staged; cgcomp.exe is shipped for legacy callers, but rsx-cg-compiler.exe is the supported shader compiler."
           fi
 
       - name: Stage tool zip
@@ -338,18 +250,9 @@ jobs:
           version="${{ needs.verify-version.outputs.version }}"
           stage="ps3-sdk-tools-${version}-windows-x86_64"
           mkdir -p "$stage/bin"
-          for bin in nidgen abi-verify coverage-report; do
-            cp "tools/target/release/${bin}.exe" "$stage/bin/"
-          done
-          cp tools/sprx-linker/sprxlinker.exe                       "$stage/bin/"
-          cp tools/rsx-cg-compiler/build/rsx-cg-compiler.exe        "$stage/bin/"
-          cp src/ps3dev/PSL1GHT/tools/generic/bin2s.exe             "$stage/bin/"
-          cp src/ps3dev/PSL1GHT/tools/cgcomp/cgcomp.exe             "$stage/bin/"
-          if [ -f src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll ]; then
-            cp src/ps3dev/PSL1GHT/tools/cgcomp/cg.dll               "$stage/bin/"
-          fi
+          cp -a stage/host-tools-windows/bin/. "$stage/bin/"
           # Strip best-effort.
-          strip "$stage/bin/"*.exe || true
+          x86_64-w64-mingw32-strip "$stage/bin/"*.exe || true
           # Bundled README.
           cat > "$stage/README.txt" <<EOF
           PS3 Custom Toolchain — host tools, ${version}, windows x86_64.
@@ -359,8 +262,9 @@ jobs:
           ad-hoc use.
 
           All .exe files are statically linked against MinGW-w64 runtime
-          and libelf / zlib / zstd; they have no DLL runtime dependencies
-          beyond what every Windows install ships (kernel32, msvcrt).
+          and their support libraries (libelf, zlib, zstd, GMP, OpenSSL);
+          they have no DLL runtime dependencies beyond what every Windows
+          install ships (kernel32, msvcrt).
 
           See CHANGELOG.md for what changed in this release.
           EOF
