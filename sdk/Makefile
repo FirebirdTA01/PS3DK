@@ -153,7 +153,8 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/spurs/job_queue_port.h \
     include/cell/spurs/job_queue_port2.h \
     include/cell/spurs/job_queue_semaphore.h \
-    include/cell/trace/trace_types.h
+    include/cell/trace/trace_types.h \
+    include/vectormath/cpp/vectormath_soa.h
 
 # SPU-side headers: SIMD class wrappers (simd + bits/simd_*.h).
 # Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
@@ -174,7 +175,10 @@ SPU_HEADERS := \
     include-spu/bits/simd_llong2.h \
     include-spu/bits/simd_ullong2.h \
     include-spu/bits/simd_float4.h \
-    include-spu/bits/simd_double2.h
+    include-spu/bits/simd_double2.h \
+    include-spu/cell/dma.h \
+    include-spu/cell/sync.h \
+    include-spu/cell/sync/barrier.h
 
 .PHONY: all install clean version-header $(SUBLIBS)
 
