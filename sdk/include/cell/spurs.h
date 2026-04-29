@@ -9,6 +9,7 @@
 #define __PS3DK_CELL_SPURS_H__
 
 #include <cell/spurs/types.h>
+#include <cell/spurs/common.h>
 #include <cell/spurs/task_types.h>
 #include <cell/spurs/task.h>
 #include <cell/spurs/workload.h>
