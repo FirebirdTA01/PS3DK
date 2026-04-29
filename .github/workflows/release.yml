@@ -197,6 +197,14 @@ jobs:
             tools/target
           key: cargo-release-host-tools-windows-${{ runner.os }}-${{ hashFiles('tools/Cargo.lock') }}
 
+      - name: Cache host-tools dependency builds
+        uses: actions/cache@v5
+        with:
+          path: ~/ps3tc/build/host-tools-windows
+          key: host-tools-windows-deps-${{ runner.os }}-${{ hashFiles('scripts/build-host-tools-windows.sh') }}
+          restore-keys: |
+            host-tools-windows-deps-${{ runner.os }}-
+
       - name: Probe toolchains
         run: |
           set -e
