@@ -16,15 +16,7 @@
 #   * fself.exe           — fake-signed SELF builder (zlib only)
 #   * bin2s.exe           — PSL1GHT binary-to-assembly helper
 #   * cgcomp.exe          — legacy PSL1GHT Cg shader compiler
-#
-# Tools we skip locally:
-#   * sprxlinker.exe — needs libelf cross.  Mingw-w64 doesn't ship libelf
-#     in upstream Arch / Ubuntu repos, and bringing libelf along clean-room
-#     is non-trivial.  CI's build-host-tools-windows job builds sprxlinker
-#     under MSYS2 (which has mingw-w64-libelf as a package) and we merge
-#     its output via package-windows-release.sh's --tools-zip flag.  Local
-#     runs of this script omit sprxlinker; the resulting Windows zip will
-#     warn about a missing sprxlinker.exe at package time.
+#   * sprxlinker.exe      — post-link ELF fixups (libelf, vendored)
 #
 # Cached intermediates live under $PS3_BUILD_ROOT/host-tools-windows/.
 # Re-runs are incremental: each lib has a stamp file and skips when present.
@@ -107,6 +99,18 @@ OPENSSL_SHA256="57e03c50feab5d31b152af2b764f10379aecd8ee92f16c985983ce4a99f7ef86
 OPENSSL_URLS=(
     "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz"
     "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VER}/openssl-${OPENSSL_VER}.tar.gz"
+)
+
+# Mike Riepe's libelf 0.8.13 — the last upstream release (2009).  Frozen
+# API, ~3 KLOC, no zlib/zstd dep.  This is the same source the MSYS2
+# mingw-w64-libelf package ships and the only libelf small enough to
+# vendor cleanly into a cross-build pipeline.  mr511.de is dead; we pull
+# from fossies.org with sources.openwrt.org as a fallback.
+LIBELF_VER="0.8.13"
+LIBELF_SHA256="591a9b4ec81c1f2042a97aa60564e0cb79d041c52faa7416acb38bc95bd2c76d"
+LIBELF_URLS=(
+    "https://fossies.org/linux/misc/old/libelf-${LIBELF_VER}.tar.gz"
+    "https://sources.openwrt.org/libelf-${LIBELF_VER}.tar.gz"
 )
 
 # -----------------------------------------------------------------------------
@@ -277,7 +281,68 @@ build_openssl() {
 }
 
 # -----------------------------------------------------------------------------
-# 4. Rust workspace -> .exe
+# 4. libelf (static, mingw — Mike Riepe 0.8.13)
+#
+# Two cross-compile quirks to know about, both rooted in libelf's
+# autoconf-2.13 era configure script:
+#
+#   * The compiler-works probe at the top of configure tests for a file
+#     literally named `conftest` after linking, but mingw-w64 always
+#     emits `conftest.exe`.  autoconf 2.13 hard-codes `ac_exeext=` to
+#     the empty string with no host-aware override.  We sed-patch
+#     configure to set it to `.exe` when invoked under this script.
+#   * The K&R-style `main(){return(0);}` in the same probe is rejected
+#     by gcc 14+ (default C2x: implicit-int is an error).  Building
+#     under -std=gnu89 brings back the looser rules autoconf 2.13 was
+#     written against.
+#
+# 64-bit ELF support also requires telling configure about the
+# `long long` and `__int64` widths — autoconf can't run the
+# sizeof-probe binaries while cross-compiling, so it defaults both
+# to 0 and falls through to libelf_64bit=no, which silently strips
+# Elf64_* support and breaks sprx-linker (PS3 ELFs are ELF64).  We
+# pre-set ac_cv_sizeof___int64=8 / ac_cv_sizeof_long_long=8 in the
+# environment so the configure cache lands on a working pick.
+# -----------------------------------------------------------------------------
+build_libelf() {
+    local stamp="$DEPS_ROOT/.libelf-${LIBELF_VER}-stamp"
+    [[ -f "$stamp" ]] && { say "libelf already built"; return 0; }
+
+    fetch "libelf-${LIBELF_VER}.tar.gz" "${LIBELF_URLS[@]}"
+    verify_sha256 "libelf-${LIBELF_VER}.tar.gz" "$LIBELF_SHA256"
+    extract_once "libelf-${LIBELF_VER}.tar.gz" "libelf-${LIBELF_VER}"
+
+    say "Building libelf for $HOST_TRIPLE"
+    local src="$SRC_ROOT/libelf-${LIBELF_VER}"
+    sed -i 's/^ac_exeext=$/ac_exeext=.exe/' "$src/configure"
+
+    local obj="$PS3_BUILD_ROOT/host-tools-windows/build/libelf-${LIBELF_VER}"
+    rm -rf "$obj"
+    mkdir -p "$obj"
+    local build_triple
+    build_triple="$(uname -m)-pc-linux-gnu"
+    (cd "$obj" && \
+        CC="$HOST_TRIPLE-gcc -std=gnu89" \
+        AR="$HOST_TRIPLE-ar" \
+        RANLIB="$HOST_TRIPLE-ranlib" \
+        ac_cv_sizeof_long_long=8 \
+        ac_cv_sizeof___int64=8 \
+        "$src/configure" \
+            --prefix="$DEPS_ROOT" \
+            --build="$build_triple" \
+            --host="$HOST_TRIPLE" \
+            --disable-shared \
+            --enable-static \
+            --enable-elf64 \
+            --enable-extended-format \
+            --disable-nls && \
+        make -j"$JOBS" && \
+        make install)
+    touch "$stamp"
+}
+
+# -----------------------------------------------------------------------------
+# 5. Rust workspace -> .exe
 #
 # The Rust cross-compile needs the x86_64-pc-windows-gnu std lib.  rustup
 # manages this via `rustup target add`; distro Rust packages (Arch / Fedora /
@@ -337,7 +402,7 @@ build_rust_tools() {
 }
 
 # -----------------------------------------------------------------------------
-# 5. rsx-cg-compiler (CMake C++17 — clean-room Cg→NV40 compiler)
+# 6. rsx-cg-compiler (CMake C++17 — clean-room Cg→NV40 compiler)
 # -----------------------------------------------------------------------------
 build_rsx_cg_compiler() {
     say "Cross-compiling rsx-cg-compiler for $HOST_TRIPLE"
@@ -378,7 +443,30 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# 6. PSL1GHT host tools — make_self / make_self_npdrm / package_finalize / fself
+# 7. sprx-linker -> sprxlinker.exe (post-link ELF fixups, our fork)
+#
+# Lives at tools/sprx-linker/ in this repo (forked from PSL1GHT).  Single
+# .c file, links against the static libelf we just cross-built.  -lelf
+# resolves out of $DEPS_ROOT/lib/libelf.a; the headers we install to
+# $DEPS_ROOT/include/libelf/ are reached via the -I.../include shim
+# headers (libelf.h / gelf.h re-include the real ones under libelf/).
+# -----------------------------------------------------------------------------
+build_sprx_linker() {
+    say "Cross-compiling sprxlinker.exe for $HOST_TRIPLE"
+
+    local src="$PS3_TOOLCHAIN_ROOT/tools/sprx-linker/sprx-linker.c"
+    [[ -f "$src" ]] || die "sprx-linker source missing: $src"
+
+    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc \
+        -I"$DEPS_ROOT/include" \
+        "$src" \
+        -L"$DEPS_ROOT/lib" -lelf \
+        -o "$STAGE_BIN/sprxlinker.exe"
+    say "  staged sprxlinker.exe"
+}
+
+# -----------------------------------------------------------------------------
+# 8. PSL1GHT host tools — make_self / make_self_npdrm / package_finalize / fself
 #
 #    These live in src/ps3dev/PSL1GHT/tools/ and link against gmp + libcrypto
 #    (openssl) + libz (or just libz for fself).  We compile them directly
@@ -421,7 +509,7 @@ build_psl1ght_tools() {
 }
 
 # -----------------------------------------------------------------------------
-# 7. PSL1GHT legacy sample helpers: bin2s and cgcomp.
+# 9. PSL1GHT legacy sample helpers: bin2s and cgcomp.
 #
 #    CMake sample helpers call these from $PS3DK/bin on Windows.  They are
 #    small host-side tools with no dependency on the target SDK build.
@@ -459,7 +547,7 @@ build_psl1ght_legacy_tools() {
 }
 
 # -----------------------------------------------------------------------------
-# 8. Host-side Python + assets that the .self / .pkg pipeline needs.
+# 10. Host-side Python + assets that the .self / .pkg pipeline needs.
 # -----------------------------------------------------------------------------
 stage_python_and_assets() {
     say "Staging host Python tools + assets"
@@ -490,8 +578,10 @@ say "stage:       $STAGE_BIN"
 build_zlib
 build_gmp
 build_openssl
+build_libelf
 build_rust_tools
 build_rsx_cg_compiler
+build_sprx_linker
 build_psl1ght_tools
 build_psl1ght_legacy_tools
 stage_python_and_assets
