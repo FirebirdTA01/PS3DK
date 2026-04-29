@@ -16,6 +16,323 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### `rsx-cg-compiler` — VP/FP byte-match expansion
+
+The byte-diff suite against the reference Cg compiler at `--O2 --fastmath`
+grows from 65/65 to **72/74** byte-identical:
+
+- **FP — implicit varying-binding inference.**  Front-end's default-
+  binding pass assigns sequential `TEXCOORD<N>` slots to unbound FP
+  entry-point inputs in declaration order, skipping any `TEXCOORD<N>`
+  already taken by a sibling parameter.  A new `Semantic.inferred`
+  flag plumbs through AST → IR → container so the .fpo carries the
+  resource code (`0x0c94 + N`) in the parameter table while
+  suppressing the semantic *string*.  Closes the gap that blocked
+  any FP shader written without explicit per-parameter semantics.
+- **FP — alpha-mask if-else lowering.**  Recognises the
+  `if (tex.a <= K) oColor = float4(0,0,0,0); else oColor = colorVarying;`
+  shape and lowers it to the canonical 3-instruction form:
+  `TEX R1.<lane>, f[TC<m>], TEX<m>` + `SLE COND R1.<lane>, c[0].x`
+  (with inline scalar literal) + `MOV(EQ.xxxx) R0, f[falseBranch]`.
+  The literal-vec4 THEN-branch is *elided* — R0's implicit
+  `(0,0,0,0)` default at FP entry plays its role.  Three coupled
+  emitter changes land together: pre-stout hoistable-op promotion in
+  the if-converter, `CmpBinding::LhsKind::TexResult` in the cmp
+  handler, and the tex-LHS schedule in Select StoreOutput emit.
+- **FP — `isReferenced=0` for unused entry params.**  `emitFragmentProgramEx`
+  now walks every IR instruction's operand list once and records a
+  `referencedParamIndices` set on `FpAttributes`; the container reads
+  that set instead of defaulting to 1.  Output params (StoreOutput
+  keys off semantic, not operand) stay at 1 unconditionally.
+- **VP — narrow-type passthroughs.**  `float2` / `float3` outputs emit
+  a partial-mask MOV with last-lane-replicated source swizzle
+  (e.g. `oTexCoord = inTexCoord` lowers to `MOV o[7].xy, v[8].xyxx`)
+  instead of a full `.xyzw` mask.
+- **VP — generic `float4(scalar, ..., literal)` constructors.**  Lanes
+  are classified as `InputLane` / `ConstLane` / `Literal` and emit
+  one MOV per source group, with literals packed top-down from
+  `c[467]` into a per-shader pool.  The container emits matching
+  `internal-constant-N` parameter-table entries
+  (`var=0x1007`, `paramno=0xFFFFFFFE`) with a 16-byte float[4] block
+  embedded in the strings region pointed at by `defaultValue` —
+  exactly the layout the reference compiler produces.
+- **VP — chained `mul(matrix, X)` with temp ping-pong.**  Prior
+  matvecmul results materialise into temp registers; the temp is
+  recycled after the next chain step so we ping-pong R0 → R1 → R0
+  instead of cascading R0 → R1 → R2.  Includes a DPH-fold path 2
+  for `mul(M, float4(in.x, in.y, 0, 1))` when the W lane is a
+  literal `1.0f`.
+- **VP/FP — `: register(BANK<N>)` explicit register binding.**  Front-
+  end parses the trailing `register(...)` clause on uniform / param
+  declarations and threads an `explicitRegisterBank` + `explicitRegisterIndex`
+  field through AST → IR → container so the param table writes the
+  user-requested const-bank slot instead of the default allocator pick.
+
+### GCM — cellGcm path coverage and shader-pipeline migration
+
+- **`libgcm_cmd` cellGcmCg* / cellGcmSet* helpers.**
+  `cellGcmSetVertexProgramParameter`,
+  `cellGcmSetFragmentProgramParameter`, and the missing CG parameter-
+  mutator entry points implemented in `sdk/libgcm_cmd/src/gcm_cg.c`.
+- **`cellGcmSetVertexProgram` literal-pool upload.**  The inline
+  emitter in `gcm_cg_bridge.h` now walks the param table for entries
+  flagged with `paramno == 0xFFFFFFFE` (the internal-constant marker)
+  and uploads each one through `NV40TCL_VP_UPLOAD_CONST_ID`.
+  Without this, shaders that read literal values via the const bank
+  (e.g. `float4(in.x, in.y, 0, 1)`) draw against stale const-bank
+  state.
+- **GCM samples migrated to rsx-cg-compiler.**  `hello-ppu-cellgcm-{blend,
+  cube, textured-cube, triangle, quad, sysmenu}` switch off cgcomp +
+  the legacy `rsx*Program*` walkers and onto rsx-cg-compiler +
+  the cellGcmCg* / cellGcmSet* path that parses the
+  `CgBinaryProgram` layout.  Vertex-attribute indices come from
+  `cellGcmCgGetParameterResource(...) - CG_ATTR0` instead of hard-
+  coded `GCM_VERTEX_ATTRIB_*` slots.  `vp-loop` stays on cgcomp
+  pending MAD-fusion + interleaved emit ordering.
+- **`hello-ppu-cellgcm-alpha-mask` validation sample.**  Exercises
+  rsx-cg-compiler's two newest FP emitter features end-to-end
+  through `ps3_add_cg_shader_rsxcgc` + `cellGcmCgInitProgram` —
+  per-corner-coloured fullscreen quad with a circular alpha-mask
+  hole punched from a 64×64 procedural texture.
+- **`libdbgfont` compiles shaders at build time.**  Drops the
+  committed `dbgfont_shaders.c` blob in favour of a Makefile pipeline
+  that re-derives `.vpo` / `.fpo` from `.vcg` / `.fcg` sources via
+  rsx-cg-compiler → bin2s → as → ar.  `dbgfont.c` switches off the
+  legacy `rsx*Program*` walkers and onto the cellGcmCg* / cellGcmSet*
+  API.  The fragment shader is rewritten off the split-write else
+  (`oColor.rgb = ...; oColor.a = ...`) and onto a single
+  `oColor = color` write so rsx-cg-compiler's alpha-mask if-convert
+  matches the reference compiler byte-for-byte.
+
+### SDK — SPURS JOB CHAIN runtime
+
+End-to-end `cellSpursJobMain2` bring-up: `samples/spurs/hello-spu-job`
+runs cleanly in RPCS3.
+
+- **SPU toolchain — `-mspurs-job` / `-mspurs-job-initialize` /
+  `-mspurs-task` driver flags.**  Patches against binutils 2.42 +
+  GCC 9.5.0 add a `spu_elf_set_spurs_job_type()` setter on the SPU
+  ELF backend, three new `--spurs-job*` long options on `ld`, and
+  matching `-m` driver flags in GCC's `spu.opt` whose `LINK_SPEC` rules
+  forward them.  Stock SPU GCC + binutils emit `e_flags=0` (treated as
+  "unspecified" and rejected by jobbin2 packaging); the new flags emit
+  `e_flags=1` / `2` / `3` natively, retiring the post-link byte-hack.
+- **`sdk/libspurs_job/`** ships a `_start` trampoline (the canonical
+  4-instruction xori-pair signature followed by `bin2` magic at
+  LS 0x20 — required by the JM2 dispatcher's deferred validator),
+  `cellSpursJobInitialize` PIC bss-clear, `spurs_job.ld` linker
+  script with `.before_text` at LS 0 and 16-byte end-padding, plus
+  install drops to `$(PS3DK)/spu/{lib,ldscripts,include/cell/spurs}`.
+- **`cmake/ps3-self.cmake`** grows a `JOBBIN` flag on `ps3_add_spu_image`
+  that runs `spu-elf-objcopy -O binary` on the linked SPU ELF and
+  bin2s-embeds the resulting flat raw image (the dispatcher consumes
+  raw bytes, not an ELF wrapper — embedding the linked ELF parks
+  `\x7fELF` at LS 0 and trips `JOB_DESCRIPTOR`).
+- **PPU header surface.**  14 new headers under `cell/spurs/`:
+  `error.h`, `exception_types.h`, `job_chain.h`, `job_chain_types.h`,
+  `job_commands.h`, `job_descriptor.h`, `job_guard.h`, `version.h`,
+  plus `cell/sync/barrier.h`, `cell/padfilter.h`,
+  `sys/spu_initialize.h`, `sys/spu_utility.h`.
+- **`docs/abi/spurs-job-entry-point.md`** is the normative ABI spec:
+  ELF identity (e_flags semantics), section layout, `_start`
+  trampoline byte signature, register-passing convention, required
+  symbols, `binaryInfo[0..3]` as the high-32 bits of the 64-bit
+  `eaBinary` union (NOT a magic word), the LS 0x20 `bin2` magic.
+
+### SDK — SPURS JOB QUEUE runtime
+
+`samples/spurs/hello-spurs-jq` runs end-to-end: 6 jobs, 2 SPUs,
+semaphore-driven sync, clean shutdown.
+
+- **`sdk/libspurs_jq/`** ships the cooperative-scheduler entry-point
+  surface (53 entry points covering info / open / close / push
+  variants / port lifecycle / scheduler / hash-check / trace-dump /
+  semaphore / wait-signal), a `cellSpursJobMain2` wrapper that runs
+  `__initialize → cellSpursJobQueueMain (user) → __finalize`, and
+  the with-CRT `_start` trampoline carrying the `JOBCRT Ver13` magic
+  at offset 0x20 of `.before_text` plus ADDR32 relocations to
+  `_end` / `__bss_start` (the JQ kernel reads BSS clear range from
+  these).  A `__job_start` wrapper runs
+  `_cellSpursJobCrtAuxInitialize → _init → cellSpursJobMain2 →
+  __do_atexit → _fini → _cellSpursJobCrtAuxFinalize` on every
+  per-job invocation.
+- **`cmake/ps3-self.cmake` `JOBBIN_WRAP` flag** runs
+  `spu_elf-to-ppu_obj.exe --format=jobbin2` (under wine) on the linked
+  SPU ELF, producing the wrapped `jobbin2` blob (256-byte ELF header
+  prefix + LS image bytes — required by the JQ dispatcher; flat raw
+  images are rejected) plus a `.spu_image.jobheader` template the
+  user copies into `s_job.header`.  Default toolchain lookup probes
+  the user-provided host-win32 install paths; both are env / cache-
+  var overridable.
+- **PPU + SPU job-queue header surface** under `cell/spurs/`:
+  `job_queue_define.h` (bracket macros + DPRINTF + RETURN_IF),
+  `job_queue_types.h` (opaque containers + enums + pipeline-info +
+  exception-handler typedefs), `job_queue.h`, `job_queue2.h`.
+- **`--start-group` / `--end-group`** wrapping in `ps3_add_spu_image`
+  for multi-lib link lines so cross-archive references (e.g.
+  libspurs_job's `_start` referencing libspurs_jq's `cellSpursJobMain2`)
+  resolve in one pass.  Single-lib lists go through unwrapped.
+
+### SDK — libspurs SPU runtime expansion
+
+Eleven new SPU-side libspurs entry points added to `libspurs_task.a`,
+each byte-equivalent to the reference SDK's `libspurs.a`:
+
+- **Module getters (round 1):** `cellSpursGetSpursAddress`,
+  `cellSpursGetCurrentSpuId`, `cellSpursGetTagId`,
+  `cellSpursGetWorkloadId`, `cellSpursGetSpuCount`.  Plain volatile
+  LS reads at the kernel-populated offsets
+  (`0x1c0` / `0x1c8` / `0x1cc` / `0x1dc` / `0x176`).  SPU GCC 9.5
+  emits the byte-equivalent `lqa + (rotqbyi) + bi $0` shape.  New
+  `samples/spurs/hello-spurs-getters` validates each against the
+  runtime spurs pointer / `numSpus`.
+- **Dispatch helpers (round 2):** `cellSpursModuleExit`,
+  `cellSpursModulePoll`, `cellSpursModulePollStatus`, `cellSpursPoll`,
+  `cellSpursGetElfAddress`, `_cellSpursGetIWLTaskId`.  Plain C with
+  volatile LS reads + indirect-call casts; build requires
+  `-fno-schedule-insns2` for byte-correct sizes.
+- **Sync primitives (round 3):** `cellSpursSemaphoreP` (480 B),
+  `cellSpursSemaphoreV` (432 B), `cellSpursSendSignal` (464 B),
+  `_cellSpursTaskCanCallBlockWait` (152 B),
+  `_cellSpursGetWorkloadFlag` (48 B),
+  `_cellSpursSendWorkloadSignal` (168 B).  Hand-written `.S` files
+  byte-matched against the reference `libspurs.a` object disassembly
+  via `cmp -l` of `.text` byte slices.  `samples/spurs/hello-spurs-semaphore`
+  exercises the producer/consumer P/V path; status reports DONE
+  rather than SUCCESS because the BLOCK service round-trip is
+  RPCS3-HLE-blocked (taskset PM syscall HLE is `Broken (TODO)`).
+- **`docs/abi/libspurs-sync-primitives.md`** captures the binary
+  contract: calling convention, cache-line layout, error codes,
+  caller obligations re: context save area + `lsPattern`.
+
+### SDK — libsputhread SPU lv2-syscall expansion
+
+Six SPU lv2-syscall wrappers added to `libsputhread.a`, byte-equivalent
+to the reference SDK:
+
+- `sys_spu_thread_send_event` / `throw_event` / `receive_event` /
+  `tryreceive_event` (event-port; `ch28+ch30` mailbox shape;
+  `+0x40000000` marker on throw; stop `0x110` / `0x111` on receive
+  variants).
+- `sys_spu_thread_group_yield` (stop `0x100`),
+  `sys_spu_thread_switch_system_module` (stop `0x120`).
+- Public surface: `<sys/spu_event.h>` declares the four event-port
+  entry points + `EVENT_DATA0_MASK` / `EVENT_PORT_MAX_NUM`;
+  `<sys/spu_thread.h>` grows declarations for `group_yield` +
+  `switch_system_module`.
+- `samples/lv2/hello-event-port-spu/` drives a six-step round-trip
+  in RPCS3.
+
+Two byte-match gotchas surfaced and are documented inline: SPU GAS
+folds `nop $127` to `nop $0` (use `.long 0x4020007f` for byte-
+identical output); `hbrr` branch-hint must sit on the line of the
+actual branch, not the line before, for the encoded immediate to
+match the reference.
+
+### SDK — SPU C++ SIMD class wrappers
+
+14 `simd::` class headers under `sdk/include-spu/{simd,bits/simd_*.h}`:
+`bool{2,4,8,16}`, `{u}char16`, `{u}short8`, `{u}int4`, `{u}llong2`,
+`float4`, `double2` — each with the full operator set (arith, compare
+→ `boolN`, shifts, select, gather/any/all, `[]_idx` lvalue proxy).
+Implementation deltas vs. the canonical surface: scalar-extract
+fallback for integer `/` and `%` (correctness over throughput);
+`spu_cmpgt` / `spu_cmpeq` directly on `vec_double2` (GCC 9.5 builtin
+handles double compares natively, no `libsimdmath` cmp dep);
+`divf4` / `divd2` for float/double divide.  `samples/spu/hello-spu-simd`
+exercises every operator class; nine result groups print expected
+values in RPCS3.
+
+### SDK — reference-SDK source-compat headers
+
+Surfaced while attempting to build code originally written for older
+SDKs unmodified against our toolchain.  None of these are CellOS ABI
+changes — they're naming / layout aliases over what we already ship:
+
+- `cell/gcm.h` (was authored in-tree, never installed),
+  `simdmath.h` top-level forwarder, `sys/cdefs.h` wrapper exposing
+  `CDECL_BEGIN` / `CDECL_END` / `NAMESPACE_LV2_BEGIN` / `_END`,
+  `sys/sce_cdefs.h` standalone copy, `sys/event.h` umbrella over
+  the LV2 sync split headers, `sysutil/sysutil_common.h` request-id
+  defines, `cell/keyboard.h` + `cell/mouse.h` cellKb* / cellMouse*
+  alias surfaces over `libio.a`'s PSL1GHT-named entries, four new
+  validation samples.
+- **`sdk/include-spu/`** picks up `cell/dma.h` (thin DMA helpers
+  wrapper), `cell/sync.h`, `cell/sync/barrier.h`, plus
+  `vectormath/cpp/vectormath_soa.h` for the Spurs SPU include set
+  and a top-level `sdk_version.h` forwarder.  New
+  `samples/spu/hello-spu-dma` exercises the surface.
+- **SDK header content updates** — enums, structs, inline functions,
+  and type aliases added to existing `cell/cell_video_out.h`,
+  `cell/cgb.h`, `cell/dbgfont.h`, `cell/gcm.h`,
+  `cell/gcm/gcm_cg_bridge.h`, `cell/gcm/gcm_command_c.h`,
+  `cell/gcm/gcm_enum.h`, `cell/keyboard.h`, `sys/event.h`,
+  `sys/process.h`, `sys/spu_thread.h`, `sys/sys_time.h`,
+  `sysutil/sysutil_common.h`, `vectormath/cpp/vectormath_soa.h` so
+  reference-SDK code parses without local edits.
+
+### Tooling — NID stub generator
+
+- **`nidgen` SPRX stub trampoline shape.**  Switches from a frame-
+  ful `bctr` tail-call to a frame-less wrapping shape (`bctrl`
+  preserving `LR @ sp+24` and `r2 @ sp+40`, no `stdu`).  The
+  reference `bctr` tail-call breaks on intra-DSO `bl` because PPU
+  GCC doesn't restore the TOC after the call; the wrapping shape
+  fixes calls with more than 8 arguments through any SPRX boundary
+  (libspurs `job_chain` etc.).
+
+### Documentation
+
+- **README** grows a "True 64-bit PPU ABI" section under "Toolchain
+  components" explaining the choice to ship a true PPU64 toolchain
+  rather than the historical PPU32 setup, and the porting
+  implications for code originally written assuming 4-byte naked
+  pointers.  Names `ATTRIBUTE_PRXPTR` as the migration path for
+  cross-SPRX struct fields and `-fpermissive` as the bridge for
+  old-sample `(int)void *` casts.
+- **`tools/rsx-cg-compiler/docs/KNOWN_ISSUES.md`** refreshed:
+  implicit-varying inference + alpha-mask if-else marked DONE; new
+  entries for FP `tex2D` emit gaps and FP arithmetic-lowering for
+  non-passthrough writes.
+- **`docs/known-issues.md`** updated — known-issue entries
+  retired/added across the GCM / SPURS / shader-compiler boundary.
+
+### Tooling — `sprxlinker` cross-build
+
+`scripts/build-host-tools-windows.sh` now vendors libelf 0.8.13
+(fossies.org primary, sources.openwrt.org fallback) as a static
+cross-built dep and produces a fully-static `sprxlinker.exe`
+(412 KB PE32+ x86-64) alongside the other host tools.  Drops the
+"skip locally" workaround that punted to the MSYS2 CI path; WSL2 /
+native Linux runs of the script now stage the full host-tool set.
+Cross-compile quirks documented inline: `ac_exeext` sed-patch for
+autoconf-2.13's missing `EXEEXT` support, `-std=gnu89` to keep
+GCC 14+ from rejecting the configure probe's K&R `main()`,
+`ac_cv_sizeof_{long_long,___int64}=8` overrides so 64-bit ELF
+support stays enabled when cross-compiling.
+
+### CI / release infrastructure
+
+- **`build-host-tools-windows.sh`** auto-fetches the PSL1GHT source
+  before the geohot/fself build — previously the geohot step ran
+  before `ensure_psl1ght_source` and died with "PSL1GHT geohot tools
+  source missing" on a clean CI checkout.
+- **Windows release packager** stages the complete host-tool set
+  (PSL1GHT host tools, geohot/fself, rsx-cg-compiler, sprxlinker,
+  `package_finalize`) plus required Python helpers.  `cg.dll` is
+  treated as optional rather than required.
+- **`release.yml`** grows the matching staging steps, fixes the
+  optional-asset path (single missing optional asset no longer fails
+  the run), and pulls Python helpers into the Windows release.
+
+### Other
+
+- **`hello-spu-job` / `hello-spurs-jq` timeout-exit polish.**
+  `sys_process_exit` on JQ halt or sentinel-poll timeout so RPCS3
+  closes cleanly when a test fails (no PS-button-out needed).
+- **`NOTICE`** updated for the NV_fragment_program reference
+  attribution.
+
 ## [v0.4.0] — 2026-04-27
 
 ### SDK surface — four new cell-named libraries land at 100% coverage
