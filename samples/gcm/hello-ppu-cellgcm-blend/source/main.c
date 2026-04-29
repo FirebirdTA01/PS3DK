@@ -51,7 +51,15 @@
 #include <io/pad.h>
 #include <cell/gcm.h>
 #include <cell/sysutil.h>
-#include <rsx/rsx.h>
+#include <Cg/cg.h>
+/* Migration note (mirrored across all gcm samples): shaders now go
+ * through rsx-cg-compiler (CgBinaryProgram container output) and load
+ * via the cellGcmCg* / cellGcmSet* runtime API.  The legacy rsx*Program
+ * loaders are not deprecated — only the cgcomp compiler + cg.dll are
+ * scheduled for removal once rsx-cg-compiler covers all sample shader
+ * features.  After cgcomp retirement, rsx*Program* will dispatch to
+ * the same CgBinaryProgram parsing as cellGcmCg* below.  Old call
+ * sites kept commented for visual API parity. */
 
 #include "vpshader_vpo.h"
 #include "fpshader_fpo.h"
@@ -94,12 +102,14 @@ static void *local_align(u32 alignment, u32 size)
 	return local_alloc(size);
 }
 
-static rsxVertexProgram   *vpo;
-static rsxFragmentProgram *fpo;
-static void               *vp_ucode;
-static void               *fp_ucode;
-static u32                 fp_offset;
-static rsxProgramConst    *modelViewProjConst;
+static CGprogram   vpo;
+static CGprogram   fpo;
+static void       *vp_ucode;
+static void       *fp_ucode;
+static u32         fp_offset;
+static CGparameter modelViewProjConst;
+static int         position_index;
+static int         color_index;
 
 static vertex_t *vertex_buffer;
 static u32       vertex_buffer_offset;
@@ -240,19 +250,30 @@ static void set_render_state(CellGcmContextData *ctx)
 		0, 0, 0, 1,
 	};
 
-	rsxLoadVertexProgram(ctx, vpo, vp_ucode);
-	rsxSetVertexProgramParameter(ctx, vpo, modelViewProjConst, mvp);
+	cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
+	cellGcmSetVertexProgramParameter(ctx, modelViewProjConst, mvp);
+	/*   rsxLoadVertexProgram(ctx, vpo, vp_ucode);
+	 *   rsxSetVertexProgramParameter(ctx, vpo, modelViewProjConst, mvp);
+	 */
 
-	rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_POS, 0,
-	                         vertex_buffer_offset + offsetof(vertex_t, pos),
-	                         sizeof(vertex_t), 3,
-	                         GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-	rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_COLOR0, 0,
-	                         vertex_buffer_offset + offsetof(vertex_t, color),
-	                         sizeof(vertex_t), 4,
-	                         GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+	cellGcmSetVertexDataArray(ctx, position_index, 0, sizeof(vertex_t), 3,
+	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
+	                          vertex_buffer_offset + offsetof(vertex_t, pos));
+	cellGcmSetVertexDataArray(ctx, color_index, 0, sizeof(vertex_t), 4,
+	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
+	                          vertex_buffer_offset + offsetof(vertex_t, color));
+	/*   rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_POS, 0,
+	 *                            vertex_buffer_offset + offsetof(vertex_t, pos),
+	 *                            sizeof(vertex_t), 3,
+	 *                            GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+	 *   rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_COLOR0, 0,
+	 *                            vertex_buffer_offset + offsetof(vertex_t, color),
+	 *                            sizeof(vertex_t), 4,
+	 *                            GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+	 */
 
-	rsxLoadFragmentProgramLocation(ctx, fpo, fp_offset, GCM_LOCATION_RSX);
+	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
+	/*   rsxLoadFragmentProgramLocation(ctx, fpo, fp_offset, GCM_LOCATION_RSX); */
 }
 
 static void flip(CellGcmContextData *ctx)
@@ -336,20 +357,36 @@ static int init_display(void)
 static void init_shaders(void)
 {
 	u32 vpsize = 0, fpsize = 0;
-	vpo = (rsxVertexProgram   *)vpshader_vpo;
-	fpo = (rsxFragmentProgram *)fpshader_fpo;
+	vpo = (CGprogram)vpshader_vpo;
+	fpo = (CGprogram)fpshader_fpo;
 
-	rsxVertexProgramGetUCode(vpo, &vp_ucode, &vpsize);
-	modelViewProjConst = rsxVertexProgramGetConst(vpo, "modelViewProj");
+	cellGcmCgInitProgram(vpo);
+	cellGcmCgInitProgram(fpo);
+	/*   vpo = (rsxVertexProgram   *)vpshader_vpo;
+	 *   fpo = (rsxFragmentProgram *)fpshader_fpo;
+	 */
+
+	cellGcmCgGetUCode(vpo, &vp_ucode, &vpsize);
+	modelViewProjConst = cellGcmCgGetNamedParameter(vpo, "modelViewProj");
+	/*   rsxVertexProgramGetUCode(vpo, &vp_ucode, &vpsize);
+	 *   modelViewProjConst = rsxVertexProgramGetConst(vpo, "modelViewProj");
+	 */
 
 	void *fp_ucode_blob;
-	rsxFragmentProgramGetUCode(fpo, &fp_ucode_blob, &fpsize);
+	cellGcmCgGetUCode(fpo, &fp_ucode_blob, &fpsize);
+	/*   rsxFragmentProgramGetUCode(fpo, &fp_ucode_blob, &fpsize); */
 	fp_ucode = local_align(64, fpsize);
 	memcpy(fp_ucode, fp_ucode_blob, fpsize);
 	cellGcmAddressToOffset(fp_ucode, &fp_offset);
 
+	CGparameter pos = cellGcmCgGetNamedParameter(vpo, "in_position");
+	CGparameter col = cellGcmCgGetNamedParameter(vpo, "in_color");
+	position_index  = pos ? (int)cellGcmCgGetParameterResource(vpo, pos) - CG_ATTR0 : 0;
+	color_index     = col ? (int)cellGcmCgGetParameterResource(vpo, col) - CG_ATTR0 : 3;
+
 	printf("  vp ucode: %u bytes; mvp uniform: %p\n", vpsize, (void *)modelViewProjConst);
 	printf("  fp ucode: %u bytes (rsx-local at offset 0x%08x)\n", fpsize, fp_offset);
+	printf("  vp attribs: position@%d color@%d\n", position_index, color_index);
 }
 
 /* 12 vertices = 3 quads × 4 verts (TRIANGLE_STRIP layout TL/TR/BL/BR

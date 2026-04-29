@@ -22,6 +22,12 @@ target_link_libraries(hello-ppu-cellgcm-vp-loop PRIVATE
     rsx gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m
 )
 
+# Still on cgcomp — blocked on rsx-cg-compiler shader-feature work.
+# vpshader.vcg chains four mul() calls across float4x4 matrices to
+# stretch the program past 7 instructions; the rsx-cg-compiler IR
+# doesn't yet lower the chained-mul pattern (skeleton-stage failure).
+# Migrate once that gap closes.  See samples/gcm/hello-ppu-cellgcm-triangle
+# for the canonical migration template.
 ps3_add_cg_shader(hello-ppu-cellgcm-vp-loop shaders/vpshader.vcg)
 ps3_add_cg_shader(hello-ppu-cellgcm-vp-loop shaders/fpshader.fcg)
 

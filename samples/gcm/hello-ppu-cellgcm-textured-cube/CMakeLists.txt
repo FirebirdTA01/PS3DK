@@ -25,8 +25,13 @@ target_link_libraries(hello-ppu-cellgcm-textured-cube PRIVATE
     rsx gcm_cmd gcm_sys io sysutil rt lv2 m
 )
 
-ps3_add_cg_shader(hello-ppu-cellgcm-textured-cube shaders/vpshader.vcg)
-ps3_add_cg_shader(hello-ppu-cellgcm-textured-cube shaders/fpshader.fcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-textured-cube shaders/vpshader.vcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-textured-cube shaders/fpshader.fcg)
+
+# Legacy cgcomp path — see samples/gcm/hello-ppu-cellgcm-triangle for
+# the canonical migration note.
+#ps3_add_cg_shader(hello-ppu-cellgcm-textured-cube shaders/vpshader.vcg)
+#ps3_add_cg_shader(hello-ppu-cellgcm-textured-cube shaders/fpshader.fcg)
 
 # Embed sdk/assets/ICON0.PNG as a binary blob the source can decode at
 # startup.  bin2s names the symbols off the file's basename (dots

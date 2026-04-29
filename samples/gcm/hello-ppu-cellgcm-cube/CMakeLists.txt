@@ -17,7 +17,12 @@ target_link_libraries(hello-ppu-cellgcm-cube PRIVATE
     gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m
 )
 
-ps3_add_cg_shader(hello-ppu-cellgcm-cube shaders/vpshader.vcg)
-ps3_add_cg_shader(hello-ppu-cellgcm-cube shaders/fpshader.fcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-cube shaders/vpshader.vcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-cube shaders/fpshader.fcg)
+
+# Legacy cgcomp path — see samples/gcm/hello-ppu-cellgcm-triangle for
+# the canonical migration note.
+#ps3_add_cg_shader(hello-ppu-cellgcm-cube shaders/vpshader.vcg)
+#ps3_add_cg_shader(hello-ppu-cellgcm-cube shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-cellgcm-cube)
