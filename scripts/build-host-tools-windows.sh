@@ -161,13 +161,19 @@ ensure_psl1ght_source() {
     local psl1ght_src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT"
     # Probe the full set of sources every PSL1GHT-derived tool needs:
     # geohot/make_self.c + fself/source/ (build_psl1ght_tools), and
-    # generic/bin2s.c + cgcomp/source (build_psl1ght_legacy_tools).
+    # generic/bin2s.c + cgcomp/source (build_psl1ght_legacy_tools), and
+    # tools/ps3py package helpers (stage_python_and_assets).
     # If any are missing we re-fetch — a partial / stale checkout would
     # otherwise pass the old narrower probe and fail mid-build.
     if [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
        && -d "$psl1ght_src/tools/cgcomp/source" \
        && -f "$psl1ght_src/tools/geohot/make_self.c" \
-       && -d "$psl1ght_src/tools/fself/source" ]]; then
+       && -d "$psl1ght_src/tools/fself/source" \
+       && -f "$psl1ght_src/tools/ps3py/pkg.py" \
+       && -f "$psl1ght_src/tools/ps3py/sfo.py" \
+       && -f "$psl1ght_src/tools/ps3py/fself.py" \
+       && -f "$psl1ght_src/tools/ps3py/Struct.py" \
+       && -f "$psl1ght_src/tools/ps3py/sfo.xml" ]]; then
         return 0
     fi
 
@@ -190,7 +196,12 @@ ensure_psl1ght_source() {
     [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
     && -d "$psl1ght_src/tools/cgcomp/source" \
     && -f "$psl1ght_src/tools/geohot/make_self.c" \
-    && -d "$psl1ght_src/tools/fself/source" ]] \
+    && -d "$psl1ght_src/tools/fself/source" \
+    && -f "$psl1ght_src/tools/ps3py/pkg.py" \
+    && -f "$psl1ght_src/tools/ps3py/sfo.py" \
+    && -f "$psl1ght_src/tools/ps3py/fself.py" \
+    && -f "$psl1ght_src/tools/ps3py/Struct.py" \
+    && -f "$psl1ght_src/tools/ps3py/sfo.xml" ]] \
         || die "PSL1GHT host-tool sources missing after fetch"
 }
 
@@ -573,23 +584,29 @@ build_psl1ght_legacy_tools() {
 stage_python_and_assets() {
     say "Staging host Python tools + assets"
 
-    # PSL1GHT installs these to $PS3DEV/bin during the Linux native build.
-    # They're host-agnostic Python and small data files — copy them into the
-    # Windows release bin/ verbatim.
-    local src="$PS3DEV/bin"
-    for f in pkg.py sfo.py fself.py Struct.py sfo.xml ICON0.PNG; do
-        if [[ -f "$src/$f" ]]; then
-            install -m 0644 "$src/$f" "$STAGE_BIN/$f"
-        fi
+    ensure_psl1ght_source
+
+    # The standalone CI host-tools job does not run build-psl1ght.sh, so
+    # stage PSL1GHT's host-agnostic package helpers directly from source.
+    # ICON0.PNG is intentionally supplied later by the release packager.
+    local src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT/tools/ps3py"
+    local required_py_assets=(
+        pkg.py
+        sfo.py
+        fself.py
+        Struct.py
+        sfo.xml
+    )
+
+    for f in "${required_py_assets[@]}"; do
+        [[ -f "$src/$f" ]] || die "required PSL1GHT Python/package helper missing: $src/$f"
+        install -m 0644 "$src/$f" "$STAGE_BIN/$f"
     done
     # Make the Python entry-point scripts executable so they can be invoked
     # directly when Python is on PATH (Windows still respects the +x bit).
     for f in pkg.py sfo.py fself.py; do
-        if [[ -f "$STAGE_BIN/$f" ]]; then
-            chmod +x "$STAGE_BIN/$f"
-        fi
+        chmod +x "$STAGE_BIN/$f"
     done
-    return 0
 }
 
 # -----------------------------------------------------------------------------
