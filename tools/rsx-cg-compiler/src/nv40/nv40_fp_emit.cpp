@@ -541,6 +541,37 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<IRValueID, FpDot3LitPackScaledBinding>
         valueToDot3LitPackScaled;
 
+    // `Mul(literal_vec3, uniform_scalar)` — folded literal vec
+    // multiplied by a uniform scalar (broadcast).  Captures the
+    // kitchen-sink water FP `phase * gTime` step.  Recognized in
+    // IROp::Mul; consumed by VecConstruct(.., 1.0) wrap below.
+    struct FpLitVecUniformScaleBinding
+    {
+        float     literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
+        IRValueID uniformId   = 0;
+        int       vecWidth    = 3;
+    };
+    std::unordered_map<IRValueID, FpLitVecUniformScaleBinding>
+        valueToLitVecUniformScale;
+
+    // `vec4(literal_vec3 * uniform_scalar, 1.0)` — float4 wrap of
+    // the FpLitVecUniformScaleBinding for a COLOR sink.  Lowers to
+    // 3 instructions:
+    //   MOV R0.x, c[0].xxxx + <uniform-patched zeros>
+    //   MOV R0.w, c[0].yyyy + {0, 1.0, 0, 0}    ← W=1.0 at lane 1
+    //                                           by the function-wide
+    //                                           "prev .xxxx → avoid"
+    //                                           literal-pool rule
+    //   MUL R0.xyz [END], R0.xxxx, c[0].xyzw + {lit.x, lit.y, lit.z, 0}
+    struct FpLitVecUniformScaleWrapBinding
+    {
+        float     literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
+        IRValueID uniformId   = 0;
+        int       vecWidth    = 3;
+    };
+    std::unordered_map<IRValueID, FpLitVecUniformScaleWrapBinding>
+        valueToLitVecUniformScaleWrap;
+
     // `vec4(scaled-or-bare 3-dot pack, 1.0)` — wraps either a bare
     // FpDot3LitPack or a FpDot3LitPackScaled into the float4 the
     // COLOR sink expects.  Lowers to 5 (no scale) or 6 (with scale)
@@ -1083,6 +1114,44 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 const IRValueID a = inst.operands[0];
                 const IRValueID b = inst.operands[1];
 
+                // Mul(literal_vec, uniform_scalar) — broadcast scale.
+                // Records a binding that the downstream wrap can use
+                // to emit the 3-instruction shape (uniform preload +
+                // W=1.0 + final MUL).  Commutative.
+                if (inst.op == IROp::Mul)
+                {
+                    auto isScalarUniform = [&](IRValueID id) -> bool
+                    {
+                        auto uIt = valueToFpUniform.find(id);
+                        if (uIt == valueToFpUniform.end()) return false;
+                        if (uIt->second >= entry.parameters.size()) return false;
+                        return entry.parameters[uIt->second].type.vectorSize <= 1;
+                    };
+                    auto aLit = valueToLiteralVec4.find(a);
+                    auto bLit = valueToLiteralVec4.find(b);
+                    const LiteralVec4* lit = nullptr;
+                    IRValueID uniId = 0;
+                    if (aLit != valueToLiteralVec4.end() && isScalarUniform(b))
+                    {
+                        lit   = &aLit->second;
+                        uniId = b;
+                    }
+                    else if (bLit != valueToLiteralVec4.end() && isScalarUniform(a))
+                    {
+                        lit   = &bLit->second;
+                        uniId = a;
+                    }
+                    if (lit && uniId)
+                    {
+                        FpLitVecUniformScaleBinding bind;
+                        for (int k = 0; k < 4; ++k) bind.literal[k] = lit->vals[k];
+                        bind.uniformId = uniId;
+                        bind.vecWidth  = inst.resultType.vectorSize;
+                        valueToLitVecUniformScale[inst.result] = bind;
+                        break;
+                    }
+                }
+
                 // Mul(literal_vec, FpDot3LitPack) — record a scaled
                 // 3-dot pack so a downstream `vec4(.., 1.0)` wrap can
                 // emit a tail MUL with the scale literal block in
@@ -1609,6 +1678,29 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         for (int k = 0; k < 4; ++k) b.literals[2][k] = it2->second.literal[k];
                         valueToDot3LitPack[inst.result] = b;
                         break;
+                    }
+                }
+
+                // Shape A4d: `vec4(literal_vec3 * uniform_scalar, 1.0)`
+                // — 2-operand wrap of a FpLitVecUniformScaleBinding.
+                if (inst.operands.size() == 2)
+                {
+                    auto luIt = valueToLitVecUniformScale.find(inst.operands[0]);
+                    if (luIt != valueToLitVecUniformScale.end())
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[1]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpLitVecUniformScaleWrapBinding wb;
+                            for (int k = 0; k < 4; ++k)
+                                wb.literal[k] = luIt->second.literal[k];
+                            wb.uniformId = luIt->second.uniformId;
+                            wb.vecWidth  = luIt->second.vecWidth;
+                            valueToLitVecUniformScaleWrap[inst.result] = wb;
+                            break;
+                        }
                     }
                 }
 
@@ -3742,6 +3834,100 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             }
                         }
                     }
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `vec4(literal_vec * uniform_scalar, 1.0)` — 3-insn
+                // shape with the W=1.0 placement chosen by the
+                // function-wide literal-pool rule (prev c[0].xxxx
+                // → avoid → lane 1 / .yyyy / {0, 1.0, 0, 0}).  The
+                // uniform preload's swizzle (.xxxx) drives the rule.
+                auto luwIt = valueToLitVecUniformScaleWrap.find(srcId);
+                if (luwIt != valueToLitVecUniformScaleWrap.end())
+                {
+                    const FpLitVecUniformScaleWrapBinding& bind =
+                        luwIt->second;
+                    auto uIt = valueToFpUniform.find(bind.uniformId);
+                    if (uIt == valueToFpUniform.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: lit-vec×uniform: uniform did not resolve");
+                        return out;
+                    }
+
+                    const struct nvfx_reg tempR0   = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    struct nvfx_src none0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    // --- Insn 1: MOV R0.x, c[0].xxxx + zeros ---
+                    // Uniform preload at lane 0 of an inline block;
+                    // the runtime patches the actual uniform value in.
+                    struct nvfx_src ufSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    ufSrc.swz[0] = ufSrc.swz[1] =
+                    ufSrc.swz[2] = ufSrc.swz[3] = 0;
+                    struct nvfx_insn movUni = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_X, ufSrc, none0, none0);
+                    movUni.precision = FLOAT32;
+                    asm_.emit(movUni, NVFX_FP_OP_OPCODE_MOV);
+
+                    const uint32_t uniOffset = asm_.currentByteSize();
+                    for (auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == uIt->second)
+                        {
+                            eu.ucodeByteOffsets.push_back(uniOffset);
+                            break;
+                        }
+                    }
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+
+                    // --- Insn 2: MOV R0.w, c[0].yyyy + {0, 1, 0, 0} ---
+                    // W=1.0 at lane 1 — the rule fires because the
+                    // PREVIOUS insn (uniform preload above) reads
+                    // c[0].xxxx, so we use .yyyy to dodge the .xxxx
+                    // collision the reference compiler avoids.
+                    struct nvfx_src cYSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    cYSrc.swz[0] = cYSrc.swz[1] =
+                    cYSrc.swz[2] = cYSrc.swz[3] = 1;
+                    struct nvfx_insn movW = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_W, cYSrc, none0, none0);
+                    movW.precision = FLOAT32;
+                    asm_.emit(movW, NVFX_FP_OP_OPCODE_MOV);
+                    const float wOneBlock[4] = { 0.0f, 1.0f, 0.0f, 0.0f };
+                    asm_.appendConstBlock(wOneBlock);
+
+                    // --- Insn 3: MUL R0.xyz [END], R0.xxxx,
+                    //                                c[0].xyzw + lit ---
+                    struct nvfx_src tempBSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                    tempBSrc.swz[0] = tempBSrc.swz[1] =
+                    tempBSrc.swz[2] = tempBSrc.swz[3] = 0;
+                    struct nvfx_src litSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    // Identity .xyzw on c[0] (default).
+
+                    struct nvfx_insn mulInsn = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                        tempBSrc, litSrc, none0);
+                    mulInsn.precision = dstPrecision;
+                    asm_.emit(mulInsn, NVFX_FP_OP_OPCODE_MUL);
+
+                    const float litBlock[4] = {
+                        bind.literal[0], bind.literal[1],
+                        bind.literal[2], 0.0f };
+                    asm_.appendConstBlock(litBlock);
 
                     emittedSomething = true;
                     break;
