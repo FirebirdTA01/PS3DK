@@ -485,6 +485,38 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, VecInsertBinding> valueToVecInsert;
 
+    // Varying-pack: `vec2(varying.x, varying.z)` (or wider).  The
+    // reference compiler materialises this with one MOV writing the
+    // pack lanes into a temp register's matching lanes and using a
+    // partial mask.  Captured here so a consuming Dot can fold the
+    // pack into an ahead-of-DP2 setup MOV without going through the
+    // generic VecConstruct lowering.  Width 2 = vec2, 3 = vec3, 4 =
+    // vec4 (latter is just an identity MOV).
+    struct FpVaryingPackBinding
+    {
+        IRValueID baseId = 0;        // resolves via valueToInputSrc
+        int       lanes[4] = {0, 0, 0, 0};
+        int       width  = 2;
+    };
+    std::unordered_map<IRValueID, FpVaryingPackBinding> valueToVaryingPack;
+
+    // `dot(literal_vec, varying_pack)` shape.  The reference compiler
+    // emits this as 2 instructions: a setup MOV that packs the
+    // varying's source lanes into a temp register's matching mask,
+    // then a DP2/DP3/DP4 reading the temp + an inline literal const
+    // block.  When the dot result feeds a `float4(d, d, d, 1.0)`
+    // VecConstruct (a common single-channel-blend output), the
+    // wrapW1 flag inserts a third MOV writing R_dst.W = 1.0 BEFORE
+    // the dot itself so the dot insn carries PROGRAM_END.  Captured
+    // operands resolve via valueToVaryingPack and valueToLiteralVec4.
+    struct FpDotLitPackBinding
+    {
+        FpVaryingPackBinding pack;
+        float                literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
+        bool                 wrapW1      = false;  // float4(d,d,d,1.0)
+    };
+    std::unordered_map<IRValueID, FpDotLitPackBinding> valueToDotLitPack;
+
     int nextTexUnit = 0;
 
     // Slot index for embedded-uniform globals.  Top-level uniforms
@@ -903,6 +935,38 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 {
                     out.diagnostics.push_back("nv40-fp: Dot with <2 operands");
                     return out;
+                }
+
+                // (folded literal vec, varying-pack) — record an
+                // FpDotLitPackBinding and break out before the
+                // existing (input, uniform) check fires.
+                {
+                    auto aLit  = valueToLiteralVec4.find(inst.operands[0]);
+                    auto bLit  = valueToLiteralVec4.find(inst.operands[1]);
+                    auto aPack = valueToVaryingPack.find(inst.operands[0]);
+                    auto bPack = valueToVaryingPack.find(inst.operands[1]);
+                    const FpVaryingPackBinding* pack = nullptr;
+                    const LiteralVec4*          lit  = nullptr;
+                    if (aLit  != valueToLiteralVec4.end()  &&
+                        bPack != valueToVaryingPack.end())
+                    {
+                        lit  = &aLit->second;
+                        pack = &bPack->second;
+                    }
+                    else if (bLit  != valueToLiteralVec4.end() &&
+                             aPack != valueToVaryingPack.end())
+                    {
+                        lit  = &bLit->second;
+                        pack = &aPack->second;
+                    }
+                    if (pack && lit)
+                    {
+                        FpDotLitPackBinding b;
+                        b.pack = *pack;
+                        for (int k = 0; k < 4; ++k) b.literal[k] = lit->vals[k];
+                        valueToDotLitPack[inst.result] = b;
+                        break;
+                    }
                 }
 
                 const SrcMod ma = resolveSrcMods(inst.operands[0]);
@@ -1456,6 +1520,72 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             valueToReflect[inst.result] = bind;
                             break;
                         }
+                    }
+                }
+
+                // Shape A3: `vec4(d, d, d, 1.0)` where d is a Dot
+                // result that resolved as a literal × varying-pack —
+                // alias the result to the same DotLitPack binding
+                // with wrapW1=true.  StoreOutput then emits the
+                // 3-instruction shape (pack MOV + W=1 MOV + DP2/END).
+                if (inst.operands.size() == 4)
+                {
+                    auto dlpIt = valueToDotLitPack.find(inst.operands[0]);
+                    if (dlpIt != valueToDotLitPack.end() &&
+                        inst.operands[1] == inst.operands[0] &&
+                        inst.operands[2] == inst.operands[0])
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[3]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpDotLitPackBinding bind = dlpIt->second;
+                            bind.wrapW1 = true;
+                            valueToDotLitPack[inst.result] = bind;
+                            break;
+                        }
+                    }
+                }
+
+                // Shape E: `vec2(varying.X, varying.Y)` (or wider) —
+                // every operand is a scalar lane of the SAME entry-
+                // point varying.  Recorded as a varying-pack so a
+                // consumer (Dot, etc.) can fold the pack-MOV into
+                // its own emit.  Plain VecConstruct fall-through
+                // for non-pack shapes.
+                if (inst.operands.size() >= 2 && inst.operands.size() <= 4)
+                {
+                    int  packLanes[4] = {0, 0, 0, 0};
+                    IRValueID baseId  = 0;
+                    bool      ok      = true;
+                    for (size_t k = 0; k < inst.operands.size(); ++k)
+                    {
+                        auto seIt = valueToScalarExtract.find(inst.operands[k]);
+                        if (seIt == valueToScalarExtract.end()) { ok = false; break; }
+                        if (k == 0)
+                        {
+                            baseId = seIt->second.baseId;
+                            if (valueToInputSrc.find(baseId) ==
+                                valueToInputSrc.end())
+                            { ok = false; break; }
+                        }
+                        else if (seIt->second.baseId != baseId)
+                        {
+                            ok = false; break;
+                        }
+                        packLanes[k] = seIt->second.lane;
+                    }
+                    if (ok)
+                    {
+                        FpVaryingPackBinding pb;
+                        pb.baseId = baseId;
+                        pb.width  = static_cast<int>(inst.operands.size());
+                        for (int k = 0; k < 4; ++k) pb.lanes[k] = packLanes[k];
+                        valueToVaryingPack[inst.result] = pb;
+                        // Don't break — fall through so the all-const
+                        // shape recognisers below still get a chance
+                        // (won't apply, but keeps the dispatch tidy).
                     }
                 }
 
@@ -3107,6 +3237,138 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // Track varying-input mask bit for the LHS varying
                     // of the compare itself.
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // dot(literal_vec, varying-pack) — wrapped in
+                // float4(d, d, d, 1.0).  3-instruction shape:
+                //   MOV R0.<pack-mask>, f[INPUT].<pack-swizzle>
+                //   MOV R0.w, c[0].xxxx       <inline {1, 0, 0, 0}>
+                //   DPN R0.xyz [END], R0.xyzw, c[0].<lit-swizzle>
+                //                              <inline literal block>
+                // Where DPN is DP2/DP3/DP4 driven by pack width.
+                // Source swizzle on the DP's c[0] reads the literal
+                // lanes back in pack order — for width-2 that's .xyxx
+                // (X→0.97, Y→0.242, Z/W replicate lane 0).
+                auto dlpIt = valueToDotLitPack.find(srcId);
+                if (dlpIt != valueToDotLitPack.end() && dlpIt->second.wrapW1)
+                {
+                    const FpDotLitPackBinding& bind = dlpIt->second;
+                    auto inputIt = valueToInputSrc.find(bind.pack.baseId);
+                    if (inputIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: dot-lit-pack varying did not resolve");
+                        return out;
+                    }
+                    const int inputSrcCode = inputIt->second;
+                    const int packWidth    = bind.pack.width;
+
+                    const struct nvfx_reg tempR0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+
+                    // --- Insn 1: MOV R0.<mask>, f[INPUT].<pack-swz> ---
+                    uint8_t packMask = 0;
+                    for (int k = 0; k < packWidth; ++k) packMask |= (1u << k);
+
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inputSrcCode);
+                    struct nvfx_src packSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    // Pack lanes fill the matching slots; trailing
+                    // slots stay identity (X=0,Y=1,Z=2,W=3).  Matches
+                    // the reference compiler's `.xzzw` shape for a
+                    // width-2 pack of lanes {0, 2}: SWZ_X=0(X),
+                    // SWZ_Y=2(Z), SWZ_Z stays 2(Z) (default), SWZ_W
+                    // stays 3(W) (default).  The dst mask hides
+                    // whatever the trailing slots resolve to.
+                    for (int k = 0; k < packWidth; ++k)
+                        packSrc.swz[k] = static_cast<uint8_t>(bind.pack.lanes[k]);
+
+                    struct nvfx_src none0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    struct nvfx_insn movPack = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        packMask, packSrc, none0, none0);
+                    movPack.precision = FLOAT32;
+                    asm_.emit(movPack, NVFX_FP_OP_OPCODE_MOV);
+
+                    // --- Insn 2: MOV R0.w, c[0].xxxx + {1, 0, 0, 0} ---
+                    struct nvfx_src cOneSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    cOneSrc.swz[0] = cOneSrc.swz[1] =
+                    cOneSrc.swz[2] = cOneSrc.swz[3] = 0;
+                    struct nvfx_insn movW = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_W, cOneSrc, none0, none0);
+                    movW.precision = FLOAT32;
+                    asm_.emit(movW, NVFX_FP_OP_OPCODE_MOV);
+                    const float wOneBlock[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+                    asm_.appendConstBlock(wOneBlock);
+
+                    // --- Insn 3: DPn R0.xyz [END], R0.xyzw,
+                    //                              c[0].<lit-swz> ---
+                    struct nvfx_src tempSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                    // identity .xyzw on the pack temp (default)
+
+                    struct nvfx_src litSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    // Literal swizzle: lane k of the dot's literal
+                    // operand is at lane k of the inline block; the
+                    // dot reads each pack-active lane in order.  For
+                    // width=2 → .xyxx (X→0.97, Y→0.242, Z/W=X).
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        litSrc.swz[k] = (k < packWidth)
+                            ? static_cast<uint8_t>(k) : 0;
+                    }
+
+                    uint8_t dotOpcode = NVFX_FP_OP_OPCODE_DP2;
+                    if      (packWidth == 3) dotOpcode = NVFX_FP_OP_OPCODE_DP3;
+                    else if (packWidth >= 4) dotOpcode = NVFX_FP_OP_OPCODE_DP4;
+
+                    // dst mask = .xyz so the W lane stays at the 1.0
+                    // we wrote in insn 2.
+                    struct nvfx_insn dotInsn = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                        tempSrc, litSrc, none0);
+                    dotInsn.precision = dstPrecision;
+                    asm_.emit(dotInsn, dotOpcode);
+
+                    // Inline literal block — pack pads to 4 floats.
+                    const float litBlock[4] = {
+                        bind.literal[0], bind.literal[1],
+                        bind.literal[2], bind.literal[3] };
+                    asm_.appendConstBlock(litBlock);
+
+                    // Track the varying input bits.  When the pack
+                    // reads lane Z or W of a TEXCOORD<N>, clear the
+                    // texCoords2D bit — the coord is being used as
+                    // 3D/4D, mirroring the cube/projective handling
+                    // elsewhere.
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inputSrcCode);
+                    if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
+                        attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        for (int k = 0; k < packWidth; ++k)
+                        {
+                            if (bind.pack.lanes[k] >= 2)
+                            {
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                                break;
+                            }
+                        }
+                    }
 
                     emittedSomething = true;
                     break;
