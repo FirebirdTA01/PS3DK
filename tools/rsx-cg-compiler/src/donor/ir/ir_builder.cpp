@@ -1694,6 +1694,16 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                 // carrying a semantic, fall through to the regular
                 // identifier-assignment StoreOutput emit so the lane-
                 // overridden vec value propagates to the output.
+                //
+                // Sequential swizzle-writes (`oColor.rgb = ...;
+                // oColor.a = ...;`) each fire this branch, so the
+                // emitted StoreOutputs would stack with intermediate
+                // values reaching the back-end.  Suppress the chain:
+                // if the last instruction in the current block is
+                // already a StoreOutput to this same semantic, just
+                // update its operand instead of appending a fresh
+                // store — the latest VecInsert chain holds all the
+                // accumulated lane writes.
                 if (ident->resolvedDecl &&
                     ident->resolvedDecl->kind == DeclKind::Parameter)
                 {
@@ -1702,6 +1712,33 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                          param->storage == StorageQualifier::InOut) &&
                         !param->semantic.isEmpty())
                     {
+                        // Drop any earlier StoreOutput in this block
+                        // that targets the same semantic — this
+                        // swizzle-write supersedes it.  Walk forward
+                        // erasing matches; nothing depends on a
+                        // StoreOutput's side effect within the IR
+                        // (StoreOutputs have no result), so removal
+                        // is safe.  Crucially this fires for
+                        // chained `oColor.rgb = ...; oColor.a = ...;`
+                        // where the rgb StoreOutput is no longer the
+                        // last instruction (the alpha VecInsert was
+                        // already appended above).
+                        auto& insts = currentBlock_->instructions;
+                        for (auto it = insts.begin(); it != insts.end(); )
+                        {
+                            const auto& cur = *it;
+                            if (cur && cur->op == IROp::StoreOutput &&
+                                cur->semanticName == param->semantic.name &&
+                                cur->semanticIndex == param->semantic.index)
+                            {
+                                it = insts.erase(it);
+                            }
+                            else
+                            {
+                                ++it;
+                            }
+                        }
+
                         auto inst = std::make_unique<IRInstruction>(
                             IROp::StoreOutput,
                             InvalidIRValue, IRTypeInfo::Void());

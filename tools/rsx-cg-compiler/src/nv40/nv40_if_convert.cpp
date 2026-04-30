@@ -69,6 +69,7 @@ bool isHoistableOp(IROp op)
     case IROp::Const:
     case IROp::VecConstruct:
     case IROp::VecExtract:
+    case IROp::VecInsert:
     case IROp::VecShuffle:
         return true;
     default:
