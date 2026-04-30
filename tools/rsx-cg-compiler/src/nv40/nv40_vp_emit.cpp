@@ -31,6 +31,7 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace nv40::detail
@@ -288,6 +289,15 @@ struct MatVecMulBinding
     uint8_t  vecOpcode      = 0;              // 0 = DP4 (default), set to DPH opcode for vec3+1 promotion
     bool     vectorIsTemp   = false;          // true → vectorInputIdx selects a TEMP, false → INPUT
 
+    // Chained matrix×vector: when the vector operand is itself a
+    // previous MatVecMul's result, `priorChainId` points to that prior
+    // step's IR value.  The reference compiler emits chained matvecmuls
+    // back-to-back when there's no other store to interleave with, but
+    // splits them into per-step batches when an out_color store needs
+    // to be interleaved.  We always defer the chain emit until flush
+    // so the interleave path can plan batches uniformly.
+    IRValueID priorChainId = 0;               // 0 → not a chain step
+
     // When the vector operand is a VecConstruct that has to materialise
     // into a temp (e.g. sysmenu's `mul(M, vec4(in.x, in.y, 0, 1))`),
     // the build plan stays here.  The MOVs are emitted at consumption
@@ -434,6 +444,18 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
     // VecConstruct results — generic 4-scalar / mixed-input version.
     std::unordered_map<IRValueID, VecConstructBinding> valueToVecConstruct;
+
+    // VecInsert: `c.lane = scalar;` overrides one lane of a previously
+    // computed vec value.  Recorded for each link in a VecInsert chain;
+    // StoreOutput resolves the chain by walking inward via baseVecId
+    // until a non-VecInsert source is reached.
+    struct VecInsertBinding
+    {
+        IRValueID baseVecId = 0;   // vector being inserted into
+        IRValueID scalarId  = 0;   // scalar being inserted at lane
+        int       laneIndex = 0;   // 0..3 — destination lane
+    };
+    std::unordered_map<IRValueID, VecInsertBinding> valueToVecInsert;
 
     // Temp register where a MatVecMul / VecConstruct result has been
     // materialised.  Set when a downstream consumer (chained MatVecMul,
@@ -681,9 +703,185 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         auto mvIt = valueToMatVecMul.find(srcId);
         if (mvIt != valueToMatVecMul.end())
         {
-            // If the matvecmul's vector operand was a deferred VecConstruct
-            // build, emit the MOVs that fill the temp register first.
-            // Resolves any remaining literal lanes through the pool.
+            // Walk the matvecmul chain back to its root (the first step,
+            // whose vector source is a direct input / VecPromote /
+            // VecConstruct).  We emit chain steps from root to tail; each
+            // intermediate step writes to a freshly-allocated temp, while
+            // the final step writes to the output register.  Temps are
+            // recycled after their consumer reads them, giving the R0 →
+            // R1 → R0 ping-pong sce-cgc emits for back-to-back chains.
+            std::vector<IRValueID> chainSteps;
+            {
+                IRValueID curr = srcId;
+                while (curr != 0)
+                {
+                    chainSteps.push_back(curr);
+                    auto it = valueToMatVecMul.find(curr);
+                    if (it == valueToMatVecMul.end()) break;
+                    curr = it->second.priorChainId;
+                }
+                std::reverse(chainSteps.begin(), chainSteps.end());
+            }
+
+            // Track each emitted step's destination temp so the next
+            // step can read from it.  The final step writes to dstReg,
+            // not a temp, so there's no entry for it here.
+            std::unordered_map<IRValueID, int> stepTempReg;
+
+            for (size_t stepIdx = 0; stepIdx < chainSteps.size(); ++stepIdx)
+            {
+                const IRValueID stepId = chainSteps[stepIdx];
+                const bool      isFinal = (stepIdx == chainSteps.size() - 1);
+                MatVecMulBinding step = valueToMatVecMul[stepId];
+
+                // Resolve vec source: prior chain step's temp (if this is a
+                // chain link), or the original vector.
+                bool readsPriorChainTemp = false;
+                int  priorChainTempReg   = -1;
+                if (step.priorChainId != 0)
+                {
+                    auto t = stepTempReg.find(step.priorChainId);
+                    if (t == stepTempReg.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-vp: chain temp not found while emitting matvecmul");
+                        return false;
+                    }
+                    priorChainTempReg = t->second;
+                    readsPriorChainTemp = true;
+                }
+
+                // For the root step only: handle VecConstruct temp-build.
+                if (step.priorChainId == 0 && step.hasTempBuild)
+                {
+                    VecConstructBinding vb = step.tempBuild;
+                    const int tempReg = step.vectorInputIdx;
+                    const bool useDph = vb.wIsLiteralOne;
+                    const int  laneCount = useDph ? 3 : 4;
+
+                    for (int j = 0; j < laneCount; ++j)
+                    {
+                        if (vb.lanes[j].kind == LaneSource::Kind::Literal)
+                        {
+                            auto [cReg, cLane] = literals.assign(vb.lanes[j].litValue);
+                            vb.lanes[j].kind    = LaneSource::Kind::ConstLane;
+                            vb.lanes[j].regIdx  = cReg;
+                            vb.lanes[j].srcLane = cLane;
+                        }
+                    }
+
+                    bool laneEmitted[4] = {false, false, false, false};
+                    for (int i = 0; i < laneCount; ++i)
+                    {
+                        if (laneEmitted[i]) continue;
+                        const LaneSource::Kind k = vb.lanes[i].kind;
+                        const int regIdx         = vb.lanes[i].regIdx;
+
+                        int mask = 0;
+                        uint8_t swz[4] = {0, 0, 0, 0};
+                        int firstMatchLane = -1;
+                        for (int j = 0; j < laneCount; ++j)
+                        {
+                            if (vb.lanes[j].kind == k && vb.lanes[j].regIdx == regIdx)
+                            {
+                                if (firstMatchLane < 0) firstMatchLane = j;
+                                mask |= (8 >> j);
+                                swz[j] = static_cast<uint8_t>(vb.lanes[j].srcLane);
+                                laneEmitted[j] = true;
+                            }
+                        }
+                        for (int j = 0; j < 4; ++j)
+                        {
+                            if (!(mask & (8 >> j)))
+                                swz[j] = swz[firstMatchLane >= 0 ? firstMatchLane : 0];
+                        }
+
+                        const struct nvfx_reg src = (k == LaneSource::Kind::InputLane)
+                            ? makeReg(NVFXSR_INPUT, regIdx)
+                            : makeReg(NVFXSR_CONST, regIdx);
+                        struct nvfx_src s0 = makeSrc(src);
+                        s0.swz[0] = swz[0]; s0.swz[1] = swz[1];
+                        s0.swz[2] = swz[2]; s0.swz[3] = swz[3];
+
+                        const struct nvfx_reg tempRegN = makeReg(NVFXSR_TEMP, tempReg);
+                        struct nvfx_insn movInsn = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempRegN),
+                            mask,
+                            s0, makeSrc(none), makeSrc(none));
+                        asm_.emit(movInsn, VP_OP(MOV));
+                    }
+                }
+
+                // Determine vec source register for the 4 DP4s.
+                struct nvfx_reg vecReg;
+                if (readsPriorChainTemp)
+                    vecReg = makeReg(NVFXSR_TEMP, priorChainTempReg);
+                else if (step.vectorIsTemp)
+                    vecReg = makeReg(NVFXSR_TEMP, step.vectorInputIdx);
+                else
+                    vecReg = makeReg(NVFXSR_INPUT, step.vectorInputIdx);
+
+                // Determine dst: temp for non-final, output for final.
+                struct nvfx_reg stepDst;
+                int  stepTemp = -1;
+                if (isFinal)
+                {
+                    stepDst = dstReg;
+                }
+                else
+                {
+                    stepTemp = allocTemp();
+                    stepDst = makeReg(NVFXSR_TEMP, stepTemp);
+                    stepTempReg[stepId] = stepTemp;
+                }
+
+                const uint8_t opcode =
+                    step.vecOpcode != 0
+                        ? step.vecOpcode
+                        : static_cast<uint8_t>(VP_OP(DP4));
+                for (int i = 0; i < 4; ++i)
+                {
+                    const int rowReg =
+                        step.matrixBaseReg + kDp4RowOffset[i];
+                    const struct nvfx_reg rowConst =
+                        makeReg(NVFXSR_CONST, rowReg);
+
+                    struct nvfx_src src0 = makeSrc(vecReg);
+                    src0.swz[0] = step.inputSwz[0];
+                    src0.swz[1] = step.inputSwz[1];
+                    src0.swz[2] = step.inputSwz[2];
+                    src0.swz[3] = step.inputSwz[3];
+                    struct nvfx_src src1 = makeSrc(rowConst);
+                    struct nvfx_src src2 = makeSrc(none);
+
+                    struct nvfx_insn in = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(stepDst),
+                        kDp4Writemask[i],
+                        src0, src1, src2);
+                    asm_.emit(in, opcode);
+                }
+
+                // After consuming the prior chain temp, recycle it so
+                // the next step can reuse it (R0 → R1 → R0 ping-pong).
+                if (readsPriorChainTemp)
+                    availableTemps.push_back(priorChainTempReg);
+            }
+
+            emittedSomething = true;
+            return true;
+        }
+
+        // ---- legacy non-chain matvecmul fallback (unused after deferral
+        // refactor; kept until full coverage is verified).  The block
+        // below is dead code; leave it disabled but in place so the
+        // surrounding diff stays minimal.
+        if (false) {
+        auto mvDeadIt = valueToMatVecMul.find(srcId);
+        if (mvDeadIt != valueToMatVecMul.end())
+        {
+            auto& mvIt = mvDeadIt;
             if (mvIt->second.hasTempBuild)
             {
                 VecConstructBinding vb = mvIt->second.tempBuild;
@@ -783,6 +981,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             emittedSomething = true;
             return true;
         }
+        } // end if(false) — legacy block
 
         // VecConstruct(...) → StoreOutput: emit one MOV per source
         // register (input attr or const-bank slot) with a writemask
@@ -1008,6 +1207,35 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 break;
             }
 
+            case IROp::VecExtract:
+            {
+                // Same shape as a single-lane VecShuffle.  Alias into
+                // valueToShuffle with width=1 so downstream consumers
+                // (MatVecMul, StoreOutput, the per-lane MAD chain
+                // recogniser) treat both ops uniformly.
+                if (inst.operands.empty()) break;
+                ShuffleBinding sb;
+                sb.srcId = inst.operands[0];
+                sb.width = 1;
+                sb.lanes[0] = inst.componentIndex & 3;
+                sb.lanes[1] = sb.lanes[0];
+                sb.lanes[2] = sb.lanes[0];
+                sb.lanes[3] = sb.lanes[0];
+                valueToShuffle[inst.result] = sb;
+                break;
+            }
+
+            case IROp::VecInsert:
+            {
+                if (inst.operands.size() < 2) break;
+                VecInsertBinding vib;
+                vib.baseVecId = inst.operands[0];
+                vib.scalarId  = inst.operands[1];
+                vib.laneIndex = inst.componentIndex & 3;
+                valueToVecInsert[inst.result] = vib;
+                break;
+            }
+
             case IROp::VecConstruct:
             {
                 // Two recognised shapes:
@@ -1227,74 +1455,21 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 }
 
                 // DP4 path #3: vector operand is a previous MatVecMul's
-                // result — chained matrix-vector multiplies.  Force the
-                // earlier result to materialise into a temp register,
-                // then read from that temp.
+                // result — chained matrix-vector multiplies.  Defer
+                // emission entirely to the flush phase so the chain can
+                // be interleaved with a per-lane MAD color store when
+                // present (mul_chain4_v shape).  When there's nothing
+                // to interleave with, the flush still walks the chain
+                // back-to-front and emits each step's 4 DP4s into a
+                // ping-pong temp pair, byte-matching the reference's
+                // sequential layout.
                 auto chainIt = valueToMatVecMul.find(inst.operands[1]);
                 if (chainIt != valueToMatVecMul.end())
                 {
-                    int tempReg;
-                    auto trIt = valueToTempReg.find(inst.operands[1]);
-                    if (trIt != valueToTempReg.end())
-                    {
-                        tempReg = trIt->second;
-                    }
-                    else
-                    {
-                        tempReg = allocTemp();
-                        valueToTempReg[inst.operands[1]] = tempReg;
-
-                        // Emit the prior MatVecMul into tempReg now.
-                        // Same 4-DP4/DPH unrolling as emitStoreOutput,
-                        // but with a temp dst instead of an output dst.
-                        const MatVecMulBinding& prev = chainIt->second;
-                        const struct nvfx_reg noneR  = makeReg(NVFXSR_NONE, 0);
-                        const struct nvfx_reg dstTemp = makeReg(NVFXSR_TEMP, tempReg);
-                        const struct nvfx_reg vecSrc =
-                            prev.vectorIsTemp
-                                ? makeReg(NVFXSR_TEMP, prev.vectorInputIdx)
-                                : makeReg(NVFXSR_INPUT, prev.vectorInputIdx);
-                        const uint8_t opcode =
-                            prev.vecOpcode != 0
-                                ? prev.vecOpcode
-                                : static_cast<uint8_t>(VP_OP(DP4));
-                        for (int i = 0; i < 4; ++i)
-                        {
-                            const int rowReg =
-                                prev.matrixBaseReg + kDp4RowOffset[i];
-                            const struct nvfx_reg rowConst =
-                                makeReg(NVFXSR_CONST, rowReg);
-                            struct nvfx_src s0 = makeSrc(vecSrc);
-                            s0.swz[0] = prev.inputSwz[0];
-                            s0.swz[1] = prev.inputSwz[1];
-                            s0.swz[2] = prev.inputSwz[2];
-                            s0.swz[3] = prev.inputSwz[3];
-                            struct nvfx_src s1 = makeSrc(rowConst);
-                            struct nvfx_insn in = nvfx_insn(
-                                0, 0, -1, -1,
-                                const_cast<struct nvfx_reg&>(dstTemp),
-                                kDp4Writemask[i],
-                                s0, s1, makeSrc(noneR));
-                            asm_.emit(in, opcode);
-                        }
-                        // After consuming the prior MatVecMul's vector
-                        // source, the temp it lived in is dead — recycle
-                        // for the next chain step.  This is what gives
-                        // us the R0 → R1 → R0 ping-pong instead of the
-                        // naive R0 → R1 → R2 cascade.  Skip recycling
-                        // when the source was a vertex input (M0 case).
-                        if (prev.vectorIsTemp)
-                            availableTemps.push_back(prev.vectorInputIdx);
-
-                        // The prior MatVecMul has now been emitted; we
-                        // remove its `valueToMatVecMul` record so a
-                        // downstream StoreOutput reading it picks up the
-                        // temp instead of triggering a re-emit.
-                        valueToMatVecMul.erase(chainIt);
-                    }
-                    binding.vectorInputIdx = tempReg;
+                    binding.priorChainId   = inst.operands[1];
                     binding.vectorIsTemp   = true;
-                    binding.vecOpcode      = 0;  // DP4 (default)
+                    binding.vectorInputIdx = -1;  // resolved at flush
+                    binding.vecOpcode      = 0;   // DP4 (default)
                     valueToMatVecMul[inst.result] = binding;
                     break;
                 }
@@ -1316,20 +1491,21 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
                 const IRValueID srcId = inst.operands[0];
 
-                // Multi-instruction expansions (matvecmul, arithmetic needing a
-                // temp) are deferred until after all single-instruction
-                // StoreOutputs have been emitted.
-                if (valueToMatVecMul.count(srcId) || valueToArith.count(srcId))
+                // Multi-instruction expansions (matvecmul, arithmetic
+                // needing a temp, VecInsert chains) are deferred until
+                // after all single-instruction StoreOutputs have been
+                // emitted.  This places single-insn stores first, which
+                // matches the reference compiler's "simple first, multi
+                // last" rule for shaders with mixed-shape outputs.
+                if (valueToMatVecMul.count(srcId) ||
+                    valueToArith.count(srcId)    ||
+                    valueToVecInsert.count(srcId))
                 {
                     deferredStores.push_back(
                         { srcId, inst.semanticName, inst.semanticIndex });
                     break;
                 }
 
-                // Single-insn StoreOutputs are buffered and emitted
-                // sorted by output-register index ascending (matches
-                // the reference compiler's instruction ordering for
-                // shaders with multiple passthrough outputs).
                 immediateStores.push_back(
                     { srcId, inst.semanticName, inst.semanticIndex });
                 break;
@@ -1387,14 +1563,449 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             return storeSortKey(a) < storeSortKey(b);
         });
 
+    // ----- Per-lane MAD chain interleave -----
+    //
+    // The reference compiler interleaves multi-batch StoreOutputs at
+    // batch granularity rather than emitting one store fully before
+    // the next.  For a vertex shader with:
+    //   out_position = float4(in_position, 1.0);
+    //   out_color    = <per-lane MAD chain on in_color, tweak, offset>;
+    // the reference output is 5 instructions in this exact order:
+    //   1. MOV o[POS].xyz, v[POS].xyzx              (pos batch 1)
+    //   2. MAD R0.xyz,    v[col].xyzx, c[tweak].xxx,
+    //                     c[tweak].yzwy             (col batch 1)
+    //   3. MOV o[POS].w,  c[lit_one].xxxx           (pos batch 2)
+    //   4. MOV R0.w,      v[col].wwww               (col batch 2)
+    //   5. ADD o[COL0],   c[offset].xyzw, R0.xyzw   (col batch 3, LAST)
+    //
+    // Detect the shape: one VecConstruct(input vec3, literal 1.0) ->
+    // out_position pair AND one VecInsert chain matching the per-lane
+    // MAD pattern -> out_color pair.  When matched, emit the 5
+    // instructions directly and mark the underlying stores consumed
+    // so the regular flush phase skips them.
+
+    std::unordered_set<IRValueID> consumedStoreSrcIds;
+
+    // Resolve a scalar IR value to a (kind, regIdx, lane) triple iff it
+    // is a single-lane VecShuffle / VecExtract reading from a known
+    // input or const-bank source.  Walks through any intervening
+    // VecInsert chain so `extract(insert(v, s, k0), k1)` with k0!=k1
+    // resolves to v.lane[k1].
+    enum class ScalarRefKind { Input, Const };
+    struct ScalarRef { ScalarRefKind kind; int regIdx; int lane; };
+    std::function<bool(IRValueID, ScalarRef&)> resolveScalarRef;
+    resolveScalarRef = [&](IRValueID id, ScalarRef& ref) -> bool {
+        auto shIt = valueToShuffle.find(id);
+        if (shIt == valueToShuffle.end()) return false;
+        if (shIt->second.width != 1) return false;
+        const int lane = shIt->second.lanes[0];
+        IRValueID curr = shIt->second.srcId;
+        while (true)
+        {
+            auto viIt = valueToVecInsert.find(curr);
+            if (viIt == valueToVecInsert.end()) break;
+            if (viIt->second.laneIndex == lane)
+                return resolveScalarRef(viIt->second.scalarId, ref);
+            curr = viIt->second.baseVecId;
+        }
+        auto vsIt = valueToSource.find(curr);
+        if (vsIt == valueToSource.end()) return false;
+        ref.kind   = (vsIt->second.kind == ValueSource::Kind::Input)
+                         ? ScalarRefKind::Input
+                         : ScalarRefKind::Const;
+        ref.regIdx = vsIt->second.regIdx;
+        ref.lane   = lane;
+        return true;
+    };
+
+    auto resolveArith = [&](IRValueID id, ArithOp expectedOp,
+                            IRValueID& lhs, IRValueID& rhs) -> bool {
+        auto arIt = valueToArith.find(id);
+        if (arIt == valueToArith.end()) return false;
+        if (arIt->second.op != expectedOp) return false;
+        lhs = arIt->second.srcIds[0];
+        rhs = arIt->second.srcIds[1];
+        return true;
+    };
+
+    // Walk a VecInsert chain from `root` back to its base vec.  Records
+    // the inserted scalar ID per lane (latest insert wins per lane).
+    struct VecInsertChain {
+        IRValueID baseVecId = 0;
+        IRValueID laneScalar[4] = {0, 0, 0, 0};
+        bool      overridden[4] = {false, false, false, false};
+    };
+    auto walkVecInsertChain = [&](IRValueID root) -> VecInsertChain {
+        VecInsertChain c;
+        IRValueID curr = root;
+        while (true)
+        {
+            auto viIt = valueToVecInsert.find(curr);
+            if (viIt == valueToVecInsert.end()) { c.baseVecId = curr; break; }
+            const int lane = viIt->second.laneIndex;
+            if (!c.overridden[lane])
+            {
+                c.overridden[lane] = true;
+                c.laneScalar[lane] = viIt->second.scalarId;
+            }
+            curr = viIt->second.baseVecId;
+        }
+        return c;
+    };
+
+    struct PerLaneMadShape {
+        bool ok = false;
+        int  inputColorAttrIdx = -1;
+        int  tweakConstReg     = -1;
+        int  offsetConstReg    = -1;
+    };
+    auto recognizePerLaneMadChain = [&](IRValueID rootId) -> PerLaneMadShape {
+        PerLaneMadShape shape;
+        const VecInsertChain c = walkVecInsertChain(rootId);
+        for (int i = 0; i < 4; ++i) if (!c.overridden[i]) return shape;
+
+        // Lanes 0,1,2: scalar = Add(Add(Mul(extract(color,k),
+        //                              extract(tweak,x)),
+        //                          extract(tweak,k+1)),
+        //                      extract(offset,k))
+        for (int k = 0; k < 3; ++k)
+        {
+            IRValueID innerAdd, offsetEx;
+            if (!resolveArith(c.laneScalar[k], ArithOp::Add, innerAdd, offsetEx))
+                return shape;
+            ScalarRef ref;
+            if (!resolveScalarRef(offsetEx, ref)) return shape;
+            if (ref.kind != ScalarRefKind::Const || ref.lane != k) return shape;
+            if (shape.offsetConstReg < 0) shape.offsetConstReg = ref.regIdx;
+            else if (ref.regIdx != shape.offsetConstReg) return shape;
+
+            IRValueID mulId, tweakAddend;
+            if (!resolveArith(innerAdd, ArithOp::Add, mulId, tweakAddend))
+                return shape;
+            if (!resolveScalarRef(tweakAddend, ref)) return shape;
+            if (ref.kind != ScalarRefKind::Const || ref.lane != (k + 1)) return shape;
+            if (shape.tweakConstReg < 0) shape.tweakConstReg = ref.regIdx;
+            else if (ref.regIdx != shape.tweakConstReg) return shape;
+
+            IRValueID colorEx, tweakXEx;
+            if (!resolveArith(mulId, ArithOp::Mul, colorEx, tweakXEx))
+                return shape;
+            if (!resolveScalarRef(colorEx, ref)) return shape;
+            if (ref.kind != ScalarRefKind::Input || ref.lane != k) return shape;
+            if (shape.inputColorAttrIdx < 0) shape.inputColorAttrIdx = ref.regIdx;
+            else if (ref.regIdx != shape.inputColorAttrIdx) return shape;
+
+            if (!resolveScalarRef(tweakXEx, ref)) return shape;
+            if (ref.kind != ScalarRefKind::Const) return shape;
+            if (ref.regIdx != shape.tweakConstReg) return shape;
+            if (ref.lane != 0) return shape;
+        }
+
+        // Lane 3: scalar = Add(extract(color, w), extract(offset, w))
+        {
+            IRValueID colorWEx, offsetWEx;
+            if (!resolveArith(c.laneScalar[3], ArithOp::Add,
+                              colorWEx, offsetWEx))
+                return shape;
+            ScalarRef ref;
+            if (!resolveScalarRef(colorWEx, ref)) return shape;
+            if (ref.kind != ScalarRefKind::Input) return shape;
+            if (ref.regIdx != shape.inputColorAttrIdx) return shape;
+            if (ref.lane != 3) return shape;
+            if (!resolveScalarRef(offsetWEx, ref)) return shape;
+            if (ref.kind != ScalarRefKind::Const) return shape;
+            if (ref.regIdx != shape.offsetConstReg) return shape;
+            if (ref.lane != 3) return shape;
+        }
+
+        shape.ok = true;
+        return shape;
+    };
+
+    struct InsnEmit { struct nvfx_insn insn; uint8_t op; };
+
+    auto tryEmitPerLaneMadChainInterleaved = [&]() -> bool {
+        // Color store: VecInsert chain with per-lane MAD shape.  Find
+        // first; we only ever fire when the per-lane MAD shape is
+        // present, regardless of what the position store looks like.
+        const DeferredStore* colStore = nullptr;
+        PerLaneMadShape colShape;
+        int colOutIdx = -1;
+        for (const auto& s : deferredStores)
+        {
+            auto sh = recognizePerLaneMadChain(s.srcId);
+            if (!sh.ok) continue;
+            colStore = &s;
+            colShape = sh;
+            colOutIdx = vertexOutputIndex(toUpper(s.semanticName), s.semanticIndex);
+            break;
+        }
+        if (!colStore || colOutIdx < 0) return false;
+
+        // Position store: either VecPromote (`float4(in_pos, 1.0)`)
+        // or a chained MatVecMul (`mul(rot, mul(scale, mul(bias,
+        // mul(mvp, ...))))`).  The two cases produce different batch
+        // counts (2 vs N), but the interleave with the color store's
+        // 3-batch MAD chain is uniform.
+        enum class PosKind { None, VecPromote, MatVecMulChain };
+        PosKind posKind = PosKind::None;
+        const DeferredStore* posStore = nullptr;
+        int posInputAttrIdx = -1;
+        int posOutIdx = -1;
+        std::vector<IRValueID> matChain;
+        auto resolvePosStore = [&](const std::vector<DeferredStore>& bucket) {
+            for (const auto& s : bucket)
+            {
+                auto vpIt = valueToVecPromote.find(s.srcId);
+                if (vpIt != valueToVecPromote.end())
+                {
+                    posStore = &s;
+                    posKind = PosKind::VecPromote;
+                    posInputAttrIdx = vpIt->second.inputAttrIdx;
+                    posOutIdx = vertexOutputIndex(
+                        toUpper(s.semanticName), s.semanticIndex);
+                    return;
+                }
+                auto vcIt = valueToVecConstruct.find(s.srcId);
+                if (vcIt != valueToVecConstruct.end())
+                {
+                    const auto& vb = vcIt->second;
+                    if (vb.width != 4 || !vb.wIsLiteralOne) continue;
+                    if (vb.lanes[0].kind != LaneSource::Kind::InputLane) continue;
+                    if (vb.lanes[1].kind != LaneSource::Kind::InputLane) continue;
+                    if (vb.lanes[2].kind != LaneSource::Kind::InputLane) continue;
+                    if (vb.lanes[0].regIdx != vb.lanes[1].regIdx) continue;
+                    if (vb.lanes[0].regIdx != vb.lanes[2].regIdx) continue;
+                    posStore = &s;
+                    posKind = PosKind::VecPromote;
+                    posInputAttrIdx = vb.lanes[0].regIdx;
+                    posOutIdx = vertexOutputIndex(
+                        toUpper(s.semanticName), s.semanticIndex);
+                    return;
+                }
+                auto mvIt = valueToMatVecMul.find(s.srcId);
+                if (mvIt != valueToMatVecMul.end())
+                {
+                    // Walk the chain.  Single-step matvecmuls don't need
+                    // per-batch interleaving — let the regular flush
+                    // handle them.
+                    std::vector<IRValueID> chain;
+                    IRValueID curr = s.srcId;
+                    while (curr != 0)
+                    {
+                        chain.push_back(curr);
+                        auto it = valueToMatVecMul.find(curr);
+                        if (it == valueToMatVecMul.end()) break;
+                        curr = it->second.priorChainId;
+                    }
+                    if (chain.size() < 2) continue;
+                    std::reverse(chain.begin(), chain.end());
+                    posStore = &s;
+                    posKind = PosKind::MatVecMulChain;
+                    matChain = chain;
+                    posOutIdx = vertexOutputIndex(
+                        toUpper(s.semanticName), s.semanticIndex);
+                    return;
+                }
+            }
+        };
+        resolvePosStore(immediateStores);
+        if (!posStore) resolvePosStore(deferredStores);
+        if (!posStore || posOutIdx < 0) return false;
+
+        const struct nvfx_reg none = makeReg(NVFXSR_NONE, 0);
+
+        // Reserve R0 for the color chain BEFORE the position chain
+        // allocates any temps.  The reference compiler always uses
+        // R0 for the color MAD's running accumulator and pushes the
+        // position chain temps to R1+ — so we replicate by claiming
+        // R0 first via allocTemp().  Position chain temps then come
+        // from R1, R2, with R1 recycled at step 2 (ping-pong).
+        const int colorTemp = allocTemp();
+
+        // ----- Build position batches -----
+        std::vector<std::vector<InsnEmit>> posBatches;
+        int litOneReg = -1, litOneLane = -1;
+        if (posKind == PosKind::VecPromote)
+        {
+            auto p = literals.assign(1.0f);
+            litOneReg = p.first; litOneLane = p.second;
+
+            // Batch 0: MOV o[POS].xyz, v[POS].xyzx
+            {
+                std::vector<InsnEmit> b;
+                const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, posOutIdx);
+                const struct nvfx_reg src = makeReg(NVFXSR_INPUT, posInputAttrIdx);
+                struct nvfx_src s0 = makeSrc(src);
+                s0.swz[0] = 0; s0.swz[1] = 1; s0.swz[2] = 2; s0.swz[3] = 0;
+                struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(dst),
+                    NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                    s0, makeSrc(none), makeSrc(none));
+                b.push_back({in, static_cast<uint8_t>(VP_OP(MOV))});
+                posBatches.push_back(std::move(b));
+            }
+            // Batch 1: MOV o[POS].w, c[lit_one].xxxx
+            {
+                std::vector<InsnEmit> b;
+                const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, posOutIdx);
+                const struct nvfx_reg src = makeReg(NVFXSR_CONST, litOneReg);
+                struct nvfx_src s0 = makeSrc(src);
+                const uint8_t lswz = static_cast<uint8_t>(litOneLane);
+                s0.swz[0] = lswz; s0.swz[1] = lswz; s0.swz[2] = lswz; s0.swz[3] = lswz;
+                struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(dst),
+                    NVFX_VP_MASK_W,
+                    s0, makeSrc(none), makeSrc(none));
+                b.push_back({in, static_cast<uint8_t>(VP_OP(MOV))});
+                posBatches.push_back(std::move(b));
+            }
+        }
+        else // PosKind::MatVecMulChain
+        {
+            std::unordered_map<IRValueID, int> stepTempReg;
+            for (size_t i = 0; i < matChain.size(); ++i)
+            {
+                const IRValueID stepId = matChain[i];
+                const bool      isFinal = (i + 1 == matChain.size());
+                MatVecMulBinding step = valueToMatVecMul[stepId];
+
+                // Vec source: prior chain step's temp, or the original
+                // vector (input/VecPromote/VecConstruct/temp).
+                struct nvfx_reg vecReg;
+                int  priorTemp = -1;
+                if (step.priorChainId != 0)
+                {
+                    priorTemp = stepTempReg[step.priorChainId];
+                    vecReg = makeReg(NVFXSR_TEMP, priorTemp);
+                }
+                else if (step.vectorIsTemp)
+                {
+                    vecReg = makeReg(NVFXSR_TEMP, step.vectorInputIdx);
+                }
+                else
+                {
+                    vecReg = makeReg(NVFXSR_INPUT, step.vectorInputIdx);
+                }
+
+                struct nvfx_reg dst;
+                if (isFinal)
+                {
+                    dst = makeReg(NVFXSR_OUTPUT, posOutIdx);
+                }
+                else
+                {
+                    int t = allocTemp();
+                    stepTempReg[stepId] = t;
+                    dst = makeReg(NVFXSR_TEMP, t);
+                }
+
+                std::vector<InsnEmit> b;
+                const uint8_t opcode =
+                    step.vecOpcode != 0
+                        ? step.vecOpcode
+                        : static_cast<uint8_t>(VP_OP(DP4));
+                for (int j = 0; j < 4; ++j)
+                {
+                    const int rowReg = step.matrixBaseReg + kDp4RowOffset[j];
+                    const struct nvfx_reg rowConst = makeReg(NVFXSR_CONST, rowReg);
+                    struct nvfx_src s0 = makeSrc(vecReg);
+                    s0.swz[0] = step.inputSwz[0];
+                    s0.swz[1] = step.inputSwz[1];
+                    s0.swz[2] = step.inputSwz[2];
+                    s0.swz[3] = step.inputSwz[3];
+                    struct nvfx_src s1 = makeSrc(rowConst);
+                    struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dst),
+                        kDp4Writemask[j],
+                        s0, s1, makeSrc(none));
+                    b.push_back({in, opcode});
+                }
+                posBatches.push_back(std::move(b));
+
+                // Recycle prior chain temp after consumption.
+                if (priorTemp >= 0)
+                    availableTemps.push_back(priorTemp);
+            }
+        }
+
+        // ----- Build color batches -----
+        std::vector<std::vector<InsnEmit>> colBatches;
+        const struct nvfx_reg colorIn =
+            makeReg(NVFXSR_INPUT, colShape.inputColorAttrIdx);
+        const struct nvfx_reg tweakC = makeReg(NVFXSR_CONST, colShape.tweakConstReg);
+        const struct nvfx_reg colorTempReg = makeReg(NVFXSR_TEMP, colorTemp);
+        // Batch 0: MAD R0.xyz, v[col].xyzx, c[tweak].xxx, c[tweak].yzwy
+        {
+            std::vector<InsnEmit> b;
+            struct nvfx_src s0 = makeSrc(colorIn);
+            s0.swz[0] = 0; s0.swz[1] = 1; s0.swz[2] = 2; s0.swz[3] = 0;
+            struct nvfx_src s1 = makeSrc(tweakC);
+            s1.swz[0] = 0; s1.swz[1] = 0; s1.swz[2] = 0; s1.swz[3] = 0;
+            struct nvfx_src s2 = makeSrc(tweakC);
+            s2.swz[0] = 1; s2.swz[1] = 2; s2.swz[2] = 3; s2.swz[3] = 1;
+            struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(colorTempReg),
+                NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                s0, s1, s2);
+            b.push_back({in, static_cast<uint8_t>(VP_OP(MAD))});
+            colBatches.push_back(std::move(b));
+        }
+        // Batch 1: MOV R0.w, v[col].wwww
+        {
+            std::vector<InsnEmit> b;
+            struct nvfx_src s0 = makeSrc(colorIn);
+            s0.swz[0] = 3; s0.swz[1] = 3; s0.swz[2] = 3; s0.swz[3] = 3;
+            struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(colorTempReg),
+                NVFX_VP_MASK_W,
+                s0, makeSrc(none), makeSrc(none));
+            b.push_back({in, static_cast<uint8_t>(VP_OP(MOV))});
+            colBatches.push_back(std::move(b));
+        }
+        // Batch 2: ADD o[COL0].xyzw, c[offset].xyzw, R0.xyzw
+        {
+            std::vector<InsnEmit> b;
+            const struct nvfx_reg dst  = makeReg(NVFXSR_OUTPUT, colOutIdx);
+            const struct nvfx_reg offC = makeReg(NVFXSR_CONST, colShape.offsetConstReg);
+            struct nvfx_src s0 = makeSrc(offC);
+            struct nvfx_src s2 = makeSrc(colorTempReg);
+            struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                NVFX_VP_MASK_ALL,
+                s0, makeSrc(none), s2);
+            b.push_back({in, static_cast<uint8_t>(VP_OP(ADD))});
+            colBatches.push_back(std::move(b));
+        }
+
+        // ----- Round-robin interleave -----
+        const size_t maxBatches =
+            std::max(posBatches.size(), colBatches.size());
+        for (size_t k = 0; k < maxBatches; ++k)
+        {
+            if (k < posBatches.size())
+                for (const auto& e : posBatches[k]) asm_.emit(e.insn, e.op);
+            if (k < colBatches.size())
+                for (const auto& e : colBatches[k]) asm_.emit(e.insn, e.op);
+        }
+
+        consumedStoreSrcIds.insert(posStore->srcId);
+        consumedStoreSrcIds.insert(colStore->srcId);
+        emittedSomething = true;
+        return true;
+    };
+
+    tryEmitPerLaneMadChainInterleaved();
+
     for (const auto& imm : immediateStores)
     {
+        if (consumedStoreSrcIds.count(imm.srcId)) continue;
         if (!emitStoreOutput(imm.srcId, imm.semanticName, imm.semanticIndex))
             return out;
     }
-
     for (const auto& def : deferredStores)
     {
+        if (consumedStoreSrcIds.count(def.srcId)) continue;
         if (!emitStoreOutput(def.srcId, def.semanticName, def.semanticIndex))
             return out;
     }
