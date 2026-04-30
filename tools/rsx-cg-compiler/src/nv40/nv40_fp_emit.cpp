@@ -517,23 +517,53 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpDotLitPackBinding> valueToDotLitPack;
 
-    // `vec4(d1, d2, d3, 1.0)` where d1/d2/d3 are 3 distinct
+    // `vec3(d1, d2, d3)` where d1/d2/d3 are 3 distinct
     // FpDotLitPackBindings against the same varying-pack baseId.
-    // Captures the kitchen-sink shader's
-    // `float3 Length = float3(dot(dirA,p), dot(dirB,p), dot(dirC,p))`
-    // wrapped to vec4 for the COLOR sink.  Lowers to 5 instructions:
+    // Pre-wrap shape — recorded so a downstream `vec4(.., 1.0)` wrap
+    // (2-operand form) or a `Mul(literal_vec, this_vec3)` scale step
+    // can fold into the wrap binding below.
+    struct FpDot3LitPackBinding
+    {
+        FpVaryingPackBinding pack;
+        float                literals[3][4] = {{0}};
+    };
+    std::unordered_map<IRValueID, FpDot3LitPackBinding>
+        valueToDot3LitPack;
+
+    // `Mul(literal_vec3, vec3(d1, d2, d3))` — 3-dot pack scaled by a
+    // folded literal vec3.  Captures the kitchen-sink shader's
+    // `freq * Length` step.
+    struct FpDot3LitPackScaledBinding
+    {
+        FpDot3LitPackBinding base;
+        float                scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    };
+    std::unordered_map<IRValueID, FpDot3LitPackScaledBinding>
+        valueToDot3LitPackScaled;
+
+    // `vec4(scaled-or-bare 3-dot pack, 1.0)` — wraps either a bare
+    // FpDot3LitPack or a FpDot3LitPackScaled into the float4 the
+    // COLOR sink expects.  Lowers to 5 (no scale) or 6 (with scale)
+    // instructions:
     //   MOV R0.zw, f[INPUT].<pack-cycle>             ; pack into Z/W
-    //   DP2 R0.x, R0.zwzx, c[0].xyxx + lit_block_0   ; offset 0 (lane X even)
-    //   DP2 R0.y, R0.zwzx, c[0].zwzz + lit_block_2   ; offset 2 (lane Y odd)
-    //   DP2 R0.z, R0.zwzx, c[0].xyxx + lit_block_0   ; offset 0 (lane Z even)
-    //   MOV R0.w [END], c[0].xxxx + {1, 0, 0, 0}     ; W=1.0
+    //   DP2 R0.x, R0.zwzz, c[0].xyxx + lit_block_0   ; even lane (X)
+    //   DP2 R0.y, R0.zwzz, c[0].zwzz + lit_block_2   ; odd lane (Y)
+    //   DP2 R0.z, R0.zwzz, c[0].xyxx + lit_block_0   ; even lane (Z)
+    //   [if hasScale]
+    //   MUL R0.xyz, R0, c[0]      + scale_block      ; freq scale
+    //   [end if]
+    //   MOV R0.w [END], c[0].<W-swz> + {wOne layout}  ; W=1.0
     // The pack lives in R0.z/R0.w because lanes 0/1/2 are written by
-    // the dots; sce-cgc places literal blocks at offset (0,1) for
-    // even output lanes and (2,3) for odd output lanes.
+    // the dots; literal block offset alternates by output-lane parity
+    // (even→0,1 / odd→2,3).  W=1.0 layout depends on hasScale — the
+    // bare wrap reads .xxxx from {1,0,0,0}; the scaled wrap reads
+    // .wwww (encoded via .xyzw + lane 3) from {0,0,0,1.0}.
     struct FpDot3LitPackWrapBinding
     {
         FpVaryingPackBinding pack;
         float                literals[3][4] = {{0}};
+        bool                 hasScale = false;
+        float                scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     };
     std::unordered_map<IRValueID, FpDot3LitPackWrapBinding>
         valueToDot3LitPackWrap;
@@ -1053,6 +1083,40 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 const IRValueID a = inst.operands[0];
                 const IRValueID b = inst.operands[1];
 
+                // Mul(literal_vec, FpDot3LitPack) — record a scaled
+                // 3-dot pack so a downstream `vec4(.., 1.0)` wrap can
+                // emit a tail MUL with the scale literal block in
+                // line.  Commutative.
+                if (inst.op == IROp::Mul)
+                {
+                    auto aLit  = valueToLiteralVec4.find(a);
+                    auto bLit  = valueToLiteralVec4.find(b);
+                    auto aDot3 = valueToDot3LitPack.find(a);
+                    auto bDot3 = valueToDot3LitPack.find(b);
+                    const FpDot3LitPackBinding* dot3 = nullptr;
+                    const LiteralVec4*          lit  = nullptr;
+                    if (aLit != valueToLiteralVec4.end() &&
+                        bDot3 != valueToDot3LitPack.end())
+                    {
+                        lit  = &aLit->second;
+                        dot3 = &bDot3->second;
+                    }
+                    else if (bLit != valueToLiteralVec4.end() &&
+                             aDot3 != valueToDot3LitPack.end())
+                    {
+                        lit  = &bLit->second;
+                        dot3 = &aDot3->second;
+                    }
+                    if (dot3 && lit)
+                    {
+                        FpDot3LitPackScaledBinding b;
+                        b.base = *dot3;
+                        for (int k = 0; k < 4; ++k) b.scale[k] = lit->vals[k];
+                        valueToDot3LitPackScaled[inst.result] = b;
+                        break;
+                    }
+                }
+
                 // MAD-fusion detection — only for Add.  Match
                 // Add(MulBinding, literal_or_uniform); commutative.
                 if (inst.op == IROp::Add)
@@ -1516,6 +1580,69 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             FpNormalizeBinding bind = nIt->second;
                             bind.wrapW1 = true;
                             valueToNormalize[inst.result] = bind;
+                            break;
+                        }
+                    }
+                }
+
+                // Shape A4b: `vec3(d1, d2, d3)` where each is a
+                // distinct DotLitPack against the same varying-pack
+                // base.  Pre-wrap binding consumed by Mul(literal,
+                // this_vec3) or VecConstruct(this_vec3, 1.0).
+                if (inst.operands.size() == 3)
+                {
+                    auto it0 = valueToDotLitPack.find(inst.operands[0]);
+                    auto it1 = valueToDotLitPack.find(inst.operands[1]);
+                    auto it2 = valueToDotLitPack.find(inst.operands[2]);
+                    if (it0 != valueToDotLitPack.end() &&
+                        it1 != valueToDotLitPack.end() &&
+                        it2 != valueToDotLitPack.end() &&
+                        it0->second.pack.baseId == it1->second.pack.baseId &&
+                        it1->second.pack.baseId == it2->second.pack.baseId &&
+                        it0->second.pack.width  == it1->second.pack.width  &&
+                        it1->second.pack.width  == it2->second.pack.width)
+                    {
+                        FpDot3LitPackBinding b;
+                        b.pack = it0->second.pack;
+                        for (int k = 0; k < 4; ++k) b.literals[0][k] = it0->second.literal[k];
+                        for (int k = 0; k < 4; ++k) b.literals[1][k] = it1->second.literal[k];
+                        for (int k = 0; k < 4; ++k) b.literals[2][k] = it2->second.literal[k];
+                        valueToDot3LitPack[inst.result] = b;
+                        break;
+                    }
+                }
+
+                // Shape A4c: `vec4(scaled-or-bare 3-dot pack, 1.0)` —
+                // 2-operand wrap.  Operand 0 is either an
+                // FpDot3LitPack (no scale) or an FpDot3LitPackScaled.
+                // Operand 1 must be the literal 1.0.
+                if (inst.operands.size() == 2)
+                {
+                    auto bareIt   = valueToDot3LitPack.find(inst.operands[0]);
+                    auto scaledIt = valueToDot3LitPackScaled.find(inst.operands[0]);
+                    const bool isBare   = (bareIt   != valueToDot3LitPack.end());
+                    const bool isScaled = (scaledIt != valueToDot3LitPackScaled.end());
+                    if (isBare || isScaled)
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[1]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpDot3LitPackWrapBinding wb;
+                            const FpDot3LitPackBinding& src =
+                                isBare ? bareIt->second : scaledIt->second.base;
+                            wb.pack = src.pack;
+                            for (int r = 0; r < 3; ++r)
+                                for (int k = 0; k < 4; ++k)
+                                    wb.literals[r][k] = src.literals[r][k];
+                            if (isScaled)
+                            {
+                                wb.hasScale = true;
+                                for (int k = 0; k < 4; ++k)
+                                    wb.scale[k] = scaledIt->second.scale[k];
+                            }
+                            valueToDot3LitPackWrap[inst.result] = wb;
                             break;
                         }
                     }
@@ -3540,19 +3667,63 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     emitDotLane(1, bind.literals[1]);
                     emitDotLane(2, bind.literals[2]);
 
-                    // --- Insn 5: MOV R0.w [END], c[0].xxxx + {1,0,0,0} ---
+                    // --- Optional Insn 5: MUL R0.xyz, R0, c[0].xyzw +
+                    //                       {scale.x, scale.y, scale.z, 0}
+                    // Folds the `freq * Length` step from the kitchen-
+                    // sink water FP shader into a single MUL with an
+                    // inline literal block.
+                    if (bind.hasScale)
+                    {
+                        struct nvfx_src tempIdent =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        // Identity .xyzw on R0.
+                        struct nvfx_src scaleConst =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        // Identity .xyzw on c[0] reading lanes 0..3.
+
+                        struct nvfx_insn mulInsn = nvfx_insn(
+                            saturate ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                            tempIdent, scaleConst, none0);
+                        mulInsn.precision = dstPrecision;
+                        asm_.emit(mulInsn, NVFX_FP_OP_OPCODE_MUL);
+                        const float scaleBlock[4] = {
+                            bind.scale[0], bind.scale[1],
+                            bind.scale[2], 0.0f };
+                        asm_.appendConstBlock(scaleBlock);
+                    }
+
+                    // --- Final MOV R0.w [END], c[0].<W> + wOne block ---
+                    // Bare wrap: c[0].xxxx with {1, 0, 0, 0}.
+                    // Scaled wrap: c[0].xyzw (reads .w=1.0) with
+                    //              {0, 0, 0, 1.0}.  Reference layout
+                    //              choice tracks the scale insn's
+                    //              identity-swizzle convention.
                     struct nvfx_src cOneSrc =
                         nvfx_src(const_cast<struct nvfx_reg&>(constReg));
-                    cOneSrc.swz[0] = cOneSrc.swz[1] =
-                    cOneSrc.swz[2] = cOneSrc.swz[3] = 0;
+                    if (bind.hasScale)
+                    {
+                        // Identity .xyzw — reads block lane 3 (W) for
+                        // the masked .w write.  Note that swz[3] = 3
+                        // is the default initialised value so we just
+                        // leave the swizzle alone.
+                    }
+                    else
+                    {
+                        cOneSrc.swz[0] = cOneSrc.swz[1] =
+                        cOneSrc.swz[2] = cOneSrc.swz[3] = 0;
+                    }
                     struct nvfx_insn movW = nvfx_insn(
                         0, 0, -1, -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_W, cOneSrc, none0, none0);
                     movW.precision = dstPrecision;
                     asm_.emit(movW, NVFX_FP_OP_OPCODE_MOV);
-                    const float wOneBlock[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
-                    asm_.appendConstBlock(wOneBlock);
+                    const float wOneBlockBare[4]   = { 1.0f, 0.0f, 0.0f, 0.0f };
+                    const float wOneBlockScaled[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+                    asm_.appendConstBlock(bind.hasScale ? wOneBlockScaled
+                                                        : wOneBlockBare);
 
                     // Track varying-input bits + clear texCoords2D.
                     attrs.attributeInputMask |=
