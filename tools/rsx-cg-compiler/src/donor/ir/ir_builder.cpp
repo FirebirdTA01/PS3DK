@@ -1,5 +1,7 @@
 #include "ir_builder.h"
+#include <cmath>
 #include <sstream>
+#include <unordered_set>
 
 // ============================================================================
 // Constructor/Destructor
@@ -73,6 +75,11 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
         if (decl->kind == DeclKind::Variable)
         {
             auto* varDecl = static_cast<VarDecl*>(decl.get());
+
+            // Cg implicitly treats file-scope variables with no explicit
+            // storage qualifier as `uniform` (e.g. `float4x4 gMtx;`).
+            if (varDecl->storage == StorageQualifier::None)
+                varDecl->storage = StorageQualifier::Uniform;
 
             IRGlobal global;
             global.name = varDecl->name;
@@ -177,6 +184,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
 void IRBuilder::buildFunction(FunctionDecl* decl)
 {
     currentFunction_ = module_->createFunction(decl->name);
+    currentFunctionDecl_ = decl;
     currentFunction_->returnType = getIRType(decl->returnType.get());
     currentFunction_->isEntryPoint = (decl->name == module_->entryPointName);
 
@@ -234,6 +242,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     declToValue_.clear();
     nameToValue_.clear();
     currentFunction_ = nullptr;
+    currentFunctionDecl_ = nullptr;
     currentBlock_ = nullptr;
 }
 
@@ -312,27 +321,117 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // Emit conditional branch
     emitCondBranch(condValue, thenBlock, elseBlock ? elseBlock : mergeBlock);
 
+    // Snapshot nameToValue_ before either branch runs so we can detect
+    // which variables get redefined in then/else and insert merge-time
+    // Selects.  Without this, code like `if (cond) c = c * tex;` leaves
+    // nameToValue_["c"] pointing at the THEN-only SSA value, which is
+    // undefined when the false branch is taken — invalid SSA.
+    auto preIfMap = nameToValue_;
+
     // Build then block
     currentBlock_ = thenBlock;
     buildStmt(stmt->thenBranch.get());
-    if (!currentBlock_->hasTerminator())
+    const bool thenTerminated = currentBlock_->hasTerminator();
+    if (!thenTerminated)
     {
         emitBranch(mergeBlock);
     }
+    auto postThenMap = nameToValue_;
 
     // Build else block
+    bool elseTerminated = false;
+    decltype(nameToValue_) postElseMap;
     if (stmt->elseBranch)
     {
+        nameToValue_ = preIfMap;  // restore before processing else
         currentBlock_ = elseBlock;
         buildStmt(stmt->elseBranch.get());
-        if (!currentBlock_->hasTerminator())
+        elseTerminated = currentBlock_->hasTerminator();
+        if (!elseTerminated)
         {
             emitBranch(mergeBlock);
         }
+        postElseMap = nameToValue_;
     }
 
-    // Continue from merge block
+    // Continue from merge block.  Insert Select(cond, thenVal, elseVal)
+    // for each variable that diverged.  When a branch terminated early
+    // (return / break / continue inside the body), its nameToValue_
+    // doesn't reach the merge — fall back to the pre-if value for
+    // that side so the merge keeps the not-terminated branch's update.
     currentBlock_ = mergeBlock;
+    nameToValue_ = preIfMap;
+
+    auto valueOrPre = [&](const std::unordered_map<std::string, IRValueID>& m,
+                          const std::string& name) -> IRValueID
+    {
+        auto it = m.find(name);
+        if (it != m.end()) return it->second;
+        auto pre = preIfMap.find(name);
+        return (pre != preIfMap.end()) ? pre->second : InvalidIRValue;
+    };
+
+    auto getValueType = [&](IRValueID id) -> IRTypeInfo
+    {
+        if (id == InvalidIRValue) return IRTypeInfo::Void();
+        // First check parameters / constants.
+        if (IRValue* v = currentFunction_->getValue(id))
+            return v->type;
+        // Then walk instructions for a result match.
+        for (const auto& bp : currentFunction_->blocks)
+        {
+            if (!bp) continue;
+            for (const auto& ip : bp->instructions)
+            {
+                if (ip && ip->result == id) return ip->resultType;
+            }
+        }
+        return IRTypeInfo::Void();
+    };
+
+    // Collect every name that appears in either post-map.
+    std::unordered_set<std::string> seen;
+    for (const auto& kv : postThenMap) seen.insert(kv.first);
+    for (const auto& kv : postElseMap) seen.insert(kv.first);
+
+    for (const std::string& name : seen)
+    {
+        IRValueID preVal = InvalidIRValue;
+        if (auto pre = preIfMap.find(name); pre != preIfMap.end())
+            preVal = pre->second;
+
+        IRValueID thenVal = thenTerminated ? preVal : valueOrPre(postThenMap, name);
+        IRValueID elseVal;
+        if (stmt->elseBranch)
+            elseVal = elseTerminated ? preVal : valueOrPre(postElseMap, name);
+        else
+            elseVal = preVal;
+
+        if (thenVal == InvalidIRValue) thenVal = preVal;
+        if (elseVal == InvalidIRValue) elseVal = preVal;
+        if (thenVal == elseVal)
+        {
+            // Both branches converge on the same SSA value (or only one
+            // branch redefined and the other kept pre-if).  Just record
+            // the final value — no Select needed.
+            if (thenVal != InvalidIRValue)
+                nameToValue_[name] = thenVal;
+            continue;
+        }
+
+        IRTypeInfo selType = getValueType(thenVal);
+        if (selType.baseType == IRType::Void)
+            selType = getValueType(elseVal);
+
+        IRValueID selId = currentFunction_->allocateValueId();
+        auto sel = std::make_unique<IRInstruction>(
+            IROp::Select, selId, selType);
+        sel->addOperand(condValue);
+        sel->addOperand(thenVal);
+        sel->addOperand(elseVal);
+        currentBlock_->addInstruction(std::move(sel));
+        nameToValue_[name] = selId;
+    }
 }
 
 namespace {
@@ -668,11 +767,78 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
 {
     if (stmt->value)
     {
+        // For struct returns of a local variable (`return OUT;` where
+        // `OUT` is a stack-temp struct populated by member assignments),
+        // the StoreOutput emits are deferred to here so the outputs
+        // land in struct-field declaration order — matching the
+        // reference compiler's parameter-table ordering.  Source
+        // statement order would otherwise leak through and reorder
+        // the synthetic output entries.
+        TypeNode* structType = nullptr;
+        std::string baseName;
+        if (stmt->value->kind == ExprKind::Identifier)
+        {
+            auto* retIdent = static_cast<IdentifierExpr*>(stmt->value.get());
+            if (retIdent->resolvedDecl &&
+                retIdent->resolvedDecl->kind == DeclKind::Variable)
+            {
+                auto* vd = static_cast<VarDecl*>(retIdent->resolvedDecl);
+                if (vd->type && vd->type->baseType == BaseType::Struct)
+                {
+                    structType = vd->type.get();
+                    baseName   = retIdent->name;
+                }
+            }
+        }
+
         IRValueID retValue = buildExpr(stmt->value.get());
 
-        // Note: StoreOutput instructions are already emitted during member assignment
-        // (e.g., output.position = value). No need to emit them again at return time
-        // since that would create duplicate store instructions.
+        // Non-struct return with a semantic on the return type itself
+        // (e.g. `float4 main(...) : COLOR { return color; }`) — emit a
+        // StoreOutput keyed off the function's return semantic.  The
+        // entry-point parameter path covers the `out`-keyword shape;
+        // this covers the value-return shape.
+        if (!structType && currentFunctionDecl_ &&
+            !currentFunctionDecl_->returnSemantic.isEmpty() &&
+            currentFunction_->isEntryPoint)
+        {
+            const Semantic& sem = currentFunctionDecl_->returnSemantic;
+            auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
+                InvalidIRValue, currentFunction_->returnType);
+            inst->addOperand(retValue);
+            inst->semanticName    = sem.name;
+            inst->rawSemanticName = sem.rawName;
+            inst->semanticIndex   = sem.index;
+            currentBlock_->addInstruction(std::move(inst));
+        }
+
+        if (structType)
+        {
+            const std::vector<StructField>* fields = getStructFields(structType);
+            if (fields)
+            {
+                for (const auto& field : *fields)
+                {
+                    if (field.semantic.isEmpty()) continue;
+                    auto it = nameToValue_.find(baseName + "." + field.name);
+                    if (it == nameToValue_.end()) continue;
+                    // Stash the field's source type on the StoreOutput
+                    // (in `resultType`) so the container emit can size
+                    // the synthetic output param entry correctly — e.g.
+                    // a `float2 texCoord : TEXCOORD0;` field gets a
+                    // float2-typed param slot, not a float4.
+                    IRTypeInfo fieldTy = getIRType(field.type.get());
+                    auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
+                        InvalidIRValue, fieldTy);
+                    inst->addOperand(it->second);
+                    inst->semanticName    = field.semantic.name;
+                    inst->rawSemanticName = field.semantic.rawName;
+                    inst->semanticIndex   = field.semantic.index;
+                    inst->fieldName       = field.name;
+                    currentBlock_->addInstruction(std::move(inst));
+                }
+            }
+        }
 
         emitReturn(retValue);
     }
@@ -819,6 +985,131 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
     return InvalidIRValue;
 }
 
+// Constant-folding helpers.  Inputs are SSA value ids; outputs are
+// fresh IRConstant ids when folding succeeds (or InvalidIRValue when
+// it doesn't).  Folding handles float scalars + float vectors today —
+// FragmentProgram.cg's `const float3 freq = 2.0 * 3.14159 / wave;`
+// chain stays in the IRConstant domain throughout, so the back-end
+// never sees the divide / multiply on a runtime value.
+
+namespace {
+// Extract the float components from an IRConstant.  For scalars,
+// returns a single-element vector; for vec types, returns the
+// stored components.  Returns false for non-constant or non-float
+// types (bool / int / etc. — outside scope today).
+bool extractFloatComponents(IRFunction& fn, IRValueID id,
+                            std::vector<float>& out)
+{
+    IRValue* v = fn.getValue(id);
+    if (!v) return false;
+    auto* c = dynamic_cast<IRConstant*>(v);
+    if (!c) return false;
+    if (std::holds_alternative<float>(c->value))
+    {
+        out = { std::get<float>(c->value) };
+        return true;
+    }
+    if (std::holds_alternative<std::vector<float>>(c->value))
+    {
+        out = std::get<std::vector<float>>(c->value);
+        return true;
+    }
+    return false;
+}
+
+// Broadcast a 1-component vector to N components by repeating the
+// scalar.  No-op when src.size() == n.  Returns false on length
+// mismatch (e.g. mixing vec3 + vec4 with no obvious broadcast).
+bool broadcastTo(std::vector<float>& v, size_t n)
+{
+    if (v.size() == n) return true;
+    if (v.size() == 1)
+    {
+        v.resize(n, v[0]);
+        return true;
+    }
+    return false;
+}
+}  // namespace
+
+IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
+                                      IRValueID lhs, IRValueID rhs)
+{
+    std::vector<float> a, b;
+    if (!extractFloatComponents(*currentFunction_, lhs, a)) return InvalidIRValue;
+    if (!extractFloatComponents(*currentFunction_, rhs, b)) return InvalidIRValue;
+
+    const size_t n = std::max(a.size(), b.size());
+    if (!broadcastTo(a, n) || !broadcastTo(b, n)) return InvalidIRValue;
+
+    std::vector<float> r(n, 0.0f);
+    for (size_t i = 0; i < n; ++i)
+    {
+        switch (op)
+        {
+        case IROp::Add: r[i] = a[i] + b[i]; break;
+        case IROp::Sub: r[i] = a[i] - b[i]; break;
+        case IROp::Mul: r[i] = a[i] * b[i]; break;
+        case IROp::Div: r[i] = a[i] / b[i]; break;
+        case IROp::Min: r[i] = std::fmin(a[i], b[i]); break;
+        case IROp::Max: r[i] = std::fmax(a[i], b[i]); break;
+        default: return InvalidIRValue;
+        }
+    }
+
+    // Materialise the folded value as a fresh IRConstant.  Scalar
+    // results stay as a single float; vector results carry the full
+    // component list.
+    if (n == 1)
+        return createConstant(r[0]);
+    return createConstant(resultType, r);
+}
+
+IRValueID IRBuilder::tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
+                                     IRValueID operand)
+{
+    std::vector<float> a;
+    if (!extractFloatComponents(*currentFunction_, operand, a)) return InvalidIRValue;
+    std::vector<float> r(a.size(), 0.0f);
+    for (size_t i = 0; i < a.size(); ++i)
+    {
+        switch (op)
+        {
+        case IROp::Neg:  r[i] = -a[i]; break;
+        case IROp::Abs:  r[i] = std::fabs(a[i]); break;
+        case IROp::Sqrt:
+            if (a[i] < 0.0f) return InvalidIRValue;  // leave NaN to runtime
+            r[i] = std::sqrt(a[i]); break;
+        case IROp::RSqrt:
+            if (a[i] <= 0.0f) return InvalidIRValue;
+            r[i] = 1.0f / std::sqrt(a[i]); break;
+        case IROp::Floor: r[i] = std::floor(a[i]); break;
+        case IROp::Ceil:  r[i] = std::ceil(a[i]); break;
+        default: return InvalidIRValue;
+        }
+    }
+    if (a.size() == 1)
+        return createConstant(r[0]);
+    return createConstant(resultType, r);
+}
+
+IRValueID IRBuilder::tryFoldVecConstruct(const IRTypeInfo& resultType,
+                                          const std::vector<IRValueID>& args)
+{
+    std::vector<float> all;
+    all.reserve(static_cast<size_t>(resultType.vectorSize));
+    for (IRValueID a : args)
+    {
+        std::vector<float> comps;
+        if (!extractFloatComponents(*currentFunction_, a, comps))
+            return InvalidIRValue;
+        all.insert(all.end(), comps.begin(), comps.end());
+    }
+    if (all.size() != static_cast<size_t>(resultType.vectorSize))
+        return InvalidIRValue;
+    return createConstant(resultType, all);
+}
+
 IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 {
     // Handle assignment specially
@@ -853,6 +1144,12 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
     IROp op = binaryOpToIROp(expr->op);
     IRTypeInfo resultType = getExprType(expr);
 
+    if (IRValueID folded = tryFoldBinaryOp(op, resultType, leftValue, rightValue);
+        folded != InvalidIRValue)
+    {
+        return folded;
+    }
+
     return emitBinaryOp(op, resultType, leftValue, rightValue);
 }
 
@@ -885,6 +1182,12 @@ IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
 
     IROp op = unaryOpToIROp(expr->op);
     IRTypeInfo resultType = getExprType(expr);
+
+    if (IRValueID folded = tryFoldUnaryOp(op, resultType, operandValue);
+        folded != InvalidIRValue)
+    {
+        return folded;
+    }
 
     return emitUnaryOp(op, resultType, operandValue);
 }
@@ -952,6 +1255,30 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
     {
         IRValueID objectValue = buildExpr(expr->object.get());
         IRTypeInfo resultType = getExprType(expr);
+
+        // Constant-fold swizzles of constant vectors — e.g. `v.y`
+        // where `v` was const-initialised lifts to a scalar
+        // IRConstant.  Multi-lane swizzles (e.g. `.xz` from a vec3)
+        // collapse to a vec IRConstant of `swizzleLength` components.
+        std::vector<float> objComps;
+        if (extractFloatComponents(*currentFunction_, objectValue, objComps))
+        {
+            std::vector<float> picked;
+            picked.reserve(static_cast<size_t>(expr->swizzleLength));
+            bool ok = true;
+            for (int s = 0; s < expr->swizzleLength; ++s)
+            {
+                const size_t lane = static_cast<size_t>(expr->swizzleIndices[s]);
+                if (lane >= objComps.size()) { ok = false; break; }
+                picked.push_back(objComps[lane]);
+            }
+            if (ok)
+            {
+                if (picked.size() == 1)
+                    return createConstant(picked[0]);
+                return createConstant(resultType, picked);
+            }
+        }
 
         auto inst = std::make_unique<IRInstruction>(IROp::VecShuffle,
             currentFunction_->allocateValueId(), resultType);
@@ -1227,6 +1554,11 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     // Vector construction
     if (resultType.isVector())
     {
+        if (IRValueID folded = tryFoldVecConstruct(resultType, argValues);
+            folded != InvalidIRValue)
+        {
+            return folded;
+        }
         auto inst = std::make_unique<IRInstruction>(IROp::VecConstruct,
             currentFunction_->allocateValueId(), resultType);
         for (IRValueID arg : argValues)
@@ -1311,6 +1643,79 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     {
         auto* memberExpr = static_cast<MemberAccessExpr*>(target);
 
+        // Single-lane swizzle write-back: `c.a = scalar;` rewrites a
+        // single lane of an existing vector value.  Lower as VecInsert
+        // against the variable's prior SSA value.  Multi-lane swizzle
+        // assignment (`c.rgb = vec3;`) is split into per-lane VecInserts
+        // — one per swizzle index — so the back-end sees a sequence of
+        // single-lane overrides.
+        if (memberExpr->isSwizzle && memberExpr->swizzleLength >= 1 &&
+            memberExpr->object->kind == ExprKind::Identifier)
+        {
+            auto* ident = static_cast<IdentifierExpr*>(memberExpr->object.get());
+            auto nvIt = nameToValue_.find(ident->name);
+            if (nvIt != nameToValue_.end())
+            {
+                IRValueID currentVec = nvIt->second;
+                IRTypeInfo vecType = getExprType(memberExpr->object.get());
+
+                for (int s = 0; s < memberExpr->swizzleLength; ++s)
+                {
+                    const int lane = memberExpr->swizzleIndices[s];
+                    IRValueID scalar = value;
+                    if (memberExpr->swizzleLength > 1)
+                    {
+                        // For multi-lane swizzle, RHS is a vector; pull out
+                        // the matching scalar lane via VecExtract.
+                        auto extractInst = std::make_unique<IRInstruction>(
+                            IROp::VecExtract,
+                            currentFunction_->allocateValueId(),
+                            IRTypeInfo::Float());
+                        extractInst->addOperand(value);
+                        extractInst->componentIndex = s;
+                        scalar = extractInst->result;
+                        currentBlock_->addInstruction(std::move(extractInst));
+                    }
+
+                    auto insertInst = std::make_unique<IRInstruction>(
+                        IROp::VecInsert,
+                        currentFunction_->allocateValueId(),
+                        vecType);
+                    insertInst->addOperand(currentVec);
+                    insertInst->addOperand(scalar);
+                    insertInst->componentIndex = lane;
+                    currentVec = insertInst->result;
+                    currentBlock_->addInstruction(std::move(insertInst));
+                }
+
+                nameToValue_[ident->name] = currentVec;
+
+                // If the underlying identifier is an out parameter
+                // carrying a semantic, fall through to the regular
+                // identifier-assignment StoreOutput emit so the lane-
+                // overridden vec value propagates to the output.
+                if (ident->resolvedDecl &&
+                    ident->resolvedDecl->kind == DeclKind::Parameter)
+                {
+                    auto* param = static_cast<ParamDecl*>(ident->resolvedDecl);
+                    if ((param->storage == StorageQualifier::Out ||
+                         param->storage == StorageQualifier::InOut) &&
+                        !param->semantic.isEmpty())
+                    {
+                        auto inst = std::make_unique<IRInstruction>(
+                            IROp::StoreOutput,
+                            InvalidIRValue, IRTypeInfo::Void());
+                        inst->addOperand(currentVec);
+                        inst->semanticName    = param->semantic.name;
+                        inst->rawSemanticName = param->semantic.rawName;
+                        inst->semanticIndex   = param->semantic.index;
+                        currentBlock_->addInstruction(std::move(inst));
+                    }
+                }
+                return currentVec;
+            }
+        }
+
         // Build the composite name for the member
         if (memberExpr->object->kind == ExprKind::Identifier)
         {
@@ -1318,9 +1723,19 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
             std::string compositeName = ident->name + "." + memberExpr->member;
             nameToValue_[compositeName] = value;
 
-            // Check if this is an output struct - emit StoreOutput
+            // Check if this is an output struct - emit StoreOutput.
+            // For local struct vars that get returned (`OUT.field = ...;
+            // return OUT;`), the StoreOutput emit is deferred to
+            // buildReturnStmt so the output param table follows the
+            // struct's *field declaration order* rather than the
+            // source statement order — that's what the reference
+            // compiler emits.  For `out` parameter struct fields we
+            // still emit inline (no return statement to anchor).
             if (ident->resolvedDecl)
             {
+                const bool isLocalVar =
+                    (ident->resolvedDecl->kind == DeclKind::Variable);
+
                 // Look up struct type info for the target
                 TypeNode* typeNode = nullptr;
                 if (ident->resolvedDecl->kind == DeclKind::Variable)
@@ -1328,25 +1743,25 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                     typeNode = static_cast<VarDecl*>(ident->resolvedDecl)->type.get();
                 }
 
-                // Use helper to resolve struct fields (may need to look up from semantic analyzer)
-                const std::vector<StructField>* fields = getStructFields(typeNode);
-                if (fields)
+                if (!isLocalVar)
                 {
-                    // Look up semantic info for this struct member
-                    for (const auto& field : *fields)
+                    const std::vector<StructField>* fields = getStructFields(typeNode);
+                    if (fields)
                     {
-                        if (field.name == memberExpr->member && !field.semantic.isEmpty())
+                        for (const auto& field : *fields)
                         {
-                            // Emit a store output instruction
-                            auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
-                                InvalidIRValue, IRTypeInfo::Void());
-                            inst->addOperand(value);
-                            inst->semanticName    = field.semantic.name;
-                            inst->rawSemanticName = field.semantic.rawName;
-                            inst->semanticIndex   = field.semantic.index;
-                            inst->fieldName       = memberExpr->member;
-                            currentBlock_->addInstruction(std::move(inst));
-                            break;
+                            if (field.name == memberExpr->member && !field.semantic.isEmpty())
+                            {
+                                auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
+                                    InvalidIRValue, IRTypeInfo::Void());
+                                inst->addOperand(value);
+                                inst->semanticName    = field.semantic.name;
+                                inst->rawSemanticName = field.semantic.rawName;
+                                inst->semanticIndex   = field.semantic.index;
+                                inst->fieldName       = memberExpr->member;
+                                currentBlock_->addInstruction(std::move(inst));
+                                break;
+                            }
                         }
                     }
                 }

@@ -27,6 +27,7 @@ public:
 private:
     std::unique_ptr<IRModule> module_;
     IRFunction* currentFunction_ = nullptr;
+    FunctionDecl* currentFunctionDecl_ = nullptr;
     IRBasicBlock* currentBlock_ = nullptr;
     const SemanticAnalyzer* semantic_ = nullptr;
 
@@ -111,6 +112,17 @@ private:
     IRValueID emitBinaryOp(IROp op, const IRTypeInfo& resultType,
                            IRValueID left, IRValueID right);
     IRValueID emitUnaryOp(IROp op, const IRTypeInfo& resultType, IRValueID operand);
+
+    // Constant-folding helpers — return a fresh IRConstant id when
+    // both operands are IRConstants, else InvalidIRValue.  Handle
+    // float scalars + float vectors with implicit scalar→vector
+    // broadcast.  See ir_builder.cpp for the supported op set.
+    IRValueID tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
+                               IRValueID lhs, IRValueID rhs);
+    IRValueID tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
+                              IRValueID operand);
+    IRValueID tryFoldVecConstruct(const IRTypeInfo& resultType,
+                                   const std::vector<IRValueID>& args);
     IRValueID emitCall(const std::string& funcName, const IRTypeInfo& resultType,
                        const std::vector<IRValueID>& args);
 

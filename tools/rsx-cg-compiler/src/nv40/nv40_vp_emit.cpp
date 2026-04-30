@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -496,6 +497,13 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         int         semanticIndex;
     };
     std::vector<DeferredStore> deferredStores;
+
+    // Single-instruction StoreOutputs land in this queue first so we
+    // can sort by source-attribute index before emitting — the
+    // reference compiler emits multi-output passthrough VPs in
+    // input-attribute order rather than source-statement order.
+    // Same struct as DeferredStore for type uniformity.
+    std::vector<DeferredStore> immediateStores;
 
     // Output-param vector width keyed by (semantic, semanticIndex) — used
     // by emitStoreOutput to pick a writemask narrower than .xyzw when the
@@ -1318,8 +1326,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     break;
                 }
 
-                if (!emitStoreOutput(srcId, inst.semanticName, inst.semanticIndex))
-                    return out;
+                // Single-insn StoreOutputs are buffered and emitted
+                // sorted by output-register index ascending (matches
+                // the reference compiler's instruction ordering for
+                // shaders with multiple passthrough outputs).
+                immediateStores.push_back(
+                    { srcId, inst.semanticName, inst.semanticIndex });
                 break;
             }
 
@@ -1332,6 +1344,53 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 return out;
             }
         }
+    }
+
+    // Sort single-insn StoreOutputs by the *source's* primary input
+    // attribute index ascending — the reference compiler emits
+    // passthrough output writes in input-attribute order rather than
+    // source-statement order.  Stores whose source is a VecConstruct
+    // pulled from an attribute (e.g. `float4(pos.xy, 0, 1)`) inherit
+    // that attribute's index.  Stores with no traceable input-attr
+    // source fall back to output-semantic index +1024 (sorting after
+    // attribute-sourced ones).
+    std::function<int(IRValueID)> attrIndexFromValue = [&](IRValueID id) -> int
+    {
+        auto vsIt = valueToSource.find(id);
+        if (vsIt != valueToSource.end() &&
+            vsIt->second.kind == ValueSource::Kind::Input)
+        {
+            return vsIt->second.regIdx;
+        }
+        auto vcIt = valueToVecConstruct.find(id);
+        if (vcIt != valueToVecConstruct.end())
+        {
+            for (int li = 0; li < vcIt->second.width; ++li)
+            {
+                if (vcIt->second.lanes[li].kind == LaneSource::Kind::InputLane)
+                    return vcIt->second.lanes[li].regIdx;
+            }
+        }
+        auto shIt = valueToShuffle.find(id);
+        if (shIt != valueToShuffle.end())
+            return attrIndexFromValue(shIt->second.srcId);
+        return -1;
+    };
+    auto storeSortKey = [&](const DeferredStore& s) -> int
+    {
+        int attr = attrIndexFromValue(s.srcId);
+        if (attr >= 0) return attr;
+        return 1024 + vertexOutputIndex(toUpper(s.semanticName), s.semanticIndex);
+    };
+    std::stable_sort(immediateStores.begin(), immediateStores.end(),
+        [&](const DeferredStore& a, const DeferredStore& b) {
+            return storeSortKey(a) < storeSortKey(b);
+        });
+
+    for (const auto& imm : immediateStores)
+    {
+        if (!emitStoreOutput(imm.srcId, imm.semanticName, imm.semanticIndex))
+            return out;
     }
 
     for (const auto& def : deferredStores)
