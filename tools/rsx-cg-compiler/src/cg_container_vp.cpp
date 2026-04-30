@@ -88,6 +88,10 @@ constexpr uint32_t kCgFloat2      = 1046u;
 constexpr uint32_t kCgFloat3      = 1047u;
 constexpr uint32_t kCgFloat4      = 1048u;
 constexpr uint32_t kCgFloat4x4    = 1064u;
+// Vector types of width 1 (`float1`, declared as separate enumerants
+// from CG_FLOAT scalar later in cg_datatypes.h).  The reference compiler
+// uses CG_FLOAT1 (not CG_FLOAT) for single-lane literal-pool slots.
+constexpr uint32_t kCgFloat1      = 1091u;
 
 std::string toUpper(std::string s)
 {
@@ -572,7 +576,7 @@ VpContainerResult emitVertexContainer(
         ParamDesc d;
         d.name      = "internal-constant-" + std::to_string(i);
         d.semantic  = "";
-        d.type      = (slot.usedLanes == 1) ? kCgFloat
+        d.type      = (slot.usedLanes == 1) ? kCgFloat1
                     : (slot.usedLanes == 2) ? kCgFloat2
                     : (slot.usedLanes == 3) ? kCgFloat3
                     :                         kCgFloat4;
