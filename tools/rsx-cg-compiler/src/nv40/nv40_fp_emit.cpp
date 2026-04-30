@@ -904,6 +904,33 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 break;
             }
 
+            case IROp::VecExtract:
+            {
+                // `extract vec[lane]` — same shape as a single-lane
+                // VecShuffle.  Alias to a ScalarExtract through any
+                // SrcMod / VecShuffle bridges so downstream consumers
+                // (comparisons, scalar math, etc.) resolve to the
+                // ultimate base-value lane.
+                if (inst.operands.size() != 1) break;
+                IRValueID base = inst.operands[0];
+                int       lane = inst.componentIndex;
+                // Walk through SrcMod aliases (identity-prefix
+                // VecShuffle records).  No swizzle remap needed since
+                // identity-prefix keeps lane indices unchanged.
+                while (true)
+                {
+                    auto modIt = valueToMod.find(base);
+                    if (modIt == valueToMod.end()) break;
+                    if (modIt->second.absMod || modIt->second.negMod) break;
+                    base = modIt->second.baseId;
+                }
+                ScalarExtract se;
+                se.baseId = base;
+                se.lane   = lane & 3;
+                valueToScalarExtract[inst.result] = se;
+                break;
+            }
+
             case IROp::VecInsert:
             {
                 if (inst.operands.size() < 2) break;
