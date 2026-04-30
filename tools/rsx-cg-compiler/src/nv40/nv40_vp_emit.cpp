@@ -1725,12 +1725,19 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     struct InsnEmit { struct nvfx_insn insn; uint8_t op; };
 
     auto tryEmitPerLaneMadChainInterleaved = [&]() -> bool {
-        // Color store: VecInsert chain with per-lane MAD shape.  Find
-        // first; we only ever fire when the per-lane MAD shape is
-        // present, regardless of what the position store looks like.
+        // Color store: either a VecInsert chain with per-lane MAD shape
+        // (3 batches) or a simple direct passthrough (1 batch — the
+        // canonical `out_color = in_color` case).  Either way, the
+        // interleave kicks in only when the position store is multi-
+        // batch (VecPromote or chained matvecmul) — single-batch pos
+        // shaders fall through to the existing imm-first / deferred-
+        // last logic.
+        enum class ColKind { None, PerLaneMad, SimplePassthrough };
+        ColKind colKind = ColKind::None;
         const DeferredStore* colStore = nullptr;
         PerLaneMadShape colShape;
         int colOutIdx = -1;
+        ValueSource colPassthroughSrc;
         for (const auto& s : deferredStores)
         {
             auto sh = recognizePerLaneMadChain(s.srcId);
@@ -1738,9 +1745,28 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             colStore = &s;
             colShape = sh;
             colOutIdx = vertexOutputIndex(toUpper(s.semanticName), s.semanticIndex);
+            colKind = ColKind::PerLaneMad;
             break;
         }
-        if (!colStore || colOutIdx < 0) return false;
+        if (colKind == ColKind::None)
+        {
+            // Look for a simple passthrough col store: srcId resolves
+            // directly to a known input or const-bank entry, no
+            // VecConstruct / VecInsert / arith intermediation.
+            for (const auto& s : immediateStores)
+            {
+                auto vsIt = valueToSource.find(s.srcId);
+                if (vsIt == valueToSource.end()) continue;
+                colStore = &s;
+                colPassthroughSrc = vsIt->second;
+                colOutIdx = vertexOutputIndex(
+                    toUpper(s.semanticName), s.semanticIndex);
+                colKind = ColKind::SimplePassthrough;
+                break;
+            }
+        }
+        if (colKind == ColKind::None || !colStore || colOutIdx < 0)
+            return false;
 
         // Position store: either VecPromote (`float4(in_pos, 1.0)`)
         // or a chained MatVecMul (`mul(rot, mul(scale, mul(bias,
@@ -1816,12 +1842,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         const struct nvfx_reg none = makeReg(NVFXSR_NONE, 0);
 
         // Reserve R0 for the color chain BEFORE the position chain
-        // allocates any temps.  The reference compiler always uses
-        // R0 for the color MAD's running accumulator and pushes the
-        // position chain temps to R1+ — so we replicate by claiming
-        // R0 first via allocTemp().  Position chain temps then come
-        // from R1, R2, with R1 recycled at step 2 (ping-pong).
-        const int colorTemp = allocTemp();
+        // allocates any temps — only required for the per-lane MAD
+        // shape, which uses R0 as a running accumulator.  Simple
+        // passthrough col stores don't need a temp; the position chain
+        // can take R0 directly.
+        const int colorTemp =
+            (colKind == ColKind::PerLaneMad) ? allocTemp() : -1;
 
         // ----- Build position batches -----
         std::vector<std::vector<InsnEmit>> posBatches;
@@ -1931,61 +1957,125 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
         // ----- Build color batches -----
         std::vector<std::vector<InsnEmit>> colBatches;
-        const struct nvfx_reg colorIn =
-            makeReg(NVFXSR_INPUT, colShape.inputColorAttrIdx);
-        const struct nvfx_reg tweakC = makeReg(NVFXSR_CONST, colShape.tweakConstReg);
-        const struct nvfx_reg colorTempReg = makeReg(NVFXSR_TEMP, colorTemp);
-        // Batch 0: MAD R0.xyz, v[col].xyzx, c[tweak].xxx, c[tweak].yzwy
+        if (colKind == ColKind::PerLaneMad)
         {
-            std::vector<InsnEmit> b;
-            struct nvfx_src s0 = makeSrc(colorIn);
-            s0.swz[0] = 0; s0.swz[1] = 1; s0.swz[2] = 2; s0.swz[3] = 0;
-            struct nvfx_src s1 = makeSrc(tweakC);
-            s1.swz[0] = 0; s1.swz[1] = 0; s1.swz[2] = 0; s1.swz[3] = 0;
-            struct nvfx_src s2 = makeSrc(tweakC);
-            s2.swz[0] = 1; s2.swz[1] = 2; s2.swz[2] = 3; s2.swz[3] = 1;
-            struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
-                const_cast<struct nvfx_reg&>(colorTempReg),
-                NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
-                s0, s1, s2);
-            b.push_back({in, static_cast<uint8_t>(VP_OP(MAD))});
-            colBatches.push_back(std::move(b));
+            const struct nvfx_reg colorIn =
+                makeReg(NVFXSR_INPUT, colShape.inputColorAttrIdx);
+            const struct nvfx_reg tweakC =
+                makeReg(NVFXSR_CONST, colShape.tweakConstReg);
+            const struct nvfx_reg colorTempReg =
+                makeReg(NVFXSR_TEMP, colorTemp);
+            // Batch 0: MAD R0.xyz, v[col].xyzx, c[tweak].xxx, c[tweak].yzwy
+            {
+                std::vector<InsnEmit> b;
+                struct nvfx_src s0 = makeSrc(colorIn);
+                s0.swz[0] = 0; s0.swz[1] = 1; s0.swz[2] = 2; s0.swz[3] = 0;
+                struct nvfx_src s1 = makeSrc(tweakC);
+                s1.swz[0] = 0; s1.swz[1] = 0; s1.swz[2] = 0; s1.swz[3] = 0;
+                struct nvfx_src s2 = makeSrc(tweakC);
+                s2.swz[0] = 1; s2.swz[1] = 2; s2.swz[2] = 3; s2.swz[3] = 1;
+                struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(colorTempReg),
+                    NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                    s0, s1, s2);
+                b.push_back({in, static_cast<uint8_t>(VP_OP(MAD))});
+                colBatches.push_back(std::move(b));
+            }
+            // Batch 1: MOV R0.w, v[col].wwww
+            {
+                std::vector<InsnEmit> b;
+                struct nvfx_src s0 = makeSrc(colorIn);
+                s0.swz[0] = 3; s0.swz[1] = 3; s0.swz[2] = 3; s0.swz[3] = 3;
+                struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(colorTempReg),
+                    NVFX_VP_MASK_W,
+                    s0, makeSrc(none), makeSrc(none));
+                b.push_back({in, static_cast<uint8_t>(VP_OP(MOV))});
+                colBatches.push_back(std::move(b));
+            }
+            // Batch 2: ADD o[COL0].xyzw, c[offset].xyzw, R0.xyzw
+            {
+                std::vector<InsnEmit> b;
+                const struct nvfx_reg dst  = makeReg(NVFXSR_OUTPUT, colOutIdx);
+                const struct nvfx_reg offC = makeReg(NVFXSR_CONST, colShape.offsetConstReg);
+                struct nvfx_src s0 = makeSrc(offC);
+                struct nvfx_src s2 = makeSrc(colorTempReg);
+                struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(dst),
+                    NVFX_VP_MASK_ALL,
+                    s0, makeSrc(none), s2);
+                b.push_back({in, static_cast<uint8_t>(VP_OP(ADD))});
+                colBatches.push_back(std::move(b));
+            }
         }
-        // Batch 1: MOV R0.w, v[col].wwww
+        else  // ColKind::SimplePassthrough
         {
             std::vector<InsnEmit> b;
-            struct nvfx_src s0 = makeSrc(colorIn);
-            s0.swz[0] = 3; s0.swz[1] = 3; s0.swz[2] = 3; s0.swz[3] = 3;
+            const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, colOutIdx);
+            const struct nvfx_reg src =
+                (colPassthroughSrc.kind == ValueSource::Kind::Input)
+                    ? makeReg(NVFXSR_INPUT, colPassthroughSrc.regIdx)
+                    : makeReg(NVFXSR_CONST, colPassthroughSrc.regIdx);
+            struct nvfx_src s0 = makeSrc(src);
+            const int srcWidth = colPassthroughSrc.width;
+            if (srcWidth < 4)
+            {
+                uint8_t sw[4];
+                identitySwizzleForWidth(srcWidth, sw);
+                s0.swz[0] = sw[0]; s0.swz[1] = sw[1];
+                s0.swz[2] = sw[2]; s0.swz[3] = sw[3];
+            }
             struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
-                const_cast<struct nvfx_reg&>(colorTempReg),
-                NVFX_VP_MASK_W,
+                const_cast<struct nvfx_reg&>(dst),
+                writemaskForWidth(srcWidth),
                 s0, makeSrc(none), makeSrc(none));
             b.push_back({in, static_cast<uint8_t>(VP_OP(MOV))});
             colBatches.push_back(std::move(b));
         }
-        // Batch 2: ADD o[COL0].xyzw, c[offset].xyzw, R0.xyzw
-        {
-            std::vector<InsnEmit> b;
-            const struct nvfx_reg dst  = makeReg(NVFXSR_OUTPUT, colOutIdx);
-            const struct nvfx_reg offC = makeReg(NVFXSR_CONST, colShape.offsetConstReg);
-            struct nvfx_src s0 = makeSrc(offC);
-            struct nvfx_src s2 = makeSrc(colorTempReg);
-            struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
-                const_cast<struct nvfx_reg&>(dst),
-                NVFX_VP_MASK_ALL,
-                s0, makeSrc(none), s2);
-            b.push_back({in, static_cast<uint8_t>(VP_OP(ADD))});
-            colBatches.push_back(std::move(b));
-        }
 
-        // ----- Round-robin interleave -----
-        const size_t maxBatches =
-            std::max(posBatches.size(), colBatches.size());
-        for (size_t k = 0; k < maxBatches; ++k)
+        // ----- Schedule -----
+        // Two alignment regimes, both verified against sce-cgc:
+        //   M <= N (col fits in pos's "between-batch" slots, or ties):
+        //     Right-align col batches against the tail.  pos[0..N-M-1]
+        //     emit alone first; for K = 0..M-1, emit col[K] then
+        //     pos[N-M+K].  (Reference emits col BEFORE its paired pos
+        //     when right-aligned.)
+        //   M > N (col has more batches than pos):
+        //     Left-align.  For K = 0..N-1, emit pos[K] then col[K]
+        //     (pos before col within a pair when left-aligned).  Then
+        //     col[N..M-1] emit alone at the tail.
+        // Examples:
+        //   mul_chain4_v        (N=4, M=3): right-align →
+        //     pos[0], col[0], pos[1], col[1], pos[2], col[2], pos[3]
+        //   mul_chain4_passthrough_v (N=4, M=1): right-align →
+        //     pos[0], pos[1], pos[2], col[0], pos[3]
+        //   per_lane_mad_chain_v (N=2, M=3): left-align →
+        //     pos[0], col[0], pos[1], col[1], col[2]
+        //   global_mvp_v        (N=1, M=1): right-align (tie) →
+        //     col[0], pos[0]   (this case currently doesn't fire here
+        //     because pos has only 1 batch; the existing imm-first
+        //     logic produces the same output.)
+        const size_t M = colBatches.size();
+        const size_t N = posBatches.size();
+        if (M <= N)
         {
-            if (k < posBatches.size())
+            for (size_t k = 0; k + M < N; ++k)
                 for (const auto& e : posBatches[k]) asm_.emit(e.insn, e.op);
-            if (k < colBatches.size())
+            for (size_t k = 0; k < M; ++k)
+            {
+                for (const auto& e : colBatches[k]) asm_.emit(e.insn, e.op);
+                for (const auto& e : posBatches[N - M + k])
+                    asm_.emit(e.insn, e.op);
+            }
+        }
+        else
+        {
+            for (size_t k = 0; k < N; ++k)
+            {
+                for (const auto& e : posBatches[k]) asm_.emit(e.insn, e.op);
+                for (const auto& e : colBatches[k]) asm_.emit(e.insn, e.op);
+            }
+            for (size_t k = N; k < M; ++k)
                 for (const auto& e : colBatches[k]) asm_.emit(e.insn, e.op);
         }
 
