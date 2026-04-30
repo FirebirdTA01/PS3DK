@@ -2711,6 +2711,52 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             auto it = valueToInputSrc.find(id);
                             return it == valueToInputSrc.end() ? -1 : it->second;
                         };
+                        // Walk a VecInsert chain that fully rebuilds an
+                        // underlying varying lane-by-lane.  Returns the
+                        // varying's input-src index, or -1 if the chain
+                        // doesn't have that exact shape.  Used to detect
+                        // the alpha_mask split-write source pattern
+                        // (`oColor.rgb = color.rgb; oColor.a = color.a;`)
+                        // — the IR ends up rebuilding `color` lane-by-
+                        // lane, which is logically equivalent to a direct
+                        // varying read but the reference compiler emits
+                        // a different ucode shape (MOVH preload + 3 cond
+                        // MOVs instead of a single cond MOV).
+                        auto resolveVecInsertChainToBaseVarying =
+                            [&](IRValueID id) -> int {
+                            IRValueID laneScalarId[4] = {0,0,0,0};
+                            bool      laneOverridden[4] = {false,false,false,false};
+                            IRValueID curr = id;
+                            while (true)
+                            {
+                                auto viIt = valueToVecInsert.find(curr);
+                                if (viIt == valueToVecInsert.end()) break;
+                                const int lane = viIt->second.lane;
+                                if (!laneOverridden[lane])
+                                {
+                                    laneOverridden[lane] = true;
+                                    laneScalarId[lane] = viIt->second.scalarId;
+                                }
+                                curr = viIt->second.vectorId;
+                            }
+                            for (int i = 0; i < 4; ++i)
+                                if (!laneOverridden[i]) return -1;
+                            int sharedInput = -1;
+                            for (int i = 0; i < 4; ++i)
+                            {
+                                auto seIt = valueToScalarExtract.find(
+                                    laneScalarId[i]);
+                                if (seIt == valueToScalarExtract.end())
+                                    return -1;
+                                if (seIt->second.lane != i) return -1;
+                                auto inIt = valueToInputSrc.find(
+                                    seIt->second.baseId);
+                                if (inIt == valueToInputSrc.end()) return -1;
+                                if (sharedInput < 0) sharedInput = inIt->second;
+                                else if (inIt->second != sharedInput) return -1;
+                            }
+                            return sharedInput;
+                        };
                         if (!isLitZero(sb.trueId))
                         {
                             out.diagnostics.push_back(
@@ -2719,7 +2765,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 "literal not yet supported");
                             return out;
                         }
-                        const int falseInputSrc = findVarying(sb.falseId);
+                        int falseInputSrc = findVarying(sb.falseId);
+                        bool splitWriteShape = false;
+                        if (falseInputSrc < 0)
+                        {
+                            falseInputSrc =
+                                resolveVecInsertChainToBaseVarying(sb.falseId);
+                            if (falseInputSrc >= 0) splitWriteShape = true;
+                        }
                         if (falseInputSrc < 0)
                         {
                             out.diagnostics.push_back(
@@ -2797,63 +2850,194 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
 
-                        // ----- Inst 2: SLE-CC R1.<lane>, c[0].xxxx -----
+                        // For the split-write shape, the reference compiler
+                        // preloads the FALSE-branch varying into a half-
+                        // precision register pair via MOVH, then uses it
+                        // as the source for the conditional per-lane MOVs.
+                        // For the simple shape, no preload is needed —
+                        // the varying is read directly in the cond MOV.
+                        struct nvfx_reg h2Dst = nvfx_reg(NVFXSR_TEMP, 2);
+                        h2Dst.is_fp16 = 1;
+                        if (splitWriteShape)
+                        {
+                            // ----- Inst 2: MOVH H2.xyzw, f[falseBr] -----
+                            const struct nvfx_reg falseInReg =
+                                nvfx_reg(NVFXSR_INPUT, falseInputSrc);
+                            struct nvfx_src mvhS0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(falseInReg));
+                            struct nvfx_src mvhS1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src mvhS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn mvh = nvfx_insn(
+                                0, 0, -1, -1, h2Dst,
+                                NVFX_FP_MASK_ALL, mvhS0, mvhS1, mvhS2);
+                            mvh.precision = FLOAT16;
+                            asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+
+                            attrs.attributeInputMask |=
+                                fpAttrMaskBitForInputSrc(falseInputSrc);
+                            if (falseInputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            {
+                                const int n =
+                                    falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                                attrs.texCoordsInputMask |= uint16_t{1} << n;
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                            }
+                        }
+
+                        // ----- SLE-CC R1.<lane>, c[0].xxxx -----
                         const struct nvfx_reg ccDst =
                             nvfx_reg(NVFXSR_NONE, 0x3F);
                         const struct nvfx_reg constReg =
                             nvfx_reg(NVFXSR_CONST, 0);
                         struct nvfx_src cmpS0 = nvfx_src(r1Dst);
-                        cmpS0.swz[0] = cmpS0.swz[1] =
-                        cmpS0.swz[2] = cmpS0.swz[3] =
-                            static_cast<uint8_t>(cb.lhsLane);
+                        if (splitWriteShape)
+                        {
+                            // Identity swizzle .xyzw — the reference's
+                            // SLE for split-write writes mask=.<lhsLane>
+                            // and reads src0 with identity .xyzw (only
+                            // the masked lane is meaningful).
+                            cmpS0.swz[0] = 0; cmpS0.swz[1] = 1;
+                            cmpS0.swz[2] = 2; cmpS0.swz[3] = 3;
+                        }
+                        else
+                        {
+                            // Smear lhsLane across all components — the
+                            // simple shape writes mask=.x, so src0's lane 0
+                            // is consumed.
+                            cmpS0.swz[0] = cmpS0.swz[1] =
+                            cmpS0.swz[2] = cmpS0.swz[3] =
+                                static_cast<uint8_t>(cb.lhsLane);
+                        }
                         struct nvfx_src cmpS1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(constReg));
                         cmpS1.swz[0] = cmpS1.swz[1] =
                         cmpS1.swz[2] = cmpS1.swz[3] = 0;  // .xxxx
                         struct nvfx_src cmpS2 =
                             nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        // The simple shape writes the CC at lane X (mask
+                        // .x); the split-write shape writes at the
+                        // lhsLane bit (mask .<lhsLane>).
+                        const uint32_t cmpMask =
+                            splitWriteShape
+                                ? (uint32_t{1} << static_cast<uint32_t>(cb.lhsLane))
+                                : NVFX_FP_MASK_X;
                         struct nvfx_insn cmpIn = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(ccDst),
-                            NVFX_FP_MASK_X, cmpS0, cmpS1, cmpS2);
+                            cmpMask, cmpS0, cmpS1, cmpS2);
                         cmpIn.cc_update = 1;  // COND_WRITE_ENABLE
                         asm_.emit(cmpIn, cb.opcode);
                         const float cmpInline[4] =
                             { cb.rhsLiteral, 0.0f, 0.0f, 0.0f };
                         asm_.appendConstBlock(cmpInline);
 
-                        // ----- Inst 3: MOV(EQ.xxxx) R0, f[falseBr] -----
-                        const struct nvfx_reg movInReg =
-                            nvfx_reg(NVFXSR_INPUT, falseInputSrc);
-                        struct nvfx_src movS0 =
-                            nvfx_src(const_cast<struct nvfx_reg&>(movInReg));
-                        struct nvfx_src movS1 =
-                            nvfx_src(const_cast<struct nvfx_reg&>(none));
-                        struct nvfx_src movS2 =
-                            nvfx_src(const_cast<struct nvfx_reg&>(none));
-                        struct nvfx_insn movIn = nvfx_insn(
-                            0, 0, -1, -1,
-                            const_cast<struct nvfx_reg&>(dstReg),
-                            NVFX_FP_MASK_ALL, movS0, movS1, movS2);
-                        // SLE writes 1 ⟺ LE; the CC value is therefore 1
-                        // when the LE comparison was true.  We want the
-                        // MOV to fire when LE was FALSE (the "else" arm).
-                        // NV40 COND_EQ is "execute when CC == 0" — i.e.
-                        // when SLE wrote 0 — i.e. when LE was FALSE.
-                        movIn.cc_test  = 1;
-                        movIn.cc_cond  = NVFX_FP_OP_COND_EQ;
-                        movIn.cc_swz[0] = movIn.cc_swz[1] =
-                        movIn.cc_swz[2] = movIn.cc_swz[3] = 0;  // all .x
-                        asm_.emit(movIn, NVFX_FP_OP_OPCODE_MOV);
-
-                        attrs.attributeInputMask |=
-                            fpAttrMaskBitForInputSrc(falseInputSrc);
-                        if (falseInputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        if (splitWriteShape)
                         {
-                            const int n = falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
-                            attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                            // The reference compiler emits 3 MOV insns
+                            // for the split-write shape, all reading the
+                            // half-precision color preload at H2:
+                            //   1. MOV(EQ.<lhs>) R0.<lhs>, H2          (alpha lane)
+                            //   2. MOV(TR)        R0.<lhs>, R0          (no-op slot)
+                            //   3. MOV(EQ.<lhs>) R0.<other>, H2 [END]  (RGB lanes)
+                            // The alpha lane and RGB lanes split because
+                            // the source had `oColor.rgb = ...; oColor.a
+                            // = ...;` separately.  COND_EQ fires when CC
+                            // == 0, i.e. when SLE wrote 0, i.e. when the
+                            // LE was FALSE (the "else" arm — alpha > 0.5).
+                            const uint32_t lhsMask =
+                                uint32_t{1} << static_cast<uint32_t>(cb.lhsLane);
+                            const uint32_t otherMask =
+                                NVFX_FP_MASK_ALL & ~lhsMask;
+                            const uint8_t lhsSwz =
+                                static_cast<uint8_t>(cb.lhsLane);
+
+                            // Inst 4: MOV(EQ.<lhs>) R0.<lhs>, H2.xyzw
+                            {
+                                struct nvfx_src s0 = nvfx_src(h2Dst);
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(dstReg),
+                                    lhsMask, s0, s1, s2);
+                                in.cc_test  = 1;
+                                in.cc_cond  = NVFX_FP_OP_COND_EQ;
+                                in.cc_swz[0] = in.cc_swz[1] =
+                                in.cc_swz[2] = in.cc_swz[3] = lhsSwz;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                            }
+                            // Inst 5: MOV(TR) R0.<lhs>, R0.xyzw — no-op
+                            // slot the reference compiler emits between
+                            // the alpha-lane and RGB-lane writes.  Source
+                            // is R0 (default identity swizzle), cc_test
+                            // disabled (always executes), cc_swz default.
+                            {
+                                struct nvfx_reg r0Src = nvfx_reg(NVFXSR_TEMP, 0);
+                                struct nvfx_src s0 = nvfx_src(r0Src);
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(dstReg),
+                                    lhsMask, s0, s1, s2);
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                            }
+                            // Inst 6: MOV(EQ.<lhs>)[END] R0.<other>, H2
+                            {
+                                struct nvfx_src s0 = nvfx_src(h2Dst);
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(dstReg),
+                                    otherMask, s0, s1, s2);
+                                in.cc_test  = 1;
+                                in.cc_cond  = NVFX_FP_OP_COND_EQ;
+                                in.cc_swz[0] = in.cc_swz[1] =
+                                in.cc_swz[2] = in.cc_swz[3] = lhsSwz;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                            }
+                        }
+                        else
+                        {
+                            // Simple shape: single MOV(EQ.xxxx) R0, f[falseBr].
+                            const struct nvfx_reg movInReg =
+                                nvfx_reg(NVFXSR_INPUT, falseInputSrc);
+                            struct nvfx_src movS0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(movInReg));
+                            struct nvfx_src movS1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src movS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn movIn = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_ALL, movS0, movS1, movS2);
+                            movIn.cc_test  = 1;
+                            movIn.cc_cond  = NVFX_FP_OP_COND_EQ;
+                            movIn.cc_swz[0] = movIn.cc_swz[1] =
+                            movIn.cc_swz[2] = movIn.cc_swz[3] = 0;
+                            asm_.emit(movIn, NVFX_FP_OP_OPCODE_MOV);
+
+                            attrs.attributeInputMask |=
+                                fpAttrMaskBitForInputSrc(falseInputSrc);
+                            if (falseInputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            {
+                                const int n =
+                                    falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                                attrs.texCoordsInputMask |= uint16_t{1} << n;
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                            }
                         }
 
                         emittedSomething = true;
