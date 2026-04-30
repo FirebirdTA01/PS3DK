@@ -517,6 +517,27 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpDotLitPackBinding> valueToDotLitPack;
 
+    // `vec4(d1, d2, d3, 1.0)` where d1/d2/d3 are 3 distinct
+    // FpDotLitPackBindings against the same varying-pack baseId.
+    // Captures the kitchen-sink shader's
+    // `float3 Length = float3(dot(dirA,p), dot(dirB,p), dot(dirC,p))`
+    // wrapped to vec4 for the COLOR sink.  Lowers to 5 instructions:
+    //   MOV R0.zw, f[INPUT].<pack-cycle>             ; pack into Z/W
+    //   DP2 R0.x, R0.zwzx, c[0].xyxx + lit_block_0   ; offset 0 (lane X even)
+    //   DP2 R0.y, R0.zwzx, c[0].zwzz + lit_block_2   ; offset 2 (lane Y odd)
+    //   DP2 R0.z, R0.zwzx, c[0].xyxx + lit_block_0   ; offset 0 (lane Z even)
+    //   MOV R0.w [END], c[0].xxxx + {1, 0, 0, 0}     ; W=1.0
+    // The pack lives in R0.z/R0.w because lanes 0/1/2 are written by
+    // the dots; sce-cgc places literal blocks at offset (0,1) for
+    // even output lanes and (2,3) for odd output lanes.
+    struct FpDot3LitPackWrapBinding
+    {
+        FpVaryingPackBinding pack;
+        float                literals[3][4] = {{0}};
+    };
+    std::unordered_map<IRValueID, FpDot3LitPackWrapBinding>
+        valueToDot3LitPackWrap;
+
     int nextTexUnit = 0;
 
     // Slot index for embedded-uniform globals.  Top-level uniforms
@@ -1543,6 +1564,39 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             FpDotLitPackBinding bind = dlpIt->second;
                             bind.wrapW1 = true;
                             valueToDotLitPack[inst.result] = bind;
+                            break;
+                        }
+                    }
+                }
+
+                // Shape A4: `vec4(d1, d2, d3, 1.0)` where d1/d2/d3 are
+                // 3 distinct DotLitPacks sharing the same varying-pack
+                // base.  Records FpDot3LitPackWrapBinding for the
+                // 5-insn StoreOutput emit.
+                if (inst.operands.size() == 4)
+                {
+                    auto it0 = valueToDotLitPack.find(inst.operands[0]);
+                    auto it1 = valueToDotLitPack.find(inst.operands[1]);
+                    auto it2 = valueToDotLitPack.find(inst.operands[2]);
+                    if (it0 != valueToDotLitPack.end() &&
+                        it1 != valueToDotLitPack.end() &&
+                        it2 != valueToDotLitPack.end() &&
+                        it0->second.pack.baseId == it1->second.pack.baseId &&
+                        it1->second.pack.baseId == it2->second.pack.baseId &&
+                        it0->second.pack.width  == it1->second.pack.width  &&
+                        it1->second.pack.width  == it2->second.pack.width)
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[3]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpDot3LitPackWrapBinding b;
+                            b.pack = it0->second.pack;
+                            for (int k = 0; k < 4; ++k) b.literals[0][k] = it0->second.literal[k];
+                            for (int k = 0; k < 4; ++k) b.literals[1][k] = it1->second.literal[k];
+                            for (int k = 0; k < 4; ++k) b.literals[2][k] = it2->second.literal[k];
+                            valueToDot3LitPackWrap[inst.result] = b;
                             break;
                         }
                     }
@@ -3353,6 +3407,154 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // texCoords2D bit — the coord is being used as
                     // 3D/4D, mirroring the cube/projective handling
                     // elsewhere.
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inputSrcCode);
+                    if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
+                        attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        for (int k = 0; k < packWidth; ++k)
+                        {
+                            if (bind.pack.lanes[k] >= 2)
+                            {
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                                break;
+                            }
+                        }
+                    }
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // 3 planar dots wrapped float4(d1, d2, d3, 1.0) —
+                // shares one varying-pack across all three.  See the
+                // FpDot3LitPackWrapBinding header for the 5-insn
+                // shape.  Even output lane parity → block at offset
+                // (0,1) with .xyxx swizzle.  Odd → offset (2,3) with
+                // .zwzz.
+                auto d3It = valueToDot3LitPackWrap.find(srcId);
+                if (d3It != valueToDot3LitPackWrap.end())
+                {
+                    const FpDot3LitPackWrapBinding& bind = d3It->second;
+                    auto inputIt = valueToInputSrc.find(bind.pack.baseId);
+                    if (inputIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: dot3-lit-pack varying did not resolve");
+                        return out;
+                    }
+                    const int inputSrcCode = inputIt->second;
+                    const int packWidth    = bind.pack.width;
+
+                    const struct nvfx_reg tempR0   = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inputSrcCode);
+                    struct nvfx_src none0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    // --- Insn 1: MOV R0.zw, f[INPUT].<cyclic> ---
+                    // Cyclic pack: each swizzle slot reads the pack
+                    // lane at (slot mod packWidth).  For width=2 with
+                    // pack=[0,2] this gives .xzxz.
+                    struct nvfx_src packSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        const int laneIdx = bind.pack.lanes[k % packWidth];
+                        packSrc.swz[k] = static_cast<uint8_t>(laneIdx);
+                    }
+                    struct nvfx_insn movPack = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_Z | NVFX_FP_MASK_W,
+                        packSrc, none0, none0);
+                    movPack.precision = FLOAT32;
+                    asm_.emit(movPack, NVFX_FP_OP_OPCODE_MOV);
+
+                    // --- Insns 2-4: 3 DP2/3/4s into R0.x, R0.y, R0.z ---
+                    uint8_t dotOpcode = NVFX_FP_OP_OPCODE_DP2;
+                    if      (packWidth == 3) dotOpcode = NVFX_FP_OP_OPCODE_DP3;
+                    else if (packWidth >= 4) dotOpcode = NVFX_FP_OP_OPCODE_DP4;
+
+                    // src0 reads the pack temp R0 with .zwzz — slots
+                    // 0/1 hold the pack data (Z/W of R0); slots 2/3
+                    // replicate the pack-lane-0 position (Z) to match
+                    // the reference compiler's filler.
+                    auto dotSrc0 = [&]() {
+                        struct nvfx_src s =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        s.swz[0] = 2;  // Z
+                        s.swz[1] = 3;  // W
+                        s.swz[2] = 2;  // Z
+                        s.swz[3] = 2;  // Z
+                        return s;
+                    };
+
+                    auto emitDotLane = [&](int outLane, const float* lit)
+                    {
+                        const bool offsetEven = ((outLane & 1) == 0);
+                        struct nvfx_src tempSrc = dotSrc0();
+                        struct nvfx_src litSrc  =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        if (offsetEven)
+                        {
+                            litSrc.swz[0] = 0;  // X
+                            litSrc.swz[1] = 1;  // Y
+                            litSrc.swz[2] = 0;  // X
+                            litSrc.swz[3] = 0;  // X
+                        }
+                        else
+                        {
+                            litSrc.swz[0] = 2;  // Z
+                            litSrc.swz[1] = 3;  // W
+                            litSrc.swz[2] = 2;  // Z
+                            litSrc.swz[3] = 2;  // Z
+                        }
+                        const uint8_t mask =
+                            static_cast<uint8_t>(1u << outLane);
+                        struct nvfx_insn dotInsn = nvfx_insn(
+                            saturate ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            mask, tempSrc, litSrc, none0);
+                        dotInsn.precision = dstPrecision;
+                        asm_.emit(dotInsn, dotOpcode);
+
+                        float block[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                        if (offsetEven)
+                        {
+                            block[0] = lit[0];
+                            block[1] = lit[1];
+                        }
+                        else
+                        {
+                            block[2] = lit[0];
+                            block[3] = lit[1];
+                        }
+                        asm_.appendConstBlock(block);
+                    };
+
+                    emitDotLane(0, bind.literals[0]);
+                    emitDotLane(1, bind.literals[1]);
+                    emitDotLane(2, bind.literals[2]);
+
+                    // --- Insn 5: MOV R0.w [END], c[0].xxxx + {1,0,0,0} ---
+                    struct nvfx_src cOneSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    cOneSrc.swz[0] = cOneSrc.swz[1] =
+                    cOneSrc.swz[2] = cOneSrc.swz[3] = 0;
+                    struct nvfx_insn movW = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_W, cOneSrc, none0, none0);
+                    movW.precision = dstPrecision;
+                    asm_.emit(movW, NVFX_FP_OP_OPCODE_MOV);
+                    const float wOneBlock[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+                    asm_.appendConstBlock(wOneBlock);
+
+                    // Track varying-input bits + clear texCoords2D.
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
