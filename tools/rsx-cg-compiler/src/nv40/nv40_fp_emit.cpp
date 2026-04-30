@@ -572,6 +572,40 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<IRValueID, FpLitVecUniformScaleWrapBinding>
         valueToLitVecUniformScaleWrap;
 
+    // `Sub(literal_vec3 * 3-dot pack, literal_vec3 * uniform_scalar)`
+    // — the kitchen-sink water FP `freq * Length - phase * gTime`
+    // step.  Combines an FpDot3LitPackScaled with an
+    // FpLitVecUniformScale and routes the dots to a SECOND R-temp
+    // (R1) so R0 can carry uniform + W=1.0 + final MAD.  Captures
+    // the multi-register schedule the reference compiler chooses
+    // for this specific composition.
+    struct FpScaledDotsMinusLitMulUniformBinding
+    {
+        FpDot3LitPackScaledBinding   scaledDots;
+        FpLitVecUniformScaleBinding  litTimesUni;
+    };
+    std::unordered_map<IRValueID, FpScaledDotsMinusLitMulUniformBinding>
+        valueToScaledDotsMinusLitMulUni;
+
+    // `vec4(scaled-dots-minus-lit-mul-uniform, 1.0)` — final wrap
+    // form for the COLOR sink.  9-instruction shape:
+    //   MOV R0.xy,    f[INPUT].<pack-swizzle>   (pack)
+    //   MOV R0.w,     c[0].xxxx + {1, 0, 0, 0}  (W=1.0 lane 0)
+    //   DP2 R1.x,     R0, c[0].xyxx + dirA-lit (lanes 0,1)
+    //   DP2 R1.y,     R0, c[0].zwzz + dirB-lit (lanes 2,3)
+    //   DP2 R1.z,     R0, c[0].yzzw + dirC-lit (lanes 1,2 — shifted)
+    //   MOV R0.x,     c[0].xxxx + zeros        (uniform-patched)
+    //   MUL R1.xyz,   R1.xyzw, c[0].xyzw + freq (scale dots)
+    //   FENCBR
+    //   MAD R0.xyz[END], -R0.xxxx, c[0].xyzw + phase, R1
+    //                  (folds the Sub into MAD with NEGATE-on-src0)
+    struct FpScaledDotsMinusLitMulUniformWrapBinding
+    {
+        FpScaledDotsMinusLitMulUniformBinding sub;
+    };
+    std::unordered_map<IRValueID, FpScaledDotsMinusLitMulUniformWrapBinding>
+        valueToScaledDotsMinusLitMulUniWrap;
+
     // `vec4(scaled-or-bare 3-dot pack, 1.0)` — wraps either a bare
     // FpDot3LitPack or a FpDot3LitPackScaled into the float4 the
     // COLOR sink expects.  Lowers to 5 (no scale) or 6 (with scale)
@@ -1113,6 +1147,25 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                 const IRValueID a = inst.operands[0];
                 const IRValueID b = inst.operands[1];
+
+                // Sub(FpDot3LitPackScaled, FpLitVecUniformScale) —
+                // fold a scaled-dots minus lit×uniform shape into a
+                // single combined binding.  Recognizer fires before
+                // the generic arithmetic path.
+                if (inst.op == IROp::Sub)
+                {
+                    auto aSd = valueToDot3LitPackScaled.find(a);
+                    auto bLu = valueToLitVecUniformScale.find(b);
+                    if (aSd != valueToDot3LitPackScaled.end() &&
+                        bLu != valueToLitVecUniformScale.end())
+                    {
+                        FpScaledDotsMinusLitMulUniformBinding sb;
+                        sb.scaledDots  = aSd->second;
+                        sb.litTimesUni = bLu->second;
+                        valueToScaledDotsMinusLitMulUni[inst.result] = sb;
+                        break;
+                    }
+                }
 
                 // Mul(literal_vec, uniform_scalar) — broadcast scale.
                 // Records a binding that the downstream wrap can use
@@ -1678,6 +1731,29 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         for (int k = 0; k < 4; ++k) b.literals[2][k] = it2->second.literal[k];
                         valueToDot3LitPack[inst.result] = b;
                         break;
+                    }
+                }
+
+                // Shape A4e: `vec4(scaled-dots-minus-lit-mul-uniform,
+                // 1.0)` — 2-operand wrap of the FragmentProgram-style
+                // Sub binding.  Lowers to 9 instructions; see the
+                // FpScaledDotsMinusLitMulUniformWrapBinding header.
+                if (inst.operands.size() == 2)
+                {
+                    auto sIt =
+                        valueToScaledDotsMinusLitMulUni.find(inst.operands[0]);
+                    if (sIt != valueToScaledDotsMinusLitMulUni.end())
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[1]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpScaledDotsMinusLitMulUniformWrapBinding wb;
+                            wb.sub = sIt->second;
+                            valueToScaledDotsMinusLitMulUniWrap[inst.result] = wb;
+                            break;
+                        }
                     }
                 }
 
@@ -3828,6 +3904,245 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         for (int k = 0; k < packWidth; ++k)
                         {
                             if (bind.pack.lanes[k] >= 2)
+                            {
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                                break;
+                            }
+                        }
+                    }
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `vec4(scaled-dots-minus-lit-mul-uniform, 1.0)` —
+                // 9-instruction shape combining a 3-dot pack, a
+                // literal vec3 scale on the dots, a literal vec3
+                // multiplied by a uniform scalar, and the SUB folded
+                // into a final MAD with NEGATE.  Routes the dots to
+                // R1 so R0 can carry the uniform preload + W=1.0 +
+                // final MAD chain without conflict.
+                auto sdmIt = valueToScaledDotsMinusLitMulUniWrap.find(srcId);
+                if (sdmIt != valueToScaledDotsMinusLitMulUniWrap.end())
+                {
+                    const FpScaledDotsMinusLitMulUniformBinding& sb =
+                        sdmIt->second.sub;
+                    const FpDot3LitPackBinding& base = sb.scaledDots.base;
+                    auto packInputIt = valueToInputSrc.find(base.pack.baseId);
+                    if (packInputIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-dots-sub: pack varying did not resolve");
+                        return out;
+                    }
+                    auto uniIt = valueToFpUniform.find(sb.litTimesUni.uniformId);
+                    if (uniIt == valueToFpUniform.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: scaled-dots-sub: uniform did not resolve");
+                        return out;
+                    }
+                    const int inputSrcCode = packInputIt->second;
+                    const int packWidth    = base.pack.width;
+
+                    const struct nvfx_reg tempR0   = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg tempR1   = nvfx_reg(NVFXSR_TEMP, 1);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inputSrcCode);
+                    struct nvfx_src none0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    // --- Insn 1: MOV R0.<pack-mask>, f[INPUT].<pack-swz> ---
+                    // Single-dot-style pack into R0.xy.  Trailing
+                    // src swizzle slots stay identity.
+                    uint8_t packMask = 0;
+                    for (int k = 0; k < packWidth; ++k) packMask |= (1u << k);
+                    struct nvfx_src packSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    for (int k = 0; k < packWidth; ++k)
+                        packSrc.swz[k] = static_cast<uint8_t>(base.pack.lanes[k]);
+                    struct nvfx_insn movPack = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        packMask, packSrc, none0, none0);
+                    movPack.precision = FLOAT32;
+                    asm_.emit(movPack, NVFX_FP_OP_OPCODE_MOV);
+
+                    // --- Insn 2: MOV R0.w, c[0].xxxx + {1, 0, 0, 0} ---
+                    // W=1.0 at lane 0 — rule 4 (default) since prev
+                    // is a varying-only MOV (no c[0] swizzle to match
+                    // or avoid) and the next non-FENCBR insn is the
+                    // first DP2 (c[0].xyxx, neither .xxxx nor .xyzw).
+                    struct nvfx_src cXSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    cXSrc.swz[0] = cXSrc.swz[1] =
+                    cXSrc.swz[2] = cXSrc.swz[3] = 0;
+                    struct nvfx_insn movW = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_W, cXSrc, none0, none0);
+                    movW.precision = FLOAT32;
+                    asm_.emit(movW, NVFX_FP_OP_OPCODE_MOV);
+                    const float wOneBlock[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+                    asm_.appendConstBlock(wOneBlock);
+
+                    // --- Insns 3-5: 3 DP2s into R1.x, R1.y, R1.z ---
+                    // Per-DP literal block layout for THIS shape:
+                    //   dirA → R1.x, swizzle .xyxx, block (lit.x, lit.y, 0, 0)
+                    //   dirB → R1.y, swizzle .zwzz, block (0, 0, lit.x, lit.y)
+                    //   dirC → R1.z, swizzle .yzzw, block (0, lit.x, lit.y, 0)
+                    //                                ^^^^ shifted by 1 lane
+                    //                                vs. the simpler 3-dot
+                    //                                wrap; reverse-engineered
+                    //                                from the reference output
+                    //                                for this exact shape.
+                    auto packTempSrc = [&]() {
+                        struct nvfx_src s =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        // Identity .xyzw — DP2 reads the pack via
+                        // R0.x and R0.y.
+                        return s;
+                    };
+                    auto emitDot = [&](int outLane, const float* lit,
+                                       int swzStart) {
+                        struct nvfx_src tempSrc = packTempSrc();
+                        struct nvfx_src litSrc =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        // swzStart = block lane where lit.x lives.
+                        // Slot 0 reads lit.x, slot 1 reads lit.y; slots
+                        // 2/3 trail.
+                        litSrc.swz[0] = static_cast<uint8_t>(swzStart);
+                        litSrc.swz[1] = static_cast<uint8_t>(swzStart + 1);
+                        // Slot 2: depends on shape — for the .xyxx and
+                        // .yzzw cases sce-cgc replicates lane 0 of the
+                        // swizzle (slot 0); for .zwzz it replicates Z.
+                        // The pattern: trailing slots replicate lane
+                        // (swzStart + (slot - 2) mod 2).  For starts 0
+                        // and 1 we replicate slot 0 / slot 1; for start
+                        // 2 we replicate slot 0 (Z).
+                        if (swzStart == 2)
+                        {
+                            // .zwzz pattern
+                            litSrc.swz[2] = 2;  // Z
+                            litSrc.swz[3] = 2;  // Z
+                        }
+                        else
+                        {
+                            // .xyxx (start=0) or .yzzw (start=1) — slot 2
+                            // replicates start; slot 3 replicates
+                            // (start + 2) for the .yzzw case (which is
+                            // identity-W) or start for .xyxx.
+                            litSrc.swz[2] = static_cast<uint8_t>(
+                                (swzStart == 0) ? 0 : (swzStart + 1));
+                            litSrc.swz[3] = static_cast<uint8_t>(
+                                (swzStart == 0) ? 0 : (swzStart + 2));
+                        }
+
+                        const uint8_t mask =
+                            static_cast<uint8_t>(1u << outLane);
+                        struct nvfx_insn dotInsn = nvfx_insn(
+                            saturate ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR1),
+                            mask, tempSrc, litSrc, none0);
+                        dotInsn.precision = FLOAT32;
+                        asm_.emit(dotInsn, NVFX_FP_OP_OPCODE_DP2);
+
+                        float block[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                        block[swzStart]     = lit[0];
+                        block[swzStart + 1] = lit[1];
+                        asm_.appendConstBlock(block);
+                    };
+                    // Hardcoded per-output-lane swizzle starts for THIS
+                    // 3-dot composition.
+                    emitDot(0, base.literals[0], 0);  // dirA → .xyxx, lanes 0,1
+                    emitDot(1, base.literals[1], 2);  // dirB → .zwzz, lanes 2,3
+                    emitDot(2, base.literals[2], 1);  // dirC → .yzzw, lanes 1,2
+
+                    // --- Insn 6: MOV R0.x, c[0].xxxx + zeros (uniform) ---
+                    struct nvfx_insn movUni = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_X, cXSrc, none0, none0);
+                    movUni.precision = FLOAT32;
+                    asm_.emit(movUni, NVFX_FP_OP_OPCODE_MOV);
+                    const uint32_t uniOffset = asm_.currentByteSize();
+                    for (auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == uniIt->second)
+                        {
+                            eu.ucodeByteOffsets.push_back(uniOffset);
+                            break;
+                        }
+                    }
+                    static const float zerosBlock[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zerosBlock);
+
+                    // --- Insn 7: MUL R1.xyz, R1.xyzw, c[0].xyzw + freq ---
+                    struct nvfx_src r1IdSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR1));
+                    // Identity swizzle (default).
+                    struct nvfx_src freqSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    // Identity (default) reads c[0].xyzw.
+                    struct nvfx_insn mulFreq = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR1),
+                        NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                        r1IdSrc, freqSrc, none0);
+                    mulFreq.precision = FLOAT32;
+                    asm_.emit(mulFreq, NVFX_FP_OP_OPCODE_MUL);
+                    const float freqBlock[4] = {
+                        sb.scaledDots.scale[0],
+                        sb.scaledDots.scale[1],
+                        sb.scaledDots.scale[2], 0.0f };
+                    asm_.appendConstBlock(freqBlock);
+
+                    // --- Insn 8: FENCBR ---
+                    asm_.emitFencbr();
+
+                    // --- Insn 9: MAD R0.xyz [END],
+                    //                       -R0.xxxx, c[0].xyzw + phase, R1 ---
+                    // Folds the Sub: -gTime * phase + (freq*Length)
+                    //              = freq*Length - phase*gTime.
+                    struct nvfx_src negR0X =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                    negR0X.swz[0] = negR0X.swz[1] =
+                    negR0X.swz[2] = negR0X.swz[3] = 0;
+                    negR0X.negate = 1;
+
+                    struct nvfx_src phaseSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    // Identity .xyzw (default).
+                    struct nvfx_src r1Src2 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR1));
+                    // Identity .xyzw on R1.
+
+                    struct nvfx_insn madFinal = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                        negR0X, phaseSrc, r1Src2);
+                    madFinal.precision = dstPrecision;
+                    asm_.emit(madFinal, NVFX_FP_OP_OPCODE_MAD);
+                    const float phaseBlock[4] = {
+                        sb.litTimesUni.literal[0],
+                        sb.litTimesUni.literal[1],
+                        sb.litTimesUni.literal[2], 0.0f };
+                    asm_.appendConstBlock(phaseBlock);
+
+                    // Track varying-input bits; clear texCoords2D
+                    // when any pack lane is Z or W.
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inputSrcCode);
+                    if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
+                        attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        for (int k = 0; k < packWidth; ++k)
+                        {
+                            if (base.pack.lanes[k] >= 2)
                             {
                                 attrs.texCoords2D &= ~(uint16_t{1} << n);
                                 break;
