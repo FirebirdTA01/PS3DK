@@ -53,6 +53,14 @@ void FpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
     if (insn.cc_update)
         hw[0] |= NVFX_FP_OP_COND_WRITE_ENABLE;
 
+    // DST_SCALE lives in hw[2] bits 28-30 (high 3 bits of SRC1).
+    // Used by the reference compiler for `2 * dot(...)` folding —
+    // DP3 with scale=2X produces twice the dot product in one
+    // instruction, saving the explicit multiply in `reflect()`.
+    if (insn.scale != 0)
+        hw[2] |= (static_cast<uint32_t>(insn.scale & 0x7)
+                  << NVFX_FP_OP_DST_SCALE_SHIFT);
+
     hw[1] |= (static_cast<uint32_t>(insn.cc_cond) << NVFX_FP_OP_COND_SHIFT);
     hw[1] |= ((static_cast<uint32_t>(insn.cc_swz[0]) << NVFX_FP_OP_COND_SWZ_X_SHIFT) |
               (static_cast<uint32_t>(insn.cc_swz[1]) << NVFX_FP_OP_COND_SWZ_Y_SHIFT) |

@@ -1,0 +1,14 @@
+// hello-ppu-cellgcm-global-uniforms — fragment program.
+//
+// File-scope `sampler2D tex;` (no `uniform` keyword) — the
+// rsx-cg-compiler binds it via the embedded-sampler-slot
+// mechanism just like an entry-param uniform.  Value-return-with-
+// semantic shape (`float4 main(...) : COLOR`) replaces the `out
+// float4 out_color : COLOR` pattern.
+
+sampler2D tex;
+
+float4 main(float2 in_texcoord : TEXCOORD0) : COLOR
+{
+    return tex2D(tex, in_texcoord);
+}

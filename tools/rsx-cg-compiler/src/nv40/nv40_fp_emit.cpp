@@ -240,6 +240,20 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpMadBinding> valueToMad;
 
+    // `Mul(varying, tex2D_result)` — the THEN-branch shape inside a
+    // uniform-conditional if-only:
+    //   if (uniform != 0.0) c = c * tex2D(s, uv);
+    // The reference compiler doesn't compute the product unconditionally
+    // — it folds it into the conditional MUL itself (cc_cond=NE.<lane>).
+    // We record the operand pair so the consuming Select dispatch can
+    // emit the 5-instruction CC-blend pattern.
+    struct FpVaryingTexMulBinding
+    {
+        IRValueID varyingId = 0;   // resolves via valueToInputSrc
+        IRValueID texId     = 0;   // resolves via valueToTex
+    };
+    std::unordered_map<IRValueID, FpVaryingTexMulBinding> valueToVaryingTexMul;
+
     // Saturate is a modifier on the producing instruction — bit 31 of
     // hw[0].  Rather than plumbing it through every binding type, we
     // alias the saturate-result IR value to its source and track the
@@ -314,11 +328,17 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         //             the cmp then sources from that temp with a
         //             smeared lane swizzle.  See the Select tex-LHS
         //             schedule in the StoreOutput emit.
-        enum class LhsKind { Varying, TexResult };
-        LhsKind   lhsKind     = LhsKind::Varying;
-        IRValueID lhsBase     = 0;
-        int       lhsLane     = 0;
-        IRValueID lhsTexId    = 0;  // (TexResult only) the TexSample IR value
+        //   UniformScalar: `if (uniformFloat != 0.0)` shape.  LHS is
+        //              a direct LoadUniform of a scalar uniform.  The
+        //              cmp emits as a MOV-with-cond_write_enable on a
+        //              CC lane, with the uniform sourced via a 16-byte
+        //              inline const block (zeros, runtime-patched).
+        enum class LhsKind { Varying, TexResult, UniformScalar };
+        LhsKind   lhsKind        = LhsKind::Varying;
+        IRValueID lhsBase        = 0;
+        int       lhsLane        = 0;
+        IRValueID lhsTexId       = 0;  // (TexResult only) the TexSample IR value
+        IRValueID lhsUniformId   = 0;  // (UniformScalar only) the LoadUniform SSA
         // RHS shape:
         //   Literal: inline {rhsLiteral, 0, 0, 0} as a const block
         //   Uniform: append zero block, record ucode offset for rhsUniformId
@@ -371,7 +391,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // both into this binding.
     struct FpScalarUnaryBinding
     {
-        enum class Kind { Rcp, Rsq };
+        enum class Kind { Rcp, Rsq, Cos, Sin };
         Kind      kind     = Kind::Rcp;
         IRValueID inputId  = 0;
         int       lane     = 0;  // 0..3 — which lane of the input to read
@@ -402,8 +422,37 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         int       lanes    = 3;
         bool      wrapW1   = false;  // true iff StoreOutput sees
                                      // `float4(normalize(v), 1.0)`
+        // Optional arith subexpression: when set, the input isn't a
+        // direct varying — it's `varying ± uniform` (or similar).
+        // Emit-side computes the arith into R0 first, then runs the
+        // DP3 + DIVSQR sequence directly on R0.  Required for shapes
+        // like `normalize(worldPos - gEye)`.
+        bool         hasArith     = false;
+        FpArithOp    arithOp      = FpArithOp::Add;
+        IRValueID    arithInputId = 0;   // varying operand
+        IRValueID    arithUniformId = 0; // uniform operand
+        bool         arithUniformNeg = false;
     };
     std::unordered_map<IRValueID, FpNormalizeBinding> valueToNormalize;
+
+    // `reflect(I, N)` — Cg standard library: I - 2 * dot(N, I) * N.
+    // The reference compiler folds the `2 *` into a DP3 with
+    // DST_SCALE_2X, then emits a single MAD with R0.wwww carrying
+    // the scaled dot.  Five-instruction shape:
+    //   MOVR R0.xyz, f[N]
+    //   MOVR R1.xyz, f[I]
+    //   DP3R(2X) R0.w, R0.xyz, R1.xyz
+    //   FENCBR
+    //   MADR R0.xyz, -R0.xyzw, R0.wwww, R1
+    // Captured operands resolve through SrcMod chains so identity-
+    // prefix shuffles (`v.xyz`) on either operand are handled.
+    struct FpReflectBinding
+    {
+        IRValueID iId = 0;   // resolves via valueToInputSrc
+        IRValueID nId = 0;   // resolves via valueToInputSrc
+        bool      wrapW1 = false;  // set when VecConstruct(reflect, 1.0)
+    };
+    std::unordered_map<IRValueID, FpReflectBinding> valueToReflect;
 
     // Multi-instruction if-else predication chain — see header
     // comments + nv40_if_convert.h Shape 3 for the IR shape, and
@@ -422,7 +471,32 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // subsequent links resolve "prior link's result" → TEMP[idx].
     std::unordered_map<IRValueID, int> predCarryDstReg;
 
+    // VecInsert: `c.a = scalar;` overrides one lane of a previously
+    // computed vec value.  The reference compiler emits the underlying
+    // producer with a full writemask, then a tail MOV writing only the
+    // overridden lane to the same dst (typically R0) with the scalar
+    // source.  Pattern probed against RenderSkyBoxFragment.cg
+    // (texCUBE → c.a = 1.0f → return c).
+    struct VecInsertBinding
+    {
+        IRValueID vectorId = 0;
+        IRValueID scalarId = 0;
+        int       lane     = 0;  // 0..3 — destination lane
+    };
+    std::unordered_map<IRValueID, VecInsertBinding> valueToVecInsert;
+
     int nextTexUnit = 0;
+
+    // Slot index for embedded-uniform globals.  Top-level uniforms
+    // (Cg implicitly treats file-scope `float gFoo;` etc. as uniform)
+    // get slots numbered after every entry parameter so the existing
+    // `entryParamIndex`-based map stays unique across both spaces.
+    // The container emit reverses the same numbering when it walks
+    // module.globals.
+    const unsigned firstGlobalSlot =
+        static_cast<unsigned>(entry.parameters.size());
+    std::unordered_map<std::string, unsigned> globalNameToFpUniformSlot;
+    std::unordered_map<std::string, int>      globalNameToTexUnit;
 
     for (size_t pi = 0; pi < entry.parameters.size(); ++pi)
     {
@@ -452,6 +526,27 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         const int srcCode = fragmentInputSrc(semUpper, param.semanticIndex);
         if (srcCode >= 0)
             valueToInputSrc[param.valueId] = srcCode;
+    }
+
+    // Pre-populate valueToLiteralVec4 from any IRConstant of vec4 /
+    // vec3 / vec2 type in the function's value map.  The IR builder's
+    // const-fold pass (ir_builder.cpp `tryFoldVecConstruct`) emits
+    // folded constants directly as IRConstants — bypassing the
+    // VecConstruct case that historically populated this map.  We
+    // mirror the entries here so all the existing literal-vec4 emit
+    // paths (Select branches, MAD addends, FENCBR-MOV-c[0], etc.)
+    // keep firing for folded constants.
+    for (const auto& kv : entry.values)
+    {
+        if (!kv.second) continue;
+        auto* c = dynamic_cast<IRConstant*>(kv.second.get());
+        if (!c) continue;
+        if (!std::holds_alternative<std::vector<float>>(c->value)) continue;
+        const auto& comps = std::get<std::vector<float>>(c->value);
+        if (comps.empty() || comps.size() > 4) continue;
+        LiteralVec4 lv;
+        for (size_t i = 0; i < comps.size(); ++i) lv.vals[i] = comps[i];
+        valueToLiteralVec4[kv.first] = lv;
     }
 
     // Determine which entry parameters are actually consumed by the
@@ -513,6 +608,63 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     return out;
                 }
                 valueToInputSrc[inst.result] = srcCode;
+                break;
+            }
+
+            case IROp::LoadUniform:
+            {
+                // File-scope uniform globals (`float gFoo;` etc., now
+                // promoted to Uniform storage by the IR builder) need
+                // the same hookup as entry-param uniforms: samplers go
+                // to a tex unit, scalars/vectors go to embedded-const
+                // slots.  Slot indices are deduped per global so a
+                // repeated LoadUniform of the same name shares the slot.
+                const IRGlobal* g = nullptr;
+                for (const auto& gg : module.globals)
+                {
+                    if (gg.name == inst.targetName) { g = &gg; break; }
+                }
+                if (!g)
+                {
+                    out.diagnostics.push_back(
+                        "nv40-fp: LoadUniform for unknown global '" + inst.targetName + "'");
+                    return out;
+                }
+                const bool isSampler =
+                    (g->type.baseType == IRType::Sampler2D ||
+                     g->type.baseType == IRType::SamplerCube);
+                if (isSampler)
+                {
+                    auto it = globalNameToTexUnit.find(g->name);
+                    int tu;
+                    if (it == globalNameToTexUnit.end())
+                    {
+                        tu = nextTexUnit++;
+                        globalNameToTexUnit[g->name] = tu;
+                    }
+                    else
+                    {
+                        tu = it->second;
+                    }
+                    valueToTexUnit[inst.result] = tu;
+                }
+                else
+                {
+                    auto it = globalNameToFpUniformSlot.find(g->name);
+                    unsigned slot;
+                    if (it == globalNameToFpUniformSlot.end())
+                    {
+                        slot = firstGlobalSlot +
+                               static_cast<unsigned>(globalNameToFpUniformSlot.size());
+                        globalNameToFpUniformSlot[g->name] = slot;
+                        attrs.embeddedUniforms.push_back({ slot, {} });
+                    }
+                    else
+                    {
+                        slot = it->second;
+                    }
+                    valueToFpUniform[inst.result] = slot;
+                }
                 break;
             }
 
@@ -604,6 +756,17 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 break;
             }
 
+            case IROp::VecInsert:
+            {
+                if (inst.operands.size() < 2) break;
+                VecInsertBinding vib;
+                vib.vectorId = inst.operands[0];
+                vib.scalarId = inst.operands[1];
+                vib.lane     = inst.componentIndex;
+                valueToVecInsert[inst.result] = vib;
+                break;
+            }
+
             case IROp::CmpGt:
             case IROp::CmpGe:
             case IROp::CmpLt:
@@ -617,25 +780,41 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // (`vcol.x > k`) or a tex2D / texCUBE / tex2Dproj
                 // result (`tex.a > k`).  Either way, the cmp records
                 // an LhsKind so the StoreOutput emit can dispatch the
-                // right schedule.
-                auto seIt = valueToScalarExtract.find(inst.operands[0]);
-                if (seIt == valueToScalarExtract.end()) break;
-
+                // right schedule.  A direct LoadUniform of a scalar
+                // uniform (`if (gFunctionSwitch != 0.0)`) skips the
+                // ScalarExtract step — the lane defaults to .x via the
+                // c[0].xxxx swizzle in the emit.
                 CmpBinding cb;
-                if (auto inIt = valueToInputSrc.find(seIt->second.baseId);
-                    inIt != valueToInputSrc.end())
+                if (auto seIt = valueToScalarExtract.find(inst.operands[0]);
+                    seIt != valueToScalarExtract.end())
                 {
-                    cb.lhsKind = CmpBinding::LhsKind::Varying;
+                    if (auto inIt = valueToInputSrc.find(seIt->second.baseId);
+                        inIt != valueToInputSrc.end())
+                    {
+                        cb.lhsKind = CmpBinding::LhsKind::Varying;
+                    }
+                    else if (auto txIt = valueToTex.find(seIt->second.baseId);
+                             txIt != valueToTex.end())
+                    {
+                        cb.lhsKind  = CmpBinding::LhsKind::TexResult;
+                        cb.lhsTexId = seIt->second.baseId;
+                    }
+                    else
+                    {
+                        break;  // unknown LHS shape — leave unlowered
+                    }
+                    cb.lhsBase = seIt->second.baseId;
+                    cb.lhsLane = seIt->second.lane;
                 }
-                else if (auto txIt = valueToTex.find(seIt->second.baseId);
-                         txIt != valueToTex.end())
+                else if (auto uIt = valueToFpUniform.find(inst.operands[0]);
+                         uIt != valueToFpUniform.end())
                 {
-                    cb.lhsKind  = CmpBinding::LhsKind::TexResult;
-                    cb.lhsTexId = seIt->second.baseId;
+                    cb.lhsKind      = CmpBinding::LhsKind::UniformScalar;
+                    cb.lhsUniformId = inst.operands[0];
                 }
                 else
                 {
-                    break;  // unknown LHS shape — leave unlowered
+                    break;  // unknown LHS shape
                 }
 
                 // RHS: either a float constant or an FP uniform.
@@ -649,8 +828,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 case IROp::CmpNe: cb.opcode = NVFX_FP_OP_OPCODE_SNE; break;
                 default: break;
                 }
-                cb.lhsBase = seIt->second.baseId;
-                cb.lhsLane = seIt->second.lane;
 
                 IRValue* rhsValue = entry.getValue(inst.operands[1]);
                 if (auto* rhsConst = dynamic_cast<IRConstant*>(rhsValue);
@@ -1041,6 +1218,34 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             break;
                     }
 
+                    // Mul(varying, tex_sample_result) — the
+                    // uniform-conditional THEN shape.  Record the pair
+                    // and let the Select dispatch consume it; nothing
+                    // else can lower this binding today.
+                    if (inst.op == IROp::Mul)
+                    {
+                        auto aIsVar = (aInput != valueToInputSrc.end());
+                        auto bIsVar = (bInput != valueToInputSrc.end());
+                        auto aIsTex = (valueToTex.count(ma.baseId) > 0);
+                        auto bIsTex = (valueToTex.count(mb.baseId) > 0);
+                        if (aIsVar && bIsTex)
+                        {
+                            FpVaryingTexMulBinding tb;
+                            tb.varyingId = ma.baseId;
+                            tb.texId     = mb.baseId;
+                            valueToVaryingTexMul[inst.result] = tb;
+                            break;
+                        }
+                        if (bIsVar && aIsTex)
+                        {
+                            FpVaryingTexMulBinding tb;
+                            tb.varyingId = mb.baseId;
+                            tb.texId     = ma.baseId;
+                            valueToVaryingTexMul[inst.result] = tb;
+                            break;
+                        }
+                    }
+
                     out.diagnostics.push_back(
                         "nv40-fp: arithmetic ops supported only for (varying, uniform) pairs "
                         "(uniform+uniform / literal arithmetic lands later)");
@@ -1069,6 +1274,29 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                 FpScalarUnaryBinding bind;
                 bind.kind    = FpScalarUnaryBinding::Kind::Rsq;
+                bind.inputId = seIt->second.baseId;
+                bind.lane    = seIt->second.lane;
+                valueToScalarUnary[inst.result] = bind;
+                break;
+            }
+
+            case IROp::Cos:
+            case IROp::Sin:
+            {
+                // `cos(scalar_lane_of_varying)` / `sin(...)`.  Same
+                // extract-then-scalar-op shape as RSQ/RCP, but the
+                // NV40 FP COS / SIN opcodes (0x22 / 0x23) read the
+                // varying directly without an MOVH preload.  Emit
+                // path picks single-insn vs preload-then-op based on
+                // Kind.
+                if (inst.operands.size() != 1) break;
+                auto seIt = valueToScalarExtract.find(inst.operands[0]);
+                if (seIt == valueToScalarExtract.end()) break;
+
+                FpScalarUnaryBinding bind;
+                bind.kind    = (inst.op == IROp::Cos)
+                    ? FpScalarUnaryBinding::Kind::Cos
+                    : FpScalarUnaryBinding::Kind::Sin;
                 bind.inputId = seIt->second.baseId;
                 bind.lane    = seIt->second.lane;
                 valueToScalarUnary[inst.result] = bind;
@@ -1123,13 +1351,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
             case IROp::Normalize:
             {
-                // `normalize(vec3)` — same input-resolution path as
-                // Length.  The `wrapW1` flag gets set later when
-                // VecConstruct sees this feeding into `float4(nrm, 1)`.
+                // `normalize(vec3)` — input may be a direct varying
+                // (existing path) OR an arith binding such as
+                // `varying ± uniform` (new path).  The `wrapW1` flag
+                // gets set later when VecConstruct sees this feeding
+                // into `float4(nrm, 1)`.
                 if (inst.operands.size() != 1) break;
                 const SrcMod m = resolveSrcMods(inst.operands[0]);
-                if (valueToInputSrc.find(m.baseId) == valueToInputSrc.end())
-                    break;
 
                 int lanes = 3;
                 auto tyIt = valueToType.find(inst.operands[0]);
@@ -1137,9 +1365,49 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     lanes = tyIt->second.vectorSize;
 
                 FpNormalizeBinding bind;
-                bind.inputId = m.baseId;
-                bind.lanes   = lanes;
-                valueToNormalize[inst.result] = bind;
+                bind.lanes = lanes;
+
+                if (valueToInputSrc.find(m.baseId) != valueToInputSrc.end())
+                {
+                    bind.inputId = m.baseId;
+                    valueToNormalize[inst.result] = bind;
+                    break;
+                }
+
+                // Try to resolve the operand as an arith binding —
+                // covers `normalize(varying - uniform)` etc.
+                auto arithIt = valueToArith.find(m.baseId);
+                if (arithIt != valueToArith.end() &&
+                    (arithIt->second.op == FpArithOp::Add))
+                {
+                    const auto& a = arithIt->second;
+                    bind.hasArith        = true;
+                    bind.arithOp         = a.op;
+                    bind.arithInputId    = a.inputId;
+                    bind.arithUniformId  = a.uniformId;
+                    bind.arithUniformNeg = a.uniformNeg;
+                    valueToNormalize[inst.result] = bind;
+                    break;
+                }
+                break;
+            }
+
+            case IROp::Reflect:
+            {
+                // `reflect(I, N)` — both operands must resolve to
+                // varying inputs (possibly through identity-prefix
+                // VecShuffle aliases).  See FpReflectBinding's docs
+                // for the lowering shape.
+                if (inst.operands.size() != 2) break;
+                const SrcMod mI = resolveSrcMods(inst.operands[0]);
+                const SrcMod mN = resolveSrcMods(inst.operands[1]);
+                if (!valueToInputSrc.count(mI.baseId) ||
+                    !valueToInputSrc.count(mN.baseId))
+                    break;
+                FpReflectBinding bind;
+                bind.iId = mI.baseId;
+                bind.nId = mN.baseId;
+                valueToReflect[inst.result] = bind;
                 break;
             }
 
@@ -1163,6 +1431,29 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             FpNormalizeBinding bind = nIt->second;
                             bind.wrapW1 = true;
                             valueToNormalize[inst.result] = bind;
+                            break;
+                        }
+                    }
+                }
+
+                // Shape A2: `float4(reflect(I, N), 1.0f)` — same idea
+                // as Shape A but for Reflect.  Aliases the
+                // VecConstruct's result to the same reflect binding
+                // with wrapW1=true; StoreOutput appends a tail MOV
+                // R0.w = 1.0 + inline {1, 0, 0, 0} after the MAD.
+                if (inst.operands.size() == 2)
+                {
+                    auto rIt = valueToReflect.find(inst.operands[0]);
+                    if (rIt != valueToReflect.end())
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[1]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpReflectBinding bind = rIt->second;
+                            bind.wrapW1 = true;
+                            valueToReflect[inst.result] = bind;
                             break;
                         }
                     }
@@ -1269,6 +1560,29 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     srcId = sIt->second;
                 }
 
+                // Peel VecInsert chains: each link overrides one lane
+                // of the underlying vector with a scalar value.  We
+                // walk inward (outer-most VecInsert is the LAST to
+                // apply) and emit overrides in source order — the
+                // reference compiler's pattern is "underlying producer
+                // writes the full vec, then a per-lane MOV writes the
+                // overridden lane(s) to the same destination".
+                struct LaneOverride
+                {
+                    int       lane     = 0;
+                    IRValueID scalarId = 0;
+                };
+                std::vector<LaneOverride> laneOverrides;
+                while (true)
+                {
+                    auto viIt = valueToVecInsert.find(srcId);
+                    if (viIt == valueToVecInsert.end()) break;
+                    laneOverrides.push_back(
+                        { viIt->second.lane, viIt->second.scalarId });
+                    srcId = viIt->second.vectorId;
+                }
+                std::reverse(laneOverrides.begin(), laneOverrides.end());
+
                 // Determine if the target output is half-typed — that
                 // promotes to MOVH / writes H0 instead of R0 (bit 7
                 // OUT_REG_HALF + bit 22 PRECISION=FP16).  We only
@@ -1296,6 +1610,53 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 if (halfOutput && outIndex == 0)
                     attrs.outputFromH0 = 1;
 
+                auto emitLaneOverrides = [&]()
+                {
+                    // For each override, emit a MOV writing only the
+                    // overridden lane to dstReg, with a 16-byte inline
+                    // const block holding {scalar, 0, 0, 0}.  SRC0 is
+                    // c[0].xxxx (smeared) so the literal lane 0 reaches
+                    // the destination's overridden lane.
+                    for (const auto& lo : laneOverrides)
+                    {
+                        IRValue* scV = entry.getValue(lo.scalarId);
+                        const auto* sc = dynamic_cast<const IRConstant*>(scV);
+                        if (!sc || !std::holds_alternative<float>(sc->value))
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: VecInsert scalar must be a float "
+                                "literal (other shapes land later)");
+                            return false;
+                        }
+                        const float lit = std::get<float>(sc->value);
+
+                        const struct nvfx_reg constReg =
+                            nvfx_reg(NVFXSR_CONST, 0);
+                        struct nvfx_src cs0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        // Smear lane 0 across all source lanes — only
+                        // the destination's masked lane consumes it.
+                        cs0.swz[0] = cs0.swz[1] = cs0.swz[2] = cs0.swz[3] = 0;
+                        struct nvfx_src cs1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src cs2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                        const uint8_t laneMask =
+                            static_cast<uint8_t>(1u << lo.lane);
+                        struct nvfx_insn mov = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            laneMask, cs0, cs1, cs2);
+                        mov.precision = dstPrecision;
+                        asm_.emit(mov, NVFX_FP_OP_OPCODE_MOV);
+
+                        const float litBlock[4] = { lit, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(litBlock);
+                    }
+                    return true;
+                };
+
                 // tex2D result consumed by StoreOutput: emit TEX writing
                 // straight to the output register (sce-cgc's pattern —
                 // no temp, no follow-up MOV).
@@ -1309,7 +1670,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             "nv40-fp: TexSample sampler did not resolve to a uniform sampler");
                         return out;
                     }
-                    auto uvIt = valueToInputSrc.find(texIt->second.uvId);
+                    // Resolve UV through identity-prefix VecShuffle
+                    // aliases: `texCUBE(s, worldPos.xyz)` records the
+                    // shuffle in valueToMod with baseId pointing at the
+                    // underlying varying (worldPos), and the TEX reads
+                    // the full input regardless of the swizzle.
+                    IRValueID uvBase = resolveSrcMods(texIt->second.uvId).baseId;
+                    auto uvIt = valueToInputSrc.find(uvBase);
                     if (uvIt == valueToInputSrc.end())
                     {
                         out.diagnostics.push_back(
@@ -1330,12 +1697,22 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             ? NVFX_FP_OP_OPCODE_TXP
                             : NVFX_FP_OP_OPCODE_TEX;
 
+                    // Narrow the TEX's writemask to only the lanes
+                    // NOT overridden by trailing VecInsert MOVs — the
+                    // reference compiler folds the lane override into
+                    // the producer's writemask so the TEX doesn't waste
+                    // a write to a lane that's about to be clobbered.
+                    uint8_t producerMask = NVFX_FP_MASK_ALL;
+                    for (const auto& lo : laneOverrides)
+                        producerMask &= static_cast<uint8_t>(
+                            ~(1u << lo.lane));
+
                     struct nvfx_insn in = nvfx_insn(
                         saturate ? 1 : 0, 0,
                         sampIt->second,  // tex_unit — packed into hw[0] bits 17-20
                         -1,
                         const_cast<struct nvfx_reg&>(dstReg),
-                        NVFX_FP_MASK_ALL,
+                        producerMask,
                         src0, src1, src2);
                     in.precision = dstPrecision;
                     // samplerCUBE: the HW needs to know the input is a
@@ -1363,6 +1740,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (texIt->second.projective || texIt->second.cube)
                             attrs.texCoords2D &= ~(uint16_t{1} << n);
                     }
+                    if (!emitLaneOverrides()) return out;
                     break;
                 }
 
@@ -1976,6 +2354,349 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         break;
                     }
 
+                    // UniformScalar-LHS Select: `if (uniformFloat != 0.0)`.
+                    // Older SDK Water sample's SimpleFragment.cg uses
+                    // this shape with a uniform `float gFunctionSwitch;`
+                    // gating an arithmetic update of a vec4 local.  The
+                    // reference compiler doesn't emit IF/ELSE/ENDIF —
+                    // it lowers to a CC-based blend:
+                    //
+                    //   TEX  R1, f[TC<m>], TEX<m>     ; sample
+                    //   MOVH H4, f[<varying>]          ; preload default
+                    //   MOV?C(<lane>) RC, c[uni].x     ; cmp + 16B zeros
+                    //   MOVR R0, H4                    ; unconditional default
+                    //   MULR(NE.<lane>) R0, H4, R1 END ; conditional THEN
+                    //
+                    // Constraints today:
+                    //   - cmp opcode is SNE (`!= 0`); cmpne resolves
+                    //     to NE cc_cond on the conditional MUL.
+                    //   - trueBr is `Mul(varying, tex_sample)` — recorded
+                    //     via valueToVaryingTexMul.
+                    //   - falseBr is the same varying as the Mul's
+                    //     varying operand (so the default move + cond
+                    //     mul both source from H4).
+                    //   - rhs of cmpne must be float literal 0.0.
+                    if (cb.lhsKind == CmpBinding::LhsKind::UniformScalar)
+                    {
+                        if (cb.opcode != NVFX_FP_OP_OPCODE_SNE)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select uniform-LHS: only `!= 0.0` "
+                                "(cmpne) wired today");
+                            return out;
+                        }
+                        if (cb.rhsKind != CmpBinding::RhsKind::Literal ||
+                            cb.rhsLiteral != 0.0f)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select uniform-LHS: RHS must be "
+                                "the literal 0.0");
+                            return out;
+                        }
+
+                        auto vmIt = valueToVaryingTexMul.find(sb.trueId);
+                        if (vmIt == valueToVaryingTexMul.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select uniform-LHS: TRUE branch "
+                                "must be Mul(varying, tex_sample)");
+                            return out;
+                        }
+                        if (sb.falseId != vmIt->second.varyingId)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select uniform-LHS: FALSE branch "
+                                "must equal the Mul's varying operand");
+                            return out;
+                        }
+
+                        auto vIn = valueToInputSrc.find(vmIt->second.varyingId);
+                        auto txIt = valueToTex.find(vmIt->second.texId);
+                        if (vIn == valueToInputSrc.end() ||
+                            txIt == valueToTex.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select uniform-LHS: tex / varying "
+                                "operand bindings did not resolve");
+                            return out;
+                        }
+                        auto sampIt = valueToTexUnit.find(txIt->second.samplerId);
+                        IRValueID uvBase = resolveSrcMods(txIt->second.uvId).baseId;
+                        auto uvIn = valueToInputSrc.find(uvBase);
+                        if (sampIt == valueToTexUnit.end() ||
+                            uvIn == valueToInputSrc.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select uniform-LHS: tex sampler / UV "
+                                "did not resolve");
+                            return out;
+                        }
+                        auto cmpUniIt = valueToFpUniform.find(cb.lhsUniformId);
+                        if (cmpUniIt == valueToFpUniform.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: Select uniform-LHS: cmp uniform slot "
+                                "did not resolve");
+                            return out;
+                        }
+
+                        // Narrow the conditional MUL's writemask to skip
+                        // any lanes that VecInsert overrides.  When
+                        // there's a lane override, we also pick the cmp
+                        // CC lane to match — the reference compiler
+                        // chooses the FIRST lane NOT in the conditional
+                        // op's writemask (so the CC bit lives on a
+                        // "free" lane that nothing else reads).  Falls
+                        // back to lane X when every lane is active.
+                        uint8_t condWriteMask = NVFX_FP_MASK_ALL;
+                        for (const auto& lo : laneOverrides)
+                            condWriteMask &= static_cast<uint8_t>(~(1u << lo.lane));
+                        int cmpLane = 0;
+                        for (int i = 0; i < 4; ++i)
+                            if (!(condWriteMask & (1u << i))) { cmpLane = i; break; }
+                        const uint8_t cmpMask = static_cast<uint8_t>(1u << cmpLane);
+
+                        const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                        const struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+                        const struct nvfx_reg r1Dst = nvfx_reg(NVFXSR_TEMP, 1);
+
+                        const uint8_t texOpcode = txIt->second.projective
+                            ? NVFX_FP_OP_OPCODE_TXP
+                            : NVFX_FP_OP_OPCODE_TEX;
+                        const struct nvfx_reg uvReg =
+                            nvfx_reg(NVFXSR_INPUT, uvIn->second);
+                        const struct nvfx_reg varReg =
+                            nvfx_reg(NVFXSR_INPUT, vIn->second);
+
+                        auto emitCmp = [&]()
+                        {
+                            // MOV?C(<cmpMask>, FX12) RC, c[0].xxxx + 16-byte
+                            // zero block runtime-patched with the uniform.
+                            struct nvfx_src s0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                            s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 0;
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(ccDst),
+                                cmpMask, s0, s1, s2);
+                            in.cc_update = 1;
+                            in.precision = FIXED12;
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+
+                            const uint32_t off = asm_.currentByteSize();
+                            for (auto& eu : attrs.embeddedUniforms)
+                                if (eu.entryParamIndex == cmpUniIt->second)
+                                { eu.ucodeByteOffsets.push_back(off); break; }
+                            static const float zerosBlock[4] = { 0, 0, 0, 0 };
+                            asm_.appendConstBlock(zerosBlock);
+                        };
+
+                        auto recordVaryingAttr = [&](int inputSrc, bool moreThan2Lanes)
+                        {
+                            attrs.attributeInputMask |=
+                                fpAttrMaskBitForInputSrc(inputSrc);
+                            if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            {
+                                const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                                attrs.texCoordsInputMask |= uint16_t{1} << n;
+                                // The reference compiler clears the
+                                // texCoords2D bit when a TEXCOORD<N>
+                                // varying is read with more than 2
+                                // lanes — same mechanism as projective
+                                // (TXP) / samplerCUBE consumption,
+                                // signalling that the input isn't a
+                                // pure 2D u/v.
+                                if (moreThan2Lanes)
+                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
+                            }
+                        };
+
+                        if (laneOverrides.empty())
+                        {
+                            // Bare uniform-cond shape (5 insts).  No
+                            // lane override means R0 is free for the
+                            // default + cond mul; fp16 H-register
+                            // backup keeps the varying around at
+                            // half precision.
+                            //
+                            // ── Inst 1: TEX R1, f[<uv>], TEX<unit> ──
+                            struct nvfx_src texS0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(uvReg));
+                            struct nvfx_src texS1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src texS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn texIn = nvfx_insn(
+                                0, 0, sampIt->second, -1,
+                                const_cast<struct nvfx_reg&>(r1Dst),
+                                NVFX_FP_MASK_ALL,
+                                texS0, texS1, texS2);
+                            if (txIt->second.cube) texIn.disable_pc = 1;
+                            asm_.emit(texIn, texOpcode);
+                            emittedSomething = true;
+                            recordVaryingAttr(uvIn->second, false);
+                            if (txIt->second.projective || txIt->second.cube)
+                                attrs.texCoords2D &= ~(uint16_t{1} <<
+                                    (uvIn->second - NVFX_FP_OP_INPUT_SRC_TC(0)));
+
+                            // ── Inst 2: MOVH H4, f[<varying>] ──
+                            struct nvfx_reg h4Dst = nvfx_reg(NVFXSR_TEMP, 4);
+                            h4Dst.is_fp16 = 1;
+                            struct nvfx_src mvhS0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(varReg));
+                            struct nvfx_src mvhS1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src mvhS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn mvh = nvfx_insn(
+                                0, 0, -1, -1,
+                                h4Dst, NVFX_FP_MASK_ALL,
+                                mvhS0, mvhS1, mvhS2);
+                            mvh.precision = FLOAT16;
+                            asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
+                            recordVaryingAttr(vIn->second, true);
+
+                            // ── Inst 3: cmp + 16B zero ──
+                            emitCmp();
+
+                            // ── Inst 4: MOVR R0, H4 ──
+                            struct nvfx_src defS0 = nvfx_src(h4Dst);
+                            struct nvfx_src defS1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src defS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn defMov = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_ALL, defS0, defS1, defS2);
+                            defMov.precision = dstPrecision;
+                            asm_.emit(defMov, NVFX_FP_OP_OPCODE_MOV);
+
+                            // ── Inst 5: MULR(NE.<lane>) R0, H4, R1 ──
+                            struct nvfx_src mulS0 = nvfx_src(h4Dst);
+                            struct nvfx_src mulS1 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r1Dst));
+                            struct nvfx_src mulS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn mulIn = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_ALL, mulS0, mulS1, mulS2);
+                            mulIn.precision = dstPrecision;
+                            mulIn.cc_test  = 1;
+                            mulIn.cc_cond  = NVFX_COND_NE;
+                            mulIn.cc_swz[0] = mulIn.cc_swz[1] =
+                            mulIn.cc_swz[2] = mulIn.cc_swz[3] =
+                                static_cast<uint8_t>(cmpLane);
+                            asm_.emit(mulIn, NVFX_FP_OP_OPCODE_MUL);
+                            break;
+                        }
+
+                        // Lane-override shape (6 insts) — `c.a = 1.0;`
+                        // after the if-block forces a different shape:
+                        // the conditional MUL must NOT touch the
+                        // override lane (W), so its writemask narrows
+                        // to ~lane.  The varying gets backed up in an
+                        // R-register (no fp16 promotion) so the cond
+                        // MUL can read it after R0's W lane has been
+                        // overwritten.  Cmp lane = the override lane
+                        // (W) so the CC bit lives on a free lane.
+                        //
+                        //   MOV?C(<cmpMask>) RC, c[0]      ; cmp first
+                        //   MOVR R2.<active>, f[<varying>] ; backup
+                        //   MOVR R0.<active>, R2.<active>  ; default
+                        //   MOVR R0.<override>, c[0]       ; lane override
+                        //   TEX  R1.<active>, f[<uv>]      ; sample
+                        //   MULR(NE.<lane>) R0, R2, R1 END ; cond mul
+                        const struct nvfx_reg r2Dst = nvfx_reg(NVFXSR_TEMP, 2);
+
+                        // ── Inst 1: cmp first ──
+                        emitCmp();
+                        emittedSomething = true;
+
+                        // ── Inst 2: MOVR R2.<active>, f[<varying>] ──
+                        {
+                            struct nvfx_src s0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(varReg));
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(r2Dst),
+                                condWriteMask, s0, s1, s2);
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                            recordVaryingAttr(vIn->second, true);
+                        }
+
+                        // ── Inst 3: MOVR R0.<active>, R2 ──
+                        {
+                            struct nvfx_src s0 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r2Dst));
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                condWriteMask, s0, s1, s2);
+                            in.precision = dstPrecision;
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        }
+
+                        // ── Inst 4: lane-override MOV(s) ──
+                        if (!emitLaneOverrides()) return out;
+
+                        // ── Inst 5: TEX R1.<active>, f[<uv>] ──
+                        {
+                            struct nvfx_src s0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(uvReg));
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, sampIt->second, -1,
+                                const_cast<struct nvfx_reg&>(r1Dst),
+                                condWriteMask, s0, s1, s2);
+                            if (txIt->second.cube) in.disable_pc = 1;
+                            asm_.emit(in, texOpcode);
+                            recordVaryingAttr(uvIn->second, false);
+                            if (txIt->second.projective || txIt->second.cube)
+                                attrs.texCoords2D &= ~(uint16_t{1} <<
+                                    (uvIn->second - NVFX_FP_OP_INPUT_SRC_TC(0)));
+                        }
+
+                        // ── Inst 6: MULR(NE.<lane>) R0.<active>, R2, R1 END ──
+                        {
+                            struct nvfx_src s0 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r2Dst));
+                            struct nvfx_src s1 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r1Dst));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                condWriteMask, s0, s1, s2);
+                            in.precision = dstPrecision;
+                            in.cc_test  = 1;
+                            in.cc_cond  = NVFX_COND_NE;
+                            in.cc_swz[0] = in.cc_swz[1] =
+                            in.cc_swz[2] = in.cc_swz[3] =
+                                static_cast<uint8_t>(cmpLane);
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
+                        }
+                        break;
+                    }
+
                     auto inIt = valueToInputSrc.find(cb.lhsBase);
                     if (inIt == valueToInputSrc.end())
                     {
@@ -2557,6 +3278,56 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
 
+                    // COS / SIN read the varying directly — single
+                    // instruction with src swizzle = (lane, lane,
+                    // lane, lane) so the scalar op picks the right
+                    // input component.  No MOVH preload.  Probed
+                    // against `color = cos(vcol.x);` (1-insn shape).
+                    if (bind.kind == FpScalarUnaryBinding::Kind::Cos ||
+                        bind.kind == FpScalarUnaryBinding::Kind::Sin)
+                    {
+                        const struct nvfx_reg inputReg =
+                            nvfx_reg(NVFXSR_INPUT, inIt->second);
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                        if (bind.lane != 0)
+                        {
+                            // Splay the single input lane across all
+                            // four src slots — only swz[0] matters
+                            // for the scalar function, but matching
+                            // the reference compiler's full splay
+                            // keeps the encoding byte-identical.
+                            s0.swz[0] = s0.swz[1] =
+                            s0.swz[2] = s0.swz[3] =
+                                static_cast<uint8_t>(bind.lane);
+                        }
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn in = nvfx_insn(
+                            saturate ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_ALL, s0, s1, s2);
+                        in.precision = dstPrecision;
+                        const uint8_t opcode =
+                            (bind.kind == FpScalarUnaryBinding::Kind::Cos)
+                                ? NVFX_FP_OP_OPCODE_COS
+                                : NVFX_FP_OP_OPCODE_SIN;
+                        asm_.emit(in, opcode);
+
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
+                        if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            attrs.texCoordsInputMask |=
+                                uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
+                        }
+
+                        emittedSomething = true;
+                        break;
+                    }
+
                     // MOVH H0.<lane>, f[input]
                     struct nvfx_reg hDst = nvfx_reg(NVFXSR_TEMP, 0);
                     hDst.is_fp16 = 1;
@@ -2701,6 +3472,137 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 if (nrmIt != valueToNormalize.end())
                 {
                     const auto& bind = nrmIt->second;
+
+                    // Arith-input shape (`normalize(varying ± uniform)`):
+                    //   ADDR R0.xyz, f[varying], ±c[uniform] + 16B zeros
+                    //   DP3R R0.w,   R0,           R0
+                    //   DIVRSQR R0.xyz, R0, R0.wwww [END]
+                    if (bind.hasArith)
+                    {
+                        auto inIt = valueToInputSrc.find(bind.arithInputId);
+                        if (inIt == valueToInputSrc.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: normalize(arith): varying op failed to resolve");
+                            return out;
+                        }
+                        auto uIt = valueToFpUniform.find(bind.arithUniformId);
+                        if (uIt == valueToFpUniform.end())
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: normalize(arith): uniform op failed to resolve");
+                            return out;
+                        }
+
+                        const struct nvfx_reg r0a = nvfx_reg(NVFXSR_TEMP, 0);
+                        const struct nvfx_reg inReg =
+                            nvfx_reg(NVFXSR_INPUT, inIt->second);
+                        const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                        const uint8_t arithMask =
+                            (bind.lanes >= 4) ? NVFX_FP_MASK_ALL :
+                            (bind.lanes == 3) ? uint8_t(NVFX_FP_MASK_X |
+                                                       NVFX_FP_MASK_Y |
+                                                       NVFX_FP_MASK_Z) :
+                            (bind.lanes == 2) ? uint8_t(NVFX_FP_MASK_X |
+                                                       NVFX_FP_MASK_Y) :
+                                                 NVFX_FP_MASK_X;
+
+                        // ── Inst 1: ADD R0, f[varying], ±c[uniform] ──
+                        {
+                            struct nvfx_src s0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(inReg));
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                            s1.negate = bind.arithUniformNeg ? 1 : 0;
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(r0a),
+                                arithMask, s0, s1, s2);
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_ADD);
+
+                            const uint32_t off = asm_.currentByteSize();
+                            for (auto& eu : attrs.embeddedUniforms)
+                                if (eu.entryParamIndex == uIt->second)
+                                { eu.ucodeByteOffsets.push_back(off); break; }
+                            static const float zerosBlock[4] = { 0, 0, 0, 0 };
+                            asm_.appendConstBlock(zerosBlock);
+
+                            attrs.attributeInputMask |=
+                                fpAttrMaskBitForInputSrc(inIt->second);
+                            if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            {
+                                const int n = inIt->second -
+                                    NVFX_FP_OP_INPUT_SRC_TC(0);
+                                attrs.texCoordsInputMask |= uint16_t{1} << n;
+                                if (bind.lanes > 2)
+                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
+                            }
+                        }
+
+                        // ── Inst 2: DP3 R0.w, R0, R0 ──
+                        {
+                            struct nvfx_src s0 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r0a));
+                            struct nvfx_src s1 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r0a));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            const uint8_t dpOp =
+                                (bind.lanes >= 4) ? NVFX_FP_OP_OPCODE_DP4
+                                                  : NVFX_FP_OP_OPCODE_DP3;
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(r0a),
+                                NVFX_FP_MASK_W, s0, s1, s2);
+                            asm_.emit(in, dpOp);
+                        }
+
+                        // wrapW1 — same MOV R0.w = c[0].x literal
+                        // pattern as the direct-varying path.
+                        if (bind.wrapW1)
+                        {
+                            struct nvfx_src wS0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                            wS0.swz[0] = wS0.swz[1] =
+                            wS0.swz[2] = wS0.swz[3] = 0;
+                            struct nvfx_src wS1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src wS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn wIn = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(r0a),
+                                NVFX_FP_MASK_W, wS0, wS1, wS2);
+                            asm_.emit(wIn, NVFX_FP_OP_OPCODE_MOV);
+                            const float oneXyzw[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+                            asm_.appendConstBlock(oneXyzw);
+                        }
+
+                        // ── Inst 3: DIVRSQR R0.<active>, R0, R0.wwww ──
+                        {
+                            struct nvfx_src s0 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r0a));
+                            struct nvfx_src s1 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r0a));
+                            s1.swz[0] = s1.swz[1] =
+                            s1.swz[2] = s1.swz[3] = 3;  // wwww
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                saturate ? 1 : 0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                arithMask, s0, s1, s2);
+                            in.precision = dstPrecision;
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
+                        }
+
+                        emittedSomething = true;
+                        break;
+                    }
+
                     auto inIt = valueToInputSrc.find(bind.inputId);
                     if (inIt == valueToInputSrc.end())
                     {
@@ -2789,6 +3691,163 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     ds.precision = dstPrecision;
                     asm_.emit(ds, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
 
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `reflect(I, N)` — verified byte-exact against the
+                // reference compiler on a 2-varying probe.  Five
+                // instructions plus an optional VecConstruct lane-
+                // override tail when wrapped in `float4(reflect(...),
+                // 1.0)`:
+                //   MOVR R0.xyz, f[N]
+                //   MOVR R1.xyz, f[I]
+                //   DP3R(2X) R0.w, R0, R1            ; scale=2X folds the *2
+                //   FENCBR
+                //   MADR R0.xyz, -R0, R0.wwww, R1   ; I - 2*dot(N,I)*N
+                // emitLaneOverrides() at the end of StoreOutput
+                // appends the W=1.0 MOV when the consuming
+                // VecInsert chain demands it.
+                auto refIt = valueToReflect.find(srcId);
+                if (refIt != valueToReflect.end())
+                {
+                    const auto& bind = refIt->second;
+                    auto nIn = valueToInputSrc.find(bind.nId);
+                    auto iIn = valueToInputSrc.find(bind.iId);
+                    if (nIn == valueToInputSrc.end() ||
+                        iIn == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: reflect() operand bindings did not resolve");
+                        return out;
+                    }
+
+                    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
+                    const struct nvfx_reg nReg =
+                        nvfx_reg(NVFXSR_INPUT, nIn->second);
+                    const struct nvfx_reg iReg =
+                        nvfx_reg(NVFXSR_INPUT, iIn->second);
+
+                    // ── Inst 1: MOVR R0.xyz, f[N] ──
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(nReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            s0, s1, s2);
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(nIn->second);
+                        if (nIn->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            nIn->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = nIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
+
+                    // ── Inst 2: MOVR R1.xyz, f[I] ──
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(iReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            s0, s1, s2);
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(iIn->second);
+                        if (iIn->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            iIn->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = iIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
+
+                    // ── Inst 3: DP3R(2X) R0.w, R0, R1 ──
+                    // DST_SCALE_2X folds the constant `2 *` from the
+                    // `2.0 * dot(N, I)` term in the reflect formula.
+                    {
+                        struct nvfx_src s0 = nvfx_src(
+                            const_cast<struct nvfx_reg&>(r0));
+                        struct nvfx_src s1 = nvfx_src(
+                            const_cast<struct nvfx_reg&>(r1));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        in.scale = NVFX_FP_OP_DST_SCALE_2X;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_DP3);
+                    }
+
+                    // ── Inst 4: FENCBR ──
+                    asm_.emitFencbr();
+
+                    // ── Inst 5: MADR R0.xyz, -R0, R0.wwww, R1 ──
+                    // Computes I - 2*dot(N,I)*N lane-by-lane.
+                    {
+                        struct nvfx_src s0 = nvfx_src(
+                            const_cast<struct nvfx_reg&>(r0));
+                        s0.negate = 1;
+                        struct nvfx_src s1 = nvfx_src(
+                            const_cast<struct nvfx_reg&>(r0));
+                        s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 3; // wwww
+                        struct nvfx_src s2 = nvfx_src(
+                            const_cast<struct nvfx_reg&>(r1));
+                        struct nvfx_insn in = nvfx_insn(
+                            saturate ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            s0, s1, s2);
+                        in.precision = dstPrecision;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
+                    }
+
+                    // VecConstruct(reflect, 1.0) tail: MOV R0.w =
+                    // c[0].x with inline {1.0, 0, 0, 0}.  Same shape
+                    // as the Normalize wrapW1 path.
+                    if (bind.wrapW1)
+                    {
+                        const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                        struct nvfx_src wS0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        wS0.swz[0] = wS0.swz[1] = wS0.swz[2] = wS0.swz[3] = 0;
+                        struct nvfx_src wS1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src wS2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn wIn = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_W, wS0, wS1, wS2);
+                        wIn.precision = dstPrecision;
+                        asm_.emit(wIn, NVFX_FP_OP_OPCODE_MOV);
+
+                        const float oneXyzw[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(oneXyzw);
+                    }
+
+                    if (!emitLaneOverrides()) return out;
                     emittedSomething = true;
                     break;
                 }

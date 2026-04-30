@@ -405,6 +405,7 @@ VpContainerResult emitVertexContainer(
         }
     }
     else
+    {
     for (size_t i = 0; i < entry->parameters.size(); ++i)
     {
         const auto& p = entry->parameters[i];
@@ -461,6 +462,104 @@ VpContainerResult emitVertexContainer(
                           : vpInputResource (semUpper, p.semanticIndex);
         }
         params.push_back(d);
+    }
+
+    // File-scope uniforms — Cg implicitly treats `float4x4 gFoo;` at
+    // file scope as a uniform.  The reference compiler appends these
+    // after the user-declared entry params, with paramno = 0xFFFFFFFF
+    // (synthetic) and isShared driven by whether the source pinned an
+    // explicit `: register(CN)` binding.  Matrix parents expand into
+    // N per-row child entries that share the parent's paramno.
+    for (const auto& g : module.globals)
+    {
+        if (g.storage != StorageQualifier::Uniform) continue;
+
+        const bool hasExplicit = (g.explicitRegisterBank == 'C');
+        std::string semantic;
+        if (hasExplicit)
+            semantic = "C" + std::to_string(g.explicitRegisterIndex);
+
+        ParamDesc d;
+        d.name      = g.name;
+        d.semantic  = semantic;
+        d.type      = cgTypeForIRType(g.type);
+        d.var       = kCgUniform;
+        d.direction = kCgIn;
+        d.res       = kCgConst;
+        d.paramno   = kInvalidIndex;
+        d.isReferenced = 1;
+        d.isShared     = hasExplicit ? 1u : 0u;
+
+        if (g.type.isMatrix())
+        {
+            int base;
+            if (hasExplicit)
+                base = g.explicitRegisterIndex;
+            else
+            {
+                base = nextMatrixReg;
+                nextMatrixReg += g.type.matrixRows;
+            }
+            d.resIndex = static_cast<uint32_t>(base);
+            params.push_back(d);
+            for (int row = 0; row < g.type.matrixRows; ++row)
+            {
+                ParamDesc r;
+                r.name      = g.name + "[" + std::to_string(row) + "]";
+                r.semantic  = semantic;
+                r.type      = kCgFloat4;
+                r.var       = kCgUniform;
+                r.direction = kCgIn;
+                r.res       = kCgConst;
+                r.paramno   = kInvalidIndex;
+                r.isReferenced = 1;
+                r.isShared     = hasExplicit ? 1u : 0u;
+                r.resIndex     = static_cast<uint32_t>(base + row);
+                params.push_back(r);
+            }
+        }
+        else
+        {
+            int reg;
+            if (hasExplicit)
+                reg = g.explicitRegisterIndex;
+            else
+                reg = nextVectorReg--;
+            d.resIndex = static_cast<uint32_t>(reg);
+            params.push_back(d);
+        }
+    }
+
+    // Synthetic struct-return outputs — `OUT.field = ...` member
+    // assignments emit StoreOutput with a fieldName.  The reference
+    // compiler names the synthetic param `<entry>.<field>` and uses
+    // paramno = 0xFFFFFFFF (no user-facing parameter index).
+    for (const auto& blockPtr : entry->blocks)
+    {
+        if (!blockPtr) continue;
+        for (const auto& instPtr : blockPtr->instructions)
+        {
+            if (!instPtr) continue;
+            const IRInstruction& in = *instPtr;
+            if (in.op != IROp::StoreOutput) continue;
+            if (in.fieldName.empty()) continue;
+            ParamDesc d;
+            d.name      = entry->name + "." + in.fieldName;
+            d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+            // The IR builder stashes the source-level field type on
+            // the StoreOutput's resultType so we can size the param
+            // entry to match the source (`float2 texCoord` -> float2).
+            uint32_t fieldType = cgTypeForIRType(in.resultType);
+            d.type      = (fieldType != 0) ? fieldType : kCgFloat4;
+            d.var       = kCgVarying;
+            d.direction = kCgOut;
+            d.paramno   = kInvalidIndex;
+            d.res       = vpOutputResource(toUpper(in.semanticName),
+                                           in.semanticIndex,
+                                           in.rawSemanticName);
+            params.push_back(d);
+        }
+    }
     }
 
     // ----- Append literal-pool params (one per c[N] reg the back-end

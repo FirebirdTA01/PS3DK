@@ -1,0 +1,28 @@
+// hello-ppu-cellgcm-global-uniforms — vertex program.
+//
+// Demonstrates the SDK's "implicit-uniform" path: file-scope variables
+// with no `uniform` keyword are treated as uniforms by Cg's
+// declaration rules.  Same MVP transform + UV passthrough as
+// hello-ppu-cellgcm-textured-cube, expressed through:
+//   1. A file-scope `float4x4 modelViewProj;`  (no `uniform` keyword)
+//   2. A `struct VOUT` value-return (instead of `out` parameters)
+// The CgBinaryProgram parameter name `modelViewProj` resolves the
+// same way at runtime — `cellGcmCgGetNamedParameter(vpo,
+// "modelViewProj")` works regardless of which Cg syntax declared it.
+
+float4x4 modelViewProj;
+
+struct VOUT
+{
+    float4 hpos     : POSITION;
+    float2 texcoord : TEXCOORD0;
+};
+
+VOUT main(float3 in_position : POSITION,
+          float2 in_texcoord : TEXCOORD0)
+{
+    VOUT o;
+    o.texcoord = in_texcoord;
+    o.hpos     = mul(modelViewProj, float4(in_position, 1.0f));
+    return o;
+}

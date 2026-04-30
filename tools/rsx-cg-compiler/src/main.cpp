@@ -364,8 +364,8 @@ int main(int argc, char** argv)
 
     if (!ucode.ok)
     {
-        std::cout << "NV40 emit: not ready (skeleton stage).\n";
-        return 0;
+        std::fprintf(stderr, "NV40 emit failed: bailing out.\n");
+        return 1;
     }
 
     if (!ctx.containerOutPath.empty())

@@ -263,6 +263,99 @@ ContainerResult emitFragmentContainer(
         params.push_back(d);
     }
 
+    // File-scope uniforms — Cg implicitly treats `float gFoo;` /
+    // `sampler2D gTex;` etc. at file scope as `uniform`.  The
+    // back-end allocates them at slot indices >= entry->parameters.size()
+    // (matching the FP emit's `firstGlobalSlot` numbering); container
+    // entries get paramno = 0xFFFFFFFF (synthetic) and the embedded-
+    // constant ucode-offset list comes from those higher slot ids.
+    {
+        const unsigned firstGlobalSlot =
+            static_cast<unsigned>(entry->parameters.size());
+        unsigned globalSlotCursor = firstGlobalSlot;
+        int      globalSamplerCursor = nextSamplerUnit;
+        for (const auto& g : module.globals)
+        {
+            if (g.storage != StorageQualifier::Uniform) continue;
+
+            ParamDesc d;
+            d.name      = g.name;
+            d.semantic  = std::string{};   // file-scope uniforms have no semantic string
+            d.type      = cgTypeForIRType(g.type);
+            d.paramno   = kInvalidIndex;
+            d.isReferenced = 1;
+
+            const bool isSampler =
+                (g.type.baseType == IRType::Sampler2D ||
+                 g.type.baseType == IRType::SamplerCube);
+
+            if (isSampler)
+            {
+                d.res       = kCgTexUnit0 + globalSamplerCursor++;
+                d.var       = kCgUniform;
+                d.direction = kCgIn;
+            }
+            else
+            {
+                d.res       = kCgUndefined;
+                d.var       = kCgUniform;
+                d.direction = kCgIn;
+
+                const unsigned slot = globalSlotCursor++;
+                for (const auto& eu : attrs.embeddedUniforms)
+                {
+                    if (eu.entryParamIndex == slot)
+                    {
+                        d.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                        break;
+                    }
+                }
+            }
+            params.push_back(d);
+        }
+    }
+
+    // Synthetic return-value output — the entry point's return type
+    // carries a semantic (`float4 main(...) : COLOR { return ... }`)
+    // and the IR builder emits a StoreOutput for the return value.
+    // The container needs a param entry for that synthetic output
+    // named `<entry>` (matching the reference compiler) with paramno =
+    // 0xFFFFFFFF.  Skip if the entry uses an `out` parameter shape
+    // (already covered above).
+    {
+        bool returnHasOutParam = false;
+        for (const auto& p : entry->parameters)
+            if (p.storage == StorageQualifier::Out ||
+                p.storage == StorageQualifier::InOut)
+            { returnHasOutParam = true; break; }
+
+        if (!returnHasOutParam)
+        {
+            for (const auto& blockPtr : entry->blocks)
+            {
+                if (!blockPtr) continue;
+                for (const auto& instPtr : blockPtr->instructions)
+                {
+                    if (!instPtr) continue;
+                    const IRInstruction& in = *instPtr;
+                    if (in.op != IROp::StoreOutput) continue;
+                    if (!in.fieldName.empty()) continue;  // struct-return path handled separately
+                    ParamDesc d;
+                    d.name      = entry->name;
+                    d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+                    d.type      = cgTypeForIRType(in.resultType);
+                    if (d.type == 0) d.type = kCgFloat4;
+                    d.var       = kCgVarying;
+                    d.direction = kCgOut;
+                    d.paramno   = kInvalidIndex;
+                    d.res       = fpResourceFor(toUpper(in.semanticName), in.semanticIndex);
+                    d.isReferenced = 1;
+                    params.push_back(d);
+                }
+            }
+        }
+    }
+
     // Append one synthetic $kill_NNNN parameter per #pragma alphakill
     // sampler (in source-order, which sce-cgc preserves and indexes
     // sequentially regardless of the original sampler's position).  These

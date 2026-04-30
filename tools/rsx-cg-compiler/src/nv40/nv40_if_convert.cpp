@@ -76,6 +76,31 @@ bool isHoistableOp(IROp op)
     }
 }
 
+// Broader pure-op predicate for whole-block hoisting (Shape 4): any op
+// that has no side effect and produces a deterministic result given
+// its operands.  Excludes control flow, stores, and discard — these
+// can't be hoisted out of a conditional arm without changing program
+// semantics.  Calls are conservatively excluded today; once the IR
+// inliner runs before this pass they should be flattened away.
+bool isPureOp(IROp op)
+{
+    switch (op)
+    {
+    case IROp::Branch:
+    case IROp::CondBranch:
+    case IROp::Return:
+    case IROp::Discard:
+    case IROp::Store:
+    case IROp::StoreOutput:
+    case IROp::StoreVarying:
+    case IROp::Call:
+    case IROp::Phi:
+        return false;
+    default:
+        return true;
+    }
+}
+
 // A block has up to N hoistable instructions, then a single
 // non-terminator StoreOutput, then an unconditional Branch to
 // `expectedJoin`.  When the shape matches, returns the StoreOutput
@@ -520,6 +545,79 @@ bool tryConvertBlock(IRFunction& fn,
         entry->successors.clear();
         eraseBlock(fn, thenBlock);
         eraseBlock(fn, falseTarget);
+        return true;
+    }
+
+    // Shape 4: if-only with no per-branch StoreOutput.  The IR builder
+    // synthesises a Select(cond, thenVal, preVal) at the merge block
+    // for any variable redefined inside THEN; the merge block then
+    // carries the StoreOutput / Return.  This shape covers the
+    // uniform-conditional pattern from older SDK Water samples:
+    //   if (gFunctionSwitch != 0.0) { c = c * tex2D(...); }
+    //   c.a = 1.0;  return c;
+    //
+    // Transformation:
+    //   - THEN must contain only pure ops (isPureOp) terminated by an
+    //     unconditional Branch to the merge block.
+    //   - falseTarget must equal that same merge block (i.e. ELSE is
+    //     "fall through to merge").
+    //   - Hoist all of THEN's instructions (except the trailing Branch)
+    //     into entry just before its CondBranch.
+    //   - Drop the CondBranch and the THEN block entirely; entry now
+    //     branches unconditionally to merge.
+    //   - Inline merge into entry (single-predecessor merge after the
+    //     drop), preserving its instructions verbatim.
+    if (thenBlock && falseTarget &&
+        thenBlock->successors.size() == 1 &&
+        thenBlock->successors[0] == falseTarget)
+    {
+        IRBasicBlock* merge = falseTarget;
+
+        // THEN must end with unconditional Branch to merge, and every
+        // preceding instruction must be pure.
+        if (thenBlock->instructions.empty()) return false;
+        IRInstruction* thenTerm = thenBlock->instructions.back().get();
+        if (!thenTerm || thenTerm->op != IROp::Branch) return false;
+        for (size_t i = 0; i + 1 < thenBlock->instructions.size(); ++i)
+        {
+            IRInstruction* p = thenBlock->instructions[i].get();
+            if (!p || !isPureOp(p->op)) return false;
+        }
+
+        // Merge must have exactly two predecessors (entry-via-falseTarget
+        // and thenBlock-via-Branch).  After the drop, merge's only
+        // predecessor is entry — safe to inline.
+        if (merge->predecessors.size() != 2) return false;
+
+        // Hoist THEN's pre-terminator instructions into entry, just
+        // before the CondBranch.  Steal ownership of each unique_ptr.
+        const size_t condBranchIdx = entry->instructions.size() - 1;
+        std::vector<std::unique_ptr<IRInstruction>> hoist;
+        hoist.reserve(thenBlock->instructions.size() - 1);
+        for (size_t i = 0; i + 1 < thenBlock->instructions.size(); ++i)
+            hoist.push_back(std::move(thenBlock->instructions[i]));
+        entry->instructions.insert(
+            entry->instructions.begin() +
+                static_cast<std::ptrdiff_t>(condBranchIdx),
+            std::make_move_iterator(hoist.begin()),
+            std::make_move_iterator(hoist.end()));
+
+        // Pop the CondBranch.  Entry's terminator is gone for now;
+        // merge's instructions will provide the new terminator.
+        entry->instructions.pop_back();
+
+        // Inline merge's instructions into entry (skip duplicates of
+        // any synthetic Select that already happen to live at the
+        // start of merge — they reference `condValue` which is still
+        // live in entry).
+        for (auto& mp : merge->instructions)
+            entry->addInstruction(std::move(mp));
+
+        // CFG cleanup: entry no longer has successors (the merge ended
+        // in Return).  Drop the THEN and merge blocks.
+        entry->successors.clear();
+        eraseBlock(fn, thenBlock);
+        eraseBlock(fn, merge);
         return true;
     }
 
