@@ -19,8 +19,28 @@ The version stamped into builds is generated from the most recent
 ### `rsx-cg-compiler` — VP/FP byte-match expansion
 
 The byte-diff suite against the reference Cg compiler at `--O2 --fastmath`
-grows from 65/65 to **72/74** byte-identical:
+grows from 65/65 to **96/96** byte-identical:
 
+- **FP — compound-discard lowering.**  Two-pass emit (analysis + emit)
+  for `IROp::Discard`: the analysis pass records all discard sites with
+  their gating conditions; the emit pass walks each site, resolves
+  compound `LogicalAnd` conditions to leaf `CmpBinding` entries, and
+  emits the full TEX → CMP → MULXC → KIL sequence with correct lane
+  masks, `NVFXSR_NONE` CC registers, and post-discard MOV/MULR
+  swizzle.  Both `discard_tex_alpha_f` (compound condition) and
+  `discard_tex_varying_f` (simple condition with post-discard
+  output) now byte-match sce-cgc at the full container level.
+- **FP — dual-texture discard ordering.**  When a fragment program
+  contains two discard sequences gated by tex-LHS comparisons,
+  the uniform-load MOV for the *second* discard must precede its
+  TEX instruction.  A new `isSubsequentDiscard` flag and
+  `emittedTexResults` tracking set ensure the exact instruction
+  schedule sce-cgc produces.
+- **FP — `VecConstructTexMul` split-write shape.**  Recognises
+  `oColor.xyz = tex.xyz * varying.x; oColor.w = tex.w * varying.y`
+  and emits a split-write StoreOutput (two MOVs with per-lane masks)
+  instead of a single MOV, matching sce-cgc's decomposition of
+  post-discard output mixing.
 - **FP — implicit varying-binding inference.**  Front-end's default-
   binding pass assigns sequential `TEXCOORD<N>` slots to unbound FP
   entry-point inputs in declaration order, skipping any `TEXCOORD<N>`
