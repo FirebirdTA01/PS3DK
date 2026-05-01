@@ -1514,8 +1514,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         }
                         struct nvfx_src cS1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(constReg));
-                        cS1.swz[0] = cS1.swz[1] =
-                        cS1.swz[2] = cS1.swz[3] = 0;
+                        // For subsequent discards, smear .yyyy on
+                        // the zero-const SRC1 to match the reference
+                        // encoding.
+                        const uint8_t zSwz = isSubsequentDiscard ? 1u : 0u;
+                        cS1.swz[0] = zSwz;
+                        cS1.swz[1] = zSwz;
+                        cS1.swz[2] = zSwz;
+                        cS1.swz[3] = zSwz;
                         struct nvfx_src cS2 =
                             nvfx_src(const_cast<struct nvfx_reg&>(none));
                         struct nvfx_insn cmpInsn = nvfx_insn(
@@ -6990,15 +6996,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             nvfx_reg(NVFXSR_INPUT, viIt->second);
                         struct nvfx_src mvhS0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
-                        // If the varying is a scalar lane of a vec4
-                        // input, swizzle all components to that lane.
-                        if (b.varyingLane >= 0)
-                        {
-                            mvhS0.swz[0] = b.varyingLane;
-                            mvhS0.swz[1] = b.varyingLane;
-                            mvhS0.swz[2] = b.varyingLane;
-                            mvhS0.swz[3] = b.varyingLane;
-                        }
                         struct nvfx_src mvhS1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(none));
                         struct nvfx_src mvhS2 =
@@ -7006,7 +7003,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         struct nvfx_insn mvh = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(hReg),
-                            NVFX_FP_MASK_X, mvhS0, mvhS1, mvhS2);
+                            b.varyingLane >= 0
+                                ? NVFX_FP_MASK_W
+                                : NVFX_FP_MASK_X,
+                            mvhS0, mvhS1, mvhS2);
                         mvh.precision = FLOAT16;
                         asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
 
@@ -7017,6 +7017,33 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (viIt->second -
                                                 NVFX_FP_OP_INPUT_SRC_TC(0));
+
+                        // When the varying is a scalar lane of a vec4
+                        // input, emit MULR before MOVR to match the
+                        // reference schedule.
+                        const bool mulrFirst = (b.varyingLane >= 0);
+
+                        if (mulrFirst)
+                        {
+                            // MULR R0.w, R0, H2.<varying_lane>
+                            const struct nvfx_reg r0Reg =
+                                nvfx_reg(NVFXSR_TEMP, 0);
+                            struct nvfx_src s0 = nvfx_src(
+                                const_cast<struct nvfx_reg&>(r0Reg));
+                            struct nvfx_src s1 = nvfx_src(hReg);
+                            s1.swz[0] = 1;
+                            s1.swz[1] = 2;
+                            s1.swz[2] = 0;
+                            s1.swz[3] = 3;
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn mul = nvfx_insn(
+                                saturate ? 1 : 0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_W, s0, s1, s2);
+                            mul.precision = dstPrecision;
+                            asm_.emit(mul, NVFX_FP_OP_OPCODE_MUL);
+                        }
 
                         // MOVR R0.xyz, R0 — identity to preserve tex xyz
                         {
@@ -7037,8 +7064,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             asm_.emit(mov, NVFX_FP_OP_OPCODE_MOV);
                         }
 
-                        // MULR R0.w, R0, H2.x
+                        if (!mulrFirst)
                         {
+                            // MULR R0.w, R0, H2.x (scalar varying case)
                             const struct nvfx_reg r0Reg =
                                 nvfx_reg(NVFXSR_TEMP, 0);
                             struct nvfx_src s0 = nvfx_src(
