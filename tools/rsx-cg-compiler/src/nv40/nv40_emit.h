@@ -58,7 +58,7 @@ struct FpAttributes
     uint8_t  registerCount       = 2;        // sce-cgc minimum
     uint8_t  outputFromH0        = 0;        // 1 iff R0 is fp16 (H0)
     uint8_t  depthReplace        = 0;        // 1 iff DEPTH output written
-    uint8_t  pixelKill           = 0;        // 1 iff KIL opcode emitted
+    uint8_t  pixelKillCount      = 0;        // number of KIL opcodes emitted
 
     std::vector<FpEmbeddedUniform> embeddedUniforms;
 

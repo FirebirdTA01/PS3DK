@@ -383,19 +383,25 @@ ContainerResult emitFragmentContainer(
 
     // When a shader uses `discard;` (KIL opcode) without a #pragma
     // alphakill directive, sce-cgc still emits one $kill_0000
-    // CgBinaryParameter at the end of the table.
-    if (attrs.pixelKill && opts.alphakillSamplers.empty())
+    // CgBinaryParameter per discard instruction at the end of the
+    // table.
+    if (attrs.pixelKillCount > 0 && opts.alphakillSamplers.empty())
     {
-        ParamDesc d;
-        d.name         = "$kill_0000";
-        d.semantic     = "";  // no semantic string
-        d.type         = kCgFloat4;
-        d.res          = kCgKillMarker;
-        d.var          = kCgVarying;
-        d.direction    = kCgOut;
-        d.paramno      = kInvalidIndex;
-        d.isReferenced = 0;
-        params.push_back(d);
+        for (uint8_t k = 0; k < attrs.pixelKillCount; ++k)
+        {
+            ParamDesc d;
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "$kill_%04u", k);
+            d.name         = buf;
+            d.semantic     = "";  // no semantic string
+            d.type         = kCgFloat4;
+            d.res          = kCgKillMarker;
+            d.var          = kCgVarying;
+            d.direction    = kCgOut;
+            d.paramno      = kInvalidIndex;
+            d.isReferenced = 0;
+            params.push_back(d);
+        }
     }
 
     // ----- Build the strings region in sce-cgc's order: per param,
@@ -515,7 +521,7 @@ ContainerResult emitFragmentContainer(
     out.push_back(attrs.registerCount);
     out.push_back(attrs.outputFromH0);
     out.push_back(attrs.depthReplace);
-    out.push_back(attrs.pixelKill);
+    out.push_back(attrs.pixelKillCount > 0 ? uint8_t(1) : uint8_t(0));
     padTo(out, 16);
 
     // ucode: words come from FpAssembler in on-disk halfword-swapped

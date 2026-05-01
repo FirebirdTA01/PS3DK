@@ -173,10 +173,19 @@ bool sameSemantic(const IRInstruction* a, const IRInstruction* b)
     return true;
 }
 
-// Remove a block from the function's blocks vector.  Linear, but
-// block lists are small in practice.
+// Remove a block from the function's blocks vector.  Also cleans
+// up stale references to this block from other blocks' predecessor
+// lists.  Linear, but block lists are small in practice.
 void eraseBlock(IRFunction& fn, IRBasicBlock* block)
 {
+    // Remove `block` from every other block's predecessor list.
+    for (auto& bp : fn.blocks)
+    {
+        if (!bp || bp.get() == block) continue;
+        auto& preds = bp->predecessors;
+        preds.erase(std::remove(preds.begin(), preds.end(), block),
+                    preds.end());
+    }
     fn.blocks.erase(std::remove_if(fn.blocks.begin(), fn.blocks.end(),
         [&](const std::unique_ptr<IRBasicBlock>& bp) {
             return bp.get() == block;
@@ -663,6 +672,34 @@ bool tryConvertBlock(IRFunction& fn,
                     for (auto& mp : join->instructions)
                         entry->addInstruction(std::move(mp));
                     eraseBlock(fn, join);
+
+                    // Rebuild successors from the new terminator.
+                    // The inlined join may contain a CondBranch that
+                    // must be visible to the next if-conversion pass.
+                    if (!entry->instructions.empty())
+                    {
+                        IRInstruction* newTerm = entry->instructions.back().get();
+                        if (newTerm && newTerm->op == IROp::CondBranch)
+                        {
+                            // targetName is "trueName,falseName".
+                            const auto& tn = newTerm->targetName;
+                            auto commaPos = tn.find(',');
+                            if (commaPos != std::string::npos)
+                            {
+                                std::string trueName  = tn.substr(0, commaPos);
+                                std::string falseName = tn.substr(commaPos + 1);
+                                IRBasicBlock* trueBlk  = findBlock(fn, trueName);
+                                IRBasicBlock* falseBlk = findBlock(fn, falseName);
+                                if (trueBlk && falseBlk)
+                                {
+                                    entry->successors.push_back(trueBlk);
+                                    entry->successors.push_back(falseBlk);
+                                    trueBlk->predecessors.push_back(entry);
+                                    falseBlk->predecessors.push_back(entry);
+                                }
+                            }
+                        }
+                    }
                 }
                 else
                 {

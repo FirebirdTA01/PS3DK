@@ -251,6 +251,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     {
         IRValueID varyingId = 0;   // resolves via valueToInputSrc
         IRValueID texId     = 0;   // resolves via valueToTex
+        int       lane      = -1;  // scalar lane of varying; -1 = full scalar (use .x)
     };
     std::unordered_map<IRValueID, FpVaryingTexMulBinding> valueToVaryingTexMul;
 
@@ -270,9 +271,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // shapes).
     struct FpVecConstructTexMulBinding
     {
-        IRValueID texBaseId  = 0;   // tex2D result
-        IRValueID varyingId  = 0;   // varying input (from valueToVaryingTexMul)
-        int       mulLane    = 3;   // w lane carries the Mul
+        IRValueID texBaseId   = 0;   // tex2D result
+        IRValueID varyingId   = 0;   // varying input (from valueToVaryingTexMul)
+        int       mulLane     = 3;   // w lane carries the Mul
+        int       varyingLane = -1;  // scalar lane of varying; -1 = scalar varyings
     };
     std::unordered_map<IRValueID, FpVecConstructTexMulBinding>
         valueToVecConstructTexMul;
@@ -498,6 +500,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // discard handler.  When IROp::Discard is encountered, this holds
     // the condition that gates the kill.
     IRValueID lastConditionalId = InvalidIRValue;
+
+    // Per-discard-instruction → condition ID.  Populated during the
+    // analysis pass so the emit pass can find the correct condition
+    // for each discard (rather than relying on the mutable
+    // lastConditionalId which gets overwritten).
+    std::unordered_map<const IRInstruction*, IRValueID> discardToCond;
 
     // LogicalAnd compound condition binding: two comparison results
     // combined with && in the source Cg.  Lowers to MULXC (multiply
@@ -766,6 +774,18 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
     bool emittedSomething = false;
 
+    // Two-pass architecture:
+    //   Pass 0 — Analysis: walk all instructions, populate every
+    //     binding map (valueToArith, valueToVaryingTexMul,
+    //     valueToVecConstructTexMul, valueToCmp, etc.).
+    //     Emit cases (Discard, StoreOutput) are skipped.
+    //   Pass 1 — Emit: walk instructions again, only processing
+    //     Discard and StoreOutput.  All binding maps are fully
+    //     populated so the emit pass can make informed decisions
+    //     (e.g. single-channel TEX output mask for discard-only
+    //     tex results).
+    for (int pass = 0; pass < 2; ++pass)
+    {
     for (const auto& blockPtr : entry.blocks)
     {
         if (!blockPtr) continue;
@@ -774,11 +794,18 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             if (!instPtr) continue;
             const IRInstruction& inst = *instPtr;
 
-            // Record the instruction's result type so downstream
-            // lowerings can look it up (e.g. Dot uses the operand's
-            // vectorSize to pick DP3 vs DP4).
-            if (inst.result != InvalidIRValue)
+            // Record types only during analysis pass; emit pass
+            // only re-walks for Discard / StoreOutput.
+            if (pass == 0 && inst.result != InvalidIRValue)
                 valueToType[inst.result] = inst.resultType;
+
+            // Analysis pass skips emit cases; emit pass skips
+            // everything except Discard and StoreOutput.
+            if (pass == 0 && inst.op == IROp::StoreOutput)
+                continue;
+            if (pass == 1 && inst.op != IROp::Discard &&
+                              inst.op != IROp::StoreOutput)
+                continue;
 
             switch (inst.op)
             {
@@ -1132,18 +1159,30 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
             case IROp::Discard:
             {
-                // Emit conditional KIL for the most recent comparison(s).
-                // If-conversion (Shape 5) has already hoisted the discard
-                // into the entry block, so its position relative to the
-                // StoreOutput is correct in the instruction order.
-                if (lastConditionalId == InvalidIRValue)
+                // Analysis pass: record which condition gates this
+                // discard so the emit pass can find it.
+                if (pass == 0)
+                {
+                    if (lastConditionalId == InvalidIRValue)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: discard with no preceding condition");
+                        return out;
+                    }
+                    discardToCond[&inst] = lastConditionalId;
+                    break;
+                }
+
+                // Emit pass: emit conditional KIL.
+                auto condIt = discardToCond.find(&inst);
+                if (condIt == discardToCond.end())
                 {
                     out.diagnostics.push_back(
-                        "nv40-fp: discard with no preceding condition");
+                        "nv40-fp: discard condition not recorded in analysis pass");
                     return out;
                 }
 
-                IRValueID condId = lastConditionalId;
+                IRValueID condId = condIt->second;
 
                 // Resolve condition to leaf comparison IDs (flatten LogicalAnd).
                 std::vector<IRValueID> cmpIds;
@@ -1185,6 +1224,73 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // to match the reference ucode byte-for-byte.
                 if (compound)
                     std::reverse(rcmps.begin(), rcmps.end());
+
+                // Pre-pass: emit TEX for any tex-LHS comparisons
+                // before any MOV / CMP instruction.  This matches
+                // sce-cgc's schedule where TEX always comes first,
+                // regardless of StoreOutput position relative to
+                // the discard block.
+                // Only apply when no TEX has been emitted yet; after
+                // a prior TEX+discard sequence the uniform load (MOV)
+                // should precede the next TEX (sce-cgc dual-discard
+                // pattern).
+                if (compound && emittedTexResults.empty())
+                {
+                    for (const auto& rc : rcmps)
+                    {
+                        if (rc.bind->lhsKind != CmpBinding::LhsKind::TexResult)
+                            continue;
+                        if (emittedTexResults.count(rc.bind->lhsTexId))
+                            continue;
+                        auto txIt = valueToTex.find(rc.bind->lhsTexId);
+                        if (txIt == valueToTex.end()) continue;
+                        auto sampIt = valueToTexUnit.find(
+                            txIt->second.samplerId);
+                        if (sampIt == valueToTexUnit.end()) continue;
+                        IRValueID uvBase =
+                            resolveSrcMods(txIt->second.uvId).baseId;
+                        auto uvIt = valueToInputSrc.find(uvBase);
+                        if (uvIt == valueToInputSrc.end()) continue;
+
+                        const struct nvfx_reg uvReg =
+                            nvfx_reg(NVFXSR_INPUT, uvIt->second);
+                        const struct nvfx_reg none =
+                            nvfx_reg(NVFXSR_NONE, 0);
+                        struct nvfx_src texSrc0 = nvfx_src(
+                            const_cast<struct nvfx_reg&>(uvReg));
+                        struct nvfx_src texSrc1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src texSrc2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        const uint8_t texOpcode =
+                            txIt->second.projective
+                                ? NVFX_FP_OP_OPCODE_TXP
+                                : NVFX_FP_OP_OPCODE_TEX;
+
+                        struct nvfx_reg outReg =
+                            nvfx_reg(NVFXSR_OUTPUT, 0);
+                        struct nvfx_insn texInsn = nvfx_insn(
+                            0, 0,
+                            sampIt->second, -1,
+                            const_cast<struct nvfx_reg&>(outReg),
+                            NVFX_FP_MASK_ALL,
+                            texSrc0, texSrc1, texSrc2);
+                        texInsn.precision = FLOAT32;
+                        if (txIt->second.cube)
+                            texInsn.disable_pc = 1;
+                        asm_.emit(texInsn, texOpcode);
+
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(uvIt->second);
+                        if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            attrs.texCoordsInputMask |=
+                                uint16_t{1} << (uvIt->second -
+                                    NVFX_FP_OP_INPUT_SRC_TC(0));
+
+                        emittedTexResults.insert(rc.bind->lhsTexId);
+                    }
+                }
 
                 // Pre-pass: emit uniform loads (MOVR) for any
                 // UniformScalar comparisons before any comparison
@@ -1458,11 +1564,37 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                                         struct nvfx_reg outReg =
                                             nvfx_reg(NVFXSR_OUTPUT, 0);
+                                        // For simple (non-compound) discards
+                                        // where the tex result is only used for
+                                        // the discard comparison, sce-cgc uses a
+                                        // single-component output mask.  If the
+                                        // tex is also consumed by a VecConstruct-
+                                        // TexMul output, all channels are needed.
+                                        uint8_t texMask = NVFX_FP_MASK_ALL;
+                                        if (!compound)
+                                        {
+                                            bool usedForOutput = false;
+                                            for (const auto& vctm : valueToVecConstructTexMul)
+                                            {
+                                                if (vctm.second.texBaseId == cb.lhsTexId)
+                                                { usedForOutput = true; break; }
+                                            }
+                                            if (!usedForOutput)
+                                            {
+                                                static const uint8_t kLaneMasks[4] = {
+                                                    NVFX_FP_MASK_X,
+                                                    NVFX_FP_MASK_Y,
+                                                    NVFX_FP_MASK_Z,
+                                                    NVFX_FP_MASK_W
+                                                };
+                                                texMask = kLaneMasks[cb.lhsLane & 3];
+                                            }
+                                        }
                                         struct nvfx_insn texInsn = nvfx_insn(
                                             0, 0,
                                             sampIt->second, -1,
                                             const_cast<struct nvfx_reg&>(outReg),
-                                            NVFX_FP_MASK_ALL,
+                                            texMask,
                                             texSrc0, texSrc1, texSrc2);
                                         texInsn.precision = FLOAT32;
                                         if (txIt->second.cube)
@@ -1613,7 +1745,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     asm_.emit(kil, NVFX_FP_OP_OPCODE_KIL);
                 }
 
-                attrs.pixelKill = 1;
+                attrs.pixelKillCount += 1;
                 emittedSomething = true;
                 break;
             }
@@ -1889,7 +2021,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 else if (aInput != valueToInputSrc.end() && bInput == valueToInputSrc.end() &&
                          bUniform == valueToFpUniform.end() &&
                          inst.op == IROp::Mul &&
-                         valueToTex.count(mb.baseId) == 0)
+                         valueToTex.count(mb.baseId) == 0 &&
+                         !(valueToScalarExtract.count(mb.baseId) &&
+                           valueToTex.count(valueToScalarExtract[mb.baseId].baseId)))
                 {
                     // (varying, temp) Mul — preload the varying into
                     // H2 via MOVH then emit MUL with the temp as SRC0
@@ -1910,7 +2044,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 else if (aInput == valueToInputSrc.end() && bInput != valueToInputSrc.end() &&
                          aUniform == valueToFpUniform.end() &&
                          inst.op == IROp::Mul &&
-                         valueToTex.count(ma.baseId) == 0)
+                         valueToTex.count(ma.baseId) == 0 &&
+                         !(valueToScalarExtract.count(ma.baseId) &&
+                           valueToTex.count(valueToScalarExtract[ma.baseId].baseId)))
                 {
                     bind.inputId    = mb.baseId;
                     bind.inputAbs   = mb.absMod;
@@ -2129,25 +2265,56 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 return id;
                             return 0;
                         };
-                        auto aIsVar = (aInput != valueToInputSrc.end());
-                        auto bIsVar = (bInput != valueToInputSrc.end());
+                        // Resolve varying through scalar extracts:
+                        // `shuffle vec4_input[lane]` produces a scalar
+                        // that is only in valueToScalarExtract, not in
+                        // valueToInputSrc (which maps the base vec4).
+                        auto resolveVarying = [&](IRValueID id) -> bool {
+                            if (valueToInputSrc.count(id)) return true;
+                            auto seIt = valueToScalarExtract.find(id);
+                            return seIt != valueToScalarExtract.end() &&
+                                   valueToInputSrc.count(seIt->second.baseId);
+                        };
+                        auto aIsVar = resolveVarying(ma.baseId);
+                        auto bIsVar = resolveVarying(mb.baseId);
                         auto aTexBase = resolveTexBase(ma.baseId);
                         auto bTexBase = resolveTexBase(mb.baseId);
+                        // Resolve the varying base ID: if the operand
+                        // is a scalar extract of a vec4 input, use the
+                        // underlying input so emit-time valueToInputSrc
+                        // lookup succeeds.
+                        auto varyingBaseId = [&](IRValueID id) -> IRValueID {
+                            auto seIt = valueToScalarExtract.find(id);
+                            if (seIt != valueToScalarExtract.end() &&
+                                valueToInputSrc.count(seIt->second.baseId))
+                                return seIt->second.baseId;
+                            return id;
+                        };
+                        // Resolve the scalar lane of the varying.
+                        // Returns -1 if the varying is a scalar (not
+                        // a lane extract), otherwise the lane index.
+                        auto varyingLane = [&](IRValueID id) -> int {
+                            auto seIt = valueToScalarExtract.find(id);
+                            if (seIt != valueToScalarExtract.end() &&
+                                valueToInputSrc.count(seIt->second.baseId))
+                                return seIt->second.lane;
+                            return -1;
+                        };
                         if (aIsVar && bTexBase)
                         {
-                            // std::fprintf(stderr, "DEBUG Mul: captured FpVaryingTexMulBinding result=%%%u var=%%%u tex=%%%u\n",
-                            //              (unsigned)inst.result, (unsigned)ma.baseId, (unsigned)bTexBase);
                             FpVaryingTexMulBinding tb;
-                            tb.varyingId = ma.baseId;
+                            tb.varyingId = varyingBaseId(ma.baseId);
                             tb.texId     = bTexBase;
+                            tb.lane      = varyingLane(ma.baseId);
                             valueToVaryingTexMul[inst.result] = tb;
                             break;
                         }
                         if (bIsVar && aTexBase)
                         {
                             FpVaryingTexMulBinding tb;
-                            tb.varyingId = mb.baseId;
+                            tb.varyingId = varyingBaseId(mb.baseId);
                             tb.texId     = aTexBase;
+                            tb.lane      = varyingLane(mb.baseId);
                             valueToVaryingTexMul[inst.result] = tb;
                             break;
                         }
@@ -2662,7 +2829,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         auto vmIt = valueToVaryingTexMul.find(inst.operands[3]);
                         if (vmIt != valueToVaryingTexMul.end())
                         {
-                            b.varyingId = vmIt->second.varyingId;
+                            b.varyingId    = vmIt->second.varyingId;
+                            b.varyingLane  = vmIt->second.lane;
                         }
                         else
                         {
@@ -6807,6 +6975,15 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             nvfx_reg(NVFXSR_INPUT, viIt->second);
                         struct nvfx_src mvhS0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                        // If the varying is a scalar lane of a vec4
+                        // input, swizzle all components to that lane.
+                        if (b.varyingLane >= 0)
+                        {
+                            mvhS0.swz[0] = b.varyingLane;
+                            mvhS0.swz[1] = b.varyingLane;
+                            mvhS0.swz[2] = b.varyingLane;
+                            mvhS0.swz[3] = b.varyingLane;
+                        }
                         struct nvfx_src mvhS1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(none));
                         struct nvfx_src mvhS2 =
@@ -6928,6 +7105,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             }
         }
     }
+    }  // pass loop
 
     if (!emittedSomething)
     {
