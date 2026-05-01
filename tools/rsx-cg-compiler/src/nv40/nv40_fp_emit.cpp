@@ -7031,10 +7031,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             struct nvfx_src s0 = nvfx_src(
                                 const_cast<struct nvfx_reg&>(r0Reg));
                             struct nvfx_src s1 = nvfx_src(hReg);
-                            s1.swz[0] = 1;
-                            s1.swz[1] = 2;
-                            s1.swz[2] = 0;
-                            s1.swz[3] = 3;
+                            // Identity swizzle: W→W reads H2.w
+                            // which holds the varying value loaded
+                            // by MOVH with MASK_W.
                             struct nvfx_src s2 =
                                 nvfx_src(const_cast<struct nvfx_reg&>(none));
                             struct nvfx_insn mul = nvfx_insn(
