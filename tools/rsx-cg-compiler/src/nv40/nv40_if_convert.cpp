@@ -549,6 +549,136 @@ bool tryConvertBlock(IRFunction& fn,
         return true;
     }
 
+    // Shape 5: if-only with discard then-block.
+    //   entry { ... cond ... brc %cond -> discardBlock, joinBlock }
+    //   discardBlock { discard; br -> joinBlock }  OR
+    //   discardBlock { discard }  (falls through to join)
+    //   joinBlock { ... }
+    //
+    // Transformation:
+    //   - Hoist `discard` into entry before the CondBranch.
+    //   - Replace CondBranch with unconditional Branch to joinBlock.
+    //   - Remove discardBlock.
+    //   - If joinBlock now has only entry as predecessor, inline its
+    //     instructions into entry (merge single-predecessor blocks).
+    if (thenBlock && falseTarget &&
+        thenBlock->successors.size() <= 1)
+    {
+        // Then-block must contain a discard as its first/only instruction.
+        if (!thenBlock->instructions.empty())
+        {
+            IRInstruction* dInst = thenBlock->instructions[0].get();
+            bool hasDiscard = (dInst && dInst->op == IROp::Discard);
+            // Check for explicit branch, or implicit fallthrough.
+            bool hasBranch = false;
+            if (thenBlock->instructions.size() >= 2)
+            {
+                IRInstruction* lastTerm =
+                    thenBlock->instructions.back().get();
+                hasBranch = (lastTerm && lastTerm->op == IROp::Branch);
+            }
+            bool fallsThrough =
+                (!hasBranch && thenBlock->successors.empty() &&
+                 thenBlock->instructions.size() == 1);
+
+            if (hasDiscard)
+            {
+                IRBasicBlock* join = falseTarget;
+                // Verify that either an explicit branch targets join,
+                // or the block falls through to join.
+                if (hasBranch)
+                {
+                    if (thenBlock->successors.size() != 1 ||
+                        thenBlock->successors[0] != join)
+                        hasDiscard = false;
+                }
+                else if (fallsThrough)
+                {
+                    // join must be the next block in the function.
+                    bool foundThen = false;
+                    join = nullptr;
+                    for (auto& bp : fn.blocks)
+                    {
+                        if (bp.get() == thenBlock) { foundThen = true; continue; }
+                        if (foundThen) { join = bp.get(); break; }
+                    }
+                    if (!join) hasDiscard = false;
+                }
+                else
+                {
+                    hasDiscard = false;
+                }
+            }
+
+            if (hasDiscard)
+            {
+                IRBasicBlock* join = falseTarget;
+                if (fallsThrough)
+                {
+                    // Find join as the block after thenBlock.
+                    bool foundThen = false;
+                    for (auto& bp : fn.blocks)
+                    {
+                        if (bp.get() == thenBlock) { foundThen = true; continue; }
+                        if (foundThen) { join = bp.get(); break; }
+                    }
+                }
+
+                // Steal the discard instruction from thenBlock.
+                auto discardInst = std::move(thenBlock->instructions[0]);
+
+                // Insert discard before the CondBranch in entry.
+                const size_t condIdx = entry->instructions.size() - 1;
+                entry->instructions.insert(
+                    entry->instructions.begin() +
+                        static_cast<std::ptrdiff_t>(condIdx),
+                    std::move(discardInst));
+
+                // Replace CondBranch with unconditional Branch to join.
+                entry->instructions.pop_back();  // remove CondBranch
+
+                // Check if join can be inlined (single predecessor).
+                bool canInlineJoin = false;
+                {
+                    auto& preds = join->predecessors;
+                    preds.erase(std::remove(preds.begin(), preds.end(), thenBlock),
+                                preds.end());
+                    preds.erase(std::remove(preds.begin(), preds.end(), entry),
+                                preds.end());
+                    // Only add entry as predecessor if we're not going to inline
+                    // (otherwise entry will gain join's instructions directly).
+                    canInlineJoin = (preds.empty());
+                    if (!canInlineJoin)
+                        preds.push_back(entry);
+                }
+
+                // Remove thenBlock.
+                eraseBlock(fn, thenBlock);
+
+                if (canInlineJoin)
+                {
+                    // Inline join into entry directly — no branch needed.
+                    entry->successors.clear();
+                    join->predecessors.clear();
+                    for (auto& mp : join->instructions)
+                        entry->addInstruction(std::move(mp));
+                    eraseBlock(fn, join);
+                }
+                else
+                {
+                    auto br = std::make_unique<IRInstruction>(
+                        IROp::Branch, InvalidIRValue, IRTypeInfo::Void());
+                    br->targetName = join->name;
+                    entry->addInstruction(std::move(br));
+                    entry->successors.clear();
+                    entry->successors.push_back(join);
+                }
+
+                return true;
+            }
+        }
+    }
+
     // Shape 4: if-only with no per-branch StoreOutput.  The IR builder
     // synthesises a Select(cond, thenVal, preVal) at the merge block
     // for any variable redefined inside THEN; the merge block then
