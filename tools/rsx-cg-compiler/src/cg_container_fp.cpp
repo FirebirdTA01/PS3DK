@@ -381,6 +381,23 @@ ContainerResult emitFragmentContainer(
         params.push_back(d);
     }
 
+    // When a shader uses `discard;` (KIL opcode) without a #pragma
+    // alphakill directive, sce-cgc still emits one $kill_0000
+    // CgBinaryParameter at the end of the table.
+    if (attrs.pixelKill && opts.alphakillSamplers.empty())
+    {
+        ParamDesc d;
+        d.name         = "$kill_0000";
+        d.semantic     = "";  // no semantic string
+        d.type         = kCgFloat4;
+        d.res          = kCgKillMarker;
+        d.var          = kCgVarying;
+        d.direction    = kCgOut;
+        d.paramno      = kInvalidIndex;
+        d.isReferenced = 0;
+        params.push_back(d);
+    }
+
     // ----- Build the strings region in sce-cgc's order: per param,
     // emit semantic (if non-empty) then name.  Track each string's
     // offset relative to the start of the container. -----
@@ -425,7 +442,10 @@ ContainerResult emitFragmentContainer(
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             put32(stringsBlob,
                   static_cast<uint32_t>(params[i].embeddedConstUcodeOffsets.size()));
-            for (uint32_t off : params[i].embeddedConstUcodeOffsets)
+            // sce-cgc writes ucode offsets in descending order.
+            auto sorted = params[i].embeddedConstUcodeOffsets;
+            std::sort(sorted.begin(), sorted.end(), std::greater<uint32_t>());
+            for (uint32_t off : sorted)
                 put32(stringsBlob, off);
         }
         if (!params[i].name.empty())

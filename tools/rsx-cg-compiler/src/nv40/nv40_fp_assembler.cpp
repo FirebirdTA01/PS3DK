@@ -37,6 +37,11 @@ void FpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
     hasInstruction_  = true;
     uint32_t* hw = &logicalWords_[base];
 
+    // DEBUG: uncomment to trace TEMP register writes
+    //if (insn.dst.type == NVFXSR_TEMP)
+    //    std::fprintf(stderr, "DEBUG emit: dst=TEMP(%d) opcode=0x%02x is_fp16=%d\n",
+    //                 (int)insn.dst.index, (int)opcode, (int)insn.dst.is_fp16);
+
     hw[0] |= (static_cast<uint32_t>(opcode) << NVFX_FP_OP_OPCODE_SHIFT);
     hw[0] |= (static_cast<uint32_t>(insn.mask) << NVFX_FP_OP_OUTMASK_SHIFT);
     hw[0] |= (static_cast<uint32_t>(insn.precision) << NVFX_FP_OP_PRECISION_SHIFT);
@@ -61,6 +66,18 @@ void FpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         hw[2] |= (static_cast<uint32_t>(insn.scale & 0x7)
                   << NVFX_FP_OP_DST_SCALE_SHIFT);
 
+    // SRC1 input precision.  sce-cgc sets bits 19-20 to 1 (FP16) and
+    // bits 21-27 to 0x0B when a comparison instruction (SLT–SEQ)
+    // uses FX12 precision (observed with cc_update for discard).
+    // Together these produce 0x0168 in hw[2] bits 16-27.
+    if (insn.precision == NVFX_FP_PRECISION_FX12 &&
+        opcode >= NVFX_FP_OP_OPCODE_SLT &&
+        opcode <= NVFX_FP_OP_OPCODE_SEQ)
+    {
+        hw[2] |= (uint32_t{1} << 19);        // input precision FP16
+        hw[2] |= (uint32_t{0x0Bu} << 21);    // sce-cgc constant
+    }
+
     hw[1] |= (static_cast<uint32_t>(insn.cc_cond) << NVFX_FP_OP_COND_SHIFT);
     hw[1] |= ((static_cast<uint32_t>(insn.cc_swz[0]) << NVFX_FP_OP_COND_SWZ_X_SHIFT) |
               (static_cast<uint32_t>(insn.cc_swz[1]) << NVFX_FP_OP_COND_SWZ_Y_SHIFT) |
@@ -82,9 +99,15 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
     {
     case NVFXSR_TEMP:
     {
+        // fp16 registers pack two per hw slot: H0/H1 → R0, H2/H3 → R1, ...
         const int hwReg = dst.is_fp16 ? (index >> 1) : index;
         if (numTempRegs_ < hwReg + 1)
+        {
             numTempRegs_ = hwReg + 1;
+            // DEBUG: uncomment to trace register count changes
+            //std::fprintf(stderr, "DEBUG emitDst TEMP: index=%d is_fp16=%d hwReg=%d numTempRegs=%d\n",
+            //             (int)index, (int)dst.is_fp16, (int)hwReg, (int)numTempRegs_);
+        }
         break;
     }
     case NVFXSR_OUTPUT:
