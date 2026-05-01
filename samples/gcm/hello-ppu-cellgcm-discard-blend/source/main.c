@@ -41,6 +41,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
+#include <math.h>
 #include <unistd.h>
 
 #include <ppu-lv2.h>
@@ -315,8 +316,8 @@ static void set_render_state(CellGcmContextData *ctx)
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
 
 	/* Runtime uniform: alpha-discard threshold */
-	cellGcmSetFragmentProgramParameter(ctx, threshUniform,
-	                                   &g_uniformThresh, 0);
+	cellGcmSetFragmentProgramParameter(ctx, fpo, threshUniform,
+	                                   &g_uniformThresh, fp_offset);
 
 	bind_textures(ctx);
 }
@@ -581,9 +582,15 @@ int main(int argc, const char **argv)
 		ioPadGetInfo(&padinfo);
 		for (int i = 0; i < MAX_PADS; i++) {
 			if (padinfo.status[i]) {
-				padData paddata;
+				padData paddata = {0};
 				ioPadGetData(i, &paddata);
-				if (paddata.BTN_START) { g_exit_request = 1; break; }
+				/* Detect rising edge — only exit on press, not hold */
+				static uint16_t prev_start[MAX_PADS];
+				uint16_t cur = paddata.BTN_START;
+				if (cur && !prev_start[i]) {
+					g_exit_request = 1; break;
+				}
+				prev_start[i] = cur;
 			}
 		}
 

@@ -248,12 +248,18 @@ int main(int argc, const char **argv)
 	 * animated layout has a monotonic time base. */
 	while (!exit_flag) {
 		padInfo padinfo;
-		padData paddata;
 		ioPadGetInfo(&padinfo);
 		for (int i = 0; i < MAX_PADS; i++) {
 			if (padinfo.status[i]) {
+				padData paddata = {0};
 				ioPadGetData(i, &paddata);
-				if (paddata.BTN_START) { exit_flag = 1; break; }
+				/* Detect rising edge — only exit on press, not hold */
+				static uint16_t prev_start[MAX_PADS];
+				uint16_t cur = paddata.BTN_START;
+				if (cur && !prev_start[i]) {
+					exit_flag = 1; break;
+				}
+				prev_start[i] = cur;
 			}
 		}
 
