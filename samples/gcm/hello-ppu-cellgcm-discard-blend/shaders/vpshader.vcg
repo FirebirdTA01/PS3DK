@@ -1,0 +1,22 @@
+// hello-ppu-cellgcm-discard-blend — vertex program.
+//
+// Passthrough with two texture coordinate sets + per-vertex colour.
+// The FP receives all varyings and decides which fragments to discard
+// or blend.
+
+void main(
+    float3 in_position       : POSITION,
+    float2 in_texcoord0      : TEXCOORD0,
+    float2 in_texcoord1      : TEXCOORD1,
+    float4 in_color          : COLOR,
+    uniform float4x4 modelViewProj,
+    out float4 out_position  : POSITION,
+    out float2 out_texcoord0 : TEXCOORD0,
+    out float2 out_texcoord1 : TEXCOORD1,
+    out float4 out_color     : COLOR)
+{
+    out_position  = mul(modelViewProj, float4(in_position, 1.0f));
+    out_texcoord0 = in_texcoord0;
+    out_texcoord1 = in_texcoord1;
+    out_color     = in_color;
+}
