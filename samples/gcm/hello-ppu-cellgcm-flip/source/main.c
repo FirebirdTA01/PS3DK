@@ -221,9 +221,15 @@ int main(int argc, const char **argv) {
 		ioPadGetInfo(&padinfo);
 		for (int i = 0; i < MAX_PADS; i++) {
 			if (padinfo.status[i]) {
-				padData paddata;
+				padData paddata = {0};
 				ioPadGetData(i, &paddata);
-				if (paddata.BTN_START) { g_exit_request = 1; break; }
+				/* Detect rising edge — only exit on press, not hold */
+				static uint16_t prev_start[MAX_PADS];
+				uint16_t cur = paddata.BTN_START;
+				if (cur && !prev_start[i]) {
+					g_exit_request = 1; break;
+				}
+				prev_start[i] = cur;
 			}
 		}
 

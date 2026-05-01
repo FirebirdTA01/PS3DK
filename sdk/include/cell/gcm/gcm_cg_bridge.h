@@ -533,29 +533,37 @@ static inline void cellGcmSetVertexProgramParameterBlock(CellGcmContextData *ctx
 }
 
 /* Patch a fragment-program embedded constant in-place (FP code in
- * memory at addrOffset).  Reference SDK signature; the patch happens
- * on the CPU side, then the hardware re-fetches via the next FP load.
- * Walks the param's embeddedConst[] table and writes 4 floats per
- * entry into the FP ucode at the encoded offsets. */
+ * RSX local memory at addrOffset).  Reference SDK signature; the
+ * patch happens on the CPU side through the PPU→RSX mapping, then
+ * the hardware re-fetches via the next FP load.  Walks the param's
+ * embeddedConst[] table and writes 4 floats per entry into the FP
+ * ucode at the encoded offsets. */
 static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
                                                       CGprogram prog,
                                                       CGparameter param,
                                                       const float *values,
                                                       uint32_t addrOffset)
 {
-    (void)ctx; (void)addrOffset;
-    if (!prog || !param || !values) return;
+    (void)ctx;
+    if (!prog || !param || !values || !addrOffset) return;
 
-    const CgBinaryProgram   *bp = (const CgBinaryProgram *)prog;
     const CgBinaryParameter *pp = (const CgBinaryParameter *)param;
-
-    /* Locate the FP ucode payload — same resolver gCellGcmCurrentContext-
-     * based callers use after cellGcmCgInitProgram has set it up. */
-    const uint8_t *base   = (const uint8_t *)bp;
-    const uint8_t *ucode  = base + bp->ucode;
-    const uint32_t *embed = (const uint32_t *)(base + pp->embeddedConst);
+    const uint32_t *embed =
+        (const uint32_t *)((const uint8_t *)prog + pp->embeddedConst);
 
     if (!embed) return;
+
+    /* Resolve the PPU-side base of RSX local memory so we can write
+     * through the IOMMU mapping into the ucode that was already
+     * uploaded at addrOffset. */
+    CellGcmConfig cfg;
+    cellGcmGetConfiguration(&cfg);
+    uint8_t *local_base = (uint8_t *)cfg.localAddress;
+
+    /* FP ucode sits at local_base + addrOffset in RSX local memory;
+     * embed[] entries are byte offsets relative to the start of the
+     * ucode payload. */
+    uint8_t *ucode = local_base + addrOffset;
 
     const uint32_t cnt = embed[0];
     for (uint32_t i = 1; i <= cnt; ++i) {

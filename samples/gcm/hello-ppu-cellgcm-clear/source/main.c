@@ -194,7 +194,6 @@ int main(int argc, const char **argv)
 	int                  cur = 0;
 	uint16_t             width = 0, height = 0;
 	padInfo              padinfo;
-	padData              paddata;
 	CellGcmContextData  *ctx;
 
 	printf("hello-ppu-cellgcm-clear: cellGcm-name validation\n");
@@ -239,11 +238,15 @@ int main(int argc, const char **argv)
 		ioPadGetInfo(&padinfo);
 		for (int i = 0; i < MAX_PADS; i++) {
 			if (padinfo.status[i]) {
+				padData paddata = {0};
 				ioPadGetData(i, &paddata);
-				if (paddata.BTN_START) {
-					exit_request = 1;
-					break;
+				/* Detect rising edge — only exit on press, not hold */
+				static uint16_t prev_start[MAX_PADS];
+				uint16_t cur = paddata.BTN_START;
+				if (cur && !prev_start[i]) {
+					exit_request = 1; break;
 				}
+				prev_start[i] = cur;
 			}
 		}
 

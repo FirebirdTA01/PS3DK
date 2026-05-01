@@ -342,12 +342,18 @@ int main(int argc, char **argv)
     volatile int exit_req = 0;
     while (!exit_req) {
         padInfo padinfo;
-        padData paddata;
         ioPadGetInfo(&padinfo);
         for (int i = 0; i < MAX_PADS; i++) {
             if (padinfo.status[i]) {
+                padData paddata = {0};
                 ioPadGetData(i, &paddata);
-                if (paddata.BTN_START) { exit_req = 1; break; }
+                /* Detect rising edge — only exit on press, not hold */
+                static uint16_t prev_start[MAX_PADS];
+                uint16_t cur = paddata.BTN_START;
+                if (cur && !prev_start[i]) {
+                    exit_req = 1; break;
+                }
+                prev_start[i] = cur;
             }
         }
         wait_flip();
