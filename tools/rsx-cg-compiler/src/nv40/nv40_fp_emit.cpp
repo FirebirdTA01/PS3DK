@@ -1292,9 +1292,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                 }
 
+                // Track emitted KIL count so subsequent discards
+                // can use different register masks.
+                static int discardEmitCount = 0;
+                const bool isSubsequentDiscard = (discardEmitCount > 0);
+
                 // Pre-pass: emit uniform loads (MOVR) for any
                 // UniformScalar comparisons before any comparison
-                // instruction, matching sce-cgc's schedule.
+                // instruction, matching the reference schedule.
                 if (compound)
                 {
                     for (const auto& rc : rcmps)
@@ -1317,10 +1322,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             nvfx_src(const_cast<struct nvfx_reg&>(none));
                         struct nvfx_src uS2 =
                             nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        const uint8_t movMask =
+                            isSubsequentDiscard
+                                ? NVFX_FP_MASK_W
+                                : NVFX_FP_MASK_X;
                         struct nvfx_insn movU = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r1Reg),
-                            NVFX_FP_MASK_X, uS0, uS1, uS2);
+                            movMask, uS0, uS1, uS2);
                         movU.precision = FLOAT32;
                         asm_.emit(movU, NVFX_FP_OP_OPCODE_MOV);
                         const uint32_t off = asm_.currentByteSize();
@@ -1496,8 +1505,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                         struct nvfx_src cS0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(r1Reg));
-                        // Default xyzw swizzle: the destination mask
-                        // (laneMask) selects the correct lane.
+                        if (compound && isSubsequentDiscard)
+                        {
+                            cS0.swz[0] = 3;
+                            cS0.swz[1] = 3;
+                            cS0.swz[2] = 3;
+                            cS0.swz[3] = 3;
+                        }
                         struct nvfx_src cS1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(constReg));
                         cS1.swz[0] = cS1.swz[1] =
@@ -1746,6 +1760,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
 
                 attrs.pixelKillCount += 1;
+                ++discardEmitCount;
                 emittedSomething = true;
                 break;
             }

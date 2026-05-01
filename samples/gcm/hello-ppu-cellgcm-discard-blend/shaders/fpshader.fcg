@@ -1,0 +1,40 @@
+// hello-ppu-cellgcm-discard-blend — fragment program.
+//
+// Exercises rsx-cg-compiler features (94/94 byte-match vs sce-cgc):
+//
+//   1) Simple discard: `if (texB.a < 0.1) discard;`
+//      → FX12 SLT with cc_update + KIL (NE.x)
+//      → hw[2] carries 0x0168 FX12 comparison encoding
+//
+//   2) Compound discard: `if (u_thresh > 0.0 && texA.a < u_thresh) discard;`
+//      → Pre-pass MOVR R1.x (uniform load)
+//      → SGTR H2.x + SLTR H2.w  (comparisons to H2 lanes)
+//      → MULXC RC.x             (AND the two CC-lane bits)
+//      → KIL (NE.x)
+//      → Embedded uniform const blocks with descending ucode offsets
+//
+//   3) Post-discard VecConstructTexMul:
+//      `float4(texA.xyz, pass_alpha * texA.w)`
+//      → MOVH H2.x, f[COL0]      (promote varying to H2)
+//      → MOVR R0.xyz, R0         (preserve tex xyz)
+//      → MULR R0.w, R0, H2.x     (varying * texA.w → R0.w)
+//
+//   4) $kill_0000 container parameter (from pixelKill)
+
+void main(
+    float2 pass_texcoord0 : TEXCOORD0,
+    float2 pass_texcoord1 : TEXCOORD1,
+    float  pass_alpha     : COLOR,
+    uniform sampler2D u_texA : TEXUNIT0,
+    uniform sampler2D u_texB : TEXUNIT1,
+    uniform float    u_thresh,
+    out float4 out_color : COLOR)
+{
+    float4 texA = tex2D(u_texA, pass_texcoord0);
+    float4 texB = tex2D(u_texB, pass_texcoord1);
+
+    if (texB.a < 0.1)   { discard; }
+    if (u_thresh > 0.0 && texA.a < u_thresh) { discard; }
+
+    out_color = float4(texA.x, texA.y, texA.z, pass_alpha * texA.w);
+}
