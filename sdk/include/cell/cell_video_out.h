@@ -3,9 +3,9 @@
  *
  * Cell-SDK-style surface for the video-output subsystem (resolution
  * query, mode configuration, scan-mode / aspect / buffer-format
- * constants).  Runtime forwards to PSL1GHT's sysutil/video.h —
- * CellVideoOut* structs are byte-identical to the lower-case
- * video* versions.
+ * constants).  Functions resolve through libsysutil_stub.a
+ * (SPRX trampolines into cellSysutil); constants alias the
+ * byte-identical PSL1GHT <sysutil/video.h> values.
  *
  * The cell SDK bundles this surface into <sysutil/sysutil_sysparam.h>;
  * our shim under the same path re-exports it so cell-SDK sample code
@@ -122,54 +122,29 @@ typedef struct _cellVideoOutConfiguration {
     uint32_t pitch;
 } CellVideoOutConfiguration;
 
-/* ---- function forwarders ------------------------------------------ */
-static inline int32_t cellVideoOutGetState(uint32_t videoOut,
-                                           uint32_t deviceIndex,
-                                           CellVideoOutState *state)
-{
-    return (int32_t)videoGetState((s32)videoOut, (s32)deviceIndex,
-                                  (videoState *)state);
-}
-
-static inline int32_t cellVideoOutGetResolution(uint32_t resolutionId,
-                                                CellVideoOutResolution *resolution)
-{
-    return (int32_t)videoGetResolution((s32)resolutionId,
-                                       (videoResolution *)resolution);
-}
-
-static inline int32_t cellVideoOutConfigure(uint32_t videoOut,
-                                            CellVideoOutConfiguration *config,
-                                            void *option,
-                                            uint32_t blocking)
-{
-    return (int32_t)videoConfigure((s32)videoOut,
-                                   (videoConfiguration *)config,
-                                   option, (s32)blocking);
-}
-
-static inline int32_t cellVideoOutGetConfiguration(uint32_t videoOut,
-                                                   CellVideoOutConfiguration *config,
-                                                   void *option)
-{
-    return (int32_t)videoGetConfiguration(videoOut,
-                                          (videoConfiguration *)config,
-                                          option);
-}
-
-static inline int32_t cellVideoOutGetResolutionAvailability(uint32_t videoOut,
-                                                            uint32_t resolutionId,
-                                                            uint32_t aspect,
-                                                            uint32_t option)
-{
-    return (int32_t)videoGetResolutionAvailability(videoOut, resolutionId,
-                                                   aspect, option);
-}
-
-/* ---- late-SDK additions ------------------------------------------- *
- * The five forwarders above resolve through PSL1GHT's video* shim;
- * the entry points below have no PSL1GHT counterpart and resolve
- * directly to libsysutil_stub.a (cellSysutil PRX). */
+/* ---- function declarations ----------------------------------------- *
+ * Resolved by libsysutil_stub.a (SPRX trampolines into cellSysutil).
+ * Previously these were static-inline forwarders that called PSL1GHT's
+ * videoGetState / videoConfigure / etc. through libsysutil.a, which
+ * forced reference Makefiles to pull in -lsysutil on top of the
+ * _stub archive.  Now they're plain extern declarations — samples
+ * that only link -lsysutil_stub resolve them directly. */
+extern int cellVideoOutGetState(uint32_t videoOut,
+                                uint32_t deviceIndex,
+                                CellVideoOutState *state);
+extern int cellVideoOutGetResolution(uint32_t resolutionId,
+                                     CellVideoOutResolution *resolution);
+extern int cellVideoOutConfigure(uint32_t videoOut,
+                                 CellVideoOutConfiguration *config,
+                                 void *option,
+                                 uint32_t blocking);
+extern int cellVideoOutGetConfiguration(uint32_t videoOut,
+                                        CellVideoOutConfiguration *config,
+                                        void *option);
+extern int cellVideoOutGetResolutionAvailability(uint32_t videoOut,
+                                                 uint32_t resolutionId,
+                                                 uint32_t aspect,
+                                                 uint32_t option);
 
 #define CELL_VIDEO_OUT_PORT_NONE           0x00
 #define CELL_VIDEO_OUT_PORT_HDMI           0x01
