@@ -5,13 +5,15 @@
 # PSL1GHT runtime backing (i.e. cell/* headers ship as declaration-only and
 # need a stub archive to satisfy the link).  Drives `nidgen archive` for each
 # YAML in $STUB_YAMLS, then installs the resulting archive under
-# $PS3DEV/psl1ght/ppu/lib/ so samples can link with `-l<archive_name>_stub`.
+# $PS3DK/ppu/lib/ so samples can link with `-l<archive_name>_stub`.
 #
-# Exception: libgcm_sys_stub.a is installed into $PS3DK/ppu/lib/ as
-# libgcm_sys.a (renamed — _stub suffix dropped) so `-lgcm_sys` in sample
-# Makefiles finds our nidgen-generated archive first (via -L$(PS3DK)/ppu/lib
-# ordering) and shadows PSL1GHT's legacy libgcm_sys.a.  This cuts the last
-# PSL1GHT bytes from the rendering path at the binary level.
+# Canonical file names follow the reference-SDK convention (lib*_stub.a).
+# For Class 3 libraries (gcm_sys, io) that combine nidgen SPRX trampolines
+# with PSL1GHT-name forwarders, the combined archive is installed under the
+# reference-SDK _stub name; a symlink aliases the PSL1GHT legacy name back
+# to it.  -L$(PS3DK)/ppu/lib ordering ensures the symlink shadows any
+# original PSL1GHT copy.  Reference Makefiles get the _stub name directly;
+# PSL1GHT-style homebrew follows the symlink transparently.
 #
 # Add a YAML to $STUB_YAMLS as new zero-coverage libraries land
 # (libsysutil_ap, libsysutil_imejp, libsysutil_subdisplay, libsysutil_music*,
@@ -100,18 +102,17 @@ for yaml in "${STUB_YAMLS[@]}"; do
     [[ ${#produced[@]} -eq 1 ]] \
         || die "expected exactly one archive in $out_dir, got ${#produced[@]}"
 
-    # libgcm_sys_stub.a gets a special home + rename: it lives in
-    # $PS3DK/ppu/lib/ under the PSL1GHT-compat filename libgcm_sys.a so
-    # -lgcm_sys in sample Makefiles finds our nidgen archive first (the
-    # ppu_rules -L order places $PS3DK before $PSL1GHT), shadowing PSL1GHT's
-    # legacy libgcm_sys.a entirely.  Samples then pull zero bytes from the
-    # PSL1GHT tree for the GCM surface.
+    # libgcm_sys_stub.a: installed under the canonical reference-SDK
+    # name libgcm_sys_stub.a, with a libgcm_sys.a symlink aliasing back
+    # for PSL1GHT compatibility.  -L$(PS3DK)/ppu/lib ordering ensures the
+    # symlink shadows any original PSL1GHT copy; reference Makefiles get
+    # the _stub name directly.
     #
-    # We also fold in sdk/libgcm_sys_legacy/build/gcm_legacy_wrappers.o so
-    # the combined archive resolves both the Sony cellGcm* names (from
-    # nidgen) and the PSL1GHT gcm* names that <cell/gcm.h>'s static-inline
-    # forwarders still emit — until the cell-SDK-primary surface reaches
-    # everywhere and those forwarders go away.
+    # The combined archive folds in sdk/libgcm_sys_legacy/ wrappers so it
+    # resolves both Sony cellGcm* names (nidgen) and PSL1GHT gcm* names
+    # that <cell/gcm.h>'s static-inline forwarders still emit — until the
+    # cell-SDK-primary surface reaches everywhere and those forwarders go
+    # away.
     if [[ "$name" == "libgcm_sys_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libgcm_sys_legacy"
         say "building legacy-name wrappers (libgcm_sys_legacy)"
@@ -120,24 +121,21 @@ for yaml in "${STUB_YAMLS[@]}"; do
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
 
-        target="$INSTALL_LIB_PS3DK/libgcm_sys.a"
+        target="$INSTALL_LIB_PS3DK/libgcm_sys_stub.a"
         # Start from the nidgen archive so its object layout is preserved,
         # then ar-r the legacy wrappers on top.  'ar r' updates members in
         # place, so reruns replace rather than duplicate.
         install -m 0644 "${produced[0]}" "$target"
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
-        say "installed libgcm_sys.a -> $INSTALL_LIB_PS3DK/ (nidgen + legacy wrappers)"
+        ln -sf libgcm_sys_stub.a "$INSTALL_LIB_PS3DK/libgcm_sys.a"
+        say "installed libgcm_sys_stub.a + libgcm_sys.a symlink -> $INSTALL_LIB_PS3DK/"
     elif [[ "$name" == "libio_stub" ]]; then
-        # Mirror of the libgcm_sys story: nidgen emits sys_io SPRX stubs
-        # under Sony cellPad / cellKb / cellMouse names; the libio_legacy
-        # TU adds PSL1GHT-flavoured ioPad / ioKb / ioMouse pass-throughs.
-        # Combined into libio.a at $PS3DK/ppu/lib/ which, via the sample
-        # Makefiles' -L$(PS3DK)/ppu/lib ordering, shadows PSL1GHT's own
-        # libio.a so the pad/kb/mouse surface resolves fully through our
-        # nidgen-emitted NIDs.  Homebrew built against either -lio spelling
-        # works; code linking cellPad* gets Sony names, code linking ioPad*
-        # gets the wrappers that call the same cellPad* stubs.
+        # Canonical reference-SDK libio_stub.a contains nidgen SPRX
+        # stubs under Sony cellPad / cellKb / cellMouse names, plus
+        # libio_legacy wrappers that forward PSL1GHT-style ioPad / ioKb /
+        # ioMouse calls to the same cell* stubs.  Installed under the
+        # _stub name; a libio.a symlink aliases back for PSL1GHT compat.
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libio_legacy"
         say "building legacy-name wrappers (libio_legacy)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" make -C "$legacy_dir" all >/dev/null
@@ -145,11 +143,12 @@ for yaml in "${STUB_YAMLS[@]}"; do
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
 
-        target="$INSTALL_LIB_PS3DK/libio.a"
+        target="$INSTALL_LIB_PS3DK/libio_stub.a"
         install -m 0644 "${produced[0]}" "$target"
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
-        say "installed libio.a -> $INSTALL_LIB_PS3DK/ (nidgen + legacy wrappers)"
+        ln -sf libio_stub.a "$INSTALL_LIB_PS3DK/libio.a"
+        say "installed libio_stub.a + libio.a symlink -> $INSTALL_LIB_PS3DK/"
     elif [[ "$name" == "libc_stub" ]]; then
         # The reference SDK ships spu_printf_{initialize,finalize,
         # attach_group,attach_thread,detach_group,detach_thread} in
@@ -181,5 +180,18 @@ for yaml in "${STUB_YAMLS[@]}"; do
         say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
     fi
 done
+
+# libusb.a is built by build-psl1ght.sh (PSL1GHT's libpsl1ght/libusb);
+# it has no nidgen counterpart yet.  Reference Makefiles spell it as
+# libusbd_stub.a, so alias the PSL1GHT name to satisfy -lusbd_stub.
+# TODO: extract a libusbd_stub.yaml, generate a real libusbd_stub.a via
+# nidgen, and invert the symlink direction (libusb.a → libusbd_stub.a).
+libusb="$INSTALL_LIB_PS3DK/libusb.a"
+if [[ -f "$libusb" ]]; then
+    ln -sf libusb.a "$INSTALL_LIB_PS3DK/libusbd_stub.a"
+    say "installed libusbd_stub.a symlink -> libusb.a"
+else
+    say "warning: libusb.a not found; skip libusbd_stub.a symlink"
+fi
 
 say "done — ${#STUB_YAMLS[@]} stub archive(s) installed"
