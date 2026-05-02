@@ -548,6 +548,13 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
     if (!prog || !param || !values || !addrOffset) return;
 
     const CgBinaryParameter *pp = (const CgBinaryParameter *)param;
+
+    /* A zero embeddedConst means this parameter has no embedded
+     * constants to patch (e.g. samplers).  We must check the offset
+     * itself, not just the computed pointer — NULL-offset is always
+     * a no-op. */
+    if (!pp->embeddedConst) return;
+
     const uint32_t *embed =
         (const uint32_t *)((const uint8_t *)prog + pp->embeddedConst);
 

@@ -77,6 +77,17 @@ between `int` and pointer treated as no-ops):
   (LPAR memory map tops out at ~256 MiB main + 256 MiB RSX).  Use
   `-fpermissive` when porting code written for older SDKs; use the
   widened type when writing new code.
+- **`(uint32_t)(ptr->member) - (uint32_t)(ptr)` computes a
+  struct-field byte offset and assumes `sizeof(void *) == 4`.**  This
+  pattern is common in older PS3 code that computes a per-attribute
+  offset from a vertex-buffer base.  On PPU64 the subtractions
+  themselves are correct when both pointers reside in the same 4 GiB
+  segment (always true on PS3 hardware), but the intermediate
+  `(uint32_t)` truncation triggers `-Wpointer-to-int-cast`.
+  **Fix:** widen the intermediate to `size_t` — e.g.
+  `(uint32_t)((size_t)ptr->member - (size_t)ptr)` — which silences
+  the warning and stays correct even if the address range ever
+  extends past 32 bits.
 - **`sizeof(void *) == 8`, not 4.**  Structs that hand-roll padding
   with `int padX[N]` after a pointer field need to be inspected.  If
   the struct crosses the SPRX boundary, tag the pointer field
