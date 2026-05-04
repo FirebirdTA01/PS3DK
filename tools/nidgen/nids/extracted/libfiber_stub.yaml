@@ -1,6 +1,7 @@
 library: cellFiber
 version: 1
 module: cellFiber
+archive_name: fiber
 exports:
 - name: _cellFiberPpuAttributeInitialize
   nid: '0xc11f8056'
