@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **99**
 - Cell SDK exports total: **4796**
-- Covered by our install tree: **2763** (57.6%) — 2463 by exact name, 300 via alias
-- Our install tree exports: **20403** (all archives, deduplicated)
+- Covered by our install tree: **2794** (58.3%) — 2494 by exact name, 300 via alias
+- Our install tree exports: **20530** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4789 · stub 7 · impl 0 · verified 0
 
@@ -31,12 +31,12 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsysutil_game_stub` | 15 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_game_exec_stub` | 6 | 0 | 0 | 0 | 0.0% |
 | `libgcm_sys_stub` | 86 | 86 | 0 | 86 | 100.0% |
-| `libgifdec_stub` | 12 | 0 | 0 | 0 | 0.0% |
+| `libgifdec_stub` | 12 | 12 | 0 | 12 | 100.0% |
 | `libhttp_stub` | 105 | 0 | 96 | 96 | 91.4% |
 | `libhttp_util_stub` | 20 | 0 | 20 | 20 | 100.0% |
 | `libsysutil_imejp_stub` | 41 | 41 | 0 | 41 | 100.0% |
 | `libjpgdec_stub` | 12 | 12 | 0 | 12 | 100.0% |
-| `libjpgenc_stub` | 10 | 0 | 0 | 0 | 0.0% |
+| `libjpgenc_stub` | 10 | 10 | 0 | 10 | 100.0% |
 | `libkey2char_stub` | 5 | 0 | 0 | 0 | 0.0% |
 | `libl10n_stub` | 165 | 165 | 0 | 165 | 100.0% |
 | `libprof_stub` | 4 | 0 | 0 | 0 | 0.0% |
@@ -53,7 +53,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsysutil_photo_export_stub` | 9 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_photo_stub` | 9 | 0 | 0 | 0 | 0.0% |
 | `libpngdec_stub` | 29 | 29 | 0 | 29 | 100.0% |
-| `libpngenc_stub` | 9 | 0 | 0 | 0 | 0.0% |
+| `libpngenc_stub` | 9 | 9 | 0 | 9 | 100.0% |
 | `libsysutil_print_stub` | 14 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_rec_stub` | 7 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_remoteplay_stub` | 8 | 0 | 0 | 0 | 0.0% |
@@ -242,23 +242,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x38579ec9  cellGameSetExitParam
 ```
 
-### `libgifdec_stub` (12 / 12 missing)
-
-```
-0x116a7da9  cellGifDecClose
-0xb60d42a5  cellGifDecCreate
-0x44b1bc61  cellGifDecDecodeData
-0xe74b2cb1  cellGifDecDestroy
-0x4711cb7f  cellGifDecExtCreate
-0x02e7e03e  cellGifDecExtDecodeData
-0x17fb83c1  cellGifDecExtOpen
-0xe53f91f2  cellGifDecExtReadHeader
-0x95cae771  cellGifDecExtSetParameter
-0x75745079  cellGifDecOpen
-0xf0da95de  cellGifDecReadHeader
-0x41a90dc4  cellGifDecSetParameter
-```
-
 ### `libhttp_stub` (9 / 105 missing)
 
 ```
@@ -271,21 +254,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xe6c7d333  cellHttpClientSetMinSslVersion
 0xbb6c0eb2  cellHttpClientSetSendBufferSize
 0x7313c78d  cellHttpClientSetSslIdDestroyCallback
-```
-
-### `libjpgenc_stub` (10 / 10 missing)
-
-```
-0x969fc5f7  cellJpgEncClose
-0xa9e81214  cellJpgEncEncodePicture
-0x636dc89e  cellJpgEncEncodePicture2
-0x4262e880  cellJpgEncGetStreamInfo
-0xa4bfae51  cellJpgEncOpen
-0x6f2d371c  cellJpgEncOpenEx
-0x12d9b6c5  cellJpgEncQueryAttr
-0x0cf2b78b  cellJpgEncReset
-0x2ae79be8  cellJpgEncWaitForInput
-0x9b4e3a74  cellJpgEncWaitForOutput
 ```
 
 ### `libkey2char_stub` (5 / 5 missing)
@@ -418,20 +386,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x3f7fc0af  cellPhotoFinalize
 0x55c70783  cellPhotoInitialize
 0x42a32983  cellPhotoRegistFromFile
-```
-
-### `libpngenc_stub` (9 / 9 missing)
-
-```
-0x117cd726  cellPngEncClose
-0x5b546ca4  cellPngEncEncodePicture
-0x585269bc  cellPngEncGetStreamInfo
-0x19256dc5  cellPngEncOpen
-0xc82558ce  cellPngEncOpenEx
-0x496cfcd0  cellPngEncQueryAttr
-0x6ac91de3  cellPngEncReset
-0x662bd637  cellPngEncWaitForInput
-0x90ef2963  cellPngEncWaitForOutput
 ```
 
 ### `libsysutil_print_stub` (14 / 14 missing)
