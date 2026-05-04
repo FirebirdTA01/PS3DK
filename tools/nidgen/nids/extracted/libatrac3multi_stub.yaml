@@ -1,6 +1,7 @@
 library: cellAtracMulti
 version: 1
 module: cellAtracMulti
+archive_name: atrac3multi
 exports:
 - name: cellAtracMultiAddStreamData
   nid: '0x1ae28192'

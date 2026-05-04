@@ -131,6 +131,10 @@ HEADERS := \
     include/cell/codec/adec.h \
     include/cell/codec/adec_base.h \
     include/cell/vpost.h \
+    include/cell/codec/libatrac3plus.h \
+    include/cell/codec/libatrac3multi.h \
+    include/cell/codec/celpenc.h \
+    include/cell/codec/celp8enc.h \
     include/cell/sysutil_oskdialog_ext.h \
     include/cell/sysutil_search.h \
     include/cell/sysutil_search_types.h \
