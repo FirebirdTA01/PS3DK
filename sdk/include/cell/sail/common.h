@@ -54,7 +54,6 @@ typedef struct { int8_t coding, scan; int16_t frameRate, aspectRatio; int32_t wi
 
 /* AU info + feeder frame info */
 typedef struct { uint64_t pts, dts; uint32_t size; uint32_t reserved; } CellSailAuInfo;
-typedef struct { uint64_t internalData[4]; } CellSailFeederFrameInfo;
 typedef struct { uint64_t internalData[8]; } CellSailSourceBufferItem;
 
 /* CellSailStartCommand forward-decl from source.h */

@@ -1,6 +1,7 @@
 library: cellSailRec
 version: 1
 module: cellSailRec
+archive_name: sail_rec
 exports:
 - name: cellSailComposerFinalize
   nid: '0xe15f38d9'

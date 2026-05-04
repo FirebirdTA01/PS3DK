@@ -69,6 +69,7 @@ extern "C" {
 #define CELL_SYSMODULE_FREETYPE           0x001b
 #define CELL_SYSMODULE_USBD               0x001c
 #define CELL_SYSMODULE_SAIL               0x001d
+#define CELL_SYSMODULE_SAIL_REC           0xf034
 #define CELL_SYSMODULE_L10N               0x001e
 #define CELL_SYSMODULE_RESC               0x001f
 #define CELL_SYSMODULE_DAISY              0x0020

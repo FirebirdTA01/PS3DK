@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-sail-rec CXX)
+include(ps3-self)
+add_executable(hello-ppu-sail-rec source/main.cpp)
+target_compile_features(hello-ppu-sail-rec PRIVATE cxx_std_17)
+target_link_libraries(hello-ppu-sail-rec PRIVATE sail_rec_stub sysmodule_stub c_stub sysutil rt lv2 m)
+ps3_add_self(hello-ppu-sail-rec)
