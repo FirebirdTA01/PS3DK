@@ -19,3 +19,6 @@ Tracked ABI documentation for each shipped stub archive.
 | libcelp8enc_stub | CELP-8 voice encoder | 9 | [libcelp8enc.md](libcelp8enc.md) |
 | libsail_stub | High-level multimedia framework | 119 | [libsail.md](libsail.md) |
 | libsail_rec_stub | SAIL recording/muxing | 58 | [libsail_rec.md](libsail_rec.md) |
+| libpngenc_stub | PNG encoder | 9 | [libpngenc.md](libpngenc.md) |
+| libjpgenc_stub | JPEG encoder | 10 | [libjpgenc.md](libjpgenc.md) |
+| libgifdec_stub | GIF decoder | 12 | [libgifdec.md](libgifdec.md) |
