@@ -49,6 +49,8 @@ extern "C" {
 #define CELL_SYSMODULE_SYNC2              0x0055
 #define CELL_SYSMODULE_FS                 0x000e
 #define CELL_SYSMODULE_JPGDEC             0x000f
+#define CELL_SYSMODULE_JPGENC             0x003d
+#define CELL_SYSMODULE_GIFDEC             0xf010
 #define CELL_SYSMODULE_GCM_SYS            0x0010
 #define CELL_SYSMODULE_GCM                0x0010
 #define CELL_SYSMODULE_AUDIO              0x0011
@@ -64,6 +66,7 @@ extern "C" {
 #define CELL_SYSMODULE_SYSUTIL_NP         0x0016
 #define CELL_SYSMODULE_IO                 0x0017
 #define CELL_SYSMODULE_PNGDEC             0x0018
+#define CELL_SYSMODULE_PNGENC             0x0052
 #define CELL_SYSMODULE_FONT               0x0019
 #define CELL_SYSMODULE_FONTFT             0x001a
 #define CELL_SYSMODULE_FREETYPE           0x001b

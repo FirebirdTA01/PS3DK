@@ -135,6 +135,10 @@ HEADERS := \
     include/cell/codec/libatrac3multi.h \
     include/cell/codec/celpenc.h \
     include/cell/codec/celp8enc.h \
+    include/cell/codec/pngcom.h \
+    include/cell/codec/pngenc.h \
+    include/cell/codec/jpgenc.h \
+    include/cell/codec/gifdec.h \
     include/cell/sail.h \
     include/cell/sail/common.h \
     include/cell/sail/player.h \

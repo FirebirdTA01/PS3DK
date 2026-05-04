@@ -1,6 +1,7 @@
 library: cellJpgEnc
 version: 1
 module: cellJpgEnc
+archive_name: jpgenc
 exports:
 - name: cellJpgEncClose
   nid: '0x969fc5f7'
