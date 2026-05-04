@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **99**
 - Cell SDK exports total: **4796**
-- Covered by our install tree: **2521** (52.6%) — 2221 by exact name, 300 via alias
-- Our install tree exports: **19429** (all archives, deduplicated)
+- Covered by our install tree: **2586** (53.9%) — 2286 by exact name, 300 via alias
+- Our install tree exports: **19693** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4789 · stub 7 · impl 0 · verified 0
 
@@ -15,13 +15,13 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | Library | Cell SDK exports | Exact | Alias | Total | % |
 |---|---:|---:|---:|---:|---:|
 | `libadec_stub` | 9 | 9 | 0 | 9 | 100.0% |
-| `libatrac3plus_stub` | 23 | 0 | 0 | 0 | 0.0% |
-| `libatrac3multi_stub` | 24 | 0 | 0 | 0 | 0.0% |
+| `libatrac3plus_stub` | 23 | 23 | 0 | 23 | 100.0% |
+| `libatrac3multi_stub` | 24 | 24 | 0 | 24 | 100.0% |
 | `libaudio_stub` | 23 | 23 | 0 | 23 | 100.0% |
 | `libsysutil_bgdl_stub` | 2 | 0 | 0 | 0 | 0.0% |
 | `libcamera_stub` | 28 | 0 | 28 | 28 | 100.0% |
-| `libcelp8enc_stub` | 9 | 0 | 0 | 0 | 0.0% |
-| `libcelpenc_stub` | 9 | 0 | 0 | 0 | 0.0% |
+| `libcelp8enc_stub` | 9 | 9 | 0 | 9 | 100.0% |
+| `libcelpenc_stub` | 9 | 9 | 0 | 9 | 100.0% |
 | `libsysutil_cross_controller_stub` | 1 | 0 | 0 | 0 | 0.0% |
 | `libdaisy_stub` | 52 | 0 | 0 | 0 | 0.0% |
 | `libdmux_stub` | 20 | 20 | 0 | 20 | 100.0% |
@@ -116,96 +116,11 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 
 ## Missing symbols by library
 
-### `libatrac3plus_stub` (23 / 23 missing)
-
-```
-0x46cfc013  cellAtracAddStreamData
-0xfa293e88  cellAtracCreateDecoder
-0x2642d4cc  cellAtracCreateDecoderExt
-0x8eb0e65f  cellAtracDecode
-0x761cb9be  cellAtracDeleteDecoder
-0x006016da  cellAtracGetBitrate
-0x99fb73d1  cellAtracGetBufferInfoForResetting
-0x0f9667b6  cellAtracGetChannel
-0xb5c11938  cellAtracGetInternalErrorInfo
-0xab6b6dbf  cellAtracGetLoopInfo
-0x5f62d546  cellAtracGetMaxSample
-0x7b22e672  cellAtracGetNextDecodePosition
-0x4797d1ff  cellAtracGetNextSample
-0xdfab73aa  cellAtracGetRemainFrame
-0xbe07f05e  cellAtracGetSecondBufferInfo
-0xcf01d5d4  cellAtracGetSoundInfo
-0x2bfff084  cellAtracGetStreamDataInfo
-0xc9a95fcb  cellAtracGetVacantSize
-0x99efe171  cellAtracIsSecondBufferNeeded
-0x7772eb2b  cellAtracResetPlayPosition
-0x66afc68e  cellAtracSetDataAndGetMemSize
-0x78ba5c41  cellAtracSetLoopNum
-0x06ddb53e  cellAtracSetSecondBuffer
-```
-
-### `libatrac3multi_stub` (24 / 24 missing)
-
-```
-0x1ae28192  cellAtracMultiAddStreamData
-0x0ffb4665  cellAtracMultiCreateDecoder
-0xb23f070a  cellAtracMultiCreateDecoderExt
-0xd86acb12  cellAtracMultiDecode
-0x780a18bb  cellAtracMultiDeleteDecoder
-0x6cff1d7f  cellAtracMultiGetBitrate
-0xde9b7905  cellAtracMultiGetBufferInfoForResetting
-0xf11b8dd5  cellAtracMultiGetChannel
-0x92d48677  cellAtracMultiGetInternalErrorInfo
-0xb91967bc  cellAtracMultiGetLoopInfo
-0xd85f2d10  cellAtracMultiGetMaxSample
-0x489e22f1  cellAtracMultiGetNextDecodePosition
-0x77bd901a  cellAtracMultiGetNextSample
-0x59431d1b  cellAtracMultiGetRemainFrame
-0xed30f1fa  cellAtracMultiGetSecondBufferInfo
-0xc5c5eed3  cellAtracMultiGetSoundInfo
-0x670b2721  cellAtracMultiGetStreamDataInfo
-0x5b6ccf5a  cellAtracMultiGetTrackArray
-0x60b2101d  cellAtracMultiGetVacantSize
-0xf8b1ab0c  cellAtracMultiIsSecondBufferNeeded
-0x9119cfd1  cellAtracMultiResetPlayPosition
-0x81b22ca8  cellAtracMultiSetDataAndGetMemSize
-0xda43f526  cellAtracMultiSetLoopNum
-0x659775fb  cellAtracMultiSetSecondBuffer
-```
-
 ### `libsysutil_bgdl_stub` (2 / 2 missing)
 
 ```
 0x74e57bdf  cellBGDLGetMode
 0x7e134a90  cellBGDLSetMode
-```
-
-### `libcelp8enc_stub` (9 / 9 missing)
-
-```
-0xfd2566b4  cellCelp8EncClose
-0x2099f86e  cellCelp8EncEncodeFrame
-0xbbbc2c1c  cellCelp8EncEnd
-0x48c5020d  cellCelp8EncGetAu
-0x2eb6efee  cellCelp8EncOpen
-0xcd48ad62  cellCelp8EncOpenEx
-0x2d677e0c  cellCelp8EncQueryAttr
-0x0f6ab57b  cellCelp8EncStart
-0x29da1ea6  cellCelp8EncWaitForOutput
-```
-
-### `libcelpenc_stub` (9 / 9 missing)
-
-```
-0x15ec0cca  cellCelpEncClose
-0x81fe030c  cellCelpEncEncodeFrame
-0xf2b85dff  cellCelpEncEnd
-0x3773692f  cellCelpEncGetAu
-0x77b3b29a  cellCelpEncOpen
-0x9eb084db  cellCelpEncOpenEx
-0x6b148570  cellCelpEncQueryAttr
-0x55dc23de  cellCelpEncStart
-0x9b244272  cellCelpEncWaitForOutput
 ```
 
 ### `libsysutil_cross_controller_stub` (1 / 1 missing)
