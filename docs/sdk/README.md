@@ -17,3 +17,4 @@ Tracked ABI documentation for each shipped stub archive.
 | libatrac3multi_stub | Multi-channel ATRAC3 | 24 | [libatrac3multi.md](libatrac3multi.md) |
 | libcelpenc_stub | CELP voice encoder | 9 | [libcelpenc.md](libcelpenc.md) |
 | libcelp8enc_stub | CELP-8 voice encoder | 9 | [libcelp8enc.md](libcelp8enc.md) |
+| libsail_stub | High-level multimedia framework | 119 | [libsail.md](libsail.md) |
