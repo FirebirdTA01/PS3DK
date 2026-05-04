@@ -1,6 +1,7 @@
 library: cellSail
 version: 1
 module: cellSail
+archive_name: sail
 exports:
 - name: cellSailAuReceiverFinalize
   nid: '0xed58e3ec'
