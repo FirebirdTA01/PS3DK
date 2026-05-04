@@ -10,3 +10,6 @@ Tracked ABI documentation for each shipped stub archive.
 | libsysutil_oskdialog_ext_stub | Extended OSK dialog | 17 | [libsysutil_oskdialog_ext.md](libsysutil_oskdialog_ext.md) |
 | libsysutil_search_stub | Content-search utility | 21 | [libsysutil_search.md](libsysutil_search.md) |
 | libsys_crashdump_stub | Crash dump user log | 2 | [libcrashdump.md](libcrashdump.md) |
+| libpamf_stub | PAMF container parser | 23 | [libpamf.md](libpamf.md) |
+| libadec_stub | Audio decoder framework | 9 | [libadec.md](libadec.md) |
+| libvpost_stub | Video post-processing | 5 | [libvpost.md](libvpost.md) |

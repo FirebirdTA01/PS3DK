@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **99**
 - Cell SDK exports total: **4796**
-- Covered by our install tree: **2484** (51.8%) — 2184 by exact name, 300 via alias
-- Our install tree exports: **19278** (all archives, deduplicated)
+- Covered by our install tree: **2521** (52.6%) — 2221 by exact name, 300 via alias
+- Our install tree exports: **19429** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4789 · stub 7 · impl 0 · verified 0
 
@@ -14,7 +14,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 
 | Library | Cell SDK exports | Exact | Alias | Total | % |
 |---|---:|---:|---:|---:|---:|
-| `libadec_stub` | 9 | 0 | 0 | 0 | 0.0% |
+| `libadec_stub` | 9 | 9 | 0 | 9 | 100.0% |
 | `libatrac3plus_stub` | 23 | 0 | 0 | 0 | 0.0% |
 | `libatrac3multi_stub` | 24 | 0 | 0 | 0 | 0.0% |
 | `libaudio_stub` | 23 | 23 | 0 | 23 | 100.0% |
@@ -47,7 +47,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libnetctl_stub` | 19 | 0 | 10 | 10 | 52.6% |
 | `libsysutil_oskdialog_ext_stub` | 17 | 17 | 0 | 17 | 100.0% |
 | `libovis_stub` | 4 | 0 | 0 | 0 | 0.0% |
-| `libpamf_stub` | 23 | 0 | 0 | 0 | 0.0% |
+| `libpamf_stub` | 23 | 23 | 0 | 23 | 100.0% |
 | `libsysutil_photo_decode_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_photo_import_stub` | 2 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_photo_export_stub` | 9 | 0 | 0 | 0 | 0.0% |
@@ -88,7 +88,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsysutil_video_export_stub` | 6 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_video_upload_stub` | 1 | 0 | 0 | 0 | 0.0% |
 | `libvoice_stub` | 35 | 0 | 0 | 0 | 0.0% |
-| `libvpost_stub` | 5 | 0 | 0 | 0 | 0.0% |
+| `libvpost_stub` | 5 | 5 | 0 | 5 | 100.0% |
 | `libfreetype_stub` | 248 | 0 | 0 | 0 | 0.0% |
 | `libfreetypeTT_stub` | 248 | 0 | 0 | 0 | 0.0% |
 | `libgcm_gpad_stub` | 3 | 0 | 0 | 0 | 0.0% |
@@ -115,20 +115,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libnet_stub` | 55 | 26 | 0 | 26 | 47.3% |
 
 ## Missing symbols by library
-
-### `libadec_stub` (9 / 9 missing)
-
-```
-0x847d2380  cellAdecClose
-0x1529e506  cellAdecDecodeAu
-0xe2ea549b  cellAdecEndSeq
-0x97ff2af1  cellAdecGetPcm
-0xbd75f78b  cellAdecGetPcmItem
-0xd00a6988  cellAdecOpen
-0x8b5551a4  cellAdecOpenEx
-0x7e4a4a49  cellAdecQueryAttr
-0x487b613e  cellAdecStartSeq
-```
 
 ### `libatrac3plus_stub` (23 / 23 missing)
 
@@ -473,34 +459,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x82f294b2  cellOvisGetOverlayTableSize
 0xa876c911  cellOvisInitializeOverlayTable
 0x629ba0c0  cellOvisInvalidateOverlappedSegments
-```
-
-### `libpamf_stub` (23 / 23 missing)
-
-```
-0x1abeb9d6  cellPamfEpIteratorGetEp
-0x50b83205  cellPamfEpIteratorMove
-0xca8181c1  cellPamfGetHeaderSize
-0x90fc9a59  cellPamfGetHeaderSize2
-0x44f5c9e3  cellPamfGetStreamOffsetAndSize
-0xe8586ec6  cellPamfReaderGetEpIteratorWithIndex
-0x439fba17  cellPamfReaderGetEpIteratorWithTimeStamp
-0x71df326a  cellPamfReaderGetEsFilterId
-0xdb70296c  cellPamfReaderGetMuxRateBound
-0xd9ea3457  cellPamfReaderGetNumberOfEp
-0xd0230671  cellPamfReaderGetNumberOfSpecificStreams
-0x37f723f7  cellPamfReaderGetNumberOfStreams
-0xf61609d6  cellPamfReaderGetPresentationEndTime
-0x4de501b1  cellPamfReaderGetPresentationStartTime
-0x041cc708  cellPamfReaderGetStreamIndex
-0x67fd273b  cellPamfReaderGetStreamInfo
-0x9ab20793  cellPamfReaderGetStreamTypeAndChannel
-0xb8436ee5  cellPamfReaderInitialize
-0x461534b4  cellPamfReaderSetStreamWithIndex
-0x03fd2caa  cellPamfReaderSetStreamWithTypeAndChannel
-0x28b4e2c1  cellPamfReaderSetStreamWithTypeAndIndex
-0x01067e22  cellPamfStreamTypeToEsFilterId
-0xd1a40ef4  cellPamfVerify
 ```
 
 ### `libsysutil_photo_decode_stub` (4 / 4 missing)
@@ -1051,16 +1009,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x3dad26e7  cellVoiceWriteToIPort
 0x30f0b5ab  cellVoiceWriteToIPortEx
 0xc4f573b8  cellVoiceWriteToIPortEx2
-```
-
-### `libvpost_stub` (5 / 5 missing)
-
-```
-0x10ef39f6  cellVpostClose
-0xabb8cc3d  cellVpostExec
-0xcd33f3e2  cellVpostOpen
-0x40524325  cellVpostOpenEx
-0x95e788c3  cellVpostQueryAttr
 ```
 
 ### `libfreetype_stub` (248 / 248 missing)
