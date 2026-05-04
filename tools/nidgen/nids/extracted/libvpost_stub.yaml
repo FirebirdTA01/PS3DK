@@ -1,6 +1,7 @@
 library: cellVpost
 version: 1
 module: cellVpost
+archive_name: vpost
 exports:
 - name: cellVpostClose
   nid: '0x10ef39f6'

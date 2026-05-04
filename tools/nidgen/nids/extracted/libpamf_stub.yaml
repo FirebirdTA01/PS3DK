@@ -1,6 +1,7 @@
 library: cellPamf
 version: 1
 module: cellPamf
+archive_name: pamf
 exports:
 - name: cellPamfEpIteratorGetEp
   nid: '0x1abeb9d6'
