@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **99**
 - Cell SDK exports total: **4796**
-- Covered by our install tree: **2586** (53.9%) — 2286 by exact name, 300 via alias
-- Our install tree exports: **19693** (all archives, deduplicated)
+- Covered by our install tree: **2705** (56.4%) — 2405 by exact name, 300 via alias
+- Our install tree exports: **20170** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4789 · stub 7 · impl 0 · verified 0
 
@@ -60,7 +60,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libresc_stub` | 22 | 0 | 21 | 21 | 95.5% |
 | `librtc_stub` | 33 | 33 | 0 | 33 | 100.0% |
 | `librudp_stub` | 29 | 0 | 0 | 0 | 0.0% |
-| `libsail_stub` | 119 | 0 | 0 | 0 | 0.0% |
+| `libsail_stub` | 119 | 119 | 0 | 119 | 100.0% |
 | `libsail_rec_stub` | 58 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_savedata_stub` | 12 | 12 | 0 | 12 | 100.0% |
 | `libsysutil_screenshot_stub` | 4 | 4 | 0 | 4 | 100.0% |
@@ -516,130 +516,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x384ba777  cellRudpSetOption
 0x48d3eeac  cellRudpTerminate
 0x48c001b0  cellRudpWrite
-```
-
-### `libsail_stub` (119 / 119 missing)
-
-```
-0xed58e3ec  cellSailAuReceiverFinalize
-0x3a1132ed  cellSailAuReceiverGet
-0x3dd9639a  cellSailAuReceiverInitialize
-0x10298371  cellSailAviMovieGetHeader
-0x6e83f5c0  cellSailAviMovieGetMovieInfo
-0x3e908c56  cellSailAviMovieGetStreamByIndex
-0xddebd2a5  cellSailAviMovieGetStreamByTypeAndIndex
-0xcc3cca60  cellSailAviStreamGetHeader
-0xc09e2f23  cellSailAviStreamGetMediaType
-0xdf5553ef  cellSailDescriptorClearEs
-0x15fd6a2a  cellSailDescriptorClose
-0x0abb318b  cellSailDescriptorCreateDatabase
-0x28336e89  cellSailDescriptorDestroyDatabase
-0xac9c3b1f  cellSailDescriptorGetCapabilities
-0xbd1635f4  cellSailDescriptorGetMediaInfo
-0xd5f9a15b  cellSailDescriptorGetStreamType
-0x4c191088  cellSailDescriptorGetUri
-0x92590d52  cellSailDescriptorInquireCapability
-0x277adf21  cellSailDescriptorIsAutoSelection
-0xc044fab1  cellSailDescriptorOpen
-0x76b1a425  cellSailDescriptorSetAutoSelection
-0x0d0c2f0c  cellSailDescriptorSetEs
-0xee94b99b  cellSailDescriptorSetParameter
-0x9553af65  cellSailFutureFinalize
-0x3a2d806c  cellSailFutureGet
-0x4cc54f8e  cellSailFutureInitialize
-0x51ecf361  cellSailFutureIsDone
-0x0c4cb439  cellSailFutureReset
-0xa37fed15  cellSailFutureSet
-0x76488bb1  cellSailGraphicsAdapterFinalize
-0xffd58aa4  cellSailGraphicsAdapterGetFormat
-0x0247c69e  cellSailGraphicsAdapterGetFrame
-0x018281a8  cellSailGraphicsAdapterGetFrame2
-0x1c983864  cellSailGraphicsAdapterInitialize
-0x1872331b  cellSailGraphicsAdapterPtsToTimePosition
-0x2e3ccb5e  cellSailGraphicsAdapterSetPreferredFormat
-0x44a20e79  cellSailGraphicsAdapterUpdateAvSync
-0x346ebba3  cellSailMemAllocatorInitialize
-0xb980b76e  cellSailMp4MovieGetBrand
-0x5783a454  cellSailMp4MovieGetMovieInfo
-0x85b07126  cellSailMp4MovieGetTrackById
-0x5faf802b  cellSailMp4MovieGetTrackByIndex
-0xc2d90ec9  cellSailMp4MovieGetTrackByTypeAndIndex
-0xd4049de0  cellSailMp4MovieIsCompatibleBrand
-0xa48be428  cellSailMp4TrackGetTrackInfo
-0x5f44f64f  cellSailMp4TrackGetTrackReference
-0x72236ec1  cellSailMp4TrackGetTrackReferenceCount
-0x7c8dff3b  cellSailPlayerAddDescriptor
-0xbdf21b0f  cellSailPlayerBoot
-0x950d53c1  cellSailPlayerCancel
-0xbf9b8d72  cellSailPlayerCloseEsAudio
-0xaed9d6cd  cellSailPlayerCloseEsUser
-0x07924359  cellSailPlayerCloseEsVideo
-0x85beffcc  cellSailPlayerCloseStream
-0xd7938b8d  cellSailPlayerCreateDescriptor
-0xfc839bd4  cellSailPlayerDestroyDescriptor
-0xcc987ba6  cellSailPlayerDumpImage
-0x18b4629d  cellSailPlayerFinalize
-0x75fca288  cellSailPlayerGetCurrentDescriptor
-0x752f8585  cellSailPlayerGetDescriptorCount
-0x952269c9  cellSailPlayerGetParameter
-0x186b98d3  cellSailPlayerGetRegisteredProtocols
-0x38144ecf  cellSailPlayerGetRepeatMode
-0x17932b26  cellSailPlayerInitialize
-0x23654375  cellSailPlayerInitialize2
-0x09de25fd  cellSailPlayerIsEsAudioMuted
-0xdbe32ed4  cellSailPlayerIsEsVideoMuted
-0xaafa17b8  cellSailPlayerIsPaused
-0x26563ddc  cellSailPlayerNext
-0x145f9b11  cellSailPlayerOpenEsAudio
-0xa849d0a7  cellSailPlayerOpenEsUser
-0x477501f6  cellSailPlayerOpenEsVideo
-0x34ecc1b9  cellSailPlayerOpenStream
-0xbedccc74  cellSailPlayerRegisterSource
-0x9897fbd1  cellSailPlayerRemoveDescriptor
-0x4fa5ad09  cellSailPlayerReopenEsAudio
-0x7b6fa92e  cellSailPlayerReopenEsUser
-0xf60a8a69  cellSailPlayerReopenEsVideo
-0x47632810  cellSailPlayerReplaceEventHandler
-0xf5747e1f  cellSailPlayerSetAuReceiver
-0x91d287f6  cellSailPlayerSetEsAudioMuted
-0xf1446a40  cellSailPlayerSetEsVideoMuted
-0x18bcd21b  cellSailPlayerSetGraphicsAdapter
-0x5f7c7a6f  cellSailPlayerSetParameter
-0xd1d55a90  cellSailPlayerSetPaused
-0x92eaf6ca  cellSailPlayerSetRendererAudio
-0xecf56150  cellSailPlayerSetRendererVideo
-0xfc5baf8a  cellSailPlayerSetRepeatMode
-0x1139a206  cellSailPlayerSetSoundAdapter
-0xe535b0d3  cellSailPlayerStart
-0xeba8d4ec  cellSailPlayerStop
-0x6f0b1002  cellSailPlayerSubscribeEvent
-0x025b4974  cellSailPlayerUnregisterSource
-0x69793952  cellSailPlayerUnsubscribeEvent
-0x06dd4174  cellSailRendererAudioFinalize
-0x67b4d01f  cellSailRendererAudioInitialize
-0xb7b4ecee  cellSailRendererAudioNotifyCallCompleted
-0xf841a537  cellSailRendererAudioNotifyFrameDone
-0x325039b9  cellSailRendererAudioNotifyOutputEos
-0x47055fea  cellSailRendererVideoFinalize
-0x8d1ff475  cellSailRendererVideoInitialize
-0x954f48f8  cellSailRendererVideoNotifyCallCompleted
-0x5f77e8df  cellSailRendererVideoNotifyFrameDone
-0xdff1cda2  cellSailRendererVideoNotifyOutputEos
-0xd1462438  cellSailSoundAdapterFinalize
-0xf25f197d  cellSailSoundAdapterGetFormat
-0x7eb8d6b5  cellSailSoundAdapterGetFrame
-0x3d0d3b72  cellSailSoundAdapterInitialize
-0x4ae979df  cellSailSoundAdapterPtsToTimePosition
-0x1c9d5e5a  cellSailSoundAdapterSetPreferredFormat
-0xeec22809  cellSailSoundAdapterUpdateAvSync
-0xee724c99  cellSailSourceFinalize
-0x9d30bdce  cellSailSourceInitialize
-0x764ec2d2  cellSailSourceNotifyCallCompleted
-0x54c53688  cellSailSourceNotifyInputEos
-0xf4009a94  cellSailSourceNotifyMediaStateChanged
-0xf289f0cd  cellSailSourceNotifySessionError
-0x95ee1695  cellSailSourceNotifyStreamOut
-0xbdb2251a  cellSailSourceSetDiagHandler
 ```
 
 ### `libsail_rec_stub` (58 / 58 missing)
