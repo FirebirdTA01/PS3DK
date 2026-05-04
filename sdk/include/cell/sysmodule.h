@@ -83,6 +83,7 @@ extern "C" {
 #define CELL_SYSMODULE_SYSUTIL_OSK_EXT    0x003b
 #define CELL_SYSMODULE_VDEC_DIVX          0x003c
 #define CELL_SYSMODULE_SPURS_JQ           0x0050
+#define CELL_SYSMODULE_FIBER              0x0043
 
 /* Return codes. */
 #define CELL_SYSMODULE_LOADED                          0

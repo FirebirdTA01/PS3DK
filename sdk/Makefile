@@ -108,6 +108,18 @@ HEADERS := \
     include/cell/spurs/job_queue_port.h \
     include/cell/spurs/job_queue_port2.h \
     include/cell/spurs/job_queue_semaphore.h \
+    include/cell/fiber.h \
+    include/cell/fiber/error.h \
+    include/cell/fiber/version.h \
+    include/cell/fiber/ppu_context_types.h \
+    include/cell/fiber/ppu_fiber_types.h \
+    include/cell/fiber/ppu_fiber_trace_types.h \
+    include/cell/fiber/user_scheduler_types.h \
+    include/cell/fiber/ppu_initialize.h \
+    include/cell/fiber/ppu_context.h \
+    include/cell/fiber/ppu_fiber.h \
+    include/cell/fiber/user_scheduler.h \
+    include/cell/fiber/ppu_fiber_worker_control.h \
     include/cell/trace/trace_types.h \
     include/sys/spu_initialize.h \
     include/sys/spu_thread.h \

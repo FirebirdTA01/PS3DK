@@ -70,6 +70,7 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libc_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/liblv2_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libfiber_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/cellFs.yaml"
 )
 
@@ -175,6 +176,26 @@ for yaml in "${STUB_YAMLS[@]}"; do
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
         install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
         say "installed libc_stub.a -> $INSTALL_LIB_DEFAULT/ (nidgen + extras)"
+    elif [[ "$name" == "libfiber_stub" ]]; then
+        # The reference archive ships cellFiberPpuInitialize as a
+        # real PPU function that loads CELL_SYSMODULE_FIBER first
+        # then forwards to _cellFiberPpuInitialize.  The YAML only
+        # covers the underscored SPRX export, so the public name
+        # and the _gCellFiberPpuThreadLocalStorage BSS area need
+        # real objects ar-appended to the nidgen archive.
+        extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libfiber_stub_extras"
+        say "building libfiber_stub_extras (pub init + TLS area)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
+        PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" \
+            make -C "$extras_dir" all >/dev/null
+        for extras_obj in "$extras_dir/build/"*.o; do
+            [[ -f "$extras_obj" ]] || continue
+            "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "${produced[0]}" \
+                "$extras_obj" 2>/dev/null
+        done
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
+        install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
+        say "installed libfiber_stub.a -> $INSTALL_LIB_DEFAULT/ (nidgen + extras)"
     else
         install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
         say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
