@@ -152,6 +152,10 @@ HEADERS := \
     include/cell/sail/renderer_video.h \
     include/cell/sail/feeder_audio.h \
     include/cell/sail/feeder_video.h \
+    include/cell/sail/common_rec.h \
+    include/cell/sail/muxer.h \
+    include/cell/sail/recorder.h \
+    include/cell/sail_rec.h \
     include/cell/sysutil_oskdialog_ext.h \
     include/cell/sysutil_search.h \
     include/cell/sysutil_search_types.h \
