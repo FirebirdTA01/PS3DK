@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **99**
 - Cell SDK exports total: **4796**
-- Covered by our install tree: **2705** (56.4%) — 2405 by exact name, 300 via alias
-- Our install tree exports: **20170** (all archives, deduplicated)
+- Covered by our install tree: **2763** (57.6%) — 2463 by exact name, 300 via alias
+- Our install tree exports: **20403** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4789 · stub 7 · impl 0 · verified 0
 
@@ -61,7 +61,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `librtc_stub` | 33 | 33 | 0 | 33 | 100.0% |
 | `librudp_stub` | 29 | 0 | 0 | 0 | 0.0% |
 | `libsail_stub` | 119 | 119 | 0 | 119 | 100.0% |
-| `libsail_rec_stub` | 58 | 0 | 0 | 0 | 0.0% |
+| `libsail_rec_stub` | 58 | 58 | 0 | 58 | 100.0% |
 | `libsysutil_savedata_stub` | 12 | 12 | 0 | 12 | 100.0% |
 | `libsysutil_screenshot_stub` | 4 | 4 | 0 | 4 | 100.0% |
 | `libsysutil_search_stub` | 21 | 21 | 0 | 21 | 100.0% |
@@ -516,69 +516,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x384ba777  cellRudpSetOption
 0x48d3eeac  cellRudpTerminate
 0x48c001b0  cellRudpWrite
-```
-
-### `libsail_rec_stub` (58 / 58 missing)
-
-```
-0xe15f38d9  cellSailComposerFinalize
-0x57390c45  cellSailComposerGetEsAudioAu
-0xd0ebd14f  cellSailComposerGetEsAudioParameter
-0x62ccc64a  cellSailComposerGetEsUserAu
-0x2f7f391f  cellSailComposerGetEsUserParameter
-0xc3b8f109  cellSailComposerGetEsVideoAu
-0xb1991509  cellSailComposerGetEsVideoParameter
-0x9a71e740  cellSailComposerGetStreamParameter
-0x434c5123  cellSailComposerInitialize
-0x3c09716b  cellSailComposerNotifyCallCompleted
-0xf1f0e5da  cellSailComposerNotifySessionError
-0x2707fd60  cellSailComposerReleaseEsAudioAu
-0x25b980a0  cellSailComposerReleaseEsUserAu
-0x6f867071  cellSailComposerReleaseEsVideoAu
-0xb9562c1a  cellSailComposerTryGetEsAudioAu
-0x4c1d59e8  cellSailComposerTryGetEsUserAu
-0xdfd899b7  cellSailComposerTryGetEsVideoAu
-0x899d1587  cellSailFeederAudioFinalize
-0xbd591197  cellSailFeederAudioInitialize
-0xc2e2f30d  cellSailFeederAudioNotifyCallCompleted
-0x3c775cea  cellSailFeederAudioNotifyFrameOut
-0x999c0dc5  cellSailFeederAudioNotifySessionEnd
-0xaf310ae6  cellSailFeederAudioNotifySessionError
-0x81bfeae8  cellSailFeederVideoFinalize
-0x57415dd3  cellSailFeederVideoInitialize
-0xd84daeb9  cellSailFeederVideoNotifyCallCompleted
-0xe5e0572a  cellSailFeederVideoNotifyFrameOut
-0xbff6e8d3  cellSailFeederVideoNotifySessionEnd
-0x86cae679  cellSailFeederVideoNotifySessionError
-0xe14cae97  cellSailProfileSetEsAudioParameter
-0x1422a425  cellSailProfileSetEsVideoParameter
-0xe8d86c43  cellSailProfileSetStreamParameter
-0xc4617ddc  cellSailRecorderBoot
-0xd37fb694  cellSailRecorderCancel
-0xe3f56f62  cellSailRecorderCloseStream
-0x50affdc1  cellSailRecorderCreateProfile
-0x49476a3d  cellSailRecorderCreateVideoConverter
-0x376c3926  cellSailRecorderDestroyProfile
-0x455c4709  cellSailRecorderDestroyVideoConverter
-0x37aad85f  cellSailRecorderDumpImage
-0xf57d74e3  cellSailRecorderFinalize
-0xff20157b  cellSailRecorderGetParameter
-0x7a52bf69  cellSailRecorderInitialize
-0x10c81457  cellSailRecorderOpenStream
-0x80b711ce  cellSailRecorderRegisterComposer
-0xe12a2fbe  cellSailRecorderReplaceEventHandler
-0x3deae857  cellSailRecorderSetFeederAudio
-0x4fec43a9  cellSailRecorderSetFeederVideo
-0x0a3ea2a9  cellSailRecorderSetParameter
-0x4830faf8  cellSailRecorderStart
-0x18ecc741  cellSailRecorderStop
-0x551a95fc  cellSailRecorderSubscribeEvent
-0xea7e20fc  cellSailRecorderUnregisterComposer
-0x54cfb78b  cellSailRecorderUnsubscribeEvent
-0xe16de678  cellSailVideoConverterCanGetResult
-0xb3d30b0d  cellSailVideoConverterCanProcess
-0xe15679fe  cellSailVideoConverterGetResult
-0x855da8c6  cellSailVideoConverterProcess
 ```
 
 ### `libsheap_stub` (18 / 18 missing)
