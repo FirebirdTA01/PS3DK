@@ -1,6 +1,7 @@
 library: cellOskExtUtility
 version: 1
 module: cellOskExtUtility
+archive_name: sysutil_oskdialog_ext
 exports:
 - name: cellOskDialogExtAddJapaneseOptionDictionary
   nid: '0x23a2ede6'
