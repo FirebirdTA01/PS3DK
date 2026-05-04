@@ -71,6 +71,7 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libc_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/liblv2_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libfiber_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libusbd_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/cellFs.yaml"
 )
 
@@ -196,23 +197,31 @@ for yaml in "${STUB_YAMLS[@]}"; do
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
         install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
         say "installed libfiber_stub.a -> $INSTALL_LIB_DEFAULT/ (nidgen + extras)"
+    elif [[ "$name" == "libusbd_stub" ]]; then
+        # Canonical reference-SDK libusbd_stub.a contains nidgen SPRX
+        # stubs under cellUsbd* names, plus libusb_legacy wrappers
+        # that forward PSL1GHT-style usb* calls to the same stubs.
+        # Installed under the _stub name; a libusb.a symlink aliases
+        # back for PSL1GHT compat.
+        legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libusb_legacy"
+        say "building legacy-name wrappers (libusb_legacy)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
+        PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" \
+            make -C "$legacy_dir" all >/dev/null
+        legacy_obj="$legacy_dir/build/usb_legacy_wrappers.o"
+        [[ -f "$legacy_obj" ]] \
+            || die "legacy wrappers object missing after build: $legacy_obj"
+
+        target="$INSTALL_LIB_PS3DK/libusbd_stub.a"
+        install -m 0644 "${produced[0]}" "$target"
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
+        ln -sf libusbd_stub.a "$INSTALL_LIB_PS3DK/libusb.a"
+        say "installed libusbd_stub.a + libusb.a symlink -> $INSTALL_LIB_PS3DK/"
     else
         install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
         say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
     fi
 done
-
-# libusb.a is built by build-psl1ght.sh (PSL1GHT's libpsl1ght/libusb);
-# it has no nidgen counterpart yet.  Reference Makefiles spell it as
-# libusbd_stub.a, so alias the PSL1GHT name to satisfy -lusbd_stub.
-# TODO: extract a libusbd_stub.yaml, generate a real libusbd_stub.a via
-# nidgen, and invert the symlink direction (libusb.a → libusbd_stub.a).
-libusb="$INSTALL_LIB_PS3DK/libusb.a"
-if [[ -f "$libusb" ]]; then
-    ln -sf libusb.a "$INSTALL_LIB_PS3DK/libusbd_stub.a"
-    say "installed libusbd_stub.a symlink -> libusb.a"
-else
-    say "warning: libusb.a not found; skip libusbd_stub.a symlink"
-fi
 
 say "done — ${#STUB_YAMLS[@]} stub archive(s) installed"

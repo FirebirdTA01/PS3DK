@@ -120,6 +120,10 @@ HEADERS := \
     include/cell/fiber/ppu_fiber.h \
     include/cell/fiber/user_scheduler.h \
     include/cell/fiber/ppu_fiber_worker_control.h \
+    include/cell/usbd.h \
+    include/cell/usbd/usb.h \
+    include/cell/usbd/libusbd.h \
+    include/cell/usbd/error.h \
     include/cell/trace/trace_types.h \
     include/sys/spu_initialize.h \
     include/sys/spu_thread.h \

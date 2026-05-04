@@ -1,6 +1,13 @@
 library: cellUsbd
 version: 1
 module: cellUsbd
+archive_name: usbd
+# 24 documented exports + 11 NIDs the firmware SPRX still exports but
+# that the public reference SDK 475 (and 3.70) headers do not declare.
+# The latter were mined from a community-mapped NID dump and ship
+# under cellUsbdUnknownN names so the surface follows our cell-prefix
+# convention.  PSL1GHT-style usb* aliases (including the same 11 NIDs)
+# are produced by sdk/libusb_legacy/ wrappers, not by nidgen.
 exports:
 - name: cellUsbdAllocateMemory
   nid: '0x074dbb39'
@@ -98,4 +105,51 @@ exports:
   nid: '0x64951ac7'
   signature: ''
   notes: extracted from _cellUsbd_0001_11.o
+# --- 11 firmware-only NIDs (not declared by reference SDK headers; the
+#     SPRX still exports them).  Names are placeholders chosen for the
+#     cell-prefix convention; semantics undocumented. ---
+- name: cellUsbdUnknown1
+  nid: '0x11b2155a'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown2
+  nid: '0x1255a907'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown3
+  nid: '0x252ce24f'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown4
+  nid: '0x5ab62af9'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown5
+  nid: '0x7d220599'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown6
+  nid: '0x850d17ed'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown7
+  nid: '0xa4088179'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown8
+  nid: '0xc9ffc854'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown9
+  nid: '0xce0773cf'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown10
+  nid: '0xd87d972d'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
+- name: cellUsbdUnknown11
+  nid: '0xd8f3972d'
+  signature: ''
+  notes: firmware-only export, not in reference SDK
 imports: []
