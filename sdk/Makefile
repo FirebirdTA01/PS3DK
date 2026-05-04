@@ -135,6 +135,23 @@ HEADERS := \
     include/cell/codec/libatrac3multi.h \
     include/cell/codec/celpenc.h \
     include/cell/codec/celp8enc.h \
+    include/cell/sail.h \
+    include/cell/sail/common.h \
+    include/cell/sail/player.h \
+    include/cell/sail/source.h \
+    include/cell/sail/source_check.h \
+    include/cell/sail/descriptor.h \
+    include/cell/sail/mp4.h \
+    include/cell/sail/avi.h \
+    include/cell/sail/converter.h \
+    include/cell/sail/profile.h \
+    include/cell/sail/au_receiver.h \
+    include/cell/sail/sound_adapter.h \
+    include/cell/sail/graphics_adapter.h \
+    include/cell/sail/renderer_audio.h \
+    include/cell/sail/renderer_video.h \
+    include/cell/sail/feeder_audio.h \
+    include/cell/sail/feeder_video.h \
     include/cell/sysutil_oskdialog_ext.h \
     include/cell/sysutil_search.h \
     include/cell/sysutil_search_types.h \
