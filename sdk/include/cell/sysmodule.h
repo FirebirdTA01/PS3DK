@@ -54,6 +54,11 @@ extern "C" {
 #define CELL_SYSMODULE_AUDIO              0x0011
 #define CELL_SYSMODULE_PAMF               0x0012
 #define CELL_SYSMODULE_ATRAC3PLUS         0x0013
+#define CELL_SYSMODULE_LIBATRAC3MULTI     0xf054
+#define CELL_SYSMODULE_CELPENC             0xf00a
+#define CELL_SYSMODULE_CELP8ENC            0x0048
+#define CELL_SYSMODULE_ADEC_CELP8          0x0047
+#define CELL_SYSMODULE_ADEC_CELP           0xf019
 #define CELL_SYSMODULE_NETCTL             0x0014
 #define CELL_SYSMODULE_SYSUTIL            0x0015
 #define CELL_SYSMODULE_SYSUTIL_NP         0x0016

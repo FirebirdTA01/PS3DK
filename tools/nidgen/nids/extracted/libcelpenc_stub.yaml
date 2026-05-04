@@ -1,6 +1,7 @@
 library: cellCelpEnc
 version: 1
 module: cellCelpEnc
+archive_name: celpenc
 exports:
 - name: cellCelpEncClose
   nid: '0x15ec0cca'

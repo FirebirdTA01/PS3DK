@@ -1,6 +1,7 @@
 library: cellCelp8Enc
 version: 1
 module: cellCelp8Enc
+archive_name: celp8enc
 exports:
 - name: cellCelp8EncClose
   nid: '0xfd2566b4'

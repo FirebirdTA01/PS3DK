@@ -1,6 +1,7 @@
 library: cellAtrac
 version: 1
 module: cellAtrac
+archive_name: atrac3plus
 exports:
 - name: cellAtracAddStreamData
   nid: '0x46cfc013'
