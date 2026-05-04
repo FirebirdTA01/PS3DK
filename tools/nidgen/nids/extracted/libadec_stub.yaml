@@ -1,6 +1,7 @@
 library: cellAdec
 version: 1
 module: cellAdec
+archive_name: adec
 exports:
 - name: cellAdecClose
   nid: '0x847d2380'

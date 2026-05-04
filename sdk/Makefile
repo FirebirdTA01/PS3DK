@@ -127,6 +127,10 @@ HEADERS := \
     include/cell/codec/dmux.h \
     include/cell/codec/dmux_pamf.h \
     include/cell/codec/types.h \
+    include/cell/codec/pamf.h \
+    include/cell/codec/adec.h \
+    include/cell/codec/adec_base.h \
+    include/cell/vpost.h \
     include/cell/sysutil_oskdialog_ext.h \
     include/cell/sysutil_search.h \
     include/cell/sysutil_search_types.h \
