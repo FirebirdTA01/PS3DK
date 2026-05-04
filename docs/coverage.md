@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **99**
 - Cell SDK exports total: **4796**
-- Covered by our install tree: **2424** (50.5%) — 2124 by exact name, 300 via alias
-- Our install tree exports: **19034** (all archives, deduplicated)
+- Covered by our install tree: **2484** (51.8%) — 2184 by exact name, 300 via alias
+- Our install tree exports: **19278** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4789 · stub 7 · impl 0 · verified 0
 
@@ -24,7 +24,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libcelpenc_stub` | 9 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_cross_controller_stub` | 1 | 0 | 0 | 0 | 0.0% |
 | `libdaisy_stub` | 52 | 0 | 0 | 0 | 0.0% |
-| `libdmux_stub` | 20 | 0 | 0 | 0 | 0.0% |
+| `libdmux_stub` | 20 | 20 | 0 | 20 | 100.0% |
 | `libfiber_stub` | 47 | 47 | 0 | 47 | 100.0% |
 | `libfont_stub` | 82 | 0 | 62 | 62 | 75.6% |
 | `libfontFT_stub` | 3 | 0 | 3 | 3 | 100.0% |
@@ -45,7 +45,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsysutil_music_export_stub` | 5 | 5 | 0 | 5 | 100.0% |
 | `libsysutil_music_stub` | 22 | 22 | 0 | 22 | 100.0% |
 | `libnetctl_stub` | 19 | 0 | 10 | 10 | 52.6% |
-| `libsysutil_oskdialog_ext_stub` | 17 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_oskdialog_ext_stub` | 17 | 17 | 0 | 17 | 100.0% |
 | `libovis_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `libpamf_stub` | 23 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_photo_decode_stub` | 4 | 0 | 0 | 0 | 0.0% |
@@ -64,7 +64,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsail_rec_stub` | 58 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_savedata_stub` | 12 | 12 | 0 | 12 | 100.0% |
 | `libsysutil_screenshot_stub` | 4 | 4 | 0 | 4 | 100.0% |
-| `libsysutil_search_stub` | 21 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_search_stub` | 21 | 21 | 0 | 21 | 100.0% |
 | `libsheap_stub` | 18 | 0 | 0 | 0 | 0.0% |
 | `libspudll_stub` | 2 | 0 | 0 | 0 | 0.0% |
 | `libspurs_stub` | 137 | 137 | 0 | 137 | 100.0% |
@@ -104,7 +104,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsysutil_np_tus_stub` | 62 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_np_util_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `liblv2_stub` | 118 | 118 | 0 | 118 | 100.0% |
-| `libcrashdump_stub` | 2 | 0 | 0 | 0 | 0.0% |
+| `libcrashdump_stub` | 2 | 2 | 0 | 2 | 100.0% |
 | `libfs_stub` | 59 | 59 | 0 | 59 | 100.0% |
 | `libio_stub` | 47 | 47 | 0 | 47 | 100.0% |
 | `libdbg_libio_stub` | 4 | 0 | 0 | 0 | 0.0% |
@@ -283,31 +283,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x706feed9  _ZN4cell5Daisy4Lock8pushOpenEv
 0x7b79d6aa  _ZN4cell5Daisy4Lock9pushCloseEv
 0x28acb77f  _ZN4cell5Daisy9_snprintfEPcjPKcz
-```
-
-### `libdmux_stub` (20 / 20 missing)
-
-```
-0x8c692521  cellDmuxClose
-0x05371c8d  cellDmuxDisableEs
-0x7b56dc3f  cellDmuxEnableEs
-0xebb3b2bd  cellDmuxFlushEs
-0x42c716b5  cellDmuxGetAu
-0x2c9a5857  cellDmuxGetAuEx
-0x68492de9  cellDmuxOpen
-0x11bc3a6c  cellDmuxOpen2
-0xf6c23560  cellDmuxOpenEx
-0x2750c5e0  cellDmuxPeekAu
-0x002e8da2  cellDmuxPeekAuEx
-0xa2d4189b  cellDmuxQueryAttr
-0x3f76e3cd  cellDmuxQueryAttr2
-0x02170d1a  cellDmuxQueryEsAttr
-0x52911bcf  cellDmuxQueryEsAttr2
-0x24ea6474  cellDmuxReleaseAu
-0x21d424f0  cellDmuxResetEs
-0x5d345de9  cellDmuxResetStream
-0xccff1284  cellDmuxResetStreamAndWaitDone
-0x04e7499f  cellDmuxSetStream
 ```
 
 ### `libfont_stub` (20 / 82 missing)
@@ -489,28 +464,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x558700f6  cellGameUpdateCheckStartWithoutDialogAsyncEx
 0x99ab1a26  cellGameUpdateInit
 0x10dae56d  cellGameUpdateTerm
-```
-
-### `libsysutil_oskdialog_ext_stub` (17 / 17 missing)
-
-```
-0x23a2ede6  cellOskDialogExtAddJapaneseOptionDictionary
-0x4fe14d09  cellOskDialogExtAddOptionDictionary
-0x9cb12c89  cellOskDialogExtDisableHalfByteKana
-0x40187c25  cellOskDialogExtEnableClipboard
-0xe6c43c58  cellOskDialogExtEnableHalfByteKana
-0x7c95feb8  cellOskDialogExtInputDeviceLock
-0x09565b21  cellOskDialogExtInputDeviceUnlock
-0x8692fcd2  cellOskDialogExtRegisterConfirmWordFilterCallback
-0xe800f586  cellOskDialogExtRegisterForceFinishCallback
-0x1e1b4c97  cellOskDialogExtRegisterKeyboardEventHookCallback
-0xbdcf8383  cellOskDialogExtRegisterKeyboardEventHookCallbackEx
-0x42439db5  cellOskDialogExtSendFinishMessage
-0x7eb292cd  cellOskDialogExtSetBaseColor
-0x75370397  cellOskDialogExtSetInitialScale
-0xc5447a90  cellOskDialogExtSetPointerEnable
-0x8b60c469  cellOskDialogExtUpdateInputText
-0xd3ea496b  cellOskDialogExtUpdatePointerDisplayPos
 ```
 
 ### `libovis_stub` (4 / 4 missing)
@@ -877,32 +830,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xb3d30b0d  cellSailVideoConverterCanProcess
 0xe15679fe  cellSailVideoConverterGetResult
 0x855da8c6  cellSailVideoConverterProcess
-```
-
-### `libsysutil_search_stub` (21 / 21 missing)
-
-```
-0x8fe376a6  cellSearchCancel
-0x774033d6  cellSearchEnd
-0xbfab7616  cellSearchFinalize
-0x94e21701  cellSearchGetContentIdByOffset
-0x9663a44b  cellSearchGetContentInfoByContentId
-0x3b210319  cellSearchGetContentInfoByOffset
-0x35cda406  cellSearchGetContentInfoDeveloperData
-0xd7a7a433  cellSearchGetContentInfoGameComment
-0xffb28491  cellSearchGetContentInfoPath
-0x37b5ba0c  cellSearchGetContentInfoPathMovieThumb
-0x1e989496  cellSearchGetContentInfoSharable
-0x025ce169  cellSearchGetMusicSelectionContext
-0xed20e079  cellSearchGetMusicSelectionContextOfSingleTrack
-0x540d9068  cellSearchGetOffsetByContentId
-0xc81ccf8a  cellSearchInitialize
-0xe73cb0d2  cellSearchPrepareFile
-0x0591826f  cellSearchStartContentSearch
-0x64fb0b76  cellSearchStartContentSearchInList
-0x0a4c8295  cellSearchStartListSearch
-0x13524faa  cellSearchStartSceneSearch
-0xc0ed0522  cellSearchStartSceneSearchInVideo
 ```
 
 ### `libsheap_stub` (18 / 18 missing)
@@ -2219,13 +2146,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xc880f37d  sceNpUtilBandwidthTestGetStatus
 0xc2ced2b7  sceNpUtilBandwidthTestInitStart
 0x432b3cbf  sceNpUtilBandwidthTestShutdown
-```
-
-### `libcrashdump_stub` (2 / 2 missing)
-
-```
-0x52696620  sys_crash_dump_get_user_log_area
-0xb20f87b3  sys_crash_dump_set_user_log_area
 ```
 
 ### `libdbg_libio_stub` (4 / 4 missing)
