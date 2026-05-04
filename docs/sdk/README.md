@@ -13,3 +13,7 @@ Tracked ABI documentation for each shipped stub archive.
 | libpamf_stub | PAMF container parser | 23 | [libpamf.md](libpamf.md) |
 | libadec_stub | Audio decoder framework | 9 | [libadec.md](libadec.md) |
 | libvpost_stub | Video post-processing | 5 | [libvpost.md](libvpost.md) |
+| libatrac3plus_stub | ATRAC3+ audio codec | 23 | [libatrac3plus.md](libatrac3plus.md) |
+| libatrac3multi_stub | Multi-channel ATRAC3 | 24 | [libatrac3multi.md](libatrac3multi.md) |
+| libcelpenc_stub | CELP voice encoder | 9 | [libcelpenc.md](libcelpenc.md) |
+| libcelp8enc_stub | CELP-8 voice encoder | 9 | [libcelp8enc.md](libcelp8enc.md) |
