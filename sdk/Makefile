@@ -124,6 +124,13 @@ HEADERS := \
     include/cell/usbd/usb.h \
     include/cell/usbd/libusbd.h \
     include/cell/usbd/error.h \
+    include/cell/codec/dmux.h \
+    include/cell/codec/dmux_pamf.h \
+    include/cell/codec/types.h \
+    include/cell/sysutil_oskdialog_ext.h \
+    include/cell/sysutil_search.h \
+    include/cell/sysutil_search_types.h \
+    include/sys/crashdump.h \
     include/cell/trace/trace_types.h \
     include/sys/spu_initialize.h \
     include/sys/spu_thread.h \

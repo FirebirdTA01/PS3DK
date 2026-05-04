@@ -1,6 +1,7 @@
 library: cellSearchUtility
 version: 1
 module: cellSearchUtility
+archive_name: sysutil_search
 exports:
 - name: cellSearchCancel
   nid: '0x8fe376a6'

@@ -1,6 +1,7 @@
 library: sys_crashdump
 version: 1
 module: sys_crashdump
+archive_name: sys_crashdump
 exports:
 - name: sys_crash_dump_get_user_log_area
   nid: '0x52696620'

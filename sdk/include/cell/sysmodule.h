@@ -38,6 +38,8 @@ extern "C" {
 #define CELL_SYSMODULE_VDEC               0x0005
 #define CELL_SYSMODULE_ADEC               0x0006
 #define CELL_SYSMODULE_DMUX               0x0007
+#define CELL_SYSMODULE_DMUX_PAMF          0x002a
+#define CELL_SYSMODULE_DMUX_AL            0x002d
 #define CELL_SYSMODULE_VPOST              0x0008
 #define CELL_SYSMODULE_RTC                0x0009
 #define CELL_SYSMODULE_SPURS              0x000a
