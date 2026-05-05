@@ -1,6 +1,7 @@
 library: cellDaisy
 version: 1
 module: cellDaisy
+archive_name: daisy
 exports:
 - name: _QN4cell5Daisy15LFQueue2PopOpenEPNS0_8LFQueue2E
   nid: '0x8921232c'
