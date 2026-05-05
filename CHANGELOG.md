@@ -16,6 +16,101 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.6.0] — 2026-05-05
+
+### SDK — multimedia, codec, and sysutil surface expansion
+
+18 stub-archive libraries promoted from 0% to 100% coverage, each
+with cell-named headers under `sdk/include/cell/`, install-tree
+archive (`libfoo_stub.a` at the canonical path), smoke sample under
+`samples/`, and tracked ABI reference under `docs/sdk/`:
+
+- **Cooperative threading + USB device driver**
+  (`docs/sdk/libfiber.md`, `libusbd.md`):
+  `libfiber` (47 entry points + `cellFiberPpuInitialize` wrapper) and
+  `libusbd` (35 entry points + 35 legacy `usb*`-named forwarders;
+  inverted symlink so `libusb.a` resolves to the new
+  `libusbd_stub.a`).
+- **Demux + audio decode framework + video post-processing**
+  (`libpamf.md`, `libadec.md`, `libvpost.md`): `libpamf` (23),
+  `libadec` (9), `libvpost` (5).
+- **Audio codecs** (`libatrac3plus.md`, `libatrac3multi.md`,
+  `libcelpenc.md`, `libcelp8enc.md`): `libatrac3plus` (23),
+  `libatrac3multi` (24), `libcelpenc` (9), `libcelp8enc` (9).
+- **Multimedia playback + recording framework** (`libsail.md`,
+  `libsail_rec.md`): `libsail` (119; 17 sub-headers under
+  `sdk/include/cell/sail/` for the player + source + descriptor +
+  adapter + renderer + feeder surface) and `libsail_rec` (58; muxer +
+  recorder + composer).
+- **Image codec encoders + GIF decoder** (`libpngenc.md`,
+  `libjpgenc.md`, `libgifdec.md`): `libpngenc` (9 + shared
+  `pngcom.h` ancillary chunks), `libjpgenc` (10), `libgifdec` (12).
+- **Sysutil + LV2 supplement** (`libdmux.md`,
+  `libsysutil_oskdialog_ext.md`, `libsysutil_search.md`,
+  `libcrashdump.md`): `libdmux` (20), `libsysutil_oskdialog_ext` (17),
+  `libsysutil_search` (21), `libcrashdump` (2).
+- **`docs/sdk/README.md`** indexes the per-library reference docs.
+  Each per-library doc lists the function table, error codes,
+  initialisation lifecycle, and Notable ABI quirks (`size_t`-as-
+  `uint32_t` in caller-allocated structs, required sysmodule load
+  order, async init pump, callback non-NULL contracts,
+  late-firmware-only entries) so shipped behaviour is documented
+  directly.
+
+`sdk/include/cell/sysmodule.h` grows the constants required to load
+each library (DMUX/DMUX_PAMF/DMUX_AL, ATRAC3+ / ATRAC3MULTI,
+ADEC_CELP / ADEC_CELP8, FIBER, SAIL_REC, GIF_DEC, plus the existing
+PAMF / ATRAC3PLUS already present).  PRXPTR audit applied across all
+new headers — pointer fields in caller-allocated structs that cross
+the SPRX boundary carry `ATTRIBUTE_PRXPTR`, and width-sensitive
+typedefs (`size_t`, `time_t`) declared as `uint32_t` to match the
+in-SPRX layout.
+
+### SDK — `cellGcmSetFragmentProgramParameter` correctness fixes
+
+Two crashes in the FP-uniform patcher predating the matrix work, both
+RPCS3 access-violation regressions:
+
+- **Writes against `.rodata`.**  The patcher used to write FP uniform
+  values into the read-only embedded `CgBinaryProgram` blob bundled
+  with the .text section, instead of into the writable RSX local
+  memory copy at `cfg.localAddress + addrOffset`.  Resolved
+  `addrOffset` against the GCM config's `localAddress` so all writes
+  land in RSX-visible memory.
+- **`embeddedConst==0` early-bail.**  A zero `embeddedConst` offset
+  means the parameter has no embedded constants to patch (samplers
+  are the canonical case).  The previous check only validated the
+  computed pointer (`prog + 0 == prog != NULL`) and proceeded to
+  read the .fpo file header as if it were an embed count.  Gate on
+  the offset itself, not the computed pointer.
+
+### SDK — `cellGcmSetFragmentProgramParameter` matrix uniforms
+
+Float `matrix4x4` uniforms in fragment programs were silently no-op'd
+in the previous implementation: a matrix parent
+`CgBinaryParameter` has `embeddedConst=0` and the row leaves at
+`pp+1..pp+N` carry the actual ucode patch points, but the patcher
+checked the parent's `embeddedConst` and bailed.  Walk the row leaves
+gated by `pp->res == 0x0CB8` (the uniform/parameter resource code) to
+avoid overmatching shapes — the same matrix type codes appear on
+varyings, output colors, and function entries with different `res`
+values, and a row-walk on those would land in unrelated parameters'
+embed lists and corrupt the FP ucode.  Per-leaf
+`var == 0x1006` (CG_UNIFORM) gate inside the walk acts as a defensive
+backstop for shaders whose parameter table happens to deviate from
+the parent-then-rows layout.
+
+### Samples — `hello-ppu-cellgcm-render-to-texture`
+
+Render-target switch smoke: allocates an off-screen surface from the
+RSX local-memory bump allocator, switches the active render target via
+`cellGcmSetSurface`, clears it, and reads the cleared bytes back
+through the PPU mapping at `cfg.localAddress + offset` to verify the
+clear actually landed.  Validates the single-target RTT path
+end-to-end (surface registers + clear + pipeline drain + shared-memory
+addressing) and documents the PPU/RSX address-space split inline as
+shipped reference.
+
 ### `rsx-cg-compiler` — VP/FP byte-match expansion
 
 The byte-diff suite against the reference Cg compiler at `--O2 --fastmath`
@@ -29,17 +124,17 @@ grows from 65/65 to **96/96** byte-identical:
   masks, `NVFXSR_NONE` CC registers, and post-discard MOV/MULR
   swizzle.  Both `discard_tex_alpha_f` (compound condition) and
   `discard_tex_varying_f` (simple condition with post-discard
-  output) now byte-match sce-cgc at the full container level.
+  output) now byte-match the reference Cg compiler at the full container level.
 - **FP — dual-texture discard ordering.**  When a fragment program
   contains two discard sequences gated by tex-LHS comparisons,
   the uniform-load MOV for the *second* discard must precede its
   TEX instruction.  A new `isSubsequentDiscard` flag and
   `emittedTexResults` tracking set ensure the exact instruction
-  schedule sce-cgc produces.
+  schedule the reference Cg compiler produces.
 - **FP — `VecConstructTexMul` split-write shape.**  Recognises
   `oColor.xyz = tex.xyz * varying.x; oColor.w = tex.w * varying.y`
   and emits a split-write StoreOutput (two MOVs with per-lane masks)
-  instead of a single MOV, matching sce-cgc's decomposition of
+  instead of a single MOV, matching the reference Cg compiler's decomposition of
   post-discard output mixing.
 - **FP — implicit varying-binding inference.**  Front-end's default-
   binding pass assigns sequential `TEXCOORD<N>` slots to unbound FP
@@ -331,6 +426,20 @@ GCC 14+ from rejecting the configure probe's K&R `main()`,
 `ac_cv_sizeof_{long_long,___int64}=8` overrides so 64-bit ELF
 support stays enabled when cross-compiling.
 
+### Build / install layout — canonical stub-archive names
+
+Stub archives now install under their canonical `_stub` filenames
+(`libgcm_sys_stub.a`, `libio_stub.a`, `libsysmodule_stub.a`,
+`libusbd_stub.a`, etc.) so reference Makefiles that link against
+`-lgcm_sys_stub` resolve out of the box.  PSL1GHT-style legacy names
+(`libgcm_sys.a`, `libio.a`, `libusb.a`) are retained as symlinks back
+to the `_stub` archive, so existing PSL1GHT consumers keep building
+without changes.  `cell_video_out.h` switches its forwarders off
+PSL1GHT's `videoGetState` etc. and onto `extern` declarations of the
+`cellVideoOut*` SPRX trampolines that resolve through
+`libsysutil_stub.a`; `sdk.makedef-ppu-gcc.mk` drops its `-lsysutil`
+auto-link as part of the same cleanup.
+
 ### CI / release infrastructure
 
 - **`build-host-tools-windows.sh`** auto-fetches the PSL1GHT source
@@ -344,6 +453,16 @@ support stays enabled when cross-compiling.
 - **`release.yml`** grows the matching staging steps, fixes the
   optional-asset path (single missing optional asset no longer fails
   the run), and pulls Python helpers into the Windows release.
+- **`extract-release-notes.sh`** new helper pulls the changelog
+  entries for the version being released and feeds them straight into
+  the GitHub Release body, so tags ship with the matching changelog
+  section without manual copy-paste.
+- **`CCACHE_DIR=~/.ccache`** pinned across PPU/SPU/cross toolchain
+  jobs.  ccache 4.x on the runner defaults to
+  `$XDG_CACHE_HOME/ccache` (`~/.cache/ccache`), so builds populated a
+  path the `actions/cache@v5` step never saw and the cache step
+  skipped saving with "Path Validation".  Pinning the directory keeps
+  cache hits across runs.
 
 ### Other
 
@@ -352,6 +471,17 @@ support stays enabled when cross-compiling.
   closes cleanly when a test fails (no PS-button-out needed).
 - **`NOTICE`** updated for the NV_fragment_program reference
   attribution.
+- **`tools/docs/coverage.md`** — symbol coverage report committed
+  under tracked docs.  Generated by `coverage-report`, diff-by-name
+  against the install tree, backed by
+  `tools/nidgen/nids/aliases.yaml` for renames.
+- **`AGENTS.md`** parallels `CLAUDE.md` for the Codex CLI agent —
+  same project context with paths repointed under `~/.Codex/...` so
+  both agents pick up the same locked-in decisions, status snapshot,
+  workspace layout, and house rules.
+- **`libdaisy_stub.yaml`** sets `archive_name: daisy` so the
+  cell-stub-archive build produces `libdaisy_stub.a` at the canonical
+  install path instead of falling back to the library field.
 
 ## [v0.4.0] — 2026-04-27
 
@@ -359,7 +489,7 @@ support stays enabled when cross-compiling.
 
 Headline: 4 stub-only libraries promoted from 0% to 100% in this
 release, plus one fully-rounded out.  Aggregate coverage across the
-tracked Sony export set climbs **46.2% -> ~52.0%** (+254 covered
+tracked reference export set climbs **46.2% -> ~52.0%** (+254 covered
 exports across 5 libraries).
 
 - **libsysutil_stub (cellSysutil PRX) — 174/174.**  Full PRX surface
@@ -374,7 +504,7 @@ exports across 5 libraries).
   avc, sysconf, storagedata, msgdialog-3d}` exercise the surface.
   AVC signatures cross-checked against the only available
   reverse-engineered reference (RPCS3's `cellSysutilAvc.{h,cpp}`)
-  since the 475-era headers stripped them.
+  since the late-firmware headers stripped them.
 
 - **librtc_stub (cellRtc) — 33/33.**  Real-time clock surface:
   calendar conversion (`CellRtcDateTime` <-> `CellRtcTick`),
@@ -535,7 +665,7 @@ End-to-end cross-build of the PPU + SPU toolchains from Linux to
 
 ### `rsx-cg-compiler` — shader byte-match coverage
 
-The byte-diff suite against `sce-cgc` at `--O2 --fastmath` grows from
+The byte-diff suite against `the reference Cg compiler` at `--O2 --fastmath` grows from
 59/59 to **65/65** byte-identical:
 
 - **Repeated-add scale-fold (full vec4)** generalises the pattern
@@ -543,7 +673,7 @@ The byte-diff suite against `sce-cgc` at `--O2 --fastmath` grows from
   longer chains lower to `MOVH H0; MULR R1 = H0*2; (MADR R1 += H0*2)
   × (K-1); [FENCBR if K odd]; (ADD/MAD) R0[END]`.  Final write picks
   ADD vs MAD by carry parity.  Scalar-lane N≥4 stays capped at 3 —
-  `sce-cgc` switches to a DP2R shape there which is documented in
+  `the reference Cg compiler` switches to a DP2R shape there which is documented in
   `KNOWN_ISSUES.md`.
 - **Multi-instruction if-only-with-default + N-insn THEN diamonds**
   predicate end-to-end via a new `IROp::PredCarry`.
@@ -695,7 +825,7 @@ Highlights:
   disc-retry / streaming-read / async-IO surface.
 - New `tools/nidgen/nids/cellFs.yaml` (curated) carries all 59 SPRX
   exports — the 49 documented signatures plus 10 NID-only entries
-  for symbols stripped from 475 public headers but still exported by
+  for symbols stripped from late-firmware public headers but still exported by
   the SPRX (`cellFsAllocateFileArea*WithInitialData`,
   `cellFsTruncate2`, `cellFsArcadeHddSerialNumber`,
   `cellFsRegisterConversionCallback`,
@@ -755,13 +885,13 @@ First public, version-tagged snapshot.  Status:
   own samples consume; PSL1GHT remains the back-compat glue layer for
   legacy homebrew.
 - **Tools:**
-  - `nidgen` — FNID/NID database + Sony-style stub archive emitter.
+  - `nidgen` — FNID/NID database + reference-format stub archive emitter.
   - `coverage-report` — reference SDK vs install-tree coverage matrix.
   - `abi-verify` — CellOS Lv-2 ABI conformance checker.  All 8 invariants
     pass on `hello-ppu-abi-check`.
   - `sprx-linker` — fork of `make_self`/`make_fself` companion.
   - `rsx-cg-compiler` — Cg → RSX (NV40) compiler.  46/46 byte-match
-    against `sce-cgc` for the stage-4 test corpus.
+    against `the reference Cg compiler` for the stage-4 test corpus.
 - **ABI:**
   - Compact 8-byte `.opd` descriptors (`ADDR32 + TLSGD-ABS`) replacing
     the 24-byte ELFv1 layout.  Two-read indirect-call sequence verified
@@ -770,7 +900,7 @@ First public, version-tagged snapshot.  Status:
     `cell/*` structs that cross the SPRX boundary.
 - **Reference-SDK builds:** unmodified `basic.cpp` (RSX triangle) and
   `5spu_spurs_without_context` (Spurs class surface) compile against
-  this SDK using stock `sce-cgc` shaders, and run in RPCS3.
+  this SDK using stock `the reference Cg compiler` shaders, and run in RPCS3.
 - **Versioning infrastructure:** this changelog, `scripts/version.sh`,
   `cell/sdk_version.h` install hook, GitHub Releases workflow.
 
