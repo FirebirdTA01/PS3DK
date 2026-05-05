@@ -549,39 +549,75 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
 
     const CgBinaryParameter *pp = (const CgBinaryParameter *)param;
 
-    /* A zero embeddedConst means this parameter has no embedded
-     * constants to patch (e.g. samplers).  We must check the offset
-     * itself, not just the computed pointer — NULL-offset is always
-     * a no-op. */
-    if (!pp->embeddedConst) return;
+    /* Matrix-uniform detection: sce-cgc emits row leaves pp+1..pp+N
+     * for float4x4 and half4x4 uniforms.  The parent has embeddedConst=0
+     * (no direct slots); the row leaves carry the actual ucode patch
+     * points.  We must gate on resource type to avoid matching varyings,
+     * output colors, and function entries that also fall in the matrix
+     * type range. */
+    const uint32_t type = (uint32_t)pp->type;
+    const uint32_t is_matrix =
+        (((type >= 1049u && type <= 1064u) || (type >= 1029u && type <= 1044u))
+         && pp->res == 0x0CB8u);
 
-    const uint32_t *embed =
-        (const uint32_t *)((const uint8_t *)prog + pp->embeddedConst);
+    if (!is_matrix) {
+        /* Non-matrix uniform: patch the embedded constants directly. */
+        if (!pp->embeddedConst) return;
 
-    if (!embed) return;
+        const uint32_t *embed =
+            (const uint32_t *)((const uint8_t *)prog + pp->embeddedConst);
 
-    /* Resolve the PPU-side base of RSX local memory so we can write
-     * through the IOMMU mapping into the ucode that was already
-     * uploaded at addrOffset. */
-    CellGcmConfig cfg;
-    cellGcmGetConfiguration(&cfg);
-    uint8_t *local_base = (uint8_t *)cfg.localAddress;
+        if (!embed) return;
 
-    /* FP ucode sits at local_base + addrOffset in RSX local memory;
-     * embed[] entries are byte offsets relative to the start of the
-     * ucode payload. */
-    uint8_t *ucode = local_base + addrOffset;
+        CellGcmConfig cfg;
+        cellGcmGetConfiguration(&cfg);
+        uint8_t *local_base = (uint8_t *)cfg.localAddress;
+        uint8_t *ucode = local_base + addrOffset;
 
-    const uint32_t cnt = embed[0];
-    for (uint32_t i = 1; i <= cnt; ++i) {
-        uint32_t off = embed[i];
-        uint32_t *slot = (uint32_t *)(ucode + off);
-        /* FP constants are stored in big-endian word order with each
-         * 4-component vector dword-swapped per NV40 FP convention. */
-        slot[0] = ((const uint32_t *)values)[1];
-        slot[1] = ((const uint32_t *)values)[0];
-        slot[2] = ((const uint32_t *)values)[3];
-        slot[3] = ((const uint32_t *)values)[2];
+        const uint32_t cnt = embed[0];
+        for (uint32_t i = 1; i <= cnt; ++i) {
+            uint32_t off = embed[i];
+            uint32_t *slot = (uint32_t *)(ucode + off);
+            slot[0] = ((const uint32_t *)values)[1];
+            slot[1] = ((const uint32_t *)values)[0];
+            slot[2] = ((const uint32_t *)values)[3];
+            slot[3] = ((const uint32_t *)values)[2];
+        }
+        return;
+    }
+
+    /* Matrix uniform: walk row leaves pp+1..pp+N.  Each leaf is a
+     * float4 parameter whose embeddedConst list points into the ucode
+     * slots that need the row values.  A per-leaf var gate (0x1006 =
+     * CG_UNIFORM per sce-cgc encoding) stops the walk if we overrun
+     * the row-leave sequence into unrelated parameters. */
+    {
+        const unsigned rows = ps3tc_cg_rows_for_type(pp->type);
+
+        CellGcmConfig cfg;
+        cellGcmGetConfiguration(&cfg);
+        uint8_t *local_base = (uint8_t *)cfg.localAddress;
+        uint8_t *ucode = local_base + addrOffset;
+
+        const CgBinaryParameter *leaf = pp + 1;
+        for (unsigned r = 0; r < rows; ++r, ++leaf) {
+            if (leaf->var != 0x1006u) break;  /* safety: stop at non-uniform */
+            if (!leaf->embeddedConst) continue; /* row unreferenced (dead code) */
+
+            const uint32_t *embed =
+                (const uint32_t *)((const uint8_t *)prog + leaf->embeddedConst);
+            if (!embed) continue;
+
+            const uint32_t cnt = embed[0];
+            for (uint32_t i = 1; i <= cnt; ++i) {
+                uint32_t off = embed[i];
+                uint32_t *slot = (uint32_t *)(ucode + off);
+                slot[0] = ((const uint32_t *)values)[r * 4 + 1];
+                slot[1] = ((const uint32_t *)values)[r * 4 + 0];
+                slot[2] = ((const uint32_t *)values)[r * 4 + 3];
+                slot[3] = ((const uint32_t *)values)[r * 4 + 2];
+            }
+        }
     }
 }
 
