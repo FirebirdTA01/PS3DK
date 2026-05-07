@@ -1,0 +1,926 @@
+--- a/gcc/config/rs6000/rs6000.md	2026-05-07 10:15:34.258569220 -0500
++++ gcc/config/rs6000/rs6000.md	2026-05-07 10:15:19.493559173 -0500
+@@ -9977,10 +9977,10 @@
+ 
+ (define_insn "*movdi_update1"
+   [(set (match_operand:DI 3 "gpc_reg_operand" "=r,r")
+-	(mem:DI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_aligned_short_operand" "r,I"))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	(mem:DI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_aligned_short_operand" "r,I"))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_POWERPC64 && TARGET_UPDATE
+    && (!avoiding_indexed_address_p (DImode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -9992,11 +9992,11 @@
+    (set_attr "indexed" "yes,no")])
+ 
+ (define_insn "movdi_<mode>_update"
+-  [(set (mem:DI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_aligned_short_operand" "r,I")))
++  [(set (mem:DI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_aligned_short_operand" "r,I")))
+ 	(match_operand:DI 3 "gpc_reg_operand" "r,r"))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_POWERPC64 && TARGET_UPDATE
+    && (!avoiding_indexed_address_p (DImode)
+        || !gpc_reg_operand (operands[2], Pmode)
+@@ -10027,10 +10027,10 @@
+ 
+ (define_insn "*movsi_update1"
+   [(set (match_operand:SI 3 "gpc_reg_operand" "=r,r")
+-	(mem:SI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I"))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	(mem:SI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I"))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (SImode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10044,10 +10044,10 @@
+ (define_insn "*movsi_update2"
+   [(set (match_operand:EXTSI 3 "gpc_reg_operand" "=r")
+ 	(sign_extend:EXTSI
+-	 (mem:SI (plus:P (match_operand:P 1 "gpc_reg_operand" "0")
+-			 (match_operand:P 2 "gpc_reg_operand" "r")))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	 (mem:SI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0")
++			 (match_operand:Pptr 2 "gpc_reg_operand" "r")))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_POWERPC64 && !avoiding_indexed_address_p (DImode)"
+   "lwaux %3,%0,%2"
+   [(set_attr "type" "load")
+@@ -10056,11 +10056,11 @@
+    (set_attr "indexed" "yes")])
+ 
+ (define_insn "movsi_<mode>_update"
+-  [(set (mem:SI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I")))
++  [(set (mem:SI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I")))
+ 	(match_operand:SI 3 "gpc_reg_operand" "r,r"))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (SImode)
+        || !gpc_reg_operand (operands[2], Pmode)
+@@ -10091,10 +10091,10 @@
+ 
+ (define_insn "*movhi_update1"
+   [(set (match_operand:HI 3 "gpc_reg_operand" "=r,r")
+-	(mem:HI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I"))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	(mem:HI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I"))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (HImode)
+        || !gpc_reg_operand (operands[2], SImode))"
+@@ -10108,10 +10108,10 @@
+ (define_insn "*movhi_update2"
+   [(set (match_operand:EXTHI 3 "gpc_reg_operand" "=r,r")
+ 	(zero_extend:EXTHI
+-	 (mem:HI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			 (match_operand:P 2 "reg_or_short_operand" "r,I")))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	 (mem:HI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			 (match_operand:Pptr 2 "reg_or_short_operand" "r,I")))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (HImode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10125,10 +10125,10 @@
+ (define_insn "*movhi_update3"
+   [(set (match_operand:EXTHI 3 "gpc_reg_operand" "=r,r")
+ 	(sign_extend:EXTHI
+-	 (mem:HI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			 (match_operand:P 2 "reg_or_short_operand" "r,I")))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	 (mem:HI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			 (match_operand:Pptr 2 "reg_or_short_operand" "r,I")))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && !(avoiding_indexed_address_p (HImode)
+ 	&& gpc_reg_operand (operands[2], Pmode))"
+@@ -10141,11 +10141,11 @@
+    (set_attr "indexed" "yes,no")])
+ 
+ (define_insn "*movhi_update4"
+-  [(set (mem:HI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I")))
++  [(set (mem:HI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I")))
+ 	(match_operand:HI 3 "gpc_reg_operand" "r,r"))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (HImode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10158,10 +10158,10 @@
+ 
+ (define_insn "*movqi_update1"
+   [(set (match_operand:QI 3 "gpc_reg_operand" "=r,r")
+-	(mem:QI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I"))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	(mem:QI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I"))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (QImode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10175,10 +10175,10 @@
+ (define_insn "*movqi_update2"
+   [(set (match_operand:EXTQI 3 "gpc_reg_operand" "=r,r")
+ 	(zero_extend:EXTQI
+-	 (mem:QI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			 (match_operand:P 2 "reg_or_short_operand" "r,I")))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	 (mem:QI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			 (match_operand:Pptr 2 "reg_or_short_operand" "r,I")))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (QImode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10190,11 +10190,11 @@
+    (set_attr "indexed" "yes,no")])
+ 
+ (define_insn "*movqi_update3"
+-  [(set (mem:QI (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I")))
++  [(set (mem:QI (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I")))
+ 	(match_operand:QI 3 "gpc_reg_operand" "r,r"))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_UPDATE
+    && (!avoiding_indexed_address_p (QImode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10207,10 +10207,10 @@
+ 
+ (define_insn "*mov<SFDF:mode>_update1"
+   [(set (match_operand:SFDF 3 "gpc_reg_operand" "=<SFDF:Ff>,<SFDF:Ff>")
+-	(mem:SFDF (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			  (match_operand:P 2 "reg_or_short_operand" "r,I"))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	(mem:SFDF (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			  (match_operand:Pptr 2 "reg_or_short_operand" "r,I"))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_HARD_FLOAT && TARGET_UPDATE
+    && (!avoiding_indexed_address_p (<SFDF:MODE>mode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10223,11 +10223,11 @@
+    (set_attr "size" "<SFDF:bits>")])
+ 
+ (define_insn "*mov<SFDF:mode>_update2"
+-  [(set (mem:SFDF (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			  (match_operand:P 2 "reg_or_short_operand" "r,I")))
++  [(set (mem:SFDF (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			  (match_operand:Pptr 2 "reg_or_short_operand" "r,I")))
+ 	(match_operand:SFDF 3 "gpc_reg_operand" "<SFDF:Ff>,<SFDF:Ff>"))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_HARD_FLOAT && TARGET_UPDATE
+    && (!avoiding_indexed_address_p (<SFDF:MODE>mode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10241,10 +10241,10 @@
+ 
+ (define_insn "*movsf_update3"
+   [(set (match_operand:SF 3 "gpc_reg_operand" "=r,r")
+-	(mem:SF (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I"))))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++	(mem:SF (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I"))))
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_SOFT_FLOAT && TARGET_UPDATE
+    && (!avoiding_indexed_address_p (SFmode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10256,11 +10256,11 @@
+    (set_attr "indexed" "yes,no")])
+ 
+ (define_insn "*movsf_update4"
+-  [(set (mem:SF (plus:P (match_operand:P 1 "gpc_reg_operand" "0,0")
+-			(match_operand:P 2 "reg_or_short_operand" "r,I")))
++  [(set (mem:SF (plus:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "0,0")
++			(match_operand:Pptr 2 "reg_or_short_operand" "r,I")))
+ 	(match_operand:SF 3 "gpc_reg_operand" "r,r"))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=b,b")
+-	(plus:P (match_dup 1) (match_dup 2)))]
++   (set (match_operand:Pptr 0 "gpc_reg_operand" "=b,b")
++	(plus:Pptr (match_dup 1) (match_dup 2)))]
+   "TARGET_SOFT_FLOAT && TARGET_UPDATE
+    && (!avoiding_indexed_address_p (SFmode)
+        || !gpc_reg_operand (operands[2], Pmode))"
+@@ -10302,8 +10302,8 @@
+ ;; TLS support.
+ 
+ (define_insn "*tls_gd_pcrel<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(unspec:P [(match_operand:P 1 "rs6000_tls_symbol_ref" "")
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(unspec:Pptr [(match_operand:Pptr 1 "rs6000_tls_symbol_ref" "")
+ 		   (const_int 0)]
+ 		  UNSPEC_TLSGD))]
+   "HAVE_AS_TLS && TARGET_ELF"
+@@ -10311,19 +10311,19 @@
+   [(set_attr "prefixed" "yes")])
+ 
+ (define_insn_and_split "*tls_gd<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(unspec:P [(match_operand:P 1 "rs6000_tls_symbol_ref" "")
+-		   (match_operand:P 2 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(unspec:Pptr [(match_operand:Pptr 1 "rs6000_tls_symbol_ref" "")
++		   (match_operand:Pptr 2 "gpc_reg_operand" "b")]
+ 		  UNSPEC_TLSGD))]
+   "HAVE_AS_TLS && TARGET_ELF"
+   "addi %0,%2,%1@got@tlsgd"
+   "&& TARGET_CMODEL != CMODEL_SMALL"
+   [(set (match_dup 3)
+-	(high:P
+-	    (unspec:P [(match_dup 1) (match_dup 2)] UNSPEC_TLSGD)))
++	(high:Pptr
++	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGD)))
+    (set (match_dup 0)
+-	(lo_sum:P (match_dup 3)
+-	    (unspec:P [(match_dup 1) (match_dup 2)] UNSPEC_TLSGD)))]
++	(lo_sum:Pptr (match_dup 3)
++	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGD)))]
+ {
+   operands[3] = gen_reg_rtx (<MODE>mode);
+ }
+@@ -10333,44 +10333,44 @@
+ 		   (const_int 4)))])
+ 
+ (define_insn "*tls_gd_high<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-     (high:P
+-       (unspec:P [(match_operand:P 1 "rs6000_tls_symbol_ref" "")
+-		  (match_operand:P 2 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++     (high:Pptr
++       (unspec:Pptr [(match_operand:Pptr 1 "rs6000_tls_symbol_ref" "")
++		  (match_operand:Pptr 2 "gpc_reg_operand" "b")]
+ 		 UNSPEC_TLSGD)))]
+   "HAVE_AS_TLS && TARGET_ELF && TARGET_CMODEL != CMODEL_SMALL"
+   "addis %0,%2,%1@got@tlsgd@ha")
+ 
+ (define_insn "*tls_gd_low<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-     (lo_sum:P (match_operand:P 1 "gpc_reg_operand" "b")
+-       (unspec:P [(match_operand:P 2 "rs6000_tls_symbol_ref" "")
+-		  (match_operand:P 3 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++     (lo_sum:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "b")
++       (unspec:Pptr [(match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")
++		  (match_operand:Pptr 3 "gpc_reg_operand" "b")]
+ 		 UNSPEC_TLSGD)))]
+   "HAVE_AS_TLS && TARGET_ELF && TARGET_CMODEL != CMODEL_SMALL"
+   "addi %0,%1,%2@got@tlsgd@l")
+ 
+ (define_insn "*tls_ld_pcrel<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(unspec:P [(const_int 0)]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(unspec:Pptr [(const_int 0)]
+ 		  UNSPEC_TLSLD))]
+   "HAVE_AS_TLS && TARGET_ELF"
+   "la %0,%&@got@tlsld@pcrel"
+   [(set_attr "prefixed" "yes")])
+ 
+ (define_insn_and_split "*tls_ld<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")]
+ 		  UNSPEC_TLSLD))]
+   "HAVE_AS_TLS && TARGET_ELF"
+   "addi %0,%1,%&@got@tlsld"
+   "&& TARGET_CMODEL != CMODEL_SMALL"
+   [(set (match_dup 2)
+-	(high:P
+-	    (unspec:P [(match_dup 1)] UNSPEC_TLSLD)))
++	(high:Pptr
++	    (unspec:Pptr [(match_dup 1)] UNSPEC_TLSLD)))
+    (set (match_dup 0)
+-	(lo_sum:P (match_dup 2)
+-	    (unspec:P [(match_dup 1)] UNSPEC_TLSLD)))]
++	(lo_sum:Pptr (match_dup 2)
++	    (unspec:Pptr [(match_dup 1)] UNSPEC_TLSLD)))]
+ {
+   operands[2] = gen_reg_rtx (<MODE>mode);
+ }
+@@ -10380,25 +10380,25 @@
+ 		   (const_int 4)))])
+ 
+ (define_insn "*tls_ld_high<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-     (high:P
+-       (unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++     (high:Pptr
++       (unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")]
+ 		 UNSPEC_TLSLD)))]
+   "HAVE_AS_TLS && TARGET_ELF && TARGET_CMODEL != CMODEL_SMALL"
+   "addis %0,%1,%&@got@tlsld@ha")
+ 
+ (define_insn "*tls_ld_low<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-     (lo_sum:P (match_operand:P 1 "gpc_reg_operand" "b")
+-       (unspec:P [(match_operand:P 2 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++     (lo_sum:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "b")
++       (unspec:Pptr [(match_operand:Pptr 2 "gpc_reg_operand" "b")]
+ 		 UNSPEC_TLSLD)))]
+   "HAVE_AS_TLS && TARGET_ELF && TARGET_CMODEL != CMODEL_SMALL"
+   "addi %0,%1,%&@got@tlsld@l")
+ 
+ (define_insn "tls_dtprel_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSDTPREL))]
+   "HAVE_AS_TLS"
+   "addi %0,%1,%2@dtprel"
+@@ -10408,35 +10408,35 @@
+ 		      (const_string "yes")))])
+ 
+ (define_insn "tls_dtprel_ha_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSDTPRELHA))]
+   "HAVE_AS_TLS"
+   "addis %0,%1,%2@dtprel@ha")
+ 
+ (define_insn "tls_dtprel_lo_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSDTPRELLO))]
+   "HAVE_AS_TLS"
+   "addi %0,%1,%2@dtprel@l")
+ 
+ (define_insn_and_split "tls_got_dtprel_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSGOTDTPREL))]
+   "HAVE_AS_TLS"
+   "<ptrload> %0,%2@got@dtprel(%1)"
+   "&& TARGET_CMODEL != CMODEL_SMALL"
+   [(set (match_dup 3)
+-	(high:P
+-	    (unspec:P [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTDTPREL)))
++	(high:Pptr
++	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTDTPREL)))
+    (set (match_dup 0)
+-	(lo_sum:P (match_dup 3)
+-	    (unspec:P [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTDTPREL)))]
++	(lo_sum:Pptr (match_dup 3)
++	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTDTPREL)))]
+ {
+   operands[3] = gen_reg_rtx (TARGET_64BIT ? DImode : SImode);
+ }
+@@ -10446,27 +10446,27 @@
+ 		   (const_int 4)))])
+ 
+ (define_insn "*tls_got_dtprel_high<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-     (high:P
+-       (unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		  (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++     (high:Pptr
++       (unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		  (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		 UNSPEC_TLSGOTDTPREL)))]
+   "HAVE_AS_TLS && TARGET_CMODEL != CMODEL_SMALL"
+   "addis %0,%1,%2@got@dtprel@ha")
+ 
+ (define_insn "*tls_got_dtprel_low<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-     (lo_sum:P (match_operand:P 1 "gpc_reg_operand" "b")
+-	 (unspec:P [(match_operand:P 3 "gpc_reg_operand" "b")
+-		    (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++     (lo_sum:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "b")
++	 (unspec:Pptr [(match_operand:Pptr 3 "gpc_reg_operand" "b")
++		    (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		   UNSPEC_TLSGOTDTPREL)))]
+   "HAVE_AS_TLS && TARGET_CMODEL != CMODEL_SMALL"
+   "<ptrload> %0,%2@got@dtprel@l(%1)")
+ 
+ (define_insn "tls_tprel_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSTPREL))]
+   "HAVE_AS_TLS"
+   "addi %0,%1,%2@tprel"
+@@ -10476,25 +10476,25 @@
+ 		      (const_string "yes")))])
+ 
+ (define_insn "tls_tprel_ha_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSTPRELHA))]
+   "HAVE_AS_TLS"
+   "addis %0,%1,%2@tprel@ha")
+ 
+ (define_insn "tls_tprel_lo_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSTPRELLO))]
+   "HAVE_AS_TLS"
+   "addi %0,%1,%2@tprel@l")
+ 
+ (define_insn "*tls_got_tprel_pcrel_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(unspec:P [(const_int 0)
+-		   (match_operand:P 1 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(unspec:Pptr [(const_int 0)
++		   (match_operand:Pptr 1 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSGOTTPREL))]
+   "HAVE_AS_TLS"
+   "<ptrload> %0,%1@got@tprel@pcrel"
+@@ -10504,19 +10504,19 @@
+ ;; optimization.  The linker may edit the instructions emitted by a
+ ;; tls_got_tprel/tls_tls pair to addis,addi.
+ (define_insn_and_split "tls_got_tprel_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSGOTTPREL))]
+   "HAVE_AS_TLS"
+   "<ptrload> %0,%2@got@tprel(%1)"
+   "&& TARGET_CMODEL != CMODEL_SMALL"
+   [(set (match_dup 3)
+-	(high:P
+-	    (unspec:P [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTTPREL)))
++	(high:Pptr
++	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTTPREL)))
+    (set (match_dup 0)
+-	(lo_sum:P (match_dup 3)
+-	    (unspec:P [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTTPREL)))]
++	(lo_sum:Pptr (match_dup 3)
++	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTTPREL)))]
+ {
+   operands[3] = gen_reg_rtx (TARGET_64BIT ? DImode : SImode);
+ }
+@@ -10526,35 +10526,35 @@
+ 		   (const_int 4)))])
+ 
+ (define_insn "*tls_got_tprel_high<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-     (high:P
+-       (unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		  (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++     (high:Pptr
++       (unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		  (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		 UNSPEC_TLSGOTTPREL)))]
+   "HAVE_AS_TLS && TARGET_CMODEL != CMODEL_SMALL"
+   "addis %0,%1,%2@got@tprel@ha")
+ 
+ (define_insn "*tls_got_tprel_low<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-     (lo_sum:P (match_operand:P 1 "gpc_reg_operand" "b")
+-	 (unspec:P [(match_operand:P 3 "gpc_reg_operand" "b")
+-		    (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++     (lo_sum:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "b")
++	 (unspec:Pptr [(match_operand:Pptr 3 "gpc_reg_operand" "b")
++		    (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		   UNSPEC_TLSGOTTPREL)))]
+   "HAVE_AS_TLS && TARGET_CMODEL != CMODEL_SMALL"
+   "<ptrload> %0,%2@got@tprel@l(%1)")
+ 
+ (define_insn "tls_tls_pcrel_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSTLS_PCREL))]
+   "TARGET_ELF && HAVE_AS_TLS"
+   "add %0,%1,%2@tls@pcrel")
+ 
+ (define_insn "tls_tls_<bits>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "rs6000_tls_symbol_ref" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "rs6000_tls_symbol_ref" "")]
+ 		  UNSPEC_TLSTLS))]
+   "TARGET_ELF && HAVE_AS_TLS"
+   "add %0,%1,%2@tls")
+@@ -10577,9 +10577,9 @@
+   "bla .__get_tpointer")
+ 
+ (define_expand "tls_get_addr<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand")
+-                   (match_operand:P 2 "gpc_reg_operand")] UNSPEC_TLSTLS))]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand")
++                   (match_operand:Pptr 2 "gpc_reg_operand")] UNSPEC_TLSTLS))]
+   "TARGET_XCOFF && HAVE_AS_TLS"
+ {
+   emit_move_insn (gen_rtx_REG (Pmode, 3), operands[1]);
+@@ -10590,14 +10590,14 @@
+ })
+ 
+ (define_insn "tls_get_addr_internal<mode>"
+-  [(set (reg:P 3)
+-	(unspec:P [(reg:P 3) (reg:P 4)] UNSPEC_TLSTLS))
+-   (clobber (reg:P 0))
+-   (clobber (reg:P 4))
+-   (clobber (reg:P 5))
+-   (clobber (reg:P 11))
++  [(set (reg:Pptr 3)
++	(unspec:Pptr [(reg:Pptr 3) (reg:Pptr 4)] UNSPEC_TLSTLS))
++   (clobber (reg:Pptr 0))
++   (clobber (reg:Pptr 4))
++   (clobber (reg:Pptr 5))
++   (clobber (reg:Pptr 11))
+    (clobber (reg:CC CR0_REGNO))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "TARGET_XCOFF && HAVE_AS_TLS"
+   "bla .__tls_get_addr")
+ 
+@@ -11863,8 +11863,8 @@
+ })
+ 
+ (define_insn "probe_stack_<mode>"
+-  [(set (match_operand:P 0 "memory_operand" "=m")
+-        (unspec:P [(const_int 0)] UNSPEC_PROBE_STACK))]
++  [(set (match_operand:Pptr 0 "memory_operand" "=m")
++        (unspec:Pptr [(const_int 0)] UNSPEC_PROBE_STACK))]
+   ""
+ {
+   operands[1] = gen_rtx_REG (Pmode, 0);
+@@ -11880,11 +11880,11 @@
+ 		      (const_string "yes")
+ 		      (const_string "no")))])
+ 
+-(define_insn "probe_stack_range<P:mode>"
+-  [(set (match_operand:P 0 "register_operand" "=&r")
+-	(unspec_volatile:P [(match_operand:P 1 "register_operand" "0")
+-			    (match_operand:P 2 "register_operand" "r")
+-			    (match_operand:P 3 "register_operand" "r")]
++(define_insn "probe_stack_range<Pptr:mode>"
++  [(set (match_operand:Pptr 0 "register_operand" "=&r")
++	(unspec_volatile:Pptr [(match_operand:Pptr 1 "register_operand" "0")
++			    (match_operand:Pptr 2 "register_operand" "r")
++			    (match_operand:Pptr 3 "register_operand" "r")]
+ 			   UNSPECV_PROBE_STACK_RANGE))]
+   ""
+   "* return output_probe_stack_range (operands[0], operands[2], operands[3]);"
+@@ -11931,9 +11931,9 @@
+ 
+ (define_expand "cstore<mode>4_signed"
+   [(use (match_operator 1 "signed_comparison_operator"
+-         [(match_operand:P 2 "gpc_reg_operand")
+-          (match_operand:P 3 "gpc_reg_operand")]))
+-   (clobber (match_operand:P 0 "gpc_reg_operand"))]
++         [(match_operand:Pptr 2 "gpc_reg_operand")
++          (match_operand:Pptr 3 "gpc_reg_operand")]))
++   (clobber (match_operand:Pptr 0 "gpc_reg_operand"))]
+   ""
+ {
+   enum rtx_code cond_code = GET_CODE (operands[1]);
+@@ -11972,9 +11972,9 @@
+ 
+ (define_expand "cstore<mode>4_unsigned"
+   [(use (match_operator 1 "unsigned_comparison_operator"
+-         [(match_operand:P 2 "gpc_reg_operand")
+-          (match_operand:P 3 "reg_or_short_operand")]))
+-   (clobber (match_operand:P 0 "gpc_reg_operand"))]
++         [(match_operand:Pptr 2 "gpc_reg_operand")
++          (match_operand:Pptr 3 "reg_or_short_operand")]))
++   (clobber (match_operand:Pptr 0 "gpc_reg_operand"))]
+   ""
+ {
+   enum rtx_code cond_code = GET_CODE (operands[1]);
+@@ -12254,9 +12254,9 @@
+ ;; instructions.  We can't split the insn due to the fact that this operation
+ ;; needs to be done in one piece.
+ (define_insn "stack_protect_set<mode>"
+-  [(set (match_operand:P 0 "memory_operand" "=YZ")
+-	(unspec:P [(match_operand:P 1 "memory_operand" "YZ")] UNSPEC_SP_SET))
+-   (set (match_scratch:P 2 "=&r") (const_int 0))]
++  [(set (match_operand:Pptr 0 "memory_operand" "=YZ")
++	(unspec:Pptr [(match_operand:Pptr 1 "memory_operand" "YZ")] UNSPEC_SP_SET))
++   (set (match_scratch:Pptr 2 "=&r") (const_int 0))]
+   ""
+ {
+   if (prefixed_memory (operands[1], <MODE>mode))
+@@ -12320,11 +12320,11 @@
+ ;; needs to be done in one piece.
+ (define_insn "stack_protect_test<mode>"
+   [(set (match_operand:CCEQ 0 "cc_reg_operand" "=x,?y")
+-        (unspec:CCEQ [(match_operand:P 1 "memory_operand" "YZ,YZ")
+-		      (match_operand:P 2 "memory_operand" "YZ,YZ")]
++        (unspec:CCEQ [(match_operand:Pptr 1 "memory_operand" "YZ,YZ")
++		      (match_operand:Pptr 2 "memory_operand" "YZ,YZ")]
+ 		     UNSPEC_SP_TEST))
+-   (set (match_scratch:P 4 "=r,r") (const_int 0))
+-   (clobber (match_scratch:P 3 "=&r,&r"))]
++   (set (match_scratch:Pptr 4 "=r,r") (const_int 0))
++   (clobber (match_scratch:Pptr 3 "=&r,&r"))]
+   ""
+ {
+   if (prefixed_memory (operands[1], <MODE>mode))
+@@ -13738,42 +13738,42 @@
+ 
+ (define_insn "*save_gpregs_<mode>_r11"
+   [(match_parallel 0 "any_parallel_operand"
+-		   [(clobber (reg:P LR_REGNO))
+-		    (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-                    (use (reg:P 11))
+-		    (set (match_operand:P 2 "memory_operand" "=m")
+-			 (match_operand:P 3 "gpc_reg_operand" "r"))])]
++		   [(clobber (reg:GPR LR_REGNO))
++		    (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++                    (use (reg:GPR 11))
++		    (set (match_operand:GPR 2 "memory_operand" "=m")
++			 (match_operand:GPR 3 "gpc_reg_operand" "r"))])]
+   ""
+   "bl %1"
+   [(set_attr "type" "branch")])
+ 
+ (define_insn "*save_gpregs_<mode>_r12"
+   [(match_parallel 0 "any_parallel_operand"
+-		   [(clobber (reg:P LR_REGNO))
+-		    (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-                    (use (reg:P 12))
+-		    (set (match_operand:P 2 "memory_operand" "=m")
+-			 (match_operand:P 3 "gpc_reg_operand" "r"))])]
++		   [(clobber (reg:GPR LR_REGNO))
++		    (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++                    (use (reg:GPR 12))
++		    (set (match_operand:GPR 2 "memory_operand" "=m")
++			 (match_operand:GPR 3 "gpc_reg_operand" "r"))])]
+   ""
+   "bl %1"
+   [(set_attr "type" "branch")])
+ 
+ (define_insn "*save_gpregs_<mode>_r1"
+   [(match_parallel 0 "any_parallel_operand"
+-		   [(clobber (reg:P LR_REGNO))
+-		    (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-                    (use (reg:P 1))
+-		    (set (match_operand:P 2 "memory_operand" "=m")
+-			 (match_operand:P 3 "gpc_reg_operand" "r"))])]
++		   [(clobber (reg:GPR LR_REGNO))
++		    (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++                    (use (reg:GPR 1))
++		    (set (match_operand:GPR 2 "memory_operand" "=m")
++			 (match_operand:GPR 3 "gpc_reg_operand" "r"))])]
+   ""
+   "bl %1"
+   [(set_attr "type" "branch")])
+ 
+ (define_insn "*save_fpregs_<mode>_r11"
+   [(match_parallel 0 "any_parallel_operand"
+-		   [(clobber (reg:P LR_REGNO))
+-		    (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-                    (use (reg:P 11))
++		   [(clobber (reg:GPR LR_REGNO))
++		    (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++                    (use (reg:GPR 11))
+ 		    (set (match_operand:DF 2 "memory_operand" "=m")
+ 			 (match_operand:DF 3 "gpc_reg_operand" "d"))])]
+   ""
+@@ -13782,9 +13782,9 @@
+ 
+ (define_insn "*save_fpregs_<mode>_r12"
+   [(match_parallel 0 "any_parallel_operand"
+-		   [(clobber (reg:P LR_REGNO))
+-		    (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-                    (use (reg:P 12))
++		   [(clobber (reg:GPR LR_REGNO))
++		    (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++                    (use (reg:GPR 12))
+ 		    (set (match_operand:DF 2 "memory_operand" "=m")
+ 			 (match_operand:DF 3 "gpc_reg_operand" "d"))])]
+   ""
+@@ -13793,9 +13793,9 @@
+ 
+ (define_insn "*save_fpregs_<mode>_r1"
+   [(match_parallel 0 "any_parallel_operand"
+-		   [(clobber (reg:P LR_REGNO))
+-		    (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-                    (use (reg:P 1))
++		   [(clobber (reg:GPR LR_REGNO))
++		    (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++                    (use (reg:GPR 1))
+ 		    (set (match_operand:DF 2 "memory_operand" "=m")
+ 			 (match_operand:DF 3 "gpc_reg_operand" "d"))])]
+   ""
+@@ -13909,33 +13909,33 @@
+ 
+ (define_insn "*restore_gpregs_<mode>_r11"
+  [(match_parallel 0 "any_parallel_operand"
+-		  [(clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 11))
+-		   (set (match_operand:P 2 "gpc_reg_operand" "=r")
+-			(match_operand:P 3 "memory_operand" "m"))])]
++		  [(clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 11))
++		   (set (match_operand:GPR 2 "gpc_reg_operand" "=r")
++			(match_operand:GPR 3 "memory_operand" "m"))])]
+  ""
+  "bl %1"
+  [(set_attr "type" "branch")])
+ 
+ (define_insn "*restore_gpregs_<mode>_r12"
+  [(match_parallel 0 "any_parallel_operand"
+-		  [(clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 12))
+-		   (set (match_operand:P 2 "gpc_reg_operand" "=r")
+-			(match_operand:P 3 "memory_operand" "m"))])]
++		  [(clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 12))
++		   (set (match_operand:GPR 2 "gpc_reg_operand" "=r")
++			(match_operand:GPR 3 "memory_operand" "m"))])]
+  ""
+  "bl %1"
+  [(set_attr "type" "branch")])
+ 
+ (define_insn "*restore_gpregs_<mode>_r1"
+  [(match_parallel 0 "any_parallel_operand"
+-		  [(clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 1))
+-		   (set (match_operand:P 2 "gpc_reg_operand" "=r")
+-			(match_operand:P 3 "memory_operand" "m"))])]
++		  [(clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 1))
++		   (set (match_operand:GPR 2 "gpc_reg_operand" "=r")
++			(match_operand:GPR 3 "memory_operand" "m"))])]
+  ""
+  "bl %1"
+  [(set_attr "type" "branch")])
+@@ -13943,11 +13943,11 @@
+ (define_insn "*return_and_restore_gpregs_<mode>_r11"
+  [(match_parallel 0 "any_parallel_operand"
+ 		  [(return)
+-		   (clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 11))
+-		   (set (match_operand:P 2 "gpc_reg_operand" "=r")
+-			(match_operand:P 3 "memory_operand" "m"))])]
++		   (clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 11))
++		   (set (match_operand:GPR 2 "gpc_reg_operand" "=r")
++			(match_operand:GPR 3 "memory_operand" "m"))])]
+  ""
+  "b %1"
+  [(set_attr "type" "branch")])
+@@ -13955,11 +13955,11 @@
+ (define_insn "*return_and_restore_gpregs_<mode>_r12"
+  [(match_parallel 0 "any_parallel_operand"
+ 		  [(return)
+-		   (clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 12))
+-		   (set (match_operand:P 2 "gpc_reg_operand" "=r")
+-			(match_operand:P 3 "memory_operand" "m"))])]
++		   (clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 12))
++		   (set (match_operand:GPR 2 "gpc_reg_operand" "=r")
++			(match_operand:GPR 3 "memory_operand" "m"))])]
+  ""
+  "b %1"
+  [(set_attr "type" "branch")])
+@@ -13967,11 +13967,11 @@
+ (define_insn "*return_and_restore_gpregs_<mode>_r1"
+  [(match_parallel 0 "any_parallel_operand"
+ 		  [(return)
+-		   (clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 1))
+-		   (set (match_operand:P 2 "gpc_reg_operand" "=r")
+-			(match_operand:P 3 "memory_operand" "m"))])]
++		   (clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 1))
++		   (set (match_operand:GPR 2 "gpc_reg_operand" "=r")
++			(match_operand:GPR 3 "memory_operand" "m"))])]
+  ""
+  "b %1"
+  [(set_attr "type" "branch")])
+@@ -13979,9 +13979,9 @@
+ (define_insn "*return_and_restore_fpregs_<mode>_r11"
+  [(match_parallel 0 "any_parallel_operand"
+ 		  [(return)
+-		   (clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 11))
++		   (clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 11))
+ 		   (set (match_operand:DF 2 "gpc_reg_operand" "=d")
+ 			(match_operand:DF 3 "memory_operand" "m"))])]
+  ""
+@@ -13991,9 +13991,9 @@
+ (define_insn "*return_and_restore_fpregs_<mode>_r12"
+  [(match_parallel 0 "any_parallel_operand"
+ 		  [(return)
+-		   (clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 12))
++		   (clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 12))
+ 		   (set (match_operand:DF 2 "gpc_reg_operand" "=d")
+ 			(match_operand:DF 3 "memory_operand" "m"))])]
+  ""
+@@ -14003,9 +14003,9 @@
+ (define_insn "*return_and_restore_fpregs_<mode>_r1"
+  [(match_parallel 0 "any_parallel_operand"
+ 		  [(return)
+-		   (clobber (reg:P LR_REGNO))
+-		   (use (match_operand:P 1 "symbol_ref_operand" "s"))
+-		   (use (reg:P 1))
++		   (clobber (reg:GPR LR_REGNO))
++		   (use (match_operand:GPR 1 "symbol_ref_operand" "s"))
++		   (use (reg:GPR 1))
+ 		   (set (match_operand:DF 2 "gpc_reg_operand" "=d")
+ 			(match_operand:DF 3 "memory_operand" "m"))])]
+  ""

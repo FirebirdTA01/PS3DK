@@ -1,0 +1,30 @@
+--- a/gcc/config/rs6000/t-cell64lv2
++++ b/gcc/config/rs6000/t-cell64lv2
+@@ -0,0 +1,27 @@
++# Multilib rules for powerpc64-ps3-elf (PS3 LV2 hybrid ABI).
++#
++# Copyright (C) 2026 PS3DK toolchain contributors.
++#
++# This file is part of GCC.
++#
++# GCC is free software; you can redistribute it and/or modify it under
++# the terms of the GNU General Public License as published by the Free
++# Software Foundation; either version 3, or (at your option) any later
++# version.
++#
++# GCC is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
++# License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with GCC; see the file COPYING3.  If not see
++# <http://www.gnu.org/licenses/>.
++#
++# Default ABI is ILP32 (32-bit pointer/long/size_t in 64-bit ELF) and
++# installs to lib/. The LP64 opt-in variant (-mlp64) installs to lib/lp64/.
++
++MULTILIB_OPTIONS    := mlp64
++MULTILIB_DIRNAMES   := lp64
++MULTILIB_EXTRA_OPTS :=
++MULTILIB_OSDIRNAMES :=

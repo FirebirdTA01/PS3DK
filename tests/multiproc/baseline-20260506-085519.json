@@ -1,0 +1,34 @@
+{
+  "phase": 0,
+  "timestamp": "2026-05-06T13:55:19Z",
+  "git_rev": "8914b8a",
+  "workload": "hello-spu.fake.self",
+  "n_runs": 5,
+  "cold_run": {
+    "wall_sec": 24.426,
+    "llvm_compile_count": 106,
+    "syscall_stats_count": 1,
+    "exit_code": 0
+  },
+  "warm_runs": {
+    "wall_sec": {
+      "median": 2.561,
+      "min": 2.500,
+      "max": 2.580
+    },
+    "llvm_compile_count": {
+      "median": 0.000,
+      "min": 0,
+      "max": 0
+    },
+    "syscall_stats_count": {
+      "median": 1.000,
+      "min": 1,
+      "max": 1
+    },
+    "raw_exit_codes": [0,0,0,0],
+    "raw_wall_times": [2.573,2.500,2.548,2.580],
+    "raw_llvm_counts": [0,0,0,0],
+    "raw_syscall_counts": [1,1,1,1]
+  }
+}

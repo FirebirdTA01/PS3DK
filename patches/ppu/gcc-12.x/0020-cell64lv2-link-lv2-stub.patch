@@ -1,0 +1,20 @@
+Add -llv2_stub to LIB_LV2_SPEC so newlib's __getreent (which calls
+sys_ppu_thread_get_id from <sys/lv2_syscall.h>) resolves at link time.
+
+The cross-module syscall stub lives in liblv2_stub.a; liblv2.a is the
+local runtime side and does not export the SPRX entry points.  Without
+this, every sample using the C library hits an undefined-reference link
+error when newlib's reentrancy hook is dragged in.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -288,7 +288,7 @@
+    build-psl1ght.sh / build-sdk.sh install libsysbase, librt, liblv2,
+    libc, and the cell-SDK stub archives).  --start-group / --end-group
+    resolve circular deps between newlib, lv2 stubs, and libsysbase.  */
+ #define LIB_LV2_SPEC \
+-  "-L %:getenv(PS3DK /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 --end-group"
++  "-L %:getenv(PS3DK /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 -llv2_stub --end-group"
+
+ #define STARTFILE_LV2_SPEC \
+   "lv2-crti.o%s crtbegin.o%s lv2-crt0.o%s lv2-sprx.o%s"

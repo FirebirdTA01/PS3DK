@@ -1,0 +1,12 @@
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -10691,6 +10691,9 @@
+ 
+       /* Now handle residuals.  We just have to set operands[1] correctly
+ 	 and let the rest of the expander run.  */
++      /* Under the LV2 hybrid ILP32 ABI, residual may come back DImode
++	 even though the expander signature requires Pmode (SImode).  */
++      residual = convert_to_mode (Pmode, residual, 0);
+       operands[1] = residual;
+     }
+ 

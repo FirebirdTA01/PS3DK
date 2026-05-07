@@ -190,16 +190,16 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "\t.type {}, @function", tramp_sym).ok();
         writeln!(out, "{}:", tramp_sym).ok();
         writeln!(out, "\tmflr   0").ok();
-        writeln!(out, "\tstd    0,24(1)").ok();          // save caller LR
-        writeln!(out, "\tstd    2,40(1)").ok();          // save caller TOC
+        writeln!(out, "\tstw    0,24(1)").ok();          // save caller LR (32-bit EA under hybrid ILP32)
+        writeln!(out, "\tstw    2,40(1)").ok();          // save caller TOC (32-bit EA under hybrid ILP32)
         writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
         writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
         writeln!(out, "\tlwz    0,0(12)").ok();          // SPRX entry
         writeln!(out, "\tlwz    2,4(12)").ok();          // SPRX TOC
         writeln!(out, "\tmtctr  0").ok();
         writeln!(out, "\tbctrl").ok();                   // call SPRX
-        writeln!(out, "\tld     2,40(1)").ok();          // restore caller TOC
-        writeln!(out, "\tld     0,24(1)").ok();          // restore caller LR
+        writeln!(out, "\tlwz    2,40(1)").ok();          // restore caller TOC (matches stw save width)
+        writeln!(out, "\tlwz    0,24(1)").ok();          // restore caller LR (matches stw save width)
         writeln!(out, "\tmtlr   0").ok();
         writeln!(out, "\tblr").ok();
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();

@@ -10,8 +10,8 @@
 +	if test x${enable_secureplt} = xyes; then
 +		tm_file="rs6000/secureplt.h ${tm_file}"
 +	fi
-+	extra_options="${extra_options} rs6000/sysv4.opt rs6000/linux64.opt"
-+	tmake_file="rs6000/t-fprules rs6000/t-ppcgas rs6000/t-ppccomm"
++	extra_options="${extra_options} rs6000/sysv4.opt rs6000/linux64.opt rs6000/cell64lv2.opt"
++	tmake_file="rs6000/t-fprules rs6000/t-ppccomm rs6000/t-cell64lv2"
 +	use_gcc_stdint=wrap
 +	;;
  powerpc*-*-freebsd*)

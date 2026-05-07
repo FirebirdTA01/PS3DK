@@ -175,34 +175,37 @@ int main(int argc, char *argv[])
 
 	/* .opd compat packing. Only apply to 24-byte ELFv1 descriptors -
 	   the spec-correct 8-byte descriptors need no post-processing.
-	   Distinguish via section alignment: ELFv1 descriptors are 8-byte
-	   aligned (sh_addralign >= 8), compact descriptors are 4-byte
-	   aligned. Divisibility-by-24 on the section size alone is not
-	   a reliable detector because a compact-OPD section of N*3
-	   entries is also divisible by 24, and treating it as ELFv1
-	   corrupts every third compact entry. */
+	   Section alignment is not a reliable detector because the linker
+	   script can force ALIGN(8) on a compact section.  Probe the first
+	   24 bytes: in ELFv1 the third 8-byte field (env) is always 0; in
+	   compact the same bytes are the next compact entry's
+	   [func_4, toc_4] — both nonzero for any non-trivial binary. */
 	Elf_Scn *opdsection = getSection(elf, ".opd");
 	if(opdsection) {
 		Elf_Data *opddata = elf_getdata(opdsection, NULL);
 		Elf64_Shdr *opdshdr = elf64_getshdr(opdsection);
-		if(opddata && opdshdr && opdshdr->sh_addralign >= 8
+		if(opddata && opdshdr
 		   && opddata->d_size % sizeof(Opd24) == 0
 		   && opddata->d_size >= sizeof(Opd24)) {
 			Opd24 *opdbase = (Opd24 *)opddata->d_buf;
 			size_t opdcount = opddata->d_size / sizeof(Opd24);
-			for(Opd24 *opd = opdbase; opd < (opdbase + opdcount); opd++) {
-				opd->data = BE64(((BE64(opd->func) << 32ULL)
-				                   | (BE64(opd->rtoc) & 0xffffffffULL)));
-				lseek(fd, opdshdr->sh_offset
-				    + (opd - opdbase) * sizeof(Opd24), SEEK_SET);
-				if(write(fd, opd, sizeof(Opd24)) != (ssize_t)sizeof(Opd24)) {
-					fprintf(stderr,
-					    "sprx-linker: write opd failed at %s:%d\n",
-					    __FILE__, __LINE__);
+			/* Compact .opd: env-shaped bytes are nonzero. */
+			if(opdbase[0].data != 0) {
+				/* compact - leave alone */
+			} else {
+				for(Opd24 *opd = opdbase; opd < (opdbase + opdcount); opd++) {
+					opd->data = BE64(((BE64(opd->func) << 32ULL)
+					                   | (BE64(opd->rtoc) & 0xffffffffULL)));
+					lseek(fd, opdshdr->sh_offset
+					    + (opd - opdbase) * sizeof(Opd24), SEEK_SET);
+					if(write(fd, opd, sizeof(Opd24)) != (ssize_t)sizeof(Opd24)) {
+						fprintf(stderr,
+						    "sprx-linker: write opd failed at %s:%d\n",
+						    __FILE__, __LINE__);
+					}
 				}
 			}
 		}
-		/* else: compact 8-byte entries or empty - leave alone. */
 	}
 
 	elf_end(elf);

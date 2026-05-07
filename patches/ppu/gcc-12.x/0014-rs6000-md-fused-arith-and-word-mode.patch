@@ -1,0 +1,661 @@
+--- a/gcc/config/rs6000/rs6000.md
++++ gcc/config/rs6000/rs6000.md
+@@ -1845,7 +1845,7 @@
+ 			      (match_operand:GPR 2 "gpc_reg_operand" "r,r"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    add. %0,%1,%2
+    #"
+@@ -1869,7 +1869,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(plus:GPR (match_dup 1)
+ 		  (match_dup 2)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    add. %0,%1,%2
+    #"
+@@ -1892,7 +1892,7 @@
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))
+    (clobber (reg:GPR CA_REGNO))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    addic. %0,%1,%2
+    #"
+@@ -1917,7 +1917,7 @@
+ 	(plus:GPR (match_dup 1)
+ 		  (match_dup 2)))
+    (clobber (reg:GPR CA_REGNO))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    addic. %0,%1,%2
+    #"
+@@ -2105,7 +2105,7 @@
+ 	(compare:CC (not:GPR (match_operand:GPR 1 "gpc_reg_operand" "r,r"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    not. %0,%1
+    #"
+@@ -2126,7 +2126,7 @@
+ 		    (const_int 0)))
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(not:GPR (match_dup 1)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    not. %0,%1
+    #"
+@@ -2188,7 +2188,7 @@
+ 			       (match_operand:GPR 1 "gpc_reg_operand" "r,r"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    subf. %0,%1,%2
+    #"
+@@ -2212,7 +2212,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(minus:GPR (match_dup 2)
+ 		   (match_dup 1)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    subf. %0,%1,%2
+    #"
+@@ -2248,7 +2248,7 @@
+    (set (reg:P CA_REGNO)
+ 	(leu:P (match_dup 1)
+ 	       (match_dup 2)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    subfc. %0,%1,%2
+    #"
+@@ -2370,7 +2370,7 @@
+ 	(compare:CC (neg:GPR (match_operand:GPR 1 "gpc_reg_operand" "r,r"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    neg. %0,%1
+    #"
+@@ -2391,7 +2391,7 @@
+ 		    (const_int 0)))
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(neg:GPR (match_dup 1)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    neg. %0,%1
+    #"
+@@ -3084,7 +3084,7 @@
+ 			      (match_operand:GPR 2 "gpc_reg_operand" "r,r"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    mull<wd>. %0,%1,%2
+    #"
+@@ -3109,7 +3109,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(mult:GPR (match_dup 1)
+ 		  (match_dup 2)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    mull<wd>. %0,%1,%2
+    #"
+@@ -3293,7 +3293,7 @@
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))
+    (clobber (reg:GPR CA_REGNO))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sra<wd>i %0,%1,%p2\;addze. %0,%0
+    #"
+@@ -3319,7 +3319,7 @@
+ 	(div:GPR (match_dup 1)
+ 		 (match_dup 2)))
+    (clobber (reg:GPR CA_REGNO))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sra<wd>i %0,%1,%p2\;addze. %0,%0
+    #"
+@@ -3553,7 +3553,7 @@
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))
+    (clobber (match_scratch:CC 4 "=X,x"))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && !rs6000_is_valid_and_mask (operands[2], <MODE>mode)"
+   "@
+    andi%e2. %0,%1,%u2
+@@ -3580,7 +3580,7 @@
+ 	(and:GPR (match_dup 1)
+ 		 (match_dup 2)))
+    (clobber (match_scratch:CC 4 "=X,x"))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && !rs6000_is_valid_and_mask (operands[2], <MODE>mode)"
+   "@
+    andi%e2. %0,%1,%u2
+@@ -3604,7 +3604,7 @@
+ 			     (match_operand:GPR 2 "logical_const_operand" "n,n"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && rs6000_is_valid_and_mask (operands[2], <MODE>mode)"
+   "@
+    andi%e2. %0,%1,%u2
+@@ -3629,7 +3629,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(and:GPR (match_dup 1)
+ 		 (match_dup 2)))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && rs6000_is_valid_and_mask (operands[2], <MODE>mode)"
+   "@
+    andi%e2. %0,%1,%u2
+@@ -3658,7 +3658,7 @@
+   "logical_const_operand (GEN_INT (UINTVAL (operands[2])
+ 				   << INTVAL (operands[4])),
+ 			  DImode)
+-   && (<MODE>mode == Pmode
++   && (<MODE>mode == word_mode
+        || (UINTVAL (operands[2]) << INTVAL (operands[4])) <= 0x7fffffff)"
+ {
+   operands[2] = GEN_INT (UINTVAL (operands[2]) << INTVAL (operands[4]));
+@@ -3684,7 +3684,7 @@
+ 			     (match_operand:GPR 2 "const_int_operand" "n,n"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && !logical_const_operand (operands[2], <MODE>mode)
+    && rs6000_is_valid_and_mask (operands[2], <MODE>mode)"
+ {
+@@ -3713,7 +3713,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(and:GPR (match_dup 1)
+ 		 (match_dup 2)))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && !logical_const_operand (operands[2], <MODE>mode)
+    && rs6000_is_valid_and_mask (operands[2], <MODE>mode)"
+ {
+@@ -3758,7 +3758,7 @@
+ 			     (match_operand:GPR 2 "const_int_operand" "n,n"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && rs6000_is_valid_2insn_and (operands[2], <MODE>mode)
+    && !(rs6000_is_valid_and_mask (operands[2], <MODE>mode)
+ 	|| logical_const_operand (operands[2], <MODE>mode))"
+@@ -3781,7 +3781,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(and:GPR (match_dup 1)
+ 		 (match_dup 2)))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[2]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[2]) <= 0x7fffffff)
+    && rs6000_is_valid_2insn_and (operands[2], <MODE>mode)
+    && !(rs6000_is_valid_and_mask (operands[2], <MODE>mode)
+ 	|| logical_const_operand (operands[2], <MODE>mode))"
+@@ -3915,7 +3915,7 @@
+ 	  (match_operand:GPR 2 "gpc_reg_operand" "r,r")])
+ 	 (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    %q3. %0,%1,%2
+    #"
+@@ -3938,7 +3938,7 @@
+ 	 (const_int 0)))
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(match_dup 3))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    %q3. %0,%1,%2
+    #"
+@@ -3970,7 +3970,7 @@
+ 	  (match_operand:GPR 1 "gpc_reg_operand" "r,r")])
+ 	 (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    %q3. %0,%1,%2
+    #"
+@@ -3993,7 +3993,7 @@
+ 	 (const_int 0)))
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(match_dup 3))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    %q3. %0,%1,%2
+    #"
+@@ -4025,7 +4025,7 @@
+ 	  (not:GPR (match_operand:GPR 2 "gpc_reg_operand" "r,r"))])
+ 	 (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    %q3. %0,%1,%2
+    #"
+@@ -4048,7 +4048,7 @@
+ 	 (const_int 0)))
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(match_dup 3))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    %q3. %0,%1,%2
+    #"
+@@ -4097,7 +4097,7 @@
+ 		   (match_operand:GPR 3 "const_int_operand" "n,n"))
+ 	  (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[3]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[3]) <= 0x7fffffff)
+    && rs6000_is_valid_shift_mask (operands[3], operands[4], <MODE>mode)"
+ {
+   if (which_alternative == 0)
+@@ -4129,7 +4129,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(and:GPR (match_dup 4)
+ 		 (match_dup 3)))]
+-  "(<MODE>mode == Pmode || UINTVAL (operands[3]) <= 0x7fffffff)
++  "(<MODE>mode == word_mode || UINTVAL (operands[3]) <= 0x7fffffff)
+    && rs6000_is_valid_shift_mask (operands[3], operands[4], <MODE>mode)"
+ {
+   if (which_alternative == 0)
+@@ -4498,7 +4498,7 @@
+ 				(match_operand:SI 2 "reg_or_cint_operand" "rn,rn"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    rotl<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -4523,7 +4523,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(rotate:GPR (match_dup 1)
+ 		    (match_dup 2)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    rotl<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -4566,7 +4566,7 @@
+ 				(match_operand:SI 2 "reg_or_cint_operand" "rn,rn"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sl<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -4591,7 +4591,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(ashift:GPR (match_dup 1)
+ 		    (match_dup 2)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sl<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -4755,7 +4755,7 @@
+ 				  (match_operand:SI 2 "reg_or_cint_operand" "rn,rn"))
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sr<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -4780,7 +4780,7 @@
+    (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
+ 	(lshiftrt:GPR (match_dup 1)
+ 		      (match_dup 2)))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sr<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -4826,7 +4826,7 @@
+ 		    (const_int 0)))
+    (clobber (match_scratch:GPR 0 "=r,r"))
+    (clobber (reg:GPR CA_REGNO))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sra<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -4853,7 +4853,7 @@
+ 	(ashiftrt:GPR (match_dup 1)
+ 		      (match_dup 2)))
+    (clobber (reg:GPR CA_REGNO))]
+-  "<MODE>mode == Pmode"
++  "<MODE>mode == word_mode"
+   "@
+    sra<wd>%I2. %0,%1,%<hH>2
+    #"
+@@ -12164,7 +12164,7 @@
+      but does hurt combine.  So don't.  */
+   if (GET_CODE (operands[1]) == EQ)
+     emit_insn (gen_eq<mode>3 (operands[0], operands[2], operands[3]));
+-  else if (<MODE>mode == Pmode
++  else if (<MODE>mode == word_mode
+ 	   && GET_CODE (operands[1]) == NE)
+     emit_insn (gen_ne<mode>3 (operands[0], operands[2], operands[3]));
+   else if (GET_CODE (operands[1]) == NE)
+@@ -12180,7 +12180,7 @@
+ 
+   /* Expanding the unsigned comparisons helps a lot: all the neg_ltu
+      etc. combinations magically work out just right.  */
+-  else if (<MODE>mode == Pmode
++  else if (<MODE>mode == word_mode
+ 	   && unsigned_comparison_operator (operands[1], VOIDmode))
+     emit_insn (gen_cstore<mode>4_unsigned (operands[0], operands[1],
+ 					   operands[2], operands[3]));
+@@ -12204,7 +12204,7 @@
+ 					       operands[2], operands[3]));
+ 
+   /* We also do not want to use mfcr for signed comparisons.  */
+-  else if (<MODE>mode == Pmode
++  else if (<MODE>mode == word_mode
+ 	   && signed_comparison_operator (operands[1], VOIDmode))
+     emit_insn (gen_cstore<mode>4_signed (operands[0], operands[1],
+ 					 operands[2], operands[3]));
+@@ -12716,26 +12716,26 @@
+ })
+ 
+ (define_insn_and_split "*ne<mode>3"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(ne:P (match_operand:P 1 "gpc_reg_operand" "r")
+-	      (match_operand:P 2 "scc_eq_operand" "<scc_eq_op2>")))
+-   (clobber (match_scratch:P 3 "=r"))
+-   (clobber (match_scratch:P 4 "=r"))
+-   (clobber (reg:P CA_REGNO))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(ne:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++	      (match_operand:GPR 2 "scc_eq_operand" "<scc_eq_op2>")))
++   (clobber (match_scratch:GPR 3 "=r"))
++   (clobber (match_scratch:GPR 4 "=r"))
++   (clobber (reg:GPR CA_REGNO))]
+   "!TARGET_POWER10 && !(TARGET_ISEL && operands[2] != const0_rtx)"
+   "#"
+   "&& 1"
+   [(parallel [(set (match_dup 4)
+-		   (plus:P (match_dup 3)
++		   (plus:GPR (match_dup 3)
+ 			   (const_int -1)))
+-	      (set (reg:P CA_REGNO)
+-		   (ne:P (match_dup 3)
++	      (set (reg:GPR CA_REGNO)
++		   (ne:GPR (match_dup 3)
+ 			 (const_int 0)))])
+    (parallel [(set (match_dup 0)
+-		   (plus:P (plus:P (not:P (match_dup 4))
+-				   (reg:P CA_REGNO))
++		   (plus:GPR (plus:GPR (not:GPR (match_dup 4))
++				   (reg:GPR CA_REGNO))
+ 			   (match_dup 3)))
+-	      (clobber (reg:P CA_REGNO))])]
++	      (clobber (reg:GPR CA_REGNO))])]
+ {
+   operands[3] = rs6000_emit_eqne (<MODE>mode,
+ 				  operands[1], operands[2], operands[3]);
+@@ -12749,25 +12749,25 @@
+ 		      (const_string "12")))])
+ 
+ (define_insn_and_split "*neg_eq_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(neg:P (eq:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		     (match_operand:P 2 "scc_eq_operand" "<scc_eq_op2>"))))
+-   (clobber (match_scratch:P 3 "=r"))
+-   (clobber (match_scratch:P 4 "=r"))
+-   (clobber (reg:P CA_REGNO))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(neg:GPR (eq:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		     (match_operand:GPR 2 "scc_eq_operand" "<scc_eq_op2>"))))
++   (clobber (match_scratch:GPR 3 "=r"))
++   (clobber (match_scratch:GPR 4 "=r"))
++   (clobber (reg:GPR CA_REGNO))]
+   "!TARGET_POWER10"
+   "#"
+   "&& 1"
+   [(parallel [(set (match_dup 4)
+-		   (plus:P (match_dup 3)
++		   (plus:GPR (match_dup 3)
+ 			   (const_int -1)))
+-	      (set (reg:P CA_REGNO)
+-		   (ne:P (match_dup 3)
++	      (set (reg:GPR CA_REGNO)
++		   (ne:GPR (match_dup 3)
+ 			 (const_int 0)))])
+    (parallel [(set (match_dup 0)
+-		   (plus:P (reg:P CA_REGNO)
++		   (plus:GPR (reg:GPR CA_REGNO)
+ 			   (const_int -1)))
+-	      (clobber (reg:P CA_REGNO))])]
++	      (clobber (reg:GPR CA_REGNO))])]
+ {
+   operands[3] = rs6000_emit_eqne (<MODE>mode,
+ 				  operands[1], operands[2], operands[3]);
+@@ -12781,24 +12781,24 @@
+ 		      (const_string "12")))])
+ 
+ (define_insn_and_split "*neg_ne_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(neg:P (ne:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		     (match_operand:P 2 "scc_eq_operand" "<scc_eq_op2>"))))
+-   (clobber (match_scratch:P 3 "=r"))
+-   (clobber (match_scratch:P 4 "=r"))
+-   (clobber (reg:P CA_REGNO))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(neg:GPR (ne:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		     (match_operand:GPR 2 "scc_eq_operand" "<scc_eq_op2>"))))
++   (clobber (match_scratch:GPR 3 "=r"))
++   (clobber (match_scratch:GPR 4 "=r"))
++   (clobber (reg:GPR CA_REGNO))]
+   "!TARGET_POWER10"
+   "#"
+   "&& 1"
+   [(parallel [(set (match_dup 4)
+-		   (neg:P (match_dup 3)))
+-	      (set (reg:P CA_REGNO)
+-		   (eq:P (match_dup 3)
++		   (neg:GPR (match_dup 3)))
++	      (set (reg:GPR CA_REGNO)
++		   (eq:GPR (match_dup 3)
+ 			 (const_int 0)))])
+    (parallel [(set (match_dup 0)
+-		   (plus:P (reg:P CA_REGNO)
++		   (plus:GPR (reg:GPR CA_REGNO)
+ 			   (const_int -1)))
+-	      (clobber (reg:P CA_REGNO))])]
++	      (clobber (reg:GPR CA_REGNO))])]
+ {
+   operands[3] = rs6000_emit_eqne (<MODE>mode,
+ 				  operands[1], operands[2], operands[3]);
+@@ -12812,25 +12812,25 @@
+ 		      (const_string "12")))])
+ 
+ (define_insn_and_split "*plus_eq_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(plus:P (eq:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		      (match_operand:P 2 "scc_eq_operand" "<scc_eq_op2>"))
+-		(match_operand:P 3 "gpc_reg_operand" "r")))
+-   (clobber (match_scratch:P 4 "=r"))
+-   (clobber (match_scratch:P 5 "=r"))
+-   (clobber (reg:P CA_REGNO))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(plus:GPR (eq:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		      (match_operand:GPR 2 "scc_eq_operand" "<scc_eq_op2>"))
++		(match_operand:GPR 3 "gpc_reg_operand" "r")))
++   (clobber (match_scratch:GPR 4 "=r"))
++   (clobber (match_scratch:GPR 5 "=r"))
++   (clobber (reg:GPR CA_REGNO))]
+   ""
+   "#"
+   ""
+   [(parallel [(set (match_dup 5)
+-		   (neg:P (match_dup 4)))
+-	      (set (reg:P CA_REGNO)
+-		   (eq:P (match_dup 4)
++		   (neg:GPR (match_dup 4)))
++	      (set (reg:GPR CA_REGNO)
++		   (eq:GPR (match_dup 4)
+ 			 (const_int 0)))])
+    (parallel [(set (match_dup 0)
+-		   (plus:P (match_dup 3)
+-			   (reg:P CA_REGNO)))
+-	      (clobber (reg:P CA_REGNO))])]
++		   (plus:GPR (match_dup 3)
++			   (reg:GPR CA_REGNO)))
++	      (clobber (reg:GPR CA_REGNO))])]
+ {
+   operands[4] = rs6000_emit_eqne (<MODE>mode,
+ 				  operands[1], operands[2], operands[4]);
+@@ -12844,26 +12844,26 @@
+ 		      (const_string "12")))])
+ 
+ (define_insn_and_split "*plus_ne_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(plus:P (ne:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		      (match_operand:P 2 "scc_eq_operand" "<scc_eq_op2>"))
+-		(match_operand:P 3 "gpc_reg_operand" "r")))
+-   (clobber (match_scratch:P 4 "=r"))
+-   (clobber (match_scratch:P 5 "=r"))
+-   (clobber (reg:P CA_REGNO))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(plus:GPR (ne:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		      (match_operand:GPR 2 "scc_eq_operand" "<scc_eq_op2>"))
++		(match_operand:GPR 3 "gpc_reg_operand" "r")))
++   (clobber (match_scratch:GPR 4 "=r"))
++   (clobber (match_scratch:GPR 5 "=r"))
++   (clobber (reg:GPR CA_REGNO))]
+   ""
+   "#"
+   ""
+   [(parallel [(set (match_dup 5)
+-		   (plus:P (match_dup 4)
++		   (plus:GPR (match_dup 4)
+ 			   (const_int -1)))
+-	      (set (reg:P CA_REGNO)
+-		   (ne:P (match_dup 4)
++	      (set (reg:GPR CA_REGNO)
++		   (ne:GPR (match_dup 4)
+ 			 (const_int 0)))])
+    (parallel [(set (match_dup 0)
+-		   (plus:P (match_dup 3)
+-			   (reg:P CA_REGNO)))
+-	      (clobber (reg:P CA_REGNO))])]
++		   (plus:GPR (match_dup 3)
++			   (reg:GPR CA_REGNO)))
++	      (clobber (reg:GPR CA_REGNO))])]
+ {
+   operands[4] = rs6000_emit_eqne (<MODE>mode,
+ 				  operands[1], operands[2], operands[4]);
+@@ -12877,27 +12877,27 @@
+ 		      (const_string "12")))])
+ 
+ (define_insn_and_split "*minus_eq_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(minus:P (match_operand:P 3 "gpc_reg_operand" "r")
+-		 (eq:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		       (match_operand:P 2 "scc_eq_operand" "<scc_eq_op2>"))))
+-   (clobber (match_scratch:P 4 "=r"))
+-   (clobber (match_scratch:P 5 "=r"))
+-   (clobber (reg:P CA_REGNO))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(minus:GPR (match_operand:GPR 3 "gpc_reg_operand" "r")
++		 (eq:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		       (match_operand:GPR 2 "scc_eq_operand" "<scc_eq_op2>"))))
++   (clobber (match_scratch:GPR 4 "=r"))
++   (clobber (match_scratch:GPR 5 "=r"))
++   (clobber (reg:GPR CA_REGNO))]
+   ""
+   "#"
+   ""
+   [(parallel [(set (match_dup 5)
+-		   (plus:P (match_dup 4)
++		   (plus:GPR (match_dup 4)
+ 			   (const_int -1)))
+-	      (set (reg:P CA_REGNO)
+-		   (ne:P (match_dup 4)
++	      (set (reg:GPR CA_REGNO)
++		   (ne:GPR (match_dup 4)
+ 			 (const_int 0)))])
+    (parallel [(set (match_dup 0)
+-		   (plus:P (plus:P (match_dup 3)
+-				   (reg:P CA_REGNO))
++		   (plus:GPR (plus:GPR (match_dup 3)
++				   (reg:GPR CA_REGNO))
+ 			   (const_int -1)))
+-	      (clobber (reg:P CA_REGNO))])]
++	      (clobber (reg:GPR CA_REGNO))])]
+ {
+   operands[4] = rs6000_emit_eqne (<MODE>mode,
+ 				  operands[1], operands[2], operands[4]);
+@@ -12911,26 +12911,26 @@
+ 		      (const_string "12")))])
+ 
+ (define_insn_and_split "*minus_ne_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(minus:P (match_operand:P 3 "gpc_reg_operand" "r")
+-		 (ne:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		       (match_operand:P 2 "scc_eq_operand" "<scc_eq_op2>"))))
+-   (clobber (match_scratch:P 4 "=r"))
+-   (clobber (match_scratch:P 5 "=r"))
+-   (clobber (reg:P CA_REGNO))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(minus:GPR (match_operand:GPR 3 "gpc_reg_operand" "r")
++		 (ne:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		       (match_operand:GPR 2 "scc_eq_operand" "<scc_eq_op2>"))))
++   (clobber (match_scratch:GPR 4 "=r"))
++   (clobber (match_scratch:GPR 5 "=r"))
++   (clobber (reg:GPR CA_REGNO))]
+   ""
+   "#"
+   ""
+   [(parallel [(set (match_dup 5)
+-		   (neg:P (match_dup 4)))
+-	      (set (reg:P CA_REGNO)
+-		   (eq:P (match_dup 4)
++		   (neg:GPR (match_dup 4)))
++	      (set (reg:GPR CA_REGNO)
++		   (eq:GPR (match_dup 4)
+ 			 (const_int 0)))])
+    (parallel [(set (match_dup 0)
+-		   (plus:P (plus:P (match_dup 3)
+-				   (reg:P CA_REGNO))
++		   (plus:GPR (plus:GPR (match_dup 3)
++				   (reg:GPR CA_REGNO))
+ 			   (const_int -1)))
+-	      (clobber (reg:P CA_REGNO))])]
++	      (clobber (reg:GPR CA_REGNO))])]
+ {
+   operands[4] = rs6000_emit_eqne (<MODE>mode,
+ 				  operands[1], operands[2], operands[4]);

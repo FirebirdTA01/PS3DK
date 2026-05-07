@@ -1,0 +1,83 @@
+--- a/gcc/config/rs6000/rs6000-logue.cc	2024-06-20 03:09:02.000000000 -0500
++++ gcc/config/rs6000/rs6000-logue.cc	2026-05-07 02:36:00.013081684 -0500
+@@ -1343,7 +1343,7 @@
+     {
+       gcc_assert (DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2);
+ 
+-      if (TARGET_32BIT)
++      if (Pmode == SImode)
+ 	emit_insn (gen_load_toc_aix_si (dest));
+       else
+ 	emit_insn (gen_load_toc_aix_di (dest));
+@@ -1502,7 +1502,7 @@
+       size_rtx = tmp_reg;
+     }
+   
+-  if (TARGET_32BIT)
++  if (Pmode == SImode)
+     insn = emit_insn (gen_movsi_update_stack (stack_pointer_rtx,
+ 					      stack_pointer_rtx,
+ 					      size_rtx,
+@@ -1665,7 +1665,7 @@
+       RTX_FRAME_RELATED_P (insn) = 1;
+ 
+       /* Emit the loop.  */
+-      if (TARGET_64BIT)
++      if (Pmode == DImode)
+ 	retval = emit_insn (gen_probe_stack_rangedi (stack_pointer_rtx,
+ 						     stack_pointer_rtx, orig_sp,
+ 						     end_addr));
+@@ -1866,7 +1866,7 @@
+ 	 probes at FIRST + N * PROBE_INTERVAL for values of N from 1
+ 	 until it is equal to ROUNDED_SIZE.  */
+ 
+-      if (TARGET_64BIT)
++      if (Pmode == DImode)
+ 	emit_insn (gen_probe_stack_rangedi (r12, r12, stack_pointer_rtx, r0));
+       else
+ 	emit_insn (gen_probe_stack_rangesi (r12, r12, stack_pointer_rtx, r0));
+@@ -1906,7 +1906,7 @@
+ 
+   /* Test if TEST_ADDR == LAST_ADDR.  */
+   xops[1] = reg2;
+-  if (TARGET_64BIT)
++  if (Pmode == DImode)
+     output_asm_insn ("cmpd 0,%0,%1", xops);
+   else
+     output_asm_insn ("cmpw 0,%0,%1", xops);
+@@ -1978,7 +1978,7 @@
+   xops[0] = reg1;
+   xops[1] = reg2;
+   xops[2] = GEN_INT (-probe_interval);
+-  if (TARGET_64BIT)
++  if (Pmode == DImode)
+     output_asm_insn ("stdu %1,%2(%0)", xops);
+   else
+     output_asm_insn ("stwu %1,%2(%0)", xops);
+@@ -1986,7 +1986,7 @@
+   /* Jump to LOOP_LAB if TEST_ADDR != LAST_ADDR.  */
+   xops[0] = reg1;
+   xops[1] = reg3;
+-  if (TARGET_64BIT)
++  if (Pmode == DImode)
+     output_asm_insn ("cmpd 0,%0,%1", xops);
+   else
+     output_asm_insn ("cmpw 0,%0,%1", xops);
+@@ -4676,7 +4676,7 @@
+ 		  rtx offset = GEN_INT (end_save + ptr_off);
+ 
+ 		  frame_off = -end_save;
+-		  if (TARGET_32BIT)
++		  if (Pmode == SImode)
+ 		    emit_insn (gen_addsi3_carry (frame_reg_rtx,
+ 						 ptr_reg, offset));
+ 		  else
+@@ -5520,7 +5520,7 @@
+ static rtx
+ gen_add3_const (rtx rt, rtx ra, long c)
+ {
+-  if (TARGET_64BIT)
++  if (Pmode == DImode)
+     return gen_adddi3 (rt, ra, GEN_INT (c));
+  else
+     return gen_addsi3 (rt, ra, GEN_INT (c));

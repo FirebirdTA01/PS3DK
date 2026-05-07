@@ -70,7 +70,7 @@ FreeBSD, bare-metal) see no change.
        fputs ("\t.section\t\".opd\",\"aw\"\n\t.align 3\n", file);
        ASM_OUTPUT_LABEL (file, name);
        fputs (DOUBLE_INT_ASM_OP, file);
-@@ -25558,7 +25596,43 @@
+@@ -25558,7 +25596,46 @@
  	     contains a value to place in the static chain register (r11).
  	     Note that if we load the static chain, our "trampoline" need
  	     not have any executable code.  */
@@ -87,7 +87,10 @@ FreeBSD, bare-metal) see no change.
 +	       the pair into a single lwz in output.  */
 +	    rtx tmp_si = gen_reg_rtx (SImode);
 +	    emit_move_insn (tmp_si, gen_rtx_MEM (SImode, func));
-+	    emit_insn (gen_zero_extendsidi2 (func_addr, tmp_si));
++	    if (Pmode == DImode)
++	      emit_insn (gen_zero_extendsidi2 (func_addr, tmp_si));
++	    else
++	      emit_move_insn (func_addr, tmp_si);
 +	  }
 +
 +	  {

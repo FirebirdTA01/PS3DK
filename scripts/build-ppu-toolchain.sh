@@ -320,7 +320,7 @@ build_gcc_newlib() {
         --disable-libssp
         --disable-libstdcxx-pch
         --disable-libstdcxx-filesystem-ts
-        --disable-multilib
+        --enable-multilib
         --disable-nls
         --disable-shared
         --disable-win32-registry

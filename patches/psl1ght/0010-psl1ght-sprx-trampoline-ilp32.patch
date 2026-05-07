@@ -1,0 +1,53 @@
+diff --git a/ppu/sprx/common/exports.S b/ppu/sprx/common/exports.S
+--- a/ppu/sprx/common/exports.S
++++ b/ppu/sprx/common/exports.S
+@@ -16,9 +16,12 @@ LIBRARY_SYMBOL:
+ 	.section ".sceStub.text","ax";		\
+ 	.globl __##name;					\
+ __##name:								\
++	/* Under the LV2 hybrid ILP32 ABI the caller's compiler saves */ \
++	/* LR + TOC with stw / lwz (4-byte slots).  Use matching widths */\
++	/* here so the trampoline does not corrupt the caller's slots. */ \
+ 	mflr	r0;							\
+-	std		r0,16(r1);					\
+-	std		r2,40(r1);					\
++	stw		r0,16(r1);					\
++	stw		r2,40(r1);					\
+ 	stdu	r1,-128(r1);				\
+ 	lis		r12,name##_stub@ha;			\
+ 	lwz		r12,name##_stub@l(r12);		\
+@@ -27,8 +30,8 @@ __##name:								\
+ 	mtctr	r0;							\
+ 	bctrl;								\
+ 	addi	r1,r1,128;					\
+-	ld		r2,40(r1);					\
+-	ld		r0,16(r1);					\
++	lwz		r2,40(r1);					\
++	lwz		r0,16(r1);					\
+ 	mtlr	r0;							\
+ 	blr;								\
+ 	.align 3;							\
+@@ -42,9 +45,10 @@ name:									\
+ 	.section ".sceStub.text","ax";			\
+ 	.globl __##name;						\
+ __##name:									\
++	/* See EXPORT macro above for the stw/lwz width rationale. */    \
+ 	mflr	r0;								\
+-	std		r0,16(r1);						\
+-	std		r2,40(r1);						\
++	stw		r0,16(r1);						\
++	stw		r2,40(r1);						\
+ 	std		r30,-16(r1);					\
+ 	std		r31,-8(r1);						\
+ 	stdu	r1,-160(r1);					\
+@@ -69,8 +73,8 @@ __##name:									\
+ 	addi	r1,r1,160;						\
+ 	ld		r30,-16(r1);					\
+ 	ld		r31,-8(r1);						\
+-	ld		r2,40(r1);						\
+-	ld		r0,16(r1);						\
++	lwz		r2,40(r1);						\
++	lwz		r0,16(r1);						\
+ 	mtlr	r0;								\
+ 	blr;									\
+ 	.align 3;								\
