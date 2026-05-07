@@ -55,24 +55,70 @@ index 0000000..8f596b3
 +AC_OUTPUT
 diff --git a/newlib/libc/sys/lv2/getreent.c b/newlib/libc/sys/lv2/getreent.c
 new file mode 100644
-index 0000000..59f3ef4
+index 0000000..a000001
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/getreent.c
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,61 @@
++/* Per-thread _reent storage for the LV2 hybrid ILP32 ABI.
++ *
++ * Compiler __thread cannot be used here: under the ELF64 + ILP32 data
++ * model, GCC emits .long sym@dtprel for DWARF TLS info, but the only
++ * @dtprel relocation available in the PPC64 ELF is R_PPC64_DTPREL64
++ * (eight bytes), which the assembler refuses to fit in four-byte storage.
++ * Per-thread _reent is keyed off the LV2 thread ID instead.
++ *
++ * sys_ppu_thread_get_id is the LV2 ABI's sysPrxForUser SPRX export for
++ * fetching the current thread id; any LV2 runtime that links libc.a
++ * provides this symbol.  Apps without an LV2 runtime get a normal
++ * undefined-symbol link error.  No single-thread fallback. */
++
 +#include <reent.h>
++#include <stdint.h>
 +
-+static __thread struct _reent t_reent;
-+static __thread struct _reent *t_reentp = 0;
++typedef uint64_t _ps3_thread_id_t;
 +
-+struct _reent* __getreent(void)
++extern int sys_ppu_thread_get_id(_ps3_thread_id_t *thread_id);
++
++#define REENT_TABLE_SIZE 16
++
++static struct {
++	_ps3_thread_id_t tid;
++	struct _reent reent;
++	int initialized;
++} reent_slots[REENT_TABLE_SIZE];
++
++/* Used only when sys_ppu_thread_get_id itself fails at runtime (e.g.,
++ * thread context not yet established).  Not a missing-symbol fallback. */
++static struct _reent _runtime_fallback_reent;
++static int _runtime_fallback_inited;
++
++struct _reent *__getreent(void)
 +{
-+  struct _reent *r = t_reentp;
-+
-+	if(!r) {
-+    t_reentp = r = &t_reent;
-+    _REENT_INIT_PTR(r);
-+  }
-+  return r;
++	_ps3_thread_id_t tid;
++	if (sys_ppu_thread_get_id(&tid) != 0) {
++		if (!_runtime_fallback_inited) {
++			_REENT_INIT_PTR(&_runtime_fallback_reent);
++			_runtime_fallback_inited = 1;
++		}
++		return &_runtime_fallback_reent;
++	}
++	unsigned base = (unsigned)tid & (REENT_TABLE_SIZE - 1);
++	for (int i = 0; i < REENT_TABLE_SIZE; i++) {
++		unsigned idx = (base + i) & (REENT_TABLE_SIZE - 1);
++		if (reent_slots[idx].initialized && reent_slots[idx].tid == tid)
++			return &reent_slots[idx].reent;
++		if (!reent_slots[idx].initialized) {
++			reent_slots[idx].tid = tid;
++			_REENT_INIT_PTR(&reent_slots[idx].reent);
++			reent_slots[idx].initialized = 1;
++			return &reent_slots[idx].reent;
++		}
++	}
++	if (!_runtime_fallback_inited) {
++		_REENT_INIT_PTR(&_runtime_fallback_reent);
++		_runtime_fallback_inited = 1;
++	}
++	return &_runtime_fallback_reent;
 +}
 diff --git a/newlib/libc/sys/lv2/lock.c b/newlib/libc/sys/lv2/lock.c
 new file mode 100644

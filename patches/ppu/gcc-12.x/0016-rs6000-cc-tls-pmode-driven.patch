@@ -1,0 +1,38 @@
+--- a/gcc/config/rs6000/rs6000.cc	2026-05-07 10:21:46.826352281 -0500
++++ gcc/config/rs6000/rs6000.cc	2026-05-07 10:21:29.458365771 -0500
+@@ -9544,7 +9544,7 @@
+       rtx tlsreg, tmp;
+ 
+       tmp = gen_reg_rtx (Pmode);
+-      if (TARGET_64BIT)
++      if (Pmode == DImode)
+ 	{
+ 	  tlsreg = gen_rtx_REG (Pmode, 13);
+ 	  insn = gen_tls_tprel_ha_64 (tmp, tlsreg, addr);
+@@ -9555,7 +9555,7 @@
+ 	  insn = gen_tls_tprel_ha_32 (tmp, tlsreg, addr);
+ 	}
+       emit_insn (insn);
+-      if (TARGET_64BIT)
++      if (Pmode == DImode)
+ 	insn = gen_tls_tprel_lo_64 (dest, tmp, addr);
+       else
+ 	insn = gen_tls_tprel_lo_32 (dest, tmp, addr);
+@@ -9637,7 +9637,7 @@
+ 
+ 	  if (rs6000_tls_size == 16 || rs6000_pcrel_p ())
+ 	    {
+-	      if (TARGET_64BIT)
++	      if (Pmode == DImode)
+ 		insn = gen_tls_dtprel_64 (dest, tmp1, addr);
+ 	      else
+ 		insn = gen_tls_dtprel_32 (dest, tmp1, addr);
+@@ -9671,7 +9671,7 @@
+ 	{
+ 	  /* IE, or 64-bit offset LE.  */
+ 	  tmp2 = gen_reg_rtx (Pmode);
+-	  if (TARGET_64BIT)
++	  if (Pmode == DImode)
+ 	    insn = gen_tls_got_tprel_64 (tmp2, got, addr);
+ 	  else
+ 	    insn = gen_tls_got_tprel_32 (tmp2, got, addr);

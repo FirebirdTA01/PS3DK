@@ -1,0 +1,11 @@
+--- a/gcc/config/rs6000/rs6000.h
++++ b/gcc/config/rs6000/rs6000.h
+@@ -1810,7 +1810,7 @@
+ #define MAX_REGS_PER_ADDRESS 2
+ 
+ /* Supply definition of STACK_SIZE_MODE for allocate_dynamic_stack_space.  */
+-#define STACK_SIZE_MODE (TARGET_32BIT ? SImode : DImode)
++#define STACK_SIZE_MODE (Pmode == SImode ? SImode : DImode)
+ 
+ /* Mode of a function address in a call instruction (for indexing purposes).  */
+ 

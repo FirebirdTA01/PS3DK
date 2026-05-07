@@ -1,0 +1,29 @@
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -14578,7 +14578,7 @@
+      .141  */
+   static char str[160];  /* 8 spare */
+   char *s = str;
+-  const char *ptrload = TARGET_64BIT ? "d" : "wz";
++  const char *ptrload = (Pmode == DImode) ? "d" : "wz";
+ 
+   if (DEFAULT_ABI == ABI_AIX)
+ #ifdef POWERPC_CELL64LV2
+@@ -14741,7 +14741,7 @@
+       sprintf (str,
+ 	       "l%s %%0,0(%%1)\n\t"
+ 	       "%s.reloc .-%c,R_PPC%s_PLT16_LO%s,%%z2%s",
+-	       TARGET_64BIT ? "d" : "wz",
++	       (Pmode == DImode) ? "d" : "wz",
+ 	       tls, off, rel64, TARGET_64BIT ? "_DS" : "", addend);
+       break;
+     case RS6000_PLTSEQ_MTCTR:
+@@ -14754,7 +14754,7 @@
+       sprintf (str,
+ 	       "pl%s %%0,0(0),1\n\t"
+ 	       "%s.reloc .-8,R_PPC%s_PLT_PCREL34_NOTOC,%%z2",
+-	       TARGET_64BIT ? "d" : "wz",
++	       (Pmode == DImode) ? "d" : "wz",
+ 	       tls, rel64);
+       break;
+     default:

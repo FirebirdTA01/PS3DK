@@ -1,0 +1,855 @@
+--- a/gcc/config/rs6000/rs6000.md
++++ gcc/config/rs6000/rs6000.md
+@@ -494,6 +494,7 @@
+ 
+ ; The size of a pointer.  Also, the size of the value that a record-condition
+ ; (one with a '.') will compare; and the size used for arithmetic carries.
++(define_mode_iterator Pptr [(SI "Pmode == SImode") (DI "Pmode == DImode")])
+ (define_mode_iterator P [(SI "TARGET_32BIT") (DI "TARGET_64BIT")])
+ 
+ ; Iterator to add PTImode along with TImode (TImode can go in VSX registers,
+@@ -1965,11 +1966,11 @@
+ 
+ 
+ (define_insn "add<mode>3_carry"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(plus:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		(match_operand:P 2 "reg_or_short_operand" "rI")))
+-   (set (reg:P CA_REGNO)
+-	(ltu:P (plus:P (match_dup 1)
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(plus:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		(match_operand:GPR 2 "reg_or_short_operand" "rI")))
++   (set (reg:GPR CA_REGNO)
++	(ltu:GPR (plus:GPR (match_dup 1)
+ 		       (match_dup 2))
+ 	       (match_dup 1)))]
+   ""
+@@ -1977,44 +1978,44 @@
+   [(set_attr "type" "add")])
+ 
+ (define_insn "*add<mode>3_imm_carry_pos"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(plus:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		(match_operand:P 2 "short_cint_operand" "n")))
+-   (set (reg:P CA_REGNO)
+-	(geu:P (match_dup 1)
+-	       (match_operand:P 3 "const_int_operand" "n")))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(plus:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		(match_operand:GPR 2 "short_cint_operand" "n")))
++   (set (reg:GPR CA_REGNO)
++	(geu:GPR (match_dup 1)
++	       (match_operand:GPR 3 "const_int_operand" "n")))]
+   "INTVAL (operands[2]) > 0
+    && INTVAL (operands[2]) + INTVAL (operands[3]) == 0"
+   "addic %0,%1,%2"
+   [(set_attr "type" "add")])
+ 
+ (define_insn "*add<mode>3_imm_carry_0"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(match_operand:P 1 "gpc_reg_operand" "r"))
+-   (set (reg:P CA_REGNO)
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(match_operand:GPR 1 "gpc_reg_operand" "r"))
++   (set (reg:GPR CA_REGNO)
+ 	(const_int 0))]
+   ""
+   "addic %0,%1,0"
+   [(set_attr "type" "add")])
+ 
+ (define_insn "*add<mode>3_imm_carry_m1"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(plus:P (match_operand:P 1 "gpc_reg_operand" "r")
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(plus:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
+ 		(const_int -1)))
+-   (set (reg:P CA_REGNO)
+-	(ne:P (match_dup 1)
++   (set (reg:GPR CA_REGNO)
++	(ne:GPR (match_dup 1)
+ 	      (const_int 0)))]
+   ""
+   "addic %0,%1,-1"
+   [(set_attr "type" "add")])
+ 
+ (define_insn "*add<mode>3_imm_carry_neg"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(plus:P (match_operand:P 1 "gpc_reg_operand" "r")
+-		(match_operand:P 2 "short_cint_operand" "n")))
+-   (set (reg:P CA_REGNO)
+-	(gtu:P (match_dup 1)
+-	       (match_operand:P 3 "const_int_operand" "n")))]
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(plus:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")
++		(match_operand:GPR 2 "short_cint_operand" "n")))
++   (set (reg:GPR CA_REGNO)
++	(gtu:GPR (match_dup 1)
++	       (match_operand:GPR 3 "const_int_operand" "n")))]
+   "INTVAL (operands[2]) < 0
+    && INTVAL (operands[2]) + INTVAL (operands[3]) == -1"
+   "addic %0,%1,%2"
+@@ -2239,14 +2240,14 @@
+ 
+ (define_insn_and_split "subf<mode>3_carry_dot2"
+   [(set (match_operand:CC 3 "cc_reg_operand" "=x,?y")
+-	(compare:CC (minus:P (match_operand:P 2 "gpc_reg_operand" "r,r")
+-			       (match_operand:P 1 "gpc_reg_operand" "r,r"))
++	(compare:CC (minus:GPR (match_operand:GPR 2 "gpc_reg_operand" "r,r")
++			       (match_operand:GPR 1 "gpc_reg_operand" "r,r"))
+ 		    (const_int 0)))
+-   (set (match_operand:P 0 "gpc_reg_operand" "=r,r")
+-	(minus:P (match_dup 2)
++   (set (match_operand:GPR 0 "gpc_reg_operand" "=r,r")
++	(minus:GPR (match_dup 2)
+ 		   (match_dup 1)))
+-   (set (reg:P CA_REGNO)
+-	(leu:P (match_dup 1)
++   (set (reg:GPR CA_REGNO)
++	(leu:GPR (match_dup 1)
+ 	       (match_dup 2)))]
+   "<MODE>mode == Pmode"
+   "@
+@@ -2254,10 +2255,10 @@
+    #"
+   "&& reload_completed && cc_reg_not_cr0_operand (operands[3], CCmode)"
+   [(parallel [(set (match_dup 0)
+-                   (minus:P (match_dup 2)
++                   (minus:GPR (match_dup 2)
+                             (match_dup 1)))
+-              (set (reg:P CA_REGNO)
+-                   (leu:P (match_dup 1)
++              (set (reg:GPR CA_REGNO)
++                   (leu:GPR (match_dup 1)
+                           (match_dup 2)))])
+    (set (match_dup 3)
+         (compare:CC (match_dup 0)
+@@ -2268,30 +2269,30 @@
+    (set_attr "length" "4,8")])
+ 
+ (define_insn "subf<mode>3_carry"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(minus:P (match_operand:P 2 "reg_or_short_operand" "rI")
+-		 (match_operand:P 1 "gpc_reg_operand" "r")))
+-   (set (reg:P CA_REGNO)
+-	(leu:P (match_dup 1)
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(minus:GPR (match_operand:GPR 2 "reg_or_short_operand" "rI")
++		 (match_operand:GPR 1 "gpc_reg_operand" "r")))
++   (set (reg:GPR CA_REGNO)
++	(leu:GPR (match_dup 1)
+ 	       (match_dup 2)))]
+   ""
+   "subf%I2c %0,%1,%2"
+   [(set_attr "type" "add")])
+ 
+ (define_insn "*subf<mode>3_imm_carry_0"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(neg:P (match_operand:P 1 "gpc_reg_operand" "r")))
+-   (set (reg:P CA_REGNO)
+-	(eq:P (match_dup 1)
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(neg:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")))
++   (set (reg:GPR CA_REGNO)
++	(eq:GPR (match_dup 1)
+ 	      (const_int 0)))]
+   ""
+   "subfic %0,%1,0"
+   [(set_attr "type" "add")])
+ 
+ (define_insn "*subf<mode>3_imm_carry_m1"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(not:P (match_operand:P 1 "gpc_reg_operand" "r")))
+-   (set (reg:P CA_REGNO)
++  [(set (match_operand:GPR 0 "gpc_reg_operand" "=r")
++	(not:GPR (match_operand:GPR 1 "gpc_reg_operand" "r")))
++   (set (reg:GPR CA_REGNO)
+ 	(const_int 1))]
+   ""
+   "subfic %0,%1,-1"
+@@ -10016,7 +10017,7 @@
+ 	(match_operand:DI 3 "gpc_reg_operand" "r,r"))
+    (set (match_operand:DI 0 "gpc_reg_operand" "=b,b")
+ 	(plus:DI (match_dup 1) (match_dup 2)))]
+-  "TARGET_64BIT"
++  "Pmode == DImode"
+   "@
+    stdux %3,%0,%2
+    stdu %3,%2(%0)"
+@@ -10080,7 +10081,7 @@
+ 	(match_operand:SI 3 "gpc_reg_operand" "r,r"))
+    (set (match_operand:SI 0 "gpc_reg_operand" "=b,b")
+ 	(plus:SI (match_dup 1) (match_dup 2)))]
+-  "TARGET_32BIT"
++  "Pmode == SImode"
+   "@
+    stwux %3,%0,%2
+    stwu %3,%2(%0)"
+@@ -10675,7 +10676,7 @@
+ 	  emit_stack_clash_protection_probe_loop_start (&loop_lab, &end_loop,
+ 							last_addr, rotated);
+
+-	  if (TARGET_32BIT)
++	  if (Pmode == SImode)
+ 	    emit_insn (gen_movsi_update_stack (stack_pointer_rtx,
+ 					       stack_pointer_rtx,
+ 					       update, chain));
+@@ -10702,7 +10703,7 @@
+   else
+     neg_op0 = GEN_INT (-INTVAL (operands[1]));
+ 
+-  insn = emit_insn ((* ((TARGET_32BIT) ? gen_movsi_update_stack
++  insn = emit_insn ((* ((Pmode == SImode) ? gen_movsi_update_stack
+ 				       : gen_movdi_update_stack))
+ 			(stack_pointer_rtx, stack_pointer_rtx, neg_op0,
+ 			 chain));
+@@ -11019,69 +11020,69 @@
+ })
+ 
+ ;; Largetoc support
+-(define_insn "*largetoc_high"
+-  [(set (match_operand:DI 0 "gpc_reg_operand" "=b*r")
+-        (high:DI
+-	  (unspec [(match_operand:DI 1 "" "")
+-		   (match_operand:DI 2 "gpc_reg_operand" "b")]
++(define_insn "*largetoc_high<mode>"
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b*r")
++        (high:Pptr
++	  (unspec [(match_operand:Pptr 1 "" "")
++		   (match_operand:Pptr 2 "gpc_reg_operand" "b")]
+ 		  UNSPEC_TOCREL)))]
+    "TARGET_ELF && TARGET_CMODEL != CMODEL_SMALL"
+    "addis %0,%2,%1@toc@ha")
+ 
+ (define_insn "*largetoc_high_aix<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b*r")
+-        (high:P
+-	  (unspec [(match_operand:P 1 "" "")
+-		   (match_operand:P 2 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b*r")
++        (high:Pptr
++	  (unspec [(match_operand:Pptr 1 "" "")
++		   (match_operand:Pptr 2 "gpc_reg_operand" "b")]
+ 		  UNSPEC_TOCREL)))]
+    "TARGET_XCOFF && TARGET_CMODEL != CMODEL_SMALL"
+    "addis %0,%1@u(%2)")
+ 
+-(define_insn "*largetoc_high_plus"
+-  [(set (match_operand:DI 0 "gpc_reg_operand" "=b*r")
+-        (high:DI
+-	  (plus:DI
+-	    (unspec [(match_operand:DI 1 "" "")
+-		     (match_operand:DI 2 "gpc_reg_operand" "b")]
++(define_insn "*largetoc_high_plus<mode>"
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b*r")
++        (high:Pptr
++	  (plus:Pptr
++	    (unspec [(match_operand:Pptr 1 "" "")
++		     (match_operand:Pptr 2 "gpc_reg_operand" "b")]
+ 		    UNSPEC_TOCREL)
+-	    (match_operand:DI 3 "add_cint_operand" "n"))))]
++	    (match_operand:Pptr 3 "add_cint_operand" "n"))))]
+    "TARGET_ELF && TARGET_CMODEL != CMODEL_SMALL"
+    "addis %0,%2,%1+%3@toc@ha")
+ 
+ (define_insn "*largetoc_high_plus_aix<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b*r")
+-        (high:P
+-	  (plus:P
+-	    (unspec [(match_operand:P 1 "" "")
+-		     (match_operand:P 2 "gpc_reg_operand" "b")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b*r")
++        (high:Pptr
++	  (plus:Pptr
++	    (unspec [(match_operand:Pptr 1 "" "")
++		     (match_operand:Pptr 2 "gpc_reg_operand" "b")]
+ 		    UNSPEC_TOCREL)
+-	    (match_operand:P 3 "add_cint_operand" "n"))))]
++	    (match_operand:Pptr 3 "add_cint_operand" "n"))))]
+    "TARGET_XCOFF && TARGET_CMODEL != CMODEL_SMALL"
+    "addis %0,%1+%3@u(%2)")
+ 
+-(define_insn "*largetoc_low"
+-  [(set (match_operand:DI 0 "gpc_reg_operand" "=r")
+-        (lo_sum:DI (match_operand:DI 1 "gpc_reg_operand" "b")
+-	           (match_operand:DI 2 "" "")))]
++(define_insn "*largetoc_low<mode>"
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++        (lo_sum:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "b")
++	           (match_operand:Pptr 2 "" "")))]
+    "TARGET_ELF && TARGET_CMODEL != CMODEL_SMALL"
+    "addi %0,%1,%2@l")
+ 
+ (define_insn "*largetoc_low_aix<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-        (lo_sum:P (match_operand:P 1 "gpc_reg_operand" "b")
+-	           (match_operand:P 2 "" "")))]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++        (lo_sum:Pptr (match_operand:Pptr 1 "gpc_reg_operand" "b")
++	           (match_operand:Pptr 2 "" "")))]
+    "TARGET_XCOFF && TARGET_CMODEL != CMODEL_SMALL"
+    "la %0,%2@l(%1)")
+ 
+ (define_insn_and_split "*tocref<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=b")
+-	(match_operand:P 1 "small_toc_ref" "R"))]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=b")
++	(match_operand:Pptr 1 "small_toc_ref" "R"))]
+    "TARGET_TOC
+     && legitimate_constant_pool_address_p (operands[1], QImode, false)"
+    "la %0,%a1"
+    "&& TARGET_CMODEL != CMODEL_SMALL && reload_completed"
+-  [(set (match_dup 0) (high:P (match_dup 1)))
+-   (set (match_dup 0) (lo_sum:P (match_dup 0) (match_dup 1)))])
++  [(set (match_dup 0) (high:Pptr (match_dup 1)))
++   (set (match_dup 0) (lo_sum:Pptr (match_dup 0) (match_dup 1)))])
+ 
+ ;; Elf specific ways of loading addresses for non-PIC code.
+ ;; The output of this could be r0, but we make a very strong
+@@ -11101,10 +11102,10 @@
+    "la %0,%2@l(%1)")
+ 
+ (define_insn "*pltseq_tocsave_<mode>"
+-  [(set (match_operand:P 0 "memory_operand" "=m")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-		   (match_operand:P 2 "symbol_ref_operand" "s")
+-		   (match_operand:P 3 "" "")]
++  [(set (match_operand:Pptr 0 "memory_operand" "=m")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++		   (match_operand:Pptr 2 "symbol_ref_operand" "s")
++		   (match_operand:Pptr 3 "" "")]
+ 		  UNSPEC_PLTSEQ))]
+   "TARGET_PLTSEQ
+    && DEFAULT_ABI == ABI_ELFv2"
+@@ -11113,10 +11114,10 @@
+ })
+ 
+ (define_insn "*pltseq_plt16_ha_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec:P [(match_operand:P 1 "" "")
+-		   (match_operand:P 2 "symbol_ref_operand" "s")
+-		   (match_operand:P 3 "" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec:Pptr [(match_operand:Pptr 1 "" "")
++		   (match_operand:Pptr 2 "symbol_ref_operand" "s")
++		   (match_operand:Pptr 3 "" "")]
+ 		  UNSPEC_PLT16_HA))]
+   "TARGET_PLTSEQ"
+ {
+@@ -11124,10 +11125,10 @@
+ })
+ 
+ (define_insn "*pltseq_plt16_lo_<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec_volatile:P [(match_operand:P 1 "gpc_reg_operand" "b")
+-			    (match_operand:P 2 "symbol_ref_operand" "s")
+-			    (match_operand:P 3 "" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec_volatile:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "b")
++			    (match_operand:Pptr 2 "symbol_ref_operand" "s")
++			    (match_operand:Pptr 3 "" "")]
+ 			   UNSPECV_PLT16_LO))]
+   "TARGET_PLTSEQ"
+ {
+@@ -11136,10 +11137,10 @@
+   [(set_attr "type" "load")])
+ 
+ (define_insn "*pltseq_mtctr_<mode>"
+-  [(set (match_operand:P 0 "register_operand" "=c")
+-	(unspec:P [(match_operand:P 1 "gpc_reg_operand" "r")
+-		   (match_operand:P 2 "symbol_ref_operand" "s")
+-		   (match_operand:P 3 "" "")]
++  [(set (match_operand:Pptr 0 "register_operand" "=c")
++	(unspec:Pptr [(match_operand:Pptr 1 "gpc_reg_operand" "r")
++		   (match_operand:Pptr 2 "symbol_ref_operand" "s")
++		   (match_operand:Pptr 3 "" "")]
+ 		  UNSPEC_PLTSEQ))]
+   "TARGET_PLTSEQ"
+ {
+@@ -11147,10 +11148,10 @@
+ })
+ 
+ (define_insn "*pltseq_plt_pcrel<mode>"
+-  [(set (match_operand:P 0 "gpc_reg_operand" "=r")
+-	(unspec_volatile:P [(match_operand:P 1 "" "")
+-			    (match_operand:P 2 "symbol_ref_operand" "s")
+-			    (match_operand:P 3 "" "")]
++  [(set (match_operand:Pptr 0 "gpc_reg_operand" "=r")
++	(unspec_volatile:Pptr [(match_operand:Pptr 1 "" "")
++			    (match_operand:Pptr 2 "symbol_ref_operand" "s")
++			    (match_operand:Pptr 3 "" "")]
+ 			   UNSPECV_PLT_PCREL))]
+   "HAVE_AS_PLTSEQ && TARGET_ELF
+    && rs6000_pcrel_p ()"
+@@ -11226,10 +11227,10 @@
+ ;; and < 0 if they were not.
+ 
+ (define_insn "*call_local<mode>"
+-  [(call (mem:SI (match_operand:P 0 "current_file_function_operand" "s,s"))
++  [(call (mem:SI (match_operand:Pptr 0 "current_file_function_operand" "s,s"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "O,n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(INTVAL (operands[2]) & CALL_LONG) == 0"
+ {
+   if (INTVAL (operands[2]) & CALL_V4_SET_FP_ARGS)
+@@ -11247,10 +11248,10 @@
+ 
+ (define_insn "*call_value_local<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "current_file_function_operand" "s,s"))
++	(call (mem:SI (match_operand:Pptr 1 "current_file_function_operand" "s,s"))
+ 	      (match_operand 2)))
+    (use (match_operand:SI 3 "immediate_operand" "O,n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(INTVAL (operands[3]) & CALL_LONG) == 0"
+ {
+   if (INTVAL (operands[3]) & CALL_V4_SET_FP_ARGS)
+@@ -11274,10 +11275,10 @@
+ ;; which indicates how to set cr1
+ 
+ (define_insn "*call_indirect_nonlocal_sysv<mode>"
+-  [(call (mem:SI (match_operand:P 0 "indirect_call_operand" "c,*l,X"))
++  [(call (mem:SI (match_operand:Pptr 0 "indirect_call_operand" "c,*l,X"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "n,n,n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "DEFAULT_ABI == ABI_V4
+    || DEFAULT_ABI == ABI_DARWIN"
+ {
+@@ -11302,10 +11303,10 @@
+ 	      (const_string "4")))])
+ 
+ (define_insn "*call_nonlocal_sysv<mode>"
+-  [(call (mem:SI (match_operand:P 0 "symbol_ref_operand" "s,s"))
++  [(call (mem:SI (match_operand:Pptr 0 "symbol_ref_operand" "s,s"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "O,n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(DEFAULT_ABI == ABI_DARWIN
+    || (DEFAULT_ABI == ABI_V4
+        && (INTVAL (operands[2]) & CALL_LONG) == 0))"
+@@ -11322,11 +11323,11 @@
+    (set_attr "length" "4,8")])
+ 
+ (define_insn "*call_nonlocal_sysv_secure<mode>"
+-  [(call (mem:SI (match_operand:P 0 "symbol_ref_operand" "s,s"))
++  [(call (mem:SI (match_operand:Pptr 0 "symbol_ref_operand" "s,s"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "O,n"))
+    (use (match_operand:SI 3 "register_operand" "r,r"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(DEFAULT_ABI == ABI_V4
+     && TARGET_SECURE_PLT && flag_pic && !SYMBOL_REF_LOCAL_P (operands[0])
+     && (INTVAL (operands[2]) & CALL_LONG) == 0)"
+@@ -11344,10 +11345,10 @@
+ 
+ (define_insn "*call_value_indirect_nonlocal_sysv<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "indirect_call_operand" "c,*l,X"))
+-	      (match_operand:P 2 "unspec_tls" "")))
++	(call (mem:SI (match_operand:Pptr 1 "indirect_call_operand" "c,*l,X"))
++	      (match_operand:Pptr 2 "unspec_tls" "")))
+    (use (match_operand:SI 3 "immediate_operand" "n,n,n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "DEFAULT_ABI == ABI_V4
+    || DEFAULT_ABI == ABI_DARWIN"
+ {
+@@ -11372,10 +11373,10 @@
+ 
+ (define_insn "*call_value_nonlocal_sysv<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "symbol_ref_operand" "s"))
+-	      (match_operand:P 2 "unspec_tls" "")))
++	(call (mem:SI (match_operand:Pptr 1 "symbol_ref_operand" "s"))
++	      (match_operand:Pptr 2 "unspec_tls" "")))
+    (use (match_operand:SI 3 "immediate_operand" "n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(DEFAULT_ABI == ABI_DARWIN
+     || (DEFAULT_ABI == ABI_V4
+ 	&& (INTVAL (operands[3]) & CALL_LONG) == 0))"
+@@ -11396,11 +11397,11 @@
+ 
+ (define_insn "*call_value_nonlocal_sysv_secure<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "symbol_ref_operand" "s"))
+-	      (match_operand:P 2 "unspec_tls" "")))
++	(call (mem:SI (match_operand:Pptr 1 "symbol_ref_operand" "s"))
++	      (match_operand:Pptr 2 "unspec_tls" "")))
+    (use (match_operand:SI 3 "immediate_operand" "n"))
+    (use (match_operand:SI 4 "register_operand" "r"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(DEFAULT_ABI == ABI_V4
+     && TARGET_SECURE_PLT && flag_pic && !SYMBOL_REF_LOCAL_P (operands[1])
+     && (INTVAL (operands[3]) & CALL_LONG) == 0)"
+@@ -11423,10 +11424,10 @@
+ ;; Restore the TOC pointer (r2) after the call.
+ 
+ (define_insn "*call_nonlocal_aix<mode>"
+-  [(call (mem:SI (match_operand:P 0 "symbol_ref_operand" "s"))
++  [(call (mem:SI (match_operand:Pptr 0 "symbol_ref_operand" "s"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2)
+    && (INTVAL (operands[2]) & CALL_LONG) == 0"
+ {
+@@ -11440,10 +11441,10 @@
+ 
+ (define_insn "*call_value_nonlocal_aix<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "symbol_ref_operand" "s"))
+-	      (match_operand:P 2 "unspec_tls" "")))
++	(call (mem:SI (match_operand:Pptr 1 "symbol_ref_operand" "s"))
++	      (match_operand:Pptr 2 "unspec_tls" "")))
+    (use (match_operand:SI 3 "immediate_operand" "n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "(DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2)
+    && (INTVAL (operands[3]) & CALL_LONG) == 0"
+ {
+@@ -11461,12 +11462,12 @@
+ ;; Operand4 is the offset of the stack location holding the current TOC pointer
+ 
+ (define_insn "*call_indirect_aix<mode>"
+-  [(call (mem:SI (match_operand:P 0 "indirect_call_operand" "c,*l,X"))
++  [(call (mem:SI (match_operand:Pptr 0 "indirect_call_operand" "c,*l,X"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "n,n,n"))
+-   (use (match_operand:P 3 "memory_operand" "<ptrm>,<ptrm>,<ptrm>"))
+-   (set (reg:P TOC_REGNUM) (unspec:P [(match_operand:P 4 "const_int_operand" "n,n,n")] UNSPEC_TOCSLOT))
+-   (clobber (reg:P LR_REGNO))]
++   (use (match_operand:Pptr 3 "memory_operand" "<ptrm>,<ptrm>,<ptrm>"))
++   (set (reg:Pptr TOC_REGNUM) (unspec:Pptr [(match_operand:Pptr 4 "const_int_operand" "n,n,n")] UNSPEC_TOCSLOT))
++   (clobber (reg:Pptr LR_REGNO))]
+   "DEFAULT_ABI == ABI_AIX"
+ {
+   return rs6000_indirect_call_template (operands, 0);
+@@ -11480,14 +11481,14 @@
+ 
+ (define_insn "*call_value_indirect_aix<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "indirect_call_operand" "c,*l,X"))
+-	      (match_operand:P 2 "unspec_tls" "")))
++	(call (mem:SI (match_operand:Pptr 1 "indirect_call_operand" "c,*l,X"))
++	      (match_operand:Pptr 2 "unspec_tls" "")))
+    (use (match_operand:SI 3 "immediate_operand" "n,n,n"))
+-   (use (match_operand:P 4 "memory_operand" "<ptrm>,<ptrm>,<ptrm>"))
+-   (set (reg:P TOC_REGNUM)
+-	(unspec:P [(match_operand:P 5 "const_int_operand" "n,n,n")]
++   (use (match_operand:Pptr 4 "memory_operand" "<ptrm>,<ptrm>,<ptrm>"))
++   (set (reg:Pptr TOC_REGNUM)
++	(unspec:Pptr [(match_operand:Pptr 5 "const_int_operand" "n,n,n")]
+ 		  UNSPEC_TOCSLOT))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "DEFAULT_ABI == ABI_AIX"
+ {
+   return rs6000_indirect_call_template (operands, 1);
+@@ -11504,11 +11505,11 @@
+ ;; Operand3 is the offset of the stack location holding the current TOC pointer
+ 
+ (define_insn "*call_indirect_elfv2<mode>"
+-  [(call (mem:SI (match_operand:P 0 "indirect_call_operand" "c,*l,X"))
++  [(call (mem:SI (match_operand:Pptr 0 "indirect_call_operand" "c,*l,X"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "n,n,n"))
+-   (set (reg:P TOC_REGNUM) (unspec:P [(match_operand:P 3 "const_int_operand" "n,n,n")] UNSPEC_TOCSLOT))
+-   (clobber (reg:P LR_REGNO))]
++   (set (reg:Pptr TOC_REGNUM) (unspec:Pptr [(match_operand:Pptr 3 "const_int_operand" "n,n,n")] UNSPEC_TOCSLOT))
++   (clobber (reg:Pptr LR_REGNO))]
+   "DEFAULT_ABI == ABI_ELFv2"
+ {
+   return rs6000_indirect_call_template (operands, 0);
+@@ -11521,10 +11522,10 @@
+ 		      (const_string "8")))])
+ 
+ (define_insn "*call_indirect_pcrel<mode>"
+-  [(call (mem:SI (match_operand:P 0 "indirect_call_operand" "c,*l,X"))
++  [(call (mem:SI (match_operand:Pptr 0 "indirect_call_operand" "c,*l,X"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "n,n,n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "rs6000_pcrel_p ()"
+ {
+   return rs6000_indirect_call_template (operands, 0);
+@@ -11538,13 +11539,13 @@
+ 
+ (define_insn "*call_value_indirect_elfv2<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "indirect_call_operand" "c,*l,X"))
+-	      (match_operand:P 2 "unspec_tls" "")))
++	(call (mem:SI (match_operand:Pptr 1 "indirect_call_operand" "c,*l,X"))
++	      (match_operand:Pptr 2 "unspec_tls" "")))
+    (use (match_operand:SI 3 "immediate_operand" "n,n,n"))
+-   (set (reg:P TOC_REGNUM)
+-	(unspec:P [(match_operand:P 4 "const_int_operand" "n,n,n")]
++   (set (reg:Pptr TOC_REGNUM)
++	(unspec:Pptr [(match_operand:Pptr 4 "const_int_operand" "n,n,n")]
+ 		  UNSPEC_TOCSLOT))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "DEFAULT_ABI == ABI_ELFv2"
+ {
+   return rs6000_indirect_call_template (operands, 1);
+@@ -11558,10 +11559,10 @@
+ 
+ (define_insn "*call_value_indirect_pcrel<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "indirect_call_operand" "c,*l,X"))
+-	      (match_operand:P 2 "unspec_tls" "")))
++	(call (mem:SI (match_operand:Pptr 1 "indirect_call_operand" "c,*l,X"))
++	      (match_operand:Pptr 2 "unspec_tls" "")))
+    (use (match_operand:SI 3 "immediate_operand" "n,n,n"))
+-   (clobber (reg:P LR_REGNO))]
++   (clobber (reg:Pptr LR_REGNO))]
+   "rs6000_pcrel_p ()"
+ {
+   return rs6000_indirect_call_template (operands, 1);
+@@ -11665,7 +11666,7 @@
+ })
+ 
+ (define_insn "*sibcall_local<mode>"
+-  [(call (mem:SI (match_operand:P 0 "current_file_function_operand" "s,s"))
++  [(call (mem:SI (match_operand:Pptr 0 "current_file_function_operand" "s,s"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "O,n"))
+    (simple_return)]
+@@ -11684,7 +11685,7 @@
+ 
+ (define_insn "*sibcall_value_local<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "current_file_function_operand" "s,s"))
++	(call (mem:SI (match_operand:Pptr 1 "current_file_function_operand" "s,s"))
+ 	      (match_operand 2)))
+    (use (match_operand:SI 3 "immediate_operand" "O,n"))
+    (simple_return)]
+@@ -11702,7 +11703,7 @@
+    (set_attr "length" "4,8")])
+ 
+ (define_insn "*sibcall_indirect_nonlocal_sysv<mode>"
+-  [(call (mem:SI (match_operand:P 0 "indirect_call_operand" "c,*l,X"))
++  [(call (mem:SI (match_operand:Pptr 0 "indirect_call_operand" "c,*l,X"))
+ 	 (match_operand 1))
+    (use (match_operand:SI 2 "immediate_operand" "n,n,n"))
+    (simple_return)]
+@@ -11730,7 +11731,7 @@
+ 	      (const_string "4")))])
+ 
+ (define_insn "*sibcall_nonlocal_sysv<mode>"
+-  [(call (mem:SI (match_operand:P 0 "symbol_ref_operand" "s,s"))
++  [(call (mem:SI (match_operand:Pptr 0 "symbol_ref_operand" "s,s"))
+ 	 (match_operand 1))
+    (use (match_operand 2 "immediate_operand" "O,n"))
+    (simple_return)]
+@@ -11751,7 +11752,7 @@
+ 
+ (define_insn "*sibcall_value_indirect_nonlocal_sysv<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "indirect_call_operand" "c,*l,X"))
++	(call (mem:SI (match_operand:Pptr 1 "indirect_call_operand" "c,*l,X"))
+ 	      (match_operand 2)))
+    (use (match_operand:SI 3 "immediate_operand" "n,n,n"))
+    (simple_return)]
+@@ -11780,7 +11781,7 @@
+ 
+ (define_insn "*sibcall_value_nonlocal_sysv<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "symbol_ref_operand" "s,s"))
++	(call (mem:SI (match_operand:Pptr 1 "symbol_ref_operand" "s,s"))
+ 	      (match_operand 2)))
+    (use (match_operand:SI 3 "immediate_operand" "O,n"))
+    (simple_return)]
+@@ -11802,7 +11803,7 @@
+ ;; AIX ABI sibling call patterns.
+ 
+ (define_insn "*sibcall_aix<mode>"
+-  [(call (mem:SI (match_operand:P 0 "call_operand" "s,c"))
++  [(call (mem:SI (match_operand:Pptr 0 "call_operand" "s,c"))
+ 	 (match_operand 1))
+    (simple_return)]
+   "DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2"
+@@ -11816,7 +11817,7 @@
+ 
+ (define_insn "*sibcall_value_aix<mode>"
+   [(set (match_operand 0 "" "")
+-	(call (mem:SI (match_operand:P 1 "call_operand" "s,c"))
++	(call (mem:SI (match_operand:Pptr 1 "call_operand" "s,c"))
+ 	      (match_operand 2)))
+    (simple_return)]
+   "DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2"
+@@ -13261,13 +13262,13 @@
+ 
+ (define_insn "*indirect_jump<mode>"
+   [(set (pc)
+-	(match_operand:P 0 "register_operand" "c,*l"))]
++	(match_operand:Pptr 0 "register_operand" "c,*l"))]
+   "rs6000_speculate_indirect_jumps"
+   "b%T0"
+   [(set_attr "type" "jmpreg")])
+ 
+ (define_insn "@indirect_jump<mode>_nospec"
+-  [(set (pc) (match_operand:P 0 "register_operand" "c,*l"))
++  [(set (pc) (match_operand:Pptr 0 "register_operand" "c,*l"))
+    (clobber (match_operand:CC 1 "cc_reg_operand" "=y,y"))]
+   "!rs6000_speculate_indirect_jumps"
+   "crset %E1\;beq%T0- %1\;b $"
+@@ -13304,7 +13305,7 @@
+ 
+ (define_expand "@tablejump<mode>_normal"
+   [(use (match_operand:SI 0))
+-   (use (match_operand:P 1))]
++   (use (match_operand:Pptr 1))]
+   "rs6000_speculate_indirect_jumps && rs6000_relative_jumptables"
+ {
+   rtx off = force_reg (SImode, operands[0]);
+@@ -13324,8 +13325,8 @@
+ })
+ 
+ (define_expand "@tablejump<mode>_absolute"
+-  [(use (match_operand:P 0))
+-   (use (match_operand:P 1))]
++  [(use (match_operand:Pptr 0))
++   (use (match_operand:Pptr 1))]
+   "rs6000_speculate_indirect_jumps && !rs6000_relative_jumptables"
+ {
+   rtx addr = gen_reg_rtx (Pmode);
+@@ -13337,7 +13338,7 @@
+ 
+ (define_expand "@tablejump<mode>_nospec"
+   [(use (match_operand:SI 0))
+-   (use (match_operand:P 1))
++   (use (match_operand:Pptr 1))
+    (use (match_operand:CC 2))]
+   "!rs6000_speculate_indirect_jumps && rs6000_relative_jumptables"
+ {
+@@ -13359,8 +13360,8 @@
+ })
+ 
+ (define_expand "@tablejump<mode>_absolute_nospec"
+-  [(use (match_operand:P 0))
+-   (use (match_operand:P 1))
++  [(use (match_operand:Pptr 0))
++   (use (match_operand:Pptr 1))
+    (use (match_operand:CC 2))]
+   "!rs6000_speculate_indirect_jumps && !rs6000_relative_jumptables"
+ {
+@@ -13374,7 +13375,7 @@
+ 
+ (define_insn "@tablejump<mode>_insn_normal"
+   [(set (pc)
+-	(match_operand:P 0 "register_operand" "c,*l"))
++	(match_operand:Pptr 0 "register_operand" "c,*l"))
+    (use (label_ref (match_operand 1)))]
+   "rs6000_speculate_indirect_jumps"
+   "b%T0"
+@@ -13382,7 +13383,7 @@
+ 
+ (define_insn "@tablejump<mode>_insn_nospec"
+   [(set (pc)
+-	(match_operand:P 0 "register_operand" "c,*l"))
++	(match_operand:Pptr 0 "register_operand" "c,*l"))
+    (use (label_ref (match_operand 1)))
+    (clobber (match_operand:CC 2 "cc_reg_operand" "=y,y"))]
+   "!rs6000_speculate_indirect_jumps"
+@@ -13429,15 +13430,15 @@
+ 
+ (define_expand "@ctr<mode>"
+   [(parallel [(set (pc)
+-		   (if_then_else (ne (match_operand:P 0 "register_operand")
++		   (if_then_else (ne (match_operand:Pptr 0 "register_operand")
+ 				     (const_int 1))
+ 				 (label_ref (match_operand 1))
+ 				 (pc)))
+ 	      (set (match_dup 0)
+-		   (plus:P (match_dup 0)
++		   (plus:Pptr (match_dup 0)
+ 			    (const_int -1)))
+ 	      (clobber (match_scratch:CC 2))
+-	      (clobber (match_scratch:P 3))])]
++	      (clobber (match_scratch:Pptr 3))])]
+   ""
+   "")
+ 
+@@ -13455,15 +13456,15 @@
+ 
+ (define_insn "<bd>_<mode>"
+   [(set (pc)
+-	(if_then_else (eqne (match_operand:P 1 "register_operand" "c,*b,*b,*b")
++	(if_then_else (eqne (match_operand:Pptr 1 "register_operand" "c,*b,*b,*b")
+ 			  (const_int 1))
+ 		      (label_ref (match_operand 0))
+ 		      (pc)))
+-   (set (match_operand:P 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
+-	(plus:P (match_dup 1)
++   (set (match_operand:Pptr 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
++	(plus:Pptr (match_dup 1)
+ 		(const_int -1)))
+    (clobber (match_scratch:CC 3 "=X,&x,&x,&x"))
+-   (clobber (match_scratch:P 4 "=X,X,&r,r"))]
++   (clobber (match_scratch:Pptr 4 "=X,X,&r,r"))]
+   ""
+ {
+   if (which_alternative != 0)
+@@ -13489,15 +13490,15 @@
+ (define_split
+   [(set (pc)
+ 	(if_then_else (match_operator 2 "comparison_operator"
+-				      [(match_operand:P 1 "gpc_reg_operand")
++				      [(match_operand:Pptr 1 "gpc_reg_operand")
+ 				       (const_int 1)])
+ 		      (match_operand 5)
+ 		      (match_operand 6)))
+-   (set (match_operand:P 0 "nonimmediate_operand")
+-	(plus:P (match_dup 1)
++   (set (match_operand:Pptr 0 "nonimmediate_operand")
++	(plus:Pptr (match_dup 1)
+ 		(const_int -1)))
+    (clobber (match_scratch:CC 3))
+-   (clobber (match_scratch:P 4))]
++   (clobber (match_scratch:Pptr 4))]
+   "reload_completed"
+   [(set (pc)
+ 	(if_then_else (match_dup 7)
+@@ -13528,17 +13529,17 @@
+   [(set (pc)
+ 	(if_then_else
+ 	  (and
+-	     (eqne (match_operand:P 1 "register_operand" "c,*b,*b,*b")
++	     (eqne (match_operand:Pptr 1 "register_operand" "c,*b,*b,*b")
+ 		   (const_int 1))
+ 	     (match_operator 3 "branch_comparison_operator"
+ 		      [(match_operand 4 "cc_reg_operand" "y,y,y,y")
+ 		       (const_int 0)]))
+ 	  (label_ref (match_operand 0))
+ 	  (pc)))
+-   (set (match_operand:P 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
+-	(plus:P (match_dup 1)
++   (set (match_operand:Pptr 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
++	(plus:Pptr (match_dup 1)
+ 		(const_int -1)))
+-   (clobber (match_scratch:P 5 "=X,X,&r,r"))
++   (clobber (match_scratch:Pptr 5 "=X,X,&r,r"))
+    (clobber (match_scratch:CC 6 "=X,&y,&y,&y"))
+    (clobber (match_scratch:CCEQ 7 "=X,&y,&y,&y"))]
+   ""
+@@ -14045,8 +14046,8 @@
+ ; We can't expand this before we know where the link register is stored.
+ (define_insn_and_split "@eh_set_lr_<mode>"
+-  [(unspec_volatile [(match_operand:P 0 "register_operand" "r")] UNSPECV_EH_RR)
+-   (clobber (match_scratch:P 1 "=&b"))]
++  [(unspec_volatile [(match_operand:Pptr 0 "register_operand" "r")] UNSPECV_EH_RR)
++   (clobber (match_scratch:Pptr 1 "=&b"))]
+   ""
+   "#"
+   "reload_completed"

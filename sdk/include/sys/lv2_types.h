@@ -103,7 +103,12 @@ static inline lv2_ea32_t lv2_fn_to_callback_ea(const void *fn)
  */
 #ifdef _Static_assert
 _Static_assert(sizeof(lv2_ea32_t) == 4, "lv2_ea32_t must be exactly 32 bits");
-_Static_assert(sizeof(void *) == 8, "PPU ABI requires 64-bit native pointers");
+/* PS3DK supports the ELF64 + ILP32 hybrid ABI (4-byte pointers, default)
+ * and the legacy ELF64 + LP64 ABI (8-byte pointers, opt-in via -mlp64).
+ * SPRX cross-module pointers stay 4 bytes regardless via lv2_ea32_t /
+ * ATTRIBUTE_PRXPTR; only the in-process pointer width differs. */
+_Static_assert(sizeof(void *) == 4 || sizeof(void *) == 8,
+	       "PPU ABI requires 4-byte (ILP32) or 8-byte (LP64) pointers");
 #endif
 
 #ifdef __cplusplus

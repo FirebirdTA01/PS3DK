@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <cell/sail/common.h>
+#include <cell/sail/common_rec.h>
 #ifdef __PPU__
 #include <ppu-types.h>
 #else
