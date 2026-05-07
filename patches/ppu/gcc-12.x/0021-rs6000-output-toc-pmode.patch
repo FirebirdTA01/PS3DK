@@ -1,0 +1,34 @@
+rs6000.cc output_toc: emit 4-byte TOC slots under hybrid ILP32.
+
+The TOC slot width is set by output_toc when emitting the .toc input
+section for each compiled translation unit.  Under upstream behaviour
+the gate is `TARGET_32BIT ? "\t.long " : DOUBLE_INT_ASM_OP` — pure
+ELF32 gets 4-byte slots, everything else gets `.quad` (8-byte).
+
+Under the CellOS Lv-2 hybrid ABI we want 4-byte slots even though
+TARGET_64BIT is set, because pointers are 32-bit and the compiler
+emits `lwz` (not `ld`) for `@toc@l` loads.  An 8-byte slot with a
+`.quad sym` directive places the 32-bit address in the LOW 4 bytes
+of the slot, and a subsequent `lwz` reads the HIGH 4 bytes (zero) —
+the load returns 0 and the pointer dereference faults.
+
+Gating on `Pmode == SImode` instead of `TARGET_32BIT` tracks the
+pointer-width axis directly: under default ILP32 hybrid Pmode is
+SImode, slots are 4 bytes; under -mlp64 Pmode is DImode, slots stay
+8 bytes for legacy compatibility.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -17307,7 +17307,11 @@ output_toc (FILE *file, rtx x, int labelno, machine_mode mode)
+     }
+
+   if (TARGET_ELF || TARGET_MINIMAL_TOC)
+-    fputs (TARGET_32BIT ? "\t.long " : DOUBLE_INT_ASM_OP, file);
++    /* CellOS Lv-2 hybrid ILP32: TOC slot is one 32-bit address word
++       even though TARGET_64BIT is set; gate on Pmode rather than
++       TARGET_32BIT so the .toc input section gets 4-byte slots that
++       a `lwz @toc@l(r2)` load can read directly.  */
++    fputs (Pmode == SImode ? "\t.long " : DOUBLE_INT_ASM_OP, file);
+   else
+     {
+       fputs ("\t.tc ", file);
