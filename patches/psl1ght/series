@@ -9,3 +9,4 @@
 0009-librsx-vp-upload-count4.patch
 0010-psl1ght-sprx-trampoline-ilp32.patch
 0011-crt-ilp32-compact-opd.patch
+0012-liblv2-drop-sprx-duplicate-trampolines.patch

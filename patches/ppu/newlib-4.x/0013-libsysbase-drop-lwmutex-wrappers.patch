@@ -1,0 +1,94 @@
+Drop libsysbase sys_lwmutex_* wrapper bodies.
+
+The wrappers in libgloss/libsysbase/lock.c routed sys_lwmutex_* through
+the __syscalls indirection table.  That worked when no real SPRX
+trampoline existed for those NIDs, but the nidgen-emitted liblv2_stub.a
+now provides them as canonical SPRX trampolines (with PSL1GHT-style
+sysLwMutex* aliases).  Keeping both copies caused duplicate
+sysPrxForUser .lib.stub records and the stale-build / TOC-slot
+collision documented in docs/abi/cellos-lv2-abi-spec.md §5.1.
+
+Resolution: keep lock.c as a comment-only placeholder so the
+libsysbase Makefile.in OBJS list (which already names lock.o) still
+finds a translation unit, but produce no symbols.  The trampolines in
+liblv2_stub.a are the only definition of sys_lwmutex_*.
+
+diff --git a/libgloss/libsysbase/lock.c b/libgloss/libsysbase/lock.c
+index 571b6a4..d70c10c 100644
+--- a/libgloss/libsysbase/lock.c
++++ b/libgloss/libsysbase/lock.c
+@@ -1,63 +1,11 @@
+-#include "config.h"
+-#include <_ansi.h>
+-#include <_syslist.h>
+-#include <errno.h>
+-#include <stdint.h>
+-#include <sys/types.h>
+-#include <sys/lock.h>
+-#include <sys/syscalls.h>
+-
+-int32_t sys_lwmutex_create(sys_lwmutex_t *lwmutex,const sys_lwmutex_attr_t *attr)
+-{
+-	struct _reent *r = _REENT;
+-
+-	if(__syscalls.sys_lwmutex_create_r)
+-		return __syscalls.sys_lwmutex_create_r(r,lwmutex,attr);
+-
+-	r->_errno = ENOSYS;
+-	return -1;
+-}
+-
+-int32_t sys_lwmutex_destroy(sys_lwmutex_t *lwmutex)
+-{
+-	struct _reent *r = _REENT;
+-
+-	if(__syscalls.sys_lwmutex_destroy_r)
+-		return __syscalls.sys_lwmutex_destroy_r(r,lwmutex);
+-
+-	r->_errno = ENOSYS;
+-	return -1;
+-}
+-
+-int32_t sys_lwmutex_lock(sys_lwmutex_t *lwmutex, uint64_t timeout)
+-{
+-	struct _reent *r = _REENT;
+-
+-	if(__syscalls.sys_lwmutex_lock_r)
+-		return __syscalls.sys_lwmutex_lock_r(r,lwmutex,timeout);
+-
+-	r->_errno = ENOSYS;
+-	return -1;
+-}
+-
+-int32_t sys_lwmutex_trylock(sys_lwmutex_t *lwmutex)
+-{
+-	struct _reent *r = _REENT;
+-
+-	if(__syscalls.sys_lwmutex_trylock_r)
+-		return __syscalls.sys_lwmutex_trylock_r(r,lwmutex);
+-
+-	r->_errno = ENOSYS;
+-	return -1;
+-}
+-
+-int32_t sys_lwmutex_unlock(sys_lwmutex_t *lwmutex)
+-{
+-	struct _reent *r = _REENT;
+-
+-	if(__syscalls.sys_lwmutex_unlock_r)
+-		return __syscalls.sys_lwmutex_unlock_r(r,lwmutex);
+-
+-	r->_errno = ENOSYS;
+-	return -1;
+-}
++/*
++ * sys_lwmutex_* C wrappers used to live here as a __syscalls indirection
++ * stub for runtimes that did not provide a direct SPRX trampoline.
++ *
++ * Removed: nidgen-emitted liblv2_stub.a now provides
++ * sys_lwmutex_{create,destroy,lock,trylock,unlock} as canonical SPRX
++ * trampolines (with PSL1GHT-style sysLwMutex* aliases for compatibility).
++ * The libsysbase wrappers were redundant and conflicted with the
++ * trampolines at link time.  See docs/abi/cellos-lv2-abi-spec.md §5
++ * for the trampoline contract.
++ */
