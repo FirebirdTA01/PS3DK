@@ -163,43 +163,40 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "{}:", fnid_sym).ok();
         writeln!(out, "\t.4byte 0x{:08x}", e.nid).ok();
 
-        // 5c. Trampoline — frame-less wrapping stub.
-        //     The reference Sony stub is a `bctr` tail-call leaf and
-        //     relies on the caller emitting `ld r2,40(r1)` after the
-        //     `bl <stub>` to restore the TOC.  Our PPU GCC + linker
-        //     treat `bl __<name>` as an intra-DSO call (since the stub
-        //     archive is linked statically) and do NOT rewrite the
-        //     trailing `nop` to a TOC restore.  So we have to restore
-        //     r2 ourselves, which means re-entering the trampoline
-        //     after the SPRX returns - i.e. `bctrl` not `bctr`.
+        // 5c. Trampoline — frame-less wrapping stub matching GCC's
+        //     LR/TOC save convention under our ELF64 + ILP32 hybrid ABI.
         //
-        //     But `bctrl` clobbers LR, so we need to save+restore LR
-        //     somewhere too.  The OLD shape `stdu r1,-128(r1)` shifted
-        //     SP and broke parameter passing for any function with >8
-        //     args (the SPRX accesses stack params at caller_sp+112+).
+        //     GCC emits prologues that save LR @ caller_sp+16 and TOC @
+        //     caller_sp+40 (LP64 ELFv1 reserved-slot convention, retained
+        //     under our hybrid because TOC discipline matches LP64).  The
+        //     callee-reserved area at sp+16/+40 is therefore guaranteed
+        //     unused by the caller's locals.  The PSL1GHT EXPORT macro in
+        //     sprx/common/exports.S follows the same convention.
         //
-        //     This shape uses zero stack frame: stash LR in caller's
-        //     reserved-area slot at sp+24 (ELFv1 PPC64 reserves
-        //     sp+24..+39 for caller-frame scratch and the SPRX never
-        //     writes there), and r2 at sp+40 (TOC save area).  SP is
-        //     unchanged across the call, so the SPRX finds stack args
-        //     where the caller put them.
+        //     The earlier "frame-less" emit used sp+24 for LR — wrong by
+        //     8 bytes; the slot at sp+24 sits inside whatever local area
+        //     the caller allocated and got clobbered.  This is the actual
+        //     Layer 11 root cause; see project_layer11_init_signal_dispatch.
+        //
+        //     SP is unchanged across the call so the SPRX (LP64 callee)
+        //     finds stack args where the caller put them.  No need for a
+        //     stwu since none of the SPRX exports we emit take >8 args.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();
         writeln!(out, "\t.type {}, @function", tramp_sym).ok();
         writeln!(out, "{}:", tramp_sym).ok();
         writeln!(out, "\tmflr   0").ok();
-        writeln!(out, "\tstw    0,24(1)").ok();          // save caller LR (32-bit EA under hybrid ILP32)
-        writeln!(out, "\tstw    2,40(1)").ok();          // save caller TOC (32-bit EA under hybrid ILP32)
+        writeln!(out, "\tstw    0,16(1)").ok();          // LR -> caller's reserved callee-LR slot
+        writeln!(out, "\tstw    2,40(1)").ok();          // TOC -> caller's reserved TOC slot
         writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
         writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
         writeln!(out, "\tlwz    0,0(12)").ok();          // SPRX entry
         writeln!(out, "\tlwz    2,4(12)").ok();          // SPRX TOC
         writeln!(out, "\tmtctr  0").ok();
         writeln!(out, "\tbctrl").ok();                   // call SPRX
-        writeln!(out, "\tlwz    2,40(1)").ok();          // restore caller TOC (matches stw save width)
-        writeln!(out, "\tlwz    0,24(1)").ok();          // restore caller LR (matches stw save width)
+        writeln!(out, "\tlwz    2,40(1)").ok();          // restore caller TOC
+        writeln!(out, "\tlwz    0,16(1)").ok();          // restore caller LR
         writeln!(out, "\tmtlr   0").ok();
         writeln!(out, "\tblr").ok();
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
@@ -294,15 +291,20 @@ mod tests {
         // The prx_header struct body.
         assert!(s.contains("0x2c000001"), "missing prx_header magic word");
         assert!(s.contains(".2byte 2"), "export count should be 2");
-        // Trampoline body must be the frame-less wrapping form: uses
-        // bctrl (so r2 + LR can be restored), but does not stdu the SP.
+        // Trampoline body is the frame-less form matching GCC's LR/TOC
+        // save convention under our ELF64+ILP32 hybrid ABI.  GCC saves LR
+        // @ sp+16 and TOC @ sp+40 (LP64 ELFv1 reserved slots), so the
+        // trampoline uses the same offsets to avoid clobbering caller
+        // locals.  Width is `stw` (4-byte) because pointers are 32-bit.
         assert!(s.contains("bctrl"), "trampoline missing bctrl");
-        assert!(!s.contains("stdu"),
-                "trampoline must not allocate a stack frame (would shift SP + break stack-arg passing)");
-        assert!(s.contains("std    0,24(1)") || s.contains("std 0,24(1)"),
-                "trampoline must save caller LR at sp+24");
-        assert!(s.contains("std    2,40(1)") || s.contains("std 2,40(1)"),
+        assert!(!s.contains("stdu") && !s.contains("stwu"),
+                "trampoline must be frame-less (would shift SP + break stack-arg passing)");
+        assert!(s.contains("stw    0,16(1)") || s.contains("stw 0,16(1)"),
+                "trampoline must save caller LR at sp+16");
+        assert!(s.contains("stw    2,40(1)") || s.contains("stw 2,40(1)"),
                 "trampoline must save caller TOC at sp+40");
+        assert!(!s.contains("std    0,") && !s.contains("std 0,"),
+                "ILP32 trampoline must not use 8-byte std for LR save");
         assert!(s.contains("cellPadInit_stub@ha"), "trampoline missing stub-slot load");
     }
 
