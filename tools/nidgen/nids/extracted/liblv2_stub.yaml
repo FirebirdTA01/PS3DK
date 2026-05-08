@@ -2,6 +2,13 @@ library: sysPrxForUser
 version: 1
 module: sysPrxForUser
 archive_name: lv2
+# Note: sys_lwmutex_{create,destroy,lock,trylock,unlock} are intentionally
+# omitted from this list.  libsysbase ships its own wrappers that route
+# through __syscalls.sys_lwmutex_*_r (set in PSL1GHT crt1.c) -> librt's
+# direct LV2 sc syscalls.  Emitting nidgen SPRX trampolines for the same
+# names creates a symbol collision and the SPRX path wins, which under our
+# ELF64+ILP32 hybrid ABI deadlocks libc init.  Do not re-add without
+# also dropping the libsysbase wrappers.
 exports:
 - name: _sys_free
   nid: '0xf7f7fb20'
@@ -267,26 +274,6 @@ exports:
   nid: '0x2a6d9d51'
   signature: ''
   notes: extracted from _sysPrxForUser_0001_18.o
-- name: sys_lwmutex_create
-  nid: '0x2f85c0ef'
-  signature: ''
-  notes: extracted from _sysPrxForUser_0001_21.o
-- name: sys_lwmutex_destroy
-  nid: '0xc3476d0c'
-  signature: ''
-  notes: extracted from _sysPrxForUser_0001_91.o
-- name: sys_lwmutex_lock
-  nid: '0x1573dc3f'
-  signature: ''
-  notes: extracted from _sysPrxForUser_0001_7.o
-- name: sys_lwmutex_trylock
-  nid: '0xaeb78725'
-  signature: ''
-  notes: extracted from _sysPrxForUser_0001_80.o
-- name: sys_lwmutex_unlock
-  nid: '0x1bc200f4'
-  signature: ''
-  notes: extracted from _sysPrxForUser_0001_10.o
 - name: sys_mempool_allocate_block
   nid: '0xa146a143'
   signature: ''
