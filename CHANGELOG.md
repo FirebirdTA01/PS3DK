@@ -16,6 +16,63 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Toolchain — ELF64 + ILP32 hybrid ABI as default
+
+PPU userland output is now ELF64 + ILP32 (32-bit C pointers in a
+64-bit ELF wrapper) by default, matching the reference SDK.  LP64 is
+retained as a `-mlp64` multilib opt-in so that LP64 inputs still
+build, but every conforming Lv-2 PPU executable emitted by the
+default driver path now follows the ILP32 contract throughout —
+compact 8-byte `.opd`, ADDR32 TOC slots, ILP32 SPRX trampolines.
+
+- **GCC 12.4.0 patch 0021** — `rs6000.cc` `output_toc` rewritten to
+  emit a 4-byte TOC slot when `Pmode == SImode` and the existing
+  8-byte slot only when `Pmode == DImode`.  Closes the silent
+  stale-build bug where a big-endian `lwz @toc@l(r2)` against an
+  8-byte slot returned the high half (always zero).
+- **nidgen `stubgen.rs`** — emits the framed SPRX trampoline shape
+  required by ELFv1: caller LR saved to `caller_sp+16` *before*
+  `stwu`, TOC saved inside the trampoline's own 64-byte frame at
+  `sp+24`.  The frame-less form lost LR when the SPRX callee wrote
+  its own callee-LR slot.  See
+  [docs/abi/cellos-lv2-abi-spec.md §5.1](docs/abi/cellos-lv2-abi-spec.md).
+- **nidgen `db.rs` + YAML** — new `aliases:` field on each export.
+  liblv2_stub.yaml carries 113 PSL1GHT-style aliases
+  (`sysGetRandomNumber` etc.) so legacy code links against the same
+  trampoline as the canonical Cell name (`sys_get_random_number`).
+- **newlib patch 0013-libsysbase-drop-lwmutex-wrappers** — strips
+  `libgloss/libsysbase/lock.c` to a comment-only placeholder.  The
+  `__syscalls`-indirection wrappers conflicted with nidgen's direct
+  SPRX trampolines for the same NIDs.
+- **PSL1GHT patch 0012-liblv2-drop-sprx-duplicate-trampolines** —
+  removes `sprx.o` from `liblv2.a`'s OBJS list so the ~100
+  `sysPrxForUser` entries that overlap with nidgen no longer emit a
+  parallel `.lib.stub` Stub record.
+- **build-ppu-toolchain.sh** — defensive force-rebuild of
+  `libgloss / newlib / libstdc++` when a patch under
+  `patches/{gcc-12.x,newlib-4.x}` is newer than the install marker.
+  Catches the stale-target-libs class of bug that hid the Layer 11
+  regression.
+
+### ABI documentation
+
+- `docs/abi/cellos-lv2-abi-spec.md` §4 rewritten for the ILP32
+  hybrid pointer model.
+- `docs/abi/cellos-lv2-abi-spec.md` §5.1 added — normative SPRX
+  trampoline shape (frame layout, register saves, ELFv1 LR-slot
+  rule).
+- `docs/abi/section-reference.md` §5 trampoline sketch updated from
+  the legacy frame-less form to the framed form.
+- `docs/abi/toolchain-architecture.md` invariant table extended for
+  the new ABI rules.
+
+### Validation
+
+- 87/87 PS3DK samples build clean under default ILP32.
+- `hello-ppu-c++17` runs the C++17 standard library end-to-end in
+  RPCS3.
+- `hello-ppu-abi-check` passes all 8 abi-verify invariants.
+
 ## [v0.6.0] — 2026-05-05
 
 ### SDK — multimedia, codec, and sysutil surface expansion
