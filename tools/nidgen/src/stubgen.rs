@@ -163,40 +163,43 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "{}:", fnid_sym).ok();
         writeln!(out, "\t.4byte 0x{:08x}", e.nid).ok();
 
-        // 5c. Trampoline — frame-less wrapping stub matching GCC's
-        //     LR/TOC save convention under our ELF64 + ILP32 hybrid ABI.
+        // 5c. Trampoline — properly-framed wrapping stub for SPRX calls
+        //     under our ELF64 + ILP32 hybrid ABI.
         //
-        //     GCC emits prologues that save LR @ caller_sp+16 and TOC @
-        //     caller_sp+40 (LP64 ELFv1 reserved-slot convention, retained
-        //     under our hybrid because TOC discipline matches LP64).  The
-        //     callee-reserved area at sp+16/+40 is therefore guaranteed
-        //     unused by the caller's locals.  The PSL1GHT EXPORT macro in
-        //     sprx/common/exports.S follows the same convention.
+        //     The frame-less shape is fundamentally broken for SPRX calls.
+        //     ELFv1 reserves caller_sp+16 as the *callee's* LR-save slot,
+        //     which the SPRX function (called via bctrl) overwrites with
+        //     ITS return-LR in its own prologue.  Saving our caller-LR
+        //     there before the bctrl means the SPRX clobbers it; on return
+        //     we read garbage and `blr` to ~0.  Likewise sp+40 sits in
+        //     SPRX's parameter save area — also unsafe.
         //
-        //     The earlier "frame-less" emit used sp+24 for LR — wrong by
-        //     8 bytes; the slot at sp+24 sits inside whatever local area
-        //     the caller allocated and got clobbered.  This is the actual
-        //     Layer 11 root cause; see project_layer11_init_signal_dispatch.
+        //     Correct shape: save caller-LR @ caller_sp+16 BEFORE the stwu
+        //     (in OUR caller's reserved slot, owned by us), allocate a
+        //     64-byte frame, save TOC inside that frame at sp+24 where
+        //     the SPRX cannot reach (its frame is below ours).
         //
-        //     SP is unchanged across the call so the SPRX (LP64 callee)
-        //     finds stack args where the caller put them.  No need for a
-        //     stwu since none of the SPRX exports we emit take >8 args.
+        //     None of the SPRX exports we emit take >8 args (junior audit
+        //     2026-05-07), so the +64 SP shift never breaks stack-arg
+        //     passing.  Re-audit if that ever changes.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();
         writeln!(out, "\t.type {}, @function", tramp_sym).ok();
         writeln!(out, "{}:", tramp_sym).ok();
         writeln!(out, "\tmflr   0").ok();
-        writeln!(out, "\tstw    0,16(1)").ok();          // LR -> caller's reserved callee-LR slot
-        writeln!(out, "\tstw    2,40(1)").ok();          // TOC -> caller's reserved TOC slot
+        writeln!(out, "\tstw    0,16(1)").ok();          // LR -> our caller's reserved slot (above sp)
+        writeln!(out, "\tstwu   1,-64(1)").ok();          // allocate 64-byte frame
+        writeln!(out, "\tstw    2,24(1)").ok();           // TOC -> our own frame slot
         writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
         writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
         writeln!(out, "\tlwz    0,0(12)").ok();          // SPRX entry
         writeln!(out, "\tlwz    2,4(12)").ok();          // SPRX TOC
         writeln!(out, "\tmtctr  0").ok();
         writeln!(out, "\tbctrl").ok();                   // call SPRX
-        writeln!(out, "\tlwz    2,40(1)").ok();          // restore caller TOC
-        writeln!(out, "\tlwz    0,16(1)").ok();          // restore caller LR
+        writeln!(out, "\tlwz    2,24(1)").ok();           // restore caller TOC from our frame
+        writeln!(out, "\taddi   1,1,64").ok();             // pop our frame
+        writeln!(out, "\tlwz    0,16(1)").ok();           // restore caller LR from caller-reserved slot
         writeln!(out, "\tmtlr   0").ok();
         writeln!(out, "\tblr").ok();
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
@@ -291,18 +294,17 @@ mod tests {
         // The prx_header struct body.
         assert!(s.contains("0x2c000001"), "missing prx_header magic word");
         assert!(s.contains(".2byte 2"), "export count should be 2");
-        // Trampoline body is the frame-less form matching GCC's LR/TOC
-        // save convention under our ELF64+ILP32 hybrid ABI.  GCC saves LR
-        // @ sp+16 and TOC @ sp+40 (LP64 ELFv1 reserved slots), so the
-        // trampoline uses the same offsets to avoid clobbering caller
-        // locals.  Width is `stw` (4-byte) because pointers are 32-bit.
+        // Trampoline body is the framed form: save caller LR @ caller_sp+16
+        // (our caller's reserved slot, owned by us — the SPRX function we'll
+        // bctrl into can't reach above our stwu), allocate a 64-byte frame,
+        // save TOC inside our frame at sp+24.
         assert!(s.contains("bctrl"), "trampoline missing bctrl");
-        assert!(!s.contains("stdu") && !s.contains("stwu"),
-                "trampoline must be frame-less (would shift SP + break stack-arg passing)");
+        assert!(s.contains("stwu   1,-64(1)") || s.contains("stwu 1,-64(1)"),
+                "trampoline must allocate a 64-byte frame to protect TOC save from SPRX callee");
         assert!(s.contains("stw    0,16(1)") || s.contains("stw 0,16(1)"),
-                "trampoline must save caller LR at sp+16");
-        assert!(s.contains("stw    2,40(1)") || s.contains("stw 2,40(1)"),
-                "trampoline must save caller TOC at sp+40");
+                "trampoline must save caller LR at caller_sp+16 BEFORE stwu");
+        assert!(s.contains("stw    2,24(1)") || s.contains("stw 2,24(1)"),
+                "trampoline must save caller TOC inside its own frame at sp+24");
         assert!(!s.contains("std    0,") && !s.contains("std 0,"),
                 "ILP32 trampoline must not use 8-byte std for LR save");
         assert!(s.contains("cellPadInit_stub@ha"), "trampoline missing stub-slot load");
