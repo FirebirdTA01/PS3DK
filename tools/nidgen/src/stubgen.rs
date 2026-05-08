@@ -218,6 +218,26 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "\t.previous").ok();
         writeln!(out, "\t.type {}, @function", e.name).ok();
         writeln!(out, "\t.size {}, 8", e.name).ok();
+
+        // 5e. Alias OPD descriptors for compatibility-only spellings.
+        //     Each alias gets its own .opd entry pointing at the same
+        //     trampoline + TOC pair as the canonical name; the resulting
+        //     binary has one trampoline + one FNID per export, but
+        //     callers can use any spelling and bind to the same code.
+        //     PSL1GHT-style names (sysLwMutexCreate, sysGetRandomNumber,
+        //     ...) live here; remove from the YAML when PSL1GHT is
+        //     retired and the alias OPD vanishes with no churn to the
+        //     canonical Sony name.
+        for alias in &e.aliases {
+            writeln!(out, "\t.section \".opd\",\"aw\"").ok();
+            writeln!(out, "\t.align 2").ok();
+            writeln!(out, "\t.globl {}", alias).ok();
+            writeln!(out, "{}:", alias).ok();
+            writeln!(out, "\t.long {}, .TOC.", tramp_sym).ok();
+            writeln!(out, "\t.previous").ok();
+            writeln!(out, "\t.type {}, @function", alias).ok();
+            writeln!(out, "\t.size {}, 8", alias).ok();
+        }
         writeln!(out).ok();
     }
 
@@ -243,6 +263,7 @@ mod tests {
                     signature: "int cellPadInit(uint32_t max_ports)".into(),
                     ordinal: None,
                     notes: None,
+                    aliases: vec!["padInit".into()],
                     impl_status: crate::db::ImplStatus::Unknown,
                 },
                 Export {
@@ -252,6 +273,7 @@ mod tests {
                     signature: "int cellPadEnd(void)".into(),
                     ordinal: None,
                     notes: None,
+                    aliases: vec![],
                     impl_status: crate::db::ImplStatus::Unknown,
                 },
             ],
