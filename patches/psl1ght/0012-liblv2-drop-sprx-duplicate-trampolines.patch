@@ -1,0 +1,38 @@
+Drop sprx.o from PSL1GHT liblv2.a.
+
+The sprx.o object inside PSL1GHT's liblv2.a was built from
+ppu/sprx/common/exports.S + libexport.c against
+ppu/sprx/liblv2/exports.h, which lists ~100 entries from the
+`sysPrxForUser` library and emits:
+
+  - one `.lib.stub` Stub record describing the library
+  - one `.sceStub.text` trampoline per export
+  - one `.rodata.sceFNID` entry per export
+  - one `.data.sceFStub` slot per export
+
+The nidgen-emitted liblv2_stub.a now provides the same coverage with
+canonical Cell-style names (and PSL1GHT-style aliases for
+backwards compatibility).  Linking both produced two `.lib.stub`
+Stub records targeting the same library — one of which had stale
+import counts after sprx-linker post-link fixup, breaking the
+loader's import resolution.
+
+Resolution: drop sprx.o from liblv2.a.  The remaining objects
+(thread_wrapper, spu_printf_wrapper, process_wrapper,
+spu_thread_printf, sys_spu_wrapper) are PSL1GHT-side helper
+wrappers and have no overlap with nidgen.  Their references to
+`sysThreadCreateEx`, `sysProcessExitSpawn2Ex`, etc. resolve
+against nidgen's trampolines via the standard archive search.
+
+diff --git a/ppu/sprx/liblv2/Makefile b/ppu/sprx/liblv2/Makefile
+--- a/ppu/sprx/liblv2/Makefile
++++ b/ppu/sprx/liblv2/Makefile
+@@ -76,7 +76,7 @@
+ 	@cp -frv $(CURDIR)/lib/ppu/*.a $(PSL1GHT)/ppu/lib
+
+ #---------------------------------------------------------------------------------
+-$(LIBRARY).a: sprx.o thread_wrapper.o spu_printf_wrapper.o process_wrapper.o \
++$(LIBRARY).a: thread_wrapper.o spu_printf_wrapper.o process_wrapper.o \
+ 			  spu_thread_printf.o sys_spu_wrapper.o
+ #---------------------------------------------------------------------------------
+

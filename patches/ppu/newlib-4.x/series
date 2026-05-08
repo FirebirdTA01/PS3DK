@@ -10,3 +10,4 @@
 0010-dirent-h-guard-dirfd-decl.patch
 0011-mathobjs-in-libc-short-prefix.patch
 0012-dirent-distinct-dt-dummy-values.patch
+0013-libsysbase-drop-lwmutex-wrappers.patch
