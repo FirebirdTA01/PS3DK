@@ -132,36 +132,70 @@ Normative rules:
 
 ---
 
-## 4. Pointer and addressing model
+## 4. Pointer and addressing model — ELF64 + ILP32 hybrid
 
-CellOS Lv-2 is a 64-bit ABI with a 32-bit userland effective-address
-space. This spec treats those as two distinct notions:
+> **Status — implemented 2026-05-07 on `feature/mlp64-abi`** (commits
+> 3db8ce9 + a08c775 + 305d133 + 22605c3 + 16a628c + 1e076ed).
+> The PPU GCC target now defaults to **ILP32 with a 64-bit ELF
+> wrapper** (Pmode = SImode, ELFCLASS64, EM_PPC64).  Pointers are
+> 32-bit on the wire, registers are 64-bit, the ELF header still
+> reports ELF64.  Multilib `-mlp64` opt-in flips Pmode to DImode for
+> the legacy 64-bit-pointer path.
 
-- **Native pointers**: C-level `void *`, `T *`, and all derived pointer
-  types are 64-bit (`DImode`). Public API struct fields MUST use native
-  pointers, never `__attribute__((mode(SI)))`. Example: `CellGcmConfig`
-  has `void *localAddress` at 8 bytes, not 4.
+This spec treats addresses in three layers:
 
-- **Effective-address fields (`lv2_ea32_t`)**: a small number of
-  ABI-fixed metadata fields hold a 32-bit EA value as a `uint32_t`. The
-  canonical typedef is `lv2_ea32_t`, defined in
-  `sdk/include/sys/lv2_types.h`. Examples: `sys_process_param_t::crash_dump_param_addr`,
-  every reloc target in `.sys_proc_prx_param`, every `.opd` entry-point
-  slot.
+- **Effective addresses (`uint32_t`)**: every userland EA fits in 32
+  bits; LV2 maps user processes into a 32-bit EA window.  All `.opd`
+  entry-point slots, `.sys_proc_prx_param` pointer fields, GOT/TOC
+  entries that hold a function or data EA, and `.lib.stub` /
+  `.data.sceFStub` slots are **4-byte** absolute words with
+  `R_PPC64_ADDR32` relocations.
+
+- **C pointers (`void *`, `T *`)**: 4 bytes by default (Pmode =
+  SImode under the ILP32 hybrid).  GCC emits `lwz @toc@l(r2)` to
+  load function pointers from the GOT/TOC and `stw r0, X(r1)` for
+  pointer spills.  No `R_PPC64_ADDR64` should appear in user-mode
+  pointer emission.  Under `-mlp64`, pointers widen to 8 bytes
+  (Pmode = DImode); the multilib variant lives under `lp64/` in the
+  install tree.
+
+- **Effective-address typedef (`lv2_ea32_t`)**: an explicit
+  `uint32_t` typedef in `sdk/include/sys/lv2_types.h`.  Use this in
+  caller-allocated kernel-facing structs whose pointer fields the
+  Lv-2 syscall layer treats as 32-bit EAs regardless of whether the
+  user binary is ILP32 or LP64.  Conversion helpers
+  (`lv2_ea32_pack(ptr)`, `lv2_ea32_expand(ea)`) make the narrow / widen
+  explicit.
 
 Normative rules:
 
-1. `lv2_ea32_t` is `uint32_t`. Conversion helpers (`lv2_ea32_pack(ptr)`,
-   `lv2_ea32_expand(ea)`) do explicit narrow/widen with assertable range
-   checks; implicit pointer -> `uint32_t` narrowing is flagged by
-   `-Wps3-ea32-truncation` when that warning is introduced.
-2. No public API in `cell/*.h` or `sys/*.h` SHALL declare a `void *`
-   field with `mode(SI)`. Any such declaration is a conformance bug.
-3. The GCC target hook override that currently accepts SImode pointers
-   on PPU64 (see `patches/ppu/gcc-12.x/0005-rs6000-cell64lv2-pointer-mode.patch`)
-   is a transitional workaround. Once `lv2_ea32_t` replaces every
-   legitimate use, the hook override is removed and strict-profile
-   binaries MUST build without it.
+1. `Pmode == SImode` under the default toolchain target.  GCC must
+   emit pointer materialization, indirect calls, TOC slot loads, and
+   pointer-typed argument/return marshaling at 32-bit width.  The
+   `-mlp64` opt-in path flips Pmode to DImode and generates the LP64
+   variant in the same source tree without source-level changes.
+2. **TOC slot width is 4 bytes** under Pmode = SImode.
+   `output_toc` in `gcc/config/rs6000/rs6000.cc` emits `.long sym`
+   (4 bytes) instead of `DOUBLE_INT_ASM_OP` / `.tc` (8 bytes) when
+   `Pmode == SImode`.  `R_PPC64_ADDR32` instead of `R_PPC64_ADDR64`.
+   See patches/ppu/gcc-12.x/0021-rs6000-output-toc-pmode.patch.
+   *Cause:* an 8-byte slot under big-endian holds the address in the
+   low 4 bytes; a `lwz @toc@l(r2)` load reads the high 4 bytes (zero)
+   and the deref faults.  `libgloss/libsysbase` MUST be rebuilt with
+   patched GCC so its `.toc` sections inherit the 4-byte layout —
+   any pre-patch build is silently ABI-stale.
+3. `lv2_ea32_t` is `uint32_t`.  Width-sensitive integers
+   (`size_t`, `ptrdiff_t`, `off_t`) in caller-allocated `cell/*`
+   structs that cross the SPRX boundary MUST be declared `uint32_t`
+   explicitly, not the LP64 default.  See
+   `feedback_size_t_in_cell_structs.md` for the prior incident.
+4. No public API in `cell/*.h` or `sys/*.h` SHALL declare a `void *`
+   field with `mode(SI)`.  Any such declaration is a conformance bug.
+5. The legacy GCC target hook override that accepted SImode pointers
+   only on the LP64 path
+   (`patches/ppu/gcc-12.x/0005-rs6000-cell64lv2-pointer-mode.patch`)
+   is now redundant under the default ILP32 hybrid; the new path
+   tracks the pointer-width axis directly via `Pmode`.
 
 ### 4.1 Kernel-side struct ABI (settled 2026-04-20)
 
@@ -232,6 +266,77 @@ CellOS Lv-2 objects. `abi-verify` flags any relocation outside this set.
 `R_PPC64_ADDR64` is permitted in `.data` / `.toc` payload only when the
 referent is a 64-bit absolute address (rare in userland). It MUST NOT
 appear in `.opd` or `.sys_proc_prx_param`.
+
+---
+
+## 5.1. SPRX import trampoline shape
+
+Imported sysPrxForUser / cellGcmSys / cellSysmodule / etc. functions
+are dispatched through per-export trampolines emitted into
+`.sceStub.text` by `tools/nidgen` (or the equivalent
+`sprx/common/exports.S` macro for legacy archives that have not been
+folded into the nidgen flow yet).
+
+> **Status — implemented 2026-05-07** (commit 16a628c).  Frame-less
+> trampolines previously used caller_sp+24 / +40 for LR/TOC saves.
+> ELFv1 reserves caller_sp+16 as the *callee*'s LR-save slot, which
+> the SPRX function (called via `bctrl`) overwrites on entry.  The
+> framed shape protects the trampoline's own TOC save inside its
+> 64-byte frame, where the SPRX cannot reach.
+
+Normative trampoline body (per export, ILP32 hybrid):
+
+```asm
+__<name>:
+    mflr   r0
+    stw    r0, 16(r1)         ; LR -> caller's reserved callee-LR slot
+    stwu   r1, -64(r1)         ; allocate 64-byte frame
+    stw    r2, 24(r1)          ; TOC -> our own frame slot, beyond SPRX reach
+    lis    r12, <name>_stub@ha
+    lwz    r12, <name>_stub@l(r12)
+    lwz    r0, 0(r12)          ; SPRX entry EA (compact OPD slot 0)
+    lwz    r2, 4(r12)          ; SPRX TOC (compact OPD slot 4)
+    mtctr  r0
+    bctrl                       ; call SPRX
+    lwz    r2, 24(r1)           ; restore caller TOC from our frame
+    addi   r1, r1, 64           ; pop our frame
+    lwz    r0, 16(r1)           ; restore caller LR from caller-reserved slot
+    mtlr   r0
+    blr
+```
+
+Normative rules:
+
+1. **Caller LR save** at `caller_sp+16` (stored BEFORE the `stwu`).
+   This is the ELFv1 callee-reserved slot; saving in our caller's
+   reserved area prevents the SPRX function we `bctrl` into from
+   overwriting it (it writes at `our_sp+16`, which lies inside our
+   own 64-byte frame).
+2. **Caller TOC save** at `our_sp+24` (stored AFTER the `stwu`).
+   Inside our frame the SPRX function cannot reach it.
+3. **Frame size 64 bytes** — gives the SPRX callee sufficient
+   parameter-save area (its `sp+24+` is our `sp+24+`, which is below
+   our TOC slot at `+24`... actually our frame extends from `our_sp`
+   upward 64 bytes, the SPRX callee's stwu pushes another frame
+   below that).  >8-arg SPRX exports are NOT currently emitted by
+   nidgen (audited 2026-05-07: zero >8-arg or variadic exports
+   across all 29 nidgen DBs), so the +64 SP shift is safe.  Audit
+   re-required if a >8-arg export ever lands.
+4. **Compact OPD descriptor read** at `lwz r0, 0(r12); lwz r2,
+   4(r12)` — the `.data.sceFStub` slot was written by the loader
+   with the resolved 8-byte compact OPD address.
+5. Saves and loads use 4-byte `stw` / `lwz`, never 8-byte
+   `std` / `ld`; pointers are 32-bit under the ILP32 hybrid.
+6. **Single `.lib.stub` header per imported library** —
+   liblv2.a/sprx.o (legacy PSL1GHT-style hand-rolled stubs) MUST NOT
+   coexist with nidgen-emitted liblv2_stub.a in the link.  Both
+   emit a `.lib.stub` header naming `sysPrxForUser`; with both in
+   the link the loader resolves duplicate sysPrxForUser imports and
+   the trampoline shape from each archive may differ.  As of commit
+   1e076ed nidgen owns sysPrxForUser canonical Sony names plus
+   PSL1GHT-style aliases (`sysLwMutexCreate` → `sys_lwmutex_create`,
+   etc.) so liblv2.a's sprx.o has been retired.  Restore the strip
+   of `sprx.o` whenever liblv2.a is rebuilt.
 
 ---
 
