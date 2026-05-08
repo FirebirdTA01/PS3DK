@@ -13,9 +13,19 @@ big-endian ELF64/PPC64 environment with:
 - `e_flags = 0x00000000`;
 - native 8-byte compact `.opd` function descriptors;
 - a 64-byte `.sys_proc_prx_param` process metadata block;
-- native 64-bit C pointers plus explicit 32-bit EA fields where the Lv-2 ABI
-  requires them;
-- NID/FNID-driven import metadata and stub archives.
+- **ILP32 by default** — Pmode = SImode, 32-bit C pointers, 4-byte
+  TOC slots (`R_PPC64_ADDR32`), `lwz @toc@l(r2)` loads — under a
+  64-bit ELF wrapper.  `-mlp64` opt-in flips the multilib axis to
+  64-bit pointers (legacy LP64 path) for downstream code that
+  cannot be ported.  See `docs/abi/cellos-lv2-abi-spec.md §4`.
+- explicit 32-bit EA typedef (`lv2_ea32_t`) for kernel-facing struct
+  fields that the Lv-2 syscall layer treats as 32-bit EAs regardless
+  of whether the user binary is ILP32 or LP64;
+- a framed SPRX import-trampoline shape that protects the trampoline's
+  caller-LR / caller-TOC saves from being clobbered by the SPRX
+  function it calls into via `bctrl` (see ABI spec §5.1);
+- NID/FNID-driven import metadata and stub archives, with PSL1GHT-style
+  aliases folded into the canonical Sony nidgen output.
 
 ---
 
@@ -41,11 +51,19 @@ Source: upstream GCC rs6000 backend plus PS3DK patches under
 
 Responsibilities:
 
-- emit PPU code;
+- emit PPU code under the ELF64 + ILP32 hybrid pointer model
+  (Pmode = SImode by default; multilib axis on `-mlp64` for the
+  LP64 legacy path);
 - emit native compact `.opd` descriptors for functions;
 - emit the compact indirect-call sequence that reads two 32-bit words from a
   descriptor;
-- keep public C/C++ pointers native 64-bit;
+- emit 4-byte TOC slots (`.long sym` with `R_PPC64_ADDR32`) under
+  Pmode = SImode, so a `lwz @toc@l(r2)` load reads the address
+  directly (8-byte slots under big-endian put the address in the
+  low half and the load returns zero — provoked Layer 11 when
+  libgloss was built before the patch landed);
+- spill / reload pointer-typed registers at 32-bit width
+  (`stw r0, X(r1)` / `lwz r0, X(r1)`) under Pmode = SImode;
 - provide PS3/Lv-2 target predefines used by SDK headers.
 
 The compact descriptor path means GCC output is not stock PPC64 ELFv1 even
@@ -258,6 +276,11 @@ At runtime, the Lv-2 loader:
 | `.opd` entry size = 8 bytes | implemented | GCC compact `.opd` path + linker script |
 | compact indirect-call sequence | implemented | GCC rs6000 backend patches |
 | callback EA conversion without `+16` | implemented | `sdk/include/sys/lv2_types.h` |
+| ELF64 + ILP32 hybrid (Pmode = SImode default) | implemented (2026-05-07) | GCC patches 0005 + 0021; multilib `-mlp64` opt-in |
+| 4-byte TOC slots (`R_PPC64_ADDR32`) | implemented (2026-05-07) | GCC patch 0021 (`output_toc` Pmode gate); libgloss force-rebuild defense in `build-ppu-toolchain.sh` |
+| Framed SPRX trampoline (LR @ caller_sp+16, TOC @ trampoline_sp+24, 64-byte frame) | implemented (2026-05-07) | `tools/nidgen/src/stubgen.rs` |
+| Single `.lib.stub` per imported library | implemented (2026-05-07) | nidgen alias-fold absorbs PSL1GHT-style names; `liblv2.a/sprx.o` retired |
+| PSL1GHT-name compatibility via aliases | implemented (2026-05-07) | nidgen `aliases:` field per export |
 | legacy 24-byte `.opd` compatibility fallback | retained | `tools/sprx-linker` |
 | full PSL1GHT-free CRT | not complete | `lv2-crt0.o` still merges PSL1GHT `crt1.o` |
 | full PSL1GHT-free SDK surface | not complete | legacy compatibility wrappers still exist |
