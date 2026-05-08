@@ -64,6 +64,16 @@ pub struct Export {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
 
+    /// Alternate C symbol names that resolve to the same SPRX export.
+    /// stubgen emits one extra .opd entry per alias pointing at the
+    /// canonical trampoline, so callers using e.g. PSL1GHT-style names
+    /// (`sysLwMutexCreate`) bind to the same trampoline + FNID as
+    /// callers using the canonical Sony name (`sys_lwmutex_create`).
+    /// When PSL1GHT compatibility is no longer needed the alias list
+    /// can be emptied without churning canonical names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+
     /// Implementation status of this symbol in our SDK.  Hand-curated: the
     /// extractor writes `unknown` for everything, then gets bumped as
     /// libraries land.  Read by coverage-report to produce the
@@ -201,6 +211,7 @@ mod tests {
                 signature: "int cellNetCtlInit(void)".into(),
                 ordinal: None,
                 notes: None,
+                aliases: Vec::new(),
                 impl_status: ImplStatus::Unknown,
             }],
             imports: vec![],
