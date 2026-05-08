@@ -300,6 +300,26 @@ build_gcc_newlib() {
         ln -sf "$newlib_src/libgloss" "$gcc_src/libgloss"
     fi
 
+    # If any GCC or newlib patch is newer than $obj/.installed, target
+    # libraries (libgcc / newlib / libstdc++ / libgloss) compiled before the
+    # patch are silently ABI-stale.  Patch 0021 (rs6000 output_toc Pmode)
+    # is the canonical instance: pre-patch libgloss had 8-byte LP64 TOC
+    # slots, post-patch lwz @toc@l reads the wrong half.  Invalidate the
+    # stamp so make rebuilds the target libs.
+    if [[ -f "$obj/.installed" ]]; then
+        local newer_patch
+        newer_patch=$(find "$PATCHES/gcc-12.x" "$PATCHES/newlib-4.x" \
+            -name "*.patch" -newer "$obj/.installed" 2>/dev/null | head -1)
+        if [[ -n "$newer_patch" ]]; then
+            say "Patch newer than .installed — invalidating to rebuild target libs ($newer_patch)"
+            rm -f "$obj/.installed"
+            # Also wipe target build trees so make actually re-compiles them.
+            rm -rf "$obj/$TARGET/libgloss" "$obj/$TARGET/lp64/libgloss" \
+                   "$obj/$TARGET/newlib"   "$obj/$TARGET/lp64/newlib"   \
+                   "$obj/$TARGET/libstdc++-v3" "$obj/$TARGET/lp64/libstdc++-v3"
+        fi
+    fi
+
     if [[ -f "$obj/.installed" ]]; then
         say "GCC already built and installed (skipping)"
         return 0
