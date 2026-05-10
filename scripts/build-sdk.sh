@@ -19,10 +19,25 @@ source "$script_dir/env.sh"
 say() { printf "[sdk] %s\n" "$*"; }
 die() { printf "[sdk] ERROR: %s\n" "$*" >&2; exit 1; }
 
+HEADERS_ONLY=false
+for arg in "$@"; do
+    case "$arg" in
+        --headers-only) HEADERS_ONLY=true ;;
+        *) die "unknown argument: $arg" ;;
+    esac
+done
+
 [[ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc" ]] \
     || die "PPU toolchain not installed. Run scripts/build-ppu-toolchain.sh first."
 [[ -d "$PS3DK/ppu/include" ]] \
     || die "PSL1GHT runtime not installed at \$PS3DK/ppu/include. Run scripts/build-psl1ght.sh first."
+
+if $HEADERS_ONLY; then
+    say "installing SDK headers only"
+    make -C "$PS3_TOOLCHAIN_ROOT/sdk" install-headers install-spu-headers install-shared-spurs-spu-headers install-version
+    say "done"
+    exit 0
+fi
 
 say "building + installing SDK"
 make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
