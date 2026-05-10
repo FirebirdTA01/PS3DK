@@ -163,43 +163,63 @@ pub fn render_library(lib: &Library) -> String {
         writeln!(out, "{}:", fnid_sym).ok();
         writeln!(out, "\t.4byte 0x{:08x}", e.nid).ok();
 
-        // 5c. Trampoline — properly-framed wrapping stub for SPRX calls
+        // 5c. Trampoline — frame-less wrapping stub for SPRX calls
         //     under our ELF64 + ILP32 hybrid ABI.
         //
-        //     The frame-less shape is fundamentally broken for SPRX calls.
-        //     ELFv1 reserves caller_sp+16 as the *callee's* LR-save slot,
-        //     which the SPRX function (called via bctrl) overwrites with
-        //     ITS return-LR in its own prologue.  Saving our caller-LR
-        //     there before the bctrl means the SPRX clobbers it; on return
-        //     we read garbage and `blr` to ~0.  Likewise sp+40 sits in
-        //     SPRX's parameter save area — also unsafe.
+        //     The trampoline saves caller LR / caller TOC into the
+        //     caller's reserved linkage slots (the "callee-TOC" slot
+        //     at sp+24, and reserved scratch at sp+40) without
+        //     allocating its own stack frame.  Frame-less is
+        //     load-bearing for >8-arg SPRX exports: the SPRX callee
+        //     reads its caller's parameter-save area at
+        //     SPRX_sp + SPRX_FRAME + 48 = trampoline_sp + 48.  If the
+        //     trampoline shifts SP via stwu before bctrl, the SPRX
+        //     reads arg9+ from inside the trampoline's frame instead
+        //     of from the wrapper's parameter-save area, and rejects
+        //     the call (libspurs ships >8-arg exports — e.g.
+        //     cellSpursJobChainAttributeInitialize = 14 args,
+        //     cellSpursCreateJobQueue = 10 args — that fail with
+        //     CELL_SPURS_JOB_ERROR_INVAL / ERROR_ALIGN under a framed
+        //     trampoline).
         //
-        //     Correct shape: save caller-LR @ caller_sp+16 BEFORE the stwu
-        //     (in OUR caller's reserved slot, owned by us), allocate a
-        //     64-byte frame, save TOC inside that frame at sp+24 where
-        //     the SPRX cannot reach (its frame is below ours).
+        //     Why sp+24 / sp+40 are safe under ELFv1:
+        //       sp+0..47  is the linkage area, reserved by the caller
+        //                  for its callee (us, the trampoline) to use.
+        //       sp+16     is the *callee-LR* slot — the SPRX writes
+        //                  its return-after-bctrl here in its own
+        //                  prologue (`mflr 0; stw 0, 16(1)`), so we
+        //                  must NOT use it for our LR save.
+        //       sp+24     is the *callee-TOC* slot — reserved
+        //                  caller-side scratch.  The SPRX writes its
+        //                  caller's TOC at SPRX_sp+24 *inside its own
+        //                  new frame* (after its stwu), not at our
+        //                  sp+24, so this slot is intact across bctrl.
+        //       sp+32..47 is reserved scratch.
+        //       sp+48+    is the parameter-save area (writable by
+        //                  caller for its outgoing call).
         //
-        //     None of the SPRX exports we emit take >8 args (junior audit
-        //     2026-05-07), so the +64 SP shift never breaks stack-arg
-        //     passing.  Re-audit if that ever changes.
+        //     Earlier emit (commits 305d133/16a628c) tried sp+16 and
+        //     then framed @ sp+16-before-stwu.  Both broke the >8-arg
+        //     class — first by direct LR-slot collision with the
+        //     SPRX's own LR write, then by SP-shift moving caller
+        //     spilled args.  This shape is what shipped before the
+        //     mlp64 pivot and matches the PSL1GHT EXPORT macro layout.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();
         writeln!(out, "\t.type {}, @function", tramp_sym).ok();
         writeln!(out, "{}:", tramp_sym).ok();
         writeln!(out, "\tmflr   0").ok();
-        writeln!(out, "\tstw    0,16(1)").ok();          // LR -> our caller's reserved slot (above sp)
-        writeln!(out, "\tstwu   1,-64(1)").ok();          // allocate 64-byte frame
-        writeln!(out, "\tstw    2,24(1)").ok();           // TOC -> our own frame slot
+        writeln!(out, "\tstw    0,24(1)").ok();          // LR  -> caller's callee-TOC slot
+        writeln!(out, "\tstw    2,40(1)").ok();          // TOC -> caller's reserved scratch
         writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
         writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
         writeln!(out, "\tlwz    0,0(12)").ok();          // SPRX entry
         writeln!(out, "\tlwz    2,4(12)").ok();          // SPRX TOC
         writeln!(out, "\tmtctr  0").ok();
         writeln!(out, "\tbctrl").ok();                   // call SPRX
-        writeln!(out, "\tlwz    2,24(1)").ok();           // restore caller TOC from our frame
-        writeln!(out, "\taddi   1,1,64").ok();             // pop our frame
-        writeln!(out, "\tlwz    0,16(1)").ok();           // restore caller LR from caller-reserved slot
+        writeln!(out, "\tlwz    2,40(1)").ok();          // restore caller TOC
+        writeln!(out, "\tlwz    0,24(1)").ok();          // restore caller LR
         writeln!(out, "\tmtlr   0").ok();
         writeln!(out, "\tblr").ok();
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
@@ -316,17 +336,22 @@ mod tests {
         // The prx_header struct body.
         assert!(s.contains("0x2c000001"), "missing prx_header magic word");
         assert!(s.contains(".2byte 2"), "export count should be 2");
-        // Trampoline body is the framed form: save caller LR @ caller_sp+16
-        // (our caller's reserved slot, owned by us — the SPRX function we'll
-        // bctrl into can't reach above our stwu), allocate a 64-byte frame,
-        // save TOC inside our frame at sp+24.
+        // Trampoline body is the frame-less form: save caller LR @
+        // caller_sp+24 (callee-TOC scratch slot, untouched by the SPRX
+        // because SPRX writes its own caller-TOC at SPRX_sp+24 inside
+        // its new frame), save caller TOC @ caller_sp+40 (reserved
+        // scratch slot above the linkage block).  Crucially, NO stwu —
+        // the SPRX accesses caller stack-spilled args at sp+48+ from the
+        // trampoline's r1, so any SP shift moves them out from under
+        // it (broke libspurs's >8-arg exports).  See comment block in
+        // render_library above for the full ABI rationale.
         assert!(s.contains("bctrl"), "trampoline missing bctrl");
-        assert!(s.contains("stwu   1,-64(1)") || s.contains("stwu 1,-64(1)"),
-                "trampoline must allocate a 64-byte frame to protect TOC save from SPRX callee");
-        assert!(s.contains("stw    0,16(1)") || s.contains("stw 0,16(1)"),
-                "trampoline must save caller LR at caller_sp+16 BEFORE stwu");
-        assert!(s.contains("stw    2,24(1)") || s.contains("stw 2,24(1)"),
-                "trampoline must save caller TOC inside its own frame at sp+24");
+        assert!(!s.contains("stwu"),
+                "trampoline must NOT allocate a frame; >8-arg SPRX exports break under any SP shift");
+        assert!(s.contains("stw    0,24(1)") || s.contains("stw 0,24(1)"),
+                "trampoline must save caller LR at caller_sp+24 (callee-TOC scratch slot)");
+        assert!(s.contains("stw    2,40(1)") || s.contains("stw 2,40(1)"),
+                "trampoline must save caller TOC at caller_sp+40 (reserved scratch slot)");
         assert!(!s.contains("std    0,") && !s.contains("std 0,"),
                 "ILP32 trampoline must not use 8-byte std for LR save");
         assert!(s.contains("cellPadInit_stub@ha"), "trampoline missing stub-slot load");
