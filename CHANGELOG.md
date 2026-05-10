@@ -16,6 +16,28 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.7.1] — 2026-05-10
+
+### CI
+
+- **`scripts/bootstrap.sh`** — switch the GCC clone source from
+  `gcc.gnu.org/git/gcc.git` to `github.com/gcc-mirror/gcc.git`.
+  Under load gcc.gnu.org has answered HTTP requests at 15-30 s
+  each; the GitHub mirror answers at ~250 ms (~100x faster) and
+  is the official mirror maintained by the GCC team.  Tag names
+  match (`releases/gcc-12.4.0`, `releases/gcc-9.5.0`).  This
+  alone closes the `RPC failed; HTTP 502 ... fatal: the remote
+  end hung up unexpectedly` failure that was blocking the
+  Release workflow's `bootstrap upstream sources` step.
+- **`scripts/bootstrap.sh`** — add retry-with-backoff (3 attempts,
+  15 s and 30 s delays) around every git clone / fetch operation,
+  plus `http.postBuffer = 1 GB`, `http.lowSpeedLimit = 1000`, and
+  `http.lowSpeedTime = 600`.  Rides through transient slowness on
+  the sourceware.org-hosted binutils-gdb and newlib-cygwin clones
+  (no GitHub mirrors exist for those repos in their combined-tree
+  form) without aborting.  Equivalent to the implicit retry the
+  `actions/checkout` action does for our own repo.
+
 ## [v0.7.0] — 2026-05-10
 
 ### Toolchain — ELF64 + ILP32 hybrid ABI as default
