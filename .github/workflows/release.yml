@@ -614,6 +614,11 @@ jobs:
           source scripts/env.sh
           ./scripts/build-psl1ght.sh
 
+      - name: Stage 0 — cell stub archives
+        run: |
+          source scripts/env.sh
+          ./scripts/build-cell-stub-archives.sh
+
       - name: Stage 0 — portlibs
         run: |
           source scripts/env.sh
@@ -635,11 +640,6 @@ jobs:
         run: |
           source scripts/env.sh
           ./scripts/build-sdk.sh
-
-      - name: Stage 0 — cell stub archives
-        run: |
-          source scripts/env.sh
-          ./scripts/build-cell-stub-archives.sh
 
       - name: Stage 1 — cross-build PPU toolchain (mingw-w64)
         run: |

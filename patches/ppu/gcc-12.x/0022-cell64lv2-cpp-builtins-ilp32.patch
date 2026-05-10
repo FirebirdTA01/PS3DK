@@ -1,0 +1,39 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: define __ILP32__ when default ILP32 mode is in effect
+
+When -mlp64 is NOT in effect (the default ILP32 hybrid mode), GCC's
+TARGET_OS_CPP_BUILTINS macro emitted neither __LP64__ nor __ILP32__.
+Portable C/C++ headers that branch on these macros (third-party
+configure probes, libc++ feature tests, GMP / MPFR / OpenSSL header
+guards) saw no data-model macro at all and either fell through to a
+wrong default or failed configure-time detection.
+
+Default ILP32 hybrid is genuinely ILP32: sizeof(int) == sizeof(long) ==
+sizeof(void *) == 4.  __ILP32__ + _ILP32 are the canonical macros to
+emit for that data model.  This patch adds the else branch.
+
+The matching positive case (TARGET_LP64) was already emitting __LP64__
+and _LP64; this patch fills in the symmetric ILP32 case.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -249,11 +249,17 @@
+       builtin_assert ("cpu=powerpc64");		\
+       builtin_assert ("machine=powerpc64");		\
+ 						\
+-      /* Data-model axis: only when -mlp64 is in effect. */ \
++      /* Data-model axis: TARGET_LP64 is the multilib opt-in; \
++         default is ILP32 hybrid. */ \
+       if (TARGET_LP64)				\
+ 	{					\
+ 	  builtin_define ("__LP64__");		\
+ 	  builtin_define ("_LP64");			\
+ 	}					\
++      else						\
++	{					\
++	  builtin_define ("__ILP32__");		\
++	  builtin_define ("_ILP32");			\
++	}					\
+     }							\
+   while (0)
+
