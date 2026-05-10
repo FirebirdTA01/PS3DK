@@ -26,6 +26,39 @@ pub const SYS_PROC_PRX_PARAM_ABI_VERSION: u32 = 0x0101_0000;
 /// CellOS Lv-2 compact `.opd` descriptor size in bytes.
 pub const LV2_OPD_ENTRY_SIZE: u64 = 8;
 
+/// Inferred data model from .toc relocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TocDataModel {
+    Ilp32,
+    Lp64,
+}
+
+impl std::fmt::Display for TocDataModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TocDataModel::Ilp32 => write!(f, "ILP32"),
+            TocDataModel::Lp64 => write!(f, "LP64"),
+        }
+    }
+}
+
+/// Pre-computed .toc section check data — populated during parsing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TocCheckData {
+    pub data_model: TocDataModel,
+    pub stride: u64,
+    pub reloc_count: u64,
+    pub mixed_relocs: bool,
+    pub has_addr64_under_ilp32: bool,
+}
+
+/// Pre-computed .sceStub.text check data — populated during parsing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StubTextCheckData {
+    pub has_stwu: bool,
+    pub stwu_offsets: Vec<u64>,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
     pub path: String,
@@ -35,6 +68,10 @@ pub struct Manifest {
     pub opd: Option<OpdSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sys_proc_prx_param: Option<SysProcPrxParamSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toc_check: Option<TocCheckData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stub_text_check: Option<StubTextCheckData>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -185,12 +222,96 @@ pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
         None
     };
 
+    let toc_check = {
+        // Find .toc section and its relocations
+        let toc_idx = sections.iter().enumerate().find_map(|(i, shdr)| {
+            let n = shdr.name(endian, strings).unwrap_or_default();
+            if String::from_utf8_lossy(n) == ".toc" {
+                Some(i)
+            } else {
+                None
+            }
+        });
+        toc_idx.and_then(|toc_idx| {
+            let rela_idx = rela_by_target.get(&toc_idx)?;
+            let rela_shdr = sections.section(SectionIndex(*rela_idx)).ok()?;
+            let (relas, _) = rela_shdr.rela(endian, data).ok()??;
+
+            let mut addr32_count: u64 = 0;
+            let mut addr64_count: u64 = 0;
+            for rela in relas {
+                match rela.r_type(endian, false) {
+                    1 => addr32_count += 1,
+                    38 => addr64_count += 1,
+                    _ => {}
+                }
+            }
+            if addr32_count == 0 && addr64_count == 0 {
+                return None;
+            }
+            let reloc_count = addr32_count + addr64_count;
+            let toc_shdr = sections.section(SectionIndex(toc_idx)).ok()?;
+            let section_size = toc_shdr.sh_size.get(endian);
+            let stride = if reloc_count > 0 { section_size / reloc_count } else { 0 };
+
+            let data_model = if addr64_count > addr32_count {
+                TocDataModel::Lp64
+            } else {
+                TocDataModel::Ilp32
+            };
+            Some(TocCheckData {
+                data_model,
+                stride,
+                reloc_count,
+                mixed_relocs: addr32_count > 0 && addr64_count > 0,
+                has_addr64_under_ilp32: data_model == TocDataModel::Ilp32 && addr64_count > 0,
+            })
+        })
+    };
+
+    let stub_text_check = {
+        let idx = sections.iter().enumerate().find_map(|(i, shdr)| {
+            let n = shdr.name(endian, strings).unwrap_or_default();
+            if String::from_utf8_lossy(n) == ".sceStub.text" {
+                Some(i)
+            } else {
+                None
+            }
+        });
+        idx.and_then(|idx| {
+            let shdr = sections.section(SectionIndex(idx)).ok()?;
+            let section_data = shdr.data(endian, data).ok()?;
+            let mut stwu_offsets = Vec::new();
+            for off in (0..section_data.len()).step_by(4) {
+                if off + 4 > section_data.len() {
+                    break;
+                }
+                let word = u32::from_be_bytes([
+                    section_data[off],
+                    section_data[off + 1],
+                    section_data[off + 2],
+                    section_data[off + 3],
+                ]);
+                // stwu r1, X(r1): top 16 bits == 0x9421
+                if (word >> 16) == 0x9421 {
+                    stwu_offsets.push(off as u64);
+                }
+            }
+            Some(StubTextCheckData {
+                has_stwu: !stwu_offsets.is_empty(),
+                stwu_offsets,
+            })
+        })
+    };
+
     Ok(Manifest {
         path: path.display().to_string(),
         elf,
         sections: section_summaries,
         opd,
         sys_proc_prx_param,
+        toc_check,
+        stub_text_check,
     })
 }
 
@@ -536,6 +657,54 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
         }
     }
 
+    // ---- .toc data-model checks ----
+    if let Some(toc) = &m.toc_check {
+        // Check 1: data-model consistency + stride
+        if toc.mixed_relocs {
+            failures.push(format!(
+                ".toc mixed RELA types (R_PPC64_ADDR32 + R_PPC64_ADDR64) — data-model inconsistent"
+            ));
+        } else if toc.stride == 4 && toc.data_model == TocDataModel::Ilp32 {
+            passes.push(format!(
+                ".toc data model: ILP32 (stride {}, R_PPC64_ADDR32) — {} relocs",
+                toc.stride, toc.reloc_count
+            ));
+        } else if toc.stride == 8 && toc.data_model == TocDataModel::Lp64 {
+            passes.push(format!(
+                ".toc data model: LP64 (stride {}, R_PPC64_ADDR64) — {} relocs",
+                toc.stride, toc.reloc_count
+            ));
+        } else {
+            failures.push(format!(
+                ".toc stride {} inconsistent with data model {} ({} relocs)",
+                toc.stride,
+                toc.data_model,
+                toc.reloc_count
+            ));
+        }
+
+        // Check 2: no R_PPC64_ADDR64 in .toc under ILP32
+        if toc.has_addr64_under_ilp32 {
+            failures.push(
+                "R_PPC64_ADDR64 in .toc under ILP32 data model — invariant violation"
+                    .into(),
+            );
+        } else {
+            passes.push("no R_PPC64_ADDR64 in .toc (ILP32 invariant)".into());
+        }
+    }
+
+    // ---- .sceStub.text frame-less trampoline check ----
+    if let Some(stub) = &m.stub_text_check {
+        if stub.has_stwu {
+            for off in &stub.stwu_offsets {
+                failures.push(format!("stwu found at .sceStub.text + offset 0x{off:x}"));
+            }
+        } else {
+            passes.push("no stwu in .sceStub.text (frame-less trampoline invariant)".into());
+        }
+    }
+
     CheckReport {
         path: m.path.clone(),
         passes,
@@ -581,5 +750,180 @@ mod tests {
             }],
         );
         assert_eq!(infer_opd_entry_size(&m, 8), 8);
+    }
+
+    #[test]
+    fn toc_check_ilp32_stride_4() {
+        let m = Manifest {
+            path: "test".into(),
+            elf: ElfHeader {
+                class: "ELF64".into(),
+                endian: "big".into(),
+                machine: "PowerPC64".into(),
+                os_abi: ELFOSABI_CELL_LV2,
+                abi_version: 0,
+                elf_type: "EXEC".into(),
+                flags: 0x0100_0000,
+            },
+            sections: vec![],
+            opd: None,
+            sys_proc_prx_param: None,
+            toc_check: Some(TocCheckData {
+                data_model: TocDataModel::Ilp32,
+                stride: 4,
+                reloc_count: 3,
+                mixed_relocs: false,
+                has_addr64_under_ilp32: false,
+            }),
+            stub_text_check: None,
+        };
+        let r = check_invariants(&m);
+        assert!(r.passes.iter().any(|p| p.contains(".toc data model: ILP32")));
+        assert!(r.passes.iter().any(|p| p.contains("no R_PPC64_ADDR64")));
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn toc_check_addr64_under_ilp32_fails() {
+        let m = Manifest {
+            path: "test".into(),
+            elf: ElfHeader {
+                class: "ELF64".into(),
+                endian: "big".into(),
+                machine: "PowerPC64".into(),
+                os_abi: ELFOSABI_CELL_LV2,
+                abi_version: 0,
+                elf_type: "EXEC".into(),
+                flags: 0x0100_0000,
+            },
+            sections: vec![],
+            opd: None,
+            sys_proc_prx_param: None,
+            toc_check: Some(TocCheckData {
+                data_model: TocDataModel::Ilp32,
+                stride: 4,
+                reloc_count: 3,
+                mixed_relocs: false,
+                has_addr64_under_ilp32: true,
+            }),
+            stub_text_check: None,
+        };
+        let r = check_invariants(&m);
+        assert!(r.failures.iter().any(|f| f.contains("R_PPC64_ADDR64 in .toc")));
+        assert!(!r.is_ok());
+    }
+
+    #[test]
+    fn toc_check_lp64_stride_8() {
+        let m = Manifest {
+            path: "test".into(),
+            elf: ElfHeader {
+                class: "ELF64".into(),
+                endian: "big".into(),
+                machine: "PowerPC64".into(),
+                os_abi: ELFOSABI_CELL_LV2,
+                abi_version: 0,
+                elf_type: "EXEC".into(),
+                flags: 0x0100_0000,
+            },
+            sections: vec![],
+            opd: None,
+            sys_proc_prx_param: None,
+            toc_check: Some(TocCheckData {
+                data_model: TocDataModel::Lp64,
+                stride: 8,
+                reloc_count: 2,
+                mixed_relocs: false,
+                has_addr64_under_ilp32: false,
+            }),
+            stub_text_check: None,
+        };
+        let r = check_invariants(&m);
+        assert!(r.passes.iter().any(|p| p.contains(".toc data model: LP64")));
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn toc_mixed_relocs_fails() {
+        let m = Manifest {
+            path: "test".into(),
+            elf: ElfHeader {
+                class: "ELF64".into(),
+                endian: "big".into(),
+                machine: "PowerPC64".into(),
+                os_abi: ELFOSABI_CELL_LV2,
+                abi_version: 0,
+                elf_type: "EXEC".into(),
+                flags: 0x0100_0000,
+            },
+            sections: vec![],
+            opd: None,
+            sys_proc_prx_param: None,
+            toc_check: Some(TocCheckData {
+                data_model: TocDataModel::Ilp32,
+                stride: 4,
+                reloc_count: 5,
+                mixed_relocs: true,
+                has_addr64_under_ilp32: true,
+            }),
+            stub_text_check: None,
+        };
+        let r = check_invariants(&m);
+        assert!(r.failures.iter().any(|f| f.contains(".toc mixed RELA")));
+        assert!(!r.is_ok());
+    }
+
+    #[test]
+    fn stub_text_no_stwu_passes() {
+        let m = Manifest {
+            path: "test".into(),
+            elf: ElfHeader {
+                class: "ELF64".into(),
+                endian: "big".into(),
+                machine: "PowerPC64".into(),
+                os_abi: ELFOSABI_CELL_LV2,
+                abi_version: 0,
+                elf_type: "EXEC".into(),
+                flags: 0x0100_0000,
+            },
+            sections: vec![],
+            opd: None,
+            sys_proc_prx_param: None,
+            toc_check: None,
+            stub_text_check: Some(StubTextCheckData {
+                has_stwu: false,
+                stwu_offsets: vec![],
+            }),
+        };
+        let r = check_invariants(&m);
+        assert!(r.passes.iter().any(|p| p.contains("no stwu in .sceStub.text")));
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn stub_text_has_stwu_fails() {
+        let m = Manifest {
+            path: "test".into(),
+            elf: ElfHeader {
+                class: "ELF64".into(),
+                endian: "big".into(),
+                machine: "PowerPC64".into(),
+                os_abi: ELFOSABI_CELL_LV2,
+                abi_version: 0,
+                elf_type: "EXEC".into(),
+                flags: 0x0100_0000,
+            },
+            sections: vec![],
+            opd: None,
+            sys_proc_prx_param: None,
+            toc_check: None,
+            stub_text_check: Some(StubTextCheckData {
+                has_stwu: true,
+                stwu_offsets: vec![16],
+            }),
+        };
+        let r = check_invariants(&m);
+        assert!(r.failures.iter().any(|f| f.contains("stwu found at .sceStub.text")));
+        assert!(!r.is_ok());
     }
 }

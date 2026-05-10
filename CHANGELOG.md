@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.7.0] — 2026-05-10
+
 ### Toolchain — ELF64 + ILP32 hybrid ABI as default
 
 PPU userland output is now ELF64 + ILP32 (32-bit C pointers in a
@@ -41,14 +43,25 @@ compact 8-byte `.opd`, ADDR32 TOC slots, ILP32 SPRX trampolines.
   8-byte slot only when `Pmode == DImode`.  Closes the silent
   stale-build bug where a big-endian `lwz @toc@l(r2)` against an
   8-byte slot returned the high half (always zero).
-- **nidgen `stubgen.rs`** — emits the framed SPRX trampoline shape
-  required by ELFv1: caller LR saved to `caller_sp+16` *before*
-  `stwu`, TOC saved inside the trampoline's own 64-byte frame at
-  `sp+24`.  The frame-less form lost LR when the SPRX callee wrote
-  its own callee-LR slot.  See
-  [docs/abi/cellos-lv2-abi-spec.md §5.1](docs/abi/cellos-lv2-abi-spec.md).
+- **GCC 12.4.0 patch 0022** — `cell64lv2.h` `TARGET_OS_CPP_BUILTINS`
+  defines `__ILP32__` + `_ILP32` in the default-mode else branch
+  (mirroring the existing `__LP64__` + `_LP64` path under
+  `TARGET_LP64`).  Closes the portability gap where third-party
+  configure probes branching on `__ILP32__` / `__LP64__` saw
+  neither macro and fell through to a wrong default.
+- **nidgen `stubgen.rs`** — emits the frame-less SPRX trampoline
+  shape under the ILP32 hybrid: caller LR saved to `caller_sp+24`
+  (callee-TOC scratch slot, reserved by ELFv1 for the trampoline's
+  use), caller TOC saved to `caller_sp+40` (reserved scratch),
+  **no `stwu`**.  Frame-less is load-bearing for `>8`-arg SPRX
+  exports (`cellSpursJobChainAttributeInitialize` and
+  `cellSpursCreateJobQueue` in libspurs) — any SP shift across
+  the `bctrl` moves caller stack-spilled args out from under the
+  SPRX callee, which then rejects with
+  `CELL_SPURS_JOB_ERROR_INVAL` / `CELL_SPURS_JOB_ERROR_ALIGN`.
+  See [docs/abi/cellos-lv2-abi-spec.md §5.1](docs/abi/cellos-lv2-abi-spec.md).
 - **nidgen `db.rs` + YAML** — new `aliases:` field on each export.
-  liblv2_stub.yaml carries 113 PSL1GHT-style aliases
+  `liblv2_stub.yaml` carries 113 PSL1GHT-style aliases
   (`sysGetRandomNumber` etc.) so legacy code links against the same
   trampoline as the canonical Cell name (`sys_get_random_number`).
 - **newlib patch 0013-libsysbase-drop-lwmutex-wrappers** — strips
@@ -62,27 +75,95 @@ compact 8-byte `.opd`, ADDR32 TOC slots, ILP32 SPRX trampolines.
 - **build-ppu-toolchain.sh** — defensive force-rebuild of
   `libgloss / newlib / libstdc++` when a patch under
   `patches/{gcc-12.x,newlib-4.x}` is newer than the install marker.
-  Catches the stale-target-libs class of bug that hid the Layer 11
-  regression.
+  Catches the stale-target-libs class of bug that hid pre-main
+  libc init regressions.
+
+### Toolchain — abi-verify enforcement of new spec invariants
+
+`tools/abi-verify` extended with three new checks implementing rules
+that landed in
+[docs/abi/cellos-lv2-abi-spec.md §4 + §5.1](docs/abi/cellos-lv2-abi-spec.md)
+during the ABI rewrite but were previously unenforced:
+
+- **`.toc` data-model + stride consistency** — when the section is
+  present, all relocations must be `R_PPC64_ADDR32` with 4-byte
+  stride (ILP32) or all `R_PPC64_ADDR64` with 8-byte stride (LP64).
+  Mixed reloc types or stride/data-model mismatch fails.
+- **No `R_PPC64_ADDR64` in `.toc` under ILP32** — stated
+  independently as a regression guard.
+- **Frame-less `.sceStub.text` trampoline shape** — section bytes
+  are scanned for the `stwu r1, X(r1)` instruction (top 16 bits
+  `0x9421`); any occurrence fails with the offset reported.
+  Catches accidental re-introduction of the framed shape that
+  broke libspurs `>8`-arg exports.
+
+Six new unit tests in `tools/abi-verify/src/lib.rs` cover both
+pass and fail paths for each invariant.
+
+### Samples
+
+- **`samples/toolchain/hello-ppu-mlp64-types`** — `sizeof` probe.
+  Prints `sizeof` of every width-sensitive primitive (`void *`,
+  `long`, `intmax_t`, `uintptr_t`, `intptr_t`, `ptrdiff_t`,
+  `size_t`, `time_t`, `off_t`) plus the state of `__LP64__` /
+  `__ILP32__` macros.  CMakeLists builds two `.fake.self` artefacts
+  side by side: default ILP32 hybrid and `-mlp64` opt-in.
+- **`samples/toolchain/hello-ppu-mlp64-tagged-pointer`** —
+  high-bit pointer-tagging demonstration.  Packs a 16-bit type tag
+  into the top 16 bits of a pointer and recovers via mask + shift.
+  Requires `sizeof(uintptr_t) >= 8`; under default ILP32 the shift
+  is undefined behaviour on a 32-bit type and the sample reports
+  `FAIL` (the demonstration).  Under `-mlp64` the round-trip
+  succeeds and reports `PASS`.
+
+### CI
+
+- **`.github/workflows/release.yml`** — Stage 0 ordering hardened
+  for the new build dependency graph.  `cell stub archives` now
+  runs after the PSL1GHT runtime and before portlibs (fixes
+  `ld: cannot find -llv2_stub` from zlib's `example` / `minigzip`
+  link tests, since GCC's `LIB_LV2_SPEC` now auto-pulls
+  `-llv2_stub`).  A new `SDK headers` step runs between the
+  PSL1GHT runtime and cell stub archives so
+  `build-cell-stub-archives.sh`'s `libgcm_sys_legacy` wrapper
+  compile finds `<sys/lv2_types.h>` and friends.
+- **`scripts/build-sdk.sh`** — `--headers-only` flag added.  Runs
+  only `install-headers` / `install-spu-headers` /
+  `install-shared-spurs-spu-headers` / `install-version`; used by
+  the CI workflow's new `SDK headers` step.
 
 ### ABI documentation
 
 - `docs/abi/cellos-lv2-abi-spec.md` §4 rewritten for the ILP32
   hybrid pointer model.
-- `docs/abi/cellos-lv2-abi-spec.md` §5.1 added — normative SPRX
-  trampoline shape (frame layout, register saves, ELFv1 LR-slot
-  rule).
-- `docs/abi/section-reference.md` §5 trampoline sketch updated from
-  the legacy frame-less form to the framed form.
-- `docs/abi/toolchain-architecture.md` invariant table extended for
-  the new ABI rules.
+- `docs/abi/cellos-lv2-abi-spec.md` §5.1 added — normative
+  frame-less SPRX trampoline shape (LR @ `caller_sp+24`, TOC @
+  `caller_sp+40`, no frame allocation), with the ELFv1 linkage-area
+  rationale baked in.
+- `docs/abi/section-reference.md` §5 trampoline sketch updated to
+  match the frame-less form.
+- `docs/abi/toolchain-architecture.md` conformance table extended
+  for the `__ILP32__` macro fix and the frame-less SPRX trampoline,
+  and an in-progress note for the `-mlp64` runtime added.
 
 ### Validation
 
 - 87/87 PS3DK samples build clean under default ILP32.
+- 67/87 samples RPCS3-validated PASS across toolchain / lv2 / spu
+  / audio / codec / spurs / sysutil.  The gcm category (20 samples)
+  was green in prior sessions and is deferred.
 - `hello-ppu-c++17` runs the C++17 standard library end-to-end in
   RPCS3.
-- `hello-ppu-abi-check` passes all 8 abi-verify invariants.
+- `hello-ppu-mlp64-types-ilp32` confirms the `__ILP32__` macro
+  fix: TTY now reports `__LP64__=0 / __ILP32__=1` in default mode
+  (was `0 / 0`).
+- libspurs `>8`-arg SPRX exports validated end-to-end:
+  `hello-ppu-spurs-job-chain`, `hello-spu-job`,
+  `hello-spurs-jq` all PASS with the frame-less trampoline.  Soak
+  across 64 SPRX-call samples spanning every category — zero
+  regressions from the trampoline-shape change.
+- `tools/abi-verify` cargo tests: 8/8 PASS (2 original opd-stride
+  + 6 new for the §4 + §5.1 invariants).
 
 ## [v0.6.0] — 2026-05-05
 
