@@ -141,6 +141,15 @@ Normative rules:
 > 32-bit on the wire, registers are 64-bit, the ELF header still
 > reports ELF64.  Multilib `-mlp64` opt-in flips Pmode to DImode for
 > the legacy 64-bit-pointer path.
+>
+> **Note — -mlp64 multilib in progress (2026-05-09).**  GCC patches
+> 0010–0021 emit LP64 user code and the multilib libc / libstdc++ /
+> libsysbase install correctly under
+> `powerpc64-ps3-elf/lib/lp64/`, but the runtime linkage tree
+> (`lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`, `lv2-sprx.o`, and the
+> nidgen-emitted SPRX stub archives) is not yet built as a multilib
+> variant.  `-mlp64` binaries link against ILP32-shape glue and crash
+> before reaching `main()`.  Default ILP32 is the daily-use shape today.
 
 This spec treats addresses in three layers:
 

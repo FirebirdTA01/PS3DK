@@ -25,6 +25,17 @@ build, but every conforming Lv-2 PPU executable emitted by the
 default driver path now follows the ILP32 contract throughout —
 compact 8-byte `.opd`, ADDR32 TOC slots, ILP32 SPRX trampolines.
 
+> **Note — `-mlp64` runtime is in progress (planned feature).**  The
+> `-mlp64` opt-in compiles and links today (GCC patches 0010-0021
+> emit LP64 user code; multilib `libc` / `libstdc++` / `libsysbase`
+> install under `powerpc64-ps3-elf/lib/lp64/`), but the runtime
+> linkage tree — `lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`,
+> `lv2-sprx.o`, and the nidgen-emitted SPRX stub archives — is not
+> yet built as a multilib variant.  Default `-mlp64` link silently
+> falls through to the ILP32 crt + ILP32 stubs, and the resulting
+> binary crashes in pre-main libc init.  Tracked as planned work;
+> the default ILP32 path is the daily-use shape today.
+
 - **GCC 12.4.0 patch 0021** — `rs6000.cc` `output_toc` rewritten to
   emit a 4-byte TOC slot when `Pmode == SImode` and the existing
   8-byte slot only when `Pmode == DImode`.  Closes the silent
