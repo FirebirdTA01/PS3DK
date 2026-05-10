@@ -277,14 +277,24 @@ At runtime, the Lv-2 loader:
 | compact indirect-call sequence | implemented | GCC rs6000 backend patches |
 | callback EA conversion without `+16` | implemented | `sdk/include/sys/lv2_types.h` |
 | ELF64 + ILP32 hybrid (Pmode = SImode default) | implemented (2026-05-07) | GCC patches 0005 + 0021; multilib `-mlp64` opt-in |
+| `__ILP32__` / `_ILP32` macros in default mode | implemented (2026-05-10) | GCC patch 0022 (`cell64lv2.h` `TARGET_OS_CPP_BUILTINS` else branch) |
 | 4-byte TOC slots (`R_PPC64_ADDR32`) | implemented (2026-05-07) | GCC patch 0021 (`output_toc` Pmode gate); libgloss force-rebuild defense in `build-ppu-toolchain.sh` |
-| Framed SPRX trampoline (LR @ caller_sp+16, TOC @ trampoline_sp+24, 64-byte frame) | implemented (2026-05-07) | `tools/nidgen/src/stubgen.rs` |
+| Frame-less SPRX trampoline (LR @ caller_sp+24, TOC @ caller_sp+40, no frame) | implemented (2026-05-09) | `tools/nidgen/src/stubgen.rs`; required for >8-arg SPRX exports |
 | Single `.lib.stub` per imported library | implemented (2026-05-07) | nidgen alias-fold absorbs PSL1GHT-style names; `liblv2.a/sprx.o` retired |
 | PSL1GHT-name compatibility via aliases | implemented (2026-05-07) | nidgen `aliases:` field per export |
 | legacy 24-byte `.opd` compatibility fallback | retained | `tools/sprx-linker` |
 | full PSL1GHT-free CRT | not complete | `lv2-crt0.o` still merges PSL1GHT `crt1.o` |
 | full PSL1GHT-free SDK surface | not complete | legacy compatibility wrappers still exist |
 | complete NID/API coverage | ongoing | `tools/nidgen` + `sdk/` |
+
+> **Note — -mlp64 multilib in progress (2026-05-09).**  GCC patches
+> 0010–0021 emit LP64 user code and the multilib libc / libstdc++ /
+> libsysbase install correctly under
+> `powerpc64-ps3-elf/lib/lp64/`, but the runtime linkage tree
+> (`lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`, `lv2-sprx.o`, and the
+> nidgen-emitted SPRX stub archives) is not yet built as a multilib
+> variant.  `-mlp64` binaries link against ILP32-shape glue and crash
+> before reaching `main()`.  Default ILP32 is the daily-use shape today.
 
 ---
 
