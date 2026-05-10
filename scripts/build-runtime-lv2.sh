@@ -55,9 +55,12 @@
 # (the symptom of skipping it is documented in build-psl1ght.sh's
 # call site).
 #
+# crt1.c is now native (runtime/lv2/crt/crt1.c) — no PSL1GHT crt
+# dependency.  lv2-sprx.o, lv2-crti.o, lv2-crt0.o emitted for both
+# ILP32 (default) and LP64 (-mlp64) multilib.  lv2.ld is ABI-invariant.
 # Future-proofing: the tipping point that lets us drop this override
-# is when our SDK provides lv2-* objects natively (no PSL1GHT crt at
-# all) and STARTFILE_LV2_SPEC searches under $PS3DK/ppu/lib first.
+# entirely is when PSL1GHT is fully phased out of the toolchain and
+# STARTFILE_LV2_SPEC searches under $PS3DK/ppu/lib first.
 # Until then, treat this script as a hard prereq for any sample build
 # that goes through SELF.
 #
@@ -86,45 +89,72 @@ mkdir -p "$gcc_startfile_dir" "$ps3dk_dir"
 # our output.
 : "${LV2_SDK_VERSION:=0x00475001}"
 
-say "building lv2-sprx.o (LV2_SDK_VERSION=$LV2_SDK_VERSION)"
-"$CC" -c \
-    "-DLV2_SDK_VERSION=$LV2_SDK_VERSION" \
-    -o "$gcc_startfile_dir/lv2-sprx.o" \
-    "$runtime_src/lv2-sprx.S"
-cp -f "$gcc_startfile_dir/lv2-sprx.o" "$ps3dk_dir/lv2-sprx.o"
+# Build each CRT artefact for both ILP32 (default) and LP64 (-mlp64)
+# multilib variants.  lv2.ld (linker script) is ABI-invariant; install
+# one copy per tree for explicitness.
+for abi_flag in "" "-mlp64"; do
+    if [[ -z "$abi_flag" ]]; then
+        abi_subdir=""
+        abi_label="ILP32"
+    else
+        abi_subdir="lp64"
+        abi_label="LP64"
+    fi
 
-say "building lv2-crti.o (compact-OPD _init/_fini)"
-"$CC" -c \
-    -mcpu=cell -mregnames -D__ASSEMBLY__ -Wa,-mcell \
-    -o "$gcc_startfile_dir/lv2-crti.o" \
-    "$runtime_src/lv2-crti.S"
-cp -f "$gcc_startfile_dir/lv2-crti.o" "$ps3dk_dir/lv2-crti.o"
+    install_gcc="$gcc_startfile_dir/$abi_subdir"
+    install_ps3dk="$ps3dk_dir/$abi_subdir"
+    mkdir -p "$install_gcc" "$install_ps3dk"
 
-# lv2-crt0.o = our crt0.o (compact __start descriptor) + PSL1GHT's
-# crt1.o (newlib/syscalls glue - unchanged), merged with `ld -r`.
-# PSL1GHT ships a pre-built crt1.o that we reuse; porting it over is
-# a separate chunk of work that isn't necessary to fix the .opd
-# regression.
-say "building lv2-crt0.o (compact-OPD __start, reuses PSL1GHT crt1.o)"
-psl1ght_crt1_o="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT/ppu/crt/ppu/crt1.o"
-[[ -f "$psl1ght_crt1_o" ]] \
-    || die "PSL1GHT crt1.o not at $psl1ght_crt1_o. Run scripts/build-psl1ght.sh."
-"$CC" -c \
-    -mcpu=cell -mregnames -D__ASSEMBLY__ -Wa,-mcell \
-    -o "$gcc_startfile_dir/crt0.o" \
-    "$runtime_src/crt0.S"
-"$PS3DEV/ppu/bin/powerpc64-ps3-elf-ld" -r \
-    "$gcc_startfile_dir/crt0.o" \
-    "$psl1ght_crt1_o" \
-    -o "$gcc_startfile_dir/lv2-crt0.o"
-cp -f "$gcc_startfile_dir/lv2-crt0.o" "$ps3dk_dir/lv2-crt0.o"
+    say "building lv2-sprx.o ($abi_label, LV2_SDK_VERSION=$LV2_SDK_VERSION)"
+    "$CC" -c $abi_flag \
+        "-DLV2_SDK_VERSION=$LV2_SDK_VERSION" \
+        -o "$install_gcc/lv2-sprx.o" \
+        "$runtime_src/lv2-sprx.S"
+    cp -f "$install_gcc/lv2-sprx.o" "$install_ps3dk/lv2-sprx.o"
 
-say "installing lv2.ld (compact .opd ALIGN(4))"
-install -m 644 "$runtime_src/lv2.ld" "$gcc_startfile_dir/lv2.ld"
-install -m 644 "$runtime_src/lv2.ld" "$ps3dk_dir/lv2.ld"
+    say "building lv2-crti.o ($abi_label, compact-OPD _init/_fini)"
+    "$CC" -c $abi_flag \
+        -mcpu=cell -mregnames -D__ASSEMBLY__ -Wa,-mcell \
+        -o "$install_gcc/lv2-crti.o" \
+        "$runtime_src/lv2-crti.S"
+    cp -f "$install_gcc/lv2-crti.o" "$install_ps3dk/lv2-crti.o"
 
-say "installed $gcc_startfile_dir/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} (GCC startfile)"
-say "installed $ps3dk_dir/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} (PS3DK mirror)"
+    # lv2-crt0.o = crt0.S (compact __start descriptor) + native
+    # crt1.c (libsysbase syscall-table wiring), merged with ld -r.
+    # Fall back to PSL1GHT's pre-built crt1.o only if the native
+    # compile fails and we're building ILP32.
+    say "building lv2-crt0.o ($abi_label, compact-OPD __start + native crt1.c)"
+    "$CC" -c $abi_flag \
+        -mcpu=cell -mregnames -D__ASSEMBLY__ -Wa,-mcell \
+        -o "$install_gcc/crt0.o" \
+        "$runtime_src/crt0.S"
+
+    if "$CC" -c $abi_flag -mcpu=cell \
+        -o "$install_gcc/crt1.o" \
+        "$runtime_src/crt1.c"; then
+        : # native crt1.c compiled
+    elif [[ -z "$abi_flag" ]]; then
+        say "WARNING: native crt1.c failed, using PSL1GHT crt1.o fallback (ILP32)"
+        psl1ght_crt1="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT/ppu/crt/ppu/crt1.o"
+        [[ -f "$psl1ght_crt1" ]] \
+            || die "native crt1.c failed and PSL1GHT crt1.o not found"
+        cp -f "$psl1ght_crt1" "$install_gcc/crt1.o"
+    else
+        die "native crt1.c failed to compile under -mlp64 (no LP64 fallback)"
+    fi
+
+    "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ld" -r \
+        "$install_gcc/crt0.o" "$install_gcc/crt1.o" \
+        -o "$install_gcc/lv2-crt0.o"
+    cp -f "$install_gcc/lv2-crt0.o" "$install_ps3dk/lv2-crt0.o"
+
+    say "installing lv2.ld ($abi_label)"
+    install -m 644 "$runtime_src/lv2.ld" "$install_gcc/lv2.ld"
+    install -m 644 "$runtime_src/lv2.ld" "$install_ps3dk/lv2.ld"
+
+    say "installed $install_gcc/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} ($abi_label GCC startfile)"
+    say "installed $install_ps3dk/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} ($abi_label PS3DK mirror)"
+done
 
 # PSL1GHT's tools/sprxlinker/ ships an old sprxlinker that doesn't grok the
 # 64-byte .sys_proc_prx_param we now emit; make_self.exe rejects the
