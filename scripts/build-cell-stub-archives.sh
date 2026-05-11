@@ -98,7 +98,27 @@ OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
 INSTALL_LIB_DEFAULT="$PS3DK/ppu/lib"
 INSTALL_LIB_PS3DK="$PS3DK/ppu/lib"
 
-mkdir -p "$OUT_ROOT" "$INSTALL_LIB_DEFAULT" "$INSTALL_LIB_PS3DK"
+mkdir -p "$OUT_ROOT" "$INSTALL_LIB_DEFAULT" "$INSTALL_LIB_PS3DK" "$INSTALL_LIB_PS3DK/lp64"
+
+# Build stub archives for both ILP32 (default) and LP64 (-mlp64) multilib.
+# LP64 archives go under $PS3DK/ppu/lib/lp64/ so GCC's multilib search
+# picks them up automatically when linking with -mlp64.
+for abi in ilp32 lp64; do
+    case $abi in
+        ilp32)
+            install_dir="$INSTALL_LIB_PS3DK"
+            out_subdir="$OUT_ROOT/$abi"
+            abi_flag=""
+            cc_flags=""
+            ;;
+        lp64)
+            install_dir="$INSTALL_LIB_PS3DK/lp64"
+            out_subdir="$OUT_ROOT/$abi"
+            abi_flag="--abi lp64"
+            cc_flags="-mlp64"
+            ;;
+    esac
+    mkdir -p "$out_subdir" "$install_dir"
 
 for yaml in "${STUB_YAMLS[@]}"; do
     [[ -f "$yaml" ]] || die "missing YAML: $yaml"
@@ -106,16 +126,17 @@ for yaml in "${STUB_YAMLS[@]}"; do
     out_dir="$OUT_ROOT/$name"
     mkdir -p "$out_dir"
 
-    say "building $name"
+    say "building $name ($abi)"
     "$NIDGEN_BIN" archive \
         --input "$yaml" \
         --toolchain-bin "$PS3DEV/ppu/bin" \
-        --out-dir "$out_dir"
+        --out-dir "$out_subdir/$name" \
+        $abi_flag
 
     # Find the produced archive (basename comes from the YAML's archive_name
     # or library field — easier to glob than to re-derive).
     shopt -s nullglob
-    produced=( "$out_dir"/lib*_stub.a )
+    produced=( "$out_subdir/$name"/lib*_stub.a )
     shopt -u nullglob
     [[ ${#produced[@]} -eq 1 ]] \
         || die "expected exactly one archive in $out_dir, got ${#produced[@]}"
@@ -133,111 +154,81 @@ for yaml in "${STUB_YAMLS[@]}"; do
     # away.
     if [[ "$name" == "libgcm_sys_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libgcm_sys_legacy"
-        say "building legacy-name wrappers (libgcm_sys_legacy)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" make -C "$legacy_dir" all >/dev/null
+        say "building legacy-name wrappers (libgcm_sys_legacy, $abi)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" CFLAGS="$cc_flags" \
+            make -C "$legacy_dir" clean all >/dev/null
         legacy_obj="$legacy_dir/build/gcm_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
 
-        target="$INSTALL_LIB_PS3DK/libgcm_sys_stub.a"
-        # Start from the nidgen archive so its object layout is preserved,
-        # then ar-r the legacy wrappers on top.  'ar r' updates members in
-        # place, so reruns replace rather than duplicate.
+        target="$install_dir/libgcm_sys_stub.a"
         install -m 0644 "${produced[0]}" "$target"
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
-        ln -sf libgcm_sys_stub.a "$INSTALL_LIB_PS3DK/libgcm_sys.a"
-        say "installed libgcm_sys_stub.a + libgcm_sys.a symlink -> $INSTALL_LIB_PS3DK/"
+        ln -sf libgcm_sys_stub.a "$install_dir/libgcm_sys.a"
+        say "installed libgcm_sys_stub.a + libgcm_sys.a symlink -> $install_dir/"
     elif [[ "$name" == "libio_stub" ]]; then
-        # Canonical reference-SDK libio_stub.a contains nidgen SPRX
-        # stubs under Sony cellPad / cellKb / cellMouse names, plus
-        # libio_legacy wrappers that forward PSL1GHT-style ioPad / ioKb /
-        # ioMouse calls to the same cell* stubs.  Installed under the
-        # _stub name; a libio.a symlink aliases back for PSL1GHT compat.
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libio_legacy"
-        say "building legacy-name wrappers (libio_legacy)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" make -C "$legacy_dir" all >/dev/null
+        say "building legacy-name wrappers (libio_legacy, $abi)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" CFLAGS="$cc_flags" \
+            make -C "$legacy_dir" clean all >/dev/null
         legacy_obj="$legacy_dir/build/io_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
 
-        target="$INSTALL_LIB_PS3DK/libio_stub.a"
+        target="$install_dir/libio_stub.a"
         install -m 0644 "${produced[0]}" "$target"
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
-        ln -sf libio_stub.a "$INSTALL_LIB_PS3DK/libio.a"
-        say "installed libio_stub.a + libio.a symlink -> $INSTALL_LIB_PS3DK/"
+        ln -sf libio_stub.a "$install_dir/libio.a"
+        say "installed libio_stub.a + libio.a symlink -> $install_dir/"
     elif [[ "$name" == "libc_stub" ]]; then
-        # The reference SDK ships spu_printf_{initialize,finalize,
-        # attach_group,attach_thread,detach_group,detach_thread} in
-        # libc.sprx, but the actual SPRX-side / RPCS3 HLE
-        # implementation does not connect the SPU thread group's
-        # printf event-port (port 1) via
-        # sys_spu_thread_group_connect_event_all_threads — so SPU
-        # printfs silently drop with CELL_ENOTCONN.  The yaml has
-        # those six entries removed; this branch builds a real
-        # PPU-side replacement out of sdk/libc_stub_extras and
-        # ar-appends it into libc_stub.a so the resulting archive
-        # has the same six user-facing names but with a working
-        # event-queue + connect_event_all_threads handler behind
-        # them.
         extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libc_stub_extras"
-        say "building libc_stub_extras (real spu_printf_*)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
-            make -C "$extras_dir" all >/dev/null
+        say "building libc_stub_extras (real spu_printf_*, $abi)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" CFLAGS="$cc_flags" \
+            make -C "$extras_dir" clean all >/dev/null
         for extras_obj in "$extras_dir/build/"*.o; do
             [[ -f "$extras_obj" ]] || continue
             "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "${produced[0]}" \
                 "$extras_obj" 2>/dev/null
         done
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
-        install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
-        say "installed libc_stub.a -> $INSTALL_LIB_DEFAULT/ (nidgen + extras)"
+        install -m 0644 "${produced[0]}" "$install_dir/"
+        say "installed libc_stub.a -> $install_dir/ (nidgen + extras)"
     elif [[ "$name" == "libfiber_stub" ]]; then
-        # The reference archive ships cellFiberPpuInitialize as a
-        # real PPU function that loads CELL_SYSMODULE_FIBER first
-        # then forwards to _cellFiberPpuInitialize.  The YAML only
-        # covers the underscored SPRX export, so the public name
-        # and the _gCellFiberPpuThreadLocalStorage BSS area need
-        # real objects ar-appended to the nidgen archive.
         extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libfiber_stub_extras"
-        say "building libfiber_stub_extras (pub init + TLS area)"
+        say "building libfiber_stub_extras (pub init + TLS area, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
-        PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" \
-            make -C "$extras_dir" all >/dev/null
+            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" CFLAGS="$cc_flags" \
+            make -C "$extras_dir" clean all >/dev/null
         for extras_obj in "$extras_dir/build/"*.o; do
             [[ -f "$extras_obj" ]] || continue
             "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "${produced[0]}" \
                 "$extras_obj" 2>/dev/null
         done
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
-        install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
-        say "installed libfiber_stub.a -> $INSTALL_LIB_DEFAULT/ (nidgen + extras)"
+        install -m 0644 "${produced[0]}" "$install_dir/"
+        say "installed libfiber_stub.a -> $install_dir/ (nidgen + extras)"
     elif [[ "$name" == "libusbd_stub" ]]; then
-        # Canonical reference-SDK libusbd_stub.a contains nidgen SPRX
-        # stubs under cellUsbd* names, plus libusb_legacy wrappers
-        # that forward PSL1GHT-style usb* calls to the same stubs.
-        # Installed under the _stub name; a libusb.a symlink aliases
-        # back for PSL1GHT compat.
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libusb_legacy"
-        say "building legacy-name wrappers (libusb_legacy)"
+        say "building legacy-name wrappers (libusb_legacy, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
-        PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" \
-            make -C "$legacy_dir" all >/dev/null
+            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" CFLAGS="$cc_flags" \
+            make -C "$legacy_dir" clean all >/dev/null
         legacy_obj="$legacy_dir/build/usb_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
 
-        target="$INSTALL_LIB_PS3DK/libusbd_stub.a"
+        target="$install_dir/libusbd_stub.a"
         install -m 0644 "${produced[0]}" "$target"
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
-        ln -sf libusbd_stub.a "$INSTALL_LIB_PS3DK/libusb.a"
-        say "installed libusbd_stub.a + libusb.a symlink -> $INSTALL_LIB_PS3DK/"
+        ln -sf libusbd_stub.a "$install_dir/libusb.a"
+        say "installed libusbd_stub.a + libusb.a symlink -> $install_dir/"
     else
-        install -m 0644 "${produced[0]}" "$INSTALL_LIB_DEFAULT/"
-        say "installed $(basename "${produced[0]}") -> $INSTALL_LIB_DEFAULT/"
+        install -m 0644 "${produced[0]}" "$install_dir/"
+        say "installed $(basename "${produced[0]}") -> $install_dir/"
     fi
 done
 
-say "done — ${#STUB_YAMLS[@]} stub archive(s) installed"
+done   # close outer abi loop
