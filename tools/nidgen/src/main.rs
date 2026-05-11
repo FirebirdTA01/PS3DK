@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use nidgen::{archive, db, extract, nid, stubgen, verify};
+use nidgen::{archive, db, extract, nid, stubgen, verify, AbiMode};
 
 #[derive(Parser)]
 #[command(name = "nidgen", version, about = "PS3 NID/FNID tooling", long_about = None)]
@@ -31,6 +31,9 @@ enum Command {
         /// Output path (default: stdout).
         #[arg(long, short = 'o')]
         output: Option<PathBuf>,
+        /// ABI mode (ilp32 or lp64).
+        #[arg(long, default_value = "ilp32")]
+        abi: String,
     },
 
     /// Verify every entry in a YAML NID database recomputes to the stored NID.
@@ -67,6 +70,9 @@ enum Command {
         /// Output directory (intermediate .s + .o + lib<name>_stub.a go here).
         #[arg(long)]
         out_dir: PathBuf,
+        /// ABI mode (ilp32 or lp64).
+        #[arg(long, default_value = "ilp32")]
+        abi: String,
     },
 }
 
@@ -79,9 +85,11 @@ fn main() -> Result<()> {
                 println!("{}\t0x{}", s, nid::format_fnid(id));
             }
         }
-        Command::Stub { input, output } => {
+        Command::Stub { input, output, abi } => {
             let lib = db::load_library(&input)?;
-            let text = stubgen::render_library(&lib);
+            let abi = AbiMode::from_str(&abi)
+                .with_context(|| format!("invalid --abi value: {abi}"))?;
+            let text = stubgen::render_library(&lib, abi);
             match output {
                 Some(path) => {
                     std::fs::write(&path, text)
@@ -129,9 +137,11 @@ fn main() -> Result<()> {
                 None => print!("{yaml}"),
             }
         }
-        Command::Archive { input, toolchain_bin, asm, ar, out_dir } => {
+        Command::Archive { input, toolchain_bin, asm, ar, out_dir, abi } => {
             let lib = db::load_library(&input)?;
-            let asm_text = stubgen::render_library(&lib);
+            let abi = AbiMode::from_str(&abi)
+                .with_context(|| format!("invalid --abi value: {abi}"))?;
+            let asm_text = stubgen::render_library(&lib, abi);
             std::fs::create_dir_all(&out_dir)?;
             let basename = lib.archive_name.clone().unwrap_or_else(|| lib.library.clone());
             let asm_src = out_dir.join(format!("{}.s", basename));
@@ -143,6 +153,7 @@ fn main() -> Result<()> {
                 &basename,
                 &asm_src,
                 &out_dir,
+                abi,
             )?;
             eprintln!(
                 "ok: {}/lib{}_stub.a",
