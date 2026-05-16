@@ -58,13 +58,6 @@
 	LOAD_DWORD(r2,__start)
 #ifdef __LP64__
 	lwz	r2,4(r2)
-	/* Bias from linker-placed .TOC. (= .got + 0x7f60) to the
-	 * standard LP64 r2 anchor (.got + 0x8000).  0xa0 holds across
-	 * all current PS3-LV2 LP64 binaries because the compact-OPD
-	 * linker logic consistently places .TOC. at the same offset
-	 * within .got.  See docs/abi for the spec note; revisit if
-	 * this constant drifts across samples. */
-	addi	r2,r2,0xa0
 #else
 	lwz	r2,4(r2)
 #endif

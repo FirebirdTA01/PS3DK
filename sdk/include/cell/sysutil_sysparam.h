@@ -92,21 +92,16 @@ extern "C" {
 #define CELL_SYSUTIL_TIME_FMT_CLOCK12             0
 #define CELL_SYSUTIL_TIME_FMT_CLOCK24             1
 
-/* PSL1GHT-side entry points declared locally so this header doesn't
- * need <sysutil/sysutil.h> (which pollutes the global namespace with
- * the `sysutilCallback` typedef and clashes with reference-SDK
- * sample code). */
-extern int sysUtilGetSystemParamInt(int id, int *value);
-extern int sysUtilGetSystemParamString(int id, char *buf, unsigned int bufsize);
-
-/* Function forwarders. */
-static inline int cellSysutilGetSystemParamInt(int id, int *value) {
-	return sysUtilGetSystemParamInt(id, value);
-}
-
-static inline int cellSysutilGetSystemParamString(int id, char *buf, unsigned int bufsize) {
-	return sysUtilGetSystemParamString(id, buf, bufsize);
-}
+/* Direct reference-NID imports — bind to the native nidgen multilib
+ * stub (libsysutil_stub.a, ILP32 + LP64; both export
+ * cellSysutilGetSystemParam{Int,String} as D/OPD).  No PSL1GHT
+ * forwarder.  Reference contract: cellSysutilGetSystemParamInt(int
+ * id, int *value).  bufsize stays `unsigned int` (32-bit) — a
+ * width-sensitive integer crossing the SPRX boundary must not widen
+ * under -mlp64.  Link with -lsysutil_stub (not the PSL1GHT
+ * -lsysutil). */
+extern int cellSysutilGetSystemParamInt(int id, int *value);
+extern int cellSysutilGetSystemParamString(int id, char *buf, unsigned int bufsize);
 
 #ifdef __cplusplus
 }

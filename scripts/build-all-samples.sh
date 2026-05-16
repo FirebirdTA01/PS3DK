@@ -12,6 +12,7 @@
 #   ./scripts/build-all-samples.sh --rebuild    # clean + rebuild
 #   ./scripts/build-all-samples.sh gcm          # only samples/gcm/*
 #   ./scripts/build-all-samples.sh sysutil      # only samples/sysutil/*
+#   ./scripts/build-all-samples.sh --lp64        # build with -mlp64 toolchain
 
 set -euo pipefail
 
@@ -23,17 +24,23 @@ say() { printf "[samples] %s\n" "$*"; }
 die() { printf "[samples] ERROR: %s\n" "$*" >&2; exit 1; }
 
 REBUILD=false
+LP64=false
 FILTER=""
 
 for arg in "$@"; do
     case "$arg" in
         --rebuild) REBUILD=true ;;
+        --lp64)    LP64=true ;;
         *)         FILTER="$arg" ;;
     esac
 done
 
 SAMPLES_ROOT="$PS3_TOOLCHAIN_ROOT/samples"
-TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain.cmake"
+if $LP64; then
+    TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain-lp64.cmake"
+else
+    TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain.cmake"
+fi
 
 [[ -d "$SAMPLES_ROOT" ]] || die "samples root not found: $SAMPLES_ROOT"
 [[ -f "$TOOLCHAIN_FILE" ]] || die "toolchain file not found: $TOOLCHAIN_FILE"
@@ -54,7 +61,11 @@ while IFS= read -r -d '' cmake_file; do
     fi
 
     TOTAL=$((TOTAL + 1))
-    build_dir="$sample_dir/build"
+    if $LP64; then
+        build_dir="$sample_dir/build-lp64"
+    else
+        build_dir="$sample_dir/build"
+    fi
 
     say "[$TOTAL] $sample_name"
 

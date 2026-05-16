@@ -80,6 +80,7 @@ CC="$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc"
 [[ -x "$CC" ]] || die "PPU toolchain not installed. Run scripts/build-ppu-toolchain.sh first."
 
 runtime_src="$PS3_TOOLCHAIN_ROOT/runtime/lv2/crt"
+librt_src="${LIBRT_SRC_DIR:-$PS3_TOOLCHAIN_ROOT/runtime/lv2/librt}"
 gcc_startfile_dir="$PS3DEV/ppu/powerpc64-ps3-elf/lib"
 ps3dk_dir="$PS3DK/ppu/lib"
 mkdir -p "$gcc_startfile_dir" "$ps3dk_dir"
@@ -151,6 +152,29 @@ for abi_flag in "" "-mlp64"; do
     say "installing lv2.ld ($abi_label)"
     install -m 644 "$runtime_src/lv2.ld" "$install_gcc/lv2.ld"
     install -m 644 "$runtime_src/lv2.ld" "$install_ps3dk/lv2.ld"
+
+    # Build native librt (replaces PSL1GHT's librt.a).  Each wrapper
+    # compiles cleanly under both ILP32 and LP64 because the syscall
+    # interface is ABI-invariant and width-sensitive types use newlib
+    # typedefs throughout.
+    if [[ -d "$librt_src" ]]; then
+        say "building librt.a ($abi_label)"
+        librt_work="$PS3_TOOLCHAIN_ROOT/build/runtime-lv2/librt/$abi_subdir"
+        mkdir -p "$librt_work"
+        librt_objs=""
+        for src in "$librt_src"/*.c; do
+            [[ -f "$src" ]] || continue
+            obj="$librt_work/$(basename "${src%.c}.o")"
+            "$CC" -c $abi_flag -mcpu=cell -I"$librt_src" -I"$PS3DK/ppu/include" -o "$obj" "$src"
+            librt_objs="$librt_objs $obj"
+        done
+        if [[ -n "$librt_objs" ]]; then
+            "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" rcs \
+                "$install_gcc/librt.a" $librt_objs
+            cp -f "$install_gcc/librt.a" "$install_ps3dk/librt.a"
+        fi
+        say "installed librt.a ($abi_label, $(echo $librt_objs | wc -w) objects)"
+    fi
 
     say "installed $install_gcc/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} ($abi_label GCC startfile)"
     say "installed $install_ps3dk/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} ($abi_label PS3DK mirror)"
