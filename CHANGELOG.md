@@ -16,6 +16,56 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Toolchain — multilib runtime infrastructure (LP64 in progress)
+
+Three commits landed during the 2026-05-10 → 2026-05-11 session
+working toward LP64 multilib support.  The ILP32 default path
+remains green (89/89 samples build, no RPCS3 regression).  The LP64
+path under `-mlp64` is **not yet runtime-functional** — the samples
+build clean but crash before reaching `main()` (PC 0x10210, segfault
+reading 0x0).
+
+- **`20af996`** — `crt: native lv2-crt1 + multilib emit for ILP32/LP64`.
+  Replaces the PSL1GHT-shipped `crt1.o` with a native re-implementation
+  under `runtime/lv2/crt/crt1.c` that wires the `__syscalls` table to
+  `__librt_*_r` entry points.  `scripts/build-runtime-lv2.sh` now emits
+  every crt artefact for both ILP32 (`$PS3DEV/ppu/powerpc64-ps3-elf/lib/`)
+  and LP64 (`$PS3DEV/ppu/powerpc64-ps3-elf/lib/lp64/`) multilib
+  variants, plus matching `$PS3DK/ppu/lib{,/lp64}/` mirrors.  No
+  regression on the default path.
+- **`2aa8400`** — `crt0.S: LP64 TOC bias + ABI-conditional LOAD_DWORD`.
+  The ABI-conditional LOAD_DWORD split (5-instruction sequence under
+  LP64, 2-instruction lis/addi pair under ILP32) is correct and stays.
+  The 0xa0 hardcoded TOC bias added in this commit was based on the
+  belief that LP64 samples were reaching `main()` after the bias —
+  later verification proved that report was a misread of stale RPCS3
+  state.  All bias values (0, 0xa0, 0xe8 linker-script-computed)
+  produce the same crash at PC 0x10210, so the TOC bias is not the
+  root cause.
+- **`2c6f3c1`** — `nidgen: multilib stub-archive emit (ILP32 + LP64)`.
+  Honest architecture improvement: nidgen now emits LP64 trampoline
+  variants (`std`/`ld` 8-byte saves, `.quad` 8-byte sceFStub slots)
+  and `build-cell-stub-archives.sh` installs them under
+  `$PS3DK/ppu/lib/lp64/`.  GCC's multilib search resolves to the right
+  stub width when `-mlp64` is on the link line.  The LP64 sample
+  tested against these stubs was crashing the whole time per the
+  above; the architecture improvement is real but the LP64 runtime
+  test that supposedly validated it was misread.
+
+### Known follow-ups for the next session
+
+- Real LP64 diagnostic against the PC 0x10210 crash.  Diagnostic
+  must use literal RPCS3 output (log lines + dialog text + TTY) on
+  every step — summaries proved unreliable in this session.
+- Working tree carries uncommitted work: native librt 31-file
+  re-author under `runtime/lv2/librt/` + linker-script-computed
+  TOC bias in `lv2.ld` + `runtime/lv2/crt/crt0.S`.  None of these
+  fix the LP64 crash on their own; they are scaffolding for the
+  next attempt.
+- Honest reporting protocol going forward: paste literal RPCS3
+  output for every test run; never summarise as "looks correct"
+  or "no crash" without copy-pasted log lines to back it up.
+
 ## [v0.7.1] — 2026-05-10
 
 ### CI
