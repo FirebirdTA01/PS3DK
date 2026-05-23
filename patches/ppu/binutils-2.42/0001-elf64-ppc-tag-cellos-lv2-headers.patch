@@ -4,14 +4,14 @@ Subject: [PATCH] elf64-ppc: tag Cell OS Lv-2 ELF headers on output
 When the output ELF contains a .sys_proc_prx_param section — which
 indicates it is a Cell OS Lv-2 userland binary — write the Cell OS
 Lv-2 OS/ABI identifier (byte 0x66) into e_ident[EI_OSABI] and set
-e_flags to exactly 0x01000000. Both values are required by the Lv-2
+e_flags to exactly 0x00000000. Both values are required by the Lv-2
 loader and are documented in docs/abi/cellos-lv2-abi-spec.md in the
 PS3 Custom Toolchain tree.
 
 Note that e_flags is assigned rather than OR'd: the Lv-2 ABI does
 not use the EF_PPC64_ABI low bits that the ppc64 backend otherwise
 sets to mark ELFv1 / ELFv2. Reference Lv-2 binaries carry
-e_flags = 0x01000000 exactly.
+e_flags = 0x00000000 exactly.
 
 Gating on the presence of .sys_proc_prx_param keeps standard ppc64
 output (Linux, FreeBSD, bare-metal) unaffected — only PS3 userland
@@ -59,7 +59,7 @@ executable or shared object only.
 +      && bfd_get_section_by_name (abfd, ".sys_proc_prx_param") != NULL)
 +    {
 +      elf_elfheader (abfd)->e_ident[EI_OSABI] = 0x66;
-+      elf_elfheader (abfd)->e_flags = 0x01000000;
++      elf_elfheader (abfd)->e_flags = 0x00000000;
 +    }
 +  return _bfd_elf_final_write_processing (abfd);
 +}

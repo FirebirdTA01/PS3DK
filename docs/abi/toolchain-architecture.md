@@ -21,9 +21,10 @@ big-endian ELF64/PPC64 environment with:
 - explicit 32-bit EA typedef (`lv2_ea32_t`) for kernel-facing struct
   fields that the Lv-2 syscall layer treats as 32-bit EAs regardless
   of whether the user binary is ILP32 or LP64;
-- a framed SPRX import-trampoline shape that protects the trampoline's
-  caller-LR / caller-TOC saves from being clobbered by the SPRX
-  function it calls into via `bctrl` (see ABI spec §5.1);
+- data-model-aware SPRX import trampolines: ILP32 uses a frame-less
+  wrapping `bctrl` shape so >8-arg exports see the original caller
+  stack, while LP64 uses a bare `bctr` tail-call shape with caller-side
+  TOC restore (see ABI spec §5.1);
 - NID/FNID-driven import metadata and stub archives, with PSL1GHT-style
   aliases folded into the canonical Sony nidgen output.
 
@@ -85,9 +86,7 @@ Responsibilities:
 - avoid rewriting native compact `.opd` sections as stock 24-byte PPC64 ELFv1
   descriptors.
 
-The current ABI spec requires `EI_OSABI = 0x66` and `e_flags = 0x00000000`.
-Older docs and patches referred to `e_flags = 0x01000000`; that value is now
-considered stale relative to the normative spec.
+The ABI spec requires `EI_OSABI = 0x66` and `e_flags = 0x00000000`.
 
 ### 3. Newlib / libgloss / libsysbase
 
@@ -112,7 +111,7 @@ Installed by `scripts/build-runtime-lv2.sh`.
 
 Current installed pieces:
 
-| Startfile / file | Current source | Status |
+| Startfile / file | Current source | Role |
 |---|---|---|
 | `lv2-sprx.o` | `runtime/lv2/crt/lv2-sprx.S` | native PS3DK; emits 64-byte `.sys_proc_prx_param` and library-range prefixes |
 | `lv2-crti.o` | `runtime/lv2/crt/lv2-crti.S` | native PS3DK compact-OPD init/fini prologue |
@@ -264,13 +263,13 @@ At runtime, the Lv-2 loader:
 
 ---
 
-## Current ABI conformance status
+## Current ABI conformance
 
-| Invariant | Status | Delivered by |
+| Invariant | Contract state | Delivered by |
 |---|---|---|
 | ELF64, big-endian, PPC64 | implemented | GCC + binutils |
 | `EI_OSABI = 0x66` | implemented / required | binutils/toolchain identity path |
-| `e_flags = 0x00000000` | normative current value | ABI spec; older `0x01000000` notes are stale |
+| `e_flags = 0x00000000` | required | ABI spec + verifier |
 | 64-byte `.sys_proc_prx_param` | implemented | `runtime/lv2/crt/lv2-sprx.S` |
 | `.sys_proc_prx_param` magic/version/layout | implemented | `lv2-sprx.S` + `lv2.ld` |
 | `.opd` entry size = 8 bytes | implemented | GCC compact `.opd` path + linker script |
