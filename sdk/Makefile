@@ -15,9 +15,13 @@ PS3DEV      ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 PS3DK       ?= $(PS3DEV)/ps3dk
 INSTALL_INC     := $(PS3DK)/ppu/include
 INSTALL_INC_SPU := $(PS3DK)/spu/include
+INSTALL_LIB      := $(PS3DK)/ppu/lib
+INSTALL_LIB_LP64 := $(INSTALL_LIB)/lp64
+INSTALL_MANIFEST := $(PS3DK)/.ps3dk-install-manifest
 
 # Path to the version generator (relative to this Makefile).
 VERSION_SH  := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../scripts/version.sh)
+TOOLCHAIN_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
 HEADERS := \
     include/types.h \
@@ -183,7 +187,7 @@ HEADERS := \
     include/cell/mouse.h \
     include/cell/padfilter.h
 
-SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq
+SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq liblv2
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -238,11 +242,12 @@ SPU_HEADERS := \
     include-spu/cell/sync.h \
     include-spu/cell/sync/barrier.h
 
-.PHONY: all install clean version-header $(SUBLIBS)
+.PHONY: all install clean version-header $(SUBLIBS) \
+	install-stub-archives install-native-aliases install-manifest verify-install
 
 all: $(SUBLIBS)
 
-install: install-headers install-spu-headers install-shared-spurs-spu-headers install-version install-sublibs
+install: install-headers install-spu-headers install-shared-spurs-spu-headers install-version install-sublibs install-stub-archives install-native-aliases install-manifest
 
 install-headers:
 	@for h in $(HEADERS); do \
@@ -293,6 +298,53 @@ install-sublibs:
 	    echo "  sublib  $$lib"; \
 	    $(MAKE) -C $$lib install || exit 1; \
 	done
+
+install-stub-archives:
+	@echo "  stubs   build-cell-stub-archives"
+	@PS3DEV="$(PS3DEV)" PS3DK="$(PS3DK)" "$(TOOLCHAIN_ROOT)/scripts/build-cell-stub-archives.sh"
+
+install-native-aliases:
+	@install -d "$(INSTALL_LIB)" "$(INSTALL_LIB_LP64)"
+	@test -f "$(INSTALL_LIB)/libsysutil_stub.a" || { echo "missing $(INSTALL_LIB)/libsysutil_stub.a"; exit 1; }
+	@test -f "$(INSTALL_LIB_LP64)/libsysutil_stub.a" || { echo "missing $(INSTALL_LIB_LP64)/libsysutil_stub.a"; exit 1; }
+	@ln -sfn libsysutil_stub.a "$(INSTALL_LIB)/libsysutil.a"
+	@ln -sfn libsysutil_stub.a "$(INSTALL_LIB_LP64)/libsysutil.a"
+	@test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }
+	@test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }
+	@echo "  alias   libsysutil.a -> libsysutil_stub.a (ILP32 + LP64)"
+
+install-manifest:
+	@install -d "$(PS3DK)"
+	@src_sha="$$(sha256sum include/sysutil/video.h | awk '{print $$1}')"; \
+	  dst_sha="$$(sha256sum "$(INSTALL_INC)/sysutil/video.h" | awk '{print $$1}')"; \
+	  test "$$src_sha" = "$$dst_sha" || { echo "installed sysutil/video.h sha mismatch"; exit 1; }; \
+	  test "$$(readlink "$(INSTALL_LIB)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad ILP32 libsysutil.a alias"; exit 1; }; \
+	  test "$$(readlink "$(INSTALL_LIB_LP64)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad LP64 libsysutil.a alias"; exit 1; }; \
+	  test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }; \
+	  test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }; \
+	  { \
+	    echo "schema=1"; \
+	    echo "source_root=$(TOOLCHAIN_ROOT)"; \
+	    printf "version="; "$(VERSION_SH)" --format=plain; \
+	    echo "sysutil_video_sha256=$$src_sha"; \
+	    echo "installed_sysutil_video_sha256=$$dst_sha"; \
+	    echo "libsysutil_ilp32=symlink:libsysutil_stub.a"; \
+	    echo "libsysutil_lp64=symlink:libsysutil_stub.a"; \
+	    echo "liblv2_ilp32=present"; \
+	    echo "liblv2_lp64=present"; \
+	  } > "$(INSTALL_MANIFEST).tmp"; \
+	  mv "$(INSTALL_MANIFEST).tmp" "$(INSTALL_MANIFEST)"
+	@echo "  marker  $(INSTALL_MANIFEST)"
+
+verify-install:
+	@test -f "$(INSTALL_MANIFEST)" || { echo "missing $(INSTALL_MANIFEST)"; exit 1; }
+	@test -L "$(INSTALL_LIB)/libsysutil.a" || { echo "bad ILP32 libsysutil.a"; exit 1; }
+	@test -L "$(INSTALL_LIB_LP64)/libsysutil.a" || { echo "bad LP64 libsysutil.a"; exit 1; }
+	@test "$$(readlink "$(INSTALL_LIB)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad ILP32 libsysutil.a target"; exit 1; }
+	@test "$$(readlink "$(INSTALL_LIB_LP64)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad LP64 libsysutil.a target"; exit 1; }
+	@test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }
+	@test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }
+	@echo "  verify  SDK install manifest + critical artifacts OK"
 
 $(SUBLIBS):
 	$(MAKE) -C $@
