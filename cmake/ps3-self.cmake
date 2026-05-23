@@ -128,7 +128,9 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
         "${PS3DK}/ppu/lib/libsysutil_stub.a"
         "${PS3DK}/ppu/lib/lp64/libsysutil_stub.a"
         "${PS3DK}/ppu/lib/liblv2.a"
-        "${PS3DK}/ppu/lib/lp64/liblv2.a")
+        "${PS3DK}/ppu/lib/lp64/liblv2.a"
+        "${PS3DK}/ppu/lib/librsx.a"
+        "${PS3DK}/ppu/lib/lp64/librsx.a")
         if(NOT EXISTS "${path}")
             message(FATAL_ERROR
                 "ps3-self: required SDK artifact missing: ${path}\n"
