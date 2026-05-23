@@ -319,10 +319,11 @@ int main(int argc, const char **argv)
 
 cleanup:
 	cellGcmSetWaitFlip(ctx);
-	rsxFree(cursor_pixels);
-	for (int i = 0; i < MAX_BUFFERS; i++)
-		rsxFree(buffers[i].ptr);
 	cellGcmFinish(ctx, 1);
+	/*
+	 * rsxFree is allocator-only. Process exit reclaims RSX memory; for
+	 * full structured teardown see the reference sampleBasic pattern.
+	 */
 	free(host_addr);
 	ioPadEnd();
 
