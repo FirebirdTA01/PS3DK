@@ -268,12 +268,14 @@ int main(int argc, const char **argv)
 		printf("  early exit on START button\n");
 
 	cellGcmSetWaitFlip(ctx);
-	for (int i = 0; i < MAX_BUFFERS; i++)
-		rsxFree(buffers[i].ptr);
 	cellGcmFinish(ctx, 1);
-	free(host_addr);
+	printf("hello-ppu-cellgcm-clear: done\n");
+
+	/*
+	 * rsxFree is allocator-only. Process exit reclaims RSX memory; for
+	 * full structured teardown see the reference sampleBasic pattern.
+	 */
 	ioPadEnd();
 
-	printf("hello-ppu-cellgcm-clear: done\n");
 	return 0;
 }
