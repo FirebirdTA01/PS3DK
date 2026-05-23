@@ -24,10 +24,13 @@ VERSION_SH  := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../scripts/version.
 TOOLCHAIN_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
 HEADERS := \
+    include/ppu-types.h \
+    include/ppu-asm.h \
     include/types.h \
     include/sys/lv2_types.h \
     include/sys/lv2_syscall.h \
     include/sys/ppu-asm.h \
+    include/sys/heap.h \
     include/sys/spu_image.h \
     include/sys/timer.h \
     include/sys/sys_time.h \
@@ -185,9 +188,18 @@ HEADERS := \
     include/sysutil/sysutil_common.h \
     include/cell/keyboard.h \
     include/cell/mouse.h \
-    include/cell/padfilter.h
+    include/cell/padfilter.h \
+    include/rsx/commands.h \
+    include/rsx/commands_inc.h \
+    include/rsx/gcm_sys.h \
+    include/rsx/mm.h \
+    include/rsx/nv40.h \
+    include/rsx/resc.h \
+    include/rsx/rsx.h \
+    include/rsx/rsx_function_macros.h \
+    include/rsx/rsx_program.h
 
-SUBLIBS := libgcm_cmd libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq liblv2
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq liblv2
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -322,6 +334,8 @@ install-manifest:
 	  test "$$(readlink "$(INSTALL_LIB_LP64)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad LP64 libsysutil.a alias"; exit 1; }; \
 	  test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }; \
 	  test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }; \
+	  test -f "$(INSTALL_LIB)/librsx.a" || { echo "missing $(INSTALL_LIB)/librsx.a"; exit 1; }; \
+	  test -f "$(INSTALL_LIB_LP64)/librsx.a" || { echo "missing $(INSTALL_LIB_LP64)/librsx.a"; exit 1; }; \
 	  { \
 	    echo "schema=1"; \
 	    echo "source_root=$(TOOLCHAIN_ROOT)"; \
@@ -332,6 +346,8 @@ install-manifest:
 	    echo "libsysutil_lp64=symlink:libsysutil_stub.a"; \
 	    echo "liblv2_ilp32=present"; \
 	    echo "liblv2_lp64=present"; \
+	    echo "librsx_ilp32=present"; \
+	    echo "librsx_lp64=present"; \
 	  } > "$(INSTALL_MANIFEST).tmp"; \
 	  mv "$(INSTALL_MANIFEST).tmp" "$(INSTALL_MANIFEST)"
 	@echo "  marker  $(INSTALL_MANIFEST)"
@@ -344,6 +360,8 @@ verify-install:
 	@test "$$(readlink "$(INSTALL_LIB_LP64)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad LP64 libsysutil.a target"; exit 1; }
 	@test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }
 	@test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }
+	@test -f "$(INSTALL_LIB)/librsx.a" || { echo "missing $(INSTALL_LIB)/librsx.a"; exit 1; }
+	@test -f "$(INSTALL_LIB_LP64)/librsx.a" || { echo "missing $(INSTALL_LIB_LP64)/librsx.a"; exit 1; }
 	@echo "  verify  SDK install manifest + critical artifacts OK"
 
 $(SUBLIBS):
