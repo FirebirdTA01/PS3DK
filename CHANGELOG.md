@@ -16,55 +16,159 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-### Toolchain — multilib runtime infrastructure (LP64 in progress)
+## [v0.8.0] — 2026-05-23
 
-Three commits landed during the 2026-05-10 → 2026-05-11 session
-working toward LP64 multilib support.  The ILP32 default path
-remains green (89/89 samples build, no RPCS3 regression).  The LP64
-path under `-mlp64` is **not yet runtime-functional** — the samples
-build clean but crash before reaching `main()` (PC 0x10210, segfault
-reading 0x0).
+### Toolchain — LP64 multilib runtime
 
-- **`20af996`** — `crt: native lv2-crt1 + multilib emit for ILP32/LP64`.
-  Replaces the PSL1GHT-shipped `crt1.o` with a native re-implementation
-  under `runtime/lv2/crt/crt1.c` that wires the `__syscalls` table to
-  `__librt_*_r` entry points.  `scripts/build-runtime-lv2.sh` now emits
-  every crt artefact for both ILP32 (`$PS3DEV/ppu/powerpc64-ps3-elf/lib/`)
-  and LP64 (`$PS3DEV/ppu/powerpc64-ps3-elf/lib/lp64/`) multilib
-  variants, plus matching `$PS3DK/ppu/lib{,/lp64}/` mirrors.  No
-  regression on the default path.
-- **`2aa8400`** — `crt0.S: LP64 TOC bias + ABI-conditional LOAD_DWORD`.
-  The ABI-conditional LOAD_DWORD split (5-instruction sequence under
-  LP64, 2-instruction lis/addi pair under ILP32) is correct and stays.
-  The 0xa0 hardcoded TOC bias added in this commit was based on the
-  belief that LP64 samples were reaching `main()` after the bias —
-  later verification proved that report was a misread of stale RPCS3
-  state.  All bias values (0, 0xa0, 0xe8 linker-script-computed)
-  produce the same crash at PC 0x10210, so the TOC bias is not the
-  root cause.
-- **`2c6f3c1`** — `nidgen: multilib stub-archive emit (ILP32 + LP64)`.
-  Honest architecture improvement: nidgen now emits LP64 trampoline
-  variants (`std`/`ld` 8-byte saves, `.quad` 8-byte sceFStub slots)
-  and `build-cell-stub-archives.sh` installs them under
-  `$PS3DK/ppu/lib/lp64/`.  GCC's multilib search resolves to the right
-  stub width when `-mlp64` is on the link line.  The LP64 sample
-  tested against these stubs was crashing the whole time per the
-  above; the architecture improvement is real but the LP64 runtime
-  test that supposedly validated it was misread.
+`-mlp64` is now runtime-functional alongside the ILP32 hybrid
+default.  The toolchain sample tier (`hello-ppu-c++17`,
+`hello-ppu-abi-check`, `gcm-config-abi`, `hello-ppu-backfill`,
+`compact-opd-probe`, `hello-ppu-mlp64-types`,
+`hello-ppu-mlp64-tagged-pointer`) all RPCS3-RAN-CLEAN under LP64;
+a broader 10-sample cross-category sweep (audio / codec / lv2 /
+gcm / sysutil) is RAN-CLEAN with no LP64-specific regressions
+against the ILP32 baseline.
 
-### Known follow-ups for the next session
+- **`7bd5098`** — `LP64 SPRX trampoline: reference tail-call shape
+  + 4B fstub stride`.  Three coordinated pieces ship the
+  ABI-correct LP64 SPRX dispatch: nidgen's LP64 trampoline now
+  emits the bare tail-call form (`std r2,40(r1); lis r12,...;
+  lwz r12,...; lwz r0,0(r12); lwz r2,4(r12); mtctr r0; bctr`,
+  matching the Cell Lv-2 §5.1 LP64 normative shape); the LP64
+  `.data.sceFStub` slot stride is 4 bytes regardless of data
+  model (compact-OPD descriptor pointers stay 32-bit under both
+  ABIs), with the trampoline loading the slot via `lwz`; and the
+  sprxlinker post-link pass gains a `--lp64` flag that rewrites
+  the compiler-emitted `nop` after every `bl .sceStub.text` call
+  site to `ld r2, 40(r1)`, completing the cross-DSO TOC restore
+  that the LP64 tail-call shape delegates to the caller.  The
+  ILP32 wrapping `bctrl` trampoline is unchanged.
+- **`dad3c20`** — `librsx: native multilib SUBLIB (off-PSL1GHT)`.
+  The PSL1GHT `librsx.a` was ILP32-only; under `-mlp64` the
+  linker silently fell through to the ILP32 archive, producing
+  an ABI-mismatched binary that crashed during static-init.
+  `sdk/librsx` is now a first-class SUBLIBS entry that builds
+  both data models side-by-side; the matching headers move to
+  `sdk/include/rsx/` (with the necessary supporting headers
+  `sys/heap.h`, `ppu-types.h`, `ppu-asm.h`) so the SDK is
+  self-contained.  `rsxFree` carries an explicit contract:
+  allocator-only, caller-owned unbind, process-exit frees
+  usually unnecessary — same semantics as the reference
+  `cellGcmUtilFree`.
 
-- Real LP64 diagnostic against the PC 0x10210 crash.  Diagnostic
-  must use literal RPCS3 output (log lines + dialog text + TTY) on
-  every step — summaries proved unreliable in this session.
-- Working tree carries uncommitted work: native librt 31-file
-  re-author under `runtime/lv2/librt/` + linker-script-computed
-  TOC bias in `lv2.ld` + `runtime/lv2/crt/crt0.S`.  None of these
-  fix the LP64 crash on their own; they are scaffolding for the
-  next attempt.
-- Honest reporting protocol going forward: paste literal RPCS3
-  output for every test run; never summarise as "looks correct"
-  or "no crash" without copy-pasted log lines to back it up.
+### Toolchain — installed-stage atomicity + freshness gate
+
+- **`9446214`** — `sdk install: atomic owner of stage + freshness
+  gate in ps3-self`.  `make -C sdk install` is now the single
+  user-facing contract that produces a consistent installed
+  stage in one invocation: headers, `cell/sdk_version.h`,
+  `VERSION`, every nidgen-emitted stub archive (both ABIs),
+  `libsysutil.a` symlink aliases pointing at `libsysutil_stub.a`
+  in both ABI dirs, native multilib `liblv2.a`, and a final
+  `$(PS3DK)/.ps3dk-install-manifest`.  `cmake/ps3-self.cmake`
+  fails CMake configure when the manifest is missing or the
+  installed `sysutil/video.h` sha256 doesn't match the source
+  tree — sample builds never silently consume a stale
+  installed SDK.  `make -C sdk verify-install` is a fast
+  no-rebuild assertion of the same invariants.
+- **`0af2a6f`** — `build-cell-stub-archives: always rebuild
+  release nidgen`.  The script always runs
+  `cargo build --release` for nidgen instead of only when the
+  binary is missing; a stale-but-present release nidgen would
+  otherwise silently mask stubgen changes.  Cargo handles
+  incremental builds so the no-source-change case is fast.
+
+### Toolchain — diagnostic + bisection infrastructure
+
+- **`a4de38f`** — `librt-bisect-harness: verifiably-injecting
+  per-arm librt + per-arm SDK`.  The bisect harness was
+  silently linking the host stage `librt.a` regardless of the
+  swap configuration because the arm-prefix gcc symlink let
+  `/proc/self/exe` canonicalise back to the host install.
+  `prepare_temp_prefixes` now copies `ppu/lib/gcc` and
+  `ppu/powerpc64-ps3-elf/lib`, symlinks
+  `ppu/powerpc64-ps3-elf/{bin,include}`, and the harness
+  exports `GCC_EXEC_PREFIX` for cmake configure + build.  An
+  in-harness `die()` on `gcc -print-file-name=librt.a`
+  resolving outside the arm prefix prevents future regression.
+  A per-arm `make -C sdk install` keeps cell/* headers and
+  nidgen stub archives current.  A msgdialog-only CMakeLists
+  injection is gated on the sample name so other samples'
+  link lines stay untouched.
+
+### Toolchain — ABI verifier expansion
+
+- **`55f395f`** — `abi-verify: e_flags 0 + .toc data-model
+  invariants + sceStub shape decode`.  The verifier now
+  enforces three additional Lv-2 invariants and the binutils
+  emit is brought into sync: `e_flags = 0x00000000` exactly
+  (the previous `0x01000000` was a stale legacy value); `.toc`
+  reloc/stride must be uniformly `R_PPC64_ADDR32`/4-byte under
+  ILP32 or `R_PPC64_ADDR64`/8-byte under LP64 with no
+  cross-data-model mixing; and `.sceStub.text` trampolines are
+  decoded per-symbol and matched against the normative shape
+  for each data model (ILP32 frame-less wrapping `bctrl`, LP64
+  bare tail-call `bctr`).  Anything else fails the check.
+  `docs/abi/cellos-lv2-abi-spec.md §5.1` and the matching
+  sections in `section-reference.md` and
+  `toolchain-architecture.md` carry the contract directly.
+
+### SDK — native off-PSL1GHT surface
+
+- **`6e5cbf2`** — `sdk: native off-PSL1GHT sysutil/video/liblv2
+  + native librt + rollout tooling`.  Lands the native
+  `<sysutil/video.h>` compat shim (a thin static-inline adapter
+  layer mapping the legacy `videoConfigure` /
+  `videoGetState` / `videoGetResolution` calls + types onto
+  the native `cellVideoOut*` nidgen stubs) and the
+  `scripts/rollout-off-psl1ght-sysutil.sh` cutover tool that
+  symlink-flips `libsysutil.a -> libsysutil_stub.a` in both ABI
+  dirs and installs the native multilib `liblv2.a` alongside.
+  The cutover preserves existing sample link lines while
+  closing the previously-absent `lp64/libsysutil.a` and
+  `lp64/liblv2.a` gaps.
+- **`e0befbc`** — `samples/gcm: link sysutil_stub on
+  alpha-mask, blend, chain`.  Three gcm samples called
+  `cellSysutilRegisterCallback` / `cellSysutilCheckCallback`
+  / `cellVideoOut*` directly but only linked the
+  PSL1GHT-forwarder `-lsysutil`; the native nidgen-emitted
+  symbols live in `libsysutil_stub.a`.  Add the stub library
+  to the link line, matching the existing
+  `samples/sysutil/hello-ppu-osk` pattern.
+- **`a4e06c6`** — `samples/gcm: skip rsxFree at process exit on
+  the smoke-render set`.  Seven smoke-render samples called
+  `rsxFree` on render-target buffers at process exit while
+  RSX still considered them bound; `rsxFree` is allocator-only
+  (no implicit unbind / Finish / invalidate) so this freed
+  metadata that the heap subsequently walked during teardown,
+  ending in an access violation in the allocator.  Removing
+  the process-exit `rsxFree` (and matching `free(host_addr)`)
+  on success paths fixes the crash; the comment block points
+  callers at the canonical structured display-safe teardown
+  pattern (Finish; set ref; black-out surface; flip; waitFlip;
+  Finish; waitFlip; onFinish-free) when one is actually
+  needed.
+
+### Samples — LP64 bisection harnesses
+
+- **`a25be3d`** + **`901b1ea`** — `samples/toolchain: add
+  hello-ppu-lp64-video-out-probe + hello-ppu-lp64-syscall-probe`.
+  Small parameterized LP64 bisect harnesses that exercise the
+  cellGcm + sysutil/video init prefix and the libsysbase
+  syscall path respectively, so future LP64 regressions can be
+  re-bisected against known harnesses rather than re-derived
+  from scratch.
+
+### Validation
+
+- 87/87 of the v0.7.x RPCS3-validated sample set continues to
+  pass under the default ILP32 hybrid path post-rollout (zero
+  emulator fatal markers; 17 RAN-CLEAN + 3 display-loop across
+  the 20 deferred gcm samples closed out for this release).
+- Under `-mlp64`, the toolchain sample tier is 7/7 RAN-CLEAN,
+  and the cross-category broader sweep (audio / codec / lv2 /
+  gcm / sysutil) is RAN-CLEAN or RENDER-LOOP with no fatal
+  markers post librsx + rsxFree-discipline fixes.
 
 ## [v0.7.1] — 2026-05-10
 
