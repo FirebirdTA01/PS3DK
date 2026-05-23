@@ -14,7 +14,7 @@ add_executable(hello-ppu-cellgcm-chain source/main.c)
 target_compile_features(hello-ppu-cellgcm-chain PRIVATE c_std_11)
 
 target_link_libraries(hello-ppu-cellgcm-chain PRIVATE
-    gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m
+    gcm_cmd gcm_sys io sysutil_stub sysutil sysmodule rt lv2 m
 )
 
 ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-chain shaders/vpshader.vcg)
