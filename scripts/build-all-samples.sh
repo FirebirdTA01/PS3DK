@@ -45,6 +45,9 @@ fi
 [[ -d "$SAMPLES_ROOT" ]] || die "samples root not found: $SAMPLES_ROOT"
 [[ -f "$TOOLCHAIN_FILE" ]] || die "toolchain file not found: $TOOLCHAIN_FILE"
 
+say "refreshing SDK install"
+PS3DEV="$PS3DEV" PS3DK="$PS3DK" make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
+
 FAILED=()
 PASSED=0
 TOTAL=0
