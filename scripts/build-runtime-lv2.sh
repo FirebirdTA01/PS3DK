@@ -159,7 +159,13 @@ for abi_flag in "" "-mlp64"; do
     # typedefs throughout.
     if [[ -d "$librt_src" ]]; then
         say "building librt.a ($abi_label)"
-        librt_work="$PS3_TOOLCHAIN_ROOT/build/runtime-lv2/librt/$abi_subdir"
+        librt_work_root="${LIBRT_WORK_ROOT:-$PS3_TOOLCHAIN_ROOT/build/runtime-lv2/librt}"
+        if [[ -n "$abi_subdir" ]]; then
+            librt_work="$librt_work_root/$abi_subdir"
+        else
+            librt_work="$librt_work_root/ilp32"
+        fi
+        rm -rf "$librt_work"
         mkdir -p "$librt_work"
         librt_objs=""
         for src in "$librt_src"/*.c; do
