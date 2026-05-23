@@ -38,10 +38,9 @@ die() { printf "[stub-archives] ERROR: %s\n" "$*" >&2; exit 1; }
     || die "PSL1GHT runtime not installed at \$PS3DK/ppu/lib. Run scripts/build-psl1ght.sh first."
 
 NIDGEN_BIN="$PS3_TOOLCHAIN_ROOT/tools/target/release/nidgen"
-if [[ ! -x "$NIDGEN_BIN" ]]; then
-    say "building nidgen (release)"
-    cargo build --release --manifest-path "$PS3_TOOLCHAIN_ROOT/tools/nidgen/Cargo.toml"
-fi
+say "building nidgen (release)"
+cargo build --release --manifest-path "$PS3_TOOLCHAIN_ROOT/tools/nidgen/Cargo.toml"
+[[ -x "$NIDGEN_BIN" ]] || die "release nidgen missing after cargo build: $NIDGEN_BIN"
 
 # Stub-archive YAMLs.  One entry per zero-PSL1GHT-coverage library.
 STUB_YAMLS=(
