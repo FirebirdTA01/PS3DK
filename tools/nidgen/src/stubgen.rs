@@ -8,22 +8,25 @@
 //! This module reproduces all of it in a single emit:
 //!
 //! ```text
-//!   .data.sceFStub.<library>   anchor + one 4-byte slot per export.
-//!                              Each slot is initialised to the trampoline
-//!                              `__<name>` (the PRX loader patches it at
-//!                              module load to the real function descriptor
-//!                              of the resolved SPRX entry).
+//!   .data.sceFStub.<library>   anchor + one 4-byte compact-descriptor
+//!                              pointer slot per export.  Each slot is
+//!                              initialised to the trampoline `__<name>` (the
+//!                              PRX loader patches it at module load to the
+//!                              real function descriptor of the resolved SPRX
+//!                              entry).  This slot width is ABI-independent:
+//!                              CellOS Lv-2 compact descriptors are 32-bit EA
+//!                              pointers in both ILP32 and LP64.
 //!   .rodata.sceResident        4-byte version word + library-name C-string.
 //!   .lib.stub                  one 44-byte prx_header per library, pointing
 //!                              at the name string, the first fnid, and the
 //!                              fstub table anchor.
 //!   .rodata.sceFNID            per-library anchor symbol + one 4-byte NID
 //!                              per export.
-//!   .sceStub.text              per-export ~60-byte PPC64 trampoline that
-//!                              reads `<name>_stub` (function descriptor),
-//!                              loads entry+TOC, and branches via `bctrl`.
-//!   .opd                       per-export 24-byte function descriptor so
-//!                              the externally-callable C symbol `<name>`
+//!   .sceStub.text              per-export PPC64 trampoline that reads
+//!                              `<name>_stub` (function descriptor), loads
+//!                              entry+TOC, and branches to the import.
+//!   .opd                       per-export compact 8-byte function descriptor
+//!                              so the externally-callable C symbol `<name>`
 //!                              resolves to the trampoline.
 //! ```
 //!
@@ -99,7 +102,12 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     writeln!(out, "\t.size {}, 44", header_sym).ok();
     writeln!(out, "{}:", header_sym).ok();
     writeln!(out, "\t.4byte 0x2c000001       # size=44, version=1").ok();
-    writeln!(out, "\t.2byte {}              # export count", lib.exports.len()).ok();
+    writeln!(
+        out,
+        "\t.2byte {}              # export count",
+        lib.exports.len()
+    )
+    .ok();
     writeln!(out, "\t.2byte 0").ok();
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte 0").ok();
@@ -128,11 +136,10 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     //
     //    <name>_stub   .data.sceFStub.<library>  4B    = &__<name>
     //    <name>_fnid   .rodata.sceFNID           4B    = NID
-    //    __<name>      .sceStub.text             ~60B  trampoline (saves LR/r2,
+    //    __<name>      .sceStub.text             trampoline (saves r2,
     //                                                  loads <name>_stub as a
     //                                                  function descriptor,
-    //                                                  branches via bctrl,
-    //                                                  restores, returns)
+    //                                                  and dispatches)
     //    <name>        .opd                      24B   { __<name>, .TOC.@tocbase, 0 }
     //
     //    The PRX loader patches <name>_stub at module load to point at the
@@ -150,20 +157,10 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         writeln!(out, "\t.globl {}", stub_sym).ok();
         writeln!(out, "\t.section \"{}\"", fstub_section).ok();
         writeln!(out, "\t.type {}, @object", stub_sym).ok();
-        match abi {
-            AbiMode::Ilp32 => {
-                writeln!(out, "\t.align 2").ok();
-                writeln!(out, "\t.size {}, 4", stub_sym).ok();
-                writeln!(out, "{}:", stub_sym).ok();
-                writeln!(out, "\t.4byte {}", tramp_sym).ok();
-            }
-            AbiMode::Lp64 => {
-                writeln!(out, "\t.align 3").ok();
-                writeln!(out, "\t.size {}, 8", stub_sym).ok();
-                writeln!(out, "{}:", stub_sym).ok();
-                writeln!(out, "\t.8byte {}", tramp_sym).ok();
-            }
-        }
+        writeln!(out, "\t.align 2").ok();
+        writeln!(out, "\t.size {}, 4", stub_sym).ok();
+        writeln!(out, "{}:", stub_sym).ok();
+        writeln!(out, "\t.4byte {}", tramp_sym).ok();
 
         // 5b. FNID.
         writeln!(out, "\t.globl {}", fnid_sym).ok();
@@ -174,83 +171,68 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         writeln!(out, "{}:", fnid_sym).ok();
         writeln!(out, "\t.4byte 0x{:08x}", e.nid).ok();
 
-        // 5c. Trampoline — frame-less wrapping stub for SPRX calls
-        //     under our ELF64 + ILP32 hybrid ABI.
+        // 5c. Trampoline — frame-less SPRX import dispatch.
         //
-        //     The trampoline saves caller LR / caller TOC into the
-        //     caller's reserved linkage slots (the "callee-TOC" slot
-        //     at sp+24, and reserved scratch at sp+40) without
-        //     allocating its own stack frame.  Frame-less is
-        //     load-bearing for >8-arg SPRX exports: the SPRX callee
-        //     reads its caller's parameter-save area at
-        //     SPRX_sp + SPRX_FRAME + 48 = trampoline_sp + 48.  If the
-        //     trampoline shifts SP via stwu before bctrl, the SPRX
-        //     reads arg9+ from inside the trampoline's frame instead
-        //     of from the wrapper's parameter-save area, and rejects
-        //     the call (libspurs ships >8-arg exports — e.g.
-        //     cellSpursJobChainAttributeInitialize = 14 args,
-        //     cellSpursCreateJobQueue = 10 args — that fail with
+        //     The trampoline must not allocate its own stack frame.
+        //     Frame-less dispatch is load-bearing for >8-arg SPRX
+        //     exports: the SPRX callee reads its caller's parameter-save
+        //     area from the incoming r1.  If the trampoline shifts SP via
+        //     stwu before dispatch, the SPRX reads arg9+ from inside the
+        //     trampoline's frame instead of from the wrapper's parameter
+        //     save area, and rejects the call (libspurs ships >8-arg
+        //     exports — e.g. cellSpursJobChainAttributeInitialize = 14
+        //     args, cellSpursCreateJobQueue = 10 args — that fail with
         //     CELL_SPURS_JOB_ERROR_INVAL / ERROR_ALIGN under a framed
         //     trampoline).
         //
-        //     Why sp+24 / sp+40 are safe under ELFv1:
-        //       sp+0..47  is the linkage area, reserved by the caller
-        //                  for its callee (us, the trampoline) to use.
-        //       sp+16     is the *callee-LR* slot — the SPRX writes
-        //                  its return-after-bctrl here in its own
-        //                  prologue (`mflr 0; stw 0, 16(1)`), so we
-        //                  must NOT use it for our LR save.
-        //       sp+24     is the *callee-TOC* slot — reserved
-        //                  caller-side scratch.  The SPRX writes its
-        //                  caller's TOC at SPRX_sp+24 *inside its own
-        //                  new frame* (after its stwu), not at our
-        //                  sp+24, so this slot is intact across bctrl.
-        //       sp+32..47 is reserved scratch.
-        //       sp+48+    is the parameter-save area (writable by
-        //                  caller for its outgoing call).
+        //     ILP32 keeps the historical wrapping form: save LR and r2
+        //     in the caller linkage area, bctrl into the SPRX, restore,
+        //     and return.  This path is empirically validated and must
+        //     stay byte-shape compatible with the existing hybrid ABI.
         //
-        //     Earlier emit (commits 305d133/16a628c) tried sp+16 and
-        //     then framed @ sp+16-before-stwu.  Both broke the >8-arg
-        //     class — first by direct LR-slot collision with the
-        //     SPRX's own LR write, then by SP-shift moving caller
-        //     spilled args.  This shape is what shipped before the
-        //     mlp64 pivot and matches the PSL1GHT EXPORT macro layout.
+        //     LP64 uses the PPC64 ELFv1/reference-SDK tail-call form:
+        //     save caller r2 at sp+40, load the 32-bit EA of the SPRX
+        //     compact descriptor from the ABI-independent 4-byte fstub
+        //     slot, and bctr into the resolved entry.  There is no
+        //     trampoline LR save because LP64 caller-frame header slots
+        //     are ABI reserved (sp+16 LR, sp+24 compiler, sp+32 link
+        //     editor, sp+40 TOC).  `sprxlinker --lp64` rewrites
+        //     call-site post-bl nops to `ld r2,40(r1)`, matching the
+        //     reference caller-side TOC restore contract.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();
         writeln!(out, "\t.type {}, @function", tramp_sym).ok();
         writeln!(out, "{}:", tramp_sym).ok();
-        writeln!(out, "\tmflr   0").ok();
         match abi {
             AbiMode::Ilp32 => {
-                writeln!(out, "\tstw    0,24(1)").ok();          // LR  -> caller's callee-TOC slot
-                writeln!(out, "\tstw    2,40(1)").ok();          // TOC -> caller's reserved scratch
+                writeln!(out, "\tmflr   0").ok();
+                writeln!(out, "\tstw    0,24(1)").ok(); // LR  -> caller's callee-TOC slot
+                writeln!(out, "\tstw    2,40(1)").ok(); // TOC -> caller's reserved scratch
                 writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
                 writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
             }
             AbiMode::Lp64 => {
-                writeln!(out, "\tstd    0,24(1)").ok();          // LR  -> caller's callee-TOC slot (8B)
-                writeln!(out, "\tstd    2,40(1)").ok();          // TOC -> caller's reserved scratch (8B)
+                writeln!(out, "\tstd    2,40(1)").ok(); // TOC -> caller TOC-save slot (8B)
                 writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
-                writeln!(out, "\tld     12,{}@l(12)", stub_sym).ok();  // 8B ptr load from stub slot
+                writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok(); // 32-bit compact descriptor EA
             }
         }
-        writeln!(out, "\tlwz    0,0(12)").ok();          // SPRX entry
-        writeln!(out, "\tlwz    2,4(12)").ok();          // SPRX TOC
+        writeln!(out, "\tlwz    0,0(12)").ok(); // SPRX entry
+        writeln!(out, "\tlwz    2,4(12)").ok(); // SPRX TOC
         writeln!(out, "\tmtctr  0").ok();
-        writeln!(out, "\tbctrl").ok();                   // call SPRX
         match abi {
             AbiMode::Ilp32 => {
-                writeln!(out, "\tlwz    2,40(1)").ok();  // restore caller TOC
-                writeln!(out, "\tlwz    0,24(1)").ok();  // restore caller LR
+                writeln!(out, "\tbctrl").ok(); // call SPRX
+                writeln!(out, "\tlwz    2,40(1)").ok(); // restore caller TOC
+                writeln!(out, "\tlwz    0,24(1)").ok(); // restore caller LR
+                writeln!(out, "\tmtlr   0").ok();
+                writeln!(out, "\tblr").ok();
             }
             AbiMode::Lp64 => {
-                writeln!(out, "\tld     2,40(1)").ok();   // restore caller TOC (8B)
-                writeln!(out, "\tld     0,24(1)").ok();   // restore caller LR  (8B)
+                writeln!(out, "\tbctr").ok(); // tail-call SPRX; caller restores r2
             }
         }
-        writeln!(out, "\tmtlr   0").ok();
-        writeln!(out, "\tblr").ok();
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
 
         // 5d. OPD function descriptor for the externally callable symbol.
@@ -336,11 +318,20 @@ mod tests {
         // Header preamble.
         assert!(s.contains("Library: cellPad"));
         // reference-SDK-compatible section names.
-        assert!(s.contains(".data.sceFStub.cellPad"), "missing fstub section");
-        assert!(s.contains(".rodata.sceResident"), "missing resident section");
+        assert!(
+            s.contains(".data.sceFStub.cellPad"),
+            "missing fstub section"
+        );
+        assert!(
+            s.contains(".rodata.sceResident"),
+            "missing resident section"
+        );
         assert!(s.contains(".rodata.sceFNID"), "missing fnid section");
         assert!(s.contains(".lib.stub\""), "missing lib.stub section");
-        assert!(s.contains(".sceStub.text"), "missing sceStub.text trampoline section");
+        assert!(
+            s.contains(".sceStub.text"),
+            "missing sceStub.text trampoline section"
+        );
         assert!(s.contains(".opd"), "missing opd descriptor section");
         // Must NOT emit the obsolete per-library .lib.stub.<library> form.
         assert!(
@@ -358,7 +349,10 @@ mod tests {
         assert!(s.contains("__cellPadEnd:"), "trampoline label missing");
         assert!(s.contains("0x2ba14c6b"));
         // OPD descriptor lines for both externally-callable symbols.
-        assert!(s.contains(".long __cellPadInit, .TOC."), "missing opd entry EA+TOC");
+        assert!(
+            s.contains(".long __cellPadInit, .TOC."),
+            "missing opd entry EA+TOC"
+        );
         // TOC slot is in the same .long line, checked above.
         // FNID anchor symbol.
         assert!(s.contains("__nidgen_cellPad_fnid_anchor"));
@@ -375,15 +369,78 @@ mod tests {
         // it (broke libspurs's >8-arg exports).  See comment block in
         // render_library above for the full ABI rationale.
         assert!(s.contains("bctrl"), "trampoline missing bctrl");
-        assert!(!s.contains("stwu"),
-                "trampoline must NOT allocate a frame; >8-arg SPRX exports break under any SP shift");
-        assert!(s.contains("stw    0,24(1)") || s.contains("stw 0,24(1)"),
-                "trampoline must save caller LR at caller_sp+24 (callee-TOC scratch slot)");
-        assert!(s.contains("stw    2,40(1)") || s.contains("stw 2,40(1)"),
-                "trampoline must save caller TOC at caller_sp+40 (reserved scratch slot)");
-        assert!(!s.contains("std    0,") && !s.contains("std 0,"),
-                "ILP32 trampoline must not use 8-byte std for LR save");
-        assert!(s.contains("cellPadInit_stub@ha"), "trampoline missing stub-slot load");
+        assert!(
+            !s.contains("stwu"),
+            "trampoline must NOT allocate a frame; >8-arg SPRX exports break under any SP shift"
+        );
+        assert!(
+            s.contains("stw    0,24(1)") || s.contains("stw 0,24(1)"),
+            "trampoline must save caller LR at caller_sp+24 (callee-TOC scratch slot)"
+        );
+        assert!(
+            s.contains("stw    2,40(1)") || s.contains("stw 2,40(1)"),
+            "trampoline must save caller TOC at caller_sp+40 (reserved scratch slot)"
+        );
+        assert!(
+            !s.contains("std    0,") && !s.contains("std 0,"),
+            "ILP32 trampoline must not use 8-byte std for LR save"
+        );
+        assert!(
+            s.contains("cellPadInit_stub@ha"),
+            "trampoline missing stub-slot load"
+        );
+    }
+
+    #[test]
+    fn lp64_trampoline_uses_reference_tail_call_shape() {
+        let s = render_library(&sample(), AbiMode::Lp64);
+
+        assert!(
+            !s.contains("stdu"),
+            "LP64 trampoline must not allocate a frame"
+        );
+        assert!(
+            !s.contains("mflr   0") && !s.contains("mflr 0"),
+            "LP64 tail-call trampoline must not save LR"
+        );
+        assert!(
+            s.contains("std    2,40(1)") || s.contains("std 2,40(1)"),
+            "LP64 trampoline must save caller TOC at caller_sp+40"
+        );
+        assert!(
+            s.contains(".size cellPadInit_stub, 4"),
+            "LP64 fstub slot must stay 4 bytes"
+        );
+        assert!(
+            s.contains("cellPadInit_stub:\n\t.4byte __cellPadInit"),
+            "LP64 fstub slot must be a 32-bit compact descriptor pointer"
+        );
+        assert!(
+            s.contains("lwz    12,cellPadInit_stub@l(12)")
+                || s.contains("lwz 12,cellPadInit_stub@l(12)"),
+            "LP64 trampoline must load the 4-byte fstub slot"
+        );
+        assert!(
+            !s.contains("ld     12,cellPadInit_stub@l(12)")
+                && !s.contains("ld 12,cellPadInit_stub@l(12)"),
+            "LP64 trampoline must not treat the fstub slot as an 8-byte pointer"
+        );
+        assert!(
+            s.contains("bctr"),
+            "LP64 trampoline must tail-call the SPRX with bctr"
+        );
+        assert!(
+            !s.contains("bctrl"),
+            "LP64 trampoline must not use wrapping bctrl"
+        );
+        assert!(
+            !s.contains("ld     2,40(1)") && !s.contains("ld 2,40(1)"),
+            "LP64 trampoline must leave caller TOC restore to the call site"
+        );
+        assert!(
+            !s.contains("std    0,") && !s.contains("std 0,"),
+            "LP64 trampoline must not save LR in caller-frame reserved slots"
+        );
     }
 
     #[test]

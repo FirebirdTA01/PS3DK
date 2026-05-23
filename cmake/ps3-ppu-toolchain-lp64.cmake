@@ -81,6 +81,7 @@ set(CMAKE_C_FLAGS_INIT   "${_ps3_ppu_machdep}")
 set(CMAKE_CXX_FLAGS_INIT "${_ps3_ppu_machdep}")
 set(CMAKE_ASM_FLAGS_INIT "-mcpu=cell -mlp64")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_ps3_ppu_machdep}")
+set(PS3_SPRXLINKER_FLAGS "--lp64" CACHE STRING "Extra flags passed to sprxlinker by ps3_add_self")
 
 # Per-config defaults (same as ILP32)
 set(CMAKE_C_FLAGS_RELEASE_INIT   "-O2 -Wall")

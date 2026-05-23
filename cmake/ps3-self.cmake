@@ -98,7 +98,7 @@ function(ps3_add_self target)
 
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_STRIP}" "${_elf}" -o "${_stripped}"
-        COMMAND "${PS3_TOOL_sprxlinker}" "${_stripped}"
+        COMMAND "${PS3_TOOL_sprxlinker}" ${PS3_SPRXLINKER_FLAGS} "${_stripped}"
         COMMAND "${PS3_TOOL_make_self}"  "${_stripped}" "${_self}"
         COMMAND "${PS3_TOOL_fself}"      "${_stripped}" "${_fake_self}"
         BYPRODUCTS "${_stripped}" "${_self}" "${_fake_self}"
