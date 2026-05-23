@@ -137,9 +137,8 @@ Every pointer-like field is a 32-bit EA relocation. This section must not use
 
 ### 2.1 `abi_version` at offset `0x20`
 
-The current normative value is `0x01010000`. Earlier minimal experiments used
-zero, but reference SDK binaries and runtime testing show that the non-zero
-value is required for the loader path PS3DK targets.
+The normative value is `0x01010000`. Zero is not a conforming
+process-parameter ABI version for the loader path PS3DK targets.
 
 ### 2.2 The `+4` addends on begin markers
 
@@ -235,29 +234,27 @@ the ELF64 + ILP32 hybrid ABI) does:
 ```asm
 __<name>:
     mflr   r0
-    stw    r0, 16(r1)              ; caller LR -> reserved callee-LR slot
-    stwu   r1, -64(r1)              ; allocate 64-byte frame
-    stw    r2, 24(r1)               ; caller TOC -> own frame slot
+    stw    r0, 24(r1)               ; caller LR -> callee-TOC scratch slot
+    stw    r2, 40(r1)               ; caller TOC -> reserved scratch slot
     lis    r12, <name>_stub@ha
     lwz    r12, <name>_stub@l(r12)  ; resolved descriptor EA from .data.sceFStub
     lwz    r0, 0(r12)               ; entry EA (compact OPD slot 0)
     lwz    r2, 4(r12)               ; callee TOC (compact OPD slot 4)
     mtctr  r0
     bctrl                            ; call into SPRX
-    lwz    r2, 24(r1)
-    addi   r1, r1, 64
-    lwz    r0, 16(r1)
+    lwz    r2, 40(r1)
+    lwz    r0, 24(r1)
     mtlr   r0
     blr
 ```
 
-Saves use 4-byte `stw` / `lwz`; pointers are 32-bit under ILP32.  The framed
-shape (vs. older frame-less variants) is required because ELFv1 reserves
-`caller_sp+16` as the *callee*'s LR-save slot — the SPRX function writes
-there in its own prologue, so the trampoline's caller-LR save must live in
-the caller's reserved area BEFORE `stwu`, and the trampoline's TOC save
-must live inside its own frame where the SPRX cannot reach.  See
-`docs/abi/cellos-lv2-abi-spec.md §5.1` for the full normative contract.
+Saves use 4-byte `stw` / `lwz`; pointers are 32-bit under ILP32. The
+trampoline must not allocate a frame because SPRX exports with more than
+eight arguments read their stack-spilled arguments from the incoming caller
+frame. LP64 uses a bare tail-call shape (`std r2,40(r1)` followed by
+descriptor load and `bctr`) with caller-side TOC restore. See
+`docs/abi/cellos-lv2-abi-spec.md §5.1` for the full data-model-specific
+contract.
 
 The exact materialization of the `.data.sceFStub` slot address is generated
 by the stub archive / nidgen path; the frame layout above is fixed by ABI.
@@ -297,10 +294,9 @@ e_machine              = EM_PPC64
 e_flags                = 0x00000000
 ```
 
-Older PS3DK notes documented `e_flags = 0x01000000`; the current ABI spec was
-corrected after comparing against reference SDK binaries. The OS/ABI byte is
-the CellOS Lv-2 fingerprint. Upstream `readelf` may print it as
-`<unknown: 66>`.
+The `e_flags` field is zero for conforming CellOS Lv-2 PPU user-mode outputs.
+The OS/ABI byte is the CellOS Lv-2 fingerprint. Upstream `readelf` may print it
+as `<unknown: 66>`.
 
 ---
 

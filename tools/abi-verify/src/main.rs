@@ -29,9 +29,7 @@ enum Cmd {
         label: Option<String>,
     },
     /// Run invariant checks against CellOS Lv-2 ABI expectations.
-    Check {
-        path: PathBuf,
-    },
+    Check { path: PathBuf },
     /// Dump an archive member and emit its manifest.
     ArchiveMember {
         archive: PathBuf,
@@ -62,8 +60,8 @@ fn run() -> Result<bool> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Manifest { path, label } => {
-            let mut m = parse_elf_file(&path)
-                .with_context(|| format!("parsing {}", path.display()))?;
+            let mut m =
+                parse_elf_file(&path).with_context(|| format!("parsing {}", path.display()))?;
             if let Some(lbl) = label {
                 m.path = lbl;
             }
@@ -71,8 +69,7 @@ fn run() -> Result<bool> {
             Ok(true)
         }
         Cmd::Check { path } => {
-            let m = parse_elf_file(&path)
-                .with_context(|| format!("parsing {}", path.display()))?;
+            let m = parse_elf_file(&path).with_context(|| format!("parsing {}", path.display()))?;
             let report = check_invariants(&m);
             for line in &report.passes {
                 println!("  PASS  {line}");
@@ -82,7 +79,11 @@ fn run() -> Result<bool> {
             }
             Ok(report.is_ok())
         }
-        Cmd::ArchiveMember { archive, member, label } => {
+        Cmd::ArchiveMember {
+            archive,
+            member,
+            label,
+        } => {
             let data = std::fs::read(&archive)
                 .with_context(|| format!("reading {}", archive.display()))?;
             let mut archive_reader = ar::Archive::new(data.as_slice());
@@ -91,13 +92,8 @@ fn run() -> Result<bool> {
                 let name = String::from_utf8_lossy(entry.header().identifier()).into_owned();
                 if name == member {
                     let mut bytes = Vec::new();
-                    std::io::copy(&mut entry, &mut bytes)
-                        .context("reading archive member")?;
-                    let virtual_path = PathBuf::from(format!(
-                        "{}({})",
-                        archive.display(),
-                        member
-                    ));
+                    std::io::copy(&mut entry, &mut bytes).context("reading archive member")?;
+                    let virtual_path = PathBuf::from(format!("{}({})", archive.display(), member));
                     let mut m = abi_verify::parse_elf_bytes(&virtual_path, &bytes)?;
                     if let Some(lbl) = label {
                         m.path = lbl;

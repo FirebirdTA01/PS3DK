@@ -7,7 +7,7 @@
     "os_abi": 102,
     "abi_version": 0,
     "elf_type": "REL",
-    "flags": 16777216
+    "flags": 0
   },
   "sections": [
     {

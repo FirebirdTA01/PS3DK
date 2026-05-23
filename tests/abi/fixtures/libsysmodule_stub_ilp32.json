@@ -1,0 +1,346 @@
+{
+  "path": "generated/libsysmodule_stub.ilp32(sysmodule.o)",
+  "elf": {
+    "class": "ELF64",
+    "endian": "big",
+    "machine": "PowerPC64",
+    "os_abi": 0,
+    "abi_version": 0,
+    "elf_type": "REL",
+    "flags": 0
+  },
+  "sections": [
+    {
+      "name": "",
+      "sh_type": "NULL",
+      "size": 0,
+      "addralign": 0,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".text",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".data",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".bss",
+      "sh_type": "NOBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".data.sceFStub.cellSysmodule",
+      "sh_type": "PROGBITS",
+      "size": 32,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.data.sceFStub.cellSysmodule",
+      "sh_type": "RELA",
+      "size": 192,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".rodata.sceResident",
+      "sh_type": "PROGBITS",
+      "size": 18,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".lib.stub",
+      "sh_type": "PROGBITS",
+      "size": 44,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.lib.stub",
+      "sh_type": "RELA",
+      "size": 72,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".rodata.sceFNID",
+      "sh_type": "PROGBITS",
+      "size": 32,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".sceStub.text",
+      "sh_type": "PROGBITS",
+      "size": 416,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".rela.sceStub.text",
+      "sh_type": "RELA",
+      "size": 384,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".opd",
+      "sh_type": "PROGBITS",
+      "size": 64,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.opd",
+      "sh_type": "RELA",
+      "size": 384,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".symtab",
+      "sh_type": "SYMTAB",
+      "size": 1176,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".strtab",
+      "sh_type": "STRTAB",
+      "size": 843,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".shstrtab",
+      "sh_type": "STRTAB",
+      "size": 152,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    }
+  ],
+  "opd": {
+    "entry_size": 4,
+    "entries": 16,
+    "descriptors": [
+      {
+        "offset": 0,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleFetchImage",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 4,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 8,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleFinalize",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 12,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 16,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleGetImagesize",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 20,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 24,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleInitialize",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 28,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 32,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleIsLoaded",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 36,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 40,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleLoadModule",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 44,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 48,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleSetMemcontainer",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 52,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 56,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "__cellSysmoduleUnloadModule",
+          "addend": 0
+        }
+      },
+      {
+        "offset": 60,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        }
+      }
+    ]
+  },
+  "stub_text_check": {
+    "has_stwu": false,
+    "stwu_offsets": [],
+    "trampolines": [
+      {
+        "name": "__cellSysmoduleFetchImage",
+        "offset": 0,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      },
+      {
+        "name": "__cellSysmoduleFinalize",
+        "offset": 52,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      },
+      {
+        "name": "__cellSysmoduleGetImagesize",
+        "offset": 104,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      },
+      {
+        "name": "__cellSysmoduleInitialize",
+        "offset": 156,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      },
+      {
+        "name": "__cellSysmoduleIsLoaded",
+        "offset": 208,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      },
+      {
+        "name": "__cellSysmoduleLoadModule",
+        "offset": 260,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      },
+      {
+        "name": "__cellSysmoduleSetMemcontainer",
+        "offset": 312,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      },
+      {
+        "name": "__cellSysmoduleUnloadModule",
+        "offset": 364,
+        "size": 52,
+        "shape": "Ilp32Wrapping",
+        "failures": []
+      }
+    ]
+  }
+}
