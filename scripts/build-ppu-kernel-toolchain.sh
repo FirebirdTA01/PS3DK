@@ -3,9 +3,10 @@
 #
 # Builds:
 #   binutils 2.42  -> $PS3DEV/ppu-kernel
+#   GCC 12.4.0     -> $PS3DEV/ppu-kernel (compiler only, no target runtime)
 #
-# GCC and libgcc are intentionally not wired yet. Invoking those items exits
-# non-zero with a clear message until the kernel target compiler work is gated.
+# libgcc is intentionally not wired yet. Invoking that item exits non-zero
+# with a clear message until the kernel runtime work is gated.
 #
 # Source extraction is via `git archive` from the mirrors cloned by bootstrap.sh.
 # Patches are applied from patches/ppu/<component>/ in the order listed in
@@ -26,6 +27,8 @@ die() { printf "[ppu-kernel] ERROR: %s\n" "$*" >&2; exit 1; }
 
 BINUTILS_TAG="binutils-2_42"
 BINUTILS_VER="2.42"
+GCC_TAG="releases/gcc-12.4.0"
+GCC_VER="12.4.0"
 
 TARGET="powerpc64-ps3-kernel-elf"
 PREFIX="$PS3DEV/ppu-kernel"
@@ -38,7 +41,7 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 say "Using $JOBS parallel jobs."
 
 # CLI: optional --clean wipes build dir; --only <item> runs only that item.
-# Items: binutils | gcc | libgcc (default: all in order; gcc/libgcc are stubs).
+# Items: binutils | gcc | libgcc (default: all in order; libgcc is stubbed).
 ONLY=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -186,8 +189,75 @@ build_binutils() {
 }
 
 build_gcc() {
-    warn "workstream (3) GCC kernel target is not yet implemented; use --only=binutils for the current green path"
-    die "GCC item not implemented"
+    local src="$BUILD/gcc-$GCC_VER-src"
+    local obj="$BUILD/gcc-$GCC_VER-build"
+
+    extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$src"
+    apply_patches "$src" "$PATCHES/gcc-12.x"
+
+    # GCC prereqs: GMP, MPFR, MPC, ISL. Use contrib/download_prerequisites
+    # which drops them as in-tree symlinks.
+    if [[ ! -d "$src/gmp" ]]; then
+        say "Downloading GCC prerequisites (GMP, MPFR, MPC, ISL)"
+        (cd "$src" && ./contrib/download_prerequisites)
+    fi
+
+    # If any GCC patch is newer than the install stamp, rebuild the compiler.
+    if [[ -f "$obj/.installed" ]]; then
+        local newer_patch
+        newer_patch=$(find "$PATCHES/gcc-12.x" \
+            -name "*.patch" -newer "$obj/.installed" 2>/dev/null | head -1)
+        if [[ -n "$newer_patch" ]]; then
+            say "Patch newer than .installed — invalidating GCC compiler build ($newer_patch)"
+            rm -f "$obj/.installed"
+        fi
+    fi
+
+    if [[ -f "$obj/.installed" ]]; then
+        say "GCC already built and installed (skipping)"
+        return 0
+    fi
+
+    mkdir -p "$obj"
+    say "Configuring GCC compiler -> $PREFIX (target=$TARGET, GCC $GCC_VER)"
+
+    local conf_args=(
+        --prefix="$PREFIX"
+        --target="$TARGET"
+        --with-cpu=cell
+        --enable-languages=c,c++
+        --enable-lto
+        --enable-long-double-128
+        --disable-dependency-tracking
+        --disable-libcc1
+        --disable-libssp
+        --disable-libstdcxx-pch
+        --disable-libstdcxx-filesystem-ts
+        --disable-nls
+        --disable-shared
+        --disable-win32-registry
+        --with-system-zlib
+        --without-headers
+    )
+
+    # GCC 12's host-side libcody requires exact C++11.  Newer rolling
+    # hosts can default g++ to C++20-or-later semantics where u8 literals
+    # become char8_t, which libcody does not accept.
+    local target_env=(
+        CXXFLAGS=-std=gnu++11
+        CXXFLAGS_FOR_BUILD=-std=gnu++11
+    )
+
+    (cd "$obj" && \
+        env "${target_env[@]}" \
+        "$src/configure" "${conf_args[@]}")
+
+    say "Building GCC compiler only"
+    (cd "$obj" && make -j"$JOBS" all-gcc)
+
+    say "Installing GCC compiler only"
+    (cd "$obj" && make install-gcc)
+    touch "$obj/.installed"
 }
 
 build_libgcc() {
@@ -200,7 +270,7 @@ build_libgcc() {
 # -----------------------------------------------------------------------------
 
 say "=== PPU kernel-side toolchain ==="
-say "binutils $BINUTILS_VER"
+say "binutils $BINUTILS_VER  gcc $GCC_VER"
 say "prefix=$PREFIX  build=$BUILD"
 [[ -n "$ONLY" ]] && say "Running only: $ONLY"
 
@@ -221,4 +291,7 @@ run_item libgcc
 say "=== Done ==="
 if [[ -x "$PREFIX/bin/$TARGET-as" ]]; then
     "$PREFIX/bin/$TARGET-as" --version | head -1
+fi
+if [[ -x "$PREFIX/bin/$TARGET-gcc" ]]; then
+    "$PREFIX/bin/$TARGET-gcc" --version | head -1
 fi

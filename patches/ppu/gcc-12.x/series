@@ -21,3 +21,6 @@
 0020-cell64lv2-link-lv2-stub.patch
 0021-rs6000-output-toc-pmode.patch
 0022-cell64lv2-cpp-builtins-ilp32.patch
+0023-rs6000-add-ps3kernel64-target-header.patch
+0024-config-gcc-add-ps3-kernel-target.patch
+0025-config-sub-recognize-ps3-kernel-elf.patch

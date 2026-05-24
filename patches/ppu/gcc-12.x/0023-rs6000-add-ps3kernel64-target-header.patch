@@ -1,0 +1,320 @@
+--- a/gcc/config/rs6000/ps3kernel64.h
++++ b/gcc/config/rs6000/ps3kernel64.h
+@@ -0,0 +1,317 @@
++/* Definitions of target machine for GNU compiler,
++   for 64-bit PowerPC PS3 kernel ELF.
++   Copyright (C) 2000-2022 Free Software Foundation, Inc.
++   Copyright (C) 2026 PS3DK toolchain contributors.
++
++   This file is part of GCC.
++
++   GCC is free software; you can redistribute it and/or modify it
++   under the terms of the GNU General Public License as published
++   by the Free Software Foundation; either version 3, or (at your
++   option) any later version.
++
++   GCC is distributed in the hope that it will be useful, but WITHOUT
++   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++   or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
++   License for more details.
++
++   Under Section 7 of GPL version 3, you are granted additional
++   permissions described in the GCC Runtime Library Exception, version
++   3.1, as published by the Free Software Foundation.
++
++   You should have received a copy of the GNU General Public License and
++   a copy of the GCC Runtime Library Exception along with this program;
++   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
++   <http://www.gnu.org/licenses/>.  */
++
++/* -----------------------------------------------------------------------
++   64-bit / bi-arch setup.
++   ----------------------------------------------------------------------- */
++
++#undef	TARGET_64BIT
++#define	TARGET_64BIT 1
++
++#define	DEFAULT_ARCH64_P 1
++#define	RS6000_BI_ARCH_P 0
++
++#ifdef IN_LIBGCC2
++#undef TARGET_64BIT
++#ifdef __powerpc64__
++#define TARGET_64BIT 1
++#else
++#define TARGET_64BIT 0
++#endif
++#endif
++
++#undef	TARGET_AIX
++#define	TARGET_AIX TARGET_64BIT
++
++#ifdef HAVE_LD_NO_DOT_SYMS
++extern int dot_symbols;
++#undef DOT_SYMBOLS
++#define DOT_SYMBOLS dot_symbols
++#endif
++
++#undef TARGET_KEEP_LEAF_WHEN_PROFILED
++#define TARGET_KEEP_LEAF_WHEN_PROFILED rs6000_keep_leaf_when_profiled
++
++/* linux64.opt provides profile_kernel and cmodel variables needed by
++   rs6000_linux64_override_options().  The kernel target does not use
++   kernel profiling, but the variable must exist for the override
++   function to compile.  */
++#define TARGET_PROFILE_KERNEL profile_kernel
++
++#define TARGET_USES_LINUX64_OPT 1
++#ifdef HAVE_LD_LARGE_TOC
++#undef TARGET_CMODEL
++#define TARGET_CMODEL rs6000_current_cmodel
++#define SET_CMODEL(opt) rs6000_current_cmodel = opt
++#else
++#define SET_CMODEL(opt) do {} while (0)
++#endif
++
++/* Start from the big-endian default64.h mask, but make the data model
++   LP64 by default for this target.  Userland keeps -mlp64 as an opt-in. */
++#undef TARGET_DEFAULT
++#define TARGET_DEFAULT (OPTION_MASK_PPC_GFXOPT | OPTION_MASK_PPC_GPOPT \
++			| OPTION_MASK_MFCRF | MASK_POWERPC64 | MASK_64BIT \
++			| OPTION_MASK_LP64)
++
++/* -----------------------------------------------------------------------
++   Cell processor defaults.
++   ----------------------------------------------------------------------- */
++
++#undef  PROCESSOR_DEFAULT
++#define PROCESSOR_DEFAULT PROCESSOR_CELL
++#undef  PROCESSOR_DEFAULT64
++#define PROCESSOR_DEFAULT64 PROCESSOR_CELL
++
++#undef	RS6000_ABI_NAME
++#define	RS6000_ABI_NAME "linux"
++
++#define INVALID_64BIT "%<-m%s%> not supported in this configuration"
++#define INVALID_32BIT INVALID_64BIT
++
++#ifdef LINUX64_DEFAULT_ABI_ELFv2
++#define ELFv2_ABI_CHECK (rs6000_elf_abi != 1)
++#else
++#define ELFv2_ABI_CHECK (rs6000_elf_abi == 2)
++#endif
++
++#undef	SUBSUBTARGET_OVERRIDE_OPTIONS
++#define	SUBSUBTARGET_OVERRIDE_OPTIONS				\
++  do								\
++    {								\
++      rs6000_linux64_override_options ();			\
++      if (!TARGET_LP64)					\
++	error ("%<-mno-lp64%> not supported in this configuration"); \
++    }								\
++  while (0)
++
++/* -----------------------------------------------------------------------
++   Assembler / linker specs.
++   ----------------------------------------------------------------------- */
++
++#undef	ASM_DEFAULT_SPEC
++#undef	ASM_SPEC
++#undef	LINK_OS_PS3KERNEL_SPEC
++#undef	LINK_SECURE_PLT_SPEC
++
++#define	ASM_DEFAULT_SPEC "-mcell"
++#define	ASM_SPEC	 "-a64 %(asm_spec_common)"
++#define	LINK_OS_PS3KERNEL_SPEC "-m elf64ppc"
++#define	LINK_SECURE_PLT_SPEC ""
++
++#define ASM_SPEC_COMMON "%(asm_cpu) \
++%{,assembler|,assembler-with-cpp: %{mregnames} %{mno-regnames}}" \
++  ENDIAN_SELECT(" -mbig", " -mlittle", DEFAULT_ASM_ENDIAN)
++
++#undef	SUBSUBTARGET_EXTRA_SPECS
++#define SUBSUBTARGET_EXTRA_SPECS \
++  { "asm_spec_common",		ASM_SPEC_COMMON },			\
++  { "link_os_ps3kernel",	LINK_OS_PS3KERNEL_SPEC },		\
++  { "cpp_os_ps3kernel",	CPP_OS_PS3KERNEL_SPEC },
++
++#undef  CPP_OS_DEFAULT_SPEC
++#define CPP_OS_DEFAULT_SPEC "%(cpp_os_ps3kernel)"
++
++#undef  LINK_SHLIB_SPEC
++#define LINK_SHLIB_SPEC "%{shared:-shared} %{!shared: %{static:-static}}"
++
++#undef  LIB_DEFAULT_SPEC
++#define LIB_DEFAULT_SPEC ""
++
++#undef  STARTFILE_DEFAULT_SPEC
++#define STARTFILE_DEFAULT_SPEC ""
++
++#undef	ENDFILE_DEFAULT_SPEC
++#define ENDFILE_DEFAULT_SPEC ""
++
++#undef	LINK_START_DEFAULT_SPEC
++#define LINK_START_DEFAULT_SPEC ""
++
++#undef	LINK_OS_DEFAULT_SPEC
++#define LINK_OS_DEFAULT_SPEC "%(link_os_ps3kernel)"
++
++#define CPP_OS_PS3KERNEL_SPEC ""
++
++#undef	MULTILIB_DEFAULTS
++#define MULTILIB_DEFAULTS { "" }
++
++/* -----------------------------------------------------------------------
++   64-bit-only overrides.
++   ----------------------------------------------------------------------- */
++
++#undef  TARGET_HAS_TOC
++#define	TARGET_HAS_TOC		1
++
++#undef	OPTION_RELOCATABLE
++#define	OPTION_RELOCATABLE	0
++#undef	OPTION_EABI
++#define	OPTION_EABI		0
++#undef	OPTION_PROTOTYPE
++#define	OPTION_PROTOTYPE	0
++#undef RELOCATABLE_NEEDS_FIXUP
++#define RELOCATABLE_NEEDS_FIXUP 0
++
++#define NO_PROFILE_COUNTERS 1
++#define PROFILE_HOOK(LABEL) \
++  do { if (TARGET_64BIT) output_profile_hook (LABEL); } while (0)
++
++#undef  JUMP_TABLES_IN_TEXT_SECTION
++#define JUMP_TABLES_IN_TEXT_SECTION TARGET_64BIT
++
++#define AGGREGATE_PADDING_FIXED TARGET_64BIT
++#define AGGREGATES_PAD_UPWARD_ALWAYS 0
++
++#define BLOCK_REG_PADDING(MODE, TYPE, FIRST) \
++  (!(FIRST) ? PAD_UPWARD : targetm.calls.function_arg_padding (MODE, TYPE))
++
++#define OS_MISSING_POWERPC64 !TARGET_64BIT
++
++/* -----------------------------------------------------------------------
++   Preprocessor defines.
++   ----------------------------------------------------------------------- */
++
++#undef  TARGET_OS_CPP_BUILTINS
++#define TARGET_OS_CPP_BUILTINS()			\
++  do							\
++    {							\
++      builtin_define ("__PPU__");			\
++      builtin_define ("__PPC__");			\
++      builtin_define ("__PPC64__");			\
++      builtin_define ("__powerpc__");			\
++      builtin_define ("__powerpc64__");		\
++      builtin_define ("__PS3_KERNEL__");		\
++      builtin_define ("__PS3_KERNEL_ELF__");		\
++      builtin_define ("__LP64__");			\
++      builtin_define ("_LP64");			\
++      if (!DOT_SYMBOLS)				\
++	builtin_define ("_CALL_LINUX");			\
++      builtin_assert ("cpu=powerpc64");		\
++      builtin_assert ("machine=powerpc64");		\
++    }							\
++  while (0)
++
++/* -----------------------------------------------------------------------
++   Endian / emulation.
++   ----------------------------------------------------------------------- */
++
++#undef  DEFAULT_ASM_ENDIAN
++#if (TARGET_DEFAULT & MASK_LITTLE_ENDIAN)
++#define DEFAULT_ASM_ENDIAN " -mlittle"
++#else
++#define DEFAULT_ASM_ENDIAN " -mbig"
++#endif
++
++/* -----------------------------------------------------------------------
++   TOC / constant pool.
++   ----------------------------------------------------------------------- */
++
++#undef  TOC_SECTION_ASM_OP
++#define TOC_SECTION_ASM_OP \
++  (TARGET_64BIT						\
++   ? "\t.section\t\".toc\",\"aw\""			\
++   : "\t.section\t\".got\",\"aw\"")
++
++#undef  MINIMAL_TOC_SECTION_ASM_OP
++#define MINIMAL_TOC_SECTION_ASM_OP \
++  (TARGET_64BIT						\
++   ? "\t.section\t\".toc1\",\"aw\""			\
++   : (flag_pic						\
++      ? "\t.section\t\".got2\",\"aw\""			\
++      : "\t.section\t\".got1\",\"aw\""))
++
++/* -----------------------------------------------------------------------
++   Type widths.
++   ----------------------------------------------------------------------- */
++
++#undef	SIZE_TYPE
++#define	SIZE_TYPE "long unsigned int"
++
++#undef	PTRDIFF_TYPE
++#define	PTRDIFF_TYPE "long int"
++
++#undef	WCHAR_TYPE
++#define	WCHAR_TYPE "int"
++#undef  WCHAR_TYPE_SIZE
++#define WCHAR_TYPE_SIZE 32
++
++#undef  LONG_TYPE_SIZE
++#define LONG_TYPE_SIZE 64
++
++/* -----------------------------------------------------------------------
++   Debug / EH / ABI helpers.
++   ----------------------------------------------------------------------- */
++
++#undef  RS6000_MCOUNT
++#define RS6000_MCOUNT "_mcount"
++
++#undef  SAVE_FP_PREFIX
++#define SAVE_FP_PREFIX (TARGET_64BIT ? "._savef" : "_savefpr_")
++#undef  SAVE_FP_SUFFIX
++#define SAVE_FP_SUFFIX ""
++#undef  RESTORE_FP_PREFIX
++#define RESTORE_FP_PREFIX (TARGET_64BIT ? "._restf" : "_restfpr_")
++#undef  RESTORE_FP_SUFFIX
++#define RESTORE_FP_SUFFIX ""
++
++#undef  PREFERRED_DEBUGGING_TYPE
++#define PREFERRED_DEBUGGING_TYPE DWARF2_DEBUG
++
++#undef	ASM_DECLARE_FUNCTION_SIZE
++#define	ASM_DECLARE_FUNCTION_SIZE(FILE, FNAME, DECL)			\
++  do									\
++    {									\
++      if (!flag_inhibit_size_directive)					\
++	{								\
++	  fputs ("\t.size\t", (FILE));					\
++	  if (TARGET_64BIT && DOT_SYMBOLS)				\
++	    putc ('.', (FILE));						\
++	  assemble_name ((FILE), (FNAME));				\
++	  fputs (",.-", (FILE));					\
++	  rs6000_output_function_entry (FILE, FNAME);			\
++	  putc ('\n', (FILE));						\
++	}								\
++    }									\
++  while (0)
++
++#undef	ASM_PREFERRED_EH_DATA_FORMAT
++#define	ASM_PREFERRED_EH_DATA_FORMAT(CODE, GLOBAL) \
++  (TARGET_64BIT || flag_pic						\
++   ? (((GLOBAL) ? DW_EH_PE_indirect : 0) | DW_EH_PE_pcrel		\
++      | DW_EH_PE_udata8)						\
++   : DW_EH_PE_absptr)
++
++#undef DRAFT_V4_STRUCT_RET
++#define DRAFT_V4_STRUCT_RET (!TARGET_64BIT)
++
++#ifdef TARGET_DEFAULT_LONG_DOUBLE_128
++#define RS6000_DEFAULT_LONG_DOUBLE_SIZE 128
++#endif
++
++#define STACK_CHECK_STATIC_BUILTIN 1
++#define STACK_CHECK_PROTECT (TARGET_64BIT ? 16 * 1024 : 12 * 1024)
++
++#undef	TARGET_FLOAT128_ENABLE_TYPE
++#define TARGET_FLOAT128_ENABLE_TYPE 1
