@@ -1,0 +1,139 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000-logue: save GPRs in DImode under TARGET_64BIT
+
+rs6000 prologue and epilogue expansion currently use Pmode as the
+machine mode for saving and restoring callee-saved general-purpose
+registers.  That is valid for normal 32-bit or 64-bit ABIs where Pmode
+matches the full GPR preservation width, but it is wrong for the PS3
+ELF64/ILP32 hybrid where TARGET_64BIT is true and Pmode is SImode.
+
+In that hybrid ABI, 64-bit values can legally live in nonvolatile GPRs
+across calls.  libstdc++'s ostreambuf_iterator by-value path is one
+example: the iterator is carried as a DImode aggregate, with the
+streambuf pointer in the high 32 bits.  If a nested callee saves a
+nonvolatile GPR with `stw' and restores it with `lwz', the high 32 bits
+are dropped and the caller observes a NULL streambuf after unpacking the
+aggregate.
+
+The stack layout already allocates 8 bytes per saved GPR whenever
+TARGET_64BIT is true.  Keep Pmode for stack/frame/LR address arithmetic,
+but use DImode for the GPR save/restore register mode under TARGET_64BIT.
+This emits full-width `std'/'ld' callee-save traffic and keeps the CFA
+notes consistent with the saved register width.  LR, TOC, FPR, and vector
+save paths are unchanged.
+
+--- a/gcc/config/rs6000/rs6000-logue.cc
++++ b/gcc/config/rs6000/rs6000-logue.cc
+@@ -2772,6 +2772,7 @@
+ 				      : STACK_POINTER_REGNUM);
+ 
+   machine_mode reg_mode = Pmode;
++  machine_mode gp_reg_mode = TARGET_64BIT ? DImode : Pmode;
+   int reg_size = TARGET_32BIT ? 4 : 8;
+   machine_mode fp_reg_mode = TARGET_HARD_FLOAT ? DFmode : SFmode;
+   int fp_reg_size = 8;
+@@ -2812,7 +2813,7 @@
+     {
+       if (bitmap_bit_p (components, i))
+ 	{
+-	  rtx reg = gen_rtx_REG (reg_mode, i);
++	  rtx reg = gen_rtx_REG (gp_reg_mode, i);
+ 	  rtx_insn *insn = emit_insn (gen_frame_store (reg, ptr_reg, offset));
+ 	  RTX_FRAME_RELATED_P (insn) = 1;
+ 	  rtx set = copy_rtx (single_set (insn));
+@@ -2852,6 +2853,7 @@
+ 				      : STACK_POINTER_REGNUM);
+ 
+   machine_mode reg_mode = Pmode;
++  machine_mode gp_reg_mode = TARGET_64BIT ? DImode : Pmode;
+   int reg_size = TARGET_32BIT ? 4 : 8;
+ 
+   machine_mode fp_reg_mode = TARGET_HARD_FLOAT ? DFmode : SFmode;
+@@ -2884,7 +2886,7 @@
+     {
+       if (bitmap_bit_p (components, i))
+ 	{
+-	  rtx reg = gen_rtx_REG (reg_mode, i);
++	  rtx reg = gen_rtx_REG (gp_reg_mode, i);
+ 	  rtx_insn *insn = emit_insn (gen_frame_load (reg, ptr_reg, offset));
+ 	  RTX_FRAME_RELATED_P (insn) = 1;
+ 	  add_reg_note (insn, REG_CFA_RESTORE, reg);
+@@ -3011,6 +3013,7 @@
+ {
+   rs6000_stack_t *info = rs6000_stack_info ();
+   machine_mode reg_mode = Pmode;
++  machine_mode gp_reg_mode = TARGET_64BIT ? DImode : Pmode;
+   int reg_size = TARGET_32BIT ? 4 : 8;
+   machine_mode fp_reg_mode = TARGET_HARD_FLOAT ? DFmode : SFmode;
+   int fp_reg_size = 8;
+@@ -3170,7 +3173,7 @@
+ 			     info->altivec_save_offset + frame_off + 16 * i);
+       for (i = 0; i < 32 - info->first_gp_reg_save; i++)
+ 	RTVEC_ELT (p, j++)
+-	  = gen_frame_store (gen_rtx_REG (reg_mode, info->first_gp_reg_save + i),
++	  = gen_frame_store (gen_rtx_REG (gp_reg_mode, info->first_gp_reg_save + i),
+ 			     frame_reg_rtx,
+ 			     info->gp_save_offset + frame_off + reg_size * i);
+ 
+@@ -3404,7 +3407,7 @@
+       p = rtvec_alloc (32 - info->first_gp_reg_save);
+       for (i = 0; i < 32 - info->first_gp_reg_save; i++)
+ 	RTVEC_ELT (p, i)
+-	  = gen_frame_store (gen_rtx_REG (reg_mode, info->first_gp_reg_save + i),
++	  = gen_frame_store (gen_rtx_REG (gp_reg_mode, info->first_gp_reg_save + i),
+ 			     frame_reg_rtx,
+ 			     info->gp_save_offset + frame_off + reg_size * i);
+       insn = emit_insn (gen_rtx_PARALLEL (VOIDmode, p));
+@@ -3418,7 +3421,7 @@
+ 	{
+ 	  if (save_reg_p (i)
+ 	      && !cfun->machine->gpr_is_wrapped_separately[i])
+-	    emit_frame_save (frame_reg_rtx, reg_mode, i, offset,
++	    emit_frame_save (frame_reg_rtx, gp_reg_mode, i, offset,
+ 			     sp_off - frame_off);
+ 
+ 	  offset += reg_size;
+@@ -4277,6 +4280,7 @@
+   rtx insn;
+   rtx cr_save_reg = NULL_RTX;
+   machine_mode reg_mode = Pmode;
++  machine_mode gp_reg_mode = TARGET_64BIT ? DImode : Pmode;
+   int reg_size = TARGET_32BIT ? 4 : 8;
+   machine_mode fp_reg_mode = TARGET_HARD_FLOAT ? DFmode : SFmode;
+   int fp_reg_size = 8;
+@@ -4377,7 +4381,7 @@
+       int i;
+       for (i = 0; i < 32 - info->first_gp_reg_save; i++)
+ 	{
+-	  rtx reg = gen_rtx_REG (reg_mode, info->first_gp_reg_save + i);
++	  rtx reg = gen_rtx_REG (gp_reg_mode, info->first_gp_reg_save + i);
+ 	  RTVEC_ELT (p, j++)
+ 	    = gen_frame_load (reg,
+ 			      frame_reg_rtx, info->gp_save_offset + reg_size * i);
+@@ -4897,7 +4901,7 @@
+       p = rtvec_alloc (32 - info->first_gp_reg_save);
+       for (i = 0; i < 32 - info->first_gp_reg_save; i++)
+ 	RTVEC_ELT (p, i)
+-	  = gen_frame_load (gen_rtx_REG (reg_mode, info->first_gp_reg_save + i),
++	  = gen_frame_load (gen_rtx_REG (gp_reg_mode, info->first_gp_reg_save + i),
+ 			    frame_reg_rtx,
+ 			    info->gp_save_offset + frame_off + reg_size * i);
+       emit_insn (gen_rtx_PARALLEL (VOIDmode, p));
+@@ -4910,7 +4914,7 @@
+ 	  if (save_reg_p (i)
+ 	      && !cfun->machine->gpr_is_wrapped_separately[i])
+ 	    {
+-	      rtx reg = gen_rtx_REG (reg_mode, i);
++	      rtx reg = gen_rtx_REG (gp_reg_mode, i);
+ 	      emit_insn (gen_frame_load (reg, frame_reg_rtx, offset));
+ 	    }
+ 
+@@ -4953,7 +4957,7 @@
+ 	if (save_reg_p (i)
+ 	    && !cfun->machine->gpr_is_wrapped_separately[i])
+ 	  {
+-	    rtx reg = gen_rtx_REG (reg_mode, i);
++	    rtx reg = gen_rtx_REG (gp_reg_mode, i);
+ 	    cfa_restores = alloc_reg_note (REG_CFA_RESTORE, reg, cfa_restores);
+ 	  }
+     }

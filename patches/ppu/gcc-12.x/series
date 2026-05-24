@@ -29,3 +29,4 @@
 0028-rs6000-cc-tls-base-register.patch
 0029-gcc-convert-pointer-cast-unsigned-intermediate.patch
 0030-gcc-expr-canonicalize-pointer-plus-offset-hybrid.patch
+0031-rs6000-logue-callee-save-dimode.patch
