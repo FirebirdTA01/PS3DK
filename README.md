@@ -33,7 +33,7 @@ is ours.
 | GCC (PPU) | **12.4.0** | `powerpc64-ps3-elf` | PowerPC 64 cross-compiler for the PPE |
 | GCC (SPU) | **9.5.0** | `spu-elf` | Cross-compiler for the SPE's SPU cores + `libgcc` cache manager |
 | Binutils | **2.42** | both targets | Assembler, linker, `ar` / `objcopy` / `nm` / `strip` for both PPU and SPU; `spu-elf` ships upstream intact |
-| Newlib | **4.4.0.20231231** | both targets | C standard library + PS3 `libsysbase` / `libgloss` lv2 syscall glue (CRT0, `_write_r` / `_sbrk_r` / `_read_r` etc.) |
+| Newlib | **4.4.0** | both targets | C standard library + PS3 `libsysbase` / `libgloss` lv2 syscall glue (CRT0, `_write_r` / `_sbrk_r` / `_read_r` etc.) |
 | GDB | **14.2** | PPU | Debugger for RPCS3's gdbstub and (eventually) real-hardware targets |
 | PSL1GHT (v3) | main | PPU + SPU runtime | Homebrew runtime rebased for cell-SDK-style naming; source-compat shim keeps PSL1GHT-targeted homebrew building |
 | portlibs | current stable | PPU | zlib 1.3.1, libpng 1.6.43, SDL2 2.30, libcurl 8.9, mbedTLS 3.6, etc. |
@@ -44,70 +44,46 @@ is ours.
 - **PPU at GCC 12.4.0.** 12.x is the highest line that rebases onto the PSL1GHT PPU patch set without middle-end churn bleeding into the backend.  12.4.0 gives full **C++17**, substantially complete **C++20**, and partial **C++23** (`-std=c++2b`).  libstdc++ ships with ranges, `<format>`, concepts, coroutines, most of the parallel algorithms, and the `<chrono>` calendar/time-zone surface.
 - **SPU at GCC 9.5.0.** 9.5.0 is the **last upstream GCC that still ships a working Cell SPE backend** — GCC 10 removed `gcc/config/spu/`, `libgcc/config/spu/`, the SPU intrinsic headers, and the SPU test suite outright (≈34 000 lines total).  9.5.0 gives full **C++17** (core language + libstdc++).  C++20 support is **early / partial**: some constexpr extensions, aggregate-init fixes, three-way-comparison groundwork, and experimental `-std=c++2a` are in; the bulk of C++20 (finalised concepts, ranges, `<format>`, spaceship library, `constinit` / `consteval`, modules, coroutines) landed in GCC 10+ and is **not** available on SPU today.  Usability is constrained mostly by the 256 KiB local-store budget rather than the compiler version: libstdc++ headers are available but feature selection is pragmatic (no RTTI / no exceptions / `-Os` by default).
 
-### True 64-bit PPU ABI
+### PPU pointer model (ELF64 + ILP32 default, LP64 multilib)
 
-The PPE is a 64-bit core, but the original PS3 runtime configured GCC
-for an effectively-32-bit pointer ABI — naked `void *`, `int *`,
-`T *` were 4 bytes everywhere by default, function arguments and
-locals included.  Our toolchain takes the modern path:
-`powerpc64-ps3-elf-gcc` is genuinely 64-bit, so naked pointers are
-8 bytes everywhere.
+The default `powerpc64-ps3-elf-gcc` invocation produces **ELF64
+binaries with 32-bit C pointers** (`sizeof(void *) == 4`), matching
+the reference cell SDK's compact OPD + ADDR32 TOC layout.  This is
+the ABI the reference SPRX runtime, lv2 syscall layer, CRT0 chain,
+and existing PS3 binaries expect — code written for older SDKs
+generally builds without `-fpermissive` and the published struct
+layouts (`cell/*.h`) match the kernel's expectations byte-for-byte.
+
+For code that wants a genuinely wide pointer model — modern
+libstdc++ headers (which assume `sizeof(size_t) == sizeof(void *)`),
+address-sanitiser parity, or just simpler `intptr_t` math — pass
+**`-mlp64`** to opt into the LP64 multilib.  The full runtime tree
+(`lv2-crt1.o`, `lv2-sprx.o`, `liblv2.a`, nidgen-emitted stub
+archives, `librsx`) is built for both data models by
+`make -C sdk install`; sample CMake builds pick the right variant
+automatically based on the `-mlp64` flag.
 
 The PRX boundary, LV2 syscall register layout, OPD format, FNID
-hashing, `_OPENSPRX_*` import shape, struct-field ABI — every
-published interface still speaks the documented 32-bit-effective-
-address conventions.  We satisfy them through `ATTRIBUTE_PRXPTR`
-(= `__attribute__((mode(SI)))`) on the specific struct fields that
-cross the SPRX boundary, while keeping naked pointers in user code
-as 64 bits.  Memory-container ids, event-queue ids, and other LV2
-handles are all 64 bits as the kernel specifies.  The `abi-verify`
-harness pins eight invariants and runs on every build.
+hashing, `_OPENSPRX_*` import shape, and struct-field ABI all speak
+the documented 32-bit-effective-address conventions regardless of
+which user-code data model is selected.  Pointer fields in `cell/*.h`
+structs that cross the SPRX boundary are tagged
+`ATTRIBUTE_PRXPTR` (= `__attribute__((mode(SI)))`); width-sensitive
+integers in those structs (`size_t`, `ptrdiff_t`, `off_t`) are
+declared as `uint32_t` directly.  Memory-container ids,
+event-queue ids, and other LV2 handles are 64 bits as the kernel
+specifies.
 
-What this means for code written for older SDKs (anything that
-assumed the historical PPU32 setup — `void *` as 4 bytes, casts
-between `int` and pointer treated as no-ops):
-
-- **`(int)void *` and `(void *)int` casts now lose precision.**  GCC
-  flags them under `-Wconversion` / `-Wint-to-pointer-cast` /
-  `-Wpointer-to-int-cast`.  The fix is to widen the local to
-  `intptr_t` / `uintptr_t` (or `long`).  Adding `-fpermissive` to
-  the build downgrades the diagnostics to warnings so the build
-  proceeds — the casts are well-defined when the pointer fits in
-  32 bits, which it does for in-process pointers on PS3 hardware
-  (LPAR memory map tops out at ~256 MiB main + 256 MiB RSX).  Use
-  `-fpermissive` when porting code written for older SDKs; use the
-  widened type when writing new code.
-- **`(uint32_t)(ptr->member) - (uint32_t)(ptr)` computes a
-  struct-field byte offset and assumes `sizeof(void *) == 4`.**  This
-  pattern is common in older PS3 code that computes a per-attribute
-  offset from a vertex-buffer base.  On PPU64 the subtractions
-  themselves are correct when both pointers reside in the same 4 GiB
-  segment (always true on PS3 hardware), but the intermediate
-  `(uint32_t)` truncation triggers `-Wpointer-to-int-cast`.
-  **Fix:** widen the intermediate to `size_t` — e.g.
-  `(uint32_t)((size_t)ptr->member - (size_t)ptr)` — which silences
-  the warning and stays correct even if the address range ever
-  extends past 32 bits.
-- **`sizeof(void *) == 8`, not 4.**  Structs that hand-roll padding
-  with `int padX[N]` after a pointer field need to be inspected.  If
-  the struct crosses the SPRX boundary, tag the pointer field
-  `ATTRIBUTE_PRXPTR` and the layout matches the kernel's expectations
-  exactly.  If it stays in-process, just let it be 8 bytes.
-- **Function pointers (e.g., callback typedefs in struct fields) are
-  also 8 bytes.**  Same `ATTRIBUTE_PRXPTR` tag if the field crosses
-  to a SPRX.  Our `cell/*.h` shipped struct definitions already do
-  this for every cross-SPRX pointer.
-- **`-m32` doesn't apply.**  GCC's PPC64 backend doesn't support a
-  silent 32-bit-pointer mode the way x86_64 does.  PPU32 on the PS3
-  was a downstream patch, not an upstream feature.  `intptr_t` /
-  `uintptr_t` / `ATTRIBUTE_PRXPTR` are the migration path.
-
-The trade is intentional: full 64-bit `size_t`, address sanitiser
-sanity, modern libstdc++ headers (which assume `sizeof(size_t) ==
-sizeof(void *)`), and a single PPU64 + SPU code-generation matrix.
-The cost is some `-fpermissive` flags when porting code written for
-older SDKs — and that cost is bounded to the casts; types and ABI
-stay clean.
+The **`abi-verify`** harness runs on every install and enforces the
+documented Cell Lv-2 invariants: ELF64 / PowerPC64 / big-endian
+class, OS/ABI byte, `e_flags = 0`, compact 8-byte `.opd` entries
+with the ADDR32 + TLSGD-tail pair, `.sys_proc_prx_param` magic +
+size, data-model-consistent `.toc` reloc stride
+(`R_PPC64_ADDR32`/4 under ILP32, `R_PPC64_ADDR64`/8 under LP64,
+no mixing), and the per-ABI `.sceStub.text` trampoline shape
+(frame-less wrapping `bctrl` for ILP32, bare tail-call `bctr` for
+LP64).  See `docs/abi/cellos-lv2-abi-spec.md` for the full
+contract.
 
 ### Upgrade roadmap
 
@@ -152,23 +128,39 @@ Active development; toolchain and core SDK are usable end-to-end.
 
 - **Toolchain (PPU + SPU):** built and validated.  Both cross-compilers,
   `binutils`, `newlib`, and PPU `gdb` produce working artefacts; the SPU
-  GCC 9.5.0 fork is patched and stable on `spu-elf`.
-- **SDK surface:** 41.6% of the reference cell-SDK export set across 98
-  libraries (1981 / 4758 symbols), driven by the NID/FNID database and
+  GCC 9.5.0 fork is patched and stable on `spu-elf`.  Default PPU ABI is
+  ELF64+ILP32; `-mlp64` opts into the LP64 multilib (runtime-functional
+  as of v0.8.0).
+- **SDK surface:** 58.3% of the reference cell-SDK export set across 99
+  libraries (2794 / 4796 symbols), driven by the NID/FNID database and
   the stub-archive pipeline.  Several subsystems are at 100% — `libaudio`,
   `libgcm_sys` (with legacy-name shims), `libio` (pad/kb/mouse), `libc`,
   `liblv2`, `libspurs` (PPU + SPU task runtime), `libsysutil_audio_out`,
-  and a dozen more.  See `docs/coverage.md` for the full matrix.
+  `libfiber`, `libdmux`, and many more.  Native off-PSL1GHT
+  `sysutil`/`video`/`liblv2`/`librsx` archives ship as the default
+  for both ABIs.  See `docs/coverage.md` for the full matrix.
 - **Runtime path:** native compact-OPD ELFv1 LV2 runtime (`runtime/lv2/`)
   ships and is the default for new PPU samples; PSL1GHT's runtime stays
-  available as a fallback.  Compact `.opd` (8-byte descriptors) is end-
-  to-end runnable in RPCS3 with full `printf` output.
-- **Samples:** 34 samples build successfully and a representative subset
-  (cellGcm rendering, cellAudio playback, cellPad input, Spurs taskset
-  + SPU task, lv2 event-flag with PPU↔SPU sync, sysutil callbacks,
-  msgdialog, savedata, gamedata, screenshot, l10n, jpg/png decode,
-  cellGcmDbgFont) runs end-to-end in RPCS3.
-- **rsx-cg-compiler:** 57/57 test shaders byte-identical to the
+  available as a fallback.  Compact `.opd` (8-byte descriptors) is
+  end-to-end runnable in RPCS3 with full `printf` output under both
+  ILP32 (default) and LP64 (`-mlp64`).
+- **Install contract:** `make -C sdk install` is the single user-facing
+  step that produces a consistent installed stage — headers, multilib
+  stub archives, native multilib `liblv2.a`, `libsysutil.a` symlink
+  aliases, and a manifest at `$PS3DK/.ps3dk-install-manifest`.
+  `cmake/ps3-self.cmake` fails CMake configure if the manifest is
+  missing or stale, so sample builds never silently consume a stale
+  installed SDK.  `make -C sdk verify-install` is a fast no-rebuild
+  assertion of the same invariants.
+- **Samples:** 91 samples in-tree; 87/87 of the v0.7.x RPCS3-validated
+  subset (cellGcm rendering, cellAudio playback, cellPad input, Spurs
+  taskset + SPU task, lv2 event-flag with PPU↔SPU sync, sysutil
+  callbacks, msgdialog, savedata, gamedata, screenshot, l10n, jpg/png
+  decode, cellGcmDbgFont, etc.) passes under the default ILP32 hybrid
+  path.  Under `-mlp64` the toolchain sample tier is 7/7 RAN-CLEAN
+  and a cross-category sweep (audio / codec / lv2 / gcm / sysutil) is
+  clean with no LP64-specific regressions against the ILP32 baseline.
+- **rsx-cg-compiler:** 96/97 test shaders byte-identical to the
   reference Cg compiler at `--O2 --fastmath`. See "Optional: rsx-cg-compiler"
   below for what's covered.
 
@@ -534,7 +526,7 @@ Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub 
 
 `tools/rsx-cg-compiler/` is a clean-room Cg → RSX (NV40) shader compiler we're growing as an eventual drop-in replacement for PSL1GHT's `cgcomp`.
 
-**It is experimental and growing.** The byte-diff harness against the reference Cg compiler at `--O2 --fastmath` reports **46 / 46 shaders byte-identical** today, covering vertex passthrough, MVP transforms, struct-flattened VP inputs, FP arithmetic + MAD fusion, saturation + fp16 precision, dot products, min/max, abs/neg, TXP (projective texture), samplerCUBE, the full Select scope (all 6 compare ops × all lanes × uniform/literal/varying RHS, ternary, if-only and if-else diamonds via if-conversion), and the SFU unaries `length` / `normalize` / `rcp` / `rsqrt`.  Open gaps: `for`/`while` loops (blocked on loop-carry SSA in the IR builder), multi-instruction if/else diamonds (only single-`stout` branches if-convert today), and varying-default if-only.  For production shader builds the recommendation is still PSL1GHT's `cgcomp` until the loop work lands; the `hello-ppu-cellgcm-triangle` sample can opt into our compiler with `make USE_RSX_CG_COMPILER=1` and renders byte-identically end-to-end in RPCS3.
+**It is experimental and growing.** The byte-diff harness against the reference Cg compiler at `--O2 --fastmath` reports **96 / 97 shaders byte-identical** today, covering vertex passthrough, MVP transforms, struct-flattened VP inputs and file-scope `: register(CN)` uniforms, FP arithmetic + MAD fusion (including per-lane MAD interleave and chained matvecmul), saturation + fp16 precision, dot products, min/max, abs/neg, TXP (projective texture), samplerCUBE, the full Select scope (all 6 compare ops × all lanes × uniform/literal/varying RHS, ternary, if-only and if-else diamonds via if-conversion), the SFU unaries `length` / `normalize` / `rcp` / `rsqrt` / `cos` / `sin` / `reflect`, FP intrinsic chaining + dot-pack family, FP uniform-condition if-conversion with CC-blend emit, IR-level constant folding, and FP tex-LHS write-back via VecInsert lowering.  Open gaps: `for`/`while` loops (blocked on loop-carry SSA in the IR builder).  For production shader builds the recommendation is still PSL1GHT's `cgcomp` until the loop work lands; the `hello-ppu-cellgcm-triangle` sample can opt into our compiler with `make USE_RSX_CG_COMPILER=1` and renders byte-identically end-to-end in RPCS3.
 
 To build it:
 
