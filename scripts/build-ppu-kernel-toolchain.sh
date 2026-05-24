@@ -3,10 +3,10 @@
 #
 # Builds:
 #   binutils 2.42  -> $PS3DEV/ppu-kernel
-#   GCC 12.4.0     -> $PS3DEV/ppu-kernel (compiler only, no target runtime)
+#   GCC 12.4.0     -> $PS3DEV/ppu-kernel
+#   libgcc         -> $PS3DEV/ppu-kernel/lib/gcc/powerpc64-ps3-kernel-elf/12.4.0/libgcc.a
 #
-# libgcc is intentionally not wired yet. Invoking that item exits non-zero
-# with a clear message until the kernel runtime work is gated.
+# libgcc is built separately from the compiler-only GCC install.
 #
 # Source extraction is via `git archive` from the mirrors cloned by bootstrap.sh.
 # Patches are applied from patches/ppu/<component>/ in the order listed in
@@ -261,8 +261,41 @@ build_gcc() {
 }
 
 build_libgcc() {
-    warn "workstream (4) kernel libgcc is not yet implemented; use --only=binutils for the current green path"
-    die "libgcc item not implemented"
+    local src="$BUILD/gcc-$GCC_VER-src"
+    local obj="$BUILD/gcc-$GCC_VER-build"
+    local libgcc_obj="$obj/$TARGET/libgcc"
+
+    extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$src"
+    apply_patches "$src" "$PATCHES/gcc-12.x"
+
+    if [[ ! -f "$obj/Makefile" || ! -x "$PREFIX/bin/$TARGET-gcc" ]]; then
+        say "GCC compiler tree is missing; building compiler before libgcc"
+        build_gcc
+    fi
+
+    if [[ -f "$libgcc_obj/.installed" ]]; then
+        local newer_patch
+        newer_patch=$(find "$PATCHES/gcc-12.x" \
+            -name "*.patch" -newer "$libgcc_obj/.installed" 2>/dev/null | head -1)
+        if [[ -n "$newer_patch" ]]; then
+            say "Patch newer than libgcc install stamp - invalidating libgcc ($newer_patch)"
+            rm -rf "$libgcc_obj"
+        fi
+    fi
+
+    if [[ -f "$libgcc_obj/.installed" ]]; then
+        say "libgcc already built and installed (skipping)"
+        return 0
+    fi
+
+    [[ -f "$obj/Makefile" ]] || die "GCC build directory is not configured: $obj"
+
+    say "Building target libgcc"
+    (cd "$obj" && make -j"$JOBS" all-target-libgcc)
+
+    say "Installing target libgcc"
+    (cd "$obj" && make install-target-libgcc)
+    touch "$libgcc_obj/.installed"
 }
 
 # -----------------------------------------------------------------------------
