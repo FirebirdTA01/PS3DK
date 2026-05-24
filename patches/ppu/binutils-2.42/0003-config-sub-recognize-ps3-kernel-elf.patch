@@ -1,0 +1,28 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] config.sub: recognize ps3-kernel ELF target
+
+Recognize the parallel kernel-side PPU target as a freestanding ELF
+configuration during config.sub canonicalization.  The binutils
+backend configuration already maps the canonical target through the
+standard PowerPC64 ELF catchalls; this change only lets configure
+reach those tables.
+
+--- a/config.sub
++++ b/config.sub
+@@ -1821,6 +1821,16 @@ case $kernel-$os-$obj in
+ 	linux-gnu*- | linux-dietlibc*- | linux-android*- | linux-newlib*- \
+ 		   | linux-musl*- | linux-relibc*- | linux-uclibc*- | linux-mlibc*- )
+ 		;;
++	kernel--elf)
++		case $cpu-$vendor in
++			powerpc64-ps3)
++				;;
++			*)
++				echo "Invalid configuration '$1': Kernel '$kernel' not known to work with OS '$os'." 1>&2
++				exit 1
++				;;
++		esac
++		;;
+ 	uclinux-uclibc*- )
+ 		;;
+ 	managarm-mlibc*- | managarm-kernel*- )
