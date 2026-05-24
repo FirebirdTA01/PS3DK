@@ -1,0 +1,28 @@
+rs6000: allow PS3 targets to use GNU save/restore helper names.
+
+The PS3 targets use 64-bit ELFv1 function descriptors but are backed by
+GNU binutils/libgcc save/restore helper support rather than AIX system
+helper policy.  Keep this scoped to the save/restore naming path instead
+of adopting POWERPC_LINUX target-wide behavior.
+
+--- a/gcc/config/rs6000/rs6000-logue.cc
++++ b/gcc/config/rs6000/rs6000-logue.cc
+@@ -2263,7 +2263,8 @@ rs6000_savres_routine_name (rs6000_stack_t *info,
+     }
+   else if (DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2)
+     {
+-#if !defined (POWERPC_LINUX) && !defined (POWERPC_FREEBSD)
++#if (!defined (POWERPC_LINUX) && !defined (POWERPC_FREEBSD) \
++     && !defined (POWERPC_PS3_SAVRES))
+       /* No out-of-line save/restore routines for GPRs on AIX.  */
+       gcc_assert (!TARGET_AIX || (sel & SAVRES_REG) != SAVRES_GPR);
+ #endif
+@@ -2275,7 +2276,8 @@ rs6000_savres_routine_name (rs6000_stack_t *info,
+       else if ((sel & SAVRES_REG) == SAVRES_FPR)
+ 	{
+-#if defined (POWERPC_LINUX) || defined (POWERPC_FREEBSD)
++#if defined (POWERPC_LINUX) || defined (POWERPC_FREEBSD) \
++    || defined (POWERPC_PS3_SAVRES)
+ 	  if ((sel & SAVRES_LR))
+ 	    prefix = ((sel & SAVRES_SAVE) ? "_savefpr_" : "_restfpr_");
+ 	  else

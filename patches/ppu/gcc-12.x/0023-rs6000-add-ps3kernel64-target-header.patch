@@ -1,6 +1,6 @@
 --- a/gcc/config/rs6000/ps3kernel64.h
 +++ b/gcc/config/rs6000/ps3kernel64.h
-@@ -0,0 +1,317 @@
+@@ -0,0 +1,320 @@
 +/* Definitions of target machine for GNU compiler,
 +   for 64-bit PowerPC PS3 kernel ELF.
 +   Copyright (C) 2000-2022 Free Software Foundation, Inc.
@@ -278,6 +278,9 @@
 +#define RESTORE_FP_PREFIX (TARGET_64BIT ? "._restf" : "_restfpr_")
 +#undef  RESTORE_FP_SUFFIX
 +#define RESTORE_FP_SUFFIX ""
++
++/* Enable GNU ppc64 out-of-line save/restore helper names.  */
++#define POWERPC_PS3_SAVRES
 +
 +#undef  PREFERRED_DEBUGGING_TYPE
 +#define PREFERRED_DEBUGGING_TYPE DWARF2_DEBUG
