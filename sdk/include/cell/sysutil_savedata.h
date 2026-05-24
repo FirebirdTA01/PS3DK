@@ -391,148 +391,85 @@ typedef void (*CellSaveDataDoneCallback)(CellSaveDataCBResult *cbResult,
 typedef sys_mem_container_t sys_memory_container_t;
 
 /* ============================================================
- * Function forwarders.  Each casts Sony struct pointers and
- * callback function pointers to PSL1GHT's types and forwards.
- * Layout compat is enforced by _Static_asserts above.
+ * Function declarations.  Resolved by the cellSaveData* trampolines
+ * in libsysutil_stub.a.  No sys-indirection layer.
  * ============================================================ */
 
-static inline int cellSaveDataListSave2(unsigned int version,
-                                        CellSaveDataSetList *setList,
-                                        CellSaveDataSetBuf *setBuf,
-                                        CellSaveDataListCallback funcList,
-                                        CellSaveDataStatCallback funcStat,
-                                        CellSaveDataFileCallback funcFile,
-                                        sys_memory_container_t container,
-                                        void *userdata) {
-	return (int)sysSaveListSave2(version,
-	                             (sysSaveListSettings *)setList,
-	                             (sysSaveBufferSettings *)setBuf,
-	                             (sysSaveListCallback)funcList,
-	                             (sysSaveStatusCallback)funcStat,
-	                             (sysSaveFileCallback)funcFile,
-	                             container, userdata);
-}
+int cellSaveDataListSave2(unsigned int version,
+                          CellSaveDataSetList *setList,
+                          CellSaveDataSetBuf *setBuf,
+                          CellSaveDataListCallback funcList,
+                          CellSaveDataStatCallback funcStat,
+                          CellSaveDataFileCallback funcFile,
+                          sys_memory_container_t container,
+                          void *userdata);
 
-static inline int cellSaveDataListLoad2(unsigned int version,
-                                        CellSaveDataSetList *setList,
-                                        CellSaveDataSetBuf *setBuf,
-                                        CellSaveDataListCallback funcList,
-                                        CellSaveDataStatCallback funcStat,
-                                        CellSaveDataFileCallback funcFile,
-                                        sys_memory_container_t container,
-                                        void *userdata) {
-	return (int)sysSaveListLoad2(version,
-	                             (sysSaveListSettings *)setList,
-	                             (sysSaveBufferSettings *)setBuf,
-	                             (sysSaveListCallback)funcList,
-	                             (sysSaveStatusCallback)funcStat,
-	                             (sysSaveFileCallback)funcFile,
-	                             container, userdata);
-}
+int cellSaveDataListLoad2(unsigned int version,
+                          CellSaveDataSetList *setList,
+                          CellSaveDataSetBuf *setBuf,
+                          CellSaveDataListCallback funcList,
+                          CellSaveDataStatCallback funcStat,
+                          CellSaveDataFileCallback funcFile,
+                          sys_memory_container_t container,
+                          void *userdata);
 
-static inline int cellSaveDataFixedSave2(unsigned int version,
-                                         CellSaveDataSetList *setList,
-                                         CellSaveDataSetBuf *setBuf,
-                                         CellSaveDataFixedCallback funcFixed,
-                                         CellSaveDataStatCallback funcStat,
-                                         CellSaveDataFileCallback funcFile,
-                                         sys_memory_container_t container,
-                                         void *userdata) {
-	return (int)sysSaveFixedSave2(version,
-	                              (sysSaveListSettings *)setList,
-	                              (sysSaveBufferSettings *)setBuf,
-	                              (sysSaveFixedCallback)funcFixed,
-	                              (sysSaveStatusCallback)funcStat,
-	                              (sysSaveFileCallback)funcFile,
-	                              container, userdata);
-}
+int cellSaveDataFixedSave2(unsigned int version,
+                           CellSaveDataSetList *setList,
+                           CellSaveDataSetBuf *setBuf,
+                           CellSaveDataFixedCallback funcFixed,
+                           CellSaveDataStatCallback funcStat,
+                           CellSaveDataFileCallback funcFile,
+                           sys_memory_container_t container,
+                           void *userdata);
 
-static inline int cellSaveDataFixedLoad2(unsigned int version,
-                                         CellSaveDataSetList *setList,
-                                         CellSaveDataSetBuf *setBuf,
-                                         CellSaveDataFixedCallback funcFixed,
-                                         CellSaveDataStatCallback funcStat,
-                                         CellSaveDataFileCallback funcFile,
-                                         sys_memory_container_t container,
-                                         void *userdata) {
-	return (int)sysSaveFixedLoad2(version,
-	                              (sysSaveListSettings *)setList,
-	                              (sysSaveBufferSettings *)setBuf,
-	                              (sysSaveFixedCallback)funcFixed,
-	                              (sysSaveStatusCallback)funcStat,
-	                              (sysSaveFileCallback)funcFile,
-	                              container, userdata);
-}
+int cellSaveDataFixedLoad2(unsigned int version,
+                           CellSaveDataSetList *setList,
+                           CellSaveDataSetBuf *setBuf,
+                           CellSaveDataFixedCallback funcFixed,
+                           CellSaveDataStatCallback funcStat,
+                           CellSaveDataFileCallback funcFile,
+                           sys_memory_container_t container,
+                           void *userdata);
 
-static inline int cellSaveDataAutoSave2(unsigned int version,
-                                        const char *dirName,
-                                        unsigned int errDialog,
-                                        CellSaveDataSetBuf *setBuf,
-                                        CellSaveDataStatCallback funcStat,
-                                        CellSaveDataFileCallback funcFile,
-                                        sys_memory_container_t container,
-                                        void *userdata) {
-	return (int)sysSaveAutoSave2((s32)version, dirName, (u32)errDialog,
-	                             (sysSaveBufferSettings *)setBuf,
-	                             (sysSaveStatusCallback)funcStat,
-	                             (sysSaveFileCallback)funcFile,
-	                             container, userdata);
-}
+int cellSaveDataAutoSave2(unsigned int version,
+                          const char *dirName,
+                          unsigned int errDialog,
+                          CellSaveDataSetBuf *setBuf,
+                          CellSaveDataStatCallback funcStat,
+                          CellSaveDataFileCallback funcFile,
+                          sys_memory_container_t container,
+                          void *userdata);
 
-static inline int cellSaveDataAutoLoad2(unsigned int version,
-                                        const char *dirName,
-                                        unsigned int errDialog,
-                                        CellSaveDataSetBuf *setBuf,
-                                        CellSaveDataStatCallback funcStat,
-                                        CellSaveDataFileCallback funcFile,
-                                        sys_memory_container_t container,
-                                        void *userdata) {
-	return (int)sysSaveAutoLoad2((s32)version, dirName, (u32)errDialog,
-	                             (sysSaveBufferSettings *)setBuf,
-	                             (sysSaveStatusCallback)funcStat,
-	                             (sysSaveFileCallback)funcFile,
-	                             container, userdata);
-}
+int cellSaveDataAutoLoad2(unsigned int version,
+                          const char *dirName,
+                          unsigned int errDialog,
+                          CellSaveDataSetBuf *setBuf,
+                          CellSaveDataStatCallback funcStat,
+                          CellSaveDataFileCallback funcFile,
+                          sys_memory_container_t container,
+                          void *userdata);
 
-static inline int cellSaveDataListAutoSave(unsigned int version,
-                                           unsigned int errDialog,
-                                           CellSaveDataSetList *setList,
-                                           CellSaveDataSetBuf *setBuf,
-                                           CellSaveDataFixedCallback funcFixed,
-                                           CellSaveDataStatCallback funcStat,
-                                           CellSaveDataFileCallback funcFile,
-                                           sys_memory_container_t container,
-                                           void *userdata) {
-	return (int)sysSaveListAutoSave(version, (u32)errDialog,
-	                                (sysSaveListSettings *)setList,
-	                                (sysSaveBufferSettings *)setBuf,
-	                                (sysSaveFixedCallback)funcFixed,
-	                                (sysSaveStatusCallback)funcStat,
-	                                (sysSaveFileCallback)funcFile,
-	                                container, userdata);
-}
+int cellSaveDataListAutoSave(unsigned int version,
+                             unsigned int errDialog,
+                             CellSaveDataSetList *setList,
+                             CellSaveDataSetBuf *setBuf,
+                             CellSaveDataFixedCallback funcFixed,
+                             CellSaveDataStatCallback funcStat,
+                             CellSaveDataFileCallback funcFile,
+                             sys_memory_container_t container,
+                             void *userdata);
 
-static inline int cellSaveDataListAutoLoad(unsigned int version,
-                                           unsigned int errDialog,
-                                           CellSaveDataSetList *setList,
-                                           CellSaveDataSetBuf *setBuf,
-                                           CellSaveDataFixedCallback funcFixed,
-                                           CellSaveDataStatCallback funcStat,
-                                           CellSaveDataFileCallback funcFile,
-                                           sys_memory_container_t container,
-                                           void *userdata) {
-	return (int)sysSaveListAutoLoad(version, (u32)errDialog,
-	                                (sysSaveListSettings *)setList,
-	                                (sysSaveBufferSettings *)setBuf,
-	                                (sysSaveFixedCallback)funcFixed,
-	                                (sysSaveStatusCallback)funcStat,
-	                                (sysSaveFileCallback)funcFile,
-	                                container, userdata);
-}
+int cellSaveDataListAutoLoad(unsigned int version,
+                             unsigned int errDialog,
+                             CellSaveDataSetList *setList,
+                             CellSaveDataSetBuf *setBuf,
+                             CellSaveDataFixedCallback funcFixed,
+                             CellSaveDataStatCallback funcStat,
+                             CellSaveDataFileCallback funcFile,
+                             sys_memory_container_t container,
+                             void *userdata);
 
-static inline int cellSaveDataDelete2(sys_memory_container_t container) {
-	return (int)sysSaveDelete2(container);
-}
+int cellSaveDataDelete2(sys_memory_container_t container);
 
 /* ============================================================
  * Direct externs.  All entry points below resolve via the
