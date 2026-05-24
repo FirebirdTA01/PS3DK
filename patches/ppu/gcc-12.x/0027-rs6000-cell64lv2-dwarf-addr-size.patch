@@ -1,0 +1,54 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: pin DWARF2_ADDR_SIZE to 8 (match ELF64 wrapper)
+
+GCC's default for DWARF2_ADDR_SIZE is POINTER_SIZE/BITS_PER_UNIT.  Under
+our default ILP32 hybrid ABI POINTER_SIZE is 32, so the default rule
+yields DWARF2_ADDR_SIZE == 4.  Our output ELF wrapper is class ELF64
+regardless of pointer width, so debug-info address fields must be 8
+bytes to match the wrapper.  Without this override, the DWARF emitter
+selects DW_OP_const4u for a thread-local DW_AT_location and routes
+through TARGET_ASM_OUTPUT_DWARF_DTPREL with size==4, which emits
+
+    .long sym@dtprel+0x8000
+
+Binutils' PowerPC64 backend resolves the `@dtprel' suffix to a 64-bit
+R_PPC64_DTPREL64 relocation, which does not fit in the 4-byte `.long'
+slot, and the assembler fails with:
+
+    Error: R_PPC64_DTPREL64 relocations do not fit in 4 bytes
+
+Pinning DWARF2_ADDR_SIZE to 8 routes the same path through DW_OP_const8u
+and an 8-byte (`.8byte') dtprel slot, which encodes a real DTPREL64 and
+assembles cleanly.  DWARF address fields and relocation slots become 8
+bytes because the wrapper is ELF64; the underlying EA values stay in
+the 32-bit virtual range under the default ILP32 hybrid, only the
+storage width grows to match the ELF class.
+
+Precedent: MIPS sets DWARF2_ADDR_SIZE from FILE_HAS_64BIT_SYMBOLS rather
+than POINTER_SIZE for exactly this reason.  GCC's mainline biarch x32
+(x86) and aarch64-ilp32 do not face this question because both emit
+class-32 ELF objects when their C pointer width is 32.  Our wrapper is
+always class-64, so the conditional collapses to the constant 8.
+
+The override is also correct for the -mlp64 multilib (POINTER_SIZE 64
+already gives DWARF2_ADDR_SIZE 8 by the default rule, so 8 matches).
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -409,6 +409,16 @@
+ #undef  PREFERRED_DEBUGGING_TYPE
+ #define PREFERRED_DEBUGGING_TYPE DWARF2_DEBUG
+ 
++/* The output ELF wrapper is always class ELF64, regardless of whether
++   the C ABI is the default ILP32 hybrid or the -mlp64 multilib opt-in.
++   DWARF address fields must mirror the ELF class, not the C pointer
++   width: under the default ILP32 hybrid POINTER_SIZE is 32 but the
++   ELF64 wrapper still stores 8-byte address fields.  This also keeps
++   TARGET_ASM_OUTPUT_DWARF_DTPREL on the 8-byte path for thread-local
++   DW_AT_location, where binutils only encodes R_PPC64_DTPREL64.  */
++#undef  DWARF2_ADDR_SIZE
++#define DWARF2_ADDR_SIZE 8
++
+ /* -----------------------------------------------------------------------
+    Function size / constant pool / EH encoding (shared with linux64).
+    ----------------------------------------------------------------------- */

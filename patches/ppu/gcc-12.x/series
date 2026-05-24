@@ -25,3 +25,4 @@
 0024-config-gcc-add-ps3-kernel-target.patch
 0025-config-sub-recognize-ps3-kernel-elf.patch
 0026-rs6000-allow-ps3-save-restore-names.patch
+0027-rs6000-cell64lv2-dwarf-addr-size.patch
