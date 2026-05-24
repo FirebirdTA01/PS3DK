@@ -28,3 +28,4 @@
 0027-rs6000-cell64lv2-dwarf-addr-size.patch
 0028-rs6000-cc-tls-base-register.patch
 0029-gcc-convert-pointer-cast-unsigned-intermediate.patch
+0030-gcc-expr-canonicalize-pointer-plus-offset-hybrid.patch

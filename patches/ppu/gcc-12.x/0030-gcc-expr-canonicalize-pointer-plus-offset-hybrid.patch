@@ -1,0 +1,78 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] gcc/expr: canonicalize POINTER_PLUS_EXPR offset under hybrid
+
+POINTER_PLUS_EXPR expansion already handles the two precision-mismatch
+cases (sizetype narrower / wider than pointer type) by inserting a
+fold_convert that forces a sign-extending widen / truncate at RTL
+emission.  When the precisions match, the original code falls straight
+through to PLUS_EXPR expansion with no canonicalization.
+
+On a target where Pmode is smaller than the natural machine word --
+ELF64 + ILP32 hybrid on powerpc64-ps3-elf -- the subsequent PLUS_EXPR
+lowers to a full-width hardware add (PPC `add` is always 64-bit).
+The base pointer is canonical (zero-extended) but the offset coming
+out of signed integer arithmetic may have non-canonical upper bits
+(e.g. subf wrapping into negative leaves the upper 32 as 0xffffffff).
+That noncanonical value propagates into the resulting effective
+address and breaks subsequent memory access.  This was the
+stb_truetype `data[(y-iy0)*w+(x-ix0)]` crash on `oss << int_value`
+paths in EMP code.
+
+Add a third branch to the precision-match case: when the pointer mode
+is narrower than UNITS_PER_WORD, sign-widen the offset through a
+word-mode signed integer type so the expansion emits an extsw before
+the address-forming add.  When the offset is negative the carry-out
+from the low 32 bits cancels the sign-extended upper bits and leaves
+the resulting pointer canonical (upper 32 = 0 to match the
+zero-extended ABI pointer).
+
+Two-step widen is intentional: a direct convert from sizetype
+(unsigned) to a signed word-mode type would zero-extend; we
+reinterpret as ssizetype first (no-op at RTL since precisions match),
+then widen with sign extension.
+
+--- a/gcc/expr.cc
++++ b/gcc/expr.cc
+@@ -9161,6 +9161,42 @@
+ 	 offset to have matching modes.  */
+       else if (TYPE_PRECISION (sizetype) > TYPE_PRECISION (type))
+ 	treeop1 = fold_convert_loc (loc, type, treeop1);
++      /* When sizetype precision equals pointer precision but the pointer
++	 mode is smaller than the target's natural register word (ELF64 with
++	 ILP32 pointers), the subsequent PLUS_EXPR expansion lowers to a
++	 full-width hardware add against the zero-extended base pointer.
++	 If the offset was produced by signed integer arithmetic, the upper
++	 bits of its 64-bit register form may be non-canonical
++	 (e.g. left as 0xffffffff after a wrapping subtract), and those bits
++	 propagate into the resulting effective address.  Round-trip the
++	 offset through ssizetype (or sizetype for unsigned offsets) so the
++	 expansion emits the required extsw / clrldi canonicalization before
++	 the address-forming add.  */
++      else if (known_lt (GET_MODE_SIZE (TYPE_MODE (type)),
++			 (unsigned int) UNITS_PER_WORD))
++	{
++	  /* Pointer arithmetic uses signed semantics for the offset (a
++	     negative offset means "step backwards"), and on a 64-bit target
++	     with an ILP32 pointer mode the subsequent PLUS_EXPR expansion
++	     lowers to a full-width hardware add.  Sign-widen the offset
++	     through a word-mode signed integer type so the upper bits of
++	     the 64-bit register are canonically sign-extended before the
++	     address-forming add.  When the offset is negative the
++	     carry-out from the low half then cancels the sign-extended
++	     upper bits and leaves the resulting pointer canonical (upper
++	     32 = 0 for a zero-extended ABI pointer base).  */
++	  tree wide_type
++	    = build_nonstandard_integer_type (GET_MODE_PRECISION (word_mode),
++					      /*unsignedp=*/0);
++	  /* Two-step widen: first reinterpret the offset as ssizetype (bit
++	     pattern preserved, no RTL emitted), then sign-extend that to
++	     the word-mode signed type.  Truncating back to `type' leaves
++	     the canonical sign-extension in the 64-bit register.  */
++	  treeop1 = fold_convert_loc (loc, type,
++				      fold_convert_loc (loc, wide_type,
++					fold_convert_loc (loc, ssizetype,
++							  treeop1)));
++	}
+       /* FALLTHRU */
+ 
+     case PLUS_EXPR:
