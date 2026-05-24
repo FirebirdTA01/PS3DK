@@ -15,7 +15,7 @@ add_executable(hello-ppu-gamedata source/main.c)
 target_compile_features(hello-ppu-gamedata PRIVATE c_std_11)
 
 target_link_libraries(hello-ppu-gamedata PRIVATE
-    sysutil rt lv2 
+    cellGame_stub sysutil rt lv2
 )
 
 ps3_add_self(hello-ppu-gamedata)

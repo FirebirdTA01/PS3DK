@@ -209,92 +209,54 @@ typedef int  (*CellGameThemeInstallCallback)(unsigned int fileOffset,
                                              unsigned int readSize, void *buf);
 
 /* ============================================================
- * Function forwarders.
+ * Function declarations.  Resolved by the cellGame* trampolines
+ * in libcellGame_stub.a.  No sys-indirection layer.
  * ============================================================ */
 
-static inline int cellGameDataCheck(unsigned int type, const char *dirName,
-                                    CellGameContentSize *size) {
-	return (int)sysGameDataCheck((u32)type, dirName, (sysGameContentSize *)size);
-}
+int cellGameDataCheck(unsigned int type, const char *dirName,
+                      CellGameContentSize *size);
 
-static inline int cellGameBootCheck(unsigned int *type, unsigned int *attributes,
-                                    CellGameContentSize *size, char *dirName) {
-	return (int)sysGameBootCheck((u32 *)type, (u32 *)attributes,
-	                             (sysGameContentSize *)size, dirName);
-}
+int cellGameBootCheck(unsigned int *type, unsigned int *attributes,
+                      CellGameContentSize *size, char *dirName);
 
-static inline int cellGamePatchCheck(CellGameContentSize *size, void *reserved) {
-	return (int)sysGamePatchCheck((sysGameContentSize *)size, reserved);
-}
+int cellGamePatchCheck(CellGameContentSize *size, void *reserved);
 
-static inline int cellGameCreateGameData(CellGameSetInitParams *init,
-                                         char *tmp_contentInfoPath,
-                                         char *tmp_usrdirPath) {
-	return (int)sysGameCreateGameData((sysGameSetInitParams *)init,
-	                                  tmp_contentInfoPath, tmp_usrdirPath);
-}
+int cellGameCreateGameData(CellGameSetInitParams *init,
+                           char *tmp_contentInfoPath,
+                           char *tmp_usrdirPath);
 
-static inline int cellGameGetParamInt(int id, int *value) {
-	return (int)sysGameGetParamInt((s32)id, (s32 *)value);
-}
+int cellGameGetParamInt(int id, int *value);
 
-static inline int cellGameGetParamString(int id, char *buf, unsigned int bufsize) {
-	return (int)sysGameGetParamString((s32)id, buf, (u32)bufsize);
-}
+int cellGameGetParamString(int id, char *buf, unsigned int bufsize);
 
-static inline int cellGameGetSizeKB(int *sizeKB) {
-	return (int)sysGameGetSizeKB((s32 *)sizeKB);
-}
+int cellGameGetSizeKB(int *sizeKB);
 
-static inline int cellGameSetParamString(int id, const char *buf) {
-	return (int)sysGameSetParamString((s32)id, buf);
-}
+int cellGameSetParamString(int id, const char *buf);
 
-static inline int cellGameGetDiscContentInfoUpdatePath(char *updatePath) {
-	return (int)sysGameGetDiscContentInfoUpdatePath(updatePath);
-}
+int cellGameGetDiscContentInfoUpdatePath(char *updatePath);
 
-static inline int cellGameContentPermit(char *contentInfoPath, char *usrdirPath) {
-	return (int)sysGameContentPermit(contentInfoPath, usrdirPath);
-}
+int cellGameContentPermit(char *contentInfoPath, char *usrdirPath);
 
-static inline int cellGameContentErrorDialog(int type, int errNeedSizeKB,
-                                             const char *dirName) {
-	return (int)sysGameContentErrorDialog((s32)type, (s32)errNeedSizeKB, dirName);
-}
+int cellGameContentErrorDialog(int type, int errNeedSizeKB,
+                               const char *dirName);
 
-static inline int cellGameThemeInstall(const char *usrdirPath, const char *fileName,
-                                       unsigned int option) {
-	return (int)sysGameThemeInstall(usrdirPath, fileName, (u32)option);
-}
+int cellGameThemeInstall(const char *usrdirPath, const char *fileName,
+                         unsigned int option);
 
-static inline int cellGameThemeInstallFromBuffer(unsigned int fileSize,
-                                                 unsigned int bufSize,
-                                                 void *buf,
-                                                 CellGameThemeInstallCallback cb,
-                                                 unsigned int option) {
-	return (int)sysGameThemeInstallFromBuffer((u32)fileSize, (u32)bufSize, buf,
-	                                          (sysGameThemeInstallCallback)cb,
-	                                          (u32)option);
-}
+int cellGameThemeInstallFromBuffer(unsigned int fileSize,
+                                   unsigned int bufSize,
+                                   void *buf,
+                                   CellGameThemeInstallCallback cb,
+                                   unsigned int option);
 
-static inline int cellGameGetLocalWebContentPath(char *contentPath) {
-	return (int)sysGameGetLocalWebContentPath(contentPath);
-}
+int cellGameGetLocalWebContentPath(char *contentPath);
 
-static inline int cellGameDeleteGameData(const char *dirName) {
-	return (int)sysGameDeleteGameData(dirName);
-}
+int cellGameDeleteGameData(const char *dirName);
 
-static inline int cellGameRegisterDiscChangeCallback(CellGameDiscEjectCallback funcEject,
-                                                     CellGameDiscInsertCallback funcInsert) {
-	return (int)sysGameRegisterDiscChangeCallback((sysGameDiscEjectCallback)funcEject,
-	                                              (sysGameDiscInsertCallback)funcInsert);
-}
+int cellGameRegisterDiscChangeCallback(CellGameDiscEjectCallback funcEject,
+                                       CellGameDiscInsertCallback funcInsert);
 
-static inline int cellGameUnregisterDiscChangeCallback(void) {
-	return (int)sysGameUnregisterDiscChangeCallback();
-}
+int cellGameUnregisterDiscChangeCallback(void);
 
 #ifdef __cplusplus
 }
