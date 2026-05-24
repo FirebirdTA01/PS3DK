@@ -34,7 +34,7 @@ BINUTILS_VER="2.42"
 GCC_TAG="releases/gcc-9.5.0"
 GCC_VER="9.5.0"
 NEWLIB_TAG="newlib-4.4.0"
-NEWLIB_VER="4.4.0.20231231"
+NEWLIB_VER="4.4.0"
 
 TARGET="spu-elf"
 PREFIX="$PS3DEV/spu"
