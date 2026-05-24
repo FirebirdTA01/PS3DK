@@ -346,7 +346,14 @@ build_gcc_newlib() {
         --disable-win32-registry
     )
 
-    local target_env=()
+    # GCC 12's host-side libcody requires exact C++11.  Newer rolling
+    # hosts can default g++ to C++20-or-later semantics where u8 literals
+    # become char8_t, which libcody does not accept.
+    local target_env=(
+        CXXFLAGS=-std=gnu++11
+        CXXFLAGS_FOR_BUILD=-std=gnu++11
+    )
+
     if [[ -n "$HOST_TRIPLE" ]]; then
         # Cross-build: host binaries only, no target libs.  --disable-bootstrap
         # is mandatory when --host != --build — the standard 3-stage GCC
@@ -360,7 +367,7 @@ build_gcc_newlib() {
         # CC_FOR_BUILD/CXX_FOR_BUILD identify the build-host compiler so
         # auxiliary tools like genmddeps compile with the local gcc, not the
         # mingw cross compiler.
-        target_env=(
+        target_env+=(
             CC_FOR_BUILD=gcc
             CXX_FOR_BUILD=g++
         )
