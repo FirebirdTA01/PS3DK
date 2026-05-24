@@ -1,0 +1,21 @@
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -2919,6 +2919,13 @@
+ 	tmake_file="${tmake_file} ${cpu_type}/t-darwin64-biarch t-slibgcc"
+ 	tm_file="${tm_file} ${cpu_type}/darwin64-biarch.h"
+ 	;;
++powerpc64-ps3-kernel-elf*)
++	tm_file="${tm_file} dbxelf.h elfos.h gnu-user.h usegas.h freebsd-spec.h newlib-stdint.h rs6000/sysv4.h rs6000/default64.h"
++	tm_file="rs6000/biarch64.h ${tm_file} rs6000/ps3kernel64.h"
++	extra_options="${extra_options} rs6000/sysv4.opt rs6000/linux64.opt rs6000/ps3-lp64.opt"
++	tmake_file="rs6000/t-fprules rs6000/t-ppccomm rs6000/t-ps3kernel64"
++	use_gcc_stdint=wrap
++	;;
+ powerpc64-ps3-elf*)
+ 	tm_file="${tm_file} dbxelf.h elfos.h gnu-user.h usegas.h freebsd-spec.h newlib-stdint.h rs6000/sysv4.h rs6000/default64.h"
+ 	tm_file="rs6000/biarch64.h ${tm_file} rs6000/cell64lv2.h"
+--- /dev/null
++++ b/gcc/config/rs6000/t-ps3kernel64
+@@ -0,0 +1,2 @@
++# Makefile fragment for powerpc64-ps3-kernel-elf.
++# Intentionally empty; reserved for target-specific build rules.
