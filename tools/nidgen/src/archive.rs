@@ -10,6 +10,8 @@ use std::process::Command;
 /// `toolchain_bin` is `$PS3DEV/ppu/bin` (or spu/bin). `as_name` is the
 /// assembler tool name (e.g. "powerpc64-ps3-elf-as", "spu-elf-as").
 /// `ar_name` is the archiver tool name.
+/// `abi` is informational only — the generated .S already contains the
+/// correct instruction widths for the target ABI.
 pub fn build_stub_archive(
     toolchain_bin: &Path,
     as_name: &str,
@@ -17,6 +19,7 @@ pub fn build_stub_archive(
     library: &str,
     asm_src: &Path,
     out_dir: &Path,
+    _abi: crate::AbiMode,
 ) -> Result<()> {
     std::fs::create_dir_all(out_dir)
         .with_context(|| format!("creating {}", out_dir.display()))?;

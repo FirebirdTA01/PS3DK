@@ -8,9 +8,8 @@ Conformance is enforced by `tools/abi-verify`. Every shipped binary or sample
 output must pass its invariant checks and diff cleanly against a matching
 fixture in `tests/abi/fixtures/`.
 
-The spec was derived empirically from reference-SDK ELF artifacts and is
-frozen here so downstream code targets it directly, not a reverse-engineering
-narrative. Discovery notes live in per-session memory, not in this tree.
+This file is the normative binary contract. Discovery notes and historical
+rationale belong outside the ABI spec.
 
 ---
 
@@ -32,22 +31,14 @@ binaries, SELF/SPRX payloads prior to post-processing) MUST satisfy:
 Upstream readelf prints the OS/ABI byte as `<unknown: 66>` - this is expected.
 Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
 
-> **Note (2026-04-23 revision):** `e_flags` was previously documented as
-> `0x01000000`. Cross-checking decrypted CEX SELFs built with the reference
-> SDK (ftpd, cellftp, mount_hdd, setmonitor, db_backup, and the BD / PS1 /
-> PS2 / PSP emulator shells) shows every binary carrying `e_flags = 0x0`.
-> Our `0001-elf64-ppc-tag-cellos-lv2-headers.patch` hardcoded the non-zero
-> value based on an earlier (incorrect) reading of the spec; that path is
-> being reverted in a follow-up.
+The `e_flags` field is zero for conforming CellOS Lv-2 PPU user-mode
+outputs. The CellOS identity is carried by `EI_OSABI = 0x66`.
 
 ---
 
 ## 2. Compact function-descriptor format (`.opd`)
 
-> **Status - achieved.** The toolchain now emits 8-byte compact function
-> descriptors natively via GCC's `-mps3-opd-compact` flag (default for the
-> `powerpc64-ps3-elf` target). Every `.opd` entry is exactly 8 bytes and is
-> laid out as:
+Every `.opd` entry is exactly 8 bytes and is laid out as:
 
 ```
 offset  size  contents
@@ -122,34 +113,18 @@ Normative rules:
    encodes ASCII `CELL`). Our toolchain selects the token at link time
    via a linker-script symbol; the value is not fixed by this spec.
 5. `abi_version` at offset `0x20` is the 32-bit literal `0x01010000`.
-   Reference-SDK `crt1.o` emits this value hardcoded in every shipping
-   CEX binary surveyed (ftpd, cellftp, mount_hdd, setmonitor, etc.).
-   Zero here causes the loader - both on hardware and RPCS3 - to
-   stall inside `_sys_prx_register_module` before the module's entry
-   point is invoked. The two bytes encode a major/minor pair
-   (`0x01` / `0x01`) but the meaning is not yet spec-clear; the
-   normative requirement is the literal value, not the interpretation.
+   Zero here is not a conforming process-parameter block and can stall
+   the loader before the module entry point is invoked. The normative
+   requirement is the literal value.
 
 ---
 
 ## 4. Pointer and addressing model — ELF64 + ILP32 hybrid
 
-> **Status — implemented 2026-05-07 on `feature/mlp64-abi`** (commits
-> 3db8ce9 + a08c775 + 305d133 + 22605c3 + 16a628c + 1e076ed).
-> The PPU GCC target now defaults to **ILP32 with a 64-bit ELF
-> wrapper** (Pmode = SImode, ELFCLASS64, EM_PPC64).  Pointers are
-> 32-bit on the wire, registers are 64-bit, the ELF header still
-> reports ELF64.  Multilib `-mlp64` opt-in flips Pmode to DImode for
-> the legacy 64-bit-pointer path.
->
-> **Note — -mlp64 multilib in progress (2026-05-09).**  GCC patches
-> 0010–0021 emit LP64 user code and the multilib libc / libstdc++ /
-> libsysbase install correctly under
-> `powerpc64-ps3-elf/lib/lp64/`, but the runtime linkage tree
-> (`lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`, `lv2-sprx.o`, and the
-> nidgen-emitted SPRX stub archives) is not yet built as a multilib
-> variant.  `-mlp64` binaries link against ILP32-shape glue and crash
-> before reaching `main()`.  Default ILP32 is the daily-use shape today.
+The default PPU C data model is **ILP32 with a 64-bit ELF wrapper**
+(Pmode = SImode, ELFCLASS64, EM_PPC64). Pointers are 32-bit on the
+wire, registers are 64-bit, and the ELF header reports ELF64.
+Multilib `-mlp64` opt-in flips Pmode to DImode for LP64 user code.
 
 This spec treats addresses in three layers:
 
@@ -191,8 +166,8 @@ Normative rules:
    *Cause:* an 8-byte slot under big-endian holds the address in the
    low 4 bytes; a `lwz @toc@l(r2)` load reads the high 4 bytes (zero)
    and the deref faults.  `libgloss/libsysbase` MUST be rebuilt with
-   patched GCC so its `.toc` sections inherit the 4-byte layout —
-   any pre-patch build is silently ABI-stale.
+   patched GCC so its `.toc` sections inherit the 4-byte layout.
+   Objects with 8-byte ILP32 `.toc` slots are non-conforming.
 3. `lv2_ea32_t` is `uint32_t`.  Width-sensitive integers
    (`size_t`, `ptrdiff_t`, `off_t`) in caller-allocated `cell/*`
    structs that cross the SPRX boundary MUST be declared `uint32_t`
@@ -235,8 +210,7 @@ sentinel - the kernel writes **exactly 24 bytes**.
 **Normative consequence:**
 
 - The public API in `cell/*.h` exposes the 32-byte `CellGcmConfig`
-  with native 64-bit pointers (matches the reference SDK header
-  caller-contract and keeps user code portable).
+  with native 64-bit pointers.
 - The kernel-interface struct the Lv-2 syscall writes is 24 bytes
   with 32-bit pointers.
 - The widener in `sdk/include/cell/gcm.h:226-240` IS a structural
@@ -286,57 +260,66 @@ are dispatched through per-export trampolines emitted into
 `sprx/common/exports.S` macro for legacy archives that have not been
 folded into the nidgen flow yet).
 
-> **Status — implemented 2026-05-07** (commit 16a628c).  Frame-less
-> trampolines previously used caller_sp+24 / +40 for LR/TOC saves.
-> ELFv1 reserves caller_sp+16 as the *callee*'s LR-save slot, which
-> the SPRX function (called via `bctrl`) overwrites on entry.  The
-> framed shape protects the trampoline's own TOC save inside its
-> 64-byte frame, where the SPRX cannot reach.
+The trampoline shape is data-model aware. ILP32 uses a frame-less
+wrapping `bctrl` form so SPRX exports with more than eight arguments
+see the caller's original stack-argument area. LP64 uses a bare
+`bctr` tail-call form that defers TOC restoration to the call-site
+nop slot rewritten by `sprxlinker --lp64`.
 
 Normative trampoline body (per export, ILP32 hybrid):
 
 ```asm
 __<name>:
     mflr   r0
-    stw    r0, 16(r1)         ; LR -> caller's reserved callee-LR slot
-    stwu   r1, -64(r1)         ; allocate 64-byte frame
-    stw    r2, 24(r1)          ; TOC -> our own frame slot, beyond SPRX reach
+    stw    r0, 24(r1)          ; LR -> caller's callee-TOC scratch slot
+    stw    r2, 40(r1)          ; TOC -> caller's reserved scratch slot
     lis    r12, <name>_stub@ha
     lwz    r12, <name>_stub@l(r12)
     lwz    r0, 0(r12)          ; SPRX entry EA (compact OPD slot 0)
     lwz    r2, 4(r12)          ; SPRX TOC (compact OPD slot 4)
     mtctr  r0
     bctrl                       ; call SPRX
-    lwz    r2, 24(r1)           ; restore caller TOC from our frame
-    addi   r1, r1, 64           ; pop our frame
-    lwz    r0, 16(r1)           ; restore caller LR from caller-reserved slot
+    lwz    r2, 40(r1)           ; restore caller TOC
+    lwz    r0, 24(r1)           ; restore caller LR
     mtlr   r0
     blr
 ```
 
+Normative trampoline body (per export, LP64):
+
+```asm
+__<name>:
+    std    r2, 40(r1)           ; caller TOC, restored at call site
+    lis    r12, <name>_stub@ha
+    lwz    r12, <name>_stub@l(r12) ; 32-bit compact descriptor EA
+    lwz    r0, 0(r12)           ; SPRX entry EA (compact OPD slot 0)
+    lwz    r2, 4(r12)           ; SPRX TOC (compact OPD slot 4)
+    mtctr  r0
+    bctr                        ; tail-call SPRX
+```
+
 Normative rules:
 
-1. **Caller LR save** at `caller_sp+16` (stored BEFORE the `stwu`).
-   This is the ELFv1 callee-reserved slot; saving in our caller's
-   reserved area prevents the SPRX function we `bctrl` into from
-   overwriting it (it writes at `our_sp+16`, which lies inside our
-   own 64-byte frame).
-2. **Caller TOC save** at `our_sp+24` (stored AFTER the `stwu`).
-   Inside our frame the SPRX function cannot reach it.
-3. **Frame size 64 bytes** — gives the SPRX callee sufficient
-   parameter-save area (its `sp+24+` is our `sp+24+`, which is below
-   our TOC slot at `+24`... actually our frame extends from `our_sp`
-   upward 64 bytes, the SPRX callee's stwu pushes another frame
-   below that).  >8-arg SPRX exports are NOT currently emitted by
-   nidgen (audited 2026-05-07: zero >8-arg or variadic exports
-   across all 29 nidgen DBs), so the +64 SP shift is safe.  Audit
-   re-required if a >8-arg export ever lands.
-4. **Compact OPD descriptor read** at `lwz r0, 0(r12); lwz r2,
+1. **No stack-frame allocation in the trampoline.**  Any `stwu` /
+   `stdu` before dispatch shifts the caller's parameter-save area.
+   SPRX exports with more than eight arguments read arg9+ from that
+   area; moving `r1` makes the callee read trampoline-frame garbage.
+2. **ILP32 caller LR save** is `stw r0,24(r1)`, not `sp+16`.
+   `sp+16` is the ELFv1 callee LR-save slot and is clobbered by the
+   SPRX callee prologue.  `sp+24` is safe for the wrapping trampoline
+   because the callee saves its incoming TOC in its own frame.
+3. **ILP32 caller TOC save** is `stw r2,40(r1)` and must be restored
+   after `bctrl`.
+4. **LP64 tail-call form** saves caller TOC with `std r2,40(r1)` and
+   uses `bctr`, not `bctrl`.  The caller-side post-call restore is
+   emitted by the LP64 link path as `ld r2,40(r1)`.
+5. **Compact OPD descriptor read** at `lwz r0, 0(r12); lwz r2,
    4(r12)` — the `.data.sceFStub` slot was written by the loader
    with the resolved 8-byte compact OPD address.
-5. Saves and loads use 4-byte `stw` / `lwz`, never 8-byte
-   `std` / `ld`; pointers are 32-bit under the ILP32 hybrid.
-6. **Single `.lib.stub` header per imported library** —
+6. **FStub slot load is always 32-bit.**  Both ILP32 and LP64 use
+   `lwz r12,<name>_stub@l(r12)` because `.data.sceFStub` slots are
+   4-byte compact descriptor EAs under both data models.
+7. **Single `.lib.stub` header per imported library** —
    liblv2.a/sprx.o (legacy PSL1GHT-style hand-rolled stubs) MUST NOT
    coexist with nidgen-emitted liblv2_stub.a in the link.  Both
    emit a `.lib.stub` header naming `sysPrxForUser`; with both in

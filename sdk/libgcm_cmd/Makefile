@@ -40,34 +40,9 @@ LEGACY_DIR  := $(SRC_DIR)/rsx_legacy
 LEGACY_SRCS := $(wildcard $(LEGACY_DIR)/*.c)
 LEGACY_OBJS := $(patsubst $(LEGACY_DIR)/%.c,$(OBJ_DIR)/rsx_legacy_%.o,$(LEGACY_SRCS))
 
-ARCHIVE        := $(OBJ_DIR)/libgcm_cmd.a
-PS3DK          ?= $(PS3DEV)/ps3dk
-INSTALL_LIB    := $(PS3DK)/ppu/lib
-INSTALL_INC    := $(PS3DK)/ppu/include
-
-.PHONY: all install clean
-
-all: $(ARCHIVE)
-
-$(ARCHIVE): $(OBJS) $(LEGACY_OBJS)
-	$(AR) $(ARFLAGS) $@ $^
-	$(RANLIB) $@
-
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
-
 # rsx_legacy needs PSL1GHT's internal header layout: its commands.c
 # includes <nv40.h> bare (not <rsx/nv40.h>) and expects LIBRSX_INTERNAL
 # defined to unlock the function-pointer side of rsxSetUserCallback.
-# Match PSL1GHT's librsx build flags exactly so the absorbed objects are
-# ABI-identical to what librsx.a shipped — same float ABI (-mhard-float),
-# same codegen (-fmodulo-sched, -ffunction-sections, -fdata-sections),
-# same dialect.  A mismatch on -mhard-float against the rest of the
-# runtime caused flip-sync samples to stutter badly after absorption
-# until this was aligned.  -std=gnu11 unlocks the `register ... asm("r3")`
-# extension in rsx_function_macros.h; -Wno-implicit-{fallthrough,
-# function-declaration} silence known-intentional warnings in
-# commands_impl.h.
 LEGACY_CFLAGS := -O2 -Wall -mcpu=cell -mregnames -Wa,-mcell -std=gnu11 \
                  -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections \
                  -Wno-unused-parameter -Wno-implicit-fallthrough \
@@ -77,15 +52,54 @@ LEGACY_CFLAGS := -O2 -Wall -mcpu=cell -mregnames -Wa,-mcell -std=gnu11 \
                  -Iinclude \
                  -DLIBRSX_INTERNAL
 
+ARCHIVE        := $(OBJ_DIR)/libgcm_cmd.a
+PS3DK          ?= $(PS3DEV)/ps3dk
+INSTALL_LIB    := $(PS3DK)/ppu/lib
+INSTALL_INC    := $(PS3DK)/ppu/include
+
+# --- LP64 (-mlp64) multilib (after all ILP32 := expansions; before targets) ---
+LP64_OBJ_DIR       := $(OBJ_DIR)-lp64
+LP64_ARCHIVE       := $(LP64_OBJ_DIR)/libgcm_cmd.a
+LP64_OBJS          := $(patsubst $(SRC_DIR)/%.c,$(LP64_OBJ_DIR)/%.o,$(SRCS))
+LP64_LEGACY_OBJS   := $(patsubst $(LEGACY_DIR)/%.c,$(LP64_OBJ_DIR)/rsx_legacy_%.o,$(LEGACY_SRCS))
+LP64_CFLAGS        := $(CFLAGS) -mlp64
+LP64_LEGACY_CFLAGS := $(LEGACY_CFLAGS) -mlp64
+
+.PHONY: all install clean
+
+all: $(ARCHIVE) $(LP64_ARCHIVE)
+
+$(ARCHIVE): $(OBJS) $(LEGACY_OBJS)
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+
+$(LP64_ARCHIVE): $(LP64_OBJS) $(LP64_LEGACY_OBJS)
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
 $(OBJ_DIR)/rsx_legacy_%.o: $(LEGACY_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(LEGACY_CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(OBJ_DIR):
 	@mkdir -p $@
 
-install: $(ARCHIVE)
+$(LP64_OBJ_DIR):
+	@mkdir -p $@
+
+$(LP64_OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(LP64_OBJ_DIR)
+	$(CC) $(LP64_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(LP64_OBJ_DIR)/rsx_legacy_%.o: $(LEGACY_DIR)/%.c | $(LP64_OBJ_DIR)
+	$(CC) $(LP64_LEGACY_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+install: $(ARCHIVE) $(LP64_ARCHIVE)
 	@install -d $(INSTALL_LIB)
 	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libgcm_cmd.a
+	@install -d $(INSTALL_LIB)/lp64
+	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LIB)/lp64/libgcm_cmd.a
 	@install -d $(INSTALL_INC)/Cg
 	install -m 0644 include/Cg/cg.h       $(INSTALL_INC)/Cg/cg.h
 	install -m 0644 include/Cg/cgBinary.h $(INSTALL_INC)/Cg/cgBinary.h
@@ -95,6 +109,6 @@ install: $(ARCHIVE)
 	@echo "installed libgcm_cmd.a + headers under $(PS3DK)/ppu/"
 
 clean:
-	rm -rf $(OBJ_DIR)
+	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)
 
 -include $(wildcard $(OBJ_DIR)/*.d)

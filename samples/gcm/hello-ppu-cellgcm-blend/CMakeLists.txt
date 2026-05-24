@@ -7,7 +7,7 @@ add_executable(hello-ppu-cellgcm-blend source/main.c)
 target_compile_features(hello-ppu-cellgcm-blend PRIVATE c_std_11)
 
 target_link_libraries(hello-ppu-cellgcm-blend PRIVATE
-    gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m
+    gcm_cmd gcm_sys io sysutil_stub sysutil sysmodule rt lv2 m
 )
 
 ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-blend shaders/vpshader.vcg)

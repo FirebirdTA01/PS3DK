@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use nidgen::{db, stubgen};
+use nidgen::{db, stubgen, AbiMode};
 
 fn yaml_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -24,7 +24,7 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
     assert_eq!(lib.archive_name.as_deref(), Some("sysutil_screenshot"));
     assert_eq!(lib.exports.len(), 4);
 
-    let asm = stubgen::render_library(&lib);
+    let asm = stubgen::render_library(&lib, AbiMode::Ilp32);
 
     // Six required sections.
     for section in [
@@ -51,9 +51,18 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
         ("cellScreenShotSetOverlayImage", "0x7a9c2243"),
     ];
     for (name, nid) in nids {
-        assert!(asm.contains(&format!("{name}_stub:")), "missing slot: {name}");
-        assert!(asm.contains(&format!("{name}_fnid:")), "missing fnid: {name}");
-        assert!(asm.contains(&format!("__{name}:")), "missing trampoline: {name}");
+        assert!(
+            asm.contains(&format!("{name}_stub:")),
+            "missing slot: {name}"
+        );
+        assert!(
+            asm.contains(&format!("{name}_fnid:")),
+            "missing fnid: {name}"
+        );
+        assert!(
+            asm.contains(&format!("__{name}:")),
+            "missing trampoline: {name}"
+        );
         assert!(
             asm.contains(&format!(".long __{name}, .TOC.")),
             "missing opd entry EA+TOC: {name}",
@@ -64,7 +73,10 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
     // Trampoline body must be the frame-less wrapping form: bctrl
     // (so r2 + LR get restored) but no stdu of SP.
     assert!(asm.contains("bctrl"), "trampoline missing bctrl");
-    assert!(!asm.contains("stdu"), "trampoline must not allocate a frame");
+    assert!(
+        !asm.contains("stdu"),
+        "trampoline must not allocate a frame"
+    );
     assert!(
         asm.contains("cellScreenShotEnable_stub@ha"),
         "trampoline missing stub-slot load",
@@ -75,5 +87,43 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
     assert!(
         asm.contains(".2byte 4              # export count"),
         "expected export count of 4 in prx_header",
+    );
+}
+
+#[test]
+fn screenshot_yaml_lp64_keeps_compact_fstub_stride() {
+    let lib = db::load_library(&yaml_path()).expect("yaml loads");
+    let asm = stubgen::render_library(&lib, AbiMode::Lp64);
+
+    assert!(
+        asm.contains(".size cellScreenShotEnable_stub, 4"),
+        "LP64 fstub slot must stay 4 bytes"
+    );
+    assert!(
+        asm.contains("cellScreenShotEnable_stub:\n\t.4byte __cellScreenShotEnable"),
+        "LP64 fstub slot must be a 32-bit compact descriptor pointer"
+    );
+    assert!(
+        !asm.contains(".8byte __cellScreenShotEnable"),
+        "LP64 fstub slot must not be widened to 8 bytes"
+    );
+    assert!(
+        asm.contains("lwz    12,cellScreenShotEnable_stub@l(12)")
+            || asm.contains("lwz 12,cellScreenShotEnable_stub@l(12)"),
+        "LP64 trampoline must load the 4-byte fstub slot"
+    );
+    assert!(
+        !asm.contains("ld     12,cellScreenShotEnable_stub@l(12)")
+            && !asm.contains("ld 12,cellScreenShotEnable_stub@l(12)"),
+        "LP64 trampoline must not use an 8-byte fstub load"
+    );
+    assert!(
+        asm.contains("std    2,40(1)") || asm.contains("std 2,40(1)"),
+        "LP64 trampoline must preserve caller TOC at sp+40"
+    );
+    assert!(asm.contains("bctr"), "LP64 trampoline must tail-call");
+    assert!(
+        !asm.contains("bctrl"),
+        "LP64 trampoline must not use wrapping bctrl"
     );
 }

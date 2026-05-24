@@ -9,13 +9,16 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use object::elf::{FileHeader64, EM_PPC64, SHT_RELA, SHT_SYMTAB};
+use object::elf::{FileHeader64, EM_PPC64, SHT_RELA, SHT_SYMTAB, STT_FUNC};
 use object::read::elf::{FileHeader, Rela, SectionHeader as _, Sym as _};
 use object::{Endianness, SectionIndex, SymbolIndex};
 use serde::{Deserialize, Serialize};
 
 /// CellOS Lv-2 OS/ABI identifier byte (unofficial; readelf prints "unknown: 66").
 pub const ELFOSABI_CELL_LV2: u8 = 0x66;
+/// Current CellOS Lv-2 e_flags value. Older toolchain notes used
+/// 0x01000000, but the synchronized ABI spec now requires zero.
+pub const CELLOS_LV2_E_FLAGS: u32 = 0x0000_0000;
 /// `.sys_proc_prx_param` magic value (BE).
 pub const SYS_PROC_PARAM_MAGIC: u32 = 0x1b43_4cec;
 
@@ -48,6 +51,8 @@ pub struct TocCheckData {
     pub data_model: TocDataModel,
     pub stride: u64,
     pub reloc_count: u64,
+    pub addr32_count: u64,
+    pub addr64_count: u64,
     pub mixed_relocs: bool,
     pub has_addr64_under_ilp32: bool,
 }
@@ -57,6 +62,23 @@ pub struct TocCheckData {
 pub struct StubTextCheckData {
     pub has_stwu: bool,
     pub stwu_offsets: Vec<u64>,
+    pub trampolines: Vec<StubTrampolineCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StubTrampolineCheck {
+    pub name: Option<String>,
+    pub offset: u64,
+    pub size: u64,
+    pub shape: StubTrampolineShape,
+    pub failures: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StubTrampolineShape {
+    Ilp32Wrapping,
+    Lp64TailCall,
+    Unknown,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -148,8 +170,7 @@ pub fn parse_elf_file(path: &Path) -> Result<Manifest> {
 }
 
 pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
-    let header =
-        FileHeader64::<Endianness>::parse(data).context("parsing ELF64 header")?;
+    let header = FileHeader64::<Endianness>::parse(data).context("parsing ELF64 header")?;
     let endian = header.endian().context("reading ELF endianness")?;
     if !matches!(endian, Endianness::Big) {
         return Err(anyhow!("expected big-endian ELF, got {:?}", endian));
@@ -205,7 +226,13 @@ pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
     }
 
     let opd = if let Some(idx) = opd_section_index {
-        Some(summarize_opd(endian, data, &sections, idx, &rela_by_target)?)
+        Some(summarize_opd(
+            endian,
+            data,
+            &sections,
+            idx,
+            &rela_by_target,
+        )?)
     } else {
         None
     };
@@ -252,9 +279,13 @@ pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
             let reloc_count = addr32_count + addr64_count;
             let toc_shdr = sections.section(SectionIndex(toc_idx)).ok()?;
             let section_size = toc_shdr.sh_size.get(endian);
-            let stride = if reloc_count > 0 { section_size / reloc_count } else { 0 };
+            let stride = if reloc_count > 0 {
+                section_size / reloc_count
+            } else {
+                0
+            };
 
-            let data_model = if addr64_count > addr32_count {
+            let data_model = if addr64_count > 0 && addr32_count == 0 {
                 TocDataModel::Lp64
             } else {
                 TocDataModel::Ilp32
@@ -263,6 +294,8 @@ pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
                 data_model,
                 stride,
                 reloc_count,
+                addr32_count,
+                addr64_count,
                 mixed_relocs: addr32_count > 0 && addr64_count > 0,
                 has_addr64_under_ilp32: data_model == TocDataModel::Ilp32 && addr64_count > 0,
             })
@@ -281,25 +314,12 @@ pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
         idx.and_then(|idx| {
             let shdr = sections.section(SectionIndex(idx)).ok()?;
             let section_data = shdr.data(endian, data).ok()?;
-            let mut stwu_offsets = Vec::new();
-            for off in (0..section_data.len()).step_by(4) {
-                if off + 4 > section_data.len() {
-                    break;
-                }
-                let word = u32::from_be_bytes([
-                    section_data[off],
-                    section_data[off + 1],
-                    section_data[off + 2],
-                    section_data[off + 3],
-                ]);
-                // stwu r1, X(r1): top 16 bits == 0x9421
-                if (word >> 16) == 0x9421 {
-                    stwu_offsets.push(off as u64);
-                }
-            }
+            let (stwu_offsets, trampolines) =
+                summarize_stub_text(endian, data, &sections, idx, section_data);
             Some(StubTextCheckData {
                 has_stwu: !stwu_offsets.is_empty(),
                 stwu_offsets,
+                trampolines,
             })
         })
     };
@@ -374,7 +394,11 @@ fn summarize_opd(
     }
 
     let entry_size = infer_opd_entry_size(&per_offset, size);
-    let entries = if entry_size == 0 { 0 } else { size / entry_size };
+    let entries = if entry_size == 0 {
+        0
+    } else {
+        size / entry_size
+    };
 
     let mut descriptors = Vec::new();
     if entry_size != 0 {
@@ -385,17 +409,13 @@ fn summarize_opd(
                 .flat_map(|(off, rs)| rs.iter().map(move |r| (*off, r.clone())))
                 .collect();
             relocs.sort_by_key(|(o, _)| *o);
-            let head = relocs
-                .first()
-                .map(|(_, r)| r.clone())
-                .unwrap_or(RelocDesc {
-                    r_type: "NONE".to_string(),
-                    symbol: None,
-                    addend: 0,
-                });
+            let head = relocs.first().map(|(_, r)| r.clone()).unwrap_or(RelocDesc {
+                r_type: "NONE".to_string(),
+                symbol: None,
+                addend: 0,
+            });
             let tail = relocs.get(1).map(|(_, r)| r.clone());
-            let extra: Vec<RelocDesc> =
-                relocs.iter().skip(2).map(|(_, r)| r.clone()).collect();
+            let extra: Vec<RelocDesc> = relocs.iter().skip(2).map(|(_, r)| r.clone()).collect();
             descriptors.push(OpdEntry {
                 offset: base,
                 head_reloc: head,
@@ -412,10 +432,7 @@ fn summarize_opd(
     })
 }
 
-fn infer_opd_entry_size(
-    per_offset: &BTreeMap<u64, Vec<RelocDesc>>,
-    section_size: u64,
-) -> u64 {
+fn infer_opd_entry_size(per_offset: &BTreeMap<u64, Vec<RelocDesc>>, section_size: u64) -> u64 {
     let entry_offsets: Vec<u64> = per_offset
         .iter()
         .filter(|(_, rs)| {
@@ -492,6 +509,204 @@ fn summarize_sys_proc_prx_param(
         abi_version,
         relocs: relocs_vec,
     })
+}
+
+fn summarize_stub_text(
+    endian: Endianness,
+    data: &[u8],
+    sections: &object::read::elf::SectionTable<'_, FileHeader64<Endianness>>,
+    stub_idx: usize,
+    section_data: &[u8],
+) -> (Vec<u64>, Vec<StubTrampolineCheck>) {
+    let mut words = Vec::new();
+    let mut stwu_offsets = Vec::new();
+    for off in (0..section_data.len()).step_by(4) {
+        if off + 4 > section_data.len() {
+            break;
+        }
+        let word = u32::from_be_bytes([
+            section_data[off],
+            section_data[off + 1],
+            section_data[off + 2],
+            section_data[off + 3],
+        ]);
+        // stwu r1, X(r1): top 16 bits == 0x9421.
+        if is_stwu_r1(word) {
+            stwu_offsets.push(off as u64);
+        }
+        words.push(word);
+    }
+
+    let mut trampolines = Vec::new();
+    let stub_addr = sections
+        .section(SectionIndex(stub_idx))
+        .map(|s| s.sh_addr.get(endian))
+        .unwrap_or(0);
+
+    if let Ok(symbols) = sections.symbols(endian, data, SHT_SYMTAB) {
+        for (sym_idx, sym) in symbols.enumerate() {
+            if sym.st_type() != STT_FUNC {
+                continue;
+            }
+            let Ok(Some(sym_section)) = symbols.symbol_section(endian, sym, sym_idx) else {
+                continue;
+            };
+            if sym_section.0 != stub_idx {
+                continue;
+            }
+            let value: u64 = sym.st_value(endian).into();
+            if value < stub_addr {
+                continue;
+            }
+            let offset = value - stub_addr;
+            if offset % 4 != 0 {
+                continue;
+            }
+            let size: u64 = sym.st_size(endian).into();
+            let name = symbols.symbol_name(endian, sym).ok().and_then(|n| {
+                if n.is_empty() {
+                    None
+                } else {
+                    Some(String::from_utf8_lossy(n).to_string())
+                }
+            });
+            let start = (offset / 4) as usize;
+            let word_len = if size == 0 {
+                words.len().saturating_sub(start)
+            } else {
+                ((size + 3) / 4) as usize
+            };
+            if start >= words.len() {
+                continue;
+            }
+            let end = start.saturating_add(word_len).min(words.len());
+            let body = &words[start..end];
+            let (shape, failures) = classify_trampoline_words(body);
+            trampolines.push(StubTrampolineCheck {
+                name,
+                offset,
+                size,
+                shape,
+                failures,
+            });
+        }
+    }
+
+    if trampolines.is_empty() {
+        for i in 0..words.len() {
+            let body = &words[i..];
+            let (shape, failures) = classify_trampoline_words(body);
+            if shape != StubTrampolineShape::Unknown {
+                let size = match shape {
+                    StubTrampolineShape::Ilp32Wrapping => 13 * 4,
+                    StubTrampolineShape::Lp64TailCall => 7 * 4,
+                    StubTrampolineShape::Unknown => 0,
+                };
+                trampolines.push(StubTrampolineCheck {
+                    name: None,
+                    offset: (i * 4) as u64,
+                    size,
+                    shape,
+                    failures,
+                });
+            }
+        }
+    }
+
+    (stwu_offsets, trampolines)
+}
+
+fn classify_trampoline_words(words: &[u32]) -> (StubTrampolineShape, Vec<String>) {
+    let ilp32 = match_ilp32_trampoline(words);
+    let lp64 = match_lp64_trampoline(words);
+    match (ilp32.is_empty(), lp64.is_empty()) {
+        (true, _) => (StubTrampolineShape::Ilp32Wrapping, Vec::new()),
+        (false, true) => (StubTrampolineShape::Lp64TailCall, Vec::new()),
+        (false, false) => {
+            let mut failures = Vec::new();
+            failures.extend(ilp32.into_iter().map(|f| format!("ILP32: {f}")));
+            failures.extend(lp64.into_iter().map(|f| format!("LP64: {f}")));
+            (StubTrampolineShape::Unknown, failures)
+        }
+    }
+}
+
+fn match_ilp32_trampoline(words: &[u32]) -> Vec<String> {
+    let expected = [
+        (0xffff_ffff, 0x7c08_02a6, "mflr r0"),
+        (0xffff_ffff, 0x9001_0018, "stw r0,24(r1)"),
+        (0xffff_ffff, 0x9041_0028, "stw r2,40(r1)"),
+        (0xffff_0000, 0x3d80_0000, "lis r12,stub@ha"),
+        (0xffff_0000, 0x818c_0000, "lwz r12,stub@l(r12)"),
+        (0xffff_ffff, 0x800c_0000, "lwz r0,0(r12)"),
+        (0xffff_ffff, 0x804c_0004, "lwz r2,4(r12)"),
+        (0xffff_ffff, 0x7c09_03a6, "mtctr r0"),
+        (0xffff_ffff, 0x4e80_0421, "bctrl"),
+        (0xffff_ffff, 0x8041_0028, "lwz r2,40(r1)"),
+        (0xffff_ffff, 0x8001_0018, "lwz r0,24(r1)"),
+        (0xffff_ffff, 0x7c08_03a6, "mtlr r0"),
+        (0xffff_ffff, 0x4e80_0020, "blr"),
+    ];
+    match_expected_words(words, &expected)
+}
+
+fn match_lp64_trampoline(words: &[u32]) -> Vec<String> {
+    let expected = [
+        (0xffff_ffff, 0xf841_0028, "std r2,40(r1)"),
+        (0xffff_0000, 0x3d80_0000, "lis r12,stub@ha"),
+        (0xffff_0000, 0x818c_0000, "lwz r12,stub@l(r12)"),
+        (0xffff_ffff, 0x800c_0000, "lwz r0,0(r12)"),
+        (0xffff_ffff, 0x804c_0004, "lwz r2,4(r12)"),
+        (0xffff_ffff, 0x7c09_03a6, "mtctr r0"),
+        (0xffff_ffff, 0x4e80_0420, "bctr"),
+    ];
+    let mut failures = match_expected_words(words, &expected);
+    for (i, word) in words.iter().enumerate().take(16) {
+        if *word == 0x7c08_02a6 {
+            failures.push(format!("unexpected mflr r0 at word {i}"));
+        }
+        if *word == 0x7c08_03a6 {
+            failures.push(format!("unexpected mtlr r0 at word {i}"));
+        }
+        if *word == 0x4e80_0421 {
+            failures.push(format!("unexpected bctrl at word {i}"));
+        }
+    }
+    failures
+}
+
+fn match_expected_words(words: &[u32], expected: &[(u32, u32, &str)]) -> Vec<String> {
+    let mut failures = Vec::new();
+    if words.len() < expected.len() {
+        failures.push(format!(
+            "body has {} words, expected at least {}",
+            words.len(),
+            expected.len()
+        ));
+    }
+    for (i, (mask, value, label)) in expected.iter().enumerate() {
+        match words.get(i) {
+            Some(word) if (word & mask) == *value => {}
+            Some(word) => failures.push(format!(
+                "word {i} is 0x{word:08x}, expected {label} (mask 0x{mask:08x}, value 0x{value:08x})"
+            )),
+            None => failures.push(format!("missing word {i}: expected {label}")),
+        }
+    }
+    for (i, word) in words.iter().enumerate().take(expected.len()) {
+        if is_stwu_r1(*word) || is_stdu_r1(*word) {
+            failures.push(format!("stack-frame update at word {i}: 0x{word:08x}"));
+        }
+    }
+    failures
+}
+
+fn is_stwu_r1(word: u32) -> bool {
+    (word >> 16) == 0x9421
+}
+
+fn is_stdu_r1(word: u32) -> bool {
+    (word >> 16) == 0xf821
 }
 
 fn collect_relocs(
@@ -578,20 +793,23 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
     } else {
         failures.push(format!("Machine is {}, expected PowerPC64", m.elf.machine));
     }
+    let is_relocatable = m.elf.elf_type == "REL";
     if m.elf.os_abi == ELFOSABI_CELL_LV2 {
         passes.push("OS/ABI byte is 0x66 (Cell LV2)".into());
+    } else if is_relocatable && m.elf.os_abi == 0 {
+        passes.push("OS/ABI byte is 0x00 (untagged relocatable object)".into());
     } else {
         failures.push(format!(
             "OS/ABI byte is 0x{:02x}, expected 0x66 (Cell LV2)",
             m.elf.os_abi
         ));
     }
-    if m.elf.flags == 0x0100_0000 {
-        passes.push("e_flags = 0x01000000".into());
+    if m.elf.flags == CELLOS_LV2_E_FLAGS {
+        passes.push(format!("e_flags = 0x{CELLOS_LV2_E_FLAGS:08x}"));
     } else {
         failures.push(format!(
-            "e_flags = 0x{:08x}, expected 0x01000000",
-            m.elf.flags
+            "e_flags = 0x{:08x}, expected 0x{CELLOS_LV2_E_FLAGS:08x}",
+            m.elf.flags,
         ));
     }
 
@@ -659,42 +877,61 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
 
     // ---- .toc data-model checks ----
     if let Some(toc) = &m.toc_check {
-        // Check 1: data-model consistency + stride
         if toc.mixed_relocs {
             failures.push(format!(
                 ".toc mixed RELA types (R_PPC64_ADDR32 + R_PPC64_ADDR64) — data-model inconsistent"
             ));
-        } else if toc.stride == 4 && toc.data_model == TocDataModel::Ilp32 {
-            passes.push(format!(
-                ".toc data model: ILP32 (stride {}, R_PPC64_ADDR32) — {} relocs",
-                toc.stride, toc.reloc_count
-            ));
-        } else if toc.stride == 8 && toc.data_model == TocDataModel::Lp64 {
-            passes.push(format!(
-                ".toc data model: LP64 (stride {}, R_PPC64_ADDR64) — {} relocs",
-                toc.stride, toc.reloc_count
-            ));
-        } else {
-            failures.push(format!(
-                ".toc stride {} inconsistent with data model {} ({} relocs)",
-                toc.stride,
-                toc.data_model,
-                toc.reloc_count
-            ));
         }
 
-        // Check 2: no R_PPC64_ADDR64 in .toc under ILP32
-        if toc.has_addr64_under_ilp32 {
-            failures.push(
-                "R_PPC64_ADDR64 in .toc under ILP32 data model — invariant violation"
-                    .into(),
-            );
-        } else {
-            passes.push("no R_PPC64_ADDR64 in .toc (ILP32 invariant)".into());
+        match toc.data_model {
+            TocDataModel::Ilp32 => {
+                if toc.addr32_count == 0 {
+                    failures.push(".toc ILP32 has no R_PPC64_ADDR32 relocs".into());
+                }
+                if toc.addr64_count != 0 {
+                    failures.push(
+                        "R_PPC64_ADDR64 in .toc under ILP32 data model — invariant violation"
+                            .into(),
+                    );
+                }
+                if toc.stride == 4 && toc.addr32_count != 0 && toc.addr64_count == 0 {
+                    passes.push(format!(
+                        ".toc ILP32 slot stride = 4, reloc type = R_PPC64_ADDR32 — {} relocs",
+                        toc.reloc_count
+                    ));
+                    passes.push("no R_PPC64_ADDR64 in .toc (ILP32 invariant)".into());
+                } else if toc.stride != 4 {
+                    failures.push(format!(
+                        ".toc ILP32 slot stride = {}, expected 4",
+                        toc.stride
+                    ));
+                }
+            }
+            TocDataModel::Lp64 => {
+                if toc.addr64_count == 0 {
+                    failures.push(".toc LP64 has no R_PPC64_ADDR64 relocs".into());
+                }
+                if toc.addr32_count != 0 {
+                    failures.push(
+                        "R_PPC64_ADDR32 in .toc under LP64 data model — invariant violation".into(),
+                    );
+                }
+                if toc.stride == 8 && toc.addr64_count != 0 && toc.addr32_count == 0 {
+                    passes.push(format!(
+                        ".toc LP64 slot stride = 8, reloc type = R_PPC64_ADDR64 — {} relocs",
+                        toc.reloc_count
+                    ));
+                } else if toc.stride != 8 {
+                    failures.push(format!(
+                        ".toc LP64 slot stride = {}, expected 8",
+                        toc.stride
+                    ));
+                }
+            }
         }
     }
 
-    // ---- .sceStub.text frame-less trampoline check ----
+    // ---- .sceStub.text trampoline-shape check ----
     if let Some(stub) = &m.stub_text_check {
         if stub.has_stwu {
             for off in &stub.stwu_offsets {
@@ -702,6 +939,46 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
             }
         } else {
             passes.push("no stwu in .sceStub.text (frame-less trampoline invariant)".into());
+        }
+        let expected_shape = m.toc_check.as_ref().map(|toc| match toc.data_model {
+            TocDataModel::Ilp32 => StubTrampolineShape::Ilp32Wrapping,
+            TocDataModel::Lp64 => StubTrampolineShape::Lp64TailCall,
+        });
+        if stub.trampolines.is_empty() {
+            failures.push(".sceStub.text present but no trampoline symbols/shapes decoded".into());
+        }
+        for tramp in &stub.trampolines {
+            let name = tramp.name.as_deref().unwrap_or("<anonymous>");
+            if tramp.shape == StubTrampolineShape::Unknown {
+                failures.push(format!(
+                    ".sceStub.text {name} at +0x{:x} does not match an ABI trampoline shape",
+                    tramp.offset
+                ));
+                for reason in &tramp.failures {
+                    failures.push(format!(".sceStub.text {name}: {reason}"));
+                }
+                continue;
+            }
+            if let Some(expected) = expected_shape {
+                if tramp.shape != expected {
+                    failures.push(format!(
+                        ".sceStub.text {name} at +0x{:x} shape {:?}, expected {:?}",
+                        tramp.offset, tramp.shape, expected
+                    ));
+                    continue;
+                }
+            }
+            match tramp.shape {
+                StubTrampolineShape::Ilp32Wrapping => passes.push(format!(
+                    ".sceStub.text {name} at +0x{:x}: ILP32 wrapping bctrl shape",
+                    tramp.offset
+                )),
+                StubTrampolineShape::Lp64TailCall => passes.push(format!(
+                    ".sceStub.text {name} at +0x{:x}: LP64 bctr tail-call shape",
+                    tramp.offset
+                )),
+                StubTrampolineShape::Unknown => {}
+            }
         }
     }
 
@@ -715,6 +992,53 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn base_manifest() -> Manifest {
+        Manifest {
+            path: "test".into(),
+            elf: ElfHeader {
+                class: "ELF64".into(),
+                endian: "big".into(),
+                machine: "PowerPC64".into(),
+                os_abi: ELFOSABI_CELL_LV2,
+                abi_version: 0,
+                elf_type: "EXEC".into(),
+                flags: CELLOS_LV2_E_FLAGS,
+            },
+            sections: vec![],
+            opd: None,
+            sys_proc_prx_param: None,
+            toc_check: None,
+            stub_text_check: None,
+        }
+    }
+
+    fn toc(
+        data_model: TocDataModel,
+        stride: u64,
+        addr32_count: u64,
+        addr64_count: u64,
+    ) -> TocCheckData {
+        TocCheckData {
+            data_model,
+            stride,
+            reloc_count: addr32_count + addr64_count,
+            addr32_count,
+            addr64_count,
+            mixed_relocs: addr32_count > 0 && addr64_count > 0,
+            has_addr64_under_ilp32: data_model == TocDataModel::Ilp32 && addr64_count > 0,
+        }
+    }
+
+    fn trampoline(shape: StubTrampolineShape) -> StubTrampolineCheck {
+        StubTrampolineCheck {
+            name: Some("__stub".into()),
+            offset: 0,
+            size: 0,
+            shape,
+            failures: vec![],
+        }
+    }
 
     #[test]
     fn opd_stride_from_two_entries() {
@@ -754,176 +1078,171 @@ mod tests {
 
     #[test]
     fn toc_check_ilp32_stride_4() {
-        let m = Manifest {
-            path: "test".into(),
-            elf: ElfHeader {
-                class: "ELF64".into(),
-                endian: "big".into(),
-                machine: "PowerPC64".into(),
-                os_abi: ELFOSABI_CELL_LV2,
-                abi_version: 0,
-                elf_type: "EXEC".into(),
-                flags: 0x0100_0000,
-            },
-            sections: vec![],
-            opd: None,
-            sys_proc_prx_param: None,
-            toc_check: Some(TocCheckData {
-                data_model: TocDataModel::Ilp32,
-                stride: 4,
-                reloc_count: 3,
-                mixed_relocs: false,
-                has_addr64_under_ilp32: false,
-            }),
-            stub_text_check: None,
-        };
+        let mut m = base_manifest();
+        m.toc_check = Some(toc(TocDataModel::Ilp32, 4, 3, 0));
         let r = check_invariants(&m);
-        assert!(r.passes.iter().any(|p| p.contains(".toc data model: ILP32")));
+        assert!(r
+            .passes
+            .iter()
+            .any(|p| p.contains(".toc ILP32 slot stride = 4")));
         assert!(r.passes.iter().any(|p| p.contains("no R_PPC64_ADDR64")));
         assert!(r.is_ok());
     }
 
     #[test]
     fn toc_check_addr64_under_ilp32_fails() {
-        let m = Manifest {
-            path: "test".into(),
-            elf: ElfHeader {
-                class: "ELF64".into(),
-                endian: "big".into(),
-                machine: "PowerPC64".into(),
-                os_abi: ELFOSABI_CELL_LV2,
-                abi_version: 0,
-                elf_type: "EXEC".into(),
-                flags: 0x0100_0000,
-            },
-            sections: vec![],
-            opd: None,
-            sys_proc_prx_param: None,
-            toc_check: Some(TocCheckData {
-                data_model: TocDataModel::Ilp32,
-                stride: 4,
-                reloc_count: 3,
-                mixed_relocs: false,
-                has_addr64_under_ilp32: true,
-            }),
-            stub_text_check: None,
-        };
+        let mut m = base_manifest();
+        m.toc_check = Some(toc(TocDataModel::Ilp32, 4, 2, 1));
         let r = check_invariants(&m);
-        assert!(r.failures.iter().any(|f| f.contains("R_PPC64_ADDR64 in .toc")));
+        assert!(r
+            .failures
+            .iter()
+            .any(|f| f.contains("R_PPC64_ADDR64 in .toc")));
         assert!(!r.is_ok());
     }
 
     #[test]
     fn toc_check_lp64_stride_8() {
-        let m = Manifest {
-            path: "test".into(),
-            elf: ElfHeader {
-                class: "ELF64".into(),
-                endian: "big".into(),
-                machine: "PowerPC64".into(),
-                os_abi: ELFOSABI_CELL_LV2,
-                abi_version: 0,
-                elf_type: "EXEC".into(),
-                flags: 0x0100_0000,
-            },
-            sections: vec![],
-            opd: None,
-            sys_proc_prx_param: None,
-            toc_check: Some(TocCheckData {
-                data_model: TocDataModel::Lp64,
-                stride: 8,
-                reloc_count: 2,
-                mixed_relocs: false,
-                has_addr64_under_ilp32: false,
-            }),
-            stub_text_check: None,
-        };
+        let mut m = base_manifest();
+        m.toc_check = Some(toc(TocDataModel::Lp64, 8, 0, 2));
         let r = check_invariants(&m);
-        assert!(r.passes.iter().any(|p| p.contains(".toc data model: LP64")));
+        assert!(r
+            .passes
+            .iter()
+            .any(|p| p.contains(".toc LP64 slot stride = 8")));
         assert!(r.is_ok());
     }
 
     #[test]
     fn toc_mixed_relocs_fails() {
-        let m = Manifest {
-            path: "test".into(),
-            elf: ElfHeader {
-                class: "ELF64".into(),
-                endian: "big".into(),
-                machine: "PowerPC64".into(),
-                os_abi: ELFOSABI_CELL_LV2,
-                abi_version: 0,
-                elf_type: "EXEC".into(),
-                flags: 0x0100_0000,
-            },
-            sections: vec![],
-            opd: None,
-            sys_proc_prx_param: None,
-            toc_check: Some(TocCheckData {
-                data_model: TocDataModel::Ilp32,
-                stride: 4,
-                reloc_count: 5,
-                mixed_relocs: true,
-                has_addr64_under_ilp32: true,
-            }),
-            stub_text_check: None,
-        };
+        let mut m = base_manifest();
+        m.toc_check = Some(toc(TocDataModel::Ilp32, 4, 4, 1));
         let r = check_invariants(&m);
         assert!(r.failures.iter().any(|f| f.contains(".toc mixed RELA")));
         assert!(!r.is_ok());
     }
 
     #[test]
-    fn stub_text_no_stwu_passes() {
-        let m = Manifest {
-            path: "test".into(),
-            elf: ElfHeader {
-                class: "ELF64".into(),
-                endian: "big".into(),
-                machine: "PowerPC64".into(),
-                os_abi: ELFOSABI_CELL_LV2,
-                abi_version: 0,
-                elf_type: "EXEC".into(),
-                flags: 0x0100_0000,
-            },
-            sections: vec![],
-            opd: None,
-            sys_proc_prx_param: None,
-            toc_check: None,
-            stub_text_check: Some(StubTextCheckData {
-                has_stwu: false,
-                stwu_offsets: vec![],
-            }),
-        };
+    fn toc_ilp32_stride_8_fails() {
+        let mut m = base_manifest();
+        m.toc_check = Some(toc(TocDataModel::Ilp32, 8, 2, 0));
         let r = check_invariants(&m);
-        assert!(r.passes.iter().any(|p| p.contains("no stwu in .sceStub.text")));
+        assert!(r
+            .failures
+            .iter()
+            .any(|f| f.contains("ILP32 slot stride = 8")));
+        assert!(!r.is_ok());
+    }
+
+    #[test]
+    fn toc_lp64_addr32_fails() {
+        let mut m = base_manifest();
+        m.toc_check = Some(toc(TocDataModel::Lp64, 8, 1, 2));
+        let r = check_invariants(&m);
+        assert!(r
+            .failures
+            .iter()
+            .any(|f| f.contains("R_PPC64_ADDR32 in .toc")));
+        assert!(!r.is_ok());
+    }
+
+    #[test]
+    fn toc_lp64_stride_4_fails() {
+        let mut m = base_manifest();
+        m.toc_check = Some(toc(TocDataModel::Lp64, 4, 0, 2));
+        let r = check_invariants(&m);
+        assert!(r
+            .failures
+            .iter()
+            .any(|f| f.contains("LP64 slot stride = 4")));
+        assert!(!r.is_ok());
+    }
+
+    #[test]
+    fn stub_text_no_stwu_passes() {
+        let mut m = base_manifest();
+        m.stub_text_check = Some(StubTextCheckData {
+            has_stwu: false,
+            stwu_offsets: vec![],
+            trampolines: vec![trampoline(StubTrampolineShape::Ilp32Wrapping)],
+        });
+        let r = check_invariants(&m);
+        assert!(r
+            .passes
+            .iter()
+            .any(|p| p.contains("no stwu in .sceStub.text")));
         assert!(r.is_ok());
     }
 
     #[test]
     fn stub_text_has_stwu_fails() {
-        let m = Manifest {
-            path: "test".into(),
-            elf: ElfHeader {
-                class: "ELF64".into(),
-                endian: "big".into(),
-                machine: "PowerPC64".into(),
-                os_abi: ELFOSABI_CELL_LV2,
-                abi_version: 0,
-                elf_type: "EXEC".into(),
-                flags: 0x0100_0000,
-            },
-            sections: vec![],
-            opd: None,
-            sys_proc_prx_param: None,
-            toc_check: None,
-            stub_text_check: Some(StubTextCheckData {
-                has_stwu: true,
-                stwu_offsets: vec![16],
-            }),
-        };
+        let mut m = base_manifest();
+        m.stub_text_check = Some(StubTextCheckData {
+            has_stwu: true,
+            stwu_offsets: vec![16],
+            trampolines: vec![trampoline(StubTrampolineShape::Unknown)],
+        });
         let r = check_invariants(&m);
-        assert!(r.failures.iter().any(|f| f.contains("stwu found at .sceStub.text")));
+        assert!(r
+            .failures
+            .iter()
+            .any(|f| f.contains("stwu found at .sceStub.text")));
         assert!(!r.is_ok());
+    }
+
+    #[test]
+    fn ilp32_trampoline_words_match() {
+        let words = [
+            0x7c08_02a6,
+            0x9001_0018,
+            0x9041_0028,
+            0x3d80_1234,
+            0x818c_5678,
+            0x800c_0000,
+            0x804c_0004,
+            0x7c09_03a6,
+            0x4e80_0421,
+            0x8041_0028,
+            0x8001_0018,
+            0x7c08_03a6,
+            0x4e80_0020,
+        ];
+        assert_eq!(
+            classify_trampoline_words(&words).0,
+            StubTrampolineShape::Ilp32Wrapping
+        );
+    }
+
+    #[test]
+    fn lp64_trampoline_words_match() {
+        let words = [
+            0xf841_0028,
+            0x3d80_1234,
+            0x818c_5678,
+            0x800c_0000,
+            0x804c_0004,
+            0x7c09_03a6,
+            0x4e80_0420,
+        ];
+        assert_eq!(
+            classify_trampoline_words(&words).0,
+            StubTrampolineShape::Lp64TailCall
+        );
+    }
+
+    #[test]
+    fn lp64_trampoline_rejects_bctrl() {
+        let words = [
+            0xf841_0028,
+            0x3d80_1234,
+            0x818c_5678,
+            0x800c_0000,
+            0x804c_0004,
+            0x7c09_03a6,
+            0x4e80_0421,
+        ];
+        let (shape, failures) = classify_trampoline_words(&words);
+        assert_eq!(shape, StubTrampolineShape::Unknown);
+        assert!(failures.iter().any(|f| f.contains("unexpected bctrl")));
     }
 }

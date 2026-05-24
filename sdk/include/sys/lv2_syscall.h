@@ -44,6 +44,14 @@
     "r"(p1), "r"(p2), "r"(p3), "r"(p4), \
     "r"(p5), "r"(p6), "r"(p7), "r"(p8), "r"(scn)
 
+/* If a translation unit also pulls the legacy <ppu-lv2.h> family
+ * (e.g. via <sys/spu.h>), it already provides lv2syscall0..8 with a
+ * byte-equivalent register-asm body (verified: same r3..r11 mapping,
+ * same "sc", same _LV2_OUT/_LV2_IN/_LV2_CLOBBERS constraint+clobber
+ * set).  First-include-wins avoids a redefinition warning with no
+ * codegen change either way. */
+#ifndef lv2syscall0
+
 #define lv2syscall0(syscall)                                                     \
         register u64 p1 __asm__("3");                                            \
         register u64 p2 __asm__("4");                                            \
@@ -152,11 +160,18 @@
         register u64 scn __asm__("11") = (syscall);                              \
         __asm__ __volatile__("sc" : _LV2_OUT : _LV2_IN : _LV2_CLOBBERS)
 
+#endif /* !lv2syscall0 — defer to an already-included equivalent family */
+
 /* Result accessors.  After an lv2syscallN call, p1..p8 hold result
  * slots 1..8 and `return_to_user_prog(T)` casts slot 1 as the typical
  * "return code" path.  register_passing_K(T) pulls the K-th
  * additional out-arg (e.g. an event-queue receive that returns four
  * u64s from one syscall). */
+/* Same first-include-wins rationale as the lv2syscall family above:
+ * legacy <ppu-lv2.h> defines a behaviorally-identical accessor set
+ * (only inert outer parens differ), so defer if already provided. */
+#ifndef return_to_user_prog
+
 #define return_to_user_prog(ret_type) return (ret_type)(p1)
 
 #define register_passing_1(type)      ((type)(p2))
@@ -166,5 +181,7 @@
 #define register_passing_5(type)      ((type)(p6))
 #define register_passing_6(type)      ((type)(p7))
 #define register_passing_7(type)      ((type)(p8))
+
+#endif /* !return_to_user_prog — defer to an already-included equivalent set */
 
 #endif /* __PS3DK_SYS_LV2_SYSCALL_H__ */
