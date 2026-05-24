@@ -1,7 +1,7 @@
---- a/gcc/config/rs6000/cell64lv2.opt
-+++ b/gcc/config/rs6000/cell64lv2.opt
-@@ -0,0 +1,24 @@
-+; Options specific to the powerpc64-ps3-elf hybrid ABI.
+--- a/gcc/config/rs6000/ps3-lp64.opt
++++ b/gcc/config/rs6000/ps3-lp64.opt
+@@ -0,0 +1,28 @@
++; Options shared by PS3 PPU targets that use the LP64 data-model axis.
 +;
 +; The chip is always 64-bit (PowerPC64 ISA, ELF64 file format).
 +; The data model is selectable: ILP32 by default (32-bit pointer,
@@ -25,3 +25,7 @@
 +; You should have received a copy of the GNU General Public License
 +; along with GCC; see the file COPYING3.  If not see
 +; <http://www.gnu.org/licenses/>.
++
++mlp64
++Target Mask(LP64) Var(rs6000_isa_flags)
++Use LP64 data model (64-bit pointers and longs).
