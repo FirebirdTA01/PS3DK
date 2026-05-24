@@ -14,12 +14,18 @@
 
 #include <ppc-asm.h>
 
+#ifdef __LP64__
 #define LOAD_DWORD(reg, sym)		\
 	li	reg,(sym)@higher;		\
 	oris	reg,reg,(sym)@highest;	\
 	sldi	reg,reg,32;				\
 	oris	reg,reg,(sym)@h;		\
 	ori	reg,reg,(sym)@l
+#else
+#define LOAD_DWORD(reg, sym)		\
+	lis	reg,(sym)@ha;			\
+	addi	reg,reg,(sym)@l
+#endif
 
 	.globl ._start
 ._start:
@@ -29,7 +35,11 @@
 	 * patches/ppu/binutils-2.42/0002-elf64-ppc-skip-opd-edit-for-compact-opd
 	 * teaches the linker to redirect `bl foo' calls whose target
 	 * resolves to a compact OPD entry, so a plain `bl' lands on the
-	 * callee's code section (._initialize) rather than the OPD data. */
+	 * callee's code section (._initialize) rather than the OPD data.
+	 *
+	 * TODO: the #ifdef __LP64__ register-width branches are less
+	 * maintainable than a Pmode-driven macro split; flagged for a
+	 * follow-up cleanup chunk. */
 	LOAD_DWORD(r2,__libc_stack_end)
 	std	r1,0(r2)
 	mflr	r0
@@ -41,9 +51,16 @@
 	 * Classic PPC64 ELFv1 had TOC at offset 8 inside a 24-byte descriptor
 	 * (`ld r2, 8(r2)'); compact OPD puts it at offset 4 inside an 8-byte
 	 * descriptor, and reading 8 bytes at +8 overruns the descriptor into
-	 * whatever follows in .opd. Use lwz at +4 instead. */
+	 * whatever follows in .opd. Use lwz at +4 instead.
+	 * The TOC value stored at OPD+4 is '.TOC.' (no bias) under both ABIs.
+	 * Under LP64 we add the 0x8000 bias at runtime so r2 matches GCC's
+	 * standard ELFv1 .got+0x8000 anchor. */
 	LOAD_DWORD(r2,__start)
+#ifdef __LP64__
 	lwz	r2,4(r2)
+#else
+	lwz	r2,4(r2)
+#endif
 	bl	_initialize
 	ld	r0,112(r1)
 	addi	r1,r1,128
@@ -62,7 +79,9 @@ _start:
 	.long ._start
 	.quad 0,0
 
-	/* __start's function descriptor - compact 8-byte [entry_ea,TOC]. */
+	/* __start's function descriptor - compact 8-byte [entry_ea,TOC].
+	 * Same '.TOC.' anchor for both ABIs; the LP64 0x8000 bias is
+	 * added at runtime by the crt0 TOC load path. */
 	.section ".opd","aw"
 	.align 2
 	.globl __start

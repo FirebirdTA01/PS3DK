@@ -55,6 +55,12 @@ OBJ_DIR     := build
 C_SRCS      := $(filter-out $(SRC_DIR)/dbgfont_shaders.c,$(wildcard $(SRC_DIR)/*.c))
 C_OBJS      := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(C_SRCS))
 
+# LP64 (-mlp64) multilib variants — mirrors build-runtime-lv2.sh pattern.
+LP64_OBJ_DIR := $(OBJ_DIR)-lp64
+LP64_ARCHIVE := $(LP64_OBJ_DIR)/libdbgfont.a
+LP64_C_OBJS  := $(patsubst $(SRC_DIR)/%.c,$(LP64_OBJ_DIR)/%.o,$(C_SRCS))
+LP64_CFLAGS  := $(CFLAGS) -mlp64
+
 VP_SRCS     := $(wildcard $(SHADER_DIR)/*.vcg)
 FP_SRCS     := $(wildcard $(SHADER_DIR)/*.fcg)
 SHADER_OBJS := $(patsubst $(SHADER_DIR)/%.vcg,$(OBJ_DIR)/%.vpo.o,$(VP_SRCS)) \
@@ -66,9 +72,13 @@ INSTALL_LIB := $(PS3DK)/ppu/lib
 
 .PHONY: all install clean
 
-all: $(ARCHIVE)
+all: $(ARCHIVE) $(LP64_ARCHIVE)
 
 $(ARCHIVE): $(C_OBJS) $(SHADER_OBJS)
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+
+$(LP64_ARCHIVE): $(LP64_C_OBJS) $(SHADER_OBJS)
 	$(AR) $(ARFLAGS) $@ $^
 	$(RANLIB) $@
 
@@ -101,12 +111,20 @@ $(OBJ_DIR)/%.fpo.o: $(OBJ_DIR)/%.fpo.s
 $(OBJ_DIR):
 	@mkdir -p $@
 
-install: $(ARCHIVE)
+$(LP64_OBJ_DIR):
+	@mkdir -p $@
+
+$(LP64_OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(LP64_OBJ_DIR)
+	$(CC) $(LP64_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+install: $(ARCHIVE) $(LP64_ARCHIVE)
 	@install -d $(INSTALL_LIB)
 	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libdbgfont.a
-	@echo "installed libdbgfont.a into $(INSTALL_LIB)/"
+	@install -d $(INSTALL_LIB)/lp64
+	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LIB)/lp64/libdbgfont.a
+	@echo "installed libdbgfont.a into $(INSTALL_LIB)/ (ILP32 + LP64)"
 
 clean:
-	rm -rf $(OBJ_DIR)
+	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)
 
 -include $(wildcard $(OBJ_DIR)/*.d)

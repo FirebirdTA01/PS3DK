@@ -61,29 +61,21 @@ typedef unsigned int CellSysutilUserId;
 #define CELL_SYSUTIL_SYSCHAT_VOICE_STREAMING_RESUMED     0x0163
 #define CELL_SYSUTIL_SYSCHAT_VOICE_STREAMING_PAUSED      0x0164
 
-/* PSL1GHT-side entry points - declared locally with our types so we
- * don't pull <sysutil/sysutil.h> (and its sysutilCallback typedef)
- * into every TU that just wants the reference-SDK callback surface.
- * Linker resolves by name; the function-pointer arg mangles the
- * same under C linkage regardless of which typedef the prototype
- * names. */
-extern int sysUtilCheckCallback(void);
-extern int sysUtilRegisterCallback(int slot, CellSysutilCallback func, void *userdata);
-extern int sysUtilUnregisterCallback(int slot);
-
-/* Callback registry — thin static inlines so reference-SDK-named call sites
- * compile down to direct branches against PSL1GHT's existing runtime. */
-static inline int cellSysutilCheckCallback(void) {
-	return sysUtilCheckCallback();
-}
-
-static inline int cellSysutilRegisterCallback(int slot, CellSysutilCallback func, void *userdata) {
-	return sysUtilRegisterCallback(slot, func, userdata);
-}
-
-static inline int cellSysutilUnregisterCallback(int slot) {
-	return sysUtilUnregisterCallback(slot);
-}
+/* Callback registry — direct reference-NID imports.
+ *
+ * These bind to the native nidgen-emitted multilib stub archive
+ * (libsysutil_stub.a, ILP32 + LP64) which provides the canonical
+ * cellSysutil* SPRX trampolines via our compact-OPD frame-less stub
+ * shape.  No PSL1GHT forwarder (sysUtilRegisterCallback /
+ * __get_opd32 / PSL1GHT libsysutil.a) is involved.  Signatures are
+ * the reference-SDK contract (sysutil_common.h §callback registry):
+ *   int cellSysutilCheckCallback(void);
+ *   int cellSysutilRegisterCallback(int, CellSysutilCallback, void*);
+ *   int cellSysutilUnregisterCallback(int);
+ * Link with -lsysutil_stub (not the PSL1GHT -lsysutil). */
+extern int cellSysutilCheckCallback(void);
+extern int cellSysutilRegisterCallback(int slot, CellSysutilCallback func, void *userdata);
+extern int cellSysutilUnregisterCallback(int slot);
 
 #ifdef __cplusplus
 }

@@ -82,14 +82,53 @@ say "Build deps present."
 # -----------------------------------------------------------------------------
 # Clone helpers.
 # -----------------------------------------------------------------------------
+# HTTP timeout/buffer tuning for slow upstreams.  sourceware.org has
+# answered at 15-30 s/request under load; the GitHub Actions runner's
+# default git http timeouts are short enough to misread that as a
+# stall and abort with HTTP 502 mid-clone.  These three flags raise
+# the bar so a slow but still-progressing transfer is not killed:
+#   postBuffer 1 GB     - prevents premature client-side close on big push/fetch
+#   lowSpeedLimit 1000  - threshold (bytes/s) below which we consider the link stalled
+#   lowSpeedTime 600    - we only call it stalled after 10 min below threshold
+# Together with retry_git below this rides through every flake we
+# have seen on sourceware.org / gcc.gnu.org without operator
+# intervention.
+GIT_HTTP_FLAGS=(
+    -c http.postBuffer=1048576000
+    -c http.lowSpeedLimit=1000
+    -c http.lowSpeedTime=600
+)
+
+# Retry a git invocation up to 3 times with exponential backoff
+# (15 s, 30 s).  Use for clone / fetch operations that hit slow
+# upstream mirrors so a transient 502 does not break the bootstrap.
+retry_git() {
+    local description="$1"; shift
+    local attempts=3
+    local delay=15
+    local attempt
+    for attempt in $(seq 1 "$attempts"); do
+        if git "${GIT_HTTP_FLAGS[@]}" "$@"; then
+            return 0
+        fi
+        if (( attempt < attempts )); then
+            warn "$description failed (attempt $attempt/$attempts), retrying in ${delay}s..."
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+    done
+    warn "$description failed after $attempts attempts"
+    return 1
+}
+
 clone_shallow() {
     local url="$1" dir="$2"
     if [[ -d "$dir/.git" ]]; then
         say "Updating $dir"
-        git -C "$dir" fetch --depth 1 --all --tags --prune
+        retry_git "git fetch in $dir" -C "$dir" fetch --depth 1 --all --tags --prune
     else
         say "Cloning $url -> $dir"
-        git clone --depth 1 "$url" "$dir"
+        retry_git "git clone of $url" clone --depth 1 "$url" "$dir"
     fi
 }
 
@@ -116,16 +155,17 @@ clone_partial() {
     local url="$1" dir="$2"
     if [[ -d "$dir/.git" ]]; then
         say "Updating $dir"
-        git -C "$dir" fetch --depth 1 --all --tags --prune
+        retry_git "git fetch in $dir" -C "$dir" fetch --depth 1 --all --tags --prune
     else
         say "Cloning (shallow) $url -> $dir"
-        git clone --depth 1 "$url" "$dir"
+        retry_git "git clone of $url" clone --depth 1 "$url" "$dir"
     fi
 }
 
 fetch_tag() {
     local dir="$1" tag="$2"
-    (cd "$dir" && git fetch --depth 1 origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null) \
+    (cd "$dir" && retry_git "git fetch tag $tag in $dir" \
+        fetch --depth 1 origin "refs/tags/$tag:refs/tags/$tag") \
         || warn "Failed to fetch tag $tag in $dir (may already be present)"
 }
 
@@ -138,7 +178,13 @@ UPSTREAM_DIR="$PS3_TOOLCHAIN_ROOT/src/upstream"
 mkdir -p "$UPSTREAM_DIR"
 
 # GCC — need both 12.4.0 (PPU) and 9.5.0 (SPU).
-clone_partial "https://gcc.gnu.org/git/gcc.git" "$UPSTREAM_DIR/gcc"
+# Use the GitHub mirror — gcc.gnu.org's git endpoint has answered
+# at 15-30 s/request under load (HTTP 200 but past the GitHub
+# Actions timeout for git's hundreds-of-requests clone path),
+# returning RPC-failed 502s mid-clone.  github.com/gcc-mirror/gcc
+# is the official mirror maintained by the GCC team and answers
+# in ~250 ms; tag names match (releases/gcc-12.4.0 etc.).
+clone_partial "https://github.com/gcc-mirror/gcc.git" "$UPSTREAM_DIR/gcc"
 fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-12.4.0"
 fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-9.5.0"
 

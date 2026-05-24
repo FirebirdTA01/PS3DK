@@ -67,6 +67,95 @@ if(NOT _PS3_SELF_TOOLS_PROBED)
 endif()
 
 # -----------------------------------------------------------------------------
+# One-time installed-SDK freshness probe
+# -----------------------------------------------------------------------------
+if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
+    set(_PS3_SELF_SDK_INSTALL_PROBED TRUE)
+
+    set(_ps3_manifest "${PS3DK}/.ps3dk-install-manifest")
+    if(NOT EXISTS "${_ps3_manifest}")
+        message(FATAL_ERROR
+            "ps3-self: SDK install manifest missing: ${_ps3_manifest}\n"
+            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+    endif()
+
+    execute_process(
+        COMMAND "${_PS3_TOOLCHAIN_ROOT}/scripts/version.sh" --format=plain
+        WORKING_DIRECTORY "${_PS3_TOOLCHAIN_ROOT}"
+        OUTPUT_VARIABLE _ps3_expected_version
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _ps3_version_rc)
+    if(NOT _ps3_version_rc EQUAL 0)
+        message(FATAL_ERROR "ps3-self: failed to compute source SDK version")
+    endif()
+
+    if(NOT EXISTS "${PS3DK}/VERSION")
+        message(FATAL_ERROR
+            "ps3-self: SDK VERSION marker missing: ${PS3DK}/VERSION\n"
+            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+    endif()
+    file(READ "${PS3DK}/VERSION" _ps3_installed_version)
+    string(STRIP "${_ps3_installed_version}" _ps3_installed_version)
+    if(NOT _ps3_installed_version STREQUAL _ps3_expected_version)
+        message(FATAL_ERROR
+            "ps3-self: stale SDK install.\n"
+            "  source:    ${_ps3_expected_version}\n"
+            "  installed: ${_ps3_installed_version}\n"
+            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+    endif()
+
+    set(_ps3_source_video_header "${_PS3_TOOLCHAIN_ROOT}/sdk/include/sysutil/video.h")
+    set(_ps3_installed_video_header "${PS3DK}/ppu/include/sysutil/video.h")
+    foreach(path "${_ps3_source_video_header}" "${_ps3_installed_video_header}")
+        if(NOT EXISTS "${path}")
+            message(FATAL_ERROR
+                "ps3-self: required SDK header missing: ${path}\n"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+    endforeach()
+    file(SHA256 "${_ps3_source_video_header}" _ps3_source_video_sha)
+    file(SHA256 "${_ps3_installed_video_header}" _ps3_installed_video_sha)
+    if(NOT _ps3_source_video_sha STREQUAL _ps3_installed_video_sha)
+        message(FATAL_ERROR
+            "ps3-self: stale sysutil/video.h in SDK install.\n"
+            "  source:    ${_ps3_source_video_sha}\n"
+            "  installed: ${_ps3_installed_video_sha}\n"
+            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+    endif()
+
+    foreach(path
+        "${PS3DK}/ppu/include/cell/sdk_version.h"
+        "${PS3DK}/ppu/lib/libsysutil_stub.a"
+        "${PS3DK}/ppu/lib/lp64/libsysutil_stub.a"
+        "${PS3DK}/ppu/lib/liblv2.a"
+        "${PS3DK}/ppu/lib/lp64/liblv2.a"
+        "${PS3DK}/ppu/lib/librsx.a"
+        "${PS3DK}/ppu/lib/lp64/librsx.a")
+        if(NOT EXISTS "${path}")
+            message(FATAL_ERROR
+                "ps3-self: required SDK artifact missing: ${path}\n"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+    endforeach()
+
+    foreach(alias
+        "${PS3DK}/ppu/lib/libsysutil.a"
+        "${PS3DK}/ppu/lib/lp64/libsysutil.a")
+        if(NOT IS_SYMLINK "${alias}")
+            message(FATAL_ERROR
+                "ps3-self: ${alias} must be a symlink to libsysutil_stub.a\n"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+        file(READ_SYMLINK "${alias}" _ps3_alias_target)
+        if(NOT _ps3_alias_target STREQUAL "libsysutil_stub.a")
+            message(FATAL_ERROR
+                "ps3-self: ${alias} points to ${_ps3_alias_target}, expected libsysutil_stub.a\n"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+    endforeach()
+endif()
+
+# -----------------------------------------------------------------------------
 # ps3_add_self(target [TITLE str] [APPID str] [CONTENTID str])
 # -----------------------------------------------------------------------------
 # TITLE / APPID / CONTENTID are reserved for the .pkg target which a
@@ -98,7 +187,7 @@ function(ps3_add_self target)
 
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_STRIP}" "${_elf}" -o "${_stripped}"
-        COMMAND "${PS3_TOOL_sprxlinker}" "${_stripped}"
+        COMMAND "${PS3_TOOL_sprxlinker}" ${PS3_SPRXLINKER_FLAGS} "${_stripped}"
         COMMAND "${PS3_TOOL_make_self}"  "${_stripped}" "${_self}"
         COMMAND "${PS3_TOOL_fself}"      "${_stripped}" "${_fake_self}"
         BYPRODUCTS "${_stripped}" "${_self}" "${_fake_self}"

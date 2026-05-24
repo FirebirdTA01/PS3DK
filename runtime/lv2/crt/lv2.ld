@@ -204,7 +204,9 @@ SECTIONS
 	.toc1		  : ALIGN(8) { *(.toc1) }
 	.opd		  : ALIGN(4) { KEEP (*(.opd)) }
 	.branch_lt	  : ALIGN(8) { *(.branch_lt) }
+	__lv2_got_start = .;
 	.got		  : ALIGN(8) { *(.got .toc) }
+	__lv2_toc_bias = __lv2_got_start + 0x8000 - .TOC.;
 	.toc.sceStub  : { KEEP (*(.toc.sceStub)) KEEP (*(SORT(.toc.sceStub.*))) }
 	
 	/* Thread Local Storage sections  */

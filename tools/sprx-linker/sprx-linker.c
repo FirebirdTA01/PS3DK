@@ -28,6 +28,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #include <libelf.h>
 
@@ -74,6 +75,8 @@ typedef struct _opd64
    marker at offset 4 of .sys_proc_prx_param. Size word (offset 0)
    intentionally not compared — both 0x28 and 0x40 are accepted. */
 static const unsigned char PRX_MAGIC[4] = { 0x1b, 0x43, 0x4c, 0xec };
+static const uint32_t PPC_NOP = 0x60000000;
+static const uint32_t PPC_LD_R2_40_R1 = 0xe8410028;
 
 static Elf_Scn *getSection(Elf *elf, const char *name)
 {
@@ -91,16 +94,105 @@ static Elf_Scn *getSection(Elf *elf, const char *name)
 	return NULL;
 }
 
+static int64_t sign_extend(int64_t value, unsigned bits)
+{
+	int64_t shift = 64 - bits;
+	return (value << shift) >> shift;
+}
+
+static bool branch_target(uint32_t insn, uint64_t pc, uint64_t *target)
+{
+	uint32_t opcode = insn >> 26;
+	uint32_t lk = insn & 1;
+	if(opcode != 18 || !lk)
+		return false;
+
+	int64_t disp = sign_extend((int64_t)(insn & 0x03fffffc), 26);
+	if(insn & 2) {
+		*target = (uint64_t)disp;
+	} else {
+		*target = (uint64_t)((int64_t)pc + disp);
+	}
+	return true;
+}
+
+static bool section_contains(const Elf64_Shdr *shdr, uint64_t addr)
+{
+	return addr >= shdr->sh_addr && addr < shdr->sh_addr + shdr->sh_size;
+}
+
+static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
+{
+	Elf_Scn *text = getSection(elf, ".text");
+	Elf_Scn *sce_stub_text = getSection(elf, ".sceStub.text");
+	if(!text || !sce_stub_text)
+		return 0;
+
+	Elf_Data *textdata = elf_getdata(text, NULL);
+	Elf64_Shdr *textshdr = elf64_getshdr(text);
+	Elf64_Shdr *sce_stub_shdr = elf64_getshdr(sce_stub_text);
+	if(!textdata || !textshdr || !sce_stub_shdr)
+		return 0;
+
+	unsigned char *buf = (unsigned char *)textdata->d_buf;
+	size_t count = textdata->d_size / sizeof(uint32_t);
+	int rewrites = 0;
+
+	for(size_t i = 0; i + 1 < count; i++) {
+		uint32_t insn;
+		memcpy(&insn, buf + i * sizeof(uint32_t), sizeof(insn));
+		insn = BE32(insn);
+
+		uint64_t target = 0;
+		if(!branch_target(insn, textshdr->sh_addr + i * sizeof(uint32_t), &target))
+			continue;
+		if(!section_contains(sce_stub_shdr, target))
+			continue;
+
+		uint32_t next;
+		memcpy(&next, buf + (i + 1) * sizeof(uint32_t), sizeof(next));
+		next = BE32(next);
+		if(next != PPC_NOP)
+			continue;
+
+		uint32_t replacement = BE32(PPC_LD_R2_40_R1);
+		off_t off = (off_t)(textshdr->sh_offset + (i + 1) * sizeof(uint32_t));
+		if(lseek(fd, off, SEEK_SET) < 0
+		   || write(fd, &replacement, sizeof(replacement)) != (ssize_t)sizeof(replacement)) {
+			fprintf(stderr,
+			    "sprx-linker: write LP64 TOC restore failed at %s:%d\n",
+			    __FILE__, __LINE__);
+			return -1;
+		}
+		rewrites++;
+	}
+
+	return rewrites;
+}
+
 int main(int argc, char *argv[])
 {
-	if(argc < 2) {
-		printf("Usage: %s [elf path]\n", argv[0]);
+	bool lp64 = false;
+	const char *elf_path = NULL;
+	for(int i = 1; i < argc; i++) {
+		if(!strcmp(argv[i], "--lp64")) {
+			lp64 = true;
+		} else if(!elf_path) {
+			elf_path = argv[i];
+		} else {
+			fprintf(stderr, "sprx-linker: unexpected argument: %s\n", argv[i]);
+			return 1;
+		}
+	}
+
+	if(!elf_path) {
+		printf("Usage: %s [--lp64] [elf path]\n", argv[0]);
 		return 0;
 	}
 
-	int fd = open(argv[1], OFLAGS);
+	int fd = open(elf_path, OFLAGS);
 	if(fd < 0) {
-		fprintf(stderr, "sprx-linker: unable to open elf file: %s\n", argv[1]);
+		fprintf(stderr, "sprx-linker: unable to open elf file: %s\n", elf_path);
 		return 1;
 	}
 
@@ -110,6 +202,12 @@ int main(int argc, char *argv[])
 	if(!elf) {
 		fprintf(stderr, "sprx-linker: libelf could not read elf file: %s\n",
 			elf_errmsg(elf_errno()));
+		close(fd);
+		return 1;
+	}
+
+	if(lp64 && rewrite_lp64_sce_stub_toc_restores(fd, elf) < 0) {
+		elf_end(elf);
 		close(fd);
 		return 1;
 	}
