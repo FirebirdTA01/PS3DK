@@ -195,7 +195,7 @@ fetch_tag "$UPSTREAM_DIR/binutils-gdb" "gdb-14.2-release"
 
 # Newlib.
 clone_partial "https://sourceware.org/git/newlib-cygwin.git" "$UPSTREAM_DIR/newlib-cygwin"
-fetch_tag "$UPSTREAM_DIR/newlib-cygwin" "newlib-4.4.0.20231231"
+fetch_tag "$UPSTREAM_DIR/newlib-cygwin" "newlib-4.4.0"
 
 # -----------------------------------------------------------------------------
 # 2. ps3dev repos.
