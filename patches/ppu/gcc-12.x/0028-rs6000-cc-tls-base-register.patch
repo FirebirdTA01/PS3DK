@@ -1,0 +1,74 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: pick TLS base register from ELF class, not pointer mode
+
+Patch 0016 retargeted the local-exec, rs6000_tls_size==32 branch of
+rs6000_legitimize_tls_address from TARGET_64BIT to Pmode == DImode.
+That move was correct for choosing between the gen_tls_tprel_ha_64
+and gen_tls_tprel_ha_32 RTL template variants (which now follow
+Pmode == Pptr), but it incorrectly tied the choice of TLS base
+register to the same predicate.
+
+Under our default ILP32 hybrid ABI TARGET_64BIT is true and Pmode is
+SImode.  The previous shape took the `else' branch and emitted
+
+    addis  rX,2,sym@tprel@ha
+    addi   rX,rX,sym@tprel@l
+
+using r2 (the TOC pointer) as the supposed thread-pointer base.  The
+PowerPC64 ELF ABI puts the thread pointer in r13 whenever the binary
+is ELF64, regardless of how wide the C pointer model is.  Using r2
+silently produces wrong-code: each thread-local access reads from the
+caller's TOC instead of the calling thread's TLS area.
+
+The two decisions are independent and need to be made on independent
+predicates:
+
+  * Which physical register holds the thread pointer is fixed by the
+    target's ELF class.  For powerpc64-ps3-elf this is always r13;
+    PowerPC 32-bit ELF uses r2.  Gate on TARGET_64BIT.
+
+  * Which RTL template variant emits the addis/addi sequence depends
+    on the operand width, i.e. Pmode (== Pptr).  Gate on
+    Pmode == DImode.
+
+This patch unconditionally sets `tlsreg' from TARGET_64BIT and then
+selects the template variant by Pmode.  All other Pmode == DImode
+checks in this file were already template-variant decisions and are
+left unchanged.
+
+No existing in-tree sample exercises a block-scope static
+thread_local, so the wrong-code went undetected until EMP_Lib's
+collisionResponse.cpp brought it to surface.  After the fix the same
+TU emits
+
+    addis  9,13,sym@tprel@ha
+    addi   9,9,sym@tprel@l
+
+which is the canonical ELFv1 ELF64 local-exec sequence.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -9544,16 +9544,15 @@
+       rtx tlsreg, tmp;
+ 
+       tmp = gen_reg_rtx (Pmode);
++      /* The TLS pointer register depends on the ELF class (TARGET_64BIT),
++	 not on C pointer width.  Under our ELF64 + ILP32 hybrid default,
++	 TARGET_64BIT is true while Pmode is SImode; the base register
++	 stays r13.  The RTL template variant still follows Pmode.  */
++      tlsreg = gen_rtx_REG (Pmode, TARGET_64BIT ? 13 : 2);
+       if (Pmode == DImode)
+-	{
+-	  tlsreg = gen_rtx_REG (Pmode, 13);
+-	  insn = gen_tls_tprel_ha_64 (tmp, tlsreg, addr);
+-	}
++	insn = gen_tls_tprel_ha_64 (tmp, tlsreg, addr);
+       else
+-	{
+-	  tlsreg = gen_rtx_REG (Pmode, 2);
+-	  insn = gen_tls_tprel_ha_32 (tmp, tlsreg, addr);
+-	}
++	insn = gen_tls_tprel_ha_32 (tmp, tlsreg, addr);
+       emit_insn (insn);
+       if (Pmode == DImode)
+ 	insn = gen_tls_tprel_lo_64 (dest, tmp, addr);

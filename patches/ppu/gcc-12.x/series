@@ -26,3 +26,4 @@
 0025-config-sub-recognize-ps3-kernel-elf.patch
 0026-rs6000-allow-ps3-save-restore-names.patch
 0027-rs6000-cell64lv2-dwarf-addr-size.patch
+0028-rs6000-cc-tls-base-register.patch
