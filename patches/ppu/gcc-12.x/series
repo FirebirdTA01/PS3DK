@@ -7,6 +7,7 @@
 0006-libstdcxx-crossconfig-ps3.patch
 0007-rs6000-cell64lv2-compact-opd.patch
 0008-system-h-no-abort-macro-on-mingw.patch
+0009-rs6000-ps3-lp64-opt.patch
 0010-rs6000-cell64lv2-opt.patch
 0011-rs6000-t-cell64lv2-multilib.patch
 0012-rs6000-md-pmode-iterator.patch
