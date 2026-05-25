@@ -76,7 +76,9 @@ install: $(LIB)
 	@install -m 0644 scripts/spurs_task.ld $(INSTALL_LDS)/spurs_task.ld
 	@echo "  ld    spurs_task.ld"
 	@install -m 0644 include/cell/spurs/spu_task.h $(INSTALL_INC)/cell/spurs/spu_task.h
-	@echo "  header cell/spurs/spu_task.h"
+	@echo "  header cell/spurs/spu_task.h (forwarder)"
+	@install -m 0644 include/cell/spurs/task.h $(INSTALL_INC)/cell/spurs/task.h
+	@echo "  header cell/spurs/task.h (canonical)"
 	@install -m 0644 ../include/cell/spurs/task_types.h $(INSTALL_INC)/cell/spurs/task_types.h
 	@echo "  header cell/spurs/task_types.h"
 	@install -m 0644 ../include/cell/spurs/common.h $(INSTALL_INC)/cell/spurs/common.h
