@@ -50,6 +50,7 @@ HEADERS := \
     include/cell/pad.h \
     include/cell/error.h \
     include/cell/gcm.h \
+    include/cell/gcm_pm.h \
     include/cell/gcm/gcm_enum.h \
     include/cell/gcm/gcm_cmd_overloads.h \
     include/cell/gcm/gcm_cg_bridge.h \
