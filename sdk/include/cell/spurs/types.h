@@ -77,7 +77,15 @@ typedef struct CellSpurs2 {
 #define _CELL_SPURS_ATTRIBUTE_REVISION     0x02
 #define _CELL_SPURS_INTERNAL_VERSION       0x330000
 
+#ifdef __cplusplus
+}   /* extern "C" -- closed before PPU-only region so SPU compilation pairs */
+#endif
+
 #ifndef __SPU__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 extern int _cellSpursAttributeInitialize(CellSpursAttribute *attr,
                                          unsigned int revision,
