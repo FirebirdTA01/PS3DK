@@ -34,6 +34,8 @@ HEADERS := \
     include/sys/spu_image.h \
     include/sys/timer.h \
     include/sys/sys_time.h \
+    include/sys/sys_types.h \
+    include/sys/types.h \
     include/sys/return_code.h \
     include/sys/thread.h \
     include/sys/ppu_thread.h \

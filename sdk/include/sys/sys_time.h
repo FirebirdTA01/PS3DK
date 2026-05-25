@@ -15,15 +15,7 @@
 #include <stdint.h>
 #include <ppu-types.h>     /* `system_time_t` already declared here */
 #include <sys/systime.h>
-
-/* Reference-SDK monotonic-clock units.  Our SDK consumes them as
- * 64-bit unsigned counters; sample code typedefs CTimer fields to
- * usecond_t / second_t expecting them to be available system-wide. */
-#ifndef PS3TC_HAVE_USECOND_T
-#define PS3TC_HAVE_USECOND_T
-typedef uint64_t usecond_t;
-typedef uint64_t second_t;
-#endif
+#include <sys/sys_types.h> /* usecond_t, second_t */
 
 #ifdef __cplusplus
 extern "C" {
