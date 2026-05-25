@@ -311,6 +311,12 @@ static inline void cellGcmSetTextureAddress(CellGcmContextData *thisContext,
 	ps3tc_gcm_tex_wrap_mode(thisContext, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma);
 }
 
+static inline void cellGcmSetTextureBorderColor(CellGcmContextData *thisContext,
+                                                uint8_t index, uint32_t color)
+{
+	rsxTextureBorderColor(thisContext, index, color);
+}
+
 /* ==========================================================
  * Timestamp / report — GPU-side profiling reports.
  *
@@ -677,6 +683,23 @@ static inline void cellGcmSetZcullEnable(CellGcmContextData *thisContext,
                                          uint32_t depth, uint32_t stencil)
 {
 	rsxSetZCullEnable(thisContext, depth, stencil);
+}
+
+static inline void cellGcmSetZcullStatsEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetZCullStatsEnable(thisContext, enable);
+}
+
+static inline void cellGcmSetZcullLimit(CellGcmContextData *thisContext,
+                                        uint16_t moveForwardLimit, uint16_t pushBackLimit)
+{
+	rsxSetZCullLimit(thisContext, moveForwardLimit, pushBackLimit);
+}
+
+static inline void cellGcmSetClearZcullSurface(CellGcmContextData *thisContext,
+                                               uint32_t depth, uint32_t stencil)
+{
+	rsxSetClearZCullSurface(thisContext, depth, stencil);
 }
 
 static inline void cellGcmSetScullControl(CellGcmContextData *thisContext,
