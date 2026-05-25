@@ -146,6 +146,15 @@ static inline uint32_t cellDmaGetUnusedTagStatus(uint32_t mask)
 	return mfc_stat_cmd_queue() & mask;
 }
 
+/* --- Extern functions (implemented in libdma.a) --- */
+
+void cellDmaAndWait(uintptr_t ls, uint64_t ea, uint32_t size,
+                    uint32_t tag, uint32_t cmd);
+void cellDmaLargeCmd(uintptr_t ls, uint64_t ea, uint32_t size,
+                     uint32_t tag, uint32_t cmd);
+void cellDmaUnalignedCmd(uintptr_t ls, uint64_t ea, uint32_t size,
+                         uint32_t tag, uint32_t cmd);
+
 #ifdef __cplusplus
 }
 #endif
