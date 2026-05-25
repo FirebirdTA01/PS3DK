@@ -61,6 +61,7 @@
 #include <Cg/cg.h>
 #include <Cg/cgBinary.h>
 #include <sys/lv2_types.h>
+#include <sys/timer.h>
 
 #ifdef __cplusplus
 extern "C" {

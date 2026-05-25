@@ -306,6 +306,9 @@ static inline void cellGcmSetReport(uint8_t type, uint32_t index)
 static inline void cellGcmSetClearReport(uint8_t type)
 { cellGcmSetClearReport(gCellGcmCurrentContext, type); }
 
+static inline void cellGcmSetReportLocation(uint32_t location)
+{ cellGcmSetReportLocation(gCellGcmCurrentContext, location); }
+
 #endif  /* __cplusplus */
 
 #endif  /* PS3TC_CELL_GCM_CMD_OVERLOADS_H */

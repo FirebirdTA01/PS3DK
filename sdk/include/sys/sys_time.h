@@ -16,6 +16,7 @@
 #include <ppu-types.h>     /* `system_time_t` already declared here */
 #include <sys/systime.h>
 #include <sys/sys_types.h> /* usecond_t, second_t */
+#include <sys/timer.h>
 
 #ifdef __cplusplus
 extern "C" {

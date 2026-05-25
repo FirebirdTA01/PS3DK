@@ -3,36 +3,38 @@
  *
  * reference-SDK samples call `sys_timer_usleep(n)` / `sys_timer_sleep(n)` for
  * coarse-grained waits (frame throttling, sleep-between-retries, etc).
- * Both are thin wrappers around the LV2 sleep syscall.  We forward to
- * POSIX `usleep` from libsysbase, which newlib implements on top of the
- * same syscall, and chunk the 64-bit count so very long sleeps still
- * fit through useconds_t (typically 32-bit).
+ * Both wrappers enter the kernel directly through the LV2 timer
+ * syscalls.
  */
 
 #ifndef PS3TC_COMPAT_SYS_TIMER_H
 #define PS3TC_COMPAT_SYS_TIMER_H
 
-#include <stdint.h>
-#include <unistd.h>
+#include <sys/lv2_syscall.h>
+#include <sys/sys_types.h>
+
+#ifndef SYS_TIMER_USLEEP
+#define SYS_TIMER_USLEEP 141
+#endif
+
+#ifndef SYS_TIMER_SLEEP
+#define SYS_TIMER_SLEEP 142
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-static inline int sys_timer_usleep(uint64_t microseconds)
+LV2_SYSCALL sys_timer_usleep(usecond_t sleep_time)
 {
-    /* useconds_t is typically uint32_t; drain large counts in chunks. */
-    while (microseconds > (uint64_t)(1u << 31))
-    {
-        usleep(1u << 31);
-        microseconds -= (1u << 31);
-    }
-    return usleep((useconds_t)microseconds);
+    lv2syscall1(SYS_TIMER_USLEEP, (u64)sleep_time);
+    return_to_user_prog(int);
 }
 
-static inline int sys_timer_sleep(uint32_t seconds)
+LV2_SYSCALL sys_timer_sleep(second_t sleep_time)
 {
-    return sys_timer_usleep((uint64_t)seconds * 1000000ull);
+    lv2syscall1(SYS_TIMER_SLEEP, (u64)sleep_time);
+    return_to_user_prog(int);
 }
 
 #ifdef __cplusplus
