@@ -372,6 +372,10 @@ run_step gcc-newlib
 run_step symlinks
 run_step linker-script
 
+# Ensure libsputhread.a is in the SPU default library search path so
+# -lsputhread resolves without extra -L flags (see 0004-spu-link-sputhread.patch).
+ln -sf "$PS3DK/spu/lib/libsputhread.a" "$PREFIX/$TARGET/lib/libsputhread.a" 2>/dev/null || true
+
 say "=== Done ==="
 if [[ -x "$PREFIX/bin/$TARGET-gcc" ]]; then
     "$PREFIX/bin/$TARGET-gcc" --version | head -1
