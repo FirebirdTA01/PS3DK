@@ -1,0 +1,110 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] gcc/rs6000+expr: emit explicit pointer-canon unspec on
+ POINTER_PLUS_EXPR under ILP32-hybrid
+
+Patch 0030 canonicalized POINTER_PLUS_EXPR offsets before falling through
+to PLUS_EXPR expansion.  Patch 0032 v2 tried to handle the related dtoa
+failure by expanding pointer-shaped PLUS_EXPR in word_mode.  That was not
+enough: the expression still has logical ptr_mode/SImode, so later RTL
+passes can collapse the temporary DImode add back to a plain SImode add.
+Final then emits a full-width PowerPC `add` without a surviving high-half
+canonicalization step.
+
+newlib dtoa exposes the failure in `s0 + ilim` and the following
+`while (*--s == '0')` loop.  Under powerpc64-ps3-elf's hybrid ABI, Pmode
+is SImode but integer GPR operations are physically 64-bit.  If a signed
+32-bit offset carries stale high bits into address arithmetic, the low 32
+bits remain correct while bit 32 leaks into the effective address,
+triggering RPCS3 narrowing errors such as object 0x1400004bc.
+
+Handle the pointer-forming operation explicitly.  For POINTER_PLUS_EXPR
+under an ILP32-on-64-bit target, expand the base as a zero-extended
+word_mode value, expand the offset through ssizetype to a signed word_mode
+value, add in word_mode, then take the logical ptr_mode lowpart.  Feed that
+lowpart through a target-visible rs6000 UNSPEC that emits:
+
+  rldicl %0,%1,0,32
+
+The UNSPEC keeps the canonicalization alive through combine/final while
+preserving the logical SImode pointer type.  Non-rs6000 and non-hybrid
+targets do not define or enable the insn, so their expansion is unchanged.
+
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -63,6 +63,7 @@
+    UNSPEC_TOC			; address of the TOC (more-or-less)
+    UNSPEC_TOCSLOT		; offset from r1 of toc pointer save slot
+    UNSPEC_MOVSI_GOT
++   UNSPEC_PS3_PTR_CANON	; canonicalize ILP32-hybrid pointer in a GPR
+    UNSPEC_FCTIWZ
+    UNSPEC_FRIM
+    UNSPEC_FRIN
+@@ -1832,6 +1833,15 @@
+   [(set_attr "type" "add")
+    (set_attr "isa" "*,*,*,p10")])
+ 
++(define_insn "ps3_ptr_canonicalize_si"
++  [(set (match_operand:SI 0 "gpc_reg_operand" "=r")
++	(unspec:SI [(match_operand:SI 1 "gpc_reg_operand" "r")]
++		   UNSPEC_PS3_PTR_CANON))]
++  "TARGET_64BIT && known_lt (GET_MODE_SIZE (Pmode),
++			     (unsigned int) UNITS_PER_WORD)"
++  "rldicl %0,%1,0,32"
++  [(set_attr "type" "shift")])
++
+ (define_insn "*addsi3_high"
+   [(set (match_operand:SI 0 "gpc_reg_operand" "=b")
+         (plus:SI (match_operand:SI 1 "gpc_reg_operand" "b")
+--- a/gcc/expr.cc
++++ b/gcc/expr.cc
+@@ -9148,6 +9148,50 @@ expand_expr_real_2 (sepops ops, rtx target, machine_mode tmode,
+       }
+ 
+     case POINTER_PLUS_EXPR:
++      /* In an ELF64/ILP32 hybrid, ptr_mode is SImode but GPR arithmetic is
++	 physically word-sized.  A POINTER_PLUS_EXPR lowered as plus:SI can
++	 therefore leave stale high bits in the address register when the
++	 offset was produced by signed 32-bit arithmetic.  Build the add in
++	 word_mode, then emit a target-visible canonicalization insn for the
++	 logical SImode pointer so later RTL passes cannot fold it away.  */
++#ifdef HAVE_ps3_ptr_canonicalize_si
++      if (modifier != EXPAND_SUM
++	  && modifier != EXPAND_INITIALIZER
++	  && mode == ptr_mode
++	  && known_lt (GET_MODE_SIZE (ptr_mode),
++		       (unsigned int) UNITS_PER_WORD)
++	  && HAVE_ps3_ptr_canonicalize_si)
++	{
++	  tree wide_type
++	    = build_nonstandard_integer_type
++		(GET_MODE_PRECISION (word_mode), /*unsignedp=*/0);
++	  tree wide_off
++	    = fold_convert_loc (loc, wide_type,
++				fold_convert_loc (loc, ssizetype, treeop1));
++	  rtx base = expand_expr (treeop0, NULL_RTX, ptr_mode,
++				  EXPAND_NORMAL);
++	  rtx offset = expand_expr (wide_off, NULL_RTX, word_mode,
++				    EXPAND_NORMAL);
++
++	  base = convert_to_mode (word_mode, base, /*unsignedp=*/1);
++	  offset = convert_to_mode (word_mode, offset, /*unsignedp=*/0);
++
++	  rtx sum = expand_simple_binop (word_mode, PLUS, base, offset,
++					 NULL_RTX, /*unsignedp=*/1,
++					 OPTAB_LIB_WIDEN);
++	  if (sum)
++	    {
++	      rtx low = gen_reg_rtx (mode);
++	      rtx canon = gen_reg_rtx (mode);
++
++	      emit_move_insn (low, gen_lowpart (mode, force_reg (word_mode,
++								 sum)));
++	      emit_insn (gen_ps3_ptr_canonicalize_si (canon, low));
++	      return REDUCE_BIT_FIELD (canon);
++	    }
++	}
++#endif
++
+       /* Even though the sizetype mode and the pointer's mode can be different
+          expand is able to handle this correctly and get the correct result out
+          of the PLUS_EXPR code.  */
