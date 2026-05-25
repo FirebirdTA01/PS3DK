@@ -28,6 +28,7 @@ HEADERS := \
     include/ppu-asm.h \
     include/stdarg.h \
     include/stdio.h \
+    include/stdlib.h \
     include/string.h \
     include/types.h \
     include/sys/lv2_types.h \
@@ -273,6 +274,7 @@ SPU_HEADERS := \
     include-spu/bits/simd_ullong2.h \
     include-spu/bits/simd_float4.h \
     include-spu/bits/simd_double2.h \
+    include-spu/stdlib.h \
     include-spu/cell/dma.h \
     include-spu/cell/sync.h \
     include-spu/cell/sync/barrier.h
