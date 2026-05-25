@@ -1,0 +1,21 @@
+Add -lc_stub to LIB_LV2_SPEC so spu_printf_* / spu_thread management
+cross-module stubs (which live in libc_stub.a) resolve at link time
+without samples needing explicit -lc_stub.
+
+Same --start-group bracket, ordered after -llv2_stub so stub priorities
+resolve correctly.  libc_stub.a provides spu_printf_initialize,
+spu_printf_finalize, spu_printf_attach_group / detach_group,
+spu_printf_attach_thread / detach_thread, and raw_spu_printf — all
+declared by spu_printf.h.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -295,7 +295,7 @@
+    libc, and the the reference SDK stub archives).  --start-group / --end-group
+    resolve circular deps between newlib, lv2 stubs, and libsysbase.  */
+ #define LIB_LV2_SPEC \
+-  "-L %:getenv(PS3DK /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 -llv2_stub --end-group"
++  "-L %:getenv(PS3DK /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 -llv2_stub -lc_stub --end-group"
+
+ #define STARTFILE_LV2_SPEC \
+   "lv2-crti.o%s crtbegin.o%s lv2-crt0.o%s lv2-sprx.o%s"
