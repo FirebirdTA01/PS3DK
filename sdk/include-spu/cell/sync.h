@@ -40,7 +40,7 @@ extern "C" {
 #define CELL_SYNC_ERROR_STAT          0x8041010f
 #define CELL_SYNC_ERROR_ALIGN         0x80410110
 #define CELL_SYNC_ERROR_NULL_POINTER  0x80410111
-#define CELL_SYNC_ERROR_SHOTAGE       0x80410112  /* sic — reference spelling */
+#define CELL_SYNC_ERROR_SHOTAGE       0x80410112
 #define CELL_SYNC_ERROR_UNKNOWNKEY    0x80410113
 
 #define CELL_SYNC_LFQUEUE_TERMINATED  2
@@ -53,6 +53,8 @@ int cellSyncMutexUnlock    (uint64_t ea_mutex);
 
 /* ---- Barrier (N-way rendezvous) ------------------------------------- */
 
+int cellSyncBarrierInitialize(uint64_t ea_barrier, uint16_t count,
+                              unsigned int tag);
 int cellSyncBarrierNotify    (uint64_t ea_barrier);
 int cellSyncBarrierTryNotify (uint64_t ea_barrier);
 int cellSyncBarrierWait      (uint64_t ea_barrier);

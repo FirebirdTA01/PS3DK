@@ -213,7 +213,7 @@ HEADERS := \
     include/rsx/rsx_function_macros.h \
     include/rsx/rsx_program.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 liblv2
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -281,7 +281,9 @@ SPU_HEADERS := \
     include-spu/cell/atomic.h \
     include-spu/cell/dma.h \
     include-spu/cell/sync.h \
+    include-spu/cell/sync/error.h \
     include-spu/cell/sync/barrier.h \
+    include-spu/cell/sync/barrier_types.h \
     include-spu/cell/sync/queue.h \
     include-spu/cell/sync/mutex.h \
     include-spu/cell/sync/rwm.h \
