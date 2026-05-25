@@ -179,11 +179,13 @@ cellSpursTasksetAttribute2Initialize(CellSpursTasksetAttribute2 *pAttr)
     _cellSpursTasksetAttribute2Initialize(pAttr, CELL_SPURS_TASK2_REVISION);
 }
 
+#ifndef __SPU__
 static inline int
 cellSpursSendSignal(CellSpursTaskset *taskset, CellSpursTaskId id)
 {
     return _cellSpursSendSignal(taskset, id);
 }
+#endif  /* !__SPU__ */
 
 #ifdef __cplusplus
 }   /* extern "C" */

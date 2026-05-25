@@ -120,6 +120,10 @@ HEADERS := \
     include/cell/spurs/job_queue_port.h \
     include/cell/spurs/job_queue_port2.h \
     include/cell/spurs/job_queue_semaphore.h \
+    include/cell/spurs/task_exit_code.h \
+    include/cell/spurs/policy_module.h \
+    include/cell/spurs/lv2_event_queue.h \
+    include/cell/spurs/lfqueue.h \
     include/cell/fiber.h \
     include/cell/fiber/error.h \
     include/cell/fiber/version.h \
@@ -230,8 +234,20 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/spurs/job_queue_port.h \
     include/cell/spurs/job_queue_port2.h \
     include/cell/spurs/job_queue_semaphore.h \
+    include/cell/spurs/task_types.h \
+    include/cell/spurs/job_guard.h \
+    include/cell/spurs/semaphore.h \
+    include/cell/spurs/task_exit_code.h \
+    include/cell/spurs/policy_module.h \
+    include/cell/spurs/lfqueue.h \
     include/cell/trace/trace_types.h \
     include/vectormath/cpp/vectormath_soa.h
+
+# SPU-only headers — installed to $(INSTALL_INC_SPU) but NOT to the
+# PPU side.  These are SPU-flavored variants (e.g. the slim SPU
+# spurs.h umbrella that omits PPU syscall surfaces).
+SPU_ONLY_HEADERS := \
+    include-spu/cell/spurs.h
 
 # SPU-side headers: SIMD class wrappers (simd + bits/simd_*.h).
 # Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
@@ -258,11 +274,12 @@ SPU_HEADERS := \
     include-spu/cell/sync/barrier.h
 
 .PHONY: all install clean version-header $(SUBLIBS) \
-	install-stub-archives install-native-aliases install-manifest verify-install
+	install-stub-archives install-native-aliases install-manifest verify-install \
+	install-spu-only-headers clean-stale-spu-spurs
 
 all: $(SUBLIBS)
 
-install: install-headers install-spu-headers install-shared-spurs-spu-headers install-version install-sublibs install-stub-archives install-native-aliases install-manifest
+install: install-headers install-spu-headers install-shared-spurs-spu-headers install-spu-only-headers clean-stale-spu-spurs install-version install-sublibs install-stub-archives install-native-aliases install-manifest
 
 install-headers:
 	@for h in $(HEADERS); do \
@@ -289,6 +306,34 @@ install-shared-spurs-spu-headers:
 	    install -d "$$(dirname $$dst)"; \
 	    install -m 0644 "$$h" "$$dst"; \
 	    echo "  shared  $$rel (spu)"; \
+	done
+
+# SPU-only headers — installed from include-spu/ to the SPU sysroot.
+# These are SPU-flavored variants (e.g. the slim spurs.h umbrella)
+# that must not leak into the PPU include tree.
+install-spu-only-headers:
+	@for h in $(SPU_ONLY_HEADERS); do \
+	    rel="$${h#include-spu/}"; \
+	    dst="$(INSTALL_INC_SPU)/$$rel"; \
+	    install -d "$$(dirname $$dst)"; \
+	    install -m 0644 "$$h" "$$dst"; \
+	    echo "  spu-only $$rel"; \
+	done
+
+# Remove stale PPU-only spurs sub-headers that may linger in the SPU
+# sysroot from a prior install that installed a broader set.  The SPU
+# umbrella now deliberately excludes task.h, workload.h, barrier.h,
+# event_flag.h, and queue.h — if they exist from an old install,
+# purge them so no stale declarations leak into SPU compiles.
+# NOTE: job_chain.h is intentionally kept — installed by libspurs_job.
+clean-stale-spu-spurs:
+	@stale="task.h workload.h barrier.h event_flag.h queue.h"; \
+	for f in $$stale; do \
+	    path="$(INSTALL_INC_SPU)/cell/spurs/$$f"; \
+	    if test -f "$$path"; then \
+	        rm -f "$$path"; \
+	        echo "  cleaned stale spu $$f"; \
+	    fi; \
 	done
 
 # cell/sdk_version.h is generated from the current git state at install
