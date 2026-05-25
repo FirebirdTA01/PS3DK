@@ -52,6 +52,7 @@ HEADERS := \
     include/sysutil/sysutil_sysparam.h \
     include/sysutil/video.h \
     include/cell/cell.h \
+    include/cell/atomic.h \
     include/cell/pad.h \
     include/cell/error.h \
     include/cell/gcm.h \
@@ -220,6 +221,7 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
     include/cell/error.h \
+    include/cell/atomic.h \
     include/cell/spurs/types.h \
     include/cell/spurs/common.h \
     include/cell/spurs/exception_types.h \
@@ -333,7 +335,7 @@ install-spu-only-headers:
 # purge them so no stale declarations leak into SPU compiles.
 # NOTE: job_chain.h is intentionally kept — installed by libspurs_job.
 clean-stale-spu-spurs:
-	@stale="task.h workload.h barrier.h event_flag.h queue.h"; \
+	@stale="workload.h barrier.h event_flag.h queue.h"; \
 	for f in $$stale; do \
 	    path="$(INSTALL_INC_SPU)/cell/spurs/$$f"; \
 	    if test -f "$$path"; then \
