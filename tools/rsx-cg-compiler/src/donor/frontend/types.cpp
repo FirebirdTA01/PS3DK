@@ -143,6 +143,7 @@ CgType CgType::Sampler1D() { return CgType(makeScalarNode(BaseType::Sampler1D));
 CgType CgType::Sampler2D() { return CgType(makeScalarNode(BaseType::Sampler2D)); }
 CgType CgType::Sampler3D() { return CgType(makeScalarNode(BaseType::Sampler3D)); }
 CgType CgType::SamplerCube() { return CgType(makeScalarNode(BaseType::SamplerCube)); }
+CgType CgType::SamplerRect() { return CgType(makeScalarNode(BaseType::SamplerRect)); }
 CgType CgType::ISampler2D() { return CgType(makeScalarNode(BaseType::ISampler2D)); }
 CgType CgType::USampler2D() { return CgType(makeScalarNode(BaseType::USampler2D)); }
 
