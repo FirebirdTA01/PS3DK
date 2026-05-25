@@ -124,6 +124,19 @@ desktop.ini
 /docs/building-reference-samples.md
 /docs/spurs-job-binary2-re.md
 
+# Agent-team session prompts — internal-only, never tracked.
+/docs/next-session-prompt-*.md
+/NEXT_SESSION_PROMPT*.md
+/.rdac/
+
+# Dated internal debug / status / repro / RE narrative — kept local.
+/docs/cellgcm-program-handle-status-2026-04-26.md
+/docs/emp-engine-coverage-2026-04-26.md
+/docs/setdrawenv-repro-result-2026-04-26.md
+/docs/step5-nid-stub-followups-2026-04-26.md
+/docs/rpcs3-spurs-taskset-pm-hle-fixup.md
+/docs/superpowers/
+
 # rsx-cg-compiler reverse-engineering diary + diff-test harness.
 # Both are local-only: REVERSE_ENGINEERING.md will be replaced by a public
 # ARCHITECTURE.md; run_diff.sh drives a byte-match against the reference
