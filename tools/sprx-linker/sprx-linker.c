@@ -217,10 +217,10 @@ int main(int argc, char *argv[])
 	   (spec). */
 	Elf_Scn *prx = getSection(elf, ".sys_proc_prx_param");
 	if(!prx) {
-		fprintf(stderr, "sprx-linker: elf has no .sys_proc_prx_param section.\n");
+		fprintf(stderr, "sprx-linker: no .sys_proc_prx_param section — nothing to rewrite, passing through.\n");
 		elf_end(elf);
 		close(fd);
-		return 1;
+		return 0;
 	}
 	Elf_Data *prx_data = elf_getdata(prx, NULL);
 	if(!prx_data || prx_data->d_size < 8
