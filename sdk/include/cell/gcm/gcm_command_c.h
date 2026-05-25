@@ -720,6 +720,11 @@ static inline void cellGcmSetClearReport(CellGcmContextData *thisContext, uint8_
 	rsxSetClearReport(thisContext, type);
 }
 
+static inline void cellGcmSetReportLocation(CellGcmContextData *thisContext, uint32_t location)
+{
+	rsxSetReportLocation(thisContext, location);
+}
+
 /* ==========================================================
  * Control register accessor — exposes PUT/GET/REF for the FIFO.
  * ========================================================== */

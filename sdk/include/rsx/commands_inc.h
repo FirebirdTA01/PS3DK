@@ -207,6 +207,7 @@ void RSX_FUNC(SetTwoSideLightEnable)(gcmContextData *context,u32 enable);
 void RSX_FUNC(SetRenderEnable)(gcmContextData *context,u8 mode,u32 index);
 void RSX_FUNC(SetReport)(gcmContextData *context,u32 type,u32 index);
 void RSX_FUNC(SetClearReport)(gcmContextData *context,u32 type);
+void RSX_FUNC(SetReportLocation)(gcmContextData *context,u32 location);
 void RSX_FUNC(SetSCullControl)(gcmContextData *context,u8 sFunc,u8 sRef,u8 sMask);
 void RSX_FUNC(SetZCullEnable)(gcmContextData *context, u32 depth, u32 stencil);
 void RSX_FUNC(SetClearZCullSurface)(gcmContextData *context, u32 depth, u32 stencil);

@@ -522,6 +522,16 @@ void RSX_FUNC(SetClearReport)(gcmContextData *context,u32 type)
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
+void RSX_FUNC(SetReportLocation)(gcmContextData *context,u32 location)
+{
+	u32 handle = (location == GCM_LOCATION_CELL) ? 0xBAD68000 : 0x66626660;
+
+	RSX_CONTEXT_CURRENT_BEGIN(2);
+	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DMA_QUERY,1);
+	RSX_CONTEXT_CURRENTP[1] = handle;
+	RSX_CONTEXT_CURRENT_END(2);
+}
+
 void RSX_FUNC(SetZPixelCountEnable)(gcmContextData *context,u32 enable)
 {
 	RSX_CONTEXT_CURRENT_BEGIN(2);
