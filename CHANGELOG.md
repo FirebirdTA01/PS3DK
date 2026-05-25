@@ -16,6 +16,296 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.9.0] — 2026-05-25
+
+### Toolchain — kernel-target (powerpc64-ps3-kernel-elf)
+
+A second PPU toolchain target ships alongside the userland
+`powerpc64-ps3-elf`: `powerpc64-ps3-kernel-elf` produces
+classical ELFv1 LP64 PPC64 binaries suitable for CFW LV2 and
+COBRA stage-2 payloads, with 24-byte function descriptors,
+8-byte TOC slots, and no compact-OPD / SPRX userland
+machinery.  Driven by a separate build script
+(`scripts/build-ppu-kernel-toolchain.sh`) so userland and
+kernel toolchains coexist on one host.
+
+- **`72aec60`** — `kernel-target: binutils alias for
+  powerpc64-ps3-kernel-elf`.  Binutils gains the kernel target
+  alias so `as`, `ld`, `objcopy`, `objdump`, and `nm` all
+  recognise the kernel target name.
+- **`3f39568`** — `gcc: kernel-target compiler config +
+  ps3kernel64.h + build script`.  GCC config gains a new
+  config-machine entry, a `gcc/config/rs6000/ps3kernel64.h`
+  target header that pins classical ELFv1 LP64 with 24-byte
+  function descriptors, and a `scripts/build-ppu-kernel-toolchain.sh`
+  driver that builds the kernel-target gcc + binutils +
+  libgcc against the same upstream sources as the userland
+  toolchain.
+- **`12e995f`** — `libgcc: build kernel-target libgcc +
+  un-stub build script item`.  libgcc builds for the kernel
+  target with the correct ABI flags so kernel-target code can
+  pull `_savegpr_*` / `_restgpr_*` out-of-line helpers when
+  generated.
+- **`196b2e5`** — `gcc: allow ppc64 out-of-line save/restore
+  helpers on PS3 targets`.  Drops an unnecessary block that
+  disabled the upstream out-of-line save/restore generation
+  path on PS3-flavoured ppc64 targets.
+- **`72f0f30`** — `samples: freestanding kernel-toolchain
+  smoke (classical ELFv1 payload)`.  A minimal sample under
+  `samples/toolchain/hello-ppu-kernel-elfv1` exercises the
+  kernel-target compile + link path and produces a classical
+  ELFv1 LP64 payload byte-shape that an unmodified CFW LV2 /
+  COBRA stage-2 build chain can ingest.
+
+### Toolchain — GCC mlp64 / ILP32-hybrid correctness
+
+A batch of GCC patches that lock in correct codegen across
+both data models — TOC width, TLS base selection, DWARF
+address size, pointer arithmetic canonicalisation under
+ILP32-hybrid, and a shared option file factor.
+
+- **`9a4bda6`** — `gcc: factor mlp64/TARGET_LP64 option into
+  shared ps3-lp64.opt`.  Both userland and kernel-target
+  configs reference the same option definition so behaviour
+  stays in sync.
+- **`b830bb9`** — `gcc: pin DWARF2_ADDR_SIZE = 8 for
+  cell64lv2 ELF64 wrapper`.  DWARF address size now always
+  matches the ELF64 wrapper width regardless of pointer mode;
+  debuggers no longer truncate addresses on LP64 binaries
+  with ILP32 pointers visible in the source.
+- **`83ce544`** — `gcc: pick TLS base register from ELF
+  class, not pointer mode`.  TLS access uses the correct base
+  register (`r13` on ELF64) independent of whether pointer
+  mode is 32-bit or 64-bit.
+- **`ae34350`** — `gcc/convert: use unsigned intermediate for
+  pointer-to-int cast`.  Pointer-to-int casts under
+  ILP32-hybrid go through an unsigned intermediate so a
+  high-bit-set 32-bit pointer doesn't sign-extend into an
+  arbitrary 64-bit value when widened.
+- **`ae87903`** — `gcc/expr: canonicalize POINTER_PLUS_EXPR
+  offset under ILP32-hybrid`.  POINTER_PLUS_EXPR offsets are
+  truncated to pointer width before the add so 64-bit-typed
+  offsets cannot accidentally widen the pointer result.
+- **`ea4cf16`** — `gcc/rs6000-logue: save/restore GPRs in
+  DImode under TARGET_64BIT`.  Prologue/epilogue save/restore
+  of general registers uses DImode under TARGET_64BIT even
+  when Pmode is 32-bit, so the full 64-bit register contents
+  are preserved across calls.
+- **`e7ed864`** — `gcc/rs6000+expr: emit explicit
+  pointer-canon unspec on POINTER_PLUS_EXPR under
+  ILP32-hybrid`.  POINTER_PLUS_EXPR codegen emits an explicit
+  pointer-canonicalisation unspec so RTL passes cannot CSE the
+  add with a widened operand and produce a 64-bit pointer in
+  an ILP32-hybrid binary.
+- **`3d83563`** — `gcc/expr: canonicalize pointer extracted
+  from aggregate register under ILP32-hybrid`.  Pointers
+  loaded out of aggregate-typed registers are canonicalised to
+  pointer width before use, preventing the same widening
+  issue at field-extract time.
+
+### Toolchain — auto-link defaults
+
+- **`b7cab94`** — `gcc/cell64lv2: auto-link -lc_stub in
+  LIB_LV2_SPEC`.  Every PPU userland link now resolves the
+  spu_printf_* family without requiring `-lc_stub` on the
+  command line.
+- **`688727e`** — `gcc/spu-elf: auto-link -lsputhread in
+  LIB_SPEC`.  Every SPU link resolves
+  `sys_event_flag_set_bit` and its siblings without requiring
+  `-lsputhread`.  A post-install symlink hook puts the
+  archive in `spu-elf/lib/`.
+
+### Toolchain — newlib C++ compatibility
+
+- **`4c0bc4e`** — `newlib/stdint: gate SIZE_MAX behind
+  __STDC_LIMIT_MACROS in C++`.  C99 §7.18 convention; unblocks
+  C++ TUs that declare their own `SIZE_MAX` constant and
+  collide with the macro.
+
+### Toolchain — bootstrap + host compatibility
+
+- **`7659be5`** — `scripts: pin host C++11 for GCC 12 libcody
+  on rolling hosts`.  Rolling-release hosts with newer host
+  GCC build libcody under a default `-std=` that breaks; we
+  pin `-std=gnu++11`.
+- **`1953c3d`** — `bootstrap: fix newlib tag fetch (drop
+  bogus .20231231 suffix)`.  The upstream newlib tag is
+  `newlib-4.4.0`, not `newlib-4.4.0.20231231`.
+
+### SDK — sys / runtime surface
+
+- **`3271d52`** — `sdk/sys: ship sys/sys_types.h + sys/types.h
+  wrapper`.  `usecond_t` / `second_t` become system-wide
+  visible.  `sys/types.h` uses `#include_next` to layer on top
+  of newlib's POSIX types.
+- **`e397905`** — `runtime: translate POSIX open() flags to
+  CellOS LV2 sys_fs_open bits`.  newlib `open()` flag bits
+  did not match LV2's `CELL_FS_O_*` bit layout; the runtime
+  glue now translates so POSIX file IO routes correctly into
+  the LV2 filesystem syscall.
+- **`8b2f257`** — `sdk: drop sys-name indirection in
+  cell/sysutil_savedata + sysutil_gamecontent`.  Two cell-side
+  headers stop forwarding through a vendor-named indirection
+  and declare the API surface directly.
+- **`8b2150f`** — `sdk: std header wrappers, LV2 timer
+  syscalls, cellGcmSetReportLocation`.
+  `sdk/include/{stdio,string,stdarg}.h` are thin SDK wrappers
+  that `#include_next` the toolchain C headers and, under
+  `__cplusplus`, inject the minimal `namespace std`
+  using-declarations (`std::memset`, `std::vfprintf`,
+  `std::vsnprintf`, `std::vsprintf`, `std::va_list`) that
+  legacy C++98 sources need when they include `<stdio.h>` /
+  `<string.h>` directly instead of the `<cXXX>` form.
+  `va_start` / `va_end` stay as GCC macros and become visible
+  via the stdio wrapper.  `sys/timer.h` replaces the previous
+  static-inline alias to libc `usleep` with direct LV2 syscall
+  entries — `sys_timer_usleep -> lv2syscall1(141, usec)`,
+  `sys_timer_sleep -> lv2syscall1(142, sec)`; `sys/sys_time.h`
+  pulls `sys/timer.h` so consumers including only
+  `<sys/sys_time.h>` see the declarations.  `rsxSetReportLocation`
+  (librsx) emits `NV4097_SET_CONTEXT_DMA_REPORT` (method
+  `0x01A8`) with the DMA handle selected on location:
+  `GCM_LOCATION_CELL` maps to `0xBAD68000` (main memory),
+  other locations map to `0x66626660` (local video).
+  `cellGcmSetReportLocation` in `cell/gcm/gcm_command_c.h`
+  forwards to the rsx primitive, with a C++ no-context
+  overload in `gcm_cmd_overloads.h`.
+
+### SDK — cell/gcm
+
+- **`c597665`** — `sdk/cell/gcm: reference-SDK naming aliases
+  and no-context wrappers`.  A large batch of cell-side
+  aliases over existing rsx primitives plus C++ no-context
+  overloads — `CELL_GCM_KEEP` / `INCR` / `COMPMODE_C32_2X1` /
+  `MRT_MAXCOUNT` / `SCULL_SFUNC_NOTEQUAL` / `TRANSFER_*`
+  family; `cellGcmSet{ZMinMaxControl,CurrentBuffer,DefaultCommandBuffer,FlipStatus}`
+  + `cellGcmGetLastFlipTime`; 13 C++ no-context overloads;
+  the owned `CellGcmReportData` struct.
+- **`a0aad9f`** — `sdk/cell: ship gcm_pm.h (API surface
+  only)`.  `CellGcmPerfMonDomain` (6 named clocks), opaque
+  per-domain typedefs, 4 prototypes, error code.  Per-domain
+  event-ID enums deliberately not shipped until independent
+  sourced.
+- **`efe671c`** — `sdk/cell/gcm: texture border color, zcull
+  stats, user-clip constants`.  Cell-side wrappers + C++
+  no-context overloads for three GCM command surfaces that
+  consume existing rsx primitives:
+  `cellGcmSetTextureBorderColor(ctx, index, color)` forwards
+  to `rsxTextureBorderColor` (`NV4097_SET_TEXTURE_BORDER_COLOR`,
+  method `0x1A1C`); the zcull-stats trio
+  (`cellGcmSetZcullStatsEnable` / `cellGcmSetZcullLimit` /
+  `cellGcmSetClearZcullSurface`) forwards to the existing
+  `rsxSetZCull*` primitives; and the new
+  `CELL_GCM_ZCULL_STATS` / `STATS1` / `STATS2` / `STATS3`
+  constant aliases plus `CELL_GCM_USER_CLIP_PLANE_DISABLE` /
+  `ENABLE_LT` / `ENABLE_GE` aliases land in `gcm_enum.h`.
+
+### SDK — cell/spurs SPU-side surface
+
+- **`5e7737d`** — `sdk/cell/spurs: slim SPU umbrella + 4
+  sub-headers`.  A new SPU-flavored `cell/spurs.h` umbrella
+  lives under `sdk/include-spu/` and is installed to the SPU
+  sysroot, exposing only the SPU-safe subset (shared types,
+  error codes, job descriptors, semaphore SPU primitives, and
+  the four new sub-headers below).  The PPU umbrella stays
+  the full 17-header surface.  Four new sub-headers ship the
+  previously-missing spurs API surface:
+  `cell/spurs/task_exit_code.h` (`CellSpursTaskExitCode` +
+  alignment constant), `cell/spurs/policy_module.h`
+  (`CellSpursModulePollStatus`),
+  `cell/spurs/lv2_event_queue.h`
+  (`cellSpursAttachLv2EventQueue` /
+  `cellSpursDetachLv2EventQueue` prototypes), and
+  `cell/spurs/lfqueue.h` (opaque `CellSpursLFQueue` type).
+  A defense-in-depth `#ifndef __SPU__` guard around the PPU
+  inline `cellSpursSendSignal` wrapper in `task.h` keeps it
+  from leaking into SPU compiles via the PPU umbrella.
+  `sdk/Makefile` gains a new `SPU_ONLY_HEADERS` list +
+  matching `install-spu-only-headers` target and a
+  `clean-stale-spu-spurs` step that purges leftover PPU-only
+  sub-headers (`task.h`, `workload.h`, `barrier.h`,
+  `event_flag.h`, `queue.h`) from the SPU sysroot on every
+  install.
+
+### SDK — cell/dbgfont Console API
+
+- **`5f237cc`** — `sdk/cell/dbgfont: Console API impl +
+  sys/system_types.h forwarder`.  A real virtual-console
+  subsystem authored in `libdbgfont` ships the
+  `cellDbgFontConsole*` API.  Each console owns an 8-slot
+  pool; each slot holds a ring buffer of 64 lines x 256
+  chars.  `cellDbgFontConsoleOpen` / `Close` / `Vprintf` /
+  `Printf` manage the slot lifecycle.  Slot 0 is reserved as
+  `CELL_DBGFONT_STDOUT_ID` and is auto-created by
+  `cellDbgFontInitGcm` with sensible defaults (24 lines
+  visible, white, top-left).  `cellDbgFontDrawGcm` renders
+  every active console's ring buffer through the existing
+  `cellDbgFontPuts` path so the console text shares the
+  overlay font atlas and shader; `cellDbgFontExitGcm` closes
+  every slot.  The public `CELL_DBGFONT_VERTEX_SIZE` constant
+  is corrected from 32 to 36 to match actual per-vertex
+  storage (DbgPos 12 + DbgUV 8 + DbgColor 16); existing
+  overlay-only consumers auto-correct via the public-constant
+  change with no regression.  Dead `DBGFONT_MAX_VERTICES`
+  constant is removed.  `sys/system_types.h` ships as a
+  catch-all system-types forwarder over `sys/types.h`,
+  `sys/sys_types.h`, and `ppu-types.h`.
+
+### rsx-cg-compiler
+
+- **`20062e8`** — `rsx-cg-compiler: texRECT / texDepth2D /
+  h{3,4}tex2D + SamplerRect type`.  Symbol-table overloads
+  for the texture-rectangle and half-precision texture
+  intrinsics, the `SamplerRect` type, IR plumbing, and NV40
+  emit pass-through.
+
+### Tools — sprx-linker
+
+- **`2885595`** — `sprx-linker: tolerate absent
+  .sys_proc_prx_param section`.  Initial fix to allow
+  freestanding ELFs to pass through the post-link pass.
+- **`6596088`** — `sprx-linker: distinguish freestanding ELF
+  from dropped param section`.  Fix-forward: gate the
+  pass-through on `.sceStub.text` absence so real link bugs
+  still error loudly.
+
+### Samples
+
+- **`81f279b`** — `samples/spurs: add hello-spu-spurs-umbrella
+  regression gate`.  The SPU TU includes `<cell/spurs.h>` as
+  the primary spurs include and exercises all four new
+  sub-header surfaces (`CellSpursTaskExitCode` +
+  `CELL_SPURS_TASK_EXIT_CODE_ALIGN/SIZE`,
+  `CellSpursModulePollStatus`, `CellSpursLFQueue`) with
+  `_Static_assert` checks plus runtime references that
+  prevent dead-code elimination.  PPU side creates an LV2
+  event queue and exercises `cellSpursAttachLv2EventQueue` /
+  `cellSpursDetachLv2EventQueue`.  Runtime path: SPURS
+  Spurs2 + class-0 Taskset spawns the embedded SPU task,
+  which DMA-writes `0xC0FFEE` into a PPU flag buffer and
+  exits via `cellSpursTaskExit`; PPU prints `SUCCESS` on
+  flag match.
+- Bundled in `efe671c`:
+  `samples/gcm/hello-ppu-gcm-zcull-clip-border` exercises the
+  texture-border-color path with `BORDER` wrap +
+  out-of-range UVs, the zcull stats / limit / clear-surface
+  trio, and the user-clip-plane `ENABLE_LT` mode through
+  `cellGcmSetUserClipPlaneControl`.
+- Bundled in `5f237cc`:
+  `samples/dbgfont/hello-ppu-dbgfont-console` exercises the
+  Console API end-to-end with the auto-created stdout console
+  (white, top-left) plus a custom console at `(0.5, 0.55)`
+  with scale `0.75` in green, rendering both through the same
+  draw call.
+
+### Documentation
+
+- **`b73772b`** — `docs(readme): refresh for ELF64+ILP32
+  default, LP64 multilib, SDK growth`.  Top-level README
+  rewritten to describe the current ELF64+ILP32-hybrid
+  default + `-mlp64` opt-in shape, the native SDK surface,
+  and the kernel-target toolchain.
+
 ## [v0.8.0] — 2026-05-23
 
 ### Toolchain — LP64 multilib runtime
