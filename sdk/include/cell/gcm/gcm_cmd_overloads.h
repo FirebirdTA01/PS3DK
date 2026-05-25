@@ -152,6 +152,9 @@ static inline void cellGcmSetTextureAddress(uint8_t index,
                                             uint8_t gamma)
 { cellGcmSetTextureAddress(gCellGcmCurrentContext, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma); }
 
+static inline void cellGcmSetTextureBorderColor(uint8_t index, uint32_t color)
+{ cellGcmSetTextureBorderColor(gCellGcmCurrentContext, index, color); }
+
 static inline void cellGcmSetTimeStamp(uint32_t index)
 { cellGcmSetTimeStamp(gCellGcmCurrentContext, index); }
 
@@ -163,6 +166,15 @@ static inline void cellGcmSetFrontFace(uint32_t dir)
 
 static inline void cellGcmSetCullFaceEnable(uint32_t enable)
 { cellGcmSetCullFaceEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetZcullStatsEnable(uint32_t enable)
+{ cellGcmSetZcullStatsEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetZcullLimit(uint16_t moveForwardLimit, uint16_t pushBackLimit)
+{ cellGcmSetZcullLimit(gCellGcmCurrentContext, moveForwardLimit, pushBackLimit); }
+
+static inline void cellGcmSetClearZcullSurface(uint32_t depth, uint32_t stencil)
+{ cellGcmSetClearZcullSurface(gCellGcmCurrentContext, depth, stencil); }
 
 static inline void cellGcmSetUserClipPlaneControl(uint32_t plane0, uint32_t plane1,
                                                   uint32_t plane2, uint32_t plane3,

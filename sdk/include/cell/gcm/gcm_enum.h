@@ -496,6 +496,14 @@ extern "C" {
  * (cellGcmSetRenderEnable / cellGcmSetReport / cellGcmSetClearReport). */
 #define CELL_GCM_CONDITIONAL                     GCM_CONDITIONAL
 #define CELL_GCM_ZPASS_PIXEL_CNT                 GCM_ZPASS_PIXEL_CNT
+#define CELL_GCM_ZCULL_STATS                     GCM_ZCULL_STATS
+#define CELL_GCM_ZCULL_STATS1                    GCM_ZCULL_STATS1
+#define CELL_GCM_ZCULL_STATS2                    GCM_ZCULL_STATS2
+#define CELL_GCM_ZCULL_STATS3                    GCM_ZCULL_STATS3
+
+#define CELL_GCM_USER_CLIP_PLANE_DISABLE         GCM_USER_CLIP_PLANE_DISABLE
+#define CELL_GCM_USER_CLIP_PLANE_ENABLE_LT       GCM_USER_CLIP_PLANE_LT
+#define CELL_GCM_USER_CLIP_PLANE_ENABLE_GE       GCM_USER_CLIP_PLANE_GE
 
 /* Compression-mode tag (cellGcmSetTileInfo extra). */
 #define CELL_GCM_COMPMODE_C32_2X2                GCM_COMPMODE_C32_2X2
