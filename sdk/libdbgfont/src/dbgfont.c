@@ -1,5 +1,5 @@
 /*
- * PS3 Custom Toolchain — libdbgfont / dbgfont.c
+ * PS3 Custom Toolchain -- libdbgfont / dbgfont.c
  *
  * Tier-2 renderer for the cellDbgFont* API family (see
  * sdk/include/cell/dbgfont.h).  Submits NV40 draw commands that
@@ -17,7 +17,7 @@
  *   cellDbgFontPuts / cellDbgFontPrintf (x, y, scale, color, ...)
  *     - convert normalized [0..1] position + ARGB color into
  *       per-glyph quads, appended to the vertex pool;
- *     - no FIFO traffic — buffering only.
+ *     - no FIFO traffic -- buffering only.
  *
  *   cellDbgFontDrawGcm()
  *     - emit all the state (blend, depth-off, VP/FP bind, texture,
@@ -26,14 +26,14 @@
  *   cellDbgFontExitGcm()
  *     - no-op; caller owns the localBufAddr allocation.
  *
- * The shaders and atlas are embedded as bin2s symbols — see
+ * The shaders and atlas are embedded as bin2s symbols -- see
  * build/(vp|fp)shader_dbgfont.(vpo|fpo).o and
  * src/dbgfont_atlas_data.h.
  *
  * Layout math: the sample provides x,y as normalized [0..1] screen
- * coordinates.  We map to NDC as (2x−1, 1−2y) so y=0 is the top of
+ * coordinates.  We map to NDC as (2x-1, 1-2y) so y=0 is the top of
  * the frame.  Glyph size in NDC is a fixed pair of constants scaled
- * by the user's `scale` argument — we assume ~1280×720 as the
+ * by the user's `scale` argument -- we assume ~1280x720 as the
  * reference resolution, which gives the same visual size as the
  * Sony samples on a 720p RPCS3 window.  There's no runtime query of
  * the actual surface resolution (the API doesn't pass it); change
@@ -54,7 +54,11 @@
 #include <cell/dbgfont.h>
 #include <cell/gcm.h>
 
-/* 128x128 8-bit-alpha font atlas — bytes stored as a brace-list
+/* Console subsystem integration. */
+extern void _cellDbgFontInitStdoutConsole(void);
+extern void _cellDbgFontDrawConsoles(void);
+
+/* 128x128 8-bit-alpha font atlas -- bytes stored as a brace-list
  * fragment in dbgfont_atlas_data.h (matches PSL1GHT's include-in-
  * initializer idiom).  ASCII mapped starting at space on row 2. */
 static const uint8_t dbgfont_atlas_data[128 * 128] = {
@@ -68,10 +72,9 @@ static const uint8_t dbgfont_atlas_data[128 * 128] = {
 #define DBGFONT_GLYPH_W_PX         8
 #define DBGFONT_GLYPH_H_PX         9
 #define DBGFONT_TAB_SIZE           4
-#define DBGFONT_MAX_VERTICES       (CELL_DBGFONT_VERTEX_SIZE * 32)   /* 1024 quads = 4096 verts worst-case; conservative default. */
 
 /* Glyph size in NDC units at scale=1.0 on a 1280x720 reference.
- * NDC ranges from -1..+1 across the screen → 2 units total.  An 8px
+ * NDC ranges from -1..+1 across the screen -> 2 units total.  An 8px
  * glyph on a 1280px-wide screen is 2 * 8 / 1280 = 0.0125 wide; a 9px
  * tall glyph on 720 tall is 2 * 9 / 720 = 0.025.  Kerning adds 1 px
  * horizontally (glyph+1) and vertically (glyph+1). */
@@ -99,7 +102,7 @@ static struct {
     uint8_t *fp_ucode_mem;     /* vidmem addr of fragment ucode copy */
     uint32_t fp_ucode_off;     /* RSX IO offset for fragment ucode   */
 
-    /* Vertex pool — interleaved in caller's buffer: positions, then
+    /* Vertex pool -- interleaved in caller's buffer: positions, then
      * texcoords, then colors.  We keep CPU-visible pointers + IO
      * offsets for each stream. */
     DbgPos   *pos_cpu;
@@ -114,7 +117,7 @@ static struct {
     /* Shader handles.  The .vpo / .fpo blobs we ship are CgBinaryProgram
      * containers (rsx-cg-compiler output), so we consume them through
      * the cellGcmCg* / cellGcmSet* API rather than the legacy cgcomp-
-     * format `rsxVertexProgram` struct walkers (the layouts differ —
+     * format `rsxVertexProgram` struct walkers (the layouts differ --
      * feeding a CgBinaryProgram to rsxLoadVertexProgram crashes the
      * GPU).  vp_ucode is a sys-mem pointer into the VP blob; the FP
      * ucode is memcpy'd into fp_ucode_mem so RSX can read it from
@@ -149,7 +152,7 @@ static void unpack_argb(uint32_t color, DbgColor *out)
     out->b = argb_to_f( color        & 0xff);
 }
 
-/* UV calculation for glyph `c` in the 128x128 atlas — 16 glyphs per
+/* UV calculation for glyph `c` in the 128x128 atlas -- 16 glyphs per
  * row.  The atlas data starts at row 2 (ASCII 0x20 == space begins
  * on the third row), matching PSL1GHT's calcT0/T1. */
 static inline float glyph_s0(uint8_t c) { return (float)((c % 16) * DBGFONT_GLYPH_W_PX) / (float)DBGFONT_ATLAS_W; }
@@ -213,7 +216,7 @@ int32_t cellDbgFontInitGcm(const CellDbgFontConfigGcm *cfg)
 
     /* The compiled .vpo / .fpo are CgBinaryProgram blobs from
      * rsx-cg-compiler.  Walk them via the cellGcmCg* API: the FP ucode
-     * blob lives inside the .fpo container — copy it into vidmem and
+     * blob lives inside the .fpo container -- copy it into vidmem and
      * leave fp_offset for cellGcmSetFragmentProgram; the VP ucode is
      * read straight from sysmem at draw time. */
     g_dbgfont.vp = (CGprogram)vpshader_dbgfont_vpo;
@@ -247,11 +250,19 @@ int32_t cellDbgFontInitGcm(const CellDbgFontConfigGcm *cfg)
     g_dbgfont.tex_unit   = (int)cellGcmCgGetParameterResource(g_dbgfont.fp, tu) - CG_TEXUNIT0;
 
     g_dbgfont.initialized = 1;
+
+    /* Auto-create the stdout console at slot 0. */
+    _cellDbgFontInitStdoutConsole();
+
     return 0;
 }
 
 int32_t cellDbgFontExitGcm(void)
 {
+    /* Close all active console slots. */
+    for (int i = 0; i < 8; i++) {
+        cellDbgFontConsoleClose((CellDbgFontConsoleId)i);
+    }
     g_dbgfont.initialized = 0;
     return 0;
 }
@@ -263,7 +274,7 @@ int32_t cellDbgFontExitGcm(void)
 /* Append one glyph quad (4 verts: TL, TR, BR, BL) at NDC top-left
  * (nx, ny) with per-vertex color `col`.  Returns 0 on success, -1 if
  * the vertex pool is full.  The winding matches CELL_GCM_PRIMITIVE_QUADS
- * which NV40 consumes as TL→TR→BR→BL. */
+ * which NV40 consumes as TL->TR->BR->BL. */
 static int append_glyph(float nx_tl, float ny_tl, float scale,
                         uint8_t ch, const DbgColor *col)
 {
@@ -335,7 +346,7 @@ int32_t cellDbgFontPuts(float x, float y, float scale, uint32_t color, const cha
             cursor_x_ndc += tab_w;
         } else {
             /* Advance blanks (space and anything else non-printable) so
-             * layout still makes sense — matches PSL1GHT's fallthrough. */
+             * layout still makes sense -- matches PSL1GHT's fallthrough. */
             cursor_x_ndc += kern_w;
         }
     }
@@ -362,6 +373,13 @@ int32_t cellDbgFontPrintf(float x, float y, float scale, uint32_t color, const c
 int32_t cellDbgFontDrawGcm(void)
 {
     if (!g_dbgfont.initialized) return -1;
+
+    /* Render all active console ring-buffers first.  Each console
+     * feeds its lines through cellDbgFontPuts, which batches quads
+     * into the vertex pool.  Then the remaining code draws all the
+     * quads in a single FIFO submit. */
+    _cellDbgFontDrawConsoles();
+
     if (g_dbgfont.num_verts == 0) return 0;
 
     gcmContextData *ctx = gCellGcmCurrentContext;
@@ -416,7 +434,7 @@ int32_t cellDbgFontDrawGcm(void)
                        GCM_TEXTURE_UNSIGNED_REMAP_NORMAL,
                        GCM_TEXTURE_ZFUNC_LESS, 0);
 
-    /* Bind the vertex-attribute streams — each attribute reads from a
+    /* Bind the vertex-attribute streams -- each attribute reads from a
      * contiguous, tightly-packed array at its own RSX IO offset. */
     rsxBindVertexArrayAttrib(ctx, g_dbgfont.pos_attrib, 0, g_dbgfont.pos_off,
                              sizeof(DbgPos), 3, GCM_VERTEX_DATA_TYPE_F32,
@@ -431,7 +449,7 @@ int32_t cellDbgFontDrawGcm(void)
     rsxDrawVertexArray(ctx, GCM_TYPE_QUADS, 0, (uint32_t)g_dbgfont.num_verts);
     rsxInvalidateVertexCache(ctx);
 
-    /* Reset for next frame.  We don't wait here — the caller's flip
+    /* Reset for next frame.  We don't wait here -- the caller's flip
      * path handles GPU/PPU synchronisation.  Next frame's Puts/Printf
      * calls overwrite the vertex pool in place. */
     g_dbgfont.num_verts = 0;

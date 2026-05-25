@@ -1,10 +1,10 @@
 /*
- * PS3 Custom Toolchain — <cell/dbgfont.h>
+ * PS3 Custom Toolchain -- <cell/dbgfont.h>
  *
  * Declarations for the cellDbgFont* on-screen text overlay API.
  * Implementation lives in libdbgfont.a (sdk/libdbgfont/).  Samples
  * that use this API must link `-ldbgfont` in addition to the usual
- * `-lgcm_cmd -lrsx …` set.
+ * `-lgcm_cmd -lrsx ...` set.
  *
  * Semantics (matches the cell SDK 475.001 <cell/dbgfont.h>):
  *
@@ -18,7 +18,7 @@
  *                       and align 128 bytes.
  *   Puts / Printf       Stage one string at normalized [0..1] screen
  *                       coords `(x,y)` (y=0 is top) with glyph
- *                       `scale` and ARGB `color`.  No FIFO traffic —
+ *                       `scale` and ARGB `color`.  No FIFO traffic --
  *                       only vertex accumulation.
  *   DrawGcm             Emit the batched quads + the render state
  *                       (alpha-blend on, depth-test off).  Call once
@@ -46,7 +46,7 @@ extern "C" {
 
 #define CELL_DBGFONT_FRAGMENT_SIZE    512
 #define CELL_DBGFONT_TEXTURE_SIZE     (256 * 256)
-#define CELL_DBGFONT_VERTEX_SIZE      32
+#define CELL_DBGFONT_VERTEX_SIZE      36   /* DbgPos(12) + DbgUV(8) + DbgColor(16) */
 #define CELL_DBGFONT_VERTEX_LOCAL     0x00000001u
 #define CELL_DBGFONT_TEXTURE_LOCAL    0x00000002u
 #define CELL_DBGFONT_VERTEX_MAIN      0x00000004u
@@ -77,6 +77,33 @@ int32_t cellDbgFontPuts  (float x, float y, float scale, uint32_t color,
 int32_t cellDbgFontPrintf(float x, float y, float scale, uint32_t color,
                           const char *fmt, ...)
                           __attribute__((format(printf, 5, 6)));
+
+/* ---- Console API: virtual text console with ring-buffer lines ----- */
+
+typedef int32_t CellDbgFontConsoleId;
+
+/* Default stdout console -- always available after InitGcm. */
+#define CELL_DBGFONT_STDOUT_ID ((CellDbgFontConsoleId)0)
+
+/* Reserved sentinel for error returns from cellDbgFontConsoleOpen. */
+#define CELL_DBGFONT_CONSOLE_INVALID_ID ((CellDbgFontConsoleId)-1)
+
+typedef struct CellDbgFontConsoleConfig {
+    float    posLeft;      /* normalised [0..1] left anchor           */
+    float    posTop;        /* normalised [0..1] top anchor (y=0 top) */
+    uint16_t cnsWidth;     /* character columns per line              */
+    uint16_t cnsHeight;    /* character rows in the ring buffer       */
+    float    scale;        /* glyph scale (1.0 == reference 720p)     */
+    uint32_t color;        /* ARGB text colour                        */
+} CellDbgFontConsoleConfig;
+
+int  cellDbgFontConsoleOpen(const CellDbgFontConsoleConfig *cfg);
+int  cellDbgFontConsoleClose(CellDbgFontConsoleId id);
+int  cellDbgFontConsoleVprintf(CellDbgFontConsoleId id,
+                               const char *fmt, va_list ap);
+int  cellDbgFontConsolePrintf(CellDbgFontConsoleId id,
+                              const char *fmt, ...)
+                              __attribute__((format(printf, 2, 3)));
 
 #ifdef __cplusplus
 }

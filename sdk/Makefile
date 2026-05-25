@@ -38,6 +38,7 @@ HEADERS := \
     include/sys/timer.h \
     include/sys/sys_time.h \
     include/sys/sys_types.h \
+    include/sys/system_types.h \
     include/sys/types.h \
     include/sys/return_code.h \
     include/sys/thread.h \
