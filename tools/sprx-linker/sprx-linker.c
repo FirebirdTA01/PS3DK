@@ -217,7 +217,24 @@ int main(int argc, char *argv[])
 	   (spec). */
 	Elf_Scn *prx = getSection(elf, ".sys_proc_prx_param");
 	if(!prx) {
-		fprintf(stderr, "sprx-linker: no .sys_proc_prx_param section — nothing to rewrite, passing through.\n");
+		/* A freestanding ELF with no SPRX imports has no
+		   .sceStub.text trampoline table either, and therefore
+		   nothing for the SPRX loader to fix up — pass through.
+		   Trampolines without the parameter section, on the other
+		   hand, is a link-time defect that the SELF would carry
+		   silently into runtime as unresolved imports, so fail
+		   loudly. */
+		Elf_Scn *sce_stub_text = getSection(elf, ".sceStub.text");
+		if(sce_stub_text) {
+			fprintf(stderr,
+			    "sprx-linker: elf has .sceStub.text trampolines but "
+			    "no .sys_proc_prx_param section — SPRX loader will be "
+			    "unable to resolve imports at runtime.\n");
+			elf_end(elf);
+			close(fd);
+			return 1;
+		}
+		fprintf(stderr, "sprx-linker: no .sys_proc_prx_param and no .sceStub.text — pass-through.\n");
 		elf_end(elf);
 		close(fd);
 		return 0;
