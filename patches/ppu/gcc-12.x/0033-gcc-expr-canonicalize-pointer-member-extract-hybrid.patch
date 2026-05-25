@@ -1,0 +1,110 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] gcc/expr: canonicalize pointer extracted from aggregate
+ register under ILP32-hybrid
+
+Under powerpc64-ps3-elf's ELF64/ILP32 hybrid ABI, C/C++ pointers are
+logical SImode values while the underlying GPRs are physically 64-bit.
+Small aggregates passed by value can therefore pack multiple logical
+32-bit fields into one DImode register.  When a pointer-typed member is
+extracted from the low 32 bits of such an aggregate register, GCC can
+represent the result as an SImode subreg and later use it directly as a
+memory address.  Final then emits a load/store through the full physical
+GPR, including the unrelated aggregate member still present in the high
+32 bits.
+
+The minimal failure is:
+
+  struct SV { unsigned len; const char *p; };
+  char f(SV sv) { return sv.p[0]; }
+
+The caller packs `len` into the high half and `p` into the low half of
+one GPR.  Without this patch the callee can emit:
+
+  lbz 3,0(3)
+
+which dereferences the packed aggregate, not the canonical pointer.
+
+This is part of the same hybrid bit-32 leak family as the callee-save
+GPR width fix and pointer-plus canonicalization fixes.  A broader
+consumer-boundary backstop would canonicalize SImode addresses when they
+become MEM operands, but GCC 12's existing rs6000 address hooks do not
+provide a narrow place that can both see already-legitimate register
+addresses and emit code.  Keep this producer-side fix scoped to
+register-held aggregate/bitfield extraction and reuse the rs6000
+target-visible UNSPEC added by the pointer-plus fix.
+
+--- a/gcc/expr.cc
++++ b/gcc/expr.cc
+@@ -11176,8 +11176,11 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
+ 	tree tem
+ 	  = get_inner_reference (exp, &bitsize, &bitpos, &offset, &mode1,
+ 				 &unsignedp, &reversep, &volatilep);
+ 	rtx orig_op0, memloc;
+ 	bool clear_mem_expr = false;
++#ifdef HAVE_ps3_ptr_canonicalize_si
++	bool ps3_canonicalize_pointer_extract = false;
++#endif
+ 
+ 	/* If we got back the original object, something is wrong.  Perhaps
+ 	   we are evaluating an expression too early.  In any event, don't
+@@ -11426,6 +11429,39 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
+ 	  {
+ 	    machine_mode ext_mode = mode;
+ 
++#ifdef HAVE_ps3_ptr_canonicalize_si
++	    /* This is one of the ELF64/ILP32 hybrid bit-32 leak fixes.
++	       The known family is:
++
++		 - callee-save GPR save/restore width truncating DImode
++		   aggregate values;
++		 - POINTER_PLUS_EXPR / PLUS_EXPR offset expansion leaving stale
++		   high bits in pointer arithmetic;
++		 - pointer-typed members extracted from word-sized aggregate
++		   registers.
++
++	       In this case the member is represented as a logical SImode value
++	       while the physical 64-bit GPR can still contain another aggregate
++	       member in the high half.  If that SImode value is used as an
++	       address without a target-visible canonicalization, final can emit
++	       a load/store through the uncanonical physical GPR.
++
++	       The more complete consumer-boundary design would canonicalize
++	       SImode addresses in memory_address_addr_space or an equivalent
++	       target hook.  GCC 12 has no narrow hook there that can both see
++	       already-legitimate register addresses and emit code, so keep this
++	       fix at the register-field extraction site and reuse the rs6000
++	       UNSPEC from the pointer-plus canonicalization.  */
++	    ps3_canonicalize_pointer_extract
++	      = (POINTER_TYPE_P (type)
++		 && mode == ptr_mode
++		 && known_lt (GET_MODE_SIZE (ptr_mode),
++			      (unsigned int) UNITS_PER_WORD)
++		 && HAVE_ps3_ptr_canonicalize_si
++		 && (REG_P (op0) || GET_CODE (op0) == SUBREG)
++		 && known_gt (GET_MODE_SIZE (mode2), GET_MODE_SIZE (mode)));
++#endif
++
+ 	    if (ext_mode == BLKmode
+ 		&& ! (target != 0 && MEM_P (op0)
+ 		      && MEM_P (target)
+@@ -11486,6 +11524,19 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
+ 				     (modifier == EXPAND_STACK_PARM
+ 				      ? NULL_RTX : target),
+ 				     ext_mode, ext_mode, reversep, alt_rtl);
+ 
++#ifdef HAVE_ps3_ptr_canonicalize_si
++	    if (ps3_canonicalize_pointer_extract
++		&& GET_MODE (op0) == ptr_mode)
++	      {
++		rtx canon = gen_reg_rtx (ptr_mode);
++
++		if (!REG_P (op0))
++		  op0 = force_reg (ptr_mode, op0);
++		emit_insn (gen_ps3_ptr_canonicalize_si (canon, op0));
++		op0 = canon;
++	      }
++#endif
++
+ 	    /* If the result has aggregate type and the mode of OP0 is an
+ 	       integral mode then, if BITSIZE is narrower than this mode
+ 	       and this is for big-endian data, we must put the field

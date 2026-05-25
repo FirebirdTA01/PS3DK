@@ -31,3 +31,4 @@
 0030-gcc-expr-canonicalize-pointer-plus-offset-hybrid.patch
 0031-rs6000-logue-callee-save-dimode.patch
 0032-gcc-rs6000-pointer-add-hybrid-canonicalize.patch
+0033-gcc-expr-canonicalize-pointer-member-extract-hybrid.patch
