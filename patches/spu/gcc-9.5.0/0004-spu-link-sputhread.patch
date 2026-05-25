@@ -1,0 +1,21 @@
+Add -lsputhread to LIB_SPEC so SPU-side runtime symbols
+(sys_spu_thread_exit, sys_spu_thread_group_exit, sys_event_flag_set_bit,
+sys_event_flag_set_bit_impatient, _spu_call_event_va_arg) resolve at
+link time without reference samples needing explicit -lsputhread.
+
+libsputhread.a is symlinked into the SPU default library search path
+(spu-elf/lib/) so no additional -L is required.  The library is placed
+inside the -( ... -) start-group / end-group bracket so circular
+references between newlib and sputhread resolve.
+
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -68,7 +68,7 @@
+  %{mspurs-task: --spurs-task}\
+ "
+
+-#define LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -) \
++#define LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -lsputhread -) \
+     %{mno-atomic-updates:-lgcc_cachemgr_nonatomic; :-lgcc_cachemgr} \
+     %{mcache-size=128:-lgcc_cache128k; \
+      %{mcache-size=64:-lgcc_cache64k; \
