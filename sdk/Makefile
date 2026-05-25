@@ -51,6 +51,8 @@ HEADERS := \
     include/sys/time_util.h \
     include/sys/paths.h \
     include/sysutil/sysutil_sysparam.h \
+    include/sysutil/sysutil_savedata.h \
+    include/sysutil/sysutil_msgdialog.h \
     include/sysutil/video.h \
     include/cell/cell.h \
     include/cell/atomic.h \
