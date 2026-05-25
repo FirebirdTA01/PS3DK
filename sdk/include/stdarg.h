@@ -5,7 +5,7 @@
 
 #ifdef __cplusplus
 namespace std {
-using ::va_list;
+typedef __builtin_va_list va_list;
 }
 #endif
 
