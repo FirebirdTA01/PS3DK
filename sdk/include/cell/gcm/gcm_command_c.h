@@ -41,6 +41,7 @@
 #include <stdint.h>
 #include <ppu-types.h>
 #include <rsx/gcm_sys.h>
+#include <rsx/rsx.h>
 #include <rsx/commands.h>
 
 /* Native NV40 emitters for the texture-family cellGcmSet* functions —
@@ -190,6 +191,23 @@ static inline void cellGcmSetDepthTestEnable(CellGcmContextData *thisContext, ui
 static inline void cellGcmSetDepthMask(CellGcmContextData *thisContext, uint32_t mask)
 {
 	rsxSetDepthWriteEnable(thisContext, mask);
+}
+
+static inline void cellGcmSetDepthBoundsTestEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetDepthBoundsTestEnable(thisContext, enable);
+}
+
+static inline void cellGcmSetDepthBounds(CellGcmContextData *thisContext, float zMin, float zMax)
+{
+	rsxSetDepthBounds(thisContext, zMin, zMax);
+}
+
+static inline void cellGcmSetAntiAliasingControl(CellGcmContextData *thisContext,
+                                                 uint32_t enable, uint32_t alphaToCoverage,
+                                                 uint32_t alphaToOne, uint32_t sampleMask)
+{
+	rsxSetAntialiasingControl(thisContext, enable, alphaToCoverage, alphaToOne, sampleMask);
 }
 
 static inline void cellGcmSetBlendEnable(CellGcmContextData *thisContext, uint32_t enable)
@@ -517,6 +535,26 @@ static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
 	                    width, height, bytesPerPixel);
 }
 
+static inline void cellGcmSetTransferScaleMode(CellGcmContextData *thisContext,
+                                               uint8_t mode, uint8_t surface)
+{
+	rsxSetTransferScaleMode(thisContext, mode, surface);
+}
+
+static inline void cellGcmSetTransferScaleSurface(CellGcmContextData *thisContext,
+                                                  const gcmTransferScale *scale,
+                                                  const gcmTransferSurface *surface)
+{
+	rsxSetTransferScaleSurface(thisContext, scale, surface);
+}
+
+static inline void cellGcmSetTransferScaleSwizzle(CellGcmContextData *thisContext,
+                                                  const gcmTransferScale *scale,
+                                                  const gcmTransferSwizzle *swizzle)
+{
+	rsxSetTransferScaleSwizzle(thisContext, scale, swizzle);
+}
+
 /* ==========================================================
  * Stencil — front + two-sided.  Reference SDK names map 1:1
  * onto the rsx* low-level emitters.
@@ -595,6 +633,11 @@ static inline void cellGcmSetPolygonOffset(CellGcmContextData *thisContext,
 	rsxSetPolygonOffset(thisContext, factor, units);
 }
 
+static inline void cellGcmSetPolySmoothEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetPolygonSmoothEnable(thisContext, enable);
+}
+
 /* ==========================================================
  * Frequency-divider operation — controls per-attribute frequency
  * divisor mode.  Used by GPU skinning paths to bind joint-matrix
@@ -640,6 +683,15 @@ static inline void cellGcmSetScullControl(CellGcmContextData *thisContext,
                                           uint16_t func, uint8_t ref, uint8_t mask)
 {
 	rsxSetSCullControl(thisContext, func, ref, mask);
+}
+
+static inline void cellGcmSetZMinMaxControl(CellGcmContextData *thisContext,
+                                            uint32_t cullNearFarEnable,
+                                            uint32_t zclampEnable,
+                                            uint32_t cullIgnoreW)
+{
+	rsxSetZMinMaxControl(thisContext, (uint8_t)cullNearFarEnable,
+	                     (uint8_t)zclampEnable, (uint8_t)cullIgnoreW);
 }
 
 /* ==========================================================

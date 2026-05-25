@@ -91,6 +91,16 @@ static inline void cellGcmSetDepthTestEnable(uint32_t enable)
 static inline void cellGcmSetDepthMask(uint32_t mask)
 { cellGcmSetDepthMask(gCellGcmCurrentContext, mask); }
 
+static inline void cellGcmSetDepthBoundsTestEnable(uint32_t enable)
+{ cellGcmSetDepthBoundsTestEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetDepthBounds(float zMin, float zMax)
+{ cellGcmSetDepthBounds(gCellGcmCurrentContext, zMin, zMax); }
+
+static inline void cellGcmSetAntiAliasingControl(uint32_t enable, uint32_t alphaToCoverage,
+                                                 uint32_t alphaToOne, uint32_t sampleMask)
+{ cellGcmSetAntiAliasingControl(gCellGcmCurrentContext, enable, alphaToCoverage, alphaToOne, sampleMask); }
+
 static inline void cellGcmSetBlendEnable(uint32_t enable)
 { cellGcmSetBlendEnable(gCellGcmCurrentContext, enable); }
 
@@ -225,6 +235,76 @@ static inline void cellGcmSetTransferImage(uint8_t mode,
                                            uint32_t width, uint32_t height,
                                            uint32_t bytesPerPixel)
 { cellGcmSetTransferImage(gCellGcmCurrentContext, mode, dstOffset, dstPitch, dstX, dstY, srcOffset, srcPitch, srcX, srcY, width, height, bytesPerPixel); }
+
+static inline void cellGcmSetTransferScaleMode(uint8_t mode, uint8_t surface)
+{ cellGcmSetTransferScaleMode(gCellGcmCurrentContext, mode, surface); }
+
+static inline void cellGcmSetTransferScaleSurface(const CellGcmTransferScale *scale,
+                                                  const CellGcmTransferSurface *surface)
+{ cellGcmSetTransferScaleSurface(gCellGcmCurrentContext, scale, surface); }
+
+static inline void cellGcmSetTransferScaleSwizzle(const CellGcmTransferScale *scale,
+                                                  const CellGcmTransferSwizzle *swizzle)
+{ cellGcmSetTransferScaleSwizzle(gCellGcmCurrentContext, scale, swizzle); }
+
+static inline void cellGcmSetPolySmoothEnable(uint32_t enable)
+{ cellGcmSetPolySmoothEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetStencilTestEnable(uint32_t enable)
+{ cellGcmSetStencilTestEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetTwoSidedStencilTestEnable(uint32_t enable)
+{ cellGcmSetTwoSidedStencilTestEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetStencilFunc(uint32_t func, int32_t ref, uint32_t mask)
+{ cellGcmSetStencilFunc(gCellGcmCurrentContext, func, ref, mask); }
+
+static inline void cellGcmSetStencilOp(uint32_t fail, uint32_t zfail, uint32_t zpass)
+{ cellGcmSetStencilOp(gCellGcmCurrentContext, fail, zfail, zpass); }
+
+static inline void cellGcmSetStencilMask(uint32_t mask)
+{ cellGcmSetStencilMask(gCellGcmCurrentContext, mask); }
+
+static inline void cellGcmSetBackStencilFunc(uint32_t func, int32_t ref, uint32_t mask)
+{ cellGcmSetBackStencilFunc(gCellGcmCurrentContext, func, ref, mask); }
+
+static inline void cellGcmSetBackStencilOp(uint32_t fail, uint32_t zfail, uint32_t zpass)
+{ cellGcmSetBackStencilOp(gCellGcmCurrentContext, fail, zfail, zpass); }
+
+static inline void cellGcmSetBackStencilMask(uint32_t mask)
+{ cellGcmSetBackStencilMask(gCellGcmCurrentContext, mask); }
+
+static inline void cellGcmSetAlphaTestEnable(uint32_t enable)
+{ cellGcmSetAlphaTestEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetFrequencyDividerOperation(uint16_t op)
+{ cellGcmSetFrequencyDividerOperation(gCellGcmCurrentContext, op); }
+
+static inline void cellGcmSetUpdateFragmentProgramParameter(uint32_t offset)
+{ cellGcmSetUpdateFragmentProgramParameter(gCellGcmCurrentContext, offset); }
+
+static inline void cellGcmSetInvalidateZcull(void)
+{ cellGcmSetInvalidateZcull(gCellGcmCurrentContext); }
+
+static inline void cellGcmSetZcullEnable(uint32_t depth, uint32_t stencil)
+{ cellGcmSetZcullEnable(gCellGcmCurrentContext, depth, stencil); }
+
+static inline void cellGcmSetZMinMaxControl(uint32_t cullNearFarEnable,
+                                            uint32_t zclampEnable,
+                                            uint32_t cullIgnoreW)
+{ cellGcmSetZMinMaxControl(gCellGcmCurrentContext, cullNearFarEnable, zclampEnable, cullIgnoreW); }
+
+static inline void cellGcmSetRenderEnable(uint32_t enable, uint32_t offset)
+{ cellGcmSetRenderEnable(gCellGcmCurrentContext, enable, offset); }
+
+static inline void cellGcmSetZpassPixelCountEnable(uint32_t enable)
+{ cellGcmSetZpassPixelCountEnable(gCellGcmCurrentContext, enable); }
+
+static inline void cellGcmSetReport(uint8_t type, uint32_t index)
+{ cellGcmSetReport(gCellGcmCurrentContext, type, index); }
+
+static inline void cellGcmSetClearReport(uint8_t type)
+{ cellGcmSetClearReport(gCellGcmCurrentContext, type); }
 
 #endif  /* __cplusplus */
 
