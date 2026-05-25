@@ -696,6 +696,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     {
         const auto& param = entry.parameters[pi];
         const bool isSampler = (param.type.baseType == IRType::Sampler2D ||
+                                param.type.baseType == IRType::SamplerRect ||
                                 param.type.baseType == IRType::SamplerCube);
         if (param.storage == StorageQualifier::Uniform && isSampler)
         {
@@ -845,6 +846,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
                 const bool isSampler =
                     (g->type.baseType == IRType::Sampler2D ||
+                     g->type.baseType == IRType::SamplerRect ||
                      g->type.baseType == IRType::SamplerCube);
                 if (isSampler)
                 {

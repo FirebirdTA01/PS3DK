@@ -313,6 +313,7 @@ void SymbolTable::registerBuiltinTypes()
     addType("sampler2D", CgType::Sampler2D());
     addType("sampler3D", CgType::Sampler3D());
     addType("samplerCUBE", CgType::SamplerCube());
+    addType("samplerRECT", CgType::SamplerRect());
     addType("isampler2D", CgType::ISampler2D());
     addType("usampler2D", CgType::USampler2D());
 }
@@ -554,6 +555,12 @@ void SymbolTable::registerTextureSymbols()
     addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex3D", CgType::Float4(), {CgType::Sampler3D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
     addFunction("texCUBE", CgType::Float4(), {CgType::SamplerCube(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("h4tex2D", CgType::Half4(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("h3tex2D", CgType::Half3(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texDepth2D", CgType::Float(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texDepth2D_precise", CgType::Float(), {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
 
     // With explicit derivatives
     addFunction("tex2D", CgType::Float4(),

@@ -44,6 +44,7 @@ enum class IRType
 
     // Sampler types
     Sampler2D,
+    SamplerRect,
     SamplerCube,
 
     // Pointer type (for memory operations)

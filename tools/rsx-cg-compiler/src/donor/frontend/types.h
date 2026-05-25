@@ -88,6 +88,7 @@ public:
     static CgType Sampler2D();
     static CgType Sampler3D();
     static CgType SamplerCube();
+    static CgType SamplerRect();
     static CgType ISampler2D();
     static CgType USampler2D();
 
