@@ -142,17 +142,75 @@ typedef struct _cellGcmSurface {
     uint16_t y;
 } CellGcmSurface;
 
-/* CellGcmTexture aliased onto PSL1GHT's gcmTexture.  Both have the
- * same 12-field layout (format u8, mipmap u8, dimension u8, cubemap u8,
- * remap u32, width u16, height u16, depth u16, location u8, _pad u8,
- * pitch u32, offset u32) — verified against the reference SDK's gcm_struct.h. */
-typedef gcmTexture           CellGcmTexture;
+/* CellGcmTexture is layout-compatible with PSL1GHT's gcmTexture, but
+ * exposes both the rsx `. _pad` spelling and the the reference SDK `. _padding`
+ * spelling used by samples/common/gcmutil. */
+typedef struct CellGcmTexture {
+    uint8_t  format;
+    uint8_t  mipmap;
+    uint8_t  dimension;
+    uint8_t  cubemap;
+    uint32_t remap;
+    uint16_t width;
+    uint16_t height;
+    uint16_t depth;
+    uint8_t  location;
+    union { uint8_t _pad; uint8_t _padding; };
+    uint32_t pitch;
+    uint32_t offset;
+} CellGcmTexture;
+typedef gcmTransferScale     CellGcmTransferScale;
+typedef gcmTransferSurface   CellGcmTransferSurface;
+typedef gcmTransferSwizzle   CellGcmTransferSwizzle;
+
+typedef struct CellGcmReportData {
+    uint64_t timer;
+    uint32_t value;
+    uint32_t zero;
+} CellGcmReportData;
 
 /* Tile / Zcull descriptors used by cellGcmGetTileInfo / cellGcmGetZcullInfo
  * helpers in samples/common/gcmutil.  Layout-equivalent to the PSL1GHT
  * lower-case aliases. */
 typedef gcmTileInfo          CellGcmTileInfo;
-typedef gcmZcullInfo         CellGcmZcullInfo;
+typedef struct CellGcmZcullInfo {
+    uint32_t region;
+    uint32_t size;
+    uint32_t start;
+    uint32_t offset;
+    union { uint32_t stat0; uint32_t status0; };
+    union { uint32_t stat1; uint32_t status1; };
+} CellGcmZcullInfo;
+
+#define PS3TC_GCM_JOIN2(a, b) a##b
+#define PS3TC_GCM_JOIN(a, b) PS3TC_GCM_JOIN2(a, b)
+#ifdef __cplusplus
+#if __cplusplus >= 201103L
+#define PS3TC_GCM_STATIC_ASSERT(cond, msg) static_assert(cond, msg);
+#else
+#define PS3TC_GCM_STATIC_ASSERT(cond, msg) \
+    typedef char PS3TC_GCM_JOIN(ps3tc_gcm_static_assert_, __LINE__)[(cond) ? 1 : -1];
+#endif
+#else
+#define PS3TC_GCM_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg);
+#endif
+
+PS3TC_GCM_STATIC_ASSERT(sizeof(CellGcmTexture) == sizeof(gcmTexture),
+                        "CellGcmTexture layout drift")
+PS3TC_GCM_STATIC_ASSERT(offsetof(CellGcmTexture, pitch) == offsetof(gcmTexture, pitch),
+                        "CellGcmTexture pitch offset drift")
+PS3TC_GCM_STATIC_ASSERT(offsetof(CellGcmTexture, offset) == offsetof(gcmTexture, offset),
+                        "CellGcmTexture offset drift")
+PS3TC_GCM_STATIC_ASSERT(sizeof(CellGcmZcullInfo) == sizeof(gcmZcullInfo),
+                        "CellGcmZcullInfo layout drift")
+PS3TC_GCM_STATIC_ASSERT(offsetof(CellGcmZcullInfo, status0) == offsetof(gcmZcullInfo, stat0),
+                        "CellGcmZcullInfo status0 offset drift")
+PS3TC_GCM_STATIC_ASSERT(offsetof(CellGcmZcullInfo, status1) == offsetof(gcmZcullInfo, stat1),
+                        "CellGcmZcullInfo status1 offset drift")
+
+#undef PS3TC_GCM_STATIC_ASSERT
+#undef PS3TC_GCM_JOIN
+#undef PS3TC_GCM_JOIN2
 
 /* ============================================================
  * Inline helpers (non-emitter).  No FIFO writes; just math.
@@ -165,6 +223,16 @@ static inline uint32_t cellGcmAlign(uint32_t alignment, uint32_t value)
     return (alignment == 0) ? value
          : (value == 0)     ? 0
          : ((((value - 1) / alignment) + 1) * alignment);
+}
+
+static inline int32_t cellGcmGetFixedSint32(float value)
+{
+    return (int32_t)rsxGetFixedSint32(value);
+}
+
+static inline uint16_t cellGcmGetFixedUint16(float value)
+{
+    return (uint16_t)rsxGetFixedUint16(value);
 }
 
 /* Tile region + Zcull — forward to PSL1GHT's libgcm_sys wrappers.
@@ -393,6 +461,26 @@ static inline void cellGcmResetFlipStatus(void)
 	gcmResetFlipStatus();
 }
 
+static inline void cellGcmSetFlipStatus(void)
+{
+	gcmSetFlipStatus();
+}
+
+static inline int64_t cellGcmGetLastFlipTime(void)
+{
+	return (int64_t)gcmGetLastFlipTime();
+}
+
+static inline void cellGcmSetCurrentBuffer(const uint32_t *addr, uint32_t size)
+{
+	rsxSetCurrentBuffer(NULL, addr, size);
+}
+
+static inline void cellGcmSetDefaultCommandBuffer(void)
+{
+	rsxSetDefaultCommandBuffer(NULL);
+}
+
 /* ----------------------------------------------------------------
  * Flip APIs — three flavours.  Pick PrepareFlip + handlers; the
  * other two are advanced/dangerous.  Read this whole block before
@@ -549,6 +637,21 @@ static inline int32_t cellGcmUpdateCursor(void)
 static inline uint32_t *cellGcmGetLabelAddress(uint8_t index)
 {
 	return gcmGetLabelAddress(index);
+}
+
+static inline CellGcmReportData *cellGcmGetReportDataAddress(uint32_t index)
+{
+	return (CellGcmReportData *)gcmGetReportDataAddress(index);
+}
+
+static inline CellGcmReportData *cellGcmGetReportDataAddressLocation(uint32_t index, uint32_t location)
+{
+	return (CellGcmReportData *)gcmGetReportDataAddressLocation(index, location);
+}
+
+static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t location)
+{
+	return (uint32_t)gcmGetReportDataLocation(index, location);
 }
 
 #ifdef __cplusplus
