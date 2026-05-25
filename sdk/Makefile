@@ -31,6 +31,7 @@ HEADERS := \
     include/stdlib.h \
     include/string.h \
     include/types.h \
+    include/cellstatus.h \
     include/sys/lv2_types.h \
     include/sys/lv2_syscall.h \
     include/sys/ppu-asm.h \
@@ -212,7 +213,7 @@ HEADERS := \
     include/rsx/rsx_function_macros.h \
     include/rsx/rsx_program.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq liblv2
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 liblv2
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -220,8 +221,8 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
+    include/cellstatus.h \
     include/cell/error.h \
-    include/cell/atomic.h \
     include/cell/spurs/types.h \
     include/cell/spurs/common.h \
     include/cell/spurs/exception_types.h \
@@ -277,9 +278,16 @@ SPU_HEADERS := \
     include-spu/bits/simd_float4.h \
     include-spu/bits/simd_double2.h \
     include-spu/stdlib.h \
+    include-spu/cell/atomic.h \
     include-spu/cell/dma.h \
     include-spu/cell/sync.h \
-    include-spu/cell/sync/barrier.h
+    include-spu/cell/sync/barrier.h \
+    include-spu/cell/sync/queue.h \
+    include-spu/cell/sync/mutex.h \
+    include-spu/cell/sync/rwm.h \
+    include-spu/cell/sync/lfqueue.h \
+    include-spu/cell/sync2.h \
+    include-spu/cell/fiber.h
 
 .PHONY: all install clean version-header $(SUBLIBS) \
 	install-stub-archives install-native-aliases install-manifest verify-install \
