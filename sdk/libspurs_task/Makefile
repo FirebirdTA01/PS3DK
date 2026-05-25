@@ -1,6 +1,7 @@
 # sdk/libspurs_task/Makefile — SPU-side Spurs task runtime.
 #
-#   libspurs_task.a    → $(PS3DK)/spu/lib/
+#   libspurs_task.a    → $(SPU_PREFIX)/spu-elf/lib/ (canonical)
+#                   → $(PS3DK)/spu/lib/           (compatibility mirror)
 #   spurs_task.ld      → $(PS3DK)/spu/ldscripts/
 #   cell/spurs/spu_task.h → $(PS3DK)/spu/include/cell/spurs/
 #
@@ -11,7 +12,8 @@ PS3DEV     ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 PS3DK      ?= $(PS3DEV)/ps3dk
 SPU_PREFIX ?= $(PS3DEV)/spu
 
-INSTALL_LIB := $(PS3DK)/spu/lib
+INSTALL_LIB := $(SPU_PREFIX)/spu-elf/lib
+INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 INSTALL_LDS := $(PS3DK)/spu/ldscripts
 INSTALL_INC := $(PS3DK)/spu/include
 
@@ -67,8 +69,9 @@ $(BUILD):
 	@mkdir -p $@
 
 install: $(LIB)
-	@install -d $(INSTALL_LIB) $(INSTALL_LDS) $(INSTALL_INC)/cell/spurs
+	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR) $(INSTALL_LDS) $(INSTALL_INC)/cell/spurs
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libspurs_task.a
+	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libspurs_task.a
 	@echo "  lib   libspurs_task.a"
 	@install -m 0644 scripts/spurs_task.ld $(INSTALL_LDS)/spurs_task.ld
 	@echo "  ld    spurs_task.ld"

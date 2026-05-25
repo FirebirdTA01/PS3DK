@@ -1,7 +1,8 @@
 # sdk/libspurs_jq/Makefile - SPU side of the cell/spurs/job_queue family.
 #
 # Outputs:
-#   libspurs_jq.a   -> $(PS3DK)/spu/lib/
+#   libspurs_jq.a   -> $(SPU_PREFIX)/spu-elf/lib/ (canonical)
+#                   -> $(PS3DK)/spu/lib/           (compatibility mirror)
 #
 # Built with spu-elf-gcc.  SPU job binaries that participate in a JQ
 # workload link against this archive (via the JOBBIN flag's LIBS hook
@@ -16,7 +17,8 @@ PS3DEV     ?= $(error PS3DEV is not set - run: source scripts/env.sh)
 PS3DK      ?= $(PS3DEV)/ps3dk
 SPU_PREFIX ?= $(PS3DEV)/spu
 
-INSTALL_LIB := $(PS3DK)/spu/lib
+INSTALL_LIB := $(SPU_PREFIX)/spu-elf/lib
+INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 
 CC := spu-elf-gcc
 AR := spu-elf-ar
@@ -51,8 +53,9 @@ $(BUILD):
 	@mkdir -p $@
 
 install: $(LIB)
-	@install -d $(INSTALL_LIB)
+	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR)
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libspurs_jq.a
+	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libspurs_jq.a
 	@echo "  lib    libspurs_jq.a"
 
 clean:

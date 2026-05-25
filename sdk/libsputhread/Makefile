@@ -1,6 +1,7 @@
 # sdk/libsputhread/Makefile — SPU-side lv2 syscall wrappers.
 #
-#   libsputhread.a            -> $(PS3DK)/spu/lib/
+#   libsputhread.a            -> $(SPU_PREFIX)/spu-elf/lib/ (canonical)
+#                            -> $(PS3DK)/spu/lib/           (compatibility mirror)
 #   sys/event_flag.h          -> $(PS3DK)/spu/include/
 #   sys/spu_thread.h          -> $(PS3DK)/spu/include/
 #
@@ -11,7 +12,9 @@
 
 PS3DEV     ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 PS3DK      ?= $(PS3DEV)/ps3dk
-INSTALL_LIB := $(PS3DK)/spu/lib
+SPU_PREFIX ?= $(PS3DEV)/spu
+INSTALL_LIB := $(SPU_PREFIX)/spu-elf/lib
+INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 INSTALL_INC := $(PS3DK)/spu/include
 
 CC      := spu-elf-gcc
@@ -58,8 +61,9 @@ $(BUILD):
 	@mkdir -p $@
 
 install: $(LIB)
-	@install -d $(INSTALL_LIB) $(INSTALL_INC)/sys
+	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR) $(INSTALL_INC)/sys
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libsputhread.a
+	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libsputhread.a
 	@echo "  lib   libsputhread.a"
 	@install -m 0644 include/sys/event_flag.h $(INSTALL_INC)/sys/event_flag.h
 	@echo "  header sys/event_flag.h"
