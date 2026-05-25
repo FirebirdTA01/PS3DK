@@ -1,7 +1,8 @@
 # sdk/libspurs_job/Makefile - SPU side of the cellSpursJobMain2 entry-point convention.
 #
 # Outputs:
-#   libspurs_job.a            -> $(PS3DK)/spu/lib/
+#   libspurs_job.a            -> $(SPU_PREFIX)/spu-elf/lib/ (canonical)
+#                            -> $(PS3DK)/spu/lib/           (compatibility mirror)
 #   spurs_job.ld              -> $(PS3DK)/spu/ldscripts/
 #   cell/spurs/job_context.h  -> $(PS3DK)/spu/include/cell/spurs/
 #   cell/spurs/job_chain.h    -> $(PS3DK)/spu/include/cell/spurs/
@@ -13,7 +14,8 @@ PS3DEV     ?= $(error PS3DEV is not set - run: source scripts/env.sh)
 PS3DK      ?= $(PS3DEV)/ps3dk
 SPU_PREFIX ?= $(PS3DEV)/spu
 
-INSTALL_LIB := $(PS3DK)/spu/lib
+INSTALL_LIB := $(SPU_PREFIX)/spu-elf/lib
+INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 INSTALL_LDS := $(PS3DK)/spu/ldscripts
 INSTALL_INC := $(PS3DK)/spu/include
 
@@ -55,8 +57,9 @@ $(BUILD):
 	@mkdir -p $@
 
 install: $(LIB)
-	@install -d $(INSTALL_LIB) $(INSTALL_LDS) $(INSTALL_INC)/cell/spurs
+	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR) $(INSTALL_LDS) $(INSTALL_INC)/cell/spurs
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libspurs_job.a
+	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libspurs_job.a
 	@echo "  lib    libspurs_job.a"
 	@install -m 0644 scripts/spurs_job.ld $(INSTALL_LDS)/spurs_job.ld
 	@echo "  ld     spurs_job.ld"
