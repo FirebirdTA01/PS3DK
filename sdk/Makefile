@@ -112,6 +112,9 @@ HEADERS := \
     include/cell/spurs.h \
     include/cell/spurs/types.h \
     include/cell/spurs/common.h \
+    include/cell/spurs/control.h \
+    include/cell/spurs/system_workload.h \
+    include/cell/spurs/system_workload_types.h \
     include/cell/spurs/task_types.h \
     include/cell/spurs/task.h \
     include/cell/spurs/workload.h \
