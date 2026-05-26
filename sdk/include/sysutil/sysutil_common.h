@@ -37,6 +37,18 @@ extern "C" {
 #define CELL_SYSUTIL_ERROR_BASE_BGMPLAYBACK_EX    0x8002d300
 #define CELL_SYSUTIL_ERROR_BASE_AP                0x8002cd00
 
+/* ---- Common cellSysutil error codes ----
+ * BASE_COMMON family (0x8002b100 range): generic argument / state /
+ * resource error returns shared across the sysutil surface. */
+#define CELL_SYSUTIL_ERROR_TYPE                   0x8002b101
+#define CELL_SYSUTIL_ERROR_VALUE                  0x8002b102
+#define CELL_SYSUTIL_ERROR_SIZE                   0x8002b103
+#define CELL_SYSUTIL_ERROR_NUM                    0x8002b104
+#define CELL_SYSUTIL_ERROR_BUSY                   0x8002b105
+#define CELL_SYSUTIL_ERROR_STATUS                 0x8002b106
+#define CELL_SYSUTIL_ERROR_MEMORY                 0x8002b107
+#define CELL_SYSUTIL_ERROR_3D_SUPPORT             0x8002b108
+
 /* ---- Sysutil callback type + entry points ----
  * Reference SDK declares these in sysutil_common.h; sample code
  * reaches them transitively without #include <cell/sysutil.h>.

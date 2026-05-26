@@ -6,5 +6,7 @@
  */
 #ifndef _PS3DK_SYSUTIL_SAVEDATA_H_
 #define _PS3DK_SYSUTIL_SAVEDATA_H_
+#include <sysutil/sysutil_common.h>
+#include <sys/memory.h>
 #include <cell/sysutil_savedata.h>
 #endif
