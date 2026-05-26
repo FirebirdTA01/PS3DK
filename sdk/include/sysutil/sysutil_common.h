@@ -39,6 +39,7 @@ extern "C" {
 #define CELL_SYSUTIL_ERROR_BASE_BGDL              0x8002ce00
 #define CELL_SYSUTIL_ERROR_BASE_USERINFO          0x8002c300
 #define CELL_SYSUTIL_ERROR_BASE_SUBDISPLAY        0x80029800
+#define CELL_SYSUTIL_ERROR_BASE_MUSIC            0x8002c100
 
 /* ---- Common cellSysutil error codes ----
  * BASE_COMMON family (0x8002b100 range): generic argument / state /
