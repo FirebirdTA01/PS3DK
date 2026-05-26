@@ -1,8 +1,8 @@
 /*! \file sysutil/sysutil_common.h
- \brief Reference-SDK source-compat header — sysutil error-code base
+ \brief Reference-SDK source-compat header - sysutil error-code base
         macros + extern "C" guard.
 
-  Sony's cellSysutil headers all `#include "sysutil_common.h"` for the
+  The cellSysutil headers share this file for the
   CELL_SYSUTIL_ERROR_BASE_* prefix constants.  Pure forwarder shape:
   defines + extern "C" only, no types.
 */
@@ -38,6 +38,7 @@ extern "C" {
 #define CELL_SYSUTIL_ERROR_BASE_AP                0x8002cd00
 #define CELL_SYSUTIL_ERROR_BASE_BGDL              0x8002ce00
 #define CELL_SYSUTIL_ERROR_BASE_USERINFO          0x8002c300
+#define CELL_SYSUTIL_ERROR_BASE_SUBDISPLAY        0x80029800
 
 /* ---- Common cellSysutil error codes ----
  * BASE_COMMON family (0x8002b100 range): generic argument / state /

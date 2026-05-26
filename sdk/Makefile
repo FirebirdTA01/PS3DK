@@ -7,11 +7,11 @@
 #     lay down into $(PS3DEV)/psl1ght/ppu/include/ directly.
 #   - libgcm_cmd/ ships its own Makefile and is invoked recursively.
 #
-# This is the user-facing entry point — no separate bridging scripts.
+# This is the user-facing entry point - no separate bridging scripts.
 # When we cut PSL1GHT loose, the install prefix migrates to our own
 # tree but the contract here stays the same.
 
-PS3DEV      ?= $(error PS3DEV is not set — run: source scripts/env.sh)
+PS3DEV      ?= $(error PS3DEV is not set - run: source scripts/env.sh)
 PS3DK       ?= $(PS3DEV)/ps3dk
 INSTALL_INC     := $(PS3DK)/ppu/include
 INSTALL_INC_SPU := $(PS3DK)/spu/include
@@ -56,6 +56,7 @@ HEADERS := \
     include/sysutil/sysutil_msgdialog.h \
     include/sysutil/sysutil_userinfo.h \
     include/sysutil/sysutil_bgdl.h \
+    include/sysutil/sysutil_subdisplay.h \
     include/sysutil/video.h \
     include/cell/cell.h \
     include/cell/atomic.h \
@@ -258,7 +259,7 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/trace/trace_types.h \
     include/vectormath/cpp/vectormath_soa.h
 
-# SPU-only headers — installed to $(INSTALL_INC_SPU) but NOT to the
+# SPU-only headers - installed to $(INSTALL_INC_SPU) but NOT to the
 # PPU side.  These are SPU-flavored variants (e.g. the slim SPU
 # spurs.h umbrella that omits PPU syscall surfaces).
 SPU_ONLY_HEADERS := \
@@ -333,7 +334,7 @@ install-shared-spurs-spu-headers:
 	    echo "  shared  $$rel (spu)"; \
 	done
 
-# SPU-only headers — installed from include-spu/ to the SPU sysroot.
+# SPU-only headers - installed from include-spu/ to the SPU sysroot.
 # These are SPU-flavored variants (e.g. the slim spurs.h umbrella)
 # that must not leak into the PPU include tree.
 install-spu-only-headers:
@@ -348,9 +349,9 @@ install-spu-only-headers:
 # Remove stale PPU-only spurs sub-headers that may linger in the SPU
 # sysroot from a prior install that installed a broader set.  The SPU
 # umbrella now deliberately excludes task.h, workload.h, barrier.h,
-# event_flag.h, and queue.h — if they exist from an old install,
+# event_flag.h, and queue.h - if they exist from an old install,
 # purge them so no stale declarations leak into SPU compiles.
-# NOTE: job_chain.h is intentionally kept — installed by libspurs_job.
+# NOTE: job_chain.h is intentionally kept - installed by libspurs_job.
 clean-stale-spu-spurs:
 	@stale="workload.h barrier.h event_flag.h queue.h"; \
 	for f in $$stale; do \
