@@ -9,8 +9,7 @@
  * against the cellMusicDecodeUtility module at runtime.
  *
  * ABI notes:
- *  - Opaque forward-decls for CellSpurs, CellSpursSystemWorkloadAttribute,
- *    CellMusicSelectionContext, and CellSearchContentId - full layouts
+ *  - Opaque forward-decls for CellSpurs and CellSearchContentId - full layouts
  *    live in external headers not yet shipped.
  *  - Read / Read2 use uint64_t for reqSize / readSize to match the
  *    module wire contract (ILP32-safe; LP64 audit deferred).
@@ -33,10 +32,10 @@ typedef sys_mem_container_t sys_memory_container_t;
 #endif
 
 /* Forward declarations - concrete layouts live in external headers we
- * do not yet ship (cell/spurs.h, sysutil/sysutil_music_playback_common.h,
- * sysutil/sysutil_search_types.h).  Opaque pointers cross the SPRX
- * boundary; PRXPTR audit deferred until structs are materialized. */
-typedef struct CellMusicSelectionContext       CellMusicSelectionContext;
+ * do not yet ship (cell/spurs.h, sysutil/sysutil_search_types.h).
+ * Opaque pointers cross the SPRX boundary; PRXPTR audit deferred
+ * until structs are materialized. */
+#include <sysutil/sysutil_music_playback_common.h>
 typedef struct CellSearchContentId             CellSearchContentId;
 typedef struct CellSpurs                       CellSpurs;
 typedef struct CellSpursSystemWorkloadAttribute CellSpursSystemWorkloadAttribute;
