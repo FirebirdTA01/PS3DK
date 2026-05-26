@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PS3 Custom Toolchain — stub-only cell-SDK libraries
+# PS3 Custom Toolchain - stub-only cell-SDK libraries
 #
 # Builds self-contained `lib<name>_stub.a` archives for libraries that have no
 # PSL1GHT runtime backing (i.e. cell/* headers ship as declaration-only and
@@ -66,6 +66,7 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsync2_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_savedata_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_savedata_extra_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_avconf_ext_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_userinfo_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_bgdl_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_game_stub.yaml"
@@ -137,7 +138,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         $abi_flag
 
     # Find the produced archive (basename comes from the YAML's archive_name
-    # or library field — easier to glob than to re-derive).
+    # or library field - easier to glob than to re-derive).
     shopt -s nullglob
     produced=( "$out_subdir/$name"/lib*_stub.a )
     shopt -u nullglob
@@ -151,8 +152,8 @@ for yaml in "${STUB_YAMLS[@]}"; do
     # the _stub name directly.
     #
     # The combined archive folds in sdk/libgcm_sys_legacy/ wrappers so it
-    # resolves both Sony cellGcm* names (nidgen) and PSL1GHT gcm* names
-    # that <cell/gcm.h>'s static-inline forwarders still emit — until the
+    # resolves both cellGcm* names (nidgen) and PSL1GHT gcm* names
+    # that <cell/gcm.h>'s static-inline forwarders still emit - until the
     # cell-SDK-primary surface reaches everywhere and those forwarders go
     # away.
     if [[ "$name" == "libgcm_sys_stub" ]]; then

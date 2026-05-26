@@ -1,6 +1,7 @@
 library: cellSysutilAvconfExt
 version: 1
 module: cellSysutilAvconfExt
+archive_name: sysutil_avconf_ext
 exports:
 - name: cellAudioInGetAvailableDeviceInfo
   nid: '0x65bf9ea3'

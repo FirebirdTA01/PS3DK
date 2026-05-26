@@ -1,29 +1,33 @@
 /*
- * PS3 Custom Toolchain — <cell/cell_video_out.h>
+ * PS3 Custom Toolchain - cell/cell_video_out.h
  *
- * Cell-SDK-style surface for the video-output subsystem (resolution
- * query, mode configuration, scan-mode / aspect / buffer-format
- * constants).  Functions resolve through libsysutil_stub.a
- * (SPRX trampolines into cellSysutil); constants alias the
- * byte-identical PSL1GHT <sysutil/video.h> values.
+ * Video-output subsystem surface: resolution query, mode enumeration,
+ * display-device discovery, configuration, gamma/cursor/HDCP control.
  *
- * The cell SDK bundles this surface into <sysutil/sysutil_sysparam.h>;
- * our shim under the same path re-exports it so cell-SDK sample code
- * that only includes sysutil_sysparam.h still gets the full video API.
+ * CellVideoOut functions resolve through libsysutil_stub.a.
+ * cellVideoOutSetGamma / GetGamma / GetScreenSize / ConvertCursorColor /
+ * SetXVColor / SetupDisplay resolve through libsysutil_avconf_ext_stub.a
+ * (cellSysutilAvconfExt module).
+ *
+ * This header is the authoritative source for the cell-SDK video-out
+ * type and constant namespace.  The sysutil/sysutil_sysparam.h alias
+ * re-exports it for cell-SDK sample code that includes only the
+ * sysutil path.
  */
 
 #ifndef PS3TC_CELL_VIDEO_OUT_H
 #define PS3TC_CELL_VIDEO_OUT_H
 
 #include <stdint.h>
-#include <sysutil/video.h>
-#include <ppu-types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* ---- error codes --------------------------------------------------- */
+/* ---------------------------------------------------------------------
+ * Error codes
+ * --------------------------------------------------------------------- */
+
 #define CELL_VIDEO_OUT_SUCCEEDED                        0
 #define CELL_VIDEO_OUT_ERROR_NOT_IMPLEMENTED            0x8002b220
 #define CELL_VIDEO_OUT_ERROR_ILLEGAL_CONFIGURATION      0x8002b221
@@ -35,177 +39,269 @@ extern "C" {
 #define CELL_VIDEO_OUT_ERROR_CONDITION_BUSY             0x8002b227
 #define CELL_VIDEO_OUT_ERROR_VALUE_IS_NOT_SET           0x8002b228
 
-/* ---- output / device states --------------------------------------- */
-#define CELL_VIDEO_OUT_OUTPUT_STATE_ENABLED   0
-#define CELL_VIDEO_OUT_OUTPUT_STATE_DISABLED  1
-#define CELL_VIDEO_OUT_OUTPUT_STATE_PREPARING 2
+/* ---------------------------------------------------------------------
+ * Video-out identity
+ * --------------------------------------------------------------------- */
 
-#define CELL_VIDEO_OUT_DEVICE_STATE_UNAVAILABLE 0
-#define CELL_VIDEO_OUT_DEVICE_STATE_AVAILABLE   1
+typedef enum CellVideoOut {
+	CELL_VIDEO_OUT_PRIMARY   = 0,
+	CELL_VIDEO_OUT_SECONDARY = 1
+} CellVideoOut;
 
-/* ---- color space -------------------------------------------------- */
-#define CELL_VIDEO_OUT_COLOR_SPACE_RGB   0x01
-#define CELL_VIDEO_OUT_COLOR_SPACE_YUV   0x02
-#define CELL_VIDEO_OUT_COLOR_SPACE_XVYCC 0x04
+/* ---------------------------------------------------------------------
+ * Resolution ID
+ * --------------------------------------------------------------------- */
 
-/* ---- port / identity constants ------------------------------------ */
-#define CELL_VIDEO_OUT_PRIMARY            VIDEO_PRIMARY
-#define CELL_VIDEO_OUT_SECONDARY          VIDEO_SECONDARY
+typedef enum CellVideoOutResolutionId {
+	CELL_VIDEO_OUT_RESOLUTION_UNDEFINED     = 0,
+	CELL_VIDEO_OUT_RESOLUTION_1080          = 1,
+	CELL_VIDEO_OUT_RESOLUTION_720           = 2,
+	CELL_VIDEO_OUT_RESOLUTION_480           = 4,
+	CELL_VIDEO_OUT_RESOLUTION_576           = 5,
+	CELL_VIDEO_OUT_RESOLUTION_1600x1080     = 10,
+	CELL_VIDEO_OUT_RESOLUTION_1440x1080     = 11,
+	CELL_VIDEO_OUT_RESOLUTION_1280x1080     = 12,
+	CELL_VIDEO_OUT_RESOLUTION_960x1080      = 13,
 
-/* ---- buffer color formats ----------------------------------------- */
-/* The cell SDK names the component ordering; we alias onto PSL1GHT's enum. */
-#define CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_X8R8G8B8  VIDEO_BUFFER_FORMAT_XRGB
-#define CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_X8B8G8R8  VIDEO_BUFFER_FORMAT_XBGR
-#define CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_R16G16B16X16_FLOAT \
-    VIDEO_BUFFER_FORMAT_FLOAT
+	CELL_VIDEO_OUT_RESOLUTION_720_3D_FRAME_PACKING       = 0x81,
+	CELL_VIDEO_OUT_RESOLUTION_1024x720_3D_FRAME_PACKING  = 0x88,
+	CELL_VIDEO_OUT_RESOLUTION_960x720_3D_FRAME_PACKING   = 0x89,
+	CELL_VIDEO_OUT_RESOLUTION_800x720_3D_FRAME_PACKING   = 0x8a,
+	CELL_VIDEO_OUT_RESOLUTION_640x720_3D_FRAME_PACKING   = 0x8b,
 
-/* ---- aspect ratio tags -------------------------------------------- */
-#define CELL_VIDEO_OUT_ASPECT_AUTO        VIDEO_ASPECT_AUTO
-#define CELL_VIDEO_OUT_ASPECT_4_3         VIDEO_ASPECT_4_3
-#define CELL_VIDEO_OUT_ASPECT_16_9        VIDEO_ASPECT_16_9
+	CELL_VIDEO_OUT_RESOLUTION_720_DUALVIEW_FRAME_PACKING       = 0x91,
+	CELL_VIDEO_OUT_RESOLUTION_720_SIMULVIEW_FRAME_PACKING      = 0x91,
+	CELL_VIDEO_OUT_RESOLUTION_1024x720_DUALVIEW_FRAME_PACKING  = 0x98,
+	CELL_VIDEO_OUT_RESOLUTION_1024x720_SIMULVIEW_FRAME_PACKING = 0x98,
+	CELL_VIDEO_OUT_RESOLUTION_960x720_DUALVIEW_FRAME_PACKING   = 0x99,
+	CELL_VIDEO_OUT_RESOLUTION_960x720_SIMULVIEW_FRAME_PACKING  = 0x99,
+	CELL_VIDEO_OUT_RESOLUTION_800x720_DUALVIEW_FRAME_PACKING   = 0x9a,
+	CELL_VIDEO_OUT_RESOLUTION_800x720_SIMULVIEW_FRAME_PACKING  = 0x9a,
+	CELL_VIDEO_OUT_RESOLUTION_640x720_DUALVIEW_FRAME_PACKING   = 0x9b,
+	CELL_VIDEO_OUT_RESOLUTION_640x720_SIMULVIEW_FRAME_PACKING  = 0x9b
+} CellVideoOutResolutionId;
 
-/* ---- resolution tags ---------------------------------------------- */
-#define CELL_VIDEO_OUT_RESOLUTION_UNDEFINED      VIDEO_RESOLUTION_UNDEFINED
-#define CELL_VIDEO_OUT_RESOLUTION_1080           VIDEO_RESOLUTION_1080
-#define CELL_VIDEO_OUT_RESOLUTION_720            VIDEO_RESOLUTION_720
-#define CELL_VIDEO_OUT_RESOLUTION_480            VIDEO_RESOLUTION_480
-#define CELL_VIDEO_OUT_RESOLUTION_576            VIDEO_RESOLUTION_576
-#define CELL_VIDEO_OUT_RESOLUTION_1600x1080      VIDEO_RESOLUTION_1600x1080
-#define CELL_VIDEO_OUT_RESOLUTION_1440x1080      VIDEO_RESOLUTION_1440x1080
-#define CELL_VIDEO_OUT_RESOLUTION_1280x1080      VIDEO_RESOLUTION_1280x1080
-#define CELL_VIDEO_OUT_RESOLUTION_960x1080       VIDEO_RESOLUTION_960x1080
+/* ---------------------------------------------------------------------
+ * Scan mode
+ * --------------------------------------------------------------------- */
 
-/* ---- struct / handle aliases --------------------------------------
- *
- * Redefined here as our own structs (NOT typedef'd from PSL1GHT's
- * video.h) so we can expose both the PSL1GHT field name and the
- * cell-SDK-sample field name through an anonymous union without
- * editing the upstream PSL1GHT header.  The storage layouts are
- * identical to PSL1GHT's videoResolution / videoState /
- * videoConfiguration / videoDisplayMode down to the last padding
- * byte, so `(videoState *)cell_state` casts in the forwarders
- * below are safe.
- *
- * Field-name mapping:
- *   .resolution   (PSL1GHT)  <-->  .resolutionId  (cell SDK samples)
- *
- * Unified via `union { u8 resolution; u8 resolutionId; }` so cell-SDK
- * source code that writes `.resolutionId = ...` compiles unchanged
- * against our SDK. */
+typedef enum CellVideoOutScanMode {
+	CELL_VIDEO_OUT_SCAN_MODE_INTERLACE   = 0,
+	CELL_VIDEO_OUT_SCAN_MODE_PROGRESSIVE = 1
+} CellVideoOutScanMode;
 
-typedef struct _cellVideoOutResolution {
-    uint16_t width;
-    uint16_t height;
+/* ---------------------------------------------------------------------
+ * Refresh rate (bitmask)
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutRefreshRate {
+	CELL_VIDEO_OUT_REFRESH_RATE_AUTO    = 0x0000,
+	CELL_VIDEO_OUT_REFRESH_RATE_59_94HZ = 0x0001,
+	CELL_VIDEO_OUT_REFRESH_RATE_50HZ    = 0x0002,
+	CELL_VIDEO_OUT_REFRESH_RATE_60HZ    = 0x0004,
+	CELL_VIDEO_OUT_REFRESH_RATE_30HZ    = 0x0008
+} CellVideoOutRefreshRate;
+
+/* ---------------------------------------------------------------------
+ * Port type
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutPortType {
+	CELL_VIDEO_OUT_PORT_NONE          = 0x00,
+	CELL_VIDEO_OUT_PORT_HDMI          = 0x01,
+	CELL_VIDEO_OUT_PORT_NETWORK       = 0x41,
+	CELL_VIDEO_OUT_PORT_COMPOSITE_S   = 0x81,
+	CELL_VIDEO_OUT_PORT_D             = 0x82,
+	CELL_VIDEO_OUT_PORT_COMPONENT     = 0x83,
+	CELL_VIDEO_OUT_PORT_RGB           = 0x84,
+	CELL_VIDEO_OUT_PORT_AVMULTI_SCART = 0x85,
+	CELL_VIDEO_OUT_PORT_DSUB          = 0x86
+} CellVideoOutPortType;
+
+/* ---------------------------------------------------------------------
+ * Display aspect
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutDisplayAspect {
+	CELL_VIDEO_OUT_ASPECT_AUTO = 0,
+	CELL_VIDEO_OUT_ASPECT_4_3  = 1,
+	CELL_VIDEO_OUT_ASPECT_16_9 = 2
+} CellVideoOutDisplayAspect;
+
+/* ---------------------------------------------------------------------
+ * Buffer colour format
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutBufferColorFormat {
+	CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_X8R8G8B8          = 0,
+	CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_X8B8G8R8          = 1,
+	CELL_VIDEO_OUT_BUFFER_COLOR_FORMAT_R16G16B16X16_FLOAT = 2
+} CellVideoOutBufferColorFormat;
+
+/* ---------------------------------------------------------------------
+ * Output state
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutOutputState {
+	CELL_VIDEO_OUT_OUTPUT_STATE_ENABLED   = 0,
+	CELL_VIDEO_OUT_OUTPUT_STATE_DISABLED  = 1,
+	CELL_VIDEO_OUT_OUTPUT_STATE_PREPARING = 2
+} CellVideoOutOutputState;
+
+/* ---------------------------------------------------------------------
+ * Device state
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutDeviceState {
+	CELL_VIDEO_OUT_DEVICE_STATE_UNAVAILABLE = 0,
+	CELL_VIDEO_OUT_DEVICE_STATE_AVAILABLE   = 1
+} CellVideoOutDeviceState;
+
+/* ---------------------------------------------------------------------
+ * Colour space
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutColorSpace {
+	CELL_VIDEO_OUT_COLOR_SPACE_RGB   = 0x01,
+	CELL_VIDEO_OUT_COLOR_SPACE_YUV   = 0x02,
+	CELL_VIDEO_OUT_COLOR_SPACE_XVYCC = 0x04
+} CellVideoOutColorSpace;
+
+/* ---------------------------------------------------------------------
+ * Debug monitor type
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutDebugMonitorType {
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_UNDEFINED     = 0,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_480I_59_94HZ  = 1,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_576I_50HZ     = 2,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_480P_59_94HZ  = 3,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_576P_50HZ     = 4,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_1080I_59_94HZ = 5,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_720P_59_94HZ  = 7,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_1080P_59_94HZ = 9,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_WXGA_60HZ     = 11,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_SXGA_60HZ     = 12,
+	CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_WUXGA_60HZ    = 13
+} CellVideoOutDebugMonitorType;
+
+/* ---------------------------------------------------------------------
+ * Display conversion
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutDisplayConversion {
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_NONE              = 0x00,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_WXGA           = 0x01,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_SXGA           = 0x02,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_WUXGA          = 0x03,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_1080           = 0x05,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_REMOTEPLAY     = 0x10,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_720_3D_FRAME_PACKING      = 0x80,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_720_DUALVIEW_FRAME_PACKING = 0x81,
+	CELL_VIDEO_OUT_DISPLAY_CONVERSION_TO_720_SIMULVIEW_FRAME_PACKING = 0x81
+} CellVideoOutDisplayConversion;
+
+/* ---------------------------------------------------------------------
+ * Event
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutEvent {
+	CELL_VIDEO_OUT_EVENT_DEVICE_CHANGED       = 0,
+	CELL_VIDEO_OUT_EVENT_OUTPUT_DISABLED      = 1,
+	CELL_VIDEO_OUT_EVENT_DEVICE_AUTHENTICATED = 2,
+	CELL_VIDEO_OUT_EVENT_OUTPUT_ENABLED       = 3
+} CellVideoOutEvent;
+
+/* ---------------------------------------------------------------------
+ * Copy control
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutCopyControl {
+	CELL_VIDEO_OUT_COPY_CONTROL_COPY_FREE = 0,
+	CELL_VIDEO_OUT_COPY_CONTROL_COPY_ONCE = 1,
+	CELL_VIDEO_OUT_COPY_CONTROL_COPY_NEVER = 2
+} CellVideoOutCopyControl;
+
+/* ---------------------------------------------------------------------
+ * RGB output range
+ * --------------------------------------------------------------------- */
+
+typedef enum CellVideoOutRGBOutputRange {
+	CELL_VIDEO_OUT_RGB_OUTPUT_RANGE_LIMITED = 0,
+	CELL_VIDEO_OUT_RGB_OUTPUT_RANGE_FULL    = 1
+} CellVideoOutRGBOutputRange;
+
+/* ---------------------------------------------------------------------
+ * Struct definitions (oracle struct-tag names)
+ * --------------------------------------------------------------------- */
+
+typedef struct CellVideoOutResolution {
+	uint16_t width;
+	uint16_t height;
 } CellVideoOutResolution;
 
-typedef struct _cellVideoOutDisplayMode {
-    union { uint8_t resolution; uint8_t resolutionId; };
-    uint8_t  scanMode;
-    uint8_t  conversion;
-    uint8_t  aspect;
-    uint8_t  padding[2];
-    uint16_t refreshRates;
+typedef struct CellVideoOutDisplayMode {
+	union { uint8_t resolution; uint8_t resolutionId; };
+	uint8_t  scanMode;
+	uint8_t  conversion;
+	uint8_t  aspect;
+	uint8_t  padding[2];
+	uint16_t refreshRates;
 } CellVideoOutDisplayMode;
 
-typedef struct _cellVideoOutState {
-    uint8_t                  state;
-    uint8_t                  colorSpace;
-    uint8_t                  padding[6];
-    CellVideoOutDisplayMode  displayMode;
+typedef struct CellVideoOutState {
+	uint8_t                  state;
+	uint8_t                  colorSpace;
+	uint8_t                  padding[6];
+	CellVideoOutDisplayMode  displayMode;
 } CellVideoOutState;
 
-typedef struct _cellVideoOutConfiguration {
-    union { uint8_t resolution; uint8_t resolutionId; };
-    uint8_t  format;
-    uint8_t  aspect;
-    uint8_t  padding[9];
-    uint32_t pitch;
+typedef struct CellVideoOutConfiguration {
+	union { uint8_t resolution; uint8_t resolutionId; };
+	uint8_t  format;
+	uint8_t  aspect;
+	uint8_t  padding[9];
+	uint32_t pitch;
 } CellVideoOutConfiguration;
 
-/* ---- function declarations ----------------------------------------- *
- * Resolved by libsysutil_stub.a (SPRX trampolines into cellSysutil).
- * Previously these were static-inline forwarders that called PSL1GHT's
- * videoGetState / videoConfigure / etc. through libsysutil.a, which
- * forced reference Makefiles to pull in -lsysutil on top of the
- * _stub archive.  Now they're plain extern declarations — samples
- * that only link -lsysutil_stub resolve them directly. */
-extern int cellVideoOutGetState(uint32_t videoOut,
-                                uint32_t deviceIndex,
-                                CellVideoOutState *state);
-extern int cellVideoOutGetResolution(uint32_t resolutionId,
-                                     CellVideoOutResolution *resolution);
-extern int cellVideoOutConfigure(uint32_t videoOut,
-                                 CellVideoOutConfiguration *config,
-                                 void *option,
-                                 uint32_t blocking);
-extern int cellVideoOutGetConfiguration(uint32_t videoOut,
-                                        CellVideoOutConfiguration *config,
-                                        void *option);
-extern int cellVideoOutGetResolutionAvailability(uint32_t videoOut,
-                                                 uint32_t resolutionId,
-                                                 uint32_t aspect,
-                                                 uint32_t option);
+typedef struct CellVideoOutOption {
+	uint32_t reserved;
+} CellVideoOutOption;
 
-#define CELL_VIDEO_OUT_PORT_NONE           0x00
-#define CELL_VIDEO_OUT_PORT_HDMI           0x01
-#define CELL_VIDEO_OUT_PORT_NETWORK        0x41
-#define CELL_VIDEO_OUT_PORT_COMPOSITE_S    0x81
-#define CELL_VIDEO_OUT_PORT_D              0x82
-#define CELL_VIDEO_OUT_PORT_COMPONENT      0x83
-#define CELL_VIDEO_OUT_PORT_RGB            0x84
-#define CELL_VIDEO_OUT_PORT_AVMULTI_SCART  0x85
-#define CELL_VIDEO_OUT_PORT_DSUB           0x86
-
-#define CELL_VIDEO_OUT_EVENT_DEVICE_CHANGED        0
-#define CELL_VIDEO_OUT_EVENT_OUTPUT_DISABLED       1
-#define CELL_VIDEO_OUT_EVENT_DEVICE_AUTHENTICATED  2
-#define CELL_VIDEO_OUT_EVENT_OUTPUT_ENABLED        3
-
-#define CELL_VIDEO_OUT_RGB_OUTPUT_RANGE_LIMITED  0
-#define CELL_VIDEO_OUT_RGB_OUTPUT_RANGE_FULL     1
-
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_UNDEFINED      0
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_480I_59_94HZ   1
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_576I_50HZ      2
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_480P_59_94HZ   3
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_576P_50HZ      4
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_1080I_59_94HZ  5
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_720P_59_94HZ   7
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_1080P_59_94HZ  9
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_WXGA_60HZ      11
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_SXGA_60HZ      12
-#define CELL_VIDEO_OUT_DEBUG_MONITOR_TYPE_WUXGA_60HZ     13
-
-typedef struct _cellVideoOutColorInfo {
-    uint16_t  redX;
-    uint16_t  redY;
-    uint16_t  greenX;
-    uint16_t  greenY;
-    uint16_t  blueX;
-    uint16_t  blueY;
-    uint16_t  whiteX;
-    uint16_t  whiteY;
-    uint32_t  gamma;
+typedef struct CellVideoOutColorInfo {
+	uint16_t redX;
+	uint16_t redY;
+	uint16_t greenX;
+	uint16_t greenY;
+	uint16_t blueX;
+	uint16_t blueY;
+	uint16_t whiteX;
+	uint16_t whiteY;
+	uint32_t gamma;
 } CellVideoOutColorInfo;
 
-typedef struct _cellVideoOutKSVList {
-    uint8_t   ksv[32 * 5];
-    uint8_t   reserved[4];
-    uint32_t  count;
+typedef struct CellVideoOutKSVList {
+	uint8_t  ksv[32 * 5];
+	uint8_t  reserved[4];
+	uint32_t count;
 } CellVideoOutKSVList;
 
-typedef struct _cellVideoOutDeviceInfo {
-    uint8_t                  portType;
-    uint8_t                  colorSpace;
-    uint16_t                 latency;
-    uint8_t                  availableModeCount;
-    uint8_t                  state;
-    uint8_t                  rgbOutputRange;
-    uint8_t                  reserved[5];
-    CellVideoOutColorInfo    colorInfo;
-    CellVideoOutDisplayMode  availableModes[32];
-    CellVideoOutKSVList      ksvList;
+typedef struct CellVideoOutDeviceInfo {
+	uint8_t                  portType;
+	uint8_t                  colorSpace;
+	uint16_t                 latency;
+	uint8_t                  availableModeCount;
+	uint8_t                  state;
+	uint8_t                  rgbOutputRange;
+	uint8_t                  reserved[5];
+	CellVideoOutColorInfo    colorInfo;
+	CellVideoOutDisplayMode  availableModes[32];
+	CellVideoOutKSVList      ksvList;
 } CellVideoOutDeviceInfo;
+
+/* ---------------------------------------------------------------------
+ * Callback
+ * --------------------------------------------------------------------- */
 
 typedef int (*CellVideoOutCallback)(uint32_t slot,
                                     uint32_t videoOut,
@@ -214,20 +310,80 @@ typedef int (*CellVideoOutCallback)(uint32_t slot,
                                     CellVideoOutDeviceInfo *info,
                                     void *userData);
 
-extern int cellVideoOutGetNumberOfDevice(uint32_t videoOut);
-extern int cellVideoOutGetDeviceInfo(uint32_t videoOut,
-                                     uint32_t deviceIndex,
-                                     CellVideoOutDeviceInfo *info);
-extern int cellVideoOutRegisterCallback(uint32_t slot,
-                                        CellVideoOutCallback function,
-                                        void *userData);
-extern int cellVideoOutUnregisterCallback(uint32_t slot);
-extern int cellVideoOutDebugSetMonitorType(uint32_t videoOut,
-                                           uint32_t monitorType);
-extern int cellVideoOutGetConvertCursorColorInfo(uint8_t *rgbOutputRange);
+/* ---------------------------------------------------------------------
+ * Function prototypes
+ *   libsysutil_stub.a:  GetNumberOfDevice, GetDeviceInfo, RegisterCallback,
+ *                       UnregisterCallback, GetState, GetResolution,
+ *                       Configure, GetConfiguration,
+ *                       GetResolutionAvailability, DebugSetMonitorType,
+ *                       GetConvertCursorColorInfo
+ *   libsysutil_avconf_ext_stub.a: SetGamma, GetGamma, GetScreenSize,
+ *                       ConvertCursorColor, SetXVColor, SetupDisplay
+ *   No stub (NID not yet identified): SetCopyControl
+ * --------------------------------------------------------------------- */
+
+int cellVideoOutGetNumberOfDevice(uint32_t videoOut);
+
+int cellVideoOutGetDeviceInfo(uint32_t videoOut,
+                              uint32_t deviceIndex,
+                              CellVideoOutDeviceInfo *info);
+
+int cellVideoOutRegisterCallback(uint32_t slot,
+                                 CellVideoOutCallback function,
+                                 void *userData);
+
+int cellVideoOutUnregisterCallback(uint32_t slot);
+
+int cellVideoOutGetState(uint32_t videoOut,
+                         uint32_t deviceIndex,
+                         CellVideoOutState *state);
+
+int cellVideoOutGetResolution(uint32_t resolutionId,
+                              CellVideoOutResolution *resolution);
+
+int cellVideoOutConfigure(uint32_t videoOut,
+                          CellVideoOutConfiguration *config,
+                          CellVideoOutOption *option,
+                          uint32_t blocking);
+
+int cellVideoOutGetConfiguration(uint32_t videoOut,
+                                 CellVideoOutConfiguration *config,
+                                 CellVideoOutOption *option);
+
+int cellVideoOutGetResolutionAvailability(uint32_t videoOut,
+                                          uint32_t resolutionId,
+                                          uint32_t aspect,
+                                          uint32_t option);
+
+int cellVideoOutDebugSetMonitorType(uint32_t videoOut,
+                                    uint32_t monitorType);
+
+int cellVideoOutGetConvertCursorColorInfo(uint8_t *rgbOutputRange);
+
+/*
+ * cellVideoOutSetCopyControl - HDCP copy-control.
+ *
+ * Prototype provided for source compatibility.  The NID has not been
+ * identified yet; linking will fail until it is added to the stub
+ * archive.
+ */
+int cellVideoOutSetCopyControl(uint32_t videoOut, uint32_t control);
+
+/* libsysutil_avconf_ext_stub.a entry points */
+
+int cellVideoOutSetGamma(uint32_t videoOut, float gamma);
+int cellVideoOutGetGamma(uint32_t videoOut, float *gamma);
+int cellVideoOutGetScreenSize(uint32_t videoOut, float *screenSize);
+int cellVideoOutConvertCursorColor(uint32_t videoOut,
+                                   int displaybuffer_format,
+                                   float gamma,
+                                   int source_buffer_format,
+                                   void *src_addr,
+                                   uint32_t *dest_addr,
+                                   int num);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  /* PS3TC_CELL_VIDEO_OUT_H */
+#endif /* PS3TC_CELL_VIDEO_OUT_H */

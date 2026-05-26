@@ -1,13 +1,13 @@
 /*! \file cell/sysmodule.h
- \brief Sony-SDK-source-compat cellSysmodule API.
+ \brief PS3 Custom Toolchain - cellSysmodule API.
 
   PSL1GHT ships a similar surface under <sysmodule/sysmodule.h> with
   PSL1GHT-style naming (sysModule*, SYSMODULE_*).  This header gives
-  Sony-named entry points (cellSysmodule*, CELL_SYSMODULE_*) backed
-  by libsysmodule_stub.a — the loader resolves the eight exports
+  cell-namespace entry points (cellSysmodule*, CELL_SYSMODULE_*) backed
+  by libsysmodule_stub.a - the loader resolves the eight exports
   against the cellSysmodule SPRX module at runtime.
 
-  FNIDs (verified against reference/sony-sdk/.../libsysmodule_stub.a):
+  FNIDs (verified against reference-sdk/.../libsysmodule_stub.a):
     cellSysmoduleLoadModule     0x32267a31
     cellSysmoduleUnloadModule   0x112a5ee9
     cellSysmoduleIsLoaded       0x5a59e258
@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-/* PRX module IDs (subset; full list lives in Sony's reference header). */
+/* PRX module IDs (subset; full list lives in the reference header). */
 #define CELL_SYSMODULE_INVALID            0xffff
 #define CELL_SYSMODULE_NET                0x0000
 #define CELL_SYSMODULE_HTTP               0x0001
@@ -95,6 +95,8 @@ extern "C" {
 #define CELL_SYSMODULE_VDEC_DIVX          0x003c
 #define CELL_SYSMODULE_SPURS_JQ           0x0050
 #define CELL_SYSMODULE_FIBER              0x0043
+#define CELL_SYSMODULE_SYSUTIL_MUSIC_DECODE   0x004f
+#define CELL_SYSMODULE_SYSUTIL_MUSIC_DECODE2  0x0053
 
 /* Return codes. */
 #define CELL_SYSMODULE_LOADED                          0
@@ -104,7 +106,7 @@ extern "C" {
 #define CELL_SYSMODULE_ERROR_INVALID_MEMCONTAINER      0x80012004
 #define CELL_SYSMODULE_ERROR_FATAL                     0x800120ff
 
-/* Sony's `sys_memory_container_t` — in PSL1GHT this is
+/* The reference `sys_memory_container_t` - in PSL1GHT this is
  * `sys_mem_container_t` from <sys/memory.h>. */
 #ifndef _SYS_MEMORY_CONTAINER_T_DEFINED
 #define _SYS_MEMORY_CONTAINER_T_DEFINED

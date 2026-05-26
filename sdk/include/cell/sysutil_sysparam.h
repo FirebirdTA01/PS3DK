@@ -3,7 +3,7 @@
 
   Thin static-inline forwarders over PSL1GHT's sysUtilGetSystemParamInt
   / String.  Verified: PSL1GHT's *_fnid symbols hold the reference
-  FNIDs —
+  FNIDs -
     sysUtilGetSystemParamInt_fnid    = 0x40e895d3  (cellSysutilGetSystemParamInt)
     sysUtilGetSystemParamString_fnid = 0x938013a0  (cellSysutilGetSystemParamString)
 
@@ -11,7 +11,7 @@
   PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_* set; aliased here so reference-SDK
   source writes the identifiers the reference headers document.
 
-  Not covered — values that cellSysutilGetSystemParam{Int,String}
+  Not covered - values that cellSysutilGetSystemParam{Int,String}
   returns (enum values for language, button-assign, date format, etc.)
   have dedicated CELL_SYSUTIL_* constants in the reference header but
   are just documentation-facing integers.  A full translation would
@@ -23,6 +23,7 @@
 #define __PSL1GHT_CELL_SYSUTIL_SYSPARAM_H__
 
 #include <cell/sysutil.h>
+#include <cell/cell_video_out.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,7 +56,7 @@ extern "C" {
 #define CELL_SYSUTIL_SYSTEMPARAM_NICKNAME_SIZE          128
 #define CELL_SYSUTIL_SYSTEMPARAM_CURRENT_USERNAME_SIZE  64
 
-/* Language enum values — what LANG returns.  Direct numeric values
+/* Language enum values - what LANG returns.  Direct numeric values
  * so this header doesn't need PSL1GHT's SYSUTIL_LANG_* symbols in
  * scope. */
 #define CELL_SYSUTIL_LANG_JAPANESE          0
@@ -92,11 +93,11 @@ extern "C" {
 #define CELL_SYSUTIL_TIME_FMT_CLOCK12             0
 #define CELL_SYSUTIL_TIME_FMT_CLOCK24             1
 
-/* Direct reference-NID imports — bind to the native nidgen multilib
+/* Direct reference-NID imports - bind to the native nidgen multilib
  * stub (libsysutil_stub.a, ILP32 + LP64; both export
  * cellSysutilGetSystemParam{Int,String} as D/OPD).  No PSL1GHT
  * forwarder.  Reference contract: cellSysutilGetSystemParamInt(int
- * id, int *value).  bufsize stays `unsigned int` (32-bit) — a
+ * id, int *value).  bufsize stays `unsigned int` (32-bit) - a
  * width-sensitive integer crossing the SPRX boundary must not widen
  * under -mlp64.  Link with -lsysutil_stub (not the PSL1GHT
  * -lsysutil). */

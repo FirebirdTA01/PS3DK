@@ -1,5 +1,5 @@
 /*! \file sysutil/video.h
- \brief Video-output mode management — native compat surface.
+ \brief Video-output mode management - native compat surface.
 
   Drop-in replacement for the legacy <sysutil/video.h> shipped with
   code written for older SDKs.  The legacy names (videoState /
@@ -120,7 +120,7 @@ extern "C" {
  * Bit-for-bit identical to the video-out HLE contract and to the
  * CellVideoOut* layouts in <cell/cell_video_out.h>.  Kept as their
  * own struct tags (not typedef'd from the cell names) so this header
- * stays a leaf — the layout match is what makes the casts in the
+ * stays a leaf - the layout match is what makes the casts in the
  * adapters below safe, not a shared declaration. */
 
 typedef struct _videoresolution {
@@ -189,33 +189,35 @@ typedef int32_t (*videoCallback)(uint32_t slot, uint32_t videoOut,
 
 /* ---- native imports (libsysutil_stub.a) ---------------------------
  *
- * Forward-declared opaque tags + prototypes that are type-compatible
+ * Forward-declared tags + prototypes that are type-compatible
  * with the typedef'd cellVideoOut* declarations in
  * <cell/cell_video_out.h>.  Declaring them here (rather than
  * including that header) keeps this file a leaf and breaks the
  * otherwise-circular include. */
-struct _cellVideoOutState;
-struct _cellVideoOutResolution;
-struct _cellVideoOutConfiguration;
-struct _cellVideoOutDeviceInfo;
+struct CellVideoOutState;
+struct CellVideoOutResolution;
+struct CellVideoOutConfiguration;
+struct CellVideoOutDeviceInfo;
+struct CellVideoOutOption;
 
 extern int cellVideoOutGetState(uint32_t videoOut, uint32_t deviceIndex,
-                                struct _cellVideoOutState *state);
+                                struct CellVideoOutState *state);
 extern int cellVideoOutGetResolution(uint32_t resolutionId,
-                                     struct _cellVideoOutResolution *resolution);
+                                     struct CellVideoOutResolution *resolution);
 extern int cellVideoOutConfigure(uint32_t videoOut,
-                                 struct _cellVideoOutConfiguration *config,
-                                 void *option, uint32_t blocking);
+                                 struct CellVideoOutConfiguration *config,
+                                 struct CellVideoOutOption *option,
+                                 uint32_t blocking);
 extern int cellVideoOutGetConfiguration(uint32_t videoOut,
-                                        struct _cellVideoOutConfiguration *config,
-                                        void *option);
+                                        struct CellVideoOutConfiguration *config,
+                                        struct CellVideoOutOption *option);
 extern int cellVideoOutGetResolutionAvailability(uint32_t videoOut,
                                                  uint32_t resolutionId,
                                                  uint32_t aspect,
                                                  uint32_t option);
 extern int cellVideoOutGetNumberOfDevice(uint32_t videoOut);
 extern int cellVideoOutGetDeviceInfo(uint32_t videoOut, uint32_t deviceIndex,
-                                     struct _cellVideoOutDeviceInfo *info);
+                                     struct CellVideoOutDeviceInfo *info);
 extern int cellVideoOutDebugSetMonitorType(uint32_t videoOut,
                                            uint32_t monitorType);
 extern int cellVideoOutGetConvertCursorColorInfo(uint8_t *rgbOutputRange);
@@ -231,7 +233,7 @@ static inline int32_t videoGetState(int32_t videoOut, int32_t deviceIndex,
 {
     return (int32_t)cellVideoOutGetState((uint32_t)videoOut,
                                          (uint32_t)deviceIndex,
-                                         (struct _cellVideoOutState *)state);
+                                         (struct CellVideoOutState *)state);
 }
 
 static inline int32_t videoGetResolution(int32_t resolutionId,
@@ -239,7 +241,7 @@ static inline int32_t videoGetResolution(int32_t resolutionId,
 {
     return (int32_t)cellVideoOutGetResolution(
         (uint32_t)resolutionId,
-        (struct _cellVideoOutResolution *)resolution);
+        (struct CellVideoOutResolution *)resolution);
 }
 
 static inline int32_t videoConfigure(int32_t videoOut,
@@ -248,8 +250,8 @@ static inline int32_t videoConfigure(int32_t videoOut,
 {
     return (int32_t)cellVideoOutConfigure(
         (uint32_t)videoOut,
-        (struct _cellVideoOutConfiguration *)config,
-        option, (uint32_t)blocking);
+        (struct CellVideoOutConfiguration *)config,
+        (struct CellVideoOutOption *)option, (uint32_t)blocking);
 }
 
 static inline int32_t videoGetConfiguration(uint32_t videoOut,
@@ -257,7 +259,8 @@ static inline int32_t videoGetConfiguration(uint32_t videoOut,
                                             void *option)
 {
     return (int32_t)cellVideoOutGetConfiguration(
-        videoOut, (struct _cellVideoOutConfiguration *)config, option);
+        videoOut, (struct CellVideoOutConfiguration *)config,
+        (struct CellVideoOutOption *)option);
 }
 
 static inline int32_t videoGetNumberOfDevice(uint32_t videoOut)
@@ -270,7 +273,7 @@ static inline int32_t videoGetDeviceInfo(uint32_t videoOut,
                                          videoDeviceInfo *info)
 {
     return (int32_t)cellVideoOutGetDeviceInfo(
-        videoOut, deviceIndex, (struct _cellVideoOutDeviceInfo *)info);
+        videoOut, deviceIndex, (struct CellVideoOutDeviceInfo *)info);
 }
 
 static inline int32_t videoGetResolutionAvailability(uint32_t videoOut,
@@ -304,7 +307,7 @@ static inline int32_t videoGetConvertCursorColorInfo(uint8_t *rgbOutputRange)
 typedef int (*__ps3dk_cellVideoOutCallback)(uint32_t slot, uint32_t videoOut,
                                             uint32_t deviceIndex,
                                             uint32_t event,
-                                            struct _cellVideoOutDeviceInfo *info,
+                                            struct CellVideoOutDeviceInfo *info,
                                             void *userData);
 
 extern int cellVideoOutRegisterCallback(uint32_t slot,
