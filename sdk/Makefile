@@ -393,6 +393,11 @@ install-native-aliases:
 	@test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }
 	@test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }
 	@echo "  alias   libsysutil.a -> libsysutil_stub.a (ILP32 + LP64)"
+	@test -f "$(INSTALL_LIB)/libdbgfont.a" || { echo "missing $(INSTALL_LIB)/libdbgfont.a"; exit 1; }
+	@test -f "$(INSTALL_LIB_LP64)/libdbgfont.a" || { echo "missing $(INSTALL_LIB_LP64)/libdbgfont.a"; exit 1; }
+	@ln -sfn libdbgfont.a "$(INSTALL_LIB)/libdbgfont_gcm.a"
+	@ln -sfn libdbgfont.a "$(INSTALL_LIB_LP64)/libdbgfont_gcm.a"
+	@echo "  alias   libdbgfont_gcm.a -> libdbgfont.a (ILP32 + LP64)"
 
 install-manifest:
 	@install -d "$(PS3DK)"
