@@ -24,7 +24,7 @@ CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding \
           -I$(PS3DK)/spu/include
 
 BUILD := build
-OBJS  := $(BUILD)/barrier.o $(BUILD)/queue.o $(BUILD)/mutex.o $(BUILD)/rwm.o
+OBJS  := $(BUILD)/barrier.o $(BUILD)/queue.o $(BUILD)/mutex.o $(BUILD)/rwm.o $(BUILD)/lfqueue.o
 LIB   := $(BUILD)/libsync.a
 
 .PHONY: all install clean

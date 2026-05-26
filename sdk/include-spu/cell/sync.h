@@ -18,12 +18,15 @@
 
 #include <stdint.h>
 #include <cell/error.h>
+#include <cell/sync/lfqueue.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Error codes are spelled identically on PPU and SPU. */
+/* Error codes are spelled identically on PPU and SPU.
+ * AGAIN..BUSY are also in cell/sync/error.h; guard for idempotency. */
+#ifndef CELL_SYNC_ERROR_AGAIN
 #define CELL_SYNC_ERROR_AGAIN         0x80410101
 #define CELL_SYNC_ERROR_INVAL         0x80410102
 #define CELL_SYNC_ERROR_NOSYS         0x80410103
@@ -34,6 +37,7 @@ extern "C" {
 #define CELL_SYNC_ERROR_DEADLK        0x80410108
 #define CELL_SYNC_ERROR_PERM          0x80410109
 #define CELL_SYNC_ERROR_BUSY          0x8041010a
+#endif
 #define CELL_SYNC_ERROR_ABORT         0x8041010c
 #define CELL_SYNC_ERROR_FAULT         0x8041010d
 #define CELL_SYNC_ERROR_CHILD         0x8041010e
@@ -89,29 +93,10 @@ int          cellSyncQueueTryPeek(uint64_t ea_queue, void *ls_buffer);
 int          cellSyncQueueClear  (uint64_t ea_queue);
 unsigned int cellSyncQueueSize   (uint64_t ea_queue);
 
-/* ---- Lock-free queue (PPU<->SPU) ------------------------------------ */
-
-int _cellSyncLFQueuePushBody(uint64_t ea_queue, const void *ls_buffer,
-                             unsigned int isBlocking);
-int _cellSyncLFQueuePopBody (uint64_t ea_queue, void *ls_buffer,
-                             unsigned int isBlocking);
-
-static inline int cellSyncLFQueuePush(uint64_t ea_queue, const void *ls_buffer)
-{
-	return _cellSyncLFQueuePushBody(ea_queue, ls_buffer, 1);
-}
-static inline int cellSyncLFQueueTryPush(uint64_t ea_queue, const void *ls_buffer)
-{
-	return _cellSyncLFQueuePushBody(ea_queue, ls_buffer, 0);
-}
-static inline int cellSyncLFQueuePop(uint64_t ea_queue, void *ls_buffer)
-{
-	return _cellSyncLFQueuePopBody(ea_queue, ls_buffer, 1);
-}
-static inline int cellSyncLFQueueTryPop(uint64_t ea_queue, void *ls_buffer)
-{
-	return _cellSyncLFQueuePopBody(ea_queue, ls_buffer, 0);
-}
+/* ---- Lock-free queue (PPU<->SPU) ------------------------------------
+ * Types and prototypes are in <cell/sync/lfqueue.h> which is included
+ * at the top of this umbrella.
+ */
 
 #ifdef __cplusplus
 }
