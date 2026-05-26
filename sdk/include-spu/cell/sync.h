@@ -47,6 +47,7 @@ extern "C" {
 
 /* ---- Mutex (ticket-fair) -------------------------------------------- */
 
+int cellSyncMutexInitialize(uint64_t ea_mutex, unsigned int tag);
 int cellSyncMutexLock      (uint64_t ea_mutex);
 int cellSyncMutexTryLock   (uint64_t ea_mutex);
 int cellSyncMutexUnlock    (uint64_t ea_mutex);

@@ -1,11 +1,11 @@
-/* cell/sync/mutex.h -- SPU-side sync mutex declarations.
+/*
+ * cell/sync/mutex.h -- SPU-side sync mutex declarations.
  *
- * Declares the cellSyncMutex* entry points.  Implementations live in
- * the SPU runtime libraries (not yet shipped -- link will produce
- * honest undefined-reference errors until the runtime is filled in).
+ * Declares the cellSyncMutex* entry points.  Implementations live
+ * in libsync.a.
  */
-#ifndef __CELL_SYNC_MUTEX_H_SPU__
-#define __CELL_SYNC_MUTEX_H_SPU__
+#ifndef _PS3DK_CELL_SYNC_MUTEX_H_SPU_
+#define _PS3DK_CELL_SYNC_MUTEX_H_SPU_
 
 #include <stdint.h>
 #include <cell/sync/error.h>
@@ -15,12 +15,12 @@ extern "C" {
 #endif
 
 int cellSyncMutexInitialize(uint64_t ea_obj, unsigned int tag);
-int cellSyncMutexTryLock(uint64_t ea);
 int cellSyncMutexLock(uint64_t ea);
+int cellSyncMutexTryLock(uint64_t ea);
 int cellSyncMutexUnlock(uint64_t ea);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __CELL_SYNC_MUTEX_H_SPU__ */
+#endif /* _PS3DK_CELL_SYNC_MUTEX_H_SPU_ */
