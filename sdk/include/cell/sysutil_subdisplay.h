@@ -1,17 +1,29 @@
-/*! \file cell/sysutil_subdisplay.h
- \brief Sony-SDK-source-compat libsysutil_subdisplay (PSP-as-secondary-display) API.
-
-  Backed by libsysutil_subdisplay_stub.a — the loader resolves the
-  eleven exports against the cellSubDisplay SPRX module at runtime.
-  No PSL1GHT runtime wrapper.
-*/
+/*
+ * PS3 Custom Toolchain - cell/sysutil_subdisplay.h
+ *
+ * cellSubDisplay surface: PSP-as-secondary-display setup, peer discovery,
+ * video-buffer access, audio output, and touch-input queries.
+ *
+ * Eleven exported entry points backed by libsysutil_subdisplay_stub.a:
+ *   cellSubDisplayGetRequiredMemory      query memory-container requirement
+ *   cellSubDisplayInit                   initialize subdisplay service
+ *   cellSubDisplayEnd                    shut down subdisplay service
+ *   cellSubDisplayStart                  start subdisplay service
+ *   cellSubDisplayStop                   stop subdisplay service
+ *   cellSubDisplayGetVideoBuffer         query current video buffer
+ *   cellSubDisplayAudioOutBlocking       submit audio data, blocking
+ *   cellSubDisplayAudioOutNonBlocking    submit audio data, non-blocking
+ *   cellSubDisplayGetPeerNum             query connected peer count
+ *   cellSubDisplayGetPeerList            query connected peer metadata
+ *   cellSubDisplayGetTouchInfo           query touch input state
+ */
 
 #ifndef __PSL1GHT_CELL_SYSUTIL_SUBDISPLAY_H__
 #define __PSL1GHT_CELL_SYSUTIL_SUBDISPLAY_H__
 
 #include <stdint.h>
-#include <stddef.h>
 #include <sys/memory.h>
+#include <sysutil/sysutil_common.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,7 +86,7 @@ extern "C" {
 #define CELL_SUBDISPLAY_TOUCH_STATUS_MOVE     3
 #define CELL_SUBDISPLAY_TOUCH_STATUS_ABORT    4
 
-/* sys_memory_container_t bridge (shared with other Phase 6.5 headers). */
+/* sys_memory_container_t bridge shared with adjacent sysutil headers. */
 #ifndef _SYS_MEMORY_CONTAINER_T_DEFINED
 #define _SYS_MEMORY_CONTAINER_T_DEFINED
 typedef sys_mem_container_t sys_memory_container_t;
@@ -127,14 +139,16 @@ typedef struct CellSubDisplayTouchInfo {
 	uint16_t y;
 } CellSubDisplayTouchInfo;
 
-/* Resolved by libsysutil_subdisplay_stub.a. */
+/* Resolved by libsysutil_subdisplay_stub.a.
+ * ppVideoBuf and pSize receive ILP32 wire values; LP64 trampoline support
+ * is handled outside this header. */
 int cellSubDisplayGetRequiredMemory(CellSubDisplayParam *pParam);
 int cellSubDisplayInit(CellSubDisplayParam *pParam, CellSubDisplayHandler func,
                        void *userdata, sys_memory_container_t container);
 int cellSubDisplayEnd(void);
 int cellSubDisplayStart(void);
 int cellSubDisplayStop(void);
-int cellSubDisplayGetVideoBuffer(int groupId, void **ppVideoBuf, size_t *pSize);
+int cellSubDisplayGetVideoBuffer(int groupId, void **ppVideoBuf, uint32_t *pSize);
 int cellSubDisplayAudioOutBlocking(int groupId, void *pvData, int samples);
 int cellSubDisplayAudioOutNonBlocking(int groupId, void *pvData, int samples);
 int cellSubDisplayGetPeerNum(int groupId);
