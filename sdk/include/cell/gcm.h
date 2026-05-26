@@ -11,14 +11,14 @@
   - **Covered**: ~25 system functions used to bring up the RSX, register
     framebuffers, drive the flip controller, manage I/O memory, and
     install handlers.  Plus a CellGcmContextData typedef alias over
-    PSL1GHT's gcmContextData (byte-identical layout — both are
+    PSL1GHT's gcmContextData (byte-identical layout - both are
     {begin, end, current, callback}).
   - **Deferred**: the entire command-emitter family (cellGcmSetSurface /
     cellGcmSetClearSurface / cellGcmSetClearColor / cellGcmSetTexture /
     cellGcmSetVertexProgram / etc., several hundred functions).  Their
     declarations live in <cell/gcm/gcm_command_c.h>; PSL1GHT's
     equivalents live in <rsx/commands_inc.h> under rsx* names.  These
-    are inline command-buffer writers, not SPRX exports — porting them
+    are inline command-buffer writers, not SPRX exports - porting them
     is mechanical but voluminous.  Until that lands, samples that need
     the command stream must call rsxFoo directly even if everything
     else is cellGcmFoo.
@@ -54,6 +54,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <malloc.h>        /* the reference SDK code reaches memalign via this include chain */
+#include <assert.h>
 #include <ppu-types.h>
 #include <rsx/gcm_sys.h>
 #include <rsx/rsx.h>
@@ -73,7 +74,7 @@ extern "C" {
 typedef gcmContextData       CellGcmContextData;
 typedef gcmContextCallback   CellGcmContextCallback;
 
-/* CellGcmConfig is NOT aliased to PSL1GHT's gcmConfiguration —
+/* CellGcmConfig is NOT aliased to PSL1GHT's gcmConfiguration -
  * gcmConfiguration's localAddress / ioAddress are `void * __attribute__((mode(SI)))`
  * (32-bit pointers), which GCC sign-extends when loaded into a 64-bit
  * register.  A pointer like 0xc0000000 (top bit set) becomes
@@ -108,14 +109,14 @@ typedef struct {
     uint32_t   coreFrequency;
 } CellGcmConfigRaw;
 
-/* Implemented in sdk/libgcm_sys_legacy/src/gcm_legacy_wrappers.c —
+/* Implemented in sdk/libgcm_sys_legacy/src/gcm_legacy_wrappers.c -
  * a TU that doesn't include this header, so it can reach the nidgen
  * NID stub `cellGcmGetConfiguration` without shadowing from the
  * inline below.  Fills the 24 bytes at `raw`. */
 extern void _cellGcmGetConfigurationRaw(CellGcmConfigRaw *raw);
 
 /* CellGcmSurface is byte-identical to PSL1GHT's gcmSurface (same 33
- * fields in the same order — verified against the reference SDK's
+ * fields in the same order - verified against the reference SDK's
  * gcm_struct.h); user code that fills a CellGcmSurface and passes it
  * to cellGcmSetSurface gets reinterpreted as gcmSurface * by the
  * cellGcmSetSurface forwarder.
@@ -236,7 +237,7 @@ static inline uint16_t cellGcmGetFixedUint16(float value)
     return (uint16_t)rsxGetFixedUint16(value);
 }
 
-/* Tile region + Zcull — forward to PSL1GHT's libgcm_sys wrappers.
+/* Tile region + Zcull - forward to PSL1GHT's libgcm_sys wrappers.
  * These configure the GPU's tile-memory compression and depth-cull
  * hints.  Signatures line up 1:1. */
 static inline int32_t cellGcmSetTileInfo(uint8_t index, uint8_t location,
@@ -282,7 +283,7 @@ static inline int32_t cellGcmUnbindZcull(uint8_t index)
     return (int32_t)gcmUnbindZcull(index);
 }
 
-/* FIFO operating-mode setter — must be called before cellGcmInit.
+/* FIFO operating-mode setter - must be called before cellGcmInit.
  * `mode` is one of CELL_GCM_DEFAULT_FIFO_MODE_*. */
 static inline int32_t cellGcmInitDefaultFifoMode(int32_t mode)
 {
@@ -305,7 +306,7 @@ static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
                                  zCullDir, zCullFormat, sFunc, sRef, sMask);
 }
 
-/* Reference-SDK names — same call shape as our SetTileInfo / BindZcull. */
+/* Reference-SDK names - same call shape as our SetTileInfo / BindZcull. */
 static inline int32_t cellGcmSetTile(uint8_t index, uint8_t location,
                                      uint32_t offset, uint32_t size, uint32_t pitch,
                                      uint8_t comp, uint16_t base, uint8_t bank)
@@ -329,7 +330,7 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
  * under the same semantics; we re-bind via #define so user-side
  * l-value uses (gCellGcmCurrentContext->current = ..., etc.) and
  * rvalue reads both resolve to PSL1GHT's actual storage.  No
- * symbol-aliasing tricks at link time — just identifier substitution
+ * symbol-aliasing tricks at link time - just identifier substitution
  * at compile. */
 #define gCellGcmCurrentContext  gGcmContext
 
@@ -392,7 +393,7 @@ static inline void cellGcmGetConfiguration(CellGcmConfig *config)
 	CellGcmConfigRaw raw;
 	_cellGcmGetConfigurationRaw(&raw);
 	/* Zero-extend the 32-bit EA fields into full 64-bit native
-	 * pointers via lv2_ea32_expand — no implicit casts, no
+	 * pointers via lv2_ea32_expand - no implicit casts, no
 	 * sign-extension risk.  The trailing scalar fields are
 	 * straight copies. */
 	config->localAddress    = lv2_ea32_expand(raw.localAddress_ea);
@@ -483,11 +484,11 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
 }
 
 /* ----------------------------------------------------------------
- * Flip APIs — three flavours.  Pick PrepareFlip + handlers; the
+ * Flip APIs - three flavours.  Pick PrepareFlip + handlers; the
  * other two are advanced/dangerous.  Read this whole block before
  * using any of them.
  *
- * (1) cellGcmSetFlip(ctx, id)  — synchronous, in-stream flip.
+ * (1) cellGcmSetFlip(ctx, id)  - synchronous, in-stream flip.
  *     Embeds a FLIP_COMMAND directly into the GPU command buffer.
  *     The RSX swaps the displayed buffer when it processes the
  *     command.  No queue, no PPU/GPU handshake.  The the reference SDK
@@ -501,7 +502,7 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  *     bit-29 set), GET wanders to 0x1f800000 (unmapped), RPCS3 fires
  *     "Dead FIFO commands queue state has been detected" and the
  *     emulator hangs.  RPCS3 may suggest "Driver Wake-Up Delay" /
- *     "RSX FIFO Accuracy = Ordered & Atomic" — that papers over the
+ *     "RSX FIFO Accuracy = Ordered & Atomic" - that papers over the
  *     symptom, not the protocol problem.  Don't ship code that
  *     relies on those settings.
  *
@@ -509,7 +510,7 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  *     PUT/GET handshake and (b) have a reason the standard
  *     PrepareFlip + handler flow won't fit.
  *
- * (2) cellGcmSetPrepareFlip(ctx, id)  — recommended.  Inserts a
+ * (2) cellGcmSetPrepareFlip(ctx, id)  - recommended.  Inserts a
  *     PREPARE_FLIP command; does NOT actually flip.  Returns a
  *     queue id 0..7, or negative when the 8-deep flip queue is
  *     full (use this as PPU back-pressure: while qid<0 sleep+retry).
@@ -528,7 +529,7 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  *     end to end, and what samples/hello-ppu-cellgcm-triangle
  *     implements.
  *
- * (3) cellGcmSetFlipImmediate(id)  — CPU-side immediate flip, no
+ * (3) cellGcmSetFlipImmediate(id)  - CPU-side immediate flip, no
  *     FIFO command.  Only meant to be called from a VBlank handler
  *     after PrepareFlip has signalled a buffer is ready.  Calling
  *     it from anywhere else races against in-flight GPU work and
@@ -663,7 +664,7 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
  * next to the GCM_* originals our runtime layer exposes. */
 #include <cell/gcm/gcm_enum.h>
 
-/* cellGcmCg* struct-walker API (libgcm_cmd.a in our stage).  reference-SDK
+/* cellGcmCg* struct-walker API (libgcm_cmd.a in the installed SDK).  reference-SDK
  * samples include <cell/gcm.h> and call cellGcmCgInitProgram /
  * cellGcmCgGetUCode / cellGcmCgGetNamedParameter / etc. without a
  * separate include, so we pull gcm_cg_func.h in transitively. */
@@ -695,7 +696,7 @@ namespace cell { namespace Gcm {} }
  * global gCellGcmCurrentContext rather than taking an explicit first
  * arg.  We ship the explicit-ctx variants via gcm_command_c.h; the
  * overloads in gcm_cmd_overloads.h let the same function names compile
- * when called the reference SDK-style — they forward to the ctx variants,
+ * when called the reference SDK-style - they forward to the ctx variants,
  * pulling the current context from the global.
  *
  * C mode cannot overload by arity, so these stay C++-only.  C callers

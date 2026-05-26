@@ -51,6 +51,9 @@ typedef unsigned CellSpursTaskId;
 struct CellSpursTaskset;
 typedef struct CellSpursTaskset CellSpursTaskset;
 
+struct CellSpursSystemWorkloadAttribute;
+typedef struct CellSpursSystemWorkloadAttribute CellSpursSystemWorkloadAttribute;
+
 typedef struct CellSpursAttribute {
     unsigned char skip[CELL_SPURS_ATTRIBUTE_SIZE];
 } __attribute__((aligned(CELL_SPURS_ATTRIBUTE_ALIGN))) CellSpursAttribute;
@@ -58,6 +61,12 @@ typedef struct CellSpursAttribute {
 typedef struct CellSpurs {
     unsigned char skip[CELL_SPURS_SIZE];
 } __attribute__((aligned(CELL_SPURS_ALIGN))) CellSpurs;
+
+/* Forward-declare CellSpurs2 for the C prototype at line ~118.  In C
+ * the typedef below provides the concrete type; in C++ the typedef is
+ * guarded out and the forward-decl ensures the name is visible before
+ * the full struct CellSpurs2 definition later in this file. */
+struct CellSpurs2;
 
 /* CellSpurs2 has the same alignment as CellSpurs and is twice the
  * byte-array size.  In C++ it's derived from cell::Spurs::Spurs to
@@ -115,7 +124,7 @@ extern int cellSpursInitialize(CellSpurs *spurs,
                                bool exitIfNoWork);
 extern int cellSpursInitializeWithAttribute(CellSpurs *spurs,
                                             const CellSpursAttribute *attr);
-extern int cellSpursInitializeWithAttribute2(CellSpurs *spurs,
+extern int cellSpursInitializeWithAttribute2(CellSpurs2 *spurs,
                                              const CellSpursAttribute *attr);
 extern int cellSpursFinalize(CellSpurs *spurs);
 extern int cellSpursWakeUp(CellSpurs *spurs);
