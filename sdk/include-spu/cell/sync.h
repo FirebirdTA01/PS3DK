@@ -63,10 +63,17 @@ int cellSyncBarrierTryWait   (uint64_t ea_barrier);
 
 /* ---- Rwm (read/write lock with attached buffer) --------------------- */
 
-int cellSyncRwmRead    (uint64_t ea_rwm, void *ls_buffer);
-int cellSyncRwmTryRead (uint64_t ea_rwm, void *ls_buffer);
-int cellSyncRwmWrite   (uint64_t ea_rwm, const void *ls_buffer);
-int cellSyncRwmTryWrite(uint64_t ea_rwm, const void *ls_buffer);
+int cellSyncRwmInitialize(uint64_t ea_rwm, uint64_t buffer_ea,
+                          uint32_t buffer_size, unsigned int tag);
+int cellSyncRwmReadBegin   (uint64_t ea_rwm, void *ls_buffer,
+                            unsigned int tag);
+int cellSyncRwmTryReadBegin(uint64_t ea_rwm, void *ls_buffer,
+                            unsigned int tag);
+int cellSyncRwmReadEnd     (uint64_t ea_rwm, unsigned int tag);
+int cellSyncRwmWrite       (uint64_t ea_rwm, void *ls_buffer,
+                            unsigned int tag);
+int cellSyncRwmTryWrite    (uint64_t ea_rwm, void *ls_buffer,
+                            unsigned int tag);
 
 /* ---- Queue (fixed-size FIFO) ---------------------------------------- */
 
