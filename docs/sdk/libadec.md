@@ -91,7 +91,7 @@ libadec is a framework host. Individual codecs (Atrac3+, AAC, MP3, CELP, M4AAC) 
 
 ### 5. Callback non-NULL requirement
 
-`cellAdecOpen` rejects `cb.callbackFunc == NULL` with `CELL_ADEC_ERROR_ARG`. A no-op `CellAdecCbMsg` is sufficient for smoke tests.
+`cellAdecOpen` rejects `cb.callbackFunc == NULL` with `CELL_ADEC_ERROR_ARG`. A no-op `CellAdecCbMsg` is sufficient for validation tests.
 
 ### 6. Shared types
 
@@ -99,4 +99,4 @@ libadec is a framework host. Individual codecs (Atrac3+, AAC, MP3, CELP, M4AAC) 
 
 ## Sample
 
-`samples/codec/hello-ppu-adec/` — PPU smoke test validated in RPCS3: loads CELL_SYSMODULE_ADEC, queries LPCM decoder memory requirements, opens a decoder instance, closes it cleanly.
+`samples/codec/hello-ppu-adec/` — PPU validation test validated in RPCS3: loads CELL_SYSMODULE_ADEC, queries LPCM decoder memory requirements, opens a decoder instance, closes it cleanly.

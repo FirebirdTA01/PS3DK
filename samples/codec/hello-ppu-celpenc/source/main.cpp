@@ -1,4 +1,4 @@
-/* hello-ppu-celpenc — cellCelpEnc smoke test. QueryAttr→Open→Close. */
+/* hello-ppu-celpenc — cellCelpEnc validation test. QueryAttr→Open→Close. */
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>

@@ -1,5 +1,5 @@
 /*
- * hello-ppu-usbd — libusbd bring-up smoke test.
+ * hello-ppu-usbd — libusbd bring-up validation test.
  *
  * Exercises the PPU libusbd surface end-to-end through the the reference SDK
  * surface in <cell/usbd.h>:
@@ -7,7 +7,7 @@
  *   1. cellSysmoduleLoadModule(CELL_SYSMODULE_USBD)
  *   2. cellUsbdInit
  *   3. cellUsbdAllocateMemory / cellUsbdFreeMemory  (round-trip)
- *   4. cellUsbdSetThreadPriority2     (smoke; HLE returns OK or error)
+ *   4. cellUsbdSetThreadPriority2     (validation; HLE returns OK or error)
  *   5. cellUsbdEnd
  *
  * RPCS3's cellUsbd HLE has Init/End at warning level (logs and returns
@@ -29,7 +29,7 @@ SYS_PROCESS_PARAM(1001, 0x10000);
 
 int main(void)
 {
-    std::printf("hello-ppu-usbd: libusbd bring-up smoke test\n");
+    std::printf("hello-ppu-usbd: libusbd bring-up validation test\n");
 
     int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_USBD);
     std::printf("  cellSysmoduleLoadModule(USBD): %#x\n", rc);

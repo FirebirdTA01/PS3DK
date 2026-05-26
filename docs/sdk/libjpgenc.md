@@ -35,4 +35,4 @@ Same shape as libpngenc: `exParamList`, `memAddr`, `spurs`, `pictureAddr`, `mark
 
 ## Sample
 
-`samples/codec/hello-ppu-jpgenc/` — PPU smoke test: 640×480 YCbCr 4:2:0 QueryAttr → Open → Close. 136KB work memory, all CELL_OK.
+`samples/codec/hello-ppu-jpgenc/` — PPU validation test: 640×480 YCbCr 4:2:0 QueryAttr → Open → Close. 136KB work memory, all CELL_OK.

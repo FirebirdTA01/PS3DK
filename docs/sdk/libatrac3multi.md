@@ -45,4 +45,4 @@ Multi-channel ATRAC3 streams plug into libadec via `CELL_ADEC_TYPE_ATRACX_2CH` /
 
 ## Sample
 
-`samples/codec/hello-ppu-atrac3multi/` — PPU smoke test: loads CELL_SYSMODULE_LIBATRAC3MULTI, queries memory, creates a decoder, deletes it.
+`samples/codec/hello-ppu-atrac3multi/` — PPU validation test: loads CELL_SYSMODULE_LIBATRAC3MULTI, queries memory, creates a decoder, deletes it.

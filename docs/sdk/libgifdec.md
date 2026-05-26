@@ -41,4 +41,4 @@ cellGifDec uses a MainHandle (Create/Destroy) + SubHandle (Open/Close) model —
 
 ## Sample
 
-`samples/codec/hello-ppu-gifdec/` — PPU smoke test: Create → Open with valid GIF89a buffer → Close → Destroy. All calls return defined facility errors, SPRX processes the buffer successfully.
+`samples/codec/hello-ppu-gifdec/` — PPU validation test: Create → Open with valid GIF89a buffer → Close → Destroy. All calls return defined facility errors, SPRX processes the buffer successfully.

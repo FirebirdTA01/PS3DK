@@ -46,7 +46,7 @@ cellCelp8Enc has its own error namespace (0x806140ax vs. celpenc's 0x8061400x), 
 
 ### 2. CELP8 framing
 
-Input: 8 kHz mono float PCM. The SPRX uses MPE excitation with configurable pulse-density (MPE_CONFIG_0 through MPE_CONFIG_26). Smoke samples can use a zero buffer for silent input.
+Input: 8 kHz mono float PCM. The SPRX uses MPE excitation with configurable pulse-density (MPE_CONFIG_0 through MPE_CONFIG_26). Validation samples can use a zero buffer for silent input.
 
 ### 3. Encoder ↔ Decoder pairing
 
@@ -54,4 +54,4 @@ To decode CELP-8 output, load `CELL_SYSMODULE_ADEC_CELP8` (0x0047) and call `cel
 
 ## Sample
 
-`samples/codec/hello-ppu-celp8enc/` — PPU smoke test validated in RPCS3: loads CELL_SYSMODULE_CELP8ENC, queries memory (~47KB), opens an encoder instance, closes cleanly.
+`samples/codec/hello-ppu-celp8enc/` — PPU validation test validated in RPCS3: loads CELL_SYSMODULE_CELP8ENC, queries memory (~47KB), opens an encoder instance, closes cleanly.

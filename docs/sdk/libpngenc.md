@@ -56,4 +56,4 @@ Width-sensitive: all `size_t` fields (memSize, limitSize, streamSize) converted 
 
 ## Sample
 
-`samples/codec/hello-ppu-pngenc/` — PPU smoke test: 640×480 8bpp QueryAttr → Open → Close. 310KB work memory, all CELL_OK.
+`samples/codec/hello-ppu-pngenc/` — PPU validation test: 640×480 8bpp QueryAttr → Open → Close. 310KB work memory, all CELL_OK.

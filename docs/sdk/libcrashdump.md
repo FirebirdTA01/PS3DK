@@ -49,4 +49,4 @@ No pointer fields cross the SPRX boundary in the user-allocated struct (addr is 
 
 ## Sample
 
-`samples/lv2/hello-ppu-crashdump/` — PPU smoke test: registers a 64-byte user log area at index 0, queries it back, verifies the label round-trips. Does not trigger an actual crash.
+`samples/lv2/hello-ppu-crashdump/` — PPU validation test: registers a 64-byte user log area at index 0, queries it back, verifies the label round-trips. Does not trigger an actual crash.

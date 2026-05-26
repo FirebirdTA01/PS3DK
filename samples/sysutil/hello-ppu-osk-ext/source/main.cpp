@@ -1,5 +1,5 @@
 /*
- * hello-ppu-osk-ext — cellOskDialogExt* extended OSK smoke test.
+ * hello-ppu-osk-ext — cellOskDialogExt* extended OSK validation test.
  *
  * Exercises the 17-entry ext surface without requiring an open OSK
  * dialog (RPCS3 HLE returns CELL_OK for most calls).  Loads both

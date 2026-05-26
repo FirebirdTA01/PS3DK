@@ -144,7 +144,7 @@ Every adapter, renderer, feeder, and source interface carries a function-pointer
 
 ### 2. SPRX Player cleanup-path crash
 
-`cellSailPlayerInitialize` with incomplete configuration returns `CELL_SAIL_ERROR_INVALID_ARG` but the SPRX's internal cleanup path may dereference uninitialized fields. This is a known RPCS3 behaviour — smoke samples should exercise the allocator surface (not the Player) to avoid RPCS3 freezes.
+`cellSailPlayerInitialize` with incomplete configuration returns `CELL_SAIL_ERROR_INVALID_ARG` but the SPRX's internal cleanup path may dereference uninitialized fields. This is a known RPCS3 behaviour — validation samples should exercise the allocator surface (not the Player) to avoid RPCS3 freezes.
 
 ### 3. Forward-declaration ordering
 
@@ -156,4 +156,4 @@ Uses `CellCodecTimeStamp` and `CellCodecEsFilterId` from `<cell/codec/types.h>` 
 
 ## Sample
 
-`samples/codec/hello-ppu-sail/` — PPU smoke test validated in RPCS3: loads CELL_SYSMODULE_SAIL, initializes a memory allocator with real malloc/free callbacks, exits cleanly. Does not exercise the full Player pipeline (out of scope for the smoke gate).
+`samples/codec/hello-ppu-sail/` — PPU validation test validated in RPCS3: loads CELL_SYSMODULE_SAIL, initializes a memory allocator with real malloc/free callbacks, exits cleanly. Does not exercise the full Player pipeline (out of scope for the validation gate).

@@ -107,8 +107,8 @@ cellOskDialogExtAddJapaneseOptionDictionary((const char **)paths_ea);
 
 ### 5. SendFinishMessage requires an open dialog
 
-`cellOskDialogExtSendFinishMessage` returns `CELL_OSKDIALOG_ERROR_PARAM` (or error range) when no OSK dialog is open. It is not suitable for smoke testing without a preceding `cellOskDialogLoadAsync` → open lifecycle.
+`cellOskDialogExtSendFinishMessage` returns `CELL_OSKDIALOG_ERROR_PARAM` (or error range) when no OSK dialog is open. It is not suitable for validation testing without a preceding `cellOskDialogLoadAsync` → open lifecycle.
 
 ## Sample
 
-`samples/sysutil/hello-ppu-osk-ext/` — PPU smoke test validated in RPCS3: loads SYSUTIL + OSK_EXT sysmodules, exercises 11 entry points (SetInitialScale, SetBaseColor, Enable/DisableHalfByteKana, 3 Register*Callback with no-op functions, InputDeviceLock/Unlock, SetPointerEnable). All return CELL_OK.
+`samples/sysutil/hello-ppu-osk-ext/` — PPU validation test validated in RPCS3: loads SYSUTIL + OSK_EXT sysmodules, exercises 11 entry points (SetInitialScale, SetBaseColor, Enable/DisableHalfByteKana, 3 Register*Callback with no-op functions, InputDeviceLock/Unlock, SetPointerEnable). All return CELL_OK.

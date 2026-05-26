@@ -1,5 +1,5 @@
 /*
- * hello-ppu-fiber — libfiber bring-up smoke test.
+ * hello-ppu-fiber — libfiber bring-up validation test.
  *
  * Exercises the PPU fiber surface end-to-end through the the reference SDK
  * surface in <cell/fiber.h>:
@@ -13,7 +13,7 @@
  *
  * The HLE present in current RPCS3 returns CELL_OK for the whole
  * surface without actually performing context switches, so this
- * sample is a smoke gate: it proves that our archive links, the
+ * sample is a validation gate: it proves that our archive links, the
  * binary boots, struct alignments survive the SPRX boundary, and
  * every entry point returns success.  Real fiber-switching
  * validation needs a working HLE or hardware.
@@ -102,7 +102,7 @@ static bool create_fiber(CellFiberPpu *fiber, CellFiberPpuEntry entry,
 
 int main(void)
 {
-    std::printf("hello-ppu-fiber: libfiber bring-up smoke test\n");
+    std::printf("hello-ppu-fiber: libfiber bring-up validation test\n");
 
     if (!init_lib())
         return 1;

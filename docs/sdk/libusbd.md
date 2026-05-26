@@ -132,4 +132,4 @@ All 22 `cellUsbd*` convenience macros use `({ UsbDeviceRequest _dr; ... _dr.wVal
 
 ## Sample
 
-`samples/lv2/hello-ppu-usbd/` — PPU smoke test validated in RPCS3: loads `CELL_SYSMODULE_USBD`, then Init → AllocateMemory → FreeMemory → SetThreadPriority2 → End.
+`samples/lv2/hello-ppu-usbd/` — PPU validation test validated in RPCS3: loads `CELL_SYSMODULE_USBD`, then Init → AllocateMemory → FreeMemory → SetThreadPriority2 → End.

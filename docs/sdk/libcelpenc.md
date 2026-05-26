@@ -59,8 +59,8 @@ libcelpenc is the ENCODE side only. To DECODE the encoder's output, load `CELL_S
 
 ### 4. CELP framing
 
-Input: 16 kHz mono 16-bit signed PCM. Typical frame size is 320 bytes (160 samples). The SPRX accepts a zero buffer for silent input — suitable for smoke testing.
+Input: 16 kHz mono 16-bit signed PCM. Typical frame size is 320 bytes (160 samples). The SPRX accepts a zero buffer for silent input — suitable for validation testing.
 
 ## Sample
 
-`samples/codec/hello-ppu-celpenc/` — PPU smoke test validated in RPCS3: loads CELL_SYSMODULE_CELPENC, queries memory (~42KB), opens an encoder instance, closes cleanly.
+`samples/codec/hello-ppu-celpenc/` — PPU validation test validated in RPCS3: loads CELL_SYSMODULE_CELPENC, queries memory (~42KB), opens an encoder instance, closes cleanly.

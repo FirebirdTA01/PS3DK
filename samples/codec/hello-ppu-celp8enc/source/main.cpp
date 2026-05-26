@@ -1,4 +1,4 @@
-/* hello-ppu-celp8enc — cellCelp8Enc smoke test. QueryAttr→Open→Close. */
+/* hello-ppu-celp8enc — cellCelp8Enc validation test. QueryAttr→Open→Close. */
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>

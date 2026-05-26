@@ -1,5 +1,5 @@
 /*
- * hello-ppu-crashdump — sys_crash_dump_* smoke test.
+ * hello-ppu-crashdump — sys_crash_dump_* validation test.
  *
  * Registers a user log area, queries it back, verifies the
  * label matches.  Does NOT trigger a crash — just validates

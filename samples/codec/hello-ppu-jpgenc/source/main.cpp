@@ -1,4 +1,4 @@
-/* hello-ppu-jpgenc — cellJpgEnc smoke test. QueryAttr→Open→Close. */
+/* hello-ppu-jpgenc — cellJpgEnc validation test. QueryAttr→Open→Close. */
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
