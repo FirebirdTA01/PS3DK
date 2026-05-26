@@ -1,4 +1,4 @@
-# hello-ppu-subdisplay — CMake build.
+# hello-ppu-subdisplay - CMake build.
 #
 # Build:
 #   cmake -S . -B build \
@@ -15,7 +15,7 @@ add_executable(hello-ppu-subdisplay source/main.c)
 target_compile_features(hello-ppu-subdisplay PRIVATE c_std_11)
 
 target_link_libraries(hello-ppu-subdisplay PRIVATE
-    sysutil_subdisplay_stub sysmodule_stub io sysutil rt lv2
+    sysutil_subdisplay_stub sysutil rt lv2
 )
 
 ps3_add_self(hello-ppu-subdisplay)

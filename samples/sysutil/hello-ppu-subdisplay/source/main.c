@@ -1,9 +1,10 @@
 /*
- * hello-ppu-subdisplay — cellSubDisplay surface smoke test.
+ * hello-ppu-subdisplay - cellSubDisplay surface smoke test.
  *
  * Exercises every entry point in libsysutil_subdisplay_stub.a
- * (11 functions).  The API manages a PSP-as-secondary-display link
- * (remote-play video + audio + touch input).
+ * (11 functions).  The API manages a PSP-as-secondary-display link:
+ * setup, peer discovery, video buffer access, audio output, and
+ * touch input.
  *
  * Runtime expectation: RPCS3 does not HLE cellSubDisplay, so every
  * call after GetRequiredMemory is expected to return an error code.
@@ -20,9 +21,18 @@
 #include <sys/memory.h>
 
 #include <cell/sysutil.h>
-#include <cell/sysutil_subdisplay.h>
+#include <sysutil/sysutil_subdisplay.h>
 
 SYS_PROCESS_PARAM(1001, 0x10000);
+
+_Static_assert(CELL_SYSUTIL_ERROR_BASE_SUBDISPLAY == 0x80029800,
+               "subdisplay error base must match SDK ABI");
+_Static_assert(CELL_SUBDISPLAY_TOUCH_MAX_TOUCH_INFO == 6,
+               "touch info array size must match SDK ABI");
+_Static_assert(CELL_SUBDISPLAY_0003_WIDTH == 864,
+               "subdisplay 0003 width must match SDK ABI");
+_Static_assert(CELL_SUBDISPLAY_0003_HEIGHT == 480,
+               "subdisplay 0003 height must match SDK ABI");
 
 static volatile int g_cb_count = 0;
 
@@ -51,7 +61,7 @@ int main(int argc, char **argv)
 	int rc = cellSysutilRegisterCallback(0, on_sysutil_event, NULL);
 	printf("  cellSysutilRegisterCallback -> 0x%08x\n", (unsigned)rc);
 
-	/* --- GetRequiredMemory --- */
+	/* GetRequiredMemory */
 	CellSubDisplayParam param = {
 		.version = CELL_SUBDISPLAY_VERSION_0001,
 		.mode    = CELL_SUBDISPLAY_MODE_REMOTEPLAY,
@@ -75,12 +85,12 @@ int main(int argc, char **argv)
 	printf("  cellSubDisplayGetRequiredMemory -> %d (0x%08x)\n",
 	       memSize, (unsigned)memSize);
 
-	/* --- Init (container = SYS_MEMORY_CONTAINER_ID_INVALID) --- */
+	/* Init with an invalid container so the call validates linkage
+	 * without allocating a real memory container. */
 	rc = cellSubDisplayInit(&param, subdisplay_handler, NULL,
 	                        (sys_memory_container_t)SYS_MEMORY_CONTAINER_ID_INVALID);
 	printf("  cellSubDisplayInit -> 0x%08x\n", (unsigned)rc);
 
-	/* --- Start --- */
 	rc = cellSubDisplayStart();
 	printf("  cellSubDisplayStart -> 0x%08x\n", (unsigned)rc);
 
@@ -90,38 +100,32 @@ int main(int argc, char **argv)
 		usleep(50 * 1000);
 	}
 
-	/* --- GetPeerNum --- */
 	int peerNum = cellSubDisplayGetPeerNum(0);
 	printf("  cellSubDisplayGetPeerNum(0) -> %d (0x%08x)\n",
 	       peerNum, (unsigned)peerNum);
 
-	/* --- GetPeerList --- */
 	CellSubDisplayPeerInfo peerInfo;
 	int peerCount = 1;
 	rc = cellSubDisplayGetPeerList(0, &peerInfo, &peerCount);
 	printf("  cellSubDisplayGetPeerList(0) -> 0x%08x, count=%d\n",
 	       (unsigned)rc, peerCount);
 
-	/* --- GetTouchInfo --- */
 	CellSubDisplayTouchInfo touchInfo[CELL_SUBDISPLAY_TOUCH_MAX_TOUCH_INFO];
 	int touchCount = CELL_SUBDISPLAY_TOUCH_MAX_TOUCH_INFO;
 	rc = cellSubDisplayGetTouchInfo(0, touchInfo, &touchCount);
 	printf("  cellSubDisplayGetTouchInfo(0) -> 0x%08x, count=%d\n",
 	       (unsigned)rc, touchCount);
 
-	/* --- GetVideoBuffer --- */
 	void *pVideoBuf = NULL;
 	uint32_t videoSize = 0;
 	rc = cellSubDisplayGetVideoBuffer(0, &pVideoBuf, &videoSize);
 	printf("  cellSubDisplayGetVideoBuffer(0) -> 0x%08x, buf=%p, size=%u\n",
 	       (unsigned)rc, pVideoBuf, (unsigned)videoSize);
 
-	/* --- AudioOutBlocking --- */
 	int16_t audioBuf[480] = {0};
 	rc = cellSubDisplayAudioOutBlocking(0, audioBuf, 480);
 	printf("  cellSubDisplayAudioOutBlocking(0) -> 0x%08x\n", (unsigned)rc);
 
-	/* --- AudioOutNonBlocking --- */
 	rc = cellSubDisplayAudioOutNonBlocking(0, audioBuf, 480);
 	printf("  cellSubDisplayAudioOutNonBlocking(0) -> 0x%08x\n", (unsigned)rc);
 
@@ -131,11 +135,9 @@ int main(int argc, char **argv)
 		usleep(50 * 1000);
 	}
 
-	/* --- Stop --- */
 	rc = cellSubDisplayStop();
 	printf("  cellSubDisplayStop -> 0x%08x\n", (unsigned)rc);
 
-	/* --- End --- */
 	rc = cellSubDisplayEnd();
 	printf("  cellSubDisplayEnd -> 0x%08x\n", (unsigned)rc);
 
