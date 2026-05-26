@@ -1,11 +1,12 @@
-/* cell/sync/queue.h -- SPU-side sync queue declarations.
+/*
+ * cell/sync/queue.h -- SPU-side sync queue declarations.
  *
- * Declares the cellSyncQueue* entry points.  Implementations live in
- * the SPU runtime libraries (not yet shipped -- link will produce
- * honest undefined-reference errors until the runtime is filled in).
+ * Declares the cellSyncQueue* entry points, matching the two-arg ABI
+ * in the SPU sync umbrella.  Implementations live in libsync.a (SPU
+ * runtime).
  */
-#ifndef __CELL_SYNC_QUEUE_H_SPU__
-#define __CELL_SYNC_QUEUE_H_SPU__
+#ifndef _PS3DK_CELL_SYNC_QUEUE_H_SPU_
+#define _PS3DK_CELL_SYNC_QUEUE_H_SPU_
 
 #include <stdint.h>
 #include <cell/sync/error.h>
@@ -17,17 +18,17 @@ extern "C" {
 int cellSyncQueueInitialize(uint64_t ea, uint64_t ptr_buffer,
                             uint32_t buffer_size, unsigned int depth,
                             unsigned int tag);
-int cellSyncQueuePush(uint64_t ptr_obj, const void *buf, unsigned int tag);
-int cellSyncQueueTryPush(uint64_t ptr_obj, const void *buf, unsigned int tag);
-int cellSyncQueuePop(uint64_t ptr_obj, void *buf, unsigned int tag);
-int cellSyncQueueTryPop(uint64_t ptr_obj, void *buf, unsigned int tag);
-int cellSyncQueueSize(uint64_t ea);
-int cellSyncQueueClear(uint64_t ea);
-int cellSyncQueuePeek(uint64_t ptr_obj, void *buf, unsigned int tag);
-int cellSyncQueueTryPeek(uint64_t ptr_obj, void *buf, unsigned int tag);
+int          cellSyncQueuePush    (uint64_t ea, const void *buf);
+int          cellSyncQueueTryPush (uint64_t ea, const void *buf);
+int          cellSyncQueuePop     (uint64_t ea, void *buf);
+int          cellSyncQueueTryPop  (uint64_t ea, void *buf);
+int          cellSyncQueuePeek    (uint64_t ea, void *buf);
+int          cellSyncQueueTryPeek (uint64_t ea, void *buf);
+int          cellSyncQueueClear   (uint64_t ea);
+unsigned int cellSyncQueueSize    (uint64_t ea);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __CELL_SYNC_QUEUE_H_SPU__ */
+#endif /* _PS3DK_CELL_SYNC_QUEUE_H_SPU_ */

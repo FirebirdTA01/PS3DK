@@ -69,6 +69,9 @@ int cellSyncRwmTryWrite(uint64_t ea_rwm, const void *ls_buffer);
 
 /* ---- Queue (fixed-size FIFO) ---------------------------------------- */
 
+int          cellSyncQueueInitialize(uint64_t ea_queue, uint64_t ptr_buffer,
+                                     uint32_t buffer_size, unsigned int depth,
+                                     unsigned int tag);
 int          cellSyncQueuePush   (uint64_t ea_queue, const void *ls_buffer);
 int          cellSyncQueueTryPush(uint64_t ea_queue, const void *ls_buffer);
 int          cellSyncQueuePop    (uint64_t ea_queue, void *ls_buffer);

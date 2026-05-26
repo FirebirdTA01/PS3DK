@@ -20,10 +20,11 @@ CC := spu-elf-gcc
 AR := spu-elf-ar
 
 CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding \
+          -I../include-spu \
           -I$(PS3DK)/spu/include
 
 BUILD := build
-OBJS  := $(BUILD)/barrier.o
+OBJS  := $(BUILD)/barrier.o $(BUILD)/queue.o
 LIB   := $(BUILD)/libsync.a
 
 .PHONY: all install clean
