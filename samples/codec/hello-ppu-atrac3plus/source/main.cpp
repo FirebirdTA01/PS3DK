@@ -1,4 +1,4 @@
-/* hello-ppu-atrac3plus — cellAtrac smoke test. Minimal init/query/create/delete round-trip. */
+/* hello-ppu-atrac3plus — cellAtrac validation test. Minimal init/query/create/delete round-trip. */
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>

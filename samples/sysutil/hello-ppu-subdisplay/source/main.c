@@ -1,5 +1,5 @@
 /*
- * hello-ppu-subdisplay - cellSubDisplay surface smoke test.
+ * hello-ppu-subdisplay - cellSubDisplay surface validation test.
  *
  * Exercises every entry point in libsysutil_subdisplay_stub.a
  * (11 functions).  The API manages a PSP-as-secondary-display link:
@@ -8,7 +8,7 @@
  *
  * Runtime expectation: RPCS3 does not HLE cellSubDisplay, so every
  * call after GetRequiredMemory is expected to return an error code.
- * The smoke gate is: does the binary link, boot, call all 11 entry
+ * The validation gate is: does the binary link, boot, call all 11 entry
  * points, and reach sys_process_exit(0) without crashing.
  */
 
@@ -56,7 +56,7 @@ int main(int argc, char **argv)
 	(void)argc;
 	(void)argv;
 
-	printf("hello-ppu-subdisplay: cellSubDisplay surface smoke\n");
+	printf("hello-ppu-subdisplay: cellSubDisplay surface validation\n");
 
 	int rc = cellSysutilRegisterCallback(0, on_sysutil_event, NULL);
 	printf("  cellSysutilRegisterCallback -> 0x%08x\n", (unsigned)rc);
@@ -143,7 +143,7 @@ int main(int argc, char **argv)
 
 	cellSysutilUnregisterCallback(0);
 	printf("  callbacks received: %d\n", g_cb_count);
-	printf("result: PASS (smoke complete)\n");
+	printf("result: PASS (validation complete)\n");
 
 	sys_process_exit(0);
 	return 0;

@@ -1,5 +1,5 @@
 /*
- * hello-ppu-adec — cellAdec audio decoder framework smoke test.
+ * hello-ppu-adec — cellAdec audio decoder framework validation test.
  *
  * Exercises the Init / QueryAttr / Open / Close round-trip with
  * a cellAdecType requesting LPCM decoder support.  No real audio

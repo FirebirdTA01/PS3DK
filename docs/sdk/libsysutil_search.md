@@ -93,7 +93,7 @@ The deferred-callback pump pattern (`cellSysutilCheckCallback`) applies to many 
 - Other calls (StartListSearch, etc.) return `CELL_SEARCH_ERROR_NOT_INITIALIZED`.
 - `cellSearchFinalize` during the pending state returns `CELL_SEARCH_ERROR_BUSY`.
 
-The workaround in smoke samples:
+The workaround in validation samples:
 
 ```c
 cellSearchInitialize(CELL_SEARCH_MODE_NORMAL, 0, search_cb, NULL);
@@ -131,4 +131,4 @@ static void search_cb(CellSearchEvent event, int result,
 
 ## Sample
 
-`samples/sysutil/hello-ppu-search/` — PPU smoke test validated in RPCS3: loads SYSUTIL sysmodule, calls cellSearchInitialize with a no-op callback, pumps sysutil check-callback 10×50ms to let the async init complete, finalizes, exits cleanly.
+`samples/sysutil/hello-ppu-search/` — PPU validation test validated in RPCS3: loads SYSUTIL sysmodule, calls cellSearchInitialize with a no-op callback, pumps sysutil check-callback 10×50ms to let the async init complete, finalizes, exits cleanly.

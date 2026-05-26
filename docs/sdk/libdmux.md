@@ -135,4 +135,4 @@ Functions like `cellDmuxGetAu` take `void **auSpecificInfo`-style output-pointer
 
 ## Sample
 
-`samples/codec/hello-ppu-dmux/` — PPU smoke test validated in RPCS3: loads DMUX + DMUX_PAMF sysmodules, queries PAMF demuxer memory requirements, opens a demuxer instance, closes it, and exits cleanly.
+`samples/codec/hello-ppu-dmux/` — PPU validation test validated in RPCS3: loads DMUX + DMUX_PAMF sysmodules, queries PAMF demuxer memory requirements, opens a demuxer instance, closes it, and exits cleanly.

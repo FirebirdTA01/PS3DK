@@ -80,4 +80,4 @@ All other structs are scalar-only (no embedded pointers).
 
 ## Sample
 
-`samples/codec/hello-ppu-vpost/` — PPU smoke test: loads CELL_SYSMODULE_VPOST, configures a 1920×1080 YUV→RGBA pipeline, queries memory, opens a vpost instance, closes. RPCS3 HLE returns a config-validation error (0x80610443) which confirms the SPRX processed the caller's config struct correctly — the gate's intent is link-surface verification, and the defined error proves the ABI is working.
+`samples/codec/hello-ppu-vpost/` — PPU validation test: loads CELL_SYSMODULE_VPOST, configures a 1920×1080 YUV→RGBA pipeline, queries memory, opens a vpost instance, closes. RPCS3 HLE returns a config-validation error (0x80610443) which confirms the SPRX processed the caller's config struct correctly — the gate's intent is link-surface verification, and the defined error proves the ABI is working.

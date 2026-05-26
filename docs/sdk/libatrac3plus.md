@@ -66,4 +66,4 @@ cellAtrac serves double duty: it can be called standalone (direct `cellAtracDeco
 
 ## Sample
 
-`samples/codec/hello-ppu-atrac3plus/` — PPU smoke test: loads CELL_SYSMODULE_ATRAC3PLUS, queries memory size, creates a decoder instance, deletes it.
+`samples/codec/hello-ppu-atrac3plus/` — PPU validation test: loads CELL_SYSMODULE_ATRAC3PLUS, queries memory size, creates a decoder instance, deletes it.

@@ -1,5 +1,5 @@
 /*
- * hello-ppu-pamf — cellPamf container-parser smoke test.
+ * hello-ppu-pamf — cellPamf container-parser validation test.
  *
  * Feeds a minimal PAMF-magic buffer to the SPRX.  No real PAMF
  * stream is needed — the SPRX validates the magic bytes then

@@ -50,7 +50,7 @@ int main(void)
 	CellStorageDataSetParam param;
 	memset(&param, 0, sizeof(param));
 	param.fileSizeMax = 1024 * 1024;
-	param.title = (char *)"PS3TC StorageData smoke";
+	param.title = (char *)"PS3TC StorageData validation";
 
 	char src_media[]  = "/dev_usb000/PS3TC/IMPORT.BIN";
 	char dst_hdd[]    = "/dev_hdd0/game/PS3TC0001/USRDIR";

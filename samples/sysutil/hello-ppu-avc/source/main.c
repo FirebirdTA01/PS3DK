@@ -6,7 +6,7 @@
  *
  * Signatures cross-checked against RPCS3's cellSysutilAvc.{h,cpp}.
  * RPCS3 stubs most AVC entry points to no-ops, so this sample is
- * mainly a link-and-resolve smoke test plus return-code logging.
+ * mainly a link-and-resolve validation test plus return-code logging.
  */
 
 #include <stdint.h>

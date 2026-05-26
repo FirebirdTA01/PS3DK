@@ -1,4 +1,4 @@
-/* hello-ppu-atrac3multi — cellAtracMulti smoke test. */
+/* hello-ppu-atrac3multi — cellAtracMulti validation test. */
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>

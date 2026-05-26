@@ -1,4 +1,4 @@
-/* hello-ppu-pngenc — cellPngEnc smoke test. QueryAttr→Open→Close. */
+/* hello-ppu-pngenc — cellPngEnc validation test. QueryAttr→Open→Close. */
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>

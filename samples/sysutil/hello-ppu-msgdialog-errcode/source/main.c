@@ -60,7 +60,7 @@ int main(int argc, char **argv)
 	(void)argc;
 	(void)argv;
 
-	printf("hello-ppu-msgdialog-errcode: cellMsgDialogOpenErrorCode smoke\n");
+	printf("hello-ppu-msgdialog-errcode: cellMsgDialogOpenErrorCode validation\n");
 
 	int rc = cellSysutilRegisterCallback(0, on_sysutil_event, NULL);
 	if (rc != 0) {

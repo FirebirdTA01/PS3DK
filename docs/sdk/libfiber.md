@@ -158,4 +158,4 @@ The `cellFiberPpuInitialize` public wrapper uses a hand-written assembly prologu
 
 ## Sample
 
-`samples/lv2/hello-ppu-fiber/` — PPU smoke test validated in RPCS3: creates two fibers, each yielding a few times then exiting, joins both, tears down the scheduler.
+`samples/lv2/hello-ppu-fiber/` — PPU validation test validated in RPCS3: creates two fibers, each yielding a few times then exiting, joins both, tears down the scheduler.

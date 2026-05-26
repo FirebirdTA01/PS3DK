@@ -1,5 +1,5 @@
 /*
- * hello-spurs-semaphore - CellSpursSemaphore P/V smoke test.
+ * hello-spurs-semaphore - CellSpursSemaphore P/V validation test.
  *
  * Two SPU tasks share a 128-byte CellSpursSemaphore in main memory.
  * Task 0 (producer) V's the semaphore eight times; task 1 (consumer)
@@ -141,7 +141,7 @@ fail:
 
 int main(void)
 {
-    std::printf("hello-spurs-semaphore: P/V smoke test\n");
+    std::printf("hello-spurs-semaphore: P/V validation test\n");
 
     int rc = spu_printf_initialize(kSpuPrintfPriority, 0);
     if (rc) { std::printf("  spu_printf_initialize: %#x\n", rc); return 1; }

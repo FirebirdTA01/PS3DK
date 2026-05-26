@@ -1,5 +1,5 @@
 /*
- * hello-ppu-search — cellSearch content-search smoke test.
+ * hello-ppu-search — cellSearch content-search validation test.
  *
  * Exercises the init / search-start / finalize lifecycle.
  * RPCS3 HLE returns CELL_OK for most calls; this sample

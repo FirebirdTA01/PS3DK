@@ -98,4 +98,4 @@ No `size_t` / `time_t` / `off_t` fields in caller-allocated structs (all fields 
 
 ## Sample
 
-`samples/codec/hello-ppu-pamf/` — PPU smoke test validated in RPCS3: loads CELL_SYSMODULE_PAMF, feeds a minimal PAMF-magic buffer, exercises Verify / GetHeaderSize / GetStreamOffsetAndSize / ReaderInitialize / GetNumberOfStreams. The SPRX returns `CELL_PAMF_ERROR_UNSUPPORTED_VERSION` (0x80610505) for the malformed buffer — expected, proves link surface works.
+`samples/codec/hello-ppu-pamf/` — PPU validation test validated in RPCS3: loads CELL_SYSMODULE_PAMF, feeds a minimal PAMF-magic buffer, exercises Verify / GetHeaderSize / GetStreamOffsetAndSize / ReaderInitialize / GetNumberOfStreams. The SPRX returns `CELL_PAMF_ERROR_UNSUPPORTED_VERSION` (0x80610505) for the malformed buffer — expected, proves link surface works.

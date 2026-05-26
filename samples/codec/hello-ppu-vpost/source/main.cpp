@@ -1,5 +1,5 @@
 /*
- * hello-ppu-vpost — cellVpost Post-Processing smoke test.
+ * hello-ppu-vpost — cellVpost Post-Processing validation test.
  * QueryAttr → Open → Close round-trip.
  */
 #include <cstdio>

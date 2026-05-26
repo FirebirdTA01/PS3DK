@@ -1,4 +1,4 @@
-/* hello-ppu-sail — cellSail smoke test. MemAllocator init (avoids Player state machine). */
+/* hello-ppu-sail — cellSail validation test. MemAllocator init (avoids Player state machine). */
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>

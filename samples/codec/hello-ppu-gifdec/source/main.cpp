@@ -1,4 +1,4 @@
-/* hello-ppu-gifdec — cellGifDec smoke test. Create/Open/Close. */
+/* hello-ppu-gifdec — cellGifDec validation test. Create/Open/Close. */
 #include <cstdio>
 #include <cstdint>
 #include <cstring>

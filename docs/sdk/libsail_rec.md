@@ -54,11 +54,11 @@ Shared with libsail (`0x806107xx`). Composers return `CELL_SAIL_ERROR_INVALID_AR
 
 ### 1. SDK-version delta (largest in the project)
 
-3.70 firmware ships 39 entry points. 475 adds 19 cellSailComposer* functions — a real-time audio+video composition / multiplexer surface. Downstream consumers targeting pre-475 firmware should guard the Composer entries with a runtime-version check. The smoke sample exercises the Composer surface specifically because it's simpler and avoids the Recorder's deep state machine.
+3.70 firmware ships 39 entry points. 475 adds 19 cellSailComposer* functions — a real-time audio+video composition / multiplexer surface. Downstream consumers targeting pre-475 firmware should guard the Composer entries with a runtime-version check. The validation sample exercises the Composer surface specifically because it's simpler and avoids the Recorder's deep state machine.
 
 ### 2. Recorder vs Composer
 
-The Recorder is the full encoder lifecycle: open file → encode → close file. The Composer is a lower-level on-the-fly multiplexer that lets callers push encoded AUs directly without a file container. The smoke test uses ComposerInitialize / ComposerFinalize to avoid the Recorder's state machine (which has the same SPRX-cleanup crash risk as the Player path in libsail).
+The Recorder is the full encoder lifecycle: open file → encode → close file. The Composer is a lower-level on-the-fly multiplexer that lets callers push encoded AUs directly without a file container. The validation test uses ComposerInitialize / ComposerFinalize to avoid the Recorder's state machine (which has the same SPRX-cleanup crash risk as the Player path in libsail).
 
 ### 3. Header dependency graph
 
@@ -79,4 +79,4 @@ Both libsail and libsail_rec share the `sdk/include/cell/sail/` directory tree. 
 
 ## Sample
 
-`samples/codec/hello-ppu-sail-rec/` — PPU smoke test validated in RPCS3: loads CELL_SYSMODULE_SAIL_REC, initializes a Composer with MP4 parameters, finalizes cleanly. Composer calls return defined error codes (0x80610701/0x80610702) — expected for an under-configured pipeline; proves link/ABI surface works.
+`samples/codec/hello-ppu-sail-rec/` — PPU validation test validated in RPCS3: loads CELL_SYSMODULE_SAIL_REC, initializes a Composer with MP4 parameters, finalizes cleanly. Composer calls return defined error codes (0x80610701/0x80610702) — expected for an under-configured pipeline; proves link/ABI surface works.
