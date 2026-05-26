@@ -57,6 +57,8 @@ HEADERS := \
     include/sysutil/sysutil_userinfo.h \
     include/sysutil/sysutil_bgdl.h \
     include/sysutil/sysutil_subdisplay.h \
+    include/sysutil/sysutil_screenshot.h \
+    include/sysutil/sysutil_imejp.h \
     include/sysutil/sysutil_music_decode2.h \
     include/sysutil/sysutil_music_playback_common.h \
     include/sysutil/video.h \

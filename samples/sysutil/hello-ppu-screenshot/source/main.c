@@ -1,8 +1,8 @@
 /*
- * hello-ppu-screenshot — first non-PSL1GHT-backed sysutil sample.
+ * hello-ppu-screenshot - first non-PSL1GHT-backed sysutil sample.
  *
  * Validates the nidgen-archive pipeline end-to-end:
- *   - cell/sysutil_screenshot.h compiles.
+ *   - sysutil/sysutil_screenshot.h compiles.
  *   - libsysutil_screenshot_stub.a (built by scripts/build-cell-stub-archives.sh)
  *     resolves cellScreenShotEnable / Disable / SetParameter at link time.
  *   - The four exports' FNIDs land in the ELF's .rodata.sceFNID:
@@ -30,7 +30,7 @@
 #include <sys/process.h>
 
 #include <cell/sysutil.h>
-#include <cell/sysutil_screenshot.h>
+#include <sysutil/sysutil_screenshot.h>
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 

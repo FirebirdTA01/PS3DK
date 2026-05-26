@@ -1,9 +1,10 @@
-/*! \file cell/sysutil_imejp.h
- \brief Sony-SDK-source-compat libsysutil_imejp (Japanese IME) API.
-
-  Backed by libsysutil_imejp_stub.a — 41 exports against the cellSysutilMisc
-  SPRX module.  No PSL1GHT runtime wrapper.
-*/
+/*
+ * PS3 Custom Toolchain - cell/sysutil_imejp.h
+ *
+ * cellSysutilImeJp surface: Japanese IME input backed by
+ * libsysutil_imejp_stub.a (41 exports against the cellSysutilMisc
+ * module).  No PSL1GHT runtime wrapper.
+ */
 
 #ifndef __PSL1GHT_CELL_SYSUTIL_IMEJP_H__
 #define __PSL1GHT_CELL_SYSUTIL_IMEJP_H__

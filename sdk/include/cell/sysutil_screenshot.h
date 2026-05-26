@@ -1,21 +1,21 @@
-/*! \file cell/sysutil_screenshot.h
- \brief Sony-SDK-source-compat cellScreenShot API.
-
-  PSL1GHT ships no wrappers for libsysutil_screenshot.  Phase 6.5
-  closes the gap with a self-contained stub archive
-  (libsysutil_screenshot_stub.a) emitted by `nidgen archive` —
-  slots, FNIDs, .lib.stub header, sceResident name, .sceStub.text
-  trampolines, and .opd descriptors all in one .a so user code links
-  with `-lsysutil_screenshot_stub` and the loader resolves the four
-  exports against the cellScreenShotUtility SPRX module at runtime.
-
-  FNIDs (verified against the reference SDK/.../libsysutil_screenshot_stub.a
-  and tools/nidgen/nids/extracted/libsysutil_screenshot_stub.yaml):
-    cellScreenShotEnable            0x9e33ab8f
-    cellScreenShotDisable           0xfc6f4e74
-    cellScreenShotSetParameter      0xd3ad63e4
-    cellScreenShotSetOverlayImage   0x7a9c2243
-*/
+/*
+ * PS3 Custom Toolchain - cell/sysutil_screenshot.h
+ *
+ * cellScreenShot surface: screen capture control and overlay-image
+ * injection backed by libsysutil_screenshot_stub.a.
+ *
+ * Four exported entry points.  The stub archive is self-contained
+ * (slots, FNIDs, trampolines, OPD descriptors); user code links
+ * with `-lsysutil_screenshot_stub` and the loader resolves exports
+ * against the cellScreenShotUtility module at runtime.
+ *
+ * FNIDs (verified against the stub archive and the extracted NID
+ * YAML at tools/nidgen/nids/extracted/libsysutil_screenshot_stub.yaml):
+ *   cellScreenShotEnable            0x9e33ab8f
+ *   cellScreenShotDisable           0xfc6f4e74
+ *   cellScreenShotSetParameter      0xd3ad63e4
+ *   cellScreenShotSetOverlayImage   0x7a9c2243
+ */
 
 #ifndef __PSL1GHT_CELL_SYSUTIL_SCREENSHOT_H__
 #define __PSL1GHT_CELL_SYSUTIL_SCREENSHOT_H__
@@ -49,7 +49,7 @@ typedef struct CellScreenShotSetParam {
 	void *reserved;
 } CellScreenShotSetParam;
 
-/* Function declarations — resolved by libsysutil_screenshot_stub.a. */
+/* Function declarations - resolved by libsysutil_screenshot_stub.a. */
 int cellScreenShotEnable(void);
 int cellScreenShotDisable(void);
 int cellScreenShotSetParameter(const CellScreenShotSetParam *param);
