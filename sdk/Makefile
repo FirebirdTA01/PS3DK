@@ -46,6 +46,7 @@ HEADERS := \
     include/sys/thread.h \
     include/sys/ppu_thread.h \
     include/sys/process.h \
+    include/sys/memory.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
     include/sys/time_util.h \

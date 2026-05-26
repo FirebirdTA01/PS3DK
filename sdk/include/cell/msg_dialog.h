@@ -29,6 +29,7 @@ typedef void (*CellMsgDialogCallback)(int buttonType, void *userData);
 #define CELL_MSGDIALOG_PROGRESSBAR_INDEX_SINGLE        0
 #define CELL_MSGDIALOG_PROGRESSBAR_INDEX_DOUBLE_UPPER  0
 #define CELL_MSGDIALOG_PROGRESSBAR_INDEX_DOUBLE_LOWER  1
+#define CELL_MSGDIALOG_PROGRESSBAR_STRING_SIZE         (64)
 
 /* Button-return codes. */
 #define CELL_MSGDIALOG_BUTTON_NONE      (-1)

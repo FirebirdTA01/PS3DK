@@ -6,5 +6,6 @@
  */
 #ifndef _PS3DK_SYSUTIL_MSGDIALOG_H_
 #define _PS3DK_SYSUTIL_MSGDIALOG_H_
+#include <sysutil/sysutil_common.h>
 #include <cell/msg_dialog.h>
 #endif
