@@ -1,12 +1,15 @@
-/* cell/sync/lfqueue.h -- SPU-side lock-free queue declarations.
+/*
+ * cell/sync/lfqueue.h -- SPU-side lock-free queue declarations.
  *
  * Declares the cellSyncLFQueue* entry points plus inline container
- * initializers.  Runtime implementations live in the SPU runtime
- * libraries (not yet shipped -- link will produce honest
- * undefined-reference errors until the runtime is filled in).
+ * initializers and blocking/try wrappers.  Implementations live in
+ * libsync.a.
+ *
+ * Arbitrary depth supported (no cap).  The caller must allocate
+ * depth*entry_size + padding + depth*4 bytes for the buffer.
  */
-#ifndef __CELL_SYNC_LFQUEUE_H_SPU__
-#define __CELL_SYNC_LFQUEUE_H_SPU__
+#ifndef _PS3DK_CELL_SYNC_LFQUEUE_H_SPU_
+#define _PS3DK_CELL_SYNC_LFQUEUE_H_SPU_
 
 #include <stdint.h>
 #include <cell/sync/error.h>
@@ -16,20 +19,24 @@
 extern "C" {
 #endif
 
-/* Direction enum -- standard lock-free queue direction values. */
+/* Direction enum. */
 typedef enum {
-    CELL_SYNC_QUEUE_DIRECTION_PPU2SPU = 0,
-    CELL_SYNC_QUEUE_DIRECTION_SPU2PPU = 1
+    CELL_SYNC_QUEUE_SPU2SPU = 0,
+    CELL_SYNC_QUEUE_SPU2PPU = 1,
+    CELL_SYNC_QUEUE_PPU2SPU = 2,
+    CELL_SYNC_QUEUE_ANY2ANY = 3
 } CellSyncQueueDirection;
 
 /* Push/pop container types. */
 typedef struct {
     const void *buffer;
+    int pointer;
     unsigned int tag;
 } CellSyncLFQueuePushContainer;
 
 typedef struct {
     void *buffer;
+    int pointer;
     unsigned int tag;
 } CellSyncLFQueuePopContainer;
 
@@ -65,6 +72,7 @@ cellSyncLFQueuePushContainerInitialize(CellSyncLFQueuePushContainer *container,
                                        const void *buffer, const unsigned int tag)
 {
     container->buffer = buffer;
+    container->pointer = 0;
     container->tag = tag;
 }
 
@@ -73,6 +81,7 @@ cellSyncLFQueuePopContainerInitialize(CellSyncLFQueuePopContainer *container,
                                       void *buffer, const unsigned int tag)
 {
     container->buffer = buffer;
+    container->pointer = 0;
     container->tag = tag;
 }
 
@@ -100,4 +109,4 @@ cellSyncLFQueueTryPopBegin(uint64_t ea, CellSyncLFQueuePopContainer *pContainer)
     return _cellSyncLFQueuePopBeginBody(ea, pContainer, 0);
 }
 
-#endif /* __CELL_SYNC_LFQUEUE_H_SPU__ */
+#endif /* _PS3DK_CELL_SYNC_LFQUEUE_H_SPU_ */
