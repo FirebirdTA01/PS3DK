@@ -1,5 +1,6 @@
 library: cellBGDLUtility
 version: 1
+archive_name: sysutil_bgdl
 module: cellBGDLUtility
 exports:
 - name: cellBGDLGetMode

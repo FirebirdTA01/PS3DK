@@ -36,6 +36,8 @@ extern "C" {
 #define CELL_SYSUTIL_ERROR_BASE_STORAGEDATA       0x8002be00
 #define CELL_SYSUTIL_ERROR_BASE_BGMPLAYBACK_EX    0x8002d300
 #define CELL_SYSUTIL_ERROR_BASE_AP                0x8002cd00
+#define CELL_SYSUTIL_ERROR_BASE_BGDL              0x8002ce00
+#define CELL_SYSUTIL_ERROR_BASE_USERINFO          0x8002c300
 
 /* ---- Common cellSysutil error codes ----
  * BASE_COMMON family (0x8002b100 range): generic argument / state /
@@ -53,7 +55,8 @@ extern "C" {
  * Reference SDK declares these in sysutil_common.h; sample code
  * reaches them transitively without #include <cell/sysutil.h>.
  * Reproduce the prototypes here. */
-#define CELL_SYSUTIL_USERID_MAX  99999999
+#define CELL_SYSUTIL_USERID_CURRENT  0
+#define CELL_SYSUTIL_USERID_MAX      99999999
 
 typedef unsigned int CellSysutilUserId;
 typedef void (*CellSysutilCallback)(uint64_t status, uint64_t param,

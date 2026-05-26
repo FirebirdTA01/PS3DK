@@ -24,6 +24,8 @@ extern "C" {
 
 #define SYS_MEMORY_CONTAINER_ID_INVALID  0xFFFFFFFFU
 
+typedef uint32_t sys_memory_container_t;
+
 typedef struct sys_memory_info {
 	uint32_t total_user_memory;
 	uint32_t available_user_memory;

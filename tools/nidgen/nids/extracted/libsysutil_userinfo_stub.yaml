@@ -1,6 +1,7 @@
 library: cellUserInfo
 version: 1
 module: cellUserInfo
+archive_name: sysutil_userinfo
 exports:
 - name: cellUserInfoEnableOverlay
   nid: '0xb3516536'

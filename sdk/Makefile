@@ -54,6 +54,8 @@ HEADERS := \
     include/sysutil/sysutil_sysparam.h \
     include/sysutil/sysutil_savedata.h \
     include/sysutil/sysutil_msgdialog.h \
+    include/sysutil/sysutil_userinfo.h \
+    include/sysutil/sysutil_bgdl.h \
     include/sysutil/video.h \
     include/cell/cell.h \
     include/cell/atomic.h \
@@ -76,6 +78,8 @@ HEADERS := \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
     include/cell/sysutil_savedata.h \
+    include/cell/sysutil_userinfo.h \
+    include/cell/sysutil_bgdl.h \
     include/cell/sysutil_gamecontent.h \
     include/cell/sysutil_screenshot.h \
     include/cell/sysutil_oskdialog.h \
