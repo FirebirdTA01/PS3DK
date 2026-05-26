@@ -57,6 +57,7 @@ HEADERS := \
     include/sysutil/sysutil_userinfo.h \
     include/sysutil/sysutil_bgdl.h \
     include/sysutil/sysutil_subdisplay.h \
+    include/sysutil/sysutil_music_decode2.h \
     include/sysutil/video.h \
     include/cell/cell.h \
     include/cell/atomic.h \
@@ -102,6 +103,7 @@ HEADERS := \
     include/cell/sysutil_subdisplay.h \
     include/cell/sysutil_music.h \
     include/cell/sysutil_music_decode.h \
+    include/cell/sysutil_music_decode2.h \
     include/cell/sysutil_music_export.h \
     include/cell/sysutil_imejp.h \
     include/cell/codec/jpgdec.h \
