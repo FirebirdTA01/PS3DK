@@ -24,7 +24,18 @@ extern "C" {
 
 #define SYS_MEMORY_CONTAINER_ID_INVALID  0xFFFFFFFFU
 
+#define SYS_MEMORY_PAGE_SIZE_1M             0x0000000000000400ULL
+#define SYS_MEMORY_PAGE_SIZE_64K            0x0000000000000200ULL
+#define SYS_MEMORY_ACCESS_RIGHT_PPU_THR     0x0000000000000008ULL
+#define SYS_MEMORY_ACCESS_RIGHT_HANDLER      0x0000000000000004ULL
+#define SYS_MEMORY_ACCESS_RIGHT_SPU_THR     0x0000000000000002ULL
+#define SYS_MEMORY_ACCESS_RIGHT_RAW_SPU     0x0000000000000001ULL
+#define SYS_MEMORY_ACCESS_RIGHT_ANY \
+	(SYS_MEMORY_ACCESS_RIGHT_PPU_THR | SYS_MEMORY_ACCESS_RIGHT_HANDLER | \
+	 SYS_MEMORY_ACCESS_RIGHT_SPU_THR | SYS_MEMORY_ACCESS_RIGHT_RAW_SPU)
+
 typedef uint32_t sys_memory_container_t;
+typedef uint32_t sys_memory_t;
 
 typedef struct sys_memory_info {
 	uint32_t total_user_memory;
@@ -47,6 +58,73 @@ LV2_SYSCALL sys_memory_container_create(sys_memory_container_t *cid,
 LV2_SYSCALL sys_memory_container_destroy(sys_memory_container_t cid)
 {
 	lv2syscall1(325, (u64)cid);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mmapper_allocate_fixed_address(void)
+{
+	lv2syscall0(326);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mmapper_enable_page_fault_notification(
+	sys_addr_t start_addr, sys_event_queue_t queue_id)
+{
+	lv2syscall2(327, (u64)start_addr, (u64)queue_id);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mmapper_allocate_address(
+	uint32_t size, uint64_t flags, uint32_t alignment,
+	sys_addr_t *alloc_addr)
+{
+	lv2syscall4(330, (u64)size, flags, (u64)alignment,
+	            (u64)(uintptr_t)alloc_addr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mmapper_free_address(sys_addr_t start_addr)
+{
+	lv2syscall1(331, (u64)start_addr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mmapper_change_address_access_right(
+	sys_addr_t start_addr, uint64_t flags)
+{
+	lv2syscall2(336, (u64)start_addr, flags);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_mmapper_search_and_map(
+	sys_addr_t start_addr, sys_memory_t mem_id,
+	uint64_t flags, sys_addr_t *map_addr)
+{
+	lv2syscall4(337, (u64)start_addr, (u64)mem_id, flags,
+	            (u64)(uintptr_t)map_addr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_memory_allocate(uint32_t size, uint64_t flags,
+                                sys_addr_t *alloc_addr)
+{
+	lv2syscall3(348, (u64)size, flags,
+	            (u64)(uintptr_t)alloc_addr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_memory_free(sys_addr_t start_addr)
+{
+	lv2syscall1(349, (u64)start_addr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_memory_allocate_from_container(
+	uint32_t size, sys_memory_container_t cid,
+	uint64_t flags, sys_addr_t *alloc_addr)
+{
+	lv2syscall4(350, (u64)size, (u64)cid, flags,
+	            (u64)(uintptr_t)alloc_addr);
 	return_to_user_prog(s32);
 }
 
