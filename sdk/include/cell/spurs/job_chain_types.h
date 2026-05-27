@@ -10,7 +10,16 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <ppu-types.h>          /* ATTRIBUTE_PRXPTR */
+/* ATTRIBUTE_PRXPTR comes from <ppu-types.h> on PPU so cross-SPRX
+ * pointer fields shrink from LP64 pointers to 4-byte EAs.  SPU
+ * pointers are already 32-bit, so the attribute is a no-op there. */
+#ifdef __PPU__
+#include <ppu-types.h>
+#else
+#ifndef ATTRIBUTE_PRXPTR
+#define ATTRIBUTE_PRXPTR
+#endif
+#endif
 #include <cell/spurs/types.h>
 #include <cell/spurs/exception_types.h>
 #include <cell/spurs/job_descriptor.h>
