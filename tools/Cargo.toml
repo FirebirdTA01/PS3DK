@@ -4,6 +4,7 @@ members = [
     "nidgen",
     "coverage-report",
     "abi-verify",
+    "jobbin2-wrap",
 ]
 
 [workspace.package]
