@@ -35,6 +35,13 @@ for arg in "$@"; do
     esac
 done
 
+MUST_PASS_SAMPLES=(
+    "sysutil/hello-ppu-avc"
+    "sysutil/hello-ppu-osk"
+    "sysutil/hello-ppu-storagedata"
+    "sysutil/hello-ppu-sysconf"
+)
+
 SAMPLES_ROOT="$PS3_TOOLCHAIN_ROOT/samples"
 if $LP64; then
     TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain-lp64.cmake"
@@ -103,6 +110,23 @@ done < <(find "$SAMPLES_ROOT" -name CMakeLists.txt \
 say ""
 say "==============================================================================="
 say "Results: $PASSED / $TOTAL passed"
+
+MUST_PASS_FAILED=()
+for sample in "${MUST_PASS_SAMPLES[@]}"; do
+    for f in "${FAILED[@]}"; do
+        if [[ "$f" == "$sample (build)" || "$f" == "$sample (configure)" ]]; then
+            MUST_PASS_FAILED+=("$sample")
+        fi
+    done
+done
+
+if [[ ${#MUST_PASS_FAILED[@]} -gt 0 ]]; then
+    say ""
+    say "REGRESSION: must-pass sample(s) failed:"
+    for f in "${MUST_PASS_FAILED[@]}"; do
+        say "  - $f"
+    done
+fi
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then
     say "Failed:"
