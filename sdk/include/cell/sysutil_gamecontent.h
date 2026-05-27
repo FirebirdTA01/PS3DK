@@ -1,9 +1,9 @@
 /*! \file cell/sysutil_gamecontent.h
- \brief Sony-SDK-source-compat cellGame* API — Phase 6 forwarder.
+ \brief PS3 Custom Toolchain - cell/sysutil_gamecontent.h
 
-  Sony's sysutil_gamecontent.h + sysutil_game_common.h surface over
-  PSL1GHT's libsysutil.a (which embeds Sony FNIDs under renamed
-  sysGame* wrappers).  Source written against Sony's reference headers
+  PSL1GHT's sysutil_gamecontent.h + sysutil_game_common.h surface over
+  PSL1GHT's libsysutil.a (which embeds the reference SDK FNIDs under renamed
+  sysGame* wrappers).  Source written against PSL1GHT's reference headers
   compiles unchanged against this header.
 
   Verified FNIDs imported by user code:
@@ -37,7 +37,7 @@ extern "C" {
 #endif
 
 /* ============================================================
- * sysutil_game_common.h surface — return/error codes, sizes,
+ * sysutil_game_common.h surface - return/error codes, sizes,
  * game-type enum.
  * ============================================================ */
 
@@ -80,7 +80,7 @@ enum {
 };
 
 /* ============================================================
- * sysutil_gamecontent.h — attribute bits, theme options, result
+ * sysutil_gamecontent.h - attribute bits, theme options, result
  * codes, PARAM.SFO IDs, error-dialog types, resolution / sound /
  * disc-type enums.
  * ============================================================ */
@@ -178,7 +178,7 @@ enum {
 #define CELL_GAME_THEMEINSTALL_BUFSIZE_MIN  4096
 
 /* ============================================================
- * Sony struct types.  Layouts byte-identical to PSL1GHT's
+ * the reference SDK struct types.  Layouts byte-identical to PSL1GHT's
  * sysGame* per the _Static_asserts below.
  * ============================================================ */
 

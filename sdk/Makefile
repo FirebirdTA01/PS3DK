@@ -59,6 +59,8 @@ HEADERS := \
     include/sysutil/sysutil_subdisplay.h \
     include/sysutil/sysutil_screenshot.h \
     include/sysutil/sysutil_imejp.h \
+    include/sysutil/sysutil_gamecontent.h \
+    include/sysutil/sysutil_syscache.h \
     include/sysutil/sysutil_music_decode2.h \
     include/sysutil/sysutil_music_playback_common.h \
     include/sysutil/video.h \
@@ -84,6 +86,13 @@ HEADERS := \
     include/cell/sysutil_sysparam.h \
     include/cell/sysutil_savedata.h \
     include/cell/sysutil_userinfo.h \
+    include/cell/libkey2char.h \
+    include/cell/font.h \
+    include/cell/fontFT.h \
+    include/cell/font/error.h \
+    include/cell/font/ps3fontset.h \
+    include/cell/font/libfont.h \
+    include/cell/font/libfontFT.h \
     include/cell/sysutil_bgdl.h \
     include/cell/sysutil_gamecontent.h \
     include/cell/sysutil_screenshot.h \
