@@ -72,87 +72,89 @@ endif()
 if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
     set(_PS3_SELF_SDK_INSTALL_PROBED TRUE)
 
-    set(_ps3_manifest "${PS3DK}/.ps3dk-install-manifest")
-    if(NOT EXISTS "${_ps3_manifest}")
-        message(FATAL_ERROR
-            "ps3-self: SDK install manifest missing: ${_ps3_manifest}\n"
-            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
-    endif()
-
-    execute_process(
-        COMMAND "${_PS3_TOOLCHAIN_ROOT}/scripts/version.sh" --format=plain
-        WORKING_DIRECTORY "${_PS3_TOOLCHAIN_ROOT}"
-        OUTPUT_VARIABLE _ps3_expected_version
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _ps3_version_rc)
-    if(NOT _ps3_version_rc EQUAL 0)
-        message(FATAL_ERROR "ps3-self: failed to compute source SDK version")
-    endif()
-
-    if(NOT EXISTS "${PS3DK}/VERSION")
-        message(FATAL_ERROR
-            "ps3-self: SDK VERSION marker missing: ${PS3DK}/VERSION\n"
-            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
-    endif()
-    file(READ "${PS3DK}/VERSION" _ps3_installed_version)
-    string(STRIP "${_ps3_installed_version}" _ps3_installed_version)
-    if(NOT _ps3_installed_version STREQUAL _ps3_expected_version)
-        message(FATAL_ERROR
-            "ps3-self: stale SDK install.\n"
-            "  source:    ${_ps3_expected_version}\n"
-            "  installed: ${_ps3_installed_version}\n"
-            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
-    endif()
-
-    set(_ps3_source_video_header "${_PS3_TOOLCHAIN_ROOT}/sdk/include/sysutil/video.h")
-    set(_ps3_installed_video_header "${PS3DK}/ppu/include/sysutil/video.h")
-    foreach(path "${_ps3_source_video_header}" "${_ps3_installed_video_header}")
-        if(NOT EXISTS "${path}")
+    if(CMAKE_HOST_UNIX)
+        set(_ps3_manifest "${PS3DK}/.ps3dk-install-manifest")
+        if(NOT EXISTS "${_ps3_manifest}")
             message(FATAL_ERROR
-                "ps3-self: required SDK header missing: ${path}\n"
+                "ps3-self: SDK install manifest missing: ${_ps3_manifest}\n"
                 "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
         endif()
-    endforeach()
-    file(SHA256 "${_ps3_source_video_header}" _ps3_source_video_sha)
-    file(SHA256 "${_ps3_installed_video_header}" _ps3_installed_video_sha)
-    if(NOT _ps3_source_video_sha STREQUAL _ps3_installed_video_sha)
-        message(FATAL_ERROR
-            "ps3-self: stale sysutil/video.h in SDK install.\n"
-            "  source:    ${_ps3_source_video_sha}\n"
-            "  installed: ${_ps3_installed_video_sha}\n"
-            "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+
+        execute_process(
+            COMMAND "${_PS3_TOOLCHAIN_ROOT}/scripts/version.sh" --format=plain
+            WORKING_DIRECTORY "${_PS3_TOOLCHAIN_ROOT}"
+            OUTPUT_VARIABLE _ps3_expected_version
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _ps3_version_rc)
+        if(NOT _ps3_version_rc EQUAL 0)
+            message(FATAL_ERROR "ps3-self: failed to compute source SDK version")
+        endif()
+
+        if(NOT EXISTS "${PS3DK}/VERSION")
+            message(FATAL_ERROR
+                "ps3-self: SDK VERSION marker missing: ${PS3DK}/VERSION\n"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+        file(READ "${PS3DK}/VERSION" _ps3_installed_version)
+        string(STRIP "${_ps3_installed_version}" _ps3_installed_version)
+        if(NOT _ps3_installed_version STREQUAL _ps3_expected_version)
+            message(FATAL_ERROR
+                "ps3-self: stale SDK install.\n"
+                "  source:    ${_ps3_expected_version}\n"
+                "  installed: ${_ps3_installed_version}\n"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+
+        set(_ps3_source_video_header "${_PS3_TOOLCHAIN_ROOT}/sdk/include/sysutil/video.h")
+        set(_ps3_installed_video_header "${PS3DK}/ppu/include/sysutil/video.h")
+        foreach(path "${_ps3_source_video_header}" "${_ps3_installed_video_header}")
+            if(NOT EXISTS "${path}")
+                message(FATAL_ERROR
+                    "ps3-self: required SDK header missing: ${path}\n"
+                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+            endif()
+        endforeach()
+        file(SHA256 "${_ps3_source_video_header}" _ps3_source_video_sha)
+        file(SHA256 "${_ps3_installed_video_header}" _ps3_installed_video_sha)
+        if(NOT _ps3_source_video_sha STREQUAL _ps3_installed_video_sha)
+            message(FATAL_ERROR
+                "ps3-self: stale sysutil/video.h in SDK install.\n"
+                "  source:    ${_ps3_source_video_sha}\n"
+                "  installed: ${_ps3_installed_video_sha}\n"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+
+        foreach(path
+            "${PS3DK}/ppu/include/cell/sdk_version.h"
+            "${PS3DK}/ppu/lib/libsysutil_stub.a"
+            "${PS3DK}/ppu/lib/lp64/libsysutil_stub.a"
+            "${PS3DK}/ppu/lib/liblv2.a"
+            "${PS3DK}/ppu/lib/lp64/liblv2.a"
+            "${PS3DK}/ppu/lib/librsx.a"
+            "${PS3DK}/ppu/lib/lp64/librsx.a")
+            if(NOT EXISTS "${path}")
+                message(FATAL_ERROR
+                    "ps3-self: required SDK artifact missing: ${path}\n"
+                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+            endif()
+        endforeach()
+
+        foreach(alias
+            "${PS3DK}/ppu/lib/libsysutil.a"
+            "${PS3DK}/ppu/lib/lp64/libsysutil.a")
+            if(NOT IS_SYMLINK "${alias}")
+                message(FATAL_ERROR
+                    "ps3-self: ${alias} must be a symlink to libsysutil_stub.a\n"
+                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+            endif()
+            file(READ_SYMLINK "${alias}" _ps3_alias_target)
+            if(NOT _ps3_alias_target STREQUAL "libsysutil_stub.a")
+                message(FATAL_ERROR
+                    "ps3-self: ${alias} points to ${_ps3_alias_target}, expected libsysutil_stub.a\n"
+                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+            endif()
+        endforeach()
     endif()
-
-    foreach(path
-        "${PS3DK}/ppu/include/cell/sdk_version.h"
-        "${PS3DK}/ppu/lib/libsysutil_stub.a"
-        "${PS3DK}/ppu/lib/lp64/libsysutil_stub.a"
-        "${PS3DK}/ppu/lib/liblv2.a"
-        "${PS3DK}/ppu/lib/lp64/liblv2.a"
-        "${PS3DK}/ppu/lib/librsx.a"
-        "${PS3DK}/ppu/lib/lp64/librsx.a")
-        if(NOT EXISTS "${path}")
-            message(FATAL_ERROR
-                "ps3-self: required SDK artifact missing: ${path}\n"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
-        endif()
-    endforeach()
-
-    foreach(alias
-        "${PS3DK}/ppu/lib/libsysutil.a"
-        "${PS3DK}/ppu/lib/lp64/libsysutil.a")
-        if(NOT IS_SYMLINK "${alias}")
-            message(FATAL_ERROR
-                "ps3-self: ${alias} must be a symlink to libsysutil_stub.a\n"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
-        endif()
-        file(READ_SYMLINK "${alias}" _ps3_alias_target)
-        if(NOT _ps3_alias_target STREQUAL "libsysutil_stub.a")
-            message(FATAL_ERROR
-                "ps3-self: ${alias} points to ${_ps3_alias_target}, expected libsysutil_stub.a\n"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
-        endif()
-    endforeach()
 endif()
 
 # -----------------------------------------------------------------------------
@@ -310,16 +312,30 @@ if(NOT _PS3_SPU_TOOLS_PROBED)
         NAMES "spu-elf-objcopy${_ps3_self_exe}" "spu-elf-objcopy"
         PATHS "${PS3DEV}/spu/bin"
         NO_DEFAULT_PATH)
-    # JOBBIN_WRAP requires the reference SDK packager + wine on Linux.
+    # JOBBIN_WRAP requires the reference SDK packager.  Linux runs the
+    # Windows helper through wine; native Windows hosts run it directly.
     # Probed via env vars so users without the proprietary toolchain
     # can opt out cleanly.
-    find_program(PS3_TOOL_wine NAMES "wine")
-    set(_ps3_jobbin2_packager "$ENV{PS3_SPU_ELF_TO_PPU_OBJ}")
-    if(NOT _ps3_jobbin2_packager AND EXISTS "$ENV{HOME}/reference-sdk/the reference SDK/cell/host-win32/bin/spu_elf-to-ppu_obj.exe")
-        set(_ps3_jobbin2_packager "$ENV{HOME}/reference-sdk/the reference SDK/cell/host-win32/bin/spu_elf-to-ppu_obj.exe")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_jobbin2_packager "$ENV{PS3_SPU_ELF_TO_PPU_OBJ}")
+        if(_ps3_jobbin2_packager AND EXISTS "${_ps3_jobbin2_packager}")
+            set(PS3_TOOL_spu_elf_to_ppu_obj "${_ps3_jobbin2_packager}" CACHE FILEPATH
+                "Reference SDK spu_elf-to-ppu_obj.exe")
+        else()
+            find_program(PS3_TOOL_spu_elf_to_ppu_obj
+                NAMES "spu_elf-to-ppu_obj.exe" "spu_elf-to-ppu_obj"
+                PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+                NO_DEFAULT_PATH)
+        endif()
+    else()
+        find_program(PS3_TOOL_wine NAMES "wine")
+        set(_ps3_jobbin2_packager "$ENV{PS3_SPU_ELF_TO_PPU_OBJ}")
+        if(NOT _ps3_jobbin2_packager AND EXISTS "$ENV{HOME}/reference-sdk/the reference SDK/cell/host-win32/bin/spu_elf-to-ppu_obj.exe")
+            set(_ps3_jobbin2_packager "$ENV{HOME}/reference-sdk/the reference SDK/cell/host-win32/bin/spu_elf-to-ppu_obj.exe")
+        endif()
+        set(PS3_TOOL_spu_elf_to_ppu_obj "${_ps3_jobbin2_packager}" CACHE FILEPATH
+            "Reference SDK spu_elf-to-ppu_obj.exe (run under wine)")
     endif()
-    set(PS3_TOOL_spu_elf_to_ppu_obj "${_ps3_jobbin2_packager}" CACHE FILEPATH
-        "Reference SDK spu_elf-to-ppu_obj.exe (run under wine)")
     set(_ps3_jobbin2_wine_path "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}")
     if(NOT _ps3_jobbin2_wine_path AND EXISTS "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}/ppu-lv2-gcc.exe")
         set(_ps3_jobbin2_wine_path "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}")
@@ -446,13 +462,13 @@ function(ps3_add_spu_image target)
     # _binary_<NAME>_jobbin2_jobheader).  Link that .ppu.o straight
     # into the PPU executable - no bin2s needed.
     if(_PSI_JOBBIN_WRAP)
-        if(NOT PS3_TOOL_wine)
+        if(NOT CMAKE_HOST_WIN32 AND NOT PS3_TOOL_wine)
             message(FATAL_ERROR "ps3_add_spu_image: JOBBIN_WRAP requires wine on PATH")
         endif()
         if(NOT PS3_TOOL_spu_elf_to_ppu_obj)
-            message(FATAL_ERROR "ps3_add_spu_image: JOBBIN_WRAP needs spu_elf-to-ppu_obj.exe (set PS3_SPU_ELF_TO_PPU_OBJ env or place at ~/reference-sdk/the reference SDK/cell/host-win32/bin/)")
+            message(FATAL_ERROR "ps3_add_spu_image: JOBBIN_WRAP needs spu_elf-to-ppu_obj.exe (set PS3_SPU_ELF_TO_PPU_OBJ env or install it under ${PS3DK}/bin)")
         endif()
-        if(NOT PS3_TOOL_ppu_lv2_gcc_dir)
+        if(NOT CMAKE_HOST_WIN32 AND NOT PS3_TOOL_ppu_lv2_gcc_dir)
             message(FATAL_ERROR "ps3_add_spu_image: JOBBIN_WRAP needs ppu-lv2-gcc.exe dir on wine PATH (set PS3_PPU_LV2_GCC_BIN_DIR env or place at the reference ppu-lv2-gcc.exe dir)")
         endif()
         find_program(PS3_PPU_OBJCOPY
@@ -477,24 +493,42 @@ function(ps3_add_spu_image target)
         set(_spu_jobbin_blob    "${_spu_jobbin_dir}/${_PSI_NAME}.jobbin2")
         set(_spu_jobbin_bin     "${_spu_jobbin_dir}/${_PSI_NAME}.bin")
         set(_spu_jobheader_bin  "${_spu_jobbin_dir}/${_PSI_NAME}_jobheader.bin")
-        add_custom_command(
-            OUTPUT "${_spu_jobbin_blob}" "${_spu_jobbin_bin}" "${_spu_jobheader_bin}"
-            COMMAND ${CMAKE_COMMAND} -E copy "${_spu_elf}" "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
-            COMMAND ${CMAKE_COMMAND} -E env
-                    "WINEPATH=Z:${PS3_TOOL_ppu_lv2_gcc_dir}"
-                    "${PS3_TOOL_wine}"
-                    "${PS3_TOOL_spu_elf_to_ppu_obj}"
-                    --format=jobbin2
-                    --objcopy-style-symbol
-                    "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
-                    "${_spu_jobbin_ppu_o}"
-            COMMAND ${CMAKE_COMMAND} -E copy "${_spu_jobbin_blob}" "${_spu_jobbin_bin}"
-            COMMAND "${PS3_PPU_OBJCOPY}" --output-target=binary
-                    --only-section=.spu_image.jobheader
-                    "${_spu_jobbin_ppu_o}" "${_spu_jobheader_bin}"
-            DEPENDS "${_spu_elf}"
-            COMMENT "ps3-spu: jobbin2-wrap ${_PSI_NAME}.jobbin2 (wine spu_elf-to-ppu_obj)"
-            VERBATIM)
+        if(CMAKE_HOST_WIN32)
+            add_custom_command(
+                OUTPUT "${_spu_jobbin_blob}" "${_spu_jobbin_bin}" "${_spu_jobheader_bin}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_spu_elf}" "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
+                COMMAND "${PS3_TOOL_spu_elf_to_ppu_obj}"
+                        --format=jobbin2
+                        --objcopy-style-symbol
+                        "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
+                        "${_spu_jobbin_ppu_o}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_spu_jobbin_blob}" "${_spu_jobbin_bin}"
+                COMMAND "${PS3_PPU_OBJCOPY}" --output-target=binary
+                        --only-section=.spu_image.jobheader
+                        "${_spu_jobbin_ppu_o}" "${_spu_jobheader_bin}"
+                DEPENDS "${_spu_elf}"
+                COMMENT "ps3-spu: jobbin2-wrap ${_PSI_NAME}.jobbin2 (native spu_elf-to-ppu_obj)"
+                VERBATIM)
+        else()
+            add_custom_command(
+                OUTPUT "${_spu_jobbin_blob}" "${_spu_jobbin_bin}" "${_spu_jobheader_bin}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_spu_elf}" "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
+                COMMAND ${CMAKE_COMMAND} -E env
+                        "WINEPATH=Z:${PS3_TOOL_ppu_lv2_gcc_dir}"
+                        "${PS3_TOOL_wine}"
+                        "${PS3_TOOL_spu_elf_to_ppu_obj}"
+                        --format=jobbin2
+                        --objcopy-style-symbol
+                        "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
+                        "${_spu_jobbin_ppu_o}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_spu_jobbin_blob}" "${_spu_jobbin_bin}"
+                COMMAND "${PS3_PPU_OBJCOPY}" --output-target=binary
+                        --only-section=.spu_image.jobheader
+                        "${_spu_jobbin_ppu_o}" "${_spu_jobheader_bin}"
+                DEPENDS "${_spu_elf}"
+                COMMENT "ps3-spu: jobbin2-wrap ${_PSI_NAME}.jobbin2 (wine spu_elf-to-ppu_obj)"
+                VERBATIM)
+        endif()
         ps3_bin2s(${target} "${_spu_jobbin_bin}")
         ps3_bin2s(${target} "${_spu_jobheader_bin}")
     elseif(_PSI_JOBBIN)
@@ -719,6 +753,8 @@ if(NOT _PS3_PKG_PROBED)
             PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
             NO_DEFAULT_PATH)
     endforeach()
+    find_program(PS3_PYTHON
+        NAMES python3 python py)
 endif()
 
 function(ps3_add_pkg target)
@@ -789,18 +825,22 @@ function(ps3_add_pkg target)
         set(_pkg_overlay_cmd "")
     endif()
 
+    if(NOT PS3_PYTHON)
+        message(FATAL_ERROR "ps3_add_pkg: Python not found (tried python3, python, py)")
+    endif()
+
     add_custom_command(
         OUTPUT "${_pkg_out}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_pkg_dir}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_pkg_dir}/USRDIR"
         COMMAND "${PS3_TOOL_make_self_npdrm}" "${_stripped}"
                 "${_pkg_dir}/USRDIR/EBOOT.BIN" "${_PSP_CONTENTID}"
-        COMMAND "${PS3_TOOL_sfo.py}"
+        COMMAND "${PS3_PYTHON}" "${PS3_TOOL_sfo.py}"
                 --title "${_PSP_TITLE}" --appid "${_PSP_APPID}"
                 -f "${_PSP_SFOXML}" "${_pkg_dir}/PARAM.SFO"
         COMMAND "${CMAKE_COMMAND}" -E copy "${_PSP_ICON}" "${_pkg_dir}/ICON0.PNG"
         ${_pkg_overlay_cmd}
-        COMMAND "${PS3_TOOL_pkg.py}"
+        COMMAND "${PS3_PYTHON}" "${PS3_TOOL_pkg.py}"
                 --contentid "${_PSP_CONTENTID}" "${_pkg_dir}/" "${_pkg_out}"
         COMMAND "${CMAKE_COMMAND}" -E copy "${_pkg_out}" "${_pkg_npdrm}"
         COMMAND "${PS3_TOOL_package_finalize}" "${_pkg_npdrm}"
