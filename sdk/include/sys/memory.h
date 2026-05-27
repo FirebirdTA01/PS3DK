@@ -61,6 +61,17 @@ LV2_SYSCALL sys_memory_container_destroy(sys_memory_container_t cid)
 	return_to_user_prog(s32);
 }
 
+LV2_SYSCALL sysMemContainerCreate(sys_memory_container_t *cid,
+                                  uint32_t yield_size)
+{
+	return sys_memory_container_create(cid, yield_size);
+}
+
+LV2_SYSCALL sysMemContainerDestroy(sys_memory_container_t cid)
+{
+	return sys_memory_container_destroy(cid);
+}
+
 LV2_SYSCALL sys_mmapper_allocate_fixed_address(void)
 {
 	lv2syscall0(326);
