@@ -1,4 +1,4 @@
-# hello-ppu-msgdialog-progressbar — CMake build.
+# hello-ppu-msgdialog-progressbar - CMake build.
 #
 # Build:
 #   cmake -S . -B build \
