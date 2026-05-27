@@ -1,19 +1,20 @@
 /*
- * PS3 Custom Toolchain - samples/fw/include/FWDebugFontRenderer.h
+ * PS3 Custom Toolchain - samples/fw/include/gcm/FWGCMDebugFontRenderer.h
  *
- * Debug-font renderer interface for the sample fw layer.
+ * libdbgfont-backed debug-font renderer for fw GCM samples.
  */
 
-#ifndef PS3TC_FW_DEBUG_FONT_RENDERER_H
-#define PS3TC_FW_DEBUG_FONT_RENDERER_H
+#ifndef PS3TC_FW_GCM_DEBUG_FONT_RENDERER_H
+#define PS3TC_FW_GCM_DEBUG_FONT_RENDERER_H
 
-#include <FWDebugFont.h>
+#include <FWDebugFontRenderer.h>
 
-class FWDebugFontRenderer {
+class FWGCMDebugFontRenderer : public FWDebugFontRenderer {
 public:
-	FWDebugFontRenderer();
-	virtual ~FWDebugFontRenderer();
+	FWGCMDebugFontRenderer();
+	virtual ~FWGCMDebugFontRenderer();
 
+	bool initWithScreen(int width, int height);
 	virtual void init();
 	virtual void shutdown();
 	virtual void printStart(float r, float g, float b, float a);
@@ -30,13 +31,15 @@ public:
 	                       float g,
 	                       float b,
 	                       float a);
+	void draw();
+	bool isInitialized() const { return mInitialized; }
 
-	static unsigned char *getFontData();
-
-	static float sR;
-	static float sG;
-	static float sB;
-	static float sA;
+private:
+	void *mBuffer;
+	unsigned int mBufferSize;
+	int mWidth;
+	int mHeight;
+	bool mInitialized;
 };
 
-#endif /* PS3TC_FW_DEBUG_FONT_RENDERER_H */
+#endif /* PS3TC_FW_GCM_DEBUG_FONT_RENDERER_H */

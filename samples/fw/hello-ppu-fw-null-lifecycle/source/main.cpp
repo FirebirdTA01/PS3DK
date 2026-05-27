@@ -1,5 +1,51 @@
 /*
- * hello-ppu-fw-null-lifecycle - validate Null fw lifecycle and text facades.
+ * hello-ppu-fw-null-lifecycle: Null fw lifecycle + debug-font facade
+ * validation.
+ *
+ * Validates: the no-op shim path through the fw framework -
+ * FWNullApplication derives from FWApplication and overrides every
+ * lifecycle hook (onInit / onUpdate / onRender / onShutdown / onSize),
+ * FWNullWindow stands in for FWWindow, FWNullDebugFontRenderer
+ * satisfies the FWDebugFontRenderer interface without any real
+ * rendering.  FWDebugFont + FWDebugConsole are exercised via the
+ * registered Null renderer; text emission falls back to ::printf so
+ * the trace is still visible in TTY.
+ *
+ * How it works: a TestApp class derives from FWNullApplication and
+ * counts each lifecycle hook invocation.  main drives one explicit
+ * init -> update -> render -> render -> resize -> shutdown cycle on
+ * the app, instantiates an FWNullWindow + FWNullDebugFontRenderer,
+ * registers the renderer via FWDebugFont::setRenderer, walks the
+ * FWDebugFont API (setPosition / setColor / setScreenRes /
+ * setSafeArea / print / printf / getExtents) and the FWDebugConsole
+ * API (init / print / printf / update / render / shutdown), prints
+ * counter validation + final state, then sys_process_exit(0).
+ *
+ * Build:
+ *   cmake -S samples/fw/hello-ppu-fw-null-lifecycle -B build \
+ *         -DCMAKE_TOOLCHAIN_FILE=cmake/ps3-ppu-toolchain.cmake
+ *   cmake --build build
+ *
+ * Run in RPCS3:
+ *   rpcs3 --no-gui samples/fw/hello-ppu-fw-null-lifecycle/hello-ppu-fw-null-lifecycle.fake.self
+ *
+ * Expected TTY:
+ *   hello-ppu-fw-null-lifecycle: Null fw lifecycle validation
+ *     TestApp::onInit argc=1
+ *     TestApp::onUpdate
+ *     TestApp::onRender
+ *     TestApp::onRender
+ *     TestApp::onSize 640x480
+ *     console message 1
+ *     console message 1
+ *     TestApp::onShutdown
+ *     safe_area=10,20,30,40 extents=64x16
+ *     counters init=1 update=1 render=2 shutdown=1 size=1
+ *   result: PASS (validation complete)
+ *
+ * What it does NOT cover: real GCM rendering, real on-screen text,
+ * any input polling.  See hello-ppu-fw-gcm-text for the GCM-backed
+ * rendering path and (forthcoming) hello-ppu-fw-input for FWInput.
  */
 
 #include <stdio.h>

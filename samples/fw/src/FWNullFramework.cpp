@@ -277,6 +277,26 @@ void FWDebugFontRenderer::printEnd()
 {
 }
 
+bool FWDebugFontRenderer::printText(const char *pText,
+                                    int numChars,
+                                    int x,
+                                    int y,
+                                    float r,
+                                    float g,
+                                    float b,
+                                    float a)
+{
+	(void)pText;
+	(void)numChars;
+	(void)x;
+	(void)y;
+	(void)r;
+	(void)g;
+	(void)b;
+	(void)a;
+	return false;
+}
+
 unsigned char *FWDebugFontRenderer::getFontData()
 {
 	return 0;
@@ -424,6 +444,10 @@ void FWDebugFont::print(const char *pText, int iNumChars)
 {
 	if (!pText || iNumChars <= 0)
 		return;
+	if (spRenderer && spRenderer->printText(pText, iNumChars, sXPos, sYPos, sR, sG, sB, sA)) {
+		sYPos += FWDEBUGFONT_GLYPH_HEIGHT;
+		return;
+	}
 	if (spRenderer) {
 		spRenderer->printStart(sR, sG, sB, sA);
 		spRenderer->printEnd();
