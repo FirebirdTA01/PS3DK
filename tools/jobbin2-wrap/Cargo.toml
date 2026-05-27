@@ -1,0 +1,24 @@
+[package]
+name = "jobbin2-wrap"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Independent SPURS jobbin2 wrapper and inspection tool"
+
+[[bin]]
+name = "jobbin2-wrap"
+path = "src/main.rs"
+
+[lib]
+name = "jobbin2_wrap"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+object.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
