@@ -1,10 +1,10 @@
 /*
- * hello-ppu-gamedata — cellGameBootCheck + cellGameGetParamString probes.
+ * hello-ppu-gamedata - cellGameBootCheck + cellGameGetParamString probes.
  *
  * cellGameBootCheck reports how the game was launched (disc, HDD,
  * patch, gamedata, app_home) and what attributes (debug, PS Store
  * relaunch, XMB-invite launch, etc.) came in on that launch.
- * cellGameGetParamString reads entries from the running PARAM.SFO —
+ * cellGameGetParamString reads entries from the running PARAM.SFO -
  * title-ID, version, per-language titles.
  *
  * ELF imports FNIDs:
@@ -19,7 +19,7 @@
 
 #include <sys/process.h>
 
-#include <cell/sysutil_gamecontent.h>
+#include <sysutil/sysutil_gamecontent.h>
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 

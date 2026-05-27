@@ -1,5 +1,5 @@
 /*
- * hello-ppu-syscache — mount the per-title cache area on /dev_hdd1
+ * hello-ppu-syscache - mount the per-title cache area on /dev_hdd1
  * (cellSysCacheMount), read back the assigned path, optionally clear
  * it (cellSysCacheClear), then exit.
  *
@@ -16,7 +16,7 @@
 #include <string.h>
 
 #include <sys/process.h>
-#include <cell/sysutil_syscache.h>
+#include <sysutil/sysutil_syscache.h>
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 

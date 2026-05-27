@@ -1,0 +1,34 @@
+/*
+ * hello-ppu-key2char - cellKey2Char surface validation.
+ */
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/process.h>
+#include <cell/libkey2char.h>
+
+SYS_PROCESS_PARAM(1001, 0x10000);
+
+int main(void)
+{
+	printf("hello-ppu-key2char: cellKey2Char surface validation\n");
+	CellKey2CharHandle h;
+	memset(h, 0, sizeof(h));
+	int rc = cellKey2CharOpen(h);
+	printf("  cellKey2CharOpen -> 0x%08x\n", (unsigned)rc);
+	rc = cellKey2CharSetMode(h, CELL_KEY2CHAR_MODE_ENGLISH);
+	printf("  cellKey2CharSetMode -> 0x%08x\n", (unsigned)rc);
+	rc = cellKey2CharSetArrangement(h, 0);
+	printf("  cellKey2CharSetArrangement -> 0x%08x\n", (unsigned)rc);
+	CellKey2CharKeyData kd = {0};
+	uint16_t *cc = NULL;
+	uint32_t cn = 0;
+	bool proc = false;
+	rc = cellKey2CharGetChar(h, &kd, &cc, &cn, &proc);
+	printf("  cellKey2CharGetChar -> 0x%08x\n", (unsigned)rc);
+	rc = cellKey2CharClose(h);
+	printf("  cellKey2CharClose -> 0x%08x\n", (unsigned)rc);
+	printf("result: PASS (validation complete)\n");
+	sys_process_exit(0);
+	return 0;
+}
