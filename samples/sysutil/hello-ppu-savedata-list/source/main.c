@@ -1,10 +1,17 @@
 /*
- * hello-ppu-savedata-list — cellSaveDataListSave2 validation test.
+ * hello-ppu-savedata-list - cellSaveDataListSave2 validation test.
  *
  * Presents the savedata list dialog, offers a deterministic new slot,
  * and writes a 256-byte payload after the user selects or creates a
- * slot.  This complements hello-ppu-savedata, which covers the
+ * slot.  Complements hello-ppu-savedata, which covers the
  * unattended AutoSave2 path.
+ *
+ * RPCS3 HLE note: cellSaveDataListSave2 returns CELL_OK but does not
+ * invoke the callback chain (list/file/result callbacks do not fire).
+ * This is a known RPCS3 HLE limitation.  On real hardware with a
+ * signed save-data keystore, the dialog appears and callbacks fire.
+ * This sample is tagged PARTIAL-HLE - link-and-resolve valid, but
+ * payload write not verified under RPCS3.
  *
  * Entry points exercised:
  *   cellSaveDataListSave2
@@ -55,6 +62,7 @@ static CellSaveDataListNewData g_new_data = {
 
 static int g_list_cb_invocations = 0;
 static int g_file_cb_invocations = 0;
+static int g_write_size_ok = 1;
 
 static void fill_payload(void)
 {
@@ -128,6 +136,13 @@ static void on_file(CellSaveDataCBResult *cbResult,
 	g_file_cb_invocations++;
 	printf("  file cb #%d: prevOpWrote=%u\n",
 	       g_file_cb_invocations, (unsigned)get->excSize);
+
+	/* Verify write size matches payload.  If this fires,
+	 * ListSave2 did not write the expected data size. */
+	if (get->excSize != sizeof(g_payload) && get->excSize != 0) {
+		printf("  WARNING: write size %u != expected %zu\n",
+		       (unsigned)get->excSize, sizeof(g_payload));
+	}
 	fflush(stdout);
 
 	if (g_file_cb_invocations == 1) {
@@ -139,8 +154,16 @@ static void on_file(CellSaveDataCBResult *cbResult,
 		set->fileBufSize = (unsigned int)sizeof(g_payload);
 		set->fileBuf = g_payload;
 		cbResult->result = CELL_SAVEDATA_CBRESULT_OK_NEXT;
-	} else {
+	} else if (get->excSize == sizeof(g_payload)) {
+		/* Write verified: OK_LAST */
+		g_write_size_ok = 1;
 		cbResult->result = CELL_SAVEDATA_CBRESULT_OK_LAST;
+	} else {
+		/* Write size mismatch - did not write expected payload */
+		printf("  ERROR: write size %u != expected %zu\n",
+		       (unsigned)get->excSize, sizeof(g_payload));
+		g_write_size_ok = 0;
+		cbResult->result = CELL_SAVEDATA_CBRESULT_ERR_FAILURE;
 	}
 
 	cbResult->invalidMsg = NULL;
@@ -185,9 +208,12 @@ int main(int argc, char **argv)
 
 	int pass = (rc == CELL_SAVEDATA_RET_OK) &&
 	           (g_list_cb_invocations > 0) &&
-	           (g_file_cb_invocations >= 2);
+	           (g_file_cb_invocations >= 2) &&
+	           g_write_size_ok;
 	printf("result: %s\n", pass ? "PASS" : "PARTIAL-HLE");
 	fflush(stdout);
 
+	/* PARTIAL-HLE: exit 1 is expected under RPCS3 - callbacks do not
+	 * fire under HLE.  PASS requires real HW or full HLE implementation. */
 	return pass ? 0 : 1;
 }

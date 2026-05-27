@@ -1,5 +1,33 @@
 /*
  * hello-ppu-gamecontent - cellGame* surface validation.
+ *
+ * Exercises all 17 entry points backed by libcellGame_stub.a and
+ * libsysutil_stub.a.  ContentErrorDialog and ContentPermit are
+ * intrinsic UI-dialog calls that block on user interaction; they
+ * are documented as deferred.  All other 15 calls dispatch and print
+ * return codes.
+ *
+ * Expected return codes under RPCS3 HLE (unpackaged .fake.self):
+ *   cellGameDataCheck:                  0x8002CB07 (CELL_GAME_ERROR_PARAM)
+ *   cellGameBootCheck:                  0x00000000 (CELL_OK)
+ *   cellGamePatchCheck:                 0x8002CB27 (NOTPATCH)
+ *   cellGameCreateGameData:             0x8002CB21 (NOTSUPPORTED)
+ *   cellGameGetParamInt:                0x8002CB25 (INVALID_ID)
+ *   cellGameGetParamString:             0x00000000 (CELL_OK)
+ *   cellGameGetSizeKB:                  0x00000000 (CELL_OK)
+ *   cellGameSetParamString:             0x8002CB21 (NOTSUPPORTED)
+ *   cellGameGetDiscContentInfoUpdatePath: 0x00000000 (CELL_OK)
+ *   cellGameThemeInstall:               0x8002CB07 (CELL_GAME_ERROR_PARAM)
+ *   cellGameThemeInstallFromBuffer:     0x00000000 (CELL_OK)
+ *   cellGameGetLocalWebContentPath:     0x00000000 (CELL_OK)
+ *   cellGameDeleteGameData:             0x8002CB07 (CELL_GAME_ERROR_PARAM)
+ *   cellGameRegisterDiscChangeCallback: 0x00000000 (CELL_OK)
+ *   cellGameUnregisterDiscChangeCallback: 0x00000000 (CELL_OK)
+ *   cellGameContentErrorDialog:         deferred (dialog-hosted)
+ *   cellGameContentPermit:              deferred (permit-cycle-hosted)
+ *
+ * Packaged (.pkg installed) launch may change BootCheck type/param
+ * values; automated sweep with --skip-clean uses unpackaged launch.
  */
 #include <stdint.h>
 #include <stdio.h>

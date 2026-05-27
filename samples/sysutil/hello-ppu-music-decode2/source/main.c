@@ -5,6 +5,19 @@
  * The sample links, calls every stub, prints each return code, and
  * reaches sys_process_exit(0) regardless of runtime results.
  *
+ * Expected return codes under RPCS3 HLE (all deliberate invalid-param
+ * or no-active-content probes):
+ *   Initialize2:             0x8002C102  (CELL_MUSIC_DECODE2_ERROR_PARAM)
+ *   Initialize2SystemWorkload: 0x8002C102  (ERROR_PARAM)
+ *   SelectContents2:          0x8002C1FF  (CELL_MUSIC_DECODE2_ERROR_GENERIC)
+ *   SetSelectionContext2:     0x8002C102  (ERROR_PARAM)
+ *   GetSelectionContext2:     0x8002C102  (ERROR_PARAM)
+ *   SetDecodeCommand2:        0x8002C1FF  (ERROR_GENERIC)
+ *   GetDecodeStatus2:         0x00000000  (CELL_OK, status=0)
+ *   Read2:                    0x8002C10B  (CELL_MUSIC_DECODE2_ERROR_NO_LPCM_DATA)
+ *   GetContentsId2:           0x8002C102  (ERROR_PARAM)
+ *   Finalize2:                0x00000000  (CELL_OK)
+ *
  * Runtime expectation: RPCS3 may or may not HLE music decode; return
  * codes will be errors or OK depending on firmware state.  The
  * validation gate is binary boot + all-10-called + clean exit.

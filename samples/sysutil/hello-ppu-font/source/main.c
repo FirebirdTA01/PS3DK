@@ -1,5 +1,22 @@
 /*
- * hello-ppu-font - cellFont surface validation (config/open-mode only).
+ * hello-ppu-font - cellFont surface validation.
+ *
+ * Validates: cellFontInitializeWithRevision, GetRevisionFlags,
+ * GetInitializedRevisionFlags, SetFontsetOpenMode/SetFontOpenMode,
+ * GetScalePixel, GetResolutionDpi, cellFontEnd.
+ *
+ * Expected return codes:
+ *   InitializeWithRevision(NULL):  0x80540002  (CELL_FONT_ERROR_INVALID_PARAMETER)
+ *   GetRevisionFlags(NULL):        0x00000000  (CELL_OK)
+ *   GetInitializedRevisionFlags:   0x00000000  (CELL_OK)
+ *   SetFontsetOpenMode(NULL):      0x80540002  (INVALID_PARAMETER)
+ *   SetFontOpenMode(NULL):         0x80540002  (INVALID_PARAMETER)
+ *   GetScalePixel(NULL):           0x80540002  (INVALID_PARAMETER)
+ *   GetResolutionDpi(NULL):        0x80540002  (INVALID_PARAMETER)
+ *   cellFontEnd():                 0x00000000  (CELL_OK)
+ *
+ * Link: cellFont_stub rt lv2.  No sysmodule/io needed (sample does
+ * not call cellSysmoduleLoadModule).
  */
 #include <stdint.h>
 #include <stdio.h>

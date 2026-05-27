@@ -1,4 +1,4 @@
-# hello-ppu-msgdialog-errcode — CMake build.
+# hello-ppu-msgdialog-errcode - CMake build.
 #
 # Build:
 #   cmake -S . -B build \

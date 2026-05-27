@@ -1,4 +1,4 @@
-# hello-ppu-savedata-list — CMake build.
+# hello-ppu-savedata-list - CMake build.
 #
 # Build:
 #   cmake -S . -B build \

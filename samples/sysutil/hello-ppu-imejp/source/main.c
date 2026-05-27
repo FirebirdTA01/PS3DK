@@ -2,6 +2,21 @@
  * hello-ppu-imejp - cellImeJpUtility surface validation.
  *
  * Exercises all 41 entry points in libsysutil_imejp_stub.a.
+ * Open returns OK; subsequent calls use that handle.  Expected
+ * return codes under RPCS3 HLE:
+ *   Open:        0x00000000  (CELL_OK - HLE stub returns OK but does
+ *                             not fully initialize the handle)
+ *   Open2/Open3: 0x8002BF21  (CELL_IMEJP_ERROR_ALREADY_OPEN)
+ *   Set*Mode:    0x00000000  (CELL_OK - handle partially init'd)
+ *   GetStatus:   0x00000000  (CELL_OK)
+ *   EnterChar*:  0x00000000  (CELL_OK)
+ *   ModeCaret*:  0x8002BF01  (CELL_IMEJP_ERROR_ERR)
+ *   Convert/Confirm: 0x8002BF01 (ERR)
+ *   GetFocus*:   0x00000000  (CELL_OK)
+ *   GetCandidateList: 0x8002BF01 (ERR)
+ *   GetConfirmString: 0x00000000 (CELL_OK)
+ *   Close:       0x00000000  (CELL_OK)
+ * cellSysutilRegisterCallback(NULL): tolerated, expected 0x00000000.
  * The sample links, calls every stub, prints each return code, and
  * reaches sys_process_exit(0) regardless of runtime results.
  *

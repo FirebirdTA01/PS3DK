@@ -82,19 +82,23 @@ int main(int argc, char **argv)
 	};
 
 	int memSize = cellSubDisplayGetRequiredMemory(&param);
+	/* expected: 0x80029854 (CELL_SUBDISPLAY_ERROR_INVALID_VALUE) -
+	 * RPCS3 HLE does not support cellSubDisplay */
 	printf("  cellSubDisplayGetRequiredMemory -> %d (0x%08x)\n",
 	       memSize, (unsigned)memSize);
 
 	/* Init with an invalid container so the call validates linkage
-	 * without allocating a real memory container. */
+	 * without allocating a real memory container.
+	 * expected: 0x80029854 (INVALID_VALUE) */
 	rc = cellSubDisplayInit(&param, subdisplay_handler, NULL,
 	                        (sys_memory_container_t)SYS_MEMORY_CONTAINER_ID_INVALID);
 	printf("  cellSubDisplayInit -> 0x%08x\n", (unsigned)rc);
 
+	/* expected: 0x80029855 (CELL_SUBDISPLAY_ERROR_NOT_INITIALIZED) */
 	rc = cellSubDisplayStart();
 	printf("  cellSubDisplayStart -> 0x%08x\n", (unsigned)rc);
 
-	/* Pump callbacks briefly */
+	/* Pump callbacks briefly - expected callbacks=0 under RPCS3 (no HLE) */
 	for (int i = 0; i < 5; i++) {
 		cellSysutilCheckCallback();
 		usleep(50 * 1000);

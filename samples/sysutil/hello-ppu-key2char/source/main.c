@@ -1,5 +1,21 @@
 /*
  * hello-ppu-key2char - cellKey2Char surface validation.
+ *
+ * Exercises all 5 entry points in libcellKey2char_stub.a.
+ *
+ * Expected return codes under RPCS3 HLE:
+ *   cellKey2CharOpen:            0x00000000 (CELL_OK - HLE stub returns OK
+ *                                  but does not initialize the handle)
+ *   cellKey2CharSetMode:         0x80121305 (CELL_K2C_ERROR_UNINITIALIZED -
+ *                                  handle zeroed, no real init by HLE)
+ *   cellKey2CharSetArrangement:  0x80121305 (UNINITIALIZED)
+ *   cellKey2CharGetChar:         0x80121305 (UNINITIALIZED)
+ *   cellKey2CharClose:           0x80121305 (UNINITIALIZED)
+ *
+ * Root cause: RPCS3 HLE returns OK for Open without populating the
+ * handle; subsequent calls check the zeroed handle and return
+ * UNINITIALIZED.  On real HW, Open would initialize the handle and
+ * the follow-up calls would succeed.
  */
 #include <stdint.h>
 #include <stdio.h>
