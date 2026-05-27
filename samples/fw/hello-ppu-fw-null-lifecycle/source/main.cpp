@@ -1,5 +1,5 @@
 /*
- * hello-ppu-fw-tier2 - validate Null fw lifecycle and text facades.
+ * hello-ppu-fw-null-lifecycle - validate Null fw lifecycle and text facades.
  */
 
 #include <stdio.h>
@@ -69,7 +69,7 @@ public:
 
 int main(int argc, char **argv)
 {
-	printf("hello-ppu-fw-tier2: Null fw lifecycle validation\n");
+	printf("hello-ppu-fw-null-lifecycle: Null fw lifecycle validation\n");
 
 	TestApp app;
 	FWNullDebugFontRenderer renderer;
