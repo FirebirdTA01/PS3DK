@@ -9,6 +9,7 @@
 #
 #   source ./scripts/env.sh
 #   ./scripts/build-sdk.sh
+#   ./scripts/build-sdk.sh --no-host-tools  # SDK-only rebuild
 
 set -euo pipefail
 
@@ -20,9 +21,11 @@ say() { printf "[sdk] %s\n" "$*"; }
 die() { printf "[sdk] ERROR: %s\n" "$*" >&2; exit 1; }
 
 HEADERS_ONLY=false
+INSTALL_HOST_TOOLS=true
 for arg in "$@"; do
     case "$arg" in
-        --headers-only) HEADERS_ONLY=true ;;
+        --headers-only) HEADERS_ONLY=true; INSTALL_HOST_TOOLS=false ;;
+        --no-host-tools) INSTALL_HOST_TOOLS=false ;;
         *) die "unknown argument: $arg" ;;
     esac
 done
@@ -52,6 +55,13 @@ icon_src="$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG"
 if [[ -f "$icon_src" ]]; then
     install -m 0644 "$icon_src" "$PS3DEV/bin/ICON0.PNG"
     say "installed sdk/assets/ICON0.PNG -> $PS3DEV/bin/ICON0.PNG"
+fi
+
+if $INSTALL_HOST_TOOLS; then
+    say "building + installing host tools"
+    "$PS3_TOOLCHAIN_ROOT/scripts/install-host-tools.sh"
+else
+    say "skipping host tools (--no-host-tools)"
 fi
 
 say "done"

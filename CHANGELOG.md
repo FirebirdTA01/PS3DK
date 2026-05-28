@@ -16,6 +16,18 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Tools — host-tool install rule
+
+- Added `scripts/install-host-tools.sh`, a Linux-host installer that
+  builds repo-owned host tools and stages them into `$PS3DEV/bin` with
+  a `$PS3DK/bin` mirror.  The installed set is `nidgen`,
+  `coverage-report`, `abi-verify`, `spu-elf-to-ppu-obj`,
+  `rsx-cg-compiler`, and `sprxlinker`.
+- `scripts/build-sdk.sh` now runs the host-tool installer after the SDK
+  install path, so CMake consumers find the clean-room tools from the
+  staged toolchain by default.  Use `--no-host-tools` for SDK-only
+  rebuilds.
+
 ## [v0.9.0] — 2026-05-25
 
 ### Toolchain — kernel-target (powerpc64-ps3-kernel-elf)
