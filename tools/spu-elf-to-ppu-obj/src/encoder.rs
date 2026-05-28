@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
+use crate::elf_embed::hard_stripped_spu_elf;
 use crate::jobheader::build_jobheader;
 use crate::patches::final_ls_image;
-use crate::ppu_write::{build_binary_ppu_object, build_jobbin2_ppu_object};
+use crate::ppu_write::{build_binary_ppu_object, build_elf_ppu_object, build_jobbin2_ppu_object};
 use crate::spu_elf::inspect_spu_elf;
 use crate::wrapper::build_jobbin2_blob;
 
@@ -12,6 +13,7 @@ use crate::wrapper::build_jobbin2_blob;
 pub enum EmbedFormat {
     Jobbin2,
     Binary,
+    Elf,
 }
 
 pub struct EncodedArtifacts {
@@ -57,6 +59,16 @@ pub fn encode_spu_elf(
                 ppu_object,
             })
         }
+        EmbedFormat::Elf => {
+            let elf_image = hard_stripped_spu_elf(path)?;
+            let ppu_object = build_elf_ppu_object(symbol_base, &elf_image)?;
+            Ok(EncodedArtifacts {
+                format,
+                image: elf_image,
+                jobheader: None,
+                ppu_object,
+            })
+        }
     }
 }
 
@@ -86,6 +98,12 @@ pub fn write_sidecars(output: &Path, artifacts: &EncodedArtifacts) -> Result<Vec
             std::fs::write(&bin_path, &artifacts.image)
                 .with_context(|| format!("writing {}", bin_path.display()))?;
             Ok(vec![bin_path])
+        }
+        EmbedFormat::Elf => {
+            let elf_path = base.with_extension("elf");
+            std::fs::write(&elf_path, &artifacts.image)
+                .with_context(|| format!("writing {}", elf_path.display()))?;
+            Ok(vec![elf_path])
         }
     }
 }

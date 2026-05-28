@@ -97,6 +97,9 @@ pub fn inspect_ppu_obj(path: &Path) -> Result<PpuObjectReport> {
             || sym.name.ends_with("_bin_start")
             || sym.name.ends_with("_bin_end")
             || sym.name.ends_with("_bin_size")
+            || sym.name.ends_with("_elf_start")
+            || sym.name.ends_with("_elf_end")
+            || sym.name.ends_with("_elf_size")
         {
             symbols.insert(
                 sym.name.clone(),

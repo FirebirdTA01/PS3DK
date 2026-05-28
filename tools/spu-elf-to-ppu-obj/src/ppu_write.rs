@@ -78,6 +78,14 @@ pub fn build_jobbin2_ppu_object(
 }
 
 pub fn build_binary_ppu_object(symbol_base: &str, ls_image: &[u8]) -> Result<Vec<u8>> {
+    build_simple_ppu_object(symbol_base, "bin", ls_image)
+}
+
+pub fn build_elf_ppu_object(symbol_base: &str, elf_image: &[u8]) -> Result<Vec<u8>> {
+    build_simple_ppu_object(symbol_base, "elf", elf_image)
+}
+
+fn build_simple_ppu_object(symbol_base: &str, infix: &str, image: &[u8]) -> Result<Vec<u8>> {
     let mut object = Object::new(BinaryFormat::Elf, Architecture::PowerPc64, Endianness::Big);
 
     let spu_image = object.add_section(
@@ -85,28 +93,28 @@ pub fn build_binary_ppu_object(symbol_base: &str, ls_image: &[u8]) -> Result<Vec
         b".spu_image".to_vec(),
         SectionKind::ReadOnlyData,
     );
-    let padded_image = padded_to(ls_image, 0x80);
+    let padded_image = padded_to(image, 0x80);
     object.append_section_data(spu_image, &padded_image, 0x80);
 
     let symbol_base = sanitize_symbol_base(symbol_base);
     add_symbol(
         &mut object,
-        &format!("_binary_{symbol_base}_bin_start"),
+        &format!("_binary_{symbol_base}_{infix}_start"),
         0,
-        ls_image.len() as u64,
+        image.len() as u64,
         SymbolSection::Section(spu_image),
     );
     add_symbol(
         &mut object,
-        &format!("_binary_{symbol_base}_bin_end"),
-        ls_image.len() as u64,
+        &format!("_binary_{symbol_base}_{infix}_end"),
+        image.len() as u64,
         0,
         SymbolSection::Section(spu_image),
     );
     add_symbol(
         &mut object,
-        &format!("_binary_{symbol_base}_bin_size"),
-        ls_image.len() as u64,
+        &format!("_binary_{symbol_base}_{infix}_size"),
+        image.len() as u64,
         0,
         SymbolSection::Absolute,
     );
@@ -188,6 +196,21 @@ mod tests {
         assert_eq!(report.sections[".spu_image"].size, 0x100);
         assert!(!report.sections.contains_key(".spu_image.jobheader"));
         assert_eq!(report.symbols["_binary_smoke_bin_size"].value, 0x88);
+        assert!(report.jobheader_relocations.is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn writer_emits_elf_symbols_without_jobheader() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("spu_elf_to_ppu_obj_elf_writer_test.ppu.o");
+        let object = build_elf_ppu_object("smoke", &[0u8; 0xd8]).unwrap();
+        std::fs::write(&path, object).unwrap();
+        let report = inspect_ppu_obj(&path).unwrap();
+        assert_eq!(report.sections[".spu_image"].align, 0x80);
+        assert_eq!(report.sections[".spu_image"].size, 0x100);
+        assert!(!report.sections.contains_key(".spu_image.jobheader"));
+        assert_eq!(report.symbols["_binary_smoke_elf_size"].value, 0xd8);
         assert!(report.jobheader_relocations.is_empty());
         let _ = std::fs::remove_file(path);
     }

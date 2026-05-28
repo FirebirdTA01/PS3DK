@@ -4,6 +4,11 @@ This document specifies the `--format=binary` artifact emitted by
 `spu-elf-to-ppu-obj`.  The format embeds a linked SPU ELF's materialized
 local-store image in a PPU relocatable object.
 
+This document covers `--format=binary` (flat LS image embed).  For
+`--format=elf` (hard-stripped ELF embed), see
+[spu-elf-embed.md](spu-elf-embed.md).  For `--format=jobbin2`, see
+[spurs-jobbin2-wrapper-abi.md](spurs-jobbin2-wrapper-abi.md).
+
 The output object contains:
 
 - `.spu_image`: the SPU local-store image, padded to the section alignment.
