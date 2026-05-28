@@ -93,7 +93,11 @@ pub fn inspect_ppu_obj(path: &Path) -> Result<PpuObjectReport> {
 
     let mut symbols = BTreeMap::new();
     for (idx, sym) in symbols_by_index.iter().enumerate() {
-        if sym.name.contains("_jobbin2") {
+        if sym.name.contains("_jobbin2")
+            || sym.name.ends_with("_bin_start")
+            || sym.name.ends_with("_bin_end")
+            || sym.name.ends_with("_bin_size")
+        {
             symbols.insert(
                 sym.name.clone(),
                 PpuSymbolReport {
@@ -129,7 +133,11 @@ pub fn inspect_ppu_obj(path: &Path) -> Result<PpuObjectReport> {
         if target_name != ".spu_image.jobheader" {
             continue;
         }
-        let entsize = if sh.sh_entsize == 0 { 24 } else { sh.sh_entsize };
+        let entsize = if sh.sh_entsize == 0 {
+            24
+        } else {
+            sh.sh_entsize
+        };
         let count = sh.sh_size / entsize;
         for i in 0..count {
             let off = sh.sh_offset as usize + (i * entsize) as usize;
@@ -226,7 +234,11 @@ fn parse_symbols(bytes: &[u8], sections: &[SectionHeader]) -> Result<Vec<SymbolE
             .map(|strtab| string_table(bytes, strtab))
             .transpose()?
             .unwrap_or_default();
-        let entsize = if sh.sh_entsize == 0 { 24 } else { sh.sh_entsize };
+        let entsize = if sh.sh_entsize == 0 {
+            24
+        } else {
+            sh.sh_entsize
+        };
         let count = sh.sh_size / entsize;
         for i in 0..count {
             let off = sh.sh_offset as usize + (i * entsize) as usize;
