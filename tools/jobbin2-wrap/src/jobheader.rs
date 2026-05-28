@@ -66,6 +66,19 @@ pub fn inspect_jobheader(path: &Path) -> Result<JobheaderReport> {
     })
 }
 
+pub fn build_jobheader(ls_size: u32) -> Result<Vec<u8>> {
+    if ls_size & 0xf != 0 {
+        bail!("LS image size 0x{ls_size:x} is not 16-byte aligned");
+    }
+    let size_binary = u16::try_from(ls_size >> 4)
+        .with_context(|| format!("LS image size 0x{ls_size:x} exceeds sizeBinary range"))?;
+    let mut bytes = vec![0u8; 0x30];
+    bytes[0x04..0x08].copy_from_slice(&0x100u32.to_be_bytes());
+    bytes[0x08..0x0a].copy_from_slice(&size_binary.to_be_bytes());
+    bytes[0x2c] = 4;
+    Ok(bytes)
+}
+
 fn be_u16(bytes: &[u8], off: usize) -> Result<u16> {
     let raw = bytes
         .get(off..off + 2)
@@ -78,4 +91,21 @@ fn be_u32(bytes: &[u8], off: usize) -> Result<u32> {
         .get(off..off + 4)
         .with_context(|| format!("reading u32 at 0x{off:x}"))?;
     Ok(u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_jobheader_writes_jq_template_fields() {
+        let header = build_jobheader(0x880).unwrap();
+        assert_eq!(header.len(), 0x30);
+        assert_eq!(&header[0x00..0x04], [0, 0, 0, 0]);
+        assert_eq!(&header[0x04..0x08], 0x100u32.to_be_bytes());
+        assert_eq!(&header[0x08..0x0a], 0x88u16.to_be_bytes());
+        assert_eq!(header[0x2c], 4);
+        assert!(header[0x0a..0x2c].iter().all(|byte| *byte == 0));
+        assert!(header[0x2d..0x30].iter().all(|byte| *byte == 0));
+    }
 }

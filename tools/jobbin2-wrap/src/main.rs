@@ -3,10 +3,12 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use jobbin2_wrap::encoder::{encode_spu_elf, write_sidecars};
 use jobbin2_wrap::jobbin2::inspect_jobbin2;
 use jobbin2_wrap::jobheader::inspect_jobheader;
+use jobbin2_wrap::patches::{expected_jq_patches, final_ls_image};
 use jobbin2_wrap::ppu_obj::inspect_ppu_obj;
 use jobbin2_wrap::report::{
     hex32, hex64, hex_bytes, Comparison, ComparisonStatus, InspectInputs, InspectReport,
@@ -42,6 +44,21 @@ enum Cmd {
         /// Optional extracted jobheader template.
         #[arg(long)]
         jobheader: Option<PathBuf>,
+    },
+    /// Wrap a linked SPU ELF into a PPU object carrying jobbin2 sections.
+    Wrap {
+        /// Linked SPU ELF input.
+        #[arg(long)]
+        spu_elf: PathBuf,
+        /// Output PPU relocatable object.
+        #[arg(long)]
+        output: PathBuf,
+        /// Symbol basename for _binary_<name>_jobbin2* symbols.
+        #[arg(long)]
+        symbol_base: String,
+        /// Also emit <output_basename>.jobbin2 and <output_basename>_jobheader.bin.
+        #[arg(long)]
+        emit_sidecars: bool,
     },
 }
 
@@ -103,6 +120,34 @@ fn run() -> Result<()> {
                 comparisons,
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Cmd::Wrap {
+            spu_elf,
+            output,
+            symbol_base,
+            emit_sidecars,
+        } => {
+            let artifacts = encode_spu_elf(&spu_elf, &symbol_base)
+                .with_context(|| format!("encoding {}", spu_elf.display()))?;
+            if let Some(parent) = output.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
+                }
+            }
+            std::fs::write(&output, &artifacts.ppu_object)
+                .with_context(|| format!("writing {}", output.display()))?;
+            if emit_sidecars {
+                let (jobbin2, jobheader) = write_sidecars(&output, &artifacts)?;
+                eprintln!(
+                    "wrote {}, {}, {}",
+                    output.display(),
+                    jobbin2.display(),
+                    jobheader.display()
+                );
+            } else {
+                eprintln!("wrote {}", output.display());
+            }
         }
     }
     Ok(())
@@ -290,18 +335,7 @@ fn find_symbol_value(ppu_obj: &jobbin2_wrap::ppu_obj::PpuObjectReport, suffix: &
 }
 
 fn apply_jq_runtime_metadata_patches(raw_ls_image: &[u8], e_flags: u32) -> Option<Vec<u8>> {
-    if e_flags != 2 {
-        return None;
-    }
-    let mut patched = raw_ls_image.to_vec();
-    for patch in expected_jq_patches(raw_ls_image.len() as u32) {
-        let start = patch.offset as usize;
-        let end = start + patch.output.len();
-        if end <= patched.len() {
-            patched[start..end].copy_from_slice(&patch.output);
-        }
-    }
-    Some(patched)
+    (e_flags == 2).then(|| final_ls_image(raw_ls_image, e_flags).ok()).flatten()
 }
 
 fn jq_runtime_metadata_patches(
@@ -339,35 +373,4 @@ fn jq_runtime_metadata_patches(
             }
         })
         .collect()
-}
-
-struct ExpectedPatch {
-    label: &'static str,
-    offset: u32,
-    output: Vec<u8>,
-}
-
-fn expected_jq_patches(ls_size: u32) -> Vec<ExpectedPatch> {
-    vec![
-        ExpectedPatch {
-            label: "JQ validator magic",
-            offset: 0x20,
-            output: b"bin2".to_vec(),
-        },
-        ExpectedPatch {
-            label: "JQ fill-tail clear",
-            offset: 0x2e,
-            output: vec![0x00, 0x00],
-        },
-        ExpectedPatch {
-            label: "JQ ls_size stamp",
-            offset: 0x50,
-            output: ls_size.to_be_bytes().to_vec(),
-        },
-        ExpectedPatch {
-            label: "JQ sentinel pair reorder",
-            offset: 0x54,
-            output: vec![0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff],
-        },
-    ]
 }
