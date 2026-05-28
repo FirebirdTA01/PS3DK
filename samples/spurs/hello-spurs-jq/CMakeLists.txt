@@ -23,12 +23,12 @@ target_link_libraries(hello-spurs-jq PRIVATE
     spurs_jq_stub spurs_stub c_stub sysmodule_stub sysutil rt lv2 m
 )
 
-# SPU side - JOBBIN_WRAP: SPURS JOB-QUEUE workloads need the
-# reference jobbin2 wrapper format (0x100-byte ELF prefix in front
-# of the LS image).  ps3_add_spu_image runs wine spu_elf-to-ppu_obj.exe
-# to produce a .ppu.o exposing _binary_<NAME>_jobbin2_jobheader and
-# the embedded blob.  PPU code copies the jobheader symbol directly
-# into the descriptor (no manual descriptor build).
+# SPU side - JOBBIN_WRAP: SPURS job-queue workloads need the
+# jobbin2 wrapper format (0x100-byte ELF prefix in front of the
+# LS image).  ps3_add_spu_image runs the jobbin2-wrap tool to emit a
+# .ppu.o with .spu_image, .spu_image.jobheader, and the
+# _binary_<NAME>_jobbin2_* symbols.  PPU code copies the jobheader
+# directly into the descriptor (no manual descriptor build).
 ps3_add_spu_image(hello-spurs-jq
     NAME hello_spurs_jq
     SOURCES spu/source/main.c
