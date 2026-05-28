@@ -5,3 +5,9 @@
 //! without copying reference bytes into the repository.
 
 pub const JOBBIN2_PREFIX_SIZE: usize = 0x100;
+
+pub mod jobbin2;
+pub mod jobheader;
+pub mod ppu_obj;
+pub mod report;
+pub mod spu_elf;
