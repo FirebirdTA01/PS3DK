@@ -1,18 +1,18 @@
 [package]
-name = "jobbin2-wrap"
+name = "spu-elf-to-ppu-obj"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Clean-room SPURS jobbin2 wrapper and inspection tool"
+description = "Clean-room SPU ELF to PPU object wrapper and inspection tool"
 
 [[bin]]
-name = "jobbin2-wrap"
+name = "spu-elf-to-ppu-obj"
 path = "src/main.rs"
 
 [lib]
-name = "jobbin2_wrap"
+name = "spu_elf_to_ppu_obj"
 path = "src/lib.rs"
 
 [dependencies]
