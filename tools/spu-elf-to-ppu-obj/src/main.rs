@@ -1,27 +1,27 @@
-//! jobbin2-wrap CLI.
+//! spu-elf-to-ppu-obj CLI.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use jobbin2_wrap::encoder::{encode_spu_elf, write_sidecars};
-use jobbin2_wrap::jobbin2::inspect_jobbin2;
-use jobbin2_wrap::jobheader::inspect_jobheader;
-use jobbin2_wrap::patches::{expected_jq_patches, final_ls_image};
-use jobbin2_wrap::ppu_obj::inspect_ppu_obj;
-use jobbin2_wrap::report::{
+use spu_elf_to_ppu_obj::encoder::{encode_spu_elf, write_sidecars};
+use spu_elf_to_ppu_obj::jobbin2::inspect_jobbin2;
+use spu_elf_to_ppu_obj::jobheader::inspect_jobheader;
+use spu_elf_to_ppu_obj::patches::{expected_jq_patches, final_ls_image};
+use spu_elf_to_ppu_obj::ppu_obj::inspect_ppu_obj;
+use spu_elf_to_ppu_obj::report::{
     hex32, hex64, hex_bytes, Comparison, ComparisonStatus, InspectInputs, InspectReport,
     MetadataPatchReport,
 };
-use jobbin2_wrap::spu_elf::inspect_spu_elf;
-use jobbin2_wrap::JOBBIN2_PREFIX_SIZE;
+use spu_elf_to_ppu_obj::spu_elf::inspect_spu_elf;
+use spu_elf_to_ppu_obj::JOBBIN2_PREFIX_SIZE;
 
 #[derive(Parser)]
 #[command(
-    name = "jobbin2-wrap",
+    name = "spu-elf-to-ppu-obj",
     version,
-    about = "Independent SPURS jobbin2 wrapper and inspection tool"
+    about = "Independent SPU ELF to PPU object wrapper and inspection tool"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -66,7 +66,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("jobbin2-wrap: {e:#}");
+            eprintln!("spu-elf-to-ppu-obj: {e:#}");
             ExitCode::from(2)
         }
     }
@@ -154,11 +154,11 @@ fn run() -> Result<()> {
 }
 
 fn compare(
-    spu: &jobbin2_wrap::spu_elf::SpuElfAnalysis,
+    spu: &spu_elf_to_ppu_obj::spu_elf::SpuElfAnalysis,
     patched_ls_image: Option<&[u8]>,
-    jobbin2: Option<&jobbin2_wrap::jobbin2::Jobbin2Analysis>,
-    jobheader: Option<&jobbin2_wrap::jobheader::JobheaderReport>,
-    ppu_obj: Option<&jobbin2_wrap::ppu_obj::PpuObjectReport>,
+    jobbin2: Option<&spu_elf_to_ppu_obj::jobbin2::Jobbin2Analysis>,
+    jobheader: Option<&spu_elf_to_ppu_obj::jobheader::JobheaderReport>,
+    ppu_obj: Option<&spu_elf_to_ppu_obj::ppu_obj::PpuObjectReport>,
 ) -> Vec<Comparison> {
     let mut checks = Vec::new();
     let start = spu
@@ -327,7 +327,7 @@ fn compare(
     checks
 }
 
-fn find_symbol_value(ppu_obj: &jobbin2_wrap::ppu_obj::PpuObjectReport, suffix: &str) -> Option<u64> {
+fn find_symbol_value(ppu_obj: &spu_elf_to_ppu_obj::ppu_obj::PpuObjectReport, suffix: &str) -> Option<u64> {
     ppu_obj
         .symbols
         .iter()
@@ -339,8 +339,8 @@ fn apply_jq_runtime_metadata_patches(raw_ls_image: &[u8], e_flags: u32) -> Optio
 }
 
 fn jq_runtime_metadata_patches(
-    spu: &jobbin2_wrap::spu_elf::SpuElfAnalysis,
-    jobbin2: Option<&jobbin2_wrap::jobbin2::Jobbin2Analysis>,
+    spu: &spu_elf_to_ppu_obj::spu_elf::SpuElfAnalysis,
+    jobbin2: Option<&spu_elf_to_ppu_obj::jobbin2::Jobbin2Analysis>,
 ) -> Vec<MetadataPatchReport> {
     if spu.report.e_flags != 2 {
         return Vec::new();

@@ -4,7 +4,7 @@ members = [
     "nidgen",
     "coverage-report",
     "abi-verify",
-    "jobbin2-wrap",
+    "spu-elf-to-ppu-obj",
 ]
 
 [workspace.package]

@@ -312,28 +312,28 @@ if(NOT _PS3_SPU_TOOLS_PROBED)
         NAMES "spu-elf-objcopy${_ps3_self_exe}" "spu-elf-objcopy"
         PATHS "${PS3DEV}/spu/bin"
         NO_DEFAULT_PATH)
-    find_program(PS3_TOOL_jobbin2_wrap
-        NAMES "jobbin2-wrap${_ps3_self_exe}" "jobbin2-wrap"
+    find_program(PS3_TOOL_spu_elf_to_ppu_obj
+        NAMES "spu-elf-to-ppu-obj${_ps3_self_exe}" "spu-elf-to-ppu-obj"
         PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
               "${CMAKE_CURRENT_LIST_DIR}/../tools/target/release"
               "${CMAKE_CURRENT_LIST_DIR}/../tools/target/debug"
         NO_DEFAULT_PATH)
-    if(NOT PS3_TOOL_jobbin2_wrap)
-        find_program(PS3_TOOL_jobbin2_wrap
-            NAMES "jobbin2-wrap${_ps3_self_exe}" "jobbin2-wrap")
+    if(NOT PS3_TOOL_spu_elf_to_ppu_obj)
+        find_program(PS3_TOOL_spu_elf_to_ppu_obj
+            NAMES "spu-elf-to-ppu-obj${_ps3_self_exe}" "spu-elf-to-ppu-obj")
     endif()
     # Optional reference-helper path for black-box diff/debug only.
-    # Normal JOBBIN_WRAP builds use the independent jobbin2-wrap tool.
-    set(_ps3_jobbin2_packager "$ENV{PS3_SPU_ELF_TO_PPU_OBJ}")
-    if(_ps3_jobbin2_packager)
-        set(PS3_TOOL_spu_elf_to_ppu_obj "${_ps3_jobbin2_packager}" CACHE FILEPATH
+    # Normal JOBBIN_WRAP builds use the independent spu-elf-to-ppu-obj tool.
+    set(_ps3_ref_spu_elf_to_ppu_obj "$ENV{PS3_SPU_ELF_TO_PPU_OBJ}")
+    if(_ps3_ref_spu_elf_to_ppu_obj)
+        set(PS3_TOOL_ref_spu_elf_to_ppu_obj "${_ps3_ref_spu_elf_to_ppu_obj}" CACHE FILEPATH
             "Optional reference SDK spu_elf-to-ppu_obj.exe for JOBBIN_WRAP diff/debug")
     endif()
     set(_ps3_jobbin2_use_reference_helper FALSE)
-    if(PS3_TOOL_spu_elf_to_ppu_obj)
+    if(PS3_TOOL_ref_spu_elf_to_ppu_obj)
         set(_ps3_jobbin2_use_reference_helper TRUE)
     endif()
-    if(NOT CMAKE_HOST_WIN32 AND PS3_TOOL_spu_elf_to_ppu_obj)
+    if(NOT CMAKE_HOST_WIN32 AND PS3_TOOL_ref_spu_elf_to_ppu_obj)
         find_program(PS3_TOOL_wine NAMES "wine")
     endif()
     set(_ps3_jobbin2_wine_path "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}")
@@ -456,12 +456,12 @@ function(ps3_add_spu_image target)
     # JOBBIN_WRAP: SPURS JOB-QUEUE workloads need jobbin2 wrapper bytes:
     # a 0x100-byte ELF32/SPU prefix, a patched LS image at blob+0x100,
     # and a byte-correct CellSpursJobHeader template.  The independent
-    # jobbin2-wrap host tool emits a .ppu.o with .spu_image and
+    # spu-elf-to-ppu-obj host tool emits a .ppu.o with .spu_image and
     # .spu_image.jobheader plus transition sidecars that the current
     # bin2s embedding path consumes.
     if(_PSI_JOBBIN_WRAP)
-        if(NOT PS3_TOOL_jobbin2_wrap AND NOT _ps3_jobbin2_use_reference_helper)
-            message(FATAL_ERROR "ps3_add_spu_image: JOBBIN_WRAP needs jobbin2-wrap (install it under ${PS3DEV}/bin, ${PS3DK}/bin, or put it on PATH)")
+        if(NOT PS3_TOOL_spu_elf_to_ppu_obj AND NOT _ps3_jobbin2_use_reference_helper)
+            message(FATAL_ERROR "ps3_add_spu_image: JOBBIN_WRAP needs spu-elf-to-ppu-obj (install it under ${PS3DEV}/bin, ${PS3DK}/bin, or put it on PATH)")
         endif()
         if(NOT CMAKE_HOST_WIN32 AND _ps3_jobbin2_use_reference_helper AND NOT PS3_TOOL_wine)
             message(FATAL_ERROR "ps3_add_spu_image: reference-helper JOBBIN_WRAP requires wine on PATH")
@@ -484,10 +484,10 @@ function(ps3_add_spu_image target)
         set(_spu_jobbin_blob    "${_spu_jobbin_dir}/${_PSI_NAME}.jobbin2")
         set(_spu_jobbin_bin     "${_spu_jobbin_dir}/${_PSI_NAME}.bin")
         set(_spu_jobheader_bin  "${_spu_jobbin_dir}/${_PSI_NAME}_jobheader.bin")
-        if(NOT _ps3_jobbin2_use_reference_helper AND PS3_TOOL_jobbin2_wrap)
+        if(NOT _ps3_jobbin2_use_reference_helper AND PS3_TOOL_spu_elf_to_ppu_obj)
             add_custom_command(
                 OUTPUT "${_spu_jobbin_ppu_o}" "${_spu_jobbin_blob}" "${_spu_jobbin_bin}" "${_spu_jobheader_bin}"
-                COMMAND "${PS3_TOOL_jobbin2_wrap}"
+                COMMAND "${PS3_TOOL_spu_elf_to_ppu_obj}"
                         wrap
                         --spu-elf "${_spu_elf}"
                         --output "${_spu_jobbin_ppu_o}"
@@ -495,13 +495,13 @@ function(ps3_add_spu_image target)
                         --emit-sidecars
                 COMMAND ${CMAKE_COMMAND} -E copy "${_spu_jobbin_blob}" "${_spu_jobbin_bin}"
                 DEPENDS "${_spu_elf}"
-                COMMENT "ps3-spu: jobbin2-wrap ${_PSI_NAME}.jobbin2"
+                COMMENT "ps3-spu: spu-elf-to-ppu-obj ${_PSI_NAME}.jobbin2"
                 VERBATIM)
         elseif(CMAKE_HOST_WIN32)
             add_custom_command(
                 OUTPUT "${_spu_jobbin_ppu_o}" "${_spu_jobbin_blob}" "${_spu_jobbin_bin}" "${_spu_jobheader_bin}"
                 COMMAND ${CMAKE_COMMAND} -E copy "${_spu_elf}" "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
-                COMMAND "${PS3_TOOL_spu_elf_to_ppu_obj}"
+                COMMAND "${PS3_TOOL_ref_spu_elf_to_ppu_obj}"
                         --format=jobbin2
                         --objcopy-style-symbol
                         "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
@@ -511,7 +511,7 @@ function(ps3_add_spu_image target)
                         --only-section=.spu_image.jobheader
                         "${_spu_jobbin_ppu_o}" "${_spu_jobheader_bin}"
                 DEPENDS "${_spu_elf}"
-                COMMENT "ps3-spu: jobbin2-wrap ${_PSI_NAME}.jobbin2 (reference helper)"
+                COMMENT "ps3-spu: spu-elf-to-ppu-obj ${_PSI_NAME}.jobbin2 (reference helper)"
                 VERBATIM)
         else()
             add_custom_command(
@@ -520,7 +520,7 @@ function(ps3_add_spu_image target)
                 COMMAND ${CMAKE_COMMAND} -E env
                         "WINEPATH=Z:${PS3_TOOL_ppu_lv2_gcc_dir}"
                         "${PS3_TOOL_wine}"
-                        "${PS3_TOOL_spu_elf_to_ppu_obj}"
+                        "${PS3_TOOL_ref_spu_elf_to_ppu_obj}"
                         --format=jobbin2
                         --objcopy-style-symbol
                         "${_spu_jobbin_dir}/${_PSI_NAME}.elf"
@@ -530,7 +530,7 @@ function(ps3_add_spu_image target)
                         --only-section=.spu_image.jobheader
                         "${_spu_jobbin_ppu_o}" "${_spu_jobheader_bin}"
                 DEPENDS "${_spu_elf}"
-                COMMENT "ps3-spu: jobbin2-wrap ${_PSI_NAME}.jobbin2 (wine reference helper)"
+                COMMENT "ps3-spu: spu-elf-to-ppu-obj ${_PSI_NAME}.jobbin2 (wine reference helper)"
                 VERBATIM)
         endif()
         ps3_bin2s(${target} "${_spu_jobbin_bin}")

@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn writer_emits_ppc64_relocation_and_symbols() {
         let dir = std::env::temp_dir();
-        let path = dir.join("jobbin2_wrap_writer_test.ppu.o");
+        let path = dir.join("spu_elf_to_ppu_obj_writer_test.ppu.o");
         let object = build_ppu_object("smoke", &[0u8; 0x180], 0x180, &[0u8; 0x30]).unwrap();
         std::fs::write(&path, object).unwrap();
         let report = inspect_ppu_obj(&path).unwrap();
