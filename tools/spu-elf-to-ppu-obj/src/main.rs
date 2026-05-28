@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use spu_elf_to_ppu_obj::elf_embed::hard_stripped_spu_elf;
 use spu_elf_to_ppu_obj::encoder::{encode_spu_elf, write_sidecars, EmbedFormat};
 use spu_elf_to_ppu_obj::jobbin2::inspect_jobbin2;
 use spu_elf_to_ppu_obj::jobheader::inspect_jobheader;
@@ -69,6 +70,7 @@ enum Cmd {
 enum CliEmbedFormat {
     Jobbin2,
     Binary,
+    Elf,
 }
 
 impl From<CliEmbedFormat> for EmbedFormat {
@@ -76,6 +78,7 @@ impl From<CliEmbedFormat> for EmbedFormat {
         match value {
             CliEmbedFormat::Jobbin2 => EmbedFormat::Jobbin2,
             CliEmbedFormat::Binary => EmbedFormat::Binary,
+            CliEmbedFormat::Elf => EmbedFormat::Elf,
         }
     }
 }
@@ -116,9 +119,11 @@ fn run() -> Result<()> {
             let patch_reports = jq_runtime_metadata_patches(&spu, jobbin2_report.as_ref());
             let patched_ls_image =
                 apply_jq_runtime_metadata_patches(&spu.ls_image, spu.report.e_flags);
+            let hard_stripped_elf = hard_stripped_spu_elf(&spu_elf).ok();
             let comparisons = compare(
                 &spu,
                 patched_ls_image.as_deref(),
+                hard_stripped_elf.as_deref(),
                 jobbin2_report.as_ref(),
                 jobheader_report.as_ref(),
                 ppu_report.as_ref(),
@@ -173,6 +178,7 @@ fn run() -> Result<()> {
 fn compare(
     spu: &spu_elf_to_ppu_obj::spu_elf::SpuElfAnalysis,
     patched_ls_image: Option<&[u8]>,
+    hard_stripped_elf: Option<&[u8]>,
     jobbin2: Option<&spu_elf_to_ppu_obj::jobbin2::Jobbin2Analysis>,
     jobheader: Option<&spu_elf_to_ppu_obj::jobheader::JobheaderReport>,
     ppu_obj: Option<&spu_elf_to_ppu_obj::ppu_obj::PpuObjectReport>,
@@ -342,7 +348,7 @@ fn compare(
             ));
         }
 
-        if jobbin2.is_none() {
+        if jobbin2.is_none() && find_symbol_value(ppu_obj, "_bin_size").is_some() {
             if let Some(section) = ppu_obj.sections.get(".spu_image") {
                 let actual = section.size;
                 let expected_min = spu.ls_image.len() as u64;
@@ -369,6 +375,49 @@ fn compare(
                 )),
                 None => checks.push(Comparison::fail(
                     "ppu_obj.symbol('_binary_<name>_bin_size') exists",
+                    "present",
+                    "missing",
+                )),
+            }
+        }
+        if jobbin2.is_none() && find_symbol_value(ppu_obj, "_elf_size").is_some() {
+            if let Some(section) = ppu_obj.sections.get(".spu_image") {
+                let actual = section.size;
+                let expected_min = hard_stripped_elf.map(|bytes| bytes.len() as u64);
+                if let Some(expected_min) = expected_min {
+                    let status = actual >= expected_min && actual % 0x80 == 0;
+                    checks.push(if status {
+                        Comparison::pass(
+                            "ppu_obj.section('.spu_image').size covers hard-stripped ELF with alignment padding",
+                            format!(">= {} and aligned 0x80", hex64(expected_min)),
+                            hex64(actual),
+                        )
+                    } else {
+                        Comparison::fail(
+                            "ppu_obj.section('.spu_image').size covers hard-stripped ELF with alignment padding",
+                            format!(">= {} and aligned 0x80", hex64(expected_min)),
+                            hex64(actual),
+                        )
+                    });
+                } else {
+                    checks.push(Comparison::skip(
+                        "ppu_obj.section('.spu_image').size covers hard-stripped ELF with alignment padding",
+                        "SPU ELF cannot be transformed as --format=elf",
+                    ));
+                }
+            }
+            match (find_symbol_value(ppu_obj, "_elf_size"), hard_stripped_elf) {
+                (Some(value), Some(bytes)) => checks.push(Comparison::eq(
+                    "ppu_obj.symbol('_binary_<name>_elf_size').value == hard_stripped_elf_size",
+                    hex64(bytes.len() as u64),
+                    hex64(value),
+                )),
+                (Some(_), None) => checks.push(Comparison::skip(
+                    "ppu_obj.symbol('_binary_<name>_elf_size').value == hard_stripped_elf_size",
+                    "SPU ELF cannot be transformed as --format=elf",
+                )),
+                (None, _) => checks.push(Comparison::fail(
+                    "ppu_obj.symbol('_binary_<name>_elf_size') exists",
                     "present",
                     "missing",
                 )),

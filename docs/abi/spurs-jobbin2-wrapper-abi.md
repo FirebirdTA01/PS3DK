@@ -3,6 +3,11 @@
 This document specifies the jobbin2 artifact emitted for SPURS job-queue SPU
 workloads.  The artifact is stored in a PPU relocatable object as two sections:
 
+This document covers `--format=jobbin2`.  For `--format=elf` (hard-stripped
+ELF embed), see [spu-elf-embed.md](spu-elf-embed.md).  For `--format=binary`
+(flat LS image embed), see
+[spu-elf-binary-embed.md](spu-elf-binary-embed.md).
+
 - `.spu_image`: a jobbin2 wrapper blob.  The first `0x100` bytes are an
   ELF32/SPU wrapper prefix.  The SPU local-store image starts at blob offset
   `0x100`.
