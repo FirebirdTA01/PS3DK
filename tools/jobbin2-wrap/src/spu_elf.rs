@@ -56,6 +56,7 @@ pub struct SpuElfChecks {
 pub struct SpuElfAnalysis {
     pub report: SpuElfReport,
     pub ls_image: Vec<u8>,
+    pub note_data: Vec<u8>,
 }
 
 pub fn inspect_spu_elf(path: &Path) -> Result<SpuElfAnalysis> {
@@ -122,6 +123,15 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
         }
         ls_image[dst..dst + len].copy_from_slice(&bytes[src..src + len]);
     }
+    let mut note_data = Vec::new();
+    for ph in program_headers.iter().filter(|ph| ph.p_type == PT_NOTE) {
+        let src = ph.p_offset as usize;
+        let len = ph.p_filesz as usize;
+        if src + len > bytes.len() {
+            bail!("PT_NOTE {} extends past input", ph.index);
+        }
+        note_data.extend_from_slice(&bytes[src..src + len]);
+    }
 
     let object = object::File::parse(bytes).context("parsing SPU ELF with object crate")?;
     let mut symbols = BTreeMap::new();
@@ -187,6 +197,7 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
             checks,
         },
         ls_image,
+        note_data,
     })
 }
 
