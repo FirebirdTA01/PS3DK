@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
-use spu_elf_to_ppu_obj::encoder::{encode_spu_elf, write_sidecars};
+use clap::{Parser, Subcommand, ValueEnum};
+use spu_elf_to_ppu_obj::encoder::{encode_spu_elf, write_sidecars, EmbedFormat};
 use spu_elf_to_ppu_obj::jobbin2::inspect_jobbin2;
 use spu_elf_to_ppu_obj::jobheader::inspect_jobheader;
 use spu_elf_to_ppu_obj::patches::{expected_jq_patches, final_ls_image};
@@ -45,21 +45,39 @@ enum Cmd {
         #[arg(long)]
         jobheader: Option<PathBuf>,
     },
-    /// Wrap a linked SPU ELF into a PPU object carrying jobbin2 sections.
+    /// Wrap a linked SPU ELF into a PPU object.
     Wrap {
+        /// Embed format to emit.
+        #[arg(long, value_enum, default_value_t = CliEmbedFormat::Jobbin2)]
+        format: CliEmbedFormat,
         /// Linked SPU ELF input.
         #[arg(long)]
         spu_elf: PathBuf,
         /// Output PPU relocatable object.
         #[arg(long)]
         output: PathBuf,
-        /// Symbol basename for _binary_<name>_jobbin2* symbols.
+        /// Symbol basename for _binary_<name>_* symbols.
         #[arg(long)]
         symbol_base: String,
-        /// Also emit <output_basename>.jobbin2 and <output_basename>_jobheader.bin.
+        /// Also emit transition/debug sidecars next to the output object.
         #[arg(long)]
         emit_sidecars: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliEmbedFormat {
+    Jobbin2,
+    Binary,
+}
+
+impl From<CliEmbedFormat> for EmbedFormat {
+    fn from(value: CliEmbedFormat) -> Self {
+        match value {
+            CliEmbedFormat::Jobbin2 => EmbedFormat::Jobbin2,
+            CliEmbedFormat::Binary => EmbedFormat::Binary,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -96,7 +114,8 @@ fn run() -> Result<()> {
                 .transpose()?;
 
             let patch_reports = jq_runtime_metadata_patches(&spu, jobbin2_report.as_ref());
-            let patched_ls_image = apply_jq_runtime_metadata_patches(&spu.ls_image, spu.report.e_flags);
+            let patched_ls_image =
+                apply_jq_runtime_metadata_patches(&spu.ls_image, spu.report.e_flags);
             let comparisons = compare(
                 &spu,
                 patched_ls_image.as_deref(),
@@ -122,12 +141,13 @@ fn run() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Cmd::Wrap {
+            format,
             spu_elf,
             output,
             symbol_base,
             emit_sidecars,
         } => {
-            let artifacts = encode_spu_elf(&spu_elf, &symbol_base)
+            let artifacts = encode_spu_elf(&spu_elf, &symbol_base, format.into())
                 .with_context(|| format!("encoding {}", spu_elf.display()))?;
             if let Some(parent) = output.parent() {
                 if !parent.as_os_str().is_empty() {
@@ -138,13 +158,10 @@ fn run() -> Result<()> {
             std::fs::write(&output, &artifacts.ppu_object)
                 .with_context(|| format!("writing {}", output.display()))?;
             if emit_sidecars {
-                let (jobbin2, jobheader) = write_sidecars(&output, &artifacts)?;
-                eprintln!(
-                    "wrote {}, {}, {}",
-                    output.display(),
-                    jobbin2.display(),
-                    jobheader.display()
-                );
+                let sidecars = write_sidecars(&output, &artifacts)?;
+                let mut paths = vec![output.display().to_string()];
+                paths.extend(sidecars.iter().map(|path| path.display().to_string()));
+                eprintln!("wrote {}", paths.join(", "));
             } else {
                 eprintln!("wrote {}", output.display());
             }
@@ -283,39 +300,79 @@ fn compare(
         }
     } else {
         checks.push(Comparison::skip(
-            "PPU object/blob comparisons",
+            "PPU object/jobbin2 comparisons",
             "--jobbin2 or --ppu-obj was not supplied",
         ));
     }
 
     if let Some(ppu_obj) = ppu_obj {
-        let relocation = ppu_obj
-            .jobheader_relocations
-            .iter()
-            .find(|rel| rel.section == ".spu_image.jobheader" && rel.offset == 0x04);
-        if let Some(rel) = relocation {
-            let ok = rel.r_type_name == "R_PPC64_ADDR32"
-                && rel.symbol.contains("_jobbin2_start")
-                && rel.addend == 0x100;
-            checks.push(if ok {
-                Comparison::pass(
-                    "ppu_obj.relocation at .spu_image.jobheader+0x04",
-                    "R_PPC64_ADDR32 _binary_<name>_jobbin2_start + 0x100",
-                    format!("{} {} + {:#x}", rel.r_type_name, rel.symbol, rel.addend),
-                )
+        if jobheader.is_some() || ppu_obj.sections.contains_key(".spu_image.jobheader") {
+            let relocation = ppu_obj
+                .jobheader_relocations
+                .iter()
+                .find(|rel| rel.section == ".spu_image.jobheader" && rel.offset == 0x04);
+            if let Some(rel) = relocation {
+                let ok = rel.r_type_name == "R_PPC64_ADDR32"
+                    && rel.symbol.contains("_jobbin2_start")
+                    && rel.addend == 0x100;
+                checks.push(if ok {
+                    Comparison::pass(
+                        "ppu_obj.relocation at .spu_image.jobheader+0x04",
+                        "R_PPC64_ADDR32 _binary_<name>_jobbin2_start + 0x100",
+                        format!("{} {} + {:#x}", rel.r_type_name, rel.symbol, rel.addend),
+                    )
+                } else {
+                    Comparison::fail(
+                        "ppu_obj.relocation at .spu_image.jobheader+0x04",
+                        "R_PPC64_ADDR32 _binary_<name>_jobbin2_start + 0x100",
+                        format!("{} {} + {:#x}", rel.r_type_name, rel.symbol, rel.addend),
+                    )
+                });
             } else {
-                Comparison::fail(
+                checks.push(Comparison::fail(
                     "ppu_obj.relocation at .spu_image.jobheader+0x04",
-                    "R_PPC64_ADDR32 _binary_<name>_jobbin2_start + 0x100",
-                    format!("{} {} + {:#x}", rel.r_type_name, rel.symbol, rel.addend),
-                )
-            });
+                    "present",
+                    "missing",
+                ));
+            }
         } else {
-            checks.push(Comparison::fail(
+            checks.push(Comparison::skip(
                 "ppu_obj.relocation at .spu_image.jobheader+0x04",
-                "present",
-                "missing",
+                "PPU object has no jobheader section",
             ));
+        }
+
+        if jobbin2.is_none() {
+            if let Some(section) = ppu_obj.sections.get(".spu_image") {
+                let actual = section.size;
+                let expected_min = spu.ls_image.len() as u64;
+                let status = actual >= expected_min && actual % 0x80 == 0;
+                checks.push(if status {
+                    Comparison::pass(
+                        "ppu_obj.section('.spu_image').size covers binary LS image with alignment padding",
+                        format!(">= {} and aligned 0x80", hex64(expected_min)),
+                        hex64(actual),
+                    )
+                } else {
+                    Comparison::fail(
+                        "ppu_obj.section('.spu_image').size covers binary LS image with alignment padding",
+                        format!(">= {} and aligned 0x80", hex64(expected_min)),
+                        hex64(actual),
+                    )
+                });
+            }
+            match find_symbol_value(ppu_obj, "_bin_size") {
+                Some(value) => checks.push(Comparison::eq(
+                    "ppu_obj.symbol('_binary_<name>_bin_size').value == ls_size",
+                    hex64(spu.ls_image.len() as u64),
+                    hex64(value),
+                )),
+                None => checks.push(Comparison::fail(
+                    "ppu_obj.symbol('_binary_<name>_bin_size') exists",
+                    "present",
+                    "missing",
+                )),
+            }
         }
     } else {
         checks.push(Comparison::skip(
@@ -327,7 +384,10 @@ fn compare(
     checks
 }
 
-fn find_symbol_value(ppu_obj: &spu_elf_to_ppu_obj::ppu_obj::PpuObjectReport, suffix: &str) -> Option<u64> {
+fn find_symbol_value(
+    ppu_obj: &spu_elf_to_ppu_obj::ppu_obj::PpuObjectReport,
+    suffix: &str,
+) -> Option<u64> {
     ppu_obj
         .symbols
         .iter()
@@ -335,7 +395,9 @@ fn find_symbol_value(ppu_obj: &spu_elf_to_ppu_obj::ppu_obj::PpuObjectReport, suf
 }
 
 fn apply_jq_runtime_metadata_patches(raw_ls_image: &[u8], e_flags: u32) -> Option<Vec<u8>> {
-    (e_flags == 2).then(|| final_ls_image(raw_ls_image, e_flags).ok()).flatten()
+    (e_flags == 2)
+        .then(|| final_ls_image(raw_ls_image, e_flags).ok())
+        .flatten()
 }
 
 fn jq_runtime_metadata_patches(
