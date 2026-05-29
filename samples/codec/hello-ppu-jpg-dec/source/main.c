@@ -12,7 +12,7 @@
  *   2. cellSysmoduleLoadModule(CELL_SYSMODULE_JPGDEC).
  *   3. cellJpgDec{Create, Open (buffer), ReadHeader, SetParameter,
  *      DecodeData} on an embedded test.jpg.
- *   4. Blit decoded ARGB into both display buffers, flip until the
+ *   4. Blit decoded RGBA into both display buffers, flip until the
  *      user presses START.
  */
 
@@ -145,14 +145,14 @@ static gcmContextData *init_screen(void *host_addr, u32 size, u16 *out_w, u16 *o
 }
 
 /* ------------------------------------------------------------------ *
- * cellJpgDec outputs ARGB8888 with outputComponents=4 when we ask for
- * CELL_JPG_ARGB - alpha byte first, then R, G, B.  The XRGB framebuffer
- * uses alpha-ignored 0xff top byte, so reading output bytes as
- * [a, r, g, b] and emitting (0xff<<24)|(r<<16)|(g<<8)|b works.
+ * cellJpgDec outputs RGBA8888 with outputComponents=4 when we ask for
+ * CELL_JPG_RGBA.  The XRGB framebuffer ignores the top byte, so this
+ * sample writes an explicit opaque 0xff there rather than depending on
+ * the JPEG decoder's alpha fill.
  * ------------------------------------------------------------------ */
 
-static void blit_argb_to_xrgb(display_buffer *dst,
-                              const uint8_t *argb, size_t src_stride,
+static void blit_rgba_to_xrgb(display_buffer *dst,
+                              const uint8_t *rgba, size_t src_stride,
                               uint32_t img_w, uint32_t img_h)
 {
     for (int y = 0; y < dst->height; y++)
@@ -165,12 +165,12 @@ static void blit_argb_to_xrgb(display_buffer *dst,
     uint32_t off_y  = ((uint32_t)dst->height - draw_h) / 2;
 
     for (uint32_t y = 0; y < draw_h; y++) {
-        const uint8_t *src_row = argb + y * src_stride;
+        const uint8_t *src_row = rgba + y * src_stride;
         uint32_t      *dst_row = dst->ptr + (off_y + y) * dst->width + off_x;
         for (uint32_t x = 0; x < draw_w; x++) {
-            uint8_t r = src_row[x * 4 + 1];
-            uint8_t g = src_row[x * 4 + 2];
-            uint8_t b = src_row[x * 4 + 3];
+            uint8_t r = src_row[x * 4 + 0];
+            uint8_t g = src_row[x * 4 + 1];
+            uint8_t b = src_row[x * 4 + 2];
             dst_row[x] = ((uint32_t)0xff << 24)
                        | ((uint32_t)r    << 16)
                        | ((uint32_t)g    <<  8)
@@ -179,14 +179,50 @@ static void blit_argb_to_xrgb(display_buffer *dst,
     }
 }
 
+static uint32_t compute_downscale(uint32_t img_w, uint32_t img_h,
+                                  uint32_t dst_w, uint32_t dst_h)
+{
+    if (img_w <= dst_w && img_h <= dst_h)
+        return 1;
+    if (img_w <= dst_w * 2u && img_h <= dst_h * 2u)
+        return 2;
+    if (img_w <= dst_w * 4u && img_h <= dst_h * 4u)
+        return 4;
+    return 8;
+}
+
+static const char *jpgdec_error_name(int rc)
+{
+    switch (rc) {
+    case CELL_JPGDEC_ERROR_HEADER:        return "CELL_JPGDEC_ERROR_HEADER";
+    case CELL_JPGDEC_ERROR_STREAM_FORMAT: return "CELL_JPGDEC_ERROR_STREAM_FORMAT";
+    case CELL_JPGDEC_ERROR_ARG:           return "CELL_JPGDEC_ERROR_ARG";
+    case CELL_JPGDEC_ERROR_SEQ:           return "CELL_JPGDEC_ERROR_SEQ";
+    case CELL_JPGDEC_ERROR_BUSY:          return "CELL_JPGDEC_ERROR_BUSY";
+    case CELL_JPGDEC_ERROR_FATAL:         return "CELL_JPGDEC_ERROR_FATAL";
+    case CELL_JPGDEC_ERROR_OPEN_FILE:     return "CELL_JPGDEC_ERROR_OPEN_FILE";
+    case CELL_JPGDEC_ERROR_SPU_UNSUPPORT: return "CELL_JPGDEC_ERROR_SPU_UNSUPPORT";
+    case CELL_JPGDEC_ERROR_CB_PARAM:      return "CELL_JPGDEC_ERROR_CB_PARAM";
+    default:                              return "unknown";
+    }
+}
+
+static void log_jpgdec_error(const char *where, int rc)
+{
+    printf("  %s: 0x%08x (%s)\n", where, (unsigned)rc,
+           jpgdec_error_name(rc));
+}
+
 /* ------------------------------------------------------------------ *
- * JPEG decode. Returns malloc'd ARGB buffer + dims on success.
+ * JPEG decode. Returns malloc'd RGBA buffer + dims on success.
  * ------------------------------------------------------------------ */
 
-static uint8_t *decode_jpg(uint32_t *out_w, uint32_t *out_h, size_t *out_stride)
+static uint8_t *decode_jpg(uint32_t fb_w, uint32_t fb_h,
+                           uint32_t *out_w, uint32_t *out_h,
+                           size_t *out_stride)
 {
     int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_JPGDEC);
-    if (rc != 0) { printf("  SYSMODULE_JPGDEC load: 0x%08x\n", (unsigned)rc); return NULL; }
+    if (rc != 0) { log_jpgdec_error("SYSMODULE_JPGDEC load", rc); return NULL; }
 
     CellJpgDecThreadInParam tin = {
         .spuThreadEnable   = CELL_JPGDEC_SPU_THREAD_DISABLE,
@@ -201,7 +237,7 @@ static uint8_t *decode_jpg(uint32_t *out_w, uint32_t *out_h, size_t *out_stride)
     CellJpgDecMainHandle     main_h = 0;
 
     rc = cellJpgDecCreate(&main_h, &tin, &tout);
-    if (rc != 0) { printf("  cellJpgDecCreate: 0x%08x\n", (unsigned)rc); goto unload; }
+    if (rc != 0) { log_jpgdec_error("cellJpgDecCreate", rc); goto unload; }
 
     CellJpgDecSrc src = {
         .srcSelect       = CELL_JPGDEC_BUFFER,
@@ -212,11 +248,11 @@ static uint8_t *decode_jpg(uint32_t *out_w, uint32_t *out_h, size_t *out_stride)
     CellJpgDecOpnInfo   opn  = {0};
     CellJpgDecSubHandle sub_h = 0;
     rc = cellJpgDecOpen(main_h, &sub_h, &src, &opn);
-    if (rc != 0) { printf("  cellJpgDecOpen: 0x%08x\n", (unsigned)rc); goto destroy; }
+    if (rc != 0) { log_jpgdec_error("cellJpgDecOpen", rc); goto destroy; }
 
     CellJpgDecInfo hdr = {0};
     rc = cellJpgDecReadHeader(main_h, sub_h, &hdr);
-    if (rc != 0) { printf("  ReadHeader: 0x%08x\n", (unsigned)rc); goto close; }
+    if (rc != 0) { log_jpgdec_error("ReadHeader", rc); goto close; }
     printf("  header %ux%u components=%u\n",
            (unsigned)hdr.imageWidth, (unsigned)hdr.imageHeight,
            (unsigned)hdr.numComponents);
@@ -225,25 +261,31 @@ static uint8_t *decode_jpg(uint32_t *out_w, uint32_t *out_h, size_t *out_stride)
         .commandPtr       = NULL,
         .method           = CELL_JPGDEC_FAST,
         .outputMode       = CELL_JPGDEC_TOP_TO_BOTTOM,
-        .outputColorSpace = CELL_JPG_ARGB,
-        .downScale        = 1,
+        .outputColorSpace = CELL_JPG_RGBA,
+        .downScale        = compute_downscale(hdr.imageWidth, hdr.imageHeight,
+                                              fb_w, fb_h),
         .outputColorAlpha = 0xff,
     };
     CellJpgDecOutParam op = {0};
     rc = cellJpgDecSetParameter(main_h, sub_h, &ip, &op);
-    if (rc != 0) { printf("  SetParameter: 0x%08x\n", (unsigned)rc); goto close; }
+    if (rc != 0) { log_jpgdec_error("SetParameter", rc); goto close; }
+    printf("  output %ux%u stride=%llu downScale=%u\n",
+           (unsigned)op.outputWidth, (unsigned)op.outputHeight,
+           (unsigned long long)op.outputWidthByte, (unsigned)ip.downScale);
 
     size_t stride = (size_t)op.outputWidthByte;
     size_t bytes  = stride * op.outputHeight;
-    uint8_t *argb = (uint8_t *)memalign(16, bytes);
-    if (!argb) { printf("  argb malloc failed (%zu)\n", bytes); goto close; }
+    uint8_t *rgba = (uint8_t *)memalign(16, bytes);
+    if (!rgba) { printf("  rgba malloc failed (%zu)\n", bytes); goto close; }
 
     CellJpgDecDataCtrlParam dcp  = { .outputBytesPerLine = stride };
     CellJpgDecDataOutInfo   dout = {0};
-    rc = cellJpgDecDecodeData(main_h, sub_h, argb, &dcp, &dout);
+    rc = cellJpgDecDecodeData(main_h, sub_h, rgba, &dcp, &dout);
     if (rc != 0 || dout.status != CELL_JPGDEC_DEC_STATUS_FINISH) {
-        printf("  DecodeData: 0x%08x status=%u\n", (unsigned)rc, (unsigned)dout.status);
-        free(argb);
+        if (rc != 0)
+            log_jpgdec_error("DecodeData", rc);
+        printf("  DecodeData status=%u\n", (unsigned)dout.status);
+        free(rgba);
         goto close;
     }
 
@@ -254,7 +296,7 @@ static uint8_t *decode_jpg(uint32_t *out_w, uint32_t *out_h, size_t *out_stride)
     *out_w      = op.outputWidth;
     *out_h      = op.outputHeight;
     *out_stride = stride;
-    return argb;
+    return rgba;
 
 close:
     cellJpgDecClose(main_h, sub_h);
@@ -283,8 +325,8 @@ int main(int argc, char **argv)
 
     uint32_t img_w = 0, img_h = 0;
     size_t   img_stride = 0;
-    uint8_t *argb = decode_jpg(&img_w, &img_h, &img_stride);
-    if (!argb) {
+    uint8_t *rgba = decode_jpg(fb_w, fb_h, &img_w, &img_h, &img_stride);
+    if (!rgba) {
         printf("  decode failed\n");
         rsxFinish(ctx, 0);
         free(host_addr);
@@ -298,10 +340,10 @@ int main(int argc, char **argv)
     for (int i = 0; i < MAX_BUFFERS; i++) {
         if (!make_buffer(&buffers[i], fb_w, fb_h, i)) {
             printf("  make_buffer[%d] failed\n", i);
-            free(argb); rsxFinish(ctx, 0); free(host_addr);
+            free(rgba); rsxFinish(ctx, 0); free(host_addr);
             return 1;
         }
-        blit_argb_to_xrgb(&buffers[i], argb, img_stride, img_w, img_h);
+        blit_rgba_to_xrgb(&buffers[i], rgba, img_stride, img_w, img_h);
     }
     do_flip(ctx, MAX_BUFFERS - 1);
 
@@ -334,7 +376,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < MAX_BUFFERS; i++) rsxFree(buffers[i].ptr);
     rsxFinish(ctx, 1);
     ioPadEnd();
-    free(argb);
+    free(rgba);
     free(host_addr);
 
     printf("hello-ppu-jpg-dec: done\n");
