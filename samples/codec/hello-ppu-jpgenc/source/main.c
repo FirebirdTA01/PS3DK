@@ -1,5 +1,5 @@
 /*
- * hello-ppu-jpg-enc - buffer-only cellJpgEnc smoke sample.
+ * hello-ppu-jpgenc - buffer-only cellJpgEnc smoke sample.
  *
  * Generates a small RGB test image in memory, encodes it to a JPEG stream
  * buffer through libjpgenc_stub.a, and prints stream size/hash/header bytes.
@@ -220,7 +220,7 @@ cleanup:
 
 int main(void)
 {
-    printf("hello-ppu-jpg-enc: buffer-only JPEG encode\n");
+    printf("hello-ppu-jpgenc: buffer-only JPEG encode\n");
 
     int32_t rc = cellSysmoduleLoadModule(CELL_SYSMODULE_JPGENC);
     if (rc < 0) {
@@ -236,6 +236,6 @@ int main(void)
         return 1;
     }
 
-    printf("hello-ppu-jpg-enc: %s\n", result == 0 ? "done" : "failed");
+    printf("hello-ppu-jpgenc: %s\n", result == 0 ? "done" : "failed");
     return result;
 }
