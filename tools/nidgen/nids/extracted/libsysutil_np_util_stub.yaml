@@ -1,4 +1,5 @@
 library: sceNpUtil
+archive_name: sysutil_np_util
 version: 1
 module: sceNpUtil
 exports:

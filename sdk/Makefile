@@ -101,6 +101,8 @@ HEADERS := \
     include/cell/http/transaction.h \
     include/cell/http/request.h \
     include/cell/http/response.h \
+    include/cell/np.h \
+    include/cell/np/util.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
     include/cell/sysutil_savedata.h \

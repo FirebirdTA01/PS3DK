@@ -64,6 +64,7 @@ extern "C" {
 #define CELL_SYSMODULE_NETCTL             0x0014
 #define CELL_SYSMODULE_SYSUTIL            0x0015
 #define CELL_SYSMODULE_SYSUTIL_NP         0x0016
+#define CELL_SYSMODULE_NP                 CELL_SYSMODULE_SYSUTIL_NP
 #define CELL_SYSMODULE_IO                 0x0017
 #define CELL_SYSMODULE_PNGDEC             0x0018
 #define CELL_SYSMODULE_PNGENC             0x0052
