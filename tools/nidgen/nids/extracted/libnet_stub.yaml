@@ -1,4 +1,5 @@
 library: sys_net
+archive_name: net
 version: 1
 module: sys_net
 exports:
