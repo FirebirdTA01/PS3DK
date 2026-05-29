@@ -118,6 +118,7 @@ HEADERS := \
     include/cell/sysutil_music_decode2.h \
     include/cell/sysutil_music_export.h \
     include/cell/sysutil_imejp.h \
+    include/cell/codec.h \
     include/cell/codec/jpgdec.h \
     include/cell/cgb.h \
     include/cell/spurs.h \
