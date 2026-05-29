@@ -1,6 +1,7 @@
 library: cellNetCtl
 version: 1
 module: cellNetCtl
+archive_name: netctl
 exports:
 - name: cellGameUpdateCheckAbort
   nid: '0x3e359ab6'
