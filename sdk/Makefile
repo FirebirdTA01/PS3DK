@@ -47,6 +47,7 @@ HEADERS := \
     include/sys/ppu_thread.h \
     include/sys/process.h \
     include/sys/memory.h \
+    include/sys/socket.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
     include/sys/time_util.h \
@@ -64,6 +65,9 @@ HEADERS := \
     include/sysutil/sysutil_music_decode2.h \
     include/sysutil/sysutil_music_playback_common.h \
     include/sysutil/video.h \
+    include/arpa/inet.h \
+    include/netdb.h \
+    include/netinet/in.h \
     include/cell/cell.h \
     include/cell/atomic.h \
     include/cell/pad.h \
@@ -83,6 +87,7 @@ HEADERS := \
     include/cell/dbgfont.h \
     include/cell/sysutil.h \
     include/cell/libnetctl.h \
+    include/cell/libnet.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
     include/cell/sysutil_savedata.h \
