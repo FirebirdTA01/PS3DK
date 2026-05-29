@@ -1,4 +1,5 @@
 library: cellHttp
+archive_name: http
 version: 1
 module: cellHttp
 exports:

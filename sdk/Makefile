@@ -91,6 +91,16 @@ HEADERS := \
     include/cell/ssl.h \
     include/cell/ssl/ssl.h \
     include/cell/ssl/cert.h \
+    include/cell/http.h \
+    include/cell/http/error.h \
+    include/cell/http/util.h \
+    include/cell/http/init.h \
+    include/cell/http/proxy.h \
+    include/cell/http/cookie.h \
+    include/cell/http/client.h \
+    include/cell/http/transaction.h \
+    include/cell/http/request.h \
+    include/cell/http/response.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
     include/cell/sysutil_savedata.h \
