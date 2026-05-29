@@ -88,6 +88,9 @@ HEADERS := \
     include/cell/sysutil.h \
     include/cell/libnetctl.h \
     include/cell/libnet.h \
+    include/cell/ssl.h \
+    include/cell/ssl/ssl.h \
+    include/cell/ssl/cert.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
     include/cell/sysutil_savedata.h \

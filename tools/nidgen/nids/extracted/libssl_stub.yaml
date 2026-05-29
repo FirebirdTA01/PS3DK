@@ -1,4 +1,5 @@
 library: cellSsl
+archive_name: ssl
 version: 1
 module: cellSsl
 exports:
