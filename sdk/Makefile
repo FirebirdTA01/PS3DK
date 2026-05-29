@@ -82,9 +82,11 @@ HEADERS := \
     include/cell/fs/cell_fs_errno.h \
     include/cell/dbgfont.h \
     include/cell/sysutil.h \
+    include/cell/libnetctl.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
     include/cell/sysutil_savedata.h \
+    include/cell/sysutil_gameupdate.h \
     include/cell/sysutil_userinfo.h \
     include/cell/libkey2char.h \
     include/cell/font.h \
