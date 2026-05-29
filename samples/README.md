@@ -14,6 +14,7 @@ samples/
 ├── toolchain/     toolchain + ABI validation tests
 ├── gcm/           RSX / cellGcm graphics (libgcm + libgcm_cmd + librsx)
 ├── sysutil/       sysutil callbacks, dialogs, save/game/system data
+├── network/       networking module load + API validation tests
 ├── lv2/           lv2 syscall primitives (threading, synchronisation)
 ├── spu/           SPU toolchain + PPU/SPU interop
 └── spurs/         libspurs sync primitives + Spurs task runtime
