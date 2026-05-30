@@ -1,0 +1,6 @@
+#ifndef PS3TC_SYSUTIL_OSKDIALOG_FORWARD_H
+#define PS3TC_SYSUTIL_OSKDIALOG_FORWARD_H
+
+#include <cell/sysutil_oskdialog.h>
+
+#endif /* PS3TC_SYSUTIL_OSKDIALOG_FORWARD_H */

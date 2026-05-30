@@ -131,6 +131,11 @@ HEADERS := \
     include/cell/np/commerce2.h \
     include/cell/np/tus.h \
     include/cell/np/np2.h \
+    include/np/matching2.h \
+    include/np/commerce2.h \
+    include/np/drm.h \
+    include/np/trophy.h \
+    include/np/clans.h \
     include/cell/np2/init.h \
     include/cell/np2/matching2.h \
     include/cell/np/trophy.h \
@@ -304,6 +309,8 @@ HEADERS := \
     include/cell/sail_rec.h \
     include/cell/sysutil_oskdialog_ext.h \
     include/cell/sysutil_search.h \
+    include/sysutil/sysutil_oskdialog.h \
+    include/sysutil/sysutil_search.h \
     include/cell/sysutil_search_types.h \
     include/sys/crashdump.h \
     include/cell/trace/trace_types.h \
