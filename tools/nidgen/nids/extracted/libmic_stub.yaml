@@ -1,169 +1,170 @@
 library: cellMic
+archive_name: mic
 version: 1
 module: cellMic
 exports:
 - name: cellMicClose
   nid: '0x8d229f8e'
-  signature: ''
+  signature: 'int cellMicClose(int dev_num)'
   notes: extracted from _cellMic_0001_21.o
 - name: cellMicCommand
   nid: '0xc461563c'
   signature: ''
-  notes: extracted from _cellMic_0001_31.o
+  notes: extracted from _cellMic_0001_31.o ; NOT FOUND in reference headers
 - name: cellMicEnd
   nid: '0xc6328caa'
-  signature: ''
+  signature: 'int cellMicEnd(void)'
   notes: extracted from _cellMic_0001_32.o
 - name: cellMicGetDeviceAttr
   nid: '0x6a024aa0'
-  signature: ''
+  signature: 'int cellMicGetDeviceAttr(int dev_num, CellMicDeviceAttr dev_attrib, int *arg1, int *arg2)'
   notes: extracted from _cellMic_0001_13.o
 - name: cellMicGetDeviceGUID
   nid: '0x017024a8'
-  signature: ''
+  signature: 'int cellMicGetDeviceGUID(int dev_num, uint32_t *ptr_guid)'
   notes: extracted from _cellMic_0001_1.o
 - name: cellMicGetDeviceIdentifier
   nid: '0xfdbbe469'
   signature: ''
-  notes: extracted from _cellMic_0001_41.o
+  notes: extracted from _cellMic_0001_41.o ; NOT FOUND in reference headers
 - name: cellMicGetFormat
   nid: '0x48108a23'
-  signature: ''
+  signature: 'int cellMicGetFormat(int dev_num, CellMicInputFormatI *format)'
   notes: extracted from _cellMic_0001_10.o
 - name: cellMicGetFormatAux
   nid: '0xfda12276'
-  signature: ''
+  signature: 'int cellMicGetFormatAux(int dev_num, CellMicInputFormatI *format)'
   notes: extracted from _cellMic_0001_40.o
 - name: cellMicGetFormatDsp
   nid: '0x87a08d29'
-  signature: ''
+  signature: 'int cellMicGetFormatDsp(int dev_num, CellMicInputFormatI *format)'
   notes: extracted from _cellMic_0001_19.o
 - name: cellMicGetFormatEx
   nid: '0xad049ecf'
   signature: ''
-  notes: extracted from _cellMic_0001_25.o
+  notes: extracted from _cellMic_0001_25.o ; NOT FOUND in reference headers
 - name: cellMicGetFormatRaw
   nid: '0x4e0b69ee'
-  signature: ''
+  signature: 'int cellMicGetFormatRaw(int dev_num, CellMicInputFormatI *format)'
   notes: extracted from _cellMic_0001_11.o
 - name: cellMicGetSignalAttr
   nid: '0xac5ba03a'
-  signature: ''
+  signature: 'int cellMicGetSignalAttr(int dev_num, CellMicSignalAttr sig_attrib, void *value)'
   notes: extracted from _cellMic_0001_24.o
 - name: cellMicGetSignalState
   nid: '0xb30780eb'
-  signature: ''
+  signature: 'int cellMicGetSignalState(int dev_num, CellMicSignalState sig_state, void *value)'
   notes: extracted from _cellMic_0001_27.o
 - name: cellMicGetStatus
   nid: '0x25c5723f'
-  signature: ''
+  signature: 'int cellMicGetStatus(int dev_num, CellMicStatus *status)'
   notes: extracted from _cellMic_0001_6.o
 - name: cellMicGetType
   nid: '0xa52d2ae4'
-  signature: ''
+  signature: 'int cellMicGetType(int dev_num, int *ptr_type)'
   notes: extracted from _cellMic_0001_23.o
 - name: cellMicInit
   nid: '0x8325e02d'
-  signature: ''
+  signature: 'int cellMicInit(void)'
   notes: extracted from _cellMic_0001_18.o
 - name: cellMicIsAttached
   nid: '0x1b42101b'
-  signature: ''
+  signature: 'int cellMicIsAttached(int dev_num)'
   notes: extracted from _cellMic_0001_5.o
 - name: cellMicIsOpen
   nid: '0x186cb1fb'
-  signature: ''
+  signature: 'int cellMicIsOpen(int dev_num)'
   notes: extracted from _cellMic_0001_4.o
 - name: cellMicOpen
   nid: '0xdd1b59f0'
-  signature: ''
+  signature: 'int cellMicOpen(int dev_num, int samprate)'
   notes: extracted from _cellMic_0001_35.o
 - name: cellMicOpenEx
   nid: '0x05709bbf'
-  signature: ''
+  signature: 'int cellMicOpenEx(int dev_num, int raw_samprate, int raw_channel, int dsp_samprate, int bufms, CellMicSignalType sigtype)'
   notes: extracted from _cellMic_0001_2.o
 - name: cellMicOpenRaw
   nid: '0xa42ac07a'
-  signature: ''
+  signature: 'int cellMicOpenRaw(int dev_num, int samprate, int channel)'
   notes: extracted from _cellMic_0001_22.o
 - name: cellMicRead
   nid: '0x07e1b12c'
-  signature: ''
+  signature: 'int cellMicRead(int dev_num, void *data, int max_bytes)'
   notes: extracted from _cellMic_0001_3.o
 - name: cellMicReadAux
   nid: '0x3acc118e'
-  signature: ''
+  signature: 'int cellMicReadAux(int dev_num, void *data, int max_bytes)'
   notes: extracted from _cellMic_0001_8.o
 - name: cellMicReadDsp
   nid: '0xc414faa5'
-  signature: ''
+  signature: 'int cellMicReadDsp(int dev_num, void *data, int max_bytes)'
   notes: extracted from _cellMic_0001_30.o
 - name: cellMicReadRaw
   nid: '0x72165a7f'
-  signature: ''
+  signature: 'int cellMicReadRaw(int dev_num, void *data, int max_bytes)'
   notes: extracted from _cellMic_0001_16.o
 - name: cellMicRemoveNotifyEventQueue
   nid: '0x65336418'
-  signature: ''
+  signature: 'int cellMicRemoveNotifyEventQueue(sys_ipc_key_t key)'
   notes: extracted from _cellMic_0001_12.o
 - name: cellMicReset
   nid: '0x6bc46aab'
-  signature: ''
+  signature: 'int cellMicReset(int dev_num)'
   notes: extracted from _cellMic_0001_14.o
 - name: cellMicSetDeviceAttr
   nid: '0xb2c16321'
-  signature: ''
+  signature: 'int cellMicSetDeviceAttr(int dev_num, CellMicDeviceAttr dev_attrib, int arg1, int arg2)'
   notes: extracted from _cellMic_0001_26.o
 - name: cellMicSetMultiMicNotifyEventQueue
   nid: '0x891c6291'
   signature: ''
-  notes: extracted from _cellMic_0001_20.o
+  notes: extracted from _cellMic_0001_20.o ; NOT FOUND in reference headers
 - name: cellMicSetNotifyEventQueue
   nid: '0x7903400e'
-  signature: ''
+  signature: 'int cellMicSetNotifyEventQueue(sys_ipc_key_t key)'
   notes: extracted from _cellMic_0001_17.o
 - name: cellMicSetNotifyEventQueue2
   nid: '0x6cc7ae00'
-  signature: ''
+  signature: 'int cellMicSetNotifyEventQueue2(sys_ipc_key_t key, uint64_t source, uint64_t flag)'
   notes: extracted from _cellMic_0001_15.o
 - name: cellMicSetSignalAttr
   nid: '0x323deb41'
-  signature: ''
+  signature: 'int cellMicSetSignalAttr(int dev_num, CellMicSignalAttr sig_attrib, void *value)'
   notes: extracted from _cellMic_0001_7.o
 - name: cellMicStart
   nid: '0xdd724314'
-  signature: ''
+  signature: 'int cellMicStart(int dev_num)'
   notes: extracted from _cellMic_0001_36.o
 - name: cellMicStartEx
   nid: '0xddd19a89'
-  signature: ''
+  signature: 'int cellMicStartEx(int dev_num, uint32_t iFlags)'
   notes: extracted from _cellMic_0001_37.o
 - name: cellMicStop
   nid: '0xfcfaf246'
-  signature: ''
+  signature: 'int cellMicStop(int dev_num)'
   notes: extracted from _cellMic_0001_39.o
 - name: cellMicSysShareClose
   nid: '0x3ace58f3'
   signature: ''
-  notes: extracted from _cellMic_0001_9.o
+  notes: extracted from _cellMic_0001_9.o ; NOT FOUND in reference headers
 - name: cellMicSysShareEnd
   nid: '0xf82bbf7c'
   signature: ''
-  notes: extracted from _cellMic_0001_38.o
+  notes: extracted from _cellMic_0001_38.o ; NOT FOUND in reference headers
 - name: cellMicSysShareInit
   nid: '0xd127cd3e'
   signature: ''
-  notes: extracted from _cellMic_0001_34.o
+  notes: extracted from _cellMic_0001_34.o ; NOT FOUND in reference headers
 - name: cellMicSysShareOpen
   nid: '0xc3610dbd'
   signature: ''
-  notes: extracted from _cellMic_0001_29.o
+  notes: extracted from _cellMic_0001_29.o ; NOT FOUND in reference headers
 - name: cellMicSysShareStart
   nid: '0xcac7e7d7'
   signature: ''
-  notes: extracted from _cellMic_0001_33.o
+  notes: extracted from _cellMic_0001_33.o ; NOT FOUND in reference headers
 - name: cellMicSysShareStop
   nid: '0xbdfd51e2'
   signature: ''
-  notes: extracted from _cellMic_0001_28.o
+  notes: extracted from _cellMic_0001_28.o ; NOT FOUND in reference headers
 imports: []

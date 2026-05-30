@@ -186,6 +186,10 @@ HEADERS := \
     include/cell/audio.h \
     include/cell/voice.h \
     include/cell/voiceTypes.h \
+    include/cell/mic.h \
+    include/cell/mic/define.h \
+    include/cell/mic/error.h \
+    include/cell/mic/interface.h \
     include/cell/pngdec.h \
     include/cell/sysmodule.h \
     include/cell/l10n.h \
