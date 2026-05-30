@@ -110,6 +110,11 @@ HEADERS := \
     include/cell/cell_fs.h \
     include/cell/fs/cell_fs_file_api.h \
     include/cell/fs/cell_fs_errno.h \
+    include/cell/dbgrsx.h \
+    include/cell/dbgrsx/dbgrsx_enum.h \
+    include/cell/dbgrsx/dbgrsx_error.h \
+    include/cell/dbgrsx/dbgrsx_struct.h \
+    include/cell/dbgrsx/dbgrsx_bundle_state_struct.h \
     include/cell/dbgfont.h \
     include/cell/sysutil.h \
     include/cell/libnetctl.h \
@@ -368,7 +373,7 @@ HEADERS := \
     include/rsx/rsx_function_macros.h \
     include/rsx/rsx_program.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937 libfontGcm
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937 libfontGcm libdbgrsx
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
