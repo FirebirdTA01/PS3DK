@@ -1,11 +1,7 @@
-/* cggl_bridge.c — CgGL bridge API stubs (Slice 1d link gate).
- *
- * Covers NV/cgGL.h + Cg/cgGL.h surface.  All functions are safe NOPs
- * returning spec-correct defaults: CG_FALSE, NULL, or 0.
- */
-#include <stddef.h>
+#include "cg_internal.h"
+#include "psgl_context.h"
 
-#include <Cg/cgGL.h>
+#include <stddef.h>
 
 static void cggl_zero(void *ptr, size_t size)
 {
@@ -15,19 +11,57 @@ static void cggl_zero(void *ptr, size_t size)
     }
 }
 
+static CGbool g_cggl_vertex_enabled = CG_FALSE;
+static CGbool g_cggl_fragment_enabled = CG_FALSE;
+
+static void cggl_copy_float4(float out[4], float x, float y, float z, float w)
+{
+    out[0] = x;
+    out[1] = y;
+    out[2] = z;
+    out[3] = w;
+}
+
+static void cggl_copy_double_to_float(float *out, const double *in,
+                                      uint32_t count)
+{
+    if (!out || !in) return;
+    for (uint32_t i = 0; i < count; i++)
+        out[i] = (float)in[i];
+}
+
+static void cggl_mark_cg_dirty(void)
+{
+    PSGLcontext *context = psgl_context_current();
+    if (context) context->dirty |= PSGL_DIRTY_CG;
+}
+
 /* ── profile ─────────────────────────────────────────────────────── */
 
 CGGL_API CGbool CGGLENTRY cgGLIsProfileSupported(CGprofile profile)
-{ (void)profile; return CG_FALSE; }
+{
+    return (psgl_cg_profile_is_vertex(profile) ||
+            psgl_cg_profile_is_fragment(profile)) ? CG_TRUE : CG_FALSE;
+}
 
 CGGL_API void CGGLENTRY cgGLEnableProfile(CGprofile profile)
-{ (void)profile; }
+{
+    if (psgl_cg_profile_is_vertex(profile)) g_cggl_vertex_enabled = CG_TRUE;
+    if (psgl_cg_profile_is_fragment(profile)) g_cggl_fragment_enabled = CG_TRUE;
+}
 
 CGGL_API void CGGLENTRY cgGLDisableProfile(CGprofile profile)
-{ (void)profile; }
+{
+    if (psgl_cg_profile_is_vertex(profile)) g_cggl_vertex_enabled = CG_FALSE;
+    if (psgl_cg_profile_is_fragment(profile)) g_cggl_fragment_enabled = CG_FALSE;
+}
 
 CGGL_API CGprofile CGGLENTRY cgGLGetLatestProfile(CGGLenum profile_type)
-{ (void)profile_type; return (CGprofile)0; }
+{
+    if (profile_type == CG_GL_VERTEX) return CG_PROFILE_SCE_VP_RSX;
+    if (profile_type == CG_GL_FRAGMENT) return CG_PROFILE_SCE_FP_RSX;
+    return CG_PROFILE_UNKNOWN;
+}
 
 CGGL_API void CGGLENTRY cgGLSetOptimalOptions(CGprofile profile)
 { (void)profile; }
@@ -35,68 +69,101 @@ CGGL_API void CGGLENTRY cgGLSetOptimalOptions(CGprofile profile)
 /* ── program load / bind ─────────────────────────────────────────── */
 
 CGGL_API void CGGLENTRY cgGLLoadProgram(CGprogram program)
-{ (void)program; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    if (p) {
+        p->loaded = CG_TRUE;
+        cggl_mark_cg_dirty();
+    }
+}
 
 CGGL_API CGbool CGGLENTRY cgGLIsProgramLoaded(CGprogram program)
-{ (void)program; return CG_FALSE; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    return (p && p->loaded) ? CG_TRUE : CG_FALSE;
+}
 
 CGGL_API void CGGLENTRY cgGLBindProgram(CGprogram program)
-{ (void)program; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    if (!p || !p->loaded) return;
+    psgl_context_bind_cg_program(program, p->profile);
+}
 
 CGGL_API void CGGLENTRY cgGLUnbindProgram(CGprofile profile)
-{ (void)profile; }
+{ psgl_context_bind_cg_program(NULL, profile); }
 
 CGGL_API GLuint CGGLENTRY cgGLGetProgramID(CGprogram program)
-{ (void)program; return 0; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    return p ? (GLuint)(uintptr_t)p : 0u;
+}
 
 /* ── parameter set / get ─────────────────────────────────────────── */
 
 CGGL_API void CGGLENTRY cgGLSetParameter1f(CGparameter p, float x)
-{ (void)p; (void)x; }
+{
+    float v[1] = {x};
+    psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 1u);
+    cggl_mark_cg_dirty();
+}
 CGGL_API void CGGLENTRY cgGLSetParameter2f(CGparameter p, float x, float y)
-{ (void)p; (void)x; (void)y; }
+{
+    float v[2] = {x, y};
+    psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 2u);
+    cggl_mark_cg_dirty();
+}
 CGGL_API void CGGLENTRY cgGLSetParameter3f(CGparameter p, float x, float y,
                                            float z)
-{ (void)p; (void)x; (void)y; (void)z; }
+{
+    float v[3] = {x, y, z};
+    psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 3u);
+    cggl_mark_cg_dirty();
+}
 CGGL_API void CGGLENTRY cgGLSetParameter4f(CGparameter p, float x, float y,
                                            float z, float w)
-{ (void)p; (void)x; (void)y; (void)z; (void)w; }
+{
+    float v[4];
+    cggl_copy_float4(v, x, y, z, w);
+    psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 4u);
+    cggl_mark_cg_dirty();
+}
 CGGL_API void CGGLENTRY cgGLSetParameter1fv(CGparameter p, const float *v)
-{ (void)p; (void)v; }
+{ psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 1u); cggl_mark_cg_dirty(); }
 CGGL_API void CGGLENTRY cgGLSetParameter2fv(CGparameter p, const float *v)
-{ (void)p; (void)v; }
+{ psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 2u); cggl_mark_cg_dirty(); }
 CGGL_API void CGGLENTRY cgGLSetParameter3fv(CGparameter p, const float *v)
-{ (void)p; (void)v; }
+{ psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 3u); cggl_mark_cg_dirty(); }
 CGGL_API void CGGLENTRY cgGLSetParameter4fv(CGparameter p, const float *v)
-{ (void)p; (void)v; }
+{ psgl_cg_set_parameter_floats(psgl_cg_parameter(p), v, 4u); cggl_mark_cg_dirty(); }
 
 CGGL_API void CGGLENTRY cgGLSetParameter1d(CGparameter p, double x)
-{ (void)p; (void)x; }
+{ double d[1] = {x}; cgGLSetParameter1dv(p, d); }
 CGGL_API void CGGLENTRY cgGLSetParameter2d(CGparameter p, double x, double y)
-{ (void)p; (void)x; (void)y; }
+{ double d[2] = {x, y}; cgGLSetParameter2dv(p, d); }
 CGGL_API void CGGLENTRY cgGLSetParameter3d(CGparameter p, double x, double y,
                                            double z)
-{ (void)p; (void)x; (void)y; (void)z; }
+{ double d[3] = {x, y, z}; cgGLSetParameter3dv(p, d); }
 CGGL_API void CGGLENTRY cgGLSetParameter4d(CGparameter p, double x, double y,
                                            double z, double w)
-{ (void)p; (void)x; (void)y; (void)z; (void)w; }
+{ double d[4] = {x, y, z, w}; cgGLSetParameter4dv(p, d); }
 CGGL_API void CGGLENTRY cgGLSetParameter1dv(CGparameter p, const double *v)
-{ (void)p; (void)v; }
+{ float f[1]; cggl_copy_double_to_float(f, v, 1u); cgGLSetParameter1fv(p, f); }
 CGGL_API void CGGLENTRY cgGLSetParameter2dv(CGparameter p, const double *v)
-{ (void)p; (void)v; }
+{ float f[2]; cggl_copy_double_to_float(f, v, 2u); cgGLSetParameter2fv(p, f); }
 CGGL_API void CGGLENTRY cgGLSetParameter3dv(CGparameter p, const double *v)
-{ (void)p; (void)v; }
+{ float f[3]; cggl_copy_double_to_float(f, v, 3u); cgGLSetParameter3fv(p, f); }
 CGGL_API void CGGLENTRY cgGLSetParameter4dv(CGparameter p, const double *v)
-{ (void)p; (void)v; }
+{ float f[4]; cggl_copy_double_to_float(f, v, 4u); cgGLSetParameter4fv(p, f); }
 
 CGGL_API void CGGLENTRY cgGLGetParameter1f(CGparameter p, float *v)
-{ (void)p; if (v) *v = 0.0f; }
+{ psgl_cg_get_parameter_floats(psgl_cg_parameter(p), v, 1u); }
 CGGL_API void CGGLENTRY cgGLGetParameter2f(CGparameter p, float *v)
-{ (void)p; if (v) { v[0] = 0.0f; v[1] = 0.0f; } }
+{ psgl_cg_get_parameter_floats(psgl_cg_parameter(p), v, 2u); }
 CGGL_API void CGGLENTRY cgGLGetParameter3f(CGparameter p, float *v)
-{ (void)p; if (v) { v[0] = 0.0f; v[1] = 0.0f; v[2] = 0.0f; } }
+{ psgl_cg_get_parameter_floats(psgl_cg_parameter(p), v, 3u); }
 CGGL_API void CGGLENTRY cgGLGetParameter4f(CGparameter p, float *v)
-{ (void)p; if (v) cggl_zero(v, 4 * sizeof(float)); }
+{ psgl_cg_get_parameter_floats(psgl_cg_parameter(p), v, 4u); }
 CGGL_API void CGGLENTRY cgGLGetParameter1d(CGparameter p, double *v)
 { (void)p; if (v) *v = 0.0; }
 CGGL_API void CGGLENTRY cgGLGetParameter2d(CGparameter p, double *v)
@@ -175,20 +242,20 @@ CGGL_API void CGGLENTRY cgGLDisableClientState(CGparameter param)
 
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterdr(CGparameter p,
                                                  const double *m)
-{ (void)p; (void)m; }
+{ float f[16]; cggl_copy_double_to_float(f, m, 16u); cgGLSetMatrixParameterfr(p, f); }
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterfr(CGparameter p,
                                                  const float *m)
-{ (void)p; (void)m; }
+{ psgl_cg_set_parameter_matrix(psgl_cg_parameter(p), m); }
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterdc(CGparameter p,
                                                  const double *m)
-{ (void)p; (void)m; }
+{ cgGLSetMatrixParameterdr(p, m); }
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterfc(CGparameter p,
                                                  const float *m)
-{ (void)p; (void)m; }
+{ cgGLSetMatrixParameterfr(p, m); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterdr(CGparameter p, double *m)
 { (void)p; if (m) cggl_zero(m, 16 * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterfr(CGparameter p, float *m)
-{ (void)p; if (m) cggl_zero(m, 16 * sizeof(float)); }
+{ psgl_cg_get_parameter_matrix(psgl_cg_parameter(p), m); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterdc(CGparameter p, double *m)
 { (void)p; if (m) cggl_zero(m, 16 * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterfc(CGparameter p, float *m)
@@ -197,7 +264,21 @@ CGGL_API void CGGLENTRY cgGLGetMatrixParameterfc(CGparameter p, float *m)
 CGGL_API void CGGLENTRY cgGLSetStateMatrixParameter(CGparameter param,
                                                     CGGLenum matrix,
                                                     CGGLenum transform)
-{ (void)param; (void)matrix; (void)transform; }
+{
+    PSGLcgParameter *p = psgl_cg_parameter(param);
+    if (!p) return;
+    cggl_zero(p->value, 16u * sizeof(float));
+    p->value[0] = 1.0f;
+    p->value[5] = 1.0f;
+    p->value[10] = 1.0f;
+    p->value[15] = 1.0f;
+    p->value_count = 16u;
+    p->state_matrix = CG_TRUE;
+    p->state_matrix_source = matrix;
+    p->state_matrix_transform = transform;
+    p->dirty = CG_TRUE;
+    cggl_mark_cg_dirty();
+}
 
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterArrayfc(CGparameter p, long off,
                                                       long n,
@@ -265,10 +346,16 @@ CGGL_API void CGGLENTRY cgGLSetupSampler(CGparameter param, GLuint texobj)
 CGGL_API void CGGLENTRY cgGLRegisterStates(CGcontext ctx) { (void)ctx; }
 
 CGGL_API void CGGLENTRY cgGLEnableProgramProfiles(CGprogram program)
-{ (void)program; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    if (p) cgGLEnableProfile(p->profile);
+}
 
 CGGL_API void CGGLENTRY cgGLDisableProgramProfiles(CGprogram program)
-{ (void)program; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    if (p) cgGLDisableProfile(p->profile);
+}
 
 CGGL_API void CGGLENTRY cgGLSetDebugMode(CGbool debug) { (void)debug; }
 
@@ -344,7 +431,11 @@ CGGL_API void CGGLENTRY cgGLSetBoolVertexRegistersSharingMask(
 { (void)ctx; (void)values; }
 
 CGGL_API unsigned int CGGLENTRY cgGLGetRegisterCount(CGprogram prog)
-{ (void)prog; return 0; }
+{
+    PSGLcgProgram *p = psgl_cg_program(prog);
+    if (!p || p->cgb_profile != CELL_CGB_PROFILE_VERTEX) return 0u;
+    return cellCgbGetVertexConstantCount(&p->cgb_program);
+}
 
 CGGL_API void CGGLENTRY cgGLSetRegisterCount(CGprogram prog,
                                              const unsigned int regCount)

@@ -106,6 +106,7 @@ void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device);
 void psgl_context_reset_current(void);
 PSGLcontext *psgl_context_current(void);
 PSGLdevice *psgl_context_current_device(void);
+void psgl_context_bind_cg_program(CGprogram program, CGprofile profile);
 void psgl_context_swap(void);
 void psgl_context_set_clear_color(GLfloat red, GLfloat green,
                                   GLfloat blue, GLfloat alpha);

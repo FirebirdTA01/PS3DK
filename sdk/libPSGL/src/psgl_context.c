@@ -473,6 +473,29 @@ PSGLdevice *psgl_context_current_device(void)
     return g_psgl.current_device;
 }
 
+void psgl_context_bind_cg_program(CGprogram program, CGprofile profile)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (profile == CG_PROFILE_SCE_VP_RSX ||
+        profile == CG_PROFILE_VPRSX ||
+        profile == CG_PROFILE_VP40 ||
+        profile == CG_PROFILE_ARBVP1 ||
+        profile == CG_PROFILE_VP30 ||
+        profile == CG_PROFILE_VP20) {
+        context->bound_vertex_program = program;
+        context->dirty |= PSGL_DIRTY_CG;
+    } else if (profile == CG_PROFILE_SCE_FP_RSX ||
+               profile == CG_PROFILE_FPRSX ||
+               profile == CG_PROFILE_FP40 ||
+               profile == CG_PROFILE_ARBFP1 ||
+               profile == CG_PROFILE_FP30 ||
+               profile == CG_PROFILE_FP20) {
+        context->bound_fragment_program = program;
+        context->dirty |= PSGL_DIRTY_CG;
+    }
+}
+
 void psgl_context_swap(void)
 {
     PSGLcontext *context = g_psgl.current_context;

@@ -1,12 +1,18 @@
-/* cg_runtime.c — Cg runtime API stubs (Slice 1d link gate).
- *
- * Covers cg.h / NV/cg.h surface.  Pointer-returning functions return
- * NULL + set CG_INVALID_PARAMETER_ERROR where appropriate; is-functions
- * return CG_FALSE; void functions are NOPs.
- */
+#include "cg_internal.h"
+
+#include <malloc.h>
+#include <ppu-types.h>
 #include <stddef.h>
 
-#include <Cg/cg.h>
+#define PSGL_CELL_FS_O_RDONLY 000000
+#define PSGL_CELL_FS_SEEK_SET 0
+#define PSGL_CELL_FS_SEEK_END 2
+
+extern s32 cellFsOpen(const char *path, s32 flags, s32 *fd,
+                      const void *arg, u64 argsize);
+extern s32 cellFsClose(s32 fd);
+extern s32 cellFsRead(s32 fd, void *ptr, u64 len, u64 *read);
+extern s32 cellFsLseek(s32 fd, s64 offset, s32 whence, u64 *position);
 
 static CGerror g_cg_error = CG_NO_ERROR;
 
@@ -18,7 +24,272 @@ static void cg_zero(void *ptr, size_t size)
     }
 }
 
-/* ── error ───────────────────────────────────────────────────────── */
+static void cg_copy(void *dst, const void *src, size_t size)
+{
+    unsigned char *out = (unsigned char *)dst;
+    const unsigned char *in = (const unsigned char *)src;
+    while (size--) {
+        *out++ = *in++;
+    }
+}
+
+static int cg_streq(const char *a, const char *b)
+{
+    if (!a || !b) return 0;
+    while (*a && *b && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static void cg_copy_name(char *dst, const char *src)
+{
+    uint32_t i = 0;
+    if (!dst) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    for (; i + 1u < PSGL_CG_NAME_MAX && src[i] != '\0'; i++)
+        dst[i] = src[i];
+    dst[i] = '\0';
+}
+
+PSGLcgContext *psgl_cg_context(CGcontext ctx)
+{
+    PSGLcgContext *context = (PSGLcgContext *)ctx;
+    return (context && context->magic == PSGL_CG_CONTEXT_MAGIC) ?
+        context : NULL;
+}
+
+PSGLcgProgram *psgl_cg_program(CGprogram program)
+{
+    PSGLcgProgram *p = (PSGLcgProgram *)program;
+    return (p && p->magic == PSGL_CG_PROGRAM_MAGIC) ? p : NULL;
+}
+
+PSGLcgParameter *psgl_cg_parameter(CGparameter parameter)
+{
+    PSGLcgParameter *p = (PSGLcgParameter *)parameter;
+    return (p && p->magic == PSGL_CG_PARAMETER_MAGIC) ? p : NULL;
+}
+
+void psgl_cg_set_error(PSGLcgContext *context, CGerror error)
+{
+    g_cg_error = error;
+    if (context) context->last_error = error;
+}
+
+int psgl_cg_profile_is_vertex(CGprofile profile)
+{
+    return profile == CG_PROFILE_SCE_VP_RSX ||
+           profile == CG_PROFILE_VPRSX ||
+           profile == CG_PROFILE_VP40 ||
+           profile == CG_PROFILE_ARBVP1 ||
+           profile == CG_PROFILE_VP30 ||
+           profile == CG_PROFILE_VP20;
+}
+
+int psgl_cg_profile_is_fragment(CGprofile profile)
+{
+    return profile == CG_PROFILE_SCE_FP_RSX ||
+           profile == CG_PROFILE_FPRSX ||
+           profile == CG_PROFILE_FP40 ||
+           profile == CG_PROFILE_ARBFP1 ||
+           profile == CG_PROFILE_FP30 ||
+           profile == CG_PROFILE_FP20;
+}
+
+static CGprofile cg_default_profile(const CgBinaryProgram *binary,
+                                    CGprofile requested)
+{
+    if (requested != CG_PROFILE_UNKNOWN && requested != (CGprofile)0)
+        return requested;
+    if (!binary) return CG_PROFILE_UNKNOWN;
+    return binary->profile;
+}
+
+static void cg_link_program(PSGLcgContext *context, PSGLcgProgram *program)
+{
+    program->next = context->programs;
+    if (context->programs) context->programs->prev = program;
+    context->programs = program;
+}
+
+static void cg_unlink_program(PSGLcgProgram *program)
+{
+    if (!program || !program->context) return;
+    if (program->prev) program->prev->next = program->next;
+    if (program->next) program->next->prev = program->prev;
+    if (program->context->programs == program)
+        program->context->programs = program->next;
+    program->context = NULL;
+    program->next = NULL;
+    program->prev = NULL;
+}
+
+static void cg_free_program(PSGLcgProgram *program)
+{
+    if (!program) return;
+    cg_unlink_program(program);
+    if (program->parameters) free(program->parameters);
+    if (program->binary) free(program->binary);
+    program->magic = 0u;
+    free(program);
+}
+
+static void *cg_read_file(const char *path, uint32_t *out_size)
+{
+    s32 fd = -1;
+    void *data;
+    u64 end = 0u;
+    u64 pos = 0u;
+    u64 got = 0u;
+
+    if (out_size) *out_size = 0u;
+    if (!path || !out_size) return NULL;
+    if (cellFsOpen(path, PSGL_CELL_FS_O_RDONLY, &fd, NULL, 0) != 0)
+        return NULL;
+    if (cellFsLseek(fd, 0, PSGL_CELL_FS_SEEK_END, &end) != 0 ||
+        end == 0u || end > 0xffffffffULL ||
+        cellFsLseek(fd, 0, PSGL_CELL_FS_SEEK_SET, &pos) != 0) {
+        cellFsClose(fd);
+        return NULL;
+    }
+
+    data = malloc((size_t)end);
+    if (!data) {
+        cellFsClose(fd);
+        return NULL;
+    }
+    if (cellFsRead(fd, data, end, &got) != 0 || got != end) {
+        cellFsClose(fd);
+        free(data);
+        return NULL;
+    }
+    cellFsClose(fd);
+    *out_size = (uint32_t)got;
+    return data;
+}
+
+static void cg_init_parameter(PSGLcgProgram *program, uint32_t index,
+                              PSGLcgParameter *parameter)
+{
+    const CgBinaryProgram *binary = (const CgBinaryProgram *)program->binary;
+    const CgBinaryParameter *binary_param =
+        (const CgBinaryParameter *)((const unsigned char *)binary +
+                                    binary->parameterArray) + index;
+    const char *name = binary_param->name ?
+        (const char *)binary + binary_param->name : NULL;
+    const float *defaults = NULL;
+
+    parameter->magic = PSGL_CG_PARAMETER_MAGIC;
+    parameter->program = program;
+    parameter->index = index;
+    parameter->type = binary_param->type;
+    parameter->resource = binary_param->res;
+    parameter->variability = binary_param->var;
+    parameter->direction = binary_param->direction;
+    parameter->resource_index = binary_param->resIndex;
+    parameter->vertex_register = 0xffffu;
+    parameter->fragment_register = 0xffffu;
+    cg_copy_name(parameter->name, name);
+
+    cellCgbMapGetVertexUniformRegister(&program->cgb_program, index,
+                                       &parameter->vertex_register,
+                                       &defaults);
+    cellCgbMapGetFragmentUniformRegister(&program->cgb_program, index,
+                                         &parameter->fragment_register);
+    if (defaults) {
+        cg_copy(parameter->value, defaults, 4u * sizeof(float));
+        parameter->value_count = 4u;
+    }
+}
+
+static int cg_build_parameters(PSGLcgProgram *program)
+{
+    uint32_t count = cellCgbMapGetLength(&program->cgb_program);
+    program->parameter_count = count;
+    if (count == 0u) return 1;
+    program->parameters =
+        (PSGLcgParameter *)calloc(count, sizeof(PSGLcgParameter));
+    if (!program->parameters) return 0;
+    for (uint32_t i = 0; i < count; i++)
+        cg_init_parameter(program, i, &program->parameters[i]);
+    return 1;
+}
+
+static CGparameterclass cg_class_for_type(CGtype type)
+{
+    if (type >= CG_FLOAT1x1 && type <= CG_FLOAT4x4)
+        return CG_PARAMETERCLASS_MATRIX;
+    if (type == CG_FLOAT || type == CG_INT || type == CG_BOOL)
+        return CG_PARAMETERCLASS_SCALAR;
+    if ((type >= CG_FLOAT1 && type <= CG_FLOAT4) ||
+        (type >= CG_INT1 && type <= CG_INT4) ||
+        (type >= CG_BOOL1 && type <= CG_BOOL4))
+        return CG_PARAMETERCLASS_VECTOR;
+    return CG_PARAMETERCLASS_UNKNOWN;
+}
+
+static int cg_columns_for_type(CGtype type)
+{
+    if (type == CG_FLOAT || type == CG_INT || type == CG_BOOL) return 1;
+    if (type == CG_FLOAT1 || type == CG_INT1 || type == CG_BOOL1) return 1;
+    if (type == CG_FLOAT2 || type == CG_INT2 || type == CG_BOOL2) return 2;
+    if (type == CG_FLOAT3 || type == CG_INT3 || type == CG_BOOL3) return 3;
+    if (type == CG_FLOAT4 || type == CG_INT4 || type == CG_BOOL4) return 4;
+    if (type >= CG_FLOAT1x1 && type <= CG_FLOAT1x4)
+        return (int)(type - CG_FLOAT1x1) + 1;
+    if (type >= CG_FLOAT2x1 && type <= CG_FLOAT2x4)
+        return (int)(type - CG_FLOAT2x1) + 1;
+    if (type >= CG_FLOAT3x1 && type <= CG_FLOAT3x4)
+        return (int)(type - CG_FLOAT3x1) + 1;
+    if (type >= CG_FLOAT4x1 && type <= CG_FLOAT4x4)
+        return (int)(type - CG_FLOAT4x1) + 1;
+    return 0;
+}
+
+static int cg_rows_for_type(CGtype type)
+{
+    if (type >= CG_FLOAT1x1 && type <= CG_FLOAT1x4) return 1;
+    if (type >= CG_FLOAT2x1 && type <= CG_FLOAT2x4) return 2;
+    if (type >= CG_FLOAT3x1 && type <= CG_FLOAT3x4) return 3;
+    if (type >= CG_FLOAT4x1 && type <= CG_FLOAT4x4) return 4;
+    return cg_columns_for_type(type) ? 1 : 0;
+}
+
+void psgl_cg_set_parameter_floats(PSGLcgParameter *parameter,
+                                  const float *values, uint32_t count)
+{
+    if (!parameter || !values) return;
+    if (count > 16u) count = 16u;
+    cg_copy(parameter->value, values, count * sizeof(float));
+    parameter->value_count = count;
+    parameter->dirty = CG_TRUE;
+}
+
+void psgl_cg_get_parameter_floats(PSGLcgParameter *parameter,
+                                  float *values, uint32_t count)
+{
+    if (!values) return;
+    for (uint32_t i = 0; i < count; i++)
+        values[i] = (parameter && i < parameter->value_count) ?
+            parameter->value[i] : 0.0f;
+}
+
+void psgl_cg_set_parameter_matrix(PSGLcgParameter *parameter,
+                                  const float *values)
+{
+    psgl_cg_set_parameter_floats(parameter, values, 16u);
+}
+
+void psgl_cg_get_parameter_matrix(PSGLcgParameter *parameter,
+                                  float *values)
+{
+    psgl_cg_get_parameter_floats(parameter, values, 16u);
+}
 
 CG_API CGerror CGENTRY cgGetError(void)
 {
@@ -79,14 +350,29 @@ CG_API CGenum CGENTRY cgGetSemanticCasePolicy(void) { return 0; }
 
 CG_API CGcontext CGENTRY cgCreateContext(void)
 {
-    g_cg_error = CG_MEMORY_ALLOC_ERROR;
-    return NULL;
+    PSGLcgContext *context =
+        (PSGLcgContext *)calloc(1u, sizeof(PSGLcgContext));
+    if (!context) {
+        psgl_cg_set_error(NULL, CG_MEMORY_ALLOC_ERROR);
+        return NULL;
+    }
+    context->magic = PSGL_CG_CONTEXT_MAGIC;
+    context->last_error = CG_NO_ERROR;
+    return (CGcontext)context;
 }
 
-CG_API void CGENTRY cgDestroyContext(CGcontext ctx) { (void)ctx; }
+CG_API void CGENTRY cgDestroyContext(CGcontext ctx)
+{
+    PSGLcgContext *context = psgl_cg_context(ctx);
+    if (!context) return;
+    while (context->programs)
+        cg_free_program(context->programs);
+    context->magic = 0u;
+    free(context);
+}
 
 CG_API CGbool CGENTRY cgIsContext(CGcontext ctx)
-{ (void)ctx; return CG_FALSE; }
+{ return psgl_cg_context(ctx) ? CG_TRUE : CG_FALSE; }
 
 CG_API const char *CGENTRY cgGetLastListing(CGcontext ctx)
 { (void)ctx; return NULL; }
@@ -123,8 +409,75 @@ CG_API CGprogram CGENTRY cgCreateProgramFromFile(CGcontext ctx,
                                                  CGprofile profile,
                                                  const char *entry,
                                                  const char **args)
-{ (void)ctx; (void)program_type; (void)program_file;
-  (void)profile; (void)entry; (void)args; return NULL; }
+{
+    PSGLcgContext *context = psgl_cg_context(ctx);
+    PSGLcgProgram *program;
+    CgBinaryProgram *binary;
+    uint32_t binary_size = 0u;
+    CGprofile selected;
+    CellCgbProfile cgb_profile;
+
+    (void)entry;
+    (void)args;
+    if (!context) {
+        psgl_cg_set_error(NULL, CG_INVALID_CONTEXT_HANDLE_ERROR);
+        return NULL;
+    }
+    if (program_type != CG_BINARY || !program_file) {
+        psgl_cg_set_error(context, CG_INVALID_ENUMERANT_ERROR);
+        return NULL;
+    }
+
+    binary = (CgBinaryProgram *)cg_read_file(program_file, &binary_size);
+    if (!binary) {
+        psgl_cg_set_error(context, CG_FILE_READ_ERROR);
+        return NULL;
+    }
+    selected = cg_default_profile(binary, profile);
+    if (!psgl_cg_profile_is_vertex(selected) &&
+        !psgl_cg_profile_is_fragment(selected)) {
+        free(binary);
+        psgl_cg_set_error(context, CG_INVALID_PROFILE_ERROR);
+        return NULL;
+    }
+
+    program = (PSGLcgProgram *)calloc(1u, sizeof(PSGLcgProgram));
+    if (!program) {
+        free(binary);
+        psgl_cg_set_error(context, CG_MEMORY_ALLOC_ERROR);
+        return NULL;
+    }
+    program->magic = PSGL_CG_PROGRAM_MAGIC;
+    program->context = context;
+    program->profile = selected;
+    program->binary = binary;
+    program->binary_size = binary_size;
+
+    if (cellCgbRead(binary, binary_size, &program->cgb_program) != CELL_CGB_OK) {
+        cg_free_program(program);
+        psgl_cg_set_error(context, CG_PROGRAM_LOAD_ERROR);
+        return NULL;
+    }
+    cgb_profile = cellCgbGetProfile(&program->cgb_program);
+    if ((psgl_cg_profile_is_vertex(selected) &&
+         cgb_profile != CELL_CGB_PROFILE_VERTEX) ||
+        (psgl_cg_profile_is_fragment(selected) &&
+         cgb_profile != CELL_CGB_PROFILE_FRAGMENT)) {
+        cg_free_program(program);
+        psgl_cg_set_error(context, CG_INVALID_PROFILE_ERROR);
+        return NULL;
+    }
+    program->cgb_profile = cgb_profile;
+    if (!cg_build_parameters(program)) {
+        cg_free_program(program);
+        psgl_cg_set_error(context, CG_MEMORY_ALLOC_ERROR);
+        return NULL;
+    }
+
+    cg_link_program(context, program);
+    psgl_cg_set_error(context, CG_NO_ERROR);
+    return (CGprogram)program;
+}
 
 CG_API CGprogram CGENTRY cgCopyProgram(CGprogram program)
 {
@@ -134,42 +487,76 @@ CG_API CGprogram CGENTRY cgCopyProgram(CGprogram program)
 }
 
 CG_API void CGENTRY cgDestroyProgram(CGprogram program)
-{ (void)program; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    if (p) cg_free_program(p);
+}
 
 CG_API CGprogram CGENTRY cgGetFirstProgram(CGcontext ctx)
-{ (void)ctx; return NULL; }
+{
+    PSGLcgContext *context = psgl_cg_context(ctx);
+    return context ? (CGprogram)context->programs : NULL;
+}
 
 CG_API CGprogram CGENTRY cgGetNextProgram(CGprogram current)
-{ (void)current; return NULL; }
+{
+    PSGLcgProgram *program = psgl_cg_program(current);
+    return program ? (CGprogram)program->next : NULL;
+}
 
 CG_API CGcontext CGENTRY cgGetProgramContext(CGprogram prog)
-{ (void)prog; return NULL; }
+{
+    PSGLcgProgram *program = psgl_cg_program(prog);
+    return program ? (CGcontext)program->context : NULL;
+}
 
 CG_API CGbool CGENTRY cgIsProgram(CGprogram program)
-{ (void)program; return CG_FALSE; }
+{ return psgl_cg_program(program) ? CG_TRUE : CG_FALSE; }
 
 CG_API void CGENTRY cgCompileProgram(CGprogram program) { (void)program; }
 
 CG_API CGbool CGENTRY cgIsProgramCompiled(CGprogram program)
-{ (void)program; return CG_FALSE; }
+{ return psgl_cg_program(program) ? CG_TRUE : CG_FALSE; }
 
 CG_API const char *CGENTRY cgGetProgramString(CGprogram prog, CGenum pname)
-{ (void)prog; (void)pname; return NULL; }
+{
+    PSGLcgProgram *program = psgl_cg_program(prog);
+    if (!program) return NULL;
+    if (pname == CG_COMPILED_PROGRAM || pname == CG_PROGRAM_SOURCE)
+        return (const char *)program->binary;
+    return NULL;
+}
 
 CG_API CGprofile CGENTRY cgGetProgramProfile(CGprogram prog)
-{ (void)prog; return (CGprofile)0; }
+{
+    PSGLcgProgram *program = psgl_cg_program(prog);
+    return program ? program->profile : (CGprofile)0;
+}
 
 CG_API char const *const *CGENTRY cgGetProgramOptions(CGprogram prog)
 { (void)prog; return NULL; }
 
 CG_API void CGENTRY cgSetProgramProfile(CGprogram prog, CGprofile profile)
-{ (void)prog; (void)profile; }
+{
+    PSGLcgProgram *program = psgl_cg_program(prog);
+    if (program && (psgl_cg_profile_is_vertex(profile) ||
+                    psgl_cg_profile_is_fragment(profile)))
+        program->profile = profile;
+}
 
 CG_API CGenum CGENTRY cgGetProgramInput(CGprogram program)
-{ (void)program; return 0; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    if (!p) return 0;
+    return psgl_cg_profile_is_vertex(p->profile) ? CG_VERTEX : CG_FRAGMENT;
+}
 
 CG_API CGenum CGENTRY cgGetProgramOutput(CGprogram program)
-{ (void)program; return 0; }
+{
+    PSGLcgProgram *p = psgl_cg_program(program);
+    if (!p) return 0;
+    return psgl_cg_profile_is_vertex(p->profile) ? CG_VERTEX : CG_FRAGMENT;
+}
 
 CG_API void CGENTRY cgSetPassProgramParameters(CGprogram p) { (void)p; }
 CG_API void CGENTRY cgUpdateProgramParameters(CGprogram p)  { (void)p; }
@@ -201,25 +588,44 @@ CG_API CGparameter CGENTRY cgGetConnectedToParameter(CGparameter param,
 
 CG_API CGparameter CGENTRY cgGetNamedParameter(CGprogram prog,
                                                const char *name)
-{ (void)prog; (void)name; return NULL; }
+{
+    PSGLcgProgram *program = psgl_cg_program(prog);
+    if (!program || !name) return NULL;
+    for (uint32_t i = 0; i < program->parameter_count; i++) {
+        if (cg_streq(program->parameters[i].name, name))
+            return (CGparameter)&program->parameters[i];
+    }
+    return NULL;
+}
 
 CG_API CGparameter CGENTRY cgGetNamedProgramParameter(CGprogram prog,
     CGenum name_space, const char *name)
-{ (void)prog; (void)name_space; (void)name; return NULL; }
+{ (void)name_space; return cgGetNamedParameter(prog, name); }
 
 CG_API CGparameter CGENTRY cgGetFirstParameter(CGprogram prog,
                                                CGenum name_space)
-{ (void)prog; (void)name_space; return NULL; }
+{
+    PSGLcgProgram *program = psgl_cg_program(prog);
+    (void)name_space;
+    return (program && program->parameter_count) ?
+        (CGparameter)&program->parameters[0] : NULL;
+}
 
 CG_API CGparameter CGENTRY cgGetNextParameter(CGparameter current)
-{ (void)current; return NULL; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(current);
+    PSGLcgProgram *program = parameter ? parameter->program : NULL;
+    if (!program || parameter->index + 1u >= program->parameter_count)
+        return NULL;
+    return (CGparameter)&program->parameters[parameter->index + 1u];
+}
 
 CG_API CGparameter CGENTRY cgGetFirstLeafParameter(CGprogram prog,
                                                    CGenum name_space)
-{ (void)prog; (void)name_space; return NULL; }
+{ return cgGetFirstParameter(prog, name_space); }
 
 CG_API CGparameter CGENTRY cgGetNextLeafParameter(CGparameter current)
-{ (void)current; return NULL; }
+{ return cgGetNextParameter(current); }
 
 CG_API CGparameter CGENTRY cgGetFirstStructParameter(CGparameter param)
 { (void)param; return NULL; }
@@ -249,39 +655,74 @@ CG_API void CGENTRY cgSetMultiDimArraySize(CGparameter param,
 { (void)param; (void)sizes; }
 
 CG_API CGprogram CGENTRY cgGetParameterProgram(CGparameter param)
-{ (void)param; return NULL; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? (CGprogram)parameter->program : NULL;
+}
 CG_API CGcontext CGENTRY cgGetParameterContext(CGparameter param)
-{ (void)param; return NULL; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return (parameter && parameter->program) ?
+        (CGcontext)parameter->program->context : NULL;
+}
 CG_API CGbool CGENTRY cgIsParameter(CGparameter param)
-{ (void)param; return CG_FALSE; }
+{ return psgl_cg_parameter(param) ? CG_TRUE : CG_FALSE; }
 CG_API const char *CGENTRY cgGetParameterName(CGparameter param)
-{ (void)param; return NULL; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? parameter->name : NULL;
+}
 CG_API CGtype CGENTRY cgGetParameterType(CGparameter param)
-{ (void)param; return (CGtype)0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? parameter->type : (CGtype)0;
+}
 CG_API CGtype CGENTRY cgGetParameterBaseType(CGparameter param)
-{ (void)param; return (CGtype)0; }
+{ return cgGetParameterType(param); }
 CG_API CGparameterclass CGENTRY cgGetParameterClass(CGparameter param)
-{ (void)param; return (CGparameterclass)0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? cg_class_for_type(parameter->type) :
+        CG_PARAMETERCLASS_UNKNOWN;
+}
 CG_API int CGENTRY cgGetParameterRows(CGparameter param)
-{ (void)param; return 0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? cg_rows_for_type(parameter->type) : 0;
+}
 CG_API int CGENTRY cgGetParameterColumns(CGparameter param)
-{ (void)param; return 0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? cg_columns_for_type(parameter->type) : 0;
+}
 CG_API CGtype CGENTRY cgGetParameterNamedType(CGparameter param)
 { (void)param; return (CGtype)0; }
 CG_API const char *CGENTRY cgGetParameterSemantic(CGparameter param)
 { (void)param; return NULL; }
 CG_API CGresource CGENTRY cgGetParameterResource(CGparameter param)
-{ (void)param; return (CGresource)0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? parameter->resource : (CGresource)0;
+}
 CG_API CGresource CGENTRY cgGetParameterBaseResource(CGparameter param)
-{ (void)param; return (CGresource)0; }
+{ return cgGetParameterResource(param); }
 CG_API unsigned long CGENTRY cgGetParameterResourceIndex(CGparameter param)
-{ (void)param; return 0UL; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? (unsigned long)parameter->resource_index : 0UL;
+}
 CG_API CGenum CGENTRY cgGetParameterVariability(CGparameter param)
-{ (void)param; return 0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? parameter->variability : 0;
+}
 CG_API CGenum CGENTRY cgGetParameterDirection(CGparameter param)
-{ (void)param; return 0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? parameter->direction : 0;
+}
 CG_API CGbool CGENTRY cgIsParameterReferenced(CGparameter param)
-{ (void)param; return CG_FALSE; }
+{ return psgl_cg_parameter(param) ? CG_TRUE : CG_FALSE; }
 CG_API CGbool CGENTRY cgIsParameterUsed(CGparameter param, CGhandle handle)
 { (void)param; (void)handle; return CG_FALSE; }
 
@@ -297,9 +738,13 @@ CG_API void CGENTRY cgSetParameterValuedr(CGparameter p, int n, const double *v)
 CG_API void CGENTRY cgSetParameterValuedc(CGparameter p, int n, const double *v)
 { (void)p; (void)n; (void)v; }
 CG_API void CGENTRY cgSetParameterValuefr(CGparameter p, int n, const float *v)
-{ (void)p; (void)n; (void)v; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(p);
+    if (parameter && n > 0)
+        psgl_cg_set_parameter_floats(parameter, v, (uint32_t)n);
+}
 CG_API void CGENTRY cgSetParameterValuefc(CGparameter p, int n, const float *v)
-{ (void)p; (void)n; (void)v; }
+{ cgSetParameterValuefr(p, n, v); }
 CG_API void CGENTRY cgSetParameterValueir(CGparameter p, int n, const int *v)
 { (void)p; (void)n; (void)v; }
 CG_API void CGENTRY cgSetParameterValueic(CGparameter p, int n, const int *v)
@@ -309,9 +754,14 @@ CG_API int CGENTRY cgGetParameterValuedr(CGparameter p, int n, double *v)
 CG_API int CGENTRY cgGetParameterValuedc(CGparameter p, int n, double *v)
 { (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(double)); return 0; }
 CG_API int CGENTRY cgGetParameterValuefr(CGparameter p, int n, float *v)
-{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(float)); return 0; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(p);
+    if (n < 0) return 0;
+    psgl_cg_get_parameter_floats(parameter, v, (uint32_t)n);
+    return parameter ? n : 0;
+}
 CG_API int CGENTRY cgGetParameterValuefc(CGparameter p, int n, float *v)
-{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(float)); return 0; }
+{ return cgGetParameterValuefr(p, n, v); }
 CG_API int CGENTRY cgGetParameterValueir(CGparameter p, int n, int *v)
 { (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(int)); return 0; }
 CG_API int CGENTRY cgGetParameterValueic(CGparameter p, int n, int *v)
@@ -328,7 +778,10 @@ CG_API int CGENTRY cgGetParameterOrdinalNumber(CGparameter param)
 CG_API CGbool CGENTRY cgIsParameterGlobal(CGparameter param)
 { (void)param; return CG_FALSE; }
 CG_API int CGENTRY cgGetParameterIndex(CGparameter param)
-{ (void)param; return -1; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(param);
+    return parameter ? (int)parameter->index : -1;
+}
 CG_API void CGENTRY cgSetParameterVariability(CGparameter param, CGenum vary)
 { (void)param; (void)vary; }
 CG_API void CGENTRY cgSetParameterSemantic(CGparameter param,
@@ -417,7 +870,11 @@ CG_API CGprofile CGENTRY cgGetProfile(const char *profile_string)
 CG_API int CGENTRY cgGetNumProgramDomains(CGprogram program)
 { (void)program; return 0; }
 CG_API CGdomain CGENTRY cgGetProfileDomain(CGprofile profile)
-{ (void)profile; return (CGdomain)0; }
+{
+    if (psgl_cg_profile_is_vertex(profile)) return CG_VERTEX_DOMAIN;
+    if (psgl_cg_profile_is_fragment(profile)) return CG_FRAGMENT_DOMAIN;
+    return CG_UNKNOWN_DOMAIN;
+}
 CG_API CGprogram CGENTRY cgCombinePrograms(int n, const CGprogram *exeList)
 { (void)n; (void)exeList; return NULL; }
 CG_API CGprogram CGENTRY cgCombinePrograms2(const CGprogram e1,
@@ -476,13 +933,22 @@ CG_API unsigned long CGENTRY cgGetBufferSize(CGbuffer b)
 /* ── type class helpers ──────────────────────────────────────────── */
 
 CG_API CGparameterclass CGENTRY cgGetTypeClass(CGtype type)
-{ (void)type; return (CGparameterclass)0; }
+{ return cg_class_for_type(type); }
 CG_API CGtype CGENTRY cgGetTypeBase(CGtype type)
 { (void)type; return (CGtype)0; }
 CG_API CGbool CGENTRY cgGetTypeSizes(CGtype type, int *nrows, int *ncols)
-{ (void)type; if (nrows) *nrows = 0; if (ncols) *ncols = 0; return CG_FALSE; }
+{
+    int rows = cg_rows_for_type(type);
+    int cols = cg_columns_for_type(type);
+    if (nrows) *nrows = rows;
+    if (ncols) *ncols = cols;
+    return (rows && cols) ? CG_TRUE : CG_FALSE;
+}
 CG_API void CGENTRY cgGetMatrixSize(CGtype type, int *nrows, int *ncols)
-{ (void)type; if (nrows) *nrows = 0; if (ncols) *ncols = 0; }
+{
+    if (nrows) *nrows = cg_rows_for_type(type);
+    if (ncols) *ncols = cg_columns_for_type(type);
+}
 
 /* ── PS3-specific Cg runtime init ────────────────────────────────── */
 
