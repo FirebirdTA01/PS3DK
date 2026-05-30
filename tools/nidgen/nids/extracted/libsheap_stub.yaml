@@ -1,77 +1,78 @@
 library: cellSheap
 version: 1
 module: cellSheap
+archive_name: sheap
 exports:
 - name: cellKeySheapBarrierDelete
   nid: '0xf6f5fbca'
-  signature: ''
+  signature: void cellKeySheapBarrierDelete(CellKeySheapBarrier *obj)
   notes: extracted from _cellSheap_0001_18.o
 - name: cellKeySheapBarrierNew
   nid: '0xe897c835'
-  signature: ''
+  signature: int cellKeySheapBarrierNew(CellKeySheapBarrier *obj, void *ksheap, CellSheapKey key, uint16_t total_count)
   notes: extracted from _cellSheap_0001_15.o
 - name: cellKeySheapBufferDelete
   nid: '0xe6b37362'
-  signature: ''
+  signature: void cellKeySheapBufferDelete(CellKeySheapBuffer *obj)
   notes: extracted from _cellSheap_0001_14.o
 - name: cellKeySheapBufferNew
   nid: '0x4a5b9659'
-  signature: ''
+  signature: int cellKeySheapBufferNew(CellKeySheapBuffer *obj, void *ksheap, CellSheapKey key, uint64_t size)
   notes: extracted from _cellSheap_0001_4.o
 - name: cellKeySheapInitialize
   nid: '0xa1b25841'
-  signature: ''
+  signature: int cellKeySheapInitialize(void *ea_sheap, uint64_t size, uint32_t spu_dma_tag)
   notes: extracted from _cellSheap_0001_12.o
 - name: cellKeySheapMutexDelete
   nid: '0x2452679f'
-  signature: ''
+  signature: void cellKeySheapMutexDelete(CellKeySheapMutex *obj)
   notes: extracted from _cellSheap_0001_1.o
 - name: cellKeySheapMutexNew
   nid: '0x3478e1e6'
-  signature: ''
+  signature: int cellKeySheapMutexNew(CellKeySheapMutex *obj, void *ksheap, CellSheapKey key)
   notes: extracted from _cellSheap_0001_2.o
 - name: cellKeySheapQueueDelete
   nid: '0x79a6abd0'
-  signature: ''
+  signature: void cellKeySheapQueueDelete(CellKeySheapQueue *obj)
   notes: extracted from _cellSheap_0001_9.o
 - name: cellKeySheapQueueNew
   nid: '0x987e260e'
-  signature: ''
+  signature: int cellKeySheapQueueNew(CellKeySheapQueue *obj, void *ksheap, CellSheapKey key, uint32_t buffer_size, uint32_t depth)
   notes: extracted from _cellSheap_0001_11.o
 - name: cellKeySheapRwmDelete
   nid: '0xed136702'
-  signature: ''
+  signature: void cellKeySheapRwmDelete(CellKeySheapRwm *obj)
   notes: extracted from _cellSheap_0001_16.o
 - name: cellKeySheapRwmNew
   nid: '0xf01ac471'
-  signature: ''
+  signature: int cellKeySheapRwmNew(CellKeySheapRwm *obj, void *ksheap, CellSheapKey key, uint32_t buffer_size)
   notes: extracted from _cellSheap_0001_17.o
 - name: cellKeySheapSemaphoreDelete
   nid: '0x73a45cf8'
-  signature: ''
+  signature: void cellKeySheapSemaphoreDelete(CellKeySheapSemaphore *obj)
   notes: extracted from _cellSheap_0001_8.o
 - name: cellKeySheapSemaphoreNew
   nid: '0x69a5861d'
-  signature: ''
+  signature: int cellKeySheapSemaphoreNew(CellKeySheapSemaphore *obj, void *ksheap, CellSheapKey key, int count)
   notes: extracted from _cellSheap_0001_7.o
 - name: cellSheapAllocate
   nid: '0x4b1383fb'
-  signature: ''
+  signature: void *cellSheapAllocate(void *ea_sheap, uint64_t size)
   notes: extracted from _cellSheap_0001_5.o
 - name: cellSheapFree
   nid: '0x5c5994bd'
-  signature: ''
+  signature: int cellSheapFree(void *ea_sheap, void *ptr)
   notes: extracted from _cellSheap_0001_6.o
 - name: cellSheapInitialize
   nid: '0xbbb47cd8'
-  signature: ''
+  signature: int cellSheapInitialize(void *ea_sheap, uint64_t size, uint32_t spu_dma_tag)
   notes: extracted from _cellSheap_0001_13.o
 - name: cellSheapQueryFree
   nid: '0x7fa23275'
-  signature: ''
+  signature: int cellSheapQueryFree(void *ea_sheap)
   notes: extracted from _cellSheap_0001_10.o
 - name: cellSheapQueryMax
   nid: '0x37968718'
-  signature: ''
+  signature: int cellSheapQueryMax(void *ea_sheap)
   notes: extracted from _cellSheap_0001_3.o
 imports: []

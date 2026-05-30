@@ -155,6 +155,16 @@ HEADERS := \
     include/cell/sync.h \
     include/cell/sync/barrier.h \
     include/cell/sync2.h \
+    include/cell/sheap.h \
+    include/cell/sheap/error.h \
+    include/cell/sheap/sheap_base.h \
+    include/cell/sheap/key_sheap.h \
+    include/cell/sheap/key_sheap_barrier.h \
+    include/cell/sheap/key_sheap_buffer.h \
+    include/cell/sheap/key_sheap_mutex.h \
+    include/cell/sheap/key_sheap_queue.h \
+    include/cell/sheap/key_sheap_rwm.h \
+    include/cell/sheap/key_sheap_semaphore.h \
     include/cell/sysutil_ap.h \
     include/cell/audio.h \
     include/cell/pngdec.h \
