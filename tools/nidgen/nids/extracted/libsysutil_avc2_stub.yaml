@@ -1,221 +1,222 @@
 library: cellSysutilAvc2
+archive_name: sysutil_avc2
 version: 1
 module: cellSysutilAvc2
 exports:
 - name: cellSysutilAvc2ChangeVideoResolution
   nid: '0x07236c83'
-  signature: ''
+  signature: 'int cellSysutilAvc2ChangeVideoResolution(const CellSysutilAvc2VideoResolution resolution)'
   notes: extracted from _cellSysutilAvc2_0001_4.o
 - name: cellSysutilAvc2CreateWindow
   nid: '0xa8dc0efa'
-  signature: ''
+  signature: 'int cellSysutilAvc2CreateWindow(const SceNpMatching2RoomMemberId member_id)'
   notes: extracted from _cellSysutilAvc2_0001_37.o
 - name: cellSysutilAvc2DestroyWindow
   nid: '0x3a37e7f1'
-  signature: ''
+  signature: 'int cellSysutilAvc2DestroyWindow(const SceNpMatching2RoomMemberId member_id)'
   notes: extracted from _cellSysutilAvc2_0001_22.o
 - name: cellSysutilAvc2EnumPlayers
   nid: '0xb81b9777'
-  signature: ''
+  signature: 'int cellSysutilAvc2EnumPlayers(int *players_num, SceNpMatching2RoomMemberId players_id[])'
   notes: extracted from _cellSysutilAvc2_0001_41.o
 - name: cellSysutilAvc2EstimateMemoryContainerSize
   nid: '0x2f280883'
-  signature: ''
+  signature: 'int cellSysutilAvc2EstimateMemoryContainerSize(const CellSysutilAvc2InitParam *option, uint32_t *size)'
   notes: extracted from _cellSysutilAvc2_0001_17.o
 - name: cellSysutilAvc2GetAttribute
   nid: '0x1be2b4e0'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetAttribute(CellSysutilAvc2Attribute *attr)'
   notes: extracted from _cellSysutilAvc2_0001_13.o
 - name: cellSysutilAvc2GetPlayerInfo
   nid: '0x02c5417a'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetPlayerInfo(const SceNpMatching2RoomMemberId *player_id, CellSysutilAvc2PlayerInfo *player_info)'
   notes: extracted from _cellSysutilAvc2_0001_1.o
 - name: cellSysutilAvc2GetPlayerVoiceMuting
   nid: '0x5f3811f8'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetPlayerVoiceMuting(const SceNpMatching2RoomMemberId member_id, uint8_t *muting)'
   notes: extracted from _cellSysutilAvc2_0001_27.o
 - name: cellSysutilAvc2GetScreenShowStatus
   nid: '0xe40e3dfc'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetScreenShowStatus(uint8_t *visible)'
   notes: extracted from _cellSysutilAvc2_0001_52.o
 - name: cellSysutilAvc2GetSpeakerMuting
   nid: '0xa9f5b75c'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetSpeakerMuting(uint8_t *muting)'
   notes: extracted from _cellSysutilAvc2_0001_38.o
 - name: cellSysutilAvc2GetSpeakerVolumeLevel
   nid: '0x3ef4f668'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetSpeakerVolumeLevel(float *level)'
   notes: extracted from _cellSysutilAvc2_0001_24.o
 - name: cellSysutilAvc2GetVideoMuting
   nid: '0x0f5a2afb'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetVideoMuting(uint8_t *muting)'
   notes: extracted from _cellSysutilAvc2_0001_6.o
 - name: cellSysutilAvc2GetVoiceMuting
   nid: '0xdf2ed367'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetVoiceMuting(uint8_t *muting)'
   notes: extracted from _cellSysutilAvc2_0001_51.o
 - name: cellSysutilAvc2GetWindowAttribute
   nid: '0x103d6b46'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetWindowAttribute(const SceNpMatching2RoomMemberId member_id, CellSysutilAvc2WindowAttribute *attr)'
   notes: extracted from _cellSysutilAvc2_0001_7.o
 - name: cellSysutilAvc2GetWindowPosition
   nid: '0xfc2873a9'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetWindowPosition(const SceNpMatching2RoomMemberId member_id, float *x, float *y, float *z)'
   notes: extracted from _cellSysutilAvc2_0001_54.o
 - name: cellSysutilAvc2GetWindowShowStatus
   nid: '0x82ced772'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetWindowShowStatus(const SceNpMatching2RoomMemberId member_id, uint8_t *visible)'
   notes: extracted from _cellSysutilAvc2_0001_31.o
 - name: cellSysutilAvc2GetWindowSize
   nid: '0x8a40a618'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetWindowSize(const SceNpMatching2RoomMemberId member_id, float *width, float *height)'
   notes: extracted from _cellSysutilAvc2_0001_33.o
 - name: cellSysutilAvc2GetWindowString
   nid: '0xb856b63f'
-  signature: ''
+  signature: 'int cellSysutilAvc2GetWindowString(const SceNpMatching2RoomMemberId member_id, char *string, uint8_t *len)'
   notes: extracted from _cellSysutilAvc2_0001_42.o
 - name: cellSysutilAvc2HideScreen
   nid: '0xd7d6272f'
-  signature: ''
+  signature: 'int cellSysutilAvc2HideScreen(void)'
   notes: extracted from _cellSysutilAvc2_0001_49.o
 - name: cellSysutilAvc2HideWindow
   nid: '0xde6afc37'
-  signature: ''
+  signature: 'int cellSysutilAvc2HideWindow(const SceNpMatching2RoomMemberId member_id)'
   notes: extracted from _cellSysutilAvc2_0001_50.o
 - name: cellSysutilAvc2InitParam
   nid: '0x89456724'
-  signature: ''
+  signature: 'int cellSysutilAvc2InitParam(const uint16_t version, CellSysutilAvc2InitParam *option)'
   notes: extracted from _cellSysutilAvc2_0001_32.o
 - name: cellSysutilAvc2IsCameraAttached
   nid: '0x4c4b9665'
-  signature: ''
+  signature: 'int cellSysutilAvc2IsCameraAttached(uint8_t *status)'
   notes: extracted from _cellSysutilAvc2_0001_25.o
 - name: cellSysutilAvc2IsMicAttached
   nid: '0xa26aa437'
-  signature: ''
+  signature: 'int cellSysutilAvc2IsMicAttached(uint8_t *status)'
   notes: extracted from _cellSysutilAvc2_0001_36.o
 - name: cellSysutilAvc2JoinChat
   nid: '0x02dc41ee'
-  signature: ''
+  signature: 'int cellSysutilAvc2JoinChat(const SceNpMatching2RoomId *room_id, CellSysutilAvc2EventId *eventId, CellSysutilAvc2EventParam *eventParam)'
   notes: extracted from _cellSysutilAvc2_0001_2.o
 - name: cellSysutilAvc2JoinChatRequest
   nid: '0x712d51d6'
-  signature: ''
+  signature: 'int cellSysutilAvc2JoinChatRequest(const SceNpMatching2RoomId *room_id)'
   notes: extracted from _cellSysutilAvc2_0001_28.o
 - name: cellSysutilAvc2LeaveChat
   nid: '0xbf022284'
-  signature: ''
+  signature: 'int cellSysutilAvc2LeaveChat(CellSysutilAvc2EventId *eventId, CellSysutilAvc2EventParam *eventParam)'
   notes: extracted from _cellSysutilAvc2_0001_43.o
 - name: cellSysutilAvc2LeaveChatRequest
   nid: '0x97b2da6a'
-  signature: ''
+  signature: 'int cellSysutilAvc2LeaveChatRequest(void)'
   notes: extracted from _cellSysutilAvc2_0001_35.o
 - name: cellSysutilAvc2Load
   nid: '0xc6c93d62'
-  signature: ''
+  signature: 'int cellSysutilAvc2Load(SceNpMatching2ContextId ctx_id, const sys_memory_container_t container, CellSysutilAvc2Callback callback_func, void *user_data, const CellSysutilAvc2InitParam *init_param)'
   notes: extracted from _cellSysutilAvc2_0001_45.o
 - name: cellSysutilAvc2LoadAsync
   nid: '0x1d73ab8c'
-  signature: ''
+  signature: 'int cellSysutilAvc2LoadAsync(SceNpMatching2ContextId ctx_id, const sys_memory_container_t container, CellSysutilAvc2Callback callback_func, void *user_data, const CellSysutilAvc2InitParam *init_param)'
   notes: extracted from _cellSysutilAvc2_0001_14.o
 - name: cellSysutilAvc2MicRead
   nid: '0x55d7bbfd'
-  signature: ''
+  signature: 'int cellSysutilAvc2MicRead(void *ptr, uint32_t *pSize)'
   notes: extracted from _cellSysutilAvc2_0001_26.o
 - name: cellSysutilAvc2SetAttribute
   nid: '0xccf0aeff'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetAttribute(const CellSysutilAvc2Attribute *attr)'
   notes: extracted from _cellSysutilAvc2_0001_46.o
 - name: cellSysutilAvc2SetPlayerVoiceMuting
   nid: '0x31fc8b92'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetPlayerVoiceMuting(const SceNpMatching2RoomMemberId member_id, const uint8_t muting)'
   notes: extracted from _cellSysutilAvc2_0001_19.o
 - name: cellSysutilAvc2SetSpeakerMuting
   nid: '0xc35ed665'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetSpeakerMuting(const uint8_t muting)'
   notes: extracted from _cellSysutilAvc2_0001_44.o
 - name: cellSysutilAvc2SetSpeakerVolumeLevel
   nid: '0x207621a8'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetSpeakerVolumeLevel(const float level)'
   notes: extracted from _cellSysutilAvc2_0001_15.o
 - name: cellSysutilAvc2SetStreamPriority
   nid: '0x8c2f5be3'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetStreamPriority(const uint8_t priority)'
   notes: extracted from _cellSysutilAvc2_0001_34.o
 - name: cellSysutilAvc2SetStreamingTarget
   nid: '0x3447668a'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetStreamingTarget(const CellSysutilAvc2StreamingTarget target)'
   notes: extracted from _cellSysutilAvc2_0001_20.o
 - name: cellSysutilAvc2SetVideoMuting
   nid: '0x2fc0ab58'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetVideoMuting(const uint8_t muting)'
   notes: extracted from _cellSysutilAvc2_0001_18.o
 - name: cellSysutilAvc2SetVoiceMuting
   nid: '0x14937714'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetVoiceMuting(const uint8_t muting)'
   notes: extracted from _cellSysutilAvc2_0001_9.o
 - name: cellSysutilAvc2SetWindowAttribute
   nid: '0x7a69ecc1'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetWindowAttribute(const SceNpMatching2RoomMemberId member_id, const CellSysutilAvc2WindowAttribute *attr)'
   notes: extracted from _cellSysutilAvc2_0001_30.o
 - name: cellSysutilAvc2SetWindowPosition
   nid: '0x3c8c827c'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetWindowPosition(const SceNpMatching2RoomMemberId member_id, const float x, const float y, const float z)'
   notes: extracted from _cellSysutilAvc2_0001_23.o
 - name: cellSysutilAvc2SetWindowSize
   nid: '0xaee75751'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetWindowSize(const SceNpMatching2RoomMemberId member_id, const float width, const float height)'
   notes: extracted from _cellSysutilAvc2_0001_40.o
 - name: cellSysutilAvc2SetWindowString
   nid: '0x225142bd'
-  signature: ''
+  signature: 'int cellSysutilAvc2SetWindowString(const SceNpMatching2RoomMemberId member_id, const char *string)'
   notes: extracted from _cellSysutilAvc2_0001_16.o
 - name: cellSysutilAvc2ShowScreen
   nid: '0x0b45cd84'
-  signature: ''
+  signature: 'int cellSysutilAvc2ShowScreen(void)'
   notes: extracted from _cellSysutilAvc2_0001_5.o
 - name: cellSysutilAvc2ShowWindow
   nid: '0xac170042'
-  signature: ''
+  signature: 'int cellSysutilAvc2ShowWindow(const SceNpMatching2RoomMemberId member_id)'
   notes: extracted from _cellSysutilAvc2_0001_39.o
 - name: cellSysutilAvc2StartStreaming
   nid: '0x74d22119'
-  signature: ''
+  signature: 'int cellSysutilAvc2StartStreaming(void)'
   notes: extracted from _cellSysutilAvc2_0001_29.o
 - name: cellSysutilAvc2StartStreaming2
   nid: '0xd42657dd'
-  signature: ''
+  signature: 'int cellSysutilAvc2StartStreaming2(const CellSysutilAvc2MediaType mediaType)'
   notes: extracted from _cellSysutilAvc2_0001_48.o
 - name: cellSysutilAvc2StartVoiceDetection
   nid: '0x16ff9ba0'
-  signature: ''
+  signature: 'int cellSysutilAvc2StartVoiceDetection(void)'
   notes: extracted from _cellSysutilAvc2_0001_10.o
 - name: cellSysutilAvc2StopStreaming
   nid: '0x04e1e1e4'
-  signature: ''
+  signature: 'int cellSysutilAvc2StopStreaming(void)'
   notes: extracted from _cellSysutilAvc2_0001_3.o
 - name: cellSysutilAvc2StopStreaming2
   nid: '0x11f071cb'
-  signature: ''
+  signature: 'int cellSysutilAvc2StopStreaming2(const CellSysutilAvc2MediaType mediaType)'
   notes: extracted from _cellSysutilAvc2_0001_8.o
 - name: cellSysutilAvc2StopVoiceDetection
   nid: '0x178982d9'
-  signature: ''
+  signature: 'int cellSysutilAvc2StopVoiceDetection(void)'
   notes: extracted from _cellSysutilAvc2_0001_12.o
 - name: cellSysutilAvc2Unload
   nid: '0x38f33624'
-  signature: ''
+  signature: 'int cellSysutilAvc2Unload(void)'
   notes: extracted from _cellSysutilAvc2_0001_21.o
 - name: cellSysutilAvc2Unload2
   nid: '0xf3b5ff77'
-  signature: ''
+  signature: 'int cellSysutilAvc2Unload2(const CellSysutilAvc2MediaType mediaType)'
   notes: extracted from _cellSysutilAvc2_0001_53.o
 - name: cellSysutilAvc2UnloadAsync
   nid: '0x17481336'
-  signature: ''
+  signature: 'int cellSysutilAvc2UnloadAsync(void)'
   notes: extracted from _cellSysutilAvc2_0001_11.o
 - name: cellSysutilAvc2UnloadAsync2
   nid: '0xce6780c9'
-  signature: ''
+  signature: 'int cellSysutilAvc2UnloadAsync2(const CellSysutilAvc2MediaType mediaType)'
   notes: extracted from _cellSysutilAvc2_0001_47.o
 imports: []

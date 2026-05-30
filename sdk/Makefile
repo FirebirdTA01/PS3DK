@@ -190,6 +190,10 @@ HEADERS := \
     include/cell/mic/define.h \
     include/cell/mic/error.h \
     include/cell/mic/interface.h \
+    include/sysutil_avc2.h \
+    include/sysutil_avc2_video.h \
+    include/cell/sysutil_avc2.h \
+    include/cell/sysutil_avc2_video.h \
     include/cell/pngdec.h \
     include/cell/sysmodule.h \
     include/cell/l10n.h \
