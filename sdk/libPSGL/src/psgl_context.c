@@ -145,6 +145,124 @@ static uint32_t psgl_pack_depth_stencil(GLfloat depth, GLint stencil)
     return (z << 8) | ((uint32_t)stencil & 0xffu);
 }
 
+static uint32_t psgl_bool(GLboolean value)
+{
+    return value ? CELL_GCM_TRUE : CELL_GCM_FALSE;
+}
+
+static int psgl_translate_compare(GLenum func, uint32_t *out)
+{
+    switch (func) {
+    case GL_NEVER:    *out = CELL_GCM_NEVER; break;
+    case GL_LESS:     *out = CELL_GCM_LESS; break;
+    case GL_EQUAL:    *out = CELL_GCM_EQUAL; break;
+    case GL_LEQUAL:   *out = CELL_GCM_LEQUAL; break;
+    case GL_GREATER:  *out = CELL_GCM_GREATER; break;
+    case GL_NOTEQUAL: *out = CELL_GCM_NOTEQUAL; break;
+    case GL_GEQUAL:   *out = CELL_GCM_GEQUAL; break;
+    case GL_ALWAYS:   *out = CELL_GCM_ALWAYS; break;
+    default: return 0;
+    }
+    return 1;
+}
+
+static int psgl_translate_blend_factor(GLenum factor, uint16_t *out)
+{
+    switch (factor) {
+    case GL_ZERO:                     *out = CELL_GCM_ZERO; break;
+    case GL_ONE:                      *out = CELL_GCM_ONE; break;
+    case GL_SRC_COLOR:                *out = CELL_GCM_SRC_COLOR; break;
+    case GL_ONE_MINUS_SRC_COLOR:      *out = CELL_GCM_ONE_MINUS_SRC_COLOR; break;
+    case GL_SRC_ALPHA:                *out = CELL_GCM_SRC_ALPHA; break;
+    case GL_ONE_MINUS_SRC_ALPHA:      *out = CELL_GCM_ONE_MINUS_SRC_ALPHA; break;
+    case GL_DST_ALPHA:                *out = CELL_GCM_DST_ALPHA; break;
+    case GL_ONE_MINUS_DST_ALPHA:      *out = CELL_GCM_ONE_MINUS_DST_ALPHA; break;
+    case GL_DST_COLOR:                *out = CELL_GCM_DST_COLOR; break;
+    case GL_ONE_MINUS_DST_COLOR:      *out = CELL_GCM_ONE_MINUS_DST_COLOR; break;
+    case GL_SRC_ALPHA_SATURATE:       *out = CELL_GCM_SRC_ALPHA_SATURATE; break;
+    case GL_CONSTANT_COLOR:           *out = CELL_GCM_CONSTANT_COLOR; break;
+    case GL_ONE_MINUS_CONSTANT_COLOR: *out = CELL_GCM_ONE_MINUS_CONSTANT_COLOR; break;
+    case GL_CONSTANT_ALPHA:           *out = CELL_GCM_CONSTANT_ALPHA; break;
+    case GL_ONE_MINUS_CONSTANT_ALPHA: *out = CELL_GCM_ONE_MINUS_CONSTANT_ALPHA; break;
+    default: return 0;
+    }
+    return 1;
+}
+
+static int psgl_translate_blend_equation(GLenum mode, uint16_t *out)
+{
+    switch (mode) {
+    case GL_FUNC_ADD:              *out = CELL_GCM_FUNC_ADD; break;
+    case GL_MIN:                   *out = CELL_GCM_MIN; break;
+    case GL_MAX:                   *out = CELL_GCM_MAX; break;
+    case GL_FUNC_SUBTRACT:         *out = CELL_GCM_FUNC_SUBTRACT; break;
+    case GL_FUNC_REVERSE_SUBTRACT: *out = CELL_GCM_FUNC_REVERSE_SUBTRACT; break;
+    default: return 0;
+    }
+    return 1;
+}
+
+static int psgl_translate_stencil_op(GLenum op, uint32_t *out)
+{
+    switch (op) {
+    case GL_KEEP:      *out = CELL_GCM_KEEP; break;
+    case GL_ZERO:      *out = CELL_GCM_ZERO; break;
+    case GL_REPLACE:   *out = CELL_GCM_REPLACE; break;
+    case GL_INCR:      *out = CELL_GCM_INCR; break;
+    case GL_DECR:      *out = CELL_GCM_DECR; break;
+    case GL_INVERT:    *out = CELL_GCM_INVERT; break;
+    case GL_INCR_WRAP: *out = CELL_GCM_INCR_WRAP; break;
+    case GL_DECR_WRAP: *out = CELL_GCM_DECR_WRAP; break;
+    default: return 0;
+    }
+    return 1;
+}
+
+static int psgl_translate_cull_face(GLenum mode, uint32_t *out)
+{
+    switch (mode) {
+    case GL_FRONT:          *out = CELL_GCM_FRONT; break;
+    case GL_BACK:           *out = CELL_GCM_BACK; break;
+    case GL_FRONT_AND_BACK: *out = CELL_GCM_FRONT_AND_BACK; break;
+    default: return 0;
+    }
+    return 1;
+}
+
+static int psgl_translate_front_face(GLenum mode, uint32_t *out)
+{
+    switch (mode) {
+    case GL_CW:  *out = CELL_GCM_CW; break;
+    case GL_CCW: *out = CELL_GCM_CCW; break;
+    default: return 0;
+    }
+    return 1;
+}
+
+static int psgl_translate_logic_op(GLenum op, uint32_t *out)
+{
+    switch (op) {
+    case GL_CLEAR:         *out = CELL_GCM_CLEAR; break;
+    case GL_AND:           *out = CELL_GCM_AND; break;
+    case GL_AND_REVERSE:   *out = CELL_GCM_AND_REVERSE; break;
+    case GL_COPY:          *out = CELL_GCM_COPY; break;
+    case GL_AND_INVERTED:  *out = CELL_GCM_AND_INVERTED; break;
+    case GL_NOOP:          *out = CELL_GCM_NOOP; break;
+    case GL_XOR:           *out = CELL_GCM_XOR; break;
+    case GL_OR:            *out = CELL_GCM_OR; break;
+    case GL_NOR:           *out = CELL_GCM_NOR; break;
+    case GL_EQUIV:         *out = CELL_GCM_EQUIV; break;
+    case GL_INVERT:        *out = CELL_GCM_INVERT; break;
+    case GL_OR_REVERSE:    *out = CELL_GCM_OR_REVERSE; break;
+    case GL_COPY_INVERTED: *out = CELL_GCM_COPY_INVERTED; break;
+    case GL_OR_INVERTED:   *out = CELL_GCM_OR_INVERTED; break;
+    case GL_NAND:          *out = CELL_GCM_NAND; break;
+    case GL_SET:           *out = CELL_GCM_SET; break;
+    default: return 0;
+    }
+    return 1;
+}
+
 static void psgl_fill_surface(PSGLdevice *device, CellGcmSurface *surface)
 {
     PSGLframeBuffer *frame = &device->frames[device->current_frame];
@@ -199,6 +317,111 @@ static void psgl_emit_viewport(PSGLcontext *context)
                        (uint16_t)vp[2], (uint16_t)vp[3],
                        0.0f, 1.0f, scale, offset);
     context->dirty &= ~PSGL_DIRTY_VIEWPORT;
+}
+
+static void psgl_emit_scissor(PSGLcontext *context)
+{
+    if (!context || !context->gcm || !context->device) return;
+    if (context->scissor_test_enabled) {
+        cellGcmSetScissor(context->gcm, (uint16_t)context->scissor[0],
+                          (uint16_t)context->scissor[1],
+                          (uint16_t)context->scissor[2],
+                          (uint16_t)context->scissor[3]);
+    } else {
+        cellGcmSetScissor(context->gcm, 0u, 0u, context->device->render_width,
+                          context->device->render_height);
+    }
+    context->dirty &= ~PSGL_DIRTY_SCISSOR;
+}
+
+static void psgl_emit_blend(PSGLcontext *context)
+{
+    uint16_t src_rgb;
+    uint16_t dst_rgb;
+    uint16_t src_alpha;
+    uint16_t dst_alpha;
+    uint16_t equation_rgb;
+    uint16_t equation_alpha;
+    if (!context || !context->gcm) return;
+    if (!psgl_translate_blend_factor(context->blend_src_rgb, &src_rgb) ||
+        !psgl_translate_blend_factor(context->blend_dst_rgb, &dst_rgb) ||
+        !psgl_translate_blend_factor(context->blend_src_alpha, &src_alpha) ||
+        !psgl_translate_blend_factor(context->blend_dst_alpha, &dst_alpha) ||
+        !psgl_translate_blend_equation(context->blend_equation_rgb, &equation_rgb) ||
+        !psgl_translate_blend_equation(context->blend_equation_alpha, &equation_alpha))
+        return;
+    cellGcmSetBlendEnable(context->gcm, psgl_bool(context->blend_enabled));
+    cellGcmSetBlendFunc(context->gcm, src_rgb, dst_rgb, src_alpha, dst_alpha);
+    cellGcmSetBlendEquation(context->gcm, equation_rgb, equation_alpha);
+    context->dirty &= ~PSGL_DIRTY_BLEND;
+}
+
+static void psgl_emit_depth(PSGLcontext *context)
+{
+    uint32_t func;
+    if (!context || !context->gcm) return;
+    if (!psgl_translate_compare(context->depth_func, &func)) return;
+    cellGcmSetDepthTestEnable(context->gcm, psgl_bool(context->depth_test_enabled));
+    cellGcmSetDepthFunc(context->gcm, func);
+    cellGcmSetDepthMask(context->gcm, psgl_bool(context->depth_mask));
+    context->dirty &= ~PSGL_DIRTY_DEPTH;
+}
+
+static void psgl_emit_stencil(PSGLcontext *context)
+{
+    uint32_t func;
+    uint32_t fail;
+    uint32_t zfail;
+    uint32_t zpass;
+    if (!context || !context->gcm) return;
+    if (!psgl_translate_compare(context->stencil_func, &func) ||
+        !psgl_translate_stencil_op(context->stencil_fail, &fail) ||
+        !psgl_translate_stencil_op(context->stencil_depth_fail, &zfail) ||
+        !psgl_translate_stencil_op(context->stencil_depth_pass, &zpass))
+        return;
+    cellGcmSetStencilTestEnable(context->gcm, psgl_bool(context->stencil_test_enabled));
+    cellGcmSetStencilFunc(context->gcm, func, context->stencil_ref,
+                          context->stencil_value_mask);
+    cellGcmSetStencilMask(context->gcm, context->stencil_write_mask);
+    cellGcmSetStencilOp(context->gcm, fail, zfail, zpass);
+    context->dirty &= ~PSGL_DIRTY_STENCIL;
+}
+
+static void psgl_emit_alpha(PSGLcontext *context)
+{
+    uint32_t func;
+    uint32_t ref;
+    if (!context || !context->gcm) return;
+    if (!psgl_translate_compare(context->alpha_func, &func)) return;
+    ref = psgl_float_to_unorm8(context->alpha_ref);
+    cellGcmSetAlphaTestEnable(context->gcm, psgl_bool(context->alpha_test_enabled));
+    cellGcmSetAlphaFunc(context->gcm, func, ref);
+    context->dirty &= ~PSGL_DIRTY_ALPHA;
+}
+
+static void psgl_emit_raster(PSGLcontext *context)
+{
+    uint32_t cull;
+    uint32_t front;
+    uint32_t logic;
+    uint32_t mask = 0u;
+    if (!context || !context->gcm) return;
+    if (!psgl_translate_cull_face(context->cull_face, &cull) ||
+        !psgl_translate_front_face(context->front_face, &front) ||
+        !psgl_translate_logic_op(context->logic_op, &logic))
+        return;
+    if (context->color_mask[0]) mask |= CELL_GCM_COLOR_MASK_R;
+    if (context->color_mask[1]) mask |= CELL_GCM_COLOR_MASK_G;
+    if (context->color_mask[2]) mask |= CELL_GCM_COLOR_MASK_B;
+    if (context->color_mask[3]) mask |= CELL_GCM_COLOR_MASK_A;
+    cellGcmSetCullFaceEnable(context->gcm, psgl_bool(context->cull_face_enabled));
+    cellGcmSetCullFace(context->gcm, cull);
+    cellGcmSetFrontFace(context->gcm, front);
+    cellGcmSetDitherEnable(context->gcm, psgl_bool(context->dither_enabled));
+    cellGcmSetColorMask(context->gcm, mask);
+    cellGcmSetLogicOpEnable(context->gcm, psgl_bool(context->logic_op_enabled));
+    cellGcmSetLogicOp(context->gcm, logic);
+    context->dirty &= ~PSGL_DIRTY_RASTER;
 }
 
 static void psgl_wait_rsx_idle(CellGcmContextData *gcm)
@@ -481,6 +704,12 @@ static void psgl_validate_draw_state(PSGLcontext *context)
     if (!context) return;
     if (context->dirty & PSGL_DIRTY_FRAMEBUFFER) psgl_bind_render_target(context);
     if (context->dirty & PSGL_DIRTY_VIEWPORT) psgl_emit_viewport(context);
+    if (context->dirty & PSGL_DIRTY_SCISSOR) psgl_emit_scissor(context);
+    if (context->dirty & PSGL_DIRTY_BLEND) psgl_emit_blend(context);
+    if (context->dirty & PSGL_DIRTY_DEPTH) psgl_emit_depth(context);
+    if (context->dirty & PSGL_DIRTY_STENCIL) psgl_emit_stencil(context);
+    if (context->dirty & PSGL_DIRTY_ALPHA) psgl_emit_alpha(context);
+    if (context->dirty & PSGL_DIRTY_RASTER) psgl_emit_raster(context);
     if (context->dirty & PSGL_DIRTY_CG) {
         psgl_emit_vertex_program(context,
                                  psgl_cg_program(context->bound_vertex_program));
@@ -564,6 +793,31 @@ PSGLcontext *psgl_context_create(void)
     psgl_matrix_identity(context->texture);
     context->clear_color[3] = 1.0f;
     context->clear_depth = 1.0f;
+    context->dither_enabled = GL_TRUE;
+    context->blend_src_rgb = GL_ONE;
+    context->blend_dst_rgb = GL_ZERO;
+    context->blend_src_alpha = GL_ONE;
+    context->blend_dst_alpha = GL_ZERO;
+    context->blend_equation_rgb = GL_FUNC_ADD;
+    context->blend_equation_alpha = GL_FUNC_ADD;
+    context->depth_func = GL_LESS;
+    context->depth_mask = GL_TRUE;
+    context->alpha_func = GL_ALWAYS;
+    context->alpha_ref = 0.0f;
+    context->stencil_func = GL_ALWAYS;
+    context->stencil_ref = 0;
+    context->stencil_value_mask = 0xffffffffu;
+    context->stencil_write_mask = 0xffffffffu;
+    context->stencil_fail = GL_KEEP;
+    context->stencil_depth_fail = GL_KEEP;
+    context->stencil_depth_pass = GL_KEEP;
+    context->color_mask[0] = GL_TRUE;
+    context->color_mask[1] = GL_TRUE;
+    context->color_mask[2] = GL_TRUE;
+    context->color_mask[3] = GL_TRUE;
+    context->logic_op = GL_COPY;
+    context->cull_face = GL_BACK;
+    context->front_face = GL_CCW;
     context->attribs[PSGL_ATTRIB_VERTEX].size = 4;
     context->attribs[PSGL_ATTRIB_NORMAL].size = 3;
     context->attribs[PSGL_ATTRIB_COLOR].size = 4;
@@ -704,9 +958,11 @@ void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device)
     context->scissor[1] = 0;
     context->scissor[2] = device->render_width;
     context->scissor[3] = device->render_height;
-    context->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_VIEWPORT;
+    context->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_VIEWPORT |
+                      PSGL_DIRTY_SCISSOR;
     psgl_bind_render_target(context);
     psgl_emit_viewport(context);
+    psgl_emit_scissor(context);
 }
 
 void psgl_context_reset_current(void)
@@ -848,6 +1104,203 @@ void psgl_context_set_viewport(GLint x, GLint y, GLsizei width, GLsizei height)
     context->viewport[3] = height;
     context->dirty |= PSGL_DIRTY_VIEWPORT;
     psgl_emit_viewport(context);
+}
+
+void psgl_context_set_enable(GLenum cap, GLboolean enabled)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    enabled = enabled ? GL_TRUE : GL_FALSE;
+    switch (cap) {
+    case GL_BLEND:
+        context->blend_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_BLEND;
+        break;
+    case GL_DEPTH_TEST:
+        context->depth_test_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_DEPTH;
+        break;
+    case GL_STENCIL_TEST:
+        context->stencil_test_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_STENCIL;
+        break;
+    case GL_ALPHA_TEST:
+        context->alpha_test_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_ALPHA;
+        break;
+    case GL_SCISSOR_TEST:
+        context->scissor_test_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_SCISSOR;
+        break;
+    case GL_CULL_FACE:
+        context->cull_face_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_RASTER;
+        break;
+    case GL_DITHER:
+        context->dither_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_RASTER;
+        break;
+    case GL_COLOR_LOGIC_OP:
+        context->logic_op_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_RASTER;
+        break;
+    default:
+        break;
+    }
+}
+
+void psgl_context_set_alpha_func(GLenum func, GLclampf ref)
+{
+    uint32_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !psgl_translate_compare(func, &translated)) return;
+    context->alpha_func = func;
+    context->alpha_ref = psgl_clampf(ref, 0.0f, 1.0f);
+    context->dirty |= PSGL_DIRTY_ALPHA;
+}
+
+void psgl_context_set_blend_func(GLenum sfactor, GLenum dfactor)
+{
+    psgl_context_set_blend_func_separate(sfactor, dfactor, sfactor, dfactor);
+}
+
+void psgl_context_set_blend_func_separate(GLenum sfactor_rgb, GLenum dfactor_rgb,
+                                          GLenum sfactor_alpha,
+                                          GLenum dfactor_alpha)
+{
+    uint16_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context ||
+        !psgl_translate_blend_factor(sfactor_rgb, &translated) ||
+        !psgl_translate_blend_factor(dfactor_rgb, &translated) ||
+        !psgl_translate_blend_factor(sfactor_alpha, &translated) ||
+        !psgl_translate_blend_factor(dfactor_alpha, &translated))
+        return;
+    context->blend_src_rgb = sfactor_rgb;
+    context->blend_dst_rgb = dfactor_rgb;
+    context->blend_src_alpha = sfactor_alpha;
+    context->blend_dst_alpha = dfactor_alpha;
+    context->dirty |= PSGL_DIRTY_BLEND;
+}
+
+void psgl_context_set_blend_equation(GLenum mode)
+{
+    psgl_context_set_blend_equation_separate(mode, mode);
+}
+
+void psgl_context_set_blend_equation_separate(GLenum mode_rgb,
+                                              GLenum mode_alpha)
+{
+    uint16_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context ||
+        !psgl_translate_blend_equation(mode_rgb, &translated) ||
+        !psgl_translate_blend_equation(mode_alpha, &translated))
+        return;
+    context->blend_equation_rgb = mode_rgb;
+    context->blend_equation_alpha = mode_alpha;
+    context->dirty |= PSGL_DIRTY_BLEND;
+}
+
+void psgl_context_set_scissor(GLint x, GLint y, GLsizei width, GLsizei height)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || width < 0 || height < 0) return;
+    context->scissor[0] = x < 0 ? 0 : x;
+    context->scissor[1] = y < 0 ? 0 : y;
+    context->scissor[2] = width;
+    context->scissor[3] = height;
+    context->dirty |= PSGL_DIRTY_SCISSOR;
+}
+
+void psgl_context_set_depth_func(GLenum func)
+{
+    uint32_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !psgl_translate_compare(func, &translated)) return;
+    context->depth_func = func;
+    context->dirty |= PSGL_DIRTY_DEPTH;
+}
+
+void psgl_context_set_depth_mask(GLboolean flag)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    context->depth_mask = flag ? GL_TRUE : GL_FALSE;
+    context->dirty |= PSGL_DIRTY_DEPTH;
+}
+
+void psgl_context_set_stencil_func(GLenum func, GLint ref, GLuint mask)
+{
+    uint32_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !psgl_translate_compare(func, &translated)) return;
+    context->stencil_func = func;
+    context->stencil_ref = ref;
+    context->stencil_value_mask = mask;
+    context->dirty |= PSGL_DIRTY_STENCIL;
+}
+
+void psgl_context_set_stencil_mask(GLuint mask)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    context->stencil_write_mask = mask;
+    context->dirty |= PSGL_DIRTY_STENCIL;
+}
+
+void psgl_context_set_stencil_op(GLenum fail, GLenum zfail, GLenum zpass)
+{
+    uint32_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context ||
+        !psgl_translate_stencil_op(fail, &translated) ||
+        !psgl_translate_stencil_op(zfail, &translated) ||
+        !psgl_translate_stencil_op(zpass, &translated))
+        return;
+    context->stencil_fail = fail;
+    context->stencil_depth_fail = zfail;
+    context->stencil_depth_pass = zpass;
+    context->dirty |= PSGL_DIRTY_STENCIL;
+}
+
+void psgl_context_set_cull_face(GLenum mode)
+{
+    uint32_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !psgl_translate_cull_face(mode, &translated)) return;
+    context->cull_face = mode;
+    context->dirty |= PSGL_DIRTY_RASTER;
+}
+
+void psgl_context_set_front_face(GLenum mode)
+{
+    uint32_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !psgl_translate_front_face(mode, &translated)) return;
+    context->front_face = mode;
+    context->dirty |= PSGL_DIRTY_RASTER;
+}
+
+void psgl_context_set_color_mask(GLboolean red, GLboolean green,
+                                 GLboolean blue, GLboolean alpha)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    context->color_mask[0] = red ? GL_TRUE : GL_FALSE;
+    context->color_mask[1] = green ? GL_TRUE : GL_FALSE;
+    context->color_mask[2] = blue ? GL_TRUE : GL_FALSE;
+    context->color_mask[3] = alpha ? GL_TRUE : GL_FALSE;
+    context->dirty |= PSGL_DIRTY_RASTER;
+}
+
+void psgl_context_set_logic_op(GLenum opcode)
+{
+    uint32_t translated;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !psgl_translate_logic_op(opcode, &translated)) return;
+    context->logic_op = opcode;
+    context->dirty |= PSGL_DIRTY_RASTER;
 }
 
 void psgl_context_gen_buffers(GLsizei n, GLuint *buffers)

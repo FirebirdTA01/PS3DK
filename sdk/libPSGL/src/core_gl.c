@@ -76,8 +76,8 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
 
 /* ── enable / disable / client-state ─────────────────────────────── */
 
-GLAPI void glEnable(GLenum cap)        { (void)cap; }
-GLAPI void glDisable(GLenum cap)       { (void)cap; }
+GLAPI void glEnable(GLenum cap)        { psgl_context_set_enable(cap, GL_TRUE); }
+GLAPI void glDisable(GLenum cap)       { psgl_context_set_enable(cap, GL_FALSE); }
 GLAPI void glEnableClientState(GLenum array)
 { psgl_context_set_client_state(array, GL_TRUE); }
 GLAPI void glDisableClientState(GLenum array)
@@ -104,14 +104,14 @@ GLAPI void glClearStencil(GLint s)         { psgl_context_set_clear_stencil(s); 
 /* ── alpha test ──────────────────────────────────────────────────── */
 
 GLAPI void glAlphaFunc(GLenum func, GLclampf ref)
-{ (void)func; (void)ref; }
+{ psgl_context_set_alpha_func(func, ref); }
 GLAPI void glAlphaFuncx(GLenum func, GLclampx ref)
-{ (void)func; (void)ref; }
+{ psgl_context_set_alpha_func(func, (GLfloat)ref / 65536.0f); }
 
 /* ── blend ───────────────────────────────────────────────────────── */
 
 GLAPI void glBlendFunc(GLenum sfactor, GLenum dfactor)
-{ (void)sfactor; (void)dfactor; }
+{ psgl_context_set_blend_func(sfactor, dfactor); }
 
 /* ── draw ────────────────────────────────────────────────────────── */
 
@@ -126,12 +126,12 @@ GLAPI void glDrawElements(GLenum mode, GLsizei count,
 GLAPI void glViewport(GLint x, GLint y, GLsizei width, GLsizei height)
 { psgl_context_set_viewport(x, y, width, height); }
 GLAPI void glScissor(GLint x, GLint y, GLsizei width, GLsizei height)
-{ (void)x; (void)y; (void)width; (void)height; }
+{ psgl_context_set_scissor(x, y, width, height); }
 
 /* ── depth ───────────────────────────────────────────────────────── */
 
-GLAPI void glDepthFunc(GLenum func)       { (void)func; }
-GLAPI void glDepthMask(GLboolean flag)    { (void)flag; }
+GLAPI void glDepthFunc(GLenum func)       { psgl_context_set_depth_func(func); }
+GLAPI void glDepthMask(GLboolean flag)    { psgl_context_set_depth_mask(flag); }
 GLAPI void glDepthRangef(GLclampf zNear, GLclampf zFar)
 { (void)zNear; (void)zFar; }
 GLAPI void glDepthRangex(GLclampx zNear, GLclampx zFar)
@@ -140,21 +140,21 @@ GLAPI void glDepthRangex(GLclampx zNear, GLclampx zFar)
 /* ── stencil ─────────────────────────────────────────────────────── */
 
 GLAPI void glStencilFunc(GLenum func, GLint ref, GLuint mask)
-{ (void)func; (void)ref; (void)mask; }
-GLAPI void glStencilMask(GLuint mask)     { (void)mask; }
+{ psgl_context_set_stencil_func(func, ref, mask); }
+GLAPI void glStencilMask(GLuint mask)     { psgl_context_set_stencil_mask(mask); }
 GLAPI void glStencilOp(GLenum fail, GLenum zfail, GLenum zpass)
-{ (void)fail; (void)zfail; (void)zpass; }
+{ psgl_context_set_stencil_op(fail, zfail, zpass); }
 
 /* ── cull face ───────────────────────────────────────────────────── */
 
-GLAPI void glCullFace(GLenum mode)        { (void)mode; }
-GLAPI void glFrontFace(GLenum mode)       { (void)mode; }
+GLAPI void glCullFace(GLenum mode)        { psgl_context_set_cull_face(mode); }
+GLAPI void glFrontFace(GLenum mode)       { psgl_context_set_front_face(mode); }
 
 /* ── colour mask ─────────────────────────────────────────────────── */
 
 GLAPI void glColorMask(GLboolean red, GLboolean green,
                        GLboolean blue, GLboolean alpha)
-{ (void)red; (void)green; (void)blue; (void)alpha; }
+{ psgl_context_set_color_mask(red, green, blue, alpha); }
 
 /* ── colour ──────────────────────────────────────────────────────── */
 
@@ -197,7 +197,7 @@ GLAPI void glHint(GLenum target, GLenum mode)
 
 /* ── logic op ────────────────────────────────────────────────────── */
 
-GLAPI void glLogicOp(GLenum opcode)       { (void)opcode; }
+GLAPI void glLogicOp(GLenum opcode)       { psgl_context_set_logic_op(opcode); }
 
 /* ── pixel store ─────────────────────────────────────────────────── */
 

@@ -234,6 +234,11 @@ static inline void cellGcmSetBlendColor(CellGcmContextData *thisContext,
 	rsxSetBlendColor(thisContext, color0, color1);
 }
 
+static inline void cellGcmSetDitherEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetDitherEnable(thisContext, enable);
+}
+
 static inline void cellGcmSetLogicOp(CellGcmContextData *thisContext, uint32_t op)
 {
 	rsxSetLogicOp(thisContext, op);

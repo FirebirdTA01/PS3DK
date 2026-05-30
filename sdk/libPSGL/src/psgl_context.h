@@ -29,7 +29,8 @@ typedef enum PSGLdirtyBits {
     PSGL_DIRTY_CG = 0x00000100u,
     PSGL_DIRTY_MATRICES = 0x00000200u,
     PSGL_DIRTY_FRAMEBUFFER = 0x00000400u,
-    PSGL_DIRTY_ALL = 0x000007ffu
+    PSGL_DIRTY_RASTER = 0x00000800u,
+    PSGL_DIRTY_ALL = 0x00000fffu
 } PSGLdirtyBits;
 
 typedef struct PSGLframeBuffer {
@@ -87,6 +88,31 @@ struct PSGLcontext {
     GLboolean depth_test_enabled;
     GLboolean stencil_test_enabled;
     GLboolean alpha_test_enabled;
+    GLboolean scissor_test_enabled;
+    GLboolean cull_face_enabled;
+    GLboolean dither_enabled;
+    GLboolean logic_op_enabled;
+    GLenum blend_src_rgb;
+    GLenum blend_dst_rgb;
+    GLenum blend_src_alpha;
+    GLenum blend_dst_alpha;
+    GLenum blend_equation_rgb;
+    GLenum blend_equation_alpha;
+    GLenum depth_func;
+    GLboolean depth_mask;
+    GLenum alpha_func;
+    GLfloat alpha_ref;
+    GLenum stencil_func;
+    GLint stencil_ref;
+    GLuint stencil_value_mask;
+    GLuint stencil_write_mask;
+    GLenum stencil_fail;
+    GLenum stencil_depth_fail;
+    GLenum stencil_depth_pass;
+    GLboolean color_mask[4];
+    GLenum logic_op;
+    GLenum cull_face;
+    GLenum front_face;
     GLfloat clear_color[4];
     GLfloat clear_depth;
     GLint clear_stencil;
@@ -117,6 +143,24 @@ void psgl_context_set_clear_depth(GLfloat depth);
 void psgl_context_set_clear_stencil(GLint stencil);
 void psgl_context_clear(GLbitfield mask);
 void psgl_context_set_viewport(GLint x, GLint y, GLsizei width, GLsizei height);
+void psgl_context_set_enable(GLenum cap, GLboolean enabled);
+void psgl_context_set_alpha_func(GLenum func, GLclampf ref);
+void psgl_context_set_blend_func(GLenum sfactor, GLenum dfactor);
+void psgl_context_set_blend_func_separate(GLenum sfactor_rgb, GLenum dfactor_rgb,
+                                          GLenum sfactor_alpha, GLenum dfactor_alpha);
+void psgl_context_set_blend_equation(GLenum mode);
+void psgl_context_set_blend_equation_separate(GLenum mode_rgb, GLenum mode_alpha);
+void psgl_context_set_scissor(GLint x, GLint y, GLsizei width, GLsizei height);
+void psgl_context_set_depth_func(GLenum func);
+void psgl_context_set_depth_mask(GLboolean flag);
+void psgl_context_set_stencil_func(GLenum func, GLint ref, GLuint mask);
+void psgl_context_set_stencil_mask(GLuint mask);
+void psgl_context_set_stencil_op(GLenum fail, GLenum zfail, GLenum zpass);
+void psgl_context_set_cull_face(GLenum mode);
+void psgl_context_set_front_face(GLenum mode);
+void psgl_context_set_color_mask(GLboolean red, GLboolean green,
+                                 GLboolean blue, GLboolean alpha);
+void psgl_context_set_logic_op(GLenum opcode);
 void psgl_context_gen_buffers(GLsizei n, GLuint *buffers);
 void psgl_context_delete_buffers(GLsizei n, const GLuint *buffers);
 void psgl_context_bind_buffer(GLenum target, GLuint name);

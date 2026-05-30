@@ -21,13 +21,14 @@ static void glext_zero(void *ptr, size_t size)
 
 /* ── blend equation / colour ─────────────────────────────────────── */
 
-GLAPI void glBlendEquation(GLenum mode)         { (void)mode; }
+GLAPI void glBlendEquation(GLenum mode)
+{ psgl_context_set_blend_equation(mode); }
 GLAPI void glBlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha)
-{ (void)modeRGB; (void)modeAlpha; }
+{ psgl_context_set_blend_equation_separate(modeRGB, modeAlpha); }
 GLAPI void glBlendFuncSeparate(GLenum sfactorRGB, GLenum dfactorRGB,
                                GLenum sfactorAlpha, GLenum dfactorAlpha)
-{ (void)sfactorRGB; (void)dfactorRGB;
-  (void)sfactorAlpha; (void)dfactorAlpha; }
+{ psgl_context_set_blend_func_separate(sfactorRGB, dfactorRGB,
+                                       sfactorAlpha, dfactorAlpha); }
 GLAPI void glBlendColor(GLclampf red, GLclampf green,
                         GLclampf blue, GLclampf alpha)
 { (void)red; (void)green; (void)blue; (void)alpha; }

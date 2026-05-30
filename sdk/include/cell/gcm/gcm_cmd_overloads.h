@@ -114,6 +114,9 @@ static inline void cellGcmSetBlendEquation(uint16_t color, uint16_t alpha)
 static inline void cellGcmSetBlendColor(uint32_t color0, uint32_t color1)
 { cellGcmSetBlendColor(gCellGcmCurrentContext, color0, color1); }
 
+static inline void cellGcmSetDitherEnable(uint32_t enable)
+{ cellGcmSetDitherEnable(gCellGcmCurrentContext, enable); }
+
 static inline void cellGcmSetLogicOp(uint32_t op)
 { cellGcmSetLogicOp(gCellGcmCurrentContext, op); }
 

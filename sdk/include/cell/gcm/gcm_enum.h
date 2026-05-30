@@ -397,6 +397,7 @@ extern "C" {
 
 /* Stencil operations. */
 #define CELL_GCM_KEEP                            GCM_KEEP
+#define CELL_GCM_REPLACE                         GCM_REPLACE
 #define CELL_GCM_INCR                            GCM_INCR
 #define CELL_GCM_DECR                            GCM_DECR
 #define CELL_GCM_INCR_WRAP                       GCM_INCR_WRAP

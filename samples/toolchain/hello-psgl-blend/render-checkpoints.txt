@@ -1,0 +1,10 @@
+# x y R G B tolerance
+# Coordinates are screenshot pixels from the RPCS3 render window capture.
+# clear background
+200 200 5 20 46 12
+# red-only triangle
+1024 300 255 0 0 25
+# blue triangle blended over clear
+1536 228 2 10 151 35
+# red + blue overlap
+1256 638 127 0 128 35
