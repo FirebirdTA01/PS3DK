@@ -200,6 +200,7 @@ HEADERS := \
     include/cell/audio.h \
     include/cell/voice.h \
     include/cell/voiceTypes.h \
+    include/cell/fontGcm.h \
     include/cell/mic.h \
     include/cell/mic/define.h \
     include/cell/mic/error.h \
@@ -367,7 +368,7 @@ HEADERS := \
     include/rsx/rsx_function_macros.h \
     include/rsx/rsx_program.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937 libfontGcm
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
