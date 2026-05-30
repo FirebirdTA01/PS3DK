@@ -16,6 +16,198 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.10.0] — 2026-05-29
+
+### SDK — network and PSN family
+
+This release ships the full network and PSN surface in a single wave.
+Twelve new stub archives cover the entire reference SDK network /
+PSN ABI: cellNetCtl (network state notification + configuration
+query), cellNet (sys_net POSIX sockets), cellSsl (TLS), cellHttp +
+cellHttpUtil (HTTP client and URL / Base64 helpers), and the NP
+ecosystem — cellSysutilNpUtil (bandwidth probe), the cellSysutilNp
+main module (initialization, basic friends / blocking / presence /
+invitations / messages, friendlist, manager, signaling, lookup,
+profile, DRM, custom menu, score / leaderboards, commerce, matching),
+cellSysutilNpTrophy (achievements), cellSysutilNpSns (Facebook SNS
+shim), cellSysutilNpClans (player guilds), cellSysutilNpCommerce2 (PS
+Store extended commerce), cellSysutilNpTus (per-title-per-user TUS /
+TSS storage), and cellSysutilNp2 (extended NP / NP2 surface with
+NP2 auth OAuth + matching2 room / lobby / signaling).
+
+Around 700 new entry points stub-emitted via `nidgen archive` into
+the corresponding `lib*_stub.a` archives under both
+`stage/ps3dev/ps3dk/ppu/lib/` and the LP64 multilib variant.  All
+declarations are width-explicit and apply `ATTRIBUTE_PRXPTR` to
+cross-SPRX pointer struct fields so the ABI is stable across the
+ILP32 default and LP64 multilib data models.
+
+The public header surface lands under the corresponding sub-trees:
+
+- `sys/socket.h`, `arpa/inet.h`, `netdb.h`, `netinet/in.h` — the
+  POSIX BSD-sockets surface, with PS3-specific `AF_INET6 = 24`,
+  `SOL_SOCKET = 0xffff`, and the `SO_USECRYPTO` / `SO_USESIGNATURE` /
+  `SOCK_DGRAM_P2P` / `SOCK_STREAM_P2P` extensions.
+- `cell/libnet.h`, `cell/libnetctl.h`, `cell/sysutil_gameupdate.h`,
+  `cell/ssl.h` + `cell/ssl/*`, `cell/http.h` + `cell/http/*`,
+  `cell/np.h` + `cell/np/*`, `cell/np2/*` — the cell-style PS3 surface,
+  with subdir umbrellas for the larger surfaces.
+
+Twelve paired validation samples ship under `samples/network/`:
+`hello-ppu-netctl`, `hello-ppu-libnet`, `hello-ppu-ssl`,
+`hello-ppu-http`, `hello-ppu-np-util`, `hello-ppu-np`,
+`hello-ppu-np-trophy`, `hello-ppu-np-sns`, `hello-ppu-np-clans`,
+`hello-ppu-np-commerce2`, `hello-ppu-np-tus`, and `hello-ppu-np2`.
+Each builds clean against both ILP32 default and LP64 multilib and
+loads + unloads its module under RPCS3.  Two RPCS3 firmware-side
+quirks discovered during the network-stack work are documented in
+`docs/known-issues.md`: the `cellSysutilNpSns` module ID is refused
+by current firmware, and `cellSysutilNp2` requires `sceNp2Init` /
+`sceNp2Term` around the load / unload to avoid an LLE-firmware mlock
+crash on hosts with a default `ulimit -l`.
+
+### SDK — codec and graphics
+
+A new `cell/codec.h` umbrella header pulls in the codec sub-headers
+so callers can `#include <cell/codec.h>` directly.  The
+`hello-ppu-jpg-dec` sample relocates from `samples/sysutil/` to
+`samples/codec/` and is expanded toward feature parity with the
+reference SDK decoder demo.  `hello-ppu-jpg-enc` is added and then
+consolidated to a functional encoder that exercises the full
+QueryAttr / Open / WaitForInput / EncodePicture2 / WaitForOutput /
+GetStreamInfo / Close cycle on an in-code RGB test image, with FNV-1a
+hash and JPEG header marker validation.  A `hello-ppu-gcm-basic`
+sample landed and was then retired in the same release as a duplicate
+of `hello-ppu-cellgcm-triangle`, which already covers the same
+flip_immediate triangle hello path with the DRAWING_PAUSED /
+SYSTEM_MENU_OPEN sysutil overlay-pause handler and rising-edge START
+detection.
+
+### Tools — spu-elf-to-ppu-obj (renamed from jobbin2-wrap)
+
+The clean-room SPU-payload embedder gains a permanent name —
+`spu-elf-to-ppu-obj` — and grows two embed formats: a `--format=elf`
+default that emits a PPU object embedding a full SPU ELF for the
+SPURS task / job loaders, and a `--format=binary` mode that emits a
+raw PPU `.spu_image` blob for `e_flags = 0` / `e_flags = 1` SPU
+inputs.  Earlier `jobbin2-wrap` work ships through the same crate:
+the clean-room SPURS jobbin2 wrapper encoder, an `inspect`
+subcommand that reports the JQ patch-set on an existing jobbin2
+PPU object, the `docs/abi/spurs-jobbin2-wrapper-abi.md` reference
+write-up, and a CMake `JOBBIN_WRAP` selector that defaults to the
+clean-room implementation.  The `hello-spurs-jq` sample is refreshed
+to drive the new selector.
+
+### Tools — host-tool install rule
+
+`scripts/install-host-tools.sh` is a Linux-host installer that
+builds the repo-owned host tools and stages them into `$PS3DEV/bin`
+with a `$PS3DK/bin` mirror.  The installed set is `nidgen`,
+`coverage-report`, `abi-verify`, `spu-elf-to-ppu-obj`,
+`rsx-cg-compiler`, and `sprxlinker`.  `scripts/build-sdk.sh` runs the
+installer after the SDK install path so CMake consumers find the
+clean-room tools from the staged toolchain by default; pass
+`--no-host-tools` for SDK-only rebuilds.
+
+### SDK — sysutil tier-2 + framework samples
+
+The `samples/fw/` framework sample family expands: a tier-1 base
+framework with a null lifecycle target, a tier-2 null-lifecycle and
+debug-font framework (with `hello-ppu-fw-tier2` renamed to
+`hello-ppu-fw-null-lifecycle` for clarity), a full GCM framework
+sample driving cellGcmInit, framebuffer / depth allocation, video
+config, `cellDbgFontInitGcm`, and the run loop, and an input
+framework + sample (`FWInput` facade + `FWInputDevice` base + 16 pad
+buttons / 4 axes / A-Z / 0-9 / arrows channels + `FWCellInput.cpp`
+driving cellPad + cellKb).  Nine `sys_memory_*` and `sys_mmapper_*`
+LV2 syscall wrappers plus a paired `hello-ppu-lv2-mmapper` sample
+cover the kernel memory-allocation and address-mapping surface.  Ten
+existing sysutil samples gain per-call expected symbolic-rc comments
+and full doc-blocks (subdisplay, three msgdialog variants,
+savedata-list with mismatch failure path, music-decode2, imejp,
+key2char, font, and gamecontent).
+
+### SDK — SPU sync runtime
+
+Five clean-room SPU-side sync primitives ship in `libsync.a` /
+`libsync_spu.a` for use from SPU code: barrier (5 entry points),
+mutex (4), queue (9), reader-writer mutex (6), and lockfree queue
+(11) — 35 SPU entry points total covering the synchronization
+surfaces SPU code needs without crossing back to PPU.
+
+### SDK — header tree refinements
+
+The PSL1GHT-decoupling work continues across small, focused changes:
+a `cellstatus.h` top-level alias, a PPU `cell/atomic.h` surface and
+SPU companion, an SPU-canonical `cell/spurs/task.h` and
+`CELL_SPU_LS_PARAM` constant, an `extern "C"` rebalance around the
+`__SPU__` guard in `cell/spurs/types.h`, a `stdlib.h` wrapper that
+exposes `memalign()` on both PPU and SPU, a `stdarg.h` that typedefs
+`std::va_list` directly from `__builtin_va_list`, an SPU-side library
+install convention that lands canonical artifacts under the
+`spu-elf` sysroot, a `libdbgfont_gcm.a` alias to `libdbgfont.a`,
+`sysutil_userinfo` and `sysutil_bgdl` header + stub archive surfaces,
+a `cell/font` + `cell/libkey2char` + sysutil sysmodule / gamecontent /
+syscache addition, a `cellSpurs` control include-path fix, a
+`cell/gcm.h` transitive-include assertion, a `cellVideoOut` surface
+plus sysparam include + module / syscall / `EBUSY` fills,
+`sysutil_music_decode` v1 + v2 ABI corrections and the decode2
+surface, a `sysutil_subdisplay` header refinement, a
+`sysutil_screenshot` + `sysutil_imejp` alias forwarders pass, and
+`sysMemContainerCreate` / `sysMemContainerDestroy` back-compat
+aliases.
+
+### Coverage
+
+`docs/coverage.md` regenerates against the post-network-stack install
+tree.  Headline numbers: 3451 of 4796 tracked exports covered across
+99 libraries — 72.0% total, of which 3356 cover by exact name and 95
+via the PSL1GHT alias map.  `libsysutil_np2`, `libsysutil_np_clans`,
+`libsysutil_np_commerce2`, `libsysutil_np_tus`, `libsysutil_np_trophy`,
+`libsysutil_np_sns`, `libnetctl_stub`, `libnet_stub`, `libssl_stub`,
+`libhttp_stub`, and `libhttp_util_stub` all land at 100% in the
+per-library matrix.
+
+### Docs
+
+The `README.md` is rewritten — 562 lines down to 426 — with a
+concise opening, a current status section using live numbers
+(72.0% / 3451 of 4796 exports, 99 libraries, 122 tracked CMake sample
+projects with category breakdown, network and NP coverage bullet), a
+modernized Direction paragraph, and links out to the dedicated
+toolchain-design / roadmap / ABI / coverage docs.  Stale references
+to old version pins ("v0.7.x", "91 samples", "87/87
+RPCS3-validated", "rsx-cg-compiler 96/97") are removed.  The manual
+direct-toolchain-invocation reference (compile / link / strip /
+sprxlinker / sign / pkg) is retained inline as the canonical "how to
+use this toolchain" reference.
+
+Two new docs are split out of the README:
+
+- `docs/toolchain-design.md` — compiler-version rationale (why PPU
+  sits on GCC 12.4.0, why SPU sits on GCC 9.5.0, runtime / binutils /
+  newlib / GDB / portlibs pins, and the SPE backend forward-port
+  track).
+- `docs/roadmap.md` — near-term direction (SDK surface, toolchain,
+  runtime / samples, release packaging).
+
+`docs/abi/cellos-lv2-abi-spec.md` gains the README's previous PPU
+pointer-model section — ELF64+ILP32 default, `-mlp64` LP64 multilib,
+the SPRX boundary stays 32-bit effective-address regardless of caller
+data model, and the `ATTRIBUTE_PRXPTR` / explicit-width-typedef
+requirement for cross-SPRX struct fields.
+
+`docs/known-issues.md` gains an entry for the SNS module
+(`CELL_SYSMODULE_SYSUTIL_NP_SNS = 0xf043`) being firmware-refused on
+current PS3 builds.
+
+### Vocabulary
+
+A repository-wide pass replaces uses of "smoke" / "smoke test" /
+"smoke gate" with "validation" / "validation test" / "validation
+gate" across tracked content for consistency with the rest of the
+project's vocabulary.
+
 ### Tools — host-tool install rule
 
 - Added `scripts/install-host-tools.sh`, a Linux-host installer that
