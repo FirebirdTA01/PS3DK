@@ -32,11 +32,14 @@ HEADERS := \
     include/string.h \
     include/types.h \
     include/cellstatus.h \
+    include/np.h \
+    include/sysutil_oskdialog.h \
     include/sys/lv2_types.h \
     include/sys/lv2_syscall.h \
     include/sys/ppu-asm.h \
     include/sys/heap.h \
     include/sys/spu_image.h \
+    include/sys/raw_spu.h \
     include/sys/timer.h \
     include/sys/sys_time.h \
     include/sys/sys_types.h \
