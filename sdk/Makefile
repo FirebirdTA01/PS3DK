@@ -99,6 +99,7 @@ HEADERS := \
     include/cell/swcache/patch_vtable.h \
     include/cell/pad.h \
     include/cell/error.h \
+    include/cell/jdl.h \
     include/cell/gcm.h \
     include/cell/gcm_pm.h \
     include/cell/gcm/gcm_enum.h \
@@ -385,6 +386,7 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cellstatus.h \
     include/mt19937.h \
     include/cell/error.h \
+    include/cell/jdl.h \
     include/cell/swcache.h \
     include/cell/swcache/define.h \
     include/cell/swcache/error.h \
