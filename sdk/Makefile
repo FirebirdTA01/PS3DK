@@ -50,6 +50,7 @@ HEADERS := \
     include/sys/fsw.h \
     include/sys/process.h \
     include/sys/memory.h \
+    include/sys/dbg.h \
     include/sys/socket.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
