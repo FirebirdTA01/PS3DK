@@ -404,7 +404,7 @@ HEADERS := \
     include/cell/cgb/cgb_struct.h \
     include/cell/sscgpu.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937 libfontGcm libdbgrsx libPSGL libPSGLU libsscgpu
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLU libsscgpu
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code

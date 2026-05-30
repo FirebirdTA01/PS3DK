@@ -1,4 +1,4 @@
-# libPSGL.a -- PSGL archive.
+# libcgb.a -- Cg binary reader archive
 
 CROSS    ?= powerpc64-ps3-elf-
 CC       := $(CROSS)gcc
@@ -20,15 +20,14 @@ OBJ_DIR  := build
 SRCS     := $(wildcard $(SRC_DIR)/*.c)
 OBJS     := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
-ARCHIVE  := $(OBJ_DIR)/libPSGL.a
+ARCHIVE  := $(OBJ_DIR)/libcgb.a
 
-# LP64 multilib
 LP64_OBJ_DIR  := $(OBJ_DIR)-lp64
-LP64_ARCHIVE  := $(LP64_OBJ_DIR)/libPSGL.a
+LP64_ARCHIVE  := $(LP64_OBJ_DIR)/libcgb.a
 LP64_OBJS     := $(patsubst $(SRC_DIR)/%.c,$(LP64_OBJ_DIR)/%.o,$(SRCS))
 LP64_CFLAGS   := $(CFLAGS) -mlp64
 
-INSTALL_LIB := $(PS3DK)/ppu/lib
+INSTALL_LIB      := $(PS3DK)/ppu/lib
 INSTALL_LP64_LIB := $(INSTALL_LIB)/lp64
 
 .PHONY: all clean install
@@ -54,8 +53,8 @@ $(OBJ_DIR) $(LP64_OBJ_DIR):
 
 install: $(ARCHIVE) $(LP64_ARCHIVE)
 	install -d $(INSTALL_LIB) $(INSTALL_LP64_LIB)
-	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libPSGL.a
-	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LP64_LIB)/libPSGL.a
+	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libcgb.a
+	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LP64_LIB)/libcgb.a
 
 clean:
 	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)
