@@ -212,6 +212,29 @@ HEADERS := \
     include/cell/spurs/job_guard.h \
     include/cell/spurs/job_chain_types.h \
     include/cell/spurs/job_chain.h \
+    include/hl/spurs.h \
+    include/sce/hl/spurs/define.h \
+    include/sce/hl/spurs/spurs.h \
+    include/sce/hl/spurs/taskset.h \
+    include/sce/hl/spurs/task_elf.h \
+    include/sce/hl/spurs/task.h \
+    include/sce/hl/spurs/event_flag.h \
+    include/sce/hl/spurs/job.h \
+    include/sce/hl/spurs/job_chain.h \
+    include/sce/hl/spurs/job_guard.h \
+    include/sce/hl/spurs/command_list_dispatcher.h \
+    include/sce/hl/spurs/HLSpursDefine.h \
+    include/sce/hl/spurs/HLSpurs.h \
+    include/sce/hl/spurs/HLSpursTaskset.h \
+    include/sce/hl/spurs/HLSpursTaskElf.h \
+    include/sce/hl/spurs/HLSpursTask.h \
+    include/sce/hl/spurs/HLSpursEventFlag.h \
+    include/sce/hl/spurs/HLSpursJobDescriptor.h \
+    include/sce/hl/spurs/HLSpursJobCommand.h \
+    include/sce/hl/spurs/HLSpursJobNotification.h \
+    include/sce/hl/spurs/HLSpursJobChain.h \
+    include/sce/hl/spurs/HLSpursJobGuard.h \
+    include/sce/hl/spurs/HLSpursCommandListDispatcher.h \
     include/cell/spurs/job_queue_define.h \
     include/cell/spurs/job_queue_types.h \
     include/cell/spurs/job_queue_cpp_types.h \
