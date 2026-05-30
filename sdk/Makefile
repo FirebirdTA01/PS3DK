@@ -32,6 +32,8 @@ HEADERS := \
     include/string.h \
     include/types.h \
     include/cellstatus.h \
+    include/gcm_tool.h \
+    include/mspace.h \
     include/np.h \
     include/sysutil_oskdialog.h \
     include/sys/lv2_types.h \
