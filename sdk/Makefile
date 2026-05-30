@@ -108,6 +108,13 @@ HEADERS := \
     include/cell/np/friendlist.h \
     include/cell/np/manager.h \
     include/cell/np/signaling.h \
+    include/cell/np/lookup.h \
+    include/cell/np/profile.h \
+    include/cell/np/drm.h \
+    include/cell/np/custom_menu.h \
+    include/cell/np/score.h \
+    include/cell/np/commerce.h \
+    include/cell/np/matching.h \
     include/cell/np/util.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
