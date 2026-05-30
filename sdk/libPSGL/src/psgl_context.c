@@ -1,4 +1,5 @@
 #include "psgl_context.h"
+#include "cg_internal.h"
 
 #include <malloc.h>
 #include <rsx/rsx.h>
@@ -12,6 +13,11 @@
 #define PSGL_HOST_ALIGNMENT    (1024u * 1024u)
 #define PSGL_LABEL_INDEX       255u
 #define PSGL_BUFFER_ALIGNMENT  64u
+#define PSGL_LABEL_PREPARED_BUFFER 0x41u
+#define PSGL_LABEL_BUFFER_STATUS   0x42u
+#define PSGL_BUFFER_IDLE           0u
+#define PSGL_BUFFER_BUSY           1u
+#define PSGL_MAX_QUEUE_FRAMES      1u
 
 typedef struct PSGLbufferObject {
     GLuint name;
@@ -58,11 +64,41 @@ static void psgl_copy(void *dst, const void *src, uint32_t size)
 
 static void psgl_flip_trampoline(uint32_t head)
 {
+    PSGLdevice *device = g_psgl.current_device;
+    if (device) {
+        uint32_t target = device->flip_target_frame;
+        for (uint32_t i = device->frame_on_display;
+             i != target && device->frame_count;
+             i = (i + 1u) % device->frame_count) {
+            volatile uint32_t *label =
+                (volatile uint32_t *)cellGcmGetLabelAddress(
+                    (uint8_t)(PSGL_LABEL_BUFFER_STATUS + i));
+            if (label) *label = PSGL_BUFFER_IDLE;
+        }
+        device->frame_on_display = target;
+        device->flip_pending = 0u;
+    }
     if (g_psgl.flip_handler) g_psgl.flip_handler((GLuint)head);
 }
 
 static void psgl_vblank_trampoline(uint32_t head)
 {
+    PSGLdevice *device = g_psgl.current_device;
+    volatile uint32_t *prepared =
+        (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_PREPARED_BUFFER);
+    if (device && prepared) {
+        uint32_t data = *prepared;
+        uint32_t buffer = data >> 8;
+        uint32_t queue_id = data & 0x7u;
+        if (!device->flip_pending && buffer != device->frame_on_display) {
+            device->flip_pending = 1u;
+            if (cellGcmSetFlipImmediate((uint8_t)queue_id) == 0) {
+                device->flip_target_frame = buffer;
+            } else {
+                device->flip_pending = 0u;
+            }
+        }
+    }
     if (g_psgl.vblank_handler) g_psgl.vblank_handler((GLuint)head);
 }
 
@@ -177,11 +213,35 @@ static void psgl_wait_rsx_idle(CellGcmContextData *gcm)
         sys_timer_usleep(30);
 }
 
-static void psgl_wait_flip(void)
+static void psgl_init_flip_labels(PSGLdevice *device)
 {
-    while (cellGcmGetFlipStatus() != 0u)
-        sys_timer_usleep(200);
-    cellGcmResetFlipStatus();
+    if (!device) return;
+    for (uint32_t i = 0; i < device->frame_count; i++) {
+        volatile uint32_t *label =
+            (volatile uint32_t *)cellGcmGetLabelAddress(
+                (uint8_t)(PSGL_LABEL_BUFFER_STATUS + i));
+        if (label) *label = PSGL_BUFFER_IDLE;
+    }
+    {
+        volatile uint32_t *prepared =
+            (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_PREPARED_BUFFER);
+        volatile uint32_t *displayed =
+            (volatile uint32_t *)cellGcmGetLabelAddress(
+                (uint8_t)(PSGL_LABEL_BUFFER_STATUS + device->frame_on_display));
+        if (prepared) *prepared = device->frame_on_display << 8;
+        if (displayed) *displayed = PSGL_BUFFER_BUSY;
+    }
+}
+
+static int psgl_ppu_too_far_ahead(const PSGLdevice *device)
+{
+    volatile uint32_t *prepared =
+        (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_PREPARED_BUFFER);
+    uint32_t gpu;
+    if (!device || !prepared || !device->frame_count) return 0;
+    gpu = *prepared >> 8;
+    return (((device->current_frame + device->frame_count - gpu) %
+             device->frame_count) > PSGL_MAX_QUEUE_FRAMES);
 }
 
 static int psgl_make_frame_buffer(PSGLdevice *device, uint32_t id)
@@ -248,6 +308,189 @@ static PSGLbufferObject *psgl_bound_buffer(PSGLcontext *context, GLenum target)
     return NULL;
 }
 
+static uint32_t psgl_gl_primitive(GLenum mode)
+{
+    switch (mode) {
+    case GL_POINTS: return CELL_GCM_PRIMITIVE_POINTS;
+    case GL_LINES: return CELL_GCM_PRIMITIVE_LINES;
+    case GL_LINE_LOOP: return CELL_GCM_PRIMITIVE_LINE_LOOP;
+    case GL_LINE_STRIP: return CELL_GCM_PRIMITIVE_LINE_STRIP;
+    case GL_TRIANGLES: return CELL_GCM_PRIMITIVE_TRIANGLES;
+    case GL_TRIANGLE_STRIP: return CELL_GCM_PRIMITIVE_TRIANGLE_STRIP;
+    case GL_TRIANGLE_FAN: return CELL_GCM_PRIMITIVE_TRIANGLE_FAN;
+    default: return 0u;
+    }
+}
+
+static uint8_t psgl_gl_vertex_type(GLenum type)
+{
+    switch (type) {
+    case GL_FLOAT: return CELL_GCM_VERTEX_F;
+    case GL_UNSIGNED_BYTE: return CELL_GCM_VERTEX_UB;
+    case GL_UNSIGNED_SHORT: return CELL_GCM_VERTEX_S32K;
+    default: return 0u;
+    }
+}
+
+static uint8_t psgl_gl_index_type(GLenum type)
+{
+    switch (type) {
+    case GL_UNSIGNED_SHORT: return CELL_GCM_DRAW_INDEX_ARRAY_TYPE_16;
+    case GL_UNSIGNED_INT: return CELL_GCM_DRAW_INDEX_ARRAY_TYPE_32;
+    default: return 0xffu;
+    }
+}
+
+static uint8_t psgl_attrib_hw_index(uint32_t slot)
+{
+    switch (slot) {
+    case PSGL_ATTRIB_VERTEX: return GCM_VERTEX_ATTRIB_POS;
+    case PSGL_ATTRIB_NORMAL: return GCM_VERTEX_ATTRIB_NORMAL;
+    case PSGL_ATTRIB_COLOR: return GCM_VERTEX_ATTRIB_COLOR0;
+    case PSGL_ATTRIB_TEXCOORD: return GCM_VERTEX_ATTRIB_TEX0;
+    default: return 0u;
+    }
+}
+
+static uint32_t psgl_attrib_stride(const PSGLvertexAttribState *attrib)
+{
+    if (attrib->stride > 0) return (uint32_t)attrib->stride;
+    if (attrib->type == GL_FLOAT) return (uint32_t)attrib->size * 4u;
+    if (attrib->type == GL_UNSIGNED_SHORT) return (uint32_t)attrib->size * 2u;
+    return (uint32_t)attrib->size;
+}
+
+static void psgl_emit_vertex_arrays(PSGLcontext *context)
+{
+    if (!context || !context->gcm) return;
+    for (uint32_t i = 0; i < PSGL_MAX_VERTEX_ATTRIBS; i++) {
+        PSGLvertexAttribState *attrib = &context->attribs[i];
+        PSGLbufferObject *buffer;
+        uint8_t type;
+        uint32_t offset;
+        if (!attrib->enabled || attrib->size <= 0) continue;
+        if (!attrib->buffer_name) continue;
+        buffer = psgl_find_buffer(attrib->buffer_name);
+        if (!buffer || !buffer->address) continue;
+        type = psgl_gl_vertex_type(attrib->type);
+        if (!type) continue;
+        offset = buffer->offset + attrib->buffer_offset;
+        cellGcmSetVertexDataArray(context->gcm, psgl_attrib_hw_index(i),
+                                  0, (uint8_t)psgl_attrib_stride(attrib),
+                                  (uint8_t)attrib->size, type,
+                                  CELL_GCM_LOCATION_LOCAL, offset);
+    }
+}
+
+static const void *psgl_cg_ucode(const PSGLcgProgram *program)
+{
+    return program ? cellCgbGetUCode(&program->cgb_program) : NULL;
+}
+
+static uint32_t psgl_cg_const_count(const PSGLcgParameter *parameter)
+{
+    uint32_t count = parameter->value_count;
+    if (count == 0u) count = 4u;
+    return (count + 3u) / 4u;
+}
+
+static int psgl_prepare_fragment_ucode(PSGLcgProgram *program)
+{
+    const void *ucode;
+    uint32_t size;
+    if (!program) return 0;
+    if (program->fragment_ucode_address) return 1;
+    ucode = cellCgbGetUCode(&program->cgb_program);
+    size = cellCgbGetUCodeSize(&program->cgb_program);
+    if (!ucode || !size) return 0;
+    program->fragment_ucode_address = rsxMemalign(64u, size);
+    if (!program->fragment_ucode_address) return 0;
+    psgl_copy(program->fragment_ucode_address, ucode, size);
+    if (cellGcmAddressToOffset(program->fragment_ucode_address,
+                               &program->fragment_ucode_offset) != 0) {
+        program->fragment_ucode_address = NULL;
+        program->fragment_ucode_offset = 0u;
+        return 0;
+    }
+    return 1;
+}
+
+static void psgl_patch_fragment_parameter(PSGLcgProgram *program,
+                                          PSGLcgParameter *parameter)
+{
+    uint32_t count = 0u;
+    uint16_t offsets[64];
+    uint32_t size;
+    if (!program || !parameter || !program->fragment_ucode_address) return;
+    if (!parameter->value_count) return;
+    cellCgbMapGetFragmentUniformOffsets(&program->cgb_program,
+                                        parameter->index, NULL, &count);
+    if (!count || count > 64u) return;
+    cellCgbMapGetFragmentUniformOffsets(&program->cgb_program,
+                                        parameter->index, offsets, &count);
+    size = cellCgbGetUCodeSize(&program->cgb_program);
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t off = offsets[i];
+        uint32_t *slot;
+        if (off + 16u > size) continue;
+        slot = (uint32_t *)((uint8_t *)program->fragment_ucode_address + off);
+        slot[0] = ((const uint32_t *)parameter->value)[1];
+        slot[1] = ((const uint32_t *)parameter->value)[0];
+        slot[2] = ((const uint32_t *)parameter->value)[3];
+        slot[3] = ((const uint32_t *)parameter->value)[2];
+    }
+    parameter->dirty = CG_FALSE;
+}
+
+static void psgl_emit_vertex_program(PSGLcontext *context,
+                                     PSGLcgProgram *program)
+{
+    const void *ucode;
+    if (!context || !context->gcm || !program || !program->loaded) return;
+    ucode = psgl_cg_ucode(program);
+    if (!ucode) return;
+    cellGcmSetVertexProgram(context->gcm, (CGprogram)program->binary,
+                            (void *)ucode);
+    cellGcmCgUploadInternalConsts(context->gcm, (CGprogram)program->binary);
+    for (uint32_t i = 0; i < program->parameter_count; i++) {
+        PSGLcgParameter *parameter = &program->parameters[i];
+        if (parameter->resource != CG_C || parameter->vertex_register == 0xffffu)
+            continue;
+        if (!parameter->value_count) continue;
+        cellGcmSetVertexProgramParameterBlock(context->gcm,
+                                             parameter->vertex_register,
+                                             psgl_cg_const_count(parameter),
+                                             parameter->value);
+        parameter->dirty = CG_FALSE;
+    }
+}
+
+static void psgl_emit_fragment_program(PSGLcontext *context,
+                                       PSGLcgProgram *program)
+{
+    if (!context || !context->gcm || !program || !program->loaded) return;
+    if (!psgl_prepare_fragment_ucode(program)) return;
+    for (uint32_t i = 0; i < program->parameter_count; i++)
+        psgl_patch_fragment_parameter(program, &program->parameters[i]);
+    cellGcmSetFragmentProgram(context->gcm, (CGprogram)program->binary,
+                              program->fragment_ucode_offset);
+}
+
+static void psgl_validate_draw_state(PSGLcontext *context)
+{
+    if (!context) return;
+    if (context->dirty & PSGL_DIRTY_FRAMEBUFFER) psgl_bind_render_target(context);
+    if (context->dirty & PSGL_DIRTY_VIEWPORT) psgl_emit_viewport(context);
+    if (context->dirty & PSGL_DIRTY_CG) {
+        psgl_emit_vertex_program(context,
+                                 psgl_cg_program(context->bound_vertex_program));
+        psgl_emit_fragment_program(context,
+                                   psgl_cg_program(context->bound_fragment_program));
+        psgl_emit_vertex_arrays(context);
+        context->dirty &= ~PSGL_DIRTY_CG;
+    }
+}
+
 static void psgl_clear_deleted_buffer_bindings(GLuint name)
 {
     PSGLcontext *context = g_psgl.current_context;
@@ -289,6 +532,8 @@ int psgl_context_init_system(const PSGLinitOptions *options)
     g_psgl.host_size = host_size;
     g_psgl.initialized = 1u;
     cellGcmSetFlipMode(GCM_FLIP_VSYNC);
+    cellGcmSetVBlankHandler(psgl_vblank_trampoline);
+    cellGcmSetFlipHandler(psgl_flip_trampoline);
     cellGcmResetFlipStatus();
     return 1;
 }
@@ -298,9 +543,10 @@ void psgl_context_shutdown_system(void)
     if (!g_psgl.initialized) return;
     if (CELL_GCM_CURRENT && g_psgl.current_device &&
         g_psgl.current_device->submitted_flips) {
-        cellGcmSetWaitFlip(CELL_GCM_CURRENT);
         cellGcmFinish(CELL_GCM_CURRENT, 1u);
     }
+    cellGcmSetVBlankHandler(NULL);
+    cellGcmSetFlipHandler(NULL);
     g_psgl.current_context = NULL;
     g_psgl.current_device = NULL;
     g_psgl.host_memory = NULL;
@@ -407,6 +653,13 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
         return NULL;
     }
 
+    device->frame_on_display = 0u;
+    device->flip_target_frame = 0u;
+    device->flip_pending = 0u;
+    device->current_frame = (device->frame_on_display + 1u) % device->frame_count;
+    psgl_init_flip_labels(device);
+    cellGcmSetVBlankHandler(psgl_vblank_trampoline);
+    cellGcmSetFlipHandler(psgl_flip_trampoline);
     device->initialized = 1u;
     return device;
 }
@@ -500,25 +753,38 @@ void psgl_context_swap(void)
 {
     PSGLcontext *context = g_psgl.current_context;
     PSGLdevice *device = g_psgl.current_device;
+    int32_t queue_id;
     if (!context || !device || !context->gcm) return;
 
-    if (device->submitted_flips) {
-        psgl_wait_flip();
-    } else {
-        cellGcmResetFlipStatus();
+    queue_id = (int32_t)cellGcmSetPrepareFlip(context->gcm,
+                                              (uint8_t)device->current_frame);
+    while (queue_id < 0) {
+        sys_timer_usleep(1000);
+        queue_id = (int32_t)cellGcmSetPrepareFlip(context->gcm,
+                                                  (uint8_t)device->current_frame);
     }
-    PSGLframeBuffer *frame = &device->frames[device->current_frame];
-    if (cellGcmSetFlip(context->gcm, frame->id) == 0) {
-        cellGcmFlush(context->gcm);
-        cellGcmSetWaitFlip(context->gcm);
-        g_psgl.last_flip_time = psglGetSystemTime();
-        device->submitted_flips++;
-        device->current_frame = (device->current_frame + 1u) % device->frame_count;
-        context->dirty |= PSGL_DIRTY_FRAMEBUFFER;
-        psgl_bind_render_target(context);
-        psgl_emit_viewport(context);
-        if (g_psgl.flip_handler) g_psgl.flip_handler(0u);
-    }
+
+    cellGcmSetWriteBackEndLabel(context->gcm, PSGL_LABEL_PREPARED_BUFFER,
+                                (device->current_frame << 8) |
+                                ((uint32_t)queue_id & 0x7u));
+    cellGcmFlush(context->gcm);
+    while (psgl_ppu_too_far_ahead(device))
+        sys_timer_usleep(3000);
+
+    g_psgl.last_flip_time = psglGetSystemTime();
+    device->submitted_flips++;
+    device->current_frame = (device->current_frame + 1u) % device->frame_count;
+    cellGcmSetWaitLabel(context->gcm,
+                        (uint8_t)(PSGL_LABEL_BUFFER_STATUS +
+                                  device->current_frame),
+                        PSGL_BUFFER_IDLE);
+    cellGcmSetWriteCommandLabel(context->gcm,
+                                (uint8_t)(PSGL_LABEL_BUFFER_STATUS +
+                                          device->current_frame),
+                                PSGL_BUFFER_BUSY);
+    context->dirty |= PSGL_DIRTY_FRAMEBUFFER;
+    psgl_bind_render_target(context);
+    psgl_emit_viewport(context);
 }
 
 void psgl_context_set_clear_color(GLfloat red, GLfloat green,
@@ -715,15 +981,19 @@ void psgl_context_set_client_state(GLenum array, GLboolean enabled)
     switch (array) {
     case GL_VERTEX_ARRAY:
         context->attribs[PSGL_ATTRIB_VERTEX].enabled = enabled;
+        context->dirty |= PSGL_DIRTY_CG;
         break;
     case GL_NORMAL_ARRAY:
         context->attribs[PSGL_ATTRIB_NORMAL].enabled = enabled;
+        context->dirty |= PSGL_DIRTY_CG;
         break;
     case GL_COLOR_ARRAY:
         context->attribs[PSGL_ATTRIB_COLOR].enabled = enabled;
+        context->dirty |= PSGL_DIRTY_CG;
         break;
     case GL_TEXTURE_COORD_ARRAY:
         context->attribs[PSGL_ATTRIB_TEXCOORD].enabled = enabled;
+        context->dirty |= PSGL_DIRTY_CG;
         break;
     default:
         break;
@@ -744,6 +1014,38 @@ void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
     attrib->pointer = pointer;
     attrib->buffer_name = context->bound_array_buffer;
     attrib->buffer_offset = context->bound_array_buffer ? (uint32_t)(uintptr_t)pointer : 0u;
+    context->dirty |= PSGL_DIRTY_CG;
+}
+
+void psgl_context_draw_arrays(GLenum mode, GLint first, GLsizei count)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    uint32_t primitive = psgl_gl_primitive(mode);
+    if (!context || !context->gcm || first < 0 || count <= 0 || !primitive)
+        return;
+    psgl_validate_draw_state(context);
+    cellGcmSetDrawArrays(context->gcm, primitive, (uint32_t)first,
+                         (uint32_t)count);
+}
+
+void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
+                                const GLvoid *indices)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLbufferObject *buffer;
+    uint32_t primitive = psgl_gl_primitive(mode);
+    uint8_t index_type = psgl_gl_index_type(type);
+    uint32_t offset;
+    if (!context || !context->gcm || count <= 0 || !primitive ||
+        index_type == 0xffu)
+        return;
+    buffer = psgl_find_buffer(context->bound_element_array_buffer);
+    if (!buffer || !buffer->address) return;
+    offset = buffer->offset + (uint32_t)(uintptr_t)indices;
+    psgl_validate_draw_state(context);
+    cellGcmSetDrawIndexArray(context->gcm, (uint8_t)primitive,
+                             (uint32_t)count, index_type,
+                             CELL_GCM_LOCATION_LOCAL, offset);
 }
 
 PSGLuint64 psglGetSystemTime(void)
@@ -762,11 +1064,11 @@ PSGLuint64 psglGetLastFlipTime(void)
 void psglSetFlipHandler(void (*handler)(const GLuint head))
 {
     g_psgl.flip_handler = handler;
-    cellGcmSetFlipHandler(handler ? psgl_flip_trampoline : NULL);
+    cellGcmSetFlipHandler(psgl_flip_trampoline);
 }
 
 void psglSetVBlankHandler(void (*handler)(const GLuint head))
 {
     g_psgl.vblank_handler = handler;
-    cellGcmSetVBlankHandler(handler ? psgl_vblank_trampoline : NULL);
+    cellGcmSetVBlankHandler(psgl_vblank_trampoline);
 }

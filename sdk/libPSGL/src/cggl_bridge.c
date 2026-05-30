@@ -245,7 +245,7 @@ CGGL_API void CGGLENTRY cgGLSetMatrixParameterdr(CGparameter p,
 { float f[16]; cggl_copy_double_to_float(f, m, 16u); cgGLSetMatrixParameterfr(p, f); }
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterfr(CGparameter p,
                                                  const float *m)
-{ psgl_cg_set_parameter_matrix(psgl_cg_parameter(p), m); }
+{ psgl_cg_set_parameter_matrix(psgl_cg_parameter(p), m); cggl_mark_cg_dirty(); }
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterdc(CGparameter p,
                                                  const double *m)
 { cgGLSetMatrixParameterdr(p, m); }

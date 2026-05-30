@@ -63,6 +63,9 @@ struct PSGLdevice {
     uint32_t pitch;
     uint32_t frame_count;
     uint32_t current_frame;
+    uint32_t frame_on_display;
+    uint32_t flip_target_frame;
+    uint32_t flip_pending;
     uint32_t submitted_flips;
     float aspect_ratio;
     PSGLframeBuffer frames[PSGL_MAX_FRAME_BUFFERS];
@@ -129,5 +132,8 @@ void psgl_context_set_client_state(GLenum array, GLboolean enabled);
 void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
                                      GLenum type, GLsizei stride,
                                      const GLvoid *pointer);
+void psgl_context_draw_arrays(GLenum mode, GLint first, GLsizei count);
+void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
+                                const GLvoid *indices);
 
 #endif

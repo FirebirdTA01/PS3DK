@@ -116,10 +116,10 @@ GLAPI void glBlendFunc(GLenum sfactor, GLenum dfactor)
 /* ── draw ────────────────────────────────────────────────────────── */
 
 GLAPI void glDrawArrays(GLenum mode, GLint first, GLsizei count)
-{ (void)mode; (void)first; (void)count; }
+{ psgl_context_draw_arrays(mode, first, count); }
 GLAPI void glDrawElements(GLenum mode, GLsizei count,
                           GLenum type, const GLvoid *indices)
-{ (void)mode; (void)count; (void)type; (void)indices; }
+{ psgl_context_draw_elements(mode, count, type, indices); }
 
 /* ── viewport / scissor ──────────────────────────────────────────── */
 

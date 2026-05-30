@@ -47,6 +47,8 @@ struct _CGprogram {
     CellCgbProgram cgb_program;
     PSGLcgParameter *parameters;
     uint32_t parameter_count;
+    void *fragment_ucode_address;
+    uint32_t fragment_ucode_offset;
     CGbool loaded;
 };
 
