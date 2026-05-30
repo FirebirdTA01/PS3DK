@@ -1,4 +1,5 @@
 library: sceNpTrophy
+archive_name: sysutil_np_trophy
 version: 1
 module: sceNpTrophy
 exports:
