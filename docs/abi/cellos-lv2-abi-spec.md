@@ -126,6 +126,27 @@ The default PPU C data model is **ILP32 with a 64-bit ELF wrapper**
 wire, registers are 64-bit, and the ELF header reports ELF64.
 Multilib `-mlp64` opt-in flips Pmode to DImode for LP64 user code.
 
+The default `powerpc64-ps3-elf-gcc` invocation therefore produces
+ELF64 binaries with `sizeof(void *) == 4`. That is the data model used
+by the CellOS SPRX runtime, LV2 syscall layer, CRT0 chain, compact OPD
+descriptors, and the published `cell/*.h` struct layouts. Code written
+for older PS3 SDKs should not need permissive pointer conversions just
+to fit this project.
+
+Code that wants a genuinely wide C pointer model can pass `-mlp64`.
+The SDK install builds the runtime objects, native archives, and
+nidgen-emitted stub archives for both data models; CMake samples pick
+the correct library path from the selected compiler flags. The PRX
+boundary remains a 32-bit-effective-address interface even when user
+code is compiled as LP64.
+
+For public headers, any pointer field inside a caller-allocated struct
+that crosses the SPRX boundary must use `ATTRIBUTE_PRXPTR` or an
+explicit `uint32_t` effective-address field. Width-sensitive integers
+inside those same structs must be fixed-width (`uint32_t`, `uint64_t`,
+and friends), not host C aliases such as `size_t`, when the firmware
+reads a fixed-width field.
+
 This spec treats addresses in three layers:
 
 - **Effective addresses (`uint32_t`)**: every userland EA fits in 32
@@ -325,7 +346,7 @@ Normative rules:
    emit a `.lib.stub` header naming `sysPrxForUser`; with both in
    the link the loader resolves duplicate sysPrxForUser imports and
    the trampoline shape from each archive may differ.  As of commit
-   1e076ed nidgen owns sysPrxForUser canonical Sony names plus
+   1e076ed nidgen owns sysPrxForUser canonical firmware names plus
    PSL1GHT-style aliases (`sysLwMutexCreate` → `sys_lwmutex_create`,
    etc.) so liblv2.a's sprx.o has been retired.  Restore the strip
    of `sprx.o` whenever liblv2.a is rebuilt.
