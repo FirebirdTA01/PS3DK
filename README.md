@@ -1,30 +1,21 @@
 # PS3 Custom Toolchain
 
-A modern, open-source toolchain and SDK for the PlayStation 3, supporting **C++20** on the PowerPC 64 PPU (PPE) and **C++17** on both the PPE and the Synergistic Processing Units (SPU) of the IBM Cell Broadband Engine.
+A modern, open-source toolchain and SDK for the PlayStation 3. It is C++17-first on both the PowerPC 64 PPU and the Synergistic Processing Units (SPU), with GCC 12.4.0 on PPU and GCC 9.5.0 on SPU. The PPU compiler also has substantial C++20 and partial C++23 library support.
 
-Built on the ps3dev baseline (`ps3toolchain` + `PSL1GHT` + `ps3libraries`) rebased onto current-generation compilers, with auto-generated stub libraries driven by a NID/FNID database and a ≥95% coverage target against the reference cell-SDK surface for the subsystems homebrew actually uses.
+The SDK now has its own runtime, native cell-style headers, NID/FNID-driven stub archives, fragment-shader tooling, and CMake sample flow. PSL1GHT remains a supported front-end for existing homebrew, while new code can use either PSL1GHT-style or cell-style APIs against the same installed runtime.
+
+## Current status
+
+- **Toolchain:** PPU GCC 12.4.0, SPU GCC 9.5.0, binutils 2.42, newlib 4.4.0, and PPU GDB 14.2 build and install end-to-end on Linux.
+- **PPU ABI:** default PPU binaries use ELF64 with 32-bit C pointers for CellOS compatibility. `-mlp64` selects the LP64 multilib. See [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md).
+- **SDK export coverage:** 3451 of 4796 tracked exports are covered by the installed SDK tree, or 72.0% across 99 tracked libraries. The full generated matrix is in [docs/coverage.md](docs/coverage.md).
+- **Network and NP coverage:** the current network-stack wave covers cellNetCtl, sys_net, SSL, HTTP/HTTPUtil, and the NP family (`sysutil_np`, NP2, trophy, TUS, clans, commerce2, SNS, and utility surfaces), adding roughly 700 exports and 12 tracked network validation samples.
+- **Samples:** 122 tracked CMake sample projects: toolchain 10, GCM 21, audio 2, codec 14, sysutil 37, firmware helper 4, LV2 7, SPU 3, SPURS 11, network 12, and dbgfont 1. See [samples/README.md](samples/README.md).
+- **Install contract:** `make -C sdk install` produces the installed headers, native archives, multilib stub archives, and `$PS3DK/.ps3dk-install-manifest`; `cmake/ps3-self.cmake` refuses stale installs at configure time.
 
 ## Direction
 
-This project started fully on PSL1GHT and is incrementally growing out
-from it.  Our own SDK lives under `sdk/` and replaces pieces of the
-PSL1GHT runtime one subsystem at a time — GCM command emitters, the
-sysutil forwarder family, stub archives built from a NID database, the
-RSX Cg compiler, etc.  The long-term shape is:
-
-- **Our own runtime + libraries** carry the bulk of the SDK surface,
-  written against the reference cell-SDK ABI where that matters for
-  binary / SPRX compatibility.
-- **PSL1GHT stays a permanently-supported front-end.** A
-  source-compat shim keeps PSL1GHT-targeted homebrew building
-  unchanged even as the runtime underneath it is replaced.  Existing
-  homebrew codebases do not have to migrate; new code can pick either
-  the PSL1GHT-style or the cell-SDK-style surface and both land on the
-  same runtime.
-
-Nothing about PSL1GHT API is getting deprecated — it stays a supported
-input forever.  What's changing is how much of the runtime behind it
-is ours.
+The repo is growing from a refreshed ps3dev/PSL1GHT baseline into a fuller SDK under `sdk/`: GCM command emitters, sysutil and NP stub archives, native LV2 runtime pieces, shader tooling, ABI verification, and samples all live here. Existing PSL1GHT code stays supported through compatibility headers and library aliases; new code can use the native cell-style surface directly.
 
 ## Toolchain components
 
@@ -39,144 +30,17 @@ is ours.
 | portlibs | current stable | PPU | zlib 1.3.1, libpng 1.6.43, SDL2 2.30, libcurl 8.9, mbedTLS 3.6, etc. |
 | Tooling | in-tree | host | Rust CLIs for NID/FNID generation, stub-archive emission, coverage reports |
 
-### Why these GCC versions
-
-- **PPU at GCC 12.4.0.** 12.x is the highest line that rebases onto the PSL1GHT PPU patch set without middle-end churn bleeding into the backend.  12.4.0 gives full **C++17**, substantially complete **C++20**, and partial **C++23** (`-std=c++2b`).  libstdc++ ships with ranges, `<format>`, concepts, coroutines, most of the parallel algorithms, and the `<chrono>` calendar/time-zone surface.
-- **SPU at GCC 9.5.0.** 9.5.0 is the **last upstream GCC that still ships a working Cell SPE backend** — GCC 10 removed `gcc/config/spu/`, `libgcc/config/spu/`, the SPU intrinsic headers, and the SPU test suite outright (≈34 000 lines total).  9.5.0 gives full **C++17** (core language + libstdc++).  C++20 support is **early / partial**: some constexpr extensions, aggregate-init fixes, three-way-comparison groundwork, and experimental `-std=c++2a` are in; the bulk of C++20 (finalised concepts, ranges, `<format>`, spaceship library, `constinit` / `consteval`, modules, coroutines) landed in GCC 10+ and is **not** available on SPU today.  Usability is constrained mostly by the 256 KiB local-store budget rather than the compiler version: libstdc++ headers are available but feature selection is pragmatic (no RTTI / no exceptions / `-Os` by default).
-
-### PPU pointer model (ELF64 + ILP32 default, LP64 multilib)
-
-The default `powerpc64-ps3-elf-gcc` invocation produces **ELF64
-binaries with 32-bit C pointers** (`sizeof(void *) == 4`), matching
-the reference cell SDK's compact OPD + ADDR32 TOC layout.  This is
-the ABI the reference SPRX runtime, lv2 syscall layer, CRT0 chain,
-and existing PS3 binaries expect — code written for older SDKs
-generally builds without `-fpermissive` and the published struct
-layouts (`cell/*.h`) match the kernel's expectations byte-for-byte.
-
-For code that wants a genuinely wide pointer model — modern
-libstdc++ headers (which assume `sizeof(size_t) == sizeof(void *)`),
-address-sanitiser parity, or just simpler `intptr_t` math — pass
-**`-mlp64`** to opt into the LP64 multilib.  The full runtime tree
-(`lv2-crt1.o`, `lv2-sprx.o`, `liblv2.a`, nidgen-emitted stub
-archives, `librsx`) is built for both data models by
-`make -C sdk install`; sample CMake builds pick the right variant
-automatically based on the `-mlp64` flag.
-
-The PRX boundary, LV2 syscall register layout, OPD format, FNID
-hashing, `_OPENSPRX_*` import shape, and struct-field ABI all speak
-the documented 32-bit-effective-address conventions regardless of
-which user-code data model is selected.  Pointer fields in `cell/*.h`
-structs that cross the SPRX boundary are tagged
-`ATTRIBUTE_PRXPTR` (= `__attribute__((mode(SI)))`); width-sensitive
-integers in those structs (`size_t`, `ptrdiff_t`, `off_t`) are
-declared as `uint32_t` directly.  Memory-container ids,
-event-queue ids, and other LV2 handles are 64 bits as the kernel
-specifies.
-
-The **`abi-verify`** harness runs on every install and enforces the
-documented Cell Lv-2 invariants: ELF64 / PowerPC64 / big-endian
-class, OS/ABI byte, `e_flags = 0`, compact 8-byte `.opd` entries
-with the ADDR32 + TLSGD-tail pair, `.sys_proc_prx_param` magic +
-size, data-model-consistent `.toc` reloc stride
-(`R_PPC64_ADDR32`/4 under ILP32, `R_PPC64_ADDR64`/8 under LP64,
-no mixing), and the per-ABI `.sceStub.text` trampoline shape
-(frame-less wrapping `bctrl` for ILP32, bare tail-call `bctr` for
-LP64).  See `docs/abi/cellos-lv2-abi-spec.md` for the full
-contract.
-
-### Upgrade roadmap
-
-We intend to track upstream GCC over time for **both** PPU and SPU —
-the current version pins are a starting point.  Each upgrade is gated 
-on the PPU patch set rebasing cleanly and the SPE backend coming 
-along for the ride, but both are active goals.
-
-- **PPU: GCC 13 → 14 → current stable.** Routine patch-set rebase
-  work across GCC 13's middle-end-to-backend interface shifts and GCC
-  14's further `machine_mode` / `target hook` API tightening.  Pay-off
-  is modules in libstdc++, fuller C++23 library coverage, and
-  progressively more C++26 paper coverage.  Planned as the PPU patch
-  stack stabilises.
-- **SPU: resurrect the SPE backend and track GCC forward.** GCC 10
-  removed `gcc/config/spu/`, `libgcc/config/spu/`, the SPU intrinsic
-  headers, and the SPU test suite (≈34 000 lines total); the
-  forward-port workstream (see `patches/spu/FORWARD_PORT_README.md`)
-  picks 9.5.0's SPE backend up, modernises it against GCC 12's
-  middle-end (the `rs6000.c` → `rs6000.cc` split pattern, new pass
-  infrastructure, `machine_mode` → `scalar_int_mode` /
-  `scalar_float_mode` tightening, libgcc build-system updates, and
-  intrinsic-header validation), and then tracks upstream alongside
-  PPU.  End state is a unified GCC version across PPU + SPU, full
-  C++20 / partial C++23 on SPU, and a single CI matrix.  This is a
-  substantial compiler-engineering effort, but it *is* the plan — not
-  a perpetual maybe.
-- **Newlib.** Tracking upstream; 4.4.0 is the current pin.  Next bump
-  is re-evaluated when a feature we need lands upstream or when the
-  PS3 `libsysbase` glue needs a material rewrite.
-- **GDB.** Same — 14.2 is the current pin; bumps happen when RPCS3's
-  gdbstub gains features we want to drive, or to track debugger
-  improvements upstream.
-
-### Other components
-
-- **PSL1GHT v3**: cell-SDK-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`) alongside a source-compat shim so PSL1GHT-targeted homebrew continues to build unchanged — PSL1GHT stays a supported front-end even as we replace most of its runtime behind the scenes.  Fragment-shader-capable RSX (NV40-FP assembler first, full Cg compiler at `tools/rsx-cg-compiler/`).
-
-## Status
-
-Active development; toolchain and core SDK are usable end-to-end.
-
-- **Toolchain (PPU + SPU):** built and validated.  Both cross-compilers,
-  `binutils`, `newlib`, and PPU `gdb` produce working artefacts; the SPU
-  GCC 9.5.0 fork is patched and stable on `spu-elf`.  Default PPU ABI is
-  ELF64+ILP32; `-mlp64` opts into the LP64 multilib (runtime-functional
-  as of v0.8.0).
-- **SDK surface:** 58.3% of the reference cell-SDK export set across 99
-  libraries (2794 / 4796 symbols), driven by the NID/FNID database and
-  the stub-archive pipeline.  Several subsystems are at 100% — `libaudio`,
-  `libgcm_sys` (with legacy-name shims), `libio` (pad/kb/mouse), `libc`,
-  `liblv2`, `libspurs` (PPU + SPU task runtime), `libsysutil_audio_out`,
-  `libfiber`, `libdmux`, and many more.  Native off-PSL1GHT
-  `sysutil`/`video`/`liblv2`/`librsx` archives ship as the default
-  for both ABIs.  See `docs/coverage.md` for the full matrix.
-- **Runtime path:** native compact-OPD ELFv1 LV2 runtime (`runtime/lv2/`)
-  ships and is the default for new PPU samples; PSL1GHT's runtime stays
-  available as a fallback.  Compact `.opd` (8-byte descriptors) is
-  end-to-end runnable in RPCS3 with full `printf` output under both
-  ILP32 (default) and LP64 (`-mlp64`).
-- **Install contract:** `make -C sdk install` is the single user-facing
-  step that produces a consistent installed stage — headers, multilib
-  stub archives, native multilib `liblv2.a`, `libsysutil.a` symlink
-  aliases, and a manifest at `$PS3DK/.ps3dk-install-manifest`.
-  `cmake/ps3-self.cmake` fails CMake configure if the manifest is
-  missing or stale, so sample builds never silently consume a stale
-  installed SDK.  `make -C sdk verify-install` is a fast no-rebuild
-  assertion of the same invariants.
-- **Samples:** 91 samples in-tree; 87/87 of the v0.7.x RPCS3-validated
-  subset (cellGcm rendering, cellAudio playback, cellPad input, Spurs
-  taskset + SPU task, lv2 event-flag with PPU↔SPU sync, sysutil
-  callbacks, msgdialog, savedata, gamedata, screenshot, l10n, jpg/png
-  decode, cellGcmDbgFont, etc.) passes under the default ILP32 hybrid
-  path.  Under `-mlp64` the toolchain sample tier is 7/7 RAN-CLEAN
-  and a cross-category sweep (audio / codec / lv2 / gcm / sysutil) is
-  clean with no LP64-specific regressions against the ILP32 baseline.
-- **rsx-cg-compiler:** 96/97 test shaders byte-identical to the
-  reference Cg compiler at `--O2 --fastmath`. See "Optional: rsx-cg-compiler"
-  below for what's covered.
-
-For the up-to-date API coverage matrix, regenerate
-`docs/coverage.md` after a build with
-`cargo run --release --bin coverage-report` from `tools/`.
+Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-design.md). Current upgrade work is tracked in [docs/roadmap.md](docs/roadmap.md). The detailed PPU ABI contract, including the ELF64+ILP32 default and LP64 multilib, is in [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md).
 
 ## Build host
 
-**Native Linux** is the primary build host — any reasonably current distribution (`glibc` ≥ 2.31, GCC ≥ 11 on the host, Python 3, Rust 1.70+) works.  Linux gives the cleanest GCC cross-build experience and matches CI.  **Windows users should build inside WSL2** (Ubuntu 24.04 recommended; see [Windows (via WSL2)](#windows-via-wsl2) below); native MSYS2 is not a supported bootstrap path.  macOS is untested.
+**Native Linux** is the primary build host. Any reasonably current distribution (`glibc` >= 2.31, GCC >= 11 on the host, Python 3, Rust 1.85+) works. Linux gives the cleanest GCC cross-build experience and matches CI. **Windows users should build inside WSL2** (Ubuntu 24.04 recommended; see [Windows (via WSL2)](#windows-via-wsl2) below); native MSYS2 is not a supported bootstrap path. macOS is untested.
 
 The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by cross-building from Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 toolchain.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
 
 ## Using a prebuilt Windows release
 
-End users who don't need to build the toolchain from source can grab `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page (planned for v0.3.0 — see [`docs/VERSIONING.md`](docs/VERSIONING.md)) instead.  The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the CMake toolchain files + helper modules under `cmake\`, portlibs, and the `samples/` source tree.
+End users who don't need to build the toolchain from source can use `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page when a Windows release artifact is published. See [`docs/VERSIONING.md`](docs/VERSIONING.md) for release packaging. The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the CMake toolchain files + helper modules under `cmake\`, portlibs, and the `samples/` source tree.
 
 ### Install
 
@@ -195,7 +59,7 @@ End users who don't need to build the toolchain from source can grab `ps3-sdk-vX
    ```
    `setup.cmd` prepends `bin\`, `ppu\bin\`, and `spu\bin\` to `%PATH%` for the current session and exports `PS3DEV` / `PSL1GHT` as in-session aliases for `%PS3DK%` (some legacy code paths still read those names).
 
-4. **Smoke-test the toolchain:**
+4. **Check the toolchain binaries:**
    ```cmd
    powerpc64-ps3-elf-gcc.exe --version
    spu-elf-gcc.exe --version
@@ -204,7 +68,7 @@ End users who don't need to build the toolchain from source can grab `ps3-sdk-vX
 
 ### Building samples from the prebuilt release
 
-The bundled `%PS3DK%\samples\` tree contains the same samples as `samples/` in this repo — `hello-ppu-c++17`, `hello-spu`, `hello-ppu-cellgcm-triangle`, the Spurs taskset demos, sysutil callbacks, savedata, etc.
+The bundled `%PS3DK%\samples\` tree contains the same tracked samples as `samples/` in this repo: toolchain checks, SPU examples, GCM rendering, SPURS taskset demos, sysutil callbacks, savedata, network-module validation, and more.
 
 Samples build with **CMake**.  You need `cmake` (3.20+) and a generator on `PATH` — Ninja is recommended, but Unix Makefiles or "MinGW Makefiles" also work.  None of these ship in the toolchain zip; install via `choco install cmake ninja`, the Visual Studio installer's optional CMake/Ninja components, or any equivalent.
 
@@ -390,7 +254,7 @@ source ./scripts/env.sh
 
 Native Windows builds aren't supported for the toolchain bootstrap — autotools and GCC's combined-tree build are reliable on Linux and brittle under MSYS2.  The recommended path for Windows users is **WSL2** with one of the supported Linux distributions.
 
-End users who just want to *use* a prebuilt toolchain on Windows do not need WSL — tagged releases will ship `ps3-sdk-vX.Y.Z-windows-x86_64.zip` with native `.exe` binaries (planned for v0.3.0; see [`docs/VERSIONING.md`](docs/VERSIONING.md)).  WSL2 is required only when *building from source*.
+End users who just want to *use* a prebuilt toolchain on Windows do not need WSL when a tagged Windows release artifact is available. WSL2 is required only when *building from source*.
 
 1. **Install WSL2 and a distro** from an elevated PowerShell or `cmd`:
    ```powershell
@@ -418,7 +282,7 @@ A few WSL2-specific notes:
 
 - The default `PS3_BUILD_ROOT` (`$HOME/ps3tc/build`) already lives in ext4 — no override needed.
 - If you want to use the Linux-hosted toolchain from Windows-native tools, copy or expose `stage/ps3dev/` back to the Windows side: `cp -r stage/ps3dev /mnt/c/ps3dev`, then set `PS3DEV=C:\ps3dev` in your Windows shell.
-- Cross-building the Windows toolchain release (the `.exe` binaries) requires the additional `mingw-w64 g++-mingw-w64-x86-64` packages on top of the standard Ubuntu install line (Debian/Fedora analogues exist).  This is documented separately under the v0.3.0 build flow.
+- Cross-building the Windows toolchain release (the `.exe` binaries) requires the additional `mingw-w64 g++-mingw-w64-x86-64` packages on top of the standard Ubuntu install line (Debian/Fedora analogues exist).
 
 ### Building the toolchain + SDK
 
@@ -429,7 +293,7 @@ source ./scripts/env.sh
 # First-time setup (clones upstream + ps3dev repos under src/).
 ./scripts/bootstrap.sh
 
-# Smoke test — binutils only, both targets (~1 minute total).
+# Quick validation: binutils only, both targets (~1 minute total).
 ./scripts/build-ppu-toolchain.sh --only binutils
 ./scripts/build-spu-toolchain.sh --only binutils
 
@@ -526,7 +390,7 @@ Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub 
 
 `tools/rsx-cg-compiler/` is a clean-room Cg → RSX (NV40) shader compiler we're growing as an eventual drop-in replacement for PSL1GHT's `cgcomp`.
 
-**It is experimental and growing.** The byte-diff harness against the reference Cg compiler at `--O2 --fastmath` reports **96 / 97 shaders byte-identical** today, covering vertex passthrough, MVP transforms, struct-flattened VP inputs and file-scope `: register(CN)` uniforms, FP arithmetic + MAD fusion (including per-lane MAD interleave and chained matvecmul), saturation + fp16 precision, dot products, min/max, abs/neg, TXP (projective texture), samplerCUBE, the full Select scope (all 6 compare ops × all lanes × uniform/literal/varying RHS, ternary, if-only and if-else diamonds via if-conversion), the SFU unaries `length` / `normalize` / `rcp` / `rsqrt` / `cos` / `sin` / `reflect`, FP intrinsic chaining + dot-pack family, FP uniform-condition if-conversion with CC-blend emit, IR-level constant folding, and FP tex-LHS write-back via VecInsert lowering.  Open gaps: `for`/`while` loops (blocked on loop-carry SSA in the IR builder).  For production shader builds the recommendation is still PSL1GHT's `cgcomp` until the loop work lands; the `hello-ppu-cellgcm-triangle` sample can opt into our compiler with `make USE_RSX_CG_COMPILER=1` and renders byte-identically end-to-end in RPCS3.
+**It is experimental and growing.** The byte-diff harness covers vertex passthrough, MVP transforms, struct-flattened VP inputs, file-scope `: register(CN)` uniforms, FP arithmetic and MAD fusion, precision modifiers, texture ops, select/if-conversion, SFU unary intrinsics, constant folding, and FP tex-LHS write-back. Open gaps include loop lowering. For production shader builds the recommendation is still PSL1GHT's `cgcomp` until the loop work lands; the `hello-ppu-cellgcm-triangle` sample can opt into our compiler with `make USE_RSX_CG_COMPILER=1`.
 
 To build it:
 
@@ -543,10 +407,10 @@ cmake --build tools/rsx-cg-compiler/build
 - `patches/` — rebased and new patches against upstream sources
 - `tools/` — Rust CLIs: `nidgen` (NID + stub-archive emit), `coverage-report`, `abi-verify`, `sprx-linker`; plus the C++ `rsx-cg-compiler`
 - `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, psl1ght, ps3dk, portlibs)
-- `samples/` — minimal C++17 demos for validation
+- `samples/` — tracked CMake sample projects across toolchain, GCM, audio, codec, sysutil, firmware helper, LV2, SPU, SPURS, and network categories
 - `ci/` — Docker images and GitHub Actions
 - `.github/workflows/` — CI (`ci.yml`) + tag-driven release (`release.yml`)
-- `docs/` — quickstart, migration guide, ABI reference, `VERSIONING.md`
+- `docs/` — coverage matrix, ABI reference, toolchain design notes, roadmap, `VERSIONING.md`
 - `CHANGELOG.md` — release-by-release history (Keep a Changelog format)
 
 ## Versioning and releases
