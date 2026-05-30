@@ -34,15 +34,6 @@ extern "C" {
 #define SCE_NP_SCORE_MAX_SELECTED_FRIENDS_NUM 100
 #define SCE_NP_SCORE_MAX_CTX_NUM 32
 
-#define SCE_NP_CLANS_CLAN_NAME_MAX_LENGTH 64
-#define SCE_NP_CLANS_CLAN_TAG_MAX_LENGTH 8
-#define SCE_NP_CLANS_CLAN_DESCRIPTION_MAX_LENGTH 255
-
-#ifndef __PS3DK_CELL_NP_CLAN_ID_TYPE_DEFINED__
-#define __PS3DK_CELL_NP_CLAN_ID_TYPE_DEFINED__
-typedef uint32_t SceNpClanId;
-#endif
-
 typedef uint32_t SceNpScoreBoardId;
 typedef int64_t SceNpScoreValue;
 typedef uint32_t SceNpScoreRankNumber;
