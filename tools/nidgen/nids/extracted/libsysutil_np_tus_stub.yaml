@@ -1,4 +1,5 @@
 library: sceNpTus
+archive_name: sysutil_np_tus
 version: 1
 module: sceNpTus
 exports:
