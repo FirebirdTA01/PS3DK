@@ -5,8 +5,17 @@
  * conditional rendering, vertex attribute sets, debug markers,
  * texture reference buffers, blend equation, polygon mode, etc.
  */
+#include <stddef.h>
+
 #include <GLES/glext.h>
-#include <string.h>
+
+static void glext_zero(void *ptr, size_t size)
+{
+    unsigned char *out = (unsigned char *)ptr;
+    while (size--) {
+        *out++ = 0;
+    }
+}
 
 /* ── blend equation / colour ─────────────────────────────────────── */
 
@@ -153,7 +162,7 @@ GLAPI void glDeleteBuffers(GLsizei n, const GLuint *buffers)
 { (void)n; (void)buffers; }
 
 GLAPI void glGenBuffers(GLsizei n, GLuint *buffers)
-{ if (buffers) memset(buffers, 0, (size_t)n * sizeof(GLuint)); }
+{ if (buffers) glext_zero(buffers, (size_t)n * sizeof(GLuint)); }
 
 GLAPI void glBufferData(GLenum target, GLsizeiptr size,
                         const GLvoid *data, GLenum usage)
@@ -183,7 +192,7 @@ GLAPI void glPrimitiveRestartIndexNV(GLuint index) { (void)index; }
 GLAPI void glDeleteFencesNV(GLsizei n, const GLuint *fences)
 { (void)n; (void)fences; }
 GLAPI void glGenFencesNV(GLsizei n, GLuint *fences)
-{ if (fences) memset(fences, 0, (size_t)n * sizeof(GLuint)); }
+{ if (fences) glext_zero(fences, (size_t)n * sizeof(GLuint)); }
 GLAPI GLboolean glIsFenceNV(GLuint fence)
 { (void)fence; return GL_FALSE; }
 GLAPI GLboolean glTestFenceNV(GLuint fence)
@@ -200,7 +209,7 @@ GLAPI void glSetFenceNV(GLuint fence, GLenum condition)
 GLAPI void glDeleteEventsSCE(GLsizei n, const GLuint *fences)
 { (void)n; (void)fences; }
 GLAPI void glGenEventsSCE(GLsizei n, GLuint *fences)
-{ if (fences) memset(fences, 0, (size_t)n * sizeof(GLuint)); }
+{ if (fences) glext_zero(fences, (size_t)n * sizeof(GLuint)); }
 GLAPI void glSetEventSCE(GLuint event)       { (void)event; }
 GLAPI void glResetEventSCE(GLuint event)     { (void)event; }
 GLAPI void glWaitEventSCE(GLuint event, GLboolean autoReset)
@@ -224,7 +233,7 @@ GLAPI void glBindRenderbufferOES(GLenum target, GLuint renderbuffer)
 GLAPI void glDeleteRenderbuffersOES(GLsizei n, const GLuint *renderbuffers)
 { (void)n; (void)renderbuffers; }
 GLAPI void glGenRenderbuffersOES(GLsizei n, GLuint *renderbuffers)
-{ if (renderbuffers) memset(renderbuffers, 0, (size_t)n * sizeof(GLuint)); }
+{ if (renderbuffers) glext_zero(renderbuffers, (size_t)n * sizeof(GLuint)); }
 GLAPI void glRenderbufferStorageOES(GLenum target, GLenum internalformat,
                                     GLsizei width, GLsizei height)
 { (void)target; (void)internalformat; (void)width; (void)height; }
@@ -239,7 +248,7 @@ GLAPI void glBindFramebufferOES(GLenum target, GLuint framebuffer)
 GLAPI void glDeleteFramebuffersOES(GLsizei n, const GLuint *framebuffers)
 { (void)n; (void)framebuffers; }
 GLAPI void glGenFramebuffersOES(GLsizei n, GLuint *framebuffers)
-{ if (framebuffers) memset(framebuffers, 0, (size_t)n * sizeof(GLuint)); }
+{ if (framebuffers) glext_zero(framebuffers, (size_t)n * sizeof(GLuint)); }
 GLAPI GLenum glCheckFramebufferStatusOES(GLenum target)
 { (void)target; return GL_FRAMEBUFFER_COMPLETE_OES; }
 GLAPI void glFramebufferTexture2DOES(GLenum target, GLenum attachment,
@@ -266,7 +275,7 @@ GLAPI void glFramebufferParameteriSCE(GLenum target, GLenum pname,
 /* ── occlusion queries ARB ───────────────────────────────────────── */
 
 GLAPI void glGenQueriesARB(GLsizei n, GLuint *ids)
-{ if (ids) memset(ids, 0, (size_t)n * sizeof(GLuint)); }
+{ if (ids) glext_zero(ids, (size_t)n * sizeof(GLuint)); }
 GLAPI void glDeleteQueriesARB(GLsizei n, const GLuint *ids)
 { (void)n; (void)ids; }
 GLAPI GLboolean glIsQueryARB(GLuint id)
@@ -296,7 +305,7 @@ GLAPI void glActiveStencilFaceEXT(GLenum face)        { (void)face; }
 /* ── vertex attribute sets SCE ───────────────────────────────────── */
 
 GLAPI void glGenAttribSetsSCE(GLsizei n, GLuint *names)
-{ if (names) memset(names, 0, (size_t)n * sizeof(GLuint)); }
+{ if (names) glext_zero(names, (size_t)n * sizeof(GLuint)); }
 GLAPI void glDeleteAttribSetsSCE(GLsizei n, const GLuint *names)
 { (void)n; (void)names; }
 GLAPI GLboolean glIsAttribSetSCE(GLuint name)

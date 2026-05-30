@@ -100,9 +100,6 @@ install: $(ARCHIVE) $(LP64_ARCHIVE)
 	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libgcm_cmd.a
 	@install -d $(INSTALL_LIB)/lp64
 	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LIB)/lp64/libgcm_cmd.a
-	@install -d $(INSTALL_INC)/Cg
-	install -m 0644 include/Cg/cg.h       $(INSTALL_INC)/Cg/cg.h
-	install -m 0644 include/Cg/cgBinary.h $(INSTALL_INC)/Cg/cgBinary.h
 	@install -d $(INSTALL_INC)/cell/gcm
 	install -m 0644 include/cell/gcm/gcm_cg_func.h    $(INSTALL_INC)/cell/gcm/gcm_cg_func.h
 	install -m 0644 include/cell/gcm/ps3tc_fifo_wrap.h $(INSTALL_INC)/cell/gcm/ps3tc_fifo_wrap.h

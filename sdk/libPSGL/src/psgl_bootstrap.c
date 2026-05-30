@@ -10,111 +10,121 @@
 #include <PSGL/psglu.h>
 #include <PSGL/report.h>
 
+#include "psgl_context.h"
+
+static void psgl_bootstrap_zero(void *ptr, uint32_t size)
+{
+    unsigned char *out = (unsigned char *)ptr;
+    while (size--) {
+        *out++ = 0;
+    }
+}
+
 /* ── lifecycle ──────────────────────────────────────────────────── */
 
 PSGL_EXPORT void psglInit(PSGLinitOptions *options)
 {
-    (void)options;
+    if (!psgl_context_init_system(options)) return;
+    if (!psgl_context_current()) {
+        PSGLcontext *context = psgl_context_create();
+        if (context) psgl_context_make_current(context, NULL);
+    }
 }
 
-PSGL_EXPORT void psglExit(void) {}
+PSGL_EXPORT void psglExit(void)
+{
+    PSGLcontext *context = psgl_context_current();
+    PSGLdevice *device = psgl_context_current_device();
+    if (context) psgl_context_destroy(context);
+    if (device) psgl_device_destroy(device);
+    psgl_context_shutdown_system();
+}
 
 PSGL_EXPORT PSGLdevice *psglCreateDeviceAuto(GLenum colorFormat,
                                              GLenum depthFormat,
                                              GLenum multisamplingMode)
 {
-    (void)colorFormat;
-    (void)depthFormat;
-    (void)multisamplingMode;
-    return NULL;
+    PSGLdeviceParameters parameters;
+    psgl_bootstrap_zero(&parameters, sizeof(parameters));
+    parameters.enable = PSGL_DEVICE_PARAMETERS_COLOR_FORMAT |
+                        PSGL_DEVICE_PARAMETERS_DEPTH_FORMAT |
+                        PSGL_DEVICE_PARAMETERS_MULTISAMPLING_MODE |
+                        PSGL_DEVICE_PARAMETERS_BUFFERING_MODE;
+    parameters.colorFormat = colorFormat;
+    parameters.depthFormat = depthFormat;
+    parameters.multisamplingMode = multisamplingMode;
+    parameters.bufferingMode = PSGL_BUFFERING_MODE_TRIPLE;
+    return psgl_device_create(&parameters);
 }
 
 PSGL_EXPORT PSGLdevice *psglCreateDeviceExtended(
     const PSGLdeviceParameters *parameters)
 {
-    (void)parameters;
-    return NULL;
+    return psgl_device_create(parameters);
 }
 
 PSGL_EXPORT GLfloat psglGetDeviceAspectRatio(const PSGLdevice *device)
 {
-    (void)device;
-    return 1.0f;
+    return device ? device->aspect_ratio : 1.0f;
 }
 
 PSGL_EXPORT void psglGetDeviceDimensions(const PSGLdevice *device,
                                          GLuint *width, GLuint *height)
 {
-    (void)device;
-    if (width)  *width  = 0;
-    if (height) *height = 0;
+    if (width)  *width  = device ? device->width : 0;
+    if (height) *height = device ? device->height : 0;
 }
 
 PSGL_EXPORT void psglGetRenderBufferDimensions(const PSGLdevice *device,
                                                GLuint *width, GLuint *height)
 {
-    (void)device;
-    if (width)  *width  = 0;
-    if (height) *height = 0;
+    if (width)  *width  = device ? device->render_width : 0;
+    if (height) *height = device ? device->render_height : 0;
 }
 
 PSGL_EXPORT void psglDestroyDevice(PSGLdevice *device)
 {
-    (void)device;
+    psgl_device_destroy(device);
 }
 
 /* ── context ─────────────────────────────────────────────────────── */
 
 PSGL_EXPORT void psglMakeCurrent(PSGLcontext *context, PSGLdevice *device)
 {
-    (void)context;
-    (void)device;
+    psgl_context_make_current(context, device);
 }
 
 PSGL_EXPORT PSGLcontext *psglCreateContext(void)
 {
-    return NULL;
+    if (!psgl_context_init_system(NULL)) return NULL;
+    return psgl_context_create();
 }
 
 PSGL_EXPORT void psglDestroyContext(PSGLcontext *context)
 {
-    (void)context;
+    psgl_context_destroy(context);
 }
 
-PSGL_EXPORT void psglResetCurrentContext(void) {}
+PSGL_EXPORT void psglResetCurrentContext(void)
+{
+    psgl_context_reset_current();
+}
 
 PSGL_EXPORT PSGLcontext *psglGetCurrentContext(void)
 {
-    return NULL;
+    return psgl_context_current();
 }
 
 PSGL_EXPORT PSGLdevice *psglGetCurrentDevice(void)
 {
-    return NULL;
+    return psgl_context_current_device();
 }
 
 /* ── frame control ───────────────────────────────────────────────── */
 
-PSGL_EXPORT void psglSwap(void) {}
-
-PSGL_EXPORT PSGLuint64 psglGetSystemTime(void)
+PSGL_EXPORT void psglSwap(void)
 {
-    return 0ULL;
-}
-
-PSGL_EXPORT PSGLuint64 psglGetLastFlipTime(void)
-{
-    return 0ULL;
-}
-
-PSGL_EXPORT void psglSetFlipHandler(void (*handler)(const GLuint head))
-{
-    (void)handler;
-}
-
-PSGL_EXPORT void psglSetVBlankHandler(void (*handler)(const GLuint head))
-{
-    (void)handler;
+    psgl_context_swap();
 }
 
 /* ── shader library ──────────────────────────────────────────────── */
@@ -157,8 +167,13 @@ PSGL_EXPORT GLsizei psglGetBounceBufferSize(void)
 
 PSGL_EXPORT void psglAddressToOffset(const void *address, GLuint *offset)
 {
-    (void)address;
-    if (offset) *offset = 0;
+    if (!offset) return;
+    *offset = 0;
+    if (address) {
+        uint32_t gcm_offset = 0;
+        if (cellGcmAddressToOffset(address, &gcm_offset) == 0)
+            *offset = (GLuint)gcm_offset;
+    }
 }
 
 PSGL_EXPORT void psglSetVertexProgramRegister(

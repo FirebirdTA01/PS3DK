@@ -5,7 +5,15 @@
  * known-zero state, not stack garbage.
  */
 #include <cell/cgb.h>
-#include <string.h>
+#include <stddef.h>
+
+static void cgb_zero(void *ptr, uint32_t size)
+{
+  unsigned char *out = (unsigned char *)ptr;
+  while (size--) {
+    *out++ = 0;
+  }
+}
 
 uint32_t cellCgbGetSize(const void *binary)
 { (void)binary; return 0; }
@@ -13,7 +21,7 @@ uint32_t cellCgbGetSize(const void *binary)
 int32_t cellCgbRead(const void *binary, const uint32_t size,
                     CellCgbProgram *program)
 { (void)binary; (void)size;
-  if (program) memset(program, 0, sizeof(*program));
+  if (program) cgb_zero(program, sizeof(*program));
   return CELL_CGB_ERROR_FAILED; }
 
 CellCgbProfile cellCgbGetProfile(const CellCgbProgram *program)
@@ -29,14 +37,14 @@ int32_t cellCgbGetVertexConfiguration(
     const CellCgbProgram *program,
     CellCgbVertexProgramConfiguration *conf)
 { (void)program;
-  if (conf) memset(conf, 0, sizeof(*conf));
+  if (conf) cgb_zero(conf, sizeof(*conf));
   return CELL_CGB_ERROR_FAILED; }
 
 int32_t cellCgbGetFragmentConfiguration(
     const CellCgbProgram *program,
     CellCgbFragmentProgramConfiguration *conf)
 { (void)program;
-  if (conf) memset(conf, 0, sizeof(*conf));
+  if (conf) cgb_zero(conf, sizeof(*conf));
   return CELL_CGB_ERROR_FAILED; }
 
 int32_t cellCgbGetVertexAttributeOutputMask(const CellCgbProgram *program,

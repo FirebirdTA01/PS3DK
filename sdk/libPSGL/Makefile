@@ -12,6 +12,7 @@ PS3DK    ?= $(PS3DEV)/ps3dk
 
 CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -mcpu=cell -std=c11 \
+            -I../include \
             -I$(PS3DK)/ppu/include
 DEPFLAGS := -MMD -MP
 ARFLAGS  := rcs

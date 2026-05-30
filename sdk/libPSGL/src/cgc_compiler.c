@@ -1,6 +1,7 @@
 /* cgc_compiler.c — sceCgc runtime-compiler stubs (Slice 1d link gate).
  */
 #include <Cg/cgc.h>
+#include <stddef.h>
 #include <string.h>
 
 CGCcontext *sceCgcNewContext(CGCmem *pool)

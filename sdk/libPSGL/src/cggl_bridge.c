@@ -3,8 +3,17 @@
  * Covers NV/cgGL.h + Cg/cgGL.h surface.  All functions are safe NOPs
  * returning spec-correct defaults: CG_FALSE, NULL, or 0.
  */
+#include <stddef.h>
+
 #include <Cg/cgGL.h>
-#include <string.h>
+
+static void cggl_zero(void *ptr, size_t size)
+{
+    unsigned char *out = (unsigned char *)ptr;
+    while (size--) {
+        *out++ = 0;
+    }
+}
 
 /* ── profile ─────────────────────────────────────────────────────── */
 
@@ -87,7 +96,7 @@ CGGL_API void CGGLENTRY cgGLGetParameter2f(CGparameter p, float *v)
 CGGL_API void CGGLENTRY cgGLGetParameter3f(CGparameter p, float *v)
 { (void)p; if (v) { v[0] = 0.0f; v[1] = 0.0f; v[2] = 0.0f; } }
 CGGL_API void CGGLENTRY cgGLGetParameter4f(CGparameter p, float *v)
-{ (void)p; if (v) memset(v, 0, 4 * sizeof(float)); }
+{ (void)p; if (v) cggl_zero(v, 4 * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetParameter1d(CGparameter p, double *v)
 { (void)p; if (v) *v = 0.0; }
 CGGL_API void CGGLENTRY cgGLGetParameter2d(CGparameter p, double *v)
@@ -95,7 +104,7 @@ CGGL_API void CGGLENTRY cgGLGetParameter2d(CGparameter p, double *v)
 CGGL_API void CGGLENTRY cgGLGetParameter3d(CGparameter p, double *v)
 { (void)p; if (v) { v[0] = 0.0; v[1] = 0.0; v[2] = 0.0; } }
 CGGL_API void CGGLENTRY cgGLGetParameter4d(CGparameter p, double *v)
-{ (void)p; if (v) memset(v, 0, 4 * sizeof(double)); }
+{ (void)p; if (v) cggl_zero(v, 4 * sizeof(double)); }
 
 /* ── parameter arrays ────────────────────────────────────────────── */
 
@@ -125,28 +134,28 @@ CGGL_API void CGGLENTRY cgGLSetParameterArray4d(CGparameter p, long off,
 { (void)p; (void)off; (void)n; (void)v; }
 CGGL_API void CGGLENTRY cgGLGetParameterArray1f(CGparameter p, long off,
                                                 long n, float *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(float)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetParameterArray2f(CGparameter p, long off,
                                                 long n, float *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(float)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetParameterArray3f(CGparameter p, long off,
                                                 long n, float *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(float)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetParameterArray4f(CGparameter p, long off,
                                                 long n, float *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(float)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetParameterArray1d(CGparameter p, long off,
                                                 long n, double *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(double)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetParameterArray2d(CGparameter p, long off,
                                                 long n, double *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(double)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetParameterArray3d(CGparameter p, long off,
                                                 long n, double *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(double)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetParameterArray4d(CGparameter p, long off,
                                                 long n, double *v)
-{ (void)p; (void)off; if (v) memset(v, 0, (size_t)n * sizeof(double)); }
+{ (void)p; (void)off; if (v) cggl_zero(v, (size_t)n * sizeof(double)); }
 
 /* ── pointer / client state ──────────────────────────────────────── */
 
@@ -177,13 +186,13 @@ CGGL_API void CGGLENTRY cgGLSetMatrixParameterfc(CGparameter p,
                                                  const float *m)
 { (void)p; (void)m; }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterdr(CGparameter p, double *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(double)); }
+{ (void)p; if (m) cggl_zero(m, 16 * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterfr(CGparameter p, float *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(float)); }
+{ (void)p; if (m) cggl_zero(m, 16 * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterdc(CGparameter p, double *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(double)); }
+{ (void)p; if (m) cggl_zero(m, 16 * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterfc(CGparameter p, float *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(float)); }
+{ (void)p; if (m) cggl_zero(m, 16 * sizeof(float)); }
 
 CGGL_API void CGGLENTRY cgGLSetStateMatrixParameter(CGparameter param,
                                                     CGGLenum matrix,
@@ -209,19 +218,19 @@ CGGL_API void CGGLENTRY cgGLSetMatrixParameterArraydr(CGparameter p, long off,
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterArrayfc(CGparameter p, long off,
                                                       long n, float *m)
 { (void)p; (void)off; (void)n;
-  if (m) memset(m, 0, (size_t)n * sizeof(float)); }
+  if (m) cggl_zero(m, (size_t)n * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterArrayfr(CGparameter p, long off,
                                                       long n, float *m)
 { (void)p; (void)off; (void)n;
-  if (m) memset(m, 0, (size_t)n * sizeof(float)); }
+  if (m) cggl_zero(m, (size_t)n * sizeof(float)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterArraydc(CGparameter p, long off,
                                                       long n, double *m)
 { (void)p; (void)off; (void)n;
-  if (m) memset(m, 0, (size_t)n * sizeof(double)); }
+  if (m) cggl_zero(m, (size_t)n * sizeof(double)); }
 CGGL_API void CGGLENTRY cgGLGetMatrixParameterArraydr(CGparameter p, long off,
                                                       long n, double *m)
 { (void)p; (void)off; (void)n;
-  if (m) memset(m, 0, (size_t)n * sizeof(double)); }
+  if (m) cggl_zero(m, (size_t)n * sizeof(double)); }
 
 /* ── texture ─────────────────────────────────────────────────────── */
 

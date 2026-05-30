@@ -4,10 +4,19 @@
  * NULL + set CG_INVALID_PARAMETER_ERROR where appropriate; is-functions
  * return CG_FALSE; void functions are NOPs.
  */
+#include <stddef.h>
+
 #include <Cg/cg.h>
-#include <string.h>
 
 static CGerror g_cg_error = CG_NO_ERROR;
+
+static void cg_zero(void *ptr, size_t size)
+{
+    unsigned char *out = (unsigned char *)ptr;
+    while (size--) {
+        *out++ = 0;
+    }
+}
 
 /* ── error ───────────────────────────────────────────────────────── */
 
@@ -296,17 +305,17 @@ CG_API void CGENTRY cgSetParameterValueir(CGparameter p, int n, const int *v)
 CG_API void CGENTRY cgSetParameterValueic(CGparameter p, int n, const int *v)
 { (void)p; (void)n; (void)v; }
 CG_API int CGENTRY cgGetParameterValuedr(CGparameter p, int n, double *v)
-{ (void)p; (void)n; if (v) memset(v, 0, (size_t)n * sizeof(double)); return 0; }
+{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(double)); return 0; }
 CG_API int CGENTRY cgGetParameterValuedc(CGparameter p, int n, double *v)
-{ (void)p; (void)n; if (v) memset(v, 0, (size_t)n * sizeof(double)); return 0; }
+{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(double)); return 0; }
 CG_API int CGENTRY cgGetParameterValuefr(CGparameter p, int n, float *v)
-{ (void)p; (void)n; if (v) memset(v, 0, (size_t)n * sizeof(float)); return 0; }
+{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(float)); return 0; }
 CG_API int CGENTRY cgGetParameterValuefc(CGparameter p, int n, float *v)
-{ (void)p; (void)n; if (v) memset(v, 0, (size_t)n * sizeof(float)); return 0; }
+{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(float)); return 0; }
 CG_API int CGENTRY cgGetParameterValueir(CGparameter p, int n, int *v)
-{ (void)p; (void)n; if (v) memset(v, 0, (size_t)n * sizeof(int)); return 0; }
+{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(int)); return 0; }
 CG_API int CGENTRY cgGetParameterValueic(CGparameter p, int n, int *v)
-{ (void)p; (void)n; if (v) memset(v, 0, (size_t)n * sizeof(int)); return 0; }
+{ (void)p; (void)n; if (v) cg_zero(v, (size_t)n * sizeof(int)); return 0; }
 
 CG_API const char *CGENTRY cgGetStringParameterValue(CGparameter param)
 { (void)param; return NULL; }
@@ -353,17 +362,17 @@ CG_API void CGENTRY cgSetMatrixParameterir(CGparameter p, const int *m)
 CG_API void CGENTRY cgSetMatrixParameteric(CGparameter p, const int *m)
 { (void)p; (void)m; }
 CG_API void CGENTRY cgGetMatrixParameterir(CGparameter p, int *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(int)); }
+{ (void)p; if (m) cg_zero(m, 16 * sizeof(int)); }
 CG_API void CGENTRY cgGetMatrixParameteric(CGparameter p, int *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(int)); }
+{ (void)p; if (m) cg_zero(m, 16 * sizeof(int)); }
 CG_API void CGENTRY cgGetMatrixParameterdr(CGparameter p, double *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(double)); }
+{ (void)p; if (m) cg_zero(m, 16 * sizeof(double)); }
 CG_API void CGENTRY cgGetMatrixParameterfr(CGparameter p, float *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(float)); }
+{ (void)p; if (m) cg_zero(m, 16 * sizeof(float)); }
 CG_API void CGENTRY cgGetMatrixParameterdc(CGparameter p, double *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(double)); }
+{ (void)p; if (m) cg_zero(m, 16 * sizeof(double)); }
 CG_API void CGENTRY cgGetMatrixParameterfc(CGparameter p, float *m)
-{ (void)p; if (m) memset(m, 0, 16 * sizeof(float)); }
+{ (void)p; if (m) cg_zero(m, 16 * sizeof(float)); }
 
 CG_API CGparameter CGENTRY cgGetNamedSubParameter(CGparameter param,
                                                   const char *name)

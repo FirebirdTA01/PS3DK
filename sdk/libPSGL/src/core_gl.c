@@ -4,12 +4,23 @@
  * calls that can never fail (e.g. glEnable, glViewport) are NOPs;
  * query functions return spec-minimum / zeroed values.
  */
+#include <stddef.h>
+
 #include <GLES/gl.h>
-#include <string.h>
+
+#include "psgl_context.h"
 
 /* ── error state ─────────────────────────────────────────────────── */
 
 static GLenum g_gl_error = GL_NO_ERROR;
+
+static void gl_zero(void *ptr, size_t size)
+{
+    unsigned char *out = (unsigned char *)ptr;
+    while (size--) {
+        *out++ = 0;
+    }
+}
 
 GLAPI GLenum glGetError(void)
 {
@@ -72,16 +83,21 @@ GLAPI void glDisableClientState(GLenum array) { (void)array; }
 
 /* ── buffer clear ────────────────────────────────────────────────── */
 
-GLAPI void glClear(GLbitfield mask)    { (void)mask; }
+GLAPI void glClear(GLbitfield mask)    { psgl_context_clear(mask); }
 GLAPI void glClearColor(GLclampf red, GLclampf green,
                         GLclampf blue, GLclampf alpha)
-{ (void)red; (void)green; (void)blue; (void)alpha; }
+{ psgl_context_set_clear_color(red, green, blue, alpha); }
 GLAPI void glClearColorx(GLclampx red, GLclampx green,
                          GLclampx blue, GLclampx alpha)
-{ (void)red; (void)green; (void)blue; (void)alpha; }
-GLAPI void glClearDepthf(GLclampf depth)   { (void)depth; }
-GLAPI void glClearDepthx(GLclampx depth)   { (void)depth; }
-GLAPI void glClearStencil(GLint s)         { (void)s; }
+{
+    psgl_context_set_clear_color((GLfloat)red / 65536.0f,
+                                 (GLfloat)green / 65536.0f,
+                                 (GLfloat)blue / 65536.0f,
+                                 (GLfloat)alpha / 65536.0f);
+}
+GLAPI void glClearDepthf(GLclampf depth)   { psgl_context_set_clear_depth(depth); }
+GLAPI void glClearDepthx(GLclampx depth)   { psgl_context_set_clear_depth((GLfloat)depth / 65536.0f); }
+GLAPI void glClearStencil(GLint s)         { psgl_context_set_clear_stencil(s); }
 
 /* ── alpha test ──────────────────────────────────────────────────── */
 
@@ -106,7 +122,7 @@ GLAPI void glDrawElements(GLenum mode, GLsizei count,
 /* ── viewport / scissor ──────────────────────────────────────────── */
 
 GLAPI void glViewport(GLint x, GLint y, GLsizei width, GLsizei height)
-{ (void)x; (void)y; (void)width; (void)height; }
+{ psgl_context_set_viewport(x, y, width, height); }
 GLAPI void glScissor(GLint x, GLint y, GLsizei width, GLsizei height)
 { (void)x; (void)y; (void)width; (void)height; }
 
@@ -241,7 +257,7 @@ GLAPI void glBindTexture(GLenum target, GLuint texture)
 
 GLAPI void glGenTextures(GLsizei n, GLuint *textures)
 {
-    if (textures) memset(textures, 0, (size_t)n * sizeof(GLuint));
+    if (textures) gl_zero(textures, (size_t)n * sizeof(GLuint));
 }
 
 GLAPI void glDeleteTextures(GLsizei n, const GLuint *textures)
@@ -399,5 +415,5 @@ GLAPI void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
 {
     (void)x; (void)y; (void)width; (void)height;
     (void)format; (void)type;
-    if (pixels) memset(pixels, 0, (size_t)(width * height * 4));
+    if (pixels) gl_zero(pixels, (size_t)(width * height * 4));
 }
