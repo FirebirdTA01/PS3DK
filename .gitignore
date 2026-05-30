@@ -49,6 +49,20 @@ tools/rsx-cg-compiler/src/donor/builtin_shader_header_embedded.inc
 *.a
 *.d
 *.so
+a.out
+
+# Patch series backups (rebase / bisect intermediates)
+patches/**/series.bak
+patches/**/series.bak.*
+
+# nidgen extracted audit YAMLs -- reference-SDK analysis
+# artifacts.  The production NID yaml under
+# tools/nidgen/nids/extracted/<lib>_stub.yaml is what ships; *_audit.yaml
+# carries the raw nm / archive inventory and stays local.
+tools/nidgen/nids/extracted/*_audit.yaml
+
+# Ad-hoc per-session sample-result CSVs (host-side sweep reports, etc).
+docs/sample_build_results_*.csv
 *.so.*
 *.dylib
 *.dll
