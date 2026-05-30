@@ -102,6 +102,12 @@ HEADERS := \
     include/cell/http/request.h \
     include/cell/http/response.h \
     include/cell/np.h \
+    include/cell/np/common.h \
+    include/cell/np/init.h \
+    include/cell/np/basic.h \
+    include/cell/np/friendlist.h \
+    include/cell/np/manager.h \
+    include/cell/np/signaling.h \
     include/cell/np/util.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \
