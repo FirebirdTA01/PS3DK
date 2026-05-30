@@ -85,6 +85,17 @@ HEADERS := \
     include/netinet/in.h \
     include/cell/cell.h \
     include/cell/atomic.h \
+    include/cell/swcache.h \
+    include/cell/swcache/define.h \
+    include/cell/swcache/error.h \
+    include/cell/swcache/types.h \
+    include/cell/swcache/default_cache.h \
+    include/cell/swcache/DMA_tag.h \
+    include/cell/swcache/cam.h \
+    include/cell/swcache/pointer.h \
+    include/cell/swcache/variable.h \
+    include/cell/swcache/patch_object.h \
+    include/cell/swcache/patch_vtable.h \
     include/cell/pad.h \
     include/cell/error.h \
     include/cell/gcm.h \
@@ -367,6 +378,17 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cellstatus.h \
     include/mt19937.h \
     include/cell/error.h \
+    include/cell/swcache.h \
+    include/cell/swcache/define.h \
+    include/cell/swcache/error.h \
+    include/cell/swcache/types.h \
+    include/cell/swcache/default_cache.h \
+    include/cell/swcache/DMA_tag.h \
+    include/cell/swcache/cam.h \
+    include/cell/swcache/pointer.h \
+    include/cell/swcache/variable.h \
+    include/cell/swcache/patch_object.h \
+    include/cell/swcache/patch_vtable.h \
     include/cell/spurs/types.h \
     include/cell/spurs/common.h \
     include/cell/spurs/exception_types.h \
