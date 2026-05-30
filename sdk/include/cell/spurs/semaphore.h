@@ -67,6 +67,32 @@ extern int      _cellSpursSendWorkloadSignal(int signalBit);
 
 #ifdef __cplusplus
 }   /* extern "C" */
+
+namespace cell {
+namespace Spurs {
+
+class Semaphore : public CellSpursSemaphore {
+public:
+    static const uint32_t kAlign = CELL_SPURS_SEMAPHORE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_SEMAPHORE_SIZE;
+
+    static int initialize(CellSpursTaskset *taskset,
+                          CellSpursSemaphore *semaphore,
+                          int total)
+    { return cellSpursSemaphoreInitialize(taskset, semaphore, total); }
+
+    static int initializeIWL(CellSpurs *spurs,
+                             CellSpursSemaphore *semaphore,
+                             int total)
+    { return cellSpursSemaphoreInitializeIWL(spurs, semaphore, total); }
+
+    int getTasksetAddress(CellSpursTaskset **taskset) const
+    { return cellSpursSemaphoreGetTasksetAddress(this, taskset); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
 #endif
 
 #endif /* __PS3DK_CELL_SPURS_SEMAPHORE_H__ */

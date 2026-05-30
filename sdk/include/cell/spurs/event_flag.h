@@ -96,6 +96,67 @@ cellSpursEventFlagInitialize(CellSpursTaskset *taskset,
 
 #ifdef __cplusplus
 }   /* extern "C" */
+
+namespace cell {
+namespace Spurs {
+
+class EventFlag : public CellSpursEventFlag {
+public:
+    static const uint32_t kAlign = CELL_SPURS_EVENT_FLAG_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_EVENT_FLAG_SIZE;
+
+    static const CellSpursEventFlagWaitMode  kOr          = CELL_SPURS_EVENT_FLAG_OR;
+    static const CellSpursEventFlagWaitMode  kAnd         = CELL_SPURS_EVENT_FLAG_AND;
+    static const CellSpursEventFlagClearMode kClearAuto   = CELL_SPURS_EVENT_FLAG_CLEAR_AUTO;
+    static const CellSpursEventFlagClearMode kClearManual = CELL_SPURS_EVENT_FLAG_CLEAR_MANUAL;
+    static const CellSpursEventFlagDirection kSpu2Spu     = CELL_SPURS_EVENT_FLAG_SPU2SPU;
+    static const CellSpursEventFlagDirection kSpu2Ppu     = CELL_SPURS_EVENT_FLAG_SPU2PPU;
+    static const CellSpursEventFlagDirection kPpu2Spu     = CELL_SPURS_EVENT_FLAG_PPU2SPU;
+    static const CellSpursEventFlagDirection kAny2Any     = CELL_SPURS_EVENT_FLAG_ANY2ANY;
+
+    static int initialize(CellSpursTaskset *taskset,
+                          CellSpursEventFlag *eventFlag,
+                          CellSpursEventFlagClearMode clearMode,
+                          CellSpursEventFlagDirection direction)
+    { return cellSpursEventFlagInitialize(taskset, eventFlag, clearMode, direction); }
+
+    static int initializeIWL(CellSpurs *spurs,
+                             CellSpursEventFlag *eventFlag,
+                             CellSpursEventFlagClearMode clearMode,
+                             CellSpursEventFlagDirection direction)
+    { return cellSpursEventFlagInitializeIWL(spurs, eventFlag, clearMode, direction); }
+
+    int wait(uint16_t *bits, CellSpursEventFlagWaitMode mode)
+    { return cellSpursEventFlagWait(this, bits, mode); }
+
+    int tryWait(uint16_t *bits, CellSpursEventFlagWaitMode mode)
+    { return cellSpursEventFlagTryWait(this, bits, mode); }
+
+    int set(uint16_t bits)
+    { return cellSpursEventFlagSet(this, bits); }
+
+    int clear(uint16_t bits)
+    { return cellSpursEventFlagClear(this, bits); }
+
+    int attachLv2EventQueue()
+    { return cellSpursEventFlagAttachLv2EventQueue(this); }
+
+    int detachLv2EventQueue()
+    { return cellSpursEventFlagDetachLv2EventQueue(this); }
+
+    int getDirection(CellSpursEventFlagDirection *direction) const
+    { return cellSpursEventFlagGetDirection(this, direction); }
+
+    int getClearMode(CellSpursEventFlagClearMode *mode) const
+    { return cellSpursEventFlagGetClearMode(this, mode); }
+
+    int getTasksetAddress(CellSpursTaskset **taskset) const
+    { return cellSpursEventFlagGetTasksetAddress(this, taskset); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
 #endif
 
 #endif /* __PS3DK_CELL_SPURS_EVENT_FLAG_H__ */

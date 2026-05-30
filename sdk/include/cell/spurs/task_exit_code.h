@@ -12,4 +12,18 @@
 
 #include <cell/spurs/task_types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern int cellSpursTaskExitCodeInitialize(CellSpursTaskExitCode *exitCode);
+extern int cellSpursTaskExitCodeGet(CellSpursTaskExitCode *exitCode,
+                                    int *value);
+extern int cellSpursTaskExitCodeTryGet(CellSpursTaskExitCode *exitCode,
+                                       int *value);
+
+#ifdef __cplusplus
+}   /* extern "C" */
+#endif
+
 #endif /* __PS3DK_CELL_SPURS_TASK_EXIT_CODE_H__ */

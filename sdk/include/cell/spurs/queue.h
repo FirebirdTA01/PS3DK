@@ -89,6 +89,93 @@ cellSpursQueueInitializeIWL(CellSpurs *spurs,
 
 #ifdef __cplusplus
 }   /* extern "C" */
+
+namespace cell {
+namespace Spurs {
+
+class Queue : public CellSpursQueue {
+public:
+    static const uint32_t kAlign = CELL_SPURS_QUEUE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_QUEUE_SIZE;
+
+    static const CellSpursQueueDirection kSpu2Spu = CELL_SPURS_QUEUE_SPU2SPU;
+    static const CellSpursQueueDirection kSpu2Ppu = CELL_SPURS_QUEUE_SPU2PPU;
+    static const CellSpursQueueDirection kPpu2Spu = CELL_SPURS_QUEUE_PPU2SPU;
+
+    static int initialize(CellSpursTaskset *taskset,
+                          CellSpursQueue *queue,
+                          const void *buffer,
+                          unsigned int size,
+                          unsigned int depth,
+                          CellSpursQueueDirection direction)
+    { return cellSpursQueueInitialize(taskset, queue, buffer, size, depth, direction); }
+
+    static int initializeIWL(CellSpurs *spurs,
+                             CellSpursQueue *queue,
+                             const void *buffer,
+                             unsigned int size,
+                             unsigned int depth,
+                             CellSpursQueueDirection direction)
+    { return cellSpursQueueInitializeIWL(spurs, queue, buffer, size, depth, direction); }
+
+    int push(const void *buffer)
+    { return cellSpursQueuePush(this, buffer); }
+
+    int tryPush(const void *buffer)
+    { return cellSpursQueueTryPush(this, buffer); }
+
+    int pushBody(const void *buffer, bool isBlocking)
+    { return cellSpursQueuePushBody(this, buffer, isBlocking); }
+
+    int pop(void *buffer)
+    { return cellSpursQueuePop(this, buffer); }
+
+    int tryPop(void *buffer)
+    { return cellSpursQueueTryPop(this, buffer); }
+
+    int popBody(void *buffer, bool isPeek, bool isBlocking)
+    { return cellSpursQueuePopBody(this, buffer, isPeek, isBlocking); }
+
+    int tryPeek(void *buffer)
+    { return cellSpursQueueTryPeek(this, buffer); }
+
+    int peek(void *buffer)
+    { return cellSpursQueuePeek(this, buffer); }
+
+    int attachLv2EventQueue()
+    { return cellSpursQueueAttachLv2EventQueue(this); }
+
+    int detachLv2EventQueue()
+    { return cellSpursQueueDetachLv2EventQueue(this); }
+
+    int attach()
+    { return cellSpursQueueAttachLv2EventQueue(this); }
+
+    int detach()
+    { return cellSpursQueueDetachLv2EventQueue(this); }
+
+    int size(unsigned int *value)
+    { return cellSpursQueueSize(this, value); }
+
+    int depth(unsigned int *value)
+    { return cellSpursQueueDepth(this, value); }
+
+    int clear()
+    { return cellSpursQueueClear(this); }
+
+    int getDirection(CellSpursQueueDirection *direction)
+    { return cellSpursQueueGetDirection(this, direction); }
+
+    int getEntrySize(unsigned int *entrySize)
+    { return cellSpursQueueGetEntrySize(this, entrySize); }
+
+    int getTasksetAddress(CellSpursTaskset **taskset) const
+    { return cellSpursQueueGetTasksetAddress(this, taskset); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
 #endif
 
 #endif /* __PS3DK_CELL_SPURS_QUEUE_H__ */

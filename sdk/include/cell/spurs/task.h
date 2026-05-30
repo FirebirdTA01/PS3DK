@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <cell/spurs/types.h>
 #include <cell/spurs/task_types.h>
+#include <cell/spurs/task_exit_code.h>
 
 #ifdef __cplusplus
 extern "C" {
