@@ -14,6 +14,7 @@
 #include <cell/np/score.h>
 #include <cell/np/commerce.h>
 #include <cell/np/matching.h>
+#include <cell/np/trophy.h>
 #include <cell/np/util.h>
 
 #endif /* __PS3DK_CELL_NP_H__ */
