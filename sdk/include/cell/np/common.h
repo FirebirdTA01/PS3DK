@@ -5,6 +5,7 @@
 #include <ppu-types.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/sys_types.h>
 
 #ifndef ATTRIBUTE_PRXPTR
 #define ATTRIBUTE_PRXPTR
