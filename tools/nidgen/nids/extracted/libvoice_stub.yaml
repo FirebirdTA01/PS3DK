@@ -1,145 +1,146 @@
 library: cellVoice
+archive_name: voice
 version: 1
 module: cellVoice
 exports:
 - name: cellVoiceConnectIPortToOPort
   nid: '0xae6a21d5'
-  signature: ''
+  signature: 'int cellVoiceConnectIPortToOPort(uint32_t ips, uint32_t ops)'
   notes: extracted from _cellVoice_0001_21.o
 - name: cellVoiceCreateNotifyEventQueue
   nid: '0x2a01013e'
-  signature: ''
+  signature: 'int cellVoiceCreateNotifyEventQueue(sys_event_queue_t *id, sys_ipc_key_t *key)'
   notes: extracted from _cellVoice_0001_4.o
 - name: cellVoiceCreatePort
   nid: '0x2de54871'
-  signature: ''
+  signature: 'int cellVoiceCreatePort(uint32_t *portId, const CellVoicePortParam *pArg)'
   notes: extracted from _cellVoice_0001_5.o
 - name: cellVoiceDebugTopology
   nid: '0x20bafe31'
-  signature: ''
+  signature: 'int cellVoiceDebugTopology(uint32_t *numPort, CellVoiceBasePortInfo *pInfo)'
   notes: extracted from _cellVoice_0001_3.o
 - name: cellVoiceDeletePort
   nid: '0x9f70c475'
-  signature: ''
+  signature: 'int cellVoiceDeletePort(uint32_t portId)'
   notes: extracted from _cellVoice_0001_20.o
 - name: cellVoiceDisconnectIPortFromOPort
   nid: '0x18d3df30'
-  signature: ''
+  signature: 'int cellVoiceDisconnectIPortFromOPort(uint32_t ips, uint32_t ops)'
   notes: extracted from _cellVoice_0001_2.o
 - name: cellVoiceEnd
   nid: '0xe0e1ae12'
-  signature: ''
+  signature: 'int cellVoiceEnd()'
   notes: extracted from _cellVoice_0001_33.o
 - name: cellVoiceGetBitRate
   nid: '0xbef53a2b'
-  signature: ''
+  signature: 'int cellVoiceGetBitRate(uint32_t portId, uint32_t *bitrate)'
   notes: extracted from _cellVoice_0001_23.o
 - name: cellVoiceGetMuteFlag
   nid: '0x474609e2'
-  signature: ''
+  signature: 'int cellVoiceGetMuteFlag(uint32_t portId, uint16_t *bMuted)'
   notes: extracted from _cellVoice_0001_11.o
 - name: cellVoiceGetPortAttr
   nid: '0xf629ed67'
-  signature: ''
+  signature: 'int cellVoiceGetPortAttr(uint32_t portId, CellVoicePortAttr attr, void *attrValue)'
   notes: extracted from _cellVoice_0001_34.o
 - name: cellVoiceGetPortInfo
   nid: '0x54ac3519'
-  signature: ''
+  signature: 'int cellVoiceGetPortInfo(uint32_t portId, CellVoiceBasePortInfo *pInfo)'
   notes: extracted from _cellVoice_0001_12.o
 - name: cellVoiceGetSignalState
   nid: '0xd6811aa7'
-  signature: ''
+  signature: 'int cellVoiceGetSignalState(uint32_t portId, CellVoicePortAttr attr, void *attrValue)'
   notes: extracted from _cellVoice_0001_30.o
 - name: cellVoiceGetVolume
   nid: '0x762dc193'
-  signature: ''
+  signature: 'int cellVoiceGetVolume(uint32_t portId, float *volume)'
   notes: extracted from _cellVoice_0001_13.o
 - name: cellVoiceInit
   nid: '0xc7cf1182'
-  signature: ''
+  signature: 'int cellVoiceInit(CellVoiceInitParam *pArg)'
   notes: extracted from _cellVoice_0001_25.o
 - name: cellVoiceInitEx
   nid: '0xb1a2c38f'
-  signature: ''
+  signature: 'int cellVoiceInitEx(CellVoiceInitParam *pArg)'
   notes: extracted from _cellVoice_0001_22.o
 - name: cellVoicePausePort
   nid: '0x87c71b06'
-  signature: ''
+  signature: 'int cellVoicePausePort(uint32_t portId)'
   notes: extracted from _cellVoice_0001_17.o
 - name: cellVoicePausePortAll
   nid: '0xd14e784d'
-  signature: ''
+  signature: 'int cellVoicePausePortAll()'
   notes: extracted from _cellVoice_0001_26.o
 - name: cellVoiceReadFromOPort
   nid: '0x36472c57'
-  signature: ''
+  signature: 'int cellVoiceReadFromOPort(uint32_t ops, void *data, uint32_t *size)'
   notes: extracted from _cellVoice_0001_9.o
 - name: cellVoiceRemoveNotifyEventQueue
   nid: '0xdd000886'
-  signature: ''
+  signature: 'int cellVoiceRemoveNotifyEventQueue(sys_ipc_key_t key)'
   notes: extracted from _cellVoice_0001_31.o
 - name: cellVoiceResetPort
   nid: '0xff0fa43a'
-  signature: ''
+  signature: 'int cellVoiceResetPort(uint32_t portId)'
   notes: extracted from _cellVoice_0001_35.o
 - name: cellVoiceResumePort
   nid: '0x7bf17b15'
-  signature: ''
+  signature: 'int cellVoiceResumePort(uint32_t portId)'
   notes: extracted from _cellVoice_0001_14.o
 - name: cellVoiceResumePortAll
   nid: '0x7f3963f7'
-  signature: ''
+  signature: 'int cellVoiceResumePortAll()'
   notes: extracted from _cellVoice_0001_16.o
 - name: cellVoiceSetBitRate
   nid: '0x7e60adc6'
-  signature: ''
+  signature: 'int cellVoiceSetBitRate(uint32_t portId, CellVoiceBitRate bitrate)'
   notes: extracted from _cellVoice_0001_15.o
 - name: cellVoiceSetMuteFlag
   nid: '0xdde35a0c'
-  signature: ''
+  signature: 'int cellVoiceSetMuteFlag(uint32_t portId, uint16_t bMuted)'
   notes: extracted from _cellVoice_0001_32.o
 - name: cellVoiceSetMuteFlagAll
   nid: '0xd4d80ea5'
-  signature: ''
+  signature: 'int cellVoiceSetMuteFlagAll(uint16_t bMuted)'
   notes: extracted from _cellVoice_0001_28.o
 - name: cellVoiceSetNotifyEventQueue
   nid: '0x35d84910'
-  signature: ''
+  signature: 'int cellVoiceSetNotifyEventQueue(sys_ipc_key_t key, uint64_t source)'
   notes: extracted from _cellVoice_0001_8.o
 - name: cellVoiceSetPortAttr
   nid: '0x9d0f4af1'
-  signature: ''
+  signature: 'int cellVoiceSetPortAttr(uint32_t portId, CellVoicePortAttr attr, void *attrValue)'
   notes: extracted from _cellVoice_0001_19.o
 - name: cellVoiceSetVolume
   nid: '0xd5ae37d8'
-  signature: ''
+  signature: 'int cellVoiceSetVolume(uint32_t portId, float volume)'
   notes: extracted from _cellVoice_0001_29.o
 - name: cellVoiceStart
   nid: '0x0a563878'
-  signature: ''
+  signature: 'int cellVoiceStart()'
   notes: extracted from _cellVoice_0001_1.o
 - name: cellVoiceStartEx
   nid: '0x94d51f92'
-  signature: ''
+  signature: 'int cellVoiceStartEx(CellVoiceStartParam *pArg)'
   notes: extracted from _cellVoice_0001_18.o
 - name: cellVoiceStop
   nid: '0xd3a84be1'
-  signature: ''
+  signature: 'int cellVoiceStop()'
   notes: extracted from _cellVoice_0001_27.o
 - name: cellVoiceUpdatePort
   nid: '0x2f24fea3'
-  signature: ''
+  signature: 'int cellVoiceUpdatePort(uint32_t portId, const CellVoicePortParam *pArg)'
   notes: extracted from _cellVoice_0001_6.o
 - name: cellVoiceWriteToIPort
   nid: '0x3dad26e7'
-  signature: ''
+  signature: 'int cellVoiceWriteToIPort(uint32_t ips, const void *data, uint32_t *size)'
   notes: extracted from _cellVoice_0001_10.o
 - name: cellVoiceWriteToIPortEx
   nid: '0x30f0b5ab'
-  signature: ''
+  signature: 'int cellVoiceWriteToIPortEx(uint32_t ips, const void *data, uint32_t *size, uint32_t numFrameLost)'
   notes: extracted from _cellVoice_0001_7.o
 - name: cellVoiceWriteToIPortEx2
   nid: '0xc4f573b8'
-  signature: ''
+  signature: 'int cellVoiceWriteToIPortEx2(uint32_t ips, const void *data, uint32_t *size, int16_t frameGaps)'
   notes: extracted from _cellVoice_0001_24.o
 imports: []

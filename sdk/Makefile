@@ -184,6 +184,8 @@ HEADERS := \
     include/cell/sheap/key_sheap_semaphore.h \
     include/cell/sysutil_ap.h \
     include/cell/audio.h \
+    include/cell/voice.h \
+    include/cell/voiceTypes.h \
     include/cell/pngdec.h \
     include/cell/sysmodule.h \
     include/cell/l10n.h \
