@@ -1,4 +1,5 @@
 library: sceNp2
+archive_name: sysutil_np2
 version: 1
 module: sceNp2
 exports:
