@@ -141,7 +141,7 @@ extern "C" {
 #define CELL_NET_CTL_HOSTNAME_LEN             256
 #define CELL_NET_CTL_IPV4_ADDR_STR_LEN        16
 
-#ifndef __IN_H__
+#if !defined(__IN_H__) && !defined(__PS3DK_NETINET_IN_H__)
 struct in_addr {
     uint32_t s_addr;
 };

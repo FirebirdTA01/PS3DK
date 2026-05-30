@@ -1,0 +1,6 @@
+#ifndef PS3TC_NETEX_LIBNETCTL_FORWARD_H
+#define PS3TC_NETEX_LIBNETCTL_FORWARD_H
+
+#include <cell/libnetctl.h>
+
+#endif  /* PS3TC_NETEX_LIBNETCTL_FORWARD_H */

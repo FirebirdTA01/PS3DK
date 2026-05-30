@@ -74,6 +74,11 @@ HEADERS := \
     include/sysutil/video.h \
     include/arpa/inet.h \
     include/netdb.h \
+    include/netex/net.h \
+    include/netex/sockinfo.h \
+    include/netex/errno.h \
+    include/netex/ifctl.h \
+    include/netex/libnetctl.h \
     include/netinet/in.h \
     include/cell/cell.h \
     include/cell/atomic.h \
