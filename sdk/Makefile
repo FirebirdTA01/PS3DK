@@ -387,6 +387,10 @@ SHARED_SPURS_SPU_HEADERS := \
     include/mt19937.h \
     include/cell/error.h \
     include/cell/jdl.h \
+    include/cell/face.h \
+    include/cell/face/error.h \
+    include/cell/face/face.h \
+    include/cell/face/util.h \
     include/cell/swcache.h \
     include/cell/swcache/define.h \
     include/cell/swcache/error.h \
