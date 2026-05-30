@@ -151,6 +151,7 @@ HEADERS := \
     include/cell/sysutil_avc.h \
     include/cell/sysutil_game_internal.h \
     include/cell/rtc.h \
+    include/cell/rudp.h \
     include/cell/sync.h \
     include/cell/sync/barrier.h \
     include/cell/sync2.h \

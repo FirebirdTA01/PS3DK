@@ -1,121 +1,122 @@
 library: cellRudp
 version: 1
 module: cellRudp
+archive_name: rudp
 exports:
 - name: cellRudpActivate
   nid: '0xc1ad7ced'
-  signature: ''
+  signature: int cellRudpActivate(int ctx_id, struct sockaddr const *to, socklen_t tolen)
   notes: extracted from _cellRudp_0001_20.o
 - name: cellRudpBind
   nid: '0xee41e16a'
-  signature: ''
+  signature: int cellRudpBind(int ctx_id, int soc, uint16_t vport, uint8_t mux_mode)
   notes: extracted from _cellRudp_0001_26.o
 - name: cellRudpCreateContext
   nid: '0x7dadc739'
-  signature: ''
+  signature: int cellRudpCreateContext(CellRudpContextEventHandler handler, void *arg, int *ctx_id)
   notes: extracted from _cellRudp_0001_12.o
 - name: cellRudpEnableInternalIOThread
   nid: '0x6c0cff03'
-  signature: ''
+  signature: int cellRudpEnableInternalIOThread(uint32_t stackSize, uint32_t priority)
   notes: extracted from _cellRudp_0001_9.o
 - name: cellRudpEnd
   nid: '0xb6bcb4a1'
-  signature: ''
+  signature: int cellRudpEnd(void)
   notes: extracted from _cellRudp_0001_19.o
 - name: cellRudpFlush
   nid: '0xa70737da'
-  signature: ''
+  signature: int cellRudpFlush(int ctx_id)
   notes: extracted from _cellRudp_0001_17.o
 - name: cellRudpGetContextStatus
   nid: '0x74bfad12'
-  signature: ''
+  signature: int cellRudpGetContextStatus(int ctx_id, CellRudpContextStatus *status, size_t statusSize)
   notes: extracted from _cellRudp_0001_11.o
 - name: cellRudpGetLocalInfo
   nid: '0xd666931f'
-  signature: ''
+  signature: int cellRudpGetLocalInfo(int ctx_id, int *soc, struct sockaddr *addr, socklen_t *addrlen, uint16_t *vport, uint8_t *mux_mode)
   notes: extracted from _cellRudp_0001_23.o
 - name: cellRudpGetMaxSegmentSize
   nid: '0xfbf7e9e4'
-  signature: ''
+  signature: int cellRudpGetMaxSegmentSize(uint16_t *mss)
   notes: extracted from _cellRudp_0001_28.o
 - name: cellRudpGetOption
   nid: '0xff9d259c'
-  signature: ''
+  signature: int cellRudpGetOption(int ctx_id, int option, void *optval, size_t optlen)
   notes: extracted from _cellRudp_0001_29.o
 - name: cellRudpGetRemoteInfo
   nid: '0x576831ae'
-  signature: ''
+  signature: int cellRudpGetRemoteInfo(int ctx_id, struct sockaddr *addr, socklen_t *addrlen, uint16_t *vport)
   notes: extracted from _cellRudp_0001_6.o
 - name: cellRudpGetSizeReadable
   nid: '0x2cde989f'
-  signature: ''
+  signature: ssize_t cellRudpGetSizeReadable(int ctx_id)
   notes: extracted from _cellRudp_0001_1.o
 - name: cellRudpGetSizeWritable
   nid: '0xa86b28e3'
-  signature: ''
+  signature: ssize_t cellRudpGetSizeWritable(int ctx_id)
   notes: extracted from _cellRudp_0001_18.o
 - name: cellRudpGetStatus
   nid: '0xcd1a3f23'
-  signature: ''
+  signature: int cellRudpGetStatus(CellRudpStatus *status, size_t statusSize)
   notes: extracted from _cellRudp_0001_22.o
 - name: cellRudpInit
   nid: '0x63f63545'
-  signature: ''
+  signature: int cellRudpInit(CellRudpAllocator *allocator)
   notes: extracted from _cellRudp_0001_7.o
 - name: cellRudpInitiate
   nid: '0xc407844f'
-  signature: ''
+  signature: int cellRudpInitiate(int ctx_id, struct sockaddr const *to, socklen_t tolen, uint16_t vport)
   notes: extracted from _cellRudp_0001_21.o
 - name: cellRudpNetReceived
   nid: '0x6ee04954'
-  signature: ''
+  signature: int cellRudpNetReceived(int soc, uint8_t const *data, size_t datalen, struct sockaddr const *from, socklen_t fromlen)
   notes: extracted from _cellRudp_0001_10.o
 - name: cellRudpPollCancel
   nid: '0xdf5a2432'
-  signature: ''
+  signature: int cellRudpPollCancel(int poll_id)
   notes: extracted from _cellRudp_0001_25.o
 - name: cellRudpPollControl
   nid: '0xa3db855c'
-  signature: ''
+  signature: int cellRudpPollControl(int poll_id, int op, int ctx_id, uint16_t events)
   notes: extracted from _cellRudp_0001_16.o
 - name: cellRudpPollCreate
   nid: '0x6bc587e9'
-  signature: ''
+  signature: int cellRudpPollCreate(size_t size)
   notes: extracted from _cellRudp_0001_8.o
 - name: cellRudpPollDestroy
   nid: '0x8ac398f1'
-  signature: ''
+  signature: int cellRudpPollDestroy(int poll_id)
   notes: extracted from _cellRudp_0001_14.o
 - name: cellRudpPollWait
   nid: '0xd8310700'
-  signature: ''
+  signature: int cellRudpPollWait(int poll_id, CellRudpPollEvent *events, size_t eventlen, CellRudpUsec timeout)
   notes: extracted from _cellRudp_0001_24.o
 - name: cellRudpProcessEvents
   nid: '0xfade48b2'
-  signature: ''
+  signature: int cellRudpProcessEvents(CellRudpUsec timeout)
   notes: extracted from _cellRudp_0001_27.o
 - name: cellRudpRead
   nid: '0x92e4d899'
-  signature: ''
+  signature: int cellRudpRead(int ctx_id, void *data, size_t len, uint8_t flags, CellRudpReadInfo *info)
   notes: extracted from _cellRudp_0001_15.o
 - name: cellRudpSetEventHandler
   nid: '0x7ed95e60'
-  signature: ''
+  signature: int cellRudpSetEventHandler(CellRudpEventHandler handler, void *arg)
   notes: extracted from _cellRudp_0001_13.o
 - name: cellRudpSetMaxSegmentSize
   nid: '0x54f81789'
-  signature: ''
+  signature: int cellRudpSetMaxSegmentSize(uint16_t mss)
   notes: extracted from _cellRudp_0001_5.o
 - name: cellRudpSetOption
   nid: '0x384ba777'
-  signature: ''
+  signature: int cellRudpSetOption(int ctx_id, int option, void const *optval, size_t optlen)
   notes: extracted from _cellRudp_0001_2.o
 - name: cellRudpTerminate
   nid: '0x48d3eeac'
-  signature: ''
+  signature: int cellRudpTerminate(int ctx_id)
   notes: extracted from _cellRudp_0001_4.o
 - name: cellRudpWrite
   nid: '0x48c001b0'
-  signature: ''
+  signature: int cellRudpWrite(int ctx_id, void const *data, size_t len, uint8_t flags)
   notes: extracted from _cellRudp_0001_3.o
 imports: []
