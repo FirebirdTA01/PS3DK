@@ -6,6 +6,7 @@
  */
 #include <PSGL/psgl.h>
 #include <PSGL/psglu.h>
+#include <cell/sscgpu.h>
 
 int main(void)
 {
@@ -19,6 +20,9 @@ int main(void)
 
     (void)cgCreateContext();
     (void)cgGLBindProgram(NULL);
+
+    /* Link-gate check for libsscgpu.a */
+    (void)cellSscGpuQueryAttr(NULL);
 
     psglSwap();
     psglExit();
