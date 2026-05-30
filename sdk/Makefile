@@ -33,6 +33,7 @@ HEADERS := \
     include/types.h \
     include/cellstatus.h \
     include/gcm_tool.h \
+    include/mt19937.h \
     include/mspace.h \
     include/np.h \
     include/sysutil_oskdialog.h \
@@ -353,7 +354,7 @@ HEADERS := \
     include/rsx/rsx_function_macros.h \
     include/rsx/rsx_program.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libmt19937
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -362,6 +363,7 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
     include/cellstatus.h \
+    include/mt19937.h \
     include/cell/error.h \
     include/cell/spurs/types.h \
     include/cell/spurs/common.h \
