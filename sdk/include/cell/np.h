@@ -17,6 +17,7 @@
 #include <cell/np/clans.h>
 #include <cell/np/commerce2.h>
 #include <cell/np/tus.h>
+#include <cell/np/np2.h>
 #include <cell/np/trophy.h>
 #include <cell/np/sns.h>
 #include <cell/np/util.h>
