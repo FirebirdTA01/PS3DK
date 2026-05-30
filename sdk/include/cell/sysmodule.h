@@ -101,6 +101,8 @@ extern "C" {
 #define CELL_SYSMODULE_SYSUTIL_MUSIC_DECODE2  0x0053
 #define CELL_SYSMODULE_SYSUTIL_NP_TROPHY      0xf035
 #define CELL_SYSMODULE_TROPHY                 CELL_SYSMODULE_SYSUTIL_NP_TROPHY
+#define CELL_SYSMODULE_SYSUTIL_NP_SNS         0xf043
+#define CELL_SYSMODULE_SNS                    CELL_SYSMODULE_SYSUTIL_NP_SNS
 
 /* Return codes. */
 #define CELL_SYSMODULE_LOADED                          0

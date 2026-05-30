@@ -116,6 +116,7 @@ HEADERS := \
     include/cell/np/commerce.h \
     include/cell/np/matching.h \
     include/cell/np/trophy.h \
+    include/cell/np/sns.h \
     include/cell/np/util.h \
     include/cell/msg_dialog.h \
     include/cell/sysutil_sysparam.h \

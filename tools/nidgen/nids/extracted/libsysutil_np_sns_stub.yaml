@@ -1,4 +1,5 @@
 library: sceNpSns
+archive_name: sysutil_np_sns
 version: 1
 module: sceNpSns
 exports:
