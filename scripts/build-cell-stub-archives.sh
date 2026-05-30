@@ -72,6 +72,7 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libmic_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_avc2_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libcamera_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libresc_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libpngdec_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libio_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libjpgdec_stub.yaml"

@@ -1,93 +1,94 @@
 library: cellResc
+archive_name: resc
 version: 1
 module: cellResc
 exports:
 - name: cellRescAdjustAspectRatio
   nid: '0x22ae06d8'
-  signature: ''
+  signature: 'int32_t cellRescAdjustAspectRatio(const float horizontal, const float vertical)'
   notes: extracted from _cellResc_0001_8.o
 - name: cellRescCreateInterlaceTable
   nid: '0xe0cef79e'
-  signature: ''
+  signature: 'int32_t cellRescCreateInterlaceTable(void* ea, const float srcH, const CellRescTableElement depth, const int length)'
   notes: extracted from _cellResc_0001_22.o
 - name: cellRescExit
   nid: '0x2ea3061e'
-  signature: ''
+  signature: 'void cellRescExit(void)'
   notes: extracted from _cellResc_0001_11.o
 - name: cellRescGcmSurface2RescSrc
   nid: '0x01220224'
-  signature: ''
+  signature: 'int32_t cellRescGcmSurface2RescSrc(const CellGcmSurface* const gcmSurface, CellRescSrc* const rescSrc)'
   notes: extracted from _cellResc_0001_1.o
 - name: cellRescGetBufferSize
   nid: '0x5a338cdb'
-  signature: ''
+  signature: 'int32_t cellRescGetBufferSize(int32_t* const colorBuffers, int32_t* const vertexArray, int32_t* const fragmentShader)'
   notes: extracted from _cellResc_0001_14.o
 - name: cellRescGetFlipStatus
   nid: '0xc47c5c22'
-  signature: ''
+  signature: 'uint32_t cellRescGetFlipStatus(void)'
   notes: extracted from _cellResc_0001_19.o
 - name: cellRescGetLastFlipTime
   nid: '0x66f5e388'
-  signature: ''
+  signature: 'system_time_t cellRescGetLastFlipTime(void)'
   notes: extracted from _cellResc_0001_15.o
 - name: cellRescGetNumColorBuffers
   nid: '0x0a2069c7'
-  signature: ''
+  signature: 'int32_t cellRescGetNumColorBuffers(const CellRescBufferMode dstMode, const CellRescPalTemporalMode palTemporalMode, const uint32_t reserved)'
   notes: extracted from _cellResc_0001_2.o
 - name: cellRescGetRegisterCount
   nid: '0x1dd3c4cd'
-  signature: ''
+  signature: 'int32_t cellRescGetRegisterCount(void)'
   notes: extracted from _cellResc_0001_7.o
 - name: cellRescInit
   nid: '0x516ee89e'
-  signature: ''
+  signature: 'int32_t cellRescInit(const CellRescInitConfig* const initConfig)'
   notes: extracted from _cellResc_0001_13.o
 - name: cellRescResetFlipStatus
   nid: '0x129922a0'
-  signature: ''
+  signature: 'void cellRescResetFlipStatus(void)'
   notes: extracted from _cellResc_0001_5.o
 - name: cellRescSetBufferAddress
   nid: '0x8107277c'
-  signature: ''
+  signature: 'int32_t cellRescSetBufferAddress(const void* const colorBuffers, const void* const vertexArray, const void* const fragmentShader)'
   notes: extracted from _cellResc_0001_18.o
 - name: cellRescSetConvertAndFlip
   nid: '0x25c107e6'
-  signature: ''
+  signature: 'int32_t cellRescSetConvertAndFlip(CellGcmContextData* con, const int32_t idx)'
   notes: extracted from _cellResc_0001_10.o
 - name: cellRescSetDisplayMode
   nid: '0x23134710'
-  signature: ''
+  signature: 'int32_t cellRescSetDisplayMode(const CellRescBufferMode bufferMode)'
   notes: extracted from _cellResc_0001_9.o
 - name: cellRescSetDsts
   nid: '0x10db5b1a'
-  signature: ''
+  signature: 'int32_t cellRescSetDsts(const CellRescBufferMode dstsMode, const CellRescDsts* const dsts)'
   notes: extracted from _cellResc_0001_4.o
 - name: cellRescSetFlipHandler
   nid: '0x2ea94661'
-  signature: ''
+  signature: 'void cellRescSetFlipHandler(const CellRescHandler handler)'
   notes: extracted from _cellResc_0001_12.o
 - name: cellRescSetPalInterpolateDropFlexRatio
   nid: '0x19a2a967'
-  signature: ''
+  signature: 'int32_t cellRescSetPalInterpolateDropFlexRatio(const float ratio)'
   notes: extracted from _cellResc_0001_6.o
 - name: cellRescSetRegisterCount
   nid: '0x7af8a37f'
-  signature: ''
+  signature: 'void cellRescSetRegisterCount(const int32_t regCount)'
   notes: extracted from _cellResc_0001_17.o
 - name: cellRescSetSrc
   nid: '0x6cd0f95f'
-  signature: ''
+  signature: 'int32_t cellRescSetSrc(const int32_t idx, const CellRescSrc* const src)'
   notes: extracted from _cellResc_0001_16.o
 - name: cellRescSetVBlankHandler
   nid: '0xd3758645'
-  signature: ''
+  signature: 'void cellRescSetVBlankHandler(const CellRescHandler handler)'
   notes: extracted from _cellResc_0001_21.o
 - name: cellRescSetWaitFlip
   nid: '0x0d3c22ce'
-  signature: ''
+  signature: 'void cellRescSetWaitFlip(CellGcmContextData* con)'
   notes: extracted from _cellResc_0001_3.o
 - name: cellRescVideoOutResolutionId2RescBufferMode
   nid: '0xd1ca0503'
-  signature: ''
+  signature: 'int32_t cellRescVideoOutResolutionId2RescBufferMode(const CellVideoOutResolutionId resolutionId, CellRescBufferMode* const bufferMode)'
   notes: extracted from _cellResc_0001_20.o
 imports: []
