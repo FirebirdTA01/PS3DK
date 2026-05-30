@@ -7,6 +7,36 @@ next surface.
 
 ---
 
+## `CELL_SYSMODULE_SNS` (0xf043) refused by current firmware
+
+**Status:** stub archive + header surface ship correctly; runtime
+`cellSysmoduleLoadModule(CELL_SYSMODULE_SNS)` returns
+`CELL_SYSMODULE_ERROR_UNKNOWN` (`0x80012002`) under RPCS3's LLE
+libsysmodule.  Header and stub-archive symbol resolution are unaffected.
+
+**Symptom.** `samples/network/hello-ppu-np-sns/` boots cleanly, the
+link is clean, the cellSysmodule call dispatches to the real firmware
+SPRX, and the firmware itself rejects the 0xf043 module id rather than
+loading sysutil_np_sns.
+
+**Cause.** The PS3 Facebook SNS shim was retired by the SNS partner
+years ago; current firmware appears to no longer register the
+`0xf043` module.  The id matches PSDevWiki for the historical SNS
+build, but no current PS3 firmware version we have access to honors
+it.  This is firmware-side behavior — not a defect in the stub
+archive or header.
+
+**Workaround.** Use the `libsysutil_np_sns_stub.a` symbols only for
+link-time validation and code-completion against the historical
+sceNpSnsFb* API.  Do not depend on the module loading at runtime.
+
+**Planned fix.** None — the firmware authoritatively rejects the
+module.  If a future RPCS3 build or a different firmware version
+re-registers `0xf043` the sample TTY will silently start printing
+`load_sns rc=0x00000000` instead.
+
+---
+
 ## Compact `.opd` emission: achieved (retired from issues list)
 
 **Status:** complete.  GCC `-mps3-opd-compact` flag emits native 8-byte
