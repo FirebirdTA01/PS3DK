@@ -369,6 +369,9 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/spurs/job_queue_port2.h \
     include/cell/spurs/job_queue_semaphore.h \
     include/cell/spurs/task_types.h \
+    include/cell/spurs/barrier.h \
+    include/cell/spurs/event_flag.h \
+    include/cell/spurs/queue.h \
     include/cell/spurs/job_guard.h \
     include/cell/spurs/semaphore.h \
     include/cell/spurs/task_exit_code.h \
@@ -466,12 +469,11 @@ install-spu-only-headers:
 
 # Remove stale PPU-only spurs sub-headers that may linger in the SPU
 # sysroot from a prior install that installed a broader set.  The SPU
-# umbrella now deliberately excludes task.h, workload.h, barrier.h,
-# event_flag.h, and queue.h - if they exist from an old install,
-# purge them so no stale declarations leak into SPU compiles.
+# umbrella now deliberately excludes workload.h; if it exists from an
+# old install, purge it so no stale declarations leak into SPU compiles.
 # NOTE: job_chain.h is intentionally kept - installed by libspurs_job.
 clean-stale-spu-spurs:
-	@stale="workload.h barrier.h event_flag.h queue.h"; \
+	@stale="workload.h"; \
 	for f in $$stale; do \
 	    path="$(INSTALL_INC_SPU)/cell/spurs/$$f"; \
 	    if test -f "$$path"; then \
