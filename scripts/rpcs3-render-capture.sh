@@ -68,26 +68,75 @@ QT_XCB_NO_SEND_EVENT_CHECK=1 "$RPCS3_BIN" "$SELF_PATH" \
 RPCS3_PID=$!
 
 # ── window-find + screenshot capture ──────────────────────────────
-# Wait for an RPCS3-owned window, then capture immediately while the
-# window is still alive.
+# Gate on RPCS3 log signal "Creating new game window" (explicit signal
+# that the game-render window exists, distinct from the main GUI window
+# which appears at RPCS3 launch).  Reject the versioned GUI title
+# ("RPCS3 0.0.xx-...").  Prefer windows whose title contains "FPS:"
+# or the .self basename.
+SAMPLE_NAME="$(basename "$SELF_PATH" .fake.self)"
+SAMPLE_NAME="${SAMPLE_NAME%.self}"
 WID=""
 SHOT="$OUT_DIR/screenshot.png"
-echo "rpcs3-capture: waiting for GS window (pid=$RPCS3_PID, max ${TIMEOUT}s)"
+echo "rpcs3-capture: waiting for game window signal (pid=$RPCS3_PID, max ${TIMEOUT}s)"
 for _ in $(seq 1 "$TIMEOUT"); do
-    for w in $(xdotool search --pid "$RPCS3_PID" 2>/dev/null || true); do
-        name="$(xdotool getwindowname "$w" 2>/dev/null || true)"
-        # Skip blank-named transient windows only.  Short-lived samples
-        # may render into the main RPCS3 window before a separate GS
-        # window appears, so we accept any non-empty title.
-        if [[ -n "$name" ]]; then
-            WID="$w"
+    # Must see the game-window-creation log line before accepting any window.
+    if ! grep -q "Creating new game window" "$LOG" 2>/dev/null; then
+        if ! kill -0 "$RPCS3_PID" 2>/dev/null; then
+            echo "rpcs3-capture: rpcs3 exited before game window created" >&2
             break
         fi
+        sleep 1
+        continue
+    fi
+
+    # Find the best render-window candidate: prefer "FPS:" or sample-name
+    # in title, skip versioned GUI titles and blank windows.
+    best_wid=""
+    best_prio=0
+    for w in $(xdotool search --pid "$RPCS3_PID" 2>/dev/null || true); do
+        name="$(xdotool getwindowname "$w" 2>/dev/null || true)"
+        case "$name" in
+            "RPCS3 0.0."*|"")
+                continue
+                ;;
+        esac
+        prio=1
+        case "$name" in
+            *"FPS:"*|*"$SAMPLE_NAME"*) prio=2 ;;
+        esac
+        if (( prio > best_prio )); then
+            best_wid="$w"
+            best_prio=$prio
+        fi
     done
-    if [[ -n "$WID" ]]; then
-        echo "rpcs3-capture: GS window found: WID=$WID name=\"$(xdotool getwindowname "$WID" 2>/dev/null)\""
-        # Wait 3s for first frame to render before capture.
-        sleep 3
+
+    if [[ -n "$best_wid" ]]; then
+        WID="$best_wid"
+        echo "rpcs3-capture: render window found: WID=$WID name=\"$(xdotool getwindowname "$WID" 2>/dev/null)\""
+        # Wait for sample TTY marker (default "ready"), then capture after
+        # configurable delay (default 500ms).  Falls back to 2s warmup if
+        # marker not seen within timeout.
+        TTY_MARKER="${PSGL_CAPTURE_TTY_MARKER:-ready}"
+        TTY_DELAY_MS="${PSGL_CAPTURE_TTY_DELAY_MS:-500}"
+        TTY_SEEN=0
+        echo "rpcs3-capture: waiting for sample TTY marker '${TTY_MARKER}'..."
+        for _ in $(seq 1 "$TIMEOUT"); do
+            if grep -q "sys_tty_write():.*${TTY_MARKER}" "$LOG" 2>/dev/null; then
+                echo "rpcs3-capture: TTY marker '${TTY_MARKER}' seen, capturing in ${TTY_DELAY_MS}ms"
+                TTY_SEEN=1
+                sleep "$(bc <<< "scale=3; ${TTY_DELAY_MS}/1000")"
+                break
+            fi
+            if ! kill -0 "$RPCS3_PID" 2>/dev/null; then
+                echo "rpcs3-capture: rpcs3 exited before TTY marker" >&2
+                break
+            fi
+            sleep 0.5
+        done
+        if [[ $TTY_SEEN -eq 0 ]]; then
+            echo "rpcs3-capture: WARNING TTY marker not seen, falling back to 2s warmup"
+            sleep 2
+        fi
         xdotool windowraise "$WID" >/dev/null 2>&1 || true
         xdotool windowactivate --sync "$WID" >/dev/null 2>&1 || true
         sleep 0.5
@@ -96,10 +145,6 @@ for _ in $(seq 1 "$TIMEOUT"); do
         else
             echo "rpcs3-capture: screenshot capture failed" >&2
         fi
-        break
-    fi
-    if ! kill -0 "$RPCS3_PID" 2>/dev/null; then
-        echo "rpcs3-capture: rpcs3 exited while waiting for window" >&2
         break
     fi
     sleep 1
