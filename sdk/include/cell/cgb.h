@@ -63,6 +63,33 @@ int32_t        cellCgbGetVertexConfiguration(const CellCgbProgram *program,
                                              CellCgbVertexProgramConfiguration *conf);
 int32_t        cellCgbGetFragmentConfiguration(const CellCgbProgram *program,
                                                CellCgbFragmentProgramConfiguration *conf);
+int32_t        cellCgbGetVertexAttributeOutputMask(const CellCgbProgram *program,
+                                                    uint32_t *attributeOutputMask);
+int32_t        cellCgbGetUserClipPlaneControlMask(const CellCgbProgram *program,
+                                                   uint32_t *userClipPlaneControlMask);
+uint32_t       cellCgbGetVertexConstantCount(const CellCgbProgram *program);
+void           cellCgbGetVertexConstantValues(const CellCgbProgram *program,
+                                              uint32_t value_index,
+                                              uint16_t *reg,
+                                              const float **value);
+uint32_t       cellCgbMapLookup(CellCgbProgram *program, const char *name);
+uint16_t       cellCgbMapGetValue(CellCgbProgram *program,
+                                   const uint32_t map_index);
+uint32_t       cellCgbMapGetLength(const CellCgbProgram *program);
+void           cellCgbMapGetName(CellCgbProgram *program,
+                                  const uint32_t map_index,
+                                  char *name, uint32_t *size);
+void           cellCgbMapGetVertexUniformRegister(const CellCgbProgram *program,
+                                                   const uint32_t map_index,
+                                                   uint16_t *reg,
+                                                   const float **default_values);
+void           cellCgbMapGetFragmentUniformOffsets(const CellCgbProgram *program,
+                                                    const uint32_t map_index,
+                                                    uint16_t *offsets,
+                                                    uint32_t *count);
+void           cellCgbMapGetFragmentUniformRegister(const CellCgbProgram *program,
+                                                     const uint32_t map_index,
+                                                     uint16_t *reg);
 
 #ifdef __cplusplus
 }

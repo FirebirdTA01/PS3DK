@@ -1,0 +1,333 @@
+/* core_gl_ext.c — GLES 1.1 extension stubs (Slice 1d link gate).
+ *
+ * Covers glext.h surface: VBO/PBO, 3D textures, cube maps, FBO/RBO,
+ * fences (NV), events (SCE), clip planes, occlusion queries,
+ * conditional rendering, vertex attribute sets, debug markers,
+ * texture reference buffers, blend equation, polygon mode, etc.
+ */
+#include <GLES/glext.h>
+#include <string.h>
+
+/* ── blend equation / colour ─────────────────────────────────────── */
+
+GLAPI void glBlendEquation(GLenum mode)         { (void)mode; }
+GLAPI void glBlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha)
+{ (void)modeRGB; (void)modeAlpha; }
+GLAPI void glBlendFuncSeparate(GLenum sfactorRGB, GLenum dfactorRGB,
+                               GLenum sfactorAlpha, GLenum dfactorAlpha)
+{ (void)sfactorRGB; (void)dfactorRGB;
+  (void)sfactorAlpha; (void)dfactorAlpha; }
+GLAPI void glBlendColor(GLclampf red, GLclampf green,
+                        GLclampf blue, GLclampf alpha)
+{ (void)red; (void)green; (void)blue; (void)alpha; }
+
+/* ── normal / colour convenience ─────────────────────────────────── */
+
+GLAPI void glNormal3fv(const GLfloat *v)          { (void)v; }
+GLAPI void glColor4fv(const GLfloat *v)           { (void)v; }
+GLAPI void glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a)
+{ (void)r; (void)g; (void)b; (void)a; }
+
+/* ── get queries ─────────────────────────────────────────────────── */
+
+GLAPI void glGetBooleanv(GLenum pname, GLboolean *params)
+{ if (params) *params = GL_FALSE; (void)pname; }
+GLAPI void glGetFloatv(GLenum pname, GLfloat *params)
+{ if (params) *params = 0.0f; (void)pname; }
+
+/* ── 3D textures ─────────────────────────────────────────────────── */
+
+GLAPI void glTexImage3D(GLenum target, GLint level, GLint internalformat,
+                        GLsizei width, GLsizei height, GLsizei depth,
+                        GLint border, GLenum format, GLenum type,
+                        const GLvoid *pixels)
+{
+    (void)target;  (void)level;  (void)internalformat;
+    (void)width;   (void)height; (void)depth;
+    (void)border;  (void)format; (void)type;
+    (void)pixels;
+}
+
+GLAPI void glTexSubImage3D(GLenum target, GLint level,
+                           GLint xoffset, GLint yoffset, GLint zoffset,
+                           GLsizei width, GLsizei height, GLsizei depth,
+                           GLenum format, GLenum type, const GLvoid *pixels)
+{
+    (void)target;  (void)level;   (void)xoffset;
+    (void)yoffset; (void)zoffset;
+    (void)width;   (void)height;  (void)depth;
+    (void)format;  (void)type;    (void)pixels;
+}
+
+GLAPI void glCompressedTexImage3D(GLenum target, GLint level,
+                                  GLenum internalformat,
+                                  GLsizei width, GLsizei height,
+                                  GLsizei depth, GLint border,
+                                  GLsizei imageSize, const GLvoid *data)
+{
+    (void)target;  (void)level;  (void)internalformat;
+    (void)width;   (void)height; (void)depth;
+    (void)border;  (void)imageSize; (void)data;
+}
+
+GLAPI void glCompressedTexSubImage3D(GLenum target, GLint level,
+                                     GLint xoffset, GLint yoffset,
+                                     GLint zoffset,
+                                     GLsizei width, GLsizei height,
+                                     GLsizei depth,
+                                     GLenum format, GLsizei imageSize,
+                                     const GLvoid *data)
+{
+    (void)target;  (void)level;   (void)xoffset;
+    (void)yoffset; (void)zoffset;
+    (void)width;   (void)height;  (void)depth;
+    (void)format;  (void)imageSize; (void)data;
+}
+
+GLAPI void glCopyTexSubImage3D(GLenum target, GLint level,
+                               GLint xoffset, GLint yoffset, GLint zoffset,
+                               GLint x, GLint y,
+                               GLsizei width, GLsizei height)
+{
+    (void)target;  (void)level;   (void)xoffset;
+    (void)yoffset; (void)zoffset;
+    (void)x;       (void)y;
+    (void)width;   (void)height;
+}
+
+/* ── draw range elements ─────────────────────────────────────────── */
+
+GLAPI void glDrawRangeElements(GLenum mode, GLuint start, GLuint end,
+                               GLsizei count, GLenum type,
+                               const GLvoid *indices)
+{ (void)mode; (void)start; (void)end; (void)count; (void)type; (void)indices; }
+
+/* ── fog int variants ────────────────────────────────────────────── */
+
+GLAPI void glFogi(GLenum pname, GLint param)
+{ (void)pname; (void)param; }
+GLAPI void glFogiv(GLenum pname, const GLint *params)
+{ (void)pname; (void)params; }
+
+/* ── polygon mode ────────────────────────────────────────────────── */
+
+GLAPI void glPolygonMode(GLenum face, GLenum mode)
+{ (void)face; (void)mode; }
+GLAPI void glReadBuffer(GLenum mode)    { (void)mode; }
+
+/* ── texenv int variants ─────────────────────────────────────────── */
+
+GLAPI void glTexEnvi(GLenum target, GLenum pname, GLint param)
+{ (void)target; (void)pname; (void)param; }
+GLAPI void glTexEnviv(GLenum target, GLenum pname, const GLint *params)
+{ (void)target; (void)pname; (void)params; }
+
+/* ── texgen ──────────────────────────────────────────────────────── */
+
+GLAPI void glTexGenf(GLenum coord, GLenum pname, GLfloat param)
+{ (void)coord; (void)pname; (void)param; }
+GLAPI void glTexGenfv(GLenum coord, GLenum pname, const GLfloat *params)
+{ (void)coord; (void)pname; (void)params; }
+GLAPI void glTexGeni(GLenum coord, GLenum pname, GLint param)
+{ (void)coord; (void)pname; (void)param; }
+GLAPI void glTexGeniv(GLenum coord, GLenum pname, const GLint *params)
+{ (void)coord; (void)pname; (void)params; }
+
+/* ── texparam vec/int variants ───────────────────────────────────── */
+
+GLAPI void glTexParameterfv(GLenum target, GLenum pname,
+                            const GLfloat *params)
+{ (void)target; (void)pname; (void)params; }
+GLAPI void glTexParameteri(GLenum target, GLenum pname, GLint param)
+{ (void)target; (void)pname; (void)param; }
+GLAPI void glTexParameteriv(GLenum target, GLenum pname,
+                            const GLint *params)
+{ (void)target; (void)pname; (void)params; }
+
+/* ── VBO / PBO ───────────────────────────────────────────────────── */
+
+GLAPI void glBindBuffer(GLenum target, GLuint name)
+{ (void)target; (void)name; }
+
+GLAPI void glDeleteBuffers(GLsizei n, const GLuint *buffers)
+{ (void)n; (void)buffers; }
+
+GLAPI void glGenBuffers(GLsizei n, GLuint *buffers)
+{ if (buffers) memset(buffers, 0, (size_t)n * sizeof(GLuint)); }
+
+GLAPI void glBufferData(GLenum target, GLsizeiptr size,
+                        const GLvoid *data, GLenum usage)
+{ (void)target; (void)size; (void)data; (void)usage; }
+
+GLAPI void glBufferSubData(GLenum target, GLintptr offset,
+                           GLsizeiptr size, const GLvoid *data)
+{ (void)target; (void)offset; (void)size; (void)data; }
+
+GLAPI void glGetBufferParameteriv(GLenum target, GLenum pname,
+                                  GLint *params)
+{ (void)target; (void)pname;
+  if (params) *params = 0; }
+
+GLAPI GLvoid *glMapBuffer(GLenum target, GLenum access)
+{ (void)target; (void)access; return NULL; }
+
+GLAPI GLboolean glUnmapBuffer(GLenum target)
+{ (void)target; return GL_FALSE; }
+
+/* ── primitive restart NV ────────────────────────────────────────── */
+
+GLAPI void glPrimitiveRestartIndexNV(GLuint index) { (void)index; }
+
+/* ── fences NV ───────────────────────────────────────────────────── */
+
+GLAPI void glDeleteFencesNV(GLsizei n, const GLuint *fences)
+{ (void)n; (void)fences; }
+GLAPI void glGenFencesNV(GLsizei n, GLuint *fences)
+{ if (fences) memset(fences, 0, (size_t)n * sizeof(GLuint)); }
+GLAPI GLboolean glIsFenceNV(GLuint fence)
+{ (void)fence; return GL_FALSE; }
+GLAPI GLboolean glTestFenceNV(GLuint fence)
+{ (void)fence; return GL_TRUE; }
+GLAPI void glGetFenceivNV(GLuint fence, GLenum pname, GLint *params)
+{ (void)fence; (void)pname;
+  if (params) *params = 0; }
+GLAPI void glFinishFenceNV(GLuint fence)   { (void)fence; }
+GLAPI void glSetFenceNV(GLuint fence, GLenum condition)
+{ (void)fence; (void)condition; }
+
+/* ── events SCE ──────────────────────────────────────────────────── */
+
+GLAPI void glDeleteEventsSCE(GLsizei n, const GLuint *fences)
+{ (void)n; (void)fences; }
+GLAPI void glGenEventsSCE(GLsizei n, GLuint *fences)
+{ if (fences) memset(fences, 0, (size_t)n * sizeof(GLuint)); }
+GLAPI void glSetEventSCE(GLuint event)       { (void)event; }
+GLAPI void glResetEventSCE(GLuint event)     { (void)event; }
+GLAPI void glWaitEventSCE(GLuint event, GLboolean autoReset)
+{ (void)event; (void)autoReset; }
+GLAPI unsigned long long glMapEventSCE(GLuint event)
+{ (void)event; return 0ULL; }
+GLAPI void glSetMappedEventSCE(unsigned long long mappedEvent)
+{ (void)mappedEvent; }
+
+/* ── clip planes ─────────────────────────────────────────────────── */
+
+GLAPI void glClipPlanef(GLenum plane, const GLfloat *equation)
+{ (void)plane; (void)equation; }
+
+/* ── FBO / RBO OES ───────────────────────────────────────────────── */
+
+GLAPI GLboolean glIsRenderbufferOES(GLuint renderbuffer)
+{ (void)renderbuffer; return GL_FALSE; }
+GLAPI void glBindRenderbufferOES(GLenum target, GLuint renderbuffer)
+{ (void)target; (void)renderbuffer; }
+GLAPI void glDeleteRenderbuffersOES(GLsizei n, const GLuint *renderbuffers)
+{ (void)n; (void)renderbuffers; }
+GLAPI void glGenRenderbuffersOES(GLsizei n, GLuint *renderbuffers)
+{ if (renderbuffers) memset(renderbuffers, 0, (size_t)n * sizeof(GLuint)); }
+GLAPI void glRenderbufferStorageOES(GLenum target, GLenum internalformat,
+                                    GLsizei width, GLsizei height)
+{ (void)target; (void)internalformat; (void)width; (void)height; }
+GLAPI void glGetRenderbufferParameterivOES(GLenum target, GLenum pname,
+                                           GLint *params)
+{ (void)target; (void)pname; if (params) *params = 0; }
+
+GLAPI GLboolean glIsFramebufferOES(GLuint framebuffer)
+{ (void)framebuffer; return GL_FALSE; }
+GLAPI void glBindFramebufferOES(GLenum target, GLuint framebuffer)
+{ (void)target; (void)framebuffer; }
+GLAPI void glDeleteFramebuffersOES(GLsizei n, const GLuint *framebuffers)
+{ (void)n; (void)framebuffers; }
+GLAPI void glGenFramebuffersOES(GLsizei n, GLuint *framebuffers)
+{ if (framebuffers) memset(framebuffers, 0, (size_t)n * sizeof(GLuint)); }
+GLAPI GLenum glCheckFramebufferStatusOES(GLenum target)
+{ (void)target; return GL_FRAMEBUFFER_COMPLETE_OES; }
+GLAPI void glFramebufferTexture2DOES(GLenum target, GLenum attachment,
+                                     GLenum textarget, GLuint texture,
+                                     GLint level)
+{ (void)target; (void)attachment; (void)textarget;
+  (void)texture; (void)level; }
+GLAPI void glFramebufferRenderbufferOES(GLenum target, GLenum attachment,
+                                        GLenum renderbuffertarget,
+                                        GLuint renderbuffer)
+{ (void)target; (void)attachment;
+  (void)renderbuffertarget; (void)renderbuffer; }
+GLAPI void glGetFramebufferAttachmentParameterivOES(GLenum target,
+                                                     GLenum attachment,
+                                                     GLenum pname,
+                                                     GLint *params)
+{ (void)target; (void)attachment; (void)pname;
+  if (params) *params = 0; }
+GLAPI void glGenerateMipmapOES(GLenum target)   { (void)target; }
+GLAPI void glFramebufferParameteriSCE(GLenum target, GLenum pname,
+                                      GLint param)
+{ (void)target; (void)pname; (void)param; }
+
+/* ── occlusion queries ARB ───────────────────────────────────────── */
+
+GLAPI void glGenQueriesARB(GLsizei n, GLuint *ids)
+{ if (ids) memset(ids, 0, (size_t)n * sizeof(GLuint)); }
+GLAPI void glDeleteQueriesARB(GLsizei n, const GLuint *ids)
+{ (void)n; (void)ids; }
+GLAPI GLboolean glIsQueryARB(GLuint id)
+{ (void)id; return GL_FALSE; }
+GLAPI void glBeginQueryARB(GLenum target, GLuint id)
+{ (void)target; (void)id; }
+GLAPI void glEndQueryARB(GLenum target)  { (void)target; }
+GLAPI void glGetQueryivARB(GLenum target, GLenum pname, GLint *params)
+{ (void)target; (void)pname; if (params) *params = 0; }
+GLAPI void glGetQueryObjectivARB(GLuint id, GLenum pname, GLint *params)
+{ (void)id; (void)pname; if (params) *params = 0; }
+GLAPI void glGetQueryObjectuivARB(GLuint id, GLenum pname, GLuint *params)
+{ (void)id; (void)pname; if (params) *params = 0; }
+GLAPI void glGetQueryObjectul64vARB(GLuint id, GLenum pname,
+                                    unsigned long long *params)
+{ (void)id; (void)pname; if (params) *params = 0ULL; }
+
+/* ── conditional rendering SCE ──────────────────────────────────── */
+
+GLAPI void glBeginConditionalRenderingSCE(GLuint id)  { (void)id; }
+GLAPI void glEndConditionalRenderingSCE(void)         {}
+
+/* ── stencil two-side EXT ────────────────────────────────────────── */
+
+GLAPI void glActiveStencilFaceEXT(GLenum face)        { (void)face; }
+
+/* ── vertex attribute sets SCE ───────────────────────────────────── */
+
+GLAPI void glGenAttribSetsSCE(GLsizei n, GLuint *names)
+{ if (names) memset(names, 0, (size_t)n * sizeof(GLuint)); }
+GLAPI void glDeleteAttribSetsSCE(GLsizei n, const GLuint *names)
+{ (void)n; (void)names; }
+GLAPI GLboolean glIsAttribSetSCE(GLuint name)
+{ (void)name; return GL_FALSE; }
+GLAPI void glBindAttribSetSCE(GLuint name)            { (void)name; }
+GLAPI void glCopyAttribSetSCE(GLuint fromName, GLuint toName)
+{ (void)fromName; (void)toName; }
+
+/* ── string markers ──────────────────────────────────────────────── */
+
+GLAPI void glPushStringMarkerSCE(const GLubyte *string) { (void)string; }
+GLAPI void glPopStringMarkerSCE(void)                   {}
+GLAPI void glStringMarkerGREMEDY(GLsizei len, const void *string)
+{ (void)len; (void)string; }
+
+/* ── texture reference buffers SCE ───────────────────────────────── */
+
+GLAPI void glTextureReferenceSCE(GLenum target, GLuint levels,
+                                 GLuint baseWidth, GLuint baseHeight,
+                                 GLuint baseDepth, GLenum internalFormat,
+                                 GLuint pitch, GLintptr offset)
+{
+    (void)target;  (void)levels;  (void)baseWidth;
+    (void)baseHeight; (void)baseDepth; (void)internalFormat;
+    (void)pitch;   (void)offset;
+}
+
+GLAPI void glBufferSurfaceSCE(GLenum target, GLuint width, GLuint height,
+                              GLenum multisampling, GLenum internalFormat,
+                              GLenum usage)
+{
+    (void)target;  (void)width;  (void)height;
+    (void)multisampling; (void)internalFormat; (void)usage;
+}

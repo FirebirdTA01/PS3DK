@@ -373,9 +373,37 @@ HEADERS := \
     include/rsx/resc.h \
     include/rsx/rsx.h \
     include/rsx/rsx_function_macros.h \
-    include/rsx/rsx_program.h
+    include/rsx/rsx_program.h \
+    include/PSGL/psgl.h \
+    include/PSGL/psglu.h \
+    include/PSGL/export.h \
+    include/PSGL/report.h \
+    include/PSGL/deprecated.h \
+    include/GLES/gl.h \
+    include/GLES/glext.h \
+    include/Cg/cg.h \
+    include/Cg/cgBinary.h \
+    include/Cg/cgGL.h \
+    include/Cg/cgc.h \
+    include/Cg/cgGL_profiles.h \
+    include/Cg/cg_bindlocations.h \
+    include/Cg/cg_datatypes.h \
+    include/Cg/cg_enums.h \
+    include/Cg/cg_errors.h \
+    include/Cg/cg_profiles.h \
+    include/Cg/cg_types.h \
+    include/Cg/NV/cg.h \
+    include/Cg/NV/cgGL.h \
+    include/Cg/NV/cgGL_profiles.h \
+    include/Cg/NV/cg_bindlocations.h \
+    include/Cg/NV/cg_datatypes.h \
+    include/Cg/NV/cg_enums.h \
+    include/Cg/NV/cg_errors.h \
+    include/Cg/NV/cg_profiles.h \
+    include/Cg/NV/cg_types.h \
+    include/cell/cgb/cgb_struct.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937 libfontGcm libdbgrsx
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmt19937 libfontGcm libdbgrsx libPSGL libPSGLU
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -623,6 +651,10 @@ $(SUBLIBS):
 # installed by libgcm_cmd.  Force the order so a parallel `make all`
 # can't race.
 libdbgfont: libgcm_cmd
+
+# libPSGLU includes <PSGL/psgl.h> transitively from <PSGL/psglu.h>.
+# libPSGL must be installed first.
+libPSGLU: libPSGL
 
 clean:
 	@for lib in $(SUBLIBS); do $(MAKE) -C $$lib clean || exit 1; done
