@@ -9,6 +9,8 @@
 
 #include <GLES/glext.h>
 
+#include "psgl_context.h"
+
 static void glext_zero(void *ptr, size_t size)
 {
     unsigned char *out = (unsigned char *)ptr;
@@ -156,32 +158,31 @@ GLAPI void glTexParameteriv(GLenum target, GLenum pname,
 /* ── VBO / PBO ───────────────────────────────────────────────────── */
 
 GLAPI void glBindBuffer(GLenum target, GLuint name)
-{ (void)target; (void)name; }
+{ psgl_context_bind_buffer(target, name); }
 
 GLAPI void glDeleteBuffers(GLsizei n, const GLuint *buffers)
-{ (void)n; (void)buffers; }
+{ psgl_context_delete_buffers(n, buffers); }
 
 GLAPI void glGenBuffers(GLsizei n, GLuint *buffers)
-{ if (buffers) glext_zero(buffers, (size_t)n * sizeof(GLuint)); }
+{ psgl_context_gen_buffers(n, buffers); }
 
 GLAPI void glBufferData(GLenum target, GLsizeiptr size,
                         const GLvoid *data, GLenum usage)
-{ (void)target; (void)size; (void)data; (void)usage; }
+{ psgl_context_buffer_data(target, size, data, usage); }
 
 GLAPI void glBufferSubData(GLenum target, GLintptr offset,
                            GLsizeiptr size, const GLvoid *data)
-{ (void)target; (void)offset; (void)size; (void)data; }
+{ psgl_context_buffer_sub_data(target, offset, size, data); }
 
 GLAPI void glGetBufferParameteriv(GLenum target, GLenum pname,
                                   GLint *params)
-{ (void)target; (void)pname;
-  if (params) *params = 0; }
+{ psgl_context_get_buffer_parameteriv(target, pname, params); }
 
 GLAPI GLvoid *glMapBuffer(GLenum target, GLenum access)
-{ (void)target; (void)access; return NULL; }
+{ return psgl_context_map_buffer(target, access); }
 
 GLAPI GLboolean glUnmapBuffer(GLenum target)
-{ (void)target; return GL_FALSE; }
+{ return psgl_context_unmap_buffer(target); }
 
 /* ── primitive restart NV ────────────────────────────────────────── */
 

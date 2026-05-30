@@ -78,8 +78,10 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
 
 GLAPI void glEnable(GLenum cap)        { (void)cap; }
 GLAPI void glDisable(GLenum cap)       { (void)cap; }
-GLAPI void glEnableClientState(GLenum array)  { (void)array; }
-GLAPI void glDisableClientState(GLenum array) { (void)array; }
+GLAPI void glEnableClientState(GLenum array)
+{ psgl_context_set_client_state(array, GL_TRUE); }
+GLAPI void glDisableClientState(GLenum array)
+{ psgl_context_set_client_state(array, GL_FALSE); }
 
 /* ── buffer clear ────────────────────────────────────────────────── */
 
@@ -347,16 +349,16 @@ GLAPI void glClientActiveTexture(GLenum texture) { (void)texture; }
 
 GLAPI void glVertexPointer(GLint size, GLenum type,
                            GLsizei stride, const GLvoid *pointer)
-{ (void)size; (void)type; (void)stride; (void)pointer; }
+{ psgl_context_set_attrib_pointer(PSGL_ATTRIB_VERTEX, size, type, stride, pointer); }
 GLAPI void glNormalPointer(GLenum type, GLsizei stride,
                            const GLvoid *pointer)
-{ (void)type; (void)stride; (void)pointer; }
+{ psgl_context_set_attrib_pointer(PSGL_ATTRIB_NORMAL, 3, type, stride, pointer); }
 GLAPI void glColorPointer(GLint size, GLenum type,
                           GLsizei stride, const GLvoid *pointer)
-{ (void)size; (void)type; (void)stride; (void)pointer; }
+{ psgl_context_set_attrib_pointer(PSGL_ATTRIB_COLOR, size, type, stride, pointer); }
 GLAPI void glTexCoordPointer(GLint size, GLenum type,
                              GLsizei stride, const GLvoid *pointer)
-{ (void)size; (void)type; (void)stride; (void)pointer; }
+{ psgl_context_set_attrib_pointer(PSGL_ATTRIB_TEXCOORD, size, type, stride, pointer); }
 
 /* ── multi-texcoord (immediate) ──────────────────────────────────── */
 

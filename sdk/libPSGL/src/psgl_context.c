@@ -11,6 +11,17 @@
 #define PSGL_DEFAULT_HOST_SIZE (32u * 1024u * 1024u)
 #define PSGL_HOST_ALIGNMENT    (1024u * 1024u)
 #define PSGL_LABEL_INDEX       255u
+#define PSGL_BUFFER_ALIGNMENT  64u
+
+typedef struct PSGLbufferObject {
+    GLuint name;
+    GLenum usage;
+    uint32_t size;
+    void *address;
+    uint32_t offset;
+    GLboolean mapped;
+    struct PSGLbufferObject *next;
+} PSGLbufferObject;
 
 typedef struct PSGLsystemState {
     uint32_t initialized;
@@ -25,12 +36,23 @@ typedef struct PSGLsystemState {
 } PSGLsystemState;
 
 static PSGLsystemState g_psgl;
+static PSGLbufferObject *g_psgl_buffers;
+static GLuint g_psgl_next_buffer_name = 1u;
 
 static void psgl_zero(void *ptr, uint32_t size)
 {
     unsigned char *out = (unsigned char *)ptr;
     while (size--) {
         *out++ = 0;
+    }
+}
+
+static void psgl_copy(void *dst, const void *src, uint32_t size)
+{
+    unsigned char *out = (unsigned char *)dst;
+    const unsigned char *in = (const unsigned char *)src;
+    while (size--) {
+        *out++ = *in++;
     }
 }
 
@@ -176,6 +198,70 @@ static int psgl_make_frame_buffer(PSGLdevice *device, uint32_t id)
     return 1;
 }
 
+static PSGLbufferObject *psgl_find_buffer(GLuint name)
+{
+    PSGLbufferObject *buffer = g_psgl_buffers;
+    while (buffer) {
+        if (buffer->name == name) return buffer;
+        buffer = buffer->next;
+    }
+    return NULL;
+}
+
+static PSGLbufferObject *psgl_create_buffer(GLuint name)
+{
+    PSGLbufferObject *buffer = psgl_find_buffer(name);
+    if (buffer) return buffer;
+    for (buffer = g_psgl_buffers; buffer; buffer = buffer->next) {
+        if (buffer->name == 0u) {
+            PSGLbufferObject *next = buffer->next;
+            psgl_zero(buffer, sizeof(*buffer));
+            buffer->name = name;
+            buffer->next = next;
+            return buffer;
+        }
+    }
+    buffer = (PSGLbufferObject *)calloc(1u, sizeof(*buffer));
+    if (!buffer) return NULL;
+    buffer->name = name;
+    buffer->next = g_psgl_buffers;
+    g_psgl_buffers = buffer;
+    return buffer;
+}
+
+static void psgl_release_buffer_storage(PSGLbufferObject *buffer)
+{
+    if (!buffer) return;
+    buffer->address = NULL;
+    buffer->size = 0u;
+    buffer->offset = 0u;
+    buffer->mapped = GL_FALSE;
+}
+
+static PSGLbufferObject *psgl_bound_buffer(PSGLcontext *context, GLenum target)
+{
+    if (!context) return NULL;
+    if (target == GL_ARRAY_BUFFER)
+        return psgl_find_buffer(context->bound_array_buffer);
+    if (target == GL_ELEMENT_ARRAY_BUFFER)
+        return psgl_find_buffer(context->bound_element_array_buffer);
+    return NULL;
+}
+
+static void psgl_clear_deleted_buffer_bindings(GLuint name)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (context->bound_array_buffer == name) context->bound_array_buffer = 0u;
+    if (context->bound_element_array_buffer == name) context->bound_element_array_buffer = 0u;
+    for (uint32_t i = 0; i < PSGL_MAX_VERTEX_ATTRIBS; i++) {
+        if (context->attribs[i].buffer_name == name) {
+            context->attribs[i].buffer_name = 0u;
+            context->attribs[i].buffer_offset = 0u;
+        }
+    }
+}
+
 int psgl_context_init_system(const PSGLinitOptions *options)
 {
     if (g_psgl.initialized) return 1;
@@ -210,7 +296,8 @@ int psgl_context_init_system(const PSGLinitOptions *options)
 void psgl_context_shutdown_system(void)
 {
     if (!g_psgl.initialized) return;
-    if (CELL_GCM_CURRENT) {
+    if (CELL_GCM_CURRENT && g_psgl.current_device &&
+        g_psgl.current_device->submitted_flips) {
         cellGcmSetWaitFlip(CELL_GCM_CURRENT);
         cellGcmFinish(CELL_GCM_CURRENT, 1u);
     }
@@ -231,6 +318,10 @@ PSGLcontext *psgl_context_create(void)
     psgl_matrix_identity(context->texture);
     context->clear_color[3] = 1.0f;
     context->clear_depth = 1.0f;
+    context->attribs[PSGL_ATTRIB_VERTEX].size = 4;
+    context->attribs[PSGL_ATTRIB_NORMAL].size = 3;
+    context->attribs[PSGL_ATTRIB_COLOR].size = 4;
+    context->attribs[PSGL_ATTRIB_TEXCOORD].size = 4;
     context->dirty = PSGL_DIRTY_ALL;
     return context;
 }
@@ -468,6 +559,168 @@ void psgl_context_set_viewport(GLint x, GLint y, GLsizei width, GLsizei height)
     context->viewport[3] = height;
     context->dirty |= PSGL_DIRTY_VIEWPORT;
     psgl_emit_viewport(context);
+}
+
+void psgl_context_gen_buffers(GLsizei n, GLuint *buffers)
+{
+    if (n < 0 || !buffers) return;
+    for (GLsizei i = 0; i < n; i++) {
+        GLuint name = g_psgl_next_buffer_name++;
+        if (name == 0u) name = g_psgl_next_buffer_name++;
+        buffers[i] = psgl_create_buffer(name) ? name : 0u;
+    }
+}
+
+void psgl_context_delete_buffers(GLsizei n, const GLuint *buffers)
+{
+    if (n < 0 || !buffers) return;
+    for (GLsizei i = 0; i < n; i++) {
+        GLuint name = buffers[i];
+        if (name == 0u) continue;
+        PSGLbufferObject *buffer = g_psgl_buffers;
+        while (buffer) {
+            if (buffer->name == name) {
+                psgl_clear_deleted_buffer_bindings(name);
+                psgl_release_buffer_storage(buffer);
+                buffer->name = 0u;
+                break;
+            }
+            buffer = buffer->next;
+        }
+    }
+}
+
+void psgl_context_bind_buffer(GLenum target, GLuint name)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (name != 0u && !psgl_create_buffer(name)) return;
+    if (target == GL_ARRAY_BUFFER) {
+        context->bound_array_buffer = name;
+    } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
+        context->bound_element_array_buffer = name;
+    }
+}
+
+void psgl_context_buffer_data(GLenum target, GLsizeiptr size,
+                              const GLvoid *data, GLenum usage)
+{
+    PSGLbufferObject *buffer = psgl_bound_buffer(g_psgl.current_context, target);
+    if (!buffer || size < 0) return;
+
+    if (size == 0) {
+        psgl_release_buffer_storage(buffer);
+        buffer->usage = usage;
+        return;
+    }
+
+    void *address = rsxMemalign(PSGL_BUFFER_ALIGNMENT, (uint32_t)size);
+    uint32_t offset = 0u;
+    if (!address) return;
+    if (cellGcmAddressToOffset(address, &offset) != 0) {
+        return;
+    }
+    if (data) psgl_copy(address, data, (uint32_t)size);
+
+    psgl_release_buffer_storage(buffer);
+    buffer->address = address;
+    buffer->offset = offset;
+    buffer->size = (uint32_t)size;
+    buffer->usage = usage;
+}
+
+void psgl_context_buffer_sub_data(GLenum target, GLintptr offset,
+                                  GLsizeiptr size, const GLvoid *data)
+{
+    PSGLbufferObject *buffer = psgl_bound_buffer(g_psgl.current_context, target);
+    if (!buffer || !data || offset < 0 || size < 0) return;
+    uint32_t begin = (uint32_t)offset;
+    uint32_t count = (uint32_t)size;
+    if (begin > buffer->size || count > buffer->size - begin) return;
+    psgl_copy((unsigned char *)buffer->address + begin, data, count);
+}
+
+void psgl_context_get_buffer_parameteriv(GLenum target, GLenum pname,
+                                         GLint *params)
+{
+    if (!params) return;
+    PSGLbufferObject *buffer = psgl_bound_buffer(g_psgl.current_context, target);
+    if (!buffer) {
+        *params = 0;
+        return;
+    }
+    switch (pname) {
+    case GL_BUFFER_SIZE:
+        *params = (GLint)buffer->size;
+        break;
+    case GL_BUFFER_USAGE:
+        *params = (GLint)buffer->usage;
+        break;
+    case GL_BUFFER_ACCESS:
+        *params = buffer->mapped ? GL_READ_WRITE : GL_WRITE_ONLY;
+        break;
+    case GL_BUFFER_MAPPED:
+        *params = buffer->mapped;
+        break;
+    default:
+        *params = 0;
+        break;
+    }
+}
+
+GLvoid *psgl_context_map_buffer(GLenum target, GLenum access)
+{
+    (void)access;
+    PSGLbufferObject *buffer = psgl_bound_buffer(g_psgl.current_context, target);
+    if (!buffer || !buffer->address) return NULL;
+    buffer->mapped = GL_TRUE;
+    return buffer->address;
+}
+
+GLboolean psgl_context_unmap_buffer(GLenum target)
+{
+    PSGLbufferObject *buffer = psgl_bound_buffer(g_psgl.current_context, target);
+    if (!buffer) return GL_FALSE;
+    buffer->mapped = GL_FALSE;
+    return GL_TRUE;
+}
+
+void psgl_context_set_client_state(GLenum array, GLboolean enabled)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    switch (array) {
+    case GL_VERTEX_ARRAY:
+        context->attribs[PSGL_ATTRIB_VERTEX].enabled = enabled;
+        break;
+    case GL_NORMAL_ARRAY:
+        context->attribs[PSGL_ATTRIB_NORMAL].enabled = enabled;
+        break;
+    case GL_COLOR_ARRAY:
+        context->attribs[PSGL_ATTRIB_COLOR].enabled = enabled;
+        break;
+    case GL_TEXTURE_COORD_ARRAY:
+        context->attribs[PSGL_ATTRIB_TEXCOORD].enabled = enabled;
+        break;
+    default:
+        break;
+    }
+}
+
+void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
+                                     GLenum type, GLsizei stride,
+                                     const GLvoid *pointer)
+{
+    if (slot >= PSGL_MAX_VERTEX_ATTRIBS || stride < 0) return;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    PSGLvertexAttribState *attrib = &context->attribs[slot];
+    attrib->size = size;
+    attrib->type = type;
+    attrib->stride = stride;
+    attrib->pointer = pointer;
+    attrib->buffer_name = context->bound_array_buffer;
+    attrib->buffer_offset = context->bound_array_buffer ? (uint32_t)(uintptr_t)pointer : 0u;
 }
 
 PSGLuint64 psglGetSystemTime(void)

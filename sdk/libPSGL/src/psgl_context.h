@@ -8,6 +8,14 @@
 
 #define PSGL_MAX_FRAME_BUFFERS 3u
 #define PSGL_MAX_TEXTURE_UNITS 4u
+#define PSGL_MAX_VERTEX_ATTRIBS 4u
+
+typedef enum PSGLvertexAttribSlot {
+    PSGL_ATTRIB_VERTEX = 0,
+    PSGL_ATTRIB_NORMAL = 1,
+    PSGL_ATTRIB_COLOR = 2,
+    PSGL_ATTRIB_TEXCOORD = 3
+} PSGLvertexAttribSlot;
 
 typedef enum PSGLdirtyBits {
     PSGL_DIRTY_VIEWPORT = 0x00000001u,
@@ -32,6 +40,16 @@ typedef struct PSGLframeBuffer {
     uint16_t height;
     uint8_t id;
 } PSGLframeBuffer;
+
+typedef struct PSGLvertexAttribState {
+    GLboolean enabled;
+    GLint size;
+    GLenum type;
+    GLsizei stride;
+    const GLvoid *pointer;
+    GLuint buffer_name;
+    uint32_t buffer_offset;
+} PSGLvertexAttribState;
 
 struct PSGLdevice {
     uint32_t initialized;
@@ -71,6 +89,7 @@ struct PSGLcontext {
     GLint clear_stencil;
     GLuint bound_array_buffer;
     GLuint bound_element_array_buffer;
+    PSGLvertexAttribState attribs[PSGL_MAX_VERTEX_ATTRIBS];
     GLuint bound_textures[PSGL_MAX_TEXTURE_UNITS];
     CGprogram bound_vertex_program;
     CGprogram bound_fragment_program;
@@ -94,5 +113,20 @@ void psgl_context_set_clear_depth(GLfloat depth);
 void psgl_context_set_clear_stencil(GLint stencil);
 void psgl_context_clear(GLbitfield mask);
 void psgl_context_set_viewport(GLint x, GLint y, GLsizei width, GLsizei height);
+void psgl_context_gen_buffers(GLsizei n, GLuint *buffers);
+void psgl_context_delete_buffers(GLsizei n, const GLuint *buffers);
+void psgl_context_bind_buffer(GLenum target, GLuint name);
+void psgl_context_buffer_data(GLenum target, GLsizeiptr size,
+                              const GLvoid *data, GLenum usage);
+void psgl_context_buffer_sub_data(GLenum target, GLintptr offset,
+                                  GLsizeiptr size, const GLvoid *data);
+void psgl_context_get_buffer_parameteriv(GLenum target, GLenum pname,
+                                         GLint *params);
+GLvoid *psgl_context_map_buffer(GLenum target, GLenum access);
+GLboolean psgl_context_unmap_buffer(GLenum target);
+void psgl_context_set_client_state(GLenum array, GLboolean enabled);
+void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
+                                     GLenum type, GLsizei stride,
+                                     const GLvoid *pointer);
 
 #endif
