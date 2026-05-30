@@ -15,6 +15,7 @@
 #ifndef __PS3DK_CELL_CGB_H__
 #define __PS3DK_CELL_CGB_H__
 
+#include <cell/cgb/cgb_struct.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -29,31 +30,6 @@ typedef enum CellCgbProfile {
     CELL_CGB_PROFILE_VERTEX  = 1,
     CELL_CGB_PROFILE_FRAGMENT = 2
 } CellCgbProfile;
-
-/* Hardware-config structs are layout-fixed (consumed by libgcm); the
- * field set + ordering matches the reference SDK 475 layout exactly so
- * sample code that allocates / initializes / passes these by value
- * compiles + runs unchanged. */
-typedef struct CellCgbVertexProgramConfiguration {
-    uint16_t instructionSlot;
-    uint16_t instructionCount;
-    uint16_t attributeInputMask;
-    uint8_t  registerCount;
-    uint8_t  unused0;
-} CellCgbVertexProgramConfiguration;
-
-typedef struct CellCgbFragmentProgramConfiguration {
-    uint32_t offset;
-    uint32_t attributeInputMask;
-    uint16_t texCoordsInputMask;
-    uint16_t texCoords2D;
-    uint16_t texCoordsCentroid;
-    uint16_t unused0;
-    uint32_t fragmentControl;
-    uint8_t  registerCount;
-    uint8_t  unused1;
-    uint16_t unused2;
-} CellCgbFragmentProgramConfiguration;
 
 /* Opaque program handle.  Reference SDK ships an internal-layout
  * char-array body sized by CELL_CGB_PROGRAM_STRUCTURE_SIZE; we expose
