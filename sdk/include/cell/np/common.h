@@ -42,6 +42,10 @@ extern "C" {
 #define SCE_NP_COOKIE_MAX_SIZE 1024
 #define SCE_NP_TICKET_PARAM_DATA_LEN 256
 
+#define SCE_NP_CLANS_CLAN_NAME_MAX_LENGTH 64
+#define SCE_NP_CLANS_CLAN_TAG_MAX_LENGTH 8
+#define SCE_NP_CLANS_CLAN_DESCRIPTION_MAX_LENGTH 255
+
 #define SCE_NP_ERROR_NOT_INITIALIZED            0x8002aa01
 #define SCE_NP_ERROR_ALREADY_INITIALIZED        0x8002aa02
 #define SCE_NP_ERROR_INVALID_ARGUMENT           0x8002aa03
@@ -188,6 +192,11 @@ typedef struct SceNpDate {
 } SceNpDate;
 
 typedef int64_t SceNpTime;
+
+#ifndef __PS3DK_CELL_NP_CLAN_ID_TYPE_DEFINED__
+#define __PS3DK_CELL_NP_CLAN_ID_TYPE_DEFINED__
+typedef uint32_t SceNpClanId;
+#endif
 
 typedef struct SceNpTicketVersion {
     uint16_t major;
