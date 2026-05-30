@@ -5,8 +5,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 ## Summary
 - Libraries tracked: **99**
 - Cell SDK exports total: **4796**
-- Covered by our install tree: **2794** (58.3%) — 2494 by exact name, 300 via alias
-- Our install tree exports: **20530** (all archives, deduplicated)
+- Covered by our install tree: **3219** (67.1%) — 3124 by exact name, 95 via alias
+- Our install tree exports: **23998** (all archives, deduplicated)
 - Alias map entries loaded: **627**
 - Impl status (per YAML annotations): unknown 4789 · stub 7 · impl 0 · verified 0
 
@@ -18,7 +18,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libatrac3plus_stub` | 23 | 23 | 0 | 23 | 100.0% |
 | `libatrac3multi_stub` | 24 | 24 | 0 | 24 | 100.0% |
 | `libaudio_stub` | 23 | 23 | 0 | 23 | 100.0% |
-| `libsysutil_bgdl_stub` | 2 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_bgdl_stub` | 2 | 2 | 0 | 2 | 100.0% |
 | `libcamera_stub` | 28 | 0 | 28 | 28 | 100.0% |
 | `libcelp8enc_stub` | 9 | 9 | 0 | 9 | 100.0% |
 | `libcelpenc_stub` | 9 | 9 | 0 | 9 | 100.0% |
@@ -26,25 +26,25 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libdaisy_stub` | 52 | 0 | 0 | 0 | 0.0% |
 | `libdmux_stub` | 20 | 20 | 0 | 20 | 100.0% |
 | `libfiber_stub` | 47 | 47 | 0 | 47 | 100.0% |
-| `libfont_stub` | 82 | 0 | 62 | 62 | 75.6% |
-| `libfontFT_stub` | 3 | 0 | 3 | 3 | 100.0% |
-| `libsysutil_game_stub` | 15 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_game_exec_stub` | 6 | 0 | 0 | 0 | 0.0% |
+| `libfont_stub` | 82 | 82 | 0 | 82 | 100.0% |
+| `libfontFT_stub` | 3 | 3 | 0 | 3 | 100.0% |
+| `libsysutil_game_stub` | 15 | 15 | 0 | 15 | 100.0% |
+| `libsysutil_game_exec_stub` | 6 | 6 | 0 | 6 | 100.0% |
 | `libgcm_sys_stub` | 86 | 86 | 0 | 86 | 100.0% |
 | `libgifdec_stub` | 12 | 12 | 0 | 12 | 100.0% |
-| `libhttp_stub` | 105 | 0 | 96 | 96 | 91.4% |
-| `libhttp_util_stub` | 20 | 0 | 20 | 20 | 100.0% |
+| `libhttp_stub` | 105 | 105 | 0 | 105 | 100.0% |
+| `libhttp_util_stub` | 20 | 20 | 0 | 20 | 100.0% |
 | `libsysutil_imejp_stub` | 41 | 41 | 0 | 41 | 100.0% |
 | `libjpgdec_stub` | 12 | 12 | 0 | 12 | 100.0% |
 | `libjpgenc_stub` | 10 | 10 | 0 | 10 | 100.0% |
-| `libkey2char_stub` | 5 | 0 | 0 | 0 | 0.0% |
+| `libkey2char_stub` | 5 | 5 | 0 | 5 | 100.0% |
 | `libl10n_stub` | 165 | 165 | 0 | 165 | 100.0% |
 | `libprof_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `libmic_stub` | 41 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_music_decode_stub` | 20 | 20 | 0 | 20 | 100.0% |
 | `libsysutil_music_export_stub` | 5 | 5 | 0 | 5 | 100.0% |
 | `libsysutil_music_stub` | 22 | 22 | 0 | 22 | 100.0% |
-| `libnetctl_stub` | 19 | 0 | 10 | 10 | 52.6% |
+| `libnetctl_stub` | 19 | 19 | 0 | 19 | 100.0% |
 | `libsysutil_oskdialog_ext_stub` | 17 | 17 | 0 | 17 | 100.0% |
 | `libovis_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `libpamf_stub` | 23 | 23 | 0 | 23 | 100.0% |
@@ -69,7 +69,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libspudll_stub` | 2 | 0 | 0 | 0 | 0.0% |
 | `libspurs_stub` | 137 | 137 | 0 | 137 | 100.0% |
 | `libspurs_jq_stub` | 63 | 63 | 0 | 63 | 100.0% |
-| `libssl_stub` | 14 | 0 | 14 | 14 | 100.0% |
+| `libssl_stub` | 14 | 14 | 0 | 14 | 100.0% |
 | `libsysutil_subdisplay_stub` | 11 | 11 | 0 | 11 | 100.0% |
 | `libsync_stub` | 42 | 42 | 0 | 42 | 100.0% |
 | `libsync2_stub` | 32 | 32 | 0 | 32 | 100.0% |
@@ -79,12 +79,12 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libsysutil_stub` | 174 | 174 | 0 | 174 | 100.0% |
 | `libsysutil_ap_stub` | 3 | 3 | 0 | 3 | 100.0% |
 | `libsysutil_avc2_stub` | 54 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_avconf_ext_stub` | 16 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_avconf_ext_stub` | 16 | 16 | 0 | 16 | 100.0% |
 | `libsysutil_licensearea_stub` | 1 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_savedata_extra_stub` | 27 | 27 | 0 | 27 | 100.0% |
 | `libusbpspcm_stub` | 27 | 0 | 0 | 0 | 0.0% |
 | `libusbd_stub` | 35 | 35 | 0 | 35 | 100.0% |
-| `libsysutil_userinfo_stub` | 5 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_userinfo_stub` | 5 | 5 | 0 | 5 | 100.0% |
 | `libsysutil_video_export_stub` | 6 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_video_upload_stub` | 1 | 0 | 0 | 0 | 0.0% |
 | `libvoice_stub` | 35 | 0 | 0 | 0 | 0.0% |
@@ -95,14 +95,14 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libgem_stub` | 37 | 0 | 36 | 36 | 97.3% |
 | `libmedi_stub` | 10 | 0 | 0 | 0 | 0.0% |
 | `libvdec_stub` | 11 | 0 | 6 | 6 | 54.5% |
-| `libsysutil_np_stub` | 236 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_np_stub` | 236 | 236 | 0 | 236 | 100.0% |
 | `libsysutil_np2_stub` | 79 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_np_clans_stub` | 39 | 0 | 0 | 0 | 0.0% |
 | `libsysutil_np_commerce2_stub` | 52 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_np_sns_stub` | 11 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_np_trophy_stub` | 17 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_np_sns_stub` | 11 | 11 | 0 | 11 | 100.0% |
+| `libsysutil_np_trophy_stub` | 17 | 17 | 0 | 17 | 100.0% |
 | `libsysutil_np_tus_stub` | 62 | 0 | 0 | 0 | 0.0% |
-| `libsysutil_np_util_stub` | 4 | 0 | 0 | 0 | 0.0% |
+| `libsysutil_np_util_stub` | 4 | 4 | 0 | 4 | 100.0% |
 | `liblv2_stub` | 118 | 118 | 0 | 118 | 100.0% |
 | `libcrashdump_stub` | 2 | 2 | 0 | 2 | 100.0% |
 | `libfs_stub` | 59 | 59 | 0 | 59 | 100.0% |
@@ -110,18 +110,11 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 | `libdbg_libio_stub` | 4 | 0 | 0 | 0 | 0.0% |
 | `libc_stub` | 318 | 318 | 0 | 318 | 100.0% |
 | `libm_stub` | 503 | 288 | 0 | 288 | 57.3% |
-| `libstdc++_stub` | 518 | 227 | 0 | 227 | 43.8% |
+| `libstdc++_stub` | 518 | 268 | 0 | 268 | 51.7% |
 | `liblv2dbg_stub` | 35 | 0 | 4 | 4 | 11.4% |
-| `libnet_stub` | 55 | 26 | 0 | 26 | 47.3% |
+| `libnet_stub` | 55 | 55 | 0 | 55 | 100.0% |
 
 ## Missing symbols by library
-
-### `libsysutil_bgdl_stub` (2 / 2 missing)
-
-```
-0x74e57bdf  cellBGDLGetMode
-0x7e134a90  cellBGDLSetMode
-```
 
 ### `libsysutil_cross_controller_stub` (1 / 1 missing)
 
@@ -186,86 +179,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x28acb77f  _ZN4cell5Daisy9_snprintfEPcjPKcz
 ```
 
-### `libfont_stub` (20 / 82 missing)
-
-```
-0x3da90559  cellFontClearFileCache
-0x8a35c887  cellFontEndGraphics
-0xdee0836c  cellFontExtend
-0xa8fae920  cellFontGlyphGetOutlineControlDistance
-0x9c8d3ff7  cellFontGlyphGetOutlineVertexes
-0x22e24707  cellFontGlyphGetScalePixel
-0xb4d112af  cellFontGlyphGetVertexesGlyphSize
-0x53f529fe  cellFontGlyphSetupVertexesGlyph
-0x03a142b9  cellFontGraphicsGetDrawType
-0xa41342dc  cellFontGraphicsGetFontRGBA
-0xf7aaa8e2  cellFontGraphicsGetLineRGBA
-0x2388186c  cellFontGraphicsGetScalePixel
-0x87bd650f  cellFontGraphicsSetDrawType
-0x061049ad  cellFontGraphicsSetFontRGBA
-0x7c83bc15  cellFontGraphicsSetLineRGBA
-0x16322df1  cellFontGraphicsSetScalePixel
-0x970d4c22  cellFontGraphicsSetupDrawContext
-0x6cfada83  cellFontSetFontOpenMode
-0x6bf6f832  cellFontSetFontsetOpenMode
-0x6bad7a69  cellFontVertexesGlyphRelocate
-```
-
-### `libsysutil_game_stub` (15 / 15 missing)
-
-```
-0xf52639ea  cellGameBootCheck
-0xb0a1f8c6  cellGameContentErrorDialog
-0x70acec67  cellGameContentPermit
-0x42a2e133  cellGameCreateGameData
-0xdb9819f3  cellGameDataCheck
-0xb367c6e3  cellGameDeleteGameData
-0x2a8e6b92  cellGameGetDiscContentInfoUpdatePath
-0xa80bf223  cellGameGetLocalWebContentPath
-0xb7a45caf  cellGameGetParamInt
-0x3a5d726a  cellGameGetParamString
-0xef9d42d5  cellGameGetSizeKB
-0xce4374f6  cellGamePatchCheck
-0xdaa5cd20  cellGameSetParamString
-0xd24e3928  cellGameThemeInstall
-0x87406734  cellGameThemeInstallFromBuffer
-```
-
-### `libsysutil_game_exec_stub` (6 / 6 missing)
-
-```
-0xf6acd0bc  cellGameGetBootGameInfo
-0x59b1ede1  cellGameGetHomeDataExportPath
-0x72cc6cf7  cellGameGetHomeDataImportPath
-0x94e9f81d  cellGameGetHomeLaunchOptionPath
-0x59bbebd4  cellGameGetHomePath
-0x38579ec9  cellGameSetExitParam
-```
-
-### `libhttp_stub` (9 / 105 missing)
-
-```
-0x431e1407  cellHttpClientGetConnectionWaitStatus
-0x1249c1d1  cellHttpClientGetConnectionWaitTimeout
-0x98ce061c  cellHttpClientGetMinSslVersion
-0xd3fcd411  cellHttpClientGetSendBufferSize
-0x88b71a4c  cellHttpClientSetConnectionWaitStatus
-0xb7cb7d05  cellHttpClientSetConnectionWaitTimeout
-0xe6c7d333  cellHttpClientSetMinSslVersion
-0xbb6c0eb2  cellHttpClientSetSendBufferSize
-0x7313c78d  cellHttpClientSetSslIdDestroyCallback
-```
-
-### `libkey2char_stub` (5 / 5 missing)
-
-```
-0x14bf2dc1  cellKey2CharClose
-0x56776c0d  cellKey2CharGetChar
-0xabf629c1  cellKey2CharOpen
-0x0dfbadfa  cellKey2CharSetArrangement
-0xbfc03768  cellKey2CharSetMode
-```
-
 ### `libprof_stub` (4 / 4 missing)
 
 ```
@@ -319,20 +232,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xc3610dbd  cellMicSysShareOpen
 0xcac7e7d7  cellMicSysShareStart
 0xbdfd51e2  cellMicSysShareStop
-```
-
-### `libnetctl_stub` (9 / 19 missing)
-
-```
-0x3e359ab6  cellGameUpdateCheckAbort
-0xffa3d791  cellGameUpdateCheckFinishAsync
-0xf463981c  cellGameUpdateCheckFinishAsyncEx
-0xd0a5d727  cellGameUpdateCheckStartAsync
-0x0791015f  cellGameUpdateCheckStartAsyncEx
-0xa5e1fa60  cellGameUpdateCheckStartWithoutDialogAsync
-0x558700f6  cellGameUpdateCheckStartWithoutDialogAsyncEx
-0x99ab1a26  cellGameUpdateInit
-0x10dae56d  cellGameUpdateTerm
 ```
 
 ### `libovis_stub` (4 / 4 missing)
@@ -567,27 +466,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xce6780c9  cellSysutilAvc2UnloadAsync2
 ```
 
-### `libsysutil_avconf_ext_stub` (16 / 16 missing)
-
-```
-0x65bf9ea3  cellAudioInGetAvailableDeviceInfo
-0x3d5730ce  cellAudioInGetDeviceInfo
-0xeb6fcff1  cellAudioInRegisterDevice
-0xeb6c50fb  cellAudioInSetDeviceMode
-0xfa6bcc17  cellAudioInUnregisterDevice
-0xc3273d9b  cellAudioOutGetAvailableDeviceInfo
-0x18d0ada6  cellAudioOutGetDeviceInfo2
-0xc7087631  cellAudioOutRegisterDevice
-0xe4645af8  cellAudioOutSetDeviceMode
-0x0bddef7d  cellAudioOutUnregisterDevice
-0x4ec8c141  cellVideoOutConvertCursorColor
-0x655a0364  cellVideoOutGetGamma
-0xfaa275a4  cellVideoOutGetScreenSize
-0xc7020f62  cellVideoOutSetGamma
-0x1cfa1a11  cellVideoOutSetXVColor
-0x269ffedd  cellVideoOutSetupDisplay
-```
-
 ### `libsysutil_licensearea_stub` (1 / 1 missing)
 
 ```
@@ -624,16 +502,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x461dc8cc  cellUsbPspcmWaitRecvAsync
 0xe840f449  cellUsbPspcmWaitResetAsync
 0x3caddf6c  cellUsbPspcmWaitSendAsync
-```
-
-### `libsysutil_userinfo_stub` (5 / 5 missing)
-
-```
-0xb3516536  cellUserInfoEnableOverlay
-0xc55e338b  cellUserInfoGetList
-0x2b761140  cellUserInfoGetStat
-0x3097cc1c  cellUserInfoSelectUser_ListType
-0x55123a25  cellUserInfoSelectUser_SetList
 ```
 
 ### `libsysutil_video_export_stub` (6 / 6 missing)
@@ -1238,247 +1106,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0xc757c2aa  cellVdecStartSeq
 ```
 
-### `libsysutil_np_stub` (236 / 236 missing)
-
-```
-0x48b3774f  _Z27_sce_np_sysutil_recv_packetiRN4cxml8DocumentERNS_7ElementE
-0x25b8bd56  _Z27_sce_np_sysutil_send_packetiRN4cxml8DocumentE
-0x9ba3e97f  _Z29_sce_np_sysutil_cxml_set_npidRN4cxml8DocumentERNS_7ElementEPKcPK7SceNpId
-0xad12e5c9  _Z31_sce_np_sysutil_send_packet_subiRN4cxml8DocumentE
-0xfd61dff5  _Z32_sce_np_sysutil_cxml_prepare_docPN16sysutil_cxmlutil11FixedMemoryERN4cxml8DocumentEPKcRNS2_7ElementES6_i
-0x1fa740db  _Z33_sce_np_sysutil_send_empty_packetiPN16sysutil_cxmlutil11FixedMemoryEPKcS3_
-0x2c5ad7b4  _Z36_sce_np_sysutil_recv_packet_fixedmemiPN16sysutil_cxmlutil11FixedMemoryERN4cxml8DocumentERNS2_7ElementE
-0xadcc5ada  _Z37sce_np_matching_set_matching2_runningb
-0x4299a92c  _Z40_sce_np_sysutil_recv_packet_fixedmem_subiPN16sysutil_cxmlutil11FixedMemoryERN4cxml8DocumentERNS2_7ElementE
-0x816c6a5f  _sceNpSysutilClientFree
-0xee0cc40c  _sceNpSysutilClientMalloc
-0x481ce0e8  sceNpBasicAbortGui
-0x1ae8a549  sceNpBasicAddBlockListEntry
-0x27c69eba  sceNpBasicAddFriend
-0x168a3117  sceNpBasicAddPlayersHistory
-0xbcdbb2ab  sceNpBasicAddPlayersHistoryAsync
-0xf2b3338a  sceNpBasicGetBlockListEntry
-0x73931bd0  sceNpBasicGetBlockListEntryCount
-0x4d9c615d  sceNpBasicGetClanMessageEntry
-0xbf607ec6  sceNpBasicGetClanMessageEntryCount
-0xd053f113  sceNpBasicGetCustomInvitationEntry
-0xa8afa7d4  sceNpBasicGetCustomInvitationEntryCount
-0xe035f7d6  sceNpBasicGetEvent
-0x04372385  sceNpBasicGetFriendListEntry
-0xafef640d  sceNpBasicGetFriendListEntryCount
-0x32c78a6a  sceNpBasicGetFriendPresenceByIndex
-0x6453b27b  sceNpBasicGetFriendPresenceByIndex2
-0xfd39ae13  sceNpBasicGetFriendPresenceByNpId
-0x260caedd  sceNpBasicGetFriendPresenceByNpId2
-0x05af1cb8  sceNpBasicGetMatchingInvitationEntry
-0xaf505def  sceNpBasicGetMatchingInvitationEntryCount
-0x5d543bbe  sceNpBasicGetMessageAttachmentEntry
-0x9153bdf4  sceNpBasicGetMessageAttachmentEntryCount
-0x30d1cbde  sceNpBasicGetMessageEntry
-0xecd503de  sceNpBasicGetMessageEntryCount
-0xbab91fc9  sceNpBasicGetPlayersHistoryEntry
-0xa15f35fe  sceNpBasicGetPlayersHistoryEntryCount
-0xe1c9f675  sceNpBasicMarkMessageAsUsed
-0xb5cb2d56  sceNpBasicRecvMessageAttachment
-0x64a704cc  sceNpBasicRecvMessageAttachmentLoad
-0x806960ab  sceNpBasicRecvMessageCustom
-0x4026eac5  sceNpBasicRegisterContextSensitiveHandler
-0xbcc09fe7  sceNpBasicRegisterHandler
-0xec0a1fbf  sceNpBasicSendMessage
-0x43b989f5  sceNpBasicSendMessageAttachment
-0x01fbbc9b  sceNpBasicSendMessageGui
-0x3f0808aa  sceNpBasicSetPresence
-0xbe81c71c  sceNpBasicSetPresenceDetails
-0x5e849303  sceNpBasicSetPresenceDetails2
-0xacb9ee8e  sceNpBasicUnregisterHandler
-0xfcac355a  sceNpCommerceCreateCtx
-0xe2877bea  sceNpCommerceDestroyCtx
-0x6cb81eb2  sceNpCommerceDestroyProductCategory
-0xaf3eba5a  sceNpCommerceDoCheckoutFinishAsync
-0xe36c660e  sceNpCommerceDoCheckoutStartAsync
-0x359642a6  sceNpCommerceGetCategoryDescription
-0xaee8cf71  sceNpCommerceGetCategoryId
-0x9452f4f8  sceNpCommerceGetCategoryImageURL
-0xeb9df054  sceNpCommerceGetCategoryInfo
-0x6e2ab18b  sceNpCommerceGetCategoryName
-0xba65de6d  sceNpCommerceGetChildCategoryInfo
-0x01cd9cfd  sceNpCommerceGetChildProductSkuInfo
-0x79225aa3  sceNpCommerceGetCurrencyCode
-0xaf57d9c9  sceNpCommerceGetCurrencyDecimals
-0xb1c02d66  sceNpCommerceGetCurrencyInfo
-0x0561448b  sceNpCommerceGetDataFlagAbort
-0x9281e87a  sceNpCommerceGetDataFlagFinish
-0xdbdb909f  sceNpCommerceGetDataFlagStart
-0xd03cea35  sceNpCommerceGetDataFlagState
-0x2be41ece  sceNpCommerceGetNumOfChildCategory
-0x7208dc08  sceNpCommerceGetNumOfChildProductSku
-0x674bb9ff  sceNpCommerceGetProductCategoryAbort
-0xcfd469e4  sceNpCommerceGetProductCategoryFinish
-0x3f195b3a  sceNpCommerceGetProductCategoryResult
-0x26f33146  sceNpCommerceGetProductCategoryStart
-0x936df4aa  sceNpCommerceGetProductId
-0xeb5f2544  sceNpCommerceGetProductName
-0xa85a4951  sceNpCommerceGetSkuDescription
-0x39a69619  sceNpCommerceGetSkuId
-0xccbe2e69  sceNpCommerceGetSkuImageURL
-0xee530059  sceNpCommerceGetSkuName
-0x78d7f9ad  sceNpCommerceGetSkuPrice
-0x1a3fcb69  sceNpCommerceGetSkuUserData
-0x8d1d096c  sceNpCommerceInitProductCategory
-0x8d4518a0  sceNpCommerceSetDataFlagFinish
-0x99ac9952  sceNpCommerceSetDataFlagStart
-0xf9732ac8  sceNpCustomMenuActionSetActivation
-0x45f8f3aa  sceNpCustomMenuRegisterActions
-0x9458f464  sceNpCustomMenuRegisterExceptionList
-0xf283c143  sceNpDrmExecuteGamePurchase
-0xcf51864b  sceNpDrmGetTimelimit
-0xad218faf  sceNpDrmIsAvailable
-0xf042b14f  sceNpDrmIsAvailable2
-0xaa16695f  sceNpDrmProcessExitSpawn
-0xe6c8f3f9  sceNpDrmProcessExitSpawn2
-0x2ecd48ed  sceNpDrmVerifyUpgradeLicense
-0xbe0e3ee2  sceNpDrmVerifyUpgradeLicense2
-0xf0a9182b  sceNpFriendlist
-0xf59e1da8  sceNpFriendlistAbortGui
-0xd7fb1fa6  sceNpFriendlistCustom
-0xbd28fdbf  sceNpInit
-0x3d1760dc  sceNpLookupAbortTransaction
-0xb6017827  sceNpLookupAvatarImage
-0xbf9eea93  sceNpLookupAvatarImageAsync
-0xce81c7f0  sceNpLookupCreateTitleCtx
-0xea2e9ffc  sceNpLookupCreateTransactionCtx
-0x5de61626  sceNpLookupDestroyTitleCtx
-0xfb87cf5e  sceNpLookupDestroyTransactionCtx
-0x5f2d9257  sceNpLookupInit
-0x166dcc11  sceNpLookupNpId
-0xd12e40ae  sceNpLookupNpIdAsync
-0x7508112e  sceNpLookupPollAsync
-0x71e5af7e  sceNpLookupSetTimeout
-0x8440537c  sceNpLookupTerm
-0xca39c4b2  sceNpLookupTitleSmallStorage
-0x860b1756  sceNpLookupTitleSmallStorageAsync
-0x9ee9f97e  sceNpLookupTitleStorage
-0x5e117ed5  sceNpLookupTitleStorageAsync
-0xdfd63b62  sceNpLookupUserProfile
-0xff0a2378  sceNpLookupUserProfileAsync
-0x2fccbfe0  sceNpLookupUserProfileWithAvatarSize
-0x1fdb3ec2  sceNpLookupUserProfileWithAvatarSizeAsync
-0xd737fd2d  sceNpLookupWaitAsync
-0x168fcece  sceNpManagerGetAccountAge
-0xb1e0718b  sceNpManagerGetAccountRegion
-0x36d0c2c5  sceNpManagerGetAvatarUrl
-0x4b9efb7a  sceNpManagerGetCachedInfo
-0xeb7a3d84  sceNpManagerGetChatRestrictionFlag
-0x6ee62ed2  sceNpManagerGetContentRatingFlag
-0xa1709abd  sceNpManagerGetEntitlementById
-0xb66d1c46  sceNpManagerGetEntitlementIdList
-0x32200389  sceNpManagerGetMyLanguages
-0xbdc07fd5  sceNpManagerGetNetworkTime
-0xfe37a7f4  sceNpManagerGetNpId
-0xbe07c708  sceNpManagerGetOnlineId
-0xf42c0df8  sceNpManagerGetOnlineName
-0x16f88a6f  sceNpManagerGetPsHandle
-0xa7bff757  sceNpManagerGetStatus
-0x0968aa36  sceNpManagerGetTicket
-0x58fa4fcd  sceNpManagerGetTicketParam
-0xe7dcd3b4  sceNpManagerRegisterCallback
-0x7e2fef28  sceNpManagerRequestTicket
-0x8297f1ec  sceNpManagerRequestTicket2
-0x442381f7  sceNpManagerSubSignin
-0x60440c73  sceNpManagerSubSigninAbortGui
-0x000e53cc  sceNpManagerSubSignout
-0x52a6b523  sceNpManagerUnregisterCallback
-0x2ad7837d  sceNpMatchingAcceptInvitationGUI
-0xac66568c  sceNpMatchingCreateCtx
-0x3cc8588a  sceNpMatchingCreateRoomGUI
-0x2e1c5068  sceNpMatchingDestroyCtx
-0x03c741a7  sceNpMatchingGetResult
-0x26b3bc94  sceNpMatchingGetResultGUI
-0x691f429d  sceNpMatchingGetRoomInfo
-0xb020684e  sceNpMatchingGetRoomInfoNoLimit
-0xe24eea19  sceNpMatchingGetRoomListLimitGUI
-0x73a2e36b  sceNpMatchingGetRoomMemberListLocal
-0xee64cf8e  sceNpMatchingGetRoomSearchFlag
-0xdae2d351  sceNpMatchingGrantOwnership
-0x474b7b13  sceNpMatchingJoinRoomGUI
-0x34cc0ca4  sceNpMatchingKickRoomMember
-0xd20d7798  sceNpMatchingKickRoomMemberWithOpt
-0xf806c54c  sceNpMatchingLeaveRoom
-0x14497465  sceNpMatchingQuickMatchGUI
-0x32febb4c  sceNpMatchingSearchJoinRoomGUI
-0x8b7bbd73  sceNpMatchingSendInvitationGUI
-0x6f8fd267  sceNpMatchingSetRoomInfo
-0x4a18a89e  sceNpMatchingSetRoomInfoNoLimit
-0xa284bd1d  sceNpMatchingSetRoomSearchFlag
-0x2f2c6b3e  sceNpProfileAbortGui
-0xceeebc7a  sceNpProfileCallGui
-0xee5b20d9  sceNpScoreAbortTransaction
-0x7deb244c  sceNpScoreCensorComment
-0x7be47e61  sceNpScoreCensorCommentAsync
-0xb9f93bbb  sceNpScoreCreateTitleCtx
-0x6f5e8143  sceNpScoreCreateTransactionCtx
-0x259113b8  sceNpScoreDestroyTitleCtx
-0xc5f4cf82  sceNpScoreDestroyTransactionCtx
-0xf4e0f607  sceNpScoreGetBoardInfo
-0xddce7d15  sceNpScoreGetBoardInfoAsync
-0x741fbf24  sceNpScoreGetClanMemberGameData
-0xbef887e5  sceNpScoreGetClanMemberGameDataAsync
-0xded17c26  sceNpScoreGetClansMembersRankingByNpId
-0xe8a67160  sceNpScoreGetClansMembersRankingByNpIdAsync
-0x41ffd4f2  sceNpScoreGetClansMembersRankingByNpIdPcId
-0x433fcb30  sceNpScoreGetClansMembersRankingByNpIdPcIdAsync
-0x6d4adc3b  sceNpScoreGetClansMembersRankingByRange
-0x4d5e0670  sceNpScoreGetClansMembersRankingByRangeAsync
-0x2a76895a  sceNpScoreGetClansRankingByClanId
-0x227f8763  sceNpScoreGetClansRankingByClanIdAsync
-0xb082003b  sceNpScoreGetClansRankingByRange
-0x7b7e9137  sceNpScoreGetClansRankingByRangeAsync
-0xf33291eb  sceNpScoreGetFriendsRanking
-0xcc946d56  sceNpScoreGetFriendsRankingAsync
-0x3b02418d  sceNpScoreGetGameData
-0xdb2e4dc2  sceNpScoreGetGameDataAsync
-0x05d65dff  sceNpScoreGetRankingByNpId
-0x3db7914d  sceNpScoreGetRankingByNpIdAsync
-0xc3a991ee  sceNpScoreGetRankingByNpIdPcId
-0xc4b6cd8f  sceNpScoreGetRankingByNpIdPcIdAsync
-0xfbc82301  sceNpScoreGetRankingByRange
-0x21206642  sceNpScoreGetRankingByRangeAsync
-0x32cf311f  sceNpScoreInit
-0xa7a090e5  sceNpScorePollAsync
-0x04ca5e6a  sceNpScoreRecordGameData
-0xf76847c2  sceNpScoreRecordGameDataAsync
-0x1672170e  sceNpScoreRecordScore
-0xf0b1e399  sceNpScoreRecordScoreAsync
-0xf1b77918  sceNpScoreSanitizeComment
-0x2cd2a1af  sceNpScoreSanitizeCommentAsync
-0x2706eaa1  sceNpScoreSetPlayerCharacterId
-0x29dd45dc  sceNpScoreSetTimeout
-0x9851f805  sceNpScoreTerm
-0x1a2704f7  sceNpScoreWaitAsync
-0x60897c38  sceNpSignalingActivateConnection
-0x50b86d94  sceNpSignalingAddExtendedHandler
-0x64dbb89d  sceNpSignalingCancelPeerNetInfo
-0x6356082e  sceNpSignalingCreateCtx
-0xfd0eb5ae  sceNpSignalingDeactivateConnection
-0xa8cf8451  sceNpSignalingDestroyCtx
-0xe853d388  sceNpSignalingGetConnectionFromNpId
-0x34ce82a0  sceNpSignalingGetConnectionFromPeerAddress
-0x155de760  sceNpSignalingGetConnectionInfo
-0xca0a2d04  sceNpSignalingGetConnectionStatus
-0x2687a127  sceNpSignalingGetCtxOpt
-0x9ad7fbd1  sceNpSignalingGetLocalNetInfo
-0x75eb50cb  sceNpSignalingGetPeerNetInfo
-0xd0958814  sceNpSignalingGetPeerNetInfoResult
-0x276c72b2  sceNpSignalingSetCtxOpt
-0x95c7bba3  sceNpSignalingTerminateConnection
-0x4885aa18  sceNpTerm
-0xd208f91d  sceNpUtilCmpNpId
-0xf5ff5f31  sceNpUtilCmpNpIdInOrder
-0x8c760b52  sceNpUtilCmpOnlineId
-0xc611029a  sceNpUtilGetPlatformType
-0xafc62605  sceNpUtilSetPlatformType
-```
-
 ### `libsysutil_np2_stub` (79 / 79 missing)
 
 ```
@@ -1664,44 +1291,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x4d4a094c  sceNpCommerce2Term
 ```
 
-### `libsysutil_np_sns_stub` (11 / 11 missing)
-
-```
-0x3711833f  sceNpSnsFbAbortHandle
-0xaa9ed7ff  sceNpSnsFbCheckConfig
-0x53d03ce1  sceNpSnsFbCheckThrottle
-0x8fd1d549  sceNpSnsFbCreateHandle
-0x6e42c0dd  sceNpSnsFbDestroyHandle
-0x702dc876  sceNpSnsFbGetAccessToken
-0xba8c569e  sceNpSnsFbGetLongAccessToken
-0x2c0f3548  sceNpSnsFbInit
-0xaf86c77a  sceNpSnsFbLoadThrottle
-0x021d6c1f  sceNpSnsFbStreamPublish
-0xc05545fd  sceNpSnsFbTerm
-```
-
-### `libsysutil_np_trophy_stub` (17 / 17 missing)
-
-```
-0x48bd97c7  sceNpTrophyAbortHandle
-0xe3bf9a28  sceNpTrophyCreateContext
-0x1c25470d  sceNpTrophyCreateHandle
-0x3741ecc7  sceNpTrophyDestroyContext
-0x623cd2dc  sceNpTrophyDestroyHandle
-0xff299e03  sceNpTrophyGetGameIcon
-0x49d18217  sceNpTrophyGetGameInfo
-0x079f0e87  sceNpTrophyGetGameProgress
-0x370136fe  sceNpTrophyGetRequiredDiskSpace
-0xbaedf689  sceNpTrophyGetTrophyIcon
-0xfce6d30a  sceNpTrophyGetTrophyInfo
-0xb3ac3478  sceNpTrophyGetTrophyUnlockState
-0x39567781  sceNpTrophyInit
-0x1197b52c  sceNpTrophyRegisterContext
-0x27deda93  sceNpTrophySetSoundLevel
-0xa7fabf4d  sceNpTrophyTerm
-0x8ceedd21  sceNpTrophyUnlockTrophy
-```
-
 ### `libsysutil_np_tus_stub` (62 / 62 missing)
 
 ```
@@ -1767,15 +1356,6 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x3602bc80  sceNpTusTryAndSetVariableVUser
 0x17db7aa7  sceNpTusTryAndSetVariableVUserAsync
 0xb8e8ff22  sceNpTusWaitAsync
-```
-
-### `libsysutil_np_util_stub` (4 / 4 missing)
-
-```
-0xc99ee313  sceNpUtilBandwidthTestAbort
-0xc880f37d  sceNpUtilBandwidthTestGetStatus
-0xc2ced2b7  sceNpUtilBandwidthTestInitStart
-0x432b3cbf  sceNpUtilBandwidthTestShutdown
 ```
 
 ### `libdbg_libio_stub` (4 / 4 missing)
@@ -2007,7 +1587,7 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x7f91cd41  tanf4fast
 ```
 
-### `libstdc++_stub` (291 / 518 missing)
+### `libstdc++_stub` (250 / 518 missing)
 
 ```
 0x9dc040e4  _Deletegloballocale
@@ -2107,15 +1687,8 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x7ebad3f0  _ZNKSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE8_PutmfldES3_bRSt8ios_basewbSbIwS2_SaIwEE
 0x4e34cf83  _ZNSbIwSt11char_traitsIwESaIwEE5_GrowEjb
 0xc4c7993b  _ZNSbIwSt11char_traitsIwESaIwEE5_TidyEbj
-0x10dc3f6c  _ZNSbIwSt11char_traitsIwESaIwEE6appendEjw
-0x871506ea  _ZNSbIwSt11char_traitsIwESaIwEE6assignERKS2_jj
-0x64ce0374  _ZNSbIwSt11char_traitsIwESaIwEE7replaceEjjPKwj
 0x668b31c6  _ZNSs5_GrowEjb
 0x31b3e5cc  _ZNSs5_TidyEbj
-0xdd8b1d47  _ZNSs5eraseEjj
-0xa9116516  _ZNSs6appendEjc
-0x6929318d  _ZNSs6assignERKSsjj
-0x22777290  _ZNSs7replaceEjjPKcj
 0xaea59ceb  _ZNSt10ctype_baseD0Ev
 0x18a38254  _ZNSt10ctype_baseD1Ev
 0xf1cff87d  _ZNSt10ctype_baseD2Ev
@@ -2134,14 +1707,12 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x1f3a9ada  _ZNSt12strstreambuf7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
 0x4520d6a2  _ZNSt13basic_filebufIcSt11char_traitsIcEE5_LockEv
 0x608abbb5  _ZNSt13basic_filebufIcSt11char_traitsIcEE5uflowEv
-0x409409af  _ZNSt13basic_filebufIcSt11char_traitsIcEE6setbufEPci
 0x3eeb7167  _ZNSt13basic_filebufIcSt11char_traitsIcEE7_UnlockEv
 0xf73f6afc  _ZNSt13basic_filebufIcSt11char_traitsIcEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
 0x460e5cb7  _ZNSt13basic_filebufIcSt11char_traitsIcEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
 0x3f6a6e68  _ZNSt13basic_filebufIcSt11char_traitsIcEE9_EndwriteEv
 0x8044f596  _ZNSt13basic_filebufIwSt11char_traitsIwEE5_LockEv
 0xf67a7e17  _ZNSt13basic_filebufIwSt11char_traitsIwEE5uflowEv
-0x4b5a8abc  _ZNSt13basic_filebufIwSt11char_traitsIwEE6setbufEPwi
 0xa1c6fc55  _ZNSt13basic_filebufIwSt11char_traitsIwEE7_UnlockEv
 0xf9ff46a1  _ZNSt13basic_filebufIwSt11char_traitsIwEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
 0xb6a4d760  _ZNSt13basic_filebufIwSt11char_traitsIwEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
@@ -2151,16 +1722,10 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x9111ec36  _ZNSt13messages_baseD0Ev
 0x9facb533  _ZNSt13messages_baseD1Ev
 0x00c3975e  _ZNSt15basic_streambufIcSt11char_traitsIcEE5_LockEv
-0x709ab035  _ZNSt15basic_streambufIcSt11char_traitsIcEE6setbufEPci
-0x4daf3fcf  _ZNSt15basic_streambufIcSt11char_traitsIcEE6xsgetnEPci
-0xadc2263b  _ZNSt15basic_streambufIcSt11char_traitsIcEE6xsputnEPKci
 0x85ba062f  _ZNSt15basic_streambufIcSt11char_traitsIcEE7_UnlockEv
 0x143048bf  _ZNSt15basic_streambufIcSt11char_traitsIcEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
 0x6c386f54  _ZNSt15basic_streambufIcSt11char_traitsIcEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
 0x085bff4f  _ZNSt15basic_streambufIwSt11char_traitsIwEE5_LockEv
-0x7b5fce95  _ZNSt15basic_streambufIwSt11char_traitsIwEE6setbufEPwi
-0xb1ac1fa3  _ZNSt15basic_streambufIwSt11char_traitsIwEE6xsgetnEPwi
-0x76e846b2  _ZNSt15basic_streambufIwSt11char_traitsIwEE6xsputnEPKwi
 0x57ef52f0  _ZNSt15basic_streambufIwSt11char_traitsIwEE7_UnlockEv
 0x5a898327  _ZNSt15basic_streambufIwSt11char_traitsIwEE7seekoffElNSt5_IosbIiE8_SeekdirENS4_9_OpenmodeE
 0x6fe060a0  _ZNSt15basic_streambufIwSt11char_traitsIwEE7seekposESt4fposISt9_MbstatetENSt5_IosbIiE9_OpenmodeE
@@ -2264,40 +1829,14 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x78a142d0  _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi
 0x5015b8d3  _ZSt7_FiopenPKwNSt5_IosbIiE9_OpenmodeEi
 0x6b493669  _ZSt7setbasei
-0x3bac19dc  _ZThn8_NSdD0Ev
-0xa4f6a919  _ZThn8_NSdD1Ev
-0xef959a6d  _ZThn8_NSt9strstreamD0Ev
-0x74a39b4f  _ZThn8_NSt9strstreamD1Ev
-0xfe468b7a  _ZTv0_n12_NSdD0Ev
-0x928fbe36  _ZTv0_n12_NSdD1Ev
-0x65f19631  _ZTv0_n12_NSiD0Ev
-0x281f9107  _ZTv0_n12_NSiD1Ev
-0xffaf3218  _ZTv0_n12_NSoD0Ev
-0x79ad3575  _ZTv0_n12_NSoD1Ev
-0xece969c0  _ZTv0_n12_NSt10istrstreamD0Ev
-0x6e0bf85d  _ZTv0_n12_NSt10istrstreamD1Ev
-0x88052736  _ZTv0_n12_NSt10ostrstreamD0Ev
-0xa1de25c2  _ZTv0_n12_NSt10ostrstreamD1Ev
-0x5ed4fb7a  _ZTv0_n12_NSt13basic_istreamIwSt11char_traitsIwEED0Ev
-0x3783acfa  _ZTv0_n12_NSt13basic_istreamIwSt11char_traitsIwEED1Ev
-0x903afa37  _ZTv0_n12_NSt13basic_ostreamIwSt11char_traitsIwEED0Ev
-0x07b6c924  _ZTv0_n12_NSt13basic_ostreamIwSt11char_traitsIwEED1Ev
-0x19c901ce  _ZTv0_n12_NSt9strstreamD0Ev
-0x2daa5a42  _ZTv0_n12_NSt9strstreamD1Ev
 0x5438d7d8  _ZdaPvS_
-0x868531a3  _ZdaPvj
 0x4b1ad744  _ZdaPvjRKSt9nothrow_t
 0xbd35830b  _ZdaPvjS_
 0x94c49383  _ZdlPvS_
-0x31a81476  _ZdlPvj
 0x67edde2f  _ZdlPvjRKSt9nothrow_t
 0xe7d8449e  _ZdlPvjS_
-0xf58e83a5  _Znaj
-0x2356ef16  _ZnajRKSt9nothrow_t
 0x96bc2578  _Znajj
 0x2c241d13  _ZnajjRKSt9nothrow_t
-0x83b2cc6f  _Znwj
-0xbb712718  _ZnwjRKSt9nothrow_t
 0xed3da02b  _Znwjj
 0xb53fa02e  _ZnwjjRKSt9nothrow_t
 0xb7dcbfdd  __Setgloballocale
@@ -2337,39 +1876,5 @@ Reference cell SDK symbols vs our install tree.  Primary diff is by exact symbol
 0x4ded9f6c  sys_dbg_signal_to_ppu_exception_handler
 0xc6d7ec13  sys_dbg_unregister_ppu_exception_handler
 0x580f8203  sys_dbg_vm_get_page_information
-```
-
-### `libnet_stub` (29 / 55 missing)
-
-```
-0x6005cde1  _sys_net_errno_loc
-0xc9157d30  _sys_net_h_errno_loc
-0xc9d09c34  recvmsg
-0xad09481b  sendmsg
-0x6db6e8cd  socketclose
-0x051ee3ee  socketpoll
-0x8ccf05ed  sys_net_abort_resolver
-0x8d1b77fb  sys_net_abort_socket
-0x44328aa2  sys_net_close_dump
-0xb68d5625  sys_net_finalize_network
-0xfdb8f926  sys_net_free_thread_context
-0x1d14d6e4  sys_net_get_lib_name_server
-0x368823c0  sys_net_get_netemu_test_param
-0x3b27c780  sys_net_get_sockinfo
-0xa765d029  sys_net_get_sockinfo_ex
-0xa5a86557  sys_net_get_test_param
-0x05bd4438  sys_net_get_udpp2p_test_param
-0x27fb339d  sys_net_if_ctl
-0x139a9e9b  sys_net_initialize_network_ex
-0xab447704  sys_net_open_dump
-0x89c9917c  sys_net_read_dump
-0x9a318259  sys_net_set_lib_name_server
-0xe2434507  sys_net_set_netemu_test_param
-0x7687d48c  sys_net_set_resolver_configurations
-0x4ab0b9b9  sys_net_set_test_param
-0x10b81ed6  sys_net_set_udpp2p_test_param
-0xb48636c4  sys_net_show_ifconfig
-0x5420e419  sys_net_show_nameserver
-0x79b61646  sys_net_show_route
 ```
 
