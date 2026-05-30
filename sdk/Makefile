@@ -159,6 +159,10 @@ HEADERS := \
     include/cell/sysutil_avc.h \
     include/cell/sysutil_game_internal.h \
     include/cell/rtc.h \
+    include/cell/face.h \
+    include/cell/face/error.h \
+    include/cell/face/face.h \
+    include/cell/face/util.h \
     include/cell/rudp.h \
     include/cell/sync.h \
     include/cell/sync/barrier.h \
@@ -305,7 +309,7 @@ HEADERS := \
     include/rsx/rsx_function_macros.h \
     include/rsx/rsx_program.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
