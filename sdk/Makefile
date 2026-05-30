@@ -199,6 +199,7 @@ HEADERS := \
     include/cell/sysutil_avc2_video.h \
     include/cell/camera.h \
     include/cell/resc.h \
+    include/cell/ovis.h \
     include/cell/pngdec.h \
     include/cell/sysmodule.h \
     include/cell/l10n.h \

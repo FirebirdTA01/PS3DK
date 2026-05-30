@@ -1,21 +1,22 @@
 library: cellOvis
+archive_name: ovis
 version: 1
 module: cellOvis
 exports:
 - name: cellOvisFixSpuSegments
   nid: '0xce6cb776'
-  signature: ''
+  signature: 'void cellOvisFixSpuSegments(sys_spu_image_t* image)'
   notes: extracted from _cellOvis_0001_4.o
 - name: cellOvisGetOverlayTableSize
   nid: '0x82f294b2'
-  signature: ''
+  signature: 'int cellOvisGetOverlayTableSize(const char* elf)'
   notes: extracted from _cellOvis_0001_2.o
 - name: cellOvisInitializeOverlayTable
   nid: '0xa876c911'
-  signature: ''
+  signature: 'int cellOvisInitializeOverlayTable(void* ea_ovly_table, const char* elf)'
   notes: extracted from _cellOvis_0001_3.o
 - name: cellOvisInvalidateOverlappedSegments
   nid: '0x629ba0c0'
-  signature: ''
+  signature: 'void cellOvisInvalidateOverlappedSegments(sys_spu_segment_t* segs, int* nsegs)'
   notes: extracted from _cellOvis_0001_1.o
 imports: []
