@@ -1,0 +1,14 @@
+// Generic VP nested arithmetic: Mul feeds Add, which then feeds
+// StoreOutput.  Existing direct Add/Sub/Mul StoreOutput lowering is
+// insufficient because one operand is a temp-producing expression.
+void main(
+    float4 in_position      : POSITION,
+    float4 in_color         : COLOR,
+    uniform float4 scale,
+    uniform float4 bias,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    out_position = in_position;
+    out_color = in_color * scale + bias;
+}

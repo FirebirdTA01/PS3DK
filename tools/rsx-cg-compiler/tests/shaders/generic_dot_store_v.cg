@@ -1,0 +1,14 @@
+// Generic VP dot result stored through a scalar broadcast.  This locks
+// the CG_FLOAT1 path: dot(normal, light_dir) feeds float4(d,d,d,1.0)
+// without being confused with the existing vec3+W=1.0 DPH fold.
+void main(
+    float4 in_position      : POSITION,
+    float3 in_normal        : NORMAL,
+    uniform float3 light_dir,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    out_position = in_position;
+    float d = dot(in_normal, light_dir);
+    out_color = float4(d, d, d, 1.0);
+}

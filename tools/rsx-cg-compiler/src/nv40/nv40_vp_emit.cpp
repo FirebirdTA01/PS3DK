@@ -306,6 +306,11 @@ struct MatVecMulBinding
     // compiler's "single instruction stores first" ordering.
     bool                hasTempBuild = false;
     VecConstructBinding tempBuild;
+
+    // Generic arithmetic roots, such as `(input + uniform)` feeding a
+    // later MatVecMul, materialise into the reserved temp at consumption
+    // time.  This keeps the exact VecConstruct/DPH paths above intact.
+    IRValueID genericTempBuildId = 0;
 };
 
 // Tracks the float literals seen during VP emit and packs them into
@@ -376,12 +381,19 @@ private:
 // to a single NV40 VEC op; if both operands come from the const bank we
 // pre-move the second into a temp because NV40 allows only one const
 // source per instruction (confirmed by the reference compiler on two_vec4_v.cg).
-enum class ArithOp { Add, Sub, Mul };
+enum class ArithOp { Add, Sub, Mul, Mad, Min, Max, Dot3, Dot4 };
 
 struct ArithBinding
 {
     ArithOp   op;
-    IRValueID srcIds[2];
+    IRValueID srcIds[3] = {0, 0, 0};
+    int       width = 4;
+};
+
+struct GenericVecConstructBinding
+{
+    IRValueID lanes[4] = {0, 0, 0, 0};
+    int       width = 4;
 };
 
 }  // namespace
@@ -465,6 +477,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
     // Arithmetic operations awaiting a consumer.
     std::unordered_map<IRValueID, ArithBinding> valueToArith;
+
+    // Generic VecConstruct values that contain computed scalar lanes
+    // (e.g. float4(dot(...), dot(...), dot(...), 1.0)).  Existing
+    // VecConstructBinding recognizers stay ahead of this fallback.
+    std::unordered_map<IRValueID, GenericVecConstructBinding>
+        valueToGenericVecConstruct;
 
     // Literal-pool allocator — slots grow downward from the first const-
     // bank register left unclaimed by uniforms.  Drained into attrs at
@@ -624,6 +642,422 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                    : makeReg(NVFXSR_CONST, it->second.regIdx);
     };
 
+    auto valueWidth = [&](IRValueID id) -> int
+    {
+        auto arIt = valueToArith.find(id);
+        if (arIt != valueToArith.end())
+            return arIt->second.width;
+        auto gvIt = valueToGenericVecConstruct.find(id);
+        if (gvIt != valueToGenericVecConstruct.end())
+            return gvIt->second.width;
+        auto vsIt = valueToSource.find(id);
+        if (vsIt != valueToSource.end())
+            return vsIt->second.width;
+        auto shIt = valueToShuffle.find(id);
+        if (shIt != valueToShuffle.end())
+            return shIt->second.width;
+        if (IRValue* v = entry.getValue(id))
+            return std::max(1, v->type.vectorSize);
+        return 4;
+    };
+
+    auto sourceValueWidth = [&](IRValueID id) -> int
+    {
+        auto vsIt = valueToSource.find(id);
+        if (vsIt != valueToSource.end())
+            return vsIt->second.width;
+        auto shIt = valueToShuffle.find(id);
+        if (shIt != valueToShuffle.end())
+            return shIt->second.width;
+        return valueWidth(id);
+    };
+
+    auto isFloatLiteral = [&](IRValueID id, float& v) -> bool
+    {
+        IRValue* irv = entry.getValue(id);
+        auto* c = dynamic_cast<IRConstant*>(irv);
+        if (!c || !std::holds_alternative<float>(c->value)) return false;
+        v = std::get<float>(c->value);
+        return true;
+    };
+
+    struct GenericSource
+    {
+        bool valid = false;
+        struct nvfx_reg reg = makeReg(NVFXSR_NONE, 0);
+        int width = 4;
+        uint8_t swz[4] = {0, 1, 2, 3};
+    };
+
+    auto srcIsConst = [](const GenericSource& s) -> bool
+    {
+        return s.valid && s.reg.type == NVFXSR_CONST;
+    };
+
+    auto makeGenericSource =
+        [&](const struct nvfx_reg& reg, int width) -> GenericSource
+    {
+        GenericSource s;
+        s.valid = true;
+        s.reg = reg;
+        s.width = std::max(1, width);
+        identitySwizzleForWidth(s.width, s.swz);
+        return s;
+    };
+
+    std::function<GenericSource(IRValueID)> resolveGenericSource;
+    std::function<bool(IRValueID, int)> materializeValueToTempReg;
+    std::function<GenericSource(IRValueID)> materializeValueToTemp;
+    std::function<bool(IRValueID, const struct nvfx_reg&, int)> emitValueToDest;
+    std::function<void(IRValueID)> collectGenericLiterals;
+
+    auto sourceToNvfx = [&](const GenericSource& src) -> struct nvfx_src
+    {
+        struct nvfx_src s = makeSrc(src.reg);
+        s.swz[0] = src.swz[0];
+        s.swz[1] = src.swz[1];
+        s.swz[2] = src.swz[2];
+        s.swz[3] = src.swz[3];
+        return s;
+    };
+
+    auto emitMovFromSource =
+        [&](const struct nvfx_reg& dst, int mask, const GenericSource& src)
+    {
+        struct nvfx_insn in = nvfx_insn(
+            0, 0, -1, -1,
+            const_cast<struct nvfx_reg&>(dst),
+            mask,
+            sourceToNvfx(src), makeSrc(makeReg(NVFXSR_NONE, 0)),
+            makeSrc(makeReg(NVFXSR_NONE, 0)));
+        asm_.emit(in, VP_OP(MOV));
+    };
+
+    auto preloadConstSource = [&](GenericSource& s) -> bool
+    {
+        if (!srcIsConst(s)) return true;
+        const int tempIdx = allocTemp();
+        const struct nvfx_reg tempReg = makeReg(NVFXSR_TEMP, tempIdx);
+        emitMovFromSource(tempReg, writemaskForWidth(s.width), s);
+        s = makeGenericSource(tempReg, s.width);
+        return true;
+    };
+
+    auto emitArithBindingToDest =
+        [&](const ArithBinding& a,
+            const struct nvfx_reg& dst,
+            int mask) -> bool
+    {
+        const struct nvfx_reg none = makeReg(NVFXSR_NONE, 0);
+        GenericSource src[3];
+        const int srcCount = (a.op == ArithOp::Mad) ? 3 : 2;
+        for (int i = 0; i < srcCount; ++i)
+        {
+            src[i] = resolveGenericSource(a.srcIds[i]);
+            if (!src[i].valid)
+            {
+                src[i] = materializeValueToTemp(a.srcIds[i]);
+                if (!src[i].valid) return false;
+            }
+        }
+
+        int constCount = 0;
+        for (int i = 0; i < srcCount; ++i)
+            if (srcIsConst(src[i])) ++constCount;
+        for (int i = srcCount - 1; constCount > 1 && i >= 0; --i)
+        {
+            if (!srcIsConst(src[i])) continue;
+            if (!preloadConstSource(src[i])) return false;
+            --constCount;
+        }
+
+        struct nvfx_src srcs[3] = {
+            makeSrc(none), makeSrc(none), makeSrc(none) };
+        uint8_t opcode = VP_OP(ADD);
+        switch (a.op)
+        {
+        case ArithOp::Add:
+            if (srcIsConst(src[1]) && !srcIsConst(src[0]))
+            {
+                srcs[0] = sourceToNvfx(src[1]);
+                srcs[2] = sourceToNvfx(src[0]);
+            }
+            else
+            {
+                srcs[0] = sourceToNvfx(src[0]);
+                srcs[2] = sourceToNvfx(src[1]);
+            }
+            opcode = VP_OP(ADD);
+            break;
+        case ArithOp::Sub:
+            srcs[0] = sourceToNvfx(src[0]);
+            srcs[2] = sourceToNvfx(src[1]);
+            srcs[2].negate = !srcs[2].negate;
+            opcode = VP_OP(ADD);
+            break;
+        case ArithOp::Mul:
+            srcs[0] = sourceToNvfx(src[0]);
+            srcs[1] = sourceToNvfx(src[1]);
+            opcode = VP_OP(MUL);
+            break;
+        case ArithOp::Mad:
+            srcs[0] = sourceToNvfx(src[0]);
+            srcs[1] = sourceToNvfx(src[1]);
+            srcs[2] = sourceToNvfx(src[2]);
+            opcode = VP_OP(MAD);
+            break;
+        case ArithOp::Min:
+            srcs[0] = sourceToNvfx(src[0]);
+            srcs[1] = sourceToNvfx(src[1]);
+            opcode = VP_OP(MIN);
+            break;
+        case ArithOp::Max:
+            srcs[0] = sourceToNvfx(src[0]);
+            srcs[1] = sourceToNvfx(src[1]);
+            opcode = VP_OP(MAX);
+            break;
+        case ArithOp::Dot3:
+        case ArithOp::Dot4:
+            srcs[0] = sourceToNvfx(src[0]);
+            srcs[1] = sourceToNvfx(src[1]);
+            opcode = (a.op == ArithOp::Dot3) ? VP_OP(DP3) : VP_OP(DP4);
+            break;
+        }
+
+        struct nvfx_insn in = nvfx_insn(
+            0, 0, -1, -1,
+            const_cast<struct nvfx_reg&>(dst),
+            mask,
+            srcs[0], srcs[1], srcs[2]);
+        asm_.emit(in, opcode);
+        emittedSomething = true;
+        return true;
+    };
+
+    collectGenericLiterals = [&](IRValueID id)
+    {
+        float lit = 0.0f;
+        if (isFloatLiteral(id, lit))
+        {
+            literals.assign(lit);
+            return;
+        }
+
+        auto arIt = valueToArith.find(id);
+        if (arIt != valueToArith.end())
+        {
+            const int srcCount = (arIt->second.op == ArithOp::Mad) ? 3 : 2;
+            for (int i = 0; i < srcCount; ++i)
+                collectGenericLiterals(arIt->second.srcIds[i]);
+            return;
+        }
+
+        auto gvIt = valueToGenericVecConstruct.find(id);
+        if (gvIt != valueToGenericVecConstruct.end())
+        {
+            for (int i = 0; i < gvIt->second.width; ++i)
+                collectGenericLiterals(gvIt->second.lanes[i]);
+        }
+    };
+
+    auto emitGenericVecConstructToDest =
+        [&](const GenericVecConstructBinding& gv,
+            const struct nvfx_reg& dst,
+            int maxWidth) -> bool
+    {
+        const int laneCount = std::min(gv.width, maxWidth);
+        for (int i = 0; i < laneCount; ++i)
+            collectGenericLiterals(gv.lanes[i]);
+
+        bool laneEmitted[4] = {false, false, false, false};
+        IRValueID deferredMinMaxLane = 0;
+        for (int i = 0; i < laneCount; ++i)
+        {
+            const IRValueID laneId = gv.lanes[i];
+            auto arIt = valueToArith.find(laneId);
+            if (arIt != valueToArith.end() &&
+                (arIt->second.op == ArithOp::Min ||
+                 arIt->second.op == ArithOp::Max))
+            {
+                deferredMinMaxLane = laneId;
+                break;
+            }
+        }
+        if (deferredMinMaxLane != 0)
+        {
+            auto arIt = valueToArith.find(deferredMinMaxLane);
+            if (arIt != valueToArith.end())
+            {
+                for (IRValueID depId : arIt->second.srcIds)
+                {
+                    if (depId == 0) continue;
+                    if (valueToArith.count(depId) ||
+                        valueToGenericVecConstruct.count(depId))
+                    {
+                        GenericSource dep = materializeValueToTemp(depId);
+                        if (!dep.valid) return false;
+                    }
+                }
+            }
+
+            for (int i = 0; i < laneCount; ++i)
+            {
+                if (laneEmitted[i] || gv.lanes[i] == deferredMinMaxLane)
+                    continue;
+                const IRValueID laneId = gv.lanes[i];
+                int mask = 0;
+                for (int j = i; j < laneCount; ++j)
+                {
+                    if (gv.lanes[j] != laneId ||
+                        gv.lanes[j] == deferredMinMaxLane)
+                    {
+                        continue;
+                    }
+                    mask |= (8 >> j);
+                    laneEmitted[j] = true;
+                }
+                if (!emitValueToDest(laneId, dst, mask))
+                    return false;
+            }
+        }
+        for (int i = 0; i < laneCount; ++i)
+        {
+            if (laneEmitted[i]) continue;
+            const IRValueID laneId = gv.lanes[i];
+            int mask = 0;
+            for (int j = i; j < laneCount; ++j)
+            {
+                if (gv.lanes[j] != laneId) continue;
+                mask |= (8 >> j);
+                laneEmitted[j] = true;
+            }
+            if (!emitValueToDest(laneId, dst, mask))
+                return false;
+        }
+        return true;
+    };
+
+    resolveGenericSource = [&](IRValueID id) -> GenericSource
+    {
+        auto tIt = valueToTempReg.find(id);
+        if (tIt != valueToTempReg.end())
+            return makeGenericSource(makeReg(NVFXSR_TEMP, tIt->second),
+                                     valueWidth(id));
+
+        auto vsIt = valueToSource.find(id);
+        if (vsIt != valueToSource.end())
+        {
+            const struct nvfx_reg r =
+                (vsIt->second.kind == ValueSource::Kind::Input)
+                    ? makeReg(NVFXSR_INPUT, vsIt->second.regIdx)
+                    : makeReg(NVFXSR_CONST, vsIt->second.regIdx);
+            return makeGenericSource(r, vsIt->second.width);
+        }
+
+        auto shIt = valueToShuffle.find(id);
+        if (shIt != valueToShuffle.end())
+        {
+            GenericSource base = resolveGenericSource(shIt->second.srcId);
+            if (!base.valid) return base;
+            GenericSource s = base;
+            s.width = std::max(1, shIt->second.width);
+            for (int i = 0; i < 4; ++i)
+                s.swz[i] = base.swz[shIt->second.lanes[i] & 3];
+            if (s.width == 1)
+                s.swz[1] = s.swz[2] = s.swz[3] = s.swz[0];
+            return s;
+        }
+
+        float lit = 0.0f;
+        if (isFloatLiteral(id, lit))
+        {
+            auto [cReg, cLane] = literals.assign(lit);
+            GenericSource s = makeGenericSource(makeReg(NVFXSR_CONST, cReg), 1);
+            s.swz[0] = s.swz[1] = s.swz[2] = s.swz[3] =
+                static_cast<uint8_t>(cLane);
+            return s;
+        }
+
+        return GenericSource{};
+    };
+
+    materializeValueToTempReg =
+        [&](IRValueID id, int tempIdx) -> bool
+    {
+        const struct nvfx_reg tempReg = makeReg(NVFXSR_TEMP, tempIdx);
+
+        GenericSource src = resolveGenericSource(id);
+        if (src.valid)
+        {
+            emitMovFromSource(tempReg, writemaskForWidth(src.width), src);
+            valueToTempReg[id] = tempIdx;
+            emittedSomething = true;
+            return true;
+        }
+
+        auto arIt = valueToArith.find(id);
+        if (arIt != valueToArith.end())
+        {
+            if (!emitArithBindingToDest(arIt->second, tempReg,
+                                        writemaskForWidth(arIt->second.width)))
+            {
+                out.diagnostics.push_back(
+                    "nv40-vp: generic arithmetic operand did not resolve");
+                return false;
+            }
+            valueToTempReg[id] = tempIdx;
+            return true;
+        }
+
+        auto gvIt = valueToGenericVecConstruct.find(id);
+        if (gvIt != valueToGenericVecConstruct.end())
+        {
+            if (!emitGenericVecConstructToDest(gvIt->second, tempReg, 4))
+                return false;
+            valueToTempReg[id] = tempIdx;
+            emittedSomething = true;
+            return true;
+        }
+
+        return false;
+    };
+
+    materializeValueToTemp = [&](IRValueID id) -> GenericSource
+    {
+        auto tIt = valueToTempReg.find(id);
+        if (tIt != valueToTempReg.end())
+            return makeGenericSource(makeReg(NVFXSR_TEMP, tIt->second),
+                                     valueWidth(id));
+
+        const int tempIdx = allocTemp();
+        if (!materializeValueToTempReg(id, tempIdx))
+            return GenericSource{};
+        return makeGenericSource(makeReg(NVFXSR_TEMP, tempIdx), valueWidth(id));
+    };
+
+    emitValueToDest =
+        [&](IRValueID id, const struct nvfx_reg& dst, int mask) -> bool
+    {
+        auto arIt = valueToArith.find(id);
+        if (arIt != valueToArith.end())
+            return emitArithBindingToDest(arIt->second, dst, mask);
+
+        auto gvIt = valueToGenericVecConstruct.find(id);
+        if (gvIt != valueToGenericVecConstruct.end())
+            return emitGenericVecConstructToDest(gvIt->second, dst, 4);
+
+        GenericSource src = resolveGenericSource(id);
+        if (!src.valid)
+        {
+            out.diagnostics.push_back(
+                "nv40-vp: generic value did not resolve to a source");
+            return false;
+        }
+        emitMovFromSource(dst, mask, src);
+        emittedSomething = true;
+        return true;
+    };
+
     auto emitStoreOutput =
         [&](IRValueID srcId,
             const std::string& semanticName,
@@ -647,13 +1081,26 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         auto arIt = valueToArith.find(srcId);
         if (arIt != valueToArith.end())
         {
+            if (arIt->second.op != ArithOp::Add &&
+                arIt->second.op != ArithOp::Sub &&
+                arIt->second.op != ArithOp::Mul)
+            {
+                if (emitValueToDest(srcId, dstReg, NVFX_VP_MASK_ALL))
+                    return true;
+                out.diagnostics.push_back(
+                    "nv40-vp: generic arithmetic store did not lower");
+                return false;
+            }
+
             bool okA = false, okB = false;
             struct nvfx_reg regA = regFromValue(arIt->second.srcIds[0], okA);
             struct nvfx_reg regB = regFromValue(arIt->second.srcIds[1], okB);
             if (!okA || !okB)
             {
+                if (emitValueToDest(srcId, dstReg, NVFX_VP_MASK_ALL))
+                    return true;
                 out.diagnostics.push_back(
-                    "nv40-vp: arithmetic operand did not resolve to a simple source");
+                    "nv40-vp: generic arithmetic operand did not resolve");
                 return false;
             }
 
@@ -684,6 +1131,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 makeSrc(none), makeSrc(none), makeSrc(none) };
             srcs[slotA] = makeSrc(regA);
             srcs[slotB] = makeSrc(regB);
+            if (arIt->second.op == ArithOp::Sub)
+                srcs[slotB].negate = !srcs[slotB].negate;
 
             struct nvfx_insn opInsn = nvfx_insn(
                 0, 0, -1, -1,
@@ -813,6 +1262,17 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     }
                 }
 
+                if (step.priorChainId == 0 && step.genericTempBuildId != 0)
+                {
+                    if (!materializeValueToTempReg(step.genericTempBuildId,
+                                                   step.vectorInputIdx))
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-vp: generic MatVecMul vector did not materialize");
+                        return false;
+                    }
+                }
+
                 // Determine vec source register for the 4 DP4s.
                 struct nvfx_reg vecReg;
                 if (readsPriorChainTemp)
@@ -869,6 +1329,23 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     availableTemps.push_back(priorChainTempReg);
             }
 
+            emittedSomething = true;
+            return true;
+        }
+
+        auto gvIt = valueToGenericVecConstruct.find(srcId);
+        if (gvIt != valueToGenericVecConstruct.end())
+        {
+            const int outDeclWidth = [&]() {
+                auto wIt = outputWidthBySemantic.find(semKey(semUpper, semanticIndex));
+                return (wIt == outputWidthBySemantic.end()) ? 4 : wIt->second;
+            }();
+            if (!emitGenericVecConstructToDest(gvIt->second, dstReg, outDeclWidth))
+            {
+                out.diagnostics.push_back(
+                    "nv40-vp: generic VecConstruct store did not lower");
+                return false;
+            }
             emittedSomething = true;
             return true;
         }
@@ -1130,6 +1607,35 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         return true;
     };
 
+    auto preMaterializeGenericMatVecRoot = [&](IRValueID srcId) -> bool
+    {
+        auto it = valueToMatVecMul.find(srcId);
+        if (it == valueToMatVecMul.end()) return true;
+
+        IRValueID rootId = srcId;
+        while (true)
+        {
+            auto rootIt = valueToMatVecMul.find(rootId);
+            if (rootIt == valueToMatVecMul.end()) return true;
+            if (rootIt->second.priorChainId == 0) break;
+            rootId = rootIt->second.priorChainId;
+        }
+
+        auto rootIt = valueToMatVecMul.find(rootId);
+        if (rootIt == valueToMatVecMul.end()) return true;
+        if (rootIt->second.genericTempBuildId == 0) return true;
+
+        if (!materializeValueToTempReg(rootIt->second.genericTempBuildId,
+                                       rootIt->second.vectorInputIdx))
+        {
+            out.diagnostics.push_back(
+                "nv40-vp: generic MatVecMul root did not materialize");
+            return false;
+        }
+        rootIt->second.genericTempBuildId = 0;
+        return true;
+    };
+
     for (const auto& blockPtr : entry.blocks)
     {
         if (!blockPtr) continue;
@@ -1151,7 +1657,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     return out;
                 }
                 valueToSource[inst.result] =
-                    { ValueSource::Kind::Input, nv40Idx };
+                    { ValueSource::Kind::Input, nv40Idx,
+                      std::max(1, inst.resultType.vectorSize) };
                 break;
             }
 
@@ -1168,13 +1675,16 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     valueToMatrixBase[inst.result] = b->baseReg;
                 else
                     valueToSource[inst.result] =
-                        { ValueSource::Kind::Const, b->baseReg };
+                        { ValueSource::Kind::Const, b->baseReg,
+                          std::max(1, inst.resultType.vectorSize) };
                 break;
             }
 
             case IROp::Add:
             case IROp::Sub:
             case IROp::Mul:
+            case IROp::Min:
+            case IROp::Max:
             {
                 if (inst.operands.size() < 2)
                 {
@@ -1184,9 +1694,48 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 ArithBinding a;
                 a.op = (inst.op == IROp::Add) ? ArithOp::Add
                      : (inst.op == IROp::Sub) ? ArithOp::Sub
-                                              : ArithOp::Mul;
+                     : (inst.op == IROp::Mul) ? ArithOp::Mul
+                     : (inst.op == IROp::Min) ? ArithOp::Min
+                                              : ArithOp::Max;
                 a.srcIds[0] = inst.operands[0];
                 a.srcIds[1] = inst.operands[1];
+                a.width = std::max(1, inst.resultType.vectorSize);
+                valueToArith[inst.result] = a;
+                break;
+            }
+
+            case IROp::Mad:
+            {
+                if (inst.operands.size() < 3)
+                {
+                    out.diagnostics.push_back("nv40-vp: MAD op with <3 operands");
+                    return out;
+                }
+                ArithBinding a;
+                a.op = ArithOp::Mad;
+                a.srcIds[0] = inst.operands[0];
+                a.srcIds[1] = inst.operands[1];
+                a.srcIds[2] = inst.operands[2];
+                a.width = std::max(1, inst.resultType.vectorSize);
+                valueToArith[inst.result] = a;
+                break;
+            }
+
+            case IROp::Dot:
+            {
+                if (inst.operands.size() < 2)
+                {
+                    out.diagnostics.push_back("nv40-vp: Dot op with <2 operands");
+                    return out;
+                }
+                const int lhsWidth = sourceValueWidth(inst.operands[0]);
+                const int rhsWidth = sourceValueWidth(inst.operands[1]);
+                const int dotWidth = std::max(lhsWidth, rhsWidth);
+                ArithBinding a;
+                a.op = (dotWidth <= 3) ? ArithOp::Dot3 : ArithOp::Dot4;
+                a.srcIds[0] = inst.operands[0];
+                a.srcIds[1] = inst.operands[1];
+                a.width = 1;
                 valueToArith[inst.result] = a;
                 break;
             }
@@ -1345,9 +1894,17 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     ok = false;
                     break;
                 }
-                if (!ok) break;
+                if (!ok)
+                {
+                    GenericVecConstructBinding gv;
+                    gv.width = static_cast<int>(inst.operands.size());
+                    for (size_t i = 0; i < inst.operands.size(); ++i)
+                        gv.lanes[i] = inst.operands[i];
+                    valueToGenericVecConstruct[inst.result] = gv;
+                    break;
+                }
 
-                // W lane = literal 1.0f → DPH-fold opportunity for a
+                // W lane = literal 1.0f -> DPH-fold opportunity for a
                 // consuming MatVecMul.  Only meaningful when width=4.
                 if (vb.width == 4 &&
                     vb.lanes[3].kind == LaneSource::Kind::Literal &&
@@ -1474,10 +2031,22 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     break;
                 }
 
+                if (valueToArith.count(inst.operands[1]) ||
+                    valueToGenericVecConstruct.count(inst.operands[1]))
+                {
+                    const int tempReg = allocTemp();
+                    binding.vectorInputIdx = tempReg;
+                    binding.vectorIsTemp   = true;
+                    binding.vecOpcode      = static_cast<uint8_t>(VP_OP(DP4));
+                    binding.genericTempBuildId = inst.operands[1];
+                    valueToMatVecMul[inst.result] = binding;
+                    break;
+                }
+
                 out.diagnostics.push_back(
                     "nv40-vp: MatVecMul vector operand must be a vertex input, "
                     "a float4(vec3, 1.0f) promotion, a float4(...) constructor, "
-                    "or a previous MatVecMul result");
+                    "a generic arithmetic value, or a previous MatVecMul result");
                 return out;
             }
 
@@ -1499,6 +2068,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 // last" rule for shaders with mixed-shape outputs.
                 if (valueToMatVecMul.count(srcId) ||
                     valueToArith.count(srcId)    ||
+                    valueToGenericVecConstruct.count(srcId) ||
                     valueToVecInsert.count(srcId))
                 {
                     deferredStores.push_back(
@@ -1545,6 +2115,15 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             {
                 if (vcIt->second.lanes[li].kind == LaneSource::Kind::InputLane)
                     return vcIt->second.lanes[li].regIdx;
+            }
+        }
+        auto gvIt = valueToGenericVecConstruct.find(id);
+        if (gvIt != valueToGenericVecConstruct.end())
+        {
+            for (int li = 0; li < gvIt->second.width; ++li)
+            {
+                int attr = attrIndexFromValue(gvIt->second.lanes[li]);
+                if (attr >= 0) return attr;
             }
         }
         auto shIt = valueToShuffle.find(id);
@@ -2086,6 +2665,13 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     };
 
     tryEmitPerLaneMadChainInterleaved();
+
+    for (const auto& def : deferredStores)
+    {
+        if (consumedStoreSrcIds.count(def.srcId)) continue;
+        if (!preMaterializeGenericMatVecRoot(def.srcId))
+            return out;
+    }
 
     for (const auto& imm : immediateStores)
     {

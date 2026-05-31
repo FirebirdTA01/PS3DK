@@ -1,0 +1,13 @@
+// Generic VP clamp shape for fixed-function lighting: dot product,
+// max against zero, then scalar broadcast with W=1.0.
+void main(
+    float4 in_position      : POSITION,
+    float3 in_normal        : NORMAL,
+    uniform float3 light_dir,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    out_position = in_position;
+    float d = max(dot(in_normal, light_dir), 0.0);
+    out_color = float4(d, d, d, 1.0);
+}

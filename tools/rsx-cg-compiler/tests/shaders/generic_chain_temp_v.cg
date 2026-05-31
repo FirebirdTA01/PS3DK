@@ -1,0 +1,15 @@
+// Generic VP arithmetic feeding a later consumer.  The ADD result must
+// materialize to a temp before the matrix multiply; StoreOutput is not
+// the direct arithmetic consumer.
+void main(
+    float4 in_position      : POSITION,
+    float4 in_color         : COLOR,
+    uniform float4 offset,
+    uniform float4x4 mvp,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR)
+{
+    float4 shifted = in_position + offset;
+    out_position = mul(mvp, shifted);
+    out_color = in_color;
+}
