@@ -220,6 +220,85 @@ static int cg_build_parameters(PSGLcgProgram *program)
     return 1;
 }
 
+static CGprogram cg_create_binary_program(PSGLcgContext *context,
+                                          CgBinaryProgram *binary,
+                                          uint32_t binary_size,
+                                          CGprofile profile)
+{
+    PSGLcgProgram *program;
+    CGprofile selected;
+    CellCgbProfile cgb_profile;
+
+    selected = cg_default_profile(binary, profile);
+    if (!psgl_cg_profile_is_vertex(selected) &&
+        !psgl_cg_profile_is_fragment(selected)) {
+        free(binary);
+        psgl_cg_set_error(context, CG_INVALID_PROFILE_ERROR);
+        return NULL;
+    }
+
+    program = (PSGLcgProgram *)calloc(1u, sizeof(PSGLcgProgram));
+    if (!program) {
+        free(binary);
+        psgl_cg_set_error(context, CG_MEMORY_ALLOC_ERROR);
+        return NULL;
+    }
+    program->magic = PSGL_CG_PROGRAM_MAGIC;
+    program->context = context;
+    program->profile = selected;
+    program->binary = binary;
+    program->binary_size = binary_size;
+
+    if (cellCgbRead(binary, binary_size, &program->cgb_program) != CELL_CGB_OK) {
+        cg_free_program(program);
+        psgl_cg_set_error(context, CG_PROGRAM_LOAD_ERROR);
+        return NULL;
+    }
+    cgb_profile = cellCgbGetProfile(&program->cgb_program);
+    if ((psgl_cg_profile_is_vertex(selected) &&
+         cgb_profile != CELL_CGB_PROFILE_VERTEX) ||
+        (psgl_cg_profile_is_fragment(selected) &&
+         cgb_profile != CELL_CGB_PROFILE_FRAGMENT)) {
+        cg_free_program(program);
+        psgl_cg_set_error(context, CG_INVALID_PROFILE_ERROR);
+        return NULL;
+    }
+    program->cgb_profile = cgb_profile;
+    if (!cg_build_parameters(program)) {
+        cg_free_program(program);
+        psgl_cg_set_error(context, CG_MEMORY_ALLOC_ERROR);
+        return NULL;
+    }
+
+    cg_link_program(context, program);
+    psgl_cg_set_error(context, CG_NO_ERROR);
+    return (CGprogram)program;
+}
+
+CGprogram psgl_cg_create_program_from_memory(CGcontext ctx,
+                                             const void *data,
+                                             uint32_t size,
+                                             CGprofile profile)
+{
+    PSGLcgContext *context = psgl_cg_context(ctx);
+    CgBinaryProgram *binary;
+    if (!context) {
+        psgl_cg_set_error(NULL, CG_INVALID_CONTEXT_HANDLE_ERROR);
+        return NULL;
+    }
+    if (!data || !size) {
+        psgl_cg_set_error(context, CG_INVALID_PARAMETER_ERROR);
+        return NULL;
+    }
+    binary = (CgBinaryProgram *)malloc(size);
+    if (!binary) {
+        psgl_cg_set_error(context, CG_MEMORY_ALLOC_ERROR);
+        return NULL;
+    }
+    cg_copy(binary, data, size);
+    return cg_create_binary_program(context, binary, size, profile);
+}
+
 static CGparameterclass cg_class_for_type(CGtype type)
 {
     if (type >= CG_FLOAT1x1 && type <= CG_FLOAT4x4)
@@ -411,11 +490,8 @@ CG_API CGprogram CGENTRY cgCreateProgramFromFile(CGcontext ctx,
                                                  const char **args)
 {
     PSGLcgContext *context = psgl_cg_context(ctx);
-    PSGLcgProgram *program;
     CgBinaryProgram *binary;
     uint32_t binary_size = 0u;
-    CGprofile selected;
-    CellCgbProfile cgb_profile;
 
     (void)entry;
     (void)args;
@@ -433,50 +509,7 @@ CG_API CGprogram CGENTRY cgCreateProgramFromFile(CGcontext ctx,
         psgl_cg_set_error(context, CG_FILE_READ_ERROR);
         return NULL;
     }
-    selected = cg_default_profile(binary, profile);
-    if (!psgl_cg_profile_is_vertex(selected) &&
-        !psgl_cg_profile_is_fragment(selected)) {
-        free(binary);
-        psgl_cg_set_error(context, CG_INVALID_PROFILE_ERROR);
-        return NULL;
-    }
-
-    program = (PSGLcgProgram *)calloc(1u, sizeof(PSGLcgProgram));
-    if (!program) {
-        free(binary);
-        psgl_cg_set_error(context, CG_MEMORY_ALLOC_ERROR);
-        return NULL;
-    }
-    program->magic = PSGL_CG_PROGRAM_MAGIC;
-    program->context = context;
-    program->profile = selected;
-    program->binary = binary;
-    program->binary_size = binary_size;
-
-    if (cellCgbRead(binary, binary_size, &program->cgb_program) != CELL_CGB_OK) {
-        cg_free_program(program);
-        psgl_cg_set_error(context, CG_PROGRAM_LOAD_ERROR);
-        return NULL;
-    }
-    cgb_profile = cellCgbGetProfile(&program->cgb_program);
-    if ((psgl_cg_profile_is_vertex(selected) &&
-         cgb_profile != CELL_CGB_PROFILE_VERTEX) ||
-        (psgl_cg_profile_is_fragment(selected) &&
-         cgb_profile != CELL_CGB_PROFILE_FRAGMENT)) {
-        cg_free_program(program);
-        psgl_cg_set_error(context, CG_INVALID_PROFILE_ERROR);
-        return NULL;
-    }
-    program->cgb_profile = cgb_profile;
-    if (!cg_build_parameters(program)) {
-        cg_free_program(program);
-        psgl_cg_set_error(context, CG_MEMORY_ALLOC_ERROR);
-        return NULL;
-    }
-
-    cg_link_program(context, program);
-    psgl_cg_set_error(context, CG_NO_ERROR);
-    return (CGprogram)program;
+    return cg_create_binary_program(context, binary, binary_size, profile);
 }
 
 CG_API CGprogram CGENTRY cgCopyProgram(CGprogram program)
@@ -732,7 +765,7 @@ CG_API const double *CGENTRY cgGetParameterValues(CGparameter param,
   if (nvalues) *nvalues = 0;
   return NULL; }
 
-/* parameter set/get — all NOPs */
+/* parameter set/get: mostly NOPs */
 CG_API void CGENTRY cgSetParameterValuedr(CGparameter p, int n, const double *v)
 { (void)p; (void)n; (void)v; }
 CG_API void CGENTRY cgSetParameterValuedc(CGparameter p, int n, const double *v)
@@ -788,7 +821,7 @@ CG_API void CGENTRY cgSetParameterSemantic(CGparameter param,
                                            const char *semantic)
 { (void)param; (void)semantic; }
 
-/* scalar parameter setters — int variants only.
+/* scalar parameter setters: int variants only.
  * float/double variants are macro-aliased to cgGL* forms in <Cg/cg.h>
  * and are defined in cggl_bridge.c. */
 CG_API void CGENTRY cgSetParameter1i(CGparameter p, int x)
@@ -808,7 +841,7 @@ CG_API void CGENTRY cgSetParameter3iv(CGparameter p, const int *v)
 CG_API void CGENTRY cgSetParameter4iv(CGparameter p, const int *v)
 { (void)p; (void)v; }
 
-/* matrix parameter setters/getters — int variants only.
+/* matrix parameter setters/getters: int variants only.
  * float/double variants are macro-aliased to cgGL* forms. */
 CG_API void CGENTRY cgSetMatrixParameterir(CGparameter p, const int *m)
 { (void)p; (void)m; }

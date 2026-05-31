@@ -74,5 +74,9 @@ void psgl_cg_set_parameter_matrix(PSGLcgParameter *parameter,
                                   const float *values);
 void psgl_cg_get_parameter_matrix(PSGLcgParameter *parameter,
                                   float *values);
+CGprogram psgl_cg_create_program_from_memory(CGcontext ctx,
+                                             const void *data,
+                                             uint32_t size,
+                                             CGprofile profile);
 
 #endif

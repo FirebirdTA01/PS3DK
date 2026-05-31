@@ -10,6 +10,7 @@ extern "C" {
 
 typedef intptr_t GLintptr;
 typedef intptr_t GLsizeiptr;
+typedef char GLchar;
 typedef unsigned short GLhalfARB;
 
 #define GL_QUADS 0x0007
@@ -305,6 +306,29 @@ typedef unsigned short GLhalfARB;
 #define GL_BUFFER_MAPPED 0x88BC
 #define GL_BUFFER_PITCH_SCE 0x6041
 #define GL_PUSHSTRINGMARKER 1
+#define GL_FRAGMENT_SHADER 0x8B30
+#define GL_VERTEX_SHADER 0x8B31
+#define GL_MAX_VERTEX_ATTRIBS 0x8869
+#define GL_MAX_VERTEX_UNIFORM_VECTORS 0x8DFB
+#define GL_MAX_VARYING_VECTORS 0x8DFC
+#define GL_MAX_FRAGMENT_UNIFORM_VECTORS 0x8DFD
+#define GL_SHADER_TYPE 0x8B4F
+#define GL_DELETE_STATUS 0x8B80
+#define GL_COMPILE_STATUS 0x8B81
+#define GL_LINK_STATUS 0x8B82
+#define GL_VALIDATE_STATUS 0x8B83
+#define GL_INFO_LOG_LENGTH 0x8B84
+#define GL_ATTACHED_SHADERS 0x8B85
+#define GL_ACTIVE_UNIFORMS 0x8B86
+#define GL_ACTIVE_UNIFORM_MAX_LENGTH 0x8B87
+#define GL_SHADER_SOURCE_LENGTH 0x8B88
+#define GL_ACTIVE_ATTRIBUTES 0x8B89
+#define GL_ACTIVE_ATTRIBUTE_MAX_LENGTH 0x8B8A
+#define GL_SHADING_LANGUAGE_VERSION 0x8B8C
+#define GL_CURRENT_PROGRAM 0x8B8D
+#define GL_SHADER_BINARY_FORMATS 0x8DF8
+#define GL_NUM_SHADER_BINARY_FORMATS 0x8DF9
+#define GL_SHADER_BINARY_FORMAT_CGB_PS3DK 0x6500
 
 GLAPI void glBlendEquation(GLenum mode);
 GLAPI void glBlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha);
@@ -398,6 +422,40 @@ GLAPI void glPopStringMarkerSCE(void);
 GLAPI void glStringMarkerGREMEDY(GLsizei len, const void *string);
 GLAPI void glTextureReferenceSCE(GLenum target, GLuint levels, GLuint baseWidth, GLuint baseHeight, GLuint baseDepth, GLenum internalFormat, GLuint pitch, GLintptr offset);
 GLAPI void glBufferSurfaceSCE(GLenum target, GLuint width, GLuint height, GLenum multisampling, GLenum internalFormat, GLenum usage);
+GLAPI GLuint glCreateShader(GLenum type);
+GLAPI void glDeleteShader(GLuint shader);
+GLAPI GLboolean glIsShader(GLuint shader);
+GLAPI void glShaderSource(GLuint shader, GLsizei count, const GLchar **string, const GLint *length);
+GLAPI void glShaderBinary(GLsizei count, const GLuint *shaders, GLenum binaryformat, const GLvoid *binary, GLsizei length);
+GLAPI void glCompileShader(GLuint shader);
+GLAPI void glGetShaderiv(GLuint shader, GLenum pname, GLint *params);
+GLAPI void glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
+GLAPI GLuint glCreateProgram(void);
+GLAPI void glDeleteProgram(GLuint program);
+GLAPI GLboolean glIsProgram(GLuint program);
+GLAPI void glAttachShader(GLuint program, GLuint shader);
+GLAPI void glDetachShader(GLuint program, GLuint shader);
+GLAPI void glBindAttribLocation(GLuint program, GLuint index, const GLchar *name);
+GLAPI void glLinkProgram(GLuint program);
+GLAPI void glUseProgram(GLuint program);
+GLAPI void glGetProgramiv(GLuint program, GLenum pname, GLint *params);
+GLAPI void glGetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
+GLAPI GLint glGetUniformLocation(GLuint program, const GLchar *name);
+GLAPI GLint glGetAttribLocation(GLuint program, const GLchar *name);
+GLAPI void glUniform1i(GLint location, GLint v0);
+GLAPI void glUniform1f(GLint location, GLfloat v0);
+GLAPI void glUniform2f(GLint location, GLfloat v0, GLfloat v1);
+GLAPI void glUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
+GLAPI void glUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
+GLAPI void glUniform1fv(GLint location, GLsizei count, const GLfloat *value);
+GLAPI void glUniform2fv(GLint location, GLsizei count, const GLfloat *value);
+GLAPI void glUniform3fv(GLint location, GLsizei count, const GLfloat *value);
+GLAPI void glUniform4fv(GLint location, GLsizei count, const GLfloat *value);
+GLAPI void glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GLAPI void glEnableVertexAttribArray(GLuint index);
+GLAPI void glDisableVertexAttribArray(GLuint index);
+GLAPI void glVertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid *pointer);
+GLAPI void glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
 
 #ifdef __cplusplus
 }
