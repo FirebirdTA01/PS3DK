@@ -208,6 +208,14 @@ static void psgl_matrix_multiply(GLfloat out[16], const GLfloat a[16],
     psgl_copy(out, tmp, sizeof(tmp));
 }
 
+static void psgl_matrix_transpose(GLfloat out[16], const GLfloat in[16])
+{
+    for (uint32_t row = 0u; row < 4u; row++) {
+        for (uint32_t col = 0u; col < 4u; col++)
+            out[row * 4u + col] = in[col * 4u + row];
+    }
+}
+
 static GLfloat *psgl_current_matrix(PSGLcontext *context)
 {
     uint32_t unit;
@@ -1939,17 +1947,25 @@ void psgl_context_load_matrix(const GLfloat *matrix)
     PSGLcontext *context = g_psgl.current_context;
     GLfloat *dst = psgl_current_matrix(context);
     if (!dst || !matrix) return;
-    psgl_copy(dst, matrix, sizeof(GLfloat) * 16u);
+    psgl_matrix_transpose(dst, matrix);
     psgl_matrix_mark_dirty(context);
 }
 
-void psgl_context_mult_matrix(const GLfloat *matrix)
+static void psgl_context_mult_matrix_raw(const GLfloat *matrix)
 {
     PSGLcontext *context = g_psgl.current_context;
     GLfloat *dst = psgl_current_matrix(context);
     if (!dst || !matrix) return;
     psgl_matrix_multiply(dst, dst, matrix);
     psgl_matrix_mark_dirty(context);
+}
+
+void psgl_context_mult_matrix(const GLfloat *matrix)
+{
+    GLfloat temp[16];
+    if (!matrix) return;
+    psgl_matrix_transpose(temp, matrix);
+    psgl_context_mult_matrix_raw(temp);
 }
 
 void psgl_context_rotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
@@ -1978,7 +1994,7 @@ void psgl_context_rotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
     matrix[8] = z * x * ic - y * s;
     matrix[9] = z * y * ic + x * s;
     matrix[10] = z * z * ic + c;
-    psgl_context_mult_matrix(matrix);
+    psgl_context_mult_matrix_raw(matrix);
 }
 
 void psgl_context_scalef(GLfloat x, GLfloat y, GLfloat z)
@@ -1988,7 +2004,7 @@ void psgl_context_scalef(GLfloat x, GLfloat y, GLfloat z)
     matrix[0] = x;
     matrix[5] = y;
     matrix[10] = z;
-    psgl_context_mult_matrix(matrix);
+    psgl_context_mult_matrix_raw(matrix);
 }
 
 void psgl_context_translatef(GLfloat x, GLfloat y, GLfloat z)
@@ -1998,7 +2014,7 @@ void psgl_context_translatef(GLfloat x, GLfloat y, GLfloat z)
     matrix[3] = x;
     matrix[7] = y;
     matrix[11] = z;
-    psgl_context_mult_matrix(matrix);
+    psgl_context_mult_matrix_raw(matrix);
 }
 
 void psgl_context_frustumf(GLfloat left, GLfloat right, GLfloat bottom,
@@ -2018,7 +2034,7 @@ void psgl_context_frustumf(GLfloat left, GLfloat right, GLfloat bottom,
     matrix[10] = -(zfar + znear) / fn;
     matrix[11] = -(2.0f * zfar * znear) / fn;
     matrix[14] = -1.0f;
-    psgl_context_mult_matrix(matrix);
+    psgl_context_mult_matrix_raw(matrix);
 }
 
 void psgl_context_orthof(GLfloat left, GLfloat right, GLfloat bottom,
@@ -2036,7 +2052,7 @@ void psgl_context_orthof(GLfloat left, GLfloat right, GLfloat bottom,
     matrix[3] = -(right + left) / rl;
     matrix[7] = -(top + bottom) / tb;
     matrix[11] = -(zfar + znear) / fn;
-    psgl_context_mult_matrix(matrix);
+    psgl_context_mult_matrix_raw(matrix);
 }
 
 void psgl_context_set_enable(GLenum cap, GLboolean enabled)
@@ -2474,6 +2490,18 @@ void psgl_context_get_floatv(GLenum pname, GLfloat *params)
     case GL_FOG_COLOR:
         psgl_get_float4(context->fog_color, params);
         break;
+    case GL_MODELVIEW_MATRIX:
+        psgl_matrix_transpose(params, context->modelview);
+        break;
+    case GL_PROJECTION_MATRIX:
+        psgl_matrix_transpose(params, context->projection);
+        break;
+    case GL_TEXTURE_MATRIX: {
+        uint32_t unit = psgl_texture_unit_index(context->active_texture);
+        if (unit < PSGL_MAX_TEXTURE_UNITS)
+            psgl_matrix_transpose(params, context->texture_matrix[unit]);
+        break;
+    }
     default:
         params[0] = 0.0f;
         break;
