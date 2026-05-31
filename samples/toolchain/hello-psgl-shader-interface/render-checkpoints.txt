@@ -1,0 +1,4 @@
+# x y expected_R expected_G expected_B tolerance
+640 400 5 20 46 8
+1280 800 0 255 0 30
+300 1200 5 20 46 8
