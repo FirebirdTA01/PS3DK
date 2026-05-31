@@ -10,6 +10,7 @@ target_link_libraries(hello-psgl-link PRIVATE
     PSGLU
     cgb
     sscgpu
+    fs_stub
     gcm_cmd
     gcm_sys
     rsx
