@@ -60,7 +60,7 @@ int main(void)
         0.0f, 0.0f, 1.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f
     };
-    const float color[4] = {1.0f, 0.15f, 0.05f, 1.0f};
+    const float color[4] = {0.0f, 1.0f, 0.0f, 1.0f};
 
     if (!write_shaders()) {
         printf("hello-psgl-triangle: shader write failed\n");

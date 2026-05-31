@@ -145,6 +145,19 @@ static uint32_t psgl_pack_depth_stencil(GLfloat depth, GLint stencil)
     return (z << 8) | ((uint32_t)stencil & 0xffu);
 }
 
+static uint32_t psgl_halfword_swap_u32(uint32_t value)
+{
+    return ((value >> 16) & 0xffffu) | ((value & 0xffffu) << 16);
+}
+
+static void psgl_patch_fragment_slot(uint32_t *slot, const uint32_t value[4])
+{
+    slot[0] = psgl_halfword_swap_u32(value[0]);
+    slot[1] = psgl_halfword_swap_u32(value[1]);
+    slot[2] = psgl_halfword_swap_u32(value[2]);
+    slot[3] = psgl_halfword_swap_u32(value[3]);
+}
+
 static uint32_t psgl_bool(GLboolean value)
 {
     return value ? CELL_GCM_TRUE : CELL_GCM_FALSE;
@@ -648,19 +661,24 @@ static void psgl_patch_fragment_parameter(PSGLcgProgram *program,
     if (!parameter->value_count) return;
     cellCgbMapGetFragmentUniformOffsets(&program->cgb_program,
                                         parameter->index, NULL, &count);
+    size = cellCgbGetUCodeSize(&program->cgb_program);
     if (!count || count > 64u) return;
     cellCgbMapGetFragmentUniformOffsets(&program->cgb_program,
                                         parameter->index, offsets, &count);
-    size = cellCgbGetUCodeSize(&program->cgb_program);
     for (uint32_t i = 0; i < count; i++) {
         uint32_t off = offsets[i];
         uint32_t *slot;
+        uint32_t *host_slot;
+        const uint32_t *value = (const uint32_t *)parameter->value;
+        const uint8_t *host_ucode = (const uint8_t *)
+            cellCgbGetUCode(&program->cgb_program);
         if (off + 16u > size) continue;
         slot = (uint32_t *)((uint8_t *)program->fragment_ucode_address + off);
-        slot[0] = ((const uint32_t *)parameter->value)[1];
-        slot[1] = ((const uint32_t *)parameter->value)[0];
-        slot[2] = ((const uint32_t *)parameter->value)[3];
-        slot[3] = ((const uint32_t *)parameter->value)[2];
+        psgl_patch_fragment_slot(slot, value);
+        if (host_ucode) {
+            host_slot = (uint32_t *)(void *)(host_ucode + off);
+            psgl_patch_fragment_slot(host_slot, value);
+        }
     }
     parameter->dirty = CG_FALSE;
 }
@@ -693,8 +711,10 @@ static void psgl_emit_fragment_program(PSGLcontext *context,
 {
     if (!context || !context->gcm || !program || !program->loaded) return;
     if (!psgl_prepare_fragment_ucode(program)) return;
-    for (uint32_t i = 0; i < program->parameter_count; i++)
-        psgl_patch_fragment_parameter(program, &program->parameters[i]);
+    for (uint32_t i = 0; i < program->parameter_count; i++) {
+        if (program->parameters[i].dirty)
+            psgl_patch_fragment_parameter(program, &program->parameters[i]);
+    }
     cellGcmSetFragmentProgram(context->gcm, (CGprogram)program->binary,
                               program->fragment_ucode_offset);
 }
@@ -1041,6 +1061,7 @@ void psgl_context_swap(void)
     context->dirty |= PSGL_DIRTY_FRAMEBUFFER;
     psgl_bind_render_target(context);
     psgl_emit_viewport(context);
+    context->dirty |= PSGL_DIRTY_CG;
 }
 
 void psgl_context_set_clear_color(GLfloat red, GLfloat green,

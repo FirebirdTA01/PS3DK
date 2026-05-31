@@ -1,0 +1,6 @@
+# hello-psgl-triangle checkpoint file (2560x1600 capture resolution)
+# Clear color: glClearColor(0.02, 0.08, 0.18, 1.0) = rgb(5, 20, 46)
+# User uniform: cgGLSetParameter4fv(solidColor, (0.0, 1.0, 0.0, 1.0)) = rgb(0, 255, 0)
+# x y expected_R expected_G expected_B tolerance
+640 400 5 20 46 10
+1280 800 0 200 0 80
