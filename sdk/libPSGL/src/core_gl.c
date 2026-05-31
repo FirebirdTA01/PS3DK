@@ -220,8 +220,8 @@ GLAPI void glFinish(void) {}
 
 GLAPI void glMatrixMode(GLenum mode)      { psgl_context_matrix_mode(mode); }
 GLAPI void glLoadIdentity(void)           { psgl_context_load_identity(); }
-GLAPI void glPushMatrix(void)             {}
-GLAPI void glPopMatrix(void)              {}
+GLAPI void glPushMatrix(void)             { psgl_context_push_matrix(); }
+GLAPI void glPopMatrix(void)              { psgl_context_pop_matrix(); }
 GLAPI void glLoadMatrixf(const GLfloat *m)  { psgl_context_load_matrix(m); }
 GLAPI void glLoadMatrixx(const GLfixed *m)
 {
@@ -241,23 +241,43 @@ GLAPI void glMultMatrixx(const GLfixed *m)
     psgl_context_mult_matrix(matrix);
 }
 GLAPI void glRotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
-{ (void)angle; (void)x; (void)y; (void)z; }
+{ psgl_context_rotatef(angle, x, y, z); }
 GLAPI void glRotatex(GLfixed angle, GLfixed x, GLfixed y, GLfixed z)
-{ (void)angle; (void)x; (void)y; (void)z; }
+{
+    psgl_context_rotatef((GLfloat)angle / 65536.0f,
+                         (GLfloat)x / 65536.0f,
+                         (GLfloat)y / 65536.0f,
+                         (GLfloat)z / 65536.0f);
+}
 GLAPI void glScalef(GLfloat x, GLfloat y, GLfloat z)
-{ (void)x; (void)y; (void)z; }
+{ psgl_context_scalef(x, y, z); }
 GLAPI void glScalex(GLfixed x, GLfixed y, GLfixed z)
-{ (void)x; (void)y; (void)z; }
+{
+    psgl_context_scalef((GLfloat)x / 65536.0f,
+                        (GLfloat)y / 65536.0f,
+                        (GLfloat)z / 65536.0f);
+}
 GLAPI void glTranslatef(GLfloat x, GLfloat y, GLfloat z)
-{ (void)x; (void)y; (void)z; }
+{ psgl_context_translatef(x, y, z); }
 GLAPI void glTranslatex(GLfixed x, GLfixed y, GLfixed z)
-{ (void)x; (void)y; (void)z; }
+{
+    psgl_context_translatef((GLfloat)x / 65536.0f,
+                            (GLfloat)y / 65536.0f,
+                            (GLfloat)z / 65536.0f);
+}
 GLAPI void glFrustumf(GLfloat l, GLfloat r, GLfloat b,
                       GLfloat t, GLfloat n, GLfloat f)
-{ (void)l; (void)r; (void)b; (void)t; (void)n; (void)f; }
+{ psgl_context_frustumf(l, r, b, t, n, f); }
 GLAPI void glFrustumx(GLfixed l, GLfixed r, GLfixed b,
                       GLfixed t, GLfixed n, GLfixed f)
-{ (void)l; (void)r; (void)b; (void)t; (void)n; (void)f; }
+{
+    psgl_context_frustumf((GLfloat)l / 65536.0f,
+                          (GLfloat)r / 65536.0f,
+                          (GLfloat)b / 65536.0f,
+                          (GLfloat)t / 65536.0f,
+                          (GLfloat)n / 65536.0f,
+                          (GLfloat)f / 65536.0f);
+}
 GLAPI void glOrthof(GLfloat l, GLfloat r, GLfloat b,
                     GLfloat t, GLfloat n, GLfloat f)
 { psgl_context_orthof(l, r, b, t, n, f); }

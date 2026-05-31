@@ -1,0 +1,6 @@
+# hello-psgl-rotating-quad checkpoint file (2560x1600 capture resolution)
+# x y expected_R expected_G expected_B tolerance
+100 300 5 20 46 10
+420 320 0 39 132 35
+1200 600 239 241 250 35
+1200 800 1 56 176 35

@@ -5,6 +5,7 @@
 #include "ffp_minimal_vpo.h"
 
 #include <malloc.h>
+#include <math.h>
 #include <ppu-types.h>
 #include <rsx/rsx.h>
 #include <stdlib.h>
@@ -88,6 +89,8 @@ static PSGLcgParameter g_psgl_ffp_library_vp_params[1];
 static PSGLcgProgram g_psgl_ffp_library_vp;
 static PSGLcgProgram g_psgl_ffp_library_fp;
 static uint32_t g_psgl_ffp_library_valid;
+
+static uint32_t psgl_texture_unit_index(GLenum texture);
 
 static void psgl_zero(void *ptr, uint32_t size)
 {
@@ -207,13 +210,23 @@ static void psgl_matrix_multiply(GLfloat out[16], const GLfloat a[16],
 
 static GLfloat *psgl_current_matrix(PSGLcontext *context)
 {
+    uint32_t unit;
     if (!context) return NULL;
     switch (context->matrix_mode) {
     case GL_MODELVIEW:  return context->modelview;
     case GL_PROJECTION: return context->projection;
-    case GL_TEXTURE:    return context->texture;
+    case GL_TEXTURE:
+        unit = psgl_texture_unit_index(context->active_texture);
+        if (unit >= PSGL_MAX_TEXTURE_UNITS) unit = 0u;
+        return context->texture_matrix[unit];
     default:            return context->modelview;
     }
+}
+
+static void psgl_matrix_mark_dirty(PSGLcontext *context)
+{
+    if (!context) return;
+    context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
 }
 
 static float psgl_clampf(GLfloat value, GLfloat lo, GLfloat hi)
@@ -1342,7 +1355,8 @@ PSGLcontext *psgl_context_create(void)
     context->matrix_mode = GL_MODELVIEW;
     psgl_matrix_identity(context->modelview);
     psgl_matrix_identity(context->projection);
-    psgl_matrix_identity(context->texture);
+    for (uint32_t unit = 0u; unit < PSGL_MAX_TEXTURE_UNITS; unit++)
+        psgl_matrix_identity(context->texture_matrix[unit]);
     context->clear_color[3] = 1.0f;
     context->clear_depth = 1.0f;
     context->dither_enabled = GL_TRUE;
@@ -1740,7 +1754,77 @@ void psgl_context_load_identity(void)
     GLfloat *matrix = psgl_current_matrix(context);
     if (!matrix) return;
     psgl_matrix_identity(matrix);
-    context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
+    psgl_matrix_mark_dirty(context);
+}
+
+void psgl_context_push_matrix(void)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    GLfloat *matrix = psgl_current_matrix(context);
+    uint32_t unit;
+    if (!context || !matrix) return;
+    switch (context->matrix_mode) {
+    case GL_MODELVIEW:
+        if (context->modelview_stack_depth >= PSGL_MODELVIEW_STACK_DEPTH)
+            return;
+        psgl_copy(context->modelview_stack[context->modelview_stack_depth],
+                  matrix, sizeof(GLfloat) * 16u);
+        context->modelview_stack_depth++;
+        break;
+    case GL_PROJECTION:
+        if (context->projection_stack_depth >= PSGL_PROJECTION_STACK_DEPTH)
+            return;
+        psgl_copy(context->projection_stack[context->projection_stack_depth],
+                  matrix, sizeof(GLfloat) * 16u);
+        context->projection_stack_depth++;
+        break;
+    case GL_TEXTURE:
+        unit = psgl_texture_unit_index(context->active_texture);
+        if (unit >= PSGL_MAX_TEXTURE_UNITS) return;
+        if (context->texture_stack_depth[unit] >= PSGL_TEXTURE_STACK_DEPTH)
+            return;
+        psgl_copy(context->texture_stack[unit][context->texture_stack_depth[unit]],
+                  matrix, sizeof(GLfloat) * 16u);
+        context->texture_stack_depth[unit]++;
+        break;
+    default:
+        break;
+    }
+}
+
+void psgl_context_pop_matrix(void)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    GLfloat *matrix = psgl_current_matrix(context);
+    uint32_t unit;
+    if (!context || !matrix) return;
+    switch (context->matrix_mode) {
+    case GL_MODELVIEW:
+        if (context->modelview_stack_depth == 0u) return;
+        context->modelview_stack_depth--;
+        psgl_copy(matrix, context->modelview_stack[context->modelview_stack_depth],
+                  sizeof(GLfloat) * 16u);
+        break;
+    case GL_PROJECTION:
+        if (context->projection_stack_depth == 0u) return;
+        context->projection_stack_depth--;
+        psgl_copy(matrix,
+                  context->projection_stack[context->projection_stack_depth],
+                  sizeof(GLfloat) * 16u);
+        break;
+    case GL_TEXTURE:
+        unit = psgl_texture_unit_index(context->active_texture);
+        if (unit >= PSGL_MAX_TEXTURE_UNITS) return;
+        if (context->texture_stack_depth[unit] == 0u) return;
+        context->texture_stack_depth[unit]--;
+        psgl_copy(matrix,
+                  context->texture_stack[unit][context->texture_stack_depth[unit]],
+                  sizeof(GLfloat) * 16u);
+        break;
+    default:
+        return;
+    }
+    psgl_matrix_mark_dirty(context);
 }
 
 void psgl_context_load_matrix(const GLfloat *matrix)
@@ -1749,7 +1833,7 @@ void psgl_context_load_matrix(const GLfloat *matrix)
     GLfloat *dst = psgl_current_matrix(context);
     if (!dst || !matrix) return;
     psgl_copy(dst, matrix, sizeof(GLfloat) * 16u);
-    context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
+    psgl_matrix_mark_dirty(context);
 }
 
 void psgl_context_mult_matrix(const GLfloat *matrix)
@@ -1758,7 +1842,76 @@ void psgl_context_mult_matrix(const GLfloat *matrix)
     GLfloat *dst = psgl_current_matrix(context);
     if (!dst || !matrix) return;
     psgl_matrix_multiply(dst, dst, matrix);
-    context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
+    psgl_matrix_mark_dirty(context);
+}
+
+void psgl_context_rotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
+{
+    GLfloat matrix[16];
+    GLfloat radians;
+    GLfloat length = sqrtf(x * x + y * y + z * z);
+    GLfloat c;
+    GLfloat s;
+    GLfloat ic;
+    if (length == 0.0f) return;
+    x /= length;
+    y /= length;
+    z /= length;
+    radians = angle * 0.01745329251994329577f;
+    c = cosf(radians);
+    s = sinf(radians);
+    ic = 1.0f - c;
+    psgl_matrix_identity(matrix);
+    matrix[0] = x * x * ic + c;
+    matrix[1] = x * y * ic - z * s;
+    matrix[2] = x * z * ic + y * s;
+    matrix[4] = y * x * ic + z * s;
+    matrix[5] = y * y * ic + c;
+    matrix[6] = y * z * ic - x * s;
+    matrix[8] = z * x * ic - y * s;
+    matrix[9] = z * y * ic + x * s;
+    matrix[10] = z * z * ic + c;
+    psgl_context_mult_matrix(matrix);
+}
+
+void psgl_context_scalef(GLfloat x, GLfloat y, GLfloat z)
+{
+    GLfloat matrix[16];
+    psgl_matrix_identity(matrix);
+    matrix[0] = x;
+    matrix[5] = y;
+    matrix[10] = z;
+    psgl_context_mult_matrix(matrix);
+}
+
+void psgl_context_translatef(GLfloat x, GLfloat y, GLfloat z)
+{
+    GLfloat matrix[16];
+    psgl_matrix_identity(matrix);
+    matrix[3] = x;
+    matrix[7] = y;
+    matrix[11] = z;
+    psgl_context_mult_matrix(matrix);
+}
+
+void psgl_context_frustumf(GLfloat left, GLfloat right, GLfloat bottom,
+                           GLfloat top, GLfloat znear, GLfloat zfar)
+{
+    GLfloat matrix[16];
+    GLfloat rl = right - left;
+    GLfloat tb = top - bottom;
+    GLfloat fn = zfar - znear;
+    if (rl == 0.0f || tb == 0.0f || fn == 0.0f || znear <= 0.0f || zfar <= 0.0f)
+        return;
+    psgl_zero(matrix, sizeof(matrix));
+    matrix[0] = (2.0f * znear) / rl;
+    matrix[2] = (right + left) / rl;
+    matrix[5] = (2.0f * znear) / tb;
+    matrix[6] = (top + bottom) / tb;
+    matrix[10] = -(zfar + znear) / fn;
+    matrix[11] = -(2.0f * zfar * znear) / fn;
+    matrix[14] = -1.0f;
+    psgl_context_mult_matrix(matrix);
 }
 
 void psgl_context_orthof(GLfloat left, GLfloat right, GLfloat bottom,

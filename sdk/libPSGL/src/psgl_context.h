@@ -9,6 +9,9 @@
 #define PSGL_MAX_FRAME_BUFFERS 3u
 #define PSGL_MAX_TEXTURE_UNITS 4u
 #define PSGL_MAX_VERTEX_ATTRIBS 4u
+#define PSGL_MODELVIEW_STACK_DEPTH 16u
+#define PSGL_PROJECTION_STACK_DEPTH 2u
+#define PSGL_TEXTURE_STACK_DEPTH 2u
 
 typedef enum PSGLvertexAttribSlot {
     PSGL_ATTRIB_VERTEX = 0,
@@ -86,7 +89,13 @@ struct PSGLcontext {
     GLenum matrix_mode;
     GLfloat modelview[16];
     GLfloat projection[16];
-    GLfloat texture[16];
+    GLfloat texture_matrix[PSGL_MAX_TEXTURE_UNITS][16];
+    GLfloat modelview_stack[PSGL_MODELVIEW_STACK_DEPTH][16];
+    GLfloat projection_stack[PSGL_PROJECTION_STACK_DEPTH][16];
+    GLfloat texture_stack[PSGL_MAX_TEXTURE_UNITS][PSGL_TEXTURE_STACK_DEPTH][16];
+    uint32_t modelview_stack_depth;
+    uint32_t projection_stack_depth;
+    uint32_t texture_stack_depth[PSGL_MAX_TEXTURE_UNITS];
     GLint viewport[4];
     GLint scissor[4];
     GLboolean blend_enabled;
@@ -154,8 +163,15 @@ void psgl_context_clear(GLbitfield mask);
 void psgl_context_set_viewport(GLint x, GLint y, GLsizei width, GLsizei height);
 void psgl_context_matrix_mode(GLenum mode);
 void psgl_context_load_identity(void);
+void psgl_context_push_matrix(void);
+void psgl_context_pop_matrix(void);
 void psgl_context_load_matrix(const GLfloat *matrix);
 void psgl_context_mult_matrix(const GLfloat *matrix);
+void psgl_context_rotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z);
+void psgl_context_scalef(GLfloat x, GLfloat y, GLfloat z);
+void psgl_context_translatef(GLfloat x, GLfloat y, GLfloat z);
+void psgl_context_frustumf(GLfloat left, GLfloat right, GLfloat bottom,
+                           GLfloat top, GLfloat znear, GLfloat zfar);
 void psgl_context_orthof(GLfloat left, GLfloat right, GLfloat bottom,
                          GLfloat top, GLfloat znear, GLfloat zfar);
 void psgl_context_set_enable(GLenum cap, GLboolean enabled);
