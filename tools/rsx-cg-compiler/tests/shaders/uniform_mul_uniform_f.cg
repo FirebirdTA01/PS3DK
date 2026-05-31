@@ -1,0 +1,9 @@
+// FP uniform-only arithmetic.  One uniform must be materialized before
+// the MUL because the fragment path has a single inline const source.
+void main(
+    uniform float4 a,
+    uniform float4 b,
+    out float4 color : COLOR)
+{
+    color = a * b;
+}

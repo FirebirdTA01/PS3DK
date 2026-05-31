@@ -1,0 +1,11 @@
+// Generic FP temp chain where Add feeds Mul.  StoreOutput is not the
+// direct consumer of the first arithmetic result.
+void main(
+    float4 vcol       : COLOR,
+    uniform float4 bias,
+    uniform float4 scale,
+    out float4 color  : COLOR)
+{
+    float4 shifted = vcol + bias;
+    color = shifted * scale;
+}

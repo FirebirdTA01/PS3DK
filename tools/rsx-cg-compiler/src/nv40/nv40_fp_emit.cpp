@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -154,6 +155,23 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         bool      uniformNeg = false;
     };
     std::unordered_map<IRValueID, FpArithBinding> valueToArith;
+
+    enum class GenericFpOp { Add, Sub, Mul, Mad, Min, Max, Dot3, Dot4 };
+    struct GenericFpArithBinding
+    {
+        GenericFpOp op = GenericFpOp::Add;
+        IRValueID   srcIds[3] = {0, 0, 0};
+        int         width = 4;
+    };
+    std::unordered_map<IRValueID, GenericFpArithBinding> valueToGenericArith;
+
+    struct GenericFpVecConstructBinding
+    {
+        IRValueID lanes[4] = {0, 0, 0, 0};
+        int       width = 4;
+    };
+    std::unordered_map<IRValueID, GenericFpVecConstructBinding>
+        valueToGenericVecConstruct;
 
     // N-ary arithmetic chain: e.g. `vcol + a + b + c` (3 adds, one root
     // varying, three uniform addends).  the reference compiler lowers this with an
@@ -1853,9 +1871,15 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
                 else
                 {
-                    out.diagnostics.push_back(
-                        "nv40-fp: Dot supported only for (varying, uniform) pairs today");
-                    return out;
+                    GenericFpArithBinding g;
+                    g.op = (dotOp == FpArithOp::Dot3)
+                        ? GenericFpOp::Dot3
+                        : GenericFpOp::Dot4;
+                    g.srcIds[0] = inst.operands[0];
+                    g.srcIds[1] = inst.operands[1];
+                    g.width = 1;
+                    valueToGenericArith[inst.result] = g;
+                    break;
                 }
                 valueToArith[inst.result] = bind;
                 break;
@@ -2343,10 +2367,21 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         }
                     }
 
-                    out.diagnostics.push_back(
-                        "nv40-fp: arithmetic ops supported only for (varying, uniform) pairs "
-                        "(uniform+uniform / literal arithmetic lands later)");
-                    return out;
+                    GenericFpArithBinding g;
+                    switch (inst.op)
+                    {
+                    case IROp::Add: g.op = GenericFpOp::Add; break;
+                    case IROp::Sub: g.op = GenericFpOp::Sub; break;
+                    case IROp::Mul: g.op = GenericFpOp::Mul; break;
+                    case IROp::Min: g.op = GenericFpOp::Min; break;
+                    case IROp::Max: g.op = GenericFpOp::Max; break;
+                    default: break;
+                    }
+                    g.srcIds[0] = a;
+                    g.srcIds[1] = b;
+                    g.width = std::max(1, inst.resultType.vectorSize);
+                    valueToGenericArith[inst.result] = g;
+                    break;
                 }
                 // Sub lowers to Add with the 2nd operand (the uniform
                 // in our canonical pattern) negated.  NV40 ADD is
@@ -2864,6 +2899,32 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         // std::fprintf(stderr, "DEBUG VecConstruct: Shape A5 matched! tex=%%%u var=%%%u\n",
                         //              (unsigned)b.texBaseId, (unsigned)b.varyingId);
                         valueToVecConstructTexMul[inst.result] = b;
+                        break;
+                    }
+                }
+
+                {
+                    bool hasGenericLane = false;
+                    for (IRValueID opId : inst.operands)
+                    {
+                        if (valueToGenericArith.count(opId) ||
+                            valueToGenericVecConstruct.count(opId) ||
+                            valueToArith.count(opId) ||
+                            valueToMad.count(opId) ||
+                            valueToScalarUnary.count(opId) ||
+                            valueToDot3LitPackScaled.count(opId))
+                        {
+                            hasGenericLane = true;
+                            break;
+                        }
+                    }
+                    if (hasGenericLane && inst.operands.size() <= 4)
+                    {
+                        GenericFpVecConstructBinding g;
+                        g.width = static_cast<int>(inst.operands.size());
+                        for (size_t i = 0; i < inst.operands.size(); ++i)
+                            g.lanes[i] = inst.operands[i];
+                        valueToGenericVecConstruct[inst.result] = g;
                         break;
                     }
                 }
@@ -7088,6 +7149,581 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         emittedSomething = true;
                         break;
                     }
+                }
+
+                struct GenericFpSource
+                {
+                    enum class Kind { None, Reg, Uniform, Literal };
+                    Kind kind = Kind::None;
+                    struct nvfx_reg reg = nvfx_reg(NVFXSR_NONE, 0);
+                    unsigned uniformParam = 0;
+                    float literal[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    int inputSrc = -1;
+                    uint8_t swz[4] = {0, 1, 2, 3};
+                    bool absMod = false;
+                    bool negMod = false;
+                };
+
+                auto recordGenericInputUse = [&](int inputSrc)
+                {
+                    if (inputSrc < 0) return;
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
+                    if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        attrs.texCoordsInputMask |=
+                            uint16_t{1} << (inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    }
+                };
+
+                auto recordGenericUniformOffset =
+                    [&](unsigned uniformParam, uint32_t ucodeByteOffset)
+                {
+                    for (auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == uniformParam)
+                        {
+                            eu.ucodeByteOffsets.push_back(ucodeByteOffset);
+                            break;
+                        }
+                    }
+                };
+
+                auto makeGenericNvfxSrc =
+                    [&](const GenericFpSource& src) -> struct nvfx_src
+                {
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg& reg =
+                        (src.kind == GenericFpSource::Kind::Uniform ||
+                         src.kind == GenericFpSource::Kind::Literal)
+                            ? constReg
+                            : src.reg;
+                    struct nvfx_src s =
+                        nvfx_src(const_cast<struct nvfx_reg&>(reg));
+                    s.swz[0] = src.swz[0];
+                    s.swz[1] = src.swz[1];
+                    s.swz[2] = src.swz[2];
+                    s.swz[3] = src.swz[3];
+                    s.abs = src.absMod ? 1 : 0;
+                    s.negate = src.negMod ? 1 : 0;
+                    return s;
+                };
+
+                auto appendGenericInlineSource =
+                    [&](const GenericFpSource& src)
+                {
+                    const uint32_t off = asm_.currentByteSize();
+                    if (src.kind == GenericFpSource::Kind::Uniform)
+                    {
+                        recordGenericUniformOffset(src.uniformParam, off);
+                        static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                        asm_.appendConstBlock(zeros);
+                    }
+                    else if (src.kind == GenericFpSource::Kind::Literal)
+                    {
+                        asm_.appendConstBlock(src.literal);
+                    }
+                };
+
+                auto emitGenericMov =
+                    [&](const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        GenericFpSource src,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    if (src.kind == GenericFpSource::Kind::Literal &&
+                        (mask == NVFX_FP_MASK_X || mask == NVFX_FP_MASK_Y ||
+                         mask == NVFX_FP_MASK_Z || mask == NVFX_FP_MASK_W) &&
+                        src.swz[0] == 0 && src.swz[1] == 0 &&
+                        src.swz[2] == 0 && src.swz[3] == 0)
+                    {
+                        const float v = src.literal[0];
+                        src.literal[0] = src.literal[1] =
+                            src.literal[2] = src.literal[3] = 0.0f;
+                        const int lane =
+                            (mask == NVFX_FP_MASK_X) ? 0 :
+                            (mask == NVFX_FP_MASK_Y) ? 1 :
+                            (mask == NVFX_FP_MASK_Z) ? 2 : 3;
+                        src.literal[lane] = v;
+                        src.swz[0] = 0;
+                        src.swz[1] = 1;
+                        src.swz[2] = 2;
+                        src.swz[3] = 3;
+                    }
+
+                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
+                    struct nvfx_src s0 = makeGenericNvfxSrc(src);
+                    struct nvfx_src s1 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                    struct nvfx_src s2 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                    struct nvfx_insn in = nvfx_insn(
+                        sat ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dst),
+                        mask, s0, s1, s2);
+                    in.precision = precision;
+                    asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                    appendGenericInlineSource(src);
+                    if (src.kind == GenericFpSource::Kind::Reg)
+                        recordGenericInputUse(src.inputSrc);
+                    return true;
+                };
+
+                std::function<bool(IRValueID, const struct nvfx_reg&, uint8_t, uint8_t, bool)>
+                    emitGenericValueToDest;
+                std::function<GenericFpSource(IRValueID)> resolveGenericSource;
+                std::function<GenericFpSource(IRValueID, int)> materializeGenericValue;
+
+                auto literalSourceFromValue =
+                    [&](IRValueID id, GenericFpSource& src) -> bool
+                {
+                    if (auto litIt = valueToLiteralVec4.find(id);
+                        litIt != valueToLiteralVec4.end())
+                    {
+                        src.kind = GenericFpSource::Kind::Literal;
+                        for (int k = 0; k < 4; ++k)
+                            src.literal[k] = litIt->second.vals[k];
+                        return true;
+                    }
+                    IRValue* v = entry.getValue(id);
+                    auto* c = dynamic_cast<IRConstant*>(v);
+                    if (!c) return false;
+                    float f = 0.0f;
+                    if (std::holds_alternative<float>(c->value))
+                        f = std::get<float>(c->value);
+                    else if (std::holds_alternative<int32_t>(c->value))
+                        f = static_cast<float>(std::get<int32_t>(c->value));
+                    else
+                        return false;
+                    src.kind = GenericFpSource::Kind::Literal;
+                    src.literal[0] = f;
+                    src.swz[0] = src.swz[1] = src.swz[2] = src.swz[3] = 0;
+                    return true;
+                };
+
+                resolveGenericSource = [&](IRValueID id) -> GenericFpSource
+                {
+                    GenericFpSource src;
+                    const SrcMod mods = resolveSrcMods(id);
+
+                    if (auto inIt = valueToInputSrc.find(mods.baseId);
+                        inIt != valueToInputSrc.end())
+                    {
+                        src.kind = GenericFpSource::Kind::Reg;
+                        src.reg = nvfx_reg(NVFXSR_INPUT, inIt->second);
+                        src.inputSrc = inIt->second;
+                        src.absMod = mods.absMod;
+                        src.negMod = mods.negMod;
+                        return src;
+                    }
+
+                    if (auto seIt = valueToScalarExtract.find(mods.baseId);
+                        seIt != valueToScalarExtract.end())
+                    {
+                        auto inIt = valueToInputSrc.find(seIt->second.baseId);
+                        if (inIt != valueToInputSrc.end())
+                        {
+                            src.kind = GenericFpSource::Kind::Reg;
+                            src.reg = nvfx_reg(NVFXSR_INPUT, inIt->second);
+                            src.inputSrc = inIt->second;
+                            src.absMod = mods.absMod;
+                            src.negMod = mods.negMod;
+                            const uint8_t lane =
+                                static_cast<uint8_t>(seIt->second.lane);
+                            src.swz[0] = src.swz[1] = src.swz[2] =
+                                src.swz[3] = lane;
+                            return src;
+                        }
+                    }
+
+                    if (auto uIt = valueToFpUniform.find(mods.baseId);
+                        uIt != valueToFpUniform.end())
+                    {
+                        src.kind = GenericFpSource::Kind::Uniform;
+                        src.uniformParam = uIt->second;
+                        src.absMod = mods.absMod;
+                        src.negMod = mods.negMod;
+                        return src;
+                    }
+
+                    if (literalSourceFromValue(mods.baseId, src))
+                    {
+                        src.absMod = mods.absMod;
+                        src.negMod = mods.negMod;
+                        return src;
+                    }
+
+                    return src;
+                };
+
+                auto genericOpOpcode = [&](GenericFpOp op) -> uint8_t
+                {
+                    switch (op)
+                    {
+                    case GenericFpOp::Add:
+                    case GenericFpOp::Sub:
+                        return NVFX_FP_OP_OPCODE_ADD;
+                    case GenericFpOp::Mul:  return NVFX_FP_OP_OPCODE_MUL;
+                    case GenericFpOp::Mad:  return NVFX_FP_OP_OPCODE_MAD;
+                    case GenericFpOp::Min:  return NVFX_FP_OP_OPCODE_MIN;
+                    case GenericFpOp::Max:  return NVFX_FP_OP_OPCODE_MAX;
+                    case GenericFpOp::Dot3: return NVFX_FP_OP_OPCODE_DP3;
+                    case GenericFpOp::Dot4: return NVFX_FP_OP_OPCODE_DP4;
+                    }
+                    return NVFX_FP_OP_OPCODE_ADD;
+                };
+
+                auto genericSourceNeedsInline =
+                    [](const GenericFpSource& src) -> bool
+                {
+                    return src.kind == GenericFpSource::Kind::Uniform ||
+                           src.kind == GenericFpSource::Kind::Literal;
+                };
+
+                auto emitGenericOp =
+                    [&](GenericFpOp op,
+                        const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        GenericFpSource src0,
+                        GenericFpSource src1,
+                        GenericFpSource src2,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    GenericFpSource* srcs[3] = {&src0, &src1, &src2};
+                    int inlineCount = 0;
+                    for (GenericFpSource* s : srcs)
+                        if (genericSourceNeedsInline(*s)) ++inlineCount;
+
+                    const int preloadOrder[3] =
+                        { (op == GenericFpOp::Mul) ? 1 : 0,
+                          (op == GenericFpOp::Mul) ? 0 : 1,
+                          2 };
+                    for (int oi = 0; inlineCount > 1 && oi < 3; ++oi)
+                    {
+                        const int i = preloadOrder[oi];
+                        if (!genericSourceNeedsInline(*srcs[i])) continue;
+                        GenericFpSource tmp;
+                        tmp.kind = GenericFpSource::Kind::Reg;
+                        tmp.reg = nvfx_reg(NVFXSR_TEMP, 0);
+                        if (!emitGenericMov(tmp.reg, NVFX_FP_MASK_ALL,
+                                            *srcs[i], FLOAT32, false))
+                            return false;
+                        *srcs[i] = tmp;
+                        --inlineCount;
+                    }
+
+                    if (op == GenericFpOp::Add &&
+                        genericSourceNeedsInline(src1) &&
+                        !genericSourceNeedsInline(src0) &&
+                        src0.kind == GenericFpSource::Kind::Reg &&
+                        src0.reg.type == NVFXSR_INPUT)
+                    {
+                        std::swap(src0, src1);
+                    }
+                    if (op == GenericFpOp::Mul &&
+                        genericSourceNeedsInline(src0) &&
+                        src1.kind == GenericFpSource::Kind::Reg &&
+                        src1.reg.type == NVFXSR_TEMP)
+                    {
+                        std::swap(src0, src1);
+                    }
+
+                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
+                    struct nvfx_src s0 = makeGenericNvfxSrc(src0);
+                    struct nvfx_src s1 = makeGenericNvfxSrc(src1);
+                    struct nvfx_src s2 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                    if (op == GenericFpOp::Mad)
+                        s2 = makeGenericNvfxSrc(src2);
+                    if (op == GenericFpOp::Sub)
+                        s1.negate = !s1.negate;
+
+                    struct nvfx_insn in = nvfx_insn(
+                        sat ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dst),
+                        mask, s0, s1, s2);
+                    in.precision = precision;
+                    asm_.emit(in, genericOpOpcode(op));
+
+                    if (genericSourceNeedsInline(src0))
+                        appendGenericInlineSource(src0);
+                    else if (genericSourceNeedsInline(src1))
+                        appendGenericInlineSource(src1);
+                    else if (op == GenericFpOp::Mad &&
+                             genericSourceNeedsInline(src2))
+                        appendGenericInlineSource(src2);
+
+                    if (src0.kind == GenericFpSource::Kind::Reg)
+                        recordGenericInputUse(src0.inputSrc);
+                    if (src1.kind == GenericFpSource::Kind::Reg)
+                        recordGenericInputUse(src1.inputSrc);
+                    if (src2.kind == GenericFpSource::Kind::Reg)
+                        recordGenericInputUse(src2.inputSrc);
+                    return true;
+                };
+
+                auto emitExistingArithToDest =
+                    [&](const FpArithBinding& bind,
+                        const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    auto iIt = valueToInputSrc.find(bind.inputId);
+                    auto uIt = valueToFpUniform.find(bind.uniformId);
+                    if (iIt == valueToInputSrc.end() ||
+                        uIt == valueToFpUniform.end())
+                        return false;
+
+                    GenericFpSource inSrc;
+                    inSrc.kind = GenericFpSource::Kind::Reg;
+                    inSrc.reg = nvfx_reg(NVFXSR_INPUT, iIt->second);
+                    inSrc.inputSrc = iIt->second;
+                    inSrc.absMod = bind.inputAbs;
+                    inSrc.negMod = bind.inputNeg;
+
+                    GenericFpSource uniSrc;
+                    uniSrc.kind = GenericFpSource::Kind::Uniform;
+                    uniSrc.uniformParam = uIt->second;
+                    uniSrc.absMod = bind.uniformAbs;
+                    uniSrc.negMod = bind.uniformNeg;
+
+                    GenericFpOp op = GenericFpOp::Add;
+                    switch (bind.op)
+                    {
+                    case FpArithOp::Add:  op = GenericFpOp::Add; break;
+                    case FpArithOp::Mul:  op = GenericFpOp::Mul; break;
+                    case FpArithOp::Min:  op = GenericFpOp::Min; break;
+                    case FpArithOp::Max:  op = GenericFpOp::Max; break;
+                    case FpArithOp::Dot3: op = GenericFpOp::Dot3; break;
+                    case FpArithOp::Dot4: op = GenericFpOp::Dot4; break;
+                    }
+
+                    if (op == GenericFpOp::Add)
+                        return emitGenericOp(op, dst, mask, uniSrc, inSrc,
+                                             GenericFpSource{}, precision, sat);
+                    return emitGenericOp(op, dst, mask, inSrc, uniSrc,
+                                         GenericFpSource{}, precision, sat);
+                };
+
+                auto emitMadBindingToDest =
+                    [&](const FpMadBinding& mb,
+                        const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    FpArithBinding mul;
+                    mul.op = FpArithOp::Mul;
+                    mul.inputId = mb.inputId;
+                    mul.uniformId = mb.multiplierUniformId;
+
+                    struct nvfx_reg hDst = nvfx_reg(NVFXSR_TEMP, 0);
+                    hDst.is_fp16 = 1;
+                    auto inIt = valueToInputSrc.find(mb.inputId);
+                    auto mulUIt = valueToFpUniform.find(mb.multiplierUniformId);
+                    if (inIt == valueToInputSrc.end() ||
+                        mulUIt == valueToFpUniform.end())
+                        return false;
+
+                    GenericFpSource inputSrc;
+                    inputSrc.kind = GenericFpSource::Kind::Reg;
+                    inputSrc.reg = nvfx_reg(NVFXSR_INPUT, inIt->second);
+                    inputSrc.inputSrc = inIt->second;
+                    if (!emitGenericMov(hDst, NVFX_FP_MASK_ALL, inputSrc,
+                                        FLOAT16, false))
+                        return false;
+
+                    const IRValueID preloadUniformId =
+                        mb.addendIsLiteral ? mb.multiplierUniformId
+                                           : mb.addendId;
+                    GenericFpSource preloadSrc = resolveGenericSource(preloadUniformId);
+                    GenericFpSource r1Src;
+                    r1Src.kind = GenericFpSource::Kind::Reg;
+                    r1Src.reg = nvfx_reg(NVFXSR_TEMP, 1);
+                    if (!emitGenericMov(r1Src.reg, NVFX_FP_MASK_ALL,
+                                        preloadSrc, FLOAT32, false))
+                        return false;
+
+                    GenericFpSource hSrc;
+                    hSrc.kind = GenericFpSource::Kind::Reg;
+                    hSrc.reg = hDst;
+
+                    GenericFpSource s1;
+                    GenericFpSource s2;
+                    if (mb.addendIsLiteral)
+                    {
+                        s1 = r1Src;
+                        s2 = resolveGenericSource(mb.addendId);
+                    }
+                    else
+                    {
+                        s1.kind = GenericFpSource::Kind::Uniform;
+                        s1.uniformParam = mulUIt->second;
+                        s2 = r1Src;
+                    }
+
+                    return emitGenericOp(GenericFpOp::Mad, dst, mask,
+                                         hSrc, s1, s2, precision, sat);
+                };
+
+                materializeGenericValue =
+                    [&](IRValueID id, int tempIdx) -> GenericFpSource
+                {
+                    GenericFpSource direct = resolveGenericSource(id);
+                    if (direct.kind != GenericFpSource::Kind::None &&
+                        direct.kind == GenericFpSource::Kind::Reg)
+                        return direct;
+
+                    GenericFpSource temp;
+                    temp.kind = GenericFpSource::Kind::Reg;
+                    temp.reg = nvfx_reg(NVFXSR_TEMP, tempIdx);
+
+                    if (direct.kind != GenericFpSource::Kind::None)
+                    {
+                        if (!emitGenericMov(temp.reg, NVFX_FP_MASK_ALL,
+                                            direct, FLOAT32, false))
+                            return GenericFpSource{};
+                        return temp;
+                    }
+
+                    if (auto arIt = valueToArith.find(id);
+                        arIt != valueToArith.end())
+                    {
+                        if (!emitExistingArithToDest(arIt->second, temp.reg,
+                                                     NVFX_FP_MASK_ALL,
+                                                     FLOAT32, false))
+                            return GenericFpSource{};
+                        return temp;
+                    }
+
+                    if (auto mdIt = valueToMad.find(id);
+                        mdIt != valueToMad.end())
+                    {
+                        if (!emitMadBindingToDest(mdIt->second, temp.reg,
+                                                  NVFX_FP_MASK_ALL,
+                                                  FLOAT32, false))
+                            return GenericFpSource{};
+                        return temp;
+                    }
+
+                    if (!emitGenericValueToDest(id, temp.reg, NVFX_FP_MASK_ALL,
+                                                FLOAT32, false))
+                        return GenericFpSource{};
+                    return temp;
+                };
+
+                auto emitGenericArithBinding =
+                    [&](const GenericFpArithBinding& g,
+                        const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    const int srcCount = (g.op == GenericFpOp::Mad) ? 3 : 2;
+                    GenericFpSource srcs[3];
+                    bool materializedExistingArith = false;
+                    for (int i = 0; i < srcCount; ++i)
+                    {
+                        srcs[i] = resolveGenericSource(g.srcIds[i]);
+                        if (srcs[i].kind == GenericFpSource::Kind::None)
+                        {
+                            if (valueToArith.count(g.srcIds[i]))
+                                materializedExistingArith = true;
+                            const int tempIdx = (i == 0) ? 0 : 1;
+                            srcs[i] = materializeGenericValue(g.srcIds[i], tempIdx);
+                        }
+                        if (srcs[i].kind == GenericFpSource::Kind::None)
+                            return false;
+                    }
+
+                    if (g.op == GenericFpOp::Add &&
+                        genericSourceNeedsInline(srcs[1]) &&
+                        srcs[0].kind == GenericFpSource::Kind::Reg &&
+                        srcs[0].reg.type == NVFXSR_INPUT)
+                    {
+                        std::swap(srcs[0], srcs[1]);
+                    }
+
+                    if (materializedExistingArith)
+                        asm_.emitFencbr();
+
+                    return emitGenericOp(g.op, dst, mask, srcs[0], srcs[1],
+                                         srcs[2], precision, sat);
+                };
+
+                emitGenericValueToDest =
+                    [&](IRValueID id,
+                        const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    if (auto gvIt = valueToGenericVecConstruct.find(id);
+                        gvIt != valueToGenericVecConstruct.end())
+                    {
+                        bool emittedLane[4] = {false, false, false, false};
+                        for (int i = 0; i < gvIt->second.width; ++i)
+                        {
+                            if (emittedLane[i]) continue;
+                            const IRValueID laneId = gvIt->second.lanes[i];
+                            uint8_t laneMask = 0;
+                            for (int j = i; j < gvIt->second.width; ++j)
+                            {
+                                if (gvIt->second.lanes[j] != laneId) continue;
+                                laneMask |= static_cast<uint8_t>(1u << j);
+                                emittedLane[j] = true;
+                            }
+                            if (!emitGenericValueToDest(laneId, dst,
+                                                        laneMask, precision,
+                                                        sat && (laneMask == mask)))
+                                return false;
+                        }
+                        return true;
+                    }
+
+                    if (auto gaIt = valueToGenericArith.find(id);
+                        gaIt != valueToGenericArith.end())
+                    {
+                        return emitGenericArithBinding(gaIt->second, dst, mask,
+                                                       precision, sat);
+                    }
+
+                    if (auto arIt = valueToArith.find(id);
+                        arIt != valueToArith.end())
+                    {
+                        return emitExistingArithToDest(arIt->second, dst, mask,
+                                                       precision, sat);
+                    }
+
+                    if (auto mdIt = valueToMad.find(id);
+                        mdIt != valueToMad.end())
+                    {
+                        return emitMadBindingToDest(mdIt->second, dst, mask,
+                                                    precision, sat);
+                    }
+
+                    GenericFpSource src = resolveGenericSource(id);
+                    if (src.kind == GenericFpSource::Kind::None)
+                        return false;
+                    return emitGenericMov(dst, mask, src, precision, sat);
+                };
+
+                if (valueToGenericVecConstruct.count(srcId) ||
+                    valueToGenericArith.count(srcId))
+                {
+                    if (!emitGenericValueToDest(srcId, dstReg,
+                                                NVFX_FP_MASK_ALL,
+                                                dstPrecision, saturate))
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: generic arithmetic value did not lower");
+                        return out;
+                    }
+                    emittedSomething = true;
+                    break;
                 }
 
                 // Resolve abs/neg modifiers on the direct-MOV path so

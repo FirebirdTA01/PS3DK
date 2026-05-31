@@ -1,0 +1,10 @@
+// Generic FP dot result stored through scalar broadcast.  This keeps
+// dot(vcol.rgb, weights) distinct from direct dot-to-color lowering.
+void main(
+    float4 vcol       : COLOR,
+    uniform float3 weights,
+    out float4 color  : COLOR)
+{
+    float d = dot(vcol.rgb, weights);
+    color = float4(d, d, d, 1.0);
+}

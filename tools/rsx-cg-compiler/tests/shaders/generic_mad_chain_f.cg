@@ -1,0 +1,12 @@
+// Generic FP arithmetic chain built from a MAD result.  The direct
+// vcol*scale+bias recognizer must remain ahead of the generic path.
+void main(
+    float4 vcol       : COLOR,
+    uniform float4 scale,
+    uniform float4 bias,
+    uniform float4 tint,
+    out float4 color  : COLOR)
+{
+    float4 lit = vcol * scale + bias;
+    color = lit * tint;
+}

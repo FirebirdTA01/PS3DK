@@ -1,0 +1,8 @@
+// FP uniform plus literal arithmetic.  The uniform uses an inline zero
+// block and the literal uses a separate inline literal block.
+void main(
+    uniform float4 a,
+    out float4 color : COLOR)
+{
+    color = a + float4(0.125, 0.25, 0.5, 1.0);
+}
