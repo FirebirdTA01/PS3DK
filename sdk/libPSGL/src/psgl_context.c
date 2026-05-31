@@ -443,6 +443,7 @@ static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
                 mask |= (1u << (8u + i));
         }
     }
+    if (context->fog_enabled) mask |= PSGL_FFP_FOG_MASK;
     return mask;
 }
 
@@ -1488,6 +1489,15 @@ PSGLcontext *psgl_context_create(void)
     context->attribs[PSGL_ATTRIB_NORMAL].size = 3;
     context->attribs[PSGL_ATTRIB_COLOR].size = 4;
     context->attribs[PSGL_ATTRIB_TEXCOORD].size = 4;
+    context->fog_enabled = GL_FALSE;
+    context->fog_mode = GL_EXP;
+    context->fog_density = 1.0f;
+    context->fog_start = 0.0f;
+    context->fog_end = 1.0f;
+    context->fog_color[0] = 0.0f;
+    context->fog_color[1] = 0.0f;
+    context->fog_color[2] = 0.0f;
+    context->fog_color[3] = 0.0f;
     context->dirty = PSGL_DIRTY_ALL;
     return context;
 }
@@ -2075,6 +2085,10 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         context->color_material_enabled = enabled;
         psgl_mark_lighting_dirty(context);
         break;
+    case GL_FOG:
+        context->fog_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_FOG | PSGL_DIRTY_CG;
+        break;
     case GL_TEXTURE_2D: {
         uint32_t unit = psgl_texture_unit_index(context->active_texture);
         context->textures[unit].texture_2d_enabled = enabled;
@@ -2427,6 +2441,7 @@ void psgl_context_get_booleanv(GLenum pname, GLboolean *params)
     switch (pname) {
     case GL_LIGHTING: *params = context->lighting_enabled; break;
     case GL_COLOR_MATERIAL: *params = context->color_material_enabled; break;
+    case GL_FOG: *params = context->fog_enabled; break;
     default:
         if (pname >= GL_LIGHT0 && pname < GL_LIGHT0 + PSGL_MAX_LIGHTS)
             *params = context->lights[pname - GL_LIGHT0].enabled;
@@ -2452,6 +2467,12 @@ void psgl_context_get_floatv(GLenum pname, GLfloat *params)
         break;
     case GL_SHADE_MODEL:
         params[0] = (GLfloat)context->shade_model;
+        break;
+    case GL_FOG_DENSITY: params[0] = context->fog_density; break;
+    case GL_FOG_START:   params[0] = context->fog_start; break;
+    case GL_FOG_END:     params[0] = context->fog_end; break;
+    case GL_FOG_COLOR:
+        psgl_get_float4(context->fog_color, params);
         break;
     default:
         params[0] = 0.0f;
@@ -2528,6 +2549,46 @@ void psgl_context_client_active_texture(GLenum texture)
     if (!context) return;
     if (psgl_texture_unit_index(texture) >= PSGL_MAX_TEXTURE_UNITS) return;
     context->client_active_texture = texture;
+}
+
+void psgl_context_set_fog_f(GLenum pname, GLfloat param)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    switch (pname) {
+    case GL_FOG_MODE:
+        if (param != (GLfloat)GL_LINEAR && param != (GLfloat)GL_EXP &&
+            param != (GLfloat)GL_EXP2) return;
+        context->fog_mode = (GLenum)param;
+        break;
+    case GL_FOG_DENSITY:
+        context->fog_density = param;
+        break;
+    case GL_FOG_START:
+        context->fog_start = param;
+        break;
+    case GL_FOG_END:
+        context->fog_end = param;
+        break;
+    default: return;
+    }
+    context->dirty |= PSGL_DIRTY_FOG | PSGL_DIRTY_CG;
+}
+
+void psgl_context_set_fog_fv(GLenum pname, const GLfloat *params)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !params) return;
+    switch (pname) {
+    case GL_FOG_COLOR:
+        context->fog_color[0] = params[0];
+        context->fog_color[1] = params[1];
+        context->fog_color[2] = params[2];
+        context->fog_color[3] = params[3];
+        break;
+    default: return;
+    }
+    context->dirty |= PSGL_DIRTY_FOG | PSGL_DIRTY_CG;
 }
 
 void psgl_context_gen_textures(GLsizei n, GLuint *textures)

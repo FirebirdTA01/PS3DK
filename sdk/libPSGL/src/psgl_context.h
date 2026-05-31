@@ -35,7 +35,8 @@ typedef enum PSGLdirtyBits {
     PSGL_DIRTY_FRAMEBUFFER = 0x00000400u,
     PSGL_DIRTY_RASTER = 0x00000800u,
     PSGL_DIRTY_LIGHTING = 0x00001000u,
-    PSGL_DIRTY_ALL = 0x00001fffu
+    PSGL_DIRTY_FOG = 0x00002000u,
+    PSGL_DIRTY_ALL = 0x00003fffu
 } PSGLdirtyBits;
 
 typedef struct PSGLframeBuffer {
@@ -133,6 +134,12 @@ struct PSGLcontext {
     GLboolean lighting_enabled;
     GLboolean color_material_enabled;
     GLboolean light_model_two_side;
+    GLboolean fog_enabled;
+    GLenum fog_mode;
+    GLfloat fog_density;
+    GLfloat fog_start;
+    GLfloat fog_end;
+    GLfloat fog_color[4];
     GLenum blend_src_rgb;
     GLenum blend_dst_rgb;
     GLenum blend_src_alpha;
@@ -278,5 +285,7 @@ void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
 void psgl_context_draw_arrays(GLenum mode, GLint first, GLsizei count);
 void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
                                 const GLvoid *indices);
+void psgl_context_set_fog_f(GLenum pname, GLfloat param);
+void psgl_context_set_fog_fv(GLenum pname, const GLfloat *params);
 
 #endif

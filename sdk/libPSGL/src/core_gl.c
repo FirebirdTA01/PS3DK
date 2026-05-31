@@ -80,6 +80,11 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
         params[0] = 1; params[1] = 64; break;
     case GL_SMOOTH_LINE_WIDTH_RANGE:
         params[0] = 1; params[1] = 8; break;
+    case GL_FOG_MODE: {
+        PSGLcontext *ctx = psglGetCurrentContext();
+        *params = ctx ? (GLint)ctx->fog_mode : 0;
+        break;
+    }
     default:
         *params = 0; break;
     }
@@ -428,13 +433,21 @@ GLAPI void glMultiTexCoord4x(GLenum target, GLfixed s, GLfixed t,
 /* ── fog ─────────────────────────────────────────────────────────── */
 
 GLAPI void glFogf(GLenum pname, GLfloat param)
-{ (void)pname; (void)param; }
+{ psgl_context_set_fog_f(pname, param); }
 GLAPI void glFogfv(GLenum pname, const GLfloat *params)
-{ (void)pname; (void)params; }
+{ psgl_context_set_fog_fv(pname, params); }
 GLAPI void glFogx(GLenum pname, GLfixed param)
-{ (void)pname; (void)param; }
+{ psgl_context_set_fog_f(pname, gl_fixed_to_float(param)); }
 GLAPI void glFogxv(GLenum pname, const GLfixed *params)
-{ (void)pname; (void)params; }
+{
+    GLfloat values[4];
+    if (!params) return;
+    values[0] = gl_fixed_to_float(params[0]);
+    values[1] = gl_fixed_to_float(params[1]);
+    values[2] = gl_fixed_to_float(params[2]);
+    values[3] = gl_fixed_to_float(params[3]);
+    psgl_context_set_fog_fv(pname, values);
+}
 
 /* ── lighting ────────────────────────────────────────────────────── */
 
