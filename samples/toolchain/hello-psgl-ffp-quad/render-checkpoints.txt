@@ -1,0 +1,5 @@
+# hello-psgl-ffp-quad checkpoint file (1920x1080 capture resolution)
+# x y expected_R expected_G expected_B tolerance
+100 300 5 20 46 10
+1000 520 0 58 195 35
+1400 520 234 238 249 35

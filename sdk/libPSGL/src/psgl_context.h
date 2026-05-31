@@ -54,6 +54,7 @@ typedef struct PSGLvertexAttribState {
 
 typedef struct PSGLtextureUnitState {
     GLuint texture_2d;
+    GLboolean texture_2d_enabled;
 } PSGLtextureUnitState;
 
 struct PSGLdevice {
@@ -150,6 +151,12 @@ void psgl_context_set_clear_depth(GLfloat depth);
 void psgl_context_set_clear_stencil(GLint stencil);
 void psgl_context_clear(GLbitfield mask);
 void psgl_context_set_viewport(GLint x, GLint y, GLsizei width, GLsizei height);
+void psgl_context_matrix_mode(GLenum mode);
+void psgl_context_load_identity(void);
+void psgl_context_load_matrix(const GLfloat *matrix);
+void psgl_context_mult_matrix(const GLfloat *matrix);
+void psgl_context_orthof(GLfloat left, GLfloat right, GLfloat bottom,
+                         GLfloat top, GLfloat znear, GLfloat zfar);
 void psgl_context_set_enable(GLenum cap, GLboolean enabled);
 void psgl_context_set_alpha_func(GLenum func, GLclampf ref);
 void psgl_context_set_blend_func(GLenum sfactor, GLenum dfactor);

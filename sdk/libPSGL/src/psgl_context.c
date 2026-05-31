@@ -1,5 +1,7 @@
 #include "psgl_context.h"
 #include "cg_internal.h"
+#include "ffp_minimal_fpo.h"
+#include "ffp_minimal_vpo.h"
 
 #include <malloc.h>
 #include <rsx/rsx.h>
@@ -19,6 +21,7 @@
 #define PSGL_BUFFER_BUSY           1u
 #define PSGL_MAX_QUEUE_FRAMES      1u
 #define PSGL_TEXTURE_ALIGNMENT     128u
+#define PSGL_FFP_MINIMAL_MASK      0x00000001u
 
 typedef struct PSGLbufferObject {
     GLuint name;
@@ -69,6 +72,11 @@ static PSGLbufferObject *g_psgl_buffers;
 static PSGLtextureObject *g_psgl_textures;
 static GLuint g_psgl_next_buffer_name = 1u;
 static GLuint g_psgl_next_texture_name = 1u;
+
+static PSGLcgParameter g_psgl_ffp_vp_params[1];
+static PSGLcgProgram g_psgl_ffp_vp;
+static PSGLcgProgram g_psgl_ffp_fp;
+static uint32_t g_psgl_ffp_initialized;
 
 static void psgl_zero(void *ptr, uint32_t size)
 {
@@ -170,6 +178,33 @@ static void psgl_matrix_identity(GLfloat matrix[16])
     matrix[15] = 1.0f;
 }
 
+static void psgl_matrix_multiply(GLfloat out[16], const GLfloat a[16],
+                                 const GLfloat b[16])
+{
+    GLfloat tmp[16];
+    for (uint32_t row = 0u; row < 4u; row++) {
+        for (uint32_t col = 0u; col < 4u; col++) {
+            tmp[row * 4u + col] =
+                a[row * 4u + 0u] * b[0u * 4u + col] +
+                a[row * 4u + 1u] * b[1u * 4u + col] +
+                a[row * 4u + 2u] * b[2u * 4u + col] +
+                a[row * 4u + 3u] * b[3u * 4u + col];
+        }
+    }
+    psgl_copy(out, tmp, sizeof(tmp));
+}
+
+static GLfloat *psgl_current_matrix(PSGLcontext *context)
+{
+    if (!context) return NULL;
+    switch (context->matrix_mode) {
+    case GL_MODELVIEW:  return context->modelview;
+    case GL_PROJECTION: return context->projection;
+    case GL_TEXTURE:    return context->texture;
+    default:            return context->modelview;
+    }
+}
+
 static float psgl_clampf(GLfloat value, GLfloat lo, GLfloat hi)
 {
     if (value < lo) return lo;
@@ -209,6 +244,120 @@ static void psgl_patch_fragment_slot(uint32_t *slot, const uint32_t value[4])
     slot[1] = psgl_halfword_swap_u32(value[1]);
     slot[2] = psgl_halfword_swap_u32(value[2]);
     slot[3] = psgl_halfword_swap_u32(value[3]);
+}
+
+static void psgl_copy_name(char *dst, const char *src)
+{
+    uint32_t i = 0u;
+    if (!dst) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    for (; i + 1u < PSGL_CG_NAME_MAX && src[i] != '\0'; i++)
+        dst[i] = src[i];
+    dst[i] = '\0';
+}
+
+static int psgl_ffp_init_minimal(void)
+{
+    const float *defaults = NULL;
+    uint32_t mvp_index;
+    if (g_psgl_ffp_initialized) return 1;
+
+    psgl_zero(&g_psgl_ffp_vp, sizeof(g_psgl_ffp_vp));
+    psgl_zero(&g_psgl_ffp_fp, sizeof(g_psgl_ffp_fp));
+    psgl_zero(g_psgl_ffp_vp_params, sizeof(g_psgl_ffp_vp_params));
+
+    if (cellCgbRead(psgl_ffp_minimal_vpo, psgl_ffp_minimal_vpo_len,
+                    &g_psgl_ffp_vp.cgb_program) != 0)
+        return 0;
+    if (cellCgbRead(psgl_ffp_minimal_fpo, psgl_ffp_minimal_fpo_len,
+                    &g_psgl_ffp_fp.cgb_program) != 0)
+        return 0;
+
+    g_psgl_ffp_vp.magic = PSGL_CG_PROGRAM_MAGIC;
+    g_psgl_ffp_vp.profile = CG_PROFILE_SCE_VP_RSX;
+    g_psgl_ffp_vp.cgb_profile = cellCgbGetProfile(&g_psgl_ffp_vp.cgb_program);
+    g_psgl_ffp_vp.binary = psgl_ffp_minimal_vpo;
+    g_psgl_ffp_vp.binary_size = psgl_ffp_minimal_vpo_len;
+    g_psgl_ffp_vp.parameters = g_psgl_ffp_vp_params;
+    g_psgl_ffp_vp.parameter_count = 1u;
+    g_psgl_ffp_vp.loaded = CG_TRUE;
+
+    g_psgl_ffp_fp.magic = PSGL_CG_PROGRAM_MAGIC;
+    g_psgl_ffp_fp.profile = CG_PROFILE_SCE_FP_RSX;
+    g_psgl_ffp_fp.cgb_profile = cellCgbGetProfile(&g_psgl_ffp_fp.cgb_program);
+    g_psgl_ffp_fp.binary = psgl_ffp_minimal_fpo;
+    g_psgl_ffp_fp.binary_size = psgl_ffp_minimal_fpo_len;
+    g_psgl_ffp_fp.loaded = CG_TRUE;
+
+    mvp_index = cellCgbMapLookup(&g_psgl_ffp_vp.cgb_program, "modelViewProj");
+    if (mvp_index == (uint32_t)CELL_CGB_ERROR_FAILED) return 0;
+
+    g_psgl_ffp_vp_params[0].magic = PSGL_CG_PARAMETER_MAGIC;
+    g_psgl_ffp_vp_params[0].program = &g_psgl_ffp_vp;
+    g_psgl_ffp_vp_params[0].index = mvp_index;
+    psgl_copy_name(g_psgl_ffp_vp_params[0].name, "modelViewProj");
+    g_psgl_ffp_vp_params[0].type = CG_FLOAT4x4;
+    g_psgl_ffp_vp_params[0].resource = CG_C;
+    g_psgl_ffp_vp_params[0].variability = CG_UNIFORM;
+    g_psgl_ffp_vp_params[0].direction = CG_IN;
+    g_psgl_ffp_vp_params[0].vertex_register = 0xffffu;
+    g_psgl_ffp_vp_params[0].fragment_register = 0xffffu;
+    g_psgl_ffp_vp_params[0].value_count = 16u;
+    g_psgl_ffp_vp_params[0].dirty = CG_TRUE;
+    cellCgbMapGetVertexUniformRegister(&g_psgl_ffp_vp.cgb_program,
+                                       mvp_index,
+                                       &g_psgl_ffp_vp_params[0].vertex_register,
+                                       &defaults);
+    if (defaults)
+        psgl_copy(g_psgl_ffp_vp_params[0].value, defaults,
+                  sizeof(g_psgl_ffp_vp_params[0].value));
+
+    g_psgl_ffp_initialized = 1u;
+    return 1;
+}
+
+static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
+{
+    if (!context) return 0u;
+    if (context->bound_vertex_program || context->bound_fragment_program)
+        return 0u;
+    if (!context->attribs[PSGL_ATTRIB_VERTEX].enabled ||
+        !context->attribs[PSGL_ATTRIB_TEXCOORD].enabled)
+        return 0u;
+    if (!context->textures[0].texture_2d_enabled ||
+        !context->textures[0].texture_2d)
+        return 0u;
+    for (uint32_t i = 1u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
+        if (context->textures[i].texture_2d_enabled)
+            return 0u;
+    }
+    return PSGL_FFP_MINIMAL_MASK;
+}
+
+static int psgl_ffp_state_mask_to_cg(uint32_t mask, PSGLcgProgram **vp,
+                                     PSGLcgProgram **fp)
+{
+    if (vp) *vp = NULL;
+    if (fp) *fp = NULL;
+    if (mask != PSGL_FFP_MINIMAL_MASK) return 0;
+    if (!psgl_ffp_init_minimal()) return 0;
+    if (vp) *vp = &g_psgl_ffp_vp;
+    if (fp) *fp = &g_psgl_ffp_fp;
+    return 1;
+}
+
+static void psgl_ffp_update_matrices(PSGLcontext *context)
+{
+    GLfloat mvp[16];
+    if (!context) return;
+    psgl_matrix_multiply(mvp, context->projection, context->modelview);
+    psgl_copy(g_psgl_ffp_vp_params[0].value, mvp, sizeof(mvp));
+    g_psgl_ffp_vp_params[0].value_count = 16u;
+    g_psgl_ffp_vp_params[0].dirty = CG_TRUE;
+    context->dirty &= ~PSGL_DIRTY_MATRICES;
 }
 
 static uint32_t psgl_bool(GLboolean value)
@@ -1041,6 +1190,9 @@ static void psgl_emit_fragment_program(PSGLcontext *context,
 
 static void psgl_validate_draw_state(PSGLcontext *context)
 {
+    PSGLcgProgram *vp;
+    PSGLcgProgram *fp;
+    uint32_t ffp_mask;
     if (!context) return;
     if (context->dirty & PSGL_DIRTY_FRAMEBUFFER) psgl_bind_render_target(context);
     if (context->dirty & PSGL_DIRTY_VIEWPORT) psgl_emit_viewport(context);
@@ -1052,10 +1204,20 @@ static void psgl_validate_draw_state(PSGLcontext *context)
     if (context->dirty & PSGL_DIRTY_RASTER) psgl_emit_raster(context);
     if (context->dirty & PSGL_DIRTY_TEXTURES) psgl_emit_textures(context);
     if (context->dirty & PSGL_DIRTY_CG) {
-        psgl_emit_vertex_program(context,
-                                 psgl_cg_program(context->bound_vertex_program));
-        psgl_emit_fragment_program(context,
-                                   psgl_cg_program(context->bound_fragment_program));
+        vp = psgl_cg_program(context->bound_vertex_program);
+        fp = psgl_cg_program(context->bound_fragment_program);
+        ffp_mask = psgl_ffp_state_mask(context);
+        if ((!vp || !fp) && ffp_mask) {
+            PSGLcgProgram *ffp_vp = NULL;
+            PSGLcgProgram *ffp_fp = NULL;
+            if (psgl_ffp_state_mask_to_cg(ffp_mask, &ffp_vp, &ffp_fp)) {
+                if (!vp) vp = ffp_vp;
+                if (!fp) fp = ffp_fp;
+                psgl_ffp_update_matrices(context);
+            }
+        }
+        psgl_emit_vertex_program(context, vp);
+        psgl_emit_fragment_program(context, fp);
         psgl_emit_vertex_arrays(context);
         context->dirty &= ~PSGL_DIRTY_CG;
     }
@@ -1451,6 +1613,60 @@ void psgl_context_set_viewport(GLint x, GLint y, GLsizei width, GLsizei height)
     psgl_emit_viewport(context);
 }
 
+void psgl_context_matrix_mode(GLenum mode)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (mode != GL_MODELVIEW && mode != GL_PROJECTION && mode != GL_TEXTURE)
+        return;
+    context->matrix_mode = mode;
+}
+
+void psgl_context_load_identity(void)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    GLfloat *matrix = psgl_current_matrix(context);
+    if (!matrix) return;
+    psgl_matrix_identity(matrix);
+    context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
+}
+
+void psgl_context_load_matrix(const GLfloat *matrix)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    GLfloat *dst = psgl_current_matrix(context);
+    if (!dst || !matrix) return;
+    psgl_copy(dst, matrix, sizeof(GLfloat) * 16u);
+    context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
+}
+
+void psgl_context_mult_matrix(const GLfloat *matrix)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    GLfloat *dst = psgl_current_matrix(context);
+    if (!dst || !matrix) return;
+    psgl_matrix_multiply(dst, dst, matrix);
+    context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
+}
+
+void psgl_context_orthof(GLfloat left, GLfloat right, GLfloat bottom,
+                         GLfloat top, GLfloat znear, GLfloat zfar)
+{
+    GLfloat matrix[16];
+    GLfloat rl = right - left;
+    GLfloat tb = top - bottom;
+    GLfloat fn = zfar - znear;
+    if (rl == 0.0f || tb == 0.0f || fn == 0.0f) return;
+    psgl_matrix_identity(matrix);
+    matrix[0] = 2.0f / rl;
+    matrix[5] = 2.0f / tb;
+    matrix[10] = -2.0f / fn;
+    matrix[3] = -(right + left) / rl;
+    matrix[7] = -(top + bottom) / tb;
+    matrix[11] = -(zfar + znear) / fn;
+    psgl_context_mult_matrix(matrix);
+}
+
 void psgl_context_set_enable(GLenum cap, GLboolean enabled)
 {
     PSGLcontext *context = g_psgl.current_context;
@@ -1489,6 +1705,12 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         context->logic_op_enabled = enabled;
         context->dirty |= PSGL_DIRTY_RASTER;
         break;
+    case GL_TEXTURE_2D: {
+        uint32_t unit = psgl_texture_unit_index(context->active_texture);
+        context->textures[unit].texture_2d_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_TEXTURES | PSGL_DIRTY_CG;
+        break;
+    }
     default:
         break;
     }

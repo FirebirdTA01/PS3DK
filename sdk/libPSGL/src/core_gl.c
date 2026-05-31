@@ -218,14 +218,28 @@ GLAPI void glFinish(void) {}
 
 /* ── matrices ────────────────────────────────────────────────────── */
 
-GLAPI void glMatrixMode(GLenum mode)      { (void)mode; }
-GLAPI void glLoadIdentity(void)           {}
+GLAPI void glMatrixMode(GLenum mode)      { psgl_context_matrix_mode(mode); }
+GLAPI void glLoadIdentity(void)           { psgl_context_load_identity(); }
 GLAPI void glPushMatrix(void)             {}
 GLAPI void glPopMatrix(void)              {}
-GLAPI void glLoadMatrixf(const GLfloat *m)  { (void)m; }
-GLAPI void glLoadMatrixx(const GLfixed *m)  { (void)m; }
-GLAPI void glMultMatrixf(const GLfloat *m)  { (void)m; }
-GLAPI void glMultMatrixx(const GLfixed *m)  { (void)m; }
+GLAPI void glLoadMatrixf(const GLfloat *m)  { psgl_context_load_matrix(m); }
+GLAPI void glLoadMatrixx(const GLfixed *m)
+{
+    GLfloat matrix[16];
+    if (!m) return;
+    for (unsigned i = 0; i < 16u; i++)
+        matrix[i] = (GLfloat)m[i] / 65536.0f;
+    psgl_context_load_matrix(matrix);
+}
+GLAPI void glMultMatrixf(const GLfloat *m)  { psgl_context_mult_matrix(m); }
+GLAPI void glMultMatrixx(const GLfixed *m)
+{
+    GLfloat matrix[16];
+    if (!m) return;
+    for (unsigned i = 0; i < 16u; i++)
+        matrix[i] = (GLfloat)m[i] / 65536.0f;
+    psgl_context_mult_matrix(matrix);
+}
 GLAPI void glRotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
 { (void)angle; (void)x; (void)y; (void)z; }
 GLAPI void glRotatex(GLfixed angle, GLfixed x, GLfixed y, GLfixed z)
@@ -246,10 +260,17 @@ GLAPI void glFrustumx(GLfixed l, GLfixed r, GLfixed b,
 { (void)l; (void)r; (void)b; (void)t; (void)n; (void)f; }
 GLAPI void glOrthof(GLfloat l, GLfloat r, GLfloat b,
                     GLfloat t, GLfloat n, GLfloat f)
-{ (void)l; (void)r; (void)b; (void)t; (void)n; (void)f; }
+{ psgl_context_orthof(l, r, b, t, n, f); }
 GLAPI void glOrthox(GLfixed l, GLfixed r, GLfixed b,
                     GLfixed t, GLfixed n, GLfixed f)
-{ (void)l; (void)r; (void)b; (void)t; (void)n; (void)f; }
+{
+    psgl_context_orthof((GLfloat)l / 65536.0f,
+                        (GLfloat)r / 65536.0f,
+                        (GLfloat)b / 65536.0f,
+                        (GLfloat)t / 65536.0f,
+                        (GLfloat)n / 65536.0f,
+                        (GLfloat)f / 65536.0f);
+}
 
 /* ── textures ────────────────────────────────────────────────────── */
 
