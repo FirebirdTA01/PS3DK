@@ -22,6 +22,17 @@ static void gl_zero(void *ptr, size_t size)
     }
 }
 
+static GLfloat gl_fixed_to_float(GLfixed value)
+{
+    return (GLfloat)value / 65536.0f;
+}
+
+static void gl_fixed4_to_float(const GLfixed *in, GLfloat out[4])
+{
+    for (unsigned i = 0u; i < 4u; i++)
+        out[i] = gl_fixed_to_float(in[i]);
+}
+
 GLAPI GLenum glGetError(void)
 {
     GLenum e = g_gl_error;
@@ -158,12 +169,19 @@ GLAPI void glColorMask(GLboolean red, GLboolean green,
 
 /* ── colour ──────────────────────────────────────────────────────── */
 
+GLAPI void glColorMaterial(GLenum face, GLenum mode)
+{ psgl_context_set_color_material(face, mode); }
 GLAPI void glColor4f(GLfloat red, GLfloat green,
                      GLfloat blue, GLfloat alpha)
-{ (void)red; (void)green; (void)blue; (void)alpha; }
+{ psgl_context_set_current_color(red, green, blue, alpha); }
 GLAPI void glColor4x(GLfixed red, GLfixed green,
                      GLfixed blue, GLfixed alpha)
-{ (void)red; (void)green; (void)blue; (void)alpha; }
+{
+    psgl_context_set_current_color(gl_fixed_to_float(red),
+                                   gl_fixed_to_float(green),
+                                   gl_fixed_to_float(blue),
+                                   gl_fixed_to_float(alpha));
+}
 
 /* ── normal ──────────────────────────────────────────────────────── */
 
@@ -174,7 +192,7 @@ GLAPI void glNormal3x(GLfixed nx, GLfixed ny, GLfixed nz)
 
 /* ── shading ─────────────────────────────────────────────────────── */
 
-GLAPI void glShadeModel(GLenum mode)      { (void)mode; }
+GLAPI void glShadeModel(GLenum mode)      { psgl_context_set_shade_model(mode); }
 
 /* ── point / line ────────────────────────────────────────────────── */
 
@@ -421,32 +439,47 @@ GLAPI void glFogxv(GLenum pname, const GLfixed *params)
 /* ── lighting ────────────────────────────────────────────────────── */
 
 GLAPI void glLightf(GLenum light, GLenum pname, GLfloat param)
-{ (void)light; (void)pname; (void)param; }
+{ psgl_context_set_light_f(light, pname, param); }
 GLAPI void glLightfv(GLenum light, GLenum pname, const GLfloat *params)
-{ (void)light; (void)pname; (void)params; }
+{ psgl_context_set_light_fv(light, pname, params); }
 GLAPI void glLightx(GLenum light, GLenum pname, GLfixed param)
-{ (void)light; (void)pname; (void)param; }
+{ psgl_context_set_light_f(light, pname, gl_fixed_to_float(param)); }
 GLAPI void glLightxv(GLenum light, GLenum pname, const GLfixed *params)
-{ (void)light; (void)pname; (void)params; }
+{
+    GLfloat values[4];
+    if (!params) return;
+    gl_fixed4_to_float(params, values);
+    psgl_context_set_light_fv(light, pname, values);
+}
 GLAPI void glLightModelf(GLenum pname, GLfloat param)
-{ (void)pname; (void)param; }
+{ psgl_context_set_light_model_f(pname, param); }
 GLAPI void glLightModelfv(GLenum pname, const GLfloat *params)
-{ (void)pname; (void)params; }
+{ psgl_context_set_light_model_fv(pname, params); }
 GLAPI void glLightModelx(GLenum pname, GLfixed param)
-{ (void)pname; (void)param; }
+{ psgl_context_set_light_model_f(pname, gl_fixed_to_float(param)); }
 GLAPI void glLightModelxv(GLenum pname, const GLfixed *params)
-{ (void)pname; (void)params; }
+{
+    GLfloat values[4];
+    if (!params) return;
+    gl_fixed4_to_float(params, values);
+    psgl_context_set_light_model_fv(pname, values);
+}
 
 /* ── material ────────────────────────────────────────────────────── */
 
 GLAPI void glMaterialf(GLenum face, GLenum pname, GLfloat param)
-{ (void)face; (void)pname; (void)param; }
+{ psgl_context_set_material_f(face, pname, param); }
 GLAPI void glMaterialfv(GLenum face, GLenum pname, const GLfloat *params)
-{ (void)face; (void)pname; (void)params; }
+{ psgl_context_set_material_fv(face, pname, params); }
 GLAPI void glMaterialx(GLenum face, GLenum pname, GLfixed param)
-{ (void)face; (void)pname; (void)param; }
+{ psgl_context_set_material_f(face, pname, gl_fixed_to_float(param)); }
 GLAPI void glMaterialxv(GLenum face, GLenum pname, const GLfixed *params)
-{ (void)face; (void)pname; (void)params; }
+{
+    GLfloat values[4];
+    if (!params) return;
+    gl_fixed4_to_float(params, values);
+    psgl_context_set_material_fv(face, pname, values);
+}
 
 /* ── read pixels ─────────────────────────────────────────────────── */
 

@@ -315,6 +315,8 @@ GLAPI void glColor4fv(const GLfloat *v);
 GLAPI void glColor4ub(GLubyte red, GLubyte green, GLubyte blue, GLubyte alpha);
 GLAPI void glGetBooleanv(GLenum pname, GLboolean *params);
 GLAPI void glGetFloatv(GLenum pname, GLfloat *params);
+GLAPI void glGetLightfv(GLenum light, GLenum pname, GLfloat *params);
+GLAPI void glGetMaterialfv(GLenum face, GLenum pname, GLfloat *params);
 GLAPI void glCompressedTexImage3D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const GLvoid *data);
 GLAPI void glCompressedTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const GLvoid *data);
 GLAPI void glCopyTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height);

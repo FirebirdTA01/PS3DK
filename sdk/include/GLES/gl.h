@@ -81,6 +81,9 @@ typedef void (*_GLfuncptr)(void);
 #define GL_LINE_SMOOTH 0x0B20
 #define GL_SCISSOR_TEST 0x0C11
 #define GL_COLOR_MATERIAL 0x0B57
+#define GL_COLOR_MATERIAL_FACE 0x0B55
+#define GL_COLOR_MATERIAL_PARAMETER 0x0B56
+#define GL_CURRENT_COLOR 0x0B00
 #define GL_NORMALIZE 0x0BA1
 #define GL_RESCALE_NORMAL 0x803A
 #define GL_POLYGON_OFFSET_FILL 0x8037
@@ -142,6 +145,7 @@ typedef void (*_GLfuncptr)(void);
 #define GL_FOG_HINT 0x0C54
 #define GL_LIGHT_MODEL_AMBIENT 0x0B53
 #define GL_LIGHT_MODEL_TWO_SIDE 0x0B52
+#define GL_SHADE_MODEL 0x0B54
 #define GL_AMBIENT 0x1200
 #define GL_DIFFUSE 0x1201
 #define GL_SPECULAR 0x1202
@@ -315,6 +319,7 @@ GLAPI GLenum glGetError(void);
 GLAPI void glGetIntegerv(GLenum pname, GLint *params);
 GLAPI const GLubyte *glGetString(GLenum name);
 GLAPI void glHint(GLenum target, GLenum mode);
+GLAPI void glColorMaterial(GLenum face, GLenum mode);
 GLAPI void glLightModelf(GLenum pname, GLfloat param);
 GLAPI void glLightModelfv(GLenum pname, const GLfloat *params);
 GLAPI void glLightModelx(GLenum pname, GLfixed param);

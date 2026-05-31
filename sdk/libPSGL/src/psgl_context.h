@@ -9,6 +9,7 @@
 #define PSGL_MAX_FRAME_BUFFERS 3u
 #define PSGL_MAX_TEXTURE_UNITS 4u
 #define PSGL_MAX_VERTEX_ATTRIBS 4u
+#define PSGL_MAX_LIGHTS 8u
 #define PSGL_MODELVIEW_STACK_DEPTH 16u
 #define PSGL_PROJECTION_STACK_DEPTH 2u
 #define PSGL_TEXTURE_STACK_DEPTH 2u
@@ -33,7 +34,8 @@ typedef enum PSGLdirtyBits {
     PSGL_DIRTY_MATRICES = 0x00000200u,
     PSGL_DIRTY_FRAMEBUFFER = 0x00000400u,
     PSGL_DIRTY_RASTER = 0x00000800u,
-    PSGL_DIRTY_ALL = 0x00000fffu
+    PSGL_DIRTY_LIGHTING = 0x00001000u,
+    PSGL_DIRTY_ALL = 0x00001fffu
 } PSGLdirtyBits;
 
 typedef struct PSGLframeBuffer {
@@ -59,6 +61,28 @@ typedef struct PSGLtextureUnitState {
     GLuint texture_2d;
     GLboolean texture_2d_enabled;
 } PSGLtextureUnitState;
+
+typedef struct PSGLlightState {
+    GLboolean enabled;
+    GLfloat ambient[4];
+    GLfloat diffuse[4];
+    GLfloat specular[4];
+    GLfloat position[4];
+    GLfloat spot_direction[3];
+    GLfloat spot_exponent;
+    GLfloat spot_cutoff;
+    GLfloat constant_attenuation;
+    GLfloat linear_attenuation;
+    GLfloat quadratic_attenuation;
+} PSGLlightState;
+
+typedef struct PSGLmaterialState {
+    GLfloat ambient[4];
+    GLfloat diffuse[4];
+    GLfloat specular[4];
+    GLfloat emission[4];
+    GLfloat shininess;
+} PSGLmaterialState;
 
 struct PSGLdevice {
     uint32_t initialized;
@@ -106,6 +130,9 @@ struct PSGLcontext {
     GLboolean cull_face_enabled;
     GLboolean dither_enabled;
     GLboolean logic_op_enabled;
+    GLboolean lighting_enabled;
+    GLboolean color_material_enabled;
+    GLboolean light_model_two_side;
     GLenum blend_src_rgb;
     GLenum blend_dst_rgb;
     GLenum blend_src_alpha;
@@ -127,16 +154,24 @@ struct PSGLcontext {
     GLenum logic_op;
     GLenum cull_face;
     GLenum front_face;
+    GLenum shade_model;
+    GLenum color_material_face;
+    GLenum color_material_parameter;
     GLenum active_texture;
     GLenum client_active_texture;
     GLint unpack_alignment;
     GLfloat clear_color[4];
+    GLfloat current_color[4];
+    GLfloat light_model_ambient[4];
     GLfloat clear_depth;
     GLint clear_stencil;
     GLuint bound_array_buffer;
     GLuint bound_element_array_buffer;
     PSGLvertexAttribState attribs[PSGL_MAX_VERTEX_ATTRIBS];
     PSGLtextureUnitState textures[PSGL_MAX_TEXTURE_UNITS];
+    PSGLlightState lights[PSGL_MAX_LIGHTS];
+    PSGLmaterialState front_material;
+    PSGLmaterialState back_material;
     CGprogram bound_vertex_program;
     CGprogram bound_fragment_program;
     uint32_t dirty;
@@ -192,6 +227,22 @@ void psgl_context_set_front_face(GLenum mode);
 void psgl_context_set_color_mask(GLboolean red, GLboolean green,
                                  GLboolean blue, GLboolean alpha);
 void psgl_context_set_logic_op(GLenum opcode);
+void psgl_context_set_shade_model(GLenum mode);
+void psgl_context_set_current_color(GLfloat red, GLfloat green,
+                                    GLfloat blue, GLfloat alpha);
+void psgl_context_set_light_fv(GLenum light, GLenum pname,
+                               const GLfloat *params);
+void psgl_context_set_light_f(GLenum light, GLenum pname, GLfloat param);
+void psgl_context_set_light_model_fv(GLenum pname, const GLfloat *params);
+void psgl_context_set_light_model_f(GLenum pname, GLfloat param);
+void psgl_context_set_material_fv(GLenum face, GLenum pname,
+                                  const GLfloat *params);
+void psgl_context_set_material_f(GLenum face, GLenum pname, GLfloat param);
+void psgl_context_set_color_material(GLenum face, GLenum mode);
+void psgl_context_get_booleanv(GLenum pname, GLboolean *params);
+void psgl_context_get_floatv(GLenum pname, GLfloat *params);
+void psgl_context_get_lightfv(GLenum light, GLenum pname, GLfloat *params);
+void psgl_context_get_materialfv(GLenum face, GLenum pname, GLfloat *params);
 void psgl_context_set_pixel_store(GLenum pname, GLint param);
 void psgl_context_active_texture(GLenum texture);
 void psgl_context_client_active_texture(GLenum texture);

@@ -229,6 +229,53 @@ static void psgl_matrix_mark_dirty(PSGLcontext *context)
     context->dirty |= PSGL_DIRTY_MATRICES | PSGL_DIRTY_CG;
 }
 
+static void psgl_mark_lighting_dirty(PSGLcontext *context)
+{
+    if (!context) return;
+    context->dirty |= PSGL_DIRTY_LIGHTING | PSGL_DIRTY_CG;
+}
+
+static void psgl_set_float4(GLfloat dst[4], const GLfloat *src)
+{
+    if (!dst || !src) return;
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+    dst[3] = src[3];
+}
+
+static void psgl_set_float3(GLfloat dst[3], const GLfloat *src)
+{
+    if (!dst || !src) return;
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+}
+
+static void psgl_get_float4(const GLfloat src[4], GLfloat *dst)
+{
+    if (!src || !dst) return;
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+    dst[3] = src[3];
+}
+
+static void psgl_get_float3(const GLfloat src[3], GLfloat *dst)
+{
+    if (!src || !dst) return;
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+}
+
+static uint32_t psgl_light_index(GLenum light)
+{
+    if (light < GL_LIGHT0) return PSGL_MAX_LIGHTS;
+    light -= GL_LIGHT0;
+    return light < PSGL_MAX_LIGHTS ? (uint32_t)light : PSGL_MAX_LIGHTS;
+}
+
 static float psgl_clampf(GLfloat value, GLfloat lo, GLfloat hi)
 {
     if (value < lo) return lo;
@@ -375,6 +422,7 @@ static int psgl_ffp_init_minimal(void)
 
 static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
 {
+    uint32_t mask = PSGL_FFP_MINIMAL_MASK;
     if (!context) return 0u;
     if (context->bound_vertex_program || context->bound_fragment_program)
         return 0u;
@@ -388,7 +436,14 @@ static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
         if (context->textures[i].texture_2d_enabled)
             return 0u;
     }
-    return PSGL_FFP_MINIMAL_MASK;
+    if (context->lighting_enabled) {
+        mask |= PSGL_FFP_LIGHTING_MASK;
+        for (uint32_t i = 0u; i < PSGL_MAX_LIGHTS; i++) {
+            if (context->lights[i].enabled)
+                mask |= (1u << (8u + i));
+        }
+    }
+    return mask;
 }
 
 static int psgl_ffp_state_mask_to_programs(uint32_t mask, PSGLcgProgram **vp,
@@ -1384,6 +1439,48 @@ PSGLcontext *psgl_context_create(void)
     context->logic_op = GL_COPY;
     context->cull_face = GL_BACK;
     context->front_face = GL_CCW;
+    context->shade_model = GL_SMOOTH;
+    context->color_material_face = GL_FRONT_AND_BACK;
+    context->color_material_parameter = GL_AMBIENT_AND_DIFFUSE;
+    context->current_color[0] = 1.0f;
+    context->current_color[1] = 1.0f;
+    context->current_color[2] = 1.0f;
+    context->current_color[3] = 1.0f;
+    context->light_model_ambient[0] = 0.2f;
+    context->light_model_ambient[1] = 0.2f;
+    context->light_model_ambient[2] = 0.2f;
+    context->light_model_ambient[3] = 1.0f;
+    context->front_material.ambient[0] = 0.2f;
+    context->front_material.ambient[1] = 0.2f;
+    context->front_material.ambient[2] = 0.2f;
+    context->front_material.ambient[3] = 1.0f;
+    context->front_material.diffuse[0] = 0.8f;
+    context->front_material.diffuse[1] = 0.8f;
+    context->front_material.diffuse[2] = 0.8f;
+    context->front_material.diffuse[3] = 1.0f;
+    context->front_material.specular[3] = 1.0f;
+    context->front_material.emission[3] = 1.0f;
+    context->back_material = context->front_material;
+    for (uint32_t light = 0u; light < PSGL_MAX_LIGHTS; light++) {
+        context->lights[light].ambient[3] = 1.0f;
+        context->lights[light].position[2] = 1.0f;
+        context->lights[light].spot_direction[2] = -1.0f;
+        context->lights[light].spot_cutoff = 180.0f;
+        context->lights[light].constant_attenuation = 1.0f;
+        if (light == 0u) {
+            context->lights[light].diffuse[0] = 1.0f;
+            context->lights[light].diffuse[1] = 1.0f;
+            context->lights[light].diffuse[2] = 1.0f;
+            context->lights[light].diffuse[3] = 1.0f;
+            context->lights[light].specular[0] = 1.0f;
+            context->lights[light].specular[1] = 1.0f;
+            context->lights[light].specular[2] = 1.0f;
+            context->lights[light].specular[3] = 1.0f;
+        } else {
+            context->lights[light].diffuse[3] = 1.0f;
+            context->lights[light].specular[3] = 1.0f;
+        }
+    }
     context->active_texture = GL_TEXTURE0;
     context->client_active_texture = GL_TEXTURE0;
     context->unpack_alignment = 4;
@@ -1970,6 +2067,14 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         context->logic_op_enabled = enabled;
         context->dirty |= PSGL_DIRTY_RASTER;
         break;
+    case GL_LIGHTING:
+        context->lighting_enabled = enabled;
+        psgl_mark_lighting_dirty(context);
+        break;
+    case GL_COLOR_MATERIAL:
+        context->color_material_enabled = enabled;
+        psgl_mark_lighting_dirty(context);
+        break;
     case GL_TEXTURE_2D: {
         uint32_t unit = psgl_texture_unit_index(context->active_texture);
         context->textures[unit].texture_2d_enabled = enabled;
@@ -1977,6 +2082,10 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         break;
     }
     default:
+        if (cap >= GL_LIGHT0 && cap < GL_LIGHT0 + PSGL_MAX_LIGHTS) {
+            context->lights[cap - GL_LIGHT0].enabled = enabled;
+            psgl_mark_lighting_dirty(context);
+        }
         break;
     }
 }
@@ -2133,6 +2242,267 @@ void psgl_context_set_logic_op(GLenum opcode)
     if (!context || !psgl_translate_logic_op(opcode, &translated)) return;
     context->logic_op = opcode;
     context->dirty |= PSGL_DIRTY_RASTER;
+}
+
+void psgl_context_set_shade_model(GLenum mode)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || (mode != GL_FLAT && mode != GL_SMOOTH)) return;
+    context->shade_model = mode;
+    psgl_mark_lighting_dirty(context);
+}
+
+static void psgl_apply_color_material(PSGLcontext *context,
+                                      PSGLmaterialState *material)
+{
+    if (!context || !material) return;
+    switch (context->color_material_parameter) {
+    case GL_AMBIENT:
+        psgl_set_float4(material->ambient, context->current_color);
+        break;
+    case GL_DIFFUSE:
+        psgl_set_float4(material->diffuse, context->current_color);
+        break;
+    case GL_AMBIENT_AND_DIFFUSE:
+        psgl_set_float4(material->ambient, context->current_color);
+        psgl_set_float4(material->diffuse, context->current_color);
+        break;
+    case GL_SPECULAR:
+        psgl_set_float4(material->specular, context->current_color);
+        break;
+    case GL_EMISSION:
+        psgl_set_float4(material->emission, context->current_color);
+        break;
+    default:
+        break;
+    }
+}
+
+void psgl_context_set_current_color(GLfloat red, GLfloat green,
+                                    GLfloat blue, GLfloat alpha)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    context->current_color[0] = red;
+    context->current_color[1] = green;
+    context->current_color[2] = blue;
+    context->current_color[3] = alpha;
+    if (context->color_material_enabled) {
+        if (context->color_material_face == GL_FRONT ||
+            context->color_material_face == GL_FRONT_AND_BACK)
+            psgl_apply_color_material(context, &context->front_material);
+        if (context->color_material_face == GL_BACK ||
+            context->color_material_face == GL_FRONT_AND_BACK)
+            psgl_apply_color_material(context, &context->back_material);
+        psgl_mark_lighting_dirty(context);
+    }
+}
+
+void psgl_context_set_light_fv(GLenum light, GLenum pname,
+                               const GLfloat *params)
+{
+    uint32_t index = psgl_light_index(light);
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLlightState *state;
+    if (!context || !params || index >= PSGL_MAX_LIGHTS) return;
+    state = &context->lights[index];
+    switch (pname) {
+    case GL_AMBIENT: psgl_set_float4(state->ambient, params); break;
+    case GL_DIFFUSE: psgl_set_float4(state->diffuse, params); break;
+    case GL_SPECULAR: psgl_set_float4(state->specular, params); break;
+    case GL_POSITION: psgl_set_float4(state->position, params); break;
+    case GL_SPOT_DIRECTION: psgl_set_float3(state->spot_direction, params); break;
+    case GL_SPOT_EXPONENT: state->spot_exponent = params[0]; break;
+    case GL_SPOT_CUTOFF: state->spot_cutoff = params[0]; break;
+    case GL_CONSTANT_ATTENUATION: state->constant_attenuation = params[0]; break;
+    case GL_LINEAR_ATTENUATION: state->linear_attenuation = params[0]; break;
+    case GL_QUADRATIC_ATTENUATION: state->quadratic_attenuation = params[0]; break;
+    default: return;
+    }
+    psgl_mark_lighting_dirty(context);
+}
+
+void psgl_context_set_light_f(GLenum light, GLenum pname, GLfloat param)
+{
+    GLfloat value[4] = { param, param, param, param };
+    psgl_context_set_light_fv(light, pname, value);
+}
+
+void psgl_context_set_light_model_fv(GLenum pname, const GLfloat *params)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !params) return;
+    switch (pname) {
+    case GL_LIGHT_MODEL_AMBIENT:
+        psgl_set_float4(context->light_model_ambient, params);
+        break;
+    case GL_LIGHT_MODEL_TWO_SIDE:
+        context->light_model_two_side = params[0] != 0.0f ? GL_TRUE : GL_FALSE;
+        break;
+    default:
+        return;
+    }
+    psgl_mark_lighting_dirty(context);
+}
+
+void psgl_context_set_light_model_f(GLenum pname, GLfloat param)
+{
+    GLfloat value[4] = { param, param, param, param };
+    psgl_context_set_light_model_fv(pname, value);
+}
+
+static void psgl_set_material_member(PSGLmaterialState *material,
+                                     GLenum pname, const GLfloat *params)
+{
+    if (!material || !params) return;
+    switch (pname) {
+    case GL_AMBIENT: psgl_set_float4(material->ambient, params); break;
+    case GL_DIFFUSE: psgl_set_float4(material->diffuse, params); break;
+    case GL_AMBIENT_AND_DIFFUSE:
+        psgl_set_float4(material->ambient, params);
+        psgl_set_float4(material->diffuse, params);
+        break;
+    case GL_SPECULAR: psgl_set_float4(material->specular, params); break;
+    case GL_EMISSION: psgl_set_float4(material->emission, params); break;
+    case GL_SHININESS: material->shininess = params[0]; break;
+    default: break;
+    }
+}
+
+void psgl_context_set_material_fv(GLenum face, GLenum pname,
+                                  const GLfloat *params)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !params) return;
+    switch (pname) {
+    case GL_AMBIENT:
+    case GL_DIFFUSE:
+    case GL_AMBIENT_AND_DIFFUSE:
+    case GL_SPECULAR:
+    case GL_EMISSION:
+    case GL_SHININESS:
+        break;
+    default:
+        return;
+    }
+    if (face == GL_FRONT || face == GL_FRONT_AND_BACK)
+        psgl_set_material_member(&context->front_material, pname, params);
+    if (face == GL_BACK || face == GL_FRONT_AND_BACK)
+        psgl_set_material_member(&context->back_material, pname, params);
+    if (face == GL_FRONT || face == GL_BACK || face == GL_FRONT_AND_BACK)
+        psgl_mark_lighting_dirty(context);
+}
+
+void psgl_context_set_material_f(GLenum face, GLenum pname, GLfloat param)
+{
+    GLfloat value[4] = { param, param, param, param };
+    psgl_context_set_material_fv(face, pname, value);
+}
+
+void psgl_context_set_color_material(GLenum face, GLenum mode)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (face != GL_FRONT && face != GL_BACK && face != GL_FRONT_AND_BACK)
+        return;
+    switch (mode) {
+    case GL_AMBIENT:
+    case GL_DIFFUSE:
+    case GL_AMBIENT_AND_DIFFUSE:
+    case GL_SPECULAR:
+    case GL_EMISSION:
+        context->color_material_face = face;
+        context->color_material_parameter = mode;
+        psgl_mark_lighting_dirty(context);
+        break;
+    default:
+        break;
+    }
+}
+
+void psgl_context_get_booleanv(GLenum pname, GLboolean *params)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !params) return;
+    switch (pname) {
+    case GL_LIGHTING: *params = context->lighting_enabled; break;
+    case GL_COLOR_MATERIAL: *params = context->color_material_enabled; break;
+    default:
+        if (pname >= GL_LIGHT0 && pname < GL_LIGHT0 + PSGL_MAX_LIGHTS)
+            *params = context->lights[pname - GL_LIGHT0].enabled;
+        else
+            *params = GL_FALSE;
+        break;
+    }
+}
+
+void psgl_context_get_floatv(GLenum pname, GLfloat *params)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !params) return;
+    switch (pname) {
+    case GL_CURRENT_COLOR:
+        psgl_get_float4(context->current_color, params);
+        break;
+    case GL_LIGHT_MODEL_AMBIENT:
+        psgl_get_float4(context->light_model_ambient, params);
+        break;
+    case GL_LIGHT_MODEL_TWO_SIDE:
+        params[0] = context->light_model_two_side ? 1.0f : 0.0f;
+        break;
+    case GL_SHADE_MODEL:
+        params[0] = (GLfloat)context->shade_model;
+        break;
+    default:
+        params[0] = 0.0f;
+        break;
+    }
+}
+
+void psgl_context_get_lightfv(GLenum light, GLenum pname, GLfloat *params)
+{
+    uint32_t index = psgl_light_index(light);
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLlightState *state;
+    if (!context || !params || index >= PSGL_MAX_LIGHTS) return;
+    state = &context->lights[index];
+    switch (pname) {
+    case GL_AMBIENT: psgl_get_float4(state->ambient, params); break;
+    case GL_DIFFUSE: psgl_get_float4(state->diffuse, params); break;
+    case GL_SPECULAR: psgl_get_float4(state->specular, params); break;
+    case GL_POSITION: psgl_get_float4(state->position, params); break;
+    case GL_SPOT_DIRECTION: psgl_get_float3(state->spot_direction, params); break;
+    case GL_SPOT_EXPONENT: params[0] = state->spot_exponent; break;
+    case GL_SPOT_CUTOFF: params[0] = state->spot_cutoff; break;
+    case GL_CONSTANT_ATTENUATION: params[0] = state->constant_attenuation; break;
+    case GL_LINEAR_ATTENUATION: params[0] = state->linear_attenuation; break;
+    case GL_QUADRATIC_ATTENUATION: params[0] = state->quadratic_attenuation; break;
+    default: break;
+    }
+}
+
+static void psgl_get_material_member(const PSGLmaterialState *material,
+                                     GLenum pname, GLfloat *params)
+{
+    if (!material || !params) return;
+    switch (pname) {
+    case GL_AMBIENT: psgl_get_float4(material->ambient, params); break;
+    case GL_DIFFUSE: psgl_get_float4(material->diffuse, params); break;
+    case GL_SPECULAR: psgl_get_float4(material->specular, params); break;
+    case GL_EMISSION: psgl_get_float4(material->emission, params); break;
+    case GL_SHININESS: params[0] = material->shininess; break;
+    default: break;
+    }
+}
+
+void psgl_context_get_materialfv(GLenum face, GLenum pname, GLfloat *params)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !params) return;
+    if (face == GL_BACK)
+        psgl_get_material_member(&context->back_material, pname, params);
+    else
+        psgl_get_material_member(&context->front_material, pname, params);
 }
 
 void psgl_context_set_pixel_store(GLenum pname, GLint param)

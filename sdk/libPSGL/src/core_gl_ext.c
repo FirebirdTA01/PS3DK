@@ -36,16 +36,28 @@ GLAPI void glBlendColor(GLclampf red, GLclampf green,
 /* ── normal / colour convenience ─────────────────────────────────── */
 
 GLAPI void glNormal3fv(const GLfloat *v)          { (void)v; }
-GLAPI void glColor4fv(const GLfloat *v)           { (void)v; }
+GLAPI void glColor4fv(const GLfloat *v)
+{
+    if (v) psgl_context_set_current_color(v[0], v[1], v[2], v[3]);
+}
 GLAPI void glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a)
-{ (void)r; (void)g; (void)b; (void)a; }
+{
+    psgl_context_set_current_color((GLfloat)r / 255.0f,
+                                   (GLfloat)g / 255.0f,
+                                   (GLfloat)b / 255.0f,
+                                   (GLfloat)a / 255.0f);
+}
 
 /* ── get queries ─────────────────────────────────────────────────── */
 
 GLAPI void glGetBooleanv(GLenum pname, GLboolean *params)
-{ if (params) *params = GL_FALSE; (void)pname; }
+{ psgl_context_get_booleanv(pname, params); }
 GLAPI void glGetFloatv(GLenum pname, GLfloat *params)
-{ if (params) *params = 0.0f; (void)pname; }
+{ psgl_context_get_floatv(pname, params); }
+GLAPI void glGetLightfv(GLenum light, GLenum pname, GLfloat *params)
+{ psgl_context_get_lightfv(light, pname, params); }
+GLAPI void glGetMaterialfv(GLenum face, GLenum pname, GLfloat *params)
+{ psgl_context_get_materialfv(face, pname, params); }
 
 /* ── 3D textures ─────────────────────────────────────────────────── */
 
