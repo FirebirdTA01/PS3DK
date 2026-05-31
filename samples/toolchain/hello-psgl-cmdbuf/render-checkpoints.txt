@@ -1,0 +1,5 @@
+# hello-psgl-cmdbuf checkpoint file (2560x1600 capture)
+# Recorded clear green (0,255,0) must win over main-path clear blue (5,20,46).
+# x y expected_R expected_G expected_B tolerance
+150 150 0 230 0 50
+1280 800 0 230 0 50
