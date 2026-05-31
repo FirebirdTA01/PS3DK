@@ -1,4 +1,4 @@
-/* core_gl_ext.c — GLES 1.1 extension stubs (Slice 1d link gate).
+/* core_gl_ext.c - GLES 1.1 extension entry points.
  *
  * Covers glext.h surface: VBO/PBO, 3D textures, cube maps, FBO/RBO,
  * fences (NV), events (SCE), clip planes, occlusion queries,
@@ -284,7 +284,7 @@ GLAPI void glGetFramebufferAttachmentParameterivOES(GLenum target,
 GLAPI void glGenerateMipmapOES(GLenum target)   { (void)target; }
 GLAPI void glFramebufferParameteriSCE(GLenum target, GLenum pname,
                                       GLint param)
-{ (void)target; (void)pname; (void)param; }
+{ psgl_context_framebuffer_parameter(target, pname, param); }
 
 /* ── occlusion queries ARB ───────────────────────────────────────── */
 

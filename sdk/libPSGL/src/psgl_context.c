@@ -297,6 +297,71 @@ static uint8_t psgl_float_to_unorm8(GLfloat value)
     return (uint8_t)(clamped * 255.0f + 0.5f);
 }
 
+static uint32_t psgl_align_u32(uint32_t value, uint32_t alignment)
+{
+    return (value + alignment - 1u) & ~(alignment - 1u);
+}
+
+static int psgl_msaa_mode_valid(GLenum mode)
+{
+    switch (mode) {
+    case 0:
+    case GL_MULTISAMPLING_NONE_SCE:
+    case GL_MULTISAMPLING_2X_DIAGONAL_CENTERED_SCE:
+    case GL_MULTISAMPLING_4X_SQUARE_CENTERED_SCE:
+    case GL_MULTISAMPLING_4X_SQUARE_ROTATED_SCE:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static uint8_t psgl_msaa_antialias(GLenum mode)
+{
+    switch (mode) {
+    case GL_MULTISAMPLING_2X_DIAGONAL_CENTERED_SCE:
+        return GCM_SURFACE_DIAGONAL_CENTERED_2;
+    case GL_MULTISAMPLING_4X_SQUARE_CENTERED_SCE:
+        return GCM_SURFACE_SQUARE_CENTERED_4;
+    case GL_MULTISAMPLING_4X_SQUARE_ROTATED_SCE:
+        return GCM_SURFACE_SQUARE_ROTATED_4;
+    case 0:
+    case GL_MULTISAMPLING_NONE_SCE:
+    default:
+        return GCM_SURFACE_CENTER_1;
+    }
+}
+
+static uint32_t psgl_msaa_samples_x(GLenum mode)
+{
+    switch (mode) {
+    case GL_MULTISAMPLING_2X_DIAGONAL_CENTERED_SCE:
+    case GL_MULTISAMPLING_4X_SQUARE_CENTERED_SCE:
+    case GL_MULTISAMPLING_4X_SQUARE_ROTATED_SCE:
+        return 2u;
+    default:
+        return 1u;
+    }
+}
+
+static uint32_t psgl_msaa_samples_y(GLenum mode)
+{
+    switch (mode) {
+    case GL_MULTISAMPLING_4X_SQUARE_CENTERED_SCE:
+    case GL_MULTISAMPLING_4X_SQUARE_ROTATED_SCE:
+        return 2u;
+    default:
+        return 1u;
+    }
+}
+
+static int psgl_device_has_msaa_storage(const PSGLdevice *device)
+{
+    if (!device) return 0;
+    return psgl_msaa_samples_x(device->multisampling_mode) > 1u ||
+           psgl_msaa_samples_y(device->multisampling_mode) > 1u;
+}
+
 static uint32_t psgl_pack_clear_color(const GLfloat color[4])
 {
     uint32_t r = psgl_float_to_unorm8(color[0]);
@@ -604,9 +669,12 @@ static int psgl_translate_logic_op(GLenum op, uint32_t *out)
     return 1;
 }
 
-static void psgl_fill_surface(PSGLdevice *device, CellGcmSurface *surface)
+static void psgl_fill_surface(PSGLcontext *context, CellGcmSurface *surface)
 {
+    PSGLdevice *device = context->device;
     PSGLframeBuffer *frame = &device->frames[device->current_frame];
+    GLenum msaa = context->multisample_enabled ?
+        device->multisampling_mode : GL_MULTISAMPLING_NONE_SCE;
     psgl_zero(surface, sizeof(*surface));
     surface->colorFormat = GCM_SURFACE_X8R8G8B8;
     surface->colorTarget = GCM_SURFACE_TARGET_0;
@@ -624,7 +692,7 @@ static void psgl_fill_surface(PSGLdevice *device, CellGcmSurface *surface)
     surface->depthOffset = device->depth_offset;
     surface->depthPitch = device->depth_pitch;
     surface->type = GCM_TEXTURE_LINEAR;
-    surface->antiAlias = GCM_SURFACE_CENTER_1;
+    surface->antiAlias = psgl_msaa_antialias(msaa);
     surface->width = frame->width;
     surface->height = frame->height;
 }
@@ -633,7 +701,7 @@ static void psgl_bind_render_target(PSGLcontext *context)
 {
     if (!context || !context->device || !context->gcm) return;
     CellGcmSurface surface;
-    psgl_fill_surface(context->device, &surface);
+    psgl_fill_surface(context, &surface);
     cellGcmSetSurface(context->gcm, &surface);
     context->dirty &= ~PSGL_DIRTY_FRAMEBUFFER;
 }
@@ -811,15 +879,99 @@ static int psgl_ppu_too_far_ahead(const PSGLdevice *device)
 static int psgl_make_frame_buffer(PSGLdevice *device, uint32_t id)
 {
     PSGLframeBuffer *frame = &device->frames[id];
-    uint32_t size = device->pitch * (uint32_t)device->height;
+    uint32_t size = device->pitch * (uint32_t)device->storage_height;
+    uint32_t display_offset;
+    uint32_t display_pitch;
     frame->address = (uint32_t *)rsxMemalign(64u, size);
     if (!frame->address) return 0;
     if (cellGcmAddressToOffset(frame->address, &frame->offset) != 0) return 0;
-    if (cellGcmSetDisplayBuffer((uint8_t)id, frame->offset, frame->pitch,
-                                frame->width, frame->height) != 0) {
+    display_offset = frame->offset;
+    display_pitch = frame->pitch;
+    if (psgl_device_has_msaa_storage(device)) {
+        uint32_t scanout_size;
+        frame->scanout_pitch =
+            psgl_align_u32((uint32_t)device->render_width * sizeof(uint32_t),
+                           64u);
+        scanout_size = frame->scanout_pitch * (uint32_t)device->render_height;
+        frame->scanout_address = (uint32_t *)rsxMemalign(64u, scanout_size);
+        if (!frame->scanout_address) return 0;
+        if (cellGcmAddressToOffset(frame->scanout_address,
+                                   &frame->scanout_offset) != 0)
+            return 0;
+        display_offset = frame->scanout_offset;
+        display_pitch = frame->scanout_pitch;
+    }
+    if (cellGcmSetDisplayBuffer((uint8_t)id, display_offset, display_pitch,
+                                device->width, device->height) != 0) {
         return 0;
     }
     return 1;
+}
+
+static void psgl_resolve_frame_for_display(PSGLcontext *context)
+{
+    PSGLdevice *device;
+    PSGLframeBuffer *frame;
+    GLenum mode;
+    uint32_t samples_x;
+    uint32_t samples_y;
+    uint32_t block_x;
+    uint32_t block_y;
+    gcmTransferScale scale;
+    gcmTransferSurface surface;
+    if (!context || !context->device || !context->gcm) return;
+    device = context->device;
+    frame = &device->frames[device->current_frame];
+    if (!frame->scanout_address) return;
+
+    mode = context->multisample_enabled ?
+        device->multisampling_mode : GL_MULTISAMPLING_NONE_SCE;
+    samples_x = psgl_msaa_samples_x(mode);
+    samples_y = psgl_msaa_samples_y(mode);
+
+    psgl_zero(&scale, sizeof(scale));
+    psgl_zero(&surface, sizeof(surface));
+    scale.conversion = GCM_TRANSFER_CONVERSION_TRUNCATE;
+    scale.format = GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8;
+    scale.operation = GCM_TRANSFER_OPERATION_SRCCOPY;
+    scale.ratioX = rsxGetFixedSint32((float)samples_x);
+    scale.ratioY = rsxGetFixedSint32((float)samples_y);
+    scale.pitch = frame->pitch;
+    scale.origin = GCM_TRANSFER_ORIGIN_CORNER;
+    scale.interp = GCM_TRANSFER_INTERPOLATOR_LINEAR;
+    scale.inX = 0u;
+    scale.inY = 0u;
+
+    surface.format = GCM_TRANSFER_SURFACE_FORMAT_A8R8G8B8;
+    surface.pitch = (uint16_t)frame->scanout_pitch;
+
+    cellGcmSetTransferScaleMode(context->gcm, GCM_TRANSFER_LOCAL_TO_LOCAL,
+                                GCM_TRANSFER_SURFACE);
+    for (block_y = 0u; block_y < device->render_height; block_y += 512u) {
+        uint32_t block_h = (uint32_t)device->render_height - block_y;
+        if (block_h > 512u) block_h = 512u;
+        for (block_x = 0u; block_x < device->render_width; block_x += 512u) {
+            uint32_t block_w = (uint32_t)device->render_width - block_x;
+            if (block_w > 512u) block_w = 512u;
+            scale.clipX = 0;
+            scale.clipY = 0;
+            scale.clipW = (uint16_t)block_w;
+            scale.clipH = (uint16_t)block_h;
+            scale.outX = 0;
+            scale.outY = 0;
+            scale.outW = (uint16_t)block_w;
+            scale.outH = (uint16_t)block_h;
+            scale.inW = (uint16_t)(block_w * samples_x);
+            scale.inH = (uint16_t)(block_h * samples_y);
+            scale.offset = frame->offset +
+                (block_x * samples_x * sizeof(uint32_t)) +
+                (block_y * samples_y * frame->pitch);
+            surface.offset = frame->scanout_offset +
+                (block_x * sizeof(uint32_t)) +
+                (block_y * frame->scanout_pitch);
+            cellGcmSetTransferScaleSurface(context->gcm, &scale, &surface);
+        }
+    }
 }
 
 static PSGLbufferObject *psgl_find_buffer(GLuint name)
@@ -1449,6 +1601,7 @@ PSGLcontext *psgl_context_create(void)
     context->cull_face = GL_BACK;
     context->front_face = GL_CCW;
     context->shade_model = GL_SMOOTH;
+    context->multisample_enabled = GL_TRUE;
     context->color_material_face = GL_FRONT_AND_BACK;
     context->color_material_parameter = GL_AMBIENT_AND_DIFFUSE;
     context->current_color[0] = 1.0f;
@@ -1518,6 +1671,8 @@ void psgl_context_destroy(PSGLcontext *context)
 
 PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
 {
+    uint32_t samples_x;
+    uint32_t samples_y;
     if (!psgl_context_init_system(NULL)) return NULL;
 
     videoState state;
@@ -1552,9 +1707,16 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
         }
         device->color_format = parameters->colorFormat;
         device->depth_format = parameters->depthFormat;
-        device->multisampling_mode = parameters->multisamplingMode;
+        if (psgl_msaa_mode_valid(parameters->multisamplingMode))
+            device->multisampling_mode = parameters->multisamplingMode;
     }
-    device->pitch = (uint32_t)device->width * sizeof(uint32_t);
+    if (!device->multisampling_mode)
+        device->multisampling_mode = GL_MULTISAMPLING_NONE_SCE;
+    samples_x = psgl_msaa_samples_x(device->multisampling_mode);
+    samples_y = psgl_msaa_samples_y(device->multisampling_mode);
+    device->storage_height = (uint16_t)((uint32_t)device->render_height * samples_y);
+    device->pitch = psgl_align_u32((uint32_t)device->render_width *
+                                   samples_x * sizeof(uint32_t), 64u);
     device->depth_pitch = device->pitch;
     device->frame_count = PSGL_MAX_FRAME_BUFFERS;
     device->aspect_ratio = device->height ? ((float)device->width / (float)device->height) : 1.0f;
@@ -1574,8 +1736,8 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
 
     for (uint32_t i = 0; i < device->frame_count; i++) {
         device->frames[i].pitch = device->pitch;
-        device->frames[i].width = device->width;
-        device->frames[i].height = device->height;
+        device->frames[i].width = device->render_width;
+        device->frames[i].height = device->render_height;
         device->frames[i].id = (uint8_t)i;
         if (!psgl_make_frame_buffer(device, i)) {
             psgl_device_destroy(device);
@@ -1583,7 +1745,7 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
         }
     }
 
-    uint32_t depth_size = device->depth_pitch * (uint32_t)device->height * 2u;
+    uint32_t depth_size = device->depth_pitch * (uint32_t)device->storage_height;
     device->depth_address = (uint32_t *)rsxMemalign(64u, depth_size);
     if (!device->depth_address ||
         cellGcmAddressToOffset(device->depth_address, &device->depth_offset) != 0) {
@@ -1619,6 +1781,7 @@ void psgl_device_destroy(PSGLdevice *device)
     }
     for (uint32_t i = 0; i < PSGL_MAX_FRAME_BUFFERS; i++) {
         device->frames[i].address = NULL;
+        device->frames[i].scanout_address = NULL;
     }
     device->depth_address = NULL;
 }
@@ -1758,6 +1921,8 @@ void psgl_context_swap(void)
     PSGLdevice *device = g_psgl.current_device;
     int32_t queue_id;
     if (!context || !device || !context->gcm) return;
+
+    psgl_resolve_frame_for_display(context);
 
     queue_id = (int32_t)cellGcmSetPrepareFlip(context->gcm,
                                               (uint8_t)device->current_frame);
@@ -2093,6 +2258,10 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         context->logic_op_enabled = enabled;
         context->dirty |= PSGL_DIRTY_RASTER;
         break;
+    case GL_MULTISAMPLE:
+        context->multisample_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_CG;
+        break;
     case GL_LIGHTING:
         context->lighting_enabled = enabled;
         psgl_mark_lighting_dirty(context);
@@ -2308,6 +2477,34 @@ static void psgl_apply_color_material(PSGLcontext *context,
     }
 }
 
+void psgl_context_framebuffer_parameter(GLenum target, GLenum pname,
+                                        GLint param)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLdevice *device;
+    GLenum mode = (GLenum)param;
+    uint32_t samples_x;
+    uint32_t samples_y;
+    uint32_t needed_pitch;
+    if (!context || (target != GL_FRAMEBUFFER_OES && target != 0))
+        return;
+    if (pname != GL_FRAMEBUFFER_MULTISAMPLING_MODE_SCE ||
+        !psgl_msaa_mode_valid(mode))
+        return;
+    device = context->device;
+    if (!device || device->multisampling_mode == mode) return;
+    if (!mode) mode = GL_MULTISAMPLING_NONE_SCE;
+    samples_x = psgl_msaa_samples_x(mode);
+    samples_y = psgl_msaa_samples_y(mode);
+    needed_pitch = psgl_align_u32((uint32_t)device->render_width *
+                                  samples_x * sizeof(uint32_t), 64u);
+    if (needed_pitch > device->pitch ||
+        (uint32_t)device->render_height * samples_y > device->storage_height)
+        return;
+    device->multisampling_mode = mode;
+    context->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_CG;
+}
+
 void psgl_context_set_current_color(GLfloat red, GLfloat green,
                                     GLfloat blue, GLfloat alpha)
 {
@@ -2458,6 +2655,7 @@ void psgl_context_get_booleanv(GLenum pname, GLboolean *params)
     case GL_LIGHTING: *params = context->lighting_enabled; break;
     case GL_COLOR_MATERIAL: *params = context->color_material_enabled; break;
     case GL_FOG: *params = context->fog_enabled; break;
+    case GL_MULTISAMPLE: *params = context->multisample_enabled; break;
     default:
         if (pname >= GL_LIGHT0 && pname < GL_LIGHT0 + PSGL_MAX_LIGHTS)
             *params = context->lights[pname - GL_LIGHT0].enabled;

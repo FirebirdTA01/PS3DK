@@ -1,0 +1,7 @@
+# x y R G B tolerance
+# clear region
+200 200 5 20 46 12
+# triangle body
+1280 800 0 217 0 35
+# outside triangle
+2100 350 5 20 46 12

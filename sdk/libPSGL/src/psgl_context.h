@@ -43,6 +43,9 @@ typedef struct PSGLframeBuffer {
     uint32_t *address;
     uint32_t offset;
     uint32_t pitch;
+    uint32_t *scanout_address;
+    uint32_t scanout_offset;
+    uint32_t scanout_pitch;
     uint16_t width;
     uint16_t height;
     uint8_t id;
@@ -91,6 +94,7 @@ struct PSGLdevice {
     uint16_t height;
     uint16_t render_width;
     uint16_t render_height;
+    uint16_t storage_height;
     uint32_t color_format;
     uint32_t depth_format;
     uint32_t multisampling_mode;
@@ -131,6 +135,7 @@ struct PSGLcontext {
     GLboolean cull_face_enabled;
     GLboolean dither_enabled;
     GLboolean logic_op_enabled;
+    GLboolean multisample_enabled;
     GLboolean lighting_enabled;
     GLboolean color_material_enabled;
     GLboolean light_model_two_side;
@@ -235,6 +240,8 @@ void psgl_context_set_color_mask(GLboolean red, GLboolean green,
                                  GLboolean blue, GLboolean alpha);
 void psgl_context_set_logic_op(GLenum opcode);
 void psgl_context_set_shade_model(GLenum mode);
+void psgl_context_framebuffer_parameter(GLenum target, GLenum pname,
+                                        GLint param);
 void psgl_context_set_current_color(GLfloat red, GLfloat green,
                                     GLfloat blue, GLfloat alpha);
 void psgl_context_set_light_fv(GLenum light, GLenum pname,
