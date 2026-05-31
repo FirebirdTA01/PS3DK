@@ -36,7 +36,7 @@ static uint32_t psgl_bootstrap_fp_control(
     return low | (1u << 10) | (reg_count << 24);
 }
 
-/* ── lifecycle ──────────────────────────────────────────────────── */
+/* lifecycle */
 
 PSGL_EXPORT void psglInit(PSGLinitOptions *options)
 {
@@ -103,7 +103,7 @@ PSGL_EXPORT void psglDestroyDevice(PSGLdevice *device)
     psgl_device_destroy(device);
 }
 
-/* ── context ─────────────────────────────────────────────────────── */
+/* context */
 
 PSGL_EXPORT void psglMakeCurrent(PSGLcontext *context, PSGLdevice *device)
 {
@@ -136,14 +136,14 @@ PSGL_EXPORT PSGLdevice *psglGetCurrentDevice(void)
     return psgl_context_current_device();
 }
 
-/* ── frame control ───────────────────────────────────────────────── */
+/* frame control */
 
 PSGL_EXPORT void psglSwap(void)
 {
     psgl_context_swap();
 }
 
-/* ── shader library ──────────────────────────────────────────────── */
+/* shader library */
 
 PSGL_EXPORT void psglLoadShaderLibrary(const char *filename)
 {
@@ -155,7 +155,7 @@ PSGL_EXPORT void *psglGetSPUInitData(void)
     return NULL;
 }
 
-/* ── allocators ──────────────────────────────────────────────────── */
+/* allocators */
 
 PSGL_EXPORT GLboolean psglSetAllocatorFuncs(PSGLmallocFunc mallocFunc,
                                             PSGLmemalignFunc memalignFunc,
@@ -179,7 +179,7 @@ PSGL_EXPORT GLsizei psglGetBounceBufferSize(void)
     return 0;
 }
 
-/* ── low-level RSX ───────────────────────────────────────────────── */
+/* low-level RSX */
 
 PSGL_EXPORT void psglAddressToOffset(const void *address, GLuint *offset)
 {
@@ -326,7 +326,7 @@ PSGL_EXPORT void psglSetFragmentProgramConfigurationMemoryLocation(
     *w++ = fp_control;
 }
 
-/* ── user clip planes ────────────────────────────────────────────── */
+/* user clip planes */
 
 PSGL_EXPORT void psglSetUserClipPlanes(
     const GLuint userClipControlMask,
@@ -336,7 +336,7 @@ PSGL_EXPORT void psglSetUserClipPlanes(
     (void)vertexOutputAttributeMask;
 }
 
-/* ── rescaler (inline in header, but needs symbol for ABI) ────────── */
+/* rescaler (inline in header, but needs symbol for ABI) */
 
 #if !defined(CELL_SDK_VERSION) || (CELL_SDK_VERSION < 0x180000)
 PSGL_EXPORT void psglRescAdjustAspectRatio(
@@ -347,7 +347,7 @@ PSGL_EXPORT void psglRescAdjustAspectRatio(
 }
 #endif
 
-/* ── command buffer recording ────────────────────────────────────── */
+/* command buffer recording */
 
 PSGL_EXPORT void psglBeginCommandRecord(void *commandBuffer,
                                         GLuint sizeInBytes)
@@ -404,7 +404,7 @@ PSGL_EXPORT void psglSetStallCallback(psglStallCallBack callBack)
     (void)callBack;
 }
 
-/* ── command buffer holes ────────────────────────────────────────── */
+/* command buffer holes */
 
 PSGL_EXPORT int psglDrawCommandBufferHole(
     GLenum mode, GLsizei count, GLenum type,
@@ -429,7 +429,7 @@ PSGL_EXPORT int psglGenerateCommandBufferHole(uint32_t holeSizeInWord,
     return -1;
 }
 
-/* ── state validation ────────────────────────────────────────────── */
+/* state validation */
 
 PSGL_EXPORT GLuint psglValidateStates(GLuint mask)
 {
@@ -452,7 +452,7 @@ PSGL_EXPORT GLuint psglValidateAttributes(const GLvoid *indices,
 
 PSGL_EXPORT void psglInvalidateAttributes(void) {}
 
-/* ── hardware cursor ─────────────────────────────────────────────── */
+/* hardware cursor */
 
 PSGL_EXPORT int32_t psglInitCursor(void)
 {
