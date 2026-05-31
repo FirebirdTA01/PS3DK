@@ -152,8 +152,27 @@ PSGL_EXPORT void psglLoadShaderLibrary(const char *filename)
 
 PSGL_EXPORT void *psglGetSPUInitData(void)
 {
-    /* TODO: populate from cellGcmGetConfiguration IOIF mapping */
-    return NULL;
+    static uint64_t config[34] __attribute__((aligned(16)));
+    CellGcmConfig gcm_config;
+    uintptr_t local_base;
+    uint32_t blocks;
+
+    cellGcmGetConfiguration(&gcm_config);
+    if (!gcm_config.localAddress || !gcm_config.localSize) return NULL;
+
+    local_base = (uintptr_t)gcm_config.localAddress;
+    blocks = (gcm_config.localSize + 0x03ffffffu) >> 26;
+    if (blocks > 8u) blocks = 8u;
+
+    for (uint32_t i = 0u; i < 34u; i++)
+        config[i] = 0u;
+    for (uint32_t block = 0u; block < blocks; block++) {
+        uint64_t block_base = (uint64_t)(local_base + (block << 26));
+        for (uint32_t window = 0u; window < 4u; window++)
+            config[block * 4u + window] = block_base;
+    }
+    config[32] = (uint64_t)local_base;
+    return config;
 }
 
 /* allocators */
