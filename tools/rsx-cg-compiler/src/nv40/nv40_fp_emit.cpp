@@ -605,6 +605,18 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<IRValueID, FpDot3LitPackScaledBinding>
         valueToDot3LitPackScaled;
 
+    // `Mul(literal_vec3, dot(literal_vec2, varying_pack))` - single
+    // dot scaled by a folded literal vec3.  This is the one-dot
+    // counterpart of FpDot3LitPackScaledBinding and feeds the
+    // water-wave ADD composite below.
+    struct FpDotLitPackScaledBinding
+    {
+        FpDotLitPackBinding base;
+        float               scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    };
+    std::unordered_map<IRValueID, FpDotLitPackScaledBinding>
+        valueToDotLitPackScaled;
+
     // `Mul(literal_vec3, uniform_scalar)` — folded literal vec
     // multiplied by a uniform scalar (broadcast).  Captures the
     // kitchen-sink water FP `phase * gTime` step.  Recognized in
@@ -669,6 +681,32 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpScaledDotsMinusLitMulUniformWrapBinding>
         valueToScaledDotsMinusLitMulUniWrap;
+
+    // `Add(literal_vec3 * single-dot-pack, literal_vec3 * uniform_scalar)`
+    // - the water-wave FP `scaled + phase * gTime` form.  This mirrors
+    // the scaled-dots-minus binding above but uses one DP2 and folds
+    // the Add into a final MAD without negating the uniform term.
+    struct FpSingleDotAddLitMulUniformBinding
+    {
+        FpDotLitPackScaledBinding    scaledDot;
+        FpLitVecUniformScaleBinding  litTimesUni;
+    };
+    std::unordered_map<IRValueID, FpSingleDotAddLitMulUniformBinding>
+        valueToSingleDotAddLitMulUni;
+
+    // `vec4(single-dot-add-lit-mul-uniform, 1.0)` - final wrap form
+    // for the COLOR sink.  Expected emission:
+    //   MOV R0.w,     c[0].xxxx + zeros          (uniform-patched)
+    //   DP2 R0.x,     f[INPUT].<pack>, c[0].xyxx + dir-lit
+    //   MUL R1.xyw,   R0.xxxx, c[0].xyzz + scale
+    //   MAD R0.xyz,   R0.wwww, c[0].xyzw + phase, R1.xywz
+    //   MOV R0.w[END], c[0].xyzw + {0,0,0,1}
+    struct FpSingleDotAddLitMulUniformWrapBinding
+    {
+        FpSingleDotAddLitMulUniformBinding add;
+    };
+    std::unordered_map<IRValueID, FpSingleDotAddLitMulUniformWrapBinding>
+        valueToSingleDotAddLitMulUniWrap;
 
     // `vec4(scaled-or-bare 3-dot pack, 1.0)` — wraps either a bare
     // FpDot3LitPack or a FpDot3LitPackScaled into the float4 the
@@ -1919,6 +1957,31 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                 }
 
+                // Add(FpDotLitPackScaled, FpLitVecUniformScale) -
+                // fold the single-dot water-wave composite into a
+                // dedicated binding.  This fires before the generic
+                // arithmetic fallback because the reference compiler
+                // emits a specialized DP2/MUL/MAD sequence.
+                if (inst.op == IROp::Add)
+                {
+                    auto trySingleDotAdd =
+                        [&](IRValueID scaledId, IRValueID litUniId) -> bool
+                    {
+                        auto sIt = valueToDotLitPackScaled.find(scaledId);
+                        auto uIt = valueToLitVecUniformScale.find(litUniId);
+                        if (sIt == valueToDotLitPackScaled.end() ||
+                            uIt == valueToLitVecUniformScale.end())
+                            return false;
+                        FpSingleDotAddLitMulUniformBinding b;
+                        b.scaledDot  = sIt->second;
+                        b.litTimesUni = uIt->second;
+                        valueToSingleDotAddLitMulUni[inst.result] = b;
+                        return true;
+                    };
+                    if (trySingleDotAdd(a, b) || trySingleDotAdd(b, a))
+                        break;
+                }
+
                 // Mul(literal_vec, uniform_scalar) — broadcast scale.
                 // Records a binding that the downstream wrap can use
                 // to emit the 3-instruction shape (uniform preload +
@@ -1929,8 +1992,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         auto uIt = valueToFpUniform.find(id);
                         if (uIt == valueToFpUniform.end()) return false;
-                        if (uIt->second >= entry.parameters.size()) return false;
-                        return entry.parameters[uIt->second].type.vectorSize <= 1;
+                        if (uIt->second < entry.parameters.size())
+                            return entry.parameters[uIt->second].type.vectorSize <= 1;
+                        auto tyIt = valueToType.find(id);
+                        return tyIt != valueToType.end() &&
+                               tyIt->second.vectorSize <= 1;
                     };
                     auto aLit = valueToLiteralVec4.find(a);
                     auto bLit = valueToLiteralVec4.find(b);
@@ -1965,21 +2031,36 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 {
                     auto aLit  = valueToLiteralVec4.find(a);
                     auto bLit  = valueToLiteralVec4.find(b);
+                    auto aDot  = valueToDotLitPack.find(a);
+                    auto bDot  = valueToDotLitPack.find(b);
                     auto aDot3 = valueToDot3LitPack.find(a);
                     auto bDot3 = valueToDot3LitPack.find(b);
+                    const FpDotLitPackBinding*  dot  = nullptr;
                     const FpDot3LitPackBinding* dot3 = nullptr;
                     const LiteralVec4*          lit  = nullptr;
-                    if (aLit != valueToLiteralVec4.end() &&
-                        bDot3 != valueToDot3LitPack.end())
+                    if (aLit != valueToLiteralVec4.end())
                     {
-                        lit  = &aLit->second;
-                        dot3 = &bDot3->second;
+                        lit = &aLit->second;
+                        if (bDot != valueToDotLitPack.end())
+                            dot = &bDot->second;
+                        if (bDot3 != valueToDot3LitPack.end())
+                            dot3 = &bDot3->second;
                     }
-                    else if (bLit != valueToLiteralVec4.end() &&
-                             aDot3 != valueToDot3LitPack.end())
+                    else if (bLit != valueToLiteralVec4.end())
                     {
-                        lit  = &bLit->second;
-                        dot3 = &aDot3->second;
+                        lit = &bLit->second;
+                        if (aDot != valueToDotLitPack.end())
+                            dot = &aDot->second;
+                        if (aDot3 != valueToDot3LitPack.end())
+                            dot3 = &aDot3->second;
+                    }
+                    if (dot && lit)
+                    {
+                        FpDotLitPackScaledBinding b;
+                        b.base = *dot;
+                        for (int k = 0; k < 4; ++k) b.scale[k] = lit->vals[k];
+                        valueToDotLitPackScaled[inst.result] = b;
+                        break;
                     }
                     if (dot3 && lit)
                     {
@@ -2613,6 +2694,29 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             FpScaledDotsMinusLitMulUniformWrapBinding wb;
                             wb.sub = sIt->second;
                             valueToScaledDotsMinusLitMulUniWrap[inst.result] = wb;
+                            break;
+                        }
+                    }
+                }
+
+                // Shape A4f: `vec4(single-dot-add-lit-mul-uniform,
+                // 1.0)` - 2-operand wrap of the water-wave ADD
+                // composite.  Lowers to the dedicated one-dot
+                // DP2/MUL/MAD sequence instead of generic arithmetic.
+                if (inst.operands.size() == 2)
+                {
+                    auto sIt =
+                        valueToSingleDotAddLitMulUni.find(inst.operands[0]);
+                    if (sIt != valueToSingleDotAddLitMulUni.end())
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[1]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpSingleDotAddLitMulUniformWrapBinding wb;
+                            wb.add = sIt->second;
+                            valueToSingleDotAddLitMulUniWrap[inst.result] = wb;
                             break;
                         }
                     }
@@ -5331,6 +5435,167 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         for (int k = 0; k < packWidth; ++k)
                         {
                             if (base.pack.lanes[k] >= 2)
+                            {
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                                break;
+                            }
+                        }
+                    }
+
+                    emittedSomething = true;
+                    break;
+                }
+
+                // `vec4(single-dot-add-lit-mul-uniform, 1.0)` -
+                // single-dot ADD mirror of the scaled-dots-minus
+                // composite above.  The dot is emitted directly from
+                // the input pack, then scaled into R1; R0 carries the
+                // uniform scalar for the final MAD.
+                auto sdaIt = valueToSingleDotAddLitMulUniWrap.find(srcId);
+                if (sdaIt != valueToSingleDotAddLitMulUniWrap.end())
+                {
+                    const FpSingleDotAddLitMulUniformBinding& b =
+                        sdaIt->second.add;
+                    const FpDotLitPackBinding& dot = b.scaledDot.base;
+                    auto packInputIt = valueToInputSrc.find(dot.pack.baseId);
+                    if (packInputIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: single-dot-add: pack varying did not resolve");
+                        return out;
+                    }
+                    auto uniIt = valueToFpUniform.find(b.litTimesUni.uniformId);
+                    if (uniIt == valueToFpUniform.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: single-dot-add: uniform did not resolve");
+                        return out;
+                    }
+
+                    const int inputSrcCode = packInputIt->second;
+                    const int packWidth    = dot.pack.width;
+                    const struct nvfx_reg tempR0   = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg tempR1   = nvfx_reg(NVFXSR_TEMP, 1);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg inputReg =
+                        nvfx_reg(NVFXSR_INPUT, inputSrcCode);
+                    struct nvfx_src none0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(none));
+
+                    // --- Insn 1: MOV R0.w, c[0].xxxx + zeros ---
+                    struct nvfx_src cXSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    cXSrc.swz[0] = cXSrc.swz[1] =
+                    cXSrc.swz[2] = cXSrc.swz[3] = 0;
+                    struct nvfx_insn movUni = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_W, cXSrc, none0, none0);
+                    movUni.precision = FLOAT32;
+                    asm_.emit(movUni, NVFX_FP_OP_OPCODE_MOV);
+                    const uint32_t uniOffset = asm_.currentByteSize();
+                    for (auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == uniIt->second)
+                        {
+                            eu.ucodeByteOffsets.push_back(uniOffset);
+                            break;
+                        }
+                    }
+                    static const float zerosBlock[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zerosBlock);
+
+                    // --- Insn 2: DP2 R0.x, f[INPUT].<pack>, c[0].xyxx ---
+                    struct nvfx_src packSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                    packSrc.swz[0] = static_cast<uint8_t>(dot.pack.lanes[0]);
+                    packSrc.swz[1] = static_cast<uint8_t>(
+                        packWidth > 1 ? dot.pack.lanes[1] : dot.pack.lanes[0]);
+                    packSrc.swz[2] = packSrc.swz[0];
+                    packSrc.swz[3] = packSrc.swz[0];
+                    struct nvfx_src dirSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    dirSrc.swz[0] = 0;
+                    dirSrc.swz[1] = 1;
+                    dirSrc.swz[2] = 0;
+                    dirSrc.swz[3] = 0;
+                    struct nvfx_insn dotInsn = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR0),
+                        NVFX_FP_MASK_X, packSrc, dirSrc, none0);
+                    dotInsn.precision = FLOAT32;
+                    asm_.emit(dotInsn, NVFX_FP_OP_OPCODE_DP2);
+                    const float dirBlock[4] = {
+                        dot.literal[0], dot.literal[1], 0.0f, 0.0f };
+                    asm_.appendConstBlock(dirBlock);
+
+                    // --- Insn 3: MUL R1.xyw, R0.xxxx, c[0].xyzz + scale ---
+                    struct nvfx_src r0DotSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                    r0DotSrc.swz[0] = r0DotSrc.swz[1] =
+                    r0DotSrc.swz[2] = r0DotSrc.swz[3] = 0;
+                    struct nvfx_src scaleSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    scaleSrc.swz[3] = 2;
+                    struct nvfx_insn mulScale = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempR1),
+                        NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_W,
+                        r0DotSrc, scaleSrc, none0);
+                    mulScale.precision = FLOAT32;
+                    asm_.emit(mulScale, NVFX_FP_OP_OPCODE_MUL);
+                    const float scaleBlock[4] = {
+                        b.scaledDot.scale[0],
+                        b.scaledDot.scale[1],
+                        b.scaledDot.scale[2], 0.0f };
+                    asm_.appendConstBlock(scaleBlock);
+
+                    // --- Insn 4: MAD R0.xyz, R0.wwww, c[0].xyzw + phase, R1.xywz ---
+                    struct nvfx_src r0XSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                    r0XSrc.swz[0] = r0XSrc.swz[1] =
+                    r0XSrc.swz[2] = r0XSrc.swz[3] = 3;
+                    struct nvfx_src phaseSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    struct nvfx_src r1Src =
+                        nvfx_src(const_cast<struct nvfx_reg&>(tempR1));
+                    r1Src.swz[2] = 3;
+                    r1Src.swz[3] = 2;
+                    struct nvfx_insn madFinal = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                        r0XSrc, phaseSrc, r1Src);
+                    madFinal.precision = dstPrecision;
+                    asm_.emit(madFinal, NVFX_FP_OP_OPCODE_MAD);
+                    const float phaseBlock[4] = {
+                        b.litTimesUni.literal[0],
+                        b.litTimesUni.literal[1],
+                        b.litTimesUni.literal[2], 0.0f };
+                    asm_.appendConstBlock(phaseBlock);
+
+                    // --- Insn 5: MOV R0.w, c[0].xyzw + {0,0,0,1} ---
+                    struct nvfx_src wSrc =
+                        nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    struct nvfx_insn movW = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_FP_MASK_W, wSrc, none0, none0);
+                    movW.precision = dstPrecision;
+                    asm_.emit(movW, NVFX_FP_OP_OPCODE_MOV);
+                    const float wBlock[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                    asm_.appendConstBlock(wBlock);
+
+                    attrs.attributeInputMask |=
+                        fpAttrMaskBitForInputSrc(inputSrcCode);
+                    if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
+                        attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        for (int k = 0; k < packWidth; ++k)
+                        {
+                            if (dot.pack.lanes[k] >= 2)
                             {
                                 attrs.texCoords2D &= ~(uint16_t{1} << n);
                                 break;
