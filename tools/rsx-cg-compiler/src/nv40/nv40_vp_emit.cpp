@@ -1149,6 +1149,147 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             return true;
         }
 
+        auto viStoreIt = valueToVecInsert.find(srcId);
+        if (viStoreIt != valueToVecInsert.end())
+        {
+            const VecInsertBinding& vi = viStoreIt->second;
+            auto mvBaseIt = valueToMatVecMul.find(vi.baseVecId);
+            auto addIt = valueToArith.find(vi.scalarId);
+            if (vi.laneIndex == 1 &&
+                mvBaseIt != valueToMatVecMul.end() &&
+                addIt != valueToArith.end() &&
+                addIt->second.op == ArithOp::Add)
+            {
+                const MatVecMulBinding& mv = mvBaseIt->second;
+
+                auto resolveScalarConst =
+                    [&](IRValueID id, int& regIdx) -> bool
+                {
+                    auto vsIt = valueToSource.find(id);
+                    if (vsIt == valueToSource.end()) return false;
+                    if (vsIt->second.kind != ValueSource::Kind::Const)
+                        return false;
+                    if (vsIt->second.width != 1) return false;
+                    regIdx = vsIt->second.regIdx;
+                    return true;
+                };
+
+                auto isBaseLaneY = [&](IRValueID id) -> bool
+                {
+                    auto shIt = valueToShuffle.find(id);
+                    if (shIt == valueToShuffle.end()) return false;
+                    return shIt->second.srcId == vi.baseVecId &&
+                           shIt->second.width == 1 &&
+                           shIt->second.lanes[0] == 1;
+                };
+
+                auto resolveMulBaseYScale =
+                    [&](IRValueID id, int& scaleReg) -> bool
+                {
+                    auto mulIt = valueToArith.find(id);
+                    if (mulIt == valueToArith.end()) return false;
+                    if (mulIt->second.op != ArithOp::Mul) return false;
+
+                    const IRValueID a = mulIt->second.srcIds[0];
+                    const IRValueID b = mulIt->second.srcIds[1];
+                    if (isBaseLaneY(a) && resolveScalarConst(b, scaleReg))
+                        return true;
+                    if (isBaseLaneY(b) && resolveScalarConst(a, scaleReg))
+                        return true;
+                    return false;
+                };
+
+                int scaleReg = -1;
+                int offsetReg = -1;
+                IRValueID mulId = 0;
+                if (resolveMulBaseYScale(addIt->second.srcIds[0], scaleReg) &&
+                    resolveScalarConst(addIt->second.srcIds[1], offsetReg))
+                {
+                    mulId = addIt->second.srcIds[0];
+                }
+                else if (resolveMulBaseYScale(addIt->second.srcIds[1], scaleReg) &&
+                         resolveScalarConst(addIt->second.srcIds[0], offsetReg))
+                {
+                    mulId = addIt->second.srcIds[1];
+                }
+
+                if (mulId != 0 && mv.priorChainId == 0 && !mv.vectorIsTemp &&
+                    !mv.hasTempBuild && mv.genericTempBuildId == 0)
+                {
+                    const int tempIdx = allocTemp();
+                    const struct nvfx_reg tempReg =
+                        makeReg(NVFXSR_TEMP, tempIdx);
+                    const struct nvfx_reg vecReg =
+                        makeReg(NVFXSR_INPUT, mv.vectorInputIdx);
+
+                    const uint8_t opcode =
+                        mv.vecOpcode != 0
+                            ? mv.vecOpcode
+                            : static_cast<uint8_t>(VP_OP(DP4));
+
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        const int rowOffset = kDp4RowOffset[i];
+                        const int rowReg = mv.matrixBaseReg + rowOffset;
+                        const struct nvfx_reg rowConst =
+                            makeReg(NVFXSR_CONST, rowReg);
+
+                        struct nvfx_src src0 = makeSrc(vecReg);
+                        src0.swz[0] = mv.inputSwz[0];
+                        src0.swz[1] = mv.inputSwz[1];
+                        src0.swz[2] = mv.inputSwz[2];
+                        src0.swz[3] = mv.inputSwz[3];
+                        struct nvfx_src src1 = makeSrc(rowConst);
+                        struct nvfx_src src2 = makeSrc(none);
+
+                        const bool isOverriddenY = (rowOffset == 1);
+                        struct nvfx_reg dpDst =
+                            isOverriddenY ? tempReg : dstReg;
+                        const int mask =
+                            isOverriddenY ? NVFX_VP_MASK_X
+                                          : kDp4Writemask[i];
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dpDst),
+                            mask,
+                            src0, src1, src2);
+                        asm_.emit(in, opcode);
+                    }
+
+                    struct nvfx_src tempX = makeSrc(tempReg);
+                    tempX.swz[0] = tempX.swz[1] =
+                        tempX.swz[2] = tempX.swz[3] = 0;
+                    struct nvfx_src scaleSrc =
+                        makeSrc(makeReg(NVFXSR_CONST, scaleReg));
+                    scaleSrc.swz[0] = scaleSrc.swz[1] =
+                        scaleSrc.swz[2] = scaleSrc.swz[3] = 0;
+                    struct nvfx_insn mulInsn = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(tempReg),
+                        NVFX_VP_MASK_X,
+                        tempX, scaleSrc, makeSrc(none));
+                    asm_.emit(mulInsn, VP_OP(MUL));
+
+                    struct nvfx_src offsetSrc =
+                        makeSrc(makeReg(NVFXSR_CONST, offsetReg));
+                    offsetSrc.swz[0] = offsetSrc.swz[1] =
+                        offsetSrc.swz[2] = offsetSrc.swz[3] = 0;
+                    struct nvfx_src scaledSrc = makeSrc(tempReg);
+                    scaledSrc.swz[0] = scaledSrc.swz[1] =
+                        scaledSrc.swz[2] = scaledSrc.swz[3] = 0;
+                    struct nvfx_insn addInsn = nvfx_insn(
+                        0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        NVFX_VP_MASK_Y,
+                        offsetSrc, makeSrc(none), scaledSrc);
+                    asm_.emit(addInsn, VP_OP(ADD));
+
+                    emittedSomething = true;
+                    return true;
+                }
+            }
+        }
+
         auto mvIt = valueToMatVecMul.find(srcId);
         if (mvIt != valueToMatVecMul.end())
         {

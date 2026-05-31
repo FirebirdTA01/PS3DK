@@ -1,0 +1,17 @@
+// VP matvec result with one arithmetic lane replacement.  The y lane
+// is derived from the transformed position while x/z/w stay from the
+// original matrix multiply result.
+void main(
+    float4 position      : POSITION,
+    uniform float4x4 mvp,
+    uniform float4 color,
+    uniform float scale,
+    uniform float offset,
+    out float4 out_pos   : POSITION,
+    out float4 out_color : COLOR)
+{
+    float4 p = mul(mvp, position);
+    p.y = p.y * scale + offset;
+    out_pos = p;
+    out_color = color;
+}
