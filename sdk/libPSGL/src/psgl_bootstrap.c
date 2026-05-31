@@ -131,7 +131,7 @@ PSGL_EXPORT void psglSwap(void)
 
 PSGL_EXPORT void psglLoadShaderLibrary(const char *filename)
 {
-    (void)filename;
+    psgl_context_load_shader_library(filename);
 }
 
 PSGL_EXPORT void *psglGetSPUInitData(void)

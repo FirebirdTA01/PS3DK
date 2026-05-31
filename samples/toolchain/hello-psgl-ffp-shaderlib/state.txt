@@ -1,0 +1,2 @@
+# Minimal textured fixed-function mask.
+0x00000001

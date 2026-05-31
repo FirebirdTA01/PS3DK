@@ -1,9 +1,11 @@
 #include "psgl_context.h"
 #include "cg_internal.h"
+#include "ffp_emit.h"
 #include "ffp_minimal_fpo.h"
 #include "ffp_minimal_vpo.h"
 
 #include <malloc.h>
+#include <ppu-types.h>
 #include <rsx/rsx.h>
 #include <stdlib.h>
 #include <sys/lv2_syscall.h>
@@ -21,7 +23,12 @@
 #define PSGL_BUFFER_BUSY           1u
 #define PSGL_MAX_QUEUE_FRAMES      1u
 #define PSGL_TEXTURE_ALIGNMENT     128u
-#define PSGL_FFP_MINIMAL_MASK      0x00000001u
+#define PSGL_CELL_FS_O_RDONLY      000000
+
+extern s32 cellFsOpen(const char *path, s32 flags, s32 *fd,
+                      const void *arg, u64 argsize);
+extern s32 cellFsClose(s32 fd);
+extern s32 cellFsRead(s32 fd, void *ptr, u64 len, u64 *read);
 
 typedef struct PSGLbufferObject {
     GLuint name;
@@ -77,6 +84,10 @@ static PSGLcgParameter g_psgl_ffp_vp_params[1];
 static PSGLcgProgram g_psgl_ffp_vp;
 static PSGLcgProgram g_psgl_ffp_fp;
 static uint32_t g_psgl_ffp_initialized;
+static PSGLcgParameter g_psgl_ffp_library_vp_params[1];
+static PSGLcgProgram g_psgl_ffp_library_vp;
+static PSGLcgProgram g_psgl_ffp_library_fp;
+static uint32_t g_psgl_ffp_library_valid;
 
 static void psgl_zero(void *ptr, uint32_t size)
 {
@@ -259,62 +270,92 @@ static void psgl_copy_name(char *dst, const char *src)
     dst[i] = '\0';
 }
 
-static int psgl_ffp_init_minimal(void)
+static uint32_t psgl_read_be32(const unsigned char *data)
+{
+    return ((uint32_t)data[0] << 24) |
+           ((uint32_t)data[1] << 16) |
+           ((uint32_t)data[2] << 8) |
+           (uint32_t)data[3];
+}
+
+static int psgl_bytes_equal(const unsigned char *data, const char *text,
+                            uint32_t count)
+{
+    for (uint32_t i = 0u; i < count; i++) {
+        if (data[i] != (unsigned char)text[i]) return 0;
+    }
+    return 1;
+}
+
+static int psgl_ffp_init_pair(PSGLcgProgram *vp, PSGLcgProgram *fp,
+                              PSGLcgParameter *vp_params,
+                              unsigned char *vpo, uint32_t vpo_size,
+                              unsigned char *fpo, uint32_t fpo_size)
 {
     const float *defaults = NULL;
     uint32_t mvp_index;
-    if (g_psgl_ffp_initialized) return 1;
 
-    psgl_zero(&g_psgl_ffp_vp, sizeof(g_psgl_ffp_vp));
-    psgl_zero(&g_psgl_ffp_fp, sizeof(g_psgl_ffp_fp));
-    psgl_zero(g_psgl_ffp_vp_params, sizeof(g_psgl_ffp_vp_params));
-
-    if (cellCgbRead(psgl_ffp_minimal_vpo, psgl_ffp_minimal_vpo_len,
-                    &g_psgl_ffp_vp.cgb_program) != 0)
+    if (!vp || !fp || !vp_params || !vpo || !vpo_size || !fpo || !fpo_size)
         return 0;
-    if (cellCgbRead(psgl_ffp_minimal_fpo, psgl_ffp_minimal_fpo_len,
-                    &g_psgl_ffp_fp.cgb_program) != 0)
+    psgl_zero(vp, sizeof(*vp));
+    psgl_zero(fp, sizeof(*fp));
+    psgl_zero(vp_params, sizeof(*vp_params));
+
+    if (cellCgbRead(vpo, vpo_size, &vp->cgb_program) != 0)
+        return 0;
+    if (cellCgbRead(fpo, fpo_size, &fp->cgb_program) != 0)
         return 0;
 
-    g_psgl_ffp_vp.magic = PSGL_CG_PROGRAM_MAGIC;
-    g_psgl_ffp_vp.profile = CG_PROFILE_SCE_VP_RSX;
-    g_psgl_ffp_vp.cgb_profile = cellCgbGetProfile(&g_psgl_ffp_vp.cgb_program);
-    g_psgl_ffp_vp.binary = psgl_ffp_minimal_vpo;
-    g_psgl_ffp_vp.binary_size = psgl_ffp_minimal_vpo_len;
-    g_psgl_ffp_vp.parameters = g_psgl_ffp_vp_params;
-    g_psgl_ffp_vp.parameter_count = 1u;
-    g_psgl_ffp_vp.loaded = CG_TRUE;
+    vp->magic = PSGL_CG_PROGRAM_MAGIC;
+    vp->profile = CG_PROFILE_SCE_VP_RSX;
+    vp->cgb_profile = cellCgbGetProfile(&vp->cgb_program);
+    vp->binary = vpo;
+    vp->binary_size = vpo_size;
+    vp->parameters = vp_params;
+    vp->parameter_count = 1u;
+    vp->loaded = CG_TRUE;
 
-    g_psgl_ffp_fp.magic = PSGL_CG_PROGRAM_MAGIC;
-    g_psgl_ffp_fp.profile = CG_PROFILE_SCE_FP_RSX;
-    g_psgl_ffp_fp.cgb_profile = cellCgbGetProfile(&g_psgl_ffp_fp.cgb_program);
-    g_psgl_ffp_fp.binary = psgl_ffp_minimal_fpo;
-    g_psgl_ffp_fp.binary_size = psgl_ffp_minimal_fpo_len;
-    g_psgl_ffp_fp.loaded = CG_TRUE;
+    fp->magic = PSGL_CG_PROGRAM_MAGIC;
+    fp->profile = CG_PROFILE_SCE_FP_RSX;
+    fp->cgb_profile = cellCgbGetProfile(&fp->cgb_program);
+    fp->binary = fpo;
+    fp->binary_size = fpo_size;
+    fp->loaded = CG_TRUE;
 
-    mvp_index = cellCgbMapLookup(&g_psgl_ffp_vp.cgb_program, "modelViewProj");
+    mvp_index = cellCgbMapLookup(&vp->cgb_program, "modelViewProj");
     if (mvp_index == (uint32_t)CELL_CGB_ERROR_FAILED) return 0;
 
-    g_psgl_ffp_vp_params[0].magic = PSGL_CG_PARAMETER_MAGIC;
-    g_psgl_ffp_vp_params[0].program = &g_psgl_ffp_vp;
-    g_psgl_ffp_vp_params[0].index = mvp_index;
-    psgl_copy_name(g_psgl_ffp_vp_params[0].name, "modelViewProj");
-    g_psgl_ffp_vp_params[0].type = CG_FLOAT4x4;
-    g_psgl_ffp_vp_params[0].resource = CG_C;
-    g_psgl_ffp_vp_params[0].variability = CG_UNIFORM;
-    g_psgl_ffp_vp_params[0].direction = CG_IN;
-    g_psgl_ffp_vp_params[0].vertex_register = 0xffffu;
-    g_psgl_ffp_vp_params[0].fragment_register = 0xffffu;
-    g_psgl_ffp_vp_params[0].value_count = 16u;
-    g_psgl_ffp_vp_params[0].dirty = CG_TRUE;
-    cellCgbMapGetVertexUniformRegister(&g_psgl_ffp_vp.cgb_program,
-                                       mvp_index,
-                                       &g_psgl_ffp_vp_params[0].vertex_register,
+    vp_params[0].magic = PSGL_CG_PARAMETER_MAGIC;
+    vp_params[0].program = vp;
+    vp_params[0].index = mvp_index;
+    psgl_copy_name(vp_params[0].name, "modelViewProj");
+    vp_params[0].type = CG_FLOAT4x4;
+    vp_params[0].resource = CG_C;
+    vp_params[0].variability = CG_UNIFORM;
+    vp_params[0].direction = CG_IN;
+    vp_params[0].vertex_register = 0xffffu;
+    vp_params[0].fragment_register = 0xffffu;
+    vp_params[0].value_count = 16u;
+    vp_params[0].dirty = CG_TRUE;
+    cellCgbMapGetVertexUniformRegister(&vp->cgb_program, mvp_index,
+                                       &vp_params[0].vertex_register,
                                        &defaults);
     if (defaults)
-        psgl_copy(g_psgl_ffp_vp_params[0].value, defaults,
-                  sizeof(g_psgl_ffp_vp_params[0].value));
+        psgl_copy(vp_params[0].value, defaults, sizeof(vp_params[0].value));
 
+    return 1;
+}
+
+static int psgl_ffp_init_minimal(void)
+{
+    if (g_psgl_ffp_initialized) return 1;
+    if (!psgl_ffp_init_pair(&g_psgl_ffp_vp, &g_psgl_ffp_fp,
+                            g_psgl_ffp_vp_params,
+                            psgl_ffp_minimal_vpo,
+                            psgl_ffp_minimal_vpo_len,
+                            psgl_ffp_minimal_fpo,
+                            psgl_ffp_minimal_fpo_len))
+        return 0;
     g_psgl_ffp_initialized = 1u;
     return 1;
 }
@@ -337,26 +378,34 @@ static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
     return PSGL_FFP_MINIMAL_MASK;
 }
 
-static int psgl_ffp_state_mask_to_cg(uint32_t mask, PSGLcgProgram **vp,
-                                     PSGLcgProgram **fp)
+static int psgl_ffp_state_mask_to_programs(uint32_t mask, PSGLcgProgram **vp,
+                                           PSGLcgProgram **fp)
 {
     if (vp) *vp = NULL;
     if (fp) *fp = NULL;
     if (mask != PSGL_FFP_MINIMAL_MASK) return 0;
+    if (g_psgl_ffp_library_valid) {
+        if (vp) *vp = &g_psgl_ffp_library_vp;
+        if (fp) *fp = &g_psgl_ffp_library_fp;
+        return 1;
+    }
     if (!psgl_ffp_init_minimal()) return 0;
     if (vp) *vp = &g_psgl_ffp_vp;
     if (fp) *fp = &g_psgl_ffp_fp;
     return 1;
 }
 
-static void psgl_ffp_update_matrices(PSGLcontext *context)
+static void psgl_ffp_update_matrices(PSGLcontext *context, PSGLcgProgram *vp)
 {
     GLfloat mvp[16];
-    if (!context) return;
+    PSGLcgParameter *parameter;
+    if (!context || !vp || !vp->parameters || vp->parameter_count == 0u)
+        return;
+    parameter = &vp->parameters[0];
     psgl_matrix_multiply(mvp, context->projection, context->modelview);
-    psgl_copy(g_psgl_ffp_vp_params[0].value, mvp, sizeof(mvp));
-    g_psgl_ffp_vp_params[0].value_count = 16u;
-    g_psgl_ffp_vp_params[0].dirty = CG_TRUE;
+    psgl_copy(parameter->value, mvp, sizeof(mvp));
+    parameter->value_count = 16u;
+    parameter->dirty = CG_TRUE;
     context->dirty &= ~PSGL_DIRTY_MATRICES;
 }
 
@@ -1210,10 +1259,10 @@ static void psgl_validate_draw_state(PSGLcontext *context)
         if ((!vp || !fp) && ffp_mask) {
             PSGLcgProgram *ffp_vp = NULL;
             PSGLcgProgram *ffp_fp = NULL;
-            if (psgl_ffp_state_mask_to_cg(ffp_mask, &ffp_vp, &ffp_fp)) {
+            if (psgl_ffp_state_mask_to_programs(ffp_mask, &ffp_vp, &ffp_fp)) {
                 if (!vp) vp = ffp_vp;
                 if (!fp) fp = ffp_fp;
-                psgl_ffp_update_matrices(context);
+                psgl_ffp_update_matrices(context, ffp_vp);
             }
         }
         psgl_emit_vertex_program(context, vp);
@@ -1486,6 +1535,69 @@ PSGLcontext *psgl_context_current(void)
 PSGLdevice *psgl_context_current_device(void)
 {
     return g_psgl.current_device;
+}
+
+void psgl_context_load_shader_library(const char *filename)
+{
+    s32 fd = -1;
+    u64 got = 0u;
+    unsigned char header[16];
+    uint32_t count;
+    if (!filename) return;
+    if (cellFsOpen(filename, PSGL_CELL_FS_O_RDONLY, &fd, NULL, 0) != 0)
+        return;
+    if (cellFsRead(fd, header, sizeof(header), &got) != 0 ||
+        got != sizeof(header) ||
+        !psgl_bytes_equal(header, "PSGLSHDR", 8u) ||
+        psgl_read_be32(header + 8u) != PSGL_SHADER_LIBRARY_VERSION) {
+        cellFsClose(fd);
+        return;
+    }
+
+    count = psgl_read_be32(header + 12u);
+    for (uint32_t i = 0u; i < count; i++) {
+        unsigned char rec[12];
+        uint32_t mask;
+        uint32_t vp_size;
+        uint32_t fp_size;
+        unsigned char *vp_blob;
+        unsigned char *fp_blob;
+        if (cellFsRead(fd, rec, sizeof(rec), &got) != 0 ||
+            got != sizeof(rec))
+            break;
+        mask = psgl_read_be32(rec);
+        vp_size = psgl_read_be32(rec + 4u);
+        fp_size = psgl_read_be32(rec + 8u);
+        if (!vp_size || !fp_size || vp_size > (1024u * 1024u) ||
+            fp_size > (1024u * 1024u))
+            break;
+        vp_blob = (unsigned char *)malloc(vp_size);
+        fp_blob = (unsigned char *)malloc(fp_size);
+        if (!vp_blob || !fp_blob) {
+            if (vp_blob) free(vp_blob);
+            if (fp_blob) free(fp_blob);
+            break;
+        }
+        if (cellFsRead(fd, vp_blob, vp_size, &got) != 0 || got != vp_size ||
+            cellFsRead(fd, fp_blob, fp_size, &got) != 0 || got != fp_size) {
+            free(vp_blob);
+            free(fp_blob);
+            break;
+        }
+        if (mask == PSGL_FFP_MINIMAL_MASK &&
+            psgl_ffp_init_pair(&g_psgl_ffp_library_vp,
+                               &g_psgl_ffp_library_fp,
+                               g_psgl_ffp_library_vp_params,
+                               vp_blob, vp_size, fp_blob, fp_size)) {
+            g_psgl_ffp_library_valid = 1u;
+        } else {
+            free(vp_blob);
+            free(fp_blob);
+        }
+    }
+    cellFsClose(fd);
+    if (g_psgl.current_context)
+        g_psgl.current_context->dirty |= PSGL_DIRTY_CG;
 }
 
 void psgl_context_bind_cg_program(CGprogram program, CGprofile profile)

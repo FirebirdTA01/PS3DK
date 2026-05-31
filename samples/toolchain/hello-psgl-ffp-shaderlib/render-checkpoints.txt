@@ -1,0 +1,5 @@
+# hello-psgl-ffp-shaderlib checkpoint file (2560x1600 capture resolution)
+# x y expected_R expected_G expected_B tolerance
+100 300 5 20 46 10
+520 770 0 41 180 35
+1480 690 243 245 250 35
