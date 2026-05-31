@@ -1,0 +1,11 @@
+// hello-ppu-cellgcm-triangle — fragment program.
+//
+// Emits the interpolated vertex colour.  No textures, no uniforms —
+// the rasteriser already did the colour interpolation for us.
+
+void main(
+    float4 in_color      : COLOR,
+    out float4 out_color : COLOR)
+{
+    out_color = in_color;
+}
