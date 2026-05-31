@@ -51,6 +51,8 @@ std::string toUpper(std::string s)
 // NV_vertex_program binding layout enumerated in nvfx_shader.h.
 int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
 {
+    if (semanticUpper.empty() && semanticIndex >= 0 && semanticIndex < 16)
+        return semanticIndex;
     if (semanticUpper == "POSITION") return NVFX_VP_INST_IN_POS;
     if (semanticUpper == "NORMAL")   return NVFX_VP_INST_IN_NORMAL;
     if (semanticUpper == "COLOR")    return semanticIndex == 1
@@ -1728,10 +1730,10 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         }();
         const int srcWidth = it->second.width;
         const int copyWidth = std::min(outWidth, srcWidth);
-        if (srcWidth < 4)
+        if (copyWidth < 4)
         {
             uint8_t s[4];
-            identitySwizzleForWidth(srcWidth, s);
+            identitySwizzleForWidth(copyWidth, s);
             src0.swz[0] = s[0];
             src0.swz[1] = s[1];
             src0.swz[2] = s[2];
@@ -2200,6 +2202,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 }
 
                 const IRValueID srcId = inst.operands[0];
+                if (inst.resultType.isVector())
+                {
+                    const std::string semUpper = toUpper(inst.semanticName);
+                    outputWidthBySemantic[semKey(semUpper, inst.semanticIndex)] =
+                        std::max(1, inst.resultType.vectorSize);
+                }
 
                 // Multi-instruction expansions (matvecmul, arithmetic
                 // needing a temp, VecInsert chains) are deferred until

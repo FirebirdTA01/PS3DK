@@ -93,6 +93,7 @@ private:
 
     // Assignment building (separate because it modifies lvalues)
     IRValueID buildAssignment(ExprNode* target, IRValueID value);
+    IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
 
     // Helper to get address/location for lvalue expressions
     struct LValueInfo

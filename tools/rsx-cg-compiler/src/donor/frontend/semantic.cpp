@@ -967,6 +967,17 @@ bool SemanticAnalyzer::checkAssignment(const CgType& target, const CgType& value
         return false;
     }
 
+    // Cg permits implicit vector narrowing on assignment, truncating
+    // from the left (float4 -> float2 keeps xy).  Keep this local to
+    // assignment checking so overload resolution and arithmetic do not
+    // gain silent narrowing.
+    if (target.isVector() && value.isVector() &&
+        target.isNumeric() && value.isNumeric() &&
+        value.vectorSize() > target.vectorSize())
+    {
+        return true;
+    }
+
     if (!value.isAssignableTo(target))
     {
         error(loc, "cannot assign '" + value.toString() + "' to '" + target.toString() + "'");

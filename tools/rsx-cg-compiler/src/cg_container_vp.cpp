@@ -139,6 +139,8 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
 // vertex-attribute slots per NVIDIA's auto-bind table.
 uint32_t vpInputResource(const std::string& semUpper, int semIndex)
 {
+    if (semUpper.empty() && semIndex >= 0 && semIndex < 16)
+        return kCgAttr0 + static_cast<uint32_t>(semIndex);
     if (semUpper == "POSITION") return kCgAttr0;
     if (semUpper == "NORMAL")   return kCgAttr0 + 2;        // ATTR2
     if (semUpper == "COLOR" || semUpper == "COL")
@@ -303,6 +305,66 @@ VpContainerResult emitVertexContainer(
                 }
             }
         }
+
+        // Non-struct entry parameters (typically uniforms) remain real
+        // function parameters and must be emitted between flattened
+        // struct inputs and synthetic struct outputs.
+        for (size_t i = 0; i < entry->parameters.size(); ++i)
+        {
+            const auto& p = entry->parameters[i];
+            if (p.type.baseType == IRType::Void)
+                continue;
+
+            ParamDesc d;
+            d.name      = p.name;
+            d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
+            d.type      = cgTypeForIRType(p.type);
+            d.paramno   = static_cast<uint32_t>(i);
+
+            const bool isUniform = (p.storage == StorageQualifier::Uniform);
+            if (isUniform)
+            {
+                d.var       = kCgUniform;
+                d.direction = kCgIn;
+                d.res       = kCgConst;
+                if (p.type.isMatrix())
+                {
+                    const int base = nextMatrixReg;
+                    nextMatrixReg += p.type.matrixRows;
+                    d.resIndex = static_cast<uint32_t>(base);
+                    params.push_back(d);
+                    for (int row = 0; row < p.type.matrixRows; ++row)
+                    {
+                        ParamDesc r;
+                        r.name      = p.name + "[" + std::to_string(row) + "]";
+                        r.semantic  = d.semantic;
+                        r.type      = kCgFloat4;
+                        r.var       = kCgUniform;
+                        r.direction = kCgIn;
+                        r.res       = kCgConst;
+                        r.paramno   = static_cast<uint32_t>(i);
+                        r.isReferenced = 1;
+                        r.resIndex = static_cast<uint32_t>(base + row);
+                        params.push_back(r);
+                    }
+                    continue;
+                }
+
+                d.resIndex = static_cast<uint32_t>(nextVectorReg--);
+            }
+            else
+            {
+                d.var = kCgVarying;
+                const bool isOut = (p.storage == StorageQualifier::Out);
+                d.direction = isOut ? kCgOut : kCgIn;
+                const std::string semUpper = toUpper(p.semanticName);
+                d.res = isOut ? vpOutputResource(semUpper, p.semanticIndex,
+                                                 p.rawSemanticName)
+                              : vpInputResource(semUpper, p.semanticIndex);
+            }
+            params.push_back(d);
+        }
+
         // File-scope uniforms — the reference compiler emits these between the
         // struct-flat inputs and outputs.  They're treated as
         // "shared" (constant-buffer linkage rather than function
@@ -393,16 +455,18 @@ VpContainerResult emitVertexContainer(
                     ParamDesc d;
                     d.name      = entry->name + "." + in.fieldName;   // the reference compiler convention
                     d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
-                    // Output struct fields are always vec4 in the
-                    // shaders we've seen — refine when narrower-output
-                    // shaders land.
-                    d.type      = kCgFloat4;
+                    // The IR builder stashes the source-level field
+                    // type on StoreOutput so narrowed struct outputs
+                    // (`float2 texcoord : TEX0`) size their parameter
+                    // entry like the reference compiler.
+                    uint32_t fieldType = cgTypeForIRType(in.resultType);
+                    d.type      = (fieldType != 0) ? fieldType : kCgFloat4;
                     d.var       = kCgVarying;
                     d.direction = kCgOut;
                     d.paramno   = kInvalidIndex;   // synthetic — no user param number
                     d.res       = vpOutputResource(toUpper(in.semanticName),
                                                    in.semanticIndex,
-                                                   in.rawSemanticName);
+                                                   "TEXCOORD");
                     params.push_back(d);
                 }
             }

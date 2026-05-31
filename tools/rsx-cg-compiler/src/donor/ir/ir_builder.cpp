@@ -1317,8 +1317,9 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
                 const std::vector<StructField>* fields = getStructFields(param->type.get());
                 if (fields)
                 {
-                    for (const auto& field : *fields)
+                    for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
                     {
+                        const auto& field = (*fields)[fieldIdx];
                         if (field.name == expr->member)
                         {
                             IRTypeInfo fieldType = getIRType(field.type.get());
@@ -1326,7 +1327,9 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
                                 valueId, fieldType);
                             inst->semanticName     = field.semantic.name;
                             inst->rawSemanticName  = field.semantic.rawName;
-                            inst->semanticIndex    = field.semantic.index;
+                            inst->semanticIndex    = field.semantic.isEmpty()
+                                ? static_cast<int>(fieldIdx)
+                                : field.semantic.index;
                             inst->structParamName  = param->name;       // e.g. "input"
                             inst->fieldName        = expr->member;       // e.g. "pos"
                             currentBlock_->addInstruction(std::move(inst));
@@ -1612,6 +1615,8 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
 
 IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
 {
+    value = coerceAssignmentValue(target, value);
+
     if (target->kind == ExprKind::Identifier)
     {
         auto* ident = static_cast<IdentifierExpr*>(target);
@@ -1851,6 +1856,36 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     return value;
 }
 
+IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
+{
+    if (value == InvalidIRValue || !target || !currentFunction_)
+        return value;
+
+    const IRTypeInfo targetType = getExprType(target);
+    IRValue* srcValue = currentFunction_->getValue(value);
+    if (!srcValue) return value;
+
+    if (!targetType.isVector() || !srcValue->type.isVector())
+        return value;
+    if (srcValue->type.vectorSize <= targetType.vectorSize)
+        return value;
+
+    static const char lanes[4] = {'x', 'y', 'z', 'w'};
+    std::string swizzle;
+    for (int i = 0; i < targetType.vectorSize && i < 4; ++i)
+        swizzle.push_back(lanes[i]);
+
+    auto inst = std::make_unique<IRInstruction>(
+        IROp::VecShuffle,
+        currentFunction_->allocateValueId(),
+        targetType);
+    inst->addOperand(value);
+    inst->swizzleMask = IRUtils::encodeSwizzle(swizzle);
+    IRValueID result = inst->result;
+    currentBlock_->addInstruction(std::move(inst));
+    return result;
+}
+
 // ============================================================================
 // Instruction Emission
 // ============================================================================
@@ -2011,7 +2046,7 @@ void IRBuilder::emitStructOutputs(ExprNode* structExpr, const std::vector<Struct
             IRValueID fieldValue = it->second;
 
             auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
-                InvalidIRValue, IRTypeInfo::Void());
+                InvalidIRValue, getIRType(field.type.get()));
             inst->addOperand(fieldValue);
             inst->semanticName    = field.semantic.name;
             inst->rawSemanticName = field.semantic.rawName;

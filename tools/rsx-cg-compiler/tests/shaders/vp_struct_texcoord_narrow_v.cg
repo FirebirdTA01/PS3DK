@@ -1,0 +1,23 @@
+// Struct-I/O vertex shader with implicit vector narrowing.  The
+// reference compiler accepts assigning a float4 source into a float2
+// TEX0 output by truncating to xy; this is a frontend prerequisite for
+// several reference samples.
+struct Vin
+{
+    float4 position;
+    float4 texcoord;
+};
+
+struct Vout
+{
+    float4 position : POSITION;
+    float2 texcoord : TEX0;
+};
+
+Vout main(Vin input, uniform float4x4 mvp)
+{
+    Vout output;
+    output.position = mul(mvp, input.position);
+    output.texcoord = input.texcoord;
+    return output;
+}
