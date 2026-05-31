@@ -14,6 +14,15 @@ static void cggl_zero(void *ptr, size_t size)
 static CGbool g_cggl_vertex_enabled = CG_FALSE;
 static CGbool g_cggl_fragment_enabled = CG_FALSE;
 
+static uint32_t cggl_texture_unit(PSGLcgParameter *parameter)
+{
+    if (!parameter) return 0u;
+    if (parameter->resource_index >= CG_TEXUNIT0 &&
+        parameter->resource_index <= CG_TEXUNIT15)
+        return (uint32_t)(parameter->resource_index - CG_TEXUNIT0);
+    return 0u;
+}
+
 static void cggl_copy_float4(float out[4], float x, float y, float z, float w)
 {
     out[0] = x;
@@ -317,13 +326,22 @@ CGGL_API void CGGLENTRY cgGLGetMatrixParameterArraydr(CGparameter p, long off,
 
 CGGL_API void CGGLENTRY cgGLSetTextureParameter(CGparameter param,
                                                 GLuint texobj)
-{ (void)param; (void)texobj; }
+{
+    PSGLcgParameter *p = psgl_cg_parameter(param);
+    uint32_t unit = cggl_texture_unit(p);
+    psgl_context_active_texture(GL_TEXTURE0 + unit);
+    psgl_context_bind_texture(GL_TEXTURE_2D, texobj);
+}
 
 CGGL_API GLuint CGGLENTRY cgGLGetTextureParameter(CGparameter param)
 { (void)param; return 0; }
 
 CGGL_API void CGGLENTRY cgGLEnableTextureParameter(CGparameter param)
-{ (void)param; }
+{
+    PSGLcgParameter *p = psgl_cg_parameter(param);
+    uint32_t unit = cggl_texture_unit(p);
+    psgl_context_active_texture(GL_TEXTURE0 + unit);
+}
 
 CGGL_API void CGGLENTRY cgGLDisableTextureParameter(CGparameter param)
 { (void)param; }
@@ -339,7 +357,7 @@ CGGL_API CGbool CGGLENTRY cgGLGetManageTextureParameters(CGcontext ctx)
 { (void)ctx; return CG_FALSE; }
 
 CGGL_API void CGGLENTRY cgGLSetupSampler(CGparameter param, GLuint texobj)
-{ (void)param; (void)texobj; }
+{ cgGLSetTextureParameter(param, texobj); }
 
 /* ── state registration ──────────────────────────────────────────── */
 

@@ -18,6 +18,7 @@
 #define PSGL_BUFFER_IDLE           0u
 #define PSGL_BUFFER_BUSY           1u
 #define PSGL_MAX_QUEUE_FRAMES      1u
+#define PSGL_TEXTURE_ALIGNMENT     128u
 
 typedef struct PSGLbufferObject {
     GLuint name;
@@ -28,6 +29,28 @@ typedef struct PSGLbufferObject {
     GLboolean mapped;
     struct PSGLbufferObject *next;
 } PSGLbufferObject;
+
+typedef struct PSGLtextureObject {
+    GLuint name;
+    GLenum target;
+    GLenum min_filter;
+    GLenum mag_filter;
+    GLenum wrap_s;
+    GLenum wrap_t;
+    GLenum allocation_hint;
+    uint16_t width;
+    uint16_t height;
+    uint16_t pitch;
+    uint8_t levels;
+    uint8_t rsx_format;
+    uint8_t location;
+    uint8_t linear;
+    uint32_t size;
+    void *address;
+    uint32_t offset;
+    CellGcmTexture gcm_texture;
+    struct PSGLtextureObject *next;
+} PSGLtextureObject;
 
 typedef struct PSGLsystemState {
     uint32_t initialized;
@@ -43,7 +66,9 @@ typedef struct PSGLsystemState {
 
 static PSGLsystemState g_psgl;
 static PSGLbufferObject *g_psgl_buffers;
+static PSGLtextureObject *g_psgl_textures;
 static GLuint g_psgl_next_buffer_name = 1u;
+static GLuint g_psgl_next_texture_name = 1u;
 
 static void psgl_zero(void *ptr, uint32_t size)
 {
@@ -60,6 +85,34 @@ static void psgl_copy(void *dst, const void *src, uint32_t size)
     while (size--) {
         *out++ = *in++;
     }
+}
+
+static uint32_t psgl_texture_remap_argb(void)
+{
+    return GCM_TEXTURE_REMAP_MODE(GCM_TEXTURE_REMAP_ORDER_XYXY,
+                                  GCM_TEXTURE_REMAP_COLOR_A,
+                                  GCM_TEXTURE_REMAP_COLOR_R,
+                                  GCM_TEXTURE_REMAP_COLOR_G,
+                                  GCM_TEXTURE_REMAP_COLOR_B,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP);
+}
+
+static uint32_t psgl_morton2(uint32_t x, uint32_t y)
+{
+    uint32_t out = 0u;
+    for (uint32_t bit = 0u; bit < 16u; bit++) {
+        out |= ((x >> bit) & 1u) << (bit * 2u);
+        out |= ((y >> bit) & 1u) << (bit * 2u + 1u);
+    }
+    return out;
+}
+
+static int psgl_is_power_of_two(uint32_t value)
+{
+    return value && ((value & (value - 1u)) == 0u);
 }
 
 static void psgl_flip_trampoline(uint32_t head)
@@ -544,6 +597,235 @@ static PSGLbufferObject *psgl_bound_buffer(PSGLcontext *context, GLenum target)
     return NULL;
 }
 
+static PSGLtextureObject *psgl_find_texture(GLuint name)
+{
+    PSGLtextureObject *texture = g_psgl_textures;
+    while (texture) {
+        if (texture->name == name) return texture;
+        texture = texture->next;
+    }
+    return NULL;
+}
+
+static void psgl_init_texture_defaults(PSGLtextureObject *texture)
+{
+    texture->target = GL_TEXTURE_2D;
+    texture->min_filter = GL_NEAREST;
+    texture->mag_filter = GL_NEAREST;
+    texture->wrap_s = GL_REPEAT;
+    texture->wrap_t = GL_REPEAT;
+    texture->allocation_hint = GL_TEXTURE_LINEAR_GPU_SCE;
+    texture->location = CELL_GCM_LOCATION_LOCAL;
+    texture->linear = 1u;
+    texture->levels = 1u;
+    texture->gcm_texture.remap = psgl_texture_remap_argb();
+}
+
+static PSGLtextureObject *psgl_create_texture(GLuint name)
+{
+    PSGLtextureObject *texture = psgl_find_texture(name);
+    if (texture) return texture;
+    for (texture = g_psgl_textures; texture; texture = texture->next) {
+        if (texture->name == 0u) {
+            PSGLtextureObject *next = texture->next;
+            psgl_zero(texture, sizeof(*texture));
+            texture->name = name;
+            texture->next = next;
+            psgl_init_texture_defaults(texture);
+            return texture;
+        }
+    }
+    texture = (PSGLtextureObject *)calloc(1u, sizeof(*texture));
+    if (!texture) return NULL;
+    texture->name = name;
+    psgl_init_texture_defaults(texture);
+    texture->next = g_psgl_textures;
+    g_psgl_textures = texture;
+    return texture;
+}
+
+static void psgl_release_texture_storage(PSGLtextureObject *texture)
+{
+    if (!texture) return;
+    texture->address = NULL;
+    texture->offset = 0u;
+    texture->size = 0u;
+    texture->width = 0u;
+    texture->height = 0u;
+    texture->pitch = 0u;
+    psgl_zero(&texture->gcm_texture, sizeof(texture->gcm_texture));
+    texture->gcm_texture.remap = psgl_texture_remap_argb();
+}
+
+static uint32_t psgl_texture_unit_index(GLenum texture)
+{
+    if (texture < GL_TEXTURE0) return PSGL_MAX_TEXTURE_UNITS;
+    texture -= GL_TEXTURE0;
+    return texture < PSGL_MAX_TEXTURE_UNITS ? (uint32_t)texture : PSGL_MAX_TEXTURE_UNITS;
+}
+
+static PSGLtextureObject *psgl_bound_texture(PSGLcontext *context, GLenum target)
+{
+    uint32_t unit;
+    GLuint name;
+    if (!context || target != GL_TEXTURE_2D) return NULL;
+    unit = psgl_texture_unit_index(context->active_texture);
+    if (unit >= PSGL_MAX_TEXTURE_UNITS) return NULL;
+    name = context->textures[unit].texture_2d;
+    return name ? psgl_find_texture(name) : NULL;
+}
+
+static uint8_t psgl_translate_texture_filter(GLenum filter)
+{
+    switch (filter) {
+    case GL_NEAREST: return CELL_GCM_TEXTURE_NEAREST;
+    case GL_LINEAR: return CELL_GCM_TEXTURE_LINEAR;
+    case GL_NEAREST_MIPMAP_NEAREST: return CELL_GCM_TEXTURE_NEAREST_NEAREST;
+    case GL_LINEAR_MIPMAP_NEAREST: return CELL_GCM_TEXTURE_LINEAR_NEAREST;
+    case GL_NEAREST_MIPMAP_LINEAR: return CELL_GCM_TEXTURE_NEAREST_LINEAR;
+    case GL_LINEAR_MIPMAP_LINEAR: return CELL_GCM_TEXTURE_LINEAR_LINEAR;
+    default: return 0u;
+    }
+}
+
+static uint8_t psgl_translate_texture_wrap(GLenum wrap)
+{
+    switch (wrap) {
+    case GL_REPEAT: return CELL_GCM_TEXTURE_WRAP;
+    case GL_CLAMP: return CELL_GCM_TEXTURE_CLAMP;
+    case GL_CLAMP_TO_EDGE: return CELL_GCM_TEXTURE_CLAMP_TO_EDGE;
+    case GL_MIRRORED_REPEAT: return CELL_GCM_TEXTURE_MIRROR;
+    default: return 0u;
+    }
+}
+
+static uint16_t psgl_align_u16(uint32_t value, uint32_t align)
+{
+    return (uint16_t)((value + align - 1u) & ~(align - 1u));
+}
+
+static uint32_t psgl_unpack_row_stride(GLsizei width, GLenum format,
+                                       GLenum type, GLint alignment)
+{
+    uint32_t row = 0u;
+    uint32_t align = alignment > 0 ? (uint32_t)alignment : 1u;
+    if (format == GL_RGBA || format == GL_BGRA) {
+        row = (type == GL_UNSIGNED_BYTE) ? (uint32_t)width * 4u : (uint32_t)width * 2u;
+    } else if (format == GL_RGB) {
+        row = (type == GL_UNSIGNED_BYTE) ? (uint32_t)width * 3u : (uint32_t)width * 2u;
+    }
+    if (align > 1u) row = (row + align - 1u) & ~(align - 1u);
+    return row;
+}
+
+static int psgl_texture_supported(GLenum format, GLenum type)
+{
+    if ((format == GL_RGBA || format == GL_BGRA || format == GL_RGB) &&
+        type == GL_UNSIGNED_BYTE)
+        return 1;
+    if (format == GL_RGBA &&
+        (type == GL_UNSIGNED_SHORT_5_5_5_1 || type == GL_UNSIGNED_SHORT_4_4_4_4))
+        return 1;
+    if (format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5)
+        return 1;
+    return 0;
+}
+
+static uint32_t psgl_read_u16_be(const unsigned char *src)
+{
+    return ((uint32_t)src[0] << 8) | (uint32_t)src[1];
+}
+
+static uint32_t psgl_pack_argb8(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    return ((uint32_t)a << 24) | ((uint32_t)r << 16) |
+           ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+static uint32_t psgl_convert_texel_argb8(const unsigned char *src,
+                                         GLenum format, GLenum type)
+{
+    if (type == GL_UNSIGNED_BYTE) {
+        if (format == GL_RGBA)
+            return psgl_pack_argb8(src[0], src[1], src[2], src[3]);
+        if (format == GL_BGRA)
+            return psgl_pack_argb8(src[2], src[1], src[0], src[3]);
+        if (format == GL_RGB)
+            return psgl_pack_argb8(src[0], src[1], src[2], 255u);
+    } else if (type == GL_UNSIGNED_SHORT_5_6_5) {
+        uint32_t v = psgl_read_u16_be(src);
+        uint8_t r = (uint8_t)(((v >> 11) & 0x1fu) * 255u / 31u);
+        uint8_t g = (uint8_t)(((v >> 5) & 0x3fu) * 255u / 63u);
+        uint8_t b = (uint8_t)((v & 0x1fu) * 255u / 31u);
+        return psgl_pack_argb8(r, g, b, 255u);
+    } else if (type == GL_UNSIGNED_SHORT_5_5_5_1) {
+        uint32_t v = psgl_read_u16_be(src);
+        uint8_t r = (uint8_t)(((v >> 11) & 0x1fu) * 255u / 31u);
+        uint8_t g = (uint8_t)(((v >> 6) & 0x1fu) * 255u / 31u);
+        uint8_t b = (uint8_t)(((v >> 1) & 0x1fu) * 255u / 31u);
+        uint8_t a = (v & 1u) ? 255u : 0u;
+        return psgl_pack_argb8(r, g, b, a);
+    } else if (type == GL_UNSIGNED_SHORT_4_4_4_4) {
+        uint32_t v = psgl_read_u16_be(src);
+        uint8_t r = (uint8_t)(((v >> 12) & 0x0fu) * 17u);
+        uint8_t g = (uint8_t)(((v >> 8) & 0x0fu) * 17u);
+        uint8_t b = (uint8_t)(((v >> 4) & 0x0fu) * 17u);
+        uint8_t a = (uint8_t)((v & 0x0fu) * 17u);
+        return psgl_pack_argb8(r, g, b, a);
+    }
+    return 0u;
+}
+
+static uint32_t psgl_texel_size(GLenum format, GLenum type)
+{
+    if (type == GL_UNSIGNED_BYTE)
+        return format == GL_RGB ? 3u : 4u;
+    return 2u;
+}
+
+static void psgl_write_texture_image(PSGLtextureObject *texture,
+                                     GLint xoffset, GLint yoffset,
+                                     GLsizei width, GLsizei height,
+                                     GLenum format, GLenum type,
+                                     const GLvoid *pixels,
+                                     GLint unpack_alignment)
+{
+    const unsigned char *src = (const unsigned char *)pixels;
+    uint32_t source_stride = psgl_unpack_row_stride(width, format, type, unpack_alignment);
+    uint32_t texel_size = psgl_texel_size(format, type);
+    if (!texture || !texture->address || !pixels || !source_stride) return;
+    for (GLsizei y = 0; y < height; y++) {
+        for (GLsizei x = 0; x < width; x++) {
+            uint32_t value = psgl_convert_texel_argb8(src + (uint32_t)y * source_stride +
+                                                      (uint32_t)x * texel_size,
+                                                      format, type);
+            uint32_t dst_x = (uint32_t)xoffset + (uint32_t)x;
+            uint32_t dst_y = (uint32_t)yoffset + (uint32_t)y;
+            uint32_t index = texture->linear
+                ? dst_y * (texture->pitch / 4u) + dst_x
+                : psgl_morton2(dst_x, dst_y);
+            ((uint32_t *)texture->address)[index] = value;
+        }
+    }
+}
+
+static void psgl_fill_gcm_texture(PSGLtextureObject *texture)
+{
+    if (!texture) return;
+    psgl_zero(&texture->gcm_texture, sizeof(texture->gcm_texture));
+    texture->gcm_texture.format = texture->rsx_format;
+    texture->gcm_texture.mipmap = texture->levels ? texture->levels : 1u;
+    texture->gcm_texture.dimension = CELL_GCM_TEXTURE_DIMENSION_2;
+    texture->gcm_texture.cubemap = 0u;
+    texture->gcm_texture.remap = psgl_texture_remap_argb();
+    texture->gcm_texture.width = texture->width;
+    texture->gcm_texture.height = texture->height;
+    texture->gcm_texture.depth = 1u;
+    texture->gcm_texture.location = texture->location;
+    texture->gcm_texture.pitch = texture->pitch;
+    texture->gcm_texture.offset = texture->offset;
+}
+
 static uint32_t psgl_gl_primitive(GLenum mode)
 {
     switch (mode) {
@@ -616,6 +898,44 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
                                   (uint8_t)attrib->size, type,
                                   CELL_GCM_LOCATION_LOCAL, offset);
     }
+}
+
+static void psgl_emit_textures(PSGLcontext *context)
+{
+    if (!context || !context->gcm) return;
+    for (uint32_t i = 0; i < PSGL_MAX_TEXTURE_UNITS; i++) {
+        GLuint name = context->textures[i].texture_2d;
+        PSGLtextureObject *texture = name ? psgl_find_texture(name) : NULL;
+        if (!texture || !texture->address) {
+            cellGcmSetTextureControl(context->gcm, (uint8_t)i, 0u,
+                                     0u, 0u,
+                                     CELL_GCM_TEXTURE_MAX_ANISO_1);
+            continue;
+        }
+        uint8_t min_filter = psgl_translate_texture_filter(texture->min_filter);
+        uint8_t mag_filter = psgl_translate_texture_filter(texture->mag_filter);
+        uint8_t wrap_s = psgl_translate_texture_wrap(texture->wrap_s);
+        uint8_t wrap_t = psgl_translate_texture_wrap(texture->wrap_t);
+        if (!min_filter) min_filter = CELL_GCM_TEXTURE_NEAREST;
+        if (!mag_filter) mag_filter = CELL_GCM_TEXTURE_NEAREST;
+        if (!wrap_s) wrap_s = CELL_GCM_TEXTURE_WRAP;
+        if (!wrap_t) wrap_t = CELL_GCM_TEXTURE_WRAP;
+        cellGcmSetTexture(context->gcm, (uint8_t)i, &texture->gcm_texture);
+        cellGcmSetTextureControl(context->gcm, (uint8_t)i, 1u,
+                                 0u, 0u,
+                                 CELL_GCM_TEXTURE_MAX_ANISO_1);
+        cellGcmSetTextureFilter(context->gcm, (uint8_t)i, 0u,
+                                min_filter, mag_filter,
+                                CELL_GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+        cellGcmSetTextureAddress(context->gcm, (uint8_t)i,
+                                 wrap_s, wrap_t, CELL_GCM_TEXTURE_WRAP,
+                                 CELL_GCM_TEXTURE_UNSIGNED_REMAP_NORMAL,
+                                 CELL_GCM_TEXTURE_ZFUNC_LESS,
+                                 CELL_GCM_TEXTURE_GAMMA_NONE);
+        cellGcmSetTextureBorderColor(context->gcm, (uint8_t)i, 0u);
+    }
+    cellGcmSetInvalidateTextureCache(context->gcm, CELL_GCM_INVALIDATE_TEXTURE);
+    context->dirty &= ~PSGL_DIRTY_TEXTURES;
 }
 
 static const void *psgl_cg_ucode(const PSGLcgProgram *program)
@@ -730,6 +1050,7 @@ static void psgl_validate_draw_state(PSGLcontext *context)
     if (context->dirty & PSGL_DIRTY_STENCIL) psgl_emit_stencil(context);
     if (context->dirty & PSGL_DIRTY_ALPHA) psgl_emit_alpha(context);
     if (context->dirty & PSGL_DIRTY_RASTER) psgl_emit_raster(context);
+    if (context->dirty & PSGL_DIRTY_TEXTURES) psgl_emit_textures(context);
     if (context->dirty & PSGL_DIRTY_CG) {
         psgl_emit_vertex_program(context,
                                  psgl_cg_program(context->bound_vertex_program));
@@ -838,6 +1159,9 @@ PSGLcontext *psgl_context_create(void)
     context->logic_op = GL_COPY;
     context->cull_face = GL_BACK;
     context->front_face = GL_CCW;
+    context->active_texture = GL_TEXTURE0;
+    context->client_active_texture = GL_TEXTURE0;
+    context->unpack_alignment = 4;
     context->attribs[PSGL_ATTRIB_VERTEX].size = 4;
     context->attribs[PSGL_ATTRIB_NORMAL].size = 3;
     context->attribs[PSGL_ATTRIB_COLOR].size = 4;
@@ -1061,7 +1385,7 @@ void psgl_context_swap(void)
     context->dirty |= PSGL_DIRTY_FRAMEBUFFER;
     psgl_bind_render_target(context);
     psgl_emit_viewport(context);
-    context->dirty |= PSGL_DIRTY_CG;
+    context->dirty |= PSGL_DIRTY_CG | PSGL_DIRTY_TEXTURES;
 }
 
 void psgl_context_set_clear_color(GLfloat red, GLfloat green,
@@ -1322,6 +1646,175 @@ void psgl_context_set_logic_op(GLenum opcode)
     if (!context || !psgl_translate_logic_op(opcode, &translated)) return;
     context->logic_op = opcode;
     context->dirty |= PSGL_DIRTY_RASTER;
+}
+
+void psgl_context_set_pixel_store(GLenum pname, GLint param)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || pname != GL_UNPACK_ALIGNMENT) return;
+    if (param != 1 && param != 2 && param != 4 && param != 8) return;
+    context->unpack_alignment = param;
+}
+
+void psgl_context_active_texture(GLenum texture)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (psgl_texture_unit_index(texture) >= PSGL_MAX_TEXTURE_UNITS) return;
+    context->active_texture = texture;
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
+void psgl_context_client_active_texture(GLenum texture)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (psgl_texture_unit_index(texture) >= PSGL_MAX_TEXTURE_UNITS) return;
+    context->client_active_texture = texture;
+}
+
+void psgl_context_gen_textures(GLsizei n, GLuint *textures)
+{
+    if (n < 0 || !textures) return;
+    for (GLsizei i = 0; i < n; i++) {
+        GLuint name = g_psgl_next_texture_name++;
+        if (name == 0u) name = g_psgl_next_texture_name++;
+        textures[i] = psgl_create_texture(name) ? name : 0u;
+    }
+}
+
+void psgl_context_delete_textures(GLsizei n, const GLuint *textures)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (n < 0 || !textures) return;
+    for (GLsizei i = 0; i < n; i++) {
+        GLuint name = textures[i];
+        PSGLtextureObject *texture;
+        if (name == 0u) continue;
+        texture = psgl_find_texture(name);
+        if (!texture) continue;
+        if (context) {
+            for (uint32_t unit = 0; unit < PSGL_MAX_TEXTURE_UNITS; unit++) {
+                if (context->textures[unit].texture_2d == name)
+                    context->textures[unit].texture_2d = 0u;
+            }
+            context->dirty |= PSGL_DIRTY_TEXTURES;
+        }
+        psgl_release_texture_storage(texture);
+        texture->name = 0u;
+    }
+}
+
+void psgl_context_bind_texture(GLenum target, GLuint texture)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    uint32_t unit;
+    if (!context || target != GL_TEXTURE_2D) return;
+    unit = psgl_texture_unit_index(context->active_texture);
+    if (unit >= PSGL_MAX_TEXTURE_UNITS) return;
+    if (texture != 0u && !psgl_create_texture(texture)) return;
+    context->textures[unit].texture_2d = texture;
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
+void psgl_context_tex_image_2d(GLenum target, GLint level,
+                               GLint internalformat,
+                               GLsizei width, GLsizei height, GLint border,
+                               GLenum format, GLenum type,
+                               const GLvoid *pixels)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    uint32_t pitch;
+    uint32_t size;
+    void *address;
+    uint32_t offset = 0u;
+    int swizzled;
+    (void)internalformat;
+    if (!context || !texture || level != 0 || border != 0 ||
+        width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
+        !psgl_texture_supported(format, type))
+        return;
+    swizzled = texture->allocation_hint == GL_TEXTURE_SWIZZLED_GPU_SCE &&
+               psgl_is_power_of_two((uint32_t)width) &&
+               psgl_is_power_of_two((uint32_t)height);
+    pitch = swizzled ? (uint32_t)width * 4u
+                     : (uint32_t)psgl_align_u16((uint32_t)width * 4u, 64u);
+    size = swizzled ? (uint32_t)width * (uint32_t)height * 4u
+                    : pitch * (uint32_t)height;
+    address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
+    if (!address) return;
+    if (cellGcmAddressToOffset(address, &offset) != 0) return;
+    psgl_release_texture_storage(texture);
+    texture->address = address;
+    texture->offset = offset;
+    texture->size = size;
+    texture->width = (uint16_t)width;
+    texture->height = (uint16_t)height;
+    texture->pitch = (uint16_t)pitch;
+    texture->levels = 1u;
+    texture->location = CELL_GCM_LOCATION_LOCAL;
+    texture->linear = swizzled ? 0u : 1u;
+    texture->rsx_format = CELL_GCM_TEXTURE_A8R8G8B8 |
+        (swizzled ? CELL_GCM_TEXTURE_SZ : CELL_GCM_TEXTURE_LN);
+    if (pixels)
+        psgl_write_texture_image(texture, 0, 0, width, height,
+                                 format, type, pixels,
+                                 context->unpack_alignment);
+    psgl_fill_gcm_texture(texture);
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
+void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
+                                   GLint xoffset, GLint yoffset,
+                                   GLsizei width, GLsizei height,
+                                   GLenum format, GLenum type,
+                                   const GLvoid *pixels)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    if (!context || !texture || !texture->address || !pixels || level != 0 ||
+        xoffset < 0 || yoffset < 0 || width < 0 || height < 0 ||
+        xoffset + width > texture->width || yoffset + height > texture->height ||
+        !psgl_texture_supported(format, type))
+        return;
+    psgl_write_texture_image(texture, xoffset, yoffset, width, height,
+                             format, type, pixels, context->unpack_alignment);
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
+void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    if (!context || !texture) return;
+    switch (pname) {
+    case GL_TEXTURE_MIN_FILTER:
+        if (!psgl_translate_texture_filter((GLenum)param)) return;
+        texture->min_filter = (GLenum)param;
+        break;
+    case GL_TEXTURE_MAG_FILTER:
+        if (param != GL_NEAREST && param != GL_LINEAR) return;
+        texture->mag_filter = (GLenum)param;
+        break;
+    case GL_TEXTURE_WRAP_S:
+        if (!psgl_translate_texture_wrap((GLenum)param)) return;
+        texture->wrap_s = (GLenum)param;
+        break;
+    case GL_TEXTURE_WRAP_T:
+        if (!psgl_translate_texture_wrap((GLenum)param)) return;
+        texture->wrap_t = (GLenum)param;
+        break;
+    case GL_TEXTURE_ALLOCATION_HINT_SCE:
+        if (param != GL_TEXTURE_LINEAR_GPU_SCE &&
+            param != GL_TEXTURE_SWIZZLED_GPU_SCE)
+            return;
+        texture->allocation_hint = (GLenum)param;
+        break;
+    default:
+        return;
+    }
+    context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
 void psgl_context_gen_buffers(GLsizei n, GLuint *buffers)

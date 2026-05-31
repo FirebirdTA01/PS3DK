@@ -202,7 +202,7 @@ GLAPI void glLogicOp(GLenum opcode)       { psgl_context_set_logic_op(opcode); }
 /* ── pixel store ─────────────────────────────────────────────────── */
 
 GLAPI void glPixelStorei(GLenum pname, GLint param)
-{ (void)pname; (void)param; }
+{ psgl_context_set_pixel_store(pname, param); }
 
 /* ── sample coverage ─────────────────────────────────────────────── */
 
@@ -253,17 +253,15 @@ GLAPI void glOrthox(GLfixed l, GLfixed r, GLfixed b,
 
 /* ── textures ────────────────────────────────────────────────────── */
 
-GLAPI void glActiveTexture(GLenum texture)    { (void)texture; }
+GLAPI void glActiveTexture(GLenum texture)    { psgl_context_active_texture(texture); }
 GLAPI void glBindTexture(GLenum target, GLuint texture)
-{ (void)target; (void)texture; }
+{ psgl_context_bind_texture(target, texture); }
 
 GLAPI void glGenTextures(GLsizei n, GLuint *textures)
-{
-    if (textures) gl_zero(textures, (size_t)n * sizeof(GLuint));
-}
+{ psgl_context_gen_textures(n, textures); }
 
 GLAPI void glDeleteTextures(GLsizei n, const GLuint *textures)
-{ (void)n; (void)textures; }
+{ psgl_context_delete_textures(n, textures); }
 
 GLAPI void glTexImage2D(GLenum target, GLint level,
                         GLint internalformat,
@@ -271,9 +269,8 @@ GLAPI void glTexImage2D(GLenum target, GLint level,
                         GLenum format, GLenum type,
                         const GLvoid *pixels)
 {
-    (void)target;  (void)level;  (void)internalformat;
-    (void)width;   (void)height; (void)border;
-    (void)format;  (void)type;   (void)pixels;
+    psgl_context_tex_image_2d(target, level, internalformat,
+                              width, height, border, format, type, pixels);
 }
 
 GLAPI void glTexSubImage2D(GLenum target, GLint level,
@@ -282,9 +279,8 @@ GLAPI void glTexSubImage2D(GLenum target, GLint level,
                            GLenum format, GLenum type,
                            const GLvoid *pixels)
 {
-    (void)target;  (void)level;  (void)xoffset;
-    (void)yoffset; (void)width;  (void)height;
-    (void)format;  (void)type;   (void)pixels;
+    psgl_context_tex_sub_image_2d(target, level, xoffset, yoffset,
+                                  width, height, format, type, pixels);
 }
 
 GLAPI void glCopyTexImage2D(GLenum target, GLint level,
@@ -330,9 +326,9 @@ GLAPI void glCompressedTexSubImage2D(GLenum target, GLint level,
 }
 
 GLAPI void glTexParameterf(GLenum target, GLenum pname, GLfloat param)
-{ (void)target; (void)pname; (void)param; }
+{ psgl_context_tex_parameter(target, pname, (GLint)param); }
 GLAPI void glTexParameterx(GLenum target, GLenum pname, GLfixed param)
-{ (void)target; (void)pname; (void)param; }
+{ psgl_context_tex_parameter(target, pname, (GLint)(param / 65536)); }
 
 GLAPI void glTexEnvf(GLenum target, GLenum pname, GLfloat param)
 { (void)target; (void)pname; (void)param; }
@@ -343,7 +339,8 @@ GLAPI void glTexEnvx(GLenum target, GLenum pname, GLfixed param)
 GLAPI void glTexEnvxv(GLenum target, GLenum pname, const GLfixed *params)
 { (void)target; (void)pname; (void)params; }
 
-GLAPI void glClientActiveTexture(GLenum texture) { (void)texture; }
+GLAPI void glClientActiveTexture(GLenum texture)
+{ psgl_context_client_active_texture(texture); }
 
 /* ── vertex / normal / texcoord arrays ───────────────────────────── */
 

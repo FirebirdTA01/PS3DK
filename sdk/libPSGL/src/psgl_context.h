@@ -52,6 +52,10 @@ typedef struct PSGLvertexAttribState {
     uint32_t buffer_offset;
 } PSGLvertexAttribState;
 
+typedef struct PSGLtextureUnitState {
+    GLuint texture_2d;
+} PSGLtextureUnitState;
+
 struct PSGLdevice {
     uint32_t initialized;
     uint16_t width;
@@ -113,13 +117,16 @@ struct PSGLcontext {
     GLenum logic_op;
     GLenum cull_face;
     GLenum front_face;
+    GLenum active_texture;
+    GLenum client_active_texture;
+    GLint unpack_alignment;
     GLfloat clear_color[4];
     GLfloat clear_depth;
     GLint clear_stencil;
     GLuint bound_array_buffer;
     GLuint bound_element_array_buffer;
     PSGLvertexAttribState attribs[PSGL_MAX_VERTEX_ATTRIBS];
-    GLuint bound_textures[PSGL_MAX_TEXTURE_UNITS];
+    PSGLtextureUnitState textures[PSGL_MAX_TEXTURE_UNITS];
     CGprogram bound_vertex_program;
     CGprogram bound_fragment_program;
     uint32_t dirty;
@@ -161,6 +168,23 @@ void psgl_context_set_front_face(GLenum mode);
 void psgl_context_set_color_mask(GLboolean red, GLboolean green,
                                  GLboolean blue, GLboolean alpha);
 void psgl_context_set_logic_op(GLenum opcode);
+void psgl_context_set_pixel_store(GLenum pname, GLint param);
+void psgl_context_active_texture(GLenum texture);
+void psgl_context_client_active_texture(GLenum texture);
+void psgl_context_gen_textures(GLsizei n, GLuint *textures);
+void psgl_context_delete_textures(GLsizei n, const GLuint *textures);
+void psgl_context_bind_texture(GLenum target, GLuint texture);
+void psgl_context_tex_image_2d(GLenum target, GLint level,
+                               GLint internalformat,
+                               GLsizei width, GLsizei height, GLint border,
+                               GLenum format, GLenum type,
+                               const GLvoid *pixels);
+void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
+                                   GLint xoffset, GLint yoffset,
+                                   GLsizei width, GLsizei height,
+                                   GLenum format, GLenum type,
+                                   const GLvoid *pixels);
+void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param);
 void psgl_context_gen_buffers(GLsizei n, GLuint *buffers);
 void psgl_context_delete_buffers(GLsizei n, const GLuint *buffers);
 void psgl_context_bind_buffer(GLenum target, GLuint name);

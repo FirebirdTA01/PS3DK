@@ -149,12 +149,12 @@ GLAPI void glTexGeniv(GLenum coord, GLenum pname, const GLint *params)
 
 GLAPI void glTexParameterfv(GLenum target, GLenum pname,
                             const GLfloat *params)
-{ (void)target; (void)pname; (void)params; }
+{ if (params) psgl_context_tex_parameter(target, pname, (GLint)params[0]); }
 GLAPI void glTexParameteri(GLenum target, GLenum pname, GLint param)
-{ (void)target; (void)pname; (void)param; }
+{ psgl_context_tex_parameter(target, pname, param); }
 GLAPI void glTexParameteriv(GLenum target, GLenum pname,
                             const GLint *params)
-{ (void)target; (void)pname; (void)params; }
+{ if (params) psgl_context_tex_parameter(target, pname, params[0]); }
 
 /* ── VBO / PBO ───────────────────────────────────────────────────── */
 
