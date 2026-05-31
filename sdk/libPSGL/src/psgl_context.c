@@ -22,7 +22,7 @@
 #define PSGL_LABEL_BUFFER_STATUS   0x42u
 #define PSGL_BUFFER_IDLE           0u
 #define PSGL_BUFFER_BUSY           1u
-#define PSGL_MAX_QUEUE_FRAMES      1u
+#define PSGL_MAX_QUEUE_FRAMES      0u
 #define PSGL_TEXTURE_ALIGNMENT     128u
 #define PSGL_CELL_FS_O_RDONLY      000000
 
