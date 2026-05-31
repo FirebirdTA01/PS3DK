@@ -162,14 +162,26 @@ PSGL_EXPORT int psglDrawCommandBufferHole(
     uint32_t *holeEA, uint32_t *holeSizeInWord)
 {
     CellGcmContextData *ctx;
-    (void)mode; (void)count; (void)type; (void)indices;
-    (void)indexOffset;
-    if (!g_record_mode) return 1;
+    uint32_t words, chunks, rest;
+    if (!g_record_mode || !holeEA || !holeSizeInWord || count <= 0)
+        return 1;
     ctx = gCellGcmCurrentContext;
     if (!ctx) return 1;
-    /* exact draw-word count deferred to SPU hole-patch path;
-       stub returns error until real state validation wired */
-    return 1;
+    (void)mode; (void)type; (void)indices;
+    if (indexOffset) *indexOffset = 0u;
+
+    /* calculate draw-hole word count using the reference formula */
+    words = 7u + 2u + 3u;
+    chunks = (uint32_t)count / 0x7ff00u;
+    words += chunks * (0x7ffu + 1u);
+    rest = (uint32_t)count % 0x7ff00u;
+    words += rest / 0x100u;
+    if (rest % 0x100u) words++;
+    words += words / 32u;
+    words += 4u - (words % 4u);
+
+    *holeSizeInWord = words;
+    return psglGenerateCommandBufferHole(words, holeEA);
 }
 
 PSGL_EXPORT int psglGenerateCommandBufferHole(uint32_t holeSizeInWord,
@@ -177,19 +189,21 @@ PSGL_EXPORT int psglGenerateCommandBufferHole(uint32_t holeSizeInWord,
 {
     CellGcmContextData *ctx;
     uint32_t *hole_ptr;
-    uint32_t i, total, aligned_pos;
+    uint32_t i, total;
     if (!g_record_mode) return 1;
     ctx = gCellGcmCurrentContext;
     if (!ctx || !holeEA || holeSizeInWord < 4u) return 1;
-    total = holeSizeInWord + 31u;
-    /* 128-byte (32-word) alignment */
-    aligned_pos = ((uintptr_t)ctx->current & 31u) ? 1u : 0u;
-    if (aligned_pos) {
-        ctx->current[0] = 0u; /* NOP */
+    if (ctx->current + holeSizeInWord + 31u > ctx->end) return 1;
+
+    /* leading NOPs until 128-byte alignment (not counted in hole) */
+    while ((uintptr_t)ctx->current & 127u) {
+        ctx->current[0] = 0u;
         ctx->current++;
     }
+
     hole_ptr = ctx->current;
     cellGcmAddressToOffset(hole_ptr, holeEA);
+    total = holeSizeInWord;
     psgl_cb_jump_to_self(ctx);
     ctx->current++;
     for (i = 1u; i < total; i++) {

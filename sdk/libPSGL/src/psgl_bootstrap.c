@@ -152,6 +152,7 @@ PSGL_EXPORT void psglLoadShaderLibrary(const char *filename)
 
 PSGL_EXPORT void *psglGetSPUInitData(void)
 {
+    /* TODO: populate from cellGcmGetConfiguration IOIF mapping */
     return NULL;
 }
 
