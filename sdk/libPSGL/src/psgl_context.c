@@ -1,6 +1,8 @@
 #include "psgl_context.h"
 #include "cg_internal.h"
 #include "ffp_emit.h"
+#include "ffp_lit_bootstrap_fpo.h"
+#include "ffp_lit_bootstrap_vpo.h"
 #include "ffp_minimal_fpo.h"
 #include "ffp_minimal_vpo.h"
 
@@ -85,6 +87,11 @@ static PSGLcgParameter g_psgl_ffp_vp_params[1];
 static PSGLcgProgram g_psgl_ffp_vp;
 static PSGLcgProgram g_psgl_ffp_fp;
 static uint32_t g_psgl_ffp_initialized;
+static PSGLcgParameter g_psgl_ffp_lit_vp_params[1];
+static PSGLcgParameter g_psgl_ffp_lit_fp_params[1];
+static PSGLcgProgram g_psgl_ffp_lit_vp;
+static PSGLcgProgram g_psgl_ffp_lit_fp;
+static uint32_t g_psgl_ffp_lit_initialized;
 static PSGLcgParameter g_psgl_ffp_library_vp_params[1];
 static PSGLcgProgram g_psgl_ffp_library_vp;
 static PSGLcgProgram g_psgl_ffp_library_fp;
@@ -214,6 +221,19 @@ static void psgl_matrix_transpose(GLfloat out[16], const GLfloat in[16])
         for (uint32_t col = 0u; col < 4u; col++)
             out[row * 4u + col] = in[col * 4u + row];
     }
+}
+
+static void psgl_matrix_transform4(const GLfloat matrix[16],
+                                   const GLfloat in[4], GLfloat out[4])
+{
+    GLfloat tmp[4];
+    for (uint32_t row = 0u; row < 4u; row++) {
+        tmp[row] = matrix[row * 4u + 0u] * in[0] +
+                   matrix[row * 4u + 1u] * in[1] +
+                   matrix[row * 4u + 2u] * in[2] +
+                   matrix[row * 4u + 3u] * in[3];
+    }
+    psgl_copy(out, tmp, sizeof(tmp));
 }
 
 static GLfloat *psgl_current_matrix(PSGLcontext *context)
@@ -493,14 +513,67 @@ static int psgl_ffp_init_minimal(void)
     return 1;
 }
 
+static int psgl_ffp_init_lit_bootstrap(void)
+{
+    uint32_t light_index;
+    PSGLcgParameter *parameter = &g_psgl_ffp_lit_fp_params[0];
+    if (g_psgl_ffp_lit_initialized) return 1;
+    if (!psgl_ffp_init_pair(&g_psgl_ffp_lit_vp, &g_psgl_ffp_lit_fp,
+                            g_psgl_ffp_lit_vp_params,
+                            psgl_ffp_lit_bootstrap_vpo,
+                            psgl_ffp_lit_bootstrap_vpo_len,
+                            psgl_ffp_lit_bootstrap_fpo,
+                            psgl_ffp_lit_bootstrap_fpo_len))
+        return 0;
+
+    light_index = cellCgbMapLookup(&g_psgl_ffp_lit_fp.cgb_program,
+                                   "lightDirection");
+    if (light_index == (uint32_t)CELL_CGB_ERROR_FAILED) return 0;
+
+    psgl_zero(g_psgl_ffp_lit_fp_params, sizeof(g_psgl_ffp_lit_fp_params));
+    parameter->magic = PSGL_CG_PARAMETER_MAGIC;
+    parameter->program = &g_psgl_ffp_lit_fp;
+    parameter->index = light_index;
+    psgl_copy_name(parameter->name, "lightDirection");
+    parameter->type = CG_FLOAT3;
+    parameter->resource = CG_C;
+    parameter->variability = CG_UNIFORM;
+    parameter->direction = CG_IN;
+    parameter->vertex_register = 0xffffu;
+    parameter->fragment_register = 0xffffu;
+    parameter->value[2] = 1.0f;
+    parameter->value_count = 4u;
+    parameter->dirty = CG_TRUE;
+    g_psgl_ffp_lit_fp.parameters = g_psgl_ffp_lit_fp_params;
+    g_psgl_ffp_lit_fp.parameter_count = 1u;
+    g_psgl_ffp_lit_initialized = 1u;
+    return 1;
+}
+
 static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
 {
     uint32_t mask = PSGL_FFP_MINIMAL_MASK;
     if (!context) return 0u;
     if (context->bound_vertex_program || context->bound_fragment_program)
         return 0u;
-    if (!context->attribs[PSGL_ATTRIB_VERTEX].enabled ||
-        !context->attribs[PSGL_ATTRIB_TEXCOORD].enabled)
+    if (!context->attribs[PSGL_ATTRIB_VERTEX].enabled)
+        return 0u;
+    if (context->lighting_enabled) {
+        if (!context->attribs[PSGL_ATTRIB_NORMAL].enabled)
+            return 0u;
+        for (uint32_t i = 0u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
+            if (context->textures[i].texture_2d_enabled)
+                return 0u;
+        }
+        if (context->fog_enabled) return 0u;
+        mask |= PSGL_FFP_LIGHTING_MASK;
+        for (uint32_t i = 0u; i < PSGL_MAX_LIGHTS; i++) {
+            if (context->lights[i].enabled)
+                mask |= (1u << (8u + i));
+        }
+        return mask;
+    }
+    if (!context->attribs[PSGL_ATTRIB_TEXCOORD].enabled)
         return 0u;
     if (!context->textures[0].texture_2d_enabled ||
         !context->textures[0].texture_2d)
@@ -508,13 +581,6 @@ static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
     for (uint32_t i = 1u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
         if (context->textures[i].texture_2d_enabled)
             return 0u;
-    }
-    if (context->lighting_enabled) {
-        mask |= PSGL_FFP_LIGHTING_MASK;
-        for (uint32_t i = 0u; i < PSGL_MAX_LIGHTS; i++) {
-            if (context->lights[i].enabled)
-                mask |= (1u << (8u + i));
-        }
     }
     if (context->fog_enabled) mask |= PSGL_FFP_FOG_MASK;
     return mask;
@@ -525,6 +591,13 @@ static int psgl_ffp_state_mask_to_programs(uint32_t mask, PSGLcgProgram **vp,
 {
     if (vp) *vp = NULL;
     if (fp) *fp = NULL;
+    if ((mask & PSGL_FFP_LIGHTING_MASK) != 0u) {
+        if ((mask & PSGL_FFP_FOG_MASK) != 0u) return 0;
+        if (!psgl_ffp_init_lit_bootstrap()) return 0;
+        if (vp) *vp = &g_psgl_ffp_lit_vp;
+        if (fp) *fp = &g_psgl_ffp_lit_fp;
+        return 1;
+    }
     if (mask != PSGL_FFP_MINIMAL_MASK) return 0;
     if (g_psgl_ffp_library_valid) {
         if (vp) *vp = &g_psgl_ffp_library_vp;
@@ -549,6 +622,45 @@ static void psgl_ffp_update_matrices(PSGLcontext *context, PSGLcgProgram *vp)
     parameter->value_count = 16u;
     parameter->dirty = CG_TRUE;
     context->dirty &= ~PSGL_DIRTY_MATRICES;
+}
+
+static void psgl_ffp_update_lighting(PSGLcontext *context, PSGLcgProgram *fp)
+{
+    GLfloat value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    GLfloat length;
+    uint32_t light = 0u;
+    uint32_t found = 0u;
+    PSGLcgParameter *parameter;
+    if (!context || !fp || !fp->parameters || fp->parameter_count == 0u)
+        return;
+    for (uint32_t i = 0u; i < PSGL_MAX_LIGHTS; i++) {
+        if (context->lights[i].enabled) {
+            light = i;
+            found = 1u;
+            break;
+        }
+    }
+    if (found) {
+        value[0] = context->lights[light].position[0];
+        value[1] = context->lights[light].position[1];
+        value[2] = context->lights[light].position[2];
+        length = sqrtf(value[0] * value[0] + value[1] * value[1] +
+                       value[2] * value[2]);
+        if (length > 0.00001f) {
+            value[0] /= length;
+            value[1] /= length;
+            value[2] /= length;
+        } else {
+            value[0] = 0.0f;
+            value[1] = 0.0f;
+            value[2] = 0.0f;
+        }
+    }
+    parameter = &fp->parameters[0];
+    psgl_copy(parameter->value, value, sizeof(value));
+    parameter->value_count = 4u;
+    parameter->dirty = CG_TRUE;
+    context->dirty &= ~PSGL_DIRTY_LIGHTING;
 }
 
 static uint32_t psgl_bool(GLboolean value)
@@ -1492,6 +1604,8 @@ static void psgl_validate_draw_state(PSGLcontext *context)
                 if (!vp) vp = ffp_vp;
                 if (!fp) fp = ffp_fp;
                 psgl_ffp_update_matrices(context, ffp_vp);
+                if ((ffp_mask & PSGL_FFP_LIGHTING_MASK) != 0u)
+                    psgl_ffp_update_lighting(context, ffp_fp);
             }
         }
         psgl_emit_vertex_program(context, vp);
@@ -2531,14 +2645,25 @@ void psgl_context_set_light_fv(GLenum light, GLenum pname,
     uint32_t index = psgl_light_index(light);
     PSGLcontext *context = g_psgl.current_context;
     PSGLlightState *state;
+    GLfloat transformed[4];
     if (!context || !params || index >= PSGL_MAX_LIGHTS) return;
     state = &context->lights[index];
     switch (pname) {
     case GL_AMBIENT: psgl_set_float4(state->ambient, params); break;
     case GL_DIFFUSE: psgl_set_float4(state->diffuse, params); break;
     case GL_SPECULAR: psgl_set_float4(state->specular, params); break;
-    case GL_POSITION: psgl_set_float4(state->position, params); break;
-    case GL_SPOT_DIRECTION: psgl_set_float3(state->spot_direction, params); break;
+    case GL_POSITION:
+        psgl_matrix_transform4(context->modelview, params, transformed);
+        psgl_set_float4(state->position, transformed);
+        break;
+    case GL_SPOT_DIRECTION:
+        transformed[0] = params[0];
+        transformed[1] = params[1];
+        transformed[2] = params[2];
+        transformed[3] = 0.0f;
+        psgl_matrix_transform4(context->modelview, transformed, transformed);
+        psgl_set_float3(state->spot_direction, transformed);
+        break;
     case GL_SPOT_EXPONENT: state->spot_exponent = params[0]; break;
     case GL_SPOT_CUTOFF: state->spot_cutoff = params[0]; break;
     case GL_CONSTANT_ATTENUATION: state->constant_attenuation = params[0]; break;
