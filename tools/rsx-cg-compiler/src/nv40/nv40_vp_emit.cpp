@@ -1493,6 +1493,43 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             return true;
         }
 
+        auto shStoreIt = valueToShuffle.find(srcId);
+        if (shStoreIt != valueToShuffle.end())
+        {
+            auto baseIt = valueToSource.find(shStoreIt->second.srcId);
+            if (baseIt != valueToSource.end() &&
+                baseIt->second.kind == ValueSource::Kind::Input)
+            {
+                const int outWidth = [&]() {
+                    auto wIt = outputWidthBySemantic.find(
+                        semKey(semUpper, semanticIndex));
+                    return (wIt == outputWidthBySemantic.end()) ? 4 : wIt->second;
+                }();
+                const int copyWidth = std::min(outWidth, shStoreIt->second.width);
+
+                const struct nvfx_reg srcReg =
+                    makeReg(NVFXSR_INPUT, baseIt->second.regIdx);
+                struct nvfx_src src0 = makeSrc(srcReg);
+                const uint8_t padLane =
+                    static_cast<uint8_t>(shStoreIt->second.lanes[0] & 3);
+                for (int i = 0; i < 4; ++i)
+                {
+                    src0.swz[i] = (i < copyWidth)
+                        ? static_cast<uint8_t>(shStoreIt->second.lanes[i] & 3)
+                        : padLane;
+                }
+
+                struct nvfx_insn in = nvfx_insn(
+                    0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(dstReg),
+                    writemaskForWidth(copyWidth),
+                    src0, makeSrc(none), makeSrc(none));
+                asm_.emit(in, VP_OP(MOV));
+                emittedSomething = true;
+                return true;
+            }
+        }
+
         // ---- legacy non-chain matvecmul fallback (unused after deferral
         // refactor; kept until full coverage is verified).  The block
         // below is dead code; leave it disabled but in place so the
