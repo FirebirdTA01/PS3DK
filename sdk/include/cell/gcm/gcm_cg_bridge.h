@@ -640,6 +640,7 @@ static inline void cellGcmSetVertexProgramParameterBlock(CellGcmContextData *ctx
                                                          uint32_t constCount,
                                                          const float *values)
 {
+    if (!ctx || constCount == 0u || !values) return;
     rsxLoadVertexProgramParameterBlock(ctx, baseConst, constCount, values);
 }
 
