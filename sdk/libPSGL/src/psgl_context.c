@@ -16,6 +16,7 @@
 #include <sysutil/video.h>
 
 #define PSGL_DEFAULT_FIFO_SIZE (1024u * 1024u)
+#define PSGL_DEFAULT_FIFO_SEGMENT_SIZE (64u * 1024u)
 #define PSGL_DEFAULT_HOST_SIZE (32u * 1024u * 1024u)
 #define PSGL_HOST_ALIGNMENT    (1024u * 1024u)
 #define PSGL_LABEL_INDEX       255u
@@ -100,6 +101,25 @@ static PSGLcgProgram g_psgl_ffp_library_fp;
 static uint32_t g_psgl_ffp_library_valid;
 
 static uint32_t psgl_texture_unit_index(GLenum texture);
+
+static int psgl_configure_default_fifo(uint32_t fifo_size)
+{
+    uint32_t buffer_words = fifo_size / sizeof(uint32_t);
+    uint32_t segment_words = PSGL_DEFAULT_FIFO_SEGMENT_SIZE / sizeof(uint32_t);
+
+    if (buffer_words < 2u)
+        return 0;
+    if (buffer_words < segment_words * 2u)
+        segment_words = buffer_words / 2u;
+    if (segment_words == 0u)
+        return 0;
+
+    if (gcmSetDefaultFifoSize(buffer_words, segment_words) != 0)
+        return 0;
+
+    ps3tc_fifo_wrap_install(CELL_GCM_CURRENT);
+    return 1;
+}
 
 static void psgl_zero(void *ptr, uint32_t size)
 {
@@ -1702,6 +1722,10 @@ int psgl_context_init_system(const PSGLinitOptions *options)
     psgl_zero(host, host_size);
 
     if (cellGcmInit(fifo_size, host_size, host) != 0) {
+        free(host);
+        return 0;
+    }
+    if (!psgl_configure_default_fifo(fifo_size)) {
         free(host);
         return 0;
     }
