@@ -300,8 +300,8 @@ PSGL_EXPORT void psglSetFragmentProgramEmbeddedConstantMemoryLocation(
         CellGcmConfig config;
         cellGcmGetConfiguration(&config);
         address = (unsigned char *)config.localAddress + offset;
-    } else if (cellGcmIoOffsetToAddress(offset, &address) != 0) {
-        return;
+    } else {
+        address = (void *)(uintptr_t)offset;
     }
     if (!address) return;
     dst = (uint32_t *)address;
