@@ -398,8 +398,11 @@ CGGL_API void CGGLENTRY cgGLAttribPointer(GLuint index, GLint fsize,
                                           GLenum type, GLboolean normalize,
                                           GLsizei stride,
                                           const GLvoid *pointer)
-{ (void)index; (void)fsize; (void)type;
-  (void)normalize; (void)stride; (void)pointer; }
+{
+    (void)normalize;
+    psgl_context_set_generic_attrib_pointer(index, fsize, type,
+                                            stride, pointer);
+}
 
 CGGL_API void CGGLENTRY cgGLAttribElementFunc(GLuint index, GLenum func,
                                               GLuint frequency)
@@ -409,8 +412,11 @@ CGGL_API void CGGLENTRY cgGLAttribValues(GLuint index, GLfloat x, GLfloat y,
                                          GLfloat z, GLfloat w)
 { (void)index; (void)x; (void)y; (void)z; (void)w; }
 
-CGGL_API void CGGLENTRY cgGLEnableAttrib(GLuint index)   { (void)index; }
-CGGL_API void CGGLENTRY cgGLDisableAttrib(GLuint index)  { (void)index; }
+CGGL_API void CGGLENTRY cgGLEnableAttrib(GLuint index)
+{ psgl_context_set_generic_attrib_enabled(index, GL_TRUE); }
+
+CGGL_API void CGGLENTRY cgGLDisableAttrib(GLuint index)
+{ psgl_context_set_generic_attrib_enabled(index, GL_FALSE); }
 
 CGGL_API void CGGLENTRY cgGLSetVertexRegister4fv(unsigned int index,
                                                  const float *v)

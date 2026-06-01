@@ -1451,6 +1451,23 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
                                   (uint8_t)attrib->size, type,
                                   buffer->location, offset);
     }
+    for (uint32_t i = 0; i < PSGL_MAX_GENERIC_ATTRIBS; i++) {
+        PSGLvertexAttribState *attrib = &context->generic_attribs[i];
+        PSGLbufferObject *buffer;
+        uint8_t type;
+        uint32_t offset;
+        if (!attrib->enabled || attrib->size <= 0) continue;
+        if (!attrib->buffer_name) continue;
+        buffer = psgl_find_buffer(attrib->buffer_name);
+        if (!buffer || !buffer->address) continue;
+        type = psgl_gl_vertex_type(attrib->type);
+        if (!type) continue;
+        offset = buffer->offset + attrib->buffer_offset;
+        cellGcmSetVertexDataArray(context->gcm, (uint8_t)i,
+                                  0, (uint8_t)psgl_attrib_stride(attrib),
+                                  (uint8_t)attrib->size, type,
+                                  buffer->location, offset);
+    }
 }
 
 static void psgl_emit_textures(PSGLcontext *context)
@@ -3290,6 +3307,31 @@ void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
     PSGLcontext *context = g_psgl.current_context;
     if (!context) return;
     PSGLvertexAttribState *attrib = &context->attribs[slot];
+    attrib->size = size;
+    attrib->type = type;
+    attrib->stride = stride;
+    attrib->pointer = pointer;
+    attrib->buffer_name = context->bound_array_buffer;
+    attrib->buffer_offset = context->bound_array_buffer ? (uint32_t)(uintptr_t)pointer : 0u;
+    context->dirty |= PSGL_DIRTY_CG;
+}
+
+void psgl_context_set_generic_attrib_enabled(GLuint index, GLboolean enabled)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || index >= PSGL_MAX_GENERIC_ATTRIBS) return;
+    context->generic_attribs[index].enabled = enabled;
+    context->dirty |= PSGL_DIRTY_CG;
+}
+
+void psgl_context_set_generic_attrib_pointer(GLuint index, GLint size,
+                                             GLenum type, GLsizei stride,
+                                             const GLvoid *pointer)
+{
+    if (index >= PSGL_MAX_GENERIC_ATTRIBS || stride < 0) return;
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    PSGLvertexAttribState *attrib = &context->generic_attribs[index];
     attrib->size = size;
     attrib->type = type;
     attrib->stride = stride;

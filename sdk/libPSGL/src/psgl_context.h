@@ -9,6 +9,7 @@
 #define PSGL_MAX_FRAME_BUFFERS 3u
 #define PSGL_MAX_TEXTURE_UNITS 4u
 #define PSGL_MAX_VERTEX_ATTRIBS 4u
+#define PSGL_MAX_GENERIC_ATTRIBS 16u
 #define PSGL_MAX_LIGHTS 8u
 #define PSGL_MODELVIEW_STACK_DEPTH 16u
 #define PSGL_PROJECTION_STACK_DEPTH 2u
@@ -181,6 +182,7 @@ struct PSGLcontext {
     GLuint bound_element_array_buffer;
     GLuint bound_texture_reference_buffer;
     PSGLvertexAttribState attribs[PSGL_MAX_VERTEX_ATTRIBS];
+    PSGLvertexAttribState generic_attribs[PSGL_MAX_GENERIC_ATTRIBS];
     PSGLtextureUnitState textures[PSGL_MAX_TEXTURE_UNITS];
     PSGLlightState lights[PSGL_MAX_LIGHTS];
     PSGLmaterialState front_material;
@@ -291,6 +293,10 @@ void psgl_context_set_client_state(GLenum array, GLboolean enabled);
 void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
                                      GLenum type, GLsizei stride,
                                      const GLvoid *pointer);
+void psgl_context_set_generic_attrib_enabled(GLuint index, GLboolean enabled);
+void psgl_context_set_generic_attrib_pointer(GLuint index, GLint size,
+                                             GLenum type, GLsizei stride,
+                                             const GLvoid *pointer);
 void psgl_context_draw_arrays(GLenum mode, GLint first, GLsizei count);
 void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
                                 const GLvoid *indices);
