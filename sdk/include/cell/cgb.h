@@ -43,6 +43,7 @@ int32_t        cellCgbGetVertexAttributeOutputMask(const CellCgbProgram *program
                                                     uint32_t *attributeOutputMask);
 int32_t        cellCgbGetUserClipPlaneControlMask(const CellCgbProgram *program,
                                                    uint32_t *userClipPlaneControlMask);
+#define cellCgbGetVertexAttributOutputMask cellCgbGetVertexAttributeOutputMask
 uint32_t       cellCgbGetVertexConstantCount(const CellCgbProgram *program);
 void           cellCgbGetVertexConstantValues(const CellCgbProgram *program,
                                               uint32_t value_index,
@@ -66,6 +67,19 @@ void           cellCgbMapGetFragmentUniformOffsets(const CellCgbProgram *program
 void           cellCgbMapGetFragmentUniformRegister(const CellCgbProgram *program,
                                                      const uint32_t map_index,
                                                      uint16_t *reg);
+static inline uint32_t cellCgbMapLookupTextureUnit(CellCgbProgram *program,
+                                                   const char *name)
+{
+    uint32_t res = cellCgbMapLookup(program, name);
+    return res != CELL_CGB_ERROR_FAILED ? cellCgbMapGetValue(program, res) : res;
+}
+
+static inline uint32_t cellCgbMapLookupAttribute(CellCgbProgram *program,
+                                                 const char *name)
+{
+    uint32_t res = cellCgbMapLookup(program, name);
+    return res != CELL_CGB_ERROR_FAILED ? cellCgbMapGetValue(program, res) : res;
+}
 
 #ifdef __cplusplus
 }
