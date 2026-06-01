@@ -18,11 +18,13 @@ typedef enum CellCgbProfile {
 } CellCgbProfile;
 
 #ifndef CELL_CGB_PROGRAM_STRUCTURE_SIZE
-#define CELL_CGB_PROGRAM_STRUCTURE_SIZE  256u
+#define CELL_CGB_PROGRAM_STRUCTURE_SIZE  48u
 #endif
 typedef struct CellCgbProgram {
     char data[CELL_CGB_PROGRAM_STRUCTURE_SIZE];
 } CellCgbProgram;
+typedef char PS3DK_CgbProgramSizeCheck[
+    (sizeof(CellCgbProgram) == 48u) ? 1 : -1];
 
 typedef struct CellCgbParameter CellCgbParameter;
 
