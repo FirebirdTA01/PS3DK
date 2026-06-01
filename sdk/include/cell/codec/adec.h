@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include <cell/codec/adec_base.h>
+#include <cell/codec/ac3_adapter.h>
 #include <cell/codec/types.h>
 
 #ifdef __PPU__

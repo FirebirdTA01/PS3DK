@@ -313,6 +313,7 @@ HEADERS := \
     include/cell/codec/dmux.h \
     include/cell/codec/dmux_pamf.h \
     include/cell/codec/types.h \
+    include/cell/codec/ac3_adapter.h \
     include/cell/codec/pamf.h \
     include/cell/codec/adec.h \
     include/cell/codec/adec_base.h \

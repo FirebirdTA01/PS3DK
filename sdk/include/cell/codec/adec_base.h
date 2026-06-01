@@ -9,6 +9,10 @@
 
 #include <cell/error.h>
 #include <cell/codec/types.h>
+#include <sys/ppu_thread.h>
+#include <sys/synchronization.h>
+#include <sys/timer.h>
+#include <sys/memory.h>
 
 #ifdef __cplusplus
 extern "C" {

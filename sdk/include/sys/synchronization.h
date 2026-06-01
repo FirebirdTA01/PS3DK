@@ -28,6 +28,7 @@
 #define __PSL1GHT_SYS_SYNCHRONIZATION_H__
 
 #include <ppu-types.h>
+#include <errno.h>
 #include <sys/lv2_syscall.h>
 #include <sys/return_code.h>
 #include <sys/mutex.h>    /* PSL1GHT: sys_mutex_t type + syscalls (100-104) */

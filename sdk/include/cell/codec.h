@@ -3,6 +3,7 @@
 #define __PS3DK_CELL_CODEC_H__
 
 #include <cell/codec/types.h>
+#include <cell/codec/ac3_adapter.h>
 #include <cell/codec/dmux.h>
 #include <cell/codec/dmux_pamf.h>
 #include <cell/codec/pamf.h>
