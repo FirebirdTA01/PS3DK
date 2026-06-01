@@ -357,6 +357,14 @@ HEADERS := \
     include/spu_printf.h \
     include/simdmath.h \
     include/sdk_version.h \
+    include/vectormath_aos.h \
+    include/vectormath/cpp/boolInVec.h \
+    include/vectormath/cpp/floatInVec.h \
+    include/vectormath/cpp/mat_aos.h \
+    include/vectormath/cpp/quat_aos.h \
+    include/vectormath/cpp/vec_aos.h \
+    include/vectormath/cpp/vecidx_aos.h \
+    include/vectormath/cpp/vectormath_aos.h \
     include/vectormath/cpp/vectormath_soa.h \
     include/sys/cdefs.h \
     include/sys/event.h \
