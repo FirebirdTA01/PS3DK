@@ -129,6 +129,12 @@ static inline void cellGcmSetShadeModel(uint32_t model)
 static inline void cellGcmSetShadeMode(uint32_t mode)
 { cellGcmSetShadeMode(gCellGcmCurrentContext, mode); }
 
+static inline void cellGcmSetFogMode(uint32_t mode)
+{ cellGcmSetFogMode(gCellGcmCurrentContext, mode); }
+
+static inline void cellGcmSetFogParams(float p0, float p1)
+{ cellGcmSetFogParams(gCellGcmCurrentContext, p0, p1); }
+
 static inline void cellGcmSetViewport(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                                       float min_z, float max_z,
                                       const float scale[4], const float offset[4])

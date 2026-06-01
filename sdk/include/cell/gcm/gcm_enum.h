@@ -104,6 +104,14 @@ extern "C" {
 #define CELL_GCM_POLYGON_MODE_LINE       (0x1B01)
 #define CELL_GCM_POLYGON_MODE_FILL       (0x1B02)
 
+/* Fog equation mode (cellGcmSetFogMode). */
+#define CELL_GCM_FOG_MODE_LINEAR         GCM_FOG_MODE_LINEAR
+#define CELL_GCM_FOG_MODE_EXP            GCM_FOG_MODE_EXP
+#define CELL_GCM_FOG_MODE_EXP2           GCM_FOG_MODE_EXP2
+#define CELL_GCM_FOG_MODE_EXP_ABS        GCM_FOG_MODE_EXP_ABS
+#define CELL_GCM_FOG_MODE_EXP2_ABS       GCM_FOG_MODE_EXP2_ABS
+#define CELL_GCM_FOG_MODE_LINEAR_ABS     GCM_FOG_MODE_LINEAR_ABS
+
 /* Debug-output verbosity tags (cellGcmSetDebugOutputLevel). */
 #define CELL_GCM_DEBUG_LEVEL0            (0)
 #define CELL_GCM_DEBUG_LEVEL1            (1)

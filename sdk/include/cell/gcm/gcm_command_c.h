@@ -260,6 +260,16 @@ static inline void cellGcmSetShadeMode(CellGcmContextData *thisContext, uint32_t
 	rsxSetShadeModel(thisContext, mode);
 }
 
+static inline void cellGcmSetFogMode(CellGcmContextData *thisContext, uint32_t mode)
+{
+	rsxSetFogMode(thisContext, mode);
+}
+
+static inline void cellGcmSetFogParams(CellGcmContextData *thisContext, float p0, float p1)
+{
+	rsxSetFogParams(thisContext, p0, p1);
+}
+
 /* ==========================================================
  * Geometry / viewport / culling
  * ========================================================== */
