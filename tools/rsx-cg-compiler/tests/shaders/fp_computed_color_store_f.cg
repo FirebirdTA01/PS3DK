@@ -1,0 +1,18 @@
+void main(float2 uv : TEXCOORD0,
+          float3 normalDir : TEXCOORD1,
+          float3 halfDir : TEXCOORD2,
+          uniform float3 lightCol,
+          uniform float3 ambient,
+          uniform sampler2D diffuseMap,
+          out float4 color : COLOR)
+{
+    float facing = max(dot(normalDir, halfDir), 0.0f);
+    float specular = pow(facing, 120.0f);
+
+    float3 texRgb = tex2D(diffuseMap, uv).rgb;
+    float3 diffuse = texRgb * lightCol;
+    float3 lighting = saturate(facing + ambient);
+    float3 lit = diffuse * lighting + specular * lightCol;
+
+    color = float4(lit, 1.0f);
+}

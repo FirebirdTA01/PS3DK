@@ -3108,9 +3108,26 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     if (hasGenericLane && inst.operands.size() <= 4)
                     {
                         GenericFpVecConstructBinding g;
-                        g.width = static_cast<int>(inst.operands.size());
-                        for (size_t i = 0; i < inst.operands.size(); ++i)
-                            g.lanes[i] = inst.operands[i];
+                        bool expanded = false;
+                        if (inst.operands.size() == 2)
+                        {
+                            auto tyIt = valueToType.find(inst.operands[0]);
+                            if (tyIt != valueToType.end() &&
+                                tyIt->second.vectorSize == 3)
+                            {
+                                g.width = 4;
+                                g.lanes[0] = g.lanes[1] = g.lanes[2] =
+                                    inst.operands[0];
+                                g.lanes[3] = inst.operands[1];
+                                expanded = true;
+                            }
+                        }
+                        if (!expanded)
+                        {
+                            g.width = static_cast<int>(inst.operands.size());
+                            for (size_t i = 0; i < inst.operands.size(); ++i)
+                                g.lanes[i] = inst.operands[i];
+                        }
                         valueToGenericVecConstruct[inst.result] = g;
                         break;
                     }
@@ -7573,6 +7590,64 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                 };
 
+                auto emitTexSampleToDest =
+                    [&](IRValueID texId,
+                        const TexBinding& tex,
+                        const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    if (emittedTexResults.count(texId))
+                        return true;
+
+                    auto sampIt = valueToTexUnit.find(tex.samplerId);
+                    if (sampIt == valueToTexUnit.end())
+                        return false;
+
+                    IRValueID uvBase = resolveSrcMods(tex.uvId).baseId;
+                    auto uvIt = valueToInputSrc.find(uvBase);
+                    if (uvIt == valueToInputSrc.end())
+                        return false;
+
+                    const struct nvfx_reg uvReg =
+                        nvfx_reg(NVFXSR_INPUT, uvIt->second);
+                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
+
+                    struct nvfx_src s0 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(uvReg));
+                    struct nvfx_src s1 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                    struct nvfx_src s2 =
+                        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+
+                    const uint8_t texOpcode =
+                        tex.projective ? NVFX_FP_OP_OPCODE_TXP
+                                       : NVFX_FP_OP_OPCODE_TEX;
+
+                    struct nvfx_insn in = nvfx_insn(
+                        sat ? 1 : 0, 0, sampIt->second, -1,
+                        const_cast<struct nvfx_reg&>(dst),
+                        mask, s0, s1, s2);
+                    in.precision = precision;
+                    if (tex.cube)
+                        in.disable_pc = 1;
+                    asm_.emit(in, texOpcode);
+
+                    emittedTexResults.insert(texId);
+
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(uvIt->second);
+                    if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                        attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        if (tex.projective || tex.cube)
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                    }
+                    return true;
+                };
+
                 auto emitGenericMov =
                     [&](const struct nvfx_reg& dst,
                         uint8_t mask,
@@ -7917,6 +7992,160 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                          hSrc, s1, s2, precision, sat);
                 };
 
+                auto emitPowMaxDotLiteralToDest =
+                    [&](const FpPowMaxDotLiteralBinding& bind,
+                        const struct nvfx_reg& dst,
+                        uint8_t mask,
+                        uint8_t precision,
+                        bool sat) -> bool
+                {
+                    auto lhsIt = valueToInputSrc.find(bind.base.lhsInputId);
+                    auto rhsIt = valueToInputSrc.find(bind.base.rhsInputId);
+                    if (lhsIt == valueToInputSrc.end() ||
+                        rhsIt == valueToInputSrc.end())
+                        return false;
+
+                    const struct nvfx_reg tempR0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
+
+                    {
+                        const struct nvfx_reg rhsReg =
+                            nvfx_reg(NVFXSR_INPUT, rhsIt->second);
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(rhsReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR0),
+                            NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                            s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 0;
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR0),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        const float one[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+                        asm_.appendConstBlock(one);
+                    }
+
+                    asm_.emitFenctr();
+
+                    {
+                        const struct nvfx_reg lhsReg =
+                            nvfx_reg(NVFXSR_INPUT, lhsIt->second);
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(lhsReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR0),
+                            NVFX_FP_MASK_X, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_DP3);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR0),
+                            NVFX_FP_MASK_X, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MAX);
+                        const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                        asm_.appendConstBlock(zero);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR0),
+                            NVFX_FP_MASK_X, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_LG2);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR0),
+                            NVFX_FP_MASK_X, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
+                        const float exponent[4] =
+                            {bind.exponent, 0.0f, 0.0f, 0.0f};
+                        asm_.appendConstBlock(exponent);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            sat ? 1 : 0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dst),
+                            mask, s0, s1, s2);
+                        in.precision = precision;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_EX2);
+                    }
+
+                    const int inputs[2] = {lhsIt->second, rhsIt->second};
+                    for (int inputSrc : inputs)
+                    {
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
+                        if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
+                    return true;
+                };
+
                 materializeGenericValue =
                     [&](IRValueID id, int tempIdx) -> GenericFpSource
                 {
@@ -7953,6 +8182,27 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (!emitMadBindingToDest(mdIt->second, temp.reg,
                                                   NVFX_FP_MASK_ALL,
                                                   FLOAT32, false))
+                            return GenericFpSource{};
+                        return temp;
+                    }
+
+                    if (auto txIt = valueToTex.find(resolveSrcMods(id).baseId);
+                        txIt != valueToTex.end())
+                    {
+                        if (!emitTexSampleToDest(resolveSrcMods(id).baseId,
+                                                 txIt->second, temp.reg,
+                                                 NVFX_FP_MASK_ALL,
+                                                 FLOAT32, false))
+                            return GenericFpSource{};
+                        return temp;
+                    }
+
+                    if (auto pwIt = valueToPowMaxDotLiteral.find(id);
+                        pwIt != valueToPowMaxDotLiteral.end())
+                    {
+                        if (!emitPowMaxDotLiteralToDest(pwIt->second, temp.reg,
+                                                        NVFX_FP_MASK_ALL,
+                                                        FLOAT32, false))
                             return GenericFpSource{};
                         return temp;
                     }
@@ -8009,6 +8259,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         uint8_t precision,
                         bool sat) -> bool
                 {
+                    if (auto sIt = saturateAlias.find(id);
+                        sIt != saturateAlias.end())
+                    {
+                        const bool nextSat = sat || saturatedResults.count(id);
+                        return emitGenericValueToDest(sIt->second, dst, mask,
+                                                       precision, nextSat);
+                    }
+
                     if (auto gvIt = valueToGenericVecConstruct.find(id);
                         gvIt != valueToGenericVecConstruct.end())
                     {
@@ -8059,9 +8317,402 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     return emitGenericMov(dst, mask, src, precision, sat);
                 };
 
+                auto tryEmitComputedColorStore = [&](IRValueID id) -> bool
+                {
+                    auto gvIt = valueToGenericVecConstruct.find(id);
+                    if (gvIt == valueToGenericVecConstruct.end() ||
+                        gvIt->second.width != 4 ||
+                        gvIt->second.lanes[0] != gvIt->second.lanes[1] ||
+                        gvIt->second.lanes[0] != gvIt->second.lanes[2])
+                        return false;
+
+                    float w = 0.0f;
+                    if (!floatLiteralValue(gvIt->second.lanes[3], w) ||
+                        w != 1.0f)
+                        return false;
+
+                    auto finalAddIt = valueToGenericArith.find(gvIt->second.lanes[0]);
+                    if (finalAddIt == valueToGenericArith.end() ||
+                        finalAddIt->second.op != GenericFpOp::Add)
+                        return false;
+
+                    struct MulPair { IRValueID a = 0; IRValueID b = 0; };
+                    auto getMulPair = [&](IRValueID mid, MulPair& outPair) -> bool
+                    {
+                        auto it = valueToGenericArith.find(mid);
+                        if (it == valueToGenericArith.end() ||
+                            it->second.op != GenericFpOp::Mul)
+                            return false;
+                        outPair.a = it->second.srcIds[0];
+                        outPair.b = it->second.srcIds[1];
+                        return true;
+                    };
+
+                    auto texBaseOf = [&](IRValueID vid) -> IRValueID
+                    {
+                        const IRValueID base = resolveSrcMods(vid).baseId;
+                        return valueToTex.count(base) ? base : 0;
+                    };
+
+                    struct TexLightMul
+                    {
+                        IRValueID texId = 0;
+                        IRValueID lightId = 0;
+                    };
+                    auto matchTexLightMul =
+                        [&](IRValueID mid, TexLightMul& outMul) -> bool
+                    {
+                        MulPair mp;
+                        if (!getMulPair(mid, mp)) return false;
+                        const IRValueID texA = texBaseOf(mp.a);
+                        const IRValueID texB = texBaseOf(mp.b);
+                        if (texA && valueToFpUniform.count(resolveSrcMods(mp.b).baseId))
+                        {
+                            outMul.texId = texA;
+                            outMul.lightId = resolveSrcMods(mp.b).baseId;
+                            return true;
+                        }
+                        if (texB && valueToFpUniform.count(resolveSrcMods(mp.a).baseId))
+                        {
+                            outMul.texId = texB;
+                            outMul.lightId = resolveSrcMods(mp.a).baseId;
+                            return true;
+                        }
+                        return false;
+                    };
+
+                    struct LightingMul
+                    {
+                        TexLightMul texLight;
+                        IRValueID   satId = 0;
+                    };
+                    auto matchLightingMul =
+                        [&](IRValueID mid, LightingMul& outMul) -> bool
+                    {
+                        MulPair mp;
+                        if (!getMulPair(mid, mp)) return false;
+                        TexLightMul tl;
+                        if (matchTexLightMul(mp.a, tl) &&
+                            saturateAlias.count(mp.b))
+                        {
+                            outMul.texLight = tl;
+                            outMul.satId = mp.b;
+                            return true;
+                        }
+                        if (matchTexLightMul(mp.b, tl) &&
+                            saturateAlias.count(mp.a))
+                        {
+                            outMul.texLight = tl;
+                            outMul.satId = mp.a;
+                            return true;
+                        }
+                        return false;
+                    };
+
+                    struct SpecMul
+                    {
+                        IRValueID powId = 0;
+                        IRValueID factorId = 0;
+                    };
+                    auto matchSpecMul =
+                        [&](IRValueID mid, SpecMul& outMul) -> bool
+                    {
+                        MulPair mp;
+                        if (!getMulPair(mid, mp)) return false;
+                        if (valueToPowMaxDotLiteral.count(mp.a))
+                        {
+                            outMul.powId = mp.a;
+                            outMul.factorId = mp.b;
+                            return true;
+                        }
+                        if (valueToPowMaxDotLiteral.count(mp.b))
+                        {
+                            outMul.powId = mp.b;
+                            outMul.factorId = mp.a;
+                            return true;
+                        }
+                        return false;
+                    };
+
+                    LightingMul lighting;
+                    SpecMul spec;
+                    const IRValueID finalA = finalAddIt->second.srcIds[0];
+                    const IRValueID finalB = finalAddIt->second.srcIds[1];
+                    if (!(matchLightingMul(finalA, lighting) &&
+                          matchSpecMul(finalB, spec)) &&
+                        !(matchLightingMul(finalB, lighting) &&
+                          matchSpecMul(finalA, spec)))
+                        return false;
+
+                    auto powIt = valueToPowMaxDotLiteral.find(spec.powId);
+                    if (powIt == valueToPowMaxDotLiteral.end())
+                        return false;
+
+                    const IRValueID satBase = saturateAlias[lighting.satId];
+                    auto satAddIt = valueToGenericArith.find(satBase);
+                    if (satAddIt == valueToGenericArith.end() ||
+                        satAddIt->second.op != GenericFpOp::Add)
+                        return false;
+
+                    IRValueID ambientId = 0;
+                    if (valueToMaxDotZero.count(satAddIt->second.srcIds[0]) &&
+                        valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[1]).baseId))
+                    {
+                        ambientId = resolveSrcMods(satAddIt->second.srcIds[1]).baseId;
+                    }
+                    else if (valueToMaxDotZero.count(satAddIt->second.srcIds[1]) &&
+                             valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[0]).baseId))
+                    {
+                        ambientId = resolveSrcMods(satAddIt->second.srcIds[0]).baseId;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+
+                    auto lhsIt = valueToInputSrc.find(powIt->second.base.lhsInputId);
+                    auto rhsIt = valueToInputSrc.find(powIt->second.base.rhsInputId);
+                    auto texIt = valueToTex.find(lighting.texLight.texId);
+                    if (lhsIt == valueToInputSrc.end() ||
+                        rhsIt == valueToInputSrc.end() ||
+                        texIt == valueToTex.end())
+                        return false;
+
+                    GenericFpSource lightSrc = resolveGenericSource(lighting.texLight.lightId);
+                    GenericFpSource ambientSrc = resolveGenericSource(ambientId);
+                    GenericFpSource specFactorSrc = resolveGenericSource(spec.factorId);
+                    if (lightSrc.kind == GenericFpSource::Kind::None ||
+                        ambientSrc.kind == GenericFpSource::Kind::None ||
+                        specFactorSrc.kind == GenericFpSource::Kind::None)
+                        return false;
+
+                    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
+                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+
+                    {
+                        const struct nvfx_reg rhsReg =
+                            nvfx_reg(NVFXSR_INPUT, rhsIt->second);
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(rhsReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                            s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                    }
+
+                    asm_.emitFenctr();
+
+                    {
+                        const struct nvfx_reg lhsReg =
+                            nvfx_reg(NVFXSR_INPUT, lhsIt->second);
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(lhsReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_X, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_DP3);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 0;
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MAX);
+                        const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                        asm_.appendConstBlock(zero);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 3;
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            NVFX_FP_MASK_X, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_LG2);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r1));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 0;
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
+                        const float exponent[4] =
+                            {0.0f, 0.0f, 0.0f, powIt->second.exponent};
+                        asm_.appendConstBlock(exponent);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 3;
+                        struct nvfx_src s1 = makeGenericNvfxSrc(ambientSrc);
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            1, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                            s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_ADD);
+                        appendGenericInlineSource(ambientSrc);
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r1));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 3;
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        in.precision = FLOAT32;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_EX2);
+                    }
+
+                    if (!emitTexSampleToDest(lighting.texLight.texId,
+                                             texIt->second, r0,
+                                             NVFX_FP_MASK_X |
+                                             NVFX_FP_MASK_Y |
+                                             NVFX_FP_MASK_Z,
+                                             FLOAT32, false))
+                        return false;
+
+                    if (!emitGenericOp(GenericFpOp::Mul, r0,
+                                       NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                       NVFX_FP_MASK_Z,
+                                       GenericFpSource{GenericFpSource::Kind::Reg,
+                                                       r0},
+                                       lightSrc, GenericFpSource{},
+                                       FLOAT32, false))
+                        return false;
+
+                    {
+                        GenericFpSource s0;
+                        s0.kind = GenericFpSource::Kind::Reg;
+                        s0.reg = r0;
+                        s0.swz[3] = 2;
+                        GenericFpSource s1;
+                        s1.kind = GenericFpSource::Kind::Reg;
+                        s1.reg = r1;
+                        s1.swz[3] = 2;
+                        if (!emitGenericOp(GenericFpOp::Mul, r0,
+                                           NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                           NVFX_FP_MASK_W,
+                                           s0, s1, GenericFpSource{},
+                                           FLOAT32, false))
+                            return false;
+                    }
+
+                    {
+                        GenericFpSource s0;
+                        s0.kind = GenericFpSource::Kind::Reg;
+                        s0.reg = r1;
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 3;
+                        GenericFpSource s2;
+                        s2.kind = GenericFpSource::Kind::Reg;
+                        s2.reg = r0;
+                        s2.swz[0] = 0;
+                        s2.swz[1] = 1;
+                        s2.swz[2] = 3;
+                        s2.swz[3] = 2;
+                        if (!emitGenericOp(GenericFpOp::Mad, dstReg,
+                                           NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                           NVFX_FP_MASK_Z,
+                                           s0, specFactorSrc, s2,
+                                           dstPrecision, false))
+                            return false;
+                    }
+
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        in.precision = dstPrecision;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        const float oneW[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                        asm_.appendConstBlock(oneW);
+                    }
+
+                    const int uvInput =
+                        valueToInputSrc[resolveSrcMods(texIt->second.uvId).baseId];
+                    const int inputs[3] = {lhsIt->second, rhsIt->second, uvInput};
+                    for (int inputSrc : inputs)
+                    {
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
+                        if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            if (inputSrc != uvInput)
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
+                    return true;
+                };
+
                 if (valueToGenericVecConstruct.count(srcId) ||
                     valueToGenericArith.count(srcId))
                 {
+                    if (tryEmitComputedColorStore(srcId))
+                    {
+                        emittedSomething = true;
+                        break;
+                    }
+
                     auto powVecIt = valueToGenericVecConstruct.find(srcId);
                     if (powVecIt != valueToGenericVecConstruct.end() &&
                         powVecIt->second.width == 4)
