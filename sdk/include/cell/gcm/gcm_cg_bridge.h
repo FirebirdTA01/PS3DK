@@ -30,6 +30,7 @@
 #include <string.h>
 #include <Cg/cg.h>
 #include <Cg/cgBinary.h>
+#include <cell/cgb/cgb_struct.h>
 #include <rsx/gcm_sys.h>           /* gcmContextData, GCM_LOCATION_*, GCM_ATTRIB_OUTPUT_MASK_* */
 #include <rsx/nv40.h>              /* NV40TCL_* method IDs */
 
@@ -453,6 +454,116 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
         *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_CONTROL, 1);
         *w++ = fpcontrol;
     }
+}
+
+static inline uint32_t ps3tc_cgb_fp_control(
+    const CellCgbFragmentProgramConfiguration *conf)
+{
+    const uint32_t output_from_h0 = (conf->fragmentControl >> 16) & 1u;
+    const uint32_t pixel_kill = (conf->fragmentControl >> 18) & 1u;
+    const uint32_t num_regs = (conf->registerCount > 2u)
+                            ? conf->registerCount : 2u;
+    uint32_t low = output_from_h0 ? 0x0eu : 0x40u;
+    if (pixel_kill) low |= (1u << 7);
+    return low | (1u << 10) | (num_regs << 24);
+}
+
+static inline void cellGcmSetVertexProgramLoadSlot(uint32_t loadSlot,
+                                                   uint32_t instCount,
+                                                   const void *ucode)
+{
+    CellGcmContextData *ctx = gCellGcmCurrentContext;
+    const uint32_t *src = (const uint32_t *)ucode;
+    if (!ctx || !src || instCount == 0u || instCount > 512u) return;
+
+    const uint32_t reserve = 3u + instCount * 5u;
+    uint32_t *w = ps3tc_gcm_reserve(ctx, reserve);
+    if (!w) return;
+
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_FROM_ID, 2);
+    *w++ = loadSlot;
+    *w++ = loadSlot;
+
+    for (uint32_t i = 0u; i < instCount; ++i)
+    {
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), 4);
+        *w++ = src[0];
+        *w++ = src[1];
+        *w++ = src[2];
+        *w++ = src[3];
+        src += 4;
+    }
+}
+
+static inline void cellGcmSetVertexProgramLoad(
+    const CellCgbVertexProgramConfiguration *conf,
+    const void *ucode)
+{
+    CellGcmContextData *ctx = gCellGcmCurrentContext;
+    if (!ctx || !conf || !ucode) return;
+    if (conf->instructionCount == 0u || conf->instructionCount > 512u) return;
+
+    cellGcmSetVertexProgramLoadSlot(conf->instructionSlot,
+                                    conf->instructionCount,
+                                    ucode);
+
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2u);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_ATTRIB_EN, 1);
+    *w++ = conf->attributeInputMask;
+
+    w = ps3tc_gcm_reserve(ctx, 2u);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_TRANSFORM_TIMEOUT, 1);
+    *w++ = (conf->registerCount <= 32u) ? 0x0020FFFFu : 0x0030FFFFu;
+}
+
+static inline void cellGcmSetFragmentProgramLoadLocation(
+    const CellCgbFragmentProgramConfiguration *conf,
+    uint32_t location)
+{
+    CellGcmContextData *ctx = gCellGcmCurrentContext;
+    uint32_t *w;
+    if (!ctx || !conf) return;
+
+    w = ps3tc_gcm_reserve(ctx, 2u);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_ADDRESS, 1);
+    *w++ = (location + 1u) | (conf->offset & 0x1fffffffu);
+
+    w = ps3tc_gcm_reserve(ctx, 2u);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
+    *w++ = conf->attributeInputMask;
+
+    uint32_t texcoords = conf->texCoordsInputMask;
+    uint32_t texcoords_2d = conf->texCoords2D;
+    uint32_t texcoords_centroid = conf->texCoordsCentroid;
+    for (uint32_t i = 0u; texcoords; ++i)
+    {
+        if (texcoords & 1u)
+        {
+            w = ps3tc_gcm_reserve(ctx, 2u);
+            if (!w) return;
+            *w++ = PS3TC_GCM_METHOD(NV40TCL_TEX_COORD_CONTROL(i), 1);
+            *w++ = (texcoords_2d & 1u) |
+                   ((texcoords_centroid & 1u) << 4);
+        }
+        texcoords >>= 1;
+        texcoords_2d >>= 1;
+        texcoords_centroid >>= 1;
+    }
+
+    w = ps3tc_gcm_reserve(ctx, 2u);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_CONTROL, 1);
+    *w++ = ps3tc_cgb_fp_control(conf);
+}
+
+static inline void cellGcmSetFragmentProgramLoad(
+    const CellCgbFragmentProgramConfiguration *conf)
+{
+    cellGcmSetFragmentProgramLoadLocation(conf, GCM_LOCATION_RSX);
 }
 
 /* -------------------------------------------------------------------- *

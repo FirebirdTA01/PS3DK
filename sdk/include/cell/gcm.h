@@ -685,9 +685,16 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
 /* The the reference SDK wraps the public libgcm API in the cell::Gcm C++
  * namespace; our C-side surface already lives at global scope, so an
  * empty namespace is enough to let `using namespace cell::Gcm;`
- * compile without affecting name lookup. */
+ * compile without affecting name lookup.
+ *
+ * Some SDK samples additionally use cell::Gcm::Inline (the reference
+ * SDK nests Inline helpers there).  We provide a similarly empty
+ * Inline sub-namespace so `using namespace cell::Gcm::Inline;` also
+ * compiles without errors. */
 #ifdef __cplusplus
-namespace cell { namespace Gcm {} }
+namespace cell { namespace Gcm {
+    namespace Inline {}
+} }
 #endif
 
 /* reference-SDK-convention no-context command-emitter overloads (C++ only).
@@ -715,6 +722,17 @@ static inline uint32_t cellGcmSetPrepareFlip(uint8_t id)
 
 static inline void cellGcmSetWaitFlip(void)
 { cellGcmSetWaitFlip(gCellGcmCurrentContext); }
+#endif
+
+/* the reference SDK samples call SetFlip/SetWaitFlip/SetPrepareFlip qualified
+ * as cell::Gcm::cellGcmSetFlip etc.  Place these using-declarations
+ * AFTER the no-context overloads so the full overload set is captured. */
+#ifdef __cplusplus
+namespace cell { namespace Gcm {
+    using ::cellGcmSetFlip;
+    using ::cellGcmSetWaitFlip;
+    using ::cellGcmSetPrepareFlip;
+} }
 #endif
 
 #endif /* __PSL1GHT_CELL_GCM_H__ */
