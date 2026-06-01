@@ -46,6 +46,11 @@ public:
     // header — verified from reference-compiler output.
     void emitFencbr();
 
+    // FENCTR is the sibling fence form used before temp-register reads
+    // in some scalar-function sequences.  It matches FENCBR's operand
+    // fields but uses opcode 0x3D instead of 0x3E.
+    void emitFenctr();
+
     // Append a 16-byte inline constant immediately after the most
     // recent instruction — matches the reference compiler's layout for FP literal
     // consts.  Values are four fp32s in the caller's natural order

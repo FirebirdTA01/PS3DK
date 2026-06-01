@@ -167,6 +167,14 @@ void FpAssembler::emitFencbr()
     hw[3] = defaultSrc;
 }
 
+void FpAssembler::emitFenctr()
+{
+    emitFencbr();
+    uint32_t& hw0 = logicalWords_[lastInstrOffset_];
+    hw0 &= ~(uint32_t{0x3fu} << NVFX_FP_OP_OPCODE_SHIFT);
+    hw0 |= (uint32_t{0x3Du} << NVFX_FP_OP_OPCODE_SHIFT);
+}
+
 void FpAssembler::appendConstBlock(const float values[4])
 {
     // Inline constants are 4×fp32 placed immediately after the

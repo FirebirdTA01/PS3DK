@@ -1,0 +1,8 @@
+void main(float3 normalDir : TEXCOORD0,
+          float3 lightDir : TEXCOORD1,
+          out float4 color : COLOR)
+{
+    float highlight = max(dot(normalDir, lightDir), 0.0f);
+    float lit = pow(highlight, 120.0f);
+    color = float4(lit, lit, lit, 1.0f);
+}

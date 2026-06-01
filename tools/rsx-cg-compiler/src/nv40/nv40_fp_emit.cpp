@@ -735,6 +735,21 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<IRValueID, FpDot3LitPackWrapBinding>
         valueToDot3LitPackWrap;
 
+    struct FpMaxDotZeroBinding
+    {
+        IRValueID lhsInputId = 0;
+        IRValueID rhsInputId = 0;
+    };
+    std::unordered_map<IRValueID, FpMaxDotZeroBinding> valueToMaxDotZero;
+
+    struct FpPowMaxDotLiteralBinding
+    {
+        FpMaxDotZeroBinding base;
+        float exponent = 1.0f;
+    };
+    std::unordered_map<IRValueID, FpPowMaxDotLiteralBinding>
+        valueToPowMaxDotLiteral;
+
     int nextTexUnit = 0;
 
     // Slot index for embedded-uniform globals.  Top-level uniforms
@@ -828,6 +843,24 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 attrs.referencedParamIndices.insert(static_cast<unsigned>(pi));
         }
     }
+
+    auto floatLiteralValue = [&](IRValueID id, float& outValue) -> bool
+    {
+        IRValue* v = entry.getValue(id);
+        auto* c = dynamic_cast<IRConstant*>(v);
+        if (!c) return false;
+        if (std::holds_alternative<float>(c->value))
+        {
+            outValue = std::get<float>(c->value);
+            return true;
+        }
+        if (std::holds_alternative<int32_t>(c->value))
+        {
+            outValue = static_cast<float>(std::get<int32_t>(c->value));
+            return true;
+        }
+        return false;
+    };
 
     bool emittedSomething = false;
 
@@ -2462,6 +2495,38 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     g.srcIds[1] = b;
                     g.width = std::max(1, inst.resultType.vectorSize);
                     valueToGenericArith[inst.result] = g;
+
+                    if (inst.op == IROp::Max)
+                    {
+                        auto tryMaxDotZero =
+                            [&](IRValueID dotId, IRValueID zeroId) -> bool
+                        {
+                            float zero = 0.0f;
+                            if (!floatLiteralValue(zeroId, zero) || zero != 0.0f)
+                                return false;
+
+                            auto dotIt = valueToGenericArith.find(dotId);
+                            if (dotIt == valueToGenericArith.end() ||
+                                dotIt->second.op != GenericFpOp::Dot3)
+                                return false;
+
+                            const SrcMod lhs = resolveSrcMods(dotIt->second.srcIds[0]);
+                            const SrcMod rhs = resolveSrcMods(dotIt->second.srcIds[1]);
+                            if (lhs.absMod || lhs.negMod || rhs.absMod || rhs.negMod)
+                                return false;
+                            if (!valueToInputSrc.count(lhs.baseId) ||
+                                !valueToInputSrc.count(rhs.baseId))
+                                return false;
+
+                            FpMaxDotZeroBinding bind;
+                            bind.lhsInputId = lhs.baseId;
+                            bind.rhsInputId = rhs.baseId;
+                            valueToMaxDotZero[inst.result] = bind;
+                            return true;
+                        };
+
+                        (void)(tryMaxDotZero(a, b) || tryMaxDotZero(b, a));
+                    }
                     break;
                 }
                 // Sub lowers to Add with the 2nd operand (the uniform
@@ -2473,6 +2538,23 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     bind.uniformNeg = !bind.uniformNeg;
 
                 valueToArith[inst.result] = bind;
+                break;
+            }
+
+            case IROp::Pow:
+            {
+                if (inst.operands.size() != 2) break;
+
+                auto baseIt = valueToMaxDotZero.find(inst.operands[0]);
+                if (baseIt == valueToMaxDotZero.end()) break;
+
+                float exponent = 0.0f;
+                if (!floatLiteralValue(inst.operands[1], exponent)) break;
+
+                FpPowMaxDotLiteralBinding bind;
+                bind.base = baseIt->second;
+                bind.exponent = exponent;
+                valueToPowMaxDotLiteral[inst.result] = bind;
                 break;
             }
 
@@ -3015,6 +3097,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             valueToGenericVecConstruct.count(opId) ||
                             valueToArith.count(opId) ||
                             valueToMad.count(opId) ||
+                            valueToPowMaxDotLiteral.count(opId) ||
                             valueToScalarUnary.count(opId) ||
                             valueToDot3LitPackScaled.count(opId))
                         {
@@ -7979,6 +8062,192 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 if (valueToGenericVecConstruct.count(srcId) ||
                     valueToGenericArith.count(srcId))
                 {
+                    auto powVecIt = valueToGenericVecConstruct.find(srcId);
+                    if (powVecIt != valueToGenericVecConstruct.end() &&
+                        powVecIt->second.width == 4)
+                    {
+                        const auto& gv = powVecIt->second;
+                        auto p0 = valueToPowMaxDotLiteral.find(gv.lanes[0]);
+                        auto p1 = valueToPowMaxDotLiteral.find(gv.lanes[1]);
+                        auto p2 = valueToPowMaxDotLiteral.find(gv.lanes[2]);
+
+                        float w = 0.0f;
+                        if (p0 != valueToPowMaxDotLiteral.end() &&
+                            p1 != valueToPowMaxDotLiteral.end() &&
+                            p2 != valueToPowMaxDotLiteral.end() &&
+                            p1->first == p0->first &&
+                            p2->first == p0->first &&
+                            floatLiteralValue(gv.lanes[3], w) &&
+                            w == 1.0f)
+                        {
+                            const auto& bind = p0->second;
+                            auto lhsIt = valueToInputSrc.find(bind.base.lhsInputId);
+                            auto rhsIt = valueToInputSrc.find(bind.base.rhsInputId);
+                            if (lhsIt == valueToInputSrc.end() ||
+                                rhsIt == valueToInputSrc.end())
+                            {
+                                out.diagnostics.push_back(
+                                    "nv40-fp: pow(max(dot), literal) inputs failed to resolve");
+                                return out;
+                            }
+
+                            const struct nvfx_reg tempR0 =
+                                nvfx_reg(NVFXSR_TEMP, 0);
+                            const struct nvfx_reg constReg =
+                                nvfx_reg(NVFXSR_CONST, 0);
+
+                            // MOVR R0.xyz, f[rhs]
+                            {
+                                const struct nvfx_reg rhsReg =
+                                    nvfx_reg(NVFXSR_INPUT, rhsIt->second);
+                                struct nvfx_src s0 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(rhsReg));
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(tempR0),
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                                    s0, s1, s2);
+                                in.precision = FLOAT32;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                            }
+
+                            // MOVR R0.w, {1,0,0,0}.x
+                            {
+                                struct nvfx_src s0 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                                s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 0;
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(tempR0),
+                                    NVFX_FP_MASK_W, s0, s1, s2);
+                                in.precision = FLOAT32;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                                const float one[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+                                asm_.appendConstBlock(one);
+                            }
+
+                            asm_.emitFenctr();
+
+                            // DP3R R0.x, f[lhs], R0
+                            {
+                                const struct nvfx_reg lhsReg =
+                                    nvfx_reg(NVFXSR_INPUT, lhsIt->second);
+                                struct nvfx_src s0 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(lhsReg));
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(tempR0),
+                                    NVFX_FP_MASK_X, s0, s1, s2);
+                                in.precision = FLOAT32;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_DP3);
+                            }
+
+                            // MAXR R0.x, R0, 0.0
+                            {
+                                struct nvfx_src s0 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                                s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(tempR0),
+                                    NVFX_FP_MASK_X, s0, s1, s2);
+                                in.precision = FLOAT32;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_MAX);
+                                const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                                asm_.appendConstBlock(zero);
+                            }
+
+                            // LG2R R0.x, R0
+                            {
+                                struct nvfx_src s0 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(tempR0),
+                                    NVFX_FP_MASK_X, s0, s1, s2);
+                                in.precision = FLOAT32;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_LG2);
+                            }
+
+                            // MULR R0.x, R0, exponent
+                            {
+                                struct nvfx_src s0 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                                s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(tempR0),
+                                    NVFX_FP_MASK_X, s0, s1, s2);
+                                in.precision = FLOAT32;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
+                                const float exponent[4] =
+                                    {bind.exponent, 0.0f, 0.0f, 0.0f};
+                                asm_.appendConstBlock(exponent);
+                            }
+
+                            // EX2R result.xyz, R0
+                            {
+                                struct nvfx_src s0 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                                struct nvfx_src s1 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_src s2 =
+                                    nvfx_src(const_cast<struct nvfx_reg&>(none));
+                                struct nvfx_insn in = nvfx_insn(
+                                    saturate ? 1 : 0, 0, -1, -1,
+                                    const_cast<struct nvfx_reg&>(dstReg),
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z,
+                                    s0, s1, s2);
+                                in.precision = dstPrecision;
+                                asm_.emit(in, NVFX_FP_OP_OPCODE_EX2);
+                            }
+
+                            const int inputs[2] = {lhsIt->second, rhsIt->second};
+                            for (int inputSrc : inputs)
+                            {
+                                attrs.attributeInputMask |=
+                                    fpAttrMaskBitForInputSrc(inputSrc);
+                                if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                    inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                {
+                                    const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                                    attrs.texCoordsInputMask |= uint16_t{1} << n;
+                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
+                                }
+                            }
+
+                            emittedSomething = true;
+                            break;
+                        }
+                    }
+
+                    if (emittedSomething)
+                        break;
+
                     if (!emitGenericValueToDest(srcId, dstReg,
                                                 NVFX_FP_MASK_ALL,
                                                 dstPrecision, saturate))
