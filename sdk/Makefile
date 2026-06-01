@@ -409,6 +409,7 @@ HEADERS := \
     include/Cg/NV/cg_errors.h \
     include/Cg/NV/cg_profiles.h \
     include/Cg/NV/cg_types.h \
+    include/cell/cgb/cgb_levelc.h \
     include/cell/cgb/cgb_struct.h \
     include/cell/sscgpu.h
 

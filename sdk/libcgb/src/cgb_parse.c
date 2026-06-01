@@ -1,4 +1,5 @@
 #include <cell/cgb.h>
+#include <cell/cgb/cgb_levelc.h>
 #include <Cg/cgBinary.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -450,4 +451,59 @@ void cellCgbMapGetFragmentUniformRegister(const CellCgbProgram *program,
     if (!cgb_load(program, &facade)) return;
     param = cgb_param(&facade, map_index);
     if (param && reg) *reg = (uint16_t)param->resIndex;
+}
+
+static const CgBinaryParameter *cgb_levelc_param(CellCgbProgram *program,
+                                                 uint32_t map_index)
+{
+    CgbFacade facade;
+    if (!cgb_load(program, &facade)) return NULL;
+    return cgb_param(&facade, map_index);
+}
+
+static uint16_t cgb_levelc_value_count(CGtype type)
+{
+    switch (type) {
+#define CG_DATATYPE_MACRO(name, compiler_name, enum_name, base_name, nrows, ncols, pc_name) \
+    case enum_name: return (uint16_t)(((nrows) ? (nrows) : 1) * ((ncols) ? (ncols) : 1));
+#include <Cg/cg_datatypes.h>
+#undef CG_DATATYPE_MACRO
+    default:
+        return 0;
+    }
+}
+
+uint16_t cellCgbLevelCMapGetCgType(CellCgbProgram *program,
+                                   const uint32_t map_index)
+{
+    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    return param ? (uint16_t)param->type : 0;
+}
+
+uint16_t cellCgbLevelCMapGetCgResource(CellCgbProgram *program,
+                                       const uint32_t map_index)
+{
+    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    return param ? (uint16_t)param->res : 0;
+}
+
+uint16_t cellCgbLevelCMapGetVariability(CellCgbProgram *program,
+                                        const uint32_t map_index)
+{
+    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    return param ? (uint16_t)param->var : 0;
+}
+
+uint16_t cellCgbLevelCMapGetDirection(CellCgbProgram *program,
+                                      const uint32_t map_index)
+{
+    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    return param ? (uint16_t)param->direction : 0;
+}
+
+uint16_t cellCgbLevelCMapGetValueCount(CellCgbProgram *program,
+                                       const uint32_t map_index)
+{
+    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    return param ? cgb_levelc_value_count(param->type) : 0;
 }

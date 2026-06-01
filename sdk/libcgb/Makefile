@@ -54,7 +54,9 @@ $(OBJ_DIR) $(LP64_OBJ_DIR):
 install: $(ARCHIVE) $(LP64_ARCHIVE)
 	install -d $(INSTALL_LIB) $(INSTALL_LP64_LIB)
 	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libcgb.a
+	install -m 0644 $(ARCHIVE) $(INSTALL_LIB)/libcgbLevelC.a
 	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LP64_LIB)/libcgb.a
+	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LP64_LIB)/libcgbLevelC.a
 
 clean:
 	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)
