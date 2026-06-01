@@ -1,0 +1,28 @@
+void main(float2 uv : TEXCOORD0,
+          float4 position : TEXCOORD1,
+          float3 normalIn : TEXCOORD2,
+          uniform float3 lightPos,
+          uniform float3 lightCol,
+          uniform float3 ambient,
+          uniform float3 eyePosLocal,
+          uniform sampler2D diffuseMap,
+          out float4 color : COLOR)
+{
+    float3 normalDir = normalize(normalIn);
+    float3 localPos = position.xyz;
+    float3 lightDir = normalize(lightPos - localPos);
+    float diffuseLight = max(dot(normalDir, lightDir), 0.0f);
+    float3 eyeDir = normalize(eyePosLocal - localPos);
+    float3 halfDir = normalize(lightDir + eyeDir);
+    float specular = pow(max(dot(halfDir, normalDir), 0.0f), 120.0f);
+    float gatedSpecular = (diffuseLight <= 0.0f) ? 0.0f : specular;
+
+    float3 texRgb = tex2D(diffuseMap, uv).rgb;
+    float3 lit = texRgb * lightCol * saturate(diffuseLight + ambient)
+               + gatedSpecular * 0.5f;
+
+    color.x = lit.x;
+    color.y = lit.y;
+    color.z = lit.z;
+    color.w = 1.0f;
+}
