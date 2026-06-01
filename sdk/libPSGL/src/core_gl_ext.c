@@ -342,9 +342,9 @@ GLAPI void glTextureReferenceSCE(GLenum target, GLuint levels,
                                  GLuint baseDepth, GLenum internalFormat,
                                  GLuint pitch, GLintptr offset)
 {
-    (void)target;  (void)levels;  (void)baseWidth;
-    (void)baseHeight; (void)baseDepth; (void)internalFormat;
-    (void)pitch;   (void)offset;
+    psgl_context_texture_reference_sce(target, levels, baseWidth, baseHeight,
+                                       baseDepth, internalFormat, pitch,
+                                       offset);
 }
 
 GLAPI void glBufferSurfaceSCE(GLenum target, GLuint width, GLuint height,

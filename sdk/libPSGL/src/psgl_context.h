@@ -278,6 +278,11 @@ void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
                                    GLenum format, GLenum type,
                                    const GLvoid *pixels);
 void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param);
+void psgl_context_texture_reference_sce(GLenum target, GLuint levels,
+                                        GLuint baseWidth, GLuint baseHeight,
+                                        GLuint baseDepth,
+                                        GLenum internalFormat,
+                                        GLuint pitch, GLintptr offset);
 void psgl_context_gen_buffers(GLsizei n, GLuint *buffers);
 void psgl_context_delete_buffers(GLsizei n, const GLuint *buffers);
 void psgl_context_bind_buffer(GLenum target, GLuint name);

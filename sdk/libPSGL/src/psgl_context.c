@@ -131,6 +131,19 @@ static uint32_t psgl_texture_remap_argb(void)
                                   GCM_TEXTURE_REMAP_TYPE_REMAP);
 }
 
+static uint32_t psgl_texture_remap_bgra(void)
+{
+    return GCM_TEXTURE_REMAP_MODE(GCM_TEXTURE_REMAP_ORDER_XYXY,
+                                  GCM_TEXTURE_REMAP_COLOR_B,
+                                  GCM_TEXTURE_REMAP_COLOR_G,
+                                  GCM_TEXTURE_REMAP_COLOR_R,
+                                  GCM_TEXTURE_REMAP_COLOR_A,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP);
+}
+
 static uint32_t psgl_morton2(uint32_t x, uint32_t y)
 {
     uint32_t out = 0u;
@@ -167,22 +180,6 @@ static void psgl_flip_trampoline(uint32_t head)
 
 static void psgl_vblank_trampoline(uint32_t head)
 {
-    PSGLdevice *device = g_psgl.current_device;
-    volatile uint32_t *prepared =
-        (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_PREPARED_BUFFER);
-    if (device && prepared) {
-        uint32_t data = *prepared;
-        uint32_t buffer = data >> 8;
-        uint32_t queue_id = data & 0x7u;
-        if (!device->flip_pending && buffer != device->frame_on_display) {
-            device->flip_pending = 1u;
-            if (cellGcmSetFlipImmediate((uint8_t)queue_id) == 0) {
-                device->flip_target_frame = buffer;
-            } else {
-                device->flip_pending = 0u;
-            }
-        }
-    }
     if (g_psgl.vblank_handler) g_psgl.vblank_handler((GLuint)head);
 }
 
@@ -981,11 +978,9 @@ static void psgl_init_flip_labels(PSGLdevice *device)
 
 static int psgl_ppu_too_far_ahead(const PSGLdevice *device)
 {
-    volatile uint32_t *prepared =
-        (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_PREPARED_BUFFER);
     uint32_t gpu;
-    if (!device || !prepared || !device->frame_count) return 0;
-    gpu = *prepared >> 8;
+    if (!device || !device->frame_count) return 0;
+    gpu = device->frame_on_display;
     return (((device->current_frame + device->frame_count - gpu) %
              device->frame_count) > PSGL_MAX_QUEUE_FRAMES);
 }
@@ -1377,6 +1372,34 @@ static void psgl_fill_gcm_texture(PSGLtextureObject *texture)
     texture->gcm_texture.location = texture->location;
     texture->gcm_texture.pitch = texture->pitch;
     texture->gcm_texture.offset = texture->offset;
+}
+
+static int psgl_texture_reference_is_compressed(GLenum internalformat)
+{
+    return internalformat == GL_COMPRESSED_RGB_S3TC_DXT1_EXT ||
+           internalformat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ||
+           internalformat == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
+           internalformat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+}
+
+static uint8_t psgl_texture_reference_format(GLenum internalformat,
+                                             GLuint pitch)
+{
+    uint8_t layout = pitch ? CELL_GCM_TEXTURE_LN : CELL_GCM_TEXTURE_SZ;
+    switch (internalformat) {
+    case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        return CELL_GCM_TEXTURE_COMPRESSED_DXT1 | layout;
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        return CELL_GCM_TEXTURE_COMPRESSED_DXT23 | layout;
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        return CELL_GCM_TEXTURE_COMPRESSED_DXT45 | layout;
+    case GL_RGBA:
+        return CELL_GCM_TEXTURE_A8R8G8B8 |
+            (pitch ? CELL_GCM_TEXTURE_LN : CELL_GCM_TEXTURE_SZ);
+    default:
+        return 0u;
+    }
 }
 
 static uint32_t psgl_gl_primitive(GLenum mode)
@@ -2072,22 +2095,16 @@ void psgl_context_swap(void)
 {
     PSGLcontext *context = g_psgl.current_context;
     PSGLdevice *device = g_psgl.current_device;
-    int32_t queue_id;
     if (!context || !device || !context->gcm) return;
 
     psgl_resolve_frame_for_display(context);
 
-    queue_id = (int32_t)cellGcmSetPrepareFlip(context->gcm,
-                                              (uint8_t)device->current_frame);
-    while (queue_id < 0) {
+    while (cellGcmSetFlip(context->gcm,
+                          (uint8_t)device->current_frame) != 0) {
         sys_timer_usleep(1000);
-        queue_id = (int32_t)cellGcmSetPrepareFlip(context->gcm,
-                                                  (uint8_t)device->current_frame);
     }
-
-    cellGcmSetWriteBackEndLabel(context->gcm, PSGL_LABEL_PREPARED_BUFFER,
-                                (device->current_frame << 8) |
-                                ((uint32_t)queue_id & 0x7u));
+    device->flip_target_frame = device->current_frame;
+    device->flip_pending = 1u;
     cellGcmFlush(context->gcm);
     while (psgl_ppu_too_far_ahead(device))
         sys_timer_usleep(3000);
@@ -3122,6 +3139,53 @@ void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param)
     default:
         return;
     }
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
+void psgl_context_texture_reference_sce(GLenum target, GLuint levels,
+                                        GLuint baseWidth, GLuint baseHeight,
+                                        GLuint baseDepth,
+                                        GLenum internalformat,
+                                        GLuint pitch, GLintptr offset)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    PSGLbufferObject *buffer =
+        psgl_bound_buffer(context, GL_TEXTURE_REFERENCE_BUFFER_SCE);
+    uint8_t rsx_format;
+    uint32_t texture_pitch;
+    uint32_t texture_offset;
+
+    if (!context || !texture || !buffer || !buffer->address || offset < 0 ||
+        baseWidth == 0u || baseHeight == 0u || baseDepth == 0u ||
+        baseWidth > 4096u || baseHeight > 4096u || baseDepth > 4096u)
+        return;
+
+    texture_offset = (uint32_t)offset;
+    if (texture_offset > buffer->size) return;
+
+    rsx_format = psgl_texture_reference_format(internalformat, pitch);
+    if (!rsx_format) return;
+
+    texture_pitch = pitch;
+    if (texture_pitch == 0u && internalformat == GL_RGBA)
+        texture_pitch = baseWidth * 4u;
+    if (texture_pitch > 0xffffu) return;
+
+    psgl_release_texture_storage(texture);
+    texture->address = (unsigned char *)buffer->address + texture_offset;
+    texture->offset = buffer->offset + texture_offset;
+    texture->size = buffer->size - texture_offset;
+    texture->width = (uint16_t)baseWidth;
+    texture->height = (uint16_t)baseHeight;
+    texture->pitch = (uint16_t)texture_pitch;
+    texture->levels = levels ? (uint8_t)levels : 1u;
+    texture->location = buffer->location;
+    texture->linear = (rsx_format & CELL_GCM_TEXTURE_LN) ? 1u : 0u;
+    texture->rsx_format = rsx_format;
+    psgl_fill_gcm_texture(texture);
+    if (psgl_texture_reference_is_compressed(internalformat))
+        texture->gcm_texture.remap = psgl_texture_remap_bgra();
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
