@@ -37,8 +37,10 @@ typedef struct PSGLbufferObject {
     GLuint name;
     GLenum usage;
     uint32_t size;
+    uint32_t allocation_size;
     void *address;
     uint32_t offset;
+    uint8_t location;
     GLboolean mapped;
     struct PSGLbufferObject *next;
 } PSGLbufferObject;
@@ -1120,9 +1122,19 @@ static PSGLbufferObject *psgl_create_buffer(GLuint name)
 static void psgl_release_buffer_storage(PSGLbufferObject *buffer)
 {
     if (!buffer) return;
+    if (buffer->address) {
+        if (buffer->location == CELL_GCM_LOCATION_MAIN) {
+            cellGcmUnmapEaIoAddress(buffer->address);
+            free(buffer->address);
+        } else {
+            rsxFree(buffer->address);
+        }
+    }
     buffer->address = NULL;
     buffer->size = 0u;
+    buffer->allocation_size = 0u;
     buffer->offset = 0u;
+    buffer->location = CELL_GCM_LOCATION_LOCAL;
     buffer->mapped = GL_FALSE;
 }
 
@@ -1437,7 +1449,7 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
         cellGcmSetVertexDataArray(context->gcm, psgl_attrib_hw_index(i),
                                   0, (uint8_t)psgl_attrib_stride(attrib),
                                   (uint8_t)attrib->size, type,
-                                  CELL_GCM_LOCATION_LOCAL, offset);
+                                  buffer->location, offset);
     }
 }
 
@@ -3151,18 +3163,40 @@ void psgl_context_buffer_data(GLenum target, GLsizeiptr size,
         return;
     }
 
-    void *address = rsxMemalign(PSGL_BUFFER_ALIGNMENT, (uint32_t)size);
+    void *address;
+    uint32_t allocation_size = (uint32_t)size;
     uint32_t offset = 0u;
-    if (!address) return;
-    if (cellGcmAddressToOffset(address, &offset) != 0) {
-        return;
+    uint8_t location;
+
+    if (usage == GL_SYSTEM_DRAW_SCE) {
+        allocation_size = psgl_align_u32(allocation_size, PSGL_HOST_ALIGNMENT);
+        if (allocation_size < (uint32_t)size) return;
+        address = memalign(PSGL_HOST_ALIGNMENT, allocation_size);
+        if (!address) return;
+        psgl_zero(address, allocation_size);
+        if (cellGcmMapMainMemory(address, allocation_size, &offset) != 0) {
+            free(address);
+            return;
+        }
+        location = CELL_GCM_LOCATION_MAIN;
+    } else {
+        address = rsxMemalign(PSGL_BUFFER_ALIGNMENT, allocation_size);
+        if (!address) return;
+        if (cellGcmAddressToOffset(address, &offset) != 0) {
+            rsxFree(address);
+            return;
+        }
+        location = CELL_GCM_LOCATION_LOCAL;
     }
+    if (!address) return;
     if (data) psgl_copy(address, data, (uint32_t)size);
 
     psgl_release_buffer_storage(buffer);
     buffer->address = address;
     buffer->offset = offset;
     buffer->size = (uint32_t)size;
+    buffer->allocation_size = allocation_size;
+    buffer->location = location;
     buffer->usage = usage;
 }
 
@@ -3293,7 +3327,7 @@ void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
     psgl_validate_draw_state(context);
     cellGcmSetDrawIndexArray(context->gcm, (uint8_t)primitive,
                              (uint32_t)count, index_type,
-                             CELL_GCM_LOCATION_LOCAL, offset);
+                             buffer->location, offset);
 }
 
 PSGLuint64 psglGetSystemTime(void)
