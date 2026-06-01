@@ -78,6 +78,20 @@ int32_t cellDbgFontPrintf(float x, float y, float scale, uint32_t color,
                           const char *fmt, ...)
                           __attribute__((format(printf, 5, 6)));
 
+/* ---- Backward-compat: pre-Gcm API (the reference SDK compat) ------- */
+
+typedef struct CellDbgFontConfig {
+    uint32_t bufSize;
+    uint32_t screenWidth;
+    uint32_t screenHeight;
+} CellDbgFontConfig;
+
+int32_t cellDbgFontInit(const CellDbgFontConfig *cfg);
+int32_t cellDbgFontExit(void);
+int32_t cellDbgFontDraw(void);
+int32_t cellDbgFontVprintf(float x, float y, float scale, uint32_t color,
+                           const char *fmt, va_list ap);
+
 /* ---- Console API: virtual text console with ring-buffer lines ----- */
 
 typedef int32_t CellDbgFontConsoleId;

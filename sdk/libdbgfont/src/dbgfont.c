@@ -455,3 +455,87 @@ int32_t cellDbgFontDrawGcm(void)
     g_dbgfont.num_verts = 0;
     return 0;
 }
+
+/* ------------------------------------------------------------------ */
+/*   Backward-compat: pre-Gcm API wrappers                            */
+/* ------------------------------------------------------------------ */
+/*
+ * Old-API CellDbgFontConfig uses three uint32_t fields (bufSize,
+ * screenWidth, screenHeight).  The wrappers below allocate a
+ * local-memory buffer large enough for the fragment ucode + texture
+ * atlas + a 1024-vertex pool, fill a CellDbgFontConfigGcm, and
+ * delegate to the Gcm API.
+ *
+ * Sample config site (cgb_basic_psgl main.cpp:452-457):
+ *   CellDbgFontConfig cfg;
+ *   memset(&cfg, 0, sizeof(CellDbgFontConfig));
+ *   cfg.bufSize = 512;
+ *   cfg.screenWidth = iWidth;
+ *   cfg.screenHeight = iHeight;
+ *   cellDbgFontInit(&cfg);
+ *
+ * Buffer pool: LOCAL (all buffers in RSX-local memory).
+ * Option flags: VERTEX_LOCAL | TEXTURE_LOCAL (InitGcm does not
+ *               consume option; included for forward compatibility).
+ */
+
+/* Total local-buffer size the compat wrapper allocates:
+ *    fragment ucode (CELL_DBGFONT_FRAGMENT_SIZE)
+ *  + texture atlas  (CELL_DBGFONT_TEXTURE_SIZE)
+ *  + vertex pool    (1024 * CELL_DBGFONT_VERTEX_SIZE) */
+#define DBGFONT_COMPAT_BUF_SIZE \
+    (CELL_DBGFONT_FRAGMENT_SIZE + CELL_DBGFONT_TEXTURE_SIZE + \
+     1024u * CELL_DBGFONT_VERTEX_SIZE)
+
+static void *g_compat_buf = NULL;
+
+int32_t cellDbgFontInit(const CellDbgFontConfig *cfg)
+{
+    if (!cfg || cfg->bufSize == 0u) return -1;
+
+    void *buf = rsxMemalign(128, DBGFONT_COMPAT_BUF_SIZE);
+    if (!buf) return -1;
+    memset(buf, 0, DBGFONT_COMPAT_BUF_SIZE);
+
+    CellDbgFontConfigGcm gcmCfg;
+    memset(&gcmCfg, 0, sizeof(gcmCfg));
+    gcmCfg.localBufAddr = (sys_addr_t)(uintptr_t)buf;
+    gcmCfg.localBufSize = DBGFONT_COMPAT_BUF_SIZE;
+    gcmCfg.screenWidth  = (uint16_t)cfg->screenWidth;
+    gcmCfg.screenHeight = (uint16_t)cfg->screenHeight;
+    gcmCfg.option       = CELL_DBGFONT_VERTEX_LOCAL
+                        | CELL_DBGFONT_TEXTURE_LOCAL;
+
+    int32_t rc = cellDbgFontInitGcm(&gcmCfg);
+    if (rc != 0) {
+        rsxFree(buf);
+        return rc;
+    }
+    g_compat_buf = buf;
+    return 0;
+}
+
+int32_t cellDbgFontExit(void)
+{
+    int32_t rc = cellDbgFontExitGcm();
+    if (g_compat_buf) {
+        rsxFree(g_compat_buf);
+        g_compat_buf = NULL;
+    }
+    return rc;
+}
+
+int32_t cellDbgFontDraw(void)
+{
+    return cellDbgFontDrawGcm();
+}
+
+int32_t cellDbgFontVprintf(float x, float y, float scale, uint32_t color,
+                           const char *fmt, va_list ap)
+{
+    if (!fmt) return 0;
+    char buf[1024];
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    if (n < 0) return 0;
+    return cellDbgFontPuts(x, y, scale, color, buf);
+}
