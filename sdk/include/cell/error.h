@@ -17,6 +17,10 @@ extern "C" {
 #define CELL_OK                0
 #define CELL_ERROR_CAST(x)     ((int)(x))
 
+#ifndef SUCCEEDED
+#define SUCCEEDED              CELL_OK
+#endif
+
 #ifdef __cplusplus
 }
 #endif
