@@ -179,6 +179,7 @@ struct PSGLcontext {
     GLint clear_stencil;
     GLuint bound_array_buffer;
     GLuint bound_element_array_buffer;
+    GLuint bound_texture_reference_buffer;
     PSGLvertexAttribState attribs[PSGL_MAX_VERTEX_ATTRIBS];
     PSGLtextureUnitState textures[PSGL_MAX_TEXTURE_UNITS];
     PSGLlightState lights[PSGL_MAX_LIGHTS];
@@ -196,6 +197,7 @@ void psgl_context_destroy(PSGLcontext *context);
 PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters);
 void psgl_device_destroy(PSGLdevice *device);
 void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device);
+void psgl_context_unbind_current(void);
 void psgl_context_reset_current(void);
 PSGLcontext *psgl_context_current(void);
 PSGLdevice *psgl_context_current_device(void);

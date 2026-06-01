@@ -1133,6 +1133,8 @@ static PSGLbufferObject *psgl_bound_buffer(PSGLcontext *context, GLenum target)
         return psgl_find_buffer(context->bound_array_buffer);
     if (target == GL_ELEMENT_ARRAY_BUFFER)
         return psgl_find_buffer(context->bound_element_array_buffer);
+    if (target == GL_TEXTURE_REFERENCE_BUFFER_SCE)
+        return psgl_find_buffer(context->bound_texture_reference_buffer);
     return NULL;
 }
 
@@ -1621,6 +1623,7 @@ static void psgl_clear_deleted_buffer_bindings(GLuint name)
     if (!context) return;
     if (context->bound_array_buffer == name) context->bound_array_buffer = 0u;
     if (context->bound_element_array_buffer == name) context->bound_element_array_buffer = 0u;
+    if (context->bound_texture_reference_buffer == name) context->bound_texture_reference_buffer = 0u;
     for (uint32_t i = 0; i < PSGL_MAX_VERTEX_ATTRIBS; i++) {
         if (context->attribs[i].buffer_name == name) {
             context->attribs[i].buffer_name = 0u;
@@ -1780,7 +1783,7 @@ PSGLcontext *psgl_context_create(void)
 void psgl_context_destroy(PSGLcontext *context)
 {
     if (!context) return;
-    if (g_psgl.current_context == context) psgl_context_reset_current();
+    if (g_psgl.current_context == context) psgl_context_unbind_current();
 }
 
 PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
@@ -1881,7 +1884,7 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
 void psgl_device_destroy(PSGLdevice *device)
 {
     if (!device) return;
-    if (g_psgl.current_device == device) psgl_context_reset_current();
+    if (g_psgl.current_device == device) psgl_context_unbind_current();
     if (CELL_GCM_CURRENT) {
         cellGcmFinish(CELL_GCM_CURRENT, 1u);
         for (uint32_t i = 0; i < PSGL_MAX_FRAME_BUFFERS; i++) {
@@ -1903,7 +1906,7 @@ void psgl_device_destroy(PSGLdevice *device)
 void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device)
 {
     if (!context) {
-        psgl_context_reset_current();
+        psgl_context_unbind_current();
         return;
     }
     context->device = device;
@@ -1926,11 +1929,18 @@ void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device)
     psgl_emit_scissor(context);
 }
 
-void psgl_context_reset_current(void)
+void psgl_context_unbind_current(void)
 {
     if (g_psgl.current_context) g_psgl.current_context->device = NULL;
     g_psgl.current_context = NULL;
     g_psgl.current_device = NULL;
+}
+
+void psgl_context_reset_current(void)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    context->dirty |= PSGL_DIRTY_ALL;
 }
 
 PSGLcontext *psgl_context_current(void)
@@ -3124,6 +3134,8 @@ void psgl_context_bind_buffer(GLenum target, GLuint name)
         context->bound_array_buffer = name;
     } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
         context->bound_element_array_buffer = name;
+    } else if (target == GL_TEXTURE_REFERENCE_BUFFER_SCE) {
+        context->bound_texture_reference_buffer = name;
     }
 }
 
