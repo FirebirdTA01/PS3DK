@@ -350,7 +350,17 @@ uint16_t cellCgbMapGetValue(CellCgbProgram *program,
     const CgBinaryParameter *param;
     if (!cgb_load(program, &facade)) return 0;
     param = cgb_param(&facade, map_index);
-    return param ? (uint16_t)param->resIndex : 0;
+    if (!param) return 0;
+
+    /* Map CG resource to hardware slot/index.  For vertex
+     * attributes, the slot is (res - CG_ATTR0); for texture
+     * units, (res - CG_TEXUNIT0); for uniform constants,
+     * the register is param->resIndex. */
+    if (param->res >= CG_ATTR0 && param->res <= CG_ATTR15)
+        return (uint16_t)(param->res - CG_ATTR0);
+    if (param->res >= CG_TEXUNIT0 && param->res <= CG_TEXUNIT15)
+        return (uint16_t)(param->res - CG_TEXUNIT0);
+    return (uint16_t)param->resIndex;
 }
 
 uint32_t cellCgbMapGetLength(const CellCgbProgram *program)
