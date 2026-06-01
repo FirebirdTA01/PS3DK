@@ -98,6 +98,9 @@ HEADERS := \
     include/cell/swcache/patch_object.h \
     include/cell/swcache/patch_vtable.h \
     include/cell/pad.h \
+    include/cell/pad/error.h \
+    include/cell/pad/libpad.h \
+    include/cell/pad/pad_codes.h \
     include/cell/error.h \
     include/cell/jdl.h \
     include/cell/gcm.h \
