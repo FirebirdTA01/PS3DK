@@ -741,6 +741,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         IRValueID rhsInputId = 0;
     };
     std::unordered_map<IRValueID, FpMaxDotZeroBinding> valueToMaxDotZero;
+    std::unordered_set<IRValueID> valueToCmpLeMaxDotZero;
 
     struct FpPowMaxDotLiteralBinding
     {
@@ -1106,6 +1107,18 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             case IROp::CmpNe:
             {
                 if (inst.operands.size() < 2) break;
+
+                if (inst.op == IROp::CmpLe &&
+                    valueToMaxDotZero.count(inst.operands[0]))
+                {
+                    float rhs = 0.0f;
+                    if (floatLiteralValue(inst.operands[1], rhs) && rhs == 0.0f)
+                    {
+                        valueToCmpLeMaxDotZero.insert(inst.result);
+                        lastConditionalId = inst.result;
+                        break;
+                    }
+                }
 
                 // LHS: scalar extract of either an entry-point varying
                 // (`vcol.x > k`) or a tex2D / texCUBE / tex2Dproj
@@ -8317,21 +8330,27 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     return emitGenericMov(dst, mask, src, precision, sat);
                 };
 
-                auto tryEmitComputedColorStore = [&](IRValueID id) -> bool
+                auto tryEmitComputedColorStore =
+                    [&](IRValueID id, IRValueID explicitColorVecId) -> bool
                 {
-                    auto gvIt = valueToGenericVecConstruct.find(id);
-                    if (gvIt == valueToGenericVecConstruct.end() ||
-                        gvIt->second.width != 4 ||
-                        gvIt->second.lanes[0] != gvIt->second.lanes[1] ||
-                        gvIt->second.lanes[0] != gvIt->second.lanes[2])
-                        return false;
+                    IRValueID colorVecId = explicitColorVecId;
+                    if (colorVecId == 0)
+                    {
+                        auto gvIt = valueToGenericVecConstruct.find(id);
+                        if (gvIt == valueToGenericVecConstruct.end() ||
+                            gvIt->second.width != 4 ||
+                            gvIt->second.lanes[0] != gvIt->second.lanes[1] ||
+                            gvIt->second.lanes[0] != gvIt->second.lanes[2])
+                            return false;
 
-                    float w = 0.0f;
-                    if (!floatLiteralValue(gvIt->second.lanes[3], w) ||
-                        w != 1.0f)
-                        return false;
+                        float w = 0.0f;
+                        if (!floatLiteralValue(gvIt->second.lanes[3], w) ||
+                            w != 1.0f)
+                            return false;
+                        colorVecId = gvIt->second.lanes[0];
+                    }
 
-                    auto finalAddIt = valueToGenericArith.find(gvIt->second.lanes[0]);
+                    auto finalAddIt = valueToGenericArith.find(colorVecId);
                     if (finalAddIt == valueToGenericArith.end() ||
                         finalAddIt->second.op != GenericFpOp::Add)
                         return false;
@@ -8413,22 +8432,49 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         IRValueID powId = 0;
                         IRValueID factorId = 0;
+                        bool gated = false;
+                    };
+                    auto matchGatedPow =
+                        [&](IRValueID sid, IRValueID& powId, bool& gated) -> bool
+                    {
+                        if (valueToPowMaxDotLiteral.count(sid))
+                        {
+                            powId = sid;
+                            gated = false;
+                            return true;
+                        }
+                        auto selIt = valueToSelect.find(sid);
+                        if (selIt == valueToSelect.end() ||
+                            !valueToCmpLeMaxDotZero.count(selIt->second.cmpId))
+                            return false;
+                        float zero = 0.0f;
+                        if (!floatLiteralValue(selIt->second.trueId, zero) ||
+                            zero != 0.0f ||
+                            !valueToPowMaxDotLiteral.count(selIt->second.falseId))
+                            return false;
+                        powId = selIt->second.falseId;
+                        gated = true;
+                        return true;
                     };
                     auto matchSpecMul =
                         [&](IRValueID mid, SpecMul& outMul) -> bool
                     {
                         MulPair mp;
                         if (!getMulPair(mid, mp)) return false;
-                        if (valueToPowMaxDotLiteral.count(mp.a))
+                        IRValueID powId = 0;
+                        bool gated = false;
+                        if (matchGatedPow(mp.a, powId, gated))
                         {
-                            outMul.powId = mp.a;
+                            outMul.powId = powId;
                             outMul.factorId = mp.b;
+                            outMul.gated = gated;
                             return true;
                         }
-                        if (valueToPowMaxDotLiteral.count(mp.b))
+                        if (matchGatedPow(mp.b, powId, gated))
                         {
-                            outMul.powId = mp.b;
+                            outMul.powId = powId;
                             outMul.factorId = mp.a;
+                            outMul.gated = gated;
                             return true;
                         }
                         return false;
@@ -8547,6 +8593,24 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         asm_.appendConstBlock(zero);
                     }
 
+                    if (spec.gated)
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 3;
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            ccDst, NVFX_FP_MASK_X, s0, s1, s2);
+                        in.cc_update = 1;
+                        in.precision = 2;
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                    }
+
                     {
                         struct nvfx_src s0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(r0));
@@ -8566,22 +8630,36 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         struct nvfx_src s0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(r1));
-                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 0;
+                        if (!spec.gated)
+                            s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 0;
                         struct nvfx_src s1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        if (spec.gated)
+                            s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0;
                         struct nvfx_src s2 =
                             nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r1),
-                            NVFX_FP_MASK_W, s0, s1, s2);
+                            spec.gated ? NVFX_FP_MASK_X : NVFX_FP_MASK_W,
+                            s0, s1, s2);
                         in.precision = FLOAT32;
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
-                        const float exponent[4] =
-                            {0.0f, 0.0f, 0.0f, powIt->second.exponent};
-                        asm_.appendConstBlock(exponent);
+                        if (spec.gated)
+                        {
+                            const float exponent[4] =
+                                {powIt->second.exponent, 0.0f, 0.0f, 0.0f};
+                            asm_.appendConstBlock(exponent);
+                        }
+                        else
+                        {
+                            const float exponent[4] =
+                                {0.0f, 0.0f, 0.0f, powIt->second.exponent};
+                            asm_.appendConstBlock(exponent);
+                        }
                     }
 
+                    auto emitSaturatedAmbientAdd = [&]()
                     {
                         struct nvfx_src s0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(r0));
@@ -8596,13 +8674,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             s0, s1, s2);
                         in.precision = FLOAT32;
                         asm_.emit(in, NVFX_FP_OP_OPCODE_ADD);
+                    };
+
+                    if (!spec.gated)
+                    {
+                        emitSaturatedAmbientAdd();
                         appendGenericInlineSource(ambientSrc);
                     }
 
                     {
                         struct nvfx_src s0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(r1));
-                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 3;
+                        if (!spec.gated)
+                            s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 3;
                         struct nvfx_src s1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
                         struct nvfx_src s2 =
@@ -8612,7 +8696,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             const_cast<struct nvfx_reg&>(r1),
                             NVFX_FP_MASK_W, s0, s1, s2);
                         in.precision = FLOAT32;
+                        if (spec.gated)
+                        {
+                            in.cc_cond = NVFX_COND_GT;
+                            in.cc_swz[0] = in.cc_swz[1] =
+                            in.cc_swz[2] = in.cc_swz[3] = 0;
+                        }
                         asm_.emit(in, NVFX_FP_OP_OPCODE_EX2);
+                    }
+
+                    if (spec.gated)
+                    {
+                        emitSaturatedAmbientAdd();
+                        appendGenericInlineSource(ambientSrc);
                     }
 
                     if (!emitTexSampleToDest(lighting.texLight.texId,
@@ -8672,6 +8768,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         struct nvfx_src s0 =
                             nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        if (spec.gated)
+                            s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 1;
                         struct nvfx_src s1 =
                             nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
                         struct nvfx_src s2 =
@@ -8682,8 +8780,16 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             NVFX_FP_MASK_W, s0, s1, s2);
                         in.precision = dstPrecision;
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
-                        const float oneW[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-                        asm_.appendConstBlock(oneW);
+                        if (spec.gated)
+                        {
+                            const float oneW[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+                            asm_.appendConstBlock(oneW);
+                        }
+                        else
+                        {
+                            const float oneW[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                            asm_.appendConstBlock(oneW);
+                        }
                     }
 
                     const int uvInput =
@@ -8704,10 +8810,53 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     return true;
                 };
 
+                auto vecInsertComputedColorVec = [&]() -> IRValueID
+                {
+                    if (laneOverrides.size() != 4)
+                        return 0;
+                    IRValueID colorVecId = 0;
+                    bool seen[4] = {false, false, false, false};
+                    for (const auto& lo : laneOverrides)
+                    {
+                        if (lo.lane < 0 || lo.lane > 3 || seen[lo.lane])
+                            return 0;
+                        seen[lo.lane] = true;
+                        if (lo.lane == 3)
+                        {
+                            float w = 0.0f;
+                            if (!floatLiteralValue(lo.scalarId, w) || w != 1.0f)
+                                return 0;
+                            continue;
+                        }
+                        auto seIt = valueToScalarExtract.find(lo.scalarId);
+                        if (seIt == valueToScalarExtract.end() ||
+                            seIt->second.lane != lo.lane)
+                            return 0;
+                        if (colorVecId == 0)
+                            colorVecId = seIt->second.baseId;
+                        else if (colorVecId != seIt->second.baseId)
+                            return 0;
+                    }
+                    return (seen[0] && seen[1] && seen[2] && seen[3])
+                        ? colorVecId
+                        : 0;
+                };
+
+                if (!laneOverrides.empty())
+                {
+                    IRValueID colorVecId = vecInsertComputedColorVec();
+                    if (colorVecId != 0 &&
+                        tryEmitComputedColorStore(0, colorVecId))
+                    {
+                        emittedSomething = true;
+                        break;
+                    }
+                }
+
                 if (valueToGenericVecConstruct.count(srcId) ||
                     valueToGenericArith.count(srcId))
                 {
-                    if (tryEmitComputedColorStore(srcId))
+                    if (tryEmitComputedColorStore(srcId, 0))
                     {
                         emittedSomething = true;
                         break;
