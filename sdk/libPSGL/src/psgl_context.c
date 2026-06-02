@@ -164,6 +164,29 @@ static uint32_t psgl_texture_remap_bgra(void)
                                   GCM_TEXTURE_REMAP_TYPE_REMAP);
 }
 
+static uint32_t psgl_texture_remap_dxt_rb(void)
+{
+    /* DXTn stores channels in a different order from A8R8G8B8;
+       without this remap the brick texture renders blue. */
+    return GCM_TEXTURE_REMAP_MODE(GCM_TEXTURE_REMAP_ORDER_XYXY,
+                                  GCM_TEXTURE_REMAP_COLOR_A,
+                                  GCM_TEXTURE_REMAP_COLOR_B,
+                                  GCM_TEXTURE_REMAP_COLOR_G,
+                                  GCM_TEXTURE_REMAP_COLOR_R,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP,
+                                  GCM_TEXTURE_REMAP_TYPE_REMAP);
+}
+
+static int psgl_texture_is_dxt(uint8_t rsx_format)
+{
+    uint8_t base = rsx_format & ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_SZ);
+    return base == CELL_GCM_TEXTURE_COMPRESSED_DXT1 ||
+           base == CELL_GCM_TEXTURE_COMPRESSED_DXT23 ||
+           base == CELL_GCM_TEXTURE_COMPRESSED_DXT45;
+}
+
 static uint32_t psgl_morton2(uint32_t x, uint32_t y)
 {
     uint32_t out = 0u;
@@ -1388,7 +1411,9 @@ static void psgl_fill_gcm_texture(PSGLtextureObject *texture)
     texture->gcm_texture.mipmap = texture->levels ? texture->levels : 1u;
     texture->gcm_texture.dimension = CELL_GCM_TEXTURE_DIMENSION_2;
     texture->gcm_texture.cubemap = 0u;
-    texture->gcm_texture.remap = psgl_texture_remap_argb();
+    texture->gcm_texture.remap = psgl_texture_is_dxt(texture->rsx_format)
+        ? psgl_texture_remap_dxt_rb()
+        : psgl_texture_remap_argb();
     texture->gcm_texture.width = texture->width;
     texture->gcm_texture.height = texture->height;
     texture->gcm_texture.depth = 1u;
@@ -3214,7 +3239,7 @@ void psgl_context_texture_reference_sce(GLenum target, GLuint levels,
     texture->rsx_format = rsx_format;
     psgl_fill_gcm_texture(texture);
     if (psgl_texture_reference_is_compressed(internalformat))
-        texture->gcm_texture.remap = psgl_texture_remap_bgra();
+        texture->gcm_texture.remap = psgl_texture_remap_dxt_rb();
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
