@@ -110,6 +110,12 @@ void put32(std::vector<uint8_t>& out, uint32_t v)
     out.push_back(static_cast<uint8_t>(v));
 }
 
+void put16(std::vector<uint8_t>& out, uint16_t v)
+{
+    out.push_back(static_cast<uint8_t>(v >> 8));
+    out.push_back(static_cast<uint8_t>(v));
+}
+
 void putString(std::vector<uint8_t>& out, const std::string& s)
 {
     out.insert(out.end(), s.begin(), s.end());
@@ -191,11 +197,12 @@ uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
 
 }  // namespace
 
-VpContainerResult emitVertexContainer(
+VpContainerResult emitVertexContainerImpl(
     const IRModule&              module,
     const std::string&           entryName,
     const std::vector<uint32_t>& ucode,
-    const nv40::VpAttributes&    attrs)
+    const nv40::VpAttributes&    attrs,
+    bool                         compactCgb)
 {
     VpContainerResult result;
 
@@ -659,6 +666,120 @@ VpContainerResult emitVertexContainer(
         params.push_back(d);
     }
 
+    if (compactCgb)
+    {
+        // Compact CGB mode is the runtime-facing `the reference compiler -mcgb` container.
+        // Target 1 emits LevelA as the empty reference block; compact VP
+        // internal constants will be added when a byte-diff target needs them.
+        struct CompactEntry
+        {
+            std::string name;
+            uint16_t    resource = 0;
+        };
+
+        std::vector<CompactEntry> entries;
+        entries.reserve(params.size());
+        for (const auto& d : params)
+        {
+            if (d.name.empty() || d.direction != kCgIn)
+                continue;
+
+            if (d.var == kCgVarying)
+            {
+                if (d.res >= kCgAttr0 && d.res < kCgAttr0 + 16u)
+                {
+                    CompactEntry e;
+                    e.name = d.name;
+                    e.resource = static_cast<uint16_t>(d.res - kCgAttr0);
+                    entries.push_back(e);
+                }
+                continue;
+            }
+
+            if (d.var == kCgUniform && d.res == kCgConst && !d.isLiteralPool)
+            {
+                // Matrix rows are raw-CgBinary child params.  Compact CGB LevelB
+                // stores the user-visible parent once, with the first c[] index.
+                if (d.name.find('[') != std::string::npos)
+                    continue;
+                if (d.resIndex <= 0xFFFFu)
+                {
+                    CompactEntry e;
+                    e.name = d.name;
+                    e.resource = static_cast<uint16_t>(d.resIndex);
+                    entries.push_back(e);
+                }
+            }
+        }
+
+        std::vector<uint8_t> strings;
+        strings.push_back(0);
+        std::vector<uint32_t> nameOffsets;
+        nameOffsets.reserve(entries.size());
+        for (const auto& e : entries)
+        {
+            nameOffsets.push_back(static_cast<uint32_t>(strings.size()));
+            putString(strings, e.name);
+        }
+
+        const uint32_t ucodeSize = static_cast<uint32_t>(ucode.size() * 4u);
+        if (ucodeSize > 0xFFFFu)
+        {
+            result.diagnostics.push_back("cg-container-vp: compact CGB ucode exceeds u16 size");
+            return result;
+        }
+
+        const uint32_t levelASize = 0x10u;
+        const uint32_t levelBSize = 6u
+            + static_cast<uint32_t>(entries.size() * 8u)
+            + static_cast<uint32_t>(strings.size());
+        if (levelBSize > 0xFFFFu || entries.size() > 0xFFFFu)
+        {
+            result.diagnostics.push_back("cg-container-vp: compact CGB LevelB too large");
+            return result;
+        }
+
+        auto& out = result.bytes;
+        out.reserve(0x20u + ucodeSize + levelASize + levelBSize);
+
+        put32(out, 0x43474200u);                         // "CGB\0"
+        put16(out, 0);                                   // format version
+        put16(out, 0);                                   // compiler version
+        put16(out, static_cast<uint16_t>(ucodeSize));
+        out.push_back(0);                                // vertex profile
+        out.push_back(0x03);                             // LevelA | LevelB
+
+        put16(out, static_cast<uint16_t>(attrs.attributeInputMask));
+        out.push_back(static_cast<uint8_t>(attrs.registerCount));
+        out.push_back(0);
+        put32(out, attrs.attributeOutputMask);
+        put32(out, attrs.userClipMask);
+        put16(out, static_cast<uint16_t>(attrs.instructionSlot));
+        put16(out, 0);
+        put32(out, 0);
+
+        for (uint32_t w : ucode) put32(out, w);
+
+        put16(out, static_cast<uint16_t>(levelASize));
+        put16(out, 0);                                   // constant count
+        while (out.size() < 0x20u + ucodeSize + levelASize)
+            out.push_back(0);
+
+        put16(out, static_cast<uint16_t>(levelBSize));
+        put16(out, static_cast<uint16_t>(entries.size()));
+        put16(out, 0);                                   // FP resource offset count
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+            put32(out, nameOffsets[i]);
+            put16(out, 0xFFFFu);                         // no parent
+            put16(out, entries[i].resource);
+        }
+        out.insert(out.end(), strings.begin(), strings.end());
+
+        result.ok = true;
+        return result;
+    }
+
     // ----- Strings region: per-param, semantic\0 then name\0.
     // Literal-pool params interleave a 16-byte float[4] block between
     // the prior strings and the param's own name string (the reference compiler lays
@@ -781,6 +902,24 @@ VpContainerResult emitVertexContainer(
 
     result.ok = true;
     return result;
+}
+
+VpContainerResult emitVertexContainer(
+    const IRModule&              module,
+    const std::string&           entryName,
+    const std::vector<uint32_t>& ucode,
+    const nv40::VpAttributes&    attrs)
+{
+    return emitVertexContainerImpl(module, entryName, ucode, attrs, false);
+}
+
+VpContainerResult emitVertexCompactCgb(
+    const IRModule&              module,
+    const std::string&           entryName,
+    const std::vector<uint32_t>& ucode,
+    const nv40::VpAttributes&    attrs)
+{
+    return emitVertexContainerImpl(module, entryName, ucode, attrs, true);
 }
 
 }  // namespace cg_container

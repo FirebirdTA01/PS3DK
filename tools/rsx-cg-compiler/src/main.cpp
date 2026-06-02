@@ -41,6 +41,7 @@ struct CompilerContext
     std::string              entryName = "main";
     std::vector<std::string> includeDirs;
     std::string              containerOutPath;  // --emit-container <path>
+    std::string              cgbContainerOutPath;  // --emit-cgb-container <path>
     bool                     noStdLib = false;
 
     enum class Profile { Unknown, FragmentRsx, VertexRsx };
@@ -66,6 +67,7 @@ void usage()
         "  -I <dir>               Add include directory\n"
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
         "  --emit-container <p>   Write the .vpo/.fpo container to <p> (binary)\n"
+        "  --emit-cgb-container <p> Write the compact CGB\\0 container to <p> (binary)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
         "  -h, --help             Show this message\n"
@@ -174,6 +176,10 @@ int main(int argc, char** argv)
         else if (arg == "--emit-container" && i + 1 < argc)
         {
             ctx.containerOutPath = argv[++i];
+        }
+        else if (arg == "--emit-cgb-container" && i + 1 < argc)
+        {
+            ctx.cgbContainerOutPath = argv[++i];
         }
         else if (arg == "-O0" || arg == "--O0")
         {
@@ -368,7 +374,18 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (!ctx.containerOutPath.empty())
+    if (!ctx.containerOutPath.empty() && !ctx.cgbContainerOutPath.empty())
+    {
+        std::fprintf(stderr,
+            "rsx-cg-compiler: --emit-container and --emit-cgb-container are mutually exclusive\n");
+        return 1;
+    }
+
+    const std::string outPath =
+        !ctx.cgbContainerOutPath.empty() ? ctx.cgbContainerOutPath : ctx.containerOutPath;
+    const bool emitCompactCgb = !ctx.cgbContainerOutPath.empty();
+
+    if (!outPath.empty())
     {
         std::vector<uint8_t>     containerBytes;
         std::vector<std::string> diagnostics;
@@ -378,16 +395,22 @@ int main(int argc, char** argv)
         {
             cg_container::ContainerOptions copts;
             copts.alphakillSamplers = ctx.alphakillSamplers;
-            cg_container::ContainerResult cr = cg_container::emitFragmentContainer(
-                *irModule, ctx.entryName, ucode.words, fpAttrs, copts);
+            cg_container::ContainerResult cr = emitCompactCgb
+                ? cg_container::emitFragmentCompactCgb(
+                    *irModule, ctx.entryName, ucode.words, fpAttrs, copts)
+                : cg_container::emitFragmentContainer(
+                    *irModule, ctx.entryName, ucode.words, fpAttrs, copts);
             containerBytes = std::move(cr.bytes);
             diagnostics    = std::move(cr.diagnostics);
             containerOk    = cr.ok;
         }
         else
         {
-            cg_container::VpContainerResult cr = cg_container::emitVertexContainer(
-                *irModule, ctx.entryName, ucode.words, vpAttrs);
+            cg_container::VpContainerResult cr = emitCompactCgb
+                ? cg_container::emitVertexCompactCgb(
+                    *irModule, ctx.entryName, ucode.words, vpAttrs)
+                : cg_container::emitVertexContainer(
+                    *irModule, ctx.entryName, ucode.words, vpAttrs);
             containerBytes = std::move(cr.bytes);
             diagnostics    = std::move(cr.diagnostics);
             containerOk    = cr.ok;
@@ -403,12 +426,12 @@ int main(int argc, char** argv)
                 ctx.inputFile.c_str());
             return 1;
         }
-        std::ofstream of(ctx.containerOutPath, std::ios::binary | std::ios::trunc);
+        std::ofstream of(outPath, std::ios::binary | std::ios::trunc);
         if (!of)
         {
             std::fprintf(stderr,
                 "rsx-cg-compiler: cannot open %s for writing\n",
-                ctx.containerOutPath.c_str());
+                outPath.c_str());
             return 1;
         }
         of.write(reinterpret_cast<const char*>(containerBytes.data()),

@@ -153,12 +153,13 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
 
 }  // namespace
 
-ContainerResult emitFragmentContainer(
+ContainerResult emitFragmentContainerImpl(
     const IRModule&              module,
     const std::string&           entryName,
     const std::vector<uint32_t>& ucode,
     const nv40::FpAttributes&    attrs,
-    const ContainerOptions&      opts)
+    const ContainerOptions&      opts,
+    bool                         compactCgb)
 {
     ContainerResult result;
 
@@ -404,6 +405,147 @@ ContainerResult emitFragmentContainer(
         }
     }
 
+    if (compactCgb)
+    {
+        if (!opts.alphakillSamplers.empty() || attrs.pixelKillCount > 0)
+        {
+            result.diagnostics.push_back(
+                "cg-container-fp: compact CGB alphakill/discard resources are not implemented yet");
+            return result;
+        }
+
+        constexpr uint16_t kFpResourceStart = 0x0400u;
+
+        struct CompactEntry
+        {
+            std::string name;
+            uint16_t    resource = 0;
+        };
+
+        std::vector<CompactEntry> entries;
+        std::vector<uint16_t>     fpResources;
+        entries.reserve(params.size());
+
+        for (const auto& d : params)
+        {
+            if (d.name.empty() || d.var != kCgUniform || d.direction != kCgIn)
+                continue;
+
+            CompactEntry e;
+            e.name = d.name;
+
+            if (d.res >= kCgTexUnit0 && d.res < kCgTexUnit0 + 16u)
+            {
+                e.resource = static_cast<uint16_t>(d.res - kCgTexUnit0);
+            }
+            else
+            {
+                if (fpResources.size() > 0xFFFEu)
+                {
+                    result.diagnostics.push_back("cg-container-fp: compact CGB FP resource table too large");
+                    return result;
+                }
+                e.resource = static_cast<uint16_t>(kFpResourceStart + fpResources.size());
+                fpResources.push_back(0xFFFFu);  // RIN: not a fixed register input
+                if (d.embeddedConstUcodeOffsets.size() > 0xFFFFu)
+                {
+                    result.diagnostics.push_back("cg-container-fp: compact CGB embedded offset list too large");
+                    return result;
+                }
+                fpResources.push_back(static_cast<uint16_t>(d.embeddedConstUcodeOffsets.size()));
+                auto offsets = d.embeddedConstUcodeOffsets;
+                std::sort(offsets.begin(), offsets.end());
+                for (uint32_t off : offsets)
+                {
+                    if (off > 0xFFFFu)
+                    {
+                        result.diagnostics.push_back("cg-container-fp: compact CGB embedded offset exceeds u16");
+                        return result;
+                    }
+                    fpResources.push_back(static_cast<uint16_t>(off));
+                }
+            }
+            entries.push_back(e);
+        }
+
+        std::vector<uint8_t> strings;
+        strings.push_back(0);
+        std::vector<uint32_t> nameOffsets;
+        nameOffsets.reserve(entries.size());
+        for (const auto& e : entries)
+        {
+            nameOffsets.push_back(static_cast<uint32_t>(strings.size()));
+            putString(strings, e.name);
+        }
+
+        const uint32_t ucodeSize = static_cast<uint32_t>(ucode.size() * 4u);
+        if (ucodeSize > 0xFFFFu)
+        {
+            result.diagnostics.push_back("cg-container-fp: compact CGB ucode exceeds u16 size");
+            return result;
+        }
+
+        const uint32_t levelASize = 0x10u;
+        const uint32_t levelBSize = 6u
+            + static_cast<uint32_t>(entries.size() * 8u)
+            + static_cast<uint32_t>(fpResources.size() * 2u)
+            + static_cast<uint32_t>(strings.size());
+        if (levelBSize > 0xFFFFu || entries.size() > 0xFFFFu || fpResources.size() > 0xFFFFu)
+        {
+            result.diagnostics.push_back("cg-container-fp: compact CGB LevelB too large");
+            return result;
+        }
+
+        const uint32_t fragmentControl =
+            (attrs.partialTexType & 0xFFFFu)
+            | (static_cast<uint32_t>(attrs.outputFromH0) << 16)
+            | (static_cast<uint32_t>(attrs.depthReplace) << 17)
+            | ((attrs.pixelKillCount > 0 ? 1u : 0u) << 18);
+
+        auto& out = result.bytes;
+        out.reserve(0x20u + ucodeSize + levelASize + levelBSize);
+
+        put32(out, 0x43474200u);                         // "CGB\0"
+        put16(out, 0);                                   // format version
+        put16(out, 0);                                   // compiler version
+        put16(out, static_cast<uint16_t>(ucodeSize));
+        out.push_back(1);                                // fragment profile
+        out.push_back(0x03);                             // LevelA | LevelB
+
+        put32(out, attrs.attributeInputMask);
+        put16(out, attrs.texCoordsInputMask);
+        put16(out, attrs.texCoords2D);
+        put16(out, attrs.texCoordsCentroid);
+        put16(out, 0);
+        put32(out, fragmentControl);
+        out.push_back(attrs.registerCount);
+        out.push_back(0);
+        put16(out, 0);
+
+        for (uint32_t w : ucode) put32(out, w);
+
+        put16(out, static_cast<uint16_t>(levelASize));
+        put16(out, 0);                                   // constant count
+        while (out.size() < 0x20u + ucodeSize + levelASize)
+            out.push_back(0);
+
+        put16(out, static_cast<uint16_t>(levelBSize));
+        put16(out, static_cast<uint16_t>(entries.size()));
+        put16(out, static_cast<uint16_t>(fpResources.size()));
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+            put32(out, nameOffsets[i]);
+            put16(out, 0xFFFFu);                         // no parent
+            put16(out, entries[i].resource);
+        }
+        for (uint16_t v : fpResources)
+            put16(out, v);
+        out.insert(out.end(), strings.begin(), strings.end());
+
+        result.ok = true;
+        return result;
+    }
+
     // ----- Build the strings region in the reference compiler's order: per param,
     // emit semantic (if non-empty) then name.  Track each string's
     // offset relative to the start of the container. -----
@@ -538,6 +680,34 @@ ContainerResult emitFragmentContainer(
     }
 
     result.ok = true;
+    return result;
+}
+
+ContainerResult emitFragmentContainer(
+    const IRModule&              module,
+    const std::string&           entryName,
+    const std::vector<uint32_t>& ucode,
+    const nv40::FpAttributes&    attrs,
+    const ContainerOptions&      opts)
+{
+    return emitFragmentContainerImpl(module, entryName, ucode, attrs, opts, false);
+}
+
+ContainerResult emitFragmentCompactCgb(
+    const IRModule&              module,
+    const std::string&           entryName,
+    const std::vector<uint32_t>& ucode,
+    const nv40::FpAttributes&    attrs,
+    const ContainerOptions&      opts)
+{
+    (void)module;
+    (void)entryName;
+    (void)ucode;
+    (void)attrs;
+    (void)opts;
+    ContainerResult result;
+    result.diagnostics.push_back(
+        "cg-container-fp: compact CGB output is disabled until fs_simple FP ucode/attrs are byte-exact");
     return result;
 }
 

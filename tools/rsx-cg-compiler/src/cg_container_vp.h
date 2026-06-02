@@ -48,6 +48,12 @@ VpContainerResult emitVertexContainer(
     const std::vector<uint32_t>& ucode,
     const nv40::VpAttributes&    attrs);
 
+VpContainerResult emitVertexCompactCgb(
+    const IRModule&              module,
+    const std::string&           entryName,
+    const std::vector<uint32_t>& ucode,
+    const nv40::VpAttributes&    attrs);
+
 }  // namespace cg_container
 
 #endif  /* RSX_CG_COMPILER_CG_CONTAINER_VP_H */
