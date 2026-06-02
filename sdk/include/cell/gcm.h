@@ -69,9 +69,14 @@ extern "C" {
 #endif
 
 /* CellGcmContextData == gcmContextData (byte-identical: {begin, end,
- * current, callback}).  reference-SDK name aliased onto PSL1GHT's struct so
- * `CellGcmContextData *ctx = gCellGcmCurrentContext;` works. */
+ * current, callback}).  In C++ the cell headers expose a real struct tag so
+ * both `CellGcmContextData *` and `struct CellGcmContextData *` spellings
+ * compile, while still converting to the underlying RSX context type. */
+#ifdef __cplusplus
+struct CellGcmContextData : public gcmContextData {};
+#else
 typedef gcmContextData       CellGcmContextData;
+#endif
 typedef gcmContextCallback   CellGcmContextCallback;
 
 /* CellGcmConfig is NOT aliased to PSL1GHT's gcmConfiguration -
@@ -332,7 +337,11 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
  * rvalue reads both resolve to PSL1GHT's actual storage.  No
  * symbol-aliasing tricks at link time - just identifier substitution
  * at compile. */
+#ifdef __cplusplus
+#define gCellGcmCurrentContext  ((CellGcmContextData *)gGcmContext)
+#else
 #define gCellGcmCurrentContext  gGcmContext
+#endif
 
 /* CELL_GCM_CURRENT macro the reference SDK source uses to fetch the current
  * context for inline command emitters. */
