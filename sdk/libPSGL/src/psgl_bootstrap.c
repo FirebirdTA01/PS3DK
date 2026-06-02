@@ -326,6 +326,11 @@ PSGL_EXPORT void psglSetFragmentProgramConfigurationMemoryLocation(
     *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_ADDRESS, 1);
     *w++ = (location + 1u) | (conf->offset & 0x1fffffffu);
 
+    w = ps3tc_gcm_reserve(context->gcm, 2u);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
+    *w++ = conf->attributeInputMask;
+
     texcoords = conf->texCoordsInputMask;
     texcoords_2d = conf->texCoords2D;
     for (uint32_t i = 0u; texcoords; i++) {
