@@ -826,13 +826,73 @@ static int psgl_translate_logic_op(GLenum op, uint32_t *out)
     return 1;
 }
 
+/* Forward decls for FBO surface branch */
+static int psgl_fbo_find(PSGLcontext *context, GLuint name);
+static PSGLtextureObject *psgl_get_texture(GLuint name);
+
 static void psgl_fill_surface(PSGLcontext *context, CellGcmSurface *surface)
 {
     PSGLdevice *device = context->device;
-    PSGLframeBuffer *frame = &device->frames[device->current_frame];
     GLenum msaa = context->multisample_enabled ?
         device->multisampling_mode : GL_MULTISAMPLING_NONE_SCE;
     psgl_zero(surface, sizeof(*surface));
+
+    if (context->bound_framebuffer != 0u) {
+        /* FBO-attached surface: build from texture attachments. */
+        PSGLtextureObject *color = NULL;
+        PSGLtextureObject *depth = NULL;
+        int idx = psgl_fbo_find(context, context->bound_framebuffer);
+        if (idx >= 0) {
+            color = psgl_get_texture(context->fbo_objects[idx].color0);
+            depth = psgl_get_texture(context->fbo_objects[idx].depth);
+        }
+        if (!((color && color->address) || (depth && depth->address))) {
+            /* Incomplete FBO — fall back to default framebuffer. */
+            goto psgl_fill_default_surface;
+        }
+        if (color && color->address) {
+            surface->colorFormat = GCM_SURFACE_X8R8G8B8;
+            surface->colorTarget = GCM_SURFACE_TARGET_0;
+            surface->colorLocation[0] = color->location;
+            surface->colorOffset[0]  = color->offset;
+            surface->colorPitch[0]   = color->pitch;
+            surface->width  = color->width;
+            surface->height = color->height;
+        } else {
+            surface->colorTarget = GCM_SURFACE_TARGET_NONE;
+        }
+        if (depth && depth->address) {
+            surface->depthFormat   = (depth->rsx_format & ~CELL_GCM_TEXTURE_LN)
+                == CELL_GCM_TEXTURE_DEPTH16
+                ? GCM_SURFACE_ZETA_Z16 : GCM_SURFACE_ZETA_Z24S8;
+            surface->depthLocation = depth->location;
+            surface->depthOffset   = depth->offset;
+            surface->depthPitch    = depth->pitch;
+            if (!color || !color->address) {
+                surface->width  = depth->width;
+                surface->height = depth->height;
+            }
+        } else {
+            surface->depthLocation = GCM_LOCATION_RSX;
+            surface->depthOffset   = device->depth_offset;
+            surface->depthPitch    = device->depth_pitch;
+            surface->depthFormat   = GCM_SURFACE_ZETA_Z24S8;
+        }
+        surface->colorLocation[1] = GCM_LOCATION_RSX;
+        surface->colorLocation[2] = GCM_LOCATION_RSX;
+        surface->colorLocation[3] = GCM_LOCATION_RSX;
+        surface->colorPitch[1] = 64u;
+        surface->colorPitch[2] = 64u;
+        surface->colorPitch[3] = 64u;
+        surface->type      = GCM_TEXTURE_LINEAR;
+        surface->antiAlias = psgl_msaa_antialias(msaa);
+        return;
+    }
+
+    /* Default device framebuffer path (unchanged). */
+    psgl_fill_default_surface: (void)0;
+    {
+    PSGLframeBuffer *frame = &device->frames[device->current_frame];
     surface->colorFormat = GCM_SURFACE_X8R8G8B8;
     surface->colorTarget = GCM_SURFACE_TARGET_0;
     surface->colorLocation[0] = GCM_LOCATION_RSX;
@@ -852,6 +912,144 @@ static void psgl_fill_surface(PSGLcontext *context, CellGcmSurface *surface)
     surface->antiAlias = psgl_msaa_antialias(msaa);
     surface->width = frame->width;
     surface->height = frame->height;
+}
+
+}
+/* ── FBO registry & helpers ───────────────────────────────────── */
+
+static int psgl_fbo_find(PSGLcontext *context, GLuint name)
+{
+    for (uint32_t i = 0; i < PSGL_MAX_FBO_OBJECTS; i++)
+        if (context->fbo_objects[i].name == name) return (int)i;
+    return -1;
+}
+
+static void psgl_current_target_dims(PSGLcontext *context,
+                                     uint16_t *w, uint16_t *h)
+{
+    if (context->bound_framebuffer != 0u) {
+        int idx = psgl_fbo_find(context, context->bound_framebuffer);
+        if (idx >= 0) {
+            PSGLtextureObject *t =
+                psgl_get_texture(context->fbo_objects[idx].color0);
+            if (!t || !t->address)
+                t = psgl_get_texture(context->fbo_objects[idx].depth);
+            if (t && t->address) {
+                *w = t->width;
+                *h = t->height;
+                return;
+            }
+        }
+    }
+    *w = context->device->render_width;
+    *h = context->device->render_height;
+}
+
+GLboolean psgl_context_is_framebuffer(GLuint framebuffer)
+{
+    PSGLcontext *ctx = g_psgl.current_context;
+    if (!ctx || framebuffer == 0u) return GL_FALSE;
+    return psgl_fbo_find(ctx, framebuffer) >= 0 ? GL_TRUE : GL_FALSE;
+}
+
+void psgl_context_bind_framebuffer(GLenum target, GLuint framebuffer)
+{
+    PSGLcontext *ctx = g_psgl.current_context;
+    if (!ctx || target != GL_FRAMEBUFFER_OES) return;
+    ctx->bound_framebuffer = framebuffer;
+    ctx->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_VIEWPORT |
+                  PSGL_DIRTY_SCISSOR;
+}
+
+void psgl_context_delete_framebuffers(GLsizei n, const GLuint *framebuffers)
+{
+    PSGLcontext *ctx = g_psgl.current_context;
+    int idx;
+    if (!ctx || !framebuffers || n <= 0) return;
+    for (GLsizei j = 0; j < n; j++) {
+        idx = psgl_fbo_find(ctx, framebuffers[j]);
+        if (idx >= 0) {
+            ctx->fbo_objects[idx].name = 0u;
+            ctx->fbo_objects[idx].color0 = 0u;
+            ctx->fbo_objects[idx].depth = 0u;
+            if (ctx->bound_framebuffer == framebuffers[j]) {
+                ctx->bound_framebuffer = 0u;
+                ctx->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_VIEWPORT |
+                              PSGL_DIRTY_SCISSOR;
+            }
+        }
+    }
+}
+
+void psgl_context_gen_framebuffers(GLsizei n, GLuint *framebuffers)
+{
+    PSGLcontext *ctx = g_psgl.current_context;
+    if (!ctx || !framebuffers || n <= 0) return;
+    for (GLsizei i = 0; i < n; i++) {
+        GLuint name = ++ctx->fbo_next_name;
+        uint32_t j;
+        if (name == 0u) name = ++ctx->fbo_next_name;
+        /* Find a free slot */
+        for (j = 0; j < PSGL_MAX_FBO_OBJECTS; j++) {
+            if (ctx->fbo_objects[j].name == 0u) {
+                ctx->fbo_objects[j].name = name;
+                ctx->fbo_objects[j].color0 = 0u;
+                ctx->fbo_objects[j].depth = 0u;
+                break;
+            }
+        }
+        framebuffers[i] = (j < PSGL_MAX_FBO_OBJECTS) ? name : 0u;
+    }
+}
+
+GLenum psgl_context_check_framebuffer_status(GLenum target)
+{
+    PSGLcontext *ctx = g_psgl.current_context;
+    PSGLtextureObject *tex;
+    uint32_t fbo_w = 0, fbo_h = 0;
+    int idx;
+    if (!ctx || target != GL_FRAMEBUFFER_OES) return 0;
+    if (ctx->bound_framebuffer == 0u)
+        return GL_FRAMEBUFFER_COMPLETE_OES;
+    idx = psgl_fbo_find(ctx, ctx->bound_framebuffer);
+    if (idx < 0) return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_OES;
+    if (ctx->fbo_objects[idx].color0 != 0u) {
+        tex = psgl_get_texture(ctx->fbo_objects[idx].color0);
+        if (!tex || !tex->address)
+            return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_OES;
+        fbo_w = tex->width;
+        fbo_h = tex->height;
+    }
+    if (ctx->fbo_objects[idx].depth != 0u) {
+        tex = psgl_get_texture(ctx->fbo_objects[idx].depth);
+        if (!tex || !tex->address)
+            return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_OES;
+        if (fbo_w == 0u) { fbo_w = tex->width; fbo_h = tex->height; }
+        else if (tex->width != fbo_w || tex->height != fbo_h)
+            return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS_OES;
+    }
+    if (fbo_w == 0u)
+        return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_OES;
+    return GL_FRAMEBUFFER_COMPLETE_OES;
+}
+
+void psgl_context_framebuffer_texture_2d(GLenum target, GLenum attachment,
+                                         GLenum textarget, GLuint texture,
+                                         GLint level)
+{
+    PSGLcontext *ctx = g_psgl.current_context;
+    int idx;
+    if (!ctx || target != GL_FRAMEBUFFER_OES || textarget != GL_TEXTURE_2D ||
+        level != 0 || ctx->bound_framebuffer == 0u)
+        return;
+    idx = psgl_fbo_find(ctx, ctx->bound_framebuffer);
+    if (idx < 0) return;
+    if (attachment == GL_COLOR_ATTACHMENT0_EXT)
+        ctx->fbo_objects[idx].color0 = texture;
+    else if (attachment == GL_DEPTH_ATTACHMENT_OES)
+        ctx->fbo_objects[idx].depth = texture;
+    ctx->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_VIEWPORT |
+                  PSGL_DIRTY_SCISSOR;
 }
 
 static void psgl_bind_render_target(PSGLcontext *context)
@@ -894,8 +1092,9 @@ static void psgl_emit_scissor(PSGLcontext *context)
                           (uint16_t)context->scissor[2],
                           (uint16_t)context->scissor[3]);
     } else {
-        cellGcmSetScissor(context->gcm, 0u, 0u, context->device->render_width,
-                          context->device->render_height);
+        uint16_t tw, th;
+        psgl_current_target_dims(context, &tw, &th);
+        cellGcmSetScissor(context->gcm, 0u, 0u, tw, th);
     }
     context->dirty &= ~PSGL_DIRTY_SCISSOR;
 }
@@ -1266,6 +1465,11 @@ static PSGLtextureObject *psgl_bound_texture(PSGLcontext *context, GLenum target
     unit = psgl_texture_unit_index(context->active_texture);
     if (unit >= PSGL_MAX_TEXTURE_UNITS) return NULL;
     name = context->textures[unit].texture_2d;
+    return name ? psgl_find_texture(name) : NULL;
+}
+
+static PSGLtextureObject *psgl_get_texture(GLuint name)
+{
     return name ? psgl_find_texture(name) : NULL;
 }
 
@@ -3110,22 +3314,53 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
     uint32_t size;
     void *address;
     uint32_t offset = 0u;
+    int rt_storage;
     int swizzled;
-    (void)internalformat;
+
+    rt_storage = ((GLenum)internalformat == GL_ARGB_SCE) ||
+                 ((GLenum)internalformat == GL_DEPTH_COMPONENT16) ||
+                 ((GLenum)internalformat == GL_DEPTH_COMPONENT24);
+
     if (!context || !texture || level != 0 || border != 0 ||
-        width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
-        !psgl_texture_supported(format, type))
+        width <= 0 || height <= 0 || width > 4096 || height > 4096)
         return;
-    swizzled = texture->allocation_hint == GL_TEXTURE_SWIZZLED_GPU_SCE &&
-               psgl_is_power_of_two((uint32_t)width) &&
-               psgl_is_power_of_two((uint32_t)height);
-    pitch = swizzled ? (uint32_t)width * 4u
-                     : (uint32_t)psgl_align_u16((uint32_t)width * 4u, 64u);
-    size = swizzled ? (uint32_t)width * (uint32_t)height * 4u
-                    : pitch * (uint32_t)height;
+    if (!rt_storage && !psgl_texture_supported(format, type))
+        return;
+
+    if ((GLenum)internalformat == GL_ARGB_SCE) {
+        /* Color render-target storage-only. */
+        if (format != GL_RGBA || type != GL_UNSIGNED_INT_8_8_8_8 || pixels)
+            return;
+        pitch = psgl_align_u16((uint32_t)width * 4u, 64u);
+        size = pitch * (uint32_t)height;
+        swizzled = 0;
+    } else if ((GLenum)internalformat == GL_DEPTH_COMPONENT16) {
+        if (format != GL_DEPTH_COMPONENT || type != GL_UNSIGNED_SHORT || pixels)
+            return;
+        pitch = psgl_align_u16((uint32_t)width * 2u, 64u);
+        size = pitch * (uint32_t)height;
+        swizzled = 0;
+    } else if ((GLenum)internalformat == GL_DEPTH_COMPONENT24) {
+        if (format != GL_DEPTH_COMPONENT || type != GL_UNSIGNED_INT || pixels)
+            return;
+        pitch = psgl_align_u16((uint32_t)width * 4u, 64u);
+        size = pitch * (uint32_t)height;
+        swizzled = 0;
+    } else {
+        swizzled = texture->allocation_hint == GL_TEXTURE_SWIZZLED_GPU_SCE &&
+                   psgl_is_power_of_two((uint32_t)width) &&
+                   psgl_is_power_of_two((uint32_t)height);
+        pitch = swizzled ? (uint32_t)width * 4u
+                         : (uint32_t)psgl_align_u16((uint32_t)width * 4u, 64u);
+        size = swizzled ? (uint32_t)width * (uint32_t)height * 4u
+                        : pitch * (uint32_t)height;
+    }
     address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
     if (!address) return;
-    if (cellGcmAddressToOffset(address, &offset) != 0) return;
+    if (cellGcmAddressToOffset(address, &offset) != 0) {
+        rsxFree(address);
+        return;
+    }
     psgl_release_texture_storage(texture);
     texture->address = address;
     texture->offset = offset;
@@ -3136,8 +3371,13 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
     texture->levels = 1u;
     texture->location = CELL_GCM_LOCATION_LOCAL;
     texture->linear = swizzled ? 0u : 1u;
-    texture->rsx_format = CELL_GCM_TEXTURE_A8R8G8B8 |
-        (swizzled ? CELL_GCM_TEXTURE_SZ : CELL_GCM_TEXTURE_LN);
+    if ((GLenum)internalformat == GL_DEPTH_COMPONENT16)
+        texture->rsx_format = CELL_GCM_TEXTURE_DEPTH16 | CELL_GCM_TEXTURE_LN;
+    else if ((GLenum)internalformat == GL_DEPTH_COMPONENT24)
+        texture->rsx_format = CELL_GCM_TEXTURE_DEPTH24_D8 | CELL_GCM_TEXTURE_LN;
+    else
+        texture->rsx_format = CELL_GCM_TEXTURE_A8R8G8B8 |
+            (swizzled ? CELL_GCM_TEXTURE_SZ : CELL_GCM_TEXTURE_LN);
     if (pixels)
         psgl_write_texture_image(texture, 0, 0, width, height,
                                  format, type, pixels,

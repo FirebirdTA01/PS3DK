@@ -256,20 +256,37 @@ GLAPI void glGetRenderbufferParameterivOES(GLenum target, GLenum pname,
 { (void)target; (void)pname; if (params) *params = 0; }
 
 GLAPI GLboolean glIsFramebufferOES(GLuint framebuffer)
-{ (void)framebuffer; return GL_FALSE; }
+{
+    return psgl_context_is_framebuffer(framebuffer);
+}
+
 GLAPI void glBindFramebufferOES(GLenum target, GLuint framebuffer)
-{ (void)target; (void)framebuffer; }
+{
+    psgl_context_bind_framebuffer(target, framebuffer);
+}
+
 GLAPI void glDeleteFramebuffersOES(GLsizei n, const GLuint *framebuffers)
-{ (void)n; (void)framebuffers; }
+{
+    psgl_context_delete_framebuffers(n, framebuffers);
+}
+
 GLAPI void glGenFramebuffersOES(GLsizei n, GLuint *framebuffers)
-{ if (framebuffers) glext_zero(framebuffers, (size_t)n * sizeof(GLuint)); }
+{
+    psgl_context_gen_framebuffers(n, framebuffers);
+}
+
 GLAPI GLenum glCheckFramebufferStatusOES(GLenum target)
-{ (void)target; return GL_FRAMEBUFFER_COMPLETE_OES; }
+{
+    return psgl_context_check_framebuffer_status(target);
+}
+
 GLAPI void glFramebufferTexture2DOES(GLenum target, GLenum attachment,
                                      GLenum textarget, GLuint texture,
                                      GLint level)
-{ (void)target; (void)attachment; (void)textarget;
-  (void)texture; (void)level; }
+{
+    psgl_context_framebuffer_texture_2d(target, attachment,
+                                        textarget, texture, level);
+}
 GLAPI void glFramebufferRenderbufferOES(GLenum target, GLenum attachment,
                                         GLenum renderbuffertarget,
                                         GLuint renderbuffer)

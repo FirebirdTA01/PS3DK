@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #define PSGL_MAX_FRAME_BUFFERS 3u
+#define PSGL_MAX_FBO_OBJECTS 16u
 #define PSGL_MAX_TEXTURE_UNITS 4u
 #define PSGL_MAX_VERTEX_ATTRIBS 4u
 #define PSGL_MAX_GENERIC_ATTRIBS 16u
@@ -189,6 +190,13 @@ struct PSGLcontext {
     PSGLmaterialState back_material;
     CGprogram bound_vertex_program;
     CGprogram bound_fragment_program;
+    GLuint bound_framebuffer;
+    struct {
+        GLuint name;
+        GLuint color0;
+        GLuint depth;
+    } fbo_objects[PSGL_MAX_FBO_OBJECTS];
+    uint32_t fbo_next_name;
     uint32_t dirty;
 };
 
@@ -267,6 +275,14 @@ void psgl_context_client_active_texture(GLenum texture);
 void psgl_context_gen_textures(GLsizei n, GLuint *textures);
 void psgl_context_delete_textures(GLsizei n, const GLuint *textures);
 void psgl_context_bind_texture(GLenum target, GLuint texture);
+GLboolean psgl_context_is_framebuffer(GLuint framebuffer);
+void psgl_context_bind_framebuffer(GLenum target, GLuint framebuffer);
+void psgl_context_delete_framebuffers(GLsizei n, const GLuint *framebuffers);
+void psgl_context_gen_framebuffers(GLsizei n, GLuint *framebuffers);
+GLenum psgl_context_check_framebuffer_status(GLenum target);
+void psgl_context_framebuffer_texture_2d(GLenum target, GLenum attachment,
+                                         GLenum textarget, GLuint texture,
+                                         GLint level);
 void psgl_context_tex_image_2d(GLenum target, GLint level,
                                GLint internalformat,
                                GLsizei width, GLsizei height, GLint border,
