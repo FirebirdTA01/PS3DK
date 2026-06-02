@@ -955,7 +955,10 @@ std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
     // Check for initializer
     if (match(TokenType::OP_ASSIGN))
     {
-        var->initializer = parseAssignmentExpression();
+        if (check(TokenType::LBRACE))
+            var->initializer = parseBracedInitializerExpression(var->type);
+        else
+            var->initializer = parseAssignmentExpression();
     }
 
     return var;
@@ -2067,6 +2070,26 @@ std::unique_ptr<ExprNode> Parser::parseConstructorExpression(std::shared_ptr<Typ
     }
 
     consume(TokenType::RPAREN, "Expected ')' after constructor arguments");
+
+    return ctor;
+}
+
+std::unique_ptr<ExprNode> Parser::parseBracedInitializerExpression(std::shared_ptr<TypeNode> type)
+{
+    SourceLocation loc = currentLocation();
+    auto ctor = std::make_unique<ConstructorExpr>(loc, type);
+
+    consume(TokenType::LBRACE, "Expected '{' in initializer");
+
+    if (!check(TokenType::RBRACE))
+    {
+        do
+        {
+            ctor->arguments.push_back(parseAssignmentExpression());
+        } while (match(TokenType::COMMA) && !check(TokenType::RBRACE));
+    }
+
+    consume(TokenType::RBRACE, "Expected '}' after initializer");
 
     return ctor;
 }

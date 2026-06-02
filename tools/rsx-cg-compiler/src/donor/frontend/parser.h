@@ -163,6 +163,7 @@ private:
     // Expression helpers
     std::unique_ptr<ExprNode> parseCallExpression(SourceLocation loc, const std::string& name);
     std::unique_ptr<ExprNode> parseConstructorExpression(std::shared_ptr<TypeNode> type);
+    std::unique_ptr<ExprNode> parseBracedInitializerExpression(std::shared_ptr<TypeNode> type);
     std::vector<std::unique_ptr<ExprNode>> parseArgumentList();
 
     // ========================================================================
