@@ -1305,7 +1305,7 @@ static uint32_t psgl_unpack_row_stride(GLsizei width, GLenum format,
     uint32_t align = alignment > 0 ? (uint32_t)alignment : 1u;
     if (format == GL_RGBA || format == GL_BGRA) {
         row = (type == GL_UNSIGNED_BYTE) ? (uint32_t)width * 4u : (uint32_t)width * 2u;
-    } else if (format == GL_RGB) {
+    } else if (format == GL_RGB || format == GL_BGR) {
         row = (type == GL_UNSIGNED_BYTE) ? (uint32_t)width * 3u : (uint32_t)width * 2u;
     }
     if (align > 1u) row = (row + align - 1u) & ~(align - 1u);
@@ -1314,7 +1314,7 @@ static uint32_t psgl_unpack_row_stride(GLsizei width, GLenum format,
 
 static int psgl_texture_supported(GLenum format, GLenum type)
 {
-    if ((format == GL_RGBA || format == GL_BGRA || format == GL_RGB) &&
+    if ((format == GL_RGBA || format == GL_BGRA || format == GL_RGB || format == GL_BGR) &&
         type == GL_UNSIGNED_BYTE)
         return 1;
     if (format == GL_RGBA &&
@@ -1346,6 +1346,8 @@ static uint32_t psgl_convert_texel_argb8(const unsigned char *src,
             return psgl_pack_argb8(src[2], src[1], src[0], src[3]);
         if (format == GL_RGB)
             return psgl_pack_argb8(src[0], src[1], src[2], 255u);
+        if (format == GL_BGR)
+            return psgl_pack_argb8(src[2], src[1], src[0], 255u);
     } else if (type == GL_UNSIGNED_SHORT_5_6_5) {
         uint32_t v = psgl_read_u16_be(src);
         uint8_t r = (uint8_t)(((v >> 11) & 0x1fu) * 255u / 31u);
@@ -1373,7 +1375,7 @@ static uint32_t psgl_convert_texel_argb8(const unsigned char *src,
 static uint32_t psgl_texel_size(GLenum format, GLenum type)
 {
     if (type == GL_UNSIGNED_BYTE)
-        return format == GL_RGB ? 3u : 4u;
+        return (format == GL_RGB || format == GL_BGR) ? 3u : 4u;
     return 2u;
 }
 
