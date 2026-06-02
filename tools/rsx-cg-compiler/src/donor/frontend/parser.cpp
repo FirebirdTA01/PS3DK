@@ -33,6 +33,7 @@ void Parser::initBuiltinTypes()
         "ushort2", "ushort3", "ushort4",
         "float2x2", "float3x3", "float4x4",
         "float2x3", "float2x4", "float3x2", "float3x4", "float4x2", "float4x3",
+        "matrix",
         "half2x2", "half3x3", "half4x4",
         "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "samplerRECT",
         "isampler1D", "isampler2D", "isampler3D", "isamplerCUBE", "isamplerRECT",
@@ -396,6 +397,16 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     }
 
     const Token& tok = peek();
+
+    // Cg's unsized `matrix` type is a float4x4 alias.
+    if (tok.type == TokenType::IDENTIFIER && tok.lexeme == "matrix")
+    {
+        advance();
+        type->baseType = BaseType::Float;
+        type->matrixRows = 4;
+        type->matrixCols = 4;
+        return type;
+    }
 
     // Check for struct type reference (user-defined type name)
     if (tok.type == TokenType::IDENTIFIER && typeNames.count(tok.lexeme) > 0)

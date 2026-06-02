@@ -307,6 +307,7 @@ void SymbolTable::registerBuiltinTypes()
     addType("float2x2", CgType::Float2x2());
     addType("float3x3", CgType::Float3x3());
     addType("float4x4", CgType::Float4x4());
+    addType("matrix", CgType::Float4x4());
 
     // Sampler types
     addType("sampler1D", CgType::Sampler1D());

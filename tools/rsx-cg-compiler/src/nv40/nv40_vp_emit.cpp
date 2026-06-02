@@ -678,9 +678,23 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     {
         IRValue* irv = entry.getValue(id);
         auto* c = dynamic_cast<IRConstant*>(irv);
-        if (!c || !std::holds_alternative<float>(c->value)) return false;
-        v = std::get<float>(c->value);
-        return true;
+        if (!c) return false;
+        if (std::holds_alternative<float>(c->value))
+        {
+            v = std::get<float>(c->value);
+            return true;
+        }
+        if (std::holds_alternative<int32_t>(c->value))
+        {
+            v = static_cast<float>(std::get<int32_t>(c->value));
+            return true;
+        }
+        if (std::holds_alternative<uint32_t>(c->value))
+        {
+            v = static_cast<float>(std::get<uint32_t>(c->value));
+            return true;
+        }
+        return false;
     };
 
     struct GenericSource
@@ -1292,7 +1306,32 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             }
         }
 
-        auto mvIt = valueToMatVecMul.find(srcId);
+        IRValueID matVecSrcId = srcId;
+        int matVecWriteLanes = 4;
+        auto shMatIt = valueToShuffle.find(srcId);
+        if (shMatIt != valueToShuffle.end() &&
+            valueToMatVecMul.count(shMatIt->second.srcId))
+        {
+            const int outWidth = [&]() {
+                auto wIt = outputWidthBySemantic.find(
+                    semKey(semUpper, semanticIndex));
+                return (wIt == outputWidthBySemantic.end()) ? 4 : wIt->second;
+            }();
+            const int copyWidth = std::min(outWidth, shMatIt->second.width);
+            for (int i = 0; i < copyWidth; ++i)
+            {
+                if (shMatIt->second.lanes[i] != i)
+                {
+                    out.diagnostics.push_back(
+                        "nv40-vp: shuffled MatVecMul store only supports identity-prefix lanes");
+                    return false;
+                }
+            }
+            matVecSrcId = shMatIt->second.srcId;
+            matVecWriteLanes = copyWidth;
+        }
+
+        auto mvIt = valueToMatVecMul.find(matVecSrcId);
         if (mvIt != valueToMatVecMul.end())
         {
             // Walk the matvecmul chain back to its root (the first step,
@@ -1304,7 +1343,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             // R1 → R0 ping-pong the reference compiler emits for back-to-back chains.
             std::vector<IRValueID> chainSteps;
             {
-                IRValueID curr = srcId;
+                IRValueID curr = matVecSrcId;
                 while (curr != 0)
                 {
                     chainSteps.push_back(curr);
@@ -1443,7 +1482,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     step.vecOpcode != 0
                         ? step.vecOpcode
                         : static_cast<uint8_t>(VP_OP(DP4));
-                for (int i = 0; i < 4; ++i)
+                const int dpCount = isFinal ? matVecWriteLanes : 4;
+                for (int i = 0; i < dpCount; ++i)
                 {
                     const int rowReg =
                         step.matrixBaseReg + kDp4RowOffset[i];
@@ -1988,11 +2028,9 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     if (inputIt != valueToSource.end() &&
                         inputIt->second.kind == ValueSource::Kind::Input)
                     {
-                        IRValue* v = entry.getValue(inst.operands[1]);
-                        auto* c = dynamic_cast<IRConstant*>(v);
-                        if (c &&
-                            std::holds_alternative<float>(c->value) &&
-                            std::get<float>(c->value) == 1.0f)
+                        float lit = 0.0f;
+                        if (isFloatLiteral(inst.operands[1], lit) &&
+                            lit == 1.0f)
                         {
                             VecPromoteBinding pb;
                             pb.inputAttrIdx = inputIt->second.regIdx;
@@ -2012,6 +2050,39 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 vb.width = static_cast<int>(inst.operands.size());
                 bool ok = true;
                 bool allInputLanes = true;
+
+                // `float4(vec3_input, literal)` expands to the input's xyz
+                // lanes plus a literal w lane.  The w=1 case above remains
+                // on the DPH fast path; w=0 and other literals materialise
+                // into a temp consumed by a DP4 MatVecMul.
+                if (inst.operands.size() == 2)
+                {
+                    auto inputIt = valueToSource.find(inst.operands[0]);
+                    float lit = 0.0f;
+                    if (inputIt != valueToSource.end() &&
+                        inputIt->second.kind == ValueSource::Kind::Input &&
+                        inputIt->second.width == 3 &&
+                        isFloatLiteral(inst.operands[1], lit))
+                    {
+                        vb.width = 4;
+                        for (int lane = 0; lane < 3; ++lane)
+                        {
+                            vb.lanes[lane].kind = LaneSource::Kind::InputLane;
+                            vb.lanes[lane].regIdx = inputIt->second.regIdx;
+                            vb.lanes[lane].srcLane = lane;
+                        }
+                        vb.lanes[3].kind = LaneSource::Kind::Literal;
+                        vb.lanes[3].litValue = lit;
+                        vb.lanes[3].srcLane = 0;
+                        vb.wIsLiteralOne = (lit == 1.0f);
+                        vb.allInputLanes = false;
+                        if (lit != 0.0f)
+                            literals.assign(lit);
+                        valueToVecConstruct[inst.result] = vb;
+                        break;
+                    }
+                }
+
                 for (size_t i = 0; i < inst.operands.size(); ++i)
                 {
                     LaneSource ls;
@@ -2059,12 +2130,11 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     // Float literal → enqueue into the literal pool at
                     // emit time.  Stash the value here; the consumer
                     // resolves it via literals.assign(value).
-                    IRValue* v = entry.getValue(id);
-                    auto* c = dynamic_cast<IRConstant*>(v);
-                    if (c && std::holds_alternative<float>(c->value))
+                    float lit = 0.0f;
+                    if (isFloatLiteral(id, lit))
                     {
                         ls.kind     = LaneSource::Kind::Literal;
-                        ls.litValue = std::get<float>(c->value);
+                        ls.litValue = lit;
                         vb.lanes[i] = ls;
                         allInputLanes = false;
                         continue;
@@ -2157,6 +2227,27 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 {
                     const VecConstructBinding& vb = vcIt->second;
                     const bool useDph = vb.wIsLiteralOne;
+
+                    if (vb.lanes[0].kind == LaneSource::Kind::InputLane &&
+                        vb.lanes[1].kind == LaneSource::Kind::InputLane &&
+                        vb.lanes[2].kind == LaneSource::Kind::InputLane &&
+                        vb.lanes[3].kind == LaneSource::Kind::Literal &&
+                        vb.lanes[3].litValue == 0.0f &&
+                        vb.lanes[0].regIdx == vb.lanes[1].regIdx &&
+                        vb.lanes[0].regIdx == vb.lanes[2].regIdx &&
+                        vb.lanes[0].srcLane == 0 &&
+                        vb.lanes[1].srcLane == 1 &&
+                        vb.lanes[2].srcLane == 2)
+                    {
+                        binding.vectorInputIdx = vb.lanes[0].regIdx;
+                        binding.vecOpcode = static_cast<uint8_t>(VP_OP(DP3));
+                        binding.inputSwz[0] = 0;
+                        binding.inputSwz[1] = 1;
+                        binding.inputSwz[2] = 2;
+                        binding.inputSwz[3] = 0;
+                        valueToMatVecMul[inst.result] = binding;
+                        break;
+                    }
 
                     // Reserve a temp register slot up-front so the
                     // matvecmul binding has a final source operand.
@@ -2252,7 +2343,15 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 // emitted.  This places single-insn stores first, which
                 // matches the reference compiler's "simple first, multi
                 // last" rule for shaders with mixed-shape outputs.
+                bool shuffledMatVec = false;
+                auto shIt = valueToShuffle.find(srcId);
+                if (shIt != valueToShuffle.end() &&
+                    valueToMatVecMul.count(shIt->second.srcId))
+                {
+                    shuffledMatVec = true;
+                }
                 if (valueToMatVecMul.count(srcId) ||
+                    shuffledMatVec ||
                     valueToArith.count(srcId)    ||
                     valueToGenericVecConstruct.count(srcId) ||
                     valueToVecInsert.count(srcId))
@@ -2606,6 +2705,53 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
         const struct nvfx_reg none = makeReg(NVFXSR_NONE, 0);
 
+        // Boy_BasicVp-style scheduler shape:
+        //   o.position = mul(P, mul(WV, float4(position, 1)));
+        //   o.normal   = mul(WV, float4(normal, 0)).xyz;
+        //   o.texCoord = texCoord;
+        //
+        // the reference compiler emits the simple texCoord MOV first, then interleaves the
+        // three normal DP3 lanes around the two position matvec batches.  Keep
+        // this as a narrow scheduling rule so the existing generic matvec
+        // order remains untouched for unrelated shaders.
+        const DeferredStore* normalStore = nullptr;
+        IRValueID normalMatVecId = 0;
+        int normalOutIdx = -1;
+        int normalWriteLanes = 0;
+        for (const auto& s : deferredStores)
+        {
+            if (posStore && s.srcId == posStore->srcId) continue;
+            auto shIt = valueToShuffle.find(s.srcId);
+            if (shIt == valueToShuffle.end()) continue;
+            auto mvIt = valueToMatVecMul.find(shIt->second.srcId);
+            if (mvIt == valueToMatVecMul.end()) continue;
+            if (mvIt->second.priorChainId != 0) continue;
+            if (mvIt->second.hasTempBuild ||
+                mvIt->second.genericTempBuildId != 0 ||
+                mvIt->second.vectorIsTemp)
+            {
+                continue;
+            }
+            const int outWidth = [&]() {
+                auto wIt = outputWidthBySemantic.find(
+                    semKey(toUpper(s.semanticName), s.semanticIndex));
+                return (wIt == outputWidthBySemantic.end()) ? 4 : wIt->second;
+            }();
+            const int copyWidth = std::min(outWidth, shIt->second.width);
+            if (copyWidth != 3) continue;
+            bool identityPrefix = true;
+            for (int lane = 0; lane < copyWidth; ++lane)
+                identityPrefix = identityPrefix && (shIt->second.lanes[lane] == lane);
+            if (!identityPrefix) continue;
+
+            normalStore = &s;
+            normalMatVecId = shIt->second.srcId;
+            normalOutIdx = vertexOutputIndex(
+                toUpper(s.semanticName), s.semanticIndex);
+            normalWriteLanes = copyWidth;
+            break;
+        }
+
         // Reserve R0 for the color chain BEFORE the position chain
         // allocates any temps — only required for the per-lane MAD
         // shape, which uses R0 as a running accumulator.  Simple
@@ -2796,6 +2942,64 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 s0, makeSrc(none), makeSrc(none));
             b.push_back({in, static_cast<uint8_t>(VP_OP(MOV))});
             colBatches.push_back(std::move(b));
+        }
+
+        // ----- Optional Boy_BasicVp normal batches -----
+        std::vector<InsnEmit> normalBatches;
+        if (normalStore && normalMatVecId != 0 && normalOutIdx >= 0)
+        {
+            const MatVecMulBinding& normalMv = valueToMatVecMul[normalMatVecId];
+            const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, normalOutIdx);
+            const struct nvfx_reg vecReg = makeReg(NVFXSR_INPUT,
+                                                   normalMv.vectorInputIdx);
+            const uint8_t opcode =
+                normalMv.vecOpcode != 0
+                    ? normalMv.vecOpcode
+                    : static_cast<uint8_t>(VP_OP(DP4));
+
+            // A vec3 identity-prefix store writes z, y, x: skip the W row
+            // and use c[base+2], c[base+1], c[base+0].
+            const int rowStart = 4 - normalWriteLanes;
+            for (int i = 0; i < normalWriteLanes; ++i)
+            {
+                const int k = rowStart + i;
+                const int rowReg = normalMv.matrixBaseReg + kDp4RowOffset[k];
+                const struct nvfx_reg rowConst = makeReg(NVFXSR_CONST, rowReg);
+                struct nvfx_src s0 = makeSrc(vecReg);
+                s0.swz[0] = normalMv.inputSwz[0];
+                s0.swz[1] = normalMv.inputSwz[1];
+                s0.swz[2] = normalMv.inputSwz[2];
+                s0.swz[3] = normalMv.inputSwz[3];
+                struct nvfx_src s1 = makeSrc(rowConst);
+                if (opcode == static_cast<uint8_t>(VP_OP(DP3)))
+                    s1.swz[3] = 0;
+                struct nvfx_insn in = nvfx_insn(0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(dst),
+                    kDp4Writemask[k],
+                    s0, s1, makeSrc(none));
+                normalBatches.push_back({in, opcode});
+            }
+        }
+
+        if (posKind == PosKind::MatVecMulChain &&
+            matChain.size() == 2 &&
+            colKind == ColKind::SimplePassthrough &&
+            colBatches.size() == 1 &&
+            posBatches.size() == 2 &&
+            normalBatches.size() == 3)
+        {
+            for (const auto& e : colBatches[0]) asm_.emit(e.insn, e.op);
+            asm_.emit(normalBatches[0].insn, normalBatches[0].op);
+            asm_.emit(normalBatches[1].insn, normalBatches[1].op);
+            for (const auto& e : posBatches[0]) asm_.emit(e.insn, e.op);
+            asm_.emit(normalBatches[2].insn, normalBatches[2].op);
+            for (const auto& e : posBatches[1]) asm_.emit(e.insn, e.op);
+
+            consumedStoreSrcIds.insert(posStore->srcId);
+            consumedStoreSrcIds.insert(colStore->srcId);
+            consumedStoreSrcIds.insert(normalStore->srcId);
+            emittedSomething = true;
+            return true;
         }
 
         // ----- Schedule -----
