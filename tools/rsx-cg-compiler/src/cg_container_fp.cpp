@@ -469,7 +469,8 @@ ContainerResult emitFragmentContainerImpl(
         }
 
         std::vector<uint8_t> strings;
-        strings.push_back(0);
+        if (!entries.empty())
+            strings.push_back(0);
         std::vector<uint32_t> nameOffsets;
         nameOffsets.reserve(entries.size());
         for (const auto& e : entries)
