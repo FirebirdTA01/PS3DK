@@ -5,6 +5,27 @@
 #include <stdint.h>
 
 #define CGB_FACADE_MAGIC 0x43474250u
+#define CGB_FACADE_COMPACT 0x80000000u
+#define CGB_FACADE_SIZE_MASK 0x7fffffffu
+
+#define CGB_COMPACT_FOURCC 0x43474200u
+#define CGB_COMPACT_HEADER_SIZE 12u
+#define CGB_COMPACT_UCODE_OFFSET 32u
+#define CGB_COMPACT_PROFILE_VERTEX 0u
+#define CGB_COMPACT_PROFILE_FRAGMENT 1u
+#define CGB_COMPACT_CONSTANT_TABLE 1u
+#define CGB_COMPACT_LOOKUP_TABLE 2u
+#define CGB_COMPACT_PARAMETER_INFO 4u
+#define CGB_COMPACT_FP_RESOURCE_START 1024u
+#define CGB_COMPACT_CGPV_MASK 0x03u
+#define CGB_COMPACT_CGPV_VARYING 0x00u
+#define CGB_COMPACT_CGPV_UNIFORM 0x01u
+#define CGB_COMPACT_CGPV_CONSTANT 0x02u
+#define CGB_COMPACT_CGPV_MIXED 0x03u
+#define CGB_COMPACT_CGPD_MASK 0x0cu
+#define CGB_COMPACT_CGPD_IN 0x00u
+#define CGB_COMPACT_CGPD_OUT 0x04u
+#define CGB_COMPACT_CGPD_INOUT 0x08u
 
 typedef struct CgbFacade {
     uint32_t magic;
@@ -43,6 +64,36 @@ static int cgb_load(const CellCgbProgram *program, CgbFacade *facade)
     if (!program || !facade) return 0;
     cgb_copy(facade, program->data, (uint32_t)sizeof(*facade));
     return facade->magic == CGB_FACADE_MAGIC && facade->binary != NULL;
+}
+
+static uint16_t cgb_be16(const void *ptr)
+{
+    const unsigned char *p = (const unsigned char *)ptr;
+    return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
+}
+
+static uint32_t cgb_be32(const void *ptr)
+{
+    const unsigned char *p = (const unsigned char *)ptr;
+    return ((uint32_t)p[0] << 24) |
+           ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) |
+           (uint32_t)p[3];
+}
+
+static int cgb_is_compact_facade(const CgbFacade *facade)
+{
+    return facade && (facade->size & CGB_FACADE_COMPACT) != 0u;
+}
+
+static uint32_t cgb_facade_size(const CgbFacade *facade)
+{
+    return facade ? (facade->size & CGB_FACADE_SIZE_MASK) : 0u;
+}
+
+static const unsigned char *cgb_compact_base(const CgbFacade *facade)
+{
+    return (const unsigned char *)facade->binary;
 }
 
 static int cgb_range(uint32_t total, uint32_t offset, uint32_t size)
@@ -127,10 +178,256 @@ static int cgb_param_is_vertex_uniform(const CgBinaryParameter *param)
     return param && param->res == CG_C;
 }
 
+static uint8_t cgb_compact_profile(const CgbFacade *facade)
+{
+    return cgb_compact_base(facade)[0x0a];
+}
+
+static uint8_t cgb_compact_content(const CgbFacade *facade)
+{
+    return cgb_compact_base(facade)[0x0b];
+}
+
+static uint16_t cgb_compact_ucode_size_base(const unsigned char *base)
+{
+    return cgb_be16(base + 0x08);
+}
+
+static uint16_t cgb_compact_ucode_size(const CgbFacade *facade)
+{
+    return cgb_compact_ucode_size_base(cgb_compact_base(facade));
+}
+
+static const unsigned char *cgb_compact_levelb(const CgbFacade *facade)
+{
+    return (const unsigned char *)facade->params;
+}
+
+static uint16_t cgb_compact_levelb_size(const CgbFacade *facade)
+{
+    const unsigned char *levelb = cgb_compact_levelb(facade);
+    return levelb ? cgb_be16(levelb) : 0u;
+}
+
+static uint16_t cgb_compact_levelb_count(const CgbFacade *facade)
+{
+    const unsigned char *levelb = cgb_compact_levelb(facade);
+    return levelb ? cgb_be16(levelb + 2) : 0u;
+}
+
+static uint16_t cgb_compact_levelb_fp_count(const CgbFacade *facade)
+{
+    const unsigned char *levelb = cgb_compact_levelb(facade);
+    return levelb ? cgb_be16(levelb + 4) : 0u;
+}
+
+static const unsigned char *cgb_compact_entry(const CgbFacade *facade,
+                                              uint32_t index)
+{
+    const unsigned char *levelb = cgb_compact_levelb(facade);
+    if (!levelb || index >= cgb_compact_levelb_count(facade)) return NULL;
+    return levelb + 6u + index * 8u;
+}
+
+static const unsigned char *cgb_compact_fp_resources(const CgbFacade *facade)
+{
+    const unsigned char *levelb = cgb_compact_levelb(facade);
+    return levelb ? levelb + 6u + cgb_compact_levelb_count(facade) * 8u : NULL;
+}
+
+static const char *cgb_compact_strings(const CgbFacade *facade)
+{
+    const unsigned char *fp = cgb_compact_fp_resources(facade);
+    return fp ? (const char *)(fp + cgb_compact_levelb_fp_count(facade) * 2u) : NULL;
+}
+
+static uint32_t cgb_compact_strings_size(const CgbFacade *facade)
+{
+    const unsigned char *levelb = cgb_compact_levelb(facade);
+    uint32_t used;
+    uint32_t size;
+    if (!levelb) return 0u;
+    size = cgb_compact_levelb_size(facade);
+    used = 6u + cgb_compact_levelb_count(facade) * 8u +
+           cgb_compact_levelb_fp_count(facade) * 2u;
+    return used <= size ? size - used : 0u;
+}
+
+static const char *cgb_compact_entry_name(const CgbFacade *facade,
+                                          uint32_t index)
+{
+    const unsigned char *entry = cgb_compact_entry(facade, index);
+    const char *strings = cgb_compact_strings(facade);
+    uint32_t strings_size = cgb_compact_strings_size(facade);
+    uint32_t offset;
+    if (!entry || !strings) return NULL;
+    offset = cgb_be32(entry);
+    if (offset >= strings_size) return NULL;
+    return strings + offset;
+}
+
+static uint16_t cgb_compact_entry_resource(const CgbFacade *facade,
+                                           uint32_t index)
+{
+    const unsigned char *entry = cgb_compact_entry(facade, index);
+    return entry ? cgb_be16(entry + 6) : 0u;
+}
+
+static int cgb_compact_cstr_valid(const char *strings,
+                                  uint32_t strings_size,
+                                  uint32_t offset)
+{
+    if (!strings || offset >= strings_size) return 0;
+    for (uint32_t i = offset; i < strings_size; i++) {
+        if (strings[i] == '\0') return 1;
+    }
+    return 0;
+}
+
+static int cgb_compact_validate_levelb(const unsigned char *levelb,
+                                       uint32_t available)
+{
+    uint32_t block_size;
+    uint32_t entry_count;
+    uint32_t fp_count;
+    uint32_t used;
+    const char *strings;
+    uint32_t strings_size;
+
+    if (available < 6u) return 0;
+    block_size = cgb_be16(levelb);
+    entry_count = cgb_be16(levelb + 2);
+    fp_count = cgb_be16(levelb + 4);
+    if (block_size < 6u || block_size > available) return 0;
+    if (entry_count > (block_size - 6u) / 8u) return 0;
+    used = 6u + entry_count * 8u;
+    if (fp_count > (block_size - used) / 2u) return 0;
+    used += fp_count * 2u;
+    strings = (const char *)levelb + used;
+    strings_size = block_size - used;
+    for (uint32_t i = 0; i < entry_count; i++) {
+        const unsigned char *entry = levelb + 6u + i * 8u;
+        if (!cgb_compact_cstr_valid(strings, strings_size, cgb_be32(entry)))
+            return 0;
+    }
+    return 1;
+}
+
+static const unsigned char *cgb_compact_levelc(const CgbFacade *facade)
+{
+    const unsigned char *base = cgb_compact_base(facade);
+    uint32_t total = cgb_facade_size(facade);
+    uint32_t off = CGB_COMPACT_UCODE_OFFSET + cgb_compact_ucode_size(facade);
+    uint8_t content = cgb_compact_content(facade);
+
+    if ((content & CGB_COMPACT_CONSTANT_TABLE) != 0u) {
+        if (off + 2u > total) return NULL;
+        off += cgb_be16(base + off);
+    }
+    if ((content & CGB_COMPACT_LOOKUP_TABLE) != 0u) {
+        if (off + 2u > total) return NULL;
+        off += cgb_be16(base + off);
+    }
+    if ((content & CGB_COMPACT_PARAMETER_INFO) == 0u) return NULL;
+    if (off + 4u > total) return NULL;
+    return base + off;
+}
+
+static int cgb_read_compact(const unsigned char *base, uint32_t size,
+                            CellCgbProgram *program)
+{
+    CgbFacade facade;
+    uint32_t ucode_size;
+    uint32_t off;
+    const unsigned char *levelb = NULL;
+    uint8_t profile;
+    uint8_t content;
+
+    if (size < CGB_COMPACT_UCODE_OFFSET) return CELL_CGB_ERROR_FAILED;
+    if (cgb_be32(base) != CGB_COMPACT_FOURCC) return CELL_CGB_ERROR_FAILED;
+    profile = base[0x0a];
+    content = base[0x0b];
+    if (profile != CGB_COMPACT_PROFILE_VERTEX &&
+        profile != CGB_COMPACT_PROFILE_FRAGMENT)
+        return CELL_CGB_ERROR_FAILED;
+    if ((content & ~(CGB_COMPACT_CONSTANT_TABLE |
+                     CGB_COMPACT_LOOKUP_TABLE |
+                     CGB_COMPACT_PARAMETER_INFO)) != 0u)
+        return CELL_CGB_ERROR_FAILED;
+
+    ucode_size = cgb_compact_ucode_size_base(base);
+    if (ucode_size > size - CGB_COMPACT_UCODE_OFFSET)
+        return CELL_CGB_ERROR_FAILED;
+    if (profile == CGB_COMPACT_PROFILE_VERTEX && (ucode_size & 15u) != 0u)
+        return CELL_CGB_ERROR_FAILED;
+
+    off = CGB_COMPACT_UCODE_OFFSET + ucode_size;
+    if ((content & CGB_COMPACT_CONSTANT_TABLE) != 0u) {
+        uint32_t block_size;
+        if (off + 4u > size) return CELL_CGB_ERROR_FAILED;
+        block_size = cgb_be16(base + off);
+        if (block_size < 4u || block_size > size - off)
+            return CELL_CGB_ERROR_FAILED;
+        off += block_size;
+    }
+    if ((content & CGB_COMPACT_LOOKUP_TABLE) != 0u) {
+        uint32_t block_size;
+        levelb = base + off;
+        if (!cgb_compact_validate_levelb(levelb, size - off))
+            return CELL_CGB_ERROR_FAILED;
+        block_size = cgb_be16(levelb);
+        off += block_size;
+    }
+    if ((content & CGB_COMPACT_PARAMETER_INFO) != 0u) {
+        uint32_t block_size;
+        uint32_t info_count;
+        if (off + 4u > size) return CELL_CGB_ERROR_FAILED;
+        block_size = cgb_be16(base + off);
+        info_count = cgb_be16(base + off + 2);
+        if (block_size < 4u || block_size > size - off)
+            return CELL_CGB_ERROR_FAILED;
+        if (info_count > (block_size - 4u) / 8u)
+            return CELL_CGB_ERROR_FAILED;
+        off += block_size;
+    }
+
+    if (off > CGB_FACADE_SIZE_MASK) return CELL_CGB_ERROR_FAILED;
+    facade.magic = CGB_FACADE_MAGIC;
+    facade.size = off | CGB_FACADE_COMPACT;
+    facade.binary = (const CgBinaryProgram *)base;
+    facade.params = (const CgBinaryParameter *)levelb;
+    facade.program_header = base + CGB_COMPACT_HEADER_SIZE;
+    facade.ucode = base + CGB_COMPACT_UCODE_OFFSET;
+    cgb_store(program, &facade);
+    return CELL_CGB_OK;
+}
+
 uint32_t cellCgbGetSize(const void *binary)
 {
     const CgBinaryProgram *program = (const CgBinaryProgram *)binary;
-    if (!program || program->revision != CG_BINARY_FORMAT_REVISION) return 0;
+    const unsigned char *base = (const unsigned char *)binary;
+    uint32_t off;
+    uint8_t content;
+    if (!binary) return 0;
+    if (cgb_be32(base) == CGB_COMPACT_FOURCC) {
+        if (base[0x0a] != CGB_COMPACT_PROFILE_VERTEX &&
+            base[0x0a] != CGB_COMPACT_PROFILE_FRAGMENT)
+            return 0;
+        content = base[0x0b];
+        if ((content & ~(CGB_COMPACT_CONSTANT_TABLE |
+                         CGB_COMPACT_LOOKUP_TABLE |
+                         CGB_COMPACT_PARAMETER_INFO)) != 0u)
+            return 0;
+        off = CGB_COMPACT_UCODE_OFFSET + cgb_compact_ucode_size_base(base);
+        if ((content & CGB_COMPACT_CONSTANT_TABLE) != 0u)
+            off += cgb_be16(base + off);
+        if ((content & CGB_COMPACT_LOOKUP_TABLE) != 0u)
+            off += cgb_be16(base + off);
+        if ((content & CGB_COMPACT_PARAMETER_INFO) != 0u)
+            off += cgb_be16(base + off);
+        return off;
+    }
+    if (program->revision != CG_BINARY_FORMAT_REVISION) return 0;
     return program->totalSize;
 }
 
@@ -146,7 +443,14 @@ int32_t cellCgbRead(const void *binary, const uint32_t size,
     uint32_t header_size;
 
     if (program) cgb_zero(program, sizeof(*program));
-    if (!binary || !program || size < (uint32_t)offsetof(CgBinaryProgram, data))
+    if (!binary || !program)
+        return CELL_CGB_ERROR_FAILED;
+    if (size >= CGB_COMPACT_UCODE_OFFSET &&
+        cgb_be32(binary) == CGB_COMPACT_FOURCC)
+        return cgb_read_compact((const unsigned char *)binary, size, program);
+    /* TODO: Once rsx-cg-compiler -mcgb emits byte-exact compact CGB
+       containers, retire this raw CgBinary transition path. */
+    if (size < (uint32_t)offsetof(CgBinaryProgram, data))
         return CELL_CGB_ERROR_FAILED;
     if (cg->revision != CG_BINARY_FORMAT_REVISION)
         return CELL_CGB_ERROR_FAILED;
@@ -211,6 +515,12 @@ CellCgbProfile cellCgbGetProfile(const CellCgbProgram *program)
 {
     CgbFacade facade;
     if (!cgb_load(program, &facade)) return CELL_CGB_PROFILE_UNKNOWN;
+    if (cgb_is_compact_facade(&facade)) {
+        uint8_t profile = cgb_compact_profile(&facade);
+        if (profile == CGB_COMPACT_PROFILE_VERTEX) return CELL_CGB_PROFILE_VERTEX;
+        if (profile == CGB_COMPACT_PROFILE_FRAGMENT) return CELL_CGB_PROFILE_FRAGMENT;
+        return CELL_CGB_PROFILE_UNKNOWN;
+    }
     if (cgb_is_vertex_profile(facade.binary->profile)) return CELL_CGB_PROFILE_VERTEX;
     if (cgb_is_fragment_profile(facade.binary->profile)) return CELL_CGB_PROFILE_FRAGMENT;
     return CELL_CGB_PROFILE_UNKNOWN;
@@ -225,7 +535,9 @@ const void *cellCgbGetUCode(const CellCgbProgram *program)
 uint32_t cellCgbGetUCodeSize(const CellCgbProgram *program)
 {
     CgbFacade facade;
-    return cgb_load(program, &facade) ? facade.binary->ucodeSize : 0u;
+    if (!cgb_load(program, &facade)) return 0u;
+    if (cgb_is_compact_facade(&facade)) return cgb_compact_ucode_size(&facade);
+    return facade.binary->ucodeSize;
 }
 
 int32_t cellCgbGetVertexConfiguration(
@@ -235,8 +547,19 @@ int32_t cellCgbGetVertexConfiguration(
     CgbFacade facade;
     const CgBinaryVertexProgram *vp;
     if (conf) cgb_zero(conf, sizeof(*conf));
-    if (!conf || !cgb_load(program, &facade) ||
-        !cgb_is_vertex_profile(facade.binary->profile))
+    if (!conf || !cgb_load(program, &facade))
+        return CELL_CGB_ERROR_FAILED;
+    if (cgb_is_compact_facade(&facade)) {
+        const unsigned char *vpconf = (const unsigned char *)facade.program_header;
+        if (cgb_compact_profile(&facade) != CGB_COMPACT_PROFILE_VERTEX)
+            return CELL_CGB_ERROR_FAILED;
+        conf->instructionSlot = cgb_be16(vpconf + 12);
+        conf->instructionCount = (uint16_t)(cgb_compact_ucode_size(&facade) / 16u);
+        conf->attributeInputMask = cgb_be16(vpconf);
+        conf->registerCount = vpconf[2];
+        return CELL_CGB_OK;
+    }
+    if (!cgb_is_vertex_profile(facade.binary->profile))
         return CELL_CGB_ERROR_FAILED;
     vp = (const CgBinaryVertexProgram *)facade.program_header;
     conf->instructionSlot = (uint16_t)vp->instructionSlot;
@@ -253,8 +576,22 @@ int32_t cellCgbGetFragmentConfiguration(
     CgbFacade facade;
     const CgBinaryFragmentProgram *fp;
     if (conf) cgb_zero(conf, sizeof(*conf));
-    if (!conf || !cgb_load(program, &facade) ||
-        !cgb_is_fragment_profile(facade.binary->profile))
+    if (!conf || !cgb_load(program, &facade))
+        return CELL_CGB_ERROR_FAILED;
+    if (cgb_is_compact_facade(&facade)) {
+        const unsigned char *fpconf = (const unsigned char *)facade.program_header;
+        if (cgb_compact_profile(&facade) != CGB_COMPACT_PROFILE_FRAGMENT)
+            return CELL_CGB_ERROR_FAILED;
+        conf->offset = 0u;
+        conf->attributeInputMask = cgb_be32(fpconf);
+        conf->texCoordsInputMask = cgb_be16(fpconf + 4);
+        conf->texCoords2D = cgb_be16(fpconf + 6);
+        conf->texCoordsCentroid = cgb_be16(fpconf + 8);
+        conf->fragmentControl = cgb_be32(fpconf + 12);
+        conf->registerCount = fpconf[16];
+        return CELL_CGB_OK;
+    }
+    if (!cgb_is_fragment_profile(facade.binary->profile))
         return CELL_CGB_ERROR_FAILED;
     fp = (const CgBinaryFragmentProgram *)facade.program_header;
     conf->attributeInputMask = fp->attributeInputMask;
@@ -275,8 +612,16 @@ int32_t cellCgbGetVertexAttributeOutputMask(const CellCgbProgram *program,
     CgbFacade facade;
     const CgBinaryVertexProgram *vp;
     if (attributeOutputMask) *attributeOutputMask = 0;
-    if (!attributeOutputMask || !cgb_load(program, &facade) ||
-        !cgb_is_vertex_profile(facade.binary->profile))
+    if (!attributeOutputMask || !cgb_load(program, &facade))
+        return CELL_CGB_ERROR_FAILED;
+    if (cgb_is_compact_facade(&facade)) {
+        const unsigned char *vpconf = (const unsigned char *)facade.program_header;
+        if (cgb_compact_profile(&facade) != CGB_COMPACT_PROFILE_VERTEX)
+            return CELL_CGB_ERROR_FAILED;
+        *attributeOutputMask = cgb_be32(vpconf + 4);
+        return CELL_CGB_OK;
+    }
+    if (!cgb_is_vertex_profile(facade.binary->profile))
         return CELL_CGB_ERROR_FAILED;
     vp = (const CgBinaryVertexProgram *)facade.program_header;
     *attributeOutputMask = vp->attributeOutputMask;
@@ -289,8 +634,16 @@ int32_t cellCgbGetUserClipPlaneControlMask(const CellCgbProgram *program,
     CgbFacade facade;
     const CgBinaryVertexProgram *vp;
     if (userClipPlaneControlMask) *userClipPlaneControlMask = 0;
-    if (!userClipPlaneControlMask || !cgb_load(program, &facade) ||
-        !cgb_is_vertex_profile(facade.binary->profile))
+    if (!userClipPlaneControlMask || !cgb_load(program, &facade))
+        return CELL_CGB_ERROR_FAILED;
+    if (cgb_is_compact_facade(&facade)) {
+        const unsigned char *vpconf = (const unsigned char *)facade.program_header;
+        if (cgb_compact_profile(&facade) != CGB_COMPACT_PROFILE_VERTEX)
+            return CELL_CGB_ERROR_FAILED;
+        *userClipPlaneControlMask = cgb_be32(vpconf + 8);
+        return CELL_CGB_OK;
+    }
+    if (!cgb_is_vertex_profile(facade.binary->profile))
         return CELL_CGB_ERROR_FAILED;
     vp = (const CgBinaryVertexProgram *)facade.program_header;
     *userClipPlaneControlMask = vp->userClipMask;
@@ -301,7 +654,13 @@ uint32_t cellCgbGetVertexConstantCount(const CellCgbProgram *program)
 {
     CgbFacade facade;
     uint32_t count = 0;
-    if (!cgb_load(program, &facade) || !cgb_is_vertex_profile(facade.binary->profile))
+    if (!cgb_load(program, &facade))
+        return 0;
+    if (cgb_is_compact_facade(&facade))
+        /* TODO: Parse compact Level A vertex constant tables for
+           reference CGBs that carry internal/default VP constants. */
+        return 0;
+    if (!cgb_is_vertex_profile(facade.binary->profile))
         return 0;
     for (uint32_t i = 0; i < facade.binary->parameterCount; i++) {
         if (cgb_param_is_vertex_uniform(&facade.params[i])) count++;
@@ -318,7 +677,13 @@ void cellCgbGetVertexConstantValues(const CellCgbProgram *program,
     uint32_t current = 0;
     if (reg) *reg = 0;
     if (value) *value = NULL;
-    if (!cgb_load(program, &facade) || !cgb_is_vertex_profile(facade.binary->profile))
+    if (!cgb_load(program, &facade))
+        return;
+    if (cgb_is_compact_facade(&facade))
+        /* TODO: Parse compact Level A vertex constant tables for
+           reference CGBs that carry internal/default VP constants. */
+        return;
+    if (!cgb_is_vertex_profile(facade.binary->profile))
         return;
     for (uint32_t i = 0; i < facade.binary->parameterCount; i++) {
         const CgBinaryParameter *param = &facade.params[i];
@@ -337,6 +702,14 @@ uint32_t cellCgbMapLookup(CellCgbProgram *program, const char *name)
 {
     CgbFacade facade;
     if (!name || !cgb_load(program, &facade)) return CELL_CGB_ERROR_FAILED;
+    if (cgb_is_compact_facade(&facade)) {
+        uint32_t count = cgb_compact_levelb_count(&facade);
+        for (uint32_t i = 0; i < count; i++) {
+            if (cgb_streq(cgb_compact_entry_name(&facade, i), name))
+                return i;
+        }
+        return CELL_CGB_ERROR_FAILED;
+    }
     for (uint32_t i = 0; i < facade.binary->parameterCount; i++) {
         if (cgb_streq(cgb_param_name(&facade, &facade.params[i]), name))
             return i;
@@ -350,6 +723,8 @@ uint16_t cellCgbMapGetValue(CellCgbProgram *program,
     CgbFacade facade;
     const CgBinaryParameter *param;
     if (!cgb_load(program, &facade)) return 0;
+    if (cgb_is_compact_facade(&facade))
+        return cgb_compact_entry_resource(&facade, map_index);
     param = cgb_param(&facade, map_index);
     if (!param) return 0;
 
@@ -367,7 +742,9 @@ uint16_t cellCgbMapGetValue(CellCgbProgram *program,
 uint32_t cellCgbMapGetLength(const CellCgbProgram *program)
 {
     CgbFacade facade;
-    return cgb_load(program, &facade) ? facade.binary->parameterCount : 0u;
+    if (!cgb_load(program, &facade)) return 0u;
+    if (cgb_is_compact_facade(&facade)) return cgb_compact_levelb_count(&facade);
+    return facade.binary->parameterCount;
 }
 
 void cellCgbMapGetName(CellCgbProgram *program,
@@ -385,8 +762,13 @@ void cellCgbMapGetName(CellCgbProgram *program,
         if (size) *size = 0;
         return;
     }
-    param = cgb_param(&facade, map_index);
-    src = cgb_param_name(&facade, param);
+    if (cgb_is_compact_facade(&facade)) {
+        param = NULL;
+        src = cgb_compact_entry_name(&facade, map_index);
+    } else {
+        param = cgb_param(&facade, map_index);
+        src = cgb_param_name(&facade, param);
+    }
     if (!src) {
         if (size) *size = 0;
         return;
@@ -411,6 +793,11 @@ void cellCgbMapGetVertexUniformRegister(const CellCgbProgram *program,
     if (reg) *reg = 0;
     if (default_values) *default_values = NULL;
     if (!cgb_load(program, &facade)) return;
+    if (cgb_is_compact_facade(&facade)) {
+        if (map_index < cgb_compact_levelb_count(&facade) && reg)
+            *reg = cgb_compact_entry_resource(&facade, map_index);
+        return;
+    }
     param = cgb_param(&facade, map_index);
     if (!cgb_param_is_vertex_uniform(param)) return;
     if (reg) *reg = (uint16_t)param->resIndex;
@@ -430,6 +817,26 @@ void cellCgbMapGetFragmentUniformOffsets(const CellCgbProgram *program,
     if (count) *count = 0;
     if (offsets) *offsets = 0;
     if (!cgb_load(program, &facade)) return;
+    if (cgb_is_compact_facade(&facade)) {
+        uint16_t resource = cgb_compact_entry_resource(&facade, map_index);
+        uint32_t index;
+        uint32_t fp_count;
+        const unsigned char *fp;
+        uint32_t embedded_count;
+        if (resource < CGB_COMPACT_FP_RESOURCE_START) return;
+        index = (uint32_t)(resource - CGB_COMPACT_FP_RESOURCE_START);
+        fp_count = cgb_compact_levelb_fp_count(&facade);
+        fp = cgb_compact_fp_resources(&facade);
+        if (!fp || index + 2u > fp_count) return;
+        embedded_count = cgb_be16(fp + (index + 1u) * 2u);
+        if (index + 2u + embedded_count > fp_count) return;
+        if (count) *count = embedded_count;
+        if (offsets) {
+            for (uint32_t i = 0; i < embedded_count; i++)
+                offsets[i] = cgb_be16(fp + (index + 2u + i) * 2u);
+        }
+        return;
+    }
     param = cgb_param(&facade, map_index);
     if (!param || param->embeddedConst == 0) return;
     embedded = (const CgBinaryEmbeddedConstant *)
@@ -449,6 +856,21 @@ void cellCgbMapGetFragmentUniformRegister(const CellCgbProgram *program,
     const CgBinaryParameter *param;
     if (reg) *reg = 0;
     if (!cgb_load(program, &facade)) return;
+    if (cgb_is_compact_facade(&facade)) {
+        uint16_t resource = cgb_compact_entry_resource(&facade, map_index);
+        const unsigned char *fp;
+        uint32_t index;
+        if (!reg) return;
+        if (resource < CGB_COMPACT_FP_RESOURCE_START) {
+            *reg = resource;
+            return;
+        }
+        index = (uint32_t)(resource - CGB_COMPACT_FP_RESOURCE_START);
+        fp = cgb_compact_fp_resources(&facade);
+        if (fp && index < cgb_compact_levelb_fp_count(&facade))
+            *reg = cgb_be16(fp + index * 2u);
+        return;
+    }
     param = cgb_param(&facade, map_index);
     if (param && reg) *reg = (uint16_t)param->resIndex;
 }
@@ -476,34 +898,84 @@ static uint16_t cgb_levelc_value_count(CGtype type)
 uint16_t cellCgbLevelCMapGetCgType(CellCgbProgram *program,
                                    const uint32_t map_index)
 {
-    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    CgbFacade facade;
+    const CgBinaryParameter *param;
+    if (cgb_load(program, &facade) && cgb_is_compact_facade(&facade)) {
+        const unsigned char *levelc = cgb_compact_levelc(&facade);
+        if (!levelc || map_index >= cgb_be16(levelc + 2)) return 0;
+        return cgb_be16(levelc + 4u + map_index * 8u);
+    }
+    param = cgb_levelc_param(program, map_index);
     return param ? (uint16_t)param->type : 0;
 }
 
 uint16_t cellCgbLevelCMapGetCgResource(CellCgbProgram *program,
                                        const uint32_t map_index)
 {
-    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    CgbFacade facade;
+    const CgBinaryParameter *param;
+    if (cgb_load(program, &facade) && cgb_is_compact_facade(&facade)) {
+        const unsigned char *levelc = cgb_compact_levelc(&facade);
+        if (!levelc || map_index >= cgb_be16(levelc + 2)) return 0;
+        return cgb_be16(levelc + 4u + map_index * 8u + 2u);
+    }
+    param = cgb_levelc_param(program, map_index);
     return param ? (uint16_t)param->res : 0;
 }
 
 uint16_t cellCgbLevelCMapGetVariability(CellCgbProgram *program,
                                         const uint32_t map_index)
 {
-    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    CgbFacade facade;
+    const CgBinaryParameter *param;
+    if (cgb_load(program, &facade) && cgb_is_compact_facade(&facade)) {
+        const unsigned char *levelc = cgb_compact_levelc(&facade);
+        uint16_t flags;
+        uint16_t variability;
+        if (!levelc || map_index >= cgb_be16(levelc + 2)) return 0;
+        flags = cgb_be16(levelc + 4u + map_index * 8u + 4u);
+        variability = flags & CGB_COMPACT_CGPV_MASK;
+        if (variability == CGB_COMPACT_CGPV_VARYING) return (uint16_t)CG_VARYING;
+        if (variability == CGB_COMPACT_CGPV_UNIFORM) return (uint16_t)CG_UNIFORM;
+        if (variability == CGB_COMPACT_CGPV_CONSTANT) return (uint16_t)CG_CONSTANT;
+        if (variability == CGB_COMPACT_CGPV_MIXED) return (uint16_t)CG_MIXED;
+        return 0;
+    }
+    param = cgb_levelc_param(program, map_index);
     return param ? (uint16_t)param->var : 0;
 }
 
 uint16_t cellCgbLevelCMapGetDirection(CellCgbProgram *program,
                                       const uint32_t map_index)
 {
-    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    CgbFacade facade;
+    const CgBinaryParameter *param;
+    if (cgb_load(program, &facade) && cgb_is_compact_facade(&facade)) {
+        const unsigned char *levelc = cgb_compact_levelc(&facade);
+        uint16_t flags;
+        uint16_t direction;
+        if (!levelc || map_index >= cgb_be16(levelc + 2)) return 0;
+        flags = cgb_be16(levelc + 4u + map_index * 8u + 4u);
+        direction = flags & CGB_COMPACT_CGPD_MASK;
+        if (direction == CGB_COMPACT_CGPD_IN) return (uint16_t)CG_IN;
+        if (direction == CGB_COMPACT_CGPD_OUT) return (uint16_t)CG_OUT;
+        if (direction == CGB_COMPACT_CGPD_INOUT) return (uint16_t)CG_INOUT;
+        return 0;
+    }
+    param = cgb_levelc_param(program, map_index);
     return param ? (uint16_t)param->direction : 0;
 }
 
 uint16_t cellCgbLevelCMapGetValueCount(CellCgbProgram *program,
                                        const uint32_t map_index)
 {
-    const CgBinaryParameter *param = cgb_levelc_param(program, map_index);
+    CgbFacade facade;
+    const CgBinaryParameter *param;
+    if (cgb_load(program, &facade) && cgb_is_compact_facade(&facade)) {
+        const unsigned char *levelc = cgb_compact_levelc(&facade);
+        if (!levelc || map_index >= cgb_be16(levelc + 2)) return 0;
+        return cgb_be16(levelc + 4u + map_index * 8u + 6u);
+    }
+    param = cgb_levelc_param(program, map_index);
     return param ? cgb_levelc_value_count(param->type) : 0;
 }
