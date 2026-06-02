@@ -277,6 +277,11 @@ void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
                                    GLsizei width, GLsizei height,
                                    GLenum format, GLenum type,
                                    const GLvoid *pixels);
+void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
+                                          GLenum internalformat,
+                                          GLsizei width, GLsizei height,
+                                          GLint border, GLsizei imageSize,
+                                          const GLvoid *data);
 void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param);
 void psgl_context_texture_reference_sce(GLenum target, GLuint levels,
                                         GLuint baseWidth, GLuint baseHeight,

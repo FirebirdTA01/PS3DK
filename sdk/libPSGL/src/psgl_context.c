@@ -3164,6 +3164,61 @@ void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
+void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
+                                          GLenum internalformat,
+                                          GLsizei width, GLsizei height,
+                                          GLint border, GLsizei imageSize,
+                                          const GLvoid *data)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    void *address;
+    uint32_t offset = 0u;
+    uint8_t rsx_format;
+    uint32_t size;
+    uint32_t pitch;
+
+    if (!context || !texture || level != 0 || border != 0 ||
+        width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
+        !psgl_texture_reference_is_compressed(internalformat) || !data)
+        return;
+
+    {
+        uint32_t block_bytes = (internalformat == GL_COMPRESSED_RGB_S3TC_DXT1_EXT ||
+                                internalformat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT)
+                                   ? 8u : 16u;
+        pitch = (((uint32_t)width + 3u) / 4u) * block_bytes;
+        rsx_format = psgl_texture_reference_format(internalformat, pitch);
+    }
+    if (!rsx_format) return;
+
+    size = (uint32_t)imageSize;
+    if (size == 0u) return;
+
+    address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
+    if (!address) return;
+    if (cellGcmAddressToOffset(address, &offset) != 0) {
+        rsxFree(address);
+        return;
+    }
+
+    psgl_release_texture_storage(texture);
+    psgl_copy(address, data, size);
+
+    texture->address = address;
+    texture->offset = offset;
+    texture->size = size;
+    texture->width = (uint16_t)width;
+    texture->height = (uint16_t)height;
+    texture->pitch = (uint16_t)pitch;
+    texture->levels = 1u;
+    texture->location = CELL_GCM_LOCATION_LOCAL;
+    texture->linear = 1u;
+    texture->rsx_format = rsx_format;
+    psgl_fill_gcm_texture(texture);
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
 void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param)
 {
     PSGLcontext *context = g_psgl.current_context;

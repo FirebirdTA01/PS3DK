@@ -373,9 +373,8 @@ GLAPI void glCompressedTexImage2D(GLenum target, GLint level,
                                   GLint border, GLsizei imageSize,
                                   const GLvoid *data)
 {
-    (void)target;  (void)level;  (void)internalformat;
-    (void)width;   (void)height; (void)border;
-    (void)imageSize; (void)data;
+    psgl_context_compressed_tex_image_2d(target, level, internalformat,
+                                         width, height, border, imageSize, data);
 }
 
 GLAPI void glCompressedTexSubImage2D(GLenum target, GLint level,
