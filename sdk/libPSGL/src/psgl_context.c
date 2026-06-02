@@ -412,7 +412,10 @@ static uint32_t psgl_pack_clear_color(const GLfloat color[4])
 
 static uint32_t psgl_pack_depth_stencil(GLfloat depth, GLint stencil)
 {
-    uint32_t z = (uint32_t)(psgl_clampf(depth, 0.0f, 1.0f) * 16777215.0f + 0.5f);
+    /* Compute in double: float32 rounds 16777215.5f to 2^24, and
+       (2^24 << 8) overflows uint32 to 0 — so depth=1.0 was clearing Z to 0.0. */
+    uint32_t z = (uint32_t)((double)psgl_clampf(depth, 0.0f, 1.0f) * 16777215.0 + 0.5);
+    if (z > 0xFFFFFFu) z = 0xFFFFFFu;
     return (z << 8) | ((uint32_t)stencil & 0xffu);
 }
 
@@ -818,7 +821,7 @@ static void psgl_fill_surface(PSGLcontext *context, CellGcmSurface *surface)
     surface->colorPitch[1] = 64u;
     surface->colorPitch[2] = 64u;
     surface->colorPitch[3] = 64u;
-    surface->depthFormat = GCM_SURFACE_ZETA_Z16;
+    surface->depthFormat = GCM_SURFACE_ZETA_Z24S8; /* TODO: map device->depth_format */
     surface->depthLocation = GCM_LOCATION_RSX;
     surface->depthOffset = device->depth_offset;
     surface->depthPitch = device->depth_pitch;
@@ -1662,7 +1665,9 @@ static void psgl_validate_draw_state(PSGLcontext *context)
     if (context->dirty & PSGL_DIRTY_VIEWPORT) psgl_emit_viewport(context);
     if (context->dirty & PSGL_DIRTY_SCISSOR) psgl_emit_scissor(context);
     if (context->dirty & PSGL_DIRTY_BLEND) psgl_emit_blend(context);
-    if (context->dirty & PSGL_DIRTY_DEPTH) psgl_emit_depth(context);
+    /* TODO: re-emit depth per draw — dirty-gated persistence does not hold
+       in RPCS3; revisit for efficiency. */
+    psgl_emit_depth(context);
     if (context->dirty & PSGL_DIRTY_STENCIL) psgl_emit_stencil(context);
     if (context->dirty & PSGL_DIRTY_ALPHA) psgl_emit_alpha(context);
     if (context->dirty & PSGL_DIRTY_RASTER) psgl_emit_raster(context);
