@@ -1,4 +1,5 @@
 #include "cg_internal.h"
+#include <cell/cgb/cgb_levelc.h>
 
 #include <malloc.h>
 #include <ppu-types.h>
@@ -176,25 +177,97 @@ static void *cg_read_file(const char *path, uint32_t *out_size)
 static void cg_init_parameter(PSGLcgProgram *program, uint32_t index,
                               PSGLcgParameter *parameter)
 {
-    const CgBinaryProgram *binary = (const CgBinaryProgram *)program->binary;
-    const CgBinaryParameter *binary_param =
-        (const CgBinaryParameter *)((const unsigned char *)binary +
-                                    binary->parameterArray) + index;
-    const char *name = binary_param->name ?
-        (const char *)binary + binary_param->name : NULL;
     const float *defaults = NULL;
 
     parameter->magic = PSGL_CG_PARAMETER_MAGIC;
     parameter->program = program;
     parameter->index = index;
-    parameter->type = binary_param->type;
-    parameter->resource = binary_param->res;
-    parameter->variability = binary_param->var;
-    parameter->direction = binary_param->direction;
-    parameter->resource_index = binary_param->resIndex;
     parameter->vertex_register = 0xffffu;
     parameter->fragment_register = 0xffffu;
-    cg_copy_name(parameter->name, name);
+
+    {
+        const unsigned char *b = (const unsigned char *)program->binary;
+        int is_compact = b && b[0] == 0x43 && b[1] == 0x47 &&
+                         b[2] == 0x42 && b[3] == 0x00;
+        if (is_compact) {
+            /* Compact CGB: use LevelC metadata when present, fall
+             * back to LevelB resource decode when there is no
+             * LevelC (content=0x03, NormalMap / basic_psgl). */
+            uint32_t name_len = (uint32_t)sizeof(parameter->name);
+            uint16_t cg_type;
+            uint16_t cg_resource;
+            uint16_t cg_var;
+            uint16_t cg_dir;
+
+            cellCgbMapGetName(&program->cgb_program, index,
+                              parameter->name, &name_len);
+
+            cg_type     = cellCgbLevelCMapGetCgType(&program->cgb_program, index);
+            cg_resource = cellCgbLevelCMapGetCgResource(&program->cgb_program, index);
+            cg_var      = cellCgbLevelCMapGetVariability(&program->cgb_program, index);
+            cg_dir      = cellCgbLevelCMapGetDirection(&program->cgb_program, index);
+
+            if (cg_type) {
+                parameter->type         = (CGtype)cg_type;
+                parameter->resource     = (CGresource)cg_resource;
+                parameter->variability  = (CGenum)cg_var;
+                parameter->direction    = (CGenum)cg_dir;
+                /* Decode resource_index from LevelB value in a way
+                 * that matches what the raw CgBinary path provides. */
+                {
+                    uint16_t value = cellCgbMapGetValue(
+                        &program->cgb_program, index);
+                    if (cg_resource == CG_C && program->cgb_profile ==
+                        CELL_CGB_PROFILE_VERTEX)
+                        parameter->resource_index = (int32_t)(value - 0x0100u);
+                    else if (cg_resource >= CG_TEXUNIT0 &&
+                             cg_resource <= CG_TEXUNIT15)
+                        parameter->resource_index = (int32_t)cg_resource;
+                    else
+                        parameter->resource_index = (int32_t)value;
+                }
+            } else {
+                /* No LevelC — decode resource from LevelB. */
+                uint16_t value = cellCgbMapGetValue(
+                    &program->cgb_program, index);
+                if (program->cgb_profile == CELL_CGB_PROFILE_VERTEX) {
+                    if (value >= 0x0100u) {
+                        parameter->resource = CG_C;
+                        parameter->resource_index = (int32_t)(value - 0x0100u);
+                    } else {
+                        parameter->resource = (CGresource)(CG_ATTR0 + (int32_t)value);
+                        parameter->resource_index = (int32_t)value;
+                    }
+                } else {
+                    if (value < 1024u) {
+                        parameter->resource = (CGresource)(CG_TEXUNIT0 + (int32_t)value);
+                        parameter->resource_index = (int32_t)(CG_TEXUNIT0 + (int32_t)value);
+                    } else {
+                        parameter->resource = CG_C;
+                        parameter->resource_index = 0;
+                    }
+                }
+                parameter->type         = CG_FLOAT4;
+                parameter->variability  = CG_UNIFORM;
+                parameter->direction    = CG_IN;
+            }
+        } else {
+        /* Raw CgBinaryProgram path (legacy, retire after -mcgb compact emit). */
+        const CgBinaryProgram *binary = (const CgBinaryProgram *)program->binary;
+        const CgBinaryParameter *binary_param =
+            (const CgBinaryParameter *)((const unsigned char *)binary +
+                                        binary->parameterArray) + index;
+        const char *name = binary_param->name ?
+            (const char *)binary + binary_param->name : NULL;
+
+        parameter->type = binary_param->type;
+        parameter->resource = binary_param->res;
+        parameter->variability = binary_param->var;
+        parameter->direction = binary_param->direction;
+        parameter->resource_index = binary_param->resIndex;
+        cg_copy_name(parameter->name, name);
+    }
+    }
 
     cellCgbMapGetVertexUniformRegister(&program->cgb_program, index,
                                        &parameter->vertex_register,
