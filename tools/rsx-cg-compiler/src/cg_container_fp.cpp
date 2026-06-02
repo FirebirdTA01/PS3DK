@@ -496,11 +496,10 @@ ContainerResult emitFragmentContainerImpl(
             return result;
         }
 
-        const uint32_t fragmentControl =
-            (attrs.partialTexType & 0xFFFFu)
-            | (static_cast<uint32_t>(attrs.outputFromH0) << 16)
-            | (static_cast<uint32_t>(attrs.depthReplace) << 17)
-            | ((attrs.pixelKillCount > 0 ? 1u : 0u) << 18);
+        uint32_t fragmentControl = attrs.outputFromH0 ? 0x0eu : 0x40u;
+        if (attrs.pixelKillCount > 0)
+            fragmentControl |= (1u << 7);
+        fragmentControl |= (1u << 10);
 
         auto& out = result.bytes;
         out.reserve(0x20u + ucodeSize + levelASize + levelBSize);
@@ -700,15 +699,7 @@ ContainerResult emitFragmentCompactCgb(
     const nv40::FpAttributes&    attrs,
     const ContainerOptions&      opts)
 {
-    (void)module;
-    (void)entryName;
-    (void)ucode;
-    (void)attrs;
-    (void)opts;
-    ContainerResult result;
-    result.diagnostics.push_back(
-        "cg-container-fp: compact CGB output is disabled until fs_simple FP ucode/attrs are byte-exact");
-    return result;
+    return emitFragmentContainerImpl(module, entryName, ucode, attrs, opts, true);
 }
 
 }  // namespace cg_container
