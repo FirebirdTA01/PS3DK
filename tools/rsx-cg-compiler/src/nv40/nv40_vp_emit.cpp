@@ -291,6 +291,13 @@ struct MatVecMulBinding
     uint8_t  vecOpcode      = 0;              // 0 = DP4 (default), set to DPH opcode for vec3+1 promotion
     bool     vectorIsTemp   = false;          // true → vectorInputIdx selects a TEMP, false → INPUT
 
+    // `mul(biasMatrix, uniformMatrix)` where biasMatrix is the fixed
+    // light-projection bias matrix used by the Skin CgTutorial sample.
+    // The uniform matvec is emitted first, then the bias transform is
+    // applied from the resulting temp into the final output.
+    bool     postBiasHalf   = false;
+    float    biasHalf       = 0.5f;
+
     // Chained matrix×vector: when the vector operand is itself a
     // previous MatVecMul's result, `priorChainId` points to that prior
     // step's IR value.  The reference compiler emits chained matvecmuls
@@ -313,6 +320,12 @@ struct MatVecMulBinding
     // later MatVecMul, materialise into the reserved temp at consumption
     // time.  This keeps the exact VecConstruct/DPH paths above intact.
     IRValueID genericTempBuildId = 0;
+};
+
+struct BiasMatrixProductBinding
+{
+    int   matrixBaseReg = -1;
+    float half = 0.5f;
 };
 
 // Tracks the float literals seen during VP emit and packs them into
@@ -438,6 +451,13 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     // Matrix-typed uniforms keep their const-bank base reg here (no valueToSource
     // entry — matrices don't translate to a single source operand).
     std::unordered_map<IRValueID, int> valueToMatrixBase;
+
+    // Fixed light-projection bias matrix products.  This keeps the Skin
+    // FaceShadow shader on a narrow production path instead of enabling
+    // arbitrary matrix values before the backend has a general matrix IR.
+    std::unordered_map<IRValueID, float> valueToBiasMatrix;
+    std::unordered_map<IRValueID, BiasMatrixProductBinding>
+        valueToBiasMatrixProduct;
 
     // MatVecMul results — emit the 4 dots once the consumer is known.
     std::unordered_map<IRValueID, MatVecMulBinding> valueToMatVecMul;
@@ -697,6 +717,41 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         return false;
     };
 
+    auto isLiteralEqual = [&](IRValueID id, float expected) -> bool
+    {
+        float v = 0.0f;
+        return isFloatLiteral(id, v) && v == expected;
+    };
+
+    auto extractBiasMatrixHalf =
+        [&](const IRInstruction& inst, float& half) -> bool
+    {
+        if (inst.operands.size() != 16) return false;
+
+        float h = 0.0f;
+        if (!isFloatLiteral(inst.operands[0], h)) return false;
+        if (h == 0.0f) return false;
+
+        const int halfLanes[] = {0, 3, 5, 7, 10, 11};
+        const int zeroLanes[] = {1, 2, 4, 6, 8, 9, 12, 13, 14};
+        for (int lane : halfLanes)
+        {
+            float v = 0.0f;
+            if (!isFloatLiteral(inst.operands[lane], v) || v != h)
+                return false;
+        }
+        for (int lane : zeroLanes)
+        {
+            if (!isLiteralEqual(inst.operands[lane], 0.0f))
+                return false;
+        }
+        if (!isLiteralEqual(inst.operands[15], 1.0f))
+            return false;
+
+        half = h;
+        return true;
+    };
+
     struct GenericSource
     {
         bool valid = false;
@@ -747,6 +802,56 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             sourceToNvfx(src), makeSrc(makeReg(NVFXSR_NONE, 0)),
             makeSrc(makeReg(NVFXSR_NONE, 0)));
         asm_.emit(in, VP_OP(MOV));
+    };
+
+    auto emitPostBiasHalfTransform =
+        [&](int srcTempIdx, const struct nvfx_reg& dst, float half)
+    {
+        auto [halfReg, halfLane] = literals.assign(half);
+        const int biasTempIdx = allocTemp();
+
+        const struct nvfx_reg srcTemp = makeReg(NVFXSR_TEMP, srcTempIdx);
+        const struct nvfx_reg biasTemp = makeReg(NVFXSR_TEMP, biasTempIdx);
+        const struct nvfx_reg halfConst = makeReg(NVFXSR_CONST, halfReg);
+
+        struct nvfx_src srcW = makeSrc(srcTemp);
+        srcW.swz[0] = srcW.swz[1] = srcW.swz[2] = srcW.swz[3] = 3;
+        struct nvfx_src halfSrc = makeSrc(halfConst);
+        halfSrc.swz[0] = halfSrc.swz[1] =
+            halfSrc.swz[2] = halfSrc.swz[3] =
+                static_cast<uint8_t>(halfLane);
+
+        // Rb.x = q.w * 0.5
+        struct nvfx_insn mulW = nvfx_insn(
+            0, 0, -1, -1,
+            const_cast<struct nvfx_reg&>(biasTemp),
+            NVFX_VP_MASK_X,
+            srcW, halfSrc, makeSrc(makeReg(NVFXSR_NONE, 0)));
+        asm_.emit(mulW, VP_OP(MUL));
+
+        // dst.xyz = q.xyz * 0.5 + Rb.x
+        struct nvfx_src srcXYZ = makeSrc(srcTemp);
+        srcXYZ.swz[0] = 0; srcXYZ.swz[1] = 1;
+        srcXYZ.swz[2] = 2; srcXYZ.swz[3] = 2;
+        struct nvfx_src biasX = makeSrc(biasTemp);
+        biasX.swz[0] = biasX.swz[1] = biasX.swz[2] = biasX.swz[3] = 0;
+        struct nvfx_insn madXYZ = nvfx_insn(
+            0, 0, -1, -1,
+            const_cast<struct nvfx_reg&>(dst),
+            NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+            srcXYZ, halfSrc, biasX);
+        asm_.emit(madXYZ, VP_OP(MAD));
+
+        // dst.w = q.w
+        struct nvfx_insn movW = nvfx_insn(
+            0, 0, -1, -1,
+            const_cast<struct nvfx_reg&>(dst),
+            NVFX_VP_MASK_W,
+            srcW, makeSrc(makeReg(NVFXSR_NONE, 0)),
+            makeSrc(makeReg(NVFXSR_NONE, 0)));
+        asm_.emit(movW, VP_OP(MOV));
+
+        availableTemps.push_back(biasTempIdx);
     };
 
     auto preloadConstSource = [&](GenericSource& s) -> bool
@@ -1467,7 +1572,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 // Determine dst: temp for non-final, output for final.
                 struct nvfx_reg stepDst;
                 int  stepTemp = -1;
-                if (isFinal)
+                const bool finalNeedsPostBias = isFinal && step.postBiasHalf;
+                if (isFinal && !finalNeedsPostBias)
                 {
                     stepDst = dstReg;
                 }
@@ -1482,7 +1588,9 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     step.vecOpcode != 0
                         ? step.vecOpcode
                         : static_cast<uint8_t>(VP_OP(DP4));
-                const int dpCount = isFinal ? matVecWriteLanes : 4;
+                const int dpCount = (isFinal && !finalNeedsPostBias)
+                    ? matVecWriteLanes
+                    : 4;
                 for (int i = 0; i < dpCount; ++i)
                 {
                     const int rowReg =
@@ -1504,6 +1612,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                         kDp4Writemask[i],
                         src0, src1, src2);
                     asm_.emit(in, opcode);
+                }
+
+                if (finalNeedsPostBias)
+                {
+                    emitPostBiasHalfTransform(stepTemp, dstReg, step.biasHalf);
+                    availableTemps.push_back(stepTemp);
                 }
 
                 // After consuming the prior chain temp, recycle it so
@@ -2181,6 +2295,32 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 break;
             }
 
+            case IROp::MatConstruct:
+            {
+                float half = 0.0f;
+                if (extractBiasMatrixHalf(inst, half))
+                    valueToBiasMatrix[inst.result] = half;
+                break;
+            }
+
+            case IROp::MatMul:
+            {
+                if (inst.operands.size() >= 2)
+                {
+                    auto biasIt = valueToBiasMatrix.find(inst.operands[0]);
+                    auto matIt = valueToMatrixBase.find(inst.operands[1]);
+                    if (biasIt != valueToBiasMatrix.end() &&
+                        matIt != valueToMatrixBase.end())
+                    {
+                        BiasMatrixProductBinding b;
+                        b.matrixBaseReg = matIt->second;
+                        b.half = biasIt->second;
+                        valueToBiasMatrixProduct[inst.result] = b;
+                    }
+                }
+                break;
+            }
+
             case IROp::MatVecMul:
             {
                 if (inst.operands.size() < 2)
@@ -2189,8 +2329,25 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     return out;
                 }
 
+                int matrixBaseReg = -1;
+                bool postBiasHalf = false;
+                float biasHalf = 0.5f;
                 auto matIt = valueToMatrixBase.find(inst.operands[0]);
-                if (matIt == valueToMatrixBase.end())
+                if (matIt != valueToMatrixBase.end())
+                {
+                    matrixBaseReg = matIt->second;
+                }
+                else
+                {
+                    auto biasIt = valueToBiasMatrixProduct.find(inst.operands[0]);
+                    if (biasIt != valueToBiasMatrixProduct.end())
+                    {
+                        matrixBaseReg = biasIt->second.matrixBaseReg;
+                        postBiasHalf = true;
+                        biasHalf = biasIt->second.half;
+                    }
+                }
+                if (matrixBaseReg < 0)
                 {
                     out.diagnostics.push_back(
                         "nv40-vp: MatVecMul matrix operand is not a uniform matrix");
@@ -2198,7 +2355,9 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 }
 
                 MatVecMulBinding binding;
-                binding.matrixBaseReg = matIt->second;
+                binding.matrixBaseReg = matrixBaseReg;
+                binding.postBiasHalf = postBiasHalf;
+                binding.biasHalf = biasHalf;
 
                 // DPH path #1: vector operand is a vec3+1.0 promotion.
                 auto promoIt = valueToVecPromote.find(inst.operands[1]);
