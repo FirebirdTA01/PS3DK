@@ -26,8 +26,15 @@ static int ps3tc_apply_default_fifo_words(u32 bufferSize, u32 segmentSize)
     g_ps3tc_default_segment_words = segmentSize;
 
     gGcmContext->current = gGcmContext->begin;
+    /* Use the WHOLE command buffer as the ring, not just one segment.
+       A single-segment ring forces a wrap (and a GPU drain) several
+       times per command-heavy frame, which serializes CPU and GPU and
+       cannot coexist with in-stream GPU waits (semaphore-acquire) that
+       legitimately block GET mid-segment.  Wrapping over the full
+       buffer drops the wrap rate to roughly once per several frames and
+       lets the GPU run concurrently with command production. */
     gGcmContext->end = gGcmContext->begin +
-                       (segmentSize - PS3TC_GCM_INIT_WORDS) - 1u;
+                       (bufferSize - PS3TC_GCM_INIT_WORDS) - 1u;
     return 0;
 }
 
