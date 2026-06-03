@@ -23,6 +23,15 @@ static uint32_t cggl_texture_unit(PSGLcgParameter *parameter)
     return 0u;
 }
 
+static uint32_t cggl_attrib_index(PSGLcgParameter *parameter)
+{
+    if (!parameter) return PSGL_MAX_GENERIC_ATTRIBS;
+    if (parameter->resource >= CG_ATTR0 &&
+        parameter->resource <= CG_ATTR15)
+        return (uint32_t)(parameter->resource - CG_ATTR0);
+    return PSGL_MAX_GENERIC_ATTRIBS;
+}
+
 static void cggl_copy_float4(float out[4], float x, float y, float z, float w)
 {
     out[0] = x;
@@ -239,13 +248,26 @@ CGGL_API void CGGLENTRY cgGLSetParameterPointer(CGparameter param,
                                                 GLint fsize, GLenum type,
                                                 GLsizei stride,
                                                 const GLvoid *pointer)
-{ (void)param; (void)fsize; (void)type; (void)stride; (void)pointer; }
+{
+    uint32_t index = cggl_attrib_index(psgl_cg_parameter(param));
+    if (index >= PSGL_MAX_GENERIC_ATTRIBS) return;
+    psgl_context_set_generic_attrib_pointer(index, fsize, type,
+                                            stride, pointer);
+}
 
 CGGL_API void CGGLENTRY cgGLEnableClientState(CGparameter param)
-{ (void)param; }
+{
+    uint32_t index = cggl_attrib_index(psgl_cg_parameter(param));
+    if (index >= PSGL_MAX_GENERIC_ATTRIBS) return;
+    psgl_context_set_generic_attrib_enabled(index, GL_TRUE);
+}
 
 CGGL_API void CGGLENTRY cgGLDisableClientState(CGparameter param)
-{ (void)param; }
+{
+    uint32_t index = cggl_attrib_index(psgl_cg_parameter(param));
+    if (index >= PSGL_MAX_GENERIC_ATTRIBS) return;
+    psgl_context_set_generic_attrib_enabled(index, GL_FALSE);
+}
 
 /* ── matrix parameters ───────────────────────────────────────────── */
 
