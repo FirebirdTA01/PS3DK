@@ -32,6 +32,37 @@ static uint32_t cggl_attrib_index(PSGLcgParameter *parameter)
     return PSGL_MAX_GENERIC_ATTRIBS;
 }
 
+static uint32_t cggl_array_base_len(const char *name)
+{
+    uint32_t n = 0u;
+    if (!name) return 0u;
+    while (name[n] != '\0' && name[n] != '[')
+        n++;
+    return n;
+}
+
+static int cggl_array_element_index(const char *name, const char *base,
+                                    uint32_t base_len, long *index)
+{
+    long value = 0;
+    uint32_t i;
+
+    if (!name || !base || !index || base_len == 0u) return 0;
+    for (i = 0u; i < base_len; i++) {
+        if (name[i] != base[i]) return 0;
+    }
+    if (name[base_len] != '[') return 0;
+    i = base_len + 1u;
+    if (name[i] < '0' || name[i] > '9') return 0;
+    while (name[i] >= '0' && name[i] <= '9') {
+        value = value * 10 + (long)(name[i] - '0');
+        i++;
+    }
+    if (name[i] != ']') return 0;
+    *index = value;
+    return 1;
+}
+
 static void cggl_copy_float4(float out[4], float x, float y, float z, float w)
 {
     out[0] = x;
@@ -314,11 +345,33 @@ CGGL_API void CGGLENTRY cgGLSetStateMatrixParameter(CGparameter param,
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterArrayfc(CGparameter p, long off,
                                                       long n,
                                                       const float *m)
-{ (void)p; (void)off; (void)n; (void)m; }
+{
+    PSGLcgParameter *parameter = psgl_cg_parameter(p);
+    PSGLcgProgram *program = parameter ? parameter->program : NULL;
+    uint32_t base_len;
+
+    if (!parameter || !program || !m || off < 0 || n <= 0) return;
+    base_len = cggl_array_base_len(parameter->name);
+    if (base_len == 0u) return;
+
+    for (uint32_t i = 0u; i < program->parameter_count; i++) {
+        PSGLcgParameter *candidate = &program->parameters[i];
+        long element_index = -1;
+
+        if (!cggl_array_element_index(candidate->name, parameter->name,
+                                      base_len, &element_index))
+            continue;
+        if (element_index < off || element_index >= off + n)
+            continue;
+        psgl_cg_set_parameter_matrix(
+            candidate, m + (uint32_t)(element_index - off) * 16u);
+    }
+    cggl_mark_cg_dirty();
+}
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterArrayfr(CGparameter p, long off,
                                                       long n,
                                                       const float *m)
-{ (void)p; (void)off; (void)n; (void)m; }
+{ cgGLSetMatrixParameterArrayfc(p, off, n, m); }
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterArraydc(CGparameter p, long off,
                                                       long n,
                                                       const double *m)

@@ -44,6 +44,16 @@ static int cg_streq(const char *a, const char *b)
     return *a == '\0' && *b == '\0';
 }
 
+static int cg_array_element_of(const char *element, const char *base)
+{
+    if (!element || !base) return 0;
+    while (*base && *element == *base) {
+        element++;
+        base++;
+    }
+    return *base == '\0' && *element == '[';
+}
+
 static void cg_copy_name(char *dst, const char *src)
 {
     uint32_t i = 0;
@@ -702,6 +712,10 @@ CG_API CGparameter CGENTRY cgGetNamedParameter(CGprogram prog,
     if (!program || !name) return NULL;
     for (uint32_t i = 0; i < program->parameter_count; i++) {
         if (cg_streq(program->parameters[i].name, name))
+            return (CGparameter)&program->parameters[i];
+    }
+    for (uint32_t i = 0; i < program->parameter_count; i++) {
+        if (cg_array_element_of(program->parameters[i].name, name))
             return (CGparameter)&program->parameters[i];
     }
     return NULL;
