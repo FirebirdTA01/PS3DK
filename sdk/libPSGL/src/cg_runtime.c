@@ -264,7 +264,10 @@ static void cg_init_parameter(PSGLcgProgram *program, uint32_t index,
         parameter->resource = binary_param->res;
         parameter->variability = binary_param->var;
         parameter->direction = binary_param->direction;
-        parameter->resource_index = binary_param->resIndex;
+        parameter->resource_index =
+            (binary_param->res >= CG_TEXUNIT0 &&
+             binary_param->res <= CG_TEXUNIT15) ?
+            (int32_t)binary_param->res : binary_param->resIndex;
         cg_copy_name(parameter->name, name);
     }
     }
