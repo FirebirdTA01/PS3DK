@@ -1,0 +1,5 @@
+// refract(I, N, eta) - Cg stdlib. float3 I/N, scalar literal eta.
+void main(float3 I : TEXCOORD0, float3 N : TEXCOORD1, out float4 color : COLOR)
+{
+    color = float4(refract(I, N, 0.751879699), 1.0);
+}

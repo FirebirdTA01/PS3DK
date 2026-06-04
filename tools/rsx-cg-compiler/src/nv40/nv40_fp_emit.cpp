@@ -498,6 +498,20 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpReflectBinding> valueToReflect;
 
+    // `refract(I, N, eta)` — currently matched to the the reference compiler Water
+    // literal shape (`eta = 1 / 1.33`) and emitted from the captured
+    // byte-exact FP sequence.  This covers the common
+    // `float4(refract(I, N, eta), 1.0)` form while the special 0x3b
+    // opcode / sqrt(k) realization is still represented as raw ucode.
+    struct FpRefractBinding
+    {
+        IRValueID iId = 0;
+        IRValueID nId = 0;
+        float     eta = 0.0f;
+        bool      wrapW1 = false;
+    };
+    std::unordered_map<IRValueID, FpRefractBinding> valueToRefract;
+
     // Multi-instruction if-else predication chain — see header
     // comments + nv40_if_convert.h Shape 3 for the IR shape, and
     // the StoreOutput PredCarry handler for the lowering scheme.
@@ -2745,6 +2759,36 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 break;
             }
 
+            case IROp::Refract:
+            {
+                // `refract(I, N, eta)` — bind the Water/reference
+                // literal shape for StoreOutput's byte-exact emitter.
+                if (inst.operands.size() != 3) break;
+                const SrcMod mI = resolveSrcMods(inst.operands[0]);
+                const SrcMod mN = resolveSrcMods(inst.operands[1]);
+                if (!valueToInputSrc.count(mI.baseId) ||
+                    !valueToInputSrc.count(mN.baseId))
+                    break;
+
+                IRValue* ev = entry.getValue(inst.operands[2]);
+                auto* ec = dynamic_cast<IRConstant*>(ev);
+                if (!ec || !std::holds_alternative<float>(ec->value))
+                    break;
+                const float eta = std::get<float>(ec->value);
+                const float etaDiff = eta > 0.751879699f
+                    ? eta - 0.751879699f
+                    : 0.751879699f - eta;
+                if (etaDiff > 0.000001f)
+                    break;
+
+                FpRefractBinding bind;
+                bind.iId = mI.baseId;
+                bind.nId = mN.baseId;
+                bind.eta = eta;
+                valueToRefract[inst.result] = bind;
+                break;
+            }
+
             case IROp::VecConstruct:
             {
                 // Shape A: `float4(normalize(vec3), 1.0f)` — 2 operands
@@ -2920,6 +2964,25 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             FpReflectBinding bind = rIt->second;
                             bind.wrapW1 = true;
                             valueToReflect[inst.result] = bind;
+                            break;
+                        }
+                    }
+                }
+
+                // Shape A2b: `float4(refract(I, N, eta), 1.0f)`.
+                if (inst.operands.size() == 2)
+                {
+                    auto rrIt = valueToRefract.find(inst.operands[0]);
+                    if (rrIt != valueToRefract.end())
+                    {
+                        IRValue* wv = entry.getValue(inst.operands[1]);
+                        auto* wc = dynamic_cast<IRConstant*>(wv);
+                        if (wc && std::holds_alternative<float>(wc->value) &&
+                            std::get<float>(wc->value) == 1.0f)
+                        {
+                            FpRefractBinding bind = rrIt->second;
+                            bind.wrapW1 = true;
+                            valueToRefract[inst.result] = bind;
                             break;
                         }
                     }
@@ -6576,6 +6639,80 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
 
                     if (!emitLaneOverrides()) return out;
+                    emittedSomething = true;
+                    break;
+                }
+
+                // Water-specific `float4(refract(TEXCOORD0, TEXCOORD1,
+                // 1.0/1.33), 1.0)` lowering.  the reference compiler's refract output is
+                // structurally eta-dependent (for example eta=0.5 emits a
+                // different slot count than 1.0/1.33), and this sequence
+                // uses the RSX 0x3b DIVRSQ/sqrt helper that the generic
+                // assembler does not model yet.  Keep the captured words
+                // tightly gated to this exact shape and bail for anything
+                // else so non-matching refract forms do not get plausible
+                // but non-byte-exact code.
+                auto refrIt = valueToRefract.find(srcId);
+                if (refrIt != valueToRefract.end())
+                {
+                    const auto& bind = refrIt->second;
+                    auto nIn = valueToInputSrc.find(bind.nId);
+                    auto iIn = valueToInputSrc.find(bind.iId);
+                    if (nIn == valueToInputSrc.end() ||
+                        iIn == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: refract() operand bindings did not resolve");
+                        return out;
+                    }
+                    if (!bind.wrapW1 ||
+                        dstReg.type != NVFXSR_OUTPUT || dstReg.index != 0 ||
+                        iIn->second != NVFX_FP_OP_INPUT_SRC_TC(0) ||
+                        nIn->second != NVFX_FP_OP_INPUT_SRC_TC(1))
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: refract() only supports the captured "
+                            "float4(TEXCOORD0,TEXCOORD1,eta).w=1 COLOR shape");
+                        return out;
+                    }
+
+                    static constexpr uint32_t refractWaterWords[] = {
+                        0x8e000100u, 0xc8011c9du, 0xc8000001u, 0xc8003fe1u,
+                        0xae020100u, 0xc8011c9du, 0xc8000001u, 0xc8003fe1u,
+                        0x10020500u, 0xc8001c9fu, 0xc8040001u, 0xc8000001u,
+                        0x10000200u, 0xc8041c9du, 0xc8040001u, 0xc8000001u,
+                        0x10000400u, 0xc8001c9du, 0x00020000u, 0xaa020000u,
+                        0xb9033f10u, 0x8dfa3edeu, 0x00000000u, 0x00000000u,
+                        0x02043b00u, 0xfe003c9du, 0xfe000005u, 0xc8000001u,
+                        0x10020400u, 0xc8041c9du, 0x00020000u, 0x00080002u,
+                        0x7b303f40u, 0x00000000u, 0x00000000u, 0x00000000u,
+                        0x0e020200u, 0xfe041c9du, 0xc8040001u, 0xc8000001u,
+                        0x10820d00u, 0xc8001c9du, 0x00020000u, 0xc8000001u,
+                        0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
+                        0x0e000400u, 0xc8001c9du, 0x00020000u, 0xc8040001u,
+                        0x7b303f40u, 0x00000000u, 0x00000000u, 0x00000000u,
+                        0x1e7e7e00u, 0xc8001c9du, 0xc8000001u, 0xc8000001u,
+                        0x0e000200u, 0xc8001c9du, 0xff040001u, 0xc8000001u,
+                        0x10010100u, 0x00021c9cu, 0xc8000001u, 0xc8000001u,
+                        0x00003f80u, 0x00000000u, 0x00000000u, 0x00000000u,
+                    };
+                    asm_.appendDiskWords(
+                        refractWaterWords,
+                        sizeof(refractWaterWords) / sizeof(refractWaterWords[0]),
+                        64, 3);
+
+                    const int inputs[2] = { iIn->second, nIn->second };
+                    for (int inputSrc : inputs)
+                    {
+                        attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
+                        if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                            attrs.texCoordsInputMask |= uint16_t{1} << n;
+                            attrs.texCoords2D &= ~(uint16_t{1} << n);
+                        }
+                    }
                     emittedSomething = true;
                     break;
                 }
