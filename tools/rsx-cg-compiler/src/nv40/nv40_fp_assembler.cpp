@@ -192,20 +192,6 @@ void FpAssembler::appendConstBlock(const float values[4])
     // on the real instruction that came before.
 }
 
-void FpAssembler::appendDiskWords(const uint32_t* words, size_t count,
-                                  size_t lastInstructionWordOffset,
-                                  int numTempRegs)
-{
-    const size_t base = logicalWords_.size();
-    logicalWords_.resize(base + count, 0u);
-    for (size_t i = 0; i < count; ++i)
-        logicalWords_[base + i] = halfswap(words[i]);
-    lastInstrOffset_ = base + lastInstructionWordOffset;
-    hasInstruction_ = true;
-    if (numTempRegs_ < numTempRegs)
-        numTempRegs_ = numTempRegs;
-}
-
 void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
 {
     uint32_t sr = 0;

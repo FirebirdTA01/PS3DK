@@ -6643,15 +6643,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     break;
                 }
 
-                // Water-specific `float4(refract(TEXCOORD0, TEXCOORD1,
-                // 1.0/1.33), 1.0)` lowering.  the reference compiler's refract output is
-                // structurally eta-dependent (for example eta=0.5 emits a
-                // different slot count than 1.0/1.33), and this sequence
-                // uses the RSX 0x3b DIVRSQ/sqrt helper that the generic
-                // assembler does not model yet.  Keep the captured words
-                // tightly gated to this exact shape and bail for anything
-                // else so non-matching refract forms do not get plausible
-                // but non-byte-exact code.
+                // `float4(refract(I, N, eta), 1.0)` — Cg refract:
+                //   k = eta*eta*dot(-I,N)^2 + (1 - eta*eta)
+                //   return k > 0 ? eta*I - (eta*dot(I,N) + sqrt(k))*N : 0
+                // the reference compiler's sequence uses the RSX 0x3b DIVRSQ helper for
+                // sqrt(k) and folds eta-dependent constants into inline
+                // const blocks.  Keep the wrapW1 shape match so the tail
+                // MOV R0.w=1.0 stays byte-exact with the reference.
                 auto refrIt = valueToRefract.find(srcId);
                 if (refrIt != valueToRefract.end())
                 {
@@ -6666,40 +6664,198 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
                     if (!bind.wrapW1 ||
-                        dstReg.type != NVFXSR_OUTPUT || dstReg.index != 0 ||
-                        iIn->second != NVFX_FP_OP_INPUT_SRC_TC(0) ||
-                        nIn->second != NVFX_FP_OP_INPUT_SRC_TC(1))
+                        dstReg.type != NVFXSR_OUTPUT || dstReg.index != 0)
                     {
                         out.diagnostics.push_back(
-                            "nv40-fp: refract() only supports the captured "
-                            "float4(TEXCOORD0,TEXCOORD1,eta).w=1 COLOR shape");
+                            "nv40-fp: refract() only supports "
+                            "float4(refract(...),1.0) COLOR output");
                         return out;
                     }
 
-                    static constexpr uint32_t refractWaterWords[] = {
-                        0x8e000100u, 0xc8011c9du, 0xc8000001u, 0xc8003fe1u,
-                        0xae020100u, 0xc8011c9du, 0xc8000001u, 0xc8003fe1u,
-                        0x10020500u, 0xc8001c9fu, 0xc8040001u, 0xc8000001u,
-                        0x10000200u, 0xc8041c9du, 0xc8040001u, 0xc8000001u,
-                        0x10000400u, 0xc8001c9du, 0x00020000u, 0xaa020000u,
-                        0xb9033f10u, 0x8dfa3edeu, 0x00000000u, 0x00000000u,
-                        0x02043b00u, 0xfe003c9du, 0xfe000005u, 0xc8000001u,
-                        0x10020400u, 0xc8041c9du, 0x00020000u, 0x00080002u,
-                        0x7b303f40u, 0x00000000u, 0x00000000u, 0x00000000u,
-                        0x0e020200u, 0xfe041c9du, 0xc8040001u, 0xc8000001u,
-                        0x10820d00u, 0xc8001c9du, 0x00020000u, 0xc8000001u,
-                        0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-                        0x0e000400u, 0xc8001c9du, 0x00020000u, 0xc8040001u,
-                        0x7b303f40u, 0x00000000u, 0x00000000u, 0x00000000u,
-                        0x1e7e7e00u, 0xc8001c9du, 0xc8000001u, 0xc8000001u,
-                        0x0e000200u, 0xc8001c9du, 0xff040001u, 0xc8000001u,
-                        0x10010100u, 0x00021c9cu, 0xc8000001u, 0xc8000001u,
-                        0x00003f80u, 0x00000000u, 0x00000000u, 0x00000000u,
+                    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
+                    const struct nvfx_reg r2 = nvfx_reg(NVFXSR_TEMP, 2);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg iReg =
+                        nvfx_reg(NVFXSR_INPUT, iIn->second);
+                    const struct nvfx_reg nReg =
+                        nvfx_reg(NVFXSR_INPUT, nIn->second);
+                    const float e = bind.eta;
+                    const float e2 = e * e;
+                    const float om = 1.0f - e2;
+
+                    auto src = [](const struct nvfx_reg& reg) {
+                        return nvfx_src(const_cast<struct nvfx_reg&>(reg));
                     };
-                    asm_.appendDiskWords(
-                        refractWaterWords,
-                        sizeof(refractWaterWords) / sizeof(refractWaterWords[0]),
-                        64, 3);
+                    auto swzAll = [](struct nvfx_src& s, int lane) {
+                        s.swz[0] = s.swz[1] = s.swz[2] = s.swz[3] = lane;
+                    };
+                    auto emitNone = [&]() {
+                        return nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    };
+
+                    // #0 MOV R0.xyz = INPUT(I)
+                    {
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            src(iReg), emitNone(), emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                    }
+
+                    // #1 MOV R1.xyz = INPUT(N)
+                    {
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            src(nReg), emitNone(), emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                    }
+
+                    // #2 DP3 R1.w = dot(-R0, R1)
+                    {
+                        struct nvfx_src s0 = src(r0);
+                        s0.negate = 1;
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            NVFX_FP_MASK_W, s0, src(r1), emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_DP3);
+                    }
+
+                    // #3 MUL R0.w = R1.w * R1.w
+                    {
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_W, src(r1), src(r1), emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
+                    }
+
+                    // #4 MAD R0.w = R0.w * e2 + (1 - e2)
+                    {
+                        struct nvfx_src s0 = src(r0);
+                        struct nvfx_src s1 = src(constReg);
+                        swzAll(s1, 0);
+                        struct nvfx_src s2 = src(constReg);
+                        swzAll(s2, 1);
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
+                        const float block[4] = { e2, om, 0.0f, 0.0f };
+                        asm_.appendConstBlock(block);
+                    }
+
+                    // #5 DIVRSQ R2.x = |R0.w| / sqrt(|R0.w|)
+                    {
+                        struct nvfx_src s0 = src(r0);
+                        swzAll(s0, 3);
+                        s0.abs = 1;
+                        struct nvfx_src s1 = src(r0);
+                        swzAll(s1, 3);
+                        s1.abs = 1;
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r2),
+                            NVFX_FP_MASK_X, s0, s1, emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
+                    }
+
+                    // #6 MAD R1.w = R1.w * e + -R2.x
+                    {
+                        struct nvfx_src s1 = src(constReg);
+                        swzAll(s1, 0);
+                        struct nvfx_src s2 = src(r2);
+                        swzAll(s2, 0);
+                        s2.negate = 1;
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            NVFX_FP_MASK_W, src(r1), s1, s2);
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
+                        const float block[4] = { e, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(block);
+                    }
+
+                    // #7 MUL R1.xyz = R1.wwww * R1.xyz
+                    {
+                        struct nvfx_src s0 = src(r1);
+                        swzAll(s0, 3);
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            s0, src(r1), emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
+                    }
+
+                    // #8 SGT R1H.w = R0.w > 0
+                    {
+                        struct nvfx_reg h1 = nvfx_reg(NVFXSR_TEMP, 1);
+                        h1.is_fp16 = 1;
+                        struct nvfx_src s0 = src(r0);
+                        struct nvfx_src s1 = src(constReg);
+                        swzAll(s1, 0);
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            h1, NVFX_FP_MASK_W, s0, s1, emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_SGT);
+                        const float block[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(block);
+                    }
+
+                    // #9 MAD R0.xyz = R0.xyz * e + R1.xyz
+                    {
+                        struct nvfx_src s1 = src(constReg);
+                        swzAll(s1, 0);
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            src(r0), s1, src(r1));
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
+                        const float block[4] = { e, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(block);
+                    }
+
+                    // #10 FENCB
+                    asm_.emitFencbr();
+
+                    // #11 MUL R0.xyz = R0.xyz * R1H.wwww
+                    {
+                        struct nvfx_reg h1 = nvfx_reg(NVFXSR_TEMP, 1);
+                        h1.is_fp16 = 1;
+                        struct nvfx_src s1 = src(h1);
+                        swzAll(s1, 3);
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z),
+                            src(dstReg), s1, emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
+                    }
+
+                    // #12 MOV R0.w = 1.0
+                    {
+                        struct nvfx_src s0 = src(constReg);
+                        swzAll(s0, 0);
+                        struct nvfx_insn in = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(dstReg),
+                            NVFX_FP_MASK_W, s0, emitNone(), emitNone());
+                        asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        const float block[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(block);
+                    }
 
                     const int inputs[2] = { iIn->second, nIn->second };
                     for (int inputSrc : inputs)

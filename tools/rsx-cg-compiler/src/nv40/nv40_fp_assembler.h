@@ -23,7 +23,6 @@
  * on hw[3] for any varying-input read).
  */
 
-#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -58,15 +57,6 @@ public:
     // (value[0] is the X lane etc.); the on-disk halfword swap is
     // applied at words() like for instructions.
     void appendConstBlock(const float values[4]);
-
-    // Append an already captured on-disk NV40 FP ucode stream.  This is
-    // reserved for byte-exact special sequences whose opcodes are not
-    // all represented by nvfx_shader.h yet; words are converted back to
-    // the assembler's logical layout and will be halfword-swapped again
-    // by words().
-    void appendDiskWords(const uint32_t* words, size_t count,
-                         size_t lastInstructionWordOffset,
-                         int numTempRegs);
 
     // Stamp the NVFX_FP_OP_PROGRAM_END bit on the most recent
     // *instruction* (not a const block).  Must be called exactly
