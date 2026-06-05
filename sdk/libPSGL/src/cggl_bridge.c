@@ -14,6 +14,8 @@ static void cggl_zero(void *ptr, size_t size)
 
 static CGbool g_cggl_vertex_enabled = CG_FALSE;
 static CGbool g_cggl_fragment_enabled = CG_FALSE;
+static CGprogram g_cggl_bound_vertex_program = NULL;
+static CGprogram g_cggl_bound_fragment_program = NULL;
 
 static uint32_t cggl_texture_unit(PSGLcgParameter *parameter)
 {
@@ -90,6 +92,131 @@ static void cggl_copy_matrix_transpose(float out[16], const float *in)
     }
 }
 
+static void cggl_matrix_multiply(float out[16], const float a[16],
+                                 const float b[16])
+{
+    float tmp[16];
+    for (uint32_t row = 0u; row < 4u; row++) {
+        for (uint32_t col = 0u; col < 4u; col++) {
+            tmp[row * 4u + col] =
+                a[row * 4u + 0u] * b[0u * 4u + col] +
+                a[row * 4u + 1u] * b[1u * 4u + col] +
+                a[row * 4u + 2u] * b[2u * 4u + col] +
+                a[row * 4u + 3u] * b[3u * 4u + col];
+        }
+    }
+    for (uint32_t i = 0u; i < 16u; i++)
+        out[i] = tmp[i];
+}
+
+static float cggl_absf(float x)
+{
+    return x < 0.0f ? -x : x;
+}
+
+static int cggl_matrix_inverse(float out[16], const float in[16])
+{
+    float aug[4][8];
+    for (uint32_t row = 0u; row < 4u; row++) {
+        for (uint32_t col = 0u; col < 4u; col++)
+            aug[row][col] = in[row * 4u + col];
+        for (uint32_t col = 0u; col < 4u; col++)
+            aug[row][4u + col] = (row == col) ? 1.0f : 0.0f;
+    }
+
+    for (uint32_t col = 0u; col < 4u; col++) {
+        uint32_t pivot = col;
+        float pivot_abs = cggl_absf(aug[pivot][col]);
+        for (uint32_t row = col + 1u; row < 4u; row++) {
+            float value_abs = cggl_absf(aug[row][col]);
+            if (value_abs > pivot_abs) {
+                pivot = row;
+                pivot_abs = value_abs;
+            }
+        }
+        if (pivot_abs < 1.0e-8f)
+            return 0;
+        if (pivot != col) {
+            for (uint32_t i = 0u; i < 8u; i++) {
+                float tmp = aug[col][i];
+                aug[col][i] = aug[pivot][i];
+                aug[pivot][i] = tmp;
+            }
+        }
+        {
+            float scale = aug[col][col];
+            for (uint32_t i = 0u; i < 8u; i++)
+                aug[col][i] /= scale;
+        }
+        for (uint32_t row = 0u; row < 4u; row++) {
+            float factor;
+            if (row == col) continue;
+            factor = aug[row][col];
+            for (uint32_t i = 0u; i < 8u; i++)
+                aug[row][i] -= factor * aug[col][i];
+        }
+    }
+
+    for (uint32_t row = 0u; row < 4u; row++) {
+        for (uint32_t col = 0u; col < 4u; col++)
+            out[row * 4u + col] = aug[row][4u + col];
+    }
+    return 1;
+}
+
+static int cggl_get_state_matrix(const PSGLcontext *context, CGGLenum matrix,
+                                 float out[16])
+{
+    uint32_t unit;
+    if (!context || !out) return 0;
+    switch (matrix) {
+    case CG_GL_MODELVIEW_MATRIX:
+        for (uint32_t i = 0u; i < 16u; i++)
+            out[i] = context->modelview[i];
+        return 1;
+    case CG_GL_PROJECTION_MATRIX:
+        for (uint32_t i = 0u; i < 16u; i++)
+            out[i] = context->projection[i];
+        return 1;
+    case CG_GL_TEXTURE_MATRIX:
+        unit = (context->active_texture >= GL_TEXTURE0) ?
+            (uint32_t)(context->active_texture - GL_TEXTURE0) : 0u;
+        if (unit >= PSGL_MAX_TEXTURE_UNITS) unit = 0u;
+        for (uint32_t i = 0u; i < 16u; i++)
+            out[i] = context->texture_matrix[unit][i];
+        return 1;
+    case CG_GL_MODELVIEW_PROJECTION_MATRIX:
+        cggl_matrix_multiply(out, context->projection, context->modelview);
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int cggl_apply_matrix_transform(float out[16], const float in[16],
+                                       CGGLenum transform)
+{
+    float inverse[16];
+    switch (transform) {
+    case CG_GL_MATRIX_IDENTITY:
+        for (uint32_t i = 0u; i < 16u; i++)
+            out[i] = in[i];
+        return 1;
+    case CG_GL_MATRIX_TRANSPOSE:
+        cggl_copy_matrix_transpose(out, in);
+        return 1;
+    case CG_GL_MATRIX_INVERSE:
+        return cggl_matrix_inverse(out, in);
+    case CG_GL_MATRIX_INVERSE_TRANSPOSE:
+        if (!cggl_matrix_inverse(inverse, in))
+            return 0;
+        cggl_copy_matrix_transpose(out, inverse);
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static void cggl_mark_cg_dirty(void)
 {
     PSGLcontext *context = psgl_context_current();
@@ -106,14 +233,26 @@ CGGL_API CGbool CGGLENTRY cgGLIsProfileSupported(CGprofile profile)
 
 CGGL_API void CGGLENTRY cgGLEnableProfile(CGprofile profile)
 {
-    if (psgl_cg_profile_is_vertex(profile)) g_cggl_vertex_enabled = CG_TRUE;
-    if (psgl_cg_profile_is_fragment(profile)) g_cggl_fragment_enabled = CG_TRUE;
+    if (psgl_cg_profile_is_vertex(profile)) {
+        g_cggl_vertex_enabled = CG_TRUE;
+        psgl_context_bind_cg_program(g_cggl_bound_vertex_program, profile);
+    }
+    if (psgl_cg_profile_is_fragment(profile)) {
+        g_cggl_fragment_enabled = CG_TRUE;
+        psgl_context_bind_cg_program(g_cggl_bound_fragment_program, profile);
+    }
 }
 
 CGGL_API void CGGLENTRY cgGLDisableProfile(CGprofile profile)
 {
-    if (psgl_cg_profile_is_vertex(profile)) g_cggl_vertex_enabled = CG_FALSE;
-    if (psgl_cg_profile_is_fragment(profile)) g_cggl_fragment_enabled = CG_FALSE;
+    if (psgl_cg_profile_is_vertex(profile)) {
+        g_cggl_vertex_enabled = CG_FALSE;
+        psgl_context_bind_cg_program(NULL, profile);
+    }
+    if (psgl_cg_profile_is_fragment(profile)) {
+        g_cggl_fragment_enabled = CG_FALSE;
+        psgl_context_bind_cg_program(NULL, profile);
+    }
 }
 
 CGGL_API CGprofile CGGLENTRY cgGLGetLatestProfile(CGGLenum profile_type)
@@ -147,11 +286,25 @@ CGGL_API void CGGLENTRY cgGLBindProgram(CGprogram program)
 {
     PSGLcgProgram *p = psgl_cg_program(program);
     if (!p || !p->loaded) return;
-    psgl_context_bind_cg_program(program, p->profile);
+    if (psgl_cg_profile_is_vertex(p->profile)) {
+        g_cggl_bound_vertex_program = program;
+        psgl_context_bind_cg_program(g_cggl_vertex_enabled ? program : NULL,
+                                     p->profile);
+    } else if (psgl_cg_profile_is_fragment(p->profile)) {
+        g_cggl_bound_fragment_program = program;
+        psgl_context_bind_cg_program(g_cggl_fragment_enabled ? program : NULL,
+                                     p->profile);
+    }
 }
 
 CGGL_API void CGGLENTRY cgGLUnbindProgram(CGprofile profile)
-{ psgl_context_bind_cg_program(NULL, profile); }
+{
+    if (psgl_cg_profile_is_vertex(profile))
+        g_cggl_bound_vertex_program = NULL;
+    if (psgl_cg_profile_is_fragment(profile))
+        g_cggl_bound_fragment_program = NULL;
+    psgl_context_bind_cg_program(NULL, profile);
+}
 
 CGGL_API GLuint CGGLENTRY cgGLGetProgramID(CGprogram program)
 {
@@ -356,18 +509,19 @@ CGGL_API void CGGLENTRY cgGLSetStateMatrixParameter(CGparameter param,
                                                     CGGLenum transform)
 {
     PSGLcgParameter *p = psgl_cg_parameter(param);
-    if (!p) return;
-    cggl_zero(p->value, 16u * sizeof(float));
-    p->value[0] = 1.0f;
-    p->value[5] = 1.0f;
-    p->value[10] = 1.0f;
-    p->value[15] = 1.0f;
-    p->value_count = 16u;
+    PSGLcontext *context = psgl_context_current();
+    float source[16];
+    float transformed[16];
+    float column_major[16];
+    if (!p || !cggl_get_state_matrix(context, matrix, source))
+        return;
+    if (!cggl_apply_matrix_transform(transformed, source, transform))
+        return;
+    cggl_copy_matrix_transpose(column_major, transformed);
+    cgGLSetMatrixParameterfc(param, column_major);
     p->state_matrix = CG_TRUE;
     p->state_matrix_source = matrix;
     p->state_matrix_transform = transform;
-    p->dirty = CG_TRUE;
-    cggl_mark_cg_dirty();
 }
 
 CGGL_API void CGGLENTRY cgGLSetMatrixParameterArrayfc(CGparameter p, long off,
@@ -484,10 +638,16 @@ CGGL_API void CGGLENTRY cgGLEnableTextureParameter(CGparameter param)
     PSGLcgParameter *p = psgl_cg_parameter(param);
     uint32_t unit = cggl_texture_unit(p);
     psgl_context_active_texture(GL_TEXTURE0 + unit);
+    psgl_context_set_enable(GL_TEXTURE_2D, GL_TRUE);
 }
 
 CGGL_API void CGGLENTRY cgGLDisableTextureParameter(CGparameter param)
-{ (void)param; }
+{
+    PSGLcgParameter *p = psgl_cg_parameter(param);
+    uint32_t unit = cggl_texture_unit(p);
+    psgl_context_active_texture(GL_TEXTURE0 + unit);
+    psgl_context_set_enable(GL_TEXTURE_2D, GL_FALSE);
+}
 
 CGGL_API GLenum CGGLENTRY cgGLGetTextureEnum(CGparameter param)
 { (void)param; return GL_TEXTURE_2D; }

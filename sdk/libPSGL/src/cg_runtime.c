@@ -356,6 +356,7 @@ static CGprogram cg_create_binary_program(PSGLcgContext *context,
         return NULL;
     }
 
+    program->loaded = CG_TRUE;
     cg_link_program(context, program);
     psgl_cg_set_error(context, CG_NO_ERROR);
     return (CGprogram)program;

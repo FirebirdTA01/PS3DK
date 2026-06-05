@@ -63,6 +63,7 @@ typedef struct PSGLtextureObject {
     uint8_t rsx_format;
     uint8_t location;
     uint8_t linear;
+    uint8_t owns_storage;
     uint32_t size;
     void *address;
     uint32_t offset;
@@ -884,6 +885,7 @@ static void psgl_fill_surface(PSGLcontext *context, CellGcmSurface *surface)
             surface->width  = color->width;
             surface->height = color->height;
         } else {
+            surface->colorFormat = GCM_SURFACE_X8R8G8B8;
             surface->colorTarget = GCM_SURFACE_TARGET_NONE;
         }
         if (depth && depth->address) {
@@ -1467,12 +1469,15 @@ static PSGLtextureObject *psgl_create_texture(GLuint name)
 static void psgl_release_texture_storage(PSGLtextureObject *texture)
 {
     if (!texture) return;
+    if (texture->owns_storage && texture->address)
+        rsxFree(texture->address);
     texture->address = NULL;
     texture->offset = 0u;
     texture->size = 0u;
     texture->width = 0u;
     texture->height = 0u;
     texture->pitch = 0u;
+    texture->owns_storage = 0u;
     psgl_zero(&texture->gcm_texture, sizeof(texture->gcm_texture));
     texture->gcm_texture.remap = psgl_texture_remap_argb();
 }
@@ -1554,6 +1559,19 @@ static int psgl_texture_supported(GLenum format, GLenum type)
     if (format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5)
         return 1;
     return 0;
+}
+
+static int psgl_texture_storage_matches(const PSGLtextureObject *texture,
+                                        uint16_t width, uint16_t height,
+                                        uint16_t pitch, uint32_t size,
+                                        uint8_t rsx_format, uint8_t linear)
+{
+    return texture && texture->address && texture->owns_storage &&
+        texture->width == width && texture->height == height &&
+        texture->pitch == pitch && texture->size == size &&
+        texture->location == CELL_GCM_LOCATION_LOCAL &&
+        texture->linear == linear && texture->levels == 1u &&
+        texture->rsx_format == rsx_format;
 }
 
 static uint32_t psgl_read_u16_be(const unsigned char *src)
@@ -1784,6 +1802,15 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
     }
 }
 
+static void psgl_emit_current_attribs(PSGLcontext *context)
+{
+    if (!context || !context->gcm) return;
+    if (!context->attribs[PSGL_ATTRIB_COLOR].enabled) {
+        cellGcmSetVertexData4f(context->gcm, GCM_VERTEX_ATTRIB_COLOR0,
+                               context->current_color);
+    }
+}
+
 static void psgl_emit_textures(PSGLcontext *context)
 {
     if (!context || !context->gcm) return;
@@ -1964,6 +1991,7 @@ static void psgl_validate_draw_state(PSGLcontext *context)
         psgl_emit_vertex_arrays(context);
         context->dirty &= ~PSGL_DIRTY_CG;
     }
+    psgl_emit_current_attribs(context);
 }
 
 static void psgl_clear_deleted_buffer_bindings(GLuint name)
@@ -3355,6 +3383,7 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
     uint32_t size;
     void *address;
     uint32_t offset = 0u;
+    uint8_t rsx_format;
     int rt_storage;
     int swizzled;
 
@@ -3375,18 +3404,21 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
         pitch = psgl_align_u16((uint32_t)width * 4u, 64u);
         size = pitch * (uint32_t)height;
         swizzled = 0;
+        rsx_format = CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN;
     } else if ((GLenum)internalformat == GL_DEPTH_COMPONENT16) {
         if (format != GL_DEPTH_COMPONENT || type != GL_UNSIGNED_SHORT || pixels)
             return;
         pitch = psgl_align_u16((uint32_t)width * 2u, 64u);
         size = pitch * (uint32_t)height;
         swizzled = 0;
+        rsx_format = CELL_GCM_TEXTURE_DEPTH16 | CELL_GCM_TEXTURE_LN;
     } else if ((GLenum)internalformat == GL_DEPTH_COMPONENT24) {
         if (format != GL_DEPTH_COMPONENT || type != GL_UNSIGNED_INT || pixels)
             return;
         pitch = psgl_align_u16((uint32_t)width * 4u, 64u);
         size = pitch * (uint32_t)height;
         swizzled = 0;
+        rsx_format = CELL_GCM_TEXTURE_DEPTH24_D8 | CELL_GCM_TEXTURE_LN;
     } else {
         swizzled = texture->allocation_hint == GL_TEXTURE_SWIZZLED_GPU_SCE &&
                    psgl_is_power_of_two((uint32_t)width) &&
@@ -3395,7 +3427,22 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
                          : (uint32_t)psgl_align_u16((uint32_t)width * 4u, 64u);
         size = swizzled ? (uint32_t)width * (uint32_t)height * 4u
                         : pitch * (uint32_t)height;
+        rsx_format = CELL_GCM_TEXTURE_A8R8G8B8 |
+            (swizzled ? CELL_GCM_TEXTURE_SZ : CELL_GCM_TEXTURE_LN);
     }
+    if (psgl_texture_storage_matches(texture, (uint16_t)width,
+                                     (uint16_t)height, (uint16_t)pitch,
+                                     size, rsx_format,
+                                     swizzled ? 0u : 1u)) {
+        if (pixels)
+            psgl_write_texture_image(texture, 0, 0, width, height,
+                                     format, type, pixels,
+                                     context->unpack_alignment);
+        psgl_fill_gcm_texture(texture);
+        context->dirty |= PSGL_DIRTY_TEXTURES;
+        return;
+    }
+
     address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
     if (!address) return;
     if (cellGcmAddressToOffset(address, &offset) != 0) {
@@ -3412,13 +3459,8 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
     texture->levels = 1u;
     texture->location = CELL_GCM_LOCATION_LOCAL;
     texture->linear = swizzled ? 0u : 1u;
-    if ((GLenum)internalformat == GL_DEPTH_COMPONENT16)
-        texture->rsx_format = CELL_GCM_TEXTURE_DEPTH16 | CELL_GCM_TEXTURE_LN;
-    else if ((GLenum)internalformat == GL_DEPTH_COMPONENT24)
-        texture->rsx_format = CELL_GCM_TEXTURE_DEPTH24_D8 | CELL_GCM_TEXTURE_LN;
-    else
-        texture->rsx_format = CELL_GCM_TEXTURE_A8R8G8B8 |
-            (swizzled ? CELL_GCM_TEXTURE_SZ : CELL_GCM_TEXTURE_LN);
+    texture->owns_storage = 1u;
+    texture->rsx_format = rsx_format;
     if (pixels)
         psgl_write_texture_image(texture, 0, 0, width, height,
                                  format, type, pixels,
@@ -3443,6 +3485,211 @@ void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
     psgl_write_texture_image(texture, xoffset, yoffset, width, height,
                              format, type, pixels, context->unpack_alignment);
     context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
+static int psgl_current_depth_source(PSGLcontext *context,
+                                     uint32_t *offset,
+                                     uint32_t *pitch,
+                                     uint16_t *width,
+                                     uint16_t *height,
+                                     uint32_t *bytes_per_pixel)
+{
+    PSGLdevice *device;
+    if (!context || !offset || !pitch || !width || !height ||
+        !bytes_per_pixel)
+        return 0;
+
+    if (context->bound_framebuffer != 0u) {
+        int idx = psgl_fbo_find(context, context->bound_framebuffer);
+        if (idx >= 0 && context->fbo_objects[idx].depth != 0u) {
+            PSGLtextureObject *depth =
+                psgl_get_texture(context->fbo_objects[idx].depth);
+            if (depth && depth->address && psgl_texture_is_depth(depth->rsx_format)) {
+                uint8_t base = depth->rsx_format &
+                    ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_SZ);
+                *offset = depth->offset;
+                *pitch = depth->pitch;
+                *width = depth->width;
+                *height = depth->height;
+                *bytes_per_pixel =
+                    (base == CELL_GCM_TEXTURE_DEPTH16) ? 2u : 4u;
+                return 1;
+            }
+        }
+    }
+
+    device = context->device;
+    if (!device || !device->depth_address)
+        return 0;
+    *offset = device->depth_offset;
+    *pitch = device->depth_pitch;
+    *width = device->render_width;
+    *height = device->render_height;
+    *bytes_per_pixel = 4u;
+    return 1;
+}
+
+static GLenum psgl_depth_copy_internal_format(GLenum internalformat,
+                                              uint32_t bytes_per_pixel)
+{
+    if (internalformat == GL_DEPTH_COMPONENT16 ||
+        internalformat == GL_DEPTH_COMPONENT24)
+        return internalformat;
+    if (internalformat == GL_DEPTH_COMPONENT)
+        return bytes_per_pixel == 2u ? GL_DEPTH_COMPONENT16
+                                     : GL_DEPTH_COMPONENT24;
+    return 0u;
+}
+
+static void psgl_copy_depth_rows(PSGLcontext *context,
+                                 uint32_t dst_offset,
+                                 uint32_t dst_pitch,
+                                 uint32_t src_offset,
+                                 uint32_t src_pitch,
+                                 uint32_t bytes_per_pixel,
+                                 uint32_t width,
+                                 uint32_t row_count)
+{
+    if (!context || !context->gcm || !bytes_per_pixel || !width ||
+        !row_count)
+        return;
+
+    cellGcmSetTransferImage(context->gcm,
+                            CELL_GCM_TRANSFER_LOCAL_TO_LOCAL,
+                            dst_offset,
+                            dst_pitch,
+                            0u,
+                            0u,
+                            src_offset,
+                            src_pitch,
+                            0u,
+                            0u,
+                            width,
+                            row_count,
+                            bytes_per_pixel);
+}
+
+static void psgl_bind_depth_copy_target(PSGLcontext *context,
+                                        const PSGLtextureObject *texture)
+{
+    CellGcmSurface surface;
+    uint8_t base;
+    if (!context || !context->gcm || !texture || !texture->address)
+        return;
+    base = texture->rsx_format & ~CELL_GCM_TEXTURE_LN;
+    psgl_zero(&surface, sizeof(surface));
+    surface.colorFormat = GCM_SURFACE_X8R8G8B8;
+    surface.colorTarget = GCM_SURFACE_TARGET_NONE;
+    surface.depthFormat = (base == CELL_GCM_TEXTURE_DEPTH16)
+        ? GCM_SURFACE_ZETA_Z16 : GCM_SURFACE_ZETA_Z24S8;
+    surface.depthLocation = texture->location;
+    surface.depthOffset = texture->offset;
+    surface.depthPitch = texture->pitch;
+    surface.colorLocation[0] = GCM_LOCATION_RSX;
+    surface.colorLocation[1] = GCM_LOCATION_RSX;
+    surface.colorLocation[2] = GCM_LOCATION_RSX;
+    surface.colorLocation[3] = GCM_LOCATION_RSX;
+    surface.colorPitch[0] = 64u;
+    surface.colorPitch[1] = 64u;
+    surface.colorPitch[2] = 64u;
+    surface.colorPitch[3] = 64u;
+    surface.type = GCM_TEXTURE_LINEAR;
+    surface.antiAlias = GCM_SURFACE_CENTER_1;
+    surface.width = texture->width;
+    surface.height = texture->height;
+    cellGcmSetSurface(context->gcm, &surface);
+}
+
+void psgl_context_copy_tex_sub_image_2d(GLenum target, GLint level,
+                                        GLint xoffset, GLint yoffset,
+                                        GLint x, GLint y,
+                                        GLsizei width, GLsizei height)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    uint32_t src_offset;
+    uint32_t src_pitch;
+    uint16_t src_width;
+    uint16_t src_height;
+    uint32_t src_bpp;
+    uint8_t dst_base;
+    uint32_t dst_bpp;
+
+    if (!context || !texture || !texture->address || !context->gcm ||
+        level != 0 || target != GL_TEXTURE_2D ||
+        xoffset < 0 || yoffset < 0 || x < 0 || y < 0 ||
+        width <= 0 || height <= 0 ||
+        xoffset + width > texture->width ||
+        yoffset + height > texture->height ||
+        !psgl_texture_is_depth(texture->rsx_format) ||
+        !psgl_current_depth_source(context, &src_offset, &src_pitch,
+                                   &src_width, &src_height, &src_bpp) ||
+        x + width > src_width || y + height > src_height)
+        return;
+
+    dst_base = texture->rsx_format &
+        ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_SZ);
+    dst_bpp = (dst_base == CELL_GCM_TEXTURE_DEPTH16) ? 2u : 4u;
+    if (dst_bpp != src_bpp)
+        return;
+
+    rsxSetWaitForIdle(context->gcm);
+    psgl_bind_depth_copy_target(context, texture);
+    cellGcmSetClearDepthStencil(context->gcm,
+                                psgl_pack_depth_stencil(1.0f, 0));
+    cellGcmSetClearSurface(context->gcm, GCM_CLEAR_Z);
+    rsxSetWaitForIdle(context->gcm);
+    psgl_copy_depth_rows(context,
+                         texture->offset +
+                             ((uint32_t)xoffset * dst_bpp) +
+                             ((uint32_t)yoffset * texture->pitch),
+                         texture->pitch,
+                         src_offset +
+                             ((uint32_t)x * src_bpp) +
+                             ((uint32_t)y * src_pitch),
+                         src_pitch,
+                         dst_bpp,
+                         (uint32_t)width,
+                         (uint32_t)height);
+    rsxSetWaitForIdle(context->gcm);
+    psgl_bind_render_target(context);
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+}
+
+void psgl_context_copy_tex_image_2d(GLenum target, GLint level,
+                                    GLenum internalformat,
+                                    GLint x, GLint y,
+                                    GLsizei width, GLsizei height,
+                                    GLint border)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    GLenum depth_format;
+    GLenum type;
+    uint32_t src_offset;
+    uint32_t src_pitch;
+    uint16_t src_width;
+    uint16_t src_height;
+    uint32_t src_bpp;
+
+    if (!context || target != GL_TEXTURE_2D || level != 0 || border != 0 ||
+        x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        !psgl_current_depth_source(context, &src_offset, &src_pitch,
+                                   &src_width, &src_height, &src_bpp) ||
+        x + width > src_width || y + height > src_height)
+        return;
+    (void)src_offset;
+    (void)src_pitch;
+
+    depth_format = psgl_depth_copy_internal_format(internalformat, src_bpp);
+    if (!depth_format)
+        return;
+
+    type = src_bpp == 2u ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
+    psgl_context_tex_image_2d(target, level, depth_format,
+                              width, height, border,
+                              GL_DEPTH_COMPONENT, type, NULL);
+    psgl_context_copy_tex_sub_image_2d(target, level, 0, 0,
+                                       x, y, width, height);
 }
 
 void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
@@ -3495,6 +3742,7 @@ void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
     texture->levels = 1u;
     texture->location = CELL_GCM_LOCATION_LOCAL;
     texture->linear = 1u;
+    texture->owns_storage = 1u;
     texture->rsx_format = rsx_format;
     psgl_fill_gcm_texture(texture);
     context->dirty |= PSGL_DIRTY_TEXTURES;
@@ -3585,6 +3833,7 @@ void psgl_context_texture_reference_sce(GLenum target, GLuint levels,
     texture->levels = levels ? (uint8_t)levels : 1u;
     texture->location = buffer->location;
     texture->linear = (rsx_format & CELL_GCM_TEXTURE_LN) ? 1u : 0u;
+    texture->owns_storage = 0u;
     texture->rsx_format = rsx_format;
     psgl_fill_gcm_texture(texture);
     if (psgl_texture_reference_is_compressed(internalformat))

@@ -293,6 +293,15 @@ void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
                                    GLsizei width, GLsizei height,
                                    GLenum format, GLenum type,
                                    const GLvoid *pixels);
+void psgl_context_copy_tex_image_2d(GLenum target, GLint level,
+                                    GLenum internalformat,
+                                    GLint x, GLint y,
+                                    GLsizei width, GLsizei height,
+                                    GLint border);
+void psgl_context_copy_tex_sub_image_2d(GLenum target, GLint level,
+                                        GLint xoffset, GLint yoffset,
+                                        GLint x, GLint y,
+                                        GLsizei width, GLsizei height);
 void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
                                           GLenum internalformat,
                                           GLsizei width, GLsizei height,
