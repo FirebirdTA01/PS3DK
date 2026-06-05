@@ -387,14 +387,16 @@ void RSX_FUNC(SetPolygonOffsetLineEnable)(gcmContextData *context,u32 enable)
 
 void RSX_FUNC(ClearSurface)(gcmContextData *context,u32 clear_mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(4);
+	RSX_CONTEXT_CURRENT_BEGIN(6);
 
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_CLEAR_BUFFERS,1);
 	RSX_CONTEXT_CURRENTP[1] = clear_mask;
 	RSX_CONTEXT_CURRENTP[2] = RSX_METHOD(NV40TCL_NOP,1);
 	RSX_CONTEXT_CURRENTP[3] = 0;
+	RSX_CONTEXT_CURRENTP[4] = RSX_METHOD(NV40TCL_WAIT_FOR_IDLE,1);
+	RSX_CONTEXT_CURRENTP[5] = 0;
 
-	RSX_CONTEXT_CURRENT_END(4);
+	RSX_CONTEXT_CURRENT_END(6);
 }
 
 void RSX_FUNC(SetCylindricalWrap)(gcmContextData *context,u32 enable)
@@ -1644,15 +1646,14 @@ void RSX_FUNC(InlineTransfer)(gcmContextData *context,u32 dstOffset,const void *
 	u32 padSizeInWords;
 	u32 alignedVideoOffset;
 
+	(void)location;
+
 	alignedVideoOffset = dstOffset&~0x3f;
 	pixelShift = (dstOffset&0x3f)>>2;
 
 	padSizeInWords = (sizeInWords + 1)&~0x01;
 
-	RSX_CONTEXT_CURRENT_BEGIN(12 + padSizeInWords);
-
-	RSX_CONTEXT_CURRENTP[pos++] = RSX_SUBCHANNEL_METHOD(3,NV04_CONTEXT_SURFACES_2D_DMA_IMAGE_DESTIN,1);
-	RSX_CONTEXT_CURRENTP[pos++] = GCM_DMA_MEMORY_FRAME_BUFFER + location;
+	RSX_CONTEXT_CURRENT_BEGIN(10 + padSizeInWords);
 
 	RSX_CONTEXT_CURRENTP[pos++] = RSX_SUBCHANNEL_METHOD(3,NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN,1);
 	RSX_CONTEXT_CURRENTP[pos++] = alignedVideoOffset;
@@ -1677,7 +1678,7 @@ void RSX_FUNC(InlineTransfer)(gcmContextData *context,u32 dstOffset,const void *
 	if(padSizeInWords!=sizeInWords)
 		RSX_CONTEXT_CURRENTP[pos++] = 0;
 
-	RSX_CONTEXT_CURRENT_END(12 + padSizeInWords);
+	RSX_CONTEXT_CURRENT_END(10 + padSizeInWords);
 }
 
 void RSX_FUNC(SetAlphaFunc)(gcmContextData *context,u32 alphaFunc,u32 ref)

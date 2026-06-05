@@ -32,6 +32,7 @@
 #include <Cg/cgBinary.h>
 #include <cell/cgb/cgb_struct.h>
 #include <rsx/gcm_sys.h>           /* gcmContextData, GCM_LOCATION_*, GCM_ATTRIB_OUTPUT_MASK_* */
+#include <rsx/commands.h>          /* rsxInlineTransfer */
 #include <rsx/nv40.h>              /* NV40TCL_* method IDs */
 
 /* Build-time diagnostic trace.  Pass `-DPS3TC_GCM_CG_BRIDGE_TRACE=1` to
@@ -235,8 +236,9 @@ static inline uint32_t ps3tc_cg_vp_result_en(const CgBinaryProgram *p)
 
 /* -------------------------------------------------------------------- *
  * Vertex-program bind — loads ucode to VP instruction memory and sets
- * the VP_ATTRIB_EN / VP_RESULT_EN / TRANSFORM_TIMEOUT state that must
- * accompany a new program.
+ * the VP_ATTRIB_EN / TRANSFORM_TIMEOUT state that must accompany a new
+ * program.  VP_RESULT_EN is owned by fragment-program binding, matching
+ * the reference SDK's SetFragmentProgramOffset behavior.
  * -------------------------------------------------------------------- */
 static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
                                            CGprogram prog, void *ucode)
@@ -250,19 +252,16 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     const uint32_t inst_count = vp->instructionCount;
     const uint32_t inst_start = vp->instructionSlot;
 
-    /* One method packet per VP instruction (count=4 each).  RPCS3
-     * desyncs on consecutive count=32 packets (verified with VPs of
-     * num_insn >= 16); the small-packet shape every shipping sample
-     * uses (count <= 28) is empirically safe on both hardware and
-     * RPCS3.  See sdk/libgcm_cmd/src/rsx_legacy/commands_impl.h:
-     * LoadVertexProgramBlock for the matching change in the
-     * rsxLoad* path. */
+    /* Reference SDK batches VP instructions into one UPLOAD_INST packet
+     * for small programs.  Keep packets below count=32; the observed
+     * RPCS3 FIFO desync only appeared with consecutive count=32 packets. */
+    const uint32_t packet_count = (inst_count + 6u) / 7u;
+
     /* Reservation: UPLOAD_FROM_ID hdr + 2 args         = 3 words,
-     * per insn:    UPLOAD_INST hdr + 4 data words     = 5 words,
+     * UPLOAD_INST hdrs + 4 data words per insn         = packet_count + inst_count*4,
      * VP_ATTRIB_EN hdr + arg                          = 2 words,
-     * VP_RESULT_EN hdr + arg                          = 2 words,
      * TRANSFORM_TIMEOUT hdr + arg                     = 2 words. */
-    const uint32_t reserve = 3u + inst_count * 5u + 2u + 2u + 2u;
+    const uint32_t reserve = 3u + packet_count + inst_count * 4u + 2u + 2u;
 
     if (!ucode || inst_count == 0 || inst_count > 512) return;
 
@@ -270,12 +269,10 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     if (!w) return;
 
     const uint32_t *src = (const uint32_t *)ucode;
-    const uint32_t result_en = ps3tc_cg_vp_result_en(p) | GCM_ATTRIB_OUTPUT_MASK_POINTSIZE;
-
-    PS3TC_TRACE("SetVP ucode=%p inst=%u start=%u regs=%u in=0x%x out=0x%x reserve=%u\n",
+    PS3TC_TRACE("SetVP ucode=%p inst=%u start=%u regs=%u in=0x%x reserve=%u\n",
                 ucode, (unsigned)inst_count, (unsigned)inst_start,
                 (unsigned)vp->registerCount, (unsigned)vp->attributeInputMask,
-                (unsigned)result_en, (unsigned)reserve);
+                (unsigned)reserve);
 #if PS3TC_GCM_CG_BRIDGE_TRACE
     {
         unsigned total = inst_count * 4u;
@@ -294,23 +291,18 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     *w++ = inst_start;
     *w++ = inst_start;
 
-    /* One UPLOAD_INST packet per VP instruction (count=4) — see
-     * reservation comment above for the why. */
-    for (uint32_t i = 0; i < inst_count; ++i)
+    for (uint32_t i = 0; i < inst_count; )
     {
-        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), 4);
-        *w++ = src[0];
-        *w++ = src[1];
-        *w++ = src[2];
-        *w++ = src[3];
-        src += 4;
+        const uint32_t batch = ((inst_count - i) > 7u) ? 7u : (inst_count - i);
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), batch * 4u);
+        memcpy(w, src, batch * 4u * sizeof(uint32_t));
+        w += batch * 4u;
+        src += batch * 4u;
+        i += batch;
     }
 
     *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_ATTRIB_EN, 1);
     *w++ = vp->attributeInputMask;
-
-    *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
-    *w++ = result_en;
 
     /* Transform-shader timeout watchdog.  Value is a function of
      * temp-register count — programs using 0..32 temps get the short
@@ -367,7 +359,7 @@ static inline void cellGcmCgUploadInternalConsts(CellGcmContextData *ctx,
 /* -------------------------------------------------------------------- *
  * Fragment-program bind — the ucode itself is already sitting in RSX
  * memory at `offset` (caller's responsibility); we only update the
- * FP_ADDRESS / FP_CONTROL / TEX_COORD_CONTROL state.
+ * FP_ADDRESS / VP_RESULT_EN / FP_CONTROL / TEX_COORD_CONTROL state.
  * -------------------------------------------------------------------- */
 static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
                                              CGprogram prog, uint32_t offset)
@@ -395,6 +387,16 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
         if (!w) return;
         *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_ADDRESS, 1);
         *w++ = ((uint32_t)GCM_LOCATION_RSX + 1u) | (offset & 0x1fffffffu);
+    }
+
+    /* Reference cellGcmSetFragmentProgramOffset refreshes the VP output
+     * mask from the FP's declared inputs after binding FP_ADDRESS.  This
+     * keeps raster interpolation state coherent across FP switches. */
+    {
+        uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+        if (!w) return;
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
+        *w++ = fp->attributeInputMask | 0x20u;
     }
 
     /* One TEX_COORD_CONTROL write per texcoord the FP actually reads.
@@ -476,7 +478,8 @@ static inline void cellGcmSetVertexProgramLoadSlot(uint32_t loadSlot,
     const uint32_t *src = (const uint32_t *)ucode;
     if (!ctx || !src || instCount == 0u || instCount > 512u) return;
 
-    const uint32_t reserve = 3u + instCount * 5u;
+    const uint32_t packet_count = (instCount + 6u) / 7u;
+    const uint32_t reserve = 3u + packet_count + instCount * 4u;
     uint32_t *w = ps3tc_gcm_reserve(ctx, reserve);
     if (!w) return;
 
@@ -484,14 +487,14 @@ static inline void cellGcmSetVertexProgramLoadSlot(uint32_t loadSlot,
     *w++ = loadSlot;
     *w++ = loadSlot;
 
-    for (uint32_t i = 0u; i < instCount; ++i)
+    for (uint32_t i = 0u; i < instCount; )
     {
-        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), 4);
-        *w++ = src[0];
-        *w++ = src[1];
-        *w++ = src[2];
-        *w++ = src[3];
-        src += 4;
+        const uint32_t batch = ((instCount - i) > 7u) ? 7u : (instCount - i);
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_INST(0), batch * 4u);
+        memcpy(w, src, batch * 4u * sizeof(uint32_t));
+        w += batch * 4u;
+        src += batch * 4u;
+        i += batch;
     }
 }
 
@@ -534,7 +537,7 @@ static inline void cellGcmSetFragmentProgramLoadLocation(
     w = ps3tc_gcm_reserve(ctx, 2u);
     if (!w) return;
     *w++ = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
-    *w++ = conf->attributeInputMask;
+    *w++ = conf->attributeInputMask | 0x20u;
 
     uint32_t texcoords = conf->texCoordsInputMask;
     uint32_t texcoords_2d = conf->texCoords2D;
@@ -597,6 +600,46 @@ static inline unsigned ps3tc_cg_rows_for_type(uint32_t type)
     }
 }
 
+static inline unsigned ps3tc_cg_cols_for_type(uint32_t type)
+{
+    switch (type)
+    {
+    case CG_FLOAT4:   case CG_HALF4:   case CG_FIXED4:   case CG_INT4:   case CG_BOOL4:
+    case CG_FLOAT1x4: case CG_FLOAT2x4: case CG_FLOAT3x4: case CG_FLOAT4x4:
+    case CG_HALF1x4:  case CG_HALF2x4:  case CG_HALF3x4:  case CG_HALF4x4:
+    case CG_FIXED1x4: case CG_FIXED2x4: case CG_FIXED3x4: case CG_FIXED4x4:
+    case CG_INT1x4:   case CG_INT2x4:   case CG_INT3x4:   case CG_INT4x4:
+    case CG_BOOL1x4:  case CG_BOOL2x4:  case CG_BOOL3x4:  case CG_BOOL4x4:
+        return 4;
+    case CG_FLOAT3:   case CG_HALF3:   case CG_FIXED3:   case CG_INT3:   case CG_BOOL3:
+    case CG_FLOAT1x3: case CG_FLOAT2x3: case CG_FLOAT3x3: case CG_FLOAT4x3:
+    case CG_HALF1x3:  case CG_HALF2x3:  case CG_HALF3x3:  case CG_HALF4x3:
+    case CG_FIXED1x3: case CG_FIXED2x3: case CG_FIXED3x3: case CG_FIXED4x3:
+    case CG_INT1x3:   case CG_INT2x3:   case CG_INT3x3:   case CG_INT4x3:
+    case CG_BOOL1x3:  case CG_BOOL2x3:  case CG_BOOL3x3:  case CG_BOOL4x3:
+        return 3;
+    case CG_FLOAT2:   case CG_HALF2:   case CG_FIXED2:   case CG_INT2:   case CG_BOOL2:
+    case CG_FLOAT1x2: case CG_FLOAT2x2: case CG_FLOAT3x2: case CG_FLOAT4x2:
+    case CG_HALF1x2:  case CG_HALF2x2:  case CG_HALF3x2:  case CG_HALF4x2:
+    case CG_FIXED1x2: case CG_FIXED2x2: case CG_FIXED3x2: case CG_FIXED4x2:
+    case CG_INT1x2:   case CG_INT2x2:   case CG_INT3x2:   case CG_INT4x2:
+    case CG_BOOL1x2:  case CG_BOOL2x2:  case CG_BOOL3x2:  case CG_BOOL4x2:
+        return 2;
+    default:
+        return 1;
+    }
+}
+
+static inline uint32_t ps3tc_cg_swap_f32_16(float v)
+{
+    union {
+        float f;
+        uint32_t u;
+    } d;
+    d.f = v;
+    return ((d.u >> 16) & 0xffffu) | ((d.u & 0xffffu) << 16);
+}
+
 static inline void cellGcmSetVertexProgramParameter(CellGcmContextData *ctx,
                                                     CGparameter param,
                                                     const float *values)
@@ -644,12 +687,10 @@ static inline void cellGcmSetVertexProgramParameterBlock(CellGcmContextData *ctx
     rsxLoadVertexProgramParameterBlock(ctx, baseConst, constCount, values);
 }
 
-/* Patch a fragment-program embedded constant in-place (FP code in
- * RSX local memory at addrOffset).  Reference SDK signature; the
- * patch happens on the CPU side through the PPU→RSX mapping, then
- * the hardware re-fetches via the next FP load.  Walks the param's
- * embeddedConst[] table and writes 4 floats per entry into the FP
- * ucode at the encoded offsets. */
+/* Patch a fragment-program embedded constant in RSX local memory at
+ * addrOffset.  The reference SDK emits the patch through the FIFO's
+ * inline-transfer path, which keeps RSX-side program/cache state in
+ * lockstep with the command stream. */
 static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
                                                       CGprogram prog,
                                                       CGparameter param,
@@ -673,7 +714,7 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
          && pp->res == 0x0CB8u);
 
     if (!is_matrix) {
-        /* Non-matrix uniform: patch the embedded constants directly. */
+        /* Non-matrix uniform: patch only the active scalar/vector words. */
         if (!pp->embeddedConst) return;
 
         const uint32_t *embed =
@@ -681,19 +722,15 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
 
         if (!embed) return;
 
-        CellGcmConfig cfg;
-        cellGcmGetConfiguration(&cfg);
-        uint8_t *local_base = (uint8_t *)cfg.localAddress;
-        uint8_t *ucode = local_base + addrOffset;
-
+        const uint32_t words = ps3tc_cg_cols_for_type(pp->type);
         const uint32_t cnt = embed[0];
         for (uint32_t i = 1; i <= cnt; ++i) {
             uint32_t off = embed[i];
-            uint32_t *slot = (uint32_t *)(ucode + off);
-            slot[0] = ((const uint32_t *)values)[1];
-            slot[1] = ((const uint32_t *)values)[0];
-            slot[2] = ((const uint32_t *)values)[3];
-            slot[3] = ((const uint32_t *)values)[2];
+            uint32_t params[4] = { 0, 0, 0, 0 };
+            for (uint32_t j = 0; j < words; ++j)
+                params[j] = ps3tc_cg_swap_f32_16(values[j]);
+            rsxInlineTransfer(ctx, addrOffset + off, params, words,
+                              GCM_LOCATION_RSX);
         }
         return;
     }
@@ -705,11 +742,6 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
      * the row-leave sequence into unrelated parameters. */
     {
         const unsigned rows = ps3tc_cg_rows_for_type(pp->type);
-
-        CellGcmConfig cfg;
-        cellGcmGetConfiguration(&cfg);
-        uint8_t *local_base = (uint8_t *)cfg.localAddress;
-        uint8_t *ucode = local_base + addrOffset;
 
         const CgBinaryParameter *leaf = pp + 1;
         for (unsigned r = 0; r < rows; ++r, ++leaf) {
@@ -723,11 +755,14 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
             const uint32_t cnt = embed[0];
             for (uint32_t i = 1; i <= cnt; ++i) {
                 uint32_t off = embed[i];
-                uint32_t *slot = (uint32_t *)(ucode + off);
-                slot[0] = ((const uint32_t *)values)[r * 4 + 1];
-                slot[1] = ((const uint32_t *)values)[r * 4 + 0];
-                slot[2] = ((const uint32_t *)values)[r * 4 + 3];
-                slot[3] = ((const uint32_t *)values)[r * 4 + 2];
+                uint32_t params[4] = {
+                    ps3tc_cg_swap_f32_16(values[r * 4 + 0]),
+                    ps3tc_cg_swap_f32_16(values[r * 4 + 1]),
+                    ps3tc_cg_swap_f32_16(values[r * 4 + 2]),
+                    ps3tc_cg_swap_f32_16(values[r * 4 + 3]),
+                };
+                rsxInlineTransfer(ctx, addrOffset + off, params, 4,
+                                  GCM_LOCATION_RSX);
             }
         }
     }
