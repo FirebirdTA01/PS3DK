@@ -1737,7 +1737,14 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
         if (!attrib->buffer_name) continue;
         buffer = psgl_find_buffer(attrib->buffer_name);
         if (!buffer || !buffer->address) continue;
-        type = psgl_gl_vertex_type(attrib->type);
+        /* Generic Cg attributes carry integer data (e.g. BLENDINDICES on
+           ATTR7), not normalized fixed-point. An unsigned-byte index must
+           use the un-normalized UB256 type so the value reaches the vertex
+           program as the integer bone index, not index/255. */
+        if (i == 7u && attrib->type == GL_UNSIGNED_BYTE)
+            type = CELL_GCM_VERTEX_UB256;
+        else
+            type = psgl_gl_vertex_type(attrib->type);
         if (!type) continue;
         offset = buffer->offset + attrib->buffer_offset;
         cellGcmSetVertexDataArray(context->gcm, (uint8_t)i,
