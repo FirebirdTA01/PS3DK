@@ -48,7 +48,7 @@ GLAPI const GLubyte *glGetString(GLenum name)
     case GL_VENDOR:     return (const GLubyte *)"PS3DK";
     case GL_RENDERER:   return (const GLubyte *)"PS3DK PSGL Stub";
     case GL_VERSION:    return (const GLubyte *)"1.1 PS3DK";
-    case GL_EXTENSIONS: return (const GLubyte *)"";
+    case GL_EXTENSIONS: return (const GLubyte *)"GL_OES_depth_texture";
     default:            return (const GLubyte *)"";
     }
 }
@@ -352,9 +352,8 @@ GLAPI void glCopyTexImage2D(GLenum target, GLint level,
                             GLint x, GLint y,
                             GLsizei width, GLsizei height, GLint border)
 {
-    (void)target; (void)level;  (void)internalformat;
-    (void)x;      (void)y;      (void)width;
-    (void)height; (void)border;
+    psgl_context_copy_tex_image_2d(target, level, internalformat,
+                                   x, y, width, height, border);
 }
 
 GLAPI void glCopyTexSubImage2D(GLenum target, GLint level,
@@ -362,9 +361,8 @@ GLAPI void glCopyTexSubImage2D(GLenum target, GLint level,
                                GLint x, GLint y,
                                GLsizei width, GLsizei height)
 {
-    (void)target;  (void)level;   (void)xoffset;
-    (void)yoffset; (void)x;       (void)y;
-    (void)width;   (void)height;
+    psgl_context_copy_tex_sub_image_2d(target, level, xoffset, yoffset,
+                                       x, y, width, height);
 }
 
 GLAPI void glCompressedTexImage2D(GLenum target, GLint level,

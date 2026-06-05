@@ -53,6 +53,8 @@ typedef struct PSGLtextureObject {
     GLenum mag_filter;
     GLenum wrap_s;
     GLenum wrap_t;
+    GLenum compare_mode;
+    GLenum compare_func;
     GLenum allocation_hint;
     uint16_t width;
     uint16_t height;
@@ -185,6 +187,13 @@ static int psgl_texture_is_dxt(uint8_t rsx_format)
     return base == CELL_GCM_TEXTURE_COMPRESSED_DXT1 ||
            base == CELL_GCM_TEXTURE_COMPRESSED_DXT23 ||
            base == CELL_GCM_TEXTURE_COMPRESSED_DXT45;
+}
+
+static int psgl_texture_is_depth(uint8_t rsx_format)
+{
+    uint8_t base = rsx_format & ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_SZ);
+    return base == CELL_GCM_TEXTURE_DEPTH16 ||
+           base == CELL_GCM_TEXTURE_DEPTH24_D8;
 }
 
 static uint32_t psgl_morton2(uint32_t x, uint32_t y)
@@ -724,6 +733,22 @@ static int psgl_translate_compare(GLenum func, uint32_t *out)
     case GL_NOTEQUAL: *out = CELL_GCM_NOTEQUAL; break;
     case GL_GEQUAL:   *out = CELL_GCM_GEQUAL; break;
     case GL_ALWAYS:   *out = CELL_GCM_ALWAYS; break;
+    default: return 0;
+    }
+    return 1;
+}
+
+static int psgl_translate_texture_zfunc(GLenum func, uint32_t *out)
+{
+    switch (func) {
+    case GL_NEVER:    *out = CELL_GCM_TEXTURE_ZFUNC_NEVER; break;
+    case GL_LESS:     *out = CELL_GCM_TEXTURE_ZFUNC_GREATER; break;
+    case GL_EQUAL:    *out = CELL_GCM_TEXTURE_ZFUNC_EQUAL; break;
+    case GL_LEQUAL:   *out = CELL_GCM_TEXTURE_ZFUNC_GEQUAL; break;
+    case GL_GREATER:  *out = CELL_GCM_TEXTURE_ZFUNC_LESS; break;
+    case GL_NOTEQUAL: *out = CELL_GCM_TEXTURE_ZFUNC_NOTEQUAL; break;
+    case GL_GEQUAL:   *out = CELL_GCM_TEXTURE_ZFUNC_LEQUAL; break;
+    case GL_ALWAYS:   *out = CELL_GCM_TEXTURE_ZFUNC_ALWAYS; break;
     default: return 0;
     }
     return 1;
@@ -1407,6 +1432,8 @@ static void psgl_init_texture_defaults(PSGLtextureObject *texture)
     texture->mag_filter = GL_NEAREST;
     texture->wrap_s = GL_REPEAT;
     texture->wrap_t = GL_REPEAT;
+    texture->compare_mode = GL_NONE;
+    texture->compare_func = GL_LEQUAL;
     texture->allocation_hint = GL_TEXTURE_LINEAR_GPU_SCE;
     texture->location = CELL_GCM_LOCATION_LOCAL;
     texture->linear = 1u;
@@ -1617,9 +1644,12 @@ static void psgl_fill_gcm_texture(PSGLtextureObject *texture)
     texture->gcm_texture.mipmap = texture->levels ? texture->levels : 1u;
     texture->gcm_texture.dimension = CELL_GCM_TEXTURE_DIMENSION_2;
     texture->gcm_texture.cubemap = 0u;
-    texture->gcm_texture.remap = psgl_texture_is_dxt(texture->rsx_format)
-        ? psgl_texture_remap_dxt_rb()
-        : psgl_texture_remap_argb();
+    if (psgl_texture_is_depth(texture->rsx_format))
+        texture->gcm_texture.remap = 0x0000aaaau;
+    else
+        texture->gcm_texture.remap = psgl_texture_is_dxt(texture->rsx_format)
+            ? psgl_texture_remap_dxt_rb()
+            : psgl_texture_remap_argb();
     texture->gcm_texture.width = texture->width;
     texture->gcm_texture.height = texture->height;
     texture->gcm_texture.depth = 1u;
@@ -1770,10 +1800,14 @@ static void psgl_emit_textures(PSGLcontext *context)
         uint8_t mag_filter = psgl_translate_texture_filter(texture->mag_filter);
         uint8_t wrap_s = psgl_translate_texture_wrap(texture->wrap_s);
         uint8_t wrap_t = psgl_translate_texture_wrap(texture->wrap_t);
+        uint32_t zfunc = CELL_GCM_TEXTURE_ZFUNC_LESS;
         if (!min_filter) min_filter = CELL_GCM_TEXTURE_NEAREST;
         if (!mag_filter) mag_filter = CELL_GCM_TEXTURE_NEAREST;
         if (!wrap_s) wrap_s = CELL_GCM_TEXTURE_WRAP;
         if (!wrap_t) wrap_t = CELL_GCM_TEXTURE_WRAP;
+        if (texture->compare_mode == GL_COMPARE_R_TO_TEXTURE_ARB &&
+            !psgl_translate_texture_zfunc(texture->compare_func, &zfunc))
+            zfunc = CELL_GCM_TEXTURE_ZFUNC_GEQUAL;
         cellGcmSetTexture(context->gcm, (uint8_t)i, &texture->gcm_texture);
         cellGcmSetTextureControl(context->gcm, (uint8_t)i, 1u,
                                  0u, 0u,
@@ -1784,7 +1818,7 @@ static void psgl_emit_textures(PSGLcontext *context)
         cellGcmSetTextureAddress(context->gcm, (uint8_t)i,
                                  wrap_s, wrap_t, CELL_GCM_TEXTURE_WRAP,
                                  CELL_GCM_TEXTURE_UNSIGNED_REMAP_NORMAL,
-                                 CELL_GCM_TEXTURE_ZFUNC_LESS,
+                                 zfunc,
                                  CELL_GCM_TEXTURE_GAMMA_NONE);
         cellGcmSetTextureBorderColor(context->gcm, (uint8_t)i, 0u);
     }
@@ -3470,6 +3504,7 @@ void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param)
 {
     PSGLcontext *context = g_psgl.current_context;
     PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    uint32_t translated;
     if (!context || !texture) return;
     switch (pname) {
     case GL_TEXTURE_MIN_FILTER:
@@ -3493,6 +3528,16 @@ void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param)
             param != GL_TEXTURE_SWIZZLED_GPU_SCE)
             return;
         texture->allocation_hint = (GLenum)param;
+        break;
+    case GL_TEXTURE_COMPARE_MODE_ARB:
+        if (param != GL_NONE && param != GL_COMPARE_R_TO_TEXTURE_ARB)
+            return;
+        texture->compare_mode = (GLenum)param;
+        break;
+    case GL_TEXTURE_COMPARE_FUNC_ARB:
+        if (!psgl_translate_texture_zfunc((GLenum)param, &translated))
+            return;
+        texture->compare_func = (GLenum)param;
         break;
     default:
         return;
