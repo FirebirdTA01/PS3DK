@@ -158,7 +158,13 @@ desktop.ini
 /tools/rsx-cg-compiler/docs/REVERSE_ENGINEERING.md
 /tools/rsx-cg-compiler/tests/
 
-# Claude project-context file — tracks internal phase narrative, kept
+# Reference-output analysis methodology — describes how we capture
+# and byte-match the proprietary reference SDK/toolchain output. Local-only;
+# references the reference tools by name, must never be published.
+/docs/reference-output-matching-methodology.md
+
+# Per-assistant project-context / memory files — internal narrative, kept
 # local-only.
 /CLAUDE.md
+/QWEN.md
 
