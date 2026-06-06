@@ -92,6 +92,11 @@ struct CompileOptions
     // Default ON.
     bool maxPsizeWorkaround = true;
 
+    // Experimental NV40 general lowering pipeline.  Default OFF so the
+    // byte-exact recognizer paths remain the production compiler until
+    // each general stage has matched its oracle.
+    bool generalLowering = false;
+
     // ------ Placeholders for features we'll plumb as they're needed ------
     // --disablepc <all|attrno>   : disable perspective-correct interp
     // --texsign ...              : signed texture remapping

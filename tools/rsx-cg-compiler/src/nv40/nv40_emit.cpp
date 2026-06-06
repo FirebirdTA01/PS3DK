@@ -7,6 +7,7 @@
  */
 
 #include "nv40_emit.h"
+#include "nv40_general_lowering.h"
 
 #include "ir.h"
 
@@ -43,7 +44,9 @@ UcodeOutput emitVertexProgram(const IRModule& module, const std::string& entry,
         out.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    return detail::lowerVertexProgram(module, *fn, opts, nullptr);
+    return opts.generalLowering
+        ? detail::lowerVertexProgramGeneral(module, *fn, opts, nullptr)
+        : detail::lowerVertexProgram(module, *fn, opts, nullptr);
 }
 
 VpEmitResult emitVertexProgramEx(const IRModule& module, const std::string& entry,
@@ -56,7 +59,9 @@ VpEmitResult emitVertexProgramEx(const IRModule& module, const std::string& entr
         out.ucode.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    out.ucode = detail::lowerVertexProgram(module, *fn, opts, &out.attrs);
+    out.ucode = opts.generalLowering
+        ? detail::lowerVertexProgramGeneral(module, *fn, opts, &out.attrs)
+        : detail::lowerVertexProgram(module, *fn, opts, &out.attrs);
     return out;
 }
 
@@ -70,7 +75,9 @@ UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry
         out.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    return detail::lowerFragmentProgram(module, *fn, opts, nullptr);
+    return opts.generalLowering
+        ? detail::lowerFragmentProgramGeneral(module, *fn, opts, nullptr)
+        : detail::lowerFragmentProgram(module, *fn, opts, nullptr);
 }
 
 FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry,
@@ -83,7 +90,9 @@ FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& en
         out.ucode.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    out.ucode = detail::lowerFragmentProgram(module, *fn, opts, &out.attrs);
+    out.ucode = opts.generalLowering
+        ? detail::lowerFragmentProgramGeneral(module, *fn, opts, &out.attrs)
+        : detail::lowerFragmentProgram(module, *fn, opts, &out.attrs);
     return out;
 }
 

@@ -68,6 +68,7 @@ void usage()
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
         "  --emit-container <p>   Write the .vpo/.fpo container to <p> (binary)\n"
         "  --emit-cgb-container <p> Write the compact CGB\\0 container to <p> (binary)\n"
+        "  --general-lowering    Use the experimental general NV40 lowering path\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
         "  -h, --help             Show this message\n"
@@ -125,6 +126,9 @@ int main(int argc, char** argv)
     CompilerContext ctx;
     bool dumpAst = false;
     bool dumpIr  = false;
+    const char* generalEnv = std::getenv("RSXCG_GENERAL");
+    if (generalEnv && generalEnv[0] && std::strcmp(generalEnv, "0") != 0)
+        ctx.compileOpts.generalLowering = true;
 
     int i = 1;
     while (i < argc)
@@ -180,6 +184,10 @@ int main(int argc, char** argv)
         else if (arg == "--emit-cgb-container" && i + 1 < argc)
         {
             ctx.cgbContainerOutPath = argv[++i];
+        }
+        else if (arg == "--general-lowering")
+        {
+            ctx.compileOpts.generalLowering = true;
         }
         else if (arg == "-O0" || arg == "--O0")
         {

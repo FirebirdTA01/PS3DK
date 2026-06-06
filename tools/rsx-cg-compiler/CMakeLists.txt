@@ -113,6 +113,7 @@ set(SRC_IR_DONOR
 set(NV40_DIR ${SRC_DIR}/nv40)
 set(SRC_NV40
     ${NV40_DIR}/nv40_emit.cpp
+    ${NV40_DIR}/nv40_general_lowering.cpp
     ${NV40_DIR}/nv40_vp_assembler.cpp
     ${NV40_DIR}/nv40_vp_emit.cpp
     ${NV40_DIR}/nv40_fp_assembler.cpp
