@@ -129,6 +129,14 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
             sr |= (NVFX_VP(SRC_REG_TYPE_CONST) << NVFX_VP(SRC_REG_TYPE_SHIFT));
             hw[1] |= (static_cast<uint32_t>(src.reg.index) & 0x1FF)
                      << NV40_VP_INST_CONST_SRC_SHIFT;
+            if (src.indirect)
+            {
+                hw[3] |= NV40_VP_INST_INDEX_CONST;
+                if (src.indirect_reg)
+                    hw[0] |= NV40_VP_INST_ADDR_REG_SELECT_1;
+                hw[0] |= (static_cast<uint32_t>(src.indirect_swz) & 0x3u)
+                         << NV40_VP_INST_ADDR_SWZ_SHIFT;
+            }
             break;
         case NVFXSR_NONE:
             sr |= (NVFX_VP(SRC_REG_TYPE_INPUT) << NVFX_VP(SRC_REG_TYPE_SHIFT));

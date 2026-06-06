@@ -316,6 +316,34 @@ ContainerResult emitFragmentContainerImpl(
         }
     }
 
+    // Synthetic struct-return outputs — `OUT.field = ...` member
+    // assignments emit StoreOutput with a fieldName.  The reference
+    // compiler names the synthetic param `<entry>.<field>` and uses
+    // paramno = 0xFFFFFFFF (no user-facing parameter index).
+    for (const auto& blockPtr : entry->blocks)
+    {
+        if (!blockPtr) continue;
+        for (const auto& instPtr : blockPtr->instructions)
+        {
+            if (!instPtr) continue;
+            const IRInstruction& in = *instPtr;
+            if (in.op != IROp::StoreOutput) continue;
+            if (in.fieldName.empty()) continue;  // non-struct out; handled below
+
+            ParamDesc d;
+            d.name      = entry->name + "." + in.fieldName;
+            d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+            d.type      = cgTypeForIRType(in.resultType);
+            if (d.type == 0) d.type = kCgFloat4;
+            d.var       = kCgVarying;
+            d.direction = kCgOut;
+            d.paramno   = kInvalidIndex;
+            d.res       = fpResourceFor(toUpper(in.semanticName), in.semanticIndex);
+            d.isReferenced = 1;
+            params.push_back(d);
+        }
+    }
+
     // Synthetic return-value output — the entry point's return type
     // carries a semantic (`float4 main(...) : COLOR { return ... }`)
     // and the IR builder emits a StoreOutput for the return value.

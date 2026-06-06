@@ -642,6 +642,8 @@ static INLINE struct nvfx_src nvfx_src(struct nvfx_reg reg)
 	temp.negate = 0;
 	temp.swz[0] = 0; temp.swz[1] = 1; temp.swz[2] = 2; temp.swz[3] = 3;
 	temp.indirect = 0;
+	temp.indirect_reg = 0;
+	temp.indirect_swz = 0;
 
 	return temp;
 }

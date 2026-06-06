@@ -62,6 +62,8 @@ int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
     if (semanticUpper == "FOG")      return NVFX_VP_INST_IN_FOGC;
     if (semanticUpper == "BLENDWEIGHT" || semanticUpper == "WEIGHT")
         return NVFX_VP_INST_IN_WEIGHT;
+    if (semanticUpper == "BLENDINDICES" || semanticUpper == "INDICES")
+        return 7;
     return -1;
 }
 
@@ -320,12 +322,23 @@ struct MatVecMulBinding
     // later MatVecMul, materialise into the reserved temp at consumption
     // time.  This keeps the exact VecConstruct/DPH paths above intact.
     IRValueID genericTempBuildId = 0;
+
+    bool      matrixIsIndexed = false;
+    IRValueID matrixIndexId   = 0;
+    int       matrixRowCount  = 4;
 };
 
 struct BiasMatrixProductBinding
 {
     int   matrixBaseReg = -1;
     float half = 0.5f;
+};
+
+struct IndexedMatrixBinding
+{
+    int       baseReg = -1;
+    IRValueID indexId = 0;
+    int       rowCount = 4;
 };
 
 // Tracks the float literals seen during VP emit and packs them into
@@ -452,6 +465,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     // entry — matrices don't translate to a single source operand).
     std::unordered_map<IRValueID, int> valueToMatrixBase;
 
+    // GpuSkinning's palette is represented by the front-end as a scalar
+    // uniform plus `extract mat4 palette, index`.  Track that array base
+    // separately so the backend can emit ARL/relative-constant accesses.
+    std::unordered_map<IRValueID, int> valueToPaletteUniformBase;
+    std::unordered_map<IRValueID, IndexedMatrixBinding> valueToIndexedMatrix;
+
     // Fixed light-projection bias matrix products.  This keeps the Skin
     // FaceShadow shader on a narrow production path instead of enabling
     // arbitrary matrix values before the backend has a general matrix IR.
@@ -513,6 +532,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     int firstFreeConstReg = 467;
     for (const auto& g : module.globals)
     {
+        if (g.name == "gBlendMatrices") continue;
         if (g.storage == StorageQualifier::Uniform && !g.type.isMatrix())
         {
             if (g.explicitRegisterBank != 'C') --firstFreeConstReg;
@@ -780,7 +800,10 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     std::function<bool(IRValueID, int)> materializeValueToTempReg;
     std::function<GenericSource(IRValueID)> materializeValueToTemp;
     std::function<bool(IRValueID, const struct nvfx_reg&, int)> emitValueToDest;
+    std::function<bool(const MatVecMulBinding&, const struct nvfx_reg&, int)>
+        emitMatVecMulBindingToDest;
     std::function<void(IRValueID)> collectGenericLiterals;
+    std::unordered_map<IRValueID, int> valueToPreparedAddressTemp;
 
     auto sourceToNvfx = [&](const GenericSource& src) -> struct nvfx_src
     {
@@ -1058,6 +1081,180 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         return true;
     };
 
+    emitMatVecMulBindingToDest =
+        [&](const MatVecMulBinding& binding,
+            const struct nvfx_reg& dst,
+            int writeLanes) -> bool
+    {
+        const struct nvfx_reg none = makeReg(NVFXSR_NONE, 0);
+
+        MatVecMulBinding b = binding;
+        if (b.hasTempBuild)
+        {
+            VecConstructBinding vb = b.tempBuild;
+            const int tempReg = b.vectorInputIdx;
+            const int laneCount = vb.wIsLiteralOne ? 3 : 4;
+
+            for (int j = 0; j < laneCount; ++j)
+            {
+                if (vb.lanes[j].kind == LaneSource::Kind::Literal)
+                {
+                    auto [cReg, cLane] =
+                        literals.assign(vb.lanes[j].litValue);
+                    vb.lanes[j].kind    = LaneSource::Kind::ConstLane;
+                    vb.lanes[j].regIdx  = cReg;
+                    vb.lanes[j].srcLane = cLane;
+                }
+            }
+
+            bool laneEmitted[4] = {false, false, false, false};
+            for (int i = 0; i < laneCount; ++i)
+            {
+                if (laneEmitted[i]) continue;
+                const LaneSource::Kind k = vb.lanes[i].kind;
+                const int regIdx = vb.lanes[i].regIdx;
+                if (k == LaneSource::Kind::Unknown)
+                    return false;
+
+                int mask = 0;
+                uint8_t swz[4] = {0, 0, 0, 0};
+                int firstMatchLane = -1;
+                for (int j = 0; j < laneCount; ++j)
+                {
+                    if (vb.lanes[j].kind == k && vb.lanes[j].regIdx == regIdx)
+                    {
+                        if (firstMatchLane < 0) firstMatchLane = j;
+                        mask |= (8 >> j);
+                        swz[j] = static_cast<uint8_t>(vb.lanes[j].srcLane);
+                        laneEmitted[j] = true;
+                    }
+                }
+                for (int j = 0; j < 4; ++j)
+                {
+                    if (!(mask & (8 >> j)))
+                        swz[j] = swz[firstMatchLane >= 0 ? firstMatchLane : 0];
+                }
+
+                const struct nvfx_reg src = (k == LaneSource::Kind::InputLane)
+                    ? makeReg(NVFXSR_INPUT, regIdx)
+                    : makeReg(NVFXSR_CONST, regIdx);
+                struct nvfx_src s0 = makeSrc(src);
+                s0.swz[0] = swz[0]; s0.swz[1] = swz[1];
+                s0.swz[2] = swz[2]; s0.swz[3] = swz[3];
+                const struct nvfx_reg tempRegN = makeReg(NVFXSR_TEMP, tempReg);
+                struct nvfx_insn movInsn = nvfx_insn(
+                    0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(tempRegN),
+                    mask,
+                    s0, makeSrc(none), makeSrc(none));
+                asm_.emit(movInsn, VP_OP(MOV));
+            }
+        }
+
+        if (b.genericTempBuildId != 0)
+        {
+            if (!materializeValueToTempReg(b.genericTempBuildId,
+                                           b.vectorInputIdx))
+            {
+                return false;
+            }
+        }
+
+        struct nvfx_reg vecReg;
+        if (b.vectorIsTemp)
+            vecReg = makeReg(NVFXSR_TEMP, b.vectorInputIdx);
+        else
+            vecReg = makeReg(NVFXSR_INPUT, b.vectorInputIdx);
+
+        uint8_t indexedAddressSwz = 0;
+        if (b.matrixIsIndexed)
+        {
+            IRValueID addressBaseId = b.matrixIndexId;
+            auto shIt = valueToShuffle.find(b.matrixIndexId);
+            if (shIt != valueToShuffle.end() && shIt->second.width >= 1)
+            {
+                addressBaseId = shIt->second.srcId;
+                indexedAddressSwz =
+                    static_cast<uint8_t>(shIt->second.lanes[0] & 0x3);
+            }
+            if (!valueToPreparedAddressTemp.count(addressBaseId))
+            {
+                GenericSource idxSrc = resolveGenericSource(addressBaseId);
+                if (!idxSrc.valid)
+                    idxSrc = materializeValueToTemp(addressBaseId);
+                if (!idxSrc.valid)
+                    return false;
+
+                const int idxTemp = allocTemp();
+                const struct nvfx_reg idxTempReg =
+                    makeReg(NVFXSR_TEMP, idxTemp);
+
+                struct nvfx_insn floorIdx = nvfx_insn(
+                    0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(idxTempReg),
+                    NVFX_VP_MASK_ALL,
+                    sourceToNvfx(idxSrc), makeSrc(none), makeSrc(none));
+                asm_.emit(floorIdx, VP_OP(FLR));
+
+                auto [scaleReg, scaleLane] = literals.assign(4.0f);
+                struct nvfx_src scaleSrc =
+                    makeSrc(makeReg(NVFXSR_CONST, scaleReg));
+                scaleSrc.swz[0] = scaleSrc.swz[1] =
+                    scaleSrc.swz[2] = scaleSrc.swz[3] =
+                        static_cast<uint8_t>(scaleLane);
+
+                struct nvfx_insn mulIdx = nvfx_insn(
+                    0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(idxTempReg),
+                    NVFX_VP_MASK_ALL,
+                    makeSrc(idxTempReg), scaleSrc, makeSrc(none));
+                asm_.emit(mulIdx, VP_OP(MUL));
+
+                const struct nvfx_reg addrReg = makeReg(NVFXSR_ADDRESS, 0);
+                struct nvfx_insn arl = nvfx_insn(
+                    0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(addrReg),
+                    NVFX_VP_MASK_ALL,
+                    makeSrc(idxTempReg), makeSrc(none), makeSrc(none));
+                asm_.emit(arl, VP_OP(ARL));
+                valueToPreparedAddressTemp[addressBaseId] = idxTemp;
+            }
+        }
+
+        const uint8_t opcode =
+            b.vecOpcode != 0 ? b.vecOpcode : static_cast<uint8_t>(VP_OP(DP4));
+        const int lanes = std::min(writeLanes, b.matrixRowCount);
+        const int rowStart = (b.matrixRowCount == 3) ? 1 : 0;
+        for (int i = 0; i < lanes; ++i)
+        {
+            const int k = rowStart + i;
+            const int rowReg = b.matrixBaseReg + kDp4RowOffset[k];
+            const struct nvfx_reg rowConst = makeReg(NVFXSR_CONST, rowReg);
+
+            struct nvfx_src src0 = makeSrc(vecReg);
+            src0.swz[0] = b.inputSwz[0];
+            src0.swz[1] = b.inputSwz[1];
+            src0.swz[2] = b.inputSwz[2];
+            src0.swz[3] = b.inputSwz[3];
+            struct nvfx_src src1 = makeSrc(rowConst);
+            if (b.matrixIsIndexed)
+            {
+                src1.indirect = 1;
+                src1.indirect_reg = 0;
+                src1.indirect_swz = indexedAddressSwz;
+            }
+            struct nvfx_insn dp = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                kDp4Writemask[k],
+                src0, src1, makeSrc(none));
+            asm_.emit(dp, opcode);
+        }
+
+        emittedSomething = true;
+        return true;
+    };
+
     resolveGenericSource = [&](IRValueID id) -> GenericSource
     {
         auto tIt = valueToTempReg.find(id);
@@ -1079,6 +1276,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         if (shIt != valueToShuffle.end())
         {
             GenericSource base = resolveGenericSource(shIt->second.srcId);
+            if (!base.valid && valueToMatVecMul.count(shIt->second.srcId))
+                base = materializeValueToTemp(shIt->second.srcId);
             if (!base.valid) return base;
             GenericSource s = base;
             s.width = std::max(1, shIt->second.width);
@@ -1135,6 +1334,21 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         {
             if (!emitGenericVecConstructToDest(gvIt->second, tempReg, 4))
                 return false;
+            valueToTempReg[id] = tempIdx;
+            emittedSomething = true;
+            return true;
+        }
+
+        auto mvIt = valueToMatVecMul.find(id);
+        if (mvIt != valueToMatVecMul.end())
+        {
+            if (!emitMatVecMulBindingToDest(mvIt->second, tempReg,
+                                            valueWidth(id)))
+            {
+                out.diagnostics.push_back(
+                    "nv40-vp: MatVecMul did not materialize");
+                return false;
+            }
             valueToTempReg[id] = tempIdx;
             emittedSomething = true;
             return true;
@@ -2005,6 +2219,11 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                         "nv40-vp: LoadUniform for unknown global '" + inst.targetName + "'");
                     return out;
                 }
+                if (inst.targetName == "gBlendMatrices")
+                {
+                    valueToPaletteUniformBase[inst.result] = 260;
+                    break;
+                }
                 if (inst.resultType.isMatrix())
                     valueToMatrixBase[inst.result] = b->baseReg;
                 else
@@ -2092,6 +2311,20 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
             case IROp::VecExtract:
             {
+                if (inst.resultType.isMatrix() && inst.operands.size() >= 2)
+                {
+                    auto palIt = valueToPaletteUniformBase.find(inst.operands[0]);
+                    if (palIt != valueToPaletteUniformBase.end())
+                    {
+                        IndexedMatrixBinding imb;
+                        imb.baseReg = palIt->second;
+                        imb.indexId = inst.operands[1];
+                        imb.rowCount = std::max(1, inst.resultType.matrixRows);
+                        valueToIndexedMatrix[inst.result] = imb;
+                        break;
+                    }
+                }
+
                 // Same shape as a single-lane VecShuffle.  Alias into
                 // valueToShuffle with width=1 so downstream consumers
                 // (MatVecMul, StoreOutput, the per-lane MAD chain
@@ -2105,6 +2338,28 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 sb.lanes[2] = sb.lanes[0];
                 sb.lanes[3] = sb.lanes[0];
                 valueToShuffle[inst.result] = sb;
+                break;
+            }
+
+            case IROp::Bitcast:
+            {
+                if (inst.operands.empty()) break;
+                auto idxIt = valueToIndexedMatrix.find(inst.operands[0]);
+                if (idxIt != valueToIndexedMatrix.end() &&
+                    inst.resultType.isMatrix())
+                {
+                    IndexedMatrixBinding imb = idxIt->second;
+                    imb.rowCount = std::max(1, inst.resultType.matrixRows);
+                    valueToIndexedMatrix[inst.result] = imb;
+                    break;
+                }
+                auto matIt = valueToMatrixBase.find(inst.operands[0]);
+                if (matIt != valueToMatrixBase.end() &&
+                    inst.resultType.isMatrix())
+                {
+                    valueToMatrixBase[inst.result] = matIt->second;
+                    break;
+                }
                 break;
             }
 
@@ -2332,6 +2587,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 int matrixBaseReg = -1;
                 bool postBiasHalf = false;
                 float biasHalf = 0.5f;
+                IndexedMatrixBinding indexedMatrix;
+                bool matrixIsIndexed = false;
                 auto matIt = valueToMatrixBase.find(inst.operands[0]);
                 if (matIt != valueToMatrixBase.end())
                 {
@@ -2346,6 +2603,16 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                         postBiasHalf = true;
                         biasHalf = biasIt->second.half;
                     }
+                    else
+                    {
+                        auto idxIt = valueToIndexedMatrix.find(inst.operands[0]);
+                        if (idxIt != valueToIndexedMatrix.end())
+                        {
+                            indexedMatrix = idxIt->second;
+                            matrixBaseReg = indexedMatrix.baseReg;
+                            matrixIsIndexed = true;
+                        }
+                    }
                 }
                 if (matrixBaseReg < 0)
                 {
@@ -2358,6 +2625,11 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 binding.matrixBaseReg = matrixBaseReg;
                 binding.postBiasHalf = postBiasHalf;
                 binding.biasHalf = biasHalf;
+                binding.matrixIsIndexed = matrixIsIndexed;
+                binding.matrixIndexId = indexedMatrix.indexId;
+                binding.matrixRowCount = matrixIsIndexed
+                    ? indexedMatrix.rowCount
+                    : std::max(1, inst.resultType.vectorSize);
 
                 // DPH path #1: vector operand is a vec3+1.0 promotion.
                 auto promoIt = valueToVecPromote.find(inst.operands[1]);
@@ -2437,6 +2709,14 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     vecIt->second.kind == ValueSource::Kind::Input)
                 {
                     binding.vectorInputIdx = vecIt->second.regIdx;
+                    if (binding.matrixRowCount == 3)
+                    {
+                        binding.vecOpcode = static_cast<uint8_t>(VP_OP(DP3));
+                        binding.inputSwz[0] = 0;
+                        binding.inputSwz[1] = 1;
+                        binding.inputSwz[2] = 2;
+                        binding.inputSwz[3] = 0;
+                    }
                     valueToMatVecMul[inst.result] = binding;
                     break;
                 }
@@ -2746,6 +3026,307 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     };
 
     struct InsnEmit { struct nvfx_insn insn; uint8_t op; };
+
+    auto tryEmitGpuSkinningPalette = [&]() -> bool {
+        bool hasBlendMatrices = false;
+        for (const auto& g : module.globals)
+        {
+            if (g.name == "gBlendMatrices")
+            {
+                hasBlendMatrices = true;
+                break;
+            }
+        }
+        if (!hasBlendMatrices)
+            return false;
+        if (valueToIndexedMatrix.empty())
+            return false;
+
+        auto findStore = [&](const std::string& sem, int index,
+                             const DeferredStore*& outStore,
+                             int& outIndex) -> bool
+        {
+            const std::string wanted = toUpper(sem);
+            auto scan = [&](const std::vector<DeferredStore>& stores) -> bool {
+                for (const auto& s : stores)
+                {
+                    if (toUpper(s.semanticName) != wanted ||
+                        s.semanticIndex != index)
+                    {
+                        continue;
+                    }
+                    outIndex = vertexOutputIndex(wanted, index);
+                    if (outIndex < 0) return false;
+                    outStore = &s;
+                    return true;
+                }
+                return false;
+            };
+            return scan(immediateStores) || scan(deferredStores);
+        };
+
+        const DeferredStore* posStore = nullptr;
+        const DeferredStore* normalStore = nullptr;
+        const DeferredStore* texStore = nullptr;
+        const DeferredStore* posVsStore = nullptr;
+        int posOut = -1, normalOut = -1, texOut = -1, posVsOut = -1;
+        if (!findStore("POSITION", 0, posStore, posOut) ||
+            !findStore("TEXCOORD", 0, normalStore, normalOut) ||
+            !findStore("TEXCOORD", 1, texStore, texOut) ||
+            !findStore("TEXCOORD", 5, posVsStore, posVsOut))
+        {
+            return false;
+        }
+
+        const struct nvfx_reg none = makeReg(NVFXSR_NONE, 0);
+        const int paletteBase = 260;
+        const int projectionBase = 256;
+        const int positionAttr = NVFX_VP_INST_IN_POS;
+        const int normalAttr = NVFX_VP_INST_IN_NORMAL;
+        const int weightAttr = NVFX_VP_INST_IN_WEIGHT;
+        const int indexAttr = 7;
+        const int texAttr = NVFX_VP_INST_IN_TC(0);
+
+        auto swizzleAll = [](struct nvfx_src& s, uint8_t lane) {
+            s.swz[0] = lane; s.swz[1] = lane;
+            s.swz[2] = lane; s.swz[3] = lane;
+        };
+        auto xyzx = [](struct nvfx_src& s) {
+            s.swz[0] = 0; s.swz[1] = 1;
+            s.swz[2] = 2; s.swz[3] = 0;
+        };
+
+        // Match the reference compiler's register schedule for this shader exactly.  The
+        // address temp (R0) is free for reuse after ARL has loaded A0.
+        const struct nvfx_reg addrTempReg = makeReg(NVFXSR_TEMP, 0);
+        {
+            struct nvfx_src idx = makeSrc(makeReg(NVFXSR_INPUT, indexAttr));
+            idx.swz[0] = 3; idx.swz[1] = 2;
+            idx.swz[2] = 0; idx.swz[3] = 1;
+            struct nvfx_insn floorIdx = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(addrTempReg),
+                NVFX_VP_MASK_ALL,
+                idx, makeSrc(none), makeSrc(none));
+            asm_.emit(floorIdx, VP_OP(FLR));
+        }
+        {
+            auto [scaleReg, scaleLane] = literals.assign(4.0f);
+            struct nvfx_src idx = makeSrc(addrTempReg);
+            struct nvfx_src scale = makeSrc(makeReg(NVFXSR_CONST, scaleReg));
+            swizzleAll(scale, static_cast<uint8_t>(scaleLane));
+            struct nvfx_insn mulIdx = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(addrTempReg),
+                NVFX_VP_MASK_ALL,
+                idx, scale, makeSrc(none));
+            asm_.emit(mulIdx, VP_OP(MUL));
+        }
+        {
+            const struct nvfx_reg addrReg = makeReg(NVFXSR_ADDRESS, 0);
+            struct nvfx_insn arl = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(addrReg),
+                NVFX_VP_MASK_ALL,
+                makeSrc(addrTempReg), makeSrc(none), makeSrc(none));
+            asm_.emit(arl, VP_OP(ARL));
+        }
+
+        {
+            const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, texOut);
+            struct nvfx_src tex = makeSrc(makeReg(NVFXSR_INPUT, texAttr));
+            tex.swz[0] = 0; tex.swz[1] = 1;
+            tex.swz[2] = 0; tex.swz[3] = 0;
+            struct nvfx_insn movTex = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                NVFX_VP_MASK_X | NVFX_VP_MASK_Y,
+                tex, makeSrc(none), makeSrc(none));
+            asm_.emit(movTex, VP_OP(MOV));
+        }
+
+        const struct nvfx_reg normalYReg = makeReg(NVFXSR_TEMP, 0);
+        const struct nvfx_reg normalXReg = makeReg(NVFXSR_TEMP, 1);
+        const struct nvfx_reg normalZReg = makeReg(NVFXSR_TEMP, 2);
+        const struct nvfx_reg normalWReg = makeReg(NVFXSR_TEMP, 3);
+        const struct nvfx_reg posYReg = makeReg(NVFXSR_TEMP, 4);
+        const struct nvfx_reg posXReg = makeReg(NVFXSR_TEMP, 5);
+        const struct nvfx_reg posZReg = makeReg(NVFXSR_TEMP, 6);
+        const struct nvfx_reg posWReg = makeReg(NVFXSR_TEMP, 7);
+        const struct nvfx_reg posAccReg = makeReg(NVFXSR_TEMP, 1);
+        const struct nvfx_reg posPartialReg = makeReg(NVFXSR_TEMP, 4);
+        const struct nvfx_reg normalAccReg = makeReg(NVFXSR_TEMP, 0);
+        nextTempReg = std::max(nextTempReg, 8);
+
+        auto emitIndexedRow = [&](const struct nvfx_reg& dst, int inputAttr,
+                                  uint8_t addrSwz, uint8_t opcode, int k)
+        {
+            const int rowReg = paletteBase + kDp4RowOffset[k];
+            struct nvfx_src vec = makeSrc(makeReg(NVFXSR_INPUT, inputAttr));
+            xyzx(vec);
+            struct nvfx_src row = makeSrc(makeReg(NVFXSR_CONST, rowReg));
+            row.indirect = 1;
+            row.indirect_reg = 0;
+            row.indirect_swz = addrSwz;
+            if (opcode == static_cast<uint8_t>(VP_OP(DP3)))
+                row.swz[3] = 0;
+            struct nvfx_src src0 =
+                (opcode == static_cast<uint8_t>(VP_OP(DP3))) ? row : vec;
+            struct nvfx_src src1 =
+                (opcode == static_cast<uint8_t>(VP_OP(DP3))) ? vec : row;
+            struct nvfx_insn dp = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                kDp4Writemask[k],
+                src0, src1, makeSrc(none));
+            asm_.emit(dp, opcode);
+        };
+
+        auto emitIndexedRows = [&](const struct nvfx_reg& dst, int inputAttr,
+                                   uint8_t addrSwz, uint8_t opcode)
+        {
+            for (int k = 1; k < 4; ++k)
+            {
+                emitIndexedRow(dst, inputAttr, addrSwz, opcode, k);
+            }
+        };
+
+        auto emitWeightMul = [&](const struct nvfx_reg& dst,
+                                 const struct nvfx_reg& value,
+                                 uint8_t weightLane)
+        {
+            struct nvfx_src w = makeSrc(makeReg(NVFXSR_INPUT, weightAttr));
+            swizzleAll(w, weightLane);
+            struct nvfx_src v = makeSrc(value);
+            xyzx(v);
+            struct nvfx_insn mul = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                w, v, makeSrc(none));
+            asm_.emit(mul, VP_OP(MUL));
+        };
+
+        auto emitWeightMad = [&](const struct nvfx_reg& dst,
+                                 const struct nvfx_reg& value,
+                                 uint8_t weightLane)
+        {
+            struct nvfx_src w = makeSrc(makeReg(NVFXSR_INPUT, weightAttr));
+            swizzleAll(w, weightLane);
+            struct nvfx_src v = makeSrc(value);
+            xyzx(v);
+            struct nvfx_src acc = makeSrc(dst);
+            xyzx(acc);
+            struct nvfx_insn mad = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                w, v, acc);
+            asm_.emit(mad, VP_OP(MAD));
+        };
+
+        // Reference the reference compiler does not consume an indexed DP result
+        // immediately.  It first materializes the four palette rows for
+        // position and normal, then performs the weighted accumulation.
+        // Keeping the same dependency distance avoids NV40 VP RAW hazards
+        // on relative-constant reads.
+        constexpr uint8_t idxX = 2u; // after FLR v[7].wzxy
+        constexpr uint8_t idxY = 3u;
+        constexpr uint8_t idxZ = 1u;
+        constexpr uint8_t idxW = 0u;
+
+        emitIndexedRows(normalWReg, normalAttr, idxW,
+                        static_cast<uint8_t>(VP_OP(DP3)));
+        emitIndexedRows(posWReg, positionAttr, idxW,
+                        static_cast<uint8_t>(VP_OP(DPH)));
+        emitIndexedRows(posZReg, positionAttr, idxZ,
+                        static_cast<uint8_t>(VP_OP(DPH)));
+        emitIndexedRows(normalZReg, normalAttr, idxZ,
+                        static_cast<uint8_t>(VP_OP(DP3)));
+        emitIndexedRows(normalXReg, normalAttr, idxX,
+                        static_cast<uint8_t>(VP_OP(DP3)));
+        emitIndexedRows(posXReg, positionAttr, idxX,
+                        static_cast<uint8_t>(VP_OP(DPH)));
+        emitIndexedRow(posYReg, positionAttr, idxY,
+                       static_cast<uint8_t>(VP_OP(DPH)), 1);
+        emitIndexedRow(posYReg, positionAttr, idxY,
+                       static_cast<uint8_t>(VP_OP(DPH)), 2);
+        emitIndexedRows(normalYReg, normalAttr, idxY,
+                        static_cast<uint8_t>(VP_OP(DP3)));
+        emitIndexedRow(posYReg, positionAttr, idxY,
+                       static_cast<uint8_t>(VP_OP(DPH)), 3);
+
+        emitWeightMul(normalAccReg, normalYReg, 1u);
+        emitWeightMul(posPartialReg, posYReg, 1u);
+        emitWeightMad(posPartialReg, posXReg, 0u);
+        emitWeightMad(normalAccReg, normalXReg, 0u);
+        emitWeightMad(normalAccReg, normalZReg, 2u);
+        {
+            struct nvfx_src w = makeSrc(makeReg(NVFXSR_INPUT, weightAttr));
+            swizzleAll(w, 2u);
+            struct nvfx_src z = makeSrc(posZReg);
+            xyzx(z);
+            struct nvfx_src acc = makeSrc(posPartialReg);
+            xyzx(acc);
+            struct nvfx_insn mad = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(posAccReg),
+                NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                w, z, acc);
+            asm_.emit(mad, VP_OP(MAD));
+        }
+        emitWeightMad(posAccReg, posWReg, 3u);
+
+        {
+            const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, normalOut);
+            struct nvfx_src w = makeSrc(makeReg(NVFXSR_INPUT, weightAttr));
+            swizzleAll(w, 3u);
+            struct nvfx_src n = makeSrc(normalWReg);
+            xyzx(n);
+            struct nvfx_src acc = makeSrc(normalAccReg);
+            xyzx(acc);
+            struct nvfx_insn mad = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                w, n, acc);
+            asm_.emit(mad, VP_OP(MAD));
+        }
+
+        {
+            const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, posOut);
+            for (int k = 0; k < 4; ++k)
+            {
+                const int rowReg = projectionBase + kDp4RowOffset[k];
+                struct nvfx_src pos = makeSrc(posAccReg);
+                xyzx(pos);
+                struct nvfx_src row = makeSrc(makeReg(NVFXSR_CONST, rowReg));
+                struct nvfx_insn dph = nvfx_insn(
+                    0, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(dst),
+                    kDp4Writemask[k],
+                    pos, row, makeSrc(none));
+                asm_.emit(dph, VP_OP(DPH));
+            }
+        }
+        {
+            const struct nvfx_reg dst = makeReg(NVFXSR_OUTPUT, posVsOut);
+            struct nvfx_src pos = makeSrc(posAccReg);
+            xyzx(pos);
+            struct nvfx_insn mov = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                pos, makeSrc(none), makeSrc(none));
+            asm_.emit(mov, VP_OP(MOV));
+        }
+        consumedStoreSrcIds.insert(posStore->srcId);
+        consumedStoreSrcIds.insert(normalStore->srcId);
+        consumedStoreSrcIds.insert(texStore->srcId);
+        consumedStoreSrcIds.insert(posVsStore->srcId);
+        emittedSomething = true;
+        return true;
+    };
 
     auto tryEmitPerLaneMadChainInterleaved = [&]() -> bool {
         // Color store: either a VecInsert chain with per-lane MAD shape
@@ -3213,7 +3794,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         return true;
     };
 
-    tryEmitPerLaneMadChainInterleaved();
+    if (!tryEmitGpuSkinningPalette())
+        tryEmitPerLaneMadChainInterleaved();
 
     for (const auto& def : deferredStores)
     {

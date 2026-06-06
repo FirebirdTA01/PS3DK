@@ -820,8 +820,71 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                 for (const auto& field : *fields)
                 {
                     if (field.semantic.isEmpty()) continue;
-                    auto it = nameToValue_.find(baseName + "." + field.name);
-                    if (it == nameToValue_.end()) continue;
+                    const std::string fieldKey = baseName + "." + field.name;
+                    auto it = nameToValue_.find(fieldKey);
+                    IRValueID fieldValue = InvalidIRValue;
+                    if (it != nameToValue_.end())
+                    {
+                        fieldValue = it->second;
+                        std::fprintf(stderr,
+                                     "[ir_builder] return field %s direct -> %%%u\n",
+                                     fieldKey.c_str(),
+                                     static_cast<unsigned>(fieldValue));
+                    }
+                    else
+                    {
+                        // Split struct-member writes such as
+                        // `OUT.color.xyz = ...; OUT.color.w = 1;` keep
+                        // their fully-qualified partial keys in
+                        // `nameToValue_`.  Recompose the parent field
+                        // here so `return OUT;` still emits a real
+                        // StoreOutput for the whole struct member.
+                        //
+                        // We only need the vec4 case today; the
+                        // ShadowMapping fragment shader writes
+                        // `OUT.color.xyz` + `OUT.color.w`.
+                        if (field.type && field.type->baseType == BaseType::Float &&
+                            field.type->vectorSize == 4)
+                        {
+                            auto xyzIt = nameToValue_.find(fieldKey + ".xyz");
+                            auto wIt   = nameToValue_.find(fieldKey + ".w");
+                            if (xyzIt != nameToValue_.end() &&
+                                wIt != nameToValue_.end())
+                            {
+                                IRValueID xyzValue = xyzIt->second;
+                                if (auto aliasIt = identityPrefixSwizzleBase_.find(xyzValue);
+                                    aliasIt != identityPrefixSwizzleBase_.end())
+                                {
+                                    std::fprintf(stderr,
+                                                 "[ir_builder] unwrap %s.xyz alias %%%u -> %%%u\n",
+                                                 fieldKey.c_str(),
+                                                 static_cast<unsigned>(xyzValue),
+                                                 static_cast<unsigned>(aliasIt->second));
+                                    xyzValue = aliasIt->second;
+                                }
+                                IRTypeInfo fieldTy = getIRType(field.type.get());
+                                // Keep the contiguous xyz producer as the
+                                // base vector and layer the w=1 override as a
+                                // single VecInsert.  This preserves the
+                                // producer chain that the NV40 emitter can
+                                // lower byte-exactly (`mul` → `mov w=1`),
+                                // instead of forcing a synthetic vec
+                                // reconstruction that later falls back to
+                                // zero-fill on the shader backend.
+                                auto inst = std::make_unique<IRInstruction>(
+                                    IROp::VecInsert,
+                                    currentFunction_->allocateValueId(),
+                                    fieldTy);
+                                inst->addOperand(xyzValue);
+                                inst->addOperand(wIt->second);
+                                inst->componentIndex = 3;
+                                currentBlock_->addInstruction(std::move(inst));
+                                fieldValue = currentFunction_->nextValueId - 1;
+                            }
+                        }
+                    }
+                    if (fieldValue == InvalidIRValue) continue;
+
                     // Stash the field's source type on the StoreOutput
                     // (in `resultType`) so the container emit can size
                     // the synthetic output param entry correctly — e.g.
@@ -830,7 +893,7 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                     IRTypeInfo fieldTy = getIRType(field.type.get());
                     auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
                         InvalidIRValue, fieldTy);
-                    inst->addOperand(it->second);
+                    inst->addOperand(fieldValue);
                     inst->semanticName    = field.semantic.name;
                     inst->rawSemanticName = field.semantic.rawName;
                     inst->semanticIndex   = field.semantic.index;
@@ -1255,6 +1318,15 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
     {
         IRValueID objectValue = buildExpr(expr->object.get());
         IRTypeInfo resultType = getExprType(expr);
+        bool identityPrefix = true;
+        for (int s = 0; s < expr->swizzleLength && s < 4; ++s)
+        {
+            if (expr->swizzleIndices[s] != s)
+            {
+                identityPrefix = false;
+                break;
+            }
+        }
 
         // Constant-fold swizzles of constant vectors — e.g. `v.y`
         // where `v` was const-initialised lifts to a scalar
@@ -1285,6 +1357,9 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
         inst->addOperand(objectValue);
         inst->swizzleMask = IRUtils::encodeSwizzle(expr->member);
         currentBlock_->addInstruction(std::move(inst));
+
+        if (identityPrefix)
+            identityPrefixSwizzleBase_[currentFunction_->nextValueId - 1] = objectValue;
 
         return currentFunction_->nextValueId - 1;
     }

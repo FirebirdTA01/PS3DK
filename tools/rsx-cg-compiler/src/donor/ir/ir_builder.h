@@ -34,6 +34,7 @@ private:
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;
     std::unordered_map<std::string, IRValueID> nameToValue_;
+    std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
 
     // Break/continue targets for loops
     struct LoopContext

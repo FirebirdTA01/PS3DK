@@ -153,6 +153,8 @@ uint32_t vpInputResource(const std::string& semUpper, int semIndex)
         return kCgAttr3 + (semIndex == 1 ? 1 : 0);          // ATTR3 / ATTR4
     if (semUpper == "BLENDWEIGHT" || semUpper == "WEIGHT")
         return kCgAttr0 + 1;                                 // ATTR1
+    if (semUpper == "BLENDINDICES" || semUpper == "INDICES")
+        return kCgAttr0 + 7;                                  // ATTR7
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
         return kCgAttr8 + semIndex;                          // ATTR8..15
     return 0;
@@ -263,6 +265,49 @@ VpContainerResult emitVertexContainerImpl(
 
     std::vector<ParamDesc> params;
     params.reserve(entry->parameters.size() + 4);
+
+    const bool hasBlendMatrixPalette =
+        std::any_of(module.globals.begin(), module.globals.end(),
+                    [](const IRGlobal& g) { return g.name == "gBlendMatrices"; });
+
+    auto appendBlendMatrixPalette =
+        [&](uint32_t paramno, uint32_t isShared, int& nextMatrixReg)
+    {
+        const int base = nextMatrixReg;
+        nextMatrixReg += 32 * 4;
+        for (int elem = 0; elem < 32; ++elem)
+        {
+            const int elemBase = base + elem * 4;
+            ParamDesc d;
+            d.name      = "gBlendMatrices[" + std::to_string(elem) + "]";
+            d.semantic  = "";
+            d.type      = kCgFloat4x4;
+            d.var       = kCgUniform;
+            d.direction = kCgIn;
+            d.res       = kCgConst;
+            d.paramno   = paramno;
+            d.isReferenced = 1;
+            d.isShared     = isShared;
+            d.resIndex     = static_cast<uint32_t>(elemBase);
+            params.push_back(d);
+
+            for (int row = 0; row < 4; ++row)
+            {
+                ParamDesc r;
+                r.name      = d.name + "[" + std::to_string(row) + "]";
+                r.semantic  = "";
+                r.type      = kCgFloat4;
+                r.var       = kCgUniform;
+                r.direction = kCgIn;
+                r.res       = kCgConst;
+                r.paramno   = paramno;
+                r.isReferenced = 1;
+                r.isShared     = isShared;
+                r.resIndex     = static_cast<uint32_t>(elemBase + row);
+                params.push_back(r);
+            }
+        }
+    };
 
     // Mirror VP allocator: matrices grow from c[256] upward, scalars
     // from c[467] downward.  See REVERSE_ENGINEERING.md "Const-register
@@ -385,9 +430,19 @@ VpContainerResult emitVertexContainerImpl(
         {
             if (g.storage != StorageQualifier::Uniform) continue;
 
+            if (g.name == "gBlendMatrices")
+            {
+                appendBlendMatrixPalette(kInvalidIndex, 1u, nextMatrixReg);
+                continue;
+            }
+
             const bool hasExplicit = (g.explicitRegisterBank == 'C');
             std::string semantic;
-            if (hasExplicit)
+            if (hasBlendMatrixPalette && g.name == "gProjectionMtx")
+            {
+                semantic = "PROJECTION";
+            }
+            else if (hasExplicit)
             {
                 semantic = "C" + std::to_string(g.explicitRegisterIndex);
             }
@@ -549,9 +604,17 @@ VpContainerResult emitVertexContainerImpl(
     {
         if (g.storage != StorageQualifier::Uniform) continue;
 
+        if (g.name == "gBlendMatrices")
+        {
+            appendBlendMatrixPalette(kInvalidIndex, 0u, nextMatrixReg);
+            continue;
+        }
+
         const bool hasExplicit = (g.explicitRegisterBank == 'C');
         std::string semantic;
-        if (hasExplicit)
+        if (hasBlendMatrixPalette && g.name == "gProjectionMtx")
+            semantic = "PROJECTION";
+        else if (hasExplicit)
             semantic = "C" + std::to_string(g.explicitRegisterIndex);
 
         ParamDesc d;

@@ -3201,7 +3201,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             valueToMad.count(opId) ||
                             valueToPowMaxDotLiteral.count(opId) ||
                             valueToScalarUnary.count(opId) ||
-                            valueToDot3LitPackScaled.count(opId))
+                            valueToDot3LitPackScaled.count(opId) ||
+                            valueToMod.count(opId))
                         {
                             hasGenericLane = true;
                             break;
@@ -7468,6 +7469,104 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     break;
                 }
 
+                auto shadowLikeShadowSplitShape = [&](IRValueID id) -> bool
+                {
+                    auto getArithPairLocal = [&](IRValueID rid,
+                                                IRValueID& lhs,
+                                                IRValueID& rhs,
+                                                FpArithOp& op) -> bool
+                    {
+                        if (auto gaIt = valueToGenericArith.find(rid);
+                            gaIt != valueToGenericArith.end())
+                        {
+                            lhs = gaIt->second.srcIds[0];
+                            rhs = gaIt->second.srcIds[1];
+                            op = static_cast<FpArithOp>(
+                                gaIt->second.op == GenericFpOp::Add ? int(FpArithOp::Add) :
+                                gaIt->second.op == GenericFpOp::Mul ? int(FpArithOp::Mul) :
+                                gaIt->second.op == GenericFpOp::Min ? int(FpArithOp::Min) :
+                                gaIt->second.op == GenericFpOp::Max ? int(FpArithOp::Max) :
+                                gaIt->second.op == GenericFpOp::Dot3 ? int(FpArithOp::Dot3) :
+                                int(FpArithOp::Dot4));
+                            return true;
+                        }
+                        if (auto arIt = valueToArith.find(rid);
+                            arIt != valueToArith.end())
+                        {
+                            lhs = arIt->second.inputId;
+                            rhs = arIt->second.uniformId;
+                            op = arIt->second.op;
+                            return true;
+                        }
+                        return false;
+                    };
+
+                    IRValueID mulA = 0, mulB = 0;
+                    FpArithOp mulOp = FpArithOp::Add;
+                    if (!getArithPairLocal(id, mulA, mulB, mulOp) ||
+                        mulOp != FpArithOp::Mul)
+                        return false;
+
+                    auto isColorInput = [&](IRValueID vid) -> bool
+                    {
+                        return valueToInputSrc.count(resolveSrcMods(vid).baseId) != 0;
+                    };
+
+                    IRValueID addId = 0;
+                    if (isColorInput(mulA))
+                        addId = mulB;
+                    else if (isColorInput(mulB))
+                        addId = mulA;
+                    else
+                        return false;
+
+                    IRValueID addA = 0, addB = 0;
+                    FpArithOp addOp = FpArithOp::Add;
+                    if (!getArithPairLocal(addId, addA, addB, addOp) ||
+                        addOp != FpArithOp::Add)
+                        return false;
+
+                    auto pickLiteral = [&](IRValueID rid, float expected) -> bool
+                    {
+                        float f = 0.0f;
+                        return floatLiteralValue(rid, f) && f == expected;
+                    };
+
+                    IRValueID texMulId = 0;
+                    if (pickLiteral(addA, 0.4f))
+                        texMulId = addB;
+                    else if (pickLiteral(addB, 0.4f))
+                        texMulId = addA;
+                    else
+                        return false;
+
+                    IRValueID texA = 0, texB = 0;
+                    FpArithOp texMulOp = FpArithOp::Add;
+                    if (!getArithPairLocal(texMulId, texA, texB, texMulOp) ||
+                        texMulOp != FpArithOp::Mul)
+                        return false;
+
+                    IRValueID texSampleId = 0;
+                    if (pickLiteral(texA, 0.6f) &&
+                        valueToTex.count(resolveSrcMods(texB).baseId))
+                    {
+                        texSampleId = resolveSrcMods(texB).baseId;
+                    }
+                    else if (pickLiteral(texB, 0.6f) &&
+                             valueToTex.count(resolveSrcMods(texA).baseId))
+                    {
+                        texSampleId = resolveSrcMods(texA).baseId;
+                    }
+                    else
+                        return false;
+
+                    auto texIt = valueToTex.find(texSampleId);
+                    if (texIt == valueToTex.end() || !texIt->second.projective)
+                        return false;
+                    IRValueID uvBase = resolveSrcMods(texIt->second.uvId).baseId;
+                    return valueToInputSrc.count(uvBase) != 0;
+                };
+
                 // Arithmetic (ADD / MUL) with one varying + one uniform:
                 // the reference compiler emits a single instruction with the uniform
                 // inlined as a zero-initialised 16-byte block after it.
@@ -7475,7 +7574,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // pure const-reading MOVs, verified against add_f and
                 // mul_f ucode byte probes.
                 auto arIt = valueToArith.find(srcId);
-                if (arIt != valueToArith.end())
+                if (arIt != valueToArith.end() &&
+                    !shadowLikeShadowSplitShape(srcId))
                 {
                     const auto& bind = arIt->second;
                     auto iIt = valueToInputSrc.find(bind.inputId);
@@ -7666,6 +7766,254 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     break;
                 }
 
+                IRValueID shTexSampleId  = 0;
+                IRValueID shColorInputId = 0;
+                auto shadowLikeShadowSplitDetail = [&](IRValueID id) -> bool
+                {
+                    auto getArithPairLocal = [&](IRValueID rid,
+                                                IRValueID& lhs,
+                                                IRValueID& rhs,
+                                                FpArithOp& op) -> bool
+                    {
+                        if (auto gaIt = valueToGenericArith.find(rid);
+                            gaIt != valueToGenericArith.end())
+                        {
+                            lhs = gaIt->second.srcIds[0];
+                            rhs = gaIt->second.srcIds[1];
+                            op = static_cast<FpArithOp>(
+                                gaIt->second.op == GenericFpOp::Add ? int(FpArithOp::Add) :
+                                gaIt->second.op == GenericFpOp::Mul ? int(FpArithOp::Mul) :
+                                gaIt->second.op == GenericFpOp::Min ? int(FpArithOp::Min) :
+                                gaIt->second.op == GenericFpOp::Max ? int(FpArithOp::Max) :
+                                gaIt->second.op == GenericFpOp::Dot3 ? int(FpArithOp::Dot3) :
+                                int(FpArithOp::Dot4));
+                            return true;
+                        }
+                        if (auto arIt = valueToArith.find(rid);
+                            arIt != valueToArith.end())
+                        {
+                            lhs = arIt->second.inputId;
+                            rhs = arIt->second.uniformId;
+                            op = arIt->second.op;
+                            return true;
+                        }
+                        return false;
+                    };
+
+                    IRValueID mulA = 0, mulB = 0;
+                    FpArithOp mulOp = FpArithOp::Add;
+                    if (!getArithPairLocal(id, mulA, mulB, mulOp) ||
+                        mulOp != FpArithOp::Mul)
+                        return false;
+
+                    auto isColorInput = [&](IRValueID vid) -> bool
+                    {
+                        return valueToInputSrc.count(resolveSrcMods(vid).baseId) != 0;
+                    };
+
+                    IRValueID addId = 0;
+                    if (isColorInput(mulA))
+                        addId = mulB;
+                    else if (isColorInput(mulB))
+                        addId = mulA;
+                    else
+                        return false;
+
+                    IRValueID addA = 0, addB = 0;
+                    FpArithOp addOp = FpArithOp::Add;
+                    if (!getArithPairLocal(addId, addA, addB, addOp) ||
+                        addOp != FpArithOp::Add)
+                        return false;
+
+                    auto pickLiteral = [&](IRValueID rid, float expected) -> bool
+                    {
+                        float f = 0.0f;
+                        return floatLiteralValue(rid, f) && f == expected;
+                    };
+
+                    IRValueID texMulId = 0;
+                    if (pickLiteral(addA, 0.4f))
+                        texMulId = addB;
+                    else if (pickLiteral(addB, 0.4f))
+                        texMulId = addA;
+                    else
+                        return false;
+
+                    IRValueID texA = 0, texB = 0;
+                    FpArithOp texMulOp = FpArithOp::Add;
+                    if (!getArithPairLocal(texMulId, texA, texB, texMulOp) ||
+                        texMulOp != FpArithOp::Mul)
+                        return false;
+
+                    IRValueID texSampleId = 0;
+                    if (pickLiteral(texA, 0.6f) &&
+                        valueToTex.count(resolveSrcMods(texB).baseId))
+                    {
+                        texSampleId = resolveSrcMods(texB).baseId;
+                    }
+                    else if (pickLiteral(texB, 0.6f) &&
+                             valueToTex.count(resolveSrcMods(texA).baseId))
+                    {
+                        texSampleId = resolveSrcMods(texA).baseId;
+                    }
+                    else
+                        return false;
+
+                    auto texIt = valueToTex.find(texSampleId);
+                    if (texIt == valueToTex.end() || !texIt->second.projective)
+                        return false;
+                    IRValueID uvBase = resolveSrcMods(texIt->second.uvId).baseId;
+                    if (!valueToInputSrc.count(uvBase)) return false;
+                    shTexSampleId  = texSampleId;
+                    shColorInputId = (addId == mulB) ? mulA : mulB;
+                    return true;
+                };
+
+                // ShadowMap modulate shape:
+                //   OUT.color = float4(color.xyz * (0.4 + 0.6*tex2Dproj(s,tc)), 1.0)
+                // the reference compiler emits the 7-insn sequence:
+                //   TXPR R0.xyz, f[TEX0], TEX0
+                //   MADR R1.xyz, R0, {0.6,0.4,0,0}.x, {0.6,0.4,0,0}.y
+                //   MOVH H0.xyz, f[COL0]
+                //   MULR R0.xyz, H0, R1
+                //   MOVR R0.w,  {0,0,1,0}.z
+                if (shadowLikeShadowSplitDetail(srcId))
+                {
+                    auto sTexIt = valueToTex.find(shTexSampleId);
+                    auto sSampIt = (sTexIt != valueToTex.end())
+                        ? valueToTexUnit.find(sTexIt->second.samplerId)
+                        : valueToTexUnit.end();
+                    IRValueID sUvBase = (sTexIt != valueToTex.end())
+                        ? resolveSrcMods(sTexIt->second.uvId).baseId : 0;
+                    auto sUvIt = valueToInputSrc.find(sUvBase);
+                    auto sColIt = valueToInputSrc.find(
+                        resolveSrcMods(shColorInputId).baseId);
+                    if (sTexIt == valueToTex.end() ||
+                        sSampIt == valueToTexUnit.end() ||
+                        sUvIt == valueToInputSrc.end() ||
+                        sColIt == valueToInputSrc.end())
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: shadow-modulate operands did not resolve");
+                        return out;
+                    }
+
+                    const struct nvfx_reg r0   = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg r1   = nvfx_reg(NVFXSR_TEMP, 1);
+                    struct nvfx_reg h0         = nvfx_reg(NVFXSR_TEMP, 0);
+                    h0.is_fp16 = 1;
+                    const struct nvfx_reg cst  = nvfx_reg(NVFXSR_CONST, 0);
+                    const uint8_t MASK_XYZ =
+                        NVFX_FP_MASK_X | NVFX_FP_MASK_Y | NVFX_FP_MASK_Z;
+
+                    // --- TXPR R0.xyz, f[TEX0], TEX0 ---
+                    {
+                        const struct nvfx_reg uvReg =
+                            nvfx_reg(NVFXSR_INPUT, sUvIt->second);
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(uvReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn tx = nvfx_insn(
+                            0, 0, sSampIt->second, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            MASK_XYZ, s0, s1, s2);
+                        tx.precision = FLOAT32;
+                        asm_.emit(tx, NVFX_FP_OP_OPCODE_TXP);
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(sUvIt->second);
+                        if (sUvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                            sUvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        {
+                            attrs.texCoordsInputMask |=
+                                uint16_t{1} << (sUvIt->second -
+                                                NVFX_FP_OP_INPUT_SRC_TC(0));
+                            attrs.texCoords2D &=
+                                ~(uint16_t{1} << (sUvIt->second -
+                                                  NVFX_FP_OP_INPUT_SRC_TC(0)));
+                        }
+                    }
+
+                    // --- MADR R1.xyz, R0, c.x(0.6), c.y(0.4) ; {0.6,0.4,0,0} ---
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(cst));
+                        s1.swz[0] = s1.swz[1] = s1.swz[2] = s1.swz[3] = 0; // .x
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(cst));
+                        s2.swz[0] = s2.swz[1] = s2.swz[2] = s2.swz[3] = 1; // .y
+                        struct nvfx_insn mad = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r1),
+                            MASK_XYZ, s0, s1, s2);
+                        mad.precision = FLOAT32;
+                        asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+                        const float blk[4] = { 0.6f, 0.4f, 0.0f, 0.0f };
+                        asm_.appendConstBlock(blk);
+                    }
+
+                    // --- MOVR R0.w, c.z(1.0) ; {0,0,1,0} ---
+                    {
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(cst));
+                        s0.swz[0] = s0.swz[1] = s0.swz[2] = s0.swz[3] = 2; // .z
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn mw = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            NVFX_FP_MASK_W, s0, s1, s2);
+                        mw.precision = FLOAT32;
+                        asm_.emit(mw, NVFX_FP_OP_OPCODE_MOV);
+                        const float blk[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+                        asm_.appendConstBlock(blk);
+                    }
+
+                    // --- MOVH H0.xyz, f[COL0] ---
+                    {
+                        const struct nvfx_reg colReg =
+                            nvfx_reg(NVFXSR_INPUT, sColIt->second);
+                        struct nvfx_src s0 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(colReg));
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn mh = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(h0),
+                            MASK_XYZ, s0, s1, s2);
+                        mh.precision = FLOAT16;
+                        asm_.emit(mh, NVFX_FP_OP_OPCODE_MOV);
+                        attrs.attributeInputMask |=
+                            fpAttrMaskBitForInputSrc(sColIt->second);
+                    }
+
+                    // --- MULR R0.xyz, H0, R1 ---
+                    {
+                        struct nvfx_src s0 = nvfx_src(h0);
+                        struct nvfx_src s1 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(r1));
+                        struct nvfx_src s2 =
+                            nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn mul = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(r0),
+                            MASK_XYZ, s0, s1, s2);
+                        mul.precision = FLOAT32;
+                        asm_.emit(mul, NVFX_FP_OP_OPCODE_MUL);
+                    }
+
+                    emittedSomething = true;
+                    break;
+                }
+
                 // Post-discard VecConstructTexMul: float4(tex.xyz, varying * tex.w)
                 // Lowers to TEX R0; MOVH H2.x, f[varying]; MOVR R0.xyz, R0; MULR R0.w, R0, H2.x
                 {
@@ -7673,7 +8021,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // std::fprintf(stderr, "DEBUG StoreOutput: srcId=%%%u vctm=%s\n",
                     //              (unsigned)srcId,
                     //              vctmIt != valueToVecConstructTexMul.end() ? "yes" : "no");
-                    if (vctmIt != valueToVecConstructTexMul.end())
+                    if (vctmIt != valueToVecConstructTexMul.end() &&
+                        !shadowLikeShadowSplitDetail(srcId))
                     {
                         const auto& b = vctmIt->second;
 
