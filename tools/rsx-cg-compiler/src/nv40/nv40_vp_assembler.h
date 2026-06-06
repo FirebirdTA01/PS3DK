@@ -32,6 +32,13 @@ public:
     // The assembler handles dst/src field packing and slot selection.
     void emit(const struct nvfx_insn& insn, uint8_t opcode);
 
+    // Emit one instruction word containing both a VEC-slot op and a
+    // SCA-slot op.  This is explicit only; callers use it where an oracle
+    // schedule requires co-issue, so existing shaders are not rescheduled
+    // heuristically.
+    void emitCoIssued(const struct nvfx_insn& vecInsn, uint8_t vecOpcode,
+                      const struct nvfx_insn& scaInsn, uint8_t scaOpcode);
+
     // Stamp the NVFX_VP_INST_LAST bit on the most recent instruction.
     // Must be called exactly once after the whole program is emitted.
     void markLast();

@@ -98,6 +98,7 @@ struct nvfx_src makeSrc(const struct nvfx_reg& r)
 }
 
 #define VP_OP(NAME) ((NVFX_VP_INST_SLOT_VEC << 7) | NVFX_VP_INST_VEC_OP_##NAME)
+#define VP_SCA_OP(NAME) ((NVFX_VP_INST_SLOT_SCA << 7) | NVFX_VP_INST_SCA_OP_##NAME)
 
 // the reference compiler emits the 4 DP4s in the order W, Z, Y, X, pulling matrix rows
 // base+3, base+2, base+1, base+0 respectively.
@@ -518,6 +519,36 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
 
     // Arithmetic operations awaiting a consumer.
     std::unordered_map<IRValueID, ArithBinding> valueToArith;
+
+    struct VpNormalizeBinding
+    {
+        IRValueID sourceId = 0;
+        int       width = 3;
+    };
+    std::unordered_map<IRValueID, VpNormalizeBinding> valueToNormalize;
+
+    struct VpPowBinding
+    {
+        IRValueID baseId = 0;
+        float     exponent = 0.0f;
+    };
+    std::unordered_map<IRValueID, VpPowBinding> valueToPow;
+
+    struct VpCmpBinding
+    {
+        IRValueID lhsId = 0;
+        IRValueID rhsId = 0;
+        IROp      op = IROp::Nop;
+    };
+    std::unordered_map<IRValueID, VpCmpBinding> valueToCmp;
+
+    struct VpSelectBinding
+    {
+        IRValueID cmpId = 0;
+        IRValueID trueId = 0;
+        IRValueID falseId = 0;
+    };
+    std::unordered_map<IRValueID, VpSelectBinding> valueToSelect;
 
     // Generic VecConstruct values that contain computed scalar lanes
     // (e.g. float4(dot(...), dot(...), dot(...), 1.0)).  Existing
@@ -2293,6 +2324,71 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 break;
             }
 
+            case IROp::Normalize:
+            {
+                if (inst.operands.size() != 1)
+                {
+                    out.diagnostics.push_back("nv40-vp: Normalize op with !=1 operand");
+                    return out;
+                }
+                VpNormalizeBinding n;
+                n.sourceId = inst.operands[0];
+                n.width = std::max(1, inst.resultType.vectorSize);
+                valueToNormalize[inst.result] = n;
+                break;
+            }
+
+            case IROp::Pow:
+            {
+                if (inst.operands.size() != 2)
+                {
+                    out.diagnostics.push_back("nv40-vp: Pow op with !=2 operands");
+                    return out;
+                }
+                float exponent = 0.0f;
+                if (!isFloatLiteral(inst.operands[1], exponent))
+                {
+                    out.diagnostics.push_back(
+                        "nv40-vp: Pow exponent must be a float literal");
+                    return out;
+                }
+                VpPowBinding p;
+                p.baseId = inst.operands[0];
+                p.exponent = exponent;
+                valueToPow[inst.result] = p;
+                break;
+            }
+
+            case IROp::CmpLe:
+            {
+                if (inst.operands.size() < 2)
+                {
+                    out.diagnostics.push_back("nv40-vp: CmpLe op with <2 operands");
+                    return out;
+                }
+                VpCmpBinding c;
+                c.lhsId = inst.operands[0];
+                c.rhsId = inst.operands[1];
+                c.op = inst.op;
+                valueToCmp[inst.result] = c;
+                break;
+            }
+
+            case IROp::Select:
+            {
+                if (inst.operands.size() < 3)
+                {
+                    out.diagnostics.push_back("nv40-vp: Select op with <3 operands");
+                    return out;
+                }
+                VpSelectBinding s;
+                s.cmpId = inst.operands[0];
+                s.trueId = inst.operands[1];
+                s.falseId = inst.operands[2];
+                valueToSelect[inst.result] = s;
+                break;
+            }
+
             case IROp::VecShuffle:
             {
                 // Single-lane extract from a wider value.  We treat any
@@ -3794,7 +3890,291 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         return true;
     };
 
-    if (!tryEmitGpuSkinningPalette())
+    auto tryEmitBasicVertexLighting = [&]() -> bool {
+        const DeferredStore* posStore = nullptr;
+        const DeferredStore* colorStore = nullptr;
+        const DeferredStore* texStore = nullptr;
+        const DeferredStore* specStore = nullptr;
+        int posOut = -1, colorOut = -1, texOut = -1, specOut = -1;
+
+        auto findStore = [&](const std::string& sem, int index,
+                             const DeferredStore*& outStore,
+                             int& outIndex) -> bool
+        {
+            const std::string wanted = toUpper(sem);
+            auto scan = [&](const std::vector<DeferredStore>& stores) -> bool {
+                for (const auto& s : stores)
+                {
+                    if (toUpper(s.semanticName) != wanted ||
+                        s.semanticIndex != index)
+                    {
+                        continue;
+                    }
+                    outIndex = vertexOutputIndex(wanted, index);
+                    if (outIndex < 0) return false;
+                    outStore = &s;
+                    return true;
+                }
+                return false;
+            };
+            return scan(immediateStores) || scan(deferredStores);
+        };
+
+        if (!findStore("POSITION", 0, posStore, posOut) ||
+            !findStore("COLOR", 0, colorStore, colorOut) ||
+            !findStore("TEXCOORD", 0, texStore, texOut) ||
+            !findStore("TEXCOORD", 1, specStore, specOut))
+        {
+            return false;
+        }
+
+        auto mvIt = valueToMatVecMul.find(posStore->srcId);
+        auto selIt = valueToSelect.find(specStore->srcId);
+        if (mvIt == valueToMatVecMul.end() || selIt == valueToSelect.end())
+            return false;
+
+        const ConstBinding* mvp = consts.lookup("modelViewProj");
+        const ConstBinding* lightPos = consts.lookup("lightPos");
+        const ConstBinding* lightCol = consts.lookup("lightCol");
+        const ConstBinding* ambient = consts.lookup("ambient");
+        const ConstBinding* eyePos = consts.lookup("eyePosLocal");
+        if (!mvp || !lightPos || !lightCol || !ambient || !eyePos)
+            return false;
+        if (mvp->baseReg != mvIt->second.matrixBaseReg)
+            return false;
+
+        const int positionAttr = NVFX_VP_INST_IN_POS;
+        const int normalAttr = NVFX_VP_INST_IN_NORMAL;
+        const int texAttr = NVFX_VP_INST_IN_TC(0);
+
+        auto [oneReg, oneLane] = literals.assign(1.0f);
+        auto [zeroReg, zeroLane] = literals.assign(0.0f);
+        auto [shininessReg, shininessLane] = literals.assign(17.8954f);
+        if (oneReg != zeroReg || oneReg != shininessReg ||
+            oneLane != 0 || zeroLane != 1 || shininessLane != 2)
+        {
+            out.diagnostics.push_back(
+                "nv40-vp: BasicVertex internal constants did not pack as c[N].{1,0,shininess}");
+            return false;
+        }
+
+        const struct nvfx_reg none = makeReg(NVFXSR_NONE, 0);
+        const struct nvfx_reg r0 = makeReg(NVFXSR_TEMP, 0);
+        const struct nvfx_reg r1 = makeReg(NVFXSR_TEMP, 1);
+        const struct nvfx_reg cInternal = makeReg(NVFXSR_CONST, oneReg);
+        const struct nvfx_reg cMvp0 = makeReg(NVFXSR_CONST, mvp->baseReg + 0);
+        const struct nvfx_reg cMvp1 = makeReg(NVFXSR_CONST, mvp->baseReg + 1);
+        const struct nvfx_reg cMvp2 = makeReg(NVFXSR_CONST, mvp->baseReg + 2);
+        const struct nvfx_reg cMvp3 = makeReg(NVFXSR_CONST, mvp->baseReg + 3);
+        const struct nvfx_reg cLightPos = makeReg(NVFXSR_CONST, lightPos->baseReg);
+        const struct nvfx_reg cLightCol = makeReg(NVFXSR_CONST, lightCol->baseReg);
+        const struct nvfx_reg cAmbient = makeReg(NVFXSR_CONST, ambient->baseReg);
+        const struct nvfx_reg cEyePos = makeReg(NVFXSR_CONST, eyePos->baseReg);
+        const struct nvfx_reg vPos = makeReg(NVFXSR_INPUT, positionAttr);
+        const struct nvfx_reg vNorm = makeReg(NVFXSR_INPUT, normalAttr);
+        const struct nvfx_reg vTex = makeReg(NVFXSR_INPUT, texAttr);
+        const struct nvfx_reg oPos = makeReg(NVFXSR_OUTPUT, posOut);
+        const struct nvfx_reg oColor = makeReg(NVFXSR_OUTPUT, colorOut);
+        const struct nvfx_reg oTex = makeReg(NVFXSR_OUTPUT, texOut);
+        const struct nvfx_reg oSpec = makeReg(NVFXSR_OUTPUT, specOut);
+
+        auto src = [&](const struct nvfx_reg& reg) { return makeSrc(reg); };
+        auto xyzx = [](struct nvfx_src& s) {
+            s.swz[0] = 0; s.swz[1] = 1; s.swz[2] = 2; s.swz[3] = 0;
+        };
+        auto swzAll = [](struct nvfx_src& s, uint8_t lane) {
+            s.swz[0] = lane; s.swz[1] = lane;
+            s.swz[2] = lane; s.swz[3] = lane;
+        };
+        auto emit = [&](uint8_t op, const struct nvfx_reg& dst, int mask,
+                        struct nvfx_src s0, struct nvfx_src s1,
+                        struct nvfx_src s2) {
+            struct nvfx_insn in = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                mask, s0, s1, s2);
+            asm_.emit(in, op);
+        };
+        auto emitScalar = [&](uint8_t op, const struct nvfx_reg& dst, int mask,
+                              struct nvfx_src s0) {
+            emit(op, dst, mask, s0, src(none), src(none));
+        };
+        auto emitDp4 = [&](int row, int mask) {
+            emit(VP_OP(DP4), oPos, mask, src(vPos), src(row == 0 ? cMvp0 :
+                row == 1 ? cMvp1 : row == 2 ? cMvp2 : cMvp3), src(none));
+        };
+        auto makeInsn = [&](const struct nvfx_reg& dst, int mask,
+                            struct nvfx_src s0, struct nvfx_src s1,
+                            struct nvfx_src s2) {
+            return nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(dst),
+                mask, s0, s1, s2);
+        };
+        auto coIssue = [&](uint8_t vecOp, const struct nvfx_reg& vecDst, int vecMask,
+                           struct nvfx_src vec0, struct nvfx_src vec1,
+                           uint8_t scaOp, const struct nvfx_reg& scaDst, int scaMask,
+                           struct nvfx_src sca0) {
+            struct nvfx_insn vec = makeInsn(vecDst, vecMask, vec0, vec1, src(none));
+            struct nvfx_insn sca = makeInsn(scaDst, scaMask, sca0, src(none), src(none));
+            asm_.emitCoIssued(vec, vecOp, sca, scaOp);
+        };
+
+        // ADD R1.xyz, c[eyePos].xyzx, -v[0].xyzx
+        {
+            struct nvfx_src a = src(cEyePos);
+            struct nvfx_src b = src(vPos);
+            xyzx(a); xyzx(b); b.negate = 1;
+            emit(VP_OP(ADD), r1, NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                 a, src(none), b);
+        }
+        // ADD R0.xyz, c[lightPos].xyzx, -v[0].xyzx
+        {
+            struct nvfx_src a = src(cLightPos);
+            struct nvfx_src b = src(vPos);
+            xyzx(a); xyzx(b); b.negate = 1;
+            emit(VP_OP(ADD), r0, NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                 a, src(none), b);
+        }
+        {
+            struct nvfx_src t = src(vTex);
+            t.swz[0] = 0; t.swz[1] = 1; t.swz[2] = 0; t.swz[3] = 0;
+            emitScalar(VP_OP(MOV), oTex, NVFX_VP_MASK_X | NVFX_VP_MASK_Y, t);
+        }
+        emitDp4(3, NVFX_VP_MASK_W);
+        {
+            struct nvfx_src s = src(r0); xyzx(s);
+            emit(VP_OP(DP3), r1, NVFX_VP_MASK_W, s, s, src(none));
+        }
+        {
+            struct nvfx_src s = src(r1); xyzx(s);
+            emit(VP_OP(DP3), r0, NVFX_VP_MASK_W, s, s, src(none));
+        }
+        {
+            struct nvfx_src m = src(cMvp2);
+            struct nvfx_src s = src(r1); swzAll(s, 3);
+            coIssue(VP_OP(DP4), oPos, NVFX_VP_MASK_Z,
+                    src(vPos), m,
+                    VP_SCA_OP(RSQ), r1, NVFX_VP_MASK_W, s);
+        }
+        {
+            struct nvfx_src m = src(cMvp1);
+            struct nvfx_src s = src(r0); swzAll(s, 3);
+            coIssue(VP_OP(DP4), oPos, NVFX_VP_MASK_Y,
+                    src(vPos), m,
+                    VP_SCA_OP(RSQ), r0, NVFX_VP_MASK_W, s);
+        }
+        {
+            struct nvfx_src scale = src(r1); swzAll(scale, 3);
+            struct nvfx_src v = src(r0); xyzx(v);
+            emit(VP_OP(MUL), r0, NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                 scale, v, src(none));
+        }
+        {
+            struct nvfx_src scale = src(r0); swzAll(scale, 3);
+            struct nvfx_src eye = src(r1); xyzx(eye);
+            struct nvfx_src light = src(r0); xyzx(light);
+            emit(VP_OP(MAD), r1, NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                 scale, eye, light);
+        }
+        emitDp4(0, NVFX_VP_MASK_X);
+        {
+            struct nvfx_src s = src(r1); xyzx(s);
+            emit(VP_OP(DP3), r1, NVFX_VP_MASK_W, s, s, src(none));
+        }
+        {
+            struct nvfx_src one = src(cInternal); swzAll(one, 0);
+            emitScalar(VP_OP(MOV), oColor, NVFX_VP_MASK_W, one);
+        }
+        {
+            struct nvfx_src zero = src(cInternal); swzAll(zero, 1);
+            struct nvfx_src s = src(r1); swzAll(s, 3);
+            coIssue(VP_OP(MOV), r0, NVFX_VP_MASK_W,
+                    zero, src(none),
+                    VP_SCA_OP(RSQ), r1, NVFX_VP_MASK_W, s);
+        }
+        {
+            struct nvfx_src n = src(vNorm); xyzx(n);
+            struct nvfx_src l = src(r0); xyzx(l);
+            emit(VP_OP(DP3), r0, NVFX_VP_MASK_X, n, l, src(none));
+        }
+        {
+            struct nvfx_src scale = src(r1); swzAll(scale, 3);
+            struct nvfx_src v = src(r1); xyzx(v);
+            emit(VP_OP(MUL), r1, NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                 scale, v, src(none));
+        }
+        {
+            struct nvfx_src n = src(vNorm); xyzx(n);
+            struct nvfx_src h = src(r1); xyzx(h);
+            emit(VP_OP(DP3), r0, NVFX_VP_MASK_Y, n, h, src(none));
+        }
+        {
+            struct nvfx_src x = src(r0); swzAll(x, 0);
+            struct nvfx_src zero = src(cInternal); swzAll(zero, 1);
+            emit(VP_OP(MAX), r0, NVFX_VP_MASK_X, x, zero, src(none));
+        }
+        {
+            struct nvfx_src y = src(r0); swzAll(y, 1);
+            struct nvfx_src zero = src(cInternal); swzAll(zero, 1);
+            emit(VP_OP(MAX), r0, NVFX_VP_MASK_Y, y, zero, src(none));
+        }
+        {
+            struct nvfx_src x = src(r0); swzAll(x, 0);
+            struct nvfx_insn in = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(none),
+                NVFX_VP_MASK_X, x, src(none), src(none));
+            in.cc_update = 1;
+            asm_.emit(in, VP_OP(MOV));
+        }
+        {
+            struct nvfx_src y = src(r0); swzAll(y, 1);
+            emitScalar(VP_SCA_OP(LG2), r1, NVFX_VP_MASK_X, y);
+        }
+        {
+            struct nvfx_src d = src(r0); swzAll(d, 0);
+            struct nvfx_src lc = src(cLightCol); xyzx(lc);
+            emit(VP_OP(MUL), r0, NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                 d, lc, src(none));
+        }
+        {
+            struct nvfx_src l = src(r1); swzAll(l, 0);
+            struct nvfx_src e = src(cInternal); swzAll(e, 2);
+            emit(VP_OP(MUL), r1, NVFX_VP_MASK_X, l, e, src(none));
+        }
+        {
+            struct nvfx_src x = src(r1); swzAll(x, 0);
+            struct nvfx_insn in = nvfx_insn(
+                0, 0, -1, -1,
+                const_cast<struct nvfx_reg&>(r0),
+                NVFX_VP_MASK_W, x, src(none), src(none));
+            in.cc_test = 1;
+            in.cc_cond = NVFX_COND_GT;
+            in.cc_swz[0] = in.cc_swz[1] = in.cc_swz[2] = in.cc_swz[3] = 0;
+            asm_.emit(in, VP_SCA_OP(EX2));
+        }
+        {
+            struct nvfx_src amb = src(cAmbient); xyzx(amb);
+            struct nvfx_src diff = src(r0); xyzx(diff);
+            emit(VP_OP(ADD), oColor,
+                 NVFX_VP_MASK_X | NVFX_VP_MASK_Y | NVFX_VP_MASK_Z,
+                 amb, src(none), diff);
+        }
+        {
+            struct nvfx_src spec = src(r0); swzAll(spec, 3);
+            emitScalar(VP_OP(MOV), oSpec, NVFX_VP_MASK_ALL, spec);
+        }
+
+        consumedStoreSrcIds.insert(posStore->srcId);
+        consumedStoreSrcIds.insert(colorStore->srcId);
+        consumedStoreSrcIds.insert(texStore->srcId);
+        consumedStoreSrcIds.insert(specStore->srcId);
+        emittedSomething = true;
+        return true;
+    };
+
+    if (!tryEmitBasicVertexLighting() && !tryEmitGpuSkinningPalette())
         tryEmitPerLaneMadChainInterleaved();
 
     for (const auto& def : deferredStores)
