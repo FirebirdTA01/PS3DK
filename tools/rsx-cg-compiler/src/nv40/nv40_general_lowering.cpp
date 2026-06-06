@@ -31,6 +31,9 @@
 #include <array>
 #include <cctype>
 #include <cstring>
+#include <cstdlib>
+#include <cstdio>
+#include <limits>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -104,6 +107,7 @@ struct VInstr
     VOp op = VOp::Mov;
     VDst dst;
     std::array<VSrc, 3> srcs;
+    int  sourceIndex = -1; // tie-break metadata for the VP list scheduler
     bool sat = false;
     bool ccUpdate = false;
     int  predicate = 0;
@@ -177,6 +181,19 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
         return NV40_VP_INST_DEST_FOGC;
     return -1;
+}
+
+static int vertexOutputPriority(int outIndex)
+{
+    if (outIndex == NV40_VP_INST_DEST_COL0)
+        return 3;
+    if (outIndex == NV40_VP_INST_DEST_TC(1))
+        return 2;
+    if (outIndex == NV40_VP_INST_DEST_TC(0))
+        return 1;
+    if (outIndex == NV40_VP_INST_DEST_POS)
+        return 0;
+    return outIndex;
 }
 
 static int fragmentInputSrc(const std::string& semanticUpper, int semanticIndex)
@@ -295,6 +312,8 @@ public:
             }
         }
         legalizeInputOperands();
+        renumberSourceIndices();
+        applyOrderingPass();
         allocatePhysicalTemps();
         return program_;
     }
@@ -308,6 +327,273 @@ private:
     std::unordered_map<IRValueID, unsigned> useCount_;
     std::unordered_map<IRValueID, int> matrixUniformBase_;
     std::unordered_map<IRValueID, VSrc> conditionToSource_;
+    static int componentRankFromMask(int mask)
+    {
+        switch (mask) {
+        case 0x1: return 0;
+        case 0x2: return 1;
+        case 0x4: return 2;
+        case 0x8: return 3;
+        default: return 0;
+        }
+    }
+
+    void renumberSourceIndices()
+    {
+        if (profile_ != GeneralProfile::Vertex || program_.instrs.empty())
+            return;
+
+        struct RankedInstr
+        {
+            size_t index = 0;
+            int category = 0;
+            int primary = 0;
+            int secondary = 0;
+        };
+
+        std::vector<RankedInstr> ranked;
+        ranked.reserve(program_.instrs.size());
+
+        size_t i = 0;
+        int matvecGroup = 0;
+        while (i < program_.instrs.size()) {
+            const VInstr& vi = program_.instrs[i];
+            const bool isMatVecGroup =
+                i + 3 < program_.instrs.size() &&
+                vi.op == VOp::Dp4 &&
+                vi.dst.writemask == 0x8 &&
+                program_.instrs[i + 1].op == VOp::Dp4 &&
+                program_.instrs[i + 1].dst.index == vi.dst.index &&
+                program_.instrs[i + 1].dst.writemask == 0x4 &&
+                program_.instrs[i + 2].op == VOp::Dp4 &&
+                program_.instrs[i + 2].dst.index == vi.dst.index &&
+                program_.instrs[i + 2].dst.writemask == 0x2 &&
+                program_.instrs[i + 3].op == VOp::Dp4 &&
+                program_.instrs[i + 3].dst.index == vi.dst.index &&
+                program_.instrs[i + 3].dst.writemask == 0x1;
+            if (isMatVecGroup) {
+                for (int row = 0; row < 4; ++row) {
+                    RankedInstr item;
+                    item.index = i + static_cast<size_t>(row);
+                    item.category = 0;
+                    item.primary = -matvecGroup;
+                    item.secondary = componentRankFromMask(
+                        program_.instrs[item.index].dst.writemask);
+                    ranked.push_back(item);
+                }
+                ++matvecGroup;
+                i += 4;
+                continue;
+            }
+
+            RankedInstr item;
+            item.index = i;
+            item.category = (vi.op == VOp::Mov && vi.dst.output) ? 1 : 2;
+            item.primary = (item.category == 1)
+                ? vertexOutputPriority(vi.dst.index)
+                : static_cast<int>(i);
+            ranked.push_back(item);
+            ++i;
+        }
+
+        std::stable_sort(ranked.begin(), ranked.end(),
+                         [](const RankedInstr& a, const RankedInstr& b) {
+                             if (a.category != b.category)
+                                 return a.category < b.category;
+                             if (a.primary != b.primary)
+                                 return a.primary < b.primary;
+                             if (a.secondary != b.secondary)
+                                 return a.secondary < b.secondary;
+                             return a.index < b.index;
+                         });
+
+        for (size_t seq = 0; seq < ranked.size(); ++seq)
+            program_.instrs[ranked[seq].index].sourceIndex = static_cast<int>(seq);
+    }
+
+    void applyOrderingPass()
+    {
+        if (profile_ != GeneralProfile::Vertex || program_.instrs.size() < 2)
+            return;
+
+        const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
+        if (dumpOrder) {
+            for (size_t i = 0; i < program_.instrs.size(); ++i) {
+                const VInstr& vi = program_.instrs[i];
+                std::fprintf(stderr, "pre[%zu] op=%d dstOut=%d dstIdx=%d mask=%x src0=%d/%d src1=%d/%d src2=%d/%d\n",
+                             i,
+                             static_cast<int>(vi.op),
+                             vi.dst.output ? 1 : 0,
+                             vi.dst.index,
+                             vi.dst.writemask,
+                             static_cast<int>(vi.srcs[0].kind), vi.srcs[0].index,
+                             static_cast<int>(vi.srcs[1].kind), vi.srcs[1].index,
+                             static_cast<int>(vi.srcs[2].kind), vi.srcs[2].index);
+            }
+        }
+
+        struct Node
+        {
+            size_t index = 0;
+            int readyTime = 0;
+            int bankA = 0;
+            int bankB = 0;
+            bool resourceOverflow = false;
+            bool schedulableNow = true;
+            int slack = 0;
+            int sourceIndex = 0;
+        };
+
+        const auto better = [](const Node& a, const Node& b) {
+            if (a.bankA != b.bankA) return a.bankA < b.bankA;
+            if (a.bankB != b.bankB) return a.bankB < b.bankB;
+            if (a.resourceOverflow != b.resourceOverflow)
+                return !a.resourceOverflow && b.resourceOverflow;
+            if (a.schedulableNow != b.schedulableNow)
+                return a.schedulableNow && !b.schedulableNow;
+            if (a.slack != b.slack) return a.slack < b.slack;
+            return a.sourceIndex > b.sourceIndex;
+        };
+
+        const auto latencyFor = [](const VInstr& vi) {
+            switch (vi.op) {
+            case VOp::Dp4:
+            case VOp::Lg2:
+            case VOp::Ex2:
+            case VOp::Rcp:
+            case VOp::Sin:
+            case VOp::Cos:
+            case VOp::DivSqrt:
+                return 4;
+            case VOp::Rsq:
+                return 3;
+            case VOp::Dp3:
+                return 2;
+            case VOp::Mul:
+            case VOp::Mad:
+                return 1;
+            case VOp::Mov:
+            case VOp::Min:
+            case VOp::Max:
+            case VOp::Sge:
+                return 1;
+            case VOp::Add:
+                return 4;
+            case VOp::Tex:
+                return 4;
+            }
+            return 1;
+        };
+
+        const auto sourceBankPressure = [&](const VInstr& vi) {
+            (void)vi;
+            return std::pair<int, int>{0, 0};
+        };
+
+        const size_t n = program_.instrs.size();
+        std::vector<int> indegree(n, 0);
+        std::vector<std::vector<size_t>> consumers(n);
+        std::unordered_map<int, size_t> tempProducer;
+        tempProducer.reserve(n * 2);
+
+        for (size_t i = 0; i < n; ++i) {
+            const VInstr& vi = program_.instrs[i];
+            for (const VSrc& src : vi.srcs) {
+                if (src.kind != VSrcKind::Temp)
+                    continue;
+                const auto prodIt = tempProducer.find(src.index);
+                if (prodIt == tempProducer.end())
+                    continue;
+                const size_t producer = prodIt->second;
+                auto& deps = consumers[producer];
+                if (std::find(deps.begin(), deps.end(), i) == deps.end()) {
+                    deps.push_back(i);
+                    ++indegree[i];
+                }
+            }
+            if (!vi.dst.none && !vi.dst.output)
+                tempProducer[vi.dst.index] = i;
+        }
+
+        std::vector<int> readyTime(n, 0);
+        std::vector<bool> scheduled(n, false);
+        std::vector<Node> ready;
+        ready.reserve(n);
+        for (size_t i = 0; i < n; ++i) {
+            if (indegree[i] == 0) {
+                Node node;
+                node.index = i;
+                node.readyTime = 0;
+                node.sourceIndex = program_.instrs[i].sourceIndex;
+                const auto [bankA, bankB] = sourceBankPressure(program_.instrs[i]);
+                node.bankA = bankA;
+                node.bankB = bankB;
+                ready.push_back(node);
+            }
+        }
+
+        std::vector<VInstr> ordered;
+        ordered.reserve(n);
+        int curCycle = 0;
+        while (ordered.size() < n) {
+            auto bestIt = ready.end();
+            Node bestNode;
+            bool found = false;
+            int nextCycle = std::numeric_limits<int>::max();
+
+            for (auto it = ready.begin(); it != ready.end(); ++it) {
+                if (scheduled[it->index])
+                    continue;
+                if (it->readyTime > curCycle) {
+                    nextCycle = std::min(nextCycle, it->readyTime);
+                    continue;
+                }
+
+                Node cand = *it;
+                cand.schedulableNow = true;
+                cand.slack = std::max(0, curCycle - cand.readyTime);
+
+                if (!found || better(cand, bestNode)) {
+                    bestNode = cand;
+                    bestIt = it;
+                    found = true;
+                }
+            }
+
+            if (!found) {
+                if (nextCycle == std::numeric_limits<int>::max()) {
+                    ++curCycle;
+                    continue;
+                }
+                curCycle = nextCycle;
+                continue;
+            }
+
+            const size_t idx = bestNode.index;
+            scheduled[idx] = true;
+            ordered.push_back(program_.instrs[idx]);
+            ready.erase(bestIt);
+
+            const int completeCycle = curCycle + latencyFor(program_.instrs[idx]);
+            for (size_t consumer : consumers[idx]) {
+                readyTime[consumer] = std::max(readyTime[consumer], completeCycle);
+                if (--indegree[consumer] == 0) {
+                    Node node;
+                    node.index = consumer;
+                    node.readyTime = readyTime[consumer];
+                    node.sourceIndex = program_.instrs[consumer].sourceIndex;
+                    const auto [bankA, bankB] = sourceBankPressure(program_.instrs[consumer]);
+                    node.bankA = bankA;
+                    node.bankB = bankB;
+                    ready.push_back(node);
+                }
+            }
+
+            ++curCycle;
+        }
+
+        program_.instrs = std::move(ordered);
+    }
 
     void countUses()
     {
@@ -323,10 +609,23 @@ private:
 
     void seedParameters()
     {
+        int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
+        std::unordered_set<std::string> seenUniformNames;
+        const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
+        struct PendingMatrix {
+            IRValueID valueId;
+            std::string name;
+            int rows = 0;
+        };
+        std::vector<PendingMatrix> pendingMatrices;
         for (size_t pi = 0; pi < entry_.parameters.size(); ++pi) {
             const auto& p = entry_.parameters[pi];
             const std::string sem = toUpper(p.semanticName);
+            if (p.storage == StorageQualifier::Uniform &&
+                !seenUniformNames.insert(p.name).second) {
+                continue;
+            }
             if (profile_ == GeneralProfile::Vertex &&
                 (p.storage == StorageQualifier::In ||
                  p.storage == StorageQualifier::None)) {
@@ -342,7 +641,7 @@ private:
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform &&
                        p.type.isMatrix()) {
-                matrixUniformBase_[p.valueId] = 256;
+                pendingMatrices.push_back(PendingMatrix{p.valueId, p.name, p.type.matrixRows});
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform) {
                 program_.valueToSource[p.valueId] =
@@ -358,8 +657,24 @@ private:
         }
 
         for (const auto& g : module_.globals) {
-            if (g.storage == StorageQualifier::Uniform)
-                continue; // Stage-1 scaffold deliberately does not place consts.
+            if (g.storage != StorageQualifier::Uniform)
+                continue;
+            if (!seenUniformNames.insert(g.name).second)
+                continue;
+            if (profile_ == GeneralProfile::Vertex && g.type.isMatrix()) {
+                pendingMatrices.push_back(PendingMatrix{g.valueId, g.name, g.type.matrixRows});
+            } else if (profile_ == GeneralProfile::Vertex) {
+                program_.valueToSource[g.valueId] =
+                    uniformSrc(nextVpUniformConst--, false);
+            }
+        }
+        for (auto it = pendingMatrices.begin(); it != pendingMatrices.end(); ++it) {
+            matrixUniformBase_[it->valueId] = nextVpMatrixConst;
+            if (dumpOrder) {
+                std::fprintf(stderr, "matrix %s -> c[%d]\n",
+                             it->name.c_str(), nextVpMatrixConst);
+            }
+            nextVpMatrixConst += it->rows;
         }
         program_.nextVpLiteralConst = nextVpUniformConst;
     }
@@ -527,13 +842,9 @@ private:
     void lowerVecShuffle(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        VInstr vi;
-        vi.op = VOp::Mov;
-        vi.dst.index = define(inst.result);
-        vi.dst.writemask = componentMask(inst.resultType);
-        vi.srcs[0] = resolve(inst.operands[0]);
-        assignSwizzle(vi.srcs[0], inst.swizzleMask, inst.resultType.componentCount());
-        program_.instrs.push_back(vi);
+        VSrc src = resolve(inst.operands[0]);
+        assignSwizzle(src, inst.swizzleMask, inst.resultType.componentCount());
+        program_.valueToSource[inst.result] = src;
     }
 
     void lowerVecExtract(const IRInstruction& inst)
@@ -552,9 +863,35 @@ private:
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
         const auto baseIt = program_.valueToVReg.find(inst.operands[0]);
-        if (baseIt == program_.valueToVReg.end()) return;
         const int lane = std::max(0, std::min(3, inst.componentIndex));
         const int laneMask = 1 << lane;
+
+        const auto isOutputParam = [&](IRValueID id) {
+            for (const auto& p : entry_.parameters) {
+                if (p.valueId == id &&
+                    (p.storage == StorageQualifier::Out ||
+                     p.storage == StorageQualifier::InOut))
+                    return true;
+            }
+            return false;
+        };
+
+        if (baseIt == program_.valueToVReg.end()) {
+            if (!isOutputParam(inst.operands[0]))
+                return;
+
+            const int resultReg = define(inst.result);
+            program_.valueToVReg[inst.result] = resultReg;
+
+            VInstr vi;
+            vi.op = VOp::Mov;
+            vi.dst.index = resultReg;
+            vi.dst.writemask = laneMask;
+            vi.srcs[0] = resolve(inst.operands[1]);
+            vi.srcs[0].swizzle = {0, 0, 0, 0};
+            program_.instrs.push_back(vi);
+            return;
+        }
 
         if (!program_.instrs.empty()) {
             VInstr& producer = program_.instrs.back();
@@ -1428,6 +1765,20 @@ private:
             return;
         }
         const IRValueID value = inst.operands[0];
+        const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
+        if (dumpOrder) {
+            const VSrc dbg = resolve(value);
+            std::fprintf(stderr,
+                         "store sem=%s outIdx=%d value=%u kind=%d idx=%d phys=%d fp16=%d mask=%x\n",
+                         inst.semanticName.c_str(),
+                         outIndex,
+                         static_cast<unsigned>(value),
+                         static_cast<int>(dbg.kind),
+                         dbg.index,
+                         dbg.phys,
+                         dbg.fp16 ? 1 : 0,
+                         dbg.kind == VSrcKind::None ? 0 : dbg.swizzle[0]);
+        }
         const int outMask = storeOutputMask(inst, value);
         const auto regIt = program_.valueToVReg.find(value);
         if (profile_ == GeneralProfile::Vertex &&
@@ -1509,6 +1860,27 @@ private:
         vi.dst.index = outIndex;
         vi.dst.writemask = outMask;
         vi.srcs[0] = resolve(value);
+        int sourceWidth = -1;
+        for (const auto& p : entry_.parameters) {
+            if (p.valueId == value) {
+                sourceWidth = p.type.componentCount();
+                break;
+            }
+        }
+        if (sourceWidth < 0) {
+            const IRValue* irValue = entry_.getValue(value);
+            if (irValue)
+                sourceWidth = irValue->type.componentCount();
+        }
+        if (sourceWidth < 0)
+            sourceWidth = inst.resultType.componentCount();
+        if (sourceWidth == 2 && outMask == 0x3) {
+            vi.srcs[0].swizzle = {0, 1, 0, 0};
+        } else if (sourceWidth == 3 && outMask == 0x7) {
+            vi.srcs[0].swizzle = {0, 1, 2, 0};
+        } else if (sourceWidth == 1 && outMask == 0xf) {
+            vi.srcs[0].swizzle = {0, 0, 0, 0};
+        }
         program_.instrs.push_back(vi);
     }
 
@@ -1762,6 +2134,7 @@ private:
     {
         std::unordered_map<int, size_t> lastUse;
         std::set<int> defs;
+        const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         for (size_t i = 0; i < program_.instrs.size(); ++i) {
             const VInstr& vi = program_.instrs[i];
             if (!vi.dst.none && !vi.dst.output)
@@ -1817,6 +2190,28 @@ private:
             if (!vi.dst.none && !vi.dst.output) {
                 vi.dst.phys = program_.vregToPhys[vi.dst.index];
                 program_.vregToFp16[vi.dst.index] = vi.dst.fp16;
+            }
+            if (dumpOrder) {
+                std::fprintf(stderr, "alloc[%zu] op=%d dstOut=%d dstIdx=%d dstPhys=%d dstFp16=%d\n",
+                             i,
+                             static_cast<int>(vi.op),
+                             vi.dst.output ? 1 : 0,
+                             vi.dst.index,
+                             vi.dst.phys,
+                             vi.dst.fp16 ? 1 : 0);
+                for (size_t s = 0; s < vi.srcs.size(); ++s) {
+                    const VSrc& src = vi.srcs[s];
+                    std::fprintf(stderr,
+                                 "  src%zu kind=%d idx=%d phys=%d fp16=%d swz=%d%d%d%d neg=%d abs=%d\n",
+                                 s,
+                                 static_cast<int>(src.kind),
+                                 src.index,
+                                 src.phys,
+                                 src.fp16 ? 1 : 0,
+                                 src.swizzle[0], src.swizzle[1], src.swizzle[2], src.swizzle[3],
+                                 src.neg ? 1 : 0,
+                                 src.abs ? 1 : 0);
+                }
             }
             for (const VSrc& src : vi.srcs) {
                 if (src.kind == VSrcKind::Temp && !src.fp16 && lastUse[src.index] == i) {
