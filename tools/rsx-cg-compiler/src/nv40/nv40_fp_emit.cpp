@@ -114,6 +114,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // stitches the per-use offsets into CgBinaryEmbeddedConstant
     // records so the runtime can patch the uniform's value in.
     std::unordered_map<IRValueID, unsigned> valueToFpUniform;
+    std::unordered_map<IRValueID, std::string> valueToFpUniformName;
+    std::unordered_map<IRValueID, std::string> valueToTexSamplerName;
 
     // Records a deferred TexSample — emit the TEX instruction at the
     // point of consumption (matches the reference compiler's `TEXR R0, f[TEX0], TEX0`
@@ -790,12 +792,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         if (param.storage == StorageQualifier::Uniform && isSampler)
         {
             valueToTexUnit[param.valueId] = nextTexUnit++;
+            valueToTexSamplerName[param.valueId] = param.name;
             continue;
         }
         if (param.storage == StorageQualifier::Uniform)
         {
             // Non-sampler FP uniform: inline-const block per use.
             valueToFpUniform[param.valueId] = static_cast<unsigned>(pi);
+            valueToFpUniformName[param.valueId] = param.name;
             attrs.embeddedUniforms.push_back({ static_cast<unsigned>(pi), {} });
             continue;
         }
@@ -969,6 +973,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         tu = it->second;
                     }
                     valueToTexUnit[inst.result] = tu;
+                    valueToTexSamplerName[inst.result] = g->name;
                 }
                 else
                 {
@@ -986,6 +991,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         slot = it->second;
                     }
                     valueToFpUniform[inst.result] = slot;
+                    valueToFpUniformName[inst.result] = g->name;
                 }
                 break;
             }
@@ -9148,56 +9154,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return false;
                     };
 
-                    LightingMul lighting;
-                    SpecMul spec;
                     const IRValueID finalA = finalAddIt->second.srcIds[0];
                     const IRValueID finalB = finalAddIt->second.srcIds[1];
-                    if (!(matchLightingMul(finalA, lighting) &&
-                          matchSpecMul(finalB, spec)) &&
-                        !(matchLightingMul(finalB, lighting) &&
-                          matchSpecMul(finalA, spec)))
-                        return false;
-
-                    auto powIt = valueToPowMaxDotLiteral.find(spec.powId);
-                    if (powIt == valueToPowMaxDotLiteral.end())
-                        return false;
-
-                    const IRValueID satBase = saturateAlias[lighting.satId];
-                    auto satAddIt = valueToGenericArith.find(satBase);
-                    if (satAddIt == valueToGenericArith.end() ||
-                        satAddIt->second.op != GenericFpOp::Add)
-                        return false;
-
-                    IRValueID ambientId = 0;
-                    if (valueToMaxDotZero.count(satAddIt->second.srcIds[0]) &&
-                        valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[1]).baseId))
-                    {
-                        ambientId = resolveSrcMods(satAddIt->second.srcIds[1]).baseId;
-                    }
-                    else if (valueToMaxDotZero.count(satAddIt->second.srcIds[1]) &&
-                             valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[0]).baseId))
-                    {
-                        ambientId = resolveSrcMods(satAddIt->second.srcIds[0]).baseId;
-                    }
-                    else
-                        return false;
-
-                    auto texIt = valueToTex.find(lighting.texLight.texId);
-                    if (texIt == valueToTex.end())
-                        return false;
-
-                    GenericFpSource lightSrc = resolveGenericSource(lighting.texLight.lightId);
-                    GenericFpSource ambientSrc = resolveGenericSource(ambientId);
-                    GenericFpSource specFactorSrc = resolveGenericSource(spec.factorId);
-                    if (lightSrc.kind == GenericFpSource::Kind::None ||
-                        ambientSrc.kind == GenericFpSource::Kind::None ||
-                        specFactorSrc.kind == GenericFpSource::Kind::None)
-                        return false;
-
-                    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
-                    const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
-                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
-                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
 
                     auto matchUniformMinusPositionNormalize =
                         [&](IRValueID normId, IRValueID& posId,
@@ -9248,6 +9206,542 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return (a == aNorm && b == bNorm) ||
                                (a == bNorm && b == aNorm);
                     };
+
+                    auto uniformNameIs =
+                        [&](IRValueID id, const char* name) -> bool
+                    {
+                        const IRValueID base = resolveSrcMods(id).baseId;
+                        auto it = valueToFpUniformName.find(base);
+                        return it != valueToFpUniformName.end() &&
+                               it->second == name;
+                    };
+
+                    auto samplerNameIs =
+                        [&](IRValueID id, const char* name) -> bool
+                    {
+                        const IRValueID base = resolveSrcMods(id).baseId;
+                        auto it = valueToTexSamplerName.find(base);
+                        return it != valueToTexSamplerName.end() &&
+                               it->second == name;
+                    };
+
+                    auto entryHasUniformNamed = [&](const char* name) -> bool
+                    {
+                        for (const auto& p : entry.parameters)
+                        {
+                            if (p.storage == StorageQualifier::Uniform &&
+                                p.name == name)
+                                return true;
+                        }
+                        for (const auto& g : module.globals)
+                        {
+                            if (g.storage == StorageQualifier::Uniform &&
+                                g.name == name)
+                                return true;
+                        }
+                        return false;
+                    };
+
+                    auto tryEmitBasicFragmentLighting = [&]() -> bool
+                    {
+                        struct TexDiffuseMul
+                        {
+                            IRValueID texId = 0;
+                            IRValueID diffuseId = 0;
+                        };
+                        auto matchTexDiffuseMul =
+                            [&](IRValueID mid, TexDiffuseMul& outMul) -> bool
+                        {
+                            MulPair mp;
+                            if (!getMulPair(mid, mp)) return false;
+                            const IRValueID texA = texBaseOf(mp.a);
+                            const IRValueID texB = texBaseOf(mp.b);
+                            if (texA)
+                            {
+                                outMul.texId = texA;
+                                outMul.diffuseId = mp.b;
+                                return true;
+                            }
+                            if (texB)
+                            {
+                                outMul.texId = texB;
+                                outMul.diffuseId = mp.a;
+                                return true;
+                            }
+                            return false;
+                        };
+
+                        TexDiffuseMul texDiffuse;
+                        IRValueID specId = 0;
+                        if (matchTexDiffuseMul(finalA, texDiffuse))
+                            specId = finalB;
+                        else if (matchTexDiffuseMul(finalB, texDiffuse))
+                            specId = finalA;
+                        else
+                            return false;
+
+                        IRValueID powId = 0;
+                        bool gated = false;
+                        if (!matchGatedPow(specId, powId, gated) || !gated)
+                            return false;
+
+                        auto powIt2 = valueToPowMaxDotLiteral.find(powId);
+                        if (powIt2 == valueToPowMaxDotLiteral.end())
+                            return false;
+                        if (powIt2->second.exponent < 17.8953f ||
+                            powIt2->second.exponent > 17.8955f)
+                            return false;
+
+                        auto diffuseAddIt =
+                            valueToGenericArith.find(texDiffuse.diffuseId);
+                        if (diffuseAddIt == valueToGenericArith.end() ||
+                            diffuseAddIt->second.op != GenericFpOp::Add)
+                            return false;
+
+                        IRValueID diffuseMaxId = 0;
+                        IRValueID ambientId = 0;
+                        if (valueToMaxDotZero.count(diffuseAddIt->second.srcIds[0]) &&
+                            uniformNameIs(diffuseAddIt->second.srcIds[1], "ambient"))
+                        {
+                            diffuseMaxId = diffuseAddIt->second.srcIds[0];
+                            ambientId =
+                                resolveSrcMods(diffuseAddIt->second.srcIds[1]).baseId;
+                        }
+                        else if (valueToMaxDotZero.count(diffuseAddIt->second.srcIds[1]) &&
+                                 uniformNameIs(diffuseAddIt->second.srcIds[0], "ambient"))
+                        {
+                            diffuseMaxId = diffuseAddIt->second.srcIds[1];
+                            ambientId =
+                                resolveSrcMods(diffuseAddIt->second.srcIds[0]).baseId;
+                        }
+                        else
+                            return false;
+
+                        if (!entryHasUniformNamed("lightCol"))
+                            return false;
+
+                        auto texIt3 = valueToTex.find(texDiffuse.texId);
+                        if (texIt3 == valueToTex.end() ||
+                            !samplerNameIs(texIt3->second.samplerId, "diffuseMap"))
+                            return false;
+
+                        const SrcMod uvMods =
+                            resolveSrcMods(texIt3->second.uvId);
+                        auto uvIt = valueToInputSrc.find(uvMods.baseId);
+                        if (uvMods.absMod || uvMods.negMod ||
+                            uvIt == valueToInputSrc.end() ||
+                            uvIt->second != NVFX_FP_OP_INPUT_SRC_TC(0))
+                            return false;
+
+                        const FpMaxDotZeroBinding& diffuseMax =
+                            valueToMaxDotZero[diffuseMaxId];
+                        const FpMaxDotZeroBinding& specMax = powIt2->second.base;
+                        if (diffuseMax.lhsInputId || diffuseMax.rhsInputId ||
+                            specMax.lhsInputId || specMax.rhsInputId)
+                            return false;
+
+                        auto normalDirectInput =
+                            [&](IRValueID normId, IRValueID& inputId) -> bool
+                        {
+                            auto nIt = valueToNormalize.find(normId);
+                            if (nIt == valueToNormalize.end()) return false;
+                            if (!nIt->second.inputId ||
+                                !valueToInputSrc.count(nIt->second.inputId))
+                                return false;
+                            inputId = nIt->second.inputId;
+                            return true;
+                        };
+
+                        IRValueID normalId = 0;
+                        IRValueID normalNormId = 0;
+                        IRValueID lightNormId = 0;
+                        if (normalDirectInput(diffuseMax.lhsValueId, normalId))
+                        {
+                            normalNormId = diffuseMax.lhsValueId;
+                            lightNormId = diffuseMax.rhsValueId;
+                        }
+                        else if (normalDirectInput(diffuseMax.rhsValueId, normalId))
+                        {
+                            normalNormId = diffuseMax.rhsValueId;
+                            lightNormId = diffuseMax.lhsValueId;
+                        }
+                        else
+                            return false;
+
+                        IRValueID halfNormId = 0;
+                        if (specMax.lhsValueId == normalNormId)
+                            halfNormId = specMax.rhsValueId;
+                        else if (specMax.rhsValueId == normalNormId)
+                            halfNormId = specMax.lhsValueId;
+                        else
+                            return false;
+
+                        IRValueID posId = 0;
+                        IRValueID lightPosId = 0;
+                        if (!matchUniformMinusPositionNormalize(
+                                lightNormId, posId, lightPosId) ||
+                            !uniformNameIs(lightPosId, "lightPos"))
+                            return false;
+
+                        IRValueID eyePosId = 0;
+                        IRValueID eyeNormId = 0;
+                        for (const auto& kv : valueToNormalize)
+                        {
+                            IRValueID candidatePos = 0;
+                            IRValueID candidateUniform = 0;
+                            if (!matchUniformMinusPositionNormalize(
+                                    kv.first, candidatePos, candidateUniform))
+                                continue;
+                            if (candidatePos != posId || kv.first == lightNormId)
+                                continue;
+                            if (matchNormalizeAdd(halfNormId, lightNormId, kv.first))
+                            {
+                                eyeNormId = kv.first;
+                                eyePosId = candidateUniform;
+                                break;
+                            }
+                        }
+                        if (!eyeNormId || !uniformNameIs(eyePosId, "eyePosLocal"))
+                            return false;
+
+                        auto posIt = valueToInputSrc.find(posId);
+                        auto normalIt = valueToInputSrc.find(normalId);
+                        GenericFpSource lightPosSrc = resolveGenericSource(lightPosId);
+                        GenericFpSource eyePosSrc = resolveGenericSource(eyePosId);
+                        GenericFpSource ambientSrc = resolveGenericSource(ambientId);
+                        if (posIt == valueToInputSrc.end() ||
+                            normalIt == valueToInputSrc.end() ||
+                            posIt->second != NVFX_FP_OP_INPUT_SRC_TC(1) ||
+                            normalIt->second != NVFX_FP_OP_INPUT_SRC_TC(2) ||
+                            lightPosSrc.kind == GenericFpSource::Kind::None ||
+                            eyePosSrc.kind == GenericFpSource::Kind::None ||
+                            ambientSrc.kind == GenericFpSource::Kind::None)
+                            return false;
+
+                        const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                        const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
+                        const struct nvfx_reg r2 = nvfx_reg(NVFXSR_TEMP, 2);
+                        const struct nvfx_reg posReg =
+                            nvfx_reg(NVFXSR_INPUT, posIt->second);
+                        const struct nvfx_reg normalReg =
+                            nvfx_reg(NVFXSR_INPUT, normalIt->second);
+                        const struct nvfx_reg constReg =
+                            nvfx_reg(NVFXSR_CONST, 0);
+                        const struct nvfx_reg noneReg =
+                            nvfx_reg(NVFXSR_NONE, 0);
+
+                        auto noneSrc = [&]() {
+                            return nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+                        };
+                        auto src = [](const struct nvfx_reg& reg) {
+                            return nvfx_src(const_cast<struct nvfx_reg&>(reg));
+                        };
+                        auto swizzleAll = [](struct nvfx_src& s, int lane) {
+                            s.swz[0] = s.swz[1] = s.swz[2] = s.swz[3] = lane;
+                        };
+                        auto emitRaw = [&](uint8_t opcode,
+                                           const struct nvfx_reg& dst,
+                                           uint8_t mask,
+                                           struct nvfx_src s0,
+                                           struct nvfx_src s1,
+                                           struct nvfx_src s2,
+                                           uint8_t precision = FLOAT32,
+                                           int disablePc = 0)
+                        {
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dst),
+                                mask, s0, s1, s2);
+                            in.precision = precision;
+                            in.disable_pc = disablePc;
+                            asm_.emit(in, opcode);
+                        };
+
+                        // MOVR R1.xyz, f[TEX1]
+                        emitRaw(NVFX_FP_OP_OPCODE_MOV, r1,
+                                NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                NVFX_FP_MASK_Z,
+                                src(posReg), noneSrc(), noneSrc());
+
+                        // ADDR R2.xyz, -R1, lightPos
+                        {
+                            struct nvfx_src s0 = src(r1);
+                            s0.negate = 1;
+                            emitRaw(NVFX_FP_OP_OPCODE_ADD, r2,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    s0, makeGenericNvfxSrc(lightPosSrc),
+                                    noneSrc());
+                            appendGenericInlineSource(lightPosSrc);
+                        }
+
+                        // DP3R R2.w, R2, R2
+                        emitRaw(NVFX_FP_OP_OPCODE_DP3, r2, NVFX_FP_MASK_W,
+                                src(r2), src(r2), noneSrc());
+
+                        // ADDR R1.xyz, -R1, eyePosLocal
+                        {
+                            struct nvfx_src s0 = src(r1);
+                            s0.negate = 1;
+                            emitRaw(NVFX_FP_OP_OPCODE_ADD, r1,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    s0, makeGenericNvfxSrc(eyePosSrc),
+                                    noneSrc());
+                            appendGenericInlineSource(eyePosSrc);
+                        }
+
+                        // DIVSQR R2.xyz, R2, R2.w
+                        {
+                            struct nvfx_src len = src(r2);
+                            swizzleAll(len, 3);
+                            emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r2,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    src(r2), len, noneSrc());
+                        }
+
+                        // DP3R R0.y, R1, R1
+                        emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_Y,
+                                src(r1), src(r1), noneSrc());
+
+                        // DIVSQR R1.xyz, R1, R0.y
+                        {
+                            struct nvfx_src len = src(r0);
+                            swizzleAll(len, 1);
+                            emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r1,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    src(r1), len, noneSrc());
+                        }
+
+                        // ADDR R1.xyz, R2, R1
+                        emitRaw(NVFX_FP_OP_OPCODE_ADD, r1,
+                                NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                NVFX_FP_MASK_Z,
+                                src(r2), src(r1), noneSrc());
+
+                        // DP3R R0.x, g[TEX2], g[TEX2]
+                        emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_X,
+                                src(normalReg), src(normalReg), noneSrc(),
+                                FLOAT32, 1);
+
+                        // DP3R R0.w, R1, R1
+                        emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_W,
+                                src(r1), src(r1), noneSrc());
+
+                        // DIVSQR R0.xyz, g[TEX2], R0.x
+                        {
+                            struct nvfx_src len = src(r0);
+                            emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r0,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    src(normalReg), len, noneSrc(),
+                                    FLOAT32, 1);
+                        }
+
+                        // DIVSQR R1.xyz, R1, R0.w
+                        {
+                            struct nvfx_src len = src(r0);
+                            swizzleAll(len, 3);
+                            emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r1,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    src(r1), len, noneSrc());
+                        }
+
+                        // DP3R R1.x, R0, R1
+                        emitRaw(NVFX_FP_OP_OPCODE_DP3, r1, NVFX_FP_MASK_X,
+                                src(r0), src(r1), noneSrc(), FLOAT32, 1);
+
+                        // MAXR R0.w, R1.x, {0}.x
+                        {
+                            struct nvfx_src s0 = src(r1);
+                            swizzleAll(s0, 0);
+                            struct nvfx_src s1 = src(constReg);
+                            swizzleAll(s1, 0);
+                            emitRaw(NVFX_FP_OP_OPCODE_MAX, r0, NVFX_FP_MASK_W,
+                                    s0, s1, noneSrc());
+                            const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                            asm_.appendConstBlock(zero);
+                        }
+
+                        // DP3R R0.x, R0, R2
+                        emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_X,
+                                src(r0), src(r2), noneSrc());
+
+                        // LG2R R0.y, R0.w
+                        {
+                            struct nvfx_src s0 = src(r0);
+                            swizzleAll(s0, 3);
+                            emitRaw(NVFX_FP_OP_OPCODE_LG2, r0, NVFX_FP_MASK_Y,
+                                    s0, noneSrc(), noneSrc());
+                        }
+
+                        // MAXR R0.x, R0.x, {0}.x
+                        {
+                            struct nvfx_src s0 = src(r0);
+                            struct nvfx_src s1 = src(constReg);
+                            swizzleAll(s1, 0);
+                            emitRaw(NVFX_FP_OP_OPCODE_MAX, r0, NVFX_FP_MASK_X,
+                                    s0, s1, noneSrc());
+                            const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                            asm_.appendConstBlock(zero);
+                        }
+
+                        // MULR R0.w, R0.y, {0, 17.8954, 0, 0}.y
+                        {
+                            struct nvfx_src s0 = src(r0);
+                            swizzleAll(s0, 1);
+                            struct nvfx_src s1 = src(constReg);
+                            swizzleAll(s1, 1);
+                            emitRaw(NVFX_FP_OP_OPCODE_MUL, r0, NVFX_FP_MASK_W,
+                                    s0, s1, noneSrc());
+                            const float exponent[4] =
+                                {0.0f, powIt2->second.exponent, 0.0f, 0.0f};
+                            asm_.appendConstBlock(exponent);
+                        }
+
+                        // MOVXC RC.x, R0.x
+                        {
+                            struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                ccDst, NVFX_FP_MASK_X,
+                                src(r0), noneSrc(), noneSrc());
+                            in.cc_update = 1;
+                            in.precision = 2;
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        }
+
+                        // ADDR R1.xyz, R0.x, ambient
+                        {
+                            struct nvfx_src s0 = src(r0);
+                            swizzleAll(s0, 0);
+                            emitRaw(NVFX_FP_OP_OPCODE_ADD, r1,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    s0, makeGenericNvfxSrc(ambientSrc),
+                                    noneSrc());
+                            appendGenericInlineSource(ambientSrc);
+                        }
+
+                        // EX2R R1.w(GT.x), R0.w
+                        {
+                            struct nvfx_src s0 = src(r0);
+                            swizzleAll(s0, 3);
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(r1),
+                                NVFX_FP_MASK_W,
+                                s0, noneSrc(), noneSrc());
+                            in.precision = FLOAT32;
+                            in.cc_cond = NVFX_COND_GT;
+                            in.cc_swz[0] = in.cc_swz[1] =
+                            in.cc_swz[2] = in.cc_swz[3] = 0;
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_EX2);
+                        }
+
+                        // TEXR R0.xyz, f[TEX0], TEX0
+                        if (!emitTexSampleToDest(texDiffuse.texId,
+                                                 texIt3->second, r0,
+                                                 NVFX_FP_MASK_X |
+                                                 NVFX_FP_MASK_Y |
+                                                 NVFX_FP_MASK_Z,
+                                                 FLOAT32, false))
+                            return false;
+
+                        // MADR oColor.xyz, R0, R1, R1.w
+                        {
+                            struct nvfx_src s2 = src(r1);
+                            swizzleAll(s2, 3);
+                            emitRaw(NVFX_FP_OP_OPCODE_MAD, dstReg,
+                                    NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
+                                    NVFX_FP_MASK_Z,
+                                    src(r0), src(r1), s2, dstPrecision);
+                        }
+
+                        // MOVR oColor.w, {1,0,0,0}.x
+                        {
+                            struct nvfx_src s0 = src(constReg);
+                            swizzleAll(s0, 0);
+                            emitRaw(NVFX_FP_OP_OPCODE_MOV, dstReg,
+                                    NVFX_FP_MASK_W,
+                                    s0, noneSrc(), noneSrc(), dstPrecision);
+                            const float one[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+                            asm_.appendConstBlock(one);
+                        }
+
+                        const int inputs[3] =
+                            {uvIt->second, posIt->second, normalIt->second};
+                        for (int inputSrc : inputs)
+                        {
+                            attrs.attributeInputMask |=
+                                fpAttrMaskBitForInputSrc(inputSrc);
+                            if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            {
+                                const int n =
+                                    inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                                attrs.texCoordsInputMask |= uint16_t{1} << n;
+                                if (inputSrc != uvIt->second)
+                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
+                            }
+                        }
+                        return true;
+                    };
+
+                    if (tryEmitBasicFragmentLighting())
+                        return true;
+
+                    LightingMul lighting;
+                    SpecMul spec;
+                    if (!(matchLightingMul(finalA, lighting) &&
+                          matchSpecMul(finalB, spec)) &&
+                        !(matchLightingMul(finalB, lighting) &&
+                          matchSpecMul(finalA, spec)))
+                        return false;
+
+                    auto powIt = valueToPowMaxDotLiteral.find(spec.powId);
+                    if (powIt == valueToPowMaxDotLiteral.end())
+                        return false;
+
+                    const IRValueID satBase = saturateAlias[lighting.satId];
+                    auto satAddIt = valueToGenericArith.find(satBase);
+                    if (satAddIt == valueToGenericArith.end() ||
+                        satAddIt->second.op != GenericFpOp::Add)
+                        return false;
+
+                    IRValueID ambientId = 0;
+                    if (valueToMaxDotZero.count(satAddIt->second.srcIds[0]) &&
+                        valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[1]).baseId))
+                    {
+                        ambientId = resolveSrcMods(satAddIt->second.srcIds[1]).baseId;
+                    }
+                    else if (valueToMaxDotZero.count(satAddIt->second.srcIds[1]) &&
+                             valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[0]).baseId))
+                    {
+                        ambientId = resolveSrcMods(satAddIt->second.srcIds[0]).baseId;
+                    }
+                    else
+                        return false;
+
+                    auto texIt = valueToTex.find(lighting.texLight.texId);
+                    if (texIt == valueToTex.end())
+                        return false;
+
+                    GenericFpSource lightSrc = resolveGenericSource(lighting.texLight.lightId);
+                    GenericFpSource ambientSrc = resolveGenericSource(ambientId);
+                    GenericFpSource specFactorSrc = resolveGenericSource(spec.factorId);
+                    if (lightSrc.kind == GenericFpSource::Kind::None ||
+                        ambientSrc.kind == GenericFpSource::Kind::None ||
+                        specFactorSrc.kind == GenericFpSource::Kind::None)
+                        return false;
+
+                    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                    const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
+                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
 
                     auto tryEmitNormalizedPhongColorStore = [&]() -> bool
                     {
