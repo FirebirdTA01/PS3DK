@@ -1618,6 +1618,10 @@ static int psgl_texture_supported(GLenum format, GLenum type)
     if (format == GL_RGBA &&
         (type == GL_UNSIGNED_SHORT_5_5_5_1 || type == GL_UNSIGNED_SHORT_4_4_4_4))
         return 1;
+    if ((format == GL_RGBA || format == GL_BGRA) &&
+        (type == GL_UNSIGNED_INT_8_8_8_8 ||
+         type == GL_UNSIGNED_INT_8_8_8_8_REV))
+        return 1;
     if (format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5)
         return 1;
     return 0;
@@ -1678,6 +1682,12 @@ static uint32_t psgl_read_u16_be(const unsigned char *src)
     return ((uint32_t)src[0] << 8) | (uint32_t)src[1];
 }
 
+static uint32_t psgl_read_u32_be(const unsigned char *src)
+{
+    return ((uint32_t)src[0] << 24) | ((uint32_t)src[1] << 16) |
+           ((uint32_t)src[2] << 8) | (uint32_t)src[3];
+}
+
 static uint32_t psgl_pack_argb8(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
     return ((uint32_t)a << 24) | ((uint32_t)r << 16) |
@@ -1696,6 +1706,30 @@ static uint32_t psgl_convert_texel_argb8(const unsigned char *src,
             return psgl_pack_argb8(src[0], src[1], src[2], 255u);
         if (format == GL_BGR)
             return psgl_pack_argb8(src[2], src[1], src[0], 255u);
+    } else if (type == GL_UNSIGNED_INT_8_8_8_8) {
+        uint32_t v = psgl_read_u32_be(src);
+        if (format == GL_RGBA)
+            return psgl_pack_argb8((uint8_t)(v >> 24),
+                                   (uint8_t)(v >> 16),
+                                   (uint8_t)(v >> 8),
+                                   (uint8_t)v);
+        if (format == GL_BGRA)
+            return psgl_pack_argb8((uint8_t)(v >> 8),
+                                   (uint8_t)(v >> 16),
+                                   (uint8_t)(v >> 24),
+                                   (uint8_t)v);
+    } else if (type == GL_UNSIGNED_INT_8_8_8_8_REV) {
+        uint32_t v = psgl_read_u32_be(src);
+        if (format == GL_RGBA)
+            return psgl_pack_argb8((uint8_t)v,
+                                   (uint8_t)(v >> 8),
+                                   (uint8_t)(v >> 16),
+                                   (uint8_t)(v >> 24));
+        if (format == GL_BGRA)
+            return psgl_pack_argb8((uint8_t)(v >> 16),
+                                   (uint8_t)(v >> 8),
+                                   (uint8_t)v,
+                                   (uint8_t)(v >> 24));
     } else if (type == GL_UNSIGNED_SHORT_5_6_5) {
         uint32_t v = psgl_read_u16_be(src);
         uint8_t r = (uint8_t)(((v >> 11) & 0x1fu) * 255u / 31u);
@@ -1724,6 +1758,9 @@ static uint32_t psgl_texel_size(GLenum format, GLenum type)
 {
     if (type == GL_UNSIGNED_BYTE)
         return (format == GL_RGB || format == GL_BGR) ? 3u : 4u;
+    if (type == GL_UNSIGNED_INT_8_8_8_8 ||
+        type == GL_UNSIGNED_INT_8_8_8_8_REV)
+        return 4u;
     return 2u;
 }
 
