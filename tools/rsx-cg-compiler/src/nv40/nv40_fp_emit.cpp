@@ -10039,6 +10039,121 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         break;
                     }
 
+                    // Basic vertex-lighting FP:
+                    //   oColor = tex2D(diffuseMap, texCoord) * color + specular
+                    //
+                    // The multiply is already captured as FpVaryingTexMulBinding.
+                    // NV40 FP cannot read a varying input as MAD's addend operand,
+                    // so materialise the specular varying in R1 first, then fuse
+                    // TEX * COLOR0 + R1 into the final MAD.
+                    auto tryEmitTexColorSpecular = [&]() -> bool
+                    {
+                        auto addIt = valueToGenericArith.find(srcId);
+                        if (addIt == valueToGenericArith.end() ||
+                            addIt->second.op != GenericFpOp::Add)
+                            return false;
+
+                        IRValueID mulId = 0;
+                        IRValueID addendId = 0;
+                        if (valueToVaryingTexMul.count(addIt->second.srcIds[0]))
+                        {
+                            mulId = addIt->second.srcIds[0];
+                            addendId = addIt->second.srcIds[1];
+                        }
+                        else if (valueToVaryingTexMul.count(addIt->second.srcIds[1]))
+                        {
+                            mulId = addIt->second.srcIds[1];
+                            addendId = addIt->second.srcIds[0];
+                        }
+                        else
+                        {
+                            return false;
+                        }
+
+                        const FpVaryingTexMulBinding& mul =
+                            valueToVaryingTexMul[mulId];
+                        if (mul.lane != -1)
+                            return false;
+
+                        const SrcMod addendMods = resolveSrcMods(addendId);
+                        if (addendMods.absMod || addendMods.negMod)
+                            return false;
+
+                        auto addendIt = valueToInputSrc.find(addendMods.baseId);
+                        auto colorIt = valueToInputSrc.find(mul.varyingId);
+                        auto texIt2 = valueToTex.find(mul.texId);
+                        if (addendIt == valueToInputSrc.end() ||
+                            colorIt == valueToInputSrc.end() ||
+                            texIt2 == valueToTex.end())
+                            return false;
+
+                        const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+                        const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
+                        const struct nvfx_reg addendReg =
+                            nvfx_reg(NVFXSR_INPUT, addendIt->second);
+
+                        // MOVR R1, f[TEX1]
+                        {
+                            struct nvfx_src s0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(addendReg));
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(none));
+                            struct nvfx_insn in = nvfx_insn(
+                                0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(r1),
+                                NVFX_FP_MASK_ALL, s0, s1, s2);
+                            in.precision = FLOAT32;
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+                        }
+
+                        // TEXR R0, f[TEX0], TEX0
+                        if (!emitTexSampleToDest(mul.texId, texIt2->second, r0,
+                                                 NVFX_FP_MASK_ALL,
+                                                 FLOAT32, false))
+                            return false;
+
+                        // MADR o, R0, f[COL0], R1
+                        {
+                            const struct nvfx_reg colorReg =
+                                nvfx_reg(NVFXSR_INPUT, colorIt->second);
+                            struct nvfx_src s0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(r0));
+                            struct nvfx_src s1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(colorReg));
+                            struct nvfx_src s2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(r1));
+                            struct nvfx_insn in = nvfx_insn(
+                                saturate ? 1 : 0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_ALL, s0, s1, s2);
+                            in.precision = dstPrecision;
+                            asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
+                        }
+
+                        const int inputs[2] = {colorIt->second, addendIt->second};
+                        for (int inputSrc : inputs)
+                        {
+                            attrs.attributeInputMask |=
+                                fpAttrMaskBitForInputSrc(inputSrc);
+                            if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            {
+                                const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+                                attrs.texCoordsInputMask |= uint16_t{1} << n;
+                                attrs.texCoords2D &= ~(uint16_t{1} << n);
+                            }
+                        }
+                        return true;
+                    };
+
+                    if (tryEmitTexColorSpecular())
+                    {
+                        emittedSomething = true;
+                        break;
+                    }
+
                     auto powVecIt = valueToGenericVecConstruct.find(srcId);
                     if (powVecIt != valueToGenericVecConstruct.end() &&
                         powVecIt->second.width == 4)
