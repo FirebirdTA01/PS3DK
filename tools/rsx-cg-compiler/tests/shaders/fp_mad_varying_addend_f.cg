@@ -1,0 +1,14 @@
+// FP MAD with three varying inputs: texture * color_varying + specular_varying.
+// Exercises the MOVR materialization path for varying-as-MAD-addend (NV40 cannot
+// read a varying input directly as MAD's third operand).
+//
+// the reference compiler lowers to: MOVR R1,f[TEX1]; TEXR R0,f[TEX0],TEX0; MADR R0,R0,f[COL0],R1
+
+void main(float2 uv : TEXCOORD0,
+          float4 diffuse : COLOR0,
+          float4 spec : TEXCOORD1,
+          uniform sampler2D tex,
+          out float4 color : COLOR)
+{
+    color = tex2D(tex, uv) * diffuse + spec;
+}
