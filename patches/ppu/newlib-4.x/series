@@ -12,3 +12,4 @@
 0012-dirent-distinct-dt-dummy-values.patch
 0013-libsysbase-drop-lwmutex-wrappers.patch
 0014-stdint-gate-limit-macros-cxx98.patch
+0015-malloc-16-byte-align-for-vmx-quadwords.patch

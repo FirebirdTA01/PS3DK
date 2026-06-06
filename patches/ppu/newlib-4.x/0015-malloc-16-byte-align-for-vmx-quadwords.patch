@@ -1,0 +1,40 @@
+Subject: [PATCH] newlib: 16-byte malloc alignment for VMX/AltiVec quadwords
+
+The Cell PPU has __BIGGEST_ALIGNMENT__ == 16 (VMX vec_float4), but the
+dlmalloc default alignment is 2*SIZE_SZ == 8 under ILP32.  Code that stores
+a vec_float4 into heap memory via stvx/lvx (e.g. vectormath Vector3 from
+operator new[] under -std=gnu++98, which has no over-aligned new) writes to
+(addr & ~0xf), one 16-byte slot below an 8-aligned block, clobbering the
+adjacent malloc chunk header and corrupting the heap (manifests as a crash
+in a later free()).  Honor __BIGGEST_ALIGNMENT__ when it exceeds the
+historical default so plain malloc satisfies vector types in every language
+mode.  Matches the reference libc's 16-byte allocations.
+
+diff --git a/newlib/libc/stdlib/_mallocr.c b/newlib/libc/stdlib/_mallocr.c
+index 56968cbd1..1abab88ca 100644
+--- a/newlib/libc/stdlib/_mallocr.c
++++ b/newlib/libc/stdlib/_mallocr.c
+@@ -1402,8 +1402,22 @@ nextchunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 
+ #define SIZE_SZ                (sizeof(INTERNAL_SIZE_T))
+ #ifndef MALLOC_ALIGNMENT
+-#define MALLOC_ALIGN           8
++/* The allocator must return memory aligned for the largest type the
++   target supports.  On the Cell PPU, VMX/AltiVec quadwords require
++   16-byte alignment (__BIGGEST_ALIGNMENT__ == 16); the historical
++   2*SIZE_SZ default (8 under ILP32) under-aligns them.  A vec_float4
++   stored into such memory via stvx/lvx — which mask the low 4 bits of
++   the effective address — then silently writes 16 bytes to the next
++   lower 16-byte boundary, clobbering the adjacent chunk's header and
++   corrupting the heap.  Honor the compiler's biggest alignment when it
++   exceeds the historical default so plain malloc satisfies vector
++   types even under language modes without over-aligned operator new. */
++#if defined(__BIGGEST_ALIGNMENT__) && (__BIGGEST_ALIGNMENT__ > (SIZE_SZ + SIZE_SZ))
++#define MALLOC_ALIGNMENT       __BIGGEST_ALIGNMENT__
++#else
+ #define MALLOC_ALIGNMENT       (SIZE_SZ < 4 ? 8 : (SIZE_SZ + SIZE_SZ))
++#endif
++#define MALLOC_ALIGN           MALLOC_ALIGNMENT
+ #else
+ #define MALLOC_ALIGN           MALLOC_ALIGNMENT
+ #endif
