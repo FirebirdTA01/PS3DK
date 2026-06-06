@@ -5,12 +5,16 @@
 #include "ffp_lit_bootstrap_vpo.h"
 #include "ffp_minimal_fpo.h"
 #include "ffp_minimal_vpo.h"
+#include "ffp_posonly_fpo.h"
+#include "ffp_posonly_vpo.h"
 
 #include <malloc.h>
 #include <math.h>
+#include <stdio.h>
 #include <ppu-types.h>
 #include <rsx/rsx.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/lv2_syscall.h>
 #include <sys/timer.h>
 #include <sysutil/video.h>
@@ -28,9 +32,13 @@
 #define PSGL_MAX_QUEUE_FRAMES      0u
 #define PSGL_TEXTURE_ALIGNMENT     128u
 #define PSGL_CELL_FS_O_RDONLY      000000
+#define PSGL_CELL_FS_O_WRONLY      000001
+#define PSGL_CELL_FS_O_CREAT       000100
+#define PSGL_CELL_FS_O_TRUNC       001000
 
 extern s32 cellFsOpen(const char *path, s32 flags, s32 *fd,
                       const void *arg, u64 argsize);
+extern s32 cellFsWrite(s32 fd, const void *ptr, u64 len, u64 *written);
 extern s32 cellFsClose(s32 fd);
 extern s32 cellFsRead(s32 fd, void *ptr, u64 len, u64 *read);
 
@@ -89,10 +97,16 @@ static PSGLtextureObject *g_psgl_textures;
 static GLuint g_psgl_next_buffer_name = 1u;
 static GLuint g_psgl_next_texture_name = 1u;
 
+static void psgl_fill_gcm_texture(PSGLtextureObject *texture);
+
 static PSGLcgParameter g_psgl_ffp_vp_params[1];
 static PSGLcgProgram g_psgl_ffp_vp;
 static PSGLcgProgram g_psgl_ffp_fp;
 static uint32_t g_psgl_ffp_initialized;
+static PSGLcgParameter g_psgl_ffp_posonly_vp_params[1];
+static PSGLcgProgram g_psgl_ffp_posonly_vp;
+static PSGLcgProgram g_psgl_ffp_posonly_fp;
+static uint32_t g_psgl_ffp_posonly_initialized;
 static PSGLcgParameter g_psgl_ffp_lit_vp_params[1];
 static PSGLcgParameter g_psgl_ffp_lit_fp_params[1];
 static PSGLcgProgram g_psgl_ffp_lit_vp;
@@ -154,6 +168,7 @@ static uint32_t psgl_texture_remap_argb(void)
                                   GCM_TEXTURE_REMAP_TYPE_REMAP);
 }
 
+__attribute__((unused))
 static uint32_t psgl_texture_remap_bgra(void)
 {
     return GCM_TEXTURE_REMAP_MODE(GCM_TEXTURE_REMAP_ORDER_XYXY,
@@ -210,6 +225,16 @@ static uint32_t psgl_morton2(uint32_t x, uint32_t y)
 static int psgl_is_power_of_two(uint32_t value)
 {
     return value && ((value & (value - 1u)) == 0u);
+}
+
+static uint8_t psgl_log2_u32(uint32_t value)
+{
+    uint8_t log = 0u;
+    while (value > 1u) {
+        value >>= 1u;
+        log++;
+    }
+    return log;
 }
 
 static void psgl_flip_trampoline(uint32_t head)
@@ -568,6 +593,20 @@ static int psgl_ffp_init_minimal(void)
     return 1;
 }
 
+static int psgl_ffp_init_posonly(void)
+{
+    if (g_psgl_ffp_posonly_initialized) return 1;
+    if (!psgl_ffp_init_pair(&g_psgl_ffp_posonly_vp, &g_psgl_ffp_posonly_fp,
+                            g_psgl_ffp_posonly_vp_params,
+                            psgl_ffp_posonly_vpo,
+                            psgl_ffp_posonly_vpo_len,
+                            psgl_ffp_posonly_fpo,
+                            psgl_ffp_posonly_fpo_len))
+        return 0;
+    g_psgl_ffp_posonly_initialized = 1u;
+    return 1;
+}
+
 static int psgl_ffp_init_lit_bootstrap(void)
 {
     uint32_t light_index;
@@ -607,7 +646,6 @@ static int psgl_ffp_init_lit_bootstrap(void)
 
 static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
 {
-    uint32_t mask = PSGL_FFP_MINIMAL_MASK;
     if (!context) return 0u;
     if (context->bound_vertex_program || context->bound_fragment_program)
         return 0u;
@@ -621,24 +659,31 @@ static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
                 return 0u;
         }
         if (context->fog_enabled) return 0u;
-        mask |= PSGL_FFP_LIGHTING_MASK;
+        uint32_t mask = PSGL_FFP_MINIMAL_MASK | PSGL_FFP_LIGHTING_MASK;
         for (uint32_t i = 0u; i < PSGL_MAX_LIGHTS; i++) {
             if (context->lights[i].enabled)
                 mask |= (1u << (8u + i));
         }
         return mask;
     }
-    if (!context->attribs[PSGL_ATTRIB_TEXCOORD].enabled)
-        return 0u;
-    if (!context->textures[0].texture_2d_enabled ||
-        !context->textures[0].texture_2d)
-        return 0u;
-    for (uint32_t i = 1u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
+    if (context->attribs[PSGL_ATTRIB_TEXCOORD].enabled &&
+        context->textures[0].texture_2d_enabled &&
+        context->textures[0].texture_2d)
+    {
+        uint32_t mask = PSGL_FFP_MINIMAL_MASK;
+        if (context->fog_enabled) mask |= PSGL_FFP_FOG_MASK;
+        for (uint32_t i = 1u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
+            if (context->textures[i].texture_2d_enabled)
+                return 0u;
+        }
+        return mask;
+    }
+    for (uint32_t i = 0u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
         if (context->textures[i].texture_2d_enabled)
             return 0u;
     }
-    if (context->fog_enabled) mask |= PSGL_FFP_FOG_MASK;
-    return mask;
+    if (context->fog_enabled) return 0u;
+    return PSGL_FFP_POSITION_ONLY_MASK;
 }
 
 static int psgl_ffp_state_mask_to_programs(uint32_t mask, PSGLcgProgram **vp,
@@ -651,6 +696,12 @@ static int psgl_ffp_state_mask_to_programs(uint32_t mask, PSGLcgProgram **vp,
         if (!psgl_ffp_init_lit_bootstrap()) return 0;
         if (vp) *vp = &g_psgl_ffp_lit_vp;
         if (fp) *fp = &g_psgl_ffp_lit_fp;
+        return 1;
+    }
+    if (mask == PSGL_FFP_POSITION_ONLY_MASK) {
+        if (!psgl_ffp_init_posonly()) return 0;
+        if (vp) *vp = &g_psgl_ffp_posonly_vp;
+        if (fp) *fp = &g_psgl_ffp_posonly_fp;
         return 1;
     }
     if (mask != PSGL_FFP_MINIMAL_MASK) return 0;
@@ -1094,17 +1145,24 @@ static void psgl_emit_viewport(PSGLcontext *context)
     float scale[4];
     float offset[4];
     GLint *vp = context->viewport;
+    uint16_t tw;
+    uint16_t th;
+    GLint rsx_y;
+
+    psgl_current_target_dims(context, &tw, &th);
+    (void)tw;
+    rsx_y = (GLint)th - vp[1] - vp[3];
 
     scale[0] = (float)vp[2] * 0.5f;
     scale[1] = (float)vp[3] * -0.5f;
     scale[2] = 0.5f;
     scale[3] = 0.0f;
     offset[0] = (float)vp[0] + (float)vp[2] * 0.5f;
-    offset[1] = (float)vp[1] + (float)vp[3] * 0.5f;
+    offset[1] = (float)rsx_y + (float)vp[3] * 0.5f;
     offset[2] = 0.5f;
     offset[3] = 0.0f;
 
-    cellGcmSetViewport(context->gcm, (uint16_t)vp[0], (uint16_t)vp[1],
+    cellGcmSetViewport(context->gcm, (uint16_t)vp[0], (uint16_t)rsx_y,
                        (uint16_t)vp[2], (uint16_t)vp[3],
                        0.0f, 1.0f, scale, offset);
     context->dirty &= ~PSGL_DIRTY_VIEWPORT;
@@ -1213,6 +1271,10 @@ static void psgl_emit_raster(PSGLcontext *context)
     cellGcmSetColorMask(context->gcm, mask);
     cellGcmSetLogicOpEnable(context->gcm, psgl_bool(context->logic_op_enabled));
     cellGcmSetLogicOp(context->gcm, logic);
+    cellGcmSetPolygonOffsetFillEnable(context->gcm,
+                                      psgl_bool(context->polygon_offset_fill_enabled));
+    cellGcmSetPolygonOffset(context->gcm, context->polygon_offset_factor,
+                            context->polygon_offset_units);
     context->dirty &= ~PSGL_DIRTY_RASTER;
 }
 
@@ -1572,6 +1634,43 @@ static int psgl_texture_storage_matches(const PSGLtextureObject *texture,
         texture->location == CELL_GCM_LOCATION_LOCAL &&
         texture->linear == linear && texture->levels == 1u &&
         texture->rsx_format == rsx_format;
+}
+
+static int psgl_allocate_texture_storage(PSGLtextureObject *texture,
+                                         uint16_t width, uint16_t height,
+                                         uint16_t pitch, uint32_t size,
+                                         uint8_t rsx_format, uint8_t linear)
+{
+    void *address;
+    uint32_t offset = 0u;
+    if (!texture || !size)
+        return 0;
+    if (psgl_texture_storage_matches(texture, width, height, pitch, size,
+                                     rsx_format, linear))
+        return 1;
+
+    address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
+    if (!address)
+        return 0;
+    if (cellGcmAddressToOffset(address, &offset) != 0) {
+        rsxFree(address);
+        return 0;
+    }
+
+    psgl_release_texture_storage(texture);
+    texture->address = address;
+    texture->offset = offset;
+    texture->size = size;
+    texture->width = width;
+    texture->height = height;
+    texture->pitch = pitch;
+    texture->levels = 1u;
+    texture->location = CELL_GCM_LOCATION_LOCAL;
+    texture->linear = linear;
+    texture->owns_storage = 1u;
+    texture->rsx_format = rsx_format;
+    psgl_fill_gcm_texture(texture);
+    return 1;
 }
 
 static uint32_t psgl_read_u16_be(const unsigned char *src)
@@ -2757,6 +2856,10 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         context->logic_op_enabled = enabled;
         context->dirty |= PSGL_DIRTY_RASTER;
         break;
+    case GL_POLYGON_OFFSET_FILL:
+        context->polygon_offset_fill_enabled = enabled;
+        context->dirty |= PSGL_DIRTY_RASTER;
+        break;
     case GL_MULTISAMPLE:
         context->multisample_enabled = enabled;
         context->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_CG;
@@ -2939,6 +3042,15 @@ void psgl_context_set_logic_op(GLenum opcode)
     PSGLcontext *context = g_psgl.current_context;
     if (!context || !psgl_translate_logic_op(opcode, &translated)) return;
     context->logic_op = opcode;
+    context->dirty |= PSGL_DIRTY_RASTER;
+}
+
+void psgl_context_set_polygon_offset(GLfloat factor, GLfloat units)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    context->polygon_offset_factor = factor;
+    context->polygon_offset_units = units;
     context->dirty |= PSGL_DIRTY_RASTER;
 }
 
@@ -3381,8 +3493,6 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
     PSGLtextureObject *texture = psgl_bound_texture(context, target);
     uint32_t pitch;
     uint32_t size;
-    void *address;
-    uint32_t offset = 0u;
     uint8_t rsx_format;
     int rt_storage;
     int swizzled;
@@ -3443,29 +3553,15 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
         return;
     }
 
-    address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
-    if (!address) return;
-    if (cellGcmAddressToOffset(address, &offset) != 0) {
-        rsxFree(address);
+    if (!psgl_allocate_texture_storage(texture, (uint16_t)width,
+                                       (uint16_t)height, (uint16_t)pitch,
+                                       size, rsx_format,
+                                       swizzled ? 0u : 1u))
         return;
-    }
-    psgl_release_texture_storage(texture);
-    texture->address = address;
-    texture->offset = offset;
-    texture->size = size;
-    texture->width = (uint16_t)width;
-    texture->height = (uint16_t)height;
-    texture->pitch = (uint16_t)pitch;
-    texture->levels = 1u;
-    texture->location = CELL_GCM_LOCATION_LOCAL;
-    texture->linear = swizzled ? 0u : 1u;
-    texture->owns_storage = 1u;
-    texture->rsx_format = rsx_format;
     if (pixels)
         psgl_write_texture_image(texture, 0, 0, width, height,
                                  format, type, pixels,
                                  context->unpack_alignment);
-    psgl_fill_gcm_texture(texture);
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
@@ -3492,11 +3588,13 @@ static int psgl_current_depth_source(PSGLcontext *context,
                                      uint32_t *pitch,
                                      uint16_t *width,
                                      uint16_t *height,
-                                     uint32_t *bytes_per_pixel)
+                                     uint32_t *bytes_per_pixel,
+                                     uint32_t *samples_x,
+                                     uint32_t *samples_y)
 {
     PSGLdevice *device;
     if (!context || !offset || !pitch || !width || !height ||
-        !bytes_per_pixel)
+        !bytes_per_pixel || !samples_x || !samples_y)
         return 0;
 
     if (context->bound_framebuffer != 0u) {
@@ -3513,6 +3611,8 @@ static int psgl_current_depth_source(PSGLcontext *context,
                 *height = depth->height;
                 *bytes_per_pixel =
                     (base == CELL_GCM_TEXTURE_DEPTH16) ? 2u : 4u;
+                *samples_x = 1u;
+                *samples_y = 1u;
                 return 1;
             }
         }
@@ -3526,6 +3626,13 @@ static int psgl_current_depth_source(PSGLcontext *context,
     *width = device->render_width;
     *height = device->render_height;
     *bytes_per_pixel = 4u;
+    if (psgl_device_has_msaa_storage(device) && context->multisample_enabled) {
+        *samples_x = psgl_msaa_samples_x(device->multisampling_mode);
+        *samples_y = psgl_msaa_samples_y(device->multisampling_mode);
+    } else {
+        *samples_x = 1u;
+        *samples_y = 1u;
+    }
     return 1;
 }
 
@@ -3541,23 +3648,307 @@ static GLenum psgl_depth_copy_internal_format(GLenum internalformat,
     return 0u;
 }
 
-static void psgl_copy_depth_rows(PSGLcontext *context,
-                                 uint32_t dst_offset,
-                                 uint32_t dst_pitch,
-                                 uint32_t src_offset,
-                                 uint32_t src_pitch,
-                                 uint32_t bytes_per_pixel,
-                                 uint32_t width,
-                                 uint32_t row_count)
+#define PSGL_DEPTH_COPY_RANGE_GUARD (2u * 1024u * 1024u)
+
+static int psgl_allocate_swizzled_depth_copy_texture(PSGLtextureObject *texture,
+                                                     uint32_t width,
+                                                     uint32_t height,
+                                                     uint32_t bytes_per_pixel)
 {
-    if (!context || !context->gcm || !bytes_per_pixel || !width ||
-        !row_count)
+    void *address;
+    uint32_t offset = 0u;
+    uint8_t rsx_format;
+    uint32_t size;
+    if (!texture || !psgl_is_power_of_two(width) ||
+        !psgl_is_power_of_two(height) || width > 4096u || height > 4096u)
+        return 0;
+    if (bytes_per_pixel == 2u)
+        rsx_format = CELL_GCM_TEXTURE_DEPTH16 | CELL_GCM_TEXTURE_SZ;
+    else if (bytes_per_pixel == 4u)
+        rsx_format = CELL_GCM_TEXTURE_DEPTH24_D8 | CELL_GCM_TEXTURE_SZ;
+    else
+        return 0;
+
+    size = psgl_align_u32(width * height * bytes_per_pixel, 4096u) +
+           4096u;
+    address = rsxMemalign(4096u, size);
+    if (!address)
+        return 0;
+    if (cellGcmAddressToOffset(address, &offset) != 0) {
+        rsxFree(address);
+        return 0;
+    }
+
+    psgl_release_texture_storage(texture);
+    texture->address = address;
+    texture->offset = offset;
+    texture->size = size;
+    texture->width = (uint16_t)width;
+    texture->height = (uint16_t)height;
+    texture->pitch = 0u;
+    texture->levels = 1u;
+    texture->location = CELL_GCM_LOCATION_LOCAL;
+    texture->linear = 0u;
+    texture->owns_storage = 1u;
+    texture->rsx_format = rsx_format;
+    psgl_fill_gcm_texture(texture);
+    return 1;
+}
+
+static void *g_psgl_depth_copy_scratch = NULL;
+static uint32_t g_psgl_depth_copy_scratch_offset = 0u;
+static uint32_t g_psgl_depth_copy_scratch_size = 0u;
+
+static int psgl_ensure_depth_copy_scratch(uint32_t size,
+                                          uint32_t *offset_out)
+{
+    void *scratch;
+    uint32_t offset;
+
+    if (!size || !offset_out)
+        return 0;
+    if (g_psgl_depth_copy_scratch &&
+        g_psgl_depth_copy_scratch_size >= size) {
+        *offset_out = g_psgl_depth_copy_scratch_offset;
+        return 1;
+    }
+
+    scratch = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
+    if (!scratch)
+        return 0;
+    if (cellGcmAddressToOffset(scratch, &offset) != 0)
+        return 0;
+
+    g_psgl_depth_copy_scratch = scratch;
+    g_psgl_depth_copy_scratch_offset = offset;
+    g_psgl_depth_copy_scratch_size = size;
+    *offset_out = offset;
+    return 1;
+}
+
+static void psgl_copy_depth_to_swizzled_texture(PSGLcontext *context,
+                                                const PSGLtextureObject *texture,
+                                                uint32_t dst_x,
+                                                uint32_t dst_y,
+                                                uint32_t src_x,
+                                                uint32_t src_y,
+                                                uint32_t src_offset,
+                                                uint32_t src_pitch,
+                                                uint32_t src_width,
+                                                uint32_t src_height,
+                                                uint32_t samples_x,
+                                                uint32_t samples_y,
+                                                uint32_t bytes_per_pixel,
+                                                uint32_t width,
+                                                uint32_t height)
+{
+    uint32_t scratch_base = 0u;
+    uint32_t scratch_a_offset;
+    uint32_t scratch_b_offset;
+    uint32_t scratch_a_pitch;
+    uint32_t scratch_b_pitch;
+    uint32_t scratch_a_size;
+    uint32_t scratch_b_size;
+    uint32_t scratch_total_size;
+    uint32_t scale_format;
+    uint32_t surface_format;
+    gcmTransferScale scale;
+    gcmTransferSurface surface;
+    gcmTransferSwizzle swizzle;
+    uint32_t sample_width;
+    uint32_t sample_height;
+    uint32_t tile_in_y;
+    const uint32_t max_tile_in = 1024u;
+
+    if (!context || !context->gcm || !texture || !texture->address ||
+        !src_pitch || !src_width || !src_height || !bytes_per_pixel ||
+        !width || !height)
+        return;
+    if (bytes_per_pixel == 2u) {
+        scale_format = GCM_TRANSFER_SCALE_FORMAT_R5G6B5;
+        surface_format = GCM_TRANSFER_SURFACE_FORMAT_R5G6B5;
+    } else if (bytes_per_pixel == 4u) {
+        scale_format = GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8;
+        surface_format = GCM_TRANSFER_SURFACE_FORMAT_A8R8G8B8;
+    } else {
+        return;
+    }
+
+    if (!samples_x) samples_x = 1u;
+    if (!samples_y) samples_y = 1u;
+
+    scratch_a_pitch = psgl_align_u32(src_width * bytes_per_pixel, 64u);
+    scratch_b_pitch = scratch_a_pitch;
+    scratch_a_size = scratch_a_pitch * src_height;
+    scratch_b_size = scratch_b_pitch * src_height;
+    scratch_total_size = psgl_align_u32(scratch_a_size, 64u) +
+                         scratch_b_size + PSGL_DEPTH_COPY_RANGE_GUARD;
+    if (!psgl_ensure_depth_copy_scratch(scratch_total_size, &scratch_base))
+        return;
+    scratch_a_offset = scratch_base;
+    scratch_b_offset = scratch_base + psgl_align_u32(scratch_a_size, 64u);
+    if (scratch_a_pitch > 0xffffu || scratch_b_pitch > 0xffffu ||
+        src_pitch > 0xffffu || src_width > 0xffffu || src_height > 0xffffu ||
+        width > 0xffffu || height > 0xffffu ||
+        src_width * samples_x > 0xffffu ||
+        src_height * samples_y > 0xffffu)
+        return;
+    if (dst_x + width > texture->width || dst_y + height > texture->height ||
+        src_x + width > src_width || src_y + height > src_height)
         return;
 
+    sample_width = src_width * samples_x;
+    sample_height = src_height * samples_y;
+    psgl_zero(&scale, sizeof(scale));
+    psgl_zero(&surface, sizeof(surface));
+    scale.conversion = GCM_TRANSFER_CONVERSION_TRUNCATE;
+    scale.format = scale_format;
+    scale.operation = GCM_TRANSFER_OPERATION_SRCCOPY;
+    scale.ratioX = rsxGetFixedSint32((float)samples_x);
+    scale.ratioY = rsxGetFixedSint32((float)samples_y);
+    scale.pitch = (uint16_t)src_pitch;
+    scale.origin = GCM_TRANSFER_ORIGIN_CORNER;
+    scale.interp = GCM_TRANSFER_INTERPOLATOR_NEAREST;
+    scale.inX = 0;
+    scale.inY = 0;
+
+    surface.format = surface_format;
+    surface.pitch = (uint16_t)scratch_a_pitch;
+
+    for (tile_in_y = 0; tile_in_y < sample_height; tile_in_y += max_tile_in) {
+        uint32_t tile_in_h = sample_height - tile_in_y;
+        uint32_t tile_out_y;
+        uint32_t tile_out_h;
+        uint32_t tile_in_x;
+
+        if (tile_in_h > max_tile_in)
+            tile_in_h = max_tile_in;
+        tile_out_y = tile_in_y / samples_y;
+        tile_out_h = tile_in_h / samples_y;
+
+        for (tile_in_x = 0; tile_in_x < sample_width;
+             tile_in_x += max_tile_in) {
+            uint32_t tile_in_w = sample_width - tile_in_x;
+            uint32_t tile_out_x;
+            uint32_t tile_out_w;
+
+            if (tile_in_w > max_tile_in)
+                tile_in_w = max_tile_in;
+            tile_out_x = tile_in_x / samples_x;
+            tile_out_w = tile_in_w / samples_x;
+
+            if (!tile_out_w || !tile_out_h)
+                continue;
+            if (tile_out_x + tile_out_w > src_width ||
+                tile_out_y + tile_out_h > src_height ||
+                tile_in_w > 0xffffu || tile_in_h > 0xffffu ||
+                tile_out_w > 0xffffu || tile_out_h > 0xffffu)
+                return;
+
+            scale.clipX = 0;
+            scale.clipY = 0;
+            scale.clipW = (uint16_t)tile_out_w;
+            scale.clipH = (uint16_t)tile_out_h;
+            scale.outX = 0;
+            scale.outY = 0;
+            scale.outW = (uint16_t)tile_out_w;
+            scale.outH = (uint16_t)tile_out_h;
+            scale.inW = (uint16_t)tile_in_w;
+            scale.inH = (uint16_t)tile_in_h;
+            scale.offset = src_offset + (tile_in_y * src_pitch) +
+                           (tile_in_x * bytes_per_pixel);
+            scale.inX = 0;
+            scale.inY = 0;
+
+            surface.offset = scratch_a_offset +
+                             (tile_out_y * scratch_a_pitch) +
+                             (tile_out_x * bytes_per_pixel);
+
+            cellGcmSetTransferScaleMode(context->gcm,
+                                        GCM_TRANSFER_LOCAL_TO_LOCAL,
+                                        GCM_TRANSFER_SURFACE);
+            cellGcmSetTransferScaleSurface(context->gcm, &scale, &surface);
+            rsxSetWaitForIdle(context->gcm);
+        }
+    }
+
+    scale.clipH = src_height;
+    scale.outH = src_height;
+    scale.ratioX = rsxGetFixedSint32(1.0f);
+    scale.ratioY = rsxGetFixedSint32(-1.0f);
+    scale.inH = src_height;
+    scale.pitch = (uint16_t)scratch_a_pitch;
+    scale.inY = rsxGetFixedUint16((float)src_height);
+    scale.outX = 0;
+    scale.outY = 0;
+    scale.inX = 0;
+
+    surface.pitch = (uint16_t)scratch_b_pitch;
+    scale.clipW = (uint16_t)width;
+    scale.outW = (uint16_t)width;
+    scale.inW = (uint16_t)width;
+    scale.offset = scratch_a_offset + (src_y * scratch_a_pitch) +
+                   (src_x * bytes_per_pixel);
+    surface.offset = scratch_b_offset;
+
+    cellGcmSetTransferScaleMode(context->gcm,
+                                GCM_TRANSFER_LOCAL_TO_LOCAL,
+                                GCM_TRANSFER_SURFACE);
+    cellGcmSetTransferScaleSurface(context->gcm, &scale, &surface);
+    rsxSetWaitForIdle(context->gcm);
+
+    {
+        uint32_t swizzle_band_offset = scratch_b_offset +
+                                       (src_y * scratch_b_pitch);
+        scale.pitch = (uint16_t)scratch_b_pitch;
+        scale.offset = swizzle_band_offset;
+    }
+    scale.outX = (int16_t)dst_x;
+    scale.outY = (int16_t)dst_y;
+    scale.clipW = (uint16_t)width;
+    scale.clipH = (uint16_t)height;
+    scale.outW = (uint16_t)width;
+    scale.outH = (uint16_t)height;
+    scale.ratioY = rsxGetFixedSint32(1.0f);
+    scale.inW = (uint16_t)width;
+    scale.inH = (uint16_t)height;
+    scale.inX = 0;
+    scale.inY = 0;
+
+    psgl_zero(&swizzle, sizeof(swizzle));
+    swizzle.format = (uint16_t)surface_format;
+    swizzle.width = psgl_log2_u32(texture->width);
+    swizzle.height = psgl_log2_u32(texture->height);
+    swizzle.offset = texture->offset;
+
+    cellGcmSetTransferScaleMode(context->gcm, GCM_TRANSFER_LOCAL_TO_LOCAL,
+                                GCM_TRANSFER_SWIZZLE);
+    cellGcmSetTransferScaleSwizzle(context->gcm, &scale, &swizzle);
+    rsxSetWaitForIdle(context->gcm);
+
+}
+
+static void psgl_copy_depth_to_linear_texture(PSGLcontext *context,
+                                              const PSGLtextureObject *texture,
+                                              uint32_t dst_x,
+                                              uint32_t dst_y,
+                                              uint32_t src_offset,
+                                              uint32_t src_pitch,
+                                              uint32_t bytes_per_pixel,
+                                              uint32_t width,
+                                              uint32_t height)
+{
+    if (!context || !context->gcm || !texture || !texture->address ||
+        !src_pitch || !bytes_per_pixel || !width || !height)
+        return;
+    if (dst_x + width > texture->width || dst_y + height > texture->height)
+        return;
     cellGcmSetTransferImage(context->gcm,
                             CELL_GCM_TRANSFER_LOCAL_TO_LOCAL,
-                            dst_offset,
-                            dst_pitch,
+                            texture->offset +
+                                (dst_y * texture->pitch) +
+                                (dst_x * bytes_per_pixel),
+                            texture->pitch,
                             0u,
                             0u,
                             src_offset,
@@ -3565,39 +3956,8 @@ static void psgl_copy_depth_rows(PSGLcontext *context,
                             0u,
                             0u,
                             width,
-                            row_count,
+                            height,
                             bytes_per_pixel);
-}
-
-static void psgl_bind_depth_copy_target(PSGLcontext *context,
-                                        const PSGLtextureObject *texture)
-{
-    CellGcmSurface surface;
-    uint8_t base;
-    if (!context || !context->gcm || !texture || !texture->address)
-        return;
-    base = texture->rsx_format & ~CELL_GCM_TEXTURE_LN;
-    psgl_zero(&surface, sizeof(surface));
-    surface.colorFormat = GCM_SURFACE_X8R8G8B8;
-    surface.colorTarget = GCM_SURFACE_TARGET_NONE;
-    surface.depthFormat = (base == CELL_GCM_TEXTURE_DEPTH16)
-        ? GCM_SURFACE_ZETA_Z16 : GCM_SURFACE_ZETA_Z24S8;
-    surface.depthLocation = texture->location;
-    surface.depthOffset = texture->offset;
-    surface.depthPitch = texture->pitch;
-    surface.colorLocation[0] = GCM_LOCATION_RSX;
-    surface.colorLocation[1] = GCM_LOCATION_RSX;
-    surface.colorLocation[2] = GCM_LOCATION_RSX;
-    surface.colorLocation[3] = GCM_LOCATION_RSX;
-    surface.colorPitch[0] = 64u;
-    surface.colorPitch[1] = 64u;
-    surface.colorPitch[2] = 64u;
-    surface.colorPitch[3] = 64u;
-    surface.type = GCM_TEXTURE_LINEAR;
-    surface.antiAlias = GCM_SURFACE_CENTER_1;
-    surface.width = texture->width;
-    surface.height = texture->height;
-    cellGcmSetSurface(context->gcm, &surface);
 }
 
 void psgl_context_copy_tex_sub_image_2d(GLenum target, GLint level,
@@ -3612,6 +3972,8 @@ void psgl_context_copy_tex_sub_image_2d(GLenum target, GLint level,
     uint16_t src_width;
     uint16_t src_height;
     uint32_t src_bpp;
+    uint32_t src_samples_x;
+    uint32_t src_samples_y;
     uint8_t dst_base;
     uint32_t dst_bpp;
 
@@ -3623,7 +3985,8 @@ void psgl_context_copy_tex_sub_image_2d(GLenum target, GLint level,
         yoffset + height > texture->height ||
         !psgl_texture_is_depth(texture->rsx_format) ||
         !psgl_current_depth_source(context, &src_offset, &src_pitch,
-                                   &src_width, &src_height, &src_bpp) ||
+                                   &src_width, &src_height, &src_bpp,
+                                   &src_samples_x, &src_samples_y) ||
         x + width > src_width || y + height > src_height)
         return;
 
@@ -3634,26 +3997,40 @@ void psgl_context_copy_tex_sub_image_2d(GLenum target, GLint level,
         return;
 
     rsxSetWaitForIdle(context->gcm);
-    psgl_bind_depth_copy_target(context, texture);
-    cellGcmSetClearDepthStencil(context->gcm,
-                                psgl_pack_depth_stencil(1.0f, 0));
-    cellGcmSetClearSurface(context->gcm, GCM_CLEAR_Z);
+    if (texture->linear) {
+        psgl_copy_depth_to_linear_texture(context, texture,
+                                          (uint32_t)xoffset,
+                                          (uint32_t)yoffset,
+                                          src_offset +
+                                              ((uint32_t)x * src_bpp) +
+                                              ((uint32_t)y * src_pitch),
+                                          src_pitch,
+                                          dst_bpp,
+                                          (uint32_t)width,
+                                          (uint32_t)height);
+    } else {
+        psgl_copy_depth_to_swizzled_texture(context, texture,
+                                            (uint32_t)xoffset,
+                                            (uint32_t)yoffset,
+                                            (uint32_t)x,
+                                            (uint32_t)y,
+                                            src_offset,
+                                            src_pitch,
+                                            src_width,
+                                            src_height,
+                                            src_samples_x,
+                                            src_samples_y,
+                                            dst_bpp,
+                                            (uint32_t)width,
+                                            (uint32_t)height);
+    }
     rsxSetWaitForIdle(context->gcm);
-    psgl_copy_depth_rows(context,
-                         texture->offset +
-                             ((uint32_t)xoffset * dst_bpp) +
-                             ((uint32_t)yoffset * texture->pitch),
-                         texture->pitch,
-                         src_offset +
-                             ((uint32_t)x * src_bpp) +
-                             ((uint32_t)y * src_pitch),
-                         src_pitch,
-                         dst_bpp,
-                         (uint32_t)width,
-                         (uint32_t)height);
-    rsxSetWaitForIdle(context->gcm);
+    context->dirty |= PSGL_DIRTY_FRAMEBUFFER | PSGL_DIRTY_VIEWPORT |
+                      PSGL_DIRTY_SCISSOR | PSGL_DIRTY_TEXTURES |
+                      PSGL_DIRTY_CG;
     psgl_bind_render_target(context);
-    context->dirty |= PSGL_DIRTY_TEXTURES;
+    context->dirty |= PSGL_DIRTY_VIEWPORT | PSGL_DIRTY_SCISSOR |
+                      PSGL_DIRTY_TEXTURES | PSGL_DIRTY_CG;
 }
 
 void psgl_context_copy_tex_image_2d(GLenum target, GLint level,
@@ -3664,17 +4041,19 @@ void psgl_context_copy_tex_image_2d(GLenum target, GLint level,
 {
     PSGLcontext *context = g_psgl.current_context;
     GLenum depth_format;
-    GLenum type;
     uint32_t src_offset;
     uint32_t src_pitch;
     uint16_t src_width;
     uint16_t src_height;
     uint32_t src_bpp;
+    uint32_t src_samples_x;
+    uint32_t src_samples_y;
 
     if (!context || target != GL_TEXTURE_2D || level != 0 || border != 0 ||
         x < 0 || y < 0 || width <= 0 || height <= 0 ||
         !psgl_current_depth_source(context, &src_offset, &src_pitch,
-                                   &src_width, &src_height, &src_bpp) ||
+                                   &src_width, &src_height, &src_bpp,
+                                   &src_samples_x, &src_samples_y) ||
         x + width > src_width || y + height > src_height)
         return;
     (void)src_offset;
@@ -3684,10 +4063,31 @@ void psgl_context_copy_tex_image_2d(GLenum target, GLint level,
     if (!depth_format)
         return;
 
-    type = src_bpp == 2u ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
-    psgl_context_tex_image_2d(target, level, depth_format,
-                              width, height, border,
-                              GL_DEPTH_COMPONENT, type, NULL);
+    {
+        PSGLtextureObject *texture = psgl_bound_texture(context, target);
+        uint8_t want_format;
+        if (!texture)
+            return;
+        if (src_bpp == 2u)
+            want_format = CELL_GCM_TEXTURE_DEPTH16 | CELL_GCM_TEXTURE_SZ;
+        else
+            want_format = CELL_GCM_TEXTURE_DEPTH24_D8 | CELL_GCM_TEXTURE_SZ;
+        /* glCopyTexImage2D is issued every frame; only (re)allocate the
+           swizzled depth target when the existing storage does not already
+           match.  Reallocating each frame churns RSX local memory until the
+           allocator walks past the mapped region (unmapped-write crash). */
+        if (!texture->owns_storage || !texture->address ||
+            texture->width != (uint16_t)width ||
+            texture->height != (uint16_t)height ||
+            texture->rsx_format != want_format) {
+            if (!psgl_allocate_swizzled_depth_copy_texture(texture,
+                                                           (uint32_t)width,
+                                                           (uint32_t)height,
+                                                           src_bpp))
+                return;
+        }
+        context->dirty |= PSGL_DIRTY_TEXTURES;
+    }
     psgl_context_copy_tex_sub_image_2d(target, level, 0, 0,
                                        x, y, width, height);
 }

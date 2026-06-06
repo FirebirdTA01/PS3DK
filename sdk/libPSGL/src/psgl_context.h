@@ -137,6 +137,7 @@ struct PSGLcontext {
     GLboolean cull_face_enabled;
     GLboolean dither_enabled;
     GLboolean logic_op_enabled;
+    GLboolean polygon_offset_fill_enabled;
     GLboolean multisample_enabled;
     GLboolean lighting_enabled;
     GLboolean color_material_enabled;
@@ -165,6 +166,8 @@ struct PSGLcontext {
     GLenum stencil_depth_fail;
     GLenum stencil_depth_pass;
     GLboolean color_mask[4];
+    GLfloat polygon_offset_factor;
+    GLfloat polygon_offset_units;
     GLenum logic_op;
     GLenum cull_face;
     GLenum front_face;
@@ -251,6 +254,7 @@ void psgl_context_set_front_face(GLenum mode);
 void psgl_context_set_color_mask(GLboolean red, GLboolean green,
                                  GLboolean blue, GLboolean alpha);
 void psgl_context_set_logic_op(GLenum opcode);
+void psgl_context_set_polygon_offset(GLfloat factor, GLfloat units);
 void psgl_context_set_shade_model(GLenum mode);
 void psgl_context_framebuffer_parameter(GLenum target, GLenum pname,
                                         GLint param);

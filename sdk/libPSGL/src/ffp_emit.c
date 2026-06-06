@@ -21,6 +21,26 @@ static const char *const psgl_ffp_minimal_fp_source =
     "    out_color = tex2D(diffuseMap, texcoord);\n"
     "}\n";
 
+static const char *const psgl_ffp_posonly_vp_source =
+    "void main(\n"
+    "    float3 in_position      : POSITION,\n"
+    "    float4 in_color         : COLOR0,\n"
+    "    uniform float4x4 modelViewProj,\n"
+    "    out float4 out_position : POSITION,\n"
+    "    out float4 out_color    : COLOR0)\n"
+    "{\n"
+    "    out_position = mul(modelViewProj, float4(in_position, 1.0f));\n"
+    "    out_color = in_color;\n"
+    "}\n";
+
+static const char *const psgl_ffp_posonly_fp_source =
+    "void main(\n"
+    "    float4 in_color : COLOR0,\n"
+    "    out float4 out_color : COLOR)\n"
+    "{\n"
+    "    out_color = in_color;\n"
+    "}\n";
+
 static const char *const psgl_ffp_lit_bootstrap_vp_source =
     "void main(\n"
     "    float3 in_position      : POSITION,\n"
@@ -68,6 +88,12 @@ int psgl_ffp_state_mask_to_cg(uint32_t mask,
                               psgl_ffp_lit_bootstrap_vp_source) &&
                psgl_emit_copy(fp_source, fp_capacity,
                               psgl_ffp_lit_bootstrap_fp_source);
+    }
+    if (mask == PSGL_FFP_POSITION_ONLY_MASK) {
+        return psgl_emit_copy(vp_source, vp_capacity,
+                              psgl_ffp_posonly_vp_source) &&
+               psgl_emit_copy(fp_source, fp_capacity,
+                              psgl_ffp_posonly_fp_source);
     }
     if (mask != PSGL_FFP_MINIMAL_MASK) return 0;
     return psgl_emit_copy(vp_source, vp_capacity, psgl_ffp_minimal_vp_source) &&

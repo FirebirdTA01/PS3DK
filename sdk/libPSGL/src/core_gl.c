@@ -209,9 +209,10 @@ GLAPI void glLineWidthx(GLfixed width)    { (void)width; }
 /* ── polygon offset ──────────────────────────────────────────────── */
 
 GLAPI void glPolygonOffset(GLfloat factor, GLfloat units)
-{ (void)factor; (void)units; }
+{ psgl_context_set_polygon_offset(factor, units); }
 GLAPI void glPolygonOffsetx(GLfixed factor, GLfixed units)
-{ (void)factor; (void)units; }
+{ psgl_context_set_polygon_offset((GLfloat)factor / 65536.0f,
+                                  (GLfloat)units / 65536.0f); }
 
 /* ── hint ────────────────────────────────────────────────────────── */
 
