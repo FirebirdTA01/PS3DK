@@ -14,7 +14,7 @@ void RSX_FUNC(FlushBuffer)(gcmContextData *context)
 {
 	u32 offset = 0;
 	gcmControlRegister volatile *ctrl = gcmGetControlRegister(context);
-	
+
 	__sync();
 	gcmAddressToOffset(context->current,&offset);
 	ctrl->put = offset;
@@ -28,4 +28,3 @@ void RSX_FUNC(Finish)(gcmContextData *context,u32 ref_value)
 	gcmControlRegister volatile *ctrl = gcmGetControlRegister(context);
 	while(ctrl->ref!=ref_value) usleep(30);
 }
-
