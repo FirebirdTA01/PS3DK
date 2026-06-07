@@ -337,9 +337,6 @@ if(NOT _PS3_SPU_TOOLS_PROBED)
         find_program(PS3_TOOL_wine NAMES "wine")
     endif()
     set(_ps3_jobbin2_wine_path "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}")
-    if(NOT _ps3_jobbin2_wine_path AND EXISTS "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}/ppu-lv2-gcc.exe")
-        set(_ps3_jobbin2_wine_path "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}")
-    endif()
     set(PS3_TOOL_ppu_lv2_gcc_dir "${_ps3_jobbin2_wine_path}" CACHE PATH
         "Directory containing reference ppu-lv2-gcc.exe for wine PATH")
     # Optional — only samples that embed SPU code need the SPU compiler.
@@ -467,7 +464,7 @@ function(ps3_add_spu_image target)
             message(FATAL_ERROR "ps3_add_spu_image: reference-helper JOBBIN_WRAP requires wine on PATH")
         endif()
         if(NOT CMAKE_HOST_WIN32 AND _ps3_jobbin2_use_reference_helper AND NOT PS3_TOOL_ppu_lv2_gcc_dir)
-            message(FATAL_ERROR "ps3_add_spu_image: reference-helper JOBBIN_WRAP needs ppu-lv2-gcc.exe dir on wine PATH (set PS3_PPU_LV2_GCC_BIN_DIR env or place at the reference ppu-lv2-gcc.exe dir)")
+            message(FATAL_ERROR "ps3_add_spu_image: reference-helper JOBBIN_WRAP needs the reference ppu-lv2-gcc.exe dir on wine PATH (set PS3_PPU_LV2_GCC_BIN_DIR env)")
         endif()
         find_program(PS3_PPU_OBJCOPY
             NAMES "${PS3_PPU_TARGET}-objcopy${_ps3_self_exe}"

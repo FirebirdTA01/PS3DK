@@ -174,3 +174,6 @@ tools/rsx-cg-compiler/docs/KNOWN_ISSUES.md
 tools/rsx-cg-compiler/docs/GENERIC_FP_ARITH_RED_BASELINE.md
 tools/rsx-cg-compiler/docs/GENERIC_VP_ARITH_RED_BASELINE.md
 tools/rsx-cg-compiler/docs/REFERENCE_SAMPLE_EMIT_RED_BASELINE.md
+
+# host-only reference-sample shim wrappers — kept locally, not tracked (independent)
+scripts/install-shim-wrappers.sh
