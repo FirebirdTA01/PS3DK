@@ -413,7 +413,9 @@ private:
 
     void applyOrderingPass()
     {
-        if (profile_ != GeneralProfile::Vertex || program_.instrs.size() < 2)
+        if ((profile_ != GeneralProfile::Vertex &&
+             profile_ != GeneralProfile::Fragment) ||
+            program_.instrs.size() < 2)
             return;
 
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
@@ -455,9 +457,14 @@ private:
             return a.sourceIndex > b.sourceIndex;
         };
 
-        const auto latencyFor = [](const VInstr& vi) {
+        // FP-specific latency deferred until an FP dependency-chain fixture
+        // constrains it.
+        const auto latencyFor = [&](const VInstr& vi) {
             switch (vi.op) {
+            case VOp::Tex:
+                return 4;
             case VOp::Dp4:
+                return 4;
             case VOp::Lg2:
             case VOp::Ex2:
             case VOp::Rcp:
@@ -471,7 +478,6 @@ private:
                 return 2;
             case VOp::Mul:
             case VOp::Mad:
-                return 1;
             case VOp::Mov:
             case VOp::Min:
             case VOp::Max:
@@ -479,13 +485,13 @@ private:
                 return 1;
             case VOp::Add:
                 return 4;
-            case VOp::Tex:
-                return 4;
             }
             return 1;
         };
 
         const auto sourceBankPressure = [&](const VInstr& vi) {
+            if (profile_ == GeneralProfile::Fragment)
+                return std::pair<int, int>{0, 0};
             const int bankA = 0;
             const int bankB = vi.dst.output ? 1 : 0;
             return std::pair<int, int>{bankA, bankB};
@@ -525,7 +531,9 @@ private:
                 Node node;
                 node.index = i;
                 node.readyTime = 0;
-                node.sourceIndex = program_.instrs[i].sourceIndex;
+                node.sourceIndex = profile_ == GeneralProfile::Fragment
+                    ? static_cast<int>(i)
+                    : program_.instrs[i].sourceIndex;
                 const auto [bankA, bankB] = sourceBankPressure(program_.instrs[i]);
                 node.bankA = bankA;
                 node.bankB = bankB;
@@ -582,7 +590,9 @@ private:
                     Node node;
                     node.index = consumer;
                     node.readyTime = readyTime[consumer];
-                    node.sourceIndex = program_.instrs[consumer].sourceIndex;
+                    node.sourceIndex = profile_ == GeneralProfile::Fragment
+                        ? static_cast<int>(consumer)
+                        : program_.instrs[consumer].sourceIndex;
                     const auto [bankA, bankB] = sourceBankPressure(program_.instrs[consumer]);
                     node.bankA = bankA;
                     node.bankB = bankB;
@@ -2021,6 +2031,11 @@ private:
                     continue;
                 if (directInputs.find(src.index) != directInputs.end())
                     continue;
+                if (profile_ == GeneralProfile::Fragment &&
+                    vi.op == VOp::Mad &&
+                    isHalfPrecisionFragmentInput(src)) {
+                    continue;
+                }
 
                 VInstr mov;
                 mov.op = VOp::Mov;
@@ -2148,6 +2163,10 @@ private:
 
         std::vector<int> freeList;
         int nextPhys = 0;
+        // FP uses the same def-order identity as VP (reverse virtual-order
+        // assignment, just across the 4-register fragment bank).
+        if (profile_ == GeneralProfile::Fragment)
+            nextPhys = static_cast<int>(defs.size()) - 1;
         for (size_t i = 0; i < program_.instrs.size(); ++i) {
             VInstr& vi = program_.instrs[i];
             for (VSrc& src : vi.srcs) {
@@ -2173,7 +2192,7 @@ private:
                                    !src.fp16 &&
                                    !vi.dst.fp16 &&
                                    lastUse[src.index] == i &&
-                                   program_.vregToPhys.find(src.index) != program_.vregToPhys.end();
+                       program_.vregToPhys.find(src.index) != program_.vregToPhys.end();
                         });
                     if (reusableSrc != vi.srcs.end()) {
                         phys = program_.vregToPhys[reusableSrc->index];
@@ -2183,7 +2202,11 @@ private:
                     } else {
                         // FP H registers have their own index space but alias
                         // full R slots in pairs: H0/H1 -> R0, H2/H3 -> R1.
-                        phys = vi.dst.fp16 ? (nextPhys++ << 1) : nextPhys++;
+                        if (profile_ == GeneralProfile::Fragment) {
+                            phys = vi.dst.fp16 ? (nextPhys-- << 1) : nextPhys--;
+                        } else {
+                            phys = vi.dst.fp16 ? (nextPhys++ << 1) : nextPhys++;
+                        }
                     }
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
