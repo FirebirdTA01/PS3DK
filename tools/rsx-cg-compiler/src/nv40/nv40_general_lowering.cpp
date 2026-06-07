@@ -2007,8 +2007,8 @@ private:
             const bool forceFpInputPreload =
                 profile_ == GeneralProfile::Fragment && vi.op == VOp::Mad &&
                 !inputs.empty();
-            if (inputs.size() <= 1 && !forceFpInputPreload &&
-                inlineConstPositions.size() <= 1) {
+            const bool needsInlineConstPreload = inlineConstPositions.size() > 1;
+            if (!forceFpInputPreload && !needsInlineConstPreload) {
                 shaped.push_back(vi);
                 continue;
             }
