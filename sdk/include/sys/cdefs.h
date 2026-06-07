@@ -20,6 +20,15 @@
 
 #include_next <sys/cdefs.h>
 
+/* Defense-in-depth: a duplicate copy of this wrapper earlier on the include path
+   would make this #include_next resolve to the (skipped) duplicate instead of
+   the real <sys/cdefs.h>, dropping newlib's _ATTRIBUTE / __BEGIN_DECLS et al.
+   Gated on the PS3 PPU target macro (GCC-only build); excluded under __clang__
+   (clangd cannot model the -isystem #include_next ordering). Inert under host/IDE. */
+#if defined(__lv2ppu__) && !defined(__clang__) && !defined(_SYS_CDEFS_H_)
+# error "PS3DK <sys/cdefs.h> wrapper: real <sys/cdefs.h> not reached (a duplicate wrapper copy shadowed it); keep only one copy of the PS3DK wrapper headers on the include path."
+#endif
+
 #ifdef __cplusplus
 # ifndef CDECL_BEGIN
 #  define CDECL_BEGIN          extern "C" {
