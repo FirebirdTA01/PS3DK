@@ -486,8 +486,9 @@ private:
         };
 
         const auto sourceBankPressure = [&](const VInstr& vi) {
-            (void)vi;
-            return std::pair<int, int>{0, 0};
+            const int bankA = 0;
+            const int bankB = vi.dst.output ? 1 : 0;
+            return std::pair<int, int>{bankA, bankB};
         };
 
         const size_t n = program_.instrs.size();
