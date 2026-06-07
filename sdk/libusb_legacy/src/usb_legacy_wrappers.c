@@ -2,7 +2,7 @@
  *
  * PSL1GHT-compatible usb* → cellUsbd* thin forwarders.
  *
- * The the reference SDK ABI surface uses cellUsbd* names; PSL1GHT homebrew
+ * The reference SDK ABI surface uses cellUsbd* names; PSL1GHT homebrew
  * uses the shorter usb* names with some Ex-renames.  Each wrapper
  * here is a one-line call into the corresponding nidgen-generated
  * cellUsbd* stub.  35 entry points total:

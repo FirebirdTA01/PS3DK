@@ -2,7 +2,7 @@
  *
  * Independent header authored from the USB 2.0 specification (Chapter 9,
  * USB Device Framework).  These are public USB-IF constants, not
- * proprietary.  The the reference SDK ABI uses these struct layouts for its
+ * proprietary.  The reference SDK ABI uses these struct layouts for its
  * libusbd entry points.
  */
 #ifndef __PS3DK_CELL_USBD_USB_H__

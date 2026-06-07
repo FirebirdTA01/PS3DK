@@ -32,7 +32,7 @@
   Function-level mapping notes:
 
   - cellGcmInit(cmd, io, ioAddr) wraps gcmInitBody(&gGcmContext, ...).
-    The the reference SDK flavour returns int32_t; PSL1GHT's returns s32; same width.
+    The reference SDK flavour returns int32_t; PSL1GHT's returns s32; same width.
   - cellGcmAddressToOffset / cellGcmIoOffsetToAddress / cellGcmGetConfiguration
     / cellGcmGetTiledPitchSize / cellGcmMapMainMemory /
     cellGcmMapEaIoAddress / cellGcmUnmapIoAddress /
@@ -331,7 +331,7 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
                             zCullDir, zCullFormat, sFunc, sRef, sMask);
 }
 
-/* The the reference SDK "current context" global.  PSL1GHT exposes gGcmContext
+/* The reference SDK "current context" global.  PSL1GHT exposes gGcmContext
  * under the same semantics; we re-bind via #define so user-side
  * l-value uses (gCellGcmCurrentContext->current = ..., etc.) and
  * rvalue reads both resolve to PSL1GHT's actual storage.  No
@@ -500,7 +500,7 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  * (1) cellGcmSetFlip(ctx, id)  - synchronous, in-stream flip.
  *     Embeds a FLIP_COMMAND directly into the GPU command buffer.
  *     The RSX swaps the displayed buffer when it processes the
- *     command.  No queue, no PPU/GPU handshake.  The the reference SDK
+ *     command.  No queue, no PPU/GPU handshake.  The reference SDK
  *     documents the API but **does not use it in any sample**, and
  *     PSL1GHT samples don't either.
  *
@@ -691,7 +691,7 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
  * preserve that. */
 #include <cell/gcm/gcm_command_c.h>
 
-/* The the reference SDK wraps the public libgcm API in the cell::Gcm C++
+/* The reference SDK wraps the public libgcm API in the cell::Gcm C++
  * namespace; our C-side surface already lives at global scope, so an
  * empty namespace is enough to let `using namespace cell::Gcm;`
  * compile without affecting name lookup.

@@ -160,7 +160,7 @@ int32_t cellUsbdFreeMemory(void *ptr);
 /* ---- Convenience macros — standard control transfers ------------
  *
  * These use GNU statement-expression syntax (({ ... })) and require
- * a GNU-mode compiler (-std=gnu11 / -std=gnu++17).  The the reference SDK
+ * a GNU-mode compiler (-std=gnu11 / -std=gnu++17).  The reference SDK
  * ABI populates a UsbDeviceRequest on the stack and calls
  * cellUsbdControlTransfer. */
 

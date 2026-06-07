@@ -191,7 +191,7 @@ extern "C" {
 #define CELL_GCM_SURFACE_Z16             GCM_SURFACE_ZETA_Z16
 #define CELL_GCM_SURFACE_Z24S8           GCM_SURFACE_ZETA_Z24S8
 
-/* Surface addressing mode.  The the reference SDK calls the row-major layout "PITCH";
+/* Surface addressing mode.  The reference SDK calls the row-major layout "PITCH";
  * PSL1GHT exposes it as TYPE_LINEAR.  Semantics identical. */
 #define CELL_GCM_SURFACE_PITCH           GCM_SURFACE_TYPE_LINEAR
 #define CELL_GCM_SURFACE_SWIZZLE         GCM_SURFACE_TYPE_SWIZZLE

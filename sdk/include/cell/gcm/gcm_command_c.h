@@ -462,7 +462,7 @@ static inline void cellGcmSetVertexDataArray(CellGcmContextData *thisContext,
                                              uint8_t type, uint8_t location,
                                              uint32_t offset)
 {
-	/* The the reference SDK and PSL1GHT agree on the param set but order args differently.
+	/* The reference SDK and PSL1GHT agree on the param set but order args differently.
 	 * the reference SDK: (index, freq, stride, size, type, location, offset)
 	 * PSL1GHT:  (attr, freq, offset, stride, elems, dtype, location) */
 	rsxBindVertexArrayAttrib(thisContext, index, frequency, offset,
