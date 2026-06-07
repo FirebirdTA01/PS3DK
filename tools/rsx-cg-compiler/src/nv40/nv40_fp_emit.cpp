@@ -7732,7 +7732,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 }
 
                 // FP uniform consumed directly (MOV R_out, uniform).
-                // The reference compiler pattern:
+                // Reference compiler pattern:
                 //   FENCBR ;
                 //   MOVR R_out, c[inline] ;
                 //   <16 bytes zero-initialised — runtime patches>
