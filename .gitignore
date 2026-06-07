@@ -168,3 +168,9 @@ desktop.ini
 /CLAUDE.md
 /QWEN.md
 
+
+# developer baselines / known-issues — kept locally, never tracked/public (independent)
+tools/rsx-cg-compiler/docs/KNOWN_ISSUES.md
+tools/rsx-cg-compiler/docs/GENERIC_FP_ARITH_RED_BASELINE.md
+tools/rsx-cg-compiler/docs/GENERIC_VP_ARITH_RED_BASELINE.md
+tools/rsx-cg-compiler/docs/REFERENCE_SAMPLE_EMIT_RED_BASELINE.md
