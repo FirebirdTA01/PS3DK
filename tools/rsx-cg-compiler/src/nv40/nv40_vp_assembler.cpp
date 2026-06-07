@@ -127,8 +127,7 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         case NVFXSR_CONST:
             // CONST_SRC is a 9-bit field at bits 12..20 of hw[1] (not 8 as
             // the PSL1GHT-ported header suggests — the reference compiler writes the full
-            // absolute c[] register index here, 0..511).  See
-            // docs/REVERSE_ENGINEERING.md for the encoding walkthrough.
+            // absolute c[] register index here, 0..511).
             sr |= (NVFX_VP(SRC_REG_TYPE_CONST) << NVFX_VP(SRC_REG_TYPE_SHIFT));
             hw[1] |= (static_cast<uint32_t>(src.reg.index) & 0x1FF)
                      << NV40_VP_INST_CONST_SRC_SHIFT;

@@ -7,7 +7,7 @@
   with `-lsysutil_ap_stub` and the loader resolves against the
   cellSysutilAp SPRX module at runtime.
 
-  FNIDs (verified against the reference SDK/.../libsysutil_ap_stub.a
+  FNIDs (verified against known PS3 library exports
   and tools/nidgen/nids/extracted/libsysutil_ap_stub.yaml):
     cellSysutilApGetRequiredMemSize  0x9e67e0dd
     cellSysutilApOn                  0x3343824c

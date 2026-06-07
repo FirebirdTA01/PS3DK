@@ -113,7 +113,7 @@ struct IoBinding
     int         semanticIndex = 0;
 };
 
-// Placement chosen for each uniform global.  See REVERSE_ENGINEERING.md:
+// Placement chosen for each uniform global:
 // the reference compiler grows matrices up from c[256] and scalars/vectors down from c[467].
 struct ConstBinding
 {

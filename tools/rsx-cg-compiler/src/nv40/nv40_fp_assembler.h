@@ -10,17 +10,15 @@
  * 1.  Fragment ucode is stored HALFWORD-SWAPPED on disk relative to
  *     the NVFX_FP_OP_* bit layout.  This class keeps its internal
  *     buffer in *logical* form (matching nvfx_shader.h's NVFX_FP_OP_*
- *     defines) and applies the swap in `words()`.  See
- *     docs/REVERSE_ENGINEERING.md "Fragment profile" section.
+ *     defines) and applies the swap in `words()`.
  *
  * 2.  Inputs are read via a per-instruction INPUT_SRC field in hw[0]
  *     rather than per-source-slot register IDs.  An FP instruction
  *     can therefore have at most one INPUT-bank source.
  *
  * Field packing is ported from PSL1GHT cgcomp/source/compilerfp.cpp's
- * emit_insn / emit_dst / emit_src — see REVERSE_ENGINEERING.md for the
- * delta against the reference compiler (notably the unconditional 0x7fc << 19 default
- * on hw[3] for any varying-input read).
+ * emit_insn / emit_dst / emit_src — the unconditional 0x7fc << 19 default
+ * on hw[3] for any varying-input read is one notable difference.
  */
 
 #include <cstdint>

@@ -13,7 +13,7 @@
   <sys/sem.h>.  Wrappers can be added here as the next sample needs
   them.
 
-  Syscall numbers verified against the reference SDK/.../sys/syscall.h:
+  Syscall numbers verified against the PS3 firmware syscall table:
     SYS_EVENT_FLAG_CREATE     82
     SYS_EVENT_FLAG_DESTROY    83
     SYS_EVENT_FLAG_WAIT       85

@@ -310,8 +310,7 @@ VpContainerResult emitVertexContainerImpl(
     };
 
     // Mirror VP allocator: matrices grow from c[256] upward, scalars
-    // from c[467] downward.  See REVERSE_ENGINEERING.md "Const-register
-    // allocation" — same algorithm runs inside lowerVertexProgram.
+    // from c[467] downward.  Same algorithm runs inside lowerVertexProgram.
     int nextMatrixReg = 256;
     int nextVectorReg = 467;
 

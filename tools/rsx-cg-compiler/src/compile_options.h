@@ -114,7 +114,7 @@ constexpr bool atLeast(OptLevel have, OptLevel want)
 
 inline CompileOptions defaultOptions()
 {
-    return CompileOptions{};  // all fields already the reference compiler-default
+    return CompileOptions{};  // all fields already the reference compiler default
 }
 
 }  // namespace rsx_cg

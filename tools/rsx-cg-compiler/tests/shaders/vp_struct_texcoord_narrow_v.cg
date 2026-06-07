@@ -1,5 +1,5 @@
 // Struct-I/O vertex shader with implicit vector narrowing.  The
-// reference compiler accepts assigning a float4 source into a float2
+// expected lowering accepts assigning a float4 source into a float2
 // TEX0 output by truncating to xy; this is a frontend prerequisite for
 // several reference samples.
 struct Vin

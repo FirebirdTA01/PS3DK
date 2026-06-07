@@ -207,7 +207,7 @@ void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
         // the reference compiler's default for hw[3] when reading any varying:
         // (0x7fc << ADDR_INDEX_SHIFT) | (disable_pc << 31).
         // PSL1GHT only sets this for TC inputs, but the reference compiler applies it
-        // unconditionally — see REVERSE_ENGINEERING.md.
+        // unconditionally.
         hw[3] |= ((static_cast<uint32_t>(insn.disable_pc) << NV40_FP_OP_DISABLE_PC_SHIFT) |
                   (0x7fcu << NV40_FP_OP_ADDR_INDEX_SHIFT));
         break;

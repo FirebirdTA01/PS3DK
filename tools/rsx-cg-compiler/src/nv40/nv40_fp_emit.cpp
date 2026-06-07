@@ -3563,8 +3563,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // with the LAST link writing R0.  The LHS-promote
                 // register is H0 when N is even (first dst is R1,
                 // R0 not touched until link 2) or H2 when N is odd
-                // (first dst is R0, would alias H0).  See KNOWN_ISSUES
-                // for the no-FENCBR / preload-displaced register case.
+                // (first dst is R0, would alias H0).  The no-FENCBR /
+                // preload-displaced register case is handled separately.
                 auto pcIt = valueToPredCarry.find(srcId);
                 if (pcIt != valueToPredCarry.end())
                 {
