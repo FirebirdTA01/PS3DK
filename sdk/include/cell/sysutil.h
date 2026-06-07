@@ -18,7 +18,7 @@
       in their own the reference SDK sub-headers and each wants a matching
       forwarder (cell/msg_dialog.h, cell/save_data.h, ...).  Pattern
       is the same as here.
-    - cellSysutilGetSystemParam{Int,String} — wait on a independent
+    - cellSysutilGetSystemParam{Int,String} — wait on an independent
       match of the reference param-ID enum before forwarding.
 */
 

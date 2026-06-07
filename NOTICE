@@ -64,7 +64,7 @@ NVIDIA NV_fragment_program reference
 ------------------------------------
 Fragment shader assembler is an implementation based on publicly documented 
 NVIDIA NV_fragment_program OpenGL extensions and the Nouveau project's 
-derived Mesa drivers. No NVIDIA proprietary source code is used. 
+the open-source Mesa/nouveau drivers. No NVIDIA proprietary source code is used. 
 This comes from PSL1GHT in the form of cgcomp and is planned for deprecation 
 and removal once a replacement is ready.
 

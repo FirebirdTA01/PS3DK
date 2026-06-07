@@ -283,7 +283,7 @@ build_openssl() {
     #
     # We DO NOT pass no-deprecated: PSL1GHT's make_self.c uses
     # AES_encrypt() and the legacy CRYPTO_* surface, both pre-3.x APIs.
-    # Stripping deprecated symbols would force a independent rewrite.
+    # Stripping deprecated symbols would force an independent rewrite.
     #
     # `make install_sw` is the canonical static-lib install target but it
     # transitively builds apps/openssl.exe (broken above) — we just copy

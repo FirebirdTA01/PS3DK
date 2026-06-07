@@ -388,7 +388,7 @@ Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub 
 
 ### Optional: rsx-cg-compiler (experimental)
 
-`tools/rsx-cg-compiler/` is a independent Cg → RSX (NV40) shader compiler we're growing as an eventual drop-in replacement for PSL1GHT's `cgcomp`.
+`tools/rsx-cg-compiler/` is an independent Cg → RSX (NV40) shader compiler we're growing as an eventual drop-in replacement for PSL1GHT's `cgcomp`.
 
 **It is experimental and growing.** The byte-diff harness covers vertex passthrough, MVP transforms, struct-flattened VP inputs, file-scope `: register(CN)` uniforms, FP arithmetic and MAD fusion, precision modifiers, texture ops, select/if-conversion, SFU unary intrinsics, constant folding, and FP tex-LHS write-back. Open gaps include loop lowering. For production shader builds the recommendation is still PSL1GHT's `cgcomp` until the loop work lands; the `hello-ppu-cellgcm-triangle` sample can opt into our compiler with `make USE_RSX_CG_COMPILER=1`.
 

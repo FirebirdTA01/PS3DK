@@ -4,7 +4,7 @@
   Predecessor to libsysutil_avc2.  Provides a system-managed chat
   panel with NP-room-backed voice/video sessions.  Stripped from
   475-era reference headers; signatures and types reproduced from
-  derived RPCS3 stubs (rpcs3/Emu/Cell/Modules/cellSysutilAvc.{h,cpp}),
+  RPCS3 stubs (rpcs3/Emu/Cell/Modules/cellSysutilAvc.{h,cpp}),
   which is the only available source.  Capitalisation normalised to
   the `CellSysutil*` form Sony uses everywhere else (RPCS3 mixes
   `Sysutil` and `SysUtil` between adjacent typedefs).

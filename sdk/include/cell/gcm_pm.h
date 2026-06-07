@@ -3,7 +3,7 @@
 
   This header intentionally exposes only the API shape needed by source that
   includes <cell/gcm_pm.h>.  Per-domain hardware event IDs are not shipped here
-  until they can be sourced through a independent public reference.
+  until they can be sourced through an independent public reference.
 */
 
 #ifndef __PS3TC_CELL_GCM_PM_H__
