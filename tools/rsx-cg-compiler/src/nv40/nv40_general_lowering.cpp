@@ -2515,6 +2515,23 @@ static void recordFpUniformOffset(FpAttributes& attrs,
     }
 }
 
+static bool fpProducerNeedsFenctr(VOp op)
+{
+    switch (op) {
+    case VOp::Tex:
+    case VOp::Rcp:
+    case VOp::Rsq:
+    case VOp::Sin:
+    case VOp::Cos:
+    case VOp::Lg2:
+    case VOp::Ex2:
+    case VOp::DivSqrt:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                                        const IRFunction& entry,
                                        FpAttributes* attrsOut)
@@ -2524,6 +2541,27 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     FpAttributes attrs;
     populateReferencedParams(entry, attrs);
     seedFpEmbeddedUniforms(entry, attrs);
+    std::unordered_map<int, VOp> tempProducerOp;
+    for (const VInstr& vi : program.instrs) {
+        if (!vi.dst.none && !vi.dst.output)
+            tempProducerOp[vi.dst.index] = vi.op;
+    }
+
+    const auto emitFenceForSources = [&](const std::array<VSrc, 3>& srcs) {
+        const bool needsCtr = std::any_of(srcs.begin(), srcs.end(),
+            [&](const VSrc& src) {
+                if (src.kind != VSrcKind::Temp)
+                    return false;
+                const auto it = tempProducerOp.find(src.index);
+                return it != tempProducerOp.end() &&
+                       fpProducerNeedsFenctr(it->second);
+            });
+        if (needsCtr)
+            asm_.emitFenctr();
+        else
+            asm_.emitFencbr();
+    };
+
     bool emittedInstruction = false;
     for (const VInstr& vi : program.instrs) {
         std::string why;
@@ -2556,8 +2594,8 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         std::array<VSrc, 3> srcs = vi.srcs;
         // Match the reference compiler's inline-constant canonicalization:
         // MOV keeps const at operand 0, ADD/MUL prefer operand 1, and
-        // MAD keeps the addend at operand 2.  FENCBR placement depends
-        // on the canonical operand position, so keep these together.
+        // MAD keeps the addend at operand 2.  Fence selection depends on
+        // the producer class of the live temp sources, so keep these together.
         if (vi.op == VOp::Add &&
             srcs[1].kind == VSrcKind::Uniform && srcs[1].neg)
             std::swap(srcs[0], srcs[1]);
@@ -2574,15 +2612,14 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                    src.kind == VSrcKind::Literal;
         };
         // Locked const-FENC rule: direct MOV-to-output folds an inline const
-        // into the prologue FENCBR carrier (RE-confirmed).  A 3-source MAD
-        // with any inline const needs the inter-instruction fence
-        // (byte-validated hazard).  MOV-to-temp and 2-source ADD/MUL do not.
+        // into the prologue fence carrier (RE-confirmed).  The fence type is
+        // chosen from the producer class of the live temp sources.
         if (vi.op == VOp::Mov && vi.dst.output &&
             std::any_of(srcs.begin(), srcs.end(), isInlineConst))
-            asm_.emitFencbr();
+            emitFenceForSources(srcs);
         if (emittedInstruction && vi.op == VOp::Mad &&
             std::any_of(srcs.begin(), srcs.end(), isInlineConst))
-            asm_.emitFencbr();
+            emitFenceForSources(srcs);
         if (vi.stubFenceBefore)
             asm_.emitFenctr();
         if (vi.stubFenceBrBefore)
