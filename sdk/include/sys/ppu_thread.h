@@ -6,7 +6,7 @@
  * exposes as sysThread*.  A thin alias layer gives callers the
  * the reference SDK identifiers without changing the runtime.
  *
- * The stack-info struct ships with the the reference SDK `pst_addr` / `pst_size`
+ * The stack-info struct ships with the reference SDK `pst_addr` / `pst_size`
  * field names and a static_assert proves it remains layout-compatible
  * with `sys_ppu_thread_stack_t` as declared in <sys/thread.h> — the
  * wrapper that calls sysThreadGetStackInformation can therefore pass

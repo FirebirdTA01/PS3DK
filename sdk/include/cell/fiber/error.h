@@ -1,7 +1,7 @@
 /* cell/fiber/error.h - libfiber error codes.
  *
  * Independent header.  CELL_FIBER_ERROR_* constants encode the
- * module-relative error numbers the the reference SDK ABI requires.
+ * module-relative error numbers the reference SDK ABI requires.
  */
 #ifndef __PS3DK_CELL_FIBER_ERROR_H__
 #define __PS3DK_CELL_FIBER_ERROR_H__

@@ -1,7 +1,7 @@
 /*
  * hello-ppu-usbd — libusbd bring-up validation test.
  *
- * Exercises the PPU libusbd surface end-to-end through the the reference SDK
+ * Exercises the PPU libusbd surface end-to-end through the reference SDK
  * surface in <cell/usbd.h>:
  *
  *   1. cellSysmoduleLoadModule(CELL_SYSMODULE_USBD)

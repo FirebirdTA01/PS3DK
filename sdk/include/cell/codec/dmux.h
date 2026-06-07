@@ -3,7 +3,7 @@
  * Independent header.  cellDmux demuxes PAMF (and other container)
  * streams into elementary streams, delivering access units via
  * callback.  This header declares all 20 cellDmux* entry points plus
- * the structs, enums, and callback typedefs the the reference SDK ABI requires.
+ * the structs, enums, and callback typedefs the reference SDK ABI requires.
  *
  * Handles are typed as uint32_t — the SPRX writes a 4-byte EA into
  * *handle during create, so LP64 callers must not interpret them as

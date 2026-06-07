@@ -500,7 +500,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, FpReflectBinding> valueToReflect;
 
-    // `refract(I, N, eta)` — currently matched to the the reference compiler Water
+    // `refract(I, N, eta)` — currently matched to the reference compiler Water
     // literal shape (`eta = 1 / 1.33`) and emitted from the captured
     // byte-exact FP sequence.  This covers the common
     // `float4(refract(I, N, eta), 1.0)` form while the special 0x3b
@@ -10918,7 +10918,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     out.ok    = true;
 
     // Finalise FP attributes from assembler state.  registerCount stays
-    // at the the reference compiler minimum of 2 unless the program actually allocates
+    // at the reference compiler minimum of 2 unless the program actually allocates
     // more full-precision temps.  fp16 H registers pack two per hw slot
     // (H0/H1→R0, H2/H3→R1, …) and are tracked correctly by emitDst.
     const int regs = asm_.numTempRegs();

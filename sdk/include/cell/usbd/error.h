@@ -1,7 +1,7 @@
 /* cell/usbd/error.h - libusbd error codes.
  *
  * Independent header.  CELL_USBD_ERROR_* constants encode the
- * module-relative error numbers the the reference SDK ABI requires.
+ * module-relative error numbers the reference SDK ABI requires.
  */
 #ifndef __PS3DK_CELL_USBD_ERROR_H__
 #define __PS3DK_CELL_USBD_ERROR_H__

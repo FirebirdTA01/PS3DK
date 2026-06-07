@@ -2,7 +2,7 @@
  *
  * Pure macro header with no runtime dependencies.  CELL_OK is the
  * canonical success code (0); CELL_STATUS_IS_FAILURE / _IS_SUCCESS
- * test the top bit convention used across the the reference SDK family.
+ * test the top bit convention used across the reference SDK family.
  */
 #ifndef PS3DK_CELLSTATUS_H
 #define PS3DK_CELLSTATUS_H

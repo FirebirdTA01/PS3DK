@@ -9,7 +9,7 @@
  * SetXVColor / SetupDisplay resolve through libsysutil_avconf_ext_stub.a
  * (cellSysutilAvconfExt module).
  *
- * This header is the authoritative source for the the reference SDK video-out
+ * This header is the authoritative source for the reference SDK video-out
  * type and constant namespace.  The sysutil/sysutil_sysparam.h alias
  * re-exports it for the reference SDK sample code that includes only the
  * sysutil path.

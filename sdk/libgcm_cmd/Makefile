@@ -34,7 +34,7 @@ OBJS     := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 # Absorbed rsx emitters (source-level snapshot of PSL1GHT's librsx,
 # MIT-licensed — see src/rsx_legacy/LICENSE).  These land in the same
-# libgcm_cmd.a so samples drop -lrsx and match the the reference SDK's layout
+# libgcm_cmd.a so samples drop -lrsx and match the reference SDK's layout
 # (one libgcm_cmd.a, no separate rsx library).
 LEGACY_DIR  := $(SRC_DIR)/rsx_legacy
 LEGACY_SRCS := $(wildcard $(LEGACY_DIR)/*.c)

@@ -69,7 +69,7 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 ## lv2/
 
 lv2 syscall-layer primitives: threading, synchronisation, event flags,
-timers.  These samples use the the reference SDK-name sync compat headers
+timers.  These samples use the reference SDK-name sync compat headers
 (`<sys/synchronization.h>`, `<sys/ppu_thread.h>`, `<sys/time_util.h>`,
 `<sys/lv2_syscall.h>`) over our own / PSL1GHT's lv2 syscall surface.
 The `hello-event-flag-spu` sample additionally pulls in our

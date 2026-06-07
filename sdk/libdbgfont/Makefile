@@ -1,6 +1,6 @@
 # sdk/libdbgfont/Makefile
 #
-# Builds libdbgfont.a — tier-2 on-screen renderer for the the reference SDK
+# Builds libdbgfont.a — tier-2 on-screen renderer for the reference SDK
 # cellDbgFont* API (see sdk/include/cell/dbgfont.h).  Renders text via
 # NV40 using a compiled vertex + fragment shader pair over a 128x128
 # 8-bit font atlas.

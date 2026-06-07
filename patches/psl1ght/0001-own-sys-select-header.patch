@@ -1,14 +1,14 @@
-Subject: [PATCH] ppu/include: PSL1GHT owns <sys/select.h>, matches the the reference SDK ABI
+Subject: [PATCH] ppu/include: PSL1GHT owns <sys/select.h>, matches the reference SDK ABI
 
 On PS3, select() is not a BSD file-descriptor call — the PS3 kernel has
 no file-descriptor select.  The only selectable thing is a sys_net
-socket, via sys_net_bnet_select.  the reference the reference SDK ships <sys/select.h>
+socket, via sys_net_bnet_select.  the reference SDK ships <sys/select.h>
 with:
 
   * FD_SETSIZE = 1024        (a 128-byte fd_set struct)
   * typedef unsigned int fd_mask
   * struct fd_set { fd_mask fds_bits[FD_SETSIZE/32]; }
-  * canonical function name: socketselect() — the the reference SDK never declares
+  * canonical function name: socketselect() — the reference SDK never declares
     select(), so no name collision with any other libc
 
 PSL1GHT historically shipped a one-line <sys/select.h> shim that
@@ -19,12 +19,12 @@ transitively.  Newlib 4.4 does pull it under __BSD_VISIBLE, so the
 shim re-entered <signal.h> before sys/types.h had finished declaring
 pid_t and every TU compiling against PSL1GHT broke at crt1.c.
 
-Cross-checked against target/ppu/include/sys/select.h in the the reference SDK
-3.55-4.75-era coverage reference.  This patch matches that layout exactly,
+Cross-checked against target/ppu/include/sys/select.h in the reference SDK
+coverage reference set.  This patch matches that layout exactly,
 including the use of fds_bits (no underscore prefix) as the struct
 member and the NFDBITS_SHIFT/NFDBITS_MASK pair, so that:
 
-  * code written against the official SDK compiles unchanged against
+  * code written against the reference SDK compiles unchanged against
     PSL1GHT, and
   * the on-wire fd_set passed to sys_net_bnet_select is the same
     struct the kernel expects.
@@ -35,7 +35,7 @@ link.  Declarations for both names live in <sys/select.h>.  The alias
 itself is added in a follow-up patch touching libnet/socket.c.
 
 pselect() was declared but never implemented in PSL1GHT (no backing
-syscall in sys_net), and the the reference SDK does not ship it.  Dropped from the
+syscall in sys_net), and the reference SDK does not ship it.  Dropped from the
 header; any caller was linking-broken before this patch anyway.
 
 FD_SETSIZE bump from the old effective 64 (inherited from newlib
@@ -53,8 +53,8 @@ diff --git a/ppu/include/sys/select.h b/ppu/include/sys/select.h
 +/*
 + * PSL1GHT <sys/select.h> — the PS3 sys_net select header.
 + *
-+ * Layout matches reference the reference SDK target/ppu/include/sys/select.h so
-+ * that code written against the official SDK and the on-wire struct
++ * Layout matches the reference SDK target/ppu/include/sys/select.h so
++ * that code written against the reference SDK and the on-wire struct
 + * passed to sys_net_bnet_select are both identical.
 + *
 + * The PS3 kernel has no file-descriptor select; only sys_net socket
@@ -100,7 +100,7 @@ diff --git a/ppu/include/sys/select.h b/ppu/include/sys/select.h
 +} while (0)
 +
 +/*
-+ * the canonical the reference SDK name.  New code should call this.
++ * the canonical reference SDK name.  New code should call this.
 + */
 +int socketselect(int nfds, fd_set *readfds, fd_set *writefds,
 +                 fd_set *exceptfds, struct timeval *timeout);
@@ -109,7 +109,7 @@ diff --git a/ppu/include/sys/select.h b/ppu/include/sys/select.h
 + * Back-compat alias for existing PSL1GHT homebrew.  libnet exports
 + * select() as a weak alias of socketselect() (see ppu/sprx/libnet/
 + * socket.c) so that legacy sources continue to link.  New code should
-+ * prefer socketselect() to stay symmetric with the reference the reference SDK.
++ * prefer socketselect() to stay symmetric with the reference SDK.
 + */
 +int select(int nfds, fd_set *readfds, fd_set *writefds,
 +           fd_set *exceptfds, struct timeval *timeout);
@@ -162,7 +162,7 @@ diff --git a/ppu/include/net/select.h b/ppu/include/net/select.h
 +/*
 + * Back-compat forwarder.  PSL1GHT internal code has historically
 + * included <net/select.h>; the real definitions now live in
-+ * <sys/select.h> to match reference the reference SDK (and to avoid redefining
++ * <sys/select.h> to match the reference SDK (and to avoid redefining
 + * fd_set via a macro dance that conflicts with newlib).
 + */
 +#ifndef __SELECT_H__

@@ -85,7 +85,7 @@ extern "C" {
 #define CELL_GCM_PRIMITIVE_POLYGON       GCM_TYPE_POLYGON
 
 /* Vertex-attribute element type (cellGcmSetVertexDataArray).  PSL1GHT
- * only exposes a subset (U8, F32); the the reference SDK's extra tags (S1, SF,
+ * only exposes a subset (U8, F32); the reference SDK's extra tags (S1, SF,
  * CMP, S32K, UB256) land when we own rsx/gcm_sys.h — for now we only
  * alias what the runtime can actually handle. */
 #define CELL_GCM_VERTEX_UB               GCM_VERTEX_DATA_TYPE_U8
@@ -147,9 +147,9 @@ extern "C" {
 #define CELL_GCM_ERROR_NOT_SUPPORTED            0x802b0003
 #define CELL_GCM_SURFACE_LINEAR_ALIGN_OFFSET       GCM_SURFACE_LINEAR_ALIGN_OFFSET
 
-/* Texture remap field helper — the the reference SDK builds the u32 remap value
+/* Texture remap field helper — the reference SDK builds the u32 remap value
  * inline via this macro; PSL1GHT exposes individual bit constants and
- * the user assembles them.  Provide the the reference SDK helper verbatim — it
+ * the user assembles them.  Provide the reference SDK helper verbatim — it
  * just packs its nine 2-bit args into the canonical layout. */
 #define CELL_GCM_REMAP_MODE(order, inputA, inputR, inputG, inputB, outputA, outputR, outputG, outputB) \
     (((order) << 16) | ((inputA)) | ((inputR) << 2) | ((inputG) << 4) | \
@@ -187,7 +187,7 @@ extern "C" {
 #define CELL_GCM_SURFACE_F_X16Z16Y16X16  GCM_SURFACE_F_X16Z16Y16X16
 #define CELL_GCM_SURFACE_F_X32           GCM_SURFACE_F_X32
 
-/* Depth/stencil formats — PSL1GHT uses the ZETA infix; the the reference SDK omits it. */
+/* Depth/stencil formats — PSL1GHT uses the ZETA infix; the reference SDK omits it. */
 #define CELL_GCM_SURFACE_Z16             GCM_SURFACE_ZETA_Z16
 #define CELL_GCM_SURFACE_Z24S8           GCM_SURFACE_ZETA_Z24S8
 
@@ -234,7 +234,7 @@ extern "C" {
 #define CELL_GCM_ZCULL_LONES             GCM_ZCULL_LONES
 #define CELL_GCM_SCULL_SFUNC_LESS        GCM_SCULL_SFUNC_LESS
 
-/* Additional flip modes.  HSYNC_WITH_NOISE is the the reference SDK name for what
+/* Additional flip modes.  HSYNC_WITH_NOISE is the reference SDK name for what
  * PSL1GHT calls HSYNC_AND_BREAK_EVERYTHING (both == 3). */
 #define CELL_GCM_DISPLAY_HSYNC_WITH_NOISE  GCM_FLIP_HSYNC_AND_BREAK_EVERYTHING
 

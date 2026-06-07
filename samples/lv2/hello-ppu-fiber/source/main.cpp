@@ -1,7 +1,7 @@
 /*
  * hello-ppu-fiber — libfiber bring-up validation test.
  *
- * Exercises the PPU fiber surface end-to-end through the the reference SDK
+ * Exercises the PPU fiber surface end-to-end through the reference SDK
  * surface in <cell/fiber.h>:
  *
  *   1. cellFiberPpuInitialize          (sysmodule load + SPRX init)

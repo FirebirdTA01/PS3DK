@@ -11,7 +11,7 @@
  * ---- Memory model on PS3 -------------------------------------------
  *
  * The RSX has its own 256 MiB pool of GDDR3 ("RSX local memory")
- * physically separate from main memory.  PSL1GHT and the the reference SDK
+ * physically separate from main memory.  PSL1GHT and the reference SDK
  * both expose it through a single base pointer + size pair returned
  * by cellGcmGetConfiguration:
  *

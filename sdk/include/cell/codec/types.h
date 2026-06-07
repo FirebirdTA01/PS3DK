@@ -1,7 +1,7 @@
 /* cell/codec/types.h — shared types for the codec subsystem.
  *
  * Independent header.  CellCodecTimeStamp is the 64-bit split
- * timestamp the the reference SDK codec ABI uses (upper 32 + lower 32).
+ * timestamp the reference SDK codec ABI uses (upper 32 + lower 32).
  * CellCodecEsFilterId identifies an elementary-stream codec via
  * a two-tier major/minor filter ID with supplemental info.
  */

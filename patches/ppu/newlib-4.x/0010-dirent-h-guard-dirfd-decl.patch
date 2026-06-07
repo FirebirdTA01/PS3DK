@@ -10,7 +10,7 @@ FreeBSD-derived `<dirent.h>` then declares `int dirfd(DIR *);` as a
 plain function prototype.  The preprocessor expands the identifier
 against our macro first, yielding `int ((DIR *)->dd_fd);` — a syntax
 error at the dirent.h include site for any TU that transitively pulls
-it in (observed while building reference the reference SDK
+it in (observed while building reference SDK
 samples/common/gcmutil/snaviutil.cpp against our SDK).
 
 Fix: guard the prototype with `#ifndef dirfd`.  When the macro is

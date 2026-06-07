@@ -9,7 +9,7 @@
   user-defined struct that happens to use the same member name).
 
   Rationale:
-    - Sony's reference SDK (the reference SDK) never defined these macros.
+    - The reference SDK never defined these macros.
     - Newlib 4.4's unconditional #defines made it impossible to
       declare `st_atime` as a struct member without pragma gymnastics
       (see the original patches/psl1ght/0003 push_macro/pop_macro dance).

@@ -369,7 +369,7 @@ retired patches (0025, 0026) that describe the original PSL1GHT
 edits before the fix moved over.
 
 PSL1GHT's struct fields use camelCase (`antiAlias`,
-`resolution`); the the reference SDK sample code writes them lower (`antialias`,
+`resolution`); the reference SDK sample code writes them lower (`antialias`,
 `resolutionId`). The PSL1GHT patches added anonymous unions so
 both names resolve to the same u8; we've since moved that aliasing
 into our own SDK structs (`CellGcmSurface`, `CellVideoOut*`) so

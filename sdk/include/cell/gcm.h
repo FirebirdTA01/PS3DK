@@ -127,7 +127,7 @@ extern void _cellGcmGetConfigurationRaw(CellGcmConfigRaw *raw);
  * cellGcmSetSurface forwarder.
  *
  * Defined here as our own struct (not a typedef of gcmSurface) so we
- * can expose the the reference SDK lower-case `.antialias` alongside PSL1GHT's
+ * can expose the reference SDK lower-case `.antialias` alongside PSL1GHT's
  * `.antiAlias` via an anonymous union without editing PSL1GHT's
  * header. */
 typedef struct _cellGcmSurface {
@@ -150,7 +150,7 @@ typedef struct _cellGcmSurface {
 } CellGcmSurface;
 
 /* CellGcmTexture is layout-compatible with PSL1GHT's gcmTexture, but
- * exposes both the rsx `. _pad` spelling and the the reference SDK `. _padding`
+ * exposes both the rsx `. _pad` spelling and the reference SDK `. _padding`
  * spelling used by samples/common/gcmutil. */
 typedef struct CellGcmTexture {
     uint8_t  format;

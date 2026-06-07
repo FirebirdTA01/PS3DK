@@ -5,7 +5,7 @@
  * command emitter shipped under gcm_command_c.h, add a sibling
  * overload without the leading CellGcmContextData* argument that
  * forwards the call through gCellGcmCurrentContext.  Matches
- * the the reference SDK no-context convention so unmodified the reference SDK sample
+ * the reference SDK no-context convention so unmodified the reference SDK sample
  * code compiles against our SDK.
  *
  * Regenerate with the sdk build system if gcm_command_c.h's

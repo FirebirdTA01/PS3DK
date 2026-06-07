@@ -49,7 +49,7 @@ extern "C" {
 
 /* ============================================================
  * Sizes, enums, constants.  Values paraphrased from the reference SDK
- * the reference SDK sysutil_savedata.h; the bit positions and numeric
+ * sysutil_savedata.h; the bit positions and numeric
  * values match bit-for-bit (verified against PSL1GHT's
  * SYS_SAVE_* set where they overlap).
  * ============================================================ */

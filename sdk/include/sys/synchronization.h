@@ -88,7 +88,7 @@ typedef u64 sys_ipc_key_t;
 
 typedef u32 sys_event_flag_t;
 
-/* Layout matches Sony's reference SDK the reference SDK sys/synchronization.h
+/* Layout matches the reference SDK sys/synchronization.h
  * exactly: 32 bytes (4 + 4 + 8 + 4 + 4 + 8).  RPCS3's
  * sys_event_flag_create rejects shorter structs with EINVAL — we
  * verified empirically that the missing pshared/key/flags fields

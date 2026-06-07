@@ -47,7 +47,7 @@
 /* Primary-thread stack-size tags written into the .sys_proc_param
  * header.  These are byte-values the loader interprets as 32K … 1M
  * requests.  Both PSL1GHT's long-standing SPAWN_STACK_SIZE_* names
- * and the the reference SDK PRIMARY_STACK_SIZE_* names resolve to the same
+ * and the reference SDK PRIMARY_STACK_SIZE_* names resolve to the same
  * underlying constants. */
 #define SYS_PROCESS_SPAWN_STACK_SIZE_32K         0x10
 #define SYS_PROCESS_SPAWN_STACK_SIZE_64K         0x20

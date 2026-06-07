@@ -6,7 +6,7 @@
  * that use this API must link `-ldbgfont` in addition to the usual
  * `-lgcm_cmd -lrsx ...` set.
  *
- * Semantics (matches the the reference SDK <cell/dbgfont.h>):
+ * Semantics (matches the reference SDK <cell/dbgfont.h>):
  *
  *   InitGcm(cfg)        Init once per process.  `cfg` describes the
  *                       caller-provided buffer that holds the fragment

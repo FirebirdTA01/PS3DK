@@ -6,7 +6,7 @@ now declares both socketselect() and select() with identical signatures
 This patch makes libnet export both symbols from a single function
 body via an attribute alias, so:
 
-  * the reference SDK-written code calling socketselect() links.
+  * reference-SDK-written code calling socketselect() links.
   * PSL1GHT homebrew calling select() still links.
   * Only one implementation to maintain.
 

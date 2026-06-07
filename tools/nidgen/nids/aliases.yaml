@@ -3,7 +3,7 @@
 # Maps each the reference SDK canonical symbol name (left of colon) to one or more
 # names that our install tree may define and that semantically satisfy the
 # the reference SDK export (right of colon).  coverage-report uses this to count
-# renamed PSL1GHT wrappers as coverage instead of marking the the reference SDK
+# renamed PSL1GHT wrappers as coverage instead of marking the reference SDK
 # name as missing.
 #
 # Rename rules applied by `coverage-report --suggest-aliases`:

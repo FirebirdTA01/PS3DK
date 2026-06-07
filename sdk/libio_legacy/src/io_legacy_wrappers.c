@@ -2,7 +2,7 @@
  * PS3 Custom Toolchain - libio legacy-name compatibility wrappers.
  *
  * Provides the PSL1GHT-flavoured ioPad / ioKb / ioMouse names as thin
- * shims over the the reference SDK cellPad / cellKb / cellMouse NID stubs in our
+ * shims over the reference SDK cellPad / cellKb / cellMouse NID stubs in our
  * nidgen-generated libio_stub archive.  The combined object (nidgen
  * stubs plus these wrappers) is installed as $PS3DK/ppu/lib/libio.a,
  * which shadows PSL1GHT's libio.a at link time so samples pull zero

@@ -31,7 +31,7 @@
     These bind to PSL1GHT's rsxSetVertexProgram / etc. — same forwarder
     pattern, just larger surface.
 
-  Note the the reference SDK spelling "BackEnd" (capital E) vs PSL1GHT's
+  Note the reference SDK spelling "BackEnd" (capital E) vs PSL1GHT's
   "Backend" — preserved exactly so the reference SDK source compiles.
 */
 
@@ -409,7 +409,7 @@ static inline void cellGcmSetUserClipPlaneControl(CellGcmContextData *thisContex
 /* ==========================================================
  * Draw / vertex-data / texture / transfer / cache
  *
- * Bulk forwarders for the the reference SDK draw and texture command emitters.
+ * Bulk forwarders for the reference SDK draw and texture command emitters.
  * Cg-handle-using variants (cellGcmSetVertexProgram(CGprogram, ...)
  * etc.) are deliberately not here — they need a Cg-runtime bridge
  * layer over PSL1GHT's rsxVertexProgram / rsxFragmentProgram structs
