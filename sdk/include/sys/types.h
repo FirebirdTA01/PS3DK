@@ -19,7 +19,7 @@
    the real <sys/types.h>, silently dropping libc. Gated on the PS3 PPU target
    macro (GCC-only build); excluded under __clang__ (clangd cannot model the
    -isystem #include_next ordering). Inert under host/IDE. */
-#if defined(__lv2ppu__) && !defined(__clang__) && !defined(_SYS_TYPES_H)
+#if defined(__lv2ppu__) && !defined(__clang__) && !defined(__PS3DK_SDK_SELFBUILD__) && !defined(_SYS_TYPES_H)
 # error "PS3DK <sys/types.h> wrapper: real <sys/types.h> not reached (a duplicate wrapper copy shadowed it); keep only one copy of the PS3DK wrapper headers on the include path."
 #endif
 

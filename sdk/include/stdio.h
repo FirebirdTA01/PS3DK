@@ -11,7 +11,7 @@
    toolchain, where _STDIO_H_ is newlib's guard; excluded under __clang__ because
    clang-based tooling (clangd) cannot model the -isystem #include_next ordering
    and would false-positive. Inert under host/IDE analysis. */
-#if defined(__lv2ppu__) && !defined(__clang__) && !defined(_STDIO_H_)
+#if defined(__lv2ppu__) && !defined(__clang__) && !defined(__PS3DK_SDK_SELFBUILD__) && !defined(_STDIO_H_)
 # error "PS3DK <stdio.h> wrapper: real <stdio.h> not reached (a duplicate wrapper copy shadowed it); keep only one copy of the PS3DK wrapper headers on the include path."
 #endif
 
