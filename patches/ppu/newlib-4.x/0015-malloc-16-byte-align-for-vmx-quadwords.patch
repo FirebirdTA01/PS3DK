@@ -10,31 +10,32 @@ in a later free()).  Honor __BIGGEST_ALIGNMENT__ when it exceeds the
 historical default so plain malloc satisfies vector types in every language
 mode.  Matches the reference libc's 16-byte allocations.
 
-diff --git a/newlib/libc/stdlib/_mallocr.c b/newlib/libc/stdlib/_mallocr.c
-index 56968cbd1..1abab88ca 100644
 --- a/newlib/libc/stdlib/_mallocr.c
 +++ b/newlib/libc/stdlib/_mallocr.c
-@@ -1402,8 +1402,22 @@ nextchunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+@@ -1405,8 +1405,26 @@
  
  #define SIZE_SZ                (sizeof(INTERNAL_SIZE_T))
  #ifndef MALLOC_ALIGNMENT
--#define MALLOC_ALIGN           8
 +/* The allocator must return memory aligned for the largest type the
 +   target supports.  On the Cell PPU, VMX/AltiVec quadwords require
 +   16-byte alignment (__BIGGEST_ALIGNMENT__ == 16); the historical
 +   2*SIZE_SZ default (8 under ILP32) under-aligns them.  A vec_float4
-+   stored into such memory via stvx/lvx — which mask the low 4 bits of
-+   the effective address — then silently writes 16 bytes to the next
++   stored into such memory via stvx/lvx -- which mask the low 4 bits of
++   the effective address -- then silently writes 16 bytes to the next
 +   lower 16-byte boundary, clobbering the adjacent chunk's header and
-+   corrupting the heap.  Honor the compiler's biggest alignment when it
-+   exceeds the historical default so plain malloc satisfies vector
-+   types even under language modes without over-aligned operator new. */
-+#if defined(__BIGGEST_ALIGNMENT__) && (__BIGGEST_ALIGNMENT__ > (SIZE_SZ + SIZE_SZ))
++   corrupting the heap.  Honor the compiler's biggest alignment so plain
++   malloc satisfies vector types even under language modes without an
++   over-aligned operator new.  MALLOC_ALIGN must stay a preprocessor
++   integer literal because _mallocr.c tests it in #if directives, so use
++   __BIGGEST_ALIGNMENT__ (a literal) -- not a sizeof()-based expression --
++   and keep MALLOC_ALIGN and MALLOC_ALIGNMENT consistent. */
++#if defined(__BIGGEST_ALIGNMENT__) && __BIGGEST_ALIGNMENT__ >= 16
++#define MALLOC_ALIGN           __BIGGEST_ALIGNMENT__
 +#define MALLOC_ALIGNMENT       __BIGGEST_ALIGNMENT__
 +#else
+ #define MALLOC_ALIGN           8
  #define MALLOC_ALIGNMENT       (SIZE_SZ < 4 ? 8 : (SIZE_SZ + SIZE_SZ))
 +#endif
-+#define MALLOC_ALIGN           MALLOC_ALIGNMENT
  #else
  #define MALLOC_ALIGN           MALLOC_ALIGNMENT
  #endif
