@@ -196,8 +196,10 @@ done
 sprxlinker_fork="$PS3_TOOLCHAIN_ROOT/tools/sprx-linker/sprxlinker"
 if [[ -x "$sprxlinker_fork" ]]; then
     say "overriding PSL1GHT's sprxlinker with our fork from tools/sprx-linker/"
-    install -m 755 "$sprxlinker_fork" "$PS3DEV/bin/sprxlinker"
-    install -m 755 "$sprxlinker_fork" "$PS3DK/bin/sprxlinker"
+    # -D creates parent dirs - $PS3DK/bin doesn't exist on a fresh tree
+    # until something else installs into it, and our override may run first.
+    install -D -m 755 "$sprxlinker_fork" "$PS3DEV/bin/sprxlinker"
+    install -D -m 755 "$sprxlinker_fork" "$PS3DK/bin/sprxlinker"
 else
     say "WARNING: $sprxlinker_fork missing — run 'make -C tools/sprx-linker' first"
 fi
