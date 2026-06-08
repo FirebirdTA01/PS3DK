@@ -36,18 +36,20 @@ entries from C/C++ TUs); a compact-aware caller doing
 bytes of an 8-byte ea (a 64-bit-shaped value that segfaults outside
 user space).
 
+diff --git a/ppu/crt/crt0.S b/ppu/crt/crt0.S
+index 4f8ccf3..fd49aa1 100644
 --- a/ppu/crt/crt0.S
 +++ b/ppu/crt/crt0.S
-@@ -1,43 +1,33 @@
+@@ -1,25 +1,20 @@
  #include <ppc-asm.h>
-
+ 
 -#define LOAD_DWORD(reg, sym)		\
 -	li		reg,(sym)@higher;		\
 -	oris	reg,reg,(sym)@highest;	\
 -	sldi	reg,reg,32;				\
 -	oris	reg,reg,(sym)@h;		\
 -	ori		reg,reg,(sym)@l
--
+-	
  	.globl ._start
  ._start:
 -	LOAD_DWORD(r2,__libc_stack_end)
@@ -74,13 +76,13 @@ user space).
  	addi	r1,r1,128
  	mtlr	r0
  	blr
-
+@@ -27,17 +22,12 @@
  	.section ".bss","aw"
  	.globl __libc_stack_end
  __libc_stack_end:
 -	.quad	0
 +	.long	0
-
+ 	
 -	.section ".rodata","a"
 +	.section ".opd","aw"
  	.globl _start
@@ -89,7 +91,7 @@ user space).
 -	.long ._start
 -	.long ._start
 -	.quad 0,0
--
+-	
 -	.section ".opd","aw"
  __start:
 -	.quad ._start
@@ -97,15 +99,17 @@ user space).
 -	.quad 0
 +	.long ._start
 +	.long .TOC.
+diff --git a/ppu/crt/lv2-crti.S b/ppu/crt/lv2-crti.S
+index 86900f3..cbfe0e2 100644
 --- a/ppu/crt/lv2-crti.S
 +++ b/ppu/crt/lv2-crti.S
-@@ -3,21 +3,21 @@
+@@ -3,19 +3,19 @@
  	.section ".opd","ax"
  	.globl _init
  _init:
 -	.quad ._init,.TOC.@tocbase,0
 +	.long ._init,.TOC.
-
+ 	
  	.section ".init","ax"
  	.globl ._init
  ._init:
@@ -114,43 +118,43 @@ user space).
 -	stdu	r1,-128(r1)
 +	stw		r0,16(r1)
 +	stwu	r1,-128(r1)
-
+ 	
  	.section ".opd","ax"
  	.globl _fini
  _fini:
 -	.quad ._fini,.TOC.@tocbase,0
 +	.long ._fini,.TOC.
-
+ 	
  	.section ".fini","ax"
  	.globl ._fini
- ._fini:
- 	mflr	r0
--	std		r0,16(r1)
--	stdu	r1,-128(r1)
-+	stw		r0,16(r1)
-+	stwu	r1,-128(r1)
+diff --git a/ppu/crt/lv2-crtn.S b/ppu/crt/lv2-crtn.S
+index 958731a..8bd33b3 100644
 --- a/ppu/crt/lv2-crtn.S
 +++ b/ppu/crt/lv2-crtn.S
-@@ -1,13 +1,13 @@
- #include <ppc-asm.h>
-
+@@ -2,13 +2,13 @@
+ 
  	.section ".init","ax"
  	addi	r1,r1,128
 -	ld		r0,16(r1)
 +	lwz		r0,16(r1)
  	mtlr	r0
  	blr
-
+ 	
  	.section ".fini","ax"
  	addi	r1,r1,128
 -	ld		r0,16(r1)
 +	lwz		r0,16(r1)
  	mtlr	r0
  	blr
+ 	
+\ No newline at end of file
+diff --git a/ppu/crt/lv2.ld b/ppu/crt/lv2.ld
+index d40801a..a87b2d4 100644
 --- a/ppu/crt/lv2.ld
 +++ b/ppu/crt/lv2.ld
-@@ -177,6 +177,6 @@
-
+@@ -177,9 +177,9 @@ SECTIONS
+ 	.data.sceFStub      : { KEEP (*(.data.sceFStub)) KEEP (*(SORT(.data.sceFStub.*))) }
+ 	
  	.toc1		  : ALIGN(8) { *(.toc1) }
 -	.opd		  : ALIGN(8) { KEEP (*(.opd)) }
 +	.opd		  : ALIGN(4) { KEEP (*(.opd)) }
@@ -158,11 +162,14 @@ user space).
 -	.got		  : ALIGN(8) { *(.got .toc) }
 +	.got      : ALIGN(4) { *(.got .toc) }
  	.toc.sceStub  : { KEEP (*(.toc.sceStub)) KEEP (*(SORT(.toc.sceStub.*))) }
+ 	
+ 	/* Thread Local Storage sections  */
+diff --git a/ppu/sprx/common/exports.S b/ppu/sprx/common/exports.S
+index efa42fa..79680ac 100644
 --- a/ppu/sprx/common/exports.S
 +++ b/ppu/sprx/common/exports.S
-@@ -33,11 +33,11 @@
- 	lwz		r2,40(r1);					\
- 	lwz		r0,16(r1);					\
+@@ -30,11 +30,11 @@ __##name:								\
+ 	ld		r0,16(r1);					\
  	mtlr	r0;							\
  	blr;								\
 -	.align 3;							\
@@ -172,18 +179,6 @@ user space).
  name:									\
 -	.quad __##name,.TOC.@tocbase,0
 +	.long __##name,.TOC.
-
+ 
  #define EXPORT_VA(name,fnid,argc)			\
  	.align 2;								\
-@@ -78,9 +78,9 @@
- 	lwz		r2,40(r1);						\
- 	lwz		r0,16(r1);						\
- 	mtlr	r0;								\
- 	blr;									\
--	.align 3;								\
-+	.align 2;								\
- 	.section ".opd","aw";					\
- 	.globl name;							\
- name:										\
--	.quad __##name,.TOC.@tocbase,0
-+	.long __##name,.TOC.
