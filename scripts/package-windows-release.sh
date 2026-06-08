@@ -189,6 +189,26 @@ else
     warn "$PS3_TOOLCHAIN_ROOT/cmake missing — release will ship without CMake toolchain files; samples won't build out of the box."
 fi
 
+# Source-tree files referenced by cmake/ps3-self.cmake's freshness probe
+# (introduced in 9446214 'sdk install: atomic owner of stage + freshness gate
+# in ps3-self'). The probe runs ${_PS3_TOOLCHAIN_ROOT}/scripts/version.sh and
+# SHA-compares ${_PS3_TOOLCHAIN_ROOT}/sdk/include/sysutil/video.h against
+# ${PS3DK}/ppu/include/sysutil/video.h. In the installed Windows package
+# layout (cmake/ at the root), _PS3_TOOLCHAIN_ROOT and PS3DK both resolve
+# to the install root, so these source files must live at PS3DK/scripts/
+# and PS3DK/sdk/include/ for the probe to even attempt running.
+# Known limitation: cmake's execute_process cannot natively run a .sh on
+# Windows (no shebang handling); the probe still trips on pure-Windows
+# hosts without Git Bash / MSYS2 in CMake's path. Tracked for follow-up.
+say "Staging source files needed by cmake freshness probe (ps3-self.cmake)"
+mkdir -p "$STAGE_DIR/scripts" "$STAGE_DIR/sdk"
+if [[ -f "$PS3_TOOLCHAIN_ROOT/scripts/version.sh" ]]; then
+    install -m 0755 "$PS3_TOOLCHAIN_ROOT/scripts/version.sh" "$STAGE_DIR/scripts/version.sh"
+fi
+if [[ -d "$PS3_TOOLCHAIN_ROOT/sdk/include" ]]; then
+    cp -a "$PS3_TOOLCHAIN_ROOT/sdk/include" "$STAGE_DIR/sdk/include"
+fi
+
 # 4. Host tools zip (from CI's build-host-tools-windows job) OR locally
 #    cross-built tools staged at $STAGE_HOST_TOOLS_BIN by
 #    scripts/build-host-tools-windows.sh.  CI takes the zip path; local
@@ -455,7 +475,11 @@ fi
 # 7. Zip + sha256.
 say "Creating $ZIP_PATH"
 rm -f "$ZIP_PATH" "$ZIP_PATH.sha256"
-(cd "$OUTPUT_DIR" && zip -r -q -9 "$STAGE_NAME.zip" "$STAGE_NAME")
+# -y preserves symlinks as symlink entries (libsysutil.a -> libsysutil_stub.a
+# alias pair installed by sdk/Makefile). Default Windows extractors may not
+# materialize NTFS symlinks (cmake's IS_SYMLINK check in ps3-self.cmake then
+# trips); 7-Zip with admin / tar via Git Bash / WSL all preserve them.
+(cd "$OUTPUT_DIR" && zip -r -y -q -9 "$STAGE_NAME.zip" "$STAGE_NAME")
 (cd "$OUTPUT_DIR" && sha256sum "$STAGE_NAME.zip" > "$STAGE_NAME.zip.sha256")
 
 say "=== Done ==="
