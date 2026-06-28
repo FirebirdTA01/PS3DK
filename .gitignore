@@ -9,6 +9,8 @@ tools/rsx-cg-compiler/build/
 samples/**/build/
 samples/**/build-lp64/
 samples/**/cmake-build/
+# CMake build-variant dirs from the sample sweep (config/fake/release/test/video, etc.)
+samples/**/build*/
 samples/**/*.elf
 samples/**/*.self
 samples/**/*.fake.self
