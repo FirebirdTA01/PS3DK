@@ -596,6 +596,7 @@ stage_python_and_assets() {
         fself.py
         Struct.py
         sfo.xml
+        crypt.c
     )
 
     for f in "${required_py_assets[@]}"; do
@@ -607,6 +608,15 @@ stage_python_and_assets() {
     for f in pkg.py sfo.py fself.py; do
         chmod +x "$STAGE_BIN/$f"
     done
+
+    # pkg.py does `import pkgcrypt`, a C extension built from crypt.c. A
+    # compiled extension is ABI-locked to one Python (version + platform),
+    # so the Windows release cannot ship a single prebuilt binary. Instead
+    # ship crypt.c (above) plus this helper, which setup.cmd runs once to
+    # build pkgcrypt against the user's own interpreter at activation time.
+    local pkgcrypt_helper="$PS3_TOOLCHAIN_ROOT/tools/pkgcrypt/build_pkgcrypt.py"
+    [[ -f "$pkgcrypt_helper" ]] || die "pkgcrypt build helper missing: $pkgcrypt_helper"
+    install -m 0644 "$pkgcrypt_helper" "$STAGE_BIN/build_pkgcrypt.py"
 }
 
 # -----------------------------------------------------------------------------

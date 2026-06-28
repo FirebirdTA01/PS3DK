@@ -16,6 +16,24 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Host tools — pkgcrypt build-on-install (Windows)
+
+`pkg.py` does `import pkgcrypt`, a C extension that is ABI-locked to a
+specific Python (version + platform), so the Windows release cannot ship a
+single prebuilt binary that matches whatever Python a user has. The release
+now ships the extension source (`crypt.c`) plus a helper
+(`tools/pkgcrypt/build_pkgcrypt.py`, staged into `bin/`) that `setup.cmd`
+runs once to build `pkgcrypt` against the user's own interpreter. The build
+uses pip + setuptools (so the host compiler — MSVC on Windows — and the
+distutils→setuptools shim are handled automatically) and is idempotent: a
+no-op once `pkgcrypt` is importable. Activation never fails if the build is
+skipped (no Python on PATH) or errors — only `.pkg` generation is affected.
+
+- `scripts/build-host-tools-windows.sh`: stage `crypt.c` and
+  `build_pkgcrypt.py` into `bin/`.
+- `scripts/package-windows-release.sh`: `setup.cmd` invokes the helper after
+  PATH setup; release validation requires the two new `bin/` files.
+
 ## [v0.10.0] — 2026-05-29
 
 ### SDK — network and PSN family
