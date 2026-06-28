@@ -1,0 +1,27 @@
+Subject: [PATCH] audio: align audioPortParam field to reference (attr)
+
+The reference SDK (CellAudioPortParam) and current upstream PSL1GHT use
+'attr'; our vendored PSL1GHT header had the stale 'attrib'. Anonymous
+union exposes both names (identical single-u64 layout) so 5ba78ae samples
+(.attr) build with zero breakage for any legacy .attrib user.
+
+diff --git a/ppu/include/audio/audio.h b/ppu/include/audio/audio.h
+index 00a6fb4..8c83334 100644
+--- a/ppu/include/audio/audio.h
++++ b/ppu/include/audio/audio.h
+@@ -96,7 +96,14 @@ typedef struct _audio_port_param
+ 
+ 	This value must be either 0 or \ref AUDIO_PORT_INITLEVEL.
+ 	*/
+-	u64 attrib;
++	/* Field name aligned to the reference SDK (CellAudioPortParam.attr) and
++	 * current upstream PSL1GHT, which renamed the old `attrib`.  Anonymous
++	 * union keeps the legacy `attrib` spelling working with zero breakage;
++	 * identical single-u64 layout. */
++	union {
++		u64 attr;
++		u64 attrib;
++	};
+ 
+ 	/*! \Brief Initial volume.
+ 
