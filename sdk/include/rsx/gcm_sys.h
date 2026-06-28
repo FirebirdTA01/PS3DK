@@ -101,6 +101,19 @@
 #define GCM_SURFACE_CENTER_1						0
 #define GCM_SURFACE_DIAGONAL_CENTERED_2				3
 #define GCM_SURFACE_SQUARE_CENTERED_4				4
+
+/* PSL1GHT-compat: older samples (e.g. gemsample's bundled rsxutil) spell
+ * these surface constants GCM_TF_*; our SDK uses GCM_SURFACE_*.  Aliases so
+ * unmodified samples build.  This is our (sdk) gcm_sys.h, which is installed
+ * over PSL1GHT's, so the aliases must live here — a patches/psl1ght/ patch to
+ * the vendored header would be overwritten. */
+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
+#define GCM_TF_COLOR_X8R8G8B8	GCM_SURFACE_X8R8G8B8
+#define GCM_TF_TARGET_0			GCM_SURFACE_TARGET_0
+#define GCM_TF_ZETA_Z16			GCM_SURFACE_ZETA_Z16
+#define GCM_TF_TYPE_LINEAR		GCM_SURFACE_TYPE_LINEAR
+#define GCM_TF_CENTER_1			GCM_SURFACE_CENTER_1
+#endif
 #define GCM_SURFACE_SQUARE_ROTATED_4				5
 
 /*! \brief blue color component */
