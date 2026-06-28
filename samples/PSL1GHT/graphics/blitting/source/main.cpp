@@ -74,7 +74,12 @@ void blit_scale(Bitmap *bitmap, u32 dstX, u32 dstY, u32 srcX, u32 srcY, u32 w, u
   scale.conversion = GCM_TRANSFER_CONVERSION_TRUNCATE;
   scale.format = GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8;
   scale.origin = GCM_TRANSFER_ORIGIN_CORNER;
-  scale.operation = GCM_TRANSFER_OPERATION_SRCCOPY_AND;
+  /* PS3DK: upstream used GCM_TRANSFER_OPERATION_SRCCOPY_AND (=0), but RPCS3's
+   * NV3089 blit engine implements only the plain `srccopy` op (=3) and calls
+   * recover_fifo() -> Dead FIFO on any other operation.  The non-scaled blits
+   * (rsxSetTransferImage) already use SRCCOPY; the AND raster-op isn't needed
+   * for this alpha-blended copy, so use SRCCOPY for hardware+RPCS3 portability. */
+  scale.operation = GCM_TRANSFER_OPERATION_SRCCOPY;
   scale.interp = GCM_TRANSFER_INTERPOLATOR_NEAREST;
   scale.clipX = 0;
   scale.clipY = 0;
