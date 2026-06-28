@@ -16,7 +16,7 @@ SPU_PREFIX ?= $(PS3DEV)/spu
 INSTALL_LIB := $(SPU_PREFIX)/spu-elf/lib
 INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 
-CC := spu-elf-gcc
+override CC := spu-elf-gcc
 AR := spu-elf-ar
 
 CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding \

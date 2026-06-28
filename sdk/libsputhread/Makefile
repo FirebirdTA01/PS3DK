@@ -17,7 +17,7 @@ INSTALL_LIB := $(SPU_PREFIX)/spu-elf/lib
 INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 INSTALL_INC := $(PS3DK)/spu/include
 
-CC      := spu-elf-gcc
+override CC := spu-elf-gcc
 AR      := spu-elf-ar
 
 SFLAGS  := -Wall

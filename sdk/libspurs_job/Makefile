@@ -19,7 +19,7 @@ INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 INSTALL_LDS := $(PS3DK)/spu/ldscripts
 INSTALL_INC := $(PS3DK)/spu/include
 
-CC := spu-elf-gcc
+override CC := spu-elf-gcc
 AR := spu-elf-ar
 
 # -fpic: required for spurs-job binaries.  The SPRX dispatcher loads
