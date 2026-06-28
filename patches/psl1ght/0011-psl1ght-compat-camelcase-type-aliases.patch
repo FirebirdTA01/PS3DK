@@ -1,0 +1,49 @@
+Subject: [PATCH] audio/io: PSL1GHT-compat CamelCase type aliases
+
+Older PSL1GHT samples spell these struct types in CamelCase
+(AudioPortParam/AudioPortConfig, PadInfo/PadInfo2/PadData/PadActParam)
+while our SDK and current upstream use the lowerCamel names. Add
+deprecated typedef aliases so unmodified samples build; each use warns.
+
+diff --git a/ppu/include/audio/audio.h b/ppu/include/audio/audio.h
+index 00a6fb4..92c4a5c 100644
+--- a/ppu/include/audio/audio.h
++++ b/ppu/include/audio/audio.h
+@@ -132,6 +132,15 @@ typedef struct _audio_port_config
+ 	u32 audioDataStart;		/*!< \brief start address of audio port buffer */
+ } audioPortConfig;
+ 
++/* PSL1GHT-compat: older samples spell these types in CamelCase; our SDK
++ * (and current upstream) use the lowerCamel names.  Deprecated aliases so
++ * unmodified samples build; each use warns to switch to the lowerCamel name.
++ * Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them. */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++typedef audioPortParam  AudioPortParam  __attribute__((deprecated("PSL1GHT-compat: use audioPortParam")));
++typedef audioPortConfig AudioPortConfig __attribute__((deprecated("PSL1GHT-compat: use audioPortConfig")));
++#endif
++
+ /*! \brief Initialize audio subsystem.
+ \return zero if no error, nonzero otherwise.
+ */
+diff --git a/ppu/include/io/pad.h b/ppu/include/io/pad.h
+index 08e855b..f9f0682 100644
+--- a/ppu/include/io/pad.h
++++ b/ppu/include/io/pad.h
+@@ -217,6 +217,17 @@ typedef struct _pad_act_param
+     u8 reserved[6];
+ } padActParam;
+ 
++/* PSL1GHT-compat: older samples spell these types in CamelCase; our SDK
++ * (and current upstream) use the lowerCamel names.  Deprecated aliases so
++ * unmodified samples build; each use warns to switch.  Define
++ * __PS3DK_NO_PSL1GHT_COMPAT__ to drop them. */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++typedef padInfo     PadInfo     __attribute__((deprecated("PSL1GHT-compat: use padInfo")));
++typedef padInfo2    PadInfo2    __attribute__((deprecated("PSL1GHT-compat: use padInfo2")));
++typedef padData     PadData     __attribute__((deprecated("PSL1GHT-compat: use padData")));
++typedef padActParam PadActParam __attribute__((deprecated("PSL1GHT-compat: use padActParam")));
++#endif
++
+ /*! \brief Pad peripheral information data structure. */
+ typedef struct _pad_periph_info
+ {
