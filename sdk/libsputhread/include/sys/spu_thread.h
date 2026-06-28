@@ -21,6 +21,24 @@
 extern "C" {
 #endif
 
+/* SPU-thread MMIO problem-state base + per-thread signal-notify register
+ * offsets, used by SPU code that pokes a sibling SPU's signalling
+ * registers (e.g. the spuchain sample).  Matches the reference layout:
+ * each SPU thread's problem-state area is SPU_THREAD_BASE + n*OFFSET, and
+ * the two signal-notify registers sit at the fixed local offsets below. */
+#ifndef SPU_THREAD_BASE
+#define SPU_THREAD_BASE          0xF0000000ULL
+#endif
+#ifndef SPU_THREAD_OFFSET
+#define SPU_THREAD_OFFSET        0x00100000ULL
+#endif
+#ifndef SPU_THREAD_Sig_Notify_1
+#define SPU_THREAD_Sig_Notify_1  0x5400C
+#endif
+#ifndef SPU_THREAD_Sig_Notify_2
+#define SPU_THREAD_Sig_Notify_2  0x5C00C
+#endif
+
 extern void sys_spu_thread_exit(int exit_code)        __attribute__((noreturn));
 extern void sys_spu_thread_group_exit(int exit_code)  __attribute__((noreturn));
 

@@ -46,6 +46,7 @@ HEADERS := \
     include/sys/timer.h \
     include/psl1ght/lv2/timer.h \
     include/psl1ght/lv2/net.h \
+    include/net/socket.h \
     include/sys/sys_time.h \
     include/sys/sys_types.h \
     include/sys/system_types.h \
