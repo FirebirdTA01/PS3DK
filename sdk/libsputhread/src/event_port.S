@@ -170,3 +170,24 @@ sys_spu_thread_receive_event:
 sys_spu_thread_tryreceive_event:
 	RECV_EVENT 0x111
 	.size	sys_spu_thread_tryreceive_event, . - sys_spu_thread_tryreceive_event
+
+
+/* --- PSL1GHT-compat legacy symbol aliases (deprecated) --------------
+ * Weak aliases of the modern sys_spu_thread_*_event symbols so
+ * unmodified PSL1GHT SPU code links; deprecated extern decls in
+ * <sys/spu_event.h> emit the per-call warning.  See spu_thread_exit.S
+ * for the rationale. */
+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
+	.weak	spu_thread_send_event
+	.set	spu_thread_send_event, sys_spu_thread_send_event
+	.type	spu_thread_send_event, @function
+	.weak	spu_thread_throw_event
+	.set	spu_thread_throw_event, sys_spu_thread_throw_event
+	.type	spu_thread_throw_event, @function
+	.weak	spu_thread_receive_event
+	.set	spu_thread_receive_event, sys_spu_thread_receive_event
+	.type	spu_thread_receive_event, @function
+	.weak	spu_thread_tryreceive_event
+	.set	spu_thread_tryreceive_event, sys_spu_thread_tryreceive_event
+	.type	spu_thread_tryreceive_event, @function
+#endif

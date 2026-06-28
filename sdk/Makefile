@@ -44,6 +44,8 @@ HEADERS := \
     include/sys/spu_image.h \
     include/sys/raw_spu.h \
     include/sys/timer.h \
+    include/psl1ght/lv2/timer.h \
+    include/psl1ght/lv2/net.h \
     include/sys/sys_time.h \
     include/sys/sys_types.h \
     include/sys/system_types.h \

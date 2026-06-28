@@ -39,4 +39,21 @@ extern int  sys_spu_thread_switch_system_module(uint32_t newAddress);
 }
 #endif
 
+/* --- PSL1GHT-compat aliases (deprecated) ----------------------------
+ * Upstream PSL1GHT names these SPU thread routines without the sys_
+ * prefix.  libsputhread provides weak alias symbols (see
+ * src/spu_thread_exit.S) so unmodified PSL1GHT SPU code links; these
+ * deprecated extern decls make each call site warn to switch to the
+ * modern sys_spu_thread_* name.  Real symbols (not static inline) so a
+ * sample that self-declares the legacy name does not conflict.
+ * Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop the legacy aliases. */
+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
+extern void spu_thread_exit(int exit_code)
+    __attribute__((noreturn, deprecated("PSL1GHT-compat: use sys_spu_thread_exit()")));
+extern void spu_thread_group_exit(int exit_code)
+    __attribute__((noreturn, deprecated("PSL1GHT-compat: use sys_spu_thread_group_exit()")));
+extern void spu_thread_group_yield(void)
+    __attribute__((deprecated("PSL1GHT-compat: use sys_spu_thread_group_yield()")));
+#endif /* __PS3DK_NO_PSL1GHT_COMPAT__ */
+
 #endif /* __PS3DK_SYS_SPU_THREAD_H__ */

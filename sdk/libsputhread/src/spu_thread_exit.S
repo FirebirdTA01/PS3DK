@@ -124,3 +124,23 @@ sys_spu_thread_switch_system_module:
 3:	brnz	$10, .Lssm_retry    /* loop on EAGAIN */
 	br	.Lssm_ret           /* otherwise return $4 */
 	.size	sys_spu_thread_switch_system_module, . - sys_spu_thread_switch_system_module
+
+
+/* --- PSL1GHT-compat legacy symbol aliases (deprecated) --------------
+ * Upstream PSL1GHT exports these SPU routines without the sys_ prefix.
+ * Provide weak aliases of the modern symbols so unmodified PSL1GHT SPU
+ * code links; the deprecated extern decls in <sys/spu_thread.h> emit
+ * the per-call warning pointing at the sys_ name.  Weak so they never
+ * clash with any other provider.  Define __PS3DK_NO_PSL1GHT_COMPAT__
+ * to drop them. */
+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
+	.weak	spu_thread_exit
+	.set	spu_thread_exit, sys_spu_thread_exit
+	.type	spu_thread_exit, @function
+	.weak	spu_thread_group_exit
+	.set	spu_thread_group_exit, sys_spu_thread_group_exit
+	.type	spu_thread_group_exit, @function
+	.weak	spu_thread_group_yield
+	.set	spu_thread_group_yield, sys_spu_thread_group_yield
+	.type	spu_thread_group_yield, @function
+#endif

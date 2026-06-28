@@ -1,0 +1,8 @@
+# Build artifacts from the PSL1GHT sample ports (ps3_add_self output + CMake dirs)
+build/
+build-shim/
+*.self
+*.fake.self
+*.elf
+*.elf.map
+*.map
