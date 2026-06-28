@@ -53,8 +53,8 @@ int main(void)
 				printf("  frame=%3d nb_keycode=%d  leds=0x%08x  mkeys=0x%08x\n",
 				       frame,
 				       (int)data.nb_keycode,
-				       (unsigned)data.led._KbLedU.leds,
-				       (unsigned)data.mkey._KbMkeyU.mkeys);
+				       (unsigned)data.led.leds,
+				       (unsigned)data.mkey.mkeys);
 				for (int i = 0; i < data.nb_keycode && i < 4; i++)
 					printf("    code[%d] = 0x%04x\n", i, (unsigned)data.keycode[i]);
 			}
