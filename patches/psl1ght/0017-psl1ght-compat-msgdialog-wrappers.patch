@@ -1,0 +1,79 @@
+Subject: [PATCH] sysutil/msg: add cellMsgDialog compat wrappers
+
+Our SDK exports the reference-SDK cellMsgDialog* names; PSL1GHT samples
+call msgDialog*. Add deprecated static-inline forwarders so unmodified
+samples build (each use warns to switch to cellMsgDialog*).
+
+diff --git a/ppu/include/sysutil/msg.h b/ppu/include/sysutil/msg.h
+index 5f31fe7..79d5d82 100644
+--- a/ppu/include/sysutil/msg.h
++++ b/ppu/include/sysutil/msg.h
+@@ -2,6 +2,7 @@
+ #define __LV2_MSG_H__
+ 
+ #include <ppu-types.h>
++#include <cell/msg_dialog.h>
+ 
+ #define MSG_PROGRESSBAR_INDEX0			0
+ #define MSG_PROGRESSBAR_INDEX1			1
+@@ -37,6 +38,52 @@ typedef enum
+ 
+ typedef void (*msgDialogCallback)(msgButton button,void *usrData);
+ 
++/* PSL1GHT-compat: our SDK exports the reference-SDK cellMsgDialog* names;
++ * these deprecated wrappers let unmodified PSL1GHT samples build (each use
++ * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them. */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogAbort")))
++static inline s32 msgDialogAbort(void) { return cellMsgDialogAbort(); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogClose")))
++static inline s32 msgDialogClose(f32 waitMs) { return cellMsgDialogClose(waitMs); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogOpen")))
++static inline s32 msgDialogOpen(msgType type,const char *msg,msgDialogCallback cb,void *usrData,void *unused)
++{
++    return cellMsgDialogOpen((unsigned int)type,msg,(CellMsgDialogCallback)cb,usrData,unused);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogOpen2")))
++static inline s32 msgDialogOpen2(msgType type,const char *msg,msgDialogCallback cb,void *usrData,void *unused)
++{
++    return cellMsgDialogOpen2((unsigned int)type,msg,(CellMsgDialogCallback)cb,usrData,unused);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogOpenErrorCode")))
++static inline s32 msgDialogOpenErrorCode(u32 errorCode,msgDialogCallback cb,void *usrData,void *unused)
++{
++    return cellMsgDialogOpenErrorCode((unsigned int)errorCode,(CellMsgDialogCallback)cb,usrData,unused);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogProgressBarSetMsg")))
++static inline s32 msgDialogProgressBarSetMsg(u32 index,const char *msg)
++{
++    return cellMsgDialogProgressBarSetMsg((unsigned int)index,msg);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogProgressBarReset")))
++static inline s32 msgDialogProgressBarReset(u32 index)
++{
++    return cellMsgDialogProgressBarReset((unsigned int)index);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogProgressBarInc")))
++static inline s32 msgDialogProgressBarInc(u32 index,u32 percent)
++{
++    return cellMsgDialogProgressBarInc((unsigned int)index,(unsigned int)percent);
++}
++#else
+ s32 msgDialogAbort();
+ s32 msgDialogClose(f32 waitMs);
+ s32 msgDialogOpen(msgType type,const char *msg,msgDialogCallback cb,void *usrData,void *unused);
+@@ -46,6 +93,7 @@ s32 msgDialogOpenErrorCode(u32 errorCode,msgDialogCallback cb,void *usrData,void
+ s32 msgDialogProgressBarSetMsg(u32 index,const char *msg);
+ s32 msgDialogProgressBarReset(u32 index);
+ s32 msgDialogProgressBarInc(u32 index,u32 percent);
++#endif
+ 
+ #ifdef __cplusplus
+ 	}
