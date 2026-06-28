@@ -1,0 +1,109 @@
+Subject: [PATCH] sysutil/osk: add cellOskDialog compat wrappers
+
+Our SDK exports the reference-SDK cellOskDialog* names; PSL1GHT samples
+call osk*. Keep the legacy osk* structs and source-facing field names,
+then add deprecated static-inline forwarders to the cellOskDialog* API.
+
+diff --git a/ppu/include/sysutil/osk.h b/ppu/include/sysutil/osk.h
+index f2fbb84..585626f 100644
+--- a/ppu/include/sysutil/osk.h
++++ b/ppu/include/sysutil/osk.h
+@@ -6,6 +6,7 @@
+ #define __LV2_OSK_H__
+ 
+ #include <ppu-types.h>
++#include <cell/sysutil_oskdialog.h>
+ 
+ #define OSK_10KEY_PANEL							1
+ #define OSK_FULLKEY_PANEL						2
+@@ -245,6 +246,82 @@ typedef struct _osk_separate_window_option
+ 	u32 reserved;											//!< Reserved.
+ } oskSeparateWindowOption;
+ 
++/* PSL1GHT-compat: keep the legacy osk* structs and field names for source
++ * compatibility, but forward calls to the reference-SDK cellOskDialog* API.
++ * Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop these wrappers. */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogSetInitialInputDevice")))
++static inline s32 oskSetInitialInputDevice(oskInputDevice input)
++{
++	return cellOskDialogSetInitialInputDevice((CellOskDialogInputDevice)input);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogGetSize")))
++static inline s32 oskGetSize(u16 *width, u16 *height, oskType type)
++{
++	return cellOskDialogGetSize(width,height,(CellOskDialogType)type);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogUnloadAsync")))
++static inline s32 oskUnloadAsync(oskCallbackReturnParam *param)
++{
++	return cellOskDialogUnloadAsync((CellOskDialogCallbackReturnParam *)param);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogDisableDimmer")))
++static inline s32 oskDisableDimmer(void) { return cellOskDialogDisableDimmer(); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogSetKeyLayoutOption")))
++static inline s32 oskSetKeyLayoutOption(u32 flags)
++{
++	return cellOskDialogSetKeyLayoutOption((uint32_t)flags);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogAbort")))
++static inline s32 oskAbort(void) { return cellOskDialogAbort(); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogSetDeviceMask")))
++static inline s32 oskSetDeviceMask(u32 mask)
++{
++	return cellOskDialogSetDeviceMask((uint32_t)mask);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogSetSeparateWindowOption")))
++static inline s32 oskSetSeparateWindowOption(oskSeparateWindowOption *option)
++{
++	return cellOskDialogSetSeparateWindowOption((CellOskDialogSeparateWindowOption *)option);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogGetInputText")))
++static inline s32 oskGetInputText(oskCallbackReturnParam *info)
++{
++	return cellOskDialogGetInputText((CellOskDialogCallbackReturnParam *)info);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogAddSupportLanguage")))
++static inline s32 oskAddSupportLanguage(u32 lang)
++{
++	return cellOskDialogAddSupportLanguage((uint32_t)lang);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogLoadAsync")))
++static inline s32 oskLoadAsync(sys_mem_container_t container, const oskParam *param, const oskInputFieldInfo *inputInfo)
++{
++	return cellOskDialogLoadAsync(container,(const CellOskDialogParam *)param,(const CellOskDialogInputFieldInfo *)inputInfo);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogSetInitialKeyLayout")))
++static inline s32 oskSetInitialKeyLayout(oskKeyLayout layout)
++{
++	return cellOskDialogSetInitialKeyLayout((CellOskDialogInitialKeyLayout)layout);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogSetLayoutMode")))
++static inline s32 oskSetLayoutMode(s32 mode)
++{
++	return cellOskDialogSetLayoutMode((int32_t)mode);
++}
++#else
+ /*! \brief Set initial input device.
+ \param[in] input Initial input device value.
+ \return zero if no error occured, nonzero otherwise.
+@@ -361,6 +438,7 @@ s32 oskSetInitialKeyLayout(oskKeyLayout layout);
+ \return zero if no error occured, nonzero otherwise.
+ */
+ s32 oskSetLayoutMode (s32 mode);
++#endif
+ 
+ #ifdef __cplusplus
+ 	}
