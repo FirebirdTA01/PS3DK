@@ -116,14 +116,15 @@ s32 ioKbSetCodeType(const u32 kb_no, const KbCodeType ctype)
                                                     { return (s32)cellKbSetCodeType(kb_no, (uint32_t)ctype); }
 u16 ioKbCnvRawCode(const KbMapping mapping, const KbMkey mkey, const KbLed led, const u16 rawcode)
 {
-    /* KbMkey and KbLed are struct-wrapped unions; the sys_io SPRX expects
-     * the raw 32-bit bitmask at the NID boundary.  PSL1GHT exposes the u32
-     * under the nested union member _KbMkeyU.mkeys / _KbLedU.leds. */
-    return cellKbCnvRawCode((uint32_t)mapping, mkey._KbMkeyU.mkeys,
-                            led._KbLedU.leds, rawcode);
+    /* KbMkey and KbLed wrap an anonymous union; the sys_io SPRX expects the
+     * raw 32-bit bitmask at the NID boundary.  PSL1GHT exposes the u32 as the
+     * flat members mkey.mkeys / led.leds (the union/inner-struct are anonymous
+     * since patches/psl1ght/0016). */
+    return cellKbCnvRawCode((uint32_t)mapping, mkey.mkeys,
+                            led.leds, rawcode);
 }
 s32 ioKbSetLEDStatus(const u32 kb_no, const KbLed led)
-                                                    { return (s32)cellKbSetLEDStatus(kb_no, led._KbLedU.leds); }
+                                                    { return (s32)cellKbSetLEDStatus(kb_no, led.leds); }
 s32 ioKbGetInfo(KbInfo *info)                       { return (s32)cellKbGetInfo(info); }
 s32 ioKbGetConfiguration(const u32 kb_no, KbConfig *config)
                                                     { return (s32)cellKbGetConfiguration(kb_no, config); }
