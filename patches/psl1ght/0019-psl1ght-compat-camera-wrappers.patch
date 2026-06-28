@@ -1,0 +1,181 @@
+Subject: [PATCH] io/camera: add cellCamera compat wrappers
+
+Our SDK exports the reference-SDK cellCamera* names; PSL1GHT samples call
+camera*. Keep the legacy camera structs and source-facing field names,
+then add deprecated static-inline forwarders to the cellCamera* API.
+
+diff --git a/ppu/include/io/camera.h b/ppu/include/io/camera.h
+index 73d1ced..b28e59b 100644
+--- a/ppu/include/io/camera.h
++++ b/ppu/include/io/camera.h
+@@ -4,6 +4,13 @@
+ #include <ppu-types.h>
+ #include <sys/memory.h>
+ 
++#ifndef PS3TC_SYS_MEMORY_CONTAINER_T_DEFINED
++#define PS3TC_SYS_MEMORY_CONTAINER_T_DEFINED
++typedef sys_mem_container_t sys_memory_container_t;
++#endif
++
++#include <cell/camera.h>
++
+ #define CAMERA_ERRO_DOUBLE_INIT			0x80140801
+ #define CAMERA_ERRO_NEED_INIT			0x80140803
+ #define CAMERA_ERRO_BAD_PARAM			0x80140804
+@@ -151,6 +158,148 @@ typedef struct _camera_read_info
+ 	u32 buffer;
+ } cameraReadInfo;
+ 
++/* PSL1GHT-compat: keep the legacy camera* structs and field names for source
++ * compatibility, but forward calls to the reference-SDK cellCamera* API.
++ * Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop these wrappers. */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraInit")))
++static inline s32 cameraInit(void) { return cellCameraInit(); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraEnd")))
++static inline s32 cameraEnd(void) { return cellCameraEnd(); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraStart")))
++static inline s32 cameraStart(s32 num) { return cellCameraStart(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraStop")))
++static inline s32 cameraStop(s32 num) { return cellCameraStop(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraOpenEx")))
++static inline s32 cameraOpenEx(s32 num,cameraInfoEx *info)
++{
++	return cellCameraOpenEx(num,(CellCameraInfoEx *)info);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraClose")))
++static inline s32 cameraClose(s32 num) { return cellCameraClose(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraRead")))
++static inline s32 cameraRead(s32 num,u32 *frame,u32 *readcount)
++{
++	return cellCameraRead(num,(unsigned int *)frame,(unsigned int *)readcount);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraReadEx")))
++static inline s32 cameraReadEx(s32 num,cameraReadInfo *info)
++{
++	return cellCameraReadEx(num,(CellCameraReadEx *)info);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraGetBufferInfoEx")))
++static inline s32 cameraGetBufferInfoEx(s32 num,cameraInfoEx *info)
++{
++	return cellCameraGetBufferInfoEx(num,(CellCameraInfoEx *)info);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraReset")))
++static inline s32 cameraReset(s32 num) { return cellCameraReset(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraGetAttribute")))
++static inline s32 cameraGetAttribute(s32 num,cameraAttrib attribute,u32* arg0,u32* arg1)
++{
++	return cellCameraGetAttribute(num,(CellCameraAttribute)attribute,(uint32_t *)arg0,(uint32_t *)arg1);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraSetAttribute")))
++static inline s32 cameraSetAttribute(s32 num,cameraAttrib attribute,u32 arg0,u32 arg1)
++{
++	return cellCameraSetAttribute(num,(CellCameraAttribute)attribute,(uint32_t)arg0,(uint32_t)arg1);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraGetType")))
++static inline s32 cameraGetType(s32 num,cameraType* type)
++{
++	return cellCameraGetType(num,(CellCameraType *)type);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraGetDeviceGUID")))
++static inline s32 cameraGetDeviceGUID(s32 num,u32* guid)
++{
++	return cellCameraGetDeviceGUID(num,(uint32_t *)guid);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraGetBufferSize")))
++static inline s32 cameraGetBufferSize(s32 num,cameraInfoEx* info)
++{
++	return cellCameraGetBufferSize(num,(CellCameraInfoEx *)info);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraIsStarted")))
++static inline s32 cameraIsStarted(s32 num) { return cellCameraIsStarted(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraIsOpen")))
++static inline s32 cameraIsOpen(s32 num) { return cellCameraIsOpen(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraIsAvailable")))
++static inline s32 cameraIsAvailable(s32 num) { return cellCameraIsAvailable(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraIsAttached")))
++static inline s32 cameraIsAttached(s32 num) { return cellCameraIsAttached(num); }
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraSetNotifyEventQueue")))
++static inline s32 cameraSetNotifyEventQueue(u64 key)
++{
++	return cellCameraSetNotifyEventQueue((sys_ipc_key_t)key);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraSetNotifyEventQueue2")))
++static inline s32 cameraSetNotifyEventQueue2(u64 key,u64 source,u64 flag)
++{
++	return cellCameraSetNotifyEventQueue2((sys_ipc_key_t)key,(uint64_t)source,(uint64_t)flag);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraRemoveNotifyEventQueue")))
++static inline s32 cameraRemoveNotifyEventQueue(u64 key)
++{
++	return cellCameraRemoveNotifyEventQueue((sys_ipc_key_t)key);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraRemoveNotifyEventQueue2")))
++static inline s32 cameraRemoveNotifyEventQueue2(u64 key)
++{
++	return cellCameraRemoveNotifyEventQueue2((sys_ipc_key_t)key);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraReadComplete")))
++static inline s32 cameraReadComplete(s32 num,u32 buf,u32 arg)
++{
++	return cellCameraReadComplete(num,(uint32_t)buf,(uint32_t)arg);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraPrepExtensionUnit")))
++static inline s32 cameraPrepExtensionUnit(s32 num,u8* guidExtCode)
++{
++	return cellCameraPrepExtensionUnit(num,(uint8_t *)guidExtCode);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraCtrlExtensionUnit")))
++static inline s32 cameraCtrlExtensionUnit(s32 num,u8 req,u16 wval,u16 wlen,u8* data)
++{
++	return cellCameraCtrlExtensionUnit(num,(uint8_t)req,(uint16_t)wval,(uint16_t)wlen,(uint8_t *)data);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraGetExtensionUnit")))
++static inline s32 cameraGetExtensionUnit(s32 num,u16 wval,u16 wlen,u8* data)
++{
++	return cellCameraGetExtensionUnit(num,(uint16_t)wval,(uint16_t)wlen,(uint8_t *)data);
++}
++
++__attribute__((deprecated("PSL1GHT-compat: use cellCameraSetExtensionUnit")))
++static inline s32 cameraSetExtensionUnit(s32 num,u16 wval,u16 wlen,u8* data)
++{
++	return cellCameraSetExtensionUnit(num,(uint16_t)wval,(uint16_t)wlen,(uint8_t *)data);
++}
++#else
+ s32 cameraInit();
+ s32 cameraEnd();
+ s32 cameraStart(s32 num);
+@@ -182,6 +331,7 @@ s32 cameraPrepExtensionUnit(s32 num,u8* guidExtCode);
+ s32 cameraCtrlExtensionUnit(s32 num,u8 req,u16 wval,u16 wlen,u8* data);
+ s32 cameraGetExtensionUnit(s32 num,u16 wval,u16 wlen,u8* data);
+ s32 cameraSetExtensionUnit(s32 num,u16 wval,u16 wlen,u8* data);
++#endif
+ 
+ #ifdef __cplusplus
+ 	}
