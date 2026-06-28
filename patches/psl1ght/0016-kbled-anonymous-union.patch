@@ -1,0 +1,36 @@
+Subject: [PATCH] io/kb: expose keyboard bitfields through anonymous unions
+
+PSL1GHT samples access KbLed and KbMkey as flat layouts (`leds`,
+`num_lock`, `mkeys`, `l_ctrl`, etc.).  The current header names both
+the unions and their inner structs, which hides those members behind
+implementation names.
+
+Make both aggregate pairs anonymous so the documented flat access
+works without changing the ABI layout.
+
+diff --git a/ppu/include/io/kb.h b/ppu/include/io/kb.h
+index 173a8c0..ce73d0f 100644
+--- a/ppu/include/io/kb.h
++++ b/ppu/include/io/kb.h
+@@ -146,8 +146,8 @@ typedef struct KbLed {
+ 		u32 scroll_lock	: 1;	/*!< \brief LED Scroll Lock 0:OFF 1:ON Bit2 */
+ 		u32 caps_lock	: 1;	/*!< \brief LED Caps Lock 0:OFF 1:ON Bit1 */
+ 		u32 num_lock	: 1;	/*!< \brief LED Num Lock 0:OFF 1:ON Bit0 LSB */
+-		}_KbLedS;
+-	}_KbLedU;
++		};
++	};
+ } KbLed;
+ 
+ /*! \brief Keyboard Modifier Key State. */
+@@ -165,8 +165,8 @@ typedef struct KbMkey {
+ 		u32 l_shift		: 1;	/*!< \brief Modifier Key Left SHIFT 0:OFF 1:ON Bit1 */
+ 		u32 l_ctrl		: 1;	/*!< \brief Modifier Key Left CTRL 0:OFF 1:ON Bit0 LSB */
+ 		/* For Macintosh Keyboard ALT & WIN correspond respectively to OPTION & APPLE keys */
+-		}_KbMkeyS;
+-	}_KbMkeyU;
++		};
++	};
+ } KbMkey;
+ 
+ /*! \brief Keyboard input data data structure. */
