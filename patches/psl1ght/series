@@ -10,3 +10,6 @@
 0010-psl1ght-sprx-trampoline-ilp32.patch
 0011-crt-ilp32-compact-opd.patch
 0012-liblv2-drop-sprx-duplicate-trampolines.patch
+0013-psl1ght-compat-camelcase-type-aliases.patch
+0014-psl1ght-compat-sysutil-callbacks.patch
+0015-audio-portparam-attr-reference-align.patch
