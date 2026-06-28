@@ -47,10 +47,16 @@ static void sysutil_exit_callback(u64 status,u64 param,void *usrdata)
 
 void blit_simple(Bitmap *bitmap, u32 dstX, u32 dstY, u32 srcX, u32 srcY, u32 w, u32 h)
 {
+  /* PS3DK: srcX/srcY are INTEGER pixel offsets into the source bitmap here
+   * (rsxSetTransferImage uses them as srcBlockOffset = bpp*(srcX + x - dstX)),
+   * NOT fixed-point.  Upstream wrapped them in rsxGetFixedUint16 (=*16) — a
+   * copy-paste from blit_scale where the scaled NV3089 path DOES want fixed
+   * point — which sends the source read far past the bitmap for srcX/srcY>0
+   * (the animated-letter blits), corrupting the NV3089 transfer. */
   rsxSetTransferImage(context, GCM_TRANSFER_LOCAL_TO_LOCAL,
     color_offset[curr_fb], color_pitch, dstX-w/2, dstY-h/2,
-    bitmap->offset, bitmap->width*4, rsxGetFixedUint16((float)srcX),
-    rsxGetFixedUint16((float)srcY), w, h, 4);
+    bitmap->offset, bitmap->width*4, srcX,
+    srcY, w, h, 4);
 }
 
 void blit_data(Bitmap *bitmap, u32 dstX, u32 dstY, u32 srcX, u32 srcY, u32 w, u32 h)
