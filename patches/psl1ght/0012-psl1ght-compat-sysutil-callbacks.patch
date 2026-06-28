@@ -1,0 +1,54 @@
+Subject: [PATCH] sysutil: PSL1GHT-compat sysUtil* callback wrappers
+
+Our SDK exports the reference-SDK cellSysutil* names; PSL1GHT samples
+call sysUtilCheckCallback/RegisterCallback/UnregisterCallback. Add
+deprecated static-inline forwarders so unmodified samples link (each
+use warns to switch to cellSysutil*).
+
+diff --git a/ppu/include/sysutil/sysutil.h b/ppu/include/sysutil/sysutil.h
+index 85f1655..02d1518 100644
+--- a/ppu/include/sysutil/sysutil.h
++++ b/ppu/include/sysutil/sysutil.h
+@@ -113,7 +113,16 @@ This function usually is called in the main loop of a program, to regularly
+ check for new events. In case of an event, the callback function (previously
+ registered using \ref sysUtilRegisterCallback) is called.
+ */
++/* PSL1GHT-compat: our SDK exports the reference-SDK cellSysutil* names;
++ * these deprecated wrappers let unmodified PSL1GHT samples build (each use
++ * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them. */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++#include <cell/sysutil.h>
++__attribute__((deprecated("PSL1GHT-compat: use cellSysutilCheckCallback")))
++static inline s32 sysUtilCheckCallback(void) { return cellSysutilCheckCallback(); }
++#else
+ s32 sysUtilCheckCallback();
++#endif
+ 
+ 
+ /*! \brief Unregister a callback function.
+@@ -121,7 +130,12 @@ s32 sysUtilCheckCallback();
+ This function usually is called at the end of a program to unregister the
+ event manager.
+ */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++__attribute__((deprecated("PSL1GHT-compat: use cellSysutilUnregisterCallback")))
++static inline s32 sysUtilUnregisterCallback(s32 slot) { return cellSysutilUnregisterCallback(slot); }
++#else
+ s32 sysUtilUnregisterCallback(s32 slot);
++#endif
+ 
+ /*! \brief Register a callback function for system events.
+ 
+@@ -139,7 +153,12 @@ to all 4 slots in order, so each manager will see all of them.
+   \param usrdata Pointer to user data, to be sent to callback function.
+       May be \c NULL.
+ */
++#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++__attribute__((deprecated("PSL1GHT-compat: use cellSysutilRegisterCallback")))
++static inline s32 sysUtilRegisterCallback(s32 slot,sysutilCallback cb,void *usrdata) { return cellSysutilRegisterCallback(slot,(CellSysutilCallback)cb,usrdata); }
++#else
+ s32 sysUtilRegisterCallback(s32 slot,sysutilCallback cb,void *usrdata);
++#endif
+ 
+ s32 sysUtilGetSystemParamInt(s32 id,s32 *value);
+ s32 sysUtilGetSystemParamString(s32 id,char *buf,u32 bufsize);
