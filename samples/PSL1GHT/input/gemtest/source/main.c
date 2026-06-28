@@ -144,7 +144,8 @@ init_screen ()
   assert (host_addr != NULL);
 
   // Initilise RSX, which sets up the command buffer and shared IO memory
-  context = rsxInit (0x10000, 1024 * 1024, host_addr);
+  // PS3DK: updated from PSL1GHT's old 3-arg rsxInit; our SDK returns the context via an out-param (4-arg form) -- see samples/PSL1GHT/graphics/blitting/rsxutil for the current pattern.
+  rsxInit (&context, 0x10000, 1024 * 1024, host_addr);
   assert (context != NULL);
 
   videoState state;

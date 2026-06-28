@@ -1,0 +1,50 @@
+Subject: [PATCH] rsx/sysmodule: add legacy sample constant aliases
+
+Older bundled PSL1GHT samples use GCM_TF_* aliases for gcmSurface fields
+and SYSMODULE_CAM for the camera module. Add guarded #define aliases to
+the current GCM_SURFACE_* and SYSMODULE_CAMERA names.
+
+diff --git a/ppu/include/rsx/gcm_sys.h b/ppu/include/rsx/gcm_sys.h
+index 18876f2..836ca3e 100644
+--- a/ppu/include/rsx/gcm_sys.h
++++ b/ppu/include/rsx/gcm_sys.h
+@@ -103,6 +103,25 @@
+ #define GCM_SURFACE_SQUARE_CENTERED_4				4
+ #define GCM_SURFACE_SQUARE_ROTATED_4				5
+ 
++/* PSL1GHT-compat: older bundled samples used GCM_TF_* names for
++ * gcmSurface fields.  Keep source compatibility while the canonical names
++ * stay on the GCM_SURFACE_* surface constants. */
++#ifndef GCM_TF_COLOR_X8R8G8B8
++#define GCM_TF_COLOR_X8R8G8B8						GCM_SURFACE_X8R8G8B8
++#endif
++#ifndef GCM_TF_TARGET_0
++#define GCM_TF_TARGET_0								GCM_SURFACE_TARGET_0
++#endif
++#ifndef GCM_TF_ZETA_Z16
++#define GCM_TF_ZETA_Z16								GCM_SURFACE_ZETA_Z16
++#endif
++#ifndef GCM_TF_TYPE_LINEAR
++#define GCM_TF_TYPE_LINEAR							GCM_SURFACE_TYPE_LINEAR
++#endif
++#ifndef GCM_TF_CENTER_1
++#define GCM_TF_CENTER_1								GCM_SURFACE_CENTER_1
++#endif
++
+ /*! \brief blue color component */
+ #define	GCM_COLOR_MASK_B							0x00000001
+ /*! \brief green color component */
+diff --git a/ppu/include/sysmodule/sysmodule.h b/ppu/include/sysmodule/sysmodule.h
+index 0cb9c56..b9b932c 100644
+--- a/ppu/include/sysmodule/sysmodule.h
++++ b/ppu/include/sysmodule/sysmodule.h
+@@ -92,6 +92,9 @@ typedef enum
+ 	SYSMODULE_ADEC_MP3 = 0xf01e,
+ } sysModuleId;
+ 
++#ifndef SYSMODULE_CAM
++#define SYSMODULE_CAM								SYSMODULE_CAMERA
++#endif
+ 
+ s32 sysModuleLoad(sysModuleId id);
+ s32 sysModuleUnload(sysModuleId id);
