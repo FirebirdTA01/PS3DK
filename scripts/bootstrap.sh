@@ -189,12 +189,12 @@ fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-12.4.0"
 fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-9.5.0"
 
 # Binutils + GDB share one repo.
-clone_partial "https://sourceware.org/git/binutils-gdb.git" "$UPSTREAM_DIR/binutils-gdb"
+clone_partial "git://sourceware.org/git/binutils-gdb.git" "$UPSTREAM_DIR/binutils-gdb"
 fetch_tag "$UPSTREAM_DIR/binutils-gdb" "binutils-2_42"
 fetch_tag "$UPSTREAM_DIR/binutils-gdb" "gdb-14.2-release"
 
 # Newlib.
-clone_partial "https://sourceware.org/git/newlib-cygwin.git" "$UPSTREAM_DIR/newlib-cygwin"
+clone_partial "git://sourceware.org/git/newlib-cygwin.git" "$UPSTREAM_DIR/newlib-cygwin"
 fetch_tag "$UPSTREAM_DIR/newlib-cygwin" "newlib-4.4.0"
 
 # -----------------------------------------------------------------------------
