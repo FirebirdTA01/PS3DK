@@ -284,29 +284,64 @@ heapFree(heap_cntrl *theheap, void *ptr)
 
 	heap_block *block = __heap_block_of_alloc_area((uintptr_t)ptr,
 							theheap->page_size);
-	uintptr_t prev_size = block->prev_size;
+	if (!__heap_block_in(theheap, block)) {
+		sysSpinlockUnlock(&theheap->lock);
+		return false;
+	}
+
 	uintptr_t block_size = __heap_block_size(block);
 	heap_block *next_block = __heap_block_at(block, block_size);
+	uintptr_t size = block_size;
+	bool prev_free = false;
+	bool next_free = false;
 
-	if (__heap_prev_used(next_block))
-		__heap_block_insert_after(__heap_head(theheap), block);
-	else
-		__heap_block_replace(next_block, block);
+	if (!__heap_block_in(theheap, next_block) ||
+	    !__heap_prev_used(next_block)) {
+		sysSpinlockUnlock(&theheap->lock);
+		return false;
+	}
+
+	uintptr_t next_block_size = __heap_block_size(next_block);
+	heap_block *next_next_block = __heap_block_at(next_block, next_block_size);
+	if (next_block != theheap->last_block) {
+		if (!__heap_block_in(theheap, next_next_block)) {
+			sysSpinlockUnlock(&theheap->lock);
+			return false;
+		}
+		next_free = !__heap_prev_used(next_next_block);
+	}
 
 	if (!__heap_prev_used(block)) {
+		uintptr_t prev_size = block->prev_size;
 		heap_block *prev_block = __heap_block_prev(block);
-		prev_size += __heap_block_size(prev_block);
+
+		if (!__heap_block_in(theheap, prev_block) ||
+		    !__heap_prev_used(prev_block)) {
+			sysSpinlockUnlock(&theheap->lock);
+			return false;
+		}
+
+		prev_free = true;
+		size += prev_size;
 		block = prev_block;
 	}
 
-	block->size &= HEAP_BLOCK_PREV_USED;
-	block->size += prev_size;
+	if (next_free)
+		size += next_block_size;
 
-	if (!__heap_prev_used(next_block))
-		block->size += __heap_block_size(next_block);
+	if (prev_free) {
+		if (next_free)
+			__heap_block_remove(next_block);
+	} else if (next_free) {
+		__heap_block_replace(next_block, block);
+	} else {
+		__heap_block_insert_after(__heap_head(theheap), block);
+	}
 
-	next_block = __heap_block_at(block, __heap_block_size(block));
-	next_block->prev_size = __heap_block_size(block);
+	/* Adjacent free blocks are coalesced, so the merged block's predecessor is used. */
+	block->size = size | HEAP_BLOCK_PREV_USED;
+	next_block = __heap_block_at(block, size);
+	next_block->prev_size = size;
 	next_block->size &= ~HEAP_BLOCK_PREV_USED;
 
 	sysSpinlockUnlock(&theheap->lock);

@@ -112,6 +112,13 @@ __heap_block_of_alloc_area(uintptr_t alloc_begin, uintptr_t page_size)
 	return (heap_block *)(alloc_begin - HEAP_BLOCK_HEADER_SIZE);
 }
 
+static __inline__ bool
+__heap_block_in(const heap_cntrl *theheap, const heap_block *block)
+{
+	return (uintptr_t)block >= (uintptr_t)theheap->first_block &&
+	       (uintptr_t)block <= (uintptr_t)theheap->last_block;
+}
+
 static __inline__ uintptr_t
 __heap_align_up(uintptr_t value, uintptr_t alignment)
 {
