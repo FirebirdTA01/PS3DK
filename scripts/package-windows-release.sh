@@ -235,6 +235,55 @@ else
     warn "No --tools-zip provided and $STAGE_HOST_TOOLS_BIN is empty.  The release zip will ship without rsx-cg-compiler.exe / make_self.exe / nidgen.exe / etc.  Either run scripts/build-host-tools-windows.sh first (to populate the staged dir), or pass --tools-zip=PATH pointing at release.yml's build-host-tools-windows artifact."
 fi
 
+# ---------------------------------------------------------------------------
+# Symlink materialization (Windows releases must contain ZERO symlink entries)
+# ---------------------------------------------------------------------------
+# sdk/Makefile and scripts/build-cell-stub-archives.sh install several stub
+# aliases as symlinks (libsysutil.a, libdbgfont_gcm.a in both ilp32 and lp64,
+# plus libgcm_sys.a, libio.a, libusb.a).  cp -a above preserves them into the
+# stage tree.  That is correct for a Linux source-tree install and wrong for a
+# Windows release: Explorer's built-in extractor and stock 7-Zip do not create
+# NTFS symlinks, so an alias shipped as a link arrives as a stub file or not at
+# all, and samples that link -lsysutil / -lgcm_sys / -lio fail at link time with
+# no actionable error.
+#
+# Fix the class, not the instance: dereference every symlink in the stage tree
+# rather than enumerating known aliases, so a new alias added later cannot
+# silently regress the package.  cp -a preserves symlinks *inside* a copied
+# directory, hence the convergence loop.
+materialize_stage_symlinks() {
+    say "Materializing symlinks in the Windows stage tree"
+    local pass=0 total=0 n link target stage_real
+    # readlink -f / find -printf are GNU-isms.  This script runs under WSL /
+    # Linux only (it cross-builds a Windows zip); do not "port" them to BSD.
+    stage_real="$(readlink -f "$STAGE_DIR")"
+    while :; do
+        n=0
+        while IFS= read -r -d '' link; do
+            target="$(readlink -f "$link" 2>/dev/null || true)"
+            if [[ -z "$target" || ! -e "$target" ]]; then
+                die "Dangling symlink in stage tree: ${link#"$STAGE_DIR"/} -> $(readlink "$link")"
+            fi
+            # readlink -f happily escapes the stage tree, which would vendor a
+            # file from the build prefix into the release with no trace.  Warn
+            # loudly and name the source rather than doing it silently.
+            if [[ "$target" != "$stage_real"/* ]]; then
+                warn "Symlink target outside the stage tree: ${link#"$STAGE_DIR"/} -> $target (vendoring it into the release)"
+            fi
+            rm -rf "$link"
+            cp -a "$target" "$link"
+            n=$((n + 1))
+        done < <(find "$STAGE_DIR" -type l -print0)
+        total=$((total + n))
+        [[ "$n" -eq 0 ]] && break
+        pass=$((pass + 1))
+        if [[ "$pass" -ge 8 ]]; then
+            die "Symlink materialization did not converge after $pass passes"
+        fi
+    done
+    say "Materialized $total symlink(s) as regular files"
+}
+
 validate_windows_release_payload() {
     say "Validating Windows release payload"
 
@@ -323,9 +372,20 @@ validate_windows_release_payload() {
         done
     fi
 
+
+    # Zero symlink entries: materialize_stage_symlinks() runs before this, so
+    # anything still a link means a new alias slipped past it.  Explorer and
+    # stock 7-Zip do not create NTFS symlinks, so shipping one produces a stub
+    # file and an unactionable ld error at the user's first build.
+    while IFS= read -r stray; do
+        [[ -n "$stray" ]] || continue
+        warn "Symlink left in Windows stage tree (must be a real file): $stray"
+        missing=1
+    done < <(find "$STAGE_DIR" -type l -printf '%P\n' 2>/dev/null)
     [[ "$missing" -eq 0 ]] || die "Windows release payload is incomplete. Run scripts/build-cell-stub-archives.sh and provide the complete Windows host-tools artifact via --tools-zip, or run scripts/build-host-tools-windows.sh before packaging."
 }
 
+materialize_stage_symlinks
 validate_windows_release_payload
 
 # 5. setup.cmd: a one-shot environment activator for Windows users.
@@ -491,11 +551,36 @@ fi
 # 7. Zip + sha256.
 say "Creating $ZIP_PATH"
 rm -f "$ZIP_PATH" "$ZIP_PATH.sha256"
-# -y preserves symlinks as symlink entries (libsysutil.a -> libsysutil_stub.a
-# alias pair installed by sdk/Makefile). Default Windows extractors may not
-# materialize NTFS symlinks (cmake's IS_SYMLINK check in ps3-self.cmake then
-# trips); 7-Zip with admin / tar via Git Bash / WSL all preserve them.
-(cd "$OUTPUT_DIR" && zip -r -y -q -9 "$STAGE_NAME.zip" "$STAGE_NAME")
+# No -y: materialize_stage_symlinks() has already dereferenced every alias into
+# a real file, so there are no symlinks left to preserve.  Storing them as
+# symlink entries was the bug -- Explorer and stock 7-Zip do not create NTFS
+# symlinks, so libsysutil.a / libgcm_sys.a / libio.a arrived as stubs and
+# -lsysutil / -lgcm_sys / -lio failed at the user's first build.
+(cd "$OUTPUT_DIR" && zip -r -q -9 "$STAGE_NAME.zip" "$STAGE_NAME")
+# The contract is zero symlink entries in the ZIP -- the stage-tree assertion
+# above checks the inputs, this checks the artifact users actually receive.
+assert_zip_has_no_symlinks() {
+    local zip="$1"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$zip" <<'PY' || die "Windows release zip contains symlink entries (Explorer/7-Zip will not materialize them)"
+import stat, sys, zipfile
+bad = [i.filename for i in zipfile.ZipFile(sys.argv[1]).infolist()
+       if stat.S_ISLNK(i.external_attr >> 16)]
+for name in bad:
+    print("  symlink entry in zip: %s" % name, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+    elif command -v zipinfo >/dev/null 2>&1; then
+        if zipinfo -1 -l "$zip" >/dev/null 2>&1 && zipinfo "$zip" | grep -q '^l'; then
+            zipinfo "$zip" | grep '^l' >&2
+            die "Windows release zip contains symlink entries (Explorer/7-Zip will not materialize them)"
+        fi
+    else
+        warn "Neither python3 nor zipinfo available; cannot verify the zip is symlink-free."
+    fi
+}
+assert_zip_has_no_symlinks "$ZIP_PATH"
+
 (cd "$OUTPUT_DIR" && sha256sum "$STAGE_NAME.zip" > "$STAGE_NAME.zip.sha256")
 
 say "=== Done ==="
