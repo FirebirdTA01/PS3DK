@@ -288,79 +288,78 @@ validate_windows_release_payload() {
     say "Validating Windows release payload"
 
     local missing=0
-    local required_bins=(
-        abi-verify.exe
-        bin2s.exe
-        cgcomp.exe
-        coverage-report.exe
-        fself.exe
-        make_self.exe
-        make_self_npdrm.exe
-        nidgen.exe
-        package_finalize.exe
-        rsx-cg-compiler.exe
-        sprxlinker.exe
-    )
-    local required_host_files=(
-        pkg.py
-        sfo.py
-        fself.py
-        Struct.py
-        sfo.xml
-        crypt.c
-        build_pkgcrypt.py
-    )
-    local required_ppu_libs=(
-        libaudio_stub.a
-        libc_stub.a
-        libfs_stub.a
-        libgcm_sys.a
-        libio.a
-        libjpgdec_stub.a
-        libl10n_stub.a
-        liblv2_stub.a
-        libpngdec_stub.a
-        librtc_stub.a
-        libspurs_jq_stub.a
-        libspurs_stub.a
-        libsync2_stub.a
-        libsync_stub.a
-        libsysmodule_stub.a
-        libsysutil_ap_stub.a
-        libsysutil_audio_out_stub.a
-        libsysutil_imejp_stub.a
-        libsysutil_music_decode_stub.a
-        libsysutil_music_export_stub.a
-        libsysutil_music_stub.a
-        libsysutil_savedata_extra_stub.a
-        libsysutil_savedata_stub.a
-        libsysutil_screenshot_stub.a
-        libsysutil_stub.a
-        libsysutil_subdisplay_stub.a
-    )
 
-    for exe in "${required_bins[@]}"; do
-        if [[ ! -f "$STAGE_DIR/bin/$exe" ]]; then
-            warn "Missing required Windows host tool: bin/$exe"
+    # Required artifacts come from cmake/ps3-required-artifacts.txt, the single
+    # source of truth shared with cmake/ps3-self.cmake's freshness probe.  These
+    # two lists drifted before: the packager validated only flat ppu/lib stubs
+    # while the probe also required lp64 variants, liblv2.a, librsx.a and
+    # cell/sdk_version.h, so a release could validate clean and then fail the
+    # user at configure time.  Do not re-inline these lists.
+    local manifest="$PS3_TOOLCHAIN_ROOT/cmake/ps3-required-artifacts.txt"
+    [[ -f "$manifest" ]] || die "Required-artifact manifest missing: $manifest"
+
+    local required_bins=() required_paths=() alias_rows=()
+    local _cat _path _target
+    while read -r _cat _path _target; do
+        [[ -z "$_cat" || "$_cat" == \#* ]] && continue
+        case "$_cat" in
+            host_bin)
+                required_bins+=("${_path#bin/}")
+                required_paths+=("$_path")
+                ;;
+            host_file|ppu_stub|sdk_core)
+                required_paths+=("$_path")
+                ;;
+            alias)
+                [[ -n "$_target" ]] || die "alias row without a target in $manifest: $_path"
+                alias_rows+=("$_path|$_target")
+                ;;
+            *)
+                # Die, don't warn: a typo'd category would otherwise validate as
+                # nothing at all, which is how a required artifact goes missing
+                # without anyone noticing.
+                die "Unknown category '$_cat' in $manifest: $_path"
+                ;;
+        esac
+    done < "$manifest"
+
+    [[ "${#required_paths[@]}" -gt 0 ]] || die "No required artifacts parsed from $manifest"
+    say "  ${#required_paths[@]} required artifacts from $(basename "$manifest")"
+
+    for rel in "${required_paths[@]}"; do
+        if [[ ! -f "$STAGE_DIR/$rel" ]]; then
+            warn "Missing required artifact: $rel"
             missing=1
         fi
     done
-    for file in "${required_host_files[@]}"; do
-        if [[ ! -f "$STAGE_DIR/bin/$file" ]]; then
-            warn "Missing required Windows host helper: bin/$file"
+
+    # Stub aliases: materialize_stage_symlinks() has already dereferenced these
+    # into real files, so in a Windows package the alias must be byte-identical
+    # to its target.  A symlink here would mean materialization was skipped.
+    local _arow _apath _atarget _adir
+    for _arow in "${alias_rows[@]}"; do
+        _apath="${_arow%%|*}"
+        _atarget="${_arow##*|}"
+        _adir="$(dirname "$STAGE_DIR/$_apath")"
+        if [[ -L "$STAGE_DIR/$_apath" ]]; then
+            warn "Stub alias is still a symlink (Windows extractors cannot restore it): $_apath"
+            missing=1
+        elif [[ ! -f "$STAGE_DIR/$_apath" ]]; then
+            warn "Missing stub alias: $_apath (expected a copy of $_atarget)"
+            missing=1
+        elif [[ ! -f "$_adir/$_atarget" ]]; then
+            warn "Stub alias target missing: $_apath -> $_atarget"
+            missing=1
+        elif ! cmp -s "$STAGE_DIR/$_apath" "$_adir/$_atarget"; then
+            warn "Stub alias is not byte-identical to its target: $_apath != $_atarget"
             missing=1
         fi
     done
+
     if [[ ! -f "$STAGE_DIR/bin/cg.dll" ]]; then
         warn "Optional legacy Cg runtime not staged: bin/cg.dll. cgcomp.exe may not run, but rsx-cg-compiler.exe is packaged and is the supported shader compiler."
     fi
 
-    for lib in "${required_ppu_libs[@]}"; do
-        if [[ ! -f "$STAGE_DIR/ppu/lib/$lib" ]]; then
-            warn "Missing required PPU stub/archive: ppu/lib/$lib"
-            missing=1
-        fi
-    done
 
     if command -v file >/dev/null 2>&1; then
         for exe in "${required_bins[@]}"; do

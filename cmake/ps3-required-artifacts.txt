@@ -1,0 +1,101 @@
+# Required artifacts of an installed PS3DK tree.
+#
+# SINGLE SOURCE OF TRUTH.  Read by BOTH:
+#   - cmake/ps3-self.cmake        (installed-SDK freshness probe, source-tree/Unix installs)
+#   - scripts/package-windows-release.sh (Windows release payload validation)
+#
+# The two lists drifted before: the packager validated only flat ppu/lib stubs
+# while the cmake probe additionally required lp64 variants, liblv2.a, librsx.a
+# and cell/sdk_version.h -- so a release could validate clean and then fail at
+# configure time.  spu-elf-to-ppu-obj.exe was absent from both, and shipped
+# missing from every Windows release until v0.10.708.
+#
+# Format: <category> <path relative to the install root ($PS3DK / stage dir)>
+# Categories:
+#   host_bin   Windows host tool executable   (package validation only)
+#   host_file  Windows host helper data file  (package validation only)
+#   ppu_stub   PPU stub/runtime archive       (package validation)
+#   sdk_core   core SDK artifact              (package validation AND cmake probe)
+#   alias      stub alias + its target        (package validation AND cmake probe)
+#
+# alias rows carry THREE fields: 'alias <path> <target>', where <target> is
+# relative to the alias's own directory.  sdk/Makefile and
+# scripts/build-cell-stub-archives.sh install these as symlinks; the Windows
+# packager materializes them into real copies (Explorer and 7-Zip do not create
+# NTFS symlinks, so shipping links produced ~17-byte stubs and an unactionable
+# ld error).  The assertion is therefore: exists AND (symlink resolving to
+# <target> OR byte-identical to <target>).  Seeded from the real install, not
+# by hand -- note libusb.a's target is libusbd_stub.a, which does not follow
+# from the alias name.
+
+# --- Windows host tools -------------------------------------------------
+host_bin  bin/abi-verify.exe
+host_bin  bin/bin2s.exe
+host_bin  bin/cgcomp.exe
+host_bin  bin/coverage-report.exe
+host_bin  bin/fself.exe
+host_bin  bin/make_self.exe
+host_bin  bin/make_self_npdrm.exe
+host_bin  bin/nidgen.exe
+host_bin  bin/package_finalize.exe
+host_bin  bin/rsx-cg-compiler.exe
+host_bin  bin/sprxlinker.exe
+host_bin  bin/spu-elf-to-ppu-obj.exe
+
+# --- Windows host helper files ------------------------------------------
+host_file bin/Struct.py
+host_file bin/build_pkgcrypt.py
+host_file bin/crypt.c
+host_file bin/fself.py
+host_file bin/pkg.py
+host_file bin/sfo.py
+host_file bin/sfo.xml
+
+# --- PPU stub / runtime archives ----------------------------------------
+ppu_stub  ppu/lib/libaudio_stub.a
+ppu_stub  ppu/lib/libc_stub.a
+ppu_stub  ppu/lib/libfs_stub.a
+ppu_stub  ppu/lib/libgcm_sys.a
+ppu_stub  ppu/lib/libio.a
+ppu_stub  ppu/lib/libjpgdec_stub.a
+ppu_stub  ppu/lib/libl10n_stub.a
+ppu_stub  ppu/lib/liblv2_stub.a
+ppu_stub  ppu/lib/libpngdec_stub.a
+ppu_stub  ppu/lib/librtc_stub.a
+ppu_stub  ppu/lib/libspurs_jq_stub.a
+ppu_stub  ppu/lib/libspurs_stub.a
+ppu_stub  ppu/lib/libsync2_stub.a
+ppu_stub  ppu/lib/libsync_stub.a
+ppu_stub  ppu/lib/libsysmodule_stub.a
+ppu_stub  ppu/lib/libsysutil_ap_stub.a
+ppu_stub  ppu/lib/libsysutil_audio_out_stub.a
+ppu_stub  ppu/lib/libsysutil_imejp_stub.a
+ppu_stub  ppu/lib/libsysutil_music_decode_stub.a
+ppu_stub  ppu/lib/libsysutil_music_export_stub.a
+ppu_stub  ppu/lib/libsysutil_music_stub.a
+ppu_stub  ppu/lib/libsysutil_savedata_extra_stub.a
+ppu_stub  ppu/lib/libsysutil_savedata_stub.a
+ppu_stub  ppu/lib/libsysutil_screenshot_stub.a
+ppu_stub  ppu/lib/libsysutil_stub.a
+ppu_stub  ppu/lib/libsysutil_subdisplay_stub.a
+
+# --- Core SDK artifacts (cmake freshness probe requires these) ----------
+sdk_core  ppu/include/cell/sdk_version.h
+sdk_core  ppu/lib/libsysutil_stub.a
+sdk_core  ppu/lib/lp64/libsysutil_stub.a
+sdk_core  ppu/lib/liblv2.a
+sdk_core  ppu/lib/lp64/liblv2.a
+sdk_core  ppu/lib/librsx.a
+sdk_core  ppu/lib/lp64/librsx.a
+
+# --- Stub aliases (must exist as symlink->target or byte-identical copy) --
+alias     ppu/lib/libdbgfont_gcm.a         libdbgfont.a
+alias     ppu/lib/libgcm_sys.a             libgcm_sys_stub.a
+alias     ppu/lib/libio.a                  libio_stub.a
+alias     ppu/lib/libsysutil.a             libsysutil_stub.a
+alias     ppu/lib/libusb.a                 libusbd_stub.a
+alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
+alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
+alias     ppu/lib/lp64/libio.a             libio_stub.a
+alias     ppu/lib/lp64/libsysutil.a        libsysutil_stub.a
+alias     ppu/lib/lp64/libusb.a            libusbd_stub.a

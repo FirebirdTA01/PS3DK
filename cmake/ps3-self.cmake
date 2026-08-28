@@ -72,6 +72,71 @@ endif()
 if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
     set(_PS3_SELF_SDK_INSTALL_PROBED TRUE)
 
+    # Required artifacts come from ps3-required-artifacts.txt, the single
+    # source of truth shared with scripts/package-windows-release.sh's
+    # payload validation.  The two lists drifted before -- the packager
+    # validated only flat ppu/lib stubs while this probe also required the
+    # lp64 variants, liblv2.a, librsx.a and cell/sdk_version.h -- so a
+    # release could validate clean and then fail here at configure time.
+    # Do not re-inline this list.
+    set(_ps3_manifest_file "${_PS3_SELF_CMAKE_DIR}/ps3-required-artifacts.txt")
+    if(NOT EXISTS "${_ps3_manifest_file}")
+        message(FATAL_ERROR
+            "ps3-self: required-artifact manifest missing: ${_ps3_manifest_file}")
+    endif()
+    file(STRINGS "${_ps3_manifest_file}" _ps3_sdk_core_lines REGEX "^sdk_core[ 	]+")
+    if(NOT _ps3_sdk_core_lines)
+        message(FATAL_ERROR
+            "ps3-self: no sdk_core entries parsed from ${_ps3_manifest_file}")
+    endif()
+    foreach(_line IN LISTS _ps3_sdk_core_lines)
+        string(REGEX REPLACE "^sdk_core[ 	]+" "" _rel "${_line}")
+        string(STRIP "${_rel}" _rel)
+        if(NOT EXISTS "${PS3DK}/${_rel}")
+            message(FATAL_ERROR
+                "ps3-self: required SDK artifact missing: ${PS3DK}/${_rel}"
+                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+        endif()
+    endforeach()
+
+    # Stub aliases, checked on EVERY host.  sdk/Makefile installs them as
+    # symlinks; the Windows packager materializes them into real copies because
+    # Explorer and 7-Zip cannot restore NTFS symlinks.  Accept either shape here
+    # -- the Unix block below additionally enforces strict symlink semantics for
+    # source-tree installs.  Before this ran on Windows, a broken alias produced
+    # a bare ld error with nothing pointing at the cause.
+    file(STRINGS "${_ps3_manifest_file}" _ps3_alias_lines REGEX "^alias[ 	]+")
+    foreach(_line IN LISTS _ps3_alias_lines)
+        string(REGEX REPLACE "^alias[ 	]+" "" _row "${_line}")
+        string(REGEX MATCH "^[^ 	]+" _rel "${_row}")
+        string(REGEX REPLACE "^[^ 	]+[ 	]+" "" _tgt "${_row}")
+        string(STRIP "${_tgt}" _tgt)
+        get_filename_component(_adir "${PS3DK}/${_rel}" DIRECTORY)
+        if(NOT EXISTS "${PS3DK}/${_rel}")
+            message(FATAL_ERROR
+                "ps3-self: required stub alias missing: ${PS3DK}/${_rel} (expected ${_tgt})"
+                "  Reinstall the SDK, or re-extract the release zip.")
+        endif()
+        # SHA-compare unconditionally rather than skipping symlinks: file(SHA256)
+        # reads THROUGH a symlink, so one code path covers the packaged copy, a
+        # correct symlink, AND a symlink pointing at the wrong file -- which an
+        # IS_SYMLINK early-out would have waved through.  The Unix block below
+        # separately enforces that source-tree installs use real symlinks.
+        if(NOT EXISTS "${_adir}/${_tgt}")
+            message(FATAL_ERROR
+                "ps3-self: stub alias target missing: ${_adir}/${_tgt}")
+        endif()
+        file(SHA256 "${PS3DK}/${_rel}" _ps3_alias_sha)
+        file(SHA256 "${_adir}/${_tgt}" _ps3_target_sha)
+        if(NOT _ps3_alias_sha STREQUAL _ps3_target_sha)
+            message(FATAL_ERROR
+                "ps3-self: stub alias ${_rel} does not match its target ${_tgt}."
+                "  Expected a symlink to it or a byte-identical copy.  A ~17-byte alias"
+                "  here means the zip was extracted by a tool that could not restore"
+                "  symlinks; re-extract with the packaged release, or reinstall the SDK.")
+        endif()
+    endforeach()
+
     if(CMAKE_HOST_UNIX)
         set(_ps3_manifest "${PS3DK}/.ps3dk-install-manifest")
         if(NOT EXISTS "${_ps3_manifest}")
@@ -124,33 +189,25 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
                 "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
         endif()
 
-        foreach(path
-            "${PS3DK}/ppu/include/cell/sdk_version.h"
-            "${PS3DK}/ppu/lib/libsysutil_stub.a"
-            "${PS3DK}/ppu/lib/lp64/libsysutil_stub.a"
-            "${PS3DK}/ppu/lib/liblv2.a"
-            "${PS3DK}/ppu/lib/lp64/liblv2.a"
-            "${PS3DK}/ppu/lib/librsx.a"
-            "${PS3DK}/ppu/lib/lp64/librsx.a")
-            if(NOT EXISTS "${path}")
-                message(FATAL_ERROR
-                    "ps3-self: required SDK artifact missing: ${path}\n"
-                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
-            endif()
-        endforeach()
 
-        foreach(alias
-            "${PS3DK}/ppu/lib/libsysutil.a"
-            "${PS3DK}/ppu/lib/lp64/libsysutil.a")
-            if(NOT IS_SYMLINK "${alias}")
+        # Source-tree installs are strict: the aliases must be real symlinks
+        # pointing at their target, which is what sdk/Makefile installs.  The
+        # host-agnostic block above already accepted a byte-identical copy,
+        # which is what a Windows package legitimately ships.
+        foreach(_line IN LISTS _ps3_alias_lines)
+            string(REGEX REPLACE "^alias[ 	]+" "" _row "${_line}")
+            string(REGEX MATCH "^[^ 	]+" _rel "${_row}")
+            string(REGEX REPLACE "^[^ 	]+[ 	]+" "" _tgt "${_row}")
+            string(STRIP "${_tgt}" _tgt)
+            if(NOT IS_SYMLINK "${PS3DK}/${_rel}")
                 message(FATAL_ERROR
-                    "ps3-self: ${alias} must be a symlink to libsysutil_stub.a\n"
+                    "ps3-self: ${PS3DK}/${_rel} must be a symlink to ${_tgt}"
                     "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
             endif()
-            file(READ_SYMLINK "${alias}" _ps3_alias_target)
-            if(NOT _ps3_alias_target STREQUAL "libsysutil_stub.a")
+            file(READ_SYMLINK "${PS3DK}/${_rel}" _ps3_alias_target)
+            if(NOT _ps3_alias_target STREQUAL "${_tgt}")
                 message(FATAL_ERROR
-                    "ps3-self: ${alias} points to ${_ps3_alias_target}, expected libsysutil_stub.a\n"
+                    "ps3-self: ${PS3DK}/${_rel} points to ${_ps3_alias_target}, expected ${_tgt}"
                     "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
             endif()
         endforeach()

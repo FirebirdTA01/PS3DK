@@ -421,14 +421,27 @@ build_rust_tools() {
         cargo build --release --workspace --target x86_64-pc-windows-gnu)
 
     local rust_out="$PS3_TOOLCHAIN_ROOT/tools/target/x86_64-pc-windows-gnu/release"
-    for bin in nidgen abi-verify coverage-report; do
-        if [[ -f "$rust_out/${bin}.exe" ]]; then
-            install -m 0755 "$rust_out/${bin}.exe" "$STAGE_BIN/"
-            say "  staged ${bin}.exe"
-        else
-            warn "${bin}.exe not produced — check cargo log"
-        fi
+    # Stage whatever the workspace actually produced, rather than a hardcoded
+    # list.  A hardcoded list already failed once: spu-elf-to-ppu-obj is a
+    # tools/Cargo.toml workspace member and WAS cross-built by the --workspace
+    # build above, but this loop named only nidgen/abi-verify/coverage-report,
+    # so every Windows release silently shipped without it.  JOBBIN_WRAP then
+    # had no tool at all on Windows (ps3-self.cmake prefers our Rust tool and
+    # treats the reference spu_elf-to-ppu_obj.exe as an optional diff oracle),
+    # and hello-spurs-jq could not build from a release zip.
+    #
+    # cargo places only workspace bin targets at the release root; build-script
+    # and dependency artifacts live under build/ and deps/.  The specific names
+    # we promise are asserted by required_bins in package-windows-release.sh,
+    # so a missing tool fails validation rather than passing silently.
+    local staged=0 exe
+    for exe in "$rust_out"/*.exe; do
+        [[ -e "$exe" ]] || continue
+        install -m 0755 "$exe" "$STAGE_BIN/"
+        say "  staged $(basename "$exe")"
+        staged=$((staged + 1))
     done
+    [[ "$staged" -gt 0 ]] || die "cargo --workspace produced no .exe in $rust_out — check the cargo log"
 }
 
 # -----------------------------------------------------------------------------
