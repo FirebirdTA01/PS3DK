@@ -17,3 +17,4 @@
 0017-psl1ght-compat-msgdialog-wrappers.patch
 0018-psl1ght-compat-oskdialog-wrappers.patch
 0020-psl1ght-compat-gcm-sysmodule-aliases.patch
+0021-librsx-callback-abi-clobbers.patch
