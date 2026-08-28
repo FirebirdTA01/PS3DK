@@ -17,6 +17,8 @@
 #   ppu_stub   PPU stub/runtime archive       (package validation)
 #   sdk_core   core SDK artifact              (package validation AND cmake probe)
 #   alias      stub alias + its target        (package validation AND cmake probe)
+#   spu_lib    SPU runtime archive            (package validation)
+#   optional   shipped but not required       (with a reason; keeps the two-sided check honest)
 #
 # alias rows carry THREE fields: 'alias <path> <target>', where <target> is
 # relative to the alias's own directory.  sdk/Makefile and
@@ -51,33 +53,122 @@ host_file bin/pkg.py
 host_file bin/sfo.py
 host_file bin/sfo.xml
 
-# --- PPU stub / runtime archives ----------------------------------------
+# --- PPU runtime / stub archives ------------------------------------------
+# CRITERION: every library linked by at least one BUNDLED SAMPLE and shipped in
+# ppu/lib.  The original list held only 26 entries inherited from the packager's
+# hardcoded array, so 69 shipped-and-linked archives -- librt.a among them --
+# were never validated: a package could omit them and still pass.  Aliases are
+# covered by the alias rows below, not here.  lp64 variants are required only
+# for the sdk_core set; 23 of these are ilp32-only by design.
+ppu_stub  ppu/lib/libPSGL.a
+ppu_stub  ppu/lib/libPSGLU.a
+ppu_stub  ppu/lib/libadec_stub.a
+ppu_stub  ppu/lib/libatrac3multi_stub.a
+ppu_stub  ppu/lib/libatrac3plus_stub.a
+ppu_stub  ppu/lib/libaudio.a
 ppu_stub  ppu/lib/libaudio_stub.a
 ppu_stub  ppu/lib/libc_stub.a
+ppu_stub  ppu/lib/libcamera.a
+ppu_stub  ppu/lib/libcamera_stub.a
+ppu_stub  ppu/lib/libcellFont_stub.a
+ppu_stub  ppu/lib/libcellGame_stub.a
+ppu_stub  ppu/lib/libcellKey2char_stub.a
+ppu_stub  ppu/lib/libcelp8enc_stub.a
+ppu_stub  ppu/lib/libcelpenc_stub.a
+ppu_stub  ppu/lib/libcgb.a
+ppu_stub  ppu/lib/libdbgfont.a
+ppu_stub  ppu/lib/libdbgrsx.a
+ppu_stub  ppu/lib/libdmux_stub.a
+ppu_stub  ppu/lib/libface.a
+ppu_stub  ppu/lib/libfiber_stub.a
+ppu_stub  ppu/lib/libfontGcm.a
 ppu_stub  ppu/lib/libfs_stub.a
-ppu_stub  ppu/lib/libgcm_sys.a
-ppu_stub  ppu/lib/libio.a
+ppu_stub  ppu/lib/libgcm_cmd.a
+ppu_stub  ppu/lib/libgcm_sys_stub.a
+ppu_stub  ppu/lib/libgem.a
+ppu_stub  ppu/lib/libgifdec_stub.a
+ppu_stub  ppu/lib/libhttp.a
+ppu_stub  ppu/lib/libhttp_stub.a
+ppu_stub  ppu/lib/libhttp_util_stub.a
+ppu_stub  ppu/lib/libhttputil.a
+ppu_stub  ppu/lib/libio_stub.a
+ppu_stub  ppu/lib/libjpgdec.a
 ppu_stub  ppu/lib/libjpgdec_stub.a
+ppu_stub  ppu/lib/libjpgenc_stub.a
 ppu_stub  ppu/lib/libl10n_stub.a
+ppu_stub  ppu/lib/liblv2.a
+# liblv2_stub.a is pulled in by the PPU link spec, not by any sample's
+# target_link_libraries line -- it is why the generator check is a SUBSET test
+# rather than equality (equality would fail here and invite deleting it).
 ppu_stub  ppu/lib/liblv2_stub.a
+ppu_stub  ppu/lib/liblv2dbg_stub.a
+ppu_stub  ppu/lib/libmic_stub.a
+ppu_stub  ppu/lib/libmt19937.a
+ppu_stub  ppu/lib/libnet.a
+ppu_stub  ppu/lib/libnet_stub.a
+ppu_stub  ppu/lib/libnetctl_stub.a
+ppu_stub  ppu/lib/libovis_stub.a
+ppu_stub  ppu/lib/libpamf_stub.a
+ppu_stub  ppu/lib/libperf.a
 ppu_stub  ppu/lib/libpngdec_stub.a
+ppu_stub  ppu/lib/libpngenc_stub.a
+ppu_stub  ppu/lib/libresc_stub.a
+ppu_stub  ppu/lib/librsx.a
+ppu_stub  ppu/lib/librt.a
 ppu_stub  ppu/lib/librtc_stub.a
+ppu_stub  ppu/lib/librudp_stub.a
+ppu_stub  ppu/lib/libsail_rec_stub.a
+ppu_stub  ppu/lib/libsail_stub.a
+ppu_stub  ppu/lib/libsheap_stub.a
+ppu_stub  ppu/lib/libsimdmath.a
+ppu_stub  ppu/lib/libspumars.a
+ppu_stub  ppu/lib/libspumarstask.a
+ppu_stub  ppu/lib/libspurs.a
 ppu_stub  ppu/lib/libspurs_jq_stub.a
 ppu_stub  ppu/lib/libspurs_stub.a
+ppu_stub  ppu/lib/libsscgpu.a
+ppu_stub  ppu/lib/libssl.a
+ppu_stub  ppu/lib/libssl_stub.a
 ppu_stub  ppu/lib/libsync2_stub.a
 ppu_stub  ppu/lib/libsync_stub.a
+ppu_stub  ppu/lib/libsys_crashdump_stub.a
+ppu_stub  ppu/lib/libsysmodule.a
 ppu_stub  ppu/lib/libsysmodule_stub.a
 ppu_stub  ppu/lib/libsysutil_ap_stub.a
 ppu_stub  ppu/lib/libsysutil_audio_out_stub.a
+ppu_stub  ppu/lib/libsysutil_avc2_stub.a
 ppu_stub  ppu/lib/libsysutil_imejp_stub.a
 ppu_stub  ppu/lib/libsysutil_music_decode_stub.a
 ppu_stub  ppu/lib/libsysutil_music_export_stub.a
 ppu_stub  ppu/lib/libsysutil_music_stub.a
+ppu_stub  ppu/lib/libsysutil_np2_stub.a
+ppu_stub  ppu/lib/libsysutil_np_clans_stub.a
+ppu_stub  ppu/lib/libsysutil_np_commerce2_stub.a
+ppu_stub  ppu/lib/libsysutil_np_sns_stub.a
+ppu_stub  ppu/lib/libsysutil_np_stub.a
+ppu_stub  ppu/lib/libsysutil_np_trophy_stub.a
+ppu_stub  ppu/lib/libsysutil_np_tus_stub.a
+ppu_stub  ppu/lib/libsysutil_np_util_stub.a
+ppu_stub  ppu/lib/libsysutil_oskdialog_ext_stub.a
 ppu_stub  ppu/lib/libsysutil_savedata_extra_stub.a
 ppu_stub  ppu/lib/libsysutil_savedata_stub.a
 ppu_stub  ppu/lib/libsysutil_screenshot_stub.a
+ppu_stub  ppu/lib/libsysutil_search_stub.a
 ppu_stub  ppu/lib/libsysutil_stub.a
 ppu_stub  ppu/lib/libsysutil_subdisplay_stub.a
+ppu_stub  ppu/lib/libusbd_stub.a
+ppu_stub  ppu/lib/libvoice_stub.a
+ppu_stub  ppu/lib/libvpost_stub.a
+
+# --- SPU runtime archives ---------------------------------------------------
+# Same criterion as ppu_stub, for spu/lib.  The manifest had ZERO spu coverage
+# until 2026-08-27: 14 SPU archives shipped and none were validated.
+spu_lib   spu/lib/libsimdmath.a
+spu_lib   spu/lib/libspumars.a
+spu_lib   spu/lib/libspumarstask.a
+spu_lib   spu/lib/libspurs_jq.a
+spu_lib   spu/lib/libspurs_task.a
+spu_lib   spu/lib/libsputhread.a
 
 # --- Core SDK artifacts (cmake freshness probe requires these) ----------
 sdk_core  ppu/include/cell/sdk_version.h
@@ -99,3 +190,39 @@ alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
 alias     ppu/lib/lp64/libsysutil.a        libsysutil_stub.a
 alias     ppu/lib/lp64/libusb.a            libusbd_stub.a
+
+# --- Shipped but not required ----------------------------------------------
+# The two-sided check requires every shipped archive to be either promised above
+# or listed here, so nothing can be added to the install without a decision.
+#
+# REASON for all of these: shipped for user code; no bundled sample names them in
+# a target_link_libraries() or ps3_add_spu_image(LIBS ...) line.  CAVEAT: this
+# generator sees only DIRECT linkage.  A transitive dependency (e.g. libspurs_jq
+# pulling libspurs_job, or libsync/libsync2 under libspurs_task) would look
+# unlinked here and be misfiled as optional.  Promote any of these to spu_lib /
+# ppu_stub the moment a link failure or an ld map shows it is actually needed.
+
+optional  ppu/lib/libPSGLFX.a                    shipped-for-user-code
+optional  ppu/lib/libcellFontFT_stub.a           shipped-for-user-code
+optional  ppu/lib/libcellGameExec_stub.a         shipped-for-user-code
+optional  ppu/lib/libcgbLevelC.a                 shipped-for-user-code
+optional  ppu/lib/libfont.a                      shipped-for-user-code
+optional  ppu/lib/libfontFT.a                    shipped-for-user-code
+optional  ppu/lib/liblv2dbg.a                    shipped-for-user-code
+optional  ppu/lib/libmixer.a                     shipped-for-user-code
+optional  ppu/lib/libnetctl.a                    shipped-for-user-code
+optional  ppu/lib/libpngdec.a                    shipped-for-user-code
+optional  ppu/lib/libresc.a                      shipped-for-user-code
+optional  ppu/lib/libspumarsjq.a                 shipped-for-user-code
+optional  ppu/lib/libsysfs.a                     shipped-for-user-code
+optional  ppu/lib/libsysutil_avconf_ext_stub.a   shipped-for-user-code
+optional  ppu/lib/libsysutil_bgdl_stub.a         shipped-for-user-code
+optional  ppu/lib/libsysutil_userinfo_stub.a     shipped-for-user-code
+optional  ppu/lib/libvdec.a                      shipped-for-user-code
+optional  spu/lib/libdma.a                       shipped-for-user-code
+optional  spu/lib/libfiber.a                     shipped-for-user-code
+optional  spu/lib/libspuatomic.a                 shipped-for-user-code
+optional  spu/lib/libspudma.a                    shipped-for-user-code
+optional  spu/lib/libspurs_job.a                 shipped-for-user-code
+optional  spu/lib/libsync.a                      shipped-for-user-code
+optional  spu/lib/libsync2.a                     shipped-for-user-code

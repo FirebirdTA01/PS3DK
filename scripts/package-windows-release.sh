@@ -298,7 +298,7 @@ validate_windows_release_payload() {
     local manifest="$PS3_TOOLCHAIN_ROOT/cmake/ps3-required-artifacts.txt"
     [[ -f "$manifest" ]] || die "Required-artifact manifest missing: $manifest"
 
-    local required_bins=() required_paths=() alias_rows=()
+    local required_bins=() required_paths=() alias_rows=() optional_paths=()
     local _cat _path _target
     while read -r _cat _path _target; do
         [[ -z "$_cat" || "$_cat" == \#* ]] && continue
@@ -313,6 +313,15 @@ validate_windows_release_payload() {
             alias)
                 [[ -n "$_target" ]] || die "alias row without a target in $manifest: $_path"
                 alias_rows+=("$_path|$_target")
+                ;;
+            spu_lib)
+                required_paths+=("$_path")
+                ;;
+            optional)
+                # Shipped but not required.  Tracked so the two-sided check below
+                # can insist every shipped archive is either promised or
+                # consciously optional.
+                optional_paths+=("$_path")
                 ;;
             *)
                 # Die, don't warn: a typo'd category would otherwise validate as
@@ -381,6 +390,32 @@ validate_windows_release_payload() {
         warn "Symlink left in Windows stage tree (must be a real file): $stray"
         missing=1
     done < <(find "$STAGE_DIR" -type l -printf '%P\n' 2>/dev/null)
+    # TWO-SIDED: the loop above proves manifest subset of stage (catches
+    # omissions).  This proves stage subset of manifest (catches additions
+    # nobody promised).  Without it, both lists can be short at once -- which is
+    # exactly how 69 sample-linked archives, librt.a included, went unvalidated.
+    local _acct _b
+    _acct="$(awk '$1=="ppu_stub"||$1=="spu_lib"||$1=="sdk_core"||$1=="alias"||$1=="optional"{n=split($2,q,"/");print q[n]}' "$manifest" | sort -u)"
+    for _b in "$STAGE_DIR"/ppu/lib/*.a "$STAGE_DIR"/spu/lib/*.a; do
+        [[ -e "$_b" ]] || continue
+        if ! grep -qxF "$(basename "$_b")" <<< "$_acct"; then
+            warn "Shipped archive is neither required nor marked optional in $(basename "$manifest"): ${_b#"$STAGE_DIR"/}"
+            missing=1
+        fi
+    done
+
+    # The sample-linked rows are DERIVED; fail if a sample started linking
+    # something the manifest does not promise.  A frozen list goes stale.
+    # Invoked via bash, not executed: a Windows checkout drops the exec bit, and
+    # an [[ -x ]] guard would then SKIP this check and validate the release
+    # clean.  Absence is fatal rather than skippable for the same reason.
+    local _gen="$PS3_TOOLCHAIN_ROOT/scripts/gen-required-artifacts.sh"
+    [[ -f "$_gen" ]] || die "Missing $_gen — required-artifact coverage cannot be verified."
+    if ! bash "$_gen" "$STAGE_DIR" --check; then
+        warn "Required-artifact manifest no longer covers what the bundled samples link."
+        missing=1
+    fi
+
     [[ "$missing" -eq 0 ]] || die "Windows release payload is incomplete. Run scripts/build-cell-stub-archives.sh and provide the complete Windows host-tools artifact via --tools-zip, or run scripts/build-host-tools-windows.sh before packaging."
 }
 
