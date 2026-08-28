@@ -1,6 +1,6 @@
 /*
  * sbrk.c — newlib sbrk backing store via a single up-front Lv-2 heap
- * arena (sysMemoryAllocate / sysMemoryFree).
+ * arena (sys_memory_allocate / sys_memory_free).
  *
  * This is a correct-by-construction fixed-arena bump allocator: one
  * contiguous allocation at init, pure userland pointer arithmetic in
@@ -46,7 +46,7 @@ sbrk_init(void)
 {
 	sys_mem_addr_t addr;
 
-	s32 ret = sysMemoryAllocate(SBRK_HEAP_SIZE,
+	s32 ret = sys_memory_allocate(SBRK_HEAP_SIZE,
 		SYS_MEMORY_PAGE_SIZE_1M,
 		&addr);
 	if (ret) {
@@ -70,7 +70,7 @@ static void __attribute__((used))
 sbrk_deinit(void)
 {
 	if (__sbrk_ready)
-		sysMemoryFree((sys_mem_addr_t)(uintptr_t)__sbrk_base);
+		sys_memory_free((sys_mem_addr_t)(uintptr_t)__sbrk_base);
 	__sbrk_ready = 0;
 }
 
