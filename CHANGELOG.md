@@ -54,15 +54,18 @@ first-run path. Fresh-extract sample sweep: 198/198 raw and 198/198 after
 - Upstream PSL1GHT API additions (eca3f99..master): `sysNetGetPeerName`,
   `sysNetGetSockName`, `sysNetSelect`, `sysLv2FsChown` / `Mount` / `Unmount`
   (`<sys/lv2_fs_ext.h>`), `netGetSockInfo` alias.
+- librt now implements `getpeername`, `getsockname` and `select()` directly
+  via Lv-2 syscalls 703/704/716 (descriptor sets and `timeval` translated to
+  the kernel's layouts). Previously `getpeername`/`getsockname` existed only
+  in `libnet.a` (via its imports, after `netInitialize()`), and `select()`
+  returned `ENOSYS` in every CMake-built program: `librt.a` carried a weak
+  stub that the `-lrt`-first link order picked ahead of libnet's real one.
+  All three now work without `libnet` on the link line.
 - SPU PSGL side (`spu_psgl.h`, `libspuPSGL.a`, `tools/psgl`) and
   `spu-elf-to-ppu-obj.exe` are now shipped.
 
 ### Fixed
 
-- `getpeername` / `getsockname` were declared in `<sys/socket.h>` but never
-  defined (undefined reference at link); `select()` returned `ENOSYS`. All
-  three are implemented via Lv-2 syscalls 703/704/716, with the descriptor
-  sets and `timeval` translated to the kernel's layouts.
 - librt POSIX restore: `gettimeofday` / `settimeofday` argument widths,
   `utime`, `umask`, `chdir` / `getcwd`, `rewinddir` / `seekdir`, the socket
   family (was `ENOSYS`), `sbrk` reporting `ENOMEM`.
