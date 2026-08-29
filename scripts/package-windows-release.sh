@@ -672,7 +672,10 @@ case "$VERSION" in
 esac
 
 say "Gating staged tree with check-release-tree.sh"
-PS3_NM="$GATE_NM" "$script_dir/check-release-tree.sh" "$STAGE_DIR" "${GATE_ARGS[@]}" \
+# Invoked through bash rather than executed directly: the exec bit does not
+# survive every clone (a Windows checkout does not set it), and a release must
+# not fail — or worse, be skipped — because of a file mode.
+PS3_NM="$GATE_NM" bash "$script_dir/check-release-tree.sh" "$STAGE_DIR" "${GATE_ARGS[@]}" \
     || die "staged release tree failed check-release-tree.sh — see the FAIL lines above"
 
 say "=== Done ==="
