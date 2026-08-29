@@ -44,10 +44,10 @@ if (-not $RepoRoot) {
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 if (-not $Manifest) {
-    $Manifest = Join-Path $RepoRoot "tests\smoke\manifest.txt"
+    $Manifest = Join-Path $RepoRoot "tests\regression\manifest.txt"
 }
 if (-not $BuildRoot) {
-    $BuildRoot = Join-Path $env:TEMP ("ps3-smoke-build-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $BuildRoot = Join-Path $env:TEMP ("ps3-regression-build-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 }
 
 $toolchain = Join-Path $SdkRoot "cmake\ps3-ppu-toolchain.cmake"
@@ -71,19 +71,19 @@ if ($Generator -eq "Ninja") {
     $cmakeMakeProgram = $ninja
 }
 
-$smokeRoot = Join-Path $RepoRoot "tests\smoke"
+$regressionRoot = Join-Path $RepoRoot "tests\regression"
 $rows = Import-Csv -LiteralPath $Manifest
 $manifestByName = @{}
 foreach ($row in $rows) {
     $manifestByName[$row.name] = $row.relative_self
 }
 
-$probeDirs = Get-ChildItem -LiteralPath $smokeRoot -Directory |
+$probeDirs = Get-ChildItem -LiteralPath $regressionRoot -Directory |
     Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "CMakeLists.txt") } |
     Sort-Object Name
 
 if ($probeDirs.Count -eq 0) {
-    throw "no smoke probes found under $smokeRoot"
+    throw "no regression probes found under $regressionRoot"
 }
 
 $results = @()
@@ -137,6 +137,6 @@ foreach ($row in $rows) {
     }
 }
 
-$csv = Join-Path $BuildRoot "smoke-build.csv"
+$csv = Join-Path $BuildRoot "regression-build.csv"
 $results | Export-Csv -NoTypeInformation -Path $csv
-Write-Host "smoke build results: $csv"
+Write-Host "regression build results: $csv"

@@ -1,5 +1,5 @@
 /*
- * hello-ppu-jpgenc - buffer-only cellJpgEnc smoke sample.
+ * hello-ppu-jpgenc - buffer-only cellJpgEnc regression sample.
  *
  * Generates a small RGB test image in memory, encodes it to a JPEG stream
  * buffer through libjpgenc_stub.a, and prints stream size/hash/header bytes.

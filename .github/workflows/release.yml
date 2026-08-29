@@ -119,7 +119,7 @@ jobs:
               -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
 
-      - name: Smoke-test --version flags
+      - name: Validate --version flags
         run: |
           tools/target/release/nidgen --version
           tools/target/release/abi-verify --version

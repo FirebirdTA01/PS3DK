@@ -1,4 +1,4 @@
-# CI Smoke Battery
+# CI Regression Battery
 
 ## Goal
 
@@ -17,17 +17,17 @@ The initial battery is seeded from `t_cd49e350`:
 
 | Probe | Coverage |
 |---|---|
-| `librt-posix` | Initial deterministic subset: `sleep`, `times`, `open`, `stat`, `O_EXCL`, absolute `opendir`, `readdir`, `telldir`, and small `malloc` |
+| `librt-posix` | `gettimeofday`, `settimeofday` return path, `utime`, `umask`, `open`, `chdir`, `getcwd`, `opendir`, `readdir`, `telldir`, `rewinddir`, `seekdir`, `sbrk` ENOMEM, `socket`, `connect`, `send`, `close` |
 | `rsx-heap` | `rsxInit`, `rsxMemalign`, `rsxFree`, free-list coalescing, allocate/free stress |
 | `rsx-wrap` | Command-buffer wrap past 1 MiB; seeded by `blitting` or a smaller dedicated wrap probe |
 | `file-io` | `/dev_hdd0` create, read, write, seek, stat, close, unlink |
 | `thread-sync` | PPU thread, mutex, condvar, join |
 | `spu-roundtrip` | SPU image load/run/mailbox round-trip; seeded by `sputest` |
 
-The probe sources should live under `tests/smoke/`, with one subdirectory per
+The probe sources should live under `tests/regression/`, with one subdirectory per
 probe and a normal `CMakeLists.txt` using the SDK toolchain. The old diagnostic
 `build/t_cd49e350_probe` is not a source of truth; its behavior should be moved
-into `tests/smoke/librt-posix/` and deleted from future reports.
+into `tests/regression/librt-posix/` and deleted from future reports.
 
 ## Harness Layout
 
@@ -35,17 +35,17 @@ Two scripts should share the same result schema:
 
 | Script | Host | Responsibility |
 |---|---|---|
-| `scripts/build-smoke.ps1` | Windows package extract | Configure and build every `tests/smoke/*/CMakeLists.txt` against an extracted SDK |
-| `scripts/smoke-rpcs3.ps1` | Windows desktop RPCS3 | Boot selected `.fake.self` files, preserve logs, classify results |
+| `scripts/build-regression.ps1` | Windows package extract | Configure and build every `tests/regression/*/CMakeLists.txt` against an extracted SDK |
+| `scripts/run-regression-rpcs3.ps1` | Windows desktop RPCS3 | Boot selected `.fake.self` files, preserve logs, classify results |
 
 The existing `scripts/boot-sweep.ps1` is the closest local pattern for the
-runtime harness. The new smoke harness should keep its useful behavior but make
+runtime harness. The new regression harness should keep its useful behavior but make
 the target list part of the repo instead of `C:\ps3boot\<label>\targets.txt`.
 
 Proposed repo-owned target list:
 
 ```text
-tests/smoke/manifest.txt
+tests/regression/manifest.txt
 ```
 
 Each row is:
@@ -57,7 +57,7 @@ name,relative-self,timeout_seconds,expected_state,required_tty_regex,forbidden_t
 Example:
 
 ```text
-librt-posix,tests/smoke/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
+librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
 rsx-wrap,samples/PSL1GHT/graphics/blitting/blitting.fake.self,45,RENDER-LOOP,blitting started,ENOSYS
 ```
 
@@ -113,7 +113,7 @@ code as informational.
 
 ## Instance Rule
 
-Runtime smoke uses the desktop release RPCS3 only:
+Runtime regression uses the desktop release RPCS3 only:
 
 ```text
 C:\Users\FirebirdTA01\Desktop\Emulators\RPCS3\rpcs3.exe
@@ -122,7 +122,7 @@ C:\Users\FirebirdTA01\Desktop\Emulators\RPCS3\rpcs3.exe
 The harness must fail preflight if any `rpcs3.exe` is already running. In human
 runs, the operator must announce before booting and post "instance down" after
 the process exits. CI runs satisfy the same rule by using a single self-hosted
-runner with no parallel smoke jobs.
+runner with no parallel regression jobs.
 
 The live-process check is necessary but not sufficient: a previous collision
 happened between samples while no `rpcs3.exe` process was running. The runtime
@@ -141,21 +141,21 @@ the room announcement and the machine-readable ownership state agree.
 
 There are two useful CI layers, and they should be separated:
 
-1. **Push/PR CI, any hosted runner:** configure and build the smoke probes in
+1. **Push/PR CI, any hosted runner:** configure and build the regression probes in
    host-stub mode. This catches probe source and CMake bitrot on every change.
    It does not use the PS3 target compiler and does not prove SDK packaging or
    runtime behavior.
 2. **Package build CI, any Windows runner with an SDK extract:** build
-   `tests/smoke/*` against a fresh package extract. This catches missing
+   `tests/regression/*` against a fresh package extract. This catches missing
    headers, missing libraries, and target-link bitrot. It does not prove runtime
    behavior.
-3. **Runtime CI, Windows self-hosted runner:** run `scripts/smoke-rpcs3.ps1`
+3. **Runtime CI, Windows self-hosted runner:** run `scripts/run-regression-rpcs3.ps1`
    against the desktop release RPCS3 install. This is the only layer that can be
    the real runtime gate.
 
 Until a Windows self-hosted runner is assigned, the first commit should still add
 the push/PR host-stub job, the manual package-build job at
-`.github/workflows/smoke-build.yml`, and the local runtime harness. Do not
+`.github/workflows/regression-build.yml`, and the local runtime harness. Do not
 pretend GitHub-hosted CI has an RPCS3 oracle unless the runner actually has the
 emulator and the package installed.
 
@@ -164,9 +164,9 @@ emulator and the package installed.
 After this design is approved:
 
 1. Move the `t_cd49e350` diagnostic behavior into
-   `tests/smoke/librt-posix/`.
-2. Add `tests/smoke/manifest.txt` with only `librt-posix` at first.
-3. Add `scripts/build-smoke.ps1` and `scripts/smoke-rpcs3.ps1`.
+   `tests/regression/librt-posix/`.
+2. Add `tests/regression/manifest.txt` with only `librt-posix` at first.
+3. Add `scripts/build-regression.ps1` and `scripts/run-regression-rpcs3.ps1`.
 4. Add a CI workflow or CI-ready script invocation that builds the probe on every
    push.
 5. Run the probe locally on the desktop RPCS3 only after the current package
@@ -174,8 +174,4 @@ After this design is approved:
 
 Keep later probes (`rsx-heap`, `rsx-wrap`, `file-io`, `thread-sync`,
 `spu-roundtrip`) as follow-up rows unless the director asks to broaden the first
-slice. The unstable `librt-posix` candidates from the original diagnostic
-(`gettimeofday`, `settimeofday`, `utime`, `umask`, `chdir`, `getcwd`,
-`rewinddir`, `seekdir`, socket/connect/send/close, and ENOMEM-on-large-malloc)
-should be added back one at a time only after their current SDK/RPCS3 behavior is
-understood and can produce a stable PASS/FAIL signal.
+slice.

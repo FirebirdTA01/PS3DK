@@ -12,7 +12,7 @@ Building a modern, feature-complete open-source PlayStation 3 SDK that supports 
 
 - **Phase 0 (bootstrap):** complete on Windows side. ~30 authored files: scripts, Rust tooling, samples, docs.
 - **Phase 1 (PPU toolchain):** complete — binutils 2.42, GCC 12.4.0, newlib 4.4.0, GDB 14.2 all built on CachyOS.
-- **Phase 2a (SPU toolchain):** complete — spu-elf-gcc 9.5.0 + newlib 4.4, C/C++17 smoke tests pass.
+- **Phase 2a (SPU toolchain):** complete — spu-elf-gcc 9.5.0 + newlib 4.4, C/C++17 regression tests pass.
 - **Phase 3 (PSL1GHT v3 RFC):** builds green 2026-04-17; RFC / NV40-FP / NID tooling still in progress.
 - **libspurs surface (2026-04-24):** full `<cell/spurs.h>` PPU surface (Spurs2, Taskset/Taskset2, event-flag / queue / semaphore / barrier / task / workload) + SPU task runtime (`libspurs_task.a` + `spurs_task.ld` + `cell/spurs/spu_task.h`).  `hello-spurs-task` runs end-to-end in RPCS3 (PPU spawns embedded SPU task, SPU task DMAs flag back to PPU, Taskset Shutdown+Join).  SPU ABI: crt at LS 0x3000 (byte-identical to reference `libspurs.a` main.o), dispatch via LS 0x2fb0 control block + `dispatch_base+0xc4`, exit code at LS 0x2fd0.
 - See `docs/phase-0-status.md` for full inventory.

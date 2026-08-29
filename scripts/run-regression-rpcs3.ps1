@@ -4,7 +4,7 @@ param(
     [string]$Rpcs3Path = "C:\Users\FirebirdTA01\Desktop\Emulators\RPCS3\rpcs3.exe",
     [string]$ResultsRoot = "",
     [string]$LockPath = "C:\ps3boot\.rpcs3-owner",
-    [string]$Owner = "smoke-rpcs3@$env:COMPUTERNAME"
+    [string]$Owner = "regression-rpcs3@$env:COMPUTERNAME"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,10 +14,10 @@ if (-not $RepoRoot) {
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 if (-not $Manifest) {
-    $Manifest = Join-Path $RepoRoot "tests\smoke\manifest.txt"
+    $Manifest = Join-Path $RepoRoot "tests\regression\manifest.txt"
 }
 if (-not $ResultsRoot) {
-    $ResultsRoot = Join-Path "C:\ps3smoke" ("run-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $ResultsRoot = Join-Path "C:\ps3regression" ("run-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 }
 
 if (-not (Test-Path -LiteralPath $Rpcs3Path)) {
@@ -156,9 +156,9 @@ try {
         }
     }
 
-    $csv = Join-Path $ResultsRoot "smoke-rpcs3.csv"
+    $csv = Join-Path $ResultsRoot "regression-rpcs3.csv"
     $results | Export-Csv -NoTypeInformation -Path $csv
-    Write-Host "runtime smoke results: $csv"
+    Write-Host "runtime regression results: $csv"
 } finally {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $releaseScript -LockPath $LockPath -Owner $Owner
 }

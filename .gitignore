@@ -18,8 +18,8 @@ samples/**/*.fake.self
 samples/**/*.map
 samples/**/*.pkg
 samples/**/*.gnpdrm.pkg
-tests/smoke/**/*.elf
-tests/smoke/**/*.self
+tests/regression/**/*.elf
+tests/regression/**/*.self
 
 # Derived sample assets copied from sdk/assets at pkg-build time.
 samples/sysutil/hello-ppu-png/pkg_files/USRDIR/ps3dk.png

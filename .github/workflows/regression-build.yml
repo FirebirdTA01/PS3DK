@@ -1,4 +1,4 @@
-name: Smoke Build
+name: Regression Build
 
 on:
   push:
@@ -17,21 +17,21 @@ on:
         type: string
 
 jobs:
-  host-stub-smoke:
-    name: Host-stub smoke probe build
+  host-stub-regression:
+    name: Host-stub regression probe build
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - name: Configure host-stub smoke probe
-        run: cmake -S tests/smoke/librt-posix -B build/smoke/librt-posix-host -DPS3TC_SMOKE_HOST_STUB=ON
+      - name: Configure host-stub regression probe
+        run: cmake -S tests/regression/librt-posix -B build/regression/librt-posix-host -DPS3TC_REGRESSION_HOST_STUB=ON
 
-      - name: Build host-stub smoke probe
-        run: cmake --build build/smoke/librt-posix-host
+      - name: Build host-stub regression probe
+        run: cmake --build build/regression/librt-posix-host
 
-  package-smoke:
-    name: Package smoke probe build
+  package-regression:
+    name: Package regression probe build
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call'
     runs-on: windows-latest
     steps:
@@ -41,10 +41,10 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path -LiteralPath '${{ inputs.sdk_root }}')) {
-            throw "Smoke build requires an extracted SDK at '${{ inputs.sdk_root }}'. Runtime smoke requires a Windows self-hosted runner with desktop RPCS3."
+            throw "Regression build requires an extracted SDK at '${{ inputs.sdk_root }}'. Runtime regression requires a Windows self-hosted runner with desktop RPCS3."
           }
 
-      - name: Build smoke probes
+      - name: Build regression probes
         shell: pwsh
         run: |
-          ./scripts/build-smoke.ps1 -SdkRoot '${{ inputs.sdk_root }}' -BuildRoot "$env:RUNNER_TEMP\ps3-smoke-build"
+          ./scripts/build-regression.ps1 -SdkRoot '${{ inputs.sdk_root }}' -BuildRoot "$env:RUNNER_TEMP\ps3-regression-build"
