@@ -361,6 +361,72 @@ function(ps3_add_prx target)
         BYPRODUCTS ${_byproducts}
         COMMENT "ps3-prx: ${target} -> ${_prx_output}"
         VERBATIM)
+
+    set_property(TARGET ${target} PROPERTY PS3_PRX_OUTPUT "${_prx_output}")
+    set_property(TARGET ${target} PROPERTY PS3_PRX_EXPORTS "${_PSP_EXPORTS}")
+endfunction()
+
+# -----------------------------------------------------------------------------
+# ps3_prx_export_roundtrip(<target>)
+#
+# Proves the export round trip on a module built by ps3_add_prx: read the
+# built module's export table back out with `prx-gen exports`, and check it
+# describes the same library as the YAML that produced it.
+#
+# The comparison is deliberately NOT a text diff of the two YAMLs. An export
+# table cannot carry everything a hand-written YAML holds -- archive_name and
+# the C signature have nowhere to live in a .lib.ent record -- so the files
+# legitimately differ. What must match is the part that a linker consumes:
+# the library name, and the export names and NIDs in order. Running both
+# through `nidgen entgen` reduces each to exactly that, so a byte comparison
+# of the generated assembly is the real equivalence check.
+#
+# Failure here means a module's own export table disagrees with the source of
+# truth it was generated from -- which is precisely the bug that would ship a
+# stub archive nothing can link against.
+# -----------------------------------------------------------------------------
+function(ps3_prx_export_roundtrip target)
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "ps3_prx_export_roundtrip: target '${target}' does not exist")
+    endif()
+    if(NOT PS3_TOOL_nidgen)
+        message(FATAL_ERROR
+            "ps3_prx_export_roundtrip: required host tool 'nidgen${_ps3_prx_exe}' not found.\n"
+            "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
+    endif()
+
+    get_property(_rt_prx TARGET ${target} PROPERTY PS3_PRX_OUTPUT)
+    get_property(_rt_yml TARGET ${target} PROPERTY PS3_PRX_EXPORTS)
+    if(NOT _rt_prx OR NOT _rt_yml)
+        message(FATAL_ERROR
+            "ps3_prx_export_roundtrip: call ps3_add_prx(${target} ... EXPORTS <yml>) first")
+    endif()
+    if(NOT IS_ABSOLUTE "${_rt_yml}")
+        set(_rt_yml "${CMAKE_CURRENT_SOURCE_DIR}/${_rt_yml}")
+    endif()
+
+    set(_rt_dir "${CMAKE_CURRENT_BINARY_DIR}/${target}-roundtrip")
+    set(_rt_stamp "${_rt_dir}/roundtrip.stamp")
+
+    add_custom_command(
+        OUTPUT "${_rt_stamp}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_rt_dir}"
+        COMMAND "${PS3_TOOL_prx_gen}" exports "${_rt_prx}" -o "${_rt_dir}/extracted.yml"
+        COMMAND "${PS3_TOOL_nidgen}" entgen --input "${_rt_yml}"
+                -o "${_rt_dir}/from-source.S"
+        COMMAND "${PS3_TOOL_nidgen}" entgen --input "${_rt_dir}/extracted.yml"
+                -o "${_rt_dir}/from-module.S"
+        COMMAND "${CMAKE_COMMAND}"
+                "-DPS3_RT_SOURCE=${_rt_dir}/from-source.S"
+                "-DPS3_RT_MODULE=${_rt_dir}/from-module.S"
+                "-DPS3_RT_TARGET=${target}"
+                -P "${_PS3_SELF_CMAKE_DIR}/ps3-prx-roundtrip-check.cmake"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_rt_stamp}"
+        DEPENDS ${target} "${_rt_yml}"
+        COMMENT "ps3-prx: export round trip for ${target}"
+        VERBATIM)
+
+    add_custom_target(${target}_export_roundtrip ALL DEPENDS "${_rt_stamp}")
 endfunction()
 
 function(ps3_add_sprx target)

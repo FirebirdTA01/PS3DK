@@ -14,3 +14,7 @@ ps3_add_prx(hello-sprx-export
     VERSION 1.0
     EXPORTS exports.yml
     OUTPUT_NAME hello-sprx-export.prx)
+
+# Prove the export round trip: read this module's own export table back out
+# and check it still describes exports.yml.
+ps3_prx_export_roundtrip(hello-sprx-export)

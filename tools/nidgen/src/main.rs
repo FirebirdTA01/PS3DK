@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use nidgen::{archive, db, extract, nid, stubgen, verify, AbiMode};
+use nidgen::{archive, db, entgen, extract, nid, stubgen, verify, AbiMode};
 
 #[derive(Parser)]
 #[command(name = "nidgen", version, about = "PS3 NID/FNID tooling", long_about = None)]
@@ -34,6 +34,19 @@ enum Command {
         /// ABI mode (ilp32 or lp64).
         #[arg(long, default_value = "ilp32")]
         abi: String,
+    },
+
+    /// Render a module's EXPORT table to assembly (the .lib.ent side).
+    ///
+    /// The mirror of `stub`: `stub` emits what an importer links against,
+    /// `entgen` emits what an exporting module publishes.
+    Entgen {
+        /// Path to the library YAML.
+        #[arg(long)]
+        input: PathBuf,
+        /// Output path (default: stdout).
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
     },
 
     /// Verify every entry in a YAML NID database recomputes to the stored NID.
@@ -90,6 +103,17 @@ fn main() -> Result<()> {
             let abi = AbiMode::from_str(&abi)
                 .with_context(|| format!("invalid --abi value: {abi}"))?;
             let text = stubgen::render_library(&lib, abi);
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, text)
+                        .with_context(|| format!("writing {}", path.display()))?;
+                }
+                None => print!("{text}"),
+            }
+        }
+        Command::Entgen { input, output } => {
+            let lib = db::load_library(&input)?;
+            let text = entgen::render_exports(&lib)?;
             match output {
                 Some(path) => {
                     std::fs::write(&path, text)

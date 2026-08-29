@@ -13,13 +13,14 @@
 mod build;
 mod check;
 mod elf;
+mod exports;
 mod module;
 mod reloc;
 
 #[cfg(test)]
 mod tests;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -73,6 +74,25 @@ enum Cmd {
         /// The module to inspect.
         input: PathBuf,
     },
+
+    /// Read a built module's export table back out as a nidgen library YAML.
+    ///
+    /// The other half of the round trip: `nidgen entgen` turns a YAML into the
+    /// module's export table, this turns an export table back into a YAML, and
+    /// `nidgen archive` turns that into a stub archive the next binary links
+    /// against.
+    Exports {
+        /// The module to read.
+        input: PathBuf,
+
+        /// Output YAML path (default: stdout).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Emit only this library, when the module exports more than one.
+        #[arg(long)]
+        library: Option<String>,
+    },
 }
 
 fn parse_u16(s: &str) -> Result<u16, String> {
@@ -116,6 +136,41 @@ fn main() -> Result<()> {
         Cmd::Check { input } => {
             if !check::check(&input)? {
                 bail!("{} is not a loadable module", input.display());
+            }
+            Ok(())
+        }
+        Cmd::Exports { input, output, library } => {
+            let libs = exports::read_exports(&input)?;
+            let chosen = match &library {
+                Some(want) => libs
+                    .iter()
+                    .find(|l| &l.name == want)
+                    .ok_or_else(|| anyhow::anyhow!(
+                        "module exports no library named '{want}' (found: {})",
+                        libs.iter().map(|l| l.name.as_str()).collect::<Vec<_>>().join(", ")))?,
+                None => {
+                    if libs.len() > 1 {
+                        bail!(
+                            "module exports {} libraries ({}); pass --library to choose one",
+                            libs.len(),
+                            libs.iter().map(|l| l.name.as_str()).collect::<Vec<_>>().join(", ")
+                        );
+                    }
+                    &libs[0]
+                }
+            };
+            if chosen.unnamed > 0 {
+                eprintln!(
+                    "prx-gen: warning: {} of {} exports had no symbol-table entry and are                      emitted under nid_<hex> placeholder names; run on an unstripped module                      to recover the real names",
+                    chosen.unnamed,
+                    chosen.functions.len()
+                );
+            }
+            let yaml = exports::render_yaml(chosen)?;
+            match output {
+                Some(path) => std::fs::write(&path, yaml)
+                    .with_context(|| format!("writing {}", path.display()))?,
+                None => print!("{yaml}"),
             }
             Ok(())
         }

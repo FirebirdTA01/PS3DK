@@ -56,6 +56,18 @@ pub struct Export {
     #[serde(default)]
     pub signature: String,
 
+    /// What this export *is*.  A PRX export record counts functions,
+    /// variables and TLS variables separately (`num_func` / `num_var` /
+    /// `num_tlsvar`), and the loader reads the NID and address arrays
+    /// functions-first, so the round trip cannot represent an export table
+    /// without this distinction.
+    ///
+    /// Defaults to `function`, which is what every entry meant before the
+    /// field existed — so the library YAMLs already in the tree stay valid
+    /// and unchanged.
+    #[serde(default, skip_serializing_if = "ExportKind::is_function")]
+    pub kind: ExportKind,
+
     /// Optional ordinal (for libraries that import by ordinal rather than NID).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ordinal: Option<u32>,
@@ -80,6 +92,28 @@ pub struct Export {
     /// "what's left to write" dashboard.
     #[serde(default, skip_serializing_if = "ImplStatus::is_unknown")]
     pub impl_status: ImplStatus,
+}
+
+/// Function, variable, or TLS variable.
+///
+/// TLS is representable here but not yet supported end to end: the export
+/// record has a `num_tlsvar` field, and RPCS3's loader logs an error and
+/// ignores any record that sets it.  Carrying the variant keeps the schema
+/// honest about what a PRX export table can hold; `entgen` refuses it rather
+/// than emitting something no loader will honour.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportKind {
+    #[default]
+    Function,
+    Variable,
+    Tlsvar,
+}
+
+impl ExportKind {
+    pub fn is_function(&self) -> bool {
+        matches!(self, ExportKind::Function)
+    }
 }
 
 /// Where this symbol stands in our implementation pipeline.
@@ -209,6 +243,7 @@ mod tests {
                 nid: 0xbd5a59fc,
                 fnid: None,
                 signature: "int cellNetCtlInit(void)".into(),
+                kind: crate::db::ExportKind::Function,
                 ordinal: None,
                 notes: None,
                 aliases: Vec::new(),

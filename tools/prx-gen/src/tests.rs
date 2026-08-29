@@ -116,15 +116,21 @@ fn synth_elf(export_attrs: (u16, u16), extra_relas: &[RelaSpec]) -> Vec<u8> {
         SymSpec { name: "__libstubend", shndx: SHN_ABS, value: LIBSTUB_END },
         // `.TOC.` as ld emits it: an absolute symbol past the end of the image.
         SymSpec { name: ".TOC.", shndx: SHN_ABS, value: TOC_VALUE },
-        SymSpec { name: "prx_add", shndx: SEC_TEXT, value: TEXT },
-        SymSpec { name: "module_start", shndx: SEC_TEXT, value: TEXT + 4 },
+        // In ELFv1 a function symbol names its descriptor, not its code, and
+        // that is exactly what PRX_EXPORT_FUNC puts in the address table -
+        // so name recovery works by matching an export address against these.
+        // Order matters: the management record's address table entry is OPD
+        // and the library record's is OPD + 8 (see the tables above), so the
+        // symbols have to sit on the descriptors they actually name.
+        SymSpec { name: "module_start", shndx: SEC_OPD, value: OPD },
+        SymSpec { name: "prx_add", shndx: SEC_OPD, value: OPD + 8 },
         SymSpec { name: "__sys_prx_module_info", shndx: SEC_MODULE_INFO, value: MI_ADDR },
     ];
     let (sym_libentstart, sym_libentend) = (1u32, 2u32);
     let (sym_libstubstart, sym_libstubend) = (3u32, 4u32);
     let sym_toc = 5u32;
-    let sym_prx_add = 6u32;
-    let sym_module_start = 7u32;
+    let sym_module_start = 6u32;
+    let sym_prx_add = 7u32;
 
     // --- relocations, as `ld -q` leaves them ------------------------------
     // The five module info pointer fields, then the two OPD entries.
@@ -391,7 +397,7 @@ fn same_segment_relative_relocations_are_dropped() {
     // module lands, so emitting it would be pointless work for the loader.
     let elf = Elf::parse(synth_elf(
         (module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY),
-        &[(2, TEXT, 6, 10, 0)], // .text: R_PPC64_REL24 -> prx_add
+        &[(2, TEXT, 6, 10, 0)], // .text: R_PPC64_REL24 -> module_start
     ))
     .unwrap();
     let conv = reloc::convert(&elf).unwrap();
@@ -570,4 +576,82 @@ fn building_a_prx_twice_is_refused() {
     .unwrap_err()
     .to_string();
     assert!(err.contains("already a PRX"), "got: {err}");
+}
+
+// ---------------------------------------------------------------------------
+// Export extraction (the round trip's read side).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn exports_recovers_nids_and_names_from_a_built_module() {
+    let (_dir, out) = build_fixture("exp", (module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY));
+    let libs = crate::exports::read_exports(&out).expect("extraction");
+
+    // The management record carries module_start; it is not a library surface
+    // and must not appear as one.
+    assert_eq!(libs.len(), 1, "only the named library should be reported");
+    assert_eq!(libs[0].name, "demo");
+    assert_eq!(libs[0].functions, vec![("prx_add".to_string(), 0x1111_1111)]);
+    assert_eq!(libs[0].unnamed, 0, "the name should come from .symtab, not a placeholder");
+}
+
+#[test]
+fn exports_falls_back_to_a_nid_placeholder_when_names_are_gone() {
+    // A stripped module still has the NIDs, which are the part that matters
+    // for linking; dropping the export entirely would be worse than naming it
+    // after its NID.
+    let dir = TempDir::new("exp-stripped");
+    let input = dir.join("in.elf");
+    let output = dir.join("out.prx");
+    std::fs::write(&input, synth_elf((module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY), &[]))
+        .unwrap();
+    crate::build::build(
+        &input,
+        &output,
+        &crate::build::BuildOptions {
+            name: "demo".into(),
+            version: (1, 0),
+            attributes: 0,
+            allow_unrelocated_module_info: false,
+            quiet: true,
+        },
+    )
+    .unwrap();
+
+    // Drop the section headers, which is what takes .symtab with them.
+    let mut bytes = std::fs::read(&output).unwrap();
+    wr_u64(&mut bytes, 40, 0);
+    wr_u16(&mut bytes, 60, 0);
+    std::fs::write(&output, &bytes).unwrap();
+
+    let libs = crate::exports::read_exports(&output).expect("extraction");
+    assert_eq!(libs[0].unnamed, 1);
+    assert_eq!(libs[0].functions[0].0, "nid_11111111");
+    assert_eq!(libs[0].functions[0].1, 0x1111_1111);
+}
+
+#[test]
+fn exports_refuses_a_linker_output_that_is_not_yet_a_prx() {
+    let dir = TempDir::new("exp-notprx");
+    let input = dir.join("in.elf");
+    std::fs::write(&input, synth_elf((module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY), &[]))
+        .unwrap();
+    let err = crate::exports::read_exports(&input).unwrap_err().to_string();
+    assert!(err.contains("not a PRX"), "got: {err}");
+}
+
+#[test]
+fn rendered_yaml_is_what_nidgen_expects() {
+    let (_dir, out) = build_fixture("exp-yaml", (module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY));
+    let libs = crate::exports::read_exports(&out).unwrap();
+    let yaml = crate::exports::render_yaml(&libs[0]).unwrap();
+
+    // The four keys nidgen's Library/Export require. `nid` is quoted because
+    // the schema accepts a hex string and an unquoted 0x… is not valid YAML
+    // for a number.
+    assert!(yaml.contains("library: demo"), "got:\n{yaml}");
+    assert!(yaml.contains("module: demo"), "got:\n{yaml}");
+    assert!(yaml.contains("version: 1"), "got:\n{yaml}");
+    assert!(yaml.contains("  - name: prx_add"), "got:\n{yaml}");
+    assert!(yaml.contains("    nid: '0x11111111'"), "got:\n{yaml}");
 }

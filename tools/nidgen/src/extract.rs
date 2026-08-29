@@ -102,6 +102,7 @@ pub fn extract_archive(archive_path: &Path) -> Result<Library> {
                 nid: e.nid,
                 fnid: None,
                 signature: String::new(),
+                kind: crate::db::ExportKind::Function,
                 ordinal: None,
                 notes: Some(format!("extracted from {}", e.source_member)),
                 aliases: Vec::new(),
