@@ -222,45 +222,46 @@ jobs:
       - name: Validate staged host tools
         run: |
           set -e
-          bin_dir="stage/host-tools-windows/bin"
-          required_bins=(
-            abi-verify.exe
-            bin2s.exe
-            cgcomp.exe
-            coverage-report.exe
-            fself.exe
-            make_self.exe
-            make_self_npdrm.exe
-            nidgen.exe
-            package_finalize.exe
-            rsx-cg-compiler.exe
-            sprxlinker.exe
-          )
-          required_files=(
-            pkg.py
-            sfo.py
-            fself.py
-            Struct.py
-            sfo.xml
-          )
+          stage_root="stage/host-tools-windows"
+          manifest="cmake/ps3-required-artifacts.txt"
+
+          # Read the required host-tool list from the manifest rather than a
+          # copy kept here.  A frozen copy in this workflow demanded pkg.py and
+          # sfo.py long after v0.11.0 replaced them with bin/pkg.exe and
+          # bin/sfo.exe, so the release build failed BECAUSE the staging was
+          # correct -- and it never checked the four new tools at all.  The
+          # manifest is already the single source for cmake/ps3-self.cmake and
+          # scripts/package-windows-release.sh; this makes it three for three.
+          [ -f "$manifest" ] || { echo "::error::missing manifest: $manifest"; exit 1; }
+
           missing=0
-          for bin in "${required_bins[@]}"; do
-            if [ ! -f "$bin_dir/$bin" ]; then
-              echo "::error::missing required Windows host tool: $bin_dir/$bin"
+          checked=0
+          while read -r category path _rest; do
+            case "$category" in
+              host_bin|host_file) ;;
+              *) continue ;;
+            esac
+            checked=$((checked + 1))
+            if [ ! -f "$stage_root/$path" ]; then
+              echo "::error::missing required Windows host tool: $stage_root/$path"
               missing=1
             fi
-          done
-          for file in "${required_files[@]}"; do
-            if [ ! -f "$bin_dir/$file" ]; then
-              echo "::error::missing required Windows host helper: $bin_dir/$file"
-              missing=1
-            fi
-          done
+          done < <(grep -v '^[[:space:]]*#' "$manifest" | grep -v '^[[:space:]]*$')
+
+          # A parse failure must not pass vacuously.  An empty loop body would
+          # otherwise "succeed" while checking nothing, which is the same class
+          # of silent-no-op the frozen list produced from the other direction.
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::manifest yielded no host_bin/host_file rows -- parse problem, not an empty requirement"
+            exit 1
+          fi
+          echo "Checked $checked host_bin/host_file entries from $manifest"
+
           [ "$missing" -eq 0 ]
 
-          file "$bin_dir"/*.exe
-          if [ -f "$bin_dir/cg.dll" ]; then
-            file "$bin_dir/cg.dll"
+          file "$stage_root"/bin/*.exe
+          if [ -f "$stage_root/bin/cg.dll" ]; then
+            file "$stage_root/bin/cg.dll"
           else
             echo "::warning::cg.dll is not staged; cgcomp.exe is shipped for legacy callers, but rsx-cg-compiler.exe is the supported shader compiler."
           fi
