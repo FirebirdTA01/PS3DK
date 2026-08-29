@@ -671,6 +671,18 @@ stage_python_and_assets() {
     # Make the Python entry point executable so it can be invoked directly when
     # Python is on PATH (Windows still respects the +x bit).
     chmod +x "$STAGE_BIN/fself.py"
+
+    # $STAGE_BIN persists between runs and the packager copies it wholesale, so
+    # merely no longer staging a file does NOT get it out of the release --
+    # yesterday's copy sits there and ships. Remove the ones this build
+    # deliberately dropped.
+    local obsolete
+    for obsolete in pkg.py sfo.py crypt.c build_pkgcrypt.py; do
+        if [[ -e "$STAGE_BIN/$obsolete" ]]; then
+            rm -f "$STAGE_BIN/$obsolete"
+            say "  removed stale $obsolete from the stage"
+        fi
+    done
 }
 
 # -----------------------------------------------------------------------------

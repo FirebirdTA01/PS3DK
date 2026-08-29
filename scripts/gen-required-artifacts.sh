@@ -64,6 +64,22 @@ ppu_names="$(
     grep -Ev '^\$|^$' | sort -u
 )"
 
+# Drop libraries a sample GENERATES for itself.  ps3_prx_stub_library(<name>
+# EXPORTS <yml>) builds lib<name>_stub.a during that sample's own build from a
+# PRX's export table, so it is never shipped in ppu/lib and must not be
+# demanded of the release.  Without this, the first sample to use it
+# (hello-sprx-import, linking hello_prx_stub) fails payload validation with
+# "ship it or stop linking it" -- and neither option is right, because the
+# whole point is that the module publishes its own import surface.
+generated_stubs="$(
+    find "$ROOT/samples" -name CMakeLists.txt -print0 |
+    xargs -0 grep -hoE 'ps3_prx_stub_library[[:space:]]*\([[:space:]]*[A-Za-z0-9_.-]+' |
+    sed -E 's/.*\([[:space:]]*//' | sort -u
+)"
+if [[ -n "$generated_stubs" ]]; then
+    ppu_names="$(grep -Fxv -f <(printf '%s\n' "$generated_stubs") <<< "$ppu_names" || true)"
+fi
+
 # SPU side: ps3_add_spu_image(target NAME <n> SOURCES <files> [LIBS <libs...>]
 # [CFLAGS ...] [JOBBIN_WRAP]).  SPU archives are named ONLY here, never in
 # target_link_libraries, so scanning just the PPU link lines misses every SPU
