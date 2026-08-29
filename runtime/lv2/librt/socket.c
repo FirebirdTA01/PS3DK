@@ -367,9 +367,21 @@ inet_pton(int af, const char *src, void *dst)
 }
 
 /*
- * getpeername/getsockname were declared in <sys/socket.h> long before
- * anything defined them, so calling either linked with an undefined
- * reference.  Lv-2 syscalls 703/704 are the implementation.
+ * getpeername/getsockname are declared in <sys/socket.h>, but librt.a alone
+ * defined neither: a program linking -lrt without -lnet got an undefined
+ * reference.  libnet.a has always defined them, through PSL1GHT's
+ * netGetPeerName/netGetSockName imports, but only once netInitialize() has
+ * run -- before that they return ENOSYS.
+ *
+ * These go straight to Lv-2 syscalls 703/704, so they work with neither
+ * libnet on the link line nor netInitialize() called.
+ *
+ * On link order: both libraries define these weakly, and the linker takes
+ * the first weak definition it meets.  cmake/ps3-ppu-toolchain.cmake calls
+ * link_libraries(rt), which puts -lrt ahead of the user's libraries for a
+ * separate constructor-ordering reason -- so in every CMake-built program
+ * it is THESE that get bound, not libnet's, whether or not -lnet is on the
+ * line.
  *
  * addr_len is in/out, so it takes the same bounce-buffer treatment as
  * accept(): Lv-2 writes through the pointer and we only publish the result
@@ -416,10 +428,16 @@ getsockname(int s, struct sockaddr *name, socklen_t *namelen)
 }
 
 /*
- * select() was a stub returning ENOSYS until Lv-2 syscall 716 was
- * identified.  The descriptor sets are rebuilt rather than cast -- see the
- * lv2_fd_set notes at the top of this file for why a cast is wrong on the
- * lp64 multilib and wrong for masked socket descriptors on both.
+ * This replaces a stub that returned ENOSYS.  That stub was not merely
+ * dormant: libnet.a defines select() too -- weakly, routed through netSelect
+ * -- but our toolchain file links -lrt ahead of the user's libraries, so the
+ * linker met librt's weak stub FIRST and bound it.  select() therefore
+ * returned ENOSYS in every CMake-built program even when -lnet was on the
+ * line and libnet was initialised.  Lv-2 syscall 716 is the implementation.
+ *
+ * The descriptor sets are rebuilt rather than cast -- see the lv2_fd_set
+ * notes at the top of this file for why a cast is wrong on the lp64
+ * multilib and wrong for masked socket descriptors on both.
  */
 int __attribute__((weak))
 select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
