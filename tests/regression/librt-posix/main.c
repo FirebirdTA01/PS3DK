@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/times.h>
@@ -15,10 +16,6 @@
 
 #ifdef PS3TC_REGRESSION_HOST_STUB
 #define SOCKET_FD_MASK 0x40000000U
-static int netInitialize(void) { return 0; }
-static void netDeinitialize(void) {}
-#else
-#include <psl1ght/lv2/net.h>
 #endif
 
 static int failures;
@@ -219,9 +216,6 @@ static void test_sbrk(void)
 
 static void test_socket(void)
 {
-    int init_rc = netInitialize();
-    printf("INFO netInitialize rc=%d errno=%d\n", init_rc, errno);
-
     errno = 0;
     int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     printf("INFO socket fd=%d errno=%d\n", fd, errno);
@@ -229,7 +223,45 @@ static void test_socket(void)
     check_true("socket fd has mask", fd < 0 || ((unsigned int)fd & SOCKET_FD_MASK) == SOCKET_FD_MASK);
 
     if (fd >= 0) {
+        struct sockaddr_in local_addr;
+        struct sockaddr_in peer_addr;
         struct sockaddr_in addr;
+        socklen_t local_len = sizeof(local_addr);
+        socklen_t peer_len = sizeof(peer_addr);
+        fd_set writefds;
+        struct timeval tv;
+        int lv2_fd = fd & ~((int)SOCKET_FD_MASK);
+
+        memset(&local_addr, 0, sizeof(local_addr));
+        errno = 0;
+        int local_rc = getsockname(fd, (struct sockaddr *)&local_addr, &local_len);
+        printf("INFO getsockname rc=%d errno=%d len=%lu family=%d port=%u\n",
+               local_rc, errno, (unsigned long)local_len,
+               local_addr.sin_family, (unsigned int)ntohs(local_addr.sin_port));
+        check_true("getsockname reaches real syscall", local_rc == 0 || errno != ENOSYS);
+
+        memset(&peer_addr, 0, sizeof(peer_addr));
+        errno = 0;
+        int peer_rc = getpeername(fd, (struct sockaddr *)&peer_addr, &peer_len);
+        printf("INFO getpeername rc=%d errno=%d len=%lu family=%d port=%u\n",
+               peer_rc, errno, (unsigned long)peer_len,
+               peer_addr.sin_family, (unsigned int)ntohs(peer_addr.sin_port));
+        check_true("getpeername reaches real syscall", peer_rc == 0 || errno != ENOSYS);
+
+        FD_ZERO(&writefds);
+        if (lv2_fd >= 0 && lv2_fd < FD_SETSIZE) {
+            FD_SET(lv2_fd, &writefds);
+        }
+        tv.tv_sec = 0;
+        tv.tv_usec = 0;
+        errno = 0;
+        int select_rc = select(lv2_fd + 1, NULL, &writefds, NULL, &tv);
+        printf("INFO select socket rc=%d errno=%d lv2fd=%d ready=%d\n",
+               select_rc, errno, lv2_fd,
+               (lv2_fd >= 0 && lv2_fd < FD_SETSIZE) ? FD_ISSET(lv2_fd, &writefds) : -1);
+        check_true("select socket descriptor in range", lv2_fd >= 0 && lv2_fd < FD_SETSIZE);
+        check_true("select socket reaches real syscall", select_rc >= 0 || errno != ENOSYS);
+
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_port = htons(65000);
@@ -245,8 +277,6 @@ static void test_socket(void)
         printf("INFO socket close rc=%d errno=%d\n", close_rc, errno);
         check_true("socket close not unimplemented", close_rc == 0 || errno != ENOSYS);
     }
-
-    netDeinitialize();
 }
 
 int main(void)
