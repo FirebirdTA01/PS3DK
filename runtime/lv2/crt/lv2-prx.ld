@@ -53,6 +53,21 @@ OUTPUT_ARCH(powerpc:common64)
 PHDRS
 {
 	hdr_load	PT_LOAD FILEHDR PHDRS	FLAGS(0x01 | 0x02 | 0x04);
+
+	/* Reserve the relocation segment's slot at link time.
+	 *
+	 * prx-gen fills this in after converting the retained relocations. The
+	 * slot has to exist HERE rather than be appended, because a real .sprx
+	 * does not carry the .prx verbatim: make_self stores the segments as the
+	 * SELF payload and the loader rebuilds an ELF from them, so a phdr table
+	 * written past the last segment does not survive. Declaring it here keeps
+	 * the table at 0x40 inside PHDR[0] -- where SIZEOF_HEADERS accounts for
+	 * both entries and where Sony's own modules put it.
+	 *
+	 * No sections are assigned to it; ld emits the slot because it is named
+	 * here, and prx-gen recognises it by its type plus a zero p_filesz.
+	 */
+	hdr_rela	0x700000A4		FLAGS(0);
 }
 
 SECTIONS

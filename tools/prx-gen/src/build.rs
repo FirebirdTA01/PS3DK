@@ -146,13 +146,26 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
     out.resize(reloc_off, 0);
     out.extend_from_slice(&blob);
 
-    // --- append the rebuilt program header table ---------------------------
-    let phoff = align_up(out.len(), 8);
-    out.resize(phoff, 0);
-
-    let mut phdrs: Vec<Phdr> = elf.phdrs.clone();
-    phdrs[0].p_paddr = p_paddr;
-    phdrs.push(Phdr {
+    // --- write the rebuilt program header table ----------------------------
+    //
+    // Placement matters beyond the raw file. A SELF does not carry the .prx
+    // byte-for-byte: make_self copies the ELF header plus the phdr table into
+    // the SELF header area and stores the SEGMENTS as the payload, and the
+    // loader reconstructs an ELF from those segments. So anything living past
+    // the end of the last segment does not survive the round trip.
+    //
+    // Appending the table put e_phoff at EOF, outside every PT_LOAD. Raw
+    // readers seek anywhere and did not care, which is why the unsigned .prx
+    // and the fake-signed .sprx both load; but in a real .sprx the rebuilt ELF
+    // ends where the segments end and e_phoff points past it, so RPCS3 fails
+    // with elf_error::stream_phdrs ("Failed to read ELF program headers").
+    //
+    // lv2-prx.ld therefore declares the reloc segment in PHDRS so the linker
+    // reserves its slot and sizes SIZEOF_HEADERS accordingly. When that slot is
+    // present we fill it in place and leave e_phoff at 0x40, inside PHDR[0],
+    // exactly as Sony's own modules are laid out. Modules linked with an older
+    // script have no slot, so we still append and stay usable unsigned.
+    let reloc_phdr = Phdr {
         p_type: PT_SCE_PPURELA,
         p_flags: 0,
         p_offset: reloc_off as u64,
@@ -161,12 +174,49 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
         p_filesz: blob.len() as u64,
         p_memsz: 0,
         p_align: 4,
-    });
+    };
+
+    let mut phdrs: Vec<Phdr> = elf.phdrs.clone();
+    phdrs[0].p_paddr = p_paddr;
+
+    // A reserved slot is the last phdr already carrying the reloc type, which
+    // is what the linker script produces for a segment with no content.
+    let reserved_slot = phdrs
+        .iter()
+        .position(|p| p.p_type == PT_SCE_PPURELA && p.p_filesz == 0);
+
+    let phoff = match reserved_slot {
+        Some(i) => {
+            phdrs[i] = reloc_phdr;
+            let at = elf.e_phoff as usize;
+            let end = at + phdrs.len() * PHDR_SIZE;
+            if end > out.len() {
+                bail!(
+                    "reserved phdr table at 0x{at:x}..0x{end:x} runs past the image \
+                     (0x{:x}) — lv2-prx.ld and prx-gen disagree about the header size",
+                    out.len()
+                );
+            }
+            let mut table = Vec::with_capacity(phdrs.len() * PHDR_SIZE);
+            for p in &phdrs {
+                p.write(&mut table);
+            }
+            out[at..end].copy_from_slice(&table);
+            at
+        }
+        None => {
+            phdrs.push(reloc_phdr);
+            let at = align_up(out.len(), 8);
+            out.resize(at, 0);
+            for p in &phdrs {
+                p.write(&mut out);
+            }
+            at
+        }
+    };
+
     if phdrs.len() > u16::MAX as usize {
         bail!("too many program headers");
-    }
-    for p in &phdrs {
-        p.write(&mut out);
     }
 
     // --- rewrite the ELF header --------------------------------------------
