@@ -21,5 +21,12 @@ __librt_usleep_r(struct _reent *r, useconds_t usec)
 unsigned int
 __librt_sleep_r(struct _reent *r, unsigned int seconds)
 {
-	return lv2errno_r(r, sysSleep(seconds));
+	s32 ret = sysSleep(seconds);
+
+	if (ret) {
+		lv2errno_r(r, ret);
+		return seconds;
+	}
+
+	return 0;
 }

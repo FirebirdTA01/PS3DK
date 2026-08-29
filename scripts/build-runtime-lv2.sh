@@ -171,7 +171,12 @@ for abi_flag in "" "-mlp64"; do
         for src in "$librt_src"/*.c; do
             [[ -f "$src" ]] || continue
             obj="$librt_work/$(basename "${src%.c}.o")"
-            "$CC" -c $abi_flag -mcpu=cell -I"$librt_src" -I"$PS3DK/ppu/include" -o "$obj" "$src"
+            "$CC" -c $abi_flag -mcpu=cell \
+                -Werror=implicit-function-declaration \
+                -Werror=incompatible-pointer-types \
+                -Werror=int-conversion \
+                -Wno-pointer-to-int-cast \
+                -I"$librt_src" -I"$PS3DK/ppu/include" -o "$obj" "$src"
             librt_objs="$librt_objs $obj"
         done
         if [[ -n "$librt_objs" ]]; then

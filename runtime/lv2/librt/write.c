@@ -15,12 +15,16 @@
 #include <sys/lv2errno.h>
 #include <sys/tty.h>
 #include <sys/file.h>
+#include <sys/socket.h>
 
 _ssize_t
 __librt_write_r(struct _reent *r, int fd, const void *ptr, size_t len)
 {
 	u32 nwritten;
 	s32 ret;
+
+	if (fd & SOCKET_FD_MASK)
+		return (_ssize_t)send(fd, ptr, len, 0);
 
 	if (fd == 1 || fd == 2) {
 		ret = sysTtyWrite(fd, ptr, (u32)len, &nwritten);

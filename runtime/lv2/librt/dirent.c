@@ -16,6 +16,12 @@
 #include <sys/dirent.h>
 #include <sys/lv2errno.h>
 #include <sys/file.h>
+#include <unistd.h>
+
+struct librt_dir {
+	DIR dir;
+	char path[PATH_MAX];
+};
 
 static void
 convert_lv2dirent(struct dirent *result, sysFSDirent *source, DIR *dirp)
@@ -48,17 +54,59 @@ readdir_i(DIR *dirp, struct dirent *entry, struct dirent **result)
 	return ret;
 }
 
+static int
+store_dir_path(struct _reent *r, struct librt_dir *owned, const char *path)
+{
+	size_t cwd_len;
+	size_t path_len;
+
+	if (!path || !*path) {
+		r->_errno = EINVAL;
+		return -1;
+	}
+
+	if (path[0] == '/') {
+		if (strlen(path) >= PATH_MAX) {
+			r->_errno = ENAMETOOLONG;
+			return -1;
+		}
+		strcpy(owned->path, path);
+		return 0;
+	}
+
+	if (!getcwd(owned->path, sizeof(owned->path)))
+		return -1;
+
+	cwd_len = strlen(owned->path);
+	path_len = strlen(path);
+	if (cwd_len + (cwd_len > 1 ? 1 : 0) + path_len >= PATH_MAX) {
+		r->_errno = ENAMETOOLONG;
+		return -1;
+	}
+
+	if (cwd_len > 1)
+		strcat(owned->path, "/");
+	strcat(owned->path, path);
+	return 0;
+}
+
 DIR *
 __librt_opendir_r(struct _reent *r, const char *path)
 {
 	s32 fd, ret;
-	DIR *dirp = (DIR *)malloc(sizeof(DIR));
+	struct librt_dir *owned = (struct librt_dir *)malloc(sizeof(*owned));
+	DIR *dirp = owned ? &owned->dir : NULL;
 	struct dirent *buffer = (struct dirent *)malloc(sizeof(struct dirent));
 
-	if (!dirp || !buffer) {
-		free(dirp);
+	if (!owned || !buffer) {
+		free(owned);
 		free(buffer);
 		r->_errno = ENOMEM;
+		return NULL;
+	}
+	if (store_dir_path(r, owned, path) < 0) {
+		free(owned);
+		free(buffer);
 		return NULL;
 	}
 
@@ -68,14 +116,14 @@ __librt_opendir_r(struct _reent *r, const char *path)
 	dirp->dd_buf = buffer;
 	dirp->dd_len = sizeof(struct dirent);
 
-	ret = sysLv2FsOpenDir(path, &fd);
+	ret = sysLv2FsOpenDir(owned->path, &fd);
 	if (!ret) {
 		dirp->dd_fd = fd;
 		return dirp;
 	}
 
 	free(buffer);
-	free(dirp);
+	free(owned);
 	lv2errno_r(r, ret);
 
 	return NULL;
@@ -108,11 +156,12 @@ int
 __librt_closedir_r(struct _reent *r, DIR *dirp)
 {
 	s32 ret;
+	struct librt_dir *owned = (struct librt_dir *)dirp;
 
 	ret = sysLv2FsCloseDir(dirp->dd_fd);
 
 	free(dirp->dd_buf);
-	free(dirp);
+	free(owned);
 
 	return lv2errno_r(r, ret);
 }
@@ -120,19 +169,57 @@ __librt_closedir_r(struct _reent *r, DIR *dirp)
 long int
 __librt_telldir_r(struct _reent *r, DIR *dirp)
 {
-	return dirp->dd_seek;
+	return dirp ? dirp->dd_seek : 0;
+}
+
+static int
+reopen_dir(struct _reent *r, DIR *dirp)
+{
+	struct librt_dir *owned = (struct librt_dir *)dirp;
+	s32 new_fd;
+	s32 ret;
+
+	ret = sysLv2FsOpenDir(owned->path, &new_fd);
+	if (ret)
+		return lv2errno_r(r, ret);
+
+	sysLv2FsCloseDir(dirp->dd_fd);
+	dirp->dd_fd = new_fd;
+	dirp->dd_seek = 0;
+	dirp->dd_loc = 0;
+	return 0;
 }
 
 void
 __librt_rewinddir_r(struct _reent *r, DIR *dirp)
 {
-	dirp->dd_seek = 0;
-	dirp->dd_loc  = 0;
+	if (dirp)
+		reopen_dir(r, dirp);
 }
 
 void
 __librt_seekdir_r(struct _reent *r, DIR *dirp, long int loc)
 {
-	dirp->dd_seek = loc;
-	dirp->dd_loc  = 0;
+	struct dirent discard;
+	struct dirent *result;
+	long int i;
+
+	if (!dirp || loc < 0) {
+		r->_errno = EINVAL;
+		return;
+	}
+	if (reopen_dir(r, dirp) < 0)
+		return;
+
+	for (i = 0; i < loc; i++) {
+		s32 ret = readdir_i(dirp, &discard, &result);
+		if (ret < 0) {
+			lv2errno_r(r, ret);
+			return;
+		}
+		if (!result) {
+			r->_errno = EINVAL;
+			return;
+		}
+	}
 }

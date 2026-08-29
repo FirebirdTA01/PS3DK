@@ -82,14 +82,14 @@ caddr_t
 __librt_sbrk_r(struct _reent *ptr, ptrdiff_t incr)
 {
 	if (!__sbrk_ready) {
-		lv2errno_r(ptr, ENOMEM);
+		ptr->_errno = ENOMEM;
 		return (caddr_t)-1;
 	}
 
 	if (incr >= 0) {
 		if (__sbrk_cur + incr > __sbrk_end || __sbrk_cur + incr < __sbrk_cur) {
 			/* overflow or out-of-space */
-			lv2errno_r(ptr, ENOMEM);
+			ptr->_errno = ENOMEM;
 			return (caddr_t)-1;
 		}
 		char *old = __sbrk_cur;

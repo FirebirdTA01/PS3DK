@@ -20,6 +20,6 @@ mode_t
 __librt_umask_r(struct _reent *r, mode_t cmask)
 {
 	mode_t old = g_umask;
-	g_umask = cmask;
+	g_umask = cmask & (S_IRWXU | S_IRWXG | S_IRWXO);
 	return old;
 }

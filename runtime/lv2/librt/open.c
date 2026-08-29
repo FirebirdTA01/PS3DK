@@ -20,8 +20,18 @@ __librt_open_r(struct _reent *r, const char *file, int flags, int mode)
 	if (flags & O_EXCL)   oflag |= SYS_O_EXCL;
 	if (flags & O_TRUNC)  oflag |= SYS_O_TRUNC;
 	if (flags & O_APPEND) oflag |= SYS_O_APPEND;
+	if (flags & O_CREAT)
+		mode &= ~g_umask;
+	else
+		mode = 0;
 
 	s32 fd;
-	s32 ret = sysLv2FsOpen(file, oflag, &fd, mode & ~g_umask, NULL, 0);
-	return lv2errno_r(r, ret) < 0 ? -1 : fd;
+	s32 ret = sysLv2FsOpen(file, oflag, &fd, mode, NULL, 0);
+	if (lv2errno_r(r, ret) < 0)
+		return -1;
+
+	if (flags & O_CREAT)
+		sysLv2FsChmod(file, mode);
+
+	return fd;
 }

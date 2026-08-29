@@ -9,6 +9,7 @@
  */
 
 #include <sys/reent.h>
+#include <sys/errno.h>
 #include <sys/time.h>
 #include <sys/lv2errno.h>
 #include <sys/systime.h>
@@ -17,5 +18,16 @@ int
 __librt_settod_r(struct _reent *r, const struct timeval *ptimeval,
                  const struct timezone *ptimezone)
 {
-	return lv2errno_r(r, sysSetCurrentTime(ptimeval, ptimezone));
+	u64 sec, nsec;
+
+	(void)ptimezone;
+
+	if (!ptimeval) {
+		r->_errno = EFAULT;
+		return -1;
+	}
+
+	sec = (u64)ptimeval->tv_sec;
+	nsec = (u64)ptimeval->tv_usec * 1000;
+	return lv2errno_r(r, sysSetCurrentTime(sec, nsec));
 }

@@ -15,12 +15,16 @@
 #include <sys/lv2errno.h>
 #include <sys/tty.h>
 #include <sys/file.h>
+#include <sys/socket.h>
 
 _ssize_t
 __librt_read_r(struct _reent *r, int fd, void *ptr, size_t len)
 {
 	u32 nread;
 	s32 ret;
+
+	if (fd & SOCKET_FD_MASK)
+		return (_ssize_t)recv(fd, ptr, len, 0);
 
 	if (fd == 0) {
 		ret = sysTtyRead(fd, ptr, (u32)len, &nread);
