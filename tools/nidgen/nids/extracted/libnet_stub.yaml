@@ -161,12 +161,18 @@ exports:
   notes: extracted from _sys_net_0001_10.o
 - name: sys_net_get_sockinfo
   nid: '0x3b27c780'
-  signature: ''
-  notes: extracted from _sys_net_0001_11.o
+  aliases:
+    - netGetSockInfo
+  signature: 's32 sys_net_get_sockinfo(s32 socket, netSocketInfo *info, s32 n)'
+  notes: extracted from _sys_net_0001_11.o; netGetSockInfo is PSL1GHT's spelling
+    of the same export (upstream declares it in net/net.h and maps it to this
+    NID), so it is an alias rather than a second import.
 - name: sys_net_get_sockinfo_ex
   nid: '0xa765d029'
+  aliases:
+    - netGetSockInfoEx
   signature: ''
-  notes: extracted from _sys_net_0001_36.o
+  notes: extracted from _sys_net_0001_36.o; netGetSockInfoEx is PSL1GHT's spelling.
 - name: sys_net_get_test_param
   nid: '0xa5a86557'
   signature: ''
