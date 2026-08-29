@@ -16,23 +16,87 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-### Host tools — pkgcrypt build-on-install (Windows)
+## [v0.11.0] — 2026-08-29
 
-`pkg.py` does `import pkgcrypt`, a C extension that is ABI-locked to a
-specific Python (version + platform), so the Windows release cannot ship a
-single prebuilt binary that matches whatever Python a user has. The release
-now ships the extension source (`crypt.c`) plus a helper
-(`tools/pkgcrypt/build_pkgcrypt.py`, staged into `bin/`) that `setup.cmd`
-runs once to build `pkgcrypt` against the user's own interpreter. The build
-uses pip + setuptools (so the host compiler — MSVC on Windows — and the
-distutils→setuptools shim are handled automatically) and is idempotent: a
-no-op once `pkgcrypt` is importable. Activation never fails if the build is
-skipped (no Python on PATH) or errors — only `.pkg` generation is affected.
+First Windows release with PRX/SPRX module support and no Python on the
+first-run path. Fresh-extract sample sweep: 198/198 raw and 198/198 after
+`setup.cmd` (v0.10.720: 191/196 raw). Runtime regression battery: PASS.
 
-- `scripts/build-host-tools-windows.sh`: stage `crypt.c` and
-  `build_pkgcrypt.py` into `bin/`.
-- `scripts/package-windows-release.sh`: `setup.cmd` invokes the helper after
-  PATH setup; release validation requires the two new `bin/` files.
+### Added
+
+- **PRX modules.** `ps3_add_prx(<target> NAME <n> VERSION <M.m> [SIGN])`
+  builds a loadable Lv-2 module: the target is linked at base 0 with
+  `-Wl,-q` against `lv2-prx.ld` and `lv2-prx-crt.o`, then `tools/prx-gen`
+  converts the retained relocations into the module relocation segment,
+  stamps the module-info block and validates the result (`prx-gen check`).
+  Export tables are written with the `<sys/prx_module.h>` macros
+  (`PRX_LIBRARY_BEGIN` / `PRX_EXPORT_FUNC` / `PRX_LIBRARY_END`); the crt
+  provides `module_start` / `module_stop` defaults.
+  `ps3_prx_stub_library(<lib> EXPORTS <yml>)` generates the importer's stub
+  archive from the same export list. Reference pair:
+  `samples/lv2/hello-sprx-export` + `hello-sprx-import`. Verified on RPCS3:
+  load, export resolution by NID, calls through both a start-time hand-off
+  and the generated stub. Design: `docs/design/sprx-generation.md`; layout:
+  ABI spec §8.
+- `make_sprx` (SPRX flavour of `make_self`) is shipped; `ps3_add_prx(... SIGN)`
+  produces `<target>.sprx`. Booting a signed module is not yet verified.
+- **Native `sfo` / `pkg` host tools** (`tools/sfo-pkg/`, adopted from
+  PSL1GHT #162 at 73e34af with our own FIPS 180-4 SHA-1 and a fix for a
+  Windows-only path bug that mistyped `EBOOT.BIN`). Output is byte-identical
+  to the previous Python tools; `ps3_add_pkg` drives them directly.
+- **Regression battery** (`tests/regression/`, `scripts/build-regression.ps1`,
+  `scripts/run-regression-rpcs3.ps1`, `.github/workflows/regression-build.yml`):
+  boots a POSIX-layer probe on RPCS3 and asserts time, dirent, socket and
+  `sbrk` behaviour; RPCS3 instance lock scripts included.
+- `setup.cmd` stale-install guard: running it from a fresh extract while
+  `PS3DK` still names an older install warns with the exact `setx` line and
+  activates the extract you ran it from.
+- Upstream PSL1GHT API additions (eca3f99..master): `sysNetGetPeerName`,
+  `sysNetGetSockName`, `sysNetSelect`, `sysLv2FsChown` / `Mount` / `Unmount`
+  (`<sys/lv2_fs_ext.h>`), `netGetSockInfo` alias.
+- SPU PSGL side (`spu_psgl.h`, `libspuPSGL.a`, `tools/psgl`) and
+  `spu-elf-to-ppu-obj.exe` are now shipped.
+
+### Fixed
+
+- `getpeername` / `getsockname` were declared in `<sys/socket.h>` but never
+  defined (undefined reference at link); `select()` returned `ENOSYS`. All
+  three are implemented via Lv-2 syscalls 703/704/716, with the descriptor
+  sets and `timeval` translated to the kernel's layouts.
+- librt POSIX restore: `gettimeofday` / `settimeofday` argument widths,
+  `utime`, `umask`, `chdir` / `getcwd`, `rewinddir` / `seekdir`, the socket
+  family (was `ENOSYS`), `sbrk` reporting `ENOMEM`.
+- `rsxContextCallback` inline asm lacked memory/volatile clobbers: GCC ≥ 11
+  cached `context->current` across the wrap callback and blitting hung at the
+  command-buffer wrap.
+- `heapFree` computed a garbage coalesced size; every `rsxFree` faulted.
+- Windows zip: stub-archive aliases are real files (no symlink entries); the
+  required-artifacts manifest is derived and two-sided.
+- `hello-psgl-ffp-shaderlib`: host C compiler is optional.
+
+### Changed
+
+- Runtime-check terminology: "smoke" → "regression" across scripts, tests,
+  workflows and docs.
+- Packaging validation excludes libraries a sample generates for itself
+  (`ps3_prx_stub_library`) and removes stale files from the persistent stage.
+
+### Removed
+
+- `pkg.py`, `sfo.py`, `crypt.c`, `build_pkgcrypt.py` and the `pkgcrypt`
+  build-on-install step in `setup.cmd` (the v0.10.x interim that compiled a
+  Python C extension against the user's interpreter at activation). Replaced
+  by the native tools above; Python is no longer required on Windows.
+
+### Known limitations
+
+- Signed `.sprx` boot unverified; variable/TLS exports from modules
+  unsupported.
+- `sysLv2FsChown` and `sys_net_get_sockinfo` cannot be verified on RPCS3
+  (its HLE reports success without acting); hardware-only.
+- `off_t` is 32-bit (no `stat64`); the 64 MiB `sbrk` arena limit stands.
+- `cg.dll` is not shipped; `rsx-cg-compiler.exe` is the supported shader
+  compiler.
 
 ## [v0.10.0] — 2026-05-29
 
