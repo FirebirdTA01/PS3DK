@@ -124,6 +124,21 @@ code at start/stop (return 0, or Lv-2 unloads the module). The build links
 with `-Wl,-q` against `lv2-prx.ld`, then `prx-gen build` turns the ELF into
 `mymod.prx` next to the CMakeLists and `prx-gen check` validates it.
 
+Outside CMake the same two steps are:
+
+```
+prx-gen build mymod.elf -o mymod.prx --name mymod [--version 1.0] [--attributes 0x0000]
+prx-gen check mymod.prx
+```
+
+Three things `prx-gen` will tell you about, so you don't have to discover
+them in the emulator: it must run on the **unstripped** link output (the
+`-Wl,-q` relocations reference `.symtab`); `--name` is at most 27 characters
+(module-info field width); and keep `check` in the build — the failures it
+catches (an export record with wrong attributes, an unrelocated module-info
+pointer) produce a module that loads cleanly and exports nothing, with no
+diagnostic anywhere in the RPCS3 log.
+
 **2. The importer** — link a stub archive generated from the same export list
 (`exports.yml`, nidgen's schema: `library`, `module`, `exports: [{name, nid}]`):
 
