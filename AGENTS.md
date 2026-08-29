@@ -96,6 +96,7 @@ User-specific memory at `~/.Codex/projects/C--<...>--PS3-Custom-Toolchain/memory
 
 - Never commit to `reference/private/` (`.gitignore` enforces).
 - Never copy reference SDK code into the repo. Independent only.
+- Session handoff briefs and sample-sweep reports are LOCAL-ONLY: they live in the gitignored `docs/local/` and are never committed (director, 2026-08-29). The director copies whatever a CachyOS session needs to that machine by hand.
 - `.gitattributes` keeps `patches/**` byte-exact (no CRLF).
 - Build trees go under `$PS3_BUILD_ROOT` (default `/c/ps3tc/build` on Windows, `~/ps3tc/build` on Linux) to dodge MAX_PATH on Windows and keep `stage/` clean.
 - Use `--only` flag on build scripts for incremental work; full rebuild only when patches change.
