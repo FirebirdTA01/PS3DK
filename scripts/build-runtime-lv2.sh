@@ -153,6 +153,21 @@ for abi_flag in "" "-mlp64"; do
     install -m 644 "$runtime_src/lv2.ld" "$install_gcc/lv2.ld"
     install -m 644 "$runtime_src/lv2.ld" "$install_ps3dk/lv2.ld"
 
+    # PRX (relocatable module) link set: crt object, linker script and the
+    # gcc specs override that drops the executable-only `-T lv2.ld' the
+    # LINK_START_LV2_SPEC injects.  Consumed by ps3_add_prx
+    # (cmake/ps3-self.cmake); post-processed by tools/prx-gen.  See
+    # docs/design/sprx-generation.md.
+    say "building lv2-prx-crt.o ($abi_label, module-info block + management record)"
+    "$CC" -c $abi_flag -mcpu=cell \
+        -o "$install_gcc/lv2-prx-crt.o" \
+        "$runtime_src/lv2-prx.S"
+    cp -f "$install_gcc/lv2-prx-crt.o" "$install_ps3dk/lv2-prx-crt.o"
+    install -m 644 "$runtime_src/lv2-prx.ld"    "$install_gcc/lv2-prx.ld"
+    install -m 644 "$runtime_src/lv2-prx.ld"    "$install_ps3dk/lv2-prx.ld"
+    install -m 644 "$runtime_src/lv2-prx.specs" "$install_gcc/lv2-prx.specs"
+    install -m 644 "$runtime_src/lv2-prx.specs" "$install_ps3dk/lv2-prx.specs"
+
     # Build native librt (replaces PSL1GHT's librt.a).  Each wrapper
     # compiles cleanly under both ILP32 and LP64 because the syscall
     # interface is ABI-invariant and width-sensitive types use newlib
@@ -187,8 +202,8 @@ for abi_flag in "" "-mlp64"; do
         say "installed librt.a ($abi_label, $(echo $librt_objs | wc -w) objects)"
     fi
 
-    say "installed $install_gcc/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} ($abi_label GCC startfile)"
-    say "installed $install_ps3dk/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld} ($abi_label PS3DK mirror)"
+    say "installed $install_gcc/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld,lv2-prx-crt.o,lv2-prx.ld,lv2-prx.specs} ($abi_label GCC startfile)"
+    say "installed $install_ps3dk/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld,lv2-prx-crt.o,lv2-prx.ld,lv2-prx.specs} ($abi_label PS3DK mirror)"
 done
 
 # PSL1GHT's tools/sprxlinker/ ships an old sprxlinker that doesn't grok the

@@ -93,6 +93,61 @@ Final artefacts land at the sample directory next to `CMakeLists.txt`; `cmake-bu
 
 `samples\README.md` has the full sample index plus per-sample notes on what each one validates.
 
+### Building a PRX / SPRX module
+
+The toolchain can produce loadable Lv-2 modules (`.prx`, and signed `.sprx`)
+and let other binaries link against them. A module is an ordinary CMake
+target plus a four-line export table; the importer is an ordinary executable.
+Reference pair: `samples/lv2/hello-sprx-export` (the module) and
+`samples/lv2/hello-sprx-import` (loads it, calls it, prints `PRX_OK`).
+
+**1. The module** — `CMakeLists.txt`:
+
+```cmake
+include(ps3-self)
+add_executable(mymod source/mymod.c source/exports.S)
+ps3_add_prx(mymod NAME mymod VERSION 1.0)            # add SIGN for mymod.sprx via make_sprx
+```
+
+`source/exports.S` names what the module exports (NIDs from `nidgen nid <symbol>`):
+
+```asm
+#include <sys/prx_module.h>
+PRX_LIBRARY_BEGIN(mymod, "mymod")
+    PRX_EXPORT_FUNC(mymod_add, 0xe1f4c294)
+PRX_LIBRARY_END(mymod)
+```
+
+`module_start(size_t args, void *argp)` / `module_stop` are optional — the
+crt provides defaults that return `SYS_PRX_RESIDENT`; define them in C to run
+code at start/stop (return 0, or Lv-2 unloads the module). The build links
+with `-Wl,-q` against `lv2-prx.ld`, then `prx-gen build` turns the ELF into
+`mymod.prx` next to the CMakeLists and `prx-gen check` validates it.
+
+**2. The importer** — link a stub archive generated from the same export list
+(`exports.yml`, nidgen's schema: `library`, `module`, `exports: [{name, nid}]`):
+
+```cmake
+include(ps3-self)
+ps3_prx_stub_library(mymod_stub EXPORTS ../mymod/exports.yml ARCHIVE_NAME mymod)
+add_executable(app source/main.c)
+target_link_libraries(app PRIVATE mymod_stub rt lv2)
+ps3_add_self(app)
+```
+
+In `main.c`: `sysPrxLoadModule("/app_home/mymod.prx", 0, NULL)`, then
+`sysPrxStartModule(id, args, argp, &modres, 0, NULL)` (the `modres` pointer
+must be non-NULL); after start, calls to `mymod_add()` resolve through the
+stub, and `argp` is a handy way for `module_start` to hand back pointers.
+Copy the `.prx` next to the booted executable so `/app_home/` finds it.
+
+**3. Running on RPCS3:** boot the importer's raw `.elf` and the unsigned
+`.prx` loads as-is. Booting a `.self`/`.fake.self` requires a signed `.sprx`
+(`ps3_add_prx(... SIGN)`, which runs `make_sprx`).
+
+Format and design notes: `docs/design/sprx-generation.md`; the module layout
+is specified in `docs/abi/cellos-lv2-abi-spec.md` §8.
+
 ### Manual / direct toolchain invocation (no CMake)
 
 If you don't want to use CMake, the toolchain can be driven directly from `cmd` or PowerShell.  This is also the right path for IDE integration, custom build systems, or one-off compiles outside the CMake-driven sample tree.

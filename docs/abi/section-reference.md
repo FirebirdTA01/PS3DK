@@ -162,10 +162,41 @@ Exported libraries are described through a concatenated range:
 ```
 
 A normal executable often has an empty `.lib.ent` body. PRX modules populate it
-with one record per exported library.
+with one record per exported library plus one nameless "management" record
+carrying `module_start` / `module_stop`.
 
-The `.sys_proc_prx_param` block points to the range using
+The `.sys_proc_prx_param` block (executables) or the module-info block
+(`.rodata.sceModuleInfo`, PRX) points to the range using
 `__begin_of_section_lib_ent + 4` and `__end_of_section_lib_ent`.
+
+### 3.1 Export record layout
+
+Same 44-byte shape as the import `Stub` record in §4.1, interpreted as:
+
+```c
+typedef struct {
+    uint8_t  size;         /* 0x2c */
+    uint8_t  unk0;
+    uint16_t version;      /* 1 */
+    uint16_t attributes;   /* 0x0001 named library, 0x8000 management */
+    uint16_t num_func;     /* written at assembly time */
+    uint16_t num_var;      /* 0 in v1 */
+    uint16_t num_tlsvar;   /* 0 */
+    uint8_t  info_hash, info_tlshash;
+    uint16_t unk1;
+    uint32_t name;         /* -> C string; 0 for the management record */
+    uint32_t nids;         /* -> u32[num_func + num_var] */
+    uint32_t addrs;        /* -> u32[...]; functions = compact OPD addresses */
+    uint32_t vnids, vstubs, unk4, unk5;   /* 0 */
+} Ent;
+```
+
+Emitters: `<sys/prx_module.h>` (`PRX_LIBRARY_BEGIN/PRX_EXPORT_FUNC/
+PRX_LIBRARY_END`, named records; arrays live in `.rodata.sceExportName /
+.sceExportNID / .sceExportAddr`) and `runtime/lv2/crt/lv2-prx.S` (the
+management record). A record with neither attribute bit is skipped by the
+loader silently; an `addrs` entry outside the module aborts the load. See
+spec §8.3.
 
 ---
 

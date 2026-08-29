@@ -389,3 +389,144 @@ Deviations from this spec require either (a) a fixture update with
 documented rationale, or (b) a change to `abi-verify` with a regression
 test. The spec is authoritative - tools and code change to match it,
 not the other way around.
+
+---
+
+## 8. Relocatable module (PRX) layout
+
+A PRX is a relocatable Lv-2 module produced by `tools/prx-gen` from a
+`-Wl,-q` link against `runtime/lv2/crt/lv2-prx.ld` (design:
+`docs/design/sprx-generation.md`; loader-side facts with public-source
+citations: `docs/local/sprx-format-facts.md`). Sections 1-6 apply with the
+differences below. Items marked *(R)* are what the emulator accepts and
+await confirmation against the reference SDK; everything else is normative.
+
+### 8.1 ELF identity
+
+| Field | Required value |
+|---|---|
+| `EI_OSABI` | `0x66` |
+| `e_type` | `0xFFA4` (`ET_SCE_PPURELEXEC`) |
+| `e_entry` | `0` *(R: never read by the loader; zero by convention)* |
+| `e_ehsize / e_phentsize / e_shentsize` | `64 / 56 / 64` |
+| Program headers | one or more `PT_LOAD` followed by exactly one `0x700000A4` (`PT_SCE_PPURELA`) segment; **no** `PT_TLS`, `0x60000001`, `0x60000002` or `PT_NOTE` |
+| `PHDR[0]` | must be the first `PT_LOAD`; its `p_paddr` = the module-info block's position in the `p_offset` frame (with `p_offset = 0` and `p_vaddr = 0`: its file offset). `p_paddr == 0` means "no module info". |
+
+Our toolchain links every module at base 0 with a single `PT_LOAD`
+(flags RWX) so that every relocation record has `index_addr == index_value
+== 0` and `ptr` equal to the link-time address. Section headers are
+optional; `prx-gen` preserves the input's.
+
+### 8.2 Module-info block (`.rodata.sceModuleInfo`, symbol `__sys_prx_module_info`)
+
+52 bytes, `sh_addralign = 4`, first section after the headers inside
+`PHDR[0]`. Emitted by `lv2-prx.S`; name/version/attributes written by
+`prx-gen`.
+
+```
+offset  size  field           value / reloc
+------  ----  --------------  ----------------------------------------
+0x00    2     attributes      0 (prx-gen --attributes)
+0x02    2     version         major, minor (prx-gen --version)
+0x04    28    name            NUL-padded, <= 27 chars (prx-gen --name)
+0x20    4     toc             R_PPC64_ADDR32 .TOC.
+0x24    4     exports_start   R_PPC64_ADDR32 __libentstart + 4
+0x28    4     exports_end     R_PPC64_ADDR32 __libentend
+0x2c    4     imports_start   R_PPC64_ADDR32 __libstubstart + 4
+0x30    4     imports_end     R_PPC64_ADDR32 __libstubend
+```
+
+Normative rules:
+
+1. The relocation segment is applied **before** the block is read, so
+   the five pointer fields MUST each be covered by a relocation record.
+   `prx-gen build` refuses a module with fewer than five (override:
+   `--allow-unrelocated-module-info`, diagnostic use only).
+2. There is no magic word and no `.sys_proc_prx_param` in a PRX.
+
+### 8.3 Library records (`.lib.ent` / `.lib.stub`)
+
+Both tables use the same 44-byte record; only the meaning of the pointer
+fields differs (import side: section-reference.md §4).
+
+```
+offset  size  field         export meaning
+------  ----  ------------  ----------------------------------------
+0x00    1     size          0x2c (walk stride; 0 is read as 44)
+0x01    1     unk0          0
+0x02    2     version       1
+0x04    2     attributes    0x0001 named library | 0x8000 management (0x0001 clear)
+0x06    2     num_func      written at assembly time (label arithmetic)
+0x08    2     num_var       0 in v1
+0x0a    2     num_tlsvar    0 (loader rejects non-zero)
+0x0c    4     info_hash, info_tlshash, unk1   0
+0x10    4     name          R_PPC64_ADDR32 -> C string; 0 for the management record
+0x14    4     nids          R_PPC64_ADDR32 -> u32[num_func + num_var]
+0x18    4     addrs         R_PPC64_ADDR32 -> u32[num_func + num_var]; functions are compact-OPD addresses
+0x1c    16    vnids, vstubs, unk4, unk5   0 (export side: variables are appended to nids/addrs)
+```
+
+Normative rules:
+
+1. A record whose `attributes` has neither `0x0001` nor `0x8000` is
+   skipped by the loader **without any diagnostic**. Export records are
+   therefore emitted with literal attributes (`<sys/prx_module.h>`,
+   `lv2-prx.S`), never derived from a count. The `.lib.stub` emitter's
+   historical habit of writing the export count into offset 4 is benign
+   on the import side only.
+2. Every `nids`/`addrs`/`name` pointer, and every entry of `addrs`, MUST
+   resolve inside a `PT_LOAD` segment; the loader dereferences them
+   eagerly and aborts the load on an outside address. Consequently the
+   management record MUST NOT reference a symbol that can resolve to 0:
+   `lv2-prx.S` defines weak `module_start` / `module_stop` (returning
+   `SYS_PRX_RESIDENT`) so both entries always exist.
+3. Management-record NIDs: `module_start 0xBC9A0086`,
+   `module_stop 0xAB779874`, `module_exit 0x3AB9A95E`,
+   `module_prologue 0x0D10FD3F`, `module_epilogue 0x330F7005`. v1 emits
+   the first two. There is no `module_info` NID.
+4. `sys_prx_start_module` is two-phase: the kernel publishes exports and
+   returns the entry to the guest wrapper, which calls it and reports the
+   result; a non-zero `module_start` return unloads the module. Exports
+   become visible at start, not at load.
+
+### 8.4 Relocation segment (`0x700000A4`)
+
+24-byte big-endian records, count = `p_filesz / 24`:
+
+```
+offset  size  field
+0x00    8     offset        site = seg[index_addr].vaddr + offset
+0x08    2     0
+0x0a    1     index_value   segment whose runtime base is added; 0xFF = none
+0x0b    1     index_addr    segment being patched
+0x0c    4     type          1 ADDR32, 4 ADDR16_LO, 5 ADDR16_HI, 6 ADDR16_HA,
+                            10 REL24, 11 REL14, 38 ADDR64, 44 REL64, 57 ADDR16_LO_DS
+0x10    8     ptr           addend (S + A minus the chosen segment's link-time vaddr)
+```
+
+Normative rules:
+
+1. `ptr` carries the plain value; the loader performs the HA carry, the
+   `>> 2` for DS/branch forms and the PC-relative subtraction.
+2. `offset < align(seg[index_addr].memsz, 0x100)` or the load aborts.
+3. `prx-gen` drops relocations that are load-invariant with a single
+   segment (`REL*`, `TOC16*`, `GOT16*`, `SECTOFF*`, `R_PPC64_NONE`) and
+   refuses any absolute form outside the nine accepted types.
+4. `.TOC.` legitimately resolves outside the segment (`.got + 0x8000`);
+   it is relocated against segment 0, not frozen as an absolute value.
+
+### 8.5 Link recipe
+
+```
+gcc -specs=$PS3DK/ppu/lib/lv2-prx.specs -nostartfiles -Wl,-q \
+    -Wl,--no-warn-rwx-segments -Wl,-T,$PS3DK/ppu/lib/lv2-prx.ld \
+    $PS3DK/ppu/lib/lv2-prx-crt.o <objects> <libs>
+prx-gen build <elf> -o <mod>.prx --name <name> --version <M.m>
+```
+
+The specs file removes the executable-only `-T lv2.ld` that
+`LINK_START_LV2_SPEC` injects unconditionally; passing a second `-T`
+instead accumulates both scripts and is not conformant. `lv2-prx.ld`
+must not merge `.rela.*` input sections into `.rela.dyn` - `prx-gen`
+needs one `.rela.<section>` per patched section and rejects a merged
+table.
