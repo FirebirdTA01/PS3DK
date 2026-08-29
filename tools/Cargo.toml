@@ -5,6 +5,7 @@ members = [
     "coverage-report",
     "abi-verify",
     "spu-elf-to-ppu-obj",
+    "prx-gen",
 ]
 
 [workspace.package]

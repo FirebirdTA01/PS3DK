@@ -1,0 +1,16 @@
+[package]
+name = "prx-gen"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Turn a -Wl,-q linked Lv-2 ELF into a loadable PRX/SPRX module"
+
+[[bin]]
+name = "prx-gen"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
