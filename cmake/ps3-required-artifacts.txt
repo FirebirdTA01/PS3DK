@@ -41,8 +41,10 @@ host_bin  bin/make_self_npdrm.exe
 host_bin  bin/make_sprx.exe
 host_bin  bin/nidgen.exe
 host_bin  bin/package_finalize.exe
+host_bin  bin/pkg.exe
 host_bin  bin/prx-gen.exe
 host_bin  bin/rsx-cg-compiler.exe
+host_bin  bin/sfo.exe
 host_bin  bin/sprxlinker.exe
 host_bin  bin/spu-elf-to-ppu-obj.exe
 

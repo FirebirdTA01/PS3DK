@@ -510,6 +510,55 @@ build_sprx_linker() {
 }
 
 # -----------------------------------------------------------------------------
+# 7b. sfo-pkg -> sfo.exe + pkg.exe (PARAM.SFO and .pkg generation)
+#
+# Native replacements for sfo.py / pkg.py plus the pkgcrypt C extension.
+# Those three put a Python interpreter on the Windows FIRST-RUN path: the
+# extension is ABI-locked to one interpreter version, so the zip could not
+# ship a prebuilt one and setup.cmd had to compile it against whatever
+# Python the user happened to have.  These have no runtime dependencies.
+#
+# Lives at tools/sfo-pkg/ (adopted from PSL1GHT with local fixes; see that
+# directory's PROVENANCE.md).  The SHA-1 is ours, so the self-test is built
+# and run natively first -- a wrong digest here would silently produce
+# .pkg files the PS3 rejects, which is not something to discover later.
+# -----------------------------------------------------------------------------
+build_sfo_pkg() {
+    say "Cross-compiling sfo.exe + pkg.exe for $HOST_TRIPLE"
+
+    local src="$PS3_TOOLCHAIN_ROOT/tools/sfo-pkg"
+    for f in sfo.c pkg.c sha1.c sha1.h sha1-test.c; do
+        [[ -f "$src/$f" ]] || die "sfo-pkg source missing: $src/$f"
+    done
+
+    say "  running the SHA-1 self-test (native)"
+    local selftest
+    selftest="$(mktemp -d)/sha1-test"
+    cc -O2 -Wall -o "$selftest" "$src/sha1.c" "$src/sha1-test.c" \
+        || die "sfo-pkg: SHA-1 self-test failed to build"
+    "$selftest" \
+        || die "sfo-pkg: SHA-1 self-test FAILED — refusing to stage pkg.exe"
+    rm -rf "$(dirname "$selftest")"
+
+    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc \
+        "$src/sfo.c" \
+        -o "$STAGE_BIN/sfo.exe"
+    say "  staged sfo.exe"
+
+    # No -Wall on pkg.c: upstream's fixed-size path buffers trip
+    # -Wstringop-truncation and -Wformat-truncation, and that noise would
+    # train everyone to skim past this build's output. Listed in PROVENANCE.md.
+    "$HOST_TRIPLE-gcc" -O2 -static -static-libgcc \
+        "$src/pkg.c" "$src/sha1.c" \
+        -o "$STAGE_BIN/pkg.exe"
+    say "  staged pkg.exe"
+
+    # sfo.xml is the PARAM.SFO field template ps3_add_pkg passes with -f.
+    install -m 0644 "$src/sfo.xml" "$STAGE_BIN/sfo.xml"
+    say "  staged sfo.xml"
+}
+
+# -----------------------------------------------------------------------------
 # 8. PSL1GHT host tools — make_self / make_self_npdrm / make_sprx / package_finalize / fself
 #
 #    These live in src/ps3dev/PSL1GHT/tools/ and link against gmp + libcrypto
@@ -648,6 +697,7 @@ build_libelf
 build_rust_tools
 build_rsx_cg_compiler
 build_sprx_linker
+build_sfo_pkg
 build_psl1ght_tools
 build_psl1ght_legacy_tools
 stage_python_and_assets

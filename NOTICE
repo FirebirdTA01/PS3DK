@@ -40,6 +40,24 @@ Upstream: https://github.com/ps3dev/PSL1GHT
 License: MIT License.
 Notable contributors: the ps3dev org, oct0xor, bucanero, Estwald, and others.
 
+PSL1GHT sfo/pkg host tools (tools/sfo-pkg/)
+-------------------------------------------
+Upstream: https://github.com/ps3dev/PSL1GHT, tools/sfo_pkg/
+Snapshot: commit 73e34af ("Convert sfo.py and pkg.py to pure C", PR #162)
+License: MIT License, via PSL1GHT's repository LICENSE — pkg.c, sfo.c and
+sfo.xml carry no per-file license header.
+pkg.c carries local modifications (a replaced SHA-1 backend and a fix to
+relative-path handling that mistyped the boot executable on Windows); each is
+marked in the source and explained in tools/sfo-pkg/PROVENANCE.md.
+
+Upstream's tools/sfo_pkg/sha1.c and sha1.h are NOT included. They are
+"Copyright (C) 1998 Paul E. Jones, All Rights Reserved" under a bespoke
+"freeware" notice granting distribution in source and binary form without a
+fee, and nothing further — no explicit permission to modify or sublicense.
+tools/sfo-pkg/sha1.c and sha1.h are instead original to this project, written
+from FIPS PUB 180-4 and validated against that standard's test vectors
+(tools/sfo-pkg/sha1-test.c). They are MIT, like the rest of this repository.
+
 ps3toolchain (build scripts and original patch series)
 ------------------------------------------------------
 Upstream: https://github.com/ps3dev/ps3toolchain

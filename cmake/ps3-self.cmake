@@ -243,8 +243,8 @@ endif()
 # ps3_add_self(target [TITLE str] [APPID str] [CONTENTID str])
 # -----------------------------------------------------------------------------
 # TITLE / APPID / CONTENTID are reserved for the .pkg target which a
-# subsequent phase (7c+) will wire up via make_self_npdrm + sfo.py +
-# pkg.py + package_finalize.  For the MVP the function only emits
+# subsequent phase (7c+) will wire up via make_self_npdrm + sfo +
+# pkg + package_finalize.  For the MVP the function only emits
 # the .self / .fake.self post-build chain.
 function(ps3_add_self target)
     cmake_parse_arguments(_PSA "" "TITLE;APPID;CONTENTID" "" ${ARGN})
@@ -964,10 +964,10 @@ endfunction()
 # Pipeline (matches the PSL1GHT ppu_rules .pkg recipe):
 #
 #   1. make_self_npdrm <stripped.elf> <pkg/USRDIR/EBOOT.BIN> <CONTENTID>
-#   2. sfo.py --title "..." --appid "..." -f <SFOXML> <pkg/PARAM.SFO>
+#   2. sfo --title "..." --appid "..." -f <SFOXML> <pkg/PARAM.SFO>
 #   3. cp <ICON> <pkg/ICON0.PNG>
 #   4. cp -r <PKGFILES>/* <pkg/>     (if PKGFILES dir exists)
-#   5. pkg.py --contentid <CONTENTID> <pkg/> <target>.pkg
+#   5. pkg --contentid <CONTENTID> <pkg/> <target>.pkg
 #   6. package_finalize <target>.gnpdrm.pkg
 #
 # CONTENTID is required (36 chars: "XX0000-AAAAAAAAA_00-USERNAMEXXXXXX0").
@@ -986,14 +986,12 @@ if(NOT _PS3_PKG_PROBED)
     if(CMAKE_HOST_WIN32)
         set(_ps3_self_exe ".exe")
     endif()
-    foreach(tool make_self_npdrm pkg.py sfo.py package_finalize)
+    foreach(tool make_self_npdrm pkg sfo package_finalize)
         find_program(PS3_TOOL_${tool}
             NAMES "${tool}${_ps3_self_exe}" "${tool}"
             PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
             NO_DEFAULT_PATH)
     endforeach()
-    find_program(PS3_PYTHON
-        NAMES python3 python py)
 endif()
 
 function(ps3_add_pkg target)
@@ -1002,11 +1000,14 @@ function(ps3_add_pkg target)
     if(NOT TARGET ${target})
         message(FATAL_ERROR "ps3_add_pkg: target '${target}' does not exist")
     endif()
-    foreach(tool make_self_npdrm pkg.py sfo.py package_finalize)
+    foreach(tool make_self_npdrm pkg sfo package_finalize)
         if(NOT PS3_TOOL_${tool})
             message(FATAL_ERROR
-                "ps3_add_pkg: required host tool '${tool}' not found.\n"
-                "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
+                "ps3_add_pkg: required host tool '${tool}${_ps3_self_exe}' not found.\n"
+                "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.\n"
+                "  sfo/pkg are native tools as of this SDK; an install that only has\n"
+                "  sfo.py/pkg.py predates them. Re-extract the release zip, or re-run\n"
+                "  scripts/build-host-tools-windows.sh and scripts/install-host-tools.sh.")
         endif()
     endforeach()
 
@@ -1037,7 +1038,7 @@ function(ps3_add_pkg target)
     endif()
 
     # Default SFO XML — PSL1GHT-style template; TITLE/APPID overridable
-    # from the command line via sfo.py's --title / --appid flags.
+    # from the command line via sfo's --title / --appid flags.
     if(NOT _PSP_SFOXML)
         set(_PSP_SFOXML "${_PS3_SELF_CMAKE_DIR}/templates/sfo.xml")
     endif()
@@ -1064,22 +1065,18 @@ function(ps3_add_pkg target)
         set(_pkg_overlay_cmd "")
     endif()
 
-    if(NOT PS3_PYTHON)
-        message(FATAL_ERROR "ps3_add_pkg: Python not found (tried python3, python, py)")
-    endif()
-
     add_custom_command(
         OUTPUT "${_pkg_out}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_pkg_dir}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_pkg_dir}/USRDIR"
         COMMAND "${PS3_TOOL_make_self_npdrm}" "${_stripped}"
                 "${_pkg_dir}/USRDIR/EBOOT.BIN" "${_PSP_CONTENTID}"
-        COMMAND "${PS3_PYTHON}" "${PS3_TOOL_sfo.py}"
+        COMMAND "${PS3_TOOL_sfo}"
                 --title "${_PSP_TITLE}" --appid "${_PSP_APPID}"
                 -f "${_PSP_SFOXML}" "${_pkg_dir}/PARAM.SFO"
         COMMAND "${CMAKE_COMMAND}" -E copy "${_PSP_ICON}" "${_pkg_dir}/ICON0.PNG"
         ${_pkg_overlay_cmd}
-        COMMAND "${PS3_PYTHON}" "${PS3_TOOL_pkg.py}"
+        COMMAND "${PS3_TOOL_pkg}"
                 --contentid "${_PSP_CONTENTID}" "${_pkg_dir}/" "${_pkg_out}"
         COMMAND "${CMAKE_COMMAND}" -E copy "${_pkg_out}" "${_pkg_npdrm}"
         COMMAND "${PS3_TOOL_package_finalize}" "${_pkg_npdrm}"
