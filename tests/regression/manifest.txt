@@ -1,2 +1,3 @@
 name,relative_self,timeout_seconds,expected_state,required_tty_regex,forbidden_tty_regex
 librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
+sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
