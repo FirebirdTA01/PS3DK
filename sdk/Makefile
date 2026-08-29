@@ -423,7 +423,7 @@ HEADERS := \
     include/cell/cgb/cgb_struct.h \
     include/cell/sscgpu.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -491,6 +491,7 @@ SPU_ONLY_HEADERS := \
 # Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
 # we mirror that under $(PS3DK)/spu/include/.
 SPU_HEADERS := \
+    include-spu/PSGL/spu_psgl.h \
     include-spu/simd \
     include-spu/bits/simd_scalars.h \
     include-spu/bits/simd_bool2.h \

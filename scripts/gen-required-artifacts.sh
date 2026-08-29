@@ -40,9 +40,23 @@ MANIFEST="$ROOT/cmake/ps3-required-artifacts.txt"
 ppu_names="$(
     find "$ROOT/samples" -name CMakeLists.txt -print0 |
     xargs -0 awk '
-        /target_link_libraries[[:space:]]*\(/ { inblk = 1 }
-        inblk                                 { print }
-        inblk && /\)/                         { inblk = 0 }
+        # The FIRST token after the paren is the TARGET, not a library --
+        # dropping it is what keeps sample names (libhttptest.a, libsputest.a)
+        # out of the missing-library report.
+        /target_link_libraries[[:space:]]*\(/ { inblk = 1; first = 1 }
+        inblk {
+            line = $0
+            sub(/.*target_link_libraries[[:space:]]*\(/, "", line)
+            gsub(/[(),]/, " ", line)
+            n = split(line, tok, /[[:space:]]+/)
+            for (i = 1; i <= n; i++) {
+                t = tok[i]
+                if (t == "") continue
+                if (first) { first = 0; continue }
+                print t
+            }
+        }
+        inblk && /\)/ { inblk = 0 }
     ' |
     tr '(),' '   ' | tr -s '[:space:]' '
 ' | sed 's/^-l//' |
@@ -98,6 +112,40 @@ emit() {
 }
 
 derived="$( { emit ppu/lib ppu_stub "$ppu_names"; emit spu/lib spu_lib "$spu_names"; } )"
+
+# A library a bundled sample LINKS but which is absent from the install is a
+# FINDING, not a skip.  emit() above only produces a row when lib<name>.a
+# exists, so "a sample links something we do not ship" yielded no row and no
+# failure -- which is exactly how libspuPSGL.a stayed missing while two
+# samples linked it.
+#
+# Computed HERE, in the parent shell, deliberately: emit() runs inside $( ),
+# a subshell, so anything accumulated in there is lost on return.  A first
+# version of this check collected the list inside emit() and could therefore
+# never fire -- the same silent-pass shape it exists to catch.
+missing_libs=""
+scan_missing() {
+    local subdir="$1" names="$2" n lib
+    while read -r n; do
+        [[ -n "$n" ]] || continue
+        lib="lib${n}.a"
+        if grep -qxF "$lib" <<< "$alias_libs"; then continue; fi
+        # Search every directory the link line actually reaches, not just one:
+        # libm.a lives in the gcc sysroot, portlibs live under portlibs/.
+        # Flagging a lib that exists elsewhere would make this check cry wolf
+        # on every run, which is how a real finding gets ignored.
+        local found=""
+        for d in "$INSTALL/$subdir" "$INSTALL/ppu/lib" "$INSTALL/ppu/lib/lp64"                  "$INSTALL/spu/lib" "$INSTALL/portlibs/ppu/lib"; do
+            if [[ -f "$d/$lib" ]]; then found=1; break; fi
+        done
+        if [[ -z "$found" ]] &&            ! find "$INSTALL/ppu" "$INSTALL/spu" -name "$lib" -print -quit 2>/dev/null | grep -q .; then
+            missing_libs="${missing_libs}  ${subdir}/${lib}
+"
+        fi
+    done <<< "$names"
+}
+scan_missing ppu/lib "$ppu_names"
+scan_missing spu/lib "$spu_names"
 norm() { tr -s ' ' ' ' | sed 's/[[:space:]]*$//' | sort -u; }
 
 if [[ "$MODE" == "--check" ]]; then
@@ -128,6 +176,13 @@ if [[ "$MODE" == "--check" ]]; then
     fi
 
     missing="$(comm -23 <(printf '%s\n' "$normalized") <(printf '%s\n' "$committed") || true)"
+    if [[ -n "${missing_libs//[[:space:]]/}" ]]; then
+        echo "gen-required-artifacts: bundled samples link libraries that are NOT in the install:" >&2
+        printf '%s' "$missing_libs" | sort -u >&2
+        echo "Either build and ship them, or stop the samples linking them." >&2
+        exit 1
+    fi
+
     if [[ -z "$missing" ]]; then
         echo "gen-required-artifacts: manifest covers all $(printf '%s\n' "$normalized" | grep -c .) sample-linked archives (ppu_stub=$_np spu_lib=$_ns)"
         exit 0

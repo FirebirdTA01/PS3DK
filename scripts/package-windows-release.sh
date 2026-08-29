@@ -209,6 +209,18 @@ if [[ -d "$PS3_TOOLCHAIN_ROOT/sdk/include" ]]; then
     cp -a "$PS3_TOOLCHAIN_ROOT/sdk/include" "$STAGE_DIR/sdk/include"
 fi
 
+# tools/psgl: samples reference the GLSL translator by a source-tree-relative
+# path (hello-psgl-glsl-object's CMakeLists uses ../../../tools/psgl/), which
+# resolves to <package-root>/tools/psgl for an extracted release.  It was never
+# staged, so that sample failed on every Windows install with "missing and no
+# known rule to make it".  Found by the first full sample sweep; an archive
+# manifest cannot see a missing script, only the sweep can.
+if [[ -d "$PS3_TOOLCHAIN_ROOT/tools/psgl" ]]; then
+    say "Staging tools/psgl (GLSL translator used by bundled samples)"
+    mkdir -p "$STAGE_DIR/tools"
+    cp -a "$PS3_TOOLCHAIN_ROOT/tools/psgl" "$STAGE_DIR/tools/psgl"
+fi
+
 # 4. Host tools zip (from CI's build-host-tools-windows job) OR locally
 #    cross-built tools staged at $STAGE_HOST_TOOLS_BIN by
 #    scripts/build-host-tools-windows.sh.  CI takes the zip path; local

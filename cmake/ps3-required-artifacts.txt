@@ -164,6 +164,7 @@ ppu_stub  ppu/lib/libvpost_stub.a
 # Same criterion as ppu_stub, for spu/lib.  The manifest had ZERO spu coverage
 # until 2026-08-27: 14 SPU archives shipped and none were validated.
 spu_lib   spu/lib/libsimdmath.a
+spu_lib   spu/lib/libspuPSGL.a
 spu_lib   spu/lib/libspumars.a
 spu_lib   spu/lib/libspumarstask.a
 spu_lib   spu/lib/libspurs_jq.a
