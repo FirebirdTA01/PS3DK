@@ -1,0 +1,8 @@
+library: hello_prx
+module: hello_prx
+archive_name: hello_prx
+version: 1
+exports:
+  - name: prx_add
+    nid: '0xe1f4c294'
+    signature: 'int prx_add(int lhs, int rhs);'

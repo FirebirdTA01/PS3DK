@@ -67,6 +67,31 @@ if(NOT _PS3_SELF_TOOLS_PROBED)
 endif()
 
 # -----------------------------------------------------------------------------
+# Optional PRX host-tool probe
+# -----------------------------------------------------------------------------
+if(NOT _PS3_PRX_TOOLS_PROBED)
+    set(_PS3_PRX_TOOLS_PROBED TRUE)
+
+    set(_ps3_prx_exe "")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_prx_exe ".exe")
+    endif()
+
+    find_program(PS3_TOOL_prx_gen
+        NAMES "prx-gen${_ps3_prx_exe}" "prx-gen"
+        PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+        NO_DEFAULT_PATH)
+    find_program(PS3_TOOL_nidgen
+        NAMES "nidgen${_ps3_prx_exe}" "nidgen"
+        PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+        NO_DEFAULT_PATH)
+    find_program(PS3_TOOL_make_sprx
+        NAMES "make_sprx${_ps3_prx_exe}" "make_sprx"
+        PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+        NO_DEFAULT_PATH)
+endif()
+
+# -----------------------------------------------------------------------------
 # One-time installed-SDK freshness probe
 # -----------------------------------------------------------------------------
 if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
@@ -252,6 +277,162 @@ function(ps3_add_self target)
         BYPRODUCTS "${_stripped}" "${_self}" "${_fake_self}"
         COMMENT "ps3-self: ${target}.{self,fake.self}"
         VERBATIM)
+endfunction()
+
+# -----------------------------------------------------------------------------
+# ps3_add_prx(target NAME name VERSION M.m [ATTRIBUTES hex] [SIGN])
+# ps3_add_sprx(...) is an alias kept for callers that prefer the file suffix.
+# -----------------------------------------------------------------------------
+function(ps3_add_prx target)
+    cmake_parse_arguments(_PSP "SIGN" "NAME;VERSION;ATTRIBUTES;EXPORTS;OUTPUT;OUTPUT_NAME" "" ${ARGN})
+
+    if(_PSP_UNPARSED_ARGUMENTS)
+        message(WARNING "ps3_add_prx: unrecognised arguments ignored: ${_PSP_UNPARSED_ARGUMENTS}")
+    endif()
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "ps3_add_prx: target '${target}' does not exist")
+    endif()
+    if(NOT _PSP_NAME)
+        message(FATAL_ERROR "ps3_add_prx: NAME is required")
+    endif()
+    if(NOT _PSP_VERSION)
+        message(FATAL_ERROR "ps3_add_prx: VERSION is required")
+    endif()
+    if(NOT PS3_TOOL_prx_gen)
+        message(FATAL_ERROR
+            "ps3_add_prx: required host tool 'prx-gen${_ps3_prx_exe}' not found.\n"
+            "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
+    endif()
+    if(_PSP_SIGN AND NOT PS3_TOOL_make_sprx)
+        message(FATAL_ERROR
+            "ps3_add_prx: SIGN requested but 'make_sprx${_ps3_prx_exe}' was not found.\n"
+            "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
+    endif()
+
+    foreach(_rel ppu/lib/lv2-prx.specs ppu/lib/lv2-prx.ld ppu/lib/lv2-prx-crt.o)
+        if(NOT EXISTS "${PS3DK}/${_rel}")
+            message(FATAL_ERROR
+                "ps3_add_prx: required PRX runtime artifact missing: ${PS3DK}/${_rel}\n"
+                "  Run scripts/build-runtime-lv2.sh after the PRX runtime lane lands.")
+        endif()
+    endforeach()
+
+    set(_psp_attributes "${_PSP_ATTRIBUTES}")
+    if(NOT _psp_attributes)
+        set(_psp_attributes "0x0")
+    endif()
+
+    target_link_options(${target} PRIVATE
+        "-specs=${PS3DK}/ppu/lib/lv2-prx.specs"
+        "-nostartfiles"
+        "-Wl,-q"
+        "-Wl,--no-warn-rwx-segments"
+        "-Wl,-T,${PS3DK}/ppu/lib/lv2-prx.ld")
+    target_link_libraries(${target} PRIVATE "${PS3DK}/ppu/lib/lv2-prx-crt.o")
+
+    set(_prx_output "${_PSP_OUTPUT}")
+    if(NOT _prx_output)
+        set(_prx_name "${_PSP_OUTPUT_NAME}")
+        if(NOT _prx_name)
+            set(_prx_name "${target}.prx")
+        endif()
+        set(_prx_output "${CMAKE_CURRENT_SOURCE_DIR}/${_prx_name}")
+    endif()
+
+    set(_byproducts "${_prx_output}")
+    set(_sign_commands "")
+    if(_PSP_SIGN)
+        get_filename_component(_prx_dir "${_prx_output}" DIRECTORY)
+        get_filename_component(_prx_stem "${_prx_output}" NAME_WE)
+        set(_sprx_output "${_prx_dir}/${_prx_stem}.sprx")
+        list(APPEND _byproducts "${_sprx_output}")
+        list(APPEND _sign_commands
+            COMMAND "${PS3_TOOL_make_sprx}" "${_prx_output}" "${_sprx_output}")
+    endif()
+
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${PS3_TOOL_prx_gen}" build "$<TARGET_FILE:${target}>"
+                -o "${_prx_output}"
+                --name "${_PSP_NAME}"
+                --version "${_PSP_VERSION}"
+                --attributes "${_psp_attributes}"
+        COMMAND "${PS3_TOOL_prx_gen}" check "${_prx_output}"
+        ${_sign_commands}
+        BYPRODUCTS ${_byproducts}
+        COMMENT "ps3-prx: ${target} -> ${_prx_output}"
+        VERBATIM)
+endfunction()
+
+function(ps3_add_sprx target)
+    ps3_add_prx(${target} ${ARGN})
+endfunction()
+
+# -----------------------------------------------------------------------------
+# ps3_prx_stub_library(target EXPORTS exports.yml [ARCHIVE_NAME name] [ABI mode])
+# -----------------------------------------------------------------------------
+function(ps3_prx_stub_library target)
+    cmake_parse_arguments(_PSS "" "EXPORTS;ARCHIVE_NAME;ABI" "" ${ARGN})
+
+    if(_PSS_UNPARSED_ARGUMENTS)
+        message(WARNING "ps3_prx_stub_library: unrecognised arguments ignored: ${_PSS_UNPARSED_ARGUMENTS}")
+    endif()
+    if(TARGET ${target})
+        message(FATAL_ERROR "ps3_prx_stub_library: target '${target}' already exists")
+    endif()
+    if(NOT _PSS_EXPORTS)
+        message(FATAL_ERROR "ps3_prx_stub_library: EXPORTS is required")
+    endif()
+    if(NOT PS3_TOOL_nidgen)
+        message(FATAL_ERROR
+            "ps3_prx_stub_library: required host tool 'nidgen${_ps3_prx_exe}' not found.\n"
+            "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
+    endif()
+
+    if(IS_ABSOLUTE "${_PSS_EXPORTS}")
+        set(_exports "${_PSS_EXPORTS}")
+    else()
+        set(_exports "${CMAKE_CURRENT_SOURCE_DIR}/${_PSS_EXPORTS}")
+    endif()
+    if(NOT EXISTS "${_exports}")
+        message(FATAL_ERROR "ps3_prx_stub_library: exports YAML not found: ${_exports}")
+    endif()
+
+    set(_archive_name "${_PSS_ARCHIVE_NAME}")
+    if(NOT _archive_name)
+        set(_archive_name "${target}")
+        string(REGEX REPLACE "_stub$" "" _archive_name "${_archive_name}")
+    endif()
+
+    set(_abi "${_PSS_ABI}")
+    if(NOT _abi)
+        set(_abi "ilp32")
+    endif()
+
+    get_filename_component(_ppu_tool_bin "${CMAKE_C_COMPILER}" DIRECTORY)
+    set(_tool_suffix "")
+    if(CMAKE_HOST_WIN32)
+        set(_tool_suffix ".exe")
+    endif()
+
+    set(_out_dir "${CMAKE_CURRENT_BINARY_DIR}/${target}")
+    set(_archive "${_out_dir}/lib${_archive_name}_stub.a")
+    add_custom_command(
+        OUTPUT "${_archive}"
+        COMMAND "${PS3_TOOL_nidgen}" archive
+                --input "${_exports}"
+                --toolchain-bin "${_ppu_tool_bin}"
+                --asm "powerpc64-ps3-elf-as${_tool_suffix}"
+                --ar "powerpc64-ps3-elf-ar${_tool_suffix}"
+                --out-dir "${_out_dir}"
+                --abi "${_abi}"
+        DEPENDS "${_exports}"
+        COMMENT "ps3-prx: ${target} import stub"
+        VERBATIM)
+    add_custom_target(${target}_archive DEPENDS "${_archive}")
+
+    add_library(${target} STATIC IMPORTED GLOBAL)
+    set_target_properties(${target} PROPERTIES IMPORTED_LOCATION "${_archive}")
+    add_dependencies(${target} ${target}_archive)
 endfunction()
 
 # -----------------------------------------------------------------------------

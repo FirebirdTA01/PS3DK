@@ -38,8 +38,10 @@ host_bin  bin/coverage-report.exe
 host_bin  bin/fself.exe
 host_bin  bin/make_self.exe
 host_bin  bin/make_self_npdrm.exe
+host_bin  bin/make_sprx.exe
 host_bin  bin/nidgen.exe
 host_bin  bin/package_finalize.exe
+host_bin  bin/prx-gen.exe
 host_bin  bin/rsx-cg-compiler.exe
 host_bin  bin/sprxlinker.exe
 host_bin  bin/spu-elf-to-ppu-obj.exe
@@ -177,6 +179,10 @@ sdk_core  ppu/lib/libsysutil_stub.a
 sdk_core  ppu/lib/lp64/libsysutil_stub.a
 sdk_core  ppu/lib/liblv2.a
 sdk_core  ppu/lib/lp64/liblv2.a
+sdk_core  ppu/lib/lv2-prx-crt.o
+sdk_core  ppu/lib/lv2-prx.ld
+sdk_core  ppu/lib/lv2-prx.specs
+sdk_core  ppu/lib/lp64/lv2-prx-crt.o
 sdk_core  ppu/lib/librsx.a
 sdk_core  ppu/lib/lp64/librsx.a
 

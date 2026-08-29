@@ -12,6 +12,7 @@
 #   * rsx-cg-compiler.exe — independent Cg→NV40 shader compiler (CMake)
 #   * make_self.exe       — CEX-signed SELF builder (gmp + openssl + zlib)
 #   * make_self_npdrm.exe — NPDRM-signed SELF builder (same libs)
+#   * make_sprx.exe       — CEX-signed SPRX builder (same source, -DSPRX)
 #   * package_finalize.exe — npdrm pkg finalisation (same libs)
 #   * fself.exe           — fake-signed SELF builder (zlib only)
 #   * bin2s.exe           — PSL1GHT binary-to-assembly helper
@@ -509,7 +510,7 @@ build_sprx_linker() {
 }
 
 # -----------------------------------------------------------------------------
-# 8. PSL1GHT host tools — make_self / make_self_npdrm / package_finalize / fself
+# 8. PSL1GHT host tools — make_self / make_self_npdrm / make_sprx / package_finalize / fself
 #
 #    These live in src/ps3dev/PSL1GHT/tools/ and link against gmp + libcrypto
 #    (openssl) + libz (or just libz for fself).  We compile them directly
@@ -536,10 +537,11 @@ build_psl1ght_tools() {
     local ldflags="-static -static-libgcc -L$DEPS_ROOT/lib -lgmp -lcrypto -lz -lws2_32 -lcrypt32"
 
     local cc="$HOST_TRIPLE-gcc"
-    "$cc" $cflags "$geohot_src/make_self.c"        $ldflags -o "$STAGE_BIN/make_self.exe"
+    "$cc" $cflags "$geohot_src/make_self.c"         $ldflags -o "$STAGE_BIN/make_self.exe"
     "$cc" $cflags -DNPDRM "$geohot_src/make_self.c" $ldflags -o "$STAGE_BIN/make_self_npdrm.exe"
-    "$cc" $cflags "$geohot_src/package_finalize.c" $ldflags -o "$STAGE_BIN/package_finalize.exe"
-    say "  staged make_self.exe make_self_npdrm.exe package_finalize.exe"
+    "$cc" $cflags -DSPRX "$geohot_src/make_self.c"  $ldflags -o "$STAGE_BIN/make_sprx.exe"
+    "$cc" $cflags "$geohot_src/package_finalize.c"  $ldflags -o "$STAGE_BIN/package_finalize.exe"
+    say "  staged make_self.exe make_self_npdrm.exe make_sprx.exe package_finalize.exe"
 
     # fself is a small fself.elf builder; ships under tools/fself/source/.
     # It only needs zlib.  Build the .c sources directly — its own Makefile

@@ -12,11 +12,14 @@ samples/**/cmake-build/
 # CMake build-variant dirs from the sample sweep (config/fake/release/test/video, etc.)
 samples/**/build*/
 samples/**/*.elf
+samples/**/*.prx
 samples/**/*.self
 samples/**/*.fake.self
 samples/**/*.map
 samples/**/*.pkg
 samples/**/*.gnpdrm.pkg
+tests/smoke/**/*.elf
+tests/smoke/**/*.self
 
 # Derived sample assets copied from sdk/assets at pkg-build time.
 samples/sysutil/hello-ppu-png/pkg_files/USRDIR/ps3dk.png
@@ -65,6 +68,7 @@ tools/nidgen/nids/extracted/*_audit.yaml
 
 # Ad-hoc per-session sample-result CSVs (host-side sweep reports, etc).
 docs/sample_build_results_*.csv
+/docs/local/
 *.so.*
 *.dylib
 *.dll
