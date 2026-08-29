@@ -507,19 +507,6 @@ echo.
 where powerpc64-ps3-elf-gcc.exe 1>nul 2>nul && powerpc64-ps3-elf-gcc.exe --version
 where spu-elf-gcc.exe            1>nul 2>nul && spu-elf-gcc.exe            --version
 
-REM pkg.py (used to build .pkg files) does `import pkgcrypt`, a C extension
-REM that is ABI-locked to a specific Python, so we ship crypt.c and build it
-REM here against the user's own interpreter. build_pkgcrypt.py is idempotent
-REM (a no-op once pkgcrypt is present) and never blocks activation.
-echo.
-where python 1>nul 2>nul
-if errorlevel 1 (
-    echo NOTE: Python not on PATH; skipping pkgcrypt build. .pkg generation via
-    echo       pkg.py needs Python + a host C compiler; install them and re-run
-    echo       setup.cmd to enable it. The rest of the toolchain works without it.
-) else (
-    python "%PS3DK%\bin\build_pkgcrypt.py" "%PS3DK%\bin" || echo WARNING: pkgcrypt build failed; .pkg generation will not work until build_pkgcrypt.py succeeds.
-)
 EOF
 # cmd.exe parses .cmd/.bat files line by line and is line-ending-sensitive
 # — Unix LF endings cause "REM" to be read as a partial token and

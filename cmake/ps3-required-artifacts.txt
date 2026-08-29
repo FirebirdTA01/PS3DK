@@ -49,12 +49,12 @@ host_bin  bin/sprxlinker.exe
 host_bin  bin/spu-elf-to-ppu-obj.exe
 
 # --- Windows host helper files ------------------------------------------
+# pkg.py, sfo.py, crypt.c and build_pkgcrypt.py are gone: bin/pkg.exe and
+# bin/sfo.exe (host_bin rows above) replace them, and shipping both would leave
+# two implementations in bin/ with nothing saying which one the build uses.
+# sfo.xml now comes from tools/sfo-pkg/ alongside them.
 host_file bin/Struct.py
-host_file bin/build_pkgcrypt.py
-host_file bin/crypt.c
 host_file bin/fself.py
-host_file bin/pkg.py
-host_file bin/sfo.py
 host_file bin/sfo.xml
 
 # --- PPU runtime / stub archives ------------------------------------------

@@ -221,14 +221,14 @@ fself.exe                   build\sample.elf sample.fake.self
 
 `sample.self` boots on RPCS3 / signed HW; `sample.fake.self` boots on CFW hardware via XMB install or `ps3load`.
 
-**6. (Optional) Build a `.pkg`** for installing the app on CFW hardware.  Requires `make_self_npdrm`, `sfo.py`, `pkg.py`, and `package_finalize`:
+**6. (Optional) Build a `.pkg`** for installing the app on CFW hardware.  Requires `make_self_npdrm`, `sfo`, `pkg`, and `package_finalize`:
 
 ```cmd
 mkdir build\pkg\USRDIR
 copy "%PS3DK%\bin\ICON0.PNG" build\pkg\ICON0.PNG
 make_self_npdrm.exe build\sample.elf build\pkg\USRDIR\EBOOT.BIN UP0001-HELPPU017_00-0000000000000000
-sfo.py --title "Hello PPU" --appid HELPPU017 -f "%PS3DK%\bin\sfo.xml" build\pkg\PARAM.SFO
-pkg.py  --contentid UP0001-HELPPU017_00-0000000000000000 build\pkg\ sample.pkg
+sfo.exe --title "Hello PPU" --appid HELPPU017 -f "%PS3DK%\bin\sfo.xml" build\pkg\PARAM.SFO
+pkg.exe --contentid UP0001-HELPPU017_00-0000000000000000 build\pkg\ sample.pkg
 copy sample.pkg sample.gnpdrm.pkg
 package_finalize.exe sample.gnpdrm.pkg
 ```

@@ -163,18 +163,15 @@ ensure_psl1ght_source() {
     # Probe the full set of sources every PSL1GHT-derived tool needs:
     # geohot/make_self.c + fself/source/ (build_psl1ght_tools), and
     # generic/bin2s.c + cgcomp/source (build_psl1ght_legacy_tools), and
-    # tools/ps3py package helpers (stage_python_and_assets).
+    # tools/ps3py helpers we still stage (fself.py + Struct.py).
     # If any are missing we re-fetch — a partial / stale checkout would
     # otherwise pass the old narrower probe and fail mid-build.
     if [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
        && -d "$psl1ght_src/tools/cgcomp/source" \
        && -f "$psl1ght_src/tools/geohot/make_self.c" \
        && -d "$psl1ght_src/tools/fself/source" \
-       && -f "$psl1ght_src/tools/ps3py/pkg.py" \
-       && -f "$psl1ght_src/tools/ps3py/sfo.py" \
        && -f "$psl1ght_src/tools/ps3py/fself.py" \
-       && -f "$psl1ght_src/tools/ps3py/Struct.py" \
-       && -f "$psl1ght_src/tools/ps3py/sfo.xml" ]]; then
+       && -f "$psl1ght_src/tools/ps3py/Struct.py" ]]; then
         return 0
     fi
 
@@ -198,11 +195,8 @@ ensure_psl1ght_source() {
     && -d "$psl1ght_src/tools/cgcomp/source" \
     && -f "$psl1ght_src/tools/geohot/make_self.c" \
     && -d "$psl1ght_src/tools/fself/source" \
-    && -f "$psl1ght_src/tools/ps3py/pkg.py" \
-    && -f "$psl1ght_src/tools/ps3py/sfo.py" \
     && -f "$psl1ght_src/tools/ps3py/fself.py" \
-    && -f "$psl1ght_src/tools/ps3py/Struct.py" \
-    && -f "$psl1ght_src/tools/ps3py/sfo.xml" ]] \
+    && -f "$psl1ght_src/tools/ps3py/Struct.py" ]] \
         || die "PSL1GHT host-tool sources missing after fetch"
 }
 
@@ -653,34 +647,30 @@ stage_python_and_assets() {
     # The standalone CI host-tools job does not run build-psl1ght.sh, so
     # stage PSL1GHT's host-agnostic package helpers directly from source.
     # ICON0.PNG is intentionally supplied later by the release packager.
+    # sfo.py, pkg.py, crypt.c and build_pkgcrypt.py are deliberately NOT staged
+    # any more: build_sfo_pkg above ships native sfo.exe/pkg.exe, and shipping
+    # the Python pair alongside them would leave two implementations in bin/
+    # with nothing saying which one the build uses. That pair is also what put
+    # a Python interpreter on the Windows first-run path -- pkg.py imports
+    # pkgcrypt, a C extension ABI-locked to one interpreter version, so the zip
+    # could not carry a prebuilt one and setup.cmd had to compile it against
+    # whatever Python the user had.
+    #
+    # fself.py and Struct.py stay: nothing on the first-run path executes them,
+    # and replacing fself.py is separate work from this change.
     local src="$PS3_TOOLCHAIN_ROOT/src/ps3dev/PSL1GHT/tools/ps3py"
     local required_py_assets=(
-        pkg.py
-        sfo.py
         fself.py
         Struct.py
-        sfo.xml
-        crypt.c
     )
 
     for f in "${required_py_assets[@]}"; do
         [[ -f "$src/$f" ]] || die "required PSL1GHT Python/package helper missing: $src/$f"
         install -m 0644 "$src/$f" "$STAGE_BIN/$f"
     done
-    # Make the Python entry-point scripts executable so they can be invoked
-    # directly when Python is on PATH (Windows still respects the +x bit).
-    for f in pkg.py sfo.py fself.py; do
-        chmod +x "$STAGE_BIN/$f"
-    done
-
-    # pkg.py does `import pkgcrypt`, a C extension built from crypt.c. A
-    # compiled extension is ABI-locked to one Python (version + platform),
-    # so the Windows release cannot ship a single prebuilt binary. Instead
-    # ship crypt.c (above) plus this helper, which setup.cmd runs once to
-    # build pkgcrypt against the user's own interpreter at activation time.
-    local pkgcrypt_helper="$PS3_TOOLCHAIN_ROOT/tools/pkgcrypt/build_pkgcrypt.py"
-    [[ -f "$pkgcrypt_helper" ]] || die "pkgcrypt build helper missing: $pkgcrypt_helper"
-    install -m 0644 "$pkgcrypt_helper" "$STAGE_BIN/build_pkgcrypt.py"
+    # Make the Python entry point executable so it can be invoked directly when
+    # Python is on PATH (Windows still respects the +x bit).
+    chmod +x "$STAGE_BIN/fself.py"
 }
 
 # -----------------------------------------------------------------------------

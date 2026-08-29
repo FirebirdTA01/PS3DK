@@ -209,12 +209,12 @@ PS3LOADIP=<console IP> ps3load <sample>.fake.self
 ```
 
 **Jailbroken hardware via XMB Package Installer (persistent install):**
-`.pkg` generation isn't yet wired into the CMake build; it's coming as
-a follow-on `ps3_add_pkg(<target>)` helper.  Until then, drive the
-`make_self_npdrm` + `sfo.py` + `pkg.py` + `package_finalize` chain by
-hand against the stripped `.elf` produced above (see the *Manual / direct
-toolchain invocation* section in the top-level `README.md` for the exact
-command sequence).
+`.pkg` generation is wired into the CMake build: add
+`ps3_add_pkg(<target> CONTENTID <id>)` alongside `ps3_add_self` and the
+`.pkg` is produced as part of a normal build.  To drive the
+`make_self_npdrm` + `sfo` + `pkg` + `package_finalize` chain by hand
+instead, see the *Manual / direct toolchain invocation* section in the
+top-level `README.md` for the exact command sequence.
 
 ## Retest matrix after major rebuilds
 
