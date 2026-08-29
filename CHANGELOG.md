@@ -16,6 +16,62 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.11.11] — 2026-08-29
+
+Patch release: every PRX container is now verified on RPCS3, the release
+pipeline validates itself, and the SPRX path is guarded by the regression
+battery.
+
+### Added
+
+- **PRX export round-trip** (`t_fe7c705a`): `prx-gen exports` reads a built
+  module's export table back to YAML; `nidgen entgen` renders a YAML into the
+  `<sys/prx_module.h>` macros; `ps3_prx_export_roundtrip(<target>)` compares
+  the two canonical forms as a build step and fails with both tables printed
+  when they disagree. `nidgen`'s `Export` schema gains `kind:
+  function|variable|tlsvar` (default `function`).
+- **Paired module containers** (A4): `ps3_add_prx(... SIGN)` now emits both
+  `<target>.sprx` (`make_sprx`, real-signed) and `<target>.fake.sprx`
+  (`fself`), mirroring `ps3_add_self`'s `.self` + `.fake.self`; a `.self`
+  loads the `.sprx`, a `.fake.self` loads the `.fake.sprx`.
+- **Regression battery row `sprx-load`**: builds the shipped
+  `hello-sprx-export` / `hello-sprx-import` pair (no copies) and asserts
+  `PRX_IMPORT_OK` on RPCS3.
+- **Release-tree gate** `scripts/check-release-tree.sh`, run by
+  `package-windows-release.sh` as its last act: every manifest artefact
+  present (aliases resolved), version stamps (`README.txt`, `VERSION`,
+  `cell/sdk_version.h`) equal, `ON_TAG` for release cuts, required symbols
+  present in both ABIs' archives, no symlinks.
+- `release.yml` validates the staged Windows host tools from
+  `cmake/ps3-required-artifacts.txt` instead of a frozen list.
+
+### Fixed
+
+- **Real-signed `.sprx` did not load** (`0x80011148`): `make_sprx` labelled
+  the container `se_flags=7` while encrypting with the revision-1 key, and
+  `prx-gen` wrote the program-header table past the last segment, which a
+  SELF round trip drops. `make_sprx` is built from a relabelled copy of
+  `make_self.c`; `lv2-prx.ld` reserves the `0x700000A4` program header and
+  `prx-gen` fills it in place, keeping the table at `0x40` inside the first
+  `PT_LOAD` (the layout Sony modules use).
+- The packaging gate rejected every non-tag build (version suffix and
+  `ON_TAG` compared unconditionally); `ON_TAG` is now required only with
+  `--require-on-tag`, which packaging passes for clean `vX.Y.Z` versions.
+
+### Changed
+
+- Docs: `docs/design/sprx-generation.md` records the signing routes and the
+  verified outcomes; `docs/design/shader-compiler-conformance.md` (design
+  for testing `rsx-cg-compiler` against the PSL1GHT #170 feature set).
+
+### Known limitations
+
+- Real-signed `.sprx` is verified on RPCS3 only; hardware acceptance
+  untested.
+- The battery asserts `.fake.sprx`; the `.prx` (raw `.elf` boot) and real
+  `.sprx` (`.self` boot) rows need a per-row boot artefact (follow-up).
+- Everything listed under v0.11.0's known limitations still applies.
+
 ## [v0.11.0] — 2026-08-29
 
 First Windows release with PRX/SPRX module support and no Python on the
