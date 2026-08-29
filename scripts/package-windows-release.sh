@@ -467,12 +467,38 @@ if not defined PS3DK (
     exit /b 1
 )
 
+REM Stale-install guard.  The archive root is versioned, so an upgrade lands
+REM in a NEW directory while %PS3DK% (setx'd at user scope) still names the
+REM OLD one.  Before this check, setup.cmd from the fresh extract silently
+REM activated the old root - the new extraction was ignored with no message.
+REM Compare the directory this script lives in against %PS3DK%; on mismatch,
+REM activate THIS directory for the session and say so loudly with the exact
+REM setx line, never the stale root.  A matching install stays silent.
+set "_here=%~dp0"
+if "%_here:~-1%"=="\" set "_here=%_here:~0,-1%"
+set "_cfg=%PS3DK%"
+if "%_cfg:~-1%"=="\" set "_cfg=%_cfg:~0,-1%"
+if /I not "%_here%"=="%_cfg%" (
+    echo.
+    echo WARNING: PS3DK points at a DIFFERENT install than this setup.cmd:
+    echo     PS3DK      = %PS3DK%
+    echo     this file  = %_here%
+    echo Activating THIS directory for the current session only.  To make it
+    echo permanent, open a regular cmd window and run:
+    echo.
+    echo     setx PS3DK "%_here%"
+    echo.
+    echo then open a new terminal and re-run setup.cmd.
+    echo.
+)
+set "PS3DK=%_here%"
+
 REM PS3DEV and PSL1GHT are back-compat aliases — code that still reads
 REM them sees the same install root.  We export at the parent shell
 REM scope only for this session; permanent setx is optional.  Windows
 REM tolerates double-separator paths (...\\ppu\\bin) so we don't bother
 REM trimming a trailing backslash off PS3DK.
-endlocal & set "PATH=%PS3DK%\bin;%PS3DK%\ppu\bin;%PS3DK%\spu\bin;%PATH%" & set "PS3DEV=%PS3DK%" & set "PSL1GHT=%PS3DK%"
+endlocal & set "PS3DK=%PS3DK%" & set "PATH=%PS3DK%\bin;%PS3DK%\ppu\bin;%PS3DK%\spu\bin;%PATH%" & set "PS3DEV=%PS3DK%" & set "PSL1GHT=%PS3DK%"
 echo PS3DK:   %PS3DK%
 echo PS3DEV:  %PS3DEV%   ^(in-session alias^)
 echo PSL1GHT: %PSL1GHT%   ^(in-session alias^)
