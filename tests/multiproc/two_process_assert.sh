@@ -65,7 +65,7 @@ fi
 # =====================================================================
 # Phase 2 assertions
 # =====================================================================
-# Phase 2 NOTE: these grep markers are end-to-end smoke (the syscalls succeed,
+# Phase 2 NOTE: these grep markers are end-to-end (the syscalls succeed,
 # so idm dispatch is consistent), NOT a validation that per-process types
 # actually routed through local_fxo vs g_fxo. With one process the dispatch
 # is unobservable from runtime behavior. Genuine dispatch validation lands
@@ -116,7 +116,7 @@ else
 fi
 
 # Phase 2+3 assertions preserved (idm dispatch + memory_base_addr init)
-# No regressions expected — smoke_test covers full boot→shutdown
+# No regressions expected - regression_test covers full boot->shutdown
 
 # =====================================================================
 # Phase 5 assertions — per-process suspend/resume API existence

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# smoke_test.sh — Phase 0 regression smoke test for multi-process XMB
+# regression_test.sh - Phase 0 regression test for multi-process XMB
 #
 # Boots hello-spu.fake.self under the from-source RPCS3 build (--no-gui)
 # and validates that the spu_thread_printf HLE is bound, formatted output
@@ -71,7 +71,7 @@ fi
 
 # --- result ----------------------------------------------------------
 if [[ "$total_misses" -eq 0 ]]; then
-    echo "PASS: smoke_test.sh — all markers present"
+    echo "PASS: regression_test.sh - all markers present"
     exit 0
 else
     die "$total_misses assertion(s) failed"

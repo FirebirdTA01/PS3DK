@@ -7,7 +7,7 @@ No RPCS3 source changes. All artifacts live in this directory.
 
 ## Scripts
 
-### `smoke_test.sh`
+### `regression_test.sh`
 
 **What:** Boots `hello-spu.fake.self` under the from-source RPCS3 build,
 greps the log for three known-good markers:
@@ -16,7 +16,7 @@ greps the log for three known-good markers:
 - Clean SPU exit (`cause=2 status=0 done=12648430`)
 
 **When to run:** After every phase, after any RPCS3 build, before opening a PR.
-**Pass:** exit 0, prints `PASS: smoke_test.sh — all markers present`.
+**Pass:** exit 0, prints `PASS: regression_test.sh - all markers present`.
 **Fail:** exit 1, diagnostic on stderr.
 
 ### `perf_baseline.sh`
@@ -35,7 +35,7 @@ Compare `baseline.json` contents across commits to spot regressions.
 **What (Phase 0):** Boots `hello-spu.fake.self`, asserts `sys_process_getpid()`
 returns `1` (today's single-process behavior).
 
-**When to run:** Same cadence as smoke_test.
+**When to run:** Same cadence as regression_test.
 **Future phases:** Extended in-place to add idm namespace checks (P2),
 per-process VM isolation (P3), distinct-pid verification (P4+).
 **Pass:** exit 0, prints PASS for each phase's assertion block.
@@ -55,7 +55,7 @@ No Python, Node, CMake, or jq required.
 
 | File | Created by | Description |
 |------|-----------|-------------|
-| `smoke_test.sh` | Phase 0 | Boot + log-marker assertions |
+| `regression_test.sh` | Phase 0 | Boot + log-marker assertions |
 | `perf_baseline.sh` | Phase 0 | 5-run perf capture → `baseline.json` |
 | `two_process_assert.sh` | Phase 0 | Phase-evolving multi-process assertions |
 | `baseline.json` | `perf_baseline.sh` | Phase 0 perf baseline (git-rev tagged) |

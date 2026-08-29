@@ -172,12 +172,12 @@ mod tests {
     fn writer_emits_ppc64_relocation_and_symbols() {
         let dir = std::env::temp_dir();
         let path = dir.join("spu_elf_to_ppu_obj_writer_test.ppu.o");
-        let object = build_jobbin2_ppu_object("smoke", &[0u8; 0x180], 0x180, &[0u8; 0x30]).unwrap();
+        let object = build_jobbin2_ppu_object("fixture", &[0u8; 0x180], 0x180, &[0u8; 0x30]).unwrap();
         std::fs::write(&path, object).unwrap();
         let report = inspect_ppu_obj(&path).unwrap();
         assert_eq!(report.sections[".spu_image"].align, 0x80);
         assert_eq!(report.sections[".spu_image.jobheader"].size, 0x30);
-        assert_eq!(report.symbols["_binary_smoke_jobbin2_size"].value, 0x180);
+        assert_eq!(report.symbols["_binary_fixture_jobbin2_size"].value, 0x180);
         let rel = &report.jobheader_relocations[0];
         assert_eq!(rel.offset, 0x04);
         assert_eq!(rel.r_type_name, "R_PPC64_ADDR32");
@@ -189,13 +189,13 @@ mod tests {
     fn writer_emits_binary_symbols_without_jobheader() {
         let dir = std::env::temp_dir();
         let path = dir.join("spu_elf_to_ppu_obj_binary_writer_test.ppu.o");
-        let object = build_binary_ppu_object("smoke", &[0u8; 0x88]).unwrap();
+        let object = build_binary_ppu_object("fixture", &[0u8; 0x88]).unwrap();
         std::fs::write(&path, object).unwrap();
         let report = inspect_ppu_obj(&path).unwrap();
         assert_eq!(report.sections[".spu_image"].align, 0x80);
         assert_eq!(report.sections[".spu_image"].size, 0x100);
         assert!(!report.sections.contains_key(".spu_image.jobheader"));
-        assert_eq!(report.symbols["_binary_smoke_bin_size"].value, 0x88);
+        assert_eq!(report.symbols["_binary_fixture_bin_size"].value, 0x88);
         assert!(report.jobheader_relocations.is_empty());
         let _ = std::fs::remove_file(path);
     }
@@ -204,13 +204,13 @@ mod tests {
     fn writer_emits_elf_symbols_without_jobheader() {
         let dir = std::env::temp_dir();
         let path = dir.join("spu_elf_to_ppu_obj_elf_writer_test.ppu.o");
-        let object = build_elf_ppu_object("smoke", &[0u8; 0xd8]).unwrap();
+        let object = build_elf_ppu_object("fixture", &[0u8; 0xd8]).unwrap();
         std::fs::write(&path, object).unwrap();
         let report = inspect_ppu_obj(&path).unwrap();
         assert_eq!(report.sections[".spu_image"].align, 0x80);
         assert_eq!(report.sections[".spu_image"].size, 0x100);
         assert!(!report.sections.contains_key(".spu_image.jobheader"));
-        assert_eq!(report.symbols["_binary_smoke_elf_size"].value, 0xd8);
+        assert_eq!(report.symbols["_binary_fixture_elf_size"].value, 0xd8);
         assert!(report.jobheader_relocations.is_empty());
         let _ = std::fs::remove_file(path);
     }
