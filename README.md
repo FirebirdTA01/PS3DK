@@ -106,7 +106,7 @@ Reference pair: `samples/lv2/hello-sprx-export` (the module) and
 ```cmake
 include(ps3-self)
 add_executable(mymod source/mymod.c source/exports.S)
-ps3_add_prx(mymod NAME mymod VERSION 1.0)            # add SIGN for mymod.sprx via make_sprx
+ps3_add_prx(mymod NAME mymod VERSION 1.0 SIGN)       # SIGN emits mymod.sprx (make_sprx) + mymod.fake.sprx (fself)
 ```
 
 `source/exports.S` names what the module exports (NIDs from `nidgen nid <symbol>`):
@@ -157,8 +157,9 @@ stub, and `argp` is a handy way for `module_start` to hand back pointers.
 Copy the `.prx` next to the booted executable so `/app_home/` finds it.
 
 **3. Running on RPCS3:** boot the importer's raw `.elf` and the unsigned
-`.prx` loads as-is. Booting a `.self`/`.fake.self` requires a signed `.sprx`
-(`ps3_add_prx(... SIGN)`, which runs `make_sprx`).
+`.prx` loads as-is. Booting the `.fake.self` requires the module's
+`.fake.sprx`; booting the real `.self` requires the `.sprx` — the module's
+container follows the executable's, which is why `SIGN` emits both.
 
 Format and design notes: `docs/design/sprx-generation.md`; the module layout
 is specified in `docs/abi/cellos-lv2-abi-spec.md` §8.
