@@ -28,3 +28,13 @@ The native LV2 runtime, compact OPD path, CMake SELF helper flow, and install ma
 Linux remains the primary development and source-build host. Windows-hosted release artifacts are produced by cross-building from Linux with Mingw-w64 and packaging the `.exe` toolchain, host tools, CMake helpers, portlibs, headers, archives, and samples into a self-contained zip.
 
 Release mechanics and version-string rules live in `docs/VERSIONING.md`.
+
+## Relationship to upstream PSL1GHT (deliberate divergences)
+
+Upstream's "v3" RFC (ps3dev/PSL1GHT issue #67, 2017, still open) has four items. Three are already this project's design: the NID/FNID database with generated stub archives (`tools/nidgen`), `cell*`/`Cell*`/`CELL_*` naming for SDK-owned APIs, and `sys_*` snake_case syscalls. The remaining item is a deliberate divergence, recorded here so it is not revisited by accident:
+
+- **Duplicated C headers.** The RFC proposes deleting PSL1GHT's copies of standard headers and pushing the implementations into newlib. This project does the opposite: `sdk/include/` overrides the vendored headers and the newlib patch set carries what the PS3 needs, because SDK-API parity (the official `cell/*` surface) will never live in upstream newlib and must be owned here.
+- **Legacy names.** The RFC's position is that renamed symbols need no aliases (old code stays on the old PSL1GHT). This project keeps the legacy PSL1GHT names compiling through deprecated aliases behind a negative gate (`__PS3DK_NO_PSL1GHT_COMPAT__`), so existing homebrew builds and warns instead of breaking.
+- **Vendored PSL1GHT** is pinned at `eca3f99`; upstream's in-flight NID rename (PR #169) is tracked but not chased while it is a draft.
+
+The one v3 must-have this project does not yet have is SPRX/PRX module generation; it is a design-first item on the board, not started.
