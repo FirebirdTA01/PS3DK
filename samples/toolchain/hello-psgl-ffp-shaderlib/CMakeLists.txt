@@ -3,6 +3,21 @@ project(hello-psgl-ffp-shaderlib C ASM)
 
 include(ps3-self)
 
+find_program(PS3_HOST_CC NAMES cc gcc clang)
+if(NOT PS3_HOST_CC)
+    message(STATUS
+        "Skipping hello-psgl-ffp-shaderlib: no host C compiler found. "
+        "A host compiler is only used to build psgl_shader_builder, which "
+        "generates the fixed-function PSGL shader library before "
+        "rsx-cg-compiler compiles its shaders. On Windows, put a cc/gcc/clang "
+        "wrapper on PATH or pass -DPS3_HOST_CC=<wrapper> to enable this sample.")
+    add_custom_target(hello-psgl-ffp-shaderlib ALL
+        COMMAND "${CMAKE_COMMAND}" -E echo
+                "Skipping hello-psgl-ffp-shaderlib: no host C compiler found"
+        VERBATIM)
+    return()
+endif()
+
 add_executable(hello-psgl-ffp-shaderlib source/main.c)
 target_compile_features(hello-psgl-ffp-shaderlib PRIVATE c_std_11)
 target_link_libraries(hello-psgl-ffp-shaderlib PRIVATE
@@ -24,7 +39,6 @@ set(_icon0_dst "${CMAKE_CURRENT_BINARY_DIR}/ICON0.PNG")
 configure_file("${_icon0_src}" "${_icon0_dst}" COPYONLY)
 ps3_bin2s(hello-psgl-ffp-shaderlib "${_icon0_dst}")
 
-find_program(PS3_HOST_CC NAMES cc gcc clang REQUIRED)
 find_program(PSGL_RSX_CG_COMPILER
     NAMES rsx-cg-compiler
     PATHS "$ENV{PS3DEV}/bin" "$ENV{PS3DK}/bin"
@@ -33,7 +47,11 @@ if(NOT PSGL_RSX_CG_COMPILER)
     find_program(PSGL_RSX_CG_COMPILER NAMES rsx-cg-compiler REQUIRED)
 endif()
 
-set(_builder "${CMAKE_CURRENT_BINARY_DIR}/psgl_shader_builder")
+set(_host_exe_suffix "")
+if(CMAKE_HOST_WIN32)
+    set(_host_exe_suffix ".exe")
+endif()
+set(_builder "${CMAKE_CURRENT_BINARY_DIR}/psgl_shader_builder${_host_exe_suffix}")
 set(_shader_bin "${CMAKE_CURRENT_BINARY_DIR}/shaders.bin")
 add_custom_command(
     OUTPUT "${_builder}"

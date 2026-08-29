@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <process.h>
+#endif
+
 #define BUILDER_SOURCE_CAPACITY 8192u
 #define BUILDER_CMD_CAPACITY 4096u
 
@@ -64,10 +68,29 @@ static int write_text_file(const char *path, const char *text)
     return fclose(file) == 0;
 }
 
-static int run_command(const char *command)
+static int run_shader_compiler(const char *compiler, const char *profile,
+                               const char *out_path, const char *in_path)
 {
-    int rc = system(command);
+#ifdef _WIN32
+    const char *const argv[] = {
+        compiler,
+        "-p",
+        profile,
+        "--emit-container",
+        out_path,
+        in_path,
+        NULL,
+    };
+    return _spawnvp(_P_WAIT, compiler, argv) == 0;
+#else
+    char command[BUILDER_CMD_CAPACITY];
+    int rc;
+    snprintf(command, sizeof(command),
+             "\"%s\" -p %s --emit-container \"%s\" \"%s\"",
+             compiler, profile, out_path, in_path);
+    rc = system(command);
     return rc == 0;
+#endif
 }
 
 static int parse_mask_line(char *line, uint32_t *mask)
@@ -98,7 +121,6 @@ static int compile_mask(const char *compiler, const char *work_dir,
     char fcg_path[512];
     char vpo_path[512];
     char fpo_path[512];
-    char command[BUILDER_CMD_CAPACITY];
     uint32_t vp_size = 0u;
     uint32_t fp_size = 0u;
 
@@ -116,14 +138,10 @@ static int compile_mask(const char *compiler, const char *work_dir,
         !write_text_file(fcg_path, fp_source))
         return 0;
 
-    snprintf(command, sizeof(command),
-             "\"%s\" -p sce_vp_rsx --emit-container \"%s\" \"%s\"",
-             compiler, vpo_path, vcg_path);
-    if (!run_command(command)) return 0;
-    snprintf(command, sizeof(command),
-             "\"%s\" -p sce_fp_rsx --emit-container \"%s\" \"%s\"",
-             compiler, fpo_path, fcg_path);
-    if (!run_command(command)) return 0;
+    if (!run_shader_compiler(compiler, "sce_vp_rsx", vpo_path, vcg_path))
+        return 0;
+    if (!run_shader_compiler(compiler, "sce_fp_rsx", fpo_path, fcg_path))
+        return 0;
 
     if (!file_size(vpo_path, &vp_size) || !file_size(fpo_path, &fp_size))
         return 0;
