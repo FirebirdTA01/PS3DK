@@ -642,6 +642,31 @@ assert_zip_has_no_symlinks "$ZIP_PATH"
 
 (cd "$OUTPUT_DIR" && sha256sum "$STAGE_NAME.zip" > "$STAGE_NAME.zip.sha256")
 
+# ---------------------------------------------------------------------------
+# Final gate on the staged tree.
+#
+# Everything above proves the packaging step did what it was told.  It cannot
+# tell whether an EARLIER phase was skipped: a re-package without build-sdk.sh
+# ships mismatched version stamps, and one without build-runtime-lv2.sh ships
+# a librt.a missing the fixes the CHANGELOG describes.  Both happened during
+# the v0.11.0 cut and both got past every check that existed at the time.
+#
+# check-release-tree.sh asserts stamp agreement, ON_TAG, and the presence of
+# specific symbols in specific archives.  It runs LAST and it is fatal: a tree
+# that fails it must not become a zip anyone can mistake for a release.
+# ---------------------------------------------------------------------------
+GATE_NM="${PS3_NM:-}"
+if [[ -z "$GATE_NM" ]]; then
+    for cand in "$PS3_TOOLCHAIN_ROOT/stage/ps3dev/ppu/bin/powerpc64-ps3-elf-nm" \
+                "$(command -v powerpc64-ps3-elf-nm 2>/dev/null || true)"; do
+        [[ -n "$cand" && -x "$cand" ]] && { GATE_NM="$cand"; break; }
+    done
+fi
+
+say "Gating staged tree with check-release-tree.sh"
+PS3_NM="$GATE_NM" "$script_dir/check-release-tree.sh" "$STAGE_DIR" --version "$VERSION" \
+    || die "staged release tree failed check-release-tree.sh — see the FAIL lines above"
+
 say "=== Done ==="
 ls -lh "$ZIP_PATH" "$ZIP_PATH.sha256"
 say "Stage tree: $STAGE_DIR"
