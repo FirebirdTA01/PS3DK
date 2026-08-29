@@ -38,16 +38,28 @@ set -uo pipefail
 ROOT=""
 WANT=""
 MANIFEST=""
+REQUIRE_ON_TAG=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)    WANT="${2:-}";     shift 2 ;;
         --version=*)  WANT="${1#*=}";    shift ;;
         --manifest)   MANIFEST="${2:-}"; shift 2 ;;
         --manifest=*) MANIFEST="${1#*=}"; shift ;;
-        -h|--help)    sed -n '2,33p' "$0"; exit 0 ;;
+        --require-on-tag) REQUIRE_ON_TAG=1; shift ;;
+        -h|--help)    sed -n '2,36p' "$0"; exit 0 ;;
         *)            ROOT="$1";         shift ;;
     esac
 done
+
+# Compare like with like.  version.sh emits "v0.11.3+dirty" off a tag, while
+# the values read out of the tree are matched with a vX.Y.Z pattern -- so a
+# raw string compare rejected every dev cut for a difference in suffix rather
+# than in version.  Normalise the expectation the same way the file values are
+# read.
+WANT_RAW="$WANT"
+if [[ -n "$WANT" ]]; then
+    WANT="$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' <<<"$WANT" | head -1)"
+fi
 [[ -n "$ROOT" ]] || { echo "usage: $0 <extracted-sdk-root> [--version vX.Y.Z]" >&2; exit 2; }
 [[ -d "$ROOT" ]] || { echo "not a directory: $ROOT" >&2; exit 2; }
 
@@ -155,9 +167,15 @@ fi
 # ---------------------------------------------------------------------------
 echo "-- version stamps must agree --"
 hdr="$ROOT/ppu/include/cell/sdk_version.h"
-readme_v="$(head -1 "$ROOT/README.txt" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-version_v="$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null)"
-hdr_v="$(grep -m1 'define PS3SDK_VERSION ' "$hdr" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')"
+# All three are read through the SAME vX.Y.Z extraction. Reading one of them
+# differently is how a dev cut ends up "disagreeing" with itself: VERSION holds
+# version.sh verbatim ("v0.11.3+dirty"), README embeds the same string in a
+# sentence, and comparing a raw read against an extracted one reports a version
+# mismatch when the only difference is the suffix.
+_ver_of() { grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
+readme_v="$(head -1 "$ROOT/README.txt" 2>/dev/null | _ver_of)"
+version_v="$(_ver_of < "$ROOT/VERSION" 2>/dev/null)"
+hdr_v="$(grep -m1 'define PS3SDK_VERSION ' "$hdr" 2>/dev/null | _ver_of)"
 printf "    README.txt    = %s\n    VERSION       = %s\n    sdk_version.h = %s\n" \
        "${readme_v:-<none>}" "${version_v:-<none>}" "${hdr_v:-<none>}"
 
@@ -171,11 +189,19 @@ else
     ok "all three agree${WANT:+ and match $WANT}"
 fi
 
+# ON_TAG is fatal only for a RELEASE cut.  A dev package is legitimately made
+# off a tag, and a gate that refuses to run outside a release would simply be
+# switched off -- which costs us the checks that matter every day.  Callers
+# that are cutting a release pass --require-on-tag; packaging does so only
+# when version.sh produced a clean vX.Y.Z with no +suffix.
 on_tag="$(grep -m1 'ON_TAG' "$hdr" 2>/dev/null | grep -oE '[01][[:space:]]*$' | tr -d '[:space:]')"
 if [[ "$on_tag" == "1" ]]; then
     ok "sdk_version.h ON_TAG=1 (cut was made on the tag)"
+elif [[ "$REQUIRE_ON_TAG" -eq 1 ]]; then
+    bad "sdk_version.h ON_TAG=${on_tag:-<none>} -- a release cut must be made with the tag in place"
 else
-    bad "sdk_version.h ON_TAG=${on_tag:-<none>} -- the cut was NOT made with the tag in place"
+    printf "  note    sdk_version.h ON_TAG=%s (dev cut; pass --require-on-tag for a release)\n" \
+           "${on_tag:-<none>}"
 fi
 
 # ---------------------------------------------------------------------------

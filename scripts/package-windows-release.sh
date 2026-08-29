@@ -663,8 +663,16 @@ if [[ -z "$GATE_NM" ]]; then
     done
 fi
 
+# A clean vX.Y.Z from version.sh means we are exactly on a tag; anything with a
+# +suffix (+dirty, +N-gsha) is a dev cut, which is allowed to have ON_TAG=0.
+GATE_ARGS=(--version "$VERSION")
+case "$VERSION" in
+    *+*) say "Dev version ($VERSION) — gating without --require-on-tag" ;;
+    *)   GATE_ARGS+=(--require-on-tag) ;;
+esac
+
 say "Gating staged tree with check-release-tree.sh"
-PS3_NM="$GATE_NM" "$script_dir/check-release-tree.sh" "$STAGE_DIR" --version "$VERSION" \
+PS3_NM="$GATE_NM" "$script_dir/check-release-tree.sh" "$STAGE_DIR" "${GATE_ARGS[@]}" \
     || die "staged release tree failed check-release-tree.sh — see the FAIL lines above"
 
 say "=== Done ==="
