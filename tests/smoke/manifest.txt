@@ -1,0 +1,2 @@
+name,relative_self,timeout_seconds,expected_state,required_tty_regex,forbidden_tty_regex
+librt-posix,tests/smoke/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
