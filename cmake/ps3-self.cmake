@@ -303,9 +303,33 @@ function(ps3_add_prx target)
             "ps3_add_prx: required host tool 'prx-gen${_ps3_prx_exe}' not found.\n"
             "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
     endif()
+    # SIGN emits BOTH containers, mirroring ps3_add_self exactly:
+    #
+    #   <stem>.sprx        make_sprx  -- real-signed, pairs with <target>.self
+    #   <stem>.fake.sprx   fself      -- s_flags 0x8000, pairs with <target>.fake.self
+    #
+    # The pairing is the point. A module's container has to match the
+    # executable's: ship a real .self and its modules must be real .sprx, boot a
+    # .fake.self and the modules it loads must be fake too. Emitting both means
+    # a project never has to choose at configure time -- it loads whichever
+    # matches how it was built, exactly as it already picks .self vs .fake.self.
+    #
+    # Real signing is a genuine option, not a placeholder: the retail keys have
+    # been public since the 2010 ECDSA nonce-reuse disclosure, which is why
+    # community CFW installs through the official updater. What is unresolved is
+    # narrower -- RPCS3 rejects make_sprx's current output with
+    # CELL_PRX_ERROR_UNSUPPORTED_PRX_TYPE ("Failed to decrypt file") before it
+    # parses the ELF, i.e. its key table has no entry matching the container's
+    # (program type, s_flags, sceversion) triple. Whether real hardware accepts
+    # it is untested. See t_09bf2ec9.
     if(_PSP_SIGN AND NOT PS3_TOOL_make_sprx)
         message(FATAL_ERROR
             "ps3_add_prx: SIGN requested but 'make_sprx${_ps3_prx_exe}' was not found.\n"
+            "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
+    endif()
+    if(_PSP_SIGN AND NOT PS3_TOOL_fself)
+        message(FATAL_ERROR
+            "ps3_add_prx: SIGN requested but 'fself${_ps3_prx_exe}' was not found.\n"
             "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.")
     endif()
 
@@ -344,10 +368,12 @@ function(ps3_add_prx target)
     if(_PSP_SIGN)
         get_filename_component(_prx_dir "${_prx_output}" DIRECTORY)
         get_filename_component(_prx_stem "${_prx_output}" NAME_WE)
-        set(_sprx_output "${_prx_dir}/${_prx_stem}.sprx")
-        list(APPEND _byproducts "${_sprx_output}")
+        set(_sprx_output      "${_prx_dir}/${_prx_stem}.sprx")
+        set(_fake_sprx_output "${_prx_dir}/${_prx_stem}.fake.sprx")
+        list(APPEND _byproducts "${_sprx_output}" "${_fake_sprx_output}")
         list(APPEND _sign_commands
-            COMMAND "${PS3_TOOL_make_sprx}" "${_prx_output}" "${_sprx_output}")
+            COMMAND "${PS3_TOOL_make_sprx}" "${_prx_output}" "${_sprx_output}"
+            COMMAND "${PS3_TOOL_fself}"     "${_prx_output}" "${_fake_sprx_output}")
     endif()
 
     add_custom_command(TARGET ${target} POST_BUILD

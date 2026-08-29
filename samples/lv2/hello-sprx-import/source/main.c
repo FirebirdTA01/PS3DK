@@ -8,7 +8,21 @@
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 
-#define HELLO_PRX_PATH "/app_home/hello-sprx-export.prx"
+/* A module's container has to match the executable's.  ps3_add_prx(... SIGN)
+ * emits both, mirroring ps3_add_self:
+ *
+ *   <target>.self       pairs with   hello-sprx-export.sprx        (real-signed)
+ *   <target>.fake.self  pairs with   hello-sprx-export.fake.sprx   (fself)
+ *
+ * This sample is booted as .fake.self, so it loads the .fake.sprx.  Ship the
+ * real .self and load the real .sprx instead -- override at configure time:
+ *   -DHELLO_PRX_PATH='"/app_home/hello-sprx-export.sprx"'
+ * or point it at the unsigned .prx, which loads only when the main executable
+ * is booted as a raw .elf (RPCS3 decrypt_self behaviour).
+ */
+#ifndef HELLO_PRX_PATH
+#define HELLO_PRX_PATH "/app_home/hello-sprx-export.fake.sprx"
+#endif
 #define EXPECTED_ADD_VALUE (20 + 22 + 0x1200)
 
 typedef int32_t sysPrxId;

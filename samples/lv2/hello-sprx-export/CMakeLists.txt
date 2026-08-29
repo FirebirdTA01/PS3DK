@@ -13,7 +13,8 @@ ps3_add_prx(hello-sprx-export
     NAME hello_prx
     VERSION 1.0
     EXPORTS exports.yml
-    OUTPUT_NAME hello-sprx-export.prx)
+    OUTPUT_NAME hello-sprx-export.prx
+    SIGN)
 
 # Prove the export round trip: read this module's own export table back out
 # and check it still describes exports.yml.
