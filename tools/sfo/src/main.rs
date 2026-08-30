@@ -48,6 +48,69 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+    Set {
+        input: PathBuf,
+        assignment: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    Flags {
+        input: PathBuf,
+        key: String,
+        #[arg(long)]
+        schema: Option<String>,
+        #[arg(long)]
+        enable: Option<String>,
+        #[arg(long)]
+        disable: Option<String>,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        schema: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Validate {
+        input: PathBuf,
+    },
+    Add {
+        input: PathBuf,
+        key: String,
+        #[arg(long)]
+        value: String,
+        #[arg(long = "type")]
+        entry_type: Option<String>,
+        #[arg(long)]
+        max_len: Option<u32>,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    Remove {
+        input: PathBuf,
+        key: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    Rename {
+        input: PathBuf,
+        from: String,
+        to: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    Create {
+        #[arg(long)]
+        template: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        appid: Option<String>,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -70,6 +133,46 @@ fn run() -> Result<()> {
     if let Some(command) = cli.command {
         return match command {
             Commands::Docs { check } => run_docs(check),
+            Commands::Set {
+                input,
+                assignment,
+                out,
+            } => run_set(input, assignment, out),
+            Commands::Flags {
+                input,
+                key,
+                schema,
+                enable,
+                disable,
+                out,
+            } => run_flags(input, key, schema, enable, disable, out),
+            Commands::Inspect {
+                input,
+                schema,
+                json,
+            } => run_inspect(input, schema, json),
+            Commands::Validate { input } => run_validate(input),
+            Commands::Add {
+                input,
+                key,
+                value,
+                entry_type,
+                max_len,
+                out,
+            } => run_add(input, key, value, entry_type, max_len, out),
+            Commands::Remove { input, key, out } => run_remove(input, key, out),
+            Commands::Rename {
+                input,
+                from,
+                to,
+                out,
+            } => run_rename(input, from, to, out),
+            Commands::Create {
+                template,
+                title,
+                appid,
+                out,
+            } => run_create(template, title, appid, out),
         };
     }
 
@@ -108,6 +211,233 @@ fn run() -> Result<()> {
     }
 
     bail!("invalid arguments; use --help for usage")
+}
+
+fn run_inspect(input: PathBuf, schema: Option<String>, json: bool) -> Result<()> {
+    let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
+    let doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    if json {
+        let registry = sfo::registry::Registry::load_default()?;
+        let schema_id = schema_id_for(&doc, schema.as_deref())?;
+        println!("{}", json_entries(&doc.entries, &registry, schema_id)?);
+    } else {
+        print_dict(&doc.entries);
+    }
+    Ok(())
+}
+
+fn run_validate(input: PathBuf) -> Result<()> {
+    let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
+    let _ = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    println!("PARAM.SFO OK");
+    Ok(())
+}
+
+fn run_add(
+    input: PathBuf,
+    key: String,
+    value: String,
+    entry_type: Option<String>,
+    max_len: Option<u32>,
+    out: PathBuf,
+) -> Result<()> {
+    let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
+    let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    let registry = sfo::registry::Registry::load_default()?;
+    let parsed_type = entry_type
+        .as_deref()
+        .map(sfo::edit::parse_entry_type)
+        .transpose()?;
+    sfo::edit::add_value(&mut doc, &registry, &key, &value, parsed_type, max_len)?;
+    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
+}
+
+fn run_remove(input: PathBuf, key: String, out: PathBuf) -> Result<()> {
+    let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
+    let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    sfo::edit::remove_key(&mut doc, &key)?;
+    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
+}
+
+fn run_rename(input: PathBuf, from: String, to: String, out: PathBuf) -> Result<()> {
+    let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
+    let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    sfo::edit::rename_key(&mut doc, &from, &to)?;
+    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
+}
+
+fn run_create(
+    template: String,
+    title: Option<String>,
+    appid: Option<String>,
+    out: PathBuf,
+) -> Result<()> {
+    if template != "game" {
+        bail!("unsupported SFO template `{template}`");
+    }
+    let entries = sfo::xml::parse_document(
+        include_str!("../../../cmake/templates/sfo.xml"),
+        title.as_deref(),
+        appid.as_deref(),
+    )?;
+    std::fs::write(&out, sfo::psf::write_canonical(&entries))
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
+}
+
+fn json_entries(
+    entries: &[sfo::psf::Entry],
+    registry: &sfo::registry::Registry,
+    schema_id: sfo::registry::SchemaId,
+) -> Result<String> {
+    let entries: Vec<_> = entries
+        .iter()
+        .map(|entry| {
+            let (format, value) = match &entry.value {
+                sfo::psf::Value::String(value) => ("utf8", serde_json::json!(value)),
+                sfo::psf::Value::Integer(value) => ("integer", serde_json::json!(value)),
+                sfo::psf::Value::Raw { format, bytes } => (
+                    raw_format_name(*format),
+                    serde_json::json!(hex_bytes(bytes)),
+                ),
+            };
+            let registry = registry_entry(registry, schema_id, entry);
+            serde_json::json!({
+                "key": entry.key,
+                "format": format,
+                "param_fmt": entry.format,
+                "value_len": entry.value_len,
+                "max_len": entry.max_len,
+                "value": value,
+                "registry": registry,
+            })
+        })
+        .collect();
+    Ok(serde_json::to_string(&entries)?)
+}
+
+fn registry_entry(
+    registry: &sfo::registry::Registry,
+    schema_id: sfo::registry::SchemaId,
+    entry: &sfo::psf::Entry,
+) -> serde_json::Value {
+    let Some(definition) = registry
+        .schema(schema_id)
+        .and_then(|schema| schema.key(&entry.key))
+    else {
+        return serde_json::Value::Null;
+    };
+
+    let decoded_flags = match entry.value {
+        sfo::psf::Value::Integer(value) => definition
+            .flags
+            .iter()
+            .filter(|flag| value & flag.mask == flag.mask)
+            .map(|flag| flag.name.as_str())
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    serde_json::json!({
+        "schema": schema_name(schema_id),
+        "known": true,
+        "confidence": confidence_name(definition.confidence),
+        "source": definition.source,
+        "decoded_flags": decoded_flags,
+    })
+}
+
+fn schema_name(schema_id: sfo::registry::SchemaId) -> &'static str {
+    match schema_id {
+        sfo::registry::SchemaId::Game => "game",
+        sfo::registry::SchemaId::Savedata => "savedata",
+    }
+}
+
+fn confidence_name(confidence: sfo::registry::Confidence) -> &'static str {
+    match confidence {
+        sfo::registry::Confidence::Confirmed => "confirmed",
+        sfo::registry::Confidence::Observed => "observed",
+        sfo::registry::Confidence::Gap => "gap",
+    }
+}
+
+fn raw_format_name(format: u16) -> &'static str {
+    match format {
+        0x0004 => "array",
+        0x0204 => "utf8_raw",
+        _ => "raw",
+    }
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+fn run_set(input: PathBuf, assignment: String, out: PathBuf) -> Result<()> {
+    let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
+    let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    sfo::edit::set_value(&mut doc, &assignment)?;
+    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
+}
+
+fn run_flags(
+    input: PathBuf,
+    key: String,
+    schema: Option<String>,
+    enable: Option<String>,
+    disable: Option<String>,
+    out: PathBuf,
+) -> Result<()> {
+    if enable.is_none() && disable.is_none() {
+        bail!("flags requires --enable or --disable");
+    }
+
+    let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
+    let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    let registry = sfo::registry::Registry::load_default()?;
+    let schema_id = schema_id_for(&doc, schema.as_deref())?;
+    if let Some(flag) = enable {
+        sfo::edit::set_flag(&mut doc, &registry, schema_id, &key, &flag, true)?;
+    }
+    if let Some(flag) = disable {
+        sfo::edit::set_flag(&mut doc, &registry, schema_id, &key, &flag, false)?;
+    }
+    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
+}
+
+fn schema_id_for(
+    doc: &sfo::psf::Document,
+    override_schema: Option<&str>,
+) -> Result<sfo::registry::SchemaId> {
+    if let Some(schema) = override_schema {
+        return parse_schema_id(schema);
+    }
+    Ok(match doc.get_string("CATEGORY") {
+        Some("SD" | "MS") => sfo::registry::SchemaId::Savedata,
+        _ => sfo::registry::SchemaId::Game,
+    })
+}
+
+fn parse_schema_id(schema: &str) -> Result<sfo::registry::SchemaId> {
+    match schema {
+        "game" => Ok(sfo::registry::SchemaId::Game),
+        "savedata" => Ok(sfo::registry::SchemaId::Savedata),
+        other => bail!("unsupported SFO schema `{other}`"),
+    }
 }
 
 fn run_docs(check: bool) -> Result<()> {

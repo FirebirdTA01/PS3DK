@@ -1,0 +1,203 @@
+use anyhow::{bail, Result};
+
+use crate::psf::{Document, Entry, Value};
+use crate::registry::{FormatKind, Registry, SchemaId};
+
+pub enum NewEntryType {
+    Array,
+    Utf8,
+    Integer,
+    Raw(u16),
+}
+
+pub fn set_value(doc: &mut Document, assignment: &str) -> Result<()> {
+    let (key, value) = assignment
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("set expects KEY=VALUE"))?;
+    let entry = find_entry_mut(&mut doc.entries, key)?;
+
+    entry.value = match entry.value {
+        Value::Integer(_) => Value::Integer(parse_integer(value)?),
+        Value::String(_) => Value::String(value.to_owned()),
+        Value::Raw { format, .. } => match entry.format {
+            0x0404 => Value::Integer(parse_integer(value)?),
+            0x0204 => Value::String(value.to_owned()),
+            _ => Value::Raw {
+                format,
+                bytes: parse_hex_bytes(value)?,
+            },
+        },
+    };
+    entry.value_len = value_len(&entry.value);
+    Ok(())
+}
+
+pub fn add_value(
+    doc: &mut Document,
+    registry: &Registry,
+    key: &str,
+    value: &str,
+    ty: Option<NewEntryType>,
+    max_len: Option<u32>,
+) -> Result<()> {
+    if doc.entries.iter().any(|entry| entry.key == key) {
+        bail!("SFO entry `{key}` already exists");
+    }
+
+    let registry_key = registry
+        .schema(SchemaId::Game)
+        .and_then(|schema| schema.key(key));
+    let format_kind = match (ty, registry_key.map(|key| key.format)) {
+        (Some(NewEntryType::Array), _) => FormatKind::Array,
+        (Some(NewEntryType::Utf8), _) => FormatKind::Utf8,
+        (Some(NewEntryType::Integer), _) => FormatKind::Integer,
+        (Some(NewEntryType::Raw(format)), _) => {
+            let bytes = parse_hex_bytes(value)?;
+            let value_len = bytes.len() as u32;
+            doc.entries.push(Entry {
+                key: key.to_owned(),
+                format,
+                value_len,
+                max_len: max_len.unwrap_or(value_len.next_multiple_of(4)),
+                value: Value::Raw { format, bytes },
+            });
+            return Ok(());
+        }
+        (None, Some(FormatKind::Array | FormatKind::Utf8 | FormatKind::Integer)) => {
+            registry_key.unwrap().format
+        }
+        (None, Some(FormatKind::Unknown) | None) => {
+            bail!("SFO entry `{key}` needs --type because its registry format is unknown")
+        }
+    };
+
+    let (format, entry_value) = match format_kind {
+        FormatKind::Array => (
+            0x0004,
+            Value::Raw {
+                format: 0x0004,
+                bytes: parse_hex_bytes(value)?,
+            },
+        ),
+        FormatKind::Utf8 => (0x0204, Value::String(value.to_owned())),
+        FormatKind::Integer => (0x0404, Value::Integer(parse_integer(value)?)),
+        FormatKind::Unknown => unreachable!("unknown registry formats are handled above"),
+    };
+    let value_len = value_len(&entry_value);
+    doc.entries.push(Entry {
+        key: key.to_owned(),
+        format,
+        value_len,
+        max_len: max_len
+            .or_else(|| registry_key.and_then(|key| key.max_len))
+            .unwrap_or(0),
+        value: entry_value,
+    });
+    Ok(())
+}
+
+pub fn remove_key(doc: &mut Document, key: &str) -> Result<()> {
+    let before = doc.entries.len();
+    doc.entries.retain(|entry| entry.key != key);
+    if doc.entries.len() == before {
+        bail!("SFO entry `{key}` not found");
+    }
+    Ok(())
+}
+
+pub fn rename_key(doc: &mut Document, from: &str, to: &str) -> Result<()> {
+    if doc.entries.iter().any(|entry| entry.key == to) {
+        bail!("SFO entry `{to}` already exists");
+    }
+    find_entry_mut(&mut doc.entries, from)?.key = to.to_owned();
+    Ok(())
+}
+
+pub fn set_flag(
+    doc: &mut Document,
+    registry: &Registry,
+    schema_id: SchemaId,
+    key: &str,
+    flag_name: &str,
+    enabled: bool,
+) -> Result<()> {
+    let definition = registry
+        .schema(schema_id)
+        .and_then(|schema| schema.key(key))
+        .ok_or_else(|| anyhow::anyhow!("SFO registry has no key `{key}`"))?;
+    if definition.format != FormatKind::Integer {
+        bail!("SFO registry key `{key}` is not an integer bitfield");
+    }
+    let flag = definition
+        .flags
+        .iter()
+        .find(|flag| flag.name == flag_name)
+        .ok_or_else(|| anyhow::anyhow!("SFO registry key `{key}` has no flag `{flag_name}`"))?;
+
+    let entry = find_entry_mut(&mut doc.entries, key)?;
+    let current = match entry.value {
+        Value::Integer(value) => value,
+        _ => bail!("SFO entry `{key}` is not an integer"),
+    };
+    entry.value = Value::Integer(if enabled {
+        current | flag.mask
+    } else {
+        current & !flag.mask
+    });
+    Ok(())
+}
+
+fn find_entry_mut<'a>(entries: &'a mut [Entry], key: &str) -> Result<&'a mut Entry> {
+    entries
+        .iter_mut()
+        .find(|entry| entry.key == key)
+        .ok_or_else(|| anyhow::anyhow!("SFO entry `{key}` not found"))
+}
+
+fn parse_integer(value: &str) -> Result<u32> {
+    if let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        Ok(u32::from_str_radix(hex, 16)?)
+    } else {
+        Ok(value.parse()?)
+    }
+}
+
+pub fn parse_entry_type(value: &str) -> Result<NewEntryType> {
+    if let Some(hex) = value
+        .strip_prefix("raw:")
+        .and_then(|raw| raw.strip_prefix("0x").or(Some(raw)))
+    {
+        return Ok(NewEntryType::Raw(u16::from_str_radix(hex, 16)?));
+    }
+    match value {
+        "array" => Ok(NewEntryType::Array),
+        "utf8" | "string" => Ok(NewEntryType::Utf8),
+        "integer" | "int32" => Ok(NewEntryType::Integer),
+        other => bail!("unsupported SFO entry type `{other}`"),
+    }
+}
+
+fn parse_hex_bytes(value: &str) -> Result<Vec<u8>> {
+    let stripped: String = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect();
+    if stripped.len() % 2 != 0 {
+        bail!("hex byte string has odd length");
+    }
+    (0..stripped.len())
+        .step_by(2)
+        .map(|i| Ok(u8::from_str_radix(&stripped[i..i + 2], 16)?))
+        .collect()
+}
+
+fn value_len(value: &Value) -> u32 {
+    match value {
+        Value::Integer(_) => 4,
+        Value::String(value) => value.len() as u32 + 1,
+        Value::Raw { bytes, .. } => bytes.len() as u32,
+    }
+}
