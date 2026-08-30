@@ -74,6 +74,66 @@ fn version_cli_reports_sfo_editor_name() {
 }
 
 #[test]
+fn gui_headless_noop_save_is_byte_identical() {
+    let input = fixture("ps3dk-template.sfo");
+    let out = temp_path("gui-noop.PARAM.SFO");
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    assert_eq!(std::fs::read(&out).unwrap(), std::fs::read(&input).unwrap());
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn gui_headless_scripted_edit_uses_preserving_writer() {
+    let input = fixture("ps3dk-template.sfo");
+    let out = temp_path("gui-edited.PARAM.SFO");
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-set",
+            "TITLE=GUI Sample",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let before = std::fs::read(&input).unwrap();
+    let after = std::fs::read(&out).unwrap();
+    let doc = sfo::psf::parse(&after).unwrap();
+    assert_eq!(doc.get_string("TITLE").unwrap(), "GUI Sample");
+    assert_only_entry_and_value_slot_changed(&before, &after, "TITLE");
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn cli_binary_rejects_gui_flag() {
+    let out = temp_path("cli-gui.PARAM.SFO");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args(["--gui", "--save-as", out.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(stderr(output.stderr).contains("unexpected argument '--gui'"));
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn set_cli_edits_existing_string_without_reflowing_layout() {
     let input = fixture("ps3dk-template.sfo");
     let out = temp_path("set-title.PARAM.SFO");
@@ -710,6 +770,12 @@ fn fixture(name: &str) -> PathBuf {
 
 fn temp_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("ps3dk-sfo-{}-{name}", std::process::id()))
+}
+
+fn sfo_editor_gui() -> Command {
+    Command::new(
+        option_env!("CARGO_BIN_EXE_sfo-editor-gui").expect("sfo-editor-gui binary target missing"),
+    )
 }
 
 fn minimal_attribute_sfo(category: &str, attribute: u32) -> Vec<u8> {

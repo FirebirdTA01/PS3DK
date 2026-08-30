@@ -124,6 +124,8 @@ jobs:
           tools/target/release/nidgen --version
           tools/target/release/abi-verify --version
           tools/target/release/coverage-report --version
+          tools/target/release/sfo-editor --version
+          tools/target/release/sfo-editor-gui --version
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
           # sprx-linker has no --version yet; just confirm it's a runnable ELF.
           file tools/sprx-linker/sprxlinker
@@ -134,7 +136,7 @@ jobs:
           stage="ps3-sdk-tools-${version}-linux-x86_64"
           mkdir -p "$stage/bin"
           # Rust binaries.
-          for bin in nidgen abi-verify coverage-report; do
+          for bin in nidgen abi-verify coverage-report sfo-editor sfo-editor-gui; do
             cp "tools/target/release/$bin" "$stage/bin/"
           done
           # C/C++ binaries.
@@ -152,7 +154,11 @@ jobs:
           Runtime dependencies (dynamic):
             * sprxlinker         — libelf, libz, libzstd
             * rsx-cg-compiler    — libstdc++ (system)
-            * nidgen, abi-verify, coverage-report — none beyond glibc
+            * sfo-editor-gui     - Linux desktop OpenGL/display libraries
+                                   loaded by the user's GUI session (for
+                                   example libX11/libxcb/libxkbcommon/
+                                   libwayland-client/libGL or libEGL)
+            * nidgen, abi-verify, coverage-report, sfo-editor - glibc/libgcc_s
 
           See CHANGELOG.md for what changed in this release.
           EOF

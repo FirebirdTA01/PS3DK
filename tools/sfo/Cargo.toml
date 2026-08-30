@@ -15,9 +15,14 @@ path = "src/lib.rs"
 name = "sfo-editor"
 path = "src/main.rs"
 
+[[bin]]
+name = "sfo-editor-gui"
+path = "src/gui_main.rs"
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+eframe = { version = "0.29.1", default-features = false, features = ["glow", "default_fonts"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
