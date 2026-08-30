@@ -3,6 +3,13 @@ use anyhow::{bail, Result};
 use crate::psf::{Document, Entry, Value};
 use crate::registry::{FormatKind, Registry, SchemaId};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Growth {
+    pub key: String,
+    pub old_max: u32,
+    pub new_max: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlagContext {
     Bootable,
@@ -40,6 +47,14 @@ pub enum NewEntryType {
 }
 
 pub fn set_value(doc: &mut Document, assignment: &str) -> Result<()> {
+    set_value_with_options(doc, assignment, false).map(|_| ())
+}
+
+pub fn set_value_with_options(
+    doc: &mut Document,
+    assignment: &str,
+    grow: bool,
+) -> Result<Option<Growth>> {
     let (key, value) = assignment
         .split_once('=')
         .ok_or_else(|| anyhow::anyhow!("set expects KEY=VALUE"))?;
@@ -58,7 +73,7 @@ pub fn set_value(doc: &mut Document, assignment: &str) -> Result<()> {
         },
     };
     entry.value_len = value_len(&entry.value);
-    Ok(())
+    Ok(grow_entry_if_needed(entry, grow))
 }
 
 pub fn add_value(
@@ -69,6 +84,18 @@ pub fn add_value(
     ty: Option<NewEntryType>,
     max_len: Option<u32>,
 ) -> Result<()> {
+    add_value_with_options(doc, registry, key, value, ty, max_len, false).map(|_| ())
+}
+
+pub fn add_value_with_options(
+    doc: &mut Document,
+    registry: &Registry,
+    key: &str,
+    value: &str,
+    ty: Option<NewEntryType>,
+    max_len: Option<u32>,
+    grow: bool,
+) -> Result<Option<Growth>> {
     if doc.entries.iter().any(|entry| entry.key == key) {
         bail!("SFO entry `{key}` already exists");
     }
@@ -83,14 +110,16 @@ pub fn add_value(
         (Some(NewEntryType::Raw(format)), _) => {
             let bytes = parse_hex_bytes(value)?;
             let value_len = bytes.len() as u32;
-            doc.entries.push(Entry {
+            let mut entry = Entry {
                 key: key.to_owned(),
                 format,
                 value_len,
                 max_len: max_len.unwrap_or(value_len.next_multiple_of(4)),
                 value: Value::Raw { format, bytes },
-            });
-            return Ok(());
+            };
+            let growth = grow_entry_if_needed(&mut entry, grow);
+            doc.entries.push(entry);
+            return Ok(growth);
         }
         (None, Some(FormatKind::Array | FormatKind::Utf8 | FormatKind::Integer)) => {
             registry_key.unwrap().format
@@ -113,7 +142,7 @@ pub fn add_value(
         FormatKind::Unknown => unreachable!("unknown registry formats are handled above"),
     };
     let value_len = value_len(&entry_value);
-    doc.entries.push(Entry {
+    let mut entry = Entry {
         key: key.to_owned(),
         format,
         value_len,
@@ -121,8 +150,10 @@ pub fn add_value(
             .or_else(|| registry_key.and_then(|key| key.max_len))
             .unwrap_or(0),
         value: entry_value,
-    });
-    Ok(())
+    };
+    let growth = grow_entry_if_needed(&mut entry, grow);
+    doc.entries.push(entry);
+    Ok(growth)
 }
 
 pub fn remove_key(doc: &mut Document, key: &str) -> Result<()> {
@@ -308,4 +339,18 @@ fn value_len(value: &Value) -> u32 {
         Value::String(value) => value.len() as u32 + 1,
         Value::Raw { bytes, .. } => bytes.len() as u32,
     }
+}
+
+fn grow_entry_if_needed(entry: &mut Entry, grow: bool) -> Option<Growth> {
+    if !grow || entry.max_len == 0 || crate::psf::current_value_len(entry) <= entry.max_len {
+        return None;
+    }
+
+    let old_max = entry.max_len;
+    entry.max_len = crate::psf::canonical_max_len(entry);
+    Some(Growth {
+        key: entry.key.clone(),
+        old_max,
+        new_max: entry.max_len,
+    })
 }

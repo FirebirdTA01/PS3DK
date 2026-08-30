@@ -99,6 +99,51 @@ fn set_cli_edits_existing_string_without_reflowing_layout() {
 }
 
 #[test]
+fn set_cli_grow_expands_only_the_named_entry() {
+    let input = temp_path("tight-title.PARAM.SFO");
+    let out = temp_path("grown-title.PARAM.SFO");
+    std::fs::write(&input, tight_title_sfo()).unwrap();
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args([
+            "set",
+            input.to_str().unwrap(),
+            "TITLE=This title needs more space",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(stderr(rejected.stderr).contains("preserved max is 8"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args([
+            "set",
+            input.to_str().unwrap(),
+            "TITLE=This title needs more space",
+            "--grow",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let stderr = stderr(output.stderr);
+    assert!(stderr.contains("TITLE max_len 8 -> 128"), "{stderr}");
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(
+        doc.get_string("TITLE").unwrap(),
+        "This title needs more space"
+    );
+    assert_eq!(entry(&doc, "TITLE").max_len, 128);
+    assert_eq!(entry(&doc, "CATEGORY").max_len, 7);
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn flags_cli_enables_named_registry_flag_without_reflowing_layout() {
     let input = fixture("ps3dk-template.sfo");
     let out = temp_path("flag-attribute.PARAM.SFO");
@@ -548,6 +593,40 @@ fn add_cli_adds_a_registry_backed_string_key() {
 }
 
 #[test]
+fn add_cli_grow_expands_a_registry_backed_slot_when_requested() {
+    let out = temp_path("add-grown-np.PARAM.SFO");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args([
+            "add",
+            fixture("ps3dk-template.sfo").to_str().unwrap(),
+            "NP_COMMUNICATION_ID",
+            "--value",
+            "NPWR00001_00_EXTRA",
+            "--grow",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let stderr = stderr(output.stderr);
+    assert!(
+        stderr.contains("NP_COMMUNICATION_ID max_len 16 -> 20"),
+        "{stderr}"
+    );
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    let entry = entry(&doc, "NP_COMMUNICATION_ID");
+    assert_eq!(entry.max_len, 20);
+    assert_eq!(
+        doc.get_string("NP_COMMUNICATION_ID").unwrap(),
+        "NPWR00001_00_EXTRA"
+    );
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn remove_cli_removes_one_key() {
     let out = temp_path("remove-license.PARAM.SFO");
 
@@ -765,6 +844,30 @@ fn trophy_sfo(padding_format: u16) -> Vec<u8> {
         },
     ])
     .unwrap()
+}
+
+fn tight_title_sfo() -> Vec<u8> {
+    sfo::psf::write_preserving(&[
+        sfo::psf::Entry {
+            key: "TITLE".to_owned(),
+            format: 0x0204,
+            value_len: 6,
+            max_len: 8,
+            value: sfo::psf::Value::String("Short".to_owned()),
+        },
+        sfo::psf::Entry {
+            key: "CATEGORY".to_owned(),
+            format: 0x0204,
+            value_len: 3,
+            max_len: 7,
+            value: sfo::psf::Value::String("HG".to_owned()),
+        },
+    ])
+    .unwrap()
+}
+
+fn entry<'a>(doc: &'a sfo::psf::Document, key: &str) -> &'a sfo::psf::Entry {
+    doc.entries.iter().find(|entry| entry.key == key).unwrap()
 }
 
 fn stderr(bytes: Vec<u8>) -> String {

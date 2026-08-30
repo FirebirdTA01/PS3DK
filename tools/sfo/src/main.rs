@@ -52,6 +52,8 @@ enum Commands {
         input: PathBuf,
         assignment: String,
         #[arg(long)]
+        grow: bool,
+        #[arg(long)]
         out: PathBuf,
     },
     Flags {
@@ -87,6 +89,8 @@ enum Commands {
         entry_type: Option<String>,
         #[arg(long)]
         max_len: Option<u32>,
+        #[arg(long)]
+        grow: bool,
         #[arg(long)]
         out: PathBuf,
     },
@@ -138,8 +142,9 @@ fn run() -> Result<()> {
             Commands::Set {
                 input,
                 assignment,
+                grow,
                 out,
-            } => run_set(input, assignment, out),
+            } => run_set(input, assignment, grow, out),
             Commands::Flags {
                 input,
                 key,
@@ -160,8 +165,9 @@ fn run() -> Result<()> {
                 value,
                 entry_type,
                 max_len,
+                grow,
                 out,
-            } => run_add(input, key, value, entry_type, max_len, out),
+            } => run_add(input, key, value, entry_type, max_len, grow, out),
             Commands::Remove { input, key, out } => run_remove(input, key, out),
             Commands::Rename {
                 input,
@@ -244,6 +250,7 @@ fn run_add(
     value: String,
     entry_type: Option<String>,
     max_len: Option<u32>,
+    grow: bool,
     out: PathBuf,
 ) -> Result<()> {
     let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
@@ -253,9 +260,18 @@ fn run_add(
         .as_deref()
         .map(sfo::edit::parse_entry_type)
         .transpose()?;
-    sfo::edit::add_value(&mut doc, &registry, &key, &value, parsed_type, max_len)?;
-    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
-        .with_context(|| format!("writing {}", out.display()))?;
+    let growth = sfo::edit::add_value_with_options(
+        &mut doc,
+        &registry,
+        &key,
+        &value,
+        parsed_type,
+        max_len,
+        grow,
+    )?;
+    let bytes = sfo::psf::write_preserving(&doc.entries)?;
+    std::fs::write(&out, bytes).with_context(|| format!("writing {}", out.display()))?;
+    print_growth(growth);
     Ok(())
 }
 
@@ -382,13 +398,23 @@ fn hex_bytes(bytes: &[u8]) -> String {
     out
 }
 
-fn run_set(input: PathBuf, assignment: String, out: PathBuf) -> Result<()> {
+fn run_set(input: PathBuf, assignment: String, grow: bool, out: PathBuf) -> Result<()> {
     let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
     let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
-    sfo::edit::set_value(&mut doc, &assignment)?;
-    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
-        .with_context(|| format!("writing {}", out.display()))?;
+    let growth = sfo::edit::set_value_with_options(&mut doc, &assignment, grow)?;
+    let bytes = sfo::psf::write_preserving(&doc.entries)?;
+    std::fs::write(&out, bytes).with_context(|| format!("writing {}", out.display()))?;
+    print_growth(growth);
     Ok(())
+}
+
+fn print_growth(growth: Option<sfo::edit::Growth>) {
+    if let Some(growth) = growth {
+        eprintln!(
+            "{} max_len {} -> {}",
+            growth.key, growth.old_max, growth.new_max
+        );
+    }
 }
 
 fn run_flags(

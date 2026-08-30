@@ -161,7 +161,11 @@ fn canonical_lengths(entry: &Entry) -> (u32, u32) {
     }
 }
 
-fn current_value_len(entry: &Entry) -> u32 {
+pub fn canonical_max_len(entry: &Entry) -> u32 {
+    canonical_lengths(entry).1
+}
+
+pub fn current_value_len(entry: &Entry) -> u32 {
     match &entry.value {
         Value::Integer(_) => 4,
         Value::String(value) => value.len() as u32 + 1,
