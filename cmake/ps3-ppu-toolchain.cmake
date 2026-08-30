@@ -56,9 +56,26 @@ set(CMAKE_STRIP        "${PS3DEV}/ppu/bin/${PS3_PPU_TARGET}-strip${_ps3_exe}"   
 set(CMAKE_OBJCOPY      "${PS3DEV}/ppu/bin/${PS3_PPU_TARGET}-objcopy${_ps3_exe}" CACHE FILEPATH "")
 set(CMAKE_OBJDUMP      "${PS3DEV}/ppu/bin/${PS3_PPU_TARGET}-objdump${_ps3_exe}" CACHE FILEPATH "")
 
-# Try-compile uses STATIC_LIBRARY mode so CMake doesn't try to link a
-# default executable (which would need our LV2 startfiles already).
-set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+# Try-compile mode, chosen from what the prefix actually contains.
+#
+# STATIC_LIBRARY stops CMake linking a default executable, which cannot work
+# while the SDK is still being built: the LV2 startfiles do not exist yet.
+# That is the only case it is needed for, and it is not free -- a try-compile
+# that never links makes every check_function_exists() / check_symbol_exists()
+# succeed, because the reference resolves at compile time and nothing ever
+# looks for the definition. Against an installed SDK that silently answers YES
+# to everything: libzip's configure found clonefile, arc4random and the MSVC
+# _fseeki64 family on a PS3 target and then failed on <sys/attr.h>. 24 of its
+# 33 probes were false positives.
+#
+# So: if the startfiles are present we are building against a finished SDK,
+# executables link, and EXECUTABLE mode makes the probes tell the truth. If
+# they are absent we are mid-bootstrap and STATIC_LIBRARY is still correct.
+if(EXISTS "${PS3DK}/ppu/lib/lv2-crt0.o")
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+else()
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+endif()
 
 # -----------------------------------------------------------------------------
 # Search-path policy
