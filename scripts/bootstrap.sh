@@ -132,6 +132,19 @@ clone_shallow() {
     fi
 }
 
+pin_commit() {
+    # Check out an exact commit in a shallow clone (fetches it if the
+    # shallow history does not already contain it).
+    local dir="$1" commit="$2"
+    if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$commit" ]]; then
+        say "$dir already at $commit"
+        return 0
+    fi
+    say "Pinning $dir to $commit"
+    retry_git "git fetch of $commit in $dir" -C "$dir" fetch --depth 1 origin "$commit"
+    git -C "$dir" checkout -q --detach "$commit"         || die "could not check out $commit in $dir"
+}
+
 clone_partial() {
     # Shallow + all-blobs clone of large upstreams (gcc, binutils-gdb,
     # newlib-cygwin).  --depth 1 keeps the initial clone bandwidth low
@@ -207,6 +220,14 @@ mkdir -p "$PS3DEV_DIR"
 
 clone_shallow "https://github.com/ps3dev/ps3toolchain.git"   "$PS3DEV_DIR/ps3toolchain"
 clone_shallow "https://github.com/ps3dev/PSL1GHT.git"        "$PS3DEV_DIR/PSL1GHT"
+# PSL1GHT is PINNED: patches/psl1ght/ is written against this exact commit and
+# build-psl1ght.sh now fails on a hunk that does not apply.  Before this pin a
+# fresh bootstrap (and therefore every CI run) took whatever master was that
+# day, while long-lived clones kept the master of the day they were made.
+# Bump the commit and re-verify the series together, never one without the
+# other.
+PSL1GHT_COMMIT="f649a08fd536a9e27c08c7db2d93a2d7ee4c3bbe"   # master 2026-06-29
+pin_commit "$PS3DEV_DIR/PSL1GHT" "$PSL1GHT_COMMIT"
 clone_shallow "https://github.com/ps3dev/ps3libraries.git"   "$PS3DEV_DIR/ps3libraries"
 
 # -----------------------------------------------------------------------------

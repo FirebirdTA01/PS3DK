@@ -90,6 +90,16 @@ mkdir -p "$gcc_startfile_dir" "$ps3dk_dir"
 # our output.
 : "${LV2_SDK_VERSION:=0x00475001}"
 
+# librt is written against OUR SDK headers (sys/memory.h declares
+# sys_memory_allocate, sys/lv2_syscall.h the syscall wrappers, ...), and it
+# compiles against $PS3DK/ppu/include, so those headers must be installed
+# there before librt is built.  On a fresh prefix they are not: this script
+# runs at the end of build-psl1ght.sh, before build-sdk.sh --headers-only
+# (release CI run 33282807246 failed here after the PSL1GHT fix).  Seed them;
+# install-headers is a pure, idempotent copy that build-sdk.sh repeats later.
+say "installing SDK headers into \$PS3DK/ppu/include (librt builds against them)"
+make -C "$PS3_TOOLCHAIN_ROOT/sdk" install-headers >/dev/null
+
 # Build each CRT artefact for both ILP32 (default) and LP64 (-mlp64)
 # multilib variants.  lv2.ld (linker script) is ABI-invariant; install
 # one copy per tree for explicitness.

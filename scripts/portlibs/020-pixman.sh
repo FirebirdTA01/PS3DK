@@ -54,6 +54,13 @@ cd "$SRC"
 # compilation.  If configure stops with "cannot run test program while
 # cross compiling", add patches/portlibs/pixman/*.patch (or seed a
 # config.cache with pixman_cv_* / ac_cv_tls vars) rather than editing here.
+# PIXMAN_NO_TLS: pixman keeps its fast-path cache in a static __thread
+# struct.  Under ILP32 with the -fPIC in the portlibs CFLAGS our GCC 12.4
+# ICEs on that (dynamic-TLS DTPREL unspec built in DImode over SImode regs:
+# "unrecognizable insn ... UNSPEC_TLSDTPRELHA", pixman-implementation.c).
+# Plain static storage is what we want anyway: nothing here links pixman
+# from more than one thread, and it removes the runtime TLS dependency.
+CPPFLAGS="-DPIXMAN_NO_TLS" \
 ./configure \
     --host="$HOST_TRIPLE" \
     --prefix="$PORTLIBS" \

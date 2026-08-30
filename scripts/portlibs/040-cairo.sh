@@ -48,7 +48,11 @@ cd "$SRC"
 
 # pixman/freetype/png/zlib come in through pkg-config; keep the -I/-L
 # fallback for the handful of configure link probes that bypass it.
-export CPPFLAGS="-I$PORTLIBS/include${CPPFLAGS:+ $CPPFLAGS}"
+# CAIRO_NO_MUTEX: the target has no pthread/mutex implementation cairo
+# recognises, and cairo-mutex-impl-private.h #errors unless this is set to
+# acknowledge single-threaded use (nothing here drives cairo from more than
+# one thread).  Same class as PIXMAN_NO_TLS in 020-pixman.sh.
+export CPPFLAGS="-I$PORTLIBS/include -DCAIRO_NO_MUTEX=1${CPPFLAGS:+ $CPPFLAGS}"
 export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
 
 # LIKELY NEEDS PATCH: cairo 1.16.0's configure runs AC_RUN_IFELSE probes
@@ -60,8 +64,8 @@ export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
 #
 # NOTE: a plain top-level `make` also descends into test/ perf/ util/,
 # some of which fail to cross-compile (they assume a hosted environment).
-# If that bites, build only the library with `make -C src` and install
-# with `make -C src install` plus `make install-pkgconfigDATA`.
+# So build only the library: `make -C src` / `make -C src install` (src/
+# installs the lib, the headers and the pkg-config files).
 ./configure \
     --host="$HOST_TRIPLE" \
     --prefix="$PORTLIBS" \
@@ -81,5 +85,8 @@ export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
     --disable-valgrind \
     --disable-gtk-doc
 
-make -j"$(nproc 2>/dev/null || echo 4)"
-make install
+# Library only: the top-level build also descends into test/ perf/ util/,
+# and test/ links cairo-test-suite against popen(), which newlib does not
+# provide for this target (the note above, now confirmed on a fresh prefix).
+make -C src -j"$(nproc 2>/dev/null || echo 4)"
+make -C src install   # installs lib, headers and the .pc files

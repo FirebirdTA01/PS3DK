@@ -5,25 +5,32 @@ call osk*. Keep the legacy osk* structs and source-facing field names,
 then add deprecated static-inline forwarders to the cellOskDialog* API.
 
 diff --git a/ppu/include/sysutil/osk.h b/ppu/include/sysutil/osk.h
-index f2fbb84..585626f 100644
+index f2fbb84..c554276 100644
 --- a/ppu/include/sysutil/osk.h
 +++ b/ppu/include/sysutil/osk.h
-@@ -6,6 +6,7 @@
+@@ -6,6 +6,9 @@
  #define __LV2_OSK_H__
  
  #include <ppu-types.h>
++#if !defined(__PS3DK_NO_PSL1GHT_COMPAT__) && __has_include(<cell/sysutil_oskdialog.h>)
 +#include <cell/sysutil_oskdialog.h>
++#endif
  
  #define OSK_10KEY_PANEL							1
  #define OSK_FULLKEY_PANEL						2
-@@ -245,6 +246,82 @@ typedef struct _osk_separate_window_option
+@@ -245,6 +248,87 @@ typedef struct _osk_separate_window_option
  	u32 reserved;											//!< Reserved.
  } oskSeparateWindowOption;
  
 +/* PSL1GHT-compat: keep the legacy osk* structs and field names for source
 + * compatibility, but forward calls to the reference-SDK cellOskDialog* API.
-+ * Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop these wrappers. */
-+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++ * Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop these wrappers.
++ * Guarded by __has_include: PSL1GHT's own build has no cell/ on its include
++ * path and must see the upstream prototypes (libsysutil defines several of
++ * these names).  Without cell/ you are not building against the PS3DK SDK,
++ * and the upstream libsysutil symbols resolve instead.
++ */
++#if !defined(__PS3DK_NO_PSL1GHT_COMPAT__) && __has_include(<cell/sysutil_oskdialog.h>)
 +__attribute__((deprecated("PSL1GHT-compat: use cellOskDialogSetInitialInputDevice")))
 +static inline s32 oskSetInitialInputDevice(oskInputDevice input)
 +{
@@ -99,7 +106,7 @@ index f2fbb84..585626f 100644
  /*! \brief Set initial input device.
  \param[in] input Initial input device value.
  \return zero if no error occured, nonzero otherwise.
-@@ -361,6 +438,7 @@ s32 oskSetInitialKeyLayout(oskKeyLayout layout);
+@@ -361,6 +445,7 @@ s32 oskSetInitialKeyLayout(oskKeyLayout layout);
  \return zero if no error occured, nonzero otherwise.
  */
  s32 oskSetLayoutMode (s32 mode);

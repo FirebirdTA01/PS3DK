@@ -72,8 +72,9 @@ run_recipe() {
 
 mapfile -t RECIPES < <(discover_recipes "$@")
 if [[ ${#RECIPES[@]} -eq 0 ]]; then
-    warn "No recipes found in $RECIPES_DIR"
-    exit 0
+    # Fatal, not a warning: die() inside $(discover_recipes ...) runs in a
+    # subshell, so a misspelt recipe name used to print an error and exit 0.
+    die "No recipes found in $RECIPES_DIR (misspelt name?)"
 fi
 
 for r in "${RECIPES[@]}"; do

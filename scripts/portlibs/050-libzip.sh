@@ -37,11 +37,26 @@ fi
 echo "$SHA256  $TARBALL" | sha256sum -c - \
     || { echo "checksum mismatch for $TARBALL" >&2; exit 1; }
 
-if [[ ! -d "$SRC" ]]; then
-    tar xf "$TARBALL"
-fi
+# Always start from a pristine extract: the patch step below is fatal on a
+# hunk that does not apply, and an already-patched tree from a previous run
+# would trip it ("Reversed (or previously applied) patch detected").
+rm -rf "$SRC"
+tar xf "$TARBALL"
 
 cd "$SRC"
+
+# Port patches (patches/portlibs/libzip/*.patch, -p1).  A hunk that does not
+# apply is fatal: the source is not what the patch expects, and building on
+# regardless is how header/recipe drift went unnoticed for months.
+PATCHES="$PS3_TOOLCHAIN_ROOT/patches/portlibs/$PKG"
+if [[ -d "$PATCHES" ]]; then
+    for p in "$PATCHES"/*.patch; do
+        [[ -f "$p" ]] || continue
+        echo "[$PKG] applying $(basename "$p")"
+        patch -p1 --forward --silent < "$p" \
+            || { echo "[$PKG] patch $(basename "$p") did not apply cleanly" >&2; exit 1; }
+    done
+fi
 
 TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain.cmake"
 [[ -f "$TOOLCHAIN_FILE" ]] || { echo "missing $TOOLCHAIN_FILE" >&2; exit 1; }
@@ -58,6 +73,11 @@ cd build
 #
 # Use the default Makefiles generator (Ninja may be absent in the build
 # env); libzip is happy with either.
+# The PS3 toolchain file probes with CMAKE_TRY_COMPILE_TARGET_TYPE
+# STATIC_LIBRARY, so check_function_exists() never links and answers
+# yes for every name.  Pre-seed the ones this target cannot link
+# (verified by linking each against the cross toolchain), or config.h
+# selects code paths for clonefile, arc4random, MSVC _*() etc.
 cmake -G "Unix Makefiles" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
     -DCMAKE_INSTALL_PREFIX="$PORTLIBS" \
@@ -65,6 +85,30 @@ cmake -G "Unix Makefiles" \
     -DCMAKE_FIND_ROOT_PATH="$PS3DEV/ppu;$PS3DK/ppu;$PORTLIBS" \
     -DZLIB_INCLUDE_DIR="$PORTLIBS/include" \
     -DZLIB_LIBRARY="$PORTLIBS/lib/libz.a" \
+    -DHAVE__CLOSE=OFF \
+    -DHAVE__DUP=OFF \
+    -DHAVE__FDOPEN=OFF \
+    -DHAVE__FILENO=OFF \
+    -DHAVE__FSEEKI64=OFF \
+    -DHAVE__FSTAT64=OFF \
+    -DHAVE__SETMODE=OFF \
+    -DHAVE__STAT64=OFF \
+    -DHAVE__STRDUP=OFF \
+    -DHAVE__STRTOI64=OFF \
+    -DHAVE__STRTOUI64=OFF \
+    -DHAVE__UNLINK=OFF \
+    -DHAVE_ARC4RANDOM=OFF \
+    -DHAVE_CLONEFILE=OFF \
+    -DHAVE_EXPLICIT_MEMSET=OFF \
+    -DHAVE_FCHMOD=OFF \
+    -DHAVE_GETPROGNAME=OFF \
+    -DHAVE_MEMCPY_S=OFF \
+    -DHAVE_SETMODE=OFF \
+    -DHAVE_STRERROR_S=OFF \
+    -DHAVE_STRERRORLEN_S=OFF \
+    -DHAVE_STRICMP=OFF \
+    -DHAVE_STRNCPY_S=OFF \
+    -DHAVE_FTS_OPEN=OFF \
     -DBUILD_SHARED_LIBS=OFF \
     -DENABLE_BZIP2=OFF \
     -DENABLE_LZMA=OFF \

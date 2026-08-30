@@ -44,7 +44,16 @@ INSTALL="$PS3DK"
 
 cd "$SRC"
 
-# Apply patch series from patches/psl1ght/ if present. Idempotent via --forward.
+# Apply the patch series to a CLEAN tree, so the result depends only on the
+# series and not on what a previous run left behind: a regenerated patch does
+# not apply over its old version, and the old "--forward + warn" path then
+# carried on building with stale headers (release CI run 33282807246).  A hunk
+# that fails on a clean tree means the tree is not what the series expects
+# (upstream moved, or the series is stale), so that is fatal now.
+if [[ -d "$SRC/.git" ]]; then
+    say "resetting PSL1GHT source tree before applying the patch series"
+    git -C "$SRC" checkout -q -- . && git -C "$SRC" clean -fdq
+fi
 if [[ -d "$PATCHES" ]]; then
     if [[ -f "$PATCHES/series" ]]; then
         patch_list=( $(grep -v '^#' "$PATCHES/series" | grep -v '^\s*$') )
@@ -54,7 +63,7 @@ if [[ -d "$PATCHES" ]]; then
     for p in "${patch_list[@]}"; do
         say "Applying $p"
         patch -p1 --forward --silent < "$PATCHES/$p" \
-            || warn "Patch $p did not apply cleanly (may already be applied)"
+            || die "Patch $p did not apply cleanly: $SRC is not the tree the series expects"
     done
 else
     say "No psl1ght patches (patches/psl1ght/ absent — building vanilla)"
@@ -62,16 +71,6 @@ fi
 
 # PSL1GHT's Makefile expects PSL1GHT to point at the install root.
 export PSL1GHT="$INSTALL"
-
-# Patch 0014 (psl1ght-compat sysutil callbacks) makes PSL1GHT's own
-# ppu/include/sysutil/sysutil.h include OUR <cell/sysutil.h>, so PSL1GHT's
-# libresc no longer compiles on a prefix that does not already carry the SDK
-# headers.  build-sdk.sh --headers-only cannot run first (it refuses until
-# PSL1GHT is installed), so seed the headers here.  Pure copy, idempotent;
-# build-sdk.sh re-installs the same files later.  Release CI run 33282807246
-# (v0.11.11) is the failure this prevents.
-say "seeding SDK headers into \$PS3DK/ppu/include (PSL1GHT compat patch 0014 needs <cell/sysutil.h>)"
-make -C "$PS3_TOOLCHAIN_ROOT/sdk" install-headers >/dev/null
 
 say "install-ctrl (copies ppu_rules / spu_rules / base_rules to \$PSL1GHT)"
 make install-ctrl

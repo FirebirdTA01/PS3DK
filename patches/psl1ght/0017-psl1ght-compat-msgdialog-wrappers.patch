@@ -5,25 +5,32 @@ call msgDialog*. Add deprecated static-inline forwarders so unmodified
 samples build (each use warns to switch to cellMsgDialog*).
 
 diff --git a/ppu/include/sysutil/msg.h b/ppu/include/sysutil/msg.h
-index 5f31fe7..79d5d82 100644
+index 5f31fe7..b1b149b 100644
 --- a/ppu/include/sysutil/msg.h
 +++ b/ppu/include/sysutil/msg.h
-@@ -2,6 +2,7 @@
+@@ -2,6 +2,9 @@
  #define __LV2_MSG_H__
  
  #include <ppu-types.h>
++#if !defined(__PS3DK_NO_PSL1GHT_COMPAT__) && __has_include(<cell/msg_dialog.h>)
 +#include <cell/msg_dialog.h>
++#endif
  
  #define MSG_PROGRESSBAR_INDEX0			0
  #define MSG_PROGRESSBAR_INDEX1			1
-@@ -37,6 +38,52 @@ typedef enum
+@@ -37,6 +40,57 @@ typedef enum
  
  typedef void (*msgDialogCallback)(msgButton button,void *usrData);
  
 +/* PSL1GHT-compat: our SDK exports the reference-SDK cellMsgDialog* names;
 + * these deprecated wrappers let unmodified PSL1GHT samples build (each use
-+ * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them. */
-+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++ * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them.
++ * Guarded by __has_include: PSL1GHT's own build has no cell/ on its include
++ * path and must see the upstream prototypes (libsysutil defines several of
++ * these names).  Without cell/ you are not building against the PS3DK SDK,
++ * and the upstream libsysutil symbols resolve instead.
++ */
++#if !defined(__PS3DK_NO_PSL1GHT_COMPAT__) && __has_include(<cell/msg_dialog.h>)
 +__attribute__((deprecated("PSL1GHT-compat: use cellMsgDialogAbort")))
 +static inline s32 msgDialogAbort(void) { return cellMsgDialogAbort(); }
 +
@@ -69,7 +76,7 @@ index 5f31fe7..79d5d82 100644
  s32 msgDialogAbort();
  s32 msgDialogClose(f32 waitMs);
  s32 msgDialogOpen(msgType type,const char *msg,msgDialogCallback cb,void *usrData,void *unused);
-@@ -46,6 +93,7 @@ s32 msgDialogOpenErrorCode(u32 errorCode,msgDialogCallback cb,void *usrData,void
+@@ -46,6 +100,7 @@ s32 msgDialogOpenErrorCode(u32 errorCode,msgDialogCallback cb,void *usrData,void
  s32 msgDialogProgressBarSetMsg(u32 index,const char *msg);
  s32 msgDialogProgressBarReset(u32 index);
  s32 msgDialogProgressBarInc(u32 index,u32 percent);

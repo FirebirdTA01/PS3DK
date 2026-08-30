@@ -6,17 +6,22 @@ deprecated static-inline forwarders so unmodified samples link (each
 use warns to switch to cellSysutil*).
 
 diff --git a/ppu/include/sysutil/sysutil.h b/ppu/include/sysutil/sysutil.h
-index 85f1655..02d1518 100644
+index 85f1655..34b8dcd 100644
 --- a/ppu/include/sysutil/sysutil.h
 +++ b/ppu/include/sysutil/sysutil.h
-@@ -113,7 +113,16 @@ This function usually is called in the main loop of a program, to regularly
+@@ -113,7 +113,21 @@ This function usually is called in the main loop of a program, to regularly
  check for new events. In case of an event, the callback function (previously
  registered using \ref sysUtilRegisterCallback) is called.
  */
 +/* PSL1GHT-compat: our SDK exports the reference-SDK cellSysutil* names;
 + * these deprecated wrappers let unmodified PSL1GHT samples build (each use
-+ * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them. */
-+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++ * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them.
++ * Guarded by __has_include: PSL1GHT's own build has no cell/ on its include
++ * path and must see the upstream prototypes (libsysutil defines several of
++ * these names).  Without cell/ you are not building against the PS3DK SDK,
++ * and the upstream libsysutil symbols resolve instead.
++ */
++#if !defined(__PS3DK_NO_PSL1GHT_COMPAT__) && __has_include(<cell/sysutil.h>)
 +#include <cell/sysutil.h>
 +__attribute__((deprecated("PSL1GHT-compat: use cellSysutilCheckCallback")))
 +static inline s32 sysUtilCheckCallback(void) { return cellSysutilCheckCallback(); }
@@ -26,11 +31,11 @@ index 85f1655..02d1518 100644
  
  
  /*! \brief Unregister a callback function.
-@@ -121,7 +130,12 @@ s32 sysUtilCheckCallback();
+@@ -121,7 +135,12 @@ s32 sysUtilCheckCallback();
  This function usually is called at the end of a program to unregister the
  event manager.
  */
-+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++#if !defined(__PS3DK_NO_PSL1GHT_COMPAT__) && __has_include(<cell/sysutil.h>)
 +__attribute__((deprecated("PSL1GHT-compat: use cellSysutilUnregisterCallback")))
 +static inline s32 sysUtilUnregisterCallback(s32 slot) { return cellSysutilUnregisterCallback(slot); }
 +#else
@@ -39,11 +44,11 @@ index 85f1655..02d1518 100644
  
  /*! \brief Register a callback function for system events.
  
-@@ -139,7 +153,12 @@ to all 4 slots in order, so each manager will see all of them.
+@@ -139,7 +158,12 @@ to all 4 slots in order, so each manager will see all of them.
    \param usrdata Pointer to user data, to be sent to callback function.
        May be \c NULL.
  */
-+#ifndef __PS3DK_NO_PSL1GHT_COMPAT__
++#if !defined(__PS3DK_NO_PSL1GHT_COMPAT__) && __has_include(<cell/sysutil.h>)
 +__attribute__((deprecated("PSL1GHT-compat: use cellSysutilRegisterCallback")))
 +static inline s32 sysUtilRegisterCallback(s32 slot,sysutilCallback cb,void *usrdata) { return cellSysutilRegisterCallback(slot,(CellSysutilCallback)cb,usrdata); }
 +#else

@@ -1,0 +1,28 @@
+libzip: use the timespec members of struct stat
+
+The PS3DK <sys/stat.h> wrapper deliberately removes the st_atime/st_mtime/
+st_ctime convenience macros (reference-SDK convention; see
+sdk/include/sys/stat.h).  Use the real timespec members.
+
+--- a/lib/zip_source_file_stdio.c
++++ b/lib/zip_source_file_stdio.c
+@@ -152,7 +152,7 @@
+     }
+ 
+     st->size = (zip_uint64_t)sb.st_size;
+-    st->mtime = sb.st_mtime;
++    st->mtime = sb.st_mtim.tv_sec;
+ 
+     st->regular_file = S_ISREG(sb.st_mode);
+     st->exists = true;
+--- a/src/zipcmp.c
++++ b/src/zipcmp.c
+@@ -507,7 +507,7 @@
+                 }
+ 
+                 a->entry[a->nentry].crc = (zip_uint32_t)crc;
+-                a->entry[a->nentry].last_modification_time = ent->fts_statp->st_mtime;
++                a->entry[a->nentry].last_modification_time = ent->fts_statp->st_mtim.tv_sec;
+             }
+             a->nentry++;
+             break;
