@@ -45,6 +45,7 @@ host_bin  bin/pkg.exe
 host_bin  bin/prx-gen.exe
 host_bin  bin/rsx-cg-compiler.exe
 host_bin  bin/sfo.exe
+host_bin  bin/sfo-editor.exe
 host_bin  bin/sprxlinker.exe
 host_bin  bin/spu-elf-to-ppu-obj.exe
 

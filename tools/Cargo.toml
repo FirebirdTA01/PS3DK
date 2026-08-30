@@ -6,6 +6,7 @@ members = [
     "abi-verify",
     "spu-elf-to-ppu-obj",
     "prx-gen",
+    "sfo",
 ]
 
 [workspace.package]

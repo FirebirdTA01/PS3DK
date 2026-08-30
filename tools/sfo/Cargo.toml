@@ -1,0 +1,21 @@
+[package]
+name = "sfo"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "PARAM.SFO parser, writer, and editor"
+
+[lib]
+name = "sfo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sfo-editor"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+thiserror.workspace = true
