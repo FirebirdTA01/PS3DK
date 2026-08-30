@@ -663,13 +663,26 @@ if [[ -z "$GATE_NM" ]]; then
     done
 fi
 
-# A clean vX.Y.Z from version.sh means we are exactly on a tag; anything with a
-# +suffix (+dirty, +N-gsha) is a dev cut, which is allowed to have ON_TAG=0.
+# Ask git whether this is a release cut, rather than inferring it from the
+# version string.
+#
+# The previous rule was "a clean vX.Y.Z means we are on a tag; a +suffix means a
+# dev cut". That is false: the suffix marks a DIRTY TREE or distance from a tag,
+# not the absence of one. A clean checkout of a branch produces a bare vX.Y.Z
+# too, so every CI dispatch build demanded ON_TAG=1 and could never satisfy it —
+# release.yml run 33295204036 died here at the last step of 23 with everything
+# else green. The rule was derived from a dev cut that happened to be dirty and
+# never tested against a clean one.
+#
+# --exact-match answers the actual question and is the same condition the
+# ON_TAG stamp records, so the gate and the build agree by construction.
 GATE_ARGS=(--version "$VERSION")
-case "$VERSION" in
-    *+*) say "Dev version ($VERSION) — gating without --require-on-tag" ;;
-    *)   GATE_ARGS+=(--require-on-tag) ;;
-esac
+if git -C "$PS3_TOOLCHAIN_ROOT" describe --exact-match --tags HEAD >/dev/null 2>&1; then
+    say "On tag $(git -C "$PS3_TOOLCHAIN_ROOT" describe --exact-match --tags HEAD) — gating with --require-on-tag"
+    GATE_ARGS+=(--require-on-tag)
+else
+    say "Not on a tag ($VERSION) — gating without --require-on-tag"
+fi
 
 say "Gating staged tree with check-release-tree.sh"
 # Invoked through bash rather than executed directly: the exec bit does not
