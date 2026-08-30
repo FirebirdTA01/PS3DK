@@ -61,6 +61,41 @@ fn game_attribute_is_sourced_from_psdevwiki() {
 }
 
 #[test]
+fn bootable_attribute_flags_carry_wiki_groups_for_gui() {
+    let registry = Registry::load_default().unwrap();
+    let game = registry.schema(SchemaId::Game).unwrap();
+    let attribute = game.key("ATTRIBUTE").unwrap();
+    assert_eq!(attribute.flags.len(), 32);
+    assert!(attribute
+        .flags
+        .iter()
+        .all(|flag| flag.group.as_deref().is_some()));
+
+    let groups = attribute
+        .flags
+        .iter()
+        .map(|flag| flag.group.as_deref().unwrap())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        groups,
+        [
+            "portables_and_xmb",
+            "warning_screens",
+            "disc_purchase_license",
+            "emulator"
+        ]
+        .into_iter()
+        .collect()
+    );
+
+    let doc = sfo::docgen::render_param_sfo_markdown(&registry);
+    assert!(doc.contains("#### Portables and XMB"), "{doc}");
+    assert!(doc.contains("#### Warning screens"), "{doc}");
+    assert!(doc.contains("#### Disc, purchase and license"), "{doc}");
+    assert!(doc.contains("#### Emulator"), "{doc}");
+}
+
+#[test]
 fn psdevwiki_section_k_populates_the_bootable_attribute_table() {
     let registry = Registry::load_default().unwrap();
     let attribute = registry

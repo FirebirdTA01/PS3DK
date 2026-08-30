@@ -305,6 +305,52 @@ fn gui_headless_flag_adds_absent_region_deny_before_toggling() {
 }
 
 #[test]
+fn gui_headless_lists_registry_known_absent_keys() {
+    let input = temp_path("gui-absent-list.PARAM.SFO");
+    std::fs::write(&input, bootable_without_attribute_sfo()).unwrap();
+
+    let output = sfo_editor_gui()
+        .args(["--open", input.to_str().unwrap(), "--gui-list-absent"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("ATTRIBUTE integer 4"), "{stdout}");
+    assert!(stdout.contains("REGION_DENY integer 4"), "{stdout}");
+    assert!(stdout.contains("NP_COMMUNICATION_ID utf8 16"), "{stdout}");
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn gui_headless_add_key_creates_default_registry_entry() {
+    let input = temp_path("gui-add-key-in.PARAM.SFO");
+    let out = temp_path("gui-add-key-out.PARAM.SFO");
+    std::fs::write(&input, bootable_without_attribute_sfo()).unwrap();
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-add-key",
+            "ATTRIBUTE",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    let attribute = entry(&doc, "ATTRIBUTE");
+    assert_eq!(attribute.format, 0x0404);
+    assert_eq!(attribute.max_len, 4);
+    assert_eq!(doc.get_integer("ATTRIBUTE").unwrap(), 0);
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn gui_headless_create_writes_the_game_template() {
     let out = temp_path("gui-created.PARAM.SFO");
 
@@ -1064,6 +1110,12 @@ fn minimal_patch_sfo(attribute: u32) -> Vec<u8> {
             value: sfo::psf::Value::Integer(attribute),
         },
     ])
+}
+
+fn bootable_without_attribute_sfo() -> Vec<u8> {
+    let mut doc = sfo::psf::parse(include_bytes!("fixtures/ps3dk-template.sfo")).unwrap();
+    doc.entries.retain(|entry| entry.key != "ATTRIBUTE");
+    sfo::psf::write_preserving(&doc.entries).unwrap()
 }
 
 fn savedata_params_sfo(param_format: u16) -> Vec<u8> {

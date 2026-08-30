@@ -95,6 +95,8 @@ pub struct Flag {
     pub name: String,
     #[serde(default)]
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub group: Option<String>,
     pub label: String,
     pub source: String,
     pub confidence: Confidence,

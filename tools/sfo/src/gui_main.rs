@@ -31,6 +31,12 @@ struct Cli {
     #[arg(long = "gui-add", hide = true)]
     adds: Vec<String>,
 
+    #[arg(long = "gui-add-key", hide = true)]
+    add_keys: Vec<String>,
+
+    #[arg(long = "gui-list-absent", hide = true)]
+    list_absent: bool,
+
     #[arg(long = "gui-enable", hide = true)]
     enables: Vec<String>,
 
@@ -75,6 +81,8 @@ fn run() -> Result<()> {
         save_as: cli.save_as,
         assignments: cli.assignments,
         adds: cli.adds,
+        add_keys: cli.add_keys,
+        list_absent: cli.list_absent,
         enables: cli.enables,
         disables: cli.disables,
         schema: cli.schema,

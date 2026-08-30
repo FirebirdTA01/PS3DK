@@ -81,7 +81,7 @@ pub fn render_param_sfo_markdown(registry: &Registry) -> String {
 
         for key in schema.keys.iter().filter(|key| !key.flags.is_empty()) {
             out.push_str(&format!("### `{}` Flags\n\n", key.name));
-            render_flags(&mut out, &key.flags);
+            render_flags_grouped(&mut out, &key.flags);
             out.push('\n');
         }
 
@@ -109,7 +109,7 @@ pub fn render_param_sfo_markdown(registry: &Registry) -> String {
                     out.push_str(notes);
                     out.push_str("\n\n");
                 }
-                render_flags(&mut out, &table.flags);
+                render_flags_grouped(&mut out, &table.flags);
                 out.push('\n');
             }
         }
@@ -121,7 +121,34 @@ pub fn render_param_sfo_markdown(registry: &Registry) -> String {
     out
 }
 
-fn render_flags(out: &mut String, flags: &[crate::registry::Flag]) {
+fn render_flags_grouped(out: &mut String, flags: &[crate::registry::Flag]) {
+    if flags.iter().all(|flag| flag.group.is_none()) {
+        render_flags(out, flags);
+        return;
+    }
+
+    let mut groups = Vec::<(&str, Vec<&crate::registry::Flag>)>::new();
+    for flag in flags {
+        let group_id = flag.group.as_deref().unwrap_or("other");
+        if let Some((_, group_flags)) = groups.iter_mut().find(|(id, _)| *id == group_id) {
+            group_flags.push(flag);
+        } else {
+            groups.push((group_id, vec![flag]));
+        }
+    }
+
+    for (group_id, group_flags) in groups {
+        out.push_str(&format!("#### {}\n\n", group_label(group_id)));
+        render_flags(out, group_flags.iter().copied());
+        out.push('\n');
+    }
+    while out.ends_with("\n\n") {
+        out.pop();
+    }
+    out.push('\n');
+}
+
+fn render_flags<'a>(out: &mut String, flags: impl IntoIterator<Item = &'a crate::registry::Flag>) {
     out.push_str("| Mask | Name | Aliases | Meaning | Confidence | Source |\n");
     out.push_str("|---:|---|---|---|---|---|\n");
     for flag in flags {
@@ -138,6 +165,16 @@ fn render_flags(out: &mut String, flags: &[crate::registry::Flag]) {
             confidence(flag.confidence),
             flag.source
         ));
+    }
+}
+
+fn group_label(group: &str) -> &'static str {
+    match group {
+        "portables_and_xmb" => "Portables and XMB",
+        "warning_screens" => "Warning screens",
+        "disc_purchase_license" => "Disc, purchase and license",
+        "emulator" => "Emulator",
+        _ => "Other",
     }
 }
 

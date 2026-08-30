@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use eframe::egui;
 
 use sfo::psf::{self, Document, Entry, Value};
-use sfo::registry::{Confidence, Registry};
+use sfo::registry::{Confidence, FormatKind, Key, Registry};
 
 pub struct LaunchOptions {
     pub open: Option<PathBuf>,
@@ -12,6 +12,8 @@ pub struct LaunchOptions {
     pub save_as: Option<PathBuf>,
     pub assignments: Vec<String>,
     pub adds: Vec<String>,
+    pub add_keys: Vec<String>,
+    pub list_absent: bool,
     pub enables: Vec<String>,
     pub disables: Vec<String>,
     pub schema: Option<String>,
@@ -26,6 +28,8 @@ pub fn run(options: LaunchOptions) -> Result<()> {
         || options.save
         || !options.assignments.is_empty()
         || !options.adds.is_empty()
+        || !options.add_keys.is_empty()
+        || options.list_absent
         || !options.enables.is_empty()
         || !options.disables.is_empty()
         || options.create_template.is_some()
@@ -36,19 +40,9 @@ pub fn run(options: LaunchOptions) -> Result<()> {
 }
 
 fn run_headless(options: LaunchOptions) -> Result<()> {
-    let save_as = options
-        .save_as
-        .clone()
-        .or_else(|| options.save.then(|| options.open.clone()).flatten())
-        .ok_or_else(|| {
-            if options.save {
-                anyhow::anyhow!("Save needs an opened file path")
-            } else {
-                anyhow::anyhow!("--save-as is required for headless GUI scripts")
-            }
-        })?;
     let mut model = GuiModel::new()?;
     model.schema_override = options.schema;
+    let opened_path = options.open.clone();
     if let Some(template) = options.create_template {
         model.create_template(
             &template,
@@ -61,11 +55,20 @@ fn run_headless(options: LaunchOptions) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("--open is required for headless GUI scripts"))?;
         model.open_path(&open)?;
     }
+    if options.list_absent {
+        for row in model.absent_registry_entries()? {
+            println!("{} {} {}", row.key, row.format, row.max_len);
+        }
+        return Ok(());
+    }
     for assignment in options.assignments {
         model.apply_assignment(&assignment, options.grow)?;
     }
     for assignment in options.adds {
         model.add_assignment(&assignment, options.grow)?;
+    }
+    for key in options.add_keys {
+        model.add_registry_key(&key)?;
     }
     for flag in options.enables {
         model.set_flag_from_spec(&flag, true)?;
@@ -73,6 +76,17 @@ fn run_headless(options: LaunchOptions) -> Result<()> {
     for flag in options.disables {
         model.set_flag_from_spec(&flag, false)?;
     }
+    let save_as = options
+        .save_as
+        .clone()
+        .or_else(|| options.save.then(|| opened_path.clone()).flatten())
+        .ok_or_else(|| {
+            if options.save {
+                anyhow::anyhow!("Save needs an opened file path")
+            } else {
+                anyhow::anyhow!("--save-as is required for headless GUI scripts")
+            }
+        })?;
     model.save_as(&save_as)
 }
 
@@ -183,6 +197,34 @@ impl GuiModel {
         Ok(())
     }
 
+    pub fn add_registry_key(&mut self, key: &str) -> Result<()> {
+        let context = self.flag_context()?;
+        let definition = self
+            .registry
+            .schema(context.schema_id())
+            .and_then(|schema| schema.key_for_name(key))
+            .ok_or_else(|| anyhow::anyhow!("SFO registry has no key `{key}`"))?;
+        let Some((ty, value)) = default_entry_value(definition) else {
+            bail!("SFO registry key `{key}` has no known format for default creation");
+        };
+        let max_len = definition.max_len;
+        let document = self
+            .document
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no PARAM.SFO is open"))?;
+        sfo::edit::add_value_with_options(
+            document,
+            &self.registry,
+            key,
+            &value,
+            Some(ty),
+            max_len,
+            false,
+        )?;
+        self.dirty = true;
+        Ok(())
+    }
+
     pub fn set_flag_from_spec(&mut self, spec: &str, enabled: bool) -> Result<()> {
         let (key, flag) = parse_flag_spec(spec)?;
         self.set_flag(key, flag, enabled)
@@ -226,6 +268,31 @@ impl GuiModel {
             false,
         )?;
         Ok(())
+    }
+
+    fn absent_registry_entries(&self) -> Result<Vec<AbsentRegistryEntry>> {
+        let Some(document) = &self.document else {
+            return Ok(Vec::new());
+        };
+        let context = self.flag_context()?;
+        let existing = document
+            .entries
+            .iter()
+            .map(|entry| entry.key.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        let Some(schema) = self.registry.schema(context.schema_id()) else {
+            return Ok(Vec::new());
+        };
+        Ok(schema
+            .keys
+            .iter()
+            .filter(|key| !key.name.contains("..") && !existing.contains(key.name.as_str()))
+            .map(|key| AbsentRegistryEntry {
+                key: key.name.clone(),
+                format: format_kind_label(key.format).to_owned(),
+                max_len: key.max_len.unwrap_or(0),
+            })
+            .collect())
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -282,6 +349,7 @@ struct GuiApp {
     localized_titles: Vec<LocalizedTitleState>,
     add_key: String,
     add_value: String,
+    show_reserved: bool,
 }
 
 impl GuiApp {
@@ -303,6 +371,7 @@ impl GuiApp {
             localized_titles,
             add_key: "TITLE_01".to_owned(),
             add_value: String::new(),
+            show_reserved: false,
         })
     }
 
@@ -370,6 +439,16 @@ impl GuiApp {
         self.add_assignment(&assignment);
     }
 
+    fn add_registry_key(&mut self, key: &str) {
+        match self.model.add_registry_key(key) {
+            Ok(()) => {
+                self.model.status = format!("Added {key}");
+                self.reload_rows();
+            }
+            Err(err) => self.model.status = err.to_string(),
+        }
+    }
+
     fn add_assignment(&mut self, assignment: &str) {
         match self.model.add_assignment(&assignment, self.grow) {
             Ok(()) => {
@@ -415,7 +494,7 @@ impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("sfo_top").show(ctx, |ui| {
             ui.vertical(|ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("Open...").clicked() {
                         self.open_dialog();
                     }
@@ -429,8 +508,7 @@ impl eframe::App for GuiApp {
                     }
                     ui.monospace(self.model.path_label());
                     ui.checkbox(&mut self.grow, "Grow");
-                });
-                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.show_reserved, "Show reserved");
                     ui.label("Schema");
                     let mut changed = false;
                     egui::ComboBox::from_id_salt("schema_choice")
@@ -452,22 +530,28 @@ impl eframe::App for GuiApp {
                     if changed {
                         self.set_schema_choice();
                     }
-                    ui.separator();
-                    ui.label("Title");
-                    ui.add_sized(
-                        [220.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.create_title),
-                    );
-                    ui.label("Title ID");
-                    ui.add_sized(
-                        [120.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.create_appid),
-                    );
-                    if ui.button("New game").clicked() {
-                        self.create_game();
-                    }
-                    ui.separator();
-                    ui.label("Add");
+                });
+                egui::CollapsingHeader::new("New file template")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Title");
+                            ui.add_sized(
+                                [220.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.create_title),
+                            );
+                            ui.label("Title ID");
+                            ui.add_sized(
+                                [120.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.create_appid),
+                            );
+                            if ui.button("New game").clicked() {
+                                self.create_game();
+                            }
+                        });
+                    });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Add entry");
                     ui.add_sized([110.0, 24.0], egui::TextEdit::singleline(&mut self.add_key));
                     ui.add_sized(
                         [180.0, 24.0],
@@ -525,70 +609,55 @@ impl eframe::App for GuiApp {
                         ui.strong("Max");
                         ui.strong("Registry");
                         ui.strong("Value");
+                        ui.strong("Apply");
+                        ui.strong("Add");
                         ui.end_row();
 
+                        let first_absent = self.rows.iter().position(|row| !row.present);
                         for (index, row) in self.rows.iter_mut().enumerate() {
+                            if Some(index) == first_absent {
+                                ui.strong("Not in file");
+                                ui.label("");
+                                ui.label("");
+                                ui.label("");
+                                ui.label("");
+                                ui.label("");
+                                ui.label("");
+                                ui.end_row();
+                            }
                             ui.monospace(&row.key);
                             ui.label(&row.format);
                             ui.label(row.max_len.to_string());
                             ui.label(&row.registry);
-                            if row.choices.is_empty() {
-                                ui.add_enabled_ui(row.present, |ui| {
-                                    ui.add_sized(
-                                        [300.0, 22.0],
-                                        egui::TextEdit::singleline(&mut row.value),
-                                    );
-                                });
-                            } else {
-                                let mut choice_changed = false;
-                                egui::ComboBox::from_id_salt(format!("choice_{}", row.key))
-                                    .selected_text(choice_label(row))
-                                    .show_ui(ui, |ui| {
-                                        for choice in &row.choices {
-                                            choice_changed |= ui
-                                                .selectable_value(
-                                                    &mut row.value,
-                                                    choice.value.clone(),
-                                                    &choice.label,
-                                                )
-                                                .changed();
-                                        }
-                                    });
-                                if choice_changed {
-                                    pending = Some(PendingAction::Apply(index));
-                                }
-                            }
+                            render_value_and_flags(
+                                ui,
+                                row,
+                                index,
+                                self.show_reserved,
+                                &mut pending,
+                            );
                             let apply_button =
                                 ui.add_enabled(row.present, egui::Button::new("Apply"));
                             if apply_button.clicked() {
                                 pending = Some(PendingAction::Apply(index));
                             }
-                            ui.end_row();
-                            if !row.flags.is_empty() {
-                                ui.label("");
-                                ui.label("");
-                                ui.label("");
-                                ui.label("Flags");
-                                ui.horizontal_wrapped(|ui| {
-                                    for flag in &row.flags {
-                                        let mut enabled = flag.enabled;
-                                        if ui.checkbox(&mut enabled, &flag.label).changed() {
-                                            pending = Some(PendingAction::Flag {
-                                                key: row.key.clone(),
-                                                flag: flag.name.clone(),
-                                                enabled,
-                                            });
-                                        }
-                                    }
-                                });
-                                ui.end_row();
+                            let add_button = ui
+                                .add_enabled(!row.present && row.addable, egui::Button::new("Add"));
+                            if add_button.clicked() {
+                                pending = Some(PendingAction::AddDefault(index));
                             }
+                            ui.end_row();
                         }
                     });
             });
             if let Some(pending) = pending {
                 match pending {
                     PendingAction::Apply(index) => self.apply_row(index),
+                    PendingAction::AddDefault(index) => {
+                        if let Some(key) = self.rows.get(index).map(|row| row.key.clone()) {
+                            self.add_registry_key(&key);
+                        }
+                    }
                     PendingAction::LocalizedTitle(index) => self.apply_localized_title(index),
                     PendingAction::Flag { key, flag, enabled } => {
                         self.set_flag(&key, &flag, enabled);
@@ -601,6 +670,7 @@ impl eframe::App for GuiApp {
 
 enum PendingAction {
     Apply(usize),
+    AddDefault(usize),
     LocalizedTitle(usize),
     Flag {
         key: String,
@@ -616,6 +686,7 @@ struct RowState {
     registry: String,
     value: String,
     present: bool,
+    addable: bool,
     choices: Vec<ValueChoice>,
     flags: Vec<FlagState>,
 }
@@ -635,6 +706,9 @@ struct ValueChoice {
 struct FlagState {
     name: String,
     label: String,
+    group: Option<String>,
+    source: String,
+    confidence: Confidence,
     enabled: bool,
 }
 
@@ -650,10 +724,11 @@ fn rows_from_model(model: &GuiModel) -> Vec<RowState> {
             registry: model.registry_label(entry, context),
             value: value_text(&entry.value),
             present: true,
+            addable: false,
             choices: value_choices(model, entry, context),
             flags: flag_states(model, entry, context),
         })
-        .chain(missing_flag_rows(model, context))
+        .chain(missing_registry_rows(model, context))
         .collect()
 }
 
@@ -699,12 +774,15 @@ fn flag_states(
         .map(|flag| FlagState {
             name: flag.name.clone(),
             label: flag.label.clone(),
+            group: flag.group.clone(),
+            source: flag.source.clone(),
+            confidence: flag.confidence,
             enabled: *value & flag.mask == flag.mask,
         })
         .collect()
 }
 
-fn missing_flag_rows(
+fn missing_registry_rows(
     model: &GuiModel,
     context: Option<sfo::edit::FlagContext>,
 ) -> impl Iterator<Item = RowState> + '_ {
@@ -725,27 +803,32 @@ fn missing_flag_rows(
             schema.keys.iter().filter_map({
                 let existing = existing.clone();
                 move |key| {
-                    let flags = sfo::edit::flags_for_context(key, context);
-                    if flags.is_empty() || existing.contains(key.name.as_str()) {
+                    if key.name.contains("..") || existing.contains(key.name.as_str()) {
                         return None;
                     }
+                    let flags = sfo::edit::flags_for_context(key, context);
+                    let addable = default_entry_value(key).is_some();
                     Some(RowState {
                         key: key.name.clone(),
-                        format: "integer".to_owned(),
-                        max_len: key.max_len.unwrap_or(4),
+                        format: format_kind_label(key.format).to_owned(),
+                        max_len: key.max_len.unwrap_or(0),
                         registry: format!(
                             "{} / {}",
                             context.name(),
                             confidence_name(key.confidence)
                         ),
-                        value: "absent".to_owned(),
+                        value: "absent - Add".to_owned(),
                         present: false,
+                        addable,
                         choices: Vec::new(),
                         flags: flags
                             .iter()
                             .map(|flag| FlagState {
                                 name: flag.name.clone(),
                                 label: flag.label.clone(),
+                                group: flag.group.clone(),
+                                source: flag.source.clone(),
+                                confidence: flag.confidence,
                                 enabled: false,
                             })
                             .collect(),
@@ -753,6 +836,39 @@ fn missing_flag_rows(
                 }
             })
         })
+}
+
+struct AbsentRegistryEntry {
+    key: String,
+    format: String,
+    max_len: u32,
+}
+
+fn default_entry_value(key: &Key) -> Option<(sfo::edit::NewEntryType, String)> {
+    match key.format {
+        FormatKind::Array => Some((
+            sfo::edit::NewEntryType::Array,
+            key.default.clone().unwrap_or_default(),
+        )),
+        FormatKind::Utf8 => Some((
+            sfo::edit::NewEntryType::Utf8,
+            key.default.clone().unwrap_or_default(),
+        )),
+        FormatKind::Integer => Some((
+            sfo::edit::NewEntryType::Integer,
+            key.default.clone().unwrap_or_else(|| "0".to_owned()),
+        )),
+        FormatKind::Unknown => None,
+    }
+}
+
+fn format_kind_label(format: FormatKind) -> &'static str {
+    match format {
+        FormatKind::Array => "array",
+        FormatKind::Utf8 => "utf8",
+        FormatKind::Integer => "integer",
+        FormatKind::Unknown => "unknown",
+    }
 }
 
 fn value_choices(
@@ -786,6 +902,143 @@ fn choice_label(row: &RowState) -> String {
         .find(|choice| choice.value == row.value)
         .map(|choice| choice.label.clone())
         .unwrap_or_else(|| row.value.clone())
+}
+
+fn render_value_and_flags(
+    ui: &mut egui::Ui,
+    row: &mut RowState,
+    index: usize,
+    show_reserved: bool,
+    pending: &mut Option<PendingAction>,
+) {
+    ui.vertical(|ui| {
+        if row.choices.is_empty() {
+            if row.present {
+                ui.add_sized([300.0, 22.0], egui::TextEdit::singleline(&mut row.value));
+            } else {
+                ui.add_enabled(false, egui::Label::new(&row.value));
+            }
+        } else {
+            let mut choice_changed = false;
+            egui::ComboBox::from_id_salt(format!("choice_{}", row.key))
+                .selected_text(choice_label(row))
+                .show_ui(ui, |ui| {
+                    for choice in &row.choices {
+                        choice_changed |= ui
+                            .selectable_value(&mut row.value, choice.value.clone(), &choice.label)
+                            .changed();
+                    }
+                });
+            if choice_changed {
+                *pending = Some(PendingAction::Apply(index));
+            }
+        }
+
+        let visible_flags = row
+            .flags
+            .iter()
+            .filter(|flag| show_reserved || !is_reserved_flag(flag))
+            .collect::<Vec<_>>();
+        if visible_flags.is_empty() {
+            return;
+        }
+
+        egui::CollapsingHeader::new(format!("{} flags", row.key))
+            .default_open(true)
+            .show(ui, |ui| {
+                for group in flag_groups(&row.key, &visible_flags) {
+                    if let Some(label) = group.label {
+                        ui.strong(label);
+                    }
+                    egui::Grid::new(format!("flags_{}_{}", row.key, group.id))
+                        .num_columns(2)
+                        .spacing([16.0, 4.0])
+                        .show(ui, |ui| {
+                            for chunk in group.flags.chunks(2) {
+                                for flag in chunk {
+                                    render_flag_checkbox(ui, row, flag, pending);
+                                }
+                                if chunk.len() == 1 {
+                                    ui.label("");
+                                }
+                                ui.end_row();
+                            }
+                        });
+                }
+            });
+    });
+}
+
+fn render_flag_checkbox(
+    ui: &mut egui::Ui,
+    row: &RowState,
+    flag: &FlagState,
+    pending: &mut Option<PendingAction>,
+) {
+    let mut enabled = flag.enabled;
+    let response = ui.checkbox(
+        &mut enabled,
+        format!("{} [{}]", flag.label, confidence_name(flag.confidence)),
+    );
+    let changed = response.changed();
+    response.on_hover_text(format!(
+        "{}\nsource: {}\nconfidence: {}",
+        flag.name,
+        flag.source,
+        confidence_name(flag.confidence)
+    ));
+    if changed {
+        *pending = Some(PendingAction::Flag {
+            key: row.key.clone(),
+            flag: flag.name.clone(),
+            enabled,
+        });
+    }
+}
+
+struct FlagGroup<'a> {
+    id: &'a str,
+    label: Option<&'static str>,
+    flags: Vec<&'a FlagState>,
+}
+
+fn flag_groups<'a>(key: &str, flags: &[&'a FlagState]) -> Vec<FlagGroup<'a>> {
+    if key != "ATTRIBUTE" || flags.iter().all(|flag| flag.group.is_none()) {
+        return vec![FlagGroup {
+            id: "all",
+            label: None,
+            flags: flags.to_vec(),
+        }];
+    }
+
+    let mut groups = Vec::<FlagGroup<'a>>::new();
+    for flag in flags {
+        let id = flag.group.as_deref().unwrap_or("other");
+        if let Some(group) = groups.iter_mut().find(|group| group.id == id) {
+            group.flags.push(flag);
+        } else {
+            groups.push(FlagGroup {
+                id,
+                label: Some(group_label(id)),
+                flags: vec![flag],
+            });
+        }
+    }
+    groups
+}
+
+fn is_reserved_flag(flag: &FlagState) -> bool {
+    flag.confidence == Confidence::Reserved || flag.name.starts_with("reserved_")
+}
+
+fn group_label(group: &str) -> &'static str {
+    match group {
+        "portables_and_xmb" => "Portables and XMB",
+        "warning_screens" => "Warning screens",
+        "disc_purchase_license" => "Disc, purchase and license",
+        "emulator" => "Emulator",
+        _ => "Other",
+    }
 }
 
 fn assignment_key(assignment: &str) -> &str {

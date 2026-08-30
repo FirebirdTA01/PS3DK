@@ -122,13 +122,15 @@ This file is generated from `tools/sfo/registry/param-sfo.yml`. Update the regis
 | Mask | Name | Aliases | Meaning | Confidence | Source |
 |---:|---|---|---|---|---|
 | `0x1` | `lpcm_2` | - | LPCM 2ch | confirmed | `rpcs3-psf` |
-| `0x2` | `dolby_dts_required_0x2` | - | Unnamed flag required by Dolby Digital/DTS examples | speculative | `psdevwiki` |
+| `0x2` | `dolby_dts_required_0x2` | - | flag 0x2 (required by Dolby/DTS) | speculative | `psdevwiki` |
 | `0x4` | `lpcm_5_1` | - | LPCM 5.1 | confirmed | `rpcs3-psf` |
 | `0x10` | `lpcm_7_1` | - | LPCM 7.1 | confirmed | `rpcs3-psf` |
 | `0x100` | `dolby_digital_5_1` | - | Dolby Digital 5.1 | confirmed | `rpcs3-psf` |
 | `0x200` | `dts_5_1` | - | DTS 5.1 | confirmed | `rpcs3-psf` |
 
 ### `ATTRIBUTE` Flags
+
+#### Portables and XMB
 
 | Mask | Name | Aliases | Meaning | Confidence | Source |
 |---:|---|---|---|---|---|
@@ -140,6 +142,11 @@ This file is generated from `tools/sfo/registry/param-sfo.yml`. Update the regis
 | `0x20` | `xmb_ingame_bgm` | - | XMB In-Game background music | confirmed | `psdevwiki` |
 | `0x40` | `system_voice_chat` | - | System voice chat | speculative | `psdevwiki` |
 | `0x80` | `psvita_remote_play` | - | PS Vita Remote Play, firmware 4.00 | confirmed | `psdevwiki` |
+
+#### Warning screens
+
+| Mask | Name | Aliases | Meaning | Confidence | Source |
+|---:|---|---|---|---|---|
 | `0x100` | `move_controller_warning` | - | Move Controller warning screen | confirmed | `psdevwiki` |
 | `0x200` | `navigation_controller_warning` | - | Navigation Controller warning screen; requires Move warning | confirmed | `psdevwiki` |
 | `0x400` | `ps_eye_warning` | - | PlayStation Eye Camera warning screen; requires Move warning | confirmed | `psdevwiki` |
@@ -148,6 +155,11 @@ This file is generated from `tools/sfo/registry/param-sfo.yml`. Update the regis
 | `0x2000` | `psnow_beta_notification` | - | PlayStation Now Beta notification screen | speculative | `psdevwiki` |
 | `0x4000` | `reserved_0x4000` | - | Not Used Yet | reserved | `psdevwiki` |
 | `0x8000` | `reserved_0x8000` | - | Not Used Yet | reserved | `psdevwiki` |
+
+#### Disc, purchase and license
+
+| Mask | Name | Aliases | Meaning | Confidence | Source |
+|---:|---|---|---|---|---|
 | `0x10000` | `install_disc` | - | Install Disc | confirmed | `psdevwiki` |
 | `0x20000` | `install_packages` | - | Install Packages | confirmed | `psdevwiki` |
 | `0x40000` | `unknown_0x40000` | - | Unknown for bootable content; patch overwrite flag in patch context | speculative | `psdevwiki` |
@@ -156,6 +168,11 @@ This file is generated from `tools/sfo/registry/param-sfo.yml`. Update the regis
 | `0x200000` | `pcengine` | - | PCEngine | speculative | `psdevwiki` |
 | `0x400000` | `license_logo_disabled` | - | License Logo Disabled | confirmed | `psdevwiki` |
 | `0x800000` | `move_controller_enabled` | ps_move_support | Move Controller Enabled / PS Move support; corroborated by RPCS3 game_list_table.cpp | confirmed | `psdevwiki` |
+
+#### Emulator
+
+| Mask | Name | Aliases | Meaning | Confidence | Source |
+|---:|---|---|---|---|---|
 | `0x1000000` | `emulator_type_bit0` | - | Emulator type field bit 0 | speculative | `psdevwiki` |
 | `0x2000000` | `emulator_type_bit1` | - | Emulator type field bit 1 | speculative | `psdevwiki` |
 | `0x4000000` | `neogeo_emulator_type` | - | NeoGeo emulator type field value X4; requires PCEngine | confirmed | `psdevwiki` |
@@ -164,6 +181,7 @@ This file is generated from `tools/sfo/registry/param-sfo.yml`. Update the regis
 | `0x20000000` | `reserved_0x20000000` | - | Not Used Yet | reserved | `psdevwiki` |
 | `0x40000000` | `reserved_0x40000000` | - | Not Used Yet | reserved | `psdevwiki` |
 | `0x80000000` | `reserved_0x80000000` | - | Not Used Yet | reserved | `psdevwiki` |
+
 
 ### `REGION_DENY` Flags
 
