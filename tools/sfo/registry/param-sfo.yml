@@ -1,0 +1,323 @@
+sources:
+  - id: rpcs3-psf
+    label: RPCS3 Loader/PSF.cpp and PSF.h parser and writer behavior
+    ref: "RPCS3 @ e426e444 rpcs3/Loader/PSF.cpp, rpcs3/Loader/PSF.h"
+  - id: rpcs3-category
+    label: RPCS3 rpcs3qt/category.h category names and PSF.cpp accept list
+    ref: "RPCS3 @ e426e444 rpcs3/rpcs3qt/category.h:23-46; rpcs3/Loader/PSF.cpp category accept list"
+  - id: rpcs3-runtime
+    label: RPCS3 runtime consumers surveyed in System.cpp, cellGame.cpp, cellAudioOut.cpp, unpkg.cpp, and cellSaveData.cpp
+    ref: "RPCS3 @ e426e444 Emu/System.cpp, cellGame.cpp, cellAudioOut.cpp, unpkg.cpp, cellSaveData.cpp"
+  - id: rpcs3-game-list
+    label: RPCS3 game_list_table.cpp observed game ATTRIBUTE bit usage citing PSDevWiki
+    ref: "RPCS3 @ e426e444 rpcs3/rpcs3qt/game_list_table.cpp:338-339"
+  - id: ps3dk-gamecontent
+    label: sdk/include/cell/sysutil_gamecontent.h public cellGame parameter sizes
+    ref: "PS3DK sdk/include/cell/sysutil_gamecontent.h:108-143"
+  - id: sysutil-savedata
+    label: sdk/include/cell/sysutil_savedata.h public savedata parameter sizes
+    ref: "PS3DK sdk/include/cell/sysutil_savedata.h:63-64,96-99,189-190"
+  - id: psl1ght-template
+    label: PSL1GHT tools/sfo_pkg/sfo.xml defaults and current PS3DK template provenance
+    ref: "PSL1GHT tools/sfo_pkg/sfo.xml @ 73e34af; tools/sfo-pkg/PROVENANCE.md:13"
+  - id: sfo-c
+    label: Current C sfo writer and on-PS3 TITLE_ID storage convention
+    ref: "PS3DK tools/sfo-pkg/sfo.c:544-554; RPCS3 @ e426e444 cellGame.h:221; observed retail SFO"
+  - id: vita-fixture
+    label: User-owned Vita param.sfo preservation fixture observed locally, bytes not committed
+    ref: "observed in a PS Vita param.sfo (19 keys, 912 B), 2026-08-30; not redistributed"
+  - id: psdevwiki-gap
+    label: PSDevWiki PARAM.SFO page required for ATTRIBUTE bit meanings; page not available to automated fetch due Cloudflare
+    ref: "https://www.psdevwiki.com/ps3/PARAM.SFO unavailable to automated fetch on 2026-08-30"
+
+categories:
+  - { code: "AM", label: "app music", source: "rpcs3-category" }
+  - { code: "AP", label: "app photo", source: "rpcs3-category" }
+  - { code: "AS", label: "app store", source: "rpcs3-category" }
+  - { code: "AT", label: "app TV", source: "rpcs3-category" }
+  - { code: "AV", label: "app video", source: "rpcs3-category" }
+  - { code: "BV", label: "BC video", source: "rpcs3-category" }
+  - { code: "WT", label: "web TV", source: "rpcs3-category" }
+  - { code: "HM", label: "home", source: "rpcs3-category" }
+  - { code: "CB", label: "network", source: "rpcs3-category" }
+  - { code: "SF", label: "store frontend", source: "rpcs3-category" }
+  - { code: "DG", label: "disc game", source: "rpcs3-category" }
+  - { code: "HG", label: "HDD game", source: "rpcs3-category" }
+  - { code: "2P", label: "PS2 game", source: "rpcs3-category" }
+  - { code: "2G", label: "PS2 installed", source: "rpcs3-category" }
+  - { code: "1P", label: "PS1 game", source: "rpcs3-category" }
+  - { code: "PP", label: "PSP game", source: "rpcs3-category" }
+  - { code: "MN", label: "PSP mini", source: "rpcs3-category" }
+  - { code: "PE", label: "PSP remaster", source: "rpcs3-category" }
+  - { code: "GD", label: "PS3 game data", source: "rpcs3-category" }
+  - { code: "2D", label: "PS2 data", source: "rpcs3-category" }
+  - { code: "SD", label: "PS3 save data", source: "rpcs3-category" }
+  - { code: "MS", label: "PSP save data", source: "rpcs3-category" }
+
+schemas:
+  - id: game
+    label: Game PARAM.SFO
+    keys:
+      - name: TITLE
+        format: utf8
+        max_len: 128
+        confidence: confirmed
+        source: ps3dk-gamecontent
+        behavior: "Localized title fallback target when TITLE_NN for the configured language is empty."
+      - name: TITLE_00..TITLE_19
+        format: utf8
+        max_len: 128
+        confidence: confirmed
+        source: ps3dk-gamecontent
+        behavior: "RPCS3 picks TITLE_%02d by CellSysutilLang value and falls back to TITLE when empty."
+        notes: "Localized titles; TITLE_NN = cellGame PARAMID - 2."
+      - name: TITLE_ID
+        format: utf8
+        max_len: 16
+        confidence: confirmed
+        source: sfo-c
+        validation: "No PARAM.SFO regex in RPCS3; 9-character rule is directory handling. Empty TITLE_ID is skipped."
+        behavior: "Identity key for HDD game, disc update and game data lookup."
+        notes: "sfo.c pads to 16 bytes; cellGame API size is 10 bytes including NUL."
+      - name: VERSION
+        format: utf8
+        max_len: 6
+        default: "01.00"
+        confidence: confirmed
+        source: ps3dk-gamecontent
+        validation: "NN.NN convention"
+        validation_confidence: observed
+        behavior: "Disc/master revision and legacy fallback when APP_VER is absent; guest-writable by cellGameCreateGameData."
+      - name: APP_VER
+        format: utf8
+        max_len: 6
+        default: "01.00"
+        confidence: confirmed
+        source: ps3dk-gamecontent
+        validation: "NN.NN convention"
+        validation_confidence: observed
+        behavior: "Game or patch version; used by install lock and package update checks."
+      - name: PS3_SYSTEM_VER
+        format: utf8
+        max_len: 8
+        default: "01.8000"
+        confidence: confirmed
+        source: ps3dk-gamecontent
+        validation: "DD.DDDD"
+        behavior: "RPCS3 compares it to installed firmware and boot aborts if higher; malformed values silently disable the check."
+      - name: PARENTAL_LEVEL
+        format: integer
+        max_len: 4
+        default: "0"
+        confidence: confirmed
+        source: ps3dk-gamecontent
+        validation: "range 1..11"
+        validation_confidence: confirmed
+        behavior: "Surfaced to guests; RPCS3 does not enforce parental controls."
+        notes: "RPCS3 UI notes only 1,2,3,5,7,9 are normally used."
+        values:
+          - { value: "0", label: "unset", source: rpcs3-runtime, confidence: observed }
+          - { value: "1", label: "0+", source: rpcs3-runtime, confidence: observed }
+          - { value: "2", label: "3+", source: rpcs3-runtime, confidence: observed }
+          - { value: "3", label: "7+", source: rpcs3-runtime, confidence: observed }
+          - { value: "4", label: "10+", source: rpcs3-runtime, confidence: observed }
+          - { value: "5", label: "12+", source: rpcs3-runtime, confidence: observed }
+          - { value: "6", label: "15+", source: rpcs3-runtime, confidence: observed }
+          - { value: "7", label: "16+", source: rpcs3-runtime, confidence: observed }
+          - { value: "8", label: "17+", source: rpcs3-runtime, confidence: observed }
+          - { value: "9", label: "18+", source: rpcs3-runtime, confidence: observed }
+          - { value: "10", label: "Level 10", source: rpcs3-runtime, confidence: observed }
+          - { value: "11", label: "Level 11", source: rpcs3-runtime, confidence: observed }
+      - name: RESOLUTION
+        format: integer
+        max_len: 4
+        default: "63"
+        confidence: confirmed
+        source: rpcs3-psf
+        behavior: "If configured video mode is absent from the mask, RPCS3 logs an error and forces 720p."
+        flags:
+          - { mask: 1, name: ntsc, label: "480", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 2, name: pal, label: "576", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 4, name: hd_720, label: "720", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 8, name: hd_1080, label: "1080", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 16, name: ntsc_16_9, label: "480 16:9", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 32, name: pal_16_9, label: "576 16:9", source: rpcs3-psf, confidence: confirmed }
+      - name: SOUND_FORMAT
+        format: integer
+        max_len: 4
+        default: "279"
+        confidence: confirmed
+        source: rpcs3-psf
+        behavior: "Builds the cellAudioOut supported-mode list; absent value defaults to LPCM 2ch."
+        flags:
+          - { mask: 1, name: lpcm_2, label: "LPCM 2ch", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 4, name: lpcm_5_1, label: "LPCM 5.1", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 16, name: lpcm_7_1, label: "LPCM 7.1", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 256, name: dolby_digital_5_1, label: "Dolby Digital 5.1", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 512, name: dts_5_1, label: "DTS 5.1", source: rpcs3-psf, confidence: confirmed }
+      - name: ATTRIBUTE
+        format: integer
+        max_len: 4
+        default: "0"
+        confidence: gap
+        source: psdevwiki-gap
+        behavior: "Copied verbatim to guests; RPCS3 has no game behavior except observed UI metadata."
+        notes: "Game ATTRIBUTE bit meanings require the saved PSDevWiki PARAM.SFO page. Do not confuse this with CELL_GAME_ATTRIBUTE_* launch flags. All other bits remain gap."
+        flags:
+          - { mask: 8388608, name: ps_move_support, label: "PS Move support", source: rpcs3-game-list, confidence: observed }
+      - name: BOOTABLE
+        format: integer
+        max_len: 4
+        default: "1"
+        confidence: observed
+        source: psl1ght-template
+        behavior: "RPCS3 UI metadata only; BOOTABLE=0 still boots."
+      - name: CATEGORY
+        format: utf8
+        max_len: 4
+        default: "HG"
+        confidence: confirmed
+        source: rpcs3-category
+        behavior: "Controls boot path and mounting; empty CATEGORY in a non-empty SFO aborts boot as corrupted."
+      - name: LICENSE
+        format: utf8
+        max_len: 512
+        confidence: observed
+        source: psl1ght-template
+        behavior: "Ignored by RPCS3; preserve."
+      - name: CONTENT_ID
+        format: utf8
+        max_len: 48
+        confidence: observed
+        source: vita-fixture
+        behavior: "RPCS3 reads it for trial unlock checks on CATEGORY HG; our pkg.c does not consume it."
+        notes: "Our package content ID comes from the package header CLI."
+      - name: NP_COMMUNICATION_ID
+        format: utf8
+        max_len: 16
+        confidence: observed
+        source: vita-fixture
+        behavior: "No RPCS3 behavior found; preserve."
+      - name: REGION_DENY
+        format: unknown
+        max_len: null
+        confidence: gap
+        source: psdevwiki-gap
+        behavior: "No RPCS3 behavior found; preserve."
+      - name: TARGET_APP_VER
+        format: utf8
+        max_len: 6
+        confidence: confirmed
+        source: rpcs3-runtime
+        validation: "NN.NN convention"
+        validation_confidence: observed
+        behavior: "For CATEGORY GD packages, exact-match install gate against the installed APP_VER."
+      - name: PATCH_FILE_NAME
+        format: unknown
+        max_len: null
+        confidence: gap
+        source: psdevwiki-gap
+        behavior: "No RPCS3 behavior found; preserve."
+      - name: ITEM_PRIORITY
+        format: unknown
+        max_len: null
+        confidence: gap
+        source: psdevwiki-gap
+        behavior: "No RPCS3 behavior found; preserve."
+      - name: INSTALL_DIR
+        format: unknown
+        max_len: null
+        confidence: gap
+        source: psdevwiki-gap
+        behavior: "No RPCS3 behavior found; package install destination comes from PKG metadata."
+      - name: XMB_APPS
+        format: unknown
+        max_len: null
+        confidence: gap
+        source: psdevwiki-gap
+        behavior: "No RPCS3 behavior found; preserve."
+
+  - id: savedata
+    label: Savedata PARAM.SFO
+    keys:
+      - name: TITLE
+        format: utf8
+        max_len: 128
+        confidence: confirmed
+        source: sysutil-savedata
+        notes: "Name from RPCS3 savedata generator; size from sysutil_savedata.h."
+      - name: SUB_TITLE
+        format: utf8
+        max_len: 128
+        confidence: confirmed
+        source: sysutil-savedata
+        notes: "Name from RPCS3 savedata generator; size from sysutil_savedata.h."
+      - name: DETAIL
+        format: utf8
+        max_len: 1024
+        confidence: confirmed
+        source: sysutil-savedata
+        notes: "Name from RPCS3 savedata generator; size from sysutil_savedata.h."
+      - name: ATTRIBUTE
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: sysutil-savedata
+        behavior: "Savedata metadata bitfield generated and read separately from game ATTRIBUTE."
+        notes: "Savedata ATTRIBUTE is separate from game PARAM.SFO ATTRIBUTE. Name from RPCS3 savedata generator; bit from sysutil_savedata.h."
+        flags:
+          - { mask: 1, name: no_duplicate, label: "No duplicate", source: sysutil-savedata, confidence: confirmed }
+      - name: SAVEDATA_LIST_PARAM
+        format: utf8
+        max_len: 8
+        confidence: confirmed
+        source: sysutil-savedata
+        validation: "[A-Z0-9-_] only in RPCS3 cellSaveData."
+        notes: "Name from RPCS3 savedata generator; size from sysutil_savedata.h."
+      - name: SAVEDATA_DIRECTORY
+        format: utf8
+        max_len: 32
+        confidence: confirmed
+        source: sysutil-savedata
+        notes: "Name from RPCS3 savedata generator; size from sysutil_savedata.h."
+      - name: PARAMS
+        format: utf8
+        max_len: 1024
+        confidence: confirmed
+        source: rpcs3-runtime
+        behavior: "Written blank by RPCS3 savedata generation; not read."
+      - name: PARAMS2
+        format: utf8
+        max_len: 12
+        confidence: confirmed
+        source: rpcs3-runtime
+        behavior: "Written blank by RPCS3 savedata generation; not read."
+      - name: ACCOUNT_ID
+        format: array
+        max_len: 16
+        confidence: confirmed
+        source: rpcs3-runtime
+        behavior: "RPCS3 writes sixteen ASCII zero bytes when generating savedata."
+      - name: PARENTAL_LEVEL
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: rpcs3-runtime
+      - name: CATEGORY
+        format: utf8
+        max_len: 4
+        default: "SD"
+        confidence: confirmed
+        source: rpcs3-category
+      - name: RPCS3_BLIST
+        format: utf8
+        max_len: null
+        confidence: observed
+        source: rpcs3-runtime
+        notes: "RPCS3 extension for savedata file order; preserve and do not apply PS3 validation."
+      - name: "*<filename>"
+        format: integer
+        max_len: 4
+        confidence: observed
+        source: rpcs3-runtime
+        notes: "RPCS3 extension pattern for savedata secure-file flags; preserve and do not apply PS3 validation."

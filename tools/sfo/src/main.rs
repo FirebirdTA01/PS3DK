@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
@@ -37,6 +37,17 @@ struct Cli {
 
     #[arg()]
     args: Vec<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Docs {
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -54,6 +65,12 @@ fn run() -> Result<()> {
     if cli.version {
         println!("sfo-editor {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+
+    if let Some(command) = cli.command {
+        return match command {
+            Commands::Docs { check } => run_docs(check),
+        };
     }
 
     if let Some(path) = cli.list {
@@ -91,6 +108,23 @@ fn run() -> Result<()> {
     }
 
     bail!("invalid arguments; use --help for usage")
+}
+
+fn run_docs(check: bool) -> Result<()> {
+    let registry = sfo::registry::Registry::load_default()?;
+    let rendered = sfo::docgen::render_param_sfo_markdown(&registry);
+    let path = PathBuf::from("docs/sdk/param-sfo.md");
+
+    if check {
+        let current = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        if current != rendered {
+            bail!("{} is not current with the SFO registry", path.display());
+        }
+    } else {
+        print!("{rendered}");
+    }
+    Ok(())
 }
 
 fn print_dict(entries: &[sfo::psf::Entry]) {
