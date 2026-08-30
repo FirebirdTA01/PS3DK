@@ -4,4 +4,5 @@ pub mod docgen;
 pub mod edit;
 pub mod psf;
 pub mod registry;
+pub mod templates;
 pub mod xml;

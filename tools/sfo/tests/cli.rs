@@ -120,6 +120,122 @@ fn gui_headless_scripted_edit_uses_preserving_writer() {
 }
 
 #[test]
+fn gui_headless_grow_expands_overlength_value() {
+    let input = temp_path("gui-tight-title.PARAM.SFO");
+    let out = temp_path("gui-grown-title.PARAM.SFO");
+    std::fs::write(&input, tight_title_sfo()).unwrap();
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-set",
+            "TITLE=This title needs more space",
+            "--grow",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(
+        doc.get_string("TITLE").unwrap(),
+        "This title needs more space"
+    );
+    assert_eq!(entry(&doc, "TITLE").max_len, 128);
+    assert_eq!(entry(&doc, "CATEGORY").max_len, 7);
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn gui_headless_flags_use_category_context() {
+    let input = temp_path("gui-savedata.PARAM.SFO");
+    let out = temp_path("gui-savedata-flag.PARAM.SFO");
+    std::fs::write(
+        &input,
+        sfo::psf::write_canonical(&[
+            sfo::psf::Entry {
+                key: "CATEGORY".to_owned(),
+                format: 0x0204,
+                value_len: 3,
+                max_len: 4,
+                value: sfo::psf::Value::String("SD".to_owned()),
+            },
+            sfo::psf::Entry {
+                key: "ATTRIBUTE".to_owned(),
+                format: 0x0404,
+                value_len: 4,
+                max_len: 4,
+                value: sfo::psf::Value::Integer(0),
+            },
+        ]),
+    )
+    .unwrap();
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-enable",
+            "ATTRIBUTE:no_duplicate",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(doc.get_integer("ATTRIBUTE").unwrap(), 1);
+
+    let rejected = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-enable",
+            "ATTRIBUTE:ps_move_support",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(stderr(rejected.stderr).contains("has no flag `ps_move_support`"));
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn gui_headless_create_writes_the_game_template() {
+    let out = temp_path("gui-created.PARAM.SFO");
+
+    let output = sfo_editor_gui()
+        .args([
+            "--create-template",
+            "game",
+            "--title",
+            "GUI Created",
+            "--appid",
+            "GUICR0001",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(doc.get_string("TITLE").unwrap(), "GUI Created");
+    assert_eq!(doc.get_string("TITLE_ID").unwrap(), "GUICR0001");
+    assert_eq!(doc.get_string("CATEGORY").unwrap(), "HG");
+    assert_eq!(doc.get_integer("BOOTABLE").unwrap(), 1);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn cli_binary_rejects_gui_flag() {
     let out = temp_path("cli-gui.PARAM.SFO");
 

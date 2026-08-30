@@ -226,7 +226,7 @@ fn run_inspect(input: PathBuf, schema: Option<String>, json: bool) -> Result<()>
     let doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
     if json {
         let registry = sfo::registry::Registry::load_default()?;
-        let context = flag_context_for(&doc, schema.as_deref())?;
+        let context = sfo::edit::flag_context_for(&doc, schema.as_deref())?;
         println!("{}", json_entries(&doc.entries, &registry, context)?);
     } else {
         print_dict(&doc.entries);
@@ -238,7 +238,7 @@ fn run_validate(input: PathBuf, schema: Option<String>) -> Result<()> {
     let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
     let doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
     let registry = sfo::registry::Registry::load_default()?;
-    let context = flag_context_for(&doc, schema.as_deref())?;
+    let context = sfo::edit::flag_context_for(&doc, schema.as_deref())?;
     sfo::edit::validate_document(&doc, &registry, context)?;
     println!("PARAM.SFO OK");
     Ok(())
@@ -299,15 +299,8 @@ fn run_create(
     appid: Option<String>,
     out: PathBuf,
 ) -> Result<()> {
-    if template != "game" {
-        bail!("unsupported SFO template `{template}`");
-    }
-    let entries = sfo::xml::parse_document(
-        include_str!("../../../cmake/templates/sfo.xml"),
-        title.as_deref(),
-        appid.as_deref(),
-    )?;
-    std::fs::write(&out, sfo::psf::write_canonical(&entries))
+    let doc = sfo::templates::create(&template, title.as_deref(), appid.as_deref())?;
+    std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
         .with_context(|| format!("writing {}", out.display()))?;
     Ok(())
 }
@@ -432,7 +425,7 @@ fn run_flags(
     let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
     let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
     let registry = sfo::registry::Registry::load_default()?;
-    let context = flag_context_for(&doc, schema.as_deref())?;
+    let context = sfo::edit::flag_context_for(&doc, schema.as_deref())?;
     if let Some(flag) = enable {
         sfo::edit::set_flag(&mut doc, &registry, context, &key, &flag, true)?;
     }
@@ -442,37 +435,6 @@ fn run_flags(
     std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
         .with_context(|| format!("writing {}", out.display()))?;
     Ok(())
-}
-
-fn flag_context_for(
-    doc: &sfo::psf::Document,
-    override_schema: Option<&str>,
-) -> Result<sfo::edit::FlagContext> {
-    if let Some(schema) = override_schema {
-        return parse_flag_context(schema);
-    }
-    Ok(match doc.get_string("CATEGORY") {
-        Some("SD" | "MS") => sfo::edit::FlagContext::Savedata,
-        Some("TR" | "VR" | "DP" | "XR") => sfo::edit::FlagContext::Subfolder,
-        Some("GD")
-            if doc.get_string("APP_VER").is_some()
-                || doc.get_string("TARGET_APP_VER").is_some() =>
-        {
-            sfo::edit::FlagContext::Patch
-        }
-        _ => sfo::edit::FlagContext::Bootable,
-    })
-}
-
-fn parse_flag_context(schema: &str) -> Result<sfo::edit::FlagContext> {
-    match schema {
-        "game" | "bootable" => Ok(sfo::edit::FlagContext::Bootable),
-        "savedata" => Ok(sfo::edit::FlagContext::Savedata),
-        "subfolder" => Ok(sfo::edit::FlagContext::Subfolder),
-        "patch" => Ok(sfo::edit::FlagContext::Patch),
-        "trophy" => Ok(sfo::edit::FlagContext::Trophy),
-        other => bail!("unsupported SFO schema `{other}`"),
-    }
 }
 
 fn run_docs(check: bool) -> Result<()> {

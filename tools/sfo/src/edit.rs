@@ -226,6 +226,34 @@ pub fn flags_for_context<'a>(
     }
 }
 
+pub fn flag_context_for(doc: &Document, override_schema: Option<&str>) -> Result<FlagContext> {
+    if let Some(schema) = override_schema {
+        return parse_flag_context(schema);
+    }
+    Ok(match doc.get_string("CATEGORY") {
+        Some("SD" | "MS") => FlagContext::Savedata,
+        Some("TR" | "VR" | "DP" | "XR") => FlagContext::Subfolder,
+        Some("GD")
+            if doc.get_string("APP_VER").is_some()
+                || doc.get_string("TARGET_APP_VER").is_some() =>
+        {
+            FlagContext::Patch
+        }
+        _ => FlagContext::Bootable,
+    })
+}
+
+pub fn parse_flag_context(schema: &str) -> Result<FlagContext> {
+    match schema {
+        "game" | "bootable" => Ok(FlagContext::Bootable),
+        "savedata" => Ok(FlagContext::Savedata),
+        "subfolder" => Ok(FlagContext::Subfolder),
+        "patch" => Ok(FlagContext::Patch),
+        "trophy" => Ok(FlagContext::Trophy),
+        other => bail!("unsupported SFO schema `{other}`"),
+    }
+}
+
 pub fn validate_document(doc: &Document, registry: &Registry, context: FlagContext) -> Result<()> {
     let Some(schema) = registry.schema(context.schema_id()) else {
         return Ok(());
