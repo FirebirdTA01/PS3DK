@@ -63,6 +63,16 @@ fi
 # PSL1GHT's Makefile expects PSL1GHT to point at the install root.
 export PSL1GHT="$INSTALL"
 
+# Patch 0014 (psl1ght-compat sysutil callbacks) makes PSL1GHT's own
+# ppu/include/sysutil/sysutil.h include OUR <cell/sysutil.h>, so PSL1GHT's
+# libresc no longer compiles on a prefix that does not already carry the SDK
+# headers.  build-sdk.sh --headers-only cannot run first (it refuses until
+# PSL1GHT is installed), so seed the headers here.  Pure copy, idempotent;
+# build-sdk.sh re-installs the same files later.  Release CI run 33282807246
+# (v0.11.11) is the failure this prevents.
+say "seeding SDK headers into \$PS3DK/ppu/include (PSL1GHT compat patch 0014 needs <cell/sysutil.h>)"
+make -C "$PS3_TOOLCHAIN_ROOT/sdk" install-headers >/dev/null
+
 say "install-ctrl (copies ppu_rules / spu_rules / base_rules to \$PSL1GHT)"
 make install-ctrl
 
