@@ -615,6 +615,16 @@ rm -f "$ZIP_PATH" "$ZIP_PATH.sha256"
 # symlink entries was the bug -- Explorer and stock 7-Zip do not create NTFS
 # symlinks, so libsysutil.a / libgcm_sys.a / libio.a arrived as stubs and
 # -lsysutil / -lgcm_sys / -lio failed at the user's first build.
+# Normalise every staged mtime to (release commit time - 24 h) before zipping.
+# zip stores DOS times as ZONE-LESS local time (the runner is UTC) plus a
+# 0x5455 UTC extra field; tar/7-Zip honour the extra field but .NET
+# Expand-Archive and Explorer do not, so a user west of UTC extracting within
+# hours of the build got files from the future and Ninja looped on a dirty
+# manifest (v0.11.15, 2026-08-30).  A stamp a day behind the commit is in the
+# past in every zone and makes the archive reproducible.
+stamp=$(( $(git -C "$PS3_TOOLCHAIN_ROOT" log -1 --format=%ct HEAD) - 86400 ))
+find "$OUTPUT_DIR/$STAGE_NAME" -exec touch -h -d "@$stamp" {} +
+say "staged mtimes normalised to $(date -u -d "@$stamp" +%Y-%m-%dT%H:%MZ) (commit time - 24 h)"
 (cd "$OUTPUT_DIR" && zip -r -q -9 "$STAGE_NAME.zip" "$STAGE_NAME")
 # The contract is zero symlink entries in the ZIP -- the stage-tree assertion
 # above checks the inputs, this checks the artifact users actually receive.
