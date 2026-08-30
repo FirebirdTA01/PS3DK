@@ -2,3 +2,4 @@ name,relative_self,timeout_seconds,expected_state,required_tty_regex,forbidden_t
 librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
 sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
+pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,PTHREAD_OK,PTHREAD_FAIL|ENOSYS

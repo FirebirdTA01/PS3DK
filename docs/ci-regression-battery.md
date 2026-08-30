@@ -19,6 +19,7 @@ The initial battery is seeded from `t_cd49e350`:
 |---|---|
 | `librt-posix` | `gettimeofday`, `settimeofday` return path, `utime`, `umask`, `open`, `chdir`, `getcwd`, `opendir`, `readdir`, `telldir`, `rewinddir`, `seekdir`, `sbrk` ENOMEM, `socket`, `connect`, `send`, `close` |
 | `tls` | PPU `__thread` local-exec TLS for scalar and aggregate objects; requires `TLS_OK` |
+| `pthread-sync` | POSIX pthread shim over Lv-2 primitives: static mutex/cond/once initialisers, recursive mutexes, `pthread_mutex_trylock` POSIX `EBUSY`, thread-specific data, `pthread_create`/`join`, `pthread_self`/`equal`, and condition signalling; requires `PTHREAD_OK` |
 | `rsx-heap` | `rsxInit`, `rsxMemalign`, `rsxFree`, free-list coalescing, allocate/free stress |
 | `rsx-wrap` | Command-buffer wrap past 1 MiB; seeded by `blitting` or a smaller dedicated wrap probe |
 | `file-io` | `/dev_hdd0` create, read, write, seek, stat, close, unlink |
