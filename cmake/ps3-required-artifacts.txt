@@ -189,6 +189,12 @@ sdk_core  ppu/lib/lv2-prx.specs
 sdk_core  ppu/lib/lp64/lv2-prx-crt.o
 sdk_core  ppu/lib/librsx.a
 sdk_core  ppu/lib/lp64/librsx.a
+# librt.a's ilp32 row stays ppu_stub above (the sample-link generator derives
+# and checks that category).  The lp64 copy is required HERE: every CMake
+# build links -lrt first by design in both ABIs, yet before 2026-08-30 the
+# lp64 archive had no presence row and the two-sided accounting never looked
+# inside lp64/ at all.
+sdk_core  ppu/lib/lp64/librt.a
 # pthread shim (2026-08-30): the shadow header fronts newlib's _POSIX_THREADS-
 # gated <pthread.h>; libpthread.a is an INPUT(-lrt) LINKER SCRIPT, not an
 # archive (validated by presence -- an alias row would demand byte-identity

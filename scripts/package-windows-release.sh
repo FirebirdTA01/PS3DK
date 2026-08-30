@@ -406,9 +406,15 @@ validate_windows_release_payload() {
     # omissions).  This proves stage subset of manifest (catches additions
     # nobody promised).  Without it, both lists can be short at once -- which is
     # exactly how 69 sample-linked archives, librt.a included, went unvalidated.
+    # The lp64 globs are not decorative: the original flat globs meant nothing
+    # under ppu/lib/lp64/ was ever accounted, so an lp64 archive could ship
+    # unpromised -- or vanish while its ilp32 twin passed.  Accounting is by
+    # BASENAME, so a twinned archive is covered by its existing manifest row;
+    # only a genuinely new (or lp64-only) archive needs a row of its own.
     local _acct _b
     _acct="$(awk '$1=="ppu_stub"||$1=="spu_lib"||$1=="sdk_core"||$1=="alias"||$1=="optional"{n=split($2,q,"/");print q[n]}' "$manifest" | sort -u)"
-    for _b in "$STAGE_DIR"/ppu/lib/*.a "$STAGE_DIR"/spu/lib/*.a; do
+    for _b in "$STAGE_DIR"/ppu/lib/*.a "$STAGE_DIR"/ppu/lib/lp64/*.a \
+              "$STAGE_DIR"/spu/lib/*.a "$STAGE_DIR"/spu/lib/lp64/*.a; do
         [[ -e "$_b" ]] || continue
         if ! grep -qxF "$(basename "$_b")" <<< "$_acct"; then
             warn "Shipped archive is neither required nor marked optional in $(basename "$manifest"): ${_b#"$STAGE_DIR"/}"
