@@ -22,6 +22,9 @@ struct Cli {
     #[arg(long = "save-as", hide = true)]
     save_as: Option<PathBuf>,
 
+    #[arg(long = "save", hide = true)]
+    save: bool,
+
     #[arg(long = "gui-set", hide = true)]
     assignments: Vec<String>,
 
@@ -65,6 +68,7 @@ fn run() -> Result<()> {
     }
     gui::run(gui::LaunchOptions {
         open: cli.open,
+        save: cli.save,
         save_as: cli.save_as,
         assignments: cli.assignments,
         enables: cli.enables,

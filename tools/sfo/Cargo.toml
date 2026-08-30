@@ -23,6 +23,7 @@ path = "src/gui_main.rs"
 anyhow.workspace = true
 clap.workspace = true
 eframe = { version = "0.29.1", default-features = false, features = ["glow", "default_fonts"] }
+rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "async-std"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

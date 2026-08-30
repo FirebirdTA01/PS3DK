@@ -120,6 +120,50 @@ fn gui_headless_scripted_edit_uses_preserving_writer() {
 }
 
 #[test]
+fn gui_headless_save_writes_opened_file_in_place() {
+    let input = temp_path("gui-save-in-place.PARAM.SFO");
+    std::fs::write(&input, include_bytes!("fixtures/ps3dk-template.sfo")).unwrap();
+    let before = std::fs::read(&input).unwrap();
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-set",
+            "TITLE=Saved In Place",
+            "--save",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let after = std::fs::read(&input).unwrap();
+    let doc = sfo::psf::parse(&after).unwrap();
+    assert_eq!(doc.get_string("TITLE").unwrap(), "Saved In Place");
+    assert_only_entry_and_value_slot_changed(&before, &after, "TITLE");
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn gui_headless_save_requires_an_opened_file() {
+    let output = sfo_editor_gui()
+        .args([
+            "--create-template",
+            "game",
+            "--title",
+            "Unsaved",
+            "--appid",
+            "UNSVD0001",
+            "--save",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(stderr(output.stderr).contains("Save needs an opened file path"));
+}
+
+#[test]
 fn gui_headless_grow_expands_overlength_value() {
     let input = temp_path("gui-tight-title.PARAM.SFO");
     let out = temp_path("gui-grown-title.PARAM.SFO");

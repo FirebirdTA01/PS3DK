@@ -8,6 +8,7 @@ use sfo::registry::{Confidence, Registry};
 
 pub struct LaunchOptions {
     pub open: Option<PathBuf>,
+    pub save: bool,
     pub save_as: Option<PathBuf>,
     pub assignments: Vec<String>,
     pub enables: Vec<String>,
@@ -21,6 +22,7 @@ pub struct LaunchOptions {
 
 pub fn run(options: LaunchOptions) -> Result<()> {
     if options.save_as.is_some()
+        || options.save
         || !options.assignments.is_empty()
         || !options.enables.is_empty()
         || !options.disables.is_empty()
@@ -34,7 +36,15 @@ pub fn run(options: LaunchOptions) -> Result<()> {
 fn run_headless(options: LaunchOptions) -> Result<()> {
     let save_as = options
         .save_as
-        .ok_or_else(|| anyhow::anyhow!("--save-as is required for headless GUI scripts"))?;
+        .clone()
+        .or_else(|| options.save.then(|| options.open.clone()).flatten())
+        .ok_or_else(|| {
+            if options.save {
+                anyhow::anyhow!("Save needs an opened file path")
+            } else {
+                anyhow::anyhow!("--save-as is required for headless GUI scripts")
+            }
+        })?;
     let mut model = GuiModel::new()?;
     model.schema_override = options.schema;
     if let Some(template) = options.create_template {
@@ -79,6 +89,7 @@ pub struct GuiModel {
     path: Option<PathBuf>,
     document: Option<Document>,
     schema_override: Option<String>,
+    dirty: bool,
     status: String,
 }
 
@@ -89,6 +100,7 @@ impl GuiModel {
             path: None,
             document: None,
             schema_override: None,
+            dirty: false,
             status: String::new(),
         })
     }
@@ -101,6 +113,7 @@ impl GuiModel {
     ) -> Result<()> {
         self.document = Some(sfo::templates::create(template, title, appid)?);
         self.path = None;
+        self.dirty = true;
         self.status = format!("Created {template} PARAM.SFO");
         Ok(())
     }
@@ -111,17 +124,33 @@ impl GuiModel {
         let count = document.entries.len();
         self.path = Some(path.to_owned());
         self.document = Some(document);
+        self.dirty = false;
         self.status = format!("Opened {} ({count} entries)", path.display());
         Ok(())
     }
 
+    pub fn save(&mut self) -> Result<()> {
+        let path = self
+            .path
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Save needs an opened file path"))?;
+        self.save_to(&path)
+    }
+
     pub fn save_as(&mut self, path: &Path) -> Result<()> {
+        self.save_to(path)?;
+        self.path = Some(path.to_owned());
+        Ok(())
+    }
+
+    fn save_to(&mut self, path: &Path) -> Result<()> {
         let document = self
             .document
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no PARAM.SFO is open"))?;
         let bytes = psf::write_preserving(&document.entries)?;
         std::fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))?;
+        self.dirty = false;
         self.status = format!("Saved {}", path.display());
         Ok(())
     }
@@ -132,6 +161,7 @@ impl GuiModel {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("no PARAM.SFO is open"))?;
         sfo::edit::set_value_with_options(document, assignment, grow)?;
+        self.dirty = true;
         Ok(())
     }
 
@@ -147,6 +177,7 @@ impl GuiModel {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("no PARAM.SFO is open"))?;
         sfo::edit::set_flag(document, &self.registry, context, key, flag, enabled)?;
+        self.dirty = true;
         Ok(())
     }
 
@@ -159,6 +190,17 @@ impl GuiModel {
 
     fn status(&self) -> &str {
         &self.status
+    }
+
+    fn path_label(&self) -> String {
+        self.path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "No file open".to_owned())
+    }
+
+    fn can_save(&self) -> bool {
+        self.dirty && self.path.is_some()
     }
 
     fn flag_context(&self) -> Result<sfo::edit::FlagContext> {
@@ -185,8 +227,6 @@ impl GuiModel {
 
 struct GuiApp {
     model: GuiModel,
-    open_path: String,
-    save_path: String,
     create_title: String,
     create_appid: String,
     schema_choice: String,
@@ -198,18 +238,12 @@ impl GuiApp {
     fn new(open: Option<PathBuf>, schema: Option<String>) -> Result<Self> {
         let mut model = GuiModel::new()?;
         model.schema_override = schema;
-        let mut open_path = String::new();
-        let mut save_path = String::new();
         if let Some(path) = open {
             model.open_path(&path)?;
-            open_path = path.display().to_string();
-            save_path = path.display().to_string();
         }
         let rows = rows_from_model(&model);
         Ok(Self {
             model,
-            open_path,
-            save_path,
             create_title: "PS3DK Sample".to_owned(),
             create_appid: "PS3DK0001".to_owned(),
             schema_choice: "auto".to_owned(),
@@ -222,25 +256,26 @@ impl GuiApp {
         self.rows = rows_from_model(&self.model);
     }
 
-    fn open_from_text(&mut self) {
-        let path = PathBuf::from(self.open_path.trim());
+    fn open_dialog(&mut self) {
+        let Some(path) = sfo_file_dialog().pick_file() else {
+            return;
+        };
         match self.model.open_path(&path) {
-            Ok(()) => {
-                if self.save_path.trim().is_empty() {
-                    self.save_path = self.open_path.clone();
-                }
-                self.reload_rows();
-            }
+            Ok(()) => self.reload_rows(),
             Err(err) => self.model.status = err.to_string(),
         }
     }
 
-    fn save_from_text(&mut self) {
-        let path = PathBuf::from(self.save_path.trim());
-        if path.as_os_str().is_empty() {
-            self.model.status = "Choose a Save As path".to_owned();
-            return;
+    fn save(&mut self) {
+        if let Err(err) = self.model.save() {
+            self.model.status = err.to_string();
         }
+    }
+
+    fn save_as_dialog(&mut self) {
+        let Some(path) = sfo_file_dialog().save_file() else {
+            return;
+        };
         if let Err(err) = self.model.save_as(&path) {
             self.model.status = err.to_string();
         }
@@ -295,23 +330,18 @@ impl eframe::App for GuiApp {
         egui::TopBottomPanel::top("sfo_top").show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Open");
-                    ui.add_sized(
-                        [300.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.open_path),
-                    );
-                    if ui.button("Open").clicked() {
-                        self.open_from_text();
+                    if ui.button("Open...").clicked() {
+                        self.open_dialog();
                     }
-                    ui.separator();
-                    ui.label("Save As");
-                    ui.add_sized(
-                        [300.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.save_path),
-                    );
-                    if ui.button("Save As").clicked() {
-                        self.save_from_text();
+                    let save_button =
+                        ui.add_enabled(self.model.can_save(), egui::Button::new("Save"));
+                    if save_button.clicked() {
+                        self.save();
                     }
+                    if ui.button("Save As...").clicked() {
+                        self.save_as_dialog();
+                    }
+                    ui.monospace(self.model.path_label());
                     ui.checkbox(&mut self.grow, "Grow");
                 });
                 ui.horizontal(|ui| {
@@ -490,6 +520,12 @@ fn flag_states(
 fn parse_flag_spec(spec: &str) -> Result<(&str, &str)> {
     spec.split_once(':')
         .ok_or_else(|| anyhow::anyhow!("flag expects KEY:FLAG"))
+}
+
+fn sfo_file_dialog() -> rfd::FileDialog {
+    rfd::FileDialog::new()
+        .add_filter("PARAM.SFO", &["SFO", "sfo"])
+        .add_filter("All files", &["*"])
 }
 
 fn confidence_name(confidence: Confidence) -> &'static str {
