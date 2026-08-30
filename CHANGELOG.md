@@ -16,6 +16,75 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.12.0] — 2026-08-30
+
+Minor release: POSIX threads. Third-party libraries that probe for pthreads
+now detect and use this SDK's threading automatically — no per-library
+patches — backed by a pthread shim in `librt.a` over the Lv-2 primitives.
+
+### Added
+
+- **POSIX threads shim in `librt.a`** (`t_44391d9c`): `pthread_mutex_*`
+  (normal + recursive, `trylock`, `timedlock`), `pthread_cond_*`,
+  `pthread_once`, thread-specific data (`pthread_key_*`,
+  `get/setspecific`), `pthread_create/join/detach/exit/self/equal`, thread
+  and mutex/cond attributes, cleanup handlers, and `sched_yield` — all over
+  the Lv-2 `sysMutex*` / `sysCond*` / `sys_ppu_thread_*` syscalls. Static
+  initialisers (`PTHREAD_MUTEX_INITIALIZER`, `PTHREAD_COND_INITIALIZER`,
+  `PTHREAD_ONCE_INIT`, `PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP`) work: an
+  Lv-2 object id is not a compile-time constant, so they store a sentinel
+  and the kernel object is created on first use.
+- **`<pthread.h>` shadow header**: newlib gates the entire body of its
+  `pthread.h` behind `_POSIX_THREADS`, which its `<sys/features.h>` defines
+  only for RTEMS — on this target the header expanded to nothing. The SDK
+  shadow enables it across an `#include_next` (and off again, so
+  `struct sigevent` keeps one layout program-wide) and adds the mutex-type
+  constants and `settype/gettype` declarations.
+- **`libpthread.a`** (linker script, `INPUT(-lrt)`) on the compiler's
+  default search path, so configure probes that hardcode `-lpthread` link
+  with zero assistance.
+- **Samples + regression rows**: `samples/lv2/hello-ppu-tls` (`TLS_OK`) and
+  `samples/lv2/hello-ppu-pthread` (`PTHREAD_OK`); battery rows `tls` and
+  `pthread-sync` — the battery is now four rows, all RPCS3-verified.
+- **Release gate**: manifest rows for `pthread.h` / `libpthread.a` and
+  `check-release-tree.sh` symbol assertions for the shim in both ABIs'
+  `librt.a`.
+
+### Fixed (release pipeline)
+
+- **lp64 archives were never accounted**: the packager's two-sided check
+  globbed only `ppu/lib/*.a`, so anything under `lp64/` could ship
+  unpromised — or go missing while its ilp32 twin passed. The accounting
+  now covers the `lp64` subdirectories and `lp64/librt.a` is required
+  explicitly.
+
+### Changed
+
+- **portlibs build without `-fPIC`** (static archives never needed PIC, and
+  `-fPIC` + `__thread` ICEs GCC 12.4 under ILP32) and with the SDK include
+  directory (`-isystem`) visible to autoconf ports.
+- **cairo** configures with `--enable-pthread=yes` and detects the shim's
+  real pthread tier (`CAIRO_HAS_PTHREAD` + `CAIRO_HAS_REAL_PTHREAD`) with
+  zero cairo patches; **pixman** builds on its native `TLS __thread` path.
+  Both recipes hard-fail if their thread-detection probe ever regresses,
+  and reconfigure stale build trees from clean.
+
+### Fixed
+
+- **cairo was compiled mutex-free** (`-DCAIRO_NO_MUTEX`) and **pixman's
+  fast-path cache was an unguarded shared global** (`-DPIXMAN_NO_TLS`) —
+  data races the moment two threads drew. Both band-aids are gone; cairo
+  uses real pthread mutexes and pixman's cache is genuinely thread-local.
+
+### Known issues
+
+- `crtend.o` carries an FDE after its `.eh_frame` zero terminator
+  (`t_376721dc`), so every link emits one benign `ld` diagnostic; the cairo
+  recipe filters exactly that line until the toolchain respin. POSIX
+  divergences of the shim (trylock's `EDEADLK` fold, bind-at-first-wait
+  condition variables, no cancellation, bounded thread/key tables) are
+  documented and slated for `docs/sdk/pthreads.md`.
+
 ## [v0.11.11] — 2026-08-29
 
 Patch release: every PRX container is now verified on RPCS3, the release
