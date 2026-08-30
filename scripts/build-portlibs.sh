@@ -43,7 +43,19 @@ export CXX="$HOST_TRIPLE-g++"
 export AR="$HOST_TRIPLE-ar"
 export RANLIB="$HOST_TRIPLE-ranlib"
 export STRIP="$HOST_TRIPLE-strip"
-export CFLAGS="-O2 -mcpu=cell -fPIC"
+# No -fPIC: every portlib is a static archive linked into a fixed-address
+# SELF, so PIC buys nothing — and under ILP32 -fPIC makes GCC 12.4 ICE on
+# __thread variables (dynamic-TLS DTPREL unspec in DImode over SImode regs,
+# seen in pixman-implementation.c).  Dropping it lets pixman's detected
+# `TLS __thread` path compile.  If a portlib ever genuinely needs PIC,
+# scope the flag to that recipe, not here.
+export CFLAGS="-O2 -mcpu=cell"
+# The SDK's own headers (ppu/include under $PS3DK) are NOT on the compiler's
+# default search path — only newlib's are.  CMake ports get them from the
+# toolchain file; autoconf ports need them here or they compile against
+# newlib alone (concretely: <pthread.h> would be newlib's empty-body header
+# instead of the SDK shadow that fronts the librt pthread shim).
+export CPPFLAGS="-isystem $PS3DK/ppu/include${CPPFLAGS:+ $CPPFLAGS}"
 export CXXFLAGS="$CFLAGS"
 
 discover_recipes() {

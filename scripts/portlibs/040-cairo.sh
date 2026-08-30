@@ -48,12 +48,18 @@ cd "$SRC"
 
 # pixman/freetype/png/zlib come in through pkg-config; keep the -I/-L
 # fallback for the handful of configure link probes that bypass it.
-# CAIRO_NO_MUTEX: the target has no pthread/mutex implementation cairo
-# recognises, and cairo-mutex-impl-private.h #errors unless this is set to
-# acknowledge single-threaded use (nothing here drives cairo from more than
-# one thread).  Same class as PIXMAN_NO_TLS in 020-pixman.sh.
-export CPPFLAGS="-I$PORTLIBS/include -DCAIRO_NO_MUTEX=1${CPPFLAGS:+ $CPPFLAGS}"
+export CPPFLAGS="-I$PORTLIBS/include${CPPFLAGS:+ $CPPFLAGS}"
 export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
+
+# Thread safety comes from the pthread shim in librt (sdk pthread.h shadow
+# over the Lv-2 sysMutex*/sysCond*/sys_ppu_thread_* primitives), so cairo's
+# stock pthread backend just works — no CAIRO_NO_MUTEX, no cairo patch, and
+# no PTHREAD_LIBS/-L help either: the SDK installs a libpthread.a linker
+# script (INPUT(-lrt)) on the default -l path, so cairo's stock '-lpthread'
+# probe resolves on its own.  That zero-assistance detection is the point —
+# it is what every future autoconf port gets for free.  --enable-pthread=yes
+# (not auto) makes configure ABORT if the probe regresses instead of
+# silently shipping a mutex-free cairo again.
 
 # LIKELY NEEDS PATCH: cairo 1.16.0's configure runs AC_RUN_IFELSE probes
 # (atomic-primitive detection, float word-order / endianness) that abort
@@ -66,11 +72,40 @@ export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
 # some of which fail to cross-compile (they assume a hosted environment).
 # So build only the library: `make -C src` / `make -C src install` (src/
 # installs the lib, the headers and the pkg-config files).
+if [[ -f Makefile ]]; then
+    # A tree configured by an older recipe revision holds objects built
+    # with different CPPFLAGS; make does not track that. Start clean.
+    make distclean >/dev/null 2>&1 || true
+fi
+
+# TEMPORARY until t_376721dc (toolchain respin) lands: crtend.o carries an
+# FDE after its .eh_frame zero terminator, so EVERY link emits one benign
+# ld diagnostic ("error in ...crtend.o(.eh_frame); no .eh_frame_hdr table
+# will be created").  cairo's pthread probe treats ANY conftest stderr as
+# failure, so that single line alone would knock configure down to the
+# no-threads tier despite a clean rc=0 link.  Wrap the compiler and drop
+# exactly that diagnostic; every other stderr line and all exit codes pass
+# through untouched.  Delete this wrapper when the respin ships a crtend
+# whose .eh_frame is only the terminator.
+QUIET_CC="$PWD/.ps3dk-quiet-cc"
+cat > "$QUIET_CC" <<WRAP
+#!/usr/bin/env bash
+tmp=\$(mktemp)
+$CC "\$@" 2>"\$tmp"
+rc=\$?
+grep -v 'error in .*crtend\.o(\.eh_frame); no \.eh_frame_hdr table will be created' "\$tmp" >&2 || true
+rm -f "\$tmp"
+exit \$rc
+WRAP
+chmod +x "$QUIET_CC"
+
+CC="$QUIET_CC" \
 ./configure \
     --host="$HOST_TRIPLE" \
     --prefix="$PORTLIBS" \
     --disable-shared \
     --enable-static \
+    --enable-pthread=yes \
     --enable-ft \
     --enable-png=yes \
     --disable-fc \
@@ -84,6 +119,14 @@ export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
     --disable-interpreter \
     --disable-valgrind \
     --disable-gtk-doc
+
+# The probe result this recipe exists to secure. REAL_PTHREAD is the tier
+# cairo's own mutexes ride on; plain HAS_PTHREAD alone would mean the probe
+# half-failed (private-mutex tier) — treat both as mandatory.
+grep -q '^#define CAIRO_HAS_PTHREAD 1' config.h \
+    || { echo "cairo configure did not detect the pthread shim (CAIRO_HAS_PTHREAD, see config.log)" >&2; exit 1; }
+grep -q '^#define CAIRO_HAS_REAL_PTHREAD 1' config.h \
+    || { echo "cairo detected only the fallback pthread tier (CAIRO_HAS_REAL_PTHREAD unset, see config.log)" >&2; exit 1; }
 
 # Library only: the top-level build also descends into test/ perf/ util/,
 # and test/ links cairo-test-suite against popen(), which newlib does not

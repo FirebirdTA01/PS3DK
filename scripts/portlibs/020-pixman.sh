@@ -54,13 +54,18 @@ cd "$SRC"
 # compilation.  If configure stops with "cannot run test program while
 # cross compiling", add patches/portlibs/pixman/*.patch (or seed a
 # config.cache with pixman_cv_* / ac_cv_tls vars) rather than editing here.
-# PIXMAN_NO_TLS: pixman keeps its fast-path cache in a static __thread
-# struct.  Under ILP32 with the -fPIC in the portlibs CFLAGS our GCC 12.4
-# ICEs on that (dynamic-TLS DTPREL unspec built in DImode over SImode regs:
-# "unrecognizable insn ... UNSPEC_TLSDTPRELHA", pixman-implementation.c).
-# Plain static storage is what we want anyway: nothing here links pixman
-# from more than one thread, and it removes the runtime TLS dependency.
-CPPFLAGS="-DPIXMAN_NO_TLS" \
+# Thread safety: pixman keeps its fast-path cache in a static __thread
+# struct and detects `TLS __thread` with a compile-only probe.  That is the
+# path we want — local-exec TLS works at runtime on this target (regression
+# row TLS_OK), and the portlibs CFLAGS carry no -fPIC (the one combination
+# that ICEs GCC 12.4 on __thread under ILP32).  The former
+# -DPIXMAN_NO_TLS fallback left the cache an unguarded global: a data race
+# the moment two threads composite.  Do not reintroduce it.
+if [[ -f Makefile ]]; then
+    # A tree configured by an older recipe revision holds objects built
+    # with different CPPFLAGS; make does not track that. Start clean.
+    make distclean >/dev/null 2>&1 || true
+fi
 ./configure \
     --host="$HOST_TRIPLE" \
     --prefix="$PORTLIBS" \
@@ -73,6 +78,11 @@ CPPFLAGS="-DPIXMAN_NO_TLS" \
     --disable-sse2 \
     --disable-gtk \
     --disable-libpng
+
+# The probe result the whole recipe exists to secure: silent fallback to
+# a slower/racier path is exactly what we must not ship.
+grep -q '^#define TLS __thread' config.h \
+    || { echo "pixman configure did not detect TLS __thread (see config.log)" >&2; exit 1; }
 
 make -j"$(nproc 2>/dev/null || echo 4)"
 make install

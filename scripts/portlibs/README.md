@@ -9,7 +9,10 @@ script pre-exports:
 
 - `CC`, `CXX`, `AR`, `RANLIB`, `STRIP` — cross tool names
 - `HOST_TRIPLE` — `powerpc64-ps3-elf`
-- `CFLAGS`, `CXXFLAGS` — `-O2 -mcpu=cell -fPIC`
+- `CFLAGS`, `CXXFLAGS` — `-O2 -mcpu=cell` (no `-fPIC`: portlibs are static
+  archives, and `-fPIC` + `__thread` ICEs GCC 12.4 under ILP32)
+- `CPPFLAGS` — `-isystem $PS3DK/ppu/include` (SDK headers, e.g. the pthread
+  shadow; not on the compiler's default path)
 - `PORTLIBS` — install prefix (`$PS3DEV/portlibs/ppu`)
 - `PKG_CONFIG_PATH` — includes `$PORTLIBS/lib/pkgconfig`
 
