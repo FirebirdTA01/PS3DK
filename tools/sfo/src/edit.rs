@@ -3,6 +3,35 @@ use anyhow::{bail, Result};
 use crate::psf::{Document, Entry, Value};
 use crate::registry::{FormatKind, Registry, SchemaId};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlagContext {
+    Bootable,
+    Savedata,
+    Subfolder,
+    Patch,
+    Trophy,
+}
+
+impl FlagContext {
+    pub fn schema_id(self) -> SchemaId {
+        match self {
+            Self::Savedata => SchemaId::Savedata,
+            Self::Trophy => SchemaId::Trophy,
+            Self::Bootable | Self::Subfolder | Self::Patch => SchemaId::Game,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bootable => "game",
+            Self::Savedata => "savedata",
+            Self::Subfolder => "subfolder",
+            Self::Patch => "patch",
+            Self::Trophy => "trophy",
+        }
+    }
+}
+
 pub enum NewEntryType {
     Array,
     Utf8,
@@ -116,22 +145,21 @@ pub fn rename_key(doc: &mut Document, from: &str, to: &str) -> Result<()> {
 pub fn set_flag(
     doc: &mut Document,
     registry: &Registry,
-    schema_id: SchemaId,
+    context: FlagContext,
     key: &str,
     flag_name: &str,
     enabled: bool,
 ) -> Result<()> {
     let definition = registry
-        .schema(schema_id)
+        .schema(context.schema_id())
         .and_then(|schema| schema.key(key))
         .ok_or_else(|| anyhow::anyhow!("SFO registry has no key `{key}`"))?;
     if definition.format != FormatKind::Integer {
         bail!("SFO registry key `{key}` is not an integer bitfield");
     }
-    let flag = definition
-        .flags
+    let flag = flags_for_context(definition, context)
         .iter()
-        .find(|flag| flag.name == flag_name)
+        .find(|flag| flag.matches(flag_name))
         .ok_or_else(|| anyhow::anyhow!("SFO registry key `{key}` has no flag `{flag_name}`"))?;
 
     let entry = find_entry_mut(&mut doc.entries, key)?;
@@ -145,6 +173,86 @@ pub fn set_flag(
         current & !flag.mask
     });
     Ok(())
+}
+
+pub fn flags_for_context<'a>(
+    key: &'a crate::registry::Key,
+    context: FlagContext,
+) -> &'a [crate::registry::Flag] {
+    if key.name != "ATTRIBUTE" {
+        return &key.flags;
+    }
+    match context {
+        FlagContext::Subfolder => key
+            .flag_table("subfolder")
+            .map(|table| table.flags.as_slice())
+            .unwrap_or(&key.flags),
+        FlagContext::Patch => key
+            .flag_table("patch")
+            .map(|table| table.flags.as_slice())
+            .unwrap_or(&key.flags),
+        FlagContext::Bootable | FlagContext::Savedata | FlagContext::Trophy => &key.flags,
+    }
+}
+
+pub fn validate_document(doc: &Document, registry: &Registry, context: FlagContext) -> Result<()> {
+    let Some(schema) = registry.schema(context.schema_id()) else {
+        return Ok(());
+    };
+
+    for entry in &doc.entries {
+        let Some(definition) = schema.key(&entry.key) else {
+            continue;
+        };
+        if definition.format == FormatKind::Unknown {
+            continue;
+        }
+        if savedata_params_variance(context, &entry.key, entry.format) {
+            continue;
+        }
+        let expected = param_format(definition.format);
+        if entry.format != expected {
+            bail!(
+                "SFO entry `{}` has format {}, expected {}",
+                entry.key,
+                format_name(entry.format),
+                format_kind_name(definition.format)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn savedata_params_variance(context: FlagContext, key: &str, format: u16) -> bool {
+    context == FlagContext::Savedata && matches!(key, "PARAMS" | "PARAMS2") && format == 0x0204
+}
+
+fn param_format(format: FormatKind) -> u16 {
+    match format {
+        FormatKind::Array => 0x0004,
+        FormatKind::Utf8 => 0x0204,
+        FormatKind::Integer => 0x0404,
+        FormatKind::Unknown => unreachable!("unknown formats are skipped by validate_document"),
+    }
+}
+
+fn format_kind_name(format: FormatKind) -> &'static str {
+    match format {
+        FormatKind::Array => "array",
+        FormatKind::Utf8 => "utf8",
+        FormatKind::Integer => "integer",
+        FormatKind::Unknown => "unknown",
+    }
+}
+
+fn format_name(format: u16) -> String {
+    match format {
+        0x0004 => "array".to_owned(),
+        0x0204 => "utf8".to_owned(),
+        0x0404 => "integer".to_owned(),
+        other => format!("raw:0x{other:04x}"),
+    }
 }
 
 fn find_entry_mut<'a>(entries: &'a mut [Entry], key: &str) -> Result<&'a mut Entry> {

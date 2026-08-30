@@ -26,23 +26,26 @@ pub fn render_param_sfo_markdown(registry: &Registry) -> String {
     out.push('\n');
 
     out.push_str("## Category Values\n\n");
-    out.push_str("| Code | Meaning | Source |\n");
-    out.push_str("|---|---|---|\n");
+    out.push_str("| Code | Meaning | Confidence | Source |\n");
+    out.push_str("|---|---|---|---|\n");
     for category in &registry.categories {
         out.push_str(&format!(
-            "| `{}` | {} | `{}` |\n",
-            category.code, category.label, category.source
+            "| `{}` | {} | {} | `{}` |\n",
+            category.code,
+            category.label,
+            confidence(category.confidence),
+            category.source
         ));
     }
     out.push('\n');
 
     for schema in &registry.schemas {
         out.push_str(&format!("## {} Keys\n\n", schema.label));
-        out.push_str("| Key | Format | Max | Default | Confidence | Source | Validation | Validation Confidence | Behavior | Notes |\n");
-        out.push_str("|---|---|---:|---|---|---|---|---|---|---|\n");
+        out.push_str("| Key | Format | Max | Default | Confidence | Source | Validation | Validation Confidence | Behavior | Notes | Variance |\n");
+        out.push_str("|---|---|---:|---|---|---|---|---|---|---|---|\n");
         for key in &schema.keys {
             out.push_str(&format!(
-                "| `{}` | {} | {} | {} | {} | `{}` | {} | {} | {} | {} |\n",
+                "| `{}` | {} | {} | {} | {} | `{}` | {} | {} | {} | {} | {} |\n",
                 key.name,
                 format_kind(key.format),
                 key.max_len
@@ -54,7 +57,8 @@ pub fn render_param_sfo_markdown(registry: &Registry) -> String {
                 key.validation.as_deref().unwrap_or("-"),
                 key.validation_confidence.map(confidence).unwrap_or("-"),
                 key.behavior.as_deref().unwrap_or("-"),
-                key.notes.as_deref().unwrap_or("-")
+                key.notes.as_deref().unwrap_or("-"),
+                key.variance.as_deref().unwrap_or("-")
             ));
         }
         out.push('\n');
@@ -77,19 +81,37 @@ pub fn render_param_sfo_markdown(registry: &Registry) -> String {
 
         for key in schema.keys.iter().filter(|key| !key.flags.is_empty()) {
             out.push_str(&format!("### `{}` Flags\n\n", key.name));
+            render_flags(&mut out, &key.flags);
+            out.push('\n');
+        }
+
+        for key in schema.keys.iter().filter(|key| !key.fields.is_empty()) {
+            out.push_str(&format!("### `{}` Bit Fields\n\n", key.name));
             out.push_str("| Mask | Name | Meaning | Confidence | Source |\n");
             out.push_str("|---:|---|---|---|---|\n");
-            for flag in &key.flags {
+            for field in &key.fields {
                 out.push_str(&format!(
                     "| `0x{:x}` | `{}` | {} | {} | `{}` |\n",
-                    flag.mask,
-                    flag.name,
-                    flag.label,
-                    confidence(flag.confidence),
-                    flag.source
+                    field.mask,
+                    field.name,
+                    field.label,
+                    confidence(field.confidence),
+                    field.source
                 ));
             }
             out.push('\n');
+        }
+
+        for key in schema.keys.iter().filter(|key| !key.flag_tables.is_empty()) {
+            for table in &key.flag_tables {
+                out.push_str(&format!("### `{}` {} Flags\n\n", key.name, table.label));
+                if let Some(notes) = &table.notes {
+                    out.push_str(notes);
+                    out.push_str("\n\n");
+                }
+                render_flags(&mut out, &table.flags);
+                out.push('\n');
+            }
         }
     }
 
@@ -97,6 +119,26 @@ pub fn render_param_sfo_markdown(registry: &Registry) -> String {
         out.pop();
     }
     out
+}
+
+fn render_flags(out: &mut String, flags: &[crate::registry::Flag]) {
+    out.push_str("| Mask | Name | Aliases | Meaning | Confidence | Source |\n");
+    out.push_str("|---:|---|---|---|---|---|\n");
+    for flag in flags {
+        out.push_str(&format!(
+            "| `0x{:x}` | `{}` | {} | {} | {} | `{}` |\n",
+            flag.mask,
+            flag.name,
+            if flag.aliases.is_empty() {
+                "-".to_owned()
+            } else {
+                flag.aliases.join(", ")
+            },
+            flag.label,
+            confidence(flag.confidence),
+            flag.source
+        ));
+    }
 }
 
 fn format_kind(format: FormatKind) -> &'static str {
@@ -112,6 +154,8 @@ fn confidence(confidence: Confidence) -> &'static str {
     match confidence {
         Confidence::Confirmed => "confirmed",
         Confidence::Observed => "observed",
+        Confidence::Speculative => "speculative",
+        Confidence::Reserved => "reserved",
         Confidence::Gap => "gap",
     }
 }

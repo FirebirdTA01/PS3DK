@@ -27,17 +27,20 @@ sources:
     label: User-owned Vita param.sfo preservation fixture observed locally, bytes not committed
     ref: "observed in a PS Vita param.sfo (19 keys, 912 B), 2026-08-30; not redistributed"
   - id: psdevwiki-gap
-    label: PSDevWiki PARAM.SFO page required for ATTRIBUTE bit meanings; page not available to automated fetch due Cloudflare
-    ref: "https://www.psdevwiki.com/ps3/PARAM.SFO unavailable to automated fetch on 2026-08-30"
+    label: PARAM.SFO keys whose public source data is still incomplete
+    ref: "Rows intentionally preserved as unknown until a public source confirms their format or behavior"
+  - id: psdevwiki
+    label: PSDevWiki PARAM.SFO page saved by the director
+    ref: "PSDevWiki PARAM.SFO, page saved 2026-08-30; local text lines cited in tools/sfo/registry/param-sfo.yml"
 
 categories:
   - { code: "AM", label: "app music", source: "rpcs3-category" }
-  - { code: "AP", label: "app photo", source: "rpcs3-category" }
-  - { code: "AS", label: "app store", source: "rpcs3-category" }
-  - { code: "AT", label: "app TV", source: "rpcs3-category" }
+  - { code: "AP", label: "Application Photo", source: "psdevwiki" }
+  - { code: "AS", label: "Application Streaming?", source: "psdevwiki", confidence: speculative }
+  - { code: "AT", label: "Application TV", source: "psdevwiki" }
   - { code: "AV", label: "app video", source: "rpcs3-category" }
   - { code: "BV", label: "BC video", source: "rpcs3-category" }
-  - { code: "WT", label: "web TV", source: "rpcs3-category" }
+  - { code: "WT", label: "Web TV", source: "psdevwiki" }
   - { code: "HM", label: "home", source: "rpcs3-category" }
   - { code: "CB", label: "network", source: "rpcs3-category" }
   - { code: "SF", label: "store frontend", source: "rpcs3-category" }
@@ -53,6 +56,10 @@ categories:
   - { code: "2D", label: "PS2 data", source: "rpcs3-category" }
   - { code: "SD", label: "PS3 save data", source: "rpcs3-category" }
   - { code: "MS", label: "PSP save data", source: "rpcs3-category" }
+  - { code: "TR", label: "disc subfolder: PS3_CONTENT/THEMEDIR/", source: "psdevwiki", confidence: observed }
+  - { code: "VR", label: "disc subfolder: VIDEODIR/", source: "psdevwiki", confidence: observed }
+  - { code: "DP", label: "disc subfolder: PKGDIR/", source: "psdevwiki", confidence: observed }
+  - { code: "XR", label: "disc subfolder: PS3_EXTRA/", source: "psdevwiki", confidence: observed }
 
 schemas:
   - id: game
@@ -76,7 +83,8 @@ schemas:
         max_len: 16
         confidence: confirmed
         source: sfo-c
-        validation: "No PARAM.SFO regex in RPCS3; 9-character rule is directory handling. Empty TITLE_ID is skipped."
+        validation: "ABCD12345 PSDevWiki convention. No PARAM.SFO regex in RPCS3; the 9-character rule is directory handling. Empty TITLE_ID is skipped."
+        validation_confidence: observed
         behavior: "Identity key for HDD game, disc update and game data lookup."
         notes: "sfo.c pads to 16 bytes; cellGame API size is 10 bytes including NUL."
       - name: VERSION
@@ -149,8 +157,10 @@ schemas:
         confidence: confirmed
         source: rpcs3-psf
         behavior: "Builds the cellAudioOut supported-mode list; absent value defaults to LPCM 2ch."
+        notes: "Examples: 21, 258, 279, 514, 791. Dolby Digital and DTS examples include flag 0x2."
         flags:
           - { mask: 1, name: lpcm_2, label: "LPCM 2ch", source: rpcs3-psf, confidence: confirmed }
+          - { mask: 2, name: dolby_dts_required_0x2, label: "Unnamed flag required by Dolby Digital/DTS examples", source: psdevwiki, confidence: speculative }
           - { mask: 4, name: lpcm_5_1, label: "LPCM 5.1", source: rpcs3-psf, confidence: confirmed }
           - { mask: 16, name: lpcm_7_1, label: "LPCM 7.1", source: rpcs3-psf, confidence: confirmed }
           - { mask: 256, name: dolby_digital_5_1, label: "Dolby Digital 5.1", source: rpcs3-psf, confidence: confirmed }
@@ -159,12 +169,64 @@ schemas:
         format: integer
         max_len: 4
         default: "0"
-        confidence: gap
-        source: psdevwiki-gap
+        confidence: confirmed
+        source: psdevwiki
         behavior: "Copied verbatim to guests; RPCS3 has no game behavior except observed UI metadata."
-        notes: "Game ATTRIBUTE bit meanings require the saved PSDevWiki PARAM.SFO page. Do not confuse this with CELL_GAME_ATTRIBUTE_* launch flags. All other bits remain gap."
+        notes: "Bootable-content interpretation from PSDevWiki text lines 1003-1192 and 1307-1392. Do not confuse this with CELL_GAME_ATTRIBUTE_* launch flags. Context-specific patch and disc-subfolder tables are listed separately."
         flags:
-          - { mask: 8388608, name: ps_move_support, label: "PS Move support", source: rpcs3-game-list, confidence: observed }
+          - { mask: 1, name: psp_remote_play_v1, label: "PSP Remote Play v1, firmware 1.10", source: psdevwiki, confidence: confirmed }
+          - { mask: 2, name: psp_export, label: "PSP Export / Copy to PSP", source: psdevwiki, confidence: confirmed }
+          - { mask: 4, name: psp_remote_play_v2, label: "PSP Remote Play v2, firmware 1.80; requires v1", source: psdevwiki, confidence: confirmed }
+          - { mask: 8, name: xmb_ingame_forced_enable, label: "XMB In-Game forced enabled", source: psdevwiki, confidence: confirmed }
+          - { mask: 16, name: xmb_ingame_disabled, label: "XMB In-Game disabled", source: psdevwiki, confidence: confirmed }
+          - { mask: 32, name: xmb_ingame_bgm, label: "XMB In-Game background music", source: psdevwiki, confidence: confirmed }
+          - { mask: 64, name: system_voice_chat, label: "System voice chat", source: psdevwiki, confidence: speculative }
+          - { mask: 128, name: psvita_remote_play, label: "PS Vita Remote Play, firmware 4.00", source: psdevwiki, confidence: confirmed }
+          - { mask: 256, name: move_controller_warning, label: "Move Controller warning screen", source: psdevwiki, confidence: confirmed }
+          - { mask: 512, name: navigation_controller_warning, label: "Navigation Controller warning screen; requires Move warning", source: psdevwiki, confidence: confirmed }
+          - { mask: 1024, name: ps_eye_warning, label: "PlayStation Eye Camera warning screen; requires Move warning", source: psdevwiki, confidence: confirmed }
+          - { mask: 2048, name: move_calibration_notification, label: "Move calibration notification", source: psdevwiki, confidence: confirmed }
+          - { mask: 4096, name: stereoscopic_3d_warning, label: "Stereoscopic 3D warning", source: psdevwiki, confidence: confirmed }
+          - { mask: 8192, name: psnow_beta_notification, label: "PlayStation Now Beta notification screen", source: psdevwiki, confidence: speculative }
+          - { mask: 16384, name: reserved_0x4000, label: "Not Used Yet", source: psdevwiki, confidence: reserved }
+          - { mask: 32768, name: reserved_0x8000, label: "Not Used Yet", source: psdevwiki, confidence: reserved }
+          - { mask: 65536, name: install_disc, label: "Install Disc", source: psdevwiki, confidence: confirmed }
+          - { mask: 131072, name: install_packages, label: "Install Packages", source: psdevwiki, confidence: confirmed }
+          - { mask: 262144, name: unknown_0x40000, label: "Unknown for bootable content; patch overwrite flag in patch context", source: psdevwiki, confidence: speculative }
+          - { mask: 524288, name: game_purchase_enabled, label: "Game Purchase Enabled", source: psdevwiki, confidence: confirmed }
+          - { mask: 1048576, name: license_related, label: "License related behavior", source: psdevwiki, confidence: speculative }
+          - { mask: 2097152, name: pcengine, label: "PCEngine", source: psdevwiki, confidence: speculative }
+          - { mask: 4194304, name: license_logo_disabled, label: "License Logo Disabled", source: psdevwiki, confidence: confirmed }
+          - { mask: 8388608, name: move_controller_enabled, aliases: [ps_move_support], label: "Move Controller Enabled / PS Move support; corroborated by RPCS3 game_list_table.cpp", source: psdevwiki, confidence: confirmed }
+          - { mask: 16777216, name: emulator_type_bit0, label: "Emulator type field bit 0", source: psdevwiki, confidence: speculative }
+          - { mask: 33554432, name: emulator_type_bit1, label: "Emulator type field bit 1", source: psdevwiki, confidence: speculative }
+          - { mask: 67108864, name: neogeo_emulator_type, label: "NeoGeo emulator type field value X4; requires PCEngine", source: psdevwiki, confidence: confirmed }
+          - { mask: 134217728, name: reserved_0x8000000, label: "Not Used Yet", source: psdevwiki, confidence: reserved }
+          - { mask: 268435456, name: reserved_0x10000000, label: "Not Used Yet", source: psdevwiki, confidence: reserved }
+          - { mask: 536870912, name: reserved_0x20000000, label: "Not Used Yet", source: psdevwiki, confidence: reserved }
+          - { mask: 1073741824, name: reserved_0x40000000, label: "Not Used Yet", source: psdevwiki, confidence: reserved }
+          - { mask: 2147483648, name: reserved_0x80000000, label: "Not Used Yet", source: psdevwiki, confidence: reserved }
+        fields:
+          - { mask: 117440512, name: emulator_type_field, label: "3-bit X1..X7 emulator type field; X4 is NeoGeo", source: psdevwiki, confidence: speculative }
+        flag_tables:
+          - id: subfolder
+            label: Disc subfolder
+            source: psdevwiki
+            confidence: confirmed
+            notes: "CATEGORY TR/VR/DP/XR; PSDevWiki text lines 1193-1305 and 1393-1406."
+            flags:
+              - { mask: 1, name: subfolder_enabled, label: "Subfolder enabled", source: psdevwiki, confidence: confirmed }
+          - id: patch
+            label: Patch
+            source: psdevwiki
+            confidence: confirmed
+            notes: "CATEGORY GD update packages with APP_VER/TARGET_APP_VER; PSDevWiki text lines 1407-1428."
+            flags:
+              - { mask: 262144, name: overwrite_resolution_sound_remoteplay, label: "Overwrite RESOLUTION, SOUND_FORMAT and remote-play flags from the base SFO", source: psdevwiki, confidence: confirmed }
+              - { mask: 1048576, name: overwrite_xmb_ingame, label: "Overwrite XMB In-Game flags 0x8/0x10/0x20", source: psdevwiki, confidence: confirmed }
+              - { mask: 2097152, name: overwrite_move_warning, label: "Expected to overwrite Move/Nav/PS Eye warning flags", source: psdevwiki, confidence: speculative }
+              - { mask: 4194304, name: overwrite_3d_warning, label: "Expected to overwrite stereoscopic 3D warning", source: psdevwiki, confidence: speculative }
+              - { mask: 8388608, name: overwrite_move_enabled, label: "Expected to overwrite Move Controller Enabled", source: psdevwiki, confidence: speculative }
       - name: BOOTABLE
         format: integer
         max_len: 4
@@ -188,22 +250,40 @@ schemas:
       - name: CONTENT_ID
         format: utf8
         max_len: 48
-        confidence: observed
-        source: vita-fixture
+        confidence: confirmed
+        source: psdevwiki
+        validation: "37 characters by PSDevWiki convention; our package content ID comes from the package header CLI."
+        validation_confidence: observed
         behavior: "RPCS3 reads it for trial unlock checks on CATEGORY HG; our pkg.c does not consume it."
-        notes: "Our package content ID comes from the package header CLI."
+        notes: "Observed at max 48 in the Vita fixture."
       - name: NP_COMMUNICATION_ID
         format: utf8
         max_len: 16
-        confidence: observed
-        source: vita-fixture
+        confidence: confirmed
+        source: psdevwiki
+        validation: "13 characters by PSDevWiki convention."
+        validation_confidence: observed
         behavior: "No RPCS3 behavior found; preserve."
+        notes: "Observed at max 16 in the Vita fixture."
       - name: REGION_DENY
-        format: unknown
-        max_len: null
-        confidence: gap
-        source: psdevwiki-gap
-        behavior: "No RPCS3 behavior found; preserve."
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "No RPCS3 behavior found; PSDevWiki says bit n set denies region n for HDD games, firmware 3.30."
+        flags:
+          - { mask: 1, name: japan, label: "Japan denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 2, name: us_canada, label: "US/Canada denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 4, name: europe_middle_east_africa, label: "Europe/Middle East/Africa denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 8, name: korea, label: "Korea denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 16, name: uk_ireland, label: "UK/Ireland denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 32, name: mexico_central_south_america, label: "Mexico/Central and South America denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 64, name: australia_new_zealand, label: "Australia/New Zealand denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 128, name: singapore_malaysia, label: "Singapore/Malaysia denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 256, name: taiwan, label: "Taiwan denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 512, name: russia_ukraine_india_central_asia, label: "Russia/Ukraine/India/Central Asia denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 1024, name: china, label: "China denied", source: psdevwiki, confidence: confirmed }
+          - { mask: 2048, name: hong_kong, label: "Hong Kong denied", source: psdevwiki, confidence: confirmed }
       - name: TARGET_APP_VER
         format: utf8
         max_len: 6
@@ -212,6 +292,13 @@ schemas:
         validation: "NN.NN convention"
         validation_confidence: observed
         behavior: "For CATEGORY GD packages, exact-match install gate against the installed APP_VER."
+      - name: GAMEDATA_ID
+        format: utf8
+        max_len: 32
+        confidence: speculative
+        source: psdevwiki
+        behavior: "PSDevWiki lists it for game data; no RPCS3 behavior found, preserve."
+        notes: "PSDevWiki marks this row with uncertainty."
       - name: PATCH_FILE_NAME
         format: unknown
         max_len: null
@@ -219,11 +306,11 @@ schemas:
         source: psdevwiki-gap
         behavior: "No RPCS3 behavior found; preserve."
       - name: ITEM_PRIORITY
-        format: unknown
-        max_len: null
-        confidence: gap
-        source: psdevwiki-gap
-        behavior: "No RPCS3 behavior found; preserve."
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "PSDevWiki lists it for CATEGORY 2G; no RPCS3 behavior found, preserve."
       - name: INSTALL_DIR
         format: unknown
         max_len: null
@@ -236,6 +323,42 @@ schemas:
         confidence: gap
         source: psdevwiki-gap
         behavior: "No RPCS3 behavior found; preserve."
+      - name: PARENTAL_LEVEL_A
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "License-area parental level override for SCEA 01 / Americas."
+      - name: PARENTAL_LEVEL_C
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "License-area parental level override for SCH 05 / China."
+      - name: PARENTAL_LEVEL_E
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "License-area parental level override for SCEE 02 / Europe, Middle East, Africa, UK, Oceania and related regions."
+      - name: PARENTAL_LEVEL_H
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "License-area parental level override from PSDevWiki."
+      - name: PARENTAL_LEVEL_J
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "License-area parental level override from PSDevWiki."
+      - name: PARENTAL_LEVEL_K
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        behavior: "License-area parental level override from PSDevWiki."
 
   - id: savedata
     label: Savedata PARAM.SFO
@@ -264,9 +387,9 @@ schemas:
         confidence: confirmed
         source: sysutil-savedata
         behavior: "Savedata metadata bitfield generated and read separately from game ATTRIBUTE."
-        notes: "Savedata ATTRIBUTE is separate from game PARAM.SFO ATTRIBUTE. Name from RPCS3 savedata generator; bit from sysutil_savedata.h."
+        notes: "Savedata ATTRIBUTE is separate from game PARAM.SFO ATTRIBUTE. Name from RPCS3 savedata generator; bit from sysutil_savedata.h; PSDevWiki labels the same bit Copy Protected."
         flags:
-          - { mask: 1, name: no_duplicate, label: "No duplicate", source: sysutil-savedata, confidence: confirmed }
+          - { mask: 1, name: no_duplicate, aliases: [copy_protected], label: "No duplicate / Copy Protected", source: sysutil-savedata, confidence: confirmed }
       - name: SAVEDATA_LIST_PARAM
         format: utf8
         max_len: 8
@@ -281,17 +404,21 @@ schemas:
         source: sysutil-savedata
         notes: "Name from RPCS3 savedata generator; size from sysutil_savedata.h."
       - name: PARAMS
-        format: utf8
+        format: array
         max_len: 1024
-        confidence: confirmed
-        source: rpcs3-runtime
+        confidence: observed
+        source: psdevwiki
         behavior: "Written blank by RPCS3 savedata generation; not read."
+        notes: "PSDevWiki matrix says utf8-S / format 0x0004. RPCS3-generated savedata uses 0x0204 strings and marks those lines uncertain; preserve and accept either."
+        variance: "RPCS3-generated savedata uses 0x0204 strings while PSDevWiki says utf8-S / format 0x0004."
       - name: PARAMS2
-        format: utf8
+        format: array
         max_len: 12
-        confidence: confirmed
-        source: rpcs3-runtime
+        confidence: observed
+        source: psdevwiki
         behavior: "Written blank by RPCS3 savedata generation; not read."
+        notes: "PSDevWiki matrix says utf8-S / format 0x0004. RPCS3-generated savedata uses 0x0204 strings and marks those lines uncertain; preserve and accept either."
+        variance: "RPCS3-generated savedata uses 0x0204 strings while PSDevWiki says utf8-S / format 0x0004."
       - name: ACCOUNT_ID
         format: array
         max_len: 16
@@ -321,3 +448,37 @@ schemas:
         confidence: observed
         source: rpcs3-runtime
         notes: "RPCS3 extension pattern for savedata secure-file flags; preserve and do not apply PS3 validation."
+
+  - id: trophy
+    label: Trophy PARAM.SFO
+    keys:
+      - name: TITLE
+        format: utf8
+        max_len: 128
+        confidence: confirmed
+        source: psdevwiki
+        notes: "Trophy PARAM.SFO uses no CATEGORY."
+      - name: LANG
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+      - name: NPCOMMID
+        format: utf8
+        max_len: 16
+        confidence: confirmed
+        source: psdevwiki
+        validation: "12 characters by PSDevWiki convention."
+        validation_confidence: observed
+      - name: PADDING
+        format: array
+        max_len: 8
+        confidence: observed
+        source: psdevwiki
+        notes: "PSDevWiki lists utf8-S / format 0x0004 for this padding field."
+      - name: SOURCE
+        format: integer
+        max_len: 4
+        confidence: confirmed
+        source: psdevwiki
+        notes: "Usually zeroes according to PSDevWiki."

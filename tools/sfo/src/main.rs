@@ -75,6 +75,8 @@ enum Commands {
     },
     Validate {
         input: PathBuf,
+        #[arg(long)]
+        schema: Option<String>,
     },
     Add {
         input: PathBuf,
@@ -151,7 +153,7 @@ fn run() -> Result<()> {
                 schema,
                 json,
             } => run_inspect(input, schema, json),
-            Commands::Validate { input } => run_validate(input),
+            Commands::Validate { input, schema } => run_validate(input, schema),
             Commands::Add {
                 input,
                 key,
@@ -218,17 +220,20 @@ fn run_inspect(input: PathBuf, schema: Option<String>, json: bool) -> Result<()>
     let doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
     if json {
         let registry = sfo::registry::Registry::load_default()?;
-        let schema_id = schema_id_for(&doc, schema.as_deref())?;
-        println!("{}", json_entries(&doc.entries, &registry, schema_id)?);
+        let context = flag_context_for(&doc, schema.as_deref())?;
+        println!("{}", json_entries(&doc.entries, &registry, context)?);
     } else {
         print_dict(&doc.entries);
     }
     Ok(())
 }
 
-fn run_validate(input: PathBuf) -> Result<()> {
+fn run_validate(input: PathBuf, schema: Option<String>) -> Result<()> {
     let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
-    let _ = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    let doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
+    let registry = sfo::registry::Registry::load_default()?;
+    let context = flag_context_for(&doc, schema.as_deref())?;
+    sfo::edit::validate_document(&doc, &registry, context)?;
     println!("PARAM.SFO OK");
     Ok(())
 }
@@ -294,7 +299,7 @@ fn run_create(
 fn json_entries(
     entries: &[sfo::psf::Entry],
     registry: &sfo::registry::Registry,
-    schema_id: sfo::registry::SchemaId,
+    context: sfo::edit::FlagContext,
 ) -> Result<String> {
     let entries: Vec<_> = entries
         .iter()
@@ -307,7 +312,7 @@ fn json_entries(
                     serde_json::json!(hex_bytes(bytes)),
                 ),
             };
-            let registry = registry_entry(registry, schema_id, entry);
+            let registry = registry_entry(registry, context, entry);
             serde_json::json!({
                 "key": entry.key,
                 "format": format,
@@ -324,19 +329,18 @@ fn json_entries(
 
 fn registry_entry(
     registry: &sfo::registry::Registry,
-    schema_id: sfo::registry::SchemaId,
+    context: sfo::edit::FlagContext,
     entry: &sfo::psf::Entry,
 ) -> serde_json::Value {
     let Some(definition) = registry
-        .schema(schema_id)
+        .schema(context.schema_id())
         .and_then(|schema| schema.key(&entry.key))
     else {
         return serde_json::Value::Null;
     };
 
     let decoded_flags = match entry.value {
-        sfo::psf::Value::Integer(value) => definition
-            .flags
+        sfo::psf::Value::Integer(value) => sfo::edit::flags_for_context(definition, context)
             .iter()
             .filter(|flag| value & flag.mask == flag.mask)
             .map(|flag| flag.name.as_str())
@@ -344,7 +348,7 @@ fn registry_entry(
         _ => Vec::new(),
     };
     serde_json::json!({
-        "schema": schema_name(schema_id),
+        "schema": context.name(),
         "known": true,
         "confidence": confidence_name(definition.confidence),
         "source": definition.source,
@@ -352,17 +356,12 @@ fn registry_entry(
     })
 }
 
-fn schema_name(schema_id: sfo::registry::SchemaId) -> &'static str {
-    match schema_id {
-        sfo::registry::SchemaId::Game => "game",
-        sfo::registry::SchemaId::Savedata => "savedata",
-    }
-}
-
 fn confidence_name(confidence: sfo::registry::Confidence) -> &'static str {
     match confidence {
         sfo::registry::Confidence::Confirmed => "confirmed",
         sfo::registry::Confidence::Observed => "observed",
+        sfo::registry::Confidence::Speculative => "speculative",
+        sfo::registry::Confidence::Reserved => "reserved",
         sfo::registry::Confidence::Gap => "gap",
     }
 }
@@ -407,35 +406,45 @@ fn run_flags(
     let data = std::fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
     let mut doc = sfo::psf::parse(&data).with_context(|| format!("parsing {}", input.display()))?;
     let registry = sfo::registry::Registry::load_default()?;
-    let schema_id = schema_id_for(&doc, schema.as_deref())?;
+    let context = flag_context_for(&doc, schema.as_deref())?;
     if let Some(flag) = enable {
-        sfo::edit::set_flag(&mut doc, &registry, schema_id, &key, &flag, true)?;
+        sfo::edit::set_flag(&mut doc, &registry, context, &key, &flag, true)?;
     }
     if let Some(flag) = disable {
-        sfo::edit::set_flag(&mut doc, &registry, schema_id, &key, &flag, false)?;
+        sfo::edit::set_flag(&mut doc, &registry, context, &key, &flag, false)?;
     }
     std::fs::write(&out, sfo::psf::write_preserving(&doc.entries)?)
         .with_context(|| format!("writing {}", out.display()))?;
     Ok(())
 }
 
-fn schema_id_for(
+fn flag_context_for(
     doc: &sfo::psf::Document,
     override_schema: Option<&str>,
-) -> Result<sfo::registry::SchemaId> {
+) -> Result<sfo::edit::FlagContext> {
     if let Some(schema) = override_schema {
-        return parse_schema_id(schema);
+        return parse_flag_context(schema);
     }
     Ok(match doc.get_string("CATEGORY") {
-        Some("SD" | "MS") => sfo::registry::SchemaId::Savedata,
-        _ => sfo::registry::SchemaId::Game,
+        Some("SD" | "MS") => sfo::edit::FlagContext::Savedata,
+        Some("TR" | "VR" | "DP" | "XR") => sfo::edit::FlagContext::Subfolder,
+        Some("GD")
+            if doc.get_string("APP_VER").is_some()
+                || doc.get_string("TARGET_APP_VER").is_some() =>
+        {
+            sfo::edit::FlagContext::Patch
+        }
+        _ => sfo::edit::FlagContext::Bootable,
     })
 }
 
-fn parse_schema_id(schema: &str) -> Result<sfo::registry::SchemaId> {
+fn parse_flag_context(schema: &str) -> Result<sfo::edit::FlagContext> {
     match schema {
-        "game" => Ok(sfo::registry::SchemaId::Game),
-        "savedata" => Ok(sfo::registry::SchemaId::Savedata),
+        "game" | "bootable" => Ok(sfo::edit::FlagContext::Bootable),
+        "savedata" => Ok(sfo::edit::FlagContext::Savedata),
+        "subfolder" => Ok(sfo::edit::FlagContext::Subfolder),
+        "patch" => Ok(sfo::edit::FlagContext::Patch),
+        "trophy" => Ok(sfo::edit::FlagContext::Trophy),
         other => bail!("unsupported SFO schema `{other}`"),
     }
 }

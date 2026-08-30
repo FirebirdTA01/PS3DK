@@ -22,6 +22,8 @@ pub struct Category {
     pub code: String,
     pub label: String,
     pub source: String,
+    #[serde(default = "confirmed")]
+    pub confidence: Confidence,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -36,6 +38,7 @@ pub struct Schema {
 pub enum SchemaId {
     Game,
     Savedata,
+    Trophy,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -50,6 +53,8 @@ pub struct Key {
     #[serde(default)]
     pub notes: Option<String>,
     #[serde(default)]
+    pub variance: Option<String>,
+    #[serde(default)]
     pub validation: Option<String>,
     #[serde(default)]
     pub validation_confidence: Option<Confidence>,
@@ -57,6 +62,10 @@ pub struct Key {
     pub behavior: Option<String>,
     #[serde(default)]
     pub flags: Vec<Flag>,
+    #[serde(default)]
+    pub flag_tables: Vec<FlagTable>,
+    #[serde(default)]
+    pub fields: Vec<BitField>,
     #[serde(default)]
     pub values: Vec<Value>,
 }
@@ -75,11 +84,35 @@ pub enum FormatKind {
 pub enum Confidence {
     Confirmed,
     Observed,
+    Speculative,
+    Reserved,
     Gap,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Flag {
+    pub mask: u32,
+    pub name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    pub label: String,
+    pub source: String,
+    pub confidence: Confidence,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct FlagTable {
+    pub id: String,
+    pub label: String,
+    pub source: String,
+    pub confidence: Confidence,
+    #[serde(default)]
+    pub notes: Option<String>,
+    pub flags: Vec<Flag>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BitField {
     pub mask: u32,
     pub name: String,
     pub label: String,
@@ -140,6 +173,15 @@ impl Registry {
                 for flag in &key.flags {
                     require_source(&source_ids, &flag.source)?;
                 }
+                for table in &key.flag_tables {
+                    require_source(&source_ids, &table.source)?;
+                    for flag in &table.flags {
+                        require_source(&source_ids, &flag.source)?;
+                    }
+                }
+                for field in &key.fields {
+                    require_source(&source_ids, &field.source)?;
+                }
                 for value in &key.values {
                     require_source(&source_ids, &value.source)?;
                 }
@@ -156,9 +198,35 @@ impl Schema {
     }
 }
 
+impl Key {
+    pub fn flag(&self, name: &str) -> Option<&Flag> {
+        self.flags.iter().find(|flag| flag.matches(name))
+    }
+
+    pub fn flag_table(&self, id: &str) -> Option<&FlagTable> {
+        self.flag_tables.iter().find(|table| table.id == id)
+    }
+}
+
+impl FlagTable {
+    pub fn flag(&self, name: &str) -> Option<&Flag> {
+        self.flags.iter().find(|flag| flag.matches(name))
+    }
+}
+
+impl Flag {
+    pub fn matches(&self, name: &str) -> bool {
+        self.name == name || self.aliases.iter().any(|alias| alias == name)
+    }
+}
+
 fn require_source(known: &HashSet<&str>, source: &str) -> Result<()> {
     if !known.contains(source) {
         bail!("unknown source id `{source}`");
     }
     Ok(())
+}
+
+fn confirmed() -> Confidence {
+    Confidence::Confirmed
 }

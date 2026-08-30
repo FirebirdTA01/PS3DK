@@ -264,6 +264,58 @@ fn flags_cli_schema_override_can_select_the_game_attribute_table() {
 }
 
 #[test]
+fn flags_cli_uses_subfolder_attribute_table_for_disc_subfolder_categories() {
+    let input = temp_path("subfolder.PARAM.SFO");
+    let out = temp_path("subfolder-flag.PARAM.SFO");
+    std::fs::write(&input, minimal_attribute_sfo("TR", 0)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args([
+            "flags",
+            input.to_str().unwrap(),
+            "ATTRIBUTE",
+            "--enable",
+            "subfolder_enabled",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(doc.get_integer("ATTRIBUTE").unwrap(), 1);
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn flags_cli_uses_patch_attribute_table_for_gd_updates() {
+    let input = temp_path("patch.PARAM.SFO");
+    let out = temp_path("patch-flag.PARAM.SFO");
+    std::fs::write(&input, minimal_patch_sfo(0)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args([
+            "flags",
+            input.to_str().unwrap(),
+            "ATTRIBUTE",
+            "--enable",
+            "overwrite_xmb_ingame",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(doc.get_integer("ATTRIBUTE").unwrap(), 0x100000);
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn inspect_json_prints_stable_entry_details() {
     let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
         .args([
@@ -308,14 +360,51 @@ fn inspect_json_resolves_registry_metadata_and_decoded_flags() {
     let attribute = json_entry(&entries, "ATTRIBUTE");
     assert_eq!(attribute["registry"]["schema"], "game");
     assert_eq!(attribute["registry"]["known"], true);
-    assert_eq!(attribute["registry"]["confidence"], "gap");
-    assert_eq!(attribute["registry"]["source"], "psdevwiki-gap");
+    assert_eq!(attribute["registry"]["confidence"], "confirmed");
+    assert_eq!(attribute["registry"]["source"], "psdevwiki");
     assert_eq!(
         attribute["registry"]["decoded_flags"],
-        serde_json::json!(["ps_move_support"])
+        serde_json::json!(["move_controller_enabled"])
     );
     assert!(json_entry(&entries, "MYSTERY")["registry"].is_null());
     let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn inspect_json_uses_context_specific_attribute_tables() {
+    let subfolder_input = temp_path("inspect-subfolder.PARAM.SFO");
+    let patch_input = temp_path("inspect-patch.PARAM.SFO");
+    std::fs::write(&subfolder_input, minimal_attribute_sfo("TR", 1)).unwrap();
+    std::fs::write(&patch_input, minimal_patch_sfo(0x100000)).unwrap();
+
+    let subfolder = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args(["inspect", subfolder_input.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(subfolder.status.success(), "{}", stderr(subfolder.stderr));
+    let entries: serde_json::Value = serde_json::from_slice(&subfolder.stdout).unwrap();
+    let attribute = json_entry(&entries, "ATTRIBUTE");
+    assert_eq!(attribute["registry"]["schema"], "subfolder");
+    assert_eq!(
+        attribute["registry"]["decoded_flags"],
+        serde_json::json!(["subfolder_enabled"])
+    );
+
+    let patch = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args(["inspect", patch_input.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(patch.status.success(), "{}", stderr(patch.stderr));
+    let entries: serde_json::Value = serde_json::from_slice(&patch.stdout).unwrap();
+    let attribute = json_entry(&entries, "ATTRIBUTE");
+    assert_eq!(attribute["registry"]["schema"], "patch");
+    assert_eq!(
+        attribute["registry"]["decoded_flags"],
+        serde_json::json!(["overwrite_xmb_ingame"])
+    );
+
+    let _ = std::fs::remove_file(subfolder_input);
+    let _ = std::fs::remove_file(patch_input);
 }
 
 #[test]
@@ -342,6 +431,87 @@ fn validate_cli_rejects_a_corrupt_sfo() {
     assert!(!output.status.success());
     assert!(stderr(output.stderr).contains("file too small"));
     let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn validate_cli_accepts_savedata_params_array_or_rpcs3_string_format() {
+    let wiki_style = temp_path("savedata-params-array.PARAM.SFO");
+    let rpcs3_style = temp_path("savedata-params-string.PARAM.SFO");
+    std::fs::write(&wiki_style, savedata_params_sfo(0x0004)).unwrap();
+    std::fs::write(&rpcs3_style, savedata_params_sfo(0x0204)).unwrap();
+
+    for input in [&wiki_style, &rpcs3_style] {
+        let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+            .args(["validate", input.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", stderr(output.stderr));
+    }
+
+    let _ = std::fs::remove_file(wiki_style);
+    let _ = std::fs::remove_file(rpcs3_style);
+}
+
+#[test]
+fn validate_cli_rejects_known_keys_with_the_wrong_format() {
+    let input = temp_path("attribute-wrong-format.PARAM.SFO");
+    std::fs::write(
+        &input,
+        sfo::psf::write_canonical(&[
+            sfo::psf::Entry {
+                key: "CATEGORY".to_owned(),
+                format: 0x0204,
+                value_len: 3,
+                max_len: 0,
+                value: sfo::psf::Value::String("HG".to_owned()),
+            },
+            sfo::psf::Entry {
+                key: "ATTRIBUTE".to_owned(),
+                format: 0x0204,
+                value_len: 2,
+                max_len: 4,
+                value: sfo::psf::Value::String("0".to_owned()),
+            },
+        ]),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args(["validate", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = stderr(output.stderr);
+    assert!(stderr.contains("ATTRIBUTE"), "{stderr}");
+    assert!(stderr.contains("expected integer"), "{stderr}");
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn validate_cli_can_use_the_categoryless_trophy_schema() {
+    let valid = temp_path("trophy.PARAM.SFO");
+    let invalid = temp_path("trophy-bad-padding.PARAM.SFO");
+    std::fs::write(&valid, trophy_sfo(0x0004)).unwrap();
+    std::fs::write(&invalid, trophy_sfo(0x0204)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args(["validate", valid.to_str().unwrap(), "--schema", "trophy"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args(["validate", invalid.to_str().unwrap(), "--schema", "trophy"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    let stderr = stderr(rejected.stderr);
+    assert!(stderr.contains("PADDING"), "{stderr}");
+    assert!(stderr.contains("expected array"), "{stderr}");
+
+    let _ = std::fs::remove_file(valid);
+    let _ = std::fs::remove_file(invalid);
 }
 
 #[test]
@@ -461,6 +631,140 @@ fn fixture(name: &str) -> PathBuf {
 
 fn temp_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("ps3dk-sfo-{}-{name}", std::process::id()))
+}
+
+fn minimal_attribute_sfo(category: &str, attribute: u32) -> Vec<u8> {
+    sfo::psf::write_canonical(&[
+        sfo::psf::Entry {
+            key: "CATEGORY".to_owned(),
+            format: 0x0204,
+            value_len: category.len() as u32 + 1,
+            max_len: 0,
+            value: sfo::psf::Value::String(category.to_owned()),
+        },
+        sfo::psf::Entry {
+            key: "ATTRIBUTE".to_owned(),
+            format: 0x0404,
+            value_len: 4,
+            max_len: 4,
+            value: sfo::psf::Value::Integer(attribute),
+        },
+    ])
+}
+
+fn minimal_patch_sfo(attribute: u32) -> Vec<u8> {
+    sfo::psf::write_canonical(&[
+        sfo::psf::Entry {
+            key: "CATEGORY".to_owned(),
+            format: 0x0204,
+            value_len: 3,
+            max_len: 0,
+            value: sfo::psf::Value::String("GD".to_owned()),
+        },
+        sfo::psf::Entry {
+            key: "APP_VER".to_owned(),
+            format: 0x0204,
+            value_len: 6,
+            max_len: 0,
+            value: sfo::psf::Value::String("01.01".to_owned()),
+        },
+        sfo::psf::Entry {
+            key: "ATTRIBUTE".to_owned(),
+            format: 0x0404,
+            value_len: 4,
+            max_len: 4,
+            value: sfo::psf::Value::Integer(attribute),
+        },
+    ])
+}
+
+fn savedata_params_sfo(param_format: u16) -> Vec<u8> {
+    let params = match param_format {
+        0x0004 => sfo::psf::Entry {
+            key: "PARAMS".to_owned(),
+            format: 0x0004,
+            value_len: 0,
+            max_len: 1024,
+            value: sfo::psf::Value::Raw {
+                format: 0x0004,
+                bytes: Vec::new(),
+            },
+        },
+        0x0204 => sfo::psf::Entry {
+            key: "PARAMS".to_owned(),
+            format: 0x0204,
+            value_len: 1,
+            max_len: 1024,
+            value: sfo::psf::Value::String(String::new()),
+        },
+        other => panic!("unsupported PARAMS format 0x{other:x}"),
+    };
+    sfo::psf::write_preserving(&[
+        sfo::psf::Entry {
+            key: "CATEGORY".to_owned(),
+            format: 0x0204,
+            value_len: 3,
+            max_len: 4,
+            value: sfo::psf::Value::String("SD".to_owned()),
+        },
+        params,
+    ])
+    .unwrap()
+}
+
+fn trophy_sfo(padding_format: u16) -> Vec<u8> {
+    let padding = match padding_format {
+        0x0004 => sfo::psf::Entry {
+            key: "PADDING".to_owned(),
+            format: 0x0004,
+            value_len: 0,
+            max_len: 8,
+            value: sfo::psf::Value::Raw {
+                format: 0x0004,
+                bytes: Vec::new(),
+            },
+        },
+        0x0204 => sfo::psf::Entry {
+            key: "PADDING".to_owned(),
+            format: 0x0204,
+            value_len: 1,
+            max_len: 8,
+            value: sfo::psf::Value::String(String::new()),
+        },
+        other => panic!("unsupported PADDING format 0x{other:x}"),
+    };
+    sfo::psf::write_preserving(&[
+        sfo::psf::Entry {
+            key: "TITLE".to_owned(),
+            format: 0x0204,
+            value_len: 12,
+            max_len: 128,
+            value: sfo::psf::Value::String("Trophy Set".to_owned()),
+        },
+        sfo::psf::Entry {
+            key: "LANG".to_owned(),
+            format: 0x0404,
+            value_len: 4,
+            max_len: 4,
+            value: sfo::psf::Value::Integer(0),
+        },
+        sfo::psf::Entry {
+            key: "NPCOMMID".to_owned(),
+            format: 0x0204,
+            value_len: 13,
+            max_len: 16,
+            value: sfo::psf::Value::String("NPWR00001_00".to_owned()),
+        },
+        padding,
+        sfo::psf::Entry {
+            key: "SOURCE".to_owned(),
+            format: 0x0404,
+            value_len: 4,
+            max_len: 4,
+            value: sfo::psf::Value::Integer(0),
+        },
+    ])
+    .unwrap()
 }
 
 fn stderr(bytes: Vec<u8>) -> String {
