@@ -30,6 +30,7 @@ HEADERS := \
     include/stdio.h \
     include/stdlib.h \
     include/string.h \
+    include/pthread.h \
     include/types.h \
     include/cellstatus.h \
     include/gcm_tool.h \

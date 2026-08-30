@@ -210,6 +210,21 @@ for abi_flag in "" "-mlp64"; do
             cp -f "$install_gcc/librt.a" "$install_ps3dk/librt.a"
         fi
         say "installed librt.a ($abi_label, $(echo $librt_objs | wc -w) objects)"
+
+        # librt/pthread.c implements the POSIX thread API over the Lv-2
+        # primitives, so -lrt is all a program needs.  Autoconf packages,
+        # though, hardcode -lpthread (that is the FIRST thing cairo's
+        # PTHREAD_LIBS tries, and most other projects never try anything
+        # else), and a missing library makes the probe fail with no hint
+        # of why.  Install libpthread.a as a linker script that redirects
+        # to librt so those packages detect threads with no per-recipe
+        # help — the point of the shim is that third-party sources build
+        # unpatched.  A plain file, never a symlink: zip extraction has
+        # eaten a symlinked archive here before.
+        printf '/* PS3 Custom Toolchain: POSIX threads live in librt. */\nINPUT(-lrt)\n' \
+            > "$install_gcc/libpthread.a"
+        cp -f "$install_gcc/libpthread.a" "$install_ps3dk/libpthread.a"
+        say "installed libpthread.a ($abi_label, linker script -> -lrt)"
     fi
 
     say "installed $install_gcc/{lv2-sprx.o,lv2-crti.o,lv2-crt0.o,lv2.ld,lv2-prx-crt.o,lv2-prx.ld,lv2-prx.specs} ($abi_label GCC startfile)"
