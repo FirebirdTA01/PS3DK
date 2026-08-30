@@ -243,6 +243,59 @@ package_finalize.exe sample.gnpdrm.pkg
 
 The exact flag set each sample needs (extra `-l` libs, additional `-I` include paths, C++ standard overrides, etc.) is in that sample's `CMakeLists.txt`.  `cmake --build cmake-build --verbose` prints every command verbatim, so you can copy the lines you need and skip CMake entirely.
 
+## PARAM.SFO tools
+
+Every installable PS3 app carries a `PARAM.SFO` — title, title id,
+category, the `ATTRIBUTE` capability bits, resolution/sound masks, and so
+on.  The SDK ships three tools that touch it, each with a distinct job:
+
+| Tool | What it is | Use it for |
+|---|---|---|
+| `sfo-editor.exe` | CLI editor | Inspecting, validating, editing and creating SFOs from the shell or scripts |
+| `sfo-editor-gui.exe` | GUI on the same engine | Visual editing: every registry-known key and flag bit as a labelled widget, including keys a file doesn't carry yet |
+| `sfo.exe` | Small C generator adopted from upstream PSL1GHT | The `.pkg` build path (`ps3_add_pkg` and step 6 above) — builds a fresh `PARAM.SFO` from `sfo.xml` |
+
+Three instead of two is deliberate and transitional: `sfo.exe` predates the
+editors and is frozen — it stays because the packaging path invokes it with
+its historical flag syntax, and because the editors' test suite diffs their
+output byte-for-byte against it as the compatibility oracle.  Once
+`ps3_add_pkg` moves over to `sfo-editor` (which already accepts the same
+`--title` / `--appid` / `-f sfo.xml` invocation), `sfo.exe` retires.
+
+The editors are **preservation-first**: keys and flag bits they don't
+recognise are kept byte-exact, edits never reflow the file layout unless
+you ask (`--grow`), and nothing writes in place — output always goes to
+`--out`.  The key/flag knowledge lives in one registry
+(`tools/sfo/registry/param-sfo.yml`) that generates the CLI behaviour, the
+GUI widgets, and the reference document
+[docs/sdk/param-sfo.md](docs/sdk/param-sfo.md) from the same data.
+
+```cmd
+:: Show every key (add --json for machine-readable output)
+sfo-editor.exe inspect PARAM.SFO
+
+:: Check types, sizes and flag bits against the registry
+sfo-editor.exe validate PARAM.SFO
+
+:: Edit one value (rejects a value that would not fit; add --grow to resize)
+sfo-editor.exe set PARAM.SFO "TITLE=My Game" --out PARAM.SFO.new
+
+:: Flip capability bits by name on bitmask keys
+sfo-editor.exe flags PARAM.SFO ATTRIBUTE --enable ps_move_support --out PARAM.SFO.new
+
+:: Start a new SFO from a registry template
+sfo-editor.exe create --template game --title "My Game" --appid MYGAME001 --out PARAM.SFO
+
+:: Key and flag reference, generated from the registry
+sfo-editor.exe docs
+```
+
+The GUI (`sfo-editor-gui.exe`) opens files via the native file dialog,
+edits in place with separate Save / Save As, renders bitmask keys as
+grouped, labelled checkboxes (reserved bits hidden), and offers an
+"absent — Add" row for registry-known keys the file doesn't carry — useful
+on retail SFOs, which often omit `ATTRIBUTE` entirely.
+
 ## Getting started
 
 ### Host dependencies
