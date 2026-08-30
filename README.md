@@ -45,6 +45,11 @@ End users who don't need to build the toolchain from source can use `ps3-sdk-vX.
 ### Install
 
 1. **Extract the archive** somewhere stable.  The path you pick is the value of `%PS3DK%`.
+   `tar -xf` (Windows 10+) or 7-Zip are the tested extractors.  Note for the
+   v0.11.15 archive only: PowerShell `Expand-Archive` and Explorer read its
+   timestamps as local time, so within 12 hours of publication files could
+   land "in the future" and make CMake/Ninja loop; archives from later
+   releases carry normalised timestamps and extract correctly with any tool.
 
 2. **Set `PS3DK` permanently** for your user account.  In a regular `cmd` window:
    ```cmd
