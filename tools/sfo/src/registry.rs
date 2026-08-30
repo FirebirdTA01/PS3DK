@@ -196,6 +196,12 @@ impl Schema {
     pub fn key(&self, name: &str) -> Option<&Key> {
         self.keys.iter().find(|key| key.name == name)
     }
+
+    pub fn key_for_name(&self, name: &str) -> Option<&Key> {
+        self.keys
+            .iter()
+            .find(|key| key.name == name || key.range_matches(name))
+    }
 }
 
 impl Key {
@@ -205,6 +211,34 @@ impl Key {
 
     pub fn flag_table(&self, id: &str) -> Option<&FlagTable> {
         self.flag_tables.iter().find(|table| table.id == id)
+    }
+
+    fn range_matches(&self, name: &str) -> bool {
+        let Some((start, end)) = self.name.split_once("..") else {
+            return false;
+        };
+        if start.len() != end.len() || name.len() != start.len() {
+            return false;
+        }
+        let prefix_len = start
+            .chars()
+            .zip(end.chars())
+            .take_while(|(left, right)| left == right)
+            .map(|(ch, _)| ch.len_utf8())
+            .sum::<usize>();
+        if !name.starts_with(&start[..prefix_len]) {
+            return false;
+        }
+        let Ok(value) = name[prefix_len..].parse::<u32>() else {
+            return false;
+        };
+        let Ok(low) = start[prefix_len..].parse::<u32>() else {
+            return false;
+        };
+        let Ok(high) = end[prefix_len..].parse::<u32>() else {
+            return false;
+        };
+        value >= low && value <= high
     }
 }
 

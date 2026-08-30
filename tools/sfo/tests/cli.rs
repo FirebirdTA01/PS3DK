@@ -253,6 +253,58 @@ fn gui_headless_flags_use_category_context() {
 }
 
 #[test]
+fn gui_headless_add_creates_localized_title_entry() {
+    let input = fixture("ps3dk-template.sfo");
+    let out = temp_path("gui-add-title.PARAM.SFO");
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-add",
+            "TITLE_01=English title",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    let title = entry(&doc, "TITLE_01");
+    assert_eq!(title.format, 0x0204);
+    assert_eq!(title.max_len, 128);
+    assert_eq!(doc.get_string("TITLE_01").unwrap(), "English title");
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn gui_headless_flag_adds_absent_region_deny_before_toggling() {
+    let input = fixture("ps3dk-template.sfo");
+    let out = temp_path("gui-region-deny.PARAM.SFO");
+
+    let output = sfo_editor_gui()
+        .args([
+            "--open",
+            input.to_str().unwrap(),
+            "--gui-enable",
+            "REGION_DENY:japan",
+            "--save-as",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
+    let region_deny = entry(&doc, "REGION_DENY");
+    assert_eq!(region_deny.format, 0x0404);
+    assert_eq!(region_deny.max_len, 4);
+    assert_eq!(doc.get_integer("REGION_DENY").unwrap(), 1);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn gui_headless_create_writes_the_game_template() {
     let out = temp_path("gui-created.PARAM.SFO");
 
@@ -632,6 +684,37 @@ fn inspect_json_resolves_registry_metadata_and_decoded_flags() {
         serde_json::json!(["move_controller_enabled"])
     );
     assert!(json_entry(&entries, "MYSTERY")["registry"].is_null());
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn inspect_json_resolves_registry_range_keys() {
+    let input = temp_path("inspect-title-range.PARAM.SFO");
+    let mut doc = sfo::psf::parse(include_bytes!("fixtures/ps3dk-template.sfo")).unwrap();
+    let registry = sfo::registry::Registry::load_default().unwrap();
+    sfo::edit::add_value_with_options(
+        &mut doc,
+        &registry,
+        "TITLE_01",
+        "English title",
+        None,
+        None,
+        false,
+    )
+    .unwrap();
+    std::fs::write(&input, sfo::psf::write_preserving(&doc.entries).unwrap()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        .args(["inspect", input.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(output.stderr));
+    let entries: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let title = json_entry(&entries, "TITLE_01");
+    assert_eq!(title["registry"]["schema"], "game");
+    assert_eq!(title["registry"]["known"], true);
+    assert_eq!(title["registry"]["confidence"], "confirmed");
     let _ = std::fs::remove_file(input);
 }
 

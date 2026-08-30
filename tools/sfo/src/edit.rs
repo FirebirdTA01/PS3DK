@@ -102,7 +102,7 @@ pub fn add_value_with_options(
 
     let registry_key = registry
         .schema(SchemaId::Game)
-        .and_then(|schema| schema.key(key));
+        .and_then(|schema| schema.key_for_name(key));
     let format_kind = match (ty, registry_key.map(|key| key.format)) {
         (Some(NewEntryType::Array), _) => FormatKind::Array,
         (Some(NewEntryType::Utf8), _) => FormatKind::Utf8,
@@ -183,7 +183,7 @@ pub fn set_flag(
 ) -> Result<()> {
     let definition = registry
         .schema(context.schema_id())
-        .and_then(|schema| schema.key(key))
+        .and_then(|schema| schema.key_for_name(key))
         .ok_or_else(|| anyhow::anyhow!("SFO registry has no key `{key}`"))?;
     if definition.format != FormatKind::Integer {
         bail!("SFO registry key `{key}` is not an integer bitfield");
@@ -260,7 +260,7 @@ pub fn validate_document(doc: &Document, registry: &Registry, context: FlagConte
     };
 
     for entry in &doc.entries {
-        let Some(definition) = schema.key(&entry.key) else {
+        let Some(definition) = schema.key_for_name(&entry.key) else {
             continue;
         };
         if definition.format == FormatKind::Unknown {

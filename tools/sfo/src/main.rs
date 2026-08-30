@@ -343,7 +343,7 @@ fn registry_entry(
 ) -> serde_json::Value {
     let Some(definition) = registry
         .schema(context.schema_id())
-        .and_then(|schema| schema.key(&entry.key))
+        .and_then(|schema| schema.key_for_name(&entry.key))
     else {
         return serde_json::Value::Null;
     };

@@ -28,6 +28,9 @@ struct Cli {
     #[arg(long = "gui-set", hide = true)]
     assignments: Vec<String>,
 
+    #[arg(long = "gui-add", hide = true)]
+    adds: Vec<String>,
+
     #[arg(long = "gui-enable", hide = true)]
     enables: Vec<String>,
 
@@ -71,6 +74,7 @@ fn run() -> Result<()> {
         save: cli.save,
         save_as: cli.save_as,
         assignments: cli.assignments,
+        adds: cli.adds,
         enables: cli.enables,
         disables: cli.disables,
         schema: cli.schema,

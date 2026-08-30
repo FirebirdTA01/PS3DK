@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use eframe::egui;
 
 use sfo::psf::{self, Document, Entry, Value};
@@ -11,6 +11,7 @@ pub struct LaunchOptions {
     pub save: bool,
     pub save_as: Option<PathBuf>,
     pub assignments: Vec<String>,
+    pub adds: Vec<String>,
     pub enables: Vec<String>,
     pub disables: Vec<String>,
     pub schema: Option<String>,
@@ -24,6 +25,7 @@ pub fn run(options: LaunchOptions) -> Result<()> {
     if options.save_as.is_some()
         || options.save
         || !options.assignments.is_empty()
+        || !options.adds.is_empty()
         || !options.enables.is_empty()
         || !options.disables.is_empty()
         || options.create_template.is_some()
@@ -61,6 +63,9 @@ fn run_headless(options: LaunchOptions) -> Result<()> {
     }
     for assignment in options.assignments {
         model.apply_assignment(&assignment, options.grow)?;
+    }
+    for assignment in options.adds {
+        model.add_assignment(&assignment, options.grow)?;
     }
     for flag in options.enables {
         model.set_flag_from_spec(&flag, true)?;
@@ -165,6 +170,19 @@ impl GuiModel {
         Ok(())
     }
 
+    pub fn add_assignment(&mut self, assignment: &str, grow: bool) -> Result<()> {
+        let (key, value) = assignment
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("add expects KEY=VALUE"))?;
+        let document = self
+            .document
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no PARAM.SFO is open"))?;
+        sfo::edit::add_value_with_options(document, &self.registry, key, value, None, None, grow)?;
+        self.dirty = true;
+        Ok(())
+    }
+
     pub fn set_flag_from_spec(&mut self, spec: &str, enabled: bool) -> Result<()> {
         let (key, flag) = parse_flag_spec(spec)?;
         self.set_flag(key, flag, enabled)
@@ -172,12 +190,41 @@ impl GuiModel {
 
     pub fn set_flag(&mut self, key: &str, flag: &str, enabled: bool) -> Result<()> {
         let context = self.flag_context()?;
+        self.ensure_bitfield_entry(key, context)?;
+        let document = self.document.as_mut().expect("document checked above");
+        sfo::edit::set_flag(document, &self.registry, context, key, flag, enabled)?;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn ensure_bitfield_entry(&mut self, key: &str, context: sfo::edit::FlagContext) -> Result<()> {
         let document = self
             .document
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("no PARAM.SFO is open"))?;
-        sfo::edit::set_flag(document, &self.registry, context, key, flag, enabled)?;
-        self.dirty = true;
+        if document.entries.iter().any(|entry| entry.key == key) {
+            return Ok(());
+        }
+        let definition = self
+            .registry
+            .schema(context.schema_id())
+            .and_then(|schema| schema.key_for_name(key))
+            .ok_or_else(|| anyhow::anyhow!("SFO registry has no key `{key}`"))?;
+        if definition.format != sfo::registry::FormatKind::Integer {
+            bail!("SFO registry key `{key}` is not an integer bitfield");
+        }
+        if sfo::edit::flags_for_context(definition, context).is_empty() {
+            bail!("SFO registry key `{key}` has no flags");
+        }
+        sfo::edit::add_value_with_options(
+            document,
+            &self.registry,
+            key,
+            "0",
+            Some(sfo::edit::NewEntryType::Integer),
+            definition.max_len,
+            false,
+        )?;
         Ok(())
     }
 
@@ -216,7 +263,7 @@ impl GuiModel {
             if let Some(key) = self
                 .registry
                 .schema(context.schema_id())
-                .and_then(|schema| schema.key(&entry.key))
+                .and_then(|schema| schema.key_for_name(&entry.key))
             {
                 return format!("{} / {}", context.name(), confidence_name(key.confidence));
             }
@@ -232,6 +279,9 @@ struct GuiApp {
     schema_choice: String,
     grow: bool,
     rows: Vec<RowState>,
+    localized_titles: Vec<LocalizedTitleState>,
+    add_key: String,
+    add_value: String,
 }
 
 impl GuiApp {
@@ -242,6 +292,7 @@ impl GuiApp {
             model.open_path(&path)?;
         }
         let rows = rows_from_model(&model);
+        let localized_titles = localized_titles_from_model(&model);
         Ok(Self {
             model,
             create_title: "PS3DK Sample".to_owned(),
@@ -249,11 +300,15 @@ impl GuiApp {
             schema_choice: "auto".to_owned(),
             grow: false,
             rows,
+            localized_titles,
+            add_key: "TITLE_01".to_owned(),
+            add_value: String::new(),
         })
     }
 
     fn reload_rows(&mut self) {
         self.rows = rows_from_model(&self.model);
+        self.localized_titles = localized_titles_from_model(&self.model);
     }
 
     fn open_dialog(&mut self) {
@@ -286,9 +341,13 @@ impl GuiApp {
             return;
         };
         let assignment = format!("{}={}", row.key, row.value);
-        match self.model.apply_assignment(&assignment, self.grow) {
+        self.apply_assignment(&assignment);
+    }
+
+    fn apply_assignment(&mut self, assignment: &str) {
+        match self.model.apply_assignment(assignment, self.grow) {
             Ok(()) => {
-                self.model.status = format!("Updated {}", row.key);
+                self.model.status = format!("Updated {}", assignment_key(assignment));
                 self.reload_rows();
             }
             Err(err) => self.model.status = err.to_string(),
@@ -303,6 +362,33 @@ impl GuiApp {
         ) {
             Ok(()) => self.reload_rows(),
             Err(err) => self.model.status = err.to_string(),
+        }
+    }
+
+    fn add_entry(&mut self) {
+        let assignment = format!("{}={}", self.add_key.trim(), self.add_value);
+        self.add_assignment(&assignment);
+    }
+
+    fn add_assignment(&mut self, assignment: &str) {
+        match self.model.add_assignment(&assignment, self.grow) {
+            Ok(()) => {
+                self.model.status = format!("Added {}", assignment_key(assignment));
+                self.reload_rows();
+            }
+            Err(err) => self.model.status = err.to_string(),
+        }
+    }
+
+    fn apply_localized_title(&mut self, index: usize) {
+        let Some(title) = self.localized_titles.get(index) else {
+            return;
+        };
+        let assignment = format!("{}={}", title.key, title.value);
+        if title.present {
+            self.apply_assignment(&assignment);
+        } else {
+            self.add_assignment(&assignment);
         }
     }
 
@@ -380,6 +466,16 @@ impl eframe::App for GuiApp {
                     if ui.button("New game").clicked() {
                         self.create_game();
                     }
+                    ui.separator();
+                    ui.label("Add");
+                    ui.add_sized([110.0, 24.0], egui::TextEdit::singleline(&mut self.add_key));
+                    ui.add_sized(
+                        [180.0, 24.0],
+                        egui::TextEdit::singleline(&mut self.add_value),
+                    );
+                    if ui.button("Add").clicked() {
+                        self.add_entry();
+                    }
                 });
             });
         });
@@ -396,6 +492,29 @@ impl eframe::App for GuiApp {
             }
 
             let mut pending = None;
+            egui::CollapsingHeader::new("Localized titles")
+                .default_open(false)
+                .show(ui, |ui| {
+                    egui::Grid::new("localized_titles")
+                        .striped(true)
+                        .min_col_width(72.0)
+                        .show(ui, |ui| {
+                            for (index, title) in self.localized_titles.iter_mut().enumerate() {
+                                ui.monospace(title.key);
+                                ui.label(title.label);
+                                ui.add_sized(
+                                    [300.0, 22.0],
+                                    egui::TextEdit::singleline(&mut title.value),
+                                );
+                                let label = if title.present { "Apply" } else { "Add" };
+                                if ui.button(label).clicked() {
+                                    pending = Some(PendingAction::LocalizedTitle(index));
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+
             egui::ScrollArea::both().show(ui, |ui| {
                 egui::Grid::new("sfo_entries")
                     .striped(true)
@@ -413,8 +532,35 @@ impl eframe::App for GuiApp {
                             ui.label(&row.format);
                             ui.label(row.max_len.to_string());
                             ui.label(&row.registry);
-                            ui.add_sized([300.0, 22.0], egui::TextEdit::singleline(&mut row.value));
-                            if ui.button("Apply").clicked() {
+                            if row.choices.is_empty() {
+                                ui.add_enabled_ui(row.present, |ui| {
+                                    ui.add_sized(
+                                        [300.0, 22.0],
+                                        egui::TextEdit::singleline(&mut row.value),
+                                    );
+                                });
+                            } else {
+                                let mut choice_changed = false;
+                                egui::ComboBox::from_id_salt(format!("choice_{}", row.key))
+                                    .selected_text(choice_label(row))
+                                    .show_ui(ui, |ui| {
+                                        for choice in &row.choices {
+                                            choice_changed |= ui
+                                                .selectable_value(
+                                                    &mut row.value,
+                                                    choice.value.clone(),
+                                                    &choice.label,
+                                                )
+                                                .changed();
+                                        }
+                                    });
+                                if choice_changed {
+                                    pending = Some(PendingAction::Apply(index));
+                                }
+                            }
+                            let apply_button =
+                                ui.add_enabled(row.present, egui::Button::new("Apply"));
+                            if apply_button.clicked() {
                                 pending = Some(PendingAction::Apply(index));
                             }
                             ui.end_row();
@@ -443,6 +589,7 @@ impl eframe::App for GuiApp {
             if let Some(pending) = pending {
                 match pending {
                     PendingAction::Apply(index) => self.apply_row(index),
+                    PendingAction::LocalizedTitle(index) => self.apply_localized_title(index),
                     PendingAction::Flag { key, flag, enabled } => {
                         self.set_flag(&key, &flag, enabled);
                     }
@@ -454,6 +601,7 @@ impl eframe::App for GuiApp {
 
 enum PendingAction {
     Apply(usize),
+    LocalizedTitle(usize),
     Flag {
         key: String,
         flag: String,
@@ -467,7 +615,21 @@ struct RowState {
     max_len: u32,
     registry: String,
     value: String,
+    present: bool,
+    choices: Vec<ValueChoice>,
     flags: Vec<FlagState>,
+}
+
+struct LocalizedTitleState {
+    key: &'static str,
+    label: &'static str,
+    value: String,
+    present: bool,
+}
+
+struct ValueChoice {
+    value: String,
+    label: String,
 }
 
 struct FlagState {
@@ -487,7 +649,32 @@ fn rows_from_model(model: &GuiModel) -> Vec<RowState> {
             max_len: entry.max_len,
             registry: model.registry_label(entry, context),
             value: value_text(&entry.value),
+            present: true,
+            choices: value_choices(model, entry, context),
             flags: flag_states(model, entry, context),
+        })
+        .chain(missing_flag_rows(model, context))
+        .collect()
+}
+
+fn localized_titles_from_model(model: &GuiModel) -> Vec<LocalizedTitleState> {
+    LOCALIZED_TITLES
+        .iter()
+        .map(|&(key, label)| {
+            let value = model
+                .entries()
+                .iter()
+                .find_map(|entry| match (&entry.key, &entry.value) {
+                    (entry_key, Value::String(value)) if entry_key == key => Some(value.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            LocalizedTitleState {
+                key,
+                label,
+                present: !value.is_empty() || model.entries().iter().any(|entry| entry.key == *key),
+                value,
+            }
         })
         .collect()
 }
@@ -503,7 +690,7 @@ fn flag_states(
     let Some(definition) = model
         .registry
         .schema(context.schema_id())
-        .and_then(|schema| schema.key(&entry.key))
+        .and_then(|schema| schema.key_for_name(&entry.key))
     else {
         return Vec::new();
     };
@@ -515,6 +702,97 @@ fn flag_states(
             enabled: *value & flag.mask == flag.mask,
         })
         .collect()
+}
+
+fn missing_flag_rows(
+    model: &GuiModel,
+    context: Option<sfo::edit::FlagContext>,
+) -> impl Iterator<Item = RowState> + '_ {
+    let existing = model
+        .entries()
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    context
+        .and_then(|context| {
+            model
+                .registry
+                .schema(context.schema_id())
+                .map(|schema| (context, schema))
+        })
+        .into_iter()
+        .flat_map(move |(context, schema)| {
+            schema.keys.iter().filter_map({
+                let existing = existing.clone();
+                move |key| {
+                    let flags = sfo::edit::flags_for_context(key, context);
+                    if flags.is_empty() || existing.contains(key.name.as_str()) {
+                        return None;
+                    }
+                    Some(RowState {
+                        key: key.name.clone(),
+                        format: "integer".to_owned(),
+                        max_len: key.max_len.unwrap_or(4),
+                        registry: format!(
+                            "{} / {}",
+                            context.name(),
+                            confidence_name(key.confidence)
+                        ),
+                        value: "absent".to_owned(),
+                        present: false,
+                        choices: Vec::new(),
+                        flags: flags
+                            .iter()
+                            .map(|flag| FlagState {
+                                name: flag.name.clone(),
+                                label: flag.label.clone(),
+                                enabled: false,
+                            })
+                            .collect(),
+                    })
+                }
+            })
+        })
+}
+
+fn value_choices(
+    model: &GuiModel,
+    entry: &Entry,
+    context: Option<sfo::edit::FlagContext>,
+) -> Vec<ValueChoice> {
+    let Some(context) = context else {
+        return Vec::new();
+    };
+    let Some(definition) = model
+        .registry
+        .schema(context.schema_id())
+        .and_then(|schema| schema.key_for_name(&entry.key))
+    else {
+        return Vec::new();
+    };
+    definition
+        .values
+        .iter()
+        .map(|value| ValueChoice {
+            value: value.value.clone(),
+            label: format!("{} - {}", value.value, value.label),
+        })
+        .collect()
+}
+
+fn choice_label(row: &RowState) -> String {
+    row.choices
+        .iter()
+        .find(|choice| choice.value == row.value)
+        .map(|choice| choice.label.clone())
+        .unwrap_or_else(|| row.value.clone())
+}
+
+fn assignment_key(assignment: &str) -> &str {
+    assignment
+        .split_once('=')
+        .map(|(key, _)| key)
+        .unwrap_or(assignment)
 }
 
 fn parse_flag_spec(spec: &str) -> Result<(&str, &str)> {
@@ -537,6 +815,29 @@ fn confidence_name(confidence: Confidence) -> &'static str {
         Confidence::Gap => "gap",
     }
 }
+
+const LOCALIZED_TITLES: &[(&str, &str)] = &[
+    ("TITLE_00", "Japanese"),
+    ("TITLE_01", "English"),
+    ("TITLE_02", "French"),
+    ("TITLE_03", "Spanish"),
+    ("TITLE_04", "German"),
+    ("TITLE_05", "Italian"),
+    ("TITLE_06", "Dutch"),
+    ("TITLE_07", "Portuguese"),
+    ("TITLE_08", "Russian"),
+    ("TITLE_09", "Korean"),
+    ("TITLE_10", "Chinese Traditional"),
+    ("TITLE_11", "Chinese Simplified"),
+    ("TITLE_12", "Finnish"),
+    ("TITLE_13", "Swedish"),
+    ("TITLE_14", "Danish"),
+    ("TITLE_15", "Norwegian"),
+    ("TITLE_16", "Polish"),
+    ("TITLE_17", "Portuguese Brazilian"),
+    ("TITLE_18", "English UK"),
+    ("TITLE_19", "Turkish"),
+];
 
 fn format_name(entry: &Entry) -> String {
     match entry.format {
