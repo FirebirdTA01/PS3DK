@@ -72,6 +72,77 @@ battery.
   `.sprx` (`.self` boot) rows need a per-row boot artefact (follow-up).
 - Everything listed under v0.11.0's known limitations still applies.
 
+## [v0.11.15] — 2026-08-29
+
+Patch release: every PRX container is now verified on RPCS3, the release
+pipeline validates itself, and the SPRX path is guarded by the regression
+battery.
+
+### Added
+
+- **PRX export round-trip** (`t_fe7c705a`): `prx-gen exports` reads a built
+  module's export table back to YAML; `nidgen entgen` renders a YAML into the
+  `<sys/prx_module.h>` macros; `ps3_prx_export_roundtrip(<target>)` compares
+  the two canonical forms as a build step and fails with both tables printed
+  when they disagree. `nidgen`'s `Export` schema gains `kind:
+  function|variable|tlsvar` (default `function`).
+- **Paired module containers** (A4): `ps3_add_prx(... SIGN)` now emits both
+  `<target>.sprx` (`make_sprx`, real-signed) and `<target>.fake.sprx`
+  (`fself`), mirroring `ps3_add_self`'s `.self` + `.fake.self`; a `.self`
+  loads the `.sprx`, a `.fake.self` loads the `.fake.sprx`.
+- **Regression battery row `sprx-load`**: builds the shipped
+  `hello-sprx-export` / `hello-sprx-import` pair (no copies) and asserts
+  `PRX_IMPORT_OK` on RPCS3.
+- **Release-tree gate** `scripts/check-release-tree.sh`, run by
+  `package-windows-release.sh` as its last act: every manifest artefact
+  present (aliases resolved), version stamps (`README.txt`, `VERSION`,
+  `cell/sdk_version.h`) equal, `ON_TAG` for release cuts, required symbols
+  present in both ABIs' archives, no symlinks.
+- `release.yml` validates the staged Windows host tools from
+  `cmake/ps3-required-artifacts.txt` instead of a frozen list.
+
+- **portlibs now build and ship**: `pixman`, `freetype`, `cairo` and `libzip`
+  join `zlib` and `libpng`. Their recipes were added after the last green CI
+  run and had never completed; four of these libraries have not shipped before.
+
+### Fixed
+
+- **Real-signed `.sprx` did not load** (`0x80011148`): `make_sprx` labelled
+  the container `se_flags=7` while encrypting with the revision-1 key, and
+  `prx-gen` wrote the program-header table past the last segment, which a
+  SELF round trip drops. `make_sprx` is built from a relabelled copy of
+  `make_self.c`; `lv2-prx.ld` reserves the `0x700000A4` program header and
+  `prx-gen` fills it in place, keeping the table at `0x40` inside the first
+  `PT_LOAD` (the layout Sony modules use).
+- The packaging gate rejected every non-tag build (version suffix and
+  `ON_TAG` compared unconditionally); `ON_TAG` is now required only with
+  `--require-on-tag`, which packaging passes for clean `vX.Y.Z` versions.
+
+### Changed
+
+- Docs: `docs/design/sprx-generation.md` records the signing routes and the
+  verified outcomes; `docs/design/shader-compiler-conformance.md` (design
+  for testing `rsx-cg-compiler` against the PSL1GHT #170 feature set).
+
+### Known limitations
+
+- `cairo` and `pixman` are built without threading support
+  (`CAIRO_NO_MUTEX=1`, `PIXMAN_NO_TLS`): safe for single-threaded use, which is
+  all the bundled samples need, but do not call them from two threads.
+
+- Real-signed `.sprx` is verified on RPCS3 only; hardware acceptance
+  untested.
+- The battery asserts `.fake.sprx`; the `.prx` (raw `.elf` boot) and real
+  `.sprx` (`.self` boot) rows need a per-row boot artefact (follow-up).
+- Everything listed under v0.11.0's known limitations still applies.
+
+- Known behaviour (unchanged, now documented): `sb.st_mtime` / `st_atime` / `st_ctime` do not compile against the PS3DK `<sys/stat.h>` — the wrapper removes newlib's convenience macros so those names can be struct members (`CellFsStat`, `sysFSStat`). Use `sb.st_mtim.tv_sec` etc. Ports needing the shortcut are patched (libzip).
+
+### Build pipeline (from-source and CI) — nine latent breaks fixed
+
+The `build-toolchain-windows` release job had not completed since 2026-05-30; a fresh-prefix replay found and fixed, in order: PSL1GHT compat patches 0014/0017/0018 now guard their `cell/*.h` includes and wrappers with `__has_include`, so PSL1GHT's own libresc/libsysutil build (they had not since 2026-06-28); `build-psl1ght.sh` resets the vendored tree before applying the series and fails on a rejected hunk (it used to warn and continue); obsolete patch 0005 dropped; PSL1GHT pinned to `f649a08` in `bootstrap.sh` (it cloned master-of-the-day); `build-runtime-lv2.sh` installs the SDK headers before building librt; portlibs: pixman built with `PIXMAN_NO_TLS` (works around an ILP32 `-fPIC` TLS ICE in our GCC — tracked separately), cairo with `CAIRO_NO_MUTEX=1` and library-only, libzip with the `st_mtim.tv_sec` patch and its CMake feature probes pre-seeded (the toolchain file's STATIC_LIBRARY probe mode answers yes to every `check_function_exists` — tracked separately); `build-portlibs.sh` fails on an unknown recipe name. The header-seeding attempt (164e305) did not work and was reverted in the same series.
+- Packaging gate: `package-windows-release.sh` decides "is this a release cut" by `git describe --exact-match --tags HEAD`, not by whether the version string is bare — a clean branch build is bare too, so every CI dispatch used to demand `ON_TAG=1` and fail. Tag runs still require it.
+
 ## [v0.11.0] — 2026-08-29
 
 First Windows release with PRX/SPRX module support and no Python on the
