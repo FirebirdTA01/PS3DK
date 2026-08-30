@@ -189,6 +189,14 @@ sdk_core  ppu/lib/lv2-prx.specs
 sdk_core  ppu/lib/lp64/lv2-prx-crt.o
 sdk_core  ppu/lib/librsx.a
 sdk_core  ppu/lib/lp64/librsx.a
+# pthread shim (2026-08-30): the shadow header fronts newlib's _POSIX_THREADS-
+# gated <pthread.h>; libpthread.a is an INPUT(-lrt) LINKER SCRIPT, not an
+# archive (validated by presence -- an alias row would demand byte-identity
+# with librt.a and fail).  The pthread_* symbols themselves are asserted on
+# librt.a by scripts/check-release-tree.sh.
+sdk_core  ppu/include/pthread.h
+sdk_core  ppu/lib/libpthread.a
+sdk_core  ppu/lib/lp64/libpthread.a
 
 # --- Stub aliases (must exist as symlink->target or byte-identical copy) --
 alias     ppu/lib/libdbgfont_gcm.a         libdbgfont.a

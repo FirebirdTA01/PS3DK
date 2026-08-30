@@ -92,10 +92,18 @@ bad() { printf "  FAIL    %s\n" "$1"; fail=$((fail+1)); }
 #                    stamps still looked correct.
 #   lv2-prx-crt.o    without __sys_prx_module_info the crt cannot anchor a
 #                    PRX; the file existing says nothing about that.
+#   librt.a pthread  v0.12.0 ships the pthread shim inside librt.a (pthread.o);
+#                    trylock is the member carrying the EDEADLK->EBUSY fold,
+#                    and a cut whose librt.a predates the shim would still
+#                    carry correct-looking version stamps.  libpthread.a is a
+#                    linker script (INPUT(-lrt)) -- presence-checked via the
+#                    manifest, never nm'd.
 # ---------------------------------------------------------------------------
 REQUIRED_SYMBOLS=(
     "ppu/lib/librt.a|getpeername getsockname select|defined"
     "ppu/lib/lp64/librt.a|getpeername getsockname select|defined"
+    "ppu/lib/librt.a|pthread_mutex_init pthread_mutex_trylock pthread_create pthread_once pthread_key_create pthread_cond_wait|defined"
+    "ppu/lib/lp64/librt.a|pthread_mutex_init pthread_mutex_trylock pthread_create pthread_once pthread_key_create pthread_cond_wait|defined"
     "ppu/lib/lv2-prx-crt.o|__sys_prx_module_info|any"
     "ppu/lib/lp64/lv2-prx-crt.o|__sys_prx_module_info|any"
 )
