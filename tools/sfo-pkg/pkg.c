@@ -307,9 +307,27 @@ static void get_files(const char *folder, const char *original)
     HANDLE h = FindFirstFile(pattern, &fd);
     if (h == INVALID_HANDLE_VALUE) return;
 
-    /* Collect entries: files first, then directories */
-    char files_list[MAX_FILES][260];
-    char dirs_list[MAX_FILES][260];
+    /* Collect entries: files first, then directories.
+       LOCAL FIX (PS3 Custom Toolchain): heap-allocated, NOT stack arrays.
+       At [MAX_FILES][260] these two tables are ~532 KB together per
+       recursion frame; against the linked 2 MB stack reserve (mingw's
+       default — measured from the shipped exe's PE header,
+       SizeOfStackReserve 0x200000) the FOURTH frame overflows, i.e. a
+       tree three subdirectories deep counting from the packaged root
+       (the root walk is frame one).  Crashed 0xC00000FD before
+       producing any output; found by the first external consumer
+       packaging USRDIR/Data/SkyBox; upstream carries the same frames.
+       They stay live across the recursion below, so they are freed
+       only at the end of this call. */
+    char (*files_list)[260] = malloc(sizeof(char[MAX_FILES][260]));
+    char (*dirs_list)[260]  = malloc(sizeof(char[MAX_FILES][260]));
+    if (!files_list || !dirs_list) {
+        fprintf(stderr, "pkg: out of memory walking %s\n", folder);
+        free(files_list);
+        free(dirs_list);
+        FindClose(h);
+        return;
+    }
     int  nfiles = 0, ndirs = 0;
 
     do {
@@ -379,6 +397,9 @@ static void get_files(const char *folder, const char *original)
 
         get_files(dirs_list[i], original);
     }
+
+    free(files_list);
+    free(dirs_list);
 }
 #else  /* POSIX */
 static void collect_dir(const char *folder, const char *original)
@@ -386,9 +407,22 @@ static void collect_dir(const char *folder, const char *original)
     DIR *dp = opendir(folder);
     if (!dp) { perror(folder); return; }
 
-    /* Collect names */
-    char files_list[MAX_FILES][512];
-    char dirs_list[MAX_FILES][512];
+    /* Collect names.
+       LOCAL FIX (PS3 Custom Toolchain): heap-allocated, NOT stack arrays —
+       at [MAX_FILES][512] these two tables are 1 MB together per recursion
+       level; see the Win32 branch's note for the depth-3 stack-overflow
+       this caused there.  Linux's larger default stack merely hid the same
+       bug to greater depth.  Freed at the end of this call, after the
+       recursion that keeps them live. */
+    char (*files_list)[512] = malloc(sizeof(char[MAX_FILES][512]));
+    char (*dirs_list)[512]  = malloc(sizeof(char[MAX_FILES][512]));
+    if (!files_list || !dirs_list) {
+        fprintf(stderr, "pkg: out of memory walking %s\n", folder);
+        free(files_list);
+        free(dirs_list);
+        closedir(dp);
+        return;
+    }
     int  nfiles = 0, ndirs = 0;
 
     size_t foldlen = strlen(folder);
@@ -481,6 +515,9 @@ static void collect_dir(const char *folder, const char *original)
 
         collect_dir(dirs_list[i], original);
     }
+
+    free(files_list);
+    free(dirs_list);
 }
 static void get_files(const char *folder, const char *original)
 {
