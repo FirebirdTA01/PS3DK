@@ -74,14 +74,19 @@ command -v "$HOST_TRIPLE-gcc" >/dev/null \
 say "Using $HOST_TRIPLE-gcc: $(command -v "$HOST_TRIPLE-gcc")"
 
 # -----------------------------------------------------------------------------
-# Source tarballs.  Pinned versions; SHA256s verified after download.
+# Source tarballs.  Pinned versions; each mirror's bytes are verified as it
+# is fetched, so a mirror answering 200 with the wrong content falls through to
+# the next one instead of poisoning the whole chain.
 # -----------------------------------------------------------------------------
 ZLIB_VER="1.3.1"
 ZLIB_SHA256="9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+# Release-tagged URLs first: a tagged artifact does not move, while a project's
+# top-level download page rotates old versions away as new ones ship - which is
+# exactly what broke the v0.12.43 release build.
 ZLIB_URLS=(
-    "https://zlib.net/zlib-${ZLIB_VER}.tar.gz"
-    "https://zlib.net/fossils/zlib-${ZLIB_VER}.tar.gz"
     "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz"
+    "https://zlib.net/fossils/zlib-${ZLIB_VER}.tar.gz"
+    "https://zlib.net/zlib-${ZLIB_VER}.tar.gz"
 )
 
 GMP_VER="6.3.0"
@@ -98,8 +103,8 @@ GMP_URLS=(
 OPENSSL_VER="3.0.16"
 OPENSSL_SHA256="57e03c50feab5d31b152af2b764f10379aecd8ee92f16c985983ce4a99f7ef86"
 OPENSSL_URLS=(
-    "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz"
     "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VER}/openssl-${OPENSSL_VER}.tar.gz"
+    "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz"
 )
 
 # Mike Riepe's libelf 0.8.13 — the last upstream release (2009).  Frozen
@@ -118,27 +123,54 @@ LIBELF_URLS=(
 # Helpers
 # -----------------------------------------------------------------------------
 
+# Fetch with PER-URL verification.  A mirror that answers 200 with the wrong
+# bytes is not a successful download: zlib.net rotated 1.3.1 off its top-level
+# path (normal practice once a newer zlib ships) and served a 355-byte HTML
+# page under the tarball's name.  wget reported success, this function
+# returned, and the two mirrors behind it - both of which had the correct
+# file - were never tried, because verification used to happen after the whole
+# chain rather than inside it.  A wrong-content 200 could therefore poison a
+# fetch that had two good sources available.
+#
+# So the hash is an argument now, and a mirror only counts as having worked if
+# what it returned matches it.  Anything else moves to the next mirror.
 fetch() {
-    local tarball="$1"; shift
-    if [[ -f "$SRC_ROOT/$tarball" ]]; then
-        return 0
+    local tarball="$1" expected="$2"; shift 2
+    local dest="$SRC_ROOT/$tarball"
+
+    # An already-present file is verified too.  It used to be trusted on
+    # existence alone, so a poisoned or truncated cache entry survived every
+    # later run - and --continue below would happily resume onto it.
+    if [[ -f "$dest" ]]; then
+        if [[ "$(sha256sum "$dest" | awk '{print $1}')" == "$expected" ]]; then
+            return 0
+        fi
+        say "Cached $tarball does not match its pin; discarding it"
+        rm -f "$dest"
     fi
+
     for url in "$@"; do
         say "Fetching $url"
-        if wget --quiet \
+        if ! wget --quiet \
             --timeout=30 \
             --dns-timeout=15 \
             --connect-timeout=15 \
             --read-timeout=30 \
             --tries=3 \
             --waitretry=5 \
-            --continue \
-            -O "$SRC_ROOT/$tarball" "$url"; then
+            -O "$dest" "$url"; then
+            rm -f "$dest"
+            continue
+        fi
+        local actual
+        actual="$(sha256sum "$dest" | awk '{print $1}')"
+        if [[ "$actual" == "$expected" ]]; then
             return 0
         fi
-        rm -f "$SRC_ROOT/$tarball"
+        say "  $url returned content that does not match the pin (got $actual); trying the next mirror"
+        rm -f "$dest"
     done
-    die "All mirrors failed for $tarball"
+    die "No mirror returned $tarball matching $expected"
 }
 
 verify_sha256() {
@@ -207,7 +239,7 @@ build_zlib() {
     local stamp="$DEPS_ROOT/.zlib-${ZLIB_VER}-stamp"
     [[ -f "$stamp" ]] && { say "zlib already built"; return 0; }
 
-    fetch "zlib-${ZLIB_VER}.tar.gz" "${ZLIB_URLS[@]}"
+    fetch "zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA256" "${ZLIB_URLS[@]}"
     verify_sha256 "zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA256"
     extract_once "zlib-${ZLIB_VER}.tar.gz" "zlib-${ZLIB_VER}"
 
@@ -227,7 +259,7 @@ build_gmp() {
     local stamp="$DEPS_ROOT/.gmp-${GMP_VER}-stamp"
     [[ -f "$stamp" ]] && { say "GMP already built"; return 0; }
 
-    fetch "gmp-${GMP_VER}.tar.xz" "${GMP_URLS[@]}"
+    fetch "gmp-${GMP_VER}.tar.xz" "$GMP_SHA256" "${GMP_URLS[@]}"
     verify_sha256 "gmp-${GMP_VER}.tar.xz" "$GMP_SHA256"
     extract_once "gmp-${GMP_VER}.tar.xz" "gmp-${GMP_VER}"
 
@@ -265,7 +297,7 @@ build_openssl() {
     local stamp="$DEPS_ROOT/.openssl-${OPENSSL_VER}-stamp"
     [[ -f "$stamp" ]] && { say "OpenSSL already built"; return 0; }
 
-    fetch "openssl-${OPENSSL_VER}.tar.gz" "${OPENSSL_URLS[@]}"
+    fetch "openssl-${OPENSSL_VER}.tar.gz" "$OPENSSL_SHA256" "${OPENSSL_URLS[@]}"
     verify_sha256 "openssl-${OPENSSL_VER}.tar.gz" "$OPENSSL_SHA256"
     extract_once "openssl-${OPENSSL_VER}.tar.gz" "openssl-${OPENSSL_VER}"
 
@@ -333,7 +365,7 @@ build_libelf() {
     local stamp="$DEPS_ROOT/.libelf-${LIBELF_VER}-stamp"
     [[ -f "$stamp" ]] && { say "libelf already built"; return 0; }
 
-    fetch "libelf-${LIBELF_VER}.tar.gz" "${LIBELF_URLS[@]}"
+    fetch "libelf-${LIBELF_VER}.tar.gz" "$LIBELF_SHA256" "${LIBELF_URLS[@]}"
     verify_sha256 "libelf-${LIBELF_VER}.tar.gz" "$LIBELF_SHA256"
     extract_once "libelf-${LIBELF_VER}.tar.gz" "libelf-${LIBELF_VER}"
 
