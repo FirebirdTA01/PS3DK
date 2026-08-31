@@ -2,6 +2,18 @@
 #include <algorithm>
 #include <limits>
 
+namespace
+{
+bool preferOverload(Symbol* candidate, Symbol* currentBest)
+{
+    if (!currentBest) return true;
+
+    // Builtins are registered before source declarations.  For an exact
+    // signature tie, a real source declaration shadows the registered fallback.
+    return currentBest->declaration == nullptr && candidate->declaration != nullptr;
+}
+}
+
 // ============================================================================
 // Scope Implementation
 // ============================================================================
@@ -245,7 +257,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
         if (exact)
         {
             // Exact match beats everything
-            if (!best.exactMatch || best.symbol == nullptr)
+            if (!best.exactMatch || preferOverload(sym, best.symbol))
             {
                 best.symbol = sym;
                 best.conversionCost = 0;
@@ -358,6 +370,8 @@ void SymbolTable::registerMathFunctions()
     addMathFunctionOverloads("asin");
     addMathFunctionOverloads("acos");
     addMathFunctionOverloads("atan");
+    addScalarVectorOverloads("radians", CgType::Float(), CgType::Float());
+    addScalarVectorOverloads("degrees", CgType::Float(), CgType::Float());
 
     // atan2(y, x)
     addFunction("atan2", CgType::Float(), {CgType::Float(), CgType::Float()}, {"y", "x"}, nullptr, true);

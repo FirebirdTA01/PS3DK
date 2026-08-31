@@ -3,6 +3,19 @@
 #include <sstream>
 #include <unordered_set>
 
+namespace
+{
+constexpr float kPiDiv180 = 0.017453292519943295769f;
+constexpr float k180DivPi = 57.295779513082320876f;
+
+std::optional<float> angleConversionScale(const std::string& name)
+{
+    if (name == "radians") return kPiDiv180;
+    if (name == "degrees") return k180DivPi;
+    return std::nullopt;
+}
+}
+
 // ============================================================================
 // Constructor/Destructor
 // ============================================================================
@@ -1268,6 +1281,15 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     }
 
     IRTypeInfo resultType = getExprType(expr);
+
+    if (auto scale = angleConversionScale(expr->functionName);
+        scale && argValues.size() == 1 && expr->resolvedFunction == nullptr)
+    {
+        // resolvedFunction == nullptr here means the registered-builtin path;
+        // source declarations shadow it via SymbolTable's overload tie-break.
+        IRValueID scaleValue = createConstant(*scale);
+        return emitBinaryOp(IROp::Mul, resultType, argValues[0], scaleValue);
+    }
 
     if (builtinOp)
     {
