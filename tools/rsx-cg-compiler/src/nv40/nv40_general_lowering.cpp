@@ -982,8 +982,12 @@ private:
         // wide operand - but a SCALAR reading is proof of a narrow one, and
         // proceeding only on proof is the safe direction.  Wider packed forms
         // refuse here and belong to the vec-construct follow-up.
-        if (inst.operands.size() == 2 &&
-            __builtin_popcount(valueComponentMask(inst.operands[1])) != 1) {
+        // "exactly one component" as a one-hot test rather than a popcount:
+        // same predicate, no compiler builtin, and it says what it means.
+        const int tailMask = (inst.operands.size() == 2)
+            ? valueComponentMask(inst.operands[1]) : 0;
+        const bool tailIsScalar = tailMask != 0 && (tailMask & (tailMask - 1)) == 0;
+        if (inst.operands.size() == 2 && !tailIsScalar) {
             program_.diagnostics.push_back(
                 "nv40-general: vec4 construction whose second operand is not a "
                 "scalar is not implemented; refusing rather than packing the "
