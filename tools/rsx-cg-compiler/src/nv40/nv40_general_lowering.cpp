@@ -130,6 +130,11 @@ struct VirtualProgram
     std::unordered_map<int, bool> vregToFp16;
     int nextVpLiteralConst = 467;
     std::vector<std::string> diagnostics;
+    // Set when a lowering could not resolve an operand.  Emission must not
+    // succeed after this: an unresolved operand used to become an empty
+    // source, which encodes as vertex attribute ZERO and produced silently
+    // wrong shaders.  Refusing is the whole point - see resolve().
+    bool unresolvedOperand = false;
 };
 
 static std::string toUpper(std::string s)
@@ -707,6 +712,20 @@ private:
         if (auto* constant = dynamic_cast<const IRConstant*>(value))
             return literalSrc(*constant);
 
+        // REFUSE, do not paper over it.  Returning an empty source here used
+        // to encode as SRC_REG_TYPE_INPUT with no index - i.e. a read of
+        // vertex attribute 0 - so a lowering that quietly dropped a value
+        // produced a shader that computed against the wrong register with no
+        // diagnostic and no input-mask bit.  23 of 27 vertex shaders were
+        // miscompiled that way.  Name the value and what produced it so the
+        // next dropped lowering hands its author the culprit.
+        std::string what = "nv40-general: operand %" + std::to_string(id) +
+                           " could not be resolved";
+        if (value)
+            what += " (defined by " + value->toString() + ")";
+        what += "; refusing rather than emitting an empty source";
+        program_.diagnostics.push_back(what);
+        program_.unresolvedOperand = true;
         return noneSrc();
     }
 
@@ -929,16 +948,35 @@ private:
 
         if (inst.operands.size() != 2 || inst.result == InvalidIRValue)
             return;
-        const auto baseIt = program_.valueToVReg.find(inst.operands[0]);
-        if (baseIt == program_.valueToVReg.end())
-            return;
         if (inst.resultType.componentCount() != 4)
             return;
 
-        program_.valueToVReg[inst.result] = baseIt->second;
+        // The base may be a SOURCE rather than a temp - float4(POSITION, 1)
+        // builds on a shader input, and inputs live in valueToSource, not in
+        // valueToVReg.  This lookup used to fail there and return silently,
+        // leaving inst.result unmapped; resolve() then fell through to
+        // noneSrc(), which encodes as vertex attribute ZERO.  The result was
+        // 23 of 27 vertex shaders reading attribute 0 in place of their
+        // constructed vector, with no diagnostic and no mask bit.
+        // Materialise the base into a temp instead of giving up.
+        int baseReg;
+        const auto baseIt = program_.valueToVReg.find(inst.operands[0]);
+        if (baseIt != program_.valueToVReg.end()) {
+            baseReg = baseIt->second;
+        } else {
+            baseReg = newVReg();
+            VInstr load;
+            load.op = VOp::Mov;
+            load.dst.index = baseReg;
+            load.dst.writemask = 0x7;   // xyz; .w is written just below
+            load.srcs[0] = resolve(inst.operands[0]);
+            program_.instrs.push_back(load);
+        }
+
+        program_.valueToVReg[inst.result] = baseReg;
         VInstr vi;
         vi.op = VOp::Mov;
-        vi.dst.index = baseIt->second;
+        vi.dst.index = baseReg;
         vi.dst.writemask = 0x8;
         vi.srcs[0] = resolve(inst.operands[1]);
         vi.srcs[0].swizzle = {0, 0, 0, 0};
@@ -2660,6 +2698,12 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         return out;
     }
     asm_.markEnd();
+    if (program.unresolvedOperand) {
+        out.diagnostics.push_back(
+            "nv40-general: refusing to emit - one or more operands were unresolved");
+        out.ok = false;
+        return out;
+    }
     out.words = asm_.words();
     out.ok = true;
     attrs.registerCount = static_cast<uint8_t>(std::max(2, asm_.numTempRegs()));
@@ -2737,6 +2781,12 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         return out;
     }
     asm_.markLast();
+    if (program.unresolvedOperand) {
+        out.diagnostics.push_back(
+            "nv40-general: refusing to emit - one or more operands were unresolved");
+        out.ok = false;
+        return out;
+    }
     out.words = asm_.words();
     out.ok = true;
     attrs.registerCount = static_cast<uint32_t>(std::max(1, asm_.numTempRegs()));
