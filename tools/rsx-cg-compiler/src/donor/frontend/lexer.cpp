@@ -163,10 +163,7 @@ std::vector<Token> Lexer::tokenize()
         }
 
         Token token = nextToken();
-        if (token.type != TokenType::UNKNOWN)
-        {
-            tokens.push_back(token);
-        }
+        tokens.push_back(token);
 	}
 
     tokens.push_back({TokenType::END_OF_FILE, "", line, column, filename});
@@ -363,6 +360,15 @@ Token Lexer::nextToken(bool keepPreprocessor)
         }
 
         return { TokenType::OP_DIVIDE, "/", startLine, startColumn };
+
+    case '%':
+        if (peek() == '=')
+        {
+            advance();
+            return { TokenType::OP_MODULO_ASSIGN, "%=", startLine, startColumn };
+        }
+
+        return { TokenType::OP_MODULO, "%", startLine, startColumn };
 
     case '=':
         if (peek() == '=')
