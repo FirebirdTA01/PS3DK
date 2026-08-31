@@ -158,24 +158,22 @@ naming the fix (`-std=gnu99` or later) instead of a hundred unknown-type errors.
 - **Boot gate.** `PTHREAD_OK` from `samples/lv2/hello-ppu-pthread` under desktop RPCS3;
   the same program runs in the regression battery as the `pthread-sync` row.
 
-Note for whoever reads a probe log: **every** link with this toolchain — including
-`int main(void){return 0;}` — prints `ld: error in .../crtend.o(.eh_frame); no
-.eh_frame_hdr table will be created` on stderr. It predates this work and is not a shim
-diagnostic, but it is not cosmetic either: the root cause is `crtend.o` carrying a real
-FDE *after* the `.eh_frame` zero terminator (readelf:
-terminator at 0x0, then an "Invalid length" FDE at 0x7), which ld's unconditional
-`.eh_frame` editing parses into and chokes on. It is not `--eh-frame-hdr` and not
-`lv2.ld`'s `.eh_frame_hdr` section — both were tested. The fix is a toolchain respin with
-crtstuff built `-fno-asynchronous-unwind-tables` (`CRTSTUFF_T_CFLAGS` in our GCC target
-fragment). It matters here because cairo's configure rejects a probe on **any** conftest
-stderr, so until the respin lands `040-cairo.sh` filters exactly that one line.
+Note for whoever reads an OLD probe log (pre patch 0035): every link with those
+toolchains — including `int main(void){return 0;}` — printed `ld: error in
+.../crtend.o(.eh_frame); no .eh_frame_hdr table will be created` on stderr. The root
+cause was `crtend.o` carrying a real FDE *after* the `.eh_frame` zero terminator, which
+ld's unconditional `.eh_frame` editing parses into and chokes on. Fixed by
+`patches/ppu/gcc-12.x/0035-libgcc-t-ps3-crtstuff-no-unwind-tables.patch` (crtstuff built
+`-fno-asynchronous-unwind-tables`, so crtend's `.eh_frame` is exactly the 4-byte
+terminator); `scripts/check-release-tree.sh` gates the section size so it cannot ship
+malformed again. Links are silent now, and cairo's stderr-sensitive pthread probe passes
+with no filter.
 
 ## 6. Follow-ups this leaves open
 
-1. The `crtend.o` `.eh_frame` complaint above — root cause known (FDE after the
-   terminator), fix is a toolchain respin with `-fno-asynchronous-unwind-tables` in
-   `CRTSTUFF_T_CFLAGS`. Until then `040-cairo.sh` carries a filter that must come out
-   when the respin lands.
+1. ~~The `crtend.o` `.eh_frame` complaint~~ — RESOLVED by GCC patch 0035 (crtstuff
+   built `-fno-asynchronous-unwind-tables`); the `040-cairo.sh` filter is removed and
+   `check-release-tree.sh` gates the crtend section size.
 2. pixman rides the `__thread` path, so **cairo is the only portlib that exercises the
    shim**; pixman's `HAVE_PTHREADS` arm stays unexercised. Keep `hello-ppu-pthread` in the
    battery as the direct coverage for `once` / `key` / `getspecific`.
