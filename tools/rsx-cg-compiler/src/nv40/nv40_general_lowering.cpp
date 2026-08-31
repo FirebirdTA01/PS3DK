@@ -65,6 +65,8 @@ enum class VOp
     Lg2,
     Ex2,
     DivSqrt,
+    Frc,
+    Flr,
     Sge,
     Slt,
     Sgt,
@@ -494,6 +496,8 @@ private:
             case VOp::Mov:
             case VOp::Min:
             case VOp::Max:
+            case VOp::Frc:
+            case VOp::Flr:
             case VOp::Sge:
             case VOp::Slt:
             case VOp::Sgt:
@@ -881,6 +885,30 @@ private:
         case IROp::Abs:
             lowerMovWithModifier(inst, false, true);
             return;
+        case IROp::Frac:
+            lowerUnary(inst, VOp::Frc, false);
+            return;
+        case IROp::Floor:
+            lowerUnary(inst, VOp::Flr, false);
+            return;
+        case IROp::Ceil:
+            lowerCeil(inst);
+            return;
+        case IROp::Round:
+            lowerRound(inst);
+            return;
+        case IROp::Sign:
+            lowerSign(inst);
+            return;
+        case IROp::Trunc:
+            lowerTrunc(inst);
+            return;
+        case IROp::Sqrt:
+            lowerSqrt(inst);
+            return;
+        case IROp::Mod:
+            lowerMod(inst);
+            return;
         case IROp::Select:
             lowerSelect(inst);
             return;
@@ -1258,21 +1286,276 @@ private:
         program_.instrs.push_back(vi);
     }
 
-    void lowerDiv(const IRInstruction& inst)
+    static VSrc floatLit(float v)
+    {
+        VSrc s;
+        s.kind = VSrcKind::Literal;
+        s.literal = {v, v, v, v};
+        s.swizzle = {0, 0, 0, 0};
+        return s;
+    }
+
+    // ceil(x) = -floor(-x): FLR into a temp with the source negated,
+    // then a negated MOV into the result.
+    void lowerCeil(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        const int mask = componentMask(inst.resultType);
+        const int t = newVReg();
+        VInstr flr;
+        flr.op = VOp::Flr;
+        flr.dst.index = t;
+        flr.dst.writemask = mask;
+        flr.srcs[0] = resolve(inst.operands[0]);
+        flr.srcs[0].neg = !flr.srcs[0].neg;
+        program_.instrs.push_back(flr);
+
+        VInstr mov;
+        mov.op = VOp::Mov;
+        mov.dst.index = define(inst.result);
+        mov.dst.writemask = mask;
+        mov.srcs[0] = tempSrc(t);
+        mov.srcs[0].neg = true;
+        program_.instrs.push_back(mov);
+    }
+
+    // round(x) = floor(x + 0.5), the Cg stdlib expansion.
+    void lowerRound(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        const int mask = componentMask(inst.resultType);
+        const int t = newVReg();
+        VInstr add;
+        add.op = VOp::Add;
+        add.dst.index = t;
+        add.dst.writemask = mask;
+        add.srcs[0] = resolve(inst.operands[0]);
+        add.srcs[1] = floatLit(0.5f);
+        program_.instrs.push_back(add);
+
+        VInstr flr;
+        flr.op = VOp::Flr;
+        flr.dst.index = define(inst.result);
+        flr.dst.writemask = mask;
+        flr.srcs[0] = tempSrc(t);
+        program_.instrs.push_back(flr);
+    }
+
+    // sign(x) = (x > 0) - (x < 0): 1/0/-1 with sign(0) == 0.
+    void lowerSign(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        const int mask = componentMask(inst.resultType);
+        const int gt = newVReg();
+        const int lt = newVReg();
+
+        VInstr a;
+        a.op = VOp::Sgt;
+        a.dst.index = gt;
+        a.dst.writemask = mask;
+        a.srcs[0] = resolve(inst.operands[0]);
+        a.srcs[1] = floatLit(0.0f);
+        program_.instrs.push_back(a);
+
+        VInstr b;
+        b.op = VOp::Slt;
+        b.dst.index = lt;
+        b.dst.writemask = mask;
+        b.srcs[0] = resolve(inst.operands[0]);
+        b.srcs[1] = floatLit(0.0f);
+        program_.instrs.push_back(b);
+
+        VInstr sub;
+        sub.op = VOp::Add;
+        sub.dst.index = define(inst.result);
+        sub.dst.writemask = mask;
+        sub.srcs[0] = tempSrc(gt);
+        sub.srcs[1] = tempSrc(lt);
+        sub.srcs[1].neg = true;
+        program_.instrs.push_back(sub);
+    }
+
+    // trunc(x) = floor(|x|) * sign(x).
+    void lowerTrunc(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        const int mask = componentMask(inst.resultType);
+        const int mag = newVReg();
+        VInstr flr;
+        flr.op = VOp::Flr;
+        flr.dst.index = mag;
+        flr.dst.writemask = mask;
+        flr.srcs[0] = resolve(inst.operands[0]);
+        flr.srcs[0].abs = true;
+        flr.srcs[0].neg = false;
+        program_.instrs.push_back(flr);
+
+        const int gt = newVReg();
+        const int lt = newVReg();
+        VInstr a;
+        a.op = VOp::Sgt;
+        a.dst.index = gt;
+        a.dst.writemask = mask;
+        a.srcs[0] = resolve(inst.operands[0]);
+        a.srcs[1] = floatLit(0.0f);
+        program_.instrs.push_back(a);
+
+        VInstr b;
+        b.op = VOp::Slt;
+        b.dst.index = lt;
+        b.dst.writemask = mask;
+        b.srcs[0] = resolve(inst.operands[0]);
+        b.srcs[1] = floatLit(0.0f);
+        program_.instrs.push_back(b);
+
+        VInstr sgn;
+        sgn.op = VOp::Add;
+        sgn.dst.index = gt;
+        sgn.dst.writemask = mask;
+        sgn.srcs[0] = tempSrc(gt);
+        sgn.srcs[1] = tempSrc(lt);
+        sgn.srcs[1].neg = true;
+        program_.instrs.push_back(sgn);
+
+        VInstr mul;
+        mul.op = VOp::Mul;
+        mul.dst.index = define(inst.result);
+        mul.dst.writemask = mask;
+        mul.srcs[0] = tempSrc(mag);
+        mul.srcs[1] = tempSrc(gt);
+        program_.instrs.push_back(mul);
+    }
+
+    // sqrt(x) = rcp(rsq(x)): two native scalar ops, and the composition
+    // gets sqrt(0) right (rsq(0)=+inf, rcp(+inf)=0) where x*rsq(x)
+    // would produce 0*inf=NaN.  Fragment only: the VP scalar unit path
+    // is still deferred (same guard as rcp/rsq/sin/cos).
+    void lowerSqrt(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP scalar intrinsic lowering deferred");
+            return;
+        }
+        const int mask = componentMask(inst.resultType);
+        const int t = newVReg();
+        VInstr rsq;
+        rsq.op = VOp::Rsq;
+        rsq.dst.index = t;
+        rsq.dst.writemask = mask;
+        rsq.srcs[0] = resolve(inst.operands[0]);
+        program_.instrs.push_back(rsq);
+
+        VInstr rcp;
+        rcp.op = VOp::Rcp;
+        rcp.dst.index = define(inst.result);
+        rcp.dst.writemask = mask;
+        rcp.srcs[0] = tempSrc(t);
+        program_.instrs.push_back(rcp);
+    }
+
+    // mod(x, y) = x - y * floor(x / y), scalar divisor only for now:
+    // RCP is a scalar op, so a vector divisor needs per-lane RCPs that
+    // belong to a later slice.  Fragment only for the same reason.
+    void lowerMod(const IRInstruction& inst)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
         if (profile_ != GeneralProfile::Fragment ||
-            !isLiteralOne(inst.operands[0])) {
+            valueWidthOf(inst.operands[1]) != 1) {
             program_.diagnostics.push_back(
-                "nv40-general: only reciprocal div lowering is supported");
+                "nv40-general: mod lowering needs a fragment profile and a "
+                "scalar divisor; refusing");
+            program_.loweringFailed = true;
             return;
         }
-        VInstr vi;
-        vi.op = VOp::Rcp;
-        vi.dst.index = define(inst.result);
-        vi.dst.writemask = componentMask(inst.resultType);
-        vi.srcs[0] = resolve(inst.operands[1]);
-        program_.instrs.push_back(vi);
+        const int mask = componentMask(inst.resultType);
+        const int r = newVReg();
+        VInstr rcp;
+        rcp.op = VOp::Rcp;
+        rcp.dst.index = r;
+        rcp.dst.writemask = 0x1;
+        rcp.srcs[0] = resolve(inst.operands[1]);
+        program_.instrs.push_back(rcp);
+
+        const int q = newVReg();
+        VInstr mul;
+        mul.op = VOp::Mul;
+        mul.dst.index = q;
+        mul.dst.writemask = mask;
+        mul.srcs[0] = resolve(inst.operands[0]);
+        mul.srcs[1] = tempSrc(r);
+        mul.srcs[1].swizzle = {0, 0, 0, 0};
+        program_.instrs.push_back(mul);
+
+        VInstr flr;
+        flr.op = VOp::Flr;
+        flr.dst.index = q;
+        flr.dst.writemask = mask;
+        flr.srcs[0] = tempSrc(q);
+        program_.instrs.push_back(flr);
+
+        VInstr mad;
+        mad.op = VOp::Mad;
+        mad.dst.index = define(inst.result);
+        mad.dst.writemask = mask;
+        mad.srcs[0] = tempSrc(q);
+        mad.srcs[0].neg = true;
+        mad.srcs[1] = resolve(inst.operands[1]);
+        mad.srcs[1].swizzle = {0, 0, 0, 0};
+        mad.srcs[2] = resolve(inst.operands[0]);
+        program_.instrs.push_back(mad);
+    }
+
+    void lowerDiv(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP div lowering deferred with the scalar unit");
+            return;
+        }
+        // 1/x keeps its single-instruction form.
+        if (isLiteralOne(inst.operands[0])) {
+            VInstr vi;
+            vi.op = VOp::Rcp;
+            vi.dst.index = define(inst.result);
+            vi.dst.writemask = componentMask(inst.resultType);
+            vi.srcs[0] = resolve(inst.operands[1]);
+            program_.instrs.push_back(vi);
+            return;
+        }
+        // General x/y: RCP is a scalar op, so a w-wide divisor takes one
+        // RCP per lane into a temp, then a single MUL.  Optimizing the
+        // uniform-divisor case is optimization-level work.
+        const int divisorWidth = valueWidthOf(inst.operands[1]);
+        if (divisorWidth < 1 || divisorWidth > 4) {
+            program_.diagnostics.push_back(
+                "nv40-general: div by a divisor of unknown width; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        const int mask = componentMask(inst.resultType);
+        const int r = newVReg();
+        for (int lane = 0; lane < divisorWidth; lane++) {
+            VInstr rcp;
+            rcp.op = VOp::Rcp;
+            rcp.dst.index = r;
+            rcp.dst.writemask = 1 << lane;
+            rcp.srcs[0] = resolve(inst.operands[1]);
+            const uint8_t comp = rcp.srcs[0].swizzle[lane];
+            rcp.srcs[0].swizzle = {comp, comp, comp, comp};
+            program_.instrs.push_back(rcp);
+        }
+        VInstr mul;
+        mul.op = VOp::Mul;
+        mul.dst.index = define(inst.result);
+        mul.dst.writemask = mask;
+        mul.srcs[0] = resolve(inst.operands[0]);
+        mul.srcs[1] = tempSrc(r);
+        if (divisorWidth == 1)
+            mul.srcs[1].swizzle = {0, 0, 0, 0};
+        program_.instrs.push_back(mul);
     }
 
     void lowerBinary(const IRInstruction& inst, VOp op, bool negateRhs = false)
@@ -1882,14 +2165,48 @@ private:
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue)
             return;
-        if (profile_ != GeneralProfile::Vertex || !isLiteralZero(inst.operands[1])) {
-            program_.diagnostics.push_back(
-                "nv40-general: only VP cmple(x, 0) lowering is supported");
+        // VP cmple(x, 0) keeps its predicate-source path: lowerSelect's
+        // VP special case consumes conditionToSource_, and that pairing
+        // is pinned by its fixture.
+        if (profile_ == GeneralProfile::Vertex && isLiteralZero(inst.operands[1])) {
+            VSrc src = resolve(inst.operands[0]);
+            src.swizzle = {0, 0, 0, 0};
+            conditionToSource_[inst.result] = src;
             return;
         }
-        VSrc src = resolve(inst.operands[0]);
-        src.swizzle = {0, 0, 0, 0};
-        conditionToSource_[inst.result] = src;
+        // Everything else is an ordinary comparison: SLE is native in
+        // both units.  (This retires a diagnose-and-continue bail that
+        // printed on dead cmple instructions in otherwise-clean
+        // compiles and would have left a consumed one to the resolve()
+        // refusal.)
+        lowerBinary(inst, VOp::Sle);
+    }
+
+    bool lowerSelectGeneral(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 3)
+            return false;
+        // Operands: (cond, a, b) = cond ? a : b.
+        const int mask = componentMask(inst.resultType);
+        const int d = newVReg();
+        VInstr sub;
+        sub.op = VOp::Add;
+        sub.dst.index = d;
+        sub.dst.writemask = mask;
+        sub.srcs[0] = resolve(inst.operands[1]);
+        sub.srcs[1] = resolve(inst.operands[2]);
+        sub.srcs[1].neg = !sub.srcs[1].neg;
+        program_.instrs.push_back(sub);
+
+        VInstr mad;
+        mad.op = VOp::Mad;
+        mad.dst.index = define(inst.result);
+        mad.dst.writemask = mask;
+        mad.srcs[0] = resolve(inst.operands[0]);
+        mad.srcs[1] = tempSrc(d);
+        mad.srcs[2] = resolve(inst.operands[2]);
+        program_.instrs.push_back(mad);
+        return true;
     }
 
     void lowerSelect(const IRInstruction& inst)
@@ -1899,8 +2216,16 @@ private:
         if (profile_ != GeneralProfile::Vertex ||
             !isLiteralZero(inst.operands[1]) ||
             conditionToSource_.find(inst.operands[0]) == conditionToSource_.end()) {
+            // General select(c, a, b) with a 0/1 condition (which is what
+            // the comparison lowerings produce): d = a - b, then
+            // dst = c * d + b.  Component-wise, so vector conditions work.
+            // The VP predicate special case above stays for the shape its
+            // fixture pins.
+            if (lowerSelectGeneral(inst))
+                return;
             program_.diagnostics.push_back(
-                "nv40-general: only VP select(cmple(x,0), 0, value) lowering is supported");
+                "nv40-general: select condition could not be lowered; refusing");
+            program_.loweringFailed = true;
             return;
         }
 
@@ -2488,6 +2813,8 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Lg2: return NVFX_FP_OP_OPCODE_LG2;
     case VOp::Ex2: return NVFX_FP_OP_OPCODE_EX2;
     case VOp::DivSqrt: return NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX;
+    case VOp::Frc: return NVFX_FP_OP_OPCODE_FRC;
+    case VOp::Flr: return NVFX_FP_OP_OPCODE_FLR;
     case VOp::Sge: return NVFX_FP_OP_OPCODE_SGE;
     case VOp::Slt: return NVFX_FP_OP_OPCODE_SLT;
     case VOp::Sgt: return NVFX_FP_OP_OPCODE_SGT;
@@ -2519,6 +2846,8 @@ static uint8_t vpOpcode(VOp op)
     case VOp::Cos: return VP_SCA_OP(COS);
     case VOp::Lg2: return VP_SCA_OP(LG2);
     case VOp::Ex2: return VP_SCA_OP(EX2);
+    case VOp::Frc: return VP_OP(FRC);
+    case VOp::Flr: return VP_OP(FLR);
     case VOp::Sge: return VP_OP(SGE);
     case VOp::Slt: return VP_OP(SLT);
     case VOp::Sgt: return VP_OP(SGT);
