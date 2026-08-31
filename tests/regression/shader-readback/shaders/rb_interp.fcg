@@ -1,0 +1,15 @@
+// shader-readback test 2 — interpolated varying passthrough.
+//
+// Emits the interpolated UV as color, so every pixel's expected value
+// is computable on the PPU from the pixel's center coordinates.  This
+// judges varying interpolation and per-channel store routing (u -> R,
+// v -> G).
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    /* Direct varying passthrough — the vertex program built the vec4
+     * (u, v, 0, 1); this judges interpolation and store routing. */
+    out_color = in_texcoord;
+}

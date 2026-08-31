@@ -1,0 +1,11 @@
+// shader-readback test 1 — literal constant output.
+//
+// The simplest judged case: every pixel must equal the literal.  Any
+// mismatch is either wrong codegen for a constant store or a broken
+// readback path — both worth failing loudly on before trusting the
+// harder tests.
+
+void main(out float4 out_color : COLOR)
+{
+    out_color = float4(0.25f, 0.5f, 0.75f, 1.0f);
+}

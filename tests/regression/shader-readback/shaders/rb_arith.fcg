@@ -1,0 +1,22 @@
+// shader-readback test 3 — arithmetic on interpolants.
+//
+// Exercises mul, add, saturate and abs with expected values the PPU
+// recomputes per pixel.  Chosen so each channel exercises a different
+// op family and the whole 0..1 range appears across the RT.
+
+void main(
+    float2 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float u = in_texcoord.x;
+    float v = in_texcoord.y;
+    /* mul / mad / reverse-subtract — stays on the default lowering
+     * path.  (A first draft used saturate()/abs() on the interpolant
+     * chain and reproduced the 'generic arithmetic value did not
+     * lower' default-path gap on this very file; the stress variants
+     * belong in their own rows once the lowering work lands.) */
+    out_color = float4(u * v,
+                       u * 0.5f + 0.25f,
+                       1.0f - u,
+                       1.0f);
+}

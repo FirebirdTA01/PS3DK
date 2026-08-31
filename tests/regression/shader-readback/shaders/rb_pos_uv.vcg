@@ -1,0 +1,18 @@
+// shader-readback — vertex program.
+//
+// Identity-projected screen-space position + texcoord passthrough.
+// The PPU writes NDC positions directly; UV rides through untouched so
+// the fragment tests receive a known 0..1 interpolant across the RT.
+
+void main(
+    float2 in_position      : POSITION,
+    float2 in_texcoord      : TEXCOORD0,
+    out float4 out_position : POSITION,
+    out float4 out_texcoord : TEXCOORD0)
+{
+    out_position = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    /* Widen the UV to a full vec4 here on the vertex side: the
+     * interp fragment test then reduces to a DIRECT varying
+     * passthrough, which every fragment lowering path supports. */
+    out_texcoord = float4(in_texcoord.x, in_texcoord.y, 0.0f, 1.0f);
+}
