@@ -11,8 +11,11 @@ git tag.
   `vMAJOR.MINOR.PATCH`.
 - Cutting a release is `git tag vX.Y.Z && git push --tags`.  GitHub
   Actions does the rest.
+- A release's patch number is the count of commits after the previous
+  minor tag — see "Version number policy" below.
 - For day-to-day builds, untagged commits get monotonically increasing
-  patch numbers (`vX.Y.<Z+commits-since-tag>`).
+  patch numbers (`vX.Y.<Z+commits-since-tag>`), which equals that same
+  count so long as the tags it counts from obey the rule.
 - A dirty working tree appends `+dirty` to human-readable strings.
 
 ## Source of truth: `scripts/version.sh`
@@ -87,7 +90,18 @@ Pre-1.0 while we're bootstrapping the SDK.
   surface additions.  May contain breaking changes; the changelog is the
   contract.
 - **Patch (`0.x.y`)** — bug fixes and additive non-breaking changes
-  within a minor line.
+  within a minor line.  **The patch number is the count of commits after
+  the previous minor tag**, measured at the commit the tag lands on:
+  `git rev-list --count vX.Y.0..<tagged commit>`.  It is not a
+  free-running counter incremented by one per release.
+
+  `version.sh` reproduces that number for untagged builds by adding
+  commits-since-the-latest-tag to that tag's patch, which is equivalent
+  *only while every patch tag obeys the rule* — the arithmetic is
+  inductive, and a mis-numbered tag propagates its offset to every
+  release after it until one is cut at the true count.  `v0.12.1` was
+  such a tag (it should have been `v0.12.9`, nine commits after
+  `v0.12.0`); `v0.12.21` restores the invariant.
 - **`v1.0.0`** — when:
   - `hello-ppu-c++17`, `hello-spurs-task`, the reference `basic.cpp`,
     and `5spu_spurs_without_context` all build and run clean against

@@ -16,6 +16,71 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.12.21] — 2026-08-31
+
+Patch release: the PPU toolchain no longer emits an `ld` diagnostic on every
+link, an install from source produces a complete tree, and three places that
+kept duplicate lists or mismatched promises now derive or state them once.
+
+### Fixed
+
+- **Every link emitted `ld: error in crtend.o(.eh_frame); no .eh_frame_hdr
+  table will be created`.** `crtend.o` carried a real FDE *after* the
+  `.eh_frame` zero terminator, which ld parses past unconditionally — so the
+  diagnostic fired even for `int main(void){return 0;}`, on both multilibs.
+  libgcc now builds the ps3 crtstuff with `-fno-asynchronous-unwind-tables`
+  (patch `0035`), leaving `crtend.o`'s `.eh_frame` as the 4-byte terminator
+  alone (was `0x40`) and `crtbegin.o`'s empty (was `0xa0`). Links are silent:
+  0 bytes of stderr where there were 287. User-code unwind tables and C++
+  exceptions are untouched — crtstuff's own functions merely lose entries
+  that were never usable — and `hello-ppu-c++17` boots green.
+  `scripts/check-release-tree.sh` now asserts the terminator-only shape, so a
+  regressed toolchain fails the release gate instead of shipping.
+- **`sdk/assets/ICON0.PNG` was never installed from source.** The artifact
+  manifest promises it and `ps3_add_pkg()` resolves its default icon through
+  it, but only the Windows packager ever wrote it: a from-source install
+  refused to configure until someone hand-staged the file. `build-sdk.sh`
+  installs both copies it owes — `PS3DEV/bin/ICON0.PNG` for PSL1GHT-era
+  `ppu_rules` Makefiles and `PS3DK/sdk/assets/ICON0.PNG` for the manifest row
+  and the `ps3_add_pkg()` default — and a missing source icon is now fatal at
+  install time rather than silently producing an incomplete tree.
+- **`list-rust-bins.sh` guessed an implicit binary's name from its directory.**
+  Cargo names an implicit binary after `package.name`, which need not match
+  the directory; the script would have reported a name the release staging
+  never looks for. It now reads `name` from the `[package]` table
+  specifically, and errors rather than guessing when a crate with
+  `src/main.rs` declares none. No shipped crate is affected today — every
+  member declares `[[bin]]` — this is the guard for the one that does not.
+
+### Changed
+
+- **The Rust host-tool binary list is derived, not repeated.** Three
+  hand-maintained copies drifted; `scripts/list-rust-bins.sh` is now the
+  single source the install and staging paths read.
+- **The artifact manifest states the contract it is actually held to.**
+  `host_bin` / `host_file` rows were labelled "package validation only" long
+  after `release.yml` began enforcing them against the host-tools staging
+  directory as well. The category table now names both validators and their
+  different roots, and package-only data has its own category.
+- **The cairo recipe no longer filters stderr.** The filter existed solely to
+  hide the crtend diagnostic; with the respun toolchain the pthread probe
+  passes unfiltered and reports `CAIRO_HAS_REAL_PTHREAD 1`, so the recipe now
+  sees the configure output a human would.
+- **`docs/sdk/pthreads.md`** drops the crtend caveat, which patch `0035`
+  resolved.
+- **`docs/VERSIONING.md` states the patch-number rule it always meant**: the
+  patch number is the count of commits after the previous *minor* tag,
+  measured at the tagged commit — not a per-release increment. `version.sh`'s
+  running arithmetic is equivalent only while every patch tag obeys that rule,
+  so `v0.12.1` (which should have been `v0.12.9`) had left every later number
+  eight low; this release is cut at the true count and restores the invariant.
+
+### Added
+
+- **`samples/.../hostrepro.c`** — the host-side condition-variable repro that
+  isolated the pthread behaviour, preserved as a note-test beside
+  `hello-ppu-pthread` so the reasoning survives with the code.
+
 ## [v0.12.1] — 2026-08-30
 
 Patch release: the SDK's own SFO editor replaces the adopted PSL1GHT
