@@ -130,11 +130,13 @@ struct VirtualProgram
     std::unordered_map<int, bool> vregToFp16;
     int nextVpLiteralConst = 467;
     std::vector<std::string> diagnostics;
-    // Set when a lowering could not resolve an operand.  Emission must not
-    // succeed after this: an unresolved operand used to become an empty
-    // source, which encodes as vertex attribute ZERO and produced silently
-    // wrong shaders.  Refusing is the whole point - see resolve().
-    bool unresolvedOperand = false;
+    // Set when ANY lowering could not complete: an unresolved operand, or an
+    // IR op this path does not implement.  Emission must not succeed after
+    // it.  Both used to continue quietly - an unresolved operand became an
+    // empty source (vertex attribute ZERO), and an unimplemented op pushed a
+    // diagnostic and emitted the rest of the program anyway, exiting 0 with a
+    // shader silently missing whatever that op was supposed to do.
+    bool loweringFailed = false;
 };
 
 static std::string toUpper(std::string s)
@@ -725,7 +727,7 @@ private:
             what += " (defined by " + value->toString() + ")";
         what += "; refusing rather than emitting an empty source";
         program_.diagnostics.push_back(what);
-        program_.unresolvedOperand = true;
+        program_.loweringFailed = true;
         return noneSrc();
     }
 
@@ -847,9 +849,17 @@ private:
         case IROp::Nop:
             return;
         default:
+            // An op we do not implement is a REFUSAL, not a note.  This used
+            // to push a diagnostic and return while the caller emitted the
+            // remaining instructions and exited 0, so a shader using discard,
+            // sqrt, floor or a comparison silently lost it.  Three shaders
+            // still exited 0 this way after resolve() began refusing, because
+            // an unimplemented op whose result nothing reads leaves nothing
+            // unresolved downstream - discard has no result at all.
             program_.diagnostics.push_back(
                 std::string("nv40-general: unsupported IR op ") +
                 irOpToString(inst.op));
+            program_.loweringFailed = true;
             return;
         }
     }
@@ -951,14 +961,37 @@ private:
         if (inst.resultType.componentCount() != 4)
             return;
 
-        // The base may be a SOURCE rather than a temp - float4(POSITION, 1)
-        // builds on a shader input, and inputs live in valueToSource, not in
-        // valueToVReg.  This lookup used to fail there and return silently,
-        // leaving inst.result unmapped; resolve() then fell through to
-        // noneSrc(), which encodes as vertex attribute ZERO.  The result was
-        // 23 of 27 vertex shaders reading attribute 0 in place of their
-        // constructed vector, with no diagnostic and no mask bit.
-        // Materialise the base into a temp instead of giving up.
+        // This lowering copies operand 0 into xyz and operand 0's scalar
+        // partner into w, which is only correct for float4(vec3, scalar).
+        // For float4(float2, float2) the right lanes are x,y from the first
+        // and x,y from the second - z and w would both come out wrong - so
+        // anything but the vec3+scalar shape must REFUSE rather than emit a
+        // plausible container.  Found in review: the two-operand guard alone
+        // was not narrow enough, and the wider forms belong to the packed
+        // vec-construct follow-up.
+        // This lowering writes operand 0 into xyz and operand 1 into w alone,
+        // correct only for float4(vec3, scalar).  float4(float2, float2) needs
+        // x,y from each and would get z and w wrong - a silent miscompile found
+        // in review, and one that PREDATES this change: the already-mapped path
+        // has always aliased operand 0 and written only .w.  So the guard sits
+        // here, BEFORE the vreg lookup, covering both branches rather than only
+        // the new one.
+        //
+        // The partner is what can actually be seen: an unresolved value's
+        // component mask defaults to Float4, so a wide reading is not proof of a
+        // wide operand - but a SCALAR reading is proof of a narrow one, and
+        // proceeding only on proof is the safe direction.  Wider packed forms
+        // refuse here and belong to the vec-construct follow-up.
+        if (inst.operands.size() == 2 &&
+            __builtin_popcount(valueComponentMask(inst.operands[1])) != 1) {
+            program_.diagnostics.push_back(
+                "nv40-general: vec4 construction whose second operand is not a "
+                "scalar is not implemented; refusing rather than packing the "
+                "wrong lanes");
+            program_.loweringFailed = true;
+            return;
+        }
+
         int baseReg;
         const auto baseIt = program_.valueToVReg.find(inst.operands[0]);
         if (baseIt != program_.valueToVReg.end()) {
@@ -2698,9 +2731,9 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         return out;
     }
     asm_.markEnd();
-    if (program.unresolvedOperand) {
+    if (program.loweringFailed) {
         out.diagnostics.push_back(
-            "nv40-general: refusing to emit - one or more operands were unresolved");
+            "nv40-general: refusing to emit - the program did not lower completely");
         out.ok = false;
         return out;
     }
@@ -2781,9 +2814,9 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         return out;
     }
     asm_.markLast();
-    if (program.unresolvedOperand) {
+    if (program.loweringFailed) {
         out.diagnostics.push_back(
-            "nv40-general: refusing to emit - one or more operands were unresolved");
+            "nv40-general: refusing to emit - the program did not lower completely");
         out.ok = false;
         return out;
     }
