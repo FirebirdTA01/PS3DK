@@ -16,6 +16,73 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.12.43] — 2026-08-31
+
+Patch release.  A crash in the packaging tool found by the first external
+consumer, and a family of compiler defects that all shared one shape: the code
+continued quietly where it should have refused.  Nothing here adds surface —
+the shader compiler's experimental lowering path deliberately accepts *less*
+than it did, because much of what it accepted before was silently wrong.
+
+### Fixed
+
+- **`pkg` crashed on any tree more than three directories deep.**  The
+  directory walker held two ~520 KB tables *per recursion level* on the stack;
+  against mingw's 2 MB reserve the fourth level exhausted it and the tool died
+  with `STATUS_STACK_OVERFLOW` before writing anything.  The tables are now
+  heap-allocated in both the Windows and POSIX walkers.  Reported with a
+  minimal repro by a downstream project whose assets were three levels deep;
+  our own 70-package sweep never caught it because our layouts are shallower.
+- **Unknown characters no longer vanish in the lexer.**  `%` was never
+  tokenised, and `tokenize()` silently dropped anything it did not recognise,
+  so a modulo expression reached the parser as a malformed stream and the
+  recovery path allocated without bound — 50 GB and climbing on a 62-line
+  shader.  Unknown characters are now a hard, located diagnostic.  Note that
+  `^`, `~` and single `&`/`|` are *valid Cg* the lexer does not yet implement,
+  so shaders using them are now rejected rather than miscompiled; implementing
+  them is tracked.
+- **A dropped value no longer becomes vertex attribute zero.**  When the
+  general lowering path could not resolve an operand it returned an empty
+  source, which encodes as "read attribute 0" — so a shader computed against
+  the wrong register with no diagnostic and no bit in its input mask.  23 of 27
+  in-repo vertex shaders were affected.  `resolve()` now refuses and names the
+  operand.
+- **Unimplemented IR ops no longer emit the rest of the program.**  They
+  pushed a diagnostic and returned while emission continued and exited 0, so a
+  shader using `discard`, `sqrt`, `floor` or a comparison silently lost it.
+- **`float4(vec3, scalar)` construction from a shader input** was dropped
+  entirely, and the wider packed forms wrote the wrong lanes.  The supported
+  shape now works; the others refuse.
+- **A materialised fragment intermediate no longer clobbers its neighbour.**
+  It was written with all lanes regardless of what the consumer needed, so one
+  output channel overwrote another — found in pixels by the new readback row.
+
+### Added
+
+- **`radians()` / `degrees()`**, lowered to a single multiply, with constants
+  that match the reference implementation bit for bit.
+- **A shader compile gate** (`scripts/shader-compile-check.py`) that compiles
+  every checked-in shader and fails on any regression — and refuses to report
+  a pass over an empty corpus.
+- **Judged RPCS3 readback rows**: solid, interpolated, arithmetic, angle
+  conversion, and a vertex-program geometry row that judges *which pixels are
+  covered* against a PPU-computed projection.  These compare against values
+  computed independently on the PPU, so they can say a shader is right rather
+  than merely self-consistent.
+- **A conditional warm-up pass** for the regression harness: a cold PPU cache
+  can consume an entire row timeout before a guest instruction runs, which
+  would surface as a mystery failure after any compiler change.
+
+### Changed
+
+- `make_sprx` is built natively as well as cross-built, from a single shared
+  generator whose drift guards now count occurrences rather than testing for a
+  string that was already present.
+- The external shader corpus is fetched at pinned commits into an ignored
+  directory, with the destination checked against git rather than against its
+  name.
+
+
 ## [v0.12.21] — 2026-08-31
 
 Patch release: the PPU toolchain no longer emits an `ld` diagnostic on every
