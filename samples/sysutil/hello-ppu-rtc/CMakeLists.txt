@@ -17,3 +17,7 @@ target_link_libraries(hello-ppu-rtc PRIVATE
 )
 
 ps3_add_self(hello-ppu-rtc)
+
+ps3_add_pkg(hello-ppu-rtc
+    APPID     "SYUT00024"
+    CONTENTID "UP0001-SYUT00024_00-PS3DKSAMPLES0000")

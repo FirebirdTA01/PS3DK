@@ -21,3 +21,7 @@ target_link_libraries(hello-ppu-cellgcm-drawenv PRIVATE
 )
 
 ps3_add_self(hello-ppu-cellgcm-drawenv)
+
+ps3_add_pkg(hello-ppu-cellgcm-drawenv
+    APPID     "GCMX00013"
+    CONTENTID "UP0001-GCMX00013_00-PS3DKSAMPLES0000")

@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-cellfs PRIVATE
 )
 
 ps3_add_self(hello-ppu-cellfs)
+
+ps3_add_pkg(hello-ppu-cellfs
+    APPID     "SYUT00005"
+    CONTENTID "UP0001-SYUT00005_00-PS3DKSAMPLES0000")

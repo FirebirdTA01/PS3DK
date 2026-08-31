@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-cellgcm-cursor PRIVATE
 )
 
 ps3_add_self(hello-ppu-cellgcm-cursor)
+
+ps3_add_pkg(hello-ppu-cellgcm-cursor
+    APPID     "GCMX00003"
+    CONTENTID "UP0001-GCMX00003_00-PS3DKSAMPLES0000")

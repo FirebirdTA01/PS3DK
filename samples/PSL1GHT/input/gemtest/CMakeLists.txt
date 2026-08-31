@@ -17,3 +17,7 @@ target_link_libraries(gemtest PRIVATE
 )
 
 ps3_add_self(gemtest)
+
+ps3_add_pkg(gemtest
+    APPID     "PSLG00006"
+    CONTENTID "UP0001-PSLG00006_00-PS3DKSAMPLES0000")

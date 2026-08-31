@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-avc PRIVATE
 )
 
 ps3_add_self(hello-ppu-avc)
+
+ps3_add_pkg(hello-ppu-avc
+    APPID     "SYUT00002"
+    CONTENTID "UP0001-SYUT00002_00-PS3DKSAMPLES0000")

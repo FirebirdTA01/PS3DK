@@ -21,3 +21,7 @@ ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-quad shaders/vpshader.vcg)
 ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-quad shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-cellgcm-quad)
+
+ps3_add_pkg(hello-ppu-cellgcm-quad
+    APPID     "GCMX00007"
+    CONTENTID "UP0001-GCMX00007_00-PS3DKSAMPLES0000")

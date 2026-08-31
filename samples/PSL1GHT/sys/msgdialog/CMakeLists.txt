@@ -20,3 +20,7 @@ target_link_libraries(msgdialog PRIVATE
 )
 
 ps3_add_self(msgdialog)
+
+ps3_add_pkg(msgdialog
+    APPID     "PSLG00002"
+    CONTENTID "UP0001-PSLG00002_00-PS3DKSAMPLES0000")

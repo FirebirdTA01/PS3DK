@@ -25,3 +25,7 @@ ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-discard-blend shaders/vpshader.vcg)
 ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-discard-blend shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-cellgcm-discard-blend)
+
+ps3_add_pkg(hello-ppu-cellgcm-discard-blend
+    APPID     "GCMX00012"
+    CONTENTID "UP0001-GCMX00012_00-PS3DKSAMPLES0000")

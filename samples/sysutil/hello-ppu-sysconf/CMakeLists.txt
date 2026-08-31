@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-sysconf PRIVATE
 )
 
 ps3_add_self(hello-ppu-sysconf)
+
+ps3_add_pkg(hello-ppu-sysconf
+    APPID     "SYUT00035"
+    CONTENTID "UP0001-SYUT00035_00-PS3DKSAMPLES0000")

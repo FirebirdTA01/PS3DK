@@ -21,3 +21,7 @@ ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-laneelision shaders/vpshader.vcg)
 ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-laneelision shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-cellgcm-laneelision)
+
+ps3_add_pkg(hello-ppu-cellgcm-laneelision
+    APPID     "GCMX00014"
+    CONTENTID "UP0001-GCMX00014_00-PS3DKSAMPLES0000")

@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-imejp PRIVATE
 )
 
 ps3_add_self(hello-ppu-imejp)
+
+ps3_add_pkg(hello-ppu-imejp
+    APPID     "SYUT00009"
+    CONTENTID "UP0001-SYUT00009_00-PS3DKSAMPLES0000")

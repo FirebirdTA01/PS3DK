@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-cellgcm-clear PRIVATE
 )
 
 ps3_add_self(hello-ppu-cellgcm-clear)
+
+ps3_add_pkg(hello-ppu-cellgcm-clear
+    APPID     "GCMX00002"
+    CONTENTID "UP0001-GCMX00002_00-PS3DKSAMPLES0000")

@@ -19,3 +19,7 @@ target_link_libraries(padtest PRIVATE
 )
 
 ps3_add_self(padtest)
+
+ps3_add_pkg(padtest
+    APPID     "PSLG00004"
+    CONTENTID "UP0001-PSLG00004_00-PS3DKSAMPLES0000")

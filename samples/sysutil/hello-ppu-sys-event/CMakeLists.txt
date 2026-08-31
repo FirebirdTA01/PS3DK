@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-sys-event PRIVATE
 )
 
 ps3_add_self(hello-ppu-sys-event)
+
+ps3_add_pkg(hello-ppu-sys-event
+    APPID     "SYUT00033"
+    CONTENTID "UP0001-SYUT00033_00-PS3DKSAMPLES0000")

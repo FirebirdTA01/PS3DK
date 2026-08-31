@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-mouse PRIVATE
 )
 
 ps3_add_self(hello-ppu-mouse)
+
+ps3_add_pkg(hello-ppu-mouse
+    APPID     "SYUT00013"
+    CONTENTID "UP0001-SYUT00013_00-PS3DKSAMPLES0000")

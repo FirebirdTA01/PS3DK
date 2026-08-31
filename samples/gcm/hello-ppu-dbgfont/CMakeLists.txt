@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-dbgfont PRIVATE
 )
 
 ps3_add_self(hello-ppu-dbgfont)
+
+ps3_add_pkg(hello-ppu-dbgfont
+    APPID     "GCMX00008"
+    CONTENTID "UP0001-GCMX00008_00-PS3DKSAMPLES0000")

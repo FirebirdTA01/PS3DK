@@ -21,3 +21,7 @@ ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-zcull-clip-border shaders/vpshader.vcg)
 ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-zcull-clip-border shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-gcm-zcull-clip-border)
+
+ps3_add_pkg(hello-ppu-gcm-zcull-clip-border
+    APPID     "GCMX00019"
+    CONTENTID "UP0001-GCMX00019_00-PS3DKSAMPLES0000")

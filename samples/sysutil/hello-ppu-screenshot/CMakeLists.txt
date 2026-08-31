@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-screenshot PRIVATE
 )
 
 ps3_add_self(hello-ppu-screenshot)
+
+ps3_add_pkg(hello-ppu-screenshot
+    APPID     "SYUT00028"
+    CONTENTID "UP0001-SYUT00028_00-PS3DKSAMPLES0000")

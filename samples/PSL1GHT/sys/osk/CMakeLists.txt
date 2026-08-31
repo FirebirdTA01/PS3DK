@@ -20,3 +20,7 @@ target_link_libraries(osk PRIVATE
 )
 
 ps3_add_self(osk)
+
+ps3_add_pkg(osk
+    APPID     "PSLG00003"
+    CONTENTID "UP0001-PSLG00003_00-PS3DKSAMPLES0000")

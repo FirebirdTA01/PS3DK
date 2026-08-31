@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-pad PRIVATE
 )
 
 ps3_add_self(hello-ppu-pad)
+
+ps3_add_pkg(hello-ppu-pad
+    APPID     "SYUT00022"
+    CONTENTID "UP0001-SYUT00022_00-PS3DKSAMPLES0000")

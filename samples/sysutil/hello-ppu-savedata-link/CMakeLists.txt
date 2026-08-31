@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-savedata-link PRIVATE
 )
 
 ps3_add_self(hello-ppu-savedata-link)
+
+ps3_add_pkg(hello-ppu-savedata-link
+    APPID     "SYUT00026"
+    CONTENTID "UP0001-SYUT00026_00-PS3DKSAMPLES0000")

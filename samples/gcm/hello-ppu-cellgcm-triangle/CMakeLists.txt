@@ -35,3 +35,7 @@ ps3_add_cg_shader_rsxcgc(hello-ppu-cellgcm-triangle shaders/fpshader.fcg)
 #ps3_add_cg_shader(hello-ppu-cellgcm-triangle shaders/fpshader.fcg)
 
 ps3_add_self(hello-ppu-cellgcm-triangle)
+
+ps3_add_pkg(hello-ppu-cellgcm-triangle
+    APPID     "GCMX00004"
+    CONTENTID "UP0001-GCMX00004_00-PS3DKSAMPLES0000")

@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-msgdialog-progressbar PRIVATE
 )
 
 ps3_add_self(hello-ppu-msgdialog-progressbar)
+
+ps3_add_pkg(hello-ppu-msgdialog-progressbar
+    APPID     "SYUT00017"
+    CONTENTID "UP0001-SYUT00017_00-PS3DKSAMPLES0000")

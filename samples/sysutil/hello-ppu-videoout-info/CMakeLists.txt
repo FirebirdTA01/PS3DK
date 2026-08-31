@@ -12,3 +12,7 @@ target_link_libraries(hello-ppu-videoout-info PRIVATE
 )
 
 ps3_add_self(hello-ppu-videoout-info)
+
+ps3_add_pkg(hello-ppu-videoout-info
+    APPID     "SYUT00038"
+    CONTENTID "UP0001-SYUT00038_00-PS3DKSAMPLES0000")

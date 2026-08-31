@@ -21,3 +21,7 @@ target_link_libraries(blitting PRIVATE
 )
 
 ps3_add_self(blitting)
+
+ps3_add_pkg(blitting
+    APPID     "PSLG00001"
+    CONTENTID "UP0001-PSLG00001_00-PS3DKSAMPLES0000")

@@ -22,3 +22,7 @@ target_link_libraries(gemsample PRIVATE
 )
 
 ps3_add_self(gemsample)
+
+ps3_add_pkg(gemsample
+    APPID     "PSLG00007"
+    CONTENTID "UP0001-PSLG00007_00-PS3DKSAMPLES0000")

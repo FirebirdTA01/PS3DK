@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-resc PRIVATE
 )
 
 ps3_add_self(hello-ppu-resc)
+
+ps3_add_pkg(hello-ppu-resc
+    APPID     "GCMX00020"
+    CONTENTID "UP0001-GCMX00020_00-PS3DKSAMPLES0000")

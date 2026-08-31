@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-msgdialog-errcode PRIVATE
 )
 
 ps3_add_self(hello-ppu-msgdialog-errcode)
+
+ps3_add_pkg(hello-ppu-msgdialog-errcode
+    APPID     "SYUT00016"
+    CONTENTID "UP0001-SYUT00016_00-PS3DKSAMPLES0000")

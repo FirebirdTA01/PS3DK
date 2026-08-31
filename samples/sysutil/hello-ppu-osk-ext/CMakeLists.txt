@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-osk-ext PRIVATE
 )
 
 ps3_add_self(hello-ppu-osk-ext)
+
+ps3_add_pkg(hello-ppu-osk-ext
+    APPID     "SYUT00021"
+    CONTENTID "UP0001-SYUT00021_00-PS3DKSAMPLES0000")

@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-bgm PRIVATE
 )
 
 ps3_add_self(hello-ppu-bgm)
+
+ps3_add_pkg(hello-ppu-bgm
+    APPID     "SYUT00004"
+    CONTENTID "UP0001-SYUT00004_00-PS3DKSAMPLES0000")

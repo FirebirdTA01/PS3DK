@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-keyboard PRIVATE
 )
 
 ps3_add_self(hello-ppu-keyboard)
+
+ps3_add_pkg(hello-ppu-keyboard
+    APPID     "SYUT00011"
+    CONTENTID "UP0001-SYUT00011_00-PS3DKSAMPLES0000")

@@ -13,3 +13,7 @@ target_link_libraries(hello-ppu-cellgcm-render-to-texture PRIVATE
 )
 
 ps3_add_self(hello-ppu-cellgcm-render-to-texture)
+
+ps3_add_pkg(hello-ppu-cellgcm-render-to-texture
+    APPID     "GCMX00016"
+    CONTENTID "UP0001-GCMX00016_00-PS3DKSAMPLES0000")

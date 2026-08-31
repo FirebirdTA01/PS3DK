@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-cellgcm-flip PRIVATE
 )
 
 ps3_add_self(hello-ppu-cellgcm-flip)
+
+ps3_add_pkg(hello-ppu-cellgcm-flip
+    APPID     "GCMX00005"
+    CONTENTID "UP0001-GCMX00005_00-PS3DKSAMPLES0000")

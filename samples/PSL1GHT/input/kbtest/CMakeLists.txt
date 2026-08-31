@@ -19,3 +19,7 @@ target_link_libraries(kbtest PRIVATE
 )
 
 ps3_add_self(kbtest)
+
+ps3_add_pkg(kbtest
+    APPID     "PSLG00005"
+    CONTENTID "UP0001-PSLG00005_00-PS3DKSAMPLES0000")

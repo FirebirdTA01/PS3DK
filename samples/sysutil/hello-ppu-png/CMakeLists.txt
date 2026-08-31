@@ -29,3 +29,7 @@ configure_file(
     COPYONLY)
 
 ps3_add_self(hello-ppu-png)
+
+ps3_add_pkg(hello-ppu-png
+    APPID     "SYUT00023"
+    CONTENTID "UP0001-SYUT00023_00-PS3DKSAMPLES0000")

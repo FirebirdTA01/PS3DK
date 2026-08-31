@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-music-decode2 PRIVATE
 )
 
 ps3_add_self(hello-ppu-music-decode2)
+
+ps3_add_pkg(hello-ppu-music-decode2
+    APPID     "SYUT00019"
+    CONTENTID "UP0001-SYUT00019_00-PS3DKSAMPLES0000")

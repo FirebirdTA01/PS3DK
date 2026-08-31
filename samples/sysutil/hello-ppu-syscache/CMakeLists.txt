@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-syscache PRIVATE
 )
 
 ps3_add_self(hello-ppu-syscache)
+
+ps3_add_pkg(hello-ppu-syscache
+    APPID     "SYUT00034"
+    CONTENTID "UP0001-SYUT00034_00-PS3DKSAMPLES0000")

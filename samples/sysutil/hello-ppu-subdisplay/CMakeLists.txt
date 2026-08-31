@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-subdisplay PRIVATE
 )
 
 ps3_add_self(hello-ppu-subdisplay)
+
+ps3_add_pkg(hello-ppu-subdisplay
+    APPID     "SYUT00031"
+    CONTENTID "UP0001-SYUT00031_00-PS3DKSAMPLES0000")

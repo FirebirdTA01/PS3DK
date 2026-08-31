@@ -19,3 +19,7 @@ target_link_libraries(hello-ppu-msgdialog-string PRIVATE
 )
 
 ps3_add_self(hello-ppu-msgdialog-string)
+
+ps3_add_pkg(hello-ppu-msgdialog-string
+    APPID     "SYUT00018"
+    CONTENTID "UP0001-SYUT00018_00-PS3DKSAMPLES0000")

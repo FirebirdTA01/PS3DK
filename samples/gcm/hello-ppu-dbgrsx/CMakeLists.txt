@@ -11,3 +11,7 @@ target_link_libraries(hello-ppu-dbgrsx PRIVATE
 )
 
 ps3_add_self(hello-ppu-dbgrsx)
+
+ps3_add_pkg(hello-ppu-dbgrsx
+    APPID     "GCMX00018"
+    CONTENTID "UP0001-GCMX00018_00-PS3DKSAMPLES0000")
