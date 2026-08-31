@@ -1098,8 +1098,12 @@ function(ps3_add_pkg target)
                 "ps3_add_pkg: required host tool '${tool}${_ps3_self_exe}' not found.\n"
                 "  Searched: ${PS3DEV}/bin and ${PS3DK}/bin.\n"
                 "  sfo/pkg are native tools as of this SDK; an install that only has\n"
-                "  sfo.py/pkg.py predates them. Re-extract the release zip, or re-run\n"
-                "  scripts/build-host-tools-windows.sh and scripts/install-host-tools.sh.")
+                "  sfo.py/pkg.py predates them. Re-extract the release zip,\n"
+                "  or re-run scripts/build-host-tools-windows.sh and\n"
+                "  scripts/install-host-tools.sh.\n"
+                "  If you upgraded the SDK in place, also delete this build directory:\n"
+                "  find_program() results are cached, so a tree configured against the\n"
+                "  old install keeps its -NOTFOUND.")
         endif()
     endforeach()
 
@@ -1130,7 +1134,9 @@ function(ps3_add_pkg target)
     endif()
 
     # Default SFO XML — PSL1GHT-style template; TITLE/APPID overridable
-    # from the command line via sfo's --title / --appid flags.
+    # from the command line via sfo's --title / --appid / -f flags.  bin/sfo
+    # is the Rust SFO editor as of v0.12.1; its one-shot generator invocation
+    # was verified byte-identical to the retired C tool's on this template.
     if(NOT _PSP_SFOXML)
         set(_PSP_SFOXML "${_PS3_SELF_CMAKE_DIR}/templates/sfo.xml")
     endif()

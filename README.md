@@ -30,7 +30,7 @@ The repo is growing from a refreshed ps3dev/PSL1GHT baseline into a fuller SDK u
 | portlibs | current stable | PPU | zlib 1.3.1, libpng 1.6.43, SDL2 2.30, libcurl 8.9, mbedTLS 3.6, etc. |
 | Tooling | in-tree | host | Rust CLIs for NID/FNID generation, stub-archive emission, coverage reports |
 
-Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-design.md). Current upgrade work is tracked in [docs/roadmap.md](docs/roadmap.md). The detailed PPU ABI contract, including the ELF64+ILP32 default and LP64 multilib, is in [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md).
+Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-design.md). Current upgrade work is tracked in [docs/roadmap.md](docs/roadmap.md). The detailed PPU ABI contract, including the ELF64+ILP32 default and LP64 multilib, is in [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md). POSIX threads (v0.12.0+) come from a pthread shim inside `librt.a` — where its semantics match hosted POSIX and where they deliberately differ is in [docs/sdk/pthreads.md](docs/sdk/pthreads.md).
 
 ## Build host
 
@@ -246,55 +246,87 @@ The exact flag set each sample needs (extra `-l` libs, additional `-I` include p
 ## PARAM.SFO tools
 
 Every installable PS3 app carries a `PARAM.SFO` — title, title id,
-category, the `ATTRIBUTE` capability bits, resolution/sound masks, and so
-on.  The SDK ships three tools that touch it, each with a distinct job:
+category, the `ATTRIBUTE` capability bits (remote play, Move support, …),
+resolution/sound masks, and so on.  The SDK ships one SFO engine with two
+front-ends:
 
-| Tool | What it is | Use it for |
-|---|---|---|
-| `sfo-editor.exe` | CLI editor | Inspecting, validating, editing and creating SFOs from the shell or scripts |
-| `sfo-editor-gui.exe` | GUI on the same engine | Visual editing: every registry-known key and flag bit as a labelled widget, including keys a file doesn't carry yet |
-| `sfo.exe` | Small C generator adopted from upstream PSL1GHT | The `.pkg` build path (`ps3_add_pkg` and step 6 above) — builds a fresh `PARAM.SFO` from `sfo.xml` |
+| Tool | Use it for |
+|---|---|
+| `sfo.exe` | Everything from the shell or a script: inspect, validate, edit, add/remove params, flip flag bits, create from a template |
+| `sfo-gui.exe` | The same operations visually: every registry-known key and flag bit as a labelled widget |
 
-Three instead of two is deliberate and transitional: `sfo.exe` predates the
-editors and is frozen — it stays because the packaging path invokes it with
-its historical flag syntax, and because the editors' test suite diffs their
-output byte-for-byte against it as the compatibility oracle.  Once
-`ps3_add_pkg` moves over to `sfo-editor` (which already accepts the same
-`--title` / `--appid` / `-f sfo.xml` invocation), `sfo.exe` retires.
+Both are generated from one key/flag registry
+(`tools/sfo/registry/param-sfo.yml`), which also generates the reference
+document [docs/sdk/param-sfo.md](docs/sdk/param-sfo.md) — so the CLI, the
+GUI and the docs cannot drift apart.
 
-The editors are **preservation-first**: keys and flag bits they don't
-recognise are kept byte-exact, edits never reflow the file layout unless
-you ask (`--grow`), and nothing writes in place — output always goes to
-`--out`.  The key/flag knowledge lives in one registry
-(`tools/sfo/registry/param-sfo.yml`) that generates the CLI behaviour, the
-GUI widgets, and the reference document
-[docs/sdk/param-sfo.md](docs/sdk/param-sfo.md) from the same data.
+They are **preservation-first**: keys and flag bits the registry doesn't
+know are kept byte-exact, edits never reflow the file layout unless you
+ask (`--grow`), and the CLI never writes in place — output always goes to
+`--out`.
+
+A history note: releases up to v0.12.0 shipped `sfo.exe` as a small C
+generator adopted from upstream PSL1GHT (with the editors alongside as
+`sfo-editor.exe` / `sfo-editor-gui.exe`).  The Rust CLI accepts that
+tool's exact command line (`--title` / `--appid` / `-f sfo.xml`, `-l`,
+`-t`) with byte-identical file output, so it now owns the `sfo.exe` name
+outright and the C tool is no longer built.  Its source stays in
+`tools/sfo-pkg/` for one purpose: the editors' correctness is anchored to
+checked-in golden fixtures generated from the frozen C tool — if those
+ever need regenerating, build `sfo.c` from the repo; never regenerate
+them from an installed `sfo.exe`, which would test the tool against
+itself.
+
+### CLI
 
 ```cmd
 :: Show every key (add --json for machine-readable output)
-sfo-editor.exe inspect PARAM.SFO
+sfo.exe inspect PARAM.SFO
 
 :: Check types, sizes and flag bits against the registry
-sfo-editor.exe validate PARAM.SFO
+sfo.exe validate PARAM.SFO
 
-:: Edit one value (rejects a value that would not fit; add --grow to resize)
-sfo-editor.exe set PARAM.SFO "TITLE=My Game" --out PARAM.SFO.new
+:: Edit one value (rejects a value that will not fit; add --grow to resize)
+sfo.exe set PARAM.SFO "TITLE=My Game" --out PARAM.SFO.new
 
-:: Flip capability bits by name on bitmask keys
-sfo-editor.exe flags PARAM.SFO ATTRIBUTE --enable ps_move_support --out PARAM.SFO.new
+:: Add a param a file does not carry (retail SFOs often omit ATTRIBUTE)
+sfo.exe add PARAM.SFO ATTRIBUTE --value 0 --out PARAM.SFO.new
+
+:: ...then flip capability bits on it by registry name
+sfo.exe flags PARAM.SFO ATTRIBUTE --enable psvita_remote_play --out PARAM.SFO.new
+sfo.exe flags PARAM.SFO ATTRIBUTE --disable psp_remote_play_v1 --out PARAM.SFO.new
+
+:: Same for the video-mode mask (ntsc / pal / hd_720 / hd_1080 ...)
+sfo.exe flags PARAM.SFO RESOLUTION --enable hd_720 --out PARAM.SFO.new
+
+:: Remove a param outright
+sfo.exe remove PARAM.SFO ATTRIBUTE --out PARAM.SFO.new
 
 :: Start a new SFO from a registry template
-sfo-editor.exe create --template game --title "My Game" --appid MYGAME001 --out PARAM.SFO
+sfo.exe create --template game --title "My Game" --appid MYGAME001 --out PARAM.SFO
 
 :: Key and flag reference, generated from the registry
-sfo-editor.exe docs
+sfo.exe docs
+
+:: The legacy one-shot generator invocation still works (what ps3_add_pkg uses)
+sfo.exe --title "My Game" --appid MYGAME001 -f "%PS3DK%\bin\sfo.xml" PARAM.SFO
 ```
 
-The GUI (`sfo-editor-gui.exe`) opens files via the native file dialog,
-edits in place with separate Save / Save As, renders bitmask keys as
-grouped, labelled checkboxes (reserved bits hidden), and offers an
-"absent — Add" row for registry-known keys the file doesn't carry — useful
-on retail SFOs, which often omit `ATTRIBUTE` entirely.
+The flag names (`psvita_remote_play`, `hd_720`, …) come from the registry;
+`sfo.exe docs` or [docs/sdk/param-sfo.md](docs/sdk/param-sfo.md) lists
+every key, every known bit, and what it does.
+
+### GUI
+
+`sfo-gui.exe` opens a file through the native file dialog and edits with
+separate **Save** (in place) and **Save As**.  Every registry-known key
+renders as a typed widget; bitmask keys (`ATTRIBUTE`, `RESOLUTION`,
+`SOUND_FORMAT`, `REGION_DENY`) render as grouped, labelled checkboxes —
+remote-play bits under their own group, reserved bits hidden — with
+badges and tooltips from the registry.  Keys the file doesn't carry show
+as **"absent — Add"** rows, so giving a retail SFO an `ATTRIBUTE` (to
+enable Vita remote play, say) is: open, Add, tick the box, Save.  Unknown
+keys are shown and preserved, never dropped.
 
 ## Getting started
 

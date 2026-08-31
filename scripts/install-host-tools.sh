@@ -60,7 +60,15 @@ build_rust_workspace() {
 
     local out="$TOOLS_DIR/target/release"
     local bin
-    for bin in nidgen coverage-report abi-verify spu-elf-to-ppu-obj; do
+    # Every workspace [[bin]], by its installed name.  This list previously
+    # held only four entries, so a from-source install silently lacked
+    # prx-gen and the SFO tools that the Windows release ships — the CMake
+    # probes then failed only at the first ps3_add_prx / ps3_add_pkg use.
+    # If you add a crate binary, add it here AND in release.yml's
+    # linux-tools loop AND in build-host-tools-windows.sh (follow-up task
+    # exists to single-source these three lists).
+    for bin in nidgen coverage-report abi-verify spu-elf-to-ppu-obj \
+               prx-gen sfo sfo-gui; do
         install_tool "$out/$bin" "$bin"
     done
 }
