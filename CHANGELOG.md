@@ -16,6 +16,64 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.12.1] — 2026-08-30
+
+Patch release: the SDK's own SFO editor replaces the adopted PSL1GHT
+generator outright, host-tool installs are complete on both platforms, and
+most graphical samples now build installable `.pkg` files.
+
+### Changed
+
+- **`sfo.exe` is now the SDK's own tool.** The Rust SFO editor takes over
+  the `sfo` name (`sfo-editor` → `sfo`, `sfo-editor-gui` → `sfo-gui`) and
+  the adopted C generator is no longer built or shipped. The CLI accepts
+  the retired tool's exact command line (`--title` / `--appid`
+  / `-f sfo.xml`, `-l`, `-t`) with byte-identical file output — verified
+  on both hosts against the frozen golden fixture — so `ps3_add_pkg`,
+  PSL1GHT-era Makefiles, and any script calling `sfo` keep working
+  unchanged. `tools/sfo-pkg/sfo.c` stays in the repo solely to regenerate
+  the editor's golden fixtures; never regenerate them from an installed
+  `sfo.exe`.
+- **README teaches the SFO tools**: inspect / validate / set / add /
+  remove / flag surgery by registry name (`psvita_remote_play`, `hd_720`,
+  …) from the CLI, and the GUI's absent-key "Add" flow for retail SFOs.
+- **`.pkg` steps for the installable samples**: every `samples/gcm` and
+  `samples/sysutil` target plus the PSL1GHT graphical/input ports now
+  build `.pkg` / `.gnpdrm.pkg`, under frozen per-family title-id blocks
+  (`GCMX#####`, `SYUT#####`, `PSLG#####`) and one uniform content-id tail
+  (`PS3DKSAMPLES0000`) — existing installs are unaffected, since the PS3
+  and RPCS3 key installs on the unchanged title-id portion.
+
+### Fixed
+
+- **From-source Linux installs were missing tools**:
+  `install-host-tools.sh` installed four of the seven workspace binaries
+  — `prx-gen` and the SFO tools never reached `$PS3DEV/bin`. The Linux
+  release tools zip had the same gap (`prx-gen`, `spu-elf-to-ppu-obj`).
+  Both lists now cover the full workspace, and the release smoke gate
+  runs `--version` on all seven.
+- **A missing default icon now fails loudly.** `sdk/assets/ICON0.PNG` —
+  which every `ps3_add_pkg()` sample defaults to — gained manifest rows,
+  and the packager hard-fails instead of silently skipping the copy.
+- **`ps3_add_pkg` refuses an APPID that disagrees with the title-id
+  inside CONTENTID** (a transposition otherwise ships a package that
+  installs under one identity and announces another). Omitting APPID
+  still derives it.
+
+### Added
+
+- **`docs/sdk/pthreads.md`**: the pthread shim reference — what it
+  provides and the seven places its semantics deliberately diverge from
+  hosted POSIX, plus the condition-variable debugging recipe.
+
+### Known notes
+
+- All 70 sample packages are verified to the byte level (headers,
+  `PARAM.SFO` identity, unique title-ids) but an interactive installer
+  run is unverified in this cut: RPCS3's non-interactive `--installpkg`
+  parses the package fully and then idles awaiting its UI. A GUI or
+  real-hardware install closes that gap.
+
 ## [v0.12.0] — 2026-08-30
 
 Minor release: POSIX threads. Third-party libraries that probe for pthreads
