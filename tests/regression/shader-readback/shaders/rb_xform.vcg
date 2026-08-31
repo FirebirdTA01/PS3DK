@@ -1,0 +1,29 @@
+// shader-readback test 5 — VERTEX program judged by pixel coverage.
+//
+// Every other row judges a fragment program under a trivial pass-through
+// VP; a vertex-side miscompile (wrong attribute read, dropped construct,
+// bad matrix multiply) is invisible to them.  This VP scales the quad by
+// a uniform matrix and the judge scores which pixels the shrunken quad
+// covers against the PPU-computed projection — geometry as readback.
+//
+// The body deliberately uses the float4(float3_input, 1.0) + mul(matrix,
+// p) shape: the exact IR ('vec vec4 %input, %one') the general-lowering
+// path silently miscompiled into an attribute-zero read (t_a68be5c3).
+// When that path becomes the default this row is the first light that
+// regression shows up under.
+//
+// The matrix supplied by the harness is diag(0.5, 0.5, 1, 1) — purely
+// diagonal ON PURPOSE, so the expectation is immune to row-major vs
+// column-major convention drift between the harness and the compiler.
+
+void main(
+    float3 in_position   : POSITION,
+    float2 in_texcoord   : TEXCOORD0,
+    uniform float4x4 mvp,
+    out float4 out_pos       : POSITION,
+    out float4 out_texcoord  : TEXCOORD0)
+{
+    float4 p = float4(in_position, 1.0f);
+    out_pos = mul(mvp, p);
+    out_texcoord = float4(in_texcoord, 0.0f, 1.0f);
+}

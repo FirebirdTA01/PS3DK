@@ -4,5 +4,9 @@ sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
 pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,PTHREAD_OK,PTHREAD_FAIL|ENOSYS
 # shader-readback must stay green: arith and angles cover the write-mask
-# clobber fixed by t_daf2da77, so any readback failure is a regression.
-shader-readback,tests/regression/shader-readback/shader-readback.fake.self,50,RAN-CLEAN,shader-readback: 4/4 tests passed,SHADER_READBACK_FAIL|readback .*: FAIL
+# clobber fixed by t_daf2da77, and xform judges vertex-program geometry
+# (uniform-matrix transform scored as pixel coverage — the row that
+# catches the t_a68be5c3 construct-from-input class at first light when
+# the general-lowering path becomes the default).  Any readback failure
+# is a regression.
+shader-readback,tests/regression/shader-readback/shader-readback.fake.self,60,RAN-CLEAN,shader-readback: 5/5 tests passed,SHADER_READBACK_FAIL|readback .*: FAIL

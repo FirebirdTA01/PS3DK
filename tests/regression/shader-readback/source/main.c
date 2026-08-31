@@ -41,6 +41,7 @@
 #include <rsx/rsx.h>
 
 #include "rb_pos_uv_vpo.h"
+#include "rb_xform_vpo.h"
 #include "rb_solid_fpo.h"
 #include "rb_interp_fpo.h"
 #include "rb_arith_fpo.h"
@@ -71,6 +72,18 @@ typedef struct {
 	const char *name;
 	const unsigned char *fp_blob;
 	expect_fn   expect;
+	/* Vertex-side overrides.  vp_blob NULL = the shared pass-through
+	 * VP.  mvp non-NULL = 16 floats handed to the VP's float4x4
+	 * uniform before the draw. */
+	const unsigned char *vp_blob;
+	const float         *mvp;
+	/* The warm-up retry loop and the sentinel-collision assert key on
+	 * this pixel.  It must be one whose EXPECTED color differs from
+	 * GPU_CLEAR_MARK — for coverage tests, a pixel INSIDE the shape
+	 * (pixel (0,0) is outside the shrunken quad and correctly stays at
+	 * the clear color forever, which would starve a (0,0)-keyed
+	 * retry). */
+	int probe_x, probe_y;
 } rb_test;
 
 /* ---- expected-value functions (PPU-side mirror of each shader) ---- */
@@ -94,6 +107,29 @@ static void expect_arith(float u, float v, float out[4])
 	out[1] = u * 0.5f + 0.25f;
 	out[2] = 1.0f - u;
 	out[3] = 1.0f;
+}
+
+/* Coverage expectation for the vertex-transform test: the VP scales the
+ * fullscreen quad by diag(0.5, 0.5, 1, 1), so NDC shrinks to
+ * [-0.5, 0.5]^2 and the viewport maps that to screen [16, 48) in both
+ * axes.  A pixel is covered iff its CENTER is inside — centers sit at
+ * .5 offsets and the quad's edges at integer coordinates, so no pixel
+ * center ever lies exactly on an edge and the expectation is exact,
+ * no boundary tolerance band needed.  Inside: rb_solid's color (the FP
+ * bound for this test).  Outside: the GPU clear color, unpacked. */
+static void expect_xform(float u, float v, float out[4])
+{
+	int px = (int)(u * (float)RT_W);
+	int py = (int)(v * (float)RT_H);
+	if (px >= RT_W / 4 && px < (3 * RT_W) / 4 &&
+	    py >= RT_H / 4 && py < (3 * RT_H) / 4) {
+		out[0] = 0.25f; out[1] = 0.5f; out[2] = 0.75f; out[3] = 1.0f;
+	} else {
+		out[0] = (float)0x10 / 255.0f;  /* GPU_CLEAR_MARK, unpacked */
+		out[1] = (float)0x20 / 255.0f;
+		out[2] = (float)0x30 / 255.0f;
+		out[3] = 1.0f;
+	}
 }
 
 static void expect_angles(float u, float v, float out[4])
@@ -260,6 +296,24 @@ static int       texcoord_index;
 static vertex_t *vertex_buffer;
 static u32       vertex_buffer_offset;
 
+/* Second VP (rb_xform.vcg): uniform-matrix transform for the coverage
+ * test.  One extra VP does not justify a table; if a third arrives,
+ * generalize. */
+static CGprogram   xform_vpo;
+static void       *xform_vp_ucode;
+static int         xform_position_index;
+static int         xform_texcoord_index;
+static CGparameter xform_mvp_param;
+
+/* diag(0.5, 0.5, 1, 1): purely diagonal ON PURPOSE — immune to
+ * row-major vs column-major convention drift (see rb_xform.vcg). */
+static const float k_xform_mvp[16] = {
+	0.5f, 0.0f, 0.0f, 0.0f,
+	0.0f, 0.5f, 0.0f, 0.0f,
+	0.0f, 0.0f, 1.0f, 0.0f,
+	0.0f, 0.0f, 0.0f, 1.0f,
+};
+
 /* Main-memory readback buffer (inside the io-mapped host region).
  * RPCS3 keeps render targets on the host GPU and does not write them
  * back to guest local memory on the default configuration, so a direct
@@ -323,11 +377,18 @@ static int run_test(CellGcmContextData *ctx, const rb_test *t,
 	printf("  %s: gpu clear %s (readback[0]=0x%08x)\n", t->name,
 	       g_readback[0] == GPU_CLEAR_MARK ? "LANDED" : "MISSING", g_readback[0]);
 
-	cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
-	cellGcmSetVertexDataArray(ctx, position_index, 0, sizeof(vertex_t), 2,
+	CGprogram cur_vpo   = t->vp_blob ? xform_vpo            : vpo;
+	void     *cur_ucode = t->vp_blob ? xform_vp_ucode       : vp_ucode;
+	int       pos_idx   = t->vp_blob ? xform_position_index : position_index;
+	int       tc_idx    = t->vp_blob ? xform_texcoord_index : texcoord_index;
+
+	cellGcmSetVertexProgram(ctx, cur_vpo, cur_ucode);
+	if (t->mvp && xform_mvp_param)
+		cellGcmSetVertexProgramParameter(ctx, xform_mvp_param, t->mvp);
+	cellGcmSetVertexDataArray(ctx, pos_idx, 0, sizeof(vertex_t), 2,
 	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
 	                          vertex_buffer_offset + offsetof(vertex_t, pos));
-	cellGcmSetVertexDataArray(ctx, texcoord_index, 0, sizeof(vertex_t), 2,
+	cellGcmSetVertexDataArray(ctx, tc_idx, 0, sizeof(vertex_t), 2,
 	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
 	                          vertex_buffer_offset + offsetof(vertex_t, uv));
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
@@ -341,12 +402,13 @@ static int run_test(CellGcmContextData *ctx, const rb_test *t,
 	 * budget runs out; a test whose CORRECT output equals the clear
 	 * mark would spend the whole budget and still judge correctly,
 	 * just slowly — keep test expectations away from GPU_CLEAR_MARK. */
+	const u32 probe = (u32)t->probe_y * (rt_pitch / 4u) + (u32)t->probe_x;
 	int tries = 0;
 	for (tries = 1; tries <= 10; tries++) {
 		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
 		wait_rsx_idle(ctx);
 		transfer_rt_to_main(ctx, rt_off, rt_pitch);
-		if (g_readback[0] != GPU_CLEAR_MARK)
+		if (g_readback[probe] != GPU_CLEAR_MARK)
 			break;
 		usleep(200000);
 	}
@@ -460,6 +522,25 @@ int main(int argc, const char **argv)
 
 	cellGcmCgUploadInternalConsts(ctx, vpo);
 
+	/* ---- transform VP for the coverage test ---- */
+	xform_vpo = (CGprogram)rb_xform_vpo;
+	cellGcmCgInitProgram(xform_vpo);
+	u32 xvpsize = 0;
+	cellGcmCgGetUCode(xform_vpo, &xform_vp_ucode, &xvpsize);
+
+	CGparameter xpos = cellGcmCgGetNamedParameter(xform_vpo, "in_position");
+	CGparameter xtc  = cellGcmCgGetNamedParameter(xform_vpo, "in_texcoord");
+	xform_mvp_param  = cellGcmCgGetNamedParameter(xform_vpo, "mvp");
+	xform_position_index = xpos ? (int)cellGcmCgGetParameterResource(xform_vpo, xpos) - CG_ATTR0 : 0;
+	xform_texcoord_index = xtc  ? (int)cellGcmCgGetParameterResource(xform_vpo, xtc)  - CG_ATTR0 : 8;
+	if (!xform_mvp_param) {
+		printf("shader-readback: rb_xform 'mvp' uniform not found in the container\nSHADER_READBACK_FAIL\n");
+		cellGcmFinish(ctx, 0);
+		free(host_addr);
+		return 1;
+	}
+	cellGcmCgUploadInternalConsts(ctx, xform_vpo);
+
 	/* ---- main-memory readback buffer, carved from the io-mapped
 	 * host region's tail (the command buffer owns the head).  Its
 	 * offset is in the RSX IO space, which is what LOCAL_TO_MAIN
@@ -488,29 +569,36 @@ int main(int argc, const char **argv)
 
 	/* ---- the judged tests ---- */
 	const rb_test tests[] = {
-		{ "solid",  rb_solid_fpo,  expect_solid  },
-		{ "interp", rb_interp_fpo, expect_interp },
-		{ "arith",  rb_arith_fpo,  expect_arith  },
-		{ "angles", rb_angles_fpo, expect_angles },
+		{ "solid",  rb_solid_fpo,  expect_solid,  NULL, NULL, 0, 0 },
+		{ "interp", rb_interp_fpo, expect_interp, NULL, NULL, 0, 0 },
+		{ "arith",  rb_arith_fpo,  expect_arith,  NULL, NULL, 0, 0 },
+		{ "angles", rb_angles_fpo, expect_angles, NULL, NULL, 0, 0 },
+		/* Vertex-side coverage: rb_xform shrinks the quad by the
+		 * uniform matrix; the judge scores covered-vs-clear pixels
+		 * against the PPU-computed projection.  Probe = RT center,
+		 * inside the shrunken quad. */
+		{ "xform",  rb_solid_fpo,  expect_xform,
+		  rb_xform_vpo, k_xform_mvp, RT_W / 2, RT_H / 2 },
 	};
 	const int n_tests = (int)(sizeof(tests) / sizeof(tests[0]));
 
-	/* Sentinel-collision assert: the retry loop keys on pixel (0,0)
-	 * differing from GPU_CLEAR_MARK, and the transfer control keys on
-	 * CLEAR_SENTINEL — a test whose EXPECTED (0,0) equals either would
-	 * burn the retry budget every run or mask a dead transfer.  A
-	 * comment asking authors to avoid those colors is not a check;
-	 * this is. */
+	/* Sentinel-collision assert: the retry loop keys on each test's
+	 * PROBE pixel differing from GPU_CLEAR_MARK, and the transfer
+	 * control keys on CLEAR_SENTINEL — a test whose EXPECTED probe
+	 * color equals either would burn the retry budget every run or
+	 * mask a dead transfer.  A comment asking authors to avoid those
+	 * colors is not a check; this is. */
 	for (int i = 0; i < n_tests; i++) {
 		float e[4];
-		tests[i].expect(0.5f / RT_W, 0.5f / RT_H, e);
+		tests[i].expect(((float)tests[i].probe_x + 0.5f) / RT_W,
+		                ((float)tests[i].probe_y + 0.5f) / RT_H, e);
 		u32 packed = ((u32)(saturatef(e[3]) * 255.0f + 0.5f) << 24)
 		           | ((u32)(saturatef(e[0]) * 255.0f + 0.5f) << 16)
 		           | ((u32)(saturatef(e[1]) * 255.0f + 0.5f) <<  8)
 		           |  (u32)(saturatef(e[2]) * 255.0f + 0.5f);
 		if (packed == GPU_CLEAR_MARK || packed == CLEAR_SENTINEL) {
-			printf("shader-readback: test '%s' expected (0,0) 0x%08x collides with a sentinel — pick different test values\nSHADER_READBACK_FAIL\n",
-			       tests[i].name, packed);
+			printf("shader-readback: test '%s' expected probe (%d,%d) 0x%08x collides with a sentinel — pick different test values or move the probe\nSHADER_READBACK_FAIL\n",
+			       tests[i].name, tests[i].probe_x, tests[i].probe_y, packed);
 			cellGcmFinish(ctx, 0);
 			free(host_addr);
 			return 1;
