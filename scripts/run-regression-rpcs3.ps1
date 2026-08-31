@@ -72,6 +72,7 @@ try {
                 self = $row.relative_self
                 emulator = "missing_self"
                 guest = "FAIL"
+                warmed_up = $false
                 tty_lines = 0
                 forbidden_tty_hits = 0
                 first_forbidden_tty = ""
@@ -83,10 +84,51 @@ try {
             continue
         }
 
+        $timeout = [int]$row.timeout_seconds
+
+        # t_f4155031: a cold PPU LLVM cache presents exactly like a real
+        # failure (no TTY + timeout) because RPCS3 spends the whole window
+        # compiling instead of running — every self recompile (and any
+        # codegen change recompiles ALL of them) invalidates the cache.
+        # Detection: RPCS3 keys cache dirs as cache/ppu-<hash>-<basename>,
+        # and the hash tracks the binary's content, so a REBUILT self gets
+        # a fresh hash while its stale same-name dir lingers.  A bare
+        # name match therefore proves nothing; "some name-matching cache
+        # dir was CREATED AFTER the binary was last written" is the
+        # warm signal.  ERROR DIRECTION, before anyone "optimises away
+        # the redundant boot": a false COLD (dir exists but predates a
+        # byte-identical rebuild) costs one extra unjudged boot —
+        # harmless.  A false WARM needs a SAME-NAMED, DIFFERENT-CONTENT
+        # binary booted more recently than this one (e.g. from another
+        # checkout); then the judged run eats the compile and can
+        # report the mystery red this check exists to prevent — the
+        # in-harness draw retries and the row timeout are the only
+        # backstop there.  The heuristic leans cold on purpose.
+        # The warm-up boot is UNJUDGED: it exists to bank the PPU
+        # compile; its logs are truncated away before the judged run.
+        $didWarmup = $false
+        $cacheRoot = Join-Path $rpcs3Dir "cache"
+        $selfLeaf = Split-Path -Leaf $selfPath
+        $selfTime = (Get-Item -LiteralPath $selfPath).LastWriteTimeUtc
+        $warmDirs = @()
+        if (Test-Path -LiteralPath $cacheRoot) {
+            $warmDirs = @(Get-ChildItem -LiteralPath $cacheRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like "ppu-*-$selfLeaf" -and $_.CreationTimeUtc -gt $selfTime })
+        }
+        if ($warmDirs.Count -eq 0) {
+            $didWarmup = $true
+            $warmTimeout = [Math]::Max(120, $timeout * 2)
+            Write-Host "  ${name}: PPU cache cold for this binary - unjudged warm-up boot (ceiling ${warmTimeout}s)"
+            $warmProc = Start-Process -FilePath $Rpcs3Path -ArgumentList @("--no-gui", $selfPath) -WorkingDirectory $rpcs3Dir -WindowStyle Hidden -PassThru
+            if (-not $warmProc.WaitForExit($warmTimeout * 1000)) {
+                Stop-Process -Id $warmProc.Id -Force
+                $warmProc.WaitForExit()
+            }
+            Start-Sleep -Milliseconds 300
+        }
+
         Set-Content -LiteralPath $rpcs3Log -Value ""
         Set-Content -LiteralPath $ttyLog -Value ""
-
-        $timeout = [int]$row.timeout_seconds
         $proc = Start-Process -FilePath $Rpcs3Path -ArgumentList @("--no-gui", $selfPath) -WorkingDirectory $rpcs3Dir -WindowStyle Hidden -PassThru
         $exited = $proc.WaitForExit($timeout * 1000)
         if ($exited) {
@@ -151,6 +193,7 @@ try {
             self = $row.relative_self
             emulator = $emulator
             guest = $guest
+            warmed_up = $didWarmup
             tty_lines = $ttyLines
             forbidden_tty_hits = $forbiddenMatches.Count
             first_forbidden_tty = if ($forbiddenMatches.Count -gt 0) { $forbiddenMatches[0].Value } else { "" }
