@@ -8383,7 +8383,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 std::function<bool(IRValueID, const struct nvfx_reg&, uint8_t, uint8_t, bool)>
                     emitGenericValueToDest;
                 std::function<GenericFpSource(IRValueID)> resolveGenericSource;
-                std::function<GenericFpSource(IRValueID, int)> materializeGenericValue;
+                std::function<GenericFpSource(IRValueID, int, uint8_t)> materializeGenericValue;
 
                 auto literalSourceFromValue =
                     [&](IRValueID id, GenericFpSource& src) -> bool
@@ -8834,7 +8834,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 };
 
                 materializeGenericValue =
-                    [&](IRValueID id, int tempIdx) -> GenericFpSource
+                    [&](IRValueID id, int tempIdx, uint8_t requiredMask) -> GenericFpSource
                 {
                     GenericFpSource direct = resolveGenericSource(id);
                     if (direct.kind != GenericFpSource::Kind::None &&
@@ -8847,7 +8847,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     if (direct.kind != GenericFpSource::Kind::None)
                     {
-                        if (!emitGenericMov(temp.reg, NVFX_FP_MASK_ALL,
+                        if (!emitGenericMov(temp.reg, requiredMask,
                                             direct, FLOAT32, false))
                             return GenericFpSource{};
                         return temp;
@@ -8857,7 +8857,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         arIt != valueToArith.end())
                     {
                         if (!emitExistingArithToDest(arIt->second, temp.reg,
-                                                     NVFX_FP_MASK_ALL,
+                                                     requiredMask,
                                                      FLOAT32, false))
                             return GenericFpSource{};
                         return temp;
@@ -8867,7 +8867,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         mdIt != valueToMad.end())
                     {
                         if (!emitMadBindingToDest(mdIt->second, temp.reg,
-                                                  NVFX_FP_MASK_ALL,
+                                                  requiredMask,
                                                   FLOAT32, false))
                             return GenericFpSource{};
                         return temp;
@@ -8878,7 +8878,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         if (!emitTexSampleToDest(resolveSrcMods(id).baseId,
                                                  txIt->second, temp.reg,
-                                                 NVFX_FP_MASK_ALL,
+                                                 requiredMask,
                                                  FLOAT32, false))
                             return GenericFpSource{};
                         return temp;
@@ -8888,13 +8888,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         pwIt != valueToPowMaxDotLiteral.end())
                     {
                         if (!emitPowMaxDotLiteralToDest(pwIt->second, temp.reg,
-                                                        NVFX_FP_MASK_ALL,
+                                                        requiredMask,
                                                         FLOAT32, false))
                             return GenericFpSource{};
                         return temp;
                     }
 
-                    if (!emitGenericValueToDest(id, temp.reg, NVFX_FP_MASK_ALL,
+                    if (!emitGenericValueToDest(id, temp.reg, requiredMask,
                                                 FLOAT32, false))
                         return GenericFpSource{};
                     return temp;
@@ -8918,7 +8918,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             if (valueToArith.count(g.srcIds[i]))
                                 materializedExistingArith = true;
                             const int tempIdx = (i == 0) ? 0 : 1;
-                            srcs[i] = materializeGenericValue(g.srcIds[i], tempIdx);
+                            // Component-wise ops need only the consumer lanes;
+                            // widening belongs here for ops that read lanes
+                            // they do not write.
+                            uint8_t requiredMask = mask;
+                            if (g.op == GenericFpOp::Dot3)
+                                requiredMask = uint8_t(NVFX_FP_MASK_X |
+                                                       NVFX_FP_MASK_Y |
+                                                       NVFX_FP_MASK_Z);
+                            else if (g.op == GenericFpOp::Dot4)
+                                requiredMask = NVFX_FP_MASK_ALL;
+                            srcs[i] = materializeGenericValue(g.srcIds[i],
+                                                              tempIdx,
+                                                              requiredMask);
                         }
                         if (srcs[i].kind == GenericFpSource::Kind::None)
                             return false;

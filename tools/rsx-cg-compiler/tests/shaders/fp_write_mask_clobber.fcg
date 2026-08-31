@@ -1,0 +1,13 @@
+struct OUT { float4 color : COLOR0; };
+
+OUT main(float2 uv : TEXCOORD0)
+{
+    OUT o;
+    float u = uv.x;
+    float v = uv.y;
+    o.color = float4(u * v,
+                     u * 0.5f + 0.25f,
+                     1.0f - u,
+                     1.0f);
+    return o;
+}

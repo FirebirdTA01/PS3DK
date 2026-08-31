@@ -86,6 +86,9 @@ jobs:
       - name: Test rsx-cg-compiler angle stdlib
         run: bash tests/shader-compiler/stdlib-angle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler write masks
+        run: bash tests/shader-compiler/write-mask-clobber-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
   host-tools-windows:
     name: Host tools build (windows mingw64)
     runs-on: windows-latest
