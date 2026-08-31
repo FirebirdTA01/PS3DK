@@ -72,7 +72,9 @@ if ($Generator -eq "Ninja") {
 }
 
 $regressionRoot = Join-Path $RepoRoot "tests\regression"
-$rows = Import-Csv -LiteralPath $Manifest
+# Lines starting with '#' are comments; strip them, and blank lines (which
+# would become all-null phantom rows), before CSV parsing.
+$rows = Get-Content -LiteralPath $Manifest | Where-Object { $_ -notmatch '^\s*(#|$)' } | ConvertFrom-Csv
 $manifestByName = @{}
 foreach ($row in $rows) {
     $manifestByName[$row.name] = $row.relative_self

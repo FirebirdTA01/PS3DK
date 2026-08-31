@@ -3,4 +3,9 @@ librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,libr
 sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
 pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,PTHREAD_OK,PTHREAD_FAIL|ENOSYS
+# shader-readback is DELIBERATELY encoded as expected-fail: the arith test is
+# a KNOWN miscompile (t_daf2da77), so the required regex pins today's exact
+# 2/3 state and the forbidden regex includes the SUCCESS sentinel — when the
+# compiler fix lands, the row goes loudly red and both terms flip to the
+# green encoding in the same commit.  Do NOT "fix" this row to 3/3.
 shader-readback,tests/regression/shader-readback/shader-readback.fake.self,45,RAN-CLEAN,shader-readback: 2/3 tests passed,SHADER_READBACK_OK|readback solid: FAIL|readback interp: FAIL

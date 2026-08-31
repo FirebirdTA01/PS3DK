@@ -53,7 +53,11 @@ try {
         New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     }
 
-    $rows = Import-Csv -LiteralPath $Manifest
+    # Lines starting with '#' are comments (deliberate-encoding notes live
+    # next to the rows they explain); strip them, and blank lines — which
+    # ConvertFrom-Csv would otherwise turn into all-null phantom rows —
+    # before CSV parsing.
+    $rows = Get-Content -LiteralPath $Manifest | Where-Object { $_ -notmatch '^\s*(#|$)' } | ConvertFrom-Csv
     $results = @()
 
     foreach ($row in $rows) {
