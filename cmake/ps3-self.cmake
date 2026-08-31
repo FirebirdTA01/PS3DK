@@ -1120,9 +1120,25 @@ function(ps3_add_pkg target)
     if(NOT _PSP_TITLE)
         set(_PSP_TITLE "${target}")
     endif()
+    # The 9-char title-id lives at chars 8..16 of the contentid.  It is the
+    # field the console and RPCS3 actually key an install on, and PARAM.SFO's
+    # TITLE_ID must agree with the .pkg's content id or the package installs
+    # under one identity and announces another.
+    string(SUBSTRING "${_PSP_CONTENTID}" 7 9 _ps3_cid_titleid)
     if(NOT _PSP_APPID)
-        # Extract the 9-char title-id from the contentid (chars 8..16).
-        string(SUBSTRING "${_PSP_CONTENTID}" 7 9 _PSP_APPID)
+        set(_PSP_APPID "${_ps3_cid_titleid}")
+    elseif(NOT _PSP_APPID STREQUAL _ps3_cid_titleid)
+        # Caught by hand across ~70 sample recipes this would be a coin flip;
+        # a transposed digit here produces a .pkg that builds and installs and
+        # then behaves strangely, so refuse rather than pick a winner.
+        message(FATAL_ERROR
+            "ps3_add_pkg(${target}): APPID '${_PSP_APPID}' does not match the "
+            "title-id embedded in CONTENTID '${_PSP_CONTENTID}' "
+            "(chars 8..16 are '${_ps3_cid_titleid}').\n"
+            "  PARAM.SFO's TITLE_ID comes from APPID and the package identity "
+            "comes from CONTENTID; they must be the same 9 characters.\n"
+            "  Fix whichever is wrong, or drop APPID entirely and it is "
+            "derived from CONTENTID.")
     endif()
 
     # Default icon: the toolchain's branded sdk/assets/ICON0.PNG.
