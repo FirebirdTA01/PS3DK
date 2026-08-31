@@ -12,11 +12,11 @@ name = "sfo"
 path = "src/lib.rs"
 
 [[bin]]
-name = "sfo-editor"
+name = "sfo"
 path = "src/main.rs"
 
 [[bin]]
-name = "sfo-editor-gui"
+name = "sfo-gui"
 path = "src/gui_main.rs"
 
 [dependencies]

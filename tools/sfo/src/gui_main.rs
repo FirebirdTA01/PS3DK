@@ -8,7 +8,7 @@ mod gui;
 
 #[derive(Parser)]
 #[command(
-    name = "sfo-editor-gui",
+    name = "sfo-gui",
     about = "Desktop PARAM.SFO editor",
     disable_version_flag = true
 )]
@@ -63,7 +63,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("sfo-editor-gui: {e:#}");
+            eprintln!("sfo-gui: {e:#}");
             ExitCode::from(2)
         }
     }
@@ -72,7 +72,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     if cli.version {
-        println!("sfo-editor-gui {}", env!("CARGO_PKG_VERSION"));
+        println!("sfo-gui {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     gui::run(gui::LaunchOptions {

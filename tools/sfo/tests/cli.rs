@@ -5,7 +5,7 @@ use std::process::Command;
 fn fromxml_cli_writes_the_golden_sfo() {
     let out = temp_path("fromxml.PARAM.SFO");
 
-    let status = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let status = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "--title",
             "PS3DK Sample",
@@ -28,7 +28,7 @@ fn fromxml_cli_writes_the_golden_sfo() {
 
 #[test]
 fn list_cli_prints_python_style_dict() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["-l", fixture("ps3dk-template.sfo").to_str().unwrap()])
         .output()
         .unwrap();
@@ -44,7 +44,7 @@ fn list_cli_prints_python_style_dict() {
 fn toxml_cli_writes_the_same_xml_as_the_frozen_c_tool() {
     let out = temp_path("from-sfo.xml");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "-t",
             fixture("ps3dk-template.sfo").to_str().unwrap(),
@@ -62,15 +62,15 @@ fn toxml_cli_writes_the_same_xml_as_the_frozen_c_tool() {
 }
 
 #[test]
-fn version_cli_reports_sfo_editor_name() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+fn version_cli_reports_sfo_name() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .arg("--version")
         .output()
         .unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.starts_with("sfo-editor "), "{stdout}");
+    assert!(stdout.starts_with("sfo "), "{stdout}");
 }
 
 #[test]
@@ -381,7 +381,7 @@ fn gui_headless_create_writes_the_game_template() {
 fn cli_binary_rejects_gui_flag() {
     let out = temp_path("cli-gui.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["--gui", "--save-as", out.to_str().unwrap()])
         .output()
         .unwrap();
@@ -396,7 +396,7 @@ fn set_cli_edits_existing_string_without_reflowing_layout() {
     let input = fixture("ps3dk-template.sfo");
     let out = temp_path("set-title.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "set",
             input.to_str().unwrap(),
@@ -422,7 +422,7 @@ fn set_cli_grow_expands_only_the_named_entry() {
     let out = temp_path("grown-title.PARAM.SFO");
     std::fs::write(&input, tight_title_sfo()).unwrap();
 
-    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "set",
             input.to_str().unwrap(),
@@ -435,7 +435,7 @@ fn set_cli_grow_expands_only_the_named_entry() {
     assert!(!rejected.status.success());
     assert!(stderr(rejected.stderr).contains("preserved max is 8"));
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "set",
             input.to_str().unwrap(),
@@ -466,7 +466,7 @@ fn flags_cli_enables_named_registry_flag_without_reflowing_layout() {
     let input = fixture("ps3dk-template.sfo");
     let out = temp_path("flag-attribute.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "flags",
             input.to_str().unwrap(),
@@ -496,7 +496,7 @@ fn flags_cli_disables_named_registry_flag_without_reflowing_layout() {
     sfo::edit::set_value(&mut doc, "ATTRIBUTE=0x800000").unwrap();
     std::fs::write(&input, sfo::psf::write_preserving(&doc.entries).unwrap()).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "flags",
             input.to_str().unwrap(),
@@ -544,7 +544,7 @@ fn flags_cli_uses_savedata_attribute_table_for_sd_category() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "flags",
             input.to_str().unwrap(),
@@ -561,7 +561,7 @@ fn flags_cli_uses_savedata_attribute_table_for_sd_category() {
     let doc = sfo::psf::parse(&std::fs::read(&out).unwrap()).unwrap();
     assert_eq!(doc.get_integer("ATTRIBUTE").unwrap(), 1);
 
-    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "flags",
             input.to_str().unwrap(),
@@ -604,7 +604,7 @@ fn flags_cli_schema_override_can_select_the_game_attribute_table() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "flags",
             input.to_str().unwrap(),
@@ -632,7 +632,7 @@ fn flags_cli_uses_subfolder_attribute_table_for_disc_subfolder_categories() {
     let out = temp_path("subfolder-flag.PARAM.SFO");
     std::fs::write(&input, minimal_attribute_sfo("TR", 0)).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "flags",
             input.to_str().unwrap(),
@@ -658,7 +658,7 @@ fn flags_cli_uses_patch_attribute_table_for_gd_updates() {
     let out = temp_path("patch-flag.PARAM.SFO");
     std::fs::write(&input, minimal_patch_sfo(0)).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "flags",
             input.to_str().unwrap(),
@@ -680,7 +680,7 @@ fn flags_cli_uses_patch_attribute_table_for_gd_updates() {
 
 #[test]
 fn inspect_json_prints_stable_entry_details() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "inspect",
             fixture("ps3dk-template.sfo").to_str().unwrap(),
@@ -713,7 +713,7 @@ fn inspect_json_resolves_registry_metadata_and_decoded_flags() {
     });
     std::fs::write(&input, sfo::psf::write_preserving(&doc.entries).unwrap()).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["inspect", input.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
@@ -750,7 +750,7 @@ fn inspect_json_resolves_registry_range_keys() {
     .unwrap();
     std::fs::write(&input, sfo::psf::write_preserving(&doc.entries).unwrap()).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["inspect", input.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
@@ -771,7 +771,7 @@ fn inspect_json_uses_context_specific_attribute_tables() {
     std::fs::write(&subfolder_input, minimal_attribute_sfo("TR", 1)).unwrap();
     std::fs::write(&patch_input, minimal_patch_sfo(0x100000)).unwrap();
 
-    let subfolder = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let subfolder = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["inspect", subfolder_input.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
@@ -784,7 +784,7 @@ fn inspect_json_uses_context_specific_attribute_tables() {
         serde_json::json!(["subfolder_enabled"])
     );
 
-    let patch = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let patch = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["inspect", patch_input.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
@@ -803,7 +803,7 @@ fn inspect_json_uses_context_specific_attribute_tables() {
 
 #[test]
 fn validate_cli_accepts_a_parseable_sfo() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["validate", fixture("ps3dk-template.sfo").to_str().unwrap()])
         .output()
         .unwrap();
@@ -817,7 +817,7 @@ fn validate_cli_rejects_a_corrupt_sfo() {
     let input = temp_path("corrupt.PARAM.SFO");
     std::fs::write(&input, b"not an sfo").unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["validate", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -835,7 +835,7 @@ fn validate_cli_accepts_savedata_params_array_or_rpcs3_string_format() {
     std::fs::write(&rpcs3_style, savedata_params_sfo(0x0204)).unwrap();
 
     for input in [&wiki_style, &rpcs3_style] {
-        let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+        let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
             .args(["validate", input.to_str().unwrap()])
             .output()
             .unwrap();
@@ -870,7 +870,7 @@ fn validate_cli_rejects_known_keys_with_the_wrong_format() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["validate", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -889,13 +889,13 @@ fn validate_cli_can_use_the_categoryless_trophy_schema() {
     std::fs::write(&valid, trophy_sfo(0x0004)).unwrap();
     std::fs::write(&invalid, trophy_sfo(0x0204)).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["validate", valid.to_str().unwrap(), "--schema", "trophy"])
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", stderr(output.stderr));
 
-    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let rejected = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args(["validate", invalid.to_str().unwrap(), "--schema", "trophy"])
         .output()
         .unwrap();
@@ -912,7 +912,7 @@ fn validate_cli_can_use_the_categoryless_trophy_schema() {
 fn add_cli_adds_a_registry_backed_string_key() {
     let out = temp_path("add-np.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "add",
             fixture("ps3dk-template.sfo").to_str().unwrap(),
@@ -945,7 +945,7 @@ fn add_cli_adds_a_registry_backed_string_key() {
 fn add_cli_grow_expands_a_registry_backed_slot_when_requested() {
     let out = temp_path("add-grown-np.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "add",
             fixture("ps3dk-template.sfo").to_str().unwrap(),
@@ -979,7 +979,7 @@ fn add_cli_grow_expands_a_registry_backed_slot_when_requested() {
 fn remove_cli_removes_one_key() {
     let out = temp_path("remove-license.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "remove",
             fixture("ps3dk-template.sfo").to_str().unwrap(),
@@ -1001,7 +1001,7 @@ fn remove_cli_removes_one_key() {
 fn rename_cli_renames_one_key_and_preserves_the_value() {
     let out = temp_path("rename-title.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "rename",
             fixture("ps3dk-template.sfo").to_str().unwrap(),
@@ -1024,7 +1024,7 @@ fn rename_cli_renames_one_key_and_preserves_the_value() {
 fn create_cli_writes_the_game_template() {
     let out = temp_path("created.PARAM.SFO");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .args([
             "create",
             "--template",
@@ -1062,9 +1062,7 @@ fn temp_path(name: &str) -> PathBuf {
 }
 
 fn sfo_editor_gui() -> Command {
-    Command::new(
-        option_env!("CARGO_BIN_EXE_sfo-editor-gui").expect("sfo-editor-gui binary target missing"),
-    )
+    Command::new(option_env!("CARGO_BIN_EXE_sfo-gui").expect("sfo-gui binary target missing"))
 }
 
 fn minimal_attribute_sfo(category: &str, attribute: u32) -> Vec<u8> {

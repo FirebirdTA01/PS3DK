@@ -18,7 +18,7 @@ fn docs_check_cli_accepts_the_checked_in_reference_doc() {
         .parent()
         .unwrap();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_sfo-editor"))
+    let status = Command::new(env!("CARGO_BIN_EXE_sfo"))
         .current_dir(repo_root)
         .args(["docs", "--check"])
         .status()

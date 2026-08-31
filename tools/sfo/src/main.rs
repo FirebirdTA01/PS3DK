@@ -6,7 +6,7 @@ use clap::{ArgAction, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "sfo-editor",
+    name = "sfo",
     about = "Create, inspect, and edit PlayStation 3 PARAM.SFO files",
     disable_version_flag = true
 )]
@@ -123,7 +123,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("sfo-editor: {e:#}");
+            eprintln!("sfo: {e:#}");
             ExitCode::from(2)
         }
     }
@@ -132,7 +132,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     if cli.version {
-        println!("sfo-editor {}", env!("CARGO_PKG_VERSION"));
+        println!("sfo {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
