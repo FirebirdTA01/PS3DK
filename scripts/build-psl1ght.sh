@@ -82,6 +82,31 @@ say "make install"
 make install
 
 # --------------------------------------------------------------------
+# make_sprx — native host build
+# --------------------------------------------------------------------
+# PSL1GHT's tools/ Makefile installs make_self / make_self_npdrm /
+# fself / package_finalize into $PS3DEV/bin, but the SPRX flavour of
+# make_self exists nowhere upstream: without this step only the Windows
+# cross-build (build-host-tools-windows.sh) produces make_sprx, and a
+# native prefix fails ps3_add_prx(... SIGN) at the ps3-self.cmake tool
+# probe.  The relabelled source comes from scripts/gen-make-sprx-source.sh
+# (the single home of the sed + drift guards); link flags mirror the
+# geohot tools' own: gmp + libcrypto (openssl) + libz.
+say "make_sprx (native build of the SPRX-flavoured make_self)"
+_sprx_gen="$PS3_BUILD_ROOT/psl1ght-tools/make_self_sprx.c"
+"$script_dir/gen-make-sprx-source.sh" "$SRC/tools/geohot/make_self.c" "$_sprx_gen"
+mkdir -p "$PS3DEV/bin"
+# -I tools/geohot because the generated copy lives outside the source
+# dir and make_self.c's own includes are relative to it.
+# Compiler mirrors the geohot siblings' Makefile rule (CC := $(PREFIX)gcc)
+# so make_sprx and make_self always move together under CC/PREFIX —
+# they are the same program and the acceptance treats them as peers.
+"${CC:-${PREFIX:-}gcc}" -O2 -I"$SRC/tools/geohot" -DSPRX "$_sprx_gen" \
+    -lgmp -lcrypto -lz -o "$PS3DEV/bin/make_sprx"
+unset _sprx_gen
+say "installed $PS3DEV/bin/make_sprx"
+
+# --------------------------------------------------------------------
 # CRT override — PSL1GHT-stale-runtime regression guard
 # --------------------------------------------------------------------
 # PSL1GHT's `make install` writes its own lv2-sprx.o / lv2-crti.o /

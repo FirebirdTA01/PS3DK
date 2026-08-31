@@ -607,27 +607,12 @@ build_psl1ght_tools() {
     local cc="$HOST_TRIPLE-gcc"
     "$cc" $cflags "$geohot_src/make_self.c"         $ldflags -o "$STAGE_BIN/make_self.exe"
     "$cc" $cflags -DNPDRM "$geohot_src/make_self.c" $ldflags -o "$STAGE_BIN/make_self_npdrm.exe"
-    # make_sprx: the SPRX branch labels the container se_flags=7 while the
-    # KEY() macro -- which selects on NPDRM only, never on SPRX -- encrypts it
-    # with the same appold material the plain .self uses. The loader looks a key
-    # up by (program_type, se_flags, sceversion), so a container that says
-    # "revision 7" and is encrypted with the revision-1 key cannot be decrypted:
-    # RPCS3 fails it with CELL_PRX_ERROR_UNSUPPORTED_PRX_TYPE, "Failed to
-    # decrypt file", before the ELF is ever parsed. Verified by flipping the two
-    # bytes in a built .sprx, after which the same file decrypts.
-    #
-    # Relabel to match the key that is actually used. Patched into a build-tree
-    # copy rather than the vendored source, and the substitution is asserted so
-    # this fails loudly if upstream ever changes the line.
+    # make_sprx: geohot make_self.c with the SPRX se_flags relabel.  The
+    # relabel, its rationale, and both drift guards are single-sourced in
+    # scripts/gen-make-sprx-source.sh, shared with build-psl1ght.sh's
+    # native make_sprx step.
     local sprx_src="$SRC_ROOT/make_self_sprx.c"
-    mkdir -p "$SRC_ROOT"
-    sed 's/set_u16(&(hdr->s_flags), 7);/set_u16(\&(hdr->s_flags), 1);/' \
-        "$geohot_src/make_self.c" > "$sprx_src"
-    grep -q 'set_u16(&(hdr->s_flags), 1);' "$sprx_src" \
-        || die "make_sprx: se_flags relabel did not apply — upstream make_self.c changed"
-    if grep -q 'set_u16(&(hdr->s_flags), 7);' "$sprx_src"; then
-        die "make_sprx: se_flags 7 still present after the relabel"
-    fi
+    "$script_dir/gen-make-sprx-source.sh" "$geohot_src/make_self.c" "$sprx_src"
     # -I"$geohot_src" because the copy lives elsewhere and the source's own
     # includes ("include/ps3_common.h") are relative to its original directory.
     "$cc" $cflags -I"$geohot_src" -DSPRX "$sprx_src" $ldflags -o "$STAGE_BIN/make_sprx.exe"

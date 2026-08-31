@@ -27,6 +27,11 @@
 # packager gets a NEW category; do not reuse host_file for package-only
 # data.
 #
+# Deliberately ABSENT from this manifest: the NATIVE make_sprx (no .exe),
+# which build-psl1ght.sh compiles into the dev prefix's $PS3DEV/bin at
+# build time.  This manifest governs the Windows zip; Unix users build
+# from source, so there is no row to promise.
+#
 # alias rows carry THREE fields: 'alias <path> <target>', where <target> is
 # relative to the alias's own directory.  sdk/Makefile and
 # scripts/build-cell-stub-archives.sh install these as symlinks; the Windows
