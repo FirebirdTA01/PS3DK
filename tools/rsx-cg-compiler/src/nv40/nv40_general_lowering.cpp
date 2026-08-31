@@ -66,6 +66,11 @@ enum class VOp
     Ex2,
     DivSqrt,
     Sge,
+    Slt,
+    Sgt,
+    Sle,
+    Seq,
+    Sne,
     Tex
 };
 
@@ -334,6 +339,7 @@ private:
     std::unordered_map<IRValueID, unsigned> useCount_;
     std::unordered_map<IRValueID, int> matrixUniformBase_;
     std::unordered_map<IRValueID, VSrc> conditionToSource_;
+    std::unordered_map<IRValueID, int> valueWidth_;
     static int componentRankFromMask(int mask)
     {
         switch (mask) {
@@ -489,6 +495,11 @@ private:
             case VOp::Min:
             case VOp::Max:
             case VOp::Sge:
+            case VOp::Slt:
+            case VOp::Sgt:
+            case VOp::Sle:
+            case VOp::Seq:
+            case VOp::Sne:
                 return 1;
             case VOp::Add:
                 return 4;
@@ -640,6 +651,11 @@ private:
         for (size_t pi = 0; pi < entry_.parameters.size(); ++pi) {
             const auto& p = entry_.parameters[pi];
             const std::string sem = toUpper(p.semanticName);
+            // Parameters have no IRValue in the entry table; without
+            // this their widths are unobservable downstream and every
+            // reader used to silently assume Float4.
+            if (!p.type.isMatrix())
+                valueWidth_[p.valueId] = p.type.componentCount();
             if (p.storage == StorageQualifier::Uniform &&
                 !seenUniformNames.insert(p.name).second) {
                 continue;
@@ -751,6 +767,15 @@ private:
 
     void lowerInstruction(const IRInstruction& inst)
     {
+        // The entry's value table only holds constants and named
+        // values - getValue() returns null for ordinary instruction
+        // results, so their widths were unobservable downstream and
+        // every reader silently assumed Float4 (measured: the
+        // conservative vec-construct guard exists because of it).
+        // Every instruction knows its own result type right here;
+        // record it once, centrally, before dispatch.
+        if (inst.result != InvalidIRValue && !inst.resultType.isMatrix())
+            valueWidth_[inst.result] = inst.resultType.componentCount();
         switch (inst.op) {
         case IROp::LoadAttribute:
         case IROp::LoadVarying:
@@ -835,6 +860,27 @@ private:
         case IROp::CmpLe:
             lowerCmpLE(inst);
             return;
+        case IROp::CmpLt:
+            lowerBinary(inst, VOp::Slt);
+            return;
+        case IROp::CmpGt:
+            lowerBinary(inst, VOp::Sgt);
+            return;
+        case IROp::CmpGe:
+            lowerBinary(inst, VOp::Sge);
+            return;
+        case IROp::CmpEq:
+            lowerBinary(inst, VOp::Seq);
+            return;
+        case IROp::CmpNe:
+            lowerBinary(inst, VOp::Sne);
+            return;
+        case IROp::Neg:
+            lowerMovWithModifier(inst, true, false);
+            return;
+        case IROp::Abs:
+            lowerMovWithModifier(inst, false, true);
+            return;
         case IROp::Select:
             lowerSelect(inst);
             return;
@@ -877,6 +923,11 @@ private:
             return;
         }
         program_.valueToSource[inst.result] = inputSrc(idx);
+        // Inputs have no IRValue in the entry table, so their width is
+        // otherwise unobservable downstream (the old default silently
+        // read as Float4).  Record the declared width here; every width
+        // consumer checks this map before falling back.
+        valueWidth_[inst.result] = inst.resultType.componentCount();
     }
 
     void lowerVecShuffle(const IRInstruction& inst)
@@ -956,68 +1007,91 @@ private:
         if (tryFoldPowDotVecConstruct(inst))
             return;
 
-        if (inst.operands.size() != 2 || inst.result == InvalidIRValue)
-            return;
-        if (inst.resultType.componentCount() != 4)
+        if (inst.result == InvalidIRValue || inst.operands.empty() ||
+            inst.operands.size() > 4)
             return;
 
-        // This lowering copies operand 0 into xyz and operand 0's scalar
-        // partner into w, which is only correct for float4(vec3, scalar).
-        // For float4(float2, float2) the right lanes are x,y from the first
-        // and x,y from the second - z and w would both come out wrong - so
-        // anything but the vec3+scalar shape must REFUSE rather than emit a
-        // plausible container.  Found in review: the two-operand guard alone
-        // was not narrow enough, and the wider forms belong to the packed
-        // vec-construct follow-up.
-        // This lowering writes operand 0 into xyz and operand 1 into w alone,
-        // correct only for float4(vec3, scalar).  float4(float2, float2) needs
-        // x,y from each and would get z and w wrong - a silent miscompile found
-        // in review, and one that PREDATES this change: the already-mapped path
-        // has always aliased operand 0 and written only .w.  So the guard sits
-        // here, BEFORE the vreg lookup, covering both branches rather than only
-        // the new one.
-        //
-        // The partner is what can actually be seen: an unresolved value's
-        // component mask defaults to Float4, so a wide reading is not proof of a
-        // wide operand - but a SCALAR reading is proof of a narrow one, and
-        // proceeding only on proof is the safe direction.  Wider packed forms
-        // refuse here and belong to the vec-construct follow-up.
-        // "exactly one component" as a one-hot test rather than a popcount:
-        // same predicate, no compiler builtin, and it says what it means.
-        const int tailMask = (inst.operands.size() == 2)
-            ? valueComponentMask(inst.operands[1]) : 0;
-        const bool tailIsScalar = tailMask != 0 && (tailMask & (tailMask - 1)) == 0;
-        if (inst.operands.size() == 2 && !tailIsScalar) {
-            program_.diagnostics.push_back(
-                "nv40-general: vec4 construction whose second operand is not a "
-                "scalar is not implemented; refusing rather than packing the "
-                "wrong lanes");
+        const int resultWidth = inst.resultType.componentCount();
+
+        // Fast path, preserved from the original lowering: float4(vec3
+        // already in a vreg, scalar) aliases the base register and writes
+        // only .w - one instruction, at the cost of mutating the base
+        // vreg in place (pre-existing behavior; safe while the IR never
+        // reads the vec3 after widening it, which is the shape's only
+        // known use).  The scalar-partner check is PROOF the shape fits:
+        // an unresolved value's component mask defaults to Float4, so a
+        // wide reading proves nothing, but a scalar reading proves a
+        // narrow partner.  Everything else takes the general packer
+        // below, which is where float4(float2, float2) - the silent
+        // wrong-lane miscompile found in review - now emits correctly
+        // instead of refusing.
+        if (inst.operands.size() == 2 && resultWidth == 4) {
+            const int tailMask = valueComponentMask(inst.operands[1]);
+            const bool tailIsScalar =
+                tailMask != 0 && (tailMask & (tailMask - 1)) == 0;
+            const auto baseIt = program_.valueToVReg.find(inst.operands[0]);
+            if (tailIsScalar && baseIt != program_.valueToVReg.end()) {
+                program_.valueToVReg[inst.result] = baseIt->second;
+                VInstr vi;
+                vi.op = VOp::Mov;
+                vi.dst.index = baseIt->second;
+                vi.dst.writemask = 0x8;
+                vi.srcs[0] = resolve(inst.operands[1]);
+                vi.srcs[0].swizzle = {0, 0, 0, 0};
+                program_.instrs.push_back(vi);
+                return;
+            }
+        }
+
+        // General packer: one MOV per operand into contiguous lanes.
+        // Requires every operand's width to be KNOWN from the IR value
+        // table and the widths to sum to the result width; anything less
+        // refuses loudly - never a plausible container with wrong lanes.
+        int widths[4] = {0, 0, 0, 0};
+        int total = 0;
+        bool known = true;
+        for (size_t i = 0; i < inst.operands.size(); i++) {
+            const int w = valueWidthOf(inst.operands[i]);
+            if (w < 1 || w > 4) {
+                known = false;
+                break;
+            }
+            widths[i] = w;
+            total += w;
+        }
+        if (!known || total != resultWidth) {
+            std::string what = "nv40-general: vec construction with operand widths (";
+            for (size_t i = 0; i < inst.operands.size(); i++) {
+                if (i) what += ",";
+                const int w = valueWidthOf(inst.operands[i]);
+                what += w ? std::to_string(w) : std::string("?");
+            }
+            what += ") for a " + std::to_string(resultWidth) +
+                    "-wide result; refusing rather than packing the wrong lanes";
+            program_.diagnostics.push_back(what);
             program_.loweringFailed = true;
             return;
         }
 
-        int baseReg;
-        const auto baseIt = program_.valueToVReg.find(inst.operands[0]);
-        if (baseIt != program_.valueToVReg.end()) {
-            baseReg = baseIt->second;
-        } else {
-            baseReg = newVReg();
-            VInstr load;
-            load.op = VOp::Mov;
-            load.dst.index = baseReg;
-            load.dst.writemask = 0x7;   // xyz; .w is written just below
-            load.srcs[0] = resolve(inst.operands[0]);
-            program_.instrs.push_back(load);
+        const int dstReg = define(inst.result);
+        int off = 0;
+        for (size_t i = 0; i < inst.operands.size(); i++) {
+            const int w = widths[i];
+            VInstr vi;
+            vi.op = VOp::Mov;
+            vi.dst.index = dstReg;
+            vi.dst.writemask = ((1 << w) - 1) << off;
+            vi.srcs[0] = resolve(inst.operands[i]);
+            // Compose swizzles: dest lane off+j reads the operand's j-th
+            // logical component, which sits at the source's swizzle[j].
+            const std::array<uint8_t, 4> orig = vi.srcs[0].swizzle;
+            std::array<uint8_t, 4> sw = {orig[0], orig[0], orig[0], orig[0]};
+            for (int j = 0; j < w; j++)
+                sw[off + j] = orig[j];
+            vi.srcs[0].swizzle = sw;
+            program_.instrs.push_back(vi);
+            off += w;
         }
-
-        program_.valueToVReg[inst.result] = baseReg;
-        VInstr vi;
-        vi.op = VOp::Mov;
-        vi.dst.index = baseReg;
-        vi.dst.writemask = 0x8;
-        vi.srcs[0] = resolve(inst.operands[1]);
-        vi.srcs[0].swizzle = {0, 0, 0, 0};
-        program_.instrs.push_back(vi);
     }
 
     bool tryFoldPowDotVecConstruct(const IRInstruction& inst)
@@ -1158,6 +1232,29 @@ private:
         vi.dst.writemask = componentMask(inst.resultType);
         vi.srcs[0] = resolve(inst.operands[0]);
         vi.sat = sat && !isPreclampedFragmentColor(vi.srcs[0]);
+        program_.instrs.push_back(vi);
+    }
+
+    // abs()/neg() are SOURCE MODIFIERS on NV40, not instructions: emit
+    // a MOV whose source carries the modifier.  One instruction today;
+    // the optimization-level work can later fold the modifier into the
+    // consumer.  Order note: the hardware applies negate AFTER abs when
+    // both are set, so Abs must CLEAR an inherited negate
+    // (abs(-x) == abs(x)) while Neg toggles it.
+    void lowerMovWithModifier(const IRInstruction& inst, bool neg, bool abs)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        VInstr vi;
+        vi.op = VOp::Mov;
+        vi.dst.index = define(inst.result);
+        vi.dst.writemask = componentMask(inst.resultType);
+        vi.srcs[0] = resolve(inst.operands[0]);
+        if (abs) {
+            vi.srcs[0].abs = true;
+            vi.srcs[0].neg = false;
+        }
+        if (neg)
+            vi.srcs[0].neg = !vi.srcs[0].neg;
         program_.instrs.push_back(vi);
     }
 
@@ -2048,7 +2145,22 @@ private:
     int valueComponentMask(IRValueID id) const
     {
         const IRValue* value = entry_.getValue(id);
-        return componentMask(value ? value->type : IRTypeInfo::Float4());
+        if (value)
+            return componentMask(value->type);
+        const auto it = valueWidth_.find(id);
+        if (it != valueWidth_.end())
+            return (1 << it->second) - 1;
+        return componentMask(IRTypeInfo::Float4());
+    }
+
+    // Width of a value in components, 0 when genuinely unknown.
+    int valueWidthOf(IRValueID id) const
+    {
+        const IRValue* value = entry_.getValue(id);
+        if (value)
+            return value->type.componentCount();
+        const auto it = valueWidth_.find(id);
+        return it != valueWidth_.end() ? it->second : 0;
     }
 
     static void applyDp3Swizzle(VSrc& src)
@@ -2377,6 +2489,11 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Ex2: return NVFX_FP_OP_OPCODE_EX2;
     case VOp::DivSqrt: return NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX;
     case VOp::Sge: return NVFX_FP_OP_OPCODE_SGE;
+    case VOp::Slt: return NVFX_FP_OP_OPCODE_SLT;
+    case VOp::Sgt: return NVFX_FP_OP_OPCODE_SGT;
+    case VOp::Sle: return NVFX_FP_OP_OPCODE_SLE;
+    case VOp::Seq: return NVFX_FP_OP_OPCODE_SEQ;
+    case VOp::Sne: return NVFX_FP_OP_OPCODE_SNE;
     case VOp::Tex: return NVFX_FP_OP_OPCODE_TEX;
     }
     return NVFX_FP_OP_OPCODE_MOV;
@@ -2402,8 +2519,13 @@ static uint8_t vpOpcode(VOp op)
     case VOp::Cos: return VP_SCA_OP(COS);
     case VOp::Lg2: return VP_SCA_OP(LG2);
     case VOp::Ex2: return VP_SCA_OP(EX2);
+    case VOp::Sge: return VP_OP(SGE);
+    case VOp::Slt: return VP_OP(SLT);
+    case VOp::Sgt: return VP_OP(SGT);
+    case VOp::Sle: return VP_OP(SLE);
+    case VOp::Seq: return VP_OP(SEQ);
+    case VOp::Sne: return VP_OP(SNE);
     case VOp::DivSqrt:
-    case VOp::Sge:
     case VOp::Tex: return VP_OP(MOV); // VP texture fetch is intentionally unsupported.
     }
     return VP_OP(MOV);

@@ -1049,9 +1049,16 @@ function(ps3_add_cg_shader_rsxcgc target file)
     file(MAKE_DIRECTORY "${_outdir}")
     set(_compiled "${_outdir}/${_stem}.${_out_ext}")
 
+    # PS3_RSXCGC_FLAGS: optional extra compiler flags as a CMake list
+    # (e.g. -DPS3_RSXCGC_FLAGS=--general-lowering for lowering-path
+    # acceptance runs).  Empty by default and expands to nothing.
+    if(NOT DEFINED PS3_RSXCGC_FLAGS)
+        set(PS3_RSXCGC_FLAGS "")
+    endif()
+
     add_custom_command(
         OUTPUT  "${_compiled}"
-        COMMAND "${PS3_TOOL_rsxcgc}" "-p" "${_profile_arg}"
+        COMMAND "${PS3_TOOL_rsxcgc}" ${PS3_RSXCGC_FLAGS} "-p" "${_profile_arg}"
                                       "--emit-container" "${_compiled}" "${_input}"
         DEPENDS "${_input}"
         COMMENT "ps3-rsxcgc: ${_stem}${_ext} → ${_stem}.${_out_ext}"
