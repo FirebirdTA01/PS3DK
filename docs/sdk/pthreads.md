@@ -169,6 +169,14 @@ terminator); `scripts/check-release-tree.sh` gates the section size so it cannot
 malformed again. Links are silent now, and cairo's stderr-sensitive pthread probe passes
 with no filter.
 
+If you are still ON a pre-0035 toolchain, know that **the noise prints above whatever the
+real failure is**, and read past it before blaming it. A downstream project hit exactly
+this on 2026-08-31: their link exited 1, the `ld: error in ...crtend.o(.eh_frame)` line was
+the visible one, and the actual cause was an undefined reference several lines below. Their
+error-extraction matched `: error`, which `undefined reference to` does not contain, so the
+only thing it surfaced was the harmless noise. The upgrade removes the noise; until then,
+grep for the exit code's cause rather than for a string that happens to match this line.
+
 ## 6. Follow-ups this leaves open
 
 1. ~~The `crtend.o` `.eh_frame` complaint~~ — RESOLVED by GCC patch 0035 (crtstuff
