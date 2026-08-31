@@ -674,7 +674,6 @@ stage_python_and_assets() {
 
     # The standalone CI host-tools job does not run build-psl1ght.sh, so
     # stage PSL1GHT's host-agnostic package helpers directly from source.
-    # ICON0.PNG is intentionally supplied later by the release packager.
     # sfo.py, pkg.py, crypt.c and build_pkgcrypt.py are deliberately NOT staged
     # any more: build_sfo_pkg above ships native pkg.exe (and bin/sfo.exe is
     # the Rust CLI staged by build_rust_tools), and shipping
@@ -697,6 +696,23 @@ stage_python_and_assets() {
         [[ -f "$src/$f" ]] || die "required PSL1GHT Python/package helper missing: $src/$f"
         install -m 0644 "$src/$f" "$STAGE_BIN/$f"
     done
+
+    # ICON0.PNG used to be left to the release packager, on the reasoning that
+    # the host-tools job had no use for it.  It is promised by the manifest as
+    # host_file bin/ICON0.PNG, and that row has TWO validators against
+    # DIFFERENT staging roots: package-windows-release.sh checks the final zip,
+    # while release.yml checks this script's stage dir.  A promise has to be
+    # true for both, so stage it here and let the packager's copy land on top
+    # of an identical file.
+    #
+    # It is not decoration in either tree: PSL1GHT's legacy ppu_rules defaults
+    # ICON0 ?= $(PS3DEV)/bin/ICON0.PNG, so the Makefile build path resolves an
+    # icon from exactly this location, while ps3_add_pkg() defaults to the
+    # sdk/assets/ copy.
+    local icon_src="$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG"
+    [[ -f "$icon_src" ]] || die "sdk/assets/ICON0.PNG missing — bin/ICON0.PNG is a required artifact"
+    install -m 0644 "$icon_src" "$STAGE_BIN/ICON0.PNG"
+    say "  staged ICON0.PNG"
     # Make the Python entry point executable so it can be invoked directly when
     # Python is on PATH (Windows still respects the +x bit).
     chmod +x "$STAGE_BIN/fself.py"
