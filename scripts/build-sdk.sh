@@ -60,11 +60,37 @@ make -C "$PS3_TOOLCHAIN_ROOT/sdk" install CC="powerpc64-ps3-elf-gcc -D__PS3DK_SD
 # instead of the PSL1GHT logo PSL1GHT itself drops there during its
 # own tool install.  Re-run this after any build-psl1ght.sh since that
 # restores the PSL1GHT default on top of us.
+#
+# It is installed TWICE, to two different consumers:
+#   $PS3DEV/bin/ICON0.PNG      what PSL1GHT-era Makefile samples read via
+#                              ppu_rules' `ICON0 ?= $(PS3DEV)/bin/ICON0.PNG`.
+#   $PS3DK/sdk/assets/ICON0.PNG  where ps3_add_pkg()'s default icon path
+#                              resolves inside an INSTALLED tree -- cmake/
+#                              ps3-self.cmake sets _PS3_TOOLCHAIN_ROOT from its
+#                              own location, so in an installed SDK that path
+#                              is $PS3DK/sdk/assets/ICON0.PNG.
+# The second copy is also the manifest's `sdk_core sdk/assets/ICON0.PNG` row,
+# which the cmake freshness probe FATAL_ERRORs on.  Until this line existed the
+# only writer of that path was scripts/package-windows-release.sh, so the row
+# was true in a packaged tree and false in every from-source install: the probe
+# refused to configure until someone hand-staged the file.  A promise in the
+# manifest has to be kept by the install phase, not only by the packager.
+# Both copies are installed UNCONDITIONALLY, and a missing source icon is
+# fatal.  This used to sit behind an `if [[ -f ]]`, which meant a tree without
+# sdk/assets/ICON0.PNG produced a green install that was missing a REQUIRED
+# manifest row -- the failure then surfaced far away, as the cmake probe
+# refusing to configure, or as ps3_add_pkg() FATAL_ERRORing on a sample.  A
+# guard that skips a required artifact is the silent-no-op class we keep
+# getting bitten by.  scripts/package-windows-release.sh already dies on the
+# same condition; the source-install path now matches it.
 icon_src="$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG"
-if [[ -f "$icon_src" ]]; then
-    install -m 0644 "$icon_src" "$PS3DEV/bin/ICON0.PNG"
-    say "installed sdk/assets/ICON0.PNG -> $PS3DEV/bin/ICON0.PNG"
-fi
+[[ -f "$icon_src" ]] \
+    || die "sdk/assets/ICON0.PNG missing: $icon_src — it is a required manifest row (sdk_core) and ps3_add_pkg() defaults every sample icon to it."
+install -m 0644 "$icon_src" "$PS3DEV/bin/ICON0.PNG"
+say "installed sdk/assets/ICON0.PNG -> $PS3DEV/bin/ICON0.PNG"
+install -d "$PS3DK/sdk/assets"
+install -m 0644 "$icon_src" "$PS3DK/sdk/assets/ICON0.PNG"
+say "installed sdk/assets/ICON0.PNG -> $PS3DK/sdk/assets/ICON0.PNG"
 
 if $INSTALL_HOST_TOOLS; then
     say "building + installing host tools"

@@ -97,6 +97,22 @@ endif()
 if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
     set(_PS3_SELF_SDK_INSTALL_PROBED TRUE)
 
+    # The advice printed by every FATAL_ERROR below.  Defined ONCE: it used
+    # to be pasted at each site, and a pasted block is how the next person to
+    # improve the wording updates three of eight and leaves the rest lying.
+    #
+    # string(CONCAT) rather than a bracket argument: bracket syntax does not
+    # process escape sequences, so \n inside [[ ]] would print as the two
+    # characters backslash-n instead of a line break.
+    string(CONCAT _ps3_sdk_install_advice
+        "\n  Source tree: run scripts/build-sdk.sh"
+        "\n    (a bare 'make -C sdk install' FAILS -- the SDK sublibs see both"
+        "\n     the source and the installed copy of the wrapper headers, and that"
+        "\n     shadow guard is an #error. build-sdk.sh passes the"
+        "\n     -D__PS3DK_SDK_SELFBUILD__ that suppresses it.)"
+        "\n  Extracted release: re-extract the SDK archive -- an installed tree has"
+        "\n    no sdk/ sources or build scripts to run this from.")
+
     # Required artifacts come from ps3-required-artifacts.txt, the single
     # source of truth shared with scripts/package-windows-release.sh's
     # payload validation.  The two lists drifted before -- the packager
@@ -120,7 +136,7 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
         if(NOT EXISTS "${PS3DK}/${_rel}")
             message(FATAL_ERROR
                 "ps3-self: required SDK artifact missing: ${PS3DK}/${_rel}"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                "${_ps3_sdk_install_advice}")
         endif()
     endforeach()
 
@@ -167,7 +183,7 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
         if(NOT EXISTS "${_ps3_manifest}")
             message(FATAL_ERROR
                 "ps3-self: SDK install manifest missing: ${_ps3_manifest}\n"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                "${_ps3_sdk_install_advice}")
         endif()
 
         execute_process(
@@ -183,7 +199,7 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
         if(NOT EXISTS "${PS3DK}/VERSION")
             message(FATAL_ERROR
                 "ps3-self: SDK VERSION marker missing: ${PS3DK}/VERSION\n"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                "${_ps3_sdk_install_advice}")
         endif()
         file(READ "${PS3DK}/VERSION" _ps3_installed_version)
         string(STRIP "${_ps3_installed_version}" _ps3_installed_version)
@@ -192,7 +208,7 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
                 "ps3-self: stale SDK install.\n"
                 "  source:    ${_ps3_expected_version}\n"
                 "  installed: ${_ps3_installed_version}\n"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                "${_ps3_sdk_install_advice}")
         endif()
 
         set(_ps3_source_video_header "${_PS3_TOOLCHAIN_ROOT}/sdk/include/sysutil/video.h")
@@ -201,7 +217,7 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
             if(NOT EXISTS "${path}")
                 message(FATAL_ERROR
                     "ps3-self: required SDK header missing: ${path}\n"
-                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                    "${_ps3_sdk_install_advice}")
             endif()
         endforeach()
         file(SHA256 "${_ps3_source_video_header}" _ps3_source_video_sha)
@@ -211,7 +227,7 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
                 "ps3-self: stale sysutil/video.h in SDK install.\n"
                 "  source:    ${_ps3_source_video_sha}\n"
                 "  installed: ${_ps3_installed_video_sha}\n"
-                "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                "${_ps3_sdk_install_advice}")
         endif()
 
 
@@ -227,13 +243,13 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
             if(NOT IS_SYMLINK "${PS3DK}/${_rel}")
                 message(FATAL_ERROR
                     "ps3-self: ${PS3DK}/${_rel} must be a symlink to ${_tgt}"
-                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                    "${_ps3_sdk_install_advice}")
             endif()
             file(READ_SYMLINK "${PS3DK}/${_rel}" _ps3_alias_target)
             if(NOT _ps3_alias_target STREQUAL "${_tgt}")
                 message(FATAL_ERROR
                     "ps3-self: ${PS3DK}/${_rel} points to ${_ps3_alias_target}, expected ${_tgt}"
-                    "  Run: make -C ${_PS3_TOOLCHAIN_ROOT}/sdk install")
+                    "${_ps3_sdk_install_advice}")
             endif()
         endforeach()
     endif()
