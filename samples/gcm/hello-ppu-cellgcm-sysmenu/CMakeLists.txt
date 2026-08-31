@@ -25,4 +25,4 @@ ps3_add_self(hello-ppu-cellgcm-sysmenu)
 ps3_add_pkg(hello-ppu-cellgcm-sysmenu
     TITLE     "PS3DK Sysmenu"
     APPID     "SYSMENU01"
-    CONTENTID "UP0001-SYSMENU01_00-PS3DKTOOLCHAIN00")
+    CONTENTID "UP0001-SYSMENU01_00-PS3DKSAMPLES0000")

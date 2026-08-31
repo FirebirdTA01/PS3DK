@@ -17,4 +17,4 @@ ps3_add_self(hello-ppu-gamecontent)
 ps3_add_pkg(hello-ppu-gamecontent
     TITLE     "PS3DK GameContent Validation"
     APPID     "GAMECT001"
-    CONTENTID "UP0001-GAMECT001_00-PS3DKTOOLCHAIN00")
+    CONTENTID "UP0001-GAMECT001_00-PS3DKSAMPLES0000")

@@ -21,4 +21,4 @@ ps3_add_self(audiotest)
 ps3_add_pkg(audiotest
     TITLE     "Test Audio - PSL1GHT"
     APPID     "TESTAUDIO"
-    CONTENTID "UP0001-TESTAUDIO_00-0000000000000000")
+    CONTENTID "UP0001-TESTAUDIO_00-PS3DKSAMPLES0000")

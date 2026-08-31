@@ -167,14 +167,21 @@ fi
 
 # 5. Umbrella bin/ — ICON0.PNG + Windows host tools.
 mkdir -p "$STAGE_DIR/bin"
-if [[ -f "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" ]]; then
-    cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/bin/ICON0.PNG"
-    # Also stage at sdk/assets/ICON0.PNG so cmake/ps3-self.cmake's
-    # ps3_add_pkg() default ICON path (${_PS3_TOOLCHAIN_ROOT}/sdk/assets/ICON0.PNG,
-    # which resolves to cmake/.. = $STAGE_DIR) finds it.
-    mkdir -p "$STAGE_DIR/sdk/assets"
-    cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/sdk/assets/ICON0.PNG"
-fi
+# ICON0.PNG is not optional: ps3_add_pkg() defaults every sample's icon to it
+# and FATAL_ERRORs when it is missing, so a release without it fails EVERY
+# packaging sample at configure time.  This copy used to sit behind an
+# `if [[ -f ... ]]` guard, which meant a missing source icon was skipped in
+# silence and shipped a broken release -- the manifest rows added alongside
+# this would then be the only thing catching it, and only at validation.
+# Fail here instead, where the message can name the file.
+[[ -f "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" ]] \
+    || die "sdk/assets/ICON0.PNG missing — ps3_add_pkg() defaults every sample icon to it."
+cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/bin/ICON0.PNG"
+# Also stage at sdk/assets/ICON0.PNG so cmake/ps3-self.cmake's
+# ps3_add_pkg() default ICON path (${_PS3_TOOLCHAIN_ROOT}/sdk/assets/ICON0.PNG,
+# which resolves to cmake/.. = $STAGE_DIR) finds it.
+mkdir -p "$STAGE_DIR/sdk/assets"
+cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/sdk/assets/ICON0.PNG"
 
 # 5b. CMake toolchain files + helper modules.  Samples build with
 #     -DCMAKE_TOOLCHAIN_FILE="%PS3DK%\cmake\ps3-ppu-toolchain.cmake"

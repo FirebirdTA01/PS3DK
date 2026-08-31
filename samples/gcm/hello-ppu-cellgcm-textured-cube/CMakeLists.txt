@@ -46,4 +46,4 @@ ps3_add_self(hello-ppu-cellgcm-textured-cube)
 ps3_add_pkg(hello-ppu-cellgcm-textured-cube
     TITLE     "PS3DK Textured Cube"
     APPID     "TEXCUBE01"
-    CONTENTID "UP0001-TEXCUBE01_00-PS3DKTOOLCHAIN00")
+    CONTENTID "UP0001-TEXCUBE01_00-PS3DKSAMPLES0000")

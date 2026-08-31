@@ -59,6 +59,18 @@ host_file bin/Struct.py
 host_file bin/fself.py
 host_file bin/sfo.xml
 
+# ICON0.PNG is the default icon ps3_add_pkg() stamps into every .pkg, and the
+# function FATAL_ERRORs when it is absent -- so a release that lost it would
+# fail every packaging sample at configure time, not at package time.  It is
+# staged twice: bin/ for direct use, and sdk/assets/ because that is where
+# ps3_add_pkg()'s ${_PS3_TOOLCHAIN_ROOT}/sdk/assets/ICON0.PNG default resolves
+# inside an installed tree.  Both rows are required, and the packager copies
+# them unconditionally: the copy used to sit behind an `if [[ -f ]]` guard,
+# which would have skipped silently and shipped a release whose every .pkg
+# sample was unbuildable.
+host_file bin/ICON0.PNG
+sdk_core  sdk/assets/ICON0.PNG
+
 # --- PPU runtime / stub archives ------------------------------------------
 # CRITERION: every library linked by at least one BUNDLED SAMPLE and shipped in
 # ppu/lib.  The original list held only 26 entries inherited from the packager's

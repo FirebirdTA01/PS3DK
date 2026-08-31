@@ -37,4 +37,4 @@ ps3_add_self(hello-ppu-cellgcm-global-uniforms)
 ps3_add_pkg(hello-ppu-cellgcm-global-uniforms
     TITLE     "PS3DK Global Uniforms"
     APPID     "GLBUNIF01"
-    CONTENTID "UP0001-GLBUNIF01_00-PS3DKTOOLCHAIN00")
+    CONTENTID "UP0001-GLBUNIF01_00-PS3DKSAMPLES0000")
