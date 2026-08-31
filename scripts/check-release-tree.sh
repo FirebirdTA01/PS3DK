@@ -268,6 +268,49 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 4b. crt objects.  crtend.o's .eh_frame must be exactly the 4-byte zero
+#     terminator (t_376721dc): a toolchain built without patch 0035 ships a
+#     crtend carrying an FDE after the terminator, and GNU ld then emits
+#     "no .eh_frame_hdr table will be created" on EVERY user link, which
+#     breaks stderr-sensitive configure probes (cairo's pthread tier).
+#     nm cannot see section sizes; readelf can, and any binutils readelf
+#     reads a foreign ELF, so a host readelf is an acceptable fallback.
+# ---------------------------------------------------------------------------
+echo "-- crtend.o .eh_frame must be only the terminator --"
+RD="${PS3_READELF:-}"
+[[ -n "$RD" ]] || RD="$(command -v powerpc64-ps3-elf-readelf 2>/dev/null || true)"
+if [[ -z "$RD" && "${OS:-}" == "Windows_NT" && -x "$ROOT/ppu/bin/powerpc64-ps3-elf-readelf.exe" ]]; then
+    RD="$ROOT/ppu/bin/powerpc64-ps3-elf-readelf.exe"
+fi
+[[ -n "$RD" ]] || RD="$(command -v readelf 2>/dev/null || true)"
+if [[ -z "$RD" ]]; then
+    # Fatal for the same reason as the nm case above.
+    bad "no readelf found (set PS3_READELF) -- refusing to skip the crtend check"
+else
+    crtends=("$ROOT"/ppu/lib/gcc/powerpc64-ps3-elf/*/crtend.o
+             "$ROOT"/ppu/lib/gcc/powerpc64-ps3-elf/*/lp64/crtend.o)
+    seen=0
+    for f in "${crtends[@]}"; do
+        [[ -f "$f" ]] || continue
+        seen=$((seen+1))
+        rel="${f#"$ROOT"/}"
+        sz="$("$RD" -SW "$f" 2>/dev/null | sed 's/\[ *[0-9]*\]//' | awk '$1==".eh_frame"{print $5}')"
+        if [[ -z "$sz" ]]; then
+            bad "$rel: could not read .eh_frame section size"
+        elif [[ "$sz" =~ ^0*4$ ]]; then
+            ok "$rel .eh_frame is the 4-byte terminator only"
+        else
+            bad "$rel .eh_frame is 0x$sz -- an FDE after the terminator makes every link noisy (t_376721dc)"
+        fi
+    done
+    if [[ "$seen" -lt 2 ]]; then
+        # Both multilibs ship a crtend; matching fewer means the glob went
+        # stale, and a check that finds nothing must not look clean.
+        bad "found $seen crtend.o (expected 2: default + lp64 multilib)"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # 5. Symlinks.  package-windows-release.sh already asserts this on the stage
 #    tree and on the zip; this is the post-extract view, which is the one the
 #    user actually gets.
