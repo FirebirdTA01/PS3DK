@@ -44,6 +44,7 @@
 #include "rb_solid_fpo.h"
 #include "rb_interp_fpo.h"
 #include "rb_arith_fpo.h"
+#include "rb_angles_fpo.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -92,6 +93,21 @@ static void expect_arith(float u, float v, float out[4])
 	out[0] = u * v;
 	out[1] = u * 0.5f + 0.25f;
 	out[2] = 1.0f - u;
+	out[3] = 1.0f;
+}
+
+static void expect_angles(float u, float v, float out[4])
+{
+	/* Mirrors radians(u*45) and degrees(v*0.0125) with the same
+	 * float32 constants the compiler derives.  Associativity note for
+	 * whoever tightens TOLERANCE someday: this computes (u*45)*k while
+	 * the compiler may fold to u*(45*k) — up to an ulp apart in
+	 * float32, invisible at 8-bit with the current tolerance, but a
+	 * source of drift unrelated to the shader if the tolerance ever
+	 * chases sub-LSB differences. */
+	out[0] = (u * 45.0f) * 0.017453292519943295769f;
+	out[1] = (v * 0.0125f) * 57.295779513082320876f;
+	out[2] = 0.0f;
 	out[3] = 1.0f;
 }
 
@@ -475,6 +491,7 @@ int main(int argc, const char **argv)
 		{ "solid",  rb_solid_fpo,  expect_solid  },
 		{ "interp", rb_interp_fpo, expect_interp },
 		{ "arith",  rb_arith_fpo,  expect_arith  },
+		{ "angles", rb_angles_fpo, expect_angles },
 	};
 	const int n_tests = (int)(sizeof(tests) / sizeof(tests[0]));
 

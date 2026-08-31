@@ -31,5 +31,6 @@ ps3_add_cg_shader_rsxcgc(shader-readback shaders/rb_pos_uv.vcg)
 ps3_add_cg_shader_rsxcgc(shader-readback shaders/rb_solid.fcg)
 ps3_add_cg_shader_rsxcgc(shader-readback shaders/rb_interp.fcg)
 ps3_add_cg_shader_rsxcgc(shader-readback shaders/rb_arith.fcg)
+ps3_add_cg_shader_rsxcgc(shader-readback shaders/rb_angles.fcg)
 
 ps3_add_self(shader-readback)

@@ -1,0 +1,20 @@
+// shader-readback test 4 — radians()/degrees() stdlib lowering.
+//
+// The two conversions lower to a single multiply by a derived constant;
+// the PPU mirror computes the same product exactly, so this judges the
+// lowering's constant and its per-lane routing.  Scales chosen to keep
+// results inside 0..1: radians(45u) spans 0..0.785, degrees(0.0125v)
+// spans 0..0.716.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,  /* float4 matches the VP's widened
+                                          output (see rb_pos_uv.vcg); only
+                                          .x/.y are read — the width is
+                                          convention, not a requirement */
+    out float4 out_color : COLOR)
+{
+    out_color = float4(radians(in_texcoord.x * 45.0f),
+                       degrees(in_texcoord.y * 0.0125f),
+                       0.0f,
+                       1.0f);
+}
