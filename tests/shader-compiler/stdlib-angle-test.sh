@@ -19,47 +19,32 @@ mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
 cat >"$work/angle_scalar.fcg" <<'SHADER'
-struct OUT { float4 color : COLOR0; };
-
-OUT main()
+void main(float angle : TEXCOORD0, out float color : COLOR0)
 {
-    OUT o;
-    float angle : TEXCOORD0;
     float r = radians(angle);
     float d = degrees(angle);
-    o.color = float4(r * 0.01, d * 0.001, 0.0, 1.0);
-    return o;
+    color = r * 0.01 + d * 0.001;
 }
 SHADER
 
 cat >"$work/angle_vector.fcg" <<'SHADER'
-struct OUT { float4 color : COLOR0; };
-
-OUT main()
+void main(float2 angle : TEXCOORD0, out float2 color : COLOR0)
 {
-    OUT o;
-    float2 angle : TEXCOORD0;
     float2 r = radians(angle);
     float2 d = degrees(angle);
-    o.color = float4(r.x, r.y, d.x, d.y);
-    return o;
+    color = r + d;
 }
 SHADER
 
 cat >"$work/shadow_radians.fcg" <<'SHADER'
-struct OUT { float4 color : COLOR0; };
-
 float radians(float x)
 {
     return x;
 }
 
-OUT main()
+void main(float angle : TEXCOORD0, out float color : COLOR0)
 {
-    OUT o;
-    float angle : TEXCOORD0;
-    o.color = float4(radians(angle), 0.0, 0.0, 1.0);
-    return o;
+    color = radians(angle);
 }
 SHADER
 
