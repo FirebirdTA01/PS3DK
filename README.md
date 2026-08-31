@@ -166,8 +166,66 @@ Copy the `.prx` next to the booted executable so `/app_home/` finds it.
 `.fake.sprx`; booting the real `.self` requires the `.sprx` — the module's
 container follows the executable's, which is why `SIGN` emits both.
 
+**4. Keeping export lists honest** — `prx-gen exports mymod.prx` reads a
+built module's export table back out as nidgen-schema YAML, and
+`ps3_prx_export_roundtrip(<target>)` wires that into the build: it compares
+the YAML extracted from the binary against the one the stubs are generated
+from and fails the build with both tables printed when they disagree — so a
+renamed export can't silently strand its importers.
+
 Format and design notes: `docs/design/sprx-generation.md`; the module layout
 is specified in `docs/abi/cellos-lv2-abi-spec.md` §8.
+
+### Embedding SPU programs (spu-elf-to-ppu-obj)
+
+PPU code that spawns SPU threads or SPURS jobs needs the SPU program's image
+inside the PPU executable.  `spu-elf-to-ppu-obj` does that wrapping as a
+standalone tool: it takes a linked SPU ELF and emits a PPU relocatable
+object exposing the image through `_binary_<name>_*` symbols, in one of
+three formats (`--format jobbin2` for SPURS job binaries — the default —
+plus raw `binary` and whole-`elf`).  `inspect` prints a JSON summary of an
+artifact set when you need to see what a wrap produced.
+
+```cmd
+spu-elf-to-ppu-obj.exe wrap --spu-elf worker.spu.elf --output worker_img.o --symbol-base worker
+spu-elf-to-ppu-obj.exe inspect worker_img.o
+```
+
+From CMake you rarely call it directly: `ps3_add_spu_image(<target>
+NAME <name> SOURCES <spu sources...> [LIBS ...] [JOBBIN|JOBBIN_WRAP]
+[NOSTARTFILES|FREESTANDING] [LDSCRIPT ...])` compiles the SPU sources with
+the SPU cross-compiler, links them, wraps the result, and links the wrapped
+object into the PPU target.  The `spu/` and `spurs/` samples are the worked
+examples.
+
+### Building installable packages (ps3_add_pkg)
+
+Any sample (or your own app) becomes an installable `.pkg` with one CMake
+call after `ps3_add_self`:
+
+```cmake
+ps3_add_self(myapp)
+ps3_add_pkg(myapp
+    CONTENTID "UP0001-MYAPP0001_00-PS3DKSAMPLES0000")
+```
+
+`CONTENTID` is the required 36-char identity; the 9 characters at positions
+8–16 are the **title id**, which is what the console and RPCS3 key the
+install on.  `APPID` defaults to that embedded title id (declaring both is
+allowed but they must agree — a mismatch fails at configure time, because a
+transposed digit otherwise ships a package that installs under one identity
+and announces another).  `TITLE` defaults to the target name; `ICON`,
+`SFOXML` and a `pkg_files/` overlay directory are overridable.  The build
+emits both `<target>.pkg` (debug-installable on CFW / RPCS3) and
+`<target>.gnpdrm.pkg` (npdrm-finalised).
+
+Under the hood this drives four host tools — `make_self_npdrm` (signs the
+ELF as `EBOOT.BIN` under the content id), `sfo` (generates `PARAM.SFO`; see
+the PARAM.SFO tools section), `pkg` (builds the archive), and
+`package_finalize` (npdrm-finalises a copy).  The equivalent manual command
+sequence is step 6 of the toolchain walkthrough below.  All `samples/gcm`,
+`samples/sysutil` and the PSL1GHT graphical/input ports carry this call, so
+any of them is a working reference.
 
 ### Manual / direct toolchain invocation (no CMake)
 
