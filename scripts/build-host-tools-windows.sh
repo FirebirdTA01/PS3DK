@@ -422,8 +422,8 @@ build_rust_tools() {
     # build above, but this loop named only nidgen/abi-verify/coverage-report,
     # so every Windows release silently shipped without it.  JOBBIN_WRAP then
     # had no tool at all on Windows (ps3-self.cmake prefers our Rust tool and
-    # treats the reference spu_elf-to-ppu_obj.exe as an optional diff oracle),
-    # and hello-spurs-jq could not build from a release zip.
+    # treats any external equivalent as optional), and hello-spurs-jq could
+    # not build from a release zip.
     #
     # cargo places only workspace bin targets at the release root; build-script
     # and dependency artifacts live under build/ and deps/.  The specific names
