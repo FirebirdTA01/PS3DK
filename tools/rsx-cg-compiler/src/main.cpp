@@ -237,8 +237,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const std::string sourceCode   = slurpFile(ctx.inputFile);
-    const std::string preprocessed = runPreprocessor(sourceCode, ctx);
+    const std::string sourceCode = slurpFile(ctx.inputFile);
+    std::string preprocessed;
+    try
+    {
+        preprocessed = runPreprocessor(sourceCode, ctx);
+    }
+    catch (const std::exception& err)
+    {
+        std::fprintf(stderr, "%s\n", err.what());
+        return 1;
+    }
 
     std::vector<ParseError> parseErrors;
     auto ast = parseShaderSource(preprocessed, ctx.inputFile, &parseErrors);

@@ -116,13 +116,13 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 			if (keepComments)
 			{
 				// Expand macros only in code segments; preserve comments verbatim
-				std::string expanded = expandWithCommentsAware(line, inBlockComment);
+				std::string expanded = expandWithCommentsAware(line, inBlockComment, filename, lineNum);
 				output += expanded + "\n";
 			}
 			else
 			{
 				// Comments were stripped globally; just expand
-				std::string expandedLine = expandMacros(line);
+				std::string expandedLine = expandMacros(line, filename, lineNum);
 				output += expandedLine + "\n";
 			}
 		}
@@ -196,7 +196,7 @@ void Preprocessor::processDirective(const std::string& directive, std::string& o
 	else if (cmd == "define")
 	{
 		if(conditionalStack.empty() || conditionalStack.top().active)
-			processDefine(directive);
+			processDefine(directive, currentFile, lineNum);
 	}
 	else if (cmd == "undef")
 	{
@@ -326,7 +326,7 @@ void Preprocessor::processInclude(const std::string& directive, std::string& out
 	}
 }
 
-void Preprocessor::processDefine(const std::string& directive)
+void Preprocessor::processDefine(const std::string& directive, const std::string& currentFile, int lineNum)
 {
 	// Extract macro definition
 	std::smatch match;
@@ -364,7 +364,8 @@ void Preprocessor::processDefine(const std::string& directive)
 		std::string replacement = match[4];
 		if (!replacement.empty())
 		{
-			Lexer lexer(replacement);
+			const int replacementColumn = static_cast<int>(match.position(4)) + 1;
+			Lexer lexer(replacement, currentFile, lineNum, replacementColumn);
 			macro.replacementList = lexer.tokenize();
 			// Remove any trailing EOF token
 			if(!macro.replacementList.empty() && macro.replacementList.back().type == TokenType::END_OF_FILE)
@@ -755,12 +756,16 @@ std::string Preprocessor::stripCommentsPreserveNewlines(const std::string& src)
 }
 
 // Expand macros in code regions, while preserving comments verbatim
-std::string Preprocessor::expandWithCommentsAware(const std::string& line, bool& inBlockComment)
+std::string Preprocessor::expandWithCommentsAware(
+	const std::string& line,
+	bool& inBlockComment,
+	const std::string& currentFile,
+	int lineNum)
 {
 	// Fast path: if no comment markers and not inside block comment
 	if (!inBlockComment && line.find('/') == std::string::npos)
 	{
-		return expandMacros(line);
+		return expandMacros(line, currentFile, lineNum);
 	}
 
 	std::string result;
@@ -777,7 +782,7 @@ std::string Preprocessor::expandWithCommentsAware(const std::string& line, bool&
 		if (endExclusive > segStart)
 		{
 			std::string code = line.substr(segStart, endExclusive - segStart);
-			result += expandMacros(code);
+			result += expandMacros(code, currentFile, lineNum, static_cast<int>(segStart) + 1);
 		}
 		segStart = endExclusive;
 	};
@@ -893,7 +898,11 @@ static bool needsSpaceBefore(TokenType prevType, TokenType currType)
 }
 
 // Expand macros; only rewrite the line when we actually substitute something
-std::string Preprocessor::expandMacros(const std::string& text)
+std::string Preprocessor::expandMacros(
+	const std::string& text,
+	const std::string& currentFile,
+	int lineNum,
+	int startColumn)
 {
 	std::string result = text;
 
@@ -904,7 +913,7 @@ std::string Preprocessor::expandMacros(const std::string& text)
 		progress = false;
 
 		// Tokenize the current result
-		Lexer lexer(result);
+		Lexer lexer(result, currentFile, lineNum, startColumn);
 		std::vector<Token> tokens = lexer.tokenize();
 
 		std::string newResult;

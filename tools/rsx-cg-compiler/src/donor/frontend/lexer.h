@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <stdexcept>
 
 enum class TokenType
 {
@@ -105,14 +106,38 @@ struct Token
 	std::string filename; // For tracking includes
 };
 
+class LexerError : public std::runtime_error
+{
+public:
+	LexerError(const Token& token, const std::string& fallbackFilename);
+
+	const std::string& filename() const { return filename_; }
+	int line() const { return line_; }
+	int column() const { return column_; }
+	const std::string& lexeme() const { return lexeme_; }
+
+private:
+	std::string filename_;
+	int line_;
+	int column_;
+	std::string lexeme_;
+};
 
 class Lexer
 {
 public:
-	explicit Lexer(const std::string& source, const std::string& filename = "<input>");
+	explicit Lexer(
+		const std::string& source,
+		const std::string& filename = "<input>",
+		int startLine = 1,
+		int startColumn = 1);
 
 	std::vector<Token> tokenize();
 	std::vector<Token> tokenizeWithPreprocessor(); // Keeps preprocessor directives
+
+	static std::string formatUnknownCharacterMessage(
+		const Token& token,
+		const std::string& fallbackFilename);
 
 private:
 	std::string source;

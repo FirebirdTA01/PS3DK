@@ -3,8 +3,31 @@
 #include <algorithm>
 #include <sstream>
 
-Lexer::Lexer(const std::string& source, const std::string& filename)
-	: source(source), filename(filename), currentPos(0), line(1), column(1)
+LexerError::LexerError(const Token& token, const std::string& fallbackFilename)
+	: std::runtime_error(Lexer::formatUnknownCharacterMessage(token, fallbackFilename)),
+	  filename_(token.filename.empty() ? fallbackFilename : token.filename),
+	  line_(token.line),
+	  column_(token.column),
+	  lexeme_(token.lexeme)
+{
+}
+
+std::string Lexer::formatUnknownCharacterMessage(
+	const Token& token,
+	const std::string& fallbackFilename)
+{
+	const std::string& where = token.filename.empty() ? fallbackFilename : token.filename;
+	return where + ":" + std::to_string(token.line) + ":" +
+		std::to_string(token.column) + ": error: unknown character '" +
+		token.lexeme + "'";
+}
+
+Lexer::Lexer(
+	const std::string& source,
+	const std::string& filename,
+	int startLine,
+	int startColumn)
+	: source(source), filename(filename), currentPos(0), line(startLine), column(startColumn)
 {
 	initKeywords();
 }
@@ -163,6 +186,8 @@ std::vector<Token> Lexer::tokenize()
         }
 
         Token token = nextToken();
+        if (token.type == TokenType::UNKNOWN)
+            throw LexerError(token, filename);
         tokens.push_back(token);
 	}
 
@@ -195,10 +220,9 @@ std::vector<Token> Lexer::tokenizeWithPreprocessor()
         else
         {
             Token token = nextToken(false);
-            if (token.type != TokenType::UNKNOWN || !token.lexeme.empty())
-            {
-                tokens.push_back(token);
-            }
+            if (token.type == TokenType::UNKNOWN)
+                throw LexerError(token, filename);
+            tokens.push_back(token);
 		}
     }
     tokens.push_back({TokenType::END_OF_FILE, "", line, column, filename});

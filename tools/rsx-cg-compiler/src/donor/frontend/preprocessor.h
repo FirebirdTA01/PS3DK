@@ -65,7 +65,7 @@ private:
 	// Directive processing
 	void processDirective(const std::string& directive, std::string& output, const std::string& currentFile, int lineNum);
 	void processInclude(const std::string& directive, std::string& output, const std::string& currentFile, int lineNum);
-	void processDefine(const std::string& directive);
+	void processDefine(const std::string& directive, const std::string& currentFile, int lineNum);
 	void processUndef(const std::string& directive);
 	void processIfdef(const std::string& directive, bool isIfndef);
 	void processIf(const std::string& directive);
@@ -75,7 +75,11 @@ private:
 	void processPragma(const std::string& directive, std::string& output);
 
 	// Macros
-	std::string expandMacros(const std::string& text);
+	std::string expandMacros(
+		const std::string& text,
+		const std::string& currentFile = "<input>",
+		int lineNum = 1,
+		int startColumn = 1);
 	bool evaluateExpression(const std::string& expr);
 
 	// File handling
@@ -92,5 +96,9 @@ private:
 
 	// Comment handling
 	std::string stripCommentsPreserveNewlines(const std::string& src);
-	std::string expandWithCommentsAware(const std::string& line, bool& inBlockComment);
+	std::string expandWithCommentsAware(
+		const std::string& line,
+		bool& inBlockComment,
+		const std::string& currentFile,
+		int lineNum);
 };

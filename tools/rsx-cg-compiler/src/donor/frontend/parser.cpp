@@ -2178,27 +2178,21 @@ std::unique_ptr<TranslationUnit> parseShaderSource(
     std::vector<ParseError>* outErrors)
 {
     Lexer lexer(source, filename);
-    auto tokens = lexer.tokenize();
-
-    bool hasLexError = false;
-    for (const Token& token : tokens)
+    std::vector<Token> tokens;
+    try
     {
-        if (token.type == TokenType::UNKNOWN)
-        {
-            hasLexError = true;
-            if (outErrors)
-            {
-                SourceLocation loc{
-                    token.filename.empty() ? filename : token.filename,
-                    token.line,
-                    token.column};
-                outErrors->push_back(
-                    {loc, "unknown character '" + token.lexeme + "'", false});
-            }
-        }
+        tokens = lexer.tokenize();
     }
-    if (hasLexError)
+    catch (const LexerError& err)
+    {
+        if (outErrors)
+        {
+            SourceLocation loc{err.filename(), err.line(), err.column()};
+            outErrors->push_back(
+                {loc, "unknown character '" + err.lexeme() + "'", false});
+        }
         return nullptr;
+    }
 
     Parser parser(tokens, filename);
     auto unit = parser.parse();
