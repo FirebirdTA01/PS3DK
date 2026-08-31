@@ -12,13 +12,20 @@
 #
 # Format: <category> <path relative to the install root ($PS3DK / stage dir)>
 # Categories:
-#   host_bin   Windows host tool executable   (package validation only)
-#   host_file  Windows host helper data file  (package validation only)
+#   host_bin   Windows host tool executable   (host-tools staging AND final package)
+#   host_file  Windows host helper data file  (host-tools staging AND final package)
 #   ppu_stub   PPU stub/runtime archive       (package validation)
 #   sdk_core   core SDK artifact              (package validation AND cmake probe)
 #   alias      stub alias + its target        (package validation AND cmake probe)
 #   spu_lib    SPU runtime archive            (package validation)
 #   optional   shipped but not required       (with a reason; keeps the two-sided check honest)
+#
+# host_bin/host_file rows have TWO validators against DIFFERENT staging
+# roots -- release.yml checks the host-tools stage dir, and
+# package-windows-release.sh checks the final zip -- so a row must be true
+# in both trees.  A future file that is genuinely supplied only by the
+# packager gets a NEW category; do not reuse host_file for package-only
+# data.
 #
 # alias rows carry THREE fields: 'alias <path> <target>', where <target> is
 # relative to the alias's own directory.  sdk/Makefile and
