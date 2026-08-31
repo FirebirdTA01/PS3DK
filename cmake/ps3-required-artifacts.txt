@@ -45,10 +45,18 @@ host_bin  bin/pkg.exe
 host_bin  bin/prx-gen.exe
 host_bin  bin/rsx-cg-compiler.exe
 host_bin  bin/sfo.exe
-host_bin  bin/sfo-editor.exe
-host_bin  bin/sfo-editor-gui.exe
+host_bin  bin/sfo-gui.exe
 host_bin  bin/sprxlinker.exe
 host_bin  bin/spu-elf-to-ppu-obj.exe
+
+# bin/sfo.exe and bin/sfo-gui.exe are BOTH the Rust tools from tools/sfo/.
+# sfo.exe kept its name deliberately: PSL1GHT-era homebrew and every
+# ps3_add_pkg() recipe invoke `sfo`, and our CLI is flag-compatible with the
+# C generator it replaced, so those callers keep working unchanged.  The C
+# generator is no longer built or shipped -- tools/sfo-pkg/sfo.c stays in the
+# repo purely to regenerate the frozen fixtures in tools/sfo/tests/, which are
+# what the editor is actually validated against.  The former sfo-editor.exe /
+# sfo-editor-gui.exe names are gone as of this version.
 
 # --- Windows host helper files ------------------------------------------
 # pkg.py, sfo.py, crypt.c and build_pkgcrypt.py are gone: bin/pkg.exe and

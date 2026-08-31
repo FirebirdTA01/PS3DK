@@ -504,13 +504,23 @@ build_sprx_linker() {
 }
 
 # -----------------------------------------------------------------------------
-# 7b. sfo-pkg -> sfo.exe + pkg.exe (PARAM.SFO and .pkg generation)
+# 7b. sfo-pkg -> pkg.exe (.pkg generation)
 #
-# Native replacements for sfo.py / pkg.py plus the pkgcrypt C extension.
-# Those three put a Python interpreter on the Windows FIRST-RUN path: the
+# Native replacement for pkg.py plus the pkgcrypt C extension.
+# Those put a Python interpreter on the Windows FIRST-RUN path: the
 # extension is ABI-locked to one interpreter version, so the zip could not
 # ship a prebuilt one and setup.cmd had to compile it against whatever
 # Python the user happened to have.  These have no runtime dependencies.
+#
+# sfo.exe IS NO LONGER BUILT HERE.  bin/sfo.exe is the Rust CLI from the
+# tools/ workspace, staged by build_rust_tools above; tools/sfo-pkg/sfo.c
+# stays in the repo only so the frozen golden fixtures in
+# tools/sfo/tests/canonical.rs can be regenerated from the original
+# implementation.  The call order is what makes dropping it mandatory rather
+# than merely tidy: build_rust_tools runs BEFORE build_sfo_pkg, so a C
+# sfo.exe compiled here would OVERWRITE the Rust one already staged, and the
+# release would ship the retired tool under the name meant to be ours --
+# silently, since both are valid executables answering the same flags.
 #
 # Lives at tools/sfo-pkg/ (adopted from PSL1GHT with local fixes; see that
 # directory's PROVENANCE.md).  The SHA-1 is ours, so the self-test is built
@@ -518,10 +528,10 @@ build_sprx_linker() {
 # .pkg files the PS3 rejects, which is not something to discover later.
 # -----------------------------------------------------------------------------
 build_sfo_pkg() {
-    say "Cross-compiling sfo.exe + pkg.exe for $HOST_TRIPLE"
+    say "Cross-compiling pkg.exe for $HOST_TRIPLE"
 
     local src="$PS3_TOOLCHAIN_ROOT/tools/sfo-pkg"
-    for f in sfo.c pkg.c sha1.c sha1.h sha1-test.c; do
+    for f in pkg.c sha1.c sha1.h sha1-test.c; do
         [[ -f "$src/$f" ]] || die "sfo-pkg source missing: $src/$f"
     done
 
@@ -533,11 +543,6 @@ build_sfo_pkg() {
     "$selftest" \
         || die "sfo-pkg: SHA-1 self-test FAILED — refusing to stage pkg.exe"
     rm -rf "$(dirname "$selftest")"
-
-    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc \
-        "$src/sfo.c" \
-        -o "$STAGE_BIN/sfo.exe"
-    say "  staged sfo.exe"
 
     # No -Wall on pkg.c: upstream's fixed-size path buffers trip
     # -Wstringop-truncation and -Wformat-truncation, and that noise would
@@ -671,7 +676,8 @@ stage_python_and_assets() {
     # stage PSL1GHT's host-agnostic package helpers directly from source.
     # ICON0.PNG is intentionally supplied later by the release packager.
     # sfo.py, pkg.py, crypt.c and build_pkgcrypt.py are deliberately NOT staged
-    # any more: build_sfo_pkg above ships native sfo.exe/pkg.exe, and shipping
+    # any more: build_sfo_pkg above ships native pkg.exe (and bin/sfo.exe is
+    # the Rust CLI staged by build_rust_tools), and shipping
     # the Python pair alongside them would leave two implementations in bin/
     # with nothing saying which one the build uses. That pair is also what put
     # a Python interpreter on the Windows first-run path -- pkg.py imports
