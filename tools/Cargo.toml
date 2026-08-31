@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.12.43"
+version = "0.12.46"
 edition = "2021"
 authors = ["PS3 Custom Toolchain contributors"]
 license = "MIT"

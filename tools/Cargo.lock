@@ -20,7 +20,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "abi-verify"
-version = "0.12.43"
+version = "0.12.46"
 dependencies = [
  "anyhow",
  "ar",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "coverage-report"
-version = "0.12.43"
+version = "0.12.46"
 dependencies = [
  "anyhow",
  "ar",
@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "nidgen"
-version = "0.12.43"
+version = "0.12.46"
 dependencies = [
  "anyhow",
  "ar",
@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "prx-gen"
-version = "0.12.43"
+version = "0.12.46"
 dependencies = [
  "anyhow",
  "clap",
@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "sfo"
-version = "0.12.43"
+version = "0.12.46"
 dependencies = [
  "anyhow",
  "clap",
@@ -2589,7 +2589,7 @@ dependencies = [
 
 [[package]]
 name = "spu-elf-to-ppu-obj"
-version = "0.12.43"
+version = "0.12.46"
 dependencies = [
  "anyhow",
  "clap",

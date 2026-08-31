@@ -16,15 +16,33 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-## [v0.12.43] — 2026-08-31
+## [v0.12.46] — 2026-08-31
 
-Patch release.  A crash in the packaging tool found by the first external
+Patch release.  Supersedes the v0.12.43 tag, which was cut correctly but could
+not build its Windows host tools and therefore published nothing — see the
+dependency-fetch entry below.  A crash in the packaging tool found by the first external
 consumer, and a family of compiler defects that all shared one shape: the code
 continued quietly where it should have refused.  Nothing here adds surface —
 the shader compiler's experimental lowering path deliberately accepts *less*
 than it did, because much of what it accepted before was silently wrong.
 
 ### Fixed
+
+- **A dependency mirror answering 200 with the wrong bytes no longer poisons
+  the fetch.**  zlib.net rotated 1.3.1 off its top-level path and served a
+  355-byte page under the tarball's name; the download "succeeded", and the two
+  mirrors behind it — both holding the correct file — were never tried, because
+  verification ran after the whole chain rather than inside it.  Each mirror's
+  bytes are now checked as it is fetched, a cached file is verified rather than
+  trusted on existence, and release-tagged mirrors are tried first because a
+  tagged artifact does not move.  The pin itself was correct throughout and is
+  what caught the substitution.
+- **The angle-stdlib test fixtures read real inputs.**  They declared their
+  input as a semantic-annotated *local*, which binds nothing — the reference
+  compiler warns "might be used before being initialized" and emits an empty
+  attribute mask for the same source.  The fixtures only passed because an
+  unresolvable operand used to become vertex attribute zero, so the test was
+  exercising `radians`/`degrees` on garbage.
 
 - **`pkg` crashed on any tree more than three directories deep.**  The
   directory walker held two ~520 KB tables *per recursion level* on the stack;
