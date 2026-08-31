@@ -34,9 +34,7 @@
 +CRTSTUFF_T_CFLAGS_S += -fno-asynchronous-unwind-tables
 --- a/libgcc/config.host
 +++ b/libgcc/config.host
-@@ -1240,10 +1240,10 @@ powerpc-*-rtems*)
- 	tmake_file="${tmake_file} rs6000/t-ppccomm rs6000/t-savresfgpr rs6000/t-crtstuff t-crtstuff-pic t-fdpbit"
- 	extra_parts="$extra_parts crtbeginS.o crtendS.o crtbeginT.o ecrti.o ecrtn.o ncrti.o ncrtn.o"
+@@ -1242,8 +1242,8 @@ powerpc-*-rtems*)
  	;;
  powerpc64-ps3-elf*)
 -	tmake_file="${tmake_file} rs6000/t-savresfgpr"
