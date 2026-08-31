@@ -121,16 +121,23 @@ jobs:
 
       - name: Validate --version flags
         run: |
-          tools/target/release/nidgen --version
-          tools/target/release/abi-verify --version
-          tools/target/release/coverage-report --version
-          tools/target/release/prx-gen --version
-          tools/target/release/spu-elf-to-ppu-obj --version
-          tools/target/release/sfo --version
-          tools/target/release/sfo-gui --version
+          # Derived from tools/Cargo.toml, so the gate cannot fall behind a
+          # newly added [[bin]] the way the hardcoded list did.
+          #
+          # Captured into a variable, deliberately, rather than expanded
+          # inline as `for bin in $(...)`.  A command substitution that fails
+          # inside a `for` list does NOT trip errexit -- the loop simply
+          # iterates zero times and the step goes green having checked
+          # nothing.  A standalone assignment does trip it, and the emptiness
+          # test below covers the case where the script exits 0 with no
+          # output.  Same vacuous-pass class the manifest loop guards against
+          # further down this file.
+          bins="$(./scripts/list-rust-bins.sh)"
+          [ -n "$bins" ] || { echo "::error::list-rust-bins.sh produced no binaries -- derivation problem, not an empty workspace"; exit 1; }
+          for bin in $bins; do
+            "tools/target/release/$bin" --version
+          done
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
-          # This gate covers every Rust binary the workspace produces; keep it
-          # and the staging loop below in step with tools/Cargo.toml's members.
           # sprx-linker has no --version yet; just confirm it's a runnable ELF.
           file tools/sprx-linker/sprxlinker
 
@@ -139,13 +146,14 @@ jobs:
           version="${{ needs.verify-version.outputs.version }}"
           stage="ps3-sdk-tools-${version}-linux-x86_64"
           mkdir -p "$stage/bin"
-          # Rust binaries.
-          # Every [[bin]] the tools/ workspace produces. This loop shipped a
+          # Rust binaries, derived from tools/Cargo.toml.  This loop shipped a
           # SUBSET for several releases -- prx-gen and spu-elf-to-ppu-obj were
           # missing, so the linux tools zip lacked tools the Windows release
-          # shipped. Keep it in sync with tools/Cargo.toml's members until
-          # the list is single-sourced.
-          for bin in nidgen abi-verify coverage-report prx-gen spu-elf-to-ppu-obj sfo sfo-gui; do
+          # shipped.  Deriving removes the possibility.
+          ./scripts/list-rust-bins.sh --check tools/target/release
+          bins="$(./scripts/list-rust-bins.sh)"
+          [ -n "$bins" ] || { echo "::error::list-rust-bins.sh produced no binaries -- derivation problem, not an empty workspace"; exit 1; }
+          for bin in $bins; do
             cp "tools/target/release/$bin" "$stage/bin/"
           done
           # C/C++ binaries.
@@ -154,6 +162,16 @@ jobs:
           # Strip everything (best-effort).
           strip "$stage/bin/"* || true
           # Bundle a tiny README that lists runtime deps.
+          #
+          # The heredoc is unquoted on purpose: the glibc/libgcc_s bullet
+          # derives its names from the workspace instead of repeating them.
+          # That bullet was the LAST hardcoded copy of the binary list in this
+          # file, and it had already drifted -- it named six tools while the
+          # workspace built seven.  sfo-gui is excluded because it is the one
+          # binary with a different runtime dependency (its bullet is just
+          # above); a future GUI tool would land in the wrong bullet, which is
+          # a smaller and more visible error than being omitted entirely, as
+          # every tool added since this text was written already was.
           cat > "$stage/README.txt" <<EOF
           PS3 Custom Toolchain — host tools, ${version}, linux x86_64.
 
@@ -167,8 +185,8 @@ jobs:
                                    loaded by the user's GUI session (for
                                    example libX11/libxcb/libxkbcommon/
                                    libwayland-client/libGL or libEGL)
-            * nidgen, abi-verify, coverage-report, prx-gen,
-              spu-elf-to-ppu-obj, sfo - glibc/libgcc_s
+            * the remaining Rust tools - glibc/libgcc_s:
+          $(./scripts/list-rust-bins.sh | grep -vx sfo-gui | sed 's/^/      /')
 
           See CHANGELOG.md for what changed in this release.
           EOF

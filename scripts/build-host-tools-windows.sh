@@ -437,6 +437,26 @@ build_rust_tools() {
         staged=$((staged + 1))
     done
     [[ "$staged" -gt 0 ]] || die "cargo --workspace produced no .exe in $rust_out — check the cargo log"
+
+    # The glob above stages whatever cargo emitted; these assert that
+    # "whatever cargo emitted" is in fact every [[bin]] tools/Cargo.toml
+    # declares.  Without them the glob is honest but blind: it cannot tell a
+    # workspace that built seven tools from one that built six, which is
+    # exactly how spu-elf-to-ppu-obj went missing from every Windows release.
+    #
+    #   $rust_out  is the real gate.  It fails if a crate did not cross-compile
+    #              or a new [[bin]] produced nothing.
+    #   $STAGE_BIN is a downstream assertion on the directory that actually
+    #              gets packaged.  Be clear about its value: today the glob
+    #              copies from $rust_out under set -e, so any case that empties
+    #              $STAGE_BIN also trips the check above it -- verified, not
+    #              assumed (a binary hidden in release/deps/ fails on $rust_out
+    #              first).  It earns its line by guarding the NEXT edit to the
+    #              staging loop, and because $STAGE_BIN persists between runs,
+    #              so it is the one directory whose contents are not implied by
+    #              this run alone.
+    "$script_dir/list-rust-bins.sh" --check "$rust_out"   --suffix .exe
+    "$script_dir/list-rust-bins.sh" --check "$STAGE_BIN"  --suffix .exe
 }
 
 # -----------------------------------------------------------------------------

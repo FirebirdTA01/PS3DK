@@ -60,17 +60,23 @@ build_rust_workspace() {
 
     local out="$TOOLS_DIR/target/release"
     local bin
-    # Every workspace [[bin]], by its installed name.  This list previously
-    # held only four entries, so a from-source install silently lacked
-    # prx-gen and the SFO tools that the Windows release ships — the CMake
-    # probes then failed only at the first ps3_add_prx / ps3_add_pkg use.
-    # If you add a crate binary, add it here AND in release.yml's
-    # linux-tools loop AND in build-host-tools-windows.sh (follow-up task
-    # exists to single-source these three lists).
-    for bin in nidgen coverage-report abi-verify spu-elf-to-ppu-obj \
-               prx-gen sfo sfo-gui; do
+    # Every workspace [[bin]], derived rather than listed.  This was a
+    # hardcoded list of four when the workspace built seven, so a from-source
+    # install silently lacked prx-gen and the SFO tools that the Windows
+    # release ships, and the gap only surfaced at the first ps3_add_prx or
+    # ps3_add_pkg.  scripts/list-rust-bins.sh is the one place the names live
+    # now; adding a [[bin]] to tools/Cargo.toml is enough.
+    #
+    # Two-sided, and the order matters: assert the build produced every
+    # derived binary FIRST, so a [[bin]] cargo did not emit is reported as
+    # "a workspace binary is not being shipped" naming all of them, rather
+    # than as install_tool's per-file "host tool missing or not executable"
+    # on whichever one the loop happened to reach first.
+    "$script_dir/list-rust-bins.sh" --check "$out"
+
+    while read -r bin; do
         install_tool "$out/$bin" "$bin"
-    done
+    done < <("$script_dir/list-rust-bins.sh")
 }
 
 build_rsx_cg_compiler() {
