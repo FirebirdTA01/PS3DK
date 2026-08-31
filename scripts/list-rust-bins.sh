@@ -69,7 +69,26 @@ while read -r member; do
 
     if [[ -z "$member_bins" ]]; then
         if [[ -f "$ROOT/tools/$member/src/main.rs" ]]; then
-            member_bins="$member"
+            # Cargo's implicit binary is named after the PACKAGE, not the
+            # directory the package sits in -- `members = ["foo-dir"]` with
+            # `name = "bar"` builds bar, not foo-dir.  Using the member name
+            # here would make this script confidently wrong for exactly the
+            # crate it exists to protect: cargo would emit one name while
+            # every consumer checked for another.  Every member today
+            # declares [[bin]] explicitly, so this path is the future guard,
+            # which is the reason to get it right rather than the reason not
+            # to bother.
+            member_bins="$(awk '
+                /^[[:space:]]*\[package\]/ { inpkg = 1; next }
+                /^[[:space:]]*\[/           { inpkg = 0 }
+                inpkg && /^[[:space:]]*name[[:space:]]*=/ {
+                    if (match($0, /"[^"]+"/)) {
+                        print substr($0, RSTART + 1, RLENGTH - 2)
+                        exit
+                    }
+                }
+            ' "$manifest")"
+            [[ -n "$member_bins" ]]                 || die "member '$member' has src/main.rs but no [package] name in $manifest"
         else
             # Neither an explicit [[bin]] nor an implicit one.  Silently
             # producing nothing here is how a tool goes missing from every
