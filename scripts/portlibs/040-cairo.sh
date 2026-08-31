@@ -78,28 +78,6 @@ if [[ -f Makefile ]]; then
     make distclean >/dev/null 2>&1 || true
 fi
 
-# TEMPORARY until t_376721dc (toolchain respin) lands: crtend.o carries an
-# FDE after its .eh_frame zero terminator, so EVERY link emits one benign
-# ld diagnostic ("error in ...crtend.o(.eh_frame); no .eh_frame_hdr table
-# will be created").  cairo's pthread probe treats ANY conftest stderr as
-# failure, so that single line alone would knock configure down to the
-# no-threads tier despite a clean rc=0 link.  Wrap the compiler and drop
-# exactly that diagnostic; every other stderr line and all exit codes pass
-# through untouched.  Delete this wrapper when the respin ships a crtend
-# whose .eh_frame is only the terminator.
-QUIET_CC="$PWD/.ps3dk-quiet-cc"
-cat > "$QUIET_CC" <<WRAP
-#!/usr/bin/env bash
-tmp=\$(mktemp)
-$CC "\$@" 2>"\$tmp"
-rc=\$?
-grep -v 'error in .*crtend\.o(\.eh_frame); no \.eh_frame_hdr table will be created' "\$tmp" >&2 || true
-rm -f "\$tmp"
-exit \$rc
-WRAP
-chmod +x "$QUIET_CC"
-
-CC="$QUIET_CC" \
 ./configure \
     --host="$HOST_TRIPLE" \
     --prefix="$PORTLIBS" \
