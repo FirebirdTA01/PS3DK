@@ -33,3 +33,4 @@
 0032-gcc-rs6000-pointer-add-hybrid-canonicalize.patch
 0033-gcc-expr-canonicalize-pointer-member-extract-hybrid.patch
 0034-cell64lv2-link-c-stub.patch
+0035-libgcc-t-ps3-crtstuff-no-unwind-tables.patch

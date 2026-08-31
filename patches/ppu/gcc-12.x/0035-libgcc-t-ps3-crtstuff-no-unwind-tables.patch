@@ -1,0 +1,49 @@
+--- a/libgcc/config/rs6000/t-ps3-crtstuff
++++ b/libgcc/config/rs6000/t-ps3-crtstuff
+@@ -0,0 +1,31 @@
++# crtstuff (crtbegin/crtend) flags for the PS3 LV2 targets.
++#
++# Copyright (C) 2026 PS3DK toolchain contributors.
++#
++# This file is part of GCC.
++#
++# GCC is free software; you can redistribute it and/or modify it under
++# the terms of the GNU General Public License as published by the Free
++# Software Foundation; either version 3, or (at your option) any later
++# version.
++#
++# GCC is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
++# License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with GCC; see the file COPYING3.  If not see
++# <http://www.gnu.org/licenses/>.
++#
++# crtend.o's .eh_frame must be exactly the 4-byte zero terminator, and
++# the terminator must be the section's LAST entry.  With asynchronous
++# unwind tables enabled the compiler appends a real FDE for crtstuff's
++# own functions after __FRAME_END__; GNU ld edits .eh_frame
++# unconditionally, parses garbage past the terminator, and emits
++# "error in crtend.o(.eh_frame); no .eh_frame_hdr table will be created"
++# on every link.  There is no unwinder for crtstuff's functions on LV2,
++# so drop their unwind entries entirely.  User-code .eh_frame is untouched.
++
++CRTSTUFF_T_CFLAGS += -fno-asynchronous-unwind-tables
++CRTSTUFF_T_CFLAGS_S += -fno-asynchronous-unwind-tables
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -1240,10 +1240,10 @@ powerpc-*-rtems*)
+ 	tmake_file="${tmake_file} rs6000/t-ppccomm rs6000/t-savresfgpr rs6000/t-crtstuff t-crtstuff-pic t-fdpbit"
+ 	extra_parts="$extra_parts crtbeginS.o crtendS.o crtbeginT.o ecrti.o ecrtn.o ncrti.o ncrtn.o"
+ 	;;
+ powerpc64-ps3-elf*)
+-	tmake_file="${tmake_file} rs6000/t-savresfgpr"
++	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff"
+ 	;;
+ powerpc64-ps3-kernel-elf*)
+-	tmake_file="${tmake_file} rs6000/t-savresfgpr"
++	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff"
+ 	;;
+ powerpc*-*-linux*)
