@@ -19,6 +19,12 @@ static gcmContextData sUserContext =
 
 extern s32 gcmInitBodyEx(gcmContextData* ATTRIBUTE_PRXPTR *ctx,const u32 cmdSize,const u32 ioSize,const void *ioAddress);
 
+/* Default only.  This one-time bind of the 2D-surface destination DMA
+ * context is NOT what makes rsxInlineTransfer land in local memory:
+ * rsxSetTransferImage / rsxSetTransferScaleMode rebind the same
+ * register to the host buffer for every *_TO_MAIN blit, so the
+ * per-transfer bind inside rsxInlineTransfer (commands_impl.h) is the
+ * load-bearing one.  Do not remove that one as redundant with this. */
 static void rsxSetInlineTransferDmaImageDestin(gcmContextData *context)
 {
 	if (!context || !context->current || !context->end) return;
