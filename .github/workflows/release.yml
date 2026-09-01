@@ -715,6 +715,85 @@ jobs:
             stage/release/ps3-sdk-*-windows-x86_64.zip
             stage/release/ps3-sdk-*-windows-x86_64.zip.sha256
 
+  # ---------------------------------------------------------------------
+  # CI gate — publishing requires CI green on the tagged commit
+  # ---------------------------------------------------------------------
+  # v0.12.54 built to completion while CI was FAILING on the same commit and
+  # would have published had a later step not failed for an unrelated reason.
+  # Nothing in the pipeline would have stopped it, so "ship on red" was not a
+  # decision anyone made - it was a thing that could happen by omission.  A
+  # release is the one artifact that cannot be retracted; everything else here
+  # can be amended, re-tagged or force-pushed.  That asymmetry is the whole
+  # argument for this job.
+  #
+  # The override is deliberate and auditable: put [ci-override: <reason>] in
+  # the ANNOTATED TAG MESSAGE.  A tag push carries no workflow inputs, and the
+  # tag annotation is permanent and visible in the release record, so the
+  # override cannot be made invisibly or after the fact.  Shipping on red stays
+  # possible; it just becomes a recorded decision with a reason attached.
+  require-ci-green:
+    name: Require CI green on the tagged commit
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check CI conclusion for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # The override lives in the annotated tag message.
+          tag="${GITHUB_REF#refs/tags/}"
+          msg="$(git for-each-ref "refs/tags/$tag" --format='%(contents)')"
+          if printf '%s' "$msg" | grep -q '\[ci-override:'; then
+              reason="$(printf '%s' "$msg" | sed -n 's/.*\[ci-override:[[:space:]]*\([^]]*\)\].*/\1/p')"
+              echo "::warning title=CI gate overridden::Publishing $tag with the CI gate overridden. Reason: ${reason:-<none given>}"
+              echo "OVERRIDDEN - proceeding without a green CI. Reason: ${reason:-<none given>}"
+              exit 0
+          fi
+
+          # Otherwise CI must have concluded successfully for THIS commit.
+          # Keyed on the commit sha, not "latest on main": the tag is what is
+          # being published and main can move underneath it.
+          echo "Waiting for CI to conclude on $SHA ..."
+          deadline=$(( SECONDS + 1800 ))
+          conclusion=""
+          while [ "$SECONDS" -lt "$deadline" ]; do
+              runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=100" \
+                        --jq '[.workflow_runs[] | select(.name == "CI")] | sort_by(.created_at) | last')"
+              if [ -z "$runs" ] || [ "$runs" = "null" ]; then
+                  echo "  no CI run for this commit yet ..."
+              else
+                  status="$(printf '%s' "$runs" | jq -r '.status')"
+                  conclusion="$(printf '%s' "$runs" | jq -r '.conclusion // ""')"
+                  echo "  CI status=$status conclusion=${conclusion:-<pending>}"
+                  [ "$status" = "completed" ] && break
+              fi
+              sleep 30
+          done
+
+          if [ "$conclusion" = "success" ]; then
+              echo "CI is green for $SHA - publishing may proceed."
+              exit 0
+          fi
+
+          # Fail CLOSED: no CI run, still running at the deadline, or red.
+          echo "::error title=CI gate::Refusing to publish - CI for $SHA is '${conclusion:-not completed}'."
+          echo
+          echo "A release is the one artifact that cannot be retracted, so this"
+          echo "job fails closed: a missing or unfinished CI run blocks just as"
+          echo "a red one does."
+          echo
+          echo "To publish anyway, re-tag with an override and a reason:"
+          echo "  git tag -a -f $tag -m 'release: $tag [ci-override: why this is safe]'"
+          echo "  git push --force origin $tag"
+          exit 1
+
   publish:
     name: Publish GitHub Release
     # Only publish on a real tag push — workflow_dispatch runs the pipeline
@@ -723,6 +802,7 @@ jobs:
     # without accidentally minting a release.
     if: github.event_name == 'push'
     needs:
+      - require-ci-green
       - verify-version
       - build-host-tools-linux
       - build-host-tools-windows
