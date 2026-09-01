@@ -4204,6 +4204,14 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     }
 
     asm_.markLast();
+    if (asm_.inputConflict())
+    {
+        out.diagnostics.push_back(
+            "nv40-vp: a vertex instruction addresses two distinct input "
+            "registers, which the hardware cannot encode; refusing "
+            "(materialising one input into a temp is the fix, filed)");
+        return out;
+    }
     out.words = asm_.words();
     out.ok    = true;
 
