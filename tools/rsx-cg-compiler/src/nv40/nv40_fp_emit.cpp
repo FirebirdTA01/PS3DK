@@ -335,6 +335,43 @@ struct FpNormalizeBinding
     bool         arithUniformNeg = false;
 };
 
+// ---------------------------------------------------------------------
+// Shared emission state for shape matchers (t_c44cc3b7, carve step 1).
+// ---------------------------------------------------------------------
+// The 49 shape matchers inside lowerFragmentProgram are [&] lambdas, so each
+// one reaches the emission state through capture.  That capture is what pins
+// them in place: a lambda capturing its caller's locals cannot become a free
+// function.  Bundling the state into an explicit context turns the capture
+// list into a parameter, which is the whole mechanism by which a matcher
+// moves out.
+//
+// Introduced here as a PURE ADDITION - constructed once and used by nothing -
+// so this commit proves the references bind from the real scope while moving
+// zero bytes.  The conversions that use it come one at a time, each fenced.
+//
+// It owns `ambiguousBinding` from the start deliberately.  A converted matcher
+// must signal an unresolvable ambiguity through the context, because the
+// function-local flag it writes today will not be in scope once the matcher
+// lives outside.  Designing that in now beats discovering it at conversion 7 -
+// and the compiler makes the mistake loud either way, since a converted
+// matcher referencing the captured flag simply will not build.
+struct FpShapeContext
+{
+    UcodeOutput&  out;
+    FpAssembler&  asm_;
+
+    std::unordered_map<IRValueID, int>&                    valueToInputSrc;
+    std::unordered_map<IRValueID, unsigned>&               valueToFpUniform;
+    std::unordered_map<IRValueID, TexBinding>&             valueToTex;
+    std::unordered_map<IRValueID, GenericFpArithBinding>&  valueToGenericArith;
+    std::unordered_map<IRValueID, FpNormalizeBinding>&     valueToNormalize;
+    std::unordered_map<IRValueID, FpMaxDotZeroBinding>&    valueToMaxDotZero;
+
+    // Set when a matcher finds an ambiguity it must not resolve by guessing;
+    // the emission tail refuses the whole compile when it is set.
+    bool& ambiguousBinding;
+};
+
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
@@ -937,6 +974,16 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // print the diagnostic inside a compile that exits 0 - the
     // diagnostic-but-continues shape this codebase has been removing.
     bool ambiguousBinding = false;
+
+    // Carve step 1: constructed, not yet consumed.  Proves the references bind
+    // from this scope; the first matcher conversion is what starts using it.
+    FpShapeContext shapeCtx{
+        out, asm_,
+        valueToInputSrc, valueToFpUniform, valueToTex,
+        valueToGenericArith, valueToNormalize, valueToMaxDotZero,
+        ambiguousBinding
+    };
+    (void)shapeCtx;
 
     // Two-pass architecture:
     //   Pass 0 — Analysis: walk all instructions, populate every
