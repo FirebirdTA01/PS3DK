@@ -3441,6 +3441,71 @@ private:
                 int phys;
                 if (vi.dst.preferredPhys >= 0) {
                     phys = vi.dst.preferredPhys;
+                    // A PIN IS HONOURED UNCONDITIONALLY - it is not a
+                    // request, it overrides the free list and the reuse
+                    // path.  That is fine while at most one pinned value
+                    // is live at a time, and silently wrong otherwise:
+                    // two pinned results share one register and a
+                    // consumer reads the same value twice.
+                    //
+                    // lowerStep pins EVERY step() result to phys 0, so
+                    // `step(a,x) * step(x,b)` computes a*a.  Measured on
+                    // test_62_v_address_register, whose border is exactly
+                    // that product: at the last column of each stripe the
+                    // correct border is 0 and ours is 1, and the pixels
+                    // that differ are precisely those columns.
+                    //
+                    // REFUSE rather than emit it.  A collision is only a
+                    // fault when the register's current occupant is used
+                    // AFTER this instruction - a pin that overwrites a
+                    // dead value is free - so the test is liveness, not
+                    // duplication: 21 of 117 corpus shaders pin one
+                    // register twice, but only 15 clobber a live value,
+                    // and test_35_clamp is in the first set and not the
+                    // second, which is why it renders correctly today.
+                    //
+                    // This is a DETECTOR, not the fix.  The pins exist
+                    // for FP precision shaping (SGE writes H0, MOVX
+                    // converts to R0, and H0/H1 alias R0; reflect and
+                    // refract pin 0 and 1 as a pair), so making a pin
+                    // yield to a live occupant has to preserve that and
+                    // is a separate change.  Until then a refusal is the
+                    // honest answer: these shaders were never compiled
+                    // correctly, only counted as compiled.
+                    // Compare ALIAS SETS, not raw indices.  H registers
+                    // have their own index space and alias full R slots in
+                    // pairs (H0/H1 -> R0), so a raw int comparison would
+                    // both miss real collisions and invent false ones.
+                    // Same slot rule as aliasesEarlyRead above.
+                    const int pinSlot = vi.dst.fp16 ? (phys >> 1) : phys;
+                    for (const auto& kv : program_.vregToPhys) {
+                        if (kv.first == vi.dst.index)
+                            continue;
+                        const bool occFp16 =
+                            program_.vregToFp16.count(kv.first) &&
+                            program_.vregToFp16[kv.first];
+                        const int occSlot =
+                            occFp16 ? (kv.second >> 1) : kv.second;
+                        if (occSlot != pinSlot)
+                            continue;
+                        const auto lu = lastUse.find(kv.first);
+                        if (lu == lastUse.end() || lu->second <= i)
+                            continue;
+                        program_.diagnostics.push_back(
+                            "nv40-general: instruction " + std::to_string(i) +
+                            " pins " + (vi.dst.fp16 ? "H" : "R") +
+                            std::to_string(phys) + " (slot R" +
+                            std::to_string(pinSlot) + ") for v" +
+                            std::to_string(vi.dst.index) + ", but v" +
+                            std::to_string(kv.first) + " already holds " +
+                            (occFp16 ? "H" : "R") + std::to_string(kv.second) +
+                            " in the same slot and is still read at " +
+                            std::to_string(lu->second) +
+                            " - the pin would clobber a live value and both "
+                            "would share one register; refusing");
+                        program_.loweringFailed = true;
+                        return;
+                    }
                 } else {
                     auto reusableSrc = std::find_if(
                         vi.srcs.begin(), vi.srcs.end(),
