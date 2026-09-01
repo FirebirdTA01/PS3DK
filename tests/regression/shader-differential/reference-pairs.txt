@@ -47,3 +47,12 @@ tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto
 # compiler had a fixture for this before today; both were relying on
 # general machinery rather than on a test that fails when it is removed.
 tests/regression/shader-differential/shaders/sd_scalar_broadcast.fcg|auto|general
+
+# Companion to sd_scalar_broadcast: the LANE-EXTRACT half of the scalar
+# rule (t_b6f2a2a4).  A scalar operand must replicate ITS OWN component,
+# not lane 0 - a width-1 value can be a lane extract that already selected
+# its lane.  Each channel takes its scalar from a different non-x lane
+# (uv.y, u_lane.z, u_lane.w) so a failure names which lane was lost.
+# Mutation-confirmed: forcing lane 0 changes this container by 8 bytes.
+# |general because it uses frac, which the default path refuses.
+tests/regression/shader-differential/shaders/sd_scalar_lane_extract.fcg|auto|general

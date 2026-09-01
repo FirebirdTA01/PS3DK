@@ -1,0 +1,59 @@
+// shader-differential — NAMED REGRESSION for the LANE-EXTRACT half of the
+// scalar-broadcast rule (t_b6f2a2a4, companion to sd_scalar_broadcast.fcg).
+//
+// THE RULE: a scalar operand under a multi-lane write mask must replicate
+// ITS OWN component, not lane 0.  A width-1 value can be a lane extract
+// that has already selected its component - `uv.y` carries swizzle[0]==1 -
+// so forcing {0,0,0,0} would silently read lane X instead, turning the fix
+// into the same class of bug it removes.
+//
+// WHY A SEPARATE FIXTURE, stated accurately after MEASURING it rather than
+// from the claim I first wrote here.  I originally asserted that
+// sd_scalar_broadcast could not catch a replicate-vs-force-lane-0 mistake.
+// That was FALSE: mutating broadcastScalar to force lane 0 changes its
+// container by 4 bytes, because its output assembly reads `frac(lit).y`
+// and friends - lane extracts with swizzle[0] == 1 - so it catches the
+// mutation incidentally through its RESULT reads.
+//
+// This fixture is still worth having, for narrower reasons than I claimed:
+// it exercises the lane extract as the SCALAR OPERAND of a multi-lane
+// operation (which is where the rule applies) rather than as an output
+// selector, and it covers lanes Z and W of a uniform, which nothing else
+// touches.  It detects the same mutation with 8 bytes against 4.
+//
+// The correction matters more than the fixture: a docstring asserting what
+// a test protects is not evidence that it protects it, and I wrote a false
+// one while relaying exactly that lesson from the vita-cg-compiler team,
+// who had just found their own fixture testing a different mechanism than
+// its docstring claimed.  Both fixtures are now mutation-confirmed against
+// force-lane-0; neither claim rests on reading.
+//
+// EACH CHANNEL TAKES ITS SCALAR FROM A DIFFERENT NON-X LANE, so a failure
+// names which lane was lost rather than only that something was:
+//   R  scalar from uv.y      under a 2-lane mask, read back at lane Y
+//   G  scalar from a uniform's .z lane, under a 2-lane mask, at lane Y
+//   B  scalar from a uniform's .w lane, under a 2-lane mask, at lane Y
+// If the broadcast forces lane 0, R reads uv.x where it should read uv.y
+// and G/B read u_lane.x - all three go wrong together and none goes to
+// zero, which is the signature that distinguishes this from the
+// read-zero and read-unwritten-lane failures of the sibling fixture.
+//
+// Non-flat input on purpose: judged on pixels, because a broadcast that is
+// present in the encoding but wrong in the swizzle reads identically in a
+// disassembly listing.
+
+void main(float2 uv : TEXCOORD0,
+          uniform float4 u_lane,
+          out float4 color : COLOR)
+{
+    float  sy = uv.y;                   // scalar taken from lane Y
+    float2 a  = uv * sy;
+
+    float  sz = u_lane.z;               // scalar taken from a uniform's lane Z
+    float2 b  = uv * sz;
+
+    float  sw = u_lane.w;               // scalar taken from a uniform's lane W
+    float2 c  = uv * sw;
+
+    color = float4(frac(a).y, frac(b).y, frac(c).y, 1.0);
+}
