@@ -580,7 +580,14 @@ static int load_manifest(void)
 		 * same conversion of convention into property, one row later
 		 * (review follow-on to the existence check). */
 		if (first_uniform_row >= 0 && control_index > first_uniform_row) {
-			printf("shader-differential: manifest line order puts a uniform-dependent row (index %d) before the control-uniform row (index %d) — it would be judged before the gate can close; refusing\n",
+			/* Note the implication for rows 1..2: the standing
+			 * controls are pinned before any possible control-uniform
+			 * position, so a standing control carrying a uniform set
+			 * always trips this check.  That is a RULE, not an
+			 * ordering accident — the comparator's own validation
+			 * cannot depend on uniform application — and the message
+			 * says so, so nobody tries to reorder their way out of it. */
+			printf("shader-differential: manifest line order puts a uniform-dependent row (index %d) before the control-uniform row (index %d) — it would be judged before the gate can close; refusing (note: the standing controls on rows 1..2 may never carry a uniform set — the comparator's own validation cannot depend on uniform application)\n",
 			       first_uniform_row, control_index);
 			return 0;
 		}
