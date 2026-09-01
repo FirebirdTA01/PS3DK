@@ -3289,6 +3289,37 @@ private:
                     src.fp16 = fp16It != program_.vregToFp16.end() && fp16It->second;
                 }
             }
+            // SelPred breaks the read-then-write assumption every other
+            // VOp satisfies: it WRITES dst in its first expanded
+            // instruction and READS srcs[0]/srcs[1] in later ones
+            // (found in review of 9e7e84d as a live miscompile — the
+            // condition's dying register was reused as dst, so CC was
+            // set from the just-written else value and the then arm
+            // never committed).  So for SelPred, dst must not share a
+            // register with srcs[0] or srcs[1] on ANY assignment path;
+            // srcs[2] is read by the same instruction that writes dst
+            // and stays shareable.  H registers alias R slots in
+            // pairs, so the comparison is on R slots.
+            const auto aliasesEarlyRead = [&](int candidate, bool candFp16) {
+                if (vi.op != VOp::SelPred)
+                    return false;
+                const int candSlot = candFp16 ? (candidate >> 1) : candidate;
+                for (int s = 0; s < 2; ++s) {
+                    const VSrc& src = vi.srcs[s];
+                    if (src.kind != VSrcKind::Temp)
+                        continue;
+                    const auto it = program_.vregToPhys.find(src.index);
+                    if (it == program_.vregToPhys.end())
+                        continue;
+                    const bool sFp16 =
+                        program_.vregToFp16.count(src.index) &&
+                        program_.vregToFp16[src.index];
+                    const int srcSlot = sFp16 ? (it->second >> 1) : it->second;
+                    if (srcSlot == candSlot)
+                        return true;
+                }
+                return false;
+            };
             if (!vi.dst.none &&
                 !vi.dst.output &&
                 program_.vregToPhys.find(vi.dst.index) == program_.vregToPhys.end()) {
@@ -3299,6 +3330,11 @@ private:
                     auto reusableSrc = std::find_if(
                         vi.srcs.begin(), vi.srcs.end(),
                         [&](const VSrc& src) {
+                            // SelPred may only reuse srcs[2] (the else
+                            // value) — see aliasesEarlyRead above.
+                            if (vi.op == VOp::SelPred &&
+                                (&src - vi.srcs.data()) != 2)
+                                return false;
                             return src.kind == VSrcKind::Temp &&
                                    !src.fp16 &&
                                    !vi.dst.fp16 &&
@@ -3307,17 +3343,20 @@ private:
                         });
                     if (reusableSrc != vi.srcs.end()) {
                         phys = program_.vregToPhys[reusableSrc->index];
-                    } else if (!vi.dst.fp16 && !freeList.empty()) {
+                    } else if (!vi.dst.fp16 && !freeList.empty() &&
+                               !aliasesEarlyRead(freeList.back(), false)) {
                         phys = freeList.back();
                         freeList.pop_back();
                     } else {
                         // FP H registers have their own index space but alias
                         // full R slots in pairs: H0/H1 -> R0, H2/H3 -> R1.
-                        if (profile_ == GeneralProfile::Fragment) {
-                            phys = vi.dst.fp16 ? (nextPhys-- << 1) : nextPhys--;
-                        } else {
-                            phys = vi.dst.fp16 ? (nextPhys++ << 1) : nextPhys++;
-                        }
+                        do {
+                            if (profile_ == GeneralProfile::Fragment) {
+                                phys = vi.dst.fp16 ? (nextPhys-- << 1) : nextPhys--;
+                            } else {
+                                phys = vi.dst.fp16 ? (nextPhys++ << 1) : nextPhys++;
+                            }
+                        } while (aliasesEarlyRead(phys, vi.dst.fp16));
                     }
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
@@ -3719,6 +3758,41 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             // literal/uniform const block is appended right after the
             // instruction that references it — the same layout the
             // single-instruction path below produces.
+            //
+            // Alias guard (found in review of 9e7e84d, live miscompile):
+            // SelPred WRITES dst in its first instruction and READS
+            // srcs[0]/srcs[1] in later ones, breaking the read-then-
+            // write assumption every allocator path relies on.  If the
+            // allocator ever hands dst a register shared with the
+            // condition or the then-value (H registers alias R slots
+            // in pairs, so compare R slots), the expansion would
+            // silently compute "else everywhere" — refuse instead.
+            // srcs[2] is read by the same instruction that writes dst
+            // and may share.
+            {
+                if (vi.dst.phys < 0) {
+                    out.diagnostics.push_back(
+                        "nv40-general: SelPred destination has no "
+                        "physical register; refusing");
+                    return out;
+                }
+                const int dstSlot =
+                    vi.dst.fp16 ? (vi.dst.phys >> 1) : vi.dst.phys;
+                for (int s = 0; s < 2; ++s) {
+                    const VSrc& src = vi.srcs[s];
+                    if (src.kind != VSrcKind::Temp)
+                        continue;
+                    const int srcSlot =
+                        src.fp16 ? (src.phys >> 1) : src.phys;
+                    if (srcSlot == dstSlot) {
+                        out.diagnostics.push_back(
+                            "nv40-general: SelPred destination register "
+                            "aliases an early-read source; refusing "
+                            "rather than emitting an always-else select");
+                        return out;
+                    }
+                }
+            }
             struct nvfx_reg selDst = nvfx_reg(NVFXSR_TEMP, vi.dst.phys);
             selDst.is_fp16 = vi.dst.fp16 ? 1 : 0;
             // OUT_NONE with the 0x3F sentinel index: writes the
