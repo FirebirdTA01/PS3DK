@@ -242,6 +242,66 @@ struct FpPowMaxDotLiteralBinding
     float exponent = 1.0f;
 };
 
+struct TexBinding
+{
+    IRValueID samplerId  = 0;
+    IRValueID uvId       = 0;
+    bool      projective = false;  // true → emit TXP (0x18) instead of TEX (0x17)
+    bool      cube       = false;  // true → sampler is samplerCUBE; sets
+                                   //         DISABLE_PC bit 31 on hw[3]
+};
+
+struct FpMadBinding
+{
+    IRValueID inputId;               // varying operand to Mul
+    IRValueID multiplierUniformId;   // uniform operand to Mul
+    IRValueID addendId;              // Add's second operand — literal OR uniform
+    bool      addendIsLiteral = false;
+};
+
+struct FpVecConstructTexMulBinding
+{
+    IRValueID texBaseId   = 0;   // tex2D result
+    IRValueID varyingId   = 0;   // varying input (from valueToVaryingTexMul)
+    int       mulLane     = 3;   // w lane carries the Mul
+    int       varyingLane = -1;  // scalar lane of varying; -1 = scalar varyings
+};
+
+struct SelectBinding
+{
+    IRValueID cmpId    = 0;
+    IRValueID trueId   = 0;  // value when condition is TRUE
+    IRValueID falseId  = 0;
+    // the reference compiler schedules ternary vs if-else differently:
+    //   ternary  → preload `trueId`, conditional EQ-write `falseId`
+    //   if-else  → preload `falseId`, conditional NE-write `trueId`
+    // The IR conveys the choice through IRInstruction::componentIndex
+    // (set by nv40_if_convert).
+    bool      ifElseSchedule = false;
+};
+
+struct FpReflectBinding
+{
+    IRValueID iId = 0;   // resolves via valueToInputSrc
+    IRValueID nId = 0;   // resolves via valueToInputSrc
+    bool      wrapW1 = false;  // set when VecConstruct(reflect, 1.0)
+};
+
+enum class FpArithOp { Add, Mul, Min, Max, Dot3, Dot4 };
+
+struct FpArithBinding
+{
+    FpArithOp op;
+    IRValueID inputId   = 0;
+    IRValueID uniformId = 0;
+    bool      inputAbs   = false;
+    bool      inputNeg   = false;
+    bool      uniformAbs = false;
+    bool      uniformNeg = false;
+};
+
+enum class GenericFpOp { Add, Sub, Mul, Mad, Min, Max, Dot3, Dot4 };
+
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
@@ -277,14 +337,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // Records a deferred TexSample — emit the TEX instruction at the
     // point of consumption (matches the reference compiler's `TEXR R0, f[TEX0], TEX0`
     // which writes straight to R0 with no temp).
-    struct TexBinding
-    {
-        IRValueID samplerId  = 0;
-        IRValueID uvId       = 0;
-        bool      projective = false;  // true → emit TXP (0x18) instead of TEX (0x17)
-        bool      cube       = false;  // true → sampler is samplerCUBE; sets
-                                       //         DISABLE_PC bit 31 on hw[3]
-    };
 
     // IR value → type, for samplers we populate from the param list
     // (already done via `valueToType` seeded above).  The TexSample
@@ -302,20 +354,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // canonicalise the same way:
     //   ADD:                src0 = CONST (uniform), src1 = INPUT
     //   MUL/MIN/MAX/DP3/DP4: src0 = INPUT,          src1 = CONST (uniform)
-    enum class FpArithOp { Add, Mul, Min, Max, Dot3, Dot4 };
-    struct FpArithBinding
-    {
-        FpArithOp op;
-        IRValueID inputId   = 0;
-        IRValueID uniformId = 0;
-        bool      inputAbs   = false;
-        bool      inputNeg   = false;
-        bool      uniformAbs = false;
-        bool      uniformNeg = false;
-    };
     std::unordered_map<IRValueID, FpArithBinding> valueToArith;
 
-    enum class GenericFpOp { Add, Sub, Mul, Mad, Min, Max, Dot3, Dot4 };
     struct GenericFpArithBinding
     {
         GenericFpOp op = GenericFpOp::Add;
@@ -397,13 +437,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //     leave literal inline at MAD SRC2.
     //   - If addend is a UNIFORM: preload addend uniform into R1,
     //     leave multiplier inline at MAD SRC1.
-    struct FpMadBinding
-    {
-        IRValueID inputId;               // varying operand to Mul
-        IRValueID multiplierUniformId;   // uniform operand to Mul
-        IRValueID addendId;              // Add's second operand — literal OR uniform
-        bool      addendIsLiteral = false;
-    };
     std::unordered_map<IRValueID, FpMadBinding> valueToMad;
 
     // `Mul(varying, tex2D_result)` — the THEN-branch shape inside a
@@ -429,13 +462,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // the (varying, tex_sample) Mul separately from the
     // valueToArith path so it doesn't interfere with Select
     // shapes).
-    struct FpVecConstructTexMulBinding
-    {
-        IRValueID texBaseId   = 0;   // tex2D result
-        IRValueID varyingId   = 0;   // varying input (from valueToVaryingTexMul)
-        int       mulLane     = 3;   // w lane carries the Mul
-        int       varyingLane = -1;  // scalar lane of varying; -1 = scalar varyings
-    };
     std::unordered_map<IRValueID, FpVecConstructTexMulBinding>
         valueToVecConstructTexMul;
 
@@ -538,18 +564,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, CmpBinding> valueToCmp;
 
-    struct SelectBinding
-    {
-        IRValueID cmpId    = 0;
-        IRValueID trueId   = 0;  // value when condition is TRUE
-        IRValueID falseId  = 0;
-        // the reference compiler schedules ternary vs if-else differently:
-        //   ternary  → preload `trueId`, conditional EQ-write `falseId`
-        //   if-else  → preload `falseId`, conditional NE-write `trueId`
-        // The IR conveys the choice through IRInstruction::componentIndex
-        // (set by nv40_if_convert).
-        bool      ifElseSchedule = false;
-    };
     std::unordered_map<IRValueID, SelectBinding> valueToSelect;
 
     // Literal `float4(k0, k1, k2, k3)` where all kN are constants —
@@ -621,12 +635,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   MADR R0.xyz, -R0.xyzw, R0.wwww, R1
     // Captured operands resolve through SrcMod chains so identity-
     // prefix shuffles (`v.xyz`) on either operand are handled.
-    struct FpReflectBinding
-    {
-        IRValueID iId = 0;   // resolves via valueToInputSrc
-        IRValueID nId = 0;   // resolves via valueToInputSrc
-        bool      wrapW1 = false;  // set when VecConstruct(reflect, 1.0)
-    };
     std::unordered_map<IRValueID, FpReflectBinding> valueToReflect;
 
     // `refract(I, N, eta)` — currently matched to the reference compiler Water
