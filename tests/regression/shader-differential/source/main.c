@@ -548,6 +548,28 @@ static int load_manifest(void)
 		       g_pairs[0].role, g_pairs[1].role);
 		return 0;
 	}
+	/* The uniform gate is MANDATORY whenever uniforms are in play,
+	 * same move as the rows-1..2 check above: a manifest that uses
+	 * uniform sets without the control-uniform row would judge every
+	 * uniform-dependent pair against unapplied embedded defaults and
+	 * report plausible verdicts — the exact silent-non-application
+	 * failure the control exists to catch, with nothing to catch it
+	 * (review finding on the increment-2b commit).  This also covers
+	 * the absent-uniforms.txt case: rows referencing sets are what
+	 * make the file load-bearing, not the file's own presence. */
+	{
+		int has_uniform_rows = 0, has_uniform_control = 0;
+		for (int i = 0; i < g_npairs; i++) {
+			if (strcmp(g_pairs[i].role, "control-uniform") == 0)
+				has_uniform_control = 1;
+			else if (!uniformSetIsNone(g_pairs[i].uniform_set))
+				has_uniform_rows = 1;
+		}
+		if (has_uniform_rows && !has_uniform_control) {
+			printf("shader-differential: manifest declares uniform sets but no control-uniform row — uniform-dependent verdicts would be unvalidated; refusing\n");
+			return 0;
+		}
+	}
 	return 1;
 }
 
@@ -845,11 +867,11 @@ int main(int argc, const char **argv)
 	int corpus = g_npairs - 2;
 	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped\n",
 	       corpus - uniforms_skipped, failures, uniforms_skipped);
-	/* A failed uniform control plus skipped rows is an incomplete run,
-	 * not a clean one: report FAIL so the scrape cannot read partial
-	 * coverage as green. */
-	if (uniforms_skipped > 0)
-		failures++;
+	/* What makes a red uniform control fail the run is the control's
+	 * own failures++ in its branch above — by the time rows are
+	 * skipped, failures is already nonzero.  No second guard here:
+	 * a line that re-failed on uniforms_skipped would be a no-op
+	 * that READS as the load-bearing check (review finding). */
 	printf("%s\n", failures == 0 ? "SHADER_DIFF_OK" : "SHADER_DIFF_FAIL");
 
 	cellGcmSetWaitFlip(ctx);
