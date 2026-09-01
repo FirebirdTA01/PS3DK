@@ -21,3 +21,12 @@
 samples/toolchain/hello-psgl-blend/shaders/fp_red.fcg|0
 samples/toolchain/hello-psgl-blend/shaders/fp_blue_alpha.fcg|0
 samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg|0
+#
+# The remaining four oracle divergences (Class B: register allocation +
+# uniform pool offsets; Class C: we emit fewer instructions than the
+# reference).  They read textures (bound by the sampler half) and take
+# uniforms (synthesised from parameter names under set auto).
+samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/fpshader.fcg|auto
+tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
+tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto
+tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto

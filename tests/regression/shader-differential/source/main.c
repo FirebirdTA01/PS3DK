@@ -19,12 +19,24 @@
  *        |target=<t>|status=<status>|max_delta=<n>|diff_pixels=<n>
  *        |total_pixels=<n>|diagnostic=<d>|elapsed_ms=<n>|artifact=<a>
  * roles:  control-identical | control-mismatch | control-uniform |
- *         control-texture | corpus | probe | reference (ours vs a
- *         reference-compiled container; gated like corpus)
+ *         control-texture | control-auto | corpus | probe |
+ *         reference (ours vs a reference-compiled container; gated
+ *         like corpus)
  * status: identical | mismatch | load-failed-a | load-failed-b |
  *         uniform-missing-a | uniform-missing-b | uniforms-invalid |
  *         textures-invalid | samplers-unvalidated |
- *         sampler-unsupported-a | sampler-unsupported-b
+ *         sampler-unsupported-a | sampler-unsupported-b |
+ *         auto-invalid | uniform-unsupported-a | uniform-unsupported-b |
+ *         internal-error (a render_side code the judge does not map)
+ *
+ * Uniform synthesis (increment 3b): a row whose uniform_set is `auto`
+ * has every float/half vector uniform its containers declare set to
+ * values derived from the PARAMETER NAME (FNV-1a, see auto_value), the
+ * same on both sides.  The control-auto row (uniform output vs a twin
+ * the stager baked from the same hash) proves guest and host agree;
+ * while it is red no auto row is judged.  Matrix, int and bool uniforms
+ * are refused as uniform-unsupported-a/b rather than left at their
+ * embedded defaults.
  *
  * Auto-binder (increment 3a): every sampler2D a container declares is
  * bound to ONE procedural 64x64 texture (both sides alike), and the
@@ -288,6 +300,15 @@ static u32  g_readback_off;
 #define TEX_H 64
 static u32 g_tex_offset;
 
+/* The texture control's identity (texel (px, py) == pixel (px, py))
+ * depends on one texel per pixel AND on single-sample fragment centres:
+ * the half-texel margin in floor(uv * 64) is exactly half a pixel, which
+ * is exactly the displacement multisampling would introduce.  If the rig
+ * ever multisamples its RTs, the control mismatches and would read as a
+ * compiler regression (review note on the 3a commit). */
+typedef char sd_tex_matches_rt_w[(TEX_W == RT_W) ? 1 : -1];
+typedef char sd_tex_matches_rt_h[(TEX_H == RT_H) ? 1 : -1];
+
 /* Texel (x, y) = (R, G, B, A) = (4x, 4y, 4(63 - x), 4y) in 8-bit units:
  * every channel a linear ramp the texture control's arithmetic twin
  * recomputes from the interpolated texcoord, and alpha ramping 0..~1
@@ -346,23 +367,95 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit)
 	                         0);
 }
 
-/* Walks the container's parameter table and binds the procedural
- * texture to every sampler2D unit it declares.  Returns the count
- * bound, or -1 when a sampler of a kind this binder does not serve
- * (1D/3D/RECT/CUBE) or an out-of-range unit is declared: such a pair
- * cannot be judged, and says so rather than sampling nothing. */
+/* Every CG sampler kind: the flat family 1065..1069 (1D, 2D, 3D, RECT,
+ * CUBE) plus the array and generic kinds 1138..1143.  Anything in
+ * either range that is not sampler2D on a texture unit is REFUSED, so
+ * "unserved" is always loud (review finding t_e230822b: the first cut
+ * tested only the flat range and would have rendered an array sampler
+ * with nothing bound). */
+static int is_sampler_type(u32 type)
+{
+	return (type >= CG_SAMPLER1D && type <= CG_SAMPLERCUBE) ||
+	       (type >= CG_SAMPLER1DARRAY && type <= CG_SAMPLER);
+}
+
+/* Walks the container's parameter table (a flat array; "leaf" is the
+ * Cg API's word, there is no tree) and binds the procedural texture to
+ * every sampler2D unit it declares.  Returns the count bound, or -1
+ * when a REFERENCED sampler of a kind this binder does not serve, or
+ * an out-of-range unit, is declared: such a pair cannot be judged, and
+ * says so rather than sampling nothing.  A declared-but-unreferenced
+ * sampler is skipped: refusal is use-based, not declaration-based. */
 static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
 {
 	int n = 0;
 	for (CGparameter prm = cellGcmCgGetFirstLeafParameter(fpo); prm;
 	     prm = cellGcmCgGetNextLeafParameter(fpo, prm)) {
 		u32 type = cellGcmCgGetParameterType(fpo, prm);
-		if (type < CG_SAMPLER1D || type > CG_SAMPLERCUBE)
+		if (!is_sampler_type(type))
+			continue;
+		if (!cellGcmCgGetParameterReferenced(fpo, prm))
 			continue;
 		u32 res = cellGcmCgGetParameterResource(fpo, prm);
 		if (type != CG_SAMPLER2D || res < CG_TEXUNIT0 || res > CG_TEXUNIT15)
 			return -1;
 		bind_procedural_texture(ctx, res - CG_TEXUNIT0);
+		n++;
+	}
+	return n;
+}
+
+/* ---- auto-binder: uniform values from parameter names ---- */
+
+/* auto_value(name, k) is the k-th component of the value the binder
+ * gives a uniform called `name`.  FNV-1a over the name, one integer
+ * mix per component, then 0.125 + m / 2^24 with m < 2^23 - a dyadic
+ * rational every float32 holds EXACTLY, so the stager can bake the
+ * identical number into the control-auto twin from its own copy of
+ * this arithmetic (stage-differential.ps1, Auto-Value).  Range
+ * [0.125, 0.625): finite, non-zero, inside a colour channel. */
+static float auto_value(const char *name, unsigned k)
+{
+	u32 h = 2166136261u;
+	for (const unsigned char *c = (const unsigned char *)name; *c; c++) {
+		h ^= (u32)*c;
+		h *= 16777619u;
+	}
+	u32 x = h ^ ((u32)k * 0x9E3779B1u);
+	x *= 0x85EBCA6Bu;
+	x ^= x >> 13;
+	return 0.125f + (float)(x >> 9) / 16777216.0f;
+}
+
+/* Applies auto values to every float/half vector uniform the container
+ * declares.  Returns the count applied, or -1 on a uniform of a kind
+ * the binder does not synthesise (matrix, int, bool, fixed): the pair
+ * is refused rather than judged against embedded defaults. */
+static int apply_auto_uniforms(CellGcmContextData *ctx, CGprogram fpo,
+                               u32 fp_offset)
+{
+	int n = 0;
+	for (CGparameter prm = cellGcmCgGetFirstLeafParameter(fpo); prm;
+	     prm = cellGcmCgGetNextLeafParameter(fpo, prm)) {
+		if (cellGcmCgGetParameterVariability(fpo, prm) != CG_UNIFORM)
+			continue;
+		u32 type = cellGcmCgGetParameterType(fpo, prm);
+		if (is_sampler_type(type))
+			continue;   /* the sampler half's business */
+		unsigned words;
+		if (type >= CG_FLOAT && type <= CG_FLOAT4)
+			words = type - CG_FLOAT + 1u;
+		else if (type >= CG_HALF && type <= CG_HALF4)
+			words = type - CG_HALF + 1u;
+		else
+			return -1;
+		const char *name = cellGcmCgGetParameterName(fpo, prm);
+		if (!name)
+			return -1;
+		float v[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		for (unsigned k = 0; k < words; k++)
+			v[k] = auto_value(name, k);
+		cellGcmSetFragmentProgramParameter(ctx, fpo, prm, v, fp_offset);
 		n++;
 	}
 	return n;
@@ -483,9 +576,10 @@ static int uniformSetIsNone(const char *set)
  * container declares a sampler the auto-binder cannot serve; -3 if it
  * declares samplers while the texture control is red (textures_ok ==
  * 0); -4 if it declares samplers and the manifest carries no texture
- * control at all (have_tex_control == 0).  The caller reports which
- * side.  Sampler checks come BEFORE any draw so a withheld verdict
- * costs nothing. */
+ * control at all (have_tex_control == 0); -5 if the set is `auto` and
+ * the container declares a uniform kind the binder does not
+ * synthesise.  The caller reports which side.  Sampler checks come
+ * BEFORE any draw so a withheld verdict costs nothing. */
 static int render_side(CellGcmContextData *ctx, void *container,
                        const char *uniform_set,
                        int textures_ok, int have_tex_control,
@@ -513,7 +607,10 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	/* Apply the pair's uniform set BEFORE the draw: the patch rides
 	 * the FIFO's inline-transfer path against the copied ucode, so
 	 * ordering relative to the draw commands is preserved. */
-	if (!uniformSetIsNone(uniform_set)) {
+	if (strcmp(uniform_set, "auto") == 0) {
+		if (apply_auto_uniforms(ctx, fpo, fp_offset) < 0)
+			return -5;
+	} else if (!uniformSetIsNone(uniform_set)) {
 		for (int i = 0; i < g_nuniforms; i++) {
 			if (strcmp(g_uniforms[i].set, uniform_set) != 0)
 				continue;
@@ -702,6 +799,32 @@ static int load_manifest(void)
 			return 0;
 		}
 	}
+	/* Auto gate: same two properties as the uniform gate, keyed on the
+	 * literal set name `auto`.  Existence CAN be required here (the
+	 * set is manifest data), and the control must precede the first
+	 * auto row.  An auto row is also a uniform-dependent row, so the
+	 * uniform gate above already covers its relation to control-uniform. */
+	{
+		int first_auto_row = -1, auto_index = -1;
+		for (int i = 0; i < g_npairs; i++) {
+			if (strcmp(g_pairs[i].role, "control-auto") == 0) {
+				if (auto_index < 0)
+					auto_index = i;
+			} else if (strcmp(g_pairs[i].uniform_set, "auto") == 0 &&
+			           first_auto_row < 0) {
+				first_auto_row = i;
+			}
+		}
+		if (first_auto_row >= 0 && auto_index < 0) {
+			printf("shader-differential: manifest uses uniform_set=auto but has no control-auto row - synthesised values would be unvalidated against the host's; refusing\n");
+			return 0;
+		}
+		if (first_auto_row >= 0 && auto_index > first_auto_row) {
+			printf("shader-differential: manifest line order puts an auto row (index %d) before the control-auto row (index %d) - it would be judged before the gate can close; refusing\n",
+			       first_auto_row, auto_index);
+			return 0;
+		}
+	}
 	/* Texture gate ordering.  Sampler use is a property of the
 	 * CONTAINERS, not the manifest, so existence cannot be required at
 	 * load (a sampler-declaring pair with no control is refused at
@@ -789,7 +912,8 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	 * uniform, side B has the value baked and declares no parameter,
 	 * so its set applies to side A only.  Every other role applies
 	 * the set to both sides. */
-	const char *set_b = strcmp(p->role, "control-uniform") == 0
+	const char *set_b = (strcmp(p->role, "control-uniform") == 0 ||
+	                     strcmp(p->role, "control-auto") == 0)
 		? "0" : p->uniform_set;
 
 	/* The texture control is the one row that may declare samplers
@@ -831,10 +955,23 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
 			         "skipped: control-texture failed");
 			break;
-		default:
+		case -4:
 			r->status = "samplers-unvalidated";
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
 			         "container declares samplers but the manifest has no control-texture row");
+			break;
+		case -5:
+			r->status = side == 'a' ? "uniform-unsupported-a" : "uniform-unsupported-b";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "container declares a uniform kind the auto-binder does not synthesise");
+			break;
+		default:
+			/* A code this switch does not know must not borrow a
+			 * confident status it does not deserve (review finding on
+			 * the 3a commit, the t_5d8795e7 family). */
+			r->status = "internal-error";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "render_side returned unmapped code %d on side %c", rc, side);
 			break;
 		}
 		r->elapsed_ms = now_ms() - t0;
@@ -986,6 +1123,7 @@ int main(int argc, const char **argv)
 	int uniforms_skipped = 0;
 	int textures_ok = 1;   /* flipped by a failed control-texture row */
 	int textures_skipped = 0;
+	int autos_ok = 1;      /* flipped by a failed control-auto row */
 	int have_tex_control = 0;
 	for (int i = 0; i < g_npairs; i++)
 		if (strcmp(g_pairs[i].role, "control-texture") == 0)
@@ -1013,6 +1151,23 @@ int main(int argc, const char **argv)
 			continue;
 		}
 
+		/* A failed auto control invalidates auto rows only, counted
+		 * with the uniform skips: they are uniform-dependent rows. */
+		if (!autos_ok && strcmp(p->uniform_set, "auto") == 0 &&
+		    strcmp(p->role, "control-auto") != 0) {
+			r.status = "auto-invalid";
+			r.max_delta = 0;
+			r.diff_pixels = 0;
+			r.total_pixels = 0;
+			r.elapsed_ms = 0;
+			snprintf(r.diagnostic, sizeof(r.diagnostic),
+			         "skipped: control-auto failed");
+			snprintf(r.artifact, sizeof(r.artifact), "-");
+			print_row(p, &r);
+			uniforms_skipped++;
+			continue;
+		}
+
 		judge_pair(ctx, p, textures_ok, have_tex_control,
 		           rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
 		           save_a, save_b, &r);
@@ -1034,6 +1189,20 @@ int main(int argc, const char **argv)
 				printf("shader-differential: control-texture judged '%s' - texture binding is not working; sampler-declaring pairs will not be judged\n",
 				       r.status);
 				textures_ok = 0;
+				failures++;
+			}
+			continue;
+		}
+
+		if (strcmp(p->role, "control-auto") == 0) {
+			/* Synthesised-vs-baked twin: identical iff the guest's
+			 * auto_value and the stager's Auto-Value agree AND the
+			 * patch path applies them.  Gates auto rows only; its
+			 * failure counts even with none present. */
+			if (strcmp(r.status, "identical") != 0) {
+				printf("shader-differential: control-auto judged '%s' - synthesised uniforms disagree with the host's; auto rows will not be judged\n",
+				       r.status);
+				autos_ok = 0;
 				failures++;
 			}
 			continue;
