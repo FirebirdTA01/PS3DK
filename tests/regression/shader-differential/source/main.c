@@ -367,16 +367,17 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit)
 	                         0);
 }
 
-/* Every CG sampler kind: the flat family 1065..1069 (1D, 2D, 3D, RECT,
- * CUBE) plus the array and generic kinds 1138..1143.  Anything in
- * either range that is not sampler2D on a texture unit is REFUSED, so
- * "unserved" is always loud (review finding t_e230822b: the first cut
- * tested only the flat range and would have rendered an array sampler
- * with nothing bound). */
+/* Every CG sampler kind, by exact value: the flat family 1065..1069
+ * (1D, 2D, 3D, RECT, CUBE), the three array kinds 1138..1140 and the
+ * generic CG_SAMPLER 1143.  NOT a range over 1138..1143: 1141 and 1142
+ * are CG_VERTEXSHADER_TYPE / CG_PIXELSHADER_TYPE (review finding).
+ * Any sampler kind that is not sampler2D on a texture unit is REFUSED,
+ * so "unserved" is always loud (t_e230822b). */
 static int is_sampler_type(u32 type)
 {
 	return (type >= CG_SAMPLER1D && type <= CG_SAMPLERCUBE) ||
-	       (type >= CG_SAMPLER1DARRAY && type <= CG_SAMPLER);
+	       type == CG_SAMPLER1DARRAY || type == CG_SAMPLER2DARRAY ||
+	       type == CG_SAMPLERCUBEARRAY || type == CG_SAMPLER;
 }
 
 /* Walks the container's parameter table (a flat array; "leaf" is the
@@ -413,7 +414,10 @@ static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
  * rational every float32 holds EXACTLY, so the stager can bake the
  * identical number into the control-auto twin from its own copy of
  * this arithmetic (stage-differential.ps1, Auto-Value).  Range
- * [0.125, 0.625): finite, non-zero, inside a colour channel. */
+ * [0.125, 0.625): finite, non-zero, inside a colour channel.  The
+ * contract hashes the name's BYTES as unsigned (the host hashes
+ * UTF-8); Cg identifiers are ASCII in practice, so the two agree
+ * without either side asserting the container's encoding. */
 static float auto_value(const char *name, unsigned k)
 {
 	u32 h = 2166136261u;
@@ -665,6 +669,7 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	*warmup_draws = tries;
 
 	memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
+	return 0;
 }
 
 /* ---- artifacts ---- */
