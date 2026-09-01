@@ -366,11 +366,40 @@ struct FpShapeContext
     std::unordered_map<IRValueID, GenericFpArithBinding>&  valueToGenericArith;
     std::unordered_map<IRValueID, FpNormalizeBinding>&     valueToNormalize;
     std::unordered_map<IRValueID, FpMaxDotZeroBinding>&    valueToMaxDotZero;
+    std::unordered_map<IRValueID, SrcMod>&                 valueToMod;
 
     // Set when a matcher finds an ambiguity it must not resolve by guessing;
     // the emission tail refuses the whole compile when it is set.
     bool& ambiguousBinding;
 };
+
+// First lambda converted out of lowerFragmentProgram (t_c44cc3b7, carve
+// step 2).  Behaviour is unchanged - the body is the former lambda verbatim,
+// with its one captured map reached through the context.
+//
+// Small on purpose.  The point of the first conversion is to prove the
+// MECHANISM end to end under the byte fence: a [&] lambda becomes a free
+// function, its capture becomes a parameter, and the emitted bytes do not
+// move.  Proving that on a twelve-line pure walk is worth more than
+// attempting it on a 100-line matcher, because when the fence passes here it
+// is evidence about the transport rather than about one matcher's rewrite.
+//
+// Measured before choosing it: the smallest bool-returning MATCHER also
+// depends on two shared helper lambdas and four per-emission locals, so a
+// matcher cannot be first.  Helpers move before the matchers that call them.
+static SrcMod resolveSrcMods(const FpShapeContext& ctx, IRValueID id)
+{
+    SrcMod r; r.baseId = id;
+    for (int hops = 0; hops < 16; ++hops)
+    {
+        auto it = ctx.valueToMod.find(r.baseId);
+        if (it == ctx.valueToMod.end()) break;
+        if (it->second.absMod) { r.absMod = true; r.negMod = false; }
+        if (it->second.negMod) r.negMod = !r.negMod;
+        r.baseId = it->second.baseId;
+    }
+    return r;
+}
 
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
@@ -549,19 +578,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     for (const auto& p : entry.parameters)
         valueToType[p.valueId] = p.type;
 
-    auto resolveSrcMods = [&](IRValueID id)
-    {
-        SrcMod r; r.baseId = id;
-        for (int hops = 0; hops < 16; ++hops)
-        {
-            auto it = valueToMod.find(r.baseId);
-            if (it == valueToMod.end()) break;
-            if (it->second.absMod) { r.absMod = true; r.negMod = false; }
-            if (it->second.negMod) r.negMod = !r.negMod;
-            r.baseId = it->second.baseId;
-        }
-        return r;
-    };
 
     // Comparisons and ternary select:
     //
@@ -980,7 +996,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     FpShapeContext shapeCtx{
         out, asm_,
         valueToInputSrc, valueToFpUniform, valueToTex,
-        valueToGenericArith, valueToNormalize, valueToMaxDotZero,
+        valueToGenericArith, valueToNormalize, valueToMaxDotZero, valueToMod,
         ambiguousBinding
     };
     (void)shapeCtx;
@@ -1474,7 +1490,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             txIt->second.samplerId);
                         if (sampIt == valueToTexUnit.end()) continue;
                         IRValueID uvBase =
-                            resolveSrcMods(txIt->second.uvId).baseId;
+                            resolveSrcMods(shapeCtx, txIt->second.uvId).baseId;
                         auto uvIt = valueToInputSrc.find(uvBase);
                         if (uvIt == valueToInputSrc.end()) continue;
 
@@ -1791,7 +1807,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 if (sampIt != valueToTexUnit.end())
                                 {
                                     IRValueID uvBase =
-                                        resolveSrcMods(txIt->second.uvId).baseId;
+                                        resolveSrcMods(shapeCtx, txIt->second.uvId).baseId;
                                     auto uvIt = valueToInputSrc.find(uvBase);
                                     if (uvIt != valueToInputSrc.end())
                                     {
@@ -2037,8 +2053,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                 }
 
-                const SrcMod ma = resolveSrcMods(inst.operands[0]);
-                const SrcMod mb = resolveSrcMods(inst.operands[1]);
+                const SrcMod ma = resolveSrcMods(shapeCtx, inst.operands[0]);
+                const SrcMod mb = resolveSrcMods(shapeCtx, inst.operands[1]);
 
                 auto aInput   = valueToInputSrc.find(ma.baseId);
                 auto bInput   = valueToInputSrc.find(mb.baseId);
@@ -2269,8 +2285,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // Resolve source modifiers: the IR might hand us
                 // `abs(input) + uniform`, in which case operand[0] is
                 // an IROp::Abs result but its base is the varying.
-                const SrcMod ma = resolveSrcMods(a);
-                const SrcMod mb = resolveSrcMods(b);
+                const SrcMod ma = resolveSrcMods(shapeCtx, a);
+                const SrcMod mb = resolveSrcMods(shapeCtx, b);
 
                 auto aInput   = valueToInputSrc.find(ma.baseId);
                 auto bInput   = valueToInputSrc.find(mb.baseId);
@@ -2645,8 +2661,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 dotIt->second.op != GenericFpOp::Dot3)
                                 return false;
 
-                            const SrcMod lhs = resolveSrcMods(dotIt->second.srcIds[0]);
-                            const SrcMod rhs = resolveSrcMods(dotIt->second.srcIds[1]);
+                            const SrcMod lhs = resolveSrcMods(shapeCtx, dotIt->second.srcIds[0]);
+                            const SrcMod rhs = resolveSrcMods(shapeCtx, dotIt->second.srcIds[1]);
                             if (lhs.absMod || lhs.negMod || rhs.absMod || rhs.negMod)
                                 return false;
                             FpMaxDotZeroBinding bind;
@@ -2770,7 +2786,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // transparently.  Lanes come from the shuffle's result
                 // type (same mechanism as Dot's DP3/DP4 pick).
                 if (inst.operands.size() != 1) break;
-                const SrcMod m = resolveSrcMods(inst.operands[0]);
+                const SrcMod m = resolveSrcMods(shapeCtx, inst.operands[0]);
                 if (valueToInputSrc.find(m.baseId) == valueToInputSrc.end())
                     break;  // non-varying length() lands in a later pass
 
@@ -2794,7 +2810,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // gets set later when VecConstruct sees this feeding
                 // into `float4(nrm, 1)`.
                 if (inst.operands.size() != 1) break;
-                const SrcMod m = resolveSrcMods(inst.operands[0]);
+                const SrcMod m = resolveSrcMods(shapeCtx, inst.operands[0]);
 
                 int lanes = 3;
                 auto tyIt = valueToType.find(inst.operands[0]);
@@ -2852,8 +2868,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // VecShuffle aliases).  See FpReflectBinding's docs
                 // for the lowering shape.
                 if (inst.operands.size() != 2) break;
-                const SrcMod mI = resolveSrcMods(inst.operands[0]);
-                const SrcMod mN = resolveSrcMods(inst.operands[1]);
+                const SrcMod mI = resolveSrcMods(shapeCtx, inst.operands[0]);
+                const SrcMod mN = resolveSrcMods(shapeCtx, inst.operands[1]);
                 if (!valueToInputSrc.count(mI.baseId) ||
                     !valueToInputSrc.count(mN.baseId))
                     break;
@@ -2869,8 +2885,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // `refract(I, N, eta)` — bind the Water/reference
                 // literal shape for StoreOutput's byte-exact emitter.
                 if (inst.operands.size() != 3) break;
-                const SrcMod mI = resolveSrcMods(inst.operands[0]);
-                const SrcMod mN = resolveSrcMods(inst.operands[1]);
+                const SrcMod mI = resolveSrcMods(shapeCtx, inst.operands[0]);
+                const SrcMod mN = resolveSrcMods(shapeCtx, inst.operands[1]);
                 if (!valueToInputSrc.count(mI.baseId) ||
                     !valueToInputSrc.count(mN.baseId))
                     break;
@@ -3566,7 +3582,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // shuffle in valueToMod with baseId pointing at the
                     // underlying varying (worldPos), and the TEX reads
                     // the full input regardless of the swizzle.
-                    IRValueID uvBase = resolveSrcMods(texIt->second.uvId).baseId;
+                    IRValueID uvBase = resolveSrcMods(shapeCtx, texIt->second.uvId).baseId;
                     auto uvIt = valueToInputSrc.find(uvBase);
                     if (uvIt == valueToInputSrc.end())
                     {
@@ -4500,7 +4516,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             return out;
                         }
                         auto sampIt = valueToTexUnit.find(txIt->second.samplerId);
-                        IRValueID uvBase = resolveSrcMods(txIt->second.uvId).baseId;
+                        IRValueID uvBase = resolveSrcMods(shapeCtx, txIt->second.uvId).baseId;
                         auto uvIn = valueToInputSrc.find(uvBase);
                         if (sampIt == valueToTexUnit.end() ||
                             uvIn == valueToInputSrc.end())
@@ -7614,7 +7630,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     auto isColorInput = [&](IRValueID vid) -> bool
                     {
-                        return valueToInputSrc.count(resolveSrcMods(vid).baseId) != 0;
+                        return valueToInputSrc.count(resolveSrcMods(shapeCtx, vid).baseId) != 0;
                     };
 
                     IRValueID addId = 0;
@@ -7653,14 +7669,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     IRValueID texSampleId = 0;
                     if (pickLiteral(texA, 0.6f) &&
-                        valueToTex.count(resolveSrcMods(texB).baseId))
+                        valueToTex.count(resolveSrcMods(shapeCtx, texB).baseId))
                     {
-                        texSampleId = resolveSrcMods(texB).baseId;
+                        texSampleId = resolveSrcMods(shapeCtx, texB).baseId;
                     }
                     else if (pickLiteral(texB, 0.6f) &&
-                             valueToTex.count(resolveSrcMods(texA).baseId))
+                             valueToTex.count(resolveSrcMods(shapeCtx, texA).baseId))
                     {
-                        texSampleId = resolveSrcMods(texA).baseId;
+                        texSampleId = resolveSrcMods(shapeCtx, texA).baseId;
                     }
                     else
                         return false;
@@ -7668,7 +7684,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     auto texIt = valueToTex.find(texSampleId);
                     if (texIt == valueToTex.end() || !texIt->second.projective)
                         return false;
-                    IRValueID uvBase = resolveSrcMods(texIt->second.uvId).baseId;
+                    IRValueID uvBase = resolveSrcMods(shapeCtx, texIt->second.uvId).baseId;
                     return valueToInputSrc.count(uvBase) != 0;
                 };
 
@@ -7913,7 +7929,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     auto isColorInput = [&](IRValueID vid) -> bool
                     {
-                        return valueToInputSrc.count(resolveSrcMods(vid).baseId) != 0;
+                        return valueToInputSrc.count(resolveSrcMods(shapeCtx, vid).baseId) != 0;
                     };
 
                     IRValueID addId = 0;
@@ -7952,14 +7968,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     IRValueID texSampleId = 0;
                     if (pickLiteral(texA, 0.6f) &&
-                        valueToTex.count(resolveSrcMods(texB).baseId))
+                        valueToTex.count(resolveSrcMods(shapeCtx, texB).baseId))
                     {
-                        texSampleId = resolveSrcMods(texB).baseId;
+                        texSampleId = resolveSrcMods(shapeCtx, texB).baseId;
                     }
                     else if (pickLiteral(texB, 0.6f) &&
-                             valueToTex.count(resolveSrcMods(texA).baseId))
+                             valueToTex.count(resolveSrcMods(shapeCtx, texA).baseId))
                     {
-                        texSampleId = resolveSrcMods(texA).baseId;
+                        texSampleId = resolveSrcMods(shapeCtx, texA).baseId;
                     }
                     else
                         return false;
@@ -7967,7 +7983,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     auto texIt = valueToTex.find(texSampleId);
                     if (texIt == valueToTex.end() || !texIt->second.projective)
                         return false;
-                    IRValueID uvBase = resolveSrcMods(texIt->second.uvId).baseId;
+                    IRValueID uvBase = resolveSrcMods(shapeCtx, texIt->second.uvId).baseId;
                     if (!valueToInputSrc.count(uvBase)) return false;
                     shTexSampleId  = texSampleId;
                     shColorInputId = (addId == mulB) ? mulA : mulB;
@@ -7989,10 +8005,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         ? valueToTexUnit.find(sTexIt->second.samplerId)
                         : valueToTexUnit.end();
                     IRValueID sUvBase = (sTexIt != valueToTex.end())
-                        ? resolveSrcMods(sTexIt->second.uvId).baseId : 0;
+                        ? resolveSrcMods(shapeCtx, sTexIt->second.uvId).baseId : 0;
                     auto sUvIt = valueToInputSrc.find(sUvBase);
                     auto sColIt = valueToInputSrc.find(
-                        resolveSrcMods(shColorInputId).baseId);
+                        resolveSrcMods(shapeCtx, shColorInputId).baseId);
                     if (sTexIt == valueToTex.end() ||
                         sSampIt == valueToTexUnit.end() ||
                         sUvIt == valueToInputSrc.end() ||
@@ -8149,7 +8165,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     "nv40-fp: VecConstructTexMul sampler not resolved");
                                 return out;
                             }
-                            IRValueID uvBase = resolveSrcMods(texIt->second.uvId).baseId;
+                            IRValueID uvBase = resolveSrcMods(shapeCtx, texIt->second.uvId).baseId;
                             auto uvIt = valueToInputSrc.find(uvBase);
                             if (uvIt == valueToInputSrc.end())
                             {
@@ -8391,7 +8407,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     if (sampIt == valueToTexUnit.end())
                         return false;
 
-                    IRValueID uvBase = resolveSrcMods(tex.uvId).baseId;
+                    IRValueID uvBase = resolveSrcMods(shapeCtx, tex.uvId).baseId;
                     auto uvIt = valueToInputSrc.find(uvBase);
                     if (uvIt == valueToInputSrc.end())
                         return false;
@@ -8514,7 +8530,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 resolveGenericSource = [&](IRValueID id) -> GenericFpSource
                 {
                     GenericFpSource src;
-                    const SrcMod mods = resolveSrcMods(id);
+                    const SrcMod mods = resolveSrcMods(shapeCtx, id);
 
                     if (auto inIt = valueToInputSrc.find(mods.baseId);
                         inIt != valueToInputSrc.end())
@@ -8972,10 +8988,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return temp;
                     }
 
-                    if (auto txIt = valueToTex.find(resolveSrcMods(id).baseId);
+                    if (auto txIt = valueToTex.find(resolveSrcMods(shapeCtx, id).baseId);
                         txIt != valueToTex.end())
                     {
-                        if (!emitTexSampleToDest(resolveSrcMods(id).baseId,
+                        if (!emitTexSampleToDest(resolveSrcMods(shapeCtx, id).baseId,
                                                  txIt->second, temp.reg,
                                                  requiredMask,
                                                  FLOAT32, false))
@@ -9154,7 +9170,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     auto texBaseOf = [&](IRValueID vid) -> IRValueID
                     {
-                        const IRValueID base = resolveSrcMods(vid).baseId;
+                        const IRValueID base = resolveSrcMods(shapeCtx, vid).baseId;
                         return valueToTex.count(base) ? base : 0;
                     };
 
@@ -9170,16 +9186,16 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (!getMulPair(mid, mp)) return false;
                         const IRValueID texA = texBaseOf(mp.a);
                         const IRValueID texB = texBaseOf(mp.b);
-                        if (texA && valueToFpUniform.count(resolveSrcMods(mp.b).baseId))
+                        if (texA && valueToFpUniform.count(resolveSrcMods(shapeCtx, mp.b).baseId))
                         {
                             outMul.texId = texA;
-                            outMul.lightId = resolveSrcMods(mp.b).baseId;
+                            outMul.lightId = resolveSrcMods(shapeCtx, mp.b).baseId;
                             return true;
                         }
-                        if (texB && valueToFpUniform.count(resolveSrcMods(mp.a).baseId))
+                        if (texB && valueToFpUniform.count(resolveSrcMods(shapeCtx, mp.a).baseId))
                         {
                             outMul.texId = texB;
-                            outMul.lightId = resolveSrcMods(mp.a).baseId;
+                            outMul.lightId = resolveSrcMods(shapeCtx, mp.a).baseId;
                             return true;
                         }
                         return false;
@@ -9289,9 +9305,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             gaIt->second.op != GenericFpOp::Sub)
                             return false;
                         const SrcMod lhs =
-                            resolveSrcMods(gaIt->second.srcIds[0]);
+                            resolveSrcMods(shapeCtx, gaIt->second.srcIds[0]);
                         const SrcMod rhs =
-                            resolveSrcMods(gaIt->second.srcIds[1]);
+                            resolveSrcMods(shapeCtx, gaIt->second.srcIds[1]);
                         if (lhs.absMod || lhs.negMod || rhs.absMod || rhs.negMod)
                             return false;
                         if (!valueToFpUniform.count(lhs.baseId) ||
@@ -9321,7 +9337,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     auto uniformNameIs =
                         [&](IRValueID id, const char* name) -> bool
                     {
-                        const IRValueID base = resolveSrcMods(id).baseId;
+                        const IRValueID base = resolveSrcMods(shapeCtx, id).baseId;
                         auto it = valueToFpUniformName.find(base);
                         return it != valueToFpUniformName.end() &&
                                it->second == name;
@@ -9330,7 +9346,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     auto samplerNameIs =
                         [&](IRValueID id, const char* name) -> bool
                     {
-                        const IRValueID base = resolveSrcMods(id).baseId;
+                        const IRValueID base = resolveSrcMods(shapeCtx, id).baseId;
                         auto it = valueToTexSamplerName.find(base);
                         return it != valueToTexSamplerName.end() &&
                                it->second == name;
@@ -9416,14 +9432,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             diffuseMaxId = diffuseAddIt->second.srcIds[0];
                             ambientId =
-                                resolveSrcMods(diffuseAddIt->second.srcIds[1]).baseId;
+                                resolveSrcMods(shapeCtx, diffuseAddIt->second.srcIds[1]).baseId;
                         }
                         else if (valueToMaxDotZero.count(diffuseAddIt->second.srcIds[1]) &&
                                  uniformNameIs(diffuseAddIt->second.srcIds[0], "ambient"))
                         {
                             diffuseMaxId = diffuseAddIt->second.srcIds[1];
                             ambientId =
-                                resolveSrcMods(diffuseAddIt->second.srcIds[0]).baseId;
+                                resolveSrcMods(shapeCtx, diffuseAddIt->second.srcIds[0]).baseId;
                         }
                         else
                             return false;
@@ -9437,7 +9453,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             return false;
 
                         const SrcMod uvMods =
-                            resolveSrcMods(texIt3->second.uvId);
+                            resolveSrcMods(shapeCtx, texIt3->second.uvId);
                         auto uvIt = valueToInputSrc.find(uvMods.baseId);
                         if (uvMods.absMod || uvMods.negMod ||
                             uvIt == valueToInputSrc.end() ||
@@ -9841,14 +9857,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     IRValueID ambientId = 0;
                     if (valueToMaxDotZero.count(satAddIt->second.srcIds[0]) &&
-                        valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[1]).baseId))
+                        valueToFpUniform.count(resolveSrcMods(shapeCtx, satAddIt->second.srcIds[1]).baseId))
                     {
-                        ambientId = resolveSrcMods(satAddIt->second.srcIds[1]).baseId;
+                        ambientId = resolveSrcMods(shapeCtx, satAddIt->second.srcIds[1]).baseId;
                     }
                     else if (valueToMaxDotZero.count(satAddIt->second.srcIds[1]) &&
-                             valueToFpUniform.count(resolveSrcMods(satAddIt->second.srcIds[0]).baseId))
+                             valueToFpUniform.count(resolveSrcMods(shapeCtx, satAddIt->second.srcIds[0]).baseId))
                     {
-                        ambientId = resolveSrcMods(satAddIt->second.srcIds[0]).baseId;
+                        ambientId = resolveSrcMods(shapeCtx, satAddIt->second.srcIds[0]).baseId;
                     }
                     else
                         return false;
@@ -10322,7 +10338,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                         const int uvInput =
                             valueToInputSrc[
-                                resolveSrcMods(texIt2->second.uvId).baseId];
+                                resolveSrcMods(shapeCtx, texIt2->second.uvId).baseId];
                         const int inputs[3] =
                             {posIt->second, normalIt->second, uvInput};
                         for (int inputSrc : inputs)
@@ -10607,7 +10623,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
 
                     const int uvInput =
-                        valueToInputSrc[resolveSrcMods(texIt->second.uvId).baseId];
+                        valueToInputSrc[resolveSrcMods(shapeCtx, texIt->second.uvId).baseId];
                     const int inputs[3] = {lhsIt->second, rhsIt->second, uvInput};
                     for (int inputSrc : inputs)
                     {
@@ -10712,7 +10728,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (mul.lane != -1)
                             return false;
 
-                        const SrcMod addendMods = resolveSrcMods(addendId);
+                        const SrcMod addendMods = resolveSrcMods(shapeCtx, addendId);
                         if (addendMods.absMod || addendMods.negMod)
                             return false;
 
@@ -10991,7 +11007,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                 // Resolve abs/neg modifiers on the direct-MOV path so
                 // `color = abs(vcol)` / `color = -vcol` emit correctly.
-                SrcMod mods = resolveSrcMods(srcId);
+                SrcMod mods = resolveSrcMods(shapeCtx, srcId);
                 auto it = valueToInputSrc.find(mods.baseId);
                 if (it == valueToInputSrc.end())
                 {
