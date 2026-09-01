@@ -2953,7 +2953,19 @@ private:
             useCount_[value] == 1 &&
             !program_.instrs.empty()) {
             VInstr& producer = program_.instrs.back();
-            if (!producer.dst.output && producer.dst.index == regIt->second) {
+            // SelPred is excluded from the store fold: on FP the
+            // output IS R0, so folding would hand the expansion an
+            // output-aliased destination the allocator cannot steer
+            // sources away from (it assigns their registers long
+            // before this fold runs), recreating the early-read alias
+            // through the output file.  The explicit MOV costs one
+            // instruction and keeps SelPred's destination a real
+            // temp, where the allocator's alias exception holds.
+            // (Found by the expansion's alias guard: four corpus
+            // shaders folded a SelPred to the output and shipped a
+            // TEMP(-1) destination encode at 9e7e84d.)
+            if (!producer.dst.output && producer.dst.index == regIt->second &&
+                producer.op != VOp::SelPred) {
                 producer.dst.output = true;
                 producer.dst.index = outIndex;
                 producer.dst.phys = -1;
