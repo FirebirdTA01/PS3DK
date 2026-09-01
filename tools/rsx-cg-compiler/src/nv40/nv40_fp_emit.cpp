@@ -429,6 +429,16 @@ struct FpShapeReads
     // global rather than about a shape binding.
     const IRModule&   module;
     const IRFunction& entry;
+
+    // Vertex-lighting shape bindings (carve step 8).  Read-only like the
+    // rest of this half: the lighting matchers only ask which shape a value
+    // belongs to, never write one.
+    const std::unordered_map<IRValueID, FpArithBinding>&  valueToArith;
+    const std::unordered_map<IRValueID, IRValueID>&       saturateAlias;
+    const std::unordered_map<IRValueID, SelectBinding>&   valueToSelect;
+    const std::unordered_set<IRValueID>&                  valueToCmpLeMaxDotZero;
+    const std::unordered_map<IRValueID, FpPowMaxDotLiteralBinding>&
+                                                          valueToPowMaxDotLiteral;
 };
 
 struct FpShapeContext
@@ -758,6 +768,196 @@ if (uIt->second < reads.entry.parameters.size())
 auto tyIt = reads.valueToType.find(id);
 return tyIt != reads.valueToType.end() &&
        tyIt->second.vectorSize <= 1;
+}
+
+// Vertex-lighting shape matchers converted out of lowerFragmentProgram
+// (t_c44cc3b7, carve step 8).  All eight only INSPECT bindings, so all
+// eight take `const FpShapeReads&` and the compiler refuses any attempt to
+// emit from them.
+//
+// They came out as a group because they call each other - matchLightingMul
+// calls matchTexLightMul, matchSpecMul calls matchGatedPow, and three of
+// them call getMulPair - so converting one at a time would have meant a
+// free function calling a lambda still trapped inside the caller.  Emitted
+// here in dependency order.
+//
+// Step 7 had to hoist their five parameter types first, for the reason the
+// carve has now hit at three different scopes: a signature cannot name a
+// type declared inside the block it is escaping from.
+static bool getMulPair(const FpShapeReads& reads, IRValueID mid,
+                       MulPair& outPair)
+{
+auto it = reads.valueToGenericArith.find(mid);
+if (it == reads.valueToGenericArith.end() ||
+    it->second.op != GenericFpOp::Mul)
+    return false;
+outPair.a = it->second.srcIds[0];
+outPair.b = it->second.srcIds[1];
+return true;
+}
+
+static bool matchTexLightMul(const FpShapeReads& reads, IRValueID mid,
+                             TexLightMul& outMul)
+{
+MulPair mp;
+if (!getMulPair(reads, mid, mp)) return false;
+const IRValueID texA = texBaseOf(reads, mp.a);
+const IRValueID texB = texBaseOf(reads, mp.b);
+if (texA && reads.valueToFpUniform.count(resolveSrcMods(reads, mp.b).baseId))
+{
+    outMul.texId = texA;
+    outMul.lightId = resolveSrcMods(reads, mp.b).baseId;
+    return true;
+}
+if (texB && reads.valueToFpUniform.count(resolveSrcMods(reads, mp.a).baseId))
+{
+    outMul.texId = texB;
+    outMul.lightId = resolveSrcMods(reads, mp.a).baseId;
+    return true;
+}
+return false;
+}
+
+static bool matchLightingMul(const FpShapeReads& reads, IRValueID mid,
+                             LightingMul& outMul)
+{
+MulPair mp;
+if (!getMulPair(reads, mid, mp)) return false;
+TexLightMul tl;
+if (matchTexLightMul(reads, mp.a, tl) &&
+    reads.saturateAlias.count(mp.b))
+{
+    outMul.texLight = tl;
+    outMul.satId = mp.b;
+    return true;
+}
+if (matchTexLightMul(reads, mp.b, tl) &&
+    reads.saturateAlias.count(mp.a))
+{
+    outMul.texLight = tl;
+    outMul.satId = mp.a;
+    return true;
+}
+return false;
+}
+
+static bool matchNormalizeAdd(const FpShapeReads& reads, IRValueID normId,
+                              IRValueID aNorm, IRValueID bNorm)
+{
+auto nIt = reads.valueToNormalize.find(normId);
+if (nIt == reads.valueToNormalize.end()) return false;
+auto gaIt = reads.valueToGenericArith.find(nIt->second.sourceId);
+if (gaIt == reads.valueToGenericArith.end() ||
+    gaIt->second.op != GenericFpOp::Add)
+    return false;
+const IRValueID a = gaIt->second.srcIds[0];
+const IRValueID b = gaIt->second.srcIds[1];
+return (a == aNorm && b == bNorm) ||
+       (a == bNorm && b == aNorm);
+}
+
+static bool matchGatedPow(const FpShapeReads& reads, IRValueID sid,
+                          IRValueID& powId, bool& gated)
+{
+if (reads.valueToPowMaxDotLiteral.count(sid))
+{
+    powId = sid;
+    gated = false;
+    return true;
+}
+auto selIt = reads.valueToSelect.find(sid);
+if (selIt == reads.valueToSelect.end() ||
+    !reads.valueToCmpLeMaxDotZero.count(selIt->second.cmpId))
+    return false;
+float zero = 0.0f;
+if (!floatLiteralValue(reads, selIt->second.trueId, zero) ||
+    zero != 0.0f ||
+    !reads.valueToPowMaxDotLiteral.count(selIt->second.falseId))
+    return false;
+powId = selIt->second.falseId;
+gated = true;
+return true;
+}
+
+static bool matchSpecMul(const FpShapeReads& reads, IRValueID mid,
+                         SpecMul& outMul)
+{
+MulPair mp;
+if (!getMulPair(reads, mid, mp)) return false;
+IRValueID powId = 0;
+bool gated = false;
+if (matchGatedPow(reads, mp.a, powId, gated))
+{
+    outMul.powId = powId;
+    outMul.factorId = mp.b;
+    outMul.gated = gated;
+    return true;
+}
+if (matchGatedPow(reads, mp.b, powId, gated))
+{
+    outMul.powId = powId;
+    outMul.factorId = mp.a;
+    outMul.gated = gated;
+    return true;
+}
+return false;
+}
+
+static bool matchTexDiffuseMul(const FpShapeReads& reads, IRValueID mid,
+                               TexDiffuseMul& outMul)
+{
+MulPair mp;
+if (!getMulPair(reads, mid, mp)) return false;
+const IRValueID texA = texBaseOf(reads, mp.a);
+const IRValueID texB = texBaseOf(reads, mp.b);
+if (texA)
+{
+    outMul.texId = texA;
+    outMul.diffuseId = mp.b;
+    return true;
+}
+if (texB)
+{
+    outMul.texId = texB;
+    outMul.diffuseId = mp.a;
+    return true;
+}
+return false;
+}
+
+static bool matchUniformMinusPositionNormalize(const FpShapeReads& reads,
+                                              IRValueID normId,
+                                              IRValueID& posId,
+                                              IRValueID& uniformId)
+{
+auto nIt = reads.valueToNormalize.find(normId);
+if (nIt == reads.valueToNormalize.end()) return false;
+auto arIt = reads.valueToArith.find(nIt->second.sourceId);
+if (arIt != reads.valueToArith.end() &&
+    arIt->second.op == FpArithOp::Add &&
+    reads.valueToInputSrc.count(arIt->second.inputId) &&
+    reads.valueToFpUniform.count(arIt->second.uniformId))
+{
+    posId = arIt->second.inputId;
+    uniformId = arIt->second.uniformId;
+    return true;
+}
+auto gaIt = reads.valueToGenericArith.find(nIt->second.sourceId);
+if (gaIt == reads.valueToGenericArith.end() ||
+    gaIt->second.op != GenericFpOp::Sub)
+    return false;
+const SrcMod lhs =
+    resolveSrcMods(reads, gaIt->second.srcIds[0]);
+const SrcMod rhs =
+    resolveSrcMods(reads, gaIt->second.srcIds[1]);
+if (lhs.absMod || lhs.negMod || rhs.absMod || rhs.negMod)
+    return false;
+if (!reads.valueToFpUniform.count(lhs.baseId) ||
+    !reads.valueToInputSrc.count(rhs.baseId))
+    return false;
+posId = rhs.baseId;
+uniformId = lhs.baseId;
+return true;
 }
 
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
@@ -1341,7 +1541,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             valueToGenericArith, valueToNormalize, valueToMaxDotZero,
             valueToMod, valueToVaryingTexMul, valueToTexUnit,
             valueToFpUniformName, valueToTexSamplerName, valueToType,
-            module, entry
+            module, entry,
+            valueToArith, saturateAlias, valueToSelect,
+            valueToCmpLeMaxDotZero, valueToPowMaxDotLiteral
         },
         out, asm_,
         emittedTexResults, attrs,
@@ -9436,201 +9638,34 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         finalAddIt->second.op != GenericFpOp::Add)
                         return false;
 
-                    auto getMulPair = [&](IRValueID mid, MulPair& outPair) -> bool
-                    {
-                        auto it = valueToGenericArith.find(mid);
-                        if (it == valueToGenericArith.end() ||
-                            it->second.op != GenericFpOp::Mul)
-                            return false;
-                        outPair.a = it->second.srcIds[0];
-                        outPair.b = it->second.srcIds[1];
-                        return true;
-                    };
 
 
-                    auto matchTexLightMul =
-                        [&](IRValueID mid, TexLightMul& outMul) -> bool
-                    {
-                        MulPair mp;
-                        if (!getMulPair(mid, mp)) return false;
-                        const IRValueID texA = texBaseOf(shapeCtx.reads, mp.a);
-                        const IRValueID texB = texBaseOf(shapeCtx.reads, mp.b);
-                        if (texA && valueToFpUniform.count(resolveSrcMods(shapeCtx.reads, mp.b).baseId))
-                        {
-                            outMul.texId = texA;
-                            outMul.lightId = resolveSrcMods(shapeCtx.reads, mp.b).baseId;
-                            return true;
-                        }
-                        if (texB && valueToFpUniform.count(resolveSrcMods(shapeCtx.reads, mp.a).baseId))
-                        {
-                            outMul.texId = texB;
-                            outMul.lightId = resolveSrcMods(shapeCtx.reads, mp.a).baseId;
-                            return true;
-                        }
-                        return false;
-                    };
 
-                    auto matchLightingMul =
-                        [&](IRValueID mid, LightingMul& outMul) -> bool
-                    {
-                        MulPair mp;
-                        if (!getMulPair(mid, mp)) return false;
-                        TexLightMul tl;
-                        if (matchTexLightMul(mp.a, tl) &&
-                            saturateAlias.count(mp.b))
-                        {
-                            outMul.texLight = tl;
-                            outMul.satId = mp.b;
-                            return true;
-                        }
-                        if (matchTexLightMul(mp.b, tl) &&
-                            saturateAlias.count(mp.a))
-                        {
-                            outMul.texLight = tl;
-                            outMul.satId = mp.a;
-                            return true;
-                        }
-                        return false;
-                    };
 
-                    auto matchGatedPow =
-                        [&](IRValueID sid, IRValueID& powId, bool& gated) -> bool
-                    {
-                        if (valueToPowMaxDotLiteral.count(sid))
-                        {
-                            powId = sid;
-                            gated = false;
-                            return true;
-                        }
-                        auto selIt = valueToSelect.find(sid);
-                        if (selIt == valueToSelect.end() ||
-                            !valueToCmpLeMaxDotZero.count(selIt->second.cmpId))
-                            return false;
-                        float zero = 0.0f;
-                        if (!floatLiteralValue(shapeCtx.reads, selIt->second.trueId, zero) ||
-                            zero != 0.0f ||
-                            !valueToPowMaxDotLiteral.count(selIt->second.falseId))
-                            return false;
-                        powId = selIt->second.falseId;
-                        gated = true;
-                        return true;
-                    };
-                    auto matchSpecMul =
-                        [&](IRValueID mid, SpecMul& outMul) -> bool
-                    {
-                        MulPair mp;
-                        if (!getMulPair(mid, mp)) return false;
-                        IRValueID powId = 0;
-                        bool gated = false;
-                        if (matchGatedPow(mp.a, powId, gated))
-                        {
-                            outMul.powId = powId;
-                            outMul.factorId = mp.b;
-                            outMul.gated = gated;
-                            return true;
-                        }
-                        if (matchGatedPow(mp.b, powId, gated))
-                        {
-                            outMul.powId = powId;
-                            outMul.factorId = mp.a;
-                            outMul.gated = gated;
-                            return true;
-                        }
-                        return false;
-                    };
 
                     const IRValueID finalA = finalAddIt->second.srcIds[0];
                     const IRValueID finalB = finalAddIt->second.srcIds[1];
 
-                    auto matchUniformMinusPositionNormalize =
-                        [&](IRValueID normId, IRValueID& posId,
-                            IRValueID& uniformId) -> bool
-                    {
-                        auto nIt = valueToNormalize.find(normId);
-                        if (nIt == valueToNormalize.end()) return false;
-                        auto arIt = valueToArith.find(nIt->second.sourceId);
-                        if (arIt != valueToArith.end() &&
-                            arIt->second.op == FpArithOp::Add &&
-                            valueToInputSrc.count(arIt->second.inputId) &&
-                            valueToFpUniform.count(arIt->second.uniformId))
-                        {
-                            posId = arIt->second.inputId;
-                            uniformId = arIt->second.uniformId;
-                            return true;
-                        }
-                        auto gaIt = valueToGenericArith.find(nIt->second.sourceId);
-                        if (gaIt == valueToGenericArith.end() ||
-                            gaIt->second.op != GenericFpOp::Sub)
-                            return false;
-                        const SrcMod lhs =
-                            resolveSrcMods(shapeCtx.reads, gaIt->second.srcIds[0]);
-                        const SrcMod rhs =
-                            resolveSrcMods(shapeCtx.reads, gaIt->second.srcIds[1]);
-                        if (lhs.absMod || lhs.negMod || rhs.absMod || rhs.negMod)
-                            return false;
-                        if (!valueToFpUniform.count(lhs.baseId) ||
-                            !valueToInputSrc.count(rhs.baseId))
-                            return false;
-                        posId = rhs.baseId;
-                        uniformId = lhs.baseId;
-                        return true;
-                    };
 
-                    auto matchNormalizeAdd =
-                        [&](IRValueID normId, IRValueID aNorm,
-                            IRValueID bNorm) -> bool
-                    {
-                        auto nIt = valueToNormalize.find(normId);
-                        if (nIt == valueToNormalize.end()) return false;
-                        auto gaIt = valueToGenericArith.find(nIt->second.sourceId);
-                        if (gaIt == valueToGenericArith.end() ||
-                            gaIt->second.op != GenericFpOp::Add)
-                            return false;
-                        const IRValueID a = gaIt->second.srcIds[0];
-                        const IRValueID b = gaIt->second.srcIds[1];
-                        return (a == aNorm && b == bNorm) ||
-                               (a == bNorm && b == aNorm);
-                    };
 
 
 
 
                     auto tryEmitBasicFragmentLighting = [&]() -> bool
                     {
-                        auto matchTexDiffuseMul =
-                            [&](IRValueID mid, TexDiffuseMul& outMul) -> bool
-                        {
-                            MulPair mp;
-                            if (!getMulPair(mid, mp)) return false;
-                            const IRValueID texA = texBaseOf(shapeCtx.reads, mp.a);
-                            const IRValueID texB = texBaseOf(shapeCtx.reads, mp.b);
-                            if (texA)
-                            {
-                                outMul.texId = texA;
-                                outMul.diffuseId = mp.b;
-                                return true;
-                            }
-                            if (texB)
-                            {
-                                outMul.texId = texB;
-                                outMul.diffuseId = mp.a;
-                                return true;
-                            }
-                            return false;
-                        };
 
                         TexDiffuseMul texDiffuse;
                         IRValueID specId = 0;
-                        if (matchTexDiffuseMul(finalA, texDiffuse))
+                        if (matchTexDiffuseMul(shapeCtx.reads, finalA, texDiffuse))
                             specId = finalB;
-                        else if (matchTexDiffuseMul(finalB, texDiffuse))
+                        else if (matchTexDiffuseMul(shapeCtx.reads, finalB, texDiffuse))
                             specId = finalA;
                         else
                             return false;
 
                         IRValueID powId = 0;
                         bool gated = false;
-                        if (!matchGatedPow(specId, powId, gated) || !gated)
+                        if (!matchGatedPow(shapeCtx.reads, specId, powId, gated) || !gated)
                             return false;
 
                         auto powIt2 = valueToPowMaxDotLiteral.find(powId);
@@ -9726,7 +9761,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                         IRValueID posId = 0;
                         IRValueID lightPosId = 0;
-                        if (!matchUniformMinusPositionNormalize(
+                        if (!matchUniformMinusPositionNormalize(shapeCtx.reads, 
                                 lightNormId, posId, lightPosId) ||
                             !uniformNameIs(shapeCtx.reads, lightPosId, "lightPos"))
                             return false;
@@ -9737,12 +9772,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             IRValueID candidatePos = 0;
                             IRValueID candidateUniform = 0;
-                            if (!matchUniformMinusPositionNormalize(
+                            if (!matchUniformMinusPositionNormalize(shapeCtx.reads, 
                                     kv.first, candidatePos, candidateUniform))
                                 continue;
                             if (candidatePos != posId || kv.first == lightNormId)
                                 continue;
-                            if (matchNormalizeAdd(halfNormId, lightNormId, kv.first))
+                            if (matchNormalizeAdd(shapeCtx.reads, halfNormId, lightNormId, kv.first))
                             {
                                 if (eyeNormId != 0)
                                 {
@@ -10060,10 +10095,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     LightingMul lighting;
                     SpecMul spec;
-                    if (!(matchLightingMul(finalA, lighting) &&
-                          matchSpecMul(finalB, spec)) &&
-                        !(matchLightingMul(finalB, lighting) &&
-                          matchSpecMul(finalA, spec)))
+                    if (!(matchLightingMul(shapeCtx.reads, finalA, lighting) &&
+                          matchSpecMul(shapeCtx.reads, finalB, spec)) &&
+                        !(matchLightingMul(shapeCtx.reads, finalB, lighting) &&
+                          matchSpecMul(shapeCtx.reads, finalA, spec)))
                         return false;
 
                     auto powIt = valueToPowMaxDotLiteral.find(spec.powId);
@@ -10162,7 +10197,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                         IRValueID posId = 0;
                         IRValueID lightPosId = 0;
-                        if (!matchUniformMinusPositionNormalize(
+                        if (!matchUniformMinusPositionNormalize(shapeCtx.reads, 
                                 lightNormId, posId, lightPosId))
                             return false;
 
@@ -10172,12 +10207,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             IRValueID candidatePos = 0;
                             IRValueID candidateUniform = 0;
-                            if (!matchUniformMinusPositionNormalize(
+                            if (!matchUniformMinusPositionNormalize(shapeCtx.reads, 
                                     kv.first, candidatePos, candidateUniform))
                                 continue;
                             if (candidatePos != posId || kv.first == lightNormId)
                                 continue;
-                            if (matchNormalizeAdd(halfNormId, lightNormId, kv.first))
+                            if (matchNormalizeAdd(shapeCtx.reads, halfNormId, lightNormId, kv.first))
                             {
                                 if (eyeNormId != 0)
                                 {
