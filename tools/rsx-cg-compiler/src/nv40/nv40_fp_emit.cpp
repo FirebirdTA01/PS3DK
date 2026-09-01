@@ -335,6 +335,39 @@ struct FpNormalizeBinding
     bool         arithUniformNeg = false;
 };
 
+// Lighting-shape binding types, hoisted out of the vertex-lighting block
+// inside lowerFragmentProgram (t_c44cc3b7, carve step 7).  Same reason as
+// steps 0/0b/0c one level up: a matcher cannot become a free function while
+// the types in its signature are declared inside the block that calls it.
+// These five sat two scopes deep, inside tryEmitComputedColorStore, which is
+// why the earlier hoists did not reach them.
+struct MulPair { IRValueID a = 0; IRValueID b = 0; };
+
+struct TexLightMul
+{
+    IRValueID texId = 0;
+    IRValueID lightId = 0;
+};
+
+struct LightingMul
+{
+    TexLightMul texLight;
+    IRValueID   satId = 0;
+};
+
+struct SpecMul
+{
+    IRValueID powId = 0;
+    IRValueID factorId = 0;
+    bool gated = false;
+};
+
+struct TexDiffuseMul
+{
+    IRValueID texId = 0;
+    IRValueID diffuseId = 0;
+};
+
 // ---------------------------------------------------------------------
 // Shared emission state for shape matchers (t_c44cc3b7, carve step 1).
 // ---------------------------------------------------------------------
@@ -9403,7 +9436,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         finalAddIt->second.op != GenericFpOp::Add)
                         return false;
 
-                    struct MulPair { IRValueID a = 0; IRValueID b = 0; };
                     auto getMulPair = [&](IRValueID mid, MulPair& outPair) -> bool
                     {
                         auto it = valueToGenericArith.find(mid);
@@ -9416,11 +9448,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     };
 
 
-                    struct TexLightMul
-                    {
-                        IRValueID texId = 0;
-                        IRValueID lightId = 0;
-                    };
                     auto matchTexLightMul =
                         [&](IRValueID mid, TexLightMul& outMul) -> bool
                     {
@@ -9443,11 +9470,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return false;
                     };
 
-                    struct LightingMul
-                    {
-                        TexLightMul texLight;
-                        IRValueID   satId = 0;
-                    };
                     auto matchLightingMul =
                         [&](IRValueID mid, LightingMul& outMul) -> bool
                     {
@@ -9471,12 +9493,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return false;
                     };
 
-                    struct SpecMul
-                    {
-                        IRValueID powId = 0;
-                        IRValueID factorId = 0;
-                        bool gated = false;
-                    };
                     auto matchGatedPow =
                         [&](IRValueID sid, IRValueID& powId, bool& gated) -> bool
                     {
@@ -9581,11 +9597,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     auto tryEmitBasicFragmentLighting = [&]() -> bool
                     {
-                        struct TexDiffuseMul
-                        {
-                            IRValueID texId = 0;
-                            IRValueID diffuseId = 0;
-                        };
                         auto matchTexDiffuseMul =
                             [&](IRValueID mid, TexDiffuseMul& outMul) -> bool
                         {
