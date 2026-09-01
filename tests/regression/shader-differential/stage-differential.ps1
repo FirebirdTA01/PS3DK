@@ -193,8 +193,12 @@ if ($Corpus) {
 # side is a finding, not a skip, so it aborts the stage.
 if (-not $ReferenceCompiler -and $env:PS3_REF_CG_COMPILER) { $ReferenceCompiler = $env:PS3_REF_CG_COMPILER }
 if ($ReferenceCompiler) {
-    if (-not (Test-Path $ReferenceCompiler)) {
-        throw "reference compiler not found (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+    # -PathType Leaf enforces the "an executable, never a directory"
+    # contract at the layer that can name the fault: a bare Test-Path
+    # accepts a directory, the launch then fails, and the next guard
+    # blames OUR shader for a bad tool argument.
+    if (-not (Test-Path -LiteralPath $ReferenceCompiler -PathType Leaf)) {
+        throw "reference compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
     }
     Write-Host "stager: reference compiler present"
     if (-not $ReferencePairs) { $ReferencePairs = Join-Path $here "reference-pairs.txt" }
@@ -231,8 +235,14 @@ if ($ReferenceCompiler) {
         # $ErrorActionPreference = "Stop" a redirected native stderr line
         # is a terminating error in PowerShell 5.1, so relax it for the
         # call and judge by exit code + container instead.
+        # A native command that fails to LAUNCH (non-executable file)
+        # does not set $LASTEXITCODE, which would otherwise still hold
+        # the 0 our own compile just returned; pre-set it so the rc
+        # check below judges this call and not the previous one.  The
+        # shell's report of a native tool is not the tool's report.
         $prevEap = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
+        $LASTEXITCODE = -1
         $null = & $ReferenceCompiler -p sce_fp_rsx -o $ref $src 2>&1
         $refRc = $LASTEXITCODE
         $ErrorActionPreference = $prevEap

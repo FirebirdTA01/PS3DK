@@ -9,6 +9,11 @@
 # uniforms table; samplers are not bound by the rig yet, so listed
 # shaders must not read textures.
 #
+# The stager's -GeneralLowering flows into OUR side only; the reference
+# side has no lowering switch.  A pair can therefore be byte-identical
+# (skipped) in one mode and staged in the other -- a changed row count
+# between modes is that, not a regression.
+#
 # First three: the Class A oracle divergences (constant-colour outputs
 # where we spell the literal out and the reference reuses one constant
 # slot through a swizzle, 4-5 differing bytes) -- the pixel question is
