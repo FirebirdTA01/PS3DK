@@ -16,22 +16,48 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-## [v0.12.54] — 2026-08-31
+## [v0.12.65] — 2026-09-01
 
-Patch release.  Supersedes the v0.12.43 and v0.12.46 tags, both of which were
-cut correctly but failed to build and therefore published nothing; everything
-attributed to them ships here for the first time.  The two failures were
-unrelated one-line defects in code added the same day, and the first hid the
-second — v0.12.43 died fetching a dependency, which aborted the job before
-v0.12.46's fault could execute at all.  Alongside them: a crash in the
-packaging tool found by the first external consumer, and a family of compiler
-defects that all shared one shape: the code continued quietly where it should
-have refused.  Nothing here adds surface — the shader compiler's experimental
-lowering path deliberately accepts *less* than it did, because much of what it
-accepted before was silently wrong.
+Patch release.  Supersedes the v0.12.43, v0.12.46 and v0.12.54 tags, none of
+which built; everything attributed to them ships here for the first time.
+
+The three failures were separate one-line defects, and each hid the next: the
+dependency fetch aborted before the toolchain step could run, that step's
+quoting fault aborted before the portlibs stage could run, and the portlibs
+stage then failed on the *same* wrong-content-download defect that had already
+been fixed one script over — six recipes each carried their own copy of it.
+That last one is the entry worth reading: fixing an instance and not grepping
+the tree for the pattern is what turned one defect into two failed releases.
+
+Alongside them: a crash in the packaging tool found by the first external
+consumer, and a family of compiler defects that all shared one shape — the code
+continued quietly where it should have refused.  The shader compiler's
+experimental lowering path now accepts *less* than it did in places, because
+much of what it accepted before was silently wrong, and rather more elsewhere:
+it compiles every tracked shader the default path compiles, which it did not
+before.
 
 ### Fixed
 
+- **A dependency mirror answering 200 with the wrong bytes no longer poisons
+  any portlibs recipe.**  All six carried their own copy of a fetch loop that
+  ended on the first HTTP 200 regardless of content, so a host serving an HTML
+  page under a tarball's name stopped the search with two working mirrors —
+  including the release-tagged one — sitting untried below it.  Verification now
+  happens per URL and lives once, in the script that sources every recipe, so
+  six copies cannot drift apart.  Cached files are verified rather than trusted
+  on existence, and resume-on-partial is gone with them.
+- **The experimental lowering path compiles everything the default path
+  compiles.**  Two shaders (a `refract` and a struct-input vertex program) were
+  refused by the general path while the default path handled them, so it was
+  not the superset it was assumed to be.  Both close here; `refract` also now
+  refuses the vector widths its lowering does not implement, rather than
+  emitting a program with an uninitialised output lane.
+- **Fragment containers declare their parameters.**  51 of 74 general-path
+  containers carried unresolved type or resource fields — placeholder inputs,
+  missing output semantics — where the reference had none.  A host binding
+  parameters by name tolerated this, which is why nothing caught it; a host
+  binding by semantic would not have.  Now at parity.
 - **The Windows toolchain build no longer fails when the compiler is invoked
   through a launcher.**  The native `make_sprx` build ran `"${CC:-...}"` quoted
   as a single word, but the release jobs export `CC="ccache gcc"`, so the shell
