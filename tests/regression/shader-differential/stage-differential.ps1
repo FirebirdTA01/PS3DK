@@ -196,7 +196,12 @@ function Print-AutoValues([string]$srcPath, [string]$label) {
 # not a row.
 function Assert-Deterministic([string]$src, [string]$firstDst, [string[]]$flags, [switch]$NoExtraFlags, [string]$label) {
     $again = "$firstDst.again"
-    $null = Compile-Shader $src $again $flags -Absolute -NoExtraFlags:$NoExtraFlags
+    # -NoThrow: a second compile that REFUSES where the first succeeded is
+    # the most alarming form of nondeterminism, and it must be reported as
+    # that, not as the second compile's own empty-container error.
+    if (-not (Compile-Shader $src $again $flags -Absolute -NoThrow -NoExtraFlags:$NoExtraFlags)) {
+        throw "NONDETERMINISTIC: $label compiled once and refused once under the same binary (rc=$($script:lastCompileRc)); no verdict about it could mean anything"
+    }
     $h1 = (Get-FileHash -Algorithm SHA256 -LiteralPath $firstDst).Hash
     $h2 = (Get-FileHash -Algorithm SHA256 -LiteralPath $again).Hash
     Remove-Item -LiteralPath $again -Force -ErrorAction SilentlyContinue
