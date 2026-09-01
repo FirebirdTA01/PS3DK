@@ -735,6 +735,14 @@ jobs:
     name: Require CI green on the tagged commit
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # The workflow-level block grants contents: write, and declaring ANY
+    # permissions block makes every unlisted scope `none` - so without this
+    # the actions/runs endpoint is unreadable and the gate would fail closed
+    # on EVERY release, blocking all publishing rather than only bad publishing.
+    # Granted at job level and read-only: this job inspects, it never writes.
+    permissions:
+      contents: read     # checkout, and reading the tag annotation
+      actions: read      # the workflow-runs API this gate is built on
     steps:
       - uses: actions/checkout@v5
         with:
@@ -750,7 +758,14 @@ jobs:
           # The override lives in the annotated tag message.
           tag="${GITHUB_REF#refs/tags/}"
           msg="$(git for-each-ref "refs/tags/$tag" --format='%(contents)')"
-          if printf '%s' "$msg" | grep -q '\[ci-override:'; then
+          # Detection uses the COMPLETE bracketed form, identical to the
+          # extraction below.  Matching only the opening marker made the two
+          # disagree: "[ci-override: no closing bracket" would satisfy the
+          # detector, fail extraction, and override the gate with an empty
+          # reason - a malformed marker silently buying a free pass, which is
+          # the one thing an override must never do.  A malformed marker now
+          # leaves the gate ENFORCED, which is the fail-closed direction.
+          if printf '%s' "$msg" | grep -Eq '\[ci-override:[^]]*\]'; then
               reason="$(printf '%s' "$msg" | sed -n 's/.*\[ci-override:[[:space:]]*\([^]]*\)\].*/\1/p')"
               echo "::warning title=CI gate overridden::Publishing $tag with the CI gate overridden. Reason: ${reason:-<none given>}"
               echo "OVERRIDDEN - proceeding without a green CI. Reason: ${reason:-<none given>}"
