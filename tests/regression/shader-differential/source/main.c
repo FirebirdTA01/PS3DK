@@ -1279,7 +1279,7 @@ int main(int argc, const char **argv)
 				textures_ok = 0;
 				failures++;
 			}
-			continue;
+			goto post_row;
 		}
 
 		if (strcmp(p->role, "control-auto") == 0) {
@@ -1293,7 +1293,7 @@ int main(int argc, const char **argv)
 				autos_ok = 0;
 				failures++;
 			}
-			continue;
+			goto post_row;
 		}
 
 		if (strcmp(p->role, "control-uniform") == 0) {
@@ -1308,7 +1308,7 @@ int main(int argc, const char **argv)
 				uniforms_ok = 0;
 				failures++;
 			}
-			continue;
+			goto post_row;
 		}
 
 		if (i == 0) {
@@ -1357,8 +1357,13 @@ int main(int argc, const char **argv)
 				failures++;
 		}
 
-		/* Poison check after every row past the standing controls
-		 * (rows 0..1 are validated by their own verdicts). */
+	post_row:
+		/* Poison check after EVERY row that drew, the three non-standing
+		 * controls included (they reach here by goto; review finding: a
+		 * control that poisons must be blamed itself, not the next row).
+		 * Rows withheld without drawing - uniforms-invalid, auto-invalid,
+		 * textures-invalid - cannot have poisoned anything and skip it.
+		 * Rows 0..1 are validated by their own verdicts. */
 		if (i > 1 && !canary_paints(ctx, canary, rt_a_off, rt_depth_off,
 		                            rt_pitch, save_a)) {
 			printf("shader-differential: RSX state poisoned after row %d (%s, role %s): a constant-colour canary draw painted nothing, so no later verdict would mean anything; %d rows not judged\nSHADER_DIFF_INVALID\n",
