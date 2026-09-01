@@ -185,6 +185,24 @@ function Print-AutoValues([string]$srcPath, [string]$label) {
     }
 }
 
+# Same binary twice: a curated container must come out byte-identical
+# when the same source is compiled again by the same binary.  A compiler
+# whose output varies run to run makes every byte fence and every
+# staged-vs-judged comparison a comparison of two different programs,
+# and nothing downstream can tell (the vita room's wall-clock GUID: months
+# of byte-exactness unreachable by construction).  Curated rows only -
+# the corpus sweep would double its stage time - and a difference ABORTS
+# the stage, since a curated row whose container is not reproducible is
+# not a row.
+function Assert-Deterministic([string]$src, [string]$firstDst, [string[]]$flags, [switch]$NoExtraFlags, [string]$label) {
+    $again = "$firstDst.again"
+    $null = Compile-Shader $src $again $flags -Absolute -NoExtraFlags:$NoExtraFlags
+    $h1 = (Get-FileHash -Algorithm SHA256 -LiteralPath $firstDst).Hash
+    $h2 = (Get-FileHash -Algorithm SHA256 -LiteralPath $again).Hash
+    Remove-Item -LiteralPath $again -Force -ErrorAction SilentlyContinue
+    if ($h1 -ne $h2) { throw "NONDETERMINISTIC: $label compiled twice by the same binary gave different containers ($($h1.Substring(0,12)) vs $($h2.Substring(0,12))); no verdict about it could mean anything" }
+}
+
 function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute, [switch]$NoThrow, [switch]$NoExtraFlags) {
     $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
     # [string[]] on purpose: a one-element array collapses to a String on
@@ -420,6 +438,7 @@ if ($ReferenceCompiler) {
         $ref  = Join-Path $refScratch "$name`_ref.fpo"
         if ($set -eq "auto") { Print-AutoValues $src $name }
         $null = Compile-Shader $src $ours @() -Absolute
+        Assert-Deterministic $src $ours @() -Label $name
         if (-not (Compile-Reference $src $ref)) { throw "reference compile failed or produced no container: $rel" }
 
         $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
@@ -529,7 +548,9 @@ if ($ReferenceCompiler) {
             $dGen = Join-Path $refScratch "$name`_general.fpo"
             $dRef = Join-Path $refScratch "$name`_pathref.fpo"
             $null = Compile-Shader $src $dDef @() -Absolute -NoExtraFlags
+            Assert-Deterministic $src $dDef @() -NoExtraFlags -Label "$name (default)"
             $null = Compile-Shader $src $dGen @("--general-lowering") -Absolute -NoExtraFlags
+            Assert-Deterministic $src $dGen @("--general-lowering") -NoExtraFlags -Label "$name (general)"
             if (-not (Compile-Reference $src $dRef)) { throw "path-pairs: reference compile failed or produced no container: $rel" }
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
