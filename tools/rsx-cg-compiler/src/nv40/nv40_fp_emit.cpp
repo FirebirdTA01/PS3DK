@@ -439,6 +439,12 @@ struct FpShapeReads
     const std::unordered_set<IRValueID>&                  valueToCmpLeMaxDotZero;
     const std::unordered_map<IRValueID, FpPowMaxDotLiteralBinding>&
                                                           valueToPowMaxDotLiteral;
+
+    // Lane extracts (carve step 10).  A scalar produced by
+    // `shuffle vec4_input[lane]` appears ONLY here, never in
+    // valueToInputSrc, so any matcher asking whether an operand is a
+    // varying has to consult both.
+    const std::unordered_map<IRValueID, ScalarExtract>& valueToScalarExtract;
 };
 
 struct FpShapeContext
@@ -1028,6 +1034,56 @@ float f = 0.0f;
 return floatLiteralValue(reads, rid, f) && f == expected;
 }
 
+// Varying/texture base resolution, converted out of lowerFragmentProgram
+// (t_c44cc3b7, carve step 10).  Read-only, so all four take
+// `const FpShapeReads&`.
+//
+// What they encode is a fact about the IR worth keeping visible now that
+// it has a name: a scalar produced by `shuffle vec4_input[lane]` appears
+// ONLY in valueToScalarExtract, never in valueToInputSrc, which maps the
+// base vec4.  Any matcher asking 'is this operand a varying' has to go
+// through one of these or it will silently answer no for every
+// lane-extracted operand.  As lambdas they were reachable from one block;
+// as free functions the rule is available to every matcher that needs it.
+static IRValueID resolveTexBase(const FpShapeReads& reads, IRValueID id)
+{
+auto seIt = reads.valueToScalarExtract.find(id);
+if (seIt != reads.valueToScalarExtract.end())
+{
+    if (reads.valueToTex.count(seIt->second.baseId))
+        return seIt->second.baseId;
+}
+if (reads.valueToTex.count(id))
+    return id;
+return 0;
+}
+
+static bool resolveVarying(const FpShapeReads& reads, IRValueID id)
+{
+if (reads.valueToInputSrc.count(id)) return true;
+auto seIt = reads.valueToScalarExtract.find(id);
+return seIt != reads.valueToScalarExtract.end() &&
+       reads.valueToInputSrc.count(seIt->second.baseId);
+}
+
+static IRValueID varyingBaseId(const FpShapeReads& reads, IRValueID id)
+{
+auto seIt = reads.valueToScalarExtract.find(id);
+if (seIt != reads.valueToScalarExtract.end() &&
+    reads.valueToInputSrc.count(seIt->second.baseId))
+    return seIt->second.baseId;
+return id;
+}
+
+static int varyingLane(const FpShapeReads& reads, IRValueID id)
+{
+auto seIt = reads.valueToScalarExtract.find(id);
+if (seIt != reads.valueToScalarExtract.end() &&
+    reads.valueToInputSrc.count(seIt->second.baseId))
+    return seIt->second.lane;
+return -1;
+}
+
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
@@ -1611,7 +1667,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             valueToFpUniformName, valueToTexSamplerName, valueToType,
             module, entry,
             valueToArith, saturateAlias, valueToSelect,
-            valueToCmpLeMaxDotZero, valueToPowMaxDotLiteral
+            valueToCmpLeMaxDotZero, valueToPowMaxDotLiteral,
+            valueToScalarExtract
         },
         out, asm_,
         emittedTexResults, attrs,
@@ -3173,67 +3230,36 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         // std::fprintf(stderr, "DEBUG Arith: entering Mul(varying,tex) check, result=%%%u\n",
                         //              (unsigned)inst.result);
-                        auto resolveTexBase = [&](IRValueID id) -> IRValueID {
-                            auto seIt = valueToScalarExtract.find(id);
-                            if (seIt != valueToScalarExtract.end())
-                            {
-                                if (valueToTex.count(seIt->second.baseId))
-                                    return seIt->second.baseId;
-                            }
-                            if (valueToTex.count(id))
-                                return id;
-                            return 0;
-                        };
                         // Resolve varying through scalar extracts:
                         // `shuffle vec4_input[lane]` produces a scalar
                         // that is only in valueToScalarExtract, not in
                         // valueToInputSrc (which maps the base vec4).
-                        auto resolveVarying = [&](IRValueID id) -> bool {
-                            if (valueToInputSrc.count(id)) return true;
-                            auto seIt = valueToScalarExtract.find(id);
-                            return seIt != valueToScalarExtract.end() &&
-                                   valueToInputSrc.count(seIt->second.baseId);
-                        };
-                        auto aIsVar = resolveVarying(ma.baseId);
-                        auto bIsVar = resolveVarying(mb.baseId);
-                        auto aTexBase = resolveTexBase(ma.baseId);
-                        auto bTexBase = resolveTexBase(mb.baseId);
+                        auto aIsVar = resolveVarying(shapeCtx.reads, ma.baseId);
+                        auto bIsVar = resolveVarying(shapeCtx.reads, mb.baseId);
+                        auto aTexBase = resolveTexBase(shapeCtx.reads, ma.baseId);
+                        auto bTexBase = resolveTexBase(shapeCtx.reads, mb.baseId);
                         // Resolve the varying base ID: if the operand
                         // is a scalar extract of a vec4 input, use the
                         // underlying input so emit-time valueToInputSrc
                         // lookup succeeds.
-                        auto varyingBaseId = [&](IRValueID id) -> IRValueID {
-                            auto seIt = valueToScalarExtract.find(id);
-                            if (seIt != valueToScalarExtract.end() &&
-                                valueToInputSrc.count(seIt->second.baseId))
-                                return seIt->second.baseId;
-                            return id;
-                        };
                         // Resolve the scalar lane of the varying.
                         // Returns -1 if the varying is a scalar (not
                         // a lane extract), otherwise the lane index.
-                        auto varyingLane = [&](IRValueID id) -> int {
-                            auto seIt = valueToScalarExtract.find(id);
-                            if (seIt != valueToScalarExtract.end() &&
-                                valueToInputSrc.count(seIt->second.baseId))
-                                return seIt->second.lane;
-                            return -1;
-                        };
                         if (aIsVar && bTexBase)
                         {
                             FpVaryingTexMulBinding tb;
-                            tb.varyingId = varyingBaseId(ma.baseId);
+                            tb.varyingId = varyingBaseId(shapeCtx.reads, ma.baseId);
                             tb.texId     = bTexBase;
-                            tb.lane      = varyingLane(ma.baseId);
+                            tb.lane      = varyingLane(shapeCtx.reads, ma.baseId);
                             valueToVaryingTexMul[inst.result] = tb;
                             break;
                         }
                         if (bIsVar && aTexBase)
                         {
                             FpVaryingTexMulBinding tb;
-                            tb.varyingId = varyingBaseId(mb.baseId);
+                            tb.varyingId = varyingBaseId(shapeCtx.reads, mb.baseId);
                             tb.texId     = aTexBase;
-                            tb.lane      = varyingLane(mb.baseId);
+                            tb.lane      = varyingLane(shapeCtx.reads, mb.baseId);
                             valueToVaryingTexMul[inst.result] = tb;
                             break;
                         }
