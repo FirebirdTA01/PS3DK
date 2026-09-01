@@ -21,7 +21,13 @@
  * roles:  control-identical | control-mismatch | control-uniform |
  *         control-texture | control-auto | corpus | probe |
  *         reference (ours vs a reference-compiled container; gated
- *         like corpus)
+ *         like corpus) | path-pair (our DEFAULT-path container vs our
+ *         GENERAL-path container of the same shader; gated like corpus,
+ *         but judged ONLY when the row immediately before it is a
+ *         reference row that judged identical - that row is the
+ *         premise that makes the default container an oracle for the
+ *         general one; otherwise status path-pair-unoracled, counted
+ *         on its own line, neither pass nor fail)
  * status: identical | mismatch | load-failed-a | load-failed-b |
  *         uniform-missing-a | uniform-missing-b | uniforms-invalid |
  *         textures-invalid | samplers-unvalidated |
@@ -29,7 +35,8 @@
  *         auto-invalid | uniform-unsupported-a | uniform-unsupported-b |
  *         internal-error (a render_side code the judge does not map) |
  *         vacuous (neither side painted a pixel: no verdict, never
- *         counted as identical)
+ *         counted as identical) | path-pair-unoracled (the premise row
+ *         before a path-pair row did not judge identical)
  *
  * Poison canary: after every row past the standing controls the rig
  * draws the identity control's container once; if that paints nothing
@@ -1204,6 +1211,9 @@ int main(int argc, const char **argv)
 	int autos_ok = 1;      /* flipped by a failed control-auto row */
 	int unsupported = 0;   /* gated rows the binder could not serve */
 	int vacuous = 0;       /* gated rows where neither side painted */
+	int unoracled = 0;     /* path-pair rows whose premise row was not identical */
+	const char *prev_role = "";       /* the row before this one, for path-pair */
+	const char *prev_status = "";
 	u32 canary_sz = 0;
 	void *canary = load_container(g_pairs[0].a_path, &canary_sz);
 	if (!canary) {
@@ -1236,6 +1246,37 @@ int main(int argc, const char **argv)
 			snprintf(r.artifact, sizeof(r.artifact), "-");
 			print_row(p, &r);
 			uniforms_skipped++;
+			prev_role = p->role;
+			prev_status = r.status;
+			continue;
+		}
+
+		/* A path-pair row is an oracle comparison only while its
+		 * premise holds: the reference row immediately before it (the
+		 * same shader's default-path container against the reference)
+		 * must have judged identical.  "Default equals general" is
+		 * satisfiable by both being wrong the same way, so the row
+		 * checks the premise in the run rather than assuming it, and a
+		 * failed premise withholds the verdict as unoracled - the
+		 * premise row itself already failed the run as a reference
+		 * row (review condition on the path-pair role). */
+		if (strcmp(p->role, "path-pair") == 0 &&
+		    !(strcmp(prev_role, "reference") == 0 &&
+		      strcmp(prev_status, "identical") == 0)) {
+			r.status = "path-pair-unoracled";
+			r.max_delta = 0;
+			r.diff_pixels = 0;
+			r.total_pixels = 0;
+			r.elapsed_ms = 0;
+			snprintf(r.diagnostic, sizeof(r.diagnostic),
+			         "premise row before it (%s, %s) did not judge identical",
+			         prev_role[0] ? prev_role : "none",
+			         prev_status[0] ? prev_status : "none");
+			snprintf(r.artifact, sizeof(r.artifact), "-");
+			print_row(p, &r);
+			unoracled++;
+			prev_role = p->role;
+			prev_status = r.status;
 			continue;
 		}
 
@@ -1253,6 +1294,8 @@ int main(int argc, const char **argv)
 			snprintf(r.artifact, sizeof(r.artifact), "-");
 			print_row(p, &r);
 			uniforms_skipped++;
+			prev_role = p->role;
+			prev_status = r.status;
 			continue;
 		}
 
@@ -1260,6 +1303,8 @@ int main(int argc, const char **argv)
 		           rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
 		           save_a, save_b, &r);
 		print_row(p, &r);
+		prev_role = p->role;
+		prev_status = r.status;
 
 		if (strcmp(r.status, "textures-invalid") == 0) {
 			/* Withheld, not failed: the red texture control already
@@ -1378,9 +1423,9 @@ int main(int argc, const char **argv)
 	free(canary);
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted)\n",
-	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous,
-	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d path-pair rows unoracled\n",
+	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - unoracled,
+	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, unoracled);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:

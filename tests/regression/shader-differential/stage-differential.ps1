@@ -52,6 +52,16 @@ param(
     # A shader goes here only when it poisons the run for every row after
     # it; a plain mismatch or refusal stays in and is reported.
     [string]$ReferenceCorpusExclude = "",
+    # -PathPairs: for each shader in -PathPairsList (default <rig>/path-pairs.txt,
+    # repo-relative shader|uniform_set) stage our DEFAULT-path container
+    # against our GENERAL-path container, preceded by the premise row that
+    # makes the default container an oracle: default vs reference.  The
+    # guest judges the path-pair row only if that premise judged identical.
+    # Needs the reference compiler.  Both containers are compiled here
+    # regardless of -GeneralLowering; a refusal on any side aborts (the
+    # list is curated).
+    [switch]$PathPairs,
+    [string]$PathPairsList = "",
     [string]$Hdd0 = ""           # override dev_hdd0 root (testing)
 )
 
@@ -144,8 +154,13 @@ function Auto-Value([string]$name, [uint32]$k) {
     return $v.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute, [switch]$NoThrow) {
+function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute, [switch]$NoThrow, [switch]$NoExtraFlags) {
     $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
+    # [string[]] on purpose: a one-element array collapses to a String on
+    # assignment, and splatting a String splats its CHARACTERS (measured:
+    # "- - g e n e r a l ..." reached the compiler).  Passed below as
+    # @($pathFlags), the array-subexpression form, never as @pathFlags.
+    [string[]]$pathFlags = if ($NoExtraFlags) { @() } else { @($extraFlags) }
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     # Our compiler reports a refusal on stderr; under "Stop" a redirected
     # native stderr line is a terminating error (same trap as the
@@ -156,11 +171,11 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         # timeout(1) inside WSL: an uncurated corpus shader must not be
         # able to stall the whole stage on a hung compile.
         $global:LASTEXITCODE = -1
-        $null = & wsl -- timeout 30s $WslCompiler @flags @($extraFlags) -p sce_fp_rsx `
+        $null = & wsl -- timeout 30s $WslCompiler @flags @($pathFlags) -p sce_fp_rsx `
             --emit-container (To-WslPath $dst) (To-WslPath $srcPath) 2>&1
     } else {
         $global:LASTEXITCODE = -1
-        $null = & $Rsxcgc @flags @($extraFlags) -p sce_fp_rsx --emit-container $dst $srcPath 2>&1
+        $null = & $Rsxcgc @flags @($pathFlags) -p sce_fp_rsx --emit-container $dst $srcPath 2>&1
     }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
@@ -448,6 +463,46 @@ if ($ReferenceCompiler) {
         if (($cRows.Count + $cIdentical + $cRefusedOurs + $cRefusedRef) -eq 0) { throw "reference corpus sweep compiled nothing" }
         $manifest += $cRows
         Write-Host "stager: reference corpus: $($files.Count) shaders, $($cRows.Count) pairs staged, $cIdentical byte-identical skipped, ours refused $cRefusedOurs, reference refused $cRefusedRef, $cExcluded excluded (sidecar: reference-corpus-refused.txt)"
+    }
+
+    # Path pairs: our default-path container vs our general-path container
+    # of the same shader, each preceded by its premise row (default vs
+    # reference).  Byte-identical default/general pairs are counted, not
+    # staged.  The premise is judged in the guest on pixels - the three
+    # shaders this was built for are byte-divergent from the reference and
+    # pixel-identical to it, so a host-side byte check would call every one
+    # of them unoracled.
+    if ($PathPairs) {
+        if (-not $PathPairsList) { $PathPairsList = Join-Path $here "path-pairs.txt" }
+        $ppLines = @(Get-Content $PathPairsList | Where-Object { $_ -and -not $_.StartsWith("#") })
+        if ($ppLines.Count -eq 0) { throw "path-pairs list is empty: $PathPairsList" }
+        $ppDst = Join-Path $root "pathpair"
+        New-Item -ItemType Directory -Force $ppDst | Out-Null
+        $ppRows = @(); $ppIdentical = 0
+        foreach ($line in $ppLines) {
+            $fields = $line.Split("|")
+            $rel = $fields[0].Trim()
+            $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
+            $src = Join-Path $repoRoot $rel
+            if (-not (Test-Path $src)) { throw "path-pairs: shader not found: $rel" }
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
+            $dDef = Join-Path $refScratch "$name`_default.fpo"
+            $dGen = Join-Path $refScratch "$name`_general.fpo"
+            $dRef = Join-Path $refScratch "$name`_pathref.fpo"
+            $null = Compile-Shader $src $dDef @() -Absolute -NoExtraFlags
+            $null = Compile-Shader $src $dGen @("--general-lowering") -Absolute -NoExtraFlags
+            if (-not (Compile-Reference $src $dRef)) { throw "path-pairs: reference compile failed or produced no container: $rel" }
+            $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
+            $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
+            if ($hD -eq $hG) { $ppIdentical++; Write-Host "stager: $rel default and general containers byte-identical -- not staged"; continue }
+            Copy-Item $dDef (Join-Path $ppDst "$name`_default.fpo") -Force
+            Copy-Item $dGen (Join-Path $ppDst "$name`_general.fpo") -Force
+            Copy-Item $dRef (Join-Path $ppDst "$name`_ref.fpo") -Force
+            $ppRows += "B|reference|$name@oracle|pathpair/$name`_default.fpo|pathpair/$name`_ref.fpo|$set"
+            $ppRows += "B|path-pair|$name@paths|pathpair/$name`_default.fpo|pathpair/$name`_general.fpo|$set"
+        }
+        $manifest += $ppRows
+        Write-Host "stager: path pairs: $($ppRows.Count / 2) pairs staged (each with its premise row), $ppIdentical byte-identical skipped"
     }
 }
 

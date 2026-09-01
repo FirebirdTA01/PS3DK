@@ -1,0 +1,22 @@
+# shader-differential path pairs: our DEFAULT-path container vs our
+# GENERAL-path container of the same shader.
+# fields: repo-relative fragment shader path|uniform_set (default 0)
+#
+# Staged by stage-differential.ps1 -PathPairs (needs the reference
+# compiler).  Each pair is preceded by its PREMISE row - the default
+# container against the reference, role reference, name <shader>@oracle -
+# and the guest judges the path-pair row (<shader>@paths) only when that
+# premise judged identical in the same run.  A default container that no
+# longer matches the reference on pixels makes "default vs general" a
+# comparison of two of our own outputs, which says which one moved and
+# nothing about which one is right; the row then reports
+# path-pair-unoracled instead of a verdict.  Both containers must compile;
+# a refusal on any side aborts the stage as a finding.
+#
+# The three shaders this role was built for: pixel-identical to the
+# reference on the default path, mismatching on the general path
+# (t_856689b2).  Byte-divergent from the reference on BOTH paths, which is
+# why the premise is judged on pixels and not on bytes.
+tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
+tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto
+tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto
