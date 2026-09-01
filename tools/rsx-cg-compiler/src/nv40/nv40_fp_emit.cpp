@@ -302,6 +302,39 @@ struct FpArithBinding
 
 enum class GenericFpOp { Add, Sub, Mul, Mad, Min, Max, Dot3, Dot4 };
 
+struct GenericFpArithBinding
+{
+    GenericFpOp op = GenericFpOp::Add;
+    IRValueID   srcIds[3] = {0, 0, 0};
+    int         width = 4;
+};
+
+struct FpScaledLanesBinding
+{
+    FpScaleVaryingBinding scale;
+    int                   scaledLane = 0;     // which output lane gets the MAD
+    float                 consts[4]  = {0,0,0,0}; // ignored at scaledLane
+};
+
+struct FpNormalizeBinding
+{
+    IRValueID inputId  = 0;
+    IRValueID sourceId = 0;
+    int       lanes    = 3;
+    bool      wrapW1   = false;  // true iff StoreOutput sees
+                                 // `float4(normalize(v), 1.0)`
+    // Optional arith subexpression: when set, the input isn't a
+    // direct varying — it's `varying ± uniform` (or similar).
+    // Emit-side computes the arith into R0 first, then runs the
+    // DP3 + DIVSQR sequence directly on R0.  Required for shapes
+    // like `normalize(worldPos - gEye)`.
+    bool         hasArith     = false;
+    FpArithOp    arithOp      = FpArithOp::Add;
+    IRValueID    arithInputId = 0;   // varying operand
+    IRValueID    arithUniformId = 0; // uniform operand
+    bool         arithUniformNeg = false;
+};
+
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
@@ -356,12 +389,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   MUL/MIN/MAX/DP3/DP4: src0 = INPUT,          src1 = CONST (uniform)
     std::unordered_map<IRValueID, FpArithBinding> valueToArith;
 
-    struct GenericFpArithBinding
-    {
-        GenericFpOp op = GenericFpOp::Add;
-        IRValueID   srcIds[3] = {0, 0, 0};
-        int         width = 4;
-    };
     std::unordered_map<IRValueID, GenericFpArithBinding> valueToGenericArith;
 
     std::unordered_map<IRValueID, GenericFpVecConstructBinding>
@@ -413,12 +440,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // lanes.  Lowers to a 3-insn shape (single-lane MOVH preload,
     // lane-elided MOVR for the constant lanes, single-lane MAD for
     // the scaled lane); see the StoreOutput handler for details.
-    struct FpScaledLanesBinding
-    {
-        FpScaleVaryingBinding scale;
-        int                   scaledLane = 0;     // which output lane gets the MAD
-        float                 consts[4]  = {0,0,0,0}; // ignored at scaledLane
-    };
     std::unordered_map<IRValueID, FpScaledLanesBinding> valueToScaledLanes;
 
     // MAD fusion: Add(Mul(input, uniformMul), addend) where addend is
@@ -604,24 +625,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // varying and optional "wrap with w=1" flag so StoreOutput can
     // emit either shape: bare normalize (no w inject) or the more
     // common `float4(normalize(v), 1.0)` pattern.
-    struct FpNormalizeBinding
-    {
-        IRValueID inputId  = 0;
-        IRValueID sourceId = 0;
-        int       lanes    = 3;
-        bool      wrapW1   = false;  // true iff StoreOutput sees
-                                     // `float4(normalize(v), 1.0)`
-        // Optional arith subexpression: when set, the input isn't a
-        // direct varying — it's `varying ± uniform` (or similar).
-        // Emit-side computes the arith into R0 first, then runs the
-        // DP3 + DIVSQR sequence directly on R0.  Required for shapes
-        // like `normalize(worldPos - gEye)`.
-        bool         hasArith     = false;
-        FpArithOp    arithOp      = FpArithOp::Add;
-        IRValueID    arithInputId = 0;   // varying operand
-        IRValueID    arithUniformId = 0; // uniform operand
-        bool         arithUniformNeg = false;
-    };
     std::unordered_map<IRValueID, FpNormalizeBinding> valueToNormalize;
 
     // `reflect(I, N)` — Cg standard library: I - 2 * dot(N, I) * N.
