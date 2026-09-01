@@ -558,15 +558,30 @@ static int load_manifest(void)
 	 * the absent-uniforms.txt case: rows referencing sets are what
 	 * make the file load-bearing, not the file's own presence. */
 	{
-		int has_uniform_rows = 0, has_uniform_control = 0;
+		int first_uniform_row = -1, control_index = -1;
 		for (int i = 0; i < g_npairs; i++) {
-			if (strcmp(g_pairs[i].role, "control-uniform") == 0)
-				has_uniform_control = 1;
-			else if (!uniformSetIsNone(g_pairs[i].uniform_set))
-				has_uniform_rows = 1;
+			if (strcmp(g_pairs[i].role, "control-uniform") == 0) {
+				if (control_index < 0)
+					control_index = i;
+			} else if (!uniformSetIsNone(g_pairs[i].uniform_set) &&
+			           first_uniform_row < 0) {
+				first_uniform_row = i;
+			}
 		}
-		if (has_uniform_rows && !has_uniform_control) {
+		if (first_uniform_row >= 0 && control_index < 0) {
 			printf("shader-differential: manifest declares uniform sets but no control-uniform row — uniform-dependent verdicts would be unvalidated; refusing\n");
+			return 0;
+		}
+		/* Existence is not enough: the judging loop clears uniforms_ok
+		 * only when the control row is REACHED, so a dependent row at
+		 * a lower index would be judged against unapplied defaults
+		 * with the gate still open.  The standing controls are immune
+		 * to this by their POSITIONAL pin on rows 1..2; this is the
+		 * same conversion of convention into property, one row later
+		 * (review follow-on to the existence check). */
+		if (first_uniform_row >= 0 && control_index > first_uniform_row) {
+			printf("shader-differential: manifest line order puts a uniform-dependent row (index %d) before the control-uniform row (index %d) — it would be judged before the gate can close; refusing\n",
+			       first_uniform_row, control_index);
 			return 0;
 		}
 	}
