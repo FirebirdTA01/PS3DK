@@ -384,6 +384,18 @@ struct FpShapeReads
     // matcher, so it belongs on the read side even though it is not a shape
     // binding.
     const std::unordered_map<IRValueID, int>& valueToTexUnit;
+
+    // Names and types the read-only predicates consult (carve step 6).  Same
+    // rule as valueToTexUnit: written during analysis, only ever read from a
+    // matcher, so the read side is where they belong.
+    const std::unordered_map<IRValueID, std::string>& valueToFpUniformName;
+    const std::unordered_map<IRValueID, std::string>& valueToTexSamplerName;
+    const std::unordered_map<IRValueID, IRTypeInfo>&  valueToType;
+
+    // The IR being lowered.  Several predicates ask it about a parameter or a
+    // global rather than about a shape binding.
+    const IRModule&   module;
+    const IRFunction& entry;
 };
 
 struct FpShapeContext
@@ -633,6 +645,86 @@ static bool tryEmitTexColorSpecular(FpShapeContext& ctx,
         }
     }
     return true;
+}
+
+// Read-only predicates converted out of lowerFragmentProgram (t_c44cc3b7,
+// carve step 6).  Each takes `const FpShapeReads&`, so the compiler refuses
+// any attempt to emit from one - this is the read side of the convention
+// step 5 made enforceable, applied for the first time beyond resolveSrcMods.
+//
+// They were six separate [&] lambdas at five different nesting depths, each
+// reachable only from the block it was declared in.  As free functions they
+// are reachable from every matcher, which is what lets the matchers that
+// call them move next.
+static bool floatLiteralValue(const FpShapeReads& reads, IRValueID id,
+                              float& outValue)
+{
+IRValue* v = reads.entry.getValue(id);
+auto* c = dynamic_cast<IRConstant*>(v);
+if (!c) return false;
+if (std::holds_alternative<float>(c->value))
+{
+    outValue = std::get<float>(c->value);
+    return true;
+}
+if (std::holds_alternative<int32_t>(c->value))
+{
+    outValue = static_cast<float>(std::get<int32_t>(c->value));
+    return true;
+}
+return false;
+}
+
+static bool uniformNameIs(const FpShapeReads& reads, IRValueID id,
+                          const char* name)
+{
+const IRValueID base = resolveSrcMods(reads, id).baseId;
+auto it = reads.valueToFpUniformName.find(base);
+return it != reads.valueToFpUniformName.end() &&
+       it->second == name;
+}
+
+static bool samplerNameIs(const FpShapeReads& reads, IRValueID id,
+                          const char* name)
+{
+const IRValueID base = resolveSrcMods(reads, id).baseId;
+auto it = reads.valueToTexSamplerName.find(base);
+return it != reads.valueToTexSamplerName.end() &&
+       it->second == name;
+}
+
+static bool entryHasUniformNamed(const FpShapeReads& reads, const char* name)
+{
+for (const auto& p : reads.entry.parameters)
+{
+    if (p.storage == StorageQualifier::Uniform &&
+        p.name == name)
+        return true;
+}
+for (const auto& g : reads.module.globals)
+{
+    if (g.storage == StorageQualifier::Uniform &&
+        g.name == name)
+        return true;
+}
+return false;
+}
+
+static IRValueID texBaseOf(const FpShapeReads& reads, IRValueID vid)
+{
+const IRValueID base = resolveSrcMods(reads, vid).baseId;
+return reads.valueToTex.count(base) ? base : 0;
+}
+
+static bool isScalarUniform(const FpShapeReads& reads, IRValueID id)
+{
+auto uIt = reads.valueToFpUniform.find(id);
+if (uIt == reads.valueToFpUniform.end()) return false;
+if (uIt->second < reads.entry.parameters.size())
+    return reads.entry.parameters[uIt->second].type.vectorSize <= 1;
+auto tyIt = reads.valueToType.find(id);
+return tyIt != reads.valueToType.end() &&
+       tyIt->second.vectorSize <= 1;
 }
 
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
@@ -1199,23 +1291,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         }
     }
 
-    auto floatLiteralValue = [&](IRValueID id, float& outValue) -> bool
-    {
-        IRValue* v = entry.getValue(id);
-        auto* c = dynamic_cast<IRConstant*>(v);
-        if (!c) return false;
-        if (std::holds_alternative<float>(c->value))
-        {
-            outValue = std::get<float>(c->value);
-            return true;
-        }
-        if (std::holds_alternative<int32_t>(c->value))
-        {
-            outValue = static_cast<float>(std::get<int32_t>(c->value));
-            return true;
-        }
-        return false;
-    };
 
     bool emittedSomething = false;
     // Set when a matcher finds an ambiguity it must not resolve by guessing.
@@ -1231,7 +1306,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         FpShapeReads{
             valueToInputSrc, valueToFpUniform, valueToTex,
             valueToGenericArith, valueToNormalize, valueToMaxDotZero,
-            valueToMod, valueToVaryingTexMul, valueToTexUnit
+            valueToMod, valueToVaryingTexMul, valueToTexUnit,
+            valueToFpUniformName, valueToTexSamplerName, valueToType,
+            module, entry
         },
         out, asm_,
         emittedTexResults, attrs,
@@ -1487,7 +1564,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     valueToMaxDotZero.count(inst.operands[0]))
                 {
                     float rhs = 0.0f;
-                    if (floatLiteralValue(inst.operands[1], rhs) && rhs == 0.0f)
+                    if (floatLiteralValue(shapeCtx.reads, inst.operands[1], rhs) && rhs == 0.0f)
                     {
                         valueToCmpLeMaxDotZero.insert(inst.result);
                         lastConditionalId = inst.result;
@@ -2409,26 +2486,16 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // W=1.0 + final MUL).  Commutative.
                 if (inst.op == IROp::Mul)
                 {
-                    auto isScalarUniform = [&](IRValueID id) -> bool
-                    {
-                        auto uIt = valueToFpUniform.find(id);
-                        if (uIt == valueToFpUniform.end()) return false;
-                        if (uIt->second < entry.parameters.size())
-                            return entry.parameters[uIt->second].type.vectorSize <= 1;
-                        auto tyIt = valueToType.find(id);
-                        return tyIt != valueToType.end() &&
-                               tyIt->second.vectorSize <= 1;
-                    };
                     auto aLit = valueToLiteralVec4.find(a);
                     auto bLit = valueToLiteralVec4.find(b);
                     const LiteralVec4* lit = nullptr;
                     IRValueID uniId = 0;
-                    if (aLit != valueToLiteralVec4.end() && isScalarUniform(b))
+                    if (aLit != valueToLiteralVec4.end() && isScalarUniform(shapeCtx.reads, b))
                     {
                         lit   = &aLit->second;
                         uniId = b;
                     }
-                    else if (bLit != valueToLiteralVec4.end() && isScalarUniform(a))
+                    else if (bLit != valueToLiteralVec4.end() && isScalarUniform(shapeCtx.reads, a))
                     {
                         lit   = &bLit->second;
                         uniId = a;
@@ -2890,7 +2957,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             [&](IRValueID dotId, IRValueID zeroId) -> bool
                         {
                             float zero = 0.0f;
-                            if (!floatLiteralValue(zeroId, zero) || zero != 0.0f)
+                            if (!floatLiteralValue(shapeCtx.reads, zeroId, zero) || zero != 0.0f)
                                 return false;
 
                             auto dotIt = valueToGenericArith.find(dotId);
@@ -2944,7 +3011,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 if (baseIt == valueToMaxDotZero.end()) break;
 
                 float exponent = 0.0f;
-                if (!floatLiteralValue(inst.operands[1], exponent)) break;
+                if (!floatLiteralValue(shapeCtx.reads, inst.operands[1], exponent)) break;
 
                 FpPowMaxDotLiteralBinding bind;
                 bind.base = baseIt->second;
@@ -7887,7 +7954,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     auto pickLiteral = [&](IRValueID rid, float expected) -> bool
                     {
                         float f = 0.0f;
-                        return floatLiteralValue(rid, f) && f == expected;
+                        return floatLiteralValue(shapeCtx.reads, rid, f) && f == expected;
                     };
 
                     IRValueID texMulId = 0;
@@ -8186,7 +8253,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     auto pickLiteral = [&](IRValueID rid, float expected) -> bool
                     {
                         float f = 0.0f;
-                        return floatLiteralValue(rid, f) && f == expected;
+                        return floatLiteralValue(shapeCtx.reads, rid, f) && f == expected;
                     };
 
                     IRValueID texMulId = 0;
@@ -9325,7 +9392,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             return false;
 
                         float w = 0.0f;
-                        if (!floatLiteralValue(gvIt->second.lanes[3], w) ||
+                        if (!floatLiteralValue(shapeCtx.reads, gvIt->second.lanes[3], w) ||
                             w != 1.0f)
                             return false;
                         colorVecId = gvIt->second.lanes[0];
@@ -9348,11 +9415,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return true;
                     };
 
-                    auto texBaseOf = [&](IRValueID vid) -> IRValueID
-                    {
-                        const IRValueID base = resolveSrcMods(shapeCtx.reads, vid).baseId;
-                        return valueToTex.count(base) ? base : 0;
-                    };
 
                     struct TexLightMul
                     {
@@ -9364,8 +9426,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         MulPair mp;
                         if (!getMulPair(mid, mp)) return false;
-                        const IRValueID texA = texBaseOf(mp.a);
-                        const IRValueID texB = texBaseOf(mp.b);
+                        const IRValueID texA = texBaseOf(shapeCtx.reads, mp.a);
+                        const IRValueID texB = texBaseOf(shapeCtx.reads, mp.b);
                         if (texA && valueToFpUniform.count(resolveSrcMods(shapeCtx.reads, mp.b).baseId))
                         {
                             outMul.texId = texA;
@@ -9429,7 +9491,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             !valueToCmpLeMaxDotZero.count(selIt->second.cmpId))
                             return false;
                         float zero = 0.0f;
-                        if (!floatLiteralValue(selIt->second.trueId, zero) ||
+                        if (!floatLiteralValue(shapeCtx.reads, selIt->second.trueId, zero) ||
                             zero != 0.0f ||
                             !valueToPowMaxDotLiteral.count(selIt->second.falseId))
                             return false;
@@ -9514,40 +9576,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                (a == bNorm && b == aNorm);
                     };
 
-                    auto uniformNameIs =
-                        [&](IRValueID id, const char* name) -> bool
-                    {
-                        const IRValueID base = resolveSrcMods(shapeCtx.reads, id).baseId;
-                        auto it = valueToFpUniformName.find(base);
-                        return it != valueToFpUniformName.end() &&
-                               it->second == name;
-                    };
 
-                    auto samplerNameIs =
-                        [&](IRValueID id, const char* name) -> bool
-                    {
-                        const IRValueID base = resolveSrcMods(shapeCtx.reads, id).baseId;
-                        auto it = valueToTexSamplerName.find(base);
-                        return it != valueToTexSamplerName.end() &&
-                               it->second == name;
-                    };
 
-                    auto entryHasUniformNamed = [&](const char* name) -> bool
-                    {
-                        for (const auto& p : entry.parameters)
-                        {
-                            if (p.storage == StorageQualifier::Uniform &&
-                                p.name == name)
-                                return true;
-                        }
-                        for (const auto& g : module.globals)
-                        {
-                            if (g.storage == StorageQualifier::Uniform &&
-                                g.name == name)
-                                return true;
-                        }
-                        return false;
-                    };
 
                     auto tryEmitBasicFragmentLighting = [&]() -> bool
                     {
@@ -9561,8 +9591,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             MulPair mp;
                             if (!getMulPair(mid, mp)) return false;
-                            const IRValueID texA = texBaseOf(mp.a);
-                            const IRValueID texB = texBaseOf(mp.b);
+                            const IRValueID texA = texBaseOf(shapeCtx.reads, mp.a);
+                            const IRValueID texB = texBaseOf(shapeCtx.reads, mp.b);
                             if (texA)
                             {
                                 outMul.texId = texA;
@@ -9608,14 +9638,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         IRValueID diffuseMaxId = 0;
                         IRValueID ambientId = 0;
                         if (valueToMaxDotZero.count(diffuseAddIt->second.srcIds[0]) &&
-                            uniformNameIs(diffuseAddIt->second.srcIds[1], "ambient"))
+                            uniformNameIs(shapeCtx.reads, diffuseAddIt->second.srcIds[1], "ambient"))
                         {
                             diffuseMaxId = diffuseAddIt->second.srcIds[0];
                             ambientId =
                                 resolveSrcMods(shapeCtx.reads, diffuseAddIt->second.srcIds[1]).baseId;
                         }
                         else if (valueToMaxDotZero.count(diffuseAddIt->second.srcIds[1]) &&
-                                 uniformNameIs(diffuseAddIt->second.srcIds[0], "ambient"))
+                                 uniformNameIs(shapeCtx.reads, diffuseAddIt->second.srcIds[0], "ambient"))
                         {
                             diffuseMaxId = diffuseAddIt->second.srcIds[1];
                             ambientId =
@@ -9624,12 +9654,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         else
                             return false;
 
-                        if (!entryHasUniformNamed("lightCol"))
+                        if (!entryHasUniformNamed(shapeCtx.reads, "lightCol"))
                             return false;
 
                         auto texIt3 = valueToTex.find(texDiffuse.texId);
                         if (texIt3 == valueToTex.end() ||
-                            !samplerNameIs(texIt3->second.samplerId, "diffuseMap"))
+                            !samplerNameIs(shapeCtx.reads, texIt3->second.samplerId, "diffuseMap"))
                             return false;
 
                         const SrcMod uvMods =
@@ -9687,7 +9717,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         IRValueID lightPosId = 0;
                         if (!matchUniformMinusPositionNormalize(
                                 lightNormId, posId, lightPosId) ||
-                            !uniformNameIs(lightPosId, "lightPos"))
+                            !uniformNameIs(shapeCtx.reads, lightPosId, "lightPos"))
                             return false;
 
                         IRValueID eyePosId = 0;
@@ -9724,7 +9754,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 // ambiguity unobservable in the first place.
                             }
                         }
-                        if (!eyeNormId || !uniformNameIs(eyePosId, "eyePosLocal"))
+                        if (!eyeNormId || !uniformNameIs(shapeCtx.reads, eyePosId, "eyePosLocal"))
                             return false;
 
                         auto posIt = valueToInputSrc.find(posId);
@@ -10834,7 +10864,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (lo.lane == 3)
                         {
                             float w = 0.0f;
-                            if (!floatLiteralValue(lo.scalarId, w) || w != 1.0f)
+                            if (!floatLiteralValue(shapeCtx.reads, lo.scalarId, w) || w != 1.0f)
                                 return 0;
                             continue;
                         }
@@ -10894,7 +10924,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             p2 != valueToPowMaxDotLiteral.end() &&
                             p1->first == p0->first &&
                             p2->first == p0->first &&
-                            floatLiteralValue(gv.lanes[3], w) &&
+                            floatLiteralValue(shapeCtx.reads, gv.lanes[3], w) &&
                             w == 1.0f)
                         {
                             const auto& bind = p0->second;
