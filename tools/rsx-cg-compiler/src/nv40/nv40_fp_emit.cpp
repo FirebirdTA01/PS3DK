@@ -1084,6 +1084,31 @@ if (seIt != reads.valueToScalarExtract.end() &&
 return -1;
 }
 
+// Two capture-free lambdas that were written out SEVEN times between three
+// emission blocks (t_c44cc3b7, carve step 11).  Unlike every conversion
+// before this one they capture NOTHING, so they need no context at all -
+// which is why they are plain free functions and not `FpShapeReads` takers.
+//
+// The seven: `src` (refract block, and again in tryEmitBasicFragmentLighting)
+// and `swzAll`/`swizzleAll` (same body, two names) collapse into these two;
+// `emitNone`/`noneSrc`/`noneSrc` were each just the first one applied to the
+// block's own NONE register, so they collapse into a call rather than into a
+// third helper.
+//
+// Bodies are the former lambdas VERBATIM, const_cast included.  That cast is
+// dead - nvfx_src takes its reg BY VALUE (nvfx_shader.h:636), so there is no
+// constness to cast away - but removing it is a behaviour argument, not a
+// motion, and this commit is a motion.  Filed on the board instead.
+static struct nvfx_src srcOfReg(const struct nvfx_reg& reg)
+{
+    return nvfx_src(const_cast<struct nvfx_reg&>(reg));
+}
+
+static void swizzleAllLanes(struct nvfx_src& s, int lane)
+{
+    s.swz[0] = s.swz[1] = s.swz[2] = s.swz[3] = lane;
+}
+
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
@@ -7439,16 +7464,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     const float e2 = e * e;
                     const float om = 1.0f - e2;
 
-                    auto src = [](const struct nvfx_reg& reg) {
-                        return nvfx_src(const_cast<struct nvfx_reg&>(reg));
-                    };
-                    auto swzAll = [](struct nvfx_src& s, int lane) {
-                        s.swz[0] = s.swz[1] = s.swz[2] = s.swz[3] = lane;
-                    };
-                    auto emitNone = [&]() {
-                        return nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    };
-
                     // #0 MOV R0.xyz = INPUT(I)
                     {
                         struct nvfx_insn in = nvfx_insn(
@@ -7456,7 +7471,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             const_cast<struct nvfx_reg&>(r0),
                             uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z),
-                            src(iReg), emitNone(), emitNone());
+                            srcOfReg(iReg), srcOfReg(none), srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
                     }
 
@@ -7467,18 +7482,18 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             const_cast<struct nvfx_reg&>(r1),
                             uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z),
-                            src(nReg), emitNone(), emitNone());
+                            srcOfReg(nReg), srcOfReg(none), srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
                     }
 
                     // #2 DP3 R1.w = dot(-R0, R1)
                     {
-                        struct nvfx_src s0 = src(r0);
+                        struct nvfx_src s0 = srcOfReg(r0);
                         s0.negate = 1;
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r1),
-                            NVFX_FP_MASK_W, s0, src(r1), emitNone());
+                            NVFX_FP_MASK_W, s0, srcOfReg(r1), srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_DP3);
                     }
 
@@ -7487,17 +7502,17 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r0),
-                            NVFX_FP_MASK_W, src(r1), src(r1), emitNone());
+                            NVFX_FP_MASK_W, srcOfReg(r1), srcOfReg(r1), srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
                     }
 
                     // #4 MAD R0.w = R0.w * e2 + (1 - e2)
                     {
-                        struct nvfx_src s0 = src(r0);
-                        struct nvfx_src s1 = src(constReg);
-                        swzAll(s1, 0);
-                        struct nvfx_src s2 = src(constReg);
-                        swzAll(s2, 1);
+                        struct nvfx_src s0 = srcOfReg(r0);
+                        struct nvfx_src s1 = srcOfReg(constReg);
+                        swizzleAllLanes(s1, 0);
+                        struct nvfx_src s2 = srcOfReg(constReg);
+                        swizzleAllLanes(s2, 1);
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r0),
@@ -7509,30 +7524,30 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     // #5 DIVRSQ R2.x = |R0.w| / sqrt(|R0.w|)
                     {
-                        struct nvfx_src s0 = src(r0);
-                        swzAll(s0, 3);
+                        struct nvfx_src s0 = srcOfReg(r0);
+                        swizzleAllLanes(s0, 3);
                         s0.abs = 1;
-                        struct nvfx_src s1 = src(r0);
-                        swzAll(s1, 3);
+                        struct nvfx_src s1 = srcOfReg(r0);
+                        swizzleAllLanes(s1, 3);
                         s1.abs = 1;
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r2),
-                            NVFX_FP_MASK_X, s0, s1, emitNone());
+                            NVFX_FP_MASK_X, s0, s1, srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX);
                     }
 
                     // #6 MAD R1.w = R1.w * e + -R2.x
                     {
-                        struct nvfx_src s1 = src(constReg);
-                        swzAll(s1, 0);
-                        struct nvfx_src s2 = src(r2);
-                        swzAll(s2, 0);
+                        struct nvfx_src s1 = srcOfReg(constReg);
+                        swizzleAllLanes(s1, 0);
+                        struct nvfx_src s2 = srcOfReg(r2);
+                        swizzleAllLanes(s2, 0);
                         s2.negate = 1;
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r1),
-                            NVFX_FP_MASK_W, src(r1), s1, s2);
+                            NVFX_FP_MASK_W, srcOfReg(r1), s1, s2);
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
                         const float block[4] = { e, 0.0f, 0.0f, 0.0f };
                         asm_.appendConstBlock(block);
@@ -7540,14 +7555,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     // #7 MUL R1.xyz = R1.wwww * R1.xyz
                     {
-                        struct nvfx_src s0 = src(r1);
-                        swzAll(s0, 3);
+                        struct nvfx_src s0 = srcOfReg(r1);
+                        swizzleAllLanes(s0, 3);
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(r1),
                             uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z),
-                            s0, src(r1), emitNone());
+                            s0, srcOfReg(r1), srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
                     }
 
@@ -7555,12 +7570,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         struct nvfx_reg h1 = nvfx_reg(NVFXSR_TEMP, 1);
                         h1.is_fp16 = 1;
-                        struct nvfx_src s0 = src(r0);
-                        struct nvfx_src s1 = src(constReg);
-                        swzAll(s1, 0);
+                        struct nvfx_src s0 = srcOfReg(r0);
+                        struct nvfx_src s1 = srcOfReg(constReg);
+                        swizzleAllLanes(s1, 0);
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
-                            h1, NVFX_FP_MASK_W, s0, s1, emitNone());
+                            h1, NVFX_FP_MASK_W, s0, s1, srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_SGT);
                         const float block[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
                         asm_.appendConstBlock(block);
@@ -7568,14 +7583,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     // #9 MAD R0.xyz = R0.xyz * e + R1.xyz
                     {
-                        struct nvfx_src s1 = src(constReg);
-                        swzAll(s1, 0);
+                        struct nvfx_src s1 = srcOfReg(constReg);
+                        swizzleAllLanes(s1, 0);
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(dstReg),
                             uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z),
-                            src(r0), s1, src(r1));
+                            srcOfReg(r0), s1, srcOfReg(r1));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
                         const float block[4] = { e, 0.0f, 0.0f, 0.0f };
                         asm_.appendConstBlock(block);
@@ -7588,25 +7603,25 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         struct nvfx_reg h1 = nvfx_reg(NVFXSR_TEMP, 1);
                         h1.is_fp16 = 1;
-                        struct nvfx_src s1 = src(h1);
-                        swzAll(s1, 3);
+                        struct nvfx_src s1 = srcOfReg(h1);
+                        swizzleAllLanes(s1, 3);
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(dstReg),
                             uint8_t(NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z),
-                            src(dstReg), s1, emitNone());
+                            srcOfReg(dstReg), s1, srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MUL);
                     }
 
                     // #12 MOV R0.w = 1.0
                     {
-                        struct nvfx_src s0 = src(constReg);
-                        swzAll(s0, 0);
+                        struct nvfx_src s0 = srcOfReg(constReg);
+                        swizzleAllLanes(s0, 0);
                         struct nvfx_insn in = nvfx_insn(
                             0, 0, -1, -1,
                             const_cast<struct nvfx_reg&>(dstReg),
-                            NVFX_FP_MASK_W, s0, emitNone(), emitNone());
+                            NVFX_FP_MASK_W, s0, srcOfReg(none), srcOfReg(none));
                         asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
                         const float block[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
                         asm_.appendConstBlock(block);
@@ -9836,15 +9851,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         const struct nvfx_reg noneReg =
                             nvfx_reg(NVFXSR_NONE, 0);
 
-                        auto noneSrc = [&]() {
-                            return nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
-                        };
-                        auto src = [](const struct nvfx_reg& reg) {
-                            return nvfx_src(const_cast<struct nvfx_reg&>(reg));
-                        };
-                        auto swizzleAll = [](struct nvfx_src& s, int lane) {
-                            s.swz[0] = s.swz[1] = s.swz[2] = s.swz[3] = lane;
-                        };
                         auto emitRaw = [&](uint8_t opcode,
                                            const struct nvfx_reg& dst,
                                            uint8_t mask,
@@ -9867,142 +9873,142 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         emitRaw(NVFX_FP_OP_OPCODE_MOV, r1,
                                 NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                 NVFX_FP_MASK_Z,
-                                src(posReg), noneSrc(), noneSrc());
+                                srcOfReg(posReg), srcOfReg(noneReg), srcOfReg(noneReg));
 
                         // ADDR R2.xyz, -R1, lightPos
                         {
-                            struct nvfx_src s0 = src(r1);
+                            struct nvfx_src s0 = srcOfReg(r1);
                             s0.negate = 1;
                             emitRaw(NVFX_FP_OP_OPCODE_ADD, r2,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     s0, makeGenericNvfxSrc(lightPosSrc),
-                                    noneSrc());
+                                    srcOfReg(noneReg));
                             appendGenericInlineSource(lightPosSrc);
                         }
 
                         // DP3R R2.w, R2, R2
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r2, NVFX_FP_MASK_W,
-                                src(r2), src(r2), noneSrc());
+                                srcOfReg(r2), srcOfReg(r2), srcOfReg(noneReg));
 
                         // ADDR R1.xyz, -R1, eyePosLocal
                         {
-                            struct nvfx_src s0 = src(r1);
+                            struct nvfx_src s0 = srcOfReg(r1);
                             s0.negate = 1;
                             emitRaw(NVFX_FP_OP_OPCODE_ADD, r1,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     s0, makeGenericNvfxSrc(eyePosSrc),
-                                    noneSrc());
+                                    srcOfReg(noneReg));
                             appendGenericInlineSource(eyePosSrc);
                         }
 
                         // DIVSQR R2.xyz, R2, R2.w
                         {
-                            struct nvfx_src len = src(r2);
-                            swizzleAll(len, 3);
+                            struct nvfx_src len = srcOfReg(r2);
+                            swizzleAllLanes(len, 3);
                             emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r2,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
-                                    src(r2), len, noneSrc());
+                                    srcOfReg(r2), len, srcOfReg(noneReg));
                         }
 
                         // DP3R R0.y, R1, R1
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_Y,
-                                src(r1), src(r1), noneSrc());
+                                srcOfReg(r1), srcOfReg(r1), srcOfReg(noneReg));
 
                         // DIVSQR R1.xyz, R1, R0.y
                         {
-                            struct nvfx_src len = src(r0);
-                            swizzleAll(len, 1);
+                            struct nvfx_src len = srcOfReg(r0);
+                            swizzleAllLanes(len, 1);
                             emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r1,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
-                                    src(r1), len, noneSrc());
+                                    srcOfReg(r1), len, srcOfReg(noneReg));
                         }
 
                         // ADDR R1.xyz, R2, R1
                         emitRaw(NVFX_FP_OP_OPCODE_ADD, r1,
                                 NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                 NVFX_FP_MASK_Z,
-                                src(r2), src(r1), noneSrc());
+                                srcOfReg(r2), srcOfReg(r1), srcOfReg(noneReg));
 
                         // DP3R R0.x, g[TEX2], g[TEX2]
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_X,
-                                src(normalReg), src(normalReg), noneSrc(),
+                                srcOfReg(normalReg), srcOfReg(normalReg), srcOfReg(noneReg),
                                 FLOAT32, 1);
 
                         // DP3R R0.w, R1, R1
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_W,
-                                src(r1), src(r1), noneSrc());
+                                srcOfReg(r1), srcOfReg(r1), srcOfReg(noneReg));
 
                         // DIVSQR R0.xyz, g[TEX2], R0.x
                         {
-                            struct nvfx_src len = src(r0);
+                            struct nvfx_src len = srcOfReg(r0);
                             emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r0,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
-                                    src(normalReg), len, noneSrc(),
+                                    srcOfReg(normalReg), len, srcOfReg(noneReg),
                                     FLOAT32, 1);
                         }
 
                         // DIVSQR R1.xyz, R1, R0.w
                         {
-                            struct nvfx_src len = src(r0);
-                            swizzleAll(len, 3);
+                            struct nvfx_src len = srcOfReg(r0);
+                            swizzleAllLanes(len, 3);
                             emitRaw(NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX, r1,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
-                                    src(r1), len, noneSrc());
+                                    srcOfReg(r1), len, srcOfReg(noneReg));
                         }
 
                         // DP3R R1.x, R0, R1
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r1, NVFX_FP_MASK_X,
-                                src(r0), src(r1), noneSrc(), FLOAT32, 1);
+                                srcOfReg(r0), srcOfReg(r1), srcOfReg(noneReg), FLOAT32, 1);
 
                         // MAXR R0.w, R1.x, {0}.x
                         {
-                            struct nvfx_src s0 = src(r1);
-                            swizzleAll(s0, 0);
-                            struct nvfx_src s1 = src(constReg);
-                            swizzleAll(s1, 0);
+                            struct nvfx_src s0 = srcOfReg(r1);
+                            swizzleAllLanes(s0, 0);
+                            struct nvfx_src s1 = srcOfReg(constReg);
+                            swizzleAllLanes(s1, 0);
                             emitRaw(NVFX_FP_OP_OPCODE_MAX, r0, NVFX_FP_MASK_W,
-                                    s0, s1, noneSrc());
+                                    s0, s1, srcOfReg(noneReg));
                             const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
                             asm_.appendConstBlock(zero);
                         }
 
                         // DP3R R0.x, R0, R2
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_X,
-                                src(r0), src(r2), noneSrc());
+                                srcOfReg(r0), srcOfReg(r2), srcOfReg(noneReg));
 
                         // LG2R R0.y, R0.w
                         {
-                            struct nvfx_src s0 = src(r0);
-                            swizzleAll(s0, 3);
+                            struct nvfx_src s0 = srcOfReg(r0);
+                            swizzleAllLanes(s0, 3);
                             emitRaw(NVFX_FP_OP_OPCODE_LG2, r0, NVFX_FP_MASK_Y,
-                                    s0, noneSrc(), noneSrc());
+                                    s0, srcOfReg(noneReg), srcOfReg(noneReg));
                         }
 
                         // MAXR R0.x, R0.x, {0}.x
                         {
-                            struct nvfx_src s0 = src(r0);
-                            struct nvfx_src s1 = src(constReg);
-                            swizzleAll(s1, 0);
+                            struct nvfx_src s0 = srcOfReg(r0);
+                            struct nvfx_src s1 = srcOfReg(constReg);
+                            swizzleAllLanes(s1, 0);
                             emitRaw(NVFX_FP_OP_OPCODE_MAX, r0, NVFX_FP_MASK_X,
-                                    s0, s1, noneSrc());
+                                    s0, s1, srcOfReg(noneReg));
                             const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
                             asm_.appendConstBlock(zero);
                         }
 
                         // MULR R0.w, R0.y, {0, 17.8954, 0, 0}.y
                         {
-                            struct nvfx_src s0 = src(r0);
-                            swizzleAll(s0, 1);
-                            struct nvfx_src s1 = src(constReg);
-                            swizzleAll(s1, 1);
+                            struct nvfx_src s0 = srcOfReg(r0);
+                            swizzleAllLanes(s0, 1);
+                            struct nvfx_src s1 = srcOfReg(constReg);
+                            swizzleAllLanes(s1, 1);
                             emitRaw(NVFX_FP_OP_OPCODE_MUL, r0, NVFX_FP_MASK_W,
-                                    s0, s1, noneSrc());
+                                    s0, s1, srcOfReg(noneReg));
                             const float exponent[4] =
                                 {0.0f, powIt2->second.exponent, 0.0f, 0.0f};
                             asm_.appendConstBlock(exponent);
@@ -10014,7 +10020,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             struct nvfx_insn in = nvfx_insn(
                                 0, 0, -1, -1,
                                 ccDst, NVFX_FP_MASK_X,
-                                src(r0), noneSrc(), noneSrc());
+                                srcOfReg(r0), srcOfReg(noneReg), srcOfReg(noneReg));
                             in.cc_update = 1;
                             in.precision = 2;
                             asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
@@ -10022,25 +10028,25 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                         // ADDR R1.xyz, R0.x, ambient
                         {
-                            struct nvfx_src s0 = src(r0);
-                            swizzleAll(s0, 0);
+                            struct nvfx_src s0 = srcOfReg(r0);
+                            swizzleAllLanes(s0, 0);
                             emitRaw(NVFX_FP_OP_OPCODE_ADD, r1,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     s0, makeGenericNvfxSrc(ambientSrc),
-                                    noneSrc());
+                                    srcOfReg(noneReg));
                             appendGenericInlineSource(ambientSrc);
                         }
 
                         // EX2R R1.w(GT.x), R0.w
                         {
-                            struct nvfx_src s0 = src(r0);
-                            swizzleAll(s0, 3);
+                            struct nvfx_src s0 = srcOfReg(r0);
+                            swizzleAllLanes(s0, 3);
                             struct nvfx_insn in = nvfx_insn(
                                 0, 0, -1, -1,
                                 const_cast<struct nvfx_reg&>(r1),
                                 NVFX_FP_MASK_W,
-                                s0, noneSrc(), noneSrc());
+                                s0, srcOfReg(noneReg), srcOfReg(noneReg));
                             in.precision = FLOAT32;
                             in.cc_cond = NVFX_COND_GT;
                             in.cc_swz[0] = in.cc_swz[1] =
@@ -10059,21 +10065,21 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                         // MADR oColor.xyz, R0, R1, R1.w
                         {
-                            struct nvfx_src s2 = src(r1);
-                            swizzleAll(s2, 3);
+                            struct nvfx_src s2 = srcOfReg(r1);
+                            swizzleAllLanes(s2, 3);
                             emitRaw(NVFX_FP_OP_OPCODE_MAD, dstReg,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
-                                    src(r0), src(r1), s2, dstPrecision);
+                                    srcOfReg(r0), srcOfReg(r1), s2, dstPrecision);
                         }
 
                         // MOVR oColor.w, {1,0,0,0}.x
                         {
-                            struct nvfx_src s0 = src(constReg);
-                            swizzleAll(s0, 0);
+                            struct nvfx_src s0 = srcOfReg(constReg);
+                            swizzleAllLanes(s0, 0);
                             emitRaw(NVFX_FP_OP_OPCODE_MOV, dstReg,
                                     NVFX_FP_MASK_W,
-                                    s0, noneSrc(), noneSrc(), dstPrecision);
+                                    s0, srcOfReg(noneReg), srcOfReg(noneReg), dstPrecision);
                             const float one[4] = {1.0f, 0.0f, 0.0f, 0.0f};
                             asm_.appendConstBlock(one);
                         }
@@ -10271,16 +10277,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             asm_.emit(in, opcode);
                         };
 
-                        auto noneSrc = [&]() {
-                            return nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
-                        };
-
                         // MOV R1.xyz, position.xyz
                         emitRaw(NVFX_FP_OP_OPCODE_MOV, r1,
                                 NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                 NVFX_FP_MASK_Z,
                                 nvfx_src(const_cast<struct nvfx_reg&>(posReg)),
-                                noneSrc(), noneSrc());
+                                srcOfReg(noneReg), srcOfReg(noneReg));
 
                         // ADD R0.xyz, -R1, lightPos
                         {
@@ -10291,7 +10293,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     s0, makeGenericNvfxSrc(lightPosSrc),
-                                    noneSrc());
+                                    srcOfReg(noneReg));
                             appendGenericInlineSource(lightPosSrc);
                         }
 
@@ -10299,7 +10301,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r1, NVFX_FP_MASK_W,
                                 nvfx_src(const_cast<struct nvfx_reg&>(r0)),
                                 nvfx_src(const_cast<struct nvfx_reg&>(r0)),
-                                noneSrc());
+                                srcOfReg(noneReg));
 
                         // ADD R2.xyz, -R1, eyePos
                         {
@@ -10310,7 +10312,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     s0, makeGenericNvfxSrc(eyePosSrc),
-                                    noneSrc());
+                                    srcOfReg(noneReg));
                             appendGenericInlineSource(eyePosSrc);
                         }
 
@@ -10324,14 +10326,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     nvfx_src(const_cast<struct nvfx_reg&>(r0)),
-                                    len, noneSrc());
+                                    len, srcOfReg(noneReg));
                         }
 
                         // DP3 R1.w, R2, R2
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r1, NVFX_FP_MASK_W,
                                 nvfx_src(const_cast<struct nvfx_reg&>(r2)),
                                 nvfx_src(const_cast<struct nvfx_reg&>(r2)),
-                                noneSrc());
+                                srcOfReg(noneReg));
 
                         // DIVRSQ R2.xyz, R2, R1.wwww
                         {
@@ -10343,7 +10345,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     nvfx_src(const_cast<struct nvfx_reg&>(r2)),
-                                    len, noneSrc());
+                                    len, srcOfReg(noneReg));
                         }
 
                         // ADD R2.xyz, R1, R2
@@ -10352,19 +10354,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 NVFX_FP_MASK_Z,
                                 nvfx_src(const_cast<struct nvfx_reg&>(r1)),
                                 nvfx_src(const_cast<struct nvfx_reg&>(r2)),
-                                noneSrc());
+                                srcOfReg(noneReg));
 
                         // DP3 R0.w, normal, normal
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_W,
                                 nvfx_src(const_cast<struct nvfx_reg&>(normalReg)),
                                 nvfx_src(const_cast<struct nvfx_reg&>(normalReg)),
-                                noneSrc(), false, FLOAT32, 1);
+                                srcOfReg(noneReg), false, FLOAT32, 1);
 
                         // DP3 R1.w, R2, R2
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r1, NVFX_FP_MASK_W,
                                 nvfx_src(const_cast<struct nvfx_reg&>(r2)),
                                 nvfx_src(const_cast<struct nvfx_reg&>(r2)),
-                                noneSrc());
+                                srcOfReg(noneReg));
 
                         // DIVRSQ R0.xyz, normal, R0.wwww
                         {
@@ -10376,14 +10378,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     nvfx_src(const_cast<struct nvfx_reg&>(normalReg)),
-                                    len, noneSrc(), false, FLOAT32, 1);
+                                    len, srcOfReg(noneReg), false, FLOAT32, 1);
                         }
 
                         // DP3 R0.w, normalDir, lightDir
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_W,
                                 nvfx_src(const_cast<struct nvfx_reg&>(r0)),
                                 nvfx_src(const_cast<struct nvfx_reg&>(r1)),
-                                noneSrc());
+                                srcOfReg(noneReg));
 
                         // DIVRSQ R2.xyz, halfVec, R1.wwww
                         {
@@ -10395,14 +10397,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     nvfx_src(const_cast<struct nvfx_reg&>(r2)),
-                                    len, noneSrc());
+                                    len, srcOfReg(noneReg));
                         }
 
                         // DP3 R0.x, normalDir, halfDir
                         emitRaw(NVFX_FP_OP_OPCODE_DP3, r0, NVFX_FP_MASK_X,
                                 nvfx_src(const_cast<struct nvfx_reg&>(r0)),
                                 nvfx_src(const_cast<struct nvfx_reg&>(r2)),
-                                noneSrc());
+                                srcOfReg(noneReg));
 
                         // MAX R0.w, R0.w, 0
                         {
@@ -10412,7 +10414,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             s1.swz[2] = s1.swz[3] = 0;
                             emitRaw(NVFX_FP_OP_OPCODE_MAX, r0, NVFX_FP_MASK_W,
                                     nvfx_src(const_cast<struct nvfx_reg&>(r0)),
-                                    s1, noneSrc());
+                                    s1, srcOfReg(noneReg));
                             const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
                             asm_.appendConstBlock(zero);
                         }
@@ -10428,7 +10430,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             s1.swz[0] = s1.swz[1] =
                             s1.swz[2] = s1.swz[3] = 0;
                             emitRaw(NVFX_FP_OP_OPCODE_MAX, r2, NVFX_FP_MASK_W,
-                                    s0, s1, noneSrc());
+                                    s0, s1, srcOfReg(noneReg));
                             const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
                             asm_.appendConstBlock(zero);
                         }
@@ -10442,7 +10444,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             s0.swz[0] = s0.swz[1] =
                             s0.swz[2] = s0.swz[3] = 0;
                             emitRaw(NVFX_FP_OP_OPCODE_MOV, r2, NVFX_FP_MASK_X,
-                                    s0, noneSrc(), noneSrc());
+                                    s0, srcOfReg(noneReg), srcOfReg(noneReg));
                             const float zero[4] =
                                 {0.0f, 0.0f, 0.0f, 0.0f};
                             asm_.appendConstBlock(zero);
@@ -10455,7 +10457,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             s0.swz[0] = s0.swz[1] =
                             s0.swz[2] = s0.swz[3] = 3;
                             emitRaw(NVFX_FP_OP_OPCODE_LG2, r2, NVFX_FP_MASK_Y,
-                                    s0, noneSrc(), noneSrc());
+                                    s0, srcOfReg(noneReg), srcOfReg(noneReg));
                         }
 
                         // MOVXC RC.x, R0.w
@@ -10468,7 +10470,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             struct nvfx_insn in = nvfx_insn(
                                 0, 0, -1, -1,
                                 ccDst, NVFX_FP_MASK_X,
-                                s0, noneSrc(), noneSrc());
+                                s0, srcOfReg(noneReg), srcOfReg(noneReg));
                             in.cc_update = 1;
                             in.precision = 2;
                             asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
@@ -10500,7 +10502,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             struct nvfx_src s1 =
                                 nvfx_src(const_cast<struct nvfx_reg&>(constReg));
                             emitRaw(NVFX_FP_OP_OPCODE_MUL, r1, NVFX_FP_MASK_W,
-                                    s0, s1, noneSrc());
+                                    s0, s1, srcOfReg(noneReg));
                             const float exponentW[4] =
                                 {0.0f, 0.0f, 0.0f, powIt->second.exponent};
                             asm_.appendConstBlock(exponentW);
@@ -10516,7 +10518,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_Z,
                                     s0, makeGenericNvfxSrc(ambientSrc),
-                                    noneSrc(), true);
+                                    srcOfReg(noneReg), true);
                             appendGenericInlineSource(ambientSrc);
                         }
 
@@ -10530,7 +10532,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 0, 0, -1, -1,
                                 const_cast<struct nvfx_reg&>(r2),
                                 NVFX_FP_MASK_X,
-                                s0, noneSrc(), noneSrc());
+                                s0, srcOfReg(noneReg), srcOfReg(noneReg));
                             in.precision = FLOAT32;
                             in.cc_cond = NVFX_COND_GT;
                             in.cc_swz[0] = in.cc_swz[1] =
@@ -10551,7 +10553,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             emitRaw(NVFX_FP_OP_OPCODE_MUL, r0,
                                     NVFX_FP_MASK_X | NVFX_FP_MASK_Y |
                                     NVFX_FP_MASK_W,
-                                    s0, s1, noneSrc());
+                                    s0, s1, srcOfReg(noneReg));
                         }
 
                         // MAD o.xyz, R2.x, specFactor, R0.xyw
@@ -10581,7 +10583,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             s0.swz[0] = s0.swz[1] =
                             s0.swz[2] = s0.swz[3] = 1;
                             emitRaw(NVFX_FP_OP_OPCODE_MOV, dstReg,
-                                    NVFX_FP_MASK_W, s0, noneSrc(), noneSrc(),
+                                    NVFX_FP_MASK_W, s0, srcOfReg(noneReg), srcOfReg(noneReg),
                                     false, dstPrecision);
                             const float oneY[4] =
                                 {0.0f, 1.0f, 0.0f, 0.0f};
