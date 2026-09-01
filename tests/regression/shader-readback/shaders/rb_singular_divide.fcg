@@ -1,0 +1,18 @@
+// shader-readback singular divide row -- zero-denominator hardware witness.
+//
+// At the default probe pixel u is exactly 0.5/64, so the denominator is zero.
+// The PPU mirror takes the IEEE infinity path, which saturates to white in the
+// 8-bit readback comparison.  That cannot distinguish infinity from a large
+// finite value, but it does rule out the zero/NaN cases that would make the
+// ternary blend rows vacuous.  Alpha is 0.5 so a zero/NaN result cannot be
+// mistaken for the opaque-black sentinel.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float u = in_texcoord.x;
+    float probe_u = 0.0078125f;
+    float r = 0.25f / (u - probe_u);
+    out_color = float4(r, r, r, 0.5f);
+}

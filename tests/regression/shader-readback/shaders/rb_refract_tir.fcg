@@ -1,0 +1,14 @@
+// shader-readback refract row 1 -- total internal reflection.
+//
+// I=(1,0,0), N=(0,-1,0), eta=2 gives d=0 and k=1-eta^2=-3
+// everywhere, so refract must return zero.  Alpha keeps the expected
+// color away from the readback sentinels.
+
+void main(
+    out float4 out_color : COLOR)
+{
+    float3 I = float3(1.0f, 0.0f, 0.0f);
+    float3 N = float3(0.0f, -1.0f, 0.0f);
+    float3 r = refract(I, N, 2.0f);
+    out_color = float4(r, 0.5f);
+}

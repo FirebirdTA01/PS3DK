@@ -1,0 +1,14 @@
+// shader-readback refract row 3 -- ordinary k>0 refraction.
+//
+// I=(1,0,0), N=(0,-1,0), eta=0.5 gives d=0 and k=0.75
+// everywhere.  This complements the TIR and k==0 rows with the normal
+// finite arm of the lowering.
+
+void main(
+    out float4 out_color : COLOR)
+{
+    float3 I = float3(1.0f, 0.0f, 0.0f);
+    float3 N = float3(0.0f, -1.0f, 0.0f);
+    float3 r = refract(I, N, 0.5f);
+    out_color = float4(r, 0.5f);
+}

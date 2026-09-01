@@ -1,0 +1,25 @@
+// shader-readback ops row -- slice A/B straight-line lowering.
+//
+// Covers add-then-compare predicates, select, vector divide, and a
+// negative trunc staircase in one PPU-mirrored row.  The quarter-pixel
+// compare offsets keep every 64x64 pixel center away from equality
+// boundaries.  Built through --general-lowering by CMake because the
+// default path still refuses several of these shapes.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float2 uv = in_texcoord.xy;
+    float quarter_pixel = 0.00390625f;
+    float2 cmp = float2(uv.x + quarter_pixel <= uv.y,
+                        uv.x > uv.y + quarter_pixel);
+    float2 picked = cmp.x > 0.5f ? uv : uv.yx;
+    float2 q = uv / float2(2.0f, 4.0f);
+    float stair = trunc(uv.x * 4.0f - 2.0f) * 0.25f + 0.5f;
+
+    out_color = float4(picked.x,
+                       q.y,
+                       stair + cmp.y * 0.0625f,
+                       1.0f);
+}

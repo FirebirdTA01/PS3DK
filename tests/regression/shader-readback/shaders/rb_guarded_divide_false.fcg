@@ -1,0 +1,20 @@
+// shader-readback guarded divide row 1 -- statement branch, false arm selected.
+//
+// At the default probe pixel u is exactly 0.5/64, so the then arm divides by
+// zero there.  The statement if/else shape forces frontend control flow; CF-1b
+// predicated select lowering must leave the finite nonzero else value untouched.
+// Alpha is 0.5 so a corrupted black color cannot be mistaken for the sentinel.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float u = in_texcoord.x;
+    float probe_u = 0.0078125f;
+    float r;
+    if (u > 0.5f)
+        r = 0.25f / (u - probe_u);
+    else
+        r = 0.125f;
+    out_color = float4(r, r, r, 0.5f);
+}

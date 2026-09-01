@@ -46,6 +46,16 @@
 #include "rb_interp_fpo.h"
 #include "rb_arith_fpo.h"
 #include "rb_angles_fpo.h"
+#include "rb_ops_fpo.h"
+#include "rb_refract_tir_fpo.h"
+#include "rb_refract_k0_fpo.h"
+#include "rb_refract_pass_fpo.h"
+#include "rb_refract_oblique_fpo.h"
+#include "rb_guarded_divide_false_fpo.h"
+#include "rb_guarded_divide_true_fpo.h"
+#include "rb_ternary_divide_false_fpo.h"
+#include "rb_ternary_divide_true_fpo.h"
+#include "rb_singular_divide_fpo.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -60,6 +70,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define CLEAR_SENTINEL 0xFF000000u  /* opaque black: no test expects it */
 #define GPU_CLEAR_MARK 0xFF102030u  /* GPU-clear control color, see run_test */
 #define TOLERANCE 3                 /* per-channel, 8-bit steps */
+#define PROBE_U (0.5f / (float)RT_W)
 
 typedef struct {
 	float pos[2];
@@ -99,7 +110,7 @@ static void expect_interp(float u, float v, float out[4])
 	out[0] = u; out[1] = v; out[2] = 0.0f; out[3] = 1.0f;
 }
 
-static float saturatef(float x) { return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x); }
+static float saturatef(float x) { return x != x ? 0.0f : (x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x)); }
 
 static void expect_arith(float u, float v, float out[4])
 {
@@ -145,6 +156,123 @@ static void expect_angles(float u, float v, float out[4])
 	out[1] = (v * 0.0125f) * 57.295779513082320876f;
 	out[2] = 0.0f;
 	out[3] = 1.0f;
+}
+
+static void expect_ops(float u, float v, float out[4])
+{
+	const float quarter_pixel = 0.00390625f;
+	float picked_x = (u + quarter_pixel <= v) ? u : v;
+	float q_y = v / 4.0f;
+	float stair = truncf(u * 4.0f - 2.0f) * 0.25f + 0.5f;
+	float gt_bias = (u > v + quarter_pixel) ? 0.0625f : 0.0f;
+
+	out[0] = picked_x;
+	out[1] = q_y;
+	out[2] = stair + gt_bias;
+	out[3] = 1.0f;
+}
+
+static void expect_refract_case(float eta, const float i[3], const float n[3],
+				float out[4])
+{
+	float d = n[0] * i[0] + n[1] * i[1] + n[2] * i[2];
+	float k = 1.0f - eta * eta * (1.0f - d * d);
+	float r[3] = { 0.0f, 0.0f, 0.0f };
+
+	if (k >= 0.0f) {
+		float c = eta * d + sqrtf(k);
+		for (int lane = 0; lane < 3; lane++)
+			r[lane] = eta * i[lane] - c * n[lane];
+	}
+
+	out[0] = r[0];
+	out[1] = r[1];
+	out[2] = r[2];
+	out[3] = 0.5f;
+}
+
+static void expect_refract_eta(float eta, float out[4])
+{
+	/* The first three refract shaders use I=(1,0,0), N=(0,-1,0),
+	 * so d=dot(N,I) is exactly zero and k = 1 - eta^2.  This makes
+	 * those rows isolate the cases the differential rig cannot
+	 * adjudicate for us: k<0 total internal reflection, k==0 critical
+	 * angle, and k>0 ordinary refraction.  The ordinary row's y term
+	 * is positive with this normal orientation, so the shader writes
+	 * refract directly instead of measuring an unrelated post-refract
+	 * bias MAD.  Alpha is 0.5 so the TIR row's zero vector cannot
+	 * collide with CLEAR_SENTINEL. */
+	const float i[3] = { 1.0f, 0.0f, 0.0f };
+	const float n[3] = { 0.0f, -1.0f, 0.0f };
+	expect_refract_case(eta, i, n, out);
+}
+
+static void expect_refract_tir(float u, float v, float out[4])
+{
+	(void)u;
+	(void)v;
+	expect_refract_eta(2.0f, out);
+}
+
+static void expect_refract_k0(float u, float v, float out[4])
+{
+	(void)u;
+	(void)v;
+	expect_refract_eta(1.0f, out);
+}
+
+static void expect_refract_pass(float u, float v, float out[4])
+{
+	(void)u;
+	(void)v;
+	expect_refract_eta(0.5f, out);
+}
+
+static void expect_refract_oblique(float u, float v, float out[4])
+{
+	(void)u;
+	(void)v;
+	/* d=dot(N,I) is -0.5 here, so eta*d is visible in the coefficient
+	 * c = eta*d + sqrt(k).  A lowering that drops the eta*d term
+	 * would produce a different color while staying in the finite k>0
+	 * region. */
+	const float i[3] = { 1.0f, 0.0f, 0.0f };
+	const float n[3] = { -0.5f, -0.8660254037844386f, 0.0f };
+	expect_refract_case(0.5f, i, n, out);
+}
+
+static void expect_divide_false(float u, float v, float out[4])
+{
+	(void)v;
+	float r = (u > 0.5f) ? 0.25f / (u - PROBE_U) : 0.125f;
+
+	out[0] = r;
+	out[1] = r;
+	out[2] = r;
+	out[3] = 0.5f;
+}
+
+static void expect_divide_true(float u, float v, float out[4])
+{
+	(void)v;
+	float r = (u < 0.5f) ? 0.25f / (1.0f - u)
+	                     : 0.25f / (u - PROBE_U);
+
+	out[0] = r;
+	out[1] = r;
+	out[2] = r;
+	out[3] = 0.5f;
+}
+
+static void expect_singular_divide(float u, float v, float out[4])
+{
+	(void)v;
+	float r = 0.25f / (u - PROBE_U);
+
+	out[0] = r;
+	out[1] = r;
+	out[2] = r;
+	out[3] = 0.5f;
 }
 
 /* ---- RSX local-memory bump allocator (see render-to-texture) ---- */
@@ -573,6 +701,48 @@ int main(int argc, const char **argv)
 		{ "interp", rb_interp_fpo, expect_interp, NULL, NULL, 0, 0 },
 		{ "arith",  rb_arith_fpo,  expect_arith,  NULL, NULL, 0, 0 },
 		{ "angles", rb_angles_fpo, expect_angles, NULL, NULL, 0, 0 },
+		/* These fragment-side rows are built through the general
+		 * lowering path in CMake because that is the opt-in lowering
+		 * whose correctness this battery measures.  The refract rows
+		 * use absolute PPU-computed truth, not diff-harness
+		 * comparison: k==0 is a deliberate divergence from the other
+		 * side's strict-greater boundary, and TIR is the case where a
+		 * contaminating select would leak the untaken arm. */
+		{ "ops", rb_ops_fpo, expect_ops, NULL, NULL, 7, 3 },
+		{ "refract-tir", rb_refract_tir_fpo, expect_refract_tir, NULL, NULL, 0, 0 },
+		{ "refract-k0", rb_refract_k0_fpo, expect_refract_k0, NULL, NULL, 0, 0 },
+		{ "refract-pass", rb_refract_pass_fpo, expect_refract_pass, NULL, NULL, 0, 0 },
+		{ "refract-oblique", rb_refract_oblique_fpo, expect_refract_oblique, NULL, NULL, 0, 0 },
+		/* These statement if/else rows are CF-1b's pixel-level
+		 * predicated-select witness.  Their untaken arm is singular
+		 * at the default probe pixel, so lowering through an
+		 * arithmetic blend would contaminate an otherwise finite
+		 * result.  Alpha is 0.5 so a corrupted black color cannot be
+		 * mistaken for the opaque-black transfer sentinel. */
+		{ "guarded-divide-false", rb_guarded_divide_false_fpo,
+		  expect_divide_false, NULL, NULL, 0, 0 },
+		{ "guarded-divide-true", rb_guarded_divide_true_fpo,
+		  expect_divide_true, NULL, NULL, 0, 0 },
+		/* These expression-ternary rows stay single-block today and
+		 * therefore record t_4db7d191's open hardware/RPCS3 question:
+		 * does the arithmetic blend path actually poison pixels when
+		 * the untaken arm is singular?  The true row is the robust
+		 * witness even if the singular arm is a large finite value;
+		 * the false row only distinguishes contamination if the
+		 * singular arm is non-finite. */
+		{ "ternary-divide-false", rb_ternary_divide_false_fpo,
+		  expect_divide_false, NULL, NULL, 0, 0 },
+		{ "ternary-divide-true", rb_ternary_divide_true_fpo,
+		  expect_divide_true, NULL, NULL, 0, 0 },
+		/* This row measures the zero-denominator divide result the
+		 * blend rows depend on.  Readback saturation cannot
+		 * distinguish IEEE infinity from a sufficiently large finite
+		 * value; it does rule out the zero/NaN cases that would make
+		 * the blend rows vacuous.  Alpha is 0.5 so those failure
+		 * modes cannot be mistaken for the opaque-black transfer
+		 * sentinel. */
+		{ "singular-divide", rb_singular_divide_fpo,
+		  expect_singular_divide, NULL, NULL, 0, 0 },
 		/* Vertex-side coverage: rb_xform shrinks the quad by the
 		 * uniform matrix; the judge scores covered-vs-clear pixels
 		 * against the PPU-computed projection.  Probe = RT center,

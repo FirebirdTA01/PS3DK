@@ -1,0 +1,15 @@
+// shader-readback refract row 2 -- k==0 boundary.
+//
+// I=(1,0,0), N=(0,-1,0), eta=1 gives d=0 and k=0 everywhere.
+// This is an absolute row because our kept behavior is the finite
+// grazing vector at k==0, while the other side of the diff harness
+// selects zero at that exact boundary.
+
+void main(
+    out float4 out_color : COLOR)
+{
+    float3 I = float3(1.0f, 0.0f, 0.0f);
+    float3 N = float3(0.0f, -1.0f, 0.0f);
+    float3 r = refract(I, N, 1.0f);
+    out_color = float4(r, 0.5f);
+}

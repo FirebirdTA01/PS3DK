@@ -1,0 +1,18 @@
+// shader-readback ternary divide row 2 -- single-block blend, true arm selected.
+//
+// At the default probe pixel u is exactly 0.5/64, so the else arm divides by
+// zero there.  The expression ternary stays a single-block select today, so
+// this row records whether the arithmetic blend path poisons pixels when the
+// untaken arm is singular.  Alpha is 0.5 so a corrupted black color cannot be
+// mistaken for the sentinel.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float u = in_texcoord.x;
+    float probe_u = 0.0078125f;
+    float r = (u < 0.5f) ? 0.25f / (1.0f - u)
+                         : 0.25f / (u - probe_u);
+    out_color = float4(r, r, r, 0.5f);
+}

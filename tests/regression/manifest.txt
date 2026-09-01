@@ -4,9 +4,12 @@ sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
 pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,PTHREAD_OK,PTHREAD_FAIL|ENOSYS
 # shader-readback must stay green: arith and angles cover the write-mask
-# clobber fixed by t_daf2da77, and xform judges vertex-program geometry
-# (uniform-matrix transform scored as pixel coverage — the row that
-# catches the t_a68be5c3 construct-from-input class at first light when
-# the general-lowering path becomes the default).  Any readback failure
-# is a regression.
-shader-readback,tests/regression/shader-readback/shader-readback.fake.self,60,RAN-CLEAN,shader-readback: 5/5 tests passed,SHADER_READBACK_FAIL|readback .*: FAIL
+# clobber fixed by t_daf2da77, xform judges vertex-program geometry,
+# ops covers straight-line slice A/B lowering, refract checks the
+# opt-in general lowering path's boundary cases against absolute
+# PPU-computed truth, guarded divide pixel-checks CF-1b predicated
+# select lowering, ternary divide records the still-open single-block
+# blend question, and singular divide pins the zero-denominator
+# hardware result those rows depend on. Any readback failure is a
+# regression.
+shader-readback,tests/regression/shader-readback/shader-readback.fake.self,90,RAN-CLEAN,shader-readback: 15/15 tests passed,SHADER_READBACK_FAIL|readback .*: FAIL

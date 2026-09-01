@@ -1,0 +1,14 @@
+// shader-readback refract row 4 -- ordinary k>0 with a nonzero dot term.
+//
+// I=(1,0,0), N=(-0.5,-0.8660254,0), eta=0.5 gives d=-0.5 and
+// k=0.8125 everywhere.  This keeps the direct output in [0,1] while
+// forcing c = eta*d + sqrt(|k|) to depend on the eta*d term.
+
+void main(
+    out float4 out_color : COLOR)
+{
+    float3 I = float3(1.0f, 0.0f, 0.0f);
+    float3 N = float3(-0.5f, -0.8660254037844386f, 0.0f);
+    float3 r = refract(I, N, 0.5f);
+    out_color = float4(r, 0.5f);
+}
