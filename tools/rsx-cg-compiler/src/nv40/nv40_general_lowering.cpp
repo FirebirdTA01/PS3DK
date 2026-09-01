@@ -176,8 +176,11 @@ static int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NVFX_VP_INST_IN_COL1
                                   : NVFX_VP_INST_IN_COL0;
-    if (semanticUpper == "DIFFUSE")  return NVFX_VP_INST_IN_COL0;
-    if (semanticUpper == "SPECULAR") return NVFX_VP_INST_IN_COL1;
+    // DIFFUSE/SPECULAR are index-less aliases of COLOR0/COLOR1; an
+    // indexed DIFFUSE1 is not a thing and must stay unsupported (-1)
+    // rather than silently landing on COL0.
+    if (semanticUpper == "DIFFUSE"  && semanticIndex == 0) return NVFX_VP_INST_IN_COL0;
+    if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NVFX_VP_INST_IN_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NVFX_VP_INST_IN_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
@@ -192,8 +195,8 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NV40_VP_INST_DEST_COL1
                                   : NV40_VP_INST_DEST_COL0;
-    if (semanticUpper == "DIFFUSE")  return NV40_VP_INST_DEST_COL0;
-    if (semanticUpper == "SPECULAR") return NV40_VP_INST_DEST_COL1;
+    if (semanticUpper == "DIFFUSE"  && semanticIndex == 0) return NV40_VP_INST_DEST_COL0;
+    if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NV40_VP_INST_DEST_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NV40_VP_INST_DEST_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
@@ -221,8 +224,8 @@ static int fragmentInputSrc(const std::string& semanticUpper, int semanticIndex)
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NVFX_FP_OP_INPUT_SRC_COL1
                                   : NVFX_FP_OP_INPUT_SRC_COL0;
-    if (semanticUpper == "DIFFUSE")  return NVFX_FP_OP_INPUT_SRC_COL0;
-    if (semanticUpper == "SPECULAR") return NVFX_FP_OP_INPUT_SRC_COL1;
+    if (semanticUpper == "DIFFUSE"  && semanticIndex == 0) return NVFX_FP_OP_INPUT_SRC_COL0;
+    if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NVFX_FP_OP_INPUT_SRC_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NVFX_FP_OP_INPUT_SRC_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
@@ -894,6 +897,19 @@ private:
         case IROp::Neg:
             lowerMovWithModifier(inst, true, false);
             return;
+        // Logical ops act on the 0/1 booleans the comparison
+        // lowerings produce (the frontend types them bool/bvec):
+        // AND is multiplication, OR is max, NOT is 1-x.  All
+        // component-wise, so bvec operands work unchanged.
+        case IROp::LogicalAnd:
+            lowerBinary(inst, VOp::Mul);
+            return;
+        case IROp::LogicalOr:
+            lowerBinary(inst, VOp::Max);
+            return;
+        case IROp::LogicalNot:
+            lowerLogicalNot(inst);
+            return;
         case IROp::Abs:
             lowerMovWithModifier(inst, false, true);
             return;
@@ -1309,6 +1325,19 @@ private:
 
     // ceil(x) = -floor(-x): FLR into a temp with the source negated,
     // then a negated MOV into the result.
+    void lowerLogicalNot(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        VInstr vi;
+        vi.op = VOp::Add;
+        vi.dst.index = define(inst.result);
+        vi.dst.writemask = componentMask(inst.resultType);
+        vi.srcs[0] = floatLit(1.0f);
+        vi.srcs[1] = resolve(inst.operands[0]);
+        vi.srcs[1].neg = !vi.srcs[1].neg;
+        program_.instrs.push_back(vi);
+    }
+
     void lowerCeil(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
