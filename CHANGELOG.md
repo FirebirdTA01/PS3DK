@@ -16,18 +16,29 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-## [v0.12.46] — 2026-08-31
+## [v0.12.54] — 2026-08-31
 
-Patch release.  Supersedes the v0.12.43 tag, which was cut correctly but could
-not build its Windows host tools and therefore published nothing — see the
-dependency-fetch entry below.  A crash in the packaging tool found by the first external
-consumer, and a family of compiler defects that all shared one shape: the code
-continued quietly where it should have refused.  Nothing here adds surface —
-the shader compiler's experimental lowering path deliberately accepts *less*
-than it did, because much of what it accepted before was silently wrong.
+Patch release.  Supersedes the v0.12.43 and v0.12.46 tags, both of which were
+cut correctly but failed to build and therefore published nothing; everything
+attributed to them ships here for the first time.  The two failures were
+unrelated one-line defects in code added the same day, and the first hid the
+second — v0.12.43 died fetching a dependency, which aborted the job before
+v0.12.46's fault could execute at all.  Alongside them: a crash in the
+packaging tool found by the first external consumer, and a family of compiler
+defects that all shared one shape: the code continued quietly where it should
+have refused.  Nothing here adds surface — the shader compiler's experimental
+lowering path deliberately accepts *less* than it did, because much of what it
+accepted before was silently wrong.
 
 ### Fixed
 
+- **The Windows toolchain build no longer fails when the compiler is invoked
+  through a launcher.**  The native `make_sprx` build ran `"${CC:-...}"` quoted
+  as a single word, but the release jobs export `CC="ccache gcc"`, so the shell
+  searched for a program literally named `ccache gcc` and exited 127.  `CC` is a
+  command *line*, not a command *name*, and is now split into an argv array.
+  The bug could not reproduce locally at all: it requires `CC` to contain a
+  space, and locally the fallback expands to a bare `gcc`.
 - **A dependency mirror answering 200 with the wrong bytes no longer poisons
   the fetch.**  zlib.net rotated 1.3.1 off its top-level path and served a
   355-byte page under the tarball's name; the download "succeeded", and the two
@@ -37,6 +48,17 @@ than it did, because much of what it accepted before was silently wrong.
   trusted on existence, and release-tagged mirrors are tried first because a
   tagged artifact does not move.  The pin itself was correct throughout and is
   what caught the substitution.
+- **Release stamping covers `Cargo.lock`, and no longer needs a hand-edit.**
+  `sync-versions.sh` rewrote only `tools/Cargo.toml`, while `tools/Cargo.lock`
+  repeats the workspace version once per member — a stale one makes
+  `cargo build --locked` disagree with the manifest, and it was stamped by hand
+  at each of the last two cuts.  The script now stamps both, and takes an
+  explicit `--version` because at a release cut the tag does not exist yet, so
+  the version cannot be derived from it.  Lock entries are matched by package
+  name read from each member's own manifest — never by "entries that look like
+  our version", since third-party crates sit at versions that collide with ours
+  (`linux-raw-sys` 0.12.1, `parking_lot` 0.12.5) — and the stamp refuses if any
+  member is missing rather than leaving it silently unstamped.
 - **The angle-stdlib test fixtures read real inputs.**  They declared their
   input as a semantic-annotated *local*, which binds nothing — the reference
   compiler warns "might be used before being initialized" and emits an empty
