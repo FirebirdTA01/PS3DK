@@ -165,7 +165,14 @@ function Auto-Value([string]$name, [uint32]$k) {
 function Print-AutoValues([string]$srcPath, [string]$label) {
     $text = Get-Content -Raw -LiteralPath $srcPath
     $seen = @{}
-    foreach ($m in [regex]::Matches($text, 'uniform\s+(float|half)([1-4])?(x[1-4])?\s+([A-Za-z_][A-Za-z0-9_]*)')) {
+    $matches = [regex]::Matches($text, 'uniform\s+(float|half)([1-4])?(x[1-4])?\s+([A-Za-z_][A-Za-z0-9_]*)')
+    # Say so when nothing matched: a shader with no uniforms and a shader
+    # whose declaration the regex missed print the SAME nothing otherwise,
+    # and "no COMPONENTS COLLIDE line appeared" would be satisfiable without
+    # the check having run (review finding; the same shape as a checker
+    # that prints "0 examined, 0 failed" as a pass).
+    if ($matches.Count -eq 0) { Write-Host "stager: auto $label no synthesised uniforms declared (regex matched nothing)"; return }
+    foreach ($m in $matches) {
         $name = $m.Groups[4].Value
         if ($seen.ContainsKey($name)) { continue }
         $seen[$name] = 1
