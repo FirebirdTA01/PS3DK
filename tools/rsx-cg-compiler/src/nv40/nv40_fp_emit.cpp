@@ -85,6 +85,163 @@ int fragmentOutputIndex(const std::string& semanticUpper, int /*semanticIndex*/)
 
 }  // namespace
 
+// ---------------------------------------------------------------------
+// Shape-binding types, hoisted out of lowerFragmentProgram (t_c44cc3b7).
+// ---------------------------------------------------------------------
+// These are plain data describing a recognised source shape.  They were
+// declared INSIDE lowerFragmentProgram, which is why no shape matcher
+// could be moved out of that function: a matcher cannot become a free
+// function while the types in its signature are local to the caller.
+//
+// Hoisting them changes no behaviour and emits no bytes - it only makes
+// the existing boundaries nameable from outside.
+
+struct GenericFpVecConstructBinding
+{
+    IRValueID lanes[4] = {0, 0, 0, 0};
+    int       width = 4;
+};
+
+struct FpScaleVaryingBinding
+{
+    IRValueID inputId = 0;   // the repeated varying (resolves via valueToInputSrc)
+    int       scale   = 0;   // ≥ 2; literal multiplier in (scale-1, 0, 0, 0)
+    int       lane    = -1;  // -1 = full vec4; 0..3 = scalar lane (.x/.y/.z/.w)
+};
+
+struct FpVaryingTexMulBinding
+{
+    IRValueID varyingId = 0;   // resolves via valueToInputSrc
+    IRValueID texId     = 0;   // resolves via valueToTex
+    int       lane      = -1;  // scalar lane of varying; -1 = full scalar (use .x)
+};
+
+struct SrcMod { IRValueID baseId = 0; bool absMod = false; bool negMod = false; };
+
+struct ScalarExtract { IRValueID baseId = 0; int lane = 0; };
+
+struct LiteralVec4
+{
+    float vals[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+struct FpLengthBinding
+{
+    IRValueID inputId = 0;
+    int       lanes   = 3;   // typically 3 (vec3 length)
+};
+
+struct FpRefractBinding
+{
+    IRValueID iId = 0;
+    IRValueID nId = 0;
+    float     eta = 0.0f;
+    bool      wrapW1 = false;
+};
+
+struct LogicalAndBinding
+{
+    IRValueID lhsId = 0;
+    IRValueID rhsId = 0;
+};
+
+struct VecInsertBinding
+{
+    IRValueID vectorId = 0;
+    IRValueID scalarId = 0;
+    int       lane     = 0;  // 0..3 — destination lane
+};
+
+struct FpVaryingPackBinding
+{
+    IRValueID baseId = 0;        // resolves via valueToInputSrc
+    int       lanes[4] = {0, 0, 0, 0};
+    int       width  = 2;
+};
+
+struct FpDotLitPackBinding
+{
+    FpVaryingPackBinding pack;
+    float                literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
+    bool                 wrapW1      = false;  // float4(d,d,d,1.0)
+};
+
+struct FpDot3LitPackBinding
+{
+    FpVaryingPackBinding pack;
+    float                literals[3][4] = {{0}};
+};
+
+struct FpDot3LitPackScaledBinding
+{
+    FpDot3LitPackBinding base;
+    float                scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+struct FpDotLitPackScaledBinding
+{
+    FpDotLitPackBinding base;
+    float               scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+struct FpLitVecUniformScaleBinding
+{
+    float     literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
+    IRValueID uniformId   = 0;
+    int       vecWidth    = 3;
+};
+
+struct FpLitVecUniformScaleWrapBinding
+{
+    float     literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
+    IRValueID uniformId   = 0;
+    int       vecWidth    = 3;
+};
+
+struct FpScaledDotsMinusLitMulUniformBinding
+{
+    FpDot3LitPackScaledBinding   scaledDots;
+    FpLitVecUniformScaleBinding  litTimesUni;
+};
+
+struct FpScaledDotsMinusLitMulUniformWrapBinding
+{
+    FpScaledDotsMinusLitMulUniformBinding sub;
+};
+
+struct FpSingleDotAddLitMulUniformBinding
+{
+    FpDotLitPackScaledBinding    scaledDot;
+    FpLitVecUniformScaleBinding  litTimesUni;
+};
+
+struct FpSingleDotAddLitMulUniformWrapBinding
+{
+    FpSingleDotAddLitMulUniformBinding add;
+};
+
+struct FpDot3LitPackWrapBinding
+{
+    FpVaryingPackBinding pack;
+    float                literals[3][4] = {{0}};
+    bool                 hasScale = false;
+    float                scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+struct FpMaxDotZeroBinding
+{
+    IRValueID lhsInputId = 0;
+    IRValueID rhsInputId = 0;
+    IRValueID lhsValueId = 0;
+    IRValueID rhsValueId = 0;
+};
+
+struct FpPowMaxDotLiteralBinding
+{
+    FpMaxDotZeroBinding base;
+    float exponent = 1.0f;
+};
+
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
@@ -167,11 +324,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
     std::unordered_map<IRValueID, GenericFpArithBinding> valueToGenericArith;
 
-    struct GenericFpVecConstructBinding
-    {
-        IRValueID lanes[4] = {0, 0, 0, 0};
-        int       width = 4;
-    };
     std::unordered_map<IRValueID, GenericFpVecConstructBinding>
         valueToGenericVecConstruct;
 
@@ -214,12 +366,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   Add(scale, x)   → scale+=1
     // Future: handle the `0 + x + x + x` shape produced by static-for
     // unroll once an algebraic-simplification pass runs `0+x → x`.
-    struct FpScaleVaryingBinding
-    {
-        IRValueID inputId = 0;   // the repeated varying (resolves via valueToInputSrc)
-        int       scale   = 0;   // ≥ 2; literal multiplier in (scale-1, 0, 0, 0)
-        int       lane    = -1;  // -1 = full vec4; 0..3 = scalar lane (.x/.y/.z/.w)
-    };
     std::unordered_map<IRValueID, FpScaleVaryingBinding> valueToScale;
 
     // `float4(scale_scalar, k1, k2, k3)` — VecConstruct that mixes a
@@ -267,12 +413,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // — it folds it into the conditional MUL itself (cc_cond=NE.<lane>).
     // We record the operand pair so the consuming Select dispatch can
     // emit the 5-instruction CC-blend pattern.
-    struct FpVaryingTexMulBinding
-    {
-        IRValueID varyingId = 0;   // resolves via valueToInputSrc
-        IRValueID texId     = 0;   // resolves via valueToTex
-        int       lane      = -1;  // scalar lane of varying; -1 = full scalar (use .x)
-    };
     std::unordered_map<IRValueID, FpVaryingTexMulBinding> valueToVaryingTexMul;
 
     // Track which tex results have already been emitted as TEX
@@ -315,7 +455,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   - abs(neg(x)) = abs(x)     → abs wins, neg cleared
     //   - neg(abs(x)) = -abs(x)    → both flags stay set
     //   - neg(neg(x)) = x          → neg toggles
-    struct SrcMod { IRValueID baseId = 0; bool absMod = false; bool negMod = false; };
     std::unordered_map<IRValueID, SrcMod> valueToMod;
 
     // Lookup map for value → type info.  IRFunction::getValue() only
@@ -358,7 +497,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //     swizzled .xxxx.
     //   - The conditional MOV has cc_cond=EQ and cc_swz=(X,X,X,X)
     //     overriding the default TR / identity.
-    struct ScalarExtract { IRValueID baseId = 0; int lane = 0; };
     std::unordered_map<IRValueID, ScalarExtract> valueToScalarExtract;
 
     struct CmpBinding
@@ -420,10 +558,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // {0x...}; END` pattern for a direct-literal shader).  Non-trivial
     // lifetimes (literal feeding arithmetic or texture sampling) land
     // in later stages.
-    struct LiteralVec4
-    {
-        float vals[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    };
     std::unordered_map<IRValueID, LiteralVec4> valueToLiteralVec4;
 
     // Scalar-function-unit unary ops (RCP / RSQ).  Both read one
@@ -448,11 +582,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // `src0 / sqrt(src1)`; the reference compiler's sqrt(dot(v,v)) trick reads back
     // the same DP3R result as both `|src0|` and `src1`, exploiting
     // `|x|/sqrt(x) == sqrt(x)` for x >= 0.
-    struct FpLengthBinding
-    {
-        IRValueID inputId = 0;
-        int       lanes   = 3;   // typically 3 (vec3 length)
-    };
     std::unordered_map<IRValueID, FpLengthBinding> valueToLength;
 
     // `normalize(vec3)` — the reference compiler lowers to MOVH + DP3R + MOVR(w=1) +
@@ -505,13 +634,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // byte-exact FP sequence.  This covers the common
     // `float4(refract(I, N, eta), 1.0)` form while the special 0x3b
     // opcode / sqrt(k) realization is still represented as raw ucode.
-    struct FpRefractBinding
-    {
-        IRValueID iId = 0;
-        IRValueID nId = 0;
-        float     eta = 0.0f;
-        bool      wrapW1 = false;
-    };
     std::unordered_map<IRValueID, FpRefractBinding> valueToRefract;
 
     // Multi-instruction if-else predication chain — see header
@@ -545,11 +667,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // LogicalAnd compound condition binding: two comparison results
     // combined with && in the source Cg.  Lowers to MULXC (multiply
     // condition codes) to combine the two CC-lane bits.
-    struct LogicalAndBinding
-    {
-        IRValueID lhsId = 0;
-        IRValueID rhsId = 0;
-    };
     std::unordered_map<IRValueID, LogicalAndBinding> valueToLogicalAnd;
 
     // VecInsert: `c.a = scalar;` overrides one lane of a previously
@@ -558,12 +675,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // overridden lane to the same dst (typically R0) with the scalar
     // source.  Pattern probed against RenderSkyBoxFragment.cg
     // (texCUBE → c.a = 1.0f → return c).
-    struct VecInsertBinding
-    {
-        IRValueID vectorId = 0;
-        IRValueID scalarId = 0;
-        int       lane     = 0;  // 0..3 — destination lane
-    };
     std::unordered_map<IRValueID, VecInsertBinding> valueToVecInsert;
 
     // Varying-pack: `vec2(varying.x, varying.z)` (or wider).  The
@@ -573,12 +684,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // pack into an ahead-of-DP2 setup MOV without going through the
     // generic VecConstruct lowering.  Width 2 = vec2, 3 = vec3, 4 =
     // vec4 (latter is just an identity MOV).
-    struct FpVaryingPackBinding
-    {
-        IRValueID baseId = 0;        // resolves via valueToInputSrc
-        int       lanes[4] = {0, 0, 0, 0};
-        int       width  = 2;
-    };
     std::unordered_map<IRValueID, FpVaryingPackBinding> valueToVaryingPack;
 
     // `dot(literal_vec, varying_pack)` shape.  The reference compiler
@@ -590,12 +695,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // wrapW1 flag inserts a third MOV writing R_dst.W = 1.0 BEFORE
     // the dot itself so the dot insn carries PROGRAM_END.  Captured
     // operands resolve via valueToVaryingPack and valueToLiteralVec4.
-    struct FpDotLitPackBinding
-    {
-        FpVaryingPackBinding pack;
-        float                literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
-        bool                 wrapW1      = false;  // float4(d,d,d,1.0)
-    };
     std::unordered_map<IRValueID, FpDotLitPackBinding> valueToDotLitPack;
 
     // `vec3(d1, d2, d3)` where d1/d2/d3 are 3 distinct
@@ -603,22 +702,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // Pre-wrap shape — recorded so a downstream `vec4(.., 1.0)` wrap
     // (2-operand form) or a `Mul(literal_vec, this_vec3)` scale step
     // can fold into the wrap binding below.
-    struct FpDot3LitPackBinding
-    {
-        FpVaryingPackBinding pack;
-        float                literals[3][4] = {{0}};
-    };
     std::unordered_map<IRValueID, FpDot3LitPackBinding>
         valueToDot3LitPack;
 
     // `Mul(literal_vec3, vec3(d1, d2, d3))` — 3-dot pack scaled by a
     // folded literal vec3.  Captures the kitchen-sink shader's
     // `freq * Length` step.
-    struct FpDot3LitPackScaledBinding
-    {
-        FpDot3LitPackBinding base;
-        float                scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    };
     std::unordered_map<IRValueID, FpDot3LitPackScaledBinding>
         valueToDot3LitPackScaled;
 
@@ -626,11 +715,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // dot scaled by a folded literal vec3.  This is the one-dot
     // counterpart of FpDot3LitPackScaledBinding and feeds the
     // water-wave ADD composite below.
-    struct FpDotLitPackScaledBinding
-    {
-        FpDotLitPackBinding base;
-        float               scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    };
     std::unordered_map<IRValueID, FpDotLitPackScaledBinding>
         valueToDotLitPackScaled;
 
@@ -638,12 +722,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // multiplied by a uniform scalar (broadcast).  Captures the
     // kitchen-sink water FP `phase * gTime` step.  Recognized in
     // IROp::Mul; consumed by VecConstruct(.., 1.0) wrap below.
-    struct FpLitVecUniformScaleBinding
-    {
-        float     literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
-        IRValueID uniformId   = 0;
-        int       vecWidth    = 3;
-    };
     std::unordered_map<IRValueID, FpLitVecUniformScaleBinding>
         valueToLitVecUniformScale;
 
@@ -656,12 +734,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //                                           "prev .xxxx → avoid"
     //                                           literal-pool rule
     //   MUL R0.xyz [END], R0.xxxx, c[0].xyzw + {lit.x, lit.y, lit.z, 0}
-    struct FpLitVecUniformScaleWrapBinding
-    {
-        float     literal[4]  = {0.0f, 0.0f, 0.0f, 0.0f};
-        IRValueID uniformId   = 0;
-        int       vecWidth    = 3;
-    };
     std::unordered_map<IRValueID, FpLitVecUniformScaleWrapBinding>
         valueToLitVecUniformScaleWrap;
 
@@ -672,11 +744,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // (R1) so R0 can carry uniform + W=1.0 + final MAD.  Captures
     // the multi-register schedule the reference compiler chooses
     // for this specific composition.
-    struct FpScaledDotsMinusLitMulUniformBinding
-    {
-        FpDot3LitPackScaledBinding   scaledDots;
-        FpLitVecUniformScaleBinding  litTimesUni;
-    };
     std::unordered_map<IRValueID, FpScaledDotsMinusLitMulUniformBinding>
         valueToScaledDotsMinusLitMulUni;
 
@@ -692,10 +759,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   FENCBR
     //   MAD R0.xyz[END], -R0.xxxx, c[0].xyzw + phase, R1
     //                  (folds the Sub into MAD with NEGATE-on-src0)
-    struct FpScaledDotsMinusLitMulUniformWrapBinding
-    {
-        FpScaledDotsMinusLitMulUniformBinding sub;
-    };
     std::unordered_map<IRValueID, FpScaledDotsMinusLitMulUniformWrapBinding>
         valueToScaledDotsMinusLitMulUniWrap;
 
@@ -703,11 +766,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // - the water-wave FP `scaled + phase * gTime` form.  This mirrors
     // the scaled-dots-minus binding above but uses one DP2 and folds
     // the Add into a final MAD without negating the uniform term.
-    struct FpSingleDotAddLitMulUniformBinding
-    {
-        FpDotLitPackScaledBinding    scaledDot;
-        FpLitVecUniformScaleBinding  litTimesUni;
-    };
     std::unordered_map<IRValueID, FpSingleDotAddLitMulUniformBinding>
         valueToSingleDotAddLitMulUni;
 
@@ -718,10 +776,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     //   MUL R1.xyw,   R0.xxxx, c[0].xyzz + scale
     //   MAD R0.xyz,   R0.wwww, c[0].xyzw + phase, R1.xywz
     //   MOV R0.w[END], c[0].xyzw + {0,0,0,1}
-    struct FpSingleDotAddLitMulUniformWrapBinding
-    {
-        FpSingleDotAddLitMulUniformBinding add;
-    };
     std::unordered_map<IRValueID, FpSingleDotAddLitMulUniformWrapBinding>
         valueToSingleDotAddLitMulUniWrap;
 
@@ -742,31 +796,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // (even→0,1 / odd→2,3).  W=1.0 layout depends on hasScale — the
     // bare wrap reads .xxxx from {1,0,0,0}; the scaled wrap reads
     // .wwww (encoded via .xyzw + lane 3) from {0,0,0,1.0}.
-    struct FpDot3LitPackWrapBinding
-    {
-        FpVaryingPackBinding pack;
-        float                literals[3][4] = {{0}};
-        bool                 hasScale = false;
-        float                scale[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    };
     std::unordered_map<IRValueID, FpDot3LitPackWrapBinding>
         valueToDot3LitPackWrap;
 
-    struct FpMaxDotZeroBinding
-    {
-        IRValueID lhsInputId = 0;
-        IRValueID rhsInputId = 0;
-        IRValueID lhsValueId = 0;
-        IRValueID rhsValueId = 0;
-    };
     std::unordered_map<IRValueID, FpMaxDotZeroBinding> valueToMaxDotZero;
     std::unordered_set<IRValueID> valueToCmpLeMaxDotZero;
 
-    struct FpPowMaxDotLiteralBinding
-    {
-        FpMaxDotZeroBinding base;
-        float exponent = 1.0f;
-    };
     std::unordered_map<IRValueID, FpPowMaxDotLiteralBinding>
         valueToPowMaxDotLiteral;
 
