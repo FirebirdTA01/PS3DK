@@ -76,8 +76,8 @@ void usage()
         RSX_CG_COMPILER_VERSION);
     std::fprintf(stderr,
         "\n"
-        "Optimization (FP only in current reference compiler; VP insensitive):\n"
-        "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O2)\n"
+        "Optimization (fragment profile only; VP output is insensitive):\n"
+        "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1)\n"
         "  --fastmath             Enable fast-math optimizations (default)\n"
         "  --nofastmath           Disable fast-math optimizations\n");
 }
