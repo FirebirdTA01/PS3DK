@@ -48,7 +48,7 @@ Logic:
 |---|---|
 | **SDK runtime headers** (`sdk/Makefile install`) | `scripts/version.sh --format=header > $PS3DK/ppu/include/cell/sdk_version.h`.  `cell/cell.h` includes it; user code reaches the version via `PS3SDK_VERSION` and friends. |
 | **SDK install marker** | `$PS3DK/VERSION` plain-text file written at install time.  Useful for shell scripts and tarball naming. |
-| **Rust workspace** (`tools/Cargo.toml`) | `[workspace.package] version` is the canonical Rust-side value.  `scripts/sync-versions.sh` rewrites it from `version.sh --format=bare` idempotently.  Each Rust binary picks it up via `CARGO_PKG_VERSION` (clap's `version` attribute exposes `--version` automatically). |
+| **Rust workspace** (`tools/Cargo.toml`, `tools/Cargo.lock`) | `[workspace.package] version` is the canonical Rust-side value.  `scripts/sync-versions.sh` rewrites it from `version.sh --format=bare` idempotently, **and stamps the matching `[[package]]` entry for every workspace member in `tools/Cargo.lock`** — the lock repeats the version once per member, and a stale one breaks `cargo build --locked`.  Lock entries are matched by member **name**, read from `[workspace] members`, never by "entries that look like our version": third-party crates sit at versions that collide with ours (`linux-raw-sys` 0.12.1, `parking_lot` 0.12.5).  Each Rust binary picks the version up via `CARGO_PKG_VERSION` (clap's `version` attribute exposes `--version` automatically). |
 | **rsx-cg-compiler** (CMake) | `tools/rsx-cg-compiler/CMakeLists.txt` calls `version.sh --format=cmake` at configure time, includes the result, and `configure_file`s `src/version.h.in` → `<build>/version.h`.  `main.cpp` includes the generated header for `RSX_CG_COMPILER_VERSION`, exposed via `--version` / `-V`. |
 | **Toolchain prefix tarball** (post-v0.3.0) | Will name itself `ps3-sdk-vX.Y.Z-<host>-<arch>.tar.zst` using `version.sh --format=plain`. |
 
@@ -63,7 +63,11 @@ Logic:
    ```sh
    ./scripts/sync-versions.sh --dry-run   # preview
    ./scripts/sync-versions.sh             # write
-   git add tools/Cargo.toml CHANGELOG.md
+
+   # At a release cut the tag does not exist yet, so version.sh cannot derive
+   # the number that the tag is about to point at.  Pass it explicitly:
+   ./scripts/sync-versions.sh --version=0.13.0
+   git add tools/Cargo.toml tools/Cargo.lock CHANGELOG.md
    git commit -m "release: vX.Y.Z"
    ```
 
