@@ -106,6 +106,31 @@ Pre-1.0 while we're bootstrapping the SDK.
   release after it until one is cut at the true count.  `v0.12.1` was
   such a tag (it should have been `v0.12.9`, nine commits after
   `v0.12.0`); `v0.12.21` restores the invariant.
+
+  **Deleting a tag can therefore change the version every later build
+  derives, and it does so silently.**  Step 1 above picks the
+  highest-sorting tag in the repository — not the previous *minor* tag,
+  and not the nearest ancestor — so removing the highest one promotes
+  whatever is beneath it and re-bases the whole count on that tag's
+  patch number.  The result is only correct if the promoted tag obeys
+  the rule.  Three releaseless tags were removed on 2026-08-31
+  (`v0.7.0`, `v0.12.43`, `v0.12.46`) and the derived version did not
+  move, but only because that promoted `v0.12.21`, which satisfies
+  `21 == git rev-list --count v0.12.0..v0.12.21`.
+
+  So: **do not delete `v0.12.21`.**  It is the lowest tag above
+  `v0.12.1` that still obeys the invariant, and it is what currently
+  shields the derivation from it.  If it were removed, the highest tag
+  would become the mis-numbered `v0.12.1`, and because that tag sits
+  nine commits after `v0.12.0` while claiming patch `1`, every derived
+  version would come out **eight low** — measured at the `v0.12.54`
+  commit, `1 + 45 = 46` against a true count of `54`.  No error would be
+  raised anywhere, because nothing checks the invariant at runtime.
+  Making `version.sh` verify that the tag it counts from satisfies
+  `patch == rev-list --count <minor base>..<tag>` would turn this from a
+  landmine into a diagnostic; until then it is a rule people have to
+  know.  Before deleting any tag, check whether it is the highest one,
+  and if it is, confirm the tag beneath it obeys the rule.
 - **`v1.0.0`** — when:
   - `hello-ppu-c++17`, `hello-spurs-task`, the reference `basic.cpp`,
     and `5spu_spurs_without_context` all build and run clean against
