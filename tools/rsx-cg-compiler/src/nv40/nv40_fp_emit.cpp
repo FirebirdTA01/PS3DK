@@ -309,6 +309,26 @@ struct GenericFpArithBinding
     int         width = 4;
 };
 
+// The generic-arithmetic source descriptor, hoisted out of lowerFragmentProgram
+// (t_c44cc3b7, carve step 12).  Same rule as steps 0/0b/0c and 7: a helper
+// cannot become a free function while a type in its SIGNATURE is declared
+// inside the block that calls it.  This one gates a whole subsystem - twelve
+// generic-emission helpers take or return it - so it is hoisted on its own
+// rather than as part of any single conversion.
+//
+// Verbatim, including the nested Kind enum and every default initialiser.
+struct GenericFpSource
+{
+    enum class Kind { None, Reg, Uniform, Literal };
+    Kind kind = Kind::None;
+    struct nvfx_reg reg = nvfx_reg(NVFXSR_NONE, 0);
+    unsigned uniformParam = 0;
+    float literal[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    int inputSrc = -1;
+    uint8_t swz[4] = {0, 1, 2, 3};
+    bool absMod = false;
+    bool negMod = false;
+};
 struct FpScaledLanesBinding
 {
     FpScaleVaryingBinding scale;
@@ -1107,6 +1127,63 @@ static struct nvfx_src srcOfReg(const struct nvfx_reg& reg)
 static void swizzleAllLanes(struct nvfx_src& s, int lane)
 {
     s.swz[0] = s.swz[1] = s.swz[2] = s.swz[3] = lane;
+}
+
+// Three generic-emission helpers that declared `[&]` but capture NOTHING
+// (t_c44cc3b7, carve step 12).  A capture list is a CLAIM, not a measurement:
+// genericOpOpcode and makeGenericNvfxSrc were written `[&]` out of local habit
+// while using nothing but their own parameters, and only genericSourceNeedsInline
+// spelled its emptiness honestly as `[]`.
+//
+// Measured, not eyeballed: `capscan.sh` flips one lambda's `[&]` to `[]`, compiles
+// the TU with -fsyntax-only, and lets the COMPILER decide.  Across the 50 `[&]`
+// lambdas left after carve 11, exactly three survive that flip - these two plus
+// makeBranchSrc0, which is blocked on a separate block-local type (BranchInfo).
+// So the "50 by-reference" figure overstates the remaining work by three: the
+// cheap seam is nearly, but not quite, exhausted.
+//
+// Bodies verbatim.  makeGenericNvfxSrc keeps its inert const_cast for the same
+// reason srcOfReg does (t_087b4ace).
+static uint8_t genericOpOpcode(GenericFpOp op)
+{
+    switch (op)
+    {
+    case GenericFpOp::Add:
+    case GenericFpOp::Sub:
+        return NVFX_FP_OP_OPCODE_ADD;
+    case GenericFpOp::Mul:  return NVFX_FP_OP_OPCODE_MUL;
+    case GenericFpOp::Mad:  return NVFX_FP_OP_OPCODE_MAD;
+    case GenericFpOp::Min:  return NVFX_FP_OP_OPCODE_MIN;
+    case GenericFpOp::Max:  return NVFX_FP_OP_OPCODE_MAX;
+    case GenericFpOp::Dot3: return NVFX_FP_OP_OPCODE_DP3;
+    case GenericFpOp::Dot4: return NVFX_FP_OP_OPCODE_DP4;
+    }
+    return NVFX_FP_OP_OPCODE_ADD;
+}
+
+static struct nvfx_src makeGenericNvfxSrc(const GenericFpSource& src)
+{
+    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+    const struct nvfx_reg& reg =
+        (src.kind == GenericFpSource::Kind::Uniform ||
+         src.kind == GenericFpSource::Kind::Literal)
+            ? constReg
+            : src.reg;
+    struct nvfx_src s =
+        nvfx_src(const_cast<struct nvfx_reg&>(reg));
+    s.swz[0] = src.swz[0];
+    s.swz[1] = src.swz[1];
+    s.swz[2] = src.swz[2];
+    s.swz[3] = src.swz[3];
+    s.abs = src.absMod ? 1 : 0;
+    s.negate = src.negMod ? 1 : 0;
+    return s;
+}
+
+static bool genericSourceNeedsInline(const GenericFpSource& src)
+{
+    return src.kind == GenericFpSource::Kind::Uniform ||
+           src.kind == GenericFpSource::Kind::Literal;
 }
 
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
@@ -8890,19 +8967,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                 }
 
-                struct GenericFpSource
-                {
-                    enum class Kind { None, Reg, Uniform, Literal };
-                    Kind kind = Kind::None;
-                    struct nvfx_reg reg = nvfx_reg(NVFXSR_NONE, 0);
-                    unsigned uniformParam = 0;
-                    float literal[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-                    int inputSrc = -1;
-                    uint8_t swz[4] = {0, 1, 2, 3};
-                    bool absMod = false;
-                    bool negMod = false;
-                };
-
                 auto recordGenericInputUse = [&](int inputSrc)
                 {
                     if (inputSrc < 0) return;
@@ -8926,26 +8990,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             break;
                         }
                     }
-                };
-
-                auto makeGenericNvfxSrc =
-                    [&](const GenericFpSource& src) -> struct nvfx_src
-                {
-                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
-                    const struct nvfx_reg& reg =
-                        (src.kind == GenericFpSource::Kind::Uniform ||
-                         src.kind == GenericFpSource::Kind::Literal)
-                            ? constReg
-                            : src.reg;
-                    struct nvfx_src s =
-                        nvfx_src(const_cast<struct nvfx_reg&>(reg));
-                    s.swz[0] = src.swz[0];
-                    s.swz[1] = src.swz[1];
-                    s.swz[2] = src.swz[2];
-                    s.swz[3] = src.swz[3];
-                    s.abs = src.absMod ? 1 : 0;
-                    s.negate = src.negMod ? 1 : 0;
-                    return s;
                 };
 
                 auto appendGenericInlineSource =
@@ -9094,30 +9138,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
 
                     return src;
-                };
-
-                auto genericOpOpcode = [&](GenericFpOp op) -> uint8_t
-                {
-                    switch (op)
-                    {
-                    case GenericFpOp::Add:
-                    case GenericFpOp::Sub:
-                        return NVFX_FP_OP_OPCODE_ADD;
-                    case GenericFpOp::Mul:  return NVFX_FP_OP_OPCODE_MUL;
-                    case GenericFpOp::Mad:  return NVFX_FP_OP_OPCODE_MAD;
-                    case GenericFpOp::Min:  return NVFX_FP_OP_OPCODE_MIN;
-                    case GenericFpOp::Max:  return NVFX_FP_OP_OPCODE_MAX;
-                    case GenericFpOp::Dot3: return NVFX_FP_OP_OPCODE_DP3;
-                    case GenericFpOp::Dot4: return NVFX_FP_OP_OPCODE_DP4;
-                    }
-                    return NVFX_FP_OP_OPCODE_ADD;
-                };
-
-                auto genericSourceNeedsInline =
-                    [](const GenericFpSource& src) -> bool
-                {
-                    return src.kind == GenericFpSource::Kind::Uniform ||
-                           src.kind == GenericFpSource::Kind::Literal;
                 };
 
                 auto emitGenericOp =
