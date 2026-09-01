@@ -240,9 +240,14 @@ if ($ReferenceCompiler) {
         # the 0 our own compile just returned; pre-set it so the rc
         # check below judges this call and not the previous one.  The
         # shell's report of a native tool is not the tool's report.
+        # It MUST be the $global: form: the engine writes the exit code
+        # to the GLOBAL variable, and a bare `$LASTEXITCODE = -1` here
+        # creates a script-scope shadow that every later read in this
+        # script sees instead - measured: a successful reference
+        # compile then reports -1 (first real execution of 0f67f51).
         $prevEap = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $LASTEXITCODE = -1
+        $global:LASTEXITCODE = -1
         $null = & $ReferenceCompiler -p sce_fp_rsx -o $ref $src 2>&1
         $refRc = $LASTEXITCODE
         $ErrorActionPreference = $prevEap
