@@ -1,0 +1,26 @@
+// Refusal fixture: a loop whose trip count depends on a varying.
+//
+// NV40 fragment hardware has no flow control; a data-dependent bound
+// cannot be unrolled at compile time, so NO honest lowering path can
+// ever compile this shader — which is exactly why it pins the refusal
+// CONTRACT rather than a today's-gap: unlike a branch or an
+// unimplemented op, this fixture does not expire when coverage grows.
+//
+// Used by tests/shader-compiler/refusal-semantics-test.sh, which
+// asserts the full refusal, not just the diagnostic: nonzero exit AND
+// no container file, on BOTH lowering paths.  Shipped v0.12.21's
+// general path printed "unsupported IR op" and then wrote a container
+// and exited 0 — a plausible artifact where there should have been a
+// refusal; this test exists so that hole cannot silently reopen.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float acc = 0.0f;
+    int n = (int)(in_texcoord.x * 10.0f);
+    for (int i = 0; i < n; i++) {
+        acc = acc + 0.1f;
+    }
+    out_color = float4(acc, 0.0f, 0.0f, 1.0f);
+}
