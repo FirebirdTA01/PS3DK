@@ -759,26 +759,61 @@ private:
         const size_t n = program_.instrs.size();
         std::vector<int> indegree(n, 0);
         std::vector<std::vector<size_t>> consumers(n);
-        std::unordered_map<int, size_t> tempProducer;
-        tempProducer.reserve(n * 2);
+
+        // Dependency edges, per register, over ALL writers and readers.
+        //
+        // The previous form kept ONE producer per temp register
+        // (`tempProducer[reg] = i`) and gave a consumer a RAW edge to that
+        // single most-recent write.  A vector built lane by lane is SEVERAL
+        // partial-writemask writes to the SAME register - exactly what
+        // lowerVecConstruct emits - so a consumer was constrained only by
+        // the LAST lane write, and every earlier lane was free to be
+        // scheduled BELOW the instruction that reads it.
+        //
+        // Measured on test_02_add (t_0a4e0ed4): `float3 result = col1 +
+        // col2` had its ADD emitted at instruction 11 while col2.y was
+        // written at 15 and col1.x at the last instruction, so the sum read
+        // stale registers and the shader rendered a near-constant colour.
+        // On the corpus this repaired 9 shaders to pixel-identical against
+        // the reference and moved none of the 27 that already matched.
+        //
+        // It also explains WHICH shaders were wrong: an op that writes its
+        // whole result in one instruction has a single producer and cannot
+        // lose an edge, while anything that computes a SCALAR and places it
+        // into a lane (dot products, sin/cos/pow) is a partial write.
+        std::unordered_map<int, std::vector<size_t>> writers, readers;
+        const auto link = [&](size_t from, size_t to) {
+            // A self-edge is FATAL, not merely redundant: indegree never
+            // reaches zero, the node is never ready, and the scheduling
+            // loop below can make no progress.  It arises whenever an
+            // instruction reads and writes the same register (`ADD R0.x,
+            // R0, R1` - most of the sin/cos and dot-product lowerings),
+            // because the read is recorded before the WAR walk below.
+            if (from == to)
+                return;
+            auto& deps = consumers[from];
+            if (std::find(deps.begin(), deps.end(), to) == deps.end()) {
+                deps.push_back(to);
+                ++indegree[to];
+            }
+        };
 
         for (size_t i = 0; i < n; ++i) {
             const VInstr& vi = program_.instrs[i];
             for (const VSrc& src : vi.srcs) {
                 if (src.kind != VSrcKind::Temp)
                     continue;
-                const auto prodIt = tempProducer.find(src.index);
-                if (prodIt == tempProducer.end())
-                    continue;
-                const size_t producer = prodIt->second;
-                auto& deps = consumers[producer];
-                if (std::find(deps.begin(), deps.end(), i) == deps.end()) {
-                    deps.push_back(i);
-                    ++indegree[i];
-                }
+                for (size_t w : writers[src.index])      // RAW
+                    link(w, i);
+                readers[src.index].push_back(i);
             }
-            if (!vi.dst.none && !vi.dst.output)
-                tempProducer[vi.dst.index] = i;
+            if (!vi.dst.none && !vi.dst.output) {
+                for (size_t w : writers[vi.dst.index])   // WAW
+                    link(w, i);
+                for (size_t r : readers[vi.dst.index])   // WAR
+                    link(r, i);
+                writers[vi.dst.index].push_back(i);
+            }
         }
 
         std::vector<int> readyTime(n, 0);
@@ -830,6 +865,23 @@ private:
 
             if (!found) {
                 if (nextCycle == std::numeric_limits<int>::max()) {
+                    // Nothing is ready and no future cycle can change that:
+                    // the graph cannot be drained.  This used to spin
+                    // forever, which turned a dependency-graph defect into
+                    // a HANG - the rig's staging timeout then presented it
+                    // as "those shaders are missing from the log", which is
+                    // the worst possible way to meet a compiler bug.
+                    // Refuse loudly instead; a graph that cannot be
+                    // scheduled is a defect in this pass either way.
+                    if (ordered.size() < n) {
+                        program_.diagnostics.push_back(
+                            "nv40-general: instruction scheduler could not drain its "
+                            "dependency graph (" + std::to_string(n - ordered.size()) +
+                            " of " + std::to_string(n) +
+                            " instructions unschedulable); refusing");
+                        program_.loweringFailed = true;
+                        return;
+                    }
                     ++curCycle;
                     continue;
                 }
