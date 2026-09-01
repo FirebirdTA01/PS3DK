@@ -176,6 +176,8 @@ static int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NVFX_VP_INST_IN_COL1
                                   : NVFX_VP_INST_IN_COL0;
+    if (semanticUpper == "DIFFUSE")  return NVFX_VP_INST_IN_COL0;
+    if (semanticUpper == "SPECULAR") return NVFX_VP_INST_IN_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NVFX_VP_INST_IN_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
@@ -190,6 +192,8 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NV40_VP_INST_DEST_COL1
                                   : NV40_VP_INST_DEST_COL0;
+    if (semanticUpper == "DIFFUSE")  return NV40_VP_INST_DEST_COL0;
+    if (semanticUpper == "SPECULAR") return NV40_VP_INST_DEST_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NV40_VP_INST_DEST_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
@@ -217,6 +221,8 @@ static int fragmentInputSrc(const std::string& semanticUpper, int semanticIndex)
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NVFX_FP_OP_INPUT_SRC_COL1
                                   : NVFX_FP_OP_INPUT_SRC_COL0;
+    if (semanticUpper == "DIFFUSE")  return NVFX_FP_OP_INPUT_SRC_COL0;
+    if (semanticUpper == "SPECULAR") return NVFX_FP_OP_INPUT_SRC_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NVFX_FP_OP_INPUT_SRC_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
@@ -815,8 +821,14 @@ private:
         case IROp::Mad:
             lowerTernary(inst, VOp::Mad);
             return;
+        case IROp::LoadUniform:
+            lowerLoadUniform(inst);
+            return;
         case IROp::MatVecMul:
             lowerMatVecMul(inst);
+            return;
+        case IROp::VecMatMul:
+            lowerVecMatMul(inst);
             return;
         case IROp::Sin:
             lowerUnary(inst, VOp::Sin, false);
@@ -1674,6 +1686,31 @@ private:
         program_.instrs.push_back(vi);
     }
 
+    void lowerLoadUniform(const IRInstruction& inst)
+    {
+        if (inst.result == InvalidIRValue)
+            return;
+        for (const auto& g : module_.globals) {
+            if (g.name != inst.targetName)
+                continue;
+            const auto mIt = matrixUniformBase_.find(g.valueId);
+            if (mIt != matrixUniformBase_.end()) {
+                matrixUniformBase_[inst.result] = mIt->second;
+                return;
+            }
+            const auto sIt = program_.valueToSource.find(g.valueId);
+            if (sIt != program_.valueToSource.end()) {
+                program_.valueToSource[inst.result] = sIt->second;
+                return;
+            }
+            break;
+        }
+        program_.diagnostics.push_back(
+            "nv40-general: ldunif of '" + inst.targetName +
+            "' has no registered uniform source; refusing");
+        program_.loweringFailed = true;
+    }
+
     void lowerMatVecMul(const IRInstruction& inst)
     {
         if (profile_ != GeneralProfile::Vertex ||
@@ -1702,6 +1739,55 @@ private:
             dp.srcs[0] = vec;
             dp.srcs[1] = uniformSrc(matIt->second + rows[i], false);
             program_.instrs.push_back(dp);
+        }
+    }
+
+    // mul(v, M) - a ROW vector times a matrix.  Component i of the
+    // result is dot(v, column_i), but columns are not addressable as
+    // single const registers; the same product IS addressable as a
+    // linear combination of ROWS:
+    //     result = v.x*M[0] + v.y*M[1] + v.z*M[2] + v.w*M[3]
+    // which is one MUL and three MADs, fully vectorized, no transpose.
+    void lowerVecMatMul(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue)
+            return;
+        if (profile_ != GeneralProfile::Vertex) {
+            program_.diagnostics.push_back(
+                "nv40-general: FP vecmatmul lowering is not implemented; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        const auto matIt = matrixUniformBase_.find(inst.operands[1]);
+        if (matIt == matrixUniformBase_.end()) {
+            program_.diagnostics.push_back(
+                "nv40-general: vecmatmul matrix source is not a uniform "
+                "matrix (computed matrices await the matmul slice); refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        if (valueWidthOf(inst.operands[0]) != 4 ||
+            inst.resultType.componentCount() != 4) {
+            program_.diagnostics.push_back(
+                "nv40-general: vecmatmul is lowered for vec4*mat4 only; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const int result = define(inst.result);
+        const VSrc vec = resolve(inst.operands[0]);
+        for (int j = 0; j < 4; ++j) {
+            VInstr vi;
+            vi.op = (j == 0) ? VOp::Mul : VOp::Mad;
+            vi.dst.index = result;
+            vi.dst.writemask = 0xf;
+            vi.srcs[0] = vec;
+            const uint8_t c = vec.swizzle[j];
+            vi.srcs[0].swizzle = {c, c, c, c};
+            vi.srcs[1] = uniformSrc(matIt->second + j, false);
+            if (j != 0)
+                vi.srcs[2] = tempSrc(result);
+            program_.instrs.push_back(vi);
         }
     }
 
