@@ -37,8 +37,15 @@ tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto
 
 # NAMED REGRESSION for the scalar-broadcast defect (t_b6f2a2a4).  A scalar
-# operand under a MULTI-LANE write mask must broadcast lane 0; without it
-# every lane past x reads ZERO from the {c,0,0,0} constant block.  Each
+# operand under a MULTI-LANE write mask must broadcast ITS OWN selected
+# component -- see the lane-extract companion below, which is the fixture
+# for that half of the rule.  In THIS fixture every scalar originates in
+# lane x, so the broadcast happens to be lane 0, and the failure it catches
+# is that wider uses did not broadcast at all: each lane past x read ZERO
+# from the {c,0,0,0} constant block.  (This block said "must broadcast
+# lane 0" as though that were the rule -- true of 51e5f5a, false after
+# 55af7a4 moved the rule to replicate-the-selected-component.  Review
+# finding; same stale-rationale class as the literalSrc comment.)  Each
 # channel isolates one scalar source kind through lane Y -- literal (R),
 # uniform (G), computed (B) -- so a failure names which kind regressed.
 # uniform_set=auto gives u_scale a synthesised value; input is non-flat on
