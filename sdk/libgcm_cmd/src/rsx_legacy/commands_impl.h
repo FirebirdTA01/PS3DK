@@ -1646,14 +1646,23 @@ void RSX_FUNC(InlineTransfer)(gcmContextData *context,u32 dstOffset,const void *
 	u32 padSizeInWords;
 	u32 alignedVideoOffset;
 
-	(void)location;
-
 	alignedVideoOffset = dstOffset&~0x3f;
 	pixelShift = (dstOffset&0x3f)>>2;
 
 	padSizeInWords = (sizeInWords + 1)&~0x01;
 
-	RSX_CONTEXT_CURRENT_BEGIN(10 + padSizeInWords);
+	RSX_CONTEXT_CURRENT_BEGIN(12 + padSizeInWords);
+
+	/* The 2D-surface destination DMA context is shared state on
+	 * subchannel 3: rsxSetTransferImage / rsxSetTransferScaleMode
+	 * rebind it to the HOST buffer for any *_TO_MAIN blit, and the
+	 * bind persists.  It must be re-established per transfer, or an
+	 * inline transfer that follows a local-to-main readback lands in
+	 * host memory at this offset instead of in RSX-local memory
+	 * (observed: FP embedded-constant patches silently not applied
+	 * after the first readback blit).  Do not hoist this to init. */
+	RSX_CONTEXT_CURRENTP[pos++] = RSX_SUBCHANNEL_METHOD(3,NV04_CONTEXT_SURFACES_2D_DMA_IMAGE_DESTIN,1);
+	RSX_CONTEXT_CURRENTP[pos++] = GCM_DMA_MEMORY_FRAME_BUFFER + location;
 
 	RSX_CONTEXT_CURRENTP[pos++] = RSX_SUBCHANNEL_METHOD(3,NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN,1);
 	RSX_CONTEXT_CURRENTP[pos++] = alignedVideoOffset;
@@ -1678,7 +1687,7 @@ void RSX_FUNC(InlineTransfer)(gcmContextData *context,u32 dstOffset,const void *
 	if(padSizeInWords!=sizeInWords)
 		RSX_CONTEXT_CURRENTP[pos++] = 0;
 
-	RSX_CONTEXT_CURRENT_END(10 + padSizeInWords);
+	RSX_CONTEXT_CURRENT_END(12 + padSizeInWords);
 }
 
 void RSX_FUNC(SetAlphaFunc)(gcmContextData *context,u32 alphaFunc,u32 ref)
