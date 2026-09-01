@@ -92,6 +92,9 @@ jobs:
       - name: Test rsx-cg-compiler refusal semantics
         run: bash tests/shader-compiler/refusal-semantics-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler control-flow flatten
+        run: bash tests/shader-compiler/control-flow-flatten-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
   host-tools-windows:
     name: Host tools build (windows mingw64)
     runs-on: windows-latest

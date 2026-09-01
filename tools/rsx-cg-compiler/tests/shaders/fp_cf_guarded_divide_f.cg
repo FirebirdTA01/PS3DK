@@ -1,0 +1,27 @@
+// CF-1a refusal fixture / CF-1b acceptance fixture: the canonical
+// guarded divide, the exact shape real shaders write.
+//
+// The then-arm value (0.25/uv.x) is computed, not provably finite.
+// Executing both arms and blending arithmetically (slice B's select
+// lowering: d = a-b; dst = cond*d + b) is NOT a conditional move —
+// where uv.x <= 0.5 the untaken arm can produce inf/NaN and 0 * inf
+// poisons the blend even though the arm "was not taken".  Purity
+// excludes side effects; it does not exclude value contamination
+// (design note §2 step 3, with the reference compiler's predicated
+// emission as the settling evidence).
+//
+// CF-1a must therefore REFUSE this loudly on --general-lowering.
+// CF-1b's predicated write (MOV default; CC-set from cond; CC-gated
+// commit) lifts the refusal; its acceptance is the guarded-divide
+// readback row judged in pixels (design note §5 tier c).
+void main(float2 uv : TEXCOORD0,
+          out float4 color : COLOR)
+{
+    float r;
+    if (uv.x > 0.5f) {
+        r = 0.25f / uv.x;
+    } else {
+        r = 0.0f;
+    }
+    color = float4(r, r, r, 1.0f);
+}

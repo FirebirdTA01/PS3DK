@@ -1,0 +1,22 @@
+// CF-1a tier-a fixture: a single if/else diamond with provably
+// finite (literal) join arms — the smallest shape the general-path
+// control-flow flatten must unlock (t_91bbd575, design note
+// docs/design/shader-compiler-control-flow.md §5).
+//
+// Contract pinned by tests/shader-compiler/control-flow-flatten-test.sh:
+//   --general-lowering : compiles (rc=0, container present)
+//   default path       : keeps refusing — the flatten is gated to the
+//                        general path, and a flattened shader newly
+//                        compiling on the default path would be a
+//                        verdict change the byte fence rejects.
+void main(float2 uv : TEXCOORD0,
+          out float4 color : COLOR)
+{
+    float4 c;
+    if (uv.x > 0.5f) {
+        c = float4(0.75f, 0.25f, 0.0f, 1.0f);
+    } else {
+        c = float4(0.25f, 0.5f, 1.0f, 1.0f);
+    }
+    color = c;
+}

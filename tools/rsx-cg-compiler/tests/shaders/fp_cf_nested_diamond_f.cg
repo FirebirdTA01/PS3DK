@@ -1,0 +1,26 @@
+// CF-1a tier-a fixture: nested if/else (a diamond inside one arm).
+//
+// This shape is the reason the flatten pass performs a real
+// topological sort: the frontend appends blocks in creation order
+// (entry, if.then0, if.else1, if.end2, if.then3, if.else4, if.end5),
+// which places the OUTER join if.end2 before the inner arms that
+// feed it — vector order is not execution order.  Measured 2026-09-01
+// with --dump-ir; see the design note §1.
+//
+// All arms are literals, so the finite-arm rule admits every join
+// select: compiles under --general-lowering, refuses on default.
+void main(float2 uv : TEXCOORD0,
+          out float4 color : COLOR)
+{
+    float r;
+    if (uv.x > 0.5f) {
+        if (uv.y > 0.5f) {
+            r = 0.9f;
+        } else {
+            r = 0.6f;
+        }
+    } else {
+        r = 0.2f;
+    }
+    color = float4(r, r, 0.0f, 1.0f);
+}

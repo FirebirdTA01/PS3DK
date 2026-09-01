@@ -19,6 +19,11 @@
 
 #include "nv40_general_lowering.h"
 
+// Before the nv40 headers: nvfx_shader.h defines a function-like
+// `abs` macro that poisons <cmath> if the standard header is included
+// after it (std::isfinite is used by the CF-1a finite-arm check).
+#include <cmath>
+
 #include "nv40_fp_assembler.h"
 #include "nv40_vp_assembler.h"
 #include "nv30_vertprog.h"
@@ -334,10 +339,21 @@ public:
 
     VirtualProgram run()
     {
-        for (const auto& block : entry_.blocks) {
-            if (!block) continue;
+        std::vector<const IRBasicBlock*> order;
+        if (!flattenBlockOrder(order))
+            return program_;
+        for (const IRBasicBlock* block : order) {
             for (const auto& instPtr : block->instructions) {
                 if (!instPtr) continue;
+                // Flattened programs execute both arms unconditionally
+                // (joins arrive from the frontend as selects), so the
+                // branch terminators are dropped rather than lowered.
+                // Single-block programs keep the exact old behaviour: a
+                // stray branch still hits the unsupported-op refusal.
+                if (flattened_ &&
+                    (instPtr->op == IROp::Branch ||
+                     instPtr->op == IROp::CondBranch))
+                    continue;
                 lowerInstruction(*instPtr);
             }
         }
@@ -358,6 +374,200 @@ private:
     std::unordered_map<IRValueID, int> matrixUniformBase_;
     std::unordered_map<IRValueID, VSrc> conditionToSource_;
     std::unordered_map<IRValueID, int> valueWidth_;
+    // CF-1a flatten state (t_91bbd575).  Set only when the entry
+    // function has more than one basic block; single-block programs
+    // never engage the flatten and lower exactly as before.
+    bool flattened_ = false;
+    std::unordered_map<IRValueID, const IRInstruction*> defMap_;
+
+    // CF-1a (design note docs/design/shader-compiler-control-flow.md):
+    // a forward-only structured CFG runs UNCONDITIONALLY — both arms
+    // always execute, joins are already select instructions inserted
+    // by the frontend at the merge blocks — so flattening is a
+    // topological order over the blocks with the branch terminators
+    // dropped.  Everything predication cannot yet express refuses
+    // loudly here rather than lowering wrong:
+    //   - back-edges (loops) — no honest unconditional schedule exists;
+    //   - output stores off the exit block — an off-path store would
+    //     commit a value the branch was supposed to suppress;
+    //   - multiple (or zero) return blocks, unterminated blocks,
+    //     branches to unknown blocks, unreachable non-empty blocks —
+    //     shapes the frontend does not emit, refused rather than
+    //     assumed away.
+    // Successor edges are derived from the branch instructions
+    // themselves, not from IRBasicBlock's successor vectors: the
+    // instruction stream is what gets emitted, so it is what gets
+    // trusted.  Returns false with the refusal recorded.
+    bool flattenBlockOrder(std::vector<const IRBasicBlock*>& order)
+    {
+        std::vector<const IRBasicBlock*> blocks;
+        for (const auto& b : entry_.blocks)
+            if (b) blocks.push_back(b.get());
+        if (blocks.size() <= 1) {
+            order = blocks;
+            return true;
+        }
+        flattened_ = true;
+
+        auto refuse = [&](const std::string& what) {
+            program_.diagnostics.push_back("nv40-general: " + what);
+            program_.loweringFailed = true;
+            return false;
+        };
+
+        std::unordered_map<std::string, const IRBasicBlock*> byName;
+        for (const IRBasicBlock* b : blocks)
+            byName[b->name] = b;
+
+        std::unordered_map<const IRBasicBlock*,
+                           std::vector<const IRBasicBlock*>> succs;
+        const IRBasicBlock* exitBlock = nullptr;
+        for (const IRBasicBlock* b : blocks) {
+            bool terminated = false;
+            for (const auto& instPtr : b->instructions) {
+                if (!instPtr) continue;
+                const IRInstruction& inst = *instPtr;
+                if (terminated)
+                    return refuse("block '" + b->name +
+                                  "' has instructions past its terminator; refusing");
+                if (inst.result != InvalidIRValue)
+                    defMap_[inst.result] = &inst;
+                switch (inst.op) {
+                case IROp::Branch:
+                case IROp::CondBranch: {
+                    terminated = true;
+                    // targetName is "then,else" for brc, "target" for br.
+                    const std::string& t = inst.targetName;
+                    size_t start = 0;
+                    while (true) {
+                        const size_t comma = t.find(',', start);
+                        const std::string name =
+                            comma == std::string::npos
+                                ? t.substr(start)
+                                : t.substr(start, comma - start);
+                        auto it = byName.find(name);
+                        if (it == byName.end())
+                            return refuse("branch to unknown block '" +
+                                          name + "'; refusing");
+                        succs[b].push_back(it->second);
+                        if (comma == std::string::npos) break;
+                        start = comma + 1;
+                    }
+                    break;
+                }
+                case IROp::Return:
+                    terminated = true;
+                    if (exitBlock)
+                        return refuse(
+                            "more than one return block; refusing");
+                    exitBlock = b;
+                    break;
+                default:
+                    break;
+                }
+            }
+            if (!terminated)
+                return refuse("block '" + b->name +
+                              "' has no terminator; refusing");
+        }
+        if (!exitBlock)
+            return refuse("control flow has no return block; refusing");
+
+        for (const IRBasicBlock* b : blocks) {
+            if (b == exitBlock) continue;
+            for (const auto& instPtr : b->instructions) {
+                if (!instPtr) continue;
+                if (instPtr->op == IROp::StoreOutput ||
+                    instPtr->op == IROp::StoreVarying)
+                    return refuse(
+                        "output store off the exit block; refusing");
+            }
+        }
+
+        // Iterative DFS from the entry block (blocks[0] by contract).
+        // Reverse post-order of a DAG is a topological order, and a
+        // grey-node revisit is a back-edge, i.e. a loop.  Definitions
+        // dominate uses in this IR, and a dominator precedes its
+        // dominatee in every topological order, so emission in this
+        // order never reads an unresolved value.
+        std::unordered_map<const IRBasicBlock*, int> color;  // 0 white, 1 grey, 2 black
+        std::vector<const IRBasicBlock*> post;
+        struct Frame { const IRBasicBlock* b; size_t next; };
+        std::vector<Frame> stack;
+        stack.push_back({blocks.front(), 0});
+        color[blocks.front()] = 1;
+        while (!stack.empty()) {
+            const Frame f = stack.back();
+            const auto& ss = succs[f.b];
+            if (f.next < ss.size()) {
+                stack.back().next = f.next + 1;
+                const IRBasicBlock* nb = ss[f.next];
+                int& c = color[nb];
+                if (c == 1)
+                    return refuse(
+                        "control flow has a back-edge (loop); refusing");
+                if (c == 0) {
+                    c = 1;
+                    stack.push_back({nb, 0});
+                }
+            } else {
+                color[f.b] = 2;
+                post.push_back(f.b);
+                stack.pop_back();
+            }
+        }
+        for (const IRBasicBlock* b : blocks) {
+            if (color[b] == 2) continue;
+            for (const auto& instPtr : b->instructions)
+                if (instPtr)
+                    return refuse("unreachable block '" + b->name +
+                                  "' has instructions; refusing");
+        }
+        order.assign(post.rbegin(), post.rend());
+        if (order.back() != exitBlock)
+            return refuse(
+                "return block is not the control-flow sink; refusing");
+        return true;
+    }
+
+    // A select arm is provably finite when no execution can make it
+    // inf/NaN: a finite literal, a direct varying/attribute read, or a
+    // select over provably finite arms.  Everything computed (div,
+    // rsq, pow, ...) is not provable and must wait for CF-1b's
+    // predicated write.  Conservative by design: a false negative
+    // refuses a shader, a false positive silently corrupts its joins.
+    bool provablyFinite(IRValueID id, int depth = 0) const
+    {
+        if (depth > 64)
+            return false;
+        if (const auto* c =
+                dynamic_cast<const IRConstant*>(entry_.getValue(id))) {
+            if (std::holds_alternative<float>(c->value))
+                return std::isfinite(std::get<float>(c->value));
+            if (std::holds_alternative<std::vector<float>>(c->value)) {
+                for (float f : std::get<std::vector<float>>(c->value))
+                    if (!std::isfinite(f)) return false;
+                return true;
+            }
+            return true;  // bool / integer literals
+        }
+        const auto it = defMap_.find(id);
+        if (it == defMap_.end())
+            return false;
+        const IRInstruction& def = *it->second;
+        switch (def.op) {
+        case IROp::LoadVarying:
+        case IROp::LoadAttribute:
+            return true;
+        case IROp::Select:
+            return def.operands.size() >= 3 &&
+                   provablyFinite(def.operands[1], depth + 1) &&
+                   provablyFinite(def.operands[2], depth + 1);
+        default:
+            return false;
+        }
+    }
+
     static int componentRankFromMask(int mask)
     {
         switch (mask) {
@@ -2524,6 +2734,24 @@ private:
         if (profile_ != GeneralProfile::Vertex ||
             !isLiteralZero(inst.operands[1]) ||
             conditionToSource_.find(inst.operands[0]) == conditionToSource_.end()) {
+            // CF-1a: in a flattened program every select executes with
+            // both arms unconditionally live, and the arithmetic blend
+            // below is NOT a conditional move — if the untaken arm
+            // yields inf/NaN, 0 * NaN poisons the join even though the
+            // arm "was not taken".  Until CF-1b's predicated write
+            // lands, arms must be provably finite or the compile
+            // refuses (design note §2 step 3).  Single-block programs
+            // (flattened_ false) keep today's blend untouched.
+            if (flattened_ &&
+                (!provablyFinite(inst.operands[1]) ||
+                 !provablyFinite(inst.operands[2]))) {
+                program_.diagnostics.push_back(
+                    "nv40-general: join select arm is not provably finite; "
+                    "predicated select lowering (CF-1b) has not landed; "
+                    "refusing");
+                program_.loweringFailed = true;
+                return;
+            }
             // General select(c, a, b) with a 0/1 condition (which is what
             // the comparison lowerings produce): d = a - b, then
             // dst = c * d + b.  Component-wise, so vector conditions work.
