@@ -19,7 +19,8 @@
  *        |target=<t>|status=<status>|max_delta=<n>|diff_pixels=<n>
  *        |total_pixels=<n>|diagnostic=<d>|elapsed_ms=<n>|artifact=<a>
  * roles:  control-identical | control-mismatch | control-uniform |
- *         corpus | probe
+ *         corpus | probe | reference (ours vs a reference-compiled
+ *         container; gated like corpus)
  * status: identical | mismatch | load-failed-a | load-failed-b |
  *         uniform-missing-a | uniform-missing-b | uniforms-invalid
  * (`ours-refused` rows are emitted host-side by the stager for shaders

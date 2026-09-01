@@ -1,0 +1,18 @@
+# shader-differential ours-vs-reference pairs (increment 2c).
+# fields: repo-relative fragment shader path|uniform_set (default 0)
+#
+# Staged by stage-differential.ps1 only when a reference compiler is
+# given; the reference containers are runtime input under dev_hdd0 and
+# never enter the tree.  Byte-identical pairs are not staged.  Every
+# shader listed here must compile on both sides; a refusal aborts the
+# stage as a finding.  Uniform sets must exist in the stager's
+# uniforms table; samplers are not bound by the rig yet, so listed
+# shaders must not read textures.
+#
+# First three: the Class A oracle divergences (constant-colour outputs
+# where we spell the literal out and the reference reuses one constant
+# slot through a swizzle, 4-5 differing bytes) -- the pixel question is
+# whether that byte divergence reaches pixels.
+samples/toolchain/hello-psgl-blend/shaders/fp_red.fcg|0
+samples/toolchain/hello-psgl-blend/shaders/fp_blue_alpha.fcg|0
+samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg|0

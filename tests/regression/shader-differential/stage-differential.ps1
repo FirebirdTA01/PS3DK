@@ -31,6 +31,15 @@ param(
     [switch]$Corpus,
     [string]$WslCompiler = "",
     [string]$CorpusDir = "",     # WSL path; default: repo corpus + tracked fixtures
+    # -ReferenceCompiler: also stage the ours-vs-reference pairs listed in
+    # -ReferencePairs (increment 2c).  A host-side executable, or the
+    # PS3_REF_CG_COMPILER environment variable (the same discovery
+    # contract as the oracle harness: an executable, never a directory,
+    # and the console reports presence, never the path).  Reference
+    # containers are runtime input under dev_hdd0 only; they never enter
+    # the tree.  Byte-identical pairs are not staged.
+    [string]$ReferenceCompiler = "",
+    [string]$ReferencePairs = "",  # default: <rig>/reference-pairs.txt
     [string]$Hdd0 = ""           # override dev_hdd0 root (testing)
 )
 
@@ -86,8 +95,8 @@ New-Item -ItemType Directory -Force $artifacts | Out-Null
 $extraFlags = @()
 if ($GeneralLowering) { $extraFlags += "--general-lowering" }
 
-function Compile-Shader([string]$src, [string]$dst, [string[]]$flags) {
-    $srcPath = Join-Path $here "shaders\$src"
+function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute) {
+    $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
     if ($useWsl) {
         & wsl -- $WslCompiler @flags @($extraFlags) -p sce_fp_rsx `
             --emit-container (To-WslPath $dst) (To-WslPath $srcPath)
@@ -98,7 +107,8 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags) {
     # A zero-byte container is a compile that lied about succeeding --
     # refuse to stage it rather than let the guest report load-failed.
     if ((Get-Item $dst).Length -eq 0) { throw "compile produced empty container: $src" }
-    Write-Host "stager: $src -> $(Split-Path -Leaf $dst) ($((Get-Item $dst).Length) bytes)"
+    $label = if ($Absolute) { Split-Path -Leaf $src } else { $src }
+    Write-Host "stager: $label -> $(Split-Path -Leaf $dst) ($((Get-Item $dst).Length) bytes)"
 }
 
 # Standing controls.  control-identical is ONE container byte-copied
@@ -174,6 +184,74 @@ if ($Corpus) {
         Where-Object { $_ -and -not $_.StartsWith("#") }
     $manifest += $corpusRows
     Write-Host "stager: corpus rows appended ($($corpusRows.Count) pairs, $($stagedFiles.Count) containers)"
+}
+
+# Ours-vs-reference pairs (increment 2c).  Rows carry role=reference,
+# which the guest GATES like a corpus row: a pixel mismatch against the
+# reference fails the run.  Byte-identical pairs are counted and not
+# staged (byte-identical implies pixel-identical); a refusal on either
+# side is a finding, not a skip, so it aborts the stage.
+if (-not $ReferenceCompiler -and $env:PS3_REF_CG_COMPILER) { $ReferenceCompiler = $env:PS3_REF_CG_COMPILER }
+if ($ReferenceCompiler) {
+    if (-not (Test-Path $ReferenceCompiler)) {
+        throw "reference compiler not found (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+    }
+    Write-Host "stager: reference compiler present"
+    if (-not $ReferencePairs) { $ReferencePairs = Join-Path $here "reference-pairs.txt" }
+    $pairLines = @(Get-Content $ReferencePairs | Where-Object { $_ -and -not $_.StartsWith("#") })
+    if ($pairLines.Count -eq 0) { throw "reference-pairs list is empty: $ReferencePairs" }
+
+    $refDst = Join-Path $root "reference"
+    New-Item -ItemType Directory -Force $refDst | Out-Null
+    $refScratch = Join-Path $env:TEMP "sd-ref-stage"
+    if (Test-Path $refScratch) { Remove-Item -Recurse -Force $refScratch }
+    New-Item -ItemType Directory -Force $refScratch | Out-Null
+
+    $refRows = @()
+    $refIdentical = 0
+    $seenNames = @{}
+    foreach ($line in $pairLines) {
+        $fields = $line.Split("|")
+        $rel = $fields[0].Trim()
+        $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
+        $src = Join-Path $repoRoot $rel
+        if (-not (Test-Path $src)) { throw "reference-pairs: shader not found: $rel" }
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
+        if ($seenNames.ContainsKey($name)) {
+            $md5 = [System.Security.Cryptography.MD5]::Create()
+            $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
+            $name = "$name`_" + $hex.Substring(0, 6)
+        }
+        $seenNames[$name] = 1
+
+        $ours = Join-Path $refScratch "$name`_ours.fpo"
+        $ref  = Join-Path $refScratch "$name`_ref.fpo"
+        Compile-Shader $src $ours @() -Absolute
+        # The reference compiler reports progress on stderr; under
+        # $ErrorActionPreference = "Stop" a redirected native stderr line
+        # is a terminating error in PowerShell 5.1, so relax it for the
+        # call and judge by exit code + container instead.
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $null = & $ReferenceCompiler -p sce_fp_rsx -o $ref $src 2>&1
+        $refRc = $LASTEXITCODE
+        $ErrorActionPreference = $prevEap
+        if ($refRc -ne 0) { throw "reference compile failed ($refRc): $rel" }
+        if (-not (Test-Path $ref) -or (Get-Item $ref).Length -eq 0) { throw "reference compile produced no container: $rel" }
+
+        $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
+        $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
+        if ($hOurs -eq $hRef) {
+            $refIdentical++
+            Write-Host "stager: $rel byte-identical to reference -- not staged"
+            continue
+        }
+        Copy-Item $ours (Join-Path $refDst "$name`_ours.fpo") -Force
+        Copy-Item $ref  (Join-Path $refDst "$name`_ref.fpo") -Force
+        $refRows += "B|reference|$name|reference/$name`_ours.fpo|reference/$name`_ref.fpo|$set"
+    }
+    $manifest += $refRows
+    Write-Host "stager: reference rows appended ($($refRows.Count) pairs, $refIdentical byte-identical skipped)"
 }
 
 Set-Content -LiteralPath (Join-Path $root "manifest.txt") -Value ($manifest -join "`n") -Encoding Ascii
