@@ -151,6 +151,11 @@ uint32_t vpInputResource(const std::string& semUpper, int semIndex)
     if (semUpper == "NORMAL")   return kCgAttr0 + 2;        // ATTR2
     if (semUpper == "COLOR" || semUpper == "COL")
         return kCgAttr3 + (semIndex == 1 ? 1 : 0);          // ATTR3 / ATTR4
+    // Index-less aliases of COLOR0/COLOR1 in NVIDIA's auto-bind
+    // table (mirrors the lowering's semantic tables; DIFFUSE1 stays
+    // unmapped on purpose).
+    if (semUpper == "DIFFUSE"  && semIndex == 0) return kCgAttr3;      // ATTR3
+    if (semUpper == "SPECULAR" && semIndex == 0) return kCgAttr3 + 1;  // ATTR4
     if (semUpper == "BLENDWEIGHT" || semUpper == "WEIGHT")
         return kCgAttr0 + 1;                                 // ATTR1
     if (semUpper == "BLENDINDICES" || semUpper == "INDICES")
