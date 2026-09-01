@@ -885,6 +885,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     };
 
     bool emittedSomething = false;
+    // Set when a matcher finds an ambiguity it must not resolve by guessing.
+    // Pushing a diagnostic is NOT enough on its own: `ucode.ok` alone gates the
+    // exit code, so a matcher that declines while another shape succeeds would
+    // print the diagnostic inside a compile that exits 0 - the
+    // diagnostic-but-continues shape this codebase has been removing.
+    bool ambiguousBinding = false;
 
     // Two-pass architecture:
     //   Pass 0 — Analysis: walk all instructions, populate every
@@ -9419,6 +9425,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                         "nv40-fp: more than one normalize binding matches the "
                                         "eye-vector pattern; refusing rather than selecting one "
                                         "by hash order");
+                                    ambiguousBinding = true;
                                     return false;
                                 }
                                 eyeNormId = kv.first;
@@ -9853,6 +9860,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                         "nv40-fp: more than one normalize binding matches the "
                                         "eye-vector pattern; refusing rather than selecting one "
                                         "by hash order");
+                                    ambiguousBinding = true;
                                     return false;
                                 }
                                 eyeNormId = kv.first;
@@ -10952,6 +10960,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     if (!emittedSomething)
     {
         out.diagnostics.push_back("nv40-fp: no StoreOutput seen in entry point");
+        return out;
+    }
+
+    if (ambiguousBinding)
+    {
+        // A matcher refused an ambiguity it could not resolve honestly.  Even
+        // if a later shape matched and emitted, the program we would ship was
+        // chosen around an ambiguity nobody saw, so the compile fails.
         return out;
     }
 
