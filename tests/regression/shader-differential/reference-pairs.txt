@@ -30,3 +30,15 @@ samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/fpshader.fcg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto
+
+# NAMED REGRESSION for the scalar-broadcast defect (t_b6f2a2a4).  A scalar
+# operand under a MULTI-LANE write mask must broadcast lane 0; without it
+# every lane past x reads ZERO from the {c,0,0,0} constant block.  Each
+# channel isolates one scalar source kind through lane Y -- literal (R),
+# uniform (G), computed (B) -- so a failure names which kind regressed.
+# uniform_set=auto gives u_scale a synthesised value; input is non-flat on
+# purpose, because a wrong broadcast reads identically in a disassembly
+# listing and only pixels can tell.  Neither this project nor the Vita Cg
+# compiler had a fixture for this before today; both were relying on
+# general machinery rather than on a test that fails when it is removed.
+tests/regression/shader-differential/shaders/sd_scalar_broadcast.fcg|auto

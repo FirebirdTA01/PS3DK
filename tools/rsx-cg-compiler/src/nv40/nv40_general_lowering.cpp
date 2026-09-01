@@ -310,6 +310,22 @@ static VSrc literalSrc(const IRConstant& constant)
 {
     VSrc s;
     s.kind = VSrcKind::Literal;
+    // A SCALAR literal must BROADCAST lane 0, not read the const block
+    // straight through.  It lands in the block as {c,0,0,0}, so under the
+    // identity swizzle every lane past x reads ZERO: `MUL R.xy, R, {6,0,0,0}`
+    // multiplies y by zero, and the shader compiles clean and renders wrong.
+    // The reference emits `{6,...}.x` for exactly this reason (t_b6f2a2a4).
+    //
+    // The broadcast belongs to the OPERAND, not to the constant: the same
+    // literal can be used under a .x mask (where identity happens to be
+    // right) and under .xy (where it is not).  Setting it here makes every
+    // use correct without the caller having to know the destination mask -
+    // and it is a no-op for a .x use, which reads lane 0 either way.
+    //
+    // A VECTOR literal keeps the identity swizzle: its lanes are distinct
+    // values and broadcasting would destroy them.  Only the width-1 case
+    // broadcasts, which is why the vector branch tests values.size().
+    bool scalar = true;
     if (std::holds_alternative<float>(constant.value)) {
         s.literal[0] = std::get<float>(constant.value);
     } else if (std::holds_alternative<int32_t>(constant.value)) {
@@ -322,7 +338,10 @@ static VSrc literalSrc(const IRConstant& constant)
         const auto& values = std::get<std::vector<float>>(constant.value);
         for (size_t i = 0; i < std::min<size_t>(4, values.size()); ++i)
             s.literal[i] = values[i];
+        scalar = (values.size() == 1);
     }
+    if (scalar)
+        s.swizzle = {0, 0, 0, 0};
     return s;
 }
 

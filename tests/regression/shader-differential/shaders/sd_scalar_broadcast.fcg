@@ -1,0 +1,38 @@
+// shader-differential — NAMED REGRESSION for the scalar-broadcast defect
+// (t_b6f2a2a4).  Written because neither this project nor the Vita Cg
+// compiler had a fixture for it: both were protected by general machinery,
+// which is not the same as a test that fails when someone removes it.
+//
+// THE DEFECT: a SCALAR operand used under a MULTI-LANE write mask must
+// broadcast lane 0.  A scalar literal lands in the constant block as
+// {c,0,0,0}, so under the identity swizzle every lane past x reads ZERO:
+//   ours       MUL R.xy, R, {6,0,0,0}      <- lane y multiplies by 0
+//   reference  MUL R.xy, R, {6,...}.x      <- broadcast
+// It compiles clean and renders wrong, and .x-only uses are immune, which
+// is why it survived every shader that happened to use one lane.
+//
+// EACH CHANNEL ISOLATES ONE SCALAR SOURCE KIND, and all three read through
+// lane Y — the lane that breaks.  If the broadcast is lost, that channel
+// collapses to frac(0) = 0 while the others may survive, so a failure says
+// WHICH kind regressed rather than just that something did:
+//   R  scalar LITERAL   under a 2-lane mask
+//   G  scalar UNIFORM   under a 2-lane mask
+//   B  COMPUTED scalar  under a 2-lane mask
+//
+// Input is deliberately NON-FLAT (uv varies per pixel): a broadcast that is
+// present in the encoding but wrong in the swizzle reads identically in a
+// disassembly listing, so this has to be judged on pixels, not on a listing.
+// Reviewed cross-project with the vita-cg-compiler team, who make the same
+// point about their own ISA.
+
+void main(float2 uv : TEXCOORD0,
+          uniform float4 u_scale,
+          out float4 color : COLOR)
+{
+    float2 lit  = uv * 6.0;             // scalar literal  -> both lanes
+    float2 unif = uv * u_scale.x;       // scalar uniform  -> both lanes
+    float  prod = uv.x + uv.y;          // computed scalar
+    float2 comp = uv * prod;            // computed scalar -> both lanes
+
+    color = float4(frac(lit).y, frac(unif).y, frac(comp).y, 1.0);
+}
