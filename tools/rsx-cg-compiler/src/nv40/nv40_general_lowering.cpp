@@ -2188,6 +2188,16 @@ private:
             return false;
         // Operands: (cond, a, b) = cond ? a : b.
         const int mask = componentMask(inst.resultType);
+        // A SCALAR condition selecting vector arms is legal and common;
+        // the comparison wrote only .x of its register, so reading the
+        // condition with an identity swizzle would pull three
+        // uninitialized lanes into the blend (found in review by a
+        // scalar-cond/vec4-arms probe).  Broadcast width-1 conditions,
+        // keep identity when the widths match, refuse anything else.
+        const int condWidth = valueWidthOf(inst.operands[0]);
+        const int resultWidth = inst.resultType.componentCount();
+        if (condWidth != 1 && condWidth != resultWidth)
+            return false;
         const int d = newVReg();
         VInstr sub;
         sub.op = VOp::Add;
@@ -2203,6 +2213,10 @@ private:
         mad.dst.index = define(inst.result);
         mad.dst.writemask = mask;
         mad.srcs[0] = resolve(inst.operands[0]);
+        if (condWidth == 1) {
+            const uint8_t c = mad.srcs[0].swizzle[0];
+            mad.srcs[0].swizzle = {c, c, c, c};
+        }
         mad.srcs[1] = tempSrc(d);
         mad.srcs[2] = resolve(inst.operands[2]);
         program_.instrs.push_back(mad);
