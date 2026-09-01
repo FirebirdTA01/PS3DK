@@ -770,13 +770,13 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	int tries;
 	int have_prev = 0;
 	int stable = 0;
-	int painted_last = 0;
+	int ever_painted = 0;   /* any draw painted, not just the last one */
 	for (tries = 1; tries <= 10; tries++) {
 		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
 		wait_rsx_idle(ctx);
 		transfer_rt_to_main(ctx, rt_off, rt_pitch);
 		int painted = painted_pixels(g_readback, rt_pitch);
-		painted_last = painted;
+		ever_painted |= painted > 0;
 		if (painted > 0 && have_prev &&
 		    memcmp(save, g_readback, (size_t)rt_pitch * RT_H) == 0) {
 			stable = 1;
@@ -795,8 +795,11 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	 * into vacuous or into a plain verdict: it is the most specific
 	 * thing the rig can say about a shader (review question on the
 	 * two-readback warm-up).  A shader that paints nothing burns the
-	 * budget without ever being "painted" and stays on the vacuous path. */
-	if (!stable && painted_last > 0)
+	 * budget without ever being "painted" and stays on the vacuous path.
+	 * Keyed on whether the side EVER painted, not on its last frame: a
+	 * side that paints, never repeats, and ends the budget on a blank
+	 * frame is unstable, not vacuous (review finding). */
+	if (!stable && ever_painted)
 		return -6;
 
 	memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
