@@ -36,7 +36,16 @@
  *         internal-error (a render_side code the judge does not map) |
  *         vacuous (neither side painted a pixel: no verdict, never
  *         counted as identical) | path-pair-unoracled (the premise row
- *         before a path-pair row did not judge identical)
+ *         before a path-pair row did not judge identical) |
+ *         unstable-a | unstable-b (that side painted but no two
+ *         consecutive readbacks agreed: output varies between draws)
+ *
+ * Sensitivity, in every judged row's diagnostic: `levels a=R/G/B/A
+ * b=R/G/B/A` = distinct 8-bit values per channel per side, and `sat`
+ * = share of pixels with any channel at 0 or 255.  A green row with
+ * three levels per channel agreed on nothing worth quoting; the numbers
+ * make that visible where the verdict is read (the vita-cg room's
+ * false-pass shapes).
  *
  * Poison canary: after every row past the standing controls the rig
  * draws the identity control's container once; if that paints nothing
@@ -588,6 +597,44 @@ static int uniformSetIsNone(const char *set)
 	return !set[0] || strcmp(set, "0") == 0 || strcmp(set, "-") == 0;
 }
 
+/* Sensitivity of one image, per channel: how many distinct 8-bit levels
+ * it uses and what share of its pixels sit at 0 or 255.  An image with
+ * three levels per channel, or nine-tenths of it saturated, can agree
+ * with a completely wrong transcription of the same shader at
+ * max_delta 0 - the comparator has nothing to disagree about.  Not a
+ * verdict on its own: reported in every row so a green can be read for
+ * what it is worth (the vita-cg room's five false-pass shapes, all
+ * "not blank, no sensitivity"). */
+typedef struct {
+	int levels[4];    /* distinct values per channel, R G B A */
+	int saturated;    /* pixels with any channel at 0 or 255, of RT_W*RT_H */
+} sd_sensitivity;
+
+static void measure_sensitivity(const u32 *img, u32 rt_pitch, sd_sensitivity *out)
+{
+	static unsigned char seen[4][256];
+	memset(seen, 0, sizeof(seen));
+	out->saturated = 0;
+	for (u32 y = 0; y < RT_H; y++)
+		for (u32 x = 0; x < RT_W; x++) {
+			u32 p = img[y * (rt_pitch / 4u) + x];
+			int sat = 0;
+			unsigned ch[4] = { (p >> 16) & 0xffu, (p >> 8) & 0xffu, p & 0xffu, (p >> 24) & 0xffu };
+			for (int c = 0; c < 4; c++) {
+				seen[c][ch[c]] = 1;
+				if (ch[c] == 0u || ch[c] == 255u)
+					sat = 1;
+			}
+			out->saturated += sat;
+		}
+	for (int c = 0; c < 4; c++) {
+		int n = 0;
+		for (int v = 0; v < 256; v++)
+			n += seen[c][v];
+		out->levels[c] = n;
+	}
+}
+
 /* Pixels a draw actually painted: neither the GPU clear mark nor the
  * host-side sentinel that marks a transfer that never landed. */
 static int painted_pixels(const u32 *img, u32 rt_pitch)
@@ -639,7 +686,8 @@ static int canary_paints(CellGcmContextData *ctx, void *canary_container,
  * 0); -4 if it declares samplers and the manifest carries no texture
  * control at all (have_tex_control == 0); -5 if the set is `auto` and
  * the container declares a uniform kind the binder does not
- * synthesise.  The caller reports which side.  Sampler checks come
+ * synthesise; -6 if the side painted but no two consecutive readbacks
+ * agreed within the warm-up budget (unstable).  The caller reports which side.  Sampler checks come
  * BEFORE any draw so a withheld verdict costs nothing. */
 static int render_side(CellGcmContextData *ctx, void *container,
                        const char *uniform_set,
@@ -709,22 +757,47 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
 
 	/* Warm-up retries against RPCS3's async shader compiler (see the
-	 * readback rig).  A draw counts as landed when ANY pixel left the
-	 * clear mark (the centre alone made every discarding or
-	 * partially-covering shader burn the whole budget, 4 s a side).
-	 * A shader that legitimately paints nothing still burns it and is
-	 * judged from the final image anyway - slow, never wrong, and both
-	 * sides of a pair face the identical policy. */
+	 * readback rig).  A draw counts as landed only when two CONSECUTIVE
+	 * readbacks are byte-identical AND painted: the interim program the
+	 * emulator hands a never-seen shader on its first draw can paint
+	 * nothing (the common case) or ALMOST everything (measured: 4042
+	 * and 3968 of 4096 on two general-path containers, accepted by the
+	 * previous any-pixel rule and reported as a compiler defect for an
+	 * hour).  A blank interim never qualifies; a real frame costs one
+	 * confirming draw.  A shader that legitimately paints nothing burns
+	 * the budget and is judged from the final image anyway - slow,
+	 * never wrong, and both sides of a pair face the identical policy. */
 	int tries;
+	int have_prev = 0;
+	int stable = 0;
+	int painted_last = 0;
 	for (tries = 1; tries <= 10; tries++) {
 		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
 		wait_rsx_idle(ctx);
 		transfer_rt_to_main(ctx, rt_off, rt_pitch);
-		if (painted_pixels(g_readback, rt_pitch) > 0)
+		int painted = painted_pixels(g_readback, rt_pitch);
+		painted_last = painted;
+		if (painted > 0 && have_prev &&
+		    memcmp(save, g_readback, (size_t)rt_pitch * RT_H) == 0) {
+			stable = 1;
 			break;
-		usleep(200000);
+		}
+		memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
+		have_prev = painted > 0;
+		if (!have_prev)
+			usleep(200000);
 	}
 	*warmup_draws = tries;
+	/* Painted frames that never agreed twice in a row: the shader's
+	 * output varies between draws, which is the signature of reading
+	 * uninitialised state - a lane nobody wrote, a register holding two
+	 * values.  Reported as its own status (unstable-a/b), never folded
+	 * into vacuous or into a plain verdict: it is the most specific
+	 * thing the rig can say about a shader (review question on the
+	 * two-readback warm-up).  A shader that paints nothing burns the
+	 * budget without ever being "painted" and stays on the vacuous path. */
+	if (!stable && painted_last > 0)
+		return -6;
 
 	memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
 	return 0;
@@ -933,7 +1006,7 @@ typedef struct {
 	int  diff_pixels;
 	int  total_pixels;
 	long elapsed_ms;
-	char diagnostic[96];
+	char diagnostic[192];
 	char artifact[96];
 } sd_result;
 
@@ -1033,6 +1106,11 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
 			         "container declares samplers but the manifest has no control-texture row");
 			break;
+		case -6:
+			r->status = side == 'a' ? "unstable-a" : "unstable-b";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "10 draws, no two consecutive readbacks agreed: output varies between draws");
+			break;
 		case -5:
 			r->status = side == 'a' ? "uniform-unsupported-a" : "uniform-unsupported-b";
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
@@ -1093,9 +1171,26 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
 		         "%spainted a=%d b=%d", len ? " " : "", painted_a, painted_b);
 	}
-	if (warm_a > 1 || warm_b > 1)
-		snprintf(r->diagnostic, sizeof(r->diagnostic),
-		         "warmup a=%d b=%d", warm_a, warm_b);
+	{
+		sd_sensitivity sa, sb;
+		measure_sensitivity(save_a, rt_pitch, &sa);
+		measure_sensitivity(save_b, rt_pitch, &sb);
+		size_t len = strlen(r->diagnostic);
+		if (strcmp(r->diagnostic, "-") == 0) len = 0;
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         "%slevels a=%d/%d/%d/%d b=%d/%d/%d/%d sat a=%d%% b=%d%%",
+		         len ? " " : "",
+		         sa.levels[0], sa.levels[1], sa.levels[2], sa.levels[3],
+		         sb.levels[0], sb.levels[1], sb.levels[2], sb.levels[3],
+		         (sa.saturated * 100) / (RT_W * RT_H),
+		         (sb.saturated * 100) / (RT_W * RT_H));
+	}
+	if (warm_a > 1 || warm_b > 1) {
+		size_t len = strlen(r->diagnostic);
+		if (strcmp(r->diagnostic, "-") == 0) len = 0;
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         "%swarmup a=%d b=%d", len ? " " : "", warm_a, warm_b);
+	}
 	r->elapsed_ms = now_ms() - t0;
 }
 
@@ -1221,6 +1316,7 @@ int main(int argc, const char **argv)
 	int autos_ok = 1;      /* flipped by a failed control-auto row */
 	int unsupported = 0;   /* gated rows the binder could not serve */
 	int vacuous = 0;       /* gated rows where neither side painted */
+	int unstable = 0;      /* gated rows where a side never repeated a frame */
 	int unoracled = 0;     /* path-pair rows whose premise row was not identical */
 	const char *prev_role = "";       /* the row before this one, for path-pair */
 	const char *prev_status = "";
@@ -1404,6 +1500,12 @@ int main(int argc, const char **argv)
 			}
 		} else if (strcmp(p->role, "probe") == 0) {
 			/* Probe rows measure; they never gate. */
+		} else if (strncmp(r.status, "unstable", 8) == 0) {
+			/* Output varied between draws on one side: a statement
+			 * about the shader (uninitialised state), counted on its
+			 * own line so it is never mistaken for an emulator stall
+			 * or a plain mismatch. */
+			unstable++;
 		} else if (strcmp(r.status, "vacuous") == 0) {
 			/* Neither side painted: no verdict about the compiler was
 			 * reached.  Counted on its own line, loudly, and never as
@@ -1445,9 +1547,9 @@ int main(int argc, const char **argv)
 	free(canary);
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d path-pair rows unoracled\n",
-	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - unoracled,
-	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, unoracled);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame)\n",
+	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - unoracled - unstable,
+	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, unoracled, unstable);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:
