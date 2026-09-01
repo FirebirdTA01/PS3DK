@@ -171,6 +171,13 @@ static int vpMaskFromComponentMask(int mask)
 
 static int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
 {
+    // Struct-flattened loads from unbound fields carry an EMPTY semantic
+    // and a positional index - the frontend's inferred-ATTR convention,
+    // which the container writer already maps as empty-at-N = ATTRN.
+    // The lowering must agree or those inputs are unresolvable (this was
+    // one of the two general-vs-default regressions).
+    if (semanticUpper.empty() && semanticIndex >= 0 && semanticIndex < 16)
+        return semanticIndex;
     if (semanticUpper == "POSITION") return NVFX_VP_INST_IN_POS;
     if (semanticUpper == "NORMAL")   return NVFX_VP_INST_IN_NORMAL;
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
@@ -875,6 +882,9 @@ private:
             return;
         case IROp::Reflect:
             lowerReflect(inst);
+            return;
+        case IROp::Refract:
+            lowerRefract(inst);
             return;
         case IROp::CmpLe:
             lowerCmpLE(inst);
@@ -2261,6 +2271,148 @@ private:
         mad.srcs[2] = tempSrc(iReg);
         mad.stubFenceBrBefore = true;
         program_.instrs.push_back(mad);
+    }
+
+    // refract(I, N, eta):
+    //   d = dot(N, I);  k = 1 - eta^2 * (1 - d^2)
+    //   result = (k < 0) ? 0 : eta*I - (eta*d + sqrt(k)) * N
+    //
+    // The k<0 arm is resolved with the ARITHMETIC select - deliberately,
+    // as the control-flow note's provably-finite opt-in: sqrt is taken of
+    // |k| (abs modifier), so the "untaken" arm's value is finite for every
+    // input and 0*finite cannot contaminate the blend the way 0*NaN would.
+    // That is the whole reason the |k| is there.
+    void lowerRefract(const IRInstruction& inst)
+    {
+        if (profile_ != GeneralProfile::Fragment ||
+            inst.operands.size() < 3 || inst.result == InvalidIRValue) {
+            program_.diagnostics.push_back(
+                "nv40-general: only FP refract lowering is supported; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const VSrc I   = resolve(inst.operands[0]);
+        const VSrc N   = resolve(inst.operands[1]);
+        const VSrc eta = resolve(inst.operands[2]);
+
+        // t.x = d = dot(N, I); t.y = 1 - d^2; t.z = eta^2; t.w = k
+        const int t = newVReg();
+        VInstr dot;
+        dot.op = VOp::Dp3;
+        dot.dst.index = t;
+        dot.dst.writemask = 0x1;
+        dot.srcs[0] = N;
+        dot.srcs[1] = I;
+        program_.instrs.push_back(dot);
+
+        VInstr oneMinusD2;
+        oneMinusD2.op = VOp::Mad;
+        oneMinusD2.dst.index = t;
+        oneMinusD2.dst.writemask = 0x2;
+        oneMinusD2.srcs[0] = tempSrc(t);
+        oneMinusD2.srcs[0].swizzle = {0, 0, 0, 0};
+        oneMinusD2.srcs[0].neg = true;
+        oneMinusD2.srcs[1] = tempSrc(t);
+        oneMinusD2.srcs[1].swizzle = {0, 0, 0, 0};
+        oneMinusD2.srcs[2] = floatLit(1.0f);
+        program_.instrs.push_back(oneMinusD2);
+
+        VInstr eta2;
+        eta2.op = VOp::Mul;
+        eta2.dst.index = t;
+        eta2.dst.writemask = 0x4;
+        eta2.srcs[0] = eta;
+        eta2.srcs[0].swizzle = {0, 0, 0, 0};
+        eta2.srcs[1] = eta;
+        eta2.srcs[1].swizzle = {0, 0, 0, 0};
+        program_.instrs.push_back(eta2);
+
+        VInstr k;
+        k.op = VOp::Mad;
+        k.dst.index = t;
+        k.dst.writemask = 0x8;
+        k.srcs[0] = tempSrc(t);
+        k.srcs[0].swizzle = {2, 2, 2, 2};
+        k.srcs[0].neg = true;
+        k.srcs[1] = tempSrc(t);
+        k.srcs[1].swizzle = {1, 1, 1, 1};
+        k.srcs[2] = floatLit(1.0f);
+        program_.instrs.push_back(k);
+
+        // s.x = rsq(|k|); s.y = sqrt(|k|); s.z = eta*d + sqrt(|k|)
+        const int s = newVReg();
+        VInstr rsq;
+        rsq.op = VOp::Rsq;
+        rsq.dst.index = s;
+        rsq.dst.writemask = 0x1;
+        rsq.srcs[0] = tempSrc(t);
+        rsq.srcs[0].swizzle = {3, 3, 3, 3};
+        rsq.srcs[0].abs = true;
+        program_.instrs.push_back(rsq);
+
+        VInstr sq;
+        sq.op = VOp::Rcp;
+        sq.dst.index = s;
+        sq.dst.writemask = 0x2;
+        sq.srcs[0] = tempSrc(s);
+        sq.srcs[0].swizzle = {0, 0, 0, 0};
+        program_.instrs.push_back(sq);
+
+        VInstr coef;
+        coef.op = VOp::Mad;
+        coef.dst.index = s;
+        coef.dst.writemask = 0x4;
+        coef.srcs[0] = eta;
+        coef.srcs[0].swizzle = {0, 0, 0, 0};
+        coef.srcs[1] = tempSrc(t);
+        coef.srcs[1].swizzle = {0, 0, 0, 0};
+        coef.srcs[2] = tempSrc(s);
+        coef.srcs[2].swizzle = {1, 1, 1, 1};
+        program_.instrs.push_back(coef);
+
+        // r = eta*I - coef*N   (finite for all inputs)
+        const int result = define(inst.result);
+        VInstr etaI;
+        etaI.op = VOp::Mul;
+        etaI.dst.index = result;
+        etaI.dst.writemask = 0x7;
+        etaI.srcs[0] = I;
+        etaI.srcs[1] = eta;
+        etaI.srcs[1].swizzle = {0, 0, 0, 0};
+        program_.instrs.push_back(etaI);
+
+        VInstr subN;
+        subN.op = VOp::Mad;
+        subN.dst.index = result;
+        subN.dst.writemask = 0x7;
+        subN.srcs[0] = N;
+        subN.srcs[0].neg = true;
+        subN.srcs[1] = tempSrc(s);
+        subN.srcs[1].swizzle = {2, 2, 2, 2};
+        subN.srcs[2] = tempSrc(result);
+        program_.instrs.push_back(subN);
+
+        // c = (k < 0); result = r - r*c  (arithmetic select, both arms finite)
+        VInstr cmp;
+        cmp.op = VOp::Slt;
+        cmp.dst.index = s;
+        cmp.dst.writemask = 0x8;
+        cmp.srcs[0] = tempSrc(t);
+        cmp.srcs[0].swizzle = {3, 3, 3, 3};
+        cmp.srcs[1] = floatLit(0.0f);
+        program_.instrs.push_back(cmp);
+
+        VInstr blend;
+        blend.op = VOp::Mad;
+        blend.dst.index = result;
+        blend.dst.writemask = 0x7;
+        blend.srcs[0] = tempSrc(result);
+        blend.srcs[0].neg = true;
+        blend.srcs[1] = tempSrc(s);
+        blend.srcs[1].swizzle = {3, 3, 3, 3};
+        blend.srcs[2] = tempSrc(result);
+        program_.instrs.push_back(blend);
     }
 
     void lowerTex(const IRInstruction& inst)
