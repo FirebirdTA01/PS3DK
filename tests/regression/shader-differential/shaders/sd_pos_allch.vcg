@@ -1,0 +1,38 @@
+// shader-differential — all-channel vertex program (NOT under test).
+//
+// Successor to sd_pos_uv.vcg for the auto-binder (increment 3): every
+// interpolated channel a fragment program under judgment may read is
+// driven by a deterministic function of the quad's (u,v), so both
+// sides of a pair see identical inputs and any reader gets defined
+// data instead of stale registers.  TEXCOORD0 is unchanged from
+// sd_pos_uv.vcg (u, v, 0, 1), so every row staged before this VP
+// existed sees exactly what it saw.
+//
+// Channel recipe (u,v in 0..1 across the RT, v down):
+//   TEXCOORD0 = (u, v, 0, 1)                 texture coordinates
+//   TEXCOORD1 = (u - 0.5, v - 0.5, 0.5, 1)   a "normal"-shaped vector
+//   TEXCOORD2 = (0.5 - u, 0.5, v, 1)         a "half"/"eye"-shaped vector
+//   TEXCOORD3 = (u * v, u + v, 1 - u, 1)     mixed products
+//   COLOR0    = (u, v, 1 - u, 0.5 + 0.5 v)   per-vertex colour with alpha ramp
+// Nothing is normalised here: shaders that normalise do so themselves,
+// shaders that dot raw vectors get finite, varying values.
+
+void main(
+    float2 in_position       : POSITION,
+    float2 in_texcoord       : TEXCOORD0,
+    out float4 out_position  : POSITION,
+    out float4 out_texcoord0 : TEXCOORD0,
+    out float4 out_texcoord1 : TEXCOORD1,
+    out float4 out_texcoord2 : TEXCOORD2,
+    out float4 out_texcoord3 : TEXCOORD3,
+    out float4 out_color     : COLOR0)
+{
+    float u = in_texcoord.x;
+    float v = in_texcoord.y;
+    out_position  = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    out_texcoord0 = float4(u, v, 0.0f, 1.0f);
+    out_texcoord1 = float4(u - 0.5f, v - 0.5f, 0.5f, 1.0f);
+    out_texcoord2 = float4(0.5f - u, 0.5f, v, 1.0f);
+    out_texcoord3 = float4(u * v, u + v, 1.0f - u, 1.0f);
+    out_color     = float4(u, v, 1.0f - u, 0.5f + 0.5f * v);
+}

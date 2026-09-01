@@ -1,0 +1,18 @@
+// shader-differential — texture-binding control, sampled side.
+//
+// Paired with sd_tex_baked.fcg under role control-texture.  Outputs the
+// texel the auto-binder's procedural texture holds at this pixel; the
+// twin computes the same value arithmetically from the interpolated
+// texcoord.  Identical iff the guest bound the procedural texture to
+// the unit this sampler declares AND sampling is nearest, unfiltered,
+// texel-aligned to the 64x64 RT.  Unbound or wrongly bound samplers
+// judge mismatch, which then withholds every sampler-dependent verdict
+// in the run.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    uniform sampler2D u_tex : TEXUNIT0,
+    out float4 out_color : COLOR)
+{
+    out_color = tex2D(u_tex, in_texcoord.xy);
+}

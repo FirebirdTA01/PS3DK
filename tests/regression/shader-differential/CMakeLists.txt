@@ -33,6 +33,6 @@ target_link_libraries(shader-differential PRIVATE
 # Control/probe fragment shaders in shaders/ are compiled by the
 # STAGER, not here — they must travel the same runtime-load path as
 # every corpus pair, or the controls would not exercise the pair path.
-ps3_add_cg_shader_rsxcgc(shader-differential shaders/sd_pos_uv.vcg)
+ps3_add_cg_shader_rsxcgc(shader-differential shaders/sd_pos_allch.vcg)
 
 ps3_add_self(shader-differential)

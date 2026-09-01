@@ -19,10 +19,19 @@
  *        |target=<t>|status=<status>|max_delta=<n>|diff_pixels=<n>
  *        |total_pixels=<n>|diagnostic=<d>|elapsed_ms=<n>|artifact=<a>
  * roles:  control-identical | control-mismatch | control-uniform |
- *         corpus | probe | reference (ours vs a reference-compiled
- *         container; gated like corpus)
+ *         control-texture | corpus | probe | reference (ours vs a
+ *         reference-compiled container; gated like corpus)
  * status: identical | mismatch | load-failed-a | load-failed-b |
- *         uniform-missing-a | uniform-missing-b | uniforms-invalid
+ *         uniform-missing-a | uniform-missing-b | uniforms-invalid |
+ *         textures-invalid | samplers-unvalidated |
+ *         sampler-unsupported-a | sampler-unsupported-b
+ *
+ * Auto-binder (increment 3a): every sampler2D a container declares is
+ * bound to ONE procedural 64x64 texture (both sides alike), and the
+ * shared VP drives every interpolated channel from the quad's (u,v).
+ * The control-texture row (sampled vs arithmetic twin) proves the
+ * binding lands; while it is red, or absent, no sampler-declaring pair
+ * is judged -- the same shape as the uniform gate.
  * (`ours-refused` rows are emitted host-side by the stager for shaders
  * our compiler refused — no container exists, so the guest never sees
  * them; the scraper merges both sources.)
@@ -90,7 +99,7 @@
 #include <cell/gcm.h>
 #include <rsx/rsx.h>
 
-#include "sd_pos_uv_vpo.h"
+#include "sd_pos_allch_vpo.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -273,6 +282,92 @@ static u32       vertex_buffer_offset;
 static u32 *g_readback;
 static u32  g_readback_off;
 
+/* ---- auto-binder: one procedural texture for every sampler ---- */
+
+#define TEX_W 64
+#define TEX_H 64
+static u32 g_tex_offset;
+
+/* Texel (x, y) = (R, G, B, A) = (4x, 4y, 4(63 - x), 4y) in 8-bit units:
+ * every channel a linear ramp the texture control's arithmetic twin
+ * recomputes from the interpolated texcoord, and alpha ramping 0..~1
+ * down the image so a discard-on-alpha shader exercises both branches.
+ * 64x64 against the 64x64 RT with nearest sampling: pixel (px, py)
+ * reads texel (px, py), no filtering in the loop. */
+static int init_procedural_texture(void)
+{
+	u32 *px = (u32 *)local_align(128, TEX_W * TEX_H * sizeof(u32));
+	for (u32 y = 0; y < TEX_H; y++)
+		for (u32 x = 0; x < TEX_W; x++)
+			px[y * TEX_W + x] = ((4u * y) << 24) | ((4u * x) << 16)
+			                  | ((4u * y) << 8) | (4u * (63u - x));
+	return cellGcmAddressToOffset(px, &g_tex_offset) == 0;
+}
+
+/* Bind recipe from the cellgcm discard-blend sample (proven on the
+ * emulator), with NEAREST filtering so the control's texel arithmetic
+ * holds exactly. */
+static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit)
+{
+	CellGcmTexture t = {0};
+	t.format    = CELL_GCM_TEXTURE_A8R8G8B8
+	            | CELL_GCM_TEXTURE_LN
+	            | CELL_GCM_TEXTURE_NR;
+	t.mipmap    = 1;
+	t.dimension = CELL_GCM_TEXTURE_DIMENSION_2;
+	t.cubemap   = CELL_GCM_FALSE;
+	t.remap     = (CELL_GCM_TEXTURE_REMAP_REMAP <<  8)
+	            | (CELL_GCM_TEXTURE_REMAP_REMAP << 10)
+	            | (CELL_GCM_TEXTURE_REMAP_REMAP << 12)
+	            | (CELL_GCM_TEXTURE_REMAP_REMAP << 14)
+	            | (CELL_GCM_TEXTURE_REMAP_FROM_A <<  0)
+	            | (CELL_GCM_TEXTURE_REMAP_FROM_R <<  2)
+	            | (CELL_GCM_TEXTURE_REMAP_FROM_G <<  4)
+	            | (CELL_GCM_TEXTURE_REMAP_FROM_B <<  6);
+	t.width     = (u16)TEX_W;
+	t.height    = (u16)TEX_H;
+	t.depth     = 1;
+	t.location  = CELL_GCM_LOCATION_LOCAL;
+	t.pitch     = (u32)(TEX_W * sizeof(u32));
+	t.offset    = g_tex_offset;
+	cellGcmSetTexture(ctx, (uint8_t)unit, &t);
+	cellGcmSetTextureControl(ctx, (uint8_t)unit, CELL_GCM_TRUE,
+	                         0, 0, CELL_GCM_TEXTURE_MAX_ANISO_1);
+	cellGcmSetTextureFilter(ctx, (uint8_t)unit, 0,
+	                        CELL_GCM_TEXTURE_NEAREST,
+	                        CELL_GCM_TEXTURE_NEAREST,
+	                        CELL_GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+	cellGcmSetTextureAddress(ctx, (uint8_t)unit,
+	                         CELL_GCM_TEXTURE_CLAMP_TO_EDGE,
+	                         CELL_GCM_TEXTURE_CLAMP_TO_EDGE,
+	                         CELL_GCM_TEXTURE_CLAMP_TO_EDGE,
+	                         CELL_GCM_TEXTURE_UNSIGNED_REMAP_NORMAL,
+	                         CELL_GCM_TEXTURE_ZFUNC_LESS,
+	                         0);
+}
+
+/* Walks the container's parameter table and binds the procedural
+ * texture to every sampler2D unit it declares.  Returns the count
+ * bound, or -1 when a sampler of a kind this binder does not serve
+ * (1D/3D/RECT/CUBE) or an out-of-range unit is declared: such a pair
+ * cannot be judged, and says so rather than sampling nothing. */
+static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
+{
+	int n = 0;
+	for (CGparameter prm = cellGcmCgGetFirstLeafParameter(fpo); prm;
+	     prm = cellGcmCgGetNextLeafParameter(fpo, prm)) {
+		u32 type = cellGcmCgGetParameterType(fpo, prm);
+		if (type < CG_SAMPLER1D || type > CG_SAMPLERCUBE)
+			continue;
+		u32 res = cellGcmCgGetParameterResource(fpo, prm);
+		if (type != CG_SAMPLER2D || res < CG_TEXUNIT0 || res > CG_TEXUNIT15)
+			return -1;
+		bind_procedural_texture(ctx, res - CG_TEXUNIT0);
+		n++;
+	}
+	return n;
+}
+
 static char g_target[16] = "emulator";  /* @target manifest directive */
 
 static void transfer_rt_to_main(CellGcmContextData *ctx, u32 rt_off, u32 rt_pitch)
@@ -383,16 +478,30 @@ static int uniformSetIsNone(const char *set)
 
 /* ---- one side of a pair: bind, draw (with warm-up), read back ---- */
 
-/* Returns 0 on success, -1 if a uniform in the pair's set has no
- * matching named parameter in this side's container (the caller
- * reports which side). */
+/* Returns 0 on success; -1 if a uniform in the pair's set has no
+ * matching named parameter in this side's container; -2 if the
+ * container declares a sampler the auto-binder cannot serve; -3 if it
+ * declares samplers while the texture control is red (textures_ok ==
+ * 0); -4 if it declares samplers and the manifest carries no texture
+ * control at all (have_tex_control == 0).  The caller reports which
+ * side.  Sampler checks come BEFORE any draw so a withheld verdict
+ * costs nothing. */
 static int render_side(CellGcmContextData *ctx, void *container,
                        const char *uniform_set,
+                       int textures_ok, int have_tex_control,
                        u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
                        u32 *save, int *warmup_draws)
 {
 	CGprogram fpo = (CGprogram)container;
 	cellGcmCgInitProgram(fpo);
+
+	int nsamplers = bind_container_samplers(ctx, fpo);
+	if (nsamplers < 0)
+		return -2;
+	if (nsamplers > 0 && !have_tex_control)
+		return -4;
+	if (nsamplers > 0 && !textures_ok)
+		return -3;
 
 	void *fp_blob_ucode; u32 fpsize = 0;
 	cellGcmCgGetUCode(fpo, &fp_blob_ucode, &fpsize);
@@ -593,6 +702,30 @@ static int load_manifest(void)
 			return 0;
 		}
 	}
+	/* Texture gate ordering.  Sampler use is a property of the
+	 * CONTAINERS, not the manifest, so existence cannot be required at
+	 * load (a sampler-declaring pair with no control is refused at
+	 * judge time, status samplers-unvalidated).  Ordering CAN be: if a
+	 * control-texture row exists it must precede every row that is not
+	 * a control, or a sampler-declaring row would be judged before the
+	 * gate can close -- the same property the uniform gate enforces. */
+	{
+		int tex_index = -1, first_open_row = -1;
+		for (int i = 0; i < g_npairs; i++) {
+			if (strcmp(g_pairs[i].role, "control-texture") == 0) {
+				if (tex_index < 0)
+					tex_index = i;
+			} else if (strncmp(g_pairs[i].role, "control-", 8) != 0 &&
+			           first_open_row < 0) {
+				first_open_row = i;
+			}
+		}
+		if (tex_index >= 0 && first_open_row >= 0 && tex_index > first_open_row) {
+			printf("shader-differential: manifest line order puts a non-control row (index %d) before the control-texture row (index %d) - a sampler-declaring pair there would be judged before the gate can close; refusing\n",
+			       first_open_row, tex_index);
+			return 0;
+		}
+	}
 	return 1;
 }
 
@@ -616,6 +749,7 @@ static long now_ms(void)
 }
 
 static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
+                       int textures_ok, int have_tex_control,
                        u32 rt_a_off, u32 rt_b_off, u32 rt_depth_off,
                        u32 rt_pitch, u32 *save_a, u32 *save_b,
                        sd_result *r)
@@ -658,21 +792,51 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	const char *set_b = strcmp(p->role, "control-uniform") == 0
 		? "0" : p->uniform_set;
 
+	/* The texture control is the one row that may declare samplers
+	 * while the gate is closed: it is the row that opens it. */
+	int tex_ok_here = textures_ok ||
+	                  strcmp(p->role, "control-texture") == 0;
+
 	int warm_a = 0, warm_b = 0;
-	int ua = render_side(ctx, cont_a, p->uniform_set, rt_a_off,
+	int ua = render_side(ctx, cont_a, p->uniform_set, tex_ok_here,
+	                     have_tex_control, rt_a_off,
 	                     rt_depth_off, rt_pitch, save_a, &warm_a);
-	int ub = render_side(ctx, cont_b, set_b, rt_b_off,
-	                     rt_depth_off, rt_pitch, save_b, &warm_b);
+	int ub = ua == 0
+		? render_side(ctx, cont_b, set_b, tex_ok_here,
+		              have_tex_control, rt_b_off,
+		              rt_depth_off, rt_pitch, save_b, &warm_b)
+		: 0;
 
 	g_local_mem_heap = watermark;
 	free(cont_a);
 	free(cont_b);
 
 	if (ua != 0 || ub != 0) {
-		r->status = ua != 0 ? "uniform-missing-a" : "uniform-missing-b";
-		snprintf(r->diagnostic, sizeof(r->diagnostic),
-		         "set '%s' names a parameter the container lacks",
-		         p->uniform_set);
+		int rc = ua != 0 ? ua : ub;
+		char side = ua != 0 ? 'a' : 'b';
+		switch (rc) {
+		case -1:
+			r->status = side == 'a' ? "uniform-missing-a" : "uniform-missing-b";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "set '%s' names a parameter the container lacks",
+			         p->uniform_set);
+			break;
+		case -2:
+			r->status = side == 'a' ? "sampler-unsupported-a" : "sampler-unsupported-b";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "container declares a sampler kind or unit the binder does not serve");
+			break;
+		case -3:
+			r->status = "textures-invalid";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "skipped: control-texture failed");
+			break;
+		default:
+			r->status = "samplers-unvalidated";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "container declares samplers but the manifest has no control-texture row");
+			break;
+		}
 		r->elapsed_ms = now_ms() - t0;
 		return;
 	}
@@ -756,7 +920,7 @@ int main(int argc, const char **argv)
 	wait_rsx_idle(ctx);
 
 	/* ---- shared VP + geometry ---- */
-	vpo = (CGprogram)sd_pos_uv_vpo;
+	vpo = (CGprogram)sd_pos_allch_vpo;
 	cellGcmCgInitProgram(vpo);
 	u32 vpsize = 0;
 	cellGcmCgGetUCode(vpo, &vp_ucode, &vpsize);
@@ -774,6 +938,13 @@ int main(int argc, const char **argv)
 	cellGcmAddressToOffset(vertex_buffer, &vertex_buffer_offset);
 
 	cellGcmCgUploadInternalConsts(ctx, vpo);
+
+	if (!init_procedural_texture()) {
+		printf("shader-differential: texture alloc failed\nSHADER_DIFF_INVALID\n");
+		cellGcmFinish(ctx, 0);
+		free(host_addr);
+		return 2;
+	}
 
 	/* ---- readback buffer at the host region's tail ---- */
 	g_readback = (u32 *)((char *)host_addr + HOST_SIZE - (64 * 1024));
@@ -813,6 +984,12 @@ int main(int argc, const char **argv)
 	int controls_ok = 1;
 	int uniforms_ok = 1;   /* flipped by a failed control-uniform row */
 	int uniforms_skipped = 0;
+	int textures_ok = 1;   /* flipped by a failed control-texture row */
+	int textures_skipped = 0;
+	int have_tex_control = 0;
+	for (int i = 0; i < g_npairs; i++)
+		if (strcmp(g_pairs[i].role, "control-texture") == 0)
+			have_tex_control = 1;
 	int failures = 0;
 	for (int i = 0; i < g_npairs; i++) {
 		const sd_pair *p = &g_pairs[i];
@@ -836,9 +1013,31 @@ int main(int argc, const char **argv)
 			continue;
 		}
 
-		judge_pair(ctx, p, rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
+		judge_pair(ctx, p, textures_ok, have_tex_control,
+		           rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
 		           save_a, save_b, &r);
 		print_row(p, &r);
+
+		if (strcmp(r.status, "textures-invalid") == 0) {
+			/* Withheld, not failed: the red texture control already
+			 * counted, the same accounting as the uniform skip. */
+			textures_skipped++;
+			continue;
+		}
+
+		if (strcmp(p->role, "control-texture") == 0) {
+			/* Sampled-vs-arithmetic twin: identical iff the procedural
+			 * texture is bound where the container's sampler says and
+			 * sampled nearest, texel-aligned.  Gates sampler-declaring
+			 * rows only; its failure counts even with none present. */
+			if (strcmp(r.status, "identical") != 0) {
+				printf("shader-differential: control-texture judged '%s' - texture binding is not working; sampler-declaring pairs will not be judged\n",
+				       r.status);
+				textures_ok = 0;
+				failures++;
+			}
+			continue;
+		}
 
 		if (strcmp(p->role, "control-uniform") == 0) {
 			/* Uniform-vs-baked twin: identical iff application works.
@@ -888,8 +1087,9 @@ int main(int argc, const char **argv)
 	}
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped\n",
-	       corpus - uniforms_skipped, failures, uniforms_skipped);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped\n",
+	       corpus - uniforms_skipped - textures_skipped, failures,
+	       uniforms_skipped, textures_skipped);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:
