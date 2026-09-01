@@ -233,6 +233,11 @@ ContainerResult emitFragmentContainerImpl(
                     if (in.op != IROp::LoadAttribute &&
                         in.op != IROp::LoadVarying)
                         continue;
+                    // Scope the walk to THIS placeholder's struct:
+                    // with two struct params, an unfiltered walk
+                    // would emit every field under both paramnos.
+                    if (in.structParamName != p.name)
+                        continue;
                     const std::string key =
                         in.structParamName + "." + in.fieldName;
                     if (in.fieldName.empty() || !seenFields.insert(key).second)
@@ -314,7 +319,10 @@ ContainerResult emitFragmentContainerImpl(
             // by convention, and its containers say so (resource
             // COLOR0 with an empty semantic string).  Ours said
             // '???' - 5 of the 51 metadata defects.
-            if (isOut && d.res == 0)
+            // Only when the source carried NO semantic at all: an
+            // explicitly unsupported one (out float4 c : FOO) must
+            // stay unresolved, not silently become COLOR0.
+            if (isOut && d.res == 0 && p.semanticName.empty())
                 d.res = kCgColor0;
         }
         // isReferenced reflects whether the IR actually consumes the

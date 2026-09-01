@@ -1323,8 +1323,6 @@ private:
         return s;
     }
 
-    // ceil(x) = -floor(-x): FLR into a temp with the source negated,
-    // then a negated MOV into the result.
     void lowerLogicalNot(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
@@ -1338,6 +1336,8 @@ private:
         program_.instrs.push_back(vi);
     }
 
+    // ceil(x) = -floor(-x): FLR into a temp with the source negated,
+    // then a negated MOV into the result.
     void lowerCeil(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
