@@ -1693,6 +1693,21 @@ private:
         for (const auto& g : module_.globals) {
             if (g.name != inst.targetName)
                 continue;
+            // ARRAY uniforms are registered as a single const source for
+            // the whole array, so aliasing an indexed load to it would
+            // silently read element zero for every index (found in
+            // review: offsets[1] emitted reading the base).  Refuse until
+            // the array-uniform slice allocates per-element registers on
+            // both the lowering and upload sides.
+            if (g.type.isArray() || inst.componentIndex != 0) {
+                program_.diagnostics.push_back(
+                    "nv40-general: ldunif of array uniform '" +
+                    inst.targetName +
+                    "' is not implemented; refusing rather than aliasing "
+                    "every index to the base");
+                program_.loweringFailed = true;
+                return;
+            }
             const auto mIt = matrixUniformBase_.find(g.valueId);
             if (mIt != matrixUniformBase_.end()) {
                 matrixUniformBase_[inst.result] = mIt->second;
