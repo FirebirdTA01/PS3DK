@@ -368,6 +368,18 @@ struct FpShapeContext
     std::unordered_map<IRValueID, FpMaxDotZeroBinding>&    valueToMaxDotZero;
     std::unordered_map<IRValueID, SrcMod>&                 valueToMod;
 
+    // Sampler-unit assignment and the emitted-texture-result set.  Added in
+    // carve step 3 for emitTexSampleToDest: unlike the maps above these are
+    // WRITTEN during emission (a sample records that it has been emitted so a
+    // later shape reuses the result register instead of re-sampling), which is
+    // why the helper takes a non-const context.
+    std::unordered_map<IRValueID, int>&  valueToTexUnit;
+    std::unordered_set<IRValueID>&       emittedTexResults;
+
+    // Attribute masks the container carries; texture emission is one of the
+    // places that sets them, so a converted matcher must reach them here.
+    FpAttributes& attrs;
+
     // Set when a matcher finds an ambiguity it must not resolve by guessing;
     // the emission tail refuses the whole compile when it is set.
     bool& ambiguousBinding;
@@ -399,6 +411,79 @@ static SrcMod resolveSrcMods(const FpShapeContext& ctx, IRValueID id)
         r.baseId = it->second.baseId;
     }
     return r;
+}
+
+// Second lambda converted out of lowerFragmentProgram (t_c44cc3b7, carve
+// step 3).  Body is the former lambda verbatim, dedented, with its six
+// captures reached through the context.
+//
+// This one is a HELPER, not a matcher, and that ordering is the step's whole
+// point.  Attempting the smallest matcher first (tryEmitTexColorSpecular)
+// failed to build on five dependencies a dependency scan had missed, two of
+// them shared helper lambdas.  A matcher cannot leave the function while a
+// helper it calls is still a lambda inside it, so the helpers move first and
+// the matchers become reachable behind them.
+//
+// Takes a NON-const context, unlike resolveSrcMods: this writes emission
+// state (emittedTexResults, the attribute masks, the assembler).  The const
+// on resolveSrcMods is a real signal - a matcher that only reads shape
+// bindings should keep it - so it is not spent on something that mutates.
+static bool emitTexSampleToDest(FpShapeContext& ctx,
+                                IRValueID texId,
+                                const TexBinding& tex,
+                                const struct nvfx_reg& dst,
+                                uint8_t mask,
+                                uint8_t precision,
+                                bool sat)
+{
+    if (ctx.emittedTexResults.count(texId))
+        return true;
+
+    auto sampIt = ctx.valueToTexUnit.find(tex.samplerId);
+    if (sampIt == ctx.valueToTexUnit.end())
+        return false;
+
+    IRValueID uvBase = resolveSrcMods(ctx, tex.uvId).baseId;
+    auto uvIt = ctx.valueToInputSrc.find(uvBase);
+    if (uvIt == ctx.valueToInputSrc.end())
+        return false;
+
+    const struct nvfx_reg uvReg =
+        nvfx_reg(NVFXSR_INPUT, uvIt->second);
+    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
+
+    struct nvfx_src s0 =
+        nvfx_src(const_cast<struct nvfx_reg&>(uvReg));
+    struct nvfx_src s1 =
+        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+    struct nvfx_src s2 =
+        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
+
+    const uint8_t texOpcode =
+        tex.projective ? NVFX_FP_OP_OPCODE_TXP
+                       : NVFX_FP_OP_OPCODE_TEX;
+
+    struct nvfx_insn in = nvfx_insn(
+        sat ? 1 : 0, 0, sampIt->second, -1,
+        const_cast<struct nvfx_reg&>(dst),
+        mask, s0, s1, s2);
+    in.precision = precision;
+    if (tex.cube)
+        in.disable_pc = 1;
+    ctx.asm_.emit(in, texOpcode);
+
+    ctx.emittedTexResults.insert(texId);
+
+    ctx.attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(uvIt->second);
+    if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+        uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+    {
+        const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+        ctx.attrs.texCoordsInputMask |= uint16_t{1} << n;
+        if (tex.projective || tex.cube)
+            ctx.attrs.texCoords2D &= ~(uint16_t{1} << n);
+    }
+    return true;
 }
 
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
@@ -991,15 +1076,15 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // diagnostic-but-continues shape this codebase has been removing.
     bool ambiguousBinding = false;
 
-    // Carve step 1: constructed, not yet consumed.  Proves the references bind
-    // from this scope; the first matcher conversion is what starts using it.
+    // The carve's transport.  Every converted helper and matcher reaches the
+    // shared emission state through this instead of through [&] capture.
     FpShapeContext shapeCtx{
         out, asm_,
         valueToInputSrc, valueToFpUniform, valueToTex,
         valueToGenericArith, valueToNormalize, valueToMaxDotZero, valueToMod,
+        valueToTexUnit, emittedTexResults, attrs,
         ambiguousBinding
     };
-    (void)shapeCtx;
 
     // Two-pass architecture:
     //   Pass 0 — Analysis: walk all instructions, populate every
@@ -8392,64 +8477,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                 };
 
-                auto emitTexSampleToDest =
-                    [&](IRValueID texId,
-                        const TexBinding& tex,
-                        const struct nvfx_reg& dst,
-                        uint8_t mask,
-                        uint8_t precision,
-                        bool sat) -> bool
-                {
-                    if (emittedTexResults.count(texId))
-                        return true;
-
-                    auto sampIt = valueToTexUnit.find(tex.samplerId);
-                    if (sampIt == valueToTexUnit.end())
-                        return false;
-
-                    IRValueID uvBase = resolveSrcMods(shapeCtx, tex.uvId).baseId;
-                    auto uvIt = valueToInputSrc.find(uvBase);
-                    if (uvIt == valueToInputSrc.end())
-                        return false;
-
-                    const struct nvfx_reg uvReg =
-                        nvfx_reg(NVFXSR_INPUT, uvIt->second);
-                    const struct nvfx_reg noneReg = nvfx_reg(NVFXSR_NONE, 0);
-
-                    struct nvfx_src s0 =
-                        nvfx_src(const_cast<struct nvfx_reg&>(uvReg));
-                    struct nvfx_src s1 =
-                        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
-                    struct nvfx_src s2 =
-                        nvfx_src(const_cast<struct nvfx_reg&>(noneReg));
-
-                    const uint8_t texOpcode =
-                        tex.projective ? NVFX_FP_OP_OPCODE_TXP
-                                       : NVFX_FP_OP_OPCODE_TEX;
-
-                    struct nvfx_insn in = nvfx_insn(
-                        sat ? 1 : 0, 0, sampIt->second, -1,
-                        const_cast<struct nvfx_reg&>(dst),
-                        mask, s0, s1, s2);
-                    in.precision = precision;
-                    if (tex.cube)
-                        in.disable_pc = 1;
-                    asm_.emit(in, texOpcode);
-
-                    emittedTexResults.insert(texId);
-
-                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(uvIt->second);
-                    if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
-                    {
-                        const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
-                        attrs.texCoordsInputMask |= uint16_t{1} << n;
-                        if (tex.projective || tex.cube)
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
-                    }
-                    return true;
-                };
-
                 auto emitGenericMov =
                     [&](const struct nvfx_reg& dst,
                         uint8_t mask,
@@ -8991,7 +9018,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     if (auto txIt = valueToTex.find(resolveSrcMods(shapeCtx, id).baseId);
                         txIt != valueToTex.end())
                     {
-                        if (!emitTexSampleToDest(resolveSrcMods(shapeCtx, id).baseId,
+                        if (!emitTexSampleToDest(shapeCtx,
+                                                 resolveSrcMods(shapeCtx, id).baseId,
                                                  txIt->second, temp.reg,
                                                  requiredMask,
                                                  FLOAT32, false))
@@ -9786,7 +9814,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         }
 
                         // TEXR R0.xyz, f[TEX0], TEX0
-                        if (!emitTexSampleToDest(texDiffuse.texId,
+                        if (!emitTexSampleToDest(shapeCtx, texDiffuse.texId,
                                                  texIt3->second, r0,
                                                  NVFX_FP_MASK_X |
                                                  NVFX_FP_MASK_Y |
@@ -10222,7 +10250,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
                         }
 
-                        if (!emitTexSampleToDest(lighting.texLight.texId,
+                        if (!emitTexSampleToDest(shapeCtx, lighting.texLight.texId,
                                                  texIt2->second, r1,
                                                  NVFX_FP_MASK_X |
                                                  NVFX_FP_MASK_Y |
@@ -10541,7 +10569,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         appendGenericInlineSource(ambientSrc);
                     }
 
-                    if (!emitTexSampleToDest(lighting.texLight.texId,
+                    if (!emitTexSampleToDest(shapeCtx, lighting.texLight.texId,
                                              texIt->second, r0,
                                              NVFX_FP_MASK_X |
                                              NVFX_FP_MASK_Y |
@@ -10762,7 +10790,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         }
 
                         // TEXR R0, f[TEX0], TEX0
-                        if (!emitTexSampleToDest(mul.texId, texIt2->second, r0,
+                        if (!emitTexSampleToDest(shapeCtx, mul.texId, texIt2->second, r0,
                                                  NVFX_FP_MASK_ALL,
                                                  FLOAT32, false))
                             return false;
