@@ -325,7 +325,6 @@ static VSrc literalSrc(const IRConstant& constant)
     // A VECTOR literal keeps the identity swizzle: its lanes are distinct
     // values and broadcasting would destroy them.  Only the width-1 case
     // broadcasts, which is why the vector branch tests values.size().
-    bool scalar = true;
     if (std::holds_alternative<float>(constant.value)) {
         s.literal[0] = std::get<float>(constant.value);
     } else if (std::holds_alternative<int32_t>(constant.value)) {
@@ -338,10 +337,7 @@ static VSrc literalSrc(const IRConstant& constant)
         const auto& values = std::get<std::vector<float>>(constant.value);
         for (size_t i = 0; i < std::min<size_t>(4, values.size()); ++i)
             s.literal[i] = values[i];
-        scalar = (values.size() == 1);
     }
-    if (scalar)
-        s.swizzle = {0, 0, 0, 0};
     return s;
 }
 
@@ -1026,22 +1022,62 @@ private:
         program_.nextVpLiteralConst = nextVpUniformConst;
     }
 
+    // A SCALAR operand must REPLICATE its own component across all four
+    // lanes.  The property belongs to the VALUE, not to the instruction
+    // reading it or to the kind of source it came from, so it is applied
+    // here - the one place every operand is resolved - rather than at each
+    // emit site.  Fixing emit sites one at a time leaves the same bug
+    // waiting in the next opcode; the vita-cg-compiler team needed a
+    // scalar-value set consulted at 13 read sites for exactly this reason,
+    // and this lowering is lucky enough to have a single choke point.
+    //
+    // Each source kind fails differently without it, which is what the
+    // three channels of sd_scalar_broadcast.fcg measured on hardware:
+    //   LITERAL   {c,0,0,0} under identity -> lanes past x read ZERO
+    //   UNIFORM   the slot holds four real values -> lanes past x read the
+    //             WRONG COMPONENT (measured: `uv * u_scale.x` read
+    //             u_scale.y on lane y, a ratio of 1.58 against the
+    //             reference rather than a zero)
+    //   TEMP      a scalar lives in .x only -> lanes past x read a lane
+    //             that was never written (measured: pinned at 0)
+    //
+    // REPLICATE swizzle[0], do not force lane 0: a width-1 value can be a
+    // LANE EXTRACT whose component is already selected (`uv.y` carries
+    // swizzle[0] == 1), and forcing {0,0,0,0} there would silently read the
+    // wrong lane.  For a width-1 value only swizzle[0] is meaningful, so
+    // replicating it is always the identity-preserving choice.
+    static void broadcastScalar(VSrc& src)
+    {
+        if (src.kind == VSrcKind::None)
+            return;
+        const uint8_t c = src.swizzle[0];
+        src.swizzle = {c, c, c, c};
+    }
+
     VSrc resolve(IRValueID id)
     {
+        const bool isScalar = (valueWidthOf(id) == 1);
         const auto srcIt = program_.valueToSource.find(id);
-        if (srcIt != program_.valueToSource.end())
-            return srcIt->second;
+        if (srcIt != program_.valueToSource.end()) {
+            VSrc src = srcIt->second;
+            if (isScalar) broadcastScalar(src);
+            return src;
+        }
         const auto regIt = program_.valueToVReg.find(id);
         if (regIt != program_.valueToVReg.end()) {
             VSrc src = tempSrc(regIt->second);
             const auto fp16It = program_.vregToFp16.find(regIt->second);
             src.fp16 = fp16It != program_.vregToFp16.end() && fp16It->second;
+            if (isScalar) broadcastScalar(src);
             return src;
         }
 
         const IRValue* value = entry_.getValue(id);
-        if (auto* constant = dynamic_cast<const IRConstant*>(value))
-            return literalSrc(*constant);
+        if (auto* constant = dynamic_cast<const IRConstant*>(value)) {
+            VSrc src = literalSrc(*constant);
+            if (isScalar) broadcastScalar(src);
+            return src;
+        }
 
         // REFUSE, do not paper over it.  Returning an empty source here used
         // to encode as SRC_REG_TYPE_INPUT with no index - i.e. a read of
