@@ -154,6 +154,30 @@ function Auto-Value([string]$name, [uint32]$k) {
     return $v.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 }
 
+# Print the values the guest will synthesise for every float/half vector
+# uniform a shader source declares (uniform_set=auto rows).  Read from
+# the SOURCE with a regex, not from the container: a curated fixture is
+# ours and its declarations are plain.  The point is the fixture, not the
+# mechanism: the host and guest hashes agreeing says nothing about
+# whether a given NAME yields distinct components, and a fixture whose
+# channels collide looks like three tests and is one (review request
+# on the lane-extract fixture).  Matrices are listed as not synthesised.
+function Print-AutoValues([string]$srcPath, [string]$label) {
+    $text = Get-Content -Raw -LiteralPath $srcPath
+    $seen = @{}
+    foreach ($m in [regex]::Matches($text, 'uniform\s+(float|half)([1-4])?(x[1-4])?\s+([A-Za-z_][A-Za-z0-9_]*)')) {
+        $name = $m.Groups[4].Value
+        if ($seen.ContainsKey($name)) { continue }
+        $seen[$name] = 1
+        if ($m.Groups[3].Success) { Write-Host "stager: auto $label $name = (matrix: not synthesised, row refuses as uniform-unsupported)"; continue }
+        $w = if ($m.Groups[2].Success) { [int]$m.Groups[2].Value } else { 1 }
+        $vals = @(0..($w - 1) | ForEach-Object { Auto-Value $name $_ })
+        $distinct = ($vals | Sort-Object -Unique).Count
+        $note = if ($distinct -lt $w) { "  <-- COMPONENTS COLLIDE" } else { "" }
+        Write-Host "stager: auto $label $name = $($vals -join ', ')$note"
+    }
+}
+
 function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute, [switch]$NoThrow, [switch]$NoExtraFlags) {
     $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
     # [string[]] on purpose: a one-element array collapses to a String on
@@ -387,6 +411,7 @@ if ($ReferenceCompiler) {
 
         $ours = Join-Path $refScratch "$name`_ours.fpo"
         $ref  = Join-Path $refScratch "$name`_ref.fpo"
+        if ($set -eq "auto") { Print-AutoValues $src $name }
         $null = Compile-Shader $src $ours @() -Absolute
         if (-not (Compile-Reference $src $ref)) { throw "reference compile failed or produced no container: $rel" }
 
@@ -492,6 +517,7 @@ if ($ReferenceCompiler) {
                 $name = "$name`_" + $hex.Substring(0, 6)
             }
             $seenNames[$name] = 1
+            if ($set -eq "auto") { Print-AutoValues $src $name }
             $dDef = Join-Path $refScratch "$name`_default.fpo"
             $dGen = Join-Path $refScratch "$name`_general.fpo"
             $dRef = Join-Path $refScratch "$name`_pathref.fpo"
