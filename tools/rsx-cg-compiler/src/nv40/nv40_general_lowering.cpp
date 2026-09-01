@@ -78,7 +78,17 @@ enum class VOp
     Sle,
     Seq,
     Sne,
-    Tex
+    Tex,
+    // CF-1b pseudo-op: predicated select, one VInstr carrying
+    // (cond, thenVal, elseVal) that the FP emitter expands to three
+    // hardware instructions (MOV default; CC-set from cond; CC-gated
+    // commit).  A single node on purpose: the ordering pass tracks
+    // only temp-read dependencies — no CC hazards, no same-register
+    // write-after-write — so a three-VInstr sequence could be torn
+    // apart or reordered against another CC writer.  One node makes
+    // the sequence atomic by construction, the same shape as the
+    // default path's PredCarry (one IR op, several hw instructions).
+    SelPred
 };
 
 enum class VSrcKind
@@ -730,6 +740,7 @@ private:
             case VOp::Sle:
             case VOp::Seq:
             case VOp::Sne:
+            case VOp::SelPred:
                 return 1;
             case VOp::Add:
                 return 4;
@@ -2686,6 +2697,48 @@ private:
         lowerBinary(inst, VOp::Sle);
     }
 
+    // CF-1b: select(c, a, b) as a predicated write when the arms are
+    // not provably finite.  Emitted as ONE SelPred pseudo-VInstr
+    // (cond, thenVal, elseVal) that the FP emitter expands to
+    //     MOV  dst, b            ; the default commits first
+    //     MOVC CC.x, cond        ; OUT_NONE + COND_WRITE_ENABLE
+    //     MOV  dst(NE.x), a      ; commits only where cond != 0
+    // — the reference compiler's shape for guarded idioms (measured:
+    // SGTRC RC.x then RCPR R0.x(NE.x); ours sets CC with a separate
+    // MOV rather than folding it into the comparison, a known
+    // instruction-count divergence to revisit when branch shaders
+    // become byte-comparable).  Fragment-only and scalar-condition
+    // only: the VP virtual scheduler reorders on temp dependencies
+    // and has no CC model, and no VP witness exists in the corpus;
+    // vector conditions want a witness before choosing a CC lane
+    // strategy.  Returns false for shapes it does not cover — the
+    // caller refuses loudly.
+    bool lowerSelectPredicated(const IRInstruction& inst)
+    {
+        if (profile_ != GeneralProfile::Fragment)
+            return false;
+        if (inst.operands.size() < 3)
+            return false;
+        if (valueWidthOf(inst.operands[0]) != 1)
+            return false;
+        VInstr sel;
+        sel.op = VOp::SelPred;
+        sel.dst.index = define(inst.result);
+        sel.dst.writemask = componentMask(inst.resultType);
+        sel.srcs[0] = resolve(inst.operands[0]);
+        {
+            // CC is written through writemask x; make every lane of
+            // the source read the condition lane so the encoding does
+            // not depend on where the producer left it.
+            const uint8_t c = sel.srcs[0].swizzle[0];
+            sel.srcs[0].swizzle = {c, c, c, c};
+        }
+        sel.srcs[1] = resolve(inst.operands[1]);
+        sel.srcs[2] = resolve(inst.operands[2]);
+        program_.instrs.push_back(sel);
+        return true;
+    }
+
     bool lowerSelectGeneral(const IRInstruction& inst)
     {
         if (inst.operands.size() < 3)
@@ -2734,21 +2787,31 @@ private:
         if (profile_ != GeneralProfile::Vertex ||
             !isLiteralZero(inst.operands[1]) ||
             conditionToSource_.find(inst.operands[0]) == conditionToSource_.end()) {
-            // CF-1a: in a flattened program every select executes with
-            // both arms unconditionally live, and the arithmetic blend
-            // below is NOT a conditional move — if the untaken arm
-            // yields inf/NaN, 0 * NaN poisons the join even though the
-            // arm "was not taken".  Until CF-1b's predicated write
-            // lands, arms must be provably finite or the compile
-            // refuses (design note §2 step 3).  Single-block programs
-            // (flattened_ false) keep today's blend untouched.
+            // CF-1a/1b: in a flattened program every select executes
+            // with both arms unconditionally live, and the arithmetic
+            // blend below is NOT a conditional move — if the untaken
+            // arm yields inf/NaN, 0 * NaN poisons the join even though
+            // the arm "was not taken".  Arms that are not provably
+            // finite take CF-1b's predicated write instead (MOV
+            // default, CC-set from cond, CC-gated commit — a true
+            // conditional move); shapes predication does not cover yet
+            // refuse.  KNOWN GAP, single-block programs: a bare
+            // source-level `?:` in a straight-line shader still takes
+            // the blend below UNGUARDED — the hazard belongs to the
+            // blend, not to flattening, and the single-block path is
+            // byte-frozen until the differential rig can judge the
+            // switch in pixels (board item; measured witness: a
+            // one-block 1.0/x ternary compiles through the blend
+            // today).
             if (flattened_ &&
                 (!provablyFinite(inst.operands[1]) ||
                  !provablyFinite(inst.operands[2]))) {
+                if (lowerSelectPredicated(inst))
+                    return;
                 program_.diagnostics.push_back(
-                    "nv40-general: join select arm is not provably finite; "
-                    "predicated select lowering (CF-1b) has not landed; "
-                    "refusing");
+                    "nv40-general: join select arm is not provably finite "
+                    "and predicated lowering does not cover this shape "
+                    "(vector condition or VP profile); refusing");
                 program_.loweringFailed = true;
                 return;
             }
@@ -3648,6 +3711,53 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                         attrs.texCoords2D &= ~bit;
                 }
             }
+        }
+        if (vi.op == VOp::SelPred) {
+            // CF-1b: expand the atomic predicated-select node into its
+            // three hardware instructions (see the VOp comment).  Each
+            // instruction carries only its own source, so each
+            // literal/uniform const block is appended right after the
+            // instruction that references it — the same layout the
+            // single-instruction path below produces.
+            struct nvfx_reg selDst = nvfx_reg(NVFXSR_TEMP, vi.dst.phys);
+            selDst.is_fp16 = vi.dst.fp16 ? 1 : 0;
+            // OUT_NONE with the 0x3F sentinel index: writes the
+            // condition register only (the default path's CC-set shape).
+            struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+            const VSrc noneSrc{};
+            const auto emitOne = [&](const struct nvfx_reg& d, int mask,
+                                     const VSrc& s, bool ccSet,
+                                     bool ccGated) {
+                struct nvfx_insn insn = nvfx_insn(
+                    ccSet ? 0 : vi.sat, 0, -1, -1,
+                    const_cast<struct nvfx_reg&>(d), mask,
+                    nvfxSource(s), nvfxSource(noneSrc), nvfxSource(noneSrc));
+                if (ccSet)
+                    insn.cc_update = 1;
+                if (ccGated) {
+                    // Commit only where cond != 0; every lane reads
+                    // CC.x, where the scalar condition was written.
+                    insn.cc_test = 1;
+                    insn.cc_cond = NVFX_FP_OP_COND_NE;
+                    insn.cc_swz[0] = insn.cc_swz[1] =
+                    insn.cc_swz[2] = insn.cc_swz[3] = 0;
+                }
+                asm_.emit(insn, NVFX_FP_OP_OPCODE_MOV);
+                if (s.kind == VSrcKind::Uniform) {
+                    const uint32_t offset = asm_.currentByteSize();
+                    recordFpUniformOffset(
+                        attrs, static_cast<unsigned>(s.index), offset);
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+                } else if (s.kind == VSrcKind::Literal) {
+                    asm_.appendConstBlock(s.literal.data());
+                }
+            };
+            emitOne(selDst, vi.dst.writemask, vi.srcs[2], false, false);
+            emitOne(ccDst, 0x1, vi.srcs[0], true, false);
+            emitOne(selDst, vi.dst.writemask, vi.srcs[1], false, true);
+            emittedInstruction = true;
+            continue;
         }
         struct nvfx_reg dst = vi.dst.output
             ? nvfx_reg(NVFXSR_OUTPUT, vi.dst.index)

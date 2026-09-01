@@ -87,9 +87,14 @@ expect_success() {
 }
 
 expect_refusal() {
-    # expect_refusal <label> <src> <flags...>
-    local label="$1" src="$2"
-    shift 2
+    # expect_refusal <label> <reason-regex> <src> <flags...>
+    # The reason regex pins WHY the compile refused, not just THAT it
+    # refused — without it every refusal fixture is interchangeable
+    # and a flatten that regressed into refusing everything generically
+    # would still pass (review finding on b10513e).  Pass '' to assert
+    # only the generic refusal contract.
+    local label="$1" reason="$2" src="$3"
+    shift 3
     local out="$work/no.fpo" log="$work/no.log" rc=0
     rm -f "$out"
     run_compile "$out" "$log" "$src" "$@" || rc=$?
@@ -97,6 +102,10 @@ expect_refusal() {
     [[ ! -e "$out" ]] || fail "$label left a container behind — a refusal that emits is not a refusal"
     grep -Eqi 'unsupported|refus|emit failed' "$log" \
         || { tail -n 10 "$log" >&2; fail "$label printed no recognizable refusal line"; }
+    if [[ -n "$reason" ]]; then
+        grep -Eqi "$reason" "$log" \
+            || { tail -n 10 "$log" >&2; fail "$label refused for the wrong reason (wanted /$reason/)"; }
+    fi
 }
 
 # Success control on both paths: the harness must be able to SEE a
@@ -109,15 +118,21 @@ expect_success "diamond[general]"        "$diamond_src" --general-lowering
 expect_success "nested-diamond[general]" "$nested_src"  --general-lowering
 
 # The gate: the same shaders keep refusing on the default path.
-expect_refusal "diamond[default]"        "$diamond_src"
-expect_refusal "nested-diamond[default]" "$nested_src"
+expect_refusal "diamond[default]"        '' "$diamond_src"
+expect_refusal "nested-diamond[default]" '' "$nested_src"
 
-# The contamination guard: non-provably-finite join arms refuse on the
-# general path until CF-1b's predicated write lands.
-expect_refusal "guarded-divide[general]" "$guarded_src" --general-lowering
-expect_refusal "guarded-divide[default]" "$guarded_src"
+# CF-1b: non-provably-finite join arms lower as a PREDICATED WRITE
+# (MOV default, CC-set from cond, CC-gated commit) instead of the
+# contaminating arithmetic blend — the guarded divide compiles on the
+# general path.  Pixel-level acceptance is the §5 tier-c readback row;
+# this asserts the compile-level contract.  The default path keeps
+# refusing: nothing about CF-1 touches it.
+expect_success "guarded-divide[general]" "$guarded_src" --general-lowering
+expect_refusal "guarded-divide[default]" '' "$guarded_src"
 
-# The back-edge witness: a loop must refuse loudly, never flatten wrong.
-expect_refusal "back-edge[general]" "$loop_src" --general-lowering
+# The back-edge witness: a loop must refuse loudly, never flatten
+# wrong — and for its OWN reason, so this fixture cannot be satisfied
+# by a generic refusal.
+expect_refusal "back-edge[general]" 'back-edge' "$loop_src" --general-lowering
 
 printf 'control-flow-flatten-test: ok\n'
