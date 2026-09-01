@@ -310,21 +310,16 @@ static VSrc literalSrc(const IRConstant& constant)
 {
     VSrc s;
     s.kind = VSrcKind::Literal;
-    // A SCALAR literal must BROADCAST lane 0, not read the const block
-    // straight through.  It lands in the block as {c,0,0,0}, so under the
-    // identity swizzle every lane past x reads ZERO: `MUL R.xy, R, {6,0,0,0}`
-    // multiplies y by zero, and the shader compiles clean and renders wrong.
-    // The reference emits `{6,...}.x` for exactly this reason (t_b6f2a2a4).
-    //
-    // The broadcast belongs to the OPERAND, not to the constant: the same
-    // literal can be used under a .x mask (where identity happens to be
-    // right) and under .xy (where it is not).  Setting it here makes every
-    // use correct without the caller having to know the destination mask -
-    // and it is a no-op for a .x use, which reads lane 0 either way.
-    //
-    // A VECTOR literal keeps the identity swizzle: its lanes are distinct
-    // values and broadcasting would destroy them.  Only the width-1 case
-    // broadcasts, which is why the vector branch tests values.size().
+    // MATERIALISES THE CONSTANT BLOCK ONLY.  It deliberately does NOT set
+    // the scalar broadcast swizzle: a scalar literal lands here as
+    // {c,0,0,0}, and under the identity swizzle every lane past x would
+    // read ZERO (`MUL R.xy, R, {6,0,0,0}` multiplies y by zero, compiles
+    // clean and renders wrong - t_b6f2a2a4).  The broadcast is applied by
+    // resolve(), which is the only place that knows the VALUE's width and
+    // therefore the only place that can apply the same rule to a scalar
+    // uniform and a scalar temp as well.  Do not reintroduce it here: a
+    // per-source-kind fix is what left the uniform and computed cases
+    // broken after the first attempt.
     if (std::holds_alternative<float>(constant.value)) {
         s.literal[0] = std::get<float>(constant.value);
     } else if (std::holds_alternative<int32_t>(constant.value)) {
