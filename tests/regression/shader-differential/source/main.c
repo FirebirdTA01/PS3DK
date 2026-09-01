@@ -27,11 +27,14 @@
  * Validity gate, enforced in-guest: the first two manifest rows MUST
  * be the standing controls, in order — control-identical (one
  * container byte-copied twice; must judge identical) then
- * control-mismatch (two different shaders; must judge mismatch).  If
- * either control judges wrong, NO further pair is judged and the run
+ * control-mismatch (two different shaders; must judge mismatch).
+ * BOTH controls are always judged — one run reports on both — and if
+ * either judged wrong, no CORPUS or probe pair is judged and the run
  * ends SHADER_DIFF_INVALID: a comparator that cannot see a deliberate
  * difference, or sees one in a byte-copy, is judging nothing, and
  * "invalid" is not "failed" — different bugs, different sentinels.
+ * (Verified by sabotage in co-lead review: a mis-pointed row 1 fired
+ * the gate with the named diagnostic and left the probe unjudged.)
  *
  * Probe rows measure; they never gate.  A probe mismatch is the
  * ANSWER to a question (is the exception class populated as visible
