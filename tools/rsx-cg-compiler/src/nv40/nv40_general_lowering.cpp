@@ -3357,6 +3357,13 @@ private:
                         phys = program_.vregToPhys[reusableSrc->index];
                     } else if (!vi.dst.fp16 && !freeList.empty() &&
                                !aliasesEarlyRead(freeList.back(), false)) {
+                        // Only the head is tested: an aliasing head
+                        // falls through to the fresh counter rather
+                        // than scanning deeper.  Deliberate
+                        // conservatism - it burns a register under
+                        // pressure but keeps this path's behaviour
+                        // trivially reasoned about; scan if a real
+                        // shader ever exhausts the bank over it.
                         phys = freeList.back();
                         freeList.pop_back();
                     } else {
@@ -3794,6 +3801,16 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                     const VSrc& src = vi.srcs[s];
                     if (src.kind != VSrcKind::Temp)
                         continue;
+                    // A Temp source with no physical register would
+                    // make regFromSource encode src.index as a
+                    // register number - refuse rather than compare
+                    // garbage (review strengthening on 1eb3c21).
+                    if (src.phys < 0) {
+                        out.diagnostics.push_back(
+                            "nv40-general: SelPred source has no "
+                            "physical register; refusing");
+                        return out;
+                    }
                     const int srcSlot =
                         src.fp16 ? (src.phys >> 1) : src.phys;
                     if (srcSlot == dstSlot) {
