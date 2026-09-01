@@ -1,0 +1,11 @@
+// shader-differential — control shader B (the deliberate mismatch).
+//
+// A different solid color from sd_ctrl_a: every pixel differs, by a
+// large per-channel delta, so the control-mismatch row exercises the
+// comparator across the full RT rather than at a boundary.  Also kept
+// away from both sentinels.
+
+void main(out float4 out_color : COLOR)
+{
+    out_color = float4(0.75f, 0.25f, 0.5f, 1.0f);
+}

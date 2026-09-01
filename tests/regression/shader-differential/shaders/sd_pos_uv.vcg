@@ -1,0 +1,21 @@
+// shader-differential — shared vertex program (NOT under test).
+//
+// Local copy of shader-readback's pass-through VP: identity-projected
+// screen-space position + texcoord widened to vec4 on the vertex side.
+// Copied rather than referenced so this rig's lane never touches the
+// readback rig's files.  Both sides of every judged pair render with
+// THIS ONE VP, compiled once at build time by our compiler — the pair
+// under judgment is always the fragment program.
+//
+// If VP pairs enter the rig (increment 2+), they arrive as manifest
+// rows with their own containers, not by editing this file.
+
+void main(
+    float2 in_position      : POSITION,
+    float2 in_texcoord      : TEXCOORD0,
+    out float4 out_position : POSITION,
+    out float4 out_texcoord : TEXCOORD0)
+{
+    out_position = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    out_texcoord = float4(in_texcoord.x, in_texcoord.y, 0.0f, 1.0f);
+}

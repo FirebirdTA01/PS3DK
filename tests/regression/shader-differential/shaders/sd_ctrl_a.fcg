@@ -1,0 +1,20 @@
+// shader-differential — control shader A.
+//
+// Solid color for the two standing controls:
+//   control-identical: this shader's container, byte-copied twice by
+//     the stager, must judge IDENTICAL — proves the pair path, the
+//     transfer, and the comparator agree that same input means same
+//     output.
+//   control-mismatch:  this shader vs sd_ctrl_b must judge MISMATCH —
+//     proves the comparator can SEE a difference before any real pair
+//     is trusted.  A rig whose deliberate mismatch passes is judging
+//     nothing.
+//
+// The color is chosen away from the rig's two sentinels (opaque black
+// readback fill, 0xFF102030 GPU clear) so every control pixel is
+// distinguishable from "no draw landed".
+
+void main(out float4 out_color : COLOR)
+{
+    out_color = float4(0.25f, 0.5f, 0.75f, 1.0f);
+}

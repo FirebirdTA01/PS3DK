@@ -187,3 +187,4 @@ scripts/install-shim-wrappers.sh
 # local tree-compiler build dir used by the shader-readback fixture
 # (PS3_TOOL_rsxcgc auto-find target); one `git add -A` from the tree otherwise
 tests/regression/shader-readback/build/
+tests/regression/shader-differential/build/

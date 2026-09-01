@@ -1,0 +1,41 @@
+// shader-differential — MAD-fusion contraction probe.
+//
+// Purpose: populate-or-empty the documented exception class to the
+// rig's bit-identical gate BEFORE a corpus run can paint it as a wall
+// of red.  A contracted a*b+c (MAD) carries more intermediate
+// precision than separate MUL+ADD; two CORRECT compilations of this
+// file can therefore differ in the last float32 bit.  The stager pairs
+// our compiler against itself with fusion toggled (--nofastmath vs
+// default), so any difference here is attributable to compilation
+// options, not to compiler identity.
+//
+// The RT is A8R8G8B8, so a last-bit float32 difference is invisible
+// after 8-bit quantization UNLESS amplified.  Channel design:
+//   R: frac(t * 2^20) — ~1 ULP at t~O(1) is 2^-24; amplified to
+//      ~0.06, i.e. ~16 8-bit levels.  This is the contraction witness.
+//   G: frac(t * 2^12) — weaker amplification, a secondary witness that
+//      scales as expected if R's difference is really sub-ULP-sourced.
+//   B: saturate(t), UNAMPLIFIED — the mechanism discriminator.  Pure
+//      MAD contraction leaves B identical (sub-quantum); a coarser
+//      mechanism (e.g. fp16 COLOR promotion, also under the fastmath
+//      umbrella) moves B as well.  R differs while B matches =>
+//      contraction; R and B both differ => something bigger than
+//      contraction is in the flag.
+//
+// Operands derive from the interpolated UV plus non-representable
+// literals so nothing constant-folds and the product mantissa is full.
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float a = in_texcoord.x + 0.33333333f;
+    float b = in_texcoord.y + 0.77777779f;
+    float c = -0.25f;
+    float t = a * b + c;
+
+    out_color = float4(frac(t * 1048576.0f),
+                       frac(t * 4096.0f),
+                       saturate(t),
+                       1.0f);
+}
