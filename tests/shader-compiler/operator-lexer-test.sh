@@ -80,8 +80,26 @@ run_case() {
         fail "$name reported an allocation abort"
     fi
 
-    if [[ "$rc" -ne 0 ]] && ! grep -q 'unsupported IR op mod' "$log"; then
-        fail "$name failed without a clean modulo diagnostic"
+    # The '%' token must still REACH the IR.  The defect this test was written
+    # for was the lexer silently DROPPING unknown tokens, and a dropped '%'
+    # leaves the parser looking at a malformed expression - so a parse-level
+    # error is the regression, not a backend refusal.
+    if grep -Eqi 'unexpected token|parse error|syntax error' "$log"; then
+        fail "$name failed in the parser; the '%' token may have been dropped"
+    fi
+
+    # A nonzero exit is legitimate: this shader also uses conversions the
+    # backend may not implement yet, and refusing is the house rule.  What
+    # matters is that the refusal is NAMED rather than silent.
+    #
+    # This deliberately does NOT pin a single op name.  It used to require
+    # 'unsupported IR op mod', which went stale the moment mod was implemented
+    # (slice B) - the compiler then refused correctly one op further down, on
+    # itof, and this test turned CI red for a compiler that was behaving
+    # exactly as intended.  Pinning the frontier op means every feature that
+    # lands breaks the test that guards the layer beneath it.
+    if [[ "$rc" -ne 0 ]] && ! grep -Eq 'nv40-(fp|vp|general):' "$log"; then
+        fail "$name failed without a named diagnostic"
     fi
 }
 
