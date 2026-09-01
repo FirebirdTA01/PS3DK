@@ -3438,46 +3438,44 @@ private:
             if (!vi.dst.none &&
                 !vi.dst.output &&
                 program_.vregToPhys.find(vi.dst.index) == program_.vregToPhys.end()) {
-                int phys;
-                if (vi.dst.preferredPhys >= 0) {
-                    phys = vi.dst.preferredPhys;
-                    // A PIN IS HONOURED UNCONDITIONALLY - it is not a
-                    // request, it overrides the free list and the reuse
-                    // path.  That is fine while at most one pinned value
-                    // is live at a time, and silently wrong otherwise:
-                    // two pinned results share one register and a
-                    // consumer reads the same value twice.
-                    //
-                    // lowerStep pins EVERY step() result to phys 0, so
-                    // `step(a,x) * step(x,b)` computes a*a.  Measured on
-                    // test_62_v_address_register, whose border is exactly
-                    // that product: at the last column of each stripe the
-                    // correct border is 0 and ours is 1, and the pixels
-                    // that differ are precisely those columns.
-                    //
-                    // REFUSE rather than emit it.  A collision is only a
-                    // fault when the register's current occupant is used
-                    // AFTER this instruction - a pin that overwrites a
-                    // dead value is free - so the test is liveness, not
-                    // duplication: 21 of 117 corpus shaders pin one
-                    // register twice, but only 15 clobber a live value,
-                    // and test_35_clamp is in the first set and not the
-                    // second, which is why it renders correctly today.
-                    //
-                    // This is a DETECTOR, not the fix.  The pins exist
-                    // for FP precision shaping (SGE writes H0, MOVX
-                    // converts to R0, and H0/H1 alias R0; reflect and
-                    // refract pin 0 and 1 as a pair), so making a pin
-                    // yield to a live occupant has to preserve that and
-                    // is a separate change.  Until then a refusal is the
-                    // honest answer: these shaders were never compiled
-                    // correctly, only counted as compiled.
-                    // Compare ALIAS SETS, not raw indices.  H registers
-                    // have their own index space and alias full R slots in
-                    // pairs (H0/H1 -> R0), so a raw int comparison would
-                    // both miss real collisions and invent false ones.
-                    // Same slot rule as aliasesEarlyRead above.
-                    const int pinSlot = vi.dst.fp16 ? (phys >> 1) : phys;
+                // A PIN IS A PREFERENCE, NOT A MANDATE.  It used to be
+                // honoured unconditionally - overriding the free list and
+                // the reuse path with no check that the register was free
+                // - which is fine while at most one pinned value is live
+                // at a time and silently wrong otherwise: two pinned
+                // results share one register and a consumer reads the same
+                // value twice.  lowerStep pins EVERY step() result to
+                // phys 0, so `step(a,x) * step(x,b)` computed a*a
+                // (t_929c0177; measured as the wrong border columns of
+                // test_62_v_address_register).
+                //
+                // 3aec606 made that REFUSE.  This yields instead: when the
+                // pinned register's current occupant is still read after
+                // this instruction, fall through to ordinary allocation.
+                // The pin is then honoured whenever it can be, which is
+                // every case that worked before, and skipped exactly where
+                // it used to corrupt.
+                //
+                // WHY YIELDING IS SAFE FOR THE PRECISION SHAPING the pins
+                // exist for: the shaping needs the fp16 destination and the
+                // later full-precision read to ALIAS, and that is carried
+                // by the vreg (same vreg, fp16 flag on the source), not by
+                // the register NUMBER.  The ordinary fp16 path allocates
+                // `nextPhys << 1`, which is an H register aliasing its R
+                // slot exactly as H0 aliases R0 - so SGE-then-MOVX still
+                // converts in place, one slot further along.  If that is
+                // wrong for some pin the rig will say so: the prediction
+                // on this commit is that the 13 live-clobber shaders which
+                // do NOT change state are the evidence it holds.
+                //
+                // Liveness, not duplication: a pin over a DEAD value is
+                // free.  Alias sets, not raw indices - H registers have
+                // their own index space and alias R slots in pairs, same
+                // rule as aliasesEarlyRead.
+                const auto pinClobbersLive = [&]() {
+                    const int pinSlot =
+                        vi.dst.fp16 ? (vi.dst.preferredPhys >> 1)
+                                    : vi.dst.preferredPhys;
                     for (const auto& kv : program_.vregToPhys) {
                         if (kv.first == vi.dst.index)
                             continue;
@@ -3489,23 +3487,15 @@ private:
                         if (occSlot != pinSlot)
                             continue;
                         const auto lu = lastUse.find(kv.first);
-                        if (lu == lastUse.end() || lu->second <= i)
-                            continue;
-                        program_.diagnostics.push_back(
-                            "nv40-general: instruction " + std::to_string(i) +
-                            " pins " + (vi.dst.fp16 ? "H" : "R") +
-                            std::to_string(phys) + " (slot R" +
-                            std::to_string(pinSlot) + ") for v" +
-                            std::to_string(vi.dst.index) + ", but v" +
-                            std::to_string(kv.first) + " already holds " +
-                            (occFp16 ? "H" : "R") + std::to_string(kv.second) +
-                            " in the same slot and is still read at " +
-                            std::to_string(lu->second) +
-                            " - the pin would clobber a live value and both "
-                            "would share one register; refusing");
-                        program_.loweringFailed = true;
-                        return;
+                        if (lu != lastUse.end() && lu->second > i)
+                            return true;
                     }
+                    return false;
+                };
+
+                int phys;
+                if (vi.dst.preferredPhys >= 0 && !pinClobbersLive()) {
+                    phys = vi.dst.preferredPhys;
                 } else {
                     auto reusableSrc = std::find_if(
                         vi.srcs.begin(), vi.srcs.end(),
@@ -4109,9 +4099,45 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         out.ok = false;
         return out;
     }
+    // FRAGMENT TEMP-REGISTER BUDGET.  A program that allocates past the
+    // usable fragment register file does not merely render wrong: on RPCS3
+    // it paints nothing AND poisons the RSX state, so every later draw in
+    // the run paints nothing either (t_5dc260b0; the rig's poison canary
+    // was built to catch it).  Refusing is the only safe answer while the
+    // allocator can produce such a program.
+    //
+    // 48 is not proven and the comment should not pretend otherwise.  The
+    // instruction ENCODING is not the bound - NV40_FP_OP_OUT_REG_MASK is
+    // (63 << 1), six bits, so R0..R63 all encode.  48 is RPCS3's annotation
+    // threshold plus an empty band in our corpus: every shader we JUDGE
+    // sits at 44 or below (test_18_atan2 and test_61 at 44, most at 2),
+    // and the only ones at or above 48 are the known poisoners at 55, 57,
+    // 62, 73, 77 and 119.  Nothing occupies 45..54, so the corpus cannot
+    // distinguish a bound anywhere in that band.  A synthetic family that
+    // keeps N values live for N = 40..60 would turn this citation into a
+    // measurement; until then it is a citation.
+    //
+    // This guard is the COMPANION to the pin yield above, not an
+    // independent idea.  The yield un-refuses four programs that the pin
+    // collision was accidentally stopping, and all four are past this
+    // budget - so landing the yield without this would put known poisoners
+    // back into a sweep that no longer excludes two of them.
+    static constexpr int kFpTempRegisterBudget = 48;
+    const int tempRegs = std::max(2, asm_.numTempRegs());
+    if (tempRegs >= kFpTempRegisterBudget) {
+        out.diagnostics.push_back(
+            "nv40-general-fp: program needs " + std::to_string(tempRegs) +
+            " temp registers, at or past the usable fragment budget of " +
+            std::to_string(kFpTempRegisterBudget) +
+            " - such a program paints nothing and poisons the RSX for every "
+            "later draw; refusing (t_5dc260b0)");
+        out.ok = false;
+        return out;
+    }
+
     out.words = asm_.words();
     out.ok = true;
-    attrs.registerCount = static_cast<uint8_t>(std::max(2, asm_.numTempRegs()));
+    attrs.registerCount = static_cast<uint8_t>(tempRegs);
     if (attrsOut)
         *attrsOut = attrs;
     return out;
