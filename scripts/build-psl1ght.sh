@@ -101,9 +101,15 @@ mkdir -p "$PS3DEV/bin"
 # Compiler mirrors the geohot siblings' Makefile rule (CC := $(PREFIX)gcc)
 # so make_sprx and make_self always move together under CC/PREFIX —
 # they are the same program and the acceptance treats them as peers.
-"${CC:-${PREFIX:-}gcc}" -O2 -I"$SRC/tools/geohot" -DSPRX "$_sprx_gen" \
+# CC can legitimately carry a launcher prefix - all three release jobs set
+# CC="ccache gcc" - so it is a command LINE, not a command name.  Quoting it as
+# a single word made the shell look for a program literally called "ccache gcc"
+# and exit 127, which is what broke the v0.12.46 Windows toolchain job.  Leaving
+# it unquoted would split correctly but would also glob, so split it explicitly.
+IFS=' ' read -r -a _cc_cmd <<< "${CC:-${PREFIX:-}gcc}"
+"${_cc_cmd[@]}" -O2 -I"$SRC/tools/geohot" -DSPRX "$_sprx_gen" \
     -lgmp -lcrypto -lz -o "$PS3DEV/bin/make_sprx"
-unset _sprx_gen
+unset _sprx_gen _cc_cmd
 say "installed $PS3DEV/bin/make_sprx"
 
 # --------------------------------------------------------------------
