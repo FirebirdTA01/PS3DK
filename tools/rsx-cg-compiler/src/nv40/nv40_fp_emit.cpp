@@ -9408,9 +9408,24 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 continue;
                             if (matchNormalizeAdd(halfNormId, lightNormId, kv.first))
                             {
+                                if (eyeNormId != 0)
+                                {
+                                    // A second candidate satisfies the same
+                                    // chain.  Which one an unordered_map walk
+                                    // reaches first is not a property of the
+                                    // shader, so picking either would be an
+                                    // arbitrary choice presented as an answer.
+                                    out.diagnostics.push_back(
+                                        "nv40-fp: more than one normalize binding matches the "
+                                        "eye-vector pattern; refusing rather than selecting one "
+                                        "by hash order");
+                                    return false;
+                                }
                                 eyeNormId = kv.first;
                                 eyePosId = candidateUniform;
-                                break;
+                                // No break: the loop must SEE a second match to
+                                // refuse it.  Breaking here is what made the
+                                // ambiguity unobservable in the first place.
                             }
                         }
                         if (!eyeNormId || !uniformNameIs(eyePosId, "eyePosLocal"))
@@ -9827,9 +9842,24 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 continue;
                             if (matchNormalizeAdd(halfNormId, lightNormId, kv.first))
                             {
+                                if (eyeNormId != 0)
+                                {
+                                    // A second candidate satisfies the same
+                                    // chain.  Which one an unordered_map walk
+                                    // reaches first is not a property of the
+                                    // shader, so picking either would be an
+                                    // arbitrary choice presented as an answer.
+                                    out.diagnostics.push_back(
+                                        "nv40-fp: more than one normalize binding matches the "
+                                        "eye-vector pattern; refusing rather than selecting one "
+                                        "by hash order");
+                                    return false;
+                                }
                                 eyeNormId = kv.first;
                                 eyePosId = candidateUniform;
-                                break;
+                                // No break: the loop must SEE a second match to
+                                // refuse it.  Breaking here is what made the
+                                // ambiguity unobservable in the first place.
                             }
                         }
                         if (!eyeNormId || !eyePosId)
