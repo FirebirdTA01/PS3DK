@@ -10,8 +10,6 @@
 # plain mismatch or refusal is never excluded: it is what the sweep is
 # for.  Remove the line when the board item closes and re-sweep.
 crystalct-psl1ght/files/samples/graphics/rsx_Basic_Wallpaper/shaders/scanlines.fcg|t_de192d41|general|general-path container is a malformed 7-instruction program; every later draw paints nothing
-ps3-open-graphics-toolkit/files/testsuite/shaders/test_58_v_input_attributes.fcg|t_5dc260b0|general|general-path container allocates R48+ - encodable (the register field is six bits) but past the usable fragment register budget; paints nothing and every later draw paints nothing
 ps3-open-graphics-toolkit/files/testsuite/shaders/test_59_v_output_registers.fcg|t_5dc260b0|general|general-path container allocates R48+ - encodable (the register field is six bits) but past the usable fragment register budget; paints nothing and every later draw paints nothing
 ps3-open-graphics-toolkit/files/testsuite/shaders/test_60_v_temporary_registers.fcg|t_5dc260b0|general|general-path container allocates R48+ - encodable (the register field is six bits) but past the usable fragment register budget; paints nothing and every later draw paints nothing
-ps3-open-graphics-toolkit/files/testsuite/shaders/test_63_v_texture_fetch.fcg|t_5dc260b0|general|general-path container allocates R48+ - encodable (the register field is six bits) but past the usable fragment register budget; paints nothing and every later draw paints nothing
 ps3-open-graphics-toolkit/files/testsuite/shaders/test_81_vector_packing_unpacking.fcg|t_5dc260b0|general|general-path container allocates R48+ - encodable (the register field is six bits) but past the usable fragment register budget; paints nothing and every later draw paints nothing
