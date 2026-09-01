@@ -367,6 +367,7 @@ struct FpShapeContext
     std::unordered_map<IRValueID, FpNormalizeBinding>&     valueToNormalize;
     std::unordered_map<IRValueID, FpMaxDotZeroBinding>&    valueToMaxDotZero;
     std::unordered_map<IRValueID, SrcMod>&                 valueToMod;
+    std::unordered_map<IRValueID, FpVaryingTexMulBinding>& valueToVaryingTexMul;
 
     // Sampler-unit assignment and the emitted-texture-result set.  Added in
     // carve step 3 for emitTexSampleToDest: unlike the maps above these are
@@ -482,6 +483,132 @@ static bool emitTexSampleToDest(FpShapeContext& ctx,
         ctx.attrs.texCoordsInputMask |= uint16_t{1} << n;
         if (tex.projective || tex.cube)
             ctx.attrs.texCoords2D &= ~(uint16_t{1} << n);
+    }
+    return true;
+}
+
+// FIRST MATCHER converted out of lowerFragmentProgram (t_c44cc3b7, carve
+// step 4) - the milestone the previous three steps existed to reach.
+//
+// Basic vertex-lighting FP:
+//   oColor = tex2D(diffuseMap, texCoord) * color + specular
+//
+// The multiply is already captured as FpVaryingTexMulBinding.  NV40 FP cannot
+// read a varying input as MAD's addend operand, so materialise the specular
+// varying in R1 first, then fuse TEX * COLOR0 + R1 into the final MAD.
+//
+// Five of its dependencies could not travel on the context, and that is the
+// shape every remaining matcher will have.  Two were shared helper lambdas
+// (resolveSrcMods, emitTexSampleToDest) and had to be converted first - steps
+// 2 and 3.  The other four are PER-EMISSION locals, not shared state: srcId is
+// the value being stored, and none/saturate/dstReg/dstPrecision belong to the
+// one store site being emitted.  Putting per-store values on a context shared
+// by every matcher would be a lie about their lifetime, so they become
+// explicit parameters instead.  Context carries what is shared; parameters
+// carry what belongs to this call.
+static bool tryEmitTexColorSpecular(FpShapeContext& ctx,
+                                    IRValueID srcId,
+                                    const struct nvfx_reg& none,
+                                    bool saturate,
+                                    const struct nvfx_reg& dstReg,
+                                    uint8_t dstPrecision)
+{
+    auto addIt = ctx.valueToGenericArith.find(srcId);
+    if (addIt == ctx.valueToGenericArith.end() ||
+        addIt->second.op != GenericFpOp::Add)
+        return false;
+
+    IRValueID mulId = 0;
+    IRValueID addendId = 0;
+    if (ctx.valueToVaryingTexMul.count(addIt->second.srcIds[0]))
+    {
+        mulId = addIt->second.srcIds[0];
+        addendId = addIt->second.srcIds[1];
+    }
+    else if (ctx.valueToVaryingTexMul.count(addIt->second.srcIds[1]))
+    {
+        mulId = addIt->second.srcIds[1];
+        addendId = addIt->second.srcIds[0];
+    }
+    else
+    {
+        return false;
+    }
+
+    const FpVaryingTexMulBinding& mul =
+        ctx.valueToVaryingTexMul[mulId];
+    if (mul.lane != -1)
+        return false;
+
+    const SrcMod addendMods = resolveSrcMods(ctx, addendId);
+    if (addendMods.absMod || addendMods.negMod)
+        return false;
+
+    auto addendIt = ctx.valueToInputSrc.find(addendMods.baseId);
+    auto colorIt = ctx.valueToInputSrc.find(mul.varyingId);
+    auto texIt2 = ctx.valueToTex.find(mul.texId);
+    if (addendIt == ctx.valueToInputSrc.end() ||
+        colorIt == ctx.valueToInputSrc.end() ||
+        texIt2 == ctx.valueToTex.end())
+        return false;
+
+    const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
+    const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
+    const struct nvfx_reg addendReg =
+        nvfx_reg(NVFXSR_INPUT, addendIt->second);
+
+    // MOVR R1, f[TEX1]
+    {
+        struct nvfx_src s0 =
+            nvfx_src(const_cast<struct nvfx_reg&>(addendReg));
+        struct nvfx_src s1 =
+            nvfx_src(const_cast<struct nvfx_reg&>(none));
+        struct nvfx_src s2 =
+            nvfx_src(const_cast<struct nvfx_reg&>(none));
+        struct nvfx_insn in = nvfx_insn(
+            0, 0, -1, -1,
+            const_cast<struct nvfx_reg&>(r1),
+            NVFX_FP_MASK_ALL, s0, s1, s2);
+        in.precision = FLOAT32;
+        ctx.asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+    }
+
+    // TEXR R0, f[TEX0], TEX0
+    if (!emitTexSampleToDest(ctx, mul.texId, texIt2->second, r0,
+                             NVFX_FP_MASK_ALL,
+                             FLOAT32, false))
+        return false;
+
+    // MADR o, R0, f[COL0], R1
+    {
+        const struct nvfx_reg colorReg =
+            nvfx_reg(NVFXSR_INPUT, colorIt->second);
+        struct nvfx_src s0 =
+            nvfx_src(const_cast<struct nvfx_reg&>(r0));
+        struct nvfx_src s1 =
+            nvfx_src(const_cast<struct nvfx_reg&>(colorReg));
+        struct nvfx_src s2 =
+            nvfx_src(const_cast<struct nvfx_reg&>(r1));
+        struct nvfx_insn in = nvfx_insn(
+            saturate ? 1 : 0, 0, -1, -1,
+            const_cast<struct nvfx_reg&>(dstReg),
+            NVFX_FP_MASK_ALL, s0, s1, s2);
+        in.precision = dstPrecision;
+        ctx.asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
+    }
+
+    const int inputs[2] = {colorIt->second, addendIt->second};
+    for (int inputSrc : inputs)
+    {
+        ctx.attrs.attributeInputMask |=
+            fpAttrMaskBitForInputSrc(inputSrc);
+        if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+        {
+            const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
+            ctx.attrs.texCoordsInputMask |= uint16_t{1} << n;
+            ctx.attrs.texCoords2D &= ~(uint16_t{1} << n);
+        }
     }
     return true;
 }
@@ -1082,6 +1209,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         out, asm_,
         valueToInputSrc, valueToFpUniform, valueToTex,
         valueToGenericArith, valueToNormalize, valueToMaxDotZero, valueToMod,
+        valueToVaryingTexMul,
         valueToTexUnit, emittedTexResults, attrs,
         ambiguousBinding
     };
@@ -10720,116 +10848,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         break;
                     }
 
-                    // Basic vertex-lighting FP:
-                    //   oColor = tex2D(diffuseMap, texCoord) * color + specular
-                    //
-                    // The multiply is already captured as FpVaryingTexMulBinding.
-                    // NV40 FP cannot read a varying input as MAD's addend operand,
-                    // so materialise the specular varying in R1 first, then fuse
-                    // TEX * COLOR0 + R1 into the final MAD.
-                    auto tryEmitTexColorSpecular = [&]() -> bool
-                    {
-                        auto addIt = valueToGenericArith.find(srcId);
-                        if (addIt == valueToGenericArith.end() ||
-                            addIt->second.op != GenericFpOp::Add)
-                            return false;
-
-                        IRValueID mulId = 0;
-                        IRValueID addendId = 0;
-                        if (valueToVaryingTexMul.count(addIt->second.srcIds[0]))
-                        {
-                            mulId = addIt->second.srcIds[0];
-                            addendId = addIt->second.srcIds[1];
-                        }
-                        else if (valueToVaryingTexMul.count(addIt->second.srcIds[1]))
-                        {
-                            mulId = addIt->second.srcIds[1];
-                            addendId = addIt->second.srcIds[0];
-                        }
-                        else
-                        {
-                            return false;
-                        }
-
-                        const FpVaryingTexMulBinding& mul =
-                            valueToVaryingTexMul[mulId];
-                        if (mul.lane != -1)
-                            return false;
-
-                        const SrcMod addendMods = resolveSrcMods(shapeCtx, addendId);
-                        if (addendMods.absMod || addendMods.negMod)
-                            return false;
-
-                        auto addendIt = valueToInputSrc.find(addendMods.baseId);
-                        auto colorIt = valueToInputSrc.find(mul.varyingId);
-                        auto texIt2 = valueToTex.find(mul.texId);
-                        if (addendIt == valueToInputSrc.end() ||
-                            colorIt == valueToInputSrc.end() ||
-                            texIt2 == valueToTex.end())
-                            return false;
-
-                        const struct nvfx_reg r0 = nvfx_reg(NVFXSR_TEMP, 0);
-                        const struct nvfx_reg r1 = nvfx_reg(NVFXSR_TEMP, 1);
-                        const struct nvfx_reg addendReg =
-                            nvfx_reg(NVFXSR_INPUT, addendIt->second);
-
-                        // MOVR R1, f[TEX1]
-                        {
-                            struct nvfx_src s0 =
-                                nvfx_src(const_cast<struct nvfx_reg&>(addendReg));
-                            struct nvfx_src s1 =
-                                nvfx_src(const_cast<struct nvfx_reg&>(none));
-                            struct nvfx_src s2 =
-                                nvfx_src(const_cast<struct nvfx_reg&>(none));
-                            struct nvfx_insn in = nvfx_insn(
-                                0, 0, -1, -1,
-                                const_cast<struct nvfx_reg&>(r1),
-                                NVFX_FP_MASK_ALL, s0, s1, s2);
-                            in.precision = FLOAT32;
-                            asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
-                        }
-
-                        // TEXR R0, f[TEX0], TEX0
-                        if (!emitTexSampleToDest(shapeCtx, mul.texId, texIt2->second, r0,
-                                                 NVFX_FP_MASK_ALL,
-                                                 FLOAT32, false))
-                            return false;
-
-                        // MADR o, R0, f[COL0], R1
-                        {
-                            const struct nvfx_reg colorReg =
-                                nvfx_reg(NVFXSR_INPUT, colorIt->second);
-                            struct nvfx_src s0 =
-                                nvfx_src(const_cast<struct nvfx_reg&>(r0));
-                            struct nvfx_src s1 =
-                                nvfx_src(const_cast<struct nvfx_reg&>(colorReg));
-                            struct nvfx_src s2 =
-                                nvfx_src(const_cast<struct nvfx_reg&>(r1));
-                            struct nvfx_insn in = nvfx_insn(
-                                saturate ? 1 : 0, 0, -1, -1,
-                                const_cast<struct nvfx_reg&>(dstReg),
-                                NVFX_FP_MASK_ALL, s0, s1, s2);
-                            in.precision = dstPrecision;
-                            asm_.emit(in, NVFX_FP_OP_OPCODE_MAD);
-                        }
-
-                        const int inputs[2] = {colorIt->second, addendIt->second};
-                        for (int inputSrc : inputs)
-                        {
-                            attrs.attributeInputMask |=
-                                fpAttrMaskBitForInputSrc(inputSrc);
-                            if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
-                            {
-                                const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
-                                attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
-                            }
-                        }
-                        return true;
-                    };
-
-                    if (tryEmitTexColorSpecular())
+                    if (tryEmitTexColorSpecular(shapeCtx, srcId, none,
+                                                saturate, dstReg, dstPrecision))
                     {
                         emittedSomething = true;
                         break;
