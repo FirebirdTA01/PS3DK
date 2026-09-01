@@ -960,6 +960,74 @@ uniformId = lhs.baseId;
 return true;
 }
 
+// Four read-only helpers DEDUPLICATED out of lowerFragmentProgram
+// (t_c44cc3b7, carve step 9).  Each existed TWICE - byte-identical copies
+// in two different shape blocks - and each becomes one free function.
+//
+// This step removes something rather than moving it.  Nobody was choosing
+// wrongly here; the hazard is that two correct copies can drift, and after
+// a drift the two shape blocks would disagree about what counts as a colour
+// input or an arithmetic pair while both still compiled.  The duplicates
+// were invisible while they were lambdas buried at two nesting depths;
+// they became findable the moment the carve started naming things, which
+// is the payoff the carve was filed for.
+//
+// Verified byte-identical before merging, not assumed from the shared
+// name: both copies of all four were whitespace-normalised and compared.
+// A fifth pair, emitRaw, has the SAME NAME and DIFFERENT BODIES at its two
+// sites - deliberately left alone here and worth its own look, because a
+// reader who assumes the name means one thing is already wrong.
+static bool getArithPairLocal(const FpShapeReads& reads, IRValueID rid,
+                              IRValueID& lhs, IRValueID& rhs, FpArithOp& op)
+{
+if (auto gaIt = reads.valueToGenericArith.find(rid);
+    gaIt != reads.valueToGenericArith.end())
+{
+    lhs = gaIt->second.srcIds[0];
+    rhs = gaIt->second.srcIds[1];
+    op = static_cast<FpArithOp>(
+        gaIt->second.op == GenericFpOp::Add ? int(FpArithOp::Add) :
+        gaIt->second.op == GenericFpOp::Mul ? int(FpArithOp::Mul) :
+        gaIt->second.op == GenericFpOp::Min ? int(FpArithOp::Min) :
+        gaIt->second.op == GenericFpOp::Max ? int(FpArithOp::Max) :
+        gaIt->second.op == GenericFpOp::Dot3 ? int(FpArithOp::Dot3) :
+        int(FpArithOp::Dot4));
+    return true;
+}
+if (auto arIt = reads.valueToArith.find(rid);
+    arIt != reads.valueToArith.end())
+{
+    lhs = arIt->second.inputId;
+    rhs = arIt->second.uniformId;
+    op = arIt->second.op;
+    return true;
+}
+return false;
+}
+
+static bool normalDirectInput(const FpShapeReads& reads, IRValueID normId,
+                              IRValueID& inputId)
+{
+auto nIt = reads.valueToNormalize.find(normId);
+if (nIt == reads.valueToNormalize.end()) return false;
+if (!nIt->second.inputId ||
+    !reads.valueToInputSrc.count(nIt->second.inputId))
+    return false;
+inputId = nIt->second.inputId;
+return true;
+}
+
+static bool isColorInput(const FpShapeReads& reads, IRValueID vid)
+{
+return reads.valueToInputSrc.count(resolveSrcMods(reads, vid).baseId) != 0;
+}
+
+static bool pickLiteral(const FpShapeReads& reads, IRValueID rid, float expected)
+{
+float f = 0.0f;
+return floatLiteralValue(reads, rid, f) && f == expected;
+}
+
 UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
                                  const rsx_cg::CompileOptions& /*opts*/,
                                  FpAttributes* attrsOut)
@@ -8131,88 +8199,50 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                 auto shadowLikeShadowSplitShape = [&](IRValueID id) -> bool
                 {
-                    auto getArithPairLocal = [&](IRValueID rid,
-                                                IRValueID& lhs,
-                                                IRValueID& rhs,
-                                                FpArithOp& op) -> bool
-                    {
-                        if (auto gaIt = valueToGenericArith.find(rid);
-                            gaIt != valueToGenericArith.end())
-                        {
-                            lhs = gaIt->second.srcIds[0];
-                            rhs = gaIt->second.srcIds[1];
-                            op = static_cast<FpArithOp>(
-                                gaIt->second.op == GenericFpOp::Add ? int(FpArithOp::Add) :
-                                gaIt->second.op == GenericFpOp::Mul ? int(FpArithOp::Mul) :
-                                gaIt->second.op == GenericFpOp::Min ? int(FpArithOp::Min) :
-                                gaIt->second.op == GenericFpOp::Max ? int(FpArithOp::Max) :
-                                gaIt->second.op == GenericFpOp::Dot3 ? int(FpArithOp::Dot3) :
-                                int(FpArithOp::Dot4));
-                            return true;
-                        }
-                        if (auto arIt = valueToArith.find(rid);
-                            arIt != valueToArith.end())
-                        {
-                            lhs = arIt->second.inputId;
-                            rhs = arIt->second.uniformId;
-                            op = arIt->second.op;
-                            return true;
-                        }
-                        return false;
-                    };
 
                     IRValueID mulA = 0, mulB = 0;
                     FpArithOp mulOp = FpArithOp::Add;
-                    if (!getArithPairLocal(id, mulA, mulB, mulOp) ||
+                    if (!getArithPairLocal(shapeCtx.reads, id, mulA, mulB, mulOp) ||
                         mulOp != FpArithOp::Mul)
                         return false;
 
-                    auto isColorInput = [&](IRValueID vid) -> bool
-                    {
-                        return valueToInputSrc.count(resolveSrcMods(shapeCtx.reads, vid).baseId) != 0;
-                    };
 
                     IRValueID addId = 0;
-                    if (isColorInput(mulA))
+                    if (isColorInput(shapeCtx.reads, mulA))
                         addId = mulB;
-                    else if (isColorInput(mulB))
+                    else if (isColorInput(shapeCtx.reads, mulB))
                         addId = mulA;
                     else
                         return false;
 
                     IRValueID addA = 0, addB = 0;
                     FpArithOp addOp = FpArithOp::Add;
-                    if (!getArithPairLocal(addId, addA, addB, addOp) ||
+                    if (!getArithPairLocal(shapeCtx.reads, addId, addA, addB, addOp) ||
                         addOp != FpArithOp::Add)
                         return false;
 
-                    auto pickLiteral = [&](IRValueID rid, float expected) -> bool
-                    {
-                        float f = 0.0f;
-                        return floatLiteralValue(shapeCtx.reads, rid, f) && f == expected;
-                    };
 
                     IRValueID texMulId = 0;
-                    if (pickLiteral(addA, 0.4f))
+                    if (pickLiteral(shapeCtx.reads, addA, 0.4f))
                         texMulId = addB;
-                    else if (pickLiteral(addB, 0.4f))
+                    else if (pickLiteral(shapeCtx.reads, addB, 0.4f))
                         texMulId = addA;
                     else
                         return false;
 
                     IRValueID texA = 0, texB = 0;
                     FpArithOp texMulOp = FpArithOp::Add;
-                    if (!getArithPairLocal(texMulId, texA, texB, texMulOp) ||
+                    if (!getArithPairLocal(shapeCtx.reads, texMulId, texA, texB, texMulOp) ||
                         texMulOp != FpArithOp::Mul)
                         return false;
 
                     IRValueID texSampleId = 0;
-                    if (pickLiteral(texA, 0.6f) &&
+                    if (pickLiteral(shapeCtx.reads, texA, 0.6f) &&
                         valueToTex.count(resolveSrcMods(shapeCtx.reads, texB).baseId))
                     {
                         texSampleId = resolveSrcMods(shapeCtx.reads, texB).baseId;
                     }
-                    else if (pickLiteral(texB, 0.6f) &&
+                    else if (pickLiteral(shapeCtx.reads, texB, 0.6f) &&
                              valueToTex.count(resolveSrcMods(shapeCtx.reads, texA).baseId))
                     {
                         texSampleId = resolveSrcMods(shapeCtx.reads, texA).baseId;
@@ -8430,88 +8460,50 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 IRValueID shColorInputId = 0;
                 auto shadowLikeShadowSplitDetail = [&](IRValueID id) -> bool
                 {
-                    auto getArithPairLocal = [&](IRValueID rid,
-                                                IRValueID& lhs,
-                                                IRValueID& rhs,
-                                                FpArithOp& op) -> bool
-                    {
-                        if (auto gaIt = valueToGenericArith.find(rid);
-                            gaIt != valueToGenericArith.end())
-                        {
-                            lhs = gaIt->second.srcIds[0];
-                            rhs = gaIt->second.srcIds[1];
-                            op = static_cast<FpArithOp>(
-                                gaIt->second.op == GenericFpOp::Add ? int(FpArithOp::Add) :
-                                gaIt->second.op == GenericFpOp::Mul ? int(FpArithOp::Mul) :
-                                gaIt->second.op == GenericFpOp::Min ? int(FpArithOp::Min) :
-                                gaIt->second.op == GenericFpOp::Max ? int(FpArithOp::Max) :
-                                gaIt->second.op == GenericFpOp::Dot3 ? int(FpArithOp::Dot3) :
-                                int(FpArithOp::Dot4));
-                            return true;
-                        }
-                        if (auto arIt = valueToArith.find(rid);
-                            arIt != valueToArith.end())
-                        {
-                            lhs = arIt->second.inputId;
-                            rhs = arIt->second.uniformId;
-                            op = arIt->second.op;
-                            return true;
-                        }
-                        return false;
-                    };
 
                     IRValueID mulA = 0, mulB = 0;
                     FpArithOp mulOp = FpArithOp::Add;
-                    if (!getArithPairLocal(id, mulA, mulB, mulOp) ||
+                    if (!getArithPairLocal(shapeCtx.reads, id, mulA, mulB, mulOp) ||
                         mulOp != FpArithOp::Mul)
                         return false;
 
-                    auto isColorInput = [&](IRValueID vid) -> bool
-                    {
-                        return valueToInputSrc.count(resolveSrcMods(shapeCtx.reads, vid).baseId) != 0;
-                    };
 
                     IRValueID addId = 0;
-                    if (isColorInput(mulA))
+                    if (isColorInput(shapeCtx.reads, mulA))
                         addId = mulB;
-                    else if (isColorInput(mulB))
+                    else if (isColorInput(shapeCtx.reads, mulB))
                         addId = mulA;
                     else
                         return false;
 
                     IRValueID addA = 0, addB = 0;
                     FpArithOp addOp = FpArithOp::Add;
-                    if (!getArithPairLocal(addId, addA, addB, addOp) ||
+                    if (!getArithPairLocal(shapeCtx.reads, addId, addA, addB, addOp) ||
                         addOp != FpArithOp::Add)
                         return false;
 
-                    auto pickLiteral = [&](IRValueID rid, float expected) -> bool
-                    {
-                        float f = 0.0f;
-                        return floatLiteralValue(shapeCtx.reads, rid, f) && f == expected;
-                    };
 
                     IRValueID texMulId = 0;
-                    if (pickLiteral(addA, 0.4f))
+                    if (pickLiteral(shapeCtx.reads, addA, 0.4f))
                         texMulId = addB;
-                    else if (pickLiteral(addB, 0.4f))
+                    else if (pickLiteral(shapeCtx.reads, addB, 0.4f))
                         texMulId = addA;
                     else
                         return false;
 
                     IRValueID texA = 0, texB = 0;
                     FpArithOp texMulOp = FpArithOp::Add;
-                    if (!getArithPairLocal(texMulId, texA, texB, texMulOp) ||
+                    if (!getArithPairLocal(shapeCtx.reads, texMulId, texA, texB, texMulOp) ||
                         texMulOp != FpArithOp::Mul)
                         return false;
 
                     IRValueID texSampleId = 0;
-                    if (pickLiteral(texA, 0.6f) &&
+                    if (pickLiteral(shapeCtx.reads, texA, 0.6f) &&
                         valueToTex.count(resolveSrcMods(shapeCtx.reads, texB).baseId))
                     {
                         texSampleId = resolveSrcMods(shapeCtx.reads, texB).baseId;
                     }
-                    else if (pickLiteral(texB, 0.6f) &&
+                    else if (pickLiteral(shapeCtx.reads, texB, 0.6f) &&
                              valueToTex.count(resolveSrcMods(shapeCtx.reads, texA).baseId))
                     {
                         texSampleId = resolveSrcMods(shapeCtx.reads, texA).baseId;
@@ -9723,27 +9715,16 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             specMax.lhsInputId || specMax.rhsInputId)
                             return false;
 
-                        auto normalDirectInput =
-                            [&](IRValueID normId, IRValueID& inputId) -> bool
-                        {
-                            auto nIt = valueToNormalize.find(normId);
-                            if (nIt == valueToNormalize.end()) return false;
-                            if (!nIt->second.inputId ||
-                                !valueToInputSrc.count(nIt->second.inputId))
-                                return false;
-                            inputId = nIt->second.inputId;
-                            return true;
-                        };
 
                         IRValueID normalId = 0;
                         IRValueID normalNormId = 0;
                         IRValueID lightNormId = 0;
-                        if (normalDirectInput(diffuseMax.lhsValueId, normalId))
+                        if (normalDirectInput(shapeCtx.reads, diffuseMax.lhsValueId, normalId))
                         {
                             normalNormId = diffuseMax.lhsValueId;
                             lightNormId = diffuseMax.rhsValueId;
                         }
-                        else if (normalDirectInput(diffuseMax.rhsValueId, normalId))
+                        else if (normalDirectInput(shapeCtx.reads, diffuseMax.rhsValueId, normalId))
                         {
                             normalNormId = diffuseMax.rhsValueId;
                             lightNormId = diffuseMax.lhsValueId;
@@ -10159,27 +10140,16 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         if (diffuseMax.lhsInputId || diffuseMax.rhsInputId)
                             return false;
 
-                        auto normalDirectInput =
-                            [&](IRValueID normId, IRValueID& inputId) -> bool
-                        {
-                            auto nIt = valueToNormalize.find(normId);
-                            if (nIt == valueToNormalize.end()) return false;
-                            if (!nIt->second.inputId ||
-                                !valueToInputSrc.count(nIt->second.inputId))
-                                return false;
-                            inputId = nIt->second.inputId;
-                            return true;
-                        };
 
                         IRValueID normalId = 0;
                         IRValueID normalNormId = 0;
                         IRValueID lightNormId = 0;
-                        if (normalDirectInput(diffuseMax.lhsValueId, normalId))
+                        if (normalDirectInput(shapeCtx.reads, diffuseMax.lhsValueId, normalId))
                         {
                             normalNormId = diffuseMax.lhsValueId;
                             lightNormId = diffuseMax.rhsValueId;
                         }
-                        else if (normalDirectInput(diffuseMax.rhsValueId, normalId))
+                        else if (normalDirectInput(shapeCtx.reads, diffuseMax.rhsValueId, normalId))
                         {
                             normalNormId = diffuseMax.rhsValueId;
                             lightNormId = diffuseMax.lhsValueId;
