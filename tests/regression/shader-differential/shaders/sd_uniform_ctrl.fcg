@@ -1,0 +1,14 @@
+// shader-differential uniform-application control, uniform half.
+//
+// Output IS the uniform.  Paired against sd_uniform_baked.fcg (the
+// same value as a literal) under a uniform set carrying that value:
+// identical iff cellGcmSetFragmentProgramParameter actually patched
+// the embedded constant.  Silent non-application shows the embedded
+// default (the stager's zeros) and the pair judges mismatch — the
+// failure mode an A/B rig cannot otherwise see, since applying no
+// uniforms to BOTH sides of an ordinary pair still judges identical.
+void main(uniform float4 u_color,
+          out float4 color : COLOR)
+{
+    color = u_color;
+}

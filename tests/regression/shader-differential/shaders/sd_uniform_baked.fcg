@@ -1,0 +1,12 @@
+// shader-differential uniform-application control, baked half.
+//
+// The literal here MUST match the u1 set value the stager writes to
+// uniforms.txt for sd_uniform_ctrl's u_color — the pair's identity
+// is the proof that uniform application works.  Values chosen to be
+// exactly representable in 8-bit channels (0.75*255=191.25 -> both
+// sides round identically whatever the packer convention, because
+// both sides go through the SAME packer).
+void main(out float4 color : COLOR)
+{
+    color = float4(0.75f, 0.25f, 0.5f, 1.0f);
+}

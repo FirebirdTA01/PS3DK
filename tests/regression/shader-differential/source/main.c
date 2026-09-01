@@ -18,8 +18,10 @@
  *   SDIFF|tier=B|role=<role>|shader=<name>|compiler=ab|uniform_set=<s>
  *        |target=<t>|status=<status>|max_delta=<n>|diff_pixels=<n>
  *        |total_pixels=<n>|diagnostic=<d>|elapsed_ms=<n>|artifact=<a>
- * roles:  control-identical | control-mismatch | corpus | probe
- * status: identical | mismatch | load-failed-a | load-failed-b
+ * roles:  control-identical | control-mismatch | control-uniform |
+ *         corpus | probe
+ * status: identical | mismatch | load-failed-a | load-failed-b |
+ *         uniform-missing-a | uniform-missing-b | uniforms-invalid
  * (`ours-refused` rows are emitted host-side by the stager for shaders
  * our compiler refused — no container exists, so the guest never sees
  * them; the scraper merges both sources.)
@@ -41,10 +43,30 @@
  * to this rig?), not a failure.
  *
  * Increment-1 scope, stated: FP pairs only (both sides render with
- * one build-time-embedded pass-through VP that is not under test);
- * uniform_set is parsed and echoed but no uniforms are applied yet —
- * uniform application is increment 2.  On mismatch both raw images
- * are dumped to artifacts/ for host-side inspection.
+ * one build-time-embedded pass-through VP that is not under test).
+ * On mismatch both raw images are dumped to artifacts/ for host-side
+ * inspection.
+ *
+ * Uniform application (increment 2b): uniform_set names a set in the
+ * staged uniforms.txt (`set|name|x,y,z,w` per line); every entry of
+ * the pair's set is applied to BOTH sides by parameter name before
+ * the draw (cellGcmSetFragmentProgramParameter patches the embedded
+ * constants of the COPIED ucode through the FIFO's inline-transfer
+ * path).  A container missing a named parameter fails its side with
+ * status uniform-missing-a/b.  uniform_set "0" means none.
+ *
+ * The uniform plumbing has its own CONTROL, because silent
+ * non-application is invisible to an A/B rig (both sides would show
+ * the same embedded defaults and still judge identical): the stager
+ * pairs a shader whose output IS a uniform against a twin with the
+ * same value BAKED as a literal, under a set carrying that value.
+ * If application works the pair is identical; if it silently fails,
+ * the uniform side shows the embedded default and the row judges
+ * mismatch.  When that control fails, every later pair whose
+ * uniform_set != 0 is SKIPPED with a named diagnostic (row status
+ * uniforms-invalid) rather than judged against unapplied values —
+ * plain pairs still run, so a uniform-plumbing bug cannot invalidate
+ * the whole corpus.
  *
  * RSX plumbing is the shader-readback rig's proven path (RT switch,
  * label-seeded idle, NV3089 image transfer for readback — see that
@@ -297,11 +319,76 @@ static void *load_container(const char *rel, u32 *out_size)
 	return buf;
 }
 
+/* ---- staged uniform sets (uniforms.txt: `set|name|x,y,z,w`) ---- */
+
+#define MAX_UNIFORMS 64
+
+typedef struct {
+	char  set[16];
+	char  name[48];
+	float values[4];
+} sd_uniform;
+
+static sd_uniform g_uniforms[MAX_UNIFORMS];
+static int        g_nuniforms;
+
+/* Absent file is fine (no sets defined); a malformed LINE is not —
+ * a silently dropped uniform is a pair judged against the wrong
+ * values.  Returns 0 only on malformed content. */
+static int load_uniforms(void)
+{
+	FILE *f = fopen(SD_ROOT "uniforms.txt", "r");
+	if (!f)
+		return 1;
+	char line[256];
+	int lineno = 0;
+	while (fgets(line, sizeof(line), f)) {
+		lineno++;
+		size_t len = strlen(line);
+		while (len && (line[len-1] == '\n' || line[len-1] == '\r'))
+			line[--len] = 0;
+		if (!len || line[0] == '#')
+			continue;
+		if (g_nuniforms >= MAX_UNIFORMS) {
+			printf("shader-differential: uniforms.txt exceeds %d entries\n",
+			       MAX_UNIFORMS);
+			fclose(f);
+			return 0;
+		}
+		sd_uniform *u = &g_uniforms[g_nuniforms];
+		float v0, v1, v2, v3;
+		char setbuf[16], namebuf[48];
+		if (sscanf(line, "%15[^|]|%47[^|]|%f,%f,%f,%f",
+		           setbuf, namebuf, &v0, &v1, &v2, &v3) != 6) {
+			printf("shader-differential: uniforms.txt line %d malformed: '%s'\n",
+			       lineno, line);
+			fclose(f);
+			return 0;
+		}
+		snprintf(u->set,  sizeof(u->set),  "%s", setbuf);
+		snprintf(u->name, sizeof(u->name), "%s", namebuf);
+		u->values[0] = v0; u->values[1] = v1;
+		u->values[2] = v2; u->values[3] = v3;
+		g_nuniforms++;
+	}
+	fclose(f);
+	return 1;
+}
+
+static int uniformSetIsNone(const char *set)
+{
+	return !set[0] || strcmp(set, "0") == 0 || strcmp(set, "-") == 0;
+}
+
 /* ---- one side of a pair: bind, draw (with warm-up), read back ---- */
 
-static void render_side(CellGcmContextData *ctx, void *container,
-                        u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
-                        u32 *save, int *warmup_draws)
+/* Returns 0 on success, -1 if a uniform in the pair's set has no
+ * matching named parameter in this side's container (the caller
+ * reports which side). */
+static int render_side(CellGcmContextData *ctx, void *container,
+                       const char *uniform_set,
+                       u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
+                       u32 *save, int *warmup_draws)
 {
 	CGprogram fpo = (CGprogram)container;
 	cellGcmCgInitProgram(fpo);
@@ -312,6 +399,23 @@ static void render_side(CellGcmContextData *ctx, void *container,
 	memcpy(fp_ucode, fp_blob_ucode, fpsize);
 	u32 fp_offset = 0;
 	cellGcmAddressToOffset(fp_ucode, &fp_offset);
+
+	/* Apply the pair's uniform set BEFORE the draw: the patch rides
+	 * the FIFO's inline-transfer path against the copied ucode, so
+	 * ordering relative to the draw commands is preserved. */
+	if (!uniformSetIsNone(uniform_set)) {
+		for (int i = 0; i < g_nuniforms; i++) {
+			if (strcmp(g_uniforms[i].set, uniform_set) != 0)
+				continue;
+			CGparameter prm =
+				cellGcmCgGetNamedParameter(fpo, g_uniforms[i].name);
+			if (!prm)
+				return -1;
+			cellGcmSetFragmentProgramParameter(ctx, fpo, prm,
+			                                   g_uniforms[i].values,
+			                                   fp_offset);
+		}
+	}
 
 	/* Sentinel-fill the readback buffer so a transfer that never lands
 	 * is attributable, then GPU-clear the RT to the mark the warm-up
@@ -502,13 +606,31 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	 * Safe because both draws are idle-waited before we return. */
 	u32 watermark = g_local_mem_heap;
 
+	/* The uniform control is asymmetric BY DESIGN: side A outputs the
+	 * uniform, side B has the value baked and declares no parameter,
+	 * so its set applies to side A only.  Every other role applies
+	 * the set to both sides. */
+	const char *set_b = strcmp(p->role, "control-uniform") == 0
+		? "0" : p->uniform_set;
+
 	int warm_a = 0, warm_b = 0;
-	render_side(ctx, cont_a, rt_a_off, rt_depth_off, rt_pitch, save_a, &warm_a);
-	render_side(ctx, cont_b, rt_b_off, rt_depth_off, rt_pitch, save_b, &warm_b);
+	int ua = render_side(ctx, cont_a, p->uniform_set, rt_a_off,
+	                     rt_depth_off, rt_pitch, save_a, &warm_a);
+	int ub = render_side(ctx, cont_b, set_b, rt_b_off,
+	                     rt_depth_off, rt_pitch, save_b, &warm_b);
 
 	g_local_mem_heap = watermark;
 	free(cont_a);
 	free(cont_b);
+
+	if (ua != 0 || ub != 0) {
+		r->status = ua != 0 ? "uniform-missing-a" : "uniform-missing-b";
+		snprintf(r->diagnostic, sizeof(r->diagnostic),
+		         "set '%s' names a parameter the container lacks",
+		         p->uniform_set);
+		r->elapsed_ms = now_ms() - t0;
+		return;
+	}
 
 	/* Raw-byte channel compare.  A8R8G8B8 both sides, same pitch, so a
 	 * per-u32 walk with per-channel deltas gives max_delta in 8-bit
@@ -553,7 +675,12 @@ int main(int argc, const char **argv)
 		printf("SHADER_DIFF_INVALID\n");
 		return 2;
 	}
-	printf("shader-differential: %d pairs, target=%s\n", g_npairs, g_target);
+	if (!load_uniforms()) {
+		printf("SHADER_DIFF_INVALID\n");
+		return 2;
+	}
+	printf("shader-differential: %d pairs, %d uniform entries, target=%s\n",
+	       g_npairs, g_nuniforms, g_target);
 
 	void *host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (!init_screen(host_addr, HOST_SIZE)) {
@@ -639,13 +766,49 @@ int main(int argc, const char **argv)
 
 	/* ---- controls first, judged in manifest order ---- */
 	int controls_ok = 1;
+	int uniforms_ok = 1;   /* flipped by a failed control-uniform row */
+	int uniforms_skipped = 0;
 	int failures = 0;
 	for (int i = 0; i < g_npairs; i++) {
 		const sd_pair *p = &g_pairs[i];
 		sd_result r;
+
+		/* A failed uniform control invalidates uniform-DEPENDENT rows
+		 * only: judging them would compare unapplied embedded defaults
+		 * and report plausible verdicts about values nobody set. */
+		if (!uniforms_ok && i > 1 && !uniformSetIsNone(p->uniform_set) &&
+		    strcmp(p->role, "control-uniform") != 0) {
+			r.status = "uniforms-invalid";
+			r.max_delta = 0;
+			r.diff_pixels = 0;
+			r.total_pixels = 0;
+			r.elapsed_ms = 0;
+			snprintf(r.diagnostic, sizeof(r.diagnostic),
+			         "skipped: control-uniform failed");
+			snprintf(r.artifact, sizeof(r.artifact), "-");
+			print_row(p, &r);
+			uniforms_skipped++;
+			continue;
+		}
+
 		judge_pair(ctx, p, rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
 		           save_a, save_b, &r);
 		print_row(p, &r);
+
+		if (strcmp(p->role, "control-uniform") == 0) {
+			/* Uniform-vs-baked twin: identical iff application works.
+			 * Not a probe (it gates) and not a standing control (it
+			 * invalidates only uniform-dependent rows).  Its failure
+			 * COUNTS AS A FAILURE even when no dependent rows exist:
+			 * a run with a red control must not read green. */
+			if (strcmp(r.status, "identical") != 0) {
+				printf("shader-differential: control-uniform judged '%s' — uniform application is not working; uniform-dependent pairs will not be judged\n",
+				       r.status);
+				uniforms_ok = 0;
+				failures++;
+			}
+			continue;
+		}
 
 		if (i == 0) {
 			/* control-identical must judge identical. */
@@ -680,8 +843,13 @@ int main(int argc, const char **argv)
 	}
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures\n",
-	       corpus, failures);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped\n",
+	       corpus - uniforms_skipped, failures, uniforms_skipped);
+	/* A failed uniform control plus skipped rows is an incomplete run,
+	 * not a clean one: report FAIL so the scrape cannot read partial
+	 * coverage as green. */
+	if (uniforms_skipped > 0)
+		failures++;
 	printf("%s\n", failures == 0 ? "SHADER_DIFF_OK" : "SHADER_DIFF_FAIL");
 
 	cellGcmSetWaitFlip(ctx);
