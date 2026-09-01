@@ -873,17 +873,18 @@ private:
                     // the worst possible way to meet a compiler bug.
                     // Refuse loudly instead; a graph that cannot be
                     // scheduled is a defect in this pass either way.
-                    if (ordered.size() < n) {
-                        program_.diagnostics.push_back(
-                            "nv40-general: instruction scheduler could not drain its "
-                            "dependency graph (" + std::to_string(n - ordered.size()) +
-                            " of " + std::to_string(n) +
-                            " instructions unschedulable); refusing");
-                        program_.loweringFailed = true;
-                        return;
-                    }
-                    ++curCycle;
-                    continue;
+                    // Unconditional: this sits inside
+                    // `while (ordered.size() < n)`, so there is always at
+                    // least one instruction left to blame.  An `if` here
+                    // would send the next reader hunting for the case that
+                    // falls through to a spin, and there isn't one.
+                    program_.diagnostics.push_back(
+                        "nv40-general: instruction scheduler could not drain its "
+                        "dependency graph (" + std::to_string(n - ordered.size()) +
+                        " of " + std::to_string(n) +
+                        " instructions unschedulable); refusing");
+                    program_.loweringFailed = true;
+                    return;
                 }
                 curCycle = nextCycle;
                 continue;
