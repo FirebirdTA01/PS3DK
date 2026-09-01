@@ -486,6 +486,12 @@ if ($ReferenceCompiler) {
             $src = Join-Path $repoRoot $rel
             if (-not (Test-Path $src)) { throw "path-pairs: shader not found: $rel" }
             $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
+            if ($seenNames.ContainsKey($name)) {
+                $md5 = [System.Security.Cryptography.MD5]::Create()
+                $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
+                $name = "$name`_" + $hex.Substring(0, 6)
+            }
+            $seenNames[$name] = 1
             $dDef = Join-Path $refScratch "$name`_default.fpo"
             $dGen = Join-Path $refScratch "$name`_general.fpo"
             $dRef = Join-Path $refScratch "$name`_pathref.fpo"

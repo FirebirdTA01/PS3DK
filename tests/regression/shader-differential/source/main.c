@@ -917,6 +917,16 @@ static int load_manifest(void)
 
 /* ---- pair judgment ---- */
 
+/* Path-pair premise coupling: the row before <shader>@paths must be an
+ * identical reference row whose side A is THE SAME CONTAINER as the
+ * path-pair row's side A (compared by a_path, not by name: the default
+ * container is the actual oracle premise, and a name stem can collide).
+ * The stager always emits them that way, but that is a property of the
+ * stager, and the gate lives here: a hand-edited manifest that put
+ * shader X's oracle before shader Y's pair would otherwise judge Y on
+ * X's premise with a confident verdict (review findings on the
+ * path-pair role, t_5d8795e7 family). */
+
 typedef struct {
 	const char *status;      /* identical | mismatch | load-failed-a/b */
 	int  max_delta;
@@ -1214,6 +1224,8 @@ int main(int argc, const char **argv)
 	int unoracled = 0;     /* path-pair rows whose premise row was not identical */
 	const char *prev_role = "";       /* the row before this one, for path-pair */
 	const char *prev_status = "";
+	const char *prev_name = "";
+	const char *prev_a_path = "";
 	u32 canary_sz = 0;
 	void *canary = load_container(g_pairs[0].a_path, &canary_sz);
 	if (!canary) {
@@ -1248,6 +1260,8 @@ int main(int argc, const char **argv)
 			uniforms_skipped++;
 			prev_role = p->role;
 			prev_status = r.status;
+			prev_name = p->name;
+			prev_a_path = p->a_path;
 			continue;
 		}
 
@@ -1262,14 +1276,16 @@ int main(int argc, const char **argv)
 		 * row (review condition on the path-pair role). */
 		if (strcmp(p->role, "path-pair") == 0 &&
 		    !(strcmp(prev_role, "reference") == 0 &&
-		      strcmp(prev_status, "identical") == 0)) {
+		      strcmp(prev_status, "identical") == 0 &&
+		      strcmp(prev_a_path, p->a_path) == 0)) {
 			r.status = "path-pair-unoracled";
 			r.max_delta = 0;
 			r.diff_pixels = 0;
 			r.total_pixels = 0;
 			r.elapsed_ms = 0;
 			snprintf(r.diagnostic, sizeof(r.diagnostic),
-			         "premise row before it (%s, %s) did not judge identical",
+			         "premise row before it (%s %s, %s) is not an identical reference row for this default container",
+			         prev_name[0] ? prev_name : "none",
 			         prev_role[0] ? prev_role : "none",
 			         prev_status[0] ? prev_status : "none");
 			snprintf(r.artifact, sizeof(r.artifact), "-");
@@ -1277,6 +1293,8 @@ int main(int argc, const char **argv)
 			unoracled++;
 			prev_role = p->role;
 			prev_status = r.status;
+			prev_name = p->name;
+			prev_a_path = p->a_path;
 			continue;
 		}
 
@@ -1296,6 +1314,8 @@ int main(int argc, const char **argv)
 			uniforms_skipped++;
 			prev_role = p->role;
 			prev_status = r.status;
+			prev_name = p->name;
+			prev_a_path = p->a_path;
 			continue;
 		}
 
@@ -1305,6 +1325,8 @@ int main(int argc, const char **argv)
 		print_row(p, &r);
 		prev_role = p->role;
 		prev_status = r.status;
+		prev_name = p->name;
+		prev_a_path = p->a_path;
 
 		if (strcmp(r.status, "textures-invalid") == 0) {
 			/* Withheld, not failed: the red texture control already
