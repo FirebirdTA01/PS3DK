@@ -30,15 +30,7 @@ URLS=(
 SHA256="5e7b29b3f113ef870d1e3ecf8adf21f923396401604bda16d44be45e66052331"
 SRC="$PKG-$VER"
 
-if [[ ! -f "$TARBALL" ]]; then
-    for url in "${URLS[@]}"; do
-        wget --continue -O "$TARBALL" "$url" && break
-        rm -f "$TARBALL"
-    done
-    [[ -s "$TARBALL" ]] || { echo "All $PKG mirrors failed" >&2; exit 1; }
-fi
-echo "$SHA256  $TARBALL" | sha256sum -c - \
-    || { echo "checksum mismatch for $TARBALL" >&2; exit 1; }
+portlib_fetch "$TARBALL" "$SHA256" "${URLS[@]}" || exit 1
 
 if [[ ! -d "$SRC" ]]; then
     tar xf "$TARBALL"

@@ -24,6 +24,58 @@ warn() { printf "[portlibs] WARNING: %s\n" "$*" >&2; }
 die() { printf "[portlibs] ERROR: %s\n" "$*" >&2; exit 1; }
 
 RECIPES_DIR="$PS3_TOOLCHAIN_ROOT/scripts/portlibs"
+# ---------------------------------------------------------------------------
+# Shared tarball fetch for the recipes below.
+# ---------------------------------------------------------------------------
+# Every recipe used to carry its own copy of:
+#
+#     for url in "${URLS[@]}"; do wget --continue -O "$TARBALL" "$url" && break
+#
+# which treats ANY 200 as success.  A mirror that answers 200 with the wrong
+# bytes therefore ends the loop, and the good mirrors behind it are never
+# tried.  That is not hypothetical: zlib.net rotated 1.3.1 off its top-level
+# path and served an 11,916-byte HTML page under the tarball's name, so the
+# v0.12.54 release build took the page, failed its checksum, and died with two
+# working mirrors - including the release-tagged one - untried directly below.
+#
+# So verification moves INSIDE the loop: a mirror only counts as having worked
+# if what it returned matches the pin.  An already-present file is verified
+# too, because trusting it on existence alone lets one poisoned cache entry
+# survive every later run - and --continue would happily resume onto it, which
+# is why that flag is gone.
+#
+# This lives here, in the driver, rather than being patched into six recipes:
+# the identical bug was in all six, and one implementation cannot drift.
+portlib_fetch() {
+    local tarball="$1" expected="$2"; shift 2
+    local url actual
+
+    if [[ -f "$tarball" ]]; then
+        if [[ "$(sha256sum "$tarball" | awk '{print $1}')" == "$expected" ]]; then
+            return 0
+        fi
+        echo "[portlibs] cached $tarball does not match its pin; discarding it" >&2
+        rm -f "$tarball"
+    fi
+
+    for url in "$@"; do
+        echo "[portlibs] fetching $url"
+        if ! wget --quiet --timeout=30 --tries=3 -O "$tarball" "$url"; then
+            rm -f "$tarball"
+            continue
+        fi
+        actual="$(sha256sum "$tarball" | awk '{print $1}')"
+        if [[ "$actual" == "$expected" ]]; then
+            return 0
+        fi
+        echo "[portlibs]   $url returned content not matching the pin (got $actual); next mirror" >&2
+        rm -f "$tarball"
+    done
+
+    echo "[portlibs] no mirror returned $tarball matching $expected" >&2
+    return 1
+}
+
 PORTLIBS_INSTALL="$PS3DEV/portlibs/ppu"
 BUILD="$PS3_BUILD_ROOT/portlibs"
 

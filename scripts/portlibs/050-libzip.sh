@@ -27,15 +27,7 @@ URLS=(
 SHA256="8a247f57d1e3e6f6d11413b12a6f28a9d388de110adc0ec608d893180ed7097b"
 SRC="$PKG-$VER"
 
-if [[ ! -f "$TARBALL" ]]; then
-    for url in "${URLS[@]}"; do
-        wget --continue -O "$TARBALL" "$url" && break
-        rm -f "$TARBALL"
-    done
-    [[ -s "$TARBALL" ]] || { echo "All $PKG mirrors failed" >&2; exit 1; }
-fi
-echo "$SHA256  $TARBALL" | sha256sum -c - \
-    || { echo "checksum mismatch for $TARBALL" >&2; exit 1; }
+portlib_fetch "$TARBALL" "$SHA256" "${URLS[@]}" || exit 1
 
 # Always start from a pristine extract: the patch step below is fatal on a
 # hunk that does not apply, and an already-patched tree from a previous run
