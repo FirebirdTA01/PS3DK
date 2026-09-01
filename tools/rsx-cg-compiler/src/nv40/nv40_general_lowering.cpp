@@ -2291,6 +2291,18 @@ private:
             program_.loweringFailed = true;
             return;
         }
+        // The sequence below is hardwired to DP3 and xyz masks.  The
+        // symbol table registers refract for vec2/vec3/vec4 too - a vec2
+        // would read an uninitialized z lane into the dot, and a vec4
+        // result would leave .w unwritten under an xyzw consumer (found
+        // in review by a width probe).  Refuse the widths the lowering
+        // does not implement rather than emit either of those.
+        if (inst.resultType.componentCount() != 3) {
+            program_.diagnostics.push_back(
+                "nv40-general: refract is lowered for float3 only; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
 
         const VSrc I   = resolve(inst.operands[0]);
         const VSrc N   = resolve(inst.operands[1]);
