@@ -39,7 +39,19 @@ param(
     # containers are runtime input under dev_hdd0 only; they never enter
     # the tree.  Byte-identical pairs are not staged.
     [string]$ReferenceCompiler = "",
-    [string]$ReferencePairs = "",  # default: <rig>/reference-pairs.txt
+    [string]$ReferencePairs = "",  # default: <rig>/reference-pairs.txt; "-" = none
+    # -ReferenceCorpus: also stage EVERY fragment shader under
+    # -ReferenceCorpusDir (Windows path; default <repo>/build/shader-corpus,
+    # the fetched community corpus, _work/ excluded) as an ours-vs-reference
+    # pair under uniform_set auto (increment 3c).  A refusal on either
+    # side is a sidecar row, not an abort: the corpus is not curated.
+    [switch]$ReferenceCorpus,
+    [string]$ReferenceCorpusDir = "",
+    # Corpus-relative paths to leave out of the sweep, one per line with
+    # the board id that says why (default <rig>/reference-corpus-exclude.txt).
+    # A shader goes here only when it poisons the run for every row after
+    # it; a plain mismatch or refusal stays in and is reported.
+    [string]$ReferenceCorpusExclude = "",
     [string]$Hdd0 = ""           # override dev_hdd0 root (testing)
 )
 
@@ -121,20 +133,37 @@ function Auto-Value([string]$name, [uint32]$k) {
     return $v.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute) {
+function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute, [switch]$NoThrow) {
     $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
+    Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+    # Our compiler reports a refusal on stderr; under "Stop" a redirected
+    # native stderr line is a terminating error (same trap as the
+    # reference side), so relax the preference for the call.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     if ($useWsl) {
-        & wsl -- $WslCompiler @flags @($extraFlags) -p sce_fp_rsx `
-            --emit-container (To-WslPath $dst) (To-WslPath $srcPath)
+        # timeout(1) inside WSL: an uncurated corpus shader must not be
+        # able to stall the whole stage on a hung compile.
+        $global:LASTEXITCODE = -1
+        $null = & wsl -- timeout 30s $WslCompiler @flags @($extraFlags) -p sce_fp_rsx `
+            --emit-container (To-WslPath $dst) (To-WslPath $srcPath) 2>&1
     } else {
-        & $Rsxcgc @flags @($extraFlags) -p sce_fp_rsx --emit-container $dst $srcPath
+        $global:LASTEXITCODE = -1
+        $null = & $Rsxcgc @flags @($extraFlags) -p sce_fp_rsx --emit-container $dst $srcPath 2>&1
     }
-    if ($LASTEXITCODE -ne 0) { throw "compile failed ($LASTEXITCODE): $src" }
-    # A zero-byte container is a compile that lied about succeeding --
-    # refuse to stage it rather than let the guest report load-failed.
-    if ((Get-Item $dst).Length -eq 0) { throw "compile produced empty container: $src" }
+    $rc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
     $label = if ($Absolute) { Split-Path -Leaf $src } else { $src }
+    # A zero-byte or missing container is a compile that lied about
+    # succeeding -- never stage it; the guest would report load-failed.
+    $ok = ($rc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
+    if (-not $ok) {
+        if ($NoThrow) { return $false }
+        if ($rc -ne 0) { throw "compile failed ($rc): $src" }
+        throw "compile produced empty container: $src"
+    }
     Write-Host "stager: $label -> $(Split-Path -Leaf $dst) ($((Get-Item $dst).Length) bytes)"
+    return $true
 }
 
 # Standing controls.  control-identical is ONE container byte-copied
@@ -246,6 +275,31 @@ if ($Corpus) {
     Write-Host "stager: corpus rows appended ($($corpusRows.Count) pairs, $($stagedFiles.Count) containers)"
 }
 
+# Reference-side compile.  The reference compiler reports progress on
+# stderr; under $ErrorActionPreference = "Stop" a redirected native
+# stderr line is a terminating error in PowerShell 5.1, so relax it for
+# the call and judge by exit code + container instead.
+# A native command that fails to LAUNCH (non-executable file) does not
+# set $LASTEXITCODE, which would otherwise still hold the 0 our own
+# compile just returned; pre-set it so the rc check judges this call
+# and not the previous one.  The shell's report of a native tool is not
+# the tool's report.  It MUST be the $global: form: the engine writes
+# the exit code to the GLOBAL variable, and a bare `$LASTEXITCODE = -1`
+# creates a shadow in whatever scope this runs in (a script invoked with
+# the call operator has its own; measured: a successful reference
+# compile then reports -1).  Returns $true iff a non-empty container
+# exists afterwards.
+function Compile-Reference([string]$src, [string]$dst) {
+    Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $global:LASTEXITCODE = -1
+    $null = & $ReferenceCompiler -p sce_fp_rsx -o $dst $src 2>&1
+    $refRc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    return ($refRc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
+}
+
 # Ours-vs-reference pairs (increment 2c).  Rows carry role=reference,
 # which the guest GATES like a corpus row: a pixel mismatch against the
 # reference fails the run.  Byte-identical pairs are counted and not
@@ -261,9 +315,18 @@ if ($ReferenceCompiler) {
         throw "reference compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
     }
     Write-Host "stager: reference compiler present"
+    # -ReferencePairs - (a dash, the manifest's own "none") stages no
+    # curated list: the list is tied to the DEFAULT lowering path (a
+    # curated shader that refuses is a finding and aborts), while a
+    # -GeneralLowering corpus sweep must be able to run without it -
+    # discard-blend/fpshader, for one, refuses on the general path until
+    # CF-2 lands (t_91bbd575).
     if (-not $ReferencePairs) { $ReferencePairs = Join-Path $here "reference-pairs.txt" }
-    $pairLines = @(Get-Content $ReferencePairs | Where-Object { $_ -and -not $_.StartsWith("#") })
-    if ($pairLines.Count -eq 0) { throw "reference-pairs list is empty: $ReferencePairs" }
+    $pairLines = @()
+    if ($ReferencePairs -ne '-') {
+        $pairLines = @(Get-Content $ReferencePairs | Where-Object { $_ -and -not $_.StartsWith("#") })
+        if ($pairLines.Count -eq 0) { throw "reference-pairs list is empty: $ReferencePairs" }
+    }
 
     $refDst = Join-Path $root "reference"
     New-Item -ItemType Directory -Force $refDst | Out-Null
@@ -290,29 +353,8 @@ if ($ReferenceCompiler) {
 
         $ours = Join-Path $refScratch "$name`_ours.fpo"
         $ref  = Join-Path $refScratch "$name`_ref.fpo"
-        Compile-Shader $src $ours @() -Absolute
-        # The reference compiler reports progress on stderr; under
-        # $ErrorActionPreference = "Stop" a redirected native stderr line
-        # is a terminating error in PowerShell 5.1, so relax it for the
-        # call and judge by exit code + container instead.
-        # A native command that fails to LAUNCH (non-executable file)
-        # does not set $LASTEXITCODE, which would otherwise still hold
-        # the 0 our own compile just returned; pre-set it so the rc
-        # check below judges this call and not the previous one.  The
-        # shell's report of a native tool is not the tool's report.
-        # It MUST be the $global: form: the engine writes the exit code
-        # to the GLOBAL variable, and a bare `$LASTEXITCODE = -1` here
-        # creates a script-scope shadow that every later read in this
-        # script sees instead - measured: a successful reference
-        # compile then reports -1 (first real execution of 0f67f51).
-        $prevEap = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        $global:LASTEXITCODE = -1
-        $null = & $ReferenceCompiler -p sce_fp_rsx -o $ref $src 2>&1
-        $refRc = $LASTEXITCODE
-        $ErrorActionPreference = $prevEap
-        if ($refRc -ne 0) { throw "reference compile failed ($refRc): $rel" }
-        if (-not (Test-Path $ref) -or (Get-Item $ref).Length -eq 0) { throw "reference compile produced no container: $rel" }
+        $null = Compile-Shader $src $ours @() -Absolute
+        if (-not (Compile-Reference $src $ref)) { throw "reference compile failed or produced no container: $rel" }
 
         $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
         $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
@@ -327,6 +369,64 @@ if ($ReferenceCompiler) {
     }
     $manifest += $refRows
     Write-Host "stager: reference rows appended ($($refRows.Count) pairs, $refIdentical byte-identical skipped)"
+
+    # Reference corpus sweep (increment 3c): every fragment shader under
+    # the corpus root, ours vs reference under set auto.  Same naming
+    # scheme as stage-corpus.sh (basename, md5-6 of the corpus-relative
+    # path on collision); refusals go to reference-corpus-refused.txt
+    # (name|side|rel) and byte-identical pairs are counted, not staged.
+    if ($ReferenceCorpus) {
+        if (-not $ReferenceCorpusDir) { $ReferenceCorpusDir = Join-Path $repoRoot "build\shader-corpus" }
+        if (-not (Test-Path -LiteralPath $ReferenceCorpusDir -PathType Container)) {
+            throw "reference corpus root not a directory: $ReferenceCorpusDir"
+        }
+        $corpusRoot = (Resolve-Path -LiteralPath $ReferenceCorpusDir).Path.TrimEnd('\')
+        $files = @(Get-ChildItem -LiteralPath $corpusRoot -Recurse -File |
+            Where-Object { ($_.Name -like '*.fcg' -or $_.Name -like '*_f.cg') -and ($_.FullName -notlike "*\_work\*") } |
+            Sort-Object FullName)
+        if ($files.Count -eq 0) { throw "reference corpus is empty: $corpusRoot" }
+        if (-not $ReferenceCorpusExclude) { $ReferenceCorpusExclude = Join-Path $here "reference-corpus-exclude.txt" }
+        $excluded = @{}
+        if (Test-Path -LiteralPath $ReferenceCorpusExclude -PathType Leaf) {
+            foreach ($line in (Get-Content $ReferenceCorpusExclude | Where-Object { $_ -and -not $_.StartsWith("#") })) {
+                $excluded[$line.Split("|")[0].Trim()] = $line
+            }
+        }
+        $cExcluded = 0
+        $refusedPath = Join-Path $root "reference-corpus-refused.txt"
+        $refusedRows = @("# shader-differential reference-corpus refusals -- generated by stage-differential.ps1", "# fields: name|side|corpus-relative path")
+        $cRows = @(); $cIdentical = 0; $cRefusedOurs = 0; $cRefusedRef = 0
+        foreach ($f in $files) {
+            $rel = $f.FullName.Substring($corpusRoot.Length + 1).Replace('\', '/')
+            if ($excluded.ContainsKey($rel)) { $cExcluded++; Write-Host "stager: excluded $rel ($($excluded[$rel]))"; continue }
+            $name = $f.Name
+            if ($name.EndsWith('.cg')) { $name = $name.Substring(0, $name.Length - 3) }
+            if ($name.EndsWith('.fcg')) { $name = $name.Substring(0, $name.Length - 4) }
+            if ($seenNames.ContainsKey($name)) {
+                $md5 = [System.Security.Cryptography.MD5]::Create()
+                $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
+                $name = "$name`_" + $hex.Substring(0, 6)
+            }
+            $seenNames[$name] = 1
+            $ours = Join-Path $refScratch "$name`_ours.fpo"
+            $ref  = Join-Path $refScratch "$name`_ref.fpo"
+            $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow
+            $okRef  = Compile-Reference $f.FullName $ref
+            if (-not $okOurs) { $cRefusedOurs++; $refusedRows += "$name|ours|$rel" }
+            if (-not $okRef)  { $cRefusedRef++;  $refusedRows += "$name|reference|$rel" }
+            if (-not ($okOurs -and $okRef)) { continue }
+            $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
+            $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
+            if ($hOurs -eq $hRef) { $cIdentical++; continue }
+            Copy-Item $ours (Join-Path $refDst "$name`_ours.fpo") -Force
+            Copy-Item $ref  (Join-Path $refDst "$name`_ref.fpo") -Force
+            $cRows += "B|reference|$name|reference/$name`_ours.fpo|reference/$name`_ref.fpo|auto"
+        }
+        Set-Content -LiteralPath $refusedPath -Value ($refusedRows -join "`n") -Encoding Ascii
+        if (($cRows.Count + $cIdentical + $cRefusedOurs + $cRefusedRef) -eq 0) { throw "reference corpus sweep compiled nothing" }
+        $manifest += $cRows
+        Write-Host "stager: reference corpus: $($files.Count) shaders, $($cRows.Count) pairs staged, $cIdentical byte-identical skipped, ours refused $cRefusedOurs, reference refused $cRefusedRef, $cExcluded excluded (sidecar: reference-corpus-refused.txt)"
+    }
 }
 
 Set-Content -LiteralPath (Join-Path $root "manifest.txt") -Value ($manifest -join "`n") -Encoding Ascii

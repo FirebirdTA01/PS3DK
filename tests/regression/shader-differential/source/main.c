@@ -27,7 +27,15 @@
  *         textures-invalid | samplers-unvalidated |
  *         sampler-unsupported-a | sampler-unsupported-b |
  *         auto-invalid | uniform-unsupported-a | uniform-unsupported-b |
- *         internal-error (a render_side code the judge does not map)
+ *         internal-error (a render_side code the judge does not map) |
+ *         vacuous (neither side painted a pixel: no verdict, never
+ *         counted as identical)
+ *
+ * Poison canary: after every row past the standing controls the rig
+ * draws the identity control's container once; if that paints nothing
+ * the run ends SHADER_DIFF_INVALID naming the row that poisoned the
+ * state (measured: one malformed general-path program blanked every
+ * draw after it).
  *
  * Uniform synthesis (increment 3b): a row whose uniform_set is `auto`
  * has every float/half vector uniform its containers declare set to
@@ -573,6 +581,48 @@ static int uniformSetIsNone(const char *set)
 	return !set[0] || strcmp(set, "0") == 0 || strcmp(set, "-") == 0;
 }
 
+/* Pixels a draw actually painted: neither the GPU clear mark nor the
+ * host-side sentinel that marks a transfer that never landed. */
+static int painted_pixels(const u32 *img, u32 rt_pitch)
+{
+	int n = 0;
+	for (u32 y = 0; y < RT_H; y++)
+		for (u32 x = 0; x < RT_W; x++) {
+			u32 p = img[y * (rt_pitch / 4u) + x];
+			if (p != GPU_CLEAR_MARK && p != CLEAR_SENTINEL)
+				n++;
+		}
+	return n;
+}
+
+/* Poison detector.  A malformed fragment program can leave the RSX (or
+ * the emulator's model of it) in a state where every later draw paints
+ * nothing - measured: one general-path corpus container blanked the 61
+ * rows after it, byte-copied constant pairs included, and they all read
+ * "vacuous" (or, before the vacuity guard, "identical").  After every
+ * gated row the rig draws the identity control's own container once;
+ * if that paints nothing the state is poisoned, the run stops and
+ * names the row that poisoned it, because no verdict after that point
+ * would mean anything.  Cost: one small draw per row. */
+static int render_side(CellGcmContextData *ctx, void *container,
+                       const char *uniform_set,
+                       int textures_ok, int have_tex_control,
+                       u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
+                       u32 *save, int *warmup_draws);
+
+static int canary_paints(CellGcmContextData *ctx, void *canary_container,
+                         u32 rt_off, u32 rt_depth_off, u32 rt_pitch, u32 *save)
+{
+	u32 watermark = g_local_mem_heap;
+	int warm = 0;
+	int rc = render_side(ctx, canary_container, "0", 1, 1,
+	                     rt_off, rt_depth_off, rt_pitch, save, &warm);
+	g_local_mem_heap = watermark;
+	if (rc != 0)
+		return 0;
+	return painted_pixels(save, rt_pitch) > 0;
+}
+
 /* ---- one side of a pair: bind, draw (with warm-up), read back ---- */
 
 /* Returns 0 on success; -1 if a uniform in the pair's set has no
@@ -652,17 +702,18 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
 
 	/* Warm-up retries against RPCS3's async shader compiler (see the
-	 * readback rig).  Probe = RT center.  A shader whose CORRECT
-	 * center pixel equals GPU_CLEAR_MARK burns the whole budget and is
-	 * then judged from the final image anyway — slow, never wrong,
-	 * and both sides of a pair face the identical policy. */
-	const u32 probe = (RT_H / 2) * (rt_pitch / 4u) + (RT_W / 2);
+	 * readback rig).  A draw counts as landed when ANY pixel left the
+	 * clear mark (the centre alone made every discarding or
+	 * partially-covering shader burn the whole budget, 4 s a side).
+	 * A shader that legitimately paints nothing still burns it and is
+	 * judged from the final image anyway - slow, never wrong, and both
+	 * sides of a pair face the identical policy. */
 	int tries;
 	for (tries = 1; tries <= 10; tries++) {
 		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
 		wait_rsx_idle(ctx);
 		transfer_rt_to_main(ctx, rt_off, rt_pitch);
-		if (g_readback[probe] != GPU_CLEAR_MARK)
+		if (painted_pixels(g_readback, rt_pitch) > 0)
 			break;
 		usleep(200000);
 	}
@@ -983,6 +1034,22 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		return;
 	}
 
+	/* Vacuity guard, the differential harness's dumbest failure at row
+	 * level: two sides that both painted NOTHING agree byte-for-byte
+	 * and would read identical.  Such a pair carries no information
+	 * about the compiler and is reported as vacuous, never identical.
+	 * (First real corpus sweep: 62 of 63 pairs would have passed this
+	 * way while RPCS3 was rejecting programs for invalid registers.) */
+	int painted_a = painted_pixels(save_a, rt_pitch);
+	int painted_b = painted_pixels(save_b, rt_pitch);
+	if (painted_a == 0 && painted_b == 0) {
+		r->status = "vacuous";
+		snprintf(r->diagnostic, sizeof(r->diagnostic),
+		         "no pixel painted on either side");
+		r->elapsed_ms = now_ms() - t0;
+		return;
+	}
+
 	/* Raw-byte channel compare.  A8R8G8B8 both sides, same pitch, so a
 	 * per-u32 walk with per-channel deltas gives max_delta in 8-bit
 	 * steps and diff_pixels as "any channel differs". */
@@ -1002,6 +1069,12 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		dump_artifact(p->name, 'a', save_a, rt_pitch * RT_H);
 		dump_artifact(p->name, 'b', save_b, rt_pitch * RT_H);
 		snprintf(r->artifact, sizeof(r->artifact), "artifacts/%s_{a,b}.raw", p->name);
+	}
+	if (painted_a < RT_W * RT_H || painted_b < RT_W * RT_H) {
+		size_t len = strlen(r->diagnostic);
+		if (strcmp(r->diagnostic, "-") == 0) len = 0;
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         "%spainted a=%d b=%d", len ? " " : "", painted_a, painted_b);
 	}
 	if (warm_a > 1 || warm_b > 1)
 		snprintf(r->diagnostic, sizeof(r->diagnostic),
@@ -1129,6 +1202,16 @@ int main(int argc, const char **argv)
 	int textures_ok = 1;   /* flipped by a failed control-texture row */
 	int textures_skipped = 0;
 	int autos_ok = 1;      /* flipped by a failed control-auto row */
+	int unsupported = 0;   /* gated rows the binder could not serve */
+	int vacuous = 0;       /* gated rows where neither side painted */
+	u32 canary_sz = 0;
+	void *canary = load_container(g_pairs[0].a_path, &canary_sz);
+	if (!canary) {
+		printf("shader-differential: cannot load the identity control's container for the poison canary\nSHADER_DIFF_INVALID\n");
+		cellGcmFinish(ctx, 0);
+		free(host_addr);
+		return 2;
+	}
 	int have_tex_control = 0;
 	for (int i = 0; i < g_npairs; i++)
 		if (strcmp(g_pairs[i].role, "control-texture") == 0)
@@ -1254,16 +1337,45 @@ int main(int argc, const char **argv)
 			}
 		} else if (strcmp(p->role, "probe") == 0) {
 			/* Probe rows measure; they never gate. */
+		} else if (strcmp(r.status, "vacuous") == 0) {
+			/* Neither side painted: no verdict about the compiler was
+			 * reached.  Counted on its own line, loudly, and never as
+			 * identical.  A control that comes out vacuous has already
+			 * failed its own check above (it is not identical). */
+			vacuous++;
+		} else if (strncmp(r.status, "sampler-unsupported", 19) == 0 ||
+		           strncmp(r.status, "uniform-unsupported", 19) == 0) {
+			/* A pair the RIG cannot bind is a rig limit, not a
+			 * compiler finding: counted on its own line so a corpus
+			 * sweep reports "not judged" rather than "failed" for it.
+			 * Every other non-identical status on a gated row - a
+			 * mismatch, a load failure, an unvalidated sampler - still
+			 * fails the run. */
+			unsupported++;
 		} else {
 			if (strcmp(r.status, "identical") != 0)
 				failures++;
 		}
+
+		/* Poison check after every row past the standing controls
+		 * (rows 0..1 are validated by their own verdicts). */
+		if (i > 1 && !canary_paints(ctx, canary, rt_a_off, rt_depth_off,
+		                            rt_pitch, save_a)) {
+			printf("shader-differential: RSX state poisoned after row %d (%s, role %s): a constant-colour canary draw painted nothing, so no later verdict would mean anything; %d rows not judged\nSHADER_DIFF_INVALID\n",
+			       i, p->name, p->role, g_npairs - 1 - i);
+			free(canary);
+			cellGcmSetWaitFlip(ctx);
+			cellGcmFinish(ctx, 1);
+			free(host_addr);
+			return 2;
+		}
 	}
+	free(canary);
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped\n",
-	       corpus - uniforms_skipped - textures_skipped, failures,
-	       uniforms_skipped, textures_skipped);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted)\n",
+	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous,
+	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:

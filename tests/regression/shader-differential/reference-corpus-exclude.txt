@@ -1,0 +1,14 @@
+# shader-differential reference-corpus exclusions (increment 3c).
+# fields: corpus-relative path|board id|why
+#
+# A shader is listed here ONLY when drawing our container for it poisons
+# the RSX state for every row after it (the guest's poison canary stops
+# the run naming the row, so a sweep cannot get past it otherwise).  A
+# plain mismatch or refusal is never excluded: it is what the sweep is
+# for.  Remove the line when the board item closes and re-sweep.
+crystalct-psl1ght/files/samples/graphics/rsx_Basic_Wallpaper/shaders/scanlines.fcg|t_de192d41|general-path container is a malformed 7-instruction program; every later draw paints nothing
+ps3-open-graphics-toolkit/files/testsuite/shaders/test_58_v_input_attributes.fcg|t_5dc260b0|general-path container allocates R48+ (past the fragment register file); paints nothing and every later draw paints nothing
+ps3-open-graphics-toolkit/files/testsuite/shaders/test_59_v_output_registers.fcg|t_5dc260b0|general-path container allocates R48+ (past the fragment register file); paints nothing and every later draw paints nothing
+ps3-open-graphics-toolkit/files/testsuite/shaders/test_60_v_temporary_registers.fcg|t_5dc260b0|general-path container allocates R48+ (past the fragment register file); paints nothing and every later draw paints nothing
+ps3-open-graphics-toolkit/files/testsuite/shaders/test_63_v_texture_fetch.fcg|t_5dc260b0|general-path container allocates R48+ (past the fragment register file); paints nothing and every later draw paints nothing
+ps3-open-graphics-toolkit/files/testsuite/shaders/test_81_vector_packing_unpacking.fcg|t_5dc260b0|general-path container allocates R48+ (past the fragment register file); paints nothing and every later draw paints nothing
