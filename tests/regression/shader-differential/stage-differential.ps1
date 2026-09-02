@@ -163,6 +163,14 @@ if (-not $hdd0) { $hdd0 = Join-Path (Split-Path -Parent $Rpcs3Path) "dev_hdd0" }
 if (-not (Test-Path $hdd0)) { throw "dev_hdd0 not found at $hdd0; pass -Rpcs3Path or -Hdd0" }
 $root = Join-Path $hdd0 "shader-differential"
 $controls = Join-Path $root "controls"
+# The PREVIOUS manifest goes first, before anything is compiled: a stage that
+# aborts (a refusing curated row, a control that will not compile) must leave
+# NO manifest behind, so a boot that follows a failed stage finds nothing and
+# reads SHADER_DIFF_INVALID instead of judging the last successful stage's
+# rows under a new compiler and calling that a verdict (measured 2026-09-02:
+# a default stage aborted on fp_discard_two_f and the boot ran an eleven-row
+# scratch manifest from an hour earlier).
+Remove-Item -LiteralPath (Join-Path $root "manifest.txt") -Force -ErrorAction SilentlyContinue
 $artifacts = Join-Path $root "artifacts"
 New-Item -ItemType Directory -Force $controls | Out-Null
 New-Item -ItemType Directory -Force $artifacts | Out-Null
