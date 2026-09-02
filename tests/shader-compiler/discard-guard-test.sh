@@ -138,6 +138,18 @@ grep -q "FALSE arm" "$work/else_default.log" || {
 reason than the false-arm discard."
 }
 
+run fp_discard_and_f "" and_default
+[[ "$rc" -ne 0 ]] || fail "fp_discard_and_f compiled on the DEFAULT path.
+Its guard compares a varying against a uniform: the pre-pass puts the
+uniform in R1 and the varying's preload writes H2 with a full mask, and
+H2's four fp16 lanes cover all of R1.x and R1.y - so the uniform is gone
+before the second comparison reads it (t_ec804d32)."
+grep -q "half-register preload" "$work/and_default.log" || {
+    tail -n 5 "$work/and_default.log" >&2
+    fail "fp_discard_and_f refused on the default path for some OTHER
+reason than the half-preload aliasing."
+}
+
 run fp_discard_two_f "" two_default
 [[ "$rc" -ne 0 ]] || fail "fp_discard_two_f compiled on the DEFAULT path.
 That path emits the FIRST store to an output and drops the rest, so every
@@ -183,7 +195,7 @@ reason than the unaccounted enclosing branch."
 # discard-blend sample ships the `&&` shape byte-identical to the
 # reference, so a rule that refused it would be a regression on a shipped
 # sample rather than a guard.
-for stem in fp_discard_lt_f fp_discard_and_f; do
+for stem in fp_discard_lt_f fp_discard_ge_f fp_discard_then_work_f; do
     run "$stem" "" "${stem}_default_ok"
     [[ "$rc" -eq 0 ]] || {
         tail -n 5 "$work/${stem}_default_ok.log" >&2

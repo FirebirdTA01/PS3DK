@@ -2544,6 +2544,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // Pre-pass: emit uniform loads (MOVR) for any
                 // UniformScalar comparisons before any comparison
                 // instruction, matching the reference schedule.
+                //
+                // t_ec804d32: this pre-pass writes R1, and the varying
+                // preload below writes H2 with a FULL mask.  H2's four
+                // fp16 lanes are 64 bits - ALL of R1.x and R1.y - so when
+                // one discard needs both, the preload destroys the
+                // uniform.  Tracked here and refused at the preload,
+                // because the pair is the defect and neither half is.
+                bool uniformInR1 = false;
                 if (compound)
                 {
                     for (const auto& rc : rcmps)
@@ -2576,6 +2584,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             movMask, uS0, uS1, uS2);
                         movU.precision = FLOAT32;
                         asm_.emit(movU, NVFX_FP_OP_OPCODE_MOV);
+                        uniformInR1 = true;
                         const uint32_t off = asm_.currentByteSize();
                         for (auto& eu : attrs.embeddedUniforms)
                             if (eu.entryParamIndex == uIt->second)
@@ -2602,6 +2611,44 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             out.diagnostics.push_back(
                                 "nv40-fp: discard CMP varying LHS unresolved");
+                            return out;
+                        }
+
+                        // t_ec804d32.  H2 and H3 pack into R1, and this
+                        // preload writes a FULL mask - four fp16 lanes,
+                        // 64 bits, all of R1.x and R1.y - so a uniform
+                        // the pre-pass put in R1 is gone by the time the
+                        // second comparison reads it.  R1.x read back as
+                        // fp32 is then (fp16(v) << 16 | fp16(v)): positive
+                        // junk where the varying is positive, and SIGNED
+                        // where it is negative, which is why the measured
+                        // failure was 320 pixels - exactly the five
+                        // columns of the rig's quad where TEXCOORD0.w goes
+                        // below zero, and nowhere else.
+                        //
+                        // Refuse.  The matcher's SHAPE is right here - the
+                        // conjunction it emits is the reference's - and
+                        // only its register choice is wrong, but every
+                        // local repair moves bytes on rows that are
+                        // already right: narrowing this mask changes
+                        // th06_notex, colored_alpha_f and fp_discard_lt_f,
+                        // and the reference avoids the problem by not
+                        // preloading at all (it compares R0, which it
+                        // filled with the output store FIRST).  Reshaping
+                        // the sequence is not this path's future.  Fable's
+                        // call, 2026-09-02: refuse, keyed on the pair, so
+                        // the `&&` shape the path gets right keeps
+                        // compiling - discard-blend's shipping sample
+                        // compares two TEXTURE results and never reaches
+                        // this branch.
+                        if (uniformInR1)
+                        {
+                            out.diagnostics.push_back(
+                                "nv40-fp: discard compares a varying and a "
+                                "uniform in one guard; the varying's "
+                                "half-register preload occupies the same "
+                                "hardware register as the uniform and "
+                                "destroys it (t_ec804d32)");
                             return out;
                         }
 
