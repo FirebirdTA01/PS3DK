@@ -952,6 +952,9 @@ private:
         // whole result in one instruction has a single producer and cannot
         // lose an edge, while anything that computes a SCALAR and places it
         // into a lane (dot products, sin/cos/pow) is a partial write.
+        // Vertex outputs live in their own register file; give them a key
+        // space that cannot collide with a temp index.
+        constexpr int kOutputKeyBase = 1 << 16;
         std::unordered_map<int, std::vector<size_t>> writers, readers;
         const auto link = [&](size_t from, size_t to) {
             // A self-edge is FATAL, not merely redundant: indegree never
@@ -978,12 +981,48 @@ private:
                     link(w, i);
                 readers[src.index].push_back(i);
             }
-            if (!vi.dst.none && !vi.dst.output) {
-                for (size_t w : writers[vi.dst.index])   // WAW
+            if (!vi.dst.none) {
+                // OUTPUT destinations belong in this graph too, and used
+                // to be excluded from it: two stores to the same output
+                // were two writes to one register with no edge between
+                // them, and the scheduler was free to commit them in
+                // either order.  Measured on fp_discard_two_f
+                // (t_becbfa69): `o = c; if (..) discard; o = o*d; if (..)
+                // discard; o = o+d;` emitted all three stores and put the
+                // FIRST one last, so every surviving pixel read `o = c`.
+                //
+                // Outputs get a key space DISJOINT from the temps', in
+                // both profiles.  It is tempting to share it on the
+                // fragment side, where a destination of OUTPUT n occupies
+                // TEMP n on the hardware - but this pass runs BEFORE
+                // allocatePhysicalTemps, so `dst.index` here is a VIRTUAL
+                // register id and virtual 0 has nothing to do with R0.
+                // Sharing the key ordered stores against unrelated
+                // virtual registers that happened to be numbered 0, and
+                // moved six fragment schedules to constrain nothing.  The
+                // physical aliasing is the allocator's question, not the
+                // scheduler's.
+                const int key = vi.dst.output
+                    ? (kOutputKeyBase + vi.dst.index)
+                    : vi.dst.index;
+                for (size_t w : writers[key]) {
+                    // WAW.  For an OUTPUT destination the edge is added
+                    // only when the two masks share a lane: a program
+                    // assembles an output lane by lane (`oColor.xyz =
+                    // ...; oColor.w = 1;`) and those writes commute, so
+                    // ordering them would move thirty vertex schedules to
+                    // constrain nothing.  Temps keep the unconditional
+                    // edge they have always had - tightening that rule is
+                    // its own change with its own fence.
+                    if (vi.dst.output &&
+                        (program_.instrs[w].dst.writemask &
+                         vi.dst.writemask) == 0)
+                        continue;
                     link(w, i);
-                for (size_t r : readers[vi.dst.index])   // WAR
+                }
+                for (size_t r : readers[key])   // WAR
                     link(r, i);
-                writers[vi.dst.index].push_back(i);
+                writers[key].push_back(i);
             }
         }
 
