@@ -251,3 +251,11 @@ tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
 # (uniform or literal threshold) is identical at 2304 (TTY-ec804d32-probe.log).
 tools/rsx-cg-compiler/tests/shaders/fp_discard_and_f.cg|auto|both
 tools/rsx-cg-compiler/tests/shaders/fp_discard_nested_f.cg|0|general
+
+# 2026-09-02 t_becbfa69 (P1, BOTH paths, shipping): an output re-stored after a discard
+# keeps its FIRST value.  'o = c; if (c.a<0.5) discard; o = o*d; if (d.a<0.5) discard;
+# o = o+d;' paints o = c on default AND general (levels 28/52/52/28 both) where the
+# reference paints the saturated c*d+d (2/34/99/61); the kill set is exactly right
+# (painted 1377 both sides, kil 2/2).  RED by design on both paths until the fix;
+# identical after it.  General-path compile of the shape is a2ee345 (CF-1a half 1).
+tools/rsx-cg-compiler/tests/shaders/fp_discard_two_f.cg|auto|both
