@@ -4349,11 +4349,18 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     // wrong value, not a compile error.  Nothing checked it while every
     // literal was a single packed lane; vector literals take a register
     // each, so it is now reachable and refused (t_3e342903).
-    if (nextLiteralReg < program.vpConstFloor) {
+    // nextLiteralReg is the NEXT register to hand out, so the LOWEST one
+    // actually allocated is nextLiteralReg + 1 - and the floor register
+    // itself is legal.  Comparing the next pointer instead refused a
+    // shader that exactly filled the last legal register (codex, review
+    // of the first version).
+    const int lowestLiteralReg = nextLiteralReg + 1;
+    if (lowestLiteralReg < program.vpConstFloor) {
         out.diagnostics.push_back(
-            "nv40-vp: the literal pool ran past c[" +
+            "nv40-vp: the literal pool reached c[" +
+            std::to_string(lowestLiteralReg) + "], below c[" +
             std::to_string(program.vpConstFloor) +
-            "], where the matrix uniforms start; refusing rather than "
+            "] where the matrix uniforms start; refusing rather than "
             "emitting a literal that reads a matrix row (t_3e342903)");
         return out;
     }
