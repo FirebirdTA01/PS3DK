@@ -1,0 +1,45 @@
+// texCoords2D tells the hardware whether TEXCOORDn interpolates as 2D.
+// The rule, measured against the reference compiler over every corpus
+// shader both compilers build:
+//
+//   bit n is CLEARED iff TEXCOORDn is READ and DECLARED wider than float2
+//
+// It is a property of the DECLARATION, not of the lanes a shader happens to
+// consume: sd_tex_ctrl declares float4 TEXCOORD0, reads only .xy through an
+// ordinary non-projective tex2D, and the reference clears the bit anyway.
+// A rule keyed on consumed lanes gets that backwards.
+//
+// One TEXCOORD per case, so a fix cannot pass by clearing too broadly or
+// too narrowly:
+//   TEXCOORD0  wide AND read   -> CLEARED
+//   TEXCOORD1  float2 and read -> SET   (clearing this is over-broad)
+//   TEXCOORD2  wide, NOT read  -> SET   (an unread varying is not
+//                                        interpolated, so its bit stays)
+//   TEX3       wide AND read   -> CLEARED
+//   TEXCOORD4  wide, read ONLY as a tex2D coordinate -> CLEARED
+//
+// TEXCOORD4 is the sd_tex_ctrl shape and it is the case that discriminates
+// the two candidate rules.  Under "clear when the read needs more than xy"
+// it stays SET, because tex2D consumes only .xy; under the declared-width
+// rule it CLEARS, which is what the reference does.  The general path used
+// to clear on `op != Tex && !scalarYRead`, so it got TEXCOORD0 right (read
+// by an add) and this one wrong - a fixture without this case passes on a
+// build where only the default path is fixed.
+//
+// TEX3 is the same semantic as TEXCOORD3: fragmentInputSrc accepts both
+// spellings and the parser keeps it as name "TEX" with index 3.  The first
+// version of this fixture used only the TEXCOORD spelling, and the fix it
+// guarded matched only that string - so a shader written with TEX had its
+// read mask set and its declared width missed, and the bit stayed set
+// (review finding, codex).
+void main(float4 wideRead   : TEXCOORD0,
+          float2 narrowRead : TEXCOORD1,
+          float4 wideUnread : TEXCOORD2,
+          float4 aliasRead  : TEX3,
+          float4 wideTexOnly : TEXCOORD4,
+          uniform sampler2D tex,
+          out float4 color : COLOR)
+{
+    color = tex2D(tex, narrowRead) + wideRead + aliasRead
+          + tex2D(tex, wideTexOnly.xy);
+}

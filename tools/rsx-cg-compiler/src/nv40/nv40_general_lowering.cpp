@@ -158,6 +158,10 @@ struct VirtualProgram
     // module, so the lowering pass carries it here.
     std::unordered_map<unsigned, std::pair<std::vector<float>, unsigned>>
         fpUniformDefaults;
+    // TEXCOORDn -> the component count it was DECLARED with.  texCoords2D
+    // is a declaration property; emission sees consumed lanes, so it
+    // cannot derive it without this.
+    std::unordered_map<int, int> texcoordDeclaredWidth;
     std::unordered_map<int, int> vregToPhys;
     std::unordered_map<int, bool> vregToFp16;
     int nextVpLiteralConst = 467;
@@ -998,6 +1002,7 @@ private:
                 const int idx = fragmentInputSrc(sem, p.semanticIndex);
                 if (idx >= 0)
                     program_.valueToSource[p.valueId] = inputSrc(idx);
+                noteTexcoordWidth(idx, p.type.componentCount());
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform &&
                        p.type.isMatrix()) {
@@ -1342,6 +1347,20 @@ private:
         }
     }
 
+    // Record a TEXCOORD's DECLARED width, keyed by the input-source code
+    // fragmentInputSrc already resolved, so the spellings this accepts
+    // cannot drift from the ones that populate the read mask (TEX0 is
+    // TEXCOORD0).
+    void noteTexcoordWidth(int inputSrcCode, int components)
+    {
+        if (inputSrcCode < NVFX_FP_OP_INPUT_SRC_TC(0) ||
+            inputSrcCode > NVFX_FP_OP_INPUT_SRC_TC(7))
+            return;
+        int& w = program_.texcoordDeclaredWidth[
+            inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0)];
+        w = std::max(w, components);
+    }
+
     void lowerInputLoad(const IRInstruction& inst)
     {
         const std::string sem = toUpper(inst.semanticName);
@@ -1355,6 +1374,8 @@ private:
             return;
         }
         program_.valueToSource[inst.result] = inputSrc(idx);
+        if (profile_ == GeneralProfile::Fragment)
+            noteTexcoordWidth(idx, inst.resultType.componentCount());
         // Inputs have no IRValue in the entry table, so their width is
         // otherwise unobservable downstream (the old default silently
         // read as Float4).  Record the declared width here; every width
@@ -3987,12 +4008,13 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                     src.index <= NVFX_FP_OP_INPUT_SRC_TC(7)) {
                     const uint16_t bit =
                         uint16_t{1} << (src.index - NVFX_FP_OP_INPUT_SRC_TC(0));
+                    // texCoordsInputMask only: texCoords2D is derived
+                    // once below, from the DECLARED widths.  This used to
+                    // clear on `op != Tex && !scalarYRead`, which is a rule
+                    // about consumed lanes and gets the common case
+                    // backwards - a float4 TEXCOORD read only as .xy by an
+                    // ordinary tex2D must still clear.
                     attrs.texCoordsInputMask |= bit;
-                    const bool scalarYRead =
-                        src.swizzle[0] == 1 && src.swizzle[1] == 1 &&
-                        src.swizzle[2] == 1 && src.swizzle[3] == 1;
-                    if (vi.op != VOp::Tex && !scalarYRead)
-                        attrs.texCoords2D &= ~bit;
                 }
             }
         }
@@ -4160,6 +4182,21 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         out.diagnostics.push_back("nv40-general-fp: no instructions emitted");
         return out;
     }
+    // texCoords2D, derived once from the declared widths and the final
+    // read mask - the same rule and the same reason as the fragment
+    // default path:
+    //
+    //   bit n is CLEARED iff TEXCOORDn is READ and DECLARED wider than float2
+    //
+    attrs.texCoords2D = 0xFFFFu;
+    for (const auto& kv : program.texcoordDeclaredWidth) {
+        const int n = kv.first;
+        if (n < 0 || n > 15) continue;
+        if (!((attrs.texCoordsInputMask >> n) & 1u)) continue;
+        if (kv.second > 2)
+            attrs.texCoords2D &= static_cast<uint16_t>(~(uint16_t{1} << n));
+    }
+
     // A file-scope uniform declared with an initialiser carries that value
     // as its COMPILED DEFAULT: write it into every const block the
     // parameter lists, which are exactly the blocks a runtime patch of that

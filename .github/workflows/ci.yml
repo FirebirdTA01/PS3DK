@@ -104,6 +104,9 @@ jobs:
       - name: Test rsx-cg-compiler uniform compiled defaults
         run: bash tests/shader-compiler/uniform-compiled-default-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler texcoord 2D flags
+        run: bash tests/shader-compiler/texcoord-2d-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

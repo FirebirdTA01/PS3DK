@@ -584,8 +584,6 @@ static bool emitTexSampleToDest(FpShapeContext& ctx,
     {
         const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
         ctx.attrs.texCoordsInputMask |= uint16_t{1} << n;
-        if (tex.projective || tex.cube)
-            ctx.attrs.texCoords2D &= ~(uint16_t{1} << n);
     }
     return true;
 }
@@ -710,7 +708,6 @@ static bool tryEmitTexColorSpecular(FpShapeContext& ctx,
         {
             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
             ctx.attrs.texCoordsInputMask |= uint16_t{1} << n;
-            ctx.attrs.texCoords2D &= ~(uint16_t{1} << n);
         }
     }
     return true;
@@ -1671,6 +1668,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<unsigned, unsigned>    fpUniformSlotCols;
     // Slot -> compiled default, for a uniform declared with an initialiser.
     std::unordered_map<unsigned, std::vector<float>> fpUniformSlotDefault;
+    // TEXCOORDn -> the component count it was DECLARED with.  texCoords2D
+    // is a property of the declaration, so it cannot be decided at the
+    // places that read the varying - they see lanes, not types.
+    std::unordered_map<int, int> texcoordDeclaredWidth;
 
     // Number the file-scope uniforms NOW, in declaration order, because
     // that is the order cg_container_fp.cpp walks module.globals in when
@@ -1700,9 +1701,30 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         }
     }
 
+    // Declared widths, from entry parameters and from struct-flattened
+    // attribute loads alike; both carry the semantic and the type.
+    const auto noteTexcoordWidth = [&](const std::string& semName,
+                                       int semIndex, const IRTypeInfo& ty)
+    {
+        // Resolve through fragmentInputSrc rather than string-matching the
+        // semantic, so the set of spellings this accepts cannot drift from
+        // the set that populates the input mask.  TEX0 IS TEXCOORD0 here
+        // (fragmentInputSrc accepts both, and the parser keeps TEX0 as name
+        // "TEX" index 0); matching only "TEXCOORD" left the declared width
+        // missing for the TEX spelling while the read mask was still set,
+        // so the bit stayed set (review finding, codex).
+        const int src = fragmentInputSrc(toUpper(semName), semIndex);
+        if (src < NVFX_FP_OP_INPUT_SRC_TC(0) ||
+            src > NVFX_FP_OP_INPUT_SRC_TC(7))
+            return;
+        int& w = texcoordDeclaredWidth[src - NVFX_FP_OP_INPUT_SRC_TC(0)];
+        w = std::max(w, ty.componentCount());
+    };
+
     for (size_t pi = 0; pi < entry.parameters.size(); ++pi)
     {
         const auto& param = entry.parameters[pi];
+        noteTexcoordWidth(param.semanticName, param.semanticIndex, param.type);
         const bool isSampler = isSamplerIRType(param.type.baseType);
         if (param.storage == StorageQualifier::Uniform && isSampler)
         {
@@ -1878,6 +1900,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     return out;
                 }
                 valueToInputSrc[inst.result] = srcCode;
+                noteTexcoordWidth(inst.semanticName, inst.semanticIndex,
+                                  inst.resultType);
                 break;
             }
 
@@ -4435,13 +4459,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
-                        // the reference compiler clears the texCoords2D bit for any
-                        // TEXCOORD used projectively or as a cube-map
-                        // direction — the HW needs more than just xy
-                        // (perspective divide for TXP; 3D direction
-                        // for cube).
-                        if (texIt->second.projective || texIt->second.cube)
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                     }
                     if (!emitLaneOverrides()) return out;
                     break;
@@ -4666,12 +4683,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = preloadVaryingInput - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            // the reference compiler clears the texCoords2D bit for any
-                            // TC read full-width via direct INPUT (vs the
-                            // MOVH-promote path which carries .xyzw on
-                            // its OUTMASK already).  Matches the
-                            // varying-Select handlers above.
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
 
@@ -5043,8 +5054,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = uvInIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            if (txIt->second.projective || txIt->second.cube)
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
 
                         // For the split-write shape, the reference compiler
@@ -5080,7 +5089,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 const int n =
                                     falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                 attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                             }
                         }
 
@@ -5233,7 +5241,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 const int n =
                                     falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                 attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                             }
                         }
 
@@ -5391,15 +5398,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             {
                                 const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                 attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                // The reference compiler clears the
-                                // texCoords2D bit when a TEXCOORD<N>
-                                // varying is read with more than 2
-                                // lanes — same mechanism as projective
-                                // (TXP) / samplerCUBE consumption,
-                                // signalling that the input isn't a
-                                // pure 2D u/v.
-                                if (moreThan2Lanes)
-                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
                             }
                         };
 
@@ -5427,9 +5425,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             asm_.emit(texIn, texOpcode);
                             emittedSomething = true;
                             recordVaryingAttr(uvIn->second, false);
-                            if (txIt->second.projective || txIt->second.cube)
-                                attrs.texCoords2D &= ~(uint16_t{1} <<
-                                    (uvIn->second - NVFX_FP_OP_INPUT_SRC_TC(0)));
 
                             // ── Inst 2: MOVH H4, f[<varying>] ──
                             struct nvfx_reg h4Dst = nvfx_reg(NVFXSR_TEMP, 4);
@@ -5556,9 +5551,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             if (txIt->second.cube) in.disable_pc = 1;
                             asm_.emit(in, texOpcode);
                             recordVaryingAttr(uvIn->second, false);
-                            if (txIt->second.projective || txIt->second.cube)
-                                attrs.texCoords2D &= ~(uint16_t{1} <<
-                                    (uvIn->second - NVFX_FP_OP_INPUT_SRC_TC(0)));
                         }
 
                         // ── Inst 6: MULR(NE.<lane>) R0.<active>, R2, R1 END ──
@@ -5802,11 +5794,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         recordUniformOffset(falseBr.uniformIdx, asm_.currentByteSize());
                         asm_.appendConstBlock(zeros);
 
-                        // Container flags: both LHS and RHS varyings
-                        // contribute to attributeInputMask; for TC
-                        // lanes, also update texCoordsInputMask.
-                        // the reference compiler clears texCoords2D for any TC used
-                        // as a comparison source (not as a 2D uv).
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(rhsIn->second);
                         maskTcBit(inIt->second);
@@ -5815,7 +5802,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             rhsIn->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
                         {
                             const int n = rhsIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
 
                         emittedSomething = true;
@@ -5954,7 +5940,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = preloadBr.inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
 
@@ -5987,7 +5972,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = conditionalBr.inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
 
@@ -6105,11 +6089,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         bind.literal[2], bind.literal[3] };
                     asm_.appendConstBlock(litBlock);
 
-                    // Track the varying input bits.  When the pack
-                    // reads lane Z or W of a TEXCOORD<N>, clear the
-                    // texCoords2D bit — the coord is being used as
-                    // 3D/4D, mirroring the cube/projective handling
-                    // elsewhere.
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
@@ -6121,7 +6100,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             if (bind.pack.lanes[k] >= 2)
                             {
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                                 break;
                             }
                         }
@@ -6301,7 +6279,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     asm_.appendConstBlock(bind.hasScale ? wOneBlockScaled
                                                         : wOneBlockBare);
 
-                    // Track varying-input bits + clear texCoords2D.
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
@@ -6313,7 +6290,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             if (bind.pack.lanes[k] >= 2)
                             {
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                                 break;
                             }
                         }
@@ -6539,8 +6515,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         sb.litTimesUni.literal[2], 0.0f };
                     asm_.appendConstBlock(phaseBlock);
 
-                    // Track varying-input bits; clear texCoords2D
-                    // when any pack lane is Z or W.
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
@@ -6552,7 +6526,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             if (base.pack.lanes[k] >= 2)
                             {
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                                 break;
                             }
                         }
@@ -6713,7 +6686,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             if (dot.pack.lanes[k] >= 2)
                             {
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                                 break;
                             }
                         }
@@ -7242,8 +7214,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 const int n = inIt->second -
                                     NVFX_FP_OP_INPUT_SRC_TC(0);
                                 attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                if (bind.lanes > 2)
-                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
                             }
                         }
 
@@ -7456,7 +7426,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = nIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
 
@@ -7482,7 +7451,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = iIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
 
@@ -7770,7 +7738,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
                     emittedSomething = true;
@@ -8757,9 +8724,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (sUvIt->second -
                                                 NVFX_FP_OP_INPUT_SRC_TC(0));
-                            attrs.texCoords2D &=
-                                ~(uint16_t{1} << (sUvIt->second -
-                                                  NVFX_FP_OP_INPUT_SRC_TC(0)));
                         }
                     }
 
@@ -9533,7 +9497,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
                     return true;
@@ -10173,8 +10136,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 const int n =
                                     inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                 attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                if (inputSrc != uvIt->second)
-                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
                             }
                         }
                         return true;
@@ -10682,8 +10643,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 const int n =
                                     inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                 attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                if (inputSrc != uvInput)
-                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
                             }
                         }
                         return true;
@@ -10964,8 +10923,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
-                            if (inputSrc != uvInput)
-                                attrs.texCoords2D &= ~(uint16_t{1} << n);
                         }
                     }
                     return true;
@@ -11204,7 +11161,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 {
                                     const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                     attrs.texCoordsInputMask |= uint16_t{1} << n;
-                                    attrs.texCoords2D &= ~(uint16_t{1} << n);
                                 }
                             }
 
@@ -11269,9 +11225,6 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     const int n = it->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                     attrs.texCoordsInputMask |= uint16_t{1} << n;
                     // 4-component varying read of TEXCOORDn — the reference compiler
-                    // clears the 2D bit (bit only stays set when the
-                    // slot is consumed by a non-projective 2D tex2D).
-                    attrs.texCoords2D &= ~(uint16_t{1} << n);
                 }
                 break;
             }
@@ -11301,6 +11254,33 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         // if a later shape matched and emitted, the program we would ship was
         // chosen around an ambiguity nobody saw, so the compile fails.
         return out;
+    }
+
+    // texCoords2D, derived ONCE from the declared widths and the final read
+    // mask.  Measured against the reference over every corpus shader both
+    // compilers build (17/17, no counterexample):
+    //
+    //   bit n is CLEARED iff TEXCOORDn is READ and DECLARED wider than float2
+    //
+    // It is a DECLARATION property, which is why deciding it at the places
+    // that read a varying got it wrong: they see consumed lanes, not the
+    // type.  sd_tex_ctrl declares float4 TEXCOORD0 and reads only .xy
+    // through an ordinary non-projective tex2D, and the reference clears
+    // the bit anyway - a rule keyed on consumed lanes gets that backwards.
+    // The projective and cube cases the old scattered clears special-cased
+    // are subsumed: their coordinates cannot be declared narrower than
+    // float3 in the first place.
+    //
+    // An UNREAD varying keeps its bit: nothing interpolates it, and the
+    // reference leaves those set.
+    attrs.texCoords2D = 0xFFFFu;
+    for (const auto& kv : texcoordDeclaredWidth)
+    {
+        const int n = kv.first;
+        if (n < 0 || n > 15) continue;
+        if (!((attrs.texCoordsInputMask >> n) & 1u)) continue;
+        if (kv.second > 2)
+            attrs.texCoords2D &= static_cast<uint16_t>(~(uint16_t{1} << n));
     }
 
     // Every inline const block that belongs to a uniform must be readable
