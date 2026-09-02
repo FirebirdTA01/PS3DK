@@ -155,6 +155,8 @@ jobs:
         run: bash tests/shader-compiler/dot2-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler half precision
         run: bash tests/shader-compiler/half-precision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler lowering-path flags
+        run: bash tests/shader-compiler/lowering-path-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

@@ -129,6 +129,15 @@ int main(int argc, char** argv)
     CompilerContext ctx;
     bool dumpAst = false;
     bool dumpIr  = false;
+    // Both path flags on one command line is a CONTRADICTION, refused
+    // below rather than resolved: last-wins would compile one path while
+    // the caller's own command line says the other, and a container is
+    // not labelled with the path that produced it.  A rig stage that
+    // adds --legacy-lowering to a row already carrying --general-lowering
+    // would have compiled general and filed it as legacy.
+    bool sawGeneralFlag = false;
+    bool sawLegacyFlag = false;
+
     // RSXCG_GENERAL kept its meaning across the flip rather than its
     // effect: =0 now selects the matcher, anything else the general
     // path.  A script that set it to 1 sees no change; one that set it
@@ -197,10 +206,12 @@ int main(int argc, char** argv)
             // A no-op alias for one release, so every script, CI line
             // and rig column that names the path it wanted keeps
             // working.
+            sawGeneralFlag = true;
             ctx.compileOpts.generalLowering = true;
         }
         else if (arg == "--legacy-lowering")
         {
+            sawLegacyFlag = true;
             ctx.compileOpts.generalLowering = false;
         }
         else if (arg == "-O0" || arg == "--O0")
@@ -243,6 +254,16 @@ int main(int argc, char** argv)
             ctx.inputFile = arg;
         }
         ++i;
+    }
+
+    if (sawGeneralFlag && sawLegacyFlag)
+    {
+        std::fprintf(stderr,
+            "rsx-cg-compiler: --general-lowering and --legacy-lowering name "
+            "different lowerings; refusing rather than picking one.\n"
+            "  --general-lowering is the default and accepted as a no-op for "
+            "one release; drop it, or drop --legacy-lowering.\n");
+        return 1;
     }
 
     if (ctx.inputFile.empty())
