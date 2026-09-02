@@ -192,6 +192,48 @@ void FpAssembler::appendConstBlock(const float values[4])
     // on the real instruction that came before.
 }
 
+void FpAssembler::clampUniformConstSwizzle(uint32_t constBlockByteOffset,
+                                           unsigned cols)
+{
+    if (cols == 0 || cols > 4) return;
+    if (constBlockByteOffset < 16) return;          // no instruction before it
+    const size_t insn = (constBlockByteOffset - 16u) / 4u;
+    if (insn + 3 >= logicalWords_.size()) return;
+
+    const uint32_t outmask =
+        (logicalWords_[insn] >> NVFX_FP_OP_OUTMASK_SHIFT) & 0xFu;
+
+    for (int pos = 1; pos <= 3; ++pos)
+    {
+        uint32_t& w = logicalWords_[insn + pos];
+        if (((w & NVFX_FP_REG_TYPE_MASK) >> NVFX_FP_REG_TYPE_SHIFT) !=
+            NVFX_FP_REG_TYPE_CONST)
+            continue;
+
+        if (cols == 1)
+        {
+            // A scalar's block is meaningful in lane x only, so broadcast
+            // it - which is also what the reference compiler emits, so the
+            // narrower "clamp just the written lanes" would cost byte
+            // parity for no gain.
+            w &= ~static_cast<uint32_t>(NVFX_FP_REG_SWZ_ALL_MASK);
+            continue;
+        }
+
+        // Wider uniforms: only the lanes the instruction WRITES are ever
+        // read, so leave the rest alone rather than move bytes in every
+        // float2/float3 container that is already correct.
+        for (int lane = 0; lane < 4; ++lane)
+        {
+            if (!((outmask >> lane) & 1u)) continue;
+            const unsigned shift =
+                static_cast<unsigned>(NVFX_FP_REG_SWZ_X_SHIFT) + 2u * lane;
+            if (((w >> shift) & 3u) >= cols)
+                w &= ~(3u << shift);                // select lane x
+        }
+    }
+}
+
 void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
 {
     uint32_t sr = 0;

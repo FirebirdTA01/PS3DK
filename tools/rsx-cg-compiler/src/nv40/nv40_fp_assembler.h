@@ -56,6 +56,24 @@ public:
     // applied at words() like for instructions.
     void appendConstBlock(const float values[4]);
 
+    // Make the inline const block at `constBlockByteOffset` readable by a
+    // runtime patch of a `cols`-wide uniform.
+    //
+    // The runtime writes a uniform by transferring cols WORDS, starting at
+    // lane x, to every ucode offset the container parameter lists.  A
+    // source that reads a lane at or beyond cols therefore reads a lane
+    // the patch never writes: a scalar uniform consumed into y, z or w
+    // read its own destination's lane and so stayed at whatever the
+    // compiled block held - zero, for an unpatched uniform - no matter
+    // what the application assigned.
+    //
+    // This is applied once over the offsets each parameter actually
+    // recorded, rather than at the emit sites, because the rule belongs to
+    // the PARAMETER and its patch width, not to any one instruction, and
+    // the sites that build these sources are many and easy to add to.
+    void clampUniformConstSwizzle(uint32_t constBlockByteOffset,
+                                  unsigned cols);
+
     // Stamp the NVFX_FP_OP_PROGRAM_END bit on the most recent
     // *instruction* (not a const block).  Must be called exactly
     // once after the whole program is emitted.

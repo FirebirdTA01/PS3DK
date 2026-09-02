@@ -1,0 +1,18 @@
+// A scalar uniform read into every channel (t_f5f750ff).
+//
+// The runtime patches a scalar uniform by transferring ONE word, at lane
+// x, to every ucode offset the container parameter lists.  A const source
+// that reads any other lane therefore never sees the patched value: k
+// reached R correctly and G and B stayed at the compiled zero, because
+// the emitter gave each const source the DESTINATION's lane rather than
+// broadcasting lane x.
+//
+// k is used in three different destination channels on purpose - a shader
+// that used it only in x would pass with the defect present, since x is
+// the one lane the patch does write.
+uniform float k;
+
+float4 main(float2 uv : TEXCOORD0) : COLOR
+{
+    return float4(uv.x * k, k, uv.y * k, 1.0);
+}

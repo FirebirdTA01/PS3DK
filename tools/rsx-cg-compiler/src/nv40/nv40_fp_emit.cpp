@@ -1666,6 +1666,9 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         static_cast<unsigned>(entry.parameters.size());
     std::unordered_map<std::string, unsigned> globalNameToFpUniformSlot;
     std::unordered_map<std::string, int>      globalNameToTexUnit;
+    // Slot -> component count, so the post-pass below knows how many words
+    // a runtime patch of that uniform actually writes.
+    std::unordered_map<unsigned, unsigned>    fpUniformSlotCols;
 
     // Number the file-scope uniforms NOW, in declaration order, because
     // that is the order cg_container_fp.cpp walks module.globals in when
@@ -1687,6 +1690,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         {
             if (g.storage != StorageQualifier::Uniform) continue;
             if (isSamplerIRType(g.type.baseType)) continue;
+            fpUniformSlotCols[globalSlotCursor] =
+                static_cast<unsigned>(g.type.componentCount());
             globalNameToFpUniformSlot[g.name] = globalSlotCursor++;
         }
     }
@@ -1706,6 +1711,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             // Non-sampler FP uniform: inline-const block per use.
             valueToFpUniform[param.valueId] = static_cast<unsigned>(pi);
             valueToFpUniformName[param.valueId] = param.name;
+            fpUniformSlotCols[static_cast<unsigned>(pi)] =
+                static_cast<unsigned>(param.type.componentCount());
             attrs.embeddedUniforms.push_back({ static_cast<unsigned>(pi), {} });
             continue;
         }
@@ -11290,6 +11297,19 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         // if a later shape matched and emitted, the program we would ship was
         // chosen around an ambiguity nobody saw, so the compile fails.
         return out;
+    }
+
+    // Every inline const block that belongs to a uniform must be readable
+    // by the runtime's patch of that uniform.  See
+    // FpAssembler::clampUniformConstSwizzle for why this is one pass over
+    // the recorded offsets rather than a rule at each emit site.
+    for (const auto& eu : attrs.embeddedUniforms)
+    {
+        const auto colsIt = fpUniformSlotCols.find(eu.entryParamIndex);
+        if (colsIt == fpUniformSlotCols.end())
+            continue;
+        for (uint32_t off : eu.ucodeByteOffsets)
+            asm_.clampUniformConstSwizzle(off, colsIt->second);
     }
 
     asm_.markEnd();

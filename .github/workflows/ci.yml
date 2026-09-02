@@ -98,6 +98,9 @@ jobs:
       - name: Test rsx-cg-compiler file-scope const folding
         run: bash tests/shader-compiler/const-fold-value-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler uniform patch lanes
+        run: bash tests/shader-compiler/uniform-patch-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
