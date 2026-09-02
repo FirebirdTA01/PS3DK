@@ -4033,15 +4033,57 @@ private:
     void allocatePhysicalTemps()
     {
         std::unordered_map<int, size_t> lastUse;
+        std::unordered_map<int, size_t> firstDef;
         std::set<int> defs;
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         for (size_t i = 0; i < program_.instrs.size(); ++i) {
             const VInstr& vi = program_.instrs[i];
-            if (!vi.dst.none && !vi.dst.output)
+            if (!vi.dst.none && !vi.dst.output) {
                 defs.insert(vi.dst.index);
+                if (!firstDef.count(vi.dst.index))
+                    firstDef[vi.dst.index] = i;
+            }
             for (const VSrc& src : vi.srcs) {
                 if (src.kind == VSrcKind::Temp)
                     lastUse[src.index] = i;
+            }
+        }
+
+        // PEAK LIVE COUNT - how many virtual temps are in flight at once.
+        //
+        // This is the number of registers the program actually needs, and
+        // it is NOT the number of definitions: a 63-instruction program
+        // that sums sixteen terms defines 62 values and holds 18 at a
+        // time, because the loop below reuses a register the moment its
+        // occupant is last read.  Counted here as interval overlap over
+        // the FINAL instruction order, with a value defined and never read
+        // living for exactly its own instruction.  Conservative on the
+        // high side: the destination is counted before the sources that
+        // die at the same instruction are released, so a destination that
+        // reuses a dying source's register is counted twice.  Over-
+        // counting costs a register number, under-counting would cost a
+        // spill - and the spill bank below starts exactly where this range
+        // ends, so even an under-count stays compact.
+        int peakLiveTemps = 0;
+        {
+            const size_t n = program_.instrs.size();
+            std::vector<int> defsAt(n + 1, 0), diesAt(n + 1, 0);
+            for (int v : defs) {
+                const auto d = firstDef.find(v);
+                if (d == firstDef.end())
+                    continue;
+                const auto l = lastUse.find(v);
+                const size_t end = (l == lastUse.end() || l->second < d->second)
+                    ? d->second : l->second;
+                ++defsAt[d->second];
+                ++diesAt[end];
+            }
+            int occ = 0;
+            for (size_t i = 0; i < n; ++i) {
+                occ += defsAt[i];
+                if (occ > peakLiveTemps)
+                    peakLiveTemps = occ;
+                occ -= diesAt[i];
             }
         }
 
@@ -4073,13 +4115,26 @@ private:
 
         std::vector<int> freeList;
         int nextPhys = 0;
+        // FP numbers DOWN from the top of the range it needs, so the range
+        // has to be the peak live count and not the definition count.
+        // Seeding it at defs.size() made the REPORTED register count -
+        // which is the highest slot ever written, plus one - track the
+        // number of definitions, so a program holding 18 values at a time
+        // declared 62 registers and was refused by the fragment budget
+        // below at 48.  The registers past the peak were never touched;
+        // only their numbers were spent (t_5dc260b0).
+        //
         // Fragment fallback counter: the bank above the ordinary
-        // descending range, used only when a candidate is rejected.
+        // descending range, used only when a candidate is rejected.  It
+        // starts where the descending range ends, so the two never
+        // collide and a rejection costs one number rather than a jump to
+        // the top of the definition count.
+        const int fpRegBase = std::max(1, peakLiveTemps);
         int fpSpill = static_cast<int>(defs.size());
-        // FP uses the same def-order identity as VP (reverse virtual-order
-        // assignment, just across the 4-register fragment bank).
-        if (profile_ == GeneralProfile::Fragment)
-            nextPhys = static_cast<int>(defs.size()) - 1;
+        if (profile_ == GeneralProfile::Fragment) {
+            fpSpill = fpRegBase;
+            nextPhys = fpRegBase - 1;
+        }
         for (size_t i = 0; i < program_.instrs.size(); ++i) {
             VInstr& vi = program_.instrs[i];
             for (VSrc& src : vi.srcs) {
