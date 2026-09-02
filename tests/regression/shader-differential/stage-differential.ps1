@@ -935,6 +935,20 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
         $covRef  = Join-Path $vpScratch "vpcov_$($c.key)_ref.fpo"
         $okOurs = Compile-Shader $covSrc $covOurs @() -Absolute -NoThrow -NoExtraFlags
         $rcOurs = $script:lastCompileRc
+        if (-not $okOurs) {
+            # A coverage FP is an instrument, not the program under test:
+            # when the default path refuses its shape (fog's
+            # `float4(v,v,v,1) * k + k` - t_45ddb7c6's family, 2026-09-02)
+            # compile it on the general path instead, so a VP row declaring
+            # the channel is judged rather than reported vp-channel-missing.
+            # Both VP containers of a row draw under the SAME coverage FP, so
+            # its correctness bounds the row's discriminating power, never
+            # its verdict's direction - the caveat tc4..tc9 and col1 already
+            # carry, printed here so a log names it.
+            $okOurs = Compile-Shader $covSrc $covOurs @("--general-lowering") -Absolute -NoThrow -NoExtraFlags
+            if ($okOurs) { Write-Host "stager: vp coverage FP $($c.key): default path refused (rc=$rcOurs), compiled on the general path instead (unproven under the shared VP; bounds discriminating power only)" }
+            $rcOurs = $script:lastCompileRc
+        }
         $okRef  = Compile-Reference $covSrc $covRef
         $rcRef  = $script:lastCompileRc
         if (-not ($okOurs -and $okRef)) {
