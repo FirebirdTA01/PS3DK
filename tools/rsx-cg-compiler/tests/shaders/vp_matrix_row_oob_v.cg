@@ -1,0 +1,18 @@
+// Row 3 of a float3x3 (t_9da20b33).  The matrix owns three registers, so
+// c[base + 3] belongs to whatever was allocated after it; the reference
+// rejects this source outright - "array index out of bounds".
+//
+// We must not compile it.  The row lowering is bounded by the matrix's own
+// row count, so this shape falls through to the paths' existing refusals
+// rather than reading a register the matrix does not own.  Its twin,
+// vp_matrix_row_small_v.cg, takes row 2 of the same matrix and compiles.
+uniform float3x3 m3;
+uniform float4x4 mvp;
+
+void main(float4 in_position : POSITION,
+          out float4 out_position : POSITION,
+          out float4 out_texcoord1 : TEXCOORD1)
+{
+    out_position = mul(mvp, in_position);
+    out_texcoord1 = float4(m3[3], 1.0f);
+}

@@ -465,6 +465,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
     // Matrix-typed uniforms keep their const-bank base reg here (no valueToSource
     // entry — matrices don't translate to a single source operand).
     std::unordered_map<IRValueID, int> valueToMatrixBase;
+    // Rows the matrix at that base actually OWNS.  A row index is
+    // bounded against this, not against 4: `m[3]` on a float3x3 would
+    // otherwise read c[base + 3], a register belonging to whatever was
+    // allocated next (review finding, codex).  The reference rejects
+    // that source outright - "array index out of bounds".
+    std::unordered_map<IRValueID, int> valueToMatrixRows;
 
     // GpuSkinning's palette is represented by the front-end as a scalar
     // uniform plus `extract mat4 palette, index`.  Track that array base
@@ -651,6 +657,8 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
             if (param.type.isMatrix())
             {
                 valueToMatrixBase[param.valueId] = b->baseReg;
+                valueToMatrixRows[param.valueId] =
+                    std::max(1, param.type.matrixRows);
             }
             else
             {
@@ -2256,7 +2264,11 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     break;
                 }
                 if (inst.resultType.isMatrix())
+                {
                     valueToMatrixBase[inst.result] = b->baseReg;
+                    valueToMatrixRows[inst.result] =
+                        std::max(1, inst.resultType.matrixRows);
+                }
                 else
                     valueToSource[inst.result] =
                         { ValueSource::Kind::Const, b->baseReg,
@@ -2443,8 +2455,12 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                         // A dynamic or out-of-range index is left alone:
                         // it falls through to the existing refusal rather
                         // than reading a register the matrix does not own.
+                        const auto rowsIt =
+                            valueToMatrixRows.find(inst.operands[0]);
+                        const int rows = rowsIt == valueToMatrixRows.end()
+                                             ? 0 : rowsIt->second;
                         if (static_cast<float>(row) == rowF &&
-                            row >= 0 && row < 4)
+                            row >= 0 && row < rows)
                         {
                             ValueSource vs;
                             vs.kind   = ValueSource::Kind::Const;
@@ -2490,6 +2506,15 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     inst.resultType.isMatrix())
                 {
                     valueToMatrixBase[inst.result] = matIt->second;
+                    // The row count travels with the base.  An alias that
+                    // carried only the base left a later `m[r]` bounded
+                    // against zero, so a VALID row refused - fail-safe, but
+                    // the two are one piece of metadata and are copied as
+                    // one wherever a matrix is aliased (review finding,
+                    // codex).  The bitcast's own type is authoritative: it
+                    // is what a narrowing alias would change.
+                    valueToMatrixRows[inst.result] =
+                        std::max(1, inst.resultType.matrixRows);
                     break;
                 }
                 break;
@@ -2598,23 +2623,31 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 {
                     const IRValueID id = inst.operands[i];
 
-                    // Direct input attribute reference, of any width: a
-                    // float2 fills x and y, a float3 x through z.
+                    // A direct source reference of any width: an input
+                    // attribute, or a const register such as a matrix ROW
+                    // (`float4(m[2], 1.0f)`).  A float2 fills x and y, a
+                    // float3 x through z.  Const sources reach here only
+                    // since matrix rows resolve (t_9da20b33); before that
+                    // the whole shape refused, so this branch had no way
+                    // to be wrong about them and no reason to handle them.
                     auto srcIt = valueToSource.find(id);
-                    if (srcIt != valueToSource.end() &&
-                        srcIt->second.kind == ValueSource::Kind::Input)
+                    if (srcIt != valueToSource.end())
                     {
+                        const bool isInput =
+                            srcIt->second.kind == ValueSource::Kind::Input;
                         const int w = srcIt->second.width < 1
                                           ? 1 : srcIt->second.width;
                         if (lane + w > 4) { ok = false; break; }
                         for (int k = 0; k < w; ++k)
                         {
                             LaneSource ls;
-                            ls.kind    = LaneSource::Kind::InputLane;
+                            ls.kind    = isInput ? LaneSource::Kind::InputLane
+                                                 : LaneSource::Kind::ConstLane;
                             ls.regIdx  = srcIt->second.regIdx;
                             ls.srcLane = k;
                             vb.lanes[lane++] = ls;
                         }
+                        if (!isInput) allInputLanes = false;
                         continue;
                     }
 

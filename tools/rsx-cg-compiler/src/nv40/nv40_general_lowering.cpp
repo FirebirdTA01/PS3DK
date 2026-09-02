@@ -420,6 +420,12 @@ private:
     int nextVReg_ = 0;
     std::unordered_map<IRValueID, unsigned> useCount_;
     std::unordered_map<IRValueID, int> matrixUniformBase_;
+    // Rows the matrix at that base actually OWNS.  A row index is
+    // bounded against this, not against 4: `m[3]` on a float3x3 would
+    // otherwise resolve to c[base + 3], a register belonging to
+    // whatever was allocated next (review finding, codex).  The
+    // reference rejects that source - "array index out of bounds".
+    std::unordered_map<IRValueID, int> matrixUniformRows_;
     // Which texture unit each sampler value names.  lowerTex used to hard-
     // code unit 0, so every sampler in a program sampled the FIRST texture
     // while the container correctly described the bindings - a two-texture
@@ -1069,6 +1075,7 @@ private:
         }
         for (auto it = pendingMatrices.begin(); it != pendingMatrices.end(); ++it) {
             matrixUniformBase_[it->valueId] = nextVpMatrixConst;
+            matrixUniformRows_[it->valueId] = std::max(1, it->rows);
             if (dumpOrder) {
                 std::fprintf(stderr, "matrix %s -> c[%d]\n",
                              it->name.c_str(), nextVpMatrixConst);
@@ -1440,9 +1447,12 @@ private:
         if (inst.operands.size() >= 2 && !inst.resultType.isMatrix()) {
             const auto matIt = matrixUniformBase_.find(inst.operands[0]);
             int row = 0;
+            const auto rowsIt = matrixUniformRows_.find(inst.operands[0]);
+            const int rows =
+                rowsIt == matrixUniformRows_.end() ? 0 : rowsIt->second;
             if (matIt != matrixUniformBase_.end() &&
                 constantIndex(inst.operands[1], row) &&
-                row >= 0 && row < 4) {
+                row >= 0 && row < rows) {
                 program_.valueToSource[inst.result] =
                     uniformSrc(matIt->second + row, false);
                 return;
@@ -2198,6 +2208,9 @@ private:
             const auto mIt = matrixUniformBase_.find(g.valueId);
             if (mIt != matrixUniformBase_.end()) {
                 matrixUniformBase_[inst.result] = mIt->second;
+                const auto rIt = matrixUniformRows_.find(g.valueId);
+                if (rIt != matrixUniformRows_.end())
+                    matrixUniformRows_[inst.result] = rIt->second;
                 return;
             }
             const auto sIt = program_.valueToSource.find(g.valueId);

@@ -1,0 +1,30 @@
+// A row of a NON-4x4 matrix uniform, and the constructor that widens it
+// (t_9da20b33).
+//
+// Two things are asserted through this one shader.  The row index must be
+// bounded by the rows the matrix actually OWNS: `m3[3]` on a float3x3 is
+// "array index out of bounds" to the reference, and reading c[base + 3]
+// would take a register belonging to whatever was allocated next - the
+// silent wrong value this item exists to avoid (review finding, codex;
+// its refusal is the twin fixture).
+//
+// And a matrix row is a CONST source three lanes wide, so the constructor
+// around it has to count components, not operands.  That branch only ever
+// saw inputs and swizzles before, because a matrix row could not be
+// resolved at all until this change; the first version of it emitted
+// `MOV o[8].x` and lost the row's y and z.
+//
+// Reference, for the texcoord half:
+//
+//     MOV o[8].xyz, c[258].xyzx;
+//     MOV o[8].w,   c[467].x;
+uniform float3x3 m3;
+uniform float4x4 mvp;
+
+void main(float4 in_position : POSITION,
+          out float4 out_position : POSITION,
+          out float4 out_texcoord1 : TEXCOORD1)
+{
+    out_position = mul(mvp, in_position);
+    out_texcoord1 = float4(m3[2], 1.0f);
+}
