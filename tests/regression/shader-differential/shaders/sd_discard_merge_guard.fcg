@@ -1,0 +1,27 @@
+// shader-differential - a discard in a two-predecessor merge INSIDE an outer guarded
+// block (codex, counterexample to 5bee678, 2026-09-02).  The outer guard c.a < 0.5
+// must reach the kill: where it is false (columns 0..26) the else arm e = COLOR0 has
+// e.a < 0.25 on rows 46..63, so a path that loses the outer guard kills 486 pixels the
+// reference paints, and one that keeps only an inner comparison kills a different set
+// again.  Expected at the pixel centres: reference painted 2832; outer guard dropped
+// 2346.  MEASURED 2026-09-02 16:10: general IDENTICAL at 2832/2832 (the guard pass
+// intersection cancels the merge's pair and keeps the outer literal); DEFAULT path
+// MISMATCH, ours painted 3264 in 4 instructions (kills on the wrong comparison), and
+// 5bee678's refusal did not fire - the shape codex named.  Curated |general only:
+// the default disposition is a refusal (t_7ae60244 replacement), and a refusing
+// curated row aborts the stage.
+//
+// The first spelling of this probe had the else arm read TEXCOORD1, whose alpha never
+// drops below 0.25, so the outer guard was an IDENTITY for the kill and both paths
+// read identical - a probe that cannot fail is not a probe.  Audit a guard's
+// discriminating power the way the constants were audited: the wrong answer must
+// paint differently.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, float4 e : COLOR0, out float4 o : COLOR)
+{
+    float4 r = d;
+    if (c.a < 0.5) {
+        if (d.x > 0.3) { r = c; } else { r = e; }
+        if (r.a < 0.25) discard;
+    }
+    o = c;
+}

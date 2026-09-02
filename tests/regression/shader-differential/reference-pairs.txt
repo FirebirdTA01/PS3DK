@@ -263,3 +263,9 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_nested_f.cg|0|general
 # (painted 1377 both sides, kil 2/2).  RED by design on both paths until the fix;
 # identical after it.  General-path compile of the shape is a2ee345 (CF-1a half 1).
 tools/rsx-cg-compiler/tests/shaders/fp_discard_two_f.cg|auto|both
+
+# 2026-09-02 codex counterexample to 5bee678 (t_7ae60244): a discard in a merge block
+# inside an outer guarded block.  General identical at painted 2832 (measured); the
+# default path paints 3264 with the wrong kill set and its refusal did not fire, so
+# the row is |general only until the default disposition's replacement lands.
+tests/regression/shader-differential/shaders/sd_discard_merge_guard.fcg|0|general
