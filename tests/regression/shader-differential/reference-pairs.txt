@@ -151,12 +151,12 @@ build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|auto|
 # the declared width.  |both: the block is written on both paths.
 tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|both
 
-# NAMED REGRESSION, DEFAULT path (claude 2026-09-01 23:22): th06_notex's
-# fog lerp after the discard is DROPPED - ours emits MOV SLT KIL MOV, the
-# reference adds MOV.w MOV ADD FENCBR MAD; our ucode never reads TEXCOORD2.
-# Visible only because sd_pos_allch now gives TEXCOORD2 a varying w (the
-# lerp factor); at w == 1 the missing statement is an identity.  set 0
-# (no uniforms).  |default: the general path refuses on discard (CF-2,
-# t_91bbd575), honestly.  RED until the computation after a discard is
-# emitted.
-build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg|0|default
+# th06_notex (claude 2026-09-01 23:22, t_72810bd7): the default path DROPPED
+# its post-discard fog lerp and compiled silently - RED here on 163088c
+# (189/4096, ours colour-through 64/64/1/1 vs the reference's lerp
+# 36/188/188/1), visible only because sd_pos_allch gives TEXCOORD2 a varying
+# w.  Since f455215 the default path REFUSES it instead (the completeness
+# guard), and a refusing curated row aborts the stage by design, so the row
+# is WITHDRAWN to the corpus sweep, where its refusal is a recorded sidecar
+# verdict (reference-corpus-refused.txt: th06_notex|ours|...|1).  It comes
+# back here, expected identical, when the lerp after a discard is lowered.
