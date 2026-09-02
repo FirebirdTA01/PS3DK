@@ -1669,6 +1669,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     // Slot -> component count, so the post-pass below knows how many words
     // a runtime patch of that uniform actually writes.
     std::unordered_map<unsigned, unsigned>    fpUniformSlotCols;
+    // Slot -> compiled default, for a uniform declared with an initialiser.
+    std::unordered_map<unsigned, std::vector<float>> fpUniformSlotDefault;
 
     // Number the file-scope uniforms NOW, in declaration order, because
     // that is the order cg_container_fp.cpp walks module.globals in when
@@ -1692,6 +1694,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             if (isSamplerIRType(g.type.baseType)) continue;
             fpUniformSlotCols[globalSlotCursor] =
                 static_cast<unsigned>(g.type.componentCount());
+            if (!g.initialValue.empty())
+                fpUniformSlotDefault[globalSlotCursor] = g.initialValue;
             globalNameToFpUniformSlot[g.name] = globalSlotCursor++;
         }
     }
@@ -11308,8 +11312,17 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         const auto colsIt = fpUniformSlotCols.find(eu.entryParamIndex);
         if (colsIt == fpUniformSlotCols.end())
             continue;
+        // A declared initialiser is the parameter's compiled default: write
+        // it into every block the parameter lists, which are exactly the
+        // blocks a runtime patch of that name overwrites (t_3bf3ce95).
+        const auto defIt = fpUniformSlotDefault.find(eu.entryParamIndex);
         for (uint32_t off : eu.ucodeByteOffsets)
+        {
+            if (defIt != fpUniformSlotDefault.end())
+                asm_.setUniformConstBlock(off, defIt->second.data(),
+                    static_cast<unsigned>(defIt->second.size()));
             asm_.clampUniformConstSwizzle(off, colsIt->second);
+        }
     }
 
     asm_.markEnd();

@@ -161,29 +161,41 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             if (varDecl->storage == StorageQualifier::None)
                 varDecl->storage = StorageQualifier::Uniform;
 
-            // A file-scope `const` needs its initialiser evaluated here,
-            // because every reference to it folds to that value.
+            // A file-scope declaration's initialiser is evaluated here, and
+            // it means two different things depending on the qualifier:
             //
-            // Both reference compilers do something else with these: sce-cgc
-            // and psp2cgc emit `const float PI = 3.14;` as a real uniform
-            // named PI whose compiled default is 3.14, usable unpatched and
-            // overridable by name at runtime.  Offering that behaviour
-            // behind a flag and comparing the two is t_3bf3ce95, a separate
-            // change on top of this one.  Folding is what this compiler
-            // does today; what it did not do was fold the right number.
+            //   const   - every reference FOLDS to the value, so the value
+            //             must be known or the fold is a zero (t_4584aa27).
+            //   uniform - the value is the parameter's COMPILED DEFAULT,
+            //             written into the same inline const block that a
+            //             runtime patch later overwrites.  So `uniform
+            //             float4 c = float4(1,0,0,1);` works unpatched AND
+            //             stays patchable by name, which is what the
+            //             reference compiler does (t_3bf3ce95).
+            //
+            // A uniform WITHOUT an initialiser is untouched: no compiled
+            // default, blocks stay zero-filled, exactly as before.
             std::vector<float> constInit;
             const bool isFileScopeConst =
                 varDecl->storage == StorageQualifier::Const;
-            if (isFileScopeConst)
+            const bool isInitialisedUniform =
+                varDecl->storage == StorageQualifier::Uniform &&
+                varDecl->initializer != nullptr;
+            if (isFileScopeConst || isInitialisedUniform)
             {
                 if (!evaluateConstInitializer(varDecl->initializer.get(), constInit))
                 {
                     // REFUSE rather than drop it.  Silently emitting zero for
                     // a value we could not evaluate is the defect this fix
                     // exists to remove, and a wrong constant is invisible in
-                    // a container that is otherwise well formed.
+                    // a container that is otherwise well formed.  A uniform
+                    // is no safer: a compiled default of zero where the
+                    // source says otherwise is a shader that renders wrong
+                    // until something patches it.
                     error(varDecl->loc,
-                          "file-scope const '" + varDecl->name +
+                          std::string("file-scope ") +
+                          (isFileScopeConst ? "const '" : "uniform '") +
+                          varDecl->name +
                           "' has an initialiser this compiler cannot evaluate; "
                           "refusing rather than compiling it as zero");
                     constInit.clear();

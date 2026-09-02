@@ -1,0 +1,18 @@
+// A file-scope uniform's initialiser is its COMPILED DEFAULT (t_3bf3ce95).
+//
+// The reference compiler writes the initialiser into the same inline const
+// block that a runtime patch of that name later overwrites, so the shader
+// does what the source says before anything patches it AND stays patchable.
+// We emitted the block zero-filled and dropped the initialiser, so an
+// unpatched shader computed with zero.
+//
+// TWO uniforms on purpose.  `plain` has no initialiser and its block must
+// stay zero: a fix that wrote defaults into every uniform's block, rather
+// than only into those declared with one, would pass on `tint` alone.
+uniform float4 tint  = float4(0.25, 0.5, 0.75, 1.0);
+uniform float4 plain;
+
+float4 main(float2 uv : TEXCOORD0) : COLOR
+{
+    return tint * plain;
+}

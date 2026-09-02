@@ -152,6 +152,12 @@ struct VirtualProgram
     // cg_container_fp.cpp walks module.globals.  Emission needs them to
     // create the embedded-offset entries, and it does not see the module.
     std::vector<unsigned> fpGlobalUniformSlots;
+    // Slot -> (compiled default, component count) for a file-scope uniform
+    // declared with an initialiser.  Emission writes the default into every
+    // const block the parameter lists (t_3bf3ce95); it does not see the
+    // module, so the lowering pass carries it here.
+    std::unordered_map<unsigned, std::pair<std::vector<float>, unsigned>>
+        fpUniformDefaults;
     std::unordered_map<int, int> vregToPhys;
     std::unordered_map<int, bool> vregToFp16;
     int nextVpLiteralConst = 467;
@@ -1036,6 +1042,10 @@ private:
                 program_.valueToSource[g.valueId] = uniformSrc(
                     static_cast<int>(slot), true);
                 program_.fpGlobalUniformSlots.push_back(slot);
+                if (!g.initialValue.empty())
+                    program_.fpUniformDefaults[slot] = {
+                        g.initialValue,
+                        static_cast<unsigned>(g.type.componentCount())};
             }
         }
         for (auto it = pendingMatrices.begin(); it != pendingMatrices.end(); ++it) {
@@ -4150,6 +4160,21 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         out.diagnostics.push_back("nv40-general-fp: no instructions emitted");
         return out;
     }
+    // A file-scope uniform declared with an initialiser carries that value
+    // as its COMPILED DEFAULT: write it into every const block the
+    // parameter lists, which are exactly the blocks a runtime patch of that
+    // name overwrites.  Done here, over the recorded offsets, for the same
+    // reason the default path does it there - the value belongs to the
+    // parameter, not to any one instruction that reads it.
+    for (const auto& eu : attrs.embeddedUniforms) {
+        const auto it = program.fpUniformDefaults.find(eu.entryParamIndex);
+        if (it == program.fpUniformDefaults.end())
+            continue;
+        for (uint32_t off : eu.ucodeByteOffsets)
+            asm_.setUniformConstBlock(off, it->second.first.data(),
+                static_cast<unsigned>(it->second.first.size()));
+    }
+
     asm_.markEnd();
     if (program.loweringFailed) {
         out.diagnostics.push_back(

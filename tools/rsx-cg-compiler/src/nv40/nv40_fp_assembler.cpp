@@ -192,6 +192,22 @@ void FpAssembler::appendConstBlock(const float values[4])
     // on the real instruction that came before.
 }
 
+void FpAssembler::setUniformConstBlock(uint32_t constBlockByteOffset,
+                                       const float* values, unsigned count)
+{
+    if (!values || count == 0 || count > 4) return;
+    const size_t w = constBlockByteOffset / 4u;
+    if (w + 4 > logicalWords_.size()) return;
+
+    // Same layout appendConstBlock writes: four fp32 in the caller's
+    // natural order, with the on-disk halfword swap applied at words().
+    float lanes[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    for (unsigned i = 0; i < count; ++i) lanes[i] = values[i];
+    uint32_t raw[4];
+    std::memcpy(raw, lanes, 16);
+    for (int i = 0; i < 4; ++i) logicalWords_[w + i] = raw[i];
+}
+
 void FpAssembler::clampUniformConstSwizzle(uint32_t constBlockByteOffset,
                                            unsigned cols)
 {

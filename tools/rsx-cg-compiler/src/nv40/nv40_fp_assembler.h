@@ -56,6 +56,15 @@ public:
     // applied at words() like for instructions.
     void appendConstBlock(const float values[4]);
 
+    // Write a uniform's COMPILED DEFAULT into the inline const block at
+    // `constBlockByteOffset`.  The block is emitted zero-filled and a
+    // runtime patch overwrites it; a uniform declared with an initialiser
+    // has that initialiser as its value until something does (t_3bf3ce95).
+    // Lanes beyond `count` stay zero, matching where a patch of the same
+    // width writes.
+    void setUniformConstBlock(uint32_t constBlockByteOffset,
+                              const float* values, unsigned count);
+
     // Make the inline const block at `constBlockByteOffset` readable by a
     // runtime patch of a `cols`-wide uniform.
     //
