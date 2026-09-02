@@ -239,13 +239,14 @@ tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
 # (fp_discard_and_f diff 320, ours 2624 painted vs 2304; fp_discard_nested_f diff
 # 351, ours 3264 vs 3615 - the outer condition dropped).  Curated |general only:
 # the general path's guard is the conjunction of the path conditions (61be582);
-# fp_discard_and_f must read identical, fp_discard_nested_f is RED BY DESIGN until
-# t_dabb23e1 (see below); the default path's disposition is a refusal (claude).
+# fp_discard_and_f must read identical, and fp_discard_nested_f too since f56c3dc
+# (t_dabb23e1, see below); the default path's disposition is a refusal (claude).
 # Measured 11:05: fp_discard_and_f IDENTICAL (painted 2304, the conjunction right on
 # pixels); fp_discard_nested_f RED by design for t_dabb23e1 - the kill set matches the
 # reference exactly (3615 painted both sides) but the general path stores o = c into
 # R0 first and then hands R0.x to the outer comparison's temp, so every surviving
-# pixel's red channel is the compare result.  Identical when t_dabb23e1 lands.
+# pixel's red channel was the compare result.  IDENTICAL since f56c3dc (a temp must
+# not take a live output's register), measured 2026-09-02 14:30 at painted 3615/3615.
 # fp_discard_and_f is |both since 11:05: on the DEFAULT path it is RED BY DESIGN for
 # t_ec804d32 (the fp16 preload of the varying lands on the R slot holding u_t, so
 # `u_t > 0` reads the fp16 copy's sign and the kill stops where c.a < 0: ours
