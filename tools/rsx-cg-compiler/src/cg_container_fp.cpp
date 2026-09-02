@@ -279,8 +279,11 @@ ContainerResult emitFragmentContainerImpl(
         d.type      = cgTypeForIRType(p.type);
         d.paramno   = static_cast<uint32_t>(i);
 
-        const bool isSampler = (p.type.baseType == IRType::Sampler2D ||
-                                p.type.baseType == IRType::SamplerCube);
+        // Shared predicate: this omitted SamplerRect while the emit side
+        // counted it, so a samplerRECT ENTRY PARAMETER took a texture unit
+        // on one side and not the other, permuting every sampler declared
+        // after it.  Same disagreement as the file-scope one below.
+        const bool isSampler = isSamplerIRType(p.type.baseType);
 
         if (p.storage == StorageQualifier::Uniform && isSampler)
         {
@@ -356,9 +359,9 @@ ContainerResult emitFragmentContainerImpl(
             d.paramno   = kInvalidIndex;
             d.isReferenced = 1;
 
-            const bool isSampler =
-                (g.type.baseType == IRType::Sampler2D ||
-                 g.type.baseType == IRType::SamplerCube);
+            // Same predicate as the emit side's declaration-order
+            // numbering: a sampler takes a texture unit, not a const slot.
+            const bool isSampler = isSamplerIRType(g.type.baseType);
 
             if (isSampler)
             {

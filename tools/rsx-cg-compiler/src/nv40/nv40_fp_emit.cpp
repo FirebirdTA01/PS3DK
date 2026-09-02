@@ -1667,12 +1667,34 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<std::string, unsigned> globalNameToFpUniformSlot;
     std::unordered_map<std::string, int>      globalNameToTexUnit;
 
+    // Number the file-scope uniforms NOW, in declaration order, because
+    // that is the order cg_container_fp.cpp walks module.globals in when
+    // it reverses this numbering.  This used to allocate a slot at FIRST
+    // USE instead, which agrees with declaration order only when a shader
+    // happens to use its uniforms in the order it declares them; when it
+    // does not, every file-scope uniform's ucode offsets are attached to
+    // some other uniform's container parameter, and patching one at
+    // runtime writes another one's constant.  Silent: the container is
+    // well formed and only a test that patches two uniforms to DIFFERENT
+    // values and reads both back can see it.
+    //
+    // Samplers are skipped here exactly as they are there - they take a
+    // texture unit, not a const slot - and the two predicates have to
+    // agree or the slots shift by one from the first sampler onward.
+    {
+        unsigned globalSlotCursor = firstGlobalSlot;
+        for (const auto& g : module.globals)
+        {
+            if (g.storage != StorageQualifier::Uniform) continue;
+            if (isSamplerIRType(g.type.baseType)) continue;
+            globalNameToFpUniformSlot[g.name] = globalSlotCursor++;
+        }
+    }
+
     for (size_t pi = 0; pi < entry.parameters.size(); ++pi)
     {
         const auto& param = entry.parameters[pi];
-        const bool isSampler = (param.type.baseType == IRType::Sampler2D ||
-                                param.type.baseType == IRType::SamplerRect ||
-                                param.type.baseType == IRType::SamplerCube);
+        const bool isSampler = isSamplerIRType(param.type.baseType);
         if (param.storage == StorageQualifier::Uniform && isSampler)
         {
             valueToTexUnit[param.valueId] = nextTexUnit++;
@@ -1698,6 +1720,27 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         const int srcCode = fragmentInputSrc(semUpper, param.semanticIndex);
         if (srcCode >= 0)
             valueToInputSrc[param.valueId] = srcCode;
+    }
+
+    // Texture units for file-scope samplers, in DECLARATION order, for
+    // exactly the reason the const slots above are: cg_container_fp.cpp
+    // assigns each file-scope sampler's parameter res from a cursor that
+    // starts after the entry-parameter samplers and walks module.globals
+    // in order.  Allocating a unit at FIRST USE instead - which is what
+    // this did - means `uniform sampler2D a; uniform sampler2D b;` used b
+    // first samples b from TEX0 while the container tells the runtime that
+    // parameter a is TEX0, so binding textures BY NAME swaps them, with a
+    // well-formed container and no diagnostic (review finding, codex).
+    //
+    // nextTexUnit is read here rather than earlier because the loop above
+    // has just finished counting the entry-parameter samplers, which take
+    // the low units on both sides.
+    for (const auto& g : module.globals)
+    {
+        if (g.storage != StorageQualifier::Uniform) continue;
+        if (!isSamplerIRType(g.type.baseType)) continue;
+        if (globalNameToTexUnit.count(g.name)) continue;
+        globalNameToTexUnit[g.name] = nextTexUnit++;
     }
 
     // Pre-populate valueToLiteralVec4 from any IRConstant of vec4 /
@@ -1846,41 +1889,44 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         "nv40-fp: LoadUniform for unknown global '" + inst.targetName + "'");
                     return out;
                 }
-                const bool isSampler =
-                    (g->type.baseType == IRType::Sampler2D ||
-                     g->type.baseType == IRType::SamplerRect ||
-                     g->type.baseType == IRType::SamplerCube);
+                const bool isSampler = isSamplerIRType(g->type.baseType);
                 if (isSampler)
                 {
+                    // Units are assigned in declaration order up front;
+                    // allocating one here would reintroduce the first-use
+                    // ordering this fix removed.
                     auto it = globalNameToTexUnit.find(g->name);
-                    int tu;
                     if (it == globalNameToTexUnit.end())
                     {
-                        tu = nextTexUnit++;
-                        globalNameToTexUnit[g->name] = tu;
+                        out.diagnostics.push_back(
+                            "nv40-fp: file-scope sampler '" + g->name +
+                            "' was not numbered; refusing rather than "
+                            "guessing a texture unit");
+                        return out;
                     }
-                    else
-                    {
-                        tu = it->second;
-                    }
-                    valueToTexUnit[inst.result] = tu;
+                    valueToTexUnit[inst.result] = it->second;
                     valueToTexSamplerName[inst.result] = g->name;
                 }
                 else
                 {
+                    // Slot numbers are assigned in declaration order up
+                    // front; this only decides whether the uniform has
+                    // been SEEN yet, so its embedded-offset entry exists.
                     auto it = globalNameToFpUniformSlot.find(g->name);
-                    unsigned slot;
                     if (it == globalNameToFpUniformSlot.end())
                     {
-                        slot = firstGlobalSlot +
-                               static_cast<unsigned>(globalNameToFpUniformSlot.size());
-                        globalNameToFpUniformSlot[g->name] = slot;
+                        out.diagnostics.push_back(
+                            "nv40-fp: file-scope uniform '" + g->name +
+                            "' was not numbered; refusing rather than "
+                            "guessing a const slot");
+                        return out;
+                    }
+                    const unsigned slot = it->second;
+                    bool seeded = false;
+                    for (const auto& eu : attrs.embeddedUniforms)
+                        if (eu.entryParamIndex == slot) { seeded = true; break; }
+                    if (!seeded)
                         attrs.embeddedUniforms.push_back({ slot, {} });
-                    }
-                    else
-                    {
-                        slot = it->second;
-                    }
                     valueToFpUniform[inst.result] = slot;
                     valueToFpUniformName[inst.result] = g->name;
                 }

@@ -51,6 +51,20 @@ enum class IRType
     Ptr
 };
 
+// A sampler binds a TEXTURE UNIT and never a constant slot.  The FP
+// emitter and the container writer both number their file-scope globals
+// on this predicate and must agree, or the two numberings drift and each
+// global's metadata is attached to a different global's parameter.  They
+// disagreed on SamplerRect - the emitter counted it, the container did
+// not - so it lives here now rather than being spelled out at each of the
+// four sites that need it (t_f5f750ff).
+inline bool isSamplerIRType(IRType t)
+{
+    return t == IRType::Sampler2D ||
+           t == IRType::SamplerRect ||
+           t == IRType::SamplerCube;
+}
+
 struct IRTypeInfo
 {
     IRType baseType = IRType::Void;
