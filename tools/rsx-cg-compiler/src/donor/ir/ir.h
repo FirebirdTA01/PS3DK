@@ -460,8 +460,23 @@ public:
     std::string entryPointName = "main";
     IRFunction* entryPoint = nullptr;
 
-    // Global value ID allocation
-    IRValueID nextGlobalId = 1;
+    // Global value ID allocation.
+    //
+    // Globals and per-function values are both IRValueID and are looked up
+    // from the SAME maps in the backends - the general path's
+    // valueToSource is keyed by the id with no namespace - so the two
+    // spaces must not overlap.  Both used to start at 1, so a file-scope
+    // uniform's global id landed on an entry value's id and resolved to
+    // whatever that value was: a varying.  `uniform float K;` read a
+    // texcoord, silently, in a well-formed container (t_f5f750ff).
+    //
+    // Disjoint by base rather than by a shared counter, because the IR
+    // builder identifies a just-allocated value as `nextValueId - 1` in a
+    // dozen places and a shared counter would make every one of those
+    // wrong the moment a global were allocated mid-function.  The base is
+    // far past any reachable per-function value count.
+    static constexpr IRValueID kGlobalIdBase = 0x40000000u;
+    IRValueID nextGlobalId = kGlobalIdBase;
 
     IRModule() = default;
     explicit IRModule(const std::string& n) : name(n) {}
