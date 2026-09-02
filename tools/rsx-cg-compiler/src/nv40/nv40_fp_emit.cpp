@@ -11303,17 +11303,31 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 work.push_back(op);
         }
 
+        // EVERY varying, not just TEXCOORDn: COLOR/COL and FOG/FOGC reach
+        // valueToInputSrc too, and a dropped computation on one of those
+        // would otherwise still compile silently (review note, codex).
+        // attributeInputMask is the mask every input kind lands in, so it
+        // is the one to check against.
+        const auto varyingName = [](int src) -> std::string
+        {
+            if (src == NVFX_FP_OP_INPUT_SRC_COL0) return "COLOR0";
+            if (src == NVFX_FP_OP_INPUT_SRC_COL1) return "COLOR1";
+            if (src == NVFX_FP_OP_INPUT_SRC_FOGC) return "FOG";
+            if (src >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                src <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                return "TEXCOORD" +
+                       std::to_string(src - NVFX_FP_OP_INPUT_SRC_TC(0));
+            return "input-source-" + std::to_string(src);
+        };
+
         for (const auto& kv : valueToInputSrc)
         {
             if (!feedsOutput.count(kv.first)) continue;
-            const int src = kv.second;
-            if (src < NVFX_FP_OP_INPUT_SRC_TC(0) ||
-                src > NVFX_FP_OP_INPUT_SRC_TC(7))
-                continue;
-            const int n = src - NVFX_FP_OP_INPUT_SRC_TC(0);
-            if ((attrs.texCoordsInputMask >> n) & 1u) continue;
+            const uint32_t bit = fpAttrMaskBitForInputSrc(kv.second);
+            if (bit == 0) continue;              // not a varying we track
+            if ((attrs.attributeInputMask & bit) == bit) continue;
             out.diagnostics.push_back(
-                "nv40-fp: TEXCOORD" + std::to_string(n) +
+                "nv40-fp: " + varyingName(kv.second) +
                 " feeds an output in the IR but no emitted instruction reads "
                 "it, so a computation was silently dropped; refusing rather "
                 "than shipping a shader missing part of its source "
