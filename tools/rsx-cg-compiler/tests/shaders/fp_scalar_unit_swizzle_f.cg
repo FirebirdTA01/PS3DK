@@ -1,0 +1,13 @@
+// Companion to fp_scalar_unit_lanes_f: the per-lane scalar-unit emission
+// must compose through the ARGUMENT'S swizzle, not read raw component n
+// for lane n (codex's finding on cbb762e).  Every argument here is a
+// swizzled vector; the output reads lanes whose value comes from a
+// different source component than their own index.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 v = float4(c.x, c.y, c.x * 0.5 + 0.25, c.y * 0.5 + 0.25) * 2.0 + 0.5;
+    float4 e = exp2(v.wzyx) * 0.05;
+    float4 l = log2(v.yxwz + 1.0) * 0.5;
+    float4 s = sin(v.zwxy) * 0.5 + 0.5;
+    o = float4(e.x, l.y, s.z, 1.0);
+}

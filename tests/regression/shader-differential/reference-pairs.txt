@@ -295,3 +295,8 @@ tools/rsx-cg-compiler/tests/shaders/fp_output_stored_thrice_f.cg|auto|general
 # lanes y, z and w and is the pixel witness; every corpus use of these ops
 # is on a scalar, which is why the rig never saw it.
 tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_lanes_f.cg|auto|general
+# 2026-09-02 18:25: companion witness - the per-lane emission must compose
+# through the ARGUMENT'S swizzle (codex on cbb762e: lowerExpLog read raw
+# component n for lane n).  exp2/log2/sin on swizzled vectors, output
+# lanes read cross-component.  Red on cbb762e for that reason.
+tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_swizzle_f.cg|auto|general
