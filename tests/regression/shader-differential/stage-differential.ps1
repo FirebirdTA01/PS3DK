@@ -394,13 +394,24 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         # timeout(1) inside WSL: an uncurated corpus shader must not be
         # able to stall the whole stage on a hung compile.
         $global:LASTEXITCODE = -1
-        [string[]]$lift = if ($UnverifiedCapacity) { @("env", "RSXCG_UNVERIFIED_CAPACITY=1") } else { @() }
+        # Child-scoped in BOTH directions: the lift is passed to this child
+        # only, and a lift sitting in the operator's shell is UNSET for a
+        # run that did not ask for it - a release-gate run must not inherit
+        # a lift it never printed a banner for (codex, 99846b8 review).
+        [string[]]$lift = if ($UnverifiedCapacity) { @("env", "RSXCG_UNVERIFIED_CAPACITY=1") } else { @("env", "-u", "RSXCG_UNVERIFIED_CAPACITY") }
         $null = & wsl -- @lift timeout 30s $WslCompiler @flags @($pathFlags) -p $Profile `
             --emit-container (To-WslPath $dst) (To-WslPath $srcPath) 2>&1
     } else {
         $global:LASTEXITCODE = -1
-        if ($UnverifiedCapacity) { $env:RSXCG_UNVERIFIED_CAPACITY = "1" }
-        $null = & $Rsxcgc @flags @($pathFlags) -p $Profile --emit-container $dst $srcPath 2>&1
+        # Process env is session-wide in PowerShell: set or clear it for
+        # this child only and put back whatever the operator had.
+        $prevLift = $env:RSXCG_UNVERIFIED_CAPACITY
+        if ($UnverifiedCapacity) { $env:RSXCG_UNVERIFIED_CAPACITY = "1" } else { Remove-Item Env:RSXCG_UNVERIFIED_CAPACITY -ErrorAction SilentlyContinue }
+        try {
+            $null = & $Rsxcgc @flags @($pathFlags) -p $Profile --emit-container $dst $srcPath 2>&1
+        } finally {
+            if ($null -eq $prevLift) { Remove-Item Env:RSXCG_UNVERIFIED_CAPACITY -ErrorAction SilentlyContinue } else { $env:RSXCG_UNVERIFIED_CAPACITY = $prevLift }
+        }
     }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
@@ -531,7 +542,7 @@ if ($Corpus) {
     $stageWsl  = To-WslPath $stage
 
     Write-Host "stager: corpus sweep via WSL ($WslCompiler over $CorpusDir)"
-    [string[]]$liftCorpus = if ($UnverifiedCapacity) { @("env", "RSXCG_UNVERIFIED_CAPACITY=1") } else { @() }
+    [string[]]$liftCorpus = if ($UnverifiedCapacity) { @("env", "RSXCG_UNVERIFIED_CAPACITY=1") } else { @("env", "-u", "RSXCG_UNVERIFIED_CAPACITY") }
     & wsl -- @liftCorpus bash $helperWsl $WslCompiler $CorpusDir $stageWsl
     if ($LASTEXITCODE -ne 0) { throw "stage-corpus.sh failed ($LASTEXITCODE)" }
 
