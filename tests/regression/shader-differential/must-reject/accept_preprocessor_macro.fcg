@@ -1,0 +1,5 @@
+#define SQUARE(x) ((x) * (x))
+float4 main(float2 uv : TEXCOORD0) : COLOR
+{
+    return float4(SQUARE(uv.x), uv.y, 0.0, 1.0);
+}

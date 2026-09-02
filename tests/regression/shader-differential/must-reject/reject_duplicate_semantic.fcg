@@ -1,0 +1,4 @@
+float4 main(float2 a : TEXCOORD0, float2 b : TEXCOORD0) : COLOR
+{
+    return float4(a, b);
+}
