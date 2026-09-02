@@ -335,6 +335,12 @@ static uint32_t fpAttrMaskBitForInputSrc(int inputSrc)
     if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
         inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
         return 1u << (14 + (inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0)));
+    // TEXCOORD8 and TEXCOORD9 are real fragment inputs, but the reference
+    // container does NOT continue the TC0..7 attribute bits at 22/23.
+    // Measured on vpcov_tc8/vpcov_tc9: TC8 -> bit 12 and TC9 -> bit 13.
+    if (inputSrc == NVFX_FP_OP_INPUT_SRC_TC(8) ||
+        inputSrc == NVFX_FP_OP_INPUT_SRC_TC(9))
+        return 1u << (4 + (inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0)));
     return 0;
 }
 
@@ -1586,7 +1592,7 @@ private:
     void noteTexcoordWidth(int inputSrcCode, int components)
     {
         if (inputSrcCode < NVFX_FP_OP_INPUT_SRC_TC(0) ||
-            inputSrcCode > NVFX_FP_OP_INPUT_SRC_TC(7))
+            inputSrcCode > NVFX_FP_OP_INPUT_SRC_TC(9))
             return;
         int& w = program_.texcoordDeclaredWidth[
             inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0)];
@@ -4637,7 +4643,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             if (src.kind == VSrcKind::Input) {
                 attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(src.index);
                 if (src.index >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                    src.index <= NVFX_FP_OP_INPUT_SRC_TC(7)) {
+                    src.index <= NVFX_FP_OP_INPUT_SRC_TC(9)) {
                     const uint16_t bit =
                         uint16_t{1} << (src.index - NVFX_FP_OP_INPUT_SRC_TC(0));
                     // texCoordsInputMask only: texCoords2D is derived

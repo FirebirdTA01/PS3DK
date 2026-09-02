@@ -77,6 +77,12 @@ inline uint32_t fpAttrMaskBitForInputSrc(int inputSrc)
     if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
         inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
         return 1u << (14 + (inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0)));
+    // TEXCOORD8 and TEXCOORD9 are real fragment inputs, but the reference
+    // container does NOT continue the TC0..7 attribute bits at 22/23.
+    // Measured on vpcov_tc8/vpcov_tc9: TC8 -> bit 12 and TC9 -> bit 13.
+    if (inputSrc == NVFX_FP_OP_INPUT_SRC_TC(8) ||
+        inputSrc == NVFX_FP_OP_INPUT_SRC_TC(9))
+        return 1u << (4 + (inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0)));
     return 0;
 }
 
@@ -645,7 +651,7 @@ static bool emitTexSampleToDest(FpShapeContext& ctx,
 
     ctx.attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(uvIt->second);
     if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-        uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+        uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
     {
         const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
         ctx.attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -769,7 +775,7 @@ static bool tryEmitTexColorSpecular(FpShapeContext& ctx,
         ctx.attrs.attributeInputMask |=
             fpAttrMaskBitForInputSrc(inputSrc);
         if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
         {
             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
             ctx.attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -1780,7 +1786,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         // so the bit stayed set (review finding, codex).
         const int src = fragmentInputSrc(toUpper(semName), semIndex);
         if (src < NVFX_FP_OP_INPUT_SRC_TC(0) ||
-            src > NVFX_FP_OP_INPUT_SRC_TC(7))
+            src > NVFX_FP_OP_INPUT_SRC_TC(9))
             return;
         int& w = texcoordDeclaredWidth[src - NVFX_FP_OP_INPUT_SRC_TC(0)];
         w = std::max(w, ty.componentCount());
@@ -2486,7 +2492,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(uvIt->second);
                         if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (uvIt->second -
                                     NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -2589,7 +2595,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(inIt->second);
                         if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (inIt->second -
                                                 NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -2827,7 +2833,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                         attrs.attributeInputMask |=
                                             fpAttrMaskBitForInputSrc(uvIt->second);
                                         if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                            uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                            uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                                             attrs.texCoordsInputMask |=
                                                 uint16_t{1} << (uvIt->second -
                                                     NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -4571,7 +4577,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // attributeInputMask + texCoordsInputMask fields.
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(uvIt->second);
                     if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         const int n = uvIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -4707,7 +4713,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(lhsInIt->second);
                     if (lhsInIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        lhsInIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        lhsInIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (lhsInIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -4795,7 +4801,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(preloadVaryingInput);
                         if (preloadVaryingInput >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            preloadVaryingInput <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            preloadVaryingInput <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = preloadVaryingInput - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -5166,7 +5172,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(uvInIt->second);
                         if (uvInIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            uvInIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            uvInIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = uvInIt->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -5200,7 +5206,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(falseInputSrc);
                             if (falseInputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             {
                                 const int n =
                                     falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
@@ -5352,7 +5358,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(falseInputSrc);
                             if (falseInputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                falseInputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             {
                                 const int n =
                                     falseInputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
@@ -5510,7 +5516,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(inputSrc);
                             if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             {
                                 const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                 attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -5789,7 +5795,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     auto maskTcBit = [&](int inputSrc)
                     {
                         if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -5915,7 +5921,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         maskTcBit(inIt->second);
                         maskTcBit(rhsIn->second);
                         if (rhsIn->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            rhsIn->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            rhsIn->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = rhsIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                         }
@@ -6052,7 +6058,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(preloadBr.inputSrc);
                         if (preloadBr.inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            preloadBr.inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            preloadBr.inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = preloadBr.inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -6084,7 +6090,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(conditionalBr.inputSrc);
                         if (conditionalBr.inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            conditionalBr.inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            conditionalBr.inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = conditionalBr.inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -6208,7 +6214,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -6398,7 +6404,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -6634,7 +6640,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -6794,7 +6800,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inputSrcCode);
                     if (inputSrcCode >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inputSrcCode <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         const int n = inputSrcCode - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -7110,7 +7116,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(inIt->second);
                             if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             {
                                 attrs.texCoordsInputMask |=
                                     uint16_t{1} << (inIt->second -
@@ -7233,7 +7239,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // Track varying-input mask bits.
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -7302,7 +7308,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
                         if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -7333,7 +7339,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -7397,7 +7403,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -7516,7 +7522,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(inIt->second);
                             if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             {
                                 const int n = inIt->second -
                                     NVFX_FP_OP_INPUT_SRC_TC(0);
@@ -7614,7 +7620,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -7729,7 +7735,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(nIn->second);
                         if (nIn->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            nIn->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            nIn->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = nIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -7754,7 +7760,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(iIn->second);
                         if (iIn->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            iIn->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            iIn->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = iIn->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -8041,7 +8047,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
                         if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -8166,7 +8172,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -8316,7 +8322,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -8421,7 +8427,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -8589,7 +8595,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     attrs.attributeInputMask |=
                         fpAttrMaskBitForInputSrc(inIt->second);
                     if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -8763,7 +8769,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(iIt->second);
                         if (iIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            iIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            iIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (iIt->second -
                                                 NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -8852,7 +8858,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // Track varying-input mask bits.
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(iIt->second);
                     if (iIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        iIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        iIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (iIt->second - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -9026,7 +9032,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(sUvIt->second);
                         if (sUvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            sUvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            sUvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (sUvIt->second -
@@ -9179,7 +9185,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(uvIt->second);
                             if (uvIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                uvIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                                 attrs.texCoordsInputMask |=
                                     uint16_t{1} << (uvIt->second -
                                                     NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -9220,7 +9226,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         attrs.attributeInputMask |=
                             fpAttrMaskBitForInputSrc(viIt->second);
                         if (viIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            viIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            viIt->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             attrs.texCoordsInputMask |=
                                 uint16_t{1} << (viIt->second -
                                                 NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -9300,7 +9306,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     if (inputSrc < 0) return;
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
                     if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         attrs.texCoordsInputMask |=
                             uint16_t{1} << (inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0));
@@ -9800,7 +9806,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
                         if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -10513,7 +10519,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(inputSrc);
                             if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             {
                                 const int n =
                                     inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
@@ -11020,7 +11026,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             attrs.attributeInputMask |=
                                 fpAttrMaskBitForInputSrc(inputSrc);
                             if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                             {
                                 const int n =
                                     inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
@@ -11301,7 +11307,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     {
                         attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(inputSrc);
                         if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                         {
                             const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                             attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -11539,7 +11545,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 attrs.attributeInputMask |=
                                     fpAttrMaskBitForInputSrc(inputSrc);
                                 if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                                    inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                                    inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
                                 {
                                     const int n = inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0);
                                     attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -11628,7 +11634,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                     attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(it->second);
                     if (it->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                        it->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                        it->second <= NVFX_FP_OP_INPUT_SRC_TC(9))
                     {
                         const int n = it->second - NVFX_FP_OP_INPUT_SRC_TC(0);
                         attrs.texCoordsInputMask |= uint16_t{1} << n;
@@ -11815,7 +11821,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             if (src == NVFX_FP_OP_INPUT_SRC_COL1) return "COLOR1";
             if (src == NVFX_FP_OP_INPUT_SRC_FOGC) return "FOG";
             if (src >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                src <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                src <= NVFX_FP_OP_INPUT_SRC_TC(9))
                 return "TEXCOORD" +
                        std::to_string(src - NVFX_FP_OP_INPUT_SRC_TC(0));
             return "input-source-" + std::to_string(src);
