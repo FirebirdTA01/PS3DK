@@ -79,6 +79,8 @@
  *         side's container DECLARES through an out parameter is never
  *         written by its vertex ucode - decoded from the words, the
  *         vertex twin of output-unwritten; `outw` in the diagnostic) |
+ *         load-failed-vp (the row's own vertex program, vp=<path>, did
+ *         not load) |
  *         vp-outw-undecoded (the LAST bit did not sit on the final
  *         instruction alone, so the decoder does not trust its own
  *         read of the words: no outw verdict, the row is judged on
@@ -225,8 +227,12 @@ typedef struct {
 	char a_path[PATH_MAX_SD];
 	char b_path[PATH_MAX_SD];
 	char uniform_set[16];
-	int  blind_ok;           /* 7th manifest field `blind-ok`: a sweep row, where
+	int  blind_ok;           /* optional field `blind-ok`: a sweep row, where
 	                          * discard-blind is inventory, not a gate failure */
+	char vp_path[PATH_MAX_SD]; /* optional field `vp=<path>`: a fragment row drawn
+	                          * under THIS runtime-loaded vertex program instead of
+	                          * the embedded shared one (instrument rows for
+	                          * channels the shared VP does not write) */
 } sd_pair;
 
 typedef struct {
@@ -385,6 +391,8 @@ static void set_draw_env(CellGcmContextData *ctx, u16 w, u16 h)
 
 static CGprogram vpo;
 static void     *vp_ucode;
+static void     *g_row_vp;        /* a row's own vertex program, or NULL for the shared one */
+static void     *g_row_vp_ucode;
 static int       position_index;
 static int       texcoord_index;
 static vertex_t *vertex_buffer;
@@ -1132,9 +1140,18 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	/* The shared VP's literal constants are re-uploaded on every draw:
 	 * a VP row before this one uploaded ITS uniforms into the same
 	 * constant bank, and a fragment row judged against clobbered VP
-	 * literals would be a verdict about the wrong input. */
-	cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
-	cellGcmCgUploadInternalConsts(ctx, vpo);
+	 * literals would be a verdict about the wrong input.  A row that
+	 * names its own vertex program (manifest vp=<path>, set by
+	 * judge_pair for its duration) draws under that one instead: the
+	 * instrument rows for FOG, COLOR1 and TEXCOORD4..9, which the
+	 * shared VP does not write. */
+	if (g_row_vp) {
+		cellGcmSetVertexProgram(ctx, (CGprogram)g_row_vp, g_row_vp_ucode);
+		cellGcmCgUploadInternalConsts(ctx, (CGprogram)g_row_vp);
+	} else {
+		cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
+		cellGcmCgUploadInternalConsts(ctx, vpo);
+	}
 	cellGcmSetVertexDataArray(ctx, position_index, 0, sizeof(vertex_t), 2,
 	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
 	                          vertex_buffer_offset + offsetof(vertex_t, pos));
@@ -1546,9 +1563,12 @@ static void dump_artifact(const char *name, const char side, const u32 *img,
 static sd_pair g_pairs[MAX_PAIRS];
 static int     g_npairs;
 
-/* `tier|role|name|a_path|b_path|uniform_set[|blind-ok]`, '#' comments,
- * and an optional `@target <word>` directive.  Refuses malformed lines
- * by line number: a silently skipped row is a shader silently unjudged.
+/* `tier|role|name|a_path|b_path|uniform_set[|blind-ok][|vp=<path>]`,
+ * '#' comments, and an optional `@target <word>` directive.  Refuses
+ * malformed lines by line number: a silently skipped row is a shader
+ * silently unjudged.  The optional fields may come in either order;
+ * `vp=<path>` draws a fragment row under that runtime-loaded vertex
+ * program (see sd_pair.vp_path).
  * The optional seventh field marks a SWEEP row (reference corpus,
  * path-pair corpus): there a discard-blind verdict is measurement
  * inventory.  A curated row carries no flag, and its contract is
@@ -1585,31 +1605,35 @@ static int load_manifest(void)
 			return 0;
 		}
 		sd_pair *p = &g_pairs[g_npairs];
-		char *fields[7];
+		char *fields[8];
 		int nf = 0;
 		char *cur = line;
 		fields[nf++] = cur;
-		for (char *c = line; *c && nf < 7; c++) {
+		for (char *c = line; *c && nf < 8; c++) {
 			if (*c == '|') {
 				*c = 0;
 				fields[nf++] = c + 1;
 			}
 		}
-		if (nf != 6 && nf != 7) {
-			printf("shader-differential: manifest line %d: expected 6 |-fields (7 with blind-ok), got %d\n",
+		if (nf < 6 || nf > 8) {
+			printf("shader-differential: manifest line %d: expected 6 |-fields (up to 8 with blind-ok / vp=<path>), got %d\n",
 			       lineno, nf);
 			fclose(f);
 			return 0;
 		}
 		p->blind_ok = 0;
-		if (nf == 7) {
-			if (strcmp(fields[6], "blind-ok") != 0) {
-				printf("shader-differential: manifest line %d: unknown 7th field '%s' (only blind-ok is defined)\n",
-				       lineno, fields[6]);
+		p->vp_path[0] = 0;
+		for (int k = 6; k < nf; k++) {
+			if (strcmp(fields[k], "blind-ok") == 0) {
+				p->blind_ok = 1;
+			} else if (strncmp(fields[k], "vp=", 3) == 0 && fields[k][3]) {
+				snprintf(p->vp_path, sizeof(p->vp_path), "%s", fields[k] + 3);
+			} else {
+				printf("shader-differential: manifest line %d: unknown optional field '%s' (blind-ok and vp=<path> are defined)\n",
+				       lineno, fields[k]);
 				fclose(f);
 				return 0;
 			}
-			p->blind_ok = 1;
 		}
 		snprintf(p->tier,        sizeof(p->tier),        "%s", fields[0]);
 		snprintf(p->role,        sizeof(p->role),        "%s", fields[1]);
@@ -1852,6 +1876,28 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	int tex_ok_here = textures_ok ||
 	                  strcmp(p->role, "control-texture") == 0;
 
+	/* A row that names its vertex program draws BOTH sides under it.
+	 * Loaded here and released after the renders, so no later row can
+	 * inherit it; a load failure is the row's own status. */
+	void *row_vp = NULL;
+	if (p->vp_path[0]) {
+		u32 vsz = 0;
+		row_vp = load_container(p->vp_path, &vsz);
+		if (!row_vp) {
+			r->status = "load-failed-vp";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "row vertex program %s did not load", p->vp_path);
+			g_local_mem_heap = watermark;
+			free(cont_a);
+			free(cont_b);
+			r->elapsed_ms = now_ms() - t0;
+			return;
+		}
+		cellGcmCgInitProgram((CGprogram)row_vp);
+		u32 vusz = 0;
+		cellGcmCgGetUCode((CGprogram)row_vp, &g_row_vp_ucode, &vusz);
+		g_row_vp = row_vp;
+	}
 	int warm_a = 0, warm_b = 0;
 	int ua = render_side(ctx, cont_a, p->uniform_set, tex_ok_here,
 	                     have_tex_control, rt_a_off,
@@ -1870,9 +1916,12 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	measure_cost(cont_a, sz_a, &cost_a);
 	measure_cost(cont_b, sz_b, &cost_b);
 
+	g_row_vp = NULL;
+	g_row_vp_ucode = NULL;
 	g_local_mem_heap = watermark;
 	free(cont_a);
 	free(cont_b);
+	free(row_vp);
 
 	if (ua != 0 || ub != 0) {
 		int rc = ua != 0 ? ua : ub;
