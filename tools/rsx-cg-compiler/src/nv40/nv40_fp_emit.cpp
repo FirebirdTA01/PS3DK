@@ -6803,15 +6803,68 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
 
                 // Literal vec4 going straight to an output: the reference compiler
                 // emits FENCBR + MOV R_out, c[inline] + 16-byte block.
+                //
+                // The block holds the DISTINCT values in first-appearance
+                // order, zero-filled, and the source swizzle selects -
+                // lane i reads the const lane holding its value
+                // (t_642eb36e).  Measured against the reference:
+                //
+                //   float4(1,1,1,1)            {1,0,0,0}           .xxxx
+                //   float4(1,0.5,1,0.5)        {1,0.5,0,0}         .xyxy
+                //   float4(.5,.25,.5,.125)     {0.5,0.25,0.125,0}  .xyxz
+                //   float4(.5,.25,.125,1)      all four, identity
+                //
+                // Writing all four lanes out verbatim, as this did until
+                // 2026-09-02, is correct and differs in bytes from the
+                // reference for every literal with a repeated lane -
+                // which includes the most common shader there is, a
+                // constant colour.  Every lane is written here, so unlike
+                // the partial-mask case (t_835be4be) there are no
+                // don't-care swizzle lanes to guess: the rule is total.
                 auto lcIt = valueToLiteralVec4.find(srcId);
                 if (lcIt != valueToLiteralVec4.end())
                 {
                     asm_.emitFencbr();
 
+                    float   block[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                    uint8_t pick[4]  = { 0, 0, 0, 0 };
+                    int     distinct = 0;
+                    for (int lane = 0; lane < 4; ++lane)
+                    {
+                        const float v = lcIt->second.vals[lane];
+                        int slot = -1;
+                        for (int j = 0; j < distinct; ++j)
+                        {
+                            // Value equality, deliberately, not a bitwise
+                            // compare: the reference folds -0.0f and
+                            // +0.0f into ONE slot and keeps the word of
+                            // whichever appeared first, which a bitwise
+                            // compare would not reproduce.  Measured both
+                            // orders - float4(-0,0,.5,.5) ships -0 in the
+                            // shared slot, float4(0,-0,.5,.5) ships +0.
+                            // The only thing that folds is the sign of a
+                            // zero, and no colour output can tell them
+                            // apart.
+                            if (block[j] == v)
+                            {
+                                slot = j;
+                                break;
+                            }
+                        }
+                        if (slot < 0)
+                        {
+                            slot = distinct++;
+                            block[slot] = v;
+                        }
+                        pick[lane] = static_cast<uint8_t>(slot);
+                    }
+
                     const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
                     struct nvfx_src src0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
                     struct nvfx_src src1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
                     struct nvfx_src src2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                    for (int lane = 0; lane < 4; ++lane)
+                        src0.swz[lane] = pick[lane];
 
                     struct nvfx_insn in = nvfx_insn(
                         saturate ? 1 : 0, 0, -1, -1,
@@ -6821,7 +6874,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     in.precision = dstPrecision;
                     asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
 
-                    asm_.appendConstBlock(lcIt->second.vals);
+                    asm_.appendConstBlock(block);
                     emittedSomething = true;
                     break;
                 }

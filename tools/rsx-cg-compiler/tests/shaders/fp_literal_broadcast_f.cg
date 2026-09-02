@@ -1,0 +1,17 @@
+// The most common fragment shader there is: one constant colour
+// (t_642eb36e).
+//
+// Reference compiler:
+//
+//     FENCBR;
+//     MOVR R0, {0x3f800000(1), 0, 0, 0}.x;
+//
+// One value in the block, broadcast by the swizzle.  Ours wrote
+// 0x3f800000 four times with an identity swizzle until 2026-09-02, which
+// is the same picture and a different container - and this is the shape
+// the rig's own generated coverage shaders use, so the byte fence saw it
+// before any corpus shader did.
+void main(out float4 oColor : COLOR)
+{
+    oColor = float4(1.0f, 1.0f, 1.0f, 1.0f);
+}

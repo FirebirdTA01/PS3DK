@@ -1,0 +1,20 @@
+// A literal vec4 with repeated lanes, written straight to the output
+// (t_642eb36e).
+//
+// The reference compiler does not write the four lanes out verbatim.  It
+// packs the DISTINCT values into the const block in first-appearance
+// order, zero-fills the rest, and selects with the source swizzle:
+//
+//     MOVR R0, {0x3f800000(1), 0x3f000000(0.5), 0, 0}.xyxy;
+//
+// Ours emitted {1, 0.5, 1, 0.5} with an identity swizzle until
+// 2026-09-02 - the same pixels, four bytes of const block apart, on a
+// shape as common as a constant colour.
+//
+// The pair matters: the packed block ALONE, read with an identity
+// swizzle, would paint (1, 0.5, 0, 0).  A test that checks the const
+// block without checking the swizzle would pass on a miscompile.
+void main(out float4 oColor : COLOR)
+{
+    oColor = float4(1.0f, 0.5f, 1.0f, 0.5f);
+}
