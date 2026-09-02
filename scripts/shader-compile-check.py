@@ -133,7 +133,11 @@ def main():
                     help="root of a fetched corpus, walked rather than "
                          "git-listed (repeatable)")
     ap.add_argument("--general-lowering", action="store_true",
-                    help="pass --general-lowering to the compiler")
+                    help="accepted and ignored: the general path is the "
+                         "default (removed after one release)")
+    ap.add_argument("--legacy-lowering", action="store_true",
+                    help="pass --legacy-lowering: compile with the retired "
+                         "shape matcher instead of the general path")
     ap.add_argument("--min-shaders", type=int, default=1,
                     help="fail if fewer than this many shaders were found "
                          "(default 1)")
@@ -190,6 +194,8 @@ def main():
                "sce_fp_rsx" if prof == "fp" else "sce_vp_rsx"]
         if args.general_lowering:
             cmd.append("--general-lowering")
+        if args.legacy_lowering:
+            cmd.append("--legacy-lowering")
         cmd += ["--emit-container", str(container), str(src)]
 
         try:

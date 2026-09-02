@@ -69,7 +69,9 @@ void usage()
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
         "  --emit-container <p>   Write the .vpo/.fpo container to <p> (binary)\n"
         "  --emit-cgb-container <p> Write the compact CGB\\0 container to <p> (binary)\n"
-        "  --general-lowering    Use the experimental general NV40 lowering path\n"
+        "  --legacy-lowering      Use the retired NV40 shape matcher instead\n"
+        "  --general-lowering     Accepted and ignored: the general path is\n"
+        "                         the default (removed after one release)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
         "  -h, --help             Show this message\n"
@@ -127,9 +129,13 @@ int main(int argc, char** argv)
     CompilerContext ctx;
     bool dumpAst = false;
     bool dumpIr  = false;
+    // RSXCG_GENERAL kept its meaning across the flip rather than its
+    // effect: =0 now selects the matcher, anything else the general
+    // path.  A script that set it to 1 sees no change; one that set it
+    // to 0 to stay on the matcher still does.
     const char* generalEnv = std::getenv("RSXCG_GENERAL");
-    if (generalEnv && generalEnv[0] && std::strcmp(generalEnv, "0") != 0)
-        ctx.compileOpts.generalLowering = true;
+    if (generalEnv && generalEnv[0])
+        ctx.compileOpts.generalLowering = std::strcmp(generalEnv, "0") != 0;
 
     int i = 1;
     while (i < argc)
@@ -188,7 +194,14 @@ int main(int argc, char** argv)
         }
         else if (arg == "--general-lowering")
         {
+            // A no-op alias for one release, so every script, CI line
+            // and rig column that names the path it wanted keeps
+            // working.
             ctx.compileOpts.generalLowering = true;
+        }
+        else if (arg == "--legacy-lowering")
+        {
+            ctx.compileOpts.generalLowering = false;
         }
         else if (arg == "-O0" || arg == "--O0")
         {

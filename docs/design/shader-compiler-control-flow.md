@@ -134,9 +134,9 @@ Fragment-only by definition; a VP discard is a frontend error.
   stores, discard, and — per the corrected step 3 — any join select
   whose arms are not provably finite (proven-empty style: the
   refusal is the guard against the shapes the pass does not handle).
-  Gated to `--general-lowering`; the default path must stay
-  byte-unmoved, and a flattened shader newly compiling on the
-  default path would be a verdict change the fence rejects.
+  Gated to the general path; the matcher (now `--legacy-lowering`)
+  must stay byte-unmoved, and a flattened shader newly compiling on
+  the matcher would be a verdict change the fence rejects.
   Unlocks the provably-finite-arm subset.
 - **CF-1b**: predicated select lowering in the general path
   (`ccUpdate` + `predicate` on VInstr; MOV default, CC-set from
@@ -152,7 +152,7 @@ Fragment-only by definition; a VP discard is a frontend error.
 - Tier a: diamond fixture, nested-diamond fixture, back-edge REFUSAL
   fixture (a hand-written loop must refuse loudly, not flatten wrong).
 - Corpus acceptance: delta sweep, newly-passing all explained,
-  proven-empty on the passing set, default path byte-unmoved.
+  proven-empty on the passing set, matcher byte-unmoved.
 - Tier c: a readback row with an if/else whose two arms produce
   different constants per pixel half (`u < 0.5 ? A : B` via real
   `if`) — judged in pixels like everything else; extends t_665f641c's

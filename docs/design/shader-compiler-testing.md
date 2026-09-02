@@ -150,12 +150,14 @@ ops, address-register stack, predicates, point size, fog.  Each gets a
 — unsupported features must fail tier a *loudly* today and flip to green
 as they land.
 
-Measured against real community shaders (2026-08-31): the default
-lowering path compiles a narrow subset of them, while the experimental
-`--general-lowering` path compiles nearly all — converging the two paths
-is the milestone's central engineering question, and tier c readback is
-the instrument that decides whether the general path's output is
-correct, not merely different.
+Measured against real community shaders (2026-08-31): the shape matcher
+compiled a narrow subset of them, while the general lowering path
+compiled nearly all.  That gap is why the general path is the default
+since 2026-09-02; the matcher is `--legacy-lowering` for one release, so
+a divergence can be bisected against it rather than argued about.  Tier c
+readback remains the instrument that decides whether the general path's
+output is correct and not merely different — the flip did not settle
+that question, it moved which answer ships.
 
 ## 6. Sequencing
 

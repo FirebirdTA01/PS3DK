@@ -128,10 +128,13 @@ struct CompileOptions
     // Default ON.
     bool maxPsizeWorkaround = true;
 
-    // Experimental NV40 general lowering pipeline.  Default OFF so the
-    // byte-exact recognizer paths remain the production compiler until
-    // each general stage has matched its oracle.
-    bool generalLowering = false;
+    // The NV40 general lowering pipeline: flatten, lower, legalise,
+    // schedule, allocate.  Default ON since D1 - it is the compiler now.
+    // The shape matcher it replaced is still reachable, for one release,
+    // as `--legacy-lowering`; a shader that only the matcher compiles is
+    // a bug against this path, and the flag is there to prove it rather
+    // than to live with it.
+    bool generalLowering = true;
 
     // ------ Placeholders for features we'll plumb as they're needed ------
     // --disablepc <all|attrno>   : disable perspective-correct interp

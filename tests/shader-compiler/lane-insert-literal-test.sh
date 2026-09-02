@@ -49,14 +49,14 @@ all="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_insert_literal_all_f.cg"
 [[ -f "$one" ]] || fail "fixture missing: $one"
 [[ -f "$all" ]] || fail "fixture missing: $all"
 
-compile "$one" one
-compile "$all" all
+compile "$one" one --legacy-lowering
+compile "$all" all --legacy-lowering
 
 # The GENERAL path refused this shape entirely - the insert's result was
 # never defined and the store reported "operand could not be resolved"
 # (t_be578e74).  It now materialises the varying into a temp masked to the
 # lanes the insert does not write, which is the reference's own shape, so
-# the one-lane case is judged by the same assertions as the default path.
+# the one-lane case is judged by the same assertions as the matcher.
 compile "$one" one_general --general-lowering
 compile "$all" all_general --general-lowering
 cmp -s "$work/one.log" "$work/one_general.log" || {

@@ -1,8 +1,9 @@
 /*
- * Experimental general NV40 lowering pipeline.
+ * The general NV40 lowering pipeline - the default since D1.
  *
- * This is deliberately opt-in (`--general-lowering` / RSXCG_GENERAL).
- * Recognizers remain the default byte-exact path while this pipeline grows.
+ * The shape matcher this replaced is still reachable for one release
+ * as `--legacy-lowering` (RSXCG_GENERAL=0), so a divergence can be
+ * bisected against it rather than argued about.
  *
  * Confirmed pieces implemented here:
  *   - profile-neutral virtual NV40 instruction records;

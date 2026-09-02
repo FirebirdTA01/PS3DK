@@ -28,7 +28,7 @@ compile() {   # $1 shader, $2 tag
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx "$1"
+            -p sce_fp_rsx --legacy-lowering "$1"
     ) >"$work/$2.log" 2>&1 || rc=$?
     [[ "$rc" -eq 124 ]] && fail "$2 timed out"
     if [[ "$rc" -ne 0 ]]; then

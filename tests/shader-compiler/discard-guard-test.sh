@@ -29,7 +29,7 @@
 #                            dynamic; our frontend fully unrolls a
 #                            constant one, so the refusal would never be
 #                            reached.
-#   fp_discard_else_f      - on the DEFAULT path, t_79fc6bf7.  EXPIRES
+#   fp_discard_else_f      - on the LEGACY path (the matcher), t_79fc6bf7.  EXPIRES
 #                            when the matcher is retired; the general path
 #                            compiles this shape correctly and is checked
 #                            for it above (case else_arm).
@@ -127,42 +127,42 @@ grep -q "back-edge" "$work/loop.log" || {
 back-edge; a refusal that fires for the wrong reason is not a guard."
 }
 
-run fp_discard_else_f "" else_default
-[[ "$rc" -ne 0 ]] || fail "fp_discard_else_f compiled on the DEFAULT path.
+run fp_discard_else_f "--legacy-lowering" else_legacy
+[[ "$rc" -ne 0 ]] || fail "fp_discard_else_f compiled on the LEGACY path (the matcher).
 That path recovers a discard's guard from the last comparison it walked
 past, so on the false arm of a branch it kills exactly the fragments that
 must survive (t_79fc6bf7).  It must refuse until the matcher is retired."
-grep -q "FALSE arm" "$work/else_default.log" || {
-    tail -n 5 "$work/else_default.log" >&2
-    fail "fp_discard_else_f refused on the default path for some OTHER
+grep -q "FALSE arm" "$work/else_legacy.log" || {
+    tail -n 5 "$work/else_legacy.log" >&2
+    fail "fp_discard_else_f refused on the legacy path for some OTHER
 reason than the false-arm discard."
 }
 
-run fp_discard_and_f "" and_default
-[[ "$rc" -ne 0 ]] || fail "fp_discard_and_f compiled on the DEFAULT path.
+run fp_discard_and_f "--legacy-lowering" and_legacy
+[[ "$rc" -ne 0 ]] || fail "fp_discard_and_f compiled on the LEGACY path (the matcher).
 Its guard compares a varying against a uniform: the pre-pass puts the
 uniform in R1 and the varying's preload writes H2 with a full mask, and
 H2's four fp16 lanes cover all of R1.x and R1.y - so the uniform is gone
 before the second comparison reads it (t_ec804d32)."
-grep -q "half-register preload" "$work/and_default.log" || {
-    tail -n 5 "$work/and_default.log" >&2
-    fail "fp_discard_and_f refused on the default path for some OTHER
+grep -q "half-register preload" "$work/and_legacy.log" || {
+    tail -n 5 "$work/and_legacy.log" >&2
+    fail "fp_discard_and_f refused on the legacy path for some OTHER
 reason than the half-preload aliasing."
 }
 
-run fp_discard_two_f "" two_default
-[[ "$rc" -ne 0 ]] || fail "fp_discard_two_f compiled on the DEFAULT path.
+run fp_discard_two_f "--legacy-lowering" two_legacy
+[[ "$rc" -ne 0 ]] || fail "fp_discard_two_f compiled on the LEGACY path (the matcher).
 That path emits the FIRST store to an output and drops the rest, so every
 surviving fragment is painted the first value (t_becbfa69).  The
 completeness check cannot see it - both varyings are read by the kills -
 so the re-store itself is what must refuse."
-grep -q "is stored" "$work/two_default.log" || {
-    tail -n 5 "$work/two_default.log" >&2
-    fail "fp_discard_two_f refused on the default path for some OTHER
+grep -q "is stored" "$work/two_legacy.log" || {
+    tail -n 5 "$work/two_legacy.log" >&2
+    fail "fp_discard_two_f refused on the legacy path for some OTHER
 reason than the re-stored output."
 }
 
-run fp_discard_merge_guard_f "" merge_guard_default
+run fp_discard_merge_guard_f "--legacy-lowering" merge_guard_legacy
 [[ "$rc" -ne 0 ]] || fail "fp_discard_merge_guard_f compiled on the DEFAULT
 path.  The discard sits in a two-predecessor merge INSIDE an outer guarded
 block: the inner branch cancels at the merge and the outer one does not, so
@@ -170,36 +170,36 @@ the guard is the outer condition and the kill would use the inner one.  The
 first form of this refusal walked up, saw two predecessors and treated that
 as 'nothing more guards this' - it stopped at the merge and passed on the
 shape it was written for (codex's counterexample to 5bee678)."
-grep -qE "cannot prove what guards|enclosing condition" "$work/merge_guard_default.log" || {
-    tail -n 5 "$work/merge_guard_default.log" >&2
-    fail "fp_discard_merge_guard_f refused on the default path for some
+grep -qE "cannot prove what guards|enclosing condition" "$work/merge_guard_legacy.log" || {
+    tail -n 5 "$work/merge_guard_legacy.log" >&2
+    fail "fp_discard_merge_guard_f refused on the legacy path for some
 OTHER reason than an unproven or unaccounted guard."
 }
 
-run fp_discard_nested_f "" nested_default
-[[ "$rc" -ne 0 ]] || fail "fp_discard_nested_f compiled on the DEFAULT path.
+run fp_discard_nested_f "--legacy-lowering" nested_legacy
+[[ "$rc" -ne 0 ]] || fail "fp_discard_nested_f compiled on the LEGACY path (the matcher).
 That path's guard is a single comparison, so an ENCLOSING branch is not
 accounted for: if_convert collapses the inner if and leaves the discard in
 the outer arm, and the kill then fires wherever the INNER condition holds,
 including on fragments the outer branch never reached (t_7ae60244).  The
 reference emits both comparisons and a multiply."
-grep -q "enclosing condition" "$work/nested_default.log" || {
-    tail -n 5 "$work/nested_default.log" >&2
-    fail "fp_discard_nested_f refused on the default path for some OTHER
+grep -q "enclosing condition" "$work/nested_legacy.log" || {
+    tail -n 5 "$work/nested_legacy.log" >&2
+    fail "fp_discard_nested_f refused on the legacy path for some OTHER
 reason than the unaccounted enclosing branch."
 }
 
-# The two shapes the default path gets RIGHT must keep compiling: a plain
+# The two shapes the matcher gets RIGHT must keep compiling: a plain
 # guard, and an `&&`.  if_convert hoists both and deletes the branch, so
 # their whole condition IS the comparison the kill uses - and the
 # discard-blend sample ships the `&&` shape byte-identical to the
 # reference, so a rule that refused it would be a regression on a shipped
 # sample rather than a guard.
 for stem in fp_discard_lt_f fp_discard_ge_f fp_discard_then_work_f; do
-    run "$stem" "" "${stem}_default_ok"
+    run "$stem" "--legacy-lowering" "${stem}_legacy_ok"
     [[ "$rc" -eq 0 ]] || {
-        tail -n 5 "$work/${stem}_default_ok.log" >&2
-        fail "$stem no longer compiles on the DEFAULT path.  The
+        tail -n 5 "$work/${stem}_legacy_ok.log" >&2
+        fail "$stem no longer compiles on the LEGACY path (the matcher).  The
 enclosing-branch refusal is meant to catch a guard the path cannot
 express, not the two it expresses correctly."
     }

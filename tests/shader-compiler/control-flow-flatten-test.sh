@@ -110,25 +110,25 @@ expect_refusal() {
 
 # Success control on both paths: the harness must be able to SEE a
 # good compile or every verdict below means nothing.
-expect_success "success-control[default]" "$good_src"
+expect_success "success-control[legacy]" "$good_src" --legacy-lowering
 expect_success "success-control[general]" "$good_src" --general-lowering
 
 # The unlock: forward-only diamonds compile on the general path.
 expect_success "diamond[general]"        "$diamond_src" --general-lowering
 expect_success "nested-diamond[general]" "$nested_src"  --general-lowering
 
-# The gate: the same shaders keep refusing on the default path.
-expect_refusal "diamond[default]"        '' "$diamond_src"
-expect_refusal "nested-diamond[default]" '' "$nested_src"
+# The gate: the same shaders keep refusing on the matcher.
+expect_refusal "diamond[legacy]"        '' "$diamond_src" --legacy-lowering
+expect_refusal "nested-diamond[legacy]" '' "$nested_src" --legacy-lowering
 
 # CF-1b: non-provably-finite join arms lower as a PREDICATED WRITE
 # (MOV default, CC-set from cond, CC-gated commit) instead of the
 # contaminating arithmetic blend — the guarded divide compiles on the
 # general path.  Pixel-level acceptance is the §5 tier-c readback row;
-# this asserts the compile-level contract.  The default path keeps
+# this asserts the compile-level contract.  The matcher keeps
 # refusing: nothing about CF-1 touches it.
 expect_success "guarded-divide[general]" "$guarded_src" --general-lowering
-expect_refusal "guarded-divide[default]" '' "$guarded_src"
+expect_refusal "guarded-divide[legacy]" '' "$guarded_src" --legacy-lowering
 
 # The back-edge witness: a loop must refuse loudly, never flatten
 # wrong — and for its OWN reason, so this fixture cannot be satisfied

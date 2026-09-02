@@ -53,8 +53,8 @@ NVFX_FP_OP_OPCODE_DDY 0x16   /* can only write XY */
 - Frontend: register `ddx`, `ddy` stdlib intrinsics for `float` and
   `float2` (fragment profile only).
 - IR: unary `Ddx`/`Ddy` ops.
-- Lowering, BOTH paths (the corpus sweep runs `--general-lowering`, so
-  the general path is the one that must land; the default path takes it
+- Lowering, BOTH paths (the corpus sweep runs the general path, so
+  the general path is the one that must land; the matcher takes it
   only if a known-good fixture is seeded for the byte gate):
   emit the single DDX/DDY instruction; destination mask ⊆ {X, Y}.
 - Widths 3–4 REJECT LOUDLY in slice 1 ("derivative width not yet
