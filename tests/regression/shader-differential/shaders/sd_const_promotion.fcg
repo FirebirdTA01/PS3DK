@@ -1,20 +1,15 @@
-// shader-differential - fixture for FILE-SCOPE CONST PROMOTION (t_3bf3ce95).
+// shader-differential - fixture for a FILE-SCOPE CONST (t_4584aa27).
 //
-// The reference compiler turns a file-scope `const float K = ...;` into a
-// real container parameter named K whose const slots carry the initialiser;
-// ours folds K to a literal.  The director's decision: both behaviours
-// behind a flag, then compare.  This shader is staged three times
-// (reference-pairs-const-mode.txt), each row answering one question:
-//   --promote-file-consts     uniform_set=auto  the parameter is real and
-//                                               patchable (both sides
-//                                               patched with the same value)
-//   --promote-file-consts     uniform_set=0     the COMPILED DEFAULT carries
-//                                               the initialiser, not a zero
-//                                               (review-found row: a promoted
-//                                               name with a 0.0 default
-//                                               passes the auto row)
-//   --no-promote-file-consts  uniform_set=0     the fold equals the reference
-//                                               compiled default
+// The reference compiler folds the constant's value inline AND adds a
+// parameter entry named K listing the code offsets where the value sits;
+// ours folds it without the parameter.  The director retired the plan for
+// a flag over "promote vs fold" (2026-09-01 22:24): the instructions are the
+// same either way, so promotion is container metadata, not a lowering, and
+// there is nothing to compare at draw time.  What this fixture guards is
+// the FOLD ITSELF: the release dropped the initialiser and compiled K as
+// zero on both paths (t_4584aa27, fixed in 0981daa).  One row, set 0,
+// both paths: ours vs the reference, no uniform applied, identical since
+// the fix.
 //
 // Channels are chosen so each mechanism is visible on its own channel:
 //   R  uv.x * K   K reaching a varying product (level count > 1)
@@ -22,9 +17,7 @@
 //                 default (0.3125 -> 80); a zero default reads 0 here
 //   B  uv.y * K   the other varying axis, same product
 //   A  1
-// K = 0.3125 = 5/16 is exact in float32.  The stager prints the auto value
-// the promote/auto row patches in; it must differ from 0.3125 or that row
-// proves nothing (it is 0.125 + m/2^24, and 5/16 needs one exact m).
+// K = 0.3125 = 5/16 is exact in float32.
 const float K = 0.3125;
 
 float4 main(float2 uv : TEXCOORD0) : COLOR

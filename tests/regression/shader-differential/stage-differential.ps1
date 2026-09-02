@@ -198,16 +198,10 @@ function Auto-Value([string]$name, [uint32]$k) {
 # whether a given NAME yields distinct components, and a fixture whose
 # channels collide looks like three tests and is one (review request
 # on the lane-extract fixture).  Matrices are listed as not synthesised.
-function Print-AutoValues([string]$srcPath, [string]$label, [switch]$IncludeFileConsts) {
+function Print-AutoValues([string]$srcPath, [string]$label) {
     $text = Get-Content -Raw -LiteralPath $srcPath
     $seen = @{}
-    # Under --promote-file-consts a file-scope `const` is a parameter too
-    # (the reference promotes it; t_3bf3ce95), so its synthesised value
-    # is listed with the uniforms.  Function-local consts also match the
-    # wider regex; they are never promoted and a line for one is noise,
-    # not a wrong value.
-    $kw = if ($IncludeFileConsts) { '(?:uniform|const)' } else { 'uniform' }
-    $matches = [regex]::Matches($text, $kw + '\s+(float|half)([1-4])?(x[1-4])?\s+([A-Za-z_][A-Za-z0-9_]*)')
+    $matches = [regex]::Matches($text, 'uniform\s+(float|half)([1-4])?(x[1-4])?\s+([A-Za-z_][A-Za-z0-9_]*)')
     # Say so when nothing matched: a shader with no uniforms and a shader
     # whose declaration the regex missed print the SAME nothing otherwise,
     # and "no COMPONENTS COLLIDE line appeared" would be satisfiable without
@@ -233,9 +227,9 @@ function Print-AutoValues([string]$srcPath, [string]$label, [switch]$IncludeFile
 # side, and our folded container has nothing to patch - a mismatch by
 # construction (measured: sd_const_promotion@oracle max_delta 9, the
 # difference between 0.3125 and its auto value).  Such rows are staged
-# under set 0 instead, and the stage says so.  Goes away when
-# --promote-file-consts is the default (t_3bf3ce95): then both sides
-# carry the parameter and auto is right again.
+# under set 0 instead, and the stage says so.  Stays this way: the
+# director retired promotion-as-a-flag (22:24), so ours folds without a
+# parameter and the reference's promoted one must not be patched.
 function Has-FileScopeConst([string]$srcPath) {
     $text = Get-Content -Raw -LiteralPath $srcPath
     # Strip block and line comments, then walk the text tracking brace and
@@ -526,8 +520,8 @@ if ($ReferenceCompiler) {
         # switches).  A row with flags is named
         # <shader>__<flag-slug>__set<uniform_set>, so the same shader can
         # be staged under two flags, or under one flag with two uniform
-        # sets, as distinct rows (t_3bf3ce95: promote-on/auto,
-        # promote-on/0, promote-off/0 are three rows of one shader).
+        # sets, as distinct rows (the retired flag design listed one shader
+        # three times this way; the column stays for the next A/B).
         [string[]]$rowFlags = @()
         if ($fields.Count -ge 4 -and $fields[3].Trim()) {
             $rowFlags = @($fields[3].Trim() -split ' +')
@@ -544,7 +538,7 @@ if ($ReferenceCompiler) {
 
         $ours = Join-Path $refScratch "$name`_ours.fpo"
         $ref  = Join-Path $refScratch "$name`_ref.fpo"
-        if ($set -eq "auto") { Print-AutoValues $src $name -IncludeFileConsts:($rowFlags -contains '--promote-file-consts') }
+        if ($set -eq "auto") { Print-AutoValues $src $name }
         Print-AutoTextures $src $name
         $null = Compile-Shader $src $ours @($rowFlags) -Absolute
         Assert-Deterministic $src $ours @($rowFlags) -Label $name

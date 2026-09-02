@@ -81,17 +81,16 @@ tests/regression/shader-differential/shaders/sd_scalar_broadcast.fcg|auto|genera
 # |general because it uses frac, which the default path refuses.
 tests/regression/shader-differential/shaders/sd_scalar_lane_extract.fcg|auto|general
 
-# NAMED REGRESSION for t_4584aa27: a FILE-SCOPE CONST's initialiser is
-# dropped and the const compiles as ZERO, on both paths, in the release
-# (containers byte-identical across v0.12.21, the 13:15 and the 20:22 dev
-# builds; the literal 0x3ea00000 is in none of them, and the IR dump shows
-# `@K = float` with no value).  Ours vs the reference, no uniform applied:
-# RED today - default path paints opaque black (K == 0), general path
-# reads K as the x input (levels a=60/64/228 vs b=64/1/64) - green once
-# folding means the initialiser.  First row in the rig to exercise a
-# file-scope const at all; found by staging the t_3bf3ce95 fixture
-# unflagged.  Its flagged siblings live in reference-pairs-const-mode.txt
-# until the flag is on origin/main.
+# NAMED REGRESSION for t_4584aa27: a FILE-SCOPE CONST's initialiser was
+# dropped and the const compiled as ZERO, on both paths, in the release
+# (containers byte-identical across v0.12.21 and two dev builds; the
+# literal 0x3ea00000 in none of them).  Ours vs the reference, no uniform
+# applied: was RED (default path opaque black, general path reading the x
+# input) until 0981daa folded the initialiser; identical on both paths
+# since.  First row in the rig to exercise a file-scope const at all.
+# The reference promotes the const to a parameter; ours folds it, and the
+# director retired the idea of a flag over the two (22:24): promotion is
+# metadata over the same inline value, so the fold is the whole test.
 tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both
 
 # COMPOUND NAMED REGRESSION, default path, two defects on two channels
