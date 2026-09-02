@@ -51,7 +51,9 @@
  *         coverage FP the row needs) | vp-path-pair-unoracled |
  *         uniforms-differ (the two vertex containers enumerate uniforms
  *         differently, so the same synthesis would feed them different
- *         values: a finding about the containers, no pixel verdict)
+ *         values: a finding about the containers, no pixel verdict) |
+ *         uniforms-unlisted (a side applies more uniforms than the rig's
+ *         bounded list holds, so that check cannot run: no verdict)
  *
  * Sensitivity, in every judged row's diagnostic: `levels a=R/G/B/A
  * b=R/G/B/A` = distinct 8-bit values per channel per side, and `sat`
@@ -1148,15 +1150,67 @@ static int is_matrix_row_leaf(CGprogram vp, const char *name)
  * when the container declares a sampler (vertex textures are out of
  * scope); -5 when `auto` meets a kind the binder does not synthesise
  * (int, bool, fixed). */
-static void note_applied(char *applied, size_t cap, const char *name)
+/* The uniform names one side actually applied, as a bounded SET: a
+ * list that silently dropped a name that did not fit could make two
+ * different enumerations compare equal (review finding, claude), so an
+ * overflow is recorded and withholds the verdict instead; and the two
+ * sides need not enumerate in the same order - values are keyed by name
+ * - so the comparison sorts first. */
+#define APPLIED_MAX  32
+#define APPLIED_NAME 48
+typedef struct {
+	char name[APPLIED_MAX][APPLIED_NAME];
+	int  n;
+	int  overflow;
+} applied_t;
+
+static void note_applied(applied_t *a, const char *name)
 {
-	size_t len = strlen(applied);
-	if (len + strlen(name) + 2 < cap)
-		snprintf(applied + len, cap - len, "%s%s", len ? "," : "", name);
+	if (a->n >= APPLIED_MAX || strlen(name) >= APPLIED_NAME) {
+		a->overflow = 1;
+		return;
+	}
+	strcpy(a->name[a->n++], name);
+}
+
+static int applied_cmp(const void *x, const void *y)
+{
+	return strcmp((const char *)x, (const char *)y);
+}
+
+static void applied_sort(applied_t *a)
+{
+	qsort(a->name, (size_t)a->n, APPLIED_NAME, applied_cmp);
+}
+
+static int applied_equal(applied_t *a, applied_t *b)
+{
+	if (a->n != b->n)
+		return 0;
+	applied_sort(a);
+	applied_sort(b);
+	for (int i = 0; i < a->n; i++)
+		if (strcmp(a->name[i], b->name[i]) != 0)
+			return 0;
+	return 1;
+}
+
+static void applied_join(applied_t *a, char *out, size_t cap)
+{
+	applied_sort(a);
+	out[0] = 0;
+	for (int i = 0; i < a->n; i++) {
+		size_t len = strlen(out);
+		if (len + strlen(a->name[i]) + 2 >= cap) {
+			snprintf(out + len, cap - len, "%s", len ? ",.." : "..");
+			return;
+		}
+		snprintf(out + len, cap - len, "%s%s", len ? "," : "", a->name[i]);
+	}
 }
 
 static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
-                             const char *uniform_set, char *applied, size_t cap)
+                             const char *uniform_set, applied_t *applied)
 {
 	if (strcmp(uniform_set, "auto") == 0) {
 		for (CGparameter prm = cellGcmCgGetFirstLeafParameter(vp); prm;
@@ -1197,7 +1251,7 @@ static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
 					v[k] = k < words ? auto_value(name, k) : 0.0f;
 			}
 			cellGcmSetVertexProgramParameter(ctx, prm, v);
-			note_applied(applied, cap, name);
+			note_applied(applied, name);
 		}
 		return 0;
 	}
@@ -1210,7 +1264,7 @@ static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
 		if (!prm)
 			return -1;
 		cellGcmSetVertexProgramParameter(ctx, prm, g_uniforms[i].values);
-		note_applied(applied, cap, g_uniforms[i].name);
+		note_applied(applied, g_uniforms[i].name);
 	}
 	return 0;
 }
@@ -1332,9 +1386,10 @@ static int render_vp_side(CellGcmContextData *ctx, void *vp_container,
                           int channel, const char *uniform_set,
                           u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
                           u32 *save, int *warmup_draws,
-                          char *applied, size_t applied_cap)
+                          applied_t *applied)
 {
-	applied[0] = 0;
+	applied->n = 0;
+	applied->overflow = 0;
 	if (!g_vp_cov[channel])
 		return -7;
 	CGprogram vp = (CGprogram)vp_container;
@@ -1361,7 +1416,7 @@ static int render_vp_side(CellGcmContextData *ctx, void *vp_container,
 
 	cellGcmSetVertexProgram(ctx, vp, vp_uc);
 	cellGcmCgUploadInternalConsts(ctx, vp);
-	int rc = apply_vp_uniforms(ctx, vp, uniform_set, applied, applied_cap);
+	int rc = apply_vp_uniforms(ctx, vp, uniform_set, applied);
 	if (rc != 0)
 		return rc;
 	bind_all_attributes(ctx);
@@ -1879,7 +1934,7 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 	int warm_max_a = 0, warm_max_b = 0;
 	sd_sensitivity sens_a = {{0,0,0,0},0}, sens_b = {{0,0,0,0},0};
 	int failed = 0;
-	char applied_a[160], applied_b[160];
+	static applied_t applied_a, applied_b;   /* 3 KB each; not stack */
 	/* The auto control is asymmetric BY DESIGN, as the fragment one is:
 	 * side A declares the uniforms and side B is the twin with the same
 	 * numbers baked, so the set applies to side A only and the two sides
@@ -1892,11 +1947,11 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 		int warm_a = 0, warm_b = 0;
 		int ua = render_vp_side(ctx, cont_a, ch, p->uniform_set,
 		                        rt_a_off, rt_depth_off, rt_pitch, save_a, &warm_a,
-		                        applied_a, sizeof(applied_a));
+		                        &applied_a);
 		int ub = ua == 0
 			? render_vp_side(ctx, cont_b, ch, set_b,
 			                 rt_b_off, rt_depth_off, rt_pitch, save_b, &warm_b,
-			                 applied_b, sizeof(applied_b))
+			                 &applied_b)
 			: 0;
 		g_local_mem_heap = watermark;
 		/* Each side walks its OWN parameter table, so two containers
@@ -1906,11 +1961,23 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 		 * mismatch that would be the rig's, not the compiler's (review
 		 * finding, claude).  Lists that differ are a finding about the
 		 * containers and end the row without a pixel verdict. */
-		if (!asymmetric && ua == 0 && ub == 0 && strcmp(applied_a, applied_b) != 0) {
+		if (!asymmetric && ua == 0 && ub == 0 &&
+		    (applied_a.overflow || applied_b.overflow)) {
+			r->status = "uniforms-unlisted";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "a container applies more uniforms than the rig lists (%d names of up to %d chars); the enumeration check cannot run, no verdict",
+			         APPLIED_MAX, APPLIED_NAME - 1);
+			failed = 1;
+			break;
+		}
+		if (!asymmetric && ua == 0 && ub == 0 && !applied_equal(&applied_a, &applied_b)) {
+			char la[160], lb[160];
+			applied_join(&applied_a, la, sizeof(la));
+			applied_join(&applied_b, lb, sizeof(lb));
 			r->status = "uniforms-differ";
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
 			         "the two containers enumerate uniforms differently: a applied [%s] b applied [%s]",
-			         applied_a, applied_b);
+			         la, lb);
 			failed = 1;
 			break;
 		}
@@ -2480,7 +2547,8 @@ int main(int argc, const char **argv)
 			vacuous++;
 		} else if (strncmp(r.status, "sampler-unsupported", 19) == 0 ||
 		           strncmp(r.status, "uniform-unsupported", 19) == 0 ||
-		           strcmp(r.status, "uniforms-differ") == 0) {
+		           strcmp(r.status, "uniforms-differ") == 0 ||
+		           strcmp(r.status, "uniforms-unlisted") == 0) {
 			/* A pair the RIG cannot bind is a rig limit, not a
 			 * compiler finding: counted on its own line so a corpus
 			 * sweep reports "not judged" rather than "failed" for it.
