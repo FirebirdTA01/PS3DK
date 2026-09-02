@@ -4,14 +4,15 @@
 // interpolated channel a fragment program under judgment may read is
 // driven by a deterministic function of the quad's (u,v), so both
 // sides of a pair see identical inputs and any reader gets defined
-// data instead of stale registers.  TEXCOORD0 is unchanged from
-// sd_pos_uv.vcg (u, v, 0, 1), so every row staged before this VP
-// existed sees exactly what it saw.
+// data instead of stale registers.  TEXCOORD0.xy is (u, v) as it was in
+// sd_pos_uv.vcg, so texture coordinates are what every earlier row saw;
+// its z and w now vary like every other lane (2026-09-02 constants
+// audit), so a row reading them sees a changed input - by design.
 //
 // Channel recipe (u,v in 0..1 across the RT, v down):
 //   TEXCOORD0 = (u, v, 0.1 + 0.5v, 0.7 + 0.25u)   texture coordinates (xy); z, w vary
 //   TEXCOORD1 = (u - 0.5, v - 0.5, 0.3 + 0.4u, 0.4 + 0.5v)   a "normal"-shaped vector
-//   TEXCOORD2 = (0.5 - u, 0.5, v, 0.25 + 0.5u)         a "half"/"eye"-shaped vector
+//   TEXCOORD2 = (0.5 - u, 0.35 + 0.3v, v, 0.25 + 0.5u)   a "half"/"eye"-shaped vector
 //   TEXCOORD3 = (u * v, u + v, 1 - u, 0.6 + 0.3u)   mixed products
 //   COLOR0    = (u, v, 1 - u, 0.5 + 0.5 v)   per-vertex colour with alpha ramp
 // Nothing is normalised here: shaders that normalise do so themselves,
@@ -22,8 +23,11 @@
 // a projective divide, z == 0 for a dot product term), and an identity
 // hides a dropped or wrong use of that lane - the default path's dropped
 // fog lerp on th06_notex was invisible while TEXCOORD2.w was 1 (t_72810bd7,
-// 2026-09-01).  A shader reading any lane sees a value that changes across
-// the image and differs from every other lane's.
+// 2026-09-01).  A shader reading any lane sees a value that varies across
+// the image and is nowhere an identity; two lanes may coincide on
+// isolated curves (continuous functions of (u, v) do), which a row
+// judging 4096 pixels does not notice - measured: at most 65 of 4225
+// sample points for the closest pair (claude, review of e53d763).
 
 void main(
     float2 in_position       : POSITION,
@@ -44,7 +48,7 @@ void main(
     // scale factor collapses to identity at w == 1, and every channel used
     // to carry 1 there - the default path's dropped fog lerp on th06_notex
     // (lerp by fog.w) was pixel-invisible for that reason (2026-09-01 23:22).
-    out_texcoord2 = float4(0.5f - u, 0.5f, v, 0.25f + 0.5f * u);
+    out_texcoord2 = float4(0.5f - u, 0.35f + 0.3f * v, v, 0.25f + 0.5f * u);
     out_texcoord3 = float4(u * v, u + v, 1.0f - u, 0.6f + 0.3f * u);
     out_color     = float4(u, v, 1.0f - u, 0.5f + 0.5f * v);
 }
