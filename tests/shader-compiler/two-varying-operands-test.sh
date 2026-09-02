@@ -7,11 +7,19 @@
 # single ADD is `b - b` - zero, everywhere, with the container's input
 # mask still naming both.  One operand has to be copied into a temp.
 #
-# The assertion is the HARDWARE RULE rather than an expected shape: every
-# instruction of every fixture is decoded and none may carry more than one
-# source of register type INPUT.  A shape assertion would have to be
-# rewritten each time the emitter improves; this one holds for any shader
-# and any lowering, on both paths.
+# The assertion is on the emitted words rather than an instruction
+# sequence, so it survives the emitter improving.  But it is NOT a general
+# rule, and the first version of this file said it was: two operands of
+# type INPUT are perfectly legal when they name the SAME varying with
+# different swizzles - `uv.x * uv.y` is one selector read twice, and the
+# REFERENCE emits exactly that shape (a DP3 with two INPUT sources in
+# fp_normalized_phong_vecinsert_f).  The encoding cannot tell the two
+# cases apart, which is precisely why the defect was invisible.
+#
+# What makes the assertion sound HERE is the fixtures: their sources name
+# two DIFFERENT varyings, so an instruction with two INPUT operands must
+# have lost one of them.  A sweep of this check over the whole corpus is
+# meaningless; over these two shaders it is exact.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -98,9 +106,12 @@ if bad:
         % b for b in bad
     )
     raise SystemExit(
-        "FAIL: a fragment instruction may name at most ONE input register - "
-        "the hardware has a single input-source selector, so a second one is "
-        "silently the first (t_e89cd261).  Offending instructions:\n" + lines
+        "FAIL: these fixtures combine two DIFFERENT varyings, and a fragment "
+        "instruction has a single input-source selector - so an instruction "
+        "with two INPUT operands here has lost one of them and reads the "
+        "other twice (t_e89cd261).  Note the same shape is LEGAL when both "
+        "operands name the same varying; it is these sources that make it a "
+        "defect.  Offending instructions:\n" + lines
     )
 PY
 
