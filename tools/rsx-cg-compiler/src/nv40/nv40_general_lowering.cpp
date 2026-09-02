@@ -1516,7 +1516,13 @@ private:
                 lane_.dst.index = baseReg;
                 lane_.dst.writemask = laneMask;
                 lane_.srcs[0] = resolve(inst.operands[1]);
-                lane_.srcs[0].swizzle = {0, 0, 0, 0};
+                // NOT forced to {0,0,0,0}: resolve() has already
+                // replicated swizzle[0] for a width-1 value, which for a
+                // LANE EXTRACT is the lane it selected.  Forcing lane 0
+                // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
+                // the red channel broadcast into green and blue
+                // (t_856689b2's remaining four).  broadcastScalar's own
+                // comment warns against exactly this.
                 program_.instrs.push_back(lane_);
                 return;
             }
@@ -1529,7 +1535,13 @@ private:
             vi.dst.index = resultReg;
             vi.dst.writemask = laneMask;
             vi.srcs[0] = resolve(inst.operands[1]);
-            vi.srcs[0].swizzle = {0, 0, 0, 0};
+            // NOT forced to {0,0,0,0}: resolve() has already
+            // replicated swizzle[0] for a width-1 value, which for a
+            // LANE EXTRACT is the lane it selected.  Forcing lane 0
+            // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
+            // the red channel broadcast into green and blue
+            // (t_856689b2's remaining four).  broadcastScalar's own
+            // comment warns against exactly this.
             program_.instrs.push_back(vi);
             return;
         }
@@ -1548,7 +1560,13 @@ private:
         vi.dst.index = baseIt->second;
         vi.dst.writemask = laneMask;
         vi.srcs[0] = resolve(inst.operands[1]);
-        vi.srcs[0].swizzle = {0, 0, 0, 0};
+        // NOT forced to {0,0,0,0}: resolve() has already
+        // replicated swizzle[0] for a width-1 value, which for a
+        // LANE EXTRACT is the lane it selected.  Forcing lane 0
+        // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
+        // the red channel broadcast into green and blue
+        // (t_856689b2's remaining four).  broadcastScalar's own
+        // comment warns against exactly this.
         program_.instrs.push_back(vi);
     }
 
@@ -1587,7 +1605,13 @@ private:
                 vi.dst.index = baseIt->second;
                 vi.dst.writemask = 0x8;
                 vi.srcs[0] = resolve(inst.operands[1]);
-                vi.srcs[0].swizzle = {0, 0, 0, 0};
+                // NOT forced to {0,0,0,0}: resolve() has already
+                // replicated swizzle[0] for a width-1 value, which for a
+                // LANE EXTRACT is the lane it selected.  Forcing lane 0
+                // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
+                // the red channel broadcast into green and blue
+                // (t_856689b2's remaining four).  broadcastScalar's own
+                // comment warns against exactly this.
                 program_.instrs.push_back(vi);
                 return;
             }

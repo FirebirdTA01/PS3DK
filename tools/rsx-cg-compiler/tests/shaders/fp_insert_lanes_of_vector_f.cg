@@ -1,0 +1,24 @@
+// Per-lane writes from a COMPUTED vector must each read their own lane
+// (t_856689b2, the last four general-path mismatches).
+//
+// The general path's VecInsert lowering forced the scalar source's swizzle
+// to lane 0.  That is right for a literal - lane 0 of the const block - and
+// wrong for a LANE EXTRACT, whose lane resolve() had already selected.  So
+//
+//     color.y = lit.y;
+//
+// emitted `MOV R0.y, R16.x`: the red channel broadcast into green and blue.
+// The rig saw it as our R level count matching the reference's while G and
+// B were copies of R, on four shaders whose reference paints three distinct
+// channels.  broadcastScalar's own comment warns against forcing lane 0 for
+// exactly this reason.
+void main(float4 v : TEXCOORD0,
+          out float4 oColor : COLOR)
+{
+    float4 lit = v * float4(0.5f, 0.25f, 0.125f, 1.0f);
+    float4 c = v;
+    c.x = lit.x;
+    c.y = lit.y;
+    c.z = lit.z;
+    oColor = c;
+}
