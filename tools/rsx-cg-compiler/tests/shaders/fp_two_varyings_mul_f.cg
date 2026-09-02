@@ -1,0 +1,11 @@
+// The same hardware rule under a different operator and a narrower write
+// (t_e89cd261): `a.xyz * b.xyz` became `b * b` before the fix.  Kept as a
+// second fixture because the operand-legalising step runs per instruction
+// and the multiply reaches it through a different binding than the
+// subtract.
+void main(float4 a : TEXCOORD0,
+          float4 b : TEXCOORD2,
+          out float4 oColor : COLOR)
+{
+    oColor = float4(a.xyz * b.xyz, 1.0f);
+}

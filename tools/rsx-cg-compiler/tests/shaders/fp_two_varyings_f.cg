@@ -1,0 +1,21 @@
+// Arithmetic between two DIFFERENT varyings (t_e89cd261).
+//
+// An NV40 fragment instruction carries ONE input-source selector, so two
+// operands of register type INPUT read the SAME varying whatever the
+// emitter meant.  Both paths emitted this as a single ADD and it became
+// `b - b`: zero, everywhere, silently - and the container's input mask
+// still named TEXCOORD0, so nothing that trusted the mask could see it.
+//
+//     reference  MOVR R1, f[TEX2]; MOVR R0, f[TEX0]; ADDR R0, -R1, R0
+//     ours       ADDR R0, f[TEX2], -f[TEX2]
+//
+// One operand has to be copied into a temp first.  The test does not
+// assert a shape: it decodes every instruction and requires that none of
+// them names two input registers, which is the hardware rule itself and
+// holds for any shader, not just this one.
+void main(float4 a : TEXCOORD0,
+          float4 b : TEXCOORD2,
+          out float4 oColor : COLOR)
+{
+    oColor = a - b;
+}

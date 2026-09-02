@@ -3422,9 +3422,19 @@ private:
                     src.kind == VSrcKind::Literal)
                     inlineConstPositions.push_back(srcIndex);
             }
+            // An NV40 FRAGMENT instruction carries ONE input-source
+            // selector, so two operands of register type INPUT read the
+            // SAME varying whatever the emitter meant: `a - b` on two
+            // varyings emitted as one ADD is `b - b`, silently, and the
+            // container's input mask still names both (t_e89cd261).
+            // Preload whenever an instruction addresses more than one
+            // distinct input register - the reference does the same, and
+            // it is the fragment counterpart of the vertex rule that an
+            // instruction addressing two distinct input registers is
+            // illegal.
             const bool forceFpInputPreload =
-                profile_ == GeneralProfile::Fragment && vi.op == VOp::Mad &&
-                !inputs.empty();
+                profile_ == GeneralProfile::Fragment && !inputs.empty() &&
+                (vi.op == VOp::Mad || inputs.size() > 1);
             const bool needsInlineConstPreload = inlineConstPositions.size() > 1;
             if (!forceFpInputPreload && !needsInlineConstPreload) {
                 shaped.push_back(vi);

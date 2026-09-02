@@ -9856,6 +9856,81 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         std::swap(srcs[0], srcs[1]);
                     }
 
+                    // An NV40 fragment instruction carries ONE input-source
+                    // selector, so two operands that are DIFFERENT varyings
+                    // cannot ride in the same instruction: the second wins
+                    // and `a - b` emits as `b - b`, silently, with the
+                    // container's input mask still naming both (t_e89cd261).
+                    // Preload every input after the first distinct one, the
+                    // way the reference does.
+                    {
+                        int keptInputSrc = -1;
+                        for (int i = 0; i < srcCount; ++i)
+                        {
+                            if (srcs[i].inputSrc < 0) continue;
+                            if (keptInputSrc < 0)
+                            {
+                                keptInputSrc = srcs[i].inputSrc;
+                                continue;
+                            }
+                            if (srcs[i].inputSrc == keptInputSrc) continue;
+
+                            uint8_t requiredMask = mask;
+                            if (g.op == GenericFpOp::Dot3)
+                                requiredMask = uint8_t(NVFX_FP_MASK_X |
+                                                       NVFX_FP_MASK_Y |
+                                                       NVFX_FP_MASK_Z);
+                            else if (g.op == GenericFpOp::Dot4)
+                                requiredMask = NVFX_FP_MASK_ALL;
+
+                            // materializeGenericValue short-circuits a value
+                            // that already resolves to a register, which is
+                            // the input itself - so the copy is emitted here.
+                            // Plain: no modifiers and no swizzle, because
+                            // both belong to the operand and a TEMP source
+                            // can carry them where a second input cannot.
+                            GenericFpSource plain;
+                            plain.kind     = GenericFpSource::Kind::Reg;
+                            plain.reg      = srcs[i].reg;
+                            plain.inputSrc = srcs[i].inputSrc;
+
+                            // A temp no operand of THIS instruction already
+                            // occupies, and not the destination: the
+                            // resolve loop above may have materialised
+                            // another source into R0 or R1, and reusing its
+                            // register would overwrite the value the
+                            // instruction is about to read.
+                            // The colour output IS R0 on this hardware, so a
+                            // destination of OUTPUT n occupies temp n and a
+                            // preload must not be put there: the instruction
+                            // would write its own operand's register.
+                            int tempIdx = 0;
+                            for (; tempIdx < 16; ++tempIdx)
+                            {
+                                bool taken = (dst.type == NVFXSR_TEMP ||
+                                              dst.type == NVFXSR_OUTPUT) &&
+                                             dst.index == tempIdx;
+                                for (int k = 0; !taken && k < srcCount; ++k)
+                                    taken = srcs[k].kind ==
+                                                GenericFpSource::Kind::Reg &&
+                                            srcs[k].reg.type == NVFXSR_TEMP &&
+                                            srcs[k].reg.index == tempIdx;
+                                if (!taken) break;
+                            }
+                            if (tempIdx >= 16)
+                                return false;
+
+                            const struct nvfx_reg tempReg =
+                                nvfx_reg(NVFXSR_TEMP, tempIdx);
+                            if (!emitGenericMov(tempReg, requiredMask, plain,
+                                                FLOAT32, false))
+                                return false;
+
+                            srcs[i].reg      = tempReg;
+                            srcs[i].inputSrc = -1;
+                        }
+                    }
+
                     if (materializedExistingArith)
                         asm_.emitFencbr();
 
