@@ -70,6 +70,7 @@ python3 - "${logs[@]}" <<'PY'
 import re
 import sys
 REG_TYPE_INPUT = 1     # NVFX_FP_REG_TYPE_INPUT
+REG_TYPE_CONST = 2     # NVFX_FP_REG_TYPE_CONST: an inline const block follows
 OPCODE_MOV = 0x01
 def unswap(v):
     return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
@@ -78,6 +79,7 @@ seen_input_movs = {}
 for path in sys.argv[1:]:
     tag = path.split("\\")[-1].split("/")[-1]
     seen_input_movs[tag] = 0
+    skip_next = False
     for line in open(path, "r", encoding="utf-8"):
         m = re.match(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$", line)
         if not m:
@@ -85,6 +87,15 @@ for path in sys.argv[1:]:
         words = [unswap(int(w, 16)) for w in m.group(2).split()]
         if len(words) < 4:
             continue
+        # An inline const block is 16 bytes of DATA following the
+        # instruction that names it (a source of register type CONST, 2);
+        # decoding it as an instruction is the shape of a false red
+        # (claude, review of d5fda09).  Skip it the way the guest's
+        # measure_cost does.
+        if skip_next:
+            skip_next = False
+            continue
+        skip_next = any((words[i] & 3) == REG_TYPE_CONST for i in (1, 2, 3))
         opcode = (words[0] >> 24) & 0x3F
         if opcode != OPCODE_MOV:
             continue
