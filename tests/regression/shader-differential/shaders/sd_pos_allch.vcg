@@ -18,16 +18,21 @@
 // Nothing is normalised here: shaders that normalise do so themselves,
 // shaders that dot raw vectors get finite, varying values.
 //
-// NO LANE IS A CONSTANT, and none reaches 0 or 1 inside the image: a
-// constant lane is an identity for some operation (w == 1 for a lerp or
-// a projective divide, z == 0 for a dot product term), and an identity
-// hides a dropped or wrong use of that lane - the default path's dropped
-// fog lerp on th06_notex was invisible while TEXCOORD2.w was 1 (t_72810bd7,
-// 2026-09-01).  A shader reading any lane sees a value that varies across
-// the image and is nowhere an identity; two lanes may coincide on
-// isolated curves (continuous functions of (u, v) do), which a row
-// judging 4096 pixels does not notice - measured: at most 65 of 4225
-// sample points for the closest pair (claude, review of e53d763).
+// NO LANE IS A CONSTANT: a constant lane is an identity for some
+// operation (w == 1 for a lerp or a projective divide, z == 0 for a dot
+// product term), and an identity hides a dropped or wrong use of that
+// lane - the default path's dropped fog lerp on th06_notex was invisible
+// while TEXCOORD2.w was 1 (t_72810bd7, 2026-09-01).  A shader reading any
+// lane sees a value that varies across the image.  Measured at the 64x64
+// pixel centres (2026-09-02): no lane is exactly 0 or 1 at any pixel
+// except TEXCOORD3.y = u + v, which is exactly 1 on the anti-diagonal
+// (64 of 4096 pixels; its range is 0.016..1.98), and TEXCOORD1.xy /
+// TEXCOORD2.x change sign across the centre lines without hitting 0 at a
+// pixel centre.  Two lanes may coincide on isolated curves (continuous
+// functions of (u, v) do) - at most 65 of 4225 sample points for the
+// closest pair (claude, review of e53d763).  An identity or a coincidence
+// confined to a line is not blindness: a row judges 4096 pixels and the
+// other 98% still show a dropped or swapped lane.
 
 void main(
     float2 in_position       : POSITION,
