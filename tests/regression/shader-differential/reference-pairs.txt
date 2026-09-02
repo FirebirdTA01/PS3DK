@@ -235,8 +235,9 @@ tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
 # default containers of these two CF-2 fixtures MISMATCH the reference
 # (fp_discard_and_f diff 320, ours 2624 painted vs 2304; fp_discard_nested_f diff
 # 351, ours 3264 vs 3615 - the outer condition dropped).  Curated |general only:
-# the general path's guard is the conjunction of the path conditions (61be582)
-# and must read identical; the default path's disposition is a refusal (claude).
+# the general path's guard is the conjunction of the path conditions (61be582);
+# fp_discard_and_f must read identical, fp_discard_nested_f is RED BY DESIGN until
+# t_dabb23e1 (see below); the default path's disposition is a refusal (claude).
 # Measured 11:05: fp_discard_and_f IDENTICAL (painted 2304, the conjunction right on
 # pixels); fp_discard_nested_f RED by design for t_dabb23e1 - the kill set matches the
 # reference exactly (3615 painted both sides) but the general path stores o = c into
