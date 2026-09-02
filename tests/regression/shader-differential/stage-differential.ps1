@@ -80,8 +80,10 @@ param(
     # is compiled by OUR compiler on the stage's path and by the reference
     # (-p sce_vp_rsx both) and staged as a vp-reference row; the guest judges
     # every output channel the containers declare under coverage FPs
-    # GENERATED here, compiled by our DEFAULT path and asserted byte-identical
-    # to the reference, so the instrument is a proven equal.  The three VP
+    # GENERATED here, compiled by our DEFAULT path and byte-checked against
+    # the reference; a provable channel that differs is judged as a
+    # reference row before any VP row, so the instrument is proven either
+    # way, never assumed.  The three VP
     # controls (identical, one-lane mismatch, synthesised-vs-baked uniforms)
     # are staged whenever any vp row is.  Needs the reference compiler.
     [switch]$VpPairs,
@@ -798,19 +800,22 @@ if ($VpPairs -or $VpCorpus) {
     # k_vp_channels): cov paints 1 (which pixels the VP covers), the rest
     # paint one interpolated channel as lane * 0.5 + 0.5 so [-1, 1]
     # survives RGBA8.  Compiled by our DEFAULT path (never the general one,
-    # whatever the stage's path) and asserted byte-identical to the
-    # reference: the instrument is a proven equal, not an assumed one.
+    # whatever the stage's path) and byte-checked against the reference;
+    # a provable channel that is not byte-identical is judged as a
+    # reference row before any VP row (below).  Proven either way, never
+    # assumed.
     $vpChannels = @(@{ key = "cov"; src = "void main(out float4 color : COLOR) { color = float4(1.0f, 1.0f, 1.0f, 1.0f); }" })
     # Spelled v * float4(0.5..) + float4(0.5..), the fused-MAD shape, and
     # the spelling has a history: on 963018a the default path emitted the
     # literal multiplicand of that MAD as ZERO (t_a1f43b12, found by these
     # very rows on 2026-09-02) and the instrument moved to (v + 1) * 0.5
-    # for one evening.  Measured on 6b2f010 (the fix): this spelling is
-    # byte-identical to the reference on every channel, so the instrument
-    # rows below stage nothing; (v + 1) * 0.5 stays byte-different (the
-    # reference reassociates it into the same MAD; claude filed that).
-    # The scalar spelling `v * 0.5f + 0.5f` still refuses on the default
-    # path (rc 1).  Whatever the spelling, the rows are the proof.
+    # for one evening.  Measured on 6b2f010 (the fix): nine of the thirteen
+    # coverage FPs are byte-identical to the reference and stage no
+    # instrument row; col0 is not and stays proven on pixels, as does any
+    # provable channel that differs - the rows are the proof, whatever the
+    # spelling.  (v + 1) * 0.5 stays byte-different (the reference
+    # reassociates it into the same MAD; claude filed that).  The scalar
+    # spelling `v * 0.5f + 0.5f` still refuses on the default path (rc 1).
     $vpHalf = "float4(0.5f, 0.5f, 0.5f, 0.5f)"
     foreach ($n in 0..9) { $vpChannels += @{ key = "tc$n"; src = "void main(float4 v : TEXCOORD$n, out float4 color : COLOR) { color = v * $vpHalf + $vpHalf; }" } }
     $vpChannels += @{ key = "col0"; src = "void main(float4 v : COLOR0, out float4 color : COLOR) { color = v * $vpHalf + $vpHalf; }" }
