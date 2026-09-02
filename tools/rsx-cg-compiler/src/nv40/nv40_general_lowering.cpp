@@ -597,11 +597,25 @@ private:
         // Stated as reachability rather than as a dominator computation
         // on purpose: one graph search per store block, on functions of a
         // handful of blocks, and nothing subtle to get wrong.
+        // Blocks that KILL the fragment.  A discard's guard is the
+        // reachability condition of its own block (the guard pass proves
+        // that), so a fragment that took a path through one of these is
+        // killed - which is what makes the second rule below sound.
+        std::unordered_set<const IRBasicBlock*> discardBlocks;
+        for (const IRBasicBlock* b : blocks)
+            for (const auto& instPtr : b->instructions)
+                if (instPtr && instPtr->op == IROp::Discard)
+                    discardBlocks.insert(b);
+
         const auto reachesExitWithout =
-            [&](const IRBasicBlock* removed) {
+            [&](const IRBasicBlock* removed, bool alsoSkipKills) {
                 std::unordered_set<const IRBasicBlock*> seen;
                 std::vector<const IRBasicBlock*> work;
-                if (blocks.front() != removed) {
+                const auto blocked = [&](const IRBasicBlock* b) {
+                    return b == removed ||
+                           (alsoSkipKills && discardBlocks.count(b) != 0);
+                };
+                if (!blocked(blocks.front())) {
                     work.push_back(blocks.front());
                     seen.insert(blocks.front());
                 }
@@ -610,7 +624,7 @@ private:
                     work.pop_back();
                     if (cur == exitBlock) return true;
                     for (const IRBasicBlock* nb : succs[cur]) {
-                        if (nb == removed) continue;
+                        if (blocked(nb)) continue;
                         if (seen.insert(nb).second) work.push_back(nb);
                     }
                 }
@@ -627,10 +641,27 @@ private:
                     stores = true;
             }
             if (!stores) continue;
-            if (reachesExitWithout(b))
-                return refuse(
-                    "output store in block '" + b->name +
-                    "' the control flow can skip; refusing");
+            if (!reachesExitWithout(b, false))
+                continue;   // unskippable: on every path to the exit
+            // Skippable, and still safe when every path that MISSES it is
+            // killed: such a fragment never reaches the framebuffer, so
+            // the value the flattened program commits to it is not
+            // observed, and every SURVIVING fragment took the store.
+            // `if (a) { o = ..; } else { discard; }` is that shape.
+            //
+            // It generalises to several stores without extra argument:
+            // when every store block for the program is either
+            // unskippable or kill-covered, every survivor visited all of
+            // them, and reverse post-order restricted to those blocks is
+            // the order the survivor visited them in - so the last store
+            // the flattened program runs is the last one the original
+            // would have run for that fragment.
+            if (!reachesExitWithout(b, true))
+                continue;
+            return refuse(
+                "output store in block '" + b->name +
+                "' the control flow can skip on a path that is not "
+                "killed; refusing");
         }
 
         // Iterative DFS from the entry block (blocks[0] by contract).

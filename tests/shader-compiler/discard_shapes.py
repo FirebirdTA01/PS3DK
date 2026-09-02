@@ -78,7 +78,7 @@ def check(case, path):
         fail("%s: decoded no instructions" % case)
 
     if case in ("lt", "ge", "ge_rev", "not", "uncond", "and", "or",
-                "nested", "merge"):
+                "nested", "merge", "else_arm"):
         kil, g = one_kill(insns, case)
 
     if case == "lt":
@@ -162,6 +162,24 @@ def check(case, path):
                 fail("ops: guard 0x%02X has precision %d, the reference "
                      "emits %d (SGE is the one comparison it does not "
                      "demote to fx12)" % (opcode, prec, want_prec))
+    elif case == "else_arm":
+        # The kill is reached through `else`, so it fires where the branch
+        # condition is FALSE: the comparison is the one the source wrote
+        # and the KIL's TEST carries the polarity.  A lowering that
+        # inverted the comparison instead would kill the same fragments
+        # here and a different set on a NaN, and would be a different
+        # container either way.  This is the shape the DEFAULT path gets
+        # backwards (t_79fc6bf7) - it emits the same SGT with the test on
+        # NE and kills exactly the fragments that must survive.
+        expect(case, "0x%02X" % g["opcode"], "0x%02X" % SGT,
+               "the guard opcode")
+        expect(case, kil["cond"], 2, "the KIL test (2 is EQ)")
+        if not any(d["dst"] == 0 and d["mask"] and not d["none"]
+                   for d in insns):
+            fail("else_arm: nothing writes the colour output.  The store "
+                 "is on the arm the branch takes, and it is only safe to "
+                 "run it unconditionally because the other arm kills - "
+                 "dropping it would make that argument vacuous.")
     elif case == "two":
         # Two discards, two kills, and the stores between them survive.
         # The stores sit in blocks the control flow cannot skip - each is

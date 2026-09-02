@@ -22,23 +22,25 @@
 # Three fixtures assert a REFUSAL, and each refusal is checked for its own
 # reason so it cannot pass because something else broke first:
 #
-#   fp_discard_loop_f   - a back-edge.  A DIVERGENCE, not a shared limit:
-#                         the reference compiles a dynamic loop with real
-#                         hardware loop instructions.  The bound must be
-#                         dynamic; our frontend fully unrolls a constant
-#                         one, so the refusal would never be reached.
-#   fp_discard_else_f   - on the DEFAULT path, t_79fc6bf7.  EXPIRES when
-#                         the matcher is retired: the general path
-#                         compiles this shape correctly today.
-#   fp_discard_else_f   - and fp_store_skippable_f on the GENERAL path,
-#                         both on a store the control flow can SKIP.  In a
-#                         flattened program every block runs, so such a
-#                         store commits a value the branch was there to
-#                         suppress.  fp_store_skippable_f has no discard
-#                         in it at all and is the BOUND on that rule's
-#                         relaxation; the assertions name the reason, so
-#                         the day either moves this test says so rather
-#                         than passing quietly.
+#   fp_discard_loop_f      - a back-edge, on the general path.  A
+#                            DIVERGENCE, not a shared limit: the reference
+#                            compiles a dynamic loop with real hardware
+#                            loop instructions.  The bound must be
+#                            dynamic; our frontend fully unrolls a
+#                            constant one, so the refusal would never be
+#                            reached.
+#   fp_discard_else_f      - on the DEFAULT path, t_79fc6bf7.  EXPIRES
+#                            when the matcher is retired; the general path
+#                            compiles this shape correctly and is checked
+#                            for it above (case else_arm).
+#   fp_store_skippable_f   - on the general path: a store the control flow
+#                            can SKIP with nothing killing the path that
+#                            misses it.  In a flattened program every
+#                            block runs, so such a store commits a value
+#                            the branch was there to suppress.  It has no
+#                            discard in it at all, which is what makes it
+#                            the BOUND on that rule rather than another
+#                            example of it.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -90,6 +92,7 @@ shape fp_discard_nested_f    nested
 shape fp_discard_merge_f     merge
 shape fp_discard_ops_f       ops
 shape fp_discard_two_f       two
+shape fp_discard_else_f      else_arm
 shape fp_discard_then_work_f then_work
 
 # One $kill_NNNN container parameter per discard STATEMENT.  Counted on
@@ -135,20 +138,19 @@ grep -q "FALSE arm" "$work/else_default.log" || {
 reason than the false-arm discard."
 }
 
-for stem in fp_discard_else_f fp_store_skippable_f; do
-    run "$stem" "--general-lowering" "${stem}_gen"
-    if [[ "$rc" -eq 0 ]]; then
-        printf 'NOTE: %s now compiles on the general path.  If the\n' "$stem" >&2
-        printf 'skippable-store rule was relaxed on purpose, give it a shape\n' >&2
-        printf 'assertion here; if not, a store the flow can jump past is\n' >&2
-        printf 'being committed unconditionally.\n' >&2
-        fail "$stem: this test still asserts the refusal"
-    fi
-    grep -q "the control flow can skip" "$work/${stem}_gen.log" || {
-        tail -n 5 "$work/${stem}_gen.log" >&2
-        fail "$stem refused on the general path for some OTHER reason than
-the skippable store; the refusal moved and this test did not."
-    }
-done
+run fp_store_skippable_f "--general-lowering" skippable
+if [[ "$rc" -eq 0 ]]; then
+    printf 'NOTE: fp_store_skippable_f now compiles on the general path.\n' >&2
+    printf 'It has no discard in it, so nothing kills the path that misses\n' >&2
+    printf 'its store: a value the branch was there to suppress is being\n' >&2
+    printf 'committed unconditionally.  If the rule was relaxed on purpose,\n' >&2
+    printf 'say what makes it safe and give it a shape assertion here.\n' >&2
+    fail "fp_store_skippable_f: this test still asserts the refusal"
+fi
+grep -q "the control flow can skip" "$work/skippable.log" || {
+    tail -n 5 "$work/skippable.log" >&2
+    fail "fp_store_skippable_f refused on the general path for some OTHER
+reason than the skippable store; the refusal moved and this test did not."
+}
 
 printf 'PASS: discard-guard-test\n'
