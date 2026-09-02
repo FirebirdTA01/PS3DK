@@ -392,6 +392,11 @@ private:
     int nextVReg_ = 0;
     std::unordered_map<IRValueID, unsigned> useCount_;
     std::unordered_map<IRValueID, int> matrixUniformBase_;
+    // Which texture unit each sampler value names.  lowerTex used to hard-
+    // code unit 0, so every sampler in a program sampled the FIRST texture
+    // while the container correctly described the bindings - a two-texture
+    // shader silently read one texture twice.
+    std::unordered_map<IRValueID, int> samplerUnit_;
     std::unordered_map<IRValueID, VSrc> conditionToSource_;
     std::unordered_map<IRValueID, int> valueWidth_;
     // CF-1a flatten state (t_91bbd575).  Set only when the entry
@@ -944,6 +949,11 @@ private:
     {
         int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
+        // Entry-parameter samplers take the low texture units and file-scope
+        // sampler globals continue from there, which is exactly how
+        // cg_container_fp.cpp numbers them; the two must agree or binding a
+        // texture by name reaches a different unit than the ucode samples.
+        int nextFpTexUnit = 0;
         std::unordered_set<std::string> seenUniformNames;
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         struct PendingMatrix {
@@ -986,9 +996,10 @@ private:
                     uniformSrc(nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform &&
-                       p.type.baseType != IRType::Sampler2D &&
-                       p.type.baseType != IRType::SamplerRect &&
-                       p.type.baseType != IRType::SamplerCube) {
+                       isSamplerIRType(p.type.baseType)) {
+                samplerUnit_[p.valueId] = nextFpTexUnit++;
+            } else if (profile_ == GeneralProfile::Fragment &&
+                       p.storage == StorageQualifier::Uniform) {
                 program_.valueToSource[p.valueId] =
                     uniformSrc(static_cast<int>(pi), true);
             }
@@ -1004,6 +1015,9 @@ private:
             } else if (profile_ == GeneralProfile::Vertex) {
                 program_.valueToSource[g.valueId] =
                     uniformSrc(nextVpUniformConst--, false);
+            } else if (profile_ == GeneralProfile::Fragment &&
+                       isSamplerIRType(g.type.baseType)) {
+                samplerUnit_[g.valueId] = nextFpTexUnit++;
             }
         }
         for (auto it = pendingMatrices.begin(); it != pendingMatrices.end(); ++it) {
@@ -2071,6 +2085,12 @@ private:
                 program_.loweringFailed = true;
                 return;
             }
+            const auto samplerIt = samplerUnit_.find(g.valueId);
+            if (samplerIt != samplerUnit_.end()) {
+                // A sampler is not a value with a source; it names a unit.
+                samplerUnit_[inst.result] = samplerIt->second;
+                return;
+            }
             const auto mIt = matrixUniformBase_.find(g.valueId);
             if (mIt != matrixUniformBase_.end()) {
                 matrixUniformBase_[inst.result] = mIt->second;
@@ -2759,7 +2779,19 @@ private:
         vi.dst.index = define(inst.result);
         vi.dst.writemask = componentMask(inst.resultType);
         vi.srcs[0] = resolve(inst.operands[1]);
-        vi.texUnit = 0;
+        const auto unitIt = samplerUnit_.find(inst.operands[0]);
+        if (unitIt == samplerUnit_.end()) {
+            // Defaulting to 0 here is what made every sampler read the first
+            // texture: the old code could not tell "unit 0" from "no idea".
+            program_.diagnostics.push_back(
+                "nv40-general: tex fetch whose sampler operand %" +
+                std::to_string(inst.operands[0]) +
+                " does not name a known sampler; refusing rather than "
+                "defaulting to texture unit 0");
+            program_.loweringFailed = true;
+            return;
+        }
+        vi.texUnit = unitIt->second;
         program_.instrs.push_back(vi);
     }
 
