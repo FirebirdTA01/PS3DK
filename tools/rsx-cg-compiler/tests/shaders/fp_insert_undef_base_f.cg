@@ -1,0 +1,30 @@
+// A vector built entirely by lane writes has an UNDEFINED base
+// (t_b8bb521f, the second half).
+//
+//   half4 c;                       <- no initialiser: %n has no producer
+//   c.xyz = ...;                   <- insert, insert, insert
+//   c.a   = ...;                   <- insert
+//
+// The insert lowering had a bail for a base that is neither a temp nor a
+// source register, which left the chain's result undefined and made the
+// consuming store refuse with "operand could not be resolved".  An
+// uninitialised declaration is the same case as an `out` parameter:
+// there is nothing to copy, so define the result and write the lane.
+//
+// Measured on the reference compiling this shader - it never materialises
+// `c` at all, computing the two chains straight into the output:
+//
+//   MOVH H0, f[TEX0];  MOVH H2, f[TEX1];
+//   MULH R0.w, H0, H2;  ADDH_sat R0.xyz, H2, H0;
+//
+// Reduced from th06_add.fcg.  The assertion that matters is that ALL FOUR
+// output lanes are written: a lowering that lost the chain would write
+// some of them and leave the rest holding whatever the register had,
+// which is the shape the old bail produced one step later.
+void main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, out float4 o : COLOR)
+{
+    half4 c;
+    c.xyz = saturate(half3(a.xyz) + half3(b.xyz));
+    c.a   = half(a.w) * half(b.w);
+    o = float4(c);
+}

@@ -469,6 +469,10 @@ private:
     int nextVReg_ = 0;
     std::unordered_map<IRValueID, unsigned> useCount_;
     std::unordered_map<IRValueID, unsigned> nonTermUseCount_;
+    // Every value some instruction PRODUCES.  A value that is neither
+    // produced nor a parameter is an uninitialised declaration - `half4 c;`
+    // - and an insert into it has nothing to copy.
+    std::unordered_set<IRValueID> definedValues_;
     std::unordered_map<IRValueID, int> matrixUniformBase_;
     // Rows the matrix at that base actually OWNS.  A row index is
     // bounded against this, not against 4: `m[3]` on a float3x3 would
@@ -1143,6 +1147,8 @@ private:
                 const bool terminator =
                     instPtr->op == IROp::Branch ||
                     instPtr->op == IROp::CondBranch;
+                if (instPtr->result != InvalidIRValue)
+                    definedValues_.insert(instPtr->result);
                 for (IRValueID id : instPtr->operands) {
                     ++useCount_[id];
                     // A flattened program drops the branch terminators,
@@ -1720,7 +1726,25 @@ private:
             // reference's shape for the same source (`MOV R0.yzw, f[TEX0]`
             // then `MOV R0.x, {0.5,0,0,0}.x`), and it avoids copying a lane
             // that is about to be overwritten.
-            if (!isOutputParam(inst.operands[0])) {
+            // NOTHING TO COPY.  Two bases carry no value to preserve: an
+            // OUT parameter, and an UNINITIALISED declaration - `half4 c;
+            // c.xyz = ...; c.a = ...;` builds its whole value by inserts,
+            // and the base %n has no producer anywhere in the function.
+            // Both want the same emission: define the result and write
+            // the lane, copying nothing.  th06_add is the second
+            // (t_b8bb521f); the reference agrees, never materialising `c`
+            // at all and writing R0.w and R0.xyz from the two chains.
+            //
+            // "No producer" is checked against every instruction's result,
+            // NOT against "the lowering has not resolved it yet": a base
+            // whose own lowering failed must still fall through to the
+            // refusal below, or this turns a dropped computation into a
+            // partial value.
+            const bool nothingToCopy =
+                isOutputParam(inst.operands[0]) ||
+                (!program_.valueToSource.count(inst.operands[0]) &&
+                 !definedValues_.count(inst.operands[0]));
+            if (!nothingToCopy) {
                 if (!program_.valueToSource.count(inst.operands[0]))
                     return;
                 const int baseReg = define(inst.result);
