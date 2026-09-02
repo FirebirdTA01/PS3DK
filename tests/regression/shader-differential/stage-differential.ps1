@@ -368,7 +368,14 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     # assignment, and splatting a String splats its CHARACTERS (measured:
     # "- - g e n e r a l ..." reached the compiler).  Passed below as
     # @($pathFlags), the array-subexpression form, never as @pathFlags.
-    [string[]]$pathFlags = if ($NoExtraFlags) { @() } else { @($extraFlags) }
+    # An EXPLICIT lowering on the call wins over the run's path flags: the
+    # instruments (controls, probes, coverage FPs) name --general-lowering
+    # because they ride the general path whatever the run judges, and under
+    # -LegacyLowering they received both flags and the matcher won - the
+    # legacy stage died on sd_mad_probe, a probe the matcher refuses by
+    # design (measured 2026-09-02 on the first flipped legacy run).
+    $explicit = @($flags | Where-Object { $_ -eq "--general-lowering" -or $_ -eq "--legacy-lowering" })
+    [string[]]$pathFlags = if ($NoExtraFlags -or $explicit.Count -gt 0) { @() } else { @($extraFlags) }
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     # Our compiler reports a refusal on stderr; under "Stop" a redirected
     # native stderr line is a terminating error (same trap as the
@@ -819,7 +826,7 @@ if ($ReferenceCompiler) {
             $dGen = Join-Path $refScratch "$name`_general.fpo"
             $dRef = Join-Path $refScratch "$name`_pathref.fpo"
             $null = Compile-Shader $src $dDef @("--legacy-lowering") -Absolute -NoExtraFlags
-            Assert-Deterministic $src $dDef @() -NoExtraFlags -Label "$name (default)"
+            Assert-Deterministic $src $dDef @("--legacy-lowering") -NoExtraFlags -Label "$name (legacy)"
             $null = Compile-Shader $src $dGen @() -Absolute -NoExtraFlags
             Assert-Deterministic $src $dGen @("--general-lowering") -NoExtraFlags -Label "$name (general)"
             if (-not (Compile-Reference $src $dRef)) { throw "path-pairs: reference compile failed or produced no container: $rel" }
