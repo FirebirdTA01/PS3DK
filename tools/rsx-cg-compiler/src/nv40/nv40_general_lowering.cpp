@@ -85,6 +85,7 @@ enum class VOp
     Add,
     Mul,
     Mad,
+    Dp2,
     Dp3,
     Dp4,
     Min,
@@ -800,6 +801,7 @@ private:
                 return 4;
             case VOp::Rsq:
                 return 3;
+            case VOp::Dp2:
             case VOp::Dp3:
                 return 2;
             case VOp::Mul:
@@ -1285,11 +1287,29 @@ private:
             // test_42_dot4 was the only shader in the corpus with one, and
             // it was the last general-path mismatch in the set
             // (t_856689b2).
-            lowerBinary(inst,
-                        std::max(valueWidthOf(inst.operands[0]),
-                                 inst.operands.size() > 1
-                                     ? valueWidthOf(inst.operands[1]) : 0) >= 4
-                            ? VOp::Dp4 : VOp::Dp3);
+            {
+                // ... and a 2-wide dot is DP2, not DP3 over a register
+                // whose third lane nothing wrote (t_a30159bf): the
+                // operands are written with a two-lane mask, so DP3
+                // reads x*x + y*y + whatever the allocator left in z.
+                // The reference emits DP2 here.  Width 1 keeps its old
+                // spelling until someone measures the reference on a
+                // scalar dot; guessing it into this commit would be the
+                // same mistake in the other direction.
+                const int w =
+                    std::max(valueWidthOf(inst.operands[0]),
+                             inst.operands.size() > 1
+                                 ? valueWidthOf(inst.operands[1]) : 0);
+                // FRAGMENT only: NV40's vertex unit has no DP2 opcode,
+                // and vpOpcode's fallthrough is MOV - a silent wrong
+                // answer.  The vertex side of the same stale-lane
+                // question is its own item, unmeasured here.
+                const bool dp2 = (w == 2 &&
+                                  profile_ == GeneralProfile::Fragment);
+                lowerBinary(inst, w >= 4 ? VOp::Dp4
+                                : dp2    ? VOp::Dp2
+                                         : VOp::Dp3);
+            }
             return;
         case IROp::Min:
             lowerBinary(inst, VOp::Min);
@@ -3397,6 +3417,7 @@ private:
         case VOp::Add:
         case VOp::Mul:
         case VOp::Mad:
+        case VOp::Dp2:
         case VOp::Dp3:
         case VOp::Dp4:
         case VOp::Min:
@@ -3429,6 +3450,7 @@ private:
     static int requiredSourceMask(const VInstr& vi)
     {
         switch (vi.op) {
+        case VOp::Dp2: return 0x3;
         case VOp::Dp3: return 0x7;
         case VOp::Dp4: return 0xf;
         case VOp::Rcp:
@@ -3915,6 +3937,7 @@ static uint8_t fpOpcode(VOp op)
     case VOp::DivSqrt: return NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX;
     case VOp::Frc: return NVFX_FP_OP_OPCODE_FRC;
     case VOp::Flr: return NVFX_FP_OP_OPCODE_FLR;
+    case VOp::Dp2: return NVFX_FP_OP_OPCODE_DP2;
     case VOp::Sge: return NVFX_FP_OP_OPCODE_SGE;
     case VOp::Slt: return NVFX_FP_OP_OPCODE_SLT;
     case VOp::Sgt: return NVFX_FP_OP_OPCODE_SGT;

@@ -146,6 +146,8 @@ jobs:
 
       - name: Test rsx-cg-compiler dot width
         run: bash tests/shader-compiler/dot-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler two-component dot width
+        run: bash tests/shader-compiler/dot2-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

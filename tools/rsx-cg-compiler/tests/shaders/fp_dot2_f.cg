@@ -1,0 +1,23 @@
+// A 2-component dot product is DP2, not DP3 (t_a30159bf).
+//
+// The general path chose DP4 for operand width >= 4 and DP3 for everything
+// else, so `dot(v, v)` on a float2 read a THIRD lane that nothing wrote:
+// the multiply before it carries a two-lane write mask, and whatever the
+// allocator left in z went into the sum.  Not reliably wrong, which is
+// worse - the same source is right in one shader and wrong in the next,
+// depending on register assignment.
+//
+// The reference emits DP2 here.  NV40 has the opcode; we simply had no
+// VOp for it.  Width 1 is deliberately NOT part of this fixture: nobody
+// has measured what the reference does with a scalar dot, and guessing it
+// into the same change would be the same mistake in the other direction.
+//
+// Reachable through dot, length, distance and normalize on any float2 -
+// test_57_discard in the corpus computes length(float2), which is why its
+// pixels could not be judged until this landed.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float2 v = c.xy * 8.0;
+    float d = dot(v, v);
+    o = float4(d, 0.0, 0.0, 1.0);
+}
