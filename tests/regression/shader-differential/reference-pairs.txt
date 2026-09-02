@@ -228,3 +228,15 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_merge_f.cg|0|general
 # aborts the stage; the items' 'default compiles it' was not true of these spellings.
 tests/regression/shader-differential/shaders/sd_select_merge.fcg|0|general
 tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
+
+# 2026-09-02 t_7ae60244 (P1, DEFAULT path, shipping): a discard under `&&` or under a
+# nested `if` kills on the LAST comparison seen, not the path condition - the same
+# mechanism as t_79fc6bf7.  Found by the gate-1 tree sweep on the CF-2 tree: the
+# default containers of these two CF-2 fixtures MISMATCH the reference
+# (fp_discard_and_f diff 320, ours 2624 painted vs 2304; fp_discard_nested_f diff
+# 351, ours 3264 vs 3615 - the outer condition dropped).  Curated |general only:
+# the general path's guard is the conjunction of the path conditions (61be582)
+# and must read identical; the default path's disposition is a refusal (claude).
+tools/rsx-cg-compiler/tests/shaders/fp_discard_and_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_discard_nested_f.cg|0|general
+
