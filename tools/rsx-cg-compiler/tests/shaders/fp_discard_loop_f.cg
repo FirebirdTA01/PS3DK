@@ -1,0 +1,22 @@
+// CF-2: a discard inside a DYNAMIC loop must refuse, and this is a
+// DIVERGENCE from the reference rather than a shared refusal.
+//
+// The reference compiles this with real hardware loop instructions -
+// LOOPH / BRKH / ENDLOOP around the comparison and the kill.  Our general
+// path refuses the back-edge (CF-1a) and the default path has no shape
+// for it.  The fixture exists so that refusal is SEEN to fire on a
+// discard-carrying loop, not merely believed.
+//
+// The loop bound must be dynamic.  A constant-trip loop is not a
+// substitute: our frontend fully unrolls one - measured, four discards
+// and four $kill parameters - so it never produces a back-edge and the
+// refusal would never be reached.
+void main(float4 c : TEXCOORD0, uniform float u_n, out float4 o : COLOR)
+{
+    float s = 0.0;
+    for (float i = 0.0; i < u_n; i += 1.0) {
+        s += c.x;
+        if (s > 2.0) discard;
+    }
+    o = float4(s, 0, 0, 1);
+}

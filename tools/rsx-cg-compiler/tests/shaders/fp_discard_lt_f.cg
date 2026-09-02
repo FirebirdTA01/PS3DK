@@ -1,0 +1,13 @@
+// CF-2 (t_91bbd575): the canonical conditional discard.
+//
+// The reference compiles this to exactly three instructions - the varying
+// load, a comparison whose destination is the CONDITION register with
+// cc_update set (no general register written), and KIL testing NE on lane
+// x.  Nine of the twelve CF-2 witnesses are this shape.
+//
+// Measured against the reference before this fixture was written.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    if (c.a < 0.5) discard;
+    o = c;
+}

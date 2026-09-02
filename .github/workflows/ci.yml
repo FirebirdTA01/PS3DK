@@ -109,6 +109,8 @@ jobs:
 
       - name: Test rsx-cg-compiler discard completeness
         run: bash tests/shader-compiler/discard-completeness-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler discard guards
+        run: bash tests/shader-compiler/discard-guard-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler lane inserts
         run: bash tests/shader-compiler/lane-insert-literal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

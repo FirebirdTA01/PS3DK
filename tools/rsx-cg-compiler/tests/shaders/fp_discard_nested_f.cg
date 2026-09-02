@@ -1,0 +1,16 @@
+// CF-2, and the reason the whole design exists: the guard of a discard is
+// the CONJUNCTION OF THE PATH CONDITIONS that reach it, not the last
+// comparison the emitter happened to walk past.
+//
+// The reference compiles this to two comparisons and one multiply into
+// the condition register - the same shape it emits for an explicit
+// `A && B`.  A lowering that recovered the guard positionally would emit
+// only the inner comparison and kill fragments the outer branch never
+// reached.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    if (c.a < 0.5) {
+        if (d.a < 0.5) discard;
+    }
+    o = c;
+}

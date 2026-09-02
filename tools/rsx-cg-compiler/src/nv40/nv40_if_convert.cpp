@@ -577,7 +577,13 @@ bool tryConvertBlock(IRFunction& fn,
         if (!thenBlock->instructions.empty())
         {
             IRInstruction* dInst = thenBlock->instructions[0].get();
-            bool hasDiscard = (dInst && dInst->op == IROp::Discard);
+            // A discard that already carries its guard (CF-2's
+            // materialiseDiscardGuards, general path only) is left alone:
+            // this shape ERASES thenBlock, which would take the guard's
+            // instructions with it, and the guarded form needs no hoist -
+            // it says what it kills without depending on where it sits.
+            bool hasDiscard = (dInst && dInst->op == IROp::Discard &&
+                               dInst->operands.empty());
             // Check for explicit branch, or implicit fallthrough.
             bool hasBranch = false;
             if (thenBlock->instructions.size() >= 2)

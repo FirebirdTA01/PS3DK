@@ -1,0 +1,20 @@
+// CF-2: the comparison opcode comes from the SOURCE OPERATOR, and the
+// operands keep SOURCE ORDER - the reference does not canonicalise either.
+//
+// Six discards, one per operator, so the assertion is on the multiset of
+// opcodes and not on their order: the reference schedules kills freely
+// (it hoists them above the work between them and, in one measured case,
+// emitted the second source discard's comparison first), so an
+// order-sensitive assertion would be stronger than the oracle.
+//
+// One $kill_NNNN container parameter per discard STATEMENT: six here.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    if (c.x <  d.x) discard;
+    if (c.y >  d.y) discard;
+    if (c.z <= d.z) discard;
+    if (c.w >= d.w) discard;
+    if (c.x == d.y) discard;
+    if (c.y != d.z) discard;
+    o = c + d;
+}

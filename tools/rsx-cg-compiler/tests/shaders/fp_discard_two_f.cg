@@ -1,0 +1,16 @@
+// CF-2: two discards, two kills, two container parameters.
+//
+// $kill_NNNN is emitted once per discard STATEMENT, so this shader
+// carries $kill_0000 and $kill_0001.  The assertion counts kills and
+// parameters and does NOT fix their order: the reference hoists kills
+// above the work between them, and in one measured shape emitted the
+// second source discard's comparison first.  Byte-identity on a
+// multi-discard shader is deliberately not a CF-2 goal.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    o = c;
+    if (c.a < 0.5) discard;
+    o = o * d;
+    if (d.a < 0.5) discard;
+    o = o + d;
+}

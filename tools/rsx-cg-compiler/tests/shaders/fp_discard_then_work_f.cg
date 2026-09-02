@@ -7,9 +7,16 @@
 // correctly described the ucode - which was missing a line of the source.
 //
 // Reduced from build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg.
-// The compiler must REFUSE this until the shape is lowered; refusing is what
-// the general path already does for the same shader, and it is the better of
-// the two failures.
+//
+// The requirement flipped twice, as each item said it would.  While the
+// lerp was not a shape either path lowered, a REFUSAL was the required
+// behaviour - compiling meant shipping a shader missing a line of its
+// source.  c157570 lowered it on the default path, and CF-2
+// (t_91bbd575) lowers the discard on the general path, so the
+// requirement now is the strong one on BOTH paths: the shader compiles,
+// the kill is emitted, and the work after it survives.  The reference
+// puts the KIL mid-program and leaves what follows unpredicated - a kill
+// is not a terminator.
 void main(float4 color : TEXCOORD0,
           float4 fog   : TEXCOORD2,
           out float4 oColor : COLOR)

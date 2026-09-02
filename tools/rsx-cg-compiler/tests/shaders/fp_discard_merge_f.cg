@@ -1,0 +1,27 @@
+// CF-2: a discard BELOW an if/else merge.  The guard is the inner
+// comparison ALONE - the two arms of the merge cancel.
+//
+// This is the fixture that chose the design.  The first draft of the CF-2
+// note proposed walking up the unique-predecessor chain and refusing any
+// block with more than one predecessor; measuring showed the reference
+// compiles this shader in six instructions (the merge as a
+// condition-code-predicated MOV, then one comparison and one KIL), so the
+// walk would have turned a natural Cg idiom into a refusal the reference
+// does not have.  The guard set is computed by intersection over the
+// predecessors and verified - the only literals the intersection may drop
+// are one complementary pair from the same branch.
+//
+// RIG: both arms' kills must be able to fire or the row cannot tell
+// "the arms cancelled" from "the then-arm literal was kept".  Under the
+// rig's vertex program, c = TEXCOORD0 and d = COLOR0: the then-arm region
+// is u > 0.42, where the kill fires on c.a < 0.25 (columns 43..63); the
+// else-arm region is u <= 0.42, where it fires on COLOR0.w < 0.25 (rows
+// 46..63).  A lowering that drops the else arm's contribution misses the
+// second band.
+void main(float4 c : TEXCOORD0, float4 d : COLOR0, out float4 o : COLOR)
+{
+    float4 r;
+    if (c.x > 0.42) { r = c; } else { r = d; }
+    if (r.a < 0.25) discard;
+    o = r;
+}

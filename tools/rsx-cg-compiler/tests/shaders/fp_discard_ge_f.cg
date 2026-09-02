@@ -1,0 +1,19 @@
+// CF-2: `>=` alone keeps fp32 where every other comparison demotes to
+// fx12.
+//
+// Measured, three ways (literal right-hand side, varying right-hand side,
+// reversed operands): a lone `<`, `>`, `<=`, `==` or `!=` feeding a kill
+// is emitted at fx12 precision, and a lone `>=` is not.  It is a property
+// of the opcode, not of the operands.  Nobody in this room has a
+// mechanism for it, so it is pinned here rather than explained: a later
+// tidy-up that "normalises" the precision table would otherwise walk the
+// container away from the reference with every test still green.
+//
+// Writing the same predicate as `0.5 <= c.a` DOES get the fx12 form,
+// because the reference keeps the source operator - see the twin fixture
+// fp_discard_ge_rev_f.  The two must NOT compile to the same instruction.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    if (c.a >= 0.5) discard;
+    o = c;
+}

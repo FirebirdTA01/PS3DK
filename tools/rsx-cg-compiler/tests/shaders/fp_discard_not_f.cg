@@ -1,0 +1,15 @@
+// CF-2: a negated guard flips the KIL's condition-code TEST, and does not
+// invert the comparison.
+//
+// The reference emits SGT (not SLE) and predicates the kill on EQ instead
+// of NE.  A lowering that inverted the comparison instead would produce
+// the same pixels for `>` but not for `==` or a NaN operand, and would be
+// a different container - so the assertion is on the opcode AND the test.
+//
+// Second measured effect, asserted here too: a negated LONE comparison
+// loses the fx12 demotion (fp32), while a negated CHAIN keeps it.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    if (!(c.a > 0.5)) discard;
+    o = c;
+}

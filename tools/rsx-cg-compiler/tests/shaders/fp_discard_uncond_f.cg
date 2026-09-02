@@ -1,0 +1,15 @@
+// CF-2: an unconditional discard is not a special encoding.
+//
+// The reference MATERIALISES a true condition - a MOV of the literal 1.0
+// into the condition register with cc_update - and then uses the same
+// KIL (NE.x) as every guarded discard.  There is exactly one KIL
+// spelling.  (The old design note guessed "KIL with condition TR"; it was
+// written before anyone compiled one.)
+//
+// Instructions before the discard are still emitted: the store of `c` to
+// the colour register is there even though nothing survives to read it.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    discard;
+    o = c;
+}

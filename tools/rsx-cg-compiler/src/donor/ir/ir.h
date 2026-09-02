@@ -311,6 +311,13 @@ public:
     int swizzleMask = 0;            // For VecShuffle: encoded swizzle pattern
     int componentIndex = 0;          // For VecExtract/VecInsert
     IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
+    // For Discard: the guard operand is the condition on the path that
+    // REACHES the discard, and this flag says the kill fires where that
+    // condition is FALSE.  The reference folds a negated guard into the
+    // KIL's condition-code test (NE becomes EQ) and leaves the
+    // comparison alone rather than inverting it, so the flag has to
+    // travel with the instruction (CF-2, t_91bbd575).
+    bool guardIsNegated = false;
     std::string targetName;          // For branch targets, function calls
     int semanticIndex = 0;           // For shader I/O operations
     std::string semanticName;        // For shader I/O operations (digit-stripped)

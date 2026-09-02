@@ -2333,6 +2333,45 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             "nv40-fp: discard with no preceding condition");
                         return out;
                     }
+                    // t_79fc6bf7.  This path recovers the guard as "the
+                    // last comparison I walked past" - its block walk
+                    // ignores the terminators - so a discard reached on
+                    // the FALSE arm of a branch was emitted with the
+                    // TRUE arm's polarity and killed exactly the
+                    // fragments that had to survive.  Silently: exit 0,
+                    // a well-formed container, the right input mask.
+                    //
+                    // Refuse rather than teach the matcher a polarity it
+                    // cannot derive.  963018a already made refusal this
+                    // path's answer to a shape it does not recognise,
+                    // the general path lowers the shape correctly from
+                    // the PATH CONDITION (CF-2, t_91bbd575), and the
+                    // matcher is the component the switch retires.
+                    if (inst.parentBlock)
+                    {
+                        for (const auto& bp : entry.blocks)
+                        {
+                            if (!bp) continue;
+                            const IRInstruction* term = bp->getTerminator();
+                            if (!term || term->op != IROp::CondBranch) continue;
+                            if (term->operands.empty() ||
+                                term->operands[0] != lastConditionalId)
+                                continue;
+                            const size_t comma = term->targetName.find(',');
+                            if (comma == std::string::npos) continue;
+                            const std::string falseName =
+                                term->targetName.substr(comma + 1);
+                            if (inst.parentBlock->name != falseName) continue;
+                            out.diagnostics.push_back(
+                                "nv40-fp: discard on the FALSE arm of a "
+                                "branch (block '" + inst.parentBlock->name +
+                                "'): this path recovers the guard from the "
+                                "last comparison, not the path condition, "
+                                "and would kill the surviving fragments "
+                                "(t_79fc6bf7)");
+                            return out;
+                        }
+                    }
                     discardToCond[&inst] = lastConditionalId;
                     break;
                 }

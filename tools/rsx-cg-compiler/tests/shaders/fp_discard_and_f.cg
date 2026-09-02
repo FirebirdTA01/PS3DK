@@ -1,0 +1,12 @@
+// CF-2: `&&` in a guard is a MULTIPLY of the two 0/1 comparisons, and it
+// is the LAST link of the chain that is retargeted to the condition
+// register - not the comparisons, which write ordinary half-register
+// lanes at fp32.
+//
+// Measured shape: two comparisons into H lanes, then MUL to the CC at
+// fx12, then KIL (NE.x).
+void main(float4 c : TEXCOORD0, uniform float u_t, out float4 o : COLOR)
+{
+    if (u_t > 0.0 && c.a < u_t) discard;
+    o = c;
+}

@@ -1,0 +1,22 @@
+// CF-2 / t_79fc6bf7: a discard on the FALSE arm of a branch.
+//
+// The fragment that SURVIVES is the one that satisfied the condition, so
+// the reference emits SGT and predicates the kill on EQ.  The default
+// path recovers the guard as "the last comparison seen" - its block walk
+// ignores the terminators - and emits the same SGT with the kill on NE:
+// it kills exactly the fragments that must survive, silently, with a
+// well-formed container and the right input mask.  Measured against the
+// reference 2026-09-02; no shader in the corpus, the samples or the tests
+// used this shape, which is why nothing caught it.
+//
+// The default path must REFUSE this until the matcher is retired
+// (963018a's rule: an unrecognised shape refuses rather than mis-renders).
+// The general path must compile it with the kill on EQ.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    if (c.a > 0.5) {
+        o = c;
+    } else {
+        discard;
+    }
+}

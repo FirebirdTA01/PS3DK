@@ -1,0 +1,14 @@
+// CF-2: `||` in a guard is a SATURATING ADD of the two 0/1 comparisons.
+// As with `&&` it is the last link that carries the cc_update, at fx12,
+// and the comparisons themselves stay fp32 in half-register lanes.
+//
+// (Our general path lowers `||` as MAX, which is equal on 0/1 and
+// byte-divergent from the reference's saturating add.  That divergence
+// predates CF-2 and moves rows that have nothing to do with discard, so
+// it is its own item; this fixture asserts the CHAIN - two comparisons,
+// one combiner carrying the cc_update, one KIL - not the opcode.)
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    if (c.a < 0.1 || c.r > 0.9) discard;
+    o = c;
+}

@@ -1,0 +1,9 @@
+// CF-2: the twin of fp_discard_ge_f, the same predicate written the other
+// way round.  `0.5 <= c.a` keeps the source operator and so is emitted as
+// SLE at fx12, where `c.a >= 0.5` is SGE at fp32.  Same pixels, different
+// instruction - the reference's behaviour, copied rather than normalised.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    if (0.5 <= c.a) discard;
+    o = c;
+}

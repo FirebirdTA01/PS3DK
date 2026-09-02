@@ -23,6 +23,7 @@
 #include "ir_passes.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
+#include "nv40/nv40_discard_guards.h"
 #include "nv40/nv40_if_convert.h"
 #include "compile_options.h"
 #include "cg_container_fp.h"
@@ -342,7 +343,28 @@ int main(int argc, char** argv)
     }
 
     // Run NV40-specific IR transforms before back-end lowering.
-    // Currently: collapse simple if-else diamonds into Select so the
+    //
+    // CF-2 first (t_91bbd575): give every `discard` the path condition
+    // that reaches it, while the control flow is still intact.  It has to
+    // precede convertSimpleIfElse - that pass's shape 5 hoists a then-arm
+    // discard into the entry block and deletes the CondBranch, after
+    // which the guard is recoverable only by position, which is the
+    // fragility this removes.  General path only: the default path's
+    // matcher is unchanged by design, and a shader that newly compiled
+    // because of this pass would be a verdict change no fence asked for.
+    if (ctx.compileOpts.generalLowering)
+    {
+        nv40::DiscardGuardResult dg = nv40::materialiseDiscardGuards(*irModule);
+        for (const auto& diag : dg.diagnostics)
+            std::fprintf(stderr, "%s\n", diag.c_str());
+        if (!dg.ok)
+        {
+            std::fprintf(stderr, "NV40 discard guards failed: bailing out.\n");
+            return 1;
+        }
+    }
+
+    // Then: collapse simple if-else diamonds into Select so the
     // existing FP emit path handles them without IF/ELSE/ENDIF.
     nv40::convertSimpleIfElse(*irModule);
 

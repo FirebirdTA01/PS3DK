@@ -115,7 +115,16 @@ enum class VOp
     // apart or reordered against another CC writer.  One node makes
     // the sequence atomic by construction, the same shape as the
     // default path's PredCarry (one IR op, several hw instructions).
-    SelPred
+    SelPred,
+    // CF-2 pseudo-op: a fragment kill.  ONE VInstr carrying the
+    // instruction that computes the guard, expanded by the FP emitter
+    // into two hardware instructions - the guard's producer retargeted
+    // to the condition register with cc_update, then KIL testing that
+    // register.  Atomic for exactly SelPred's reason: the ordering pass
+    // tracks temp reads and knows nothing about the condition register,
+    // so a separate CC writer and KIL could be torn apart, or another
+    // CC writer scheduled between them.
+    Kil
 };
 
 enum class VSrcKind
@@ -173,6 +182,13 @@ struct VInstr
     bool stubCoIssuePartner = false;
     bool stubFenceBefore = false;   // FENCTR
     bool stubFenceBrBefore = false; // FENCBR
+    // VOp::Kil only: the operation that computes the guard (fused into
+    // the kill and emitted with cc_update to the condition register),
+    // and whether the kill fires where that guard is FALSE.  The
+    // reference folds a negated guard into the KIL's condition-code test
+    // rather than inverting the comparison.
+    VOp  killFused = VOp::Mov;
+    bool killTestEq = false;
 };
 
 struct VirtualProgram
@@ -446,6 +462,7 @@ private:
     VirtualProgram program_;
     int nextVReg_ = 0;
     std::unordered_map<IRValueID, unsigned> useCount_;
+    std::unordered_map<IRValueID, unsigned> nonTermUseCount_;
     std::unordered_map<IRValueID, int> matrixUniformBase_;
     // Rows the matrix at that base actually OWNS.  A row index is
     // bounded against this, not against 4: `m[3]` on a float3x3 would
@@ -1001,8 +1018,19 @@ private:
             if (!block) continue;
             for (const auto& instPtr : block->instructions) {
                 if (!instPtr) continue;
-                for (IRValueID id : instPtr->operands)
+                const bool terminator =
+                    instPtr->op == IROp::Branch ||
+                    instPtr->op == IROp::CondBranch;
+                for (IRValueID id : instPtr->operands) {
                     ++useCount_[id];
+                    // A flattened program drops the branch terminators,
+                    // so a condition read only by its own brc and by a
+                    // discard has ONE real consumer.  Counting the brc
+                    // would refuse the fusion the reference performs on
+                    // every simple `if (a < b) discard;`.
+                    if (!terminator)
+                        ++nonTermUseCount_[id];
+                }
             }
         }
     }
@@ -1404,6 +1432,9 @@ private:
             return;
         case IROp::StoreOutput:
             lowerStoreOutput(inst);
+            return;
+        case IROp::Discard:
+            lowerDiscard(inst);
             return;
         case IROp::Return:
         case IROp::Comment:
@@ -1902,6 +1933,133 @@ private:
         s.literal = {v, v, v, v};
         s.swizzle = {0, 0, 0, 0};
         return s;
+    }
+
+    // CF-2 (t_91bbd575): a fragment kill.
+    //
+    // The guard arrives as an operand from materialiseDiscardGuards -
+    // the conjunction of the branch conditions on the path that reaches
+    // this discard - and `guardIsNegated` says the kill fires where that
+    // guard is FALSE.  Everything the reference does here was measured
+    // before it was written; the shapes are in the CF-2 note.
+    void lowerDiscard(const IRInstruction& inst)
+    {
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: discard is fragment-only");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        VInstr kil;
+        kil.op = VOp::Kil;
+        kil.dst.none = true;
+        kil.dst.writemask = 0x1;
+        kil.killTestEq = inst.guardIsNegated;
+
+        if (inst.operands.empty()) {
+            // Unconditional.  The reference does NOT encode an
+            // always-kill: it MATERIALISES a true condition (a MOV of
+            // 1.0 into the condition register with cc_update) and then
+            // uses the same KIL.  There is exactly one KIL spelling, so
+            // there is exactly one here too.
+            kil.killFused = VOp::Mov;
+            kil.srcs[0] = floatLit(1.0f);
+            kil.fpPrecisionOverride = NVFX_FP_PRECISION_FX12;
+            program_.instrs.push_back(kil);
+            return;
+        }
+
+        const IRValueID guard = inst.operands[0];
+        const auto vregIt = program_.valueToVReg.find(guard);
+        const auto useIt = nonTermUseCount_.find(guard);
+        const unsigned uses =
+            useIt == nonTermUseCount_.end() ? 0u : useIt->second;
+        const bool soleConsumer = (uses <= 1);
+
+        // Fuse the guard's producer into the kill when it is the last
+        // instruction emitted and nothing else reads its result: the
+        // reference retargets that instruction to the condition register
+        // and never writes the general register at all.
+        bool fused = false;
+        if (!program_.instrs.empty() && vregIt != program_.valueToVReg.end()) {
+            const VInstr& last = program_.instrs.back();
+            const bool fusable =
+                !last.dst.none && !last.dst.output &&
+                last.dst.index == vregIt->second &&
+                last.op != VOp::SelPred && last.op != VOp::Kil &&
+                last.op != VOp::Tex && last.fpScale == 0 &&
+                !last.stubFenceBefore && !last.stubFenceBrBefore;
+            if (fusable && soleConsumer) {
+                kil.killFused = last.op;
+                kil.srcs = last.srcs;
+                kil.sat = last.sat;
+                kil.fpPrecisionOverride =
+                    fusedPrecision(guard, last.op, kil.killTestEq, true);
+                program_.instrs.pop_back();
+                fused = true;
+            }
+        }
+
+        if (!fused) {
+            // Not the last instruction, or read by something else: keep
+            // the guard where it is and move a copy of it into the
+            // condition register.  One instruction longer than the
+            // reference, which reuses the CC in that case - measured,
+            // and deliberately out of CF-2's first slice.
+            VSrc src = resolve(guard);
+            if (src.kind == VSrcKind::None) {
+                program_.diagnostics.push_back(
+                    "nv40-general: discard guard is unresolved");
+                program_.loweringFailed = true;
+                return;
+            }
+            kil.killFused = VOp::Mov;
+            kil.srcs[0] = src;
+            kil.fpPrecisionOverride = NVFX_FP_PRECISION_FX12;
+        }
+
+        program_.instrs.push_back(kil);
+    }
+
+    // Precision of the instruction fused into a kill, as MEASURED - not
+    // as derived, because nobody in this room has a mechanism for the
+    // SGE case and a tidy rule would be a rule the reference does not
+    // follow.  The reference:
+    //
+    //   - demotes a LONE comparison feeding a kill to fx12, when the
+    //     test is NE and the condition register has no other consumer;
+    //   - does NOT demote SGE, ever, in that position;
+    //   - does NOT demote a NEGATED lone comparison (test EQ);
+    //   - DOES keep fx12 for a `&&` / `||` chain link whatever the test,
+    //     because those combiners are fx12 in their own right;
+    //   - keeps fp32 whenever the condition register drives something
+    //     else as well (a predicated write after the kill).
+    //
+    // Everything else keeps the default.  In particular an arbitrary
+    // arithmetic guard is NOT demoted: fx12 is s1.10 and would clamp a
+    // value the shader may legitimately compute outside [-2, 2).
+    int fusedPrecision(IRValueID guard, VOp fusedOp, bool testEq,
+                       bool soleConsumer) const
+    {
+        const auto defIt = defMap_.find(guard);
+        const IROp defOp =
+            defIt == defMap_.end() ? IROp::Nop : defIt->second->op;
+
+        const bool combiner =
+            (defOp == IROp::LogicalAnd || defOp == IROp::LogicalOr) &&
+            (fusedOp == VOp::Mul || fusedOp == VOp::Max ||
+             fusedOp == VOp::Add);
+        if (combiner)
+            return NVFX_FP_PRECISION_FX12;
+
+        const bool comparison =
+            fusedOp == VOp::Slt || fusedOp == VOp::Sgt ||
+            fusedOp == VOp::Sle || fusedOp == VOp::Seq ||
+            fusedOp == VOp::Sne;
+        if (comparison && !testEq && soleConsumer)
+            return NVFX_FP_PRECISION_FX12;
+        return -1;
     }
 
     void lowerLogicalNot(const IRInstruction& inst)
@@ -3447,9 +3605,16 @@ private:
         return isPreclampedFragmentColor(src);
     }
 
+    // A kill carries the instruction that computes its guard inline, so
+    // every rule about operands applies to THAT op, not to VOp::Kil.
+    static VOp effectiveOp(const VInstr& vi)
+    {
+        return vi.op == VOp::Kil ? vi.killFused : vi.op;
+    }
+
     static int requiredSourceMask(const VInstr& vi)
     {
-        switch (vi.op) {
+        switch (effectiveOp(vi)) {
         case VOp::Dp2: return 0x3;
         case VOp::Dp3: return 0x7;
         case VOp::Dp4: return 0xf;
@@ -3511,7 +3676,8 @@ private:
         shaped.reserve(program_.instrs.size());
 
         for (VInstr vi : program_.instrs) {
-            if (!isArithmeticOp(vi.op)) {
+            const VOp effOp = effectiveOp(vi);
+            if (!isArithmeticOp(effOp)) {
                 shaped.push_back(vi);
                 continue;
             }
@@ -3539,7 +3705,7 @@ private:
             // illegal.
             const bool forceFpInputPreload =
                 profile_ == GeneralProfile::Fragment && !inputs.empty() &&
-                (vi.op == VOp::Mad || inputs.size() > 1);
+                (effOp == VOp::Mad || inputs.size() > 1);
             const bool needsInlineConstPreload = inlineConstPositions.size() > 1;
             if (!forceFpInputPreload && !needsInlineConstPreload) {
                 shaped.push_back(vi);
@@ -3565,7 +3731,7 @@ private:
                 if (directInputs.find(src.index) != directInputs.end())
                     continue;
                 if (profile_ == GeneralProfile::Fragment &&
-                    vi.op == VOp::Mad &&
+                    effOp == VOp::Mad &&
                     isHalfPrecisionFragmentInput(src)) {
                     continue;
                 }
@@ -3578,9 +3744,9 @@ private:
                                 isHalfPrecisionFragmentInput(src);
                 program_.vregToFp16[mov.dst.index] = mov.dst.fp16;
                 mov.srcs[0] = src;
-                if (vi.op == VOp::Dp3 && profile_ != GeneralProfile::Fragment)
+                if (effOp == VOp::Dp3 && profile_ != GeneralProfile::Fragment)
                     applyDp3Swizzle(mov.srcs[0]);
-                if (vi.op == VOp::Dp3 && profile_ == GeneralProfile::Fragment &&
+                if (effOp == VOp::Dp3 && profile_ == GeneralProfile::Fragment &&
                     srcIndex == 1) {
                     mov.dst.writemask = 0xb; // the reference compiler uses Rn.xyw for FP DP3 rhs.
                     mov.srcs[0].swizzle = {0, 1, 2, 2};
@@ -3615,9 +3781,9 @@ private:
                 const bool abs = src.abs;
                 src = tempSrc(pending.mov.dst.index);
                 src.fp16 = pending.mov.dst.fp16;
-                if (vi.op == VOp::Dp3 && profile_ != GeneralProfile::Fragment)
+                if (effOp == VOp::Dp3 && profile_ != GeneralProfile::Fragment)
                     applyDp3Swizzle(src);
-                if (vi.op == VOp::Dp3 && profile_ == GeneralProfile::Fragment &&
+                if (effOp == VOp::Dp3 && profile_ == GeneralProfile::Fragment &&
                     pending.srcIndex == 1)
                     src.swizzle = {0, 1, 3, 2};
                 src.neg = neg;
@@ -3937,6 +4103,7 @@ static uint8_t fpOpcode(VOp op)
     case VOp::DivSqrt: return NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX;
     case VOp::Frc: return NVFX_FP_OP_OPCODE_FRC;
     case VOp::Flr: return NVFX_FP_OP_OPCODE_FLR;
+    case VOp::Kil: return NVFX_FP_OP_OPCODE_KIL;
     case VOp::Dp2: return NVFX_FP_OP_OPCODE_DP2;
     case VOp::Sge: return NVFX_FP_OP_OPCODE_SGE;
     case VOp::Slt: return NVFX_FP_OP_OPCODE_SLT;
@@ -4294,6 +4461,58 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                     attrs.texCoordsInputMask |= bit;
                 }
             }
+        }
+        if (vi.op == VOp::Kil) {
+            // CF-2: two hardware instructions from one node.  First the
+            // guard's producer, retargeted to the condition register -
+            // OUT_NONE with the 0x3F sentinel index, so it writes the CC
+            // and no general register - then the KIL testing lane x.
+            //
+            // The KIL's own destination is that same register 63, which
+            // is why a kill can never be mistaken for a write to the
+            // colour output: the rig's `outw` decode reads the
+            // destination field of the same word and sees 63, not 0.
+            struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+            struct nvfx_insn set = nvfx_insn(
+                vi.sat, 0, -1, -1, ccDst, NVFX_FP_MASK_X,
+                nvfxSource(vi.srcs[0]),
+                nvfxSource(vi.srcs[1]),
+                nvfxSource(vi.srcs[2]));
+            set.cc_update = 1;
+            if (vi.fpPrecisionOverride >= 0)
+                set.precision = static_cast<uint8_t>(vi.fpPrecisionOverride);
+            asm_.emit(set, fpOpcode(vi.killFused));
+            for (const VSrc& src : vi.srcs) {
+                if (src.kind != VSrcKind::Uniform &&
+                    src.kind != VSrcKind::Literal)
+                    continue;
+                const uint32_t offset = asm_.currentByteSize();
+                if (src.kind == VSrcKind::Uniform) {
+                    recordFpUniformOffset(
+                        attrs, static_cast<unsigned>(src.index), offset);
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+                } else {
+                    asm_.appendConstBlock(src.literal.data());
+                }
+            }
+            const VSrc noneSrc{};
+            struct nvfx_insn kil = nvfx_insn(
+                0, 0, -1, -1, ccDst,
+                NVFX_FP_MASK_X | NVFX_FP_MASK_Y,
+                nvfxSource(noneSrc), nvfxSource(noneSrc), nvfxSource(noneSrc));
+            kil.precision = 0;
+            // A negated guard flips the TEST, and leaves the comparison
+            // alone - the reference emits SGT with EQ for `!(a > b)`,
+            // never SLE with NE.  The two differ on NaN and on the
+            // container, and the container is what the fence reads.
+            kil.cc_cond = vi.killTestEq ? NVFX_COND_EQ : NVFX_COND_NE;
+            kil.cc_swz[0] = kil.cc_swz[1] = kil.cc_swz[2] = kil.cc_swz[3] = 0;
+            asm_.emit(kil, NVFX_FP_OP_OPCODE_KIL);
+            // One $kill_NNNN container parameter per discard STATEMENT.
+            attrs.pixelKillCount += 1;
+            emittedInstruction = true;
+            continue;
         }
         if (vi.op == VOp::SelPred) {
             // CF-1b: expand the atomic predicated-select node into its
