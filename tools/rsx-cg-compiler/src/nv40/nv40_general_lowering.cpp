@@ -1064,6 +1064,48 @@ private:
                 for (size_t r : readers[key])   // WAR
                     link(r, i);
                 writers[key].push_back(i);
+
+                // REPEATED STORES TO ONE OUTPUT KEEP PROGRAM ORDER
+                // (t_c2582cf1).
+                //
+                // lowerStoreOutput's lane-by-lane branches do not emit a
+                // dst.output instruction: they compose the colour into a
+                // TEMP and pin it to the output's register.  A program
+                // that stores its output more than once therefore has one
+                // pinned vreg PER STORE, all landing on the same physical
+                // slot, and the graph above - keyed on the virtual
+                // register - sees no relation between them at all.  With
+                // nothing ordering them, all of the stores are ready at
+                // once and the tie-break, which prefers the LATEST
+                // instruction in program order, emits them BACKWARDS: the
+                // first store wins because it is written last.  Measured
+                // on fp_output_stored_thrice_f, which painted its FIRST
+                // value where the reference paints its third, kills
+                // agreeing exactly.
+                //
+                // The edge is SUPPLEMENTAL, keyed on the pinned slot in
+                // the output key space, and the per-vreg tracking above is
+                // left exactly as it was: a pinned colour value is still an
+                // ordinary temp with ordinary readers, and replacing its
+                // key would drop the RAW and WAR edges it needs as one.
+                //
+                // Same mask rule as a real output store: two writes that
+                // share no lane commute, which is what lets a colour be
+                // assembled lane by lane without being serialised against
+                // itself.
+                if (!vi.dst.output && vi.dst.outputPin &&
+                    vi.dst.preferredPhys >= 0) {
+                    const int slot = vi.dst.fp16 ? (vi.dst.preferredPhys >> 1)
+                                                 : vi.dst.preferredPhys;
+                    const int pinKey = kOutputKeyBase + slot;
+                    for (size_t w : writers[pinKey]) {
+                        if ((program_.instrs[w].dst.writemask &
+                             vi.dst.writemask) == 0)
+                            continue;
+                        link(w, i);
+                    }
+                    writers[pinKey].push_back(i);
+                }
             }
         }
 
