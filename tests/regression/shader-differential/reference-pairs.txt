@@ -114,3 +114,11 @@ tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|default
 # the numbering fix.  |default: file-scope uniforms on the
 # general path are t_f5f750ff.
 tests/regression/shader-differential/shaders/sd_sampler_order.fcg|0|default
+
+# NAMED REGRESSION for sampler PARAMETERS on the general path (claude
+# 21:44): lowerTex hard-codes texture unit 0, so a two-sampler shader reads
+# the first texture twice.  Per-name images make it visible; sa at
+# TEXCOORD0 and sb at TEXCOORD2 keep the product asymmetric.  |both:
+# default identical, general RED until the tex instruction carries the
+# unit of the sampler it names.
+tests/regression/shader-differential/shaders/sd_sampler_units.fcg|0|both

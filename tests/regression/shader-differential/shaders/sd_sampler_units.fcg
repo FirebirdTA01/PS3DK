@@ -1,0 +1,26 @@
+// shader-differential - NAMED REGRESSION for sampler PARAMETERS on the
+// general path (claude 2026-09-01 21:44): lowerTex sets the texture unit
+// to 0 unconditionally, so every tex2D samples unit 0 and a two-texture
+// shader reads the first texture twice while the container still reports
+// sa = TEX0, sb = TEX1.  One shared image for every sampler paints this
+// correctly by construction; the per-name permuted images do not.
+//
+// Shape: q3_fp_modulate2's tex * tex (the two-sampler form the default
+// matcher accepts), samplers as ordinary main() PARAMETERS - no file-scope
+// anything - with sa at TEXCOORD0 and sb at TEXCOORD2 so the product is
+// asymmetric.  Each name gets its own image (sa = perm FNV(sa) mod 24,
+// sb likewise; the stager prints them).
+//   correct:   sa-image(tc0) * sb-image(tc2)
+//   unit 0 x2: sa-image(tc0) * sa-image(tc2)  - a different picture
+// |both: the default path must stay identical (its units are right); the
+// general path is RED today and green once the tex instruction carries
+// the unit of the sampler it names, refusing when it cannot resolve one.
+void main(
+    float2 tc0 : TEXCOORD0,
+    float2 tc2 : TEXCOORD2,
+    uniform sampler2D sa,
+    uniform sampler2D sb,
+    out float4 oColor : COLOR)
+{
+    oColor = tex2D(sa, tc0) * tex2D(sb, tc2);
+}
