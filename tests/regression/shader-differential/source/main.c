@@ -27,7 +27,14 @@
  *         reference row that judged identical - that row is the
  *         premise that makes the default container an oracle for the
  *         general one; otherwise status path-pair-unoracled, counted
- *         on its own line, neither pass nor fail)
+ *         on its own line, neither pass nor fail) |
+ *         VP ROWS (increment 4, gate 5): control-vp-identical |
+ *         control-vp-mismatch | control-vp-auto | vp-reference |
+ *         vp-path-pair - both paths name VERTEX containers of one
+ *         shader, drawn under the SAME not-under-test coverage FP per
+ *         interpolated channel (see judge_vp_pair); gated like their
+ *         fragment namesakes, with the three VP controls mandatory
+ *         whenever a vp- row exists and judged before it
  * status: identical | mismatch | load-failed-a | load-failed-b |
  *         uniform-missing-a | uniform-missing-b | uniforms-invalid |
  *         textures-invalid | samplers-unvalidated |
@@ -38,7 +45,10 @@
  *         counted as identical) | path-pair-unoracled (the premise row
  *         before a path-pair row did not judge identical) |
  *         unstable-a | unstable-b (that side painted but no two
- *         consecutive readbacks agreed: output varies between draws)
+ *         consecutive readbacks agreed: output varies between draws) |
+ *         vp-controls-invalid | vp-auto-invalid (withheld: a VP control
+ *         failed) | vp-channel-missing (the stager did not provide a
+ *         coverage FP the row needs) | vp-path-pair-unoracled
  *
  * Sensitivity, in every judged row's diagnostic: `levels a=R/G/B/A
  * b=R/G/B/A` = distinct 8-bit values per channel per side, and `sat`
@@ -131,6 +141,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <malloc.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -186,6 +197,15 @@ typedef struct {
 	float pos[2];
 	float uv[2];
 } vertex_t;
+
+/* VP rows bind EVERY attribute index 0..15 with data, not just the ones
+ * a container's input mask names: the mask is the field a compiler can
+ * get wrong (t_a68be5c3), and a rig that bound by it would be blind to
+ * exactly that.  Index 0 is the quad (vertex_t.pos); indices 1..15 read
+ * this buffer, one float4 per vertex per attribute (stride 16, so the
+ * u8 stride field holds), values from attr_lane(). */
+#define ATTR_COUNT 15
+typedef float attr_vertex_t[4];
 
 /* ---- RSX local-memory bump allocator (see render-to-texture) ---- */
 
@@ -333,6 +353,32 @@ static int       position_index;
 static int       texcoord_index;
 static vertex_t *vertex_buffer;
 static u32       vertex_buffer_offset;
+static attr_vertex_t *attr_buffer;        /* [ATTR_COUNT][4 vertices] */
+static u32            attr_buffer_offset;
+
+/* Lane recipe for attribute i (1..15) at quad corner (u, v): LINEAR in
+ * (u, v), so the interpolated value at a pixel centre is the formula
+ * itself.  Built for DISCRIMINATING POWER after the coverage FP's
+ * *0.5+0.5 map and 8-bit quantisation (design review, claude): the
+ * index is the dominant term and every lane shares one (u, v) term, so
+ * the separation between two attributes, or two lanes of one, does not
+ * depend on where in the image you look.  Measured at the 64x64 pixel
+ * centres, in post-map levels: every lane varies by >= 12.6 across the
+ * image; same lane / different index >= 5.7 everywhere; same index /
+ * different lane >= 4.7 everywhere; raw range 0.128..0.992, nothing
+ * saturates.  Different index AND different lane is NOT separated (60
+ * values cannot all sit 4 levels apart in 7 bits); a wrong index is
+ * still seen through the other three lanes.  Re-measure those numbers
+ * whenever this changes (docs/local/shader-vp-pairs-design.md). */
+static void attr_lane(int i, float u, float v, float out[4])
+{
+	float base = 0.20f + 0.045f * (float)i;
+	float g = 0.05f * (u + v) - 0.05f;
+	out[0] = base - 0.0675f + g;
+	out[1] = base - 0.0225f + g + 0.004f * (u - v);
+	out[2] = base + 0.0225f + g - 0.004f * (u - v);
+	out[3] = base + 0.0675f + g;
+}
 
 static u32 *g_readback;
 static u32  g_readback_off;
@@ -880,6 +926,69 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 	}
 }
 
+/* Draw the bound programs into the current RT until two consecutive
+ * painted readbacks agree, then leave the frame in `save`.  Returns 0,
+ * or -6 when the side painted but never repeated a frame (unstable).
+ * Shared by the fragment path (render_side) and the vertex path
+ * (render_vp_side) so both face the identical warm-up policy. */
+static int draw_readback(CellGcmContextData *ctx, u32 rt_off, u32 rt_pitch,
+                         u32 *save, int *warmup_draws)
+{
+	/* Warm-up retries against RPCS3's async shader compiler (see the
+	 * readback rig).  A draw counts as landed only when two CONSECUTIVE
+	 * readbacks are byte-identical AND painted: the interim program the
+	 * emulator hands a never-seen shader on its first draw can paint
+	 * nothing (the common case) or ALMOST everything (measured: 4042
+	 * and 3968 of 4096 on two general-path containers, accepted by the
+	 * previous any-pixel rule and reported as a compiler defect for an
+	 * hour).  A blank interim never qualifies; a real frame costs one
+	 * confirming draw.  A shader that legitimately paints nothing burns
+	 * the budget and is judged from the final image anyway - slow,
+	 * never wrong, and both sides of a pair face the identical policy. */
+	int tries;
+	int have_prev = 0;
+	int stable = 0;
+	int ever_painted = 0;   /* any draw painted, not just the last one */
+	for (tries = 1; tries <= 10; tries++) {
+		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+		wait_rsx_idle(ctx);
+		/* Refilled per readback, parity from the try count: before
+		 * this the fill happened once per side, so a transfer that
+		 * never landed on try N showed try N-1's frame, identical by
+		 * construction, and passed the two-frames rule. */
+		fill_readback(rt_pitch, tries);
+		transfer_rt_to_main(ctx, rt_off, rt_pitch);
+		int painted = painted_pixels(g_readback, rt_pitch);
+		ever_painted |= painted > 0;
+		if (painted > 0 && have_prev &&
+		    memcmp(save, g_readback, (size_t)rt_pitch * RT_H) == 0) {
+			stable = 1;
+			break;
+		}
+		memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
+		have_prev = painted > 0;
+		if (!have_prev)
+			usleep(200000);
+	}
+	*warmup_draws = tries;
+	/* Painted frames that never agreed twice in a row: the shader's
+	 * output varies between draws, which is the signature of reading
+	 * uninitialised state - a lane nobody wrote, a register holding two
+	 * values.  Reported as its own status (unstable-a/b), never folded
+	 * into vacuous or into a plain verdict: it is the most specific
+	 * thing the rig can say about a shader (review question on the
+	 * two-readback warm-up).  A shader that paints nothing burns the
+	 * budget without ever being "painted" and stays on the vacuous path.
+	 * Keyed on whether the side EVER painted, not on its last frame: a
+	 * side that paints, never repeats, and ends the budget on a blank
+	 * frame is unstable, not vacuous (review finding). */
+	if (!stable && ever_painted)
+		return -6;
+
+	memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
+	return 0;
+}
+
 /* ---- one side of a pair: bind, draw (with warm-up), read back ---- */
 
 /* Returns 0 on success; -1 if a uniform in the pair's set has no
@@ -949,7 +1058,12 @@ static int render_side(CellGcmContextData *ctx, void *container,
 		GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
 	wait_rsx_idle(ctx);
 
+	/* The shared VP's literal constants are re-uploaded on every draw:
+	 * a VP row before this one uploaded ITS uniforms into the same
+	 * constant bank, and a fragment row judged against clobbered VP
+	 * literals would be a verdict about the wrong input. */
 	cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
+	cellGcmCgUploadInternalConsts(ctx, vpo);
 	cellGcmSetVertexDataArray(ctx, position_index, 0, sizeof(vertex_t), 2,
 	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
 	                          vertex_buffer_offset + offsetof(vertex_t, pos));
@@ -958,59 +1072,287 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	                          vertex_buffer_offset + offsetof(vertex_t, uv));
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
 
-	/* Warm-up retries against RPCS3's async shader compiler (see the
-	 * readback rig).  A draw counts as landed only when two CONSECUTIVE
-	 * readbacks are byte-identical AND painted: the interim program the
-	 * emulator hands a never-seen shader on its first draw can paint
-	 * nothing (the common case) or ALMOST everything (measured: 4042
-	 * and 3968 of 4096 on two general-path containers, accepted by the
-	 * previous any-pixel rule and reported as a compiler defect for an
-	 * hour).  A blank interim never qualifies; a real frame costs one
-	 * confirming draw.  A shader that legitimately paints nothing burns
-	 * the budget and is judged from the final image anyway - slow,
-	 * never wrong, and both sides of a pair face the identical policy. */
-	int tries;
-	int have_prev = 0;
-	int stable = 0;
-	int ever_painted = 0;   /* any draw painted, not just the last one */
-	for (tries = 1; tries <= 10; tries++) {
-		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
-		wait_rsx_idle(ctx);
-		/* Refilled per readback, parity from the try count: before
-		 * this the fill happened once per side, so a transfer that
-		 * never landed on try N showed try N-1's frame, identical by
-		 * construction, and passed the two-frames rule. */
-		fill_readback(rt_pitch, tries);
-		transfer_rt_to_main(ctx, rt_off, rt_pitch);
-		int painted = painted_pixels(g_readback, rt_pitch);
-		ever_painted |= painted > 0;
-		if (painted > 0 && have_prev &&
-		    memcmp(save, g_readback, (size_t)rt_pitch * RT_H) == 0) {
-			stable = 1;
-			break;
-		}
-		memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
-		have_prev = painted > 0;
-		if (!have_prev)
-			usleep(200000);
-	}
-	*warmup_draws = tries;
-	/* Painted frames that never agreed twice in a row: the shader's
-	 * output varies between draws, which is the signature of reading
-	 * uninitialised state - a lane nobody wrote, a register holding two
-	 * values.  Reported as its own status (unstable-a/b), never folded
-	 * into vacuous or into a plain verdict: it is the most specific
-	 * thing the rig can say about a shader (review question on the
-	 * two-readback warm-up).  A shader that paints nothing burns the
-	 * budget without ever being "painted" and stays on the vacuous path.
-	 * Keyed on whether the side EVER painted, not on its last frame: a
-	 * side that paints, never repeats, and ends the budget on a blank
-	 * frame is unstable, not vacuous (review finding). */
-	if (!stable && ever_painted)
-		return -6;
+	return draw_readback(ctx, rt_off, rt_pitch, save, warmup_draws);
+}
 
-	memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
+
+/* ---- VP rows (increment 4, gate 5): vertex containers judged on pixels ---- */
+
+/* Rows of a matrix uniform type, 0 for a non-matrix.  The bridge's
+ * cellGcmSetVertexProgramParameter uploads rows * 4 floats from the
+ * value array, so the guest hands it a full row-major 4x4 whatever the
+ * declared column count. */
+static unsigned matrix_rows(u32 type)
+{
+	switch (type) {
+	case CG_FLOAT1x1: case CG_FLOAT1x2: case CG_FLOAT1x3: case CG_FLOAT1x4:
+	case CG_HALF1x1:  case CG_HALF1x2:  case CG_HALF1x3:  case CG_HALF1x4:
+		return 1;
+	case CG_FLOAT2x1: case CG_FLOAT2x2: case CG_FLOAT2x3: case CG_FLOAT2x4:
+	case CG_HALF2x1:  case CG_HALF2x2:  case CG_HALF2x3:  case CG_HALF2x4:
+		return 2;
+	case CG_FLOAT3x1: case CG_FLOAT3x2: case CG_FLOAT3x3: case CG_FLOAT3x4:
+	case CG_HALF3x1:  case CG_HALF3x2:  case CG_HALF3x3:  case CG_HALF3x4:
+		return 3;
+	case CG_FLOAT4x1: case CG_FLOAT4x2: case CG_FLOAT4x3: case CG_FLOAT4x4:
+	case CG_HALF4x1:  case CG_HALF4x2:  case CG_HALF4x3:  case CG_HALF4x4:
+		return 4;
+	default:
+		return 0;
+	}
+}
+
+/* Matrix element (r, c) the auto-binder gives a matrix uniform `name`:
+ * diagonal = auto_value(name, 4r + c) + 0.375 (in [0.5, 1)), off-diagonal
+ * = (auto_value(name, 4r + c) - 0.375) / 4 (in [-1/16, 1/16)).  Both are
+ * exact in float32 (auto_value is 0.125 + m / 2^24 with m < 2^23, and
+ * these add or scale it by powers of two within the mantissa), so the
+ * stager's twin bakes the very same numbers (Auto-Matrix).  Near
+ * enough to a scaled identity that mul(mvp, position) keeps the quad
+ * on screen with w > 0.375 everywhere, while every element varies with
+ * the name and the position. */
+static float auto_matrix_element(const char *name, unsigned r, unsigned c)
+{
+	float a = auto_value(name, 4u * r + c);
+	return r == c ? a + 0.375f : (a - 0.375f) * 0.25f;
+}
+
+/* True when `name` is `base[k]` and `base` is a matrix parameter of the
+ * container: such a leaf is one row of a matrix the walk uploads whole.
+ * A float4 ARRAY element (no matrix named `base`) is not one, and keeps
+ * its own synthesised value. */
+static int is_matrix_row_leaf(CGprogram vp, const char *name)
+{
+	const char *br = strchr(name, '[');
+	if (!br || br == name)
+		return 0;
+	char base[96];
+	size_t n = (size_t)(br - name);
+	if (n >= sizeof(base))
+		return 0;
+	memcpy(base, name, n);
+	base[n] = 0;
+	CGparameter parent = cellGcmCgGetNamedParameter(vp, base);
+	if (!parent)
+		return 0;
+	return matrix_rows(cellGcmCgGetParameterType(vp, parent)) > 0;
+}
+
+/* Applies the row's uniform set to a VERTEX container: the staged set
+ * by name, or `auto` synthesised from the parameter names (vectors as
+ * for fragment programs, matrices via auto_matrix_element).  Returns 0;
+ * -1 when a staged uniform names a parameter the container lacks; -2
+ * when the container declares a sampler (vertex textures are out of
+ * scope); -5 when `auto` meets a kind the binder does not synthesise
+ * (int, bool, fixed). */
+static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
+                             const char *uniform_set)
+{
+	if (strcmp(uniform_set, "auto") == 0) {
+		for (CGparameter prm = cellGcmCgGetFirstLeafParameter(vp); prm;
+		     prm = cellGcmCgGetNextLeafParameter(vp, prm)) {
+			if (cellGcmCgGetParameterVariability(vp, prm) != CG_UNIFORM)
+				continue;
+			u32 type = cellGcmCgGetParameterType(vp, prm);
+			if (is_sampler_type(type))
+				return -2;
+			const char *name = cellGcmCgGetParameterName(vp, prm);
+			if (!name)
+				return -5;
+			/* A matrix parameter is listed TWICE by the reference
+			 * compiler: once as the float4x4 and once per row as a
+			 * float4 leaf named m[r] at the row's own register.
+			 * Synthesising the row leaves by their own names would
+			 * overwrite the matrix just uploaded (measured: the first
+			 * control-vp-auto boot painted auto_value("m_auto[r]") where
+			 * the columns should have been).  A row leaf whose base
+			 * name is a matrix parameter is the matrix's business. */
+			if (is_matrix_row_leaf(vp, name))
+				continue;
+			float v[16];
+			unsigned rows = matrix_rows(type);
+			if (rows) {
+				for (unsigned r = 0; r < 4; r++)
+					for (unsigned c = 0; c < 4; c++)
+						v[4 * r + c] = auto_matrix_element(name, r, c);
+			} else {
+				unsigned words;
+				if (type >= CG_FLOAT && type <= CG_FLOAT4)
+					words = type - CG_FLOAT + 1u;
+				else if (type >= CG_HALF && type <= CG_HALF4)
+					words = type - CG_HALF + 1u;
+				else
+					return -5;
+				for (unsigned k = 0; k < 4; k++)
+					v[k] = k < words ? auto_value(name, k) : 0.0f;
+			}
+			cellGcmSetVertexProgramParameter(ctx, prm, v);
+		}
+		return 0;
+	}
+	if (uniformSetIsNone(uniform_set))
+		return 0;
+	for (int i = 0; i < g_nuniforms; i++) {
+		if (strcmp(g_uniforms[i].set, uniform_set) != 0)
+			continue;
+		CGparameter prm = cellGcmCgGetNamedParameter(vp, g_uniforms[i].name);
+		if (!prm)
+			return -1;
+		cellGcmSetVertexProgramParameter(ctx, prm, g_uniforms[i].values);
+	}
 	return 0;
+}
+
+/* Every attribute index bound with data (see attr_buffer). */
+static void bind_all_attributes(CellGcmContextData *ctx)
+{
+	cellGcmSetVertexDataArray(ctx, 0, 0, sizeof(vertex_t), 2,
+	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
+	                          vertex_buffer_offset + offsetof(vertex_t, pos));
+	for (int i = 1; i <= ATTR_COUNT; i++)
+		cellGcmSetVertexDataArray(ctx, (u8)i, 0, sizeof(attr_vertex_t), 4,
+		                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL,
+		                          attr_buffer_offset +
+		                          (u32)(i - 1) * 4u * (u32)sizeof(attr_vertex_t));
+}
+
+/* After a VP row: disable every array the fragment path does not bind,
+ * so a fragment row never draws with a stray attribute enabled. */
+static void unbind_extra_attributes(CellGcmContextData *ctx)
+{
+	for (int i = 0; i <= ATTR_COUNT; i++)
+		if (i != position_index && i != texcoord_index)
+			cellGcmSetVertexDataArray(ctx, (u8)i, 0, 0, 0,
+			                          CELL_GCM_VERTEX_F,
+			                          CELL_GCM_LOCATION_LOCAL, 0);
+}
+
+/* The interpolated channels a VP row can judge, each through a coverage
+ * FP the stager compiled (controls/vpcov_<key>.fpo) that paints that
+ * channel as lane * 0.5 + 0.5 - so a lane in [-1, 1] survives RGBA8 -
+ * and `cov`, which paints 1 and judges WHICH pixels the VP's position
+ * covers.  The key is what the row's diagnostic names. */
+typedef struct {
+	const char *key;
+	const char *semantic[3];   /* semantics that select it (any case) */
+} vp_channel_t;
+
+static const vp_channel_t k_vp_channels[] = {
+	{ "cov",  { NULL, NULL, NULL } },
+	{ "tc0",  { "TEXCOORD0", "TEXCOORD", "TEX0" } },
+	{ "tc1",  { "TEXCOORD1", "TEX1", NULL } },
+	{ "tc2",  { "TEXCOORD2", "TEX2", NULL } },
+	{ "tc3",  { "TEXCOORD3", "TEX3", NULL } },
+	{ "tc4",  { "TEXCOORD4", "TEX4", NULL } },
+	{ "tc5",  { "TEXCOORD5", "TEX5", NULL } },
+	{ "tc6",  { "TEXCOORD6", "TEX6", NULL } },
+	{ "tc7",  { "TEXCOORD7", "TEX7", NULL } },
+	{ "tc8",  { "TEXCOORD8", "TEX8", NULL } },
+	{ "tc9",  { "TEXCOORD9", "TEX9", NULL } },
+	{ "col0", { "COLOR0", "COLOR", "COL0" } },
+	{ "col1", { "COLOR1", "COL1", NULL } },
+	{ "fog",  { "FOG", "FOGC", NULL } },
+};
+#define N_VP_CHANNELS ((int)(sizeof(k_vp_channels) / sizeof(k_vp_channels[0])))
+
+static void *g_vp_cov[16];
+static u32   g_vp_cov_sz[16];
+static int   g_vp_cov_loaded;
+
+static void load_vp_channels(void)
+{
+	if (g_vp_cov_loaded)
+		return;
+	g_vp_cov_loaded = 1;
+	for (int i = 0; i < N_VP_CHANNELS; i++) {
+		char rel[64];
+		snprintf(rel, sizeof(rel), "controls/vpcov_%s.fpo", k_vp_channels[i].key);
+		g_vp_cov[i] = load_container(rel, &g_vp_cov_sz[i]);
+	}
+}
+
+static int channel_of_semantic(const char *sem)
+{
+	if (!sem || !sem[0])
+		return -1;
+	for (int i = 1; i < N_VP_CHANNELS; i++)
+		for (int k = 0; k < 3; k++)
+			if (k_vp_channels[i].semantic[k] &&
+			    strcasecmp(k_vp_channels[i].semantic[k], sem) == 0)
+				return i;
+	return -1;
+}
+
+/* Bit i set for every channel an OUT parameter of the container selects;
+ * semantics no channel serves are appended to `unjudged` (POSITION and
+ * PSIZE are silently accepted: the first is judged by cov, the second is
+ * not interpolated). */
+static u32 channel_mask_of(CGprogram vp, char *unjudged, size_t cap)
+{
+	u32 mask = 1u;   /* cov, always */
+	for (CGparameter prm = cellGcmCgGetFirstLeafParameter(vp); prm;
+	     prm = cellGcmCgGetNextLeafParameter(vp, prm)) {
+		u32 dir = cellGcmCgGetParameterDirection(vp, prm);
+		if (dir != CG_OUT && dir != CG_INOUT)
+			continue;
+		const char *sem = cellGcmCgGetParameterSemantic(vp, prm);
+		int ch = channel_of_semantic(sem);
+		if (ch >= 0) {
+			mask |= 1u << ch;
+			continue;
+		}
+		if (!sem || !sem[0] ||
+		    strcasecmp(sem, "POSITION") == 0 || strcasecmp(sem, "HPOS") == 0 ||
+		    strcasecmp(sem, "PSIZE") == 0 || strcasecmp(sem, "PSIZ") == 0)
+			continue;
+		size_t len = strlen(unjudged);
+		if (len + strlen(sem) + 2 < cap)
+			snprintf(unjudged + len, cap - len, "%s%s", len ? "," : "", sem);
+	}
+	return mask;
+}
+
+/* One side of a VP row: the side's VERTEX container under the channel's
+ * coverage FP, every attribute bound, uniforms applied by name.  Codes
+ * as render_side (-1 uniform missing, -2 sampler, -5 unsupported kind,
+ * -6 unstable), plus -7 when the coverage FP is not staged. */
+static int render_vp_side(CellGcmContextData *ctx, void *vp_container,
+                          int channel, const char *uniform_set,
+                          u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
+                          u32 *save, int *warmup_draws)
+{
+	if (!g_vp_cov[channel])
+		return -7;
+	CGprogram vp = (CGprogram)vp_container;
+	cellGcmCgInitProgram(vp);
+	void *vp_uc = NULL; u32 vp_sz = 0;
+	cellGcmCgGetUCode(vp, &vp_uc, &vp_sz);
+
+	CGprogram fpo = (CGprogram)g_vp_cov[channel];
+	cellGcmCgInitProgram(fpo);
+	void *fp_blob_ucode; u32 fpsize = 0;
+	cellGcmCgGetUCode(fpo, &fp_blob_ucode, &fpsize);
+	void *fp_ucode = local_align(64, fpsize);
+	memcpy(fp_ucode, fp_blob_ucode, fpsize);
+	u32 fp_offset = 0;
+	cellGcmAddressToOffset(fp_ucode, &fp_offset);
+
+	fill_readback(rt_pitch, 0);
+	set_rt_surface(ctx, rt_off, rt_depth_off, rt_pitch, RT_W, RT_H);
+	set_draw_env(ctx, RT_W, RT_H);
+	cellGcmSetClearColor(ctx, GPU_CLEAR_MARK);
+	cellGcmSetClearSurface(ctx,
+		GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
+	wait_rsx_idle(ctx);
+
+	cellGcmSetVertexProgram(ctx, vp, vp_uc);
+	cellGcmCgUploadInternalConsts(ctx, vp);
+	int rc = apply_vp_uniforms(ctx, vp, uniform_set);
+	if (rc != 0)
+		return rc;
+	bind_all_attributes(ctx);
+	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
+	return draw_readback(ctx, rt_off, rt_pitch, save, warmup_draws);
 }
 
 /* ---- artifacts ---- */
@@ -1195,6 +1537,39 @@ static int load_manifest(void)
 			return 0;
 		}
 	}
+	/* VP gate: whenever a vp- row exists, control-vp-identical and
+	 * control-vp-mismatch must exist and precede it (the VP comparator
+	 * is validated by them the way rows 1..2 validate the fragment
+	 * one), and an auto vp row needs control-vp-auto before it. */
+	{
+		int first_vp = -1, first_vp_auto = -1;
+		int ident = -1, mism = -1, vauto = -1;
+		for (int i = 0; i < g_npairs; i++) {
+			const char *role = g_pairs[i].role;
+			if (strcmp(role, "control-vp-identical") == 0) { if (ident < 0) ident = i; }
+			else if (strcmp(role, "control-vp-mismatch") == 0) { if (mism < 0) mism = i; }
+			else if (strcmp(role, "control-vp-auto") == 0) { if (vauto < 0) vauto = i; }
+			else if (strncmp(role, "vp-", 3) == 0) {
+				if (first_vp < 0) first_vp = i;
+				if (first_vp_auto < 0 && strcmp(g_pairs[i].uniform_set, "auto") == 0)
+					first_vp_auto = i;
+			}
+		}
+		if (first_vp >= 0 && (ident < 0 || mism < 0)) {
+			printf("shader-differential: manifest has vp rows but no control-vp-identical/control-vp-mismatch pair - the VP comparator would be unvalidated; refusing\n");
+			return 0;
+		}
+		if (first_vp >= 0 && (ident > first_vp || mism > first_vp)) {
+			printf("shader-differential: manifest line order puts a vp row (index %d) before its comparator controls (indices %d, %d); refusing\n",
+			       first_vp, ident, mism);
+			return 0;
+		}
+		if (first_vp_auto >= 0 && (vauto < 0 || vauto > first_vp_auto)) {
+			printf("shader-differential: manifest has an auto vp row (index %d) without a control-vp-auto row before it (index %d); refusing\n",
+			       first_vp_auto, vauto);
+			return 0;
+		}
+	}
 	return 1;
 }
 
@@ -1216,7 +1591,8 @@ typedef struct {
 	int  diff_pixels;
 	int  total_pixels;
 	long elapsed_ms;
-	char diagnostic[192];
+	int  diff_channels;      /* VP rows: channels that judged mismatch */
+	char diagnostic[448];
 	char artifact[96];
 } sd_result;
 
@@ -1421,6 +1797,219 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	r->elapsed_ms = now_ms() - t0;
 }
 
+
+/* VP row: both VERTEX containers of one shader, judged channel by channel
+ * under the same coverage FP (cov + every channel an OUT parameter of
+ * EITHER side selects; a one-sided declaration is a finding the
+ * diagnostic prints as OUTS-DIFFER with both masks).  One row: status =
+ * the worst channel, counts = the worst channel, `ch=key:diff,...`
+ * names every judged channel, artifacts per mismatching channel. */
+static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
+                          u32 rt_a_off, u32 rt_b_off, u32 rt_depth_off,
+                          u32 rt_pitch, u32 *save_a, u32 *save_b,
+                          sd_result *r)
+{
+	long t0 = now_ms();
+	r->status = "identical";
+	r->max_delta = 0;
+	r->diff_pixels = 0;
+	r->total_pixels = RT_W * RT_H;
+	r->diff_channels = 0;
+	snprintf(r->diagnostic, sizeof(r->diagnostic), "-");
+	snprintf(r->artifact, sizeof(r->artifact), "-");
+	load_vp_channels();
+
+	u32 sz_a = 0, sz_b = 0;
+	void *cont_a = load_container(p->a_path, &sz_a);
+	if (!cont_a) {
+		r->status = "load-failed-a";
+		snprintf(r->diagnostic, sizeof(r->diagnostic), "cannot read %s", p->a_path);
+		r->elapsed_ms = now_ms() - t0;
+		return;
+	}
+	void *cont_b = load_container(p->b_path, &sz_b);
+	if (!cont_b) {
+		free(cont_a);
+		r->status = "load-failed-b";
+		snprintf(r->diagnostic, sizeof(r->diagnostic), "cannot read %s", p->b_path);
+		r->elapsed_ms = now_ms() - t0;
+		return;
+	}
+	cellGcmCgInitProgram((CGprogram)cont_a);
+	cellGcmCgInitProgram((CGprogram)cont_b);
+	char unj_a[64] = "", unj_b[64] = "";
+	u32 mask_a = channel_mask_of((CGprogram)cont_a, unj_a, sizeof(unj_a));
+	u32 mask_b = channel_mask_of((CGprogram)cont_b, unj_b, sizeof(unj_b));
+	u32 mask = mask_a | mask_b;
+
+	/* Cost, from the vertex header: instruction and register counts
+	 * are what the container declares, not a ucode walk. */
+	const CgBinaryProgram *pa = (const CgBinaryProgram *)cont_a;
+	const CgBinaryProgram *pb = (const CgBinaryProgram *)cont_b;
+	const CgBinaryVertexProgram *va =
+		(const CgBinaryVertexProgram *)((const u8 *)pa + pa->program);
+	const CgBinaryVertexProgram *vb =
+		(const CgBinaryVertexProgram *)((const u8 *)pb + pb->program);
+	u32 insn_a = va->instructionCount, insn_b = vb->instructionCount;
+	u32 regs_a = va->registerCount, regs_b = vb->registerCount;
+	u32 inmask_a = va->attributeInputMask, inmask_b = vb->attributeInputMask;
+	u32 params_a = cellGcmCgGetCountParameter((CGprogram)cont_a);
+	u32 params_b = cellGcmCgGetCountParameter((CGprogram)cont_b);
+
+	u32 watermark = g_local_mem_heap;
+	char chlist[160] = "";
+	int worst_pixels = 0, worst_delta = 0, worst_ch = -1;
+	int painted_any = 0;
+	int warm_max_a = 0, warm_max_b = 0;
+	sd_sensitivity sens_a = {{0,0,0,0},0}, sens_b = {{0,0,0,0},0};
+	int failed = 0;
+	for (int ch = 0; ch < N_VP_CHANNELS && !failed; ch++) {
+		if (!(mask & (1u << ch)))
+			continue;
+		int warm_a = 0, warm_b = 0;
+		int ua = render_vp_side(ctx, cont_a, ch, p->uniform_set,
+		                        rt_a_off, rt_depth_off, rt_pitch, save_a, &warm_a);
+		int ub = ua == 0
+			? render_vp_side(ctx, cont_b, ch, p->uniform_set,
+			                 rt_b_off, rt_depth_off, rt_pitch, save_b, &warm_b)
+			: 0;
+		g_local_mem_heap = watermark;
+		if (ua != 0 || ub != 0) {
+			int rc = ua != 0 ? ua : ub;
+			char side = ua != 0 ? 'a' : 'b';
+			switch (rc) {
+			case -1:
+				r->status = side == 'a' ? "uniform-missing-a" : "uniform-missing-b";
+				snprintf(r->diagnostic, sizeof(r->diagnostic),
+				         "set '%s' names a parameter the vertex container lacks", p->uniform_set);
+				break;
+			case -2:
+				r->status = side == 'a' ? "sampler-unsupported-a" : "sampler-unsupported-b";
+				snprintf(r->diagnostic, sizeof(r->diagnostic),
+				         "vertex container declares a sampler (vertex textures are out of scope)");
+				break;
+			case -5:
+				r->status = side == 'a' ? "uniform-unsupported-a" : "uniform-unsupported-b";
+				snprintf(r->diagnostic, sizeof(r->diagnostic),
+				         "vertex container declares a uniform kind the auto-binder does not synthesise");
+				break;
+			case -6:
+				r->status = side == 'a' ? "unstable-a" : "unstable-b";
+				snprintf(r->diagnostic, sizeof(r->diagnostic),
+				         "channel %s: 10 draws, no two consecutive readbacks agreed", k_vp_channels[ch].key);
+				break;
+			case -7:
+				r->status = "vp-channel-missing";
+				snprintf(r->diagnostic, sizeof(r->diagnostic),
+				         "the stager did not provide controls/vpcov_%s.fpo", k_vp_channels[ch].key);
+				break;
+			default:
+				r->status = "internal-error";
+				snprintf(r->diagnostic, sizeof(r->diagnostic),
+				         "render_vp_side returned unmapped code %d on side %c", rc, side);
+				break;
+			}
+			failed = 1;
+			break;
+		}
+		if (warm_a > warm_max_a) warm_max_a = warm_a;
+		if (warm_b > warm_max_b) warm_max_b = warm_b;
+		int painted_a = painted_pixels(save_a, rt_pitch);
+		int painted_b = painted_pixels(save_b, rt_pitch);
+		painted_any |= (painted_a > 0 || painted_b > 0);
+		int diff = 0, delta = 0;
+		for (int i = 0; i < RT_W * RT_H; i++) {
+			u32 a = save_a[i], b = save_b[i];
+			if (a == b)
+				continue;
+			diff++;
+			for (int sh = 0; sh < 32; sh += 8) {
+				int da = (int)((a >> sh) & 0xff) - (int)((b >> sh) & 0xff);
+				if (da < 0) da = -da;
+				if (da > delta) delta = da;
+			}
+		}
+		{
+			size_t len = strlen(chlist);
+			snprintf(chlist + len, sizeof(chlist) - len, "%s%s:%d",
+			         len ? "," : "", k_vp_channels[ch].key, diff);
+		}
+		if (diff > 0) {
+			r->diff_channels++;
+			char nm[96];
+			snprintf(nm, sizeof(nm), "%s.%s", p->name, k_vp_channels[ch].key);
+			dump_artifact(nm, 'a', save_a, rt_pitch * RT_H);
+			dump_artifact(nm, 'b', save_b, rt_pitch * RT_H);
+		}
+		/* The worst channel carries the row's numbers and sensitivity;
+		 * the first channel does while nothing has differed, so a green
+		 * row still reports the levels it agreed on. */
+		if (worst_ch < 0 || diff > worst_pixels) {
+			worst_ch = ch;
+			worst_pixels = diff;
+			worst_delta = delta;
+			measure_sensitivity(save_a, rt_pitch, &sens_a);
+			measure_sensitivity(save_b, rt_pitch, &sens_b);
+		}
+	}
+	unbind_extra_attributes(ctx);
+	cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
+	cellGcmCgUploadInternalConsts(ctx, vpo);
+	free(cont_a);
+	free(cont_b);
+	if (failed) {
+		r->elapsed_ms = now_ms() - t0;
+		return;
+	}
+	if (!painted_any) {
+		r->status = "vacuous";
+		snprintf(r->diagnostic, sizeof(r->diagnostic),
+		         "no pixel painted on either side in any channel (ch=%s)", chlist);
+		r->elapsed_ms = now_ms() - t0;
+		return;
+	}
+	r->diff_pixels = worst_pixels;
+	r->max_delta = worst_delta;
+	if (r->diff_channels > 0) {
+		r->status = "mismatch";
+		snprintf(r->artifact, sizeof(r->artifact), "artifacts/%s.<ch>_{a,b}.raw", p->name);
+	}
+	snprintf(r->diagnostic, sizeof(r->diagnostic),
+	         "ch=%s worst=%s levels a=%d/%d/%d/%d b=%d/%d/%d/%d sat a=%d%% b=%d%%"
+	         "%s%s%s%s%s",
+	         chlist, worst_ch >= 0 ? k_vp_channels[worst_ch].key : "-",
+	         sens_a.levels[0], sens_a.levels[1], sens_a.levels[2], sens_a.levels[3],
+	         sens_b.levels[0], sens_b.levels[1], sens_b.levels[2], sens_b.levels[3],
+	         (sens_a.saturated * 100) / (RT_W * RT_H),
+	         (sens_b.saturated * 100) / (RT_W * RT_H),
+	         mask_a != mask_b ? " OUTS-DIFFER" : "",
+	         unj_a[0] ? " unjudged a=" : "", unj_a,
+	         unj_b[0] ? " unjudged b=" : "", unj_b);
+	{
+		size_t len = strlen(r->diagnostic);
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         " outs a=0x%x b=0x%x inmask a=0x%x b=0x%x",
+		         mask_a, mask_b, inmask_a, inmask_b);
+	}
+	if (warm_max_a > 1 || warm_max_b > 1) {
+		size_t len = strlen(r->diagnostic);
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         " warmup a=%d b=%d", warm_max_a, warm_max_b);
+	}
+	{
+		size_t len = strlen(r->diagnostic);
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         " size a=%u b=%u insn a=%u b=%u regs a=%u b=%u params a=%u b=%u",
+		         sz_a, sz_b, insn_a, insn_b, regs_a, regs_b, params_a, params_b);
+	}
+	r->elapsed_ms = now_ms() - t0;
+}
+
+static int is_vp_role(const char *role)
+{
+	return strncmp(role, "vp-", 3) == 0 || strncmp(role, "control-vp-", 11) == 0;
+}
+
 static void print_row(const sd_pair *p, const sd_result *r)
 {
 	printf("SDIFF|tier=%s|role=%s|shader=%s|compiler=ab|uniform_set=%s|target=%s|status=%s|max_delta=%d|diff_pixels=%d|total_pixels=%d|diagnostic=%s|elapsed_ms=%ld|artifact=%s\n",
@@ -1491,6 +2080,15 @@ int main(int argc, const char **argv)
 	vertex_buffer[3] = (vertex_t){{ 1.0f, -1.0f}, {1.0f, 1.0f}};
 	cellGcmAddressToOffset(vertex_buffer, &vertex_buffer_offset);
 
+	/* VP rows: attributes 1..15, one float4 per vertex each, laid out
+	 * per attribute so every array has stride 16 (attr_lane). */
+	attr_buffer = (attr_vertex_t *)local_align(128, ATTR_COUNT * 4 * sizeof(attr_vertex_t));
+	for (int a = 1; a <= ATTR_COUNT; a++)
+		for (int vtx = 0; vtx < 4; vtx++)
+			attr_lane(a, vertex_buffer[vtx].uv[0], vertex_buffer[vtx].uv[1],
+			          attr_buffer[(a - 1) * 4 + vtx]);
+	cellGcmAddressToOffset(attr_buffer, &attr_buffer_offset);
+
 	cellGcmCgUploadInternalConsts(ctx, vpo);
 
 	if (!init_procedural_texture()) {
@@ -1545,6 +2143,9 @@ int main(int argc, const char **argv)
 	int vacuous = 0;       /* gated rows where neither side painted */
 	int unstable = 0;      /* gated rows where a side never repeated a frame */
 	int unoracled = 0;     /* path-pair rows whose premise row was not identical */
+	int vp_ok = 1;         /* flipped by a failed control-vp-identical/mismatch */
+	int vp_autos_ok = 1;   /* flipped by a failed control-vp-auto */
+	int vp_skipped = 0;    /* vp rows withheld behind a red VP control */
 	const char *prev_role = "";       /* the row before this one, for path-pair */
 	const char *prev_status = "";
 	const char *prev_name = "";
@@ -1642,9 +2243,63 @@ int main(int argc, const char **argv)
 			continue;
 		}
 
-		judge_pair(ctx, p, textures_ok, have_tex_control,
-		           rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
-		           save_a, save_b, &r);
+		/* VP rows behind a red VP control are withheld, the same shape
+		 * as the uniform and texture gates: a comparator that could not
+		 * see a one-lane difference between two vertex programs, or
+		 * whose synthesised matrices disagree with the host's, judges
+		 * nothing about a vertex program. */
+		if (strncmp(p->role, "vp-", 3) == 0 &&
+		    (!vp_ok || (!vp_autos_ok && strcmp(p->uniform_set, "auto") == 0))) {
+			r.status = vp_ok ? "vp-auto-invalid" : "vp-controls-invalid";
+			r.max_delta = 0;
+			r.diff_pixels = 0;
+			r.total_pixels = 0;
+			r.elapsed_ms = 0;
+			snprintf(r.diagnostic, sizeof(r.diagnostic),
+			         vp_ok ? "skipped: control-vp-auto failed"
+			               : "skipped: a VP comparator control failed");
+			snprintf(r.artifact, sizeof(r.artifact), "-");
+			print_row(p, &r);
+			vp_skipped++;
+			prev_role = p->role;
+			prev_status = r.status;
+			prev_name = p->name;
+			prev_a_path = p->a_path;
+			continue;
+		}
+		/* vp-path-pair: the same premise rule as path-pair, against the
+		 * vp-reference row immediately before it. */
+		if (strcmp(p->role, "vp-path-pair") == 0 &&
+		    !(strcmp(prev_role, "vp-reference") == 0 &&
+		      strcmp(prev_status, "identical") == 0 &&
+		      strcmp(prev_a_path, p->a_path) == 0)) {
+			r.status = "vp-path-pair-unoracled";
+			r.max_delta = 0;
+			r.diff_pixels = 0;
+			r.total_pixels = 0;
+			r.elapsed_ms = 0;
+			snprintf(r.diagnostic, sizeof(r.diagnostic),
+			         "premise row before it (%s %s, %s) is not an identical vp-reference row for this default container",
+			         prev_name[0] ? prev_name : "none",
+			         prev_role[0] ? prev_role : "none",
+			         prev_status[0] ? prev_status : "none");
+			snprintf(r.artifact, sizeof(r.artifact), "-");
+			print_row(p, &r);
+			unoracled++;
+			prev_role = p->role;
+			prev_status = r.status;
+			prev_name = p->name;
+			prev_a_path = p->a_path;
+			continue;
+		}
+
+		if (is_vp_role(p->role))
+			judge_vp_pair(ctx, p, rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
+			              save_a, save_b, &r);
+		else
+			judge_pair(ctx, p, textures_ok, have_tex_control,
+			           rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
+			           save_a, save_b, &r);
 		print_row(p, &r);
 		prev_role = p->role;
 		prev_status = r.status;
@@ -1656,6 +2311,42 @@ int main(int argc, const char **argv)
 			 * counted, the same accounting as the uniform skip. */
 			textures_skipped++;
 			continue;
+		}
+
+		if (strcmp(p->role, "control-vp-identical") == 0) {
+			/* One vertex container byte-copied twice under every
+			 * channel it declares: must judge identical. */
+			if (strcmp(r.status, "identical") != 0) {
+				printf("shader-differential: control-vp-identical judged '%s' - a byte-copied vertex pair must be identical; vp rows will not be judged\n",
+				       r.status);
+				vp_ok = 0;
+				failures++;
+			}
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-vp-mismatch") == 0) {
+			/* Two vertex programs differing in ONE output lane: must
+			 * judge mismatch, and in exactly one channel - the
+			 * comparator must localise, not just notice. */
+			if (strcmp(r.status, "mismatch") != 0 || r.diff_channels != 1) {
+				printf("shader-differential: control-vp-mismatch judged '%s' in %d channel(s) - the VP comparator did not see a one-lane difference as one channel; vp rows will not be judged\n",
+				       r.status, r.diff_channels);
+				vp_ok = 0;
+				failures++;
+			}
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-vp-auto") == 0) {
+			/* Synthesised matrix and vector vs the stager's baked twin:
+			 * identical iff auto_matrix_element / auto_value agree with
+			 * the host's copies AND the upload lands row by row. */
+			if (strcmp(r.status, "identical") != 0) {
+				printf("shader-differential: control-vp-auto judged '%s' - synthesised VP uniforms disagree with the host's; auto vp rows will not be judged\n",
+				       r.status);
+				vp_autos_ok = 0;
+				failures++;
+			}
+			goto post_row;
 		}
 
 		if (strcmp(p->role, "control-texture") == 0) {
@@ -1802,9 +2493,9 @@ int main(int argc, const char **argv)
 	free(canary);
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame)\n",
-	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - unoracled - unstable,
-	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, unoracled, unstable);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame), %d vp rows withheld behind a red VP control\n",
+	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - unoracled - unstable - vp_skipped,
+	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, unoracled, unstable, vp_skipped);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:

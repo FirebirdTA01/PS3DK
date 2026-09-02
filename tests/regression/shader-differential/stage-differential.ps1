@@ -75,6 +75,24 @@ param(
     # poisoner blanks every row after it).  Needs the reference compiler.
     [switch]$PathPairCorpus,
     [string]$PathPairCorpusDir = "",
+    # -VpPairs: judge VERTEX programs on pixels (increment 4, gate 5).  Each
+    # .vcg in -VpPairsList (default <rig>/vp-pairs.txt: repo-relative|set|path)
+    # is compiled by OUR compiler on the stage's path and by the reference
+    # (-p sce_vp_rsx both) and staged as a vp-reference row; the guest judges
+    # every output channel the containers declare under coverage FPs
+    # GENERATED here, compiled by our DEFAULT path and asserted byte-identical
+    # to the reference, so the instrument is a proven equal.  The three VP
+    # controls (identical, one-lane mismatch, synthesised-vs-baked uniforms)
+    # are staged whenever any vp row is.  Needs the reference compiler.
+    [switch]$VpPairs,
+    [string]$VpPairsList = "",
+    # -VpCorpus: every *.vcg / *_v.cg under -VpCorpusDir (Windows path;
+    # default = the reference corpus dir) as a vp-reference row under set
+    # auto (set 0 for a file-scope const); a refusal on either side is a
+    # sidecar row (vp-corpus-refused.txt), not an abort; the exclude list
+    # applies by corpus-relative path as for the fragment sweep.
+    [switch]$VpCorpus,
+    [string]$VpCorpusDir = "",
     [string]$Hdd0 = ""           # override dev_hdd0 root (testing)
 )
 
@@ -198,6 +216,23 @@ function Auto-Value([string]$name, [uint32]$k) {
 # whether a given NAME yields distinct components, and a fixture whose
 # channels collide looks like three tests and is one (review request
 # on the lane-extract fixture).  Matrices are listed as not synthesised.
+# Auto-Matrix: the host copy of the guest's auto_matrix_element (main.c).
+# Element (r, c) of a matrix uniform `name` is Auto-Value(name, 4r + c)
+# + 0.375 on the diagonal and (Auto-Value(name, 4r + c) - 0.375) / 4 off
+# it - sums and quarters of a dyadic value, exact in decimal and in
+# float32 alike, so the control-vp-auto twin's literals parse back to
+# the guest's numbers.  Returned row-major, 16 decimals.
+function Auto-Matrix([string]$name) {
+    $m = @()
+    foreach ($r in 0..3) {
+        foreach ($c in 0..3) {
+            [decimal]$a = Auto-Value $name ([uint32](4 * $r + $c))
+            if ($r -eq $c) { $m += ($a + [decimal]0.375) } else { $m += (($a - [decimal]0.375) / [decimal]4) }
+        }
+    }
+    return $m
+}
+
 function Print-AutoValues([string]$srcPath, [string]$label) {
     $text = Get-Content -Raw -LiteralPath $srcPath
     $seen = @{}
@@ -212,7 +247,13 @@ function Print-AutoValues([string]$srcPath, [string]$label) {
         $name = $m.Groups[4].Value
         if ($seen.ContainsKey($name)) { continue }
         $seen[$name] = 1
-        if ($m.Groups[3].Success) { Write-Host "stager: auto $label $name = (matrix: not synthesised, row refuses as uniform-unsupported)"; continue }
+        if ($m.Groups[3].Success) {
+            # Matrices are synthesised for VERTEX containers only (Auto-Matrix);
+            # a fragment row declaring one still refuses as uniform-unsupported.
+            $mm = Auto-Matrix $name
+            Write-Host "stager: auto $label $name = matrix rows [$($mm[0..3] -join ', ')] [$($mm[4..7] -join ', ')] [$($mm[8..11] -join ', ')] [$($mm[12..15] -join ', ')] (vertex rows only; a fragment row refuses it)"
+            continue
+        }
         $w = if ($m.Groups[2].Success) { [int]$m.Groups[2].Value } else { 1 }
         $vals = @(0..($w - 1) | ForEach-Object { Auto-Value $name $_ })
         $distinct = ($vals | Sort-Object -Unique).Count
@@ -261,12 +302,12 @@ function Has-FileScopeConst([string]$srcPath) {
 # the corpus sweep would double its stage time - and a difference ABORTS
 # the stage, since a curated row whose container is not reproducible is
 # not a row.
-function Assert-Deterministic([string]$src, [string]$firstDst, [string[]]$flags, [switch]$NoExtraFlags, [string]$label) {
+function Assert-Deterministic([string]$src, [string]$firstDst, [string[]]$flags, [switch]$NoExtraFlags, [string]$label, [string]$Profile = "sce_fp_rsx") {
     $again = "$firstDst.again"
     # -NoThrow: a second compile that REFUSES where the first succeeded is
     # the most alarming form of nondeterminism, and it must be reported as
     # that, not as the second compile's own empty-container error.
-    if (-not (Compile-Shader $src $again $flags -Absolute -NoThrow -NoExtraFlags:$NoExtraFlags)) {
+    if (-not (Compile-Shader $src $again $flags -Absolute -NoThrow -NoExtraFlags:$NoExtraFlags -Profile $Profile)) {
         throw "NONDETERMINISTIC: $label compiled once and refused once under the same binary (rc=$($script:lastCompileRc)); no verdict about it could mean anything"
     }
     $h1 = (Get-FileHash -Algorithm SHA256 -LiteralPath $firstDst).Hash
@@ -275,7 +316,7 @@ function Assert-Deterministic([string]$src, [string]$firstDst, [string[]]$flags,
     if ($h1 -ne $h2) { throw "NONDETERMINISTIC: $label compiled twice by the same binary gave different containers ($($h1.Substring(0,12)) vs $($h2.Substring(0,12))); no verdict about it could mean anything" }
 }
 
-function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute, [switch]$NoThrow, [switch]$NoExtraFlags) {
+function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$Absolute, [switch]$NoThrow, [switch]$NoExtraFlags, [string]$Profile = "sce_fp_rsx") {
     $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
     # [string[]] on purpose: a one-element array collapses to a String on
     # assignment, and splatting a String splats its CHARACTERS (measured:
@@ -292,11 +333,11 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         # timeout(1) inside WSL: an uncurated corpus shader must not be
         # able to stall the whole stage on a hung compile.
         $global:LASTEXITCODE = -1
-        $null = & wsl -- timeout 30s $WslCompiler @flags @($pathFlags) -p sce_fp_rsx `
+        $null = & wsl -- timeout 30s $WslCompiler @flags @($pathFlags) -p $Profile `
             --emit-container (To-WslPath $dst) (To-WslPath $srcPath) 2>&1
     } else {
         $global:LASTEXITCODE = -1
-        $null = & $Rsxcgc @flags @($pathFlags) -p sce_fp_rsx --emit-container $dst $srcPath 2>&1
+        $null = & $Rsxcgc @flags @($pathFlags) -p $Profile --emit-container $dst $srcPath 2>&1
     }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
@@ -446,12 +487,12 @@ if ($Corpus) {
 # the call operator has its own; measured: a successful reference
 # compile then reports -1).  Returns $true iff a non-empty container
 # exists afterwards.
-function Compile-Reference([string]$src, [string]$dst) {
+function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_fp_rsx") {
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $global:LASTEXITCODE = -1
-    $null = & $ReferenceCompiler -p sce_fp_rsx -o $dst $src 2>&1
+    $null = & $ReferenceCompiler -p $Profile -o $dst $src 2>&1
     $refRc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     $script:lastCompileRc = $refRc
@@ -744,6 +785,220 @@ if ($ReferenceCompiler) {
         $manifest += $pcRows
         Write-Host "stager: path-pair corpus (gate 1): $($pcFiles.Count) shaders, $pcExcl excluded, $pcDefRefused default-refused (out of scope), $pcGenRefused GENERAL-REFUSED (gate failures), $pcRefRefused reference-refused (unoracled), $pcIdentical byte-identical default/general, $pcStaged pairs staged ($pcConstSet0 under set 0 for a file-scope const)"
     }
+}
+
+# ---- VP rows (increment 4, gate 5) ----
+if ($VpPairs -or $VpCorpus) {
+    if (-not $ReferenceCompiler) { throw "-VpPairs / -VpCorpus need the reference compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)" }
+    $vpScratch = Join-Path $env:TEMP "sd-vp-stage"
+    if (Test-Path $vpScratch) { Remove-Item -Recurse -Force $vpScratch }
+    New-Item -ItemType Directory -Force $vpScratch | Out-Null
+
+    # Coverage FPs, one per channel the guest can judge (main.c
+    # k_vp_channels): cov paints 1 (which pixels the VP covers), the rest
+    # paint one interpolated channel as lane * 0.5 + 0.5 so [-1, 1]
+    # survives RGBA8.  Compiled by our DEFAULT path (never the general one,
+    # whatever the stage's path) and asserted byte-identical to the
+    # reference: the instrument is a proven equal, not an assumed one.
+    $vpChannels = @(@{ key = "cov"; src = "void main(out float4 color : COLOR) { color = float4(1.0f, 1.0f, 1.0f, 1.0f); }" })
+    # Spelled (v + 1) * 0.5 with float4 literals, on purpose: the default
+    # path refuses the scalar spelling `v * 0.5f + 0.5f` (rc 1) and
+    # MISCOMPILES `v * float4(0.5..) + float4(0.5..)` - the literal
+    # multiplicand of a fused MAD is emitted as zero (t_a1f43b12, found by
+    # these very rows on 2026-09-02).  ADD-then-MUL has no MAD to fuse and
+    # disassembles as the two instructions it says.  The instrument rows
+    # below are what prove the spelling, whatever it is.
+    $vpOne = "float4(1.0f, 1.0f, 1.0f, 1.0f)"; $vpHalf = "float4(0.5f, 0.5f, 0.5f, 0.5f)"
+    foreach ($n in 0..9) { $vpChannels += @{ key = "tc$n"; src = "void main(float4 v : TEXCOORD$n, out float4 color : COLOR) { color = (v + $vpOne) * $vpHalf; }" } }
+    $vpChannels += @{ key = "col0"; src = "void main(float4 v : COLOR0, out float4 color : COLOR) { color = (v + $vpOne) * $vpHalf; }" }
+    $vpChannels += @{ key = "col1"; src = "void main(float4 v : COLOR1, out float4 color : COLOR) { color = (v + $vpOne) * $vpHalf; }" }
+    $vpChannels += @{ key = "fog";  src = "void main(float v : FOG, out float4 color : COLOR) { color = (float4(v, v, v, 1.0f) + $vpOne) * $vpHalf; }" }
+    # Instrument rows exist only for channels the shared VP (sd_pos_allch)
+    # WRITES - cov, tc0..tc3, col0: a coverage FP reading an interpolator no
+    # VP wrote compares two undefined inputs.  tc4..tc9 and col1 are the
+    # same generated shape with another index and ride on that proof.
+    $vpProvable = @("cov", "tc0", "tc1", "tc2", "tc3", "col0")
+    $vpCovMissing = @(); $vpCovRows = @(); $vpCovIdentical = 0
+    foreach ($c in $vpChannels) {
+        $covSrc = Join-Path $vpScratch "vpcov_$($c.key).fcg"
+        Set-Content -LiteralPath $covSrc -Value @("// GENERATED by stage-differential.ps1 - VP coverage FP for channel $($c.key) (not under test).", $c.src) -Encoding Ascii
+        $covOurs = Join-Path $vpScratch "vpcov_$($c.key)_ours.fpo"
+        $covRef  = Join-Path $vpScratch "vpcov_$($c.key)_ref.fpo"
+        $okOurs = Compile-Shader $covSrc $covOurs @() -Absolute -NoThrow -NoExtraFlags
+        $rcOurs = $script:lastCompileRc
+        $okRef  = Compile-Reference $covSrc $covRef
+        $rcRef  = $script:lastCompileRc
+        if (-not ($okOurs -and $okRef)) {
+            Write-Host "stager: vp coverage FP $($c.key): ours ok=$okOurs rc=$rcOurs container=$(Test-Path -LiteralPath $covOurs); reference ok=$okRef rc=$rcRef"
+            # fog is the one channel whose input semantic either compiler may
+            # refuse; a row declaring it then reports vp-channel-missing by
+            # name rather than the stage aborting.
+            if ($c.key -eq "fog") { $vpCovMissing += $c.key; Write-Host "stager: vp coverage FP $($c.key) not available (ours ok=$okOurs, reference ok=$okRef) - a vp row declaring FOG reports vp-channel-missing"; continue }
+            throw "vp coverage FP $($c.key) failed to compile (ours ok=$okOurs, reference ok=$okRef)"
+        }
+        Copy-Item $covOurs (Join-Path $controls "vpcov_$($c.key).fpo") -Force
+        $hO = (Get-FileHash -Algorithm SHA256 -LiteralPath $covOurs).Hash
+        $hR = (Get-FileHash -Algorithm SHA256 -LiteralPath $covRef).Hash
+        if ($hO -eq $hR) { $vpCovIdentical++; continue }
+        # Not byte-identical (measured: even `color = 1` differs from the
+        # reference in container metadata): the instrument is then judged
+        # on PIXELS as an ordinary reference row, ours vs the reference's
+        # container of the same coverage FP under the shared VP, before any
+        # vp row - a mismatch fails the run, as an instrument that paints
+        # differently from the reference must.
+        if ($c.key -notin $vpProvable) { continue }
+        Copy-Item $covRef (Join-Path $controls "vpcov_$($c.key)_ref.fpo") -Force
+        $vpCovRows += "B|reference|vpcov_$($c.key)@instrument|controls/vpcov_$($c.key).fpo|controls/vpcov_$($c.key)_ref.fpo|0"
+    }
+    $manifest += $vpCovRows
+    Write-Host "stager: vp coverage FPs staged ($($vpChannels.Count - $vpCovMissing.Count) of $($vpChannels.Count): $vpCovIdentical byte-identical to the reference, $($vpCovRows.Count) judged on pixels as reference rows under the shared VP)"
+
+    # VP controls, compiled on the stage's path like the fragment controls.
+    # control-vp-identical: one container byte-copied.  control-vp-mismatch:
+    # sd_vp_ctrl_b differs from sd_vp_ctrl_a in one lane of TEXCOORD1, so the
+    # guest must see a mismatch in channel tc1 and nowhere else.
+    # control-vp-auto: sd_vp_auto_ctrl writes v_auto and the columns of
+    # m_auto to channels; the twin GENERATED here bakes the same 20 numbers.
+    Compile-Shader "sd_vp_ctrl_a.vcg" (Join-Path $controls "vp_ident_a.vpo") @() -Profile sce_vp_rsx
+    Copy-Item (Join-Path $controls "vp_ident_a.vpo") (Join-Path $controls "vp_ident_b.vpo") -Force
+    Compile-Shader "sd_vp_ctrl_b.vcg" (Join-Path $controls "vp_mismatch_b.vpo") @() -Profile sce_vp_rsx
+    # The auto control and its twin are REFERENCE-compiled, both sides: a
+    # rig control proves the guest's synthesis and upload against the
+    # host's prediction, and must not rest on the compiler under test (the
+    # first version compiled both on our general path, and the row went red
+    # on two of OUR defects - t_a1f43b12's sibling in the VP pool - rather
+    # than on anything the control measures).  Our compiler's handling of
+    # the same source is the curated vp-reference row sd_vp_auto_ctrl.
+    if (-not (Compile-Reference (Join-Path $here "shaders\sd_vp_auto_ctrl.vcg") (Join-Path $controls "vp_auto_ctrl.vpo") -Profile sce_vp_rsx)) { throw "reference compile of sd_vp_auto_ctrl.vcg failed" }
+    $vAuto = @(0, 1, 2, 3) | ForEach-Object { Auto-Value "v_auto" $_ }
+    $mAuto = Auto-Matrix "m_auto"
+    $vpCol = @()
+    foreach ($cc in 0..3) { $vpCol += ,@(0..3 | ForEach-Object { $mAuto[4 * $_ + $cc] }) }
+    $vpTwin = @(
+        "// GENERATED by stage-differential.ps1 - control-vp-auto twin of sd_vp_auto_ctrl.vcg.",
+        "// Literals: Auto-Value(""v_auto"", 0..3) and the COLUMNS of Auto-Matrix(""m_auto""), exact decimals of float32 values.",
+        "void main(float2 in_position : POSITION, out float4 out_position : POSITION,",
+        "          out float4 out_texcoord0 : TEXCOORD0, out float4 out_texcoord1 : TEXCOORD1,",
+        "          out float4 out_texcoord2 : TEXCOORD2, out float4 out_texcoord3 : TEXCOORD3,",
+        "          out float4 out_color : COLOR0)",
+        "{",
+        "    out_position  = float4(in_position.x, in_position.y, 0.0f, 1.0f);",
+        "    out_texcoord0 = float4($($vAuto[0])f, $($vAuto[1])f, $($vAuto[2])f, $($vAuto[3])f);",
+        "    out_texcoord1 = float4($($vpCol[0][0])f, $($vpCol[0][1])f, $($vpCol[0][2])f, $($vpCol[0][3])f);",
+        "    out_texcoord2 = float4($($vpCol[1][0])f, $($vpCol[1][1])f, $($vpCol[1][2])f, $($vpCol[1][3])f);",
+        "    out_texcoord3 = float4($($vpCol[2][0])f, $($vpCol[2][1])f, $($vpCol[2][2])f, $($vpCol[2][3])f);",
+        "    out_color     = float4($($vpCol[3][0])f, $($vpCol[3][1])f, $($vpCol[3][2])f, $($vpCol[3][3])f);",
+        "}"
+    )
+    $vpTwinPath = Join-Path $vpScratch "sd_vp_auto_baked.vcg"
+    Set-Content -LiteralPath $vpTwinPath -Value ($vpTwin -join "`n") -Encoding Ascii
+    Write-Host "stager: control-vp-auto values for v_auto = $($vAuto -join ', '); m_auto rows [$($mAuto[0..3] -join ', ')] [$($mAuto[4..7] -join ', ')] [$($mAuto[8..11] -join ', ')] [$($mAuto[12..15] -join ', ')]"
+    if (-not (Compile-Reference $vpTwinPath (Join-Path $controls "vp_auto_baked.vpo") -Profile sce_vp_rsx)) { throw "reference compile of the control-vp-auto twin failed" }
+    $manifest += @(
+        "B|control-vp-identical|vp_ident|controls/vp_ident_a.vpo|controls/vp_ident_b.vpo|0",
+        "B|control-vp-mismatch|vp_mismatch|controls/vp_ident_a.vpo|controls/vp_mismatch_b.vpo|0",
+        "B|control-vp-auto|vp_auto_apply|controls/vp_auto_ctrl.vpo|controls/vp_auto_baked.vpo|auto"
+    )
+
+    $vpDst = Join-Path $root "vp"
+    New-Item -ItemType Directory -Force $vpDst | Out-Null
+    $vpSeen = @{}
+    $vpRows = @()
+
+    if ($VpPairs) {
+        if (-not $VpPairsList) { $VpPairsList = Join-Path $here "vp-pairs.txt" }
+        $vpLines = @(Get-Content $VpPairsList | Where-Object { $_ -and -not $_.StartsWith("#") })
+        if ($vpLines.Count -eq 0) { throw "vp-pairs list is empty: $VpPairsList" }
+        $vpIdentical = 0; $vpSkippedPath = 0
+        foreach ($line in $vpLines) {
+            $fields = $line.Split("|")
+            $rel = $fields[0].Trim()
+            $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
+            if (-not (Row-AppliesToPath $fields 2)) { $vpSkippedPath++; continue }
+            $src = Join-Path $repoRoot $rel
+            if (-not (Test-Path $src)) { throw "vp-pairs: shader not found: $rel" }
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
+            if ($vpSeen.ContainsKey($name)) {
+                $md5 = [System.Security.Cryptography.MD5]::Create()
+                $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
+                $name = "$name" + "_" + $hex.Substring(0, 6)
+            }
+            $vpSeen[$name] = 1
+            if ($set -eq "auto") { Print-AutoValues $src $name }
+            $ours = Join-Path $vpScratch ("$name" + "_ours.vpo")
+            $ref  = Join-Path $vpScratch ("$name" + "_ref.vpo")
+            $null = Compile-Shader $src $ours @() -Absolute -Profile sce_vp_rsx
+            Assert-Deterministic $src $ours @() -Label $name -Profile sce_vp_rsx
+            if (-not (Compile-Reference $src $ref -Profile sce_vp_rsx)) { throw "vp-pairs: reference compile failed or produced no container: $rel" }
+            $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
+            $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
+            if ($hOurs -eq $hRef) { $vpIdentical++; Write-Host "stager: $rel vertex container byte-identical to reference -- not staged"; continue }
+            Copy-Item $ours (Join-Path $vpDst ("$name" + "_ours.vpo")) -Force
+            Copy-Item $ref  (Join-Path $vpDst ("$name" + "_ref.vpo")) -Force
+            $vpRows += "B|vp-reference|$name|vp/$name" + "_ours.vpo|vp/$name" + "_ref.vpo|$set"
+        }
+        Write-Host "stager: vp pairs: $($vpRows.Count) staged, $vpIdentical byte-identical skipped, $vpSkippedPath not for the $activePath path"
+    }
+
+    if ($VpCorpus) {
+        if (-not $VpCorpusDir) {
+            $VpCorpusDir = if ($ReferenceCorpusDir) { $ReferenceCorpusDir } else { Join-Path $repoRoot "build\shader-corpus" }
+        }
+        if (-not (Test-Path -LiteralPath $VpCorpusDir -PathType Container)) { throw "vp corpus root not a directory: $VpCorpusDir" }
+        $vcRoot = (Resolve-Path -LiteralPath $VpCorpusDir).Path.TrimEnd('\')
+        $vcFiles = @(Get-ChildItem -LiteralPath $vcRoot -Recurse -File |
+            Where-Object { $_.Name -like '*.vcg' -or $_.Name -like '*_v.cg' } |
+            Where-Object {
+                $r = $_.FullName.Substring($vcRoot.Length + 1).Replace('\', '/')
+                -not ($r.StartsWith('build/') -or $r.Contains('/_work/') -or $r.StartsWith('_work/'))
+            } | Sort-Object FullName)
+        if ($vcFiles.Count -eq 0) { throw "vp corpus is empty: $vcRoot" }
+        $vcExcludeFile = if ($ReferenceCorpusExclude) { $ReferenceCorpusExclude } else { Join-Path $here "reference-corpus-exclude.txt" }
+        $vcExcluded = @{}
+        if (Test-Path -LiteralPath $vcExcludeFile -PathType Leaf) {
+            foreach ($line in (Get-Content $vcExcludeFile | Where-Object { $_ -and -not $_.StartsWith("#") })) {
+                $ef = $line.Split("|")
+                if (Row-AppliesToPath $ef 2) { $vcExcluded[$ef[0].Trim()] = $line }
+            }
+        }
+        $vcRefusedPath = Join-Path $root "vp-corpus-refused.txt"
+        $vcRefusedRows = @("# shader-differential vp-corpus refusals -- generated by stage-differential.ps1", "# fields: name|side|corpus-relative path|rc")
+        $vcStart = $vpRows.Count; $vcIdentical = 0; $vcRefusedOurs = 0; $vcRefusedRef = 0; $vcExcl = 0; $vcConstSet0 = 0
+        foreach ($f in $vcFiles) {
+            $rel = $f.FullName.Substring($vcRoot.Length + 1).Replace('\', '/')
+            if ($vcExcluded.ContainsKey($rel)) { $vcExcl++; Write-Host "stager: vp corpus excluded $rel ($($vcExcluded[$rel]))"; continue }
+            $name = $f.Name
+            if ($name.EndsWith('.cg')) { $name = $name.Substring(0, $name.Length - 3) }
+            if ($name.EndsWith('.vcg')) { $name = $name.Substring(0, $name.Length - 4) }
+            if ($vpSeen.ContainsKey($name)) {
+                $md5 = [System.Security.Cryptography.MD5]::Create()
+                $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
+                $name = "$name" + "_" + $hex.Substring(0, 6)
+            }
+            $vpSeen[$name] = 1
+            $ours = Join-Path $vpScratch ("$name" + "_ours.vpo")
+            $ref  = Join-Path $vpScratch ("$name" + "_ref.vpo")
+            $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow -Profile sce_vp_rsx
+            $rcOurs = $script:lastCompileRc
+            $okRef  = Compile-Reference $f.FullName $ref -Profile sce_vp_rsx
+            $rcRef  = $script:lastCompileRc
+            if (-not $okOurs) { $vcRefusedOurs++; $vcRefusedRows += "$name|ours|$rel|$rcOurs" }
+            if (-not $okRef)  { $vcRefusedRef++;  $vcRefusedRows += "$name|reference|$rel|$rcRef" }
+            if (-not ($okOurs -and $okRef)) { continue }
+            $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
+            $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
+            if ($hOurs -eq $hRef) { $vcIdentical++; continue }
+            $vcSet = "auto"
+            if (Has-FileScopeConst $f.FullName) { $vcSet = "0"; $vcConstSet0++ }
+            Copy-Item $ours (Join-Path $vpDst ("$name" + "_ours.vpo")) -Force
+            Copy-Item $ref  (Join-Path $vpDst ("$name" + "_ref.vpo")) -Force
+            $vpRows += "B|vp-reference|$name|vp/$name" + "_ours.vpo|vp/$name" + "_ref.vpo|$vcSet"
+        }
+        Set-Content -LiteralPath $vcRefusedPath -Value ($vcRefusedRows -join "`n") -Encoding Ascii
+        if ((($vpRows.Count - $vcStart) + $vcIdentical + $vcRefusedOurs + $vcRefusedRef) -eq 0) { throw "vp corpus sweep compiled nothing" }
+        Write-Host "stager: vp corpus: $($vcFiles.Count) vertex shaders, $($vpRows.Count - $vcStart) pairs staged, $vcIdentical byte-identical skipped, ours refused $vcRefusedOurs, reference refused $vcRefusedRef, $vcExcl excluded, $vcConstSet0 under set 0 (sidecar: vp-corpus-refused.txt)"
+    }
+    $manifest += $vpRows
 }
 
 Set-Content -LiteralPath (Join-Path $root "manifest.txt") -Value ($manifest -join "`n") -Encoding Ascii

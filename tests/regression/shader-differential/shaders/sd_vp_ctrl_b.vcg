@@ -1,0 +1,21 @@
+// shader-differential — control-vp-mismatch side B (VP rows, increment 4).
+//
+// sd_vp_ctrl_a.vcg with ONE lane changed: TEXCOORD1.y is
+// in_texcoord.x * 0.5 + 0.35 here, 0.25 there - a 0.1 shift, 12 levels
+// after the coverage FP's *0.5+0.5 map, on every pixel.  TEXCOORD0 and
+// COLOR0 are byte-for-byte the same computation, so the row must judge
+// mismatch in channel tc1 and in no other.
+
+void main(
+    float2 in_position       : POSITION,
+    float4 in_texcoord       : TEXCOORD0,
+    out float4 out_position  : POSITION,
+    out float4 out_texcoord0 : TEXCOORD0,
+    out float4 out_texcoord1 : TEXCOORD1,
+    out float4 out_color     : COLOR0)
+{
+    out_position  = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    out_texcoord0 = in_texcoord;
+    out_texcoord1 = float4(in_texcoord.y, in_texcoord.x * 0.5f + 0.35f, in_texcoord.z, in_texcoord.w);
+    out_color     = float4(in_texcoord.w, in_texcoord.z, in_texcoord.y, in_texcoord.x);
+}

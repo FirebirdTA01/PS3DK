@@ -1,0 +1,12 @@
+# shader-differential: curated VERTEX programs judged against the reference
+# on pixels (increment 4, gate 5).  fields: repo-relative .vcg|uniform_set|path
+# (default | general | both; omitted = both).  Each is compiled by OUR
+# compiler on the stage's path and by the reference; a byte-identical pair
+# is counted and not staged; a refusal on either side aborts (curated).
+# Every declared output channel is judged under the coverage FPs; see
+# docs/local/shader-vp-pairs-design.md for the row protocol.
+tests/regression/shader-differential/shaders/sd_pos_allch.vcg|auto|both
+tests/regression/shader-differential/shaders/sd_vp_ctrl_a.vcg|0|both
+tests/regression/shader-differential/shaders/sd_vp_auto_ctrl.vcg|auto|general
+tests/regression/shader-readback/shaders/rb_pos_uv.vcg|0|both
+tests/regression/shader-readback/shaders/rb_xform.vcg|auto|both

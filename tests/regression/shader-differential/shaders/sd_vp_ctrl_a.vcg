@@ -1,0 +1,26 @@
+// shader-differential — control-vp-identical side A (VP rows, increment 4).
+//
+// A small vertex program with three interpolated outputs, each a
+// different linear function of the quad's (u, v).  Staged twice as a
+// byte copy for control-vp-identical (must judge identical in every
+// declared channel), and as side A of control-vp-mismatch against
+// sd_vp_ctrl_b.vcg, which differs in ONE lane of TEXCOORD1 (must judge
+// mismatch in exactly that channel: the comparator has to localise).
+//
+// In a VP row every attribute index carries data (main.c attr_lane), so
+// in_texcoord here reads attribute 8's recipe, not (u, v); the values
+// still vary across the image, which is all these controls need.
+
+void main(
+    float2 in_position       : POSITION,
+    float4 in_texcoord       : TEXCOORD0,
+    out float4 out_position  : POSITION,
+    out float4 out_texcoord0 : TEXCOORD0,
+    out float4 out_texcoord1 : TEXCOORD1,
+    out float4 out_color     : COLOR0)
+{
+    out_position  = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    out_texcoord0 = in_texcoord;
+    out_texcoord1 = float4(in_texcoord.y, in_texcoord.x * 0.5f + 0.25f, in_texcoord.z, in_texcoord.w);
+    out_color     = float4(in_texcoord.w, in_texcoord.z, in_texcoord.y, in_texcoord.x);
+}
