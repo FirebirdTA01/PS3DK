@@ -1546,6 +1546,12 @@ private:
         case IROp::Mod:
             lowerMod(inst);
             return;
+        case IROp::FloatToHalf:
+            lowerPrecisionCast(inst, true);
+            return;
+        case IROp::HalfToFloat:
+            lowerPrecisionCast(inst, false);
+            return;
         case IROp::Select:
             lowerSelect(inst);
             return;
@@ -2004,6 +2010,38 @@ private:
         program_.instrs = std::move(rewritten);
         program_.valueToVReg[inst.result] = powReg;
         return true;
+    }
+
+    // float -> half and half -> float.  NV40 has no conversion opcode:
+    // the conversion IS the register file the value lands in, so both are
+    // a MOV whose destination is an H or an R register, and the precision
+    // of every later instruction follows from its operands.  MEASURED on
+    // the reference compiling th06_mod, which never emits a conversion at
+    // all - it writes `MOVH H0, f[TEX2]` and then reads H0.w in a MADH,
+    // so the ftoh in the IR is absorbed by the register the value was
+    // already loaded into.
+    //
+    // Ours emits the MOV.  That is one instruction more than the
+    // reference wherever the source is already in the right file, and it
+    // is the honest first slice: the fold is a peephole over this, not a
+    // different lowering (t_b8bb521f).
+    void lowerPrecisionCast(const IRInstruction& inst, bool toHalf)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: half precision is fragment-only");
+            program_.loweringFailed = true;
+            return;
+        }
+        VInstr vi;
+        vi.op = VOp::Mov;
+        vi.dst.index = define(inst.result);
+        vi.dst.writemask = componentMask(inst.resultType);
+        vi.dst.fp16 = toHalf;
+        program_.vregToFp16[vi.dst.index] = toHalf;
+        vi.srcs[0] = resolve(inst.operands[0]);
+        program_.instrs.push_back(vi);
     }
 
     void lowerUnary(const IRInstruction& inst, VOp op, bool sat)

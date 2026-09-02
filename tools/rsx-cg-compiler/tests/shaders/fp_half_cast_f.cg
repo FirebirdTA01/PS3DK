@@ -1,0 +1,31 @@
+// A float-to-half conversion must lower (t_b8bb521f).
+//
+// NV40 has NO conversion opcode.  The conversion IS the register file the
+// value lands in: writing an H register converts, and every later
+// instruction's precision follows from its operands.  So `ftoh` is a MOV
+// with an fp16 destination, and `htof` a MOV with an fp32 one.
+//
+// Measured on the reference compiling this shader - it emits no
+// conversion at all, because the values are already in H registers:
+//
+//   MOVH H0, f[TEX2];  MOVH H1, f[TEX0];
+//   ADDH H1.xyz, -H0, H1;  FENCBR;  MADH R0.xyz, H1, H0.w, H0;
+//   MOVH R0.w, H1;
+//
+// Reduced from th06_mod.fcg, which refused on the general path with
+// "unsupported IR op ftoh" and was one of the two discard witnesses no
+// path compiled - the refusal had nothing to do with its discard.
+//
+// KNOWN DIVERGENCE, stated because the fixture does not assert it away:
+// we lower the CASTS and do not yet propagate half-ness through the
+// arithmetic, so our ucode computes in fp32 where the reference computes
+// in fp16.  The values agree; the intermediate rounding is the
+// reference's and not ours.  Propagating the type is a separate change
+// and the rig's pixels are what will say whether it is observable.
+void main(float4 color : TEXCOORD0, float4 fog : TEXCOORD2, out float4 o : COLOR)
+{
+    half4 c = half4(color);
+    half3 f = half3(fog.xyz);
+    c.xyz = f + (c.xyz - f) * half(fog.w);
+    o = float4(c);
+}
