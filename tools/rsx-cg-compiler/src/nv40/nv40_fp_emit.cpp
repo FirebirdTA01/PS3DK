@@ -11571,9 +11571,51 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     }
                 }
 
-                // Refuses when an override scalar is not a float literal
-                // (t_72810bd7's post-discard lerp is that shape); a
-                // refusal is the honest failure, not a dropped line.
+                // Overrides that are the LANES OF ONE VECTOR - `c.xyz =
+                // <some vec3>` reaching the store as an extract/insert
+                // chain - are the same program as `float4(<vec3>, c.w)`,
+                // and the reference compiles the two spellings to
+                // byte-identical ucode.  Emit the vector into the lanes it
+                // covers with the generic lowering rather than refusing,
+                // which is what the constructor spelling has always done
+                // (t_72810bd7).
+                //
+                // Lane-preserving only: the extract's lane must be the lane
+                // it is written to.  `c.x = v.z` is a different program and
+                // stays with the literal-only path below.
+                {
+                    IRValueID vecId = 0;
+                    uint8_t   coveredMask = 0;
+                    bool      lanesOfOneVec = !laneOverrides.empty();
+                    for (const auto& lo : laneOverrides)
+                    {
+                        auto seIt = valueToScalarExtract.find(lo.scalarId);
+                        if (seIt == valueToScalarExtract.end() ||
+                            seIt->second.lane != lo.lane)
+                        {
+                            lanesOfOneVec = false;
+                            break;
+                        }
+                        if (vecId == 0) vecId = seIt->second.baseId;
+                        else if (vecId != seIt->second.baseId)
+                        {
+                            lanesOfOneVec = false;
+                            break;
+                        }
+                        coveredMask |= static_cast<uint8_t>(1u << lo.lane);
+                    }
+                    if (lanesOfOneVec && vecId != 0 &&
+                        emitGenericValueToDest(vecId, dstReg, coveredMask,
+                                               dstPrecision, saturate))
+                    {
+                        emittedSomething = true;
+                        break;
+                    }
+                }
+
+                // Refuses when an override scalar is neither a float literal
+                // nor a lane of one vector; a refusal is the honest failure,
+                // not a dropped line.
                 if (!emitLaneOverrides()) return out;
                 emittedSomething = true;
                 break;

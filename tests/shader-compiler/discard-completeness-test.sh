@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# A shader whose post-discard work the default path cannot lower must be
-# REFUSED, not compiled with that work missing (t_72810bd7).
+# Work that FOLLOWS a discard must reach the ucode (t_72810bd7).
 #
-# Two controls, because a guard like this fails in both directions: it can
-# miss the drop, or it can refuse the whole discard class.  The negative
-# control is a real discard shader from the samples that the default path
-# lowers correctly today.
+# THE ASSERTION FLIPPED on 2026-09-02, as the item said it would.  While
+# the post-discard lerp was not a shape this path lowered, the required
+# behaviour was a REFUSAL - compiling it meant shipping a shader missing a
+# line of its source, which is what th06_notex did for months.  The lerp
+# lowers now, so the requirement is the stronger one: the shader compiles
+# AND the work is there.
 #
-# WHICH refusal fires moved on 2026-09-02 (t_afb4af65).  The post-discard
-# lerp writes its result into three lanes of `color` through a VecInsert
-# chain, and the StoreOutput emitter now refuses a non-literal insert
-# scalar instead of walking past the overrides - so this shader is turned
-# away by that check, before the closure guard downstream ever runs.  Both
-# diagnostics carry t_72810bd7, and the assertion below is deliberately on
-# the task id rather than on one message: what this test defends is that
-# the shader does not compile MISSING A LINE, not which of the two honest
-# refusals gets there first.  The closure guard keeps its own coverage in
-# the rig's default-path corpus sweep.
+# "The work is there" is asserted on the UCODE, not on the container's
+# input mask.  The mask is not evidence: t_e89cd261 was a defect where the
+# mask named a varying no instruction read, so a shader can claim an input
+# it never touches.  The lerp reads TEXCOORD2, so some instruction must
+# name input source 6 - and if the lerp were dropped again, only the
+# colour's TEXCOORD0 would appear.
+#
+# Two controls, because this fails in both directions: it can miss a drop,
+# or it can refuse the whole discard class.  The negative control is a real
+# discard shader from the samples.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -43,19 +44,69 @@ run() {   # $1 shader path, $2 tag
     return "$rc"
 }
 
-# POSITIVE: post-discard work this path cannot lower -> must refuse.
+# POSITIVE: post-discard work must compile AND be present in the ucode.
 pos="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_discard_then_work_f.cg"
-if run "$pos" positive; then
-    fail "fp_discard_then_work COMPILED. The post-discard lerp is not a shape
-this path lowers, so the container it just produced is missing part of the
-shader. Refusing is the required behaviour until the shape is lowered."
-fi
-if ! grep -q "t_72810bd7" "$work/positive.log"; then
+if ! run "$pos" positive; then
     tail -n 10 "$work/positive.log" >&2
-    fail "fp_discard_then_work was refused, but not by a completeness
-refusal - so this test would keep passing if the guard were removed and the
-shader merely failed to parse."
+    fail "fp_discard_then_work did NOT compile. Its post-discard lerp is a
+shape this path lowers now; refusing it is a regression to the behaviour
+t_72810bd7 replaced."
 fi
+
+# The container run above prints no ucode, so take the dump separately.
+(
+    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
+    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" -p sce_fp_rsx "$pos"
+) >"$work/positive-dump.log" 2>&1 ||
+    fail "fp_discard_then_work compiled with --emit-container but not without it"
+
+python3 - "$work/positive-dump.log" <<'PY'
+import re
+import sys
+
+# NV40 fragment INPUT_SRC selector: TEXCOORDn is 4 + n, in word0 bits 13..16.
+TEX0, TEX2 = 4, 6
+REG_TYPE_INPUT = 1
+
+
+def unswap(v):
+    return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
+
+
+read = set()
+for line in open(sys.argv[1], "r", encoding="utf-8"):
+    m = re.match(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$", line)
+    if not m:
+        continue
+    w = [unswap(int(x, 16)) for x in m.group(2).split()]
+    if len(w) < 4:
+        continue
+    opcode = (w[0] >> 24) & 0x3F
+    if opcode == 0 or opcode > 0x40:
+        continue
+    if any((w[i] & 3) == REG_TYPE_INPUT for i in (1, 2, 3)):
+        read.add((w[0] >> 13) & 0xF)
+
+if not read:
+    raise SystemExit(
+        "FAIL: no instruction reads a varying at all - the ucode dump did "
+        "not parse, so nothing below was actually checked"
+    )
+if TEX2 not in read:
+    raise SystemExit(
+        "FAIL: no instruction reads TEXCOORD2 (input source %d); the ucode "
+        "names %s.  The fog lerp after the discard reads it, so the work was "
+        "dropped - which is the whole of t_72810bd7.  Asserted on the ucode "
+        "and not on attributeInputMask, because a container can name an "
+        "input no instruction touches (t_e89cd261)."
+        % (TEX2, sorted(read))
+    )
+if TEX0 not in read:
+    raise SystemExit(
+        "FAIL: no instruction reads TEXCOORD0 (input source %d); the ucode "
+        "names %s.  The colour the lerp blends comes from it." % (TEX0, sorted(read))
+    )
+PY
 
 # NEGATIVE: a discard shader this path lowers correctly -> must still compile.
 neg="$repo_root/samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/fpshader.fcg"
