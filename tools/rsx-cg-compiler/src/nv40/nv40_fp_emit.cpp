@@ -11760,6 +11760,52 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         return out;
     }
 
+    // RE-STORED OUTPUT (t_becbfa69).
+    //
+    // This path emits the FIRST store to an output and drops the rest:
+    //
+    //   o = c;  if (c.a < 0.5) discard;  o = o * d;  if (d.a < 0.5) discard;
+    //   o = o + d;
+    //
+    // put `o = c` in the ucode and neither of the later values, so every
+    // surviving fragment was painted the first one (measured on the rig at
+    // painted 1377/1377 with every survivor wrong).  The completeness
+    // check below cannot see it, and says so in its own scope note: it
+    // catches a dropped computation that also drops a VARYING READ, and
+    // here both varyings are read by the two kills.
+    //
+    // The matcher cannot express a re-stored output - the reference emits
+    // the last value and reuses the register for the intermediates - so
+    // this refuses rather than shipping the first value silently.  963018a
+    // made refusal this path's answer to a shape it does not recognise,
+    // and the general path lowers it correctly since 70568e9 put
+    // write-after-write edges on outputs.
+    {
+        std::unordered_map<std::string, int> storesPerOutput;
+        for (const auto& blockPtr : entry.blocks)
+        {
+            if (!blockPtr) continue;
+            for (const auto& instPtr : blockPtr->instructions)
+            {
+                if (!instPtr || instPtr->op != IROp::StoreOutput) continue;
+                ++storesPerOutput[instPtr->semanticName + "#" +
+                                  std::to_string(instPtr->semanticIndex)];
+            }
+        }
+        for (const auto& kv : storesPerOutput)
+        {
+            if (kv.second <= 1) continue;
+            out.diagnostics.push_back(
+                "nv40-fp: output '" +
+                kv.first.substr(0, kv.first.find('#')) + "' is stored " +
+                std::to_string(kv.second) +
+                " times; this path emits the first store and drops the "
+                "rest, which paints every surviving fragment the first "
+                "value (t_becbfa69)");
+            return out;
+        }
+    }
+
     // COMPLETENESS CHECK (t_72810bd7).
     //
     // The default path is a shape matcher: an IR shape it does not

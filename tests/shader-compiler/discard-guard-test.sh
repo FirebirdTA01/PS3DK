@@ -138,6 +138,18 @@ grep -q "FALSE arm" "$work/else_default.log" || {
 reason than the false-arm discard."
 }
 
+run fp_discard_two_f "" two_default
+[[ "$rc" -ne 0 ]] || fail "fp_discard_two_f compiled on the DEFAULT path.
+That path emits the FIRST store to an output and drops the rest, so every
+surviving fragment is painted the first value (t_becbfa69).  The
+completeness check cannot see it - both varyings are read by the kills -
+so the re-store itself is what must refuse."
+grep -q "is stored" "$work/two_default.log" || {
+    tail -n 5 "$work/two_default.log" >&2
+    fail "fp_discard_two_f refused on the default path for some OTHER
+reason than the re-stored output."
+}
+
 run fp_discard_merge_guard_f "" merge_guard_default
 [[ "$rc" -ne 0 ]] || fail "fp_discard_merge_guard_f compiled on the DEFAULT
 path.  The discard sits in a two-predecessor merge INSIDE an outer guarded
