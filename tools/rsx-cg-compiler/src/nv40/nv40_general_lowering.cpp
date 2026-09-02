@@ -1486,8 +1486,40 @@ private:
         };
 
         if (baseIt == program_.valueToVReg.end()) {
-            if (!isOutputParam(inst.operands[0]))
+            // The base is a value that lives in a SOURCE register rather
+            // than a temp: a varying passed straight through with one lane
+            // overridden, `float4 c = color; c.x = 0.5;`.  Returning here
+            // left the insert's result undefined and the consuming store
+            // refused with "operand could not be resolved" - the general
+            // path's half of t_afb4af65, filed as t_be578e74.
+            //
+            // Materialise the base into a temp, masked to the lanes the
+            // insert does NOT write, then write the lane.  That is the
+            // reference's shape for the same source (`MOV R0.yzw, f[TEX0]`
+            // then `MOV R0.x, {0.5,0,0,0}.x`), and it avoids copying a lane
+            // that is about to be overwritten.
+            if (!isOutputParam(inst.operands[0])) {
+                if (!program_.valueToSource.count(inst.operands[0]))
+                    return;
+                const int baseReg = define(inst.result);
+                program_.valueToVReg[inst.result] = baseReg;
+
+                VInstr base;
+                base.op = VOp::Mov;
+                base.dst.index = baseReg;
+                base.dst.writemask = 0xf & ~laneMask;
+                base.srcs[0] = resolve(inst.operands[0]);
+                program_.instrs.push_back(base);
+
+                VInstr lane_;
+                lane_.op = VOp::Mov;
+                lane_.dst.index = baseReg;
+                lane_.dst.writemask = laneMask;
+                lane_.srcs[0] = resolve(inst.operands[1]);
+                lane_.srcs[0].swizzle = {0, 0, 0, 0};
+                program_.instrs.push_back(lane_);
                 return;
+            }
 
             const int resultReg = define(inst.result);
             program_.valueToVReg[inst.result] = resultReg;

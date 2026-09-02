@@ -29,12 +29,12 @@ work="${TMPDIR:-/tmp}/ps3dk-lane-insert-literal-test.$$"
 mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
-compile() {   # $1 shader path, $2 tag -> log at $work/$2.log
+compile() {   # $1 shader path, $2 tag, $3 extra flags -> log at $work/$2.log
     local rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx "$1"
+            -p sce_fp_rsx ${3:+$3} "$1"
     ) >"$work/$2.log" 2>&1 || rc=$?
     [[ "$rc" -eq 124 ]] && fail "$2 timed out"
     [[ "$rc" -eq 134 || "$rc" -eq 137 ]] && fail "$2 aborted or was killed under the memory cap"
@@ -51,6 +51,20 @@ all="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_insert_literal_all_f.cg"
 
 compile "$one" one
 compile "$all" all
+
+# The GENERAL path refused this shape entirely - the insert's result was
+# never defined and the store reported "operand could not be resolved"
+# (t_be578e74).  It now materialises the varying into a temp masked to the
+# lanes the insert does not write, which is the reference's own shape, so
+# the one-lane case is judged by the same assertions as the default path.
+compile "$one" one_general --general-lowering
+compile "$all" all_general --general-lowering
+cmp -s "$work/one.log" "$work/one_general.log" || {
+    diff "$work/one.log" "$work/one_general.log" >&2 || true
+    fail "the general path's ucode for a single lane insert differs from the
+default path's, and both are byte-identical to the reference there
+(t_be578e74)."
+}
 
 python3 - "$work/one.log" "$work/all.log" <<'PY'
 import re
