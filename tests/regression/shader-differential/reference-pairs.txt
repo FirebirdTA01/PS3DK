@@ -133,11 +133,13 @@ tests/regression/shader-differential/shaders/sd_sampler_units.fcg|0|both
 # file-scope NON-sampler uniform shader in corpus + tree, and its uniform
 # carries an initialiser - `uniform float4 c = float4(1,0,0,1);` with a
 # main() taking no parameters.  Two rows, two questions:
-#   set 0   the COMPILED DEFAULT: the reference writes the initialiser into
-#           the inline const block, ours writes zeros (t_3bf3ce95 is exactly
-#           that line).  RED until the initialiser is the default.
+#   set 0   the COMPILED DEFAULT: the initialiser must be in the inline
+#           const block.  Was RED (ours zeros: black vs the reference's red,
+#           255/4096, both paths) until db6dbca wrote the initialiser as the
+#           compiled default (t_3bf3ce95, no flag per the director 22:24);
+#           identical on both paths since.  A red here is a regression.
 #   auto    PATCHABILITY: both sides patched by name, must be identical.
-#           Green on e5b4a4d (t_f5f750ff closed) - a red here is a regression.
+#           Green since e5b4a4d (t_f5f750ff closed) - a red here is a regression.
 # The corpus copy is referenced by its build/ path (untracked, fetched by
 # the corpus tooling); the stager names the second row with its set.
 build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|0|both
