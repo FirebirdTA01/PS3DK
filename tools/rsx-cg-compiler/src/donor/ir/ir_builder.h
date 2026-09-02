@@ -66,6 +66,12 @@ private:
     void buildGlobals(TranslationUnit& unit);
     void buildFunction(FunctionDecl* decl);
 
+    // True for a FRAGMENT entry's `out` parameter declared with no
+    // semantic, which binds to COLOR the way the reference compiler binds
+    // it (t_a15ec129).  Consulted wherever a parameter's semantic decides
+    // whether a store is emitted.
+    bool isDefaultedFragmentOutput(const ParamDecl* param) const;
+
     // Statement building
     void buildStmt(StmtNode* stmt);
     void buildBlockStmt(BlockStmt* stmt);

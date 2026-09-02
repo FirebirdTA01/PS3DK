@@ -348,6 +348,32 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
     }
 }
 
+// A FRAGMENT entry's `out` parameter with NO semantic binds to COLOR.
+//
+// The reference compiler does this - its parameter table for a shader
+// declaring `out float4 oColor` with no semantic reads
+// "out.UNDEFINED: COLOR0", the declared semantic undefined and the resource
+// COLOR0 - and without it we dropped the whole shader (t_a15ec129).  The
+// store was gated on the parameter HAVING a semantic, so no StoreOutput was
+// emitted, everything that only fed it went with it, and the container came
+// out with eleven instructions, none of them writing the output register:
+// exit 0, no diagnostic, an input mask naming three varyings the ucode never
+// read.  Four corpus shaders were mismatching on that for two days.
+//
+// Fragment only, and entry only.  A vertex `out` with no semantic has no such
+// default - the reference does not give it one - and a non-entry function's
+// out parameter is an ordinary reference argument, not a shader output.
+bool IRBuilder::isDefaultedFragmentOutput(const ParamDecl* param) const
+{
+    if (!param || !param->semantic.isEmpty()) return false;
+    if (param->storage != StorageQualifier::Out &&
+        param->storage != StorageQualifier::InOut) return false;
+    if (!module_ || module_->shaderStage != ShaderStage::Fragment) return false;
+    if (!currentFunctionDecl_ ||
+        currentFunctionDecl_->name != module_->entryPointName) return false;
+    return true;
+}
+
 // ============================================================================
 // Function Building
 // ============================================================================
@@ -374,6 +400,13 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             irParam.rawSemanticName = param->semantic.rawName;
             irParam.semanticIndex   = param->semantic.index;
             irParam.inferredSemantic = param->semantic.inferred;
+        }
+        else if (isDefaultedFragmentOutput(param.get()))
+        {
+            irParam.semanticName     = "COLOR";
+            irParam.rawSemanticName  = "COLOR";
+            irParam.semanticIndex    = 0;
+            irParam.inferredSemantic = true;
         }
 
         currentFunction_->parameters.push_back(irParam);
@@ -1922,17 +1955,18 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         if (ident->resolvedDecl && ident->resolvedDecl->kind == DeclKind::Parameter)
         {
             auto* param = static_cast<ParamDecl*>(ident->resolvedDecl);
+            const bool defaultedOut = isDefaultedFragmentOutput(param);
             if ((param->storage == StorageQualifier::Out ||
                  param->storage == StorageQualifier::InOut) &&
-                !param->semantic.isEmpty())
+                (!param->semantic.isEmpty() || defaultedOut))
             {
                 // Emit a store output instruction for the out parameter
                 auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
                     InvalidIRValue, IRTypeInfo::Void());
                 inst->addOperand(value);
-                inst->semanticName    = param->semantic.name;
-                inst->rawSemanticName = param->semantic.rawName;
-                inst->semanticIndex   = param->semantic.index;
+                inst->semanticName    = defaultedOut ? "COLOR" : param->semantic.name;
+                inst->rawSemanticName = defaultedOut ? "COLOR" : param->semantic.rawName;
+                inst->semanticIndex   = defaultedOut ? 0 : param->semantic.index;
                 currentBlock_->addInstruction(std::move(inst));
             }
         }
@@ -2009,9 +2043,16 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                     ident->resolvedDecl->kind == DeclKind::Parameter)
                 {
                     auto* param = static_cast<ParamDecl*>(ident->resolvedDecl);
+                    const bool defaultedOut = isDefaultedFragmentOutput(param);
+                    const std::string outSemName =
+                        defaultedOut ? std::string("COLOR") : param->semantic.name;
+                    const std::string outSemRaw =
+                        defaultedOut ? std::string("COLOR") : param->semantic.rawName;
+                    const int outSemIndex =
+                        defaultedOut ? 0 : param->semantic.index;
                     if ((param->storage == StorageQualifier::Out ||
                          param->storage == StorageQualifier::InOut) &&
-                        !param->semantic.isEmpty())
+                        (!param->semantic.isEmpty() || defaultedOut))
                     {
                         // Drop any earlier StoreOutput in this block
                         // that targets the same semantic — this
@@ -2029,8 +2070,8 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                         {
                             const auto& cur = *it;
                             if (cur && cur->op == IROp::StoreOutput &&
-                                cur->semanticName == param->semantic.name &&
-                                cur->semanticIndex == param->semantic.index)
+                                cur->semanticName == outSemName &&
+                                cur->semanticIndex == outSemIndex)
                             {
                                 it = insts.erase(it);
                             }
@@ -2044,9 +2085,9 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                             IROp::StoreOutput,
                             InvalidIRValue, IRTypeInfo::Void());
                         inst->addOperand(currentVec);
-                        inst->semanticName    = param->semantic.name;
-                        inst->rawSemanticName = param->semantic.rawName;
-                        inst->semanticIndex   = param->semantic.index;
+                        inst->semanticName    = outSemName;
+                        inst->rawSemanticName = outSemRaw;
+                        inst->semanticIndex   = outSemIndex;
                         currentBlock_->addInstruction(std::move(inst));
                     }
                 }

@@ -1,0 +1,12 @@
+// The twin of fp_out_no_semantic_f.cg, with `: COLOR` written out
+// (t_a15ec129).  The two must compile to the same PROGRAM - identical
+// ucode - because an omitted output semantic on a fragment entry is not
+// missing information: the reference binds it to COLOR0 without being
+// told.  The CONTAINERS differ by one string, the declared semantic, which
+// the reference records as UNDEFINED when it was omitted; ours matches
+// each of the reference's two containers byte for byte.
+void main(float4 color : TEXCOORD0,
+          out float4 oColor : COLOR)
+{
+    oColor = color;
+}

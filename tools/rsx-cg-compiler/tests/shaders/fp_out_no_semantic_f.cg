@@ -1,0 +1,26 @@
+// A fragment entry's `out` parameter with NO SEMANTIC binds to COLOR
+// (t_a15ec129).
+//
+// The store was gated on the parameter HAVING a semantic, so this shader
+// emitted no StoreOutput at all - and then everything that only fed the
+// output went with it.  diffuse_specular came out as eleven instructions,
+// none of them writing the output register, with an input mask naming
+// three varyings the ucode never read: exit 0, no diagnostic, four corpus
+// rows mismatching for two days.
+//
+// The reference defaults it.  Its parameter table for a shader declared
+// this way reads "out.UNDEFINED: COLOR0" - declared semantic undefined,
+// resource COLOR0.
+//
+// Its twin fp_out_with_semantic_f.cg is the same shader with `: COLOR`
+// written out.  The test requires the two to compile to the same PROGRAM -
+// identical ucode - which is the whole claim: the semantic is not optional
+// information, it is information the compiler already has.  Not the same
+// CONTAINER: the reference records the declared semantic beside the
+// resource, "out.UNDEFINED: COLOR0" here against "out.COLOR: COLOR0"
+// there, and ours matches each of those byte for byte.
+void main(float4 color : TEXCOORD0,
+          out float4 oColor)
+{
+    oColor = color;
+}

@@ -134,6 +134,9 @@ jobs:
       - name: Test rsx-cg-compiler two-varying operands
         run: bash tests/shader-compiler/two-varying-operands-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler defaulted output semantic
+        run: bash tests/shader-compiler/out-no-semantic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
