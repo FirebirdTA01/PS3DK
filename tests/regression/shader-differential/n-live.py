@@ -71,16 +71,14 @@ INSN_LINE = re.compile(r"^\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
 
 
 def count_insn(text):
-    """Instructions in the compiler's ucode dump (the 'N: w0 w1 w2 w3' lines),
-    skipping the 16-byte inline const block that follows any instruction with
-    a CONST-typed source (register type 2 in words 1..3) - the guest's
-    measure_cost rule.  The first refusal is binary and says nothing on a
+    """16-byte groups in the compiler's ucode dump (the 'N: w0 w1 w2 w3'
+    lines), inline const blocks INCLUDED - the container's instructionCount
+    semantics, so the column is like for like with the reference's field.  The first refusal is binary and says nothing on a
     compiler that never refuses; the SLOPE of instructions per term is the
     finding there (the vita team, running this family: 4 per term against
     the reference's 1, both linear - 'materialise every term before the
     first add' measured as a gradient rather than a threshold)."""
     n = 0
-    skip = False
     for line in text.splitlines():
         m = INSN_LINE.match(line)
         if not m:
@@ -88,12 +86,12 @@ def count_insn(text):
         words = [int(w, 16) for w in m.group(2).split()]
         if len(words) < 4:
             continue
-        if skip:
-            skip = False
-            continue
+        # Counted WITH inline const blocks: that is the container's
+        # instructionCount semantics (ucode/16), which the reference's field -
+        # read by reference_insn - also carries, so the two columns are like
+        # for like (claude, review of a0cd14f: excluding them here read 59
+        # against a reference 63 whose true like-for-like is 81).
         n += 1
-        swapped = [((w >> 16) | ((w & 0xFFFF) << 16)) & 0xFFFFFFFF for w in words]
-        skip = any((swapped[i] & 3) == 2 for i in (1, 2, 3))
     return n
 
 
