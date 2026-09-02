@@ -4267,6 +4267,44 @@ private:
                 }
                 return false;
             };
+            // THE RULE EVERY HAND-OUT OWES: a candidate register is free
+            // only if no value currently assigned to it has a read still
+            // ahead.  Only the pin path asked this (pinClobbersLive), and
+            // only about the pinned register - the freeList head and the
+            // fresh descending counter handed out registers without ever
+            // checking whether something live was sitting in them.
+            //
+            // That was invisible while the bank was numbered from the
+            // DEFINITION COUNT, because the counter never descended far
+            // enough to reach a slot a pin had taken out of band.  Numbered
+            // from the peak live count it does reach it, and the result is
+            // two virtual registers in one slot with overlapping live
+            // ranges: test_62 emitted a MUL whose two operands were
+            // different values both reading R0, computing a*a where the
+            // source says a*b.  Measured on test_58, test_62, test_63 and
+            // test_83, always on R0 - the bottom of the descending bank.
+            //
+            // H registers alias R slots in pairs, so the comparison is on
+            // R slots, the same rule as aliasesEarlyRead and
+            // clobbersLiveOutput.
+            const auto heldByLiveValue = [&](int candidate, bool candFp16) {
+                const int candSlot = candFp16 ? (candidate >> 1) : candidate;
+                for (const auto& kv : program_.vregToPhys) {
+                    if (kv.first == vi.dst.index)
+                        continue;
+                    const bool occFp16 =
+                        program_.vregToFp16.count(kv.first) &&
+                        program_.vregToFp16[kv.first];
+                    const int occSlot =
+                        occFp16 ? (kv.second >> 1) : kv.second;
+                    if (occSlot != candSlot)
+                        continue;
+                    const auto lu = lastUse.find(kv.first);
+                    if (lu != lastUse.end() && lu->second > i)
+                        return true;
+                }
+                return false;
+            };
             const auto aliasesEarlyRead = [&](int candidate, bool candFp16) {
                 if (vi.op != VOp::SelPred)
                     return false;
@@ -4390,7 +4428,8 @@ private:
                         phys = program_.vregToPhys[reusableSrc->index];
                     } else if (!vi.dst.fp16 && !freeList.empty() &&
                                !aliasesEarlyRead(freeList.back(), false) &&
-                               !clobbersLiveOutput(freeList.back(), false)) {
+                               !clobbersLiveOutput(freeList.back(), false) &&
+                               !heldByLiveValue(freeList.back(), false)) {
                         // Only the head is tested: an aliasing head
                         // falls through to the fresh counter rather
                         // than scanning deeper.  Deliberate
@@ -4425,7 +4464,11 @@ private:
                                 phys = vi.dst.fp16 ? (nextPhys++ << 1) : nextPhys++;
                             }
                         } while (aliasesEarlyRead(phys, vi.dst.fp16) ||
-                                 clobbersLiveOutput(phys, vi.dst.fp16));
+                                 clobbersLiveOutput(phys, vi.dst.fp16) ||
+                                 heldByLiveValue(phys, vi.dst.fp16));
+                        // Terminates: the descending counter is finite and
+                        // the spill bank above it hands out numbers that
+                        // have never been assigned, so they cannot be held.
                     }
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
@@ -5174,9 +5217,12 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // option C).  7243bd9 numbers the fragment bank from the peak live
     // count, so programs the old numbering declared at 48 or more registers
     // now compile - and of the seven in the corpus, SIX paint the wrong
-    // picture against sce-cgc (an R0 live-range collision, a store-order
-    // defect and three unrelated ones: t_c2582cf1, t_aaa7c7b1), every one
-    // hidden until today by the refusal.  Until each shape is judged, what
+    // picture against sce-cgc: test_58/62/63 share one R0 live-range
+    // collision, test_83 has that collision AND genuinely needs 51
+    // registers, and test_60/81 are unrelated (t_aaa7c7b1).  The
+    // store-order defect t_c2582cf1 is NOT among them - its witness is
+    // fp_output_stored_thrice_f, which is not a capacity shape.  Every one
+    // was hidden until today by the refusal.  Until each shape is judged, what
     // the old numbering refused still refuses, BY NAME, keyed on the count
     // that numbering produces (the dry run in lowerFunction), so the only
     // behaviour the seed fix ships is a correct declared count on programs
