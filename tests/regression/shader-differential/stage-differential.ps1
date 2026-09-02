@@ -801,18 +801,21 @@ if ($VpPairs -or $VpCorpus) {
     # whatever the stage's path) and asserted byte-identical to the
     # reference: the instrument is a proven equal, not an assumed one.
     $vpChannels = @(@{ key = "cov"; src = "void main(out float4 color : COLOR) { color = float4(1.0f, 1.0f, 1.0f, 1.0f); }" })
-    # Spelled (v + 1) * 0.5 with float4 literals, on purpose: the default
-    # path refuses the scalar spelling `v * 0.5f + 0.5f` (rc 1) and
-    # MISCOMPILES `v * float4(0.5..) + float4(0.5..)` - the literal
-    # multiplicand of a fused MAD is emitted as zero (t_a1f43b12, found by
-    # these very rows on 2026-09-02).  ADD-then-MUL has no MAD to fuse and
-    # disassembles as the two instructions it says.  The instrument rows
-    # below are what prove the spelling, whatever it is.
-    $vpOne = "float4(1.0f, 1.0f, 1.0f, 1.0f)"; $vpHalf = "float4(0.5f, 0.5f, 0.5f, 0.5f)"
-    foreach ($n in 0..9) { $vpChannels += @{ key = "tc$n"; src = "void main(float4 v : TEXCOORD$n, out float4 color : COLOR) { color = (v + $vpOne) * $vpHalf; }" } }
-    $vpChannels += @{ key = "col0"; src = "void main(float4 v : COLOR0, out float4 color : COLOR) { color = (v + $vpOne) * $vpHalf; }" }
-    $vpChannels += @{ key = "col1"; src = "void main(float4 v : COLOR1, out float4 color : COLOR) { color = (v + $vpOne) * $vpHalf; }" }
-    $vpChannels += @{ key = "fog";  src = "void main(float v : FOG, out float4 color : COLOR) { color = (float4(v, v, v, 1.0f) + $vpOne) * $vpHalf; }" }
+    # Spelled v * float4(0.5..) + float4(0.5..), the fused-MAD shape, and
+    # the spelling has a history: on 963018a the default path emitted the
+    # literal multiplicand of that MAD as ZERO (t_a1f43b12, found by these
+    # very rows on 2026-09-02) and the instrument moved to (v + 1) * 0.5
+    # for one evening.  Measured on 6b2f010 (the fix): this spelling is
+    # byte-identical to the reference on every channel, so the instrument
+    # rows below stage nothing; (v + 1) * 0.5 stays byte-different (the
+    # reference reassociates it into the same MAD; claude filed that).
+    # The scalar spelling `v * 0.5f + 0.5f` still refuses on the default
+    # path (rc 1).  Whatever the spelling, the rows are the proof.
+    $vpHalf = "float4(0.5f, 0.5f, 0.5f, 0.5f)"
+    foreach ($n in 0..9) { $vpChannels += @{ key = "tc$n"; src = "void main(float4 v : TEXCOORD$n, out float4 color : COLOR) { color = v * $vpHalf + $vpHalf; }" } }
+    $vpChannels += @{ key = "col0"; src = "void main(float4 v : COLOR0, out float4 color : COLOR) { color = v * $vpHalf + $vpHalf; }" }
+    $vpChannels += @{ key = "col1"; src = "void main(float4 v : COLOR1, out float4 color : COLOR) { color = v * $vpHalf + $vpHalf; }" }
+    $vpChannels += @{ key = "fog";  src = "void main(float v : FOG, out float4 color : COLOR) { color = float4(v, v, v, 1.0f) * $vpHalf + $vpHalf; }" }
     # Instrument rows exist only for channels the shared VP (sd_pos_allch)
     # WRITES - cov, tc0..tc3, col0: a coverage FP reading an interpolator no
     # VP wrote compares two undefined inputs.  tc4..tc9 and col1 are the

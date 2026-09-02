@@ -48,7 +48,10 @@
  *         consecutive readbacks agreed: output varies between draws) |
  *         vp-controls-invalid | vp-auto-invalid (withheld: a VP control
  *         failed) | vp-channel-missing (the stager did not provide a
- *         coverage FP the row needs) | vp-path-pair-unoracled
+ *         coverage FP the row needs) | vp-path-pair-unoracled |
+ *         uniforms-differ (the two vertex containers enumerate uniforms
+ *         differently, so the same synthesis would feed them different
+ *         values: a finding about the containers, no pixel verdict)
  *
  * Sensitivity, in every judged row's diagnostic: `levels a=R/G/B/A
  * b=R/G/B/A` = distinct 8-bit values per channel per side, and `sat`
@@ -1145,8 +1148,15 @@ static int is_matrix_row_leaf(CGprogram vp, const char *name)
  * when the container declares a sampler (vertex textures are out of
  * scope); -5 when `auto` meets a kind the binder does not synthesise
  * (int, bool, fixed). */
+static void note_applied(char *applied, size_t cap, const char *name)
+{
+	size_t len = strlen(applied);
+	if (len + strlen(name) + 2 < cap)
+		snprintf(applied + len, cap - len, "%s%s", len ? "," : "", name);
+}
+
 static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
-                             const char *uniform_set)
+                             const char *uniform_set, char *applied, size_t cap)
 {
 	if (strcmp(uniform_set, "auto") == 0) {
 		for (CGparameter prm = cellGcmCgGetFirstLeafParameter(vp); prm;
@@ -1187,6 +1197,7 @@ static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
 					v[k] = k < words ? auto_value(name, k) : 0.0f;
 			}
 			cellGcmSetVertexProgramParameter(ctx, prm, v);
+			note_applied(applied, cap, name);
 		}
 		return 0;
 	}
@@ -1199,6 +1210,7 @@ static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
 		if (!prm)
 			return -1;
 		cellGcmSetVertexProgramParameter(ctx, prm, g_uniforms[i].values);
+		note_applied(applied, cap, g_uniforms[i].name);
 	}
 	return 0;
 }
@@ -1319,8 +1331,10 @@ static u32 channel_mask_of(CGprogram vp, char *unjudged, size_t cap)
 static int render_vp_side(CellGcmContextData *ctx, void *vp_container,
                           int channel, const char *uniform_set,
                           u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
-                          u32 *save, int *warmup_draws)
+                          u32 *save, int *warmup_draws,
+                          char *applied, size_t applied_cap)
 {
+	applied[0] = 0;
 	if (!g_vp_cov[channel])
 		return -7;
 	CGprogram vp = (CGprogram)vp_container;
@@ -1347,7 +1361,7 @@ static int render_vp_side(CellGcmContextData *ctx, void *vp_container,
 
 	cellGcmSetVertexProgram(ctx, vp, vp_uc);
 	cellGcmCgUploadInternalConsts(ctx, vp);
-	int rc = apply_vp_uniforms(ctx, vp, uniform_set);
+	int rc = apply_vp_uniforms(ctx, vp, uniform_set, applied, applied_cap);
 	if (rc != 0)
 		return rc;
 	bind_all_attributes(ctx);
@@ -1592,6 +1606,7 @@ typedef struct {
 	int  total_pixels;
 	long elapsed_ms;
 	int  diff_channels;      /* VP rows: channels that judged mismatch */
+	char diff_channel[8];    /* VP rows: the channel key when exactly one differs */
 	char diagnostic[448];
 	char artifact[96];
 } sd_result;
@@ -1815,6 +1830,7 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 	r->diff_pixels = 0;
 	r->total_pixels = RT_W * RT_H;
 	r->diff_channels = 0;
+	snprintf(r->diff_channel, sizeof(r->diff_channel), "-");
 	snprintf(r->diagnostic, sizeof(r->diagnostic), "-");
 	snprintf(r->artifact, sizeof(r->artifact), "-");
 	load_vp_channels();
@@ -1863,17 +1879,41 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 	int warm_max_a = 0, warm_max_b = 0;
 	sd_sensitivity sens_a = {{0,0,0,0},0}, sens_b = {{0,0,0,0},0};
 	int failed = 0;
+	char applied_a[160], applied_b[160];
+	/* The auto control is asymmetric BY DESIGN, as the fragment one is:
+	 * side A declares the uniforms and side B is the twin with the same
+	 * numbers baked, so the set applies to side A only and the two sides
+	 * are expected to enumerate differently. */
+	int asymmetric = strcmp(p->role, "control-vp-auto") == 0;
+	const char *set_b = asymmetric ? "0" : p->uniform_set;
 	for (int ch = 0; ch < N_VP_CHANNELS && !failed; ch++) {
 		if (!(mask & (1u << ch)))
 			continue;
 		int warm_a = 0, warm_b = 0;
 		int ua = render_vp_side(ctx, cont_a, ch, p->uniform_set,
-		                        rt_a_off, rt_depth_off, rt_pitch, save_a, &warm_a);
+		                        rt_a_off, rt_depth_off, rt_pitch, save_a, &warm_a,
+		                        applied_a, sizeof(applied_a));
 		int ub = ua == 0
-			? render_vp_side(ctx, cont_b, ch, p->uniform_set,
-			                 rt_b_off, rt_depth_off, rt_pitch, save_b, &warm_b)
+			? render_vp_side(ctx, cont_b, ch, set_b,
+			                 rt_b_off, rt_depth_off, rt_pitch, save_b, &warm_b,
+			                 applied_b, sizeof(applied_b))
 			: 0;
 		g_local_mem_heap = watermark;
+		/* Each side walks its OWN parameter table, so two containers
+		 * of one shader can enumerate uniforms differently (one lists
+		 * a matrix and its row leaves, the other only the leaves) and
+		 * then receive DIFFERENT values from the same synthesis - a
+		 * mismatch that would be the rig's, not the compiler's (review
+		 * finding, claude).  Lists that differ are a finding about the
+		 * containers and end the row without a pixel verdict. */
+		if (!asymmetric && ua == 0 && ub == 0 && strcmp(applied_a, applied_b) != 0) {
+			r->status = "uniforms-differ";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "the two containers enumerate uniforms differently: a applied [%s] b applied [%s]",
+			         applied_a, applied_b);
+			failed = 1;
+			break;
+		}
 		if (ua != 0 || ub != 0) {
 			int rc = ua != 0 ? ua : ub;
 			char side = ua != 0 ? 'a' : 'b';
@@ -1936,6 +1976,8 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 		}
 		if (diff > 0) {
 			r->diff_channels++;
+			snprintf(r->diff_channel, sizeof(r->diff_channel), "%s",
+			         r->diff_channels == 1 ? k_vp_channels[ch].key : "-");
 			char nm[96];
 			snprintf(nm, sizeof(nm), "%s.%s", p->name, k_vp_channels[ch].key);
 			dump_artifact(nm, 'a', save_a, rt_pitch * RT_H);
@@ -2328,9 +2370,15 @@ int main(int argc, const char **argv)
 			/* Two vertex programs differing in ONE output lane: must
 			 * judge mismatch, and in exactly one channel - the
 			 * comparator must localise, not just notice. */
-			if (strcmp(r.status, "mismatch") != 0 || r.diff_channels != 1) {
-				printf("shader-differential: control-vp-mismatch judged '%s' in %d channel(s) - the VP comparator did not see a one-lane difference as one channel; vp rows will not be judged\n",
-				       r.status, r.diff_channels);
+			if (strcmp(r.status, "mismatch") != 0 || r.diff_channels != 1 ||
+			    strcmp(r.diff_channel, "tc1") != 0) {
+				/* The channel must be THE one the fixture changed, not
+				 * merely one: a wiring fault between the channel table
+				 * and the coverage FPs that reported one wrong channel
+				 * would otherwise open every vp row (review finding,
+				 * codex). */
+				printf("shader-differential: control-vp-mismatch judged '%s' in %d channel(s) (%s) - the VP comparator did not see the one-lane difference as channel tc1 alone; vp rows will not be judged\n",
+				       r.status, r.diff_channels, r.diff_channel);
 				vp_ok = 0;
 				failures++;
 			}
@@ -2431,7 +2479,8 @@ int main(int argc, const char **argv)
 			 * failed its own check above (it is not identical). */
 			vacuous++;
 		} else if (strncmp(r.status, "sampler-unsupported", 19) == 0 ||
-		           strncmp(r.status, "uniform-unsupported", 19) == 0) {
+		           strncmp(r.status, "uniform-unsupported", 19) == 0 ||
+		           strcmp(r.status, "uniforms-differ") == 0) {
 			/* A pair the RIG cannot bind is a rig limit, not a
 			 * compiler finding: counted on its own line so a corpus
 			 * sweep reports "not judged" rather than "failed" for it.
