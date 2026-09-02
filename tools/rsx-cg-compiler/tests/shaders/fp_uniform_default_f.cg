@@ -6,13 +6,24 @@
 // We emitted the block zero-filled and dropped the initialiser, so an
 // unpatched shader computed with zero.
 //
-// TWO uniforms on purpose.  `plain` has no initialiser and its block must
-// stay zero: a fix that wrote defaults into every uniform's block, rather
-// than only into those declared with one, would pass on `tint` alone.
+// THREE uniforms, each covering a case the others cannot:
+//
+//   tint   an explicit four-component initialiser - the straightforward case
+//   splat  a SCALAR initialiser for a vector.  Cg broadcasts it, so this
+//          means (0.5,0.5,0.5,0.5).  The first version of this fix stored
+//          what the EXPRESSION held - one component - and produced
+//          (0.5,0,0,0): right in x and zero elsewhere, which renders as a
+//          plausible darker colour rather than as anything obviously wrong
+//          (review finding, codex).  The original fixture used only a
+//          four-component constructor and could not see it.
+//   plain  NO initialiser, so its block must stay ZERO.  A fix that wrote
+//          defaults into every uniform's block rather than only into those
+//          declared with one would pass on the other two.
 uniform float4 tint  = float4(0.25, 0.5, 0.75, 1.0);
+uniform float4 splat = 0.5;
 uniform float4 plain;
 
 float4 main(float2 uv : TEXCOORD0) : COLOR
 {
-    return tint * plain;
+    return tint * splat * plain;
 }

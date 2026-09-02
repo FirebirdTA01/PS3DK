@@ -53,7 +53,11 @@ def block_at(off):
     words = [unswap(struct.unpack_from(">I", raw, 4 * i)[0]) for i in range(4)]
     return [round(struct.unpack(">f", struct.pack(">I", w))[0], 6) for w in words]
 
-want = {"tint": [0.25, 0.5, 0.75, 1.0], "plain": [0.0, 0.0, 0.0, 0.0]}
+want = {
+    "tint":  [0.25, 0.5, 0.75, 1.0],   # explicit four-component
+    "splat": [0.5, 0.5, 0.5, 0.5],     # SCALAR broadcast across the vector
+    "plain": [0.0, 0.0, 0.0, 0.0],     # no initialiser: stays zero
+}
 seen = {}
 for i in range(u32(12)):
     base = u32(16) + i * 48

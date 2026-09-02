@@ -223,6 +223,37 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 global.explicitRegisterIndex = varDecl->semantic.explicitRegisterIndex;
             }
 
+            // Cg broadcasts a scalar initialiser across a vector: `float4 c
+            // = 1.0;` and `float4 c = float4(1.0);` both mean (1,1,1,1),
+            // and the frontend accepts them.  The evaluator above reports
+            // what the EXPRESSION held, which is one component, so without
+            // this the compiled default is (1,0,0,0) - right in x and zero
+            // everywhere else (review finding, codex).  Widen to the
+            // DECLARED component count, which is the width a runtime patch
+            // of this parameter writes and the width the fold needs.
+            if (constInit.size() == 1)
+            {
+                const int declared = global.type.componentCount();
+                if (declared > 1)
+                    constInit.assign(static_cast<size_t>(declared), constInit[0]);
+            }
+            else if (!constInit.empty() &&
+                     constInit.size() !=
+                         static_cast<size_t>(global.type.componentCount()))
+            {
+                // Any other count mismatch is a form this narrow evaluator
+                // does not understand well enough to widen.  Refuse rather
+                // than pad with zeros, for the same reason as above.
+                error(varDecl->loc,
+                      "file-scope '" + varDecl->name + "' has a " +
+                      std::to_string(constInit.size()) +
+                      "-component initialiser for a " +
+                      std::to_string(global.type.componentCount()) +
+                      "-component declaration; refusing rather than "
+                      "padding it with zeros");
+                constInit.clear();
+            }
+
             global.initialValue = constInit;
 
             module_->addGlobal(global);
