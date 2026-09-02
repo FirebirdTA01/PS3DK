@@ -337,7 +337,7 @@ static u32       vertex_buffer_offset;
 static u32 *g_readback;
 static u32  g_readback_off;
 
-/* ---- auto-binder: one procedural texture for every sampler ---- */
+/* ---- auto-binder: a per-name permuted procedural texture for every sampler ---- */
 
 #define TEX_W 64
 #define TEX_H 64
@@ -352,16 +352,15 @@ static u32 g_tex_offset;
 typedef char sd_tex_matches_rt_w[(TEX_W == RT_W) ? 1 : -1];
 typedef char sd_tex_matches_rt_h[(TEX_H == RT_H) ? 1 : -1];
 
-/* Texel (x, y) = (R, G, B, A) = (4x, 4y, 4(63 - x), 4y) in 8-bit units:
- * every channel a linear ramp the texture control's arithmetic twin
- * recomputes from the interpolated texcoord, and alpha ramping 0..~1
- * down the image so a discard-on-alpha shader exercises both branches.
- * 64x64 against the 64x64 RT with nearest sampling: pixel (px, py)
- * reads texel (px, py), no filtering in the loop. */
-/* Base texel (R, G, B, A) = (4x, 4(63-y), 4(63-x), 4y): four DISTINCT
- * channel functions, so that every channel permutation below is a
- * different image.  (The first version had G == A == 4y, under which
- * permutations exchanging G and A were invisible.) */
+/* Base texel (x, y) = (R, G, B, A) = (4x, 4(63-y), 4(63-x), 4y) in 8-bit
+ * units: four DISTINCT linear ramps, so that every channel permutation
+ * below is a different image (the first version had G == A == 4y, under
+ * which permutations exchanging G and A were invisible).  The texture
+ * control's arithmetic twin recomputes the permuted texel from the
+ * interpolated texcoord; alpha ramps 0..~1 down the image so a
+ * discard-on-alpha shader exercises both branches.  64x64 against the
+ * 64x64 RT with nearest sampling: pixel (px, py) reads texel (px, py),
+ * no filtering in the loop. */
 static u32 base_texel(u32 x, u32 y, unsigned c)
 {
 	switch (c) {

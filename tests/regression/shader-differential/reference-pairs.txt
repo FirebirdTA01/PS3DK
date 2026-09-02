@@ -14,8 +14,13 @@
 # never enter the tree.  Byte-identical pairs are not staged.  Every
 # shader listed here must compile on both sides; a refusal aborts the
 # stage as a finding.  Uniform sets must exist in the stager's
-# uniforms table; samplers are not bound by the rig yet, so listed
-# shaders must not read textures.
+# uniforms table.  sampler2D rows are allowed: the guest binds every
+# referenced sampler2D BY NAME to the unit the container reports, each
+# name to its own per-name image (the procedural texture with its
+# channels permuted by FNV-1a(name) mod 24 - the stager prints the
+# permutation per sampler), gated on the control-texture row being
+# present and green; any other sampler kind, or a unit outside
+# TEXUNIT0..15, refuses in-guest as samplers-unvalidated.
 #
 # The stager's -GeneralLowering flows into OUR side only; the reference
 # side has no lowering switch.  A pair can therefore be byte-identical
