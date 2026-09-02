@@ -32,7 +32,11 @@ void main(
     out_position  = float4(in_position.x, in_position.y, 0.0f, 1.0f);
     out_texcoord0 = float4(u, v, 0.0f, 1.0f);
     out_texcoord1 = float4(u - 0.5f, v - 0.5f, 0.5f, 1.0f);
-    out_texcoord2 = float4(0.5f - u, 0.5f, v, 1.0f);
+    // .w varies: a fragment shader that uses a texcoord's w as a lerp or
+    // scale factor collapses to identity at w == 1, and every channel used
+    // to carry 1 there - the default path's dropped fog lerp on th06_notex
+    // (lerp by fog.w) was pixel-invisible for that reason (2026-09-01 23:22).
+    out_texcoord2 = float4(0.5f - u, 0.5f, v, 0.25f + 0.5f * u);
     out_texcoord3 = float4(u * v, u + v, 1.0f - u, 1.0f);
     out_color     = float4(u, v, 1.0f - u, 0.5f + 0.5f * v);
 }

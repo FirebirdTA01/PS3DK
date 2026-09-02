@@ -150,3 +150,13 @@ build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|auto|
 # default is what paints.  RED on db6dbca, green once the evaluator fills
 # the declared width.  |both: the block is written on both paths.
 tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|both
+
+# NAMED REGRESSION, DEFAULT path (claude 2026-09-01 23:22): th06_notex's
+# fog lerp after the discard is DROPPED - ours emits MOV SLT KIL MOV, the
+# reference adds MOV.w MOV ADD FENCBR MAD; our ucode never reads TEXCOORD2.
+# Visible only because sd_pos_allch now gives TEXCOORD2 a varying w (the
+# lerp factor); at w == 1 the missing statement is an identity.  set 0
+# (no uniforms).  |default: the general path refuses on discard (CF-2,
+# t_91bbd575), honestly.  RED until the computation after a discard is
+# emitted.
+build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg|0|default
