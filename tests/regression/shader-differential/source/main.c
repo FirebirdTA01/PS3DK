@@ -23,7 +23,14 @@
  *         vs a twin biased by a tenth of an 8-bit step, both
  *         reference-compiled: must judge mismatch with max_delta 1 on
  *         5%..20% of pixels, ~10% expected - the comparator's
- *         sensitivity floor, measured every run) | corpus | probe |
+ *         sensitivity floor, measured every run) | control-discard
+ *         (two reference-compiled programs that KILL different bands:
+ *         must judge mismatch with painted a=3072 b=2048, 1024
+ *         differing pixels, a KIL decoded on both sides) |
+ *         control-discard-blind (one reference-compiled program whose
+ *         KIL can never fire, byte-copied: must judge discard-blind,
+ *         so the blindness instrument is seen to fire before any
+ *         discard row is believed) | corpus | probe |
  *         reference (ours vs a reference-compiled container; gated
  *         like corpus) | path-pair (our DEFAULT-path container vs our
  *         GENERAL-path container of the same shader; gated like corpus,
@@ -53,6 +60,10 @@
  *         output-unwritten-a | output-unwritten-b (no instruction of
  *         that side's ucode writes register 0, the colour output: the
  *         image is a leftover, not a value; decoded from the words) |
+ *         discard-blind (the pixels agree and both sides painted every
+ *         pixel, yet a side's ucode holds a KIL: the discard never
+ *         fired under the rig's inputs, so the row proves nothing
+ *         about it - not identical, counted on its own line) |
  *         vp-controls-invalid | vp-auto-invalid (withheld: a VP control
  *         failed) | vp-channel-missing (the stager did not provide a
  *         coverage FP the row needs) | vp-path-pair-unoracled |
@@ -910,6 +921,7 @@ typedef struct {
 	u32 consts;   /* inline 16-byte constant blocks */
 	u32 params;   /* container parameter count */
 	int r0_written; /* any instruction writes register 0 (the colour output) */
+	u32 kil;      /* KIL instructions (opcode 0x12): the discards that reached the ucode */
 } sd_cost;
 
 static void measure_cost(void *container, u32 bytes, sd_cost *out)
@@ -921,6 +933,7 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 	out->params = cellGcmCgGetCountParameter(prog);
 	out->insn = out->consts = 0;
 	out->r0_written = 0;
+	out->kil = 0;
 	const u32 *w = (const u32 *)uc;
 	u32 n = usz / 16, i = 0;
 	while (i < n) {
@@ -939,6 +952,13 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 			w0 = (w0 << 16) | (w0 >> 16);
 			if (((w0 >> 1) & 63u) == 0u && ((w0 >> 9) & 0xFu) != 0u)
 				out->r0_written = 1;
+			/* Opcode at bits 24..29 of the swapped word; 0x12 is KIL.  A
+			 * discard the compiler dropped is a KIL that is not here; a
+			 * KIL that never fires is one the pixels cannot show - the
+			 * judge combines this count with the painted count to name
+			 * the second case (discard-blind). */
+			if (((w0 >> 24) & 63u) == 0x12u)
+				out->kil++;
 		}
 		for (int src = 1; src <= 3; src++) {
 			u32 v = w[i * 4 + src];
@@ -1684,6 +1704,10 @@ typedef struct {
 	int  diff_pixels;
 	int  total_pixels;
 	long elapsed_ms;
+	int  painted_a;          /* pixels a side painted (not the GPU clear mark) */
+	int  painted_b;
+	u32  kil_a;              /* KIL instructions decoded per side */
+	u32  kil_b;
 	int  diff_channels;      /* VP rows: channels that judged mismatch */
 	char diff_channel[8];    /* VP rows: the channel key when exactly one differs */
 	char diagnostic[448];
@@ -1825,6 +1849,10 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	 * way while RPCS3 was rejecting programs for invalid registers.) */
 	int painted_a = painted_pixels(save_a, rt_pitch);
 	int painted_b = painted_pixels(save_b, rt_pitch);
+	r->painted_a = painted_a;
+	r->painted_b = painted_b;
+	r->kil_a = cost_a.kil;
+	r->kil_b = cost_b.kil;
 	if (painted_a == 0 && painted_b == 0) {
 		r->status = "vacuous";
 		snprintf(r->diagnostic, sizeof(r->diagnostic),
@@ -1859,6 +1887,19 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	 * read as a wrong value when it is a missing one. */
 	if (!cost_a.r0_written || !cost_b.r0_written)
 		r->status = !cost_a.r0_written ? "output-unwritten-a" : "output-unwritten-b";
+	/* Discard blindness.  A KIL in either side's ucode with every pixel
+	 * painted on both sides means the discard never fired under the
+	 * rig's inputs: the two images agree, and would agree whether the
+	 * kill were right, inverted or missing on the other side.  Measured
+	 * on th06_notex (2026-09-02): identical, 4096/4096 painted, while
+	 * TEXCOORD0.w never dropped below its 4/255 threshold.  Such a row
+	 * is not identical; it is a witness that did not testify, and the
+	 * summary counts it on its own line so a CF-2 acceptance run cannot
+	 * pass on kills that were never exercised. */
+	if (strcmp(r->status, "identical") == 0 &&
+	    (cost_a.kil > 0 || cost_b.kil > 0) &&
+	    painted_a == RT_W * RT_H && painted_b == RT_W * RT_H)
+		r->status = "discard-blind";
 	if (painted_a < RT_W * RT_H || painted_b < RT_W * RT_H) {
 		size_t len = strlen(r->diagnostic);
 		if (strcmp(r->diagnostic, "-") == 0) len = 0;
@@ -1889,11 +1930,12 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		size_t len = strlen(r->diagnostic);
 		if (strcmp(r->diagnostic, "-") == 0) len = 0;
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
-		         "%ssize a=%u b=%u insn a=%u b=%u consts a=%u b=%u params a=%u b=%u outw a=%s b=%s",
+		         "%ssize a=%u b=%u insn a=%u b=%u consts a=%u b=%u params a=%u b=%u outw a=%s b=%s kil a=%u b=%u",
 		         len ? " " : "", cost_a.bytes, cost_b.bytes,
 		         cost_a.insn, cost_b.insn, cost_a.consts, cost_b.consts,
 		         cost_a.params, cost_b.params,
-		         cost_a.r0_written ? "yes" : "NO", cost_b.r0_written ? "yes" : "NO");
+		         cost_a.r0_written ? "yes" : "NO", cost_b.r0_written ? "yes" : "NO",
+		         cost_a.kil, cost_b.kil);
 	}
 	r->elapsed_ms = now_ms() - t0;
 }
@@ -2281,6 +2323,7 @@ int main(int argc, const char **argv)
 	int autos_ok = 1;      /* flipped by a failed control-auto row */
 	int unsupported = 0;   /* gated rows the binder could not serve */
 	int vacuous = 0;       /* gated rows where neither side painted */
+	int blind = 0;         /* gated rows whose KIL never fired: no verdict on the kill */
 	int unstable = 0;      /* gated rows where a side never repeated a frame */
 	int unoracled = 0;     /* path-pair rows whose premise row was not identical */
 	int vp_ok = 1;         /* flipped by a failed control-vp-identical/mismatch */
@@ -2513,6 +2556,42 @@ int main(int argc, const char **argv)
 			goto post_row;
 		}
 
+		if (strcmp(p->role, "control-discard") == 0) {
+			/* Two reference-compiled programs that KILL different
+			 * bands of the quad: side A u < 0.25 (16 columns, 1024
+			 * pixels), side B u < 0.5 (32 columns).  The comparator
+			 * must see the 1024 pixels A painted and B killed, the
+			 * painted counts must be the arithmetic ones, and the KIL
+			 * decoder must have found a kill on both sides - a row
+			 * that proves the judge sees a wrong discard as a wrong
+			 * band, before any discard witness is believed.  Fails the
+			 * run, withholds nothing. */
+			int ok = strcmp(r.status, "mismatch") == 0 &&
+			         r.painted_a == 3072 && r.painted_b == 2048 &&
+			         r.diff_pixels == 1024 && r.kil_a >= 1 && r.kil_b >= 1;
+			printf("shader-differential: control-discard: status %s, painted a=%d b=%d (expect 3072/2048), diff_pixels %d (expect 1024), kil a=%u b=%u: %s\n",
+			       r.status, r.painted_a, r.painted_b, r.diff_pixels, r.kil_a, r.kil_b,
+			       ok ? "the judge sees a kill band" : "NOT AS EXPECTED - a wrong discard could pass this rig unseen");
+			if (!ok)
+				failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-discard-blind") == 0) {
+			/* One reference-compiled program whose KIL cannot fire
+			 * (v.x < -1 on a 0..1 lane), byte-copied to both sides:
+			 * must judge discard-blind.  The instrument that names a
+			 * witness whose discard never ran is seen to fire once, on
+			 * purpose, or its silence on a real row means nothing. */
+			int ok = strcmp(r.status, "discard-blind") == 0 &&
+			         r.kil_a >= 1 && r.kil_b >= 1;
+			printf("shader-differential: control-discard-blind: status %s, painted a=%d b=%d, kil a=%u b=%u: %s\n",
+			       r.status, r.painted_a, r.painted_b, r.kil_a, r.kil_b,
+			       ok ? "a never-firing KIL is named" : "NOT NAMED - a blind discard witness would read as a verdict");
+			if (!ok)
+				failures++;
+			goto post_row;
+		}
+
 		if (strcmp(p->role, "control-texture") == 0) {
 			/* Sampled-vs-arithmetic twin: identical iff the procedural
 			 * texture is bound where the container's sampler says and
@@ -2594,6 +2673,11 @@ int main(int argc, const char **argv)
 			 * identical.  A control that comes out vacuous has already
 			 * failed its own check above (it is not identical). */
 			vacuous++;
+		} else if (strcmp(r.status, "discard-blind") == 0) {
+			/* Both sides painted everything under a KIL: the discard
+			 * was never exercised, so the row is neither a pass nor a
+			 * compiler finding.  Own line, never identical. */
+			blind++;
 		} else if (strncmp(r.status, "sampler-unsupported", 19) == 0 ||
 		           strncmp(r.status, "uniform-unsupported", 19) == 0 ||
 		           strcmp(r.status, "uniforms-differ") == 0 ||
@@ -2659,9 +2743,9 @@ int main(int argc, const char **argv)
 	free(canary);
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame), %d vp rows withheld behind a red VP control\n",
-	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - unoracled - unstable - vp_skipped,
-	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, unoracled, unstable, vp_skipped);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d discard-blind pairs (a KIL that never fired: no verdict on the kill), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame), %d vp rows withheld behind a red VP control\n",
+	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - blind - unoracled - unstable - vp_skipped,
+	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, blind, unoracled, unstable, vp_skipped);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:

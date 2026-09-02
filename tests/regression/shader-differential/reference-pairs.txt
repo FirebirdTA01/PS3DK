@@ -159,7 +159,15 @@ tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|bot
 # the row was withdrawn to the corpus sweep; 1ab43d0 (2026-09-02) lowers the
 # lerp after the discard and the row RETURNS, judged on the default path
 # (the general path refuses discard, CF-2, t_91bbd575).  Expected identical.
+# 2026-09-02 09:00: that identical was 4096/4096 painted on both sides - the
+# KIL never fired because TEXCOORD0.w stayed above 4/255 - so it proved the
+# lerp and nothing about the kill.  sd_pos_allch now takes TEXCOORD0.w below
+# zero on columns 58..63; expected identical WITH painted a = b = 3712, and
+# the row would read discard-blind if the kill ever stopped firing.
 build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg|0|default
+# The in-tree twin of the same shape (discard, then work feeding the output);
+# the general path refuses it until CF-2.  Expected identical, painted 3712.
+tools/rsx-cg-compiler/tests/shaders/fp_discard_then_work_f.cg|0|default
 
 # 2026-09-02 regression rows: the two default-path P1s the VP work found (both fixed on
 # origin/main before these rows were added; each was RED on 963018a).  sd_lane_insert
@@ -171,3 +179,17 @@ tests/regression/shader-differential/shaders/sd_mad_literal.fcg|0|both
 # 2026-09-02 t_e89cd261: two distinct varyings in one instruction (one input selector);
 # RED on both paths at eb51db7 by design - the row is the witness for the fix.
 tests/regression/shader-differential/shaders/sd_two_inputs.fcg|0|both
+
+# 2026-09-02 t_79fc6bf7 (claude, found measuring the reference for CF-2): a discard
+# on the FALSE arm of a branch - the default path recovers the guard from the last
+# comparison seen, not the path condition, and predicates the KIL on NE where the
+# reference uses EQ: it kills exactly the fragments that must survive.  RED on the
+# default path by design (every pixel differs) until the fix lands; the general
+# path refuses the shape until CF-2.  Measured 2026-09-02 09:03 on 2929e9d: ours
+# paints 2368 where the reference paints 1728, all 4096 pixels differ.  The
+# agreed fix (CF-2 design note 2.4) makes the DEFAULT path REFUSE this shape,
+# and a refusing curated row aborts the stage - so when that lands this row's
+# path column flips to |general, where CF-2 must turn it identical with
+# painted a = b = 1728; the default-path refusal is then proven by the
+# compiler-side fixture fp_discard_else_f, not here.
+tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|default

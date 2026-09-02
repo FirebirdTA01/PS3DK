@@ -1,0 +1,21 @@
+// shader-differential — control-discard side A (CF-2 acceptance, 2026-09-02).
+//
+// Kills the 16 left-hand columns (TEXCOORD0.x = u < 0.25 at the pixel
+// centres) and paints the rest with a ramp.  The stager GENERATES side B
+// from this source with the band widened to u < 0.5 (32 columns), and
+// both sides are REFERENCE-compiled: the row measures the judge, not the
+// compiler.  What the guest asserts: mismatch, painted a=3072 b=2048,
+// exactly 1024 differing pixels (the columns A paints and B kills), and a
+// KIL decoded in both containers.  A judge that could not see a wrong
+// discard as a wrong band fails the run here, before any discard witness
+// (th06, discard-blend, test_57_discard, fp_discard_then_work_f) is read.
+//
+// The companion control-discard-blind row is one generated program whose
+// KIL cannot fire (v.x < -1 on a 0..1 lane) byte-copied to both sides; it
+// must judge discard-blind, proving the instrument that names a witness
+// whose discard never ran under the rig's inputs.
+void main(float4 v : TEXCOORD0, out float4 color : COLOR)
+{
+    if (v.x < 0.25f) discard;
+    color = float4(v.x, v.y, 0.5f, 1.0f);
+}

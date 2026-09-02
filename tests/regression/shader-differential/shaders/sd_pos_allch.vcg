@@ -10,13 +10,27 @@
 // audit), so a row reading them sees a changed input - by design.
 //
 // Channel recipe (u,v in 0..1 across the RT, v down):
-//   TEXCOORD0 = (u, v, 0.1 + 0.5v, 0.7 + 0.25u)   texture coordinates (xy); z, w vary
+//   TEXCOORD0 = (u, v, 0.1 + 0.5v, 0.92 - u)   texture coordinates (xy); z, w vary
 //   TEXCOORD1 = (u - 0.5, v - 0.5, 0.3 + 0.4u, 0.4 + 0.5v)   a "normal"-shaped vector
 //   TEXCOORD2 = (0.5 - u, 0.35 + 0.3v, v, 0.25 + 0.5u)   a "half"/"eye"-shaped vector
 //   TEXCOORD3 = (u * v, u + v, 1 - u, 0.6 + 0.3u)   mixed products
-//   COLOR0    = (u, v, 1 - u, 0.5 + 0.5 v)   per-vertex colour with alpha ramp
+//   COLOR0    = (u, v, 1 - u, 1 - 1.05v)   per-vertex colour with alpha ramp
 // Nothing is normalised here: shaders that normalise do so themselves,
 // shaders that dot raw vectors get finite, varying values.
+//
+// THE TWO ALPHA-CARRYING LANES CROSS ZERO (2026-09-02, CF-2 acceptance).
+// A shader's alpha test is `if (a < k) discard` with k small (4/255 in
+// every th06 shader, 0.1 in discard-blend), and a lane that never drops
+// below k makes that KIL a no-op on every pixel: th06_notex read
+// identical on the default path with both sides painting 4096/4096 - a
+// green that proved the post-discard lerp and nothing about the kill.
+// TEXCOORD0.w (th06's `color.a`) now runs 0.912 -> -0.072 left to right
+// and is below 4/255 on columns 58..63 (384 pixels; column 57 clears the
+// threshold by 0.0059); COLOR0.w runs 0.992 -> -0.042 top to bottom and
+// is below 4/255 on rows 60..63 (256 pixels; row 59 clears it by 0.008).
+// The zero crossings fall between pixel centres (x = 58.4, y = 60.4).
+// A discard that keys on either lane therefore kills a band, and the
+// judge sees a dropped or inverted KIL as that band's pixels differing.
 //
 // NO LANE IS A CONSTANT: a constant lane is an identity for some
 // operation (w == 1 for a lerp or a projective divide, z == 0 for a dot
@@ -24,7 +38,8 @@
 // lane - the default path's dropped fog lerp on th06_notex was invisible
 // while TEXCOORD2.w was 1 (t_72810bd7, 2026-09-01).  A shader reading any
 // lane sees a value that varies across the image.  Measured at the 64x64
-// pixel centres (2026-09-02): no lane is exactly 0 or 1 at any pixel
+// pixel centres (2026-09-02, re-checked after the alpha lanes changed):
+// no lane is exactly 0 or 1 at any pixel
 // except TEXCOORD3.y = u + v, which is exactly 1 on the anti-diagonal
 // (64 of 4096 pixels; its range is 0.016..1.98), and TEXCOORD1.xy /
 // TEXCOORD2.x change sign across the centre lines without hitting 0 at a
@@ -47,7 +62,7 @@ void main(
     float u = in_texcoord.x;
     float v = in_texcoord.y;
     out_position  = float4(in_position.x, in_position.y, 0.0f, 1.0f);
-    out_texcoord0 = float4(u, v, 0.1f + 0.5f * v, 0.7f + 0.25f * u);
+    out_texcoord0 = float4(u, v, 0.1f + 0.5f * v, 0.92f - u);
     out_texcoord1 = float4(u - 0.5f, v - 0.5f, 0.3f + 0.4f * u, 0.4f + 0.5f * v);
     // .w varies: a fragment shader that uses a texcoord's w as a lerp or
     // scale factor collapses to identity at w == 1, and every channel used
@@ -55,5 +70,5 @@ void main(
     // (lerp by fog.w) was pixel-invisible for that reason (2026-09-01 23:22).
     out_texcoord2 = float4(0.5f - u, 0.35f + 0.3f * v, v, 0.25f + 0.5f * u);
     out_texcoord3 = float4(u * v, u + v, 1.0f - u, 0.6f + 0.3f * u);
-    out_color     = float4(u, v, 1.0f - u, 0.5f + 0.5f * v);
+    out_color     = float4(u, v, 1.0f - u, 1.0f - 1.05f * v);
 }

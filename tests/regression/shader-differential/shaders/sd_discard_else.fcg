@@ -1,0 +1,24 @@
+// shader-differential — discard on the FALSE arm of a branch (t_79fc6bf7).
+//
+// The kill is reached through `else`, so the fragment that survives is
+// the one that satisfied the branch condition.  Under the rig's VP,
+// TEXCOORD0.w runs 0.912 -> -0.072 left to right, so `a > 0.5` holds on
+// the 27 left-hand columns: the reference paints those 1728 pixels and
+// kills the other 2368.  A lowering that recovers the guard from the
+// LAST COMPARISON SEEN instead of the PATH CONDITION emits the same
+// SGTRC but predicates the KIL on NE rather than EQ, and kills exactly
+// the fragments that must survive: every pixel differs.  Measured by
+// claude against the reference, 2026-09-02 08:58 (the default path,
+// shipping; the general path refuses the shape until CF-2 lands).
+//
+// Curated on the default path, RED until t_79fc6bf7 is fixed.  Whatever
+// lands for it must turn this row identical with painted a = b = 1728.
+void main(float4 color : TEXCOORD0, out float4 oColor : COLOR)
+{
+    float4 c = color;
+    if (c.a > 0.5f) {
+        oColor = c;
+    } else {
+        discard;
+    }
+}
