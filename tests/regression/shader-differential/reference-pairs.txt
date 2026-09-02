@@ -105,9 +105,9 @@ tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both
 # RED today.  After declaration-order numbering: STILL RED, R right, G
 # zero.  GREEN only after canonical-lane const blocks as well.  Green
 # after the numbering fix alone is a finding, not a pass.
-# |default: the general path has no fragment branch for file-scope uniforms
-# at all yet (t_f5f750ff) and refuses or aliases this shader.
-tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|default
+# |both since e5b4a4d gave the general path its fragment globals branch
+# (t_f5f750ff closed); before that it refused or aliased this shader.
+tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|both
 
 # NAMED REGRESSION for file-scope SAMPLERS used out of declaration order
 # (codex on 5d44ba6): emit numbers a sampler's unit at first use, the
@@ -117,8 +117,8 @@ tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|default
 # two-sampler shape the default matcher accepts) is asymmetric and a unit
 # swap is a different picture.  RED today, green after the sampler half of
 # the numbering fix.  |both since e672f38 registers file-scope samplers on
-# the general path too (the non-sampler half of t_f5f750ff is still open,
-# which is why sd_uniform_order above stays |default).
+# the general path (e5b4a4d then closed the non-sampler half, which is
+# why sd_uniform_order above is |both as well).
 tests/regression/shader-differential/shaders/sd_sampler_order.fcg|0|both
 
 # NAMED REGRESSION for sampler PARAMETERS on the general path (claude
@@ -128,3 +128,17 @@ tests/regression/shader-differential/shaders/sd_sampler_order.fcg|0|both
 # default identical, general RED until the tex instruction carries the
 # unit of the sampler it names.
 tests/regression/shader-differential/shaders/sd_sampler_units.fcg|0|both
+
+# DOUBLE-DUTY WITNESS (claude 21:58): program_uniforms.fcg is the only real
+# file-scope NON-sampler uniform shader in corpus + tree, and its uniform
+# carries an initialiser - `uniform float4 c = float4(1,0,0,1);` with a
+# main() taking no parameters.  Two rows, two questions:
+#   set 0   the COMPILED DEFAULT: the reference writes the initialiser into
+#           the inline const block, ours writes zeros (t_3bf3ce95 is exactly
+#           that line).  RED until the initialiser is the default.
+#   auto    PATCHABILITY: both sides patched by name, must be identical.
+#           Green on e5b4a4d (t_f5f750ff closed) - a red here is a regression.
+# The corpus copy is referenced by its build/ path (untracked, fetched by
+# the corpus tooling); the stager names the second row with its set.
+build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|0|both
+build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|auto|both

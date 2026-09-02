@@ -502,6 +502,7 @@ if ($ReferenceCompiler) {
     $refIdentical = 0
     $refSkippedPath = 0
     $seenNames = @{}
+    $seenRels = @{}
     foreach ($line in $pairLines) {
         $fields = $line.Split("|")
         $rel = $fields[0].Trim()
@@ -510,6 +511,16 @@ if ($ReferenceCompiler) {
         $src = Join-Path $repoRoot $rel
         if (-not (Test-Path $src)) { throw "reference-pairs: shader not found: $rel" }
         $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
+        # The SAME shader listed twice with two uniform sets (a double-duty
+        # witness: set 0 for its compiled default, auto for patchability) is
+        # named by its set on every listing after the first, so the row and
+        # its artifacts say which question they answer.  Two DIFFERENT
+        # shaders sharing a basename fall through to the md5 suffix below.
+        # (Review finding, codex: the first version only reached the set
+        # suffix when the md5 name collided too, which it never does for one
+        # path listed twice.)
+        if ($seenRels.ContainsKey($rel)) { $name = "$name" + "__set" + $set }
+        $seenRels[$rel] = 1
         # Column 4: extra compiler flags for OUR side, space separated,
         # applied on top of the path flag (the reference side has no
         # switches).  A row with flags is named
