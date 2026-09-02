@@ -236,7 +236,8 @@ tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
 # kills on the inner comparison alone (the outer guard dropped) - the t_79fc6bf7
 # mechanism; fixed by REFUSAL in 13c32bc (one guard query asked by both paths).
 # (`&&` is NOT this item: the default path gets the conjunction right;
-# fp_discard_and_f's default red is t_ec804d32, the half-preload aliasing.)  Found by the gate-1 tree sweep on the CF-2 tree: the
+# fp_discard_and_f's default red is t_ec804d32, the half-preload aliasing.)
+# Found by the gate-1 tree sweep on the CF-2 tree: the
 # default containers of these two CF-2 fixtures MISMATCH the reference
 # (fp_discard_and_f diff 320, ours 2624 painted vs 2304; fp_discard_nested_f diff
 # 351, ours 3264 vs 3615 - the outer condition dropped).  Curated |general only:
@@ -255,7 +256,10 @@ tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
 # 2624 painted vs the reference's 2304, columns 59..63) - identical at 2304 when
 # that fix lands.  Measured negative controls: the same predicate without the &&
 # (uniform or literal threshold) is identical at 2304 (TTY-ec804d32-probe.log).
-tools/rsx-cg-compiler/tests/shaders/fp_discard_and_f.cg|auto|both
+# |general since b126b95 (the t_ec804d32 refusal: the default path refuses the shape
+# that aliases a preloaded uniform with the varying's full-mask half preload; a
+# refusing curated row aborts the stage).  Expected identical at 2304 on general.
+tools/rsx-cg-compiler/tests/shaders/fp_discard_and_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_discard_nested_f.cg|0|general
 
 # 2026-09-02 t_becbfa69 (P1, BOTH paths, shipping): an output re-stored after a discard
