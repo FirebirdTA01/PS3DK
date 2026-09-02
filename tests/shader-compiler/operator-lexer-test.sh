@@ -82,7 +82,11 @@ struct OUT { float4 color : COLOR0; };
 OUT main()
 {
     OUT o;
-    bool b = (3 & 1) == 1;
+    bool b = ((3 & 1) == 1) &&
+             ((1 << 40) == 256) &&
+             ((1 << 33) == 2) &&
+             ((1 << -1) < 0) &&
+             ((-8 >> 1) == -4);
     o.color = b ? float4(1.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 1.0);
     return o;
 }
@@ -91,7 +95,11 @@ SHADER
 cat >"$work/live_constant_bitwise_vp.vcg" <<'SHADER'
 float4 main(float4 pos : POSITION) : POSITION
 {
-    bool b = (3 & 1) == 1;
+    bool b = ((3 & 1) == 1) &&
+             ((1 << 40) == 256) &&
+             ((1 << 33) == 2) &&
+             ((1 << -1) < 0) &&
+             ((-8 >> 1) == -4);
     return b ? pos : float4(0.0, 0.0, 0.0, 1.0);
 }
 SHADER

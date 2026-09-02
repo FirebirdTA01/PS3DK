@@ -1343,12 +1343,10 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
         case IROp::Or:  r = ia | ib; break;
         case IROp::Xor: r = ia ^ ib; break;
         case IROp::Shl:
-            if (ib < 0 || ib >= 32) return InvalidIRValue;
-            r = static_cast<int32_t>(static_cast<uint32_t>(ia) << ib);
+            r = static_cast<int32_t>(static_cast<uint32_t>(ia) << (ib & 31));
             break;
         case IROp::Shr:
-            if (ib < 0 || ib >= 32) return InvalidIRValue;
-            r = ia >> ib;
+            r = ia >> (ib & 31);
             break;
         default:
             break;
@@ -1392,8 +1390,13 @@ IRValueID IRBuilder::tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
                                      IRValueID operand)
 {
     int32_t ia = 0;
-    if (op == IROp::Not && extractIntScalar(*currentFunction_, operand, ia))
-        return createConstant(static_cast<int32_t>(~ia));
+    if (extractIntScalar(*currentFunction_, operand, ia))
+    {
+        if (op == IROp::Not)
+            return createConstant(static_cast<int32_t>(~ia));
+        if (op == IROp::Neg)
+            return createConstant(static_cast<int32_t>(-ia));
+    }
 
     std::vector<float> a;
     if (!extractFloatComponents(*currentFunction_, operand, a)) return InvalidIRValue;
