@@ -27,6 +27,13 @@ param(
     # matcher (--legacy-lowering) for the second half of the release gate.
     [switch]$GeneralLowering,
     [switch]$LegacyLowering,
+    # -UnverifiedCapacity: lift the general path's transitional capacity
+    # gate (e28531f, director's option C, 2026-09-02) for OUR compiles by
+    # exporting RSXCG_UNVERIFIED_CAPACITY=1, so the shapes above the
+    # pre-2026-09-02 capacity are compiled and JUDGED on pixels instead of
+    # refused into probe rows.  This is how a fix for one of those shapes
+    # is proven; the release-gate runs never pass it.
+    [switch]$UnverifiedCapacity,
     # -Corpus: also stage the ours-vs-ours fast/nofast corpus sweep
     # (increment 2).  The corpus compile loop runs in WSL via
     # stage-corpus.sh, because dev builds of the compiler live there —
@@ -161,6 +168,7 @@ if ($Rsxcgc) {
     }
 }
 if ($useWsl) { Write-Host "stager: compiler = wsl:$WslCompiler" }
+if ($UnverifiedCapacity) { Write-Host "stager: CAPACITY GATE LIFTED for our compiles (RSXCG_UNVERIFIED_CAPACITY=1) - this is a judging run, not a release-gate run" }
 else         { Write-Host "stager: compiler = $Rsxcgc" }
 
 $hdd0 = $Hdd0
@@ -386,10 +394,12 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         # timeout(1) inside WSL: an uncurated corpus shader must not be
         # able to stall the whole stage on a hung compile.
         $global:LASTEXITCODE = -1
-        $null = & wsl -- timeout 30s $WslCompiler @flags @($pathFlags) -p $Profile `
+        [string[]]$lift = if ($UnverifiedCapacity) { @("env", "RSXCG_UNVERIFIED_CAPACITY=1") } else { @() }
+        $null = & wsl -- @lift timeout 30s $WslCompiler @flags @($pathFlags) -p $Profile `
             --emit-container (To-WslPath $dst) (To-WslPath $srcPath) 2>&1
     } else {
         $global:LASTEXITCODE = -1
+        if ($UnverifiedCapacity) { $env:RSXCG_UNVERIFIED_CAPACITY = "1" }
         $null = & $Rsxcgc @flags @($pathFlags) -p $Profile --emit-container $dst $srcPath 2>&1
     }
     $rc = $LASTEXITCODE
@@ -521,7 +531,8 @@ if ($Corpus) {
     $stageWsl  = To-WslPath $stage
 
     Write-Host "stager: corpus sweep via WSL ($WslCompiler over $CorpusDir)"
-    & wsl -- bash $helperWsl $WslCompiler $CorpusDir $stageWsl
+    [string[]]$liftCorpus = if ($UnverifiedCapacity) { @("env", "RSXCG_UNVERIFIED_CAPACITY=1") } else { @() }
+    & wsl -- @liftCorpus bash $helperWsl $WslCompiler $CorpusDir $stageWsl
     if ($LASTEXITCODE -ne 0) { throw "stage-corpus.sh failed ($LASTEXITCODE)" }
 
     $corpusDst = Join-Path $root "corpus"
