@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """shader-differential: the N-live-registers family (t_5dc260b0), 2026-09-02.
 
+Two readouts: the FIRST REFUSAL per compiler (binary; the acceptance gate) and
+the SLOPE of emitted instructions per term (the gradient; the progress
+measure on a compiler that never refuses - the vita team's addition, 2026-09-02).
+
 Generates fragment shaders with N float4 terms, each derived from the
 inputs by a distinct affine op, summed into the output:
 
@@ -28,6 +32,7 @@ table is the result.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -62,6 +67,47 @@ def classify(rc, text):
     return "refuse(rc=%d)" % rc
 
 
+INSN_LINE = re.compile(r"^\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
+
+
+def count_insn(text):
+    """Instructions in the compiler's ucode dump (the 'N: w0 w1 w2 w3' lines),
+    skipping the 16-byte inline const block that follows any instruction with
+    a CONST-typed source (register type 2 in words 1..3) - the guest's
+    measure_cost rule.  The first refusal is binary and says nothing on a
+    compiler that never refuses; the SLOPE of instructions per term is the
+    finding there (the vita team, running this family: 4 per term against
+    the reference's 1, both linear - 'materialise every term before the
+    first add' measured as a gradient rather than a threshold)."""
+    n = 0
+    skip = False
+    for line in text.splitlines():
+        m = INSN_LINE.match(line)
+        if not m:
+            continue
+        words = [int(w, 16) for w in m.group(2).split()]
+        if len(words) < 4:
+            continue
+        if skip:
+            skip = False
+            continue
+        n += 1
+        swapped = [((w >> 16) | ((w & 0xFFFF) << 16)) & 0xFFFFFFFF for w in words]
+        skip = any((swapped[i] & 3) == 2 for i in (1, 2, 3))
+    return n
+
+
+def reference_insn(reference_exe, container):
+    """instructionCount from the reference's own disassembler, if it sits
+    beside the reference compiler; None otherwise."""
+    d = os.path.join(os.path.dirname(reference_exe), "sce-cgcdisasm.exe")
+    if not os.path.exists(d) or not os.path.exists(container):
+        return None
+    rc, text = run([d, container])
+    m = re.search(r"instructionCount\s+(\d+)", text)
+    return int(m.group(1)) if m else None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ours", required=True, help="WSL path of rsx-cg-compiler")
@@ -78,20 +124,33 @@ def main():
             f.write(shader(n))
         row = {"N": n}
         for label, flags in (("legacy", ["--legacy-lowering"]), ("general", [])):
+            # A bare compile (no --emit-container) prints the ucode dump the
+            # instruction count is read from; a refusal still returns non-zero.
             rc, text = run(["wsl", "--", "timeout", "30s", a.ours] + flags +
-                           ["-p", "sce_fp_rsx", "--emit-container", wsl_path(a.out) + "/nl.fpo", wsl_path(src)])
+                           ["-p", "sce_fp_rsx", wsl_path(src)])
             row[label] = classify(rc, text)
+            row[label + " insn"] = count_insn(text) if rc == 0 else "-"
         if a.reference:
-            rc, text = run([a.reference, "-p", "sce_fp_rsx", "-o", os.path.join(a.out, "ref_%02d.fpo" % n), src])
+            ref_out = os.path.join(a.out, "ref_%02d.fpo" % n)
+            rc, text = run([a.reference, "-p", "sce_fp_rsx", "-o", ref_out, src])
             row["reference"] = "ok" if rc == 0 else "refuse"
+            ri = reference_insn(a.reference, ref_out) if rc == 0 else None
+            row["reference insn"] = ri if ri is not None else "-"
         rows.append(row)
-    cols = ["N", "legacy", "general"] + (["reference"] if a.reference else [])
+    cols = ["N", "legacy", "legacy insn", "general", "general insn"] + (["reference", "reference insn"] if a.reference else [])
     print("n-live: ours = wsl:%s%s" % (a.ours, ", reference present" if a.reference else ", no reference"))
     print("  ".join("%-22s" % c for c in cols))
     for row in rows:
         print("  ".join("%-22s" % str(row[c]) for c in cols))
-    first = {c: next((r["N"] for r in rows if r[c] != "ok"), None) for c in cols[1:]}
-    print("first refusal: " + ", ".join("%s=%s" % (c, first[c] if first[c] else "none through %d" % steps[-1]) for c in cols[1:]))
+    verdict_cols = [c for c in cols[1:] if not c.endswith(" insn")]
+    first = {c: next((r["N"] for r in rows if r[c] != "ok"), None) for c in verdict_cols}
+    print("first refusal: " + ", ".join("%s=%s" % (c, first[c] if first[c] else "none through %d" % steps[-1]) for c in verdict_cols))
+    # the slope: instructions per term between the two largest N that compiled
+    for c in verdict_cols:
+        pts = [(r["N"], r[c + " insn"]) for r in rows if isinstance(r[c + " insn"], int)]
+        if len(pts) >= 2:
+            (n1, i1), (n2, i2) = pts[-2], pts[-1]
+            print("slope %s: %.2f instructions per term (N %d..%d)" % (c, (i2 - i1) / float(n2 - n1), n1, n2))
     return 0
 
 
