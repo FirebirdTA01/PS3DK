@@ -162,7 +162,13 @@ desktop.ini
 # ARCHITECTURE.md; run_diff.sh drives a byte-match against the reference
 # compiler and depends on a proprietary tool.
 /tools/rsx-cg-compiler/docs/REVERSE_ENGINEERING.md
-/tools/rsx-cg-compiler/tests/
+/tools/rsx-cg-compiler/tests/*
+# ...except the shader fixtures: tests/shader-compiler/*.sh compiles these in
+# CI, so a fresh checkout has to have them.  The ones predating this line were
+# force-added one at a time, which is a trap - a fixture can be referenced by a
+# CI step and silently left uncommitted.  Listed as a directory re-include, so
+# the * above is what keeps the rest of tests/ ignored.
+!/tools/rsx-cg-compiler/tests/shaders/
 
 # Reference-output analysis methodology — describes how we capture
 # and byte-match the proprietary reference SDK/toolchain output. Local-only;

@@ -423,6 +423,15 @@ struct IRGlobal
     // the const allocator picks the slot.
     char explicitRegisterBank  = 0;
     int  explicitRegisterIndex = 0;
+
+    // A file-scope `const`'s initialiser, evaluated when the global is
+    // built.  Every reference to the const folds to an IRConstant made
+    // from this, so a global without it is one whose value the backend
+    // would have to invent rather than read from the source - which is
+    // exactly what used to happen (t_4584aa27).  Empty means the global is
+    // not a file-scope const with an evaluable initialiser; ordinary
+    // uniforms leave it empty.
+    std::vector<float> initialValue;
 };
 
 class IRModule

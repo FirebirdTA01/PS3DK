@@ -1,0 +1,9 @@
+// Negative control for the file-scope const pair (t_4584aa27).  Identical to
+// fp_inline_literal_f.cg except for the constant.  If the equality assertion
+// ever passes because the compiler dropped the multiply rather than because it
+// folded the right value, this shader's container would match too -- so the
+// test requires this one to DIFFER.
+void main(float2 uv : TEXCOORD0, out float4 color : COLOR)
+{
+    color = float4(uv.x * 3.25, uv.y, 0.0, 1.0);
+}

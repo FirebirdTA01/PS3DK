@@ -1,0 +1,24 @@
+// A file-scope `const` must reach the ucode as its INITIALISER (t_4584aa27).
+//
+// Before the fix the initialiser was parsed and then dropped: the global was
+// promoted to a uniform-like load with no value behind it, and each backend
+// invented a different wrong answer for K -- the fragment default path
+// compiled it as 0.0, the fragment general path read it as vertex attribute 0
+// (so K took the value of uv.x), and the vertex backend refused outright with
+// "LoadUniform for unknown global 'K'".  Only the vertex refusal was honest.
+//
+// Paired with fp_inline_literal_f.cg, which writes the same value inline and
+// must compile to the byte-identical container, and with
+// fp_inline_literal_alt_f.cg, which writes a DIFFERENT value and must not --
+// without that third shader, a compiler that dropped the multiply entirely
+// would satisfy the equality and pass.
+//
+// 7.5 is exact in float32 (0x40F00000) and is stored halfword-swapped in the
+// ucode as 0000 40F0, so the test can also assert the value itself is present
+// rather than only that two containers agree.
+const float K = 7.5;
+
+void main(float2 uv : TEXCOORD0, out float4 color : COLOR)
+{
+    color = float4(uv.x * K, uv.y, 0.0, 1.0);
+}

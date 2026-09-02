@@ -30,6 +30,11 @@ private:
     FunctionDecl* currentFunctionDecl_ = nullptr;
     IRBasicBlock* currentBlock_ = nullptr;
     const SemanticAnalyzer* semantic_ = nullptr;
+    // Narrow evaluator for a file-scope const's initialiser.  False means
+    // the value could not be computed, which the call site REFUSES rather
+    // than compiling as zero.
+    static bool evaluateConstInitializer(const ExprNode* init,
+                                         std::vector<float>& out);
 
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;

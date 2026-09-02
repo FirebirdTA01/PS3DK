@@ -1,0 +1,7 @@
+// The inline-literal half of the file-scope const pair (t_4584aa27): same
+// value as fp_file_scope_const_f.cg's K, written directly.  Folding a const
+// means the container is byte-identical to this one.
+void main(float2 uv : TEXCOORD0, out float4 color : COLOR)
+{
+    color = float4(uv.x * 7.5, uv.y, 0.0, 1.0);
+}

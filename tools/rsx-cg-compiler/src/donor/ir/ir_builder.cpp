@@ -46,6 +46,73 @@ std::string IRBuilder::makeLabel(const std::string& prefix)
 // Main Build Entry Point
 // ============================================================================
 
+// Evaluate a file-scope const's initialiser to floats (t_4584aa27).
+// Deliberately NARROW: a scalar literal, or a constructor whose arguments
+// are all scalar literals, with an optional leading unary minus.  Anything
+// else returns false and the caller REFUSES the shader.
+//
+// Narrow rather than a general constant folder on purpose: the initialisers
+// real shaders use are nearly all of this shape, and a half-right folder
+// would put wrong numbers into containers that are otherwise well formed -
+// the same class of silent damage this evaluator exists to remove.
+static bool literalToFloat(const ExprNode* e, float& out)
+{
+    bool negate = false;
+    while (e && e->kind == ExprKind::Unary)
+    {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        if (u->op != UnaryOp::Negate)
+            return false;
+        negate = !negate;
+        e = u->operand.get();
+    }
+    if (!e || e->kind != ExprKind::Literal)
+        return false;
+    const auto* lit = static_cast<const LiteralExpr*>(e);
+    double v = 0.0;
+    switch (lit->literalKind)
+    {
+    case LiteralExpr::LiteralKind::Float: v = std::get<double>(lit->value); break;
+    case LiteralExpr::LiteralKind::Int:   v = static_cast<double>(std::get<int64_t>(lit->value)); break;
+    case LiteralExpr::LiteralKind::Bool:  v = std::get<bool>(lit->value) ? 1.0 : 0.0; break;
+    default: return false;
+    }
+    out = static_cast<float>(negate ? -v : v);
+    return true;
+}
+
+bool IRBuilder::evaluateConstInitializer(const ExprNode* init,
+                                         std::vector<float>& out)
+{
+    out.clear();
+    if (!init)
+        return false;               // `const float x;` - nothing to evaluate
+
+    float scalar = 0.0f;
+    if (literalToFloat(init, scalar))
+    {
+        out.push_back(scalar);
+        return true;
+    }
+
+    if (init->kind == ExprKind::Constructor)
+    {
+        const auto* ctor = static_cast<const ConstructorExpr*>(init);
+        if (ctor->arguments.empty() || ctor->arguments.size() > 4)
+            return false;
+        for (const auto& a : ctor->arguments)
+        {
+            float v = 0.0f;
+            if (!literalToFloat(a.get(), v))
+                return false;       // not all-literal: fold instead
+            out.push_back(v);
+        }
+        return true;
+    }
+
+    return false;
+}
+
 std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const SemanticAnalyzer& semantic)
 {
     semantic_ = &semantic;
@@ -94,6 +161,35 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             if (varDecl->storage == StorageQualifier::None)
                 varDecl->storage = StorageQualifier::Uniform;
 
+            // A file-scope `const` needs its initialiser evaluated here,
+            // because every reference to it folds to that value.
+            //
+            // Both reference compilers do something else with these: sce-cgc
+            // and psp2cgc emit `const float PI = 3.14;` as a real uniform
+            // named PI whose compiled default is 3.14, usable unpatched and
+            // overridable by name at runtime.  Offering that behaviour
+            // behind a flag and comparing the two is t_3bf3ce95, a separate
+            // change on top of this one.  Folding is what this compiler
+            // does today; what it did not do was fold the right number.
+            std::vector<float> constInit;
+            const bool isFileScopeConst =
+                varDecl->storage == StorageQualifier::Const;
+            if (isFileScopeConst)
+            {
+                if (!evaluateConstInitializer(varDecl->initializer.get(), constInit))
+                {
+                    // REFUSE rather than drop it.  Silently emitting zero for
+                    // a value we could not evaluate is the defect this fix
+                    // exists to remove, and a wrong constant is invisible in
+                    // a container that is otherwise well formed.
+                    error(varDecl->loc,
+                          "file-scope const '" + varDecl->name +
+                          "' has an initialiser this compiler cannot evaluate; "
+                          "refusing rather than compiling it as zero");
+                    constInit.clear();
+                }
+            }
+
             IRGlobal global;
             global.name = varDecl->name;
             global.type = getIRType(varDecl->type.get());
@@ -115,6 +211,8 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 global.explicitRegisterIndex = varDecl->semantic.explicitRegisterIndex;
             }
 
+            global.initialValue = constInit;
+
             module_->addGlobal(global);
 
             // Map declaration to value.  Uniform globals are intentionally
@@ -123,7 +221,24 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // the lowering can resolve the source const-bank slot.  Other
             // globals stay in nameToValue_ (existing behaviour).
             declToValue_[varDecl] = global.valueId;
-            if (varDecl->storage != StorageQualifier::Uniform)
+            // Uniforms are kept OUT of nameToValue_ so buildIdentifierExpr
+            // falls through to findGlobal() and emits a LoadUniform.  A
+            // file-scope CONST is kept out for the same reason and a
+            // different destination: its reference materialises an
+            // IRConstant from the initialiser recorded on the global.
+            //
+            // It used to be mapped to `global.valueId` - a value id with no
+            // IRConstant behind it, because IRGlobal carried no initialiser.
+            // Every reference then resolved to a value that was never
+            // populated and the constant emitted as ZERO: `const float K =
+            // 7.5; uv.x * K` compiled to `uv.x * 0.0`, on both paths, with
+            // no diagnostic (t_4584aa27).  A local const never had this
+            // problem because buildVarDeclStmt maps the name to
+            // buildExpr(initialiser), which is a real IRConstant.
+            const bool foldableConst =
+                varDecl->storage == StorageQualifier::Const &&
+                !global.initialValue.empty();
+            if (varDecl->storage != StorageQualifier::Uniform && !foldableConst)
             {
                 nameToValue_[varDecl->name] = global.valueId;
             }
@@ -1049,6 +1164,18 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
     IRGlobal* global = module_->findGlobal(expr->name);
     if (global)
     {
+        // A file-scope const folds to its initialiser here, where
+        // currentFunction_ exists to own the IRConstant.  This is the
+        // reference site for the same reason the uniform case is: the
+        // global itself is not an SSA value.
+        if (global->storage != StorageQualifier::Uniform &&
+            !global->initialValue.empty())
+        {
+            if (global->initialValue.size() == 1)
+                return createConstant(global->initialValue[0]);
+            return createConstant(global->type, global->initialValue);
+        }
+
         // Emit load from global
         auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
             currentFunction_->allocateValueId(), global->type);
