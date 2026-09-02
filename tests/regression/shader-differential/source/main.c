@@ -47,9 +47,11 @@
  * make that visible where the verdict is read (the vita-cg room's
  * false-pass shapes).
  * Cost, in every judged row's diagnostic: `size a=N b=N insn a=N b=N
- * params a=N b=N` - container bytes, ucode/16, container parameter
- * count - so the price of a green is on the row (t_3bf3ce95 compares
- * const promotion against folding on exactly these).
+ * consts a=N b=N params a=N b=N` - container bytes, fragment
+ * instructions, inline constant blocks (16-byte data entries in the
+ * ucode, not instructions), container parameter count - so the price
+ * of a green is on the row (t_3bf3ce95 compares const promotion against
+ * folding on exactly these).
  *
  * Poison canary: after every row past the standing controls the rig
  * draws the identity control's container once; if that paints nothing
@@ -702,6 +704,53 @@ static int canary_paints(CellGcmContextData *ctx, void *canary_container,
 	return painted_pixels(save, rt_pitch) > 0;
 }
 
+/* Cost of one container, so a green can be priced (t_3bf3ce95 compares
+ * const promotion against folding on exactly these): container bytes,
+ * container parameters, and the ucode split into INSTRUCTIONS and inline
+ * CONST BLOCKS.  The NV40 fragment ucode is 16-byte entries, but not all
+ * of them are instructions: an instruction whose source has type 2
+ * (constant, low two bits of the source word) is followed by one 16-byte
+ * block of immediate data.  ucode/16 counted those as instructions
+ * (review finding, codex), which for the promotion comparison would
+ * report const-slot growth as instruction growth.  The words are read
+ * as the guest sees them: the container stores each 32-bit word with
+ * its halfwords swapped, so the type bits sit at bit 16 of the word as
+ * loaded; swapping back puts them at bit 0.  Call only after
+ * cellGcmCgInitProgram (render_side does that). */
+typedef struct {
+	u32 bytes;    /* container size */
+	u32 insn;     /* fragment instructions */
+	u32 consts;   /* inline 16-byte constant blocks */
+	u32 params;   /* container parameter count */
+} sd_cost;
+
+static void measure_cost(void *container, u32 bytes, sd_cost *out)
+{
+	CGprogram prog = (CGprogram)container;
+	void *uc = NULL; u32 usz = 0;
+	cellGcmCgGetUCode(prog, &uc, &usz);
+	out->bytes  = bytes;
+	out->params = cellGcmCgGetCountParameter(prog);
+	out->insn = out->consts = 0;
+	const u32 *w = (const u32 *)uc;
+	u32 n = usz / 16, i = 0;
+	while (i < n) {
+		int has_const = 0;
+		for (int src = 1; src <= 3; src++) {
+			u32 v = w[i * 4 + src];
+			v = (v << 16) | (v >> 16);
+			if ((v & 3u) == 2u)
+				has_const = 1;
+		}
+		out->insn++;
+		i++;
+		if (has_const && i < n) {
+			out->consts++;
+			i++;
+		}
+	}
+}
+
 /* ---- one side of a pair: bind, draw (with warm-up), read back ---- */
 
 /* Returns 0 on success; -1 if a uniform in the pair's set has no
@@ -1109,6 +1158,14 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		              rt_depth_off, rt_pitch, save_b, &warm_b)
 		: 0;
 
+	/* Cost metrics are taken HERE, while both containers are live: the
+	 * first version of the cost column read them after the frees below
+	 * (review finding, codex: use-after-free that only looked stable
+	 * because the heap had not been reused yet). */
+	sd_cost cost_a, cost_b;
+	measure_cost(cont_a, sz_a, &cost_a);
+	measure_cost(cont_b, sz_b, &cost_b);
+
 	g_local_mem_heap = watermark;
 	free(cont_a);
 	free(cont_b);
@@ -1224,23 +1281,13 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		         "%swarmup a=%d b=%d", len ? " " : "", warm_a, warm_b);
 	}
 	{
-		/* Cost of each side, so a green can be priced: container
-		 * bytes, fragment instructions (the ucode blob is 16 bytes
-		 * per instruction on NV40), and container parameters (a
-		 * promoted file-scope const shows up here as +1, t_3bf3ce95).
-		 * Both containers were initialised by render_side above. */
-		void *ua = NULL, *ub = NULL;
-		u32 usz_a = 0, usz_b = 0;
-		cellGcmCgGetUCode((CGprogram)cont_a, &ua, &usz_a);
-		cellGcmCgGetUCode((CGprogram)cont_b, &ub, &usz_b);
 		size_t len = strlen(r->diagnostic);
 		if (strcmp(r->diagnostic, "-") == 0) len = 0;
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
-		         "%ssize a=%u b=%u insn a=%u b=%u params a=%u b=%u",
-		         len ? " " : "", (unsigned)sz_a, (unsigned)sz_b,
-		         (unsigned)(usz_a / 16), (unsigned)(usz_b / 16),
-		         (unsigned)cellGcmCgGetCountParameter((CGprogram)cont_a),
-		         (unsigned)cellGcmCgGetCountParameter((CGprogram)cont_b));
+		         "%ssize a=%u b=%u insn a=%u b=%u consts a=%u b=%u params a=%u b=%u",
+		         len ? " " : "", cost_a.bytes, cost_b.bytes,
+		         cost_a.insn, cost_b.insn, cost_a.consts, cost_b.consts,
+		         cost_a.params, cost_b.params);
 	}
 	r->elapsed_ms = now_ms() - t0;
 }
