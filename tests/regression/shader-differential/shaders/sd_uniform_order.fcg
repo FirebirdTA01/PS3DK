@@ -1,0 +1,40 @@
+// shader-differential - NAMED REGRESSION for file-scope uniforms used out
+// of declaration order (claude, 2026-09-01 21:10; default path, ships).
+//
+// THE DEFECT: nv40_fp_emit allocates a file-scope uniform's slot at FIRST
+// USE while the container emit numbers them in DECLARATION order, so when
+// the two orders differ every file-scope uniform's patch offsets are
+// permuted: patching a writes b's constant block and vice versa.  Every
+// shader we had used its uniforms in declaration order, so both numberings
+// agreed and nothing could fail.
+//
+// THE ROW: uniform_set=auto patches each parameter BY NAME with a value
+// derived from the name, so a and b receive DIFFERENT values in one row.
+//   R = uv.x * b     b is declared SECOND and used FIRST
+//   G = uv.y * a     a is declared FIRST and used SECOND
+//   B = 0, A = 1
+// A row that patched both to ONE value could not fail - which is why this
+// needs auto, not a fill.
+//
+// THIS IS A COMPOUND ROW carrying TWO default-path defects, and its
+// expected progression is (review finding, codex):
+//   today:  RED - R carries a's value (the swap), and G reads ZERO: b's
+//           patch does land at a's site, but the scalar const block there
+//           holds its value in the DESTINATION lane (y) while a by-name
+//           patch writes lane x, so the lane G reads was never written.
+//           Measured on origin/main 0981daa: reference R max 67 / G max
+//           103, ours R max 103 / G 0 everywhere.
+//   after declaration-order slot numbering: STILL RED - R right, G still
+//           zero.  A green here after that fix alone would mean the fix
+//           did something it was not meant to; read the levels.
+//   after scalar const blocks are written in a canonical lane with the
+//           swizzle selecting: GREEN.
+// The two halves are read on their own channels: R is the numbering, G
+// is the lane placement.
+uniform float a;
+uniform float b;
+
+float4 main(float2 uv : TEXCOORD0) : COLOR
+{
+    return float4(uv.x * b, uv.y * a, 0.0, 1.0);
+}

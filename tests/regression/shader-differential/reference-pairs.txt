@@ -80,3 +80,18 @@ tests/regression/shader-differential/shaders/sd_scalar_lane_extract.fcg|auto|gen
 # unflagged.  Its flagged siblings live in reference-pairs-const-mode.txt
 # until the flag is on origin/main.
 tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both
+
+# COMPOUND NAMED REGRESSION, default path, two defects on two channels
+# (claude 2026-09-01 21:10; expected progression per codex review):
+#   R = the slot NUMBERING: emit numbers a global at first use, the
+#       container in declaration order, so a and b get each other's patch
+#       offsets.  Under auto each name gets its own value, so R shows a's
+#       value where the reference shows b's.
+#   G = the LANE PLACEMENT: a scalar const block holds its value in the
+#       destination lane, a by-name patch writes lane x, G reads zero.
+# RED today.  After declaration-order numbering: STILL RED, R right, G
+# zero.  GREEN only after canonical-lane const blocks as well.  Green
+# after the numbering fix alone is a finding, not a pass.
+# |default: the general path has no fragment branch for file-scope uniforms
+# at all yet (t_f5f750ff) and refuses or aliases this shader.
+tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|default

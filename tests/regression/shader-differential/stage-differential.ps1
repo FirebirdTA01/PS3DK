@@ -215,12 +215,24 @@ function Print-AutoValues([string]$srcPath, [string]$label, [switch]$IncludeFile
 # carry the parameter and auto is right again.
 function Has-FileScopeConst([string]$srcPath) {
     $text = Get-Content -Raw -LiteralPath $srcPath
-    # Strip block and line comments, then look for const at line start
-    # (file scope; function-local consts are indented in every fixture
-    # and never promoted anyway).
-    $text = [regex]::Replace($text, '/\*[\s\S]*?\*/', '')
-    $text = [regex]::Replace($text, '//[^\n]*', '')
-    return [regex]::IsMatch($text, '(?m)^const\s')
+    # Strip block and line comments, then walk the text tracking brace and
+    # parenthesis depth: a `const` counts only at depth 0 of both (outside
+    # every function body and every parameter list).  Indentation plays no
+    # part (review note, codex: the first version keyed on column 0, which
+    # is a convention, not a property).
+    $text = [regex]::Replace($text, '/\*[\s\S]*?\*/', ' ')
+    $text = [regex]::Replace($text, '//[^\n]*', ' ')
+    $depth = 0; $paren = 0
+    foreach ($m in [regex]::Matches($text, '[{}()]|\bconst\b')) {
+        switch ($m.Value) {
+            '{' { $depth++ }
+            '}' { if ($depth -gt 0) { $depth-- } }
+            '(' { $paren++ }
+            ')' { if ($paren -gt 0) { $paren-- } }
+            default { if ($depth -eq 0 -and $paren -eq 0) { return $true } }
+        }
+    }
+    return $false
 }
 
 # Same binary twice: a curated container must come out byte-identical
