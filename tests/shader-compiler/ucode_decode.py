@@ -28,6 +28,29 @@ Output, one blank-separated line per instruction:
 Inline constant blocks are 16 bytes of DATA following the instruction that
 names them; this walk advances past them, so a literal is never decoded as
 an opcode.
+
+AN UNUSED OPERAND SLOT ENCODES AS REGISTER TYPE TEMP, INDEX 0.  Measured on
+sd_mad_probe: instruction 0 is ADD (0x03) with src0=INPUT, src1=CONST and
+src2=TEMP R0, raw 0x3fe1c800 - a third operand an ADD does not have.  Every
+instruction with fewer than three real sources carries dummy TEMP-R0
+operands, and NOTHING IN THE UCODE DISTINGUISHES THEM FROM A GENUINE READ OF
+R0.  Two consequences for anyone writing a check on these words:
+
+  - A byte-only rule of the form "every temp source must have been written"
+    or "no two sources may name one slot" is FALSE as stated.  One such
+    invariant, proposed and measured before it was written, fired on 209 of
+    209 compiled shaders on every binary including known-good ones.  Making
+    it sound needs an opcode -> source-arity table, which is a second source
+    of truth about the ISA.
+  - A scan that counts these as reads is still sound PROVIDED it excludes
+    R0, because the dummies only ever name R0: the over-count can make a
+    register look more live, never less, and cannot mask anything about a
+    non-zero slot.  That is why colour-reaches-r0-test.sh is correct.
+
+Virtual-register IDENTITY is not in these words at all.  A check that needs
+it takes it from the allocator trace (RSX_DUMP_ORDER), whose `kind` field is
+VSrcKind: None=0, Temp=1, Input=2, Uniform=3, Literal=4.  Reading Temp as 0
+there produces a tool that examines nothing and reports every shader clean.
 """
 
 import re
