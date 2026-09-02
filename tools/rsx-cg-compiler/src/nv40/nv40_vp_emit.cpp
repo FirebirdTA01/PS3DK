@@ -2548,46 +2548,67 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     }
                 }
 
+                // The destination lane an operand fills is NOT its
+                // argument position: a VECTOR operand fills as many lanes
+                // as it is wide.  Counting one lane per operand made
+                // `float4(float2_uv, 0, 1)` emit (uv.x, 0, 1, unwritten)
+                // and `float4(pos.xyz, 1)` emit (pos.x, 1, -, -), silently
+                // - the literals landed one lane early and the tail was
+                // never written (t_14d18f02).  Only the exact
+                // `float4(float3_input, literal)` shape was ever right,
+                // because it has its own case above.
+                int lane = 0;
                 for (size_t i = 0; i < inst.operands.size(); ++i)
                 {
-                    LaneSource ls;
                     const IRValueID id = inst.operands[i];
 
-                    // Direct input attribute reference (scalar input
-                    // type — uncommon but legal for `float in.x`).
+                    // Direct input attribute reference, of any width: a
+                    // float2 fills x and y, a float3 x through z.
                     auto srcIt = valueToSource.find(id);
                     if (srcIt != valueToSource.end() &&
                         srcIt->second.kind == ValueSource::Kind::Input)
                     {
-                        ls.kind    = LaneSource::Kind::InputLane;
-                        ls.regIdx  = srcIt->second.regIdx;
-                        ls.srcLane = 0;
-                        vb.lanes[i] = ls;
+                        const int w = srcIt->second.width < 1
+                                          ? 1 : srcIt->second.width;
+                        if (lane + w > 4) { ok = false; break; }
+                        for (int k = 0; k < w; ++k)
+                        {
+                            LaneSource ls;
+                            ls.kind    = LaneSource::Kind::InputLane;
+                            ls.regIdx  = srcIt->second.regIdx;
+                            ls.srcLane = k;
+                            vb.lanes[lane++] = ls;
+                        }
                         continue;
                     }
 
-                    // VecShuffle of a known input → InputLane(srcLane).
+                    // VecShuffle of a known input or const, of any width:
+                    // `float4(v.xyz, 1)` fills three lanes from v.
                     auto shIt = valueToShuffle.find(id);
                     if (shIt != valueToShuffle.end())
                     {
                         auto inputIt = valueToSource.find(shIt->second.srcId);
-                        if (inputIt != valueToSource.end() &&
-                            inputIt->second.kind == ValueSource::Kind::Input)
+                        const bool isInput =
+                            inputIt != valueToSource.end() &&
+                            inputIt->second.kind == ValueSource::Kind::Input;
+                        const bool isConst =
+                            inputIt != valueToSource.end() &&
+                            inputIt->second.kind == ValueSource::Kind::Const;
+                        if (isInput || isConst)
                         {
-                            ls.kind    = LaneSource::Kind::InputLane;
-                            ls.regIdx  = inputIt->second.regIdx;
-                            ls.srcLane = shIt->second.lanes[0];
-                            vb.lanes[i] = ls;
-                            continue;
-                        }
-                        if (inputIt != valueToSource.end() &&
-                            inputIt->second.kind == ValueSource::Kind::Const)
-                        {
-                            ls.kind    = LaneSource::Kind::ConstLane;
-                            ls.regIdx  = inputIt->second.regIdx;
-                            ls.srcLane = shIt->second.lanes[0];
-                            vb.lanes[i] = ls;
-                            allInputLanes = false;
+                            const int w = shIt->second.width < 1
+                                              ? 1 : shIt->second.width;
+                            if (lane + w > 4) { ok = false; break; }
+                            for (int k = 0; k < w; ++k)
+                            {
+                                LaneSource ls;
+                                ls.kind    = isInput ? LaneSource::Kind::InputLane
+                                                     : LaneSource::Kind::ConstLane;
+                                ls.regIdx  = inputIt->second.regIdx;
+                                ls.srcLane = shIt->second.lanes[k];
+                                vb.lanes[lane++] = ls;
+                            }
+                            if (isConst) allInputLanes = false;
                             continue;
                         }
                     }
@@ -2598,9 +2619,11 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     float lit = 0.0f;
                     if (isFloatLiteral(id, lit))
                     {
+                        if (lane + 1 > 4) { ok = false; break; }
+                        LaneSource ls;
                         ls.kind     = LaneSource::Kind::Literal;
                         ls.litValue = lit;
-                        vb.lanes[i] = ls;
+                        vb.lanes[lane++] = ls;
                         allInputLanes = false;
                         continue;
                     }
@@ -2609,6 +2632,9 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     ok = false;
                     break;
                 }
+                // The width is what the operands actually filled, not how
+                // many of them there were.
+                if (ok) vb.width = lane;
                 if (!ok)
                 {
                     GenericVecConstructBinding gv;

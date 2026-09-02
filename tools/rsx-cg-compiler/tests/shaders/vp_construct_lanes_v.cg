@@ -1,0 +1,29 @@
+// A float4 constructor whose operands are VECTORS fills one lane per
+// COMPONENT, not one lane per operand (t_14d18f02).
+//
+// The lane classifier used the operand's argument position as its
+// destination lane, so a float2 counted as one lane: the two literals
+// landed one lane early and w was never written at all.
+//
+//     out_texcoord = float4(in_texcoord, 0.0f, 1.0f);   // float2 in
+//     ours       MOV o[7].x,  v[8].x;
+//                MOV o[7].yz, c[467].xxyx;      -> (u, 0, 1, unwritten)
+//     reference  MOV o[7].xy, v[8].xyxx;
+//                MOV o[7].zw, c[467].xxxy;      -> (u, v, 0, 1)
+//
+// Silent, in the shipping path, and this exact statement is in the
+// readback rig's own transform VP - every readback row that read
+// TEXCOORD0.y through it was reading zero.  The same fault took the
+// `.xyz` swizzle of a float4 input as one lane, which left a quad's
+// POSITION as (x, 1, -, -) and stopped it rasterising at all.
+//
+// `float4(float3_input, literal)` was always right because it has its
+// own case; nothing else was.
+void main(float4 in_position  : POSITION,
+          float2 in_texcoord  : TEXCOORD0,
+          out float4 out_position : POSITION,
+          out float4 out_texcoord : TEXCOORD0)
+{
+    out_position = in_position;
+    out_texcoord = float4(in_texcoord, 0.0f, 1.0f);
+}
