@@ -1161,11 +1161,26 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
                 $r = $_.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
                 -not ($r.StartsWith('build/') -or $r.Contains('/_work/') -or $r.StartsWith('_work/'))
             } | Sort-Object FullName)
+        # A shader that is BOTH curated and in the corpus is one candidate,
+        # not two: keyed on the resolved full path (a pairing instrument
+        # keys on full path or its hash, never a basename), the curated
+        # entry wins and keeps its uniform set.  Dormant today (no curated
+        # VP lives under the corpus root); the count is printed so a
+        # duplicate is visible the day one appears (claude's note on the
+        # gate-5 sweep, 2026-09-02).
+        $vppSeen = @{}
+        foreach ($c in $vppCands) { $vppSeen[(Resolve-Path -LiteralPath $c.src).Path.ToLowerInvariant()] = 1 }
+        $vppDupes = 0
+        $vppCurated = $vppCands.Count
         foreach ($f in $vppFiles) {
+            $key = $f.FullName.ToLowerInvariant()
+            if ($vppSeen.ContainsKey($key)) { $vppDupes++; continue }
+            $vppSeen[$key] = 1
             $rel = $f.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
             $set = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
             $vppCands += @{ src = $f.FullName; rel = $rel; set = $set }
         }
+        if ($vppDupes -gt 0) { Write-Host "stager: vp path pairs: $vppDupes corpus candidate(s) already curated - counted once, curated set kept" }
 
         if ($vppCands.Count -eq 0) { throw "vp path pairs: no candidates (list empty and no corpus dir)" }
         $vppDst = Join-Path $root "vppathpair"
@@ -1209,7 +1224,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
         Set-Content -LiteralPath $vppRefusedPath -Value ($vppRefusedRows -join "`n") -Encoding Ascii
         if (($vppStaged + $vppIdentical + $vppDefRefused + $vppGenRefused + $vppRefRefused) -eq 0) { throw "vp path pairs compiled nothing" }
         $manifest += $vppRows
-        Write-Host "stager: vp path pairs (gate 5): $($vppCands.Count) candidates ($($vppCands.Count - $vppFiles.Count) curated from $VpPairsList + $($vppFiles.Count) from $vppRoot), $vppDefRefused default-refused (out of scope), $vppGenRefused GENERAL-REFUSED (gate failures), $vppRefRefused reference-refused (unoracled), $vppIdentical byte-identical default/general, $vppStaged pairs staged (sidecar: vp-path-pair-refused.txt)"
+        Write-Host "stager: vp path pairs (gate 5): $($vppCands.Count) candidates ($vppCurated curated from $VpPairsList + $($vppCands.Count - $vppCurated) from $vppRoot, $vppDupes already curated and counted once), $vppDefRefused default-refused (out of scope), $vppGenRefused GENERAL-REFUSED (gate failures), $vppRefRefused reference-refused (unoracled), $vppIdentical byte-identical default/general, $vppStaged pairs staged (sidecar: vp-path-pair-refused.txt)"
     }
 }
 
