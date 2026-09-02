@@ -1615,7 +1615,11 @@ static int load_manifest(void)
 				fields[nf++] = c + 1;
 			}
 		}
-		if (nf < 6 || nf > 8) {
+		/* The splitter stops at the eighth field and leaves anything after
+		 * it INSIDE the eighth ('vp=x|bogus' would read as a vp= path), so a
+		 * separator still present in the last field is a line with too many
+		 * fields (codex, review of 67a3f48). */
+		if (nf < 6 || nf > 8 || strchr(fields[nf - 1], '|')) {
 			printf("shader-differential: manifest line %d: expected 6 |-fields (up to 8 with blind-ok / vp=<path>), got %d\n",
 			       lineno, nf);
 			fclose(f);
