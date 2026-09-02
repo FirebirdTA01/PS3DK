@@ -388,6 +388,7 @@ static const char *const k_tex_perm[24] = {
 	"ARGB", "ARBG", "AGRB", "AGBR", "ABRG", "ABGR",
 };
 static u32 g_tex_perm_offset[24];
+static u32 *g_tex_perm_base[24];
 static int g_tex_perm_ready[24];
 
 static u32 fnv1a(const char *name)
@@ -435,18 +436,60 @@ static int ensure_perm_texture(unsigned p)
 				base_texel(x, y, perm_channel(p, 3)));
 	if (cellGcmAddressToOffset(px, &g_tex_perm_offset[p]) != 0)
 		return 0;
+	g_tex_perm_base[p] = px;
 	g_tex_perm_ready[p] = 1;
 	return 1;
 }
 
 static int init_procedural_texture(void)
 {
-	/* The identity permutation is the texture every earlier row used;
-	 * keep it first so a failure here is attributable. */
-	if (!ensure_perm_texture(0))
-		return 0;
+	/* ALL 24 permuted images are created HERE, at init, below every
+	 * per-row watermark.  The first version created them lazily inside
+	 * bind_container_samplers, i.e. inside a row, from the same bump
+	 * heap that judge_pair resets to its watermark after the row - so
+	 * the next row's fragment ucode was copied over the image, and its
+	 * texels at rows 4..6 became instruction words.  Measured: the
+	 * "2-3 scanline band where the reference alternates pixel to pixel"
+	 * (t_c48f48c1) and every 2..13-pixel mismatch of the gate-1 sweep
+	 * under per-name images were the ucode of the following row, read
+	 * back through the sampler.  24 x 16 KB of local memory is the
+	 * price of never having that class again. */
+	for (unsigned p = 0; p < 24; p++)
+		if (!ensure_perm_texture(p))
+			return 0;
 	g_tex_offset = g_tex_perm_offset[0];
 	return 1;
+}
+
+/* Texture-integrity canary.  Re-reads the first TEX_CHECK_ROWS rows of
+ * every permuted image from local memory and compares them with the
+ * values init wrote.  Returns -1 if all intact, else the permutation
+ * index whose image no longer holds its texels.  Rows 0..7 cover the
+ * band the lifetime bug corrupted (rows 4..6: the next row's ucode,
+ * copied from the bump heap's watermark); 24 x 2 KB of uncached reads
+ * per judged row is the price.  An instrument that changes what it
+ * feeds the shader must re-prove that input intact when it is sampled;
+ * "the texture control was green" only proved the control's image at
+ * the control's moment (2026-09-01, t_c48f48c1 retraction). */
+#define TEX_CHECK_ROWS 8
+static int textures_intact(void)
+{
+	for (unsigned p = 0; p < 24; p++) {
+		if (!g_tex_perm_ready[p])
+			continue;
+		const volatile u32 *px = (const volatile u32 *)g_tex_perm_base[p];
+		for (u32 y = 0; y < TEX_CHECK_ROWS; y++)
+			for (u32 x = 0; x < TEX_W; x++) {
+				u32 want = pack_texel(
+					base_texel(x, y, perm_channel(p, 0)),
+					base_texel(x, y, perm_channel(p, 1)),
+					base_texel(x, y, perm_channel(p, 2)),
+					base_texel(x, y, perm_channel(p, 3)));
+				if (px[y * TEX_W + x] != want)
+					return (int)p;
+			}
+	}
+	return -1;
 }
 
 /* Bind recipe from the cellgcm discard-blend sample (proven on the
@@ -1726,6 +1769,34 @@ int main(int argc, const char **argv)
 			cellGcmFinish(ctx, 1);
 			free(host_addr);
 			return 2;
+		}
+#ifdef SD_SABOTAGE_TEXTURE
+		/* Sabotage build only: scribble over image 6 after row 3 so the
+		 * integrity canary below is seen to fire once, on purpose. */
+		if (i == 3) {
+			volatile u32 *px = (volatile u32 *)g_tex_perm_base[6];
+			for (u32 k = 0; k < 12; k++)
+				px[4 * TEX_W + k] = 0x9e011700u;
+		}
+#endif
+		/* Texture-integrity check after every row that drew: the images
+		 * every later sampler reads must still hold their texels.  The
+		 * lifetime bug this guards against (images created inside a row
+		 * above the bump heap's watermark, overwritten by the next row's
+		 * ucode) produced 2..13-pixel mismatches and a "reference
+		 * alternates pixel to pixel" band that were reported as compiler
+		 * findings (t_c48f48c1, retracted). */
+		if (i > 1) {
+			int bad = textures_intact();
+			if (bad >= 0) {
+				printf("shader-differential: texture image %d (%s) no longer holds its texels after row %d (%s, role %s): every later sampled verdict would be against a corrupted input; %d rows not judged\nSHADER_DIFF_INVALID\n",
+				       bad, k_tex_perm[bad], i, p->name, p->role, g_npairs - 1 - i);
+				free(canary);
+				cellGcmSetWaitFlip(ctx);
+				cellGcmFinish(ctx, 1);
+				free(host_addr);
+				return 2;
+			}
 		}
 	}
 	free(canary);
