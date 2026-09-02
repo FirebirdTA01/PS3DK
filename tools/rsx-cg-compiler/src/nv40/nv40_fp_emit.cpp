@@ -11256,6 +11256,72 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         return out;
     }
 
+    // COMPLETENESS CHECK (t_72810bd7).
+    //
+    // The default path is a shape matcher: an IR shape it does not
+    // recognise is skipped, and nothing notices.  th06_notex compiled with
+    // its whole post-discard fog lerp missing, exit 0, no diagnostic.  The
+    // general path refuses that shader because it HAS a completeness check
+    // (`loweringFailed`); this path had none.
+    //
+    // Scope, stated plainly: this catches a dropped computation that also
+    // drops a VARYING READ.  A shape skipped whose inputs are all read
+    // elsewhere is still invisible here.  The general guard needs a record
+    // of which IR values the emitter actually realised, which this path
+    // does not keep; that is a larger change.  This is the half that is
+    // both cheap and provably useful - it is what made th06_notex visible.
+    //
+    // Restricted to the DEPENDENCY CLOSURE of the outputs (review note,
+    // codex): a varying read only by dead code must not trip it.
+    {
+        std::unordered_map<IRValueID, const IRInstruction*> producer;
+        std::vector<IRValueID> work;
+        for (const auto& blockPtr : entry.blocks)
+        {
+            if (!blockPtr) continue;
+            for (const auto& instPtr : blockPtr->instructions)
+            {
+                if (!instPtr) continue;
+                if (instPtr->result != InvalidIRValue)
+                    producer[instPtr->result] = instPtr.get();
+                if (instPtr->op == IROp::StoreOutput)
+                    for (IRValueID op : instPtr->operands)
+                        work.push_back(op);
+            }
+        }
+
+        std::set<IRValueID> feedsOutput;
+        while (!work.empty())
+        {
+            const IRValueID v = work.back();
+            work.pop_back();
+            if (v == InvalidIRValue || !feedsOutput.insert(v).second)
+                continue;
+            auto pIt = producer.find(v);
+            if (pIt == producer.end()) continue;
+            for (IRValueID op : pIt->second->operands)
+                work.push_back(op);
+        }
+
+        for (const auto& kv : valueToInputSrc)
+        {
+            if (!feedsOutput.count(kv.first)) continue;
+            const int src = kv.second;
+            if (src < NVFX_FP_OP_INPUT_SRC_TC(0) ||
+                src > NVFX_FP_OP_INPUT_SRC_TC(7))
+                continue;
+            const int n = src - NVFX_FP_OP_INPUT_SRC_TC(0);
+            if ((attrs.texCoordsInputMask >> n) & 1u) continue;
+            out.diagnostics.push_back(
+                "nv40-fp: TEXCOORD" + std::to_string(n) +
+                " feeds an output in the IR but no emitted instruction reads "
+                "it, so a computation was silently dropped; refusing rather "
+                "than shipping a shader missing part of its source "
+                "(t_72810bd7)");
+            return out;
+        }
+    }
+
     // texCoords2D, derived ONCE from the declared widths and the final read
     // mask.  Measured against the reference over every corpus shader both
     // compilers build (17/17, no counterexample):

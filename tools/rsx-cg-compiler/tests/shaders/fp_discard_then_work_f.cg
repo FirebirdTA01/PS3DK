@@ -1,0 +1,21 @@
+// Work that FOLLOWS a discard must not be silently dropped (t_72810bd7).
+//
+// The default path is a shape matcher and enumerates exactly one
+// post-discard shape.  This lerp is not it, so the whole statement was
+// skipped: the shader compiled, exited 0, printed nothing, and rendered
+// the colour unfogged.  The container was well formed and its input mask
+// correctly described the ucode - which was missing a line of the source.
+//
+// Reduced from build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg.
+// The compiler must REFUSE this until the shape is lowered; refusing is what
+// the general path already does for the same shader, and it is the better of
+// the two failures.
+void main(float4 color : TEXCOORD0,
+          float4 fog   : TEXCOORD2,
+          out float4 oColor : COLOR)
+{
+    if (color.a < 0.0157) discard;
+    float4 c = color;
+    c.xyz = fog.xyz + (c.xyz - fog.xyz) * fog.w;   /* lerp(fogColor, c, coef) */
+    oColor = c;
+}
