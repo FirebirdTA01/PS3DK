@@ -192,7 +192,21 @@ tests/regression/shader-differential/shaders/sd_two_inputs.fcg|0|both
 # path column flips to |general, where CF-2 must turn it identical with
 # painted a = b = 1728; the default-path refusal is then proven by the
 # compiler-side fixture fp_discard_else_f, not here.
-tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|default
+# FLIPPED to |general with CF-2 (claude's stack, 2026-09-02): the default path now
+# REFUSES the false-arm discard by design, and the general path lowers it.
+# Expected identical, painted a = b = 1728, kil 1/1.
+tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|general
+
+# CF-2 landed: the general path lowers discard (t_91bbd575).  Two of claude's
+# fixtures as standing pixel witnesses on the general path, expected identical:
+# fp_discard_else_f - the else-arm kill (test EQ), painted a = b = 1728 like
+# sd_discard_else above;
+# fp_discard_merge_f - a discard below an if/else merge, guard = the inner
+# comparison alone.  Expected painted a = b = 2266 (then-arm columns 43..63
+# killed on c.a < 0.25 = 1344; else-arm rows 46..63 on columns 0..26 killed on
+# COLOR0.w < 0.25 = 486); 2752 would mean the else arm's literal was dropped.
+tools/rsx-cg-compiler/tests/shaders/fp_discard_else_f.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/fp_discard_merge_f.cg|0|general
 
 # 2026-09-02 two general-path P1s found by claude while compiling CF-2's fixtures,
 # neither containing a discard, both live on fd5aa13 and both switch blockers:
