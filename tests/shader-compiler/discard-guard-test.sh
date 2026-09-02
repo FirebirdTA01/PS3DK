@@ -30,12 +30,15 @@
 #   fp_discard_else_f   - on the DEFAULT path, t_79fc6bf7.  EXPIRES when
 #                         the matcher is retired: the general path
 #                         compiles this shape correctly today.
-#   fp_discard_two_f    - and fp_discard_else_f on the GENERAL path, both
-#                         on CF-1a's off-exit-store rule, which they run
-#                         into for reasons that have nothing to do with
-#                         discard.  EXPIRES when that rule is lifted; the
-#                         assertion names the reason, so the day it moves
-#                         this test says so rather than passing quietly.
+#   fp_discard_else_f   - and fp_store_skippable_f on the GENERAL path,
+#                         both on a store the control flow can SKIP.  In a
+#                         flattened program every block runs, so such a
+#                         store commits a value the branch was there to
+#                         suppress.  fp_store_skippable_f has no discard
+#                         in it at all and is the BOUND on that rule's
+#                         relaxation; the assertions name the reason, so
+#                         the day either moves this test says so rather
+#                         than passing quietly.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -86,6 +89,7 @@ shape fp_discard_or_f        or
 shape fp_discard_nested_f    nested
 shape fp_discard_merge_f     merge
 shape fp_discard_ops_f       ops
+shape fp_discard_two_f       two
 shape fp_discard_then_work_f then_work
 
 # One $kill_NNNN container parameter per discard STATEMENT.  Counted on
@@ -104,6 +108,8 @@ n="$(kills_in_container fp_discard_lt_f --general-lowering)"
 [[ "$n" == "1" ]] || fail "fp_discard_lt_f container has $n \$kill parameters, expected 1"
 n="$(kills_in_container fp_discard_ops_f --general-lowering)"
 [[ "$n" == "6" ]] || fail "fp_discard_ops_f container has $n \$kill parameters, expected 6 - one per discard STATEMENT"
+n="$(kills_in_container fp_discard_two_f --general-lowering)"
+[[ "$n" == "2" ]] || fail "fp_discard_two_f container has $n \$kill parameters, expected 2"
 
 # --- refusals, each checked for its own reason -------------------------
 
@@ -129,18 +135,19 @@ grep -q "FALSE arm" "$work/else_default.log" || {
 reason than the false-arm discard."
 }
 
-for stem in fp_discard_else_f fp_discard_two_f; do
+for stem in fp_discard_else_f fp_store_skippable_f; do
     run "$stem" "--general-lowering" "${stem}_gen"
     if [[ "$rc" -eq 0 ]]; then
-        printf 'NOTE: %s now compiles on the general path - CF-1a'"'"'s\n' "$stem" >&2
-        printf 'off-exit-store refusal was lifted.  Give it a shape assertion\n' >&2
-        printf 'here and delete this block.\n' >&2
-        fail "$stem: this test still asserts the old refusal"
+        printf 'NOTE: %s now compiles on the general path.  If the\n' "$stem" >&2
+        printf 'skippable-store rule was relaxed on purpose, give it a shape\n' >&2
+        printf 'assertion here; if not, a store the flow can jump past is\n' >&2
+        printf 'being committed unconditionally.\n' >&2
+        fail "$stem: this test still asserts the refusal"
     fi
-    grep -q "output store off the exit block" "$work/${stem}_gen.log" || {
+    grep -q "the control flow can skip" "$work/${stem}_gen.log" || {
         tail -n 5 "$work/${stem}_gen.log" >&2
         fail "$stem refused on the general path for some OTHER reason than
-CF-1a's off-exit-store rule; the refusal moved and this test did not."
+the skippable store; the refusal moved and this test did not."
     }
 done
 

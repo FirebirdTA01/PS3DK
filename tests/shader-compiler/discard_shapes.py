@@ -162,6 +162,26 @@ def check(case, path):
                 fail("ops: guard 0x%02X has precision %d, the reference "
                      "emits %d (SGE is the one comparison it does not "
                      "demote to fx12)" % (opcode, prec, want_prec))
+    elif case == "two":
+        # Two discards, two kills, and the stores between them survive.
+        # The stores sit in blocks the control flow cannot skip - each is
+        # on every path to the exit - which is what lets the flattened
+        # program run all three in order and keep the last.
+        ks = kills(insns)
+        if len(ks) != 2:
+            fail("two: expected two KILs, one per discard statement, "
+                 "decoded %d" % len(ks))
+        for k in ks:
+            g = guard_of(insns, k)
+            if g is None:
+                fail("two: a KIL has no condition-register write before it")
+            if not g["none"]:
+                fail("two: a kill's guard writes a general register "
+                     "(dst=%d) instead of the condition register" % g["dst"])
+        if ks[1] == len(insns) - 1 and ks[0] == len(insns) - 2:
+            fail("two: both kills are the last two instructions, so the "
+                 "work between and after them was dropped - the stores are "
+                 "the point of this fixture")
     elif case == "then_work":
         ks = kills(insns)
         if len(ks) != 1:

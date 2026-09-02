@@ -1,0 +1,21 @@
+// A store the control flow can SKIP must refuse on the general path.
+//
+// The flatten runs every block unconditionally, so a store the original
+// program could jump past commits a value the branch was there to
+// suppress.  CF-1a refused every store outside the exit block; the rule
+// is now the reachability question that is actually being asked -
+// removing the store's block must disconnect the exit from the entry -
+// which lets a store the flow CANNOT skip through, and this fixture is
+// the other side of that line.
+//
+// Nothing rescues this one: `o` is stored only on the true arm, the false
+// arm reaches the exit without it and without a discard, so a fragment
+// that took the false arm would be painted with the true arm's value.
+// The refusal has to be seen to fire, or the relaxation next to it is a
+// claim rather than a bound.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    if (c.a < 0.5) {
+        o = c * 2.0;
+    }
+}

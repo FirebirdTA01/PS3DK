@@ -576,15 +576,61 @@ private:
         if (!exitBlock)
             return refuse("control flow has no return block; refusing");
 
+        // Off-exit stores.  In a flattened program every block executes,
+        // so a store that the original control flow could SKIP commits a
+        // value the branch was meant to suppress.  Refusing all of them
+        // was the first slice's bound; a store the flow cannot skip is
+        // safe, and that is a reachability question with an answer:
+        //
+        //   b is on EVERY path from entry to exit
+        //     <=>  removing b disconnects the exit from the entry.
+        //
+        // Every such block executes on every path in the original
+        // program too, so the flattened order commits the same value.
+        // And when several store blocks each dominate the exit they are
+        // totally ordered by dominance - dominators of a node form a
+        // chain - and reverse post-order respects dominance, so the LAST
+        // store the flattened program runs is the last one the original
+        // would have run, on every path.  `o = c; if (..) discard;
+        // o = o*d; if (..) discard; o = o+d;` is that shape.
+        //
+        // Stated as reachability rather than as a dominator computation
+        // on purpose: one graph search per store block, on functions of a
+        // handful of blocks, and nothing subtle to get wrong.
+        const auto reachesExitWithout =
+            [&](const IRBasicBlock* removed) {
+                std::unordered_set<const IRBasicBlock*> seen;
+                std::vector<const IRBasicBlock*> work;
+                if (blocks.front() != removed) {
+                    work.push_back(blocks.front());
+                    seen.insert(blocks.front());
+                }
+                while (!work.empty()) {
+                    const IRBasicBlock* cur = work.back();
+                    work.pop_back();
+                    if (cur == exitBlock) return true;
+                    for (const IRBasicBlock* nb : succs[cur]) {
+                        if (nb == removed) continue;
+                        if (seen.insert(nb).second) work.push_back(nb);
+                    }
+                }
+                return false;
+            };
+
         for (const IRBasicBlock* b : blocks) {
             if (b == exitBlock) continue;
+            bool stores = false;
             for (const auto& instPtr : b->instructions) {
                 if (!instPtr) continue;
                 if (instPtr->op == IROp::StoreOutput ||
                     instPtr->op == IROp::StoreVarying)
-                    return refuse(
-                        "output store off the exit block; refusing");
+                    stores = true;
             }
+            if (!stores) continue;
+            if (reachesExitWithout(b))
+                return refuse(
+                    "output store in block '" + b->name +
+                    "' the control flow can skip; refusing");
         }
 
         // Iterative DFS from the entry block (blocks[0] by contract).
