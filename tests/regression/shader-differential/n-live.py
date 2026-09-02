@@ -73,11 +73,11 @@ INSN_LINE = re.compile(r"^\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
 def count_insn(text):
     """16-byte groups in the compiler's ucode dump (the 'N: w0 w1 w2 w3'
     lines), inline const blocks INCLUDED - the container's instructionCount
-    semantics, so the column is like for like with the reference's field.  The first refusal is binary and says nothing on a
-    compiler that never refuses; the SLOPE of instructions per term is the
-    finding there (the vita team, running this family: 4 per term against
-    the reference's 1, both linear - 'materialise every term before the
-    first add' measured as a gradient rather than a threshold)."""
+    semantics, so the column is like for like with the reference's field.
+    The first refusal is binary and says nothing on a compiler that never
+    refuses; the SLOPE of instructions per term is the finding there (the
+    vita team's addition; on this measure ours reads 6.75 per term against
+    the reference's 5.25 at N 8..12, both linear)."""
     n = 0
     for line in text.splitlines():
         m = INSN_LINE.match(line)
