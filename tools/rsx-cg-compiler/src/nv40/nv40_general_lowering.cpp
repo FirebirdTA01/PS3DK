@@ -3381,6 +3381,16 @@ private:
         return componentMask(irValue ? irValue->type : inst.resultType);
     }
 
+    // Ops whose operands need legalising: more than one source, so they
+    // can address two distinct input registers (illegal - one input
+    // selector) or carry two inline const blocks (illegal - one block per
+    // instruction).  The COMPARISONS were missing from this list, which
+    // left both defects live on every comparison the general path emits:
+    // `a < b` on two varyings compared b with itself, and a comparison of
+    // a uniform against a literal appended two const blocks after one
+    // instruction, so the second was decoded as an instruction
+    // (t_40dd8159).  Everything not listed here is unary and cannot
+    // reach either rule.
     static bool isArithmeticOp(VOp op)
     {
         switch (op) {
@@ -3391,6 +3401,12 @@ private:
         case VOp::Dp4:
         case VOp::Min:
         case VOp::Max:
+        case VOp::Slt:
+        case VOp::Sgt:
+        case VOp::Sle:
+        case VOp::Sge:
+        case VOp::Seq:
+        case VOp::Sne:
             return true;
         default:
             return false;

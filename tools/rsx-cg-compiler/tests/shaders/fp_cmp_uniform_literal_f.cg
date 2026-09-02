@@ -1,0 +1,21 @@
+// One NV40 fragment instruction carries ONE inline constant block, and a
+// comparison of a uniform against a literal has two constant operands.
+// The general path appended a 16-byte block for each, after the same
+// instruction: the second block was then decoded as an instruction (the
+// disassembler reads it as NOPR), so the ucode was not merely wrong, it
+// was malformed - and the comparison's second operand resolved to the
+// first block, making `u_t > 0.0` into `u_t > u_t` (t_40dd8159).
+//
+// needsInlineConstPreload in legalizeInputOperands has always handled this
+// shape; comparisons were absent from the list of ops that pass looks at,
+// so they never reached it.  The reference preloads the uniform into a
+// register and keeps the literal inline.
+//
+// The assertion is that no instruction carries more than one const block,
+// which the ucode walk can check exactly: a block follows the instruction
+// that names it.
+void main(float4 c : TEXCOORD0, uniform float u_t, out float4 o : COLOR)
+{
+    float t = (u_t > 0.0) ? 1.0 : 0.0;
+    o = float4(t, c.y, c.z, 1.0);
+}

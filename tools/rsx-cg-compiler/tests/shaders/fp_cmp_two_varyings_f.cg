@@ -1,0 +1,16 @@
+// An NV40 FRAGMENT instruction carries ONE input-source selector, so two
+// operands of register type INPUT read the SAME varying whatever the
+// emitter meant (t_e89cd261).  cf07e6c taught the general path to preload
+// one of them - for ARITHMETIC.  Comparisons were not on the list that
+// pass consults, so `c.w < d.w` between two varyings compiled to
+// `SLT ..., f[TEX1].w, f[TEX1].w`: d.w compared with itself, silently, in
+// a container whose input mask still named both (t_40dd8159).
+//
+// The reference preloads both operands into a register and compares those.
+// The assertion is that no comparison instruction addresses two DISTINCT
+// input registers - which is a property of the ucode, not of the mask.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    float t = (c.w < d.w) ? 1.0 : 0.0;
+    o = float4(t, t, t, 1.0);
+}
