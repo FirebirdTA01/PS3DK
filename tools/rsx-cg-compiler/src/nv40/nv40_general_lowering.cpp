@@ -1496,6 +1496,12 @@ private:
         case IROp::Cos:
             lowerUnary(inst, VOp::Cos, false);
             return;
+        case IROp::Tan:
+            lowerTan(inst);
+            return;
+        case IROp::Cross:
+            lowerCross(inst);
+            return;
         case IROp::Exp:
             lowerExpLog(inst, /*base2=*/false, /*isLog=*/false);
             return;
@@ -3305,6 +3311,97 @@ private:
             mul.stubFenceBrBefore = !vertex;
             program_.instrs.push_back(mul);
         }
+    }
+
+    // tan(x) = sin(x) / cos(x) (t_a7dd471f).  That is what the reference
+    // computes - MOVR, MOVR, SINR, COSR, DIVR - and the shape is worth
+    // stating because a polynomial approximation would have been the other
+    // reasonable guess and it is not what the oracle does.
+    //
+    // WE ARE NOT BYTE-IDENTICAL HERE AND THE REASON IS NAMED: the reference
+    // divides with DIVR (NV40 opcode 0x3A) and this compiler has no VOp for
+    // it, so the divide goes through the RCP-then-MUL idiom lowerDiv has
+    // always used.  Adding the opcode is its own change - vpOpcode's
+    // fallthrough is MOV, so a new VOp that reaches the vertex path
+    // silently becomes a MOV, and that wants its own fixture rather than
+    // being smuggled in behind tan.
+    //
+    // SIN, COS and RCP are all scalar-unit ops, so all three go per lane
+    // through the shared helper; the final multiply is ordinary vector ALU.
+    void lowerTan(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP scalar intrinsic lowering deferred");
+            program_.loweringFailed = true;
+            return;
+        }
+        const int mask = componentMask(inst.resultType);
+        const VSrc arg = resolve(inst.operands[0]);
+
+        const int sinReg = newVReg();
+        const int cosReg = newVReg();
+        const int rcpReg = newVReg();
+        emitScalarUnitPerLane(VOp::Sin, sinReg, mask, arg, false);
+        emitScalarUnitPerLane(VOp::Cos, cosReg, mask, arg, false);
+        emitScalarUnitPerLane(VOp::Rcp, rcpReg, mask, tempSrc(cosReg), false);
+
+        VInstr mul;
+        mul.op = VOp::Mul;
+        mul.dst.index = define(inst.result);
+        mul.dst.writemask = mask;
+        mul.srcs[0] = tempSrc(sinReg);
+        mul.srcs[1] = tempSrc(rcpReg);
+        program_.instrs.push_back(mul);
+    }
+
+    // cross(a, b) = a.yzx * b.zxy - a.zxy * b.yzx (t_a7dd471f).
+    //
+    // Two instructions: the second product into a temp, then a MAD that
+    // negates it.  That is the reference's arithmetic too - MULR then MADR
+    // with a negated third operand - and the MOVs it emits around them are
+    // operand legalisation, which this path does for itself: `a` and `b`
+    // are usually both varyings, and a fragment instruction has ONE input
+    // selector (t_e89cd261), so legalizeInputOperands has to copy one of
+    // them into a temp before either instruction can name both.
+    //
+    // The result is a float3; the w lane is not this op's business.
+    void lowerCross(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
+        const VSrc a = resolve(inst.operands[0]);
+        const VSrc b = resolve(inst.operands[1]);
+        const int mask = componentMask(inst.resultType) & 0x7;
+
+        // yzx and zxy, composed through each operand's own swizzle - never
+        // the raw component, the rule the whole afternoon turned on.
+        const auto rotate = [](const VSrc& s, int by) {
+            VSrc r = s;
+            for (int lane = 0; lane < 3; ++lane)
+                r.swizzle[lane] = s.swizzle[(lane + by) % 3];
+            r.swizzle[3] = s.swizzle[3];
+            return r;
+        };
+
+        const int t = newVReg();
+        VInstr mul;
+        mul.op = VOp::Mul;
+        mul.dst.index = t;
+        mul.dst.writemask = mask;
+        mul.srcs[0] = rotate(a, 2);      // a.zxy
+        mul.srcs[1] = rotate(b, 1);      // b.yzx
+        program_.instrs.push_back(mul);
+
+        VInstr mad;
+        mad.op = VOp::Mad;
+        mad.dst.index = define(inst.result);
+        mad.dst.writemask = mask;
+        mad.srcs[0] = rotate(a, 1);      // a.yzx
+        mad.srcs[1] = rotate(b, 2);      // b.zxy
+        mad.srcs[2] = tempSrc(t);
+        mad.srcs[2].neg = true;
+        program_.instrs.push_back(mad);
     }
 
     void lowerClamp(const IRInstruction& inst)
