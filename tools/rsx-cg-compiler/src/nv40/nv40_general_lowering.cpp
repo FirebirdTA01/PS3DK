@@ -148,6 +148,10 @@ struct VirtualProgram
     std::vector<VInstr> instrs;
     std::unordered_map<IRValueID, int> valueToVReg;
     std::unordered_map<IRValueID, VSrc> valueToSource;
+    // Const-slot indices for FILE-SCOPE fragment uniforms, in the order
+    // cg_container_fp.cpp walks module.globals.  Emission needs them to
+    // create the embedded-offset entries, and it does not see the module.
+    std::vector<unsigned> fpGlobalUniformSlots;
     std::unordered_map<int, int> vregToPhys;
     std::unordered_map<int, bool> vregToFp16;
     int nextVpLiteralConst = 467;
@@ -954,6 +958,8 @@ private:
         // cg_container_fp.cpp numbers them; the two must agree or binding a
         // texture by name reaches a different unit than the ucode samples.
         int nextFpTexUnit = 0;
+        unsigned nextFpGlobalSlot =
+            static_cast<unsigned>(entry_.parameters.size());
         std::unordered_set<std::string> seenUniformNames;
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         struct PendingMatrix {
@@ -1018,6 +1024,18 @@ private:
             } else if (profile_ == GeneralProfile::Fragment &&
                        isSamplerIRType(g.type.baseType)) {
                 samplerUnit_[g.valueId] = nextFpTexUnit++;
+            } else if (profile_ == GeneralProfile::Fragment) {
+                // File-scope uniforms are numbered after every entry
+                // parameter, in declaration order - the numbering
+                // cg_container_fp.cpp reverses when it walks
+                // module.globals.  This branch did not exist, so an FP
+                // file-scope uniform had no source at all and the shader
+                // refused (or, before the id spaces were separated, read
+                // whatever function value shared its id).
+                const unsigned slot = nextFpGlobalSlot++;
+                program_.valueToSource[g.valueId] = uniformSrc(
+                    static_cast<int>(slot), true);
+                program_.fpGlobalUniformSlots.push_back(slot);
             }
         }
         for (auto it = pendingMatrices.begin(); it != pendingMatrices.end(); ++it) {
@@ -3862,8 +3880,16 @@ static void populateReferencedParams(const IRFunction& entry, FpAttributes& attr
     }
 }
 
-static void seedFpEmbeddedUniforms(const IRFunction& entry, FpAttributes& attrs)
+static void seedFpEmbeddedUniforms(const IRFunction& entry,
+                                   const VirtualProgram& program,
+                                   FpAttributes& attrs)
 {
+    // File-scope uniforms first in intent, appended after the parameters
+    // below: recordFpUniformOffset matches on the slot index, so an entry
+    // must exist for every slot a source can name or the offsets are
+    // dropped and the container advertises a parameter nothing can patch.
+    for (unsigned slot : program.fpGlobalUniformSlots)
+        attrs.embeddedUniforms.push_back({slot, {}});
     for (size_t i = 0; i < entry.parameters.size(); ++i) {
         const auto& p = entry.parameters[i];
         if (p.storage != StorageQualifier::Uniform)
@@ -3913,7 +3939,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     FpAssembler asm_;
     FpAttributes attrs;
     populateReferencedParams(entry, attrs);
-    seedFpEmbeddedUniforms(entry, attrs);
+    seedFpEmbeddedUniforms(entry, program, attrs);
     std::unordered_map<int, VOp> tempProducerOp;
     for (const VInstr& vi : program.instrs) {
         if (!vi.dst.none && !vi.dst.output)
