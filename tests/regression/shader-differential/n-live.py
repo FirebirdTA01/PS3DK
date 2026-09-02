@@ -77,7 +77,7 @@ def main():
         with open(src, "w", newline="\n") as f:
             f.write(shader(n))
         row = {"N": n}
-        for label, flags in (("default", []), ("general", ["--general-lowering"])):
+        for label, flags in (("legacy", ["--legacy-lowering"]), ("general", [])):
             rc, text = run(["wsl", "--", "timeout", "30s", a.ours] + flags +
                            ["-p", "sce_fp_rsx", "--emit-container", wsl_path(a.out) + "/nl.fpo", wsl_path(src)])
             row[label] = classify(rc, text)
@@ -85,7 +85,7 @@ def main():
             rc, text = run([a.reference, "-p", "sce_fp_rsx", "-o", os.path.join(a.out, "ref_%02d.fpo" % n), src])
             row["reference"] = "ok" if rc == 0 else "refuse"
         rows.append(row)
-    cols = ["N", "default", "general"] + (["reference"] if a.reference else [])
+    cols = ["N", "legacy", "general"] + (["reference"] if a.reference else [])
     print("n-live: ours = wsl:%s%s" % (a.ours, ", reference present" if a.reference else ", no reference"))
     print("  ".join("%-22s" % c for c in cols))
     for row in rows:

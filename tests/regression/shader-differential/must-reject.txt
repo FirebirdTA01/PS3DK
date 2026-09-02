@@ -1,5 +1,6 @@
 # shader-differential must-reject list (frontend acceptance as a rig role, 2026-09-02).
-# fields: case|reference|ours-default|ours-general|note
+# fields: case|reference|ours-legacy|ours-general|note   (legacy = the retired
+#   matcher under --legacy-lowering; general = the default since the flip)
 #   reference    = what the reference compiler does: accept | reject (measured
 #                  2026-09-01 18:50, native; its diagnostic TEXT stays outside
 #                  the tree - only the verdict is recorded here)

@@ -4,7 +4,10 @@
 #   separated, on top of the path flag.  A row with flags is named
 #   <shader>__<flag-slug>__set<uniform_set>, so one shader can be staged
 #   under several flags or sets as distinct rows (t_3bf3ce95).
-#   path = default | general | both (default both): the lowering path the
+#   path = general | legacy | both (default both): the lowering the row is
+#   compiled on - general is the DEFAULT since the flip (2026-09-02), legacy is
+#   the retired matcher under --legacy-lowering ('default' is accepted as an
+#   alias of legacy for one release).  Historically 'the lowering path the
 #   row is compiled on.  A row for the other path is skipped by the
 #   stager, not compiled, so a fixture that only compiles under
 #   --general-lowering cannot abort a default-path stage.

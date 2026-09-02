@@ -21,7 +21,12 @@
 param(
     [string]$Rsxcgc = "",
     [string]$Rpcs3Path = "C:\Users\FirebirdTA01\Desktop\Emulators\RPCS3\rpcs3.exe",
+    # The general lowering is the DEFAULT since the flip (2026-09-02, director's
+    # D1); -GeneralLowering is accepted as a no-op for one release so scripts
+    # written before it keep working.  -LegacyLowering selects the retired
+    # matcher (--legacy-lowering) for the second half of the release gate.
     [switch]$GeneralLowering,
+    [switch]$LegacyLowering,
     # -Corpus: also stage the ours-vs-ours fast/nofast corpus sweep
     # (increment 2).  The corpus compile loop runs in WSL via
     # stage-corpus.sh, because dev builds of the compiler live there —
@@ -112,7 +117,7 @@ param(
     # identical (vp-path-pair-unoracled otherwise).  A default refusal is
     # out of the gate's scope and only counted; a GENERAL refusal of a VP the
     # default path compiles IS a gate failure and goes to
-    # vp-path-pair-refused.txt; byte-identical default/general pairs are
+    # vp-path-pair-refused.txt; byte-identical legacy/general pairs are
     # counted, not staged.  Needs the reference compiler.
     [switch]$VpPathPairs,
     [string]$Hdd0 = ""           # override dev_hdd0 root (testing)
@@ -183,16 +188,20 @@ New-Item -ItemType Directory -Force $artifacts | Out-Null
 Get-ChildItem -LiteralPath $artifacts -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
 $extraFlags = @()
-if ($GeneralLowering) { $extraFlags += "--general-lowering" }
+if ($LegacyLowering) { $extraFlags += "--legacy-lowering" }
+if ($GeneralLowering) { Write-Host "stager: -GeneralLowering is the default since the flip; accepted as a no-op for one release" }
 # The lowering path this stage compiles OUR side on.  Curated and exclude
 # list rows may name the path they apply to (default | general | both);
 # a row for the other path is skipped, not compiled, so a general-only
 # regression fixture cannot abort a default-path stage and a general-path
 # poisoner cannot hide a shader the default path compiles fine.
-$activePath = if ($GeneralLowering) { "general" } else { "default" }
+$activePath = if ($LegacyLowering) { "legacy" } else { "general" }
 function Row-AppliesToPath([string[]]$fields, [int]$col) {
     $p = if ($fields.Count -gt $col -and $fields[$col].Trim()) { $fields[$col].Trim().ToLower() } else { "both" }
-    if ($p -notin @("default", "general", "both")) { throw "list row names an unknown path '$p' (default | general | both): $($fields -join '|')" }
+    # 'default' meant the matcher before the flip; accepted as an alias of
+    # legacy for one release, and named when it is seen.
+    if ($p -eq "default") { if (-not $script:defaultAliasSaid) { Write-Host "stager: a list row says |default - the matcher is |legacy since the flip; alias accepted for one release"; $script:defaultAliasSaid = $true }; $p = "legacy" }
+    if ($p -notin @("legacy", "general", "both")) { throw "list row names an unknown path '$p' (general | legacy | both): $($fields -join '|')" }
     return ($p -eq "both") -or ($p -eq $activePath)
 }
 
@@ -806,22 +815,22 @@ if ($ReferenceCompiler) {
             }
             $seenNames[$name] = 1
             if ($set -eq "auto") { Print-AutoValues $src $name }
-            $dDef = Join-Path $refScratch "$name`_default.fpo"
+            $dDef = Join-Path $refScratch "$name`_legacy.fpo"
             $dGen = Join-Path $refScratch "$name`_general.fpo"
             $dRef = Join-Path $refScratch "$name`_pathref.fpo"
-            $null = Compile-Shader $src $dDef @() -Absolute -NoExtraFlags
+            $null = Compile-Shader $src $dDef @("--legacy-lowering") -Absolute -NoExtraFlags
             Assert-Deterministic $src $dDef @() -NoExtraFlags -Label "$name (default)"
-            $null = Compile-Shader $src $dGen @("--general-lowering") -Absolute -NoExtraFlags
+            $null = Compile-Shader $src $dGen @() -Absolute -NoExtraFlags
             Assert-Deterministic $src $dGen @("--general-lowering") -NoExtraFlags -Label "$name (general)"
             if (-not (Compile-Reference $src $dRef)) { throw "path-pairs: reference compile failed or produced no container: $rel" }
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
             if ($hD -eq $hG) { $ppIdentical++; Write-Host "stager: $rel default and general containers byte-identical -- not staged"; continue }
-            Copy-Item $dDef (Join-Path $ppDst "$name`_default.fpo") -Force
+            Copy-Item $dDef (Join-Path $ppDst "$name`_legacy.fpo") -Force
             Copy-Item $dGen (Join-Path $ppDst "$name`_general.fpo") -Force
             Copy-Item $dRef (Join-Path $ppDst "$name`_ref.fpo") -Force
-            $ppRows += "B|reference|$name@oracle|pathpair/$name`_default.fpo|pathpair/$name`_ref.fpo|$set"
-            $ppRows += "B|path-pair|$name@paths|pathpair/$name`_default.fpo|pathpair/$name`_general.fpo|$set"
+            $ppRows += "B|reference|$name@oracle|pathpair/$name`_legacy.fpo|pathpair/$name`_ref.fpo|$set"
+            $ppRows += "B|path-pair|$name@paths|pathpair/$name`_legacy.fpo|pathpair/$name`_general.fpo|$set"
         }
         $manifest += $ppRows
         Write-Host "stager: path pairs: $($ppRows.Count / 2) pairs staged (each with its premise row), $ppIdentical byte-identical skipped"
@@ -874,13 +883,13 @@ if ($ReferenceCompiler) {
                 $name = "$name" + "_" + $hex.Substring(0, 6)
             }
             $seenNames[$name] = 1
-            $dDef = Join-Path $refScratch ("$name" + "_pcdefault.fpo")
+            $dDef = Join-Path $refScratch ("$name" + "_pclegacy.fpo")
             $dGen = Join-Path $refScratch ("$name" + "_pcgeneral.fpo")
             $dRef = Join-Path $refScratch ("$name" + "_pcref.fpo")
-            if (-not (Compile-Shader $f.FullName $dDef @() -Absolute -NoThrow -NoExtraFlags)) {
-                $pcDefRefused++; $pcRefusedRows += "$name|default|$rel|$($script:lastCompileRc)"; continue
+            if (-not (Compile-Shader $f.FullName $dDef @("--legacy-lowering") -Absolute -NoThrow -NoExtraFlags)) {
+                $pcDefRefused++; $pcRefusedRows += "$name|legacy|$rel|$($script:lastCompileRc)"; continue
             }
-            if (-not (Compile-Shader $f.FullName $dGen @("--general-lowering") -Absolute -NoThrow -NoExtraFlags)) {
+            if (-not (Compile-Shader $f.FullName $dGen @() -Absolute -NoThrow -NoExtraFlags)) {
                 $pcGenRefused++; $pcRefusedRows += "$name|general|$rel|$($script:lastCompileRc)"; continue
             }
             if (-not (Compile-Reference $f.FullName $dRef)) {
@@ -891,17 +900,17 @@ if ($ReferenceCompiler) {
             if ($hD -eq $hG) { $pcIdentical++; continue }
             $pcSet = "auto"
             if (Has-FileScopeConst $f.FullName) { $pcSet = "0"; $pcConstSet0++; Write-Host "stager: path-pair corpus $rel has a file-scope const - staged under set 0, not auto (see Has-FileScopeConst)" }
-            Copy-Item $dDef (Join-Path $pcDst ("$name" + "_default.fpo")) -Force
+            Copy-Item $dDef (Join-Path $pcDst ("$name" + "_legacy.fpo")) -Force
             Copy-Item $dGen (Join-Path $pcDst ("$name" + "_general.fpo")) -Force
             Copy-Item $dRef (Join-Path $pcDst ("$name" + "_ref.fpo")) -Force
-            $pcRows += "B|reference|$name@oracle|pathpair/$name" + "_default.fpo|pathpair/$name" + "_ref.fpo|$pcSet|blind-ok"
-            $pcRows += "B|path-pair|$name@paths|pathpair/$name" + "_default.fpo|pathpair/$name" + "_general.fpo|$pcSet|blind-ok"
+            $pcRows += "B|reference|$name@oracle|pathpair/$name" + "_legacy.fpo|pathpair/$name" + "_ref.fpo|$pcSet|blind-ok"
+            $pcRows += "B|path-pair|$name@paths|pathpair/$name" + "_legacy.fpo|pathpair/$name" + "_general.fpo|$pcSet|blind-ok"
             $pcStaged++
         }
         Set-Content -LiteralPath $pcRefusedPath -Value ($pcRefusedRows -join "`n") -Encoding Ascii
         if (($pcStaged + $pcIdentical + $pcDefRefused + $pcGenRefused + $pcRefRefused) -eq 0) { throw "path-pair corpus sweep compiled nothing" }
         $manifest += $pcRows
-        Write-Host "stager: path-pair corpus (gate 1): $($pcFiles.Count) shaders, $pcExcl excluded, $pcDefRefused default-refused (out of scope), $pcGenRefused GENERAL-REFUSED (gate failures), $pcRefRefused reference-refused (unoracled), $pcIdentical byte-identical default/general, $pcStaged pairs staged ($pcConstSet0 under set 0 for a file-scope const)"
+        Write-Host "stager: path-pair corpus (gate 1): $($pcFiles.Count) shaders, $pcExcl excluded, $pcDefRefused legacy-refused (out of scope), $pcGenRefused GENERAL-REFUSED (gate failures), $pcRefRefused reference-refused (unoracled), $pcIdentical byte-identical legacy/general, $pcStaged pairs staged ($pcConstSet0 under set 0 for a file-scope const)"
     }
 }
 
@@ -1231,13 +1240,13 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
                 $name = "$name" + "_" + $hex.Substring(0, 6)
             }
             $vppSeen[$name] = 1
-            $dDef = Join-Path $vpScratch ("$name" + "_ppdefault.vpo")
+            $dDef = Join-Path $vpScratch ("$name" + "_pplegacy.vpo")
             $dGen = Join-Path $vpScratch ("$name" + "_ppgeneral.vpo")
             $dRef = Join-Path $vpScratch ("$name" + "_ppref.vpo")
-            if (-not (Compile-Shader $c.src $dDef @() -Absolute -NoThrow -NoExtraFlags -Profile sce_vp_rsx)) {
-                $vppDefRefused++; $vppRefusedRows += "$name|default|$($c.rel)|$($script:lastCompileRc)"; continue
+            if (-not (Compile-Shader $c.src $dDef @("--legacy-lowering") -Absolute -NoThrow -NoExtraFlags -Profile sce_vp_rsx)) {
+                $vppDefRefused++; $vppRefusedRows += "$name|legacy|$($c.rel)|$($script:lastCompileRc)"; continue
             }
-            if (-not (Compile-Shader $c.src $dGen @("--general-lowering") -Absolute -NoThrow -NoExtraFlags -Profile sce_vp_rsx)) {
+            if (-not (Compile-Shader $c.src $dGen @() -Absolute -NoThrow -NoExtraFlags -Profile sce_vp_rsx)) {
                 $vppGenRefused++; $vppRefusedRows += "$name|general|$($c.rel)|$($script:lastCompileRc)"; continue
             }
             if (-not (Compile-Reference $c.src $dRef -Profile sce_vp_rsx)) {
@@ -1246,17 +1255,17 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
             if ($hD -eq $hG) { $vppIdentical++; continue }
-            Copy-Item $dDef (Join-Path $vppDst ("$name" + "_default.vpo")) -Force
+            Copy-Item $dDef (Join-Path $vppDst ("$name" + "_legacy.vpo")) -Force
             Copy-Item $dGen (Join-Path $vppDst ("$name" + "_general.vpo")) -Force
             Copy-Item $dRef (Join-Path $vppDst ("$name" + "_ref.vpo")) -Force
-            $vppRows += "B|vp-reference|$name@oracle|vppathpair/$name" + "_default.vpo|vppathpair/$name" + "_ref.vpo|$($c.set)"
-            $vppRows += "B|vp-path-pair|$name@paths|vppathpair/$name" + "_default.vpo|vppathpair/$name" + "_general.vpo|$($c.set)"
+            $vppRows += "B|vp-reference|$name@oracle|vppathpair/$name" + "_legacy.vpo|vppathpair/$name" + "_ref.vpo|$($c.set)"
+            $vppRows += "B|vp-path-pair|$name@paths|vppathpair/$name" + "_legacy.vpo|vppathpair/$name" + "_general.vpo|$($c.set)"
             $vppStaged++
         }
         Set-Content -LiteralPath $vppRefusedPath -Value ($vppRefusedRows -join "`n") -Encoding Ascii
         if (($vppStaged + $vppIdentical + $vppDefRefused + $vppGenRefused + $vppRefRefused) -eq 0) { throw "vp path pairs compiled nothing" }
         $manifest += $vppRows
-        Write-Host "stager: vp path pairs (gate 5): $($vppCands.Count) candidates ($vppCurated curated from $VpPairsList + $($vppCands.Count - $vppCurated) from $vppRoot, $vppDupes already curated and counted once), $vppDefRefused default-refused (out of scope), $vppGenRefused GENERAL-REFUSED (gate failures), $vppRefRefused reference-refused (unoracled), $vppIdentical byte-identical default/general, $vppStaged pairs staged (sidecar: vp-path-pair-refused.txt)"
+        Write-Host "stager: vp path pairs (gate 5): $($vppCands.Count) candidates ($vppCurated curated from $VpPairsList + $($vppCands.Count - $vppCurated) from $vppRoot, $vppDupes already curated and counted once), $vppDefRefused legacy-refused (out of scope), $vppGenRefused GENERAL-REFUSED (gate failures), $vppRefRefused reference-refused (unoracled), $vppIdentical byte-identical legacy/general, $vppStaged pairs staged (sidecar: vp-path-pair-refused.txt)"
     }
 }
 

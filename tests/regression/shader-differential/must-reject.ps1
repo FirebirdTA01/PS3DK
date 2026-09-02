@@ -109,9 +109,9 @@ foreach ($row in $rows) {
     if (-not (Test-Path -LiteralPath $src)) { throw "must-reject case missing: $src" }
     $ref = Compile-Ref $src (Join-Path $scratch "$case.ref.fpo")
     $gotRef = Classify $ref.text $ref.rc (Join-Path $scratch "$case.ref.fpo") $case
-    $def = Compile-Ours $src (Join-Path $scratch "$case.def.fpo") @()
+    $def = Compile-Ours $src (Join-Path $scratch "$case.def.fpo") @("--legacy-lowering")
     $gotDef = Classify $def.text $def.rc (Join-Path $scratch "$case.def.fpo") $case
-    $gen = Compile-Ours $src (Join-Path $scratch "$case.gen.fpo") @("--general-lowering")
+    $gen = Compile-Ours $src (Join-Path $scratch "$case.gen.fpo") @()
     $gotGen = Classify $gen.text $gen.rc (Join-Path $scratch "$case.gen.fpo") $case
     # The reference column lists accept | reject: a reject is satisfied by
     # either refusal kind (its diagnostic text is printed, not asserted).
@@ -121,10 +121,10 @@ foreach ($row in $rows) {
     $verdict = if ($okRef -and $okDef -and $okGen) { "PASS" } else { "FAIL" }
     if ($verdict -eq "PASS") { $pass++ } else { $fail++ }
     $refLine = (($ref.text -split "`r?`n") | Where-Object { $_ -match "error" } | Select-Object -First 1)
-    Write-Host ("MUSTREJECT|case={0}|reference={1}(want {2})|default={3}(want {4})|general={5}(want {6})|{7}{8}" -f `
+    Write-Host ("MUSTREJECT|case={0}|reference={1}(want {2})|legacy={3}(want {4})|general={5}(want {6})|{7}{8}" -f `
         $case, $gotRef, $wantRef, $gotDef, $wantDef, $gotGen, $wantGen, $verdict, $(if ($note) { "|note=$note" } else { "" }))
     if ($refLine) { Write-Host "    reference: $($refLine.Trim())" }
-    if ($gotDef -ne "accept") { Write-Host "    ours[default]: $((($def.text -split "`r?`n") | Where-Object { $_ -match 'error|nv40|refus' } | Select-Object -First 1))" }
+    if ($gotDef -ne "accept") { Write-Host "    ours[legacy]: $((($def.text -split "`r?`n") | Where-Object { $_ -match 'error|nv40|refus' } | Select-Object -First 1))" }
     if ($gotGen -ne "accept") { Write-Host "    ours[general]: $((($gen.text -split "`r?`n") | Where-Object { $_ -match 'error|nv40|refus' } | Select-Object -First 1))" }
 }
 Write-Host "must-reject: $pass pass, $fail fail of $($rows.Count)"
