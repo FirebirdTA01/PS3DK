@@ -1,0 +1,25 @@
+// A literal written into one lane of a varying that is otherwise passed
+// straight through (t_afb4af65).
+//
+// Until 2026-09-02 the default path peeled the VecInsert chain, resolved
+// the store's source inward to `color`, and then emitted ONE full-width
+// MOV of that varying - dropping `c.x = 0.5` in silence.  Exit 0, a
+// well-formed container, and an input mask that correctly described the
+// ucode, which was missing a line of the source.  The completeness guard
+// (t_72810bd7) cannot see this one: the varying IS read; it is the
+// LITERAL that goes missing.
+//
+// Reference compiler, for this shader:
+//
+//     MOVR R0.yzw, f[TEX0];
+//     MOVR R0.x,   {0x3f000000(0.5), 0, 0, 0}.x;
+//
+// The base MOV is masked to the lanes the insert does not write, and the
+// override follows it.  Ours is byte-identical to that.
+void main(float4 color : TEXCOORD0,
+          out float4 oColor : COLOR)
+{
+    float4 c = color;
+    c.x = 0.5;
+    oColor = c;
+}

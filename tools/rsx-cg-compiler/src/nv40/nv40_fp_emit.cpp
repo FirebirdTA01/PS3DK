@@ -4339,10 +4339,22 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         {
                             out.diagnostics.push_back(
                                 "nv40-fp: VecInsert scalar must be a float "
-                                "literal (other shapes land later)");
+                                "literal (other shapes land later), so the "
+                                "lane it writes cannot be emitted; refusing "
+                                "rather than shipping a shader missing part "
+                                "of its source (t_afb4af65; the post-discard "
+                                "lerp shape is t_72810bd7)");
                             return false;
                         }
-                        const float lit = std::get<float>(sc->value);
+                        // A saturate on the store applies to every lane
+                        // it writes, and the reference compiler folds it
+                        // into the literal rather than emitting a
+                        // saturating MOV for the override (measured:
+                        // `c.x = 1.5; oColor = saturate(c)` emits
+                        // MOVR_sat on the base and a plain MOV of 1.0).
+                        float lit = std::get<float>(sc->value);
+                        if (saturate)
+                            lit = lit < 0.0f ? 0.0f : (lit > 1.0f ? 1.0f : lit);
 
                         const struct nvfx_reg constReg =
                             nvfx_reg(NVFXSR_CONST, 0);
@@ -11205,27 +11217,60 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 src0.abs    = mods.absMod ? 1 : 0;
                 src0.negate = mods.negMod ? 1 : 0;
 
-                struct nvfx_insn in = nvfx_insn(
-                    saturate ? 1 : 0, 0, -1, -1,
-                    const_cast<struct nvfx_reg&>(dstReg),
-                    NVFX_FP_MASK_ALL,
-                    src0, src1, src2);
-                // MOV with a source modifier: the reference compiler emits it at
-                // FP16 precision (MOVH variant) even when the dst
-                // stays R0.  Verified via abs_input_f / neg_input_f
-                // byte probes — both produce PRECISION=1 (FP16).
-                in.precision = (mods.absMod || mods.negMod) ? FLOAT16 : dstPrecision;
-                asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
-                emittedSomething = true;
-
-                attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(it->second);
-                if (it->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-                    it->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                // Lane overrides reaching the direct-MOV path: the
+                // peeler above resolved `oColor = c` inward to the
+                // varying `c` copies, so an insert like `c.x = 0.5`
+                // sits in laneOverrides and is this branch's to emit.
+                // Until t_afb4af65 it was ignored here and the insert
+                // was dropped in silence — a full-width MOV of the
+                // varying, no diagnostic, well-formed container.
+                //
+                // Reference shape (measured): the base MOV is masked to
+                // the lanes the overrides do NOT write, then the
+                // overrides write theirs; with all four lanes overridden
+                // the varying is not read at all and no base MOV exists.
+                uint8_t baseMask = NVFX_FP_MASK_ALL;
+                for (const auto& lo : laneOverrides)
                 {
-                    const int n = it->second - NVFX_FP_OP_INPUT_SRC_TC(0);
-                    attrs.texCoordsInputMask |= uint16_t{1} << n;
-                    // 4-component varying read of TEXCOORDn — the reference compiler
+                    if (lo.lane < 0 || lo.lane > 3)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: VecInsert lane out of range on a "
+                            "varying passthrough");
+                        return out;
+                    }
+                    baseMask &= static_cast<uint8_t>(~(1u << lo.lane));
                 }
+
+                if (baseMask != 0)
+                {
+                    struct nvfx_insn in = nvfx_insn(
+                        saturate ? 1 : 0, 0, -1, -1,
+                        const_cast<struct nvfx_reg&>(dstReg),
+                        baseMask,
+                        src0, src1, src2);
+                    // MOV with a source modifier: the reference compiler emits it at
+                    // FP16 precision (MOVH variant) even when the dst
+                    // stays R0.  Verified via abs_input_f / neg_input_f
+                    // byte probes — both produce PRECISION=1 (FP16).
+                    in.precision = (mods.absMod || mods.negMod) ? FLOAT16 : dstPrecision;
+                    asm_.emit(in, NVFX_FP_OP_OPCODE_MOV);
+
+                    attrs.attributeInputMask |= fpAttrMaskBitForInputSrc(it->second);
+                    if (it->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                        it->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                    {
+                        const int n = it->second - NVFX_FP_OP_INPUT_SRC_TC(0);
+                        attrs.texCoordsInputMask |= uint16_t{1} << n;
+                        // 4-component varying read of TEXCOORDn — the reference compiler
+                    }
+                }
+
+                // Refuses when an override scalar is not a float literal
+                // (t_72810bd7's post-discard lerp is that shape); a
+                // refusal is the honest failure, not a dropped line.
+                if (!emitLaneOverrides()) return out;
+                emittedSomething = true;
                 break;
             }
 
@@ -11289,6 +11334,44 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         work.push_back(op);
             }
         }
+
+        // A VecInsert chain that overrides ALL FOUR lanes leaves nothing
+        // of the vector it inserts into, and the emitter reads nothing
+        // from it (the reference agrees: `c.x..c.w = literals` compiles
+        // with attributeInputMask None).  Seeding the closure with that
+        // vector would make the guard refuse a shader whose varying is
+        // legitimately dead - the guard exists to catch work that was
+        // DROPPED, not work the source itself overwrote.  So peel the
+        // chain the same way the StoreOutput emitter does and drop the
+        // base vector when the overrides cover the whole width.
+        //
+        // Deliberately conservative: only a full 4-lane cover is treated
+        // as dead, so a narrower vector fully overwritten still seeds the
+        // closure.  That can only refuse a shader we would otherwise
+        // accept, never accept one we should refuse.
+        std::vector<IRValueID> overrideScalars;
+        for (IRValueID& seed : work)
+        {
+            IRValueID v = seed;
+            std::set<int> covered;
+            std::vector<IRValueID> scalars;
+            while (true)
+            {
+                auto viIt = valueToVecInsert.find(v);
+                if (viIt == valueToVecInsert.end()) break;
+                covered.insert(viIt->second.lane);
+                scalars.push_back(viIt->second.scalarId);
+                v = viIt->second.vectorId;
+            }
+            if (covered.size() != 4) continue;
+            // Append after the loop: growing `work` while iterating it
+            // would invalidate `seed`.
+            overrideScalars.insert(overrideScalars.end(),
+                                   scalars.begin(), scalars.end());
+            seed = InvalidIRValue;   // the base vector is dead
+        }
+        work.insert(work.end(),
+                    overrideScalars.begin(), overrideScalars.end());
 
         std::set<IRValueID> feedsOutput;
         while (!work.empty())

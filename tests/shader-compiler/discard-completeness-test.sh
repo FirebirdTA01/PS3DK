@@ -6,6 +6,17 @@
 # miss the drop, or it can refuse the whole discard class.  The negative
 # control is a real discard shader from the samples that the default path
 # lowers correctly today.
+#
+# WHICH refusal fires moved on 2026-09-02 (t_afb4af65).  The post-discard
+# lerp writes its result into three lanes of `color` through a VecInsert
+# chain, and the StoreOutput emitter now refuses a non-literal insert
+# scalar instead of walking past the overrides - so this shader is turned
+# away by that check, before the closure guard downstream ever runs.  Both
+# diagnostics carry t_72810bd7, and the assertion below is deliberately on
+# the task id rather than on one message: what this test defends is that
+# the shader does not compile MISSING A LINE, not which of the two honest
+# refusals gets there first.  The closure guard keeps its own coverage in
+# the rig's default-path corpus sweep.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -41,8 +52,8 @@ shader. Refusing is the required behaviour until the shape is lowered."
 fi
 if ! grep -q "t_72810bd7" "$work/positive.log"; then
     tail -n 10 "$work/positive.log" >&2
-    fail "fp_discard_then_work was refused, but not by the completeness
-guard - so this test would keep passing if the guard were removed and the
+    fail "fp_discard_then_work was refused, but not by a completeness
+refusal - so this test would keep passing if the guard were removed and the
 shader merely failed to parse."
 fi
 

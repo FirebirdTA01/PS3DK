@@ -1,0 +1,30 @@
+// Every lane of a varying overwritten by a literal (t_afb4af65).
+//
+// The interesting half here is the COMPLETENESS GUARD, not the emission.
+// The guard refuses a shader when a varying that feeds an output in the
+// IR is read by no emitted instruction (t_72810bd7).  Here `color` does
+// feed the output in the IR - through the insert chain - and is correctly
+// read by nothing, because all four of its lanes are overwritten before
+// the store.  The guard has to know the difference between work that was
+// DROPPED and a value the source itself overwrote, or it refuses this
+// shader for being correct.
+//
+// Reference compiler, for this shader:
+//
+//     FENCBR;
+//     MOVR R0, {0x3f000000(0.5), 0x3e800000(0.25), 0x3e000000(0.125), 0x3f800000(1)};
+//     # attributeInputMask None
+//
+// It reads no input at all, which is the same conclusion the guard has to
+// reach.  Ours writes the four lanes as four MOVs rather than one and is
+// not byte-identical here; the coalesced form is its own item.
+void main(float4 color : TEXCOORD0,
+          out float4 oColor : COLOR)
+{
+    float4 c = color;
+    c.x = 0.5f;
+    c.y = 0.25f;
+    c.z = 0.125f;
+    c.w = 1.0f;
+    oColor = c;
+}
