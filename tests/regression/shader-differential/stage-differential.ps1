@@ -147,17 +147,40 @@ function Row-AppliesToPath([string[]]$fields, [int]$col) {
 # printed as its exact decimal so the twin's literal parses back to the
 # very same float.  The control-auto row is what proves the two copies
 # agree; change one, and that row goes red until the other follows.
-function Auto-Value([string]$name, [uint32]$k) {
-    # Every operand is cast to [uint64] on purpose: PowerShell promotes
-    # a mixed unsigned/signed product to Double, which then overflows the
-    # -band (measured: the first version of this function produced
-    # 4230320.17... for k=0 and errors for the rest).
+# Host copy of the guest's per-name texture permutation (auto_tex_perm):
+# FNV-1a of the sampler's name, mod 24, into the lexicographic "RGBA"
+# permutation table.  Printed per sampler so a texture-dependent row can
+# be read, and so the control twin (sd_tex_baked) can be written for the
+# permutation its sampler's name selects.
+$script:TexPerms = @('RGBA','RGAB','RBGA','RBAG','RAGB','RABG','GRBA','GRAB','GBRA','GBAR','GARB','GABR',
+                     'BRGA','BRAG','BGRA','BGAR','BARG','BAGR','ARGB','ARBG','AGRB','AGBR','ABRG','ABGR')
+function Fnv1a([string]$name) {
     [uint64]$mask = 4294967295
     [uint64]$h = 2166136261
     foreach ($b in [System.Text.Encoding]::UTF8.GetBytes($name)) {
         $h = ([uint64]$h -bxor [uint64]$b) -band $mask
         $h = ([uint64]$h * [uint64]16777619) -band $mask
     }
+    return [uint64]$h
+}
+function Auto-TexPerm([string]$name) {
+    $p = [int]((Fnv1a $name) % 24)
+    return "$p ($($script:TexPerms[$p]))"
+}
+function Print-AutoTextures([string]$srcPath, [string]$label) {
+    $text = Get-Content -Raw -LiteralPath $srcPath
+    foreach ($m in [regex]::Matches($text, 'sampler2D\s+([A-Za-z_][A-Za-z0-9_]*)')) {
+        Write-Host "stager: texture $label $($m.Groups[1].Value) = perm $(Auto-TexPerm $m.Groups[1].Value)"
+    }
+}
+
+function Auto-Value([string]$name, [uint32]$k) {
+    # Every operand is cast to [uint64] on purpose: PowerShell promotes
+    # a mixed unsigned/signed product to Double, which then overflows the
+    # -band (measured: the first version of this function produced
+    # 4230320.17... for k=0 and errors for the rest).
+    [uint64]$mask = 4294967295
+    [uint64]$h = Fnv1a $name
     [uint64]$x = ([uint64]$h -bxor (([uint64]$k * [uint64]2654435761) -band $mask)) -band $mask
     $x = ([uint64]$x * [uint64]2246822507) -band $mask
     $x = ([uint64]$x -bxor ([uint64]$x -shr 13)) -band $mask
@@ -346,6 +369,7 @@ Set-Content -LiteralPath (Join-Path $root "uniforms.txt") -Value ($uniforms -joi
 # sampling is texel-aligned; a mismatch withholds every
 # sampler-declaring verdict.  --general-lowering on both sides: the
 # twin uses floor(), which the default path refuses.
+Print-AutoTextures (Join-Path $here "shaders\sd_tex_ctrl.fcg") "control-texture"
 Compile-Shader "sd_tex_ctrl.fcg"  (Join-Path $controls "tex_ctrl.fpo")  @("--general-lowering")
 Compile-Shader "sd_tex_baked.fcg" (Join-Path $controls "tex_baked.fpo") @("--general-lowering")
 
@@ -510,6 +534,7 @@ if ($ReferenceCompiler) {
         $ours = Join-Path $refScratch "$name`_ours.fpo"
         $ref  = Join-Path $refScratch "$name`_ref.fpo"
         if ($set -eq "auto") { Print-AutoValues $src $name -IncludeFileConsts:($rowFlags -contains '--promote-file-consts') }
+        Print-AutoTextures $src $name
         $null = Compile-Shader $src $ours @($rowFlags) -Absolute
         Assert-Deterministic $src $ours @($rowFlags) -Label $name
         if (-not (Compile-Reference $src $ref)) { throw "reference compile failed or produced no container: $rel" }

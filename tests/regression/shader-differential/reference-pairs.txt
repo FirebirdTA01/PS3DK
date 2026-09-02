@@ -37,6 +37,14 @@ samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg|0
 # discard-blend refuses under --general-lowering until CF-2 discard lands (t_91bbd575): default path only.
 samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/fpshader.fcg|auto|default
 tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
+# The next two are RED on the DEFAULT path since the binder started giving
+# every sampler its own per-name image (t_c48f48c1): under the identity
+# texture they judged identical all day; under diffuseMap = perm 1 (RGAB)
+# they diverge from the reference in a 2-3 scanline band (152 and 35
+# pixels) where the reference alternates values pixel to pixel - a
+# precision or near-zero region, which compiler is right is a source
+# question.  Green again only when t_c48f48c1 is understood; a green from
+# reverting the texture would be the one-input statement we retired.
 tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto
 
@@ -95,3 +103,14 @@ tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both
 # |default: the general path has no fragment branch for file-scope uniforms
 # at all yet (t_f5f750ff) and refuses or aliases this shader.
 tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|default
+
+# NAMED REGRESSION for file-scope SAMPLERS used out of declaration order
+# (codex on 5d44ba6): emit numbers a sampler's unit at first use, the
+# container in declaration order, so binding by name swaps the textures.
+# Each sampler name gets its own image (channels permuted by name), and b
+# samples TEXCOORD0 while a samples TEXCOORD2, so the product tex*tex (the
+# two-sampler shape the default matcher accepts) is asymmetric and a unit
+# swap is a different picture.  RED today, green after the sampler half of
+# the numbering fix.  |default: file-scope uniforms on the
+# general path are t_f5f750ff.
+tests/regression/shader-differential/shaders/sd_sampler_order.fcg|0|default

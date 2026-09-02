@@ -69,7 +69,8 @@
  * embedded defaults.
  *
  * Auto-binder (increment 3a): every sampler2D a container declares is
- * bound to ONE procedural 64x64 texture (both sides alike), and the
+ * bound to the procedural 64x64 texture with its channels PERMUTED by
+ * the sampler's NAME (see k_tex_perm; both sides alike), and the
  * shared VP drives every interpolated channel from the quad's (u,v).
  * The control-texture row (sampled vs arithmetic twin) proves the
  * binding lands; while it is red, or absent, no sampler-declaring pair
@@ -357,20 +358,102 @@ typedef char sd_tex_matches_rt_h[(TEX_H == RT_H) ? 1 : -1];
  * down the image so a discard-on-alpha shader exercises both branches.
  * 64x64 against the 64x64 RT with nearest sampling: pixel (px, py)
  * reads texel (px, py), no filtering in the loop. */
-static int init_procedural_texture(void)
+/* Base texel (R, G, B, A) = (4x, 4(63-y), 4(63-x), 4y): four DISTINCT
+ * channel functions, so that every channel permutation below is a
+ * different image.  (The first version had G == A == 4y, under which
+ * permutations exchanging G and A were invisible.) */
+static u32 base_texel(u32 x, u32 y, unsigned c)
 {
+	switch (c) {
+	case 0:  return 4u * x;
+	case 1:  return 4u * (63u - y);
+	case 2:  return 4u * (63u - x);
+	default: return 4u * y;
+	}
+}
+
+/* Per-NAME texture variants.  Every sampler parameter is bound to the
+ * base texture with its channels PERMUTED by a permutation chosen from
+ * the parameter's name (FNV-1a, same hash as auto_value, mod 24; the
+ * stager mirrors it and prints the permutation per sampler).  Two
+ * samplers in one program therefore see two different images, and a
+ * container that reports the wrong texture unit for a name - the
+ * declaration-order vs first-use sampler numbering codex found on
+ * 5d44ba6 - shows as the wrong image, where one shared texture could
+ * not show it.  Table order is lexicographic over "RGBA": entry p,
+ * position i, names the BASE channel that output channel i reads. */
+static const char *const k_tex_perm[24] = {
+	"RGBA", "RGAB", "RBGA", "RBAG", "RAGB", "RABG",
+	"GRBA", "GRAB", "GBRA", "GBAR", "GARB", "GABR",
+	"BRGA", "BRAG", "BGRA", "BGAR", "BARG", "BAGR",
+	"ARGB", "ARBG", "AGRB", "AGBR", "ABRG", "ABGR",
+};
+static u32 g_tex_perm_offset[24];
+static int g_tex_perm_ready[24];
+
+static u32 fnv1a(const char *name)
+{
+	u32 h = 2166136261u;
+	for (const unsigned char *c = (const unsigned char *)name; *c; c++) {
+		h ^= (u32)*c;
+		h *= 16777619u;
+	}
+	return h;
+}
+
+static unsigned auto_tex_perm(const char *name)
+{
+	return fnv1a(name) % 24u;
+}
+
+static unsigned perm_channel(unsigned p, unsigned i)
+{
+	switch (k_tex_perm[p][i]) {
+	case 'R': return 0;
+	case 'G': return 1;
+	case 'B': return 2;
+	default:  return 3;
+	}
+}
+
+/* Texel packing is A8R8G8B8 as a big-endian u32: A<<24 | R<<16 | G<<8 | B. */
+static u32 pack_texel(u32 r, u32 g, u32 b, u32 a)
+{
+	return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+static int ensure_perm_texture(unsigned p)
+{
+	if (g_tex_perm_ready[p])
+		return 1;
 	u32 *px = (u32 *)local_align(128, TEX_W * TEX_H * sizeof(u32));
 	for (u32 y = 0; y < TEX_H; y++)
 		for (u32 x = 0; x < TEX_W; x++)
-			px[y * TEX_W + x] = ((4u * y) << 24) | ((4u * x) << 16)
-			                  | ((4u * y) << 8) | (4u * (63u - x));
-	return cellGcmAddressToOffset(px, &g_tex_offset) == 0;
+			px[y * TEX_W + x] = pack_texel(
+				base_texel(x, y, perm_channel(p, 0)),
+				base_texel(x, y, perm_channel(p, 1)),
+				base_texel(x, y, perm_channel(p, 2)),
+				base_texel(x, y, perm_channel(p, 3)));
+	if (cellGcmAddressToOffset(px, &g_tex_perm_offset[p]) != 0)
+		return 0;
+	g_tex_perm_ready[p] = 1;
+	return 1;
+}
+
+static int init_procedural_texture(void)
+{
+	/* The identity permutation is the texture every earlier row used;
+	 * keep it first so a failure here is attributable. */
+	if (!ensure_perm_texture(0))
+		return 0;
+	g_tex_offset = g_tex_perm_offset[0];
+	return 1;
 }
 
 /* Bind recipe from the cellgcm discard-blend sample (proven on the
  * emulator), with NEAREST filtering so the control's texel arithmetic
  * holds exactly. */
-static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit)
+static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned perm)
 {
 	CellGcmTexture t = {0};
 	t.format    = CELL_GCM_TEXTURE_A8R8G8B8
@@ -392,7 +475,7 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit)
 	t.depth     = 1;
 	t.location  = CELL_GCM_LOCATION_LOCAL;
 	t.pitch     = (u32)(TEX_W * sizeof(u32));
-	t.offset    = g_tex_offset;
+	t.offset    = g_tex_perm_offset[perm];
 	cellGcmSetTexture(ctx, (uint8_t)unit, &t);
 	cellGcmSetTextureControl(ctx, (uint8_t)unit, CELL_GCM_TRUE,
 	                         0, 0, CELL_GCM_TEXTURE_MAX_ANISO_1);
@@ -442,7 +525,15 @@ static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
 		u32 res = cellGcmCgGetParameterResource(fpo, prm);
 		if (type != CG_SAMPLER2D || res < CG_TEXUNIT0 || res > CG_TEXUNIT15)
 			return -1;
-		bind_procedural_texture(ctx, res - CG_TEXUNIT0);
+		/* Bound BY NAME to the unit the container reports for that
+		 * name, exactly as an application does: a container whose
+		 * ucode samples a different unit than it reports for the
+		 * name reads the wrong image. */
+		const char *name = cellGcmCgGetParameterName(fpo, prm);
+		unsigned perm = auto_tex_perm(name ? name : "");
+		if (!ensure_perm_texture(perm))
+			return -1;
+		bind_procedural_texture(ctx, res - CG_TEXUNIT0, perm);
 		n++;
 	}
 	return n;
@@ -462,11 +553,7 @@ static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
  * without either side asserting the container's encoding. */
 static float auto_value(const char *name, unsigned k)
 {
-	u32 h = 2166136261u;
-	for (const unsigned char *c = (const unsigned char *)name; *c; c++) {
-		h ^= (u32)*c;
-		h *= 16777619u;
-	}
+	u32 h = fnv1a(name);
 	u32 x = h ^ ((u32)k * 0x9E3779B1u);
 	x *= 0x85EBCA6Bu;
 	x ^= x >> 13;

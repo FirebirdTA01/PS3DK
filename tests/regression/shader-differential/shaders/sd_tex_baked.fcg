@@ -1,11 +1,25 @@
-// shader-differential — texture-binding control, arithmetic twin.
+// shader-differential - texture-binding control, arithmetic twin.
 //
-// The procedural texture is 64x64 A8R8G8B8 with texel (x, y) =
-// (R, G, B, A) = (4x, 4y, 4(63 - x), 4y) in 8-bit units.  At RT pixel
-// (px, py) the interpolated texcoord is ((px + 0.5)/64, (py + 0.5)/64),
-// so floor(uv * 64) recovers (px, py) with half a texel of margin, and
-// the nearest-sampled texel is the same (px, py).  4/255 scaling makes
-// every channel exactly representable after the RT's 8-bit quantisation.
+// The base procedural texture is 64x64 A8R8G8B8 with texel (x, y) =
+// (R, G, B, A) = (4x, 4(63 - y), 4(63 - x), 4y) in 8-bit units - four
+// DISTINCT channel functions.  Every sampler is bound to that texture
+// with its channels PERMUTED by the sampler's NAME (guest auto_tex_perm =
+// FNV-1a(name) mod 24 into the lexicographic RGBA table; the stager
+// prints it per sampler as "texture <row> <name> = perm N (XXXX)").
+// The sampled twin's sampler is named u_tex, whose permutation is
+// 6 (GRBA): output R reads base G, output G reads base R, B and A stay.
+// So the texel u_tex sees is (4(63 - y), 4x, 4(63 - x), 4y).
+//
+// At RT pixel (px, py) the interpolated texcoord is ((px + 0.5)/64,
+// (py + 0.5)/64), so floor(uv * 64) recovers (px, py) with half a texel
+// of margin, and the nearest-sampled texel is the same (px, py).  4/255
+// scaling makes every channel exactly representable after the RT's 8-bit
+// quantisation.
+//
+// This twin is therefore ALSO the proof that the host's and the guest's
+// permutation tables agree for at least one name: rename u_tex, or change
+// either table, and this row goes red until the twin is rewritten for the
+// new permutation.
 
 void main(
     float4 in_texcoord   : TEXCOORD0,
@@ -14,5 +28,5 @@ void main(
     float x = floor(in_texcoord.x * 64.0f);
     float y = floor(in_texcoord.y * 64.0f);
     float s = 4.0f / 255.0f;
-    out_color = float4(x * s, y * s, (63.0f - x) * s, y * s);
+    out_color = float4((63.0f - y) * s, x * s, (63.0f - x) * s, y * s);
 }

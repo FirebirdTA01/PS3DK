@@ -1,0 +1,34 @@
+// shader-differential - NAMED REGRESSION for file-scope SAMPLERS used out
+// of declaration order (codex, review of 5d44ba6, 2026-09-01 21:19;
+// default path, ships).
+//
+// THE DEFECT: the emit side assigns a file-scope sampler's texture unit at
+// FIRST USE, the container reports units in DECLARATION order.  Declare
+// a, b and use b, a: the ucode samples b from TEX0 and a from TEX1 while
+// the container tells the application a is TEX0 and b is TEX1.  Binding
+// by name - what every application does - swaps the textures silently.
+//
+// THE ROW: the guest binds each sampler BY NAME to the unit the container
+// reports, and each name gets its own image (the base texture with its
+// channels permuted by the name: a = perm 4 RAGB, b = perm 13 BRAG).
+// The shape is q3_fp_modulate2's - tex * tex, the one two-sampler form
+// the default matcher accepts - but a PRODUCT of two samples at the SAME
+// coordinate is symmetric and a unit swap would be invisible, so b
+// samples at TEXCOORD0 and a at TEXCOORD2 (the rig's vertex shader gives
+// TEXCOORD2 the coordinate (0.5 - u, 0.5), different from (u, v)):
+//   out = tex2D(b, tc0) * tex2D(a, tc2)
+// With the units swapped the product becomes a-image(tc0) * b-image(tc2),
+// a different picture.  RED today on the default path; green once
+// samplers are numbered on the emit side in declaration order.  One
+// shared texture for every sampler could not show this - which is why
+// the binder now permutes per name.
+uniform sampler2D a;
+uniform sampler2D b;
+
+void main(
+    float2 tc0 : TEXCOORD0,
+    float2 tc2 : TEXCOORD2,
+    out float4 oColor : COLOR)
+{
+    oColor = tex2D(b, tc0) * tex2D(a, tc2);
+}
