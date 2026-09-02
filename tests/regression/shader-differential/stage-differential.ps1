@@ -985,6 +985,13 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     Compile-Shader "sd_vp_ctrl_a.vcg" (Join-Path $controls "vp_ident_a.vpo") @() -Profile sce_vp_rsx
     Copy-Item (Join-Path $controls "vp_ident_a.vpo") (Join-Path $controls "vp_ident_b.vpo") -Force
     Compile-Shader "sd_vp_ctrl_b.vcg" (Join-Path $controls "vp_mismatch_b.vpo") @() -Profile sce_vp_rsx
+    # control-vp-unwritten (VP-side outw, 2026-09-02): a vertex program that
+    # declares TEXCOORD1 and never writes it, REFERENCE-compiled and
+    # byte-copied to both sides.  The guest must judge vp-output-unwritten-a:
+    # the decoder that names a declared-but-unwritten vertex channel from
+    # the ucode words is seen to fire before any vp row's outw is believed.
+    $okU = Compile-Reference (Join-Path $here "shaders\sd_vp_unwritten_ctrl.vcg") (Join-Path $controls "vp_unwritten.vpo") "sce_vp_rsx"
+    if (-not $okU) { throw "control-vp-unwritten: reference compile failed" }
     # The auto control and its twin are REFERENCE-compiled, both sides: a
     # rig control proves the guest's synthesis and upload against the
     # host's prediction, and must not rest on the compiler under test (the
@@ -1020,6 +1027,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     $manifest += @(
         "B|control-vp-identical|vp_ident|controls/vp_ident_a.vpo|controls/vp_ident_b.vpo|0",
         "B|control-vp-mismatch|vp_mismatch|controls/vp_ident_a.vpo|controls/vp_mismatch_b.vpo|0",
+        "B|control-vp-unwritten|vp_unwritten|controls/vp_unwritten.vpo|controls/vp_unwritten.vpo|0",
         "B|control-vp-auto|vp_auto_apply|controls/vp_auto_ctrl.vpo|controls/vp_auto_baked.vpo|auto"
     )
 

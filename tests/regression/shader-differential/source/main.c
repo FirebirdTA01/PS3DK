@@ -40,7 +40,10 @@
  *         general one; otherwise status path-pair-unoracled, counted
  *         on its own line, neither pass nor fail) |
  *         VP ROWS (increment 4, gate 5): control-vp-identical |
- *         control-vp-mismatch | control-vp-auto | vp-reference |
+ *         control-vp-mismatch | control-vp-auto | control-vp-unwritten
+ *         (a reference-compiled vertex program declaring a TEXCOORD it
+ *         never writes, byte-copied: must judge vp-output-unwritten-a,
+ *         so the VP-side outw decoder is seen to fire) | vp-reference |
  *         vp-path-pair - both paths name VERTEX containers of one
  *         shader, drawn under the SAME not-under-test coverage FP per
  *         interpolated channel (see judge_vp_pair); gated like their
@@ -71,7 +74,15 @@
  *         differently, so the same synthesis would feed them different
  *         values: a finding about the containers, no pixel verdict) |
  *         uniforms-unlisted (a side applies more uniforms than the rig's
- *         bounded list holds, so that check cannot run: no verdict)
+ *         bounded list holds, so that check cannot run: no verdict) |
+ *         vp-output-unwritten-a | vp-output-unwritten-b (a channel the
+ *         side's container DECLARES through an out parameter is never
+ *         written by its vertex ucode - decoded from the words, the
+ *         vertex twin of output-unwritten; `outw` in the diagnostic) |
+ *         vp-outw-undecoded (the LAST bit did not sit on the final
+ *         instruction alone, so the decoder does not trust its own
+ *         read of the words: no outw verdict, the row is judged on
+ *         pixels as before)
  *
  * Sensitivity, in every judged row's diagnostic: `levels a=R/G/B/A
  * b=R/G/B/A` = distinct 8-bit values per channel per side, and `sat`
@@ -1404,6 +1415,41 @@ static int channel_of_semantic(const char *sem)
 	return -1;
 }
 
+/* VP-side outw: the channels the vertex UCODE actually writes, decoded
+ * from the words rather than read from any mask the container declares
+ * (the FP side's outw rule).  NV40 vertex instructions are four 32-bit
+ * words, stored as the assembler laid them out (no halfword swap on the
+ * vertex side): an output write sets VEC_RESULT (word 0 bit 30) or
+ * SCA_RESULT (word 3 bit 12) and names the output register at word 3
+ * bits 2..6 - HPOS 0, COL0 1, COL1 2, BFC0/1 3/4, FOGC 5, PSZ 6, TC0..7
+ * at 7..14.  Mapped onto the rig's channel bits (cov = HPOS).  The
+ * decoder checks itself: the LAST bit (word 3 bit 0) must sit on the
+ * final instruction and on no other; otherwise it reports undecoded
+ * rather than a mask read from the wrong words. */
+static u32 vp_written_channels(void *container, int *decoded)
+{
+	void *uc = NULL; u32 usz = 0;
+	cellGcmCgGetUCode((CGprogram)container, &uc, &usz);
+	const u32 *w = (const u32 *)uc;
+	u32 n = usz / 16, mask = 0;
+	int last_ok = (n > 0);
+	for (u32 i = 0; i < n; i++) {
+		u32 w0 = w[i * 4 + 0], w3 = w[i * 4 + 3];
+		int is_last = (w3 & 1u) != 0;
+		if (is_last != (i == n - 1))
+			last_ok = 0;
+		if (!(w0 & (1u << 30)) && !(w3 & (1u << 12)))
+			continue;
+		u32 dest = (w3 >> 2) & 31u;
+		if (dest == 0)                      mask |= 1u;                 /* HPOS -> cov */
+		else if (dest == 1 || dest == 2)    mask |= 1u << (11 + (dest - 1)); /* COL0/1 */
+		else if (dest == 5)                 mask |= 1u << 13;           /* FOGC */
+		else if (dest >= 7 && dest <= 14)   mask |= 1u << (1 + (dest - 7)); /* TC0..7 */
+	}
+	*decoded = last_ok;
+	return mask;
+}
+
 /* Bit i set for every channel an OUT parameter of the container selects;
  * semantics no channel serves are appended to `unjudged` (POSITION and
  * PSIZE are silently accepted: the first is judged by cov, the second is
@@ -2038,6 +2084,9 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 	u32 inmask_a = va->attributeInputMask, inmask_b = vb->attributeInputMask;
 	u32 params_a = cellGcmCgGetCountParameter((CGprogram)cont_a);
 	u32 params_b = cellGcmCgGetCountParameter((CGprogram)cont_b);
+	int outw_ok_a = 0, outw_ok_b = 0;
+	u32 outw_a = vp_written_channels(cont_a, &outw_ok_a);
+	u32 outw_b = vp_written_channels(cont_b, &outw_ok_b);
 
 	u32 watermark = g_local_mem_heap;
 	char chlist[160] = "";
@@ -2209,8 +2258,19 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 	{
 		size_t len = strlen(r->diagnostic);
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
-		         " outs a=0x%x b=0x%x inmask a=0x%x b=0x%x",
-		         mask_a, mask_b, inmask_a, inmask_b);
+		         " outs a=0x%x b=0x%x inmask a=0x%x b=0x%x outw a=0x%x b=0x%x",
+		         mask_a, mask_b, inmask_a, inmask_b, outw_a, outw_b);
+	}
+	/* A declared channel the ucode never writes is the vertex twin of
+	 * output-unwritten: whatever the pixels said, that channel's values
+	 * are leftovers.  Only channels the row judges (the declared mask)
+	 * count; a decoder that could not trust its read says so instead of
+	 * guessing.  Applied after the pixel verdict so a mismatch on
+	 * another channel is not hidden, and before any control check. */
+	if (!outw_ok_a || !outw_ok_b) {
+		r->status = "vp-outw-undecoded";
+	} else if ((mask_a & ~outw_a) != 0 || (mask_b & ~outw_b) != 0) {
+		r->status = (mask_a & ~outw_a) ? "vp-output-unwritten-a" : "vp-output-unwritten-b";
 	}
 	if (warm_max_a > 1 || warm_max_b > 1) {
 		size_t len = strlen(r->diagnostic);
@@ -2562,6 +2622,18 @@ int main(int argc, const char **argv)
 				vp_ok = 0;
 				failures++;
 			}
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-vp-unwritten") == 0) {
+			/* A reference-compiled vertex program declaring a TEXCOORD
+			 * it never writes, byte-copied: the decoder must name it.
+			 * Fails the run, withholds nothing. */
+			int ok = strcmp(r.status, "vp-output-unwritten-a") == 0;
+			printf("shader-differential: control-vp-unwritten: status %s: %s\n",
+			       r.status, ok ? "the VP outw decoder names a declared-but-unwritten channel"
+			                    : "NOT NAMED - a vertex program that never writes a channel it declares would pass this rig unseen");
+			if (!ok)
+				failures++;
 			goto post_row;
 		}
 		if (strcmp(p->role, "control-vp-auto") == 0) {

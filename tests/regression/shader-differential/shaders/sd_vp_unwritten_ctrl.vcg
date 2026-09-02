@@ -1,0 +1,21 @@
+// shader-differential — control-vp-unwritten (VP-side outw, 2026-09-02).
+//
+// Declares TEXCOORD1 as an output and never writes it.  REFERENCE-compiled
+// and byte-copied to both sides: the row measures the guest's vertex ucode
+// decoder, not the compiler.  What the guest asserts: status
+// vp-output-unwritten-a - the declared tc1 channel is absent from the set
+// of output registers the ucode writes (VEC_RESULT / SCA_RESULT with the
+// output index at word 3 bits 2..6), decoded from the words rather than
+// read from any mask the container declares.  The fragment side's outw
+// named t_a15ec129 two days after the sensitivity fields had been pointing
+// at it; this is the vertex twin, seen to fire once before it is believed.
+void main(
+    float2 in_position       : POSITION,
+    float2 in_texcoord       : TEXCOORD0,
+    out float4 out_position  : POSITION,
+    out float4 out_texcoord0 : TEXCOORD0,
+    out float4 out_texcoord1 : TEXCOORD1)
+{
+    out_position  = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    out_texcoord0 = float4(in_texcoord.x, in_texcoord.y, 0.0f, 1.0f);
+}
