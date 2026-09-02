@@ -122,6 +122,9 @@ jobs:
       - name: Test rsx-cg-compiler vertex constructor lanes
         run: bash tests/shader-compiler/vp-construct-lanes-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler vertex literal pool
+        run: bash tests/shader-compiler/vp-literal-vector-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

@@ -108,6 +108,11 @@ struct VSrc
     bool     fp16 = false;   // FP-only: temp source is an H register
     bool     embeddedUniform = false; // FP uniforms use inline blocks; VP uniforms are const regs
     std::array<float, 4> literal = {0.0f, 0.0f, 0.0f, 0.0f};
+    // Meaningful lanes of `literal`.  A VECTOR literal has to keep all of
+    // them: the vertex literal pool used to read literal[0] and nothing
+    // else, so float4(a,b,c,d) shipped as a broadcast of `a` and every
+    // store of it painted one value four times (t_3e342903).
+    uint8_t  literalLanes = 1;
     std::array<uint8_t, 4> swizzle = {0, 1, 2, 3};
     bool     neg = false;
     bool     abs = false;
@@ -165,6 +170,13 @@ struct VirtualProgram
     std::unordered_map<int, int> vregToPhys;
     std::unordered_map<int, bool> vregToFp16;
     int nextVpLiteralConst = 467;
+    // Lowest const register the literal pool may take.  Uniforms grow DOWN
+    // from 467 and matrices grow UP from 256, and the literal pool
+    // continues downward after the uniforms - so the matrix watermark is
+    // the floor.  Carried here because emission allocates the pool and
+    // does not see the uniform walk (t_3e342903 made vector literals take
+    // a register each, which is what made this reachable).
+    int vpConstFloor = 256;
     std::vector<std::string> diagnostics;
     // Set when ANY lowering could not complete: an unresolved operand, or an
     // IR op this path does not implement.  Emission must not succeed after
@@ -344,8 +356,10 @@ static VSrc literalSrc(const IRConstant& constant)
         s.literal[0] = std::get<bool>(constant.value) ? 1.0f : 0.0f;
     } else if (std::holds_alternative<std::vector<float>>(constant.value)) {
         const auto& values = std::get<std::vector<float>>(constant.value);
-        for (size_t i = 0; i < std::min<size_t>(4, values.size()); ++i)
+        const size_t n = std::min<size_t>(4, values.size());
+        for (size_t i = 0; i < n; ++i)
             s.literal[i] = values[i];
+        s.literalLanes = static_cast<uint8_t>(std::max<size_t>(1, n));
     }
     return s;
 }
@@ -1062,6 +1076,7 @@ private:
             nextVpMatrixConst += it->rows;
         }
         program_.nextVpLiteralConst = nextVpUniformConst;
+        program_.vpConstFloor = nextVpMatrixConst;
     }
 
     // A SCALAR operand must REPLICATE its own component across all four
@@ -3843,16 +3858,65 @@ static bool floatBitsEqual(float a, float b)
     return pa == pb;
 }
 
+// Which pool slots hold packed SCALARS and which hold one whole vector
+// literal.  The two are allocated differently and must not be matched
+// against each other: appending a scalar into a vector's register, or
+// broadcasting a scalar out of a lane of one, would both be shapes the
+// reference does not produce.
+struct VpLiteralAlloc
+{
+    std::vector<size_t> scalarSlots;
+    std::vector<size_t> vectorSlots;
+};
+
 static VSrc assignVpLiteralSource(const VSrc& literal,
                                   VpAttributes& attrs,
-                                  int& nextLiteralReg)
+                                  int& nextLiteralReg,
+                                  VpLiteralAlloc& alloc)
 {
     VSrc out = literal;
     out.kind = VSrcKind::Uniform;
     out.embeddedUniform = false;
 
+    // A VECTOR literal gets a const register of its own, holding all of
+    // its lanes, and keeps whatever swizzle the source already carried.
+    // Measured against the reference: `out = float4(a,b,c,d)` is
+    // `MOV o[n], c[467]` with C[467] declared float4, and two identical
+    // vec4 literals SHARE one register.  Reading literal[0] and
+    // broadcasting it - which is what this did for every literal - made
+    // every such store paint one value four times (t_3e342903).
+    if (literal.literalLanes > 1) {
+        const uint8_t lanes = literal.literalLanes;
+        for (size_t idx : alloc.vectorSlots) {
+            const auto& slot = attrs.literalPool[idx];
+            if (slot.usedLanes != lanes) continue;
+            bool same = true;
+            for (uint32_t lane = 0; lane < slot.usedLanes; ++lane) {
+                if (!floatBitsEqual(slot.values[lane], literal.literal[lane])) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) {
+                out.index = static_cast<int>(slot.constReg);
+                return out;
+            }
+        }
+
+        VpLiteralPoolSlot slot;
+        slot.constReg = static_cast<uint32_t>(nextLiteralReg--);
+        slot.usedLanes = lanes;
+        for (uint32_t lane = 0; lane < lanes; ++lane)
+            slot.values[lane] = literal.literal[lane];
+        alloc.vectorSlots.push_back(attrs.literalPool.size());
+        attrs.literalPool.push_back(slot);
+        out.index = static_cast<int>(slot.constReg);
+        return out;
+    }
+
     const float value = literal.literal[0];
-    for (const auto& slot : attrs.literalPool) {
+    for (size_t idx : alloc.scalarSlots) {
+        const auto& slot = attrs.literalPool[idx];
         for (uint32_t lane = 0; lane < slot.usedLanes; ++lane) {
             if (floatBitsEqual(slot.values[lane], value)) {
                 out.index = static_cast<int>(slot.constReg);
@@ -3865,8 +3929,8 @@ static VSrc assignVpLiteralSource(const VSrc& literal,
         }
     }
 
-    if (!attrs.literalPool.empty()) {
-        auto& slot = attrs.literalPool.back();
+    if (!alloc.scalarSlots.empty()) {
+        auto& slot = attrs.literalPool[alloc.scalarSlots.back()];
         if (slot.usedLanes < 4) {
             const uint32_t lane = slot.usedLanes++;
             slot.values[lane] = value;
@@ -3883,6 +3947,7 @@ static VSrc assignVpLiteralSource(const VSrc& literal,
     slot.constReg = static_cast<uint32_t>(nextLiteralReg--);
     slot.usedLanes = 1;
     slot.values[0] = value;
+    alloc.scalarSlots.push_back(attrs.literalPool.size());
     attrs.literalPool.push_back(slot);
 
     out.index = static_cast<int>(slot.constReg);
@@ -4270,11 +4335,27 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     VpAssembler asm_;
     VpAttributes attrs;
     int nextLiteralReg = program.nextVpLiteralConst;
+    VpLiteralAlloc literalAlloc;
     for (VInstr& vi : program.instrs) {
         for (VSrc& src : vi.srcs) {
             if (src.kind == VSrcKind::Literal)
-                src = assignVpLiteralSource(src, attrs, nextLiteralReg);
+                src = assignVpLiteralSource(src, attrs, nextLiteralReg,
+                                            literalAlloc);
         }
+    }
+    // The pool grows DOWN from the last free uniform register and the
+    // matrices grow UP from 256, so running past that watermark would
+    // hand a literal a register a matrix row already owns - a silent
+    // wrong value, not a compile error.  Nothing checked it while every
+    // literal was a single packed lane; vector literals take a register
+    // each, so it is now reachable and refused (t_3e342903).
+    if (nextLiteralReg < program.vpConstFloor) {
+        out.diagnostics.push_back(
+            "nv40-vp: the literal pool ran past c[" +
+            std::to_string(program.vpConstFloor) +
+            "], where the matrix uniforms start; refusing rather than "
+            "emitting a literal that reads a matrix row (t_3e342903)");
+        return out;
     }
 
     auto makeInsn = [](const VInstr& vi) {

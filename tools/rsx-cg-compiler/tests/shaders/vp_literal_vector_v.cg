@@ -1,0 +1,32 @@
+// A float4 literal keeps all four of its lanes in the vertex constant
+// pool (t_3e342903).
+//
+// The general path's literal pool read literal[0] and nothing else: every
+// literal, of any width, was packed into one lane of a shared const
+// register and read back with an .xxxx broadcast.  So
+//
+//     out_tc0 = float4(0.404f, 0.186f, 0.277f, 0.349f);
+//
+// shipped as `MOV o[7], c[467].x` and painted 0.404 in all four channels.
+// Exit 0, container written, no diagnostic - and the value in the
+// container was not the value in the source.
+//
+// The reference gives a vector literal a const register of its own,
+// holding the whole vector, and two IDENTICAL vector literals share one:
+//
+//     #: float4: internal-constant-0: C[467]     MOV o[7], c[467]
+//     #: float4: internal-constant-1: C[466]     MOV o[8], c[466]
+//
+// The third store below is the first literal again, so the pool must
+// still hold exactly two slots.
+void main(float4 in_position : POSITION,
+          out float4 out_position : POSITION,
+          out float4 out_tc0 : TEXCOORD0,
+          out float4 out_tc1 : TEXCOORD1,
+          out float4 out_tc2 : TEXCOORD2)
+{
+    out_position = in_position;
+    out_tc0 = float4(0.404f, 0.186f, 0.277f, 0.349f);
+    out_tc1 = float4(0.754f, 0.027f, -0.061f, -0.054f);
+    out_tc2 = float4(0.404f, 0.186f, 0.277f, 0.349f);
+}
