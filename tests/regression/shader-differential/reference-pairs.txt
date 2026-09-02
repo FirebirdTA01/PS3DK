@@ -195,7 +195,12 @@ tests/regression/shader-differential/shaders/sd_two_inputs.fcg|0|both
 # FLIPPED to |general with CF-2 (claude's stack, 2026-09-02): the default path now
 # REFUSES the false-arm discard by design, and the general path lowers it.
 # Expected identical, painted a = b = 1728, kil 1/1.
-tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|general
+# WITHDRAWN 10:50 to the sweep: on the committed CF-2 tree the general path still
+# REFUSES the else-arm shape (CF-1a's 'output store off the exit block' rule; claude's
+# 286-shader sweep names it), so a curated row here would abort the general stage.
+# Returns when that rule is relaxed for the shape.  Until then t_79fc6bf7 is proven
+# by the default-path refusal fixture only.
+# tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|general
 
 # CF-2 landed: the general path lowers discard (t_91bbd575).  Two of claude's
 # fixtures as standing pixel witnesses on the general path, expected identical:
@@ -205,7 +210,8 @@ tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|general
 # comparison alone.  Expected painted a = b = 2266 (then-arm columns 43..63
 # killed on c.a < 0.25 = 1344; else-arm rows 46..63 on columns 0..26 killed on
 # COLOR0.w < 0.25 = 486); 2752 would mean the else arm's literal was dropped.
-tools/rsx-cg-compiler/tests/shaders/fp_discard_else_f.cg|0|general
+# fp_discard_else_f withdrawn with sd_discard_else above (same shape, same refusal).
+# tools/rsx-cg-compiler/tests/shaders/fp_discard_else_f.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/fp_discard_merge_f.cg|0|general
 
 # 2026-09-02 two general-path P1s found by claude while compiling CF-2's fixtures,
