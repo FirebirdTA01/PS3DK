@@ -174,6 +174,13 @@ Remove-Item -LiteralPath (Join-Path $root "manifest.txt") -Force -ErrorAction Si
 $artifacts = Join-Path $root "artifacts"
 New-Item -ItemType Directory -Force $controls | Out-Null
 New-Item -ItemType Directory -Force $artifacts | Out-Null
+# The guest dumps a mismatching row's two images here by SHADER NAME, and a
+# row that goes identical dumps nothing - so a dump from an earlier run would
+# sit under the current name and read as this run's evidence.  The stager
+# owns the directory: emptied at every stage, so every file in it is from the
+# boot that follows (the vita team found two compilers' containers sharing one
+# output directory, told apart only by a date nobody reads, 2026-09-02).
+Get-ChildItem -LiteralPath $artifacts -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
 $extraFlags = @()
 if ($GeneralLowering) { $extraFlags += "--general-lowering" }
