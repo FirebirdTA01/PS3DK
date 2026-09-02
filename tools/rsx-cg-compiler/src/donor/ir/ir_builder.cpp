@@ -578,9 +578,20 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     auto getValueType = [&](IRValueID id) -> IRTypeInfo
     {
         if (id == InvalidIRValue) return IRTypeInfo::Void();
-        // First check parameters / constants.
+        // Constants live in the function's value map.
         if (IRValue* v = currentFunction_->getValue(id))
             return v->type;
+        // Parameters do NOT: their ids are allocated and pushed onto
+        // `parameters` only, so a merge whose arm is a raw input (`if
+        // (c.x > k) r = c; else r = d;`) resolved to Void here, the
+        // Select was typed Void, and the general path masked its write
+        // to one lane and broadcast lane x into every channel
+        // (t_7b20ffdc, measured 2026-09-02 against the reference; the
+        // default path happened not to read the width).  The comment
+        // above used to claim this branch checked parameters; it never
+        // had.
+        for (const IRParameter& param : currentFunction_->parameters)
+            if (param.valueId == id) return param.type;
         // Then walk instructions for a result match.
         for (const auto& bp : currentFunction_->blocks)
         {

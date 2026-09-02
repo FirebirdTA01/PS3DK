@@ -1,0 +1,28 @@
+// shader-differential — vector-valued if/else merge of two raw inputs (t_7b20ffdc).
+//
+// Both arms are function INPUTS, not computed values, and they differ in
+// every channel other than x: under sd_pos_allch, c = TEXCOORD0 =
+// (u, v, 0.1+0.5v, 0.92-u) and d = COLOR0 = (u, v, 1-u, 1-1.05v), so the
+// x channel agrees on both arms by construction and only y/z/w can show a
+// wrong merge.  That is deliberate: the defect collapses the merge to
+// lane x and broadcasts it, so an arm pair differing only in x paints
+// identically under the bug and would read green.
+//
+// Measured 2026-09-02 on fd5aa13 (claude, then reproduced here): the
+// general path emits MOVR R0.x, f[COL0]; MOVRC RC.x; MOVR R0.x(NE.x),
+// f[TEX0]; MOVR R0, R0.x where the reference emits MOVR R0, R0;
+// MOVR R0(EQ.x), f[COL0].  Cause: the IR builder's merge type lookup
+// never consulted function parameters, so a merge whose arm is a raw
+// input was typed Void and the general path masked its write to one
+// lane.  The default path REFUSES this shape outright ("Select: two
+// varying branches not yet supported") - honest, so the row is
+// general-only (a refusing curated row aborts the stage).
+//
+// Curated |general: RED until the fix lands (every pixel's y/z/w wrong,
+// x agreeing), identical after it.
+void main(float4 c : TEXCOORD0, float4 d : COLOR0, out float4 o : COLOR)
+{
+    float4 r;
+    if (c.x > 0.42) { r = c; } else { r = d; }
+    o = r;
+}

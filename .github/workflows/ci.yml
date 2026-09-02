@@ -133,6 +133,8 @@ jobs:
 
       - name: Test rsx-cg-compiler two-varying operands
         run: bash tests/shader-compiler/two-varying-operands-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler select merge of raw inputs
+        run: bash tests/shader-compiler/select-merge-inputs-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler defaulted output semantic
         run: bash tests/shader-compiler/out-no-semantic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

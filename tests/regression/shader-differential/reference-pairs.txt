@@ -193,3 +193,18 @@ tests/regression/shader-differential/shaders/sd_two_inputs.fcg|0|both
 # painted a = b = 1728; the default-path refusal is then proven by the
 # compiler-side fixture fp_discard_else_f, not here.
 tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|default
+
+# 2026-09-02 two general-path P1s found by claude while compiling CF-2's fixtures,
+# neither containing a discard, both live on fd5aa13 and both switch blockers:
+# t_7b20ffdc - a vector-valued if/else merge of two RAW INPUTS collapses to lane x and
+# broadcasts it (the IR builder typed the merge's Select Void because its type lookup
+# never consulted parameters; Fable's fix in the builder).  The arms agree in x by
+# construction and differ in y/z/w, or the broadcast would paint identically.
+# t_40dd8159 - a comparison between two DISTINCT varyings compares one with itself
+# (input legalisation covers arithmetic ops only; claude's fix).  Both |both: green on
+# default, RED on general until each fix lands.  Both |general only: the default
+# path REFUSES both shapes ('Select: two varying branches not yet supported' and
+# 'generic arithmetic value did not lower') - honest, and a refusing curated row
+# aborts the stage; the items' 'default compiles it' was not true of these spellings.
+tests/regression/shader-differential/shaders/sd_select_merge.fcg|0|general
+tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general

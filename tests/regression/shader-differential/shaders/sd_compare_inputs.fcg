@@ -1,0 +1,23 @@
+// shader-differential — a comparison between two DISTINCT varyings (t_40dd8159).
+//
+// `c.w < d.w` with c = TEXCOORD0 and d = TEXCOORD1.  Under sd_pos_allch
+// c.w = 0.92 - u and d.w = 0.4 + 0.5v, so the comparison is true on one
+// side of a diagonal across the quad and false on the other: a
+// discriminating band.  The general path's input legalisation lists only
+// the arithmetic ops, so a comparison between two inputs reaches the
+// emitter with two INPUT operands and the one-input-selector rule
+// (t_e89cd261) makes it compare d.w with ITSELF - always false - and the
+// row paints a constant where the reference paints a band (claude,
+// measured 2026-09-02 on fd5aa13).  The default path REFUSES the shape
+// ("generic arithmetic value did not lower"), so the row is general-only.
+//
+// The result is written to R and to B (via 1 - t) so a constant output
+// shows in two channels; G carries u so the row is never vacuous and
+// the levels line reads the band.
+//
+// Curated |general: RED until t_40dd8159's fix, identical after it.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    float t = (c.w < d.w) ? 1.0f : 0.0f;
+    o = float4(t, c.x, 1.0f - t, 1.0f);
+}

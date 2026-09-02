@@ -1,0 +1,21 @@
+// t_7b20ffdc: a vector-valued if/else merge whose arms are RAW INPUTS.
+//
+// The IR builder types the merge's Select from the then-value; function
+// parameters were never entered in the function's value map, so a raw
+// input resolved to Void, the Select was typed Void, and the general
+// path masked its predicated write to lane x and broadcast that lane
+// into every channel (measured 2026-09-02 on fd5aa13: MOVR R0.x, f[COL0];
+// MOVRC RC.x; MOVR R0.x(NE.x), f[TEX0]; MOVR R0, R0.x).  The reference
+// emits MOVR R0, f[TEX0]; SGTRC RC.x; MOVR R0, R0; MOVR R0(EQ.x), f[COL0]
+// - every value move writes all four lanes.
+//
+// Arms computed from inputs (`r = c * 2`) have a defining instruction
+// and were typed correctly, which is why no corpus shader showed it.
+// The assertion (select-merge-inputs-test.sh) is that every MOV reading
+// an input register writes the full mask, on both paths.
+void main(float4 c : TEXCOORD0, float4 d : COLOR0, out float4 o : COLOR)
+{
+    float4 r;
+    if (c.x > 0.42) { r = c; } else { r = d; }
+    o = r;
+}
