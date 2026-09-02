@@ -74,8 +74,15 @@ inline uint32_t fpAttrMaskBitForInputSrc(int inputSrc)
         return (1u << 1) | (1u << 3);  // front specular + back specular
     if (inputSrc == NVFX_FP_OP_INPUT_SRC_FOGC)
         return 1u << 4;
+    // TEXCOORD8 and TEXCOORD9 are real fragment inputs - the input-source
+    // field is four bits and TC(n) = 4 + n, so they encode as 12 and 13 -
+    // and the container has mask bits for them at 22 and 23.  The bound
+    // stopped at TC(7), so a shader reading either declared NO attribute
+    // input at all and the varying arrived as a constant on both paths
+    // (t_34e537a6; the reference's container for the same shader says
+    // Tex8, Tex9).
     if (inputSrc >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
-        inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(7))
+        inputSrc <= NVFX_FP_OP_INPUT_SRC_TC(9))
         return 1u << (14 + (inputSrc - NVFX_FP_OP_INPUT_SRC_TC(0)));
     return 0;
 }
