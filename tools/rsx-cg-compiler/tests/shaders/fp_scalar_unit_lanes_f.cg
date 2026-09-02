@@ -1,0 +1,14 @@
+// The NV40 scalar unit (SIN COS EX2 LG2 RCP RSQ) computes ONE lane and
+// broadcasts it into every enabled destination lane.  A vector argument
+// therefore needs one instruction per lane, each selecting its own source
+// component - the reference emits four SINR for sin(float4).  This
+// fixture reads lanes OTHER than x of each result, so a single full-mask
+// instruction paints the x lane's value where y, z and w belong.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 v = float4(c.x, c.y, c.x * 0.5 + 0.25, c.y * 0.5 + 0.25) * 3.0 + 0.5;
+    float4 s = sin(v) * 0.5 + 0.5;
+    float4 r = rsqrt(v + 1.0);
+    float4 p = pow(v, 2.0) * 0.1;
+    o = float4(s.y, r.z, p.w, 1.0);
+}

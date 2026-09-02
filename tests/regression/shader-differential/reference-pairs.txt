@@ -288,3 +288,10 @@ tests/regression/shader-differential/shaders/sd_discard_merge_guard.fcg|0|genera
 # refuses the shape.
 tools/rsx-cg-compiler/tests/shaders/fp_output_restored_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_output_stored_thrice_f.cg|auto|general
+# 2026-09-02 18:05 (claude's find on t_a7dd471f's first slice): the NV40
+# scalar unit computes ONE lane; sin/cos/rsqrt/rcp/sqrt/exp2/log2/pow on a
+# VECTOR need one instruction per lane.  Ours emits one full-mask
+# instruction, so every lane but x carries lane x's value.  This row reads
+# lanes y, z and w and is the pixel witness; every corpus use of these ops
+# is on a scalar, which is why the rig never saw it.
+tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_lanes_f.cg|auto|general
