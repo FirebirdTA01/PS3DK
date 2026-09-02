@@ -9,7 +9,15 @@
 #                                  SOURCE FILE (file:line:col) - the
 #                                  compiler-agnostic discriminator the vita
 #                                  team and we settled on: a backend refusal
-#                                  never names the file
+#                                  never names the file.  The label means
+#                                  "a refusal the user sees a source location
+#                                  for", not "raised by the frontend": a
+#                                  profile refusal raised at lowering that
+#                                  names the file (C5508, bitwise ops) is
+#                                  frontend-reject here, and so is the
+#                                  reference's for the same construct.  Do
+#                                  not "fix" such a prefix to make the label
+#                                  literal (claude, review of c3cfc8c).
 #                  backend-refuse  refuses without naming the file (a shape
 #                                  the path cannot lower - honest, not a
 #                                  frontend verdict)
