@@ -362,7 +362,24 @@ function Assert-Deterministic([string]$src, [string]$firstDst, [string[]]$flags,
     # the most alarming form of nondeterminism, and it must be reported as
     # that, not as the second compile's own empty-container error.
     if (-not (Compile-Shader $src $again $flags -Absolute -NoThrow -NoExtraFlags:$NoExtraFlags -Profile $Profile)) {
-        throw "NONDETERMINISTIC: $label compiled once and refused once under the same binary (rc=$($script:lastCompileRc)); no verdict about it could mean anything"
+        # The refusal sidecar's own code space, applied here too (it was
+        # not, and a WSL launch hiccup on fp_discard_then_work_f read as
+        # "compiled once and refused once", 2026-09-02): 0 with no
+        # container, 124 (timeout inside WSL) and -1 (no exit code) are
+        # the HOST failing to run the compiler, not the compiler refusing.
+        # Those retry once and then name themselves; only the compiler's
+        # own refusal code is nondeterminism.
+        $rc = $script:lastCompileRc
+        $transient = ($rc -eq 0) -or ($rc -eq 124) -or ($rc -eq -1)
+        if ($transient) {
+            $what = switch ($rc) { 0 { "returned 0 but wrote no container" } 124 { "timed out inside WSL" } default { "never returned an exit code" } }
+            Write-Host "stager: determinism recompile of $label $what - a host transient, not a refusal; retrying once"
+            if (-not (Compile-Shader $src $again $flags -Absolute -NoThrow -NoExtraFlags:$NoExtraFlags -Profile $Profile)) {
+                throw "STAGE INFRASTRUCTURE: the determinism recompile of $label $what twice (rc=$($script:lastCompileRc)); the host could not run the compiler - rerun the stage, nothing is known about the shader"
+            }
+        } else {
+            throw "NONDETERMINISTIC: $label compiled once and refused once under the same binary (the compiler's own refusal code rc=$rc); no verdict about it could mean anything"
+        }
     }
     $h1 = (Get-FileHash -Algorithm SHA256 -LiteralPath $firstDst).Hash
     $h2 = (Get-FileHash -Algorithm SHA256 -LiteralPath $again).Hash

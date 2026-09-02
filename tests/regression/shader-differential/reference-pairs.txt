@@ -295,6 +295,11 @@ tools/rsx-cg-compiler/tests/shaders/fp_output_stored_thrice_f.cg|auto|general
 # lanes y, z and w and is the pixel witness; every corpus use of these ops
 # is on a scalar, which is why the rig never saw it.
 tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_lanes_f.cg|auto|general
+# MATCHED PAIR with fp_scalar_unit_swizzle_f below: this row catches the
+# BROADCAST (one full-mask scalar-unit instruction), that one catches the
+# COMPOSITION (lane n reading raw component n instead of the argument's
+# swizzle).  Measured 2026-09-02: on cbb762e this row read identical while
+# that one read 4013/4096 wrong.  Neither is redundant; keep both.
 # 2026-09-02 18:25: companion witness - the per-lane emission must compose
 # through the ARGUMENT'S swizzle (codex on cbb762e: lowerExpLog read raw
 # component n for lane n).  exp2/log2/sin on swizzled vectors, output
