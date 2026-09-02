@@ -214,6 +214,8 @@ typedef struct {
 	char a_path[PATH_MAX_SD];
 	char b_path[PATH_MAX_SD];
 	char uniform_set[16];
+	int  blind_ok;           /* 7th manifest field `blind-ok`: a sweep row, where
+	                          * discard-blind is inventory, not a gate failure */
 } sd_pair;
 
 typedef struct {
@@ -594,10 +596,19 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned 
 	                        CELL_GCM_TEXTURE_NEAREST,
 	                        CELL_GCM_TEXTURE_NEAREST,
 	                        CELL_GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+	/* WRAP, not CLAMP_TO_EDGE (2026-09-02).  A shader that samples a
+	 * window half outside 0..1 - th06's `uv : TEXCOORD1` = (u-0.5, v-0.5)
+	 * - read texels 0..31 only under clamp, and the permuted alpha ramp
+	 * tex0 lands on never dropped below 0.5 there, so four corpus
+	 * discard witnesses (`t.a < 4/255`) read discard-blind on the
+	 * REFERENCE side.  Under wrap any 1.0-wide window traverses every
+	 * ramp wherever it sits.  The second control-texture row
+	 * (sd_tex_wrap_ctrl vs its frac-based twin) proves wrapped sampling
+	 * lands where the arithmetic says; it goes red on a clamp guest. */
 	cellGcmSetTextureAddress(ctx, (uint8_t)unit,
-	                         CELL_GCM_TEXTURE_CLAMP_TO_EDGE,
-	                         CELL_GCM_TEXTURE_CLAMP_TO_EDGE,
-	                         CELL_GCM_TEXTURE_CLAMP_TO_EDGE,
+	                         CELL_GCM_TEXTURE_WRAP,
+	                         CELL_GCM_TEXTURE_WRAP,
+	                         CELL_GCM_TEXTURE_WRAP,
 	                         CELL_GCM_TEXTURE_UNSIGNED_REMAP_NORMAL,
 	                         CELL_GCM_TEXTURE_ZFUNC_LESS,
 	                         0);
@@ -1487,9 +1498,15 @@ static void dump_artifact(const char *name, const char side, const u32 *img,
 static sd_pair g_pairs[MAX_PAIRS];
 static int     g_npairs;
 
-/* `tier|role|name|a_path|b_path|uniform_set`, '#' comments, and an
- * optional `@target <word>` directive.  Refuses malformed lines by
- * line number: a silently skipped row is a shader silently unjudged. */
+/* `tier|role|name|a_path|b_path|uniform_set[|blind-ok]`, '#' comments,
+ * and an optional `@target <word>` directive.  Refuses malformed lines
+ * by line number: a silently skipped row is a shader silently unjudged.
+ * The optional seventh field marks a SWEEP row (reference corpus,
+ * path-pair corpus): there a discard-blind verdict is measurement
+ * inventory.  A curated row carries no flag, and its contract is
+ * identical AND discriminating - discard-blind fails the run (claude,
+ * review of 5a9630b: without this the curated list can regress from
+ * discriminating to blind and still read SHADER_DIFF_OK). */
 static int load_manifest(void)
 {
 	FILE *f = fopen(SD_ROOT "manifest.txt", "r");
@@ -1520,21 +1537,31 @@ static int load_manifest(void)
 			return 0;
 		}
 		sd_pair *p = &g_pairs[g_npairs];
-		char *fields[6];
+		char *fields[7];
 		int nf = 0;
 		char *cur = line;
 		fields[nf++] = cur;
-		for (char *c = line; *c && nf < 6; c++) {
+		for (char *c = line; *c && nf < 7; c++) {
 			if (*c == '|') {
 				*c = 0;
 				fields[nf++] = c + 1;
 			}
 		}
-		if (nf != 6) {
-			printf("shader-differential: manifest line %d: expected 6 |-fields, got %d\n",
+		if (nf != 6 && nf != 7) {
+			printf("shader-differential: manifest line %d: expected 6 |-fields (7 with blind-ok), got %d\n",
 			       lineno, nf);
 			fclose(f);
 			return 0;
+		}
+		p->blind_ok = 0;
+		if (nf == 7) {
+			if (strcmp(fields[6], "blind-ok") != 0) {
+				printf("shader-differential: manifest line %d: unknown 7th field '%s' (only blind-ok is defined)\n",
+				       lineno, fields[6]);
+				fclose(f);
+				return 0;
+			}
+			p->blind_ok = 1;
 		}
 		snprintf(p->tier,        sizeof(p->tier),        "%s", fields[0]);
 		snprintf(p->role,        sizeof(p->role),        "%s", fields[1]);
@@ -1729,6 +1756,12 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 {
 	long t0 = now_ms();
 	r->status = "identical";
+	/* Zeroed here, not only on the full path: a control row that exits
+	 * early (load failed, unstable) still has its painted/kil fields
+	 * printed by its validator, and an uninitialised sd_result would
+	 * print stack (codex, review of 5a9630b). */
+	r->painted_a = r->painted_b = 0;
+	r->kil_a = r->kil_b = 0;
 	r->max_delta = 0;
 	r->diff_pixels = 0;
 	r->total_pixels = RT_W * RT_H;
@@ -1954,6 +1987,12 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 {
 	long t0 = now_ms();
 	r->status = "identical";
+	/* Zeroed here, not only on the full path: a control row that exits
+	 * early (load failed, unstable) still has its painted/kil fields
+	 * printed by its validator, and an uninitialised sd_result would
+	 * print stack (codex, review of 5a9630b). */
+	r->painted_a = r->painted_b = 0;
+	r->kil_a = r->kil_b = 0;
 	r->max_delta = 0;
 	r->diff_pixels = 0;
 	r->total_pixels = RT_W * RT_H;
@@ -2676,8 +2715,16 @@ int main(int argc, const char **argv)
 		} else if (strcmp(r.status, "discard-blind") == 0) {
 			/* Both sides painted everything under a KIL: the discard
 			 * was never exercised, so the row is neither a pass nor a
-			 * compiler finding.  Own line, never identical. */
+			 * compiler finding.  Own line, never identical.  On a
+			 * sweep row (blind-ok) that is inventory; on a curated row
+			 * it is a regression of the list from discriminating to
+			 * blind and fails the run by name. */
 			blind++;
+			if (!p->blind_ok) {
+				printf("shader-differential: curated row %s read discard-blind - its KIL never fired under the rig's inputs; a curated row must be identical AND discriminating\n",
+				       p->name);
+				failures++;
+			}
 		} else if (strncmp(r.status, "sampler-unsupported", 19) == 0 ||
 		           strncmp(r.status, "uniform-unsupported", 19) == 0 ||
 		           strcmp(r.status, "uniforms-differ") == 0 ||

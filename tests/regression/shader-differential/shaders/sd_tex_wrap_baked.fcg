@@ -1,0 +1,18 @@
+// shader-differential - texture WRAP control, arithmetic twin.
+//
+// TEXCOORD1.xy = (u - 0.5, v - 0.5); at RT pixel (px, py) that is
+// ((px - 31.5)/64, (py - 31.5)/64).  Under WRAP addressing the sampled
+// texel is frac(coord) * 64 rounded down: (px + 32) for px < 32 and
+// (px - 32) for px >= 32, with half a texel of margin on both sides of
+// every boundary, so floor(frac(c) * 64) recovers it exactly.  The texel
+// itself is the permuted base texel for u_tex (perm 6, GRBA - see
+// sd_tex_baked.fcg): (4(63 - y), 4x, 4(63 - x), 4y) at texel (x, y).
+void main(
+    float4 in_texcoord1  : TEXCOORD1,
+    out float4 out_color : COLOR)
+{
+    float x = floor(frac(in_texcoord1.x) * 64.0f);
+    float y = floor(frac(in_texcoord1.y) * 64.0f);
+    float s = 4.0f / 255.0f;
+    out_color = float4((63.0f - y) * s, x * s, (63.0f - x) * s, y * s);
+}

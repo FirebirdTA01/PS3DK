@@ -1,0 +1,22 @@
+// shader-differential - texture WRAP control, sampled side (2026-09-02).
+//
+// Samples u_tex at TEXCOORD1.xy = (u - 0.5, v - 0.5), a coordinate window
+// that is half outside 0..1 on each axis - the window th06's shaders use
+// (`float4 uv : TEXCOORD1`).  Under CLAMP_TO_EDGE that window read texels
+// 0..31 only, and tex0's permuted alpha ramp never dropped below 0.5
+// there, so four of the nine corpus discard witnesses (th06_probe_alpha,
+// probe_mulrgb, probe_texrgb, th06_rep: `t.a < 4/255`) read discard-blind
+// on the reference side.  The rig now addresses every texture WRAP, so a
+// 1.0-wide window traverses every ramp wherever it sits; this row is the
+// proof that wrapped sampling lands on the texel the arithmetic twin
+// predicts (sd_tex_wrap_baked.fcg, frac-based).  Same role as the plain
+// texture control: a mismatch here withholds every sampler-declaring
+// verdict.  Proven to fire by booting the CLAMP guest against this
+// manifest (the row must go red there).
+void main(
+    float4 in_texcoord1  : TEXCOORD1,
+    uniform sampler2D u_tex : TEXUNIT0,
+    out float4 out_color : COLOR)
+{
+    out_color = tex2D(u_tex, in_texcoord1.xy);
+}
