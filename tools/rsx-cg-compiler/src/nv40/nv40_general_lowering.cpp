@@ -162,6 +162,7 @@ struct VDst
     int  index = 0;          // virtual temp id or output register index
     int  phys = -1;          // filled for temp destinations after allocation
     int  preferredPhys = -1; // FP-only: optional R/H index pin for precision shaping
+    bool outputPin = false;  // FP-only: preferredPhys IS the output slot, not a preference
     bool fp16 = false;       // FP-only: destination is an H register
     int  writemask = 0xf;
 };
@@ -3641,9 +3642,22 @@ private:
                 producer.dst.index == regIt->second &&
                 producer.dst.writemask != outMask &&
                 producerDefs > 1) {
+                // OUTPUT PIN, not a preference (t_5dc260b0 fallout).  This
+                // branch composes the colour lane by lane into a temp and
+                // returns WITHOUT emitting any dst.output instruction, so
+                // "this value is the colour" is carried by the pin alone.
+                // The allocator is otherwise free to yield a pin whose
+                // register is occupied - which is right for the precision
+                // pins, and silently wrong here: the colour gets composed
+                // in R1, nothing ever writes R0, and the framebuffer reads
+                // whatever else landed there.  Measured on
+                // hello-ppu-cellgcm-discard-blend once the register
+                // numbering came low enough for texA to reach R0.
                 for (VInstr& vi : program_.instrs) {
-                    if (!vi.dst.output && vi.dst.index == regIt->second)
+                    if (!vi.dst.output && vi.dst.index == regIt->second) {
                         vi.dst.preferredPhys = 0;
+                        vi.dst.outputPin = true;
+                    }
                 }
                 return;
             }
@@ -3653,9 +3667,16 @@ private:
                 producer.dst.writemask != outMask &&
                 producerDefs > 1 &&
                 producer.preservePartialOutputMask) {
+                // Same contract as the branch above.  This one DOES mark
+                // the last producer as an output store, but the earlier
+                // lane writes are pinned temps that start before it, so
+                // the slot is occupied from the FIRST of them - which is
+                // what allocatePhysicalTemps has to reserve.
                 for (VInstr& vi : program_.instrs) {
-                    if (!vi.dst.output && vi.dst.index == regIt->second)
+                    if (!vi.dst.output && vi.dst.index == regIt->second) {
                         vi.dst.preferredPhys = 0;
+                        vi.dst.outputPin = true;
+                    }
                 }
                 producer.dst.output = true;
                 producer.dst.index = outIndex;
@@ -4111,6 +4132,24 @@ private:
                 if (it == outputStorePos.end())
                     outputStorePos[vi.dst.index] = i;
             }
+            // An OUTPUT PIN occupies its slot from its FIRST write, and
+            // lowerStoreOutput's lane-by-lane branches emit no store
+            // instruction at all - so a guard built only from dst.output
+            // instructions was inert on exactly the shape that needs it.
+            // Recorded as the earliest, so a slot that has both a pinned
+            // write and a later store is reserved from the pin.
+            for (size_t i = 0; i < program_.instrs.size(); ++i) {
+                const VInstr& vi = program_.instrs[i];
+                if (vi.dst.none || vi.dst.output || !vi.dst.outputPin)
+                    continue;
+                const int slot = vi.dst.fp16 ? (vi.dst.preferredPhys >> 1)
+                                             : vi.dst.preferredPhys;
+                if (slot < 0)
+                    continue;
+                auto it = outputStorePos.find(slot);
+                if (it == outputStorePos.end() || i < it->second)
+                    outputStorePos[slot] = i;
+            }
         }
 
         std::vector<int> freeList;
@@ -4258,6 +4297,24 @@ private:
                 };
 
                 int phys;
+                if (vi.dst.outputPin && vi.dst.preferredPhys >= 0 &&
+                    pinClobbersLive()) {
+                    // An output pin is the CONTRACT that this value is the
+                    // colour, so yielding it does not cost an optimisation
+                    // - it produces a program that computes the right
+                    // colour into a register nothing reads.  The
+                    // reservation above should make this unreachable; if
+                    // it is ever reached the allocator has a defect, and a
+                    // refusal names it rather than shipping a picture.
+                    program_.diagnostics.push_back(
+                        "nv40-general-fp: the colour output's register R" +
+                        std::to_string(vi.dst.preferredPhys) +
+                        " is held by a value that outlives the store; "
+                        "refusing rather than composing the colour off-slot "
+                        "(t_5dc260b0)");
+                    program_.loweringFailed = true;
+                    return;
+                }
                 if (vi.dst.preferredPhys >= 0 && !pinClobbersLive() &&
                     !clobbersLiveOutput(vi.dst.preferredPhys, vi.dst.fp16)) {
                     phys = vi.dst.preferredPhys;
