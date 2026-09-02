@@ -1,0 +1,26 @@
+// A fused multiply-add with a LITERAL multiplier and a UNIFORM addend
+// (t_a1f43b12), the half of the defect that is not fixed by knowing both
+// operands are literals.
+//
+// Here the emitter preloads the addend uniform into R1 correctly and then
+// writes the MULTIPLIER as a zero placeholder to be patched - but the
+// multiplier is a literal, so nothing patches it and the output is the
+// uniform alone.  `v * 0.5 + k` painted `k`.
+//
+// Reference:
+//
+//     MOVR R0, f[TEX0];
+//     MOVR R1, k;              # zero block, patched by the host
+//     FENCBR;
+//     MADR R0, R0, {0.5,0,0,0}.x, R1;
+//
+// Which operand rides in R1 is the reference's choice, not a free one:
+// R1 holds the UNIFORM when exactly one operand is a uniform, and the
+// ADDEND otherwise.  Measured across all four literal/uniform
+// combinations and both two-literal overflow shapes.
+uniform float4 k;
+
+void main(float4 v : TEXCOORD0, out float4 color : COLOR)
+{
+    color = v * float4(0.5f, 0.5f, 0.5f, 0.5f) + k;
+}

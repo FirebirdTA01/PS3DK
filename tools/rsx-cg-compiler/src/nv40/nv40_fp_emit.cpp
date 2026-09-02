@@ -259,6 +259,45 @@ struct FpMadBinding
     bool      addendIsLiteral = false;
 };
 
+// Literal const blocks: the reference compiler packs the DISTINCT values
+// of a literal into the 16-byte block in first-appearance order, zero-fills
+// the rest, and selects per destination lane with the source swizzle
+// (t_642eb36e).  This accumulates the lanes of one or more literals into a
+// single block, so an instruction reading two of them - a MAD with a
+// literal multiplier and a literal addend - can share one block when the
+// distinct values fit, which is exactly what the reference does.
+struct FpConstBlockPacker
+{
+    float vals[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    int   used    = 0;
+
+    // Value equality, deliberately, not a bitwise compare: the reference
+    // folds -0.0f and +0.0f into one slot and ships whichever word came
+    // first.  Measured in both orders.
+    int slotFor(float v)
+    {
+        for (int i = 0; i < used; ++i)
+            if (vals[i] == v) return i;
+        if (used == 4) return -1;
+        vals[used] = v;
+        return used++;
+    }
+
+    // Packs one vec4 literal, filling swz with the const lane each
+    // destination lane must read.  False when the block is full; the
+    // caller decides what to do and must not reuse a packer that failed.
+    bool pack(const float lit[4], uint8_t swz[4])
+    {
+        for (int lane = 0; lane < 4; ++lane)
+        {
+            const int slot = slotFor(lit[lane]);
+            if (slot < 0) return false;
+            swz[lane] = static_cast<uint8_t>(slot);
+        }
+        return true;
+    }
+};
+
 struct FpVecConstructTexMulBinding
 {
     IRValueID texBaseId   = 0;   // tex2D result
@@ -6910,81 +6949,219 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         return out;
                     }
 
-                    // MOVH H0, f[input]
-                    struct nvfx_reg hDst = nvfx_reg(NVFXSR_TEMP, 0);
-                    hDst.is_fp16 = 1;
+                    // Classify BOTH operands.  `multiplierUniformId` is a
+                    // misnomer inherited from the Mul matcher, which
+                    // stores whichever value was not the varying - and
+                    // that can be a literal.  Reading it as a uniform is
+                    // what made `v * float4(0.5,0.5,0.5,0.5) + ...` emit
+                    // a multiplicand of {0,0,0,0} and collapse the output
+                    // to the addend, silently (t_a1f43b12).
+                    auto mulLitIt = valueToLiteralVec4.find(mb.multiplierUniformId);
+                    auto addLitIt = valueToLiteralVec4.find(mb.addendId);
+                    const bool mulIsLiteral = mulLitIt != valueToLiteralVec4.end();
+                    const bool addIsLiteral = addLitIt != valueToLiteralVec4.end();
+                    if (!mulIsLiteral &&
+                        valueToFpUniform.count(mb.multiplierUniformId) == 0)
+                    {
+                        // Neither a literal we can emit nor a uniform we
+                        // can patch: a zero placeholder here would be a
+                        // multiplicand of zero, which is the defect.
+                        out.diagnostics.push_back(
+                            "nv40-fp: MAD multiplier is neither a literal nor a "
+                            "uniform, so its value cannot be placed in the const "
+                            "block; refusing rather than emitting zero "
+                            "(t_a1f43b12)");
+                        return out;
+                    }
+                    if (!addIsLiteral && valueToFpUniform.count(mb.addendId) == 0)
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: MAD addend is neither a literal nor a "
+                            "uniform, so its value cannot be placed in the const "
+                            "block; refusing rather than emitting zero "
+                            "(t_a1f43b12)");
+                        return out;
+                    }
+
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
+                    const struct nvfx_reg tempR0   = nvfx_reg(NVFXSR_TEMP, 0);
                     const struct nvfx_reg inputReg =
                         nvfx_reg(NVFXSR_INPUT, inIt->second);
-                    struct nvfx_src mvhS0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
-                    struct nvfx_src mvhS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_src mvhS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_insn mvh = nvfx_insn(
-                        0, 0, -1, -1,
-                        hDst, NVFX_FP_MASK_ALL, mvhS0, mvhS1, mvhS2);
-                    mvh.precision = FLOAT16;
-                    asm_.emit(mvh, NVFX_FP_OP_OPCODE_MOV);
 
-                    // Decide which uniform to preload into R1.  See
-                    // the header comment on FpMadBinding.
-                    const IRValueID preloadUniformId =
-                        mb.addendIsLiteral ? mb.multiplierUniformId
-                                           : mb.addendId;
+                    // MOVR R0, f[input].  Full precision: the reference
+                    // emits MOVR for every MAD-fusion shape measured
+                    // (literal/uniform in either operand, and both), never
+                    // the MOVH this used to emit - which rounded the
+                    // varying to half before a float multiply.
+                    {
+                        struct nvfx_src s0 = nvfx_src(const_cast<struct nvfx_reg&>(inputReg));
+                        struct nvfx_src s1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_insn mv = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(tempR0),
+                            NVFX_FP_MASK_ALL, s0, s1, s2);
+                        mv.precision = FLOAT32;
+                        asm_.emit(mv, NVFX_FP_OP_OPCODE_MOV);
+                    }
 
-                    // MOVR R1, preloadUniform + 16-byte zero block.
-                    struct nvfx_reg rDst = nvfx_reg(NVFXSR_TEMP, 1);
-                    const struct nvfx_reg constReg = nvfx_reg(NVFXSR_CONST, 0);
-                    struct nvfx_src mvrS0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
-                    struct nvfx_src mvrS1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_src mvrS2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
-                    struct nvfx_insn mvr = nvfx_insn(
-                        0, 0, -1, -1,
-                        rDst, NVFX_FP_MASK_ALL, mvrS0, mvrS1, mvrS2);
-                    asm_.emit(mvr, NVFX_FP_OP_OPCODE_MOV);
+                    // TWO LITERALS THAT SHARE ONE BLOCK: an instruction
+                    // carries a single 16-byte const block, so when the
+                    // multiplier's and addend's distinct values together
+                    // fit in four lanes the reference drops the preload
+                    // and the fence entirely and reads both operands out
+                    // of that one block with different swizzles -
+                    // `MAD R0, R0, c.xyxy, c.zwzw`.  Measured on
+                    // five shapes, including both scalar spellings.
+                    if (mulIsLiteral && addIsLiteral)
+                    {
+                        FpConstBlockPacker shared;
+                        uint8_t mulSwz[4] = {0, 1, 2, 3};
+                        uint8_t addSwz[4] = {0, 1, 2, 3};
+                        if (shared.pack(mulLitIt->second.vals, mulSwz) &&
+                            shared.pack(addLitIt->second.vals, addSwz))
+                        {
+                            struct nvfx_src madS0 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                            struct nvfx_src madS1 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                            struct nvfx_src madS2 =
+                                nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                            for (int lane = 0; lane < 4; ++lane)
+                            {
+                                madS1.swz[lane] = mulSwz[lane];
+                                madS2.swz[lane] = addSwz[lane];
+                            }
+                            struct nvfx_insn mad = nvfx_insn(
+                                saturate ? 1 : 0, 0, -1, -1,
+                                const_cast<struct nvfx_reg&>(dstReg),
+                                NVFX_FP_MASK_ALL,
+                                madS0, madS1, madS2);
+                            mad.precision = dstPrecision;
+                            asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
+                            asm_.appendConstBlock(shared.vals);
 
-                    const uint32_t preloadOffset = asm_.currentByteSize();
-                    recordUniformOffsetHere(preloadUniformId, preloadOffset);
-                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-                    asm_.appendConstBlock(zeros);
+                            attrs.attributeInputMask |=
+                                fpAttrMaskBitForInputSrc(inIt->second);
+                            if (inIt->second >= NVFX_FP_OP_INPUT_SRC_TC(0) &&
+                                inIt->second <= NVFX_FP_OP_INPUT_SRC_TC(7))
+                            {
+                                attrs.texCoordsInputMask |=
+                                    uint16_t{1} << (inIt->second -
+                                                    NVFX_FP_OP_INPUT_SRC_TC(0));
+                            }
+                            emittedSomething = true;
+                            break;
+                        }
+                        // Did not fit: fall through to the preload shape,
+                        // which the reference also uses here.
+                    }
+
+                    // PRELOAD SHAPE.  One operand goes into R1, the other
+                    // rides in the instruction's own const block.  Which
+                    // is which is not a free choice - it is the
+                    // reference's, measured across all four
+                    // literal/uniform combinations plus the two-literal
+                    // overflow: R1 holds the UNIFORM when exactly one
+                    // operand is a uniform, and the ADDEND otherwise.
+                    //
+                    // The binding's older rule - preload the multiplier
+                    // whenever the addend is a literal - agreed with that
+                    // only while the other operand was a uniform, which
+                    // was the only case it was written for.  Two literals
+                    // that do not share a block take the addend-preloaded
+                    // shape (measured: mul per-lane + add per-lane, and
+                    // mul broadcast + add per-lane).
+                    const bool preloadIsMultiplier = !mulIsLiteral && addIsLiteral;
+                    const IRValueID preloadId =
+                        preloadIsMultiplier ? mb.multiplierUniformId : mb.addendId;
+                    const IRValueID inlineId =
+                        preloadIsMultiplier ? mb.addendId : mb.multiplierUniformId;
+                    const bool preloadIsLiteral =
+                        preloadIsMultiplier ? mulIsLiteral : addIsLiteral;
+                    const bool inlineIsLiteral =
+                        preloadIsMultiplier ? addIsLiteral : mulIsLiteral;
+
+                    // MOVR R1, <preload>.  A uniform gets a zero block and
+                    // an offset the host patches; a LITERAL gets its own
+                    // values, which is the half that was missing.
+                    const struct nvfx_reg rDst = nvfx_reg(NVFXSR_TEMP, 1);
+                    uint8_t preloadSwz[4] = {0, 1, 2, 3};
+                    FpConstBlockPacker preloadBlock;
+                    if (preloadIsLiteral &&
+                        !preloadBlock.pack(valueToLiteralVec4[preloadId].vals,
+                                           preloadSwz))
+                    {
+                        out.diagnostics.push_back(
+                            "nv40-fp: MAD preloaded literal does not fit one "
+                            "const block");
+                        return out;
+                    }
+                    {
+                        struct nvfx_src s0 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                        struct nvfx_src s1 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        struct nvfx_src s2 = nvfx_src(const_cast<struct nvfx_reg&>(none));
+                        if (preloadIsLiteral)
+                            for (int lane = 0; lane < 4; ++lane)
+                                s0.swz[lane] = preloadSwz[lane];
+                        struct nvfx_insn mv = nvfx_insn(
+                            0, 0, -1, -1,
+                            const_cast<struct nvfx_reg&>(rDst),
+                            NVFX_FP_MASK_ALL, s0, s1, s2);
+                        asm_.emit(mv, NVFX_FP_OP_OPCODE_MOV);
+                    }
+                    if (preloadIsLiteral)
+                    {
+                        asm_.appendConstBlock(preloadBlock.vals);
+                    }
+                    else
+                    {
+                        recordUniformOffsetHere(preloadId, asm_.currentByteSize());
+                        asm_.appendConstBlock(zeros);
+                    }
 
                     // FENCBR
                     asm_.emitFencbr();
 
-                    // MADR R_out, H0, src1, src2
-                    // - If addend is a LITERAL: src1 = R1 (multiplier), src2 = inline literal
-                    // - If addend is a UNIFORM: src1 = CONST (multiplier inline), src2 = R1 (addend)
-                    struct nvfx_src madS0 = nvfx_src(hDst);         // H0
-                    struct nvfx_src madS1;
-                    struct nvfx_src madS2;
-                    if (mb.addendIsLiteral)
+                    // MADR R_out, R0, src1, src2 — the preloaded operand
+                    // reads R1, the other reads the inline const block.
+                    uint8_t inlineSwz[4] = {0, 1, 2, 3};
+                    FpConstBlockPacker inlineBlock;
+                    if (inlineIsLiteral &&
+                        !inlineBlock.pack(valueToLiteralVec4[inlineId].vals,
+                                          inlineSwz))
                     {
-                        madS1 = nvfx_src(rDst);                     // R1 (multiplier preloaded)
-                        madS2 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));  // CONST (inline literal)
+                        out.diagnostics.push_back(
+                            "nv40-fp: MAD inline literal does not fit one "
+                            "const block");
+                        return out;
                     }
-                    else
-                    {
-                        madS1 = nvfx_src(const_cast<struct nvfx_reg&>(constReg));  // CONST (multiplier inline)
-                        madS2 = nvfx_src(rDst);                     // R1 (addend preloaded)
-                    }
+
+                    struct nvfx_src madS0 = nvfx_src(const_cast<struct nvfx_reg&>(tempR0));
+                    struct nvfx_src madConst = nvfx_src(const_cast<struct nvfx_reg&>(constReg));
+                    if (inlineIsLiteral)
+                        for (int lane = 0; lane < 4; ++lane)
+                            madConst.swz[lane] = inlineSwz[lane];
+                    struct nvfx_src madPreload = nvfx_src(const_cast<struct nvfx_reg&>(rDst));
 
                     struct nvfx_insn mad = nvfx_insn(
                         saturate ? 1 : 0, 0, -1, -1,
                         const_cast<struct nvfx_reg&>(dstReg),
                         NVFX_FP_MASK_ALL,
-                        madS0, madS1, madS2);
+                        madS0,
+                        preloadIsMultiplier ? madPreload : madConst,
+                        preloadIsMultiplier ? madConst  : madPreload);
                     mad.precision = dstPrecision;
                     asm_.emit(mad, NVFX_FP_OP_OPCODE_MAD);
 
-                    // Inline block after MAD — either the literal or
-                    // the (non-preloaded) uniform.
-                    const uint32_t postMadOffset = asm_.currentByteSize();
-                    if (mb.addendIsLiteral)
+                    if (inlineIsLiteral)
                     {
-                        auto lIt = valueToLiteralVec4.find(mb.addendId);
-                        asm_.appendConstBlock(lIt->second.vals);
+                        asm_.appendConstBlock(inlineBlock.vals);
                     }
                     else
                     {
-                        recordUniformOffsetHere(mb.multiplierUniformId, postMadOffset);
+                        recordUniformOffsetHere(inlineId, asm_.currentByteSize());
                         asm_.appendConstBlock(zeros);
                     }
 

@@ -1,0 +1,28 @@
+// A fused multiply-add whose multiplier AND addend are both literals
+// (t_a1f43b12).
+//
+// The Mul matcher stores whichever operand was not the varying in a field
+// called `multiplierUniformId`, and the MAD emitter read that as a
+// uniform: it wrote a zero placeholder for the host to patch, and nothing
+// ever patched it.  The shader compiled, exit 0, no diagnostic, and every
+// pixel came out as the addend:
+//
+//     ours       MOVH H0, f[TEX0]; MOVR R1, {0,0,0,0}; FENCBR;
+//                MADR R0, H0, R1, {0.5,0.5,0.5,0.5}     -> v * 0 + 0.5
+//     reference  MOVR R0, f[TEX0];
+//                MADR R0, R0, {0.5,0,0,0}.x, {0.5,0,0,0}.x
+//
+// Found by the rig's VP instrument rows on their first boot: ours painted
+// one level where the reference painted sixty-four.
+//
+// Two rules are visible in the reference's shape.  An instruction carries
+// a single 16-byte const block, so when the two literals' distinct values
+// fit in four lanes there is no preload and no fence - both operands read
+// that one block with their own swizzles.  And the varying is moved at
+// FULL precision; the MOVH here rounded it to half before a float
+// multiply, which no part of the source asked for.
+void main(float4 v : TEXCOORD0, out float4 color : COLOR)
+{
+    color = v * float4(0.5f, 0.5f, 0.5f, 0.5f)
+              + float4(0.5f, 0.5f, 0.5f, 0.5f);
+}
