@@ -1036,20 +1036,26 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             if (-not (Test-Path $src)) { throw "vp-pairs: shader not found: $rel" }
             $vppCands += @{ src = $src; rel = $rel; set = $set }
         }
-        if (Test-Path -LiteralPath $VpCorpusDir -PathType Container) {
-            $vppRoot = (Resolve-Path -LiteralPath $VpCorpusDir).Path.TrimEnd('\')
-            $vppFiles = @(Get-ChildItem -LiteralPath $vppRoot -Recurse -File |
-                Where-Object { $_.Name -like '*.vcg' -or $_.Name -like '*_v.cg' } |
-                Where-Object {
-                    $r = $_.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
-                    -not ($r.StartsWith('build/') -or $r.Contains('/_work/') -or $r.StartsWith('_work/'))
-                } | Sort-Object FullName)
-            foreach ($f in $vppFiles) {
-                $rel = $f.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
-                $set = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
-                $vppCands += @{ src = $f.FullName; rel = $rel; set = $set }
-            }
+        # A missing corpus root ABORTS, as it does for -VpCorpus and the
+        # fragment -PathPairCorpus: gate 5's number must never come from a
+        # run that silently shrank to the curated list (review finding,
+        # codex), and the gate line below prints the RESOLVED corpus root and
+        # the candidate count so a wrong directory is as visible as a missing
+        # one (claude).
+        if (-not (Test-Path -LiteralPath $VpCorpusDir -PathType Container)) { throw "vp path pairs: corpus root not a directory: $VpCorpusDir (gate 5 needs the corpus; pass -VpCorpusDir)" }
+        $vppRoot = (Resolve-Path -LiteralPath $VpCorpusDir).Path.TrimEnd('\')
+        $vppFiles = @(Get-ChildItem -LiteralPath $vppRoot -Recurse -File |
+            Where-Object { $_.Name -like '*.vcg' -or $_.Name -like '*_v.cg' } |
+            Where-Object {
+                $r = $_.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
+                -not ($r.StartsWith('build/') -or $r.Contains('/_work/') -or $r.StartsWith('_work/'))
+            } | Sort-Object FullName)
+        foreach ($f in $vppFiles) {
+            $rel = $f.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
+            $set = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
+            $vppCands += @{ src = $f.FullName; rel = $rel; set = $set }
         }
+
         if ($vppCands.Count -eq 0) { throw "vp path pairs: no candidates (list empty and no corpus dir)" }
         $vppDst = Join-Path $root "vppathpair"
         New-Item -ItemType Directory -Force $vppDst | Out-Null
@@ -1092,7 +1098,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
         Set-Content -LiteralPath $vppRefusedPath -Value ($vppRefusedRows -join "`n") -Encoding Ascii
         if (($vppStaged + $vppIdentical + $vppDefRefused + $vppGenRefused + $vppRefRefused) -eq 0) { throw "vp path pairs compiled nothing" }
         $manifest += $vppRows
-        Write-Host "stager: vp path pairs (gate 5): $($vppCands.Count) vertex shaders, $vppDefRefused default-refused (out of scope), $vppGenRefused GENERAL-REFUSED (gate failures), $vppRefRefused reference-refused (unoracled), $vppIdentical byte-identical default/general, $vppStaged pairs staged (sidecar: vp-path-pair-refused.txt)"
+        Write-Host "stager: vp path pairs (gate 5): $($vppCands.Count) candidates ($($vppCands.Count - $vppFiles.Count) curated from $VpPairsList + $($vppFiles.Count) from $vppRoot), $vppDefRefused default-refused (out of scope), $vppGenRefused GENERAL-REFUSED (gate failures), $vppRefRefused reference-refused (unoracled), $vppIdentical byte-identical default/general, $vppStaged pairs staged (sidecar: vp-path-pair-refused.txt)"
     }
 }
 
