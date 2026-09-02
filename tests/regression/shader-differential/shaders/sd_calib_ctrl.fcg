@@ -1,0 +1,28 @@
+// shader-differential — control-calibration side A (increment 4b).
+//
+// A ramp in R (TEXCOORD0.x, 64 distinct values across the image), a ramp
+// in G, constants in B and A.  The stager GENERATES side B from this
+// source with R biased by 1/2550 - a tenth of an 8-bit step - and both
+// sides are REFERENCE-compiled: the row measures the comparator, not the
+// compiler.
+//
+// By arithmetic a tenth-of-a-step bias crosses a round-to-nearest
+// boundary on 6 of this ramp's 64 columns (9.4%: columns 32..37, whose
+// 255*u sit within 0.1 of a .5).  MEASURED on RPCS3 (2026-09-02,
+// TTY-calib-default.log): the 64 levels match round-to-nearest exactly,
+// and 4 columns move (32..35, 6.2%) with max_delta 1 - the two with
+// margins 0.07 and 0.09 of a level did not, so the bias reaching the
+// comparator on this emulator is between 0.05 and 0.07 of a step, not the
+// full 0.1 (the ADD is a full-precision ADDR on both sides; the shortfall
+// is the emulator's, recorded here rather than explained).  The vita room
+// measured 10.03% on its own rig and ramp.
+//
+// What the row asserts: mismatch, max_delta exactly 1, and a moved share
+// inside 5%..20%.  Fewer means the comparator has lost sensitivity below
+// the quantisation floor; a delta above 1 means it is not comparing the
+// images it claims to.  The guest fails the run outside the window and
+// prints the measured share every run.
+void main(float4 v : TEXCOORD0, out float4 color : COLOR)
+{
+    color = float4(v.x, v.y, 0.5f, 1.0f);
+}

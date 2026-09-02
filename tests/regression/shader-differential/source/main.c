@@ -19,7 +19,11 @@
  *        |target=<t>|status=<status>|max_delta=<n>|diff_pixels=<n>
  *        |total_pixels=<n>|diagnostic=<d>|elapsed_ms=<n>|artifact=<a>
  * roles:  control-identical | control-mismatch | control-uniform |
- *         control-texture | control-auto | corpus | probe |
+ *         control-texture | control-auto | control-calibration (a ramp
+ *         vs a twin biased by a tenth of an 8-bit step, both
+ *         reference-compiled: must judge mismatch with max_delta 1 on
+ *         5%..20% of pixels, ~10% expected - the comparator's
+ *         sensitivity floor, measured every run) | corpus | probe |
  *         reference (ours vs a reference-compiled container; gated
  *         like corpus) | path-pair (our DEFAULT-path container vs our
  *         GENERAL-path container of the same shader; gated like corpus,
@@ -2461,6 +2465,24 @@ int main(int argc, const char **argv)
 				vp_autos_ok = 0;
 				failures++;
 			}
+			goto post_row;
+		}
+
+		if (strcmp(p->role, "control-calibration") == 0) {
+			/* A tenth-of-a-step bias crosses a rounding boundary on
+			 * about one pixel column in ten.  Fewer than 5% moved
+			 * means the comparator has lost sensitivity below the
+			 * quantisation floor; more than 20%, or any delta above
+			 * 1, means it is not comparing the images it claims to.
+			 * Fails the run, withholds nothing: every verdict in the
+			 * run rests on this floor, and the number is printed. */
+			int pct10 = r.total_pixels ? (r.diff_pixels * 1000) / r.total_pixels : 0;
+			int ok = strcmp(r.status, "mismatch") == 0 && r.max_delta == 1 &&
+			         pct10 >= 50 && pct10 <= 200;
+			printf("shader-differential: control-calibration: %d.%d%% of pixels moved by max_delta %d under a 1/2550 bias (window 5%%..20%%, max_delta 1): %s\n",
+			       pct10 / 10, pct10 % 10, r.max_delta, ok ? "sensitivity at the quantisation floor" : "OUTSIDE THE WINDOW - the comparator's sensitivity is not what every verdict assumes");
+			if (!ok)
+				failures++;
 			goto post_row;
 		}
 
