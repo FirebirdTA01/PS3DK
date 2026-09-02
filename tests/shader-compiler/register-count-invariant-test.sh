@@ -60,6 +60,11 @@ compile() {   # $1 source path, $2 tag
     local rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
+        # The sixteen-term fixture defines 62 temps, which the transitional
+        # capacity gate refuses by design until the shapes above the old
+        # capacity are pixel-judged (director, 2026-09-02, option C).  This
+        # test is one of the things that judges them, so it lifts the gate.
+        RSXCG_UNVERIFIED_CAPACITY=1 \
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" "$compiler" \
             -p sce_fp_rsx --emit-container "$work/$2.fpo" "$1"
     ) >"$work/$2.log" 2>&1 || rc=$?
