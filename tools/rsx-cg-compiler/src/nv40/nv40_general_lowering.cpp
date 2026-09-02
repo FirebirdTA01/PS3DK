@@ -1406,9 +1406,49 @@ private:
         program_.valueToSource[inst.result] = src;
     }
 
+    // The integer value of a constant operand, for an index rather than a
+    // number: an array or matrix subscript arrives as int32 here.
+    bool constantIndex(IRValueID id, int& out) const
+    {
+        const IRValue* value = entry_.getValue(id);
+        auto* constant = dynamic_cast<const IRConstant*>(value);
+        if (!constant) return false;
+        if (std::holds_alternative<int32_t>(constant->value))
+            out = std::get<int32_t>(constant->value);
+        else if (std::holds_alternative<uint32_t>(constant->value))
+            out = static_cast<int>(std::get<uint32_t>(constant->value));
+        else if (std::holds_alternative<float>(constant->value)) {
+            const float f = std::get<float>(constant->value);
+            if (static_cast<float>(static_cast<int>(f)) != f) return false;
+            out = static_cast<int>(f);
+        } else {
+            return false;
+        }
+        return true;
+    }
+
     void lowerVecExtract(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+
+        // `m[r]` on a matrix uniform is the const register of row r, whole
+        // - not a lane of something.  Without this the operand resolved to
+        // nothing and the program refused to lower (t_9da20b33).  The row
+        // is OPERAND 1: the IR for m[0] and m[2] differs only there, and
+        // both carry componentIndex 0, so reading the field would compile
+        // every row as row 0.
+        if (inst.operands.size() >= 2 && !inst.resultType.isMatrix()) {
+            const auto matIt = matrixUniformBase_.find(inst.operands[0]);
+            int row = 0;
+            if (matIt != matrixUniformBase_.end() &&
+                constantIndex(inst.operands[1], row) &&
+                row >= 0 && row < 4) {
+                program_.valueToSource[inst.result] =
+                    uniformSrc(matIt->second + row, false);
+                return;
+            }
+        }
+
         const int lane = std::max(0, std::min(3, inst.componentIndex));
         VSrc src = resolve(inst.operands[0]);
         src.swizzle = {static_cast<uint8_t>(lane),
@@ -3190,8 +3230,19 @@ private:
             if (irValue)
                 sourceWidth = irValue->type.componentCount();
         }
-        if (sourceWidth < 0)
-            sourceWidth = inst.resultType.componentCount();
+        if (sourceWidth < 0) {
+            // The width of the value being STORED, from the central
+            // per-instruction record.  The old fallback used the
+            // StoreOutput instruction's own resultType, which describes
+            // nothing - a store has no result - so an instruction result
+            // with no IRValue entry measured as width 1 and took the
+            // scalar-broadcast branch below.  That is how `m[0]` came out
+            // as `MOV o[n], c[256].x`, the row's x lane four times
+            // (t_9da20b33).
+            sourceWidth = valueWidthOf(value);
+            if (sourceWidth <= 0)
+                sourceWidth = inst.resultType.componentCount();
+        }
         if (sourceWidth == 2 && outMask == 0x3) {
             vi.srcs[0].swizzle = {0, 1, 0, 0};
         } else if (sourceWidth == 3 && outMask == 0x7) {

@@ -128,6 +128,9 @@ jobs:
       - name: Test rsx-cg-compiler int literals in float constructors
         run: bash tests/shader-compiler/int-literal-ctor-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler matrix row indexing
+        run: bash tests/shader-compiler/vp-matrix-row-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

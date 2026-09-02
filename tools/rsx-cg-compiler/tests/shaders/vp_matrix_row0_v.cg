@@ -1,0 +1,24 @@
+// A matrix uniform's ROW is a const register, whole (t_9da20b33).
+//
+// `m[0]` refused on both paths - the default one with "StoreOutput source
+// is not a direct Load or matvecmul", the general one with "operand could
+// not be resolved" - although the reference compiles it to a single
+// instruction:
+//
+//     MOV o[8], c[256];
+//
+// The row lives at matrixBase + r, and this fixture takes row 0 while its
+// twin takes row 2.  The pair is the point: the row index arrives as
+// OPERAND 1 of the extract, and both rows carry componentIndex 0, so a
+// lowering that read the field would compile them IDENTICALLY - a silent
+// wrong row rather than a refusal.  The test compares the two shaders'
+// ucode for exactly that reason.
+uniform float4x4 m_auto;
+
+void main(float4 in_position : POSITION,
+          out float4 out_position : POSITION,
+          out float4 out_texcoord1 : TEXCOORD1)
+{
+    out_position = mul(m_auto, in_position);
+    out_texcoord1 = m_auto[0];
+}

@@ -2421,6 +2421,42 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     }
                 }
 
+                // `m[r]` on a matrix uniform IS the const register of row
+                // r - the reference emits `MOV o[n], c[base + r]` and
+                // nothing else.  Recording it as a plain Const source lets
+                // the existing StoreOutput path emit exactly that; without
+                // it the store fell through to "not a direct Load or
+                // matvecmul" and the shader did not build (t_9da20b33).
+                //
+                // The row comes from OPERAND 1, not componentIndex: the IR
+                // for m[0] and m[2] differ only in that operand, and both
+                // carry componentIndex 0.  Reading the field instead would
+                // have compiled every row as row 0 - measured, not assumed.
+                if (!inst.resultType.isMatrix() && inst.operands.size() >= 2)
+                {
+                    auto matBaseIt = valueToMatrixBase.find(inst.operands[0]);
+                    float rowF = 0.0f;
+                    if (matBaseIt != valueToMatrixBase.end() &&
+                        isFloatLiteral(inst.operands[1], rowF))
+                    {
+                        const int row = static_cast<int>(rowF);
+                        // A dynamic or out-of-range index is left alone:
+                        // it falls through to the existing refusal rather
+                        // than reading a register the matrix does not own.
+                        if (static_cast<float>(row) == rowF &&
+                            row >= 0 && row < 4)
+                        {
+                            ValueSource vs;
+                            vs.kind   = ValueSource::Kind::Const;
+                            vs.regIdx = matBaseIt->second + row;
+                            vs.width  = std::max(1, std::min(4,
+                                            inst.resultType.componentCount()));
+                            valueToSource[inst.result] = vs;
+                            break;
+                        }
+                    }
+                }
+
                 // Same shape as a single-lane VecShuffle.  Alias into
                 // valueToShuffle with width=1 so downstream consumers
                 // (MatVecMul, StoreOutput, the per-lane MAD chain
