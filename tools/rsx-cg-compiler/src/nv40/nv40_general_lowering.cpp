@@ -1252,8 +1252,18 @@ private:
             lowerPow(inst);
             return;
         case IROp::Dot:
-            lowerBinary(inst, inst.resultType.componentCount() >= 4
-                              ? VOp::Dp4 : VOp::Dp3);
+            // The width that picks DP4 over DP3 is the OPERANDS', not the
+            // result's.  A dot product's result is a SCALAR, always, so
+            // `resultType.componentCount() >= 4` was never true and every
+            // dot lowered to DP3 - a 4D dot silently dropping its w term.
+            // test_42_dot4 was the only shader in the corpus with one, and
+            // it was the last general-path mismatch in the set
+            // (t_856689b2).
+            lowerBinary(inst,
+                        std::max(valueWidthOf(inst.operands[0]),
+                                 inst.operands.size() > 1
+                                     ? valueWidthOf(inst.operands[1]) : 0) >= 4
+                            ? VOp::Dp4 : VOp::Dp3);
             return;
         case IROp::Min:
             lowerBinary(inst, VOp::Min);

@@ -1,0 +1,23 @@
+// A 4D dot lowers to DP4 and a 3D dot to DP3 (t_856689b2's last one).
+//
+// The general path chose between them on the RESULT's width - and a dot
+// product's result is a scalar, always, so the test was never true and
+// every dot became DP3.  A four-component dot silently dropped its w term:
+//
+//     ours       DP3R R9.x, R9, {0.5, -0.5, 0.707, -0.707}
+//     reference  DP4R R0.x, R0, {0.5, -0.5, 0.707, -0.707}
+//
+// test_42_dot4 was the only shader in the corpus with a 4D dot, and it was
+// the last general-path mismatch left in the whole set.
+//
+// Both widths are in one shader on purpose: a fix that always chose DP4
+// would pass a DP4-only fixture and break every lighting shader in the
+// corpus.  The test requires one of each.
+void main(float4 a : TEXCOORD0,
+          float4 b : TEXCOORD1,
+          out float4 oColor : COLOR)
+{
+    float d4 = dot(a, b);
+    float d3 = dot(a.xyz, b.xyz);
+    oColor = float4(d4, d3, 0.0f, 1.0f);
+}
