@@ -56,6 +56,46 @@ OUT main()
 }
 SHADER
 
+cat >"$work/constant_bitwise_fp.fcg" <<'SHADER'
+struct OUT { float4 color : COLOR0; };
+
+OUT main()
+{
+    OUT o;
+    int v = ((7 & 4) | (8 ^ 3)) + (~0) + (1 << 2) + (8 >> 1);
+    o.color = float4(1.0, 0.0, 0.0, 1.0);
+    return o;
+}
+SHADER
+
+cat >"$work/constant_bitwise_vp.vcg" <<'SHADER'
+float4 main(float4 pos : POSITION) : POSITION
+{
+    int v = ((7 & 4) | (8 ^ 3)) + (~0) + (1 << 2) + (8 >> 1);
+    return pos;
+}
+SHADER
+
+cat >"$work/live_constant_bitwise_fp.fcg" <<'SHADER'
+struct OUT { float4 color : COLOR0; };
+
+OUT main()
+{
+    OUT o;
+    bool b = (3 & 1) == 1;
+    o.color = b ? float4(1.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 1.0);
+    return o;
+}
+SHADER
+
+cat >"$work/live_constant_bitwise_vp.vcg" <<'SHADER'
+float4 main(float4 pos : POSITION) : POSITION
+{
+    bool b = (3 & 1) == 1;
+    return b ? pos : float4(0.0, 0.0, 0.0, 1.0);
+}
+SHADER
+
 run_case() {
     local name="$1"
     local src="$work/$name.fcg"
@@ -113,58 +153,121 @@ rc=0
         -p sce_fp_rsx --general-lowering \
         --emit-container "$work/unused_bad_macro.bin" "$work/unused_bad_macro.fcg"
 ) >"$work/unused_bad_macro.log" 2>&1 || rc=$?
-[[ "$rc" -ne 0 ]] || fail "unused_bad_macro accepted an unknown token in a macro replacement list"
-grep -Eq "unknown character '\\^'" "$work/unused_bad_macro.log" \
-    || fail "unused_bad_macro failed without a named lexer diagnostic"
-grep -Fq "$work/unused_bad_macro.fcg:" "$work/unused_bad_macro.log" \
-    || fail "unused_bad_macro diagnostic did not name the source file"
+[[ "$rc" -eq 0 ]] || { tail -n 10 "$work/unused_bad_macro.log" >&2; fail "unused_bad_macro refused an unused bitwise token in a macro replacement list"; }
+[[ -s "$work/unused_bad_macro.bin" ]] || fail "unused_bad_macro produced no container"
+if grep -Eq "unknown character|not supported by this profile" "$work/unused_bad_macro.log"; then
+    tail -n 10 "$work/unused_bad_macro.log" >&2
+    fail "unused_bad_macro treated an unused macro replacement token as active code"
+fi
 
-unknown_cases=(
-    "bitwise_and:int v = 7 & 4;:&:15"
-    "bitwise_or:int v = 7 | 4;:|:15"
-    "bitwise_xor:int v = 7 ^ 4;:^:15"
-    "bitwise_not:int v = ~7;:~:13"
-)
+for profile in sce_fp_rsx sce_vp_rsx; do
+    src="$work/constant_bitwise_fp.fcg"
+    [[ "$profile" == sce_vp_rsx ]] && src="$work/constant_bitwise_vp.vcg"
+    for mode in default general; do
+        args=()
+        [[ "$mode" == general ]] && args+=(--general-lowering)
+        rc=0
+        (
+            ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
+            timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
+                -p "$profile" "${args[@]}" \
+                --emit-container "$work/constant_bitwise_${profile}_${mode}.bin" "$src"
+        ) >"$work/constant_bitwise_${profile}_${mode}.log" 2>&1 || rc=$?
+        [[ "$rc" -eq 0 ]] || { tail -n 10 "$work/constant_bitwise_${profile}_${mode}.log" >&2; fail "constant_bitwise refused on $profile/$mode"; }
+        [[ -s "$work/constant_bitwise_${profile}_${mode}.bin" ]] || fail "constant_bitwise produced no container on $profile/$mode"
+        if grep -Eq "unknown character|not supported by this profile|unsupported IR op" "$work/constant_bitwise_${profile}_${mode}.log"; then
+            tail -n 10 "$work/constant_bitwise_${profile}_${mode}.log" >&2
+            fail "constant_bitwise did not fold before the profile/backend checks on $profile/$mode"
+        fi
+    done
+done
 
-for item in "${unknown_cases[@]}"; do
-    IFS=: read -r name expr char column <<<"$item"
-    src="$work/$name.fcg"
-    out="$work/$name.bin"
-    log="$work/$name.log"
-    cat >"$src" <<SHADER
-struct OUT { float4 color : COLOR0; };
-
-OUT main()
-{
-    OUT o;
-    $expr
-    o.color = float4((float)v, 0.0, 0.0, 1.0);
-    return o;
-}
-SHADER
-
+for profile in sce_fp_rsx sce_vp_rsx; do
+    src="$work/live_constant_bitwise_fp.fcg"
+    [[ "$profile" == sce_vp_rsx ]] && src="$work/live_constant_bitwise_vp.vcg"
     rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering \
-            --emit-container "$out" "$src"
-    ) >"$log" 2>&1 || rc=$?
+            -p "$profile" --general-lowering \
+            --emit-container "$work/live_constant_bitwise_$profile.bin" "$src"
+    ) >"$work/live_constant_bitwise_$profile.log" 2>&1 || rc=$?
+    [[ "$rc" -eq 0 ]] || { tail -n 10 "$work/live_constant_bitwise_$profile.log" >&2; fail "live_constant_bitwise refused on $profile/general"; }
+    [[ -s "$work/live_constant_bitwise_$profile.bin" ]] || fail "live_constant_bitwise produced no container on $profile/general"
+    if grep -Eq "unknown character|not supported by this profile|unsupported IR op" "$work/live_constant_bitwise_$profile.log"; then
+        tail -n 10 "$work/live_constant_bitwise_$profile.log" >&2
+        fail "live_constant_bitwise did not fold before the profile/backend checks on $profile/general"
+    fi
+done
 
-    [[ "$rc" -ne 0 ]] || fail "$name accepted an unsupported operator"
-    if [[ "$rc" -eq 124 ]]; then
-        fail "$name timed out; unknown-token handling must be bounded"
-    fi
-    if [[ "$rc" -eq 134 || "$rc" -eq 137 ]]; then
-        fail "$name aborted or was killed under memory cap"
-    fi
-    if grep -Eq 'std::bad_alloc|terminate called|Aborted|Killed' "$log"; then
-        fail "$name reported an allocation abort"
-    fi
-    grep -Fq "$src:" "$log" \
-        || fail "$name diagnostic did not name the source file"
-    grep -Eq ":[0-9]+:$column: error: unknown character '\\$char'" "$log" \
-        || fail "$name failed without a character+location lexer diagnostic"
+profile_cases=(
+    "bitwise_and:bool b = (u & 4) != 0;:&:20"
+    "bitwise_or:bool b = (u | 4) != 0;:|:20"
+    "bitwise_xor:bool b = (u ^ 4) != 0;:^:20"
+    "bitwise_not:bool b = (~u) != 0;:~:19"
+    "shift_left:bool b = (u << 1) != 0;:<<:20"
+    "shift_right:bool b = (u >> 1) != 0;:>>:20"
+)
+
+for item in "${profile_cases[@]}"; do
+    IFS=: read -r name expr char column <<<"$item"
+    fp_src="$work/${name}_fp.fcg"
+    cat >"$fp_src" <<SHADER
+struct OUT { float4 color : COLOR0; };
+
+OUT main(uniform int u)
+{
+    OUT o;
+    $expr
+    o.color = b ? float4(1.0, 0.0, 0.0, 1.0) : float4(0.0, 0.0, 0.0, 1.0);
+    return o;
+}
+SHADER
+    vp_src="$work/${name}_vp.vcg"
+    cat >"$vp_src" <<SHADER
+float4 main(float4 pos : POSITION, uniform int u) : POSITION
+{
+    $expr
+    return b ? pos : float4(pos.x, pos.y, pos.z, 1.0);
+}
+SHADER
+
+    for profile in sce_fp_rsx sce_vp_rsx; do
+        src="$fp_src"
+        [[ "$profile" == sce_vp_rsx ]] && src="$vp_src"
+        for mode in default general; do
+            args=()
+            [[ "$mode" == general ]] && args+=(--general-lowering)
+            out="$work/${name}_${profile}_${mode}.bin"
+            log="$work/${name}_${profile}_${mode}.log"
+            rc=0
+            (
+                ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
+                timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
+                    -p "$profile" "${args[@]}" \
+                    --emit-container "$out" "$src"
+            ) >"$log" 2>&1 || rc=$?
+
+            [[ "$rc" -ne 0 ]] || fail "$name accepted an unsupported operator on $profile/$mode"
+            if [[ "$rc" -eq 124 ]]; then
+                fail "$name timed out on $profile/$mode; unsupported-op handling must be bounded"
+            fi
+            if [[ "$rc" -eq 134 || "$rc" -eq 137 ]]; then
+                fail "$name aborted or was killed under memory cap on $profile/$mode"
+            fi
+            if grep -Eq 'std::bad_alloc|terminate called|Aborted|Killed' "$log"; then
+                fail "$name reported an allocation abort on $profile/$mode"
+            fi
+            grep -Fq "$src:" "$log" \
+                || fail "$name diagnostic did not name the source file on $profile/$mode"
+            if grep -Eq "unknown character|unexpected token|parse error|syntax error|unsupported IR op" "$log"; then
+                tail -n 10 "$log" >&2
+                fail "$name failed before the profile check on $profile/$mode"
+            fi
+            grep -Fq "C5508: the operator \"$char\" is not supported by this profile" "$log" \
+                || fail "$name failed without the profile-level bitwise diagnostic on $profile/$mode"
+        done
+    done
 done
 
 cat >"$work/lexer_api_probe.cpp" <<'CPP'

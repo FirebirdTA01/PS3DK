@@ -51,6 +51,32 @@ namespace nv40::detail
 namespace
 {
 
+const char* unsupportedProfileOperator(IROp op)
+{
+    switch (op)
+    {
+    case IROp::And: return "&";
+    case IROp::Or:  return "|";
+    case IROp::Xor: return "^";
+    case IROp::Not: return "~";
+    case IROp::Shl: return "<<";
+    case IROp::Shr: return ">>";
+    default:        return nullptr;
+    }
+}
+
+std::string profileUnsupportedDiagnostic(const IRInstruction& inst)
+{
+    const char* op = unsupportedProfileOperator(inst.op);
+    if (!op) return {};
+    std::string msg;
+    if (!inst.loc.filename.empty())
+        msg = inst.loc.toString() + ": ";
+    msg += std::string("error C5508: the operator \"") + op +
+           "\" is not supported by this profile";
+    return msg;
+}
+
 enum class GeneralProfile { Fragment, Vertex };
 
 enum class VOp
@@ -1364,6 +1390,13 @@ private:
         case IROp::Nop:
             return;
         default:
+            if (std::string msg = profileUnsupportedDiagnostic(inst);
+                !msg.empty())
+            {
+                program_.diagnostics.push_back(msg);
+                program_.loweringFailed = true;
+                return;
+            }
             // An op we do not implement is a REFUSAL, not a note.  This used
             // to push a diagnostic and return while the caller emitted the
             // remaining instructions and exited 0, so a shader using discard,

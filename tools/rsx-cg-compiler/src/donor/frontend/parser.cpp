@@ -174,7 +174,12 @@ Token Parser::consume(TokenType type, const std::string& message)
 SourceLocation Parser::currentLocation() const
 {
     const Token& tok = peek();
-    return {tok.filename.empty() ? filename : tok.filename, tok.line, tok.column};
+    return tokenLocation(tok);
+}
+
+SourceLocation Parser::tokenLocation(const Token& token) const
+{
+    return {token.filename.empty() ? filename : token.filename, token.line, token.column};
 }
 
 // ============================================================================
@@ -1602,7 +1607,7 @@ std::unique_ptr<ExprNode> Parser::parseAssignmentExpression()
                TokenType::OP_MULTIPLY_ASSIGN, TokenType::OP_DIVIDE_ASSIGN, TokenType::OP_MODULO_ASSIGN}))
     {
         Token op = previous();
-        SourceLocation loc = {op.filename, op.line, op.column};
+        SourceLocation loc = tokenLocation(op);
 
         BinaryOp binOp;
         switch (op.type)
@@ -1659,7 +1664,7 @@ std::unique_ptr<ExprNode> Parser::parseLogicalOrExpression()
 
     while (match(TokenType::OP_LOGICAL_OR))
     {
-        SourceLocation loc = {previous().filename, previous().line, previous().column};
+        SourceLocation loc = tokenLocation(previous());
         auto right = parseLogicalAndExpression();
         left = std::make_unique<BinaryExpr>(loc, BinaryOp::LogicalOr, std::move(left), std::move(right));
     }
@@ -1673,7 +1678,7 @@ std::unique_ptr<ExprNode> Parser::parseLogicalAndExpression()
 
     while (match(TokenType::OP_LOGICAL_AND))
     {
-        SourceLocation loc = {previous().filename, previous().line, previous().column};
+        SourceLocation loc = tokenLocation(previous());
         auto right = parseBitwiseOrExpression();
         left = std::make_unique<BinaryExpr>(loc, BinaryOp::LogicalAnd, std::move(left), std::move(right));
     }
@@ -1687,7 +1692,7 @@ std::unique_ptr<ExprNode> Parser::parseBitwiseOrExpression()
 
     while (match(TokenType::OP_BITWISE_OR))
     {
-        SourceLocation loc = {previous().filename, previous().line, previous().column};
+        SourceLocation loc = tokenLocation(previous());
         auto right = parseBitwiseXorExpression();
         left = std::make_unique<BinaryExpr>(loc, BinaryOp::BitwiseOr, std::move(left), std::move(right));
     }
@@ -1701,7 +1706,7 @@ std::unique_ptr<ExprNode> Parser::parseBitwiseXorExpression()
 
     while (match(TokenType::OP_BITWISE_XOR))
     {
-        SourceLocation loc = {previous().filename, previous().line, previous().column};
+        SourceLocation loc = tokenLocation(previous());
         auto right = parseBitwiseAndExpression();
         left = std::make_unique<BinaryExpr>(loc, BinaryOp::BitwiseXor, std::move(left), std::move(right));
     }
@@ -1715,7 +1720,7 @@ std::unique_ptr<ExprNode> Parser::parseBitwiseAndExpression()
 
     while (match(TokenType::OP_BITWISE_AND))
     {
-        SourceLocation loc = {previous().filename, previous().line, previous().column};
+        SourceLocation loc = tokenLocation(previous());
         auto right = parseEqualityExpression();
         left = std::make_unique<BinaryExpr>(loc, BinaryOp::BitwiseAnd, std::move(left), std::move(right));
     }
@@ -1730,7 +1735,7 @@ std::unique_ptr<ExprNode> Parser::parseEqualityExpression()
     while (match({TokenType::OP_EQUAL, TokenType::OP_NOT_EQUAL}))
     {
         Token op = previous();
-        SourceLocation loc = {op.filename, op.line, op.column};
+        SourceLocation loc = tokenLocation(op);
         BinaryOp binOp = (op.type == TokenType::OP_EQUAL) ? BinaryOp::Equal : BinaryOp::NotEqual;
         auto right = parseRelationalExpression();
         left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
@@ -1746,7 +1751,7 @@ std::unique_ptr<ExprNode> Parser::parseRelationalExpression()
     while (match({TokenType::OP_LESS, TokenType::OP_LESS_EQUAL, TokenType::OP_GREATER, TokenType::OP_GREATER_EQUAL}))
     {
         Token op = previous();
-        SourceLocation loc = {op.filename, op.line, op.column};
+        SourceLocation loc = tokenLocation(op);
 
         BinaryOp binOp;
         switch (op.type)
@@ -1782,7 +1787,7 @@ std::unique_ptr<ExprNode> Parser::parseShiftExpression()
     while (match({TokenType::OP_SHIFT_LEFT, TokenType::OP_SHIFT_RIGHT}))
     {
         Token op = previous();
-        SourceLocation loc = {op.filename, op.line, op.column};
+        SourceLocation loc = tokenLocation(op);
         BinaryOp binOp = (op.type == TokenType::OP_SHIFT_LEFT) ? BinaryOp::ShiftLeft : BinaryOp::ShiftRight;
         auto right = parseAdditiveExpression();
         left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
@@ -1798,7 +1803,7 @@ std::unique_ptr<ExprNode> Parser::parseAdditiveExpression()
     while (match({TokenType::OP_PLUS, TokenType::OP_MINUS}))
     {
         Token op = previous();
-        SourceLocation loc = {op.filename, op.line, op.column};
+        SourceLocation loc = tokenLocation(op);
         BinaryOp binOp = (op.type == TokenType::OP_PLUS) ? BinaryOp::Add : BinaryOp::Sub;
         auto right = parseMultiplicativeExpression();
         left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
@@ -1814,7 +1819,7 @@ std::unique_ptr<ExprNode> Parser::parseMultiplicativeExpression()
     while (match({TokenType::OP_MULTIPLY, TokenType::OP_DIVIDE, TokenType::OP_MODULO}))
     {
         Token op = previous();
-        SourceLocation loc = {op.filename, op.line, op.column};
+        SourceLocation loc = tokenLocation(op);
 
         BinaryOp binOp;
         switch (op.type)
@@ -1847,7 +1852,7 @@ std::unique_ptr<ExprNode> Parser::parseUnaryExpression()
                TokenType::OP_INCREMENT, TokenType::OP_DECREMENT}))
     {
         Token op = previous();
-        SourceLocation loc = {op.filename, op.line, op.column};
+        SourceLocation loc = tokenLocation(op);
 
         UnaryOp unOp;
         switch (op.type)
@@ -1952,13 +1957,13 @@ std::unique_ptr<ExprNode> Parser::parsePostfixExpression()
         else if (match(TokenType::OP_INCREMENT))
         {
             // Post-increment
-            SourceLocation loc = {previous().filename, previous().line, previous().column};
+            SourceLocation loc = tokenLocation(previous());
             expr = std::make_unique<UnaryExpr>(loc, UnaryOp::PostIncrement, std::move(expr));
         }
         else if (match(TokenType::OP_DECREMENT))
         {
             // Post-decrement
-            SourceLocation loc = {previous().filename, previous().line, previous().column};
+            SourceLocation loc = tokenLocation(previous());
             expr = std::make_unique<UnaryExpr>(loc, UnaryOp::PostDecrement, std::move(expr));
         }
         else

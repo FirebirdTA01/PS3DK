@@ -315,6 +315,7 @@ public:
     int semanticIndex = 0;           // For shader I/O operations
     std::string semanticName;        // For shader I/O operations (digit-stripped)
     std::string rawSemanticName;     // For shader I/O operations (source spelling, e.g. "POSITION0")
+    SourceLocation loc;              // Source expression/statement for diagnostics.
     // Struct-flattened entry params:
     //   LoadAttribute  for `input.pos` carries structParamName="input", fieldName="pos"
     //   StoreOutput    for `o.pos = ...` carries fieldName="pos" (parent struct name is

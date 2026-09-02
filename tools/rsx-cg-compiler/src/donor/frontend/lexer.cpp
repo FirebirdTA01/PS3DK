@@ -413,6 +413,11 @@ Token Lexer::nextToken(bool keepPreprocessor)
         return { TokenType::OP_LOGICAL_NOT, "!", startLine, startColumn };
 
     case '<':
+        if (peek() == '<')
+        {
+            advance();
+            return { TokenType::OP_SHIFT_LEFT, "<<", startLine, startColumn };
+        }
         if (peek() == '=')
         {
             advance();
@@ -422,6 +427,11 @@ Token Lexer::nextToken(bool keepPreprocessor)
         return { TokenType::OP_LESS, "<", startLine, startColumn };
 
     case '>':
+        if (peek() == '>')
+        {
+            advance();
+            return { TokenType::OP_SHIFT_RIGHT, ">>", startLine, startColumn };
+        }
         if (peek() == '=') 
         {
             advance();
@@ -437,7 +447,7 @@ Token Lexer::nextToken(bool keepPreprocessor)
             return { TokenType::OP_LOGICAL_AND, "&&", startLine, startColumn };
         }
 
-        return { TokenType::UNKNOWN, std::string(1, c), startLine, startColumn };
+        return { TokenType::OP_BITWISE_AND, "&", startLine, startColumn };
 
     case '|':
         if (peek() == '|') 
@@ -446,7 +456,13 @@ Token Lexer::nextToken(bool keepPreprocessor)
             return { TokenType::OP_LOGICAL_OR, "||", startLine, startColumn };
         }
 
-        return { TokenType::UNKNOWN, std::string(1, c), startLine, startColumn };
+        return { TokenType::OP_BITWISE_OR, "|", startLine, startColumn };
+
+    case '^':
+        return { TokenType::OP_BITWISE_XOR, "^", startLine, startColumn };
+
+    case '~':
+        return { TokenType::OP_BITWISE_NOT, "~", startLine, startColumn };
 
     case ';': return { TokenType::SEMICOLON, ";", startLine, startColumn };
     case ',': return { TokenType::COMMA, ",", startLine, startColumn };

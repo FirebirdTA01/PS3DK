@@ -1296,6 +1296,24 @@ bool extractFloatComponents(IRFunction& fn, IRValueID id,
     return false;
 }
 
+bool extractIntScalar(IRFunction& fn, IRValueID id, int32_t& out)
+{
+    IRValue* v = fn.getValue(id);
+    auto* c = v ? dynamic_cast<IRConstant*>(v) : nullptr;
+    if (!c) return false;
+    if (std::holds_alternative<int32_t>(c->value))
+    {
+        out = std::get<int32_t>(c->value);
+        return true;
+    }
+    if (std::holds_alternative<uint32_t>(c->value))
+    {
+        out = static_cast<int32_t>(std::get<uint32_t>(c->value));
+        return true;
+    }
+    return false;
+}
+
 // Broadcast a 1-component vector to N components by repeating the
 // scalar.  No-op when src.size() == n.  Returns false on length
 // mismatch (e.g. mixing vec3 + vec4 with no obvious broadcast).
@@ -1314,6 +1332,32 @@ bool broadcastTo(std::vector<float>& v, size_t n)
 IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
                                       IRValueID lhs, IRValueID rhs)
 {
+    int32_t ia = 0, ib = 0;
+    if (extractIntScalar(*currentFunction_, lhs, ia) &&
+        extractIntScalar(*currentFunction_, rhs, ib))
+    {
+        int32_t r = 0;
+        switch (op)
+        {
+        case IROp::And: r = ia & ib; break;
+        case IROp::Or:  r = ia | ib; break;
+        case IROp::Xor: r = ia ^ ib; break;
+        case IROp::Shl:
+            if (ib < 0 || ib >= 32) return InvalidIRValue;
+            r = static_cast<int32_t>(static_cast<uint32_t>(ia) << ib);
+            break;
+        case IROp::Shr:
+            if (ib < 0 || ib >= 32) return InvalidIRValue;
+            r = ia >> ib;
+            break;
+        default:
+            break;
+        }
+        if (op == IROp::And || op == IROp::Or || op == IROp::Xor ||
+            op == IROp::Shl || op == IROp::Shr)
+            return createConstant(r);
+    }
+
     std::vector<float> a, b;
     if (!extractFloatComponents(*currentFunction_, lhs, a)) return InvalidIRValue;
     if (!extractFloatComponents(*currentFunction_, rhs, b)) return InvalidIRValue;
@@ -1347,6 +1391,10 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
 IRValueID IRBuilder::tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
                                      IRValueID operand)
 {
+    int32_t ia = 0;
+    if (op == IROp::Not && extractIntScalar(*currentFunction_, operand, ia))
+        return createConstant(static_cast<int32_t>(~ia));
+
     std::vector<float> a;
     if (!extractFloatComponents(*currentFunction_, operand, a)) return InvalidIRValue;
     std::vector<float> r(a.size(), 0.0f);
@@ -1458,7 +1506,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
         return folded;
     }
 
-    return emitBinaryOp(op, resultType, leftValue, rightValue);
+    return emitBinaryOp(op, resultType, leftValue, rightValue, expr->loc);
 }
 
 IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
@@ -1497,7 +1545,7 @@ IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
         return folded;
     }
 
-    return emitUnaryOp(op, resultType, operandValue);
+    return emitUnaryOp(op, resultType, operandValue, expr->loc);
 }
 
 IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
@@ -2228,13 +2276,15 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 // ============================================================================
 
 IRValueID IRBuilder::emitInstruction(IROp op, const IRTypeInfo& resultType,
-                                      const std::vector<IRValueID>& operands)
+                                      const std::vector<IRValueID>& operands,
+                                      const SourceLocation& loc)
 {
     IRValueID result = (resultType.baseType != IRType::Void)
         ? currentFunction_->allocateValueId()
         : InvalidIRValue;
 
     auto inst = std::make_unique<IRInstruction>(op, result, resultType);
+    inst->loc = loc;
     for (IRValueID opnd : operands)
     {
         inst->addOperand(opnd);
@@ -2245,14 +2295,16 @@ IRValueID IRBuilder::emitInstruction(IROp op, const IRTypeInfo& resultType,
 }
 
 IRValueID IRBuilder::emitBinaryOp(IROp op, const IRTypeInfo& resultType,
-                                   IRValueID left, IRValueID right)
+                                   IRValueID left, IRValueID right,
+                                   const SourceLocation& loc)
 {
-    return emitInstruction(op, resultType, {left, right});
+    return emitInstruction(op, resultType, {left, right}, loc);
 }
 
-IRValueID IRBuilder::emitUnaryOp(IROp op, const IRTypeInfo& resultType, IRValueID operand)
+IRValueID IRBuilder::emitUnaryOp(IROp op, const IRTypeInfo& resultType,
+                                 IRValueID operand, const SourceLocation& loc)
 {
-    return emitInstruction(op, resultType, {operand});
+    return emitInstruction(op, resultType, {operand}, loc);
 }
 
 IRValueID IRBuilder::emitCall(const std::string& funcName, const IRTypeInfo& resultType,

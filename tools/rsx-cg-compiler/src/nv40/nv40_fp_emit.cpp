@@ -30,6 +30,32 @@ namespace nv40::detail
 namespace
 {
 
+const char* unsupportedProfileOperator(IROp op)
+{
+    switch (op)
+    {
+    case IROp::And: return "&";
+    case IROp::Or:  return "|";
+    case IROp::Xor: return "^";
+    case IROp::Not: return "~";
+    case IROp::Shl: return "<<";
+    case IROp::Shr: return ">>";
+    default:        return nullptr;
+    }
+}
+
+std::string profileUnsupportedDiagnostic(const IRInstruction& inst)
+{
+    const char* op = unsupportedProfileOperator(inst.op);
+    if (!op) return {};
+    std::string msg;
+    if (!inst.loc.filename.empty())
+        msg = inst.loc.toString() + ": ";
+    msg += std::string("error C5508: the operator \"") + op +
+           "\" is not supported by this profile";
+    return msg;
+}
+
 std::string toUpper(std::string s)
 {
     std::transform(s.begin(), s.end(), s.begin(),
@@ -11625,6 +11651,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 break;
 
             default:
+                if (std::string msg = profileUnsupportedDiagnostic(inst);
+                    !msg.empty())
+                {
+                    out.diagnostics.push_back(msg);
+                    return out;
+                }
                 out.diagnostics.push_back(
                     "nv40-fp: unsupported IR op #" +
                     std::to_string(static_cast<int>(inst.op)));

@@ -121,10 +121,13 @@ private:
 
     // Instruction emission helpers
     IRValueID emitInstruction(IROp op, const IRTypeInfo& resultType,
-                              const std::vector<IRValueID>& operands = {});
+                              const std::vector<IRValueID>& operands = {},
+                              const SourceLocation& loc = {});
     IRValueID emitBinaryOp(IROp op, const IRTypeInfo& resultType,
-                           IRValueID left, IRValueID right);
-    IRValueID emitUnaryOp(IROp op, const IRTypeInfo& resultType, IRValueID operand);
+                           IRValueID left, IRValueID right,
+                           const SourceLocation& loc = {});
+    IRValueID emitUnaryOp(IROp op, const IRTypeInfo& resultType, IRValueID operand,
+                          const SourceLocation& loc = {});
 
     // Constant-folding helpers — return a fresh IRConstant id when
     // both operands are IRConstants, else InvalidIRValue.  Handle
