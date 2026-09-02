@@ -160,3 +160,10 @@ tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|bot
 # is WITHDRAWN to the corpus sweep, where its refusal is a recorded sidecar
 # verdict (reference-corpus-refused.txt: th06_notex|ours|...|1).  It comes
 # back here, expected identical, when the lerp after a discard is lowered.
+
+# 2026-09-02 regression rows: the two default-path P1s the VP work found (both fixed on
+# origin/main before these rows were added; each was RED on 963018a).  sd_lane_insert
+# is default-only: the general path refuses the VecInsert-of-literal shape (t_be578e74,
+# 'operand %5 could not be resolved'); flip to both when it lowers.
+tests/regression/shader-differential/shaders/sd_lane_insert.fcg|0|default
+tests/regression/shader-differential/shaders/sd_mad_literal.fcg|0|both

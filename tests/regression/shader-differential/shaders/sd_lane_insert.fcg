@@ -1,0 +1,18 @@
+// shader-differential — curated regression row for t_afb4af65 (P1, fixed
+// b24559e): a literal written into one lane of a varying that is otherwise
+// passed straight through.  Until 2026-09-02 the default path emitted one
+// full-width MOV of the varying and dropped `c.x = 0.5` in silence - exit
+// 0, a well-formed container, an input mask that described the ucode.
+// The completeness guard cannot see it: the varying IS read; the LITERAL
+// goes missing.  Judged against the reference under the shared VP, where
+// TEXCOORD0.x varies across the image: a dropped override paints the
+// varying's x where 0.5 belongs.  The shader body is the one in
+// tools/rsx-cg-compiler/tests/shaders/fp_insert_literal_f.cg (source-
+// equivalent; this header is the rig's, not a copy of that file's).
+void main(float4 color : TEXCOORD0,
+          out float4 oColor : COLOR)
+{
+    float4 c = color;
+    c.x = 0.5;
+    oColor = c;
+}

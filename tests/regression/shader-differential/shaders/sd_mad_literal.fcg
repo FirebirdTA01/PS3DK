@@ -1,0 +1,13 @@
+// shader-differential — curated regression row for t_a1f43b12 (P1, fixed
+// 6b2f010): the literal MULTIPLICAND of a fused MAD.  Until 2026-09-02 the
+// default path emitted it as {0, 0, 0, 0} (the Mul matcher stored the
+// non-varying operand in a field the MAD emitter read as a uniform to be
+// patched; nothing patches a literal), so the output collapsed to the
+// addend: 0.5 everywhere, exit 0, container written.  Found by the VP
+// rig's coverage-FP instrument rows on their first boot.  Judged against
+// the reference under the shared VP: TEXCOORD0 varies, so a zeroed
+// multiplier paints a constant where a ramp belongs.
+void main(float4 v : TEXCOORD0, out float4 color : COLOR)
+{
+    color = v * float4(0.5f, 0.5f, 0.5f, 0.5f) + float4(0.5f, 0.5f, 0.5f, 0.5f);
+}
