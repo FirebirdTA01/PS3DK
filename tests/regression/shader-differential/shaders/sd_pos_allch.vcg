@@ -11,7 +11,7 @@
 // Channel recipe (u,v in 0..1 across the RT, v down):
 //   TEXCOORD0 = (u, v, 0, 1)                 texture coordinates
 //   TEXCOORD1 = (u - 0.5, v - 0.5, 0.5, 1)   a "normal"-shaped vector
-//   TEXCOORD2 = (0.5 - u, 0.5, v, 1)         a "half"/"eye"-shaped vector
+//   TEXCOORD2 = (0.5 - u, 0.5, v, 0.25 + 0.5u)         a "half"/"eye"-shaped vector
 //   TEXCOORD3 = (u * v, u + v, 1 - u, 1)     mixed products
 //   COLOR0    = (u, v, 1 - u, 0.5 + 0.5 v)   per-vertex colour with alpha ramp
 // Nothing is normalised here: shaders that normalise do so themselves,
