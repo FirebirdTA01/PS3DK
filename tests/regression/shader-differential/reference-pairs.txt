@@ -111,9 +111,10 @@ tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|default
 # samples TEXCOORD0 while a samples TEXCOORD2, so the product tex*tex (the
 # two-sampler shape the default matcher accepts) is asymmetric and a unit
 # swap is a different picture.  RED today, green after the sampler half of
-# the numbering fix.  |default: file-scope uniforms on the
-# general path are t_f5f750ff.
-tests/regression/shader-differential/shaders/sd_sampler_order.fcg|0|default
+# the numbering fix.  |both since e672f38 registers file-scope samplers on
+# the general path too (the non-sampler half of t_f5f750ff is still open,
+# which is why sd_uniform_order above stays |default).
+tests/regression/shader-differential/shaders/sd_sampler_order.fcg|0|both
 
 # NAMED REGRESSION for sampler PARAMETERS on the general path (claude
 # 21:44): lowerTex hard-codes texture unit 0, so a two-sampler shader reads
