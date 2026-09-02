@@ -138,6 +138,35 @@ grep -q "FALSE arm" "$work/else_default.log" || {
 reason than the false-arm discard."
 }
 
+run fp_discard_nested_f "" nested_default
+[[ "$rc" -ne 0 ]] || fail "fp_discard_nested_f compiled on the DEFAULT path.
+That path's guard is a single comparison, so an ENCLOSING branch is not
+accounted for: if_convert collapses the inner if and leaves the discard in
+the outer arm, and the kill then fires wherever the INNER condition holds,
+including on fragments the outer branch never reached (t_7ae60244).  The
+reference emits both comparisons and a multiply."
+grep -q "enclosing branch" "$work/nested_default.log" || {
+    tail -n 5 "$work/nested_default.log" >&2
+    fail "fp_discard_nested_f refused on the default path for some OTHER
+reason than the unaccounted enclosing branch."
+}
+
+# The two shapes the default path gets RIGHT must keep compiling: a plain
+# guard, and an `&&`.  if_convert hoists both and deletes the branch, so
+# their whole condition IS the comparison the kill uses - and the
+# discard-blend sample ships the `&&` shape byte-identical to the
+# reference, so a rule that refused it would be a regression on a shipped
+# sample rather than a guard.
+for stem in fp_discard_lt_f fp_discard_and_f; do
+    run "$stem" "" "${stem}_default_ok"
+    [[ "$rc" -eq 0 ]] || {
+        tail -n 5 "$work/${stem}_default_ok.log" >&2
+        fail "$stem no longer compiles on the DEFAULT path.  The
+enclosing-branch refusal is meant to catch a guard the path cannot
+express, not the two it expresses correctly."
+    }
+done
+
 run fp_store_skippable_f "--general-lowering" skippable
 if [[ "$rc" -eq 0 ]]; then
     printf 'NOTE: fp_store_skippable_f now compiles on the general path.\n' >&2

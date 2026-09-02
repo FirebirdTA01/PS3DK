@@ -2353,7 +2353,24 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // the general path lowers the shape correctly from
                     // the PATH CONDITION (CF-2, t_91bbd575), and the
                     // matcher is the component the switch retires.
-                    if (inst.parentBlock)
+                    // The discard's block is found by SEARCHING the
+                    // blocks for this instruction, never by reading
+                    // inst.parentBlock: if_convert moves a discard between
+                    // blocks with a raw vector insert and never updates
+                    // that field, so a hoisted one still names a block
+                    // that has since been erased.  Reading it made the
+                    // enclosing-branch check below silently find no
+                    // predecessors and pass (measured on
+                    // fp_discard_nested_f).
+                    const IRBasicBlock* discardBlock = nullptr;
+                    for (const auto& bp : entry.blocks)
+                    {
+                        if (!bp) continue;
+                        for (const auto& ip : bp->instructions)
+                            if (ip.get() == &inst) { discardBlock = bp.get(); break; }
+                        if (discardBlock) break;
+                    }
+                    if (discardBlock)
                     {
                         for (const auto& bp : entry.blocks)
                         {
@@ -2367,15 +2384,95 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             if (comma == std::string::npos) continue;
                             const std::string falseName =
                                 term->targetName.substr(comma + 1);
-                            if (inst.parentBlock->name != falseName) continue;
+                            if (discardBlock->name != falseName) continue;
                             out.diagnostics.push_back(
                                 "nv40-fp: discard on the FALSE arm of a "
-                                "branch (block '" + inst.parentBlock->name +
+                                "branch (block '" + discardBlock->name +
                                 "'): this path recovers the guard from the "
                                 "last comparison, not the path condition, "
                                 "and would kill the surviving fragments "
                                 "(t_79fc6bf7)");
                             return out;
+                        }
+                    }
+                    // t_7ae60244, the same defect one level up.  The
+                    // guard this path recovers is a single comparison, so
+                    // an ENCLOSING branch is simply not accounted for: for
+                    // `if (A) { if (B) discard; }` if_convert collapses the
+                    // inner if and leaves the discard in the outer arm, so
+                    // lastConditionalId is B and the kill fires wherever B
+                    // holds - including on fragments the outer branch never
+                    // reached.  Measured against the reference, which emits
+                    // both comparisons and a MULXC: ours drops A entirely.
+                    //
+                    // Walk up the unique-predecessor chain and collect the
+                    // branch conditions that guard this block.  Empty is
+                    // fine and is the common case - shape 5 hoists a
+                    // then-arm discard into the entry block and deletes the
+                    // brc, which is why a plain `if (a) discard;` and an
+                    // `if (a && b) discard;` still compile: their whole
+                    // condition IS lastConditionalId.  A condition that is
+                    // not lastConditionalId is one the emitted kill ignores.
+                    if (discardBlock)
+                    {
+                        std::unordered_map<std::string, const IRBasicBlock*>
+                            byName;
+                        for (const auto& bp : entry.blocks)
+                            if (bp) byName[bp->name] = bp.get();
+
+                        const IRBasicBlock* cur = discardBlock;
+                        for (int depth = 0; depth < 64 && cur; ++depth)
+                        {
+                            const IRBasicBlock* pred = nullptr;
+                            const IRInstruction* predTerm = nullptr;
+                            int preds = 0;
+                            for (const auto& bp : entry.blocks)
+                            {
+                                if (!bp) continue;
+                                const IRInstruction* t = bp->getTerminator();
+                                if (!t) continue;
+                                if (t->op != IROp::Branch &&
+                                    t->op != IROp::CondBranch) continue;
+                                const std::string& tn = t->targetName;
+                                size_t start = 0;
+                                bool targets = false;
+                                while (true)
+                                {
+                                    const size_t comma = tn.find(',', start);
+                                    const std::string name =
+                                        comma == std::string::npos
+                                            ? tn.substr(start)
+                                            : tn.substr(start, comma - start);
+                                    if (byName.count(name) &&
+                                        byName[name] == cur)
+                                        targets = true;
+                                    if (comma == std::string::npos) break;
+                                    start = comma + 1;
+                                }
+                                if (!targets) continue;
+                                ++preds;
+                                pred = bp.get();
+                                predTerm = t;
+                            }
+                            // A merge (more than one predecessor) cancels
+                            // the branch that made it, and no predecessor
+                            // is the entry: either way the walk is done.
+                            if (preds != 1 || !pred) break;
+                            if (predTerm->op == IROp::CondBranch &&
+                                !predTerm->operands.empty() &&
+                                predTerm->operands[0] != lastConditionalId)
+                            {
+                                out.diagnostics.push_back(
+                                    "nv40-fp: discard guarded by an "
+                                    "enclosing branch this path cannot "
+                                    "express (block '" +
+                                    discardBlock->name + "'): the kill "
+                                    "would use only the innermost "
+                                    "comparison and fire where the outer "
+                                    "condition is false (t_7ae60244)");
+                                return out;
+                            }
+                            cur = pred;
                         }
                     }
                     discardToCond[&inst] = lastConditionalId;
