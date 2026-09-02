@@ -232,9 +232,11 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_merge_f.cg|0|general
 tests/regression/shader-differential/shaders/sd_select_merge.fcg|0|general
 tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
 
-# 2026-09-02 t_7ae60244 (P1, DEFAULT path, shipping): a discard under `&&` or under a
-# nested `if` kills on the LAST comparison seen, not the path condition - the same
-# mechanism as t_79fc6bf7.  Found by the gate-1 tree sweep on the CF-2 tree: the
+# 2026-09-02 t_7ae60244 (P1, DEFAULT path, shipping): a discard under a NESTED `if`
+# kills on the inner comparison alone (the outer guard dropped) - the t_79fc6bf7
+# mechanism; fixed by REFUSAL in 13c32bc (one guard query asked by both paths).
+# (`&&` is NOT this item: the default path gets the conjunction right;
+# fp_discard_and_f's default red is t_ec804d32, the half-preload aliasing.)  Found by the gate-1 tree sweep on the CF-2 tree: the
 # default containers of these two CF-2 fixtures MISMATCH the reference
 # (fp_discard_and_f diff 320, ours 2624 painted vs 2304; fp_discard_nested_f diff
 # 351, ours 3264 vs 3615 - the outer condition dropped).  Curated |general only:
@@ -262,7 +264,10 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_nested_f.cg|0|general
 # reference paints the saturated c*d+d (2/34/99/61); the kill set is exactly right
 # (painted 1377 both sides, kil 2/2).  RED by design on both paths until the fix;
 # identical after it.  General-path compile of the shape is a2ee345 (CF-1a half 1).
-tools/rsx-cg-compiler/tests/shaders/fp_discard_two_f.cg|auto|both
+# |general since 79226a2 (t_becbfa69's default half): the DEFAULT path now REFUSES an
+# output it stores more than once, and a refusing curated row aborts the stage.  On
+# general it has been identical at painted 1377 since 70568e9.
+tools/rsx-cg-compiler/tests/shaders/fp_discard_two_f.cg|auto|general
 
 # 2026-09-02 codex counterexample to 5bee678 (t_7ae60244): a discard in a merge block
 # inside an outer guarded block.  General identical at painted 2832 (measured); the
