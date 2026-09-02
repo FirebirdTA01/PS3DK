@@ -250,7 +250,11 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     $ok = ($rc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
     if (-not $ok) {
         if ($NoThrow) { return $false }
-        if ($rc -ne 0) { throw "compile failed ($rc): $src" }
+        # Name the flags too: a flagged curated row (t_3bf3ce95) that refuses on
+        # a compiler without its flag must say WHICH flag, not just which shader.
+        $allFlags = @(@($flags) + @($pathFlags)) | Where-Object { $_ }
+        $flagNote = if ($allFlags.Count) { " [flags: $($allFlags -join ' ')]" } else { "" }
+        if ($rc -ne 0) { throw "compile failed ($rc): $src$flagNote" }
         throw "compile produced empty container: $src"
     }
     Write-Host "stager: $label -> $(Split-Path -Leaf $dst) ($((Get-Item $dst).Length) bytes)"
