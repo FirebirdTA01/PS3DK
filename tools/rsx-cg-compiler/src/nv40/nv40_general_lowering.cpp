@@ -1496,6 +1496,18 @@ private:
         case IROp::Cos:
             lowerUnary(inst, VOp::Cos, false);
             return;
+        case IROp::Exp:
+            lowerExpLog(inst, /*base2=*/false, /*isLog=*/false);
+            return;
+        case IROp::Exp2:
+            lowerExpLog(inst, /*base2=*/true, /*isLog=*/false);
+            return;
+        case IROp::Log:
+            lowerExpLog(inst, /*base2=*/false, /*isLog=*/true);
+            return;
+        case IROp::Log2:
+            lowerExpLog(inst, /*base2=*/true, /*isLog=*/true);
+            return;
         case IROp::RSqrt:
             lowerUnary(inst, VOp::Rsq, false);
             return;
@@ -3181,6 +3193,118 @@ private:
         if (profile_ == GeneralProfile::Vertex)
             ex2.srcs[0].swizzle = {0, 0, 0, 0};
         program_.instrs.push_back(ex2);
+    }
+
+    // exp / exp2 / log / log2 (t_a7dd471f).
+    //
+    // NV40 has EX2 and LG2 and nothing else in this family, so the
+    // natural-base pair is one of those plus a constant multiply.  WHICH
+    // SIDE the multiply goes on and WHAT the constant is are read from the
+    // reference's own listings rather than derived - a constant this file
+    // chose for itself would round differently in the last bit and be a
+    // shape we could never be byte-identical on:
+    //
+    //   exp(x)    MULR by 0x3fb8aa3a (log2 e), then EX2R
+    //   exp2(x)   EX2R alone
+    //   log(x)    LG2R, then MULR by 0x3f317218 (ln 2)
+    //   log2(x)   LG2R alone
+    //
+    // log10 is NOT here and is not a missing case: there is no IROp for it
+    // at all, because the frontend leaves it as an uninlined `call` - the
+    // same refusal test_01_rsxrt's user function takes.  That is a
+    // different layer and folding it in here would hide it.
+    //
+    // The reference puts a FENCBR between log's LG2 and the multiply that
+    // READS the register the LG2 has just written.  Fragment only: FENCBR
+    // is an FP encoding, and the VP path reaches EX2/LG2 through the scalar
+    // slot, which is why the sources are scalarised there - the same
+    // handling lowerPow already relies on for this pair of opcodes.
+    void lowerExpLog(const IRInstruction& inst, bool base2, bool isLog)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+
+        // WRITTEN BY THEIR BITS, NOT BY THEIR VALUES.  log2(e) correctly
+        // rounded to float32 is 0x3fb8aa3b; the reference emits 0x3fb8aa3a,
+        // the value one ULP BELOW.  Spelling the constant
+        // `1.4426950408889634f` therefore compiles to the right number and
+        // the wrong bytes - measured, on the first build of this lowering.
+        // ln(2) happens to agree, and is written the same way so the next
+        // reader is not left guessing which of the two was checked.
+        constexpr float kLog2E = 1.4426949024200439453125f;   // 0x3fb8aa3a
+        constexpr float kLn2   = 0.693147182464599609375f;    // 0x3f317218
+
+        const int temp = define(inst.result);
+        const uint8_t mask = componentMask(inst.resultType);
+        const bool vertex = profile_ == GeneralProfile::Vertex;
+        const VSrc arg = resolve(inst.operands[0]);
+
+        // ONE INSTRUCTION PER LANE.  EX2 and LG2 are SCALAR-UNIT
+        // instructions: they read a single source COMPONENT and write that
+        // one result into every enabled destination lane.  So a vector
+        // `exp2(v)` emitted as one EX2 with a four-lane writemask computes
+        // exp2(v.x) and stores it in x, y, z AND w - three lanes silently
+        // wrong.  The reference says so in its own bytes: for a float4 it
+        // emits four EX2Rs, each naming its own component (EX2R R0.y, R0.y
+        // and so on).  This is the same family as t_e89cd261's one-input
+        // rule - an encoding that reads less than the writemask suggests.
+        //
+        // exp's multiply is per lane too, because it feeds the scalar
+        // unit's single source: the reference scales into a scratch .x and
+        // reads that.  log's multiply is an ordinary vector ALU op and
+        // stays ONE instruction covering every lane, after the fence.
+        // ONE PER-LANE PATH.  exp2, log2 and log's LG2 are exactly what
+        // emitScalarUnitPerLane emits, so they use it rather than carrying a
+        // second copy of the rule - which is how the swizzle composition came
+        // to be right in one place and wrong in the other.
+        if (isLog || base2) {
+            emitScalarUnitPerLane(isLog ? VOp::Lg2 : VOp::Ex2, temp, mask,
+                                  arg, false);
+        } else {
+            // exp is the one shape the helper cannot express: the scale
+            // feeds the scalar unit's single source, so the reference puts
+            // it in a scratch .x per lane and reads that back.  The source
+            // component is still composed through the operand's OWN
+            // swizzle - `arg.swizzle[lane]`, never the raw lane, or
+            // `exp(v.wzyx)` would scale v.x where v.w belongs.
+            const bool partial = laneCount(mask) > 1;
+            for (int lane = 0; lane < 4; ++lane) {
+                if (!(mask & (1 << lane)))
+                    continue;
+                const uint8_t comp = arg.swizzle[lane];
+                const int scaled = newVReg();
+
+                VInstr mul;
+                mul.op = VOp::Mul;
+                mul.dst.index = scaled;
+                mul.dst.writemask = 0x1;
+                mul.srcs[0] = arg;
+                mul.srcs[0].swizzle = {comp, comp, comp, comp};
+                mul.srcs[1] = floatLit(kLog2E);
+                program_.instrs.push_back(mul);
+
+                VInstr ex2;
+                ex2.op = VOp::Ex2;
+                ex2.dst.index = temp;
+                ex2.dst.writemask = static_cast<uint8_t>(1 << lane);
+                ex2.srcs[0] = tempSrc(scaled);
+                ex2.srcs[0].swizzle = {0, 0, 0, 0};
+                ex2.preservePartialOutputMask = partial;
+                program_.instrs.push_back(ex2);
+            }
+        }
+
+        if (isLog && !base2) {
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = temp;
+            mul.dst.writemask = mask;
+            mul.srcs[0] = tempSrc(temp);
+            if (vertex)
+                mul.srcs[0].swizzle = {0, 0, 0, 0};
+            mul.srcs[1] = floatLit(kLn2);
+            mul.stubFenceBrBefore = !vertex;
+            program_.instrs.push_back(mul);
+        }
     }
 
     void lowerClamp(const IRInstruction& inst)
