@@ -1,5 +1,9 @@
 # shader-differential ours-vs-reference pairs (increment 2c).
 # fields: repo-relative fragment shader path|uniform_set (default 0)|path
+#   |flags (optional, column 4): extra compiler flags for OUR side, space
+#   separated, on top of the path flag.  A row with flags is named
+#   <shader>__<flag-slug>__set<uniform_set>, so one shader can be staged
+#   under several flags or sets as distinct rows (t_3bf3ce95).
 #   path = default | general | both (default both): the lowering path the
 #   row is compiled on.  A row for the other path is skipped by the
 #   stager, not compiled, so a fixture that only compiles under
@@ -63,3 +67,16 @@ tests/regression/shader-differential/shaders/sd_scalar_broadcast.fcg|auto|genera
 # Mutation-confirmed: forcing lane 0 changes this container by 8 bytes.
 # |general because it uses frac, which the default path refuses.
 tests/regression/shader-differential/shaders/sd_scalar_lane_extract.fcg|auto|general
+
+# NAMED REGRESSION for t_4584aa27: a FILE-SCOPE CONST's initialiser is
+# dropped and the const compiles as ZERO, on both paths, in the release
+# (containers byte-identical across v0.12.21, the 13:15 and the 20:22 dev
+# builds; the literal 0x3ea00000 is in none of them, and the IR dump shows
+# `@K = float` with no value).  Ours vs the reference, no uniform applied:
+# RED today - default path paints opaque black (K == 0), general path
+# reads K as the x input (levels a=60/64/228 vs b=64/1/64) - green once
+# folding means the initialiser.  First row in the rig to exercise a
+# file-scope const at all; found by staging the t_3bf3ce95 fixture
+# unflagged.  Its flagged siblings live in reference-pairs-const-mode.txt
+# until the flag is on origin/main.
+tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both

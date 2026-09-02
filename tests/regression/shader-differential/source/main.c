@@ -46,6 +46,10 @@
  * three levels per channel agreed on nothing worth quoting; the numbers
  * make that visible where the verdict is read (the vita-cg room's
  * false-pass shapes).
+ * Cost, in every judged row's diagnostic: `size a=N b=N insn a=N b=N
+ * params a=N b=N` - container bytes, ucode/16, container parameter
+ * count - so the price of a green is on the row (t_3bf3ce95 compares
+ * const promotion against folding on exactly these).
  *
  * Poison canary: after every row past the standing controls the rig
  * draws the identity control's container once; if that paints nothing
@@ -147,7 +151,19 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 
 #define RT_W 64
 #define RT_H 64
-#define CLEAR_SENTINEL 0xFF000000u  /* readback fill: transfer-never-landed marker */
+/* Readback fill before every transfer.  Two values, alternating per
+ * readback: a transfer that never lands leaves the fill behind, and
+ * two consecutive fills DIFFER, so it can never satisfy the warm-up's
+ * two-identical-frames rule and surfaces as `unstable`, which is what
+ * an instrument that could not read is.  The fill is NOT excluded from
+ * the paint count: the first fill was opaque black, and a shader whose
+ * honest output is opaque black (sd_const_promotion under t_4584aa27,
+ * K dropped to zero) read as "painted 0" for eleven draws and would
+ * have read as vacuous against a black reference.  Any 32-bit colour
+ * is a colour some shader can paint; only the clear mark, which the
+ * rig itself wrote, is evidence of no draw. */
+#define CLEAR_SENTINEL_EVEN 0xFF000000u
+#define CLEAR_SENTINEL_ODD  0xFF000001u
 #define GPU_CLEAR_MARK 0xFF102030u  /* GPU-clear control color */
 
 #define SD_ROOT "/dev_hdd0/shader-differential/"
@@ -635,15 +651,24 @@ static void measure_sensitivity(const u32 *img, u32 rt_pitch, sd_sensitivity *ou
 	}
 }
 
-/* Pixels a draw actually painted: neither the GPU clear mark nor the
- * host-side sentinel that marks a transfer that never landed. */
+/* Fill the readback buffer before a transfer; parity alternates the
+ * fill so a transfer that never lands cannot repeat a frame. */
+static void fill_readback(u32 rt_pitch, int parity)
+{
+	u32 fill = (parity & 1) ? CLEAR_SENTINEL_ODD : CLEAR_SENTINEL_EVEN;
+	for (u32 i = 0; i < (rt_pitch / 4u) * RT_H; i++)
+		g_readback[i] = fill;
+}
+
+/* Pixels a draw actually painted: anything but the GPU clear mark.  The
+ * readback fill is deliberately not excluded (see CLEAR_SENTINEL_EVEN). */
 static int painted_pixels(const u32 *img, u32 rt_pitch)
 {
 	int n = 0;
 	for (u32 y = 0; y < RT_H; y++)
 		for (u32 x = 0; x < RT_W; x++) {
 			u32 p = img[y * (rt_pitch / 4u) + x];
-			if (p != GPU_CLEAR_MARK && p != CLEAR_SENTINEL)
+			if (p != GPU_CLEAR_MARK)
 				n++;
 		}
 	return n;
@@ -736,8 +761,7 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	/* Sentinel-fill the readback buffer so a transfer that never lands
 	 * is attributable, then GPU-clear the RT to the mark the warm-up
 	 * loop keys on. */
-	for (u32 i = 0; i < (rt_pitch / 4u) * RT_H; i++)
-		g_readback[i] = CLEAR_SENTINEL;
+	fill_readback(rt_pitch, 0);
 
 	set_rt_surface(ctx, rt_off, rt_depth_off, rt_pitch, RT_W, RT_H);
 	set_draw_env(ctx, RT_W, RT_H);
@@ -774,6 +798,11 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	for (tries = 1; tries <= 10; tries++) {
 		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
 		wait_rsx_idle(ctx);
+		/* Refilled per readback, parity from the try count: before
+		 * this the fill happened once per side, so a transfer that
+		 * never landed on try N showed try N-1's frame, identical by
+		 * construction, and passed the two-frames rule. */
+		fill_readback(rt_pitch, tries);
 		transfer_rt_to_main(ctx, rt_off, rt_pitch);
 		int painted = painted_pixels(g_readback, rt_pitch);
 		ever_painted |= painted > 0;
@@ -1193,6 +1222,25 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		if (strcmp(r->diagnostic, "-") == 0) len = 0;
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
 		         "%swarmup a=%d b=%d", len ? " " : "", warm_a, warm_b);
+	}
+	{
+		/* Cost of each side, so a green can be priced: container
+		 * bytes, fragment instructions (the ucode blob is 16 bytes
+		 * per instruction on NV40), and container parameters (a
+		 * promoted file-scope const shows up here as +1, t_3bf3ce95).
+		 * Both containers were initialised by render_side above. */
+		void *ua = NULL, *ub = NULL;
+		u32 usz_a = 0, usz_b = 0;
+		cellGcmCgGetUCode((CGprogram)cont_a, &ua, &usz_a);
+		cellGcmCgGetUCode((CGprogram)cont_b, &ub, &usz_b);
+		size_t len = strlen(r->diagnostic);
+		if (strcmp(r->diagnostic, "-") == 0) len = 0;
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         "%ssize a=%u b=%u insn a=%u b=%u params a=%u b=%u",
+		         len ? " " : "", (unsigned)sz_a, (unsigned)sz_b,
+		         (unsigned)(usz_a / 16), (unsigned)(usz_b / 16),
+		         (unsigned)cellGcmCgGetCountParameter((CGprogram)cont_a),
+		         (unsigned)cellGcmCgGetCountParameter((CGprogram)cont_b));
 	}
 	r->elapsed_ms = now_ms() - t0;
 }

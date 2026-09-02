@@ -1,0 +1,18 @@
+# shader-differential: file-scope const promotion vs folding (t_3bf3ce95).
+# Same format as reference-pairs.txt (path|uniform_set|path|flags).
+#
+# Kept in its own list until --promote-file-consts / --no-promote-file-consts
+# are on origin/main: every row here refuses on a compiler without the
+# flag, and a refusing curated row aborts the stage by design.  Stage with
+#   -ReferencePairs tests/regression/shader-differential/reference-pairs-const-mode.txt
+# Once the flag is on origin/main these three rows move into
+# reference-pairs.txt and this file goes away (the exclusion rule: a
+# fixture joins the default list only when the compiler on origin/main
+# has the property the fixture names).
+#
+# Three rows of one shader, three questions - see the shader header.
+# Row 2 is review-found (claude): without it a promotion emitting the
+# right name and a 0.0 default satisfies rows 1 and 3.
+tests/regression/shader-differential/shaders/sd_const_promotion.fcg|auto|both|--promote-file-consts
+tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both|--promote-file-consts
+tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both|--no-promote-file-consts

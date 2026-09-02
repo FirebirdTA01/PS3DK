@@ -162,10 +162,16 @@ function Auto-Value([string]$name, [uint32]$k) {
 # whether a given NAME yields distinct components, and a fixture whose
 # channels collide looks like three tests and is one (review request
 # on the lane-extract fixture).  Matrices are listed as not synthesised.
-function Print-AutoValues([string]$srcPath, [string]$label) {
+function Print-AutoValues([string]$srcPath, [string]$label, [switch]$IncludeFileConsts) {
     $text = Get-Content -Raw -LiteralPath $srcPath
     $seen = @{}
-    $matches = [regex]::Matches($text, 'uniform\s+(float|half)([1-4])?(x[1-4])?\s+([A-Za-z_][A-Za-z0-9_]*)')
+    # Under --promote-file-consts a file-scope `const` is a parameter too
+    # (the reference promotes it; t_3bf3ce95), so its synthesised value
+    # is listed with the uniforms.  Function-local consts also match the
+    # wider regex; they are never promoted and a line for one is noise,
+    # not a wrong value.
+    $kw = if ($IncludeFileConsts) { '(?:uniform|const)' } else { 'uniform' }
+    $matches = [regex]::Matches($text, $kw + '\s+(float|half)([1-4])?(x[1-4])?\s+([A-Za-z_][A-Za-z0-9_]*)')
     # Say so when nothing matched: a shader with no uniforms and a shader
     # whose declaration the regex missed print the SAME nothing otherwise,
     # and "no COMPONENTS COLLIDE line appeared" would be satisfiable without
@@ -432,6 +438,20 @@ if ($ReferenceCompiler) {
         $src = Join-Path $repoRoot $rel
         if (-not (Test-Path $src)) { throw "reference-pairs: shader not found: $rel" }
         $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
+        # Column 4: extra compiler flags for OUR side, space separated,
+        # applied on top of the path flag (the reference side has no
+        # switches).  A row with flags is named
+        # <shader>__<flag-slug>__set<uniform_set>, so the same shader can
+        # be staged under two flags, or under one flag with two uniform
+        # sets, as distinct rows (t_3bf3ce95: promote-on/auto,
+        # promote-on/0, promote-off/0 are three rows of one shader).
+        [string[]]$rowFlags = @()
+        if ($fields.Count -ge 4 -and $fields[3].Trim()) {
+            $rowFlags = @($fields[3].Trim() -split ' +')
+            $slug = (@($rowFlags | ForEach-Object { $_ -replace '^-+', '' }) -join '_') -replace '[^A-Za-z0-9]', '_'
+            $name = "$name" + "__" + $slug + "__set" + $set
+            if ($name.Length -gt 63) { throw "reference-pairs: row name exceeds the guest's 63-char limit: $name" }
+        }
         if ($seenNames.ContainsKey($name)) {
             $md5 = [System.Security.Cryptography.MD5]::Create()
             $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
@@ -441,9 +461,9 @@ if ($ReferenceCompiler) {
 
         $ours = Join-Path $refScratch "$name`_ours.fpo"
         $ref  = Join-Path $refScratch "$name`_ref.fpo"
-        if ($set -eq "auto") { Print-AutoValues $src $name }
-        $null = Compile-Shader $src $ours @() -Absolute
-        Assert-Deterministic $src $ours @() -Label $name
+        if ($set -eq "auto") { Print-AutoValues $src $name -IncludeFileConsts:($rowFlags -contains '--promote-file-consts') }
+        $null = Compile-Shader $src $ours @($rowFlags) -Absolute
+        Assert-Deterministic $src $ours @($rowFlags) -Label $name
         if (-not (Compile-Reference $src $ref)) { throw "reference compile failed or produced no container: $rel" }
 
         $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
