@@ -50,6 +50,9 @@
  *         before a path-pair row did not judge identical) |
  *         unstable-a | unstable-b (that side painted but no two
  *         consecutive readbacks agreed: output varies between draws) |
+ *         output-unwritten-a | output-unwritten-b (no instruction of
+ *         that side's ucode writes register 0, the colour output: the
+ *         image is a leftover, not a value; decoded from the words) |
  *         vp-controls-invalid | vp-auto-invalid (withheld: a VP control
  *         failed) | vp-channel-missing (the stager did not provide a
  *         coverage FP the row needs) | vp-path-pair-unoracled |
@@ -906,6 +909,7 @@ typedef struct {
 	u32 insn;     /* fragment instructions */
 	u32 consts;   /* inline 16-byte constant blocks */
 	u32 params;   /* container parameter count */
+	int r0_written; /* any instruction writes register 0 (the colour output) */
 } sd_cost;
 
 static void measure_cost(void *container, u32 bytes, sd_cost *out)
@@ -916,10 +920,26 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 	out->bytes  = bytes;
 	out->params = cellGcmCgGetCountParameter(prog);
 	out->insn = out->consts = 0;
+	out->r0_written = 0;
 	const u32 *w = (const u32 *)uc;
 	u32 n = usz / 16, i = 0;
 	while (i < n) {
 		int has_const = 0;
+		/* Word 0, as loaded, halfwords swapped back: destination register
+		 * at bits 1..6, the write mask at bits 9..12.  Register 0 is the
+		 * colour output (R0, or H0 in half precision), so a program in
+		 * which no instruction writes index 0 with a non-empty mask never
+		 * writes its output at all - it paints whatever the register
+		 * held, the 'constant where the reference varies' signature the
+		 * sensitivity fields reported for two days before the decode
+		 * named it (t_a15ec129, claude).  Decoded per instruction, not
+		 * read from any mask the container declares. */
+		{
+			u32 w0 = w[i * 4 + 0];
+			w0 = (w0 << 16) | (w0 >> 16);
+			if (((w0 >> 1) & 63u) == 0u && ((w0 >> 9) & 0xFu) != 0u)
+				out->r0_written = 1;
+		}
 		for (int src = 1; src <= 3; src++) {
 			u32 v = w[i * 4 + src];
 			v = (v << 16) | (v >> 16);
@@ -1833,6 +1853,12 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		dump_artifact(p->name, 'b', save_b, rt_pitch * RT_H);
 		snprintf(r->artifact, sizeof(r->artifact), "artifacts/%s_{a,b}.raw", p->name);
 	}
+	/* A side whose ucode never writes the output register gets its own
+	 * status, whatever the pixels said: identical pixels would only mean
+	 * both registers held the same leftover, and a mismatch would be
+	 * read as a wrong value when it is a missing one. */
+	if (!cost_a.r0_written || !cost_b.r0_written)
+		r->status = !cost_a.r0_written ? "output-unwritten-a" : "output-unwritten-b";
 	if (painted_a < RT_W * RT_H || painted_b < RT_W * RT_H) {
 		size_t len = strlen(r->diagnostic);
 		if (strcmp(r->diagnostic, "-") == 0) len = 0;
@@ -1863,10 +1889,11 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		size_t len = strlen(r->diagnostic);
 		if (strcmp(r->diagnostic, "-") == 0) len = 0;
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
-		         "%ssize a=%u b=%u insn a=%u b=%u consts a=%u b=%u params a=%u b=%u",
+		         "%ssize a=%u b=%u insn a=%u b=%u consts a=%u b=%u params a=%u b=%u outw a=%s b=%s",
 		         len ? " " : "", cost_a.bytes, cost_b.bytes,
 		         cost_a.insn, cost_b.insn, cost_a.consts, cost_b.consts,
-		         cost_a.params, cost_b.params);
+		         cost_a.params, cost_b.params,
+		         cost_a.r0_written ? "yes" : "NO", cost_b.r0_written ? "yes" : "NO");
 	}
 	r->elapsed_ms = now_ms() - t0;
 }
