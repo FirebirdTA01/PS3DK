@@ -14,24 +14,21 @@ namespace nv40
 namespace
 {
 
-// One branch condition with the polarity the edge took.  `taken == true`
-// is the THEN arm.
-struct GuardLiteral
+// GuardLiteral is declared in the header: the DEFAULT path asks the same
+// question with the read-only query at the bottom of this file, and one
+// rule with one implementation is the point.
+inline bool sameLiteral(const GuardLiteral& a, const GuardLiteral& b)
 {
-    IRValueID cond = InvalidIRValue;
-    bool taken = true;
-
-    bool operator==(const GuardLiteral& o) const
-    {
-        return cond == o.cond && taken == o.taken;
-    }
-};
+    return a.cond == b.cond && a.taken == b.taken;
+}
 
 using GuardSet = std::vector<GuardLiteral>;
 
 bool contains(const GuardSet& s, const GuardLiteral& l)
 {
-    return std::find(s.begin(), s.end(), l) != s.end();
+    for (const GuardLiteral& x : s)
+        if (sameLiteral(x, l)) return true;
+    return false;
 }
 
 // Intersection that PRESERVES the order of the first operand, so the
@@ -446,6 +443,215 @@ private:
 };
 
 }  // namespace
+
+// ---------------------------------------------------------------------
+// Read-only guard query, used by the DEFAULT path.
+//
+// Same rule as the pass above - intersection over predecessors with the
+// complementary-pair verification - computed without touching the IR,
+// because the matcher must not have its input rewritten by a question.
+//
+// It exists because the first attempt wrote this walk a SECOND time in
+// nv40_fp_emit.cpp and the copy was wrong at exactly the place a copy
+// tends to be: it stopped at a merge and treated that as "no guard
+// remains", when a merge cancels only the branch that FORMED it and says
+// nothing about a branch enclosing it (codex's counterexample:
+// `if (A) { if (B) { .. } else { .. } discard; }` - B cancels, A does
+// not).
+namespace
+{
+
+class GuardQuery
+{
+public:
+    explicit GuardQuery(const IRFunction& fn) : fn_(fn) {}
+
+    BlockGuard forBlock(const IRBasicBlock* target)
+    {
+        BlockGuard result;
+        if (!target) return result;
+        if (!buildEdges()) return result;
+        if (!orderBlocks()) return result;
+        if (!computeGuards()) return result;
+        const auto it = guard_.find(target);
+        if (it == guard_.end()) return result;
+        result.proven = true;
+        result.literals = it->second;
+        return result;
+    }
+
+private:
+    const IRFunction& fn_;
+    std::vector<const IRBasicBlock*> blocks_;
+    std::unordered_map<const IRBasicBlock*,
+                       std::vector<const IRBasicBlock*>> succs_;
+    std::unordered_map<const IRBasicBlock*,
+                       std::vector<const IRBasicBlock*>> preds_;
+    std::unordered_map<const IRBasicBlock*,
+                       std::unordered_map<const IRBasicBlock*, GuardLiteral>>
+        edgeLiteral_;
+    std::vector<const IRBasicBlock*> order_;
+    std::unordered_map<const IRBasicBlock*, GuardSet> guard_;
+
+    // A block whose last instruction is a `discard` carries no terminator
+    // (isTerminator(Discard) is true, so the frontend emitted no branch to
+    // the merge).  The pass rewrites that; a query must not, so the edge
+    // is inferred here the same way - to the next block in creation order.
+    bool buildEdges()
+    {
+        for (const auto& b : fn_.blocks)
+            if (b) blocks_.push_back(b.get());
+        if (blocks_.empty()) return false;
+
+        std::unordered_map<std::string, const IRBasicBlock*> byName;
+        for (const IRBasicBlock* b : blocks_)
+            byName[b->name] = b;
+
+        for (size_t bi = 0; bi < blocks_.size(); ++bi) {
+            const IRBasicBlock* b = blocks_[bi];
+            bool terminated = false;
+            for (const auto& instPtr : b->instructions) {
+                if (!instPtr) continue;
+                const IRInstruction& inst = *instPtr;
+                if (terminated) return false;
+                if (inst.op == IROp::Return) { terminated = true; continue; }
+                if (inst.op != IROp::Branch && inst.op != IROp::CondBranch)
+                    continue;
+                terminated = true;
+                std::vector<std::string> names;
+                const std::string& t = inst.targetName;
+                size_t start = 0;
+                while (true) {
+                    const size_t comma = t.find(',', start);
+                    names.push_back(comma == std::string::npos
+                                        ? t.substr(start)
+                                        : t.substr(start, comma - start));
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+                if (inst.op == IROp::CondBranch &&
+                    (names.size() != 2 || inst.operands.empty()))
+                    return false;
+                if (inst.op == IROp::Branch && names.size() != 1)
+                    return false;
+                for (size_t i = 0; i < names.size(); ++i) {
+                    auto it = byName.find(names[i]);
+                    if (it == byName.end()) return false;
+                    succs_[b].push_back(it->second);
+                    preds_[it->second].push_back(b);
+                    if (inst.op == IROp::CondBranch) {
+                        GuardLiteral lit;
+                        lit.cond = inst.operands[0];
+                        lit.taken = (i == 0);
+                        edgeLiteral_[b][it->second] = lit;
+                    }
+                }
+            }
+            if (terminated) continue;
+            // Unterminated: a trailing discard falls through to the next
+            // block, and anything else is a shape this query will not
+            // guess at.
+            const IRInstruction* last =
+                b->instructions.empty() ? nullptr
+                                        : b->instructions.back().get();
+            if (!last || last->op != IROp::Discard) return false;
+            if (bi + 1 >= blocks_.size()) return false;
+            const IRBasicBlock* next = blocks_[bi + 1];
+            succs_[b].push_back(next);
+            preds_[next].push_back(b);
+        }
+        return true;
+    }
+
+    bool orderBlocks()
+    {
+        std::unordered_map<const IRBasicBlock*, int> color;
+        std::vector<const IRBasicBlock*> post;
+        struct Frame { const IRBasicBlock* b; size_t next; };
+        std::vector<Frame> stack;
+        stack.push_back({blocks_.front(), 0});
+        color[blocks_.front()] = 1;
+        while (!stack.empty()) {
+            const Frame f = stack.back();
+            const auto& ss = succs_[f.b];
+            if (f.next < ss.size()) {
+                stack.back().next = f.next + 1;
+                const IRBasicBlock* nb = ss[f.next];
+                int& c = color[nb];
+                if (c == 1) return false;      // back-edge
+                if (c == 0) { c = 1; stack.push_back({nb, 0}); }
+            } else {
+                color[f.b] = 2;
+                post.push_back(f.b);
+                stack.pop_back();
+            }
+        }
+        order_.assign(post.rbegin(), post.rend());
+        return true;
+    }
+
+    bool computeGuards()
+    {
+        for (size_t i = 0; i < order_.size(); ++i) {
+            const IRBasicBlock* b = order_[i];
+            const auto& ps = preds_[b];
+            if (i == 0 || ps.empty()) { guard_[b] = GuardSet{}; continue; }
+            std::vector<GuardSet> incoming;
+            for (const IRBasicBlock* p : ps) {
+                auto git = guard_.find(p);
+                if (git == guard_.end()) return false;
+                GuardSet s = git->second;
+                auto eit = edgeLiteral_.find(p);
+                if (eit != edgeLiteral_.end()) {
+                    auto lit = eit->second.find(b);
+                    if (lit != eit->second.end() && !contains(s, lit->second))
+                        s.push_back(lit->second);
+                }
+                incoming.push_back(std::move(s));
+            }
+            GuardSet g = incoming.front();
+            for (size_t k = 1; k < incoming.size(); ++k)
+                g = intersect(g, incoming[k]);
+            if (incoming.size() > 1) {
+                // Exactly the pass's verification: two predecessors, and
+                // the only literals the intersection dropped are one
+                // complementary pair from the same branch.  Anything else
+                // is unproven - and unproven must not read as "no guard",
+                // which is the mistake this query was written to stop.
+                if (incoming.size() != 2) return false;
+                GuardSet d0, d1;
+                for (const GuardLiteral& l : incoming[0])
+                    if (!contains(g, l)) d0.push_back(l);
+                for (const GuardLiteral& l : incoming[1])
+                    if (!contains(g, l)) d1.push_back(l);
+                if (d0.size() != 1 || d1.size() != 1 ||
+                    d0[0].cond != d1[0].cond || d0[0].taken == d1[0].taken)
+                    return false;
+            }
+            guard_[b] = std::move(g);
+        }
+        return true;
+    }
+};
+
+}  // namespace
+
+BlockGuard guardForBlockContaining(const IRFunction& entry,
+                                   const IRInstruction& inst)
+{
+    const IRBasicBlock* block = nullptr;
+    for (const auto& bp : entry.blocks) {
+        if (!bp) continue;
+        for (const auto& ip : bp->instructions)
+            if (ip.get() == &inst) { block = bp.get(); break; }
+        if (block) break;
+    }
+    // NEVER inst.parentBlock: if_convert moves instructions between blocks
+    // with a raw vector insert and never updates that field, so a hoisted
+    // discard still names a block that has since been erased.
+    if (!block) return BlockGuard{};
+    return GuardQuery(entry).forBlock(block);
+}
 
 DiscardGuardResult materialiseDiscardGuards(IRModule& module)
 {

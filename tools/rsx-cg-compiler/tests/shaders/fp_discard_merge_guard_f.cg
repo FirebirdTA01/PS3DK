@@ -1,0 +1,30 @@
+// A discard in a two-predecessor MERGE, inside an outer guarded block
+// (codex's counterexample to the first form of t_7ae60244's refusal).
+//
+//   if (A) { if (B) { .. } else { .. }  discard; }
+//
+// The inner branch CANCELS at the merge and the outer one does NOT, so
+// the guard is A alone - and the default path's kill would use B, the
+// last comparison it walked past.  The first version of the refusal
+// walked up from the discard's block, saw two predecessors, and treated
+// that as "nothing more guards this": it stopped at the merge and missed
+// A entirely, so it passed on the very shape it was written to catch.
+//
+// Measured on the rig at 5bee678: the general path renders it identically
+// to the reference at painted 2832/2832 (the intersection keeps the outer
+// literal); the DEFAULT path killed 832 pixels where the reference kills
+// 1264 - not the reference's set and not even "outer guard dropped", it
+// kills on the wrong comparison altogether.
+//
+// The else arm reads COLOR0 on purpose.  Fable's first spelling used a
+// TEXCOORD whose alpha never crosses the threshold, which made the outer
+// guard an IDENTITY for the kill and both paths read identical - a guard
+// probe has to be built so the WRONG answer paints differently.
+void main(float4 c : TEXCOORD0, float4 d : COLOR0, out float4 o : COLOR)
+{
+    o = c;
+    if (c.x > 0.42) {
+        if (d.w < 0.25) { o = c; } else { o = d; }
+        discard;
+    }
+}

@@ -138,6 +138,20 @@ grep -q "FALSE arm" "$work/else_default.log" || {
 reason than the false-arm discard."
 }
 
+run fp_discard_merge_guard_f "" merge_guard_default
+[[ "$rc" -ne 0 ]] || fail "fp_discard_merge_guard_f compiled on the DEFAULT
+path.  The discard sits in a two-predecessor merge INSIDE an outer guarded
+block: the inner branch cancels at the merge and the outer one does not, so
+the guard is the outer condition and the kill would use the inner one.  The
+first form of this refusal walked up, saw two predecessors and treated that
+as 'nothing more guards this' - it stopped at the merge and passed on the
+shape it was written for (codex's counterexample to 5bee678)."
+grep -qE "cannot prove what guards|enclosing condition" "$work/merge_guard_default.log" || {
+    tail -n 5 "$work/merge_guard_default.log" >&2
+    fail "fp_discard_merge_guard_f refused on the default path for some
+OTHER reason than an unproven or unaccounted guard."
+}
+
 run fp_discard_nested_f "" nested_default
 [[ "$rc" -ne 0 ]] || fail "fp_discard_nested_f compiled on the DEFAULT path.
 That path's guard is a single comparison, so an ENCLOSING branch is not
@@ -145,7 +159,7 @@ accounted for: if_convert collapses the inner if and leaves the discard in
 the outer arm, and the kill then fires wherever the INNER condition holds,
 including on fragments the outer branch never reached (t_7ae60244).  The
 reference emits both comparisons and a multiply."
-grep -q "enclosing branch" "$work/nested_default.log" || {
+grep -q "enclosing condition" "$work/nested_default.log" || {
     tail -n 5 "$work/nested_default.log" >&2
     fail "fp_discard_nested_f refused on the default path for some OTHER
 reason than the unaccounted enclosing branch."

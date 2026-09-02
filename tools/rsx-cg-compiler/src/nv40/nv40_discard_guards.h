@@ -40,6 +40,8 @@
 #include <string>
 #include <vector>
 
+#include "../donor/ir/ir.h"
+
 class IRModule;
 
 namespace nv40
@@ -56,6 +58,36 @@ struct DiscardGuardResult
 // Rewrites every `discard` in every entry-point function of `module`.
 // A module with no discard is untouched and costs one walk.
 DiscardGuardResult materialiseDiscardGuards(IRModule& module);
+
+// One branch condition with the polarity of the edge that was taken.
+struct GuardLiteral
+{
+    IRValueID cond = InvalidIRValue;
+    bool taken = true;      // true: the THEN arm
+};
+
+// What guards the block containing `inst`, computed READ-ONLY.
+//
+// The same intersection-over-predecessors with the complementary-pair
+// verification the pass above uses, exposed because the DEFAULT path needs
+// the same answer for the opposite purpose: it recovers a discard's guard
+// as a single comparison, so it has to know whether that comparison IS the
+// whole guard before it emits a kill (t_79fc6bf7, t_7ae60244).  One rule,
+// one implementation - the first attempt wrote the walk a second time in
+// the emitter and the copy was wrong at merges.
+//
+// `proven` false means the shape is one this computation cannot verify: a
+// back-edge, more than two predecessors, or a merge whose predecessors do
+// not differ by exactly one complementary pair.  A caller deciding whether
+// to REFUSE must treat that as "cannot prove", never as "no guard".
+struct BlockGuard
+{
+    bool proven = false;
+    std::vector<GuardLiteral> literals;
+};
+
+BlockGuard guardForBlockContaining(const IRFunction& entry,
+                                   const IRInstruction& inst);
 
 }  // namespace nv40
 

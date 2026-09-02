@@ -7,6 +7,7 @@
  * and Select lowering.
  */
 
+#include "nv40_discard_guards.h"
 #include "nv40_emit.h"
 #include "nv40_fp_assembler.h"
 
@@ -2339,140 +2340,77 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             "nv40-fp: discard with no preceding condition");
                         return out;
                     }
-                    // t_79fc6bf7.  This path recovers the guard as "the
-                    // last comparison I walked past" - its block walk
-                    // ignores the terminators - so a discard reached on
-                    // the FALSE arm of a branch was emitted with the
-                    // TRUE arm's polarity and killed exactly the
-                    // fragments that had to survive.  Silently: exit 0,
-                    // a well-formed container, the right input mask.
+                    // THE GUARD THIS PATH IS ABOUT TO EMIT MUST BE THE
+                    // WHOLE GUARD.  It recovers a discard's condition as
+                    // `lastConditionalId` - the last comparison its block
+                    // walk passed - and that is the whole story only when
+                    // nothing else guards the block the discard sits in.
+                    // When something does, the kill fires on fragments
+                    // the branch never reached:
                     //
-                    // Refuse rather than teach the matcher a polarity it
-                    // cannot derive.  963018a already made refusal this
-                    // path's answer to a shape it does not recognise,
-                    // the general path lowers the shape correctly from
-                    // the PATH CONDITION (CF-2, t_91bbd575), and the
-                    // matcher is the component the switch retires.
-                    // The discard's block is found by SEARCHING the
-                    // blocks for this instruction, never by reading
-                    // inst.parentBlock: if_convert moves a discard between
-                    // blocks with a raw vector insert and never updates
-                    // that field, so a hoisted one still names a block
-                    // that has since been erased.  Reading it made the
-                    // enclosing-branch check below silently find no
-                    // predecessors and pass (measured on
-                    // fp_discard_nested_f).
-                    const IRBasicBlock* discardBlock = nullptr;
-                    for (const auto& bp : entry.blocks)
+                    //   t_79fc6bf7  a discard on the FALSE arm gets the
+                    //               TRUE arm's polarity and kills exactly
+                    //               the fragments that must survive.
+                    //   t_7ae60244  an ENCLOSING branch is not accounted
+                    //               for at all - if_convert collapses the
+                    //               inner if of a nested pair and the kill
+                    //               keeps only the inner comparison.
+                    //
+                    // Both are answered by ONE question, asked of the
+                    // same computation the general path uses to LOWER the
+                    // guard: what literals guard this block?  Writing that
+                    // walk a second time here is what produced a version
+                    // that stopped at a merge and missed the branch
+                    // enclosing it (codex, review of 5bee678), so the
+                    // query lives in nv40_discard_guards.cpp and both
+                    // paths call it.
+                    //
+                    // `proven == false` means the shape is one the query
+                    // will not verify - a back-edge, a merge it cannot
+                    // check.  That must refuse: "cannot prove" is not
+                    // "no guard", which is precisely the confusion that
+                    // made the earlier version pass on its own witness.
                     {
-                        if (!bp) continue;
-                        for (const auto& ip : bp->instructions)
-                            if (ip.get() == &inst) { discardBlock = bp.get(); break; }
-                        if (discardBlock) break;
-                    }
-                    if (discardBlock)
-                    {
-                        for (const auto& bp : entry.blocks)
+                        const BlockGuard bg =
+                            guardForBlockContaining(entry, inst);
+                        if (!bg.proven)
                         {
-                            if (!bp) continue;
-                            const IRInstruction* term = bp->getTerminator();
-                            if (!term || term->op != IROp::CondBranch) continue;
-                            if (term->operands.empty() ||
-                                term->operands[0] != lastConditionalId)
-                                continue;
-                            const size_t comma = term->targetName.find(',');
-                            if (comma == std::string::npos) continue;
-                            const std::string falseName =
-                                term->targetName.substr(comma + 1);
-                            if (discardBlock->name != falseName) continue;
                             out.diagnostics.push_back(
-                                "nv40-fp: discard on the FALSE arm of a "
-                                "branch (block '" + discardBlock->name +
-                                "'): this path recovers the guard from the "
-                                "last comparison, not the path condition, "
-                                "and would kill the surviving fragments "
-                                "(t_79fc6bf7)");
+                                "nv40-fp: cannot prove what guards this "
+                                "discard, so the single comparison this "
+                                "path would emit cannot be shown to be "
+                                "the whole guard (t_7ae60244)");
                             return out;
                         }
-                    }
-                    // t_7ae60244, the same defect one level up.  The
-                    // guard this path recovers is a single comparison, so
-                    // an ENCLOSING branch is simply not accounted for: for
-                    // `if (A) { if (B) discard; }` if_convert collapses the
-                    // inner if and leaves the discard in the outer arm, so
-                    // lastConditionalId is B and the kill fires wherever B
-                    // holds - including on fragments the outer branch never
-                    // reached.  Measured against the reference, which emits
-                    // both comparisons and a MULXC: ours drops A entirely.
-                    //
-                    // Walk up the unique-predecessor chain and collect the
-                    // branch conditions that guard this block.  Empty is
-                    // fine and is the common case - shape 5 hoists a
-                    // then-arm discard into the entry block and deletes the
-                    // brc, which is why a plain `if (a) discard;` and an
-                    // `if (a && b) discard;` still compile: their whole
-                    // condition IS lastConditionalId.  A condition that is
-                    // not lastConditionalId is one the emitted kill ignores.
-                    if (discardBlock)
-                    {
-                        std::unordered_map<std::string, const IRBasicBlock*>
-                            byName;
-                        for (const auto& bp : entry.blocks)
-                            if (bp) byName[bp->name] = bp.get();
-
-                        const IRBasicBlock* cur = discardBlock;
-                        for (int depth = 0; depth < 64 && cur; ++depth)
+                        const bool wholeGuard =
+                            bg.literals.empty() ||
+                            (bg.literals.size() == 1 &&
+                             bg.literals[0].cond == lastConditionalId &&
+                             bg.literals[0].taken);
+                        if (!wholeGuard)
                         {
-                            const IRBasicBlock* pred = nullptr;
-                            const IRInstruction* predTerm = nullptr;
-                            int preds = 0;
-                            for (const auto& bp : entry.blocks)
-                            {
-                                if (!bp) continue;
-                                const IRInstruction* t = bp->getTerminator();
-                                if (!t) continue;
-                                if (t->op != IROp::Branch &&
-                                    t->op != IROp::CondBranch) continue;
-                                const std::string& tn = t->targetName;
-                                size_t start = 0;
-                                bool targets = false;
-                                while (true)
-                                {
-                                    const size_t comma = tn.find(',', start);
-                                    const std::string name =
-                                        comma == std::string::npos
-                                            ? tn.substr(start)
-                                            : tn.substr(start, comma - start);
-                                    if (byName.count(name) &&
-                                        byName[name] == cur)
-                                        targets = true;
-                                    if (comma == std::string::npos) break;
-                                    start = comma + 1;
-                                }
-                                if (!targets) continue;
-                                ++preds;
-                                pred = bp.get();
-                                predTerm = t;
-                            }
-                            // A merge (more than one predecessor) cancels
-                            // the branch that made it, and no predecessor
-                            // is the entry: either way the walk is done.
-                            if (preds != 1 || !pred) break;
-                            if (predTerm->op == IROp::CondBranch &&
-                                !predTerm->operands.empty() &&
-                                predTerm->operands[0] != lastConditionalId)
-                            {
-                                out.diagnostics.push_back(
-                                    "nv40-fp: discard guarded by an "
-                                    "enclosing branch this path cannot "
-                                    "express (block '" +
-                                    discardBlock->name + "'): the kill "
-                                    "would use only the innermost "
-                                    "comparison and fire where the outer "
-                                    "condition is false (t_7ae60244)");
-                                return out;
-                            }
-                            cur = pred;
+                            const bool falseArm =
+                                bg.literals.size() == 1 &&
+                                bg.literals[0].cond == lastConditionalId &&
+                                !bg.literals[0].taken;
+                            out.diagnostics.push_back(
+                                falseArm
+                                    ? std::string(
+                                          "nv40-fp: discard on the FALSE "
+                                          "arm of a branch: this path "
+                                          "recovers the guard from the "
+                                          "last comparison, not the path "
+                                          "condition, and would kill the "
+                                          "surviving fragments "
+                                          "(t_79fc6bf7)")
+                                    : std::string(
+                                          "nv40-fp: discard guarded by a "
+                                          "branch this path cannot express "
+                                          "- the kill would use only the "
+                                          "innermost comparison and fire "
+                                          "where an enclosing condition is "
+                                          "false (t_7ae60244)"));
+                            return out;
                         }
                     }
                     discardToCond[&inst] = lastConditionalId;
