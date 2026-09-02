@@ -281,3 +281,10 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_two_f.cg|auto|general
 # default path paints 3264 with the wrong kill set and its refusal did not fire, so
 # the row is |general only until the default disposition's replacement lands.
 tests/regression/shader-differential/shaders/sd_discard_merge_guard.fcg|0|general
+# 60b08a5's witnesses (t_5dc260b0 fallout): a colour stored twice pins two
+# vregs to slot 0; the single-owner reservation REFUSED both, the owner set
+# compiles them.  colour-reaches-r0-test asserts they compile; these rows
+# assert they PAINT the reference's picture - general only, the matcher
+# refuses the shape.
+tools/rsx-cg-compiler/tests/shaders/fp_output_restored_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_output_stored_thrice_f.cg|auto|general
