@@ -1421,8 +1421,10 @@ static int channel_of_semantic(const char *sem)
  * words, stored as the assembler laid them out (no halfword swap on the
  * vertex side): an output write sets VEC_RESULT (word 0 bit 30) or
  * SCA_RESULT (word 3 bit 12) and names the output register at word 3
- * bits 2..6 - HPOS 0, COL0 1, COL1 2, BFC0/1 3/4, FOGC 5, PSZ 6, TC0..7
- * at 7..14.  Mapped onto the rig's channel bits (cov = HPOS).  The
+ * bits 2..6 - HPOS 0, COL0 1, COL1 2, BFC0/1 3/4, FOGC 5, PSZ 6, TC0..9
+ * at 7..16 (the emitters write DEST_TC(n) = 7 + n without clamping and
+ * the channel table judges tc8/tc9, so the decoder follows both).
+ * Mapped onto the rig's channel bits (cov = HPOS).  The
  * decoder checks itself: the LAST bit (word 3 bit 0) must sit on the
  * final instruction and on no other; otherwise it reports undecoded
  * rather than a mask read from the wrong words. */
@@ -1444,7 +1446,7 @@ static u32 vp_written_channels(void *container, int *decoded)
 		if (dest == 0)                      mask |= 1u;                 /* HPOS -> cov */
 		else if (dest == 1 || dest == 2)    mask |= 1u << (11 + (dest - 1)); /* COL0/1 */
 		else if (dest == 5)                 mask |= 1u << 13;           /* FOGC */
-		else if (dest >= 7 && dest <= 14)   mask |= 1u << (1 + (dest - 7)); /* TC0..7 */
+		else if (dest >= 7 && dest <= 16)   mask |= 1u << (1 + (dest - 7)); /* TC0..9: both compilers emit DEST_TC(n) = 7 + n unclamped, and k_vp_channels judges tc8/tc9 (codex, review of c201b7b) */
 	}
 	*decoded = last_ok;
 	return mask;
