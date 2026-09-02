@@ -3976,8 +3976,37 @@ private:
             }
         }
 
+        // FRAGMENT only: an output destination OCCUPIES the temp register
+        // of the same index - the colour output is R0 - and it stays live
+        // from its store to the END of the program, because that is when
+        // the framebuffer reads it.  Temps were allocated with no
+        // knowledge of that, so a temp whose live range crossed a store
+        // could be given the store's register and clobber it.  Measured on
+        // fp_discard_nested_f (t_dabb23e1): `MOVR R0, f[TEX0]` then
+        // `SLTR R0.x, ...` - the kill fired on exactly the right pixels
+        // and every surviving one was painted with the comparison.
+        //
+        // Recorded as the EARLIEST store per output, because the register
+        // is live from there on.  Nothing is reserved outright: a temp
+        // whose last use precedes the store cannot conflict, which is why
+        // the overwhelming case - a shader that stores its output last -
+        // allocates exactly as before.
+        std::unordered_map<int, size_t> outputStorePos;
+        if (profile_ == GeneralProfile::Fragment) {
+            for (size_t i = 0; i < program_.instrs.size(); ++i) {
+                const VInstr& vi = program_.instrs[i];
+                if (vi.dst.none || !vi.dst.output) continue;
+                auto it = outputStorePos.find(vi.dst.index);
+                if (it == outputStorePos.end())
+                    outputStorePos[vi.dst.index] = i;
+            }
+        }
+
         std::vector<int> freeList;
         int nextPhys = 0;
+        // Fragment fallback counter: the bank above the ordinary
+        // descending range, used only when a candidate is rejected.
+        int fpSpill = static_cast<int>(defs.size());
         // FP uses the same def-order identity as VP (reverse virtual-order
         // assignment, just across the 4-register fragment bank).
         if (profile_ == GeneralProfile::Fragment)
@@ -4004,6 +4033,28 @@ private:
             // srcs[2] is read by the same instruction that writes dst
             // and stays shareable.  H registers alias R slots in
             // pairs, so the comparison is on R slots.
+            // A candidate register conflicts with a live output when the
+            // temp's live range reaches the output's store: the output is
+            // live from there to the end, so any overlap is a clobber.
+            // H registers alias R slots in pairs, so the comparison is on
+            // R slots, the same rule as aliasesEarlyRead.
+            const auto clobbersLiveOutput = [&](int candidate, bool candFp16) {
+                if (outputStorePos.empty())
+                    return false;
+                const auto lu = lastUse.find(vi.dst.index);
+                const size_t deadAfter = lu == lastUse.end() ? i : lu->second;
+                const int candSlot = candFp16 ? (candidate >> 1) : candidate;
+                // STRICT: a temp whose last read IS the store commits
+                // no clobber - the store reads it and writes the output in
+                // the same instruction, which is the read-then-write the
+                // allocator's own reuse path already relies on.  Only a
+                // temp still live AFTER the store overlaps the output's
+                // live range.
+                for (const auto& kv : outputStorePos)
+                    if (kv.first == candSlot && kv.second < deadAfter)
+                        return true;
+                return false;
+            };
             const auto aliasesEarlyRead = [&](int candidate, bool candFp16) {
                 if (vi.op != VOp::SelPred)
                     return false;
@@ -4083,7 +4134,8 @@ private:
                 };
 
                 int phys;
-                if (vi.dst.preferredPhys >= 0 && !pinClobbersLive()) {
+                if (vi.dst.preferredPhys >= 0 && !pinClobbersLive() &&
+                    !clobbersLiveOutput(vi.dst.preferredPhys, vi.dst.fp16)) {
                     phys = vi.dst.preferredPhys;
                 } else {
                     auto reusableSrc = std::find_if(
@@ -4100,10 +4152,14 @@ private:
                                    lastUse[src.index] == i &&
                        program_.vregToPhys.find(src.index) != program_.vregToPhys.end();
                         });
-                    if (reusableSrc != vi.srcs.end()) {
+                    if (reusableSrc != vi.srcs.end() &&
+                        !clobbersLiveOutput(
+                            program_.vregToPhys[reusableSrc->index],
+                            false)) {
                         phys = program_.vregToPhys[reusableSrc->index];
                     } else if (!vi.dst.fp16 && !freeList.empty() &&
-                               !aliasesEarlyRead(freeList.back(), false)) {
+                               !aliasesEarlyRead(freeList.back(), false) &&
+                               !clobbersLiveOutput(freeList.back(), false)) {
                         // Only the head is tested: an aliasing head
                         // falls through to the fresh counter rather
                         // than scanning deeper.  Deliberate
@@ -4118,11 +4174,27 @@ private:
                         // full R slots in pairs: H0/H1 -> R0, H2/H3 -> R1.
                         do {
                             if (profile_ == GeneralProfile::Fragment) {
-                                phys = vi.dst.fp16 ? (nextPhys-- << 1) : nextPhys--;
+                                // The fragment counter walks DOWN to 0, so
+                                // a rejected candidate can walk it past the
+                                // bottom of the bank.  When it does, take a
+                                // register ABOVE the ordinary range instead
+                                // of a negative one - which is what the
+                                // reserved-output case needs, and it leaves
+                                // every shader that never rejects a
+                                // candidate allocating exactly as before.
+                                if (nextPhys < 0) {
+                                    phys = vi.dst.fp16 ? (fpSpill << 1)
+                                                       : fpSpill;
+                                    ++fpSpill;
+                                } else {
+                                    phys = vi.dst.fp16 ? (nextPhys-- << 1)
+                                                       : nextPhys--;
+                                }
                             } else {
                                 phys = vi.dst.fp16 ? (nextPhys++ << 1) : nextPhys++;
                             }
-                        } while (aliasesEarlyRead(phys, vi.dst.fp16));
+                        } while (aliasesEarlyRead(phys, vi.dst.fp16) ||
+                                 clobbersLiveOutput(phys, vi.dst.fp16));
                     }
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
