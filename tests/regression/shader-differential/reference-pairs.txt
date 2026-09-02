@@ -167,3 +167,7 @@ tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|bot
 # path (t_be578e74); both paths are byte-identical to the reference on it now.
 tests/regression/shader-differential/shaders/sd_lane_insert.fcg|0|both
 tests/regression/shader-differential/shaders/sd_mad_literal.fcg|0|both
+
+# 2026-09-02 t_e89cd261: two distinct varyings in one instruction (one input selector);
+# RED on both paths at eb51db7 by design - the row is the witness for the fix.
+tests/regression/shader-differential/shaders/sd_two_inputs.fcg|0|both

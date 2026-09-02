@@ -1,0 +1,17 @@
+// shader-differential — curated row for t_e89cd261 (P1, both paths):
+// arithmetic between two DIFFERENT varyings in one instruction.  An NV40
+// fragment instruction has ONE input-source selector, so two operands of
+// register type INPUT read the SAME varying; the reference preloads one
+// into a temp (MOVR R1, f[TEX2]; MOVR R0, f[TEX0]; ADDR R0, -R1, R0), and
+// until the fix ours emitted ADDR R0, f[TEX2], -f[TEX2] on both paths -
+// b - b - while the container's attributeInputMask still claimed Tex0.
+// Under the shared VP TEXCOORD0 and TEXCOORD2 differ in every lane at
+// every pixel (constants audit, 2026-09-02), so a - b is nowhere zero:
+// the defect paints a CONSTANT where the reference paints a ramp, the
+// same signature the sensitivity fields showed on diffuse_specular x4.
+// Mapped through * 0.5 + 0.5 so the sign survives RGBA8.
+void main(float4 a : TEXCOORD0, float4 b : TEXCOORD2, out float4 color : COLOR)
+{
+    float3 d = a.xyz - b.xyz;
+    color = float4(d * float3(0.5f, 0.5f, 0.5f) + float3(0.5f, 0.5f, 0.5f), 1.0f);
+}
