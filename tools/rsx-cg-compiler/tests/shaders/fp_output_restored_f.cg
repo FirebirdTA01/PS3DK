@@ -1,0 +1,15 @@
+// Two pinned colour values for ONE output slot: the colour is stored, read
+// back through a temp, and stored again (t_5dc260b0).
+//
+// lowerStoreOutput pins the composing writes of EACH store to register 0,
+// so this program has two distinct virtual registers both claiming the
+// colour slot.  A reservation that remembers only the last of them makes
+// the first reject its own slot, and this shader refuses - which is how
+// the single-owner version was caught.  It compiles on every binary before
+// that one, so a refusal here is a regression, not a discovery.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    o = float4(c.x, c.y, c.z, 1.0);
+    float4 t = float4(o.x * d.x, o.y * d.y, o.z * d.z, o.w);
+    o = float4(t.x, t.y, t.z, 0.75);
+}

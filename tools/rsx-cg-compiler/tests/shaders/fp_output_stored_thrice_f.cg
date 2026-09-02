@@ -1,0 +1,11 @@
+// Three pinned colour values for one output slot, with a kill between each
+// (t_5dc260b0).  The same two-owner shape as fp_output_restored_f, reached
+// the way real discard shaders reach it rather than through a read-back.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    o = float4(c.x, c.y, c.z, 1.0);
+    if (d.x < 0.1) discard;
+    o = float4(c.w, d.z, d.y, 0.5);
+    if (d.y < 0.2) discard;
+    o = float4(d.w, c.z, c.y, 0.25);
+}

@@ -4195,7 +4195,22 @@ private:
         // the overwhelming case - a shader that stores its output last -
         // allocates exactly as before.
         std::unordered_map<int, size_t> outputStorePos;
-        std::unordered_map<int, int> outputPinOwner;
+        // A slot can be reserved for MORE THAN ONE value: an output stored
+        // twice, or stored in two arms of a branch, produces a pinned vreg
+        // per store.  Keeping only the last owner made the earlier one
+        // reject its own reservation, which turned two shapes that compile
+        // correctly on 6ece362 into named refusals - an output written,
+        // read back and re-stored, and the three-store discard shape.
+        // Found by codex in review of the single-owner version, and
+        // witnessed rather than argued.
+        //
+        // Exempting every owner is safe because it does not disable the
+        // overlap check: two pinned values that are live at the same time
+        // still collide on pinClobbersLive(), which asks whether the
+        // register's current occupant is read after this instruction.
+        // What the exemption removes is only the reservation's claim
+        // against the values it exists to protect.
+        std::unordered_map<int, std::set<int>> outputPinOwners;
         if (profile_ == GeneralProfile::Fragment) {
             for (size_t i = 0; i < program_.instrs.size(); ++i) {
                 const VInstr& vi = program_.instrs[i];
@@ -4229,7 +4244,7 @@ private:
                 // its two composing writes across two registers, dropping
                 // the alpha lane.  Caught by the byte-identity column of
                 // the corpus sweep, not by any test.
-                outputPinOwner[slot] = vi.dst.index;
+                outputPinOwners[slot].insert(vi.dst.index);
             }
         }
 
@@ -4301,9 +4316,9 @@ private:
                         continue;
                     // The value the slot is reserved FOR is not clobbering
                     // it by occupying it - that is the reservation working.
-                    const auto owner = outputPinOwner.find(kv.first);
-                    if (owner != outputPinOwner.end() &&
-                        owner->second == vi.dst.index)
+                    const auto owners = outputPinOwners.find(kv.first);
+                    if (owners != outputPinOwners.end() &&
+                        owners->second.count(vi.dst.index))
                         continue;
                     return true;
                 }

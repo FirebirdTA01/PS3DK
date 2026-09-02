@@ -66,6 +66,24 @@ for s in "${shaders[@]}"; do
     ) >"$out" 2>&1 || rm -f "$out"    # a refusal is not this test's business
 done
 
+# ... except for these, where a refusal IS the regression.
+#
+# Both store the colour more than once, so lowerStoreOutput pins a
+# DIFFERENT virtual register to slot 0 per store.  A slot reservation that
+# remembers only one owner makes the other reject its own slot, and the
+# honour-or-refuse rule then turns that into a named refusal of a shape
+# that compiles correctly on every binary before it.  The refusal is the
+# honest failure of a wrong reservation - which is exactly why it needs a
+# fixture: without one, the wrong reservation looks like a clean run.
+for s in tools/rsx-cg-compiler/tests/shaders/fp_output_restored_f.cg \
+         tools/rsx-cg-compiler/tests/shaders/fp_output_stored_thrice_f.cg; do
+    [[ -f "$repo_root/$s" ]] || fail "fixture missing: $s"
+    out="$work/$(printf '%s' "$s" | tr '/' '_').log"
+    [[ -s "$out" ]] || fail "$s did not compile.  It stores the colour more
+than once, so it pins two colour values to the same output slot; a slot
+reserved for only one of them refuses the other (t_5dc260b0)"
+done
+
 python3 - "$work" <<'PY'
 import os
 import re
