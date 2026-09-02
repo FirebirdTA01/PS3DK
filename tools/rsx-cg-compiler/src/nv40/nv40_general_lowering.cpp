@@ -4124,6 +4124,7 @@ private:
         // the overwhelming case - a shader that stores its output last -
         // allocates exactly as before.
         std::unordered_map<int, size_t> outputStorePos;
+        std::unordered_map<int, int> outputPinOwner;
         if (profile_ == GeneralProfile::Fragment) {
             for (size_t i = 0; i < program_.instrs.size(); ++i) {
                 const VInstr& vi = program_.instrs[i];
@@ -4149,6 +4150,15 @@ private:
                 auto it = outputStorePos.find(slot);
                 if (it == outputStorePos.end() || i < it->second)
                     outputStorePos[slot] = i;
+                // WHO the slot is reserved FOR.  Without this the
+                // reservation blocks the pinned value against itself: the
+                // colour vreg asks for R0, the guard sees R0 reserved from
+                // the colour's own first write, and the pin is rejected -
+                // which moved fp_pow_computed_literal_f off R0 and split
+                // its two composing writes across two registers, dropping
+                // the alpha lane.  Caught by the byte-identity column of
+                // the corpus sweep, not by any test.
+                outputPinOwner[slot] = vi.dst.index;
             }
         }
 
@@ -4213,9 +4223,17 @@ private:
                 // allocator's own reuse path already relies on.  Only a
                 // temp still live AFTER the store overlaps the output's
                 // live range.
-                for (const auto& kv : outputStorePos)
-                    if (kv.first == candSlot && kv.second < deadAfter)
-                        return true;
+                for (const auto& kv : outputStorePos) {
+                    if (kv.first != candSlot || kv.second >= deadAfter)
+                        continue;
+                    // The value the slot is reserved FOR is not clobbering
+                    // it by occupying it - that is the reservation working.
+                    const auto owner = outputPinOwner.find(kv.first);
+                    if (owner != outputPinOwner.end() &&
+                        owner->second == vi.dst.index)
+                        continue;
+                    return true;
+                }
                 return false;
             };
             const auto aliasesEarlyRead = [&](int candidate, bool candFp16) {
@@ -4298,7 +4316,8 @@ private:
 
                 int phys;
                 if (vi.dst.outputPin && vi.dst.preferredPhys >= 0 &&
-                    pinClobbersLive()) {
+                    (pinClobbersLive() ||
+                     clobbersLiveOutput(vi.dst.preferredPhys, vi.dst.fp16))) {
                     // An output pin is the CONTRACT that this value is the
                     // colour, so yielding it does not cost an optimisation
                     // - it produces a program that computes the right
