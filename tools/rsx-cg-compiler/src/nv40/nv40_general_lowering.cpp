@@ -2141,6 +2141,68 @@ private:
         program_.instrs.push_back(vi);
     }
 
+    // THE SCALAR UNIT COMPUTES ONE LANE (t_249b8088).
+    //
+    // RCP, RSQ, SIN, COS, LG2 and EX2 read a single source COMPONENT and
+    // write that one result into EVERY enabled destination lane.  So a
+    // vector argument needs one instruction per lane, each selecting its
+    // own component - which is exactly what the reference emits: sin on a
+    // float4 is four SINRs, `SINR R0.y, R0.y` and so on.
+    //
+    // Emitted as one full-mask instruction instead, `sin(v)` computes
+    // sin(v.x) and stores it in x, y, z AND w.  It compiles, it declares
+    // the right register count, it survives the dead-store and collision
+    // censuses because the register IS written - and three lanes are
+    // silently wrong.  Measured against the oracle: sin 1 instruction
+    // where the reference emits 5, pow 7 where it emits 25; being three
+    // times SHORTER than the reference is what exposed it.  The rig had
+    // never seen it because every corpus use of these ops is on a scalar.
+    //
+    // lowerDiv has always done this correctly for its divisor and says so
+    // in its own comment; the rest of the file did not.
+    static bool isScalarUnitOp(VOp op)
+    {
+        return op == VOp::Rcp || op == VOp::Rsq || op == VOp::Sin ||
+               op == VOp::Cos || op == VOp::Lg2 || op == VOp::Ex2;
+    }
+
+    static int laneCount(int mask)
+    {
+        int n = 0;
+        for (int lane = 0; lane < 4; ++lane)
+            if (mask & (1 << lane))
+                ++n;
+        return n;
+    }
+
+    // One instruction per enabled lane.  The source component is composed
+    // through the operand's OWN swizzle - `arg.swizzle[lane]`, not `lane` -
+    // so a value already arriving swizzled selects the right thing, the
+    // same composition lowerDiv uses.
+    void emitScalarUnitPerLane(VOp op, int dstVreg, int mask, const VSrc& arg,
+                               bool sat)
+    {
+        const bool partial = laneCount(mask) > 1;
+        for (int lane = 0; lane < 4; ++lane) {
+            if (!(mask & (1 << lane)))
+                continue;
+            VInstr vi;
+            vi.op = op;
+            vi.dst.index = dstVreg;
+            vi.dst.writemask = 1 << lane;
+            vi.srcs[0] = arg;
+            const uint8_t comp = arg.swizzle[lane];
+            vi.srcs[0].swizzle = {comp, comp, comp, comp};
+            vi.sat = sat;
+            // The value is now assembled from several partial writes, so
+            // the store-output fold must not take the last one and widen
+            // its mask to the output's - that would put one lane's result
+            // in every lane and leave the rest in a register nothing reads.
+            vi.preservePartialOutputMask = partial;
+            program_.instrs.push_back(vi);
+        }
+    }
+
     void lowerUnary(const IRInstruction& inst, VOp op, bool sat)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
@@ -2151,12 +2213,22 @@ private:
                 "nv40-general: VP scalar intrinsic lowering deferred");
             return;
         }
+        const int mask = componentMask(inst.resultType);
+        VSrc arg = resolve(inst.operands[0]);
+        const bool clamp = sat && !isPreclampedFragmentColor(arg);
+        // A SINGLE-LANE result keeps its exact previous shape, so nothing
+        // that uses these ops on a float moves a byte.
+        if (profile_ == GeneralProfile::Fragment && isScalarUnitOp(op) &&
+            laneCount(mask) > 1) {
+            emitScalarUnitPerLane(op, define(inst.result), mask, arg, clamp);
+            return;
+        }
         VInstr vi;
         vi.op = op;
         vi.dst.index = define(inst.result);
-        vi.dst.writemask = componentMask(inst.resultType);
-        vi.srcs[0] = resolve(inst.operands[0]);
-        vi.sat = sat && !isPreclampedFragmentColor(vi.srcs[0]);
+        vi.dst.writemask = mask;
+        vi.srcs[0] = arg;
+        vi.sat = clamp;
         program_.instrs.push_back(vi);
     }
 
@@ -2477,6 +2549,16 @@ private:
         }
         const int mask = componentMask(inst.resultType);
         const int t = newVReg();
+        // Both halves go through the scalar unit, so both are per lane on a
+        // vector (t_249b8088); a scalar keeps its previous two-instruction
+        // shape exactly.
+        if (laneCount(mask) > 1) {
+            emitScalarUnitPerLane(VOp::Rsq, t, mask,
+                                  resolve(inst.operands[0]), false);
+            emitScalarUnitPerLane(VOp::Rcp, define(inst.result), mask,
+                                  tempSrc(t), false);
+            return;
+        }
         VInstr rsq;
         rsq.op = VOp::Rsq;
         rsq.dst.index = t;
@@ -2552,12 +2634,21 @@ private:
                 "nv40-general: VP div lowering deferred with the scalar unit");
             return;
         }
-        // 1/x keeps its single-instruction form.
+        // 1/x keeps its single-instruction form - for a SCALAR.  On a
+        // vector it is one RCP per lane like every other scalar-unit op
+        // (t_249b8088); the general path below already knew that about its
+        // divisor and this fast path did not.
         if (isLiteralOne(inst.operands[0])) {
+            const int mask = componentMask(inst.resultType);
+            if (laneCount(mask) > 1) {
+                emitScalarUnitPerLane(VOp::Rcp, define(inst.result), mask,
+                                      resolve(inst.operands[1]), false);
+                return;
+            }
             VInstr vi;
             vi.op = VOp::Rcp;
             vi.dst.index = define(inst.result);
-            vi.dst.writemask = componentMask(inst.resultType);
+            vi.dst.writemask = mask;
             vi.srcs[0] = resolve(inst.operands[1]);
             program_.instrs.push_back(vi);
             return;
@@ -3001,6 +3092,64 @@ private:
                 program_.instrs.pop_back();
             }
         }
+        // A VECTOR pow is one chain PER LANE (t_249b8088): both LG2 and
+        // EX2 are scalar-unit instructions that read a single source
+        // component, so the full-mask form computed pow(base.x, e) and
+        // stored it in every lane.  The reference emits the same per-lane
+        // shape - LG2, a scalar MUL into a scratch, then EX2 writing that
+        // one lane.  A scalar pow keeps its previous three-instruction
+        // form exactly, so nothing that raises a float moves a byte.
+        const int powMask = componentMask(inst.resultType);
+        if (profile_ == GeneralProfile::Fragment && laneCount(powMask) > 1) {
+            VSrc exponent = resolve(inst.operands[1]);
+            const bool exponentIsScalar =
+                exponent.kind == VSrcKind::Literal ||
+                exponent.kind == VSrcKind::Uniform ||
+                valueWidthOf(inst.operands[1]) == 1;
+            const int scratch = newVReg();
+            for (int lane = 0; lane < 4; ++lane) {
+                if (!(powMask & (1 << lane)))
+                    continue;
+                const uint8_t baseComp = base.swizzle[lane];
+
+                VInstr laneLg2;
+                laneLg2.op = VOp::Lg2;
+                laneLg2.dst.index = scratch;
+                laneLg2.dst.writemask = 0x1;
+                laneLg2.srcs[0] = base;
+                laneLg2.srcs[0].swizzle = {baseComp, baseComp,
+                                           baseComp, baseComp};
+                program_.instrs.push_back(laneLg2);
+
+                VInstr laneMul;
+                laneMul.op = VOp::Mul;
+                laneMul.dst.index = scratch;
+                laneMul.dst.writemask = 0x1;
+                laneMul.srcs[0] = tempSrc(scratch);
+                laneMul.srcs[0].swizzle = {0, 0, 0, 0};
+                laneMul.srcs[1] = exponent;
+                if (exponentIsScalar) {
+                    laneMul.srcs[1].swizzle = {0, 0, 0, 0};
+                } else {
+                    const uint8_t e = exponent.swizzle[lane];
+                    laneMul.srcs[1].swizzle = {e, e, e, e};
+                }
+                program_.instrs.push_back(laneMul);
+
+                VInstr laneEx2;
+                laneEx2.op = VOp::Ex2;
+                laneEx2.dst.index = temp;
+                laneEx2.dst.writemask = 1 << lane;
+                laneEx2.srcs[0] = tempSrc(scratch);
+                laneEx2.srcs[0].swizzle = {0, 0, 0, 0};
+                laneEx2.preservePartialOutputMask = true;
+                program_.instrs.push_back(laneEx2);
+            }
+            if (hasDelayedPositionMov)
+                program_.instrs.push_back(delayedPositionMov);
+            return;
+        }
+
         VInstr lg2;
         lg2.op = VOp::Lg2;
         lg2.dst.index = temp;
