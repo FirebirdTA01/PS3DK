@@ -1,0 +1,9 @@
+// The other spelling of t_dc1d92b0: a float variable initialised from an
+// int literal, used as a constructor component.  `float x = 1;` leaves an
+// int constant behind, so the constructor it feeds did not fold either.
+// One fix in the constructor fold covers both.
+void main(out float4 oColor : COLOR)
+{
+    float x = 1;
+    oColor = float4(0.5f, 0.25f, 0.125f, x);
+}

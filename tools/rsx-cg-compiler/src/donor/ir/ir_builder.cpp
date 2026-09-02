@@ -1342,12 +1342,41 @@ IRValueID IRBuilder::tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
 IRValueID IRBuilder::tryFoldVecConstruct(const IRTypeInfo& resultType,
                                           const std::vector<IRValueID>& args)
 {
+    // An INTEGER literal in a float constructor converts, which is what Cg
+    // says and what the reference compiler does.  Without this the whole
+    // constructor failed to fold, `float4(1,1,1,1)` reached the back end as
+    // four separate constants, and every matcher that wants a literal vec4
+    // refused it - so the most idiomatic constant in the language did not
+    // build (t_dc1d92b0).  Deliberately local to a FLOAT constructor: the
+    // shared extractFloatComponents also serves the binary and unary
+    // folders, which would then fold integer division through floats.
+    const bool floatResult = resultType.elementType == IRType::Float32 ||
+                             resultType.elementType == IRType::Float16;
+    auto components = [&](IRValueID id, std::vector<float>& out) -> bool
+    {
+        if (extractFloatComponents(*currentFunction_, id, out))
+            return true;
+        if (!floatResult) return false;
+        IRValue* v = currentFunction_->getValue(id);
+        auto* c = v ? dynamic_cast<IRConstant*>(v) : nullptr;
+        if (!c) return false;
+        if (std::holds_alternative<int32_t>(c->value))
+            out = { static_cast<float>(std::get<int32_t>(c->value)) };
+        else if (std::holds_alternative<uint32_t>(c->value))
+            out = { static_cast<float>(std::get<uint32_t>(c->value)) };
+        else if (std::holds_alternative<bool>(c->value))
+            out = { std::get<bool>(c->value) ? 1.0f : 0.0f };
+        else
+            return false;
+        return true;
+    };
+
     std::vector<float> all;
     all.reserve(static_cast<size_t>(resultType.vectorSize));
     for (IRValueID a : args)
     {
         std::vector<float> comps;
-        if (!extractFloatComponents(*currentFunction_, a, comps))
+        if (!components(a, comps))
             return InvalidIRValue;
         all.insert(all.end(), comps.begin(), comps.end());
     }

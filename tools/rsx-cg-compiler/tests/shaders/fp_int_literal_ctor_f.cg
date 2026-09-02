@@ -1,0 +1,19 @@
+// An INT literal in a float constructor converts (t_dc1d92b0).
+//
+// `float4(1,1,1,1)` is the most idiomatic constant in Cg and it did not
+// build.  The IR builder's constructor fold only accepted float
+// constants, so one int literal stopped the whole constructor folding;
+// the back end then saw four loose constants instead of a literal vec4
+// and every matcher that wants one refused:
+//
+//     nv40-fp: StoreOutput source is not a direct varying input, tex2D
+//     result, or literal vec4 (arithmetic lowering lands later)
+//
+// An honest refusal rather than a miscompile, which is why this is not a
+// P1 - but the reference compiles all of these, and so should we.  The
+// second fixture covers the other spelling, an int-initialised float
+// VARIABLE, which turned out to be the same site.
+void main(out float4 oColor : COLOR)
+{
+    oColor = float4(1, 1, 1, 1);
+}
