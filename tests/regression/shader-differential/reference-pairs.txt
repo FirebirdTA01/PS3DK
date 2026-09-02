@@ -39,8 +39,8 @@ samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg|0
 # uniform pool offsets; Class C: we emit fewer instructions than the
 # reference).  They read textures (bound by the sampler half) and take
 # uniforms (synthesised from parameter names under set auto).
-# discard-blend refuses under --general-lowering until CF-2 discard lands (t_91bbd575): default path only.
-samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/fpshader.fcg|auto|default
+# discard-blend refused under --general-lowering until CF-2 discard landed (t_91bbd575, 61be582): |both since 2026-09-02.
+samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/fpshader.fcg|auto|both
 tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
 # The next two are RED on the DEFAULT path since the binder started giving
 # every sampler its own per-name image (t_c48f48c1): under the identity
@@ -164,10 +164,10 @@ tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|bot
 # lerp and nothing about the kill.  sd_pos_allch now takes TEXCOORD0.w below
 # zero on columns 58..63; expected identical WITH painted a = b = 3712, and
 # the row would read discard-blind if the kill ever stopped firing.
-build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg|0|default
+build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg|0|both
 # The in-tree twin of the same shape (discard, then work feeding the output);
 # the general path refuses it until CF-2.  Expected identical, painted 3712.
-tools/rsx-cg-compiler/tests/shaders/fp_discard_then_work_f.cg|0|default
+tools/rsx-cg-compiler/tests/shaders/fp_discard_then_work_f.cg|0|both
 
 # 2026-09-02 regression rows: the two default-path P1s the VP work found (both fixed on
 # origin/main before these rows were added; each was RED on 963018a).  sd_lane_insert
