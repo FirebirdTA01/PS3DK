@@ -155,11 +155,11 @@ tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|bot
 # its post-discard fog lerp and compiled silently - RED here on 163088c
 # (189/4096, ours colour-through 64/64/1/1 vs the reference's lerp
 # 36/188/188/1), visible only because sd_pos_allch gives TEXCOORD2 a varying
-# w.  Since f455215 the default path REFUSES it instead (the completeness
-# guard), and a refusing curated row aborts the stage by design, so the row
-# is WITHDRAWN to the corpus sweep, where its refusal is a recorded sidecar
-# verdict (reference-corpus-refused.txt: th06_notex|ours|...|1).  It comes
-# back here, expected identical, when the lerp after a discard is lowered.
+# w.  From f455215 the default path REFUSED it (the completeness guard) and
+# the row was withdrawn to the corpus sweep; 1ab43d0 (2026-09-02) lowers the
+# lerp after the discard and the row RETURNS, judged on the default path
+# (the general path refuses discard, CF-2, t_91bbd575).  Expected identical.
+build/shader-corpus/th06-ps3/files/ps3/shaders/th06_notex.fcg|0|default
 
 # 2026-09-02 regression rows: the two default-path P1s the VP work found (both fixed on
 # origin/main before these rows were added; each was RED on 963018a).  sd_lane_insert
