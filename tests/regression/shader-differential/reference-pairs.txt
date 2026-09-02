@@ -144,3 +144,10 @@ tests/regression/shader-differential/shaders/sd_sampler_units.fcg|0|both
 # the corpus tooling); the stager names the second row with its set.
 build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|0|both
 build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|auto|both
+
+# NAMED REGRESSION for a scalar initialiser on a vector uniform (codex on
+# db6dbca): `uniform float4 k = 0.5;` must compile to a default of
+# (0.5, 0.5, 0.5, 0.5); db6dbca writes (0.5, 0, 0, 0).  set 0 so the compiled
+# default is what paints.  RED on db6dbca, green once the evaluator fills
+# the declared width.  |both: the block is written on both paths.
+tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|both

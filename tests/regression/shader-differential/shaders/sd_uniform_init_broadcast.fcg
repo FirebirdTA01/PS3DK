@@ -1,0 +1,20 @@
+// shader-differential - NAMED REGRESSION for a SCALAR initialiser on a
+// VECTOR file-scope uniform (codex, review of db6dbca, 2026-09-01 22:34).
+//
+// The frontend accepts scalar-to-vector broadcast, so `uniform float4 k =
+// 0.5;` means (0.5, 0.5, 0.5, 0.5).  The initialiser evaluator stored the
+// EXPRESSION's component count (one value) and the const-block writer
+// copied only that count, so the compiled default came out (0.5, 0, 0, 0):
+// a well-formed, patchable parameter over a half-written block.
+//
+// THE ROW: set 0, no patch, output the uniform straight.  Ours paints the
+// x lane only; the reference paints the broadcast.  RED on db6dbca; green
+// once the evaluator fills the DECLARED width.  program_uniforms.fcg beside
+// it cannot see this - its initialiser is a full float4 constructor - which
+// is why a second row exists.  0.5 -> 128, exact in 8 bits.
+uniform float4 k = 0.5;
+
+float4 main() : COLOR
+{
+    return k;
+}
