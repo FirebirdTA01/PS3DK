@@ -1,0 +1,11 @@
+// t_58e2212c: scalar smoothstep with dynamic edges uses DIVR_sat for
+// saturate((x - edge0) / (edge1 - edge0)).  Vector smoothstep deliberately
+// remains on the reference's per-lane RCP plus vector MUL shape.
+void main(float4 c : TEXCOORD0,
+          float4 lo : TEXCOORD1,
+          float4 hi : TEXCOORD2,
+          out float4 o : COLOR)
+{
+    float s = smoothstep(lo.z, hi.y, c.x * 0.5 + c.w * 0.25);
+    o = float4(s, s * 0.5, s * 0.25, 1.0);
+}

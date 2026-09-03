@@ -10,7 +10,9 @@
 # Three fixtures are checked: distinct unswizzled vector lanes, a swizzled
 # vector argument, and variable vector edges that cannot fold the reciprocal.
 # The swizzled cases are the same trap that caught cbb762e: per-lane lowering
-# must compose through arg.swizzle[lane], not raw lane N.
+# must compose through arg.swizzle[lane], not raw lane N.  Vector variable-edge
+# smoothstep uses the reference's vector-divide shape: one RCP per divisor
+# lane and then a saturated MUL, not DIVR.
 #
 # CONTROL: this fails on compilers before the smoothstep slice because
 # IROp::SmoothStep reaches the general lowering as an unsupported op.
@@ -55,7 +57,7 @@ python3 - \
 import re
 import sys
 
-ADD, MUL, RCP = 0x03, 0x02, 0x1A
+ADD, MUL, RCP, DIV = 0x03, 0x02, 0x1A, 0x3A
 DST_SCALE_2X = 1
 TEMP, CONST = 0, 2
 LINE = re.compile(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
@@ -111,6 +113,10 @@ def assert_variable_edge(path):
     ins = decode(path)
     if not ins:
         raise SystemExit("FAIL: %s produced no decoded instructions" % path)
+    if any(d["op"] == DIV for d in ins):
+        raise SystemExit(
+            "FAIL: %s emitted DIVR for vector smoothstep.  The oracle uses "
+            "per-lane RCP plus vector MUL for vector divides." % path)
     rcps = [d for d in ins if d["op"] == RCP]
     if len(rcps) < 3:
         raise SystemExit(

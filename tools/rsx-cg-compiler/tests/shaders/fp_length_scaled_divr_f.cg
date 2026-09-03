@@ -1,0 +1,9 @@
+// t_58e2212c: sce-cgc lowers a scalar length multiplied by a literal as
+// RSQ followed by DIVR literal, rsq.  test_83's last one-ULP mismatch after
+// literal-divisor folding came from using DIVSQR then MUL for this shape.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float2 p = c.xy * 0.25 - float2(0.125, 0.375);
+    float l = length(p) * 2.5;
+    o = float4(saturate(1.0 - l), l * 0.25, l * 0.125, 1.0);
+}

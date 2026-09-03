@@ -1,0 +1,10 @@
+// t_58e2212c: DIVR is fragment-only in the general lowering until the
+// vertex encoding is measured.  This fixture must refuse by name rather
+// than letting an unmapped VOp reach vpOpcode and silently become MOV.
+void main(float4 p : POSITION,
+          float4 q : TEXCOORD0,
+          out float4 o : POSITION)
+{
+    float x = (p.x + 1.0) / (q.x + 2.0);
+    o = float4(x, p.y, p.z, 1.0);
+}

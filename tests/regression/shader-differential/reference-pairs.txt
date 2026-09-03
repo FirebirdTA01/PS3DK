@@ -319,6 +319,15 @@ tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_variable_edges_f.cg|auto|general
+# t_58e2212c: DIVR is scalar-only.  These rows judge the scalar DIVR and
+# DIVR_sat shapes on pixels; the vector smoothstep row above remains the
+# negative control and must stay on per-lane RCP plus vector MUL.
+tools/rsx-cg-compiler/tests/shaders/fp_divr_scalar_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_tan_divr_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_scalar_variable_edges_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_div_literal_recip_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_div_literal_vector_recip_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_length_scaled_divr_f.cg|auto|general
 
 # t_71ad405e: stdlib dot-reductions must use the source width.  The length
 # float2 row is the pixel witness for the stale-lane failure: its float3

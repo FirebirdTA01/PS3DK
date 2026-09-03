@@ -105,6 +105,7 @@ enum class VOp
     Cos,
     Lg2,
     Ex2,
+    DivR,
     DivSqrt,
     Frc,
     Flr,
@@ -917,6 +918,7 @@ private:
             case VOp::Sin:
             case VOp::Cos:
             case VOp::DivSqrt:
+            case VOp::DivR:
                 return 4;
             case VOp::Rsq:
                 return 3;
@@ -2158,7 +2160,7 @@ private:
 
     // THE SCALAR UNIT COMPUTES ONE LANE (t_249b8088).
     //
-    // RCP, RSQ, SIN, COS, LG2 and EX2 read a single source COMPONENT and
+    // RCP, RSQ, SIN, COS, LG2, EX2 and DIVR read a single source COMPONENT and
     // write that one result into EVERY enabled destination lane.  So a
     // vector argument needs one instruction per lane, each selecting its
     // own component - which is exactly what the reference emits: sin on a
@@ -2173,12 +2175,15 @@ private:
     // times SHORTER than the reference is what exposed it.  The rig had
     // never seen it because every corpus use of these ops is on a scalar.
     //
-    // lowerDiv has always done this correctly for its divisor and says so
-    // in its own comment; the rest of the file did not.
+    // lowerDiv's literal 1/x fast path uses the same per-lane helper for
+    // vector reciprocals.  General VECTOR x/y division also stays on
+    // per-lane RCP plus vector MUL because that is the reference's shape;
+    // scalar x/y division uses DIVR.
     static bool isScalarUnitOp(VOp op)
     {
         return op == VOp::Rcp || op == VOp::Rsq || op == VOp::Sin ||
-               op == VOp::Cos || op == VOp::Lg2 || op == VOp::Ex2;
+               op == VOp::Cos || op == VOp::Lg2 || op == VOp::Ex2 ||
+               op == VOp::DivR;
     }
 
     static int laneCount(int mask)
@@ -2700,8 +2705,8 @@ private:
         }
         // 1/x keeps its single-instruction form - for a SCALAR.  On a
         // vector it is one RCP per lane like every other scalar-unit op
-        // (t_249b8088); the general path below already knew that about its
-        // divisor and this fast path did not.
+        // (t_249b8088).  General x/y division below uses DIVR for scalars,
+        // but literal 1/x remains the scalar reciprocal shape.
         if (isLiteralOne(inst.operands[0])) {
             const int mask = componentMask(inst.resultType);
             if (laneCount(mask) > 1) {
@@ -2717,9 +2722,34 @@ private:
             program_.instrs.push_back(vi);
             return;
         }
-        // General x/y: RCP is a scalar op, so a w-wide divisor takes one
-        // RCP per lane into a temp, then a single MUL.  Optimizing the
-        // uniform-divisor case is optimization-level work.
+        const int mask = componentMask(inst.resultType);
+        const std::optional<float> divisorLiteral =
+            scalarFloatLiteral(inst.operands[1]);
+        if (divisorLiteral && *divisorLiteral != 0.0f &&
+            std::isfinite(*divisorLiteral)) {
+            // The oracle folds division by any non-zero scalar literal
+            // divisor to multiplication by the reciprocal at every width.
+            // test_83's finite differences show /0.01 becoming MULR by
+            // {100}, and a float3 / 0.01 oracle probe does the same vector
+            // MULR - no DIVR and no per-lane RCPR.  Compute the reciprocal in
+            // double and round once to float: /3.0 emits 0x3eaaaaab, the
+            // correctly rounded reciprocal, and a float divide can pick a
+            // neighboring bit pattern for harder constants.
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = define(inst.result);
+            mul.dst.writemask = mask;
+            mul.srcs[0] = resolve(inst.operands[0]);
+            mul.srcs[1] = floatLit(
+                static_cast<float>(1.0 / static_cast<double>(*divisorLiteral)));
+            program_.instrs.push_back(mul);
+            return;
+        }
+        // General SCALAR x/y with a dynamic divisor: the oracle uses DIVR
+        // (0x3A).  General VECTOR x/y deliberately keeps the per-lane RCP
+        // plus vector MUL shape: measured on float3 division, sce-cgc emits
+        // three RCPRs and one MULR, not three DIVRs and not one multi-lane
+        // DIVR.
         const int divisorWidth = valueWidthOf(inst.operands[1]);
         if (divisorWidth < 1 || divisorWidth > 4) {
             program_.diagnostics.push_back(
@@ -2727,7 +2757,17 @@ private:
             program_.loweringFailed = true;
             return;
         }
-        const int mask = componentMask(inst.resultType);
+        if (laneCount(mask) == 1) {
+            VInstr div;
+            div.op = VOp::DivR;
+            div.dst.index = define(inst.result);
+            div.dst.writemask = mask;
+            div.srcs[0] = resolve(inst.operands[0]);
+            div.srcs[1] = resolve(inst.operands[1]);
+            program_.instrs.push_back(div);
+            return;
+        }
+
         const int r = newVReg();
         for (int lane = 0; lane < divisorWidth; lane++) {
             VInstr rcp;
@@ -2755,6 +2795,9 @@ private:
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
         if (profile_ == GeneralProfile::Fragment &&
             op == VOp::Max && tryFoldDotMax(inst))
+            return;
+        if (profile_ == GeneralProfile::Fragment &&
+            op == VOp::Mul && tryFoldScaledLengthWithLiteral(inst))
             return;
         if (profile_ == GeneralProfile::Fragment &&
             op == VOp::Add && !negateRhs && tryFuseAddWithMul(inst))
@@ -2824,6 +2867,75 @@ private:
         maxv.stubFenceBrBefore = true;
         program_.instrs.push_back(maxv);
         return true;
+    }
+
+    bool tryFoldScaledLengthWithLiteral(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 2 ||
+            laneCount(componentMask(inst.resultType)) != 1 ||
+            program_.instrs.size() < 4)
+            return false;
+
+        for (int litOperand = 0; litOperand < 2; ++litOperand) {
+            const std::optional<float> scale =
+                scalarFloatLiteral(inst.operands[litOperand]);
+            if (!scale)
+                continue;
+
+            const IRValueID lengthValue = inst.operands[1 - litOperand];
+            if (useCount_[lengthValue] != 1)
+                continue;
+            const auto lengthRegIt = program_.valueToVReg.find(lengthValue);
+            if (lengthRegIt == program_.valueToVReg.end())
+                continue;
+
+            VInstr& broadcast = program_.instrs[program_.instrs.size() - 1];
+            VInstr& sqrt = program_.instrs[program_.instrs.size() - 2];
+            VInstr& dp = program_.instrs[program_.instrs.size() - 3];
+            if (broadcast.op != VOp::Mov || broadcast.dst.output ||
+                broadcast.dst.index != lengthRegIt->second ||
+                broadcast.srcs[0].kind != VSrcKind::Temp ||
+                broadcast.srcs[0].swizzle != std::array<uint8_t, 4>{0, 0, 0, 0})
+                continue;
+
+            const int lenSqReg = broadcast.srcs[0].index;
+            if (sqrt.op != VOp::DivSqrt || sqrt.dst.output ||
+                sqrt.dst.index != lenSqReg || sqrt.dst.writemask != 0x1 ||
+                sqrt.srcs[0].kind != VSrcKind::Temp ||
+                sqrt.srcs[0].index != lenSqReg ||
+                sqrt.srcs[1].kind != VSrcKind::Temp ||
+                sqrt.srcs[1].index != lenSqReg)
+                continue;
+            if ((dp.op != VOp::Dp2 && dp.op != VOp::Dp3 && dp.op != VOp::Dp4) ||
+                dp.dst.output || dp.dst.index != lenSqReg ||
+                dp.dst.writemask != 0x1)
+                continue;
+
+            // sce-cgc lowers length(x) * literal as reciprocal square root
+            // followed by DIVR literal, rsq.  test_83 exposed the one-ULP
+            // difference from the mathematically equivalent DIVSQR/MUL path.
+            program_.instrs.pop_back();
+            program_.instrs.pop_back();
+
+            VInstr rsq;
+            rsq.op = VOp::Rsq;
+            rsq.dst.index = lenSqReg;
+            rsq.dst.writemask = 0x1;
+            rsq.srcs[0] = tempSrc(lenSqReg);
+            program_.instrs.push_back(rsq);
+
+            VInstr div;
+            div.op = VOp::DivR;
+            div.dst.index = define(inst.result);
+            div.dst.writemask = componentMask(inst.resultType);
+            div.srcs[0] = floatLit(*scale);
+            div.srcs[1] = tempSrc(lenSqReg);
+            div.srcs[1].swizzle = {0, 0, 0, 0};
+            program_.instrs.push_back(div);
+            return true;
+        }
+
+        return false;
     }
 
     bool tryFuseAddWithMul(const IRInstruction& inst)
@@ -3381,16 +3493,9 @@ private:
     // stating because a polynomial approximation would have been the other
     // reasonable guess and it is not what the oracle does.
     //
-    // WE ARE NOT BYTE-IDENTICAL HERE AND THE REASON IS NAMED: the reference
-    // divides with DIVR (NV40 opcode 0x3A) and this compiler has no VOp for
-    // it, so the divide goes through the RCP-then-MUL idiom lowerDiv has
-    // always used.  Adding the opcode is its own change - vpOpcode's
-    // fallthrough is MOV, so a new VOp that reaches the vertex path
-    // silently becomes a MOV, and that wants its own fixture rather than
-    // being smuggled in behind tan.
-    //
-    // SIN, COS and RCP are all scalar-unit ops, so all three go per lane
-    // through the shared helper; the final multiply is ordinary vector ALU.
+    // SIN and COS are scalar-unit ops, so they go per lane through the
+    // shared helper.  Scalar tan then uses DIVR; vector tan stays on the
+    // reference's vector-divide shape, per-lane RCP plus vector MUL.
     void lowerTan(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
@@ -3405,18 +3510,31 @@ private:
 
         const int sinReg = newVReg();
         const int cosReg = newVReg();
-        const int rcpReg = newVReg();
         emitScalarUnitPerLane(VOp::Sin, sinReg, mask, arg, false);
         emitScalarUnitPerLane(VOp::Cos, cosReg, mask, arg, false);
-        emitScalarUnitPerLane(VOp::Rcp, rcpReg, mask, tempSrc(cosReg), false);
 
-        VInstr mul;
-        mul.op = VOp::Mul;
-        mul.dst.index = define(inst.result);
-        mul.dst.writemask = mask;
-        mul.srcs[0] = tempSrc(sinReg);
-        mul.srcs[1] = tempSrc(rcpReg);
-        program_.instrs.push_back(mul);
+        if (laneCount(mask) > 1) {
+            const int rcpReg = newVReg();
+            emitScalarUnitPerLane(VOp::Rcp, rcpReg, mask,
+                                  tempSrc(cosReg), false);
+
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = define(inst.result);
+            mul.dst.writemask = mask;
+            mul.srcs[0] = tempSrc(sinReg);
+            mul.srcs[1] = tempSrc(rcpReg);
+            program_.instrs.push_back(mul);
+            return;
+        }
+
+        VInstr div;
+        div.op = VOp::DivR;
+        div.dst.index = define(inst.result);
+        div.dst.writemask = mask;
+        div.srcs[0] = tempSrc(sinReg);
+        div.srcs[1] = tempSrc(cosReg);
+        program_.instrs.push_back(div);
     }
 
     // cross(a, b) = a.yzx * b.zxy - a.zxy * b.yzx (t_a7dd471f).
@@ -3671,10 +3789,10 @@ private:
     // t = saturate((x - edge0) / (edge1 - edge0)).
     //
     // The oracle probe uses scalar literal edges 0.25 and 0.75; sce-cgc
-    // folds 1/(0.75 - 0.25) into ADDR_2X_sat instead of emitting RCP.
+    // folds 1/(0.75 - 0.25) into ADDR_2X_sat instead of emitting DIVR.
     // Keep that measured shape when the span maps to NV40's destination
-    // scale field.  The generic fallback still uses one RCP per divisor
-    // lane, because RCP is a scalar-unit instruction.
+    // scale field.  The scalar generic fallback uses DIVR_sat for the clamp;
+    // vector edges use the reference's per-lane RCP plus vector MUL.
     void lowerSmoothStep(const IRInstruction& inst)
     {
         if (profile_ != GeneralProfile::Fragment ||
@@ -3731,8 +3849,13 @@ private:
         spanInst.srcs[1].neg = true;
         program_.instrs.push_back(spanInst);
 
-        const int invSpan = newVReg();
-        emitScalarUnitPerLane(VOp::Rcp, invSpan, spanMask, tempSrc(span), false);
+        const bool scalarClamp = laneCount(mask) == 1;
+        int invSpan = InvalidIRValue;
+        if (!scalarClamp) {
+            invSpan = newVReg();
+            emitScalarUnitPerLane(VOp::Rcp, invSpan, spanMask,
+                                  tempSrc(span), false);
+        }
 
         const int delta = newVReg();
         VInstr deltaInst;
@@ -3745,11 +3868,11 @@ private:
         program_.instrs.push_back(deltaInst);
 
         VInstr clamp;
-        clamp.op = VOp::Mul;
+        clamp.op = scalarClamp ? VOp::DivR : VOp::Mul;
         clamp.dst.index = t;
         clamp.dst.writemask = mask;
         clamp.srcs[0] = tempSrc(delta);
-        clamp.srcs[1] = tempSrc(invSpan);
+        clamp.srcs[1] = tempSrc(scalarClamp ? span : invSpan);
         if (spanWidth == 1)
             clamp.srcs[1].swizzle = {0, 0, 0, 0};
         clamp.sat = true;
@@ -4476,6 +4599,7 @@ private:
         case VOp::Dp4:
         case VOp::Min:
         case VOp::Max:
+        case VOp::DivR:
         case VOp::Slt:
         case VOp::Sgt:
         case VOp::Sle:
@@ -4520,6 +4644,7 @@ private:
         case VOp::Cos:
         case VOp::Lg2:
         case VOp::Ex2:
+        case VOp::DivR:
             return 0x1;
         default:       return vi.dst.writemask;
         }
@@ -5255,6 +5380,7 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Cos: return NVFX_FP_OP_OPCODE_COS;
     case VOp::Lg2: return NVFX_FP_OP_OPCODE_LG2;
     case VOp::Ex2: return NVFX_FP_OP_OPCODE_EX2;
+    case VOp::DivR: return NVFX_FP_OP_OPCODE_DIV;
     case VOp::DivSqrt: return NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX;
     case VOp::Frc: return NVFX_FP_OP_OPCODE_FRC;
     case VOp::Flr: return NVFX_FP_OP_OPCODE_FLR;
@@ -5293,6 +5419,7 @@ static const char* vOpName(VOp op)
     case VOp::Cos: return "Cos";
     case VOp::Lg2: return "Lg2";
     case VOp::Ex2: return "Ex2";
+    case VOp::DivR: return "DivR";
     case VOp::DivSqrt: return "DivSqrt";
     case VOp::Frc: return "Frc";
     case VOp::Flr: return "Flr";
@@ -5588,6 +5715,7 @@ static bool fpProducerNeedsFenctr(VOp op)
     case VOp::Cos:
     case VOp::Lg2:
     case VOp::Ex2:
+    case VOp::DivR:
     case VOp::DivSqrt:
         return true;
     default:

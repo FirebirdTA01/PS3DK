@@ -1,0 +1,8 @@
+// t_58e2212c: ordinary fragment division should use NV40 DIVR (0x3A),
+// not the older RCP-then-MUL idiom.  The operands are dynamic so there is
+// no constant reciprocal to fold.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float x = (c.x + 0.25) / (abs(c.y) + 1.25);
+    o = float4(x, x * 0.5, x * 0.25, 1.0);
+}
