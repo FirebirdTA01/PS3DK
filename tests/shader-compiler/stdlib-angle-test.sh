@@ -105,9 +105,20 @@ fi
 if grep -Eq 'std::bad_alloc|terminate called|Aborted|Killed' "$shadow_log"; then
     fail "user-defined radians reported an allocation abort"
 fi
+if [[ "$shadow_rc" -ne 0 ]]; then
+    tail -n 20 "$shadow_log" >&2
+    fail "user-defined radians failed to compile"
+fi
+[[ -s "$shadow_out" ]] || fail "user-defined radians did not emit a container"
 grep -q 'define float @radians(float' "$shadow_log" \
     || fail "user-defined radians body was not present in IR"
-grep -Eq ' = call float .* @radians$' "$shadow_log" \
-    || fail "user-defined radians call did not survive as a user call"
+awk '
+    /^define void @main/ { in_entry = 1 }
+    in_entry { print }
+    /^}/ && in_entry { exit }
+' "$shadow_log" >"$work/shadow_radians.entry.ir"
+if grep -Eq ' = call float .* @radians$' "$work/shadow_radians.entry.ir"; then
+    fail "user-defined radians call survived in main IR"
+fi
 
 printf 'stdlib-angle-test: ok\n'

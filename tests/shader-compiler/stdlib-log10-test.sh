@@ -81,10 +81,21 @@ shadow_out="$work/shadow_log10.fpo"
 rm -f "$shadow_out"
 shadow_rc=0
 compile_ir "shadow_log10" "$work/shadow_log10.fcg" "$shadow_out" "$shadow_log" || shadow_rc=$?
+if [[ "$shadow_rc" -ne 0 ]]; then
+    tail -n 20 "$shadow_log" >&2
+    fail "user-defined log10 failed to compile"
+fi
+[[ -s "$shadow_out" ]] || fail "user-defined log10 did not emit a container"
 grep -q 'define float @log10(float' "$shadow_log" \
     || fail "user-defined log10 body was not present in IR"
-grep -Eq ' = call float .* @log10$' "$shadow_log" \
-    || fail "user-defined log10 call did not survive as a user call"
+awk '
+    /^define void @main/ { in_entry = 1 }
+    in_entry { print }
+    /^}/ && in_entry { exit }
+' "$shadow_log" >"$work/shadow_log10.entry.ir"
+if grep -Eq ' = call float .* @log10$' "$work/shadow_log10.entry.ir"; then
+    fail "user-defined log10 call survived in main IR"
+fi
 
 run_builtin() {
     local name="$1"

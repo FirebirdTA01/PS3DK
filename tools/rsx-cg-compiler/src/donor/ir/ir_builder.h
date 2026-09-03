@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <stack>
+#include <vector>
 
 // ============================================================================
 // IR Builder - Converts AST to IR
@@ -40,6 +41,8 @@ private:
     std::unordered_map<DeclNode*, IRValueID> declToValue_;
     std::unordered_map<std::string, IRValueID> nameToValue_;
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
+    std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
+    std::vector<FunctionDecl*> inlineStack_;
 
     // Break/continue targets for loops
     struct LoopContext
@@ -97,6 +100,9 @@ private:
     IRValueID buildBinaryExpr(BinaryExpr* expr);
     IRValueID buildUnaryExpr(UnaryExpr* expr);
     IRValueID buildCallExpr(CallExpr* expr);
+    bool inlineUserFunctionCall(CallExpr* expr, const std::vector<IRValueID>& args,
+                                IRValueID& result);
+    bool buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result);
     IRValueID buildMemberAccessExpr(MemberAccessExpr* expr);
     IRValueID buildIndexExpr(IndexExpr* expr);
     IRValueID buildTernaryExpr(TernaryExpr* expr);

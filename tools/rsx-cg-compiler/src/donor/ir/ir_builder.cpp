@@ -125,6 +125,16 @@ std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const Semantic
     // Build globals (uniforms, attributes, etc.)
     buildGlobals(unit);
 
+    functionDefinitionsByName_.clear();
+    for (auto& decl : unit.declarations)
+    {
+        if (decl->kind != DeclKind::Function)
+            continue;
+        auto* funcDecl = static_cast<FunctionDecl*>(decl.get());
+        if (!funcDecl->isPrototype() && !funcDecl->isIntrinsic)
+            functionDefinitionsByName_[funcDecl->name].push_back(funcDecl);
+    }
+
     // Build functions
     for (auto& decl : unit.declarations)
     {
@@ -1623,8 +1633,160 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         return emitInstruction(*builtinOp, resultType, argValues);
     }
 
+    if (expr->resolvedFunction &&
+        (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
+        expr->resolvedFunction->kind == DeclKind::Function)
+    {
+        IRValueID inlined = InvalidIRValue;
+        if (inlineUserFunctionCall(expr, argValues, inlined))
+            return inlined;
+        return InvalidIRValue;
+    }
+
     // User function call
     return emitCall(expr->functionName, resultType, argValues);
+}
+
+bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
+                                       const std::vector<IRValueID>& args,
+                                       IRValueID& result)
+{
+    result = InvalidIRValue;
+
+    auto* callee = static_cast<FunctionDecl*>(expr->resolvedFunction);
+    if (callee->isPrototype() || !callee->body)
+    {
+        auto defs = functionDefinitionsByName_.find(callee->name);
+        if (defs != functionDefinitionsByName_.end())
+        {
+            for (FunctionDecl* def : defs->second)
+            {
+                if (def->parameters.size() == args.size())
+                {
+                    callee = def;
+                    break;
+                }
+            }
+        }
+    }
+    const std::string& name = callee->name;
+
+    constexpr size_t kMaxInlineDepth = 16;
+    for (FunctionDecl* active : inlineStack_)
+    {
+        if (active == callee)
+        {
+            error(expr->loc, "recursive user function call involving '" + name + "'");
+            return false;
+        }
+    }
+    if (inlineStack_.size() >= kMaxInlineDepth)
+    {
+        error(expr->loc, "user function inline depth exceeded at '" + name + "'");
+        return false;
+    }
+
+    if (callee->isPrototype() || !callee->body)
+    {
+        error(expr->loc, "cannot inline user function '" + name + "': no function body");
+        return false;
+    }
+    if (args.size() != callee->parameters.size())
+    {
+        error(expr->loc, "cannot inline user function '" + name + "': argument count mismatch");
+        return false;
+    }
+    for (const auto& param : callee->parameters)
+    {
+        if (param->storage == StorageQualifier::Out ||
+            param->storage == StorageQualifier::InOut)
+        {
+            error(expr->loc, "cannot inline user function '" + name +
+                             "': out/inout parameters are not supported");
+            return false;
+        }
+    }
+
+    auto savedDecls = declToValue_;
+    auto savedNames = nameToValue_;
+    auto savedSwizzles = identityPrefixSwizzleBase_;
+
+    for (size_t i = 0; i < callee->parameters.size(); ++i)
+    {
+        ParamDecl* param = callee->parameters[i].get();
+        declToValue_[param] = args[i];
+        if (!param->name.empty())
+            nameToValue_[param->name] = args[i];
+    }
+
+    inlineStack_.push_back(callee);
+    const bool ok = buildInlineFunctionBody(callee, result);
+    inlineStack_.pop_back();
+
+    auto inlineSwizzles = identityPrefixSwizzleBase_;
+    declToValue_ = std::move(savedDecls);
+    nameToValue_ = std::move(savedNames);
+    identityPrefixSwizzleBase_ = std::move(savedSwizzles);
+    for (const auto& kv : inlineSwizzles)
+        identityPrefixSwizzleBase_.try_emplace(kv.first, kv.second);
+    return ok && result != InvalidIRValue;
+}
+
+bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
+{
+    result = InvalidIRValue;
+    bool sawReturn = false;
+
+    for (size_t i = 0; i < callee->body->statements.size(); ++i)
+    {
+        StmtNode* stmt = callee->body->statements[i].get();
+        if (!stmt) continue;
+
+        if (sawReturn)
+        {
+            error(stmt->loc, "cannot inline user function '" + callee->name +
+                             "': statements after return are not supported");
+            return false;
+        }
+
+        if (stmt->kind == StmtKind::Return)
+        {
+            auto* ret = static_cast<ReturnStmt*>(stmt);
+            if (!ret->value)
+            {
+                error(stmt->loc, "cannot inline user function '" + callee->name +
+                                 "': void return");
+                return false;
+            }
+            result = buildExpr(ret->value.get());
+            sawReturn = true;
+            continue;
+        }
+
+        if (stmt->kind == StmtKind::Decl || stmt->kind == StmtKind::Expr)
+        {
+            buildStmt(stmt);
+            if (currentBlock_->hasTerminator())
+            {
+                error(stmt->loc, "cannot inline user function '" + callee->name +
+                                 "': statement terminated the caller block");
+                return false;
+            }
+            continue;
+        }
+
+        error(stmt->loc, "cannot inline user function '" + callee->name +
+                         "': body contains unsupported control flow");
+        return false;
+    }
+
+    if (!sawReturn)
+    {
+        error(callee->loc, "cannot inline user function '" + callee->name +
+                           "': no return expression");
+        return false;
+    }
+    return result != InvalidIRValue;
 }
 
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
