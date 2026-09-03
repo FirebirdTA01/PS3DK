@@ -242,6 +242,7 @@ const char* irOpToString(IROp op)
     case IROp::Exp2:         return "exp2";
     case IROp::Log:          return "log";
     case IROp::Log2:         return "log2";
+    case IROp::Log10:        return "log10";
     case IROp::Sqrt:         return "sqrt";
     case IROp::RSqrt:        return "rsqrt";
     case IROp::Dot:          return "dot";
@@ -739,6 +740,7 @@ int getOperandCount(IROp op)
     case IROp::Exp2:
     case IROp::Log:
     case IROp::Log2:
+    case IROp::Log10:
     case IROp::Sqrt:
     case IROp::RSqrt:
     case IROp::Length:

@@ -52,6 +52,13 @@ namespace nv40::detail
 namespace
 {
 
+static float floatFromBits(uint32_t bits)
+{
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
 const char* unsupportedProfileOperator(IROp op)
 {
     switch (op)
@@ -1489,6 +1496,10 @@ private:
             return;
         case IROp::Log2:
             lowerExpLog(inst, /*base2=*/true, /*isLog=*/true);
+            return;
+        case IROp::Log10:
+            lowerExpLog(inst, /*base2=*/false, /*isLog=*/true,
+                        /*base10=*/true);
             return;
         case IROp::RSqrt:
             lowerUnary(inst, VOp::Rsq, false);
@@ -3232,7 +3243,7 @@ private:
         program_.instrs.push_back(ex2);
     }
 
-    // exp / exp2 / log / log2 (t_a7dd471f).
+    // exp / exp2 / log / log2 / log10 (t_a7dd471f, t_fe6d143b).
     //
     // NV40 has EX2 and LG2 and nothing else in this family, so the
     // natural-base pair is one of those plus a constant multiply.  WHICH
@@ -3245,18 +3256,15 @@ private:
     //   exp2(x)   EX2R alone
     //   log(x)    LG2R, then MULR by 0x3f317218 (ln 2)
     //   log2(x)   LG2R alone
-    //
-    // log10 is NOT here and is not a missing case: there is no IROp for it
-    // at all, because the frontend leaves it as an uninlined `call` - the
-    // same refusal test_01_rsxrt's user function takes.  That is a
-    // different layer and folding it in here would hide it.
+    //   log10(x)  LG2R, then MULR by 0x3e9a209b (1 / log2(10))
     //
     // The reference puts a FENCBR between log's LG2 and the multiply that
     // READS the register the LG2 has just written.  Fragment only: FENCBR
     // is an FP encoding, and the VP path reaches EX2/LG2 through the scalar
     // slot, which is why the sources are scalarised there - the same
     // handling lowerPow already relies on for this pair of opcodes.
-    void lowerExpLog(const IRInstruction& inst, bool base2, bool isLog)
+    void lowerExpLog(const IRInstruction& inst, bool base2, bool isLog,
+                     bool base10 = false)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
 
@@ -3265,10 +3273,11 @@ private:
         // the value one ULP BELOW.  Spelling the constant
         // `1.4426950408889634f` therefore compiles to the right number and
         // the wrong bytes - measured, on the first build of this lowering.
-        // ln(2) happens to agree, and is written the same way so the next
-        // reader is not left guessing which of the two was checked.
+        // ln(2) and 1/log2(10) are written the same way so the next
+        // reader is not left guessing which constants were checked.
         constexpr float kLog2E = 1.4426949024200439453125f;   // 0x3fb8aa3a
         constexpr float kLn2   = 0.693147182464599609375f;    // 0x3f317218
+        const float kInvLog2Of10 = floatFromBits(0x3e9a209bu);
 
         const int temp = define(inst.result);
         const uint8_t mask = componentMask(inst.resultType);
@@ -3338,7 +3347,7 @@ private:
             mul.srcs[0] = tempSrc(temp);
             if (vertex)
                 mul.srcs[0].swizzle = {0, 0, 0, 0};
-            mul.srcs[1] = floatLit(kLn2);
+            mul.srcs[1] = floatLit(base10 ? kInvLog2Of10 : kLn2);
             mul.stubFenceBrBefore = !vertex;
             program_.instrs.push_back(mul);
         }

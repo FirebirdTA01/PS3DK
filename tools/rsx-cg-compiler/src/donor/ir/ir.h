@@ -183,6 +183,7 @@ enum class IROp
     Exp2,
     Log,
     Log2,
+    Log10,
     Sqrt,
     RSqrt,          // 1/sqrt(x)
 

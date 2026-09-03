@@ -1585,7 +1585,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         return emitBinaryOp(IROp::Mul, resultType, argValues[0], scaleValue);
     }
 
-    if (builtinOp)
+    if (builtinOp && expr->resolvedFunction == nullptr)
     {
         // Special handling for 'mul' - determine correct operation based on argument types
         if (expr->functionName == "mul" && expr->arguments.size() == 2)
@@ -2530,6 +2530,7 @@ std::optional<IROp> IRBuilder::builtinToIROp(const std::string& name)
         {"exp2", IROp::Exp2},
         {"log", IROp::Log},
         {"log2", IROp::Log2},
+        {"log10", IROp::Log10},
         {"sqrt", IROp::Sqrt},
         {"rsqrt", IROp::RSqrt},
         {"dot", IROp::Dot},
