@@ -1,0 +1,6 @@
+void main(float4 c : COLOR0, out float4 o : COLOR)
+{
+    float4 a = c.wzyx * float4(1.5, -2.0, 0.75, -1.25) + float4(0.1, -0.2, 0.3, -0.4);
+    float4 q = atan(a.zwxy);
+    o = float4(q.w, q.z, q.y, q.x);
+}

@@ -1508,6 +1508,15 @@ private:
         case IROp::Tan:
             lowerTan(inst);
             return;
+        case IROp::Asin:
+            lowerAsinAcos(inst, /*acos=*/false);
+            return;
+        case IROp::Acos:
+            lowerAsinAcos(inst, /*acos=*/true);
+            return;
+        case IROp::Atan:
+            lowerAtan(inst);
+            return;
         case IROp::Atan2:
             lowerAtan2(inst);
             return;
@@ -3561,6 +3570,384 @@ private:
         div.srcs[0] = tempSrc(sinReg);
         div.srcs[1] = tempSrc(cosReg);
         program_.instrs.push_back(div);
+    }
+
+    int emitAtanMinimaxPolynomial(int t, int mask)
+    {
+        static constexpr uint32_t kCoeffBits[] = {
+            0xbc5cdd30u, // -0.01348046958
+            0x3d6b6d55u, //  0.05747731403
+            0xbdf84c31u, // -0.1212390736
+            0x3e4854c9u, //  0.1956359297
+            0xbeaa7e45u, // -0.3329946101, fitted, not exactly -1/3
+            0x3f7fffb7u, //  0.9999956489, fitted, not 1.0
+        };
+
+        const int u = newVReg();
+        VInstr square;
+        square.op = VOp::Mul;
+        square.dst.index = u;
+        square.dst.writemask = mask;
+        square.srcs[0] = tempSrc(t);
+        square.srcs[1] = tempSrc(t);
+        program_.instrs.push_back(square);
+
+        const int poly = newVReg();
+        VInstr seed;
+        seed.op = VOp::Mad;
+        seed.dst.index = poly;
+        seed.dst.writemask = mask;
+        seed.srcs[0] = floatLit(floatFromBits(kCoeffBits[0]));
+        seed.srcs[1] = tempSrc(u);
+        seed.srcs[2] = floatLit(floatFromBits(kCoeffBits[1]));
+        program_.instrs.push_back(seed);
+        for (size_t i = 2; i < std::size(kCoeffBits); ++i) {
+            VInstr mad;
+            mad.op = VOp::Mad;
+            mad.dst.index = poly;
+            mad.dst.writemask = mask;
+            mad.srcs[0] = tempSrc(poly);
+            mad.srcs[1] = tempSrc(u);
+            mad.srcs[2] = floatLit(floatFromBits(kCoeffBits[i]));
+            program_.instrs.push_back(mad);
+        }
+
+        const int angle = newVReg();
+        VInstr base;
+        base.op = VOp::Mul;
+        base.dst.index = angle;
+        base.dst.writemask = mask;
+        base.srcs[0] = tempSrc(poly);
+        base.srcs[1] = tempSrc(t);
+        program_.instrs.push_back(base);
+        return angle;
+    }
+
+    // atan(x), read from sce-cgc before implementation, shares atan2's
+    // fitted minimax polynomial exactly.  The scalar form uses DIVR, while
+    // vectors follow the oracle's vector-divide rule: per-lane RCP plus a
+    // vector MUL.  The constants are not Taylor coefficients - notably the
+    // leading term is 0x3f7fffb7, fitted and not 1.0.
+    void lowerAtan(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP atan lowering deferred");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        static constexpr uint32_t kPiOver2Bits = 0x3fc90fdbu;
+
+        const int mask = componentMask(inst.resultType);
+        const bool vector = laneCount(mask) > 1;
+        const VSrc arg = resolve(inst.operands[0]);
+
+        const int argReg = newVReg();
+        VInstr load;
+        load.op = VOp::Mov;
+        load.dst.index = argReg;
+        load.dst.writemask = mask;
+        load.srcs[0] = arg;
+        program_.instrs.push_back(load);
+
+        VSrc absArg = tempSrc(argReg);
+        absArg.abs = true;
+
+        const int minReg = newVReg();
+        VInstr minv;
+        minv.op = VOp::Min;
+        minv.dst.index = minReg;
+        minv.dst.writemask = mask;
+        minv.srcs[0] = absArg;
+        minv.srcs[1] = floatLit(1.0f);
+        program_.instrs.push_back(minv);
+
+        const int maxReg = newVReg();
+        VInstr maxv;
+        maxv.op = VOp::Max;
+        maxv.dst.index = maxReg;
+        maxv.dst.writemask = mask;
+        maxv.srcs[0] = absArg;
+        maxv.srcs[1] = floatLit(1.0f);
+        program_.instrs.push_back(maxv);
+
+        const int t = newVReg();
+        if (vector) {
+            const int invMax = newVReg();
+            emitScalarUnitPerLane(VOp::Rcp, invMax, mask, tempSrc(maxReg),
+                                  false);
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = t;
+            mul.dst.writemask = mask;
+            mul.srcs[0] = tempSrc(minReg);
+            mul.srcs[1] = tempSrc(invMax);
+            program_.instrs.push_back(mul);
+        } else {
+            VInstr div;
+            div.op = VOp::DivR;
+            div.dst.index = t;
+            div.dst.writemask = mask;
+            div.srcs[0] = tempSrc(minReg);
+            div.srcs[1] = tempSrc(maxReg);
+            program_.instrs.push_back(div);
+        }
+
+        const int angle = emitAtanMinimaxPolynomial(t, mask);
+        const int result = define(inst.result);
+        std::array<uint8_t, 4> laneSwizzle = {0, 1, 2, 3};
+
+        VInstr absGtOne;
+        absGtOne.op = VOp::Sgt;
+        absGtOne.dst.none = true;
+        absGtOne.dst.writemask = mask;
+        absGtOne.srcs[0] = absArg;
+        absGtOne.srcs[1] = floatLit(1.0f);
+        absGtOne.ccUpdate = true;
+        program_.instrs.push_back(absGtOne);
+
+        VInstr quad;
+        quad.op = VOp::Add;
+        quad.dst.index = angle;
+        quad.dst.writemask = mask;
+        quad.srcs[0] = tempSrc(angle);
+        quad.srcs[0].neg = true;
+        quad.srcs[1] = floatLit(floatFromBits(kPiOver2Bits));
+        quad.predicate = NVFX_COND_NE;
+        quad.predicateSwizzle = laneSwizzle;
+        program_.instrs.push_back(quad);
+
+        VInstr signCond;
+        signCond.op = VOp::Mov;
+        signCond.dst.none = true;
+        signCond.dst.writemask = mask;
+        signCond.srcs[0] = tempSrc(argReg);
+        signCond.ccUpdate = true;
+        program_.instrs.push_back(signCond);
+
+        VInstr out;
+        out.op = VOp::Mov;
+        out.dst.index = result;
+        out.dst.writemask = mask;
+        out.srcs[0] = tempSrc(angle);
+        program_.instrs.push_back(out);
+
+        VInstr negOut;
+        negOut.op = VOp::Mov;
+        negOut.dst.index = result;
+        negOut.dst.writemask = mask;
+        negOut.srcs[0] = tempSrc(angle);
+        negOut.srcs[0].neg = true;
+        negOut.predicate = NVFX_COND_LT;
+        negOut.predicateSwizzle = laneSwizzle;
+        negOut.stubFenceBrBefore = true;
+        program_.instrs.push_back(negOut);
+    }
+
+    int emitAsinAcosBase(int xReg, int mask)
+    {
+        static constexpr uint32_t kCoeffBits[] = {
+            0xbc996e30u, // -0.018729299, fitted
+            0x3d981627u, //  0.074261002, fitted
+            0xbe593484u, // -0.21211439, fitted
+            0x3fc90da4u, //  1.5707288, fitted, not exact pi/2
+        };
+
+        VSrc absX = tempSrc(xReg);
+        absX.abs = true;
+
+        const int oneMinusAbs = newVReg();
+        VInstr delta;
+        delta.op = VOp::Add;
+        delta.dst.index = oneMinusAbs;
+        delta.dst.writemask = mask;
+        delta.srcs[0] = absX;
+        delta.srcs[0].neg = true;
+        delta.srcs[1] = floatLit(1.0f);
+        program_.instrs.push_back(delta);
+
+        const int poly = newVReg();
+        VInstr seed;
+        seed.op = VOp::Mad;
+        seed.dst.index = poly;
+        seed.dst.writemask = mask;
+        seed.srcs[0] = absX;
+        seed.srcs[1] = floatLit(floatFromBits(kCoeffBits[0]));
+        seed.srcs[2] = floatLit(floatFromBits(kCoeffBits[1]));
+        program_.instrs.push_back(seed);
+        for (size_t i = 2; i < std::size(kCoeffBits); ++i) {
+            VInstr mad;
+            mad.op = VOp::Mad;
+            mad.dst.index = poly;
+            mad.dst.writemask = mask;
+            mad.srcs[0] = absX;
+            mad.srcs[1] = tempSrc(poly);
+            mad.srcs[2] = floatLit(floatFromBits(kCoeffBits[i]));
+            program_.instrs.push_back(mad);
+        }
+
+        const int base = newVReg();
+        if (laneCount(mask) > 1) {
+            // The vector oracle often shares the sqrt side with DIVSQR when
+            // asin and acos appear together: compute sqrt(delta) as
+            // delta / sqrt(delta), then multiply by the fitted polynomial.
+            // DIVSQR(poly, delta) would divide by sqrt(delta), which is the
+            // reciprocal of the required factor.
+            const int sqrtDelta = newVReg();
+            const bool partial = laneCount(mask) > 1;
+            for (int lane = 0; lane < 4; ++lane) {
+                if (!(mask & (1 << lane)))
+                    continue;
+                VInstr divsqrt;
+                divsqrt.op = VOp::DivSqrt;
+                divsqrt.dst.index = sqrtDelta;
+                divsqrt.dst.writemask = 1 << lane;
+                divsqrt.srcs[0] = tempSrc(oneMinusAbs);
+                divsqrt.srcs[0].abs = true;
+                divsqrt.srcs[0].swizzle = {
+                    static_cast<uint8_t>(lane),
+                    static_cast<uint8_t>(lane),
+                    static_cast<uint8_t>(lane),
+                    static_cast<uint8_t>(lane),
+                };
+                divsqrt.srcs[1] = tempSrc(oneMinusAbs);
+                divsqrt.srcs[1].swizzle = divsqrt.srcs[0].swizzle;
+                divsqrt.preservePartialOutputMask = partial;
+                program_.instrs.push_back(divsqrt);
+            }
+
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = base;
+            mul.dst.writemask = mask;
+            mul.srcs[0] = tempSrc(poly);
+            mul.srcs[1] = tempSrc(sqrtDelta);
+            program_.instrs.push_back(mul);
+        } else {
+            const int rsqReg = newVReg();
+            VInstr rsq;
+            rsq.op = VOp::Rsq;
+            rsq.dst.index = rsqReg;
+            rsq.dst.writemask = mask;
+            rsq.srcs[0] = tempSrc(oneMinusAbs);
+            program_.instrs.push_back(rsq);
+
+            VInstr div;
+            div.op = VOp::DivR;
+            div.dst.index = base;
+            div.dst.writemask = mask;
+            div.srcs[0] = tempSrc(poly);
+            div.srcs[1] = tempSrc(rsqReg);
+            program_.instrs.push_back(div);
+        }
+        return base;
+    }
+
+    // asin/acos share a fitted polynomial read from sce-cgc.  The
+    // 0x3fc90da4 coefficient is not exact pi/2; exact pi/2 and pi are used
+    // later only for the sign/quadrant repair and are kept by bits too.
+    void lowerAsinAcos(const IRInstruction& inst, bool acos)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                acos ? "nv40-general: VP acos lowering deferred"
+                     : "nv40-general: VP asin lowering deferred");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        static constexpr uint32_t kPiOver2Bits = 0x3fc90fdbu;
+        static constexpr uint32_t kPiBits = 0x40490fdbu;
+
+        const int mask = componentMask(inst.resultType);
+        const int result = define(inst.result);
+        const VSrc arg = resolve(inst.operands[0]);
+        const int xReg = newVReg();
+
+        VInstr load;
+        load.op = VOp::Mov;
+        load.dst.index = xReg;
+        load.dst.writemask = mask;
+        load.srcs[0] = arg;
+        program_.instrs.push_back(load);
+
+        const int base = emitAsinAcosBase(xReg, mask);
+
+        if (acos) {
+            const int sign = newVReg();
+            VInstr signValue;
+            signValue.op = VOp::Slt;
+            signValue.dst.index = sign;
+            signValue.dst.writemask = mask;
+            signValue.srcs[0] = tempSrc(xReg);
+            signValue.srcs[1] = floatLit(0.0f);
+            program_.instrs.push_back(signValue);
+
+            const int doubledSign = newVReg();
+            VInstr scaleSign;
+            scaleSign.op = VOp::Mov;
+            scaleSign.dst.index = doubledSign;
+            scaleSign.dst.writemask = mask;
+            scaleSign.srcs[0] = tempSrc(sign);
+            scaleSign.fpScale = NVFX_FP_OP_DST_SCALE_2X;
+            program_.instrs.push_back(scaleSign);
+
+            const int signedBase = newVReg();
+            VInstr baseRepair;
+            baseRepair.op = VOp::Mad;
+            baseRepair.dst.index = signedBase;
+            baseRepair.dst.writemask = mask;
+            baseRepair.srcs[0] = tempSrc(doubledSign);
+            baseRepair.srcs[0].neg = true;
+            baseRepair.srcs[1] = tempSrc(base);
+            baseRepair.srcs[2] = tempSrc(base);
+            program_.instrs.push_back(baseRepair);
+
+            VInstr out;
+            out.op = VOp::Mad;
+            out.dst.index = result;
+            out.dst.writemask = mask;
+            out.srcs[0] = tempSrc(sign);
+            out.srcs[1] = floatLit(floatFromBits(kPiBits));
+            out.srcs[2] = tempSrc(signedBase);
+            out.stubFenceBrBefore = true;
+            program_.instrs.push_back(out);
+            return;
+        }
+
+        const int positive = newVReg();
+        VInstr pos;
+        pos.op = VOp::Add;
+        pos.dst.index = positive;
+        pos.dst.writemask = mask;
+        pos.srcs[0] = tempSrc(base);
+        pos.srcs[0].neg = true;
+        pos.srcs[1] = floatLit(floatFromBits(kPiOver2Bits));
+        program_.instrs.push_back(pos);
+
+        const int doubledSign = newVReg();
+        VInstr signValue;
+        signValue.op = VOp::Slt;
+        signValue.dst.index = doubledSign;
+        signValue.dst.writemask = mask;
+        signValue.srcs[0] = tempSrc(xReg);
+        signValue.srcs[1] = floatLit(0.0f);
+        signValue.fpScale = NVFX_FP_OP_DST_SCALE_2X;
+        program_.instrs.push_back(signValue);
+
+        VInstr out;
+        out.op = VOp::Mad;
+        out.dst.index = result;
+        out.dst.writemask = mask;
+        out.srcs[0] = tempSrc(doubledSign);
+        out.srcs[0].neg = true;
+        out.srcs[1] = tempSrc(positive);
+        out.srcs[2] = tempSrc(positive);
+        out.stubFenceBrBefore = true;
+        program_.instrs.push_back(out);
     }
 
     // atan2(y, x) (t_a7dd471f), read from sce-cgc before implementation.

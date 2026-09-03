@@ -1,0 +1,7 @@
+void main(float4 c : COLOR0, out float4 o : COLOR)
+{
+    float x = saturate(c.y * 1.25 + 0.125) * 2.0 - 1.0;
+    float a = asin(x);
+    float b = acos(x);
+    o = float4(a, b, a + b, 1.0);
+}

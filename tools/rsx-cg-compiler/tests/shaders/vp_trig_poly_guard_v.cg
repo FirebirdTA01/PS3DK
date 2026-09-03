@@ -1,0 +1,5 @@
+void main(float4 pos : POSITION, float4 c : COLOR0, out float4 oPos : POSITION, out float4 oCol : COLOR0)
+{
+    oPos = pos;
+    oCol = float4(atan(c.x), asin(saturate(c.y)), acos(saturate(c.z)), 1.0);
+}

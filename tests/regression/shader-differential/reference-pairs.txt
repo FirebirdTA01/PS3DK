@@ -336,6 +336,17 @@ tools/rsx-cg-compiler/tests/shaders/fp_atan2_scalar_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_atan2_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_atan2_swizzle_f.cg|auto|general
 
+# t_a7dd471f asin/acos/atan slice: atan shares atan2's minimax polynomial,
+# while asin and acos share a separate fitted table.  Keep scalar plus both
+# vector rows for each family: scalar pins DIVR, lanes pin scalar-unit
+# width, and swizzle pins composition through the operand swizzle.
+tools/rsx-cg-compiler/tests/shaders/fp_atan_scalar_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_atan_lanes_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_atan_swizzle_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_scalar_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_lanes_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_swizzle_f.cg|auto|general
+
 # t_71ad405e: stdlib dot-reductions must use the source width.  The length
 # float2 row is the pixel witness for the stale-lane failure: its float3
 # source has a non-zero z lane, and the broken lowering reuses that physical
