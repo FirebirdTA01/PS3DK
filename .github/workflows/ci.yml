@@ -135,6 +135,8 @@ jobs:
 
       - name: Test rsx-cg-compiler vertex literal pool
         run: bash tests/shader-compiler/vp-literal-vector-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler VP opcode fallthrough
+        run: bash tests/shader-compiler/vp-opcode-fallthrough-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler int literals in float constructors
         run: bash tests/shader-compiler/int-literal-ctor-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

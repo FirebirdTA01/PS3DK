@@ -5275,35 +5275,68 @@ static uint8_t fpOpcode(VOp op)
 #define VP_OP(NAME) ((NVFX_VP_INST_SLOT_VEC << 7) | NVFX_VP_INST_VEC_OP_##NAME)
 #define VP_SCA_OP(NAME) ((NVFX_VP_INST_SLOT_SCA << 7) | NVFX_VP_INST_SCA_OP_##NAME)
 
-static uint8_t vpOpcode(VOp op)
+static const char* vOpName(VOp op)
 {
     switch (op) {
-    case VOp::Mov: return VP_OP(MOV);
-    case VOp::Add: return VP_OP(ADD);
-    case VOp::Mul: return VP_OP(MUL);
-    case VOp::Mad: return VP_OP(MAD);
-    case VOp::Dp3: return VP_OP(DP3);
-    case VOp::Dp4: return VP_OP(DP4);
-    case VOp::Max: return VP_OP(MAX);
-    case VOp::Min: return VP_OP(MIN);
-    case VOp::Rcp: return VP_SCA_OP(RCP);
-    case VOp::Rsq: return VP_SCA_OP(RSQ);
-    case VOp::Sin: return VP_SCA_OP(SIN);
-    case VOp::Cos: return VP_SCA_OP(COS);
-    case VOp::Lg2: return VP_SCA_OP(LG2);
-    case VOp::Ex2: return VP_SCA_OP(EX2);
-    case VOp::Frc: return VP_OP(FRC);
-    case VOp::Flr: return VP_OP(FLR);
-    case VOp::Sge: return VP_OP(SGE);
-    case VOp::Slt: return VP_OP(SLT);
-    case VOp::Sgt: return VP_OP(SGT);
-    case VOp::Sle: return VP_OP(SLE);
-    case VOp::Seq: return VP_OP(SEQ);
-    case VOp::Sne: return VP_OP(SNE);
-    case VOp::DivSqrt:
-    case VOp::Tex: return VP_OP(MOV); // VP texture fetch is intentionally unsupported.
+    case VOp::Mov: return "Mov";
+    case VOp::Add: return "Add";
+    case VOp::Mul: return "Mul";
+    case VOp::Mad: return "Mad";
+    case VOp::Dp2: return "Dp2";
+    case VOp::Dp3: return "Dp3";
+    case VOp::Dp4: return "Dp4";
+    case VOp::Min: return "Min";
+    case VOp::Max: return "Max";
+    case VOp::Rcp: return "Rcp";
+    case VOp::Rsq: return "Rsq";
+    case VOp::Sin: return "Sin";
+    case VOp::Cos: return "Cos";
+    case VOp::Lg2: return "Lg2";
+    case VOp::Ex2: return "Ex2";
+    case VOp::DivSqrt: return "DivSqrt";
+    case VOp::Frc: return "Frc";
+    case VOp::Flr: return "Flr";
+    case VOp::Sge: return "Sge";
+    case VOp::Slt: return "Slt";
+    case VOp::Sgt: return "Sgt";
+    case VOp::Sle: return "Sle";
+    case VOp::Seq: return "Seq";
+    case VOp::Sne: return "Sne";
+    case VOp::Tex: return "Tex";
+    case VOp::Ftoi: return "Ftoi";
+    case VOp::SelPred: return "SelPred";
+    case VOp::Kil: return "Kil";
     }
-    return VP_OP(MOV);
+    return "unknown";
+}
+
+static bool tryVpOpcode(VOp op, uint8_t& opcode)
+{
+    switch (op) {
+    case VOp::Mov: opcode = VP_OP(MOV); return true;
+    case VOp::Add: opcode = VP_OP(ADD); return true;
+    case VOp::Mul: opcode = VP_OP(MUL); return true;
+    case VOp::Mad: opcode = VP_OP(MAD); return true;
+    case VOp::Dp3: opcode = VP_OP(DP3); return true;
+    case VOp::Dp4: opcode = VP_OP(DP4); return true;
+    case VOp::Max: opcode = VP_OP(MAX); return true;
+    case VOp::Min: opcode = VP_OP(MIN); return true;
+    case VOp::Rcp: opcode = VP_SCA_OP(RCP); return true;
+    case VOp::Rsq: opcode = VP_SCA_OP(RSQ); return true;
+    case VOp::Sin: opcode = VP_SCA_OP(SIN); return true;
+    case VOp::Cos: opcode = VP_SCA_OP(COS); return true;
+    case VOp::Lg2: opcode = VP_SCA_OP(LG2); return true;
+    case VOp::Ex2: opcode = VP_SCA_OP(EX2); return true;
+    case VOp::Frc: opcode = VP_OP(FRC); return true;
+    case VOp::Flr: opcode = VP_OP(FLR); return true;
+    case VOp::Sge: opcode = VP_OP(SGE); return true;
+    case VOp::Slt: opcode = VP_OP(SLT); return true;
+    case VOp::Sgt: opcode = VP_OP(SGT); return true;
+    case VOp::Sle: opcode = VP_OP(SLE); return true;
+    case VOp::Seq: opcode = VP_OP(SEQ); return true;
+    case VOp::Sne: opcode = VP_OP(SNE); return true;
+    default: return false;
+    }
 }
 
 static bool hasUnsupportedSource(const VInstr& vi, std::string& why)
@@ -6056,16 +6089,24 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             out.diagnostics.push_back("nv40-general-vp: texture fetch unsupported in VP");
             return out;
         }
+        uint8_t opcode = 0;
+        if (!tryVpOpcode(vi.op, opcode)) {
+            out.diagnostics.push_back(
+                std::string("nv40-general-vp: unsupported VP VOp ") +
+                vOpName(vi.op));
+            return out;
+        }
         if (i + 1 < program.instrs.size()) {
             const VInstr& next = program.instrs[i + 1];
-            if (canCoissueVp(vi, next)) {
-                asm_.emitCoIssued(makeInsn(next), vpOpcode(next.op),
-                                  makeInsn(vi), vpOpcode(vi.op));
+            uint8_t nextOpcode = 0;
+            if (tryVpOpcode(next.op, nextOpcode) && canCoissueVp(vi, next)) {
+                asm_.emitCoIssued(makeInsn(next), nextOpcode,
+                                  makeInsn(vi), opcode);
                 ++i;
                 continue;
             }
         }
-        asm_.emit(makeInsn(vi), vpOpcode(vi.op));
+        asm_.emit(makeInsn(vi), opcode);
     }
     if (asm_.empty()) {
         out.diagnostics.push_back("nv40-general-vp: no instructions emitted");
