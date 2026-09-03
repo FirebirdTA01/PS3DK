@@ -117,28 +117,28 @@ enum class VOp
     Sne,
     Tex,
     // t_a7dd471f: float-to-int is one condition-register sequence, not
-    // independent VInstrs.  The scheduler only tracks temp dependencies;
-    // if MOVRC and the LT-predicated sign restore are separate nodes, the
-    // condition-code write can legally move after the restore.
+    // independent VInstrs.  It predates the scheduler's condition-register
+    // dependency key and stays atomic so the sign-restore shape cannot be
+    // torn apart.
     Ftoi,
     // CF-1b pseudo-op: predicated select, one VInstr carrying
     // (cond, thenVal, elseVal) that the FP emitter expands to three
     // hardware instructions (MOV default; CC-set from cond; CC-gated
     // commit).  A single node on purpose: the ordering pass tracks
-    // only temp-read dependencies — no CC hazards, no same-register
-    // write-after-write — so a three-VInstr sequence could be torn
-    // apart or reordered against another CC writer.  One node makes
-    // the sequence atomic by construction, the same shape as the
-    // default path's PredCarry (one IR op, several hw instructions).
+    // only temp-read dependencies when this was written — no CC hazards,
+    // no same-register write-after-write — so a three-VInstr sequence could
+    // be torn apart or reordered against another CC writer.  One node keeps
+    // the sequence atomic by construction, the same shape as the default
+    // path's PredCarry (one IR op, several hw instructions).
     SelPred,
     // CF-2 pseudo-op: a fragment kill.  ONE VInstr carrying the
     // instruction that computes the guard, expanded by the FP emitter
     // into two hardware instructions - the guard's producer retargeted
     // to the condition register with cc_update, then KIL testing that
     // register.  Atomic for exactly SelPred's reason: the ordering pass
-    // tracks temp reads and knows nothing about the condition register,
-    // so a separate CC writer and KIL could be torn apart, or another
-    // CC writer scheduled between them.
+    // tracked temp reads and knew nothing about the condition register when
+    // this was written, so a separate CC writer and KIL could be torn apart,
+    // or another CC writer scheduled between them.
     Kil
 };
 
@@ -190,6 +190,7 @@ struct VInstr
     bool sat = false;
     bool ccUpdate = false;
     int  predicate = 0;
+    std::array<uint8_t, 4> predicateSwizzle = {0, 0, 0, 0};
     int  texUnit = 0;
     bool disablePc = false;
     int  fpScale = 0;
@@ -982,6 +983,7 @@ private:
         // Vertex outputs live in their own register file; give them a key
         // space that cannot collide with a temp index.
         constexpr int kOutputKeyBase = 1 << 16;
+        constexpr int kConditionKey = 2 << 16;
         std::unordered_map<int, std::vector<size_t>> writers, readers;
         const auto link = [&](size_t from, size_t to) {
             // A self-edge is FATAL, not merely redundant: indegree never
@@ -999,6 +1001,15 @@ private:
             }
         };
 
+        const auto readsConditionRegister = [](const VInstr& vi) {
+            return vi.predicate != 0 || vi.op == VOp::Kil ||
+                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred;
+        };
+        const auto writesConditionRegister = [](const VInstr& vi) {
+            return vi.ccUpdate || vi.op == VOp::Kil ||
+                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred;
+        };
+
         for (size_t i = 0; i < n; ++i) {
             const VInstr& vi = program_.instrs[i];
             for (const VSrc& src : vi.srcs) {
@@ -1007,6 +1018,18 @@ private:
                 for (size_t w : writers[src.index])      // RAW
                     link(w, i);
                 readers[src.index].push_back(i);
+            }
+            if (readsConditionRegister(vi)) {
+                for (size_t w : writers[kConditionKey])
+                    link(w, i);
+                readers[kConditionKey].push_back(i);
+            }
+            if (writesConditionRegister(vi)) {
+                for (size_t w : writers[kConditionKey])
+                    link(w, i);
+                for (size_t r : readers[kConditionKey])
+                    link(r, i);
+                writers[kConditionKey].push_back(i);
             }
             if (!vi.dst.none) {
                 // OUTPUT destinations belong in this graph too, and used
@@ -5988,7 +6011,9 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             emittedInstruction = true;
             continue;
         }
-        struct nvfx_reg dst = vi.dst.output
+        struct nvfx_reg dst = vi.dst.none
+            ? nvfx_reg(NVFXSR_NONE, 0x3F)
+            : vi.dst.output
             ? nvfx_reg(NVFXSR_OUTPUT, vi.dst.index)
             : nvfx_reg(NVFXSR_TEMP, vi.dst.phys);
         dst.is_fp16 = vi.dst.fp16 ? 1 : 0;
@@ -6040,6 +6065,14 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             insn.scale = vi.fpScale;
         if (vi.disablePc)
             insn.disable_pc = 1;
+        if (vi.ccUpdate)
+            insn.cc_update = 1;
+        if (vi.predicate) {
+            insn.cc_test = 1;
+            insn.cc_cond = vi.predicate;
+            for (int lane = 0; lane < 4; ++lane)
+                insn.cc_swz[lane] = vi.predicateSwizzle[lane];
+        }
         asm_.emit(insn, fpOpcode(vi.op));
         emittedInstruction = true;
         for (const VSrc& src : srcs) {
@@ -6200,8 +6233,8 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         if (vi.predicate) {
             insn.cc_test = 1;
             insn.cc_cond = vi.predicate;
-            insn.cc_swz[0] = insn.cc_swz[1] =
-                insn.cc_swz[2] = insn.cc_swz[3] = 0;
+            for (int lane = 0; lane < 4; ++lane)
+                insn.cc_swz[lane] = vi.predicateSwizzle[lane];
         }
         return insn;
     };
