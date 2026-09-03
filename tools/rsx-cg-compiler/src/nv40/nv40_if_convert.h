@@ -58,10 +58,59 @@
  *      inner OP re-executed against Rdst(NE.x) so it only commits
  *      when the predicate fires.  See nv40_fp_emit's PredCarry handler.
  *
- * Anything else (full if-else with multi-insn both branches, non-Output
- * writes inside the branches, nested diamonds) is left alone — the
- * NV40 FP emit path will emit a "control flow not yet supported"
- * diagnostic in that case.
+ *   4. If-only with NO per-branch StoreOutput.  IRBuilder has already
+ *      synthesised a Select at the merge for any local redefined inside
+ *      THEN, and the merge carries the StoreOutput / Return.  This is
+ *      the uniform-conditional shape from the SDK samples:
+ *
+ *          if (gFunctionSwitch != 0.0) { c = c * tex2D(...); }
+ *          c.a = 1.0;  return c;
+ *
+ *      THEN must hold only pure ops (isPureOp) ending in an
+ *      unconditional Branch to the merge, and the ELSE edge must be
+ *      that same merge.  THEN's body is hoisted into entry before the
+ *      CondBranch, the CondBranch and THEN are dropped, and the merge -
+ *      now single-predecessor - is inlined into entry.
+ *
+ *   5. If-only whose THEN is a `discard`.  The discard is hoisted into
+ *      entry before the CondBranch, the CondBranch becomes an
+ *      unconditional Branch to the join, the discard block is removed,
+ *      and a single-predecessor join is inlined.
+ *
+ * THE PASS ITERATES TO A FIXPOINT.  `convertSimpleIfElse` re-runs the
+ * whole matcher until a round changes nothing, rebuilding the
+ * value→type map each time because collapsing a diamond synthesises new
+ * Select values.  So a NESTED diamond does collapse from the inside out,
+ * in a handful of rounds - it is not left alone, and the note below
+ * saying so was written before the loop existed.
+ *
+ * What genuinely is left alone: a full if-else whose branches are
+ * multi-instruction, non-Output writes inside the branches, and any nest
+ * whose INNER arm matches none of the five shapes.  That last one stalls
+ * the whole nest, and today the refusal names the OUTER shape - a
+ * wrong-cause diagnostic, and its own defect rather than this pass's
+ * intent.
+ *
+ * ORDERING CONSTRAINT, and it is the one an outside reader will miss:
+ * `materialiseDiscardGuards` MUST RUN BEFORE THIS PASS (see main.cpp,
+ * where it does).  Shape 5 hoists a then-arm discard into the entry
+ * block and DELETES the CondBranch, after which the discard's guard is
+ * recoverable only by POSITION.  Give every discard its path condition
+ * while the control flow is still intact, or a conditional kill quietly
+ * becomes an unconditional one.
+ *
+ * Note the asymmetry that follows from it: this pass runs on BOTH
+ * lowering paths, while guard materialisation runs on the general path
+ * only.  On the legacy matcher the guard is therefore still recovered by
+ * position, which holds for a single-level `if (cond) discard;` - both
+ * paths emit the comparison and a KIL under NE - and is exactly the
+ * fragility the guard pass was written to remove for anything nested.
+ *
+ * FINALLY, FOR ANYONE READING THIS AS A SPECIFICATION - and someone
+ * has: this pass PREDATES the general lowering path, which resolves
+ * diamonds through its own SelPred lowering and discards through guard
+ * expression trees.  The live design is there.  This pass is where the
+ * shapes were learned, and it still runs, but it is not the whole story.
  */
 
 class IRModule;
