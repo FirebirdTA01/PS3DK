@@ -305,3 +305,10 @@ tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_lanes_f.cg|auto|general
 # component n for lane n).  exp2/log2/sin on swizzled vectors, output
 # lanes read cross-component.  Red on cbb762e for that reason.
 tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_swizzle_f.cg|auto|general
+# t_a7dd471f ftoi/itof slice: signed truncation lowers through MOVRC,
+# FLR of the absolute value, LT-predicated sign restore and FENCBR
+# before the final value use.  Keep both rows: the first catches lane
+# broadcast/collapse, the second catches raw-lane reads through a
+# swizzled argument.
+tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_lanes_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_swizzle_f.cg|auto|general

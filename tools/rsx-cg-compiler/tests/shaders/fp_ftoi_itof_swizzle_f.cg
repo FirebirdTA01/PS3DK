@@ -1,0 +1,12 @@
+// Companion to fp_ftoi_itof_lanes_f: the signed truncation must compose
+// through the argument's swizzle rather than reading raw lane N for lane N.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 v = c.wzyx * 15.0 - 7.5;
+    float4 f = float4(
+        (float)((int)v.x),
+        (float)((int)v.y),
+        (float)((int)v.z),
+        (float)((int)v.w));
+    o = float4(f.x, f.y, f.z, 1.0) * 0.0625 + 0.5;
+}

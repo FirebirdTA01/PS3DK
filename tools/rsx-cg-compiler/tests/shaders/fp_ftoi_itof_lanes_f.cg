@@ -1,0 +1,13 @@
+// t_a7dd471f: float-to-int and int-to-float must preserve each lane.
+// The reference lowers the signed truncation through MOVRC + FLR +
+// a LT-predicated sign restore, with a FENCBR before the final value use.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 v = c * 15.0 - 7.5;
+    float4 f = float4(
+        (float)((int)v.x),
+        (float)((int)v.y),
+        (float)((int)v.z),
+        (float)((int)v.w));
+    o = f * 0.0625 + 0.5;
+}

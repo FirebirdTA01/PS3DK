@@ -107,6 +107,11 @@ enum class VOp
     Seq,
     Sne,
     Tex,
+    // t_a7dd471f: float-to-int is one condition-register sequence, not
+    // independent VInstrs.  The scheduler only tracks temp dependencies;
+    // if MOVRC and the LT-predicated sign restore are separate nodes, the
+    // condition-code write can legally move after the restore.
+    Ftoi,
     // CF-1b pseudo-op: predicated select, one VInstr carrying
     // (cond, thenVal, elseVal) that the FP emitter expands to three
     // hardware instructions (MOV default; CC-set from cond; CC-gated
@@ -1649,6 +1654,12 @@ private:
         case IROp::HalfToFloat:
             lowerPrecisionCast(inst, false);
             return;
+        case IROp::FloatToInt:
+            lowerFloatToInt(inst);
+            return;
+        case IROp::IntToFloat:
+            lowerIntToFloat(inst);
+            return;
         case IROp::Select:
             lowerSelect(inst);
             return;
@@ -2551,6 +2562,55 @@ private:
         mul.srcs[0] = tempSrc(mag);
         mul.srcs[1] = tempSrc(gt);
         program_.instrs.push_back(mul);
+    }
+
+    void lowerFloatToInt(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP float-to-int lowering deferred");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const int mask = componentMask(inst.resultType);
+        const int result = define(inst.result);
+        const VSrc arg = resolve(inst.operands[0]);
+
+        for (int lane = 0; lane < 4; ++lane) {
+            if (!(mask & (1 << lane)))
+                continue;
+
+            const uint8_t comp = arg.swizzle[lane];
+            VInstr vi;
+            vi.op = VOp::Ftoi;
+            vi.dst.index = result;
+            vi.dst.writemask = 1 << lane;
+            vi.srcs[0] = arg;
+            vi.srcs[0].swizzle = {comp, comp, comp, comp};
+            vi.preservePartialOutputMask = laneCount(mask) > 1;
+            program_.instrs.push_back(vi);
+        }
+    }
+
+    void lowerIntToFloat(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP int-to-float lowering deferred");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        VInstr mov;
+        mov.op = VOp::Mov;
+        mov.dst.index = define(inst.result);
+        mov.dst.writemask = componentMask(inst.resultType);
+        mov.srcs[0] = resolve(inst.operands[0]);
+        mov.stubFenceBrBefore = true;
+        program_.instrs.push_back(mov);
     }
 
     // sqrt(x) = rcp(rsq(x)): two native scalar ops, and the composition
@@ -5001,6 +5061,7 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Seq: return NVFX_FP_OP_OPCODE_SEQ;
     case VOp::Sne: return NVFX_FP_OP_OPCODE_SNE;
     case VOp::Tex: return NVFX_FP_OP_OPCODE_TEX;
+    case VOp::Ftoi: return NVFX_FP_OP_OPCODE_MOV;
     }
     return NVFX_FP_OP_OPCODE_MOV;
 }
@@ -5400,6 +5461,71 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             asm_.emit(kil, NVFX_FP_OP_OPCODE_KIL);
             // One $kill_NNNN container parameter per discard STATEMENT.
             attrs.pixelKillCount += 1;
+            emittedInstruction = true;
+            continue;
+        }
+        if (vi.op == VOp::Ftoi) {
+            if (vi.dst.phys < 0) {
+                out.diagnostics.push_back(
+                    "nv40-general: FloatToInt destination has no "
+                    "physical register; refusing");
+                return out;
+            }
+
+            auto appendConstFor = [&](const VSrc& src) {
+                if (src.kind == VSrcKind::Uniform) {
+                    const uint32_t offset = asm_.currentByteSize();
+                    recordFpUniformOffset(
+                        attrs, static_cast<unsigned>(src.index), offset);
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+                } else if (src.kind == VSrcKind::Literal) {
+                    asm_.appendConstBlock(src.literal.data());
+                }
+            };
+
+            struct nvfx_reg dst = nvfx_reg(NVFXSR_TEMP, vi.dst.phys);
+            dst.is_fp16 = vi.dst.fp16 ? 1 : 0;
+            struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+            const VSrc none{};
+
+            struct nvfx_insn movc = nvfx_insn(
+                0, 0, -1, -1, ccDst, NVFX_FP_MASK_X,
+                nvfxSource(vi.srcs[0]), nvfxSource(none),
+                nvfxSource(none));
+            movc.cc_update = 1;
+            asm_.emit(movc, NVFX_FP_OP_OPCODE_MOV);
+            appendConstFor(vi.srcs[0]);
+
+            VSrc absSrc = vi.srcs[0];
+            absSrc.abs = true;
+            absSrc.neg = false;
+            struct nvfx_insn flr = nvfx_insn(
+                0, 0, -1, -1, dst, vi.dst.writemask,
+                nvfxSource(absSrc), nvfxSource(none), nvfxSource(none));
+            asm_.emit(flr, NVFX_FP_OP_OPCODE_FLR);
+            appendConstFor(absSrc);
+
+            VSrc self = tempSrc(vi.dst.index);
+            self.phys = vi.dst.phys;
+            self.fp16 = vi.dst.fp16;
+            int lane = 0;
+            while (lane < 3 && !(vi.dst.writemask & (1 << lane)))
+                ++lane;
+            self.swizzle = {static_cast<uint8_t>(lane),
+                            static_cast<uint8_t>(lane),
+                            static_cast<uint8_t>(lane),
+                            static_cast<uint8_t>(lane)};
+            self.neg = true;
+            struct nvfx_insn restore = nvfx_insn(
+                0, 0, -1, -1, dst, vi.dst.writemask,
+                nvfxSource(self), nvfxSource(none), nvfxSource(none));
+            restore.cc_test = 1;
+            restore.cc_cond = NVFX_COND_LT;
+            restore.cc_swz[0] = restore.cc_swz[1] =
+                restore.cc_swz[2] = restore.cc_swz[3] = 0;
+            asm_.emit(restore, NVFX_FP_OP_OPCODE_MOV);
+
             emittedInstruction = true;
             continue;
         }
