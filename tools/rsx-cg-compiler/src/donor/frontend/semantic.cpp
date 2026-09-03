@@ -1,9 +1,51 @@
 #include "semantic.h"
 #include <algorithm>
 #include <cctype>
+#include <limits>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <iostream>  // For debug output
+
+namespace
+{
+std::optional<int64_t> constantIntegerIndex(const ExprNode* expr)
+{
+    if (!expr)
+        return std::nullopt;
+
+    if (expr->kind == ExprKind::Literal)
+    {
+        const auto* lit = static_cast<const LiteralExpr*>(expr);
+        if (lit->literalKind == LiteralExpr::LiteralKind::Int)
+            return std::get<int64_t>(lit->value);
+        return std::nullopt;
+    }
+
+    if (expr->kind == ExprKind::Unary)
+    {
+        const auto* unary = static_cast<const UnaryExpr*>(expr);
+        if (unary->op != UnaryOp::Negate)
+            return std::nullopt;
+
+        std::optional<int64_t> value = constantIntegerIndex(unary->operand.get());
+        if (!value || *value == std::numeric_limits<int64_t>::min())
+            return std::nullopt;
+        return -*value;
+    }
+
+    return std::nullopt;
+}
+
+bool constantIndexInRange(int elementCount, const std::optional<int64_t>& index)
+{
+    if (!index)
+        return true;
+    if (*index >= 0 && *index < elementCount)
+        return true;
+    return false;
+}
+}
 
 // ============================================================================
 // SemanticDiagnostic Implementation
@@ -805,6 +847,8 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
         return CgType::Error();
     }
 
+    std::optional<int64_t> constantIndex = constantIntegerIndex(expr->index.get());
+
     // Check array/vector indexing
     if (arrayType.isArray())
     {
@@ -812,6 +856,12 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
     }
     else if (arrayType.isVector())
     {
+        if (!constantIndexInRange(arrayType.vectorSize(), constantIndex))
+        {
+            error(expr->index->loc, "array index out of bounds for type '" +
+                  arrayType.toString() + "'");
+            return CgType::Error();
+        }
         // Indexing a vector returns a scalar
         return CgType::Scalar(arrayType.scalarKind());
     }
