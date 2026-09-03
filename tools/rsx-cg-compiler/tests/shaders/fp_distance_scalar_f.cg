@@ -1,0 +1,12 @@
+// t_71ad405e: distance(float,float) is abs(a-b), not a dot reduction.
+//
+// The operands come from a float3 with a non-zero z lane so the broken
+// lowering can reuse that physical slot, overwrite x only, then read xyz
+// with DP3.  This makes the scalar case the same stale-lane bug one width
+// below distance(float2,float2).
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float3 p = c.xyz * float3(0.125, 0.25, 8.0);
+    float dist = distance(p.x, p.y);
+    o = float4(dist, dist, dist, 1.0);
+}

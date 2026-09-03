@@ -159,8 +159,8 @@ jobs:
 
       - name: Test rsx-cg-compiler dot width
         run: bash tests/shader-compiler/dot-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test rsx-cg-compiler two-component dot width
-        run: bash tests/shader-compiler/dot2-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler dot-reduction width
+        run: bash tests/shader-compiler/dot-reduction-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler half precision
         run: bash tests/shader-compiler/half-precision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler lowering-path flags

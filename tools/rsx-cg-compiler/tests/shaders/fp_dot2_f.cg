@@ -12,9 +12,9 @@
 // has measured what the reference does with a scalar dot, and guessing it
 // into the same change would be the same mistake in the other direction.
 //
-// Reachable through dot, length, distance and normalize on any float2 -
-// test_57_discard in the corpus computes length(float2), which is why its
-// pixels could not be judged until this landed.
+// Reachable through dot, length, distance, normalize and reflect on any
+// float2 - test_57_discard in the corpus computes length(float2), which is
+// why its pixels could not be judged until this landed.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)
 {
     float2 v = c.xy * 8.0;

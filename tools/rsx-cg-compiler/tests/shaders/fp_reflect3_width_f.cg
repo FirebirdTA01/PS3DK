@@ -1,0 +1,12 @@
+// t_71ad405e: reflect(float3,float3) is the oracle-accepted reflect width.
+//
+// reflect(float2) and reflect(float4) are overload-parity questions because
+// sce-cgc rejects them.  This row pins the width-3 path that this lowering
+// does support, so the conditional dot-width rule remains judged.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    float3 i = c.xyz * float3(0.25, 0.5, 0.75);
+    float3 n = normalize(d.xyz * float3(0.5, 0.375, 0.25) + 0.125);
+    float3 r = reflect(i, n);
+    o = float4(r, 1.0);
+}

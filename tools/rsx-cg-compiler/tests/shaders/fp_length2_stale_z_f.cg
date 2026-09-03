@@ -1,0 +1,12 @@
+// t_71ad405e: length(float2) must not read a stale third lane.
+//
+// The float3 producer and the length temp reuse the same physical register
+// on the broken lowering.  The length load overwrites xy only, leaving p.z
+// live in the physical z lane; a DP3 then computes length(float3(p.xy,p.z))
+// instead of length(p.xy).  This is a pixel witness, not only a byte witness.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float3 p = c.xyz * float3(0.125, 0.125, 8.0);
+    float l = length(p.xy);
+    o = float4(l, l, l, 1.0);
+}

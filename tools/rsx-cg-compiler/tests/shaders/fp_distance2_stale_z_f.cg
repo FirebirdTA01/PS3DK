@@ -1,0 +1,11 @@
+// t_71ad405e: distance(float2,float2) is the same narrow-dot rule as length.
+//
+// The operands are built as float3s with non-zero z lanes, then sliced to xy.
+// A DP3 over the two-wide delta reads a lane outside the source value.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    float3 a = c.xyz * float3(0.125, 0.25, 8.0);
+    float3 b = d.xyz * float3(0.5, 0.375, 4.0);
+    float dist = distance(a.xy, b.xy);
+    o = float4(dist, dist, dist, 1.0);
+}

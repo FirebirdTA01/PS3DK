@@ -1,0 +1,6 @@
+// t_71ad405e: length(float) is abs(x), not a dot reduction.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float l = length(c.x - 0.5);
+    o = float4(l, l, l, 1.0);
+}

@@ -319,3 +319,19 @@ tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_variable_edges_f.cg|auto|general
+
+# t_71ad405e: stdlib dot-reductions must use the source width.  The length
+# float2 row is the pixel witness for the stale-lane failure: its float3
+# source has a non-zero z lane, and the broken lowering reuses that physical
+# slot, overwrites only xy, then reads xyz with DP3.  The other rows keep
+# the sibling entry points judged too, including the float4 side where DP3
+# drops w.
+tools/rsx-cg-compiler/tests/shaders/fp_length_scalar_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_length2_stale_z_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_distance2_stale_z_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_normalize2_stale_z_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_distance_scalar_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_reflect3_width_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_length4_width_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_distance4_width_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_normalize4_width_f.cg|auto|general

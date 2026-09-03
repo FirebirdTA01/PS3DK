@@ -1,0 +1,7 @@
+// t_71ad405e: normalize(float4) must compute its reciprocal length with DP4
+// and scale all four lanes.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 n = normalize(c * float4(0.125, 0.25, 0.5, 0.75));
+    o = float4(n.x, n.y, n.z, n.w);
+}

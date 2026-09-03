@@ -1,0 +1,10 @@
+// t_71ad405e: normalize(float2) must compute its reciprocal length with DP2.
+//
+// This keeps the normalize entry point in the same stale-lane family as
+// dot, length and distance.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float3 p = c.xyz * float3(0.125, 0.25, 8.0);
+    float2 n = normalize(p.xy);
+    o = float4(n.x, n.y, 0.0, 1.0);
+}

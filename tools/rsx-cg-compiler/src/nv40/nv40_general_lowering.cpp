@@ -3004,16 +3004,30 @@ private:
             return;
         }
 
+        const int width = valueWidthOf(inst.operands[0]);
+        if (width == 1) {
+            VInstr absValue;
+            absValue.op = VOp::Mov;
+            absValue.dst.index = define(inst.result);
+            absValue.dst.writemask = componentMask(inst.resultType);
+            absValue.srcs[0] = resolve(inst.operands[0]);
+            absValue.srcs[0].abs = true;
+            program_.instrs.push_back(absValue);
+            return;
+        }
+
+        const int reduceWidth = dotReductionWidth(width);
+        const int reduceMask = componentMaskForWidth(reduceWidth);
         const int lenSq = newVReg();
         VInstr load;
         load.op = VOp::Mov;
         load.dst.index = lenSq;
-        load.dst.writemask = valueComponentMask(inst.operands[0]) & 0x7;
+        load.dst.writemask = reduceMask;
         load.srcs[0] = resolve(inst.operands[0]);
         program_.instrs.push_back(load);
 
         VInstr dp;
-        dp.op = VOp::Dp3;
+        dp.op = dotReductionOp(reduceWidth);
         dp.dst.index = lenSq;
         dp.dst.writemask = 0x1;
         dp.srcs[0] = tempSrc(lenSq);
@@ -3049,11 +3063,16 @@ private:
 
         const int result = define(inst.result);
         VSrc src = resolve(inst.operands[0]);
+        const int width = dotReductionWidth(valueWidthOf(inst.operands[0]));
+        const int mask = componentMaskForWidth(width);
+        const int dotReg = width >= 4 ? newVReg() : result;
+        const int dotLaneMask = width >= 4 ? 0x1 : 0x8;
+        const uint8_t dotLane = width >= 4 ? 0 : 3;
 
         VInstr dp;
-        dp.op = VOp::Dp3;
-        dp.dst.index = result;
-        dp.dst.writemask = 0x8;
+        dp.op = dotReductionOp(width);
+        dp.dst.index = dotReg;
+        dp.dst.writemask = dotLaneMask;
         dp.srcs[0] = src;
         dp.srcs[1] = src;
         dp.disablePc = true;
@@ -3062,7 +3081,7 @@ private:
         VInstr load;
         load.op = VOp::Mov;
         load.dst.index = result;
-        load.dst.writemask = 0x7;
+        load.dst.writemask = mask;
         load.srcs[0] = src;
         load.disablePc = true;
         program_.instrs.push_back(load);
@@ -3070,10 +3089,10 @@ private:
         VInstr norm;
         norm.op = VOp::DivSqrt;
         norm.dst.index = result;
-        norm.dst.writemask = 0x7;
+        norm.dst.writemask = mask;
         norm.srcs[0] = tempSrc(result);
-        norm.srcs[1] = tempSrc(result);
-        norm.srcs[1].swizzle = {3, 3, 3, 3};
+        norm.srcs[1] = tempSrc(dotReg);
+        norm.srcs[1].swizzle = {dotLane, dotLane, dotLane, dotLane};
         program_.instrs.push_back(norm);
     }
 
@@ -3748,18 +3767,43 @@ private:
             return;
         }
 
+        const int operandWidth = std::max(valueWidthOf(inst.operands[0]),
+                                          valueWidthOf(inst.operands[1]));
+        if (operandWidth == 1) {
+            const int result = define(inst.result);
+            VInstr delta;
+            delta.op = VOp::Add;
+            delta.dst.index = result;
+            delta.dst.writemask = componentMask(inst.resultType);
+            delta.srcs[0] = resolve(inst.operands[0]);
+            delta.srcs[1] = resolve(inst.operands[1]);
+            delta.srcs[1].neg = true;
+            program_.instrs.push_back(delta);
+
+            VInstr absValue;
+            absValue.op = VOp::Mov;
+            absValue.dst.index = result;
+            absValue.dst.writemask = componentMask(inst.resultType);
+            absValue.srcs[0] = tempSrc(result);
+            absValue.srcs[0].abs = true;
+            program_.instrs.push_back(absValue);
+            return;
+        }
+
+        const int width = dotReductionWidth(operandWidth);
+        const int mask = componentMaskForWidth(width);
         const int result = define(inst.result);
         VInstr loadB;
         loadB.op = VOp::Mov;
         loadB.dst.index = result;
-        loadB.dst.writemask = valueComponentMask(inst.operands[1]) & 0x7;
+        loadB.dst.writemask = mask;
         loadB.srcs[0] = resolve(inst.operands[1]);
         program_.instrs.push_back(loadB);
 
         VInstr delta;
         delta.op = VOp::Add;
         delta.dst.index = result;
-        delta.dst.writemask = valueComponentMask(inst.operands[0]) & 0x7;
+        delta.dst.writemask = mask;
         delta.srcs[0] = resolve(inst.operands[0]);
         delta.srcs[0].neg = true;
         delta.srcs[1] = tempSrc(result);
@@ -3767,7 +3811,7 @@ private:
         program_.instrs.push_back(delta);
 
         VInstr dp;
-        dp.op = VOp::Dp3;
+        dp.op = dotReductionOp(width);
         dp.dst.index = result;
         dp.dst.writemask = 0x1;
         dp.srcs[0] = tempSrc(result);
@@ -3803,12 +3847,15 @@ private:
             return;
         }
 
+        const int width = dotReductionWidth(inst.resultType.componentCount());
+        const int mask = componentMaskForWidth(width);
         const int result = define(inst.result);
+        const int nReg = newVReg();
         VInstr loadN;
         loadN.op = VOp::Mov;
-        loadN.dst.index = result;
+        loadN.dst.index = nReg;
         loadN.dst.preferredPhys = 0;
-        loadN.dst.writemask = valueComponentMask(inst.operands[1]) & 0x7;
+        loadN.dst.writemask = mask;
         loadN.srcs[0] = resolve(inst.operands[1]);
         program_.instrs.push_back(loadN);
 
@@ -3817,15 +3864,16 @@ private:
         loadI.op = VOp::Mov;
         loadI.dst.index = iReg;
         loadI.dst.preferredPhys = 1;
-        loadI.dst.writemask = valueComponentMask(inst.operands[0]) & 0x7;
+        loadI.dst.writemask = mask;
         loadI.srcs[0] = resolve(inst.operands[0]);
         program_.instrs.push_back(loadI);
 
+        const int dotReg = newVReg();
         VInstr dot;
-        dot.op = VOp::Dp3;
-        dot.dst.index = result;
-        dot.dst.writemask = 0x8;
-        dot.srcs[0] = tempSrc(result);
+        dot.op = dotReductionOp(width);
+        dot.dst.index = dotReg;
+        dot.dst.writemask = 0x1;
+        dot.srcs[0] = tempSrc(nReg);
         dot.srcs[1] = tempSrc(iReg);
         dot.fpScale = NVFX_FP_OP_DST_SCALE_2X;
         program_.instrs.push_back(dot);
@@ -3833,11 +3881,11 @@ private:
         VInstr mad;
         mad.op = VOp::Mad;
         mad.dst.index = result;
-        mad.dst.writemask = 0x7;
-        mad.srcs[0] = tempSrc(result);
+        mad.dst.writemask = mask;
+        mad.srcs[0] = tempSrc(nReg);
         mad.srcs[0].neg = true;
-        mad.srcs[1] = tempSrc(result);
-        mad.srcs[1].swizzle = {3, 3, 3, 3};
+        mad.srcs[1] = tempSrc(dotReg);
+        mad.srcs[1].swizzle = {0, 0, 0, 0};
         mad.srcs[2] = tempSrc(iReg);
         mad.stubFenceBrBefore = true;
         program_.instrs.push_back(mad);
@@ -4510,6 +4558,25 @@ private:
             return value->type.componentCount();
         const auto it = valueWidth_.find(id);
         return it != valueWidth_.end() ? it->second : 0;
+    }
+
+    static int componentMaskForWidth(int width)
+    {
+        if (width >= 4) return 0xf;
+        if (width <= 0) return 0x7;
+        return (1 << width) - 1;
+    }
+
+    static int dotReductionWidth(int width)
+    {
+        if (width >= 4) return 4;
+        if (width == 2) return 2;
+        return 3;
+    }
+
+    static VOp dotReductionOp(int width)
+    {
+        return width >= 4 ? VOp::Dp4 : width == 2 ? VOp::Dp2 : VOp::Dp3;
     }
 
     static void applyDp3Swizzle(VSrc& src)

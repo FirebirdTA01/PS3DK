@@ -1,0 +1,6 @@
+// t_71ad405e: distance(float4,float4) must include w with DP4.
+void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
+{
+    float dist = distance(c, d * float4(0.5, 0.625, 0.75, 0.875));
+    o = float4(dist, dist, dist, 1.0);
+}
