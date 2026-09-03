@@ -2609,6 +2609,10 @@ private:
         mov.dst.index = define(inst.result);
         mov.dst.writemask = componentMask(inst.resultType);
         mov.srcs[0] = resolve(inst.operands[0]);
+        // Measured itof probes contain the preceding ftoi and therefore
+        // cannot distinguish "itof needs a fence" from "ftoi then read
+        // needs one".  Keep the reference's conservative FENCBR until a
+        // standalone itof probe proves it unnecessary.
         mov.stubFenceBrBefore = true;
         program_.instrs.push_back(mov);
     }
@@ -5094,6 +5098,7 @@ static uint8_t vpOpcode(VOp op)
     case VOp::Sle: return VP_OP(SLE);
     case VOp::Seq: return VP_OP(SEQ);
     case VOp::Sne: return VP_OP(SNE);
+    case VOp::Ftoi:
     case VOp::DivSqrt:
     case VOp::Tex: return VP_OP(MOV); // VP texture fetch is intentionally unsupported.
     }
