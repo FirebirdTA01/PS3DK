@@ -1508,6 +1508,9 @@ private:
         case IROp::Tan:
             lowerTan(inst);
             return;
+        case IROp::Atan2:
+            lowerAtan2(inst);
+            return;
         case IROp::Cross:
             lowerCross(inst);
             return;
@@ -3558,6 +3561,208 @@ private:
         div.srcs[0] = tempSrc(sinReg);
         div.srcs[1] = tempSrc(cosReg);
         program_.instrs.push_back(div);
+    }
+
+    // atan2(y, x) (t_a7dd471f), read from sce-cgc before implementation.
+    //
+    // The reference computes t = min(abs(y), abs(x)) / max(abs(y), abs(x)),
+    // then evaluates a five-MADR Horner polynomial in u = t*t and multiplies
+    // by t.  The six polynomial coefficients are a minimax fit, NOT the
+    // Taylor series: 0x3f7fffb7 is 0.9999956489, not 1.0, and 0xbeaa7e45 is
+    // near -1/3 but deliberately not exactly -1/3.  Keep every constant by
+    // its measured bits; pi/2 and pi are the correctly rounded floats but
+    // stay in the same table so the reader does not have to infer which
+    // constants were measured and which were derived.
+    //
+    // DIVR is scalar-only.  Scalar atan2 uses DIVR; vector atan2 follows the
+    // same oracle rule as vector division: one RCP per divisor lane and one
+    // vector MUL.  The quadrant repair writes CC with SGTRC and then uses
+    // predicated ADDR/MOVR.  For vectors those predicates read CC per lane,
+    // not CC.x broadcast.
+    void lowerAtan2(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP atan2 lowering deferred");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        static constexpr uint32_t kCoeffBits[] = {
+            0xbc5cdd30u, // -0.01348046958
+            0x3d6b6d55u, //  0.05747731403
+            0xbdf84c31u, // -0.1212390736
+            0x3e4854c9u, //  0.1956359297
+            0xbeaa7e45u, // -0.3329946101, fitted, not exactly -1/3
+            0x3f7fffb7u, //  0.9999956489, fitted, not 1.0
+        };
+        static constexpr uint32_t kPiOver2Bits = 0x3fc90fdbu;
+        static constexpr uint32_t kPiBits = 0x40490fdbu;
+
+        const int mask = componentMask(inst.resultType);
+        const bool vector = laneCount(mask) > 1;
+        const VSrc y = resolve(inst.operands[0]);
+        const VSrc x = resolve(inst.operands[1]);
+
+        const int yReg = newVReg();
+        VInstr loadY;
+        loadY.op = VOp::Mov;
+        loadY.dst.index = yReg;
+        loadY.dst.writemask = mask;
+        loadY.srcs[0] = y;
+        program_.instrs.push_back(loadY);
+
+        const int xReg = newVReg();
+        VInstr loadX;
+        loadX.op = VOp::Mov;
+        loadX.dst.index = xReg;
+        loadX.dst.writemask = mask;
+        loadX.srcs[0] = x;
+        program_.instrs.push_back(loadX);
+
+        VSrc absY = tempSrc(yReg);
+        absY.abs = true;
+        VSrc absX = tempSrc(xReg);
+        absX.abs = true;
+
+        const int minReg = newVReg();
+        VInstr minv;
+        minv.op = VOp::Min;
+        minv.dst.index = minReg;
+        minv.dst.writemask = mask;
+        minv.srcs[0] = absY;
+        minv.srcs[1] = absX;
+        program_.instrs.push_back(minv);
+
+        const int maxReg = newVReg();
+        VInstr maxv;
+        maxv.op = VOp::Max;
+        maxv.dst.index = maxReg;
+        maxv.dst.writemask = mask;
+        maxv.srcs[0] = absY;
+        maxv.srcs[1] = absX;
+        program_.instrs.push_back(maxv);
+
+        const int t = newVReg();
+        if (vector) {
+            const int invMax = newVReg();
+            emitScalarUnitPerLane(VOp::Rcp, invMax, mask, tempSrc(maxReg),
+                                  false);
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = t;
+            mul.dst.writemask = mask;
+            mul.srcs[0] = tempSrc(minReg);
+            mul.srcs[1] = tempSrc(invMax);
+            program_.instrs.push_back(mul);
+        } else {
+            VInstr div;
+            div.op = VOp::DivR;
+            div.dst.index = t;
+            div.dst.writemask = mask;
+            div.srcs[0] = tempSrc(minReg);
+            div.srcs[1] = tempSrc(maxReg);
+            program_.instrs.push_back(div);
+        }
+
+        const int u = newVReg();
+        VInstr square;
+        square.op = VOp::Mul;
+        square.dst.index = u;
+        square.dst.writemask = mask;
+        square.srcs[0] = tempSrc(t);
+        square.srcs[1] = tempSrc(t);
+        program_.instrs.push_back(square);
+
+        const int poly = newVReg();
+        VInstr seed;
+        seed.op = VOp::Mad;
+        seed.dst.index = poly;
+        seed.dst.writemask = mask;
+        seed.srcs[0] = floatLit(floatFromBits(kCoeffBits[0]));
+        seed.srcs[1] = tempSrc(u);
+        seed.srcs[2] = floatLit(floatFromBits(kCoeffBits[1]));
+        program_.instrs.push_back(seed);
+        for (size_t i = 2; i < std::size(kCoeffBits); ++i) {
+            VInstr mad;
+            mad.op = VOp::Mad;
+            mad.dst.index = poly;
+            mad.dst.writemask = mask;
+            mad.srcs[0] = tempSrc(poly);
+            mad.srcs[1] = tempSrc(u);
+            mad.srcs[2] = floatLit(floatFromBits(kCoeffBits[i]));
+            program_.instrs.push_back(mad);
+        }
+
+        const int angle = define(inst.result);
+        VInstr base;
+        base.op = VOp::Mul;
+        base.dst.index = angle;
+        base.dst.writemask = mask;
+        base.srcs[0] = tempSrc(poly);
+        base.srcs[1] = tempSrc(t);
+        program_.instrs.push_back(base);
+
+        std::array<uint8_t, 4> laneSwizzle = {0, 1, 2, 3};
+
+        VInstr yGtX;
+        yGtX.op = VOp::Sgt;
+        yGtX.dst.none = true;
+        yGtX.dst.writemask = mask;
+        yGtX.srcs[0] = absY;
+        yGtX.srcs[1] = absX;
+        yGtX.ccUpdate = true;
+        program_.instrs.push_back(yGtX);
+
+        VInstr quad;
+        quad.op = VOp::Add;
+        quad.dst.index = angle;
+        quad.dst.writemask = mask;
+        quad.srcs[0] = tempSrc(angle);
+        quad.srcs[0].neg = true;
+        quad.srcs[1] = floatLit(floatFromBits(kPiOver2Bits));
+        quad.predicate = NVFX_COND_NE;
+        quad.predicateSwizzle = laneSwizzle;
+        program_.instrs.push_back(quad);
+
+        VInstr xCond;
+        xCond.op = VOp::Mov;
+        xCond.dst.none = true;
+        xCond.dst.writemask = mask;
+        xCond.srcs[0] = tempSrc(xReg);
+        xCond.ccUpdate = true;
+        program_.instrs.push_back(xCond);
+
+        VInstr xFix;
+        xFix.op = VOp::Add;
+        xFix.dst.index = angle;
+        xFix.dst.writemask = mask;
+        xFix.srcs[0] = tempSrc(angle);
+        xFix.srcs[0].neg = true;
+        xFix.srcs[1] = floatLit(floatFromBits(kPiBits));
+        xFix.predicate = NVFX_COND_LT;
+        xFix.predicateSwizzle = laneSwizzle;
+        program_.instrs.push_back(xFix);
+
+        VInstr yCond;
+        yCond.op = VOp::Mov;
+        yCond.dst.none = true;
+        yCond.dst.writemask = mask;
+        yCond.srcs[0] = tempSrc(yReg);
+        yCond.ccUpdate = true;
+        program_.instrs.push_back(yCond);
+
+        VInstr yFix;
+        yFix.op = VOp::Mov;
+        yFix.dst.index = angle;
+        yFix.dst.writemask = mask;
+        yFix.srcs[0] = tempSrc(angle);
+        yFix.srcs[0].neg = true;
+        yFix.predicate = NVFX_COND_LT;
+        yFix.predicateSwizzle = laneSwizzle;
+        yFix.stubFenceBrBefore = true;
+        program_.instrs.push_back(yFix);
     }
 
     // cross(a, b) = a.yzx * b.zxy - a.zxy * b.yzx (t_a7dd471f).
