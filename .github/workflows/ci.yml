@@ -144,6 +144,8 @@ jobs:
         run: bash tests/shader-compiler/general-operand-legalisation-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler select merge of raw inputs
         run: bash tests/shader-compiler/select-merge-inputs-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler unsafe select predication
+        run: bash tests/shader-compiler/unsafe-select-predication-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler defaulted output semantic
         run: bash tests/shader-compiler/out-no-semantic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

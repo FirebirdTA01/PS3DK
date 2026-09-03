@@ -3991,15 +3991,11 @@ private:
             // finite take CF-1b's predicated write instead (MOV
             // default, CC-set from cond, CC-gated commit — a true
             // conditional move); shapes predication does not cover yet
-            // refuse.  KNOWN GAP, single-block programs: a bare
-            // source-level `?:` in a straight-line shader still takes
-            // the blend below UNGUARDED — the hazard belongs to the
-            // blend, not to flattening, and the single-block path is
-            // byte-frozen until the differential rig can judge the
-            // switch in pixels (board item; measured witness: a
-            // one-block 1.0/x ternary compiles through the blend
-            // today).
-            if (flattened_ &&
+            // refuse.  This is a property of the select itself, not only
+            // of control-flow flattening: a one-block source-level `?:`
+            // can carry the same non-finite untaken arm and must take the
+            // same predicated path.
+            if (profile_ == GeneralProfile::Fragment &&
                 (!provablyFinite(inst.operands[1]) ||
                  !provablyFinite(inst.operands[2]))) {
                 if (lowerSelectPredicated(inst))
