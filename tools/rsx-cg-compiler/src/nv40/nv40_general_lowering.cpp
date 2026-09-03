@@ -235,11 +235,6 @@ struct VirtualProgram
     // diagnostic and emitted the rest of the program anyway, exiting 0 with a
     // shader silently missing whatever that op was supposed to do.
     bool loweringFailed = false;
-    // What the pre-2026-09-02 numbering (fragment bank seeded at the
-    // definition count) would have DECLARED for this program: the key of
-    // the transitional capacity gate in emitFragmentVirtual.  -1 = not
-    // probed (vertex, or an allocation that refused).
-    int legacyDeclaredTemps = -1;
 };
 
 static std::string toUpper(std::string s)
@@ -469,27 +464,6 @@ public:
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
-        // TRANSITIONAL CAPACITY GATE, first half (director 2026-09-02,
-        // option C): number the program the way 6ece362 did - bank seeded
-        // at the definition count, spill bank above it - on a COPY, and
-        // remember the register count that numbering would have declared.
-        // The emitter refuses above the old capacity by that number, so
-        // the seed fix ships no shape the old build did not, until each
-        // shape above the old capacity has been judged on pixels.
-        if (profile_ == GeneralProfile::Fragment) {
-            const VirtualProgram saved = program_;
-            legacyCapacityProbe_ = true;
-            allocatePhysicalTemps();
-            legacyCapacityProbe_ = false;
-            int highest = -1;
-            if (!program_.loweringFailed)
-                for (const VInstr& vi : program_.instrs)
-                    if (!vi.dst.none && vi.dst.phys >= 0)
-                        highest = std::max(highest, vi.dst.fp16 ? (vi.dst.phys >> 1)
-                                                                : vi.dst.phys);
-            program_ = saved;
-            program_.legacyDeclaredTemps = highest < 0 ? -1 : std::max(2, highest + 1);
-        }
         allocatePhysicalTemps();
         return program_;
     }
@@ -499,9 +473,6 @@ private:
     const IRFunction& entry_;
     const IRModule& module_;
     VirtualProgram program_;
-    // True only during the capacity gate's dry run: seed the fragment bank
-    // at the definition count, as before 7243bd9.
-    bool legacyCapacityProbe_ = false;
     int nextVReg_ = 0;
     std::unordered_map<IRValueID, unsigned> useCount_;
     std::unordered_map<IRValueID, unsigned> nonTermUseCount_;
@@ -4694,9 +4665,7 @@ private:
         // starts where the descending range ends, so the two never
         // collide and a rejection costs one number rather than a jump to
         // the top of the definition count.
-        const int fpRegBase = legacyCapacityProbe_
-            ? std::max(1, static_cast<int>(defs.size()))
-            : std::max(1, peakLiveTemps);
+        const int fpRegBase = std::max(1, peakLiveTemps);
         int fpSpill = static_cast<int>(defs.size());
         if (profile_ == GeneralProfile::Fragment) {
             fpSpill = fpRegBase;
@@ -5762,38 +5731,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             std::to_string(kFpTempRegisterBudget) +
             " - such a program paints nothing and poisons the RSX for every "
             "later draw; refusing (t_5dc260b0)");
-        out.ok = false;
-        return out;
-    }
-
-    // TRANSITIONAL CAPACITY GATE, second half (director, 2026-09-02 17:18:
-    // option C).  7243bd9 numbers the fragment bank from the peak live
-    // count, so programs the old numbering declared at 48 or more registers
-    // now compile - and of the seven in the corpus, SIX paint the wrong
-    // picture against sce-cgc: test_58/62/63 share one R0 live-range
-    // collision, test_83 has that collision AND genuinely needs 51
-    // registers, and test_60/81 are unrelated (t_aaa7c7b1).  The
-    // store-order defect t_c2582cf1 is NOT among them - its witness is
-    // fp_output_stored_thrice_f, which is not a capacity shape.  Every one
-    // was hidden until today by the refusal.  Until each shape is judged, what
-    // the old numbering refused still refuses, BY NAME, keyed on the count
-    // that numbering produces (the dry run in lowerFunction), so the only
-    // behaviour the seed fix ships is a correct declared count on programs
-    // that already compiled.  Proof: the 318-shader sweep against 6ece362
-    // admits nothing new and moves no bytes.
-    //
-    // RSXCG_UNVERIFIED_CAPACITY=1 lifts the gate for the tests and the rig
-    // that exist to judge those shapes; it is not a user flag.
-    if (program.legacyDeclaredTemps >= kFpTempRegisterBudget &&
-        std::getenv("RSXCG_UNVERIFIED_CAPACITY") == nullptr) {
-        out.diagnostics.push_back(
-            "nv40-general-fp: the pre-2026-09-02 numbering declared " +
-            std::to_string(program.legacyDeclaredTemps) +
-            " temp registers for this program (budget " +
-            std::to_string(kFpTempRegisterBudget) +
-            "); the general path is not yet pixel-verified above that "
-            "capacity (six of seven such corpus programs paint wrong) - "
-            "refusing until the shape is judged (t_5dc260b0 gate)");
         out.ok = false;
         return out;
     }
