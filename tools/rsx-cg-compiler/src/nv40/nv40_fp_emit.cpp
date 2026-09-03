@@ -3432,8 +3432,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                         // Scalar-lane path (lane >= 0): capped at 3 —
                         // the reference compiler uses a different DP2R-based shape
                         // for N>=4 we haven't implemented yet.
-                        constexpr int kMaxScalarLaneScale = 3;
-                        constexpr int kMaxFullVec4Scale   = 64;
+                        // static: a capture-less lambda names these
+                        // below, and MSVC demands a capture for a
+                        // non-static local even when it is constexpr.
+                        // A static local is never captured, so this is
+                        // portable and changes no behaviour.
+                        static constexpr int kMaxScalarLaneScale = 3;
+                        static constexpr int kMaxFullVec4Scale   = 64;
                         auto scaleCap = [](const FpScaleVaryingBinding& b) {
                             return b.lane >= 0 ? kMaxScalarLaneScale
                                                : kMaxFullVec4Scale;

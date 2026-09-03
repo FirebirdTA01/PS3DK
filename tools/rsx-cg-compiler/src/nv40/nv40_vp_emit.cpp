@@ -457,6 +457,15 @@ struct GenericVecConstructBinding
 // MUL fills src0 + src1.  Matches PSL1GHT vpparser.cpp's spec
 // (`{"ADD", OPCODE_ADD, {0, 2, -1}, ...}`) and the reference compiler output.
 // Returned indices are into the 3-slot nvfx_insn::src array.
+// Shape of the position store that tryEmitPerLaneMadChainInterleaved
+// resolves.  Declared at file scope rather than inside that lambda on
+// purpose: MSVC gives a local enum declared in one lambda body a
+// DIFFERENT type when it is named from a lambda nested inside it, so
+// resolvePosStore's assignments to posKind do not compile on a Windows
+// host build.  GCC and Clang accept the local form, which is why this
+// only surfaced when the compiler was first built with MSVC.
+enum class PosKind { None, VecPromote, MatVecMulChain };
+
 static inline void arithSlots(ArithOp op, int& slotA, int& slotB)
 {
     switch (op)
@@ -3600,7 +3609,6 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
         // mul(mvp, ...))))`).  The two cases produce different batch
         // counts (2 vs N), but the interleave with the color store's
         // 3-batch MAD chain is uniform.
-        enum class PosKind { None, VecPromote, MatVecMulChain };
         PosKind posKind = PosKind::None;
         const DeferredStore* posStore = nullptr;
         int posInputAttrIdx = -1;
