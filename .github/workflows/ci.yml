@@ -87,6 +87,8 @@ jobs:
         run: bash tests/shader-compiler/stdlib-angle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler log10 stdlib
         run: bash tests/shader-compiler/stdlib-log10-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler smoothstep stdlib
+        run: bash tests/shader-compiler/stdlib-smoothstep-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler user-function inlining
         run: bash tests/shader-compiler/user-function-inline-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

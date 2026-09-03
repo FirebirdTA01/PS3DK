@@ -1,0 +1,12 @@
+// Generic smoothstep fallback: variable vector edges cannot fold the reciprocal
+// into a destination scale, so the divisor path must emit one scalar-unit RCP
+// per lane before the saturated clamp.
+void main(float4 c : TEXCOORD0,
+          float4 lo : TEXCOORD1,
+          float4 hi : TEXCOORD2,
+          out float4 o : COLOR)
+{
+    float3 v = float3(c.x, c.y, c.x * 0.5 + c.y * 0.25);
+    float3 s = smoothstep(lo.zyx, hi.yxz, v);
+    o = float4(s.x, s.y, s.z, 1.0);
+}

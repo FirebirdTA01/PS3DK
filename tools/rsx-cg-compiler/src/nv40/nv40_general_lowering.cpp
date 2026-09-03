@@ -40,6 +40,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <limits>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -1559,6 +1560,9 @@ private:
             return;
         case IROp::Step:
             lowerStep(inst);
+            return;
+        case IROp::SmoothStep:
+            lowerSmoothStep(inst);
             return;
         case IROp::Distance:
             lowerDistance(inst);
@@ -3572,6 +3576,167 @@ private:
         mov.fpPrecisionOverride = FIXED12;
         mov.stubFenceBrBefore = true;
         program_.instrs.push_back(mov);
+    }
+
+    std::optional<float> scalarFloatLiteral(IRValueID id) const
+    {
+        const IRValue* value = entry_.getValue(id);
+        auto* constant = dynamic_cast<const IRConstant*>(value);
+        if (!constant)
+            return std::nullopt;
+        if (std::holds_alternative<float>(constant->value))
+            return std::get<float>(constant->value);
+        if (std::holds_alternative<int32_t>(constant->value))
+            return static_cast<float>(std::get<int32_t>(constant->value));
+        if (std::holds_alternative<uint32_t>(constant->value))
+            return static_cast<float>(std::get<uint32_t>(constant->value));
+        if (std::holds_alternative<bool>(constant->value))
+            return std::get<bool>(constant->value) ? 1.0f : 0.0f;
+        return std::nullopt;
+    }
+
+    static std::optional<int> dstScaleForReciprocal(float span)
+    {
+        if (span == 1.0f)    return NVFX_FP_OP_DST_SCALE_1X;
+        if (span == 0.5f)    return NVFX_FP_OP_DST_SCALE_2X;
+        if (span == 0.25f)   return NVFX_FP_OP_DST_SCALE_4X;
+        if (span == 0.125f)  return NVFX_FP_OP_DST_SCALE_8X;
+        if (span == 2.0f)    return NVFX_FP_OP_DST_SCALE_INV_2X;
+        if (span == 4.0f)    return NVFX_FP_OP_DST_SCALE_INV_4X;
+        if (span == 8.0f)    return NVFX_FP_OP_DST_SCALE_INV_8X;
+        return std::nullopt;
+    }
+
+    void emitSmoothStepPolynomial(int result, int t, int mask)
+    {
+        const float kThree = floatFromBits(0x40400000u);
+
+        const int twoT = newVReg();
+        VInstr scale;
+        scale.op = VOp::Mov;
+        scale.dst.index = twoT;
+        scale.dst.writemask = mask;
+        scale.srcs[0] = tempSrc(t);
+        scale.fpScale = NVFX_FP_OP_DST_SCALE_2X;
+        program_.instrs.push_back(scale);
+
+        const int tSquared = newVReg();
+        VInstr square;
+        square.op = VOp::Mul;
+        square.dst.index = tSquared;
+        square.dst.writemask = mask;
+        square.srcs[0] = tempSrc(t);
+        square.srcs[1] = tempSrc(t);
+        program_.instrs.push_back(square);
+
+        const int factor = newVReg();
+        VInstr factorInst;
+        factorInst.op = VOp::Add;
+        factorInst.dst.index = factor;
+        factorInst.dst.writemask = mask;
+        factorInst.srcs[0] = tempSrc(twoT);
+        factorInst.srcs[0].neg = true;
+        factorInst.srcs[1] = floatLit(kThree);
+        program_.instrs.push_back(factorInst);
+
+        VInstr out;
+        out.op = VOp::Mul;
+        out.dst.index = result;
+        out.dst.writemask = mask;
+        out.srcs[0] = tempSrc(tSquared);
+        out.srcs[1] = tempSrc(factor);
+        program_.instrs.push_back(out);
+    }
+
+    // smoothstep(edge0, edge1, x) = t*t*(3 - 2*t), where
+    // t = saturate((x - edge0) / (edge1 - edge0)).
+    //
+    // The oracle probe uses scalar literal edges 0.25 and 0.75; sce-cgc
+    // folds 1/(0.75 - 0.25) into ADDR_2X_sat instead of emitting RCP.
+    // Keep that measured shape when the span maps to NV40's destination
+    // scale field.  The generic fallback still uses one RCP per divisor
+    // lane, because RCP is a scalar-unit instruction.
+    void lowerSmoothStep(const IRInstruction& inst)
+    {
+        if (profile_ != GeneralProfile::Fragment ||
+            inst.operands.size() < 3 || inst.result == InvalidIRValue) {
+            program_.diagnostics.push_back(
+                "nv40-general: only FP smoothstep lowering is supported");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const int mask = componentMask(inst.resultType);
+        const int result = define(inst.result);
+        const int t = newVReg();
+
+        const std::optional<float> edge0 = scalarFloatLiteral(inst.operands[0]);
+        const std::optional<float> edge1 = scalarFloatLiteral(inst.operands[1]);
+        if (edge0 && edge1) {
+            const float span = *edge1 - *edge0;
+            const std::optional<int> scale = dstScaleForReciprocal(span);
+            if (scale) {
+                VInstr clamp;
+                clamp.op = VOp::Add;
+                clamp.dst.index = t;
+                clamp.dst.writemask = mask;
+                clamp.srcs[0] = resolve(inst.operands[2]);
+                clamp.srcs[1] = floatLit(-*edge0);
+                clamp.sat = true;
+                clamp.fpScale = *scale;
+                program_.instrs.push_back(clamp);
+
+                emitSmoothStepPolynomial(result, t, mask);
+                return;
+            }
+        }
+
+        const int spanWidth =
+            std::max(valueWidthOf(inst.operands[0]),
+                     valueWidthOf(inst.operands[1]));
+        if (spanWidth < 1 || spanWidth > 4) {
+            program_.diagnostics.push_back(
+                "nv40-general: smoothstep edge span has unknown width; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        const int spanMask = spanWidth == 1 ? 0x1 : mask;
+
+        const int span = newVReg();
+        VInstr spanInst;
+        spanInst.op = VOp::Add;
+        spanInst.dst.index = span;
+        spanInst.dst.writemask = spanMask;
+        spanInst.srcs[0] = resolve(inst.operands[1]);
+        spanInst.srcs[1] = resolve(inst.operands[0]);
+        spanInst.srcs[1].neg = true;
+        program_.instrs.push_back(spanInst);
+
+        const int invSpan = newVReg();
+        emitScalarUnitPerLane(VOp::Rcp, invSpan, spanMask, tempSrc(span), false);
+
+        const int delta = newVReg();
+        VInstr deltaInst;
+        deltaInst.op = VOp::Add;
+        deltaInst.dst.index = delta;
+        deltaInst.dst.writemask = mask;
+        deltaInst.srcs[0] = resolve(inst.operands[2]);
+        deltaInst.srcs[1] = resolve(inst.operands[0]);
+        deltaInst.srcs[1].neg = true;
+        program_.instrs.push_back(deltaInst);
+
+        VInstr clamp;
+        clamp.op = VOp::Mul;
+        clamp.dst.index = t;
+        clamp.dst.writemask = mask;
+        clamp.srcs[0] = tempSrc(delta);
+        clamp.srcs[1] = tempSrc(invSpan);
+        if (spanWidth == 1)
+            clamp.srcs[1].swizzle = {0, 0, 0, 0};
+        clamp.sat = true;
+        program_.instrs.push_back(clamp);
+
+        emitSmoothStepPolynomial(result, t, mask);
     }
 
     void lowerDistance(const IRInstruction& inst)

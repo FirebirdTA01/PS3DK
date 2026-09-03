@@ -1,0 +1,9 @@
+// Companion to fp_smoothstep_lanes_f: the smoothstep argument is swizzled, so
+// each lane has to compose through the operand's own swizzle rather than read
+// raw component N for output lane N.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 v = float4(c.x, c.y, c.x * 0.5 + 0.25, c.y * 0.5 + 0.25);
+    float3 s = smoothstep(0.25, 0.75, v.wzy);
+    o = float4(s.x, s.y, s.z, 1.0);
+}

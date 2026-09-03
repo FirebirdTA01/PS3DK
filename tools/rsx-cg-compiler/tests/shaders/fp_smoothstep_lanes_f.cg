@@ -1,0 +1,9 @@
+// t_a7dd471f: smoothstep on a vector must compute each lane independently.
+// The edges are scalar constants matching the oracle probe, so the reference
+// folds the reciprocal into a saturated 2X ADD.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 v = float4(c.x, c.y, c.x * 0.5 + 0.25, c.y * 0.5 + 0.25);
+    float4 s = smoothstep(0.25, 0.75, v);
+    o = float4(s.x, s.y, s.z, 1.0);
+}

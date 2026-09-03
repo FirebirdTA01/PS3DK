@@ -312,3 +312,10 @@ tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_swizzle_f.cg|auto|general
 # swizzled argument.
 tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_swizzle_f.cg|auto|general
+# t_a7dd471f smoothstep slice: the scalar-constant edge case measured from
+# sce-cgc folds clamp((x - 0.25) / 0.5) into ADDR_2X_sat, then computes
+# t*t*(3 - 2*t).  Keep both rows: the first catches lane collapse, the
+# second catches raw-lane reads through a swizzled argument.
+tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_lanes_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_swizzle_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_variable_edges_f.cg|auto|general
