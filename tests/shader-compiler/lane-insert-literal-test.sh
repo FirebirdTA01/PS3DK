@@ -66,7 +66,7 @@ default path's, and both are byte-identical to the reference there
 (t_be578e74)."
 }
 
-python3 - "$work/one.log" "$work/all.log" <<'PY'
+python3 - "$work/one.log" "$work/all.log" "$work/all_general.log" <<'PY'
 import re
 import sys
 
@@ -105,6 +105,7 @@ def mask_of(row, what):
 
 one_rows = words(sys.argv[1])
 all_rows = words(sys.argv[2])
+all_general_rows = words(sys.argv[3])
 
 # --- one lane overridden -------------------------------------------------
 # MOV R0.yzw, f[TEX0] ; MOV R0.x, {0.5,0,0,0}.x ; the const block.
@@ -149,6 +150,63 @@ for row, value in zip((1, 3, 5, 7), (0.5, 0.25, 0.125, 1.0)):
             "FAIL: const block %d must hold %s (0x%08x), holds 0x%08x"
             % (row // 2, value, LIT[value], all_rows[row][0])
         )
+
+# Shipping general lowering currently keeps an unnecessary base MOV that
+# reads TEXCOORD0 before overwriting every lane; that no-input/container-mask
+# divergence is tracked separately as t_1cc1cabf.  This guard does not pin
+# that bad shape in place.  It asserts only the original t_afb4af65 property:
+# every literal override reaches R0 with the right lane value, whether that
+# is four single-lane MOVs today or one coalesced MOV after t_835be4be.
+def logical(disk_word):
+    return ((disk_word >> 16) | ((disk_word & 0xFFFF) << 16)) & 0xFFFFFFFF
+
+
+def const_writes_to_r0(raw_rows):
+    writes = []
+    i = 0
+    while i < len(raw_rows):
+        logical_words = [logical(w) for w in raw_rows[i]]
+        opcode = (logical_words[0] >> 24) & 0x3F
+        dst = (logical_words[0] >> 1) & 0x3F
+        none = (logical_words[0] >> 30) & 1
+        const_srcs = [
+            w for w in logical_words[1:4]
+            if (w & 3) == 2
+        ]
+        if opcode == MOV and dst == 0 and not none and const_srcs:
+            writes.append(((logical_words[0] >> 9) & 0xF,
+                           const_srcs[0],
+                           raw_rows[i + 1]))
+        i += 1 + (1 if const_srcs else 0)
+    return writes
+
+
+def swizzle(word, lane):
+    return (word >> (9 + 2 * lane)) & 3
+
+
+expected = [LIT[0.5], LIT[0.25], LIT[0.125], LIT[1.0]]
+writes = const_writes_to_r0(all_general_rows)
+covered = 0
+for mask, src, block in writes:
+    covered |= mask
+    for lane, value in enumerate(expected):
+        if not (mask & (1 << lane)):
+            continue
+        got = block[swizzle(src, lane)]
+        if got != value:
+            raise SystemExit(
+                "FAIL: general fp_insert_literal_all_f writes lane %d from "
+                "0x%08x, expected 0x%08x.  The container would compile but "
+                "paint the wrong literal lane (t_afb4af65)."
+                % (lane, got, value)
+            )
+if covered != 0xF:
+    raise SystemExit(
+        "FAIL: general fp_insert_literal_all_f literal writes cover mask "
+        "0x%x, expected 0xf.  A missing lane is the silent dropped-insert "
+        "failure (t_afb4af65)." % covered
+    )
 PY
 
 printf 'lane-insert-literal-test: ok\n'

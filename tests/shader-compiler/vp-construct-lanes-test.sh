@@ -24,12 +24,12 @@ work="${TMPDIR:-/tmp}/ps3dk-vp-construct-lanes-test.$$"
 mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
-compile() {   # $1 shader, $2 tag
+compile() {   # $1 shader, $2 tag, $3 extra flags
     local rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_vp_rsx --legacy-lowering "$1"
+            -p sce_vp_rsx ${3:+$3} "$1"
     ) >"$work/$2.log" 2>&1 || rc=$?
     [[ "$rc" -eq 124 ]] && fail "$2 timed out"
     if [[ "$rc" -ne 0 ]]; then
@@ -43,10 +43,13 @@ swizzle="$repo_root/tools/rsx-cg-compiler/tests/shaders/vp_construct_swizzle_v.c
 [[ -f "$narrow" ]]  || fail "fixture missing: $narrow"
 [[ -f "$swizzle" ]] || fail "fixture missing: $swizzle"
 
-compile "$narrow" narrow
-compile "$swizzle" swizzle
+compile "$narrow" narrow_legacy --legacy-lowering
+compile "$swizzle" swizzle_legacy --legacy-lowering
+compile "$narrow" narrow_general
+compile "$swizzle" swizzle_general
 
-python3 - "$work/narrow.log" "$work/swizzle.log" <<'PY'
+python3 - "$work/narrow_legacy.log" "$work/swizzle_legacy.log" \
+        "$work/narrow_general.log" "$work/swizzle_general.log" <<'PY'
 import re
 import sys
 
@@ -70,31 +73,58 @@ def show(ms):
     return ", ".join("0x%x" % m for m in ms)
 
 
+def expect(label, got, want, why):
+    if got != want:
+        raise SystemExit("FAIL: %s expected %s; got %s. %s"
+                         % (label, show(want), show(got), why))
+
+
 # --- float2 operand: out_texcoord = float4(in_texcoord, 0, 1) ---------
 # MOV o[0] (xyzw) ; MOV o[7].xy from the input ; MOV o[7].zw from consts.
-narrow = masks(sys.argv[1])
-if narrow != [0xF, 0xC, 0x3]:
-    raise SystemExit(
-        "FAIL: vp_construct_lanes_v must write o[0] whole (0xf), then the "
-        "float2 input into xy (0xc) and the two literals into zw (0x3); got "
-        "%s.  The pre-fix shape was 0xf, 0x8, 0x6 - one lane for the whole "
-        "float2, the literals shifted down, and w never written "
-        "(t_14d18f02)." % show(narrow)
-    )
+narrow_legacy = masks(sys.argv[1])
+expect(
+    "legacy vp_construct_lanes_v",
+    narrow_legacy,
+    [0xF, 0xC, 0x3],
+    "The pre-fix shape was 0xf, 0x8, 0x6 - one lane for the whole "
+    "float2, the literals shifted down, and w never written (t_14d18f02).",
+)
 
 # --- .xyz swizzle operand: out_position = float4(in_position.xyz, 1) --
 # Four writes: position xyz and w, texcoord xy and zw.  Compared as a
 # SET: the reference interleaves the trailing literal write differently
 # from us, which is an ordering difference and not this defect.
-swizzle = sorted(masks(sys.argv[2]))
-if swizzle != [0x1, 0x3, 0xC, 0xE]:
-    raise SystemExit(
-        "FAIL: vp_construct_swizzle_v must cover both outputs completely - "
-        "position 0xe + 0x1 and texcoord 0xc + 0x3, in some order; got %s.  "
-        "The pre-fix shape was 0x4, 0x6, 0x8, 0x8, which leaves position "
-        "with two lanes never written, so the quad does not rasterise "
-        "(t_14d18f02)." % show(swizzle)
-    )
+swizzle_legacy = sorted(masks(sys.argv[2]))
+expect(
+    "legacy vp_construct_swizzle_v",
+    swizzle_legacy,
+    [0x1, 0x3, 0xC, 0xE],
+    "The pre-fix shape was 0x4, 0x6, 0x8, 0x8, which leaves position "
+    "with two lanes never written, so the quad does not rasterise "
+    "(t_14d18f02).",
+)
+
+# Shipping general lowering is allowed to split the trailing literals into
+# scalar writes.  The property is that the vector operand contributes all
+# of its lanes and the literals cover the tail; a missing lane would leave
+# the output partially unwritten while the container still compiles.
+narrow_general = sorted(masks(sys.argv[3]))
+expect(
+    "general vp_construct_lanes_v",
+    narrow_general,
+    [0x1, 0x2, 0xC, 0xF],
+    "The shipping path must write position xyzw, then texcoord xy, z and w; "
+    "the old failure shifted the literals down and never wrote w.",
+)
+
+swizzle_general = sorted(masks(sys.argv[4]))
+expect(
+    "general vp_construct_swizzle_v",
+    swizzle_general,
+    [0x1, 0x1, 0x2, 0xC, 0xE],
+    "The shipping path must cover both outputs completely; missing any "
+    "lane is the silent t_14d18f02 rasterisation failure.",
+)
 PY
 
 printf 'vp-construct-lanes-test: ok\n'
