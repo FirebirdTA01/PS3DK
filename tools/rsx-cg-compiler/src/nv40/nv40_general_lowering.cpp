@@ -6171,8 +6171,37 @@ private:
                 // temp still live AFTER the store overlaps the output's
                 // live range.
                 for (const auto& kv : outputStorePos) {
-                    if (kv.first != candSlot || kv.second >= deadAfter)
+                    if (kv.first != candSlot || kv.second > deadAfter)
                         continue;
+                    if (kv.second == deadAfter) {
+                        // SelPred is the one pseudo-op that is not
+                        // read-then-write internally: it writes the
+                        // default to dst first, then reads srcs[0]
+                        // (condition) and srcs[1] (then value) while
+                        // expanding the CC-set and gated commit.  When
+                        // that SelPred is also the first output-pinned
+                        // write to R0, an early-read source whose last
+                        // use is the same pseudo-instruction cannot
+                        // occupy R0.  Treat equality as overlap only
+                        // for those early-read sources; ordinary stores
+                        // keep the strict boundary above.
+                        const VInstr& store = program_.instrs[kv.second];
+                        const int storeSlot =
+                            store.dst.fp16
+                                ? (store.dst.preferredPhys >> 1)
+                                : store.dst.preferredPhys;
+                        const bool earlyReadBySelPred =
+                            store.op == VOp::SelPred &&
+                            store.dst.outputPin &&
+                            store.dst.preferredPhys >= 0 &&
+                            storeSlot == candSlot &&
+                            ((store.srcs[0].kind == VSrcKind::Temp &&
+                              store.srcs[0].index == vi.dst.index) ||
+                             (store.srcs[1].kind == VSrcKind::Temp &&
+                              store.srcs[1].index == vi.dst.index));
+                        if (!earlyReadBySelPred)
+                            continue;
+                    }
                     // The value the slot is reserved FOR is not clobbering
                     // it by occupying it - that is the reservation working.
                     const auto owners = outputPinOwners.find(kv.first);

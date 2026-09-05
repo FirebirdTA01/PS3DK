@@ -1,0 +1,59 @@
+struct FragmentInput {
+    float2 uv : TEXCOORD0;
+};
+
+struct FragmentOutput {
+    float4 color : COLOR0;
+    float depth : DEPTH;
+};
+
+FragmentOutput main(FragmentInput input, uniform float4 time_param) {
+    FragmentOutput output;
+    float t = time_param.x;
+    float2 p = input.uv * 2.0;
+
+    float terrain_boundary =
+        -0.15 + 0.35 * sin(p.x * 3.5 + t * 1.5) * cos(p.x * 2.0 - t);
+
+    float3 final_color;
+    float custom_depth;
+
+    if (p.y <= terrain_boundary) {
+        float depth_gradient = clamp((terrain_boundary - p.y) * 1.2, 0.0, 1.0);
+        custom_depth = clamp(0.15 + 0.75 * depth_gradient, 0.0, 1.0);
+
+        float3 depth_ramp =
+            0.5 + 0.5 * cos(float3(0.0, 2.0, 4.0) +
+                            depth_gradient * 6.28 + t);
+
+        float grad_x =
+            -0.35 * (3.5 * cos(p.x * 3.5 + t * 1.5) *
+                     cos(p.x * 2.0 - t) -
+                     2.0 * sin(p.x * 3.5 + t * 1.5) *
+                     sin(p.x * 2.0 - t));
+        float3 norm = normalize(float3(grad_x, 1.0, 0.6));
+
+        float3 light_dir = normalize(float3(0.5, 1.2, 0.8));
+        float diff = max(0.0, dot(norm, light_dir));
+        float spec = pow(max(0.0,
+                             dot(norm,
+                                 normalize(light_dir + float3(0.0, 0.0, 1.0)))),
+                         24.0);
+
+        float contour = abs(frac(custom_depth * 28.0) - 0.5);
+        float contour_line = step(contour, 0.10);
+
+        final_color = depth_ramp * (0.35 + 0.65 * diff) +
+                      float3(1.0, 1.0, 1.0) * spec * 0.5 +
+                      float3(1.0, 1.0, 1.0) * contour_line * 0.6;
+    } else {
+        float sky_t = clamp((p.y - terrain_boundary) / 1.5, 0.0, 1.0);
+        final_color = lerp(float3(0.12, 0.22, 0.38),
+                           float3(0.04, 0.06, 0.12), sky_t);
+        custom_depth = 1.0;
+    }
+
+    output.color = float4(final_color, 1.0);
+    output.depth = custom_depth;
+    return output;
+}
