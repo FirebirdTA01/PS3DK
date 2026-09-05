@@ -2020,31 +2020,8 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 return InvalidIRValue;
             }
 
-            IRTypeInfo resultType = getExprType(expr);
-            IRValueID selected = localIt->second.empty()
-                ? InvalidIRValue
-                : localIt->second[0];
-            if (selected == InvalidIRValue)
-            {
-                error(expr->loc, "local array element used before assignment");
-                return InvalidIRValue;
-            }
-            for (size_t i = 1; i < localIt->second.size(); ++i)
-            {
-                IRValueID elem = localIt->second[i];
-                if (elem == InvalidIRValue)
-                {
-                    error(expr->loc, "local array element used before assignment");
-                    return InvalidIRValue;
-                }
-                IRValueID idxConst = createConstant(static_cast<int32_t>(i));
-                IRValueID match =
-                    emitBinaryOp(IROp::CmpEq, IRTypeInfo::Bool(),
-                                 indexValue, idxConst, expr->loc);
-                selected = emitInstruction(IROp::Select, resultType,
-                                           {match, elem, selected}, expr->loc);
-            }
-            return selected;
+            error(expr->loc, "local array dynamic indexing is not supported by this profile");
+            return InvalidIRValue;
         }
     }
 
