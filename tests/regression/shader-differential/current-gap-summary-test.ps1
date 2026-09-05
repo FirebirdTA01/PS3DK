@@ -11,8 +11,8 @@ function Assert-Contains([string]$Haystack, [string]$Needle, [string]$Label) {
     }
 }
 
-function Invoke-GapSummary([string]$Census, [string]$Metrics, [string]$Tty) {
-    $output = powershell -NoProfile -ExecutionPolicy Bypass -File $script -CensusCsv $Census -MetricsCsv $Metrics -TtyLog $Tty 2>&1
+function Invoke-GapSummary([string]$Census, [string]$Metrics, [string]$Tty, [string]$StageLog) {
+    $output = powershell -NoProfile -ExecutionPolicy Bypass -File $script -CensusCsv $Census -MetricsCsv $Metrics -TtyLog $Tty -StageLog $StageLog 2>&1
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Text = ($output | Out-String)
@@ -22,7 +22,7 @@ function Invoke-GapSummary([string]$Census, [string]$Metrics, [string]$Tty) {
 try {
     $oldErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $missing = powershell -NoProfile -ExecutionPolicy Bypass -File $script -CensusCsv (Join-Path $work "missing.csv") -MetricsCsv (Join-Path $work "missing-metrics.csv") -TtyLog (Join-Path $work "missing.log") 2>&1
+    $missing = powershell -NoProfile -ExecutionPolicy Bypass -File $script -CensusCsv (Join-Path $work "missing.csv") -MetricsCsv (Join-Path $work "missing-metrics.csv") -TtyLog (Join-Path $work "missing.log") -StageLog (Join-Path $work "missing-stage.log") 2>&1
     $missingExitCode = $LASTEXITCODE
     $ErrorActionPreference = $oldErrorActionPreference
     if ($missingExitCode -eq 0) {
@@ -50,23 +50,32 @@ try {
         "SDIFF|tier=B|role=reference|shader=bad_pixels|compiler=ab|uniform_set=0|target=emulator|status=mismatch|max_delta=9|diff_pixels=64|total_pixels=4096|diagnostic=real|elapsed_ms=1|artifact=-"
     ) | Set-Content -Path $tty -Encoding Ascii
 
-    $result = Invoke-GapSummary $census $metrics $tty
+    $stageLog = Join-Path $work "stage.log"
+    @(
+        "stager: reference corpus: 117 shaders, 97 pairs staged, 7 byte-identical skipped, ours refused 12, reference refused 1, 1 excluded, 11 reference-only probe rows (sidecar: reference-corpus-refused.txt)",
+        "stager: path-pair corpus (gate 1): 180 shaders from manifest path-pair-corpus-manifest.txt, 0 excluded, 103 legacy-refused (out of scope), 0 GENERAL-REFUSED (gate failures), 0 reference-refused (unoracled), 29 byte-identical legacy/general, 48 pairs staged (0 under set 0 for a file-scope const)",
+        "stager: vp corpus: 18 vertex shaders, 14 pairs staged, 2 byte-identical skipped, ours refused 2, reference refused 0, 0 excluded, 0 under set 0 (sidecar: vp-corpus-refused.txt)",
+        "stager: vp path pairs (gate 5): 104 candidates (16 curated from vp-path-pairs.txt + 88 from corpus, 0 already curated and counted once), 0 legacy-refused (out of scope), 0 GENERAL-REFUSED (gate failures), 0 reference-refused (unoracled), 0 byte-identical legacy/general, 104 pairs staged (sidecar: vp-path-pair-refused.txt)"
+    ) | Set-Content -Path $stageLog -Encoding Ascii
+
+    $result = Invoke-GapSummary $census $metrics $tty $stageLog
     if ($result.ExitCode -ne 0) {
         throw "current-gap-summary failed unexpectedly: $($result.Text)"
     }
-    Assert-Contains $result.Text "CURRENT_GAPS|census_rows=5|accepted_refusals=3|register_budget=1|pixel_mismatches=1|newly_refusing=1|metrics_worse_regs=1|metrics_worse_instr=1" "summary"
+    Assert-Contains $result.Text "CURRENT_GAPS|shaders_examined=135|census_refusal_rows=5|accepted_refusals=3|register_budget=1|pixel_mismatches=1|newly_refusing=1|metrics_worse_regs=1|metrics_worse_instr=1" "summary"
     Assert-Contains $result.Text "GAP_BUCKET|bucket=operand_resolution|count=1|names=test_48_refract" "operand bucket"
     Assert-Contains $result.Text "GAP_BUCKET|bucket=register_budget|count=1|names=test_79_centroid_interpolation" "register bucket"
 
     @(
         [pscustomobject]@{ name="only_one"; profile="sce_fp_rsx"; source="a.fcg"; ours_status="backend-refuse"; reference_status="accept"; bucket="one_off" }
     ) | Export-Csv -NoTypeInformation -Path $census -Encoding Ascii
-    $changed = Invoke-GapSummary $census $metrics $tty
-    Assert-Contains $changed.Text "CURRENT_GAPS|census_rows=1|accepted_refusals=1|" "changed census summary"
+    $changed = Invoke-GapSummary $census $metrics $tty $stageLog
+    Assert-Contains $changed.Text "CURRENT_GAPS|shaders_examined=135|census_refusal_rows=1|accepted_refusals=1|" "changed census summary"
 
     Set-Content -LiteralPath $census -Value '"name","profile","source","ours_status","reference_status","bucket","rc_ours","rc_reference"' -Encoding Ascii
-    $empty = Invoke-GapSummary $census $metrics $tty
-    Assert-Contains $empty.Text "CURRENT_GAPS|census_rows=0|accepted_refusals=0|register_budget=0|" "empty census summary"
+    Set-Content -LiteralPath $stageLog -Value "stager: reference corpus: 0 shaders, 0 pairs staged, 0 byte-identical skipped, ours refused 0, reference refused 0, 0 excluded, 0 reference-only probe rows (sidecar: reference-corpus-refused.txt)" -Encoding Ascii
+    $empty = Invoke-GapSummary $census $metrics $tty $stageLog
+    Assert-Contains $empty.Text "CURRENT_GAPS|shaders_examined=0|census_refusal_rows=0|accepted_refusals=0|register_budget=0|" "empty census summary"
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
