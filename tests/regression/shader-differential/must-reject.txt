@@ -37,7 +37,7 @@ accept_const_promotion|accept|accept/backend-refuse|accept|
 accept_for_loop|accept|accept/backend-refuse|accept|
 accept_half_overload|accept|accept/backend-refuse|accept|t_b8bb521f CLOSED 2026-09-02 (ba2e820 + bbb6a0a): the general path lowers ftoh (half precision) and compiles this, as it does th06_add/th06_mod; legacy still refuses the overload
 accept_int_literal_in_float|accept|accept/backend-refuse|accept|
-accept_matrix_constructor|accept|backend-refuse|backend-refuse|KNOWN GAP t_1b67da58: matconstruct + fragment matvecmul are not lowered on either path; accept when it lands
+accept_matrix_constructor|accept|backend-refuse|accept|t_b4024c12: the general path lowers matconstruct plus fragment matvecmul; legacy still refuses
 accept_nested_swizzle|accept|accept/backend-refuse|accept|
 accept_preprocessor_macro|accept|accept/backend-refuse|accept|
 accept_struct_param|accept|accept/backend-refuse|accept|
@@ -49,6 +49,6 @@ reject_narrowing_init|reject|frontend-reject|frontend-reject|
 reject_swizzle_out_of_range|reject|frontend-reject|frontend-reject|
 reject_undeclared_identifier|reject|frontend-reject|frontend-reject|
 reject_unknown_function|reject|frontend-reject|frontend-reject|
-reject_vector_index_out_of_range|reject|backend-refuse|accept|SHARED GAP t_2f826072: an out-of-range vector subscript is accepted by our frontend and the general path EMITS a container; the reference rejects
+reject_vector_index_out_of_range|reject|backend-refuse|backend-refuse|t_2f826072 CLOSED: the compiler refuses out-of-range vector subscripts with a bounds diagnostic and leaves no container
 reject_write_to_uniform|accept|accept/backend-refuse|accept|the filename's expectation is wrong about Cg: every reference accepts assignment to a uniform parameter
 reject_wrong_arity|reject|frontend-reject|frontend-reject|

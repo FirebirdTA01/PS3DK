@@ -149,6 +149,8 @@ jobs:
 
       - name: Test rsx-cg-compiler matrix row indexing
         run: bash tests/shader-compiler/vp-matrix-row-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler matrix values
+        run: bash tests/shader-compiler/matrix-value-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler two-varying operands
         run: bash tests/shader-compiler/two-varying-operands-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

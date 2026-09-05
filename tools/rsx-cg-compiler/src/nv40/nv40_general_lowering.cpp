@@ -503,6 +503,13 @@ private:
     // whatever was allocated next (review finding, codex).  The
     // reference rejects that source - "array index out of bounds".
     std::unordered_map<IRValueID, int> matrixUniformRows_;
+    struct MatrixValue
+    {
+        int rows = 0;
+        int cols = 0;
+        std::vector<VSrc> rowSrcs;
+    };
+    std::unordered_map<IRValueID, MatrixValue> matrixValues_;
     // Which texture unit each sampler value names.  lowerTex used to hard-
     // code unit 0, so every sampler in a program sampled the FIRST texture
     // while the container correctly described the bindings - a two-texture
@@ -1490,6 +1497,7 @@ private:
             IRValueID valueId;
             std::string name;
             int rows = 0;
+            int cols = 0;
         };
         std::vector<PendingMatrix> pendingMatrices;
         for (size_t pi = 0; pi < entry_.parameters.size(); ++pi) {
@@ -1520,7 +1528,9 @@ private:
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform &&
                        p.type.isMatrix()) {
-                pendingMatrices.push_back(PendingMatrix{p.valueId, p.name, p.type.matrixRows});
+                pendingMatrices.push_back(PendingMatrix{p.valueId, p.name,
+                                                        p.type.matrixRows,
+                                                        p.type.matrixCols});
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform) {
                 program_.valueToSource[p.valueId] =
@@ -1542,7 +1552,9 @@ private:
             if (!seenUniformNames.insert(g.name).second)
                 continue;
             if (profile_ == GeneralProfile::Vertex && g.type.isMatrix()) {
-                pendingMatrices.push_back(PendingMatrix{g.valueId, g.name, g.type.matrixRows});
+                pendingMatrices.push_back(PendingMatrix{g.valueId, g.name,
+                                                        g.type.matrixRows,
+                                                        g.type.matrixCols});
             } else if (profile_ == GeneralProfile::Vertex) {
                 program_.valueToSource[g.valueId] =
                     uniformSrc(nextVpUniformConst--, false);
@@ -1570,6 +1582,12 @@ private:
         for (auto it = pendingMatrices.begin(); it != pendingMatrices.end(); ++it) {
             matrixUniformBase_[it->valueId] = nextVpMatrixConst;
             matrixUniformRows_[it->valueId] = std::max(1, it->rows);
+            MatrixValue mv;
+            mv.rows = std::max(1, it->rows);
+            mv.cols = std::max(1, it->cols);
+            for (int row = 0; row < mv.rows; ++row)
+                mv.rowSrcs.push_back(uniformSrc(nextVpMatrixConst + row, false));
+            matrixValues_[it->valueId] = mv;
             if (dumpOrder) {
                 std::fprintf(stderr, "matrix %s -> c[%d]\n",
                              it->name.c_str(), nextVpMatrixConst);
@@ -1770,6 +1788,12 @@ private:
             return;
         case IROp::LoadUniform:
             lowerLoadUniform(inst);
+            return;
+        case IROp::MatConstruct:
+            lowerMatConstruct(inst);
+            return;
+        case IROp::MatMul:
+            lowerMatMul(inst);
             return;
         case IROp::MatVecMul:
             lowerMatVecMul(inst);
@@ -2069,23 +2093,20 @@ private:
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
 
-        // `m[r]` on a matrix uniform is the const register of row r, whole
-        // - not a lane of something.  Without this the operand resolved to
+        // `m[r]` on a matrix is the whole row source - not a lane of
+        // something.  Without this a uniform-matrix operand resolved to
         // nothing and the program refused to lower (t_9da20b33).  The row
         // is OPERAND 1: the IR for m[0] and m[2] differs only there, and
         // both carry componentIndex 0, so reading the field would compile
         // every row as row 0.
         if (inst.operands.size() >= 2 && !inst.resultType.isMatrix()) {
-            const auto matIt = matrixUniformBase_.find(inst.operands[0]);
+            const auto matIt = matrixValues_.find(inst.operands[0]);
             int row = 0;
-            const auto rowsIt = matrixUniformRows_.find(inst.operands[0]);
-            const int rows =
-                rowsIt == matrixUniformRows_.end() ? 0 : rowsIt->second;
-            if (matIt != matrixUniformBase_.end() &&
+            if (matIt != matrixValues_.end() &&
                 constantIndex(inst.operands[1], row) &&
-                row >= 0 && row < rows) {
+                row >= 0 && row < matIt->second.rows) {
                 program_.valueToSource[inst.result] =
-                    uniformSrc(matIt->second + row, false);
+                    matIt->second.rowSrcs[static_cast<size_t>(row)];
                 return;
             }
         }
@@ -3329,6 +3350,9 @@ private:
                 const auto rIt = matrixUniformRows_.find(g.valueId);
                 if (rIt != matrixUniformRows_.end())
                     matrixUniformRows_[inst.result] = rIt->second;
+                const auto mvIt = matrixValues_.find(g.valueId);
+                if (mvIt != matrixValues_.end())
+                    matrixValues_[inst.result] = mvIt->second;
                 return;
             }
             const auto sIt = program_.valueToSource.find(g.valueId);
@@ -3344,33 +3368,193 @@ private:
         program_.loweringFailed = true;
     }
 
-    void lowerMatVecMul(const IRInstruction& inst)
+    bool matrixDimsSupported(const IRTypeInfo& type) const
     {
-        if (profile_ != GeneralProfile::Vertex ||
-            inst.operands.size() < 2 ||
-            inst.result == InvalidIRValue) {
+        return type.isMatrix() &&
+               type.matrixRows >= 2 && type.matrixRows <= 4 &&
+               type.matrixCols >= 2 && type.matrixCols <= 4;
+    }
+
+    void lowerMatConstruct(const IRInstruction& inst)
+    {
+        if (inst.result == InvalidIRValue || !matrixDimsSupported(inst.resultType)) {
             program_.diagnostics.push_back(
-                "nv40-general: only VP matvecmul lowering is supported");
+                "nv40-general: matrix constructor shape is unsupported; refusing");
+            program_.loweringFailed = true;
             return;
         }
-        const auto matIt = matrixUniformBase_.find(inst.operands[0]);
-        if (matIt == matrixUniformBase_.end()) {
+
+        const int rows = inst.resultType.matrixRows;
+        const int cols = inst.resultType.matrixCols;
+        MatrixValue mv;
+        mv.rows = rows;
+        mv.cols = cols;
+
+        if (static_cast<int>(inst.operands.size()) == rows) {
+            for (IRValueID operand : inst.operands) {
+                const int width = valueWidthOf(operand);
+                if (width != cols) {
+                    program_.diagnostics.push_back(
+                        "nv40-general: matrix row constructor operand width " +
+                        std::to_string(width) + " does not match " +
+                        std::to_string(cols) + "; refusing");
+                    program_.loweringFailed = true;
+                    return;
+                }
+                mv.rowSrcs.push_back(resolve(operand));
+            }
+            matrixValues_[inst.result] = mv;
+            return;
+        }
+
+        if (static_cast<int>(inst.operands.size()) != rows * cols) {
             program_.diagnostics.push_back(
-                "nv40-general: matvecmul matrix source is not a uniform matrix");
+                "nv40-general: matrix constructor operand count " +
+                std::to_string(inst.operands.size()) + " does not match " +
+                std::to_string(rows) + " rows or " +
+                std::to_string(rows * cols) + " scalars; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        size_t operandIndex = 0;
+        for (int row = 0; row < rows; ++row) {
+            const int rowReg = newVReg();
+            mv.rowSrcs.push_back(tempSrc(rowReg));
+            for (int col = 0; col < cols; ++col, ++operandIndex) {
+                VInstr vi;
+                vi.op = VOp::Mov;
+                vi.dst.index = rowReg;
+                vi.dst.writemask = 1 << col;
+                vi.srcs[0] = resolve(inst.operands[operandIndex]);
+                program_.instrs.push_back(vi);
+            }
+        }
+        matrixValues_[inst.result] = mv;
+    }
+
+    bool matrixRows(IRValueID value, MatrixValue& out) const
+    {
+        const auto it = matrixValues_.find(value);
+        if (it == matrixValues_.end())
+            return false;
+        out = it->second;
+        return true;
+    }
+
+    void lowerRowVecMatProduct(IRValueID resultValue,
+                               const VSrc& vec,
+                               int vecWidth,
+                               const MatrixValue& mat,
+                               int resultWidth,
+                               int resultReg)
+    {
+        const int mask = componentMaskForWidth(resultWidth);
+        for (int j = 0; j < vecWidth; ++j) {
+            VInstr vi;
+            vi.op = (j == 0) ? VOp::Mul : VOp::Mad;
+            vi.dst.index = resultReg;
+            vi.dst.writemask = mask;
+            vi.srcs[0] = vec;
+            const uint8_t c = vec.swizzle[j];
+            vi.srcs[0].swizzle = {c, c, c, c};
+            vi.srcs[1] = mat.rowSrcs[static_cast<size_t>(j)];
+            if (j != 0)
+                vi.srcs[2] = tempSrc(resultReg);
+            program_.instrs.push_back(vi);
+        }
+        if (resultValue != InvalidIRValue)
+            program_.valueToVReg[resultValue] = resultReg;
+    }
+
+    void lowerMatMul(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue ||
+            !matrixDimsSupported(inst.resultType)) {
+            program_.diagnostics.push_back(
+                "nv40-general: matrix multiply shape is unsupported; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        MatrixValue left;
+        MatrixValue right;
+        if (!matrixRows(inst.operands[0], left) ||
+            !matrixRows(inst.operands[1], right)) {
+            program_.diagnostics.push_back(
+                "nv40-general: matmul operands must be matrix values; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        if (left.cols != right.rows ||
+            inst.resultType.matrixRows != left.rows ||
+            inst.resultType.matrixCols != right.cols ||
+            left.rowSrcs.size() != static_cast<size_t>(left.rows) ||
+            right.rowSrcs.size() != static_cast<size_t>(right.rows)) {
+            program_.diagnostics.push_back(
+                "nv40-general: matmul dimensions do not line up; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        MatrixValue result;
+        result.rows = inst.resultType.matrixRows;
+        result.cols = inst.resultType.matrixCols;
+        for (int row = 0; row < result.rows; ++row) {
+            const int rowReg = newVReg();
+            result.rowSrcs.push_back(tempSrc(rowReg));
+            lowerRowVecMatProduct(InvalidIRValue,
+                                  left.rowSrcs[static_cast<size_t>(row)],
+                                  left.cols,
+                                  right,
+                                  result.cols,
+                                  rowReg);
+        }
+        matrixValues_[inst.result] = result;
+    }
+
+    void lowerMatVecMul(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 2 ||
+            inst.result == InvalidIRValue) {
+            program_.diagnostics.push_back(
+                "nv40-general: matvecmul shape is unsupported; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        MatrixValue mat;
+        if (!matrixRows(inst.operands[0], mat)) {
+            program_.diagnostics.push_back(
+                "nv40-general: matvecmul matrix source is not a matrix value");
+            program_.loweringFailed = true;
+            return;
+        }
+        const int vecWidth = valueWidthOf(inst.operands[1]);
+        const int resultWidth = inst.resultType.componentCount();
+        if (mat.cols != vecWidth || mat.rows != resultWidth ||
+            mat.rowSrcs.size() != static_cast<size_t>(mat.rows)) {
+            program_.diagnostics.push_back(
+                "nv40-general: matvecmul dimensions do not line up; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        if (profile_ == GeneralProfile::Vertex && mat.cols == 2) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP matvecmul with 2-column matrices is not "
+                "implemented; refusing before reaching unsupported DP2 emission");
+            program_.loweringFailed = true;
             return;
         }
 
         const int result = define(inst.result);
         VSrc vec = resolve(inst.operands[1]);
-        static const int masks[4] = {0x8, 0x4, 0x2, 0x1};
-        static const int rows[4] = {3, 2, 1, 0};
-        for (int i = 0; i < 4; ++i) {
+        for (int row = mat.rows - 1; row >= 0; --row) {
             VInstr dp;
-            dp.op = VOp::Dp4;
+            dp.op = dotReductionOp(mat.cols);
             dp.dst.index = result;
-            dp.dst.writemask = masks[i];
+            dp.dst.writemask = 1 << row;
             dp.srcs[0] = vec;
-            dp.srcs[1] = uniformSrc(matIt->second + rows[i], false);
+            dp.srcs[1] = mat.rowSrcs[static_cast<size_t>(row)];
             program_.instrs.push_back(dp);
         }
     }
@@ -3391,37 +3575,28 @@ private:
             program_.loweringFailed = true;
             return;
         }
-        const auto matIt = matrixUniformBase_.find(inst.operands[1]);
-        if (matIt == matrixUniformBase_.end()) {
+        MatrixValue mat;
+        if (!matrixRows(inst.operands[1], mat)) {
             program_.diagnostics.push_back(
-                "nv40-general: vecmatmul matrix source is not a uniform "
-                "matrix (computed matrices await the matmul slice); refusing");
+                "nv40-general: vecmatmul matrix source is not a matrix value; refusing");
             program_.loweringFailed = true;
             return;
         }
-        if (valueWidthOf(inst.operands[0]) != 4 ||
-            inst.resultType.componentCount() != 4) {
+        const int vecWidth = valueWidthOf(inst.operands[0]);
+        const int resultWidth = inst.resultType.componentCount();
+        if (vecWidth != mat.rows ||
+            resultWidth != mat.cols ||
+            mat.rowSrcs.size() != static_cast<size_t>(mat.rows)) {
             program_.diagnostics.push_back(
-                "nv40-general: vecmatmul is lowered for vec4*mat4 only; refusing");
+                "nv40-general: vecmatmul dimensions do not line up; refusing");
             program_.loweringFailed = true;
             return;
         }
 
         const int result = define(inst.result);
         const VSrc vec = resolve(inst.operands[0]);
-        for (int j = 0; j < 4; ++j) {
-            VInstr vi;
-            vi.op = (j == 0) ? VOp::Mul : VOp::Mad;
-            vi.dst.index = result;
-            vi.dst.writemask = 0xf;
-            vi.srcs[0] = vec;
-            const uint8_t c = vec.swizzle[j];
-            vi.srcs[0].swizzle = {c, c, c, c};
-            vi.srcs[1] = uniformSrc(matIt->second + j, false);
-            if (j != 0)
-                vi.srcs[2] = tempSrc(result);
-            program_.instrs.push_back(vi);
-        }
+        lowerRowVecMatProduct(inst.result, vec, vecWidth, mat, resultWidth,
+                              result);
     }
 
     void lowerLength(const IRInstruction& inst)

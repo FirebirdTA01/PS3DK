@@ -1,0 +1,13 @@
+void main
+(
+    float3 vertexPosition : POSITION,
+    uniform float4x4 projMatrix,
+    uniform float4x4 modelViewMatrix,
+    out float4 outPosition : POSITION,
+    out float4 outTexcoord : TEXCOORD0
+)
+{
+    float4x4 mvp = mul(projMatrix, modelViewMatrix);
+    outPosition = mul(mvp, float4(vertexPosition, 1.0f));
+    outTexcoord = float4(vertexPosition, 1.0f);
+}
