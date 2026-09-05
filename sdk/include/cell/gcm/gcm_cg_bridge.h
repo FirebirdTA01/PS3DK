@@ -32,7 +32,7 @@
 #include <Cg/cgBinary.h>
 #include <cell/cgb/cgb_struct.h>
 #include <rsx/gcm_sys.h>           /* gcmContextData, GCM_LOCATION_*, GCM_ATTRIB_OUTPUT_MASK_* */
-#include <rsx/commands.h>          /* rsxInlineTransfer */
+#include <rsx/commands.h>
 #include <rsx/nv40.h>              /* NV40TCL_* method IDs */
 
 /* Build-time diagnostic trace.  Pass `-DPS3TC_GCM_CG_BRIDGE_TRACE=1` to
@@ -62,6 +62,8 @@ extern "C" {
  * written to (method_offset + 4 * i) automatically.
  */
 #define PS3TC_GCM_METHOD(m, n)  (((uint32_t)(n) << 18) | (uint32_t)(m))
+#define PS3TC_GCM_SUBCHANNEL_METHOD(ch, m, n) \
+    (((uint32_t)(n) << 18) | ((uint32_t)(ch) << 13) | (uint32_t)(m))
 
 /* Reserve `count` u32 slots in the command buffer, invoking the
  * gcm callback (which grows the buffer or flushes upstream) when we
@@ -149,6 +151,43 @@ static inline uint32_t *ps3tc_gcm_reserve(CellGcmContextData *ctx, uint32_t coun
     uint32_t *p = ctx->current;
     ctx->current += count;
     return p;
+}
+
+/* Header-owned inline transfer for FP embedded constants.  This duplicates
+ * the librsx packet deliberately: the bridge is a static-inline API, and
+ * t_19ddcbee showed that delegating to an older installed archive silently
+ * dropped the per-transfer DMA destination bind even though the source tree
+ * had been fixed.  Keep the load-bearing bind with the header-emitted
+ * fragment-uniform patch so consumers do not depend on archive vintage. */
+static inline void ps3tc_gcm_inline_transfer(CellGcmContextData *ctx,
+                                             uint32_t dstOffset,
+                                             const uint32_t *src,
+                                             uint32_t sizeInWords,
+                                             uint8_t location)
+{
+    const uint32_t alignedVideoOffset = dstOffset & ~0x3fu;
+    const uint32_t pixelShift = (dstOffset & 0x3fu) >> 2;
+    const uint32_t padSizeInWords = (sizeInWords + 1u) & ~1u;
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 12u + padSizeInWords);
+    if (!w) return;
+
+    *w++ = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_DMA_IMAGE_DESTIN, 1);
+    *w++ = GCM_DMA_MEMORY_FRAME_BUFFER + location;
+    *w++ = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN, 1);
+    *w++ = alignedVideoOffset;
+    *w++ = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_FORMAT, 2);
+    *w++ = NV04_CONTEXT_SURFACES_2D_FORMAT_Y32;
+    *w++ = (0x1000u << 16) | 0x1000u;
+    *w++ = PS3TC_GCM_SUBCHANNEL_METHOD(5, NV01_IMAGE_FROM_CPU_POINT, 3);
+    *w++ = pixelShift;
+    *w++ = (1u << 16) | sizeInWords;
+    *w++ = (1u << 16) | sizeInWords;
+    *w++ = PS3TC_GCM_SUBCHANNEL_METHOD(5, NV01_IMAGE_FROM_CPU_COLOR(0), padSizeInWords);
+
+    for (uint32_t i = 0; i < sizeInWords; ++i)
+        *w++ = src[i];
+    if (padSizeInWords != sizeInWords)
+        *w++ = 0;
 }
 
 /* ---- VP result-mask synthesis ------------------------------------- */
@@ -697,7 +736,6 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
                                                       const float *values,
                                                       uint32_t addrOffset)
 {
-    (void)ctx;
     if (!prog || !param || !values || !addrOffset) return;
 
     const CgBinaryParameter *pp = (const CgBinaryParameter *)param;
@@ -729,8 +767,8 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
             uint32_t params[4] = { 0, 0, 0, 0 };
             for (uint32_t j = 0; j < words; ++j)
                 params[j] = ps3tc_cg_swap_f32_16(values[j]);
-            rsxInlineTransfer(ctx, addrOffset + off, params, words,
-                              GCM_LOCATION_RSX);
+            ps3tc_gcm_inline_transfer(ctx, addrOffset + off, params, words,
+                                      GCM_LOCATION_RSX);
         }
         return;
     }
@@ -761,8 +799,8 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
                     ps3tc_cg_swap_f32_16(values[r * 4 + 2]),
                     ps3tc_cg_swap_f32_16(values[r * 4 + 3]),
                 };
-                rsxInlineTransfer(ctx, addrOffset + off, params, 4,
-                                  GCM_LOCATION_RSX);
+                ps3tc_gcm_inline_transfer(ctx, addrOffset + off, params, 4,
+                                          GCM_LOCATION_RSX);
             }
         }
     }
