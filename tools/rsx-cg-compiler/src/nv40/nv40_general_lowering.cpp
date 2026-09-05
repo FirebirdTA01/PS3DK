@@ -179,6 +179,8 @@ struct VDst
     bool outputPin = false;  // FP-only: preferredPhys IS the output slot, not a preference
     bool fp16 = false;       // FP-only: destination is an H register
     int  writemask = 0xf;
+    bool userClipOutput = false;
+    int  userClipIndex = 0;
 };
 
 struct VInstr
@@ -279,6 +281,8 @@ static int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
     // one of the two general-vs-default regressions).
     if (semanticUpper.empty() && semanticIndex >= 0 && semanticIndex < 16)
         return semanticIndex;
+    if (semanticUpper == "ATTR" && semanticIndex >= 0 && semanticIndex < 16)
+        return semanticIndex;
     if (semanticUpper == "POSITION") return NVFX_VP_INST_IN_POS;
     if (semanticUpper == "NORMAL")   return NVFX_VP_INST_IN_NORMAL;
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
@@ -307,9 +311,20 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
     if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NV40_VP_INST_DEST_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NV40_VP_INST_DEST_TC(semanticIndex);
+    // Measured against sce-cgc: CLP0 advertises CG_CLP0 in the container
+    // but uses the encoded FOGC destination slot.  Clip-specific metadata
+    // below distinguishes it from a real FOG output.
+    if (semanticUpper == "CLP" && semanticIndex == 0)
+        return NV40_VP_INST_DEST_FOGC;
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
         return NV40_VP_INST_DEST_FOGC;
     return -1;
+}
+
+static bool isVertexClipOutput(const std::string& semanticUpper,
+                               int semanticIndex)
+{
+    return semanticUpper == "CLP" && semanticIndex == 0;
 }
 
 static int vertexOutputPriority(int outIndex)
@@ -5472,6 +5487,9 @@ private:
             return;
         }
         const IRValueID value = inst.operands[0];
+        const bool isClipOutput =
+            profile_ == GeneralProfile::Vertex &&
+            isVertexClipOutput(sem, inst.semanticIndex);
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         if (dumpOrder) {
             const VSrc dbg = resolve(value);
@@ -5508,6 +5526,8 @@ private:
                         vi.dst.output = true;
                         vi.dst.index = outIndex;
                         vi.dst.phys = -1;
+                        vi.dst.userClipOutput = isClipOutput;
+                        vi.dst.userClipIndex = inst.semanticIndex;
                     }
                 }
                 return;
@@ -5566,6 +5586,8 @@ private:
                 producer.dst.output = true;
                 producer.dst.index = outIndex;
                 producer.dst.phys = -1;
+                producer.dst.userClipOutput = isClipOutput;
+                producer.dst.userClipIndex = inst.semanticIndex;
                 return;
             }
         }
@@ -5590,6 +5612,8 @@ private:
                 producer.dst.index = outIndex;
                 producer.dst.phys = -1;
                 producer.dst.writemask = outMask;
+                producer.dst.userClipOutput = isClipOutput;
+                producer.dst.userClipIndex = inst.semanticIndex;
                 return;
             }
         }
@@ -5598,6 +5622,8 @@ private:
         vi.dst.output = true;
         vi.dst.index = outIndex;
         vi.dst.writemask = outMask;
+        vi.dst.userClipOutput = isClipOutput;
+        vi.dst.userClipIndex = inst.semanticIndex;
         vi.srcs[0] = resolve(value);
         int sourceWidth = -1;
         for (const auto& p : entry_.parameters) {
@@ -7342,6 +7368,21 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     attrs.registerCount = static_cast<uint32_t>(std::max(1, asm_.numTempRegs()));
     attrs.attributeInputMask = asm_.inputMask();
     attrs.attributeOutputMask = asm_.outputMask();
+    bool hasClipOutput = false;
+    bool hasFogOutput = false;
+    for (const VInstr& vi : program.instrs) {
+        if (!vi.dst.output)
+            continue;
+        if (vi.dst.userClipOutput && vi.dst.userClipIndex == 0) {
+            hasClipOutput = true;
+            attrs.attributeOutputMask |= (1u << 6);
+            attrs.userClipMask |= (1u << 1);
+        } else if (vi.dst.index == NV40_VP_INST_DEST_FOGC) {
+            hasFogOutput = true;
+        }
+    }
+    if (hasClipOutput && !hasFogOutput)
+        attrs.attributeOutputMask &= ~(1u << 4);
     if (attrsOut)
         *attrsOut = attrs;
     return out;

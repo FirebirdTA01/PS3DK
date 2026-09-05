@@ -1,0 +1,19 @@
+// CLP0 is a vertex-program user clip output, not a generic TEX/COLOR output.
+struct appin
+{
+    float4 p : POSITION;
+};
+
+struct appout
+{
+    float4 pos : POSITION;
+    float clp : CLP0;
+};
+
+appout main(appin IN)
+{
+    appout OUT;
+    OUT.pos = IN.p;
+    OUT.clp = IN.p.x;
+    return OUT;
+}

@@ -10,3 +10,5 @@ tests/regression/shader-differential/shaders/sd_vp_ctrl_a.vcg|0|both
 tests/regression/shader-differential/shaders/sd_vp_auto_ctrl.vcg|auto|general
 tests/regression/shader-readback/shaders/rb_pos_uv.vcg|0|both
 tests/regression/shader-readback/shaders/rb_xform.vcg|auto|both
+tools/rsx-cg-compiler/tests/shaders/vp_attr_inputs_v.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/vp_clp0_output_v.cg|0|general

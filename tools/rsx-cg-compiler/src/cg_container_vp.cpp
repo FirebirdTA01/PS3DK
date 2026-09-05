@@ -23,6 +23,7 @@
  *       TEXCOORDn / TEXn      → CG_TEX0+n  = 0x883+n  (note: VP's
  *                                                       TEX0 vs FP's
  *                                                       TEXCOORD0)
+ *       CLP0                 → CG_CLP0    = 0x906
  *
  *     Uniforms land in the const bank (C[0..511]):
  *       float4x4   → CG_C = 0x882, resIndex = first row's c[N]
@@ -81,6 +82,7 @@ constexpr uint32_t kCgConst       = 2178u;  // 0x0882 — uniform const-bank slo
 constexpr uint32_t kCgTex0        = 2179u;  // 0x0883 — VP TEX/TEXCOORD output
 constexpr uint32_t kCgHpos        = 2243u;  // 0x08c3 — VP POSITION output
 constexpr uint32_t kCgCol0        = 2245u;  // 0x08c5 — VP COL0 output
+constexpr uint32_t kCgClp0        = 2310u;  // 0x0906 — VP CLP0 output
 
 // CGtype values (from cg_datatypes.h, base = 1024).
 constexpr uint32_t kCgFloat       = 1045u;
@@ -147,6 +149,8 @@ uint32_t vpInputResource(const std::string& semUpper, int semIndex)
 {
     if (semUpper.empty() && semIndex >= 0 && semIndex < 16)
         return kCgAttr0 + static_cast<uint32_t>(semIndex);
+    if (semUpper == "ATTR" && semIndex >= 0 && semIndex < 16)
+        return kCgAttr0 + static_cast<uint32_t>(semIndex);
     if (semUpper == "POSITION") return kCgAttr0;
     if (semUpper == "NORMAL")   return kCgAttr0 + 2;        // ATTR2
     if (semUpper == "COLOR" || semUpper == "COL")
@@ -199,6 +203,8 @@ uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
                        });
         return (wroteTexCoord ? kCgTexCoord0 : kCgTex0) + semIndex;
     }
+    if (semUpper == "CLP" && semIndex == 0)
+        return kCgClp0;
     return 0;
 }
 

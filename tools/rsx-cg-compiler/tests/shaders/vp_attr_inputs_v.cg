@@ -1,0 +1,26 @@
+// Explicit ATTRn input semantics must bind to the matching VP input slots.
+struct appin
+{
+    float4 p  : ATTR0;
+    float4 c  : ATTR3;
+    float4 t0 : ATTR8;
+    float4 t1 : ATTR9;
+};
+
+struct appout
+{
+    float4 pos : POSITION;
+    float4 col : COLOR0;
+    float4 tex0 : TEXCOORD0;
+    float4 tex1 : TEXCOORD1;
+};
+
+appout main(appin IN)
+{
+    appout OUT;
+    OUT.pos = IN.p;
+    OUT.col = IN.c;
+    OUT.tex0 = IN.t0;
+    OUT.tex1 = IN.t1;
+    return OUT;
+}
