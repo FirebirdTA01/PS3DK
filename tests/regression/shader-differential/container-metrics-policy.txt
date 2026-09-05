@@ -1,0 +1,17 @@
+Shader Differential Container Metrics Policy
+
+The instruction_count and register_count metrics are read from the emitted Cg
+containers. They are not recomputed from decoded instructions by the harness.
+
+container-metrics-baseline.csv is the gate trigger. When it is present beside
+stage-differential.ps1, staging reports SDIFF-METRICS-GATE and fails by default
+if any row has a larger instruction_delta or register_delta than its matching
+baseline row. The match key is role, name, profile, source, and uniform_set.
+
+Use -MetricsReportOnly for explicit investigative runs that should print the
+same gate line without failing the stage. New rows missing from the baseline
+are reported as missing_baseline_rows and do not fail by themselves; accepting
+new rows should update the baseline in the same reviewed change.
+
+Any commit that moves an existing baseline row in the worse direction must say
+so in its commit message and explain why the higher cost is accepted.

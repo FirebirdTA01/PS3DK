@@ -114,6 +114,105 @@ try {
         $importedSummary.PixelProofCandidates -ne 1) {
         throw "imported CSV metrics did not preserve proof/candidate counts"
     }
+
+    $baseline = @(
+        [pscustomobject]@{
+            name = "asin"
+            role = "reference"
+            profile = "sce_fp_rsx"
+            source = "shader.cg"
+            uniform_set = "0"
+            instruction_delta = "16"
+            register_delta = "1"
+        }
+    )
+    $gate = Get-ContainerMetricsGateSummary $joined $baseline
+    if ($gate.Status -ne "ok" -or
+        $gate.CurrentRows -ne 1 -or
+        $gate.BaselineRows -ne 1 -or
+        $gate.BaselineRegressions -ne 0 -or
+        $gate.MissingBaselineRows -ne 0) {
+        throw "baseline-equal gate summary wrong: $($gate | ConvertTo-Json -Compress)"
+    }
+
+    $regressed = @(
+        [pscustomobject]@{
+            name = "asin"
+            role = "reference"
+            profile = "sce_fp_rsx"
+            source = "shader.cg"
+            uniform_set = "0"
+            instruction_delta = "17"
+            register_delta = "2"
+        }
+    )
+    $badGate = Get-ContainerMetricsGateSummary $regressed $baseline
+    if ($badGate.Status -ne "fail" -or
+        $badGate.BaselineRegressions -ne 1 -or
+        $badGate.WorstInstructionRegression -ne 1 -or
+        $badGate.WorstRegisterRegression -ne 1) {
+        throw "baseline-regressed gate summary wrong: $($badGate | ConvertTo-Json -Compress)"
+    }
+
+    $newRow = @(
+        [pscustomobject]@{
+            name = "new_acceptance"
+            role = "reference"
+            profile = "sce_fp_rsx"
+            source = "new.cg"
+            uniform_set = "auto"
+            instruction_delta = "12"
+            register_delta = "3"
+        }
+    )
+    $missingGate = Get-ContainerMetricsGateSummary $newRow $baseline
+    if ($missingGate.Status -ne "ok" -or
+        $missingGate.MissingBaselineRows -ne 1 -or
+        $missingGate.BaselineRegressions -ne 0) {
+        throw "missing-baseline row should be reported but not failed: $($missingGate | ConvertTo-Json -Compress)"
+    }
+
+    $baselinePath = Join-Path $work "container-metrics-baseline.csv"
+    $baseline | Export-Csv -NoTypeInformation -Path $baselinePath -Encoding Ascii
+    $gateOutput = Write-ContainerMetricsGateReport $joined $baselinePath 6>$null
+    if ($gateOutput.Mode -ne "fail-by-default" -or
+        $gateOutput.ShouldFail -or
+        $gateOutput.Summary.Status -ne "ok") {
+        throw "baseline-present gate report should be fail-by-default and ok: $($gateOutput | ConvertTo-Json -Compress -Depth 4)"
+    }
+
+    $badOutput = Write-ContainerMetricsGateReport $regressed $baselinePath 6>$null
+    if ($badOutput.Mode -ne "fail-by-default" -or
+        -not $badOutput.ShouldFail -or
+        $badOutput.Summary.BaselineRegressions -ne 1) {
+        throw "baseline-present regression should fail by default: $($badOutput | ConvertTo-Json -Compress -Depth 4)"
+    }
+
+    $reportOnlyOutput = Write-ContainerMetricsGateReport $regressed $baselinePath -ReportOnly 6>$null
+    if ($reportOnlyOutput.Mode -ne "report-only" -or
+        $reportOnlyOutput.ShouldFail -or
+        $reportOnlyOutput.Summary.Status -ne "fail") {
+        throw "MetricsReportOnly should report regression without failing: $($reportOnlyOutput | ConvertTo-Json -Compress -Depth 4)"
+    }
+
+    $absentOutput = Write-ContainerMetricsGateReport $joined (Join-Path $work "missing-baseline.csv") 6>$null
+    if ($absentOutput.Mode -ne "report-only" -or
+        $absentOutput.ShouldFail -or
+        $absentOutput.Summary.BaselineRows -ne 0) {
+        throw "missing baseline should be report-only: $($absentOutput | ConvertTo-Json -Compress -Depth 4)"
+    }
+
+    $badBaselinePath = Join-Path $work "bad-baseline.csv"
+    Set-Content -LiteralPath $badBaselinePath -Value '"name","role","profile","source","uniform_set","instruction_delta"' -Encoding Ascii
+    $badBaselineFailed = $false
+    try {
+        Write-ContainerMetricsGateReport $joined $badBaselinePath | Out-Null
+    } catch {
+        $badBaselineFailed = $_.Exception.Message.Contains("baseline CSV missing required column")
+    }
+    if (-not $badBaselineFailed) {
+        throw "malformed baseline did not fail loudly"
+    }
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }

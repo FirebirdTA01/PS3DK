@@ -143,6 +143,91 @@ function Get-ContainerMetricsSummary([object[]]$Rows) {
     }
 }
 
+function Get-ContainerMetricKey($Row) {
+    return "$($Row.role)|$($Row.name)|$($Row.profile)|$($Row.source)|$($Row.uniform_set)"
+}
+
+function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRows) {
+    function Metric-Int($value) {
+        if ($null -eq $value -or $value -eq "") { return 0 }
+        return [int]$value
+    }
+
+    $baselineByKey = @{}
+    foreach ($row in @($BaselineRows)) {
+        $key = Get-ContainerMetricKey $row
+        if ($baselineByKey.ContainsKey($key)) {
+            throw "duplicate container metrics baseline row: $key"
+        }
+        $baselineByKey[$key] = $row
+    }
+
+    $baselineRegressions = 0
+    $missingBaselineRows = 0
+    $worstInstructionRegression = 0
+    $worstRegisterRegression = 0
+    foreach ($row in @($Rows)) {
+        $key = Get-ContainerMetricKey $row
+        if (-not $baselineByKey.ContainsKey($key)) {
+            $missingBaselineRows++
+            continue
+        }
+        $baseline = $baselineByKey[$key]
+        $instructionRegression = (Metric-Int $row.instruction_delta) - (Metric-Int $baseline.instruction_delta)
+        $registerRegression = (Metric-Int $row.register_delta) - (Metric-Int $baseline.register_delta)
+        if ($instructionRegression -gt 0 -or $registerRegression -gt 0) {
+            $baselineRegressions++
+            if ($instructionRegression -gt $worstInstructionRegression) {
+                $worstInstructionRegression = $instructionRegression
+            }
+            if ($registerRegression -gt $worstRegisterRegression) {
+                $worstRegisterRegression = $registerRegression
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Status = if ($baselineRegressions -gt 0) { "fail" } else { "ok" }
+        CurrentRows = @($Rows).Count
+        BaselineRows = @($BaselineRows).Count
+        MissingBaselineRows = $missingBaselineRows
+        BaselineRegressions = $baselineRegressions
+        WorstInstructionRegression = $worstInstructionRegression
+        WorstRegisterRegression = $worstRegisterRegression
+    }
+}
+
+function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath, [switch]$ReportOnly) {
+    $baselinePresent = Test-Path -LiteralPath $BaselinePath -PathType Leaf
+    $baselineRows = @()
+    if ($baselinePresent) {
+        $header = Get-Content -LiteralPath $BaselinePath -TotalCount 1
+        if (-not $header) {
+            throw "baseline CSV has no header: $BaselinePath"
+        }
+        $columns = @($header -split "," | ForEach-Object { $_.Trim().Trim('"') })
+        foreach ($column in @("role", "name", "profile", "source", "uniform_set", "instruction_delta", "register_delta")) {
+            if ($column -notin $columns) {
+                throw "baseline CSV missing required column '$column': $BaselinePath"
+            }
+        }
+        $baselineRows = @(Import-Csv -LiteralPath $BaselinePath)
+    }
+
+    $summary = Get-ContainerMetricsGateSummary $Rows $baselineRows
+    $mode = if ($baselinePresent -and -not $ReportOnly) { "fail-by-default" } else { "report-only" }
+    $shouldFail = $mode -eq "fail-by-default" -and $summary.Status -ne "ok"
+    $baselineState = if ($baselinePresent) { "present" } else { "absent" }
+    Write-Host "SDIFF-METRICS-GATE|status=$($summary.Status)|mode=$mode|current_rows=$($summary.CurrentRows)|baseline_rows=$($summary.BaselineRows)|missing_baseline_rows=$($summary.MissingBaselineRows)|baseline_regressions=$($summary.BaselineRegressions)|worst_instruction_regression=$($summary.WorstInstructionRegression)|worst_register_regression=$($summary.WorstRegisterRegression)|baseline=$baselineState"
+    return [pscustomobject]@{
+        Summary = $summary
+        Mode = $mode
+        ShouldFail = $shouldFail
+        BaselinePath = $BaselinePath
+        BaselinePresent = $baselinePresent
+    }
+}
+
 function Write-ContainerMetricsReport([object[]]$Rows, [string]$Path) {
     $Rows | Export-Csv -NoTypeInformation -Path $Path -Encoding Ascii
     $s = Get-ContainerMetricsSummary $Rows
