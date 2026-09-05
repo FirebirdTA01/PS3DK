@@ -13,3 +13,9 @@ pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,P
 # hardware result those rows depend on. Any readback failure is a
 # regression.
 shader-readback,tests/regression/shader-readback/shader-readback.fake.self,90,RAN-CLEAN,shader-readback: 15/15 tests passed,SHADER_READBACK_FAIL|readback .*: FAIL
+# uniform-readback must stay green: asserts that runtime fragment uniform
+# parameter updates via cellGcmSetFragmentProgramParameter actually reach
+# RSX local memory and alter draw output (witness for t_19ddcbee / t_224f9771).
+# Failure condition is sameness across two draws differing only in uniform value.
+uniform-readback,tests/regression/uniform-readback/uniform-readback.fake.self,30,RAN-CLEAN,UNIFORM_READBACK_OK,UNIFORM_READBACK_FAIL
+

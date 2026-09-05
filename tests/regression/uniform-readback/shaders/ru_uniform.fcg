@@ -1,0 +1,10 @@
+// uniform-readback — fragment program.
+// Directly outputs runtime-patched uniform u_color.
+
+void main(
+    float2 uv : TEXCOORD0,
+    uniform float4 u_color,
+    out float4 out_color : COLOR)
+{
+    out_color = u_color;
+}
