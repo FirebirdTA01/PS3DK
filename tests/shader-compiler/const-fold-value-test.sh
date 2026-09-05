@@ -47,9 +47,11 @@ compile() {
     [[ -s "$work/$tag.fpo" ]] || fail "$stem ($tag) produced no container"
 }
 
-for path in default general; do
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+for path in general legacy; do
     flags=()
-    [[ "$path" == general ]] && flags=(--general-lowering)
+    [[ "$path" == legacy ]] && flags=(--legacy-lowering)
 
     compile fp_file_scope_const_f   "const_$path"  "${flags[@]}"
     compile fp_inline_literal_f     "lit_$path"    "${flags[@]}"
@@ -74,7 +76,7 @@ done
 
 # The value itself is in the ucode, not merely agreement between two files.
 # 7.5f is 0x40F00000, stored halfword-swapped in the ucode blob as 0000 40F0.
-python3 - "$work/const_default.fpo" "$work/const_general.fpo" <<'PY'
+python3 - "$work/const_general.fpo" "$work/const_legacy.fpo" <<'PY'
 import sys
 
 needle = bytes((0x00, 0x00, 0x40, 0xF0))   # 7.5f, halfword-swapped

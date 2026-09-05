@@ -28,9 +28,11 @@ void main(float4 v : TEXCOORD$n, out float4 color : COLOR) {
 }
 CG
 
-    for path in default general; do
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+    for path in general legacy; do
         flags=()
-        [[ "$path" == general ]] && flags=(--general-lowering)
+        [[ "$path" == legacy ]] && flags=(--legacy-lowering)
         out="$work/tc${n}_$path.fpo"
         rc=0
         (

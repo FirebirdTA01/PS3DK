@@ -63,7 +63,7 @@ compile_ir() {
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering --dump-ir \
+            -p sce_fp_rsx --dump-ir \
             --emit-container "$out" "$src"
     ) >"$log" 2>&1 || rc=$?
 
@@ -120,7 +120,7 @@ run_builtin() {
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering "$src"
+            -p sce_fp_rsx "$src"
     ) >"$ucode_log" 2>&1 || {
         tail -n 20 "$ucode_log" >&2
         fail "$name failed while dumping ucode"

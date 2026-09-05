@@ -47,23 +47,25 @@ compile() {   # $1 flags, $2 tag
         fail "$2 did not compile"
     fi
 }
-compile --general-lowering  "${stem}_general"
+compile "" "${stem}_general"
 
-# Default path: a refusal is accepted only with the measured message; a
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+# Legacy path: a refusal is accepted only with the measured message; a
 # compile is held to the same rule as the general path.
 logs=("$work/${stem}_general.log")
 rc=0
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_fp_rsx "$shaders/$stem.cg"
-) >"$work/${stem}_default.log" 2>&1 || rc=$?
-[[ "$rc" -eq 124 ]] && fail "${stem}_default timed out"
+        -p sce_fp_rsx --legacy-lowering "$shaders/$stem.cg"
+) >"$work/${stem}_legacy.log" 2>&1 || rc=$?
+[[ "$rc" -eq 124 ]] && fail "${stem}_legacy timed out"
 if [[ "$rc" -eq 0 ]]; then
-    logs+=("$work/${stem}_default.log")
-elif ! grep -q "Select: two varying branches not yet supported" "$work/${stem}_default.log"; then
-    tail -n 20 "$work/${stem}_default.log" >&2
-    fail "${stem}_default failed for a reason other than the measured refusal"
+    logs+=("$work/${stem}_legacy.log")
+elif ! grep -q "Select: two varying branches not yet supported" "$work/${stem}_legacy.log"; then
+    tail -n 20 "$work/${stem}_legacy.log" >&2
+    fail "${stem}_legacy failed for a reason other than the measured refusal"
 fi
 
 python3 - "${logs[@]}" <<'PY'
@@ -133,5 +135,5 @@ PY
 if [[ ${#logs[@]} -eq 2 ]]; then
     printf 'select-merge-inputs-test: ok (full-width merge on both paths)\n'
 else
-    printf 'select-merge-inputs-test: ok (full-width merge on the general path; the default path refuses the shape as measured)\n'
+    printf 'select-merge-inputs-test: ok (full-width merge on the general path; the legacy path refuses the shape as measured)\n'
 fi

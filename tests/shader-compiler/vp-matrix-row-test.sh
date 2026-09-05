@@ -31,7 +31,7 @@ for f in vp_matrix_row0_v.cg vp_matrix_row2_v.cg; do
     [[ -f "$shaders/$f" ]] || fail "fixture missing: $shaders/$f"
 done
 
-# $1 fixture stem, $2 "" | --general-lowering, $3 tag
+# $1 fixture stem, $2 flags, $3 tag
 compile() {
     local rc=0
     (
@@ -51,12 +51,14 @@ reference reads directly; refusing it is the defect (t_9da20b33)."
     [[ -s "$work/$3.ucode" ]] || fail "$3 emitted no ucode"
 }
 
-compile vp_matrix_row0_v ""                   row0_default
-compile vp_matrix_row2_v ""                   row2_default
-compile vp_matrix_row0_v --general-lowering   row0_general
-compile vp_matrix_row2_v --general-lowering   row2_general
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+compile vp_matrix_row0_v ""                   row0_general
+compile vp_matrix_row2_v ""                   row2_general
+compile vp_matrix_row0_v --legacy-lowering    row0_legacy
+compile vp_matrix_row2_v --legacy-lowering    row2_legacy
 
-for path in default general; do
+for path in general legacy; do
     if cmp -s "$work/row0_$path.ucode" "$work/row2_$path.ucode"; then
         cat "$work/row0_$path.ucode" >&2
         fail "on the $path path m_auto[0] and m_auto[2] compile to the SAME
@@ -68,10 +70,10 @@ done
 # A row of a float3x3, widened by a constructor: three lanes from the const
 # register and one literal.  A constructor that counted operands instead of
 # components would write o[8].x and o[8].y and lose the row's y and z.
-compile vp_matrix_row_small_v ""                 small_default
-compile vp_matrix_row_small_v --general-lowering small_general
+compile vp_matrix_row_small_v ""                 small_general
+compile vp_matrix_row_small_v --legacy-lowering  small_legacy
 
-python3 - "$work/small_default.ucode" "$work/small_general.ucode" <<'PY'
+python3 - "$work/small_general.ucode" "$work/small_legacy.ucode" <<'PY'
 import re
 import sys
 
@@ -90,7 +92,7 @@ def masks(path):
 # Four DP4 lanes into the position (0x1, 0x2, 0x4, 0x8) plus the texcoord's
 # xyz (0xe) and w (0x1).
 want = [0x1, 0x1, 0x2, 0x4, 0x8, 0xE]
-for path, name in zip(sys.argv[1:3], ("default", "general")):
+for path, name in zip(sys.argv[1:3], ("general", "legacy")):
     got = masks(path)
     if got != want:
         raise SystemExit(
@@ -105,7 +107,7 @@ PY
 
 # Row 3 of a float3x3 is out of bounds - the reference calls it that and
 # refuses.  Compiling it would read a register the matrix does not own.
-for flags_tag in ":oob_default" "--general-lowering:oob_general"; do
+for flags_tag in ":oob_general" "--legacy-lowering:oob_legacy"; do
     flags="${flags_tag%%:*}"
     tag="${flags_tag##*:}"
     rc=0

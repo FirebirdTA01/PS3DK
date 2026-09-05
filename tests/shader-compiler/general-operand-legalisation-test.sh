@@ -51,7 +51,7 @@ dump() {   # $1 stem, $2 tag
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering "$shaders/$1.cg"
+            -p sce_fp_rsx "$shaders/$1.cg"
     ) >"$work/$2.dump" 2>&1 || rc=$?
     [[ "$rc" -eq 124 ]] && fail "$2 timed out"
     if [[ "$rc" -ne 0 ]]; then

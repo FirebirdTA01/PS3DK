@@ -54,9 +54,11 @@ compile() {   # $1 fixture stem, $2 flags, $3 tag
     fi
 }
 
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
 for stem in fp_two_varyings_f fp_two_varyings_mul_f; do
-    compile "$stem" ""                   "${stem}_default"
-    compile "$stem" --general-lowering   "${stem}_general"
+    compile "$stem" ""                   "${stem}_general"
+    compile "$stem" --legacy-lowering    "${stem}_legacy"
 done
 
 python3 - "$work"/*.log <<'PY'

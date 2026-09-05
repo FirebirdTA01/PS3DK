@@ -57,8 +57,8 @@ compile "$all" all --legacy-lowering
 # (t_be578e74).  It now materialises the varying into a temp masked to the
 # lanes the insert does not write, which is the reference's own shape, so
 # the one-lane case is judged by the same assertions as the matcher.
-compile "$one" one_general --general-lowering
-compile "$all" all_general --general-lowering
+compile "$one" one_general
+compile "$all" all_general
 cmp -s "$work/one.log" "$work/one_general.log" || {
     diff "$work/one.log" "$work/one_general.log" >&2 || true
     fail "the general path's ucode for a single lane insert differs from the

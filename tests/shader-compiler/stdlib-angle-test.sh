@@ -58,7 +58,7 @@ run_case() {
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering --dump-ir \
+            -p sce_fp_rsx --dump-ir \
             --emit-container "$out" "$src"
     ) >"$log" 2>&1 || rc=$?
 

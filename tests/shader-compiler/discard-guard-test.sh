@@ -72,7 +72,7 @@ run() {   # $1 stem, $2 flags, $3 tag -> rc in $rc, output in $work/$3.log
 
 shape() {   # $1 fixture stem, $2 case name
     [[ -f "$shaders/$1.cg" ]] || fail "fixture missing: $shaders/$1.cg"
-    run "$1" "--general-lowering" "$2"
+    run "$1" "" "$2"
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$2.log" >&2
         fail "$1 did not compile on the general path.  CF-2 lowers the
@@ -107,16 +107,16 @@ kills_in_container() {   # $1 stem, $2 flags -> count on stdout
     LC_ALL=C grep -a -o '[$]kill_' "$out" | wc -l | tr -d ' '
 }
 
-n="$(kills_in_container fp_discard_lt_f --general-lowering)"
+n="$(kills_in_container fp_discard_lt_f)"
 [[ "$n" == "1" ]] || fail "fp_discard_lt_f container has $n \$kill parameters, expected 1"
-n="$(kills_in_container fp_discard_ops_f --general-lowering)"
+n="$(kills_in_container fp_discard_ops_f)"
 [[ "$n" == "6" ]] || fail "fp_discard_ops_f container has $n \$kill parameters, expected 6 - one per discard STATEMENT"
-n="$(kills_in_container fp_discard_two_f --general-lowering)"
+n="$(kills_in_container fp_discard_two_f)"
 [[ "$n" == "2" ]] || fail "fp_discard_two_f container has $n \$kill parameters, expected 2"
 
 # --- refusals, each checked for its own reason -------------------------
 
-run fp_discard_loop_f "--general-lowering" loop
+run fp_discard_loop_f "" loop
 [[ "$rc" -ne 0 ]] || fail "fp_discard_loop_f compiled on the general path.
 A discard inside a dynamic loop needs the back-edge CF-1a refuses.  If the
 loop is being unrolled instead, the fixture's bound stopped being dynamic
@@ -205,7 +205,7 @@ express, not the two it expresses correctly."
     }
 done
 
-run fp_store_skippable_f "--general-lowering" skippable
+run fp_store_skippable_f "" skippable
 if [[ "$rc" -eq 0 ]]; then
     printf 'NOTE: fp_store_skippable_f now compiles on the general path.\n' >&2
     printf 'It has no discard in it, so nothing kills the path that misses\n' >&2

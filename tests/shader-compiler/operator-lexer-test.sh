@@ -114,7 +114,7 @@ run_case() {
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering \
+            -p sce_fp_rsx \
             --emit-container "$out" "$src"
     ) >"$log" 2>&1 || rc=$?
 
@@ -158,7 +158,7 @@ rc=0
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_fp_rsx --general-lowering \
+        -p sce_fp_rsx \
         --emit-container "$work/unused_bad_macro.bin" "$work/unused_bad_macro.fcg"
 ) >"$work/unused_bad_macro.log" 2>&1 || rc=$?
 [[ "$rc" -eq 0 ]] || { tail -n 10 "$work/unused_bad_macro.log" >&2; fail "unused_bad_macro refused an unused bitwise token in a macro replacement list"; }
@@ -171,9 +171,11 @@ fi
 for profile in sce_fp_rsx sce_vp_rsx; do
     src="$work/constant_bitwise_fp.fcg"
     [[ "$profile" == sce_vp_rsx ]] && src="$work/constant_bitwise_vp.vcg"
-    for mode in default general; do
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+    for mode in general legacy; do
         args=()
-        [[ "$mode" == general ]] && args+=(--general-lowering)
+        [[ "$mode" == legacy ]] && args+=(--legacy-lowering)
         rc=0
         (
             ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
@@ -197,7 +199,7 @@ for profile in sce_fp_rsx sce_vp_rsx; do
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p "$profile" --general-lowering \
+            -p "$profile" \
             --emit-container "$work/live_constant_bitwise_$profile.bin" "$src"
     ) >"$work/live_constant_bitwise_$profile.log" 2>&1 || rc=$?
     [[ "$rc" -eq 0 ]] || { tail -n 10 "$work/live_constant_bitwise_$profile.log" >&2; fail "live_constant_bitwise refused on $profile/general"; }
@@ -243,9 +245,11 @@ SHADER
     for profile in sce_fp_rsx sce_vp_rsx; do
         src="$fp_src"
         [[ "$profile" == sce_vp_rsx ]] && src="$vp_src"
-        for mode in default general; do
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+        for mode in general legacy; do
             args=()
-            [[ "$mode" == general ]] && args+=(--general-lowering)
+            [[ "$mode" == legacy ]] && args+=(--legacy-lowering)
             out="$work/${name}_${profile}_${mode}.bin"
             log="$work/${name}_${profile}_${mode}.log"
             rc=0

@@ -54,7 +54,7 @@ decode_fixture() {
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering "$src"
+            -p sce_fp_rsx "$src"
     ) >"$log" 2>&1 || rc=$?
     if [[ "$rc" -eq 124 ]]; then fail "$stem timed out"; fi
     if [[ "$rc" -ne 0 ]]; then

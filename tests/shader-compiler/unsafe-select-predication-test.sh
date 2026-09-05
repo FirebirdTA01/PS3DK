@@ -40,7 +40,7 @@ SHADER
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_fp_rsx --general-lowering --dump-ir "$work/unsafe_select.fcg"
+        -p sce_fp_rsx --dump-ir "$work/unsafe_select.fcg"
 ) >"$work/unsafe_select.log" 2>&1 || {
     tail -n 30 "$work/unsafe_select.log" >&2
     fail "unsafe select witness did not compile"

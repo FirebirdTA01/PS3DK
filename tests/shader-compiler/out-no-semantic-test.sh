@@ -62,7 +62,9 @@ binds to COLOR; refusing or dropping it is t_a15ec129."
     ) >"$work/$3.dump" 2>&1 || fail "$3 compiled with a container but not without"
 }
 
-for path_flags in ":default" "--general-lowering:general"; do
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+for path_flags in ":general" "--legacy-lowering:legacy"; do
     flags="${path_flags%%:*}"
     tag="${path_flags##*:}"
     compile fp_out_no_semantic_f   "$flags" "none_$tag"

@@ -46,7 +46,7 @@ compile_fp() {
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx --general-lowering "$src"
+            -p sce_fp_rsx "$src"
     ) >"$log" 2>&1 || {
         tail -n 20 "$log" >&2
         fail "$stem did not compile"
@@ -204,7 +204,7 @@ vp_rc=0
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_vp_rsx --general-lowering "$shaders/vp_divr_guard_v.cg"
+        -p sce_vp_rsx "$shaders/vp_divr_guard_v.cg"
 ) >"$vp_log" 2>&1 || vp_rc=$?
 if [[ "$vp_rc" -eq 0 ]]; then
     fail "vp_divr_guard_v compiled; DIVR must not reach the unmeasured VP path"

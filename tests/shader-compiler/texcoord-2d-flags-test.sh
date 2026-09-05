@@ -24,9 +24,11 @@ work="${TMPDIR:-/tmp}/ps3dk-texcoord-2d-test.$$"
 mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
-for path in default general; do
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+for path in general legacy; do
     flags=()
-    [[ "$path" == general ]] && flags=(--general-lowering)
+    [[ "$path" == legacy ]] && flags=(--legacy-lowering)
     rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"

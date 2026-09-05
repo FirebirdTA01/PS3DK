@@ -59,8 +59,10 @@ run_compile() {
     return "$rc"
 }
 
-for path_flag in "--general-lowering" ""; do
-    label="path[${path_flag:-default}]"
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+for path_flag in "" "--legacy-lowering"; do
+    label="path[${path_flag:-general}]"
     # shellcheck disable=SC2086 — an empty flag must expand to nothing
     extra=($path_flag)
 

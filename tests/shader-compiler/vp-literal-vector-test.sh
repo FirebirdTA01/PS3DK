@@ -30,7 +30,7 @@ rc=0
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_vp_rsx --general-lowering \
+        -p sce_vp_rsx \
         --emit-container "$work/out.vpo" "$src"
 ) >"$work/out.log" 2>&1 || rc=$?
 [[ "$rc" -eq 124 ]] && fail "vp_literal_vector timed out"

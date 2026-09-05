@@ -22,9 +22,11 @@ trap 'rm -rf "$work"' EXIT
 
 # BOTH lowering paths: the value belongs to the parameter, so a fix that
 # only reached one path would leave the other computing with zero.
-for path in default general; do
+# Shelf-life: when the retired legacy matcher is removed, drop this second
+# --legacy-lowering run and its header claim in the same commit.
+for path in general legacy; do
     flags=()
-    [[ "$path" == general ]] && flags=(--general-lowering)
+    [[ "$path" == legacy ]] && flags=(--legacy-lowering)
     rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
