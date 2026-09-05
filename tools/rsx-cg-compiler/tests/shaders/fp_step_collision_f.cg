@@ -1,0 +1,13 @@
+// t_929c0177: Two simultaneously-live step() operations must not collide on
+// physical register 0.
+//
+// NOTE: Passing this test proves absence of register collision between these
+// two live values (allocating distinct registers); it does not assert that the
+// register allocator achieves reference-parity register efficiency (our compiler
+// uses more registers than the reference across the corpus).
+float4 main(float2 uv : TEXCOORD0) : COLOR {
+    float a = step(0.05, uv.x);
+    float b = step(uv.x, 0.95);
+    float c = a * b;
+    return float4(c, c, c, 1.0);
+}

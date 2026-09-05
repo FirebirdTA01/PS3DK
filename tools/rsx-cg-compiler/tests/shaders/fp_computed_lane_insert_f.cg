@@ -1,0 +1,13 @@
+// t_b25e6444: Non-contiguous lane-preserving insert of a computed vector.
+//
+// Inserting computed vector components into non-contiguous destination channels
+// (c.x = v.x; c.z = v.z) must compile on the general path, preserving channels
+// .y and .w from the passthrough varying and inserting .x and .z from the
+// computed temporary.
+float4 main(float4 color : COLOR, float4 fog : TEXCOORD0) : COLOR {
+    float4 v = fog * float4(0.5f, 0.5f, 0.5f, 0.5f);
+    float4 c = color;
+    c.x = v.x;
+    c.z = v.z;
+    return c;
+}

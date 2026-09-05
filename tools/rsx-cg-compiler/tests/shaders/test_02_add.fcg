@@ -1,0 +1,31 @@
+// =============================================================================
+// PS3 RSX Test 02: add / + (Shader Model 3.0 Basic Arithmetic)
+// Two animated chromatic waves added together producing additive color mixing
+// =============================================================================
+
+struct FragmentInput {
+    float2 uv : TEXCOORD0;
+};
+
+struct FragmentOutput {
+    float4 color : COLOR0;
+};
+
+FragmentOutput main(FragmentInput input, uniform float4 time_param) {
+    FragmentOutput output;
+    float t = time_param.x;
+    
+    // Wave 1: Red horizontal moving wave
+    float w1 = sin(input.uv.x * 6.28318 + t * 3.0) * 0.5 + 0.5;
+    float3 col1 = float3(w1, 0.0, 0.0);
+    
+    // Wave 2: Green vertical moving wave
+    float w2 = cos(input.uv.y * 6.28318 + t * 2.0) * 0.5 + 0.5;
+    float3 col2 = float3(0.0, w2, 0.0);
+    
+    // Test native ADD: col1 + col2 -> Yellow where they intersect
+    float3 result = col1 + col2;
+    
+    output.color = float4(result, 1.0);
+    return output;
+}
