@@ -29,6 +29,10 @@ $logDir = Join-Path $rpcs3Dir "log"
 $rpcs3Log = Join-Path $logDir "RPCS3.log"
 $ttyLog = Join-Path $logDir "TTY.log"
 $fatalRegex = "(^|[ \u00B7])F |Fatal|Access violation|frozen|Dead FIFO|recover_fifo|runtime_error|Emulation has been frozen"
+$shaderMetricHelper = Join-Path $RepoRoot "tests\regression\shader-differential\container-metrics.ps1"
+if (Test-Path -LiteralPath $shaderMetricHelper -PathType Leaf) {
+    . $shaderMetricHelper
+}
 
 New-Item -ItemType Directory -Force -Path $ResultsRoot | Out-Null
 
@@ -149,6 +153,19 @@ try {
         $ttyText = Get-Content -Raw -LiteralPath $copiedTtyLog -ErrorAction SilentlyContinue
         $rpcs3Text = Get-Content -Raw -LiteralPath $copiedRpcs3Log -ErrorAction SilentlyContinue
         $ttyLines = @($ttyText -split "`r?`n" | Where-Object { $_.Length -gt 0 }).Count
+
+        if ((Get-Command Parse-SdiffRows -ErrorAction SilentlyContinue) -and
+            (Get-Command Join-ContainerMetricsWithSdiff -ErrorAction SilentlyContinue) -and
+            (Get-Command Write-ContainerMetricsReport -ErrorAction SilentlyContinue) -and
+            [regex]::IsMatch($ttyText, "(?m)^SDIFF\|")) {
+            $stagedMetrics = Join-Path $rpcs3Dir "dev_hdd0\shader-differential\container-metrics.csv"
+            if (Test-Path -LiteralPath $stagedMetrics -PathType Leaf) {
+                $metricRows = @(Import-Csv -LiteralPath $stagedMetrics)
+                $sdiffRows = Parse-SdiffRows $ttyText
+                $joinedRows = Join-ContainerMetricsWithSdiff $metricRows $sdiffRows
+                Write-ContainerMetricsReport $joinedRows (Join-Path $sampleDir "container-metrics.csv")
+            }
+        }
 
         $required = $row.required_tty_regex
         $forbidden = $row.forbidden_tty_regex

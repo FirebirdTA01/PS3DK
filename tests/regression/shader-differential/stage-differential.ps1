@@ -126,6 +126,7 @@ param(
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $here "..\..\..")).Path
+. (Join-Path $here "container-metrics.ps1")
 
 function To-WslPath([string]$p) {
     $q = $p -replace '\\', '/'
@@ -196,6 +197,7 @@ if ($GeneralLowering) { Write-Host "stager: -GeneralLowering is the default sinc
 # regression fixture cannot abort a default-path stage and a general-path
 # poisoner cannot hide a shader the default path compiles fine.
 $activePath = if ($LegacyLowering) { "legacy" } else { "general" }
+$containerMetricRows = @()
 function Row-AppliesToPath([string[]]$fields, [int]$col) {
     $p = if ($fields.Count -gt $col -and $fields[$col].Trim()) { $fields[$col].Trim().ToLower() } else { "both" }
     # 'default' meant the matcher before the flip; accepted as an alias of
@@ -731,6 +733,10 @@ if ($ReferenceCompiler) {
 
         $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
         $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
+        Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            -Role "reference" -Profile "sce_fp_rsx" -Source $rel `
+            -UniformSet $set -OursPath $ours -ReferencePath $ref `
+            -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
         if ($hOurs -eq $hRef) {
             $refIdentical++
             Write-Host "stager: $rel byte-identical to reference -- not staged"
@@ -800,6 +806,10 @@ if ($ReferenceCompiler) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+                -Role "reference-corpus" -Profile "sce_fp_rsx" -Source $rel `
+                -UniformSet "auto" -OursPath $ours -ReferencePath $ref `
+                -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
             if ($hOurs -eq $hRef) { $cIdentical++; continue }
             Copy-Item $ours (Join-Path $refDst "$name`_ours.fpo") -Force
             Copy-Item $ref  (Join-Path $refDst "$name`_ref.fpo") -Force
@@ -849,6 +859,15 @@ if ($ReferenceCompiler) {
             if (-not (Compile-Reference $src $dRef)) { throw "path-pairs: reference compile failed or produced no container: $rel" }
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
+            $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
+                -Role "path-pair-reference" -Profile "sce_fp_rsx" -Source $rel `
+                -UniformSet $set -OursPath $dDef -ReferencePath $dRef `
+                -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
+                -Role "path-pair-reference" -Profile "sce_fp_rsx" -Source $rel `
+                -UniformSet $set -OursPath $dGen -ReferencePath $dRef `
+                -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
             if ($hD -eq $hG) { $ppIdentical++; Write-Host "stager: $rel default and general containers byte-identical -- not staged"; continue }
             Copy-Item $dDef (Join-Path $ppDst "$name`_legacy.fpo") -Force
             Copy-Item $dGen (Join-Path $ppDst "$name`_general.fpo") -Force
@@ -921,9 +940,19 @@ if ($ReferenceCompiler) {
             }
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
-            if ($hD -eq $hG) { $pcIdentical++; continue }
+            $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
             $pcSet = "auto"
-            if (Has-FileScopeConst $f.FullName) { $pcSet = "0"; $pcConstSet0++; Write-Host "stager: path-pair corpus $rel has a file-scope const - staged under set 0, not auto (see Has-FileScopeConst)" }
+            if (Has-FileScopeConst $f.FullName) { $pcSet = "0" }
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
+                -Role "path-pair-corpus-reference" -Profile "sce_fp_rsx" -Source $rel `
+                -UniformSet $pcSet -OursPath $dDef -ReferencePath $dRef `
+                -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
+                -Role "path-pair-corpus-reference" -Profile "sce_fp_rsx" -Source $rel `
+                -UniformSet $pcSet -OursPath $dGen -ReferencePath $dRef `
+                -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
+            if ($hD -eq $hG) { $pcIdentical++; continue }
+            if ($pcSet -eq "0") { $pcConstSet0++; Write-Host "stager: path-pair corpus $rel has a file-scope const - staged under set 0, not auto (see Has-FileScopeConst)" }
             Copy-Item $dDef (Join-Path $pcDst ("$name" + "_legacy.fpo")) -Force
             Copy-Item $dGen (Join-Path $pcDst ("$name" + "_general.fpo")) -Force
             Copy-Item $dRef (Join-Path $pcDst ("$name" + "_ref.fpo")) -Force
@@ -1128,6 +1157,10 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             if (-not (Compile-Reference $src $ref -Profile sce_vp_rsx)) { throw "vp-pairs: reference compile failed or produced no container: $rel" }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+                -Role "vp-reference" -Profile "sce_vp_rsx" -Source $rel `
+                -UniformSet $set -OursPath $ours -ReferencePath $ref `
+                -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
             if ($hOurs -eq $hRef) { $vpIdentical++; Write-Host "stager: $rel vertex container byte-identical to reference -- not staged"; continue }
             Copy-Item $ours (Join-Path $vpDst ("$name" + "_ours.vpo")) -Force
             Copy-Item $ref  (Join-Path $vpDst ("$name" + "_ref.vpo")) -Force
@@ -1183,9 +1216,14 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            if ($hOurs -eq $hRef) { $vcIdentical++; continue }
             $vcSet = "auto"
-            if (Has-FileScopeConst $f.FullName) { $vcSet = "0"; $vcConstSet0++ }
+            if (Has-FileScopeConst $f.FullName) { $vcSet = "0" }
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+                -Role "vp-corpus-reference" -Profile "sce_vp_rsx" -Source $rel `
+                -UniformSet $vcSet -OursPath $ours -ReferencePath $ref `
+                -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
+            if ($hOurs -eq $hRef) { $vcIdentical++; continue }
+            if ($vcSet -eq "0") { $vcConstSet0++ }
             Copy-Item $ours (Join-Path $vpDst ("$name" + "_ours.vpo")) -Force
             Copy-Item $ref  (Join-Path $vpDst ("$name" + "_ref.vpo")) -Force
             $vpRows += "B|vp-reference|$name|vp/$name" + "_ours.vpo|vp/$name" + "_ref.vpo|$vcSet"
@@ -1278,6 +1316,15 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             }
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
+            $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
+                -Role "vp-path-pair-reference" -Profile "sce_vp_rsx" -Source $($c.rel) `
+                -UniformSet $($c.set) -OursPath $dDef -ReferencePath $dRef `
+                -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
+                -Role "vp-path-pair-reference" -Profile "sce_vp_rsx" -Source $($c.rel) `
+                -UniformSet $($c.set) -OursPath $dGen -ReferencePath $dRef `
+                -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
             if ($hD -eq $hG) { $vppIdentical++; continue }
             Copy-Item $dDef (Join-Path $vppDst ("$name" + "_legacy.vpo")) -Force
             Copy-Item $dGen (Join-Path $vppDst ("$name" + "_general.vpo")) -Force
@@ -1293,6 +1340,11 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     }
 }
 
+if ($containerMetricRows.Count -gt 0) {
+    Write-ContainerMetricsReport $containerMetricRows (Join-Path $root "container-metrics.csv")
+} else {
+    Write-Host "SDIFF-METRICS|compared=0|instruction_mismatches=0|register_mismatches=0|both_mismatches=0|worse_instructions=0|better_instructions=0|worse_registers=0|better_registers=0|pixel_proof_candidates=0|pixel_proof_rows=0"
+}
 Set-Content -LiteralPath (Join-Path $root "manifest.txt") -Value ($manifest -join "`n") -Encoding Ascii
 Write-Host "stager: manifest written ($($manifest.Count) lines) to $root"
 Write-Host "stager: done -- run the shader-differential SELF under RPCS3 and scrape SDIFF| rows"
