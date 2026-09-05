@@ -27,6 +27,12 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 src="$shaders/fp_discard_nested_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
+# Precondition: the fixture must have exactly one assignment to the colour output 'o'.
+# If the fixture is modified to have multiple output stores, this guard's single-store
+# invariant must be revisited.
+store_count=$(grep -c '\<o\s*=' "$src" || true)
+[[ "$store_count" -eq 1 ]] || fail "precondition failed: $src has $store_count output stores (expected 1); revisit single-store invariant"
+
 log="$work/fp_discard_nested.log"
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
