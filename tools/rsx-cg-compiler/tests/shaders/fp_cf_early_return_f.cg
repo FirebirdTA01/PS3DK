@@ -1,0 +1,18 @@
+// CF-1: an early `return output;` inside a forward-only branch must
+// merge into the single flattened exit instead of refusing for multiple
+// return blocks.  Both return values are finite literals; this fixture
+// isolates return merging from the predicated-select contamination case.
+struct FragmentOutput {
+    float4 color : COLOR0;
+};
+
+FragmentOutput main(float2 uv : TEXCOORD0)
+{
+    FragmentOutput output;
+    if (uv.x > 0.5f) {
+        output.color = float4(0.8f, 0.2f, 0.1f, 1.0f);
+        return output;
+    }
+    output.color = float4(0.1f, 0.4f, 0.9f, 1.0f);
+    return output;
+}

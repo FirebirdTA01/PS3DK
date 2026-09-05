@@ -455,6 +455,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     // Clean up
     declToValue_.clear();
     nameToValue_.clear();
+    localArrayValues_.clear();
     currentFunction_ = nullptr;
     currentFunctionDecl_ = nullptr;
     currentBlock_ = nullptr;
@@ -1184,6 +1185,10 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         IRValueID varId = currentFunction_->allocateValueId();
         declToValue_[varDecl] = varId;
         nameToValue_[varDecl->name] = varId;
+        IRTypeInfo varType = getIRType(varDecl->type.get());
+        if (varType.isArray() && varType.arraySize > 0)
+            localArrayValues_[varDecl->name].assign(
+                static_cast<size_t>(varType.arraySize), InvalidIRValue);
 
         // If there's an initializer, evaluate it
         if (varDecl->initializer)
@@ -1997,6 +2002,50 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 }
             }
         }
+
+        auto localIt = localArrayValues_.find(ident->name);
+        if (localIt != localArrayValues_.end())
+        {
+            IRValueID indexValue = buildExpr(expr->index.get());
+            if (indexValue == InvalidIRValue)
+                return InvalidIRValue;
+
+            int32_t constIndex = 0;
+            if (extractIntScalar(*currentFunction_, indexValue, constIndex))
+            {
+                if (constIndex >= 0 &&
+                    constIndex < static_cast<int32_t>(localIt->second.size()))
+                    return localIt->second[static_cast<size_t>(constIndex)];
+                error(expr->loc, "array index out of bounds");
+                return InvalidIRValue;
+            }
+
+            IRTypeInfo resultType = getExprType(expr);
+            IRValueID selected = localIt->second.empty()
+                ? InvalidIRValue
+                : localIt->second[0];
+            if (selected == InvalidIRValue)
+            {
+                error(expr->loc, "local array element used before assignment");
+                return InvalidIRValue;
+            }
+            for (size_t i = 1; i < localIt->second.size(); ++i)
+            {
+                IRValueID elem = localIt->second[i];
+                if (elem == InvalidIRValue)
+                {
+                    error(expr->loc, "local array element used before assignment");
+                    return InvalidIRValue;
+                }
+                IRValueID idxConst = createConstant(static_cast<int32_t>(i));
+                IRValueID match =
+                    emitBinaryOp(IROp::CmpEq, IRTypeInfo::Bool(),
+                                 indexValue, idxConst, expr->loc);
+                selected = emitInstruction(IROp::Select, resultType,
+                                           {match, elem, selected}, expr->loc);
+            }
+            return selected;
+        }
     }
 
     // Fallback: vector component extraction (e.g., vec.x, vec[i])
@@ -2408,8 +2457,25 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     // Handle array index assignment
     if (target->kind == ExprKind::Index)
     {
-        // For now, just store the value and return
-        // TODO: Proper array element store
+        auto* indexExpr = static_cast<IndexExpr*>(target);
+        if (indexExpr->array->kind == ExprKind::Identifier &&
+            indexExpr->index->kind == ExprKind::Literal)
+        {
+            auto* ident =
+                static_cast<IdentifierExpr*>(indexExpr->array.get());
+            auto* lit = static_cast<LiteralExpr*>(indexExpr->index.get());
+            auto arrIt = localArrayValues_.find(ident->name);
+            if (arrIt != localArrayValues_.end() &&
+                lit->literalKind == LiteralExpr::LiteralKind::Int)
+            {
+                int64_t rawIndex = std::get<int64_t>(lit->value);
+                if (rawIndex >= 0 &&
+                    rawIndex < static_cast<int64_t>(arrIt->second.size()))
+                    arrIt->second[static_cast<size_t>(rawIndex)] = value;
+                else
+                    error(target->loc, "array index out of bounds");
+            }
+        }
         return value;
     }
 

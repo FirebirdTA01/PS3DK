@@ -51,6 +51,8 @@ good_src="$shaders/generic_mad_chain_f.cg"
 diamond_src="$shaders/fp_cf_diamond_f.cg"
 nested_src="$shaders/fp_cf_nested_diamond_f.cg"
 guarded_src="$shaders/fp_cf_guarded_divide_f.cg"
+early_return_src="$shaders/fp_cf_early_return_f.cg"
+early_return_tail_shared_src="$shaders/fp_cf_early_return_tail_shared_expr_f.cg"
 loop_src="$shaders/fp_refusal_dynamic_loop_f.cg"
 work="${TMPDIR:-/tmp}/ps3dk-cf-flatten-test.$$"
 mkdir -p "$work"
@@ -116,10 +118,16 @@ expect_success "success-control[general]" "$good_src"
 # The unlock: forward-only diamonds compile on the general path.
 expect_success "diamond[general]"        "$diamond_src"
 expect_success "nested-diamond[general]" "$nested_src"
+expect_success "early-return[general]"   "$early_return_src"
+expect_success "early-return-tail-shared-expr[general]" \
+               "$early_return_tail_shared_src"
 
 # The gate: the same shaders keep refusing on the matcher.
 expect_refusal "diamond[legacy]"        '' "$diamond_src" --legacy-lowering
 expect_refusal "nested-diamond[legacy]" '' "$nested_src" --legacy-lowering
+expect_refusal "early-return[legacy]"   '' "$early_return_src" --legacy-lowering
+expect_refusal "early-return-tail-shared-expr[legacy]" \
+               '' "$early_return_tail_shared_src" --legacy-lowering
 
 # CF-1b: non-provably-finite join arms lower as a PREDICATED WRITE
 # (MOV default, CC-set from cond, CC-gated commit) instead of the

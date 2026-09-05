@@ -1,0 +1,29 @@
+// CF-1: an early return followed by a tail if/else where both arms use
+// the same computed expression must lower in an order that defines the
+// shared value before either arm reads it.
+struct FragmentOutput {
+    float4 color : COLOR0;
+};
+
+FragmentOutput main(float2 uv : TEXCOORD0)
+{
+    FragmentOutput output;
+    if (uv.x < 0.0f) {
+        output.color = float4(0.02f, 0.04f, 0.08f, 1.0f);
+        return output;
+    }
+
+    float3 light_dir = normalize(float3(uv.x, uv.y, 0.85f));
+    float3 view_dir = float3(0.0f, 0.0f, 1.0f);
+    float3 lit_color;
+    if (uv.y >= 0.0f) {
+        float3 half_vec = normalize(light_dir + view_dir);
+        lit_color = half_vec;
+    } else {
+        float3 half_vec = normalize(light_dir + view_dir);
+        lit_color = half_vec * 0.5f;
+    }
+
+    output.color = float4(lit_color, 1.0f);
+    return output;
+}

@@ -459,6 +459,10 @@ public:
         for (const IRBasicBlock* block : order) {
             for (const auto& instPtr : block->instructions) {
                 if (!instPtr) continue;
+                if (mergedReturnSelect_ &&
+                    (instPtr.get() == mergedReturnSelect_->trueStore ||
+                     instPtr.get() == mergedReturnSelect_->falseStore))
+                    continue;
                 // Flattened programs execute both arms unconditionally
                 // (joins arrive from the frontend as selects), so the
                 // branch terminators are dropped rather than lowered.
@@ -471,6 +475,8 @@ public:
                 lowerInstruction(*instPtr);
             }
         }
+        if (mergedReturnSelect_)
+            lowerMergedReturnSelect(*mergedReturnSelect_);
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
@@ -509,6 +515,14 @@ private:
     // never engage the flatten and lower exactly as before.
     bool flattened_ = false;
     std::unordered_map<IRValueID, const IRInstruction*> defMap_;
+
+    struct MergedReturnSelect
+    {
+        IRValueID cond = InvalidIRValue;
+        const IRInstruction* trueStore = nullptr;
+        const IRInstruction* falseStore = nullptr;
+    };
+    std::optional<MergedReturnSelect> mergedReturnSelect_;
 
     // CF-1a (design note docs/design/shader-compiler-control-flow.md):
     // a forward-only structured CFG runs UNCONDITIONALLY — both arms
@@ -552,6 +566,7 @@ private:
         std::unordered_map<const IRBasicBlock*,
                            std::vector<const IRBasicBlock*>> succs;
         const IRBasicBlock* exitBlock = nullptr;
+        std::vector<const IRBasicBlock*> returnBlocks;
         for (const IRBasicBlock* b : blocks) {
             bool terminated = false;
             for (const auto& instPtr : b->instructions) {
@@ -587,10 +602,9 @@ private:
                 }
                 case IROp::Return:
                     terminated = true;
-                    if (exitBlock)
-                        return refuse(
-                            "more than one return block; refusing");
-                    exitBlock = b;
+                    if (!exitBlock)
+                        exitBlock = b;
+                    returnBlocks.push_back(b);
                     break;
                 default:
                     break;
@@ -602,6 +616,12 @@ private:
         }
         if (!exitBlock)
             return refuse("control flow has no return block; refusing");
+        if (returnBlocks.size() > 1) {
+            if (!tryPrepareMergedReturnSelect(blocks, succs, returnBlocks,
+                                              order))
+                return refuse("more than one return block; refusing");
+            return true;
+        }
 
         // Off-exit stores.  In a flattened program every block executes,
         // so a store that the original control flow could SKIP commits a
@@ -734,6 +754,214 @@ private:
         if (order.back() != exitBlock)
             return refuse(
                 "return block is not the control-flow sink; refusing");
+        return true;
+    }
+
+    bool tryPrepareMergedReturnSelect(
+        const std::vector<const IRBasicBlock*>& blocks,
+        const std::unordered_map<const IRBasicBlock*,
+                                 std::vector<const IRBasicBlock*>>& succs,
+        const std::vector<const IRBasicBlock*>& returnBlocks,
+        std::vector<const IRBasicBlock*>& order)
+    {
+        if (profile_ != GeneralProfile::Fragment || returnBlocks.size() != 2)
+            return false;
+
+        const IRBasicBlock* entry = blocks.front();
+        if (entry->instructions.empty())
+            return false;
+        const IRInstruction* term = entry->instructions.back().get();
+        if (!term || term->op != IROp::CondBranch ||
+            term->operands.empty())
+            return false;
+
+        auto succIt = succs.find(entry);
+        if (succIt == succs.end() || succIt->second.size() != 2)
+            return false;
+        const IRBasicBlock* trueBlock = succIt->second[0];
+        const IRBasicBlock* falseBlock = succIt->second[1];
+
+        const IRBasicBlock* tailEntry = nullptr;
+        const IRBasicBlock* earlyReturnBlock = nullptr;
+        bool earlyOnTrue = false;
+        const IRInstruction* earlyStore = singleReturnStore(trueBlock);
+        if (earlyStore && blockSuccs(succs, trueBlock).empty()) {
+            earlyReturnBlock = trueBlock;
+            tailEntry = falseBlock;
+            earlyOnTrue = true;
+        } else {
+            earlyStore = singleReturnStore(falseBlock);
+            if (!earlyStore || !blockSuccs(succs, falseBlock).empty())
+                return false;
+            earlyReturnBlock = falseBlock;
+            tailEntry = trueBlock;
+        }
+
+        const IRBasicBlock* tailReturnBlock =
+            returnBlocks[0] == earlyReturnBlock ? returnBlocks[1]
+                                                : returnBlocks[0];
+        if (!tailReachableOnly(succs, tailEntry, tailReturnBlock,
+                               earlyReturnBlock))
+            return false;
+
+        const IRInstruction* tailStore = singleReturnStore(tailReturnBlock);
+        if (!tailStore || !sameOutputSemantic(earlyStore, tailStore))
+            return false;
+        if (hasOtherOutputStores(blocks, earlyStore, tailStore))
+            return false;
+        if (!buildFlatDagOrder(blocks, succs, order))
+            return false;
+
+        mergedReturnSelect_ = MergedReturnSelect{
+            term->operands[0],
+            earlyOnTrue ? earlyStore : tailStore,
+            earlyOnTrue ? tailStore : earlyStore};
+        return true;
+    }
+
+    static const std::vector<const IRBasicBlock*>& blockSuccs(
+        const std::unordered_map<const IRBasicBlock*,
+                                 std::vector<const IRBasicBlock*>>& succs,
+        const IRBasicBlock* b)
+    {
+        static const std::vector<const IRBasicBlock*> empty;
+        auto it = succs.find(b);
+        return it != succs.end() ? it->second : empty;
+    }
+
+    static bool tailReachableOnly(
+        const std::unordered_map<const IRBasicBlock*,
+                                 std::vector<const IRBasicBlock*>>& succs,
+        const IRBasicBlock* start,
+        const IRBasicBlock* target,
+        const IRBasicBlock* forbidden)
+    {
+        std::unordered_set<const IRBasicBlock*> seen;
+        std::vector<const IRBasicBlock*> work;
+        if (!start || !target || start == forbidden)
+            return false;
+        work.push_back(start);
+        seen.insert(start);
+        bool reachedTarget = false;
+        while (!work.empty()) {
+            const IRBasicBlock* cur = work.back();
+            work.pop_back();
+            if (cur == forbidden)
+                return false;
+            if (cur == target)
+                reachedTarget = true;
+            for (const IRBasicBlock* nb : blockSuccs(succs, cur)) {
+                if (seen.insert(nb).second)
+                    work.push_back(nb);
+            }
+        }
+        return reachedTarget;
+    }
+
+    static bool hasOtherOutputStores(
+        const std::vector<const IRBasicBlock*>& blocks,
+        const IRInstruction* first,
+        const IRInstruction* second)
+    {
+        for (const IRBasicBlock* b : blocks) {
+            for (const auto& instPtr : b->instructions) {
+                const IRInstruction* inst = instPtr.get();
+                if (!inst || inst == first || inst == second)
+                    continue;
+                if (inst->op == IROp::StoreOutput ||
+                    inst->op == IROp::StoreVarying)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    static bool buildFlatDagOrder(
+        const std::vector<const IRBasicBlock*>& blocks,
+        const std::unordered_map<const IRBasicBlock*,
+                                 std::vector<const IRBasicBlock*>>& succs,
+        std::vector<const IRBasicBlock*>& order)
+    {
+        std::unordered_map<const IRBasicBlock*, int> color;
+        std::vector<const IRBasicBlock*> post;
+        struct Frame { const IRBasicBlock* b; size_t next; };
+        std::vector<Frame> stack;
+        stack.push_back({blocks.front(), 0});
+        color[blocks.front()] = 1;
+        while (!stack.empty()) {
+            const Frame f = stack.back();
+            const auto& ss = blockSuccs(succs, f.b);
+            if (f.next < ss.size()) {
+                stack.back().next = f.next + 1;
+                const IRBasicBlock* nb = ss[f.next];
+                int& c = color[nb];
+                if (c == 1)
+                    return false;
+                if (c == 0) {
+                    c = 1;
+                    stack.push_back({nb, 0});
+                }
+            } else {
+                color[f.b] = 2;
+                post.push_back(f.b);
+                stack.pop_back();
+            }
+        }
+        for (const IRBasicBlock* b : blocks) {
+            if (color[b] == 2) continue;
+            for (const auto& instPtr : b->instructions)
+                if (instPtr)
+                    return false;
+        }
+        // The frontend can CSE identical expressions across sibling arms,
+        // leaving the single definition in the arm it emitted first.  For
+        // merged returns every reachable block is executed anyway, so keep
+        // that IR emission order after proving the graph is reachable and
+        // acyclic instead of choosing a sibling order from DFS.
+        order = blocks;
+        return true;
+    }
+
+    const IRInstruction* singleReturnStore(const IRBasicBlock* block) const
+    {
+        if (!block || block->instructions.size() < 2)
+            return nullptr;
+        const IRInstruction* term = block->instructions.back().get();
+        if (!term || term->op != IROp::Return)
+            return nullptr;
+        const IRInstruction* store = nullptr;
+        for (size_t i = 0; i + 1 < block->instructions.size(); ++i) {
+            const IRInstruction* inst = block->instructions[i].get();
+            if (!inst)
+                return nullptr;
+            if (inst->op == IROp::Branch || inst->op == IROp::CondBranch ||
+                inst->op == IROp::Return || inst->op == IROp::StoreVarying ||
+                inst->op == IROp::Discard)
+                return nullptr;
+            if (inst->op != IROp::StoreOutput)
+                continue;
+            if (store || inst->operands.size() != 1)
+                return nullptr;
+            if (i + 2 != block->instructions.size())
+                return nullptr;
+            store = inst;
+        }
+        return store;
+    }
+
+    static bool sameOutputSemantic(const IRInstruction* a,
+                                   const IRInstruction* b)
+    {
+        if (!a || !b) return false;
+        if (a->semanticIndex != b->semanticIndex) return false;
+        if (a->semanticName.size() != b->semanticName.size()) return false;
+        for (size_t i = 0; i < a->semanticName.size(); ++i) {
+            char ca = a->semanticName[i];
+            char cb = b->semanticName[i];
+            if (ca >= 'a' && ca <= 'z') ca = char(ca - 'a' + 'A');
+            if (cb >= 'a' && cb <= 'z') cb = char(cb - 'a' + 'A');
+            if (ca != cb) return false;
+        }
         return true;
     }
 
@@ -1442,6 +1670,56 @@ private:
         const int vreg = nextVReg_++;
         program_.vregToFp16[vreg] = false;
         return vreg;
+    }
+
+    void lowerMergedReturnSelect(const MergedReturnSelect& merge)
+    {
+        if (!merge.trueStore || !merge.falseStore ||
+            merge.trueStore->operands.empty() ||
+            merge.falseStore->operands.empty())
+            return;
+        if (valueWidthOf(merge.cond) != 1) {
+            program_.diagnostics.push_back(
+                "nv40-general: merged return condition is not scalar; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const std::string sem = toUpper(merge.trueStore->semanticName);
+        const int outIndex = fragmentOutputIndex(sem);
+        if (outIndex < 0) {
+            program_.diagnostics.push_back(
+                "nv40-general: unsupported output semantic " +
+                merge.trueStore->semanticName);
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const IRValueID trueVal = merge.trueStore->operands[0];
+        const IRValueID falseVal = merge.falseStore->operands[0];
+        const int outMask = storeOutputMask(*merge.trueStore, trueVal);
+        const int selected = newVReg();
+
+        VInstr sel;
+        sel.op = VOp::SelPred;
+        sel.dst.index = selected;
+        sel.dst.writemask = outMask;
+        sel.srcs[0] = resolve(merge.cond);
+        {
+            const uint8_t c = sel.srcs[0].swizzle[0];
+            sel.srcs[0].swizzle = {c, c, c, c};
+        }
+        sel.srcs[1] = resolve(trueVal);
+        sel.srcs[2] = resolve(falseVal);
+        program_.instrs.push_back(sel);
+
+        VInstr out;
+        out.op = VOp::Mov;
+        out.dst.output = true;
+        out.dst.index = outIndex;
+        out.dst.writemask = outMask;
+        out.srcs[0] = tempSrc(selected);
+        program_.instrs.push_back(out);
     }
 
     void lowerInstruction(const IRInstruction& inst)
