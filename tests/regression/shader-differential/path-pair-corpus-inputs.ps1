@@ -64,3 +64,32 @@ function Get-PathPairCorpusFiles([string]$Root, [string]$Manifest = "") {
             }
         })
 }
+
+function Get-ReferenceTreeCorpusFiles([string]$Root, [string]$Manifest = "") {
+    return @(Get-PathPairCorpusFiles -Root $Root -Manifest $Manifest)
+}
+
+function Format-ReferenceTreeCorpusSummary(
+    [int]$CandidateCount,
+    [int]$OursRefused,
+    [int]$ReferenceRefused,
+    [int]$BothRefused,
+    [int]$ByteIdentical,
+    [int]$PairsStaged,
+    [int]$ProbeRows
+) {
+    return ("stager: reference tree corpus: {0} candidates, {1} ours-refused, {2} reference-refused, {3} both-refused, {4} byte-identical, {5} pairs staged, {6} probe rows" -f `
+        $CandidateCount, $OursRefused, $ReferenceRefused, $BothRefused, $ByteIdentical, $PairsStaged, $ProbeRows)
+}
+
+function Get-ReferencePairsPathForStage(
+    [string]$ReferencePairs,
+    [string]$DefaultPath,
+    [bool]$ReferenceTreeCorpus,
+    [bool]$ReferenceCorpus,
+    [bool]$PathPairs
+) {
+    if ($ReferencePairs) { return $ReferencePairs }
+    if ($ReferenceTreeCorpus -and -not ($ReferenceCorpus -or $PathPairs)) { return "-" }
+    return $DefaultPath
+}

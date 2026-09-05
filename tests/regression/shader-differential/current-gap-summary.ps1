@@ -41,6 +41,9 @@ function Get-ShadersExamined([string]$Path) {
         if ($line -match '^stager: reference corpus: ([0-9]+) shaders,') {
             $total += [int]$Matches[1]
             $matched = $true
+        } elseif ($line -match '^stager: reference tree corpus: ([0-9]+) candidates,') {
+            $total += [int]$Matches[1]
+            $matched = $true
         } elseif ($line -match '^stager: vp corpus: ([0-9]+) vertex shaders,') {
             $total += [int]$Matches[1]
             $matched = $true

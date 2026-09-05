@@ -23,6 +23,10 @@ try {
         "# header",
         "th06_v|ours|games/th06_v.vcg|1"
     ) -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $work "reference-tree-corpus-refused.txt") -Value @(
+        "# header",
+        "tree_only_gap|ours|samples/tree_only_gap.fcg|1"
+    ) -Encoding Ascii
     $exclude = Join-Path $work "reference-corpus-exclude.txt"
     Set-Content -LiteralPath $exclude -Value @(
         "# path|board id|path|why",
@@ -33,6 +37,7 @@ try {
     @(
         [pscustomobject]@{ name="test_48_refract"; source=""; bucket="operand_resolution" },
         [pscustomobject]@{ name="th06_v"; source=""; bucket="operand_resolution" },
+        [pscustomobject]@{ name="tree_only_gap"; source=""; bucket="reference_tree" },
         [pscustomobject]@{ name=""; source="samples/scanlines.fcg"; bucket="one_off" }
     ) | Export-Csv -NoTypeInformation -Path $bucketMap -Encoding Ascii
 
@@ -48,7 +53,7 @@ try {
     }
 
     $rows = @(Import-Csv -LiteralPath $out)
-    AssertEq 5 $rows.Count "row count"
+    AssertEq 6 $rows.Count "row count"
 
     $refract = $rows | Where-Object { $_.name -eq "test_48_refract" }
     AssertEq "backend-refuse" $refract.ours_status "ours refusal"
@@ -59,6 +64,12 @@ try {
     $th06 = $rows | Where-Object { $_.name -eq "th06_v" }
     AssertEq "new-refuse" $th06.ours_status "base accepted but current refuses"
     AssertEq "sce_vp_rsx" $th06.profile "VP profile"
+
+    $treeOnly = $rows | Where-Object { $_.name -eq "tree_only_gap" }
+    AssertEq "backend-refuse" $treeOnly.ours_status "reference-tree ours refusal"
+    AssertEq "accept" $treeOnly.reference_status "reference-tree reference accepted implied by one-sided ours refusal"
+    AssertEq "reference_tree" $treeOnly.bucket "reference-tree bucket"
+    AssertEq "sce_fp_rsx" $treeOnly.profile "reference-tree FP profile"
 
     $test86 = $rows | Where-Object { $_.name -eq "test_86_profile_restricted" }
     AssertEq "accept" $test86.ours_status "ours accepted reference-only refusal"

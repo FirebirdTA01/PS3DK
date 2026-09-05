@@ -126,6 +126,7 @@ $baseAccepted = Read-BaseAccepted $BaseCensusCsv
 $rowsByKey = @{}
 
 Add-RefusalRows $rowsByKey (Join-Path $SidecarRoot "reference-corpus-refused.txt") "sce_fp_rsx"
+Add-RefusalRows $rowsByKey (Join-Path $SidecarRoot "reference-tree-corpus-refused.txt") "sce_fp_rsx"
 Add-RefusalRows $rowsByKey (Join-Path $SidecarRoot "vp-corpus-refused.txt") "sce_vp_rsx"
 Add-ExcludeRows $rowsByKey $ExcludeList
 

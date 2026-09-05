@@ -154,7 +154,16 @@ try {
         throw "baseline-regressed gate summary wrong: $($badGate | ConvertTo-Json -Compress)"
     }
 
-    $newRow = @(
+    $newRows = @(
+        [pscustomobject]@{
+            name = "asin"
+            role = "reference"
+            profile = "sce_fp_rsx"
+            source = "shader.cg"
+            uniform_set = "0"
+            instruction_delta = "16"
+            register_delta = "1"
+        },
         [pscustomobject]@{
             name = "new_acceptance"
             role = "reference"
@@ -165,11 +174,31 @@ try {
             register_delta = "3"
         }
     )
-    $missingGate = Get-ContainerMetricsGateSummary $newRow $baseline
+    $missingGate = Get-ContainerMetricsGateSummary $newRows $baseline
     if ($missingGate.Status -ne "ok" -or
+        $missingGate.ComparedBaselineRows -ne 1 -or
         $missingGate.MissingBaselineRows -ne 1 -or
         $missingGate.BaselineRegressions -ne 0) {
         throw "missing-baseline row should be reported but not failed: $($missingGate | ConvertTo-Json -Compress)"
+    }
+
+    $allMissing = @(
+        [pscustomobject]@{
+            name = "new_mode"
+            role = "reference-tree-corpus"
+            profile = "sce_fp_rsx"
+            source = "new-mode.cg"
+            uniform_set = "auto"
+            instruction_delta = "4"
+            register_delta = "1"
+        }
+    )
+    $noCoverageGate = Get-ContainerMetricsGateSummary $allMissing $baseline
+    if ($noCoverageGate.Status -ne "no-coverage" -or
+        $noCoverageGate.ComparedBaselineRows -ne 0 -or
+        $noCoverageGate.MissingBaselineRows -ne 1 -or
+        $noCoverageGate.BaselineRegressions -ne 0) {
+        throw "all-missing baseline rows should report no-coverage: $($noCoverageGate | ConvertTo-Json -Compress)"
     }
 
     $baselinePath = Join-Path $work "container-metrics-baseline.csv"
@@ -193,6 +222,20 @@ try {
         $reportOnlyOutput.ShouldFail -or
         $reportOnlyOutput.Summary.Status -ne "fail") {
         throw "MetricsReportOnly should report regression without failing: $($reportOnlyOutput | ConvertTo-Json -Compress -Depth 4)"
+    }
+
+    $noCoverageOutput = Write-ContainerMetricsGateReport $allMissing $baselinePath 6>$null
+    if ($noCoverageOutput.Mode -ne "fail-by-default" -or
+        -not $noCoverageOutput.ShouldFail -or
+        $noCoverageOutput.Summary.Status -ne "no-coverage") {
+        throw "baseline-present all-missing rows should fail with no-coverage: $($noCoverageOutput | ConvertTo-Json -Compress -Depth 4)"
+    }
+
+    $noCoverageReportOnly = Write-ContainerMetricsGateReport $allMissing $baselinePath -ReportOnly 6>$null
+    if ($noCoverageReportOnly.Mode -ne "report-only" -or
+        $noCoverageReportOnly.ShouldFail -or
+        $noCoverageReportOnly.Summary.Status -ne "no-coverage") {
+        throw "MetricsReportOnly should report no-coverage without failing: $($noCoverageReportOnly | ConvertTo-Json -Compress -Depth 4)"
     }
 
     $absentOutput = Write-ContainerMetricsGateReport $joined (Join-Path $work "missing-baseline.csv") 6>$null

@@ -72,6 +72,10 @@ try {
     $changed = Invoke-GapSummary $census $metrics $tty $stageLog
     Assert-Contains $changed.Text "CURRENT_GAPS|staged_shaders_examined=135|census_refusal_rows=1|accepted_refusals=1|" "changed census summary"
 
+    Set-Content -LiteralPath $stageLog -Value "stager: reference tree corpus: 180 candidates, 13 ours-refused, 9 reference-refused, 9 both-refused, 29 byte-identical, 138 pairs staged, 4 probe rows" -Encoding Ascii
+    $treeOnly = Invoke-GapSummary $census $metrics $tty $stageLog
+    Assert-Contains $treeOnly.Text "CURRENT_GAPS|staged_shaders_examined=180|census_refusal_rows=1|accepted_refusals=1|" "reference-tree census summary"
+
     Set-Content -LiteralPath $census -Value '"name","profile","source","ours_status","reference_status","bucket","rc_ours","rc_reference"' -Encoding Ascii
     Set-Content -LiteralPath $stageLog -Value "stager: reference corpus: 0 shaders, 0 pairs staged, 0 byte-identical skipped, ours refused 0, reference refused 0, 0 excluded, 0 reference-only probe rows (sidecar: reference-corpus-refused.txt)" -Encoding Ascii
     $empty = Invoke-GapSummary $census $metrics $tty $stageLog

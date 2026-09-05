@@ -204,6 +204,7 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-test.ps1
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-census-test.ps1
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-gap-summary-test.ps1
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\reference-tree-test.ps1
 
       - name: Set up MSYS2 / mingw64
         uses: msys2/setup-msys2@v2

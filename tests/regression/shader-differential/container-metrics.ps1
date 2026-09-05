@@ -166,6 +166,7 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
     $missingBaselineRows = 0
     $worstInstructionRegression = 0
     $worstRegisterRegression = 0
+    $currentRows = @($Rows).Count
     foreach ($row in @($Rows)) {
         $key = Get-ContainerMetricKey $row
         if (-not $baselineByKey.ContainsKey($key)) {
@@ -186,10 +187,21 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
         }
     }
 
+    $baselineRowCount = @($BaselineRows).Count
+    $comparedBaselineRows = $currentRows - $missingBaselineRows
+    $status = if ($baselineRegressions -gt 0) {
+        "fail"
+    } elseif ($baselineRowCount -gt 0 -and $currentRows -gt 0 -and $comparedBaselineRows -eq 0) {
+        "no-coverage"
+    } else {
+        "ok"
+    }
+
     return [pscustomobject]@{
-        Status = if ($baselineRegressions -gt 0) { "fail" } else { "ok" }
-        CurrentRows = @($Rows).Count
-        BaselineRows = @($BaselineRows).Count
+        Status = $status
+        CurrentRows = $currentRows
+        BaselineRows = $baselineRowCount
+        ComparedBaselineRows = $comparedBaselineRows
         MissingBaselineRows = $missingBaselineRows
         BaselineRegressions = $baselineRegressions
         WorstInstructionRegression = $worstInstructionRegression
@@ -218,7 +230,7 @@ function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath
     $mode = if ($baselinePresent -and -not $ReportOnly) { "fail-by-default" } else { "report-only" }
     $shouldFail = $mode -eq "fail-by-default" -and $summary.Status -ne "ok"
     $baselineState = if ($baselinePresent) { "present" } else { "absent" }
-    Write-Host "SDIFF-METRICS-GATE|status=$($summary.Status)|mode=$mode|current_rows=$($summary.CurrentRows)|baseline_rows=$($summary.BaselineRows)|missing_baseline_rows=$($summary.MissingBaselineRows)|baseline_regressions=$($summary.BaselineRegressions)|worst_instruction_regression=$($summary.WorstInstructionRegression)|worst_register_regression=$($summary.WorstRegisterRegression)|baseline=$baselineState"
+    Write-Host "SDIFF-METRICS-GATE|status=$($summary.Status)|mode=$mode|current_rows=$($summary.CurrentRows)|baseline_rows=$($summary.BaselineRows)|compared_baseline_rows=$($summary.ComparedBaselineRows)|missing_baseline_rows=$($summary.MissingBaselineRows)|baseline_regressions=$($summary.BaselineRegressions)|worst_instruction_regression=$($summary.WorstInstructionRegression)|worst_register_regression=$($summary.WorstRegisterRegression)|baseline=$baselineState"
     return [pscustomobject]@{
         Summary = $summary
         Mode = $mode
