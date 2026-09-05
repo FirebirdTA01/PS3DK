@@ -47,6 +47,14 @@ public:
     const std::vector<uint32_t>& words() const { return words_; }
 
     uint32_t inputMask () const { return inputMask_;  }
+
+    // NV40 VP instructions have ONE per-instruction input-register
+    // field.  Encoding two DISTINCT input sources OR-ed their indices
+    // (9|10=11) into a register neither operand named, silently.  The
+    // assembler cannot fix that - only a lowering can materialise the
+    // second input into a temp - so it RECORDS the conflict and the
+    // caller must refuse to emit the program.
+    bool inputConflict() const { return inputConflict_; }
     uint32_t outputMask() const { return outputMask_; }
     int      numTempRegs() const { return numTempRegs_; }
 
@@ -57,6 +65,7 @@ private:
     uint32_t              inputMask_   = 0;
     uint32_t              outputMask_  = 0;
     int                   numTempRegs_ = 0;
+    bool                  inputConflict_ = false;
 
     // Returns the base offset of the current instruction inside words_.
     size_t curBase() const { return words_.size() - 4; }

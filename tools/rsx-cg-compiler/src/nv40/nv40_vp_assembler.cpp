@@ -106,6 +106,7 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
     }
 
     // --- srcs ---
+    int instInputIndex = -1;  // the ONE input register this instruction may address
     for (uint8_t pos = 0; pos < 3; ++pos)
     {
         const struct nvfx_src& src = (slot == NVFX_VP_INST_SLOT_SCA)
@@ -122,6 +123,14 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         case NVFXSR_INPUT:
             sr |= (NVFX_VP(SRC_REG_TYPE_INPUT) << NVFX_VP(SRC_REG_TYPE_SHIFT));
             inputMask_ |= (1u << src.reg.index);
+            // ONE input-register field per instruction: a second
+            // DISTINCT index cannot be encoded - OR-ing it in reads
+            // a register neither operand named.  Record the conflict
+            // for the caller to refuse on.
+            if (instInputIndex >= 0 &&
+                instInputIndex != static_cast<int>(src.reg.index))
+                inputConflict_ = true;
+            instInputIndex = static_cast<int>(src.reg.index);
             hw[1] |= (src.reg.index << NVFX_VP(INST_INPUT_SRC_SHIFT));
             break;
         case NVFXSR_CONST:
@@ -273,6 +282,10 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
         }
     };
 
+    // Shared across BOTH co-issued halves on purpose: the vec and sca ops
+    // share one hw[1], so a cross-half input conflict folds exactly like an
+    // intra-instruction one.
+    int instInputIndex = -1;
     auto sourceBits = [&](const struct nvfx_src& src) -> uint32_t {
         uint32_t sr = 0;
 
@@ -285,6 +298,14 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
         case NVFXSR_INPUT:
             sr |= (NVFX_VP(SRC_REG_TYPE_INPUT) << NVFX_VP(SRC_REG_TYPE_SHIFT));
             inputMask_ |= (1u << src.reg.index);
+            // ONE input-register field per instruction: a second
+            // DISTINCT index cannot be encoded - OR-ing it in reads
+            // a register neither operand named.  Record the conflict
+            // for the caller to refuse on.
+            if (instInputIndex >= 0 &&
+                instInputIndex != static_cast<int>(src.reg.index))
+                inputConflict_ = true;
+            instInputIndex = static_cast<int>(src.reg.index);
             hw[1] |= (src.reg.index << NVFX_VP(INST_INPUT_SRC_SHIFT));
             break;
         case NVFXSR_CONST:

@@ -6866,6 +6866,14 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         return out;
     }
     asm_.markLast();
+    if (asm_.inputConflict()) {
+        out.diagnostics.push_back(
+            "nv40-general: a vertex instruction addresses two distinct "
+            "input registers, which the hardware cannot encode; refusing "
+            "(materialising one input into a temp is the fix, filed)");
+        out.ok = false;
+        return out;
+    }
     if (program.loweringFailed) {
         out.diagnostics.push_back(
             "nv40-general: refusing to emit - the program did not lower completely");
