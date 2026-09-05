@@ -85,7 +85,7 @@ $newlyRefusing = @(
 $worseRegs = @($metrics | Where-Object { (Metric-Int $_.register_delta) -gt 0 }).Count
 $worseInstr = @($metrics | Where-Object { (Metric-Int $_.instruction_delta) -gt 0 }).Count
 
-Write-Host ("CURRENT_GAPS|shaders_examined={0}|census_refusal_rows={1}|accepted_refusals={2}|register_budget={3}|pixel_mismatches={4}|newly_refusing={5}|metrics_worse_regs={6}|metrics_worse_instr={7}" -f `
+Write-Host ("CURRENT_GAPS|staged_shaders_examined={0}|census_refusal_rows={1}|accepted_refusals={2}|register_budget={3}|pixel_mismatches={4}|newly_refusing={5}|metrics_worse_regs={6}|metrics_worse_instr={7}" -f `
     $shadersExamined, $census.Count, $referenceAcceptedRefusals.Count, $registerBudget, $pixelMismatches, $newlyRefusing, $worseRegs, $worseInstr)
 
 $referenceAcceptedRefusals |

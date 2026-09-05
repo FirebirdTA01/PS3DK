@@ -62,7 +62,7 @@ try {
     if ($result.ExitCode -ne 0) {
         throw "current-gap-summary failed unexpectedly: $($result.Text)"
     }
-    Assert-Contains $result.Text "CURRENT_GAPS|shaders_examined=135|census_refusal_rows=5|accepted_refusals=3|register_budget=1|pixel_mismatches=1|newly_refusing=1|metrics_worse_regs=1|metrics_worse_instr=1" "summary"
+    Assert-Contains $result.Text "CURRENT_GAPS|staged_shaders_examined=135|census_refusal_rows=5|accepted_refusals=3|register_budget=1|pixel_mismatches=1|newly_refusing=1|metrics_worse_regs=1|metrics_worse_instr=1" "summary"
     Assert-Contains $result.Text "GAP_BUCKET|bucket=operand_resolution|count=1|names=test_48_refract" "operand bucket"
     Assert-Contains $result.Text "GAP_BUCKET|bucket=register_budget|count=1|names=test_79_centroid_interpolation" "register bucket"
 
@@ -70,12 +70,12 @@ try {
         [pscustomobject]@{ name="only_one"; profile="sce_fp_rsx"; source="a.fcg"; ours_status="backend-refuse"; reference_status="accept"; bucket="one_off" }
     ) | Export-Csv -NoTypeInformation -Path $census -Encoding Ascii
     $changed = Invoke-GapSummary $census $metrics $tty $stageLog
-    Assert-Contains $changed.Text "CURRENT_GAPS|shaders_examined=135|census_refusal_rows=1|accepted_refusals=1|" "changed census summary"
+    Assert-Contains $changed.Text "CURRENT_GAPS|staged_shaders_examined=135|census_refusal_rows=1|accepted_refusals=1|" "changed census summary"
 
     Set-Content -LiteralPath $census -Value '"name","profile","source","ours_status","reference_status","bucket","rc_ours","rc_reference"' -Encoding Ascii
     Set-Content -LiteralPath $stageLog -Value "stager: reference corpus: 0 shaders, 0 pairs staged, 0 byte-identical skipped, ours refused 0, reference refused 0, 0 excluded, 0 reference-only probe rows (sidecar: reference-corpus-refused.txt)" -Encoding Ascii
     $empty = Invoke-GapSummary $census $metrics $tty $stageLog
-    Assert-Contains $empty.Text "CURRENT_GAPS|shaders_examined=0|census_refusal_rows=0|accepted_refusals=0|register_budget=0|" "empty census summary"
+    Assert-Contains $empty.Text "CURRENT_GAPS|staged_shaders_examined=0|census_refusal_rows=0|accepted_refusals=0|register_budget=0|" "empty census summary"
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
