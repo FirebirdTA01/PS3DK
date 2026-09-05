@@ -2635,6 +2635,10 @@ private:
         mov.dst.index = define(inst.result);
         mov.dst.writemask = componentMask(inst.resultType);
         mov.srcs[0] = resolve(inst.operands[0]);
+        // Measured itof probes contain the preceding ftoi and therefore
+        // cannot distinguish "itof needs a fence" from "ftoi then read
+        // needs one".  Keep the reference's conservative FENCBR until a
+        // standalone itof probe proves it unnecessary.
         mov.stubFenceBrBefore = true;
         program_.instrs.push_back(mov);
     }
