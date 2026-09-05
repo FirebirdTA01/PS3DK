@@ -61,10 +61,13 @@ for i, w in enumerate(gs):
 if first_store_idx is None:
     sys.exit("FAIL: could not find colour output store to R0")
 
-# For all subsequent instructions after the colour output store, assert that no
-# comparison or non-output computation instruction writes to R0.
-# Comparisons: SLT (0x0A), SGE (0x0B), SEQ (0x0C), SNE (0x0D), etc.
-COMPARISON_OPS = {0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F}
+# In fp_discard_nested_f, there is exactly one output store (o = c).
+# The store writes R0 (mask 0xF). Because this shader contains no subsequent
+# output assignments, no instruction after first_store_idx is permitted to write
+# any lane that the store wrote. Any subsequent write to R0 (regardless of opcode —
+# whether comparison SLT, arithmetic ADD/MUL/MAD, etc.) represents the allocator
+# reusing live colour output R0 as a scratch temporary (t_dabb23e1).
+store_mask = (gs[first_store_idx][0] >> 9) & 0xf
 
 for i in range(first_store_idx + 1, len(gs)):
     w = gs[i]
@@ -72,14 +75,13 @@ for i in range(first_store_idx + 1, len(gs)):
     dst = (w[0] >> 1) & 0x3f
     mask = (w[0] >> 9) & 0xf
     opcode = (w[0] >> 24) & 0x3f
-    if not none and dst == 0:
-        if opcode in COMPARISON_OPS:
-            sys.exit(
-                f"FAIL: comparison instruction (opcode 0x{opcode:02X}) at instruction {i} "
-                f"uses colour output register R0 (mask 0x{mask:X}) as a temporary, "
-                f"clobbering live output after store at instruction {first_store_idx} "
-                f"(t_dabb23e1 regression)"
-            )
+    if not none and dst == 0 and (mask & store_mask) != 0:
+        sys.exit(
+            f"FAIL: instruction at {i} (opcode 0x{opcode:02X}) writes to colour output "
+            f"register R0 (mask 0x{mask:X}, overlapping store mask 0x{store_mask:X}), "
+            f"clobbering live colour output after store at instruction {first_store_idx} "
+            f"(t_dabb23e1 regression)"
+        )
 
 print(f"output-temp-reuse-test: ok (R0 output at instruction {first_store_idx} preserved; no subsequent temp clobbers)")
 PY
