@@ -88,6 +88,11 @@ param(
     # poisoner blanks every row after it).  Needs the reference compiler.
     [switch]$PathPairCorpus,
     [string]$PathPairCorpusDir = "",
+    # Optional root-relative input manifest for -PathPairCorpus.  When the
+    # corpus root is the repo root and this is omitted, the tracked gate-1
+    # manifest beside this script is used so the "tree" count is a repo fact
+    # instead of a working-directory accident.
+    [string]$PathPairCorpusManifest = "",
     # -VpPairs: judge VERTEX programs on pixels (increment 4, gate 5).  Each
     # .vcg in -VpPairsList (default <rig>/vp-pairs.txt: repo-relative|set|path)
     # is compiled by OUR compiler on the stage's path and by the reference
@@ -127,6 +132,7 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $here "..\..\..")).Path
 . (Join-Path $here "container-metrics.ps1")
+. (Join-Path $here "path-pair-corpus-inputs.ps1")
 
 function To-WslPath([string]$p) {
     $q = $p -replace '\\', '/'
@@ -887,15 +893,11 @@ if ($ReferenceCompiler) {
             throw "path-pair corpus root not a directory: $PathPairCorpusDir"
         }
         $pcRoot = (Resolve-Path -LiteralPath $PathPairCorpusDir).Path.TrimEnd('\')
-        # Relative-path filter, not FullName: the default corpus lives under
-        # build/, so a FullName filter on build/ would exclude all of it.
-        $pcFiles = @(Get-ChildItem -LiteralPath $pcRoot -Recurse -File |
-            Where-Object { $_.Name -like '*.fcg' -or $_.Name -like '*_f.cg' } |
-            Where-Object {
-                $r = $_.FullName.Substring($pcRoot.Length + 1).Replace('\', '/')
-                -not ($r.StartsWith('build/') -or $r.Contains('/_work/') -or $r.StartsWith('_work/'))
-            } | Sort-Object FullName)
-        if ($pcFiles.Count -eq 0) { throw "path-pair corpus is empty: $pcRoot" }
+        if (-not $PathPairCorpusManifest -and (Test-Path -LiteralPath (Join-Path $pcRoot ".git"))) {
+            $PathPairCorpusManifest = Join-Path $here "path-pair-corpus.txt"
+        }
+        $pcFileRows = @(Get-PathPairCorpusFiles -Root $pcRoot -Manifest $PathPairCorpusManifest)
+        if ($pcFileRows.Count -eq 0) { throw "path-pair corpus is empty: $pcRoot" }
         $pcExcludeFile = if ($ReferenceCorpusExclude) { $ReferenceCorpusExclude } else { Join-Path $here "reference-corpus-exclude.txt" }
         $pcExcluded = @{}
         if (Test-Path -LiteralPath $pcExcludeFile -PathType Leaf) {
@@ -914,8 +916,9 @@ if ($ReferenceCompiler) {
                            "# fields: name|side|corpus-relative path|rc.  side=general on a shader the default path compiles is a GATE-1 FAILURE;",
                            "#         side=default is out of the gate's scope (the default path refuses it today); side=reference leaves the pair unoracled.")
         $pcRows = @(); $pcStaged = 0; $pcIdentical = 0; $pcDefRefused = 0; $pcGenRefused = 0; $pcRefRefused = 0; $pcExcl = 0; $pcConstSet0 = 0
-        foreach ($f in $pcFiles) {
-            $rel = $f.FullName.Substring($pcRoot.Length + 1).Replace('\', '/')
+        foreach ($fileRow in $pcFileRows) {
+            $f = $fileRow.File
+            $rel = $fileRow.RelativePath
             if ($pcExcluded.ContainsKey($rel)) { $pcExcl++; Write-Host "stager: path-pair corpus excluded $rel ($($pcExcluded[$rel]))"; continue }
             $name = $f.Name
             if ($name.EndsWith('.cg')) { $name = $name.Substring(0, $name.Length - 3) }
@@ -963,7 +966,8 @@ if ($ReferenceCompiler) {
         Set-Content -LiteralPath $pcRefusedPath -Value ($pcRefusedRows -join "`n") -Encoding Ascii
         if (($pcStaged + $pcIdentical + $pcDefRefused + $pcGenRefused + $pcRefRefused) -eq 0) { throw "path-pair corpus sweep compiled nothing" }
         $manifest += $pcRows
-        Write-Host "stager: path-pair corpus (gate 1): $($pcFiles.Count) shaders, $pcExcl excluded, $pcDefRefused legacy-refused (out of scope), $pcGenRefused GENERAL-REFUSED (gate failures), $pcRefRefused reference-refused (unoracled), $pcIdentical byte-identical legacy/general, $pcStaged pairs staged ($pcConstSet0 under set 0 for a file-scope const)"
+        $pcInputLabel = if ($PathPairCorpusManifest) { "manifest $PathPairCorpusManifest" } else { "filesystem walk" }
+        Write-Host "stager: path-pair corpus (gate 1): $($pcFileRows.Count) shaders from $pcInputLabel, $pcExcl excluded, $pcDefRefused legacy-refused (out of scope), $pcGenRefused GENERAL-REFUSED (gate failures), $pcRefRefused reference-refused (unoracled), $pcIdentical byte-identical legacy/general, $pcStaged pairs staged ($pcConstSet0 under set 0 for a file-scope const)"
     }
 }
 

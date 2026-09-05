@@ -1,0 +1,18 @@
+// shader-differential - tracked witness for the legacy debugfont shader shape.
+//
+// The old gate1 tree count accidentally relied on ignored PSL1GHT copies under
+// src/.  Keep the load-bearing property in the repo: sample alpha through
+// tex2D(...).w, then assign the passing colour as split rgb/a writes.
+void main(float4 color : COLOR0,
+          float2 texcoord : TEXCOORD0,
+          uniform sampler2D texture,
+          out float4 oColor : COLOR0)
+{
+    float alpha = tex2D(texture, texcoord).w;
+    if (alpha <= 0.5f) {
+        oColor = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    } else {
+        oColor.rgb = color.rgb;
+        oColor.a = color.a;
+    }
+}
