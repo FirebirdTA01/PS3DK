@@ -7610,10 +7610,23 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             // srcs[2] is read by the same instruction that writes dst
             // and may share.
             {
+                // Diagnose the final physical operands used by emission,
+                // independently of the order in which they were allocated.
+                const auto registerName = [](int phys, bool fp16) {
+                    if (phys < 0) return std::string("unassigned");
+                    return std::string(fp16 ? "H" : "R") +
+                           std::to_string(phys) +
+                           (fp16 ? " (R" + std::to_string(phys >> 1) + ")" : "");
+                };
+                const std::string context =
+                    "nv40-general: SelPred alloc[" +
+                    std::to_string(&vi - program.instrs.data()) + "] dst v" +
+                    std::to_string(vi.dst.index) + " " +
+                    registerName(vi.dst.phys, vi.dst.fp16);
+                const std::string refusal =
+                    "; refusing (t_3603033d; invariant t_652d6e42)";
                 if (vi.dst.phys < 0) {
-                    out.diagnostics.push_back(
-                        "nv40-general: SelPred destination has no "
-                        "physical register; refusing");
+                    out.diagnostics.push_back(context + refusal);
                     return out;
                 }
                 const int dstSlot =
@@ -7628,17 +7641,17 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                     // garbage (review strengthening on 1eb3c21).
                     if (src.phys < 0) {
                         out.diagnostics.push_back(
-                            "nv40-general: SelPred source has no "
-                            "physical register; refusing");
+                            context + ", early-read src" + std::to_string(s) +
+                            " v" + std::to_string(src.index) + " unassigned" + refusal);
                         return out;
                     }
                     const int srcSlot =
                         src.fp16 ? (src.phys >> 1) : src.phys;
                     if (srcSlot == dstSlot) {
                         out.diagnostics.push_back(
-                            "nv40-general: SelPred destination register "
-                            "aliases an early-read source; refusing "
-                            "rather than emitting an always-else select");
+                            context + " aliases early-read src" +
+                            std::to_string(s) + " v" + std::to_string(src.index) +
+                            " " + registerName(src.phys, src.fp16) + refusal);
                         return out;
                     }
                 }
