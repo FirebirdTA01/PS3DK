@@ -18,6 +18,7 @@
 # installed release: this rig exists to judge the compiler under
 # development, and %PS3DK% is a clean release extract by standing rule.
 
+[CmdletBinding()]
 param(
     [string]$Rsxcgc = "",
     [string]$Rpcs3Path = "C:\Users\FirebirdTA01\Desktop\Emulators\RPCS3\rpcs3.exe",
@@ -45,11 +46,20 @@ param(
     # the tree.  Byte-identical pairs are not staged.
     [string]$ReferenceCompiler = "",
     [string]$ReferencePairs = "",  # default: <rig>/reference-pairs.txt; "-" = none
-    # -ReferenceCorpus: also stage EVERY fragment shader under
-    # -ReferenceCorpusDir (Windows path; default <repo>/build/shader-corpus,
-    # the fetched community corpus, _work/ excluded) as an ours-vs-reference
-    # pair under uniform_set auto (increment 3c).  A refusal on either
-    # side is a sidecar row, not an abort: the corpus is not curated.
+    # -ReferenceCorpus: also stage EVERY fragment shader under the corpus
+    # root (the fetched community corpus, _work/ excluded) as an
+    # ours-vs-reference pair under uniform_set auto (increment 3c).  A
+    # refusal on either side is a sidecar row, not an abort: the corpus is
+    # not curated.
+    #
+    # -ReferenceCorpusDir (Windows path) is THE CORPUS ROOT for the whole
+    # stage: every sweep default and every curated row spelled
+    # build/shader-corpus/<x> resolves under it.  Default: the judged tree's
+    # own build\shader-corpus if it has one, else the PRIMARY checkout's
+    # (the corpus is a manifest-pinned external fetch that lives beside the
+    # primary .git, so a linked worktree normally has none - see -RepoRoot).
+    # The resolved root and where it came from are printed at the top of
+    # every stage.
     [switch]$ReferenceCorpus,
     [string]$ReferenceCorpusDir = "",
     # -ReferenceTreeCorpus: stage the tracked fragment tree manifest as
@@ -133,6 +143,34 @@ param(
     # counted, not staged.  Needs the reference compiler.
     [switch]$VpPathPairs,
     [string]$Hdd0 = "",          # override dev_hdd0 root (testing)
+    # -RepoRoot: the TREE THIS STAGE JUDGES, as a Windows path (relative or
+    # forward-slashed is fine; it is resolved).  Default = the tree this
+    # script lives in, which for the shared checkout is the shared tree.
+    #
+    # Two roots used to be one.  The script's own directory supplied BOTH
+    # the code (helpers, the sd_* instruments whose verdicts the guest has
+    # coded in) AND the tree's data - the curated lists, the listed shader
+    # sources, the tracked-tree manifest, the exclude list, the metrics
+    # baseline - while -WslCompiler pointed at a worktree's binary.  So a
+    # fixture that lived only on a branch could not be judged from its own
+    # branch: the stager read the shared tree's lists, found no such
+    # shader, and either aborted or, worse, judged the shared tree's copy
+    # of a same-named file under the branch's compiler and called that a
+    # verdict (t_b1269234; three void builds on 2026-09-02 came from the
+    # same coupling in the other direction).
+    #
+    # With -RepoRoot, EVERYTHING THE JUDGED TREE OWNS resolves under it:
+    # every repo-relative shader in reference-pairs / path-pairs / vp-pairs,
+    # the lists themselves, path-pair-corpus.txt, reference-corpus-exclude.txt,
+    # container-metrics-baseline.csv and the tracked-tree corpus root.  The
+    # INSTRUMENTS (sd_* controls, probes, coverage sources) and the helper
+    # scripts stay with this script, because their meaning is coded into
+    # the guest that judges them, not into the tree under test.  The
+    # fetched community corpus is NOT tree-owned either - see
+    # -ReferenceCorpusDir for how build/shader-corpus rows resolve.  Both
+    # resolved roots are printed at the top of every stage so a log says
+    # which tree and which corpus it judged.
+    [string]$RepoRoot = "",
     # Once container-metrics-baseline.csv exists beside this script, metric
     # regressions fail staging by default.  This switch keeps the report
     # visible but suppresses the failure for explicit investigative runs.
@@ -141,9 +179,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = (Resolve-Path (Join-Path $here "..\..\..")).Path
 . (Join-Path $here "container-metrics.ps1")
 . (Join-Path $here "path-pair-corpus-inputs.ps1")
+
+# The three roots - see -RepoRoot and -ReferenceCorpusDir, and
+# Resolve-StageRoots in path-pair-corpus-inputs.ps1 for the rules.  $here
+# stays the CODE's home: helpers and instruments come from there.
+$stageRoots = Resolve-StageRoots -ScriptDir $here -RepoRoot $RepoRoot -ReferenceCorpusDir $ReferenceCorpusDir
+$repoRoot = $stageRoots.RepoRoot
+$rig = $stageRoots.Rig
+$corpusRoot = $stageRoots.CorpusRoot
+foreach ($line in @(Format-StageRootsBanner $stageRoots)) { Write-Host $line }
 
 function To-WslPath([string]$p) {
     $q = $p -replace '\\', '/'
@@ -552,7 +598,7 @@ if ($Corpus) {
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
     New-Item -ItemType Directory -Force $stage | Out-Null
 
-    if (-not $CorpusDir) { $CorpusDir = To-WslPath (Join-Path $repoRoot "build\shader-corpus") }
+    if (-not $CorpusDir) { $CorpusDir = To-WslPath $corpusRoot }
     $helperWsl = To-WslPath $helper
     $stageWsl  = To-WslPath $stage
 
@@ -688,7 +734,7 @@ if ($ReferenceCompiler) {
     # CF-2 lands (t_91bbd575).
     $ReferencePairs = Get-ReferencePairsPathForStage `
         -ReferencePairs $ReferencePairs `
-        -DefaultPath (Join-Path $here "reference-pairs.txt") `
+        -DefaultPath (Join-Path $rig "reference-pairs.txt") `
         -ReferenceTreeCorpus ([bool]$ReferenceTreeCorpus) `
         -ReferenceCorpus ([bool]$ReferenceCorpus) `
         -PathPairs ([bool]$PathPairs)
@@ -714,7 +760,7 @@ if ($ReferenceCompiler) {
         $rel = $fields[0].Trim()
         $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
         if (-not (Row-AppliesToPath $fields 2)) { $refSkippedPath++; continue }
-        $src = Join-Path $repoRoot $rel
+        $src = Resolve-StageTreePath -RepoRoot $repoRoot -CorpusRoot $corpusRoot -Rel $rel
         if (-not (Test-Path $src)) { throw "reference-pairs: shader not found: $rel" }
         $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
         # The SAME shader listed twice with two uniform sets (a double-duty
@@ -780,7 +826,7 @@ if ($ReferenceCompiler) {
     # path on collision); refusals go to reference-corpus-refused.txt
     # (name|side|rel) and byte-identical pairs are counted, not staged.
     if ($ReferenceCorpus) {
-        if (-not $ReferenceCorpusDir) { $ReferenceCorpusDir = Join-Path $repoRoot "build\shader-corpus" }
+        if (-not $ReferenceCorpusDir) { $ReferenceCorpusDir = $corpusRoot }
         if (-not (Test-Path -LiteralPath $ReferenceCorpusDir -PathType Container)) {
             throw "reference corpus root not a directory: $ReferenceCorpusDir"
         }
@@ -789,7 +835,7 @@ if ($ReferenceCompiler) {
             Where-Object { ($_.Name -like '*.fcg' -or $_.Name -like '*_f.cg') -and ($_.FullName -notlike "*\_work\*") } |
             Sort-Object FullName)
         if ($files.Count -eq 0) { throw "reference corpus is empty: $corpusRoot" }
-        if (-not $ReferenceCorpusExclude) { $ReferenceCorpusExclude = Join-Path $here "reference-corpus-exclude.txt" }
+        if (-not $ReferenceCorpusExclude) { $ReferenceCorpusExclude = Join-Path $rig "reference-corpus-exclude.txt" }
         $excluded = @{}
         if (Test-Path -LiteralPath $ReferenceCorpusExclude -PathType Leaf) {
             foreach ($line in (Get-Content $ReferenceCorpusExclude | Where-Object { $_ -and -not $_.StartsWith("#") })) {
@@ -857,7 +903,7 @@ if ($ReferenceCompiler) {
         $repoRootResolved = (Resolve-Path -LiteralPath $repoRoot).Path.TrimEnd('\')
         if (-not $ReferenceTreeCorpusManifest -and
             $rtRoot.Equals($repoRootResolved, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $ReferenceTreeCorpusManifest = Join-Path $here "path-pair-corpus.txt"
+            $ReferenceTreeCorpusManifest = Join-Path $rig "path-pair-corpus.txt"
         }
         if (-not $ReferenceTreeCorpusManifest) {
             throw "reference tree corpus needs a manifest when the root is not the repo root"
@@ -940,7 +986,7 @@ if ($ReferenceCompiler) {
     # pixel-identical to it, so a host-side byte check would call every one
     # of them unoracled.
     if ($PathPairs) {
-        if (-not $PathPairsList) { $PathPairsList = Join-Path $here "path-pairs.txt" }
+        if (-not $PathPairsList) { $PathPairsList = Join-Path $rig "path-pairs.txt" }
         $ppLines = @(Get-Content $PathPairsList | Where-Object { $_ -and -not $_.StartsWith("#") })
         if ($ppLines.Count -eq 0) { throw "path-pairs list is empty: $PathPairsList" }
         $ppDst = Join-Path $root "pathpair"
@@ -950,7 +996,7 @@ if ($ReferenceCompiler) {
             $fields = $line.Split("|")
             $rel = $fields[0].Trim()
             $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
-            $src = Join-Path $repoRoot $rel
+            $src = Resolve-StageTreePath -RepoRoot $repoRoot -CorpusRoot $corpusRoot -Rel $rel
             if (-not (Test-Path $src)) { throw "path-pairs: shader not found: $rel" }
             $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
             if ($seenNames.ContainsKey($name)) {
@@ -992,18 +1038,18 @@ if ($ReferenceCompiler) {
 
     if ($PathPairCorpus) {
         if (-not $PathPairCorpusDir) {
-            $PathPairCorpusDir = if ($ReferenceCorpusDir) { $ReferenceCorpusDir } else { Join-Path $repoRoot "build\shader-corpus" }
+            $PathPairCorpusDir = $corpusRoot
         }
         if (-not (Test-Path -LiteralPath $PathPairCorpusDir -PathType Container)) {
             throw "path-pair corpus root not a directory: $PathPairCorpusDir"
         }
         $pcRoot = (Resolve-Path -LiteralPath $PathPairCorpusDir).Path.TrimEnd('\')
         if (-not $PathPairCorpusManifest -and (Test-Path -LiteralPath (Join-Path $pcRoot ".git"))) {
-            $PathPairCorpusManifest = Join-Path $here "path-pair-corpus.txt"
+            $PathPairCorpusManifest = Join-Path $rig "path-pair-corpus.txt"
         }
         $pcFileRows = @(Get-PathPairCorpusFiles -Root $pcRoot -Manifest $PathPairCorpusManifest)
         if ($pcFileRows.Count -eq 0) { throw "path-pair corpus is empty: $pcRoot" }
-        $pcExcludeFile = if ($ReferenceCorpusExclude) { $ReferenceCorpusExclude } else { Join-Path $here "reference-corpus-exclude.txt" }
+        $pcExcludeFile = if ($ReferenceCorpusExclude) { $ReferenceCorpusExclude } else { Join-Path $rig "reference-corpus-exclude.txt" }
         $pcExcluded = @{}
         if (Test-Path -LiteralPath $pcExcludeFile -PathType Leaf) {
             foreach ($line in (Get-Content $pcExcludeFile | Where-Object { $_ -and -not $_.StartsWith("#") })) {
@@ -1240,7 +1286,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     $vpRows = @()
 
     if ($VpPairs) {
-        if (-not $VpPairsList) { $VpPairsList = Join-Path $here "vp-pairs.txt" }
+        if (-not $VpPairsList) { $VpPairsList = Join-Path $rig "vp-pairs.txt" }
         $vpLines = @(Get-Content $VpPairsList | Where-Object { $_ -and -not $_.StartsWith("#") })
         if ($vpLines.Count -eq 0) { throw "vp-pairs list is empty: $VpPairsList" }
         $vpIdentical = 0; $vpSkippedPath = 0
@@ -1249,7 +1295,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             $rel = $fields[0].Trim()
             $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
             if (-not (Row-AppliesToPath $fields 2)) { $vpSkippedPath++; continue }
-            $src = Join-Path $repoRoot $rel
+            $src = Resolve-StageTreePath -RepoRoot $repoRoot -CorpusRoot $corpusRoot -Rel $rel
             if (-not (Test-Path $src)) { throw "vp-pairs: shader not found: $rel" }
             $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
             if ($vpSeen.ContainsKey($name)) {
@@ -1280,7 +1326,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
 
     if ($VpCorpus) {
         if (-not $VpCorpusDir) {
-            $VpCorpusDir = if ($ReferenceCorpusDir) { $ReferenceCorpusDir } else { Join-Path $repoRoot "build\shader-corpus" }
+            $VpCorpusDir = $corpusRoot
         }
         if (-not (Test-Path -LiteralPath $VpCorpusDir -PathType Container)) { throw "vp corpus root not a directory: $VpCorpusDir" }
         $vcRoot = (Resolve-Path -LiteralPath $VpCorpusDir).Path.TrimEnd('\')
@@ -1291,7 +1337,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
                 -not ($r.StartsWith('build/') -or $r.Contains('/_work/') -or $r.StartsWith('_work/'))
             } | Sort-Object FullName)
         if ($vcFiles.Count -eq 0) { throw "vp corpus is empty: $vcRoot" }
-        $vcExcludeFile = if ($ReferenceCorpusExclude) { $ReferenceCorpusExclude } else { Join-Path $here "reference-corpus-exclude.txt" }
+        $vcExcludeFile = if ($ReferenceCorpusExclude) { $ReferenceCorpusExclude } else { Join-Path $rig "reference-corpus-exclude.txt" }
         $vcExcluded = @{}
         if (Test-Path -LiteralPath $vcExcludeFile -PathType Leaf) {
             foreach ($line in (Get-Content $vcExcludeFile | Where-Object { $_ -and -not $_.StartsWith("#") })) {
@@ -1346,16 +1392,16 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     if ($VpPathPairs) {
         # Candidates: the curated list (every row, whatever its path column -
         # the sweep compiles both paths itself) plus the VP corpus dir.
-        if (-not $VpPairsList) { $VpPairsList = Join-Path $here "vp-pairs.txt" }
+        if (-not $VpPairsList) { $VpPairsList = Join-Path $rig "vp-pairs.txt" }
         if (-not $VpCorpusDir) {
-            $VpCorpusDir = if ($ReferenceCorpusDir) { $ReferenceCorpusDir } else { Join-Path $repoRoot "build\shader-corpus" }
+            $VpCorpusDir = $corpusRoot
         }
         $vppCands = @()
         foreach ($line in @(Get-Content $VpPairsList | Where-Object { $_ -and -not $_.StartsWith("#") })) {
             $fields = $line.Split("|")
             $rel = $fields[0].Trim()
             $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
-            $src = Join-Path $repoRoot $rel
+            $src = Resolve-StageTreePath -RepoRoot $repoRoot -CorpusRoot $corpusRoot -Rel $rel
             if (-not (Test-Path $src)) { throw "vp-pairs: shader not found: $rel" }
             $vppCands += @{ src = $src; rel = $rel; set = $set }
         }
@@ -1455,7 +1501,7 @@ if ($containerMetricRows.Count -gt 0) {
 } else {
     Write-Host "SDIFF-METRICS|compared=0|instruction_mismatches=0|register_mismatches=0|both_mismatches=0|worse_instructions=0|better_instructions=0|worse_registers=0|better_registers=0|pixel_proof_candidates=0|pixel_proof_rows=0"
 }
-$metricsGate = Write-ContainerMetricsGateReport @($containerMetricRows) (Join-Path $here "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly
+$metricsGate = Write-ContainerMetricsGateReport @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly
 if ($metricsGate.ShouldFail) {
     throw "container metrics gate failed: $($metricsGate.Summary.BaselineRegressions) baseline regression(s)"
 }
