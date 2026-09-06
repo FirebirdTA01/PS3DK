@@ -2443,12 +2443,16 @@ private:
             // whose own lowering failed must still fall through to the
             // refusal below, or this turns a dropped computation into a
             // partial value.
+            // Constants live in the IR value table, not the instruction
+            // result set. They are initialized bases with lanes to preserve.
+            const bool constantBase = dynamic_cast<const IRConstant*>(
+                entry_.getValue(inst.operands[0])) != nullptr;
             const bool nothingToCopy =
                 isOutputParam(inst.operands[0]) ||
-                (!program_.valueToSource.count(inst.operands[0]) &&
+                (!constantBase && !program_.valueToSource.count(inst.operands[0]) &&
                  !definedValues_.count(inst.operands[0]));
             if (!nothingToCopy) {
-                if (!program_.valueToSource.count(inst.operands[0]))
+                if (!constantBase && !program_.valueToSource.count(inst.operands[0]))
                     return;
                 const int baseReg = define(inst.result);
                 program_.valueToVReg[inst.result] = baseReg;
@@ -5955,8 +5959,17 @@ private:
             // (Found by the expansion's alias guard: four corpus
             // shaders folded a SelPred to the output and shipped a
             // TEMP(-1) destination encode at 9e7e84d.)
+            // A partial final writer of a composed vector cannot stand in
+            // for the whole value either: widening just that writer drops
+            // earlier lanes and broadcasts its scalar source over them.
+            const bool partialMultiwriter = producer.dst.writemask != outMask &&
+                std::count_if(program_.instrs.begin(), program_.instrs.end(),
+                    [&](const VInstr& vi) {
+                        return !vi.dst.none && !vi.dst.output &&
+                               vi.dst.index == regIt->second;
+                    }) > 1;
             if (!producer.dst.output && producer.dst.index == regIt->second &&
-                producer.op != VOp::SelPred) {
+                producer.op != VOp::SelPred && !partialMultiwriter) {
                 producer.dst.output = true;
                 producer.dst.index = outIndex;
                 producer.dst.phys = -1;
