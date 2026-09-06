@@ -47,7 +47,7 @@ assert_row classicube fetch-run-only 5 5 0 3 2
 assert_row crystalct-psl1ght vendor-eligible 14 6 0 7 7
 assert_row rsxgl vendor-eligible 10 10 0 5 5
 assert_row libretro-common-shaders fetch-run-only 577 572 577 0 0
-assert_row ogre-cg-samples vendor-eligible 41 41 41 0 0
+assert_row ogre-cg-samples fetch-run-only 41 41 41 0 0
 assert_row ogre-examples excluded 4 3 4 0 0
 assert_row shader-tut excluded 0 0 0 0 0
 

@@ -155,13 +155,13 @@ REPO[ogre-cg-samples]="https://github.com/OGRECave/ogre.git"
 REF[ogre-cg-samples]="d491e96bfe7bb57effcc57521bed4fd55fa7cfe3"
 PATHS[ogre-cg-samples]="Samples/Media/materials/programs"
 LICENSE[ogre-cg-samples]="MIT"
-USAGE[ogre-cg-samples]="vendor-eligible"
+USAGE[ogre-cg-samples]="fetch-run-only"
 TRACKED[ogre-cg-samples]=41
 DISTINCT[ogre-cg-samples]=41
 CG[ogre-cg-samples]=41
 VCG[ogre-cg-samples]=0
 FCG[ogre-cg-samples]=0
-NOTES[ogre-cg-samples]="MIT-repo-LICENSE-Torus-Knot;hand-named-entries;vendoring-awaits-director-word"
+NOTES[ogre-cg-samples]="MIT-repo-LICENSE-Torus-Knot;hand-named-entries;kept-local-by-project-policy;no-vendoring"
 
 NAME[ogre-examples]="ogre-examples"
 REPO[ogre-examples]="https://github.com/qknight/ogre-examples.git"
