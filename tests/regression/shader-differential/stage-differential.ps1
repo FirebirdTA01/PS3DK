@@ -760,7 +760,11 @@ if ($ReferenceCompiler) {
         @("sd_depth_blind",    "depth_blind"),
         @("sd_depth_plain",    "depth_plain"),
         @("sd_depthonly_ctrl", "depthonly_ctrl"),
-        @("sd_depthonly_twin", "depthonly_twin")
+        @("sd_depthonly_twin", "depthonly_twin"),
+        @("sd_h0_nodepth",      "h0_nodepth"),
+        @("sd_h0_nodepth_twin", "h0_nodepth_twin"),
+        @("sd_h0_r1known",      "h0_r1known"),
+        @("sd_h0_r1known_twin", "h0_r1known_twin")
     )
     $outputControlFailed = @()
     foreach ($pair in $outputControlSources) {
@@ -782,7 +786,44 @@ if ($ReferenceCompiler) {
         "B|control-depthonly-identical|depthonly_ident|controls/depthonly_ctrl.fpo|controls/depthonly_ctrl.fpo|0",
         "B|control-depthonly-mismatch|depthonly_off|controls/depthonly_ctrl.fpo|controls/depthonly_twin.fpo|0"
     )
-    Write-Host "stager: output controls compiled (10 proving rows: MRT dense/sparse/skip, depth with colour, depth-only); placed ahead of the first corpus row when the manifest is written"
+    # INSTRUMENT ROWS, not proving rows: they gate nothing, they ASK a
+    # question the declarations cannot answer (t_96daf53b).  Both sides of
+    # each pair are reference-compiled, and what they share is the CONTAINER
+    # difference, not a source one: outputFromH0 plus the output
+    # instruction's register and precision bits, and nothing else - three
+    # bytes of 208 for the nodepth pair, two of 272 for r1known.  (In source
+    # terms only nodepth is a one-token pair, out half4 against out float4;
+    # r1known's H0 side also carries an explicit (half4) cast on its store.
+    # The container difference is the invariant worth stating.)  That flag is what decides which control word the SDK builds
+    # (the values live in cell/gcm/gcm_fp_control.h, never repeated here -
+    # they have already moved once), so these two rows are the pixel-side
+    # regression guard on that word.
+    #
+    # They exist because the SDK bound a half output with the depth-export
+    # bit set until 2026-09-06, inherited from PSL1GHT: a program declaring
+    # NO depth exported whatever its R1.z held.  Neither side declares depth,
+    # so the judge cannot derive the question from the declarations - a BIND
+    # defect writes a surface the container never named - and the rows opt in
+    # with judge=z, expecting IDENTICAL.
+    #
+    # h0_r1known carries the number: r1 stays live to the last instruction
+    # with R1.z = t.z * 0.5 + 0.375, and sd_pos_allch drives TEXCOORD0.z =
+    # 0.1 + 0.5v, so an export that fires reads Z24(row) = 7163085 +
+    # 65536 * row - measured exact for rows 0..18 and one Z24 unit lower
+    # from row 19 on, last row 11291852.  That ramp is what a regression
+    # looks like.  h0_nodepth never writes R1 at all and answers the weaker
+    # question - did the bit fire - without depending on that model of R1.
+    #
+    # They ride in the SAME insertion as the ten because Add-ProvingControls
+    # places the set before the first row whose role does not start with
+    # "control-": appended separately they would be found FIRST, the set
+    # would land after them, and they would be withheld as depth-unvalidated
+    # by their own name.
+    $h0Rows = @(
+        "B|control-h0-nodepth|h0_nodepth|controls/h0_nodepth.fpo|controls/h0_nodepth_twin.fpo|0|judge=z",
+        "B|control-h0-r1known|h0_r1known|controls/h0_r1known.fpo|controls/h0_r1known_twin.fpo|0|judge=z"
+    )
+    Write-Host "stager: output controls compiled (10 proving rows: MRT dense/sparse/skip, depth with colour, depth-only; plus 2 H0 instrument rows judging z); placed ahead of the first corpus row when the manifest is written"
 
     # -ReferencePairs - (a dash, the manifest's own "none") stages no
     # curated list: the list is tied to the DEFAULT lowering path (a
@@ -1567,7 +1608,7 @@ if ($metricsGate.ShouldFail) {
 # the manifest is refused if the set is incomplete, duplicated or out of
 # order - the guest's gates could not open and every MRT/depth row would be
 # withheld.  Refusing here says so before a boot is wasted.
-if ($provingRows) { $manifest = Add-ProvingControls $manifest $provingRows }
+if ($provingRows) { $manifest = Add-ProvingControls $manifest ($provingRows + $h0Rows) }
 $controlProblems = Get-ControlManifestProblems $manifest
 if ($controlProblems.Count -gt 0) {
     throw "manifest: proving controls invalid - $($controlProblems -join '; ')"

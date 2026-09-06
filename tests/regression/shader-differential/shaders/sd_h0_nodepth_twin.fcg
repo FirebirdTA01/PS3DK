@@ -1,0 +1,13 @@
+// control-h0-nodepth twin (t_96daf53b): sd_h0_nodepth.fcg with the ONE token
+// changed - out float4 instead of out half4.  Its container clears
+// outputFromH0 and its last instruction writes the full-precision output
+// register where the H0 side writes the half one, so the SDK builds a
+// different control word for it (the values and their provenance live in
+// cell/gcm/gcm_fp_control.h, not here).  That is what makes the pair an
+// experiment on the bind rather than on the compiler: both sides are
+// reference-compiled, and this side is the expectation the other is judged
+// against - the vertex program's own Z on every pixel.
+void main(float4 t : TEXCOORD0, out float4 o : COLOR)
+{
+    o = t;
+}

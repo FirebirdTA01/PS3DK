@@ -1,0 +1,35 @@
+// control-h0-r1known (t_96daf53b): the H0 shape whose R1.z is known.
+//
+// sd_h0_nodepth.fcg answers "did the bit fire"; this one answers "with what",
+// so that a moved zeta is a NUMBER and not an adjective.  The reference emits
+//
+//   MOVR r0, f[TEX0]
+//   MADR r1, r0, {0.5,0.125,0.25,0.375}.x, {0.5,0.125,0.25,0.375}.yzwx
+//   MADR_D4 r0, r1, r1, r0
+//   ADDR o[COLH], r0, r1
+//
+// with r1 live to the last instruction, so R1.z = t.z * 0.5 + 0.375 at every
+// pixel.  sd_pos_allch.vcg drives TEXCOORD0 = (u, v, 0.1 + 0.5v, 0.92 - u), so
+// R1.z = 0.425 + 0.25v and, at 64x64 pixel centres, a depth export that fires
+// writes Z24(row) = 7163085 + 65536 * row - one distinct value per row, an
+// exact 65536 step because 0.25 / 64 * 2^24 is exact.  MEASURED when the bind
+// was wrong: that ramp, exact for rows 0..18 and one Z24 unit lower from row
+// 19 on (last row 11291852, a single 65535 step) - rounding on an interpolated
+// fp32 value, not a second mechanism.  A ramp is a signature no coincidence
+// produces, which is why this row is worth its cost.
+//
+// Its expectation with a correct bind is IDENTICAL: flat at the vertex
+// program's Z, like its twin.  The ramp above is what a REGRESSION looks like,
+// recorded so the next reader recognises it rather than rediscovering it.
+//
+// Its pair is tighter than sd_h0_nodepth's: because the body is fp32 on both
+// sides, the two containers differ in the outputFromH0 flag and ONE ucode bit,
+// the destination register of the last instruction - two bytes of 272.  Note
+// also, for its own sake, that the reference is content to write a half output
+// from an fp32 ADDR, so the flag does not require an all-half body.
+void main(float4 t : TEXCOORD0, out half4 o : COLOR)
+{
+    float4 f = t * 0.5 + float4(0.125, 0.25, 0.375, 0.5);
+    float4 g = f * f + t;
+    o = (half4)(g * 0.25 + f);
+}

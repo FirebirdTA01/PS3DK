@@ -1,0 +1,36 @@
+// control-h0-nodepth (t_96daf53b): half colour output, NO depth declared.
+//
+// A half colour output is the only thing that makes the reference set the
+// container's outputFromH0 flag - measured 2026-09-06: half ARITHMETIC does
+// not (the float twin compiled with the reference's fast-precision switch
+// turns its whole body half and still writes its colour to the full-precision
+// output with the flag clear), so the flag tracks the DECLARED OUTPUT TYPE and
+// nothing else.  This shader and sd_h0_nodepth_twin.fcg differ in one source
+// token and, in the container, in that flag plus the output instruction's
+// register and precision bits: three bytes of 208, measured.
+//
+// WHAT THIS ROW IS FOR.  The flag decides which control word the SDK binds
+// (cell/gcm/gcm_fp_control.h, which carries the bit facts and their
+// provenance - no value is repeated here, because those values have already
+// moved once and a fixture that hard-codes them would have to be edited every
+// time the runtime learns something).  Until 2026-09-06 the SDK bound a half
+// output with the depth-export bit set, inherited from PSL1GHT, so a program
+// declaring NO depth exported whatever its R1.z held.  This pair caught that,
+// and it stays in the manifest to catch it coming back.
+//
+// It declares no depth on either side, so the judge cannot derive the question
+// from the declarations - a BIND defect writes a surface the container never
+// named.  The row therefore opts in with judge=z, and its expectation is
+// IDENTICAL: the zeta must read the vertex program's own Z on both sides.
+// A moved zeta here means the bind is exporting depth nobody asked for.
+//
+// registerCount is 2 and R1 is NEVER WRITTEN by this program, so a stray
+// export reads a lane it never touched - deliberately, because this row's job
+// is "did the bit fire at all" without depending on any model of what R1 holds.
+// sd_h0_r1known.fcg is the companion that carries the number.  Both sides are
+// reference-compiled: the variable under test is the bind, so a compiler
+// difference would confound it.
+void main(float4 t : TEXCOORD0, out half4 o : COLOR)
+{
+    o = t;
+}

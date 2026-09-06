@@ -1,0 +1,21 @@
+// control-h0-r1known twin (t_96daf53b): sd_h0_r1known.fcg at fp32 output.
+//
+// TWO source differences, not one - the declaration (out float4 against out
+// half4) and the explicit (half4) cast the H0 side needs on its store.
+// sd_h0_nodepth's pair is the one-token pair; this one is not, and the claim
+// that matters is not about the sources anyway: the two CONTAINERS differ in
+// the outputFromH0 flag and in the destination register of the last
+// instruction, two bytes of 272, because the body is fp32 on both sides.  The
+// arithmetic, the registers and the live R1 are identical.
+//
+// So the SDK builds a different control word for this side and nothing else
+// about the two programs differs.  Its zeta is the expectation the H0 side is
+// judged against: the vertex program's own Z on all 4096 pixels.  If the H0
+// side ever reads the ramp described in sd_h0_r1known.fcg instead, the bind
+// has started exporting depth for a program that declares none.
+void main(float4 t : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 f = t * 0.5 + float4(0.125, 0.25, 0.375, 0.5);
+    float4 g = f * f + t;
+    o = g * 0.25 + f;
+}
