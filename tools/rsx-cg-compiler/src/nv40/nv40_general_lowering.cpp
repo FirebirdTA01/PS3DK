@@ -1920,6 +1920,14 @@ private:
         }
         sel.srcs[1] = resolve(trueVal);
         sel.srcs[2] = resolve(falseVal);
+        // Merged returns are fragment-only (see the early profile guard).
+        // Output 1 means DEPTH while COLOR1+ is explicitly refused.
+        if (outIndex == 1) {
+            for (size_t i : {size_t{1}, size_t{2}}) {
+                const uint8_t lane = sel.srcs[i].swizzle[0];
+                sel.srcs[i].swizzle = {lane, lane, lane, lane};
+            }
+        }
         program_.instrs.push_back(sel);
 
         VInstr out;
@@ -5802,6 +5810,10 @@ private:
         }
         if (regIt != program_.valueToVReg.end() &&
             useCount_[value] == 1 &&
+            // A scalar depth producer computes in x.  Merely changing its
+            // destination mask to z can also change which source lanes it
+            // reads; keep the explicit scalar-to-depth export below.
+            !(profile_ == GeneralProfile::Fragment && outIndex == 1) &&
             !program_.instrs.empty()) {
             VInstr& producer = program_.instrs.back();
             // SelPred is excluded from the store fold: on FP the
@@ -5834,6 +5846,12 @@ private:
         vi.dst.userClipOutput = isClipOutput;
         vi.dst.userClipIndex = inst.semanticIndex;
         vi.srcs[0] = resolve(value);
+        if (profile_ == GeneralProfile::Fragment && outIndex == 1) {
+            const uint8_t lane = vi.srcs[0].swizzle[0];
+            vi.srcs[0].swizzle = {lane, lane, lane, lane};
+            program_.instrs.push_back(vi);
+            return;
+        }
         int sourceWidth = -1;
         for (const auto& p : entry_.parameters) {
             if (p.valueId == value) {
@@ -5872,6 +5890,10 @@ private:
     int storeOutputMask(const IRInstruction& inst, IRValueID value) const
     {
         const std::string sem = toUpper(inst.semanticName);
+        // Fragment depth is exported through R1.z even though the source
+        // language declares a scalar.  Keep this shared with merged returns.
+        if (profile_ == GeneralProfile::Fragment && fragmentOutputIndex(sem) == 1)
+            return 0x4;
         for (const auto& p : entry_.parameters) {
             if (p.storage != StorageQualifier::Out &&
                 p.storage != StorageQualifier::InOut)
@@ -7141,6 +7163,12 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     UcodeOutput out;
     FpAssembler asm_;
     FpAttributes attrs;
+    // COLOR1+ is refused, so an emitted output-1 write is a DEPTH export.
+    attrs.depthReplace = std::any_of(program.instrs.begin(), program.instrs.end(),
+        [](const VInstr& vi) {
+            return !vi.dst.none && vi.dst.output && vi.dst.index == 1 &&
+                   (vi.dst.writemask & 0x4);
+        }) ? 1 : 0;
     populateReferencedParams(entry, attrs);
     seedFpEmbeddedUniforms(entry, program, attrs);
     std::unordered_map<int, VOp> tempProducerOp;
