@@ -1,0 +1,8 @@
+// t_fe384b97: `static inline` on a function - both qualifiers together, in
+// either order - must also compile and match the control.  `static` is the
+// storage class the loop keeps; `inline` is swallowed.
+static inline float4 scaled(float4 v) { return v * 2.0; }
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = scaled(c);
+}

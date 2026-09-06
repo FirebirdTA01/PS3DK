@@ -133,6 +133,9 @@ void Lexer::initKeywords() {
     keywords["inout"] = TokenType::KW_INOUT;
     keywords["const"] = TokenType::KW_CONST;
     keywords["static"] = TokenType::KW_STATIC;
+    // `inline` is a hint the hardware compiler accepts and ignores; the
+    // parser drops it on a function and refuses it on anything else.
+    keywords["inline"] = TokenType::KW_INLINE;
     keywords["extern"] = TokenType::KW_EXTERN;
     keywords["packed"] = TokenType::KW_PACKED;
     keywords["row_major"] = TokenType::KW_ROW_MAJOR;

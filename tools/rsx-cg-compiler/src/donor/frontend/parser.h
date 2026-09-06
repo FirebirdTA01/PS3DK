@@ -118,7 +118,10 @@ private:
     std::vector<std::unique_ptr<ParamDecl>> parseParameterList();
 
     // Storage qualifiers and attributes
-    StorageQualifier parseStorageQualifier();
+    // `sawInline`, when given, reports whether an `inline` keyword was
+    // swallowed; `inline` has no storage meaning, so the caller rules on
+    // whether it is legal (a function ignores it, anything else refuses).
+    StorageQualifier parseStorageQualifier(bool* sawInline = nullptr);
     Semantic parseSemantic();
     VitaAttributes parseVitaAttributes();
     void skipGccAttributes();  // Skip __attribute__((...)) clauses

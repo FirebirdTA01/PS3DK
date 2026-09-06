@@ -887,8 +887,11 @@ std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration()
 {
     SourceLocation loc = currentLocation();
 
-    // Parse storage qualifiers
-    StorageQualifier storage = parseStorageQualifier();
+    // Parse storage qualifiers.  `inline` is legal only on a function, so
+    // capture whether it was present and rule on it once the '(' or its
+    // absence has said which this declaration is.
+    bool declaredInline = false;
+    StorageQualifier storage = parseStorageQualifier(&declaredInline);
 
     // Parse Vita attributes (can appear before type)
     VitaAttributes vitaAttrs = parseVitaAttributes();
@@ -918,6 +921,14 @@ std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration()
     }
     else
     {
+        // `inline float k = 0;` is not a function; the reference refuses it
+        // (C1005 "inline modifier only for functions"), so a program that
+        // relied on it being ignored must not silently compile here.
+        if (declaredInline)
+        {
+            error("inline modifier only for functions");
+            return nullptr;
+        }
         // Could be multiple variable declarations: int a, b, c;
         auto vars = parseMultipleVariableDeclarations(loc, type, name, storage);
         if (vars.size() == 1)
@@ -1039,7 +1050,11 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
 {
     SourceLocation loc = currentLocation();
 
-    // Parse storage qualifier (in/out/inout/uniform)
+    // Parse storage qualifier (in/out/inout/uniform).  `inline` carries no
+    // meaning on a parameter and the reference accepts it in any position
+    // ("inline out", "out inline"), so it is swallowed before and after the
+    // storage word.
+    while (match(TokenType::KW_INLINE)) {}
     StorageQualifier storage = StorageQualifier::In;  // default
     if (match(TokenType::KW_IN))
         storage = StorageQualifier::In;
@@ -1051,6 +1066,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
         storage = StorageQualifier::Uniform;
     else if (match(TokenType::KW_CONST))
         storage = StorageQualifier::Const;
+    while (match(TokenType::KW_INLINE)) {}
 
     // Parse type
     auto type = parseType();
@@ -1121,33 +1137,52 @@ std::vector<std::unique_ptr<ParamDecl>> Parser::parseParameterList()
     return params;
 }
 
-StorageQualifier Parser::parseStorageQualifier()
+StorageQualifier Parser::parseStorageQualifier(bool* sawInline)
 {
-    if (match(TokenType::KW_UNIFORM))
-        return StorageQualifier::Uniform;
-    if (match(TokenType::KW_IN))
-        return StorageQualifier::In;
-    if (match(TokenType::KW_OUT))
-        return StorageQualifier::Out;
-    if (match(TokenType::KW_INOUT))
-        return StorageQualifier::InOut;
-    if (match(TokenType::KW_CONST))
-    {
-        // Handle "const static" combination
+    // `inline` carries no storage meaning and may sit before or after the
+    // storage class ("inline float f", "static inline float f").  It is
+    // swallowed on either side of the storage decision and reported through
+    // `sawInline`; whether it is legal here at all is the caller's to decide.
+    // The storage decision itself is the exact first-match form this had
+    // before inline was added, so a fold order cannot change which of two
+    // orthogonal qualifiers the enum keeps (uniform vs const in
+    // `uniform const`).
+    bool inlineSeen = false;
+    auto swallowInline = [&]() {
+        while (match(TokenType::KW_INLINE))
+            inlineSeen = true;
+    };
+    swallowInline();
+    StorageQualifier result = [&]() -> StorageQualifier {
+        if (match(TokenType::KW_UNIFORM))
+            return StorageQualifier::Uniform;
+        if (match(TokenType::KW_IN))
+            return StorageQualifier::In;
+        if (match(TokenType::KW_OUT))
+            return StorageQualifier::Out;
+        if (match(TokenType::KW_INOUT))
+            return StorageQualifier::InOut;
+        if (match(TokenType::KW_CONST))
+        {
+            // Handle "const static" combination
+            if (match(TokenType::KW_STATIC))
+                return StorageQualifier::Static;  // static const -> treat as static
+            return StorageQualifier::Const;
+        }
         if (match(TokenType::KW_STATIC))
-            return StorageQualifier::Static;  // static const -> treat as static
-        return StorageQualifier::Const;
-    }
-    if (match(TokenType::KW_STATIC))
-    {
-        // Handle "static const" combination
-        match(TokenType::KW_CONST);  // consume const if present
-        return StorageQualifier::Static;
-    }
-    if (match(TokenType::KW_EXTERN))
-        return StorageQualifier::Extern;
-
-    return StorageQualifier::None;
+        {
+            // Handle "static const" combination
+            match(TokenType::KW_CONST);  // consume const if present
+            return StorageQualifier::Static;
+        }
+        if (match(TokenType::KW_EXTERN))
+            return StorageQualifier::Extern;
+        return StorageQualifier::None;
+    }();
+    swallowInline();
+    if (sawInline)
+        *sawInline = inlineSeen;
+    return result;
 }
 
 Semantic Parser::parseSemantic()
@@ -1574,7 +1609,8 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
     bool hasStorageQualifier = false;
     size_t savedPos = current;
 
-    StorageQualifier storage = parseStorageQualifier();
+    bool declaredInline = false;
+    StorageQualifier storage = parseStorageQualifier(&declaredInline);
     if (storage != StorageQualifier::None)
     {
         hasStorageQualifier = true;
@@ -1593,6 +1629,14 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
         auto type = parseType();
         if (type && check(TokenType::IDENTIFIER))
         {
+            // `inline` is legal only on a function, and there are no local
+            // functions here - a local declaration carrying it is the same
+            // C1005 the file-scope path refuses.
+            if (declaredInline)
+            {
+                error("inline modifier only for functions");
+                return nullptr;
+            }
             std::string name = advance().lexeme;
             auto vars = parseMultipleVariableDeclarations(loc, type, name, storage);
 

@@ -38,7 +38,7 @@ enum class TokenType
 
 	// Storage qualifiers
 	KW_UNIFORM, KW_IN, KW_OUT, KW_INOUT,
-	KW_CONST, KW_STATIC, KW_EXTERN,
+	KW_CONST, KW_STATIC, KW_EXTERN, KW_INLINE,
 	KW_PACKED, // Cg packed arrays
 	KW_ROW_MAJOR, KW_COLUMN_MAJOR, // Matrix layout
 

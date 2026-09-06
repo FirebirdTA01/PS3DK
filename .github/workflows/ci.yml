@@ -192,6 +192,8 @@ jobs:
         run: bash tests/shader-compiler/return-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the parser makes progress on an unknown type name
         run: bash tests/shader-compiler/parser-progress-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test inline is a no-op function qualifier and refused elsewhere
+        run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros
         run: bash tests/shader-compiler/macro-hideset-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test included headers share the unit's macros and conditional stack

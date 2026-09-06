@@ -1,0 +1,7 @@
+// Control for fp_inline_function_f: the same program without `inline`.  The
+// inline form must produce this exact container.
+float4 scaled(float4 v) { return v * 2.0; }
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = scaled(c);
+}
