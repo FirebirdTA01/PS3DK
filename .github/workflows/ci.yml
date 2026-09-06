@@ -227,6 +227,8 @@ jobs:
         run: bash tests/shader-compiler/scheduler-partial-writer-raw-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler predicated select output aliases
         run: bash tests/shader-compiler/selpred-output-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test predicated-select emission refuses invalid allocations
+        run: bash tests/shader-compiler/selpred-emission-guard-test.sh
       - name: Test rsx-cg-compiler short-circuit root comparisons
         run: bash tests/shader-compiler/short-root-comparison-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler step register collisions
