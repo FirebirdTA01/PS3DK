@@ -382,3 +382,13 @@ tools/rsx-cg-compiler/tests/shaders/accumulation/mad_n08_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/accumulation/mad_n40_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/accumulation/step_n08_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/accumulation/step_n40_f.cg|auto|general
+
+# Faceforward and composed-lane correctness witnesses, pixel-judged 2026-09-06.
+build/shader-corpus/ps3-open-graphics-toolkit/files/testsuite/shaders/test_49_faceforward.fcg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_faceforward2_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_faceforward3_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_faceforward4_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_faceforward_zero_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_faceforward_lane_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_faceforward1_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_insert_constant_base_f.cg|auto|general

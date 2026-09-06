@@ -44,3 +44,7 @@ samples/toolchain/hello-psgl-spudraw-triangle/shaders/vpshader.vcg|auto|general
 samples/toolchain/hello-psgl-textured-quad/shaders/vpshader.vcg|auto|general
 samples/toolchain/hello-psgl-triangle/shaders/vpshader.vcg|auto|general
 sdk/libdbgfont/shaders/vpshader_dbgfont.vcg|auto|general
+
+# Faceforward and composed-lane correctness witnesses, pixel-judged 2026-09-06.
+tools/rsx-cg-compiler/tests/shaders/vp_insert_alpha_first_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_insert_alpha_last_v.cg|auto|general
