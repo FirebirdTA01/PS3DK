@@ -551,6 +551,8 @@ private:
     // never engage the flatten and lower exactly as before.
     bool flattened_ = false;
     std::unordered_map<IRValueID, const IRInstruction*> defMap_;
+    std::unordered_set<IRValueID> comparisonSqrtValues_;
+    std::unordered_set<IRValueID> comparisonLogicalValues_;
 
     struct MergedReturnSelect
     {
@@ -640,8 +642,22 @@ private:
         return false;
     }
 
-    bool hasUnsafeShortCircuitSqrt(
-        const std::vector<const IRBasicBlock*>& blocks) const
+    bool isComparisonValue(IRValueID value) const
+    {
+        const auto it = defMap_.find(value);
+        if (it == defMap_.end() || !it->second) return false;
+        switch (it->second->op) {
+        case IROp::CmpLt: case IROp::CmpLe: case IROp::CmpGt:
+        case IROp::CmpGe: case IROp::CmpEq: case IROp::CmpNe:
+            return it->second->resultType.componentCount() == 1;
+        default: return false;
+        }
+    }
+
+    // Admits comparison-only roots for lowering; this is not a speculative
+    // predicate. Returns true when a remaining unsafe root requires refusal.
+    bool classifyShortCircuitRoots(
+        const std::vector<const IRBasicBlock*>& blocks)
     {
         for (const IRBasicBlock* b : blocks) {
             for (const auto& instPtr : b->instructions) {
@@ -651,8 +667,37 @@ private:
                     instPtr->operands.size() < 2)
                     continue;
                 std::unordered_set<IRValueID> seen;
-                if (valueDependsOnUnsafeSqrt(instPtr->operands[1], seen))
+                if (!valueDependsOnUnsafeSqrt(instPtr->operands[1], seen))
+                    continue;
+                // The measured eager shape combines COMPARISONS, never a
+                // potentially non-finite root value multiplied by zero.
+                if (profile_ != GeneralProfile::Fragment ||
+                    !isComparisonValue(instPtr->operands[0]) ||
+                    !isComparisonValue(instPtr->operands[1]))
                     return true;
+                std::vector<IRValueID> pending{instPtr->operands[1]};
+                seen.clear();
+                while (!pending.empty()) {
+                    const IRValueID value = pending.back();
+                    pending.pop_back();
+                    if (!seen.insert(value).second) continue;
+                    const auto it = defMap_.find(value);
+                    if (it == defMap_.end() || !it->second) continue;
+                    const IRInstruction& def = *it->second;
+                    std::unordered_set<IRValueID> dependent;
+                    // The top comparison may be shared: every consumer gets
+                    // its already-normalized boolean, never the raw root.
+                    if (value != instPtr->operands[1] &&
+                        valueDependsOnUnsafeSqrt(value, dependent) &&
+                        useCount_[value] != 1)
+                        return true; // Do not change an ordinary shared use.
+                    if (def.op == IROp::Sqrt && def.shortCircuitRhs) {
+                        if (def.resultType.componentCount() != 1) return true;
+                        comparisonSqrtValues_.insert(value);
+                    }
+                    pending.insert(pending.end(), def.operands.begin(), def.operands.end());
+                }
+                comparisonLogicalValues_.insert(instPtr->result);
             }
         }
         return false;
@@ -693,7 +738,7 @@ private:
                 if (instPtr && instPtr->result != InvalidIRValue)
                     defMap_[instPtr->result] = instPtr.get();
 
-        if (hasUnsafeShortCircuitSqrt(blocks)) {
+        if (classifyShortCircuitRoots(blocks)) {
             return refuse(
                 "short-circuit logical RHS with sqrt/rsqrt is not "
                 "lowered; refusing rather than eagerly evaluating it");
@@ -2217,9 +2262,17 @@ private:
         // AND is multiplication, OR is max, NOT is 1-x.  All
         // component-wise, so bvec operands work unchanged.
         case IROp::LogicalAnd:
+            if (comparisonLogicalValues_.count(inst.result)) {
+                lowerComparisonLogical(inst, false);
+                return;
+            }
             lowerBinary(inst, VOp::Mul);
             return;
         case IROp::LogicalOr:
+            if (comparisonLogicalValues_.count(inst.result)) {
+                lowerComparisonLogical(inst, true);
+                return;
+            }
             lowerBinary(inst, VOp::Max);
             return;
         case IROp::LogicalNot:
@@ -3055,6 +3108,20 @@ private:
         return -1;
     }
 
+    void lowerComparisonLogical(const IRInstruction& inst, bool isOr)
+    {
+        VInstr vi;
+        vi.op = isOr ? VOp::Add : VOp::Mul;
+        vi.dst.index = define(inst.result);
+        vi.dst.writemask = 1;
+        vi.srcs[0] = resolve(inst.operands[0]);
+        vi.srcs[1] = resolve(inst.operands[1]);
+        vi.sat = isOr;
+        vi.fpPrecisionOverride = NVFX_FP_PRECISION_FX12;
+        vi.ccUpdate = true; // Existing CC dependency edges include this def.
+        program_.instrs.push_back(vi);
+    }
+
     void lowerLogicalNot(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
@@ -3262,6 +3329,21 @@ private:
         if (profile_ != GeneralProfile::Fragment) {
             program_.diagnostics.push_back(
                 "nv40-general: VP scalar intrinsic lowering deferred");
+            return;
+        }
+        if (comparisonSqrtValues_.count(inst.result)) {
+            // Coexists with the established RCP(RSQ) lowering below: only
+            // newly admitted comparison-only RHS roots use the measured
+            // DIVSQR(abs(d), d) form. Shared arithmetic uses are not retargeted.
+            VInstr root;
+            root.op = VOp::DivSqrt;
+            root.dst.index = define(inst.result);
+            root.dst.writemask = 1;
+            root.srcs[0] = resolve(inst.operands[0]);
+            root.srcs[1] = root.srcs[0];
+            root.srcs[0].abs = true;
+            root.srcs[0].neg = false; // abs(d), including a negated source view.
+            program_.instrs.push_back(root);
             return;
         }
         const int mask = componentMask(inst.resultType);

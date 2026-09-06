@@ -1,0 +1,9 @@
+// CSE shares the root first emitted inside the RHS with an arithmetic use.
+// This bounded lowering does not retarget an ordinary multiply consumer
+// from RCP(RSQ) to the comparison-only DIVSQR shape; keep a named refusal.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    float d = a.x + 0.25;
+    bool k = d >= 0 && sqrt(d) > a.y;
+    float ordinary = sqrt(d) * a.z;
+    return float4(ordinary, k, 0.25, 1);
+}

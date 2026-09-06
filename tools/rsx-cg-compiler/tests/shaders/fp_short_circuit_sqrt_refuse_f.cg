@@ -1,10 +1,6 @@
-// A logical && RHS that contains sqrt() must not be eagerly evaluated.
-//
-// Cg's short-circuit semantics skip the RHS when x < 0 here.  The current
-// flattened fragment path has no way to preserve that control dependence:
-// evaluating sqrt(x) unconditionally lets a non-finite value contaminate
-// the LogicalAnd/Select chain.  Refuse this shape until short-circuit
-// lowering is implemented honestly.
+// Historical refusal witness, now accepted. The measured reference emits
+// an unconditional DIVSQR, compares its result, and combines two booleans.
+// The comparison, rather than the root value, feeds the logical multiply.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)
 {
     float x = c.x - 0.5;

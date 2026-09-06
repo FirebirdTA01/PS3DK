@@ -392,3 +392,11 @@ tools/rsx-cg-compiler/tests/shaders/fp_faceforward_zero_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_faceforward_lane_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_faceforward1_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_insert_constant_base_f.cg|auto|general
+
+# Short-root comparison correctness: AND, OR, zero, rsqrt and CC/discard ordering.
+build/shader-corpus/ps3-open-graphics-toolkit/files/testsuite/shaders/test_74_shadow_map_pcf.fcg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_and_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_or_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_zero_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_short_rsqrt_and_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_discard_f.cg|auto|general

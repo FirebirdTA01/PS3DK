@@ -80,13 +80,9 @@ rc=0
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx --emit-container "$out" "$short_circuit_src"
 ) >"$log" 2>&1 || rc=$?
-[[ "$rc" -ne 0 ]] ||
-    fail "short-circuit sqrt compiled; flattened && would eagerly evaluate the RHS"
-[[ ! -e "$out" ]] ||
-    fail "short-circuit sqrt left a container behind after refusal"
-grep -q "short-circuit" "$log" || {
+[[ "$rc" -eq 0 && -s "$out" ]] || {
     tail -n 20 "$log" >&2
-    fail "short-circuit sqrt refused for a reason other than unsafe eager RHS evaluation"
+    fail "short-circuit sqrt comparison did not compile; reference uses an eager root then boolean comparison"
 }
 
 printf 'static-loop-unroll-test: ok\n'

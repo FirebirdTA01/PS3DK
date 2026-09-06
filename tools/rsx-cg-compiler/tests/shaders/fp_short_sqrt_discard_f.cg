@@ -1,0 +1,9 @@
+// Pixel comparison checks CC ordering between the logical combinator and
+// adjacent discard predicates; merely finding their opcodes is insufficient.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    if (a.z < 0.25) discard;
+    float d = a.x * 2 - 1;
+    bool k = d >= 0 && sqrt(d) > a.y;
+    if (a.w < 0.25) discard;
+    return k ? float4(1,0.25,0.75,1) : float4(0.25,0.5,0.25,1);
+}
