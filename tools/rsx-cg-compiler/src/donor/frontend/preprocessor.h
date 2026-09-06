@@ -9,15 +9,24 @@ struct MacroDefinition
 	std::string name;
 	std::vector<std::string> parameters; // empty if not function-like
 	std::vector<Token> replacementList;
-	bool isFunctionLike;
-	bool isVariadic;
+	bool isFunctionLike = false;
+	bool isVariadic = false; // read by the expander for EVERY function-like
+	                         // macro, but processDefine set it only when a
+	                         // variadic tail was present - an uninitialized
+	                         // read that decided arity from stack garbage and
+	                         // gave one build's binary a different answer than
+	                         // another's on the same source (t_53363b4b).
 };
 
 struct ConditionalState
 {
-	bool active; // Current branch is active
-	bool hasElse; // Already seen else
-	bool everActive; // Any branch has been active
+	// In-class defaults on every bool: today each is assigned at both
+	// construction sites, but that is a property of the writers, not the
+	// type, and a single missing assignment would be another indeterminate
+	// read like MacroDefinition::isVariadic was (t_53363b4b).
+	bool active = false; // Current branch is active
+	bool hasElse = false; // Already seen else
+	bool everActive = false; // Any branch has been active
 };
 
 class Preprocessor
@@ -50,6 +59,7 @@ private:
 	std::vector<std::string> includePaths;
 	std::unordered_map<std::string, MacroDefinition> macros;
 	std::stack<ConditionalState> conditionalStack;
+	int includeDepth = 0; // >0 while processing an #include'd file
 	std::set<std::string> includedFiles;
 	std::set<std::string> includeGuards; // For #pragma once
 	std::string currentProcessingFile;

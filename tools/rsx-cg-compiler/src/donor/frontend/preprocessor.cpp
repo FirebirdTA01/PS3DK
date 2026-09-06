@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <regex>
 #include <algorithm>
+#include <deque>
+#include <iterator>
+#include <set>
 #include <iostream>
 
 Preprocessor::Preprocessor()
@@ -130,10 +133,19 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 		lineNum++;
 	}
 
-	// Check for unclosed conditionals
-	if(!conditionalStack.empty())
+	// ONE CONDITIONAL STACK PER TRANSLATION UNIT, not per file.  The
+	// reference lets an included file end inside an open #if: the block
+	// simply continues in the includer, whose next #else/#endif binds to
+	// it, and an open block at the end of the whole unit is closed
+	// silently.  Only a block still SKIPPING at the end of the unit draws
+	// a warning, because it swallowed everything after it - the entry
+	// included - and the parser's refusal that follows would otherwise be
+	// unexplained.  Refusing here instead was wrong twice over: libretro's
+	// compat_macros.inc never closes its include guard and every shader in
+	// that corpus includes it (t_d594ccd9).
+	if (includeDepth == 0 && !conditionalStack.empty() && !conditionalStack.top().active)
 	{
-		throw std::runtime_error("Unterminated #if/#ifdef block in file " + filename);
+		std::cerr << filename << ": warning: unmatched #if - the rest of the unit was skipped\n";
 	}
 
 	return output;
@@ -304,9 +316,37 @@ void Preprocessor::processInclude(const std::string& directive, std::string& out
 			output += "#line 1 \"" + filepath + "\"\n";
 		}
 
-		// Recursively process the included file
-		Preprocessor subProcessor = *this; // Copy current state
-		std::string processedContent = subProcessor.process(fileContent, filepath);
+		// Process the included file IN THIS OBJECT.  It used to run in a
+		// copy, which threw away everything the header did to the state:
+		// every macro a header defined was invisible to the file that
+		// included it, and a conditional left open at the header's end
+		// was an error rather than a block that continues in the includer
+		// (t_d594ccd9).  Only the current-file name is per file; the
+		// macro table, the conditional stack and the include set are the
+		// unit's.
+		// process() rebinds __FILE__ to the file it is given, so the
+		// includer's binding is saved here and put back on return - the
+		// text after the #include is the includer's again, whatever the
+		// header said its name was.  __LINE__ needs nothing: it is rebound
+		// on every line.
+		const std::string savedFile = currentProcessingFile;
+		const MacroDefinition savedFileMacro = macros["__FILE__"];
+		includeDepth++;
+		std::string processedContent;
+		try
+		{
+			processedContent = process(fileContent, filepath);
+		}
+		catch (...)
+		{
+			includeDepth--;
+			currentProcessingFile = savedFile;
+			macros["__FILE__"] = savedFileMacro;
+			throw;
+		}
+		includeDepth--;
+		currentProcessingFile = savedFile;
+		macros["__FILE__"] = savedFileMacro;
 		output += processedContent;
 
 		if(!noLineMarkers)
@@ -314,11 +354,6 @@ void Preprocessor::processInclude(const std::string& directive, std::string& out
 			output += "#line " + std::to_string(lineNum + 1) + " \"" + currentFile + "\"\n";
 		}
 
-		// Merge included files
-		for(const auto& incFile : subProcessor.getIncludedFiles())
-		{
-			includedFiles.insert(incFile);
-		}
 	}
 	else
 	{
@@ -897,300 +932,266 @@ static bool needsSpaceBefore(TokenType prevType, TokenType currType)
 	return true;
 }
 
-// Expand macros; only rewrite the line when we actually substitute something
+// Expand macros in one line of text.
+//
+// This is the standard hide-set algorithm (Prosser): every token carries the
+// set of macro names that must NOT be expanded at it.  A macro's replacement
+// inherits the invoking token's hide set plus the macro's own name, so a
+// macro that names itself - `#define dot(x,y) saturate(dot(x,y))`, the
+// "NVIDIA fix" idiom in the libretro corpus - expands exactly once, and a
+// mutual cycle (`#define A B` / `#define B A`) stops when the name comes
+// round again.  The text-based fixpoint loop this replaced re-tokenised the
+// whole line after every substitution and so could not remember what had
+// already been expanded: on either shape it never terminated (t_53363b4b).
+// The reference accepts both shapes; a preprocessor that spins cannot be
+// worked around at all.
+namespace {
+
+struct HsToken
+{
+	Token tok;
+	std::set<std::string> hs;
+};
+
+using HsTokens = std::vector<HsToken>;
+
+// Re-lex a spelling produced by token pasting into tokens carrying `hs`.
+void lexInto(const std::string& text, const std::set<std::string>& hs, HsTokens& out)
+{
+	Lexer partLexer(text);
+	for (const Token& t : partLexer.tokenize())
+	{
+		if (t.type != TokenType::END_OF_FILE)
+			out.push_back({ t, hs });
+	}
+}
+
+std::string spell(const HsTokens& toks)
+{
+	std::string text;
+	TokenType prev = TokenType::END_OF_FILE;
+	for (const HsToken& t : toks)
+	{
+		if (needsSpaceBefore(prev, t.tok.type) && !text.empty())
+			text += ' ';
+		text += t.tok.lexeme;
+		prev = t.tok.type;
+	}
+	return text;
+}
+
+class HideSetExpander
+{
+public:
+	explicit HideSetExpander(const std::unordered_map<std::string, MacroDefinition>& macros)
+		: macros_(macros) {}
+
+	HsTokens expand(std::deque<HsToken> in)
+	{
+		HsTokens out;
+		while (!in.empty())
+		{
+			HsToken t = std::move(in.front());
+			in.pop_front();
+			if (t.tok.type != TokenType::IDENTIFIER || t.hs.count(t.tok.lexeme))
+			{
+				out.push_back(std::move(t));
+				continue;
+			}
+			auto it = macros_.find(t.tok.lexeme);
+			if (it == macros_.end())
+			{
+				out.push_back(std::move(t));
+				continue;
+			}
+			const MacroDefinition& macro = it->second;
+
+			if (!macro.isFunctionLike)
+			{
+				std::set<std::string> hs = t.hs;
+				hs.insert(macro.name);
+				HsTokens rep = substitute(macro, {}, {}, hs);
+				in.insert(in.begin(), rep.begin(), rep.end());
+				continue;
+			}
+
+			// Function-like: only an invocation - the name followed by '(' -
+			// expands; a bare name is an ordinary identifier.
+			if (in.empty() || in.front().tok.type != TokenType::LPAREN)
+			{
+				out.push_back(std::move(t));
+				continue;
+			}
+			in.pop_front(); // '('
+			std::vector<HsTokens> args;
+			HsTokens cur;
+			int depth = 1;
+			std::set<std::string> rparenHs;
+			while (!in.empty())
+			{
+				HsToken a = std::move(in.front());
+				in.pop_front();
+				if (a.tok.type == TokenType::LPAREN)
+				{
+					depth++;
+				}
+				else if (a.tok.type == TokenType::RPAREN)
+				{
+					depth--;
+					if (depth == 0)
+					{
+						rparenHs = a.hs;
+						break;
+					}
+				}
+				else if (a.tok.type == TokenType::COMMA && depth == 1)
+				{
+					args.push_back(std::move(cur));
+					cur.clear();
+					continue;
+				}
+				cur.push_back(std::move(a));
+			}
+			if (!cur.empty())
+				args.push_back(std::move(cur));
+
+			if ((!macro.isVariadic && args.size() != macro.parameters.size()) ||
+				(macro.isVariadic && args.size() < (macro.parameters.empty() ? 0 : macro.parameters.size() - 1)))
+			{
+				throw std::runtime_error("Macro " + macro.name + " called with incorrect number of arguments");
+			}
+
+			// Arguments are fully expanded before substitution (except where
+			// they meet ##, which pastes their raw spelling).
+			std::vector<HsTokens> expandedArgs;
+			expandedArgs.reserve(args.size());
+			for (const HsTokens& arg : args)
+				expandedArgs.push_back(expand(std::deque<HsToken>(arg.begin(), arg.end())));
+
+			std::set<std::string> hs;
+			std::set_intersection(t.hs.begin(), t.hs.end(), rparenHs.begin(), rparenHs.end(),
+			                      std::inserter(hs, hs.begin()));
+			hs.insert(macro.name);
+			HsTokens rep = substitute(macro, args, expandedArgs, hs);
+			in.insert(in.begin(), rep.begin(), rep.end());
+		}
+		return out;
+	}
+
+private:
+	const std::unordered_map<std::string, MacroDefinition>& macros_;
+
+	// The argument bound to `name`, raw or expanded; a variadic tail is the
+	// remaining arguments joined with commas.  Returns false for a
+	// non-parameter identifier.
+	bool argFor(const MacroDefinition& macro, const std::vector<HsTokens>& args,
+	            const std::string& name, HsTokens& out) const
+	{
+		for (size_t p = 0; p < macro.parameters.size(); ++p)
+		{
+			if (macro.parameters[p] != name)
+				continue;
+			out.clear();
+			if (macro.isVariadic && p == macro.parameters.size() - 1)
+			{
+				for (size_t v = p; v < args.size(); ++v)
+				{
+					if (v > p)
+						out.push_back({ Token{ TokenType::COMMA, ",", 0, 0, "" }, {} });
+					out.insert(out.end(), args[v].begin(), args[v].end());
+				}
+			}
+			else if (p < args.size())
+			{
+				out = args[p];
+			}
+			return true;
+		}
+		return false;
+	}
+
+	HsTokens substitute(const MacroDefinition& macro, const std::vector<HsTokens>& rawArgs,
+	                    const std::vector<HsTokens>& expandedArgs, const std::set<std::string>& hs) const
+	{
+		const std::vector<Token>& rl = macro.replacementList;
+		HsTokens out;
+		for (size_t ri = 0; ri < rl.size(); ++ri)
+		{
+			const Token& rt = rl[ri];
+			if (rt.type == TokenType::OP_HASH_HASH)
+			{
+				// Token pasting: the spelling before ## joined to the spelling
+				// after it, then re-lexed.  A run of adjacent NUMBER/IDENTIFIER
+				// tokens of alternating kind after ## is one spelling ("2D"
+				// lexes as NUMBER 2 + IDENTIFIER D), as before this rewrite.
+				std::string left;
+				if (!out.empty())
+				{
+					left = out.back().tok.lexeme;
+					out.pop_back();
+				}
+				std::string right;
+				size_t la = ri + 1;
+				TokenType prevKind = TokenType::END_OF_FILE;
+				while (la < rl.size() &&
+				       (rl[la].type == TokenType::NUMBER || rl[la].type == TokenType::IDENTIFIER) &&
+				       (right.empty() || rl[la].type != prevKind))
+				{
+					HsTokens raw;
+					if (rl[la].type == TokenType::IDENTIFIER && argFor(macro, rawArgs, rl[la].lexeme, raw))
+						right += spell(raw);
+					else
+						right += rl[la].lexeme;
+					prevKind = rl[la].type;
+					la++;
+				}
+				lexInto(left + right, hs, out);
+				ri = la - 1;
+				continue;
+			}
+			HsTokens arg;
+			if (rt.type == TokenType::IDENTIFIER && argFor(macro, expandedArgs, rt.lexeme, arg))
+			{
+				// A parameter that is itself the left operand of ## pastes raw.
+				if (ri + 1 < rl.size() && rl[ri + 1].type == TokenType::OP_HASH_HASH)
+					argFor(macro, rawArgs, rt.lexeme, arg);
+				for (HsToken a : arg)
+				{
+					a.hs.insert(hs.begin(), hs.end());
+					out.push_back(std::move(a));
+				}
+				continue;
+			}
+			out.push_back({ rt, hs });
+		}
+		return out;
+	}
+};
+
+} // namespace
+
 std::string Preprocessor::expandMacros(
 	const std::string& text,
 	const std::string& currentFile,
 	int lineNum,
 	int startColumn)
 {
-	std::string result = text;
-
-	bool expandedAny = false;
-	bool progress;
-	do
+	Lexer lexer(text, currentFile, lineNum, startColumn);
+	std::deque<HsToken> in;
+	bool anyMacroName = false;
+	for (const Token& t : lexer.tokenize())
 	{
-		progress = false;
-
-		// Tokenize the current result
-		Lexer lexer(result, currentFile, lineNum, startColumn);
-		std::vector<Token> tokens = lexer.tokenize();
-
-		std::string newResult;
-		size_t i = 0;
-		bool touchedThisPass = false;
-		TokenType prevTokenType = TokenType::END_OF_FILE;
-
-		// Helper lambda to append with proper spacing
-		auto appendToken = [&](const std::string& lexeme, TokenType type) {
-			if (needsSpaceBefore(prevTokenType, type) && !newResult.empty())
-			{
-				newResult += ' ';
-			}
-			newResult += lexeme;
-			prevTokenType = type;
-		};
-
-		while (i < tokens.size())
-		{
-			const Token& token = tokens[i];
-
-			// Skip EOF tokens if present
-			if (token.type == TokenType::END_OF_FILE) { i++; continue; }
-
-			if (token.type == TokenType::IDENTIFIER && macros.find(token.lexeme) != macros.end())
-			{
-				const MacroDefinition& macro = macros[token.lexeme];
-				if (macro.isFunctionLike)
-				{
-					// Function-like macro, expect '('
-					if (i + 1 < tokens.size() && tokens[i + 1].type == TokenType::LPAREN)
-					{
-						i += 2; // Skip macro name and '('
-						std::vector<std::string> args;
-						std::string currentArg;
-						TokenType prevArgTokenType = TokenType::END_OF_FILE;
-						int parenDepth = 1;
-
-						// Helper to append to currentArg with proper spacing
-						auto appendToArg = [&](const std::string& lexeme, TokenType type) {
-							if (needsSpaceBefore(prevArgTokenType, type) && !currentArg.empty())
-							{
-								currentArg += ' ';
-							}
-							currentArg += lexeme;
-							prevArgTokenType = type;
-						};
-
-						while (i < tokens.size() && parenDepth > 0)
-						{
-							const Token& argToken = tokens[i];
-							if (argToken.type == TokenType::LPAREN)
-							{
-								parenDepth++;
-								appendToArg(argToken.lexeme, argToken.type);
-							}
-							else if (argToken.type == TokenType::RPAREN)
-							{
-								parenDepth--;
-								if (parenDepth > 0)
-								{
-									appendToArg(argToken.lexeme, argToken.type);
-								}
-							}
-							else if (argToken.type == TokenType::COMMA && parenDepth == 1)
-							{
-								args.push_back(currentArg);
-								currentArg.clear();
-								prevArgTokenType = TokenType::END_OF_FILE;
-							}
-							else
-							{
-								appendToArg(argToken.lexeme, argToken.type);
-							}
-							i++;
-						}
-						if (!currentArg.empty())
-						{
-							args.push_back(currentArg);
-						}
-						// Arity checks
-						if ((!macro.isVariadic && args.size() != macro.parameters.size()) ||
-							(macro.isVariadic && args.size() < (macro.parameters.empty() ? 0 : macro.parameters.size() - 1)))
-						{
-							throw std::runtime_error("Macro " + macro.name + " called with incorrect number of arguments");
-						}
-						// Map parameters to arguments
-						std::unordered_map<std::string, std::string> paramMap;
-						for (size_t p = 0; p < macro.parameters.size(); ++p)
-						{
-							if (p < args.size())
-							{
-								paramMap[macro.parameters[p]] = args[p];
-							}
-							else if (macro.isVariadic && p == macro.parameters.size() - 1)
-							{
-								std::string variadicArgs;
-								for (size_t v = p; v < args.size(); ++v)
-								{
-									if (v > p) variadicArgs += ",";
-									variadicArgs += args[v];
-								}
-								paramMap[macro.parameters[p]] = variadicArgs;
-							}
-						}
-						// Emit replacement with ## token pasting support
-						// First pass: substitute parameters and build intermediate list
-						// Also combine adjacent NUMBER+IDENTIFIER tokens around ## operators
-						std::vector<std::string> replacementParts;
-						for (size_t ri = 0; ri < macro.replacementList.size(); ++ri)
-						{
-							const Token& repToken = macro.replacementList[ri];
-
-							if (repToken.type == TokenType::OP_HASH_HASH)
-							{
-								// Token pasting operator - mark it for processing
-								replacementParts.push_back("\x01##\x01"); // Special marker
-
-								// Look ahead: combine NUMBER+IDENTIFIER sequence (e.g., "2D" -> "2D")
-								// This handles cases like "SMPTY ## 2D" where 2D is tokenized separately
-								if (ri + 1 < macro.replacementList.size())
-								{
-									std::string combined;
-									size_t lookahead = ri + 1;
-
-									// Collect adjacent NUMBER/IDENTIFIER tokens
-									while (lookahead < macro.replacementList.size())
-									{
-										const Token& nextTok = macro.replacementList[lookahead];
-										if (nextTok.type == TokenType::NUMBER ||
-										    nextTok.type == TokenType::IDENTIFIER)
-										{
-											// Check if it's a parameter
-											if (nextTok.type == TokenType::IDENTIFIER &&
-											    paramMap.find(nextTok.lexeme) != paramMap.end())
-											{
-												combined += paramMap[nextTok.lexeme];
-											}
-											else
-											{
-												combined += nextTok.lexeme;
-											}
-
-											// Check if next token continues the sequence
-											if (lookahead + 1 < macro.replacementList.size())
-											{
-												const Token& afterNext = macro.replacementList[lookahead + 1];
-												if ((afterNext.type == TokenType::NUMBER ||
-												     afterNext.type == TokenType::IDENTIFIER) &&
-												    afterNext.type != macro.replacementList[lookahead].type)
-												{
-													// Different type, continue combining (NUMBER->ID or ID->NUMBER)
-													lookahead++;
-													continue;
-												}
-											}
-											lookahead++;
-											break;
-										}
-										else
-										{
-											break;
-										}
-									}
-
-									if (!combined.empty())
-									{
-										replacementParts.push_back(combined);
-										ri = lookahead - 1; // -1 because loop will increment
-									}
-								}
-							}
-							else if (repToken.type == TokenType::IDENTIFIER &&
-							         paramMap.find(repToken.lexeme) != paramMap.end())
-							{
-								// Parameter substitution
-								replacementParts.push_back(paramMap[repToken.lexeme]);
-							}
-							else
-							{
-								replacementParts.push_back(repToken.lexeme);
-							}
-						}
-
-						// Second pass: process ## operators
-						std::vector<std::string> pastedParts;
-						for (size_t pi = 0; pi < replacementParts.size(); ++pi)
-						{
-							if (replacementParts[pi] == "\x01##\x01")
-							{
-								// Token pasting: concatenate previous and next
-								if (!pastedParts.empty() && pi + 1 < replacementParts.size())
-								{
-									// Get previous part (remove trailing whitespace)
-									std::string prev = pastedParts.back();
-									while (!prev.empty() && (prev.back() == ' ' || prev.back() == '\t'))
-										prev.pop_back();
-									pastedParts.pop_back();
-
-									// Get next part (skip leading whitespace)
-									std::string next = replacementParts[pi + 1];
-									size_t start = 0;
-									while (start < next.size() && (next[start] == ' ' || next[start] == '\t'))
-										start++;
-									next = next.substr(start);
-
-									// Concatenate
-									pastedParts.push_back(prev + next);
-									pi++; // Skip the next part since we consumed it
-								}
-							}
-							else
-							{
-								pastedParts.push_back(replacementParts[pi]);
-							}
-						}
-
-						// Third pass: tokenize and emit with proper spacing
-						for (const auto& part : pastedParts)
-						{
-							Lexer partLexer(part);
-							auto partTokens = partLexer.tokenize();
-							for (const auto& partTok : partTokens)
-							{
-								if (partTok.type != TokenType::END_OF_FILE)
-								{
-									appendToken(partTok.lexeme, partTok.type);
-								}
-							}
-						}
-
-						// We performed a substitution in this pass
-						touchedThisPass = true;
-						progress = true;
-						expandedAny = true;
-						continue;
-					}
-					else
-					{
-						// Not a macro call, just append
-						appendToken(token.lexeme, token.type);
-						i++;
-						continue;
-					}
-				}
-				else
-				{
-					// Object-like macro
-					for (const Token& repToken : macro.replacementList)
-					{
-						appendToken(repToken.lexeme, repToken.type);
-					}
-					touchedThisPass = true;
-					progress = true;
-					expandedAny = true;
-					i++;
-					continue;
-				}
-			}
-
-			// Not a macro, just append
-			appendToken(token.lexeme, token.type);
-			i++;
-		}
-
-		if (!touchedThisPass)
-		{
-			// No substitutions this pass; keep original spacing/text
-			break;
-		}
-
-		// Apply this pass' result and try again
-		result = newResult;
-
-	} while (progress);
-
-	return result;
+		if (t.type == TokenType::END_OF_FILE)
+			continue;
+		if (t.type == TokenType::IDENTIFIER && macros.find(t.lexeme) != macros.end())
+			anyMacroName = true;
+		in.push_back({ t, {} });
+	}
+	// No macro name on the line: keep the original spacing and text.
+	if (!anyMacroName)
+		return text;
+	HideSetExpander expander(macros);
+	return spell(expander.expand(std::move(in)));
 }
 
 // Recursive descent parser for C preprocessor #if expressions.

@@ -1,0 +1,7 @@
+// Control for fp_macro_mutual_cycle_f: the cycle resolves to the plain
+// identifier, so this is the program the reference compiles it to.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float A = 1.0;
+    o = c * A;
+}

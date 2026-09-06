@@ -1,0 +1,11 @@
+// t_d594ccd9 NEGATIVE: the unclosed guard included twice.  The second
+// inclusion's #ifndef is false and nothing ever closes it, so the entry is
+// swallowed.  The reference warns 'unmatched #if' and refuses; we must
+// refuse too (exit 1, no container) and say why - one stack per unit does
+// not mean anything goes.
+#include "include/open_guard.h"
+#include "include/open_guard.h"
+void main(uniform SAMPLER_T t, float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = tex2D(t, c.xy);
+}

@@ -1,0 +1,9 @@
+// t_d594ccd9: the header's open block is never closed at all - not by the
+// header and not by the includer - and the unit ends inside it.  The
+// reference closes it silently (measured, no diagnostic).  Must accept and
+// equal fp_include_macro_control_f.
+#include "include/open_guard.h"
+void main(uniform SAMPLER_T t, float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = tex2D(t, c.xy);
+}
