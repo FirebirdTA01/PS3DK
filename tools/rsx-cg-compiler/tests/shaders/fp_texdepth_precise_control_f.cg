@@ -1,0 +1,7 @@
+// t_0970e943: packed depth decode and its independent expansion.
+uniform float3 _depth_factor_precise = float3(0.003906250465661287, 0.000015258790881489404, 0.00000005960465188081798);
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D image) : COLOR
+{
+    float depth = dot(floor(tex2D(image, uv).xyz * 255.0 + 0.5), _depth_factor_precise);
+    return float4(depth, depth, depth, 1.0);
+}
