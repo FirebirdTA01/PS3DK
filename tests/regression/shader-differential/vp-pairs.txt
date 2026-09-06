@@ -48,3 +48,6 @@ sdk/libdbgfont/shaders/vpshader_dbgfont.vcg|auto|general
 # Faceforward and composed-lane correctness witnesses, pixel-judged 2026-09-06.
 tools/rsx-cg-compiler/tests/shaders/vp_insert_alpha_first_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_insert_alpha_last_v.cg|auto|general
+
+# t_3e342903 consumer half: a float4 literal into mul(M, .) must keep four lanes.
+tools/rsx-cg-compiler/tests/shaders/vp_literal_matrix_mul_v.cg|auto|general
