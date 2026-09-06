@@ -1,6 +1,6 @@
-// t_58e2212c: DIVR is fragment-only in the general lowering until the
-// vertex encoding is measured.  This fixture must refuse by name rather
-// than letting an unmapped VOp reach vpOpcode and silently become MOV.
+// t_b67cf02b: division on the vertex path uses scalar RCP plus vector MUL.
+// The original fragment-only DIVR boundary witness must now compile with
+// those measured vertex opcodes rather than an unmapped opcode or MOV.
 void main(float4 p : POSITION,
           float4 q : TEXCOORD0,
           out float4 o : POSITION)

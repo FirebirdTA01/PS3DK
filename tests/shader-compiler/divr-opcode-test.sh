@@ -7,9 +7,8 @@
 # This test deliberately has two halves:
 #   * fragment fixtures require DIVR, including a saturated DIVR for
 #     scalar variable-edge smoothstep;
-#   * a VP fixture still refuses by name.  The vertex unit's DIV encoding is
-#     unmeasured, so DIVR must not reach VP emission until that path has its
-#     own oracle fixture.
+#   * a VP fixture requires the separately measured scalar RCP/vector MUL
+#     sequence. Fragment DIVR must never reach the vertex emitter.
 #
 # CONTROL: before the DIVR lowering, the positive fragment fixtures compile
 # through RCP/MUL and this test names the missing 0x3A opcode.  The vector
@@ -295,12 +294,20 @@ vp_rc=0
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_vp_rsx "$shaders/vp_divr_guard_v.cg"
+        -p sce_vp_rsx --emit-container "$work/vp_divr_guard_v.vpo" "$shaders/vp_divr_guard_v.cg"
 ) >"$vp_log" 2>&1 || vp_rc=$?
-if [[ "$vp_rc" -eq 0 ]]; then
-    fail "vp_divr_guard_v compiled; DIVR must not reach the unmeasured VP path"
+if [[ "$vp_rc" -ne 0 ]]; then
+    fail "vp_divr_guard_v did not compile through the vertex RCP/MUL path (exit $vp_rc)"
 fi
-grep -Eq 'VP div lowering deferred|unsupported VP VOp' "$vp_log" \
-    || fail "vp_divr_guard_v did not refuse with a VP DIVR/div diagnostic"
+python3 - "$work/vp_divr_guard_v.vpo" <<'PY'
+import pathlib, struct, sys
+b = pathlib.Path(sys.argv[1]).read_bytes()
+size, offset = struct.unpack_from('>II', b, 24)
+if not size or size % 16 or offset + size > len(b):
+    raise SystemExit('FAIL: vertex division container has invalid ucode')
+words = [struct.unpack_from('>4I', b, p) for p in range(offset, offset + size, 16)]
+if sum((w[1] >> 27) & 31 == 2 for w in words) != 1 or sum((w[1] >> 22) & 31 == 2 for w in words) != 1:
+    raise SystemExit('FAIL: vertex division must emit one scalar RCP and one vector MUL')
+PY
 
 printf 'PASS: divr-opcode-test\n'

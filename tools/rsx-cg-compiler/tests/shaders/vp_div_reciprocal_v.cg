@@ -1,0 +1,8 @@
+// t_b67cf02b: vertex division uses scalar RCP then vector MUL.
+// TEXCOORD1 is the witness channel exercised by the VP mismatch control.
+void main(float4 p : POSITION, float4 a : TEXCOORD0, uniform float4 u,
+          out float4 position : POSITION, out float4 value : TEXCOORD1)
+{
+    position = p;
+    value = 1.0 / u.wzyx;
+}
