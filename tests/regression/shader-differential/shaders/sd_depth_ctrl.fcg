@@ -1,0 +1,14 @@
+// control-depth (t_678a4dab): colour plus an exported depth.  Reference-
+// compiled by the stager; the reference writes the root to R1.z and sets the
+// container's depthReplace flag, which is what the judge keys on.
+struct O {
+    float4 color : COLOR;
+    float  depth : DEPTH;
+};
+O main(float4 tc : TEXCOORD0)
+{
+    O o;
+    o.color = float4(tc.x, tc.y, 0.25, 1.0);
+    o.depth = tc.x * 0.5;
+    return o;
+}

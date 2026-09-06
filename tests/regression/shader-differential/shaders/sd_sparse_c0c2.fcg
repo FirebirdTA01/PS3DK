@@ -1,0 +1,17 @@
+// control-sparse-skip (t_678a4dab): COLOR0 and COLOR2 declared, COLOR1 not.
+// Three targets must be BOUND and only c0/c2 JUDGED: R2 (COLOR1's register) is
+// ordinary scratch for this program, so comparing the c1 target would compare
+// two compilers' scratch-allocation choices - a false mismatch when they differ
+// and a false identical when they agree.  Paired with itself: identical, with
+// the diagnostic naming three bound targets and a judged mask of c0,c2.
+struct O {
+    float4 c0 : COLOR0;
+    float4 c2 : COLOR2;
+};
+O main(float4 tc : TEXCOORD0)
+{
+    O o;
+    o.c0 = float4(tc.x, tc.y, 0.5, 1.0);
+    o.c2 = float4(tc.y, tc.x, 0.25, 1.0);
+    return o;
+}

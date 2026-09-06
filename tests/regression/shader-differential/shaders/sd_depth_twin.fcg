@@ -1,0 +1,14 @@
+// control-depth-mismatch twin of sd_depth_ctrl.fcg: colour IDENTICAL, depth
+// differs by a constant (+0.125).  A colour-only judge calls this pair
+// identical; the all-outputs judge must name z and nothing else.
+struct O {
+    float4 color : COLOR;
+    float  depth : DEPTH;
+};
+O main(float4 tc : TEXCOORD0)
+{
+    O o;
+    o.color = float4(tc.x, tc.y, 0.25, 1.0);
+    o.depth = tc.x * 0.5 + 0.125;
+    return o;
+}

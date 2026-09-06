@@ -1,0 +1,9 @@
+// control-depthonly (t_678a4dab): a program whose ONLY output is depth - no
+// colour at all.  The judge must derive its output set from the declarations
+// (this container has no COLORn record and depthReplace set), read nothing but
+// the zeta surface, and count painted pixels on that surface.  Reference-
+// compiled by the stager.
+void main(float4 tc : TEXCOORD0, out float depth : DEPTH)
+{
+    depth = tc.x * 0.5;
+}

@@ -1,0 +1,6 @@
+// The non-exporting half of control-depth-blind: same colour as
+// sd_depth_blind.fcg, no DEPTH output, so the zeta image is the VP's Z.
+void main(float4 tc : TEXCOORD0, out float4 color : COLOR)
+{
+    color = float4(tc.x, tc.y, 0.25, 1.0);
+}

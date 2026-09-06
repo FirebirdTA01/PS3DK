@@ -1,0 +1,7 @@
+// control-sparse twin: identical to sd_sparse_c1.fcg except COLOR1's blue is
+// 0.75 instead of 0.5, so the pair must judge mismatch on c1 alone (delta 63 in
+// 8-bit steps on every pixel) while c0 is neither judged nor reported.
+void main(float4 tc : TEXCOORD0, out float4 c1 : COLOR1)
+{
+    c1 = float4(tc.x, tc.y, 0.75, 1.0);
+}

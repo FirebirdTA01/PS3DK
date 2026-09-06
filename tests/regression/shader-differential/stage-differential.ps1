@@ -181,6 +181,7 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $here "container-metrics.ps1")
 . (Join-Path $here "path-pair-corpus-inputs.ps1")
+. (Join-Path $here "control-manifest.ps1")
 
 # The three roots - see -RepoRoot and -ReferenceCorpusDir, and
 # Resolve-StageRoots in path-pair-corpus-inputs.ps1 for the rules.  $here
@@ -725,6 +726,63 @@ if ($ReferenceCompiler) {
     $manifest += "B|control-discard|discard_band|controls/discard_ctrl.fpo|controls/discard_twin.fpo|0"
     $manifest += "B|control-discard-blind|discard_never|controls/discard_blind.fpo|controls/discard_blind.fpo|0"
     Write-Host "stager: discard controls staged (reference-compiled; kill bands of 16 vs 32 columns, and a KIL that never fires)"
+
+    # Every declared output (t_678a4dab): the guest judges COLOR1..3 and
+    # the exported depth, deriving each side's output set from its
+    # container, and these ten reference-compiled controls are what prove
+    # it can before any row leans on it.  MRT: control-mrt-mismatch
+    # differs from control-mrt-identical's container ONLY in COLOR2;
+    # control-sparse-identical/-mismatch are COLOR1-only programs (two
+    # targets bound, only c1 judged, painted counted on c1);
+    # control-sparse-skip declares COLOR0+COLOR2 (three bound, c1 - scratch
+    # register R2 - not compared).  Depth: control-depth-mismatch differs
+    # from control-depth-identical's ONLY in the exported depth (+0.125);
+    # control-depth-blind pairs an exporter that writes the interpolated Z
+    # back against a container declaring no depth and must read identical;
+    # control-depthonly-identical/-mismatch have NO colour output at all.
+    # A colour-0-only judge calls every one of these pairs identical or
+    # vacuous - exactly the blindness they exist to expose.
+    #
+    # GATE EXISTENCE IS NOT GATE SUCCESS: the guest's MRT and depth gates
+    # start closed and open only when the COMPLETE set has run and passed
+    # ahead of a row, so the rows are collected here and placed before the
+    # first corpus row by Add-ProvingControls at the end; a manifest with a
+    # member missing, duplicated or after the corpus is refused before it
+    # is written (Get-ControlManifestProblems, manifest-controls-test.ps1).
+    $outputControlSources = @(
+        @("sd_mrt_ctrl",       "mrt_ctrl"),
+        @("sd_mrt_twin",       "mrt_twin"),
+        @("sd_sparse_c1",      "sparse_c1"),
+        @("sd_sparse_c1_twin", "sparse_c1_twin"),
+        @("sd_sparse_c0c2",    "sparse_c0c2"),
+        @("sd_depth_ctrl",     "depth_ctrl"),
+        @("sd_depth_twin",     "depth_twin"),
+        @("sd_depth_blind",    "depth_blind"),
+        @("sd_depth_plain",    "depth_plain"),
+        @("sd_depthonly_ctrl", "depthonly_ctrl"),
+        @("sd_depthonly_twin", "depthonly_twin")
+    )
+    $outputControlFailed = @()
+    foreach ($pair in $outputControlSources) {
+        $ok = Compile-Reference (Join-Path $here ("shaders\" + $pair[0] + ".fcg")) (Join-Path $controls ($pair[1] + ".fpo"))
+        if (-not $ok) { $outputControlFailed += $pair[0] }
+    }
+    if ($outputControlFailed.Count -gt 0) {
+        throw "output controls: reference compile failed for $($outputControlFailed -join ', ')"
+    }
+    $provingRows = @(
+        "B|control-mrt-identical|mrt_ident|controls/mrt_ctrl.fpo|controls/mrt_ctrl.fpo|0",
+        "B|control-mrt-mismatch|mrt_c2|controls/mrt_ctrl.fpo|controls/mrt_twin.fpo|0",
+        "B|control-sparse-identical|sparse_c1|controls/sparse_c1.fpo|controls/sparse_c1.fpo|0",
+        "B|control-sparse-mismatch|sparse_c1_blue|controls/sparse_c1.fpo|controls/sparse_c1_twin.fpo|0",
+        "B|control-sparse-skip|sparse_c0c2|controls/sparse_c0c2.fpo|controls/sparse_c0c2.fpo|0",
+        "B|control-depth-identical|depth_ident|controls/depth_ctrl.fpo|controls/depth_ctrl.fpo|0",
+        "B|control-depth-mismatch|depth_off|controls/depth_ctrl.fpo|controls/depth_twin.fpo|0",
+        "B|control-depth-blind|depth_blind|controls/depth_blind.fpo|controls/depth_plain.fpo|0",
+        "B|control-depthonly-identical|depthonly_ident|controls/depthonly_ctrl.fpo|controls/depthonly_ctrl.fpo|0",
+        "B|control-depthonly-mismatch|depthonly_off|controls/depthonly_ctrl.fpo|controls/depthonly_twin.fpo|0"
+    )
+    Write-Host "stager: output controls compiled (10 proving rows: MRT dense/sparse/skip, depth with colour, depth-only); placed ahead of the first corpus row when the manifest is written"
 
     # -ReferencePairs - (a dash, the manifest's own "none") stages no
     # curated list: the list is tied to the DEFAULT lowering path (a
@@ -1504,6 +1562,15 @@ if ($containerMetricRows.Count -gt 0) {
 $metricsGate = Write-ContainerMetricsGateReport @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly
 if ($metricsGate.ShouldFail) {
     throw "container metrics gate failed: $($metricsGate.Summary.BaselineRegressions) baseline regression(s)"
+}
+# The proving controls go ahead of the first corpus row by construction, and
+# the manifest is refused if the set is incomplete, duplicated or out of
+# order - the guest's gates could not open and every MRT/depth row would be
+# withheld.  Refusing here says so before a boot is wasted.
+if ($provingRows) { $manifest = Add-ProvingControls $manifest $provingRows }
+$controlProblems = Get-ControlManifestProblems $manifest
+if ($controlProblems.Count -gt 0) {
+    throw "manifest: proving controls invalid - $($controlProblems -join '; ')"
 }
 Set-Content -LiteralPath (Join-Path $root "manifest.txt") -Value ($manifest -join "`n") -Encoding Ascii
 Write-Host "stager: manifest written ($($manifest.Count) lines) to $root"

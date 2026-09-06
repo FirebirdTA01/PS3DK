@@ -1,0 +1,8 @@
+// control-sparse (t_678a4dab): a program whose ONLY colour output is COLOR1
+// (register R2).  Two targets must be BOUND (targets are positional) but only
+// c1 JUDGED; c0 receives whatever R0 held and is not evidence.  Painted pixels
+// are counted on c1.  Reference-compiled by the stager.
+void main(float4 tc : TEXCOORD0, out float4 c1 : COLOR1)
+{
+    c1 = float4(tc.x, tc.y, 0.5, 1.0);
+}

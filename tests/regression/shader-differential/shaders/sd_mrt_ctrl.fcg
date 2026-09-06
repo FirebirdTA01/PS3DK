@@ -1,0 +1,19 @@
+// control-mrt (t_678a4dab): four colour targets, each carrying a DISTINCT
+// pattern so a per-target readback can tell them apart.  Reference-compiled by
+// the stager.  Measured mapping (2026-09-06): COLOR0->R0, COLOR1->R2,
+// COLOR2->R3, COLOR3->R4; R1 is result.depth and is skipped.
+struct O {
+    float4 c0 : COLOR0;
+    float4 c1 : COLOR1;
+    float4 c2 : COLOR2;
+    float4 c3 : COLOR3;
+};
+O main(float4 tc : TEXCOORD0)
+{
+    O o;
+    o.c0 = float4(tc.x, 0.0, 0.0, 1.0);
+    o.c1 = float4(0.0, tc.y, 0.0, 1.0);
+    o.c2 = float4(tc.x, tc.y, 0.5, 1.0);
+    o.c3 = float4(0.25, 0.5, tc.x, 1.0);
+    return o;
+}

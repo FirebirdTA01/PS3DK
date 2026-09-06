@@ -1,0 +1,15 @@
+// control-depth-blind: declares and exports DEPTH but writes the interpolated
+// window Z back, so the zeta image equals the one a NON-exporting program with
+// the same colour leaves behind.  Paired against sd_depth_plain.fcg the judge
+// must say identical: depth judgement is not merely "declared differs".
+struct O {
+    float4 color : COLOR;
+    float  depth : DEPTH;
+};
+O main(float4 tc : TEXCOORD0, float4 wpos : WPOS)
+{
+    O o;
+    o.color = float4(tc.x, tc.y, 0.25, 1.0);
+    o.depth = wpos.z;
+    return o;
+}

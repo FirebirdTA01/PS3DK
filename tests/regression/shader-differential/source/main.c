@@ -201,6 +201,25 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 
 #define RT_W 64
 #define RT_H 64
+
+/* ---- every declared output (t_678a4dab) ----
+ * A fragment program can write four colour targets and replace depth,
+ * and until this increment the rig read back colour target 0 only: a
+ * wrong depth export survived for as long as the compiler had existed,
+ * and a four-target program would have been judged on one.  Outputs
+ * are indexed 0..3 = COLOR0..3 and 4 = depth (SD_OUT_Z).  Measured
+ * register mapping (reference-compiled fixtures, 2026-09-06):
+ * COLOR0->R0, COLOR1->R2, COLOR2->R3, COLOR3->R4; R1 is result.depth
+ * and is ALSO ordinary scratch whenever depth is not replaced, so an R1
+ * write is never evidence of a depth export in either direction. */
+#define SD_OUT_MAX 5
+#define SD_OUT_Z   4
+/* Whether depth is judged keys on the container's depthReplace flag -
+ * the program header byte at +20, the program offset being the
+ * big-endian word at file offset 20 - never on the parameter table
+ * alone: declaring DEPTH and exporting it are two facts, and last
+ * night's defect was exactly their disagreement. */
+#define DEPTH_CLEAR_MARK 0xFFFFFF00u   /* zeta clear: far plane, stencil 0 */
 /* Readback fill before every transfer.  Two values, alternating per
  * readback: a transfer that never lands leaves the fill behind, and
  * two consecutive fills DIFFER, so it can never satisfy the warm-up's
@@ -222,7 +241,9 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 
 typedef struct {
 	char tier[8];
-	char role[24];
+	char role[48];   /* the parser refuses a longer role: at 24 a truncated
+	                  * "control-sparse-identical" silently became an
+	                  * ordinary row and its gate never opened (measured) */
 	char name[64];
 	char a_path[PATH_MAX_SD];
 	char b_path[PATH_MAX_SD];
@@ -339,23 +360,30 @@ static int make_buffer(display_buffer *b, int id)
 
 /* ---- render-target + draw-env plumbing (readback rig's path) ---- */
 
-static void set_rt_surface(CellGcmContextData *ctx,
-                           u32 color_off, u32 depth_off, u32 pitch,
-                           u16 w, u16 h)
+/* Bind `ntargets` colour targets (1..4, offsets in color_offs) and the
+ * depth surface.  The target enum names the HIGHEST bound target, so a
+ * program that writes COLOR2 needs three targets bound whatever it does
+ * with COLOR1; unbound slots keep the placeholder pitch the readback
+ * rig always carried. */
+static void set_rt_surface_n(CellGcmContextData *ctx,
+                             const u32 *color_offs, int ntargets,
+                             u32 depth_off, u32 pitch, u16 w, u16 h)
 {
+	static const u32 k_targets[4] = {
+		GCM_SURFACE_TARGET_0, GCM_SURFACE_TARGET_MRT1,
+		GCM_SURFACE_TARGET_MRT2, GCM_SURFACE_TARGET_MRT3
+	};
+	if (ntargets < 1) ntargets = 1;
+	if (ntargets > 4) ntargets = 4;
 	CellGcmSurface sf;
 	memset(&sf, 0, sizeof(sf));
 	sf.colorFormat      = GCM_SURFACE_A8R8G8B8;
-	sf.colorTarget      = GCM_SURFACE_TARGET_0;
-	sf.colorLocation[0] = GCM_LOCATION_RSX;
-	sf.colorOffset[0]   = color_off;
-	sf.colorPitch[0]    = pitch;
-	sf.colorLocation[1] = GCM_LOCATION_RSX;
-	sf.colorLocation[2] = GCM_LOCATION_RSX;
-	sf.colorLocation[3] = GCM_LOCATION_RSX;
-	sf.colorPitch[1]    = 64;
-	sf.colorPitch[2]    = 64;
-	sf.colorPitch[3]    = 64;
+	sf.colorTarget      = k_targets[ntargets - 1];
+	for (int i = 0; i < 4; i++) {
+		sf.colorLocation[i] = GCM_LOCATION_RSX;
+		sf.colorOffset[i]   = i < ntargets ? color_offs[i] : 0;
+		sf.colorPitch[i]    = i < ntargets ? pitch : 64;
+	}
 	sf.depthFormat      = GCM_SURFACE_ZETA_Z24S8;
 	sf.depthLocation    = GCM_LOCATION_RSX;
 	sf.depthOffset      = depth_off;
@@ -369,11 +397,38 @@ static void set_rt_surface(CellGcmContextData *ctx,
 	cellGcmSetSurface(ctx, &sf);
 }
 
-static void set_draw_env(CellGcmContextData *ctx, u16 w, u16 h)
+static void set_rt_surface(CellGcmContextData *ctx,
+                           u32 color_off, u32 depth_off, u32 pitch,
+                           u16 w, u16 h)
+{
+	set_rt_surface_n(ctx, &color_off, 1, depth_off, pitch, w, h);
+}
+
+/* Draw environment.  `mrt_targets` is the count of colour targets whose
+ * writes are enabled (1 = colour 0 only, as every row before this
+ * increment); `judge_depth` enables the depth test ALWAYS with depth
+ * writes ON, so a program that replaces depth lands its value and one
+ * that does not leaves the vertex program's interpolated Z - both sides
+ * of a pair draw under the same VP, so the zeta image is comparable
+ * either way.  Depth stays off when not judged: the rows that never
+ * asked for it keep exactly the environment their verdicts were made
+ * under. */
+static void set_draw_env_n(CellGcmContextData *ctx, u16 w, u16 h,
+                           int mrt_targets, int judge_depth)
 {
 	cellGcmSetColorMask(ctx,
 		GCM_COLOR_MASK_R | GCM_COLOR_MASK_G | GCM_COLOR_MASK_B | GCM_COLOR_MASK_A);
-	cellGcmSetColorMaskMrt(ctx, 0);
+	u32 mrt = 0;
+	if (mrt_targets >= 2)
+		mrt |= GCM_COLOR_MASK_MRT1_R | GCM_COLOR_MASK_MRT1_G |
+		       GCM_COLOR_MASK_MRT1_B | GCM_COLOR_MASK_MRT1_A;
+	if (mrt_targets >= 3)
+		mrt |= GCM_COLOR_MASK_MRT2_R | GCM_COLOR_MASK_MRT2_G |
+		       GCM_COLOR_MASK_MRT2_B | GCM_COLOR_MASK_MRT2_A;
+	if (mrt_targets >= 4)
+		mrt |= GCM_COLOR_MASK_MRT3_R | GCM_COLOR_MASK_MRT3_G |
+		       GCM_COLOR_MASK_MRT3_B | GCM_COLOR_MASK_MRT3_A;
+	cellGcmSetColorMaskMrt(ctx, mrt);
 
 	float min = 0.0f, max = 1.0f;
 	float scale[4]  = { w * 0.5f, h * -0.5f, (max - min) * 0.5f, 0.0f };
@@ -381,10 +436,22 @@ static void set_draw_env(CellGcmContextData *ctx, u16 w, u16 h)
 	cellGcmSetViewport(ctx, 0, 0, w, h, min, max, scale, offset);
 	rsxSetScissor(ctx, 0, 0, w, h);
 
-	cellGcmSetDepthTestEnable(ctx, GCM_FALSE);
+	if (judge_depth) {
+		cellGcmSetDepthTestEnable(ctx, GCM_TRUE);
+		cellGcmSetDepthFunc(ctx, GCM_ALWAYS);
+		cellGcmSetDepthMask(ctx, GCM_TRUE);
+	} else {
+		cellGcmSetDepthMask(ctx, GCM_FALSE);
+		cellGcmSetDepthTestEnable(ctx, GCM_FALSE);
+	}
 	cellGcmSetShadeModel(ctx, GCM_SHADE_MODEL_SMOOTH);
 	cellGcmSetCullFaceEnable(ctx, GCM_FALSE);
 	cellGcmSetBlendEnable(ctx, GCM_FALSE);
+}
+
+static void set_draw_env(CellGcmContextData *ctx, u16 w, u16 h)
+{
+	set_draw_env_n(ctx, w, h, 1, 0);
 }
 
 /* ---- shared state ---- */
@@ -904,6 +971,43 @@ static int painted_pixels(const u32 *img, u32 rt_pitch)
 	return n;
 }
 
+/* The same for the zeta surface: anything but the depth clear mark.  With
+ * the depth test ALWAYS and writes on, every pixel a draw covers writes
+ * its Z whether or not the program exports one, so this counts drawn
+ * pixels for a program that paints no colour at all. */
+static int painted_depth(const u32 *img, u32 rt_pitch)
+{
+	int n = 0;
+	for (u32 y = 0; y < RT_H; y++)
+		for (u32 x = 0; x < RT_W; x++) {
+			u32 p = img[y * (rt_pitch / 4u) + x];
+			if (p != DEPTH_CLEAR_MARK)
+				n++;
+		}
+	return n;
+}
+
+/* Painted over the JUDGED outputs: the most pixels any judged colour
+ * target or the judged zeta surface shows drawn.  A depth-only or
+ * COLOR1-only program paints nothing on colour 0, and keying painted on
+ * colour 0 alone made such a program vacuous by construction (codex,
+ * 2026-09-06). */
+static int painted_over(u32 *const *saves, int judge_mask, int judge_depth, u32 rt_pitch)
+{
+	int best = 0;
+	for (int o = 0; o < 4; o++) {
+		if (!(judge_mask & (1 << o)))
+			continue;
+		int n = painted_pixels(saves[o], rt_pitch);
+		if (n > best) best = n;
+	}
+	if (judge_depth) {
+		int n = painted_depth(saves[SD_OUT_Z], rt_pitch);
+		if (n > best) best = n;
+	}
+	return best;
+}
+
 /* Poison detector.  A malformed fragment program can leave the RSX (or
  * the emulator's model of it) in a state where every later draw paints
  * nothing - measured: one general-path corpus container blanked the 61
@@ -952,6 +1056,10 @@ typedef struct {
 	u32 params;   /* container parameter count */
 	int r0_written; /* any instruction writes register 0 (the colour output) */
 	u32 kil;      /* KIL instructions (opcode 0x12): the discards that reached the ucode */
+	u32 written_regs; /* bit r set: some instruction writes register r (r < 32)
+	                   * with a non-empty mask.  R2/R3/R4 are COLOR1..3's
+	                   * registers; a declared target its ucode never writes
+	                   * is named, not judged on leftovers. */
 } sd_cost;
 
 static void measure_cost(void *container, u32 bytes, sd_cost *out)
@@ -964,6 +1072,7 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 	out->insn = out->consts = 0;
 	out->r0_written = 0;
 	out->kil = 0;
+	out->written_regs = 0;
 	const u32 *w = (const u32 *)uc;
 	u32 n = usz / 16, i = 0;
 	while (i < n) {
@@ -982,6 +1091,16 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 			w0 = (w0 << 16) | (w0 >> 16);
 			if (((w0 >> 1) & 63u) == 0u && ((w0 >> 9) & 0xFu) != 0u)
 				out->r0_written = 1;
+			/* Every register with a non-empty mask, for the per-target
+			 * declared-but-never-written check.  An fp16 destination (bit
+			 * 7) names H registers, two per R slot; H2/H3 alias R1 and so
+			 * on, and the colour targets are full-precision R2/R3/R4, so an
+			 * H write to the pair is recorded under its R slot. */
+			if (((w0 >> 9) & 0xFu) != 0u && !(w0 & (1u << 30))) {
+				u32 reg = (w0 >> 1) & 63u;
+				if (w0 & (1u << 7)) reg >>= 1;
+				if (reg < 32u) out->written_regs |= 1u << reg;
+			}
 			/* Opcode at bits 24..29 of the swapped word; 0x12 is KIL.  A
 			 * discard the compiler dropped is a KIL that is not here; a
 			 * KIL that never fires is one the pixels cannot show - the
@@ -1010,63 +1129,107 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
  * or -6 when the side painted but never repeated a frame (unstable).
  * Shared by the fragment path (render_side) and the vertex path
  * (render_vp_side) so both face the identical warm-up policy. */
+/* The outputs one side of a fragment pair draws and reads back:
+ * `targets` colour targets (1..4, offsets in color_offs, judged in
+ * order COLOR0..), and depth when `depth` is set (zeta offset).  The
+ * saves are indexed like SD_OUT_*: 0..3 colour, 4 depth; a slot not
+ * selected is left untouched. */
+typedef struct {
+	int targets;      /* colour targets BOUND: one past the highest declared index */
+	int judge_mask;   /* colour targets JUDGED (read back, compared): bit i = COLORi */
+	int depth;        /* the zeta surface is judged */
+	u32 color_offs[4];
+	u32 depth_off;
+} sd_outsel;
+
+static int draw_readback_n(CellGcmContextData *ctx, const sd_outsel *sel,
+                           u32 rt_pitch, u32 *const *saves, int *warmup_draws);
+
 static int draw_readback(CellGcmContextData *ctx, u32 rt_off, u32 rt_pitch,
                          u32 *save, int *warmup_draws)
 {
-	/* Warm-up retries against RPCS3's async shader compiler (see the
-	 * readback rig).  A draw counts as landed only when two CONSECUTIVE
-	 * readbacks are byte-identical AND painted: the interim program the
-	 * emulator hands a never-seen shader on its first draw can paint
-	 * nothing (the common case) or ALMOST everything (measured: 4042
-	 * and 3968 of 4096 on two general-path containers, accepted by the
-	 * previous any-pixel rule and reported as a compiler defect for an
-	 * hour).  A blank interim never qualifies; a real frame costs one
-	 * confirming draw.  A shader that legitimately paints nothing burns
-	 * the budget and is judged from the final image anyway - slow,
-	 * never wrong, and both sides of a pair face the identical policy. */
+	sd_outsel sel;
+	memset(&sel, 0, sizeof(sel));
+	sel.targets = 1;
+	sel.judge_mask = 1;
+	sel.color_offs[0] = rt_off;
+	u32 *saves[SD_OUT_MAX] = { save, NULL, NULL, NULL, NULL };
+	return draw_readback_n(ctx, &sel, rt_pitch, saves, warmup_draws);
+}
+
+/* Multi-output form of the warm-up loop below.  One draw per try, then
+ * every selected output is read back; the frame is "landed" only when
+ * ALL of them repeat the previous try byte for byte - a target that
+ * kept changing while colour 0 held still would otherwise be judged
+ * from whichever try happened to be last.  Painted-ness is the largest
+ * painted count over EVERY selected output, colour or depth, so a
+ * depth-only or COLOR1-only side that paints nothing on colour 0 still
+ * lands; a colour-0-only selection reduces to the old policy exactly. */
+static int draw_readback_n(CellGcmContextData *ctx, const sd_outsel *sel,
+                           u32 rt_pitch, u32 *const *saves, int *warmup_draws)
+{
 	int tries;
 	int have_prev = 0;
 	int stable = 0;
-	int ever_painted = 0;   /* any draw painted, not just the last one */
+	int ever_painted = 0;
+	const size_t bytes = (size_t)rt_pitch * RT_H;
 	for (tries = 1; tries <= 10; tries++) {
 		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
 		wait_rsx_idle(ctx);
-		/* Refilled per readback, parity from the try count: before
-		 * this the fill happened once per side, so a transfer that
-		 * never landed on try N showed try N-1's frame, identical by
-		 * construction, and passed the two-frames rule. */
-		fill_readback(rt_pitch, tries);
-		transfer_rt_to_main(ctx, rt_off, rt_pitch);
-		int painted = painted_pixels(g_readback, rt_pitch);
+		int painted = 0;
+		int all_same = have_prev;
+		for (int o = 0; o < SD_OUT_MAX; o++) {
+			u32 off;
+			if (o < 4) {
+				if (!(sel->judge_mask & (1 << o))) continue;
+				off = sel->color_offs[o];
+			} else {
+				if (!sel->depth) continue;
+				off = sel->depth_off;
+			}
+			fill_readback(rt_pitch, tries);
+			transfer_rt_to_main(ctx, off, rt_pitch);
+			/* Painted = drawn on ANY judged output, so a depth-only or
+			 * COLOR1-only program is not vacuous by construction. */
+			int pp = (o == SD_OUT_Z) ? painted_depth(g_readback, rt_pitch)
+			                         : painted_pixels(g_readback, rt_pitch);
+			if (pp > painted) painted = pp;
+			if (all_same && memcmp(saves[o], g_readback, bytes) != 0)
+				all_same = 0;
+			memcpy(saves[o], g_readback, bytes);
+		}
 		ever_painted |= painted > 0;
-		if (painted > 0 && have_prev &&
-		    memcmp(save, g_readback, (size_t)rt_pitch * RT_H) == 0) {
+		if (painted > 0 && all_same) {
 			stable = 1;
 			break;
 		}
-		memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
 		have_prev = painted > 0;
 		if (!have_prev)
 			usleep(200000);
 	}
 	*warmup_draws = tries;
-	/* Painted frames that never agreed twice in a row: the shader's
-	 * output varies between draws, which is the signature of reading
-	 * uninitialised state - a lane nobody wrote, a register holding two
-	 * values.  Reported as its own status (unstable-a/b), never folded
-	 * into vacuous or into a plain verdict: it is the most specific
-	 * thing the rig can say about a shader (review question on the
-	 * two-readback warm-up).  A shader that paints nothing burns the
-	 * budget without ever being "painted" and stays on the vacuous path.
-	 * Keyed on whether the side EVER painted, not on its last frame: a
-	 * side that paints, never repeats, and ends the budget on a blank
-	 * frame is unstable, not vacuous (review finding). */
 	if (!stable && ever_painted)
 		return -6;
-
-	memcpy(save, g_readback, (size_t)rt_pitch * RT_H);
 	return 0;
 }
+
+/* Warm-up policy, stated once for draw_readback_n above: retries
+ * against RPCS3's async shader compiler (see the readback rig).  A draw
+ * counts as landed only when two CONSECUTIVE readbacks are byte-identical
+ * AND painted: the interim program the emulator hands a never-seen shader
+ * on its first draw can paint nothing (the common case) or ALMOST
+ * everything (measured: 4042 and 3968 of 4096 on two general-path
+ * containers, accepted by the previous any-pixel rule and reported as a
+ * compiler defect for an hour).  A blank interim never qualifies; a real
+ * frame costs one confirming draw.  A shader that legitimately paints
+ * nothing burns the budget and is judged from the final image anyway -
+ * slow, never wrong, and both sides of a pair face the identical policy.
+ * The readback fill is refreshed per output per try, parity from the try
+ * count, so a transfer that never lands cannot repeat a frame.  Painted
+ * frames that never agreed twice in a row are reported as unstable-a/b,
+ * never folded into vacuous or a plain verdict: it is the most specific
+ * thing the rig can say about a shader.  Keyed on whether the side EVER
+ * painted, not on its last frame (review finding). */
 
 /* ---- one side of a pair: bind, draw (with warm-up), read back ---- */
 
@@ -1080,11 +1243,34 @@ static int draw_readback(CellGcmContextData *ctx, u32 rt_off, u32 rt_pitch,
  * synthesise; -6 if the side painted but no two consecutive readbacks
  * agreed within the warm-up budget (unstable).  The caller reports which side.  Sampler checks come
  * BEFORE any draw so a withheld verdict costs nothing. */
+static int render_side_n(CellGcmContextData *ctx, void *container,
+                         const char *uniform_set,
+                         int textures_ok, int have_tex_control,
+                         const sd_outsel *sel, u32 rt_pitch,
+                         u32 *const *saves, int *warmup_draws);
+
 static int render_side(CellGcmContextData *ctx, void *container,
                        const char *uniform_set,
                        int textures_ok, int have_tex_control,
                        u32 rt_off, u32 rt_depth_off, u32 rt_pitch,
                        u32 *save, int *warmup_draws)
+{
+	sd_outsel sel;
+	memset(&sel, 0, sizeof(sel));
+	sel.targets = 1;
+	sel.judge_mask = 1;
+	sel.color_offs[0] = rt_off;
+	sel.depth_off = rt_depth_off;
+	u32 *saves[SD_OUT_MAX] = { save, NULL, NULL, NULL, NULL };
+	return render_side_n(ctx, container, uniform_set, textures_ok,
+	                     have_tex_control, &sel, rt_pitch, saves, warmup_draws);
+}
+
+static int render_side_n(CellGcmContextData *ctx, void *container,
+                         const char *uniform_set,
+                         int textures_ok, int have_tex_control,
+                         const sd_outsel *sel, u32 rt_pitch,
+                         u32 *const *saves, int *warmup_draws)
 {
 	CGprogram fpo = (CGprogram)container;
 	cellGcmCgInitProgram(fpo);
@@ -1129,13 +1315,27 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	 * loop keys on. */
 	fill_readback(rt_pitch, 0);
 
-	set_rt_surface(ctx, rt_off, rt_depth_off, rt_pitch, RT_W, RT_H);
-	set_draw_env(ctx, RT_W, RT_H);
-
-	cellGcmSetClearColor(ctx, GPU_CLEAR_MARK);
-	cellGcmSetClearSurface(ctx,
-		GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
-	wait_rsx_idle(ctx);
+	/* Every selected colour target is cleared to the mark ON ITS OWN
+	 * (bound as the single target 0), so a target the program never
+	 * writes reads as unpainted rather than as whatever the previous
+	 * row left there; then the full surface is bound and the zeta
+	 * surface cleared to its mark for the same reason. */
+	for (int t = 0; t < sel->targets; t++) {
+		set_rt_surface(ctx, sel->color_offs[t], sel->depth_off, rt_pitch, RT_W, RT_H);
+		set_draw_env(ctx, RT_W, RT_H);
+		cellGcmSetClearColor(ctx, GPU_CLEAR_MARK);
+		cellGcmSetClearSurface(ctx,
+			GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
+		wait_rsx_idle(ctx);
+	}
+	set_rt_surface_n(ctx, sel->color_offs, sel->targets, sel->depth_off,
+	                 rt_pitch, RT_W, RT_H);
+	set_draw_env_n(ctx, RT_W, RT_H, sel->targets, sel->depth);
+	if (sel->depth) {
+		cellGcmSetClearDepthStencil(ctx, DEPTH_CLEAR_MARK);
+		cellGcmSetClearSurface(ctx, GCM_CLEAR_Z | GCM_CLEAR_S);
+		wait_rsx_idle(ctx);
+	}
 
 	/* The shared VP's literal constants are re-uploaded on every draw:
 	 * a VP row before this one uploaded ITS uniforms into the same
@@ -1160,7 +1360,7 @@ static int render_side(CellGcmContextData *ctx, void *container,
 	                          vertex_buffer_offset + offsetof(vertex_t, uv));
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
 
-	return draw_readback(ctx, rt_off, rt_pitch, save, warmup_draws);
+	return draw_readback_n(ctx, sel, rt_pitch, saves, warmup_draws);
 }
 
 
@@ -1639,6 +1839,17 @@ static int load_manifest(void)
 				return 0;
 			}
 		}
+		if (strlen(fields[1]) >= sizeof(p->role)) {
+			/* A role that does not fit is refused, never truncated: a
+			 * control whose name lost its tail matches no validator and
+			 * is judged as a corpus row, so the proving set is never
+			 * complete and nothing says why (measured 2026-09-06 with a
+			 * 24-byte field and three 24..27-character control roles). */
+			printf("shader-differential: manifest line %d: role '%s' is longer than %u characters and would be truncated into a different role\n",
+			       lineno, fields[1], (unsigned)sizeof(p->role) - 1u);
+			fclose(f);
+			return 0;
+		}
 		snprintf(p->tier,        sizeof(p->tier),        "%s", fields[0]);
 		snprintf(p->role,        sizeof(p->role),        "%s", fields[1]);
 		snprintf(p->name,        sizeof(p->name),        "%s", fields[2]);
@@ -1813,9 +2024,137 @@ typedef struct {
 	u32  kil_b;
 	int  diff_channels;      /* VP rows: channels that judged mismatch */
 	char diff_channel[8];    /* VP rows: the channel key when exactly one differs */
+	/* Every declared output (t_678a4dab): which outputs the row judged
+	 * and what each said.  Indexed like SD_OUT_*; out_maxd for depth is
+	 * in Z24 units (the zeta word's high 24 bits), colour in 8-bit
+	 * levels.  The row's max_delta stays the worst COLOUR delta and its
+	 * diff_pixels the worst over every output, so a depth delta cannot
+	 * masquerade as a colour level. */
+	int  out_targets;        /* colour targets BOUND, 1..4 (one past the highest declared) */
+	int  out_mask;           /* colour targets JUDGED, bit i = COLORi; 0 for a depth-only pair */
+	int  out_depth;          /* the zeta surface was judged */
+	int  out_diff[SD_OUT_MAX];
+	int  out_maxd[SD_OUT_MAX];
+	int  depth_flag_a;       /* the container's depthReplace, per side */
+	int  depth_flag_b;
+	int  color_mask_a;       /* COLORn declared, per side */
+	int  color_mask_b;
 	char diagnostic[448];
 	char artifact[96];
 } sd_result;
+
+/* ---- declared outputs (t_678a4dab) ----
+ * Read from the container BYTES, the same way the bridge header's own
+ * parameter walk does: header words are big-endian u32 at file offsets
+ * 12 (parameterCount), 16 (parameterArray) and 20 (program); parameter
+ * records are 48 bytes - type, res, var, resIndex, name, defaultValue,
+ * embeddedConstants, semantic (+28), direction (+32), paramno, isReferenced,
+ * isShared - with CG_OUT 0x1002 and CG_INOUT 0x1003 in the direction word.
+ * depthReplace is the byte at program+20.  Every offset here was read
+ * out of reference containers on 2026-09-06 (the first draft put the
+ * direction at +44 and found no outputs at all - measured on the four-
+ * target control, which is what the control is for). */
+typedef struct {
+	int color_mask;      /* bit i: COLORi declared as an output (COLOR = COLOR0) */
+	int depth_declared;  /* a DEPTH output parameter exists */
+	int depth_replace;   /* the program header flag: depth is exported */
+} sd_outdecl;
+
+static u32 be32_at(const u8 *b, u32 off)
+{
+	return ((u32)b[off] << 24) | ((u32)b[off + 1] << 16) |
+	       ((u32)b[off + 2] << 8) | (u32)b[off + 3];
+}
+
+/* Derive a container's declared outputs from its parameter table and its
+ * program header; nothing is assumed.  An `out` record (direction 0x1002 or
+ * 0x1003) whose semantic is "DEPTH" declares depth; "COLOR1".."COLOR3"
+ * declare that target; every other out semantic - "COLOR", "COLOR0", and
+ * the EMPTY string the reference records for an unsemanticked `out float4
+ * c` (which it binds to COLOR0; a bare unsemanticked return value it
+ * refuses, C5029) - declares colour 0.  Measured 2026-09-06 on reference
+ * containers.  A container declaring nothing is named by the judge, never
+ * seeded with colour 0: the first draft seeded bit 0 and so could not tell
+ * a depth-only or COLOR1-only program from one writing colour 0 (codex). */
+static void fp_declared_outputs(const void *container, u32 size, sd_outdecl *o)
+{
+	const u8 *b = (const u8 *)container;
+	memset(o, 0, sizeof(*o));
+	if (size < 32)
+		return;
+	u32 count = be32_at(b, 12);
+	u32 parr  = be32_at(b, 16);
+	u32 prog  = be32_at(b, 20);
+	if (prog + 21u <= size)
+		o->depth_replace = b[prog + 20] ? 1 : 0;
+	for (u32 i = 0; i < count; i++) {
+		u32 rec = parr + i * 48u;
+		if (rec + 48u > size)
+			break;
+		u32 dir = be32_at(b, rec + 32);
+		if (dir != 0x1002u && dir != 0x1003u)
+			continue;
+		u32 semoff = be32_at(b, rec + 28);
+		const char *sem = (semoff != 0 && semoff < size) ? (const char *)b + semoff : "";
+		if (strncmp(sem, "DEPTH", 5) == 0)
+			o->depth_declared = 1;
+		else if (strncmp(sem, "COLOR", 5) == 0 && sem[5] >= '1' && sem[5] <= '3')
+			o->color_mask |= 1 << (sem[5] - '0');
+		else
+			o->color_mask |= 1;
+	}
+}
+
+/* The register a colour target lives in: COLOR0 R0, COLOR1 R2, COLOR2 R3,
+ * COLOR3 R4 (measured; R1 is result.depth and is skipped).  Never
+ * "the Nth register". */
+static const int k_color_target_reg[4] = { 0, 2, 3, 4 };
+
+/* The proving sets.  Every member must run and pass before its gate
+ * opens; the stager writes them ahead of the first corpus row. */
+enum {
+	SD_MRT_C_IDENT       = 1,   /* control-mrt-identical      */
+	SD_MRT_C_MIS         = 2,   /* control-mrt-mismatch       */
+	SD_MRT_C_SPARSE_ID   = 4,   /* control-sparse-identical   */
+	SD_MRT_C_SPARSE_MIS  = 8,   /* control-sparse-mismatch    */
+	SD_MRT_C_SPARSE_SKIP = 16,  /* control-sparse-skip        */
+	SD_MRT_C_ALL         = 31
+};
+enum {
+	SD_DEP_C_IDENT     = 1,     /* control-depth-identical     */
+	SD_DEP_C_MIS       = 2,     /* control-depth-mismatch      */
+	SD_DEP_C_BLIND     = 4,     /* control-depth-blind         */
+	SD_DEP_C_ONLY_ID   = 8,     /* control-depthonly-identical */
+	SD_DEP_C_ONLY_MIS  = 16,    /* control-depthonly-mismatch  */
+	SD_DEP_C_ALL       = 31
+};
+/* The proving roles by EXACT name - the same set the validators below
+ * recognise.  Membership, never a prefix, decides which rows are exempt
+ * from the gate they open: a misspelt "control-depth-unknown" matches
+ * no validator, so it is an ordinary row and an ordinary row that
+ * exports depth is withheld until the set has passed, never let
+ * through on the strength of its name (review finding). */
+static const char *const k_mrt_control_roles[] = {
+	"control-mrt-identical", "control-mrt-mismatch", "control-sparse-identical",
+	"control-sparse-mismatch", "control-sparse-skip"
+};
+static const char *const k_depth_control_roles[] = {
+	"control-depth-identical", "control-depth-mismatch", "control-depth-blind",
+	"control-depthonly-identical", "control-depthonly-mismatch"
+};
+static int role_in_set(const char *role, const char *const *set, int n)
+{
+	for (int i = 0; i < n; i++)
+		if (strcmp(role, set[i]) == 0)
+			return 1;
+	return 0;
+}
+/* 0: the set has not fully run; 1: it ran and a member failed; 2: open. */
+static int gate_state(unsigned seen, unsigned pass, unsigned all)
+{
+	if (seen != all) return 0;
+	return pass == all ? 2 : 1;
+}
 
 static long now_ms(void)
 {
@@ -1826,8 +2165,9 @@ static long now_ms(void)
 
 static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
                        int textures_ok, int have_tex_control,
-                       u32 rt_a_off, u32 rt_b_off, u32 rt_depth_off,
-                       u32 rt_pitch, u32 *save_a, u32 *save_b,
+                       int mrt_gate, int depth_gate,
+                       const u32 *rt_a_offs, const u32 *rt_b_offs, u32 rt_depth_off,
+                       u32 rt_pitch, u32 *const *save_a, u32 *const *save_b,
                        sd_result *r)
 {
 	long t0 = now_ms();
@@ -1841,6 +2181,13 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	r->max_delta = 0;
 	r->diff_pixels = 0;
 	r->total_pixels = RT_W * RT_H;
+	r->out_targets = 1;
+	r->out_mask = 0;
+	r->out_depth = 0;
+	memset(r->out_diff, 0, sizeof(r->out_diff));
+	memset(r->out_maxd, 0, sizeof(r->out_maxd));
+	r->depth_flag_a = r->depth_flag_b = 0;
+	r->color_mask_a = r->color_mask_b = 0;
 	r->diagnostic[0] = 0;
 	snprintf(r->diagnostic, sizeof(r->diagnostic), "-");
 	snprintf(r->artifact, sizeof(r->artifact), "-");
@@ -1902,14 +2249,115 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		cellGcmCgGetUCode((CGprogram)row_vp, &g_row_vp_ucode, &vusz);
 		g_row_vp = row_vp;
 	}
+	/* Which outputs this pair judges: every colour target EITHER side
+	 * declares (the highest declared index sets the bound count, so a
+	 * one-sided declaration is judged and shows as a mismatch on that
+	 * target rather than vanishing), and depth when EITHER side's
+	 * container carries depthReplace - the flag, never the declaration
+	 * alone (see fp_declared_outputs). */
+	sd_outdecl decl_a, decl_b;
+	fp_declared_outputs(cont_a, sz_a, &decl_a);
+	fp_declared_outputs(cont_b, sz_b, &decl_b);
+	r->color_mask_a = decl_a.color_mask;
+	r->color_mask_b = decl_b.color_mask;
+	r->depth_flag_a = decl_a.depth_replace;
+	r->depth_flag_b = decl_b.depth_replace;
+	/* Two different numbers that coincide only in the dense case: the
+	 * JUDGED colour set is the union of what the two sides declare; the
+	 * BOUND target count is one past the highest declared index, because
+	 * targets are positional.  A bound-but-undeclared target (COLOR1
+	 * under a COLOR0+COLOR2 program) receives whatever its register R2
+	 * held, and R2 is ordinary scratch for that program: comparing it
+	 * would compare two allocators' scratch choices - a false mismatch
+	 * when they differ and a false identical when they agree (codex,
+	 * claude 2026-09-06).  Only judged outputs are read back or compared. */
+	int judge_mask = decl_a.color_mask | decl_b.color_mask;
+	int targets = 1;
+	for (int t = 1; t < 4; t++)
+		if (judge_mask & (1 << t))
+			targets = t + 1;
+	int judge_depth = decl_a.depth_replace || decl_b.depth_replace;
+	r->out_targets = targets;
+	r->out_mask = judge_mask;
+	r->out_depth = judge_depth;
+	if (judge_mask == 0 && !judge_depth) {
+		r->status = "no-declared-outputs";
+		snprintf(r->diagnostic, sizeof(r->diagnostic),
+		         "neither container declares a colour target or exports depth (DEPTH declared a=%d b=%d)",
+		         decl_a.depth_declared, decl_b.depth_declared);
+	}
+
+	/* GATE EXISTENCE IS NOT GATE SUCCESS.  A row that needs the MRT or
+	 * depth instrument is withheld, never judged blind, unless the
+	 * instrument's COMPLETE proving set has already run and passed ahead
+	 * of it in this manifest (gate 0: incomplete or not yet run; 1: a
+	 * control failed; 2: open).  The proving rows themselves are exempt,
+	 * by exact role name: they are what open the gate. */
+	int is_mrt_control = role_in_set(p->role, k_mrt_control_roles,
+	                                 (int)(sizeof(k_mrt_control_roles) / sizeof(k_mrt_control_roles[0])));
+	int is_depth_control = role_in_set(p->role, k_depth_control_roles,
+	                                   (int)(sizeof(k_depth_control_roles) / sizeof(k_depth_control_roles[0])));
+	if (strcmp(r->status, "identical") == 0 && (judge_mask & ~1) && !is_mrt_control) {
+		if (mrt_gate == 0) {
+			r->status = "mrt-unvalidated";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "container declares colour targets beyond c0 (judged mask 0x%x, %d bound) but the MRT proving set has not run and passed ahead of this row",
+			         judge_mask, targets);
+		} else if (mrt_gate == 1) {
+			r->status = "mrt-invalid";
+			snprintf(r->diagnostic, sizeof(r->diagnostic), "skipped: an MRT proving control failed");
+		}
+	}
+	if (strcmp(r->status, "identical") == 0 && judge_depth && !is_depth_control) {
+		if (depth_gate == 0) {
+			r->status = "depth-unvalidated";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "container exports depth (depthReplace a=%d b=%d) but the depth proving set has not run and passed ahead of this row",
+			         decl_a.depth_replace, decl_b.depth_replace);
+		} else if (depth_gate == 1) {
+			r->status = "depth-invalid";
+			snprintf(r->diagnostic, sizeof(r->diagnostic), "skipped: a depth proving control failed");
+		}
+	}
+	/* Both sides declare DEPTH but only one exports it: the same source
+	 * compiled to two different contracts.  A red before any draw. */
+	if (strcmp(r->status, "identical") == 0 &&
+	    decl_a.depth_declared && decl_b.depth_declared &&
+	    decl_a.depth_replace != decl_b.depth_replace) {
+		r->status = "depth-export-flag-differs";
+		snprintf(r->diagnostic, sizeof(r->diagnostic),
+		         "both containers declare DEPTH but depthReplace a=%d b=%d",
+		         decl_a.depth_replace, decl_b.depth_replace);
+	}
+	if (strcmp(r->status, "identical") != 0) {
+		g_row_vp = NULL;
+		g_row_vp_ucode = NULL;
+		g_local_mem_heap = watermark;
+		free(cont_a);
+		free(cont_b);
+		free(row_vp);
+		r->elapsed_ms = now_ms() - t0;
+		return;
+	}
+
+	sd_outsel sel_a, sel_b;
+	memset(&sel_a, 0, sizeof(sel_a));
+	memset(&sel_b, 0, sizeof(sel_b));
+	sel_a.targets = sel_b.targets = targets;
+	sel_a.judge_mask = sel_b.judge_mask = judge_mask;
+	sel_a.depth = sel_b.depth = judge_depth;
+	for (int t = 0; t < 4; t++) {
+		sel_a.color_offs[t] = rt_a_offs[t];
+		sel_b.color_offs[t] = rt_b_offs[t];
+	}
+	sel_a.depth_off = sel_b.depth_off = rt_depth_off;
+
 	int warm_a = 0, warm_b = 0;
-	int ua = render_side(ctx, cont_a, p->uniform_set, tex_ok_here,
-	                     have_tex_control, rt_a_off,
-	                     rt_depth_off, rt_pitch, save_a, &warm_a);
+	int ua = render_side_n(ctx, cont_a, p->uniform_set, tex_ok_here,
+	                       have_tex_control, &sel_a, rt_pitch, save_a, &warm_a);
 	int ub = ua == 0
-		? render_side(ctx, cont_b, set_b, tex_ok_here,
-		              have_tex_control, rt_b_off,
-		              rt_depth_off, rt_pitch, save_b, &warm_b)
+		? render_side_n(ctx, cont_b, set_b, tex_ok_here,
+		                have_tex_control, &sel_b, rt_pitch, save_b, &warm_b)
 		: 0;
 
 	/* Cost metrics are taken HERE, while both containers are live: the
@@ -1981,8 +2429,8 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	 * about the compiler and is reported as vacuous, never identical.
 	 * (First real corpus sweep: 62 of 63 pairs would have passed this
 	 * way while RPCS3 was rejecting programs for invalid registers.) */
-	int painted_a = painted_pixels(save_a, rt_pitch);
-	int painted_b = painted_pixels(save_b, rt_pitch);
+	int painted_a = painted_over(save_a, judge_mask, judge_depth, rt_pitch);
+	int painted_b = painted_over(save_b, judge_mask, judge_depth, rt_pitch);
 	r->painted_a = painted_a;
 	r->painted_b = painted_b;
 	r->kil_a = cost_a.kil;
@@ -1990,37 +2438,96 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	if (painted_a == 0 && painted_b == 0) {
 		r->status = "vacuous";
 		snprintf(r->diagnostic, sizeof(r->diagnostic),
-		         "no pixel painted on either side");
+		         "no pixel painted on either side over the judged outputs (mask 0x%x depth %d)", judge_mask, judge_depth);
 		r->elapsed_ms = now_ms() - t0;
 		return;
 	}
 
-	/* Raw-byte channel compare.  A8R8G8B8 both sides, same pitch, so a
-	 * per-u32 walk with per-channel deltas gives max_delta in 8-bit
-	 * steps and diff_pixels as "any channel differs". */
-	for (int i = 0; i < RT_W * RT_H; i++) {
-		u32 a = save_a[i], b = save_b[i];
-		if (a == b)
+	/* Raw-byte compare, once per judged output.  Colour: A8R8G8B8 both
+	 * sides, per-u32 walk with per-channel deltas, max_delta in 8-bit
+	 * steps.  Depth: the zeta word's high 24 bits, delta in Z24 units
+	 * (the control-depth-mismatch row pins that layout by expecting the
+	 * arithmetic delta of its known offset).  The row's max_delta is the
+	 * worst COLOUR delta, its diff_pixels the worst count over every
+	 * output, and every output's own numbers go into the diagnostic. */
+	/* The row's own artifact name (artifacts/<name>_{a,b}.raw) belongs to
+	 * ONE primary output, chosen once: colour 0 when judged, else the
+	 * lowest judged colour target, else depth.  Every other differing
+	 * output is dumped under a suffixed name (_c1/_c2/_c3/_z), so a
+	 * c1+c2 or c1+depth row keeps every image rather than the last one
+	 * written over the others (review finding).  The SDIFF artifact
+	 * field names the first image actually dumped. */
+	int primary = judge_depth ? SD_OUT_Z : -1;
+	for (int o = 3; o >= 0; o--)
+		if (judge_mask & (1 << o))
+			primary = o;
+	int any_diff = 0;
+	for (int o = 0; o < SD_OUT_MAX; o++) {
+		if (o < 4 ? !(judge_mask & (1 << o)) : !judge_depth)
 			continue;
-		r->diff_pixels++;
-		for (int sh = 0; sh < 32; sh += 8) {
-			int da = (int)((a >> sh) & 0xff) - (int)((b >> sh) & 0xff);
-			if (da < 0) da = -da;
-			if (da > r->max_delta) r->max_delta = da;
+		int diff = 0, maxd = 0;
+		for (int i = 0; i < RT_W * RT_H; i++) {
+			u32 a = save_a[o][i], b = save_b[o][i];
+			if (a == b)
+				continue;
+			diff++;
+			if (o == SD_OUT_Z) {
+				long dz = (long)(a >> 8) - (long)(b >> 8);
+				if (dz < 0) dz = -dz;
+				if (dz > maxd) maxd = (int)dz;
+			} else {
+				for (int sh = 0; sh < 32; sh += 8) {
+					int da = (int)((a >> sh) & 0xff) - (int)((b >> sh) & 0xff);
+					if (da < 0) da = -da;
+					if (da > maxd) maxd = da;
+				}
+			}
+		}
+		r->out_diff[o] = diff;
+		r->out_maxd[o] = maxd;
+		if (diff > 0) {
+			any_diff = 1;
+			if (diff > r->diff_pixels) r->diff_pixels = diff;
+			if (o != SD_OUT_Z && maxd > r->max_delta) r->max_delta = maxd;
+			char nm[80];
+			if (o == primary)
+				snprintf(nm, sizeof(nm), "%s", p->name);
+			else
+				snprintf(nm, sizeof(nm), "%s_%s", p->name,
+				         o == SD_OUT_Z ? "z" : (o == 0 ? "c0" : o == 1 ? "c1" : o == 2 ? "c2" : "c3"));
+			dump_artifact(nm, 'a', save_a[o], rt_pitch * RT_H);
+			dump_artifact(nm, 'b', save_b[o], rt_pitch * RT_H);
+			if (strcmp(r->artifact, "-") == 0)
+				snprintf(r->artifact, sizeof(r->artifact), "artifacts/%s_{a,b}.raw", nm);
 		}
 	}
-	if (r->diff_pixels > 0) {
+	if (any_diff)
 		r->status = "mismatch";
-		dump_artifact(p->name, 'a', save_a, rt_pitch * RT_H);
-		dump_artifact(p->name, 'b', save_b, rt_pitch * RT_H);
-		snprintf(r->artifact, sizeof(r->artifact), "artifacts/%s_{a,b}.raw", p->name);
-	}
 	/* A side whose ucode never writes the output register gets its own
 	 * status, whatever the pixels said: identical pixels would only mean
 	 * both registers held the same leftover, and a mismatch would be
 	 * read as a wrong value when it is a missing one. */
-	if (!cost_a.r0_written || !cost_b.r0_written)
+	if ((judge_mask & 1) && (!cost_a.r0_written || !cost_b.r0_written))
 		r->status = !cost_a.r0_written ? "output-unwritten-a" : "output-unwritten-b";
+	/* The same rule per declared colour target (registers R2/R3/R4), and
+	 * for depth: a side that declares DEPTH in its parameter table but
+	 * does not set depthReplace declares an output it never exports -
+	 * last night's defect, exactly - and is named rather than judged on
+	 * leftovers.  The blind control pairs an exporter with a container
+	 * that declares nothing, which is not this case. */
+	for (int t = 1; t < 4; t++) {
+		if (!(judge_mask & (1 << t)))
+			continue;
+		int reg = k_color_target_reg[t];
+		if ((decl_a.color_mask & (1 << t)) && !(cost_a.written_regs & (1u << reg)))
+			r->status = "mrt-declared-not-written-a";
+		else if ((decl_b.color_mask & (1 << t)) && !(cost_b.written_regs & (1u << reg)))
+			r->status = "mrt-declared-not-written-b";
+	}
+	if (decl_a.depth_declared && !decl_a.depth_replace)
+		r->status = "depth-declared-not-exported-a";
+	else if (decl_b.depth_declared && !decl_b.depth_replace)
+		r->status = "depth-declared-not-exported-b";
 	/* Discard blindness.  A KIL in either side's ucode with every pixel
 	 * painted on both sides means the discard never fired under the
 	 * rig's inputs: the two images agree, and would agree whether the
@@ -2040,10 +2547,16 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
 		         "%spainted a=%d b=%d", len ? " " : "", painted_a, painted_b);
 	}
-	{
+	/* Sensitivity is measured on the lowest judged colour target; a
+	 * depth-only pair has none and reports none. */
+	int sens_o = -1;
+	for (int o = 0; o < 4 && sens_o < 0; o++)
+		if (judge_mask & (1 << o))
+			sens_o = o;
+	if (sens_o >= 0) {
 		sd_sensitivity sa, sb;
-		measure_sensitivity(save_a, rt_pitch, &sa);
-		measure_sensitivity(save_b, rt_pitch, &sb);
+		measure_sensitivity(save_a[sens_o], rt_pitch, &sa);
+		measure_sensitivity(save_b[sens_o], rt_pitch, &sb);
 		size_t len = strlen(r->diagnostic);
 		if (strcmp(r->diagnostic, "-") == 0) len = 0;
 		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
@@ -2053,6 +2566,48 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		         sb.levels[0], sb.levels[1], sb.levels[2], sb.levels[3],
 		         (sa.saturated * 100) / (RT_W * RT_H),
 		         (sb.saturated * 100) / (RT_W * RT_H));
+	}
+	/* Every judged output beyond colour 0, and the declarations both
+	 * sides made, so a log says what was compared and why. */
+	if (judge_mask != 1 || judge_depth) {
+		size_t len = strlen(r->diagnostic);
+		if (strcmp(r->diagnostic, "-") == 0) len = 0;
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len, "%sbound=%d judged=0x%x out=", len ? " " : "", targets, judge_mask);
+		int first = 1;
+		for (int o = 0; o < SD_OUT_MAX; o++) {
+			if (o < 4 ? !(judge_mask & (1 << o)) : !judge_depth)
+				continue;
+			len = strlen(r->diagnostic);
+			snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len, "%s%s:%d/%d",
+			         first ? "" : ",",
+			         o == SD_OUT_Z ? "z" : (o == 0 ? "c0" : o == 1 ? "c1" : o == 2 ? "c2" : "c3"),
+			         r->out_diff[o], r->out_maxd[o]);
+			first = 0;
+		}
+		len = strlen(r->diagnostic);
+		snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+		         " outdecl a=0x%x b=0x%x dr a=%d b=%d",
+		         decl_a.color_mask, decl_b.color_mask,
+		         decl_a.depth_replace, decl_b.depth_replace);
+		if (judge_depth) {
+			/* How much of each zeta image the draw actually wrote (not
+			 * the clear mark), and the first differing/first pixel's raw
+			 * words: the difference between "depth never landed" and
+			 * "landed and agreed" is invisible from a diff count alone,
+			 * and that is the false-identical this instrument must not
+			 * produce. */
+			int za = 0, zb = 0;
+			for (int i = 0; i < RT_W * RT_H; i++) {
+				if (save_a[SD_OUT_Z][i] != DEPTH_CLEAR_MARK) za++;
+				if (save_b[SD_OUT_Z][i] != DEPTH_CLEAR_MARK) zb++;
+			}
+			len = strlen(r->diagnostic);
+			snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+			         " zpaint a=%d b=%d z0 a=%08x b=%08x zmid a=%08x b=%08x",
+			         za, zb, save_a[SD_OUT_Z][0], save_b[SD_OUT_Z][0],
+			         save_a[SD_OUT_Z][RT_W * (RT_H / 2) + RT_W / 2],
+			         save_b[SD_OUT_Z][RT_W * (RT_H / 2) + RT_W / 2]);
+		}
 	}
 	if (warm_a > 1 || warm_b > 1) {
 		size_t len = strlen(r->diagnostic);
@@ -2443,30 +2998,47 @@ int main(int argc, const char **argv)
 		return 2;
 	}
 
-	/* ---- two RTs (A and B), one shared depth (test disabled) ---- */
+	/* ---- four colour RTs per side (A and B), one shared zeta ----
+	 * Colour target 0 is every row's; targets 1..3 and the zeta surface
+	 * are bound only for rows whose containers declare them (t_678a4dab).
+	 * 64x64 A8R8G8B8, 16 KB each. */
 	u32 rt_pitch = RT_W * 4;
 	u32 rt_sz    = rt_pitch * RT_H;
-	u32 *rt_a = (u32 *)local_align(64, rt_sz);
-	u32 *rt_b = (u32 *)local_align(64, rt_sz);
+	u32 rt_a_offs[4], rt_b_offs[4];
+	u32 rt_depth_off = 0;
+	int rt_alloc_ok = 1;
+	for (int t = 0; t < 4; t++) {
+		u32 *ra = (u32 *)local_align(64, rt_sz);
+		u32 *rb = (u32 *)local_align(64, rt_sz);
+		if (cellGcmAddressToOffset(ra, &rt_a_offs[t]) != 0 ||
+		    cellGcmAddressToOffset(rb, &rt_b_offs[t]) != 0)
+			rt_alloc_ok = 0;
+	}
 	void *rt_depth = local_align(64, rt_sz);
-	u32 rt_a_off = 0, rt_b_off = 0, rt_depth_off = 0;
-	if (cellGcmAddressToOffset(rt_a, &rt_a_off) != 0 ||
-	    cellGcmAddressToOffset(rt_b, &rt_b_off) != 0 ||
-	    cellGcmAddressToOffset(rt_depth, &rt_depth_off) != 0) {
+	if (!rt_alloc_ok || cellGcmAddressToOffset(rt_depth, &rt_depth_off) != 0) {
 		printf("shader-differential: RT alloc failed\nSHADER_DIFF_INVALID\n");
 		cellGcmFinish(ctx, 0);
 		free(host_addr);
 		return 2;
 	}
+	u32 rt_a_off = rt_a_offs[0], rt_b_off = rt_b_offs[0];
 
-	u32 *save_a = (u32 *)malloc(rt_sz);
-	u32 *save_b = (u32 *)malloc(rt_sz);
-	if (!save_a || !save_b) {
+	/* One save image per judged output per side: 0..3 colour, 4 depth. */
+	u32 *save_a_all[SD_OUT_MAX], *save_b_all[SD_OUT_MAX];
+	int save_ok = 1;
+	for (int o = 0; o < SD_OUT_MAX; o++) {
+		save_a_all[o] = (u32 *)malloc(rt_sz);
+		save_b_all[o] = (u32 *)malloc(rt_sz);
+		if (!save_a_all[o] || !save_b_all[o])
+			save_ok = 0;
+	}
+	if (!save_ok) {
 		printf("shader-differential: save alloc failed\nSHADER_DIFF_INVALID\n");
 		cellGcmFinish(ctx, 0);
 		free(host_addr);
 		return 2;
 	}
+	u32 *save_a = save_a_all[0], *save_b = save_b_all[0];
 
 	/* ---- controls first, judged in manifest order ---- */
 	int controls_ok = 1;
@@ -2496,9 +3068,24 @@ int main(int argc, const char **argv)
 		return 2;
 	}
 	int have_tex_control = 0;
-	for (int i = 0; i < g_npairs; i++)
+	/* GATE EXISTENCE IS NOT GATE SUCCESS (t_678a4dab).  The MRT and
+	 * depth instruments are proven by a COMPLETE set of reference-
+	 * compiled controls, each of which must RUN AND PASS ahead of any row
+	 * that leans on the instrument.  Both gates start closed and nothing
+	 * but a passing control opens them: a missing control, a control
+	 * placed after the corpus, or a red control withholds every row that
+	 * needs the instrument.  The first draft initialised the gates open
+	 * and scanned for the mismatch role's mere presence, so a manifest
+	 * with its controls after the corpus judged the corpus blind and a
+	 * deleted identical/blind control went unnoticed (codex, claude
+	 * 2026-09-06).  The stager refuses such manifests before they are
+	 * written; this is the second line. */
+	unsigned mrt_seen = 0, mrt_pass = 0, depth_seen = 0, depth_pass = 0;
+	int outputs_skipped = 0;   /* rows withheld behind an incomplete or red MRT/depth proving set */
+	for (int i = 0; i < g_npairs; i++) {
 		if (strcmp(g_pairs[i].role, "control-texture") == 0)
 			have_tex_control = 1;
+	}
 	int failures = 0;
 	for (int i = 0; i < g_npairs; i++) {
 		const sd_pair *p = &g_pairs[i];
@@ -2635,8 +3222,10 @@ int main(int argc, const char **argv)
 			              save_a, save_b, &r);
 		else
 			judge_pair(ctx, p, textures_ok, have_tex_control,
-			           rt_a_off, rt_b_off, rt_depth_off, rt_pitch,
-			           save_a, save_b, &r);
+			           gate_state(mrt_seen, mrt_pass, SD_MRT_C_ALL),
+			           gate_state(depth_seen, depth_pass, SD_DEP_C_ALL),
+			           rt_a_offs, rt_b_offs, rt_depth_off, rt_pitch,
+			           save_a_all, save_b_all, &r);
 		print_row(p, &r);
 		prev_role = p->role;
 		prev_status = r.status;
@@ -2648,6 +3237,18 @@ int main(int argc, const char **argv)
 			 * counted, the same accounting as the uniform skip. */
 			textures_skipped++;
 			continue;
+		}
+		if (strcmp(r.status, "mrt-invalid") == 0 || strcmp(r.status, "depth-invalid") == 0) {
+			/* Withheld behind a red MRT/depth control, which already
+			 * counted as the failure. */
+			outputs_skipped++;
+			continue;
+		}
+		if (strcmp(r.status, "mrt-unvalidated") == 0 || strcmp(r.status, "depth-unvalidated") == 0) {
+			/* Withheld because the proving set had not run and passed
+			 * ahead of this row: counted as withheld for the summary
+			 * AND as a failure below, since no control failed for it. */
+			outputs_skipped++;
 		}
 
 		if (strcmp(p->role, "control-vp-identical") == 0) {
@@ -2755,6 +3356,147 @@ int main(int argc, const char **argv)
 			       ok ? "a never-firing KIL is named" : "NOT NAMED - a blind discard witness would read as a verdict");
 			if (!ok)
 				failures++;
+			goto post_row;
+		}
+
+		/* ---- every declared output (t_678a4dab): the instrument is
+		 * proven on reference-compiled controls before any row leans on
+		 * it.  All five are reference-compiled by the stager. ---- */
+		if (strcmp(p->role, "control-mrt-identical") == 0) {
+			/* One four-target container byte-copied twice: identical,
+			 * with all four targets judged - the row that proves the
+			 * per-target readback lands at all. */
+			int ok = strcmp(r.status, "identical") == 0 && r.out_targets == 4 && r.out_mask == 0xf;
+			printf("shader-differential: control-mrt-identical: status %s, targets %d judged 0x%x: %s\n",
+			       r.status, r.out_targets, r.out_mask,
+			       ok ? "four targets read back and agree" : "NOT AS EXPECTED - the MRT readback is not proven");
+			mrt_seen |= SD_MRT_C_IDENT;
+			if (ok) mrt_pass |= SD_MRT_C_IDENT; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-mrt-mismatch") == 0) {
+			/* Two four-target containers that differ ONLY in COLOR2: a
+			 * colour-0-only judge calls them identical; this one must
+			 * name c2 and nothing else.  Fails the run and closes the
+			 * MRT gate. */
+			int ok = strcmp(r.status, "mismatch") == 0 && r.out_targets == 4 &&
+			         r.out_diff[0] == 0 && r.out_diff[1] == 0 &&
+			         r.out_diff[2] > 0 && r.out_diff[3] == 0;
+			printf("shader-differential: control-mrt-mismatch: status %s, out c0=%d c1=%d c2=%d c3=%d (expect only c2 to differ): %s\n",
+			       r.status, r.out_diff[0], r.out_diff[1], r.out_diff[2], r.out_diff[3],
+			       ok ? "the judge sees the third target" : "NOT AS EXPECTED - a wrong colour target could pass this rig unseen");
+			mrt_seen |= SD_MRT_C_MIS;
+			if (ok) mrt_pass |= SD_MRT_C_MIS; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-sparse-identical") == 0) {
+			/* A COLOR1-only container twice: identical with TWO targets
+			 * bound, ONLY c1 judged, and every pixel painted on c1 - the
+			 * row that proves a program painting nothing on colour 0 is
+			 * neither vacuous nor judged on colour 0's leftovers. */
+			int ok = strcmp(r.status, "identical") == 0 && r.out_targets == 2 &&
+			         r.out_mask == 0x2 && r.painted_a == RT_W * RT_H;
+			printf("shader-differential: control-sparse-identical: status %s, bound %d judged 0x%x painted %d: %s\n",
+			       r.status, r.out_targets, r.out_mask, r.painted_a,
+			       ok ? "a COLOR1-only program is judged on c1 alone" : "NOT AS EXPECTED - a COLOR1-only program cannot get a verdict");
+			mrt_seen |= SD_MRT_C_SPARSE_ID;
+			if (ok) mrt_pass |= SD_MRT_C_SPARSE_ID; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-sparse-mismatch") == 0) {
+			/* COLOR1-only pair differing only in c1's blue (0.5 vs 0.75,
+			 * 63 or 64 in 8-bit steps): mismatch on c1, every pixel,
+			 * with c0 neither judged nor reported. */
+			int ok = strcmp(r.status, "mismatch") == 0 && r.out_mask == 0x2 &&
+			         r.out_diff[0] == 0 && r.out_diff[1] == RT_W * RT_H &&
+			         r.out_maxd[1] >= 60 && r.out_maxd[1] <= 66;
+			printf("shader-differential: control-sparse-mismatch: status %s, judged 0x%x, c1 diff %d max_delta %d (expect 4096 px, ~63): %s\n",
+			       r.status, r.out_mask, r.out_diff[1], r.out_maxd[1],
+			       ok ? "the judge sees a COLOR1-only difference" : "NOT AS EXPECTED - a wrong COLOR1-only output could pass this rig unseen");
+			mrt_seen |= SD_MRT_C_SPARSE_MIS;
+			if (ok) mrt_pass |= SD_MRT_C_SPARSE_MIS; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-sparse-skip") == 0) {
+			/* COLOR0+COLOR2 twice: THREE targets bound, c0 and c2 judged,
+			 * c1 (register R2, scratch for this program) not compared.
+			 * Proves the judged set and the bound count are two numbers. */
+			int ok = strcmp(r.status, "identical") == 0 && r.out_targets == 3 && r.out_mask == 0x5;
+			printf("shader-differential: control-sparse-skip: status %s, bound %d judged 0x%x: %s\n",
+			       r.status, r.out_targets, r.out_mask,
+			       ok ? "a skipped target is bound but not judged" : "NOT AS EXPECTED - an undeclared target's scratch would be compared");
+			mrt_seen |= SD_MRT_C_SPARSE_SKIP;
+			if (ok) mrt_pass |= SD_MRT_C_SPARSE_SKIP; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-depth-identical") == 0) {
+			/* One depth-exporting container twice: identical with the
+			 * zeta surface judged. */
+			int ok = strcmp(r.status, "identical") == 0 && r.out_depth &&
+			         r.depth_flag_a && r.depth_flag_b;
+			printf("shader-differential: control-depth-identical: status %s, depth judged %d, depthReplace a=%d b=%d: %s\n",
+			       r.status, r.out_depth, r.depth_flag_a, r.depth_flag_b,
+			       ok ? "the zeta surface reads back and agrees" : "NOT AS EXPECTED - the depth readback is not proven");
+			depth_seen |= SD_DEP_C_IDENT;
+			if (ok) depth_pass |= SD_DEP_C_IDENT; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-depth-mismatch") == 0) {
+			/* Colour identical, exported depth differs by a known
+			 * constant (+0.125 of the unit range = 2097152 Z24 units):
+			 * must judge mismatch on z ALONE, and the measured delta
+			 * must be that arithmetic one within 30%, which is what
+			 * pins the zeta word's Z24-high layout rather than
+			 * assuming it. */
+			int ok = strcmp(r.status, "mismatch") == 0 && r.out_depth &&
+			         r.out_diff[0] == 0 && r.out_diff[SD_OUT_Z] > 0 &&
+			         r.out_maxd[SD_OUT_Z] >= 1468006 && r.out_maxd[SD_OUT_Z] <= 2726297;
+			printf("shader-differential: control-depth-mismatch: status %s, c0 diff %d, z diff %d max_delta %d Z24 (expect ~2097152): %s\n",
+			       r.status, r.out_diff[0], r.out_diff[SD_OUT_Z], r.out_maxd[SD_OUT_Z],
+			       ok ? "the judge sees a depth difference of the expected size" : "NOT AS EXPECTED - a wrong depth export could pass this rig unseen");
+			depth_seen |= SD_DEP_C_MIS;
+			if (ok) depth_pass |= SD_DEP_C_MIS; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-depth-blind") == 0) {
+			/* An exporter that writes the interpolated Z back, against
+			 * a container declaring no depth at all: identical, with
+			 * depth judged on the exporter's flag alone.  Proves depth
+			 * judgement is not merely 'declared differs'. */
+			int ok = strcmp(r.status, "identical") == 0 && r.out_depth &&
+			         (r.depth_flag_a != r.depth_flag_b);
+			printf("shader-differential: control-depth-blind: status %s, depth judged %d, depthReplace a=%d b=%d, z diff %d: %s\n",
+			       r.status, r.out_depth, r.depth_flag_a, r.depth_flag_b, r.out_diff[SD_OUT_Z],
+			       ok ? "an unchanged depth is not called different" : "NOT AS EXPECTED - depth judgement would flag exports that change nothing");
+			depth_seen |= SD_DEP_C_BLIND;
+			if (ok) depth_pass |= SD_DEP_C_BLIND; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-depthonly-identical") == 0) {
+			/* A container whose ONLY output is depth, twice: identical
+			 * with NO colour judged, depth judged, and every pixel drawn
+			 * on the zeta surface. */
+			int ok = strcmp(r.status, "identical") == 0 && r.out_mask == 0 &&
+			         r.out_depth && r.painted_a == RT_W * RT_H;
+			printf("shader-differential: control-depthonly-identical: status %s, judged 0x%x depth %d painted %d: %s\n",
+			       r.status, r.out_mask, r.out_depth, r.painted_a,
+			       ok ? "a depth-only program is judged on z alone" : "NOT AS EXPECTED - a depth-only program cannot get a verdict");
+			depth_seen |= SD_DEP_C_ONLY_ID;
+			if (ok) depth_pass |= SD_DEP_C_ONLY_ID; else failures++;
+			goto post_row;
+		}
+		if (strcmp(p->role, "control-depthonly-mismatch") == 0) {
+			/* Depth-only pair whose exported depths differ by +0.125:
+			 * mismatch on z alone, every pixel, the arithmetic Z24 delta,
+			 * and no colour delta at all. */
+			int ok = strcmp(r.status, "mismatch") == 0 && r.out_mask == 0 && r.out_depth &&
+			         r.out_diff[SD_OUT_Z] == RT_W * RT_H && r.max_delta == 0 &&
+			         r.out_maxd[SD_OUT_Z] >= 1468006 && r.out_maxd[SD_OUT_Z] <= 2726297;
+			printf("shader-differential: control-depthonly-mismatch: status %s, judged 0x%x, z diff %d max_delta %d Z24 (expect 4096 px, ~2097152), colour max_delta %d: %s\n",
+			       r.status, r.out_mask, r.out_diff[SD_OUT_Z], r.out_maxd[SD_OUT_Z], r.max_delta,
+			       ok ? "the judge sees a depth-only difference" : "NOT AS EXPECTED - a wrong depth-only export could pass this rig unseen");
+			depth_seen |= SD_DEP_C_ONLY_MIS;
+			if (ok) depth_pass |= SD_DEP_C_ONLY_MIS; else failures++;
 			goto post_row;
 		}
 
@@ -2917,9 +3659,9 @@ int main(int argc, const char **argv)
 	free(canary);
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d discard-blind pairs (a KIL that never fired: no verdict on the kill), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame), %d vp rows withheld behind a red VP control\n",
-	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - blind - unoracled - unstable - vp_skipped,
-	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, blind, unoracled, unstable, vp_skipped);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d discard-blind pairs (a KIL that never fired: no verdict on the kill), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame), %d vp rows withheld behind a red VP control, %d rows withheld behind a red MRT/depth control\n",
+	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - blind - unoracled - unstable - vp_skipped - outputs_skipped,
+	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, blind, unoracled, unstable, vp_skipped, outputs_skipped);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:

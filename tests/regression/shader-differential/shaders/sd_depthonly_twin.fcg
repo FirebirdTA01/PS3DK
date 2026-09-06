@@ -1,0 +1,7 @@
+// control-depthonly twin: identical to sd_depthonly_ctrl.fcg except the exported
+// depth is offset by +0.125, so the pair must judge mismatch on z alone with the
+// arithmetic Z24 delta of 0.125 * 2^24 = 2097152 and no colour output judged.
+void main(float4 tc : TEXCOORD0, out float depth : DEPTH)
+{
+    depth = tc.x * 0.5 + 0.125;
+}
