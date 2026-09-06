@@ -7374,8 +7374,11 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // A DECLARED half colour output writes H0, not R0 (t_80dad2dd).  The
     // reference decides this from the OUTPUT PARAMETER'S TYPE and nothing
     // else - half arithmetic alone does not do it - and records it in the
-    // container's outputFromH0, which the SDK's bind reads: 0x0e for H0
-    // against 0x40 for R0.  Until this, the general path dropped all three
+    // container's outputFromH0, which the runtime reads to decide which
+    // register the colour comes from - the bit values are the SDK's business
+    // and have already moved once (t_96daf53b), so they are named in
+    // cell/gcm/gcm_fp_control.h and nowhere in the compiler.  Until this
+    // change, the general path dropped all three
     // (the register, its precision and the flag), so `out half4` and
     // `out float4` compiled to byte-identical programs.
     const bool halfColourOutput = std::any_of(
