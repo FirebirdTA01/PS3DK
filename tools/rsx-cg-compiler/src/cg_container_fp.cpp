@@ -68,6 +68,7 @@ constexpr uint32_t kInvalidIndex           = 0xFFFFFFFFu;
 // CGresource bind locations.
 constexpr uint32_t kCgTexUnit0   = 2048u;  // 0x0800
 constexpr uint32_t kCgColor0     = 2757u;  // 0x0ac5  (FP COLOR semantic)
+constexpr uint32_t kCgDepth0     = 2933u;  // 0x0b75  (FP DEPTH semantic)
 constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
 
 // CG_UNDEFINED = 3256 = 0x0cb8 — the reference compiler uses this resource code for
@@ -153,7 +154,22 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     if (semUpper == "SPECULAR" && semIndex == 0) return kCgColor0 + 1;
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
         return kCgTexCoord0 + semIndex;
+    // The fragment DEPTH output.  Ours left this at 0, which the
+    // reference disassembler prints as '???'; measured against the
+    // reference on a `float depth : DEPTH` fixture, it is CG_DEPTH0
+    // (t_1722b8bc).  Only DEPTH0 exists — there is one depth output.
+    if ((semUpper == "DEPTH" || semUpper == "DEPTH0") && semIndex == 0)
+        return kCgDepth0;
     return 0;
+}
+
+// The reference records the DEPTH output parameter's CGtype as FLOAT3,
+// not the FLOAT the Cg source declares (measured: type 0x0417 where we
+// emitted 0x0415).  Byte identity depends on reproducing it, so it is
+// recorded here rather than normalised away.
+bool isFpDepthOutput(const std::string& semUpper, int semIndex)
+{
+    return (semUpper == "DEPTH" || semUpper == "DEPTH0") && semIndex == 0;
 }
 
 }  // namespace
@@ -277,6 +293,9 @@ ContainerResult emitFragmentContainerImpl(
                         ? std::string{}
                         : (p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName);
         d.type      = cgTypeForIRType(p.type);
+        if (p.storage == StorageQualifier::Out &&
+            isFpDepthOutput(toUpper(p.semanticName), p.semanticIndex))
+            d.type = kCgFloat3;
         d.paramno   = static_cast<uint32_t>(i);
 
         // Shared predicate: this omitted SamplerRect while the emit side
@@ -408,6 +427,8 @@ ContainerResult emitFragmentContainerImpl(
             d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
             d.type      = cgTypeForIRType(in.resultType);
             if (d.type == 0) d.type = kCgFloat4;
+            if (isFpDepthOutput(toUpper(in.semanticName), in.semanticIndex))
+                d.type = kCgFloat3;
             d.var       = kCgVarying;
             d.direction = kCgOut;
             d.paramno   = kInvalidIndex;

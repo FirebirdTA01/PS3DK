@@ -1,0 +1,15 @@
+// Fragment DEPTH export, `out` PARAMETER spelling (t_1722b8bc).
+//
+// Same contract as fp_depth_export_f.cg, reached through a different
+// container code path: a struct return and an `out` parameter list build
+// the parameter table at two SEPARATE sites, and the depth output's
+// CGtype widening had to be fixed in both.  Fixing only the site the
+// struct fixture exercised left this spelling emitting CG_FLOAT, so this
+// file exists to pin the site the other fixture cannot reach.
+void main(float4 tc      : TEXCOORD0,
+          out float4 color : COLOR,
+          out float  depth : DEPTH)
+{
+    color = tc;
+    depth = tc.x * 0.5;
+}

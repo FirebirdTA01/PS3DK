@@ -1,0 +1,24 @@
+// Fragment DEPTH export (t_1722b8bc).
+//
+// The reference compiles this to:
+//     MOVR R0, f[TEX0];
+//     MULR R1.z, R0.x, 0.5;
+// with the container carrying depthReplace = 1, the depth parameter's
+// resource CG_DEPTH0 (0x0b75) and its CGtype FLOAT3 (0x0417) — note the
+// reference widens the declared `float` to float3.
+//
+// Every one of those was wrong on our side and all four failures were
+// silent: exit 0, a container written and a sane register count, with the
+// pixel rig blind because nothing judges depth.
+struct PSOut {
+    float4 color : COLOR;
+    float  depth : DEPTH;
+};
+
+PSOut main(float4 tc : TEXCOORD0)
+{
+    PSOut o;
+    o.color = tc;
+    o.depth = tc.x * 0.5;
+    return o;
+}

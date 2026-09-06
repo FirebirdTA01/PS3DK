@@ -1267,6 +1267,48 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     FpAssembler asm_;
     FpAttributes attrs;
 
+    // FRAGMENT DEPTH OUTPUT: REFUSED ON THIS PATH (t_1722b8bc).
+    //
+    // fragmentOutputIndex above has always said DEPTH -> R1, ".z only".
+    // Nothing here ever emitted it: a shader declaring `float d : DEPTH`
+    // compiled to its colour store alone, exit 0, container written,
+    // sane register count, and the depth write simply ABSENT.  Measured
+    // against the reference on fp_depth_export_f.cg, which it lowers to
+    // MULR R1.z with depthReplace = 1.
+    //
+    // This is the retired shape matcher, reachable only via
+    // --legacy-lowering, so teaching it the real depth lowering buys
+    // nothing that ships.  Refusing does: a silently dropped output is
+    // the failure class this compiler keeps paying for, and an honest
+    // named refusal is what every other unlowerable shape here gets.
+    // The general path owns the real lowering.
+    for (const auto& p : entry.parameters) {
+        if (p.storage != StorageQualifier::Out &&
+            p.storage != StorageQualifier::InOut)
+            continue;
+        if (fragmentOutputIndex(toUpper(p.semanticName), p.semanticIndex) == 1) {
+            out.diagnostics.push_back(
+                "nv40-fp: fragment DEPTH output is not lowered on the legacy "
+                "path - it would be dropped silently; refusing (t_1722b8bc)");
+            out.ok = false;
+            return out;
+        }
+    }
+    for (const auto& blockPtr : entry.blocks) {
+        if (!blockPtr) continue;
+        for (const auto& instPtr : blockPtr->instructions) {
+            if (!instPtr || instPtr->op != IROp::StoreOutput) continue;
+            if (fragmentOutputIndex(toUpper(instPtr->semanticName),
+                                    instPtr->semanticIndex) != 1)
+                continue;
+            out.diagnostics.push_back(
+                "nv40-fp: fragment DEPTH output is not lowered on the legacy "
+                "path - it would be dropped silently; refusing (t_1722b8bc)");
+            out.ok = false;
+            return out;
+        }
+    }
+
     // IR value → NV40 FP INPUT_SRC code (e.g. NVFX_FP_OP_INPUT_SRC_COL0).
     // Populated from In/None parameters (the front-end leaves direct
     // varying reads as the parameter value, no explicit LoadVarying)
