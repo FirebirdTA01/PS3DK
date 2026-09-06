@@ -55,22 +55,60 @@ one of them while failing the other two.
   registers can be the faster one. We do not yet model that trade at all: our
   optimization levels are currently a declaration rather than a behaviour, and
   our programs are both longer and register-hungrier than they need to be. This
-  is the axis no gate currently enforces, and closing it is what turns the
-  compiler from correct into useful.
+  is the axis a gate holds at no-regression but no gate yet drives toward the
+  reference's counts, and closing it is what turns the compiler from correct
+  into useful.
+
+The items that headed this list have moved. Control flow merges multiple return
+blocks; matrix-valued expressions compile; derivatives landed as a partial, with
+one precision question still open. On register pressure, demand scheduling keeps
+register counts bounded on the measured fragment accumulation families and
+removed the two measured register-budget refusals — it triggers only on
+fragment accumulator chains of at least three members whose intermediates have a
+single use, and it can lengthen the lifetime of a value shared with an unrelated
+consumer, so broader register-pressure modelling remains open.
+
+### The bar for a release
+
+The goal is that this compiler can replace the reference compiler for every
+shader this project ships, even where it produces less well optimized microcode.
+Acceptance is the near-term bar and it is largely met: every shipped sample and
+SDK shader compiles and renders identically on colour 0. The remaining refusals
+— including four of this project's own regression fixtures — are named shapes
+the reference accepts, tracked individually rather than as a percentage.
+
+The harder half is verification, so the gate is:
+
+- every shader the reference compiles, compiles here
+- every shader this project ships renders identically, across **all declared
+  outputs** — colour targets beyond the first, and depth, not only colour 0
+- remaining single-LSB differences either eliminated or accepted individually
+- a spot check on real hardware for a named set, since emulator-based judging
+  cannot decide fixed-point precision, and multi-output comparison is a new
+  instrument that deserves one hardware confirmation before its verdicts are
+  trusted
+
+Byte-for-byte equality with the reference is explicitly **not** part of that
+bar. It is tracked separately as a quality signal, because a shader that matches
+exactly needs no pixel judgement at all.
 
 Near-term shader work, in order:
 
-- general-path control flow — merging multiple return blocks is the single
-  largest remaining acceptance unlock (`docs/design/shader-compiler-control-flow.md`)
-- matrix-valued expression plumbing, which blocks several shipped homebrew
-  vertex programs
-- register-pressure modelling and instruction-count reduction
-  (`docs/design/shader-compiler-register-pressure.md`), which also closes the
-  last refusals that are budget consequences rather than missing features
-- screen-space derivatives (`docs/design/shader-compiler-derivatives.md`)
+- judging **every declared output**, not only colour 0. This is the instrument
+  that stands between "compiles" and "replaces the reference": a wrong depth
+  export survived for as long as the compiler had existed because nothing
+  rendered depth to compare it
+- multiple render targets, which cannot be called complete before that
+  instrument exists
+- the remaining shapes the reference compiles and this compiler refuses
+- the last single-LSB pixel differences, each attributed to a named mechanism
+  rather than to precision in general
 - an NV40 microcode disassembler, so that microcode-level verification is
   reproducible from this repository alone rather than depending on private
   comparison material
+- instruction-count and register-count reduction, the quality axis above. A gate
+  holds these at no-regression against a recorded baseline; no gate yet drives
+  them toward the reference's counts
 
 ## Relationship to upstream PSL1GHT (deliberate divergences)
 
