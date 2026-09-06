@@ -1664,6 +1664,41 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
         current = savedPos;
     }
 
+    // A DECLARATION ATTEMPT WITH AN UNKNOWN TYPE.  `bogusType q;` is not
+    // an expression, but it reached expression parsing because the
+    // declaration path above is only taken when the first token is a
+    // KNOWN type name.  The result was five diagnostics for one mistake:
+    // the first pointing at the identifier AFTER the unknown type, and a
+    // later one inventing `unknown type name 'o'` about a name that is
+    // declared - the wrong line about the wrong identifier.
+    //
+    // Two adjacent identifiers are never a valid expression in Cg, so the
+    // shape is unambiguous: name the unknown TYPE at its own position,
+    // then let the caller's recovery consume to the ';' so a second, real
+    // mistake later in the body is still reported (t_ec186f0c).  The
+    // parameter path has reported it this way since t_472ff302; this is
+    // the local path being made to agree with it.
+    if (check(TokenType::IDENTIFIER) &&
+        peek(1).type == TokenType::IDENTIFIER)
+    {
+        const Token& typeToken = peek();
+        error(tokenLocation(typeToken),
+              "unknown type name '" + typeToken.lexeme + "'");
+        // CONSUME THE FAILED DECLARATION.  Returning without advancing
+        // leaves the statement loop on the same token, which is the same
+        // no-progress shape t_472ff302 fixed at the top level - here it
+        // exhausted memory rather than hanging, because the shader tests
+        // run under a virtual-memory limit.  Stop at the ';' or at a brace
+        // so the rest of the body is still parsed and its own mistakes are
+        // still reported.
+        while (!isAtEnd() && !check(TokenType::SEMICOLON) &&
+               !check(TokenType::LBRACE) && !check(TokenType::RBRACE))
+            advance();
+        if (check(TokenType::SEMICOLON))
+            advance();
+        return nullptr;
+    }
+
     // Parse as expression statement
     auto expr = parseExpression();
     consume(TokenType::SEMICOLON, "Expected ';' after expression");
