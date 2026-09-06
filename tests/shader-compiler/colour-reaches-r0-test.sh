@@ -19,8 +19,8 @@
 # whatever was already in R0 happened to match the expected picture.  An
 # off-slot colour is invisible whenever the stale contents agree.
 #
-# What is deterministic, and what this test asserts: R0 is the only
-# register the hardware reads after the program ends, so a write to any
+# What is deterministic, and what this test asserts: declared output
+# registers are live after the program ends, so a write to any
 # other register that is never read again is a value computed and thrown
 # away.  When that value is the colour, the picture is wrong.  Dead stores
 # are merely wasteful in the general case, so the check is exact rather
@@ -36,6 +36,18 @@ if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
 fi
 [[ -x "$compiler" ]] || fail "rsx-cg-compiler not executable: $compiler"
+
+# Windows-created linked worktrees contain a drive-letter gitdir that Linux
+# Git cannot resolve.  Translate it for this test under WSL without rewriting
+# the shared .git pointer (native Windows Git still needs its original path).
+if [[ -z "${GIT_DIR:-}" && -f "$repo_root/.git" ]] && command -v wslpath >/dev/null 2>&1; then
+    IFS= read -r git_pointer < "$repo_root/.git"
+    git_pointer="${git_pointer%$'\r'}"
+    if [[ "$git_pointer" =~ ^gitdir:\ ([A-Za-z]:[/\\].*)$ ]]; then
+        export GIT_DIR="$(wslpath -u "${BASH_REMATCH[1]}")"
+        export GIT_WORK_TREE="$repo_root"
+    fi
+fi
 
 work="${TMPDIR:-/tmp}/ps3dk-colour-reaches-r0-test.$$"
 mkdir -p "$work"
@@ -61,7 +73,7 @@ for s in "${shaders[@]}"; do
     out="$work/$(printf '%s' "$s" | tr '/' '_').log"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-        timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" "$compiler" \
+        timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" env RSX_DUMP_ORDER=1 "$compiler" \
             -p sce_fp_rsx "$repo_root/$s"
     ) >"$out" 2>&1 || rm -f "$out"    # a refusal is not this test's business
 done
@@ -94,6 +106,7 @@ import sys
 # destination.  hw[1..3]: bits 0..1 register type (0 temp), bits 2..7 the
 # register, bit 8 H register.
 LINE = re.compile(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
+OUTPUT = re.compile(r"^store sem=\S+ outIdx=(\d+)\s")
 
 # The one shader that has always carried a dead write, named rather than
 # excused by a weaker rule: its guard lowering leaves a trailing ADD whose
@@ -124,11 +137,39 @@ def src_slots(w):
     return out
 
 
+def dead_writes(instrs, outputs):
+    dead = []
+    for n, w in enumerate(instrs):
+        slot = dst_slot(w)
+        if slot is None or slot in outputs:
+            continue
+        if not any(slot in src_slots(later) for later in instrs[n + 1:]):
+            dead.append((n, slot))
+    return dead
+
+
+# A depth-like output at R1 is live only when declared.  A dead write at R2
+# remains an error in that same program; adding outputs must not disable the
+# check for ordinary temporaries.  These are decoded MOV destination words,
+# writing .x with all sources reading R0.
+control = [[0x202, 0, 0, 0], [0x204, 0, 0, 0]]
+assert dead_writes(control, {0, 1}) == [(1, 2)]
+assert dead_writes(control, {0}) == [(0, 1), (1, 2)]
+
+
 work = sys.argv[1]
 checked, bad, stale = 0, [], []
 for name in sorted(os.listdir(work)):
     words = []
+    # Colour is the default fragment return, including merged-return paths
+    # that directly compose R0 without visiting lowerStoreOutput.  Additional
+    # outputs must have a declaration in the lowering trace; never exempt a
+    # register merely because it could hold depth.
+    outputs = {0}
     for line in open(os.path.join(work, name), encoding="utf-8"):
+        output = OUTPUT.match(line)
+        if output:
+            outputs.add(int(output.group(1)))
         m = LINE.match(line)
         if m:
             w = [unswap(int(x, 16)) for x in m.group(2).split()]
@@ -146,13 +187,7 @@ for name in sorted(os.listdir(work)):
         instrs.append(w)
         i += 1 + (1 if consts else 0)
 
-    dead = []
-    for n, w in enumerate(instrs):
-        slot = dst_slot(w)
-        if slot is None or slot == 0:
-            continue
-        if not any(slot in src_slots(later) for later in instrs[n + 1:]):
-            dead.append((n, slot))
+    dead = dead_writes(instrs, outputs)
 
     # log name is the repo-relative path with '/' -> '_', plus '.log'
     shader = name.split("shaders_")[-1]
@@ -169,8 +204,8 @@ if checked < 20:
 
 for shader, dead in bad:
     sys.stderr.write(
-        "FAIL: %s writes %s and never reads it again.  R0 is the only "
-        "register the hardware reads after the program ends, so this is a "
+        "FAIL: %s writes %s and never reads it again.  This register is not "
+        "a declared output read after the program ends, so this is a "
         "value computed and thrown away - and when it is the colour, the "
         "program paints whatever was already in R0 (t_5dc260b0).\n"
         % (shader, ", ".join("R%d at instruction %d" % (s, n)
