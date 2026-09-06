@@ -1,0 +1,2 @@
+# Explicit repository CI exclusions: repository test path|board id|reason
+# Bare paths and empty reasons refuse. No tests are currently excluded.

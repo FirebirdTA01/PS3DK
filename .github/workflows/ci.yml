@@ -80,6 +80,9 @@ jobs:
       - name: Validate rsx-cg-compiler --version
         run: tools/rsx-cg-compiler/build/rsx-cg-compiler --version
 
+      - name: Check every tracked test has a CI invocation
+        run: python3 tests/ci-test-list-test.py
+
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
@@ -190,6 +193,41 @@ jobs:
         run: bash tests/shader-compiler/int-float-cast-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler vector subscript bounds
         run: bash tests/shader-compiler/vector-subscript-bounds-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler accumulation order
+        run: bash tests/shader-compiler/accumulation-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler composed outputs
+        run: bash tests/shader-compiler/composed-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler computed lane inserts
+        run: bash tests/shader-compiler/computed-lane-insert-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler cross-block source lanes
+        run: bash tests/shader-compiler/cross-block-source-lanes-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler depth export
+        run: bash tests/shader-compiler/depth-export-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler direct square roots
+        run: bash tests/shader-compiler/direct-sqrt-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler faceforward
+        run: bash tests/shader-compiler/faceforward-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler local array indexing
+        run: bash tests/shader-compiler/local-array-index-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler MRT refusal
+        run: bash tests/shader-compiler/mrt-output-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler output temporary reuse
+        run: bash tests/shader-compiler/output-temp-reuse-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler scheduler output writes
+        run: bash tests/shader-compiler/scheduler-output-waw-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler scheduler partial writers
+        run: bash tests/shader-compiler/scheduler-partial-writer-raw-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler predicated select output aliases
+        run: bash tests/shader-compiler/selpred-output-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler short-circuit root comparisons
+        run: bash tests/shader-compiler/short-root-comparison-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler step register collisions
+        run: bash tests/shader-compiler/step-register-collision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler vertex attributes and clip planes
+        run: bash tests/shader-compiler/vp-attr-clp-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test shader corpus fetch metadata and destination guards
+        run: bash tests/shader-corpus/fetch-shader-corpus-test.sh
 
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -207,11 +245,19 @@ jobs:
         shell: pwsh
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-census-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-gap-summary-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\reference-tree-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\stage-roots-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\shipped-coverage-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\path-pair-corpus-inputs-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Set up MSYS2 / mingw64
         uses: msys2/setup-msys2@v2
@@ -229,6 +275,9 @@ jobs:
             mingw-w64-x86_64-zstd
             mingw-w64-x86_64-python
             mingw-w64-x86_64-rust
+
+      - name: Test sampler refusal with the configured native compiler
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/regression/shader-differential/sampler-kind-refusal-test.ps1 -CCompiler gcc
 
       - name: cargo build (windows)
         working-directory: tools

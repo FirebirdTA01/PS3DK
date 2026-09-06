@@ -3,6 +3,7 @@
 # Asserts that the differential harness auto-binder rejects unsupported
 # sampler kinds (such as sampler arrays and generic sampler) with -1 refusal
 # rather than silently continuing/skipping them without binding textures.
+param([string]$CCompiler = "")
 $ErrorActionPreference = "Stop"
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -123,18 +124,24 @@ New-Item -ItemType Directory -Force $work | Out-Null
 try {
     $cFile = Join-Path $work "runner.c"
     Set-Content -LiteralPath $cFile -Value $runnerSrc -Encoding Ascii
-    $wslCFile = "/mnt/" + $work.Substring(0, 1).ToLowerInvariant() + $work.Substring(2).Replace('\', '/') + "/runner.c"
-    $wslBin = "/tmp/sampler_refusal_runner"
-
-    $compileCmd = "gcc -I $wsl_path/sdk/libgcm_cmd/include -I $wsl_path/sdk/libgcm_cmd/include/cell $wslCFile -o $wslBin"
-    $compileOut = (& wsl bash -c $compileCmd 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) {
-        throw "compilation failed: $compileOut"
-    }
-
-    $runOut = (& wsl $wslBin 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) {
-        throw "runner failed: $runOut"
+    if ($CCompiler) {
+        # CI's Windows job configures MinGW, not a WSL distribution. Compile
+        # the identical harness natively when its compiler is explicitly given.
+        Write-Host "sampler-kind-refusal: native compiler '$CCompiler'"
+        $nativeBin = Join-Path $work "runner.exe"
+        $compileOut = (& $CCompiler -I "$repo_root/sdk/libgcm_cmd/include" -I "$repo_root/sdk/libgcm_cmd/include/cell" $cFile -o $nativeBin 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw "native compiler '$CCompiler' failed: $compileOut" }
+        $runOut = (& $nativeBin 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw "native runner from '$CCompiler' failed: $runOut" }
+    } else {
+        Write-Host "sampler-kind-refusal: WSL gcc (default)"
+        $wslCFile = "/mnt/" + $work.Substring(0, 1).ToLowerInvariant() + $work.Substring(2).Replace('\', '/') + "/runner.c"
+        $wslBin = "/tmp/sampler_refusal_runner"
+        $compileCmd = "gcc -I $wsl_path/sdk/libgcm_cmd/include -I $wsl_path/sdk/libgcm_cmd/include/cell $wslCFile -o $wslBin"
+        $compileOut = (& wsl bash -c $compileCmd 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw "WSL gcc compilation failed: $compileOut" }
+        $runOut = (& wsl $wslBin 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw "WSL runner failed: $runOut" }
     }
     Write-Host $runOut.Trim()
 } finally {
