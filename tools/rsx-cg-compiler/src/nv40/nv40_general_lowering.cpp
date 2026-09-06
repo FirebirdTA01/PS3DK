@@ -459,11 +459,13 @@ static VSrc literalSrc(const IRConstant& constant)
 
 static void assignSwizzle(VSrc& src, int encoded, int count)
 {
-    if (encoded == 0 && count <= 1)
-        return;
+    // The operand may already alias a shuffled source. Select its lanes,
+    // not the underlying register's lanes (t_6be25fd4). Snapshot the map:
+    // assigning in place would corrupt permutations with repeated lanes.
+    const auto original = src.swizzle;
     for (int i = 0; i < 4; ++i) {
         const int shift = (i < count ? i : count - 1) * 2;
-        src.swizzle[i] = static_cast<uint8_t>((encoded >> shift) & 3);
+        src.swizzle[i] = original[(encoded >> shift) & 3];
     }
 }
 
@@ -1914,11 +1916,11 @@ private:
             VSrc src = resolve(def->operands[0]);
             if (src.kind == VSrcKind::None)
                 return false;
-            const int lane = std::max(0, std::min(3, def->componentIndex));
-            src.swizzle = {static_cast<uint8_t>(lane),
-                           static_cast<uint8_t>(lane),
-                           static_cast<uint8_t>(lane),
-                           static_cast<uint8_t>(lane)};
+            int lane = def->componentIndex;
+            if (def->operands.size() >= 2)
+                constantIndex(def->operands[1], lane);
+            lane = std::max(0, std::min(3, lane));
+            assignSwizzle(src, lane, 1);
             out = src;
             program_.valueToSource[id] = out;
             valueWidth_[id] = def->resultType.componentCount();
@@ -2441,12 +2443,14 @@ private:
             }
         }
 
-        const int lane = std::max(0, std::min(3, inst.componentIndex));
+        // Indexed extraction carries the selector as operand 1; its
+        // componentIndex remains zero, just as for matrix rows above.
+        int lane = inst.componentIndex;
+        if (inst.operands.size() >= 2)
+            constantIndex(inst.operands[1], lane);
+        lane = std::max(0, std::min(3, lane));
         VSrc src = resolve(inst.operands[0]);
-        src.swizzle = {static_cast<uint8_t>(lane),
-                       static_cast<uint8_t>(lane),
-                       static_cast<uint8_t>(lane),
-                       static_cast<uint8_t>(lane)};
+        assignSwizzle(src, lane, 1);
         program_.valueToSource[inst.result] = src;
     }
 

@@ -268,9 +268,8 @@ broadcast = decode(sys.argv[13])
 if sum(d["op"] == DIV for d in broadcast) != 1 or any(d["op"] == RCP for d in broadcast):
     raise SystemExit("FAIL: scalar quotient broadcast must keep one DIVR, no RCP")
 
-# Keep the inherited local-alias miscompile visible without blessing its
-# wrong encoding. Set PS3TC_REQUIRE_LOCAL_SWIZZLE=1 to run its currently-red
-# guard as a failure; once t_6be25fd4 lands this should pass unconditionally.
+# t_6be25fd4: the retained original witness now fails unconditionally if
+# source-map composition selects the wrong lanes.
 # Evaluate the tiny witness's DIVR input selection at a=(2,3,5,7). Its
 # numerator must be (5,3,7), denominator 2; current code reads (3,5,2)/7.
 known = decode(sys.argv[14])
@@ -284,10 +283,7 @@ if (w[1] & 3) == 1 and (w[2] & 3) == 1:
     denom = values[(w[2] >> 9) & 3]
     correct = numer == (5, 3, 7) and denom == 2
     if not correct:
-        message = "KNOWN RED t_6be25fd4: local swizzle reads %s/%s, expected (5, 3, 7)/2" % (numer, denom)
-        if os.environ.get("PS3TC_REQUIRE_LOCAL_SWIZZLE") == "1":
-            raise SystemExit("FAIL: " + message)
-        print(message)
+        raise SystemExit("FAIL t_6be25fd4: local swizzle reads %s/%s, expected (5, 3, 7)/2" % (numer, denom))
     else:
         print("local-swizzle witness now selects the expected inputs")
 else:

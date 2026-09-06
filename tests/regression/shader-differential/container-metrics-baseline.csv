@@ -419,3 +419,6 @@
 "fp_divr_vector_divisor_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_divisor_f.cg","auto","6","7","-1","2","2","0","False","True","identical"
 "fp_divr_vector_separate_inputs_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_separate_inputs_f.cg","auto","5","5","0","3","2","1","False","True","identical"
 "vp_literal_matrix_mul_v","vp-reference","sce_vp_rsx","tools/rsx-cg-compiler/tests/shaders/vp_literal_matrix_mul_v.cg","auto","12","9","3","4","2","2","False","True","identical"
+"fp_divr_local_swizzle_known_red_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_divr_local_swizzle_known_red_f.cg","auto","3","4","-1","2","2","0","False","True","identical"
+"fp_local_swizzle_chain_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_local_swizzle_chain_f.cg","auto","6","3","3","2","2","0","False","True","identical"
+"vp_local_swizzle_chain_v","vp-reference","sce_vp_rsx","tools/rsx-cg-compiler/tests/shaders/vp_local_swizzle_chain_v.cg","auto","3","2","1","1","1","0","False","True","identical"
