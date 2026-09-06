@@ -61,7 +61,11 @@ try {
         "samples/x/shaders/good.vcg|t_00000000|general|poisons every row after it"
     ) -Encoding Ascii
     $r = Read-Exclusions $probe
-    if (@($r.Excluded) -ne @("samples/x/shaders/good.vcg")) { throw "exclusion parser accepted a record without both a board id and a reason: $($r.Excluded -join ',')" }
+    # Count FIRST: an array on the left of -ne filters rather than compares, so
+    # an EMPTY Excluded would pass a membership assertion silently - a guard
+    # must be proven able to fail on the empty case, not only the wrong one
+    # (review finding, claude, 2026-09-06).
+    if (@($r.Excluded).Count -ne 1 -or @($r.Excluded)[0] -ne "samples/x/shaders/good.vcg") { throw "exclusion parser did not accept exactly the one complete record: [$($r.Excluded -join ',')]" }
     if (@($r.Malformed).Count -ne 2) { throw "exclusion parser did not flag the two reasonless records: $($r.Malformed -join ',')" }
 } finally {
     Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
