@@ -47,6 +47,10 @@ SOURCE_IDS=(
     classicube
     crystalct-psl1ght
     rsxgl
+    libretro-common-shaders
+    ogre-cg-samples
+    ogre-examples
+    shader-tut
 )
 
 declare -A NAME REPO REF PATHS LICENSE USAGE TRACKED DISTINCT CG VCG FCG NOTES
@@ -129,6 +133,62 @@ VCG[rsxgl]=5
 FCG[rsxgl]=5
 NOTES[rsxgl]="permissive-corpus-candidate"
 
+# Internet survey, 2026-09-06 (t_e5233251).  Programs are (source, entry,
+# profile) triples: libretro files carry main_fragment AND main_vertex, and
+# the OGRE files name their entries by hand, so a sweep must pass -e.
+
+NAME[libretro-common-shaders]="libretro common-shaders"
+REPO[libretro-common-shaders]="https://github.com/libretro/common-shaders.git"
+REF[libretro-common-shaders]="9c0d839a19651dffc9898da7673574a20fb39415"
+PATHS[libretro-common-shaders]="."
+LICENSE[libretro-common-shaders]="mixed-per-file-no-repo-license"
+USAGE[libretro-common-shaders]="fetch-run-only"
+TRACKED[libretro-common-shaders]=577
+DISTINCT[libretro-common-shaders]=572
+CG[libretro-common-shaders]=577
+VCG[libretro-common-shaders]=0
+FCG[libretro-common-shaders]=0
+NOTES[libretro-common-shaders]="no-repo-license;191-files-GPL-marked;146-permissive-marked;rest-unmarked;entries-main_fragment-main_vertex"
+
+NAME[ogre-cg-samples]="OGRE sample Cg programs"
+REPO[ogre-cg-samples]="https://github.com/OGRECave/ogre.git"
+REF[ogre-cg-samples]="d491e96bfe7bb57effcc57521bed4fd55fa7cfe3"
+PATHS[ogre-cg-samples]="Samples/Media/materials/programs"
+LICENSE[ogre-cg-samples]="MIT"
+USAGE[ogre-cg-samples]="vendor-eligible"
+TRACKED[ogre-cg-samples]=41
+DISTINCT[ogre-cg-samples]=41
+CG[ogre-cg-samples]=41
+VCG[ogre-cg-samples]=0
+FCG[ogre-cg-samples]=0
+NOTES[ogre-cg-samples]="MIT-repo-LICENSE-Torus-Knot;hand-named-entries;vendoring-awaits-director-word"
+
+NAME[ogre-examples]="ogre-examples"
+REPO[ogre-examples]="https://github.com/qknight/ogre-examples.git"
+REF[ogre-examples]="6aa4c56e89b5808b996da4be2b961d40e3d1a582"
+PATHS[ogre-examples]="."
+LICENSE[ogre-examples]="none"
+USAGE[ogre-examples]="excluded"
+TRACKED[ogre-examples]=4
+DISTINCT[ogre-examples]=3
+CG[ogre-examples]=4
+VCG[ogre-examples]=0
+FCG[ogre-examples]=0
+NOTES[ogre-examples]="no-license-file-anywhere-in-repo;surveyed-locally-only"
+
+NAME[shader-tut]="Shader-Tut"
+REPO[shader-tut]="https://github.com/Craig-Macomber/Shader-Tut.git"
+REF[shader-tut]="7bca8438a398529894d0cf63d731cb5bf7d3bdb5"
+PATHS[shader-tut]="."
+LICENSE[shader-tut]="none"
+USAGE[shader-tut]="excluded"
+TRACKED[shader-tut]=0
+DISTINCT[shader-tut]=0
+CG[shader-tut]=0
+VCG[shader-tut]=0
+FCG[shader-tut]=0
+NOTES[shader-tut]="no-Cg-sources-at-this-ref-and-no-license;listed-so-the-survey-is-not-repeated"
+
 csv_escape() {
     local value="${1//\"/\"\"}"
     case "$value" in
@@ -166,8 +226,14 @@ validate_metadata() {
         [[ -n "${PATHS[$id]:-}" ]] || die "$id missing path"
         [[ -n "${LICENSE[$id]:-}" ]] || die "$id missing license"
         [[ -n "${USAGE[$id]:-}" ]] || die "$id missing usage"
-        [[ "${USAGE[$id]}" == "fetch-run-only" || "${USAGE[$id]}" == "vendor-eligible" ]] \
+        [[ "${USAGE[$id]}" == "fetch-run-only" || "${USAGE[$id]}" == "vendor-eligible" \
+            || "${USAGE[$id]}" == "excluded" ]] \
             || die "$id has unsupported usage ${USAGE[$id]}"
+        # An excluded source stays in the table so the survey is not repeated,
+        # and it must say why it is excluded.
+        if [[ "${USAGE[$id]}" == "excluded" ]]; then
+            [[ -n "${NOTES[$id]:-}" ]] || die "$id is excluded without a reason in NOTES"
+        fi
 
         local extension_total=$(( CG[$id] + VCG[$id] + FCG[$id] ))
         [[ "$extension_total" -eq "${TRACKED[$id]}" ]] \
@@ -175,12 +241,30 @@ validate_metadata() {
         [[ "${DISTINCT[$id]}" -le "${TRACKED[$id]}" ]] \
             || die "$id distinct count exceeds tracked count"
 
-        case "${LICENSE[$id]}" in
-            *NOASSERTION*)
-                [[ "${USAGE[$id]}" == "fetch-run-only" ]] \
-                    || die "$id has ambiguous license but usage ${USAGE[$id]}"
-                ;;
-        esac
+        # Vendoring is redistribution, so this is an ALLOWLIST, not a
+        # denylist: a vendor-eligible source must carry a licence the project
+        # has decided it can ship, and everything else - including a licence
+        # string nobody has classified yet - is refused by default.  A
+        # denylist would green-light a GPL set the moment someone flipped its
+        # usage, because the guard would not recognise the string to reject
+        # it.  Add a licence here only as a deliberate decision.
+        if [[ "${USAGE[$id]}" == "vendor-eligible" ]]; then
+            # EXACT values only, never a prefix glob: `BSD-3-Clause-*` would
+            # admit "BSD-3-Clause-style-with-GitHub-NOASSERTION", which carries
+            # the very NOASSERTION ambiguity this guard exists to reject.  The
+            # allowlist is the set of licence strings the project has actually
+            # reviewed and decided it can redistribute; adding one is a
+            # deliberate edit, and the string must be the exact metadata value.
+            case "${LICENSE[$id]}" in
+                MIT) ;;
+                BSD-2-Clause) ;;
+                BSD-2-Clause-style) ;;  # rsxgl, reviewed
+                BSD-3-Clause) ;;
+                Zlib) ;;
+                zlib) ;;
+                *) die "$id is vendor-eligible but its licence '${LICENSE[$id]}' is not on the vendorable allowlist (exact match: MIT, BSD-2-Clause, BSD-2-Clause-style, BSD-3-Clause, Zlib); classify it fetch-run-only, or add the exact licence string here on purpose" ;;
+            esac
+        fi
 
         total_sources=$((total_sources + 1))
         total_tracked=$((total_tracked + TRACKED[$id]))
@@ -329,7 +413,11 @@ verify_fetched_counts() {
 fetch_source() {
     local id="$1" root="$2"
     require_id "$id"
-    [[ "${USAGE[$id]}" != "excluded" ]] || die "$id is excluded"
+    # An excluded source is a decision, not an oversight, so naming it
+    # explicitly is refused rather than silently honoured; its NOTES say why
+    # it was excluded.  Fetching is not redistribution, so un-excluding one a
+    # surveyor genuinely needs is a one-line edit here, made on purpose.
+    [[ "${USAGE[$id]}" != "excluded" ]] || die "$id is excluded (${NOTES[$id]:-see the licence table}); it is not fetched"
 
     command -v git >/dev/null 2>&1 || die "git not found"
     command -v find >/dev/null 2>&1 || die "find not found"
@@ -381,6 +469,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# An explicit --source naming an excluded source is refused for every action
+# that consumes the selection, dry-run included: the first question a careful
+# user asks is "what would this do?", and the answer for an excluded source is
+# "nothing", not "ok".  require_id also rejects an unknown id here.
+for id in "${ONLY[@]:-}"; do
+    [[ -n "$id" ]] || continue
+    require_id "$id"
+    [[ "${USAGE[$id]}" != "excluded" ]] \
+        || die "$id is excluded (${NOTES[$id]:-see the licence table}); it is not fetched"
+done
+
 case "$ACTION" in
     list)
         print_list
@@ -395,7 +494,10 @@ case "$ACTION" in
     fetch)
         validate_metadata
         if [[ ${#ONLY[@]} -eq 0 ]]; then
-            ONLY=("${SOURCE_IDS[@]}")
+            # --all means every non-excluded source, as the help text says.
+            for id in "${SOURCE_IDS[@]}"; do
+                [[ "${USAGE[$id]}" == "excluded" ]] || ONLY+=("$id")
+            done
         fi
         for id in "${ONLY[@]}"; do
             fetch_source "$id" "$ROOT"
