@@ -44,6 +44,12 @@ private:
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;
+    // Source text is the wrong boundary for short-circuit hazards:
+    // a precomputed sqrt predicate is already eager, while an inlined
+    // helper called from a logical RHS is still protected by the RHS.
+    // Tag instructions by where they are emitted so lowering can refuse
+    // only work source semantics would have skipped.
+    int shortCircuitRhsDepth_ = 0;
 
     // Break/continue targets for loops
     struct LoopContext

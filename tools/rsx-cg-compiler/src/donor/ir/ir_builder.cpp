@@ -1533,7 +1533,11 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 
     // Regular binary expression
     IRValueID leftValue = buildExpr(expr->left.get());
+    if (expr->op == BinaryOp::LogicalAnd || expr->op == BinaryOp::LogicalOr)
+        ++shortCircuitRhsDepth_;
     IRValueID rightValue = buildExpr(expr->right.get());
+    if (expr->op == BinaryOp::LogicalAnd || expr->op == BinaryOp::LogicalOr)
+        --shortCircuitRhsDepth_;
 
     IROp op = binaryOpToIROp(expr->op);
     IRTypeInfo resultType = getExprType(expr);
@@ -2513,6 +2517,7 @@ IRValueID IRBuilder::emitInstruction(IROp op, const IRTypeInfo& resultType,
 
     auto inst = std::make_unique<IRInstruction>(op, result, resultType);
     inst->loc = loc;
+    inst->shortCircuitRhs = shortCircuitRhsDepth_ > 0;
     for (IRValueID opnd : operands)
     {
         inst->addOperand(opnd);
@@ -2544,6 +2549,7 @@ IRValueID IRBuilder::emitCall(const std::string& funcName, const IRTypeInfo& res
 
     auto inst = std::make_unique<IRInstruction>(IROp::Call, result, resultType);
     inst->targetName = funcName;
+    inst->shortCircuitRhs = shortCircuitRhsDepth_ > 0;
     for (IRValueID arg : args)
     {
         inst->addOperand(arg);

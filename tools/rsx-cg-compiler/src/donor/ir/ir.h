@@ -321,6 +321,7 @@ public:
     // comparison alone rather than inverting it, so the flag has to
     // travel with the instruction (CF-2, t_91bbd575).
     bool guardIsNegated = false;
+    bool shortCircuitRhs = false;
     std::string targetName;          // For branch targets, function calls
     int semanticIndex = 0;           // For shader I/O operations
     std::string semanticName;        // For shader I/O operations (digit-stripped)

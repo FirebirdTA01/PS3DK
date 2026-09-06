@@ -624,6 +624,8 @@ private:
             return false;
         const IRInstruction& inst = *it->second;
         if (inst.op == IROp::Sqrt || inst.op == IROp::RSqrt) {
+            if (!inst.shortCircuitRhs)
+                return false;
             if (!inst.operands.empty() &&
                 isClampedNonNegative(inst.operands[0]))
                 return false;

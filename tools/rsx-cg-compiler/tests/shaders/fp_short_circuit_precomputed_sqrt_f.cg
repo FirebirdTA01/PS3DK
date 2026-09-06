@@ -1,0 +1,15 @@
+// Precomputing a sqrt predicate before a logical && is already eager in Cg.
+//
+// The short-circuit sqrt refusal must only catch work that source semantics
+// would skip on the logical RHS.  This shape evaluates sqrt(x) before the
+// logical expression, so refusing it is over-broad.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float x = c.x - 0.5;
+    bool p = sqrt(x) > 0.25;
+    if (c.y > 0.5 && p) {
+        o = float4(0.1, 0.8, 0.2, 1.0);
+    } else {
+        o = float4(0.7, 0.1, 0.1, 1.0);
+    }
+}

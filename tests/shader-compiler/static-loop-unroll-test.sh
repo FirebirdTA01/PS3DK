@@ -26,9 +26,11 @@ good_src="$shaders/generic_mad_chain_f.cg"
 static_src="$shaders/fp_static_negative_loop_f.cg"
 dynamic_src="$shaders/fp_refusal_dynamic_loop_f.cg"
 short_circuit_src="$shaders/fp_short_circuit_sqrt_refuse_f.cg"
+precomputed_sqrt_src="$shaders/fp_short_circuit_precomputed_sqrt_f.cg"
 
 [[ -f "$static_src" ]] || fail "fixture missing: $static_src"
 [[ -f "$short_circuit_src" ]] || fail "fixture missing: $short_circuit_src"
+[[ -f "$precomputed_sqrt_src" ]] || fail "fixture missing: $precomputed_sqrt_src"
 
 compile() {
     local label="$1" src="$2" out="$3" log="$4"
@@ -45,6 +47,8 @@ compile() {
 
 compile success-control "$good_src" "$work/good.fpo" "$work/good.log"
 compile static-negative-loop "$static_src" "$work/static.fpo" "$work/static.log"
+compile precomputed-sqrt-predicate "$precomputed_sqrt_src" \
+    "$work/precomputed.fpo" "$work/precomputed.log"
 
 if grep -Eq '^for\.(cond|body|inc|end)[0-9]*:' "$work/static.log"; then
     awk '/define void @main/,/^}/' "$work/static.log" >&2
