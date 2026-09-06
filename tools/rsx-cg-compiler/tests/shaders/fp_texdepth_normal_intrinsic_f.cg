@@ -1,0 +1,6 @@
+// t_0970e943: packed depth decode and its independent expansion.
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D image) : COLOR
+{
+    float depth = texDepth2D(image, uv);
+    return float4(depth, depth, depth, 1.0);
+}

@@ -44,6 +44,7 @@ private:
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;
+    std::vector<std::string> depthDecodeUniforms_;
     // Source text is the wrong boundary for short-circuit hazards:
     // a precomputed sqrt predicate is already eager, while an inlined
     // helper called from a logical RHS is still protected by the RHS.

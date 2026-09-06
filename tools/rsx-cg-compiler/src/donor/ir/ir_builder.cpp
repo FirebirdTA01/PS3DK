@@ -119,6 +119,7 @@ std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const Semantic
 {
     semantic_ = &semantic;
     module_ = std::make_unique<IRModule>(unit.filename);
+    depthDecodeUniforms_.clear();
 
     // Set shader stage
     module_->shaderStage = semantic.shaderInfo().stage;
@@ -1699,6 +1700,55 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 
     if (builtinOp && expr->resolvedFunction == nullptr)
     {
+        if ((expr->functionName == "texDepth2D" ||
+             expr->functionName == "texDepth2D_precise") && argValues.size() == 2)
+        {
+            // t_0970e943: these intrinsics decode packed RGB depth. Keep
+            // the factor as a patchable uniform with its compiled default,
+            // not a literal that the runtime cannot replace.
+            const bool precise = expr->functionName == "texDepth2D_precise";
+            const std::string factorName = precise ? "_depth_factor_precise" : "_depth_factor";
+            auto* factor = module_->findGlobal(factorName);
+            const bool generated = std::find(depthDecodeUniforms_.begin(),
+                depthDecodeUniforms_.end(), factorName) != depthDecodeUniforms_.end();
+            bool parameterCollision = false;
+            for (const auto& parameter : currentFunction_->parameters)
+                parameterCollision |= parameter.name == factorName;
+            if ((factor && !generated) || parameterCollision)
+            {
+                error(expr->loc, "depth decode parameter '" + factorName +
+                    "' conflicts with a source declaration; refusing ambiguous binding (t_0970e943)");
+                return InvalidIRValue;
+            }
+            if (!factor)
+            {
+                IRGlobal global;
+                global.name = factorName;
+                global.type = IRTypeInfo::Float3();
+                global.valueId = module_->allocateGlobalId();
+                global.storage = StorageQualifier::Uniform;
+                global.initialValue = precise
+                    ? std::vector<float>{0.003906250465661287f, 0.000015258790881489404f, 0.00000005960465188081798f}
+                    : std::vector<float>{0.99609375f, 0.0038909912109375f, 0.000015199184417724609375f};
+                module_->addGlobal(global);
+                depthDecodeUniforms_.push_back(factorName);
+            }
+            const auto vectorType = IRTypeInfo::Float3();
+            IRValueID sampled = emitInstruction(IROp::TexSample, vectorType, argValues);
+            if (precise)
+            {
+                // Reconstruct integer channel values before applying the
+                // precise scale; normalized channels alone are insufficient.
+                sampled = emitBinaryOp(IROp::Mul, vectorType, sampled, createConstant(255.0f));
+                sampled = emitBinaryOp(IROp::Add, vectorType, sampled, createConstant(0.5f));
+                sampled = emitUnaryOp(IROp::Floor, vectorType, sampled);
+            }
+            const IRValueID factorId = currentFunction_->allocateValueId();
+            auto load = std::make_unique<IRInstruction>(IROp::LoadUniform, factorId, vectorType);
+            load->targetName = factorName;
+            currentBlock_->addInstruction(std::move(load));
+            return emitBinaryOp(IROp::Dot, resultType, sampled, factorId);
+        }
         // Special handling for 'mul' - determine correct operation based on argument types
         if (expr->functionName == "mul" && expr->arguments.size() == 2)
         {

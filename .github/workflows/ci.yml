@@ -105,6 +105,8 @@ jobs:
         run: bash tests/shader-compiler/divr-opcode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Vertex division scalar-unit guard
         run: bash tests/shader-compiler/vp-division-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Packed depth texture decode guard
+        run: bash tests/shader-compiler/texdepth-decode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test source swizzle composition in both shader profiles
         run: bash tests/shader-compiler/local-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler user-function inlining

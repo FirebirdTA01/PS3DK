@@ -423,3 +423,11 @@ tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_separate_inputs_f.cg|auto|gen
 # t_6be25fd4: source-map composition, original quotient and three-alias chain.
 tools/rsx-cg-compiler/tests/shaders/fp_divr_local_swizzle_known_red_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_local_swizzle_chain_f.cg|auto|general
+
+# t_0970e943: packed RGB depth, compiled defaults and non-saturating patched factors.
+tools/rsx-cg-compiler/tests/shaders/fp_texdepth_normal_intrinsic_f.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/fp_texdepth_normal_intrinsic_f.cg|td-normal|general
+tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_intrinsic_f.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_intrinsic_f.cg|td-precise|general
+tools/rsx-cg-compiler/tests/shaders/fp_texdepth_normal_control_f.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_control_f.cg|0|general
