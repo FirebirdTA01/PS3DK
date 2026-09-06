@@ -134,11 +134,21 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 		{
 			// A marker we are passing through REPLACES the logical position
 			// rather than advancing it - it names the line of what follows.
+			//
+			// Unless it is SKIPPED.  A marker inside an inactive block names
+			// nothing: processDirective suppresses it, no text it describes is
+			// ever emitted, and adopting it renamed and renumbered the live
+			// source that followed the #endif - `#if 0 / #line 900 "hidden.h"
+			// / #endif` reported the next line as hidden.h:901.  A skipped
+			// marker is just another consumed line and advances the position
+			// by one like any other.
 			int markerLine = 0;
 			std::string markerFile;
-			if (Lexer::parseLineMarker(trimmedLine, markerLine, markerFile))
+			const bool isMarker =
+				Lexer::parseLineMarker(trimmedLine, markerLine, markerFile);
+			processDirective(trimmedLine, output, logicalFile, logicalLine);
+			if (isMarker && active)
 			{
-				processDirective(trimmedLine, output, logicalFile, logicalLine);
 				logicalLine = markerLine;
 				if (!markerFile.empty())
 					logicalFile = markerFile;
@@ -146,11 +156,17 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 				lineNum++;
 				continue;
 			}
-			processDirective(trimmedLine, output, logicalFile, logicalLine);
 		}
 		else if (active)
 		{
-			if (logicalLine != nextEmittedLine || logicalFile != nextEmittedFile)
+			// TRACKING is unconditional; EMITTING a marker is not.  A caller
+			// that asked for no line markers gets none - the option exists so
+			// the output can be fed to something that does not understand
+			// them, and a marker this function invented is no more welcome
+			// there than one it passed through.  handleInclude has always
+			// gated its own the same way.
+			if (!noLineMarkers &&
+				(logicalLine != nextEmittedLine || logicalFile != nextEmittedFile))
 			{
 				output += "#line " + std::to_string(logicalLine) + " \"" + logicalFile + "\"\n";
 			}
