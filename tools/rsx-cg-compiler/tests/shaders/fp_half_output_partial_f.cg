@@ -1,0 +1,18 @@
+// t_80dad2dd: a PARTIALLY written half colour output.
+//
+// The reference writes the output register twice and keeps no temp at all -
+// `MOVH o[COLH].w, {1}.---x` then `MOVH o[COLH].xyz, f[TEX0].xyz`.  The
+// general path instead composes the value in a temp and pins that temp to the
+// output slot, which for a half output is H0 - the low half of R0, the very
+// register the pin holds.  It therefore REFUSES, by design and by name.
+//
+// This fixture exists to keep that refusal honest.  It is not a wish for the
+// refusal to stay: the day the composition learns to write H0 directly (or
+// the allocator learns the output is half before it places anything), this
+// test turns red and whoever lifts the refusal inherits a failing test that
+// names the shape, rather than a silent H0-vs-R0 mix.  See t_cde25bad.
+void main(float4 t : TEXCOORD0, out half4 o : COLOR)
+{
+    o.xyz = t.xyz;
+    o.w = 1.0;
+}
