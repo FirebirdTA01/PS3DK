@@ -12,3 +12,9 @@ tests/regression/shader-readback/shaders/rb_pos_uv.vcg|0|both
 tests/regression/shader-readback/shaders/rb_xform.vcg|auto|both
 tools/rsx-cg-compiler/tests/shaders/vp_attr_inputs_v.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/vp_clp0_output_v.cg|0|general
+# t_9da20b33: a uniform matrix row index, `m_auto[0]` / `m_auto[2]`,
+# resolves to the row's VP const register.  Both containers are byte-identical
+# to the reference under the auto matrix values, so the stager records the
+# rows and skips pixel staging until a future byte drift needs judgement.
+tools/rsx-cg-compiler/tests/shaders/vp_matrix_row0_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_matrix_row2_v.cg|auto|general
