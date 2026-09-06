@@ -1,0 +1,21 @@
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float s0 = step(0.01, c.x + c.y * 0.001);
+    float s1 = step(0.02, c.x + c.y * 0.001);
+    float s2 = step(0.03, c.x + c.y * 0.001);
+    float s3 = step(0.04, c.x + c.y * 0.001);
+    float s4 = step(0.05, c.x + c.y * 0.001);
+    float s5 = step(0.06, c.x + c.y * 0.001);
+    float s6 = step(0.07, c.x + c.y * 0.001);
+    float s7 = step(0.08, c.x + c.y * 0.001);
+    float s8 = step(0.09, c.x + c.y * 0.001);
+    float s9 = step(0.10, c.x + c.y * 0.001);
+    float s10 = step(0.11, c.x + c.y * 0.001);
+    float s11 = step(0.12, c.x + c.y * 0.001);
+    float s12 = step(0.13, c.x + c.y * 0.001);
+    float s13 = step(0.14, c.x + c.y * 0.001);
+    float s14 = step(0.15, c.x + c.y * 0.001);
+    float s15 = step(0.16, c.x + c.y * 0.001);
+    float v = (s0 + s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9 + s10 + s11 + s12 + s13 + s14 + s15) * 0.062500;
+    o = float4(v, v, v, 1.0);
+}

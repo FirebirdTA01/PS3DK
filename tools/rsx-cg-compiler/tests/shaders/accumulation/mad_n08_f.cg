@@ -1,0 +1,13 @@
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float t0 = c.x * 0.001 + c.y * 0.001;
+    float t1 = c.x * 0.002 + c.y * 0.008;
+    float t2 = c.x * 0.003 + c.y * 0.015;
+    float t3 = c.x * 0.004 + c.y * 0.022;
+    float t4 = c.x * 0.005 + c.y * 0.029;
+    float t5 = c.x * 0.006 + c.y * 0.036;
+    float t6 = c.x * 0.007 + c.y * 0.043;
+    float t7 = c.x * 0.008 + c.y * 0.050;
+    float v = (t0 + t1 + t2 + t3 + t4 + t5 + t6 + t7) * 0.125000;
+    o = float4(v, v, v, 1.0);
+}

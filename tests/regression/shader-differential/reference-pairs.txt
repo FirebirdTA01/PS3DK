@@ -377,3 +377,8 @@ tools/rsx-cg-compiler/tests/shaders/fp_reflect3_width_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_length4_width_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_distance4_width_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_normalize4_width_f.cg|auto|general
+# Immediate accumulation: two sizes per independent shape pin the register law.
+tools/rsx-cg-compiler/tests/shaders/accumulation/mad_n08_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/accumulation/mad_n40_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/accumulation/step_n08_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/accumulation/step_n40_f.cg|auto|general

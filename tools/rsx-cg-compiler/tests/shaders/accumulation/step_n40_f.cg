@@ -1,0 +1,45 @@
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float s0 = step(0.01, c.x + c.y * 0.001);
+    float s1 = step(0.02, c.x + c.y * 0.001);
+    float s2 = step(0.03, c.x + c.y * 0.001);
+    float s3 = step(0.04, c.x + c.y * 0.001);
+    float s4 = step(0.05, c.x + c.y * 0.001);
+    float s5 = step(0.06, c.x + c.y * 0.001);
+    float s6 = step(0.07, c.x + c.y * 0.001);
+    float s7 = step(0.08, c.x + c.y * 0.001);
+    float s8 = step(0.09, c.x + c.y * 0.001);
+    float s9 = step(0.10, c.x + c.y * 0.001);
+    float s10 = step(0.11, c.x + c.y * 0.001);
+    float s11 = step(0.12, c.x + c.y * 0.001);
+    float s12 = step(0.13, c.x + c.y * 0.001);
+    float s13 = step(0.14, c.x + c.y * 0.001);
+    float s14 = step(0.15, c.x + c.y * 0.001);
+    float s15 = step(0.16, c.x + c.y * 0.001);
+    float s16 = step(0.17, c.x + c.y * 0.001);
+    float s17 = step(0.18, c.x + c.y * 0.001);
+    float s18 = step(0.19, c.x + c.y * 0.001);
+    float s19 = step(0.20, c.x + c.y * 0.001);
+    float s20 = step(0.21, c.x + c.y * 0.001);
+    float s21 = step(0.22, c.x + c.y * 0.001);
+    float s22 = step(0.23, c.x + c.y * 0.001);
+    float s23 = step(0.24, c.x + c.y * 0.001);
+    float s24 = step(0.25, c.x + c.y * 0.001);
+    float s25 = step(0.26, c.x + c.y * 0.001);
+    float s26 = step(0.27, c.x + c.y * 0.001);
+    float s27 = step(0.28, c.x + c.y * 0.001);
+    float s28 = step(0.29, c.x + c.y * 0.001);
+    float s29 = step(0.30, c.x + c.y * 0.001);
+    float s30 = step(0.31, c.x + c.y * 0.001);
+    float s31 = step(0.32, c.x + c.y * 0.001);
+    float s32 = step(0.33, c.x + c.y * 0.001);
+    float s33 = step(0.34, c.x + c.y * 0.001);
+    float s34 = step(0.35, c.x + c.y * 0.001);
+    float s35 = step(0.36, c.x + c.y * 0.001);
+    float s36 = step(0.37, c.x + c.y * 0.001);
+    float s37 = step(0.38, c.x + c.y * 0.001);
+    float s38 = step(0.39, c.x + c.y * 0.001);
+    float s39 = step(0.40, c.x + c.y * 0.001);
+    float v = (s0 + s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9 + s10 + s11 + s12 + s13 + s14 + s15 + s16 + s17 + s18 + s19 + s20 + s21 + s22 + s23 + s24 + s25 + s26 + s27 + s28 + s29 + s30 + s31 + s32 + s33 + s34 + s35 + s36 + s37 + s38 + s39) * 0.025000;
+    o = float4(v, v, v, 1.0);
+}

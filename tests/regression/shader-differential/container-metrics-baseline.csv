@@ -364,3 +364,7 @@
 "fp_length4_width_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_length4_width_f.cg","auto","11","6","5","2","2","0","False","True","identical"
 "fp_distance4_width_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_distance4_width_f.cg","auto","13","7","6","2","2","0","False","True","identical"
 "fp_normalize4_width_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_normalize4_width_f.cg","auto","9","4","5","3","2","1","False","True","identical"
+"mad_n08_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/accumulation/mad_n08_f.cg","auto","62","25","37","4","2","2","False","True","identical"
+"mad_n40_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/accumulation/mad_n40_f.cg","auto","286","124","162","4","2","2","False","True","identical"
+"step_n08_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/accumulation/step_n08_f.cg","auto","94","29","65","4","2","2","False","True","identical"
+"step_n40_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/accumulation/step_n40_f.cg","auto","446","127","319","4","2","2","False","True","identical"

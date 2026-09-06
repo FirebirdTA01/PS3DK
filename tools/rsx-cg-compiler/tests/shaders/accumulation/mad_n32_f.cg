@@ -1,0 +1,37 @@
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float t0 = c.x * 0.001 + c.y * 0.001;
+    float t1 = c.x * 0.002 + c.y * 0.008;
+    float t2 = c.x * 0.003 + c.y * 0.015;
+    float t3 = c.x * 0.004 + c.y * 0.022;
+    float t4 = c.x * 0.005 + c.y * 0.029;
+    float t5 = c.x * 0.006 + c.y * 0.036;
+    float t6 = c.x * 0.007 + c.y * 0.043;
+    float t7 = c.x * 0.008 + c.y * 0.050;
+    float t8 = c.x * 0.009 + c.y * 0.057;
+    float t9 = c.x * 0.010 + c.y * 0.064;
+    float t10 = c.x * 0.011 + c.y * 0.071;
+    float t11 = c.x * 0.012 + c.y * 0.078;
+    float t12 = c.x * 0.013 + c.y * 0.085;
+    float t13 = c.x * 0.014 + c.y * 0.092;
+    float t14 = c.x * 0.015 + c.y * 0.099;
+    float t15 = c.x * 0.016 + c.y * 0.106;
+    float t16 = c.x * 0.017 + c.y * 0.113;
+    float t17 = c.x * 0.018 + c.y * 0.120;
+    float t18 = c.x * 0.019 + c.y * 0.127;
+    float t19 = c.x * 0.020 + c.y * 0.134;
+    float t20 = c.x * 0.021 + c.y * 0.141;
+    float t21 = c.x * 0.022 + c.y * 0.148;
+    float t22 = c.x * 0.023 + c.y * 0.155;
+    float t23 = c.x * 0.024 + c.y * 0.162;
+    float t24 = c.x * 0.025 + c.y * 0.169;
+    float t25 = c.x * 0.026 + c.y * 0.176;
+    float t26 = c.x * 0.027 + c.y * 0.183;
+    float t27 = c.x * 0.028 + c.y * 0.190;
+    float t28 = c.x * 0.029 + c.y * 0.197;
+    float t29 = c.x * 0.030 + c.y * 0.204;
+    float t30 = c.x * 0.031 + c.y * 0.211;
+    float t31 = c.x * 0.032 + c.y * 0.218;
+    float v = (t0 + t1 + t2 + t3 + t4 + t5 + t6 + t7 + t8 + t9 + t10 + t11 + t12 + t13 + t14 + t15 + t16 + t17 + t18 + t19 + t20 + t21 + t22 + t23 + t24 + t25 + t26 + t27 + t28 + t29 + t30 + t31) * 0.031250;
+    o = float4(v, v, v, 1.0);
+}

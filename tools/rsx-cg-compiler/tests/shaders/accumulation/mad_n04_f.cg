@@ -1,0 +1,9 @@
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float t0 = c.x * 0.001 + c.y * 0.001;
+    float t1 = c.x * 0.002 + c.y * 0.008;
+    float t2 = c.x * 0.003 + c.y * 0.015;
+    float t3 = c.x * 0.004 + c.y * 0.022;
+    float v = (t0 + t1 + t2 + t3) * 0.250000;
+    o = float4(v, v, v, 1.0);
+}

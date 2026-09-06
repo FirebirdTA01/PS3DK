@@ -1,0 +1,7 @@
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float s0 = step(0.01, c.x + c.y * 0.001);
+    float s1 = step(0.02, c.x + c.y * 0.001);
+    float v = (s0 + s1) * 0.500000;
+    o = float4(v, v, v, 1.0);
+}

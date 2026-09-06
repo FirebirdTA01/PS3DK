@@ -102,9 +102,10 @@ compile "$work/n16.fcg" n16
 }
 
 # Raw fp16 H indices share the same six-bit FP temp field as full R indices.
-# After slot compaction this shape stays below the R-slot registerCount budget,
-# but exceeds H63.  The parent refuses on its inflated R-slot budget instead;
-# the diagnostic below distinguishes that refusal from the encoding guard.
+# Keep every step value live across the first sum by reading it again with
+# that sum as a multiplier. Immediate accumulation can now compile the old
+# single-use sum, but cannot discard these shared terms before the second sum.
+# The shape stays below the R-slot budget while exceeding raw H63.
 {
     printf 'void main(float4 c : TEXCOORD0, out float4 o : COLOR)\n{\n'
     for i in $(seq 0 39); do
@@ -117,7 +118,13 @@ compile "$work/n16.fcg" n16
         printf 's%d' "$i"
     done
     printf ') * 0.025;\n'
-    printf '    o = float4(v, v, v, 1.0);\n}\n'
+    printf '    float w = ('
+    for i in $(seq 0 39); do
+        [[ "$i" -gt 0 ]] && printf ' + '
+        printf 's%d * v' "$i"
+    done
+    printf ') * 0.025;\n'
+    printf '    o = float4(w, w, w, 1.0);\n}\n'
 } > "$work/fp16_raw_limit.fcg"
 
 rc=0

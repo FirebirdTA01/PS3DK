@@ -1265,6 +1265,7 @@ private:
             bool schedulableNow = true;
             int slack = 0;
             int sourceIndex = 0;
+            int demandOrder = std::numeric_limits<int>::max();
         };
 
         const auto better = [](const Node& a, const Node& b) {
@@ -1274,6 +1275,8 @@ private:
                 return !a.resourceOverflow && b.resourceOverflow;
             if (a.schedulableNow != b.schedulableNow)
                 return a.schedulableNow && !b.schedulableNow;
+            if (a.demandOrder != b.demandOrder)
+                return a.demandOrder < b.demandOrder;
             if (a.slack != b.slack) return a.slack < b.slack;
             return a.sourceIndex > b.sourceIndex;
         };
@@ -1491,6 +1494,72 @@ private:
             }
         }
 
+        // Demand order is a cost ranking ONLY among dependency-ready nodes.
+        // The RAW/WAR/WAW, output and condition-code edges above remain the
+        // authority; no operand pairing or floating-point association changes.
+        std::vector<int> demandOrder(n, std::numeric_limits<int>::max());
+        if (profile_ == GeneralProfile::Fragment) {
+            std::unordered_set<int> singleUse;
+            for (const auto& [value, reg] : program_.valueToVReg) {
+                if (useCount_[value] == 1)
+                    singleUse.insert(reg);
+            }
+            const auto accumulator = [](const VInstr& vi) -> const VSrc* {
+                if (vi.op == VOp::Add) return &vi.srcs[0];
+                if (vi.op == VOp::Mad) return &vi.srcs[2];
+                return nullptr;
+            };
+            std::vector<size_t> previous(n, n);
+            std::vector<int> chainLength(n, 0);
+            std::vector<bool> extended(n, false);
+            for (size_t i = 0; i < n; ++i) {
+                const VSrc* acc = accumulator(program_.instrs[i]);
+                if (!acc) continue;
+                chainLength[i] = 1;
+                if (acc->kind != VSrcKind::Temp || !singleUse.count(acc->index))
+                    continue;
+                const auto& defs = writers[acc->index];
+                const auto& uses = readers[acc->index];
+                if (defs.size() != 1 || uses.size() != 1 || defs[0] >= i ||
+                    !accumulator(program_.instrs[defs[0]]))
+                    continue;
+                previous[i] = defs[0];
+                chainLength[i] += chainLength[defs[0]];
+                extended[defs[0]] = true;
+            }
+
+            // Trigger: a left-deep Add/Mad chain with at least two links,
+            // each intermediate accumulator having exactly one IR use and
+            // one virtual read. Negated Add sources (subtraction) count too.
+            // Walk each expression depth-first in source operand order,
+            // visiting the prior partial sum before producing the next term.
+            // The whole transitive subtree outranks unrelated ready work,
+            // which keeps INT_MAX. A shared value with a late non-chain use
+            // can therefore live longer; independent expressions move later.
+            std::vector<std::vector<size_t>> predecessors(n);
+            for (size_t i = 0; i < n; ++i)
+                for (size_t next : consumers[i])
+                    predecessors[next].push_back(i);
+            int nextDemand = 0;
+            const auto visit = [&](const auto& self, size_t i) -> void {
+                if (demandOrder[i] != std::numeric_limits<int>::max()) return;
+                if (previous[i] != n) self(self, previous[i]);
+                const VInstr& vi = program_.instrs[i];
+                for (const VSrc& src : vi.srcs) {
+                    if (src.kind != VSrcKind::Temp) continue;
+                    for (size_t def : writers[src.index])
+                        if (def < i) self(self, def);
+                }
+                // Include non-value dependencies without restating their
+                // rules. Every original edge points forward in source order.
+                for (size_t pred : predecessors[i])
+                    if (pred < i) self(self, pred);
+                demandOrder[i] = nextDemand++;
+            };
+            for (size_t i = 0; i < n; ++i)
+                if (chainLength[i] >= 3 && !extended[i]) visit(visit, i);
+        }
+
         std::vector<int> readyTime(n, 0);
         std::vector<bool> scheduled(n, false);
         std::vector<Node> ready;
@@ -1499,6 +1568,7 @@ private:
             if (indegree[i] == 0) {
                 Node node;
                 node.index = i;
+                node.demandOrder = demandOrder[i];
                 node.readyTime = 0;
                 node.sourceIndex = profile_ == GeneralProfile::Fragment
                     ? static_cast<int>(i)
@@ -1576,6 +1646,7 @@ private:
                 if (--indegree[consumer] == 0) {
                     Node node;
                     node.index = consumer;
+                    node.demandOrder = demandOrder[consumer];
                     node.readyTime = readyTime[consumer];
                     node.sourceIndex = profile_ == GeneralProfile::Fragment
                         ? static_cast<int>(consumer)
