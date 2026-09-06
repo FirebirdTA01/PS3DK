@@ -1,0 +1,4 @@
+// Cached-RHS on the w/a lane, .a spelling: the last write assigns an existing
+// scalar and must win, same as the xyz case.  Byte-identical to the .w control.
+struct R { float4 c : COLOR; };
+R main(float2 uv : TEXCOORD0, uniform sampler2D t) { R r; float e = tex2D(t,uv).w; r.c.xyz = tex2D(t,uv).xyz; r.c.w = tex2D(t,uv).w * 2.0; r.c.a = e; return r; }

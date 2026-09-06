@@ -1,0 +1,2 @@
+struct P { float3 first; float3 second; };
+float4 main(float4 v : TEXCOORD0) : COLOR { P p; p.first = v.xyz; p.second = v.zyx; return float4(p.first.x, p.second.x, 0.0, 1.0); }

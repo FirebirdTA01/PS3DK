@@ -1083,6 +1083,39 @@ void IRBuilder::buildSwitchStmt(SwitchStmt* stmt)
     currentBlock_ = endBlock;
 }
 
+// Canonicalise a CONFIRMED vector-swizzle component to its xyzw spelling so
+// `.rgb` and `.xyz` (and `.stp`) compose the SAME nameToValue_ key: a field
+// written under one spelling and read or overwritten under another sees one
+// key, and the map holds the last write by construction, using whatever
+// branch/inline snapshot machinery the map already has (the branch control
+// proves that path rather than assuming it).  Call this ONLY for a confirmed
+// swizzle (MemberAccessExpr::isSwizzle); a real struct field named "rgb" or
+// "a" keeps its own key, so two members never merge (t_c1d781ba).
+//
+// Only the LOWERCASE rgba/stpq spellings are mapped - the ones the reference
+// treats as equivalent to xyzw (measured: it accepts .rgb and .xyz alike).
+// An UPPERCASE output swizzle (.XYZ) is left unchanged: the reference rejects
+// it with C1048 "invalid character in swizzle", and our compiler also refuses
+// it, unchanged by this slice; that our validator accepts the uppercase
+// spelling at all is a separate upstream divergence (t_373d4005).
+static std::string canonicalizeSwizzleKey(const std::string& member)
+{
+    std::string out;
+    out.reserve(member.size());
+    for (char c : member)
+    {
+        switch (c)
+        {
+            case 'r': case 's': out += 'x'; break;
+            case 'g': case 't': out += 'y'; break;
+            case 'b': case 'p': out += 'z'; break;
+            case 'a': case 'q': out += 'w'; break;
+            default:            out += c;   break; // x/y/z/w and uppercase kept
+        }
+    }
+    return out;
+}
+
 void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
 {
     if (stmt->value)
@@ -1999,7 +2032,8 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
     if (expr->object->kind == ExprKind::Identifier)
     {
         auto* ident = static_cast<IdentifierExpr*>(expr->object.get());
-        std::string compositeName = ident->name + "." + expr->member;
+        std::string compositeName = ident->name + "." +
+            (expr->isSwizzle ? canonicalizeSwizzleKey(expr->member) : expr->member);
 
         // Look up in local names
         auto it = nameToValue_.find(compositeName);
@@ -2067,12 +2101,15 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
         std::string baseName;
         ExprNode* current = expr->object.get();
         std::vector<std::string> members;
-        members.push_back(expr->member);
+        members.push_back(expr->isSwizzle
+                              ? canonicalizeSwizzleKey(expr->member) : expr->member);
 
         while (current->kind == ExprKind::MemberAccess)
         {
             auto* memberExpr = static_cast<MemberAccessExpr*>(current);
-            members.push_back(memberExpr->member);
+            members.push_back(memberExpr->isSwizzle
+                                  ? canonicalizeSwizzleKey(memberExpr->member)
+                                  : memberExpr->member);
             current = memberExpr->object.get();
         }
 
@@ -2496,7 +2533,9 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         if (memberExpr->object->kind == ExprKind::Identifier)
         {
             auto* ident = static_cast<IdentifierExpr*>(memberExpr->object.get());
-            std::string compositeName = ident->name + "." + memberExpr->member;
+            std::string compositeName = ident->name + "." +
+                (memberExpr->isSwizzle ? canonicalizeSwizzleKey(memberExpr->member)
+                                       : memberExpr->member);
             nameToValue_[compositeName] = value;
 
             // Check if this is an output struct - emit StoreOutput.
@@ -2552,12 +2591,16 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
             std::string baseName;
             ExprNode* current = memberExpr->object.get();
             std::vector<std::string> members;
-            members.push_back(memberExpr->member);
+            members.push_back(memberExpr->isSwizzle
+                                  ? canonicalizeSwizzleKey(memberExpr->member)
+                                  : memberExpr->member);
 
             while (current->kind == ExprKind::MemberAccess)
             {
                 auto* nested = static_cast<MemberAccessExpr*>(current);
-                members.push_back(nested->member);
+                members.push_back(nested->isSwizzle
+                                      ? canonicalizeSwizzleKey(nested->member)
+                                      : nested->member);
                 current = nested->object.get();
             }
 

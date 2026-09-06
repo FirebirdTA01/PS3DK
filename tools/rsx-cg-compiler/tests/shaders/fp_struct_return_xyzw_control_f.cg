@@ -1,0 +1,2 @@
+struct R { float4 c : COLOR; };
+R main(float2 uv : TEXCOORD0, uniform sampler2D t) { R r; r.c.xyz = dot(tex2D(t,uv).xyz, float3(0.5,0.25,0.125)); r.c.w = 1.0; return r; }

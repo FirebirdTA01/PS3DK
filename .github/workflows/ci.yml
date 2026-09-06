@@ -198,6 +198,8 @@ jobs:
         run: bash tests/shader-compiler/parser-progress-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test an unknown local type is reported once, at the type
         run: bash tests/shader-compiler/local-declaration-error-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test struct-return .rgb/.a swizzles emit their store like .xyz/.w
+        run: bash tests/shader-compiler/struct-return-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros
