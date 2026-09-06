@@ -103,6 +103,8 @@ jobs:
         run: bash tests/shader-compiler/stdlib-derivatives-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler DIVR opcode
         run: bash tests/shader-compiler/divr-opcode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test source swizzle composition in both shader profiles
+        run: bash tests/shader-compiler/local-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler user-function inlining
         run: bash tests/shader-compiler/user-function-inline-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

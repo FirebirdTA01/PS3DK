@@ -419,3 +419,7 @@ tools/rsx-cg-compiler/tests/shaders/fp_divr_vector3_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_divr_vector4_uniform_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_divisor_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_separate_inputs_f.cg|auto|general
+
+# t_6be25fd4: source-map composition, original quotient and three-alias chain.
+tools/rsx-cg-compiler/tests/shaders/fp_divr_local_swizzle_known_red_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_local_swizzle_chain_f.cg|auto|general

@@ -1,0 +1,11 @@
+// t_6be25fd4: the same source-map composition is shared by FP and VP.
+// TEXCOORD1 carries the result because the VP mismatch control proves
+// that channel discriminating. POSITION remains the input quad.
+void main(float4 p : POSITION, float4 a : TEXCOORD0,
+          out float4 position : POSITION, out float4 o : TEXCOORD1)
+{
+    position = p;
+    float4 b = a.wzyx;
+    float4 c = b.yzxw;
+    o = c.zwxy * 0.25 + 0.375;
+}
