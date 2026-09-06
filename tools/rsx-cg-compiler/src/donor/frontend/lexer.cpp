@@ -149,6 +149,78 @@ void Lexer::initKeywords() {
     keywords["sizeof"] = TokenType::KW_SIZEOF;
 }
 
+bool Lexer::parseLineMarker(const std::string& directive,
+                            int& lineOut,
+                            std::string& fileOut)
+{
+    // Accepts `#line 12 "file"` and the bare `# 12 "file"` form.  Anything
+    // else - #pragma above all - is rejected: a directive we do not
+    // understand must not move the line count, because a location that is
+    // confidently wrong is worse than the one we already have.
+    size_t i = 0;
+    if (i < directive.size() && directive[i] == '#')
+        i++;
+
+    while (i < directive.size() && (directive[i] == ' ' || directive[i] == '\t'))
+        i++;
+
+    if (directive.compare(i, 4, "line") == 0)
+    {
+        i += 4;
+        // "line" must be a whole word - `#linear` is not a line marker.
+        if (i < directive.size() && directive[i] != ' ' && directive[i] != '\t')
+            return false;
+        while (i < directive.size() && (directive[i] == ' ' || directive[i] == '\t'))
+            i++;
+    }
+
+    if (i >= directive.size() || !std::isdigit(static_cast<unsigned char>(directive[i])))
+        return false;
+
+    long value = 0;
+    while (i < directive.size() && std::isdigit(static_cast<unsigned char>(directive[i])))
+    {
+        value = value * 10 + (directive[i] - '0');
+        if (value > 100000000L)  // absurd; refuse rather than wrap
+            return false;
+        i++;
+    }
+    lineOut = static_cast<int>(value);
+
+    // The optional file name follows, quoted.  A marker with no name leaves
+    // the current file alone, which is the C rule.
+    fileOut.clear();
+    while (i < directive.size() && (directive[i] == ' ' || directive[i] == '\t'))
+        i++;
+    if (i < directive.size() && directive[i] == '"')
+    {
+        const size_t open = i + 1;
+        const size_t close = directive.find('"', open);
+        if (close != std::string::npos)
+            fileOut = directive.substr(open, close - open);
+    }
+    return true;
+}
+
+void Lexer::applyLineDirective(const std::string& directive)
+{
+    int markerLine = 0;
+    std::string markerFile;
+    if (!parseLineMarker(directive, markerLine, markerFile))
+        return;
+
+    // Taking the file name is what keeps a diagnostic raised inside the
+    // embedded header, or inside an included file, from being reported
+    // against the file that pulled it in.
+    if (!markerFile.empty())
+        filename = markerFile;
+
+    // The marker names the line of the text that FOLLOWS it, and the
+    // newline terminating it has already been consumed by the caller.
+    line = markerLine;
+    column = 1;
+}
+
 std::vector<Token> Lexer::tokenize()
 {
     std::vector<Token> tokens;
@@ -172,15 +244,27 @@ std::vector<Token> Lexer::tokenize()
             char next = peek(1);
             if (next == 'l' || next == 'p' || std::isdigit(next) || next == ' ' || next == '\t')
             {
-                // Skip the entire line (it's a preprocessor directive)
+                // CAPTURE the directive while skipping it.  Throwing the
+                // text away is why every diagnostic from this lexer named
+                // the wrong line: the driver composes the unit as
+                // `#line 1 "<builtin>"` + the embedded header +
+                // `#line 1 "<input>"` + the user's source, and with the
+                // markers ignored a token carried its physical line in
+                // that stream - the source line plus 154 in the default
+                // composition, plus 1 under --no-stdlib.  Columns were
+                // always right, which is what made it look like an
+                // off-by-one rather than a marker nobody read
+                // (t_1366b9b9).
+                std::string directive;
                 while (!isAtEnd() && peek() != '\n')
                 {
-                    advance();
+                    directive += advance();
                 }
                 if (!isAtEnd() && peek() == '\n')
                 {
                     advance(); // consume the newline
                 }
+                applyLineDirective(directive);
                 continue;
             }
         }

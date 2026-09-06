@@ -139,6 +139,14 @@ public:
 		const Token& token,
 		const std::string& fallbackFilename);
 
+	// Parse `#line N "file"` or the bare `# N "file"`.  Public and static
+	// because the preprocessor has to recognise the same markers it passes
+	// through - two parsers for one syntax is two answers to one question.
+	static bool parseLineMarker(
+		const std::string& directive,
+		int& lineOut,
+		std::string& fileOut);
+
 private:
 	std::string source;
 	std::string filename;
@@ -148,6 +156,7 @@ private:
 	std::unordered_map<std::string, TokenType> keywords;
 
 	void initKeywords();
+	void applyLineDirective(const std::string& directive);
 	bool isAtEnd() const;
 	char peek(size_t offset = 0) const;
 	char advance();
