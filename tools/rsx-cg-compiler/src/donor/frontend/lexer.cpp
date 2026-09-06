@@ -109,6 +109,23 @@ void Lexer::initKeywords() {
     keywords["usampler3D"] = TokenType::KW_USAMPLER3D;
     keywords["usamplerCUBE"] = TokenType::KW_USAMPLERCUBE;
 
+    // texobj<K> is the Cg 1.x spelling of sampler<K> and is what the
+    // reference SDK's samples use: 109 texobj2D and 2 texobj3D occurrences,
+    // and every one of them an unknown type name here.  Measured against
+    // the reference, the two spellings of the same program compile to
+    // byte-identical containers - sampled and declared-but-unused alike, so
+    // the parameter table records them the same way too.  An alias, not a
+    // type: same token, nothing downstream needs to know (t_5c1f84d3).
+    //
+    // These five and no more.  The reference REJECTS texobj2DShadow and
+    // texobjRECTShadow with a syntax error at the identifier, so the family
+    // stops where measurement says it stops, not where the pattern suggests.
+    keywords["texobj1D"] = TokenType::KW_SAMPLER1D;
+    keywords["texobj2D"] = TokenType::KW_SAMPLER2D;
+    keywords["texobj3D"] = TokenType::KW_SAMPLER3D;
+    keywords["texobjCUBE"] = TokenType::KW_SAMPLERCUBE;
+    keywords["texobjRECT"] = TokenType::KW_SAMPLERRECT;
+
     // Storage
     keywords["uniform"] = TokenType::KW_UNIFORM;
     keywords["in"] = TokenType::KW_IN;

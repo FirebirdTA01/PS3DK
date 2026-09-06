@@ -37,7 +37,11 @@ void Parser::initBuiltinTypes()
         "half2x2", "half3x3", "half4x4",
         "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "samplerRECT",
         "isampler1D", "isampler2D", "isampler3D", "isamplerCUBE", "isamplerRECT",
-        "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT"
+        "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT",
+        // The Cg 1.x spelling of the five sampler types (t_5c1f84d3).  The
+        // lexer maps them to the same tokens; this list is what decides
+        // whether a name is a TYPE, so it has to know them too.
+        "texobj1D", "texobj2D", "texobj3D", "texobjCUBE", "texobjRECT"
     };
 }
 

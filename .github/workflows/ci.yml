@@ -198,6 +198,8 @@ jobs:
         run: bash tests/shader-compiler/include-unit-state-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test diagnostics name the source line and file
         run: bash tests/shader-compiler/diagnostic-location-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test texobj types are the sampler types under another name
+        run: bash tests/shader-compiler/texobj-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test if/else join emission order is taken from the source
         run: bash tests/shader-compiler/join-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler lowering-path flags
