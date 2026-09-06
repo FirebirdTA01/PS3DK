@@ -254,6 +254,18 @@ typedef struct {
 	                          * under THIS runtime-loaded vertex program instead of
 	                          * the embedded shared one (instrument rows for
 	                          * channels the shared VP does not write) */
+	int  judge_mask_extra;   /* optional field `judge=<list>` (c1,c2,c3,z): outputs
+	                          * judged ON TOP of what the containers declare.  For a
+	                          * bind defect - the hardware writing a surface nobody
+	                          * declared - the declaration is exactly the wrong
+	                          * thing to key on, so an instrument row opts in and
+	                          * expects IDENTICAL: nothing distinguishable was
+	                          * written.  Only for control-* rows compiled by the
+	                          * SAME compiler on both sides (convention: the guest
+	                          * cannot tell compilers apart): between two compilers
+	                          * an undeclared target holds two allocators' scratch
+	                          * and comparing it is meaningless (t_96daf53b). */
+	int  judge_depth_extra;
 } sd_pair;
 
 typedef struct {
@@ -1805,35 +1817,67 @@ static int load_manifest(void)
 			return 0;
 		}
 		sd_pair *p = &g_pairs[g_npairs];
-		char *fields[8];
+		char *fields[9];
 		int nf = 0;
 		char *cur = line;
 		fields[nf++] = cur;
-		for (char *c = line; *c && nf < 8; c++) {
+		for (char *c = line; *c && nf < 9; c++) {
 			if (*c == '|') {
 				*c = 0;
 				fields[nf++] = c + 1;
 			}
 		}
-		/* The splitter stops at the eighth field and leaves anything after
-		 * it INSIDE the eighth ('vp=x|bogus' would read as a vp= path), so a
+		/* The splitter stops at the ninth field and leaves anything after
+		 * it INSIDE the ninth ('vp=x|bogus' would read as a vp= path), so a
 		 * separator still present in the last field is a line with too many
 		 * fields (codex, review of 67a3f48). */
-		if (nf < 6 || nf > 8 || strchr(fields[nf - 1], '|')) {
-			printf("shader-differential: manifest line %d: expected 6 |-fields (up to 8 with blind-ok / vp=<path>), got %d\n",
+		if (nf < 6 || nf > 9 || strchr(fields[nf - 1], '|')) {
+			printf("shader-differential: manifest line %d: expected 6 |-fields (up to 9 with blind-ok / vp=<path> / judge=<list>), got %d\n",
 			       lineno, nf);
 			fclose(f);
 			return 0;
 		}
 		p->blind_ok = 0;
 		p->vp_path[0] = 0;
+		p->judge_mask_extra = 0;
+		p->judge_depth_extra = 0;
 		for (int k = 6; k < nf; k++) {
 			if (strcmp(fields[k], "blind-ok") == 0) {
 				p->blind_ok = 1;
 			} else if (strncmp(fields[k], "vp=", 3) == 0 && fields[k][3]) {
 				snprintf(p->vp_path, sizeof(p->vp_path), "%s", fields[k] + 3);
+			} else if (strncmp(fields[k], "judge=", 6) == 0 && fields[k][6]) {
+				/* Opt-in judgement of undeclared outputs: instrument rows
+				 * only (see sd_pair.judge_mask_extra for why), and every
+				 * member must be a known output or the line is refused -
+				 * a misspelt member that parsed as nothing would leave the
+				 * row judged on declarations alone, printing a clean
+				 * verdict about a surface it never read. */
+				if (strncmp(fields[1], "control-", 8) != 0) {
+					printf("shader-differential: manifest line %d: judge= is for control-* instrument rows compiled by the same compiler on both sides, not for role '%s'\n",
+					       lineno, fields[1]);
+					fclose(f);
+					return 0;
+				}
+				char *list = fields[k] + 6;
+				while (*list) {
+					char *comma = strchr(list, ',');
+					if (comma) *comma = 0;
+					if (strcmp(list, "c1") == 0)      p->judge_mask_extra |= 2;
+					else if (strcmp(list, "c2") == 0) p->judge_mask_extra |= 4;
+					else if (strcmp(list, "c3") == 0) p->judge_mask_extra |= 8;
+					else if (strcmp(list, "z") == 0)  p->judge_depth_extra = 1;
+					else {
+						printf("shader-differential: manifest line %d: judge= member '%s' is not one of c1,c2,c3,z\n",
+						       lineno, list);
+						fclose(f);
+						return 0;
+					}
+					if (!comma) break;
+					list = comma + 1;
+				}
 			} else {
-				printf("shader-differential: manifest line %d: unknown optional field '%s' (blind-ok and vp=<path> are defined)\n",
+				printf("shader-differential: manifest line %d: unknown optional field '%s' (blind-ok, vp=<path> and judge=<list> are defined)\n",
 				       lineno, fields[k]);
 				fclose(f);
 				return 0;
@@ -2039,7 +2083,7 @@ typedef struct {
 	int  depth_flag_b;
 	int  color_mask_a;       /* COLORn declared, per side */
 	int  color_mask_b;
-	char diagnostic[448];
+	char diagnostic[640];  /* a fully opted-in row (judge=c1,c2,c3,z) needs ~520 */
 	char artifact[96];
 } sd_result;
 
@@ -2272,11 +2316,19 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	 * when they differ and a false identical when they agree (codex,
 	 * claude 2026-09-06).  Only judged outputs are read back or compared. */
 	int judge_mask = decl_a.color_mask | decl_b.color_mask;
+	/* ... except for an instrument row that opts in (judge=): a bind
+	 * defect writes a surface the container never declared, and an
+	 * instrument that only looks where the declaration points cannot
+	 * see it (claude, t_96daf53b).  The opted-in outputs are judged
+	 * with the ordinary comparison - identical means nothing
+	 * distinguishable was written - and the row still waits behind the
+	 * proving gates below like any other. */
+	judge_mask |= p->judge_mask_extra;
 	int targets = 1;
 	for (int t = 1; t < 4; t++)
 		if (judge_mask & (1 << t))
 			targets = t + 1;
-	int judge_depth = decl_a.depth_replace || decl_b.depth_replace;
+	int judge_depth = decl_a.depth_replace || decl_b.depth_replace || p->judge_depth_extra;
 	r->out_targets = targets;
 	r->out_mask = judge_mask;
 	r->out_depth = judge_depth;
@@ -2601,12 +2653,30 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 				if (save_a[SD_OUT_Z][i] != DEPTH_CLEAR_MARK) za++;
 				if (save_b[SD_OUT_Z][i] != DEPTH_CLEAR_MARK) zb++;
 			}
+			/* Each side's Z24 range over the pixels it painted, and the
+			 * per-row step between the first two rows: a "moved" zeta is
+			 * then numbers against a prediction (claude's shape B expects
+			 * Z24(row) = 7163085 + 65536 * row), not a word. */
+			u32 zmin_a = 0xffffffu, zmax_a = 0, zmin_b = 0xffffffu, zmax_b = 0;
+			for (int i = 0; i < RT_W * RT_H; i++) {
+				u32 a = save_a[SD_OUT_Z][i], b = save_b[SD_OUT_Z][i];
+				if (a != DEPTH_CLEAR_MARK) { a >>= 8; if (a < zmin_a) zmin_a = a; if (a > zmax_a) zmax_a = a; }
+				if (b != DEPTH_CLEAR_MARK) { b >>= 8; if (b < zmin_b) zmin_b = b; if (b > zmax_b) zmax_b = b; }
+			}
 			len = strlen(r->diagnostic);
 			snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
-			         " zpaint a=%d b=%d z0 a=%08x b=%08x zmid a=%08x b=%08x",
+			         " zpaint a=%d b=%d z0 a=%08x b=%08x zmid a=%08x b=%08x zrange a=%u..%u b=%u..%u zrow1 a=%u b=%u",
 			         za, zb, save_a[SD_OUT_Z][0], save_b[SD_OUT_Z][0],
 			         save_a[SD_OUT_Z][RT_W * (RT_H / 2) + RT_W / 2],
-			         save_b[SD_OUT_Z][RT_W * (RT_H / 2) + RT_W / 2]);
+			         save_b[SD_OUT_Z][RT_W * (RT_H / 2) + RT_W / 2],
+			         zmin_a, zmax_a, zmin_b, zmax_b,
+			         save_a[SD_OUT_Z][RT_W] >> 8, save_b[SD_OUT_Z][RT_W] >> 8);
+		}
+		if (p->judge_mask_extra || p->judge_depth_extra) {
+			len = strlen(r->diagnostic);
+			snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
+			         " judge=opt-in:0x%x/z%d",
+			         p->judge_mask_extra, p->judge_depth_extra);
 		}
 	}
 	if (warm_a > 1 || warm_b > 1) {
