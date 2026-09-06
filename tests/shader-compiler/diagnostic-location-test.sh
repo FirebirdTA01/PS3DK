@@ -167,6 +167,20 @@ printf '  %-28s %-12s %s\n' "included header" "default" "bad_header.h:3:1"
 #
 # Generated rather than added as fixtures: they are one-line probes with no
 # value as shaders, and the tree's sweeps compile every fixture they can see.
+#
+# The inactive_marker row is the one that says a marker must be OBEYED on
+# the same terms as any other directive: a `#line` inside `#if 0` is
+# suppressed, so it must rename nothing, and reading it anyway pointed the
+# diagnostic for the live source after the #endif at a file that does not
+# exist.  A suppressed directive changes nothing, exactly as a suppressed
+# #define defines nothing.
+#
+# NOT COVERED HERE, deliberately: Preprocessor::setNoLineMarkers(true) must
+# suppress the markers this file's fix generates, and it did not.  That
+# option is API-only - main.cpp never calls it - so no test driving the
+# compiler through its command line can reach it, and a proxy assertion
+# here would only look like coverage.  It belongs to the preprocessor
+# harness guard (t_e5fced4c), which links the preprocessor directly.
 probe_dir="$work/probes"
 mkdir -p "$probe_dir"
 printf '// good header line 1\n#define HDRVAL 1.0\n' > "$probe_dir/good_header.h"
@@ -180,6 +194,7 @@ probes=(
     "after_include|5|-|#include @good_header.h@\n#define A 1\nvoid main(float4 c : TEXCOORD0, out float4 o : COLOR)\n{\n    bogusType q;\n    o = c;\n}"
     "spliced|6|-|#define LONG(a, b) \\\\\n    ((a) + (b))\n#define B 2\nvoid main(float4 c : TEXCOORD0, out float4 o : COLOR)\n{\n    bogusType q;\n    o = c;\n}"
     "user_marker|3|renamed_region.h|#line 1 @renamed_region.h@\nvoid main(float4 c : TEXCOORD0, out float4 o : COLOR)\n{\n    bogusType q;\n    o = c;\n}"
+    "inactive_marker|4|-|#if 0\n#line 900 @hidden.h@\n#endif\nbogusType bad;"
 )
 
 for probe in "${probes[@]}"; do
