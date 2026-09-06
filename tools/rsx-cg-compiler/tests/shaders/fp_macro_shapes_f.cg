@@ -1,0 +1,15 @@
+// t_53363b4b control for the shapes the expander must keep working while
+// it learns hide sets: ## token pasting, a nested function-like macro, an
+// object-like alias for a function-like name whose arguments follow in
+// the source, and a function-like name that appears WITHOUT parentheses
+// (an ordinary identifier).  Must equal fp_macro_shapes_control_f.
+#define CAT(a,b) a##b
+#define TEX(dx,dy) tex2D(decal, uv + float2((dx),(dy)))
+#define ALIAS tex2D
+#define scale(v) ((v) * 0.5)
+void main(uniform sampler2D decal, float2 uv : TEXCOORD0, out float4 o : COLOR)
+{
+    float CAT(v,1) = scale(uv.x);
+    float scale = v1;
+    o = TEX(0.5, 0.25) + ALIAS(decal, uv) * scale;
+}

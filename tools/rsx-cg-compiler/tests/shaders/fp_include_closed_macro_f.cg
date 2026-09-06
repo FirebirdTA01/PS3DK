@@ -1,0 +1,7 @@
+// t_d594ccd9: a macro defined in a well-formed header must reach the file
+// that includes it.  Must accept and equal fp_include_macro_control_f.
+#include "include/closed_guard.h"
+void main(uniform SAMPLER_T t, float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = tex2D(t, c.xy);
+}

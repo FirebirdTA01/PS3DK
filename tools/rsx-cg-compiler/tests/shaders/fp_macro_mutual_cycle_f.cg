@@ -1,0 +1,12 @@
+// t_53363b4b, the indirect shape: A expands to B, B expands to A, and the
+// second A is painted so the cycle stops with the identifier `A` in place.
+// The reference accepts this (measured: same container as the control).  A
+// fix that only special-cased a macro naming itself directly would still
+// spin here, which is why this fixture exists beside the direct one.
+#define A B
+#define B A
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float A = 1.0;
+    o = c * A;
+}

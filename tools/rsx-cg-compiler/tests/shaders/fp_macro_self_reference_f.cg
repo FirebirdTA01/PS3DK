@@ -1,0 +1,11 @@
+// t_53363b4b: a macro that names itself expands ONCE.  This is the
+// "NVIDIA fix" idiom from the libretro corpus (gdapt-pass0.cg line 25); the
+// C rule is that a macro name is not re-expanded inside its own expansion.
+// Before the fix the preprocessor re-tokenised the whole line after every
+// substitution, found `dot(` again, and never returned.  The reference
+// accepts this and produces the same program as the hand-expanded control.
+#define dot(x,y) saturate(dot(x,y))
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = dot(c, c);
+}

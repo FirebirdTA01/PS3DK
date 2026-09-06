@@ -1,0 +1,6 @@
+// Control for the fp_include_* fixtures: the same program with the macro
+// written out.  Every accepting include fixture must produce THIS container.
+void main(uniform sampler2D t, float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = tex2D(t, c.xy);
+}
