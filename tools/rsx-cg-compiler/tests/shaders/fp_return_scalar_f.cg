@@ -1,0 +1,16 @@
+// t_5c12df56: a scalar RETURNED from a float4 entry must broadcast.
+//
+// `return 1.0;` from a `float4 main() : COLOR` assigns a scalar to a
+// four-component output, so Cg broadcasts it.  The reference emits
+// `MOVR R0, {1,0,0,0}.x` - write mask 0xF, the source read as .x.  The
+// general path emits `MOVR R0.x` instead: mask 0x1, so y/z/w are never
+// written and the colour's other three lanes are whatever the register
+// held.  Exit 0, container written, no diagnostic.
+//
+// Nothing here is half-specific; the same defect is visible at fp32.  The
+// out-parameter spelling of the same assignment (fp_return_scalar_control_f)
+// already broadcasts, which is what makes this the RETURN path's defect.
+float4 main() : COLOR
+{
+    return 1.0;
+}

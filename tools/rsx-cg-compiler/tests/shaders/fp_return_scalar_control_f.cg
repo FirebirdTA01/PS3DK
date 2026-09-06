@@ -1,0 +1,7 @@
+// t_5c12df56 control: the out-parameter spelling of fp_return_scalar_f.
+// It is byte-identical to the reference today (mask 0xF, source read .x),
+// so it must not move when the return path is taught to broadcast.
+void main(out float4 o : COLOR)
+{
+    o = 1.0;
+}

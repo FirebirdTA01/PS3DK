@@ -4,8 +4,11 @@
 # `out half4 o : COLOR` selects a different hardware output register (H0
 # rather than R0) at a different precision, and the container records that in
 # outputFromH0.  The runtime reads that flag to decide which register the
-# colour is taken from, so a dropped flag is not cosmetic - the shader's
-# colour is read from a register it never wrote.
+# colour is taken from.  Dropping the flag AND emitting MOVR is internally
+# consistent - the runtime reads R0 and R0 was written - so this is not a
+# read of an unwritten register; it is the declared output type being
+# disregarded, so the program honours neither the register nor the
+# precision the source asked for (t_5c12df56 corrected this wording).
 #
 # NO CONTROL-WORD VALUE APPEARS IN THIS TEST, deliberately.  Which bits the
 # bind sets is the SDK's business and has been measured and corrected once
@@ -109,8 +112,8 @@ FLOAT_WORD0 = 0x9E010100
 if half["h0"] != 1:
     problems.append(
         "declared `out half4` produced outputFromH0=%d: the container does not "
-        "record the half output, so the runtime is told to read the colour "
-        "from the full-precision register the program never wrote"
+        "record the half output, so the colour stays in R0 at full precision "
+        "instead of the H0 the source asked for"
         % half["h0"])
 if half["words"][0] != HALF_WORD0:
     problems.append(
