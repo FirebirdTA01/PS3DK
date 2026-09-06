@@ -400,3 +400,10 @@ tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_or_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_zero_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_short_rsqrt_and_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_discard_f.cg|auto|general
+
+# Direct sqrt: scalar, swizzled vector, low-bit residue and direct-value edges.
+tools/rsx-cg-compiler/tests/shaders/fp_sqrt_direct_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_sqrt_swizzle_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_sqrt_residue_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_sqrt_zero_value_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_sqrt_negative_value_f.cg|auto|general

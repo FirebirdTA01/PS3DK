@@ -1,0 +1,7 @@
+// Observe the root directly, without boolean normalization. Other channels
+// remain varying so the judge has coverage even if the root paints black.
+// This precision edge also belongs on the real-PS3 hardware spot-check list.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    float s = sqrt(-abs(a.y + 0.125));
+    return float4(a.x, s, a.z, 1.0);
+}

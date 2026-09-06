@@ -1,0 +1,6 @@
+// Direct and additive consumers retain two independently observable roots.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    float s = sqrt(a.x);
+    float t = sqrt(a.y * 4.0);
+    return float4(s, t, s + t, 1.0);
+}

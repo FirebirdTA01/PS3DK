@@ -1,0 +1,4 @@
+// Distinct, permuted lanes prevent scalar broadcast from passing unnoticed.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    return sqrt(a.wzyx + float4(0.01, 0.02, 0.03, 0.04));
+}

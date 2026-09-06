@@ -405,3 +405,8 @@
 "fp_short_sqrt_zero_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_zero_f.cg","auto","15","12","3","4","2","2","False","True","identical"
 "fp_short_rsqrt_and_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_short_rsqrt_and_f.cg","auto","17","14","3","4","2","2","False","True","identical"
 "fp_short_sqrt_discard_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_discard_f.cg","auto","23","19","4","4","2","2","False","True","identical"
+"fp_sqrt_direct_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_sqrt_direct_f.cg","auto","10","9","1","3","2","1","False","True","identical"
+"fp_sqrt_swizzle_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_sqrt_swizzle_f.cg","auto","6","13","-7","2","2","0","False","True","identical"
+"fp_sqrt_residue_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_sqrt_residue_f.cg","auto","18","12","6","3","2","1","False","True","identical"
+"fp_sqrt_zero_value_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_sqrt_zero_value_f.cg","auto","8","6","2","2","2","0","False","True","identical"
+"fp_sqrt_negative_value_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_sqrt_negative_value_f.cg","auto","10","7","3","2","2","0","False","True","identical"

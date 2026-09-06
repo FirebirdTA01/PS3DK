@@ -1,0 +1,6 @@
+// A runtime diagonal makes the root exactly zero without a comparison
+// hiding its value. Other pixels have a positive root; no constant folding.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    float s = sqrt(abs(a.x - a.y));
+    return float4(a.x, s, a.z, 1.0);
+}

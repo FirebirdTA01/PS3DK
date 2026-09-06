@@ -1,0 +1,11 @@
+// Additive first consumer keeps the direct-root shape. Amplification at 2^20
+// exposes low-bit differences at 8-bit readback; 2^24 makes every residue an
+// integer and would turn this into a blind, uniformly zero control.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    float x = a.x * 15.0 + 1.0;
+    float s = sqrt(x);
+    float d = s - floor(s);
+    float r = d * 1048576.0;
+    r = r - floor(r);
+    return float4(r, r, r, 1.0);
+}

@@ -551,7 +551,6 @@ private:
     // never engage the flatten and lower exactly as before.
     bool flattened_ = false;
     std::unordered_map<IRValueID, const IRInstruction*> defMap_;
-    std::unordered_set<IRValueID> comparisonSqrtValues_;
     std::unordered_set<IRValueID> comparisonLogicalValues_;
 
     struct MergedReturnSelect
@@ -693,7 +692,6 @@ private:
                         return true; // Do not change an ordinary shared use.
                     if (def.op == IROp::Sqrt && def.shortCircuitRhs) {
                         if (def.resultType.componentCount() != 1) return true;
-                        comparisonSqrtValues_.insert(value);
                     }
                     pending.insert(pending.end(), def.operands.begin(), def.operands.end());
                 }
@@ -3319,10 +3317,9 @@ private:
         program_.instrs.push_back(mov);
     }
 
-    // sqrt(x) = rcp(rsq(x)): two native scalar ops, and the composition
-    // gets sqrt(0) right (rsq(0)=+inf, rcp(+inf)=0) where x*rsq(x)
-    // would produce 0*inf=NaN.  Fragment only: the VP scalar unit path
-    // is still deferred (same guard as rcp/rsq/sin/cos).
+    // Direct sqrt uses the measured native DIVSQR(abs(x), x) shape. Two
+    // approximate operations RCP(RSQ(x)) lose low bits on the residue probe.
+    // Consumer-scale instruction selection is separate from this lowering.
     void lowerSqrt(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
@@ -3331,46 +3328,28 @@ private:
                 "nv40-general: VP scalar intrinsic lowering deferred");
             return;
         }
-        if (comparisonSqrtValues_.count(inst.result)) {
-            // Coexists with the established RCP(RSQ) lowering below: only
-            // newly admitted comparison-only RHS roots use the measured
-            // DIVSQR(abs(d), d) form. Shared arithmetic uses are not retargeted.
+        const int mask = componentMask(inst.resultType);
+        const int result = define(inst.result);
+        const VSrc arg = resolve(inst.operands[0]);
+        // Like emitScalarUnitPerLane, but DIVSQR needs two sources with
+        // different modifiers; the unary helper cannot express this pair.
+        for (int lane = 0; lane < 4; ++lane) {
+            if (!(mask & (1 << lane))) continue;
             VInstr root;
             root.op = VOp::DivSqrt;
-            root.dst.index = define(inst.result);
-            root.dst.writemask = 1;
-            root.srcs[0] = resolve(inst.operands[0]);
+            root.dst.index = result;
+            root.dst.writemask = 1 << lane;
+            root.srcs[0] = arg;
+            // Compose through the incoming swizzle; the scalar denominator
+            // must read this lane even when the destination is y, z or w.
+            const uint8_t comp = arg.swizzle[lane];
+            root.srcs[0].swizzle = {comp, comp, comp, comp};
             root.srcs[1] = root.srcs[0];
             root.srcs[0].abs = true;
             root.srcs[0].neg = false; // abs(d), including a negated source view.
+            root.preservePartialOutputMask = laneCount(mask) > 1;
             program_.instrs.push_back(root);
-            return;
         }
-        const int mask = componentMask(inst.resultType);
-        const int t = newVReg();
-        // Both halves go through the scalar unit, so both are per lane on a
-        // vector (t_249b8088); a scalar keeps its previous two-instruction
-        // shape exactly.
-        if (laneCount(mask) > 1) {
-            emitScalarUnitPerLane(VOp::Rsq, t, mask,
-                                  resolve(inst.operands[0]), false);
-            emitScalarUnitPerLane(VOp::Rcp, define(inst.result), mask,
-                                  tempSrc(t), false);
-            return;
-        }
-        VInstr rsq;
-        rsq.op = VOp::Rsq;
-        rsq.dst.index = t;
-        rsq.dst.writemask = mask;
-        rsq.srcs[0] = resolve(inst.operands[0]);
-        program_.instrs.push_back(rsq);
-
-        VInstr rcp;
-        rcp.op = VOp::Rcp;
-        rcp.dst.index = define(inst.result);
-        rcp.dst.writemask = mask;
-        rcp.srcs[0] = tempSrc(t);
-        program_.instrs.push_back(rcp);
     }
 
     // mod(x, y) = x - y * floor(x / y), scalar divisor only for now:
