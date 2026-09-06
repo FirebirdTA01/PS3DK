@@ -1,0 +1,6 @@
+// Distinct varyings require both operands to be legalized into temporaries.
+void main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, out float4 o : COLOR)
+{
+    float3 p = a.zyx / b.w;
+    o = float4(p, 1.0);
+}

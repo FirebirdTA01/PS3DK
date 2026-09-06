@@ -412,3 +412,10 @@ tools/rsx-cg-compiler/tests/shaders/fp_sqrt_negative_value_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_refract_root_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_refract_root_runtime_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_refract_root_tir_f.cg|auto|general
+
+# Vector/scalar division, swizzles, separate input preloads, vector divisor control.
+tools/rsx-cg-compiler/tests/shaders/fp_divr_vector2_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_divr_vector3_swizzle_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_divr_vector4_uniform_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_divisor_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_separate_inputs_f.cg|auto|general

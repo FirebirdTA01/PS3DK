@@ -1,0 +1,6 @@
+// Both operands use nontrivial component selections; the divisor is scalar.
+void main(float4 a : TEXCOORD0, out float4 o : COLOR)
+{
+    float3 p = a.zyw / a.x;
+    o = float4(p, 1.0);
+}

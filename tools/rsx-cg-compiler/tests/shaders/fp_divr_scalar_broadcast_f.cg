@@ -1,0 +1,6 @@
+// A scalar quotient broadcast to a vector is allowed to repeat lanes.
+void main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, out float4 o : COLOR)
+{
+    float3 p = a.x / b.w;
+    o = float4(p, 1.0);
+}

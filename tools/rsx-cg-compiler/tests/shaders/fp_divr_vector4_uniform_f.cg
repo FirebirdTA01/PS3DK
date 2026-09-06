@@ -1,0 +1,5 @@
+// A scalar uniform denominator must broadcast over all four numerator lanes.
+void main(float4 a : TEXCOORD0, uniform float divisor, out float4 o : COLOR)
+{
+    o = a.wzyx / divisor;
+}

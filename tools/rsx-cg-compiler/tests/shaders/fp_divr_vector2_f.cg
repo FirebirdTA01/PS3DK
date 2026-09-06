@@ -1,0 +1,6 @@
+// Distinct numerator lanes divided by one dynamic component.
+void main(float4 a : TEXCOORD0, out float4 o : COLOR)
+{
+    float2 p = a.xy / a.w;
+    o = float4(p, 0.0, 1.0);
+}

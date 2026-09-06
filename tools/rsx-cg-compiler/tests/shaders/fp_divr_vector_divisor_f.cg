@@ -1,0 +1,6 @@
+// Dynamic vector denominators require one reciprocal per component.
+void main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, out float4 o : COLOR)
+{
+    float3 p = a.xyz / b.zyx;
+    o = float4(p, 1.0);
+}

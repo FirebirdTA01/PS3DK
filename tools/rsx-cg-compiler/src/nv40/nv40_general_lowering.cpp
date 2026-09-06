@@ -2828,7 +2828,7 @@ private:
 
     // THE SCALAR UNIT COMPUTES ONE LANE (t_249b8088).
     //
-    // RCP, RSQ, SIN, COS, LG2, EX2 and DIVR read a single source COMPONENT and
+    // RCP, RSQ, SIN, COS, LG2 and EX2 read a single source COMPONENT and
     // write that one result into EVERY enabled destination lane.  So a
     // vector argument needs one instruction per lane, each selecting its
     // own component - which is exactly what the reference emits: sin on a
@@ -2844,14 +2844,13 @@ private:
     // never seen it because every corpus use of these ops is on a scalar.
     //
     // lowerDiv's literal 1/x fast path uses the same per-lane helper for
-    // vector reciprocals.  General VECTOR x/y division also stays on
-    // per-lane RCP plus vector MUL because that is the reference's shape;
-    // scalar x/y division uses DIVR.
+    // vector reciprocals.  DIVR instead has a vector numerator and a scalar
+    // denominator: lowerDiv uses it for scalar divisors at every result
+    // width, and keeps per-lane RCP plus MUL for vector denominators.
     static bool isScalarUnitOp(VOp op)
     {
         return op == VOp::Rcp || op == VOp::Rsq || op == VOp::Sin ||
-               op == VOp::Cos || op == VOp::Lg2 || op == VOp::Ex2 ||
-               op == VOp::DivR;
+               op == VOp::Cos || op == VOp::Lg2 || op == VOp::Ex2;
     }
 
     static int laneCount(int mask)
@@ -3454,11 +3453,11 @@ private:
             program_.instrs.push_back(mul);
             return;
         }
-        // General SCALAR x/y with a dynamic divisor: the oracle uses DIVR
-        // (0x3A).  General VECTOR x/y deliberately keeps the per-lane RCP
-        // plus vector MUL shape: measured on float3 division, sce-cgc emits
-        // three RCPRs and one MULR, not three DIVRs and not one multi-lane
-        // DIVR.
+        // A dynamic SCALAR divisor uses DIVR (0x3A) at every numerator
+        // width.  The numerator is vector-valued; only the denominator's
+        // first swizzled component is scalar.  A VECTOR divisor keeps the
+        // per-lane RCP plus MUL shape: direct float3/float3 emits three
+        // RCPRs and one MULR.  divr-opcode-test pins both cases.
         const int divisorWidth = valueWidthOf(inst.operands[1]);
         if (divisorWidth < 1 || divisorWidth > 4) {
             program_.diagnostics.push_back(
@@ -3466,13 +3465,17 @@ private:
             program_.loweringFailed = true;
             return;
         }
-        if (laneCount(mask) == 1) {
+        if (laneCount(mask) == 1 || divisorWidth == 1) {
             VInstr div;
             div.op = VOp::DivR;
             div.dst.index = define(inst.result);
             div.dst.writemask = mask;
             div.srcs[0] = resolve(inst.operands[0]);
             div.srcs[1] = resolve(inst.operands[1]);
+            if (laneCount(mask) > 1) {
+                const uint8_t comp = div.srcs[1].swizzle[0];
+                div.srcs[1].swizzle = {comp, comp, comp, comp};
+            }
             program_.instrs.push_back(div);
             return;
         }
@@ -4789,8 +4792,8 @@ private:
     // stay in the same table so the reader does not have to infer which
     // constants were measured and which were derived.
     //
-    // DIVR is scalar-only.  Scalar atan2 uses DIVR; vector atan2 follows the
-    // same oracle rule as vector division: one RCP per divisor lane and one
+    // DIVR takes a scalar denominator. Scalar atan2 uses DIVR; vector atan2
+    // has a vector denominator: one RCP per divisor lane and one
     // vector MUL.  The quadrant repair writes CC with SGTRC and then uses
     // predicated ADDR/MOVR.  For vectors those predicates read CC per lane,
     // not CC.x broadcast.
@@ -6159,19 +6162,20 @@ private:
         return vi.op == VOp::Kil ? vi.killFused : vi.op;
     }
 
-    static int requiredSourceMask(const VInstr& vi)
+    static int requiredSourceMask(const VInstr& vi, size_t srcIndex)
     {
         switch (effectiveOp(vi)) {
         case VOp::Dp2: return 0x3;
         case VOp::Dp3: return 0x7;
         case VOp::Dp4: return 0xf;
+        case VOp::DivR:
+            return srcIndex == 0 ? vi.dst.writemask : 0x1;
         case VOp::Rcp:
         case VOp::Rsq:
         case VOp::Sin:
         case VOp::Cos:
         case VOp::Lg2:
         case VOp::Ex2:
-        case VOp::DivR:
             return 0x1;
         default:       return vi.dst.writemask;
         }
@@ -6310,7 +6314,7 @@ private:
                 VInstr mov;
                 mov.op = VOp::Mov;
                 mov.dst.index = newVReg();
-                mov.dst.writemask = requiredSourceMask(vi);
+                mov.dst.writemask = requiredSourceMask(vi, srcIndex);
                 mov.dst.fp16 = profile_ == GeneralProfile::Fragment &&
                                 isHalfPrecisionFragmentInput(src);
                 program_.vregToFp16[mov.dst.index] = mov.dst.fp16;
@@ -6398,7 +6402,7 @@ private:
                 VInstr mov;
                 mov.op = VOp::Mov;
                 mov.dst.index = newVReg();
-                mov.dst.writemask = requiredSourceMask(vi);
+                mov.dst.writemask = requiredSourceMask(vi, srcIndex);
                 mov.srcs[0] = src;
                 shaped.push_back(mov);
 

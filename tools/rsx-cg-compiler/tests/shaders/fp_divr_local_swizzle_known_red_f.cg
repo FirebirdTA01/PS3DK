@@ -1,0 +1,8 @@
+// KNOWN RED t_6be25fd4: the local swizzle is lost on the general path.
+// Expected p = a.zyw / a.x. Retained independently of vector DIVR lowering.
+void main(float4 a : TEXCOORD0, out float4 o : COLOR)
+{
+    float4 b = a.wzyx;
+    float3 p = b.yzx / b.w;
+    o = float4(p, 1.0);
+}

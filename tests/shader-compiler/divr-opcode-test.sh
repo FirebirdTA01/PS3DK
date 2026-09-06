@@ -13,8 +13,9 @@
 #
 # CONTROL: before the DIVR lowering, the positive fragment fixtures compile
 # through RCP/MUL and this test names the missing 0x3A opcode.  The vector
-# smoothstep fixture is the known-good control: the reference does NOT use
-# DIVR for vector division, so it must keep the RCP/MUL idiom.  The literal
+# smoothstep fixture is the known-good control: a vector denominator keeps
+# the per-component RCP/MUL idiom. A scalar denominator permits vector DIVR.
+# The literal
 # divisor fixtures are the other negative controls: the reference folds
 # /3.0 to MUL by the correctly rounded reciprocal 0x3eaaaaab, and folds
 # vector /0.01 to vector MUL by 100, so neither should emit DIVR or RCP.
@@ -60,6 +61,13 @@ compile_fp fp_smoothstep_variable_edges_f
 compile_fp fp_div_literal_recip_f
 compile_fp fp_div_literal_vector_recip_f
 compile_fp fp_length_scaled_divr_f
+compile_fp fp_divr_vector2_f
+compile_fp fp_divr_vector3_swizzle_f
+compile_fp fp_divr_vector4_uniform_f
+compile_fp fp_divr_vector_divisor_f
+compile_fp fp_divr_vector_separate_inputs_f
+compile_fp fp_divr_scalar_broadcast_f
+compile_fp fp_divr_local_swizzle_known_red_f
 
 python3 - \
     "$work/fp_divr_scalar_f.log" \
@@ -68,9 +76,17 @@ python3 - \
     "$work/fp_smoothstep_variable_edges_f.log" \
     "$work/fp_div_literal_recip_f.log" \
     "$work/fp_div_literal_vector_recip_f.log" \
-    "$work/fp_length_scaled_divr_f.log" <<'PY'
+    "$work/fp_length_scaled_divr_f.log" \
+    "$work/fp_divr_vector2_f.log" \
+    "$work/fp_divr_vector3_swizzle_f.log" \
+    "$work/fp_divr_vector4_uniform_f.log" \
+    "$work/fp_divr_vector_divisor_f.log" \
+    "$work/fp_divr_vector_separate_inputs_f.log" \
+    "$work/fp_divr_scalar_broadcast_f.log" \
+    "$work/fp_divr_local_swizzle_known_red_f.log" <<'PY'
 import re
 import sys
+import os
 
 DIV, RCP, MUL, RSQ, DIVSQR = 0x3A, 0x1A, 0x02, 0x1B, 0x3B
 CONST = 2
@@ -98,6 +114,8 @@ def decode(path):
             "op": (w[0] >> 24) & 0x3F,
             "sat": bool(w[0] & (1 << 31)),
             "mask": (w[0] >> 9) & 0xF,
+            "src0_swizzle": (w[1] >> 9) & 0xFF,
+            "words": w,
         })
         i += 1 + (1 if consts else 0)
     return out
@@ -114,8 +132,8 @@ def assert_divr(path, label, saturated):
             "in use" % label)
     if any(d["mask"] not in (0x1, 0x2, 0x4, 0x8) for d in divs):
         raise SystemExit(
-            "FAIL: %s emitted a multi-lane DIVR.  The oracle uses DIVR for "
-            "scalar division only; vector divides stay RCP/MUL." % label)
+            "FAIL: %s emitted a multi-lane DIVR for this scalar-result "
+            "fixture." % label)
     if saturated and not any(d["sat"] for d in divs):
         raise SystemExit(
             "FAIL: %s emitted DIVR but not DIVR_sat for the clamp" % label)
@@ -135,8 +153,8 @@ def assert_vector_rcp_mul(path, label):
         raise SystemExit("FAIL: %s produced no decoded instructions" % label)
     if any(d["op"] == DIV for d in ins):
         raise SystemExit(
-            "FAIL: %s emitted DIVR for vector division.  The oracle uses "
-            "per-lane RCP plus vector MUL for vector divides." % label)
+            "FAIL: %s emitted DIVR for a vector denominator. Expected "
+            "per-lane RCP plus vector MUL." % label)
     rcps = [d for d in ins if d["op"] == RCP]
     if len(rcps) < 3:
         raise SystemExit(
@@ -197,6 +215,83 @@ assert_vector_rcp_mul(sys.argv[4], "fp_smoothstep_variable_edges_f")
 assert_literal_recip_mul(sys.argv[5], "fp_div_literal_recip_f", "aaab3eaa")
 assert_literal_recip_mul(sys.argv[6], "fp_div_literal_vector_recip_f", "000042c8")
 assert_scaled_length_divr(sys.argv[7], "fp_length_scaled_divr_f")
+
+# A vector numerator with a SCALAR denominator is one vector DIVR.  A
+# vector denominator remains the per-component RCP/MUL case above.
+assert_vector_rcp_mul(sys.argv[11], "fp_divr_vector_divisor_f")
+vector_ops = decode(sys.argv[11])
+if sum(d["op"] == RCP for d in vector_ops) != 3 or sum(d["op"] == MUL for d in vector_ops) != 1:
+    raise SystemExit("FAIL: direct float3/float3 must use exactly three RCPs and one MUL")
+for path, mask in zip(sys.argv[8:11], (0x3, 0x7, 0xF)):
+    ins = decode(path)
+    divs = [d for d in ins if d["op"] == DIV]
+    if len(divs) != 1 or divs[0]["mask"] != mask:
+        raise SystemExit("FAIL: %s expected one DIVR with mask 0x%x, got %s" %
+                         (path, mask, divs))
+    if any(d["op"] == RCP for d in ins):
+        raise SystemExit("FAIL: %s still composes RCP/MUL" % path)
+    d = divs[0]
+    numerator = [(d["src0_swizzle"] >> (2 * lane)) & 3
+                 for lane in range(4) if mask & (1 << lane)]
+    if len(set(numerator)) != len(numerator):
+        raise SystemExit("FAIL: %s lost distinct numerator lanes" % path)
+    print("%s: one vector DIVR, distinct numerator lanes" % path)
+
+# Different varyings force temporary preloads. DIVR must read initialized
+# numerator components in every written lane; copying just x is insufficient.
+ins = decode(sys.argv[12])
+written = {}
+div_count = 0
+for d in ins:
+    w = d["words"]
+    if d["op"] == DIV:
+        div_count += 1
+        if d["mask"] != 0x7:
+            raise SystemExit("FAIL: separate-input DIVR lost result lanes")
+        for source, needed in ((w[1], d["mask"]), (w[2], 0x1)):
+            if (source & 3) != 0:
+                raise SystemExit("FAIL: separate varyings were not preloaded")
+            reg = (source >> 2) & 63
+            for lane in range(4):
+                comp = (source >> (9 + 2 * lane)) & 3
+                if needed & (1 << lane) and not written.get(reg, 0) & (1 << comp):
+                    raise SystemExit("FAIL: DIVR reads uninitialized R%d.%s after input preload" %
+                                     (reg, "xyzw"[comp]))
+    if not w[0] & (1 << 30):
+        reg = (w[0] >> 1) & 63
+        written[reg] = written.get(reg, 0) | d["mask"]
+if div_count != 1:
+    raise SystemExit("FAIL: separate-input fixture expected one DIVR")
+print("separate-input DIVR: numerator and denominator preload coverage verified")
+
+broadcast = decode(sys.argv[13])
+if sum(d["op"] == DIV for d in broadcast) != 1 or any(d["op"] == RCP for d in broadcast):
+    raise SystemExit("FAIL: scalar quotient broadcast must keep one DIVR, no RCP")
+
+# Keep the inherited local-alias miscompile visible without blessing its
+# wrong encoding. Set PS3TC_REQUIRE_LOCAL_SWIZZLE=1 to run its currently-red
+# guard as a failure; once t_6be25fd4 lands this should pass unconditionally.
+# Evaluate the tiny witness's DIVR input selection at a=(2,3,5,7). Its
+# numerator must be (5,3,7), denominator 2; current code reads (3,5,2)/7.
+known = decode(sys.argv[14])
+divs = [d for d in known if d["op"] == DIV]
+if len(divs) != 1:
+    raise SystemExit("FAIL: known-red local-swizzle witness lost its DIVR")
+w = divs[0]["words"]
+if (w[1] & 3) == 1 and (w[2] & 3) == 1:
+    values = (2, 3, 5, 7)
+    numer = tuple(values[(w[1] >> (9 + 2 * lane)) & 3] for lane in range(3))
+    denom = values[(w[2] >> 9) & 3]
+    correct = numer == (5, 3, 7) and denom == 2
+    if not correct:
+        message = "KNOWN RED t_6be25fd4: local swizzle reads %s/%s, expected (5, 3, 7)/2" % (numer, denom)
+        if os.environ.get("PS3TC_REQUIRE_LOCAL_SWIZZLE") == "1":
+            raise SystemExit("FAIL: " + message)
+        print(message)
+    else:
+        print("local-swizzle witness now selects the expected inputs")
+else:
+    raise SystemExit("FAIL: local-swizzle witness shape changed; re-evaluate t_6be25fd4 rather than waive it")
 PY
 
 vp_log="$work/vp_divr_guard_v.log"
