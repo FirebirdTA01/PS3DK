@@ -1,0 +1,6 @@
+float4 main(float4 n : TEXCOORD0, float4 i : TEXCOORD1, float4 ng : TEXCOORD2) : COLOR
+{
+    float4 color = float4(0.25, 0.0, 0.75, 1.0);
+    color.y = faceforward(n.xyz, i.xyz, ng.xyz).z * 0.25 + 0.5;
+    return color;
+}

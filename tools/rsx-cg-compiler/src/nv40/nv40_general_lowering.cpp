@@ -2185,6 +2185,9 @@ private:
         case IROp::Reflect:
             lowerReflect(inst);
             return;
+        case IROp::FaceForward:
+            lowerFaceForward(inst);
+            return;
         case IROp::Refract:
             lowerRefract(inst);
             return;
@@ -5387,6 +5390,60 @@ private:
         mad.srcs[2] = tempSrc(iReg);
         mad.stubFenceBrBefore = true;
         program_.instrs.push_back(mad);
+    }
+
+    void lowerFaceForward(const IRInstruction& inst)
+    {
+        const int width = inst.resultType.componentCount();
+        if (profile_ != GeneralProfile::Fragment || inst.operands.size() != 3 ||
+            inst.result == InvalidIRValue || width < 1 || width > 4) {
+            program_.diagnostics.push_back(
+                "nv40-general: faceforward requires an FP value of width 1..4; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const VSrc normal = resolve(inst.operands[0]);
+        const int selected = newVReg();
+        const int mask = componentMaskForWidth(width);
+        // Measured shape: default -N; width-specific dot(I, Ng) to CC.x;
+        // commit N only under LT.x. In particular, a zero dot keeps -N.
+        VInstr initial;
+        initial.op = VOp::Mov;
+        initial.dst.index = selected;
+        initial.dst.writemask = mask;
+        initial.srcs[0] = normal;
+        // Toggle: if N already means -x, the default -N must mean +x.
+        initial.srcs[0].neg = !initial.srcs[0].neg;
+        program_.instrs.push_back(initial);
+
+        VInstr dot;
+        dot.op = width == 1 ? VOp::Mul : dotReductionOp(width);
+        dot.dst.none = true;
+        dot.dst.writemask = 0x1;
+        dot.srcs[0] = resolve(inst.operands[1]);
+        dot.srcs[1] = resolve(inst.operands[2]);
+        dot.ccUpdate = true;
+        program_.instrs.push_back(dot);
+
+        VInstr commit;
+        commit.op = VOp::Mov;
+        commit.dst.index = selected;
+        commit.dst.writemask = mask;
+        commit.srcs[0] = normal;
+        commit.predicate = NVFX_COND_LT;
+        commit.predicateSwizzle = {0, 0, 0, 0};
+        program_.instrs.push_back(commit);
+
+        // Keep the conditional multiwriter private. The generic output-store
+        // fold may redirect the final producer; redirecting only the LT write
+        // would leave the default arm outside the output register.
+        VInstr result;
+        result.op = VOp::Mov;
+        result.dst.index = define(inst.result);
+        result.dst.writemask = mask;
+        result.srcs[0] = tempSrc(selected);
+        program_.instrs.push_back(result);
     }
 
     // refract(I, N, eta):

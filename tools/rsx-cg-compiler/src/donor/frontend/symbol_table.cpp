@@ -535,7 +535,7 @@ void SymbolTable::registerVectorFunctions()
     }
 
     // faceforward
-    for (int size = 2; size <= 4; ++size)
+    for (int size = 1; size <= 4; ++size)
     {
         CgType vec = CgType::Vec(ScalarKind::Float, size);
         addFunction("faceforward", vec, {vec, vec, vec}, {"n", "i", "nref"}, nullptr, true);
