@@ -355,6 +355,13 @@ tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_deriv_scalar_f.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/fp_deriv_float2_f.cg|0|general
 
+# t_a290c3c8 Task 10: parser spelling for negative integer literals
+# must not decide whether a static loop is unrolled. This is the safe
+# half of test_74's 3x3 PCF loop shape: the row is pixel-identical, while
+# test_74 itself still refuses on the short-circuit sqrt hazard exposed
+# after the loop back-edge symptom was removed.
+tools/rsx-cg-compiler/tests/shaders/fp_static_negative_loop_f.cg|0|general
+
 # t_71ad405e: stdlib dot-reductions must use the source width.  The length
 # float2 row is the pixel witness for the stale-lane failure: its float3
 # source has a non-zero z lane, and the broken lowering reuses that physical

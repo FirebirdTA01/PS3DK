@@ -5,7 +5,7 @@
 "th06_v","","operand_resolution"
 "test_79_centroid_interpolation","","register_budget"
 "test_84_projective_texture_txp","","register_budget"
-"test_74_shadow_map_pcf","","control_flow_backedge"
+"test_74_shadow_map_pcf","","short_circuit_sqrt_rhs"
 "test_71_v_dynamic_loops","","selpred_alias"
 "test_76_custom_depth_output","","selpred_alias"
 "scanlines","","one_off"

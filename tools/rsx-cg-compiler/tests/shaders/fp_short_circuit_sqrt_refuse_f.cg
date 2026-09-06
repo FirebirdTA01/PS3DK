@@ -1,0 +1,16 @@
+// A logical && RHS that contains sqrt() must not be eagerly evaluated.
+//
+// Cg's short-circuit semantics skip the RHS when x < 0 here.  The current
+// flattened fragment path has no way to preserve that control dependence:
+// evaluating sqrt(x) unconditionally lets a non-finite value contaminate
+// the LogicalAnd/Select chain.  Refuse this shape until short-circuit
+// lowering is implemented honestly.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float x = c.x - 0.5;
+    if (x >= 0.0 && sqrt(x) > 0.25) {
+        o = float4(0.1, 0.8, 0.2, 1.0);
+    } else {
+        o = float4(0.7, 0.1, 0.1, 1.0);
+    }
+}

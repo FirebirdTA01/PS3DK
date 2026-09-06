@@ -587,6 +587,73 @@ private:
         return true;
     }
 
+    bool isZeroConstant(IRValueID id) const
+    {
+        const IRValue* value = entry_.getValue(id);
+        const auto* constant = value ? dynamic_cast<const IRConstant*>(value) : nullptr;
+        if (!constant)
+            return false;
+        if (std::holds_alternative<float>(constant->value))
+            return std::get<float>(constant->value) == 0.0f;
+        if (std::holds_alternative<int32_t>(constant->value))
+            return std::get<int32_t>(constant->value) == 0;
+        if (std::holds_alternative<uint32_t>(constant->value))
+            return std::get<uint32_t>(constant->value) == 0u;
+        return false;
+    }
+
+    bool isClampedNonNegative(IRValueID id) const
+    {
+        auto it = defMap_.find(id);
+        if (it == defMap_.end() || !it->second)
+            return false;
+        const IRInstruction& inst = *it->second;
+        return inst.op == IROp::Max &&
+               inst.operands.size() >= 2 &&
+               (isZeroConstant(inst.operands[0]) ||
+                isZeroConstant(inst.operands[1]));
+    }
+
+    bool valueDependsOnUnsafeSqrt(IRValueID id,
+                                  std::unordered_set<IRValueID>& seen) const
+    {
+        if (id == InvalidIRValue || !seen.insert(id).second)
+            return false;
+        auto it = defMap_.find(id);
+        if (it == defMap_.end() || !it->second)
+            return false;
+        const IRInstruction& inst = *it->second;
+        if (inst.op == IROp::Sqrt || inst.op == IROp::RSqrt) {
+            if (!inst.operands.empty() &&
+                isClampedNonNegative(inst.operands[0]))
+                return false;
+            return true;
+        }
+        for (IRValueID operand : inst.operands) {
+            if (valueDependsOnUnsafeSqrt(operand, seen))
+                return true;
+        }
+        return false;
+    }
+
+    bool hasUnsafeShortCircuitSqrt(
+        const std::vector<const IRBasicBlock*>& blocks) const
+    {
+        for (const IRBasicBlock* b : blocks) {
+            for (const auto& instPtr : b->instructions) {
+                if (!instPtr ||
+                    (instPtr->op != IROp::LogicalAnd &&
+                     instPtr->op != IROp::LogicalOr) ||
+                    instPtr->operands.size() < 2)
+                    continue;
+                std::unordered_set<IRValueID> seen;
+                if (valueDependsOnUnsafeSqrt(instPtr->operands[1], seen))
+                    return true;
+            }
+        }
+        return false;
+    }
+
     // CF-1a (design note docs/design/shader-compiler-control-flow.md):
     // a forward-only structured CFG runs UNCONDITIONALLY — both arms
     // always execute, joins are already select instructions inserted
@@ -610,17 +677,29 @@ private:
         std::vector<const IRBasicBlock*> blocks;
         for (const auto& b : entry_.blocks)
             if (b) blocks.push_back(b.get());
-        if (blocks.size() <= 1) {
-            order = blocks;
-            return true;
-        }
-        flattened_ = true;
 
         auto refuse = [&](const std::string& what) {
             program_.diagnostics.push_back("nv40-general: " + what);
             program_.loweringFailed = true;
             return false;
         };
+
+        for (const IRBasicBlock* b : blocks)
+            for (const auto& instPtr : b->instructions)
+                if (instPtr && instPtr->result != InvalidIRValue)
+                    defMap_[instPtr->result] = instPtr.get();
+
+        if (hasUnsafeShortCircuitSqrt(blocks)) {
+            return refuse(
+                "short-circuit logical RHS with sqrt/rsqrt is not "
+                "lowered; refusing rather than eagerly evaluating it");
+        }
+
+        if (blocks.size() <= 1) {
+            order = blocks;
+            return true;
+        }
+        flattened_ = true;
 
         std::unordered_map<std::string, const IRBasicBlock*> byName;
         for (const IRBasicBlock* b : blocks)
@@ -638,8 +717,6 @@ private:
                 if (terminated)
                     return refuse("block '" + b->name +
                                   "' has instructions past its terminator; refusing");
-                if (inst.result != InvalidIRValue)
-                    defMap_[inst.result] = &inst;
                 switch (inst.op) {
                 case IROp::Branch:
                 case IROp::CondBranch: {
@@ -679,6 +756,7 @@ private:
         }
         if (!exitBlock)
             return refuse("control flow has no return block; refusing");
+
         if (returnBlocks.size() > 1) {
             if (!tryPrepareMergedReturnSelect(blocks, succs, returnBlocks,
                                               order))

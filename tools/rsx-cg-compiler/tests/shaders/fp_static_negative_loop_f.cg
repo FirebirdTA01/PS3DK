@@ -1,0 +1,19 @@
+// Static loops with negative literal bounds must unroll in the frontend.
+//
+// test_74_shadow_map_pcf uses the same shape for its 3x3 PCF loop:
+//     for (int y = -1; y <= 1; y++)
+//     for (int x = -1; x <= 1; x++)
+// A parser represents -1 as Unary(Negate, Literal(1)), so this fixture
+// catches the unroller treating that literal shape as dynamic and leaving
+// a real back-edge for the fragment backend to refuse.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    float acc = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            float2 offset = float2((float)x, (float)y);
+            acc += dot(offset, float2(0.1, 0.2)) + c.x * 0.01;
+        }
+    }
+    o = float4(acc, c.y, 0.0, 1.0);
+}

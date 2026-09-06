@@ -695,10 +695,19 @@ bool stmtContainsBreakOrContinue(StmtNode* stmt)
 
 bool exprIsIntLiteral(ExprNode* e, int32_t* out)
 {
+    bool negate = false;
+    while (e && e->kind == ExprKind::Unary)
+    {
+        auto* u = static_cast<UnaryExpr*>(e);
+        if (u->op != UnaryOp::Negate) return false;
+        negate = !negate;
+        e = u->operand.get();
+    }
     if (!e || e->kind != ExprKind::Literal) return false;
     auto* lit = static_cast<LiteralExpr*>(e);
     if (lit->literalKind != LiteralExpr::LiteralKind::Int) return false;
-    *out = static_cast<int32_t>(std::get<int64_t>(lit->value));
+    int64_t v = std::get<int64_t>(lit->value);
+    *out = static_cast<int32_t>(negate ? -v : v);
     return true;
 }
 
