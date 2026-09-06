@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lexer.h"
+#include <vector>
 #include <stack>
 #include <set>
 
@@ -102,7 +103,12 @@ private:
 	std::vector<std::string> tokenizeArgs(const std::string& args);      // For macro invocation arguments
 
 	// Line splicing (backslash-newline continuation)
-	std::string spliceLines(const std::string& src);
+	// Joins backslash-newline continuations.  `physicalLinesPerSpliced`, when
+	// given, receives how many SOURCE lines each spliced line consumed, so a
+	// caller can keep counting the lines the author wrote rather than the
+	// lines that survived splicing.
+	std::string spliceLines(const std::string& src,
+	                        std::vector<int>* physicalLinesPerSpliced = nullptr);
 
 	// Comment handling
 	std::string stripCommentsPreserveNewlines(const std::string& src);

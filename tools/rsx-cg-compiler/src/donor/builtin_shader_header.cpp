@@ -35,7 +35,13 @@ R"__VSHDR__(/* Fallback Vita builtin header (generation failed).
 )__VSHDR__";
 #endif
 
-static constexpr char kVirtualHeaderName[] = "vita_builtin_cg.h";
+// This name is user-visible: main.cpp emits it as the `#line 1 "<name>"`
+// marker ahead of the header text, and since t_1366b9b9 the lexer reads
+// that marker, so a diagnostic raised inside this header is reported
+// against this string.  It was the donor's own file name, which named
+// the wrong console in the wrong project's output; a neutral label says
+// what it is without pretending to be a file anyone can open.
+static constexpr char kVirtualHeaderName[] = "<builtin>";
 } // namespace
 
 const char* GetBuiltinShaderHeaderName()

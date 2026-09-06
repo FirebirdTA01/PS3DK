@@ -74,7 +74,10 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 {
 	// Phase 1: Handle backslash-newline continuation (line splicing)
 	// This joins physical lines ending with '\' into logical lines
-	std::string splicedSource = spliceLines(source);
+	// The counts come back so the logical line below can advance by the
+	// number of SOURCE lines each spliced line ate, not by one.
+	std::vector<int> physicalLinesPerSpliced;
+	std::string splicedSource = spliceLines(source, &physicalLinesPerSpliced);
 
 	// If comments should be removed (-C not set), strip them up-front while preserving newlines
 	const std::string& inputSource = keepComments ? splicedSource : stripCommentsPreserveNewlines(splicedSource);
@@ -96,11 +99,28 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 
 	bool inBlockComment = false; // Only used when keepComments == true
 
+	// process() runs on the COMPOSED unit - the builtin header, the driver's
+	// markers and the user's source, one string - so lineNum counts lines of
+	// that stream and is not the line anyone wrote.  Two things followed from
+	// using it as if it were: a directive line and every line inside an
+	// inactive conditional are CONSUMED and emit nothing, so each one shifted
+	// the text below it by a line, and the marker handleInclude() emits on the
+	// way back out of an include named a composed-stream line, which put the
+	// following code back where it started.  Track the LOGICAL position
+	// instead - the file and line the text claims, updated from the markers we
+	// pass through - and emit a marker wherever the emitted text stops being
+	// contiguous with it (t_1366b9b9).
+	int logicalLine = 1;
+	std::string logicalFile = filename;
+	int nextEmittedLine = 1;
+	size_t splicedIndex = 0;
+	std::string nextEmittedFile = filename;
+
 	while (std::getline(input, line))
 	{
 		// Update __LINE__ macro
 		macros["__LINE__"].replacementList.clear();
-		macros["__LINE__"].replacementList.push_back({ TokenType::NUMBER, std::to_string(lineNum), lineNum, 0, filename });
+		macros["__LINE__"].replacementList.push_back({ TokenType::NUMBER, std::to_string(logicalLine), logicalLine, 0, logicalFile });
 
 		// Check if we're in an active conditional block
 		bool active = true;
@@ -112,24 +132,48 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 		std::string trimmedLine = trim(line);
 		if(trimmedLine.size() > 0 && trimmedLine[0] == '#')
 		{
-			processDirective(trimmedLine, output, filename, lineNum);
+			// A marker we are passing through REPLACES the logical position
+			// rather than advancing it - it names the line of what follows.
+			int markerLine = 0;
+			std::string markerFile;
+			if (Lexer::parseLineMarker(trimmedLine, markerLine, markerFile))
+			{
+				processDirective(trimmedLine, output, logicalFile, logicalLine);
+				logicalLine = markerLine;
+				if (!markerFile.empty())
+					logicalFile = markerFile;
+				splicedIndex++;
+				lineNum++;
+				continue;
+			}
+			processDirective(trimmedLine, output, logicalFile, logicalLine);
 		}
 		else if (active)
 		{
+			if (logicalLine != nextEmittedLine || logicalFile != nextEmittedFile)
+			{
+				output += "#line " + std::to_string(logicalLine) + " \"" + logicalFile + "\"\n";
+			}
 			if (keepComments)
 			{
 				// Expand macros only in code segments; preserve comments verbatim
-				std::string expanded = expandWithCommentsAware(line, inBlockComment, filename, lineNum);
+				std::string expanded = expandWithCommentsAware(line, inBlockComment, logicalFile, logicalLine);
 				output += expanded + "\n";
 			}
 			else
 			{
 				// Comments were stripped globally; just expand
-				std::string expandedLine = expandMacros(line, filename, lineNum);
+				std::string expandedLine = expandMacros(line, logicalFile, logicalLine);
 				output += expandedLine + "\n";
 			}
+			nextEmittedLine = logicalLine + 1;
+			nextEmittedFile = logicalFile;
 		}
 
+		logicalLine += (splicedIndex < physicalLinesPerSpliced.size())
+					  ? physicalLinesPerSpliced[splicedIndex]
+					  : 1;
+		splicedIndex++;
 		lineNum++;
 	}
 
@@ -670,10 +714,16 @@ void Preprocessor::processPragma(const std::string& directive, std::string& outp
 // Handle backslash-newline continuation (line splicing)
 // This is Phase 1 of preprocessing per the C standard
 // Lines ending with '\' followed by newline are joined together
-std::string Preprocessor::spliceLines(const std::string& src)
+std::string Preprocessor::spliceLines(const std::string& src,
+                                      std::vector<int>* physicalLinesPerSpliced)
 {
 	std::string result;
 	result.reserve(src.size());
+	// How many source lines the spliced line being built has eaten so far.
+	// A continuation removes a newline the author wrote; counting them here
+	// is what lets a diagnostic below a multi-line #define still name the
+	// author's line.
+	int physicalForCurrent = 1;
 
 	size_t i = 0;
 	while (i < src.size())
@@ -698,12 +748,14 @@ std::string Preprocessor::spliceLines(const std::string& src)
 				{
 					// Backslash-newline: skip both, continue on next line
 					i = next + 1;
+					physicalForCurrent++;
 					continue;
 				}
 				else if (src[next] == '\r' && next + 1 < src.size() && src[next + 1] == '\n')
 				{
 					// Backslash-CRLF: skip all three characters
 					i = next + 2;
+					physicalForCurrent++;
 					continue;
 				}
 			}
@@ -715,6 +767,12 @@ std::string Preprocessor::spliceLines(const std::string& src)
 		else
 		{
 			result.push_back(c);
+			if (c == '\n')
+			{
+				if (physicalLinesPerSpliced)
+					physicalLinesPerSpliced->push_back(physicalForCurrent);
+				physicalForCurrent = 1;
+			}
 			i++;
 		}
 	}
