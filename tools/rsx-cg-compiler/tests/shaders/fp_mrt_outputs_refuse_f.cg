@@ -1,0 +1,20 @@
+struct FragmentInput {
+    float2 uv : TEXCOORD0;
+};
+
+struct FragmentOutput {
+    float4 color0 : COLOR0;
+    float4 color1 : COLOR1;
+    float4 color2 : COLOR2;
+    float4 color3 : COLOR3;
+};
+
+FragmentOutput main(FragmentInput input)
+{
+    FragmentOutput output;
+    output.color0 = float4(input.uv.x, 0.0, 0.0, 1.0);
+    output.color1 = float4(0.0, input.uv.y, 0.0, 1.0);
+    output.color2 = float4(input.uv.xy, 0.0, 1.0);
+    output.color3 = float4(1.0, 1.0, 1.0, 1.0);
+    return output;
+}

@@ -1,0 +1,25 @@
+struct FragmentInput {
+    float2 uv : TEXCOORD0;
+};
+
+struct FragmentOutput {
+    float4 color : COLOR0;
+};
+
+FragmentOutput main(FragmentInput input, uniform float4 time_param)
+{
+    FragmentOutput output;
+    float r = dot(input.uv, input.uv);
+
+    if (r < 0.5) {
+        float x = input.uv.x;
+        float y = input.uv.y;
+        output.color = float4(x, y, 0.25, 1.0);
+    } else {
+        float a = sin(input.uv.x + time_param.x);
+        float b = sin(input.uv.y);
+        output.color = float4(a * b, a, b, 1.0);
+    }
+
+    return output;
+}

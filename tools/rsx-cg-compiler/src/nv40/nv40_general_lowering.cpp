@@ -383,6 +383,14 @@ static int fragmentOutputIndex(const std::string& semanticUpper)
     return -1;
 }
 
+static int fragmentColourOutputTargetIndex(const std::string& semanticUpper,
+                                           int semanticIndex)
+{
+    if (semanticUpper == "COLOR" || semanticUpper == "COL")
+        return semanticIndex;
+    return -1;
+}
+
 static VSrc noneSrc()
 {
     return VSrc{};
@@ -469,6 +477,8 @@ public:
     VirtualProgram run()
     {
         std::vector<const IRBasicBlock*> order;
+        if (!validateFragmentOutputs())
+            return program_;
         if (!flattenBlockOrder(order))
             return program_;
         for (const IRBasicBlock* block : order) {
@@ -545,6 +555,35 @@ private:
         const IRInstruction* falseStore = nullptr;
     };
     std::optional<MergedReturnSelect> mergedReturnSelect_;
+
+    bool validateFragmentOutputs()
+    {
+        if (profile_ != GeneralProfile::Fragment)
+            return true;
+        std::set<int> colourTargets;
+        for (const auto& block : entry_.blocks) {
+            if (!block) continue;
+            for (const auto& instPtr : block->instructions) {
+                if (!instPtr || instPtr->op != IROp::StoreOutput)
+                    continue;
+                const std::string sem = toUpper(instPtr->semanticName);
+                const int colourTarget =
+                    fragmentColourOutputTargetIndex(sem, instPtr->semanticIndex);
+                if (colourTarget < 0)
+                    continue;
+                colourTargets.insert(colourTarget);
+                if (colourTarget != 0 || colourTargets.size() > 1) {
+                    program_.diagnostics.push_back(
+                        "nv40-general: multiple fragment colour outputs "
+                        "are not lowered; refusing rather than aliasing "
+                        "secondary colour outputs to COLOR0");
+                    program_.loweringFailed = true;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 
     // CF-1a (design note docs/design/shader-compiler-control-flow.md):
     // a forward-only structured CFG runs UNCONDITIONALLY — both arms
@@ -1645,30 +1684,81 @@ private:
         src.swizzle = {c, c, c, c};
     }
 
+    const IRInstruction* definitionOf(IRValueID id) const
+    {
+        const auto it = defMap_.find(id);
+        return it != defMap_.end() ? it->second : nullptr;
+    }
+
+    bool tryResolveSourceDefinition(IRValueID id, VSrc& out)
+    {
+        const IRInstruction* def = definitionOf(id);
+        if (!def || def->result != id)
+            return false;
+
+        switch (def->op) {
+        case IROp::VecShuffle: {
+            if (def->operands.empty())
+                return false;
+            VSrc src = resolve(def->operands[0]);
+            if (src.kind == VSrcKind::None)
+                return false;
+            assignSwizzle(src, def->swizzleMask,
+                          def->resultType.componentCount());
+            out = src;
+            program_.valueToSource[id] = out;
+            valueWidth_[id] = def->resultType.componentCount();
+            return true;
+        }
+        case IROp::VecExtract: {
+            if (def->operands.empty())
+                return false;
+            VSrc src = resolve(def->operands[0]);
+            if (src.kind == VSrcKind::None)
+                return false;
+            const int lane = std::max(0, std::min(3, def->componentIndex));
+            src.swizzle = {static_cast<uint8_t>(lane),
+                           static_cast<uint8_t>(lane),
+                           static_cast<uint8_t>(lane),
+                           static_cast<uint8_t>(lane)};
+            out = src;
+            program_.valueToSource[id] = out;
+            valueWidth_[id] = def->resultType.componentCount();
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+
     VSrc resolve(IRValueID id)
     {
-        const bool isScalar = (valueWidthOf(id) == 1);
+        const auto finish = [&](VSrc src) {
+            if (valueWidthOf(id) == 1)
+                broadcastScalar(src);
+            return src;
+        };
         const auto srcIt = program_.valueToSource.find(id);
         if (srcIt != program_.valueToSource.end()) {
-            VSrc src = srcIt->second;
-            if (isScalar) broadcastScalar(src);
-            return src;
+            return finish(srcIt->second);
         }
         const auto regIt = program_.valueToVReg.find(id);
         if (regIt != program_.valueToVReg.end()) {
             VSrc src = tempSrc(regIt->second);
             const auto fp16It = program_.vregToFp16.find(regIt->second);
             src.fp16 = fp16It != program_.vregToFp16.end() && fp16It->second;
-            if (isScalar) broadcastScalar(src);
-            return src;
+            return finish(src);
         }
 
         const IRValue* value = entry_.getValue(id);
         if (auto* constant = dynamic_cast<const IRConstant*>(value)) {
             VSrc src = literalSrc(*constant);
-            if (isScalar) broadcastScalar(src);
-            return src;
+            return finish(src);
         }
+
+        VSrc deferred;
+        if (tryResolveSourceDefinition(id, deferred))
+            return finish(deferred);
 
         // REFUSE, do not paper over it.  Returning an empty source here used
         // to encode as SRC_REG_TYPE_INPUT with no index - i.e. a read of
@@ -1681,6 +1771,8 @@ private:
                            " could not be resolved";
         if (value)
             what += " (defined by " + value->toString() + ")";
+        else if (const IRInstruction* def = definitionOf(id))
+            what += " (defined by " + def->toString() + ")";
         what += "; refusing rather than emitting an empty source";
         program_.diagnostics.push_back(what);
         program_.loweringFailed = true;
@@ -5780,7 +5872,11 @@ private:
         if (value)
             return value->type.componentCount();
         const auto it = valueWidth_.find(id);
-        return it != valueWidth_.end() ? it->second : 0;
+        if (it != valueWidth_.end())
+            return it->second;
+        if (const IRInstruction* def = definitionOf(id))
+            return def->resultType.componentCount();
+        return 0;
     }
 
     static int componentMaskForWidth(int width)
