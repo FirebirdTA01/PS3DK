@@ -6108,6 +6108,19 @@ private:
                 return componentMask(p.type);
         }
 
+        // A value RETURNED from the entry has no out parameter to be
+        // measured against, so the loop above finds nothing and the
+        // fallback below measures the VALUE.  For `float4 main() : COLOR
+        // { return 1.0; }` that value is a scalar, which masked the colour
+        // write to lane x and left y/z/w holding whatever the register
+        // had - exit 0, container written, no diagnostic (t_5c12df56).
+        // The destination's width is the entry's DECLARED return type; the
+        // out-parameter spelling of the same assignment already broadcasts
+        // because its declared parameter is what the loop above reads.
+        // Struct returns are not vectors, so they keep the old path.
+        if (entry_.returnType.isVector())
+            return componentMask(entry_.returnType);
+
         const IRValue* irValue = entry_.getValue(value);
         return componentMask(irValue ? irValue->type : inst.resultType);
     }
@@ -7385,17 +7398,53 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // change, the general path dropped all three
     // (the register, its precision and the flag), so `out half4` and
     // `out float4` compiled to byte-identical programs.
-    const bool halfColourOutput = std::any_of(
-        entry.parameters.begin(), entry.parameters.end(),
-        [](const IRParameter& p) {
-            if (p.storage != StorageQualifier::Out &&
-                p.storage != StorageQualifier::InOut)
-                return false;
-            if (p.type.elementType != IRType::Float16) return false;
-            // An unsemanticked fragment `out` binds COLOR0.
-            const std::string sem = toUpper(p.semanticName);
-            return (sem.empty() || sem == "COLOR") && p.semanticIndex == 0;
-        });
+    // Whether the colour comes out of H0 is decided by the DECLARED TYPE
+    // OF THE COLOR0 OUTPUT, and by nothing else.  There are two spellings
+    // and only the first was read here, so `half4 main() : COLOR` kept
+    // outputFromH0 clear and emitted a full-precision MOVR.  That pair is
+    // internally consistent, so the defect is not a read of an unwritten
+    // register: the declared type is disregarded and the program does not
+    // honour the register and precision the source asked for, which is
+    // what the reference emits (t_5c12df56).
+    //
+    //   - an out/inout PARAMETER bound to COLOR0: its type decides, and it
+    //     decides even when the entry also returns something.  `half
+    //     main(out float4 colour : COLOR) : DEPTH` returns half for the
+    //     DEPTH export while its colour stays fp32 in R0, which is what
+    //     the reference emits; reading "half return type AND some COLOR0
+    //     store exists" turned that shader's fp32 colour into H0.
+    //   - otherwise the RETURN TYPE decides, and only if the program
+    //     actually emits a COLOR0 store, so a half return carrying some
+    //     other semantic cannot claim the colour register.
+    //
+    // An unsemanticked fragment `out` binds COLOR0.
+    const auto isColour0 = [](const std::string& rawSem, int index) {
+        const std::string sem = toUpper(rawSem);
+        return (sem.empty() || sem == "COLOR") && index == 0;
+    };
+    const IRParameter* colour0Param = nullptr;
+    for (const IRParameter& p : entry.parameters) {
+        if (p.storage != StorageQualifier::Out &&
+            p.storage != StorageQualifier::InOut)
+            continue;
+        if (isColour0(p.semanticName, p.semanticIndex)) {
+            colour0Param = &p;
+            break;
+        }
+    }
+    bool halfColourOutput = false;
+    if (colour0Param) {
+        halfColourOutput = colour0Param->type.elementType == IRType::Float16;
+    } else if (entry.returnType.elementType == IRType::Float16) {
+        for (const auto& block : entry.blocks) {
+            if (!block) continue;
+            for (const auto& instPtr : block->instructions) {
+                if (!instPtr || instPtr->op != IROp::StoreOutput) continue;
+                if (isColour0(instPtr->semanticName, instPtr->semanticIndex))
+                    halfColourOutput = true;
+            }
+        }
+    }
     if (halfColourOutput) {
         // H0 IS THE LOW HALF OF R0.  A temp allocated there would be the
         // output register, and the allocator placed it before this point

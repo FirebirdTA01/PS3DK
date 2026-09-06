@@ -1,0 +1,17 @@
+// t_5c12df56 positive twin of fp_return_half_depth_control_f.cg: here the
+// HALF is the colour and the out parameter is something else.
+//
+// No out parameter binds COLOR0, so the return type decides: the colour is
+// H0 at fp16 with outputFromH0 set, while the fp32 DEPTH out parameter is
+// untouched.  The reference emits colour word 0x1E800140 and depth word
+// 0x08030100; ours matches both once the return type is read.
+//
+// The pair matters because the two fixtures differ only in WHICH output is
+// half: a rule that looked at the return type alone would set the flag on
+// both, and a rule that looked at parameters alone would set it on
+// neither.
+half4 main(out float d : DEPTH) : COLOR
+{
+    d = 0.5;
+    return 1.0;
+}

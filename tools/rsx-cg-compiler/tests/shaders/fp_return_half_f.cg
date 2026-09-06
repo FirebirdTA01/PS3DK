@@ -1,0 +1,19 @@
+// t_5c12df56: a half RETURN TYPE must reach the container, like a half
+// out parameter does.
+//
+// The half-output detection added for t_80dad2dd walks the entry's
+// PARAMETERS, so it never sees `half4 main() : COLOR`.  The reference
+// emits `MOVH H0, {1,0,0,0}.x` with outputFromH0 set; the general path
+// emits `MOVR R0.x` with the flag clear.  That pair is internally
+// consistent - the runtime reads R0, and R0 was written - so the defect
+// is not a read of an unwritten register: it is that the DECLARED half
+// output is disregarded, and the program does not honour the register and
+// precision the source asked for.  The scalar is not broadcast either
+// (that half is fp_return_scalar_f).
+//
+// fp_half_output_f.cg is the same output declared as an out parameter and
+// is already correct, so this fixture isolates the return type.
+half4 main() : COLOR
+{
+    return 1.0;
+}

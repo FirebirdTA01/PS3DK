@@ -1,0 +1,15 @@
+// t_5c12df56 control: a HALF return that is not the colour.
+//
+// The entry returns half for the DEPTH export while an out parameter binds
+// COLOR0 at fp32.  A COLOR0 store an out parameter owns belongs to that
+// parameter whatever the entry returns, so this program's colour must stay
+// in R0 at full precision with outputFromH0 clear - which is what the
+// reference emits (colour word 0x1E000100, depth word 0x08030140, flag 0).
+//
+// A first draft of the half-return detection read "half return type AND a
+// COLOR0 store exists" and turned this shader's fp32 colour into H0.
+half main(out float4 colour : COLOR) : DEPTH
+{
+    colour = float4(0.25, 0.5, 0.75, 1.0);
+    return 0.5;
+}
