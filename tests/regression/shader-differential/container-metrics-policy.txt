@@ -13,6 +13,15 @@ same gate line without failing the stage. New rows missing from the baseline
 are reported as missing_baseline_rows and do not fail by themselves; accepting
 new rows should update the baseline in the same reviewed change.
 
+The role=reference baseline rows are cost protection for the curated durable
+reference-pair stage. They are not corpus-wide cost coverage; broader corpus
+cost policy lives in the reference-corpus and reference-tree-corpus roles.
+As recorded on 2026-09-05, those 66 rows total 1447 instructions against the
+reference's 934, and 266 registers against the reference's 152, with 45 of 66
+rows carrying a positive register delta. The baseline records current cost, not
+acceptable cost; baseline_regressions=0 means nothing got worse, not that the
+cost is acceptable.
+
 If every current row is missing from a present baseline, the gate reports
 status=no-coverage instead of status=ok. In fail-by-default mode that fails the
 stage, because no baseline row was actually compared.
