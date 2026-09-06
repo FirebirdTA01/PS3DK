@@ -52,9 +52,36 @@ std::unique_ptr<TranslationUnit> Parser::parse()
 
     while (!isAtEnd())
     {
+        // THE LOOP MUST MAKE PROGRESS.  error() records a diagnostic and sets
+        // panicMode; it does not throw and it does not consume a token, so a
+        // declaration that fails WITHOUT advancing leaves the cursor where it
+        // was and this loop calls it again on the same token, for ever.  The
+        // catch below never fires, because nothing here throws.
+        //
+        // That is not hypothetical: ANY unknown identifier in type position
+        // hung the compiler outright - 'uniform bogusType t', or a local
+        // 'bogusType x;' - and it hung --dump-ast too, because it never
+        // reached a back end.  95 shaders in the reference SDK sample tree
+        // never terminated, most of them over the Cg 1.x texobj2D type name
+        // (t_472ff302).  A compiler that refuses is workable; one that spins
+        // cannot be worked around at all.
+        const size_t before = current;
         try
         {
             auto decl = parseTopLevelDeclaration();
+            if (!decl && current == before)
+            {
+                // No declaration and no progress: synchronize, which advances
+                // at least one token, so the diagnostic already recorded is
+                // reported instead of repeated.
+                synchronize();
+                if (static_cast<int>(errors.size()) >= config.maxErrors)
+                {
+                    error("Too many errors, stopping parse");
+                    break;
+                }
+                continue;
+            }
             if (decl)
             {
                 // Track struct/typedef names for type resolution
@@ -497,7 +524,13 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     type->baseType = tokenToBaseType(typeTok.type);
     if (type->baseType == BaseType::Void && typeTok.type != TokenType::KW_VOID)
     {
-        error("Expected type name");
+        // Name the token: 'Expected type name' on its own leaves the reader
+        // hunting for which one, and the commonest cause is a type this
+        // compiler does not know yet rather than a syntax error.
+        if (tok.type == TokenType::IDENTIFIER)
+            error("unknown type name '" + tok.lexeme + "'");
+        else
+            error("Expected type name");
         return nullptr;
     }
 
