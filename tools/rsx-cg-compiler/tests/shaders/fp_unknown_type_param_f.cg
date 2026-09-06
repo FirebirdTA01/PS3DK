@@ -1,0 +1,19 @@
+// t_472ff302: an unknown identifier in type position must be REFUSED, and the
+// compiler must terminate.  Before the fix this source made rsx-cg-compiler
+// spin for ever - not slowly, never - and it did so under --dump-ast too,
+// because the parse loop never reached a back end.
+//
+// The cause was not this type: Parser::error() records a diagnostic without
+// consuming a token or throwing, so a declaration that failed left the cursor
+// where it was and the top-level loop called it again on the same token.  Any
+// failure that neither advances nor throws did this.  'bogusType' is simply
+// the shortest way to reach it.
+//
+// 95 shaders in the reference SDK sample tree never terminated, most of them
+// over the Cg 1.x type name texobj2D - which is a REAL type the reference
+// accepts, and supporting it is a separate row.  This fixture only asks that
+// an unknown one be refused rather than hung on.
+void main(uniform bogusType t, float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = c;
+}

@@ -1,0 +1,16 @@
+// t_472ff302, the second hang shape: an unknown type in a LOCAL declaration.
+// Before the fix this hung exactly like the parameter form.
+//
+// Its DIAGNOSTICS are still poor and that is recorded rather than hidden: the
+// parser takes 'bogusType x;' as an expression statement, reports a missing
+// semicolon, and a later cascade line names the wrong identifier entirely.
+// Five errors for one mistake.  This fixture asserts only that the compiler
+// TERMINATES and REFUSES - the message quality is its own row, because
+// teaching statement parsing to recognise 'identifier identifier ;' as a
+// declaration attempt is a real parser change and does not belong in a fix
+// whose whole point is that it cannot break anything.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    bogusType x;
+    o = c;
+}
