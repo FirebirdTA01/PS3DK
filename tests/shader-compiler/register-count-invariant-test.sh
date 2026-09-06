@@ -102,9 +102,9 @@ compile "$work/n16.fcg" n16
 }
 
 # Raw fp16 H indices share the same six-bit FP temp field as full R indices.
-# This shape stays below the R-slot registerCount budget, but reaches H64;
-# before the guard it compiled into the same malformed-program class that the
-# differential poison canary saw on test_79/test_85.
+# After slot compaction this shape stays below the R-slot registerCount budget,
+# but exceeds H63.  The parent refuses on its inflated R-slot budget instead;
+# the diagnostic below distinguishes that refusal from the encoding guard.
 {
     printf 'void main(float4 c : TEXCOORD0, out float4 o : COLOR)\n{\n'
     for i in $(seq 0 39); do
@@ -264,7 +264,7 @@ declared = blob[program + 18]
 by_vreg = {}
 encoded = set()
 for line in open(order, encoding="utf-8"):
-    m = re.match(r"^alloc\[(\d+)\]\s+op=\d+\s+opName=\S+\s+dstOut=(\d+)\s+dstIdx=(-?\d+)\s+dstPhys=(-?\d+)\s+dstFp16=(\d+)", line)
+    m = re.match(r"^alloc\[(\d+)\]\s+op=\d+\s+(?:opName=\S+\s+)?dstOut=(\d+)\s+dstIdx=(-?\d+)\s+dstPhys=(-?\d+)\s+dstFp16=(\d+)", line)
     if not m:
         continue
     _, out, vreg, phys, fp16 = map(int, m.groups())
@@ -273,26 +273,26 @@ for line in open(order, encoding="utf-8"):
     encoded.add((phys, fp16))
     by_vreg.setdefault(vreg, set()).add((phys, fp16))
 
+if not by_vreg or not any(len({f for _, f in writes}) == 2
+                          for writes in by_vreg.values()):
+    raise SystemExit("FAIL: fp16_promote_sparse did not exercise an H/R promotion")
+
 bad_promotions = []
 for vreg, writes in sorted(by_vreg.items()):
-    halves = [phys for phys, fp16 in writes if fp16]
-    fulls = [phys for phys, fp16 in writes if not fp16]
-    for h in halves:
-        for r in fulls:
-            if r == h and r != (h >> 1):
-                bad_promotions.append((vreg, h, r, h >> 1))
+    slots = {phys >> 1 if fp16 else phys for phys, fp16 in writes}
+    if len(slots) != 1:
+        bad_promotions.append("v%d writes R slots %s" % (vreg, sorted(slots)))
 
 if bad_promotions:
-    details = ", ".join("v%d H%d promoted to R%d (expected R%d)" % x
-                        for x in bad_promotions)
-    raise SystemExit("FAIL: fp16/full promotion reused raw H register as "
-                     "full R register: %s" % details)
+    raise SystemExit("FAIL: fp16/full promotion changed R slot: " +
+                     ", ".join(bad_promotions))
 
-if declared > len(encoded) + 1:
+slots = {phys >> 1 if fp16 else phys for phys, fp16 in encoded}
+if declared > len(slots) + 1:
     raise SystemExit("FAIL: fp16_promote_sparse declared registerCount %d "
-                     "for only %d encoded temp destinations; this is the "
+                     "for only %d distinct R slots; this is the "
                      "2*distinct-1 sparse numbering failure" %
-                     (declared, len(encoded)))
+                     (declared, len(slots)))
 
 print("fp16 promotion keeps the same R slot across H-to-R widening")
 PY

@@ -6327,6 +6327,11 @@ private:
         // the H register pair for that slot.  Keeping this in slot space is
         // what lets a dead full value's R5 slot become H10/H11 instead of
         // forcing the fp16 path into the spill bank.
+        // Every fp16 allocation in this path uses an even H index (slot << 1,
+        // including the only fp16 pins, H0 and H2).  No odd-H partner is
+        // allocated independently, so freeing an fp16 value frees its whole
+        // R slot.  Adding odd-H pins or subslot packing requires changing
+        // this ownership model before reusing the whole slot.
         std::vector<int> freeList;
         int nextPhys = 0;
         // FP numbers DOWN from the top of the range it needs, so the range
@@ -6716,7 +6721,10 @@ private:
             }
             for (const VSrc& src : vi.srcs) {
                 if (src.kind == VSrcKind::Temp && lastUse[src.index] == i) {
-                    const int freedPhys = program_.vregToPhys[src.index];
+                    if (src.phys < 0) continue;
+                    // Match the encoding to src.fp16 as resolved before a
+                    // destination promotion can rewrite vregToPhys.
+                    const int freedPhys = src.phys;
                     const int freedSlot = src.fp16 ? (freedPhys >> 1) : freedPhys;
                     const int dstSlot = vi.dst.fp16 ? (vi.dst.phys >> 1) : vi.dst.phys;
                     if (vi.dst.none || vi.dst.output || dstSlot != freedSlot)
