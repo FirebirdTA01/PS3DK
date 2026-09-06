@@ -18,3 +18,29 @@ tools/rsx-cg-compiler/tests/shaders/vp_clp0_output_v.cg|0|general
 # rows and skips pixel staging until a future byte drift needs judgement.
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row0_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row2_v.cg|auto|general
+
+# Our SHIPPED vertex programs (coverage audit 2026-09-06, correctness-first
+# bar): every vpshader.vcg under samples/ plus the SDK's libdbgfont VP.  None
+# had ever been compared against the reference by any list.  auto|general:
+# uniforms synthesised, judged on the shipping path.
+samples/gcm/hello-ppu-cellgcm-alpha-mask/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-blend/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-chain/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-cube/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-global-uniforms/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-laneelision/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-loops/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-quad/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-sysmenu/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-textured-cube/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-triangle/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-vp-loop/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-gcm-zcull-clip-border/shaders/vpshader.vcg|auto|general
+samples/toolchain/hello-psgl-blend/shaders/vpshader.vcg|auto|general
+samples/toolchain/hello-psgl-msaa/shaders/vpshader.vcg|auto|general
+samples/toolchain/hello-psgl-shader-interface/shaders/vpshader.vcg|auto|general
+samples/toolchain/hello-psgl-spudraw-triangle/shaders/vpshader.vcg|auto|general
+samples/toolchain/hello-psgl-textured-quad/shaders/vpshader.vcg|auto|general
+samples/toolchain/hello-psgl-triangle/shaders/vpshader.vcg|auto|general
+sdk/libdbgfont/shaders/vpshader_dbgfont.vcg|auto|general
