@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include "gcm_fp_control.h"
 #include <Cg/cg.h>
 #include <Cg/cgBinary.h>
 #include <cell/cgb/cgb_struct.h>
@@ -474,18 +475,20 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
      *   bit  10  : program valid / enable — must be set for the FP
      *              to actually execute.
      *   bits 24-31: number of temps (register-count, clamped ≥ 2 —
-     *              NV40 requires a minimum of 2 allocated temps). */
+     *              NV40 requires a minimum of 2 allocated temps).
+     *
+     *   The word itself is built by ps3tc_fp_control_word() in
+     *   gcm_fp_control.h - the ONE builder, shared with
+     *   cellGcmSetFragmentProgramLoad below and with PSGL.  That header
+     *   carries every bit's provenance, including the depth-export bit
+     *   (0x0e, measured 2026-09-06) that no copy of this arithmetic had
+     *   forwarded, and the unresolved collision with the H0 reading. */
     {
-        const uint32_t num_regs = (fp->registerCount > 2)
-                                ? fp->registerCount : 2u;
-
-        uint32_t low = 0;
-        low |= (fp->outputFromH0 ? 0x0eu : 0x40u);
-        if (fp->pixelKill) low |= (1u << 7);
-
-        uint32_t fpcontrol = low
-                           | (1u << 10)
-                           | (num_regs << 24);
+        const uint32_t fpcontrol = ps3tc_fp_control_word(
+            fp->outputFromH0, fp->depthReplace, fp->pixelKill,
+            fp->registerCount);
+        const uint32_t low = fpcontrol & 0xffu;
+        const uint32_t num_regs = fpcontrol >> PS3TC_FP_CONTROL_REGS_SHIFT;
 
         PS3TC_TRACE("SetFP fp_control=0x%08x (low=0x%x num_regs=%u)\n",
                     (unsigned)fpcontrol, (unsigned)low, (unsigned)num_regs);
@@ -500,13 +503,11 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
 static inline uint32_t ps3tc_cgb_fp_control(
     const CellCgbFragmentProgramConfiguration *conf)
 {
-    const uint32_t output_from_h0 = (conf->fragmentControl >> 16) & 1u;
-    const uint32_t pixel_kill = (conf->fragmentControl >> 18) & 1u;
-    const uint32_t num_regs = (conf->registerCount > 2u)
-                            ? conf->registerCount : 2u;
-    uint32_t low = output_from_h0 ? 0x0eu : 0x40u;
-    if (pixel_kill) low |= (1u << 7);
-    return low | (1u << 10) | (num_regs << 24);
+    /* The CellCgb configuration path.  Until 2026-09-06 this copy read
+     * fragmentControl bits 16 and 18 and never 17 (depthReplace), and a
+     * fix to the CGprogram path above missed it: one builder now. */
+    return ps3tc_fp_control_from_cgb(conf->fragmentControl,
+                                     conf->registerCount);
 }
 
 static inline void cellGcmSetVertexProgramLoadSlot(uint32_t loadSlot,

@@ -83,6 +83,9 @@ jobs:
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
 
+      - name: Test the SDK's fragment-program control word builder
+        run: bash tests/sdk/fp-control-word-test.sh
+
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

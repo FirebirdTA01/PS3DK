@@ -11,6 +11,7 @@
 #include <PSGL/report.h>
 
 #include "psgl_context.h"
+#include <cell/gcm/gcm_fp_control.h>
 
 static void psgl_bootstrap_zero(void *ptr, uint32_t size)
 {
@@ -28,12 +29,13 @@ static uint32_t psgl_bootstrap_halfword_swap(uint32_t value)
 static uint32_t psgl_bootstrap_fp_control(
     const CellCgbFragmentProgramConfiguration *conf)
 {
-    uint32_t output_from_h0 = (conf->fragmentControl >> 16) & 1u;
-    uint32_t pixel_kill = (conf->fragmentControl >> 18) & 1u;
-    uint32_t reg_count = conf->registerCount > 2u ? conf->registerCount : 2u;
-    uint32_t low = output_from_h0 ? 0x0eu : 0x40u;
-    if (pixel_kill) low |= (1u << 7);
-    return low | (1u << 10) | (reg_count << 24);
+    /* The third consumer of the fragment control word.  This copy read
+     * fragmentControl bits 16 and 18 and never 17 (depthReplace) until
+     * 2026-09-06; it now calls the SDK's one builder, whose header
+     * carries the bit facts.  No instrument judges PSGL output: this
+     * is pinned by the host test, not by a pixel. */
+    return ps3tc_fp_control_from_cgb(conf->fragmentControl,
+                                     conf->registerCount);
 }
 
 /* lifecycle */
