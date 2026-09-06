@@ -1,0 +1,17 @@
+// t_56ff2244: fp_join_order_decl_f.cg with both join variables RENAMED. The order an if/else join emits its Select instructions in is
+// part of the compiler's output, and it must come from the source rather than
+// from a hash table.  Its emitted order MUST MATCH that file exactly: `hue` is DECLARED
+// first, so its value id is the smaller one reaching the join and its select
+// is emitted first.  fp_join_order_decl_swapped_f.cg is the same shader with
+// the two declarations exchanged and emits the other order.
+//
+// Judged on the IR (--dump-ir), not on container bytes: the defect was an
+// ORDERING one, and an order can change while the container happens not to.
+void main(float4 t : TEXCOORD0, out float4 o : COLOR)
+{
+    float3 hue;
+    float  dist;
+    if (t.x > 0.5) { hue = t.xyz; dist = t.w; }
+    else           { hue = t.zyx; dist = t.y; }
+    o = float4(hue * dist, 1.0);
+}

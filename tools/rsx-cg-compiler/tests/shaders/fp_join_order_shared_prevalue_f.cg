@@ -1,0 +1,19 @@
+// t_56ff2244, the TIE case: two joined names that share one pre-if value.
+//
+// `b = a` binds both names to the SAME SSA value before the if, so both have
+// the same smallest reaching id and the primary key ties.  A comparator that
+// left ties unordered would settle them by the order the names came out of the
+// container they were collected from - which is the hash set the fix exists to
+// stop trusting - so the tie would reopen the defect in exactly the shape it
+// was closed in.  The name is the tie-break, so `a` precedes `b`.
+//
+// The two arms assign them in OPPOSITE orders on purpose: nothing about the
+// arms may influence the join's order.
+void main(float4 t : TEXCOORD0, out float4 o : COLOR)
+{
+    float a = t.x;
+    float b = a;
+    if (t.y > 0.5) { a = t.z; b = t.w; }
+    else           { b = t.x; a = t.y; }
+    o = float4(a, b, a * b, 1.0);
+}

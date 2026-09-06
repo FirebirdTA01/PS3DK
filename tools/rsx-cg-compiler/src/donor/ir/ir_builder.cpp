@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <vector>
 #include "ir_builder.h"
 #include <cmath>
 #include <sstream>
@@ -616,9 +618,51 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     };
 
     // Collect every name that appears in either post-map.
+    //
+    // THE ORDER OF THIS LOOP IS PART OF THE COMPILER'S OUTPUT.  It decides the
+    // order the join's Select instructions are emitted in, which decides SSA
+    // numbering, the virtual program, and register allocation.  Iterating an
+    // unordered_set here made that order the standard library's string-hash
+    // bucket order, so an MSVC-built compiler and a gcc-built compiler emitted
+    // DIFFERENT PROGRAMS from the same source - measured on 2026-09-06, three
+    // of 421 corpus shaders (t_56ff2244).  Never iterate an unordered container
+    // into emission.
+    //
+    // The key is the SMALLEST valid SSA id among a name's pre-if, then and else
+    // values: the EARLIEST DEFINITION THAT REACHES THIS JOIN.  Ids are handed
+    // out in source order, so this is declaration order: an uninitialised
+    // local is still BOUND TO A VALUE at its declaration, so the
+    // declaration's id is the smallest one reaching the join - measured,
+    // by swapping two declarations and watching the emitted order follow.  It is deliberately NOT a literal declaration-order
+    // counter: such a counter would have to be maintained at every site that
+    // binds a name (seventeen of them here), and a site missed later would
+    // silently reintroduce an arbitrary order for exactly one kind of variable.
+    // This key reads only values the join already holds, so it cannot be
+    // incomplete.  Do not "improve" it into a declaration counter.
+    //
+    // Not the then-value alone and not the else-value alone: a name assigned in
+    // both arms has two ids, and keying on one arm lets the two arms order the
+    // same pair of names oppositely.
+    //
+    // ONE CASE WHERE THIS IS NOT DECLARATION ORDER TO THE LETTER, so nobody
+    // reads it as a promise it does not make: globals are allocated from a
+    // separate id space above kGlobalIdBase, so a join over a file-scope global
+    // and a local orders the LOCAL first whatever the source says.  Stable and
+    // deterministic, which is the requirement here; just not literal source
+    // order across that boundary.
     std::unordered_set<std::string> seen;
     for (const auto& kv : postThenMap) seen.insert(kv.first);
     for (const auto& kv : postElseMap) seen.insert(kv.first);
+
+    struct JoinName
+    {
+        std::string name;
+        IRValueID   thenVal;
+        IRValueID   elseVal;
+        IRValueID   key;
+    };
+    std::vector<JoinName> joinNames;
+    joinNames.reserve(seen.size());
 
     for (const std::string& name : seen)
     {
@@ -635,6 +679,46 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
 
         if (thenVal == InvalidIRValue) thenVal = preVal;
         if (elseVal == InvalidIRValue) elseVal = preVal;
+
+        IRValueID key = InvalidIRValue;
+        for (IRValueID candidate : {preVal, thenVal, elseVal})
+            if (candidate != InvalidIRValue &&
+                (key == InvalidIRValue || candidate < key))
+                key = candidate;
+        if (key == InvalidIRValue)
+        {
+            // A name with no value on ANY path emits nothing and records
+            // nothing - the loop below would take its thenVal == elseVal
+            // branch and skip it.  This is not a broken invariant: an early
+            // return leaves a joined name (output.color in
+            // fp_cf_early_return_f) with no value reaching the join at all.
+            // Measured: refusing here instead cost SEVEN corpus shaders.
+            // It has no key because it has no definition, and it needs none,
+            // because ordering only matters for names that emit a Select.
+            continue;
+        }
+        joinNames.push_back({name, thenVal, elseVal, key});
+    }
+
+    // TIE-BREAK ON THE NAME, and it is not decoration.  SSA ids are unique per
+    // VALUE, not per NAME: two names that alias the same pre-if value share a
+    // minimum reaching id, so the key alone can tie.  A comparator that leaves
+    // ties unordered would settle them by the order this vector was built in -
+    // which came from an unordered_set - and the hole would survive the fix in
+    // exactly the shape it is being closed in.  Names are unique within a join,
+    // so (key, name) is a total order and the result cannot depend on input
+    // order.
+    std::sort(joinNames.begin(), joinNames.end(),
+              [](const JoinName& a, const JoinName& b) {
+                  if (a.key != b.key) return a.key < b.key;
+                  return a.name < b.name;
+              });
+
+    for (const JoinName& joined : joinNames)
+    {
+        const std::string& name = joined.name;
+        const IRValueID thenVal = joined.thenVal;
+        const IRValueID elseVal = joined.elseVal;
         if (thenVal == elseVal)
         {
             // Both branches converge on the same SSA value (or only one

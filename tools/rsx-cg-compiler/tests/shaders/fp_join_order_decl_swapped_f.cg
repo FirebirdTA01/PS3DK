@@ -1,0 +1,17 @@
+// t_56ff2244: the swapped half of the declaration-order pair.  The order an if/else join emits its Select instructions in is
+// part of the compiler's output, and it must come from the source rather than
+// from a hash table.  Here `depth` is DECLARED first, so its
+// select is emitted first - the opposite of fp_join_order_decl_f.cg, which is
+// identical in every other character.  If these two ever emit the SAME order,
+// the join has stopped following the source.
+//
+// Judged on the IR (--dump-ir), not on container bytes: the defect was an
+// ORDERING one, and an order can change while the container happens not to.
+void main(float4 t : TEXCOORD0, out float4 o : COLOR)
+{
+    float  depth;
+    float3 colour;
+    if (t.x > 0.5) { colour = t.xyz; depth = t.w; }
+    else           { colour = t.zyx; depth = t.y; }
+    o = float4(colour * depth, 1.0);
+}
