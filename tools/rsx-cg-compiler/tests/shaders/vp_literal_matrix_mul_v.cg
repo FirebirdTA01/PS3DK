@@ -1,0 +1,41 @@
+// t_3e342903, consumer half: a float4 literal used as the operand of a
+// matrix multiply must keep all four of its lanes.
+//
+// The filed symptom had two parts.  The CONSTANT POOL half - a float4 literal
+// keeping only its .x - is pinned by vp-literal-vector-test.sh, which decodes
+// the VPO parameter table and requires two distinct CG_FLOAT4 slots with all
+// four values present.  What that fixture cannot see is the CONSUMER: whether
+// the instruction reading the literal reads it as a vector or as a broadcast
+// of one lane.  This shader is that half, judged on pixels.
+//
+// THE RESULT IS WRITTEN TO TEXCOORD1 AS WELL AS COLOR, and that is the whole
+// reason this fixture is shaped the way it is.  The rig's VP control
+// (control-vp-mismatch) demonstrates a difference on tc1 - 4096 pixels - and
+// on no other channel, so tc1 is the channel a boot PROVES the judge can see.
+// A row whose only evidence sits on a channel no control exercises is a green
+// that has not earned anything; writing to both means the verdict rests on the
+// proven channel and col0 comes along as corroboration.
+//
+// THE FOUR LANES ARE DELIBERATELY DISTINCT AND UNORDERED.  With a broadcast of
+// .x the result is M * (k, k, k, k), a different value in every lane for an
+// auto-bound matrix.  Measured against the matrix the stager binds for this
+// row, a broadcast moves GREEN by 11 levels, BLUE by 4 and ALPHA by 3.
+//
+// RED IS BLIND HERE, by arithmetic rather than by accident: red's delta is
+// row 0's OFF-DIAGONAL terms times the lane differences, and the auto matrix
+// is diagonal-dominant, so red reads the same either way whatever order the
+// literal's lanes are written in.  This is a three-lane witness - green, blue
+// and alpha - and must not be read as a four-lane one.
+//
+// The scale keeps every value inside 0..1: four accumulated products of
+// auto-bound values reach ~1.6 unscaled, and a clamped lane is a lane where
+// correct and broadcast can agree.
+void main(float4 p : POSITION, uniform float4x4 M,
+          out float4 position : POSITION,
+          out float4 color : COLOR,
+          out float4 tc1 : TEXCOORD1)
+{
+    position = p;
+    color = mul(M, float4(0.404f, 0.186f, 0.277f, 0.349f)) * 0.25f;
+    tc1 = color;
+}
