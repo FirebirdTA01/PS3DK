@@ -7371,6 +7371,57 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             return !vi.dst.none && vi.dst.output && vi.dst.index == 1 &&
                    (vi.dst.writemask & 0x4);
         }) ? 1 : 0;
+    // A DECLARED half colour output writes H0, not R0 (t_80dad2dd).  The
+    // reference decides this from the OUTPUT PARAMETER'S TYPE and nothing
+    // else - half arithmetic alone does not do it - and records it in the
+    // container's outputFromH0, which the SDK's bind reads: 0x0e for H0
+    // against 0x40 for R0.  Until this, the general path dropped all three
+    // (the register, its precision and the flag), so `out half4` and
+    // `out float4` compiled to byte-identical programs.
+    const bool halfColourOutput = std::any_of(
+        entry.parameters.begin(), entry.parameters.end(),
+        [](const IRParameter& p) {
+            if (p.storage != StorageQualifier::Out &&
+                p.storage != StorageQualifier::InOut)
+                return false;
+            if (p.type.elementType != IRType::Float16) return false;
+            // An unsemanticked fragment `out` binds COLOR0.
+            const std::string sem = toUpper(p.semanticName);
+            return (sem.empty() || sem == "COLOR") && p.semanticIndex == 0;
+        });
+    if (halfColourOutput) {
+        // H0 IS THE LOW HALF OF R0.  A temp allocated there would be the
+        // output register, and the allocator placed it before this point
+        // believing the output was R0.  Rather than emit a program whose
+        // colour is overwritten by its own scratch - the silent shape this
+        // change exists to end - refuse and name it.
+        const bool tempHoldsR0 = std::any_of(
+            program.instrs.begin(), program.instrs.end(),
+            [](const VInstr& vi) {
+                return !vi.dst.none && !vi.dst.output && vi.dst.phys == 0;
+            });
+        if (tempHoldsR0) {
+            out.diagnostics.push_back(
+                "nv40-general-fp: a declared half colour output writes H0, "
+                "which is the low half of R0, and a temp was allocated to "
+                "that register; refusing rather than emitting a program "
+                "whose colour output is clobbered by its own scratch "
+                "(t_80dad2dd)");
+            return out;
+        }
+        for (VInstr& vi : program.instrs) {
+            if (vi.dst.none || !vi.dst.output || vi.dst.index != 0) continue;
+            vi.dst.fp16 = true;
+            if (vi.fpPrecisionOverride < 0) vi.fpPrecisionOverride = FLOAT16;
+        }
+    }
+    // Derived from what was EMITTED, like depthReplace above, so the flag
+    // cannot disagree with the ucode it describes.
+    attrs.outputFromH0 = std::any_of(program.instrs.begin(), program.instrs.end(),
+        [](const VInstr& vi) {
+            return !vi.dst.none && vi.dst.output && vi.dst.index == 0 &&
+                   vi.dst.fp16;
+        }) ? 1 : 0;
     populateReferencedParams(entry, attrs);
     seedFpEmbeddedUniforms(entry, program, attrs);
     std::unordered_map<int, VOp> tempProducerOp;

@@ -1,0 +1,8 @@
+// t_80dad2dd control: fp_half_output_f.cg with `out float4` in place of
+// `out half4` and nothing else changed.  It must keep MOVR o[COLR] and a
+// CLEAR outputFromH0 - it is the negative half of the pair, and it passes
+// today.  A fix that set the flag unconditionally would break this row.
+void main(float4 t : TEXCOORD0, out float4 o : COLOR)
+{
+    o = t;
+}

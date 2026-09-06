@@ -1,0 +1,14 @@
+// t_80dad2dd: a fragment program whose colour output is DECLARED half.
+//
+// The reference compiles this to a single `MOVH o[COLH], f[TEX0]` - the
+// output register is H0, the instruction carries fp16 precision, and the
+// container's outputFromH0 flag is set.  The general path compiles the same
+// source to `MOVR o[COLR]` with the flag clear and says nothing about it.
+// The declared type is the ONLY thing that decides this: the same body at
+// fp32 arithmetic under the reference's fast-precision switch turns MOVH but
+// keeps o[COLR] and the clear flag, so this is not a question of how the body
+// is computed.
+void main(float4 t : TEXCOORD0, out half4 o : COLOR)
+{
+    o = t;
+}

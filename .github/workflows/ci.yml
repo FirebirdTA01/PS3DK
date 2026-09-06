@@ -184,6 +184,8 @@ jobs:
         run: bash tests/shader-compiler/dot-reduction-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler half precision
         run: bash tests/shader-compiler/half-precision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler declared half colour output
+        run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler lowering-path flags
         run: bash tests/shader-compiler/lowering-path-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler fragment registerCount invariant
