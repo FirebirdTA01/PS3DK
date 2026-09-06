@@ -54,3 +54,12 @@ tools/rsx-cg-compiler/tests/shaders/vp_literal_matrix_mul_v.cg|auto|general
 
 # t_6be25fd4: three source aliases, judged on the proven tc1 channel.
 tools/rsx-cg-compiler/tests/shaders/vp_local_swizzle_chain_v.cg|auto|general
+
+# t_b67cf02b: vertex division, with quotient observed on tc1.
+tools/rsx-cg-compiler/tests/shaders/vp_div_scalar_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_div_vector_scalar_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_div_vector_vector_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_div_reciprocal_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_div_literal_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_div_alias_v.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/vp_div_vector2_v.cg|auto|general

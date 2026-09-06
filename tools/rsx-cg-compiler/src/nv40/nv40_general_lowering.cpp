@@ -3410,11 +3410,6 @@ private:
     void lowerDiv(const IRInstruction& inst)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP div lowering deferred with the scalar unit");
-            return;
-        }
         // 1/x keeps its single-instruction form - for a SCALAR.  On a
         // vector it is one RCP per lane like every other scalar-unit op
         // (t_249b8088).  General x/y division below uses DIVR for scalars,
@@ -3469,7 +3464,12 @@ private:
             program_.loweringFailed = true;
             return;
         }
-        if (laneCount(mask) == 1 || divisorWidth == 1) {
+        // DIVR belongs to the fragment unit. Vertex division uses one
+        // scalar RCP per denominator lane followed by vector MUL; the
+        // scalar denominator case broadcasts the temporary's x below.
+        // Keep the existing reciprocal/literal fast paths for both stages.
+        if (profile_ == GeneralProfile::Fragment &&
+            (laneCount(mask) == 1 || divisorWidth == 1)) {
             VInstr div;
             div.op = VOp::DivR;
             div.dst.index = define(inst.result);
@@ -7187,6 +7187,23 @@ static bool canCoissueVp(const VInstr& sca, const VInstr& vec)
         return false;
     if (sameDestinationRegister(sca.dst, vec.dst))
         return false;
+    // The scalar and vector units have separate temporary destinations,
+    // but share one output index. Two different output writes cannot pair.
+    if (sca.dst.output && vec.dst.output)
+        return false;
+    // Literal sources have already been assigned constant registers here.
+    // Both halves share one constant address just as they share one input
+    // address; pairing different constants ORs their indices together.
+    int constant = -1;
+    for (const VInstr* instr : { &sca, &vec }) {
+        for (const VSrc& src : instr->srcs) {
+            if (src.kind != VSrcKind::Uniform)
+                continue;
+            if (constant >= 0 && constant != src.index)
+                return false;
+            constant = src.index;
+        }
+    }
     for (const VSrc& src : vec.srcs) {
         if (sameTempRegister(src, sca.dst))
             return false;
