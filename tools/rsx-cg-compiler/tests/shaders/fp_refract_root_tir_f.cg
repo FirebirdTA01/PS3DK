@@ -1,0 +1,6 @@
+// dot(N,I)=0 and eta>1 make k negative. Varying x/z keep the draw visible
+// while y checks the existing total-internal-reflection selection.
+float4 main(float4 a : TEXCOORD0) : COLOR {
+    float3 r = refract(float3(a.x, a.y, 0.0), float3(0.0, 0.0, 1.0), 1.5 + a.z);
+    return float4(a.x, r.y * 0.25 + 0.5, a.z, 1.0);
+}

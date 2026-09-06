@@ -1,0 +1,5 @@
+// Runtime eta: both root operands must read the same computed k lane.
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR {
+    float eta = a.w * 0.5 + 0.25;
+    return float4(refract(a.xyz, b.xyz, eta) * 0.25 + 0.5, 1.0);
+}

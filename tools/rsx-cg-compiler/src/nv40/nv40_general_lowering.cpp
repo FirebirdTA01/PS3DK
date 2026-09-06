@@ -5590,23 +5590,19 @@ private:
         k.srcs[2] = floatLit(1.0f);
         program_.instrs.push_back(k);
 
-        // s.x = rsq(|k|); s.y = sqrt(|k|); s.z = eta*d + sqrt(|k|)
+        // s.y = sqrt(|k|); s.z = eta*d + sqrt(|k|). Refract uses
+        // abs on BOTH root operands: k may be negative before the TIR
+        // selection below. A single root avoids composing RSQ/RCP errors.
+        // Constant-eta output-scale folding is a separate transformation.
         const int s = newVReg();
-        VInstr rsq;
-        rsq.op = VOp::Rsq;
-        rsq.dst.index = s;
-        rsq.dst.writemask = 0x1;
-        rsq.srcs[0] = tempSrc(t);
-        rsq.srcs[0].swizzle = {3, 3, 3, 3};
-        rsq.srcs[0].abs = true;
-        program_.instrs.push_back(rsq);
-
         VInstr sq;
-        sq.op = VOp::Rcp;
+        sq.op = VOp::DivSqrt;
         sq.dst.index = s;
         sq.dst.writemask = 0x2;
-        sq.srcs[0] = tempSrc(s);
-        sq.srcs[0].swizzle = {0, 0, 0, 0};
+        sq.srcs[0] = tempSrc(t);
+        sq.srcs[0].swizzle = {3, 3, 3, 3};
+        sq.srcs[0].abs = true;
+        sq.srcs[1] = sq.srcs[0];
         program_.instrs.push_back(sq);
 
         VInstr coef;

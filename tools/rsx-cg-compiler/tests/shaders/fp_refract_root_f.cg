@@ -1,0 +1,5 @@
+// Non-power-of-two eta keeps the root unscaled. The pixel row checks the
+// result after replacing the reciprocal-of-reciprocal-root composition.
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR {
+    return float4(refract(a.xyz, b.xyz, 0.3) * 0.25 + 0.5, 1.0);
+}

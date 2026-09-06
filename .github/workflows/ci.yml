@@ -205,6 +205,9 @@ jobs:
         run: bash tests/shader-compiler/depth-export-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler direct square roots
         run: bash tests/shader-compiler/direct-sqrt-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test refract native root
+        run: bash tests/shader-compiler/refract-root-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler faceforward
         run: bash tests/shader-compiler/faceforward-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler local array indexing
