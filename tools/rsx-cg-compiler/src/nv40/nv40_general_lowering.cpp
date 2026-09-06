@@ -153,6 +153,8 @@ enum class VSrcKind
     Literal,
 };
 
+static const char* vOpName(VOp op);
+
 struct VSrc
 {
     VSrcKind kind = VSrcKind::None;
@@ -6320,6 +6322,11 @@ private:
             }
         }
 
+        // Free entries are R slots, not raw encoded register numbers.  A
+        // full destination uses the slot directly; an fp16 destination uses
+        // the H register pair for that slot.  Keeping this in slot space is
+        // what lets a dead full value's R5 slot become H10/H11 instead of
+        // forcing the fp16 path into the spill bank.
         std::vector<int> freeList;
         int nextPhys = 0;
         // FP numbers DOWN from the top of the range it needs, so the range
@@ -6341,6 +6348,13 @@ private:
         if (profile_ == GeneralProfile::Fragment) {
             fpSpill = fpRegBase;
             nextPhys = fpRegBase - 1;
+        }
+        if (dumpOrder) {
+            std::fprintf(stderr,
+                         "alloc-setup peakLiveTemps=%d fpRegBase=%d defs=%zu\n",
+                         peakLiveTemps,
+                         fpRegBase,
+                         defs.size());
         }
         for (size_t i = 0; i < program_.instrs.size(); ++i) {
             VInstr& vi = program_.instrs[i];
@@ -6481,9 +6495,13 @@ private:
                 }
                 return false;
             };
+            const bool dstHadPhysBefore =
+                !vi.dst.none &&
+                !vi.dst.output &&
+                program_.vregToPhys.find(vi.dst.index) != program_.vregToPhys.end();
             if (!vi.dst.none &&
                 !vi.dst.output &&
-                program_.vregToPhys.find(vi.dst.index) == program_.vregToPhys.end()) {
+                !dstHadPhysBefore) {
                 // A PIN IS A PREFERENCE, NOT A MANDATE.  It used to be
                 // honoured unconditionally - overriding the free list and
                 // the reuse path with no check that the register was free
@@ -6582,65 +6600,106 @@ private:
                             program_.vregToPhys[reusableSrc->index],
                             false)) {
                         phys = program_.vregToPhys[reusableSrc->index];
-                    } else if (!vi.dst.fp16 && !freeList.empty() &&
-                               !aliasesEarlyRead(freeList.back(), false) &&
-                               !clobbersLiveOutput(freeList.back(), false) &&
-                               !heldByLiveValue(freeList.back(), false)) {
-                        // Only the head is tested: an aliasing head
-                        // falls through to the fresh counter rather
-                        // than scanning deeper.  Deliberate
-                        // conservatism - it burns a register under
-                        // pressure but keeps this path's behaviour
-                        // trivially reasoned about; scan if a real
-                        // shader ever exhausts the bank over it.
-                        phys = freeList.back();
-                        freeList.pop_back();
                     } else {
-                        // FP H registers have their own index space but alias
-                        // full R slots in pairs: H0/H1 -> R0, H2/H3 -> R1.
-                        do {
+                        bool tookFree = false;
+                        for (auto it = freeList.rbegin(); it != freeList.rend(); ++it) {
+                            const int slot = *it;
+                            const int candidate = vi.dst.fp16 ? (slot << 1) : slot;
+                            if (aliasesEarlyRead(candidate, vi.dst.fp16) ||
+                                clobbersLiveOutput(candidate, vi.dst.fp16) ||
+                                heldByLiveValue(candidate, vi.dst.fp16)) {
+                                continue;
+                            }
+                            phys = candidate;
+                            freeList.erase(std::next(it).base());
+                            tookFree = true;
+                            break;
+                        }
+                        if (tookFree) {
+                            // Reuse keeps numbering compact.  The old path
+                            // looked only at the free-list head, and fp16
+                            // destinations could not use the list at all; any
+                            // blocked head sent them to the spill bank, where
+                            // H indices are twice their R slot and the
+                            // declared registerCount doubled.
+                        } else {
+                            // FP H registers have their own index space but alias
+                            // full R slots in pairs: H0/H1 -> R0, H2/H3 -> R1.
                             if (profile_ == GeneralProfile::Fragment) {
-                                // The fragment counter walks DOWN to 0, so
-                                // a rejected candidate can walk it past the
-                                // bottom of the bank.  When it does, take a
-                                // register ABOVE the ordinary range instead
-                                // of a negative one - which is what the
-                                // reserved-output case needs, and it leaves
-                                // every shader that never rejects a
-                                // candidate allocating exactly as before.
-                                if (nextPhys < 0) {
-                                    phys = vi.dst.fp16 ? (fpSpill << 1)
-                                                       : fpSpill;
-                                    ++fpSpill;
-                                } else {
-                                    phys = vi.dst.fp16 ? (nextPhys-- << 1)
-                                                       : nextPhys--;
+                                bool found = false;
+                                while (nextPhys >= 0) {
+                                    phys = vi.dst.fp16 ? (nextPhys << 1)
+                                                       : nextPhys;
+                                    --nextPhys;
+                                    if (aliasesEarlyRead(phys, vi.dst.fp16) ||
+                                        clobbersLiveOutput(phys, vi.dst.fp16) ||
+                                        heldByLiveValue(phys, vi.dst.fp16)) {
+                                        continue;
+                                    }
+                                    found = true;
+                                    break;
+                                }
+                                if (!found) {
+                                    for (int slot = 0;; ++slot) {
+                                        phys = vi.dst.fp16 ? (slot << 1) : slot;
+                                        if (aliasesEarlyRead(phys, vi.dst.fp16) ||
+                                            clobbersLiveOutput(phys, vi.dst.fp16) ||
+                                            heldByLiveValue(phys, vi.dst.fp16)) {
+                                            continue;
+                                        }
+                                        if (slot >= fpSpill)
+                                            fpSpill = slot + 1;
+                                        break;
+                                    }
                                 }
                             } else {
-                                phys = vi.dst.fp16 ? (nextPhys++ << 1) : nextPhys++;
+                                do {
+                                    phys = vi.dst.fp16 ? (nextPhys++ << 1)
+                                                       : nextPhys++;
+                                } while (aliasesEarlyRead(phys, vi.dst.fp16) ||
+                                         clobbersLiveOutput(phys, vi.dst.fp16) ||
+                                         heldByLiveValue(phys, vi.dst.fp16));
                             }
-                        } while (aliasesEarlyRead(phys, vi.dst.fp16) ||
-                                 clobbersLiveOutput(phys, vi.dst.fp16) ||
-                                 heldByLiveValue(phys, vi.dst.fp16));
-                        // Terminates: the descending counter is finite and
-                        // the spill bank above it hands out numbers that
-                        // have never been assigned, so they cannot be held.
+                            // Terminates: the finite live set always leaves a
+                            // safe slot at or above the current pressure, and
+                            // the search asks the same alias/live-output checks
+                            // that protect the ordinary handout path.
+                        }
                     }
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
             }
             if (!vi.dst.none && !vi.dst.output) {
+                auto physIt = program_.vregToPhys.find(vi.dst.index);
+                if (dstHadPhysBefore && physIt != program_.vregToPhys.end()) {
+                    const auto fp16It = program_.vregToFp16.find(vi.dst.index);
+                    const bool oldFp16 =
+                        fp16It != program_.vregToFp16.end() && fp16It->second;
+                    if (oldFp16 != vi.dst.fp16) {
+                        // The same virtual value can be first materialised in
+                        // H space and then widened to a full R destination.
+                        // H registers alias R slots in pairs (H10 -> R5);
+                        // carrying the raw H index forward made that widening
+                        // write R10 instead, doubling registerCount without
+                        // adding a live value.
+                        const int slot = oldFp16 ? (physIt->second >> 1)
+                                                 : physIt->second;
+                        physIt->second = vi.dst.fp16 ? (slot << 1) : slot;
+                    }
+                }
                 vi.dst.phys = program_.vregToPhys[vi.dst.index];
                 program_.vregToFp16[vi.dst.index] = vi.dst.fp16;
             }
             if (dumpOrder) {
-                std::fprintf(stderr, "alloc[%zu] op=%d dstOut=%d dstIdx=%d dstPhys=%d dstFp16=%d\n",
+                std::fprintf(stderr, "alloc[%zu] op=%d opName=%s dstOut=%d dstIdx=%d dstPhys=%d dstFp16=%d preferredPhys=%d\n",
                              i,
                              static_cast<int>(vi.op),
+                             vOpName(vi.op),
                              vi.dst.output ? 1 : 0,
                              vi.dst.index,
                              vi.dst.phys,
-                             vi.dst.fp16 ? 1 : 0);
+                             vi.dst.fp16 ? 1 : 0,
+                             vi.dst.preferredPhys);
                 for (size_t s = 0; s < vi.srcs.size(); ++s) {
                     const VSrc& src = vi.srcs[s];
                     std::fprintf(stderr,
@@ -6656,10 +6715,12 @@ private:
                 }
             }
             for (const VSrc& src : vi.srcs) {
-                if (src.kind == VSrcKind::Temp && !src.fp16 && lastUse[src.index] == i) {
-                    const int freed = program_.vregToPhys[src.index];
-                    if (vi.dst.none || vi.dst.output || vi.dst.phys != freed)
-                        freeList.push_back(freed);
+                if (src.kind == VSrcKind::Temp && lastUse[src.index] == i) {
+                    const int freedPhys = program_.vregToPhys[src.index];
+                    const int freedSlot = src.fp16 ? (freedPhys >> 1) : freedPhys;
+                    const int dstSlot = vi.dst.fp16 ? (vi.dst.phys >> 1) : vi.dst.phys;
+                    if (vi.dst.none || vi.dst.output || dstSlot != freedSlot)
+                        freeList.push_back(freedSlot);
                 }
             }
         }
@@ -7449,35 +7510,71 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         out.ok = false;
         return out;
     }
-    // FRAGMENT TEMP-REGISTER BUDGET.  A program that allocates past the
-    // usable fragment register file does not merely render wrong: on RPCS3
-    // it paints nothing AND poisons the RSX state, so every later draw in
-    // the run paints nothing either (t_5dc260b0; the rig's poison canary
-    // was built to catch it).  Refusing is the only safe answer while the
-    // allocator can produce such a program.
+    auto tempSlot = [](int raw, bool fp16) {
+        return fp16 ? (raw >> 1) : raw;
+    };
+    int maxEncodedTemp = -1;
+    int maxTempSlot = -1;
+    std::set<int> distinctTempSlots;
+    auto recordTemp = [&](int raw, bool fp16) {
+        if (raw < 0)
+            return;
+        maxEncodedTemp = std::max(maxEncodedTemp, raw);
+        const int slot = tempSlot(raw, fp16);
+        maxTempSlot = std::max(maxTempSlot, slot);
+        distinctTempSlots.insert(slot);
+    };
+    for (const VInstr& vi : program.instrs) {
+        if (!vi.dst.none && !vi.dst.output)
+            recordTemp(vi.dst.phys, vi.dst.fp16);
+        for (const VSrc& src : vi.srcs)
+            if (src.kind == VSrcKind::Temp)
+                recordTemp(src.phys, src.fp16);
+    }
+    // The container's registerCount names R slots, but fp16 H registers
+    // still encode their raw H index in the six-bit temp field.  H64 and
+    // above can therefore sit under the 48-slot R budget while still
+    // producing a malformed program; test_79 and test_85 were measured
+    // this way after the allocator sparsity fix.
+    static constexpr int kFpEncodedTempRegisterLimit = 64;
+    if (maxEncodedTemp >= kFpEncodedTempRegisterLimit) {
+        out.diagnostics.push_back(
+            "nv40-general-fp: program encodes temp register index " +
+            std::to_string(maxEncodedTemp) +
+            ", past the six-bit FP temp field limit of " +
+            std::to_string(kFpEncodedTempRegisterLimit - 1) +
+            "; declared R slots would be " +
+            std::to_string(std::max(2, maxTempSlot + 1)) +
+            ", distinct R slots " +
+            std::to_string(distinctTempSlots.size()) +
+            " - such a program paints nothing and poisons the RSX for every "
+            "later draw; refusing");
+        out.ok = false;
+        return out;
+    }
+    // FRAGMENT TEMP-REGISTER BUDGET.  The encoded-temp guard above catches
+    // malformed raw register numbers such as H64.  This second guard is the
+    // R-slot budget: a program that allocates past the usable fragment
+    // register file does not merely render wrong.  On RPCS3 it paints
+    // nothing AND poisons the RSX state, so every later draw in the run
+    // paints nothing either (t_5dc260b0; the rig's poison canary was built
+    // to catch it).  Refusing is the only safe answer while the allocator
+    // can produce such a program.
     //
     // 48 is not proven and the comment should not pretend otherwise.  The
     // instruction ENCODING is not the bound - NV40_FP_OP_OUT_REG_MASK is
     // (63 << 1), six bits, so R0..R63 all encode.  48 is RPCS3's annotation
-    // threshold plus an empty band in our corpus: every shader we JUDGE
-    // sits at 44 or below (test_18_atan2 and test_61 at 44, most at 2),
-    // and the only ones at or above 48 are the known poisoners at 55, 57,
-    // 62, 73, 77 and 119.  Nothing occupies 45..54, so the corpus cannot
-    // distinguish a bound anywhere in that band.  A synthetic family that
-    // keeps N values live for N = 40..60 would turn this citation into a
+    // threshold plus an empty band in our corpus.  A synthetic family that
+    // keeps N R slots live for N = 40..60 would turn this citation into a
     // measurement; until then it is a citation.
-    //
-    // This guard is the COMPANION to the pin yield above, not an
-    // independent idea.  The yield un-refuses four programs that the pin
-    // collision was accidentally stopping, and all four are past this
-    // budget - so landing the yield without this would put known poisoners
-    // back into a sweep that no longer excludes two of them.
     static constexpr int kFpTempRegisterBudget = 48;
     const int tempRegs = std::max(2, asm_.numTempRegs());
     if (tempRegs >= kFpTempRegisterBudget) {
         out.diagnostics.push_back(
             "nv40-general-fp: program needs " + std::to_string(tempRegs) +
-            " temp registers, at or past the usable fragment budget of " +
+            " declared temp registers (distinct R slots " +
+            std::to_string(distinctTempSlots.size()) +
+            "), at or past the usable fragment budget of " +
             std::to_string(kFpTempRegisterBudget) +
             " - such a program paints nothing and poisons the RSX for every "
             "later draw; refusing (t_5dc260b0)");

@@ -75,6 +75,65 @@ compile() {   # $1 source path, $2 tag
 # acceptance half of the regression.
 compile "$work/n16.fcg" n16
 
+# Same family, second mechanism (axis 3, 2026-09-05): a temp first written as
+# an fp16 H register and then promoted to full precision must keep the same R
+# slot.  The bad allocator reused the raw H number as an R number, so H10 later
+# became R10 instead of R5 and registerCount doubled to 2*distinct-1.
+{
+    printf 'void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)\n{\n'
+    for i in $(seq 0 3); do
+        printf '    float4 t%d = c * %d.125 + d.%s * 0.%d;\n' \
+            "$i" "$((i + 1))" "${lanes[$((i % 4))]}" "$((i + 3))"
+    done
+    printf '    float a = step(0.05, c.x);\n'
+    printf '    float b = step(d.y, 0.95);\n'
+    printf '    o = (t0 + t1 + t2 + t3) * (a * b);\n'
+    printf '}\n'
+} > "$work/fp16_promote_sparse.fcg"
+
+(
+    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
+    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" env RSX_DUMP_ORDER=1 "$compiler" \
+        -p sce_fp_rsx --emit-container "$work/fp16_promote_sparse.fpo" \
+        "$work/fp16_promote_sparse.fcg"
+) >"$work/fp16_promote_sparse.log" 2>"$work/fp16_promote_sparse.order" || {
+    tail -n 20 "$work/fp16_promote_sparse.log" "$work/fp16_promote_sparse.order" >&2
+    fail "fp16_promote_sparse did not compile"
+}
+
+# Raw fp16 H indices share the same six-bit FP temp field as full R indices.
+# This shape stays below the R-slot registerCount budget, but reaches H64;
+# before the guard it compiled into the same malformed-program class that the
+# differential poison canary saw on test_79/test_85.
+{
+    printf 'void main(float4 c : TEXCOORD0, out float4 o : COLOR)\n{\n'
+    for i in $(seq 0 39); do
+        printf '    float s%d = step(0.%02d, c.x + c.y * 0.001);\n' \
+            "$i" "$((i + 1))"
+    done
+    printf '    float v = ('
+    for i in $(seq 0 39); do
+        [[ "$i" -gt 0 ]] && printf ' + '
+        printf 's%d' "$i"
+    done
+    printf ') * 0.025;\n'
+    printf '    o = float4(v, v, v, 1.0);\n}\n'
+} > "$work/fp16_raw_limit.fcg"
+
+rc=0
+(
+    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
+    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" "$compiler" \
+        -p sce_fp_rsx --emit-container "$work/fp16_raw_limit.fpo" \
+        "$work/fp16_raw_limit.fcg"
+) >"$work/fp16_raw_limit.log" 2>&1 || rc=$?
+[[ "$rc" -ne 0 ]] || fail "fp16_raw_limit compiled despite reaching raw H64"
+[[ ! -e "$work/fp16_raw_limit.fpo" ]] || fail "fp16_raw_limit left a container behind after refusal"
+grep -q "six-bit FP temp field" "$work/fp16_raw_limit.log" || {
+    tail -n 20 "$work/fp16_raw_limit.log" >&2
+    fail "fp16_raw_limit refused for a reason other than raw encoded temp overflow"
+}
+
 for stem in fp_normalized_phong_vecinsert_f fp_computed_color_store_f \
             fp_half_cast_f fp_dot4_width_f; do
     [[ -f "$shaders/$stem.cg" ]] || fail "fixture missing: $shaders/$stem.cg"
@@ -191,5 +250,51 @@ done
 
 # ... and only now on the real containers.
 python3 "$work/check.py" "$work"/n16.fpo "$work"/fp_*.fpo
+
+python3 - "$work/fp16_promote_sparse.fpo" "$work/fp16_promote_sparse.order" <<'PY'
+import re
+import struct
+import sys
+
+container, order = sys.argv[1], sys.argv[2]
+blob = open(container, "rb").read()
+program = struct.unpack_from(">I", blob, 20)[0]
+declared = blob[program + 18]
+
+by_vreg = {}
+encoded = set()
+for line in open(order, encoding="utf-8"):
+    m = re.match(r"^alloc\[(\d+)\]\s+op=\d+\s+opName=\S+\s+dstOut=(\d+)\s+dstIdx=(-?\d+)\s+dstPhys=(-?\d+)\s+dstFp16=(\d+)", line)
+    if not m:
+        continue
+    _, out, vreg, phys, fp16 = map(int, m.groups())
+    if out or vreg < 0 or phys < 0:
+        continue
+    encoded.add((phys, fp16))
+    by_vreg.setdefault(vreg, set()).add((phys, fp16))
+
+bad_promotions = []
+for vreg, writes in sorted(by_vreg.items()):
+    halves = [phys for phys, fp16 in writes if fp16]
+    fulls = [phys for phys, fp16 in writes if not fp16]
+    for h in halves:
+        for r in fulls:
+            if r == h and r != (h >> 1):
+                bad_promotions.append((vreg, h, r, h >> 1))
+
+if bad_promotions:
+    details = ", ".join("v%d H%d promoted to R%d (expected R%d)" % x
+                        for x in bad_promotions)
+    raise SystemExit("FAIL: fp16/full promotion reused raw H register as "
+                     "full R register: %s" % details)
+
+if declared > len(encoded) + 1:
+    raise SystemExit("FAIL: fp16_promote_sparse declared registerCount %d "
+                     "for only %d encoded temp destinations; this is the "
+                     "2*distinct-1 sparse numbering failure" %
+                     (declared, len(encoded)))
+
+print("fp16 promotion keeps the same R slot across H-to-R widening")
+PY
 
 printf 'PASS: register-count-invariant-test\n'

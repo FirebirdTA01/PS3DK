@@ -49,7 +49,7 @@ import sys
 
 log_path = sys.argv[1]
 alloc_re = re.compile(
-    r"alloc\[(\d+)\] op=27 dstOut=(\d+) dstIdx=(\d+) "
+    r"alloc\[(\d+)\] op=\d+ opName=SelPred dstOut=(\d+) dstIdx=(\d+) "
     r"dstPhys=(-?\d+) dstFp16=(\d+)"
 )
 src_re = re.compile(
