@@ -1,0 +1,9 @@
+// t_fe384b97 NEGATIVE: `inline` is legal only on a function.  The reference
+// refuses it on a variable (C1005 "inline modifier only for functions"), so
+// a program that leaned on it being ignored must not silently compile.  This
+// fixture must be REFUSED with exit 1 and no container.
+inline float k = 2.0;
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = c * k;
+}

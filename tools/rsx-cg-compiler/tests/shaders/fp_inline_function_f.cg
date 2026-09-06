@@ -1,0 +1,11 @@
+// t_fe384b97: `inline` on a function is a hint the reference accepts and
+// ignores - it emits the same program with or without it.  The general path
+// used to lex `inline` as an identifier and reject it as an unknown type
+// name; 110 of the internet survey's remaining gaps were this one keyword
+// (libretro gamma-management.h and most OGRE helpers declare inline).  This
+// fixture must compile and be byte-identical to fp_inline_function_control_f.
+inline float4 scaled(float4 v) { return v * 2.0; }
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = scaled(c);
+}

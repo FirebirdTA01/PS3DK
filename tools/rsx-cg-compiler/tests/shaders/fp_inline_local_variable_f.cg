@@ -1,0 +1,9 @@
+// t_fe384b97 NEGATIVE: `inline` on a LOCAL variable inside a function body is
+// refused too - the reference gives C1005 "inline modifier only for
+// functions".  The file-scope path and the statement path both read the
+// inline flag now; before, only the file-scope one did, so this compiled.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    inline float x = 2.0;
+    o = c * x;
+}
