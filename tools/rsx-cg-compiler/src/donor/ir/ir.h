@@ -164,6 +164,8 @@ enum class IROp
     Max,
     Clamp,
     Saturate,
+    Ddx,
+    Ddy,
     Lerp,
     Step,
     SmoothStep,

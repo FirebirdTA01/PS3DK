@@ -2720,6 +2720,8 @@ std::optional<IROp> IRBuilder::builtinToIROp(const std::string& name)
         {"max", IROp::Max},
         {"clamp", IROp::Clamp},
         {"saturate", IROp::Saturate},
+        {"ddx", IROp::Ddx},
+        {"ddy", IROp::Ddy},
         {"lerp", IROp::Lerp},
         {"step", IROp::Step},
         {"smoothstep", IROp::SmoothStep},

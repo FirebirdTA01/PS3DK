@@ -1,0 +1,4 @@
+void main(float4 uvwq : TEXCOORD0, out float4 o : COLOR)
+{
+    o = ddy(uvwq);
+}

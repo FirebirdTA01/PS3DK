@@ -105,6 +105,8 @@ enum class VOp
     Cos,
     Lg2,
     Ex2,
+    Ddx,
+    Ddy,
     DivR,
     DivSqrt,
     Frc,
@@ -1914,6 +1916,12 @@ private:
         case IROp::Cos:
             lowerUnary(inst, VOp::Cos, false);
             return;
+        case IROp::Ddx:
+            lowerDerivative(inst, VOp::Ddx);
+            return;
+        case IROp::Ddy:
+            lowerDerivative(inst, VOp::Ddy);
+            return;
         case IROp::Tan:
             lowerTan(inst);
             return;
@@ -2690,6 +2698,33 @@ private:
         vi.dst.writemask = mask;
         vi.srcs[0] = arg;
         vi.sat = clamp;
+        program_.instrs.push_back(vi);
+    }
+
+    void lowerDerivative(const IRInstruction& inst, VOp op)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                "nv40-general: screen-space derivatives are fragment-only");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        const int mask = componentMask(inst.resultType);
+        if (mask & ~0x3) {
+            program_.diagnostics.push_back(
+                "nv40-general: derivative width not yet supported; "
+                "only float and float2 ddx/ddy lower in this slice");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        VInstr vi;
+        vi.op = op;
+        vi.dst.index = define(inst.result);
+        vi.dst.writemask = mask;
+        vi.srcs[0] = resolve(inst.operands[0]);
         program_.instrs.push_back(vi);
     }
 
@@ -6603,6 +6638,8 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Cos: return NVFX_FP_OP_OPCODE_COS;
     case VOp::Lg2: return NVFX_FP_OP_OPCODE_LG2;
     case VOp::Ex2: return NVFX_FP_OP_OPCODE_EX2;
+    case VOp::Ddx: return NVFX_FP_OP_OPCODE_DDX;
+    case VOp::Ddy: return NVFX_FP_OP_OPCODE_DDY;
     case VOp::DivR: return NVFX_FP_OP_OPCODE_DIV;
     case VOp::DivSqrt: return NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX;
     case VOp::Frc: return NVFX_FP_OP_OPCODE_FRC;
@@ -6642,6 +6679,8 @@ static const char* vOpName(VOp op)
     case VOp::Cos: return "Cos";
     case VOp::Lg2: return "Lg2";
     case VOp::Ex2: return "Ex2";
+    case VOp::Ddx: return "Ddx";
+    case VOp::Ddy: return "Ddy";
     case VOp::DivR: return "DivR";
     case VOp::DivSqrt: return "DivSqrt";
     case VOp::Frc: return "Frc";

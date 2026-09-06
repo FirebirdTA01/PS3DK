@@ -1,0 +1,5 @@
+void main(float3 uvw : TEXCOORD0, out float4 o : COLOR)
+{
+    float3 d = ddx(uvw);
+    o = float4(d, 1.0);
+}

@@ -409,6 +409,18 @@ void SymbolTable::registerMathFunctions()
     addMathFunctionOverloads("trunc");
     addMathFunctionOverloads("saturate");
 
+    // Screen-space derivatives. Widths 3/4 are registered so the lowering
+    // path can issue the measured profile diagnostic instead of a generic
+    // overload failure; slice 1 only emits scalar and float2.
+    addFunction("ddx", CgType::Float(), {CgType::Float()}, {"x"}, nullptr, true);
+    addFunction("ddy", CgType::Float(), {CgType::Float()}, {"x"}, nullptr, true);
+    for (int size = 2; size <= 4; ++size)
+    {
+        CgType vec = CgType::Vec(ScalarKind::Float, size);
+        addFunction("ddx", vec, {vec}, {"x"}, nullptr, true);
+        addFunction("ddy", vec, {vec}, {"x"}, nullptr, true);
+    }
+
     // min, max, clamp
     for (ScalarKind sk : {ScalarKind::Float, ScalarKind::Half, ScalarKind::Int, ScalarKind::UInt})
     {

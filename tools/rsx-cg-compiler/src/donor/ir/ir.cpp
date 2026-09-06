@@ -227,6 +227,8 @@ const char* irOpToString(IROp op)
     case IROp::Max:          return "max";
     case IROp::Clamp:        return "clamp";
     case IROp::Saturate:     return "sat";
+    case IROp::Ddx:          return "ddx";
+    case IROp::Ddy:          return "ddy";
     case IROp::Lerp:         return "lerp";
     case IROp::Step:         return "step";
     case IROp::SmoothStep:   return "smoothstep";
@@ -730,6 +732,8 @@ int getOperandCount(IROp op)
     case IROp::Round:
     case IROp::Trunc:
     case IROp::Saturate:
+    case IROp::Ddx:
+    case IROp::Ddy:
     case IROp::Sin:
     case IROp::Cos:
     case IROp::Tan:

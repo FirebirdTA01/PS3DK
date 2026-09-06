@@ -347,6 +347,14 @@ tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_scalar_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_swizzle_f.cg|auto|general
 
+# t_b28f9994 / t_6f5f1694 derivative slice 1: scalar and float2
+# ddx/ddy lower to native NV40 DDX/DDY. These linear-varying rows are
+# the durable pixel witnesses for the opcode semantics; the corpus row
+# test_56_deriv compiles after this slice but still has a one-byte
+# scalar rounding mismatch in the surrounding colour arithmetic.
+tools/rsx-cg-compiler/tests/shaders/fp_deriv_scalar_f.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/fp_deriv_float2_f.cg|0|general
+
 # t_71ad405e: stdlib dot-reductions must use the source width.  The length
 # float2 row is the pixel witness for the stale-lane failure: its float3
 # source has a non-zero z lane, and the broken lowering reuses that physical

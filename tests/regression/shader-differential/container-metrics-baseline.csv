@@ -197,6 +197,8 @@
 "fp_asin_acos_lanes_f","reference-tree-corpus","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_lanes_f.cg","auto","66","42","24","9","3","6","False","True","unknown"
 "fp_asin_acos_scalar_f","reference-tree-corpus","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_scalar_f.cg","auto","62","31","31","8","2","6","False","True","unknown"
 "fp_asin_acos_swizzle_f","reference-tree-corpus","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_swizzle_f.cg","auto","66","31","35","9","4","5","False","True","unknown"
+"fp_deriv_scalar_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_deriv_scalar_f.cg","0","15","9","6","3","2","1","False","True","identical"
+"fp_deriv_float2_f","reference","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_deriv_float2_f.cg","0","8","6","2","3","2","1","False","True","identical"
 "fp_atan_lanes_f","reference-tree-corpus","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_atan_lanes_f.cg","auto","46","41","5","6","4","2","False","True","unknown"
 "fp_atan_scalar_f","reference-tree-corpus","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_atan_scalar_f.cg","auto","48","36","12","6","2","4","False","True","unknown"
 "fp_atan_swizzle_f","reference-tree-corpus","sce_fp_rsx","tools/rsx-cg-compiler/tests/shaders/fp_atan_swizzle_f.cg","auto","46","42","4","6","4","2","False","True","unknown"

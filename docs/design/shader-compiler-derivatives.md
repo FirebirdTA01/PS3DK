@@ -1,9 +1,11 @@
 # Screen-space derivatives (`ddx` / `ddy` / `fwidth`) — scoping note
 
-Status: SCOPED, not started.  Owner lane: shader compiler feature work.
-Closes the last community-corpus compile failure (134/135 → 135/135 on
-the general path; the sweep's one remaining row fails with an unresolved
-`ddy(float)`).
+Status: slice 1 partial landed on `cg-compiler-dev` (scalar/float2
+fragment `ddx`/`ddy`). It removes the frontend/lowering refusal in
+`test_56_deriv`, but that corpus shader is NOT closed: it still
+pixel-mismatches the reference at the quantisation floor, so the
+remaining work is the final scalar rounding/precision question in the
+surrounding colour arithmetic, not the derivative opcode itself.
 
 ## 1. What the corpus actually needs
 
@@ -49,14 +51,13 @@ NVFX_FP_OP_OPCODE_DDY 0x16   /* can only write XY */
 
 ## 3. Slices
 
-**Slice 1 — scalar/2-lane (closes the corpus):**
+**Slice 1 — scalar/2-lane (compile unlock, not corpus closure):**
 - Frontend: register `ddx`, `ddy` stdlib intrinsics for `float` and
   `float2` (fragment profile only).
 - IR: unary `Ddx`/`Ddy` ops.
-- Lowering, BOTH paths (the corpus sweep runs the general path, so
-  the general path is the one that must land; the matcher takes it
-  only if a known-good fixture is seeded for the byte gate):
-  emit the single DDX/DDY instruction; destination mask ⊆ {X, Y}.
+- Lowering, general path first: emit the single DDX/DDY instruction;
+  destination mask ⊆ {X, Y}. The retired matcher can remain refusing
+  until deletion unless a separate compatibility need appears.
 - Widths 3–4 REJECT LOUDLY in slice 1 ("derivative width not yet
   supported") — never silent truncation.  Rejection is tier-a conform:
   a diagnostic, not resource exhaustion, not wrong output.
@@ -95,13 +96,16 @@ out of the generic materialization path entirely.
   0, 1)` expects flat (0.5, 0.5, 0, 1) — PPU mirror is two constants.
   Add as test 5 of the existing shader-readback battery (manifest count
   flips 4/4 → 5/5 in the same commit, per that row's convention).
-- **Corpus:** the general-path sweep's last row flips; acceptance for
-  slice 1 is 135/135 with `bad_alloc=0 unknown=0` and no other row
-  moving.
+- **Corpus:** `test_56_deriv` flips from refusal to compile, with no
+  newly-refusing rows. Acceptance still requires pixel identity. The
+  first judged run after slice 1 reports max_delta 1 on 4/4096 pixels:
+  the derivative edge channel itself matches, while `edge * 0.7` rounds
+  one byte lower at four quantisation-boundary pixels.
 
 ## 6. Cost estimate
 
-Slice 1 is small: one intrinsic registration site, one IR op pair, one
-emission case per path, three fixtures, one readback row.  The lane
-routing in slice 2 is the only genuinely fiddly part and nothing in the
-corpus needs it today.
+Slice 1 was small: one intrinsic registration site, one IR op pair, one
+general-path emission case, scalar/float2 fixtures, named refusal
+fixtures, and two reference-pair pixel witnesses. The lane routing in
+slice 2 is the only genuinely fiddly part and nothing in the corpus
+needs it today.

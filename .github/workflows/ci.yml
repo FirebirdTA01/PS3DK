@@ -93,6 +93,8 @@ jobs:
         run: bash tests/shader-compiler/stdlib-atan2-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler trig polynomial stdlib
         run: bash tests/shader-compiler/stdlib-trig-poly-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler derivatives stdlib
+        run: bash tests/shader-compiler/stdlib-derivatives-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler DIVR opcode
         run: bash tests/shader-compiler/divr-opcode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler user-function inlining
