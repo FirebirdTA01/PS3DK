@@ -572,11 +572,17 @@ void SemanticAnalyzer::analyzeExprStmt(ExprStmt* stmt)
 
 void SemanticAnalyzer::analyzeDeclStmt(DeclStmt* stmt)
 {
-    if (!stmt->declaration) return;
-
-    if (stmt->declaration->kind == DeclKind::Variable)
+    // EVERY declarator, not just the first: `float a, b;` declares both, and
+    // analysing only the first is what made a declared name read as
+    // undeclared later (t_a90b1ef1).  The existing redefinition check below
+    // then also does its job on `float a, a;`, which used to compile.
+    for (const auto& declaration : stmt->declarations)
     {
-        VarDecl* varDecl = static_cast<VarDecl*>(stmt->declaration.get());
+    if (!declaration) continue;
+
+    if (declaration->kind == DeclKind::Variable)
+    {
+        VarDecl* varDecl = static_cast<VarDecl*>(declaration.get());
 
         // Resolve the type (handles struct type lookup)
         CgType resolvedType = resolveType(varDecl->type.get());
@@ -604,6 +610,7 @@ void SemanticAnalyzer::analyzeDeclStmt(DeclStmt* stmt)
 
         // Analyze initializer
         analyzeVarDecl(varDecl);
+    }
     }
 }
 

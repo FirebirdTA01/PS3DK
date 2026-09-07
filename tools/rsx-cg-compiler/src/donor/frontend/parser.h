@@ -95,10 +95,17 @@ private:
     // ========================================================================
 
     std::unique_ptr<DeclNode> parseDeclaration();
-    std::unique_ptr<DeclNode> parseTopLevelDeclaration();
+    // `extraDeclarations`, when given, receives the SECOND and later
+    // declarators of a comma-separated declaration - `float g1, g2;` is
+    // one declaration with two names and both are declared.  Returning
+    // only the first is what made the second read as undeclared
+    // (t_a90b1ef1).
+    std::unique_ptr<DeclNode> parseTopLevelDeclaration(
+        std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<StructDecl> parseStructDeclaration();
     std::unique_ptr<TypedefDecl> parseTypedefDeclaration();
-    std::unique_ptr<DeclNode> parseVariableOrFunctionDeclaration();
+    std::unique_ptr<DeclNode> parseVariableOrFunctionDeclaration(
+        std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<FunctionDecl> parseFunctionDeclaration(
         SourceLocation loc,
         std::shared_ptr<TypeNode> returnType,
