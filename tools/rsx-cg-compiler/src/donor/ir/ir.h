@@ -169,6 +169,17 @@ enum class IROp
     Saturate,
     Ddx,
     Ddy,
+    // Pack/unpack builtins (t_23f9d1a6): one NV40 instruction each,
+    // fragment-only.  A pack reads a vector and yields one float whose bits
+    // hold the packed lanes; an unpack reads that float.
+    PackHalf2,
+    UnpackHalf2,
+    PackUByte4,
+    UnpackUByte4,
+    PackByte4,
+    UnpackByte4,
+    PackUShort2,
+    UnpackUShort2,
     Lerp,
     Step,
     SmoothStep,

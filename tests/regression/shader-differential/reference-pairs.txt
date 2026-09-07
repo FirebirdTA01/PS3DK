@@ -431,3 +431,9 @@ tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_intrinsic_f.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_intrinsic_f.cg|td-precise|general
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_normal_control_f.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_control_f.cg|0|general
+
+# PACK/UNPACK FAMILY (t_23f9d1a6): PK2H/UP4UB and PK4UB/UP2H/UP2US decide the
+# pixels; the reference twins carry the same instructions (the tip differs by
+# the export-fold MOV only), so a moved pixel here is a value defect.
+tests/regression/shader-differential/shaders/sd_pack_2half.fcg|0|general
+tests/regression/shader-differential/shaders/sd_pack_4ubyte.fcg|0|general

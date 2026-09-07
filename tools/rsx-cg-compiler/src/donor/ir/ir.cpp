@@ -237,6 +237,14 @@ const char* irOpToString(IROp op)
     case IROp::Saturate:     return "sat";
     case IROp::Ddx:          return "ddx";
     case IROp::Ddy:          return "ddy";
+    case IROp::PackHalf2:    return "pack_2half";
+    case IROp::UnpackHalf2:  return "unpack_2half";
+    case IROp::PackUByte4:   return "pack_4ubyte";
+    case IROp::UnpackUByte4: return "unpack_4ubyte";
+    case IROp::PackByte4:    return "pack_4byte";
+    case IROp::UnpackByte4:  return "unpack_4byte";
+    case IROp::PackUShort2:  return "pack_2ushort";
+    case IROp::UnpackUShort2: return "unpack_2ushort";
     case IROp::Lerp:         return "lerp";
     case IROp::Step:         return "step";
     case IROp::SmoothStep:   return "smoothstep";
@@ -742,6 +750,14 @@ int getOperandCount(IROp op)
     case IROp::Saturate:
     case IROp::Ddx:
     case IROp::Ddy:
+    case IROp::PackHalf2:
+    case IROp::UnpackHalf2:
+    case IROp::PackUByte4:
+    case IROp::UnpackUByte4:
+    case IROp::PackByte4:
+    case IROp::UnpackByte4:
+    case IROp::PackUShort2:
+    case IROp::UnpackUShort2:
     case IROp::Sin:
     case IROp::Cos:
     case IROp::Tan:

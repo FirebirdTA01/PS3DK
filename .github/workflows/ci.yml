@@ -230,6 +230,8 @@ jobs:
         run: bash tests/shader-compiler/nested-struct-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test float literal syntax, suffixes, swizzles, and attributes
         run: bash tests/shader-compiler/float-literal-syntax-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler pack/unpack family (t_23f9d1a6)
+        run: bash tests/shader-compiler/pack-unpack-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros

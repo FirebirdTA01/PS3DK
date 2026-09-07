@@ -1,0 +1,1 @@
+float4 main(float4 f : TEXCOORD0) : COLOR { return pack_4byte(f).xxxx; }

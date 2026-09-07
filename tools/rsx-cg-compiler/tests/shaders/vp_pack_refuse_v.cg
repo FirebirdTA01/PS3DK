@@ -1,0 +1,1 @@
+float4 main(float4 p : POSITION, float2 n : TEXCOORD0, out float4 t : TEXCOORD0) : POSITION { t = pack_2half(n).xxxx; return p; }

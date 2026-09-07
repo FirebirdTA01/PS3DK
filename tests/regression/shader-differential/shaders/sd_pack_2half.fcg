@@ -1,0 +1,10 @@
+// pack_2half -> unpack_4ubyte (t_23f9d1a6): the DeferredShading normal
+// encoding shape, judged on pixels.  TEXCOORD0 = (u, v, 0.1 + 0.5v, 0.92 - u)
+// from sd_pos_allch.vcg, so the packed float carries half(u), half(v) and the
+// four unpacked bytes paint the two halves' bit patterns as a colour.
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    float p = pack_2half(t.xy);
+    half4 v = unpack_4ubyte(p);
+    return v;
+}
