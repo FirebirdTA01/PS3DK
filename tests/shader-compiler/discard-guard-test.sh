@@ -47,6 +47,21 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
+# either one satisfies "did not exit 0" while meaning the compiler never
+# reached the decision this guard is about - so a compiler that CRASHED on a
+# shader it should have refused BY NAME was reported as correct here.  Call
+# this wherever a compile's status is captured, whichever way that compile is
+# expected to go: it is silent for 0 and for 1 and names anything else.
+# Measured: half the guards in this suite that assert a refusal could not tell
+# one from a SIGABRT (t_fd95d1b9).
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
+
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
 fi
@@ -66,7 +81,7 @@ run() {   # $1 stem, $2 flags, $3 tag -> rc in $rc, output in $work/$3.log
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx ${2:+$2} "$shaders/$1.cg"
     ) >"$work/$3.log" 2>&1 || rc=$?
-    if [[ "$rc" -eq 124 ]]; then fail "$3 timed out"; fi
+    refusal_status "$rc" "$3"
     return 0
 }
 
@@ -117,7 +132,7 @@ n="$(kills_in_container fp_discard_two_f)"
 # --- refusals, each checked for its own reason -------------------------
 
 run fp_discard_loop_f "" loop
-[[ "$rc" -ne 0 ]] || fail "fp_discard_loop_f compiled on the general path.
+[[ "$rc" -eq 1 ]] || fail "fp_discard_loop_f compiled on the general path.
 A discard inside a dynamic loop needs the back-edge CF-1a refuses.  If the
 loop is being unrolled instead, the fixture's bound stopped being dynamic
 and the refusal is no longer exercised."
@@ -128,7 +143,7 @@ back-edge; a refusal that fires for the wrong reason is not a guard."
 }
 
 run fp_discard_else_f "--legacy-lowering" else_legacy
-[[ "$rc" -ne 0 ]] || fail "fp_discard_else_f compiled on the LEGACY path (the matcher).
+[[ "$rc" -eq 1 ]] || fail "fp_discard_else_f compiled on the LEGACY path (the matcher).
 That path recovers a discard's guard from the last comparison it walked
 past, so on the false arm of a branch it kills exactly the fragments that
 must survive (t_79fc6bf7).  It must refuse until the matcher is retired."
@@ -139,7 +154,7 @@ reason than the false-arm discard."
 }
 
 run fp_discard_and_f "--legacy-lowering" and_legacy
-[[ "$rc" -ne 0 ]] || fail "fp_discard_and_f compiled on the LEGACY path (the matcher).
+[[ "$rc" -eq 1 ]] || fail "fp_discard_and_f compiled on the LEGACY path (the matcher).
 Its guard compares a varying against a uniform: the pre-pass puts the
 uniform in R1 and the varying's preload writes H2 with a full mask, and
 H2's four fp16 lanes cover all of R1.x and R1.y - so the uniform is gone
@@ -151,7 +166,7 @@ reason than the half-preload aliasing."
 }
 
 run fp_discard_two_f "--legacy-lowering" two_legacy
-[[ "$rc" -ne 0 ]] || fail "fp_discard_two_f compiled on the LEGACY path (the matcher).
+[[ "$rc" -eq 1 ]] || fail "fp_discard_two_f compiled on the LEGACY path (the matcher).
 That path emits the FIRST store to an output and drops the rest, so every
 surviving fragment is painted the first value (t_becbfa69).  The
 completeness check cannot see it - both varyings are read by the kills -
@@ -163,7 +178,7 @@ reason than the re-stored output."
 }
 
 run fp_discard_merge_guard_f "--legacy-lowering" merge_guard_legacy
-[[ "$rc" -ne 0 ]] || fail "fp_discard_merge_guard_f compiled on the DEFAULT
+[[ "$rc" -eq 1 ]] || fail "fp_discard_merge_guard_f compiled on the DEFAULT
 path.  The discard sits in a two-predecessor merge INSIDE an outer guarded
 block: the inner branch cancels at the merge and the outer one does not, so
 the guard is the outer condition and the kill would use the inner one.  The
@@ -177,7 +192,7 @@ OTHER reason than an unproven or unaccounted guard."
 }
 
 run fp_discard_nested_f "--legacy-lowering" nested_legacy
-[[ "$rc" -ne 0 ]] || fail "fp_discard_nested_f compiled on the LEGACY path (the matcher).
+[[ "$rc" -eq 1 ]] || fail "fp_discard_nested_f compiled on the LEGACY path (the matcher).
 That path's guard is a single comparison, so an ENCLOSING branch is not
 accounted for: if_convert collapses the inner if and leaves the discard in
 the outer arm, and the kill then fires wherever the INNER condition holds,

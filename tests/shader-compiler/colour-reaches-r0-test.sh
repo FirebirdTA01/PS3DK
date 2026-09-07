@@ -32,6 +32,18 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+# This test does not care WHICH shaders refuse - it reads the ucode of the ones
+# that compile.  It does care that a refusal is a refusal: 124 is a timeout and
+# >= 128 is a signal, and a compiler that CRASHED on one of these would have its
+# log deleted below and be counted as "refused, not our business" (t_fd95d1b9).
+# Silent for 0 and for 1; names anything else.
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
+
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
 fi
@@ -71,11 +83,14 @@ found - the enumeration broke, so nothing below was actually checked"
 
 for s in "${shaders[@]}"; do
     out="$work/$(printf '%s' "$s" | tr '/' '_').log"
+    rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" env RSX_DUMP_ORDER=1 "$compiler" \
             -p sce_fp_rsx "$repo_root/$s"
-    ) >"$out" 2>&1 || rm -f "$out"    # a refusal is not this test's business
+    ) >"$out" 2>&1 || rc=$?
+    refusal_status "$rc" "$s"
+    [[ "$rc" -eq 0 ]] || rm -f "$out"   # a refusal is not this test's business
 done
 
 # ... except for these, where a refusal IS the regression.

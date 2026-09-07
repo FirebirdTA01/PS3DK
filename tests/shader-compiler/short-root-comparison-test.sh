@@ -34,7 +34,13 @@ for tag in ('sqrt_and','sqrt_or','sqrt_zero','rsqrt_and','sqrt_discard'):
         errors.append(tag+': boolean OR add must saturate')
 p=pathlib.Path(root)/'tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_shared_refuse_f.cg'
 r=subprocess.run([compiler,'-p','sce_fp_rsx',str(p)],capture_output=True,text=True,timeout=30)
-if not r.returncode or 'short-circuit' not in r.stderr:
+# Exit 1 EXACTLY: a timeout or a crash also has a non-zero status, and both
+# would have satisfied the old `not r.returncode` while meaning the compiler
+# never reached this decision (t_fd95d1b9).
+if r.returncode!=1:
+    what=('died on signal %d'%-r.returncode) if r.returncode<0 else ('exited %d'%r.returncode)
+    errors.append('shared root: expected exit 1, a refusal, but the compiler '+what+' - a timeout or a crash is not a refusal')
+elif 'short-circuit' not in r.stderr:
     errors.append('shared root must keep its named short-circuit refusal')
 if errors: raise SystemExit('\n'.join('FAIL: '+e for e in errors))
 print('short-root-comparison: root-to-comparison shapes compile')
