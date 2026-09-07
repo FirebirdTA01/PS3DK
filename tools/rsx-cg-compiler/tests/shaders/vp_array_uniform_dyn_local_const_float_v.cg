@@ -1,0 +1,2 @@
+uniform float4 u[4];
+float4 main(float4 p : POSITION) : POSITION { float i = 1; float j = 2; return u[int(i)] + u[int(j)] + p; }

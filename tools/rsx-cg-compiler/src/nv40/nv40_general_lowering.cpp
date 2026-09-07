@@ -119,6 +119,13 @@ enum class VOp
     Seq,
     Sne,
     Tex,
+    // VP only (t_99b29225): load a lane of an ADDRESS register from the
+    // index value of a run-time array read.  dst.address names A0/A1 and
+    // the lane is the writemask; srcs[0] is the index with its swizzle.
+    // The relative reads it serves carry VSrc::relative and depend on it
+    // through the scheduler's address key.  The hardware floors, which
+    // is what the reference emits for `u[int(idx)]`.
+    Arl,
     // t_a7dd471f: float-to-int is one condition-register sequence, not
     // independent VInstrs.  It predates the scheduler's condition-register
     // dependency key and stays atomic so the sign-restore shape cannot be
@@ -172,12 +179,21 @@ struct VSrc
     std::array<uint8_t, 4> swizzle = {0, 1, 2, 3};
     bool     neg = false;
     bool     abs = false;
+    // VP uniform read through the address register: `index` is the
+    // array's block BASE and the hardware adds A<addrReg>.<addrLane>
+    // (INDEX_CONST + ADDR_SWZ + ADDR_REG_SELECT_1 in the encoding).
+    bool     relative = false;
+    uint8_t  addrReg = 0;
+    uint8_t  addrLane = 0;
 };
 
 struct VDst
 {
     bool none = false;
     bool output = false;
+    // VP only: the destination is address register `index` (0 = A0,
+    // 1 = A1), not a temp - never allocated, never counted live.
+    bool address = false;
     int  index = 0;          // virtual temp id or output register index
     int  phys = -1;          // filled for temp destinations after allocation
     int  preferredPhys = -1; // FP-only: optional R/H index pin for precision shaping
@@ -650,6 +666,32 @@ private:
     // register per REFERENCED element).  Filled in the constructor from
     // the pre-pass classification, read by lowerLoadUniform (t_f9ecd3ac).
     std::map<std::string, std::map<int, VSrc>> arrayElementSrcs_;
+    // Run-time array indexing (t_99b29225, VP only).  dynamicIndexUses_:
+    // how many run-time array reads each value indexes, counted with the
+    // other uses so a float-to-int consumed ONLY as an index can become
+    // the ARL instead of a lowering this profile does not have.
+    // indexValueOf_: that peel - the cast's result to the float it cast.
+    // addressLanes_: the address lanes handed out, in order of first use,
+    // each remembering the index source it holds and the ARL that loads
+    // it, so a second read of the same value reuses the lane and a
+    // second lane of the same input register joins the same ARL.
+    std::unordered_map<IRValueID, unsigned> dynamicIndexUses_;
+    std::unordered_map<IRValueID, IRValueID> indexValueOf_;
+    struct AddressLane
+    {
+        VSrcKind kind = VSrcKind::None;
+        int      index = 0;
+        uint8_t  component = 0;
+        bool     neg = false;
+        bool     abs = false;
+        // For a TEMP source: how many writes to that lane of the vreg
+        // preceded the read.  A lane rewritten in place between two
+        // reads (`v.x = v.y`) is a different index value with the same
+        // vreg and component (review: codex's rewrite twin).
+        unsigned version = 0;
+        size_t   arlAt = 0;     // position in program_.instrs
+    };
+    std::vector<AddressLane> addressLanes_;
     std::unordered_map<IRValueID, VSrc> conditionToSource_;
     std::unordered_map<IRValueID, int> valueWidth_;
     // CF-1a flatten state (t_91bbd575).  Set only when the entry
@@ -1506,6 +1548,12 @@ private:
         // space that cannot collide with a temp index.
         constexpr int kOutputKeyBase = 1 << 16;
         constexpr int kConditionKey = 2 << 16;
+        // The ADDRESS registers, as one key: ARL writes, a relative read
+        // reads.  One key for both A0 and A1 and for every lane - the
+        // reference keeps every ARL ahead of every relative read that
+        // follows it in source order, and a lane-precise model would buy
+        // reorderings the oracle never shows (t_99b29225).
+        constexpr int kAddressKey = 3 << 16;
         std::unordered_map<int, std::vector<size_t>> writers, readers;
         const auto link = [&](size_t from, size_t to) {
             // A self-edge is FATAL, not merely redundant: indegree never
@@ -1553,7 +1601,20 @@ private:
                     link(r, i);
                 writers[kConditionKey].push_back(i);
             }
-            if (!vi.dst.none) {
+            if (std::any_of(vi.srcs.begin(), vi.srcs.end(),
+                            [](const VSrc& s) { return s.relative; })) {
+                for (size_t w : writers[kAddressKey])      // RAW
+                    link(w, i);
+                readers[kAddressKey].push_back(i);
+            }
+            if (vi.op == VOp::Arl) {
+                for (size_t w : writers[kAddressKey])      // WAW
+                    link(w, i);
+                for (size_t r : readers[kAddressKey])      // WAR
+                    link(r, i);
+                writers[kAddressKey].push_back(i);
+            }
+            if (!vi.dst.none && !vi.dst.address) {
                 // OUTPUT destinations belong in this graph too, and used
                 // to be excluded from it: two stores to the same output
                 // were two writes to one register with no edge between
@@ -1821,6 +1882,11 @@ private:
                     instPtr->op == IROp::CondBranch;
                 if (instPtr->result != InvalidIRValue)
                     definedValues_.insert(instPtr->result);
+                if (instPtr->op == IROp::LoadUniform &&
+                    instPtr->arrayIndexKind ==
+                        IRInstruction::ArrayIndexKind::Dynamic &&
+                    !instPtr->operands.empty())
+                    ++dynamicIndexUses_[instPtr->operands[0]];
                 for (IRValueID id : instPtr->operands) {
                     ++useCount_[id];
                     // A flattened program drops the branch terminators,
@@ -1852,11 +1918,12 @@ private:
             rsx_cg::fpParameterSlotBases(entry_);
         unsigned nextFpGlobalSlot = rsx_cg::fpFirstGlobalSlot(entry_);
         // How the entry reaches each array uniform, classified BEFORE any
-        // resource is assigned: a run-time index anywhere on an array
-        // refuses the whole program in this slice (its contiguous block
-        // and ARL lowering are the next one), so an array can never be
-        // laid out per element here and as a block later for the same
-        // source - the container shape would change under the user.
+        // resource is assigned: a VP array with a run-time index anywhere
+        // is laid out as a contiguous block (all elements referenced), one
+        // with constant indices only per referenced element - the same
+        // rule the container declares from (array_uniforms.h), so the
+        // container shape and the registers cannot disagree.  A fragment
+        // program has no indexed constants and refuses by name.
         const rsx_cg::ArrayUniformUses arrayUses =
             rsx_cg::classifyArrayUniformUses(entry_);
         const auto layoutArrayUniform = [&](const std::string& name,
@@ -1876,32 +1943,29 @@ private:
             const auto useIt = arrayUses.find(name);
             const rsx_cg::ArrayUniformUse use =
                 useIt != arrayUses.end() ? useIt->second : rsx_cg::ArrayUniformUse{};
-            if (use.dynamic) {
+            if (use.dynamic && profile_ == GeneralProfile::Fragment) {
                 program_.diagnostics.push_back(
-                    profile_ == GeneralProfile::Fragment
-                        ? "nv40-general-fp: array " + std::string(where) + " '" +
-                          name + "' is indexed at run time; a fragment program "
-                          "has no indexed constants (the reference refuses this "
-                          "too: C6013, only arrays of texcoords may be indexed "
-                          "in this profile); refusing"
-                        : "nv40-general-vp: run-time index into array " +
-                          std::string(where) + " '" + name + "' needs a "
-                          "contiguous constant block and ARL addressing, which "
-                          "is not lowered yet; refusing the whole program "
-                          "rather than laying the array out per element");
+                    "nv40-general-fp: array " + std::string(where) + " '" +
+                    name + "' is indexed at run time; a fragment program "
+                    "has no indexed constants (the reference refuses this "
+                    "too: C6013, only arrays of texcoords may be indexed "
+                    "in this profile); refusing");
                 program_.loweringFailed = true;
                 return;
             }
             const int count = type.arraySize;
             if (profile_ == GeneralProfile::Vertex) {
-                // Referenced elements only, registers DESCENDING from
-                // c467 in ASCENDING element order (measured: u_bones[1]
-                // -> c467, u_bones[3] -> c466); unreferenced elements are
-                // declared by the container but hold no register.
-                for (int k : use.constantElements) {
-                    if (k < 0 || k >= count) continue;
-                    arrayElementSrcs_[name][k] =
-                        uniformSrc(nextVpUniformConst--, false);
+                // The shared walk: referenced elements only, DESCENDING
+                // from c467 in ASCENDING element order, or the whole
+                // array as one contiguous block under a run-time index.
+                // A run-time read resolves against the block's base
+                // (element 0) with the address register added.
+                const std::vector<int> regs = rsx_cg::vpArrayElementRegisters(
+                    use, count, nextVpUniformConst);
+                for (int k = 0; k < count; ++k) {
+                    if (regs[static_cast<size_t>(k)] >= 0)
+                        arrayElementSrcs_[name][k] =
+                            uniformSrc(regs[static_cast<size_t>(k)], false);
                 }
             } else {
                 // Every element has its own inline-const slot, used or
@@ -3503,7 +3567,33 @@ private:
     void lowerFloatToInt(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        {
+            // `float i = 1; u[int(i)]`: the cast of a constant that only
+            // array indices consume folds into those constant reads on
+            // both profiles (array_uniforms.h) and emits nothing.
+            const auto dynIt = dynamicIndexUses_.find(inst.result);
+            const auto useIt = useCount_.find(inst.result);
+            int folded = 0;
+            if (dynIt != dynamicIndexUses_.end() && dynIt->second > 0 &&
+                useIt != useCount_.end() && useIt->second == dynIt->second &&
+                rsx_cg::foldConstantIndex(entry_, inst.result, folded))
+                return;
+        }
         if (profile_ != GeneralProfile::Fragment) {
+            // A cast that ONLY a run-time array index consumes is the ARL
+            // itself: the reference emits `ARL A0.x, v.x` for u[int(idx)]
+            // (ARL floors) and `MUL R0.x, ...; ARL A0.x, R0.x` for a
+            // computed index, never a float-to-int sequence.  Any other
+            // consumer needs the integer value in a register, which this
+            // profile does not lower - and int(idx) + 1 is the shape the
+            // reference lowers as a full truncation before its ARL.
+            const auto dynIt = dynamicIndexUses_.find(inst.result);
+            const auto useIt = useCount_.find(inst.result);
+            if (dynIt != dynamicIndexUses_.end() && dynIt->second > 0 &&
+                useIt != useCount_.end() && useIt->second == dynIt->second) {
+                indexValueOf_[inst.result] = inst.operands[0];
+                return;
+            }
             program_.diagnostics.push_back(
                 "nv40-general: VP float-to-int lowering deferred");
             program_.loweringFailed = true;
@@ -3957,9 +4047,35 @@ private:
             return;
         }
         if (inst.arrayIndexKind == Kind::Dynamic) {
-            // The constructor already refused the program; keep the load
-            // from resolving to anything in case it did not see the array.
-            if (!program_.loweringFailed) {
+            // A constant the builder did not fold (`int i = 1; u[i]`) is
+            // a constant index here as it was in the classification, on
+            // both profiles; out of range refuses as the reference does.
+            int folded = 0;
+            if (!inst.operands.empty() &&
+                rsx_cg::foldConstantIndex(entry_, inst.operands[0], folded)) {
+                const auto arrIt = arrayElementSrcs_.find(inst.targetName);
+                if (arrIt != arrayElementSrcs_.end()) {
+                    const auto elIt = arrIt->second.find(folded);
+                    if (elIt != arrIt->second.end()) {
+                        program_.valueToSource[inst.result] = elIt->second;
+                        valueWidth_[inst.result] = inst.resultType.componentCount();
+                        return;
+                    }
+                }
+                if (!program_.loweringFailed) {
+                    program_.diagnostics.push_back(
+                        "nv40-general: array index " + std::to_string(folded) +
+                        " out of bounds for array uniform '" + inst.targetName +
+                        "' (the reference refuses this too: C1068); refusing");
+                    program_.loweringFailed = true;
+                }
+                return;
+            }
+            if (profile_ == GeneralProfile::Vertex && !inst.operands.empty())
+                lowerDynamicArrayRead(inst);
+            else if (!program_.loweringFailed) {
+                // The constructor already refused a fragment program; keep
+                // the load from resolving in case it did not see the array.
                 program_.diagnostics.push_back(
                     "nv40-general: run-time index into array uniform '" +
                     inst.targetName + "' is not lowered; refusing");
@@ -4025,6 +4141,149 @@ private:
             "nv40-general: ldunif of '" + inst.targetName +
             "' has no registered uniform source; refusing");
         program_.loweringFailed = true;
+    }
+
+    // A VP array element chosen at run time (t_99b29225): the value is the
+    // array's block base read through an address-register lane, and the
+    // lane is loaded by an ARL from the index.  Measured on the reference:
+    //   - lanes are handed out in order of FIRST USE, A0.x..w then A1.x..w,
+    //     whatever component the index came from (int(idx.y) alone is
+    //     `ARL A0.x, v.yyyy`); the same index value read twice keeps its
+    //     lane and its one ARL;
+    //   - index values read from ONE input register share ONE ARL, whose
+    //     writemask grows a lane per value and whose swizzle starts as the
+    //     first value's broadcast and takes each later value's component
+    //     in that value's lane (idx.x then idx.y: A0.xy, v.xyxx; idx.y then
+    //     idx.x: A0.xy, v.yxyy).  A temp index keeps an ARL of its own: a
+    //     vector temp is written lane by lane and a merged ARL could be
+    //     scheduled ahead of a later lane's write;
+    //   - a ninth value is refused by name: the reference reuses a lane
+    //     whose value is dead, and that allocation is not lowered here.
+    void lowerDynamicArrayRead(const IRInstruction& inst)
+    {
+        const auto arrIt = arrayElementSrcs_.find(inst.targetName);
+        if (arrIt == arrayElementSrcs_.end() ||
+            arrIt->second.find(0) == arrIt->second.end()) {
+            if (!program_.loweringFailed) {
+                program_.diagnostics.push_back(
+                    "nv40-general-vp: run-time index into array uniform '" +
+                    inst.targetName + "' but the array has no contiguous "
+                    "block; refusing rather than reading past it");
+                program_.loweringFailed = true;
+            }
+            return;
+        }
+        const VSrc base = arrIt->second.at(0);
+
+        // The index: through a cast the index alone consumed, to the
+        // float the reference feeds the ARL.
+        IRValueID indexValue = inst.operands[0];
+        for (auto peel = indexValueOf_.find(indexValue);
+             peel != indexValueOf_.end(); peel = indexValueOf_.find(indexValue))
+            indexValue = peel->second;
+        const VSrc index = resolve(indexValue);
+        if (index.kind == VSrcKind::Literal) {
+            // Constants fold above; a literal here is one that did not
+            // (a vector literal, or a non-integral one).
+            if (!program_.loweringFailed) {
+                program_.diagnostics.push_back(
+                    "nv40-general-vp: the run-time index into array uniform '" +
+                    inst.targetName + "' is a literal this lowering cannot "
+                    "fold to an element; refusing");
+                program_.loweringFailed = true;
+            }
+            return;
+        }
+        if (index.kind == VSrcKind::None || index.relative) {
+            if (!program_.loweringFailed) {
+                program_.diagnostics.push_back(
+                    "nv40-general-vp: the run-time index into array uniform '" +
+                    inst.targetName + "' has no register source; refusing");
+                program_.loweringFailed = true;
+            }
+            return;
+        }
+        const uint8_t component = index.swizzle[0];
+        unsigned version = 0;
+        if (index.kind == VSrcKind::Temp) {
+            for (const VInstr& prior : program_.instrs) {
+                if (!prior.dst.none && !prior.dst.output && !prior.dst.address &&
+                    prior.dst.index == index.index &&
+                    (prior.dst.writemask & (1 << component)))
+                    ++version;
+            }
+        }
+
+        int lane = -1;
+        for (size_t i = 0; i < addressLanes_.size(); ++i) {
+            const AddressLane& al = addressLanes_[i];
+            if (al.kind == index.kind && al.index == index.index &&
+                al.component == component && al.neg == index.neg &&
+                al.abs == index.abs && al.version == version) {
+                lane = static_cast<int>(i);
+                break;
+            }
+        }
+        if (lane < 0) {
+            if (addressLanes_.size() >= 8) {
+                program_.diagnostics.push_back(
+                    "nv40-general-vp: run-time array indices need more than "
+                    "the eight address register lanes (A0.xyzw, A1.xyzw); "
+                    "reusing a lane whose value is dead is not lowered; "
+                    "refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            lane = static_cast<int>(addressLanes_.size());
+            const int addrReg = lane / 4;
+            const int addrLane = lane % 4;
+            AddressLane al;
+            al.kind = index.kind;
+            al.index = index.index;
+            al.component = component;
+            al.neg = index.neg;
+            al.abs = index.abs;
+            al.version = version;
+            // Join the ARL already loading this register, if there is one
+            // and it targets the same address register.
+            size_t joinAt = program_.instrs.size();
+            if (index.kind != VSrcKind::Temp) {
+                for (const AddressLane& prev : addressLanes_) {
+                    if (prev.kind == index.kind && prev.index == index.index &&
+                        prev.neg == index.neg && prev.abs == index.abs &&
+                        prev.arlAt < program_.instrs.size() &&
+                        program_.instrs[prev.arlAt].op == VOp::Arl &&
+                        program_.instrs[prev.arlAt].dst.index == addrReg) {
+                        joinAt = prev.arlAt;
+                        break;
+                    }
+                }
+            }
+            if (joinAt < program_.instrs.size()) {
+                VInstr& arl = program_.instrs[joinAt];
+                arl.dst.writemask |= (1 << addrLane);
+                arl.srcs[0].swizzle[static_cast<size_t>(addrLane)] = component;
+                al.arlAt = joinAt;
+            } else {
+                VInstr arl;
+                arl.op = VOp::Arl;
+                arl.dst.address = true;
+                arl.dst.index = addrReg;
+                arl.dst.writemask = 1 << addrLane;
+                arl.srcs[0] = index;
+                arl.srcs[0].swizzle = {component, component, component, component};
+                al.arlAt = program_.instrs.size();
+                program_.instrs.push_back(arl);
+            }
+            addressLanes_.push_back(al);
+        }
+
+        VSrc read = base;
+        read.relative = true;
+        read.addrReg = static_cast<uint8_t>(lane / 4);
+        read.addrLane = static_cast<uint8_t>(lane % 4);
+        program_.valueToSource[inst.result] = read;
+        valueWidth_[inst.result] = inst.resultType.componentCount();
     }
 
     bool matrixDimsSupported(const IRTypeInfo& type) const
@@ -6845,7 +7104,7 @@ private:
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         for (size_t i = 0; i < program_.instrs.size(); ++i) {
             const VInstr& vi = program_.instrs[i];
-            if (!vi.dst.none && !vi.dst.output) {
+            if (!vi.dst.none && !vi.dst.output && !vi.dst.address) {
                 defs.insert(vi.dst.index);
                 if (!firstDef.count(vi.dst.index))
                     firstDef[vi.dst.index] = i;
@@ -7144,9 +7403,11 @@ private:
             const bool dstHadPhysBefore =
                 !vi.dst.none &&
                 !vi.dst.output &&
+                !vi.dst.address &&
                 program_.vregToPhys.find(vi.dst.index) != program_.vregToPhys.end();
             if (!vi.dst.none &&
                 !vi.dst.output &&
+                !vi.dst.address &&
                 !dstHadPhysBefore) {
                 // A PIN IS A PREFERENCE, NOT A MANDATE.  It used to be
                 // honoured unconditionally - overriding the free list and
@@ -7315,7 +7576,7 @@ private:
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
             }
-            if (!vi.dst.none && !vi.dst.output) {
+            if (!vi.dst.none && !vi.dst.output && !vi.dst.address) {
                 auto physIt = program_.vregToPhys.find(vi.dst.index);
                 if (dstHadPhysBefore && physIt != program_.vregToPhys.end()) {
                     const auto fp16It = program_.vregToFp16.find(vi.dst.index);
@@ -7402,6 +7663,11 @@ static struct nvfx_src nvfxSource(const VSrc& src)
 {
     struct nvfx_reg r = regFromSource(src);
     struct nvfx_src s = nvfx_src(r);
+    if (src.relative) {
+        s.indirect = 1;
+        s.indirect_reg = src.addrReg ? 1 : 0;
+        s.indirect_swz = src.addrLane & 3;
+    }
     s = nvfx_src_swz(s, src.swizzle[0], src.swizzle[1],
                      src.swizzle[2], src.swizzle[3]);
     if (src.neg)
@@ -7443,6 +7709,7 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Seq: return NVFX_FP_OP_OPCODE_SEQ;
     case VOp::Sne: return NVFX_FP_OP_OPCODE_SNE;
     case VOp::Tex: return NVFX_FP_OP_OPCODE_TEX;
+    case VOp::Arl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Ftoi: return NVFX_FP_OP_OPCODE_MOV;
     }
     return NVFX_FP_OP_OPCODE_MOV;
@@ -7482,6 +7749,7 @@ static const char* vOpName(VOp op)
     case VOp::Seq: return "Seq";
     case VOp::Sne: return "Sne";
     case VOp::Tex: return "Tex";
+    case VOp::Arl: return "Arl";
     case VOp::Ftoi: return "Ftoi";
     case VOp::SelPred: return "SelPred";
     case VOp::Kil: return "Kil";
@@ -7514,6 +7782,7 @@ static bool tryVpOpcode(VOp op, uint8_t& opcode)
     case VOp::Sle: opcode = VP_OP(SLE); return true;
     case VOp::Seq: opcode = VP_OP(SEQ); return true;
     case VOp::Sne: opcode = VP_OP(SNE); return true;
+    case VOp::Arl: opcode = VP_OP(ARL); return true;
     default: return false;
     }
 }
@@ -7542,7 +7811,9 @@ static bool isVpScalarOp(VOp op)
 
 static bool isVpVectorOp(VOp op)
 {
-    return !isVpScalarOp(op) && op != VOp::Tex;
+    // ARL never pairs: the reference emits it alone, and a co-issued
+    // half shares the constant address the relative reads depend on.
+    return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Arl;
 }
 
 static bool sameTempRegister(const VSrc& src, const VDst& dst)
@@ -7597,6 +7868,10 @@ static bool canCoissueVp(const VInstr& sca, const VInstr& vec)
     int constant = -1;
     for (const VInstr* instr : { &sca, &vec }) {
         for (const VSrc& src : instr->srcs) {
+            // A relative read owns the instruction's address fields
+            // (INDEX_CONST, ADDR_SWZ); a partner cannot share them.
+            if (src.relative)
+                return false;
             if (src.kind != VSrcKind::Uniform)
                 continue;
             if (constant >= 0 && constant != src.index)
@@ -8405,6 +8680,8 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     auto makeInsn = [](const VInstr& vi) {
         const struct nvfx_reg dst = vi.dst.none
             ? nvfx_reg(NVFXSR_NONE, 0)
+            : vi.dst.address
+            ? nvfx_reg(NVFXSR_ADDRESS, vi.dst.index)
             : vi.dst.output
             ? nvfx_reg(NVFXSR_OUTPUT, vi.dst.index)
             : nvfx_reg(NVFXSR_TEMP, vi.dst.phys);

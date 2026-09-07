@@ -18,6 +18,12 @@ tools/rsx-cg-compiler/tests/shaders/vp_clp0_output_v.cg|0|general
 # rows and skips pixel staging until a future byte drift needs judgement.
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row0_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row2_v.cg|auto|general
+# t_99b29225: a run-time array index (ARL + relative const read over a
+# contiguous block).  Two computed indices, one landing on the LAST element
+# everywhere and one splitting the quad between elements 2 and 3; every
+# element has its own auto value.  The row differs from the reference in
+# operand order only, so it is staged and judged on pixels.
+tools/rsx-cg-compiler/tests/shaders/vp_array_uniform_dyn_rig_v.cg|auto|general
 
 # Our SHIPPED vertex programs (coverage audit 2026-09-06, correctness-first
 # bar): every vpshader.vcg under samples/ plus the SDK's libdbgfont VP.  None

@@ -141,6 +141,14 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     // `half4 u_h[3]` elements 1048); this returned 0 for it, so every
     // half scalar uniform's record carried no type at all.
     case IRType::Float16: return kCgFloat;
+    // An int, uint or bool SCALAR is recorded as FLOAT too (measured on
+    // the vertex side, t_99b29225: `int a : TEXCOORD1` -> 1045, and
+    // int2/int3/int4 -> 1046/1047/1048 like their float twins, which the
+    // vector cases below already produce); this returned 0 for the scalar
+    // and the record carried no type.
+    case IRType::Bool:
+    case IRType::Int32:
+    case IRType::UInt32:  return kCgFloat;
     case IRType::Vec2:    return kCgFloat2;
     case IRType::Vec3:    return kCgFloat3;
     case IRType::Vec4:    return kCgFloat4;

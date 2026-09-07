@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # t_f9ecd3ac: array uniforms with CONSTANT indices, parameter and file-scope,
 # fragment and vertex, laid out one element at a time the way the reference
-# lays them out.  Run-time indices keep a named refusal in this slice.
+# lays them out.  A VERTEX run-time index is the next slice's contiguous
+# block (vp-array-dynamic-test.sh); a FRAGMENT one keeps its named refusal.
 #
 # The oracle is the reference's PARAMETER TABLE, measured on sce-cgc and
 # pinned here as literal expectations (the reference itself cannot run in
@@ -18,9 +19,8 @@
 # float4 as the element (exit 0, wrong pixels - the e88 miscompile), and a
 # file-scope array refused.  Every accept row below is red on that parent.
 #
-# The refusals are the half that keeps the slice honest: a run-time index
-# anywhere on an array refuses the WHOLE program (a partial layout would
-# change container shape when the next slice lands), out-of-range and
+# The refusals are the half that keeps the slice honest: a fragment
+# run-time index refuses (no indexed constants; C6013), out-of-range and
 # invalid constant indices refuse (the reference refuses them too: C1068,
 # C6013), and an element type this slice does not lay out refuses by name.
 set -euo pipefail
@@ -275,10 +275,9 @@ refuse() {  # <label> <stem> <body>
     printf '  %-40s refused\n' "$1"
 }
 refuse "FP run-time index"        fp_array_uniform_dynamic_refuse_f      "indexed at run time"
-refuse "VP run-time index"        vp_array_uniform_dynamic_v             "run-time index into array"
-refuse "VP constant THEN run-time (whole program)" vp_array_uniform_mixed_v "run-time index into array"
-refuse "VP two run-time indices"  vp_array_uniform_consecutive_v         "run-time index into array"
-refuse "VP two arrays, one dynamic" vp_array_uniform_two_arrays_v        "run-time index into array"
+# VP run-time indices (vp_array_uniform_{dynamic,mixed,consecutive,two_arrays}_v)
+# were refusal rows here until t_99b29225; they are accept rows in
+# vp-array-dynamic-test.sh now.
 refuse "index 4 of [4]"           fp_array_uniform_oob_refuse_f          "array index 4 out of bounds"
 refuse "index -1"                 fp_array_uniform_negative_refuse_f     "array index -1 out of bounds"
 refuse "index 4 / 0"              fp_array_uniform_invalid_const_refuse_f "divides by zero"

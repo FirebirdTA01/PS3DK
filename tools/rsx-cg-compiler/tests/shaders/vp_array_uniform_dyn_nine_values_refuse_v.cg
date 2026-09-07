@@ -1,0 +1,2 @@
+uniform float4 u_bones[4];
+void main(float4 pos : POSITION, float4 a : TEXCOORD1, float4 b : TEXCOORD2, float c : TEXCOORD3, out float4 oPos : POSITION) { oPos = pos + u_bones[int(a.x)] + u_bones[int(a.y)] + u_bones[int(a.z)] + u_bones[int(a.w)] + u_bones[int(b.x)] + u_bones[int(b.y)] + u_bones[int(b.z)] + u_bones[int(b.w)] + u_bones[int(c)]; }

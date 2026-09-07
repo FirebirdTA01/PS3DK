@@ -50,7 +50,11 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
 
         case NVFXSR_ADDRESS:
         case NVFXSR_TEMP:
-            if (numTempRegs_ < (dst.index + 1))
+            // An ADDRESS destination (ARL into A0/A1) shares the temp
+            // index field but is not a temp: the reference declares
+            // registerCount 1 for a program whose only registers are A0
+            // and A1 (t_99b29225), so it must not raise the count.
+            if (dst.type == NVFXSR_TEMP && numTempRegs_ < (dst.index + 1))
                 numTempRegs_ = dst.index + 1;
             hw[3] |= NV40_VP_INST_DEST_MASK;
             if (slot == 0)
@@ -256,8 +260,8 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
 
         case NVFXSR_ADDRESS:
         case NVFXSR_TEMP:
-            if (numTempRegs_ < (dst.index + 1))
-                numTempRegs_ = dst.index + 1;
+            if (dst.type == NVFXSR_TEMP && numTempRegs_ < (dst.index + 1))
+                numTempRegs_ = dst.index + 1;   // an address register is not a temp
             if (slot == NVFX_VP_INST_SLOT_VEC)
                 hw[0] |= (dst.index << NV40_VP_INST_VEC_DEST_TEMP_SHIFT);
             else

@@ -140,6 +140,14 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     // A `half` scalar is recorded as FLOAT by the reference (measured on
     // the fragment side: 1045 for `half`, 1048 for `half4` elements).
     case IRType::Float16: return kCgFloat;
+    // An int, uint or bool SCALAR is recorded as FLOAT too (measured on
+    // the vertex side, t_99b29225: `int a : TEXCOORD1` -> 1045, and
+    // int2/int3/int4 -> 1046/1047/1048 like their float twins, which the
+    // vector cases below already produce); this returned 0 for the scalar
+    // and the record carried no type.
+    case IRType::Bool:
+    case IRType::Int32:
+    case IRType::UInt32:  return kCgFloat;
     case IRType::Vec2:    return kCgFloat2;
     case IRType::Vec3:    return kCgFloat3;
     case IRType::Vec4:    return kCgFloat4;
@@ -329,11 +337,13 @@ VpContainerResult emitVertexContainerImpl(
     int nextMatrixReg = 256;
     int nextVectorReg = 467;
 
-    // Array uniforms: one record per element, and a register only for a
-    // REFERENCED element, taken from the same descending cursor in
-    // ascending element order - the walk the lowering performed, from the
-    // same classification (array_uniforms.h, t_f9ecd3ac).  An unreferenced
-    // element is declared with no resource, as the reference declares it.
+    // Array uniforms: one record per element, registers from the same
+    // descending cursor the lowering walked, by the same rule and from the
+    // same classification (array_uniforms.h): a REFERENCED element's own
+    // register under constant indices (t_f9ecd3ac), or a contiguous block
+    // of every element under a run-time index (t_99b29225).  An element
+    // without a register is declared with no resource, as the reference
+    // declares it.
     const rsx_cg::ArrayUniformUses arrayUses =
         rsx_cg::classifyArrayUniformUses(*entry);
     constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
@@ -343,10 +353,13 @@ VpContainerResult emitVertexContainerImpl(
                                          uint32_t isShared) {
         const auto useIt = arrayUses.find(name);
         const int count = type.arraySize;
+        const std::vector<int> regs = rsx_cg::vpArrayElementRegisters(
+            useIt != arrayUses.end() ? useIt->second : rsx_cg::ArrayUniformUse{},
+            count, nextVectorReg);
         for (int k = 0; k < count; ++k)
         {
-            const bool referenced = useIt != arrayUses.end() &&
-                                    useIt->second.constantElements.count(k) != 0;
+            const int reg = regs[static_cast<size_t>(k)];
+            const bool referenced = reg >= 0;
             ParamDesc e;
             e.name      = rsx_cg::arrayElementName(name, k);
             e.semantic  = "";
@@ -359,7 +372,7 @@ VpContainerResult emitVertexContainerImpl(
             {
                 e.res          = kCgConst;
                 e.isReferenced = 1;
-                e.resIndex     = static_cast<uint32_t>(nextVectorReg--);
+                e.resIndex     = static_cast<uint32_t>(reg);
             }
             else
             {
