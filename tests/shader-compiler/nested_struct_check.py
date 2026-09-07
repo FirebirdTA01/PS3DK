@@ -343,6 +343,48 @@ R main(float4 t : TEXCOORD0) {
         assert get_output_from_h0(blob13) == 0, f"nested_unwritten_float expected outputFromH0=0, got {get_output_from_h0(blob13)}"
         print("PASS: nested unwritten float beside top-level half selects float bank R0 / outputFromH0=0", flush=True)
 
+        # 14. Negative control: struct-typed member with semantic in VP with keep output (refused by name)
+        code14_vp = """
+struct I { float4 v; };
+struct R { I i : POSITION; float4 keep : TEXCOORD0; };
+R main(float4 t : POSITION) {
+    R r;
+    r.i.v = t;
+    r.keep = t;
+    return r;
+}
+"""
+        src14 = work / 'struct_semantic_vp.cg'
+        out14 = work / 'struct_semantic_vp.vpo'
+        src14.write_text(code14_vp)
+        p14 = subprocess.run([compiler, '-p', 'sce_vp_rsx', '--emit-container', str(out14), str(src14)],
+                             capture_output=True, text=True, timeout=20)
+        assert p14.returncode == 1, f"expected rc=1 for struct-typed member semantic in VP, got {p14.returncode}"
+        assert not out14.exists(), "must not emit container artifact for struct-typed member semantic in VP"
+        assert "semantics on struct-typed" in p14.stderr, f"expected 'semantics on struct-typed' error, got: {p14.stderr}"
+        print("PASS: struct-typed member semantic refusal with keep output in VP (rc=1, no container)", flush=True)
+
+        # 15. Negative control: struct-typed member with semantic in FP with keep output (refused by name)
+        code15_fp = """
+struct I { float4 v; };
+struct R { I i : COLOR; float4 keep : COLOR1; };
+R main(float4 t : COLOR) : COLOR {
+    R r;
+    r.i.v = t;
+    r.keep = t;
+    return r;
+}
+"""
+        src15 = work / 'struct_semantic_fp.cg'
+        out15 = work / 'struct_semantic_fp.fpo'
+        src15.write_text(code15_fp)
+        p15 = subprocess.run([compiler, '-p', 'sce_fp_rsx', '--emit-container', str(out15), str(src15)],
+                             capture_output=True, text=True, timeout=20)
+        assert p15.returncode == 1, f"expected rc=1 for struct-typed member semantic in FP, got {p15.returncode}"
+        assert not out15.exists(), "must not emit container artifact for struct-typed member semantic in FP"
+        assert "semantics on struct-typed" in p15.stderr, f"expected 'semantics on struct-typed' error, got: {p15.stderr}"
+        print("PASS: struct-typed member semantic refusal with keep output in FP (rc=1, no container)", flush=True)
+
 
 if __name__ == '__main__':
     main()
