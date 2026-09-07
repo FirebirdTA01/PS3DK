@@ -1,0 +1,15 @@
+// t_80dad2dd / t_5c12df56: the OUT-PARAMETER WINS over the return type.
+//
+// The entry returns half, but the thing bound to COLOR0 is a declared
+// `out float4`, so the colour stays full precision in R0 and outputFromH0
+// stays clear; the half return belongs to the DEPTH export.  Reading
+// "half return type AND some COLOR0 store exists" turns this shader's fp32
+// colour into H0, which is why the classifier checks the parameter first
+// and only falls back to the return type.
+//
+// Measured against the reference: outputFromH0=0, depthReplace=1.
+half main(float4 t : TEXCOORD0, out float4 colour : COLOR) : DEPTH
+{
+	colour = t;
+	return t.x;
+}

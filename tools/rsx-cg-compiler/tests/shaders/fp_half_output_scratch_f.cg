@@ -1,0 +1,21 @@
+// t_80dad2dd: a declared half colour output whose value passes through a
+// TEMP that the allocator places in R0.
+//
+// H0 is the low half of R0, so this is the shape a blanket "no temp in R0"
+// guard refused - 45 of the reference SDK's fragment programs, this one
+// among them (CgTutorial/GCM/HDR/shaders/OneHalfFp.cg is the same source).
+// It is not a conflict: the temp's LAST READ is the instruction that writes
+// the colour, so ordinary liveness separates them, and the reference emits
+// exactly that overlap - `TEXR R0.xyz, f[TEX0], TEX0` then
+// `MOVH H0.xyz, R0`.
+//
+// What keeps a temp that is still live off the slot is the allocator's
+// output reservation (outputStorePos), not a guard in the emitter.
+sampler2D gTexture;
+
+half4 main(float2 texCoord0 : TEXCOORD0) : COLOR
+{
+	half4 c = tex2D(gTexture, texCoord0);
+	c.a = 1.0;
+	return c;
+}
