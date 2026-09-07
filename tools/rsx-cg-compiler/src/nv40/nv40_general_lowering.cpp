@@ -2823,6 +2823,33 @@ private:
             return;
         }
 
+        // VecInsert creates a new SSA value. Reusing the base's vreg is
+        // valid only when no other IR consumer can still observe the base.
+        // In particular, a flattened conditional retains it as the else
+        // arm: overwriting it here makes both SelPred arms the then value.
+        if (useCount_[inst.operands[0]] > 1) {
+            const int resultReg = define(inst.result);
+            VInstr copy;
+            copy.op = VOp::Mov;
+            copy.dst.index = resultReg;
+            // Absent vector lanes must stay absent: a producer fold can
+            // send this mask directly to a vertex TEXCOORD export.
+            copy.dst.writemask =
+                ((1 << inst.resultType.componentCount()) - 1) & ~laneMask;
+            copy.srcs[0] = resolve(inst.operands[0]);
+            // A scalar .x insert replaces every declared lane.
+            if (copy.dst.writemask != 0)
+                program_.instrs.push_back(copy);
+
+            VInstr insert;
+            insert.op = VOp::Mov;
+            insert.dst.index = resultReg;
+            insert.dst.writemask = laneMask;
+            insert.srcs[0] = resolve(inst.operands[1]);
+            program_.instrs.push_back(insert);
+            return;
+        }
+
         if (!program_.instrs.empty()) {
             VInstr& producer = program_.instrs.back();
             if (!producer.dst.output &&
@@ -7503,6 +7530,11 @@ private:
                        program_.vregToPhys.find(src.index) != program_.vregToPhys.end();
                         });
                     if (reusableSrc != vi.srcs.end() &&
+                        // The else source may also occupy a slot read by
+                        // the condition or then arm after the first MOV.
+                        // Dying at this VInstr does not make that slot safe.
+                        !aliasesEarlyRead(
+                            program_.vregToPhys[reusableSrc->index], false) &&
                         !clobbersLiveOutput(
                             program_.vregToPhys[reusableSrc->index],
                             false)) {

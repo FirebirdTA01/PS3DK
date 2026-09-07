@@ -1,0 +1,11 @@
+// t_5fa66f60: the dying else source also occupies the then-source slot.
+// The SelPred expansion must allocate a different destination before it
+// writes the else arm and subsequently reads the condition and then arm.
+half4 main(float4 input : TEXCOORD0, uniform float enabled) : COLOR
+{
+    float4 colour = input * 0.75;
+    if (enabled)
+        colour.xyz = colour.xyz * 0.5 + 0.125;
+    colour.w = 1.0;
+    return colour;
+}
