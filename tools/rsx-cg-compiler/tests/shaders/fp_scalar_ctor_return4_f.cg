@@ -1,0 +1,6 @@
+// t_75de19a1: float4(scalar) as the whole colour - a four-lane broadcast on
+// the return path, the shape that is not a struct member.
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D image) : COLOR
+{
+    return float4(tex2D(image, uv).g);
+}

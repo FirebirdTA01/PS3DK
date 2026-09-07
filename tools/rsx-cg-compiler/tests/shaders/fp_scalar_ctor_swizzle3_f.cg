@@ -1,0 +1,13 @@
+// t_75de19a1 INDEPENDENT control: the same program spelled as a swizzle
+// broadcast, `.bbb`, which never goes through the vector constructor.  Its
+// bytes are the oracle for float3(s): the two must agree, and this one
+// cannot be broken by a wrong constructor lowering.  Measured: the
+// reference compiles this and the constructor spellings to identical bytes.
+struct Result { float4 colour : COLOR; };
+Result main(float2 uv : TEXCOORD0, uniform sampler2D image)
+{
+    Result o;
+    o.colour.rgb = tex2D(image, uv).bbb;
+    o.colour.a = 1.0;
+    return o;
+}

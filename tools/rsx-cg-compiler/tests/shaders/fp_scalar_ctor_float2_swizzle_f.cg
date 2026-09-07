@@ -1,0 +1,6 @@
+// t_75de19a1 INDEPENDENT control for float2(s): the .gg swizzle spelling.
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D image) : COLOR
+{
+    float2 p = tex2D(image, uv).gg;
+    return float4(p, 0.0, 1.0);
+}

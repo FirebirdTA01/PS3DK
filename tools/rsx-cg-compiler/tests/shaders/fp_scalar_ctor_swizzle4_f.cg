@@ -1,0 +1,10 @@
+// t_75de19a1 INDEPENDENT control for the float4 return: `.gggg`, a swizzle
+// broadcast that never goes through the vector constructor.  The reference
+// compiles it and float4(s) to identical 272-byte containers.  Ours agree on
+// the broadcast MOV's decoded fields (mask xyzw, source lane y) but not yet
+// on bytes: float4(s) lands in a temp and is copied to R0 by the return
+// store, one MOV the reference does not emit (t_e3af5f18).
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D image) : COLOR
+{
+    return tex2D(image, uv).gggg;
+}
