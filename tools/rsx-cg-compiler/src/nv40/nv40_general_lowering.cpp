@@ -2973,6 +2973,36 @@ private:
             for (size_t i = 1; sameScalar && i < inst.operands.size(); i++)
                 sameScalar = inst.operands[i] == inst.operands[0];
             if (sameScalar) {
+                // Lane-only consumers can read the broadcast's source
+                // directly, just as they read a .xxx shuffle. Materialising
+                // it first gives struct-field inserts an extra vector copy.
+                // Keep half materialisation explicit: a half-typed input
+                // can still need rounding when moved from a varying.
+                const IRInstruction* scalarDef = definitionOf(inst.operands[0]);
+                const IRValue* scalarValue = entry_.getValue(inst.operands[0]);
+                const IRTypeInfo* scalarType = scalarDef ? &scalarDef->resultType :
+                    (scalarValue ? &scalarValue->type : nullptr);
+                bool laneOnly = scalarType &&
+                    inst.resultType.elementType == IRType::Float32 &&
+                    scalarType->elementType == inst.resultType.elementType;
+                bool hasReader = false;
+                for (const auto& block : entry_.blocks) {
+                    if (!block) continue;
+                    for (const auto& use : block->instructions) {
+                        if (!use) continue;
+                        for (IRValueID operand : use->operands) {
+                            if (operand != inst.result) continue;
+                            hasReader = true;
+                            if (use->op != IROp::VecExtract &&
+                                use->op != IROp::VecShuffle)
+                                laneOnly = false;
+                        }
+                    }
+                }
+                if (laneOnly && hasReader) {
+                    program_.valueToSource[inst.result] = resolve(inst.operands[0]);
+                    return;
+                }
                 const int dstReg = define(inst.result);
                 VInstr vi;
                 vi.op = VOp::Mov;

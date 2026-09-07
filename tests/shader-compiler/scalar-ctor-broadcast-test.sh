@@ -108,6 +108,14 @@ grep -qE '^[0-9]+ MOV dst=R0 mask=xyz .* s0=R[0-9]+[.]zzzz$' "$work/bcast.insns"
     || fail "expected exactly one xyz MOV into R0 for the member store"
 printf '  %-36s == .bbb, MOV R0.xyz <- .zzzz\n' "float3(scalar) member store"
 
+# The source remains the value at construction time even when its original
+# vector is subsequently written. The saved lanes must not follow that write.
+accept fp_scalar_ctor_snapshot_f
+accept fp_scalar_ctor_snapshot_swizzle_f
+cmp -s "$work/fp_scalar_ctor_snapshot_f.fpo" "$work/fp_scalar_ctor_snapshot_swizzle_f.fpo" \
+    || fail "a broadcast snapshot changed when its source vector was subsequently written"
+printf '  %-36s == saved .yyy before source write\n' "float3(scalar) snapshot"
+
 accept fp_scalar_ctor_return4_explicit_f
 accept fp_scalar_ctor_swizzle4_f
 accept fp_scalar_ctor_return4_f
