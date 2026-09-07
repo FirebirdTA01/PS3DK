@@ -900,6 +900,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     // Clean up
     declToValue_.clear();
     nameToValue_.clear();
+    undefinedFieldBases_.clear();
     localArrayValues_.clear();
     currentFunction_ = nullptr;
     currentFunctionDecl_ = nullptr;
@@ -1626,6 +1627,9 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                     if (it != nameToValue_.end())
                     {
                         fieldValue = it->second;
+                        // Declaring a field makes it an lvalue, not an output
+                        // write. Only an assignment replaces its undefined base.
+                        if (undefinedFieldBases_.count(fieldValue)) continue;
                         std::fprintf(stderr,
                                      "[ir_builder] return field %s direct -> %%%u\n",
                                      fieldKey.c_str(),
@@ -1776,6 +1780,24 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             // For now, just use the initializer value as the variable value
             nameToValue_[varDecl->name] = initValue;
             declToValue_[varDecl] = initValue;
+        }
+        else if (const auto* fields = getStructFields(varDecl->type.get()))
+        {
+            // An uninitialised vector field is a local vector lvalue too.
+            // Bind its undefined base at declaration, before either arm of
+            // a branch snapshots the map. Swizzle assignment can then build
+            // the ordinary VecInsert chain in source order, including
+            // overlapping/reordered writes and rgba/stpq aliases. No value
+            // or instruction defines this base: unwritten lanes stay absent.
+            // Return reads the whole field binding rather than guessing its
+            // value from a particular pair of partial-name keys (.xyz/.w).
+            for (const auto& field : *fields)
+                if (field.type && field.type->vectorSize > 1)
+                {
+                    const IRValueID base = currentFunction_->allocateValueId();
+                    nameToValue_[varDecl->name + "." + field.name] = base;
+                    undefinedFieldBases_.insert(base);
+                }
         }
     }
     }

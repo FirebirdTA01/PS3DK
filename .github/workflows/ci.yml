@@ -220,6 +220,8 @@ jobs:
         run: bash tests/shader-compiler/struct-return-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test swizzle updates preserve a struct field's current value
         run: bash tests/shader-compiler/struct-field-update-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test partial struct outputs preserve lane assignment order
+        run: bash tests/shader-compiler/partial-struct-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros
