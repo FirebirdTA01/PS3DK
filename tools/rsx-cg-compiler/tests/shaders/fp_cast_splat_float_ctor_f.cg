@@ -1,0 +1,7 @@
+// The constructor twin of fp_cast_splat_float_f: the two spellings must
+// produce the same container.
+float4 main(float4 a : TEXCOORD0) : COLOR
+{
+	float d = a.x;
+	return float4(d, d, d, d);
+}

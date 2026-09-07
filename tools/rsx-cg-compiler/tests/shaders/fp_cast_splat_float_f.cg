@@ -1,0 +1,8 @@
+// `(float4)d` from a SCALAR is a broadcast - the cast spelling of
+// float4(d,d,d,d).  It fell through to IROp::Bitcast, which the NV40
+// lowering refuses outright; the reference emits one MOV with .xxxx.
+float4 main(float4 a : TEXCOORD0) : COLOR
+{
+	float d = a.x;
+	return (float4)d;
+}

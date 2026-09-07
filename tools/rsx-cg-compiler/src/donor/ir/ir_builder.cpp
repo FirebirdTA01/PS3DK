@@ -4037,6 +4037,40 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
         }
     }
 
+    // A CAST FROM A SCALAR TO A VECTOR IS A BROADCAST.  `(float4)d` and
+    // `(half4)d` are the cast spelling of `float4(d,d,d,d)`, and the
+    // reference lowers all three of these to ONE instruction:
+    //
+    //   float d = a.x; return (float4)d;        MOV R0.xyzw, TEX0.xxxx
+    //   half  d = a.x; return (half4)d;         MOV H0.xyzw, TEX0.xxxx  prec=1
+    //   half  d = a.x; return half4(d,d,d,d);   MOV H0.xyzw, TEX0.xxxx  prec=1
+    //
+    // Only the constructor spelling reached VecConstruct here; the cast fell
+    // through to the default Bitcast below, which the NV40 lowering refuses
+    // outright ("unsupported IR op bitcast").  It is not a half-only gap -
+    // the float row above refused too - and it is 22 rows of the
+    // reference-SDK sweep (t_cde25bad).
+    //
+    // The broadcast is built in the SOURCE's element type and any precision
+    // conversion is left to the vector path below, so `(float4)h` is one
+    // splat plus the ordinary hvec4 -> vec4 conversion rather than a second
+    // scalar-conversion path to keep in step with this one.
+    if (targetType.isVector() && sourceType.isScalar() &&
+        targetType.componentCount() > 1)
+    {
+        IRTypeInfo splatType = targetType;
+        splatType.elementType = sourceType.baseType;
+        auto splat = std::make_unique<IRInstruction>(IROp::VecConstruct,
+            currentFunction_->allocateValueId(), splatType);
+        for (int i = 0; i < targetType.componentCount(); ++i)
+            splat->addOperand(operandValue);
+        currentBlock_->addInstruction(std::move(splat));
+        operandValue = currentFunction_->nextValueId - 1;
+        sourceType = splatType;
+        if (sourceType.elementType == targetType.elementType)
+            return operandValue;
+    }
+
     // Determine conversion operation
     IROp op = IROp::Bitcast;  // Default
     const IRType srcElem = sourceType.isVector() ? sourceType.elementType : sourceType.baseType;

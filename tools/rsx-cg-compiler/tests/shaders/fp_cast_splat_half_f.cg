@@ -1,0 +1,7 @@
+// The half twin: the broadcast must keep the half precision as well, so the
+// colour is MOV H0 at prec=1 (t_cde25bad).
+half4 main(half4 a : TEXCOORD0) : COLOR
+{
+	half d = a.x;
+	return (half4)d;
+}

@@ -1,0 +1,5 @@
+half4 main(half4 a : TEXCOORD0) : COLOR
+{
+	half d = a.x;
+	return half4(d, d, d, d);
+}
