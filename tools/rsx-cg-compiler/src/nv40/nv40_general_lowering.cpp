@@ -358,6 +358,8 @@ static int fragmentInputSrc(const std::string& semanticUpper, int semanticIndex)
         return NVFX_FP_OP_INPUT_SRC_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
         return NVFX_FP_OP_INPUT_SRC_FOGC;
+    if (semanticUpper == "FACE" && semanticIndex == 0)
+        return NV40_FP_OP_INPUT_SRC_FACING;
     return -1;
 }
 
@@ -4330,6 +4332,12 @@ private:
             VInstr& producer = program_.instrs.back();
             if (!producer.dst.output &&
                 producer.op == VOp::Mov &&
+                // Only an unconditional, unmodified copy can disappear.
+                // In particular, pow(saturate(x), e) must clamp BEFORE
+                // LG2; bypassing MOV_sat silently changes the base.
+                !producer.sat && !producer.ccUpdate &&
+                producer.predicate == 0 && producer.fpScale == 0 &&
+                producer.fpPrecisionOverride < 0 && !producer.dst.fp16 &&
                 producer.dst.index == baseRegIt->second &&
                 producer.dst.writemask == 0x1) {
                 base = producer.srcs[0];
