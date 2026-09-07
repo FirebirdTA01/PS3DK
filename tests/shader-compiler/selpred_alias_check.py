@@ -56,6 +56,12 @@ for row in selpreds:
     if row["dst_phys"] < 0:
         raise SystemExit(f"FAIL: SelPred at alloc[{row['instr']}] has unresolved destination")
     dst_slot = slot(row["dst_phys"], row["dst_fp16"])
+    if "--distinct-arms" in sys.argv[2:]:
+        then, otherwise = row["srcs"][1], row["srcs"][2]
+        if (then["kind"] != 1 or otherwise["kind"] != 1 or
+                slot(then["phys"], then["fp16"]) ==
+                slot(otherwise["phys"], otherwise["fp16"])):
+            raise SystemExit("FAIL: distinct branch values lost before SelPred")
     for src_index in (0, 1):
         src = row["srcs"].get(src_index)
         if not src or src["kind"] != 1:

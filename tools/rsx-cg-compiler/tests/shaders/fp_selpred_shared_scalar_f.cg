@@ -1,0 +1,8 @@
+// A computed scalar .x update reaches VecInsert with no untouched lanes.
+float4 main(float4 a : TEXCOORD0, uniform float enabled) : COLOR
+{
+    float s = a.x * 0.5;
+    if (enabled)
+        s.x = a.y;
+    return float4(s, 2, 3, 4);
+}
