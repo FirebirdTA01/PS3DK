@@ -2671,11 +2671,26 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         // assignment (`c.rgb = vec3;`) is split into per-lane VecInserts
         // — one per swizzle index — so the back-end sees a sequence of
         // single-lane overrides.
-        if (memberExpr->isSwizzle && memberExpr->swizzleLength >= 1 &&
-            memberExpr->object->kind == ExprKind::Identifier)
+        if (memberExpr->isSwizzle && memberExpr->swizzleLength >= 1)
         {
-            auto* ident = static_cast<IdentifierExpr*>(memberExpr->object.get());
-            auto nvIt = nameToValue_.find(ident->name);
+            // A field that already has a whole value needs the same
+            // read/modify/write as a local vector. Storing r.color.rgb
+            // under a separate key leaves return r reading stale r.color.
+            ExprNode* base = memberExpr->object.get();
+            std::vector<std::string> fields;
+            while (base->kind == ExprKind::MemberAccess)
+            {
+                auto* field = static_cast<MemberAccessExpr*>(base);
+                if (field->isSwizzle) break;
+                fields.push_back(field->member);
+                base = field->object.get();
+            }
+            auto* ident = base->kind == ExprKind::Identifier
+                ? static_cast<IdentifierExpr*>(base) : nullptr;
+            std::string objectName = ident ? ident->name : std::string();
+            for (auto it = fields.rbegin(); it != fields.rend(); ++it)
+                objectName += "." + *it;
+            auto nvIt = nameToValue_.find(objectName);
             if (nvIt != nameToValue_.end())
             {
                 IRValueID currentVec = nvIt->second;
@@ -2710,7 +2725,7 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                     currentBlock_->addInstruction(std::move(insertInst));
                 }
 
-                nameToValue_[ident->name] = currentVec;
+                nameToValue_[objectName] = currentVec;
 
                 // If the underlying identifier is an out parameter
                 // carrying a semantic, fall through to the regular
@@ -2726,7 +2741,7 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                 // update its operand instead of appending a fresh
                 // store — the latest VecInsert chain holds all the
                 // accumulated lane writes.
-                if (ident->resolvedDecl &&
+                if (fields.empty() && ident && ident->resolvedDecl &&
                     ident->resolvedDecl->kind == DeclKind::Parameter)
                 {
                     auto* param = static_cast<ParamDecl*>(ident->resolvedDecl);
@@ -2778,7 +2793,9 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                         currentBlock_->addInstruction(std::move(inst));
                     }
                 }
-                return currentVec;
+                // The lvalue now holds the updated vector, but the value
+                // of an assignment expression is its coerced RHS.
+                return value;
             }
         }
 
