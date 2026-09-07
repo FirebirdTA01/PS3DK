@@ -1,0 +1,8 @@
+// The value is half, the OUTPUT is float.  The reference still multiplies at
+// prec=1 and lands the result in a float register - which is why the
+// precision cannot be read off the destination bank.
+float4 main(half4 p : TEXCOORD0) : COLOR
+{
+	half4 a = p * (half)1.003;
+	return (float4)a;
+}

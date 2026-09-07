@@ -1,0 +1,12 @@
+// A HALF value whose register is written again by later lane inserts.
+// The appended writes must stay in the SAME bank as the writes before
+// them: an R-view write into a register holding packed half data is
+// read back as float by the conversion at the end - the inverse of the
+// float-base defect, and just as wrong (codex, second review round).
+half4 main(half4 p : TEXCOORD0) : COLOR
+{
+	half4 a = p;
+	a.xy = p.zw;
+	a.zw = p.xy;
+	return a;
+}

@@ -1,0 +1,10 @@
+// A HALF CONSTRUCTOR OVER A FLOAT-TYPED PRODUCER.  cross() returns a
+// float3 in the IR even on half inputs, so `half4(cross(...), p.w)` writes
+// xyz as FLOAT data through the constructor's shared base register and only
+// the w lane is half-typed.  A rule that stamps the whole register fp16 on
+// the strength of that one lane reinterprets the xyz lanes - the value is
+// wrong, not merely differently formatted (codex, review of t_cde25bad).
+half4 main(half4 p : TEXCOORD0) : COLOR
+{
+	return half4(cross(p.xyz, p.zyx), p.w);
+}

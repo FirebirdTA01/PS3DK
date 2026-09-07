@@ -624,7 +624,9 @@ public:
                     (instPtr->op == IROp::Branch ||
                      instPtr->op == IROp::CondBranch))
                     continue;
+                const size_t beforeLower = program_.instrs.size();
                 lowerInstruction(*instPtr);
+                markHalfComputation(*instPtr, beforeLower);
             }
         }
         if (mergedReturnSelect_)
@@ -6799,6 +6801,143 @@ private:
     // Marking the vreg as well as the destination is what makes a reader
     // of the colour resolve to an H source; allocatePhysicalTemps copies
     // vregToFp16 onto every temp source it rewrites.
+    // A HALF-TYPED VALUE IS COMPUTED IN HALF - the precision follows the
+    // VALUE's type, not the output's declaration.  Both halves of that are
+    // measured on the reference (2026-09-07, C:/cgdev/h0/hp):
+    //
+    //   float4 a = p * 1.003; return (half4)a;   MUL R0 prec=0, then H0
+    //   half4  a = p * (half)1.003; return a;    MOV H0 prec=1, MUL H0 prec=1
+    //   half4  a = p * (half)1.003; return (float4)a;
+    //                                            MOV H0 prec=1, MUL R0 prec=1
+    //
+    // The third row is the one that settles it: the destination is a FLOAT
+    // register and the multiply is still prec=1, so the precision cannot be
+    // read off the destination bank.  It is the type of the value being
+    // computed.  This is why markHalfColourDest above forces FLOAT32 on a
+    // non-MOV writer of a half COLOUR - there the values are float and only
+    // the output is half (codex's 15-shape matrix) - and why that rule does
+    // not contradict this one.
+    //
+    // Applied centrally, after each IR instruction lowers, to every VInstr
+    // that wrote the instruction's own result: a lowering that expands into
+    // several instructions computes the whole expansion in half, which is
+    // what the reference does with a normalize (Gemini's dullMetalFp, 213
+    // pixels off by up to 3 because we computed the intermediates in float).
+    void markHalfComputation(const IRInstruction& inst, size_t firstNew)
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        if (inst.result == InvalidIRValue) return;
+        if (inst.resultType.isMatrix()) return;
+        if (inst.resultType.elementType != IRType::Float16) return;
+        const auto it = program_.valueToVReg.find(inst.result);
+        if (it == program_.valueToVReg.end()) return;
+        const int vreg = it->second;
+        // THE BANK IS THE COLOUR'S DECISION, THE PRECISION IS THE VALUE'S.
+        // The container has ONE outputFromH0 flag, and it is derived from
+        // the colour's writers, so a half temp that ends up pinned to the
+        // colour must not move the flag: mrt-output's compose-float writes
+        // a half COLOR0 beside a float COLOR1 and the reference keeps every
+        // output in the float bank, flag 0 (measured, t_5dc260b0 /
+        // reference_h0_output).  So H registers are handed out only when
+        // the colour already uses the half bank; when it does not, the
+        // value is still COMPUTED in half - which is the correctness
+        // question - in a float register.  The reference does exactly that
+        // where the two disagree: `half4 a = p * (half)1.003; return
+        // (float4)a;` is MUL R0 at prec=1.
+        // THE OVERRIDE IS SET EVEN WHERE THE BANK ALREADY IMPLIES IT.  The
+        // emitter reads `if (dst.fp16) precision = FLOAT16;` before applying
+        // an override, so an H destination would be half without one - but
+        // then the precision would depend on a bank that a later pass may
+        // move (an output pin can put a value in R), and a silent drop to
+        // fp32 is exactly the defect this commit exists to remove.  The
+        // override says what was MEANT; the bank says where it lives.
+        //
+        // The cost is measured and it is not correctness: codex's VecInsert
+        // coalescer refuses to merge a preceding writer that carries an
+        // explicit override or an fp16 destination, so a half insert chain
+        // does not compact - `half4 a = p; a.xy = p.zw; a.zw = p.xy;` is
+        // five instructions where its float twin is one and the reference
+        // is one.  Dropping the override does NOT recover it (the fp16
+        // destination refuses the merge on its own, measured), so the
+        // relaxation belongs in the coalescer - merge when the two writers
+        // agree on bank AND precision - rather than here (t_12bc176c).
+        // A REGISTER THIS LOWERING DID NOT CREATE IS SHARED, and its bank
+        // belongs to whoever wrote it first.  VecConstruct aliases its base
+        // vreg, so `half4(cross(p.xyz, p.zyx), p.w)` writes xyz as FLOAT
+        // data through the shared register and only the w MOV is new here;
+        // stamping the vreg fp16 on the strength of that one instruction
+        // reinterprets the xyz lanes as half - a wrong value, not a
+        // formatting difference (codex, review of this commit, with the
+        // normalize twin behaving the same way).  Walking only the new
+        // instructions is not enough on its own: vregToFp16 is per-REGISTER
+        // metadata, so it has to be left alone whenever an earlier writer
+        // owns the register.
+        bool shared = false;
+        bool sharedFp16 = false;
+        int sharedPrecision = -1;
+        for (size_t i = 0; i < firstNew; ++i) {
+            const VInstr& prev = program_.instrs[i];
+            if (prev.dst.none || prev.dst.output || prev.dst.address) continue;
+            if (prev.dst.index != vreg) continue;
+            shared = true;
+            sharedFp16 = prev.dst.fp16;
+            sharedPrecision = prev.fpPrecisionOverride;
+        }
+        if (shared) {
+            // INHERIT the register's existing bank rather than skipping the
+            // instruction entirely.  Skipping left an appended write at
+            // dst.fp16=false on a register whose earlier writers used H, so
+            // a half insert chain wrote half data through an R view and the
+            // conversion at the end read it as float - the inverse of the
+            // defect above, and just as wrong (codex, second round).  The
+            // value's type decided nothing here: the REGISTER decides, and
+            // the appended write has to agree with what is already in it.
+            for (size_t i = firstNew; i < program_.instrs.size(); ++i) {
+                VInstr& vi = program_.instrs[i];
+                if (vi.dst.none || vi.dst.output || vi.dst.address) continue;
+                if (vi.dst.index != vreg) continue;
+                if (vi.fpPrecisionOverride >= 0) continue;
+                // The format is taken from the MOST RECENT earlier writer,
+                // bank and precision together.  That is an ALIAS-PRESERVATION
+                // rule for this lowering, not a claim that a register may
+                // only ever hold one arithmetic precision - the two are
+                // independent ISA fields (codex).  Taking the bank while
+                // still deciding the precision from the value's type put
+                // prec=1 lanes beside prec=0 lanes in the same register and
+                // turned mrt-output's compose-float red, so the pair travels
+                // together here.
+                vi.dst.fp16 = sharedFp16;
+                if (sharedPrecision >= 0)
+                    vi.fpPrecisionOverride = sharedPrecision;
+            }
+            return;
+        }
+
+        bool wrote = false;
+        for (size_t i = firstNew; i < program_.instrs.size(); ++i) {
+            VInstr& vi = program_.instrs[i];
+            if (vi.dst.none || vi.dst.output || vi.dst.address) continue;
+            if (vi.dst.index != vreg) continue;
+            // A LOWERING THAT SET ITS OWN PRECISION OWNS THE INSTRUCTION'S
+            // FORMAT, bank included.  The pack/unpack family is the case
+            // that proves it: unpack_2half RETURNS half2, so the type rule
+            // above would stamp UP2H fp16, and the reference emits UP2H at
+            // prec=0 into an R register whatever its result feeds -
+            // measured on the merged tree, where UP2H came out prec=1
+            // against the reference's 0 on fp_pack_roundtrip_f and
+            // fp_pack_family_f (codex raised it from the source; t_23f9d1a6
+            // + this card).  These instructions read and write RAW BITS;
+            // their format is the ISA's, not the value's.
+            if (vi.fpPrecisionOverride >= 0) continue;
+            if (halfColourBank_)
+                vi.dst.fp16 = true;
+            vi.fpPrecisionOverride = FLOAT16;
+            wrote = true;
+        }
+        if (wrote && halfColourBank_)
+            program_.vregToFp16[vreg] = true;
+    }
+
     void markHalfColourDest(VInstr& vi, int outIndex)
     {
         if (profile_ != GeneralProfile::Fragment || outIndex == 1 ||

@@ -1,0 +1,9 @@
+// A chain of HALF temps.  The reference computes the whole chain at fp16
+// (prec=1) in H registers; we computed it in fp32 and converted only at the
+// store, which is a precision defect, not a formatting one (t_cde25bad).
+half4 main(half4 a : TEXCOORD0) : COLOR
+{
+	half4 b = a * (half)2.0;
+	half4 c = b + a;
+	return c;
+}
