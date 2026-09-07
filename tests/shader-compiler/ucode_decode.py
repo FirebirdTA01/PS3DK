@@ -70,16 +70,69 @@ def unswap(v):
     return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
 
 
+class CorruptDump(Exception):
+    """The log is not a faithful copy of what the compiler printed."""
+
+
+# A DUMP ROW THAT DOES NOT PARSE USED TO BE SKIPPED SILENTLY, and that is
+# how a harness problem became a compiler finding.  Capturing the compiler
+# with a merged `2>&1` lets a stderr line interleave INSIDE a hex row, so
+# the row stops matching, this function drops it, every later row shifts by
+# one, and a constant gets decoded as an instruction writing a register
+# nothing reads - a "dead write" that the compiler never emitted.  That cost
+# two people an hour of arguing about four accumulation_mad rows where one
+# ran the suite under WSL with merged capture and the other natively with
+# separate capture, on the SAME binary (codex, 2026-09-07).
+#
+# The rows are NUMBERED, so the corruption is detectable rather than
+# guessable: indices run 0, 1, 2, ... within one program and restart at 0
+# when a log holds several.  A gap means a row was dropped, and a line that
+# opens like a row but does not parse as four hex words IS the dropped row.
+# Both now raise instead of returning a plausible-looking short list.
 def groups(path):
     out = []
+    expected = 0
     with open(path, "r", encoding="utf-8") as handle:
-        for line in handle:
+        for lineno, line in enumerate(handle, 1):
             m = re.match(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$", line)
             if not m:
+                # ANY line that opens "<digits>:" is a dump row.  An
+                # earlier version of this also required the first payload
+                # character to be hex, which let a splice land BEFORE the
+                # first word - "173: src0 kind=1 ..." - slip through as
+                # prose; on the FINAL row there is no following index to
+                # expose the gap either, so the decoder silently returned
+                # 173 of 174 rows (codex, review of 1a588e5f).  Measured
+                # before widening it: in a real dump, with RSX_DUMP_ORDER
+                # both on and off, EVERY line matching "<digits>:" is a hex
+                # row - the log's ordinary prose never opens that way.
+                if re.match(r"\s*\d+:", line):
+                    raise CorruptDump(
+                        "%s:%d: a ucode row did not parse as four hex words - "
+                        "the log is not a faithful copy of the dump.  The usual "
+                        "cause is capturing the compiler with a merged 2>&1, "
+                        "which lets a stderr line land inside a row.  Capture "
+                        "stdout and stderr separately and join them after the "
+                        "process exits.  Row was: %r" % (path, lineno, line[:120]))
                 continue
             words = [unswap(int(x, 16)) for x in m.group(2).split()]
-            if len(words) == 4:
-                out.append(words)
+            if len(words) != 4:
+                raise CorruptDump(
+                    "%s:%d: a ucode row carried %d words, not four (%r)"
+                    % (path, lineno, len(words), line[:120]))
+            index = int(m.group(1))
+            if index == 0:
+                expected = 0          # a second program in the same log
+            if index != expected:
+                raise CorruptDump(
+                    "%s:%d: ucode row %d arrived where row %d was expected, so "
+                    "at least one row was dropped and every row after it is "
+                    "misaligned.  A dropped row decodes later words as opcodes "
+                    "and invents register writes that the compiler never "
+                    "emitted.  See the merged-capture note above."
+                    % (path, lineno, index, expected))
+            expected = index + 1
+            out.append(words)
     return out
 
 
