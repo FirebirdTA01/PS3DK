@@ -1,0 +1,1 @@
+float4 main(float4 c : TEXCOORD0) : COLOR { float4 r = float4(0, 0, 0, 0); r.zw = unpack_4ubyte(pack_2half(c.y)).xy; return r; }

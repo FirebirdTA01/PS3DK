@@ -108,6 +108,14 @@ enum class VOp
     Ex2,
     Ddx,
     Ddy,
+    Pk2h,   // pack/unpack family (t_23f9d1a6), fragment-only
+    Up2h,
+    Pk4ub,
+    Up4ub,
+    Pk4b,
+    Up4b,
+    Pk2us,
+    Up2us,
     DivR,
     DivSqrt,
     Frc,
@@ -620,6 +628,7 @@ public:
         }
         if (mergedReturnSelect_)
             lowerMergedReturnSelect(*mergedReturnSelect_);
+        fencePackedReads();
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
@@ -2397,6 +2406,14 @@ private:
         case IROp::Ddy:
             lowerDerivative(inst, VOp::Ddy);
             return;
+        case IROp::PackHalf2:     lowerPack(inst, VOp::Pk2h,  false, "pack_2half");     return;
+        case IROp::UnpackHalf2:   lowerPack(inst, VOp::Up2h,  true,  "unpack_2half");   return;
+        case IROp::PackUByte4:    lowerPack(inst, VOp::Pk4ub, false, "pack_4ubyte");    return;
+        case IROp::UnpackUByte4:  lowerPack(inst, VOp::Up4ub, true,  "unpack_4ubyte");  return;
+        case IROp::PackByte4:     lowerPack(inst, VOp::Pk4b,  false, "pack_4byte");     return;
+        case IROp::UnpackByte4:   lowerPack(inst, VOp::Up4b,  true,  "unpack_4byte");   return;
+        case IROp::PackUShort2:   lowerPack(inst, VOp::Pk2us, false, "pack_2ushort");   return;
+        case IROp::UnpackUShort2: lowerPack(inst, VOp::Up2us, true,  "unpack_2ushort"); return;
         case IROp::Tan:
             lowerTan(inst);
             return;
@@ -3337,6 +3354,175 @@ private:
         vi.dst.writemask = mask;
         vi.srcs[0] = resolve(inst.operands[0]);
         program_.instrs.push_back(vi);
+    }
+
+    // The pack/unpack family (t_23f9d1a6): one instruction each, fragment
+    // only.  Measured on the reference (C:/cgdev/pack-probe, 2026-09-07):
+    //
+    //   * a PACK reads its argument directly - an input register with its
+    //     swizzle (TEX0.yyyy for a scalar smear, TEX0.zwzw), or the temp a
+    //     fetch or an expression produced - and writes the lanes its
+    //     consumer reads;
+    //   * an UNPACK never reads an input register: an input argument is
+    //     staged through a MOV into a temp (MOV R0.x <- TEX0; UP4UB R0 <-
+    //     R0), while a temp is read directly; it writes the lanes the
+    //     program consumes and stays prec=0 even into a half local;
+    //   * under sce_vp_rsx the reference refuses the family (C1115 for the
+    //     packs, C5201 for the unpacks); so does this.
+    //
+    // Not modelled here, and named in pack-unpack-test.sh: when a pack's
+    // result goes straight to the colour output the reference first moves
+    // the argument into an H register (MOV H0.xy <- TEX0 prec=1; PK2H
+    // R0.xyzw <- H0) - that MOV is the half-temp allocation of t_cde25bad.
+    // A byte difference with the same pixels.  The FENCBR the reference
+    // puts before an arithmetic reader of a pack result is fencePackedReads
+    // below, with its contract stated there.
+    void lowerPack(const IRInstruction& inst, VOp op, bool unpack, const char* name)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return;
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.diagnostics.push_back(
+                std::string("nv40-general: ") + name +
+                " is fragment-only - the reference refuses it under sce_vp_rsx "
+                "(C1115 / C5201); refusing rather than emitting a vertex "
+                "instruction the hardware does not have");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        VSrc src = resolve(inst.operands[0]);
+        // The reference reads an IDENTITY-PREFIX operand with the identity
+        // swizzle - nrm.xy of a float3 is TEX0.xyzw, and an unpack's lane-x
+        // scalar is R0.xyzw - and a replicated or permuted one as written
+        // (TEX0.zwzw, R0.yyyy).  A pack of a SCALAR is the exception: it
+        // smears the lane (TEX0.yyyy, H0.xxxx).  resolve() fills the lanes
+        // beyond the operand's width by replication (xyyy, xxxx); undo that
+        // for a prefix so the words match.
+        const int width = operandWidth(inst.operands[0]);
+        if (unpack || width >= 2)
+            fillIdentityPrefix(src, width);
+        if (unpack && src.kind == VSrcKind::Input) {
+            // Stage the input through a temp, identity swizzle, only the
+            // lane the unpack reads; the unpack keeps the source swizzle.
+            const int staged = newVReg();
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = staged;
+            mov.dst.writemask = 1 << (src.swizzle[0] & 3);
+            mov.srcs[0] = src;
+            mov.srcs[0].swizzle[0] = 0; mov.srcs[0].swizzle[1] = 1;
+            mov.srcs[0].swizzle[2] = 2; mov.srcs[0].swizzle[3] = 3;
+            mov.srcs[0].neg = false;
+            mov.srcs[0].abs = false;
+            program_.instrs.push_back(mov);
+            VSrc fromTemp = tempSrc(staged);
+            for (int i = 0; i < 4; ++i) fromTemp.swizzle[i] = src.swizzle[i];
+            fromTemp.neg = src.neg;
+            fromTemp.abs = src.abs;
+            src = fromTemp;
+        }
+
+        VInstr vi;
+        vi.op = op;
+        vi.dst.index = define(inst.result);
+        // An unpack writes the lanes the program consumes (UP4UB R0.xy for
+        // .xy, R0.yz for .gb, UP2H R0.x for .x); a pack yields one float.
+        vi.dst.writemask = unpack ? consumedLanes(inst.result, componentMask(inst.resultType))
+                                  : componentMask(inst.resultType);
+        vi.srcs[0] = src;
+        // Measured prec=0 on every member, INCLUDING unpack_2half, whose IR
+        // result is half2: pinned as an explicit override so a pass that
+        // stamps half-typed results with FLOAT16 (t_cde25bad) leaves the
+        // packed-data instructions alone (review: codex).
+        vi.fpPrecisionOverride = NVFX_FP_PRECISION_FP32;
+        program_.instrs.push_back(vi);
+    }
+
+    int operandWidth(IRValueID id) const
+    {
+        const auto def = defMap_.find(id);
+        if (def != defMap_.end() && def->second)
+            return def->second->resultType.componentCount();
+        const IRValue* value = entry_.getValue(id);
+        return value ? value->type.componentCount() : 4;
+    }
+
+    static void fillIdentityPrefix(VSrc& src, int width)
+    {
+        if (width <= 0 || width > 4) return;
+        for (int i = 0; i < width; ++i)
+            if (src.swizzle[i] != i) return;
+        for (int i = width; i < 4; ++i)
+            src.swizzle[i] = static_cast<uint8_t>(i);
+    }
+
+    // The lanes of `value` that the program reads: the union over its
+    // consumers of the lanes a shuffle or an extract names, or every lane
+    // as soon as one consumer reads it whole.  `full` is the value's own
+    // mask, returned when nothing narrower is provable.
+    int consumedLanes(IRValueID value, int full) const
+    {
+        int lanes = 0;
+        for (const auto& block : entry_.blocks) {
+            if (!block) continue;
+            for (const auto& instPtr : block->instructions) {
+                if (!instPtr) continue;
+                const IRInstruction& use = *instPtr;
+                bool reads = false;
+                for (IRValueID id : use.operands) reads |= id == value;
+                if (!reads) continue;
+                if (use.op == IROp::VecShuffle && use.operands.size() == 1) {
+                    const int n = use.resultType.componentCount();
+                    for (int i = 0; i < n && i < 4; ++i)
+                        lanes |= 1 << ((use.swizzleMask >> (2 * i)) & 3);
+                } else if (use.op == IROp::VecExtract && use.operands.size() == 1) {
+                    lanes |= 1 << (use.componentIndex & 3);
+                } else {
+                    return full;
+                }
+            }
+        }
+        return lanes ? (lanes & full) : full;
+    }
+
+    // PASS CONTRACT, not an oracle rule: mark the first non-MOV, non-unpack
+    // reader of each pack result - in IR order, since this runs before
+    // applyOrderingPass - with a FENCBR.  It reproduces the three measured
+    // shapes where the reference fences (PK4UB R0.x; FENCBR; MUL R0 <-
+    // R0.xxxx: t_23f9d1a6, C:/cgdev/pack-probe r03/r11/r12 against r02/p1,
+    // none before an unpack reader or the output store).  It is NOT the
+    // reference's whole rule: on two packs read by one ADD the reference
+    // emits no fence, and a packed value COPIED by a MOV and then read
+    // arithmetically is fenced by the reference but not here (review:
+    // codex, build/codex-pack-probes).  What a missing fence on such a
+    // reader costs is UNMEASURED timing semantics, not a proven no-op: the
+    // two-pack oracle defeats a universal rule, it does not make the
+    // MOV-propagated case safe.  The exact rule is a follow-up with those
+    // shapes as rows.
+    void fencePackedReads()
+    {
+        std::vector<int> packed;
+        for (VInstr& vi : program_.instrs) {
+            const bool isPack = vi.op == VOp::Pk2h || vi.op == VOp::Pk4ub ||
+                                vi.op == VOp::Pk4b || vi.op == VOp::Pk2us;
+            const bool isUnpack = vi.op == VOp::Up2h || vi.op == VOp::Up4ub ||
+                                  vi.op == VOp::Up4b || vi.op == VOp::Up2us;
+            if (!isPack && !isUnpack && vi.op != VOp::Mov && !vi.dst.output) {
+                for (const VSrc& src : vi.srcs) {
+                    if (src.kind != VSrcKind::Temp) continue;
+                    if (std::find(packed.begin(), packed.end(), src.index) != packed.end()) {
+                        vi.stubFenceBrBefore = true;
+                        packed.erase(std::find(packed.begin(), packed.end(), src.index));
+                        break;
+                    }
+                }
+            }
+            if (!vi.dst.none && !vi.dst.output && !vi.dst.address) {
+                auto it = std::find(packed.begin(), packed.end(), vi.dst.index);
+                if (it != packed.end()) packed.erase(it);
+                if (isPack) packed.push_back(vi.dst.index);
+            }
+        }
     }
 
     // abs()/neg() are SOURCE MODIFIERS on NV40, not instructions: emit
@@ -7806,6 +7992,14 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Ex2: return NVFX_FP_OP_OPCODE_EX2;
     case VOp::Ddx: return NVFX_FP_OP_OPCODE_DDX;
     case VOp::Ddy: return NVFX_FP_OP_OPCODE_DDY;
+    case VOp::Pk2h: return NVFX_FP_OP_OPCODE_PK2H;
+    case VOp::Up2h: return NVFX_FP_OP_OPCODE_UP2H;
+    case VOp::Pk4ub: return NVFX_FP_OP_OPCODE_PK4UB;
+    case VOp::Up4ub: return NVFX_FP_OP_OPCODE_UP4UB;
+    case VOp::Pk4b: return NVFX_FP_OP_OPCODE_PK4B;
+    case VOp::Up4b: return NVFX_FP_OP_OPCODE_UP4B;
+    case VOp::Pk2us: return NVFX_FP_OP_OPCODE_PK2US;
+    case VOp::Up2us: return NVFX_FP_OP_OPCODE_UP2US;
     case VOp::DivR: return NVFX_FP_OP_OPCODE_DIV;
     case VOp::DivSqrt: return NVFX_FP_OP_OPCODE_DIVRSQ_NV40RSX;
     case VOp::Frc: return NVFX_FP_OP_OPCODE_FRC;
@@ -7848,6 +8042,14 @@ static const char* vOpName(VOp op)
     case VOp::Ex2: return "Ex2";
     case VOp::Ddx: return "Ddx";
     case VOp::Ddy: return "Ddy";
+    case VOp::Pk2h: return "Pk2h";
+    case VOp::Up2h: return "Up2h";
+    case VOp::Pk4ub: return "Pk4ub";
+    case VOp::Up4ub: return "Up4ub";
+    case VOp::Pk4b: return "Pk4b";
+    case VOp::Up4b: return "Up4b";
+    case VOp::Pk2us: return "Pk2us";
+    case VOp::Up2us: return "Up2us";
     case VOp::DivR: return "DivR";
     case VOp::DivSqrt: return "DivSqrt";
     case VOp::Frc: return "Frc";

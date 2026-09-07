@@ -1,0 +1,11 @@
+// pack_4ubyte -> unpack_2half and unpack_2ushort (t_23f9d1a6): the LogLuv
+// round trip, judged on pixels.  The packed bytes of TEXCOORD0's permuted
+// lanes are read back as two halves and two ushorts and mixed into the
+// colour, so PK4UB, UP2H and UP2US all decide pixels.
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    float p = pack_4ubyte(t.yxwz);
+    float2 h = unpack_2half(p);
+    float2 s = unpack_2ushort(p);
+    return float4(h.x, h.y, s.x, s.y);
+}

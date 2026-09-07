@@ -421,6 +421,29 @@ void SymbolTable::registerMathFunctions()
         addFunction("ddy", vec, {vec}, {"x"}, nullptr, true);
     }
 
+    // The pack/unpack family (t_23f9d1a6): one NV40 fragment instruction each.
+    // Measured on the reference: pack_2half / pack_2ushort take half2 or
+    // float2 (a float scalar smears; a half scalar and a float3 are C1101
+    // ambiguous, which the two overloads reproduce), pack_4ubyte / pack_4byte
+    // take half4 or float4 (float3 is C1115), and the unpacks take a float:
+    // unpack_2half yields half2, the others float.  Registered for both
+    // profiles; the vertex lowering refuses them by name, as the reference
+    // does (C1115 / C5201).
+    for (const char* name : {"pack_2half", "pack_2ushort"})
+    {
+        addFunction(name, CgType::Float(), {CgType::Half2()}, {"a"}, nullptr, true);
+        addFunction(name, CgType::Float(), {CgType::Float2()}, {"a"}, nullptr, true);
+    }
+    for (const char* name : {"pack_4ubyte", "pack_4byte"})
+    {
+        addFunction(name, CgType::Float(), {CgType::Half4()}, {"a"}, nullptr, true);
+        addFunction(name, CgType::Float(), {CgType::Float4()}, {"a"}, nullptr, true);
+    }
+    addFunction("unpack_2half", CgType::Half2(), {CgType::Float()}, {"a"}, nullptr, true);
+    addFunction("unpack_2ushort", CgType::Float2(), {CgType::Float()}, {"a"}, nullptr, true);
+    addFunction("unpack_4ubyte", CgType::Float4(), {CgType::Float()}, {"a"}, nullptr, true);
+    addFunction("unpack_4byte", CgType::Float4(), {CgType::Float()}, {"a"}, nullptr, true);
+
     // min, max, clamp
     for (ScalarKind sk : {ScalarKind::Float, ScalarKind::Half, ScalarKind::Int, ScalarKind::UInt})
     {

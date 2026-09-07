@@ -1,0 +1,1 @@
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D s) : COLOR { float d = pack_4ubyte(tex2D(s, uv).bgra); return (d * 2.0).xxxx; }

@@ -1,0 +1,1 @@
+void main(float3 nrm : TEXCOORD0, out float4 o : COLOR) { float t = pack_2half(nrm.xy); half4 v = unpack_4ubyte(t); o = v; }
