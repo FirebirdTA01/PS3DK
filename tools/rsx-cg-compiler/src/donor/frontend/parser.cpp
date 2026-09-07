@@ -1175,7 +1175,10 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
     // Check for default value
     if (match(TokenType::OP_ASSIGN))
     {
-        param->defaultValue = parseAssignmentExpression();
+        if (check(TokenType::LBRACE))
+            param->defaultValue = parseBracedInitializerExpression(param->type);
+        else
+            param->defaultValue = parseAssignmentExpression();
     }
 
     return param;
@@ -1453,6 +1456,19 @@ std::unique_ptr<StmtNode> Parser::parseStatement()
     if (match(TokenType::SEMICOLON))
     {
         return std::make_unique<EmptyStmt>(currentLocation());
+    }
+
+    // Flow control and statement attributes: [branch], [flatten], [unroll], etc.
+    while (check(TokenType::LBRACKET))
+    {
+        advance(); // consume '['
+        int depth = 1;
+        while (!isAtEnd() && depth > 0)
+        {
+            if (check(TokenType::LBRACKET)) depth++;
+            else if (check(TokenType::RBRACKET)) depth--;
+            advance();
+        }
     }
 
     // Block
@@ -2043,6 +2059,12 @@ std::unique_ptr<ExprNode> Parser::parseMultiplicativeExpression()
 
 std::unique_ptr<ExprNode> Parser::parseUnaryExpression()
 {
+    // Unary plus is a no-op
+    if (match(TokenType::OP_PLUS))
+    {
+        return parseUnaryExpression();
+    }
+
     // Prefix operators
     if (match({TokenType::OP_MINUS, TokenType::OP_LOGICAL_NOT, TokenType::OP_BITWISE_NOT,
                TokenType::OP_INCREMENT, TokenType::OP_DECREMENT}))
