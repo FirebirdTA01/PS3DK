@@ -1,5 +1,6 @@
 /*
- * hello-ppu-cellgcm-chain — rsx-cg-compiler FP arithmetic-chain validation.
+ * hello-ppu-cellgcm-chain — rsx-cg-compiler FP arithmetic-chain validation
+ * with per-draw runtime uniform patching.
  *
  * Same render plumbing as hello-ppu-cellgcm-triangle (flip_immediate,
  * 4 colour buffers, MVP-uniform VP) — exercises the FP arithmetic-
@@ -9,12 +10,15 @@
  *
  * The byte-diff harness at tools/rsx-cg-compiler/tests/run_diff.sh
  * proves our compiler's output matches the reference compiler.  This sample proves
- * those bytes execute correctly on RSX with non-zero FP uniforms
- * patched in via rsxSetFragmentProgramParameter.
+ * those bytes execute correctly on RSX with runtime FP uniforms
+ * patched in via cellGcmSetFragmentProgramParameter between successive draws
+ * in the same frame:
  *
- * Visual: canonical RGB-gradient triangle, biased by a + b + c so each
- * channel is lifted by ~0.1 — vertices that were saturated stay
- * clamped at 1, vertices that were 0 brighten visibly.
+ *   - Draw 1 (left):  a=0, b=0, c=0 via cellGcmSetFragmentProgramParameter.
+ *     Renders baseline canonical RGB-gradient triangle.
+ *   - Draw 2 (right): a=(0.15,0,0,0), b=(0,0.15,0,0), c=(0,0,0.15,0) via
+ *     cellGcmSetFragmentProgramParameter.  Renders visibly brighter triangle
+ *     with all channels lifted by +0.15.
  */
 
 #include <stdint.h>
@@ -39,15 +43,20 @@
 SYS_PROCESS_PARAM(1001, 0x100000);
 
 #define CB_SIZE              0x10000
-#define HOST_SIZE            (1 * 1024 * 1024)
+#define HOST_SIZE            (16 * 1024 * 1024)
 #define COLOR_BUFFER_NUM     4
 #define MAX_QUEUE_FRAMES     1
+
+/* Readback buffer in host memory for verifying rendered pixels. */
+static u32 *g_readback = NULL;
+static u32  g_readback_offset = 0;
 
 /* Labels — same offsets the canonical flip_immediate sample uses. */
 #define LABEL_PREPARED_BUFFER_OFFSET   0x41
 #define LABEL_BUFFER_STATUS_OFFSET     0x42
 #define BUFFER_IDLE                    0
 #define BUFFER_BUSY                    1
+#define GCM_LABEL_INDEX                255
 
 typedef struct {
 	float pos[3];
@@ -76,6 +85,16 @@ static void *local_align(u32 alignment, u32 size)
 	return local_alloc(size);
 }
 
+static void wait_rsx_idle(CellGcmContextData *ctx)
+{
+	vu32 *slot = (vu32 *)cellGcmGetLabelAddress(GCM_LABEL_INDEX);
+	uint32_t target = *slot + 1u;
+	cellGcmSetWriteBackEndLabel(ctx, GCM_LABEL_INDEX, target);
+	cellGcmFlush(ctx);
+	while (*slot != target)
+		usleep(30);
+}
+
 /* Shader objects.  CgBinaryProgram blobs from rsx-cg-compiler's
  * --emit-container output — paired with the cellGcmCg* / cellGcmSet*
  * runtime API (matches what reference SDK basic.cpp uses). */
@@ -89,9 +108,8 @@ static int         position_index;
 static int         color_index;
 
 /* Fragment-program uniforms (a, b, c).  Each parameter lists the byte
- * offsets of its embedded-constant slots inside the fp ucode; we patch
- * those slots in RSX-local memory directly (cellGcmSetFragmentProgram-
- * Parameter is not yet shipped in our SDK). */
+ * offsets of its embedded-constant slots inside the fp ucode; patched
+ * into RSX local memory via cellGcmSetFragmentProgramParameter. */
 static CGparameter aParam;
 static CGparameter bParam;
 static CGparameter cParam;
@@ -226,24 +244,6 @@ static void set_draw_env(CellGcmContextData *ctx)
 	cellGcmSetBlendEnable(ctx, GCM_FALSE);
 }
 
-/* Patch a single FP uniform's embedded-constant slots in-place inside
- * the RSX-local fp ucode copy.  CgBinaryProgram embeds a list of
- * ucode-byte-offsets per parameter; each slot wants the value stored
- * as 4 fp32 BE-words (16 bytes), halfword-swapped to match the
- * NV40 fragment-program on-disk encoding. */
-static void patch_fp_uniform(CGparameter param, const float v[4])
-{
-	if (!param || !fp_ucode) return;
-	const uint32_t count = cellGcmCgGetEmbeddedConstantCount(fpo, param);
-	for (uint32_t i = 0; i < count; ++i) {
-		const uint32_t off = cellGcmCgGetEmbeddedConstantOffset(fpo, param, i);
-		uint32_t *slot = (uint32_t *)((uint8_t *)fp_ucode + off);
-		uint32_t raw[4];
-		memcpy(raw, v, 16);
-		for (int k = 0; k < 4; ++k)
-			slot[k] = (raw[k] >> 16) | (raw[k] << 16);  /* halfword swap */
-	}
-}
 
 static void set_render_state(CellGcmContextData *ctx)
 {
@@ -386,15 +386,6 @@ static void init_shaders(void)
 	bParam = cellGcmCgGetNamedParameter(fpo, "b");
 	cParam = cellGcmCgGetNamedParameter(fpo, "c");
 
-	/* Bake the uniforms into the local FP ucode copy.  Each uniform is
-	 * a small bias on its own channel — net effect is +0.1 on R, G, B
-	 * for every fragment vs the unmodified vertex colour. */
-	static const float a_val[4] = {0.1f, 0.0f, 0.0f, 0.0f};
-	static const float b_val[4] = {0.0f, 0.1f, 0.0f, 0.0f};
-	static const float c_val[4] = {0.0f, 0.0f, 0.1f, 0.0f};
-	patch_fp_uniform(aParam, a_val);
-	patch_fp_uniform(bParam, b_val);
-	patch_fp_uniform(cParam, c_val);
 
 	printf("  vp ucode: %u bytes; mvp uniform: %p\n", vpsize, (void *)modelViewProjConst);
 	printf("  fp ucode: %u bytes (rsx-local at offset 0x%08x)\n", fpsize, fp_offset);
@@ -445,6 +436,9 @@ int main(int argc, const char **argv)
 	ctx = CELL_GCM_CURRENT;
 	printf("  RSX up at %ux%u\n", display_width, display_height);
 
+	g_readback = (u32 *)((char *)host_addr + (8 * 1024 * 1024));
+	cellGcmAddressToOffset(g_readback, &g_readback_offset);
+
 	ioPadInit(7);
 	cellSysutilRegisterCallback(0, on_sysutil_event, NULL);
 
@@ -457,7 +451,7 @@ int main(int argc, const char **argv)
 	set_render_target(ctx, g_frame_index);
 	cellGcmSetWriteCommandLabel(ctx, LABEL_BUFFER_STATUS_OFFSET + g_frame_index, BUFFER_BUSY);
 
-	const int total = 600;  /* 10 s @ 60Hz */
+	const int total = 120;  /* 2 s @ 60Hz */
 	int       frame = 0;
 
 	while (frame < total && !g_exit_request) {
@@ -491,7 +485,90 @@ int main(int argc, const char **argv)
 			GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A |
 			GCM_CLEAR_Z | GCM_CLEAR_S);
 
+		/* Draw 1: left triangle with zero uniform bias (canonical RGB gradient) */
+		static const float mvp_left[16] = {
+			0.7f, 0.0f, 0.0f, -0.45f,
+			0.0f, 0.7f, 0.0f,  0.0f,
+			0.0f, 0.0f, 1.0f,  0.0f,
+			0.0f, 0.0f, 0.0f,  1.0f,
+		};
+		static const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		cellGcmSetVertexProgramParameter(ctx, modelViewProjConst, mvp_left);
+		cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
+		cellGcmSetFragmentProgramParameter(ctx, fpo, aParam, zero, fp_offset);
+		cellGcmSetFragmentProgramParameter(ctx, fpo, bParam, zero, fp_offset);
+		cellGcmSetFragmentProgramParameter(ctx, fpo, cParam, zero, fp_offset);
 		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, 0, 3);
+
+		/* Draw 2: right triangle with runtime-patched uniform biases (all channels lifted by +0.15) */
+		static const float mvp_right[16] = {
+			0.7f, 0.0f, 0.0f,  0.45f,
+			0.0f, 0.7f, 0.0f,  0.0f,
+			0.0f, 0.0f, 1.0f,  0.0f,
+			0.0f, 0.0f, 0.0f,  1.0f,
+		};
+		static const float a_val[4] = { 0.15f, 0.0f,  0.0f,  0.0f };
+		static const float b_val[4] = { 0.0f,  0.15f, 0.0f,  0.0f };
+		static const float c_val[4] = { 0.0f,  0.0f,  0.15f, 0.0f };
+		cellGcmSetVertexProgramParameter(ctx, modelViewProjConst, mvp_right);
+		cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
+		cellGcmSetFragmentProgramParameter(ctx, fpo, aParam, a_val, fp_offset);
+		cellGcmSetFragmentProgramParameter(ctx, fpo, bParam, b_val, fp_offset);
+		cellGcmSetFragmentProgramParameter(ctx, fpo, cParam, c_val, fp_offset);
+		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, 0, 3);
+
+		/* On frame 10, transfer back the rendered frame to host memory to verify
+		 * that the between-draw uniform patch took effect in pixels.
+		 * Calibrated probe coordinates assume 720p (1280x720); skip on other modes. */
+		if (frame == 10) {
+			if (display_width == 1280 && display_height == 720) {
+				/* Transfer left half [0, 640) and right half [640, 1280) to avoid 1024-pixel tile splits */
+				cellGcmSetTransferImage(ctx, CELL_GCM_TRANSFER_LOCAL_TO_MAIN,
+				                        g_readback_offset, color_pitch, 0, 0,
+				                        color_offset[g_frame_index], color_pitch, 0, 0,
+				                        640, display_height, 4);
+				cellGcmSetTransferImage(ctx, CELL_GCM_TRANSFER_LOCAL_TO_MAIN,
+				                        g_readback_offset, color_pitch, 640, 0,
+				                        color_offset[g_frame_index], color_pitch, 640, 0,
+				                        640, display_height, 4);
+				wait_rsx_idle(ctx);
+
+				/* Background: center of screen (640, 360)
+				 * Gradient probes along active scanline y=495:
+				 *   - Green-dominant: Left (202, 495), Right (778, 495)
+				 *   - Center:         Left (352, 495), Right (928, 495)
+				 *   - Blue-dominant:  Left (502, 495), Right (1078, 495) */
+				u32 px_bg      = g_readback[360 * display_width + 640];
+				u32 px_l_mid   = g_readback[495 * display_width + 352];
+				u32 px_r_mid   = g_readback[495 * display_width + 928];
+				u32 px_l_green = g_readback[495 * display_width + 202];
+				u32 px_r_green = g_readback[495 * display_width + 778];
+				u32 px_l_blue  = g_readback[495 * display_width + 502];
+				u32 px_r_blue  = g_readback[495 * display_width + 1078];
+
+				int lm_r = (px_l_mid >> 16) & 0xff, lm_g = (px_l_mid >> 8) & 0xff, lm_b = px_l_mid & 0xff;
+				int rm_r = (px_r_mid >> 16) & 0xff, rm_g = (px_r_mid >> 8) & 0xff, rm_b = px_r_mid & 0xff;
+
+				int lg_r = (px_l_green >> 16) & 0xff, lg_g = (px_l_green >> 8) & 0xff, lg_b = px_l_green & 0xff;
+				int rg_r = (px_r_green >> 16) & 0xff, rg_g = (px_r_green >> 8) & 0xff, rg_b = px_r_green & 0xff;
+
+				int lb_r = (px_l_blue >> 16) & 0xff, lb_g = (px_l_blue >> 8) & 0xff, lb_b = px_l_blue & 0xff;
+				int rb_r = (px_r_blue >> 16) & 0xff, rb_g = (px_r_blue >> 8) & 0xff, rb_b = px_r_blue & 0xff;
+
+				printf("READBACK|frame=10|bg=0x%08x\n", px_bg);
+				printf("READBACK|mid_left(352,495)=0x%08x (R=%d, G=%d, B=%d)\n", px_l_mid, lm_r, lm_g, lm_b);
+				printf("READBACK|mid_right(928,495)=0x%08x (R=%d, G=%d, B=%d)\n", px_r_mid, rm_r, rm_g, rm_b);
+				printf("READBACK|mid_delta=(dR=%+d, dG=%+d, dB=%+d) (expected +38, +38, +38)\n",
+				       rm_r - lm_r, rm_g - lm_g, rm_b - lm_b);
+				printf("READBACK|green_delta=(dR=%+d, dG=%+d, dB=%+d)\n",
+				       rg_r - lg_r, rg_g - lg_g, rg_b - lg_b);
+				printf("READBACK|blue_delta=(dR=%+d, dG=%+d, dB=%+d)\n",
+				       rb_r - lb_r, rb_g - lb_g, rb_b - lb_b);
+			} else {
+				printf("READBACK|calibration skipped for non-720p resolution (%ux%u)\n",
+				       display_width, display_height);
+			}
+		}
 
 		flip(ctx);
 		frame++;
