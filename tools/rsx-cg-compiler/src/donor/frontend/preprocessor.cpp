@@ -1,6 +1,7 @@
 #include "preprocessor.h"
 #include <cstring>
 #include <fstream>
+#include <cctype>
 #include <sstream>
 #include <filesystem>
 #include <regex>
@@ -262,6 +263,39 @@ void Preprocessor::processDirective(const std::string& directive, std::string& o
 		{
 			throw std::runtime_error("Invalid preprocessor directive: " + directive);
 		}
+	}
+
+	// THE DIRECTIVE NAME ENDS AT THE FIRST NON-IDENTIFIER CHARACTER, not at
+	// the first space.  `#if(SAMPLE_COUNT > 1)` is a directive named `if`
+	// whose expression happens to start with a parenthesis, and taking the
+	// whole whitespace-delimited token made the name `if(SAMPLE_COUNT` and
+	// reported it as an unknown directive - 20 reference-SDK sources, all
+	// of them shapes the reference compiles.
+	//
+	// Measured against the reference rather than assumed, because the
+	// obvious rule is too permissive in one direction:
+	//
+	//   #if(N > 1)     accepted        #elif(N > 1)   accepted
+	//   #endif(N)      accepted        #ifdef(N)      REFUSED, C0105
+	//                                                 "Syntax error in #ifdef"
+	//
+	// So `ifdef` IS recognised as the name - the reference reports a
+	// SYNTAX error in it, not the C0104 "Unknown pre-processor directive"
+	// it gives for `#frobnicate`.  The name is parsed the same way in every
+	// case; what differs is that `#ifdef` then requires an identifier and
+	// `(N)` is not one.  Splitting the name off here reproduces both: the
+	// expression directives get their `(`, and processIfdef's own regex
+	// still refuses `(N)` by name.
+	{
+		size_t n = 0;
+		while (n < cmd.size() &&
+		       (std::isalnum(static_cast<unsigned char>(cmd[n])) || cmd[n] == '_'))
+			++n;
+		if (n == 0)
+		{
+			throw std::runtime_error("Invalid preprocessor directive: " + directive);
+		}
+		cmd.resize(n);
 	}
 
 	// From here on, 'cmd' is the directive name 

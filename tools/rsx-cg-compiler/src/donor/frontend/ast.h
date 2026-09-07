@@ -116,6 +116,13 @@ struct StructField
     std::string name;
     std::shared_ptr<TypeNode> type;
     Semantic semantic;
+    // A member may carry a storage/interface qualifier - the reference
+    // SDK's own headers write `uniform sampler2D t : TEXUNIT0;` and
+    // `in float4 position : POSITION;` inside structs.  RECORDED rather
+    // than dropped: nothing reads it yet, because the SEMANTIC is what
+    // binds the member today, but a qualifier that is parsed and thrown
+    // away is indistinguishable from one that was never written.
+    StorageQualifier storage = StorageQualifier::None;
 };
 
 struct TypeNode

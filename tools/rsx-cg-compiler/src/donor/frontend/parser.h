@@ -103,7 +103,12 @@ private:
     std::unique_ptr<DeclNode> parseTopLevelDeclaration(
         std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<StructDecl> parseStructDeclaration();
-    std::unique_ptr<TypedefDecl> parseTypedefDeclaration();
+    // `struct` [name] `{` fields `}` and nothing after it, so the two
+    // spellings that differ only in what FOLLOWS the body can share it.
+    std::unique_ptr<StructDecl> parseStructBody();
+    // Returns a StructDecl for `typedef struct { ... } Name;` and a
+    // TypedefDecl otherwise, so the return type is the common base.
+    std::unique_ptr<DeclNode> parseTypedefDeclaration();
     std::unique_ptr<DeclNode> parseVariableOrFunctionDeclaration(
         std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<FunctionDecl> parseFunctionDeclaration(

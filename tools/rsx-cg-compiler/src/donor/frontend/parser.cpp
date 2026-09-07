@@ -798,7 +798,11 @@ std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration(
     return parseVariableOrFunctionDeclaration(extraDeclarations);
 }
 
-std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
+// `struct` [name] `{` fields `}`, stopping at the closing brace.  What may
+// follow differs between the two spellings - a declarator and a semicolon
+// after a plain struct, the typedef's name after `typedef struct { ... }` -
+// so the caller owns that and this owns the body.
+std::unique_ptr<StructDecl> Parser::parseStructBody()
 {
     SourceLocation loc = currentLocation();
     consume(TokenType::KW_STRUCT, "Expected 'struct'");
@@ -815,6 +819,16 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
 
     while (!check(TokenType::RBRACE) && !isAtEnd())
     {
+        // A member may lead with a storage/interface qualifier.  The
+        // reference SDK writes both spellings inside structs - `uniform
+        // sampler2D texture_zstencil : TEXUNIT0;` in
+        // DeferredShading/shaders/light_structs.cgh and `in float4
+        // position : POSITION;` in the head_tracker shaders - and without
+        // this the member's TYPE is never reached and the parser reports
+        // "Expected type name" at the qualifier.
+        bool memberInline = false;
+        StorageQualifier memberStorage = parseStorageQualifier(&memberInline);
+
         // Parse struct member
         auto type = parseType();
         if (!type)
@@ -833,6 +847,7 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
         StructField field;
         field.name = advance().lexeme;
         field.type = type;
+        field.storage = memberStorage;
 
         // Check for array brackets after field name (e.g., float4 positions[8])
         while (check(TokenType::LBRACKET))
@@ -853,6 +868,15 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
 
     consume(TokenType::RBRACE, "Expected '}' after struct body");
 
+    return structDecl;
+}
+
+std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
+{
+    auto structDecl = parseStructBody();
+    if (!structDecl)
+        return nullptr;
+
     // Struct declarations are often followed by a semicolon or variable name
     if (check(TokenType::IDENTIFIER))
     {
@@ -867,10 +891,43 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
     return structDecl;
 }
 
-std::unique_ptr<TypedefDecl> Parser::parseTypedefDeclaration()
+std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration()
 {
     SourceLocation loc = currentLocation();
     consume(TokenType::KW_TYPEDEF, "Expected 'typedef'");
+
+    // `typedef struct { ... } Name;` - the struct is ANONYMOUS and the
+    // typedef supplies its name.  parseType() cannot see a struct BODY, so
+    // this used to fail at the brace with "Expected type name" followed by
+    // "Expected type in typedef".  It is the shape the reference SDK's own
+    // headers use (DeferredShading/shaders/light_structs.cgh declares both
+    // of its varying structs this way), and the reference compiles it.
+    //
+    // The result is returned as a StructDecl carrying the typedef's name
+    // rather than as a TypedefDecl wrapping an anonymous type: the name
+    // then registers through the DeclKind::Struct arm the same way
+    // `struct Name { ... };` does, so every later lookup of the name
+    // resolves without a second indirection.  A NAMED `typedef struct Tag
+    // { ... } Name;` keeps its tag in the body and takes the same path,
+    // which loses the tag as a separate spelling - no reference-SDK source
+    // uses the tag, and giving it one would need a real alias table.
+    if (check(TokenType::KW_STRUCT))
+    {
+        auto structDecl = parseStructBody();
+        if (!structDecl)
+        {
+            error("Expected struct body in typedef");
+            return nullptr;
+        }
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error("Expected name for typedef");
+            return nullptr;
+        }
+        structDecl->name = advance().lexeme;
+        consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+        return structDecl;
+    }
 
     auto type = parseType();
     if (!type)
