@@ -831,6 +831,9 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         for (const auto& field : *fields) {
             const std::string fieldPath = pathPrefix.empty() ? field.name : (pathPrefix + "." + field.name);
             if (!field.semantic.isEmpty()) {
+                if (getStructFields(field.type.get())) {
+                    continue;
+                }
                 IRParameter output{};
                 output.name = fieldPath;
                 output.type = getIRType(field.type.get());
@@ -1642,6 +1645,11 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                         {
                             self(self, fieldKey, fieldPath, field.type.get());
                         }
+                        continue;
+                    }
+
+                    if (field.type && field.type->baseType == BaseType::Struct)
+                    {
                         continue;
                     }
 

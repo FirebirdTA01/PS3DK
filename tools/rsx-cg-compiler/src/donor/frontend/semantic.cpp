@@ -316,6 +316,10 @@ void SemanticAnalyzer::analyzeStructDecl(StructDecl* decl)
         {
             error(decl->loc, "unknown type in struct field '" + field.name + "'");
         }
+        else if (!field.semantic.isEmpty() && fieldType.isStruct())
+        {
+            error(decl->loc, "semantics on struct-typed members are not supported: '" + field.name + "'");
+        }
     }
 }
 
@@ -349,6 +353,11 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         sym->loc = param->loc;
         sym->storage = param->storage;
         sym->semantic = param->semantic;
+
+        if (!param->semantic.isEmpty() && resolvedType.isStruct())
+        {
+            error(param->loc, "semantics on struct-typed parameters are not supported: '" + param->name + "'");
+        }
 
         if (!symbols_.addSymbol(std::move(sym)))
         {
@@ -1196,9 +1205,14 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
         for (const auto& field : sType.structFields())
         {
             std::string fullName = prefix + "." + field.name;
+            CgType fieldType = resolveType(field.type.get());
             if (!field.semantic.isEmpty())
             {
-                CgType fieldType = resolveType(field.type.get());
+                if (fieldType.isStruct())
+                {
+                    error(entryPoint->loc, "semantics on struct-typed members are not supported: '" + fullName + "'");
+                    return;
+                }
                 ShaderIOParam ioParam(fullName, field.semantic.name,
                                       field.semantic.index, fieldType, isOut);
                 if (isOut)
@@ -1216,7 +1230,6 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             }
             else
             {
-                CgType fieldType = resolveType(field.type.get());
                 if (fieldType.isStruct())
                 {
                     self(self, fullName, fieldType, isOut);
