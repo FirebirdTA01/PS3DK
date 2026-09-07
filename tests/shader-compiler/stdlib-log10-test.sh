@@ -59,13 +59,14 @@ SHADER
 
 compile_ir() {
     local label="$1" src="$2" out="$3" log="$4"
+    local err="${log%.log}.err"
     local rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx --dump-ir \
             --emit-container "$out" "$src"
-    ) >"$log" 2>&1 || rc=$?
+    ) >"$log" 2>"$err" || rc=$?
 
     if [[ "$rc" -eq 124 ]]; then
         fail "$label timed out"
@@ -82,7 +83,9 @@ rm -f "$shadow_out"
 shadow_rc=0
 compile_ir "shadow_log10" "$work/shadow_log10.fcg" "$shadow_out" "$shadow_log" || shadow_rc=$?
 if [[ "$shadow_rc" -ne 0 ]]; then
-    tail -n 20 "$shadow_log" >&2
+    # the diagnostics are in the OTHER half now (codex, review of the
+    # capture separation) - the .log holds the IR dump this test greps
+    tail -n 20 "${shadow_log%.log}.err" >&2
     fail "user-defined log10 failed to compile"
 fi
 [[ -s "$shadow_out" ]] || fail "user-defined log10 did not emit a container"
@@ -106,7 +109,7 @@ run_builtin() {
     rc=0
     compile_ir "$name" "$src" "$out" "$log" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
-        tail -n 20 "$log" >&2
+        tail -n 20 "${log%.log}.err" >&2
         fail "$name failed to compile"
     fi
     [[ -s "$out" ]] || fail "$name did not emit a container"
@@ -116,13 +119,18 @@ run_builtin() {
         fail "$name left a log10 call in entry IR"
     fi
 
+    # stdout carries the ucode rows, stderr the diagnostics; merged, a
+    # stderr line can land inside a hex row and cost it (the false R33,
+    # 2026-09-07).  The decoder refuses such a log - this is why it does
+    # not have to.
     local ucode_log="$work/$name.ucode.log"
+    local ucode_err="$work/$name.ucode.err"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx "$src"
-    ) >"$ucode_log" 2>&1 || {
-        tail -n 20 "$ucode_log" >&2
+    ) >"$ucode_log" 2>"$ucode_err" || {
+        tail -n 20 "$ucode_err" >&2
         fail "$name failed while dumping ucode"
     }
     python3 "$repo_root/tests/shader-compiler/ucode_decode.py" "$ucode_log" \

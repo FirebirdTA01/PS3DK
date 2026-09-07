@@ -57,6 +57,11 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 # dump (for the instructions).  A fixture that refuses here is the
 # regression this file exists to catch, so the failure names the shape
 # rather than surfacing later as a missing file.
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 emit() {
     local stem="$1"
     local src="$shaders/$stem.cg"
@@ -65,8 +70,8 @@ emit() {
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$src"
-    ) >"$work/$stem.clog" 2>&1 || {
-        tail -n 20 "$work/$stem.clog" >&2
+    ) >"$work/$stem.clog" 2>"$work/$stem.cerr" || {
+        tail -n 20 "$work/$stem.cerr" >&2
         fail "$stem did not compile; a declared half colour output must not refuse merely for holding a temp in R0 (t_80dad2dd)"
     }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem wrote no container"
@@ -74,8 +79,8 @@ emit() {
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx "$src"
-    ) >"$work/$stem.log" 2>&1 || {
-        tail -n 20 "$work/$stem.log" >&2
+    ) >"$work/$stem.log" 2>"$work/$stem.err" || {
+        tail -n 20 "$work/$stem.err" >&2
         fail "$stem did not compile on the dump path"
     }
 }

@@ -81,16 +81,28 @@ done < <(cd "$repo_root" && git ls-files \
 (( ${#shaders[@]} > 20 )) || fail "only ${#shaders[@]} tracked fragment shaders
 found - the enumeration broke, so nothing below was actually checked"
 
+# STDOUT AND STDERR ARE KEPT APART, and that is not tidiness.  The ucode
+# rows are printed on stdout; the RSX_DUMP_ORDER trace this test also reads
+# is printed on stderr.  Merged into one file a trace line can land INSIDE a
+# hex row: the row is lost, every later row shifts, and a constant decodes as
+# an instruction writing a register nothing reads.  This test reported
+# exactly that - a dead write at R33 - under WSL while the same binary was
+# clean natively, and two people spent an hour on it (2026-09-07).  The
+# shared decoder now REFUSES such a log; refusing is the fallback, not
+# corrupting it is the fix.
 for s in "${shaders[@]}"; do
     out="$work/$(printf '%s' "$s" | tr '/' '_').log"
+    err="${out%.log}.err"
     rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" env RSX_DUMP_ORDER=1 "$compiler" \
             -p sce_fp_rsx "$repo_root/$s"
-    ) >"$out" 2>&1 || rc=$?
+    ) >"$out" 2>"$err" || rc=$?
     refusal_status "$rc" "$s"
-    [[ "$rc" -eq 0 ]] || rm -f "$out"   # a refusal is not this test's business
+    # a refusal is not this test's business - drop BOTH halves together, so a
+    # trace can never outlive the dump it belongs to
+    [[ "$rc" -eq 0 ]] || rm -f "$out" "$err"
 done
 
 # ... except for these, where a refusal IS the regression.
@@ -111,7 +123,8 @@ than once, so it pins two colour values to the same output slot; a slot
 reserved for only one of them refuses the other (t_5dc260b0)"
 done
 
-python3 - "$work" <<'PY'
+python3 - "$work" "$repo_root/tests/shader-compiler" <<'PY'
+import io
 import os
 import re
 import sys
@@ -120,7 +133,18 @@ import sys
 # H register (two share one R slot), bits 9..12 write mask, bit 30 no
 # destination.  hw[1..3]: bits 0..1 register type (0 temp), bits 2..7 the
 # register, bit 8 H register.
-LINE = re.compile(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
+# The ROWS come from the shared decoder, not from a parser of our own.
+# This script used to carry its own copy, and that copy skipped an
+# unparseable row silently - so a stderr line interleaving inside a hex row
+# under a merged capture cost the row, shifted every later one, and made
+# this guard report a dead write at R33 that the compiler never emitted.
+# Two people spent an hour on that in opposite environments before codex
+# isolated it (2026-09-07).  groups() now refuses a dump it cannot trust,
+# and using it here means this guard inherits that refusal instead of
+# re-implementing the bug.
+sys.path.insert(0, sys.argv[2])
+from ucode_decode import groups                # noqa: E402
+
 OUTPUT = re.compile(r"^store sem=\S+ outIdx=(\d+)\s")
 
 # The one shader that has always carried a dead write, named rather than
@@ -129,10 +153,6 @@ OUTPUT = re.compile(r"^store sem=\S+ outIdx=(\d+)\s")
 # the picture is right and the instruction is merely wasted.  If a lowering
 # change removes it, delete this entry - do not widen the rule.
 KNOWN = {"fp_discard_not_f.cg"}
-
-
-def unswap(v):
-    return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
 
 
 def dst_slot(w):
@@ -175,21 +195,23 @@ assert dead_writes(control, {0}) == [(0, 1), (1, 2)]
 work = sys.argv[1]
 checked, bad, stale = 0, [], []
 for name in sorted(os.listdir(work)):
-    words = []
     # Colour is the default fragment return, including merged-return paths
     # that directly compose R0 without visiting lowerStoreOutput.  Additional
     # outputs must have a declaration in the lowering trace; never exempt a
     # register merely because it could hold depth.
+    if not name.endswith(".log"):
+        continue                     # the .err half, read below by name
     outputs = {0}
-    for line in open(os.path.join(work, name), encoding="utf-8"):
+    path = os.path.join(work, name)
+    # The lowering trace comes from the OTHER stream.  Reading it out of a
+    # separate file is what keeps it from landing inside a hex row.
+    trace = path[:-4] + ".err"
+    for line in io.open(trace, encoding="utf-8", errors="replace"):
         output = OUTPUT.match(line)
         if output:
             outputs.add(int(output.group(1)))
-        m = LINE.match(line)
-        if m:
-            w = [unswap(int(x, 16)) for x in m.group(2).split()]
-            if len(w) == 4:
-                words.append(w)
+    # Raises CorruptDump rather than returning a short, misaligned program.
+    words = groups(path)
     if not words:
         continue
     checked += 1

@@ -138,6 +138,31 @@ for n, line in enumerate(good):
 must_refuse("last-row", last, "a stderr fragment landed in the FINAL row, "
             "where no later index can expose the loss", len(rows))
 
+# 5. THE SPLICE THAT NEITHER ROW RULE CAN SEE: it lands BETWEEN the index
+#    digits and the colon of the final row, so the two lines it leaves
+#    behind - "4 src0 kind=1 ..." and ": 8280..." - neither open
+#    "<digits>:" nor break the index sequence, and the row simply vanishes.
+#    Fable measured it on the revised decoder (review of c5916bb6).  What
+#    catches it is the dump's own header: "NV40 ucode words: N" is a row
+#    count the log states independently, so 4 * rows == N closes every
+#    final-row shape, this one included, and a tail lost to a truncated
+#    pipe with it.
+digits = []
+for n, line in enumerate(good):
+    if n == rows[-1]:
+        head, _, tail = line.partition(":")
+        digits.append(head + " src0 kind=1 idx=116 phys=-1")
+        digits.append(":" + tail)
+    else:
+        digits.append(line)
+must_refuse("digits-colon", digits, "a stderr fragment split the final row "
+            "between its index and its colon, leaving nothing that looks "
+            "like a row at all", len(rows))
+
+# 6. A TRUNCATED TAIL - no splice, the log just stops.  Same detection.
+must_refuse("truncated", good[:rows[-1]], "the log was cut short and lost "
+            "its last row", len(rows))
+
 # 4. A MULTI-PROGRAM LOG must still decode: indices restart at 0, and that
 #    restart must not be mistaken for a gap.
 both = good + good
@@ -147,8 +172,9 @@ if len(groups(p)) != 2 * len(rows):
                      "the restart-at-zero rule is wrong"
                      % (len(groups(p)), 2 * len(rows)))
 
-print("ucode-decode-selftest: clean %d rows, spliced / dropped / final-row "
-      "all refused, two-program log %d rows" % (n_clean, 2 * len(rows)))
+print("ucode-decode-selftest: clean %d rows, five corruptions refused "
+      "(spliced, dropped, final-row, digits-colon, truncated), "
+      "two-program log %d rows" % (n_clean, 2 * len(rows)))
 PY
 
 printf 'ucode-decode-selftest: PASS\n'

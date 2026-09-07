@@ -34,6 +34,11 @@ trap 'rm -rf "$work"' EXIT
 
 shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 emit() {
     local stem="$1"
     local src="$shaders/$stem.cg"
@@ -42,8 +47,8 @@ emit() {
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$src"
-    ) >"$work/$stem.log" 2>&1 || {
-        tail -n 20 "$work/$stem.log" >&2
+    ) >"$work/$stem.log" 2>"$work/$stem.err" || {
+        tail -n 20 "$work/$stem.err" >&2
         fail "$stem did not compile"
     }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem wrote no container"
