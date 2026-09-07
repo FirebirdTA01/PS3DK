@@ -1,0 +1,10 @@
+// A NON-zero fill, so a lowering that quietly drops the initialiser instead
+// of emitting it fails here rather than passing on the zero case.
+struct OUT { float4 c : COLOR; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	OUT o = (OUT)1;
+	o.c.xy = p.xy;
+	return o.c;
+}

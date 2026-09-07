@@ -1,0 +1,10 @@
+// The fill reaches a NESTED leaf, not only the top-level fields.
+struct INNER { float4 v; };
+struct OUT { INNER i; float4 c : COLOR; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	OUT o = (OUT)0;
+	o.i.v.xy = p.xy;
+	return o.i.v;
+}

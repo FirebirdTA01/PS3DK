@@ -830,6 +830,67 @@ bool canImplicitlyConvert(const CgType& from, const CgType& to)
     return false;
 }
 
+// Every leaf of a struct is a number, a vector or a matrix of numbers - no
+// samplers, no arrays.  `(OUT)0` fills each of them, so it is only a cast
+// the language allows when there is nothing in the struct that a number
+// cannot initialise.
+static bool structLeavesAreNumeric(const CgType& type, int depth = 0)
+{
+    if (depth > 8) return false;            // a malformed cycle, not a struct
+    const auto& fields = type.structFields();
+    if (fields.empty()) return false;
+    for (const auto& field : fields)
+    {
+        const auto fieldType = type.getFieldType(field.name);
+        if (!fieldType) return false;
+        if (fieldType->isStruct())
+        {
+            // A NESTED field's TypeNode may carry only the struct's NAME
+            // here - resolving it needs the symbol table, which this file
+            // does not have - so an unpopulated nested struct is answered
+            // by the caller in semantic analysis, which does.
+            if (fieldType->structFields().empty()) return false;
+            if (!structLeavesAreNumeric(*fieldType, depth + 1)) return false;
+            continue;
+        }
+        if (fieldType->isArray()) return false;
+        if (fieldType->isMatrix()) return false;
+        // A MATRIX leaf is out too: the fill picks the leaf's element type
+        // to convert through, and the matrix path selected the matrix's own
+        // base type instead, so a half2x2 filled from 1.00048828125 kept the
+        // float value where the reference rounds to 1.0009765625 (codex).
+        // Refused with the rest of the conversion boundary.
+        if (!fieldType->isNumeric() && !fieldType->isVector())
+            return false;
+        // ONLY THE LEAF TYPES THIS SLICE ACTUALLY CONVERTS.  The fill has to
+        // apply the LEAF's conversion, and bool (truth), fixed (clamp to
+        // [-2, 2 - 2^-10]) and the narrow integers (short/char wrap) each
+        // have their own; leaving them to a generic float/int dispatch
+        // writes the scalar through unchanged, which is a WRONG VALUE:
+        // measured (S)0.5 into a bool leaf as 0.5 where the reference says
+        // 1, (S)3.0 into a fixed leaf as 3 where the reference says
+        // 1.9990234375, and (S)65537 into a short leaf as 65537 where the
+        // reference says 1 (codex, review of this commit).  Refusing them by
+        // name is the bounded answer; the conversions belong with the typed
+        // constant evaluator, not in a second table here.
+        switch (fieldType->scalarKind())
+        {
+        case ScalarKind::Float:
+        case ScalarKind::Half:
+        case ScalarKind::Int:
+            break;
+        default:
+            // UInt is here with bool and the narrow integers because the
+            // SIGNEDNESS conversion is missing too: `(S)(-1)` into an
+            // unsigned leaf emitted -1 where the reference wraps
+            // (codex).  Same class, same answer - refuse until the typed
+            // evaluator owns the conversion.
+            return false;
+        }
+    }
+    return true;
+}
+
 bool canExplicitlyConvert(const CgType& from, const CgType& to)
 {
     // Everything that can be implicitly converted can be explicitly converted
@@ -847,6 +908,17 @@ bool canExplicitlyConvert(const CgType& from, const CgType& to)
     if (from.isVector() && to.isVector())
     {
         // Can truncate or extend vectors
+        return true;
+    }
+
+    // A SCALAR CAST TO A STRUCT initialises every leaf with that scalar.
+    // `OUT o = (OUT)0;` is how the reference SDK's own shaders clear an
+    // output struct, and it is 16 rows of the reference-SDK sweep; we
+    // refused it in semantic analysis with "cannot cast from 'int' to
+    // 'struct'".  Only a struct whose leaves are all numeric qualifies -
+    // there is no meaning for `(S)0` when S holds a sampler or an array.
+    if (from.isNumeric() && to.isStruct() && structLeavesAreNumeric(to))
+    {
         return true;
     }
 

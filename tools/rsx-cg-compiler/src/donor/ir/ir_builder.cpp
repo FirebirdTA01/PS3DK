@@ -2146,6 +2146,133 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             localArrayValues_[varDecl->name].assign(
                 static_cast<size_t>(varType.arraySize), InvalidIRValue);
 
+        // A STRUCT INITIALISED FROM A SCALAR - `OUT o = (OUT)0;` - fills
+        // every leaf with that scalar.  It is how the reference SDK's own
+        // shaders clear an output struct, and semantic analysis used to
+        // refuse it outright ("cannot cast from 'int' to 'struct'").
+        //
+        // Expanded HERE rather than in buildCastExpr because a struct is not
+        // a value in this builder: its fields are bound by name, exactly as
+        // an uninitialised struct's vector leaves are bound below.  Binding
+        // the leaves is what lets a later `o.c.xy = p.xy` build the ordinary
+        // VecInsert chain on top of the zero rather than on nothing.
+        //
+        // The zeros ARE emitted.  The reference drops the ones that no later
+        // write touches - `float4 z = (float4)0; z.xy = p.xy;` compiles to a
+        // single MOV of the xy lanes there - but that is only sound if an
+        // unwritten register reads as zero, and RPCS3's zero-initialisation
+        // of every fragment local (FragmentProgramDecompiler AddReg) cannot
+        // tell a hardware guarantee from an emulator convenience; a physical
+        // register reused after another value's live range holds that value
+        // either way (codex, 2026-09-07).  So: correct now, shorter later.
+        if (varDecl->initializer && getStructFields(varDecl->type.get()) &&
+            varDecl->initializer->kind == ExprKind::Cast)
+        {
+            auto* cast = static_cast<CastExpr*>(varDecl->initializer.get());
+            const IRTypeInfo operandType = getExprType(cast->operand.get());
+            // The cast's target IS this struct - `OUT o = (OUT)0` - rather
+            // than a struct-typed expression cast to something else; there
+            // is no IRType for a struct, so the AST node is what says so.
+            const bool castsToThisStruct =
+                cast->targetType && varDecl->type &&
+                cast->targetType->baseType == BaseType::Struct &&
+                cast->targetType->structName == varDecl->type->structName;
+            // A DEFENSIVE BACKSTOP.  The unsigned source is refused in
+            // semantic analysis, where the type still says UInt - codex
+            // measured ScalarKind UInt reaching analyzeCastExpr, correcting
+            // my earlier belief that the unsignedness was lost by then.  This
+            // check is what catches a source that arrives here typed
+            // otherwise; `static const unsigned int U = 2147483648; S s =
+            // (S)U;` read +2147483648 where the reference reads
+            // -2147483648, and the signedness conversion belongs with the
+            // typed evaluator.
+            if (castsToThisStruct && operandType.isScalar() &&
+                operandType.baseType == IRType::UInt32)
+            {
+                error(varDecl->loc,
+                      "cannot fill a struct from an unsigned value: the "
+                      "signed conversion of the leaf is not implemented");
+                continue;
+            }
+            if (castsToThisStruct && operandType.isScalar())
+            {
+                const IRValueID scalar = buildExpr(cast->operand.get());
+                std::unordered_map<int, IRValueID> convertedScalar;
+
+                // One converted scalar per element type, then one splat per
+                // leaf width: a struct of four float4 fields costs one
+                // conversion, not four.
+                auto leafValue = [&](const IRTypeInfo& leafType) -> IRValueID {
+                    const IRType elem = leafType.isVector()
+                        ? leafType.elementType : leafType.baseType;
+                    auto it = convertedScalar.find(static_cast<int>(elem));
+                    IRValueID converted;
+                    if (it != convertedScalar.end()) {
+                        converted = it->second;
+                    } else {
+                        converted = scalar;
+                        IRTypeInfo scalarTarget = leafType;
+                        scalarTarget.baseType = elem;
+                        scalarTarget.vectorSize = 1;
+                        scalarTarget.matrixRows = 0;
+                        scalarTarget.matrixCols = 0;
+                        const IRType from = operandType.baseType;
+                        IROp conv = IROp::Bitcast;
+                        if ((from == IRType::Int32 || from == IRType::UInt32 ||
+                             from == IRType::Bool) &&
+                            (elem == IRType::Float32 || elem == IRType::Float16))
+                            conv = IROp::IntToFloat;
+                        else if (from == IRType::Float32 && elem == IRType::Float16)
+                            conv = IROp::FloatToHalf;
+                        else if (from == IRType::Float16 && elem == IRType::Float32)
+                            conv = IROp::HalfToFloat;
+                        else if ((from == IRType::Float32 || from == IRType::Float16) &&
+                                 (elem == IRType::Int32 || elem == IRType::UInt32))
+                            conv = IROp::FloatToInt;
+                        if (conv != IROp::Bitcast) {
+                            if (IRValueID folded = tryFoldUnaryOp(conv, scalarTarget, converted);
+                                folded != InvalidIRValue)
+                                converted = folded;
+                            else
+                                converted = emitUnaryOp(conv, scalarTarget, converted);
+                        }
+                        convertedScalar[static_cast<int>(elem)] = converted;
+                    }
+                    if (leafType.componentCount() <= 1)
+                        return converted;
+                    if (IRValueID folded = tryFoldVecConstruct(leafType,
+                            std::vector<IRValueID>(
+                                static_cast<size_t>(leafType.componentCount()), converted),
+                            std::nullopt);
+                        folded != InvalidIRValue)
+                        return folded;
+                    auto splat = std::make_unique<IRInstruction>(IROp::VecConstruct,
+                        currentFunction_->allocateValueId(), leafType);
+                    for (int i = 0; i < leafType.componentCount(); ++i)
+                        splat->addOperand(converted);
+                    currentBlock_->addInstruction(std::move(splat));
+                    return currentFunction_->nextValueId - 1;
+                };
+
+                auto bindLeaves = [&](auto& self, const std::string& prefix,
+                                      TypeNode* typeNode) -> void {
+                    const auto* leaves = getStructFields(typeNode);
+                    if (!leaves) return;
+                    for (const auto& field : *leaves) {
+                        if (!field.type) continue;
+                        const std::string name = prefix + "." + field.name;
+                        if (field.type->baseType == BaseType::Struct) {
+                            self(self, name, field.type.get());
+                            continue;
+                        }
+                        nameToValue_[name] = leafValue(getIRType(field.type.get()));
+                    }
+                };
+                bindLeaves(bindLeaves, varDecl->name, varDecl->type.get());
+                continue;
+            }
+        }
+
         // If there's an initializer, evaluate it
         if (varDecl->initializer)
         {

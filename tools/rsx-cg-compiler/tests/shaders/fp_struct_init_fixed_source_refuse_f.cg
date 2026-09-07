@@ -1,0 +1,14 @@
+// A FIXED source carries its own conversion: the reference reads
+// (S)((fixed)3.0) as 1.9990234375 and this fill would write 3 through.  The
+// scalar cast float((fixed)3.0) is already wrong outside any struct, so the
+// repair is on that card - what this refuses is EXPOSING it through a new
+// acceptance (codex, who also measured that the cast is still Fixed at
+// analyzeCastExpr; the check has to sit before the conversion fallback,
+// which a flat admitted struct satisfies).
+struct S { float f; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	S s = (S)((fixed)3.0);
+	return float4(float(s.f), 2.0, 3.0, 4.0);
+}
