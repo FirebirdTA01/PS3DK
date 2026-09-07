@@ -1,0 +1,15 @@
+// Regression test for t_65e1b7fa:
+// Verify file-scope `static const` and `const static` declarations
+// are lowered as typed IR constants rather than falling through to
+// unregistered uniform loads (which triggered 'ldunif of INFINITY has no registered uniform source').
+
+static const half INFINITY = 255.0;
+const static float EPSILON = 0.001;
+static const half SCALE = 2.0;
+
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    half maxV = max((half)c.x, max((half)c.y, (half)c.z));
+    half denom = clamp(maxV, (half)EPSILON, INFINITY);
+    o = (c / (float)denom) * (float)SCALE;
+}
