@@ -200,6 +200,8 @@ jobs:
         run: bash tests/shader-compiler/dot-reduction-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler half precision
         run: bash tests/shader-compiler/half-precision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a half-typed value is computed in half
+        run: bash tests/shader-compiler/half-arithmetic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler declared half colour output
         run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the half colour output reaches H0 through the allocator
