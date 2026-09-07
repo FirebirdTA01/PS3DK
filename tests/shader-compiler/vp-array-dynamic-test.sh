@@ -338,6 +338,35 @@ accept vp_array_uniform_dyn_same_expr_twice_v
 printf '  %-44s rewrite = two lanes; same expression twice = one
 ' "v.x = v.y between reads"
 
+# A FLOAT-TYPED index (t_050bebce).  The reference accepts it on both
+# profiles with int() semantics: a run-time float or half index is the same
+# ARL as int(idx) (byte-identical containers), a constant truncates toward
+# zero (1.7 -> 1, -0.5 -> 0, 3.9 -> 3; 4.0 refuses C1068), an UNSIGNED cast of
+# 2^32 wraps to element 0 (a signed one is INT_MIN and out of bounds), and a
+# float literal is SINGLE precision before any conversion, so 4294967297.0
+# under an unsigned int or unsigned char cast is element 0 too (review: codex),
+# a local float
+# constant folds the same way, and an expression goes through a temp.
+accept vp_array_uniform_dyn_float_index_v
+cmp -s "$work/vp_array_uniform_dyn_float_index_v.bin" "$work/vp_array_uniform_dynamic_v.bin"     || fail "u_bones[idx] with a float idx did not compile to the bytes of u_bones[int(idx)]"
+accept vp_array_uniform_dyn_half_index_v
+cmp -s "$work/vp_array_uniform_dyn_half_index_v.bin" "$work/vp_array_uniform_dynamic_v.bin"     || fail "u_bones[idx] with a half idx did not compile to the bytes of u_bones[int(idx)]"
+for pair in "vp_array_uniform_dyn_float_const_v:1" "vp_array_uniform_dyn_float_neg_v:0" "vp_array_uniform_dyn_float_39_v:3" "vp_array_uniform_dyn_float_local_v:2" "vp_array_uniform_dyn_uint_cast_wrap_v:0" "vp_array_uniform_dyn_uint_cast_wrap1_v:0" "vp_array_uniform_dyn_uchar_cast_wrap_v:0" "vp_array_uniform_dyn_float_near0_v:1" "vp_array_uniform_dyn_float_near1_v:2" "vp_array_uniform_dyn_float_near2_v:3"; do
+    stem="${pair%%:*}"; k="${pair##*:}"
+    accept "$stem"
+    expect_record "$stem" "u\[$k\] type=1048 paramno=none ref=1 resIndex=467"
+    [[ "$(count_words "$stem" ' ARL ')" -eq 0 ]] || { cat "$work/$stem.words" >&2; fail "$stem: a constant float index must not emit an ARL"; }
+    for j in 0 1 2 3; do
+        [[ "$j" -eq "$k" ]] || expect_record "$stem" "u\[$j\] type=1048 paramno=none ref=0 resIndex=none"
+    done
+done
+accept vp_array_uniform_dyn_float_expr_v
+expect_word vp_array_uniform_dyn_float_expr_v '^[0-9]+ MUL dst=R0 mask=x src0=IN9\.xxxx '
+expect_word vp_array_uniform_dyn_float_expr_v '^[0-9]+ ARL dst=A0 mask=x src0=R0\.xxxx '
+expect_word vp_array_uniform_dyn_float_expr_v "$(REL 0 '0\.x' 464)"
+printf '  %-44s float/half idx == int(idx); 1.7 -> [1], -0.5 -> [0], 3.9 -> [3], local 2.5 -> [2]
+' "float-typed index"
+
 # ---------------------------------------------------------------------------
 # REFUSALS: exit exactly 1, no artifact, the named body.
 check_refusal() {  # <compiler> <stem> <body> -> problem or nothing
@@ -353,7 +382,34 @@ refuse() {  # <label> <stem> <body>
     printf '  %-44s refused\n' "$1"
 }
 refuse "int(idx) + 1 (VP float-to-int deferred)" vp_array_uniform_dyn_arith_refuse_v "float-to-int"
-refuse "float-typed index (frontend gap, as FP)" vp_array_uniform_dyn_float_index_refuse_v "array index must have integral type"
+refuse "float index out of range (C1068 in the reference)" vp_array_uniform_dyn_float_oob_refuse_v "out of bounds"
+# A CONSTANT floating expression beyond a bare literal or a floating cast of
+# a constant is REFUSED BY NAME until the typed constant evaluator serves
+# this path (t_65e1b7fa follow-up): the reference evaluates it in float and
+# truncates ONCE on the result - u[1.7 * 2.0] is element 3 (leaf truncation
+# reads 2), u[((float)3 / 2) * 2] is element 3 (leaf truncation reads 2, and
+# there is no float LITERAL in it), u[(int)(bool)(float)0.5] is element 1
+# (the fraction is truthy; leaf truncation reads 0).  The last two were
+# found in review (codex) on a candidate that accepted them WRONG; a
+# refusal is the honest interim, and these rows flip to accept rows with
+# element assertions when the evaluator lands.
+refuse "u[1.7 * 2.0] (reference: element 3)"        vp_array_uniform_dyn_float_arith_v      "floating value"
+refuse "u[((float)3 / 2) * 2] (reference: 3)"        vp_array_uniform_dyn_float_cast_arith_v "floating value"
+refuse "u[(int)(bool)(float)0.5] (reference: 1)"     vp_array_uniform_dyn_float_cast_bool_v  "floating value"
+# A FIXED cast clamps to [-2, 2 - 2^-10] before it is read - the reference
+# reads u[(fixed)3] as element 1 - and that conversion is the typed
+# evaluator's, so the cast refuses by name here (review: codex).  An integral
+# cast of an out-of-range float literal folds to INT_MIN (the x86 indefinite
+# value the reference uses, measured on t_65e1b7fa) and is out of bounds.
+refuse "u[(fixed)3] (reference: element 1)"           vp_array_uniform_dyn_fixed_cast_refuse_v "floating value"
+refuse "u[(int)4294967296.0] (C1068 in the reference)" vp_array_uniform_dyn_int_cast_oob_refuse_v "out of bounds"
+# The float32 rule on bare literals, directly: 0.9999999999 is 1.0f before
+# it is read (element 1), and 3.9999999999 is 4.0f - out of bounds (claude's
+# rows).  The unsigned wrap has a bound: 2^32 + 512 (exactly representable
+# in fp32) narrows to 512 and is out of bounds, which separates "int64, then
+# narrow to 32, then the ordinary bounds check" from "wrap modulo the array".
+refuse "u[3.9999999999] (4.0f: C1068 in the reference)" vp_array_uniform_dyn_float_near3_v "out of bounds"
+refuse "u[(unsigned int)4294967808.0] (C1068)"        vp_array_uniform_dyn_uint_cast_oob_refuse_v "out of bounds"
 refuse "nine index values (lane reuse not lowered)" vp_array_uniform_dyn_nine_values_refuse_v "address register lanes"
 refuse "int i = 4; u[i] (C1068 in the reference)" vp_array_uniform_dyn_local_oob_refuse_v "out of bounds"
 refuse "int i = -1; u[i]"                    vp_array_uniform_dyn_local_neg_refuse_v "out of bounds"
@@ -382,7 +438,8 @@ BYTE_IDENTICAL=(vp_array_uniform_dynamic_v vp_array_uniform_consecutive_v
     vp_array_uniform_dyn_via_local_v vp_array_uniform_dyn_param_v
     vp_array_uniform_dyn_half4_v vp_array_uniform_dyn_float3_v
     vp_array_uniform_dyn_scalar_v vp_array_uniform_dyn_computed_v
-    vp_array_uniform_dyn_work_between_v)
+    vp_array_uniform_dyn_work_between_v vp_array_uniform_dyn_float_index_v
+    vp_array_uniform_dyn_half_index_v vp_array_uniform_dyn_float_expr_v)
 if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
     [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
     for stem in $(grep -oE '^accept [a-z0-9_]+' "${BASH_SOURCE[0]}" | cut -d' ' -f2 | sort -u); do
