@@ -400,6 +400,21 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     currentFunction_->returnType = getIRType(decl->returnType.get());
     currentFunction_->isEntryPoint = (decl->name == module_->entryPointName);
 
+    if (const auto* fields = getStructFields(decl->returnType.get())) {
+        for (const auto& field : *fields) {
+            if (field.semantic.isEmpty()) continue;
+            IRParameter output{};
+            output.name = field.name;
+            output.type = getIRType(field.type.get());
+            output.valueId = InvalidIRValue;
+            output.storage = StorageQualifier::Out;
+            output.semanticName = field.semantic.name;
+            output.rawSemanticName = field.semantic.rawName;
+            output.semanticIndex = field.semantic.index;
+            currentFunction_->returnOutputs.push_back(std::move(output));
+        }
+    }
+
     // Build parameters
     for (auto& param : decl->parameters)
     {

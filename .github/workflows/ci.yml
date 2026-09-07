@@ -261,8 +261,8 @@ jobs:
         run: bash tests/shader-compiler/faceforward-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler local array indexing
         run: bash tests/shader-compiler/local-array-index-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test rsx-cg-compiler MRT refusal
-        run: bash tests/shader-compiler/mrt-output-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler MRT output registers and precision
+        run: bash tests/shader-compiler/mrt-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler output temporary reuse
         run: bash tests/shader-compiler/output-temp-reuse-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler scheduler output writes
