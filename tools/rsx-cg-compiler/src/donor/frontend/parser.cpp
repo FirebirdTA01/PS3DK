@@ -72,7 +72,8 @@ std::unique_ptr<TranslationUnit> Parser::parse()
         const size_t before = current;
         try
         {
-            auto decl = parseTopLevelDeclaration();
+            std::vector<std::unique_ptr<DeclNode>> extraDeclarations;
+            auto decl = parseTopLevelDeclaration(&extraDeclarations);
             if (!decl && current == before)
             {
                 // No declaration and no progress: synchronize, which advances
@@ -99,6 +100,13 @@ std::unique_ptr<TranslationUnit> Parser::parse()
                 }
 
                 unit->declarations.push_back(std::move(decl));
+
+                // The second and later declarators of `float g1, g2;`.
+                for (auto& extra : extraDeclarations)
+                {
+                    if (extra)
+                        unit->declarations.push_back(std::move(extra));
+                }
             }
         }
         catch (...)
@@ -773,7 +781,8 @@ BaseType Parser::tokenToBaseType(TokenType type) const
 // Declaration parsing
 // ============================================================================
 
-std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration()
+std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
 {
     // Skip any stray semicolons
     while (match(TokenType::SEMICOLON))
@@ -796,7 +805,7 @@ std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration()
     }
 
     // Otherwise it's a variable or function declaration
-    return parseVariableOrFunctionDeclaration();
+    return parseVariableOrFunctionDeclaration(extraDeclarations);
 }
 
 std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
@@ -893,7 +902,8 @@ std::unique_ptr<TypedefDecl> Parser::parseTypedefDeclaration()
     return std::make_unique<TypedefDecl>(loc, name, type);
 }
 
-std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration()
+std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
 {
     SourceLocation loc = currentLocation();
 
@@ -948,11 +958,18 @@ std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration()
         }
         else
         {
-            // For multiple declarations, return the first and warn
-            // (proper handling would need a declaration list node)
+            // Every declarator is declared.  The first is returned and the
+            // rest go to the caller through extraDeclarations - returning
+            // only the first is what made `float g1, g2;` declare g1 and
+            // refuse g2 as undeclared (t_a90b1ef1).
             if (!vars.empty())
             {
                 vars[0]->vitaAttrs = vitaAttrs;
+                if (extraDeclarations)
+                {
+                    for (size_t i = 1; i < vars.size(); ++i)
+                        extraDeclarations->push_back(std::move(vars[i]));
+                }
                 return std::move(vars[0]);
             }
         }
@@ -1653,7 +1670,14 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
             if (!vars.empty())
             {
                 vars[0]->vitaAttrs = vitaAttrs;
-                return std::make_unique<DeclStmt>(loc, std::move(vars[0]));
+                // ALL of them.  Taking vars[0] alone declared only the first
+                // name of `float a, b;`, and using the second was then
+                // refused as undeclared (t_a90b1ef1).
+                std::vector<std::unique_ptr<DeclNode>> decls;
+                decls.reserve(vars.size());
+                for (auto& var : vars)
+                    decls.push_back(std::move(var));
+                return std::make_unique<DeclStmt>(loc, std::move(decls));
             }
         }
         else

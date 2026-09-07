@@ -810,10 +810,15 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
     if (stmt->init->kind == StmtKind::Decl)
     {
         auto* declStmt = static_cast<DeclStmt*>(stmt->init.get());
-        if (!declStmt->declaration ||
-            declStmt->declaration->kind != DeclKind::Variable)
+        // The unrolled form reasons about ONE induction variable; a
+        // multi-declarator init (`for (int i = 0, n = 4; ...)`) is declined
+        // here rather than silently unrolled on the first of them.
+        if (declStmt->declarations.size() != 1)
             return false;
-        auto* var = static_cast<VarDecl*>(declStmt->declaration.get());
+        const auto& initDecl = declStmt->declarations.front();
+        if (!initDecl || initDecl->kind != DeclKind::Variable)
+            return false;
+        auto* var = static_cast<VarDecl*>(initDecl.get());
         if (!var->initializer) return false;
         if (!exprIsIntLiteral(var->initializer.get(), &curVal)) return false;
         varName = var->name;
@@ -1302,11 +1307,16 @@ void IRBuilder::buildExprStmt(ExprStmt* stmt)
 
 void IRBuilder::buildDeclStmt(DeclStmt* stmt)
 {
-    if (!stmt->declaration) return;
-
-    if (stmt->declaration->kind == DeclKind::Variable)
+    // Every declarator in the statement, in source order, so `float a, b;`
+    // builds both and an initialiser list `float a = x, b = y;` evaluates
+    // them left to right (t_a90b1ef1).
+    for (const auto& declaration : stmt->declarations)
     {
-        auto* varDecl = static_cast<VarDecl*>(stmt->declaration.get());
+    if (!declaration) continue;
+
+    if (declaration->kind == DeclKind::Variable)
+    {
+        auto* varDecl = static_cast<VarDecl*>(declaration.get());
 
         // Allocate a value for the variable
         IRValueID varId = currentFunction_->allocateValueId();
@@ -1325,6 +1335,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             nameToValue_[varDecl->name] = initValue;
             declToValue_[varDecl] = initValue;
         }
+    }
     }
 }
 

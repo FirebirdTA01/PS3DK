@@ -387,10 +387,27 @@ struct ExprStmt : StmtNode
 // Declaration statement (variable declaration inside function)
 struct DeclStmt : StmtNode
 {
-    std::unique_ptr<DeclNode> declaration;
+    // ONE STATEMENT CAN DECLARE SEVERAL NAMES: `float a, b;` is one
+    // declaration statement with two declarators, and every one of them is
+    // declared.  This was a single pointer, so the parser - which has always
+    // parsed the whole comma list correctly - had its result truncated to the
+    // first name here, and using the second was then refused as an UNDECLARED
+    // IDENTIFIER (t_a90b1ef1).  A vector rather than a first-plus-extras pair
+    // deliberately: nothing about the first declarator is special, and a
+    // shape that makes it special is how the truncation happened.
+    //
+    // NOT a synthetic block: wrapping the declarators in a BlockStmt would
+    // introduce a scope and hide them from the rest of the enclosing one.
+    std::vector<std::unique_ptr<DeclNode>> declarations;
 
     DeclStmt(SourceLocation loc, std::unique_ptr<DeclNode> decl)
-        : StmtNode(StmtKind::Decl, loc), declaration(std::move(decl)) {}
+        : StmtNode(StmtKind::Decl, loc)
+    {
+        declarations.push_back(std::move(decl));
+    }
+
+    DeclStmt(SourceLocation loc, std::vector<std::unique_ptr<DeclNode>> decls)
+        : StmtNode(StmtKind::Decl, loc), declarations(std::move(decls)) {}
 };
 
 // Block statement { ... }
