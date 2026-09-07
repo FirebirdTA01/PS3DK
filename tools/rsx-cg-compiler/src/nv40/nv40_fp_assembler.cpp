@@ -98,7 +98,10 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
     switch (dst.type)
     {
     case NVFXSR_TEMP:
+    case NVFXSR_OUTPUT:
     {
+        // Colour/depth exports occupy this same file. A lone COLOR3
+        // writes R4 and requires five slots even without a scratch temp.
         // fp16 registers pack two per hw slot: H0/H1 → R0, H2/H3 → R1, ...
         const int hwReg = dst.is_fp16 ? (index >> 1) : index;
         if (numTempRegs_ < hwReg + 1)
@@ -110,11 +113,6 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
         }
         break;
     }
-    case NVFXSR_OUTPUT:
-        // R0 is result.color, R1 is result.depth.  FPControl bit
-        // tracking (DEPTH_USE / KIL_USE) lands when those features
-        // do — identity_f only writes R0.
-        break;
     case NVFXSR_NONE:
         hw[0] |= NV40_FP_OP_OUT_NONE;
         break;

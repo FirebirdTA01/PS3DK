@@ -406,6 +406,9 @@ class IRFunction
 public:
     std::string name;
     IRTypeInfo returnType;
+    // Declared struct return fields, including those never stored. The
+    // fragment colour bank depends on all declarations, not just writes.
+    std::vector<IRParameter> returnOutputs;
     std::vector<IRParameter> parameters;
     std::vector<std::unique_ptr<IRBasicBlock>> blocks;
 

@@ -383,10 +383,15 @@ static uint32_t fpAttrMaskBitForInputSrc(int inputSrc)
     return 0;
 }
 
-static int fragmentOutputIndex(const std::string& semanticUpper)
+static int fragmentOutputIndex(const std::string& semanticUpper, int semanticIndex)
 {
-    if (semanticUpper == "COLOR" || semanticUpper == "COL") return 0;
-    if (semanticUpper == "DEPTH" || semanticUpper == "DEPTH0") return 1;
+    // Fragment outputs share the temporary file. R1.z is depth, so the
+    // four colour targets occupy R0, R2, R3, R4 (t_cfff9343).
+    if ((semanticUpper == "COLOR" || semanticUpper == "COL") &&
+        semanticIndex >= 0 && semanticIndex < 4)
+        return semanticIndex == 0 ? 0 : semanticIndex + 1;
+    if ((semanticUpper == "DEPTH" || semanticUpper == "DEPTH0") &&
+        semanticIndex == 0) return 1;
     return -1;
 }
 
@@ -474,33 +479,31 @@ static void assignSwizzle(VSrc& src, int encoded, int count)
 
 // Is fragment colour output `outIndex` DECLARED half?
 //
-// The reference decides the colour register's precision from the DECLARED
-// TYPE OF THAT OUTPUT and by nothing else - half arithmetic on the way
-// there does not do it, and neither does --fastprecision.  A half COLOR0
-// lands in H0, the low half of R0, and sets the container's outputFromH0.
+// Classify the DECLARED TYPE, independently of intermediate arithmetic or
+// --fastprecision. The bank decision below considers all colour outputs:
+// only an all-half declaration set uses H0/H4/H6/H8 and outputFromH0.
 //
-// There are two spellings and the parameter one WINS, because it decides
+// The parameter spelling WINS, because it decides
 // even when the entry also returns something: `half main(out float4
 // colour : COLOR) : DEPTH` returns half for the DEPTH export while its
 // colour stays fp32 in R0, which is what the reference emits.
 //
 //   - an out/inout PARAMETER bound to this colour index: its type decides.
-//   - otherwise the RETURN TYPE decides, and only if the program actually
-//     emits a store to this colour index, so a half return carrying some
-//     other semantic cannot claim the colour register (t_5c12df56).
+//   - otherwise declared return fields decide, even if never written, then
+//     the typed StoreOutput record handles a non-aggregate return.
+//     A half return carrying some other semantic cannot claim this colour
+//     register (t_5c12df56).
 //
 // An unsemanticked fragment `out` binds COLOR0.
 //
 // Takes the index rather than assuming 0 so the MRT lane can ask the same
 // question of COLOR1..3, whose half bank the reference measures as
 // H0/H4/H6/H8 against the float targets R0/R2/R3/R4 (codex, 2026-09-07).
-// At outIndex 0 it is exactly the predicate that stood inline in
-// emitFragmentVirtual before this change.
 static bool fragmentColourOutputIsHalf(const IRFunction& entry, int outIndex)
 {
     const auto isColour = [outIndex](const std::string& rawSem, int index) {
         const std::string sem = toUpper(rawSem);
-        const bool named = sem == "COLOR" || (sem.empty() && outIndex == 0);
+        const bool named = sem == "COLOR" || sem == "COL" || (sem.empty() && outIndex == 0);
         return named && index == outIndex;
     };
     for (const IRParameter& p : entry.parameters) {
@@ -510,17 +513,50 @@ static bool fragmentColourOutputIsHalf(const IRFunction& entry, int outIndex)
         if (isColour(p.semanticName, p.semanticIndex))
             return p.type.elementType == IRType::Float16;
     }
-    if (entry.returnType.elementType != IRType::Float16)
-        return false;
+    for (const auto& output : entry.returnOutputs) {
+        if (isColour(output.semanticName, output.semanticIndex))
+            return output.type.elementType == IRType::Float16;
+    }
     for (const auto& block : entry.blocks) {
         if (!block) continue;
         for (const auto& instPtr : block->instructions) {
             if (!instPtr || instPtr->op != IROp::StoreOutput) continue;
             if (isColour(instPtr->semanticName, instPtr->semanticIndex))
-                return true;
+                return instPtr->resultType.elementType == IRType::Float16;
         }
     }
     return false;
+}
+
+// One bank serves all colour targets. An unwritten float output still
+// selects the full bank; depth does not participate. StoreOutput carries
+// the declared field type for struct returns whose entry type is Struct.
+static bool fragmentColourOutputsUseHalfBank(const IRFunction& entry)
+{
+    std::set<int> targets;
+    for (const auto& output : entry.returnOutputs) {
+        const std::string sem = toUpper(output.semanticName);
+        if (sem == "COLOR" || sem == "COL")
+            targets.insert(output.semanticIndex);
+    }
+    for (const auto& p : entry.parameters) {
+        if (p.storage != StorageQualifier::Out &&
+            p.storage != StorageQualifier::InOut) continue;
+        const std::string sem = toUpper(p.semanticName);
+        if (sem.empty() || sem == "COLOR" || sem == "COL")
+            targets.insert(p.semanticIndex);
+    }
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& inst : block->instructions) {
+            if (!inst || inst->op != IROp::StoreOutput) continue;
+            const std::string sem = toUpper(inst->semanticName);
+            if (sem.empty() || sem == "COLOR" || sem == "COL")
+                targets.insert(inst->semanticIndex);
+        }
+    }
+    return !targets.empty() && std::all_of(targets.begin(), targets.end(),
+        [&](int index) { return fragmentColourOutputIsHalf(entry, index); });
 }
 
 class GeneralBuilder
@@ -534,8 +570,8 @@ public:
         // the precision on the colour's writers as it folds them; a pass
         // that patched dst.output afterwards could not see the two folds
         // that emit no dst.output instruction at all.
-        halfColour0_ = profile_ == GeneralProfile::Fragment &&
-                       fragmentColourOutputIsHalf(entry, 0);
+        halfColourBank_ = profile_ == GeneralProfile::Fragment &&
+                          fragmentColourOutputsUseHalfBank(entry);
         countUses();
         seedParameters();
     }
@@ -579,7 +615,7 @@ private:
     GeneralProfile profile_;
     // COLOR0 is declared half, so every writer of it belongs in H0 rather
     // than R0.  Set in the constructor; read by lowerStoreOutput.
-    bool halfColour0_ = false;
+    bool halfColourBank_ = false;
     const IRFunction& entry_;
     const IRModule& module_;
     VirtualProgram program_;
@@ -635,7 +671,6 @@ private:
     {
         if (profile_ != GeneralProfile::Fragment)
             return true;
-        std::set<int> colourTargets;
         for (const auto& block : entry_.blocks) {
             if (!block) continue;
             for (const auto& instPtr : block->instructions) {
@@ -646,12 +681,10 @@ private:
                     fragmentColourOutputTargetIndex(sem, instPtr->semanticIndex);
                 if (colourTarget < 0)
                     continue;
-                colourTargets.insert(colourTarget);
-                if (colourTarget != 0 || colourTargets.size() > 1) {
+                if (colourTarget > 3) {
                     program_.diagnostics.push_back(
-                        "nv40-general: multiple fragment colour outputs "
-                        "are not lowered; refusing rather than aliasing "
-                        "secondary colour outputs to COLOR0");
+                        "nv40-general: fragment colour output index is "
+                        "outside COLOR0..COLOR3; refusing");
                     program_.loweringFailed = true;
                     return false;
                 }
@@ -2176,7 +2209,7 @@ private:
         }
 
         const std::string sem = toUpper(merge.trueStore->semanticName);
-        const int outIndex = fragmentOutputIndex(sem);
+        const int outIndex = fragmentOutputIndex(sem, merge.trueStore->semanticIndex);
         if (outIndex < 0) {
             program_.diagnostics.push_back(
                 "nv40-general: unsupported output semantic " +
@@ -2202,7 +2235,7 @@ private:
         sel.srcs[1] = resolve(trueVal);
         sel.srcs[2] = resolve(falseVal);
         // Merged returns are fragment-only (see the early profile guard).
-        // Output 1 means DEPTH while COLOR1+ is explicitly refused.
+        // Physical output 1 is DEPTH; COLOR1 starts at physical output 2.
         if (outIndex == 1) {
             for (size_t i : {size_t{1}, size_t{2}}) {
                 const uint8_t lane = sel.srcs[i].swizzle[0];
@@ -6140,8 +6173,8 @@ private:
         program_.instrs.push_back(pred);
     }
 
-    // A declared half COLOR0 puts the colour in H0, the low half of R0,
-    // so EVERY writer of it is stamped half HERE, while the allocator can
+    // In the half bank COLOR0 occupies H0, the low half of R0,
+    // so EVERY writer of it is stamped HERE, while the allocator can
     // still act on it - the two folds below carry "this value is the
     // colour" in an outputPin and emit no dst.output instruction at all,
     // so the post-allocation stamp this replaces reached neither of them
@@ -6153,7 +6186,10 @@ private:
     // vregToFp16 onto every temp source it rewrites.
     void markHalfColourDest(VInstr& vi, int outIndex)
     {
-        if (!halfColour0_ || outIndex != 0) return;
+        if (profile_ != GeneralProfile::Fragment || outIndex == 1 ||
+            outIndex < 0 || outIndex > 4) return;
+        const int colourIndex = outIndex == 0 ? 0 : outIndex - 1;
+        if (!fragmentColourOutputIsHalf(entry_, colourIndex)) return;
         // THE REGISTER BANK AND THE ARITHMETIC PRECISION ARE TWO DIFFERENT
         // FIELDS, and only the first of them follows from the output being
         // half.  Measured on the reference's own containers: word0 bit 7
@@ -6175,9 +6211,10 @@ private:
         // multiply still emits it half.  Setting FLOAT32 here is what
         // actually keeps the arithmetic full (codex).  An override the
         // lowering set for its own reasons is left alone.
-        vi.dst.fp16 = true;
         if (vi.fpPrecisionOverride < 0)
             vi.fpPrecisionOverride = vi.op == VOp::Mov ? FLOAT16 : FLOAT32;
+        if (!halfColourBank_) return;
+        vi.dst.fp16 = true;
         if (!vi.dst.output && vi.dst.index >= 0)
             program_.vregToFp16[vi.dst.index] = true;
     }
@@ -6188,11 +6225,13 @@ private:
         const std::string sem = toUpper(inst.semanticName);
         const int outIndex = profile_ == GeneralProfile::Vertex
             ? vertexOutputIndex(sem, inst.semanticIndex)
-            : fragmentOutputIndex(sem);
+            : fragmentOutputIndex(sem, inst.semanticIndex);
         if (outIndex < 0) {
             program_.diagnostics.push_back(
                 "nv40-general: unsupported output semantic " +
                 inst.semanticName);
+            if (profile_ == GeneralProfile::Fragment)
+                program_.loweringFailed = true;
             return;
         }
         const IRValueID value = inst.operands[0];
@@ -6215,6 +6254,20 @@ private:
         }
         const int outMask = storeOutputMask(inst, value);
         const auto regIt = program_.valueToVReg.find(value);
+        // A half texture export in the full MRT bank needs an explicit
+        // conversion MOV. TEX keeps full arithmetic precision, and this
+        // bank provides no half storage to round its sampled lanes. Keep
+        // the whole conversion even when other writes compose the value.
+        const bool halfTextureConversion =
+            profile_ == GeneralProfile::Fragment && !halfColourBank_ &&
+            outIndex != 1 && outIndex >= 0 &&
+            fragmentColourOutputIsHalf(entry_, outIndex == 0 ? 0 : outIndex - 1) &&
+            regIt != program_.valueToVReg.end() &&
+            std::any_of(program_.instrs.begin(), program_.instrs.end(),
+                [&](const VInstr& vi) {
+                    return !vi.dst.none && !vi.dst.output &&
+                           vi.dst.index == regIt->second && vi.op == VOp::Tex;
+                });
         if (profile_ == GeneralProfile::Vertex &&
             regIt != program_.valueToVReg.end()) {
             int producerDefs = 0;
@@ -6269,7 +6322,8 @@ private:
         // consulted when the colour is half.
         const bool colourOwnsValue = nonTermUseCount_[value] <= 1;
         if (profile_ == GeneralProfile::Fragment && outIndex == 0 &&
-            (!halfColour0_ || colourOwnsValue) &&
+            !halfTextureConversion &&
+            (!fragmentColourOutputIsHalf(entry_, 0) || colourOwnsValue) &&
             regIt != program_.valueToVReg.end() &&
             !program_.instrs.empty()) {
             VInstr& producer = program_.instrs.back();
@@ -6330,6 +6384,7 @@ private:
             }
         }
         if (regIt != program_.valueToVReg.end() &&
+            !halfTextureConversion &&
             useCount_[value] == 1 &&
             // A scalar depth producer computes in x.  Merely changing its
             // destination mask to z can also change which source lanes it
@@ -6441,7 +6496,8 @@ private:
         const std::string sem = toUpper(inst.semanticName);
         // Fragment depth is exported through R1.z even though the source
         // language declares a scalar.  Keep this shared with merged returns.
-        if (profile_ == GeneralProfile::Fragment && fragmentOutputIndex(sem) == 1)
+        if (profile_ == GeneralProfile::Fragment &&
+            fragmentOutputIndex(sem, inst.semanticIndex) == 1)
             return 0x4;
         for (const auto& p : entry_.parameters) {
             if (p.storage != StorageQualifier::Out &&
@@ -7777,7 +7833,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // reference itself emits - `TEXR R0.xyz; MOVH H0.xyz, R0` on
     // CgTutorial/GCM/HDR/shaders/OneHalfFp.cg, where the temp's last read
     // IS the instruction that writes the colour.
-    const bool halfColourOutput = fragmentColourOutputIsHalf(entry, 0);
+    const bool halfColourOutput = fragmentColourOutputsUseHalfBank(entry);
     // A WRITER OF THE COLOUR, in either spelling: an ordinary store, or a
     // pinned temp from a fold that emits no dst.output instruction.
     const auto writesColour = [](const VInstr& vi) {
@@ -7830,8 +7886,15 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // alone read 0 on exactly the programs whose colour IS in H0.
     attrs.outputFromH0 = std::any_of(program.instrs.begin(), program.instrs.end(),
         [&](const VInstr& vi) {
-            return writesColour(vi) && vi.dst.fp16;
+            return !vi.dst.none && vi.dst.fp16 &&
+                ((vi.dst.output && vi.dst.index != 1) || vi.dst.outputPin);
         }) ? 1 : 0;
+    // Allocation reserves full register slots, even for half exports.
+    // Convert to half-register indices only once allocation is complete.
+    for (VInstr& vi : program.instrs) {
+        if (!vi.dst.none && vi.dst.output && vi.dst.fp16)
+            vi.dst.index *= 2;
+    }
     populateReferencedParams(entry, attrs);
     seedFpEmbeddedUniforms(entry, program, attrs);
     std::unordered_map<int, VOp> tempProducerOp;
