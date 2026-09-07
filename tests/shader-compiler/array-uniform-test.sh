@@ -119,10 +119,8 @@ printf '  %-40s == literal\n' "FP u_colors[1 + 1]"
 # CASTS in a constant index APPLY the target's semantics (a review found a
 # draft passing the operand through: (int)(bool)2 read element 2 where the
 # reference reads element 1).  Measured on the reference: (int)(bool)2 ==
-# u[1], (short)65538 == u[2], (int)2.5 == u[2].  A float-TYPED index,
-# u[(float)2], is refused in semantic analysis on the parent and here;
-# the reference accepts it (element 2) - a pre-existing gap, pinned as the
-# refusal it is today so a change there is a visible decision.
+# u[1], (short)65538 == u[2], (int)2.5 == u[2], and a float-TYPED index
+# u[(float)2] == u[2] (accepted since t_050bebce, as the reference does).
 accept fp_array_uniform_index1_f
 accept fp_array_uniform_cast_bool_f
 cmp -s "$work/fp_array_uniform_cast_bool_f.bin" "$work/fp_array_uniform_index1_f.bin" \
@@ -133,6 +131,11 @@ cmp -s "$work/fp_array_uniform_cast_short_f.bin" "$work/fp_array_uniform_literal
 accept fp_array_uniform_cast_floatlit_f
 cmp -s "$work/fp_array_uniform_cast_floatlit_f.bin" "$work/fp_array_uniform_literal_f.bin" \
     || fail "u_colors[(int)2.5] did not compile to the bytes of u_colors[2] - the float literal was not truncated under the integral cast"
+# A FLOAT-TYPED index is accepted with int() semantics (t_050bebce; the
+# reference accepts it): u_colors[(float)2] is element 2.
+accept fp_array_uniform_cast_float_f
+cmp -s "$work/fp_array_uniform_cast_float_f.bin" "$work/fp_array_uniform_literal_f.bin" \
+    || fail "u_colors[(float)2] did not compile to the bytes of u_colors[2] - a float-typed constant index must truncate to the element"
 printf '  %-40s bool -> 1, short wraps, (int)2.5 -> 2\n' "FP casts in a constant index"
 
 # A name bound in scope SHADOWS a global array of the same name: the
@@ -281,8 +284,13 @@ refuse "FP run-time index"        fp_array_uniform_dynamic_refuse_f      "indexe
 refuse "index 4 of [4]"           fp_array_uniform_oob_refuse_f          "array index 4 out of bounds"
 refuse "index -1"                 fp_array_uniform_negative_refuse_f     "array index -1 out of bounds"
 refuse "index 4 / 0"              fp_array_uniform_invalid_const_refuse_f "divides by zero"
+# (int)(bool)(float)0.5 is element 1 to the reference (the fraction is
+# truthy); this evaluator cannot carry the fraction through the casts and
+# refuses by name rather than reading element 0 (review: codex; flips to an
+# accept row when the typed evaluator serves the index path).
+refuse "(int)(bool)(float)0.5 (reference: element 1)" fp_array_uniform_cast_bool_float_f "floating value"
+refuse "(fixed)3 (reference: element 1; clamp is the typed evaluator's)" fp_array_uniform_fixed_cast_refuse_f "floating value"
 refuse "float4x4 element array"   fp_array_uniform_matrix_refuse_f       "element type this lowering does not lay out"
-refuse "float-typed index (parent refuses; reference accepts)" fp_array_uniform_cast_float_refuse_f "array index must have integral type"
 
 # SELF-CHECK: an exit-1 stub that leaves an EMPTY artifact, and one that
 # refuses for an unrelated reason, must both be rejected by the checker.

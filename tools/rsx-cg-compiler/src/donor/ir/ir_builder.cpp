@@ -2929,9 +2929,119 @@ bool checkedMul(int64_t a, int64_t b, int64_t& out)
     out = a * b; return true;
 }
 
+// THIS EVALUATOR HOLDS ONE int64 AND CANNOT CARRY A FLOATING VALUE between
+// operations.  The reference evaluates a floating index expression in
+// float and truncates ONCE on the result: u[1.7 * 2] is element 3,
+// u[((float)3 / 2) * 2] is element 3, u[(int)(bool)(float)0.5] is element
+// 1 (the fraction is truthy).  Truncating leaf by leaf read those as 2, 2
+// and 0 (review: codex found the second and third, the second with no
+// float literal in it at all).  So the only floating shapes evaluated
+// here are the two whose measured rule is exactly one truncation - a bare
+// float literal (or its negation), and a cast to a floating type around a
+// constant this evaluator can already hold - and EVERY OTHER constant
+// expression with a floating leaf is REFUSED BY NAME rather than read
+// wrongly, until the typed constant evaluator (t_65e1b7fa) serves this
+// path.  An expression that names a VARIABLE is the run-time path's, typed,
+// as before.
+static bool isFloatingTarget(const TypeNode* t)
+{
+    return t && (t->baseType == BaseType::Float || t->baseType == BaseType::Half ||
+                 t->baseType == BaseType::Fixed);
+}
+
+static bool isFloatLiteral(const ExprNode* e)
+{
+    return e && e->kind == ExprKind::Literal &&
+           static_cast<const LiteralExpr*>(e)->literalKind == LiteralExpr::LiteralKind::Float;
+}
+
+static bool containsFloatingLeaf(const ExprNode* e)
+{
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Literal:
+        return isFloatLiteral(e);
+    case ExprKind::Unary:
+        return containsFloatingLeaf(static_cast<const UnaryExpr*>(e)->operand.get());
+    case ExprKind::Binary:
+    {
+        auto* b = static_cast<const BinaryExpr*>(e);
+        return containsFloatingLeaf(b->left.get()) || containsFloatingLeaf(b->right.get());
+    }
+    case ExprKind::Cast:
+    {
+        auto* c = static_cast<const CastExpr*>(e);
+        return isFloatingTarget(c->targetType.get()) ||
+               containsFloatingLeaf(c->operand.get());
+    }
+    default:
+        return false;
+    }
+}
+
+// Does the expression name anything that is not a constant (a variable, a
+// member, a call, an element)?  Then it is a run-time index whatever else
+// it contains.
+static bool containsNonConstant(const ExprNode* e)
+{
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Literal:
+        return false;
+    case ExprKind::Unary:
+        return containsNonConstant(static_cast<const UnaryExpr*>(e)->operand.get());
+    case ExprKind::Binary:
+    {
+        auto* b = static_cast<const BinaryExpr*>(e);
+        return containsNonConstant(b->left.get()) || containsNonConstant(b->right.get());
+    }
+    case ExprKind::Cast:
+        return containsNonConstant(static_cast<const CastExpr*>(e)->operand.get());
+    default:
+        return true;
+    }
+}
+
 IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& why)
 {
     if (!e) { why = "array index is missing"; return IndexEval::Invalid; }
+    {
+        // The two floating shapes this evaluator may hold (see above):
+        // a bare float literal or its negation, and a cast to a floating
+        // type whose operand carries no floating leaf of its own (u[(float)2]).
+        auto* asCast = e->kind == ExprKind::Cast ? static_cast<const CastExpr*>(e) : nullptr;
+        const bool bareFloat = isFloatLiteral(e) ||
+            (e->kind == ExprKind::Unary &&
+             static_cast<const UnaryExpr*>(e)->op == UnaryOp::Negate &&
+             isFloatLiteral(static_cast<const UnaryExpr*>(e)->operand.get()));
+        // A FIXED cast is never admitted here: fixed clamps to [-2, 2 - 2^-10]
+        // before it is read (the reference reads u[(fixed)3] as element 1),
+        // and that conversion belongs to the typed evaluator.
+        const bool floatingCastOfConstant = asCast &&
+            isFloatingTarget(asCast->targetType.get()) &&
+            asCast->targetType->baseType != BaseType::Fixed &&
+            !containsFloatingLeaf(asCast->operand.get()) &&
+            !containsNonConstant(asCast->operand.get());
+        // ... and an INTEGRAL cast around a bare float literal, u[(int)2.5],
+        // which is one truncation under the cast's own rule (commit A's
+        // measured row: element 2; (int)(bool)2.5 would be element 1).
+        const bool integralCastOfBareFloat = asCast &&
+            !isFloatingTarget(asCast->targetType.get()) &&
+            isFloatLiteral(asCast->operand.get());
+        if (!bareFloat && !floatingCastOfConstant && !integralCastOfBareFloat &&
+            containsFloatingLeaf(e))
+        {
+            if (containsNonConstant(e))
+                return IndexEval::Runtime;
+            why = "array index is a constant expression with a floating value; "
+                  "this compiler does not evaluate it at compile time yet and "
+                  "refuses rather than truncating a subexpression (the reference "
+                  "evaluates it in float and truncates the result)";
+            return IndexEval::Invalid;
+        }
+    }
     switch (e->kind)
     {
     case ExprKind::Literal:
@@ -2940,6 +3050,27 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
         if (lit->literalKind == LiteralExpr::LiteralKind::Int)
         {
             out = std::get<int64_t>(lit->value);
+            return IndexEval::Constant;
+        }
+        if (lit->literalKind == LiteralExpr::LiteralKind::Float)
+        {
+            // A float constant index TRUNCATES toward zero, as int() does
+            // and as the reference reads it: u[1.7] is u[1], u[-0.5] is
+            // u[0] (measured, t_050bebce).  Arithmetic over float leaves
+            // is left to the run-time path (see Binary below), because
+            // truncating each leaf first would read u[1.7 * 2] as element
+            // 2 where the reference reads element 3.
+            // The reference holds a float literal in SINGLE precision: the
+            // rounding happens before any conversion (4294967297.0 is
+            // 4294967296 by the time an unsigned cast wraps it - codex's
+            // boundary rows), so the lexer's double is narrowed first.
+            const double d = static_cast<double>(static_cast<float>(std::get<double>(lit->value)));
+            if (!(d > -9.2e18 && d < 9.2e18))
+            {
+                why = "array index constant overflows";
+                return IndexEval::Invalid;
+            }
+            out = static_cast<int64_t>(d);
             return IndexEval::Constant;
         }
         why = "array index must be an integer constant expression";
@@ -3021,14 +3152,31 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
              t->baseType == BaseType::UShort || t->baseType == BaseType::Char ||
              t->baseType == BaseType::UChar))
         {
-            const double d = std::get<double>(static_cast<const LiteralExpr*>(operand)->value);
-            if (!(d > -9.2e18 && d < 9.2e18))
+            // Single precision first, as above: (unsigned char)4294967297.0
+            // and (unsigned int)4294967297.0 are element 0 to the reference,
+            // because the literal is 4294967296 before the wrap.
+            const double d = static_cast<double>(static_cast<float>(
+                std::get<double>(static_cast<const LiteralExpr*>(operand)->value)));
+            const bool unsignedTarget = t->baseType == BaseType::UInt ||
+                                        t->baseType == BaseType::UShort ||
+                                        t->baseType == BaseType::UChar;
+            if (t->baseType == BaseType::Bool)
+                v = d != 0.0 ? 1 : 0;
+            else if (d != d || !(d > -9.2e18 && d < 9.2e18))
             {
                 why = "array index constant overflows";
                 return IndexEval::Invalid;
             }
-            v = t->baseType == BaseType::Bool ? (d != 0.0 ? 1 : 0)
-                                              : static_cast<int64_t>(d);
+            else if (!unsignedTarget && !(d > -2147483649.0 && d < 2147483648.0))
+                // A SIGNED target out of int32 range: the reference's
+                // float-to-int folds to INT_MIN (the x86 indefinite value,
+                // measured on t_65e1b7fa), so u[(int)4294967296.0] is out of
+                // bounds.  An UNSIGNED target wraps instead - the reference
+                // reads u[(unsigned int)4294967296.0] as element 0 (review:
+                // codex) - and the narrowing below does that.
+                v = INT32_MIN;
+            else
+                v = static_cast<int64_t>(d);
         }
         else
         {
@@ -3044,6 +3192,13 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
         case BaseType::UShort: out = static_cast<int64_t>(static_cast<uint16_t>(v)); return IndexEval::Constant;
         case BaseType::Char:   out = static_cast<int64_t>(static_cast<int8_t>(v));   return IndexEval::Constant;
         case BaseType::UChar:  out = static_cast<int64_t>(static_cast<uint8_t>(v));  return IndexEval::Constant;
+        case BaseType::Float:
+        case BaseType::Half:
+            // Only reached for a float/half cast around a constant with no
+            // floating leaf of its own (the top of this function refuses
+            // every other floating shape by name, fixed included):
+            // u[(float)2] is u[2].
+            out = v; return IndexEval::Constant;
         default:
             why = "array index constant cast to '" + baseTypeToString(t->baseType) +
                   "' is not evaluated";
@@ -3144,6 +3299,23 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 indexValue = buildExpr(expr->index.get());
                 if (indexValue == InvalidIRValue)
                     return InvalidIRValue;
+                // A FLOAT or HALF index is int(index): the reference emits
+                // the same address-register load for u[idx] and u[int(idx)]
+                // with a float idx (t_050bebce).  The cast is what the
+                // lowering folds into the ARL (vertex) or, when the value
+                // is a constant, into the element read on either profile.
+                const IRTypeInfo indexType = getExprType(expr->index.get());
+                if (indexType.baseType == IRType::Float32 ||
+                    indexType.baseType == IRType::Float16)
+                {
+                    const IRValueID castId = currentFunction_->allocateValueId();
+                    auto cast = std::make_unique<IRInstruction>(
+                        IROp::FloatToInt, castId, IRTypeInfo::Int());
+                    cast->addOperand(indexValue);
+                    cast->loc = expr->index->loc;
+                    currentBlock_->addInstruction(std::move(cast));
+                    indexValue = castId;
+                }
             }
 
             IRTypeInfo resultType = getExprType(expr);

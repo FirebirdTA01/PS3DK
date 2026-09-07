@@ -847,8 +847,13 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
         return CgType::Error();
     }
 
-    // Index must be integral
-    if (!indexType.isIntegral())
+    // An integral index, or a FLOATING one: the reference accepts a
+    // float or half index with int() semantics - a constant truncates
+    // toward zero (u[1.7] is u[1], u[-0.5] is u[0], u[4.0] on four
+    // elements is C1068), and a run-time float index is the same address
+    // register load as u[int(idx)] (t_050bebce).  The builder inserts the
+    // truncation; the constant evaluator applies it.
+    if (!indexType.isIntegral() && !indexType.isFloatingPoint())
     {
         error(expr->index->loc, "array index must have integral type");
         return CgType::Error();
