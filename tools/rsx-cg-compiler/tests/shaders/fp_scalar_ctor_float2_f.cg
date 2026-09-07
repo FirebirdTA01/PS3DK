@@ -1,0 +1,7 @@
+// t_75de19a1: float2(scalar) - the two-lane broadcast, which the parent
+// refused and this change accepts.  Pinned against the .gg swizzle spelling.
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D image) : COLOR
+{
+    float2 p = float2(tex2D(image, uv).g);
+    return float4(p, 0.0, 1.0);
+}

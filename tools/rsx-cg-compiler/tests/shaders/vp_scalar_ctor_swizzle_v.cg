@@ -1,0 +1,6 @@
+// t_75de19a1 INDEPENDENT control for the vertex broadcast: .www.
+void main(float4 position : POSITION, out float4 oPos : POSITION, out float4 oCol : COLOR0)
+{
+    oPos = position;
+    oCol = float4(position.www, 1.0);
+}

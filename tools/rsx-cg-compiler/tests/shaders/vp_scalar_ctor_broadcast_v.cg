@@ -1,0 +1,8 @@
+// t_75de19a1: the same broadcast in a VERTEX program - float3(p.w) - which
+// the parent refused and this change accepts.  The policy is the
+// constructor's, not the profile's.  Pinned against the .www spelling.
+void main(float4 position : POSITION, out float4 oPos : POSITION, out float4 oCol : COLOR0)
+{
+    oPos = position;
+    oCol = float4(float3(position.w), 1.0);
+}

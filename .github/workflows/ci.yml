@@ -153,6 +153,8 @@ jobs:
       - name: Test rsx-cg-compiler MAD literal operands
         run: bash tests/shader-compiler/mad-literal-operand-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test a vector constructor from one scalar is a broadcast
+        run: bash tests/shader-compiler/scalar-ctor-broadcast-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler vertex constructor lanes
         run: bash tests/shader-compiler/vp-construct-lanes-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

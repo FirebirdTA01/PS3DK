@@ -1,0 +1,14 @@
+// t_75de19a1 negative control: operand widths that do not sum to the result
+// width still take the packer's named refusal, not the broadcast.
+// float3(float2, float2) is four lanes into three.  Measured: the reference
+// ACCEPTS this with warning C7541 ("too much data in type constructor") and
+// truncates; our refusal is a known portability gap, tracked separately -
+// this fixture pins only that the broadcast path does not swallow it.
+struct Result { float4 colour : COLOR; };
+Result main(float2 uv : TEXCOORD0, uniform sampler2D image)
+{
+    Result o;
+    o.colour.rgb = float3(uv, uv);
+    o.colour.a = 1.0;
+    return o;
+}

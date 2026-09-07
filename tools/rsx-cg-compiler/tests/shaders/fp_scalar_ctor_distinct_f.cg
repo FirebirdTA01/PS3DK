@@ -1,0 +1,12 @@
+// t_75de19a1 negative control: three DIFFERENT scalars are not a broadcast.
+// This must keep packing lane by lane and must not compile to the
+// broadcast fixture's bytes - a fold that keyed on width alone would.
+struct Result { float4 colour : COLOR; };
+Result main(float2 uv : TEXCOORD0, uniform sampler2D image)
+{
+    Result o;
+    float4 t = tex2D(image, uv);
+    o.colour.rgb = float3(t.b, t.g, t.r);
+    o.colour.a = 1.0;
+    return o;
+}

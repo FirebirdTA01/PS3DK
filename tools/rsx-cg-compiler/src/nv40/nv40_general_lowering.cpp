@@ -2625,6 +2625,34 @@ private:
             }
         }
 
+        // Scalar broadcast: float3(s), float4(s) and the spelled-out
+        // float3(s, s, s) are ONE MOV with the scalar replicated into every
+        // result lane.  The reference emits exactly that for both spellings
+        // (`MOVR R0.xyz, R0.z` for a .rgb store from a texture's .b) and its
+        // two containers are byte-identical, so one path serves both here.
+        // Before this the single-operand form fell into the packer below,
+        // whose width sum (1) never matches a wider result, and refused;
+        // that refusal was itself the honest replacement for a silent
+        // miscompile that dropped the store (t_c1d781ba), and this is the
+        // third and correct state (t_75de19a1).  resolve() replicates
+        // swizzle[0] for a width-1 value, so the lane a scalar EXTRACT
+        // selected is the lane broadcast - never lane 0 forced.
+        if (resultWidth > 1) {
+            bool sameScalar = valueWidthOf(inst.operands[0]) == 1;
+            for (size_t i = 1; sameScalar && i < inst.operands.size(); i++)
+                sameScalar = inst.operands[i] == inst.operands[0];
+            if (sameScalar) {
+                const int dstReg = define(inst.result);
+                VInstr vi;
+                vi.op = VOp::Mov;
+                vi.dst.index = dstReg;
+                vi.dst.writemask = componentMaskForWidth(resultWidth);
+                vi.srcs[0] = resolve(inst.operands[0]);
+                program_.instrs.push_back(vi);
+                return;
+            }
+        }
+
         // General packer: one MOV per operand into contiguous lanes.
         // Requires every operand's width to be KNOWN from the IR value
         // table and the widths to sum to the result width; anything less

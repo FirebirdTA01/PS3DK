@@ -1,0 +1,11 @@
+// t_75de19a1: float3(scalar) into a struct-member .rgb store.  The reference
+// lowers it to one broadcast MOV (MOVR R0.xyz, R0.z) and compiles it to the
+// same bytes as the spelled-out float3(b, b, b) form.
+struct Result { float4 colour : COLOR; };
+Result main(float2 uv : TEXCOORD0, uniform sampler2D image)
+{
+    Result o;
+    o.colour.rgb = float3(tex2D(image, uv).b);
+    o.colour.a = 1.0;
+    return o;
+}

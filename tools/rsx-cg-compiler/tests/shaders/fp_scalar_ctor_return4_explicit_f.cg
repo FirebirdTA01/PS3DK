@@ -1,0 +1,6 @@
+// t_75de19a1: the spelled-out control for fp_scalar_ctor_return4_f.
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D image) : COLOR
+{
+    float g = tex2D(image, uv).g;
+    return float4(g, g, g, g);
+}

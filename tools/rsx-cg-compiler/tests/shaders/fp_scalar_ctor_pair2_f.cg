@@ -1,0 +1,10 @@
+// t_75de19a1 negative control at the width boundary: a REPEATED NON-SCALAR
+// operand.  float4(h, h) with a float2 h is two width-2 operands that sum to
+// the result width - the packer's shape, not the broadcast's.  A broadcast
+// keyed on operand identity alone would emit one xyzw MOV reading .xyyy and
+// put h.y into lane z where h.x belongs: same size, wrong program.
+float4 main(float4 c : TEXCOORD0) : COLOR
+{
+    float2 h = c.xy;
+    return float4(h, h);
+}
