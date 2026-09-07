@@ -70,6 +70,11 @@ void Preprocessor::setKeepComments(bool value)
 	keepComments = value;
 }
 
+void Preprocessor::setSourceTextHook(SourceTextHook hook)
+{
+	sourceTextHook_ = std::move(hook);
+}
+
 std::string Preprocessor::process(const std::string& source, const std::string& filename)
 {
 	// Phase 1: Handle backslash-newline continuation (line splicing)
@@ -1676,7 +1681,18 @@ std::string Preprocessor::readFile(const std::string& filepath)
 
 	std::stringstream buffer;
 	buffer << file.rdbuf();
-	return buffer.str();
+	std::string text = buffer.str();
+	// The hook sees this file's raw bytes and nothing else, before the
+	// caller's emptiness check and before any #line text is put in front
+	// of them: a rule about how a file may BEGIN has to run where offset 0
+	// is still offset 0.  What the hook leaves behind is what the include
+	// is: a header that is only a byte order mark, admitted, is an empty
+	// header and is treated exactly as an empty header is.
+	if (sourceTextHook_)
+	{
+		sourceTextHook_(text, filepath);
+	}
+	return text;
 }
 
 std::string Preprocessor::trim(const std::string& str)

@@ -40,3 +40,9 @@ patches/** -text
 *.tar.xz binary
 *.tar.zst binary
 *.zip binary
+
+# Extension fixtures carry deliberate leading bytes (a UTF-8 BOM, a U+00A9)
+# and deliberately empty files; no normalisation may touch them or the
+# extension tests pass while proving nothing (t_f16682d5).  The test checks
+# their first bytes before it judges anything.
+tools/rsx-cg-compiler/tests/shaders/extensions/** -text

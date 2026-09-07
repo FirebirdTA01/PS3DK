@@ -1,0 +1,2 @@
+#include "inc_empty.h"
+float4 main(float4 c : COLOR0) : COLOR { return c * 0.5; }
