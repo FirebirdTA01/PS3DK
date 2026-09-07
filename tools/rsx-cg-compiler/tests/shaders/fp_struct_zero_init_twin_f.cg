@@ -1,0 +1,11 @@
+// The explicit twin of fp_struct_zero_init_f: the two spellings are the
+// same program.
+struct OUT { float4 c : COLOR; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	OUT o;
+	o.c = float4(0, 0, 0, 0);
+	o.c.xy = p.xy;
+	return o.c;
+}

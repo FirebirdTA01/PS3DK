@@ -1,0 +1,12 @@
+// `OUT o = (OUT)0;` fills every leaf with the scalar.  Semantic analysis
+// used to refuse the cast outright - "cannot cast from 'int' to 'struct'" -
+// which is 16 rows of the reference-SDK sweep, where clearing an output
+// struct this way is the usual spelling (t_cde25bad follow-up).
+struct OUT { float4 c : COLOR; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	OUT o = (OUT)0;
+	o.c.xy = p.xy;
+	return o.c;
+}

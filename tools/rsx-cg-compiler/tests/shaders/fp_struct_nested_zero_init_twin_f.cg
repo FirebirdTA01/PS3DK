@@ -1,0 +1,10 @@
+struct INNER { float4 v; };
+struct OUT { INNER i; float4 c : COLOR; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	OUT o;
+	o.i.v = float4(0, 0, 0, 0);
+	o.i.v.xy = p.xy;
+	return o.i.v;
+}

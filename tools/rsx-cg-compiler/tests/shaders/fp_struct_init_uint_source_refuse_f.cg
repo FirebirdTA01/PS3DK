@@ -1,0 +1,12 @@
+// An UNSIGNED SOURCE into a signed leaf: the value keeps its UInt SSA form
+// through the default path, so this read +2147483648 where the reference
+// reads -2147483648 (codex).  Removing unsigned TARGETS did not cover
+// unsigned SOURCES - both directions are refused by name.
+static const unsigned int U = 2147483648;
+struct S { int i; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	S s = (S)U;
+	return float4(float(s.i), 2.0, 3.0, 4.0);
+}

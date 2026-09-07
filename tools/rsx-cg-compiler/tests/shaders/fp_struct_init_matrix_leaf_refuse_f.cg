@@ -1,0 +1,11 @@
+// A MATRIX leaf: the fill converted through the matrix's BASE type rather
+// than its element type, so a half2x2 filled from 1.00048828125 kept the
+// float value where the reference rounds to 1.0009765625 (codex).  Refused
+// with the rest of the conversion boundary.
+struct S { half2x2 m; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	S s = (S)1.00048828125;
+	return float4(s.m[0][0], s.m[0][1], s.m[1][0], s.m[1][1]);
+}

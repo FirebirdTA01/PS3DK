@@ -1,0 +1,2 @@
+struct OUT { float4 a; float4 c; };
+float4 main(float4 p : TEXCOORD0) : COLOR { OUT o; o.a = float4(1,1,1,1); o.c = float4(1,1,1,1); o.a.xy = p.xy; return o.c + o.a; }

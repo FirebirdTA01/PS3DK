@@ -1,0 +1,11 @@
+// An UNSIGNED leaf needs the signedness conversion, which this slice does
+// not do either: `(S)(-1)` emitted -1 where the reference wraps to the
+// unsigned value (codex, review of this commit).  Same class as the bool,
+// fixed and narrow-integer leaves, same answer - refused by name.
+struct S { unsigned int i; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	S s = (S)(-1);
+	return float4(float(s.i), 2.0, 3.0, 4.0);
+}

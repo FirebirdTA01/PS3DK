@@ -1,0 +1,9 @@
+// A scalar cannot initialise a sampler, so the cast stays refused for a
+// struct that holds one.  Without this row the rule would be "any struct".
+struct HOLDER { sampler2D s; float4 c : COLOR; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	HOLDER h = (HOLDER)0;
+	return h.c;
+}

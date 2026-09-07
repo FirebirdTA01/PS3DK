@@ -1,0 +1,9 @@
+// The SECOND leaf is read after a `(S)1` fill.  Every other fixture in
+// this family reads a single-field struct or the FIRST field of a nested
+// one, so a fill that stops after the first leaf is INVISIBLE to them -
+// measured by Fable 2026-09-14 with a bindLeaves-breaks-after-first
+// mutant that left all three original twins byte-identical.  A non-zero
+// fill is used deliberately: a dropped ZERO looks correct on a register
+// that happens to be clear.
+struct OUT { float4 a; float4 c; };
+float4 main(float4 p : TEXCOORD0) : COLOR { OUT o = (OUT)1; o.a.xy = p.xy; return o.c + o.a; }

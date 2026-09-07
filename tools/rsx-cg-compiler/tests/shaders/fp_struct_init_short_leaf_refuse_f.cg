@@ -1,0 +1,14 @@
+// A leaf type whose conversion this slice does not do: the reference
+// applies the LEAF's rule - bool is a truth test, fixed clamps to
+// [-2, 2 - 2^-10], short wraps - and writing the scalar through unchanged
+// is a wrong VALUE, not a formatting difference (codex measured (S)0.5 into
+// a bool leaf as 0.5 against the reference's 1, (S)3.0 into fixed as 3
+// against 1.9990234375, and (S)65537 into short as 65537 against 1).
+// Refused by name until the typed evaluator owns those conversions.
+struct S { short f; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	S s = (S)65537;
+	return float4(float(s.f), 2.0, 3.0, 4.0);
+}

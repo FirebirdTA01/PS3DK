@@ -1,4 +1,5 @@
 #include "semantic.h"
+#include <functional>
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -1050,6 +1051,81 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
     if (targetType.isError() || operandType.isError())
     {
         return CgType::Error();
+    }
+
+    // A STRUCT FILL'S SOURCE KIND IS BOUNDED LIKE ITS LEAVES, and this check
+    // has to sit OUTSIDE the conversion fallback below: a struct whose leaves
+    // are all admitted answers TRUE from canExplicitlyConvert, so anything
+    // placed in that fallback is skipped for exactly the shapes it is meant
+    // to judge (codex).  A fixed, narrow-integer or UNSIGNED source carries
+    // its own conversion - the reference reads (S)((fixed)3.0) as
+    // 1.9990234375, (S)((short)65537) as 1, and an unsigned 2147483648 into a
+    // signed leaf as -2147483648 - and this fill would write it through.
+    // Those scalar casts are already wrong outside any struct, so the repair
+    // is on their own card; what this refuses is EXPOSING them through a new
+    // acceptance.
+    if (targetType.isStruct() && operandType.isNumeric())
+    {
+        const ScalarKind kind = operandType.scalarKind();
+        if (kind != ScalarKind::Float && kind != ScalarKind::Half &&
+            kind != ScalarKind::Int)
+        {
+            error(expr->loc, "cannot cast from '" + operandType.toString() +
+                  "' to '" + targetType.toString() + "'");
+            return CgType::Error();
+        }
+    }
+
+    // A SCALAR CAST TO A STRUCT fills every leaf - `OUT o = (OUT)0;`.  The
+    // type rules answer it for a flat struct, but a NESTED field's TypeNode
+    // may carry only the struct's name, and resolving that needs the symbol
+    // table, which lives here rather than in types.cpp.
+    if (!operandType.isExplicitlyConvertibleTo(targetType) &&
+        operandType.isNumeric() && targetType.isStruct())
+    {
+        std::function<bool(const CgType&, int)> leavesAreNumeric =
+            [&](const CgType& type, int depth) -> bool {
+            if (depth > 8) return false;
+            const auto& fields = type.structFields();
+            if (fields.empty()) return false;
+            for (const auto& field : fields)
+            {
+                if (!field.type) return false;
+                const CgType resolved = resolveType(field.type.get());
+                if (resolved.isError()) return false;
+                if (resolved.isStruct())
+                {
+                    if (!leavesAreNumeric(resolved, depth + 1)) return false;
+                    continue;
+                }
+                if (resolved.isArray()) return false;
+                if (resolved.isMatrix()) return false;
+                // Matrix leaves are refused with the rest of the boundary -
+                // the fill converted through the matrix's base type rather
+                // than its element type (codex).
+                if (!resolved.isNumeric() && !resolved.isVector())
+                    return false;
+                // Only the leaf types the fill can convert - see the same
+                // switch in types.cpp: bool, fixed and the narrow integers
+                // each need their own conversion and are refused by name
+                // rather than written through unchanged.
+                switch (resolved.scalarKind())
+                {
+                case ScalarKind::Float:
+                case ScalarKind::Half:
+                case ScalarKind::Int:
+                    break;
+                default:
+                    // UInt too: `(S)(-1)` into an unsigned leaf emitted -1
+                    // where the reference wraps (codex).  The signedness
+                    // conversion is as missing as bool's truth test.
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (leavesAreNumeric(targetType, 0))
+            return targetType;
     }
 
     if (!operandType.isExplicitlyConvertibleTo(targetType))

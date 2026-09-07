@@ -1,0 +1,9 @@
+// The narrow-integer twin: the reference reads (S)((short)65537) as 1 and
+// this fill would write 65537 through.  Same reasoning as the fixed source.
+struct S { float f; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	S s = (S)((short)65537);
+	return float4(float(s.f), 2.0, 3.0, 4.0);
+}
