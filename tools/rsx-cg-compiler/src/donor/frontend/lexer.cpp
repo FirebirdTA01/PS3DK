@@ -636,29 +636,38 @@ Token Lexer::scanNumber(int startLine, int startColumn)
     // Decimal part: at most one decimal point
     if (!hasDecimal && peek() == '.')
     {
-        char next = peek(1);
-        if (std::isdigit(next) || next == 'f' || next == 'F' || next == 'h' || next == 'H' ||
-            next == 'e' || next == 'E' || (!std::isalpha(next) && next != '_'))
+        hasDecimal = true;
+        advance(); // consume '.'
+        while (std::isdigit(peek())) 
         {
-            hasDecimal = true;
-            advance(); // consume '.'
-            while (std::isdigit(peek())) 
-            {
-                advance();
-            }
+            advance();
         }
     }
 
     // Scientific notation
     if (peek() == 'e' || peek() == 'E')
     {
-        hasExponent = true;
-        advance(); // consume 'e' or 'E'
-        if (peek() == '+' || peek() == '-') // optional sign
-            advance();
-        while (std::isdigit(peek()))
+        size_t lookahead = 1;
+        if (peek(lookahead) == '+' || peek(lookahead) == '-')
+            lookahead++;
+        if (std::isdigit(peek(lookahead)))
         {
-            advance();
+            hasExponent = true;
+            advance(); // consume 'e' or 'E'
+            if (peek() == '+' || peek() == '-') // optional sign
+                advance();
+            while (std::isdigit(peek()))
+            {
+                advance();
+            }
+        }
+        else
+        {
+            // 'e' without digits is a malformed exponent (C0124 in reference)
+            advance(); // consume 'e'
+            if (peek() == '+' || peek() == '-')
+                advance();
+            return { TokenType::UNKNOWN, source.substr(start, currentPos - start), startLine, startColumn, filename };
         }
     }
 

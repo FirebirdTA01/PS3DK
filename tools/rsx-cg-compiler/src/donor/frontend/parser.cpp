@@ -1175,6 +1175,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
     // Check for default value
     if (match(TokenType::OP_ASSIGN))
     {
+        error(param->loc, "default parameter values are not supported");
         if (check(TokenType::LBRACE))
             param->defaultValue = parseBracedInitializerExpression(param->type);
         else
@@ -1458,16 +1459,40 @@ std::unique_ptr<StmtNode> Parser::parseStatement()
         return std::make_unique<EmptyStmt>(currentLocation());
     }
 
-    // Flow control and statement attributes: [branch], [flatten], [unroll], etc.
+    // Flow control statement attributes: [branch] or [flatten] before 'if'
     while (check(TokenType::LBRACKET))
     {
+        SourceLocation attrLoc = currentLocation();
         advance(); // consume '['
-        int depth = 1;
-        while (!isAtEnd() && depth > 0)
+        if (!check(TokenType::IDENTIFIER))
         {
-            if (check(TokenType::LBRACKET)) depth++;
-            else if (check(TokenType::RBRACKET)) depth--;
-            advance();
+            error(attrLoc, "expected attribute name after '['");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        std::string attrName = advance().lexeme;
+        if (attrName != "branch" && attrName != "flatten")
+        {
+            error(attrLoc, "unknown attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!match(TokenType::RBRACKET))
+        {
+            error(attrLoc, "expected ']' after attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!check(TokenType::KW_IF))
+        {
+            error(attrLoc, "attribute '" + attrName + "' is only supported on if statements");
+            return nullptr;
         }
     }
 
