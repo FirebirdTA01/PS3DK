@@ -836,7 +836,7 @@ CgType SemanticAnalyzer::analyzeMemberAccessExpr(MemberAccessExpr* expr)
         return *fieldType;
     }
 
-    // Check for swizzle on vector
+    // Check for swizzle on vector or scalar
     if (objectType.isVector() || objectType.isScalar())
     {
         validateSwizzle(expr, objectType);
