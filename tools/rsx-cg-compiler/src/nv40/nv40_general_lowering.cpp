@@ -2723,6 +2723,41 @@ private:
         program_.valueToSource[inst.result] = src;
     }
 
+    void appendInsertMove(VInstr move)
+    {
+        move.preservePartialOutputMask = true;
+        if (!program_.instrs.empty()) {
+            VInstr& prior = program_.instrs.back();
+            const VSrc& a = prior.srcs[0];
+            const VSrc& b = move.srcs[0];
+            // Merge only adjacent ordinary MOVs with disjoint writes and
+            // the same source storage. Swizzles remain lane-specific.
+            // A self-read must stay sequential: MOV v.x,v.y; MOV v.z,v.x
+            // cannot become a simultaneous two-lane MOV.
+            if (prior.op == VOp::Mov && !prior.dst.output && !prior.dst.none &&
+                !prior.dst.address && !prior.dst.outputPin && !prior.dst.fp16 &&
+                prior.dst.preferredPhys == -1 && prior.dst.index == move.dst.index &&
+                !(prior.dst.writemask & move.dst.writemask) &&
+                !prior.sat && !prior.ccUpdate && prior.predicate == 0 &&
+                !prior.disablePc && prior.fpScale == 0 && prior.fpPrecisionOverride == -1 &&
+                !prior.stubFenceBefore && !prior.stubFenceBrBefore &&
+                a.kind == b.kind && a.index == b.index && a.fp16 == b.fp16 &&
+                a.embeddedUniform == b.embeddedUniform && a.literalLanes == b.literalLanes &&
+                std::memcmp(a.literal.data(), b.literal.data(), sizeof(a.literal)) == 0 &&
+                a.neg == b.neg && a.abs == b.abs && a.relative == b.relative &&
+                a.addrReg == b.addrReg && a.addrLane == b.addrLane &&
+                !(b.kind == VSrcKind::Temp && b.index == move.dst.index)) {
+                for (int lane = 0; lane < 4; ++lane)
+                    if (move.dst.writemask & (1 << lane))
+                        prior.srcs[0].swizzle[lane] = b.swizzle[lane];
+                prior.dst.writemask |= move.dst.writemask;
+                prior.preservePartialOutputMask = true;
+                return;
+            }
+        }
+        program_.instrs.push_back(move);
+    }
+
     void lowerVecInsert(const IRInstruction& inst)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
@@ -2800,7 +2835,7 @@ private:
                 // the red channel broadcast into green and blue
                 // (t_856689b2's remaining four).  broadcastScalar's own
                 // comment warns against exactly this.
-                program_.instrs.push_back(lane_);
+                appendInsertMove(lane_);
                 return;
             }
 
@@ -2819,7 +2854,7 @@ private:
             // the red channel broadcast into green and blue
             // (t_856689b2's remaining four).  broadcastScalar's own
             // comment warns against exactly this.
-            program_.instrs.push_back(vi);
+            appendInsertMove(vi);
             return;
         }
 
@@ -2846,7 +2881,7 @@ private:
             insert.dst.index = resultReg;
             insert.dst.writemask = laneMask;
             insert.srcs[0] = resolve(inst.operands[1]);
-            program_.instrs.push_back(insert);
+            appendInsertMove(insert);
             return;
         }
 
@@ -2871,7 +2906,7 @@ private:
         // the red channel broadcast into green and blue
         // (t_856689b2's remaining four).  broadcastScalar's own
         // comment warns against exactly this.
-        program_.instrs.push_back(vi);
+        appendInsertMove(vi);
     }
 
     void lowerVecConstruct(const IRInstruction& inst)
@@ -6540,6 +6575,14 @@ private:
         }
         const int outMask = storeOutputMask(inst, value);
         const auto regIt = program_.valueToVReg.find(value);
+        unsigned outputValueUses = useCount_[value];
+        if (entry_.isEntryPoint) {
+            for (const auto& block : entry_.blocks)
+                for (const auto& instruction : block->instructions)
+                    if (instruction->op == IROp::Return)
+                        for (IRValueID operand : instruction->operands)
+                            if (operand == value) --outputValueUses;
+        }
         // A half texture export in the full MRT bank needs an explicit
         // conversion MOV. TEX keeps full arithmetic precision, and this
         // bank provides no half storage to round its sampled lanes. Keep
@@ -6671,7 +6714,6 @@ private:
         }
         if (regIt != program_.valueToVReg.end() &&
             !halfTextureConversion &&
-            useCount_[value] == 1 &&
             // A scalar depth producer computes in x.  Merely changing its
             // destination mask to z can also change which source lanes it
             // reads; keep the explicit scalar-to-depth export below.
@@ -6699,12 +6741,18 @@ private:
                                vi.dst.index == regIt->second;
                     }) > 1;
             if (!producer.dst.output && producer.dst.index == regIt->second &&
-                producer.op != VOp::SelPred && !partialMultiwriter) {
+                producer.op != VOp::SelPred && !partialMultiwriter &&
+                (useCount_[value] == 1 ||
+                 // A compacted insert MOV needs no extra export for the
+                 // entry Return, which reads the already-exported value.
+                 (producer.op == VOp::Mov && producer.preservePartialOutputMask &&
+                  outputValueUses == 1))) {
                 markHalfColourDest(producer, outIndex);
                 producer.dst.output = true;
                 producer.dst.index = outIndex;
                 producer.dst.phys = -1;
-                producer.dst.writemask = outMask;
+                producer.dst.writemask = producer.preservePartialOutputMask
+                    ? producer.dst.writemask & outMask : outMask;
                 producer.dst.userClipOutput = isClipOutput;
                 producer.dst.userClipIndex = inst.semanticIndex;
                 return;

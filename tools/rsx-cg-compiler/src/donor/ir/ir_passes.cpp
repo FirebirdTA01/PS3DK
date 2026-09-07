@@ -119,11 +119,54 @@ bool DeadCodeElimination::runOnFunction(IRFunction& func)
     m_usedValues.clear();
     m_isEntryPoint = func.isEntryPoint;
 
+    // A later insert replaces one lane of its base. Bypass older writes
+    // to that lane only along an exclusive-use insert chain: another
+    // reader (including a read-modify-write RHS) must retain its value.
+    std::unordered_map<IRValueID, IRInstruction*> definitions;
+    std::unordered_map<IRValueID, unsigned> uses;
+    for (auto& block : func.blocks) {
+        for (auto& inst : block->instructions) {
+            if (inst->result != InvalidIRValue)
+                definitions[inst->result] = inst.get();
+            for (IRValueID operand : inst->operands)
+                ++uses[operand];
+        }
+    }
+    bool changed = false;
+    for (auto& block : func.blocks) {
+        for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
+            IRInstruction* link = it->get();
+            if (link->op != IROp::VecInsert || !uses[link->result] || link->operands.size() != 2 ||
+                link->componentIndex < 0 || link->componentIndex > 3)
+                continue;
+            unsigned written = 1u << link->componentIndex;
+            auto prior = definitions.find(link->operands[0]);
+            while (prior != definitions.end()) {
+                IRInstruction* older = prior->second;
+                if (older->op != IROp::VecInsert || older->operands.size() != 2 ||
+                    uses[older->result] != 1 || older->componentIndex < 0 ||
+                    older->componentIndex > 3)
+                    break;
+                const unsigned lane = 1u << older->componentIndex;
+                if (written & lane) {
+                    link->operands[0] = older->operands[0];
+                    --uses[older->result];
+                    // The dead node's base edge is replaced by this edge;
+                    // its effective use count therefore stays unchanged.
+                    changed = true;
+                } else {
+                    written |= lane;
+                    link = older;
+                }
+                prior = definitions.find(link->operands[0]);
+            }
+        }
+    }
+
     // Step 1: Find all values that are actually used
     computeUsedValues(func);
 
     // Step 2: Remove instructions whose results are never used
-    bool changed = false;
     for (auto& block : func.blocks)
     {
         auto it = block->instructions.begin();
