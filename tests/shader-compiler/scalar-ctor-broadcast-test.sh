@@ -66,32 +66,22 @@ accept() {  # <stem>
     [[ -s "$work/$1.fpo" ]] || fail "$1 compiled but wrote no container"
 }
 
-# movs <stem>: one line per MOV in the container's ucode, decoded from the
-# words with the field positions in nvfx_shader.h:
-#     dst=R<n> mask=0x<m> src=<type>:R<n> swz=0x<byte>
-# where swz packs the four 2-bit source lane selectors (x=0 y=1 z=2 w=3),
-# so 0xaa is .zzzz, 0x55 is .yyyy, 0xe4 is identity.  The on-disk words
-# are 16-bit-half swapped, and an instruction whose source names a
-# constant is followed by a 16-byte inline block that is data, not a word.
-movs() {
-    python3 - "$work/$1.fpo" <<'PY'
-import struct, sys
-b = open(sys.argv[1], 'rb').read()
-_, _, _, _, _, _, ucsz, uc = struct.unpack_from('>8I', b, 0)
-u = b[uc:uc + ucsz]
-i = 0
-while i + 16 <= len(u):
-    w = []
-    for j in range(4):
-        x = struct.unpack_from('>I', u, i + 4 * j)[0]
-        w.append(((x & 0xffff) << 16) | (x >> 16))
-    i += 16
-    if any((w[k] & 3) == 2 for k in (1, 2, 3)):
-        i += 16
-    if (w[0] >> 24) & 0x3f == 0x01:
-        print('dst=R%d mask=0x%x src=%d:R%d swz=0x%02x' % (
-            (w[0] >> 1) & 0x3f, (w[0] >> 9) & 0xf, w[1] & 3, (w[1] >> 2) & 0x3f, (w[1] >> 9) & 0xff))
-PY
+# insns <stem>: one line per INSTRUCTION, from the shared decoder
+# (fp_sources.py, t_c83277c9).  This file used to carry its own, one of six
+# in the tree; the shared one owns the on-disk half-swap, the inline-constant
+# skip and the opcode-to-arity table, and it names an input source's VARYING
+# instead of the register field - which is always zero for an input, so the
+# `src=1:R0` this file used to match meant nothing.
+#
+#     <n> MOV dst=R<n> mask=<xyzw> prec=<p> sat=<s> end=<e> s0=<src>.<swz>
+#
+# TWO DIFFERENCES THAT MATTER TO THE ROWS BELOW.  The mask is rendered as
+# LANE LETTERS rather than a hex nibble, and EVERY instruction is printed,
+# not only the MOVs - so every count and every negative assertion here is
+# scoped to `MOV`, or a TEX writing R0.xyz in some future fixture would
+# satisfy a row that is about the broadcast.
+insns() {
+    python3 "$repo_root/tests/shader-compiler/fp_sources.py" "$work/$1.fpo"
 }
 
 # Two oracles for each shape, because a single one can be fooled:
@@ -111,10 +101,11 @@ cmp -s "$work/fp_scalar_ctor_broadcast_f.fpo" "$work/fp_scalar_ctor_swizzle3_f.f
     || fail "float3(s) into a member .rgb store did not compile to the bytes of the .bbb swizzle spelling - the broadcast is not a broadcast"
 cmp -s "$work/fp_scalar_ctor_broadcast_f.fpo" "$work/fp_scalar_ctor_explicit_f.fpo" \
     || fail "float3(s) and float3(s, s, s) compiled to different bytes"
-movs fp_scalar_ctor_broadcast_f > "$work/bcast.movs"
-grep -qE '^dst=R0 mask=0x7 src=0:R[0-9]+ swz=0xaa$' "$work/bcast.movs" \
-    || { cat "$work/bcast.movs" >&2; fail "the member store's broadcast MOV is not 'R0.xyz <- temp.zzzz': the scalar's lane (.b) is not what reaches all three lanes"; }
-[[ "$(grep -c '^dst=R0 mask=0x7' "$work/bcast.movs")" == 1 ]] || fail "expected exactly one xyz MOV into R0 for the member store"
+insns fp_scalar_ctor_broadcast_f > "$work/bcast.insns"
+grep -qE '^[0-9]+ MOV dst=R0 mask=xyz .* s0=R[0-9]+[.]zzzz$' "$work/bcast.insns" \
+    || { cat "$work/bcast.insns" >&2; fail "the member store's broadcast MOV is not 'R0.xyz <- temp.zzzz': the scalar's lane (.b) is not what reaches all three lanes"; }
+[[ "$(grep -cE '^[0-9]+ MOV dst=R0 mask=xyz ' "$work/bcast.insns")" == 1 ]] \
+    || fail "expected exactly one xyz MOV into R0 for the member store"
 printf '  %-36s == .bbb, MOV R0.xyz <- .zzzz\n' "float3(scalar) member store"
 
 accept fp_scalar_ctor_return4_explicit_f
@@ -122,15 +113,15 @@ accept fp_scalar_ctor_swizzle4_f
 accept fp_scalar_ctor_return4_f
 cmp -s "$work/fp_scalar_ctor_return4_f.fpo" "$work/fp_scalar_ctor_return4_explicit_f.fpo" \
     || fail "float4(s) on the return path did not compile to the bytes of float4(s, s, s, s)"
-movs fp_scalar_ctor_return4_f > "$work/ret4.movs"
-grep -qE '^dst=R[0-9]+ mask=0xf src=0:R[0-9]+ swz=0x55$' "$work/ret4.movs" \
-    || { cat "$work/ret4.movs" >&2; fail "the float4(s) return has no xyzw MOV reading .yyyy - the scalar's lane (.g) is not what reaches all four lanes"; }
+insns fp_scalar_ctor_return4_f > "$work/ret4.insns"
+grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xyzw .* s0=R[0-9]+[.]yyyy$' "$work/ret4.insns" \
+    || { cat "$work/ret4.insns" >&2; fail "the float4(s) return has no xyzw MOV reading .yyyy - the scalar's lane (.g) is not what reaches all four lanes"; }
 # The .gggg spelling's broadcast MOV has the same decoded fields; its bytes
 # differ from float4(s) only by the extra return-store copy (t_e3af5f18),
 # so the comparison here is on the decoded MOV, not on the container.
-movs fp_scalar_ctor_swizzle4_f > "$work/swz4.movs"
-grep -qE '^dst=R[0-9]+ mask=0xf src=0:R[0-9]+ swz=0x55$' "$work/swz4.movs" \
-    || { cat "$work/swz4.movs" >&2; fail "the .gggg control lost its xyzw .yyyy MOV - the independent oracle for the return shape is broken"; }
+insns fp_scalar_ctor_swizzle4_f > "$work/swz4.insns"
+grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xyzw .* s0=R[0-9]+[.]yyyy$' "$work/swz4.insns" \
+    || { cat "$work/swz4.insns" >&2; fail "the .gggg control lost its xyzw .yyyy MOV - the independent oracle for the return shape is broken"; }
 printf '  %-36s == explicit, MOV xyzw <- .yyyy as .gggg\n' "float4(scalar) return"
 
 # The two-lane shape, float2(s), which the parent refused.  Its bytes are
@@ -139,12 +130,12 @@ printf '  %-36s == explicit, MOV xyzw <- .yyyy as .gggg\n' "float4(scalar) retur
 # pin is the decoded MOV: mask xy reading .yyyy.
 accept fp_scalar_ctor_float2_swizzle_f
 accept fp_scalar_ctor_float2_f
-movs fp_scalar_ctor_float2_f > "$work/f2.movs"
-grep -qE '^dst=R[0-9]+ mask=0x3 src=0:R[0-9]+ swz=0x55$' "$work/f2.movs" \
-    || { cat "$work/f2.movs" >&2; fail "float2(s) has no xy MOV reading .yyyy - the two-lane broadcast is wrong"; }
-movs fp_scalar_ctor_float2_swizzle_f > "$work/f2s.movs"
-grep -qE '^dst=R[0-9]+ mask=0x3 src=0:R[0-9]+ swz=0x55$' "$work/f2s.movs" \
-    || { cat "$work/f2s.movs" >&2; fail "the .gg control lost its xy .yyyy MOV - the independent oracle for float2 is broken"; }
+insns fp_scalar_ctor_float2_f > "$work/f2.insns"
+grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xy .* s0=R[0-9]+[.]yyyy$' "$work/f2.insns" \
+    || { cat "$work/f2.insns" >&2; fail "float2(s) has no xy MOV reading .yyyy - the two-lane broadcast is wrong"; }
+insns fp_scalar_ctor_float2_swizzle_f > "$work/f2s.insns"
+grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xy .* s0=R[0-9]+[.]yyyy$' "$work/f2s.insns" \
+    || { cat "$work/f2s.insns" >&2; fail "the .gg control lost its xy .yyyy MOV - the independent oracle for float2 is broken"; }
 printf '  %-36s MOV xy <- .yyyy as .gg\n' "float2(scalar)"
 
 # The VERTEX profile takes the same path: float3(p.w) in a VP, which the
@@ -176,10 +167,10 @@ printf '  %-36s == .www\n' "vertex float3(scalar)"
 accept fp_scalar_ctor_distinct_f
 cmp -s "$work/fp_scalar_ctor_distinct_f.fpo" "$work/fp_scalar_ctor_broadcast_f.fpo" \
     && fail "float3(t.b, t.g, t.r) compiled to the BROADCAST's bytes - three different scalars were folded into one"
-movs fp_scalar_ctor_distinct_f > "$work/distinct.movs"
-for want in 'mask=0x1 src=0:R[0-9]+ swz=0xaa' 'mask=0x2 src=0:R[0-9]+ swz=0x55' 'mask=0x4 src=0:R[0-9]+ swz=0x00'; do
-    grep -qE "^dst=R0 $want\$" "$work/distinct.movs" \
-        || { cat "$work/distinct.movs" >&2; fail "float3(t.b, t.g, t.r): missing the lane MOV '$want'"; }
+insns fp_scalar_ctor_distinct_f > "$work/distinct.insns"
+for want in 'mask=x .* s0=R[0-9]+[.]zzzz' 'mask=y .* s0=R[0-9]+[.]yyyy' 'mask=z .* s0=R[0-9]+[.]xxxx'; do
+    grep -qE "^[0-9]+ MOV dst=R0 $want\$" "$work/distinct.insns" \
+        || { cat "$work/distinct.insns" >&2; fail "float3(t.b, t.g, t.r): missing the lane MOV '$want'"; }
 done
 printf '  %-36s packed: x<-.z y<-.y z<-.x\n' "float3(a, b, c)"
 
@@ -192,13 +183,16 @@ printf '  %-36s packed: x<-.z y<-.y z<-.x\n' "float3(a, b, c)"
 # reading .xyxy (swizzle 0x44); that merge is a separate packer gap
 # (t_53f9b8ac), and when it lands this row's pins become that single MOV.
 accept fp_scalar_ctor_pair2_f
-movs fp_scalar_ctor_pair2_f > "$work/pair2.movs"
-grep -qE '^dst=R0 mask=0x3 src=1:R[0-9]+ swz=0x04$' "$work/pair2.movs" \
-    || { cat "$work/pair2.movs" >&2; fail "float4(h, h): missing the xy MOV reading the input's .xyxx"; }
-grep -qE '^dst=R0 mask=0xc src=1:R[0-9]+ swz=0x40$' "$work/pair2.movs" \
-    || { cat "$work/pair2.movs" >&2; fail "float4(h, h): missing the zw MOV reading the input's .xxxy"; }
-grep -qE 'mask=0xf' "$work/pair2.movs" \
-    && { cat "$work/pair2.movs" >&2; fail "float4(h, h) emitted a full-mask MOV - a width-2 operand was broadcast as if it were a scalar"; }
+insns fp_scalar_ctor_pair2_f > "$work/pair2.insns"
+grep -qE '^[0-9]+ MOV dst=R0 mask=xy .* s0=TEX0[.]xyxx$' "$work/pair2.insns" \
+    || { cat "$work/pair2.insns" >&2; fail "float4(h, h): missing the xy MOV reading the input's .xyxx"; }
+grep -qE '^[0-9]+ MOV dst=R0 mask=zw .* s0=TEX0[.]xxxy$' "$work/pair2.insns" \
+    || { cat "$work/pair2.insns" >&2; fail "float4(h, h): missing the zw MOV reading the input's .xxxy"; }
+# MOV-scoped on purpose: the shared decoder prints EVERY instruction, so
+# an unanchored 'mask=xyzw' would be satisfied by a TEX in some future
+# version of this fixture and stop being about the broadcast at all.
+grep -qE '^[0-9]+ MOV .* mask=xyzw ' "$work/pair2.insns" \
+    && { cat "$work/pair2.insns" >&2; fail "float4(h, h) emitted a full-mask MOV - a width-2 operand was broadcast as if it were a scalar"; }
 printf '  %-36s packed: xy<-.xy zw<-.xy, no broadcast\n' "float4(h, h), h float2"
 
 # A width mismatch still refuses by name and leaves nothing behind.
