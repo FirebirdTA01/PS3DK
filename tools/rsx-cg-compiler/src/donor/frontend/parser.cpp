@@ -1217,10 +1217,9 @@ StorageQualifier Parser::parseStorageQualifier(bool* sawInline)
     // storage class ("inline float f", "static inline float f").  It is
     // swallowed on either side of the storage decision and reported through
     // `sawInline`; whether it is legal here at all is the caller's to decide.
-    // The storage decision itself is the exact first-match form this had
-    // before inline was added, so a fold order cannot change which of two
-    // orthogonal qualifiers the enum keeps (uniform vs const in
-    // `uniform const`).
+    // The storage decision itself is first-match, with "static const" and
+    // "const static" both canonicalized to StorageQualifier::Const so const
+    // evaluation and immutability are preserved regardless of qualifier order.
     bool inlineSeen = false;
     auto swallowInline = [&]() {
         while (match(TokenType::KW_INLINE))
@@ -1238,15 +1237,15 @@ StorageQualifier Parser::parseStorageQualifier(bool* sawInline)
             return StorageQualifier::InOut;
         if (match(TokenType::KW_CONST))
         {
-            // Handle "const static" combination
-            if (match(TokenType::KW_STATIC))
-                return StorageQualifier::Static;  // static const -> treat as static
+            // Handle "const static" combination: treat as Const
+            match(TokenType::KW_STATIC);
             return StorageQualifier::Const;
         }
         if (match(TokenType::KW_STATIC))
         {
-            // Handle "static const" combination
-            match(TokenType::KW_CONST);  // consume const if present
+            // Handle "static const" combination: treat as Const
+            if (match(TokenType::KW_CONST))
+                return StorageQualifier::Const;
             return StorageQualifier::Static;
         }
         if (match(TokenType::KW_EXTERN))

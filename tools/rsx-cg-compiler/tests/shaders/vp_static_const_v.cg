@@ -1,0 +1,16 @@
+static const float SCALE = 1.5;
+const static float OFFSET = 0.5;
+
+struct VertexInput {
+    float4 pos : POSITION;
+};
+
+struct VertexOutput {
+    float4 pos : POSITION;
+};
+
+VertexOutput main(VertexInput input) {
+    VertexOutput output;
+    output.pos = input.pos * SCALE + OFFSET;
+    return output;
+}

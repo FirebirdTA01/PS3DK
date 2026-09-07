@@ -304,6 +304,12 @@ bool ConstantFolding::tryFoldInstruction(IRFunction& func, IRInstruction* inst)
     case IROp::Sub:
     case IROp::Mul:
     case IROp::Div:
+    case IROp::Mod:
+    case IROp::And:
+    case IROp::Or:
+    case IROp::Xor:
+    case IROp::Shl:
+    case IROp::Shr:
         if (constOperands.size() == 2)
         {
             result = foldBinaryOp(func, inst->op, constOperands[0], constOperands[1]);
@@ -311,6 +317,8 @@ bool ConstantFolding::tryFoldInstruction(IRFunction& func, IRInstruction* inst)
         break;
 
     case IROp::Neg:
+    case IROp::Not:
+    case IROp::IntToFloat:
         if (constOperands.size() == 1)
         {
             result = foldUnaryOp(func, inst->op, constOperands[0]);
@@ -345,6 +353,85 @@ bool ConstantFolding::tryFoldInstruction(IRFunction& func, IRInstruction* inst)
 IRConstant* ConstantFolding::foldBinaryOp(IRFunction& func, IROp op,
                                           const IRConstant* lhs, const IRConstant* rhs)
 {
+    const bool lhsInt = std::holds_alternative<int32_t>(lhs->value);
+    const bool lhsUInt = std::holds_alternative<uint32_t>(lhs->value);
+    const bool rhsInt = std::holds_alternative<int32_t>(rhs->value);
+    const bool rhsUInt = std::holds_alternative<uint32_t>(rhs->value);
+    if ((lhsInt || lhsUInt) && (rhsInt || rhsUInt))
+    {
+        const bool isUnsigned = lhsUInt || rhsUInt ||
+                                lhs->type.baseType == IRType::UInt32 ||
+                                rhs->type.baseType == IRType::UInt32;
+        if (isUnsigned)
+        {
+            const uint32_t a = lhsUInt ? std::get<uint32_t>(lhs->value)
+                                       : static_cast<uint32_t>(std::get<int32_t>(lhs->value));
+            const uint32_t b = rhsUInt ? std::get<uint32_t>(rhs->value)
+                                       : static_cast<uint32_t>(std::get<int32_t>(rhs->value));
+            uint32_t result = 0;
+            switch (op)
+            {
+            case IROp::Add: result = a + b; break;
+            case IROp::Sub: result = a - b; break;
+            case IROp::Mul: result = a * b; break;
+            case IROp::Div:
+                if (b == 0) return nullptr;
+                result = a / b;
+                break;
+            case IROp::Mod:
+                if (b == 0) return nullptr;
+                result = a % b;
+                break;
+            case IROp::And: result = a & b; break;
+            case IROp::Or:  result = a | b; break;
+            case IROp::Xor: result = a ^ b; break;
+            case IROp::Shl:
+                result = a << (b & 31);
+                break;
+            case IROp::Shr:
+            case IROp::UShr:
+                result = a >> (b & 31);
+                break;
+            default: return nullptr;
+            }
+            return func.createConstant(IRTypeInfo::UInt(), result);
+        }
+        else
+        {
+            const int32_t a = std::get<int32_t>(lhs->value);
+            const int32_t b = std::get<int32_t>(rhs->value);
+            int32_t result = 0;
+            switch (op)
+            {
+            case IROp::Add: result = static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b)); break;
+            case IROp::Sub: result = static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b)); break;
+            case IROp::Mul: result = static_cast<int32_t>(static_cast<uint32_t>(a) * static_cast<uint32_t>(b)); break;
+            case IROp::Div:
+                if (b == 0 || (a == INT32_MIN && b == -1)) return nullptr;
+                result = a / b;
+                break;
+            case IROp::Mod:
+                if (b == 0 || (a == INT32_MIN && b == -1)) return nullptr;
+                result = a % b;
+                break;
+            case IROp::And: result = a & b; break;
+            case IROp::Or:  result = a | b; break;
+            case IROp::Xor: result = a ^ b; break;
+            case IROp::Shl:
+                result = static_cast<int32_t>(static_cast<uint32_t>(a) << (b & 31));
+                break;
+            case IROp::Shr:
+                result = a >> (b & 31);
+                break;
+            case IROp::UShr:
+                result = static_cast<int32_t>(static_cast<uint32_t>(a) >> (b & 31));
+                break;
+            default: return nullptr;
+            }
+            return func.createConstant(IRTypeInfo::Int(), result);
+        }
+    }
+
     // Only handle float constants for now
     if (!std::holds_alternative<float>(lhs->value) ||
         !std::holds_alternative<float>(rhs->value))
@@ -370,21 +457,48 @@ IRConstant* ConstantFolding::foldBinaryOp(IRFunction& func, IROp op,
 
 IRConstant* ConstantFolding::foldUnaryOp(IRFunction& func, IROp op, const IRConstant* operand)
 {
+    if (std::holds_alternative<int32_t>(operand->value))
+    {
+        const int32_t a = std::get<int32_t>(operand->value);
+        switch (op)
+        {
+        case IROp::Neg: return func.createConstant(IRTypeInfo::Int(), static_cast<int32_t>(-static_cast<uint32_t>(a)));
+        case IROp::Not: return func.createConstant(IRTypeInfo::Int(), ~a);
+        case IROp::IntToFloat: return func.createConstant(IRTypeInfo::Float(), static_cast<float>(a));
+        default: return nullptr;
+        }
+    }
+
+    if (std::holds_alternative<uint32_t>(operand->value))
+    {
+        const uint32_t a = std::get<uint32_t>(operand->value);
+        switch (op)
+        {
+        case IROp::Neg: return func.createConstant(IRTypeInfo::UInt(), static_cast<uint32_t>(-static_cast<int64_t>(a)));
+        case IROp::Not: return func.createConstant(IRTypeInfo::UInt(), ~a);
+        case IROp::IntToFloat: return func.createConstant(IRTypeInfo::Float(), static_cast<float>(a));
+        default: return nullptr;
+        }
+    }
+
     if (!std::holds_alternative<float>(operand->value))
     {
         return nullptr;
     }
 
     float a = std::get<float>(operand->value);
-    float result;
 
     switch (op)
     {
-    case IROp::Neg: result = -a; break;
+    case IROp::Neg: return func.createConstant(IRTypeInfo::Float(), -a);
+    case IROp::HalfToFloat: return func.createConstant(IRTypeInfo::Float(), IRUtils::roundToHalf(a));
+    case IROp::FloatToHalf: return func.createConstant(IRTypeInfo::Half(), IRUtils::roundToHalf(a));
+    case IROp::FloatToInt:
+        if (std::isnan(a) || std::isinf(a) || a < -2147483648.0f || a >= 2147483648.0f)
+            return func.createConstant(IRTypeInfo::Int(), static_cast<int32_t>(-2147483648LL));
+        return func.createConstant(IRTypeInfo::Int(), static_cast<int32_t>(a));
     default: return nullptr;
     }
-
-    return func.createConstant(IRTypeInfo::Float(), result);
 }
 
 IRConstant* ConstantFolding::foldMathOp(IRFunction& func, IROp op,

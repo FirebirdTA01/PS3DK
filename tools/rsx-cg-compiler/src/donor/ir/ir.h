@@ -4,6 +4,8 @@
 #include "ast.h"
 #include "semantic.h"  // For ShaderStage
 #include <cstdint>
+#include <cstring>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <memory>
@@ -92,6 +94,7 @@ struct IRTypeInfo
     static IRTypeInfo Int() { return {IRType::Int32, 1, 0, 0}; }
     static IRTypeInfo UInt() { return {IRType::UInt32, 1, 0, 0}; }
     static IRTypeInfo Float() { return {IRType::Float32, 1, 0, 0}; }
+    static IRTypeInfo Half() { return {IRType::Float16, 1, 0, 0}; }
     static IRTypeInfo Float2() { return {IRType::Vec2, 2, 0, 0, IRType::Float32}; }
     static IRTypeInfo Float3() { return {IRType::Vec3, 3, 0, 0, IRType::Float32}; }
     static IRTypeInfo Float4() { return {IRType::Vec4, 4, 0, 0, IRType::Float32}; }
@@ -283,6 +286,7 @@ class IRConstant : public IRValue
 {
 public:
     std::variant<bool, int32_t, uint32_t, float, std::vector<float>> value;
+    std::vector<int64_t> intValues;
 
     IRConstant(IRValueID id, const IRTypeInfo& type, bool v)
         : IRValue(id, type), value(v) {}
@@ -294,6 +298,8 @@ public:
         : IRValue(id, type), value(v) {}
     IRConstant(IRValueID id, const IRTypeInfo& type, const std::vector<float>& v)
         : IRValue(id, type), value(v) {}
+    IRConstant(IRValueID id, const IRTypeInfo& type, const std::vector<float>& v, const std::vector<int64_t>& iv)
+        : IRValue(id, type), value(v), intValues(iv) {}
 
     std::string valueToString() const;
 };
@@ -435,7 +441,7 @@ public:
     IRConstant* createConstant(const IRTypeInfo& type, int32_t value);
     IRConstant* createConstant(const IRTypeInfo& type, uint32_t value);
     IRConstant* createConstant(const IRTypeInfo& type, float value);
-    IRConstant* createConstant(const IRTypeInfo& type, const std::vector<float>& value);
+    IRConstant* createConstant(const IRTypeInfo& type, const std::vector<float>& value, const std::vector<int64_t>& intValues = {});
 
     std::string toString() const;
 };
@@ -473,6 +479,7 @@ struct IRGlobal
     // not a file-scope const with an evaluable initialiser; ordinary
     // uniforms leave it empty.
     std::vector<float> initialValue;
+    std::vector<int64_t> initialIntValues;
 };
 
 class IRModule
@@ -539,4 +546,109 @@ namespace IRUtils
 
     // Get number of operands for an operation
     int getOperandCount(IROp op);
+
+    // Round float to 16-bit half precision (binary16, ties round toward +infinity to match Cg hardware target semantics)
+    inline float roundToHalf(float f)
+    {
+        if (std::isnan(f) || std::isinf(f)) return f;
+
+        uint32_t u;
+        std::memcpy(&u, &f, sizeof(u));
+        uint32_t sign = u & 0x80000000u;
+        int32_t exp = static_cast<int32_t>((u >> 23) & 0xFFu) - 127 + 15;
+        uint32_t mant = u & 0x7FFFFFu;
+
+        uint16_t h;
+        if (exp >= 31)
+        {
+            h = static_cast<uint16_t>((sign >> 16) | 0x7C00u);
+        }
+        else if (exp <= 0)
+        {
+            if (exp < -10)
+            {
+                h = static_cast<uint16_t>(sign >> 16);
+            }
+            else
+            {
+                int32_t shift = 1 - exp;
+                uint32_t val = mant | 0x800000u;
+                int32_t totalShift = shift + 13;
+                uint32_t halfUlp = 1u << (totalShift - 1);
+                uint32_t rem = val & ((1u << totalShift) - 1u);
+                bool roundUp = (rem > halfUlp) || (rem == halfUlp && sign == 0);
+                uint32_t kept = val >> totalShift;
+                if (roundUp)
+                    kept++;
+                if (kept > 0x3FFu)
+                    h = static_cast<uint16_t>((sign >> 16) | (1u << 10) | (kept & 0x3FFu));
+                else
+                    h = static_cast<uint16_t>((sign >> 16) | kept);
+            }
+        }
+        else
+        {
+            uint32_t rem = mant & 0x1FFFu;
+            // Round ties toward +infinity:
+            // For positive (sign == 0), tie rounds to larger magnitude (roundUp = true).
+            // For negative (sign != 0), tie rounds toward zero / +infinity (roundUp = false).
+            bool roundUp = (rem > 0x1000u) || (rem == 0x1000u && sign == 0);
+            if (roundUp)
+            {
+                mant += 0x2000u - rem;
+                if (mant & 0x800000u)
+                {
+                    mant = 0;
+                    exp++;
+                    if (exp >= 31)
+                        h = static_cast<uint16_t>((sign >> 16) | 0x7C00u);
+                    else
+                        h = static_cast<uint16_t>((sign >> 16) | (exp << 10) | (mant >> 13));
+                }
+                else
+                {
+                    h = static_cast<uint16_t>((sign >> 16) | (exp << 10) | (mant >> 13));
+                }
+            }
+            else
+            {
+                h = static_cast<uint16_t>((sign >> 16) | (exp << 10) | (mant >> 13));
+            }
+        }
+
+        uint32_t h_sign = (h & 0x8000u) << 16;
+        uint32_t h_exp = (h >> 10) & 0x1Fu;
+        uint32_t h_mant = h & 0x3FFu;
+        uint32_t u_out;
+        if (h_exp == 31)
+        {
+            u_out = h_sign | 0x7F800000u | (h_mant << 13);
+        }
+        else if (h_exp == 0)
+        {
+            if (h_mant == 0)
+            {
+                u_out = h_sign;
+            }
+            else
+            {
+                while ((h_mant & 0x400u) == 0)
+                {
+                    h_mant <<= 1;
+                    h_exp--;
+                }
+                h_exp++;
+                h_mant &= 0x3FFu;
+                u_out = h_sign | ((h_exp + 127 - 15) << 23) | (h_mant << 13);
+            }
+        }
+        else
+        {
+            u_out = h_sign | ((h_exp + 127 - 15) << 23) | (h_mant << 13);
+        }
+
+        float res;
+        std::memcpy(&res, &u_out, sizeof(res));
+        return res;
+    }
 }

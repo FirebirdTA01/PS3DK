@@ -518,10 +518,10 @@ IRConstant* IRFunction::createConstant(const IRTypeInfo& type, float value)
     return ptr;
 }
 
-IRConstant* IRFunction::createConstant(const IRTypeInfo& type, const std::vector<float>& value)
+IRConstant* IRFunction::createConstant(const IRTypeInfo& type, const std::vector<float>& value, const std::vector<int64_t>& intValues)
 {
     IRValueID id = allocateValueId();
-    auto constant = std::make_unique<IRConstant>(id, type, value);
+    auto constant = std::make_unique<IRConstant>(id, type, value, intValues);
     IRConstant* ptr = constant.get();
     values[id] = std::move(constant);
     return ptr;

@@ -59,62 +59,467 @@ std::string IRBuilder::makeLabel(const std::string& prefix)
 // real shaders use are nearly all of this shape, and a half-right folder
 // would put wrong numbers into containers that are otherwise well formed -
 // the same class of silent damage this evaluator exists to remove.
-static bool literalToFloat(const ExprNode* e, float& out)
+namespace {
+
+struct ConstEvalScalar
 {
-    bool negate = false;
-    while (e && e->kind == ExprKind::Unary)
+    enum class Kind { Int, UInt, Float, Bool };
+    Kind kind = Kind::Int;
+    int64_t i = 0;
+    uint64_t u = 0;
+    double f = 0.0;
+    bool b = false;
+
+    static ConstEvalScalar fromInt(int64_t val)
     {
-        const auto* u = static_cast<const UnaryExpr*>(e);
-        if (u->op != UnaryOp::Negate)
-            return false;
-        negate = !negate;
-        e = u->operand.get();
+        ConstEvalScalar s;
+        s.kind = Kind::Int;
+        s.i = val;
+        return s;
     }
-    if (!e || e->kind != ExprKind::Literal)
+
+    static ConstEvalScalar fromUInt(uint64_t val)
+    {
+        ConstEvalScalar s;
+        s.kind = Kind::UInt;
+        s.u = val;
+        return s;
+    }
+
+    static ConstEvalScalar fromFloat(double val)
+    {
+        ConstEvalScalar s;
+        s.kind = Kind::Float;
+        s.f = val;
+        return s;
+    }
+
+    static ConstEvalScalar fromBool(bool val)
+    {
+        ConstEvalScalar s;
+        s.kind = Kind::Bool;
+        s.b = val;
+        return s;
+    }
+
+    bool isTruthy() const
+    {
+        switch (kind)
+        {
+        case Kind::Int:   return i != 0;
+        case Kind::UInt:  return u != 0;
+        case Kind::Float: return f != 0.0;
+        case Kind::Bool:  return b;
+        }
         return false;
-    const auto* lit = static_cast<const LiteralExpr*>(e);
-    double v = 0.0;
-    switch (lit->literalKind)
-    {
-    case LiteralExpr::LiteralKind::Float: v = std::get<double>(lit->value); break;
-    case LiteralExpr::LiteralKind::Int:   v = static_cast<double>(std::get<int64_t>(lit->value)); break;
-    case LiteralExpr::LiteralKind::Bool:  v = std::get<bool>(lit->value) ? 1.0 : 0.0; break;
-    default: return false;
     }
-    out = static_cast<float>(negate ? -v : v);
-    return true;
-}
 
-bool IRBuilder::evaluateConstInitializer(const ExprNode* init,
-                                         std::vector<float>& out)
-{
-    out.clear();
-    if (!init)
-        return false;               // `const float x;` - nothing to evaluate
-
-    float scalar = 0.0f;
-    if (literalToFloat(init, scalar))
+    double asDouble() const
     {
-        out.push_back(scalar);
+        switch (kind)
+        {
+        case Kind::Int:   return static_cast<double>(i);
+        case Kind::UInt:  return static_cast<double>(u);
+        case Kind::Float: return f;
+        case Kind::Bool:  return b ? 1.0 : 0.0;
+        }
+        return 0.0;
+    }
+
+    int64_t asInt64() const
+    {
+        switch (kind)
+        {
+        case Kind::Int:   return i;
+        case Kind::UInt:  return static_cast<int64_t>(u);
+        case Kind::Float: return static_cast<int64_t>(f);
+        case Kind::Bool:  return b ? 1 : 0;
+        }
+        return 0;
+    }
+};
+
+static bool convertScalar(const ConstEvalScalar& in, BaseType targetType, ConstEvalScalar& out)
+{
+    switch (targetType)
+    {
+    case BaseType::Bool:
+        out = ConstEvalScalar::fromBool(in.isTruthy());
+        return true;
+
+    case BaseType::Int:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromInt(static_cast<int32_t>(in.i));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromInt(static_cast<int32_t>(static_cast<uint32_t>(in.u)));
+            return true;
+        case ConstEvalScalar::Kind::Float: {
+            double d = in.f;
+            if (std::isnan(d) || std::isinf(d) || d < -2147483648.0 || d >= 2147483648.0)
+                out = ConstEvalScalar::fromInt(-2147483648LL);
+            else
+                out = ConstEvalScalar::fromInt(static_cast<int32_t>(d));
+            return true;
+        }
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromInt(in.b ? 1 : 0);
+            return true;
+        }
+        return false;
+
+    case BaseType::UInt:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromUInt(static_cast<uint32_t>(in.i));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromUInt(static_cast<uint32_t>(in.u));
+            return true;
+        case ConstEvalScalar::Kind::Float: {
+            double d = in.f;
+            if (std::isnan(d) || std::isinf(d))
+                out = ConstEvalScalar::fromUInt(0);
+            else if (d < 0.0)
+                out = ConstEvalScalar::fromUInt(static_cast<uint32_t>(static_cast<int64_t>(d)));
+            else
+                out = ConstEvalScalar::fromUInt(static_cast<uint32_t>(static_cast<uint64_t>(std::fmod(d, 4294967296.0))));
+            return true;
+        }
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromUInt(in.b ? 1 : 0);
+            return true;
+        }
+        return false;
+
+    case BaseType::Short:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromInt(static_cast<int16_t>(in.i));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromInt(static_cast<int16_t>(static_cast<uint16_t>(in.u)));
+            return true;
+        case ConstEvalScalar::Kind::Float: {
+            double d = in.f;
+            int32_t i32 = (std::isnan(d) || std::isinf(d) || d < -2147483648.0 || d >= 2147483648.0)
+                              ? static_cast<int32_t>(-2147483648LL)
+                              : static_cast<int32_t>(d);
+            out = ConstEvalScalar::fromInt(static_cast<int16_t>(i32));
+            return true;
+        }
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromInt(in.b ? 1 : 0);
+            return true;
+        }
+        return false;
+
+    case BaseType::UShort:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromUInt(static_cast<uint16_t>(in.i));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromUInt(static_cast<uint16_t>(in.u));
+            return true;
+        case ConstEvalScalar::Kind::Float: {
+            double d = in.f;
+            uint32_t u32 = (std::isnan(d) || std::isinf(d))
+                               ? 0
+                               : (d < 0.0 ? static_cast<uint32_t>(static_cast<int64_t>(d))
+                                          : static_cast<uint32_t>(static_cast<uint64_t>(std::fmod(d, 4294967296.0))));
+            out = ConstEvalScalar::fromUInt(static_cast<uint16_t>(u32));
+            return true;
+        }
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromUInt(in.b ? 1 : 0);
+            return true;
+        }
+        return false;
+
+    case BaseType::Char:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromInt(static_cast<int8_t>(in.i));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromInt(static_cast<int8_t>(static_cast<uint8_t>(in.u)));
+            return true;
+        case ConstEvalScalar::Kind::Float: {
+            double d = in.f;
+            int32_t i32 = (std::isnan(d) || std::isinf(d) || d < -2147483648.0 || d >= 2147483648.0)
+                              ? static_cast<int32_t>(-2147483648LL)
+                              : static_cast<int32_t>(d);
+            out = ConstEvalScalar::fromInt(static_cast<int8_t>(i32));
+            return true;
+        }
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromInt(in.b ? 1 : 0);
+            return true;
+        }
+        return false;
+
+    case BaseType::UChar:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromUInt(static_cast<uint8_t>(in.i));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromUInt(static_cast<uint8_t>(in.u));
+            return true;
+        case ConstEvalScalar::Kind::Float: {
+            double d = in.f;
+            uint32_t u32 = (std::isnan(d) || std::isinf(d))
+                               ? 0
+                               : (d < 0.0 ? static_cast<uint32_t>(static_cast<int64_t>(d))
+                                          : static_cast<uint32_t>(static_cast<uint64_t>(std::fmod(d, 4294967296.0))));
+            out = ConstEvalScalar::fromUInt(static_cast<uint8_t>(u32));
+            return true;
+        }
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromUInt(in.b ? 1 : 0);
+            return true;
+        }
+        return false;
+
+    case BaseType::Float:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromFloat(static_cast<double>(in.i));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromFloat(static_cast<double>(in.u));
+            return true;
+        case ConstEvalScalar::Kind::Float:
+            out = in;
+            return true;
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromFloat(in.b ? 1.0 : 0.0);
+            return true;
+        }
+        return false;
+
+    case BaseType::Half:
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            out = ConstEvalScalar::fromFloat(static_cast<double>(IRUtils::roundToHalf(static_cast<float>(in.i))));
+            return true;
+        case ConstEvalScalar::Kind::UInt:
+            out = ConstEvalScalar::fromFloat(static_cast<double>(IRUtils::roundToHalf(static_cast<float>(in.u))));
+            return true;
+        case ConstEvalScalar::Kind::Float:
+            out = ConstEvalScalar::fromFloat(static_cast<double>(IRUtils::roundToHalf(static_cast<float>(in.f))));
+            return true;
+        case ConstEvalScalar::Kind::Bool:
+            out = ConstEvalScalar::fromFloat(in.b ? 1.0 : 0.0);
+            return true;
+        }
+        return false;
+
+    case BaseType::Fixed: {
+        double d = 0.0;
+        switch (in.kind)
+        {
+        case ConstEvalScalar::Kind::Int:
+            d = static_cast<double>(in.i);
+            break;
+        case ConstEvalScalar::Kind::UInt:
+            d = static_cast<double>(in.u);
+            break;
+        case ConstEvalScalar::Kind::Float:
+            d = in.f;
+            break;
+        case ConstEvalScalar::Kind::Bool:
+            d = in.b ? 1.0 : 0.0;
+            break;
+        }
+        // Clamps to [-2.0, 2.0 - 2^-10] = [-2.0, 1.9990234375]
+        const double maxFixed = 2.0 - (1.0 / 1024.0); // 1.9990234375
+        const double minFixed = -2.0;
+        if (d > maxFixed) d = maxFixed;
+        else if (d < minFixed) d = minFixed;
+        // Quantize to 10 fractional bits, ties round toward +infinity
+        d = std::floor(d * 1024.0 + 0.5) / 1024.0;
+        out = ConstEvalScalar::fromFloat(d);
         return true;
     }
 
+    default:
+        return false;
+    }
+}
+
+static bool evaluateConstScalar(const ExprNode* e, ConstEvalScalar& out)
+{
+    if (!e) return false;
+    if (e->kind == ExprKind::Literal)
+    {
+        const auto* lit = static_cast<const LiteralExpr*>(e);
+        switch (lit->literalKind)
+        {
+        case LiteralExpr::LiteralKind::Int:
+            out = ConstEvalScalar::fromInt(std::get<int64_t>(lit->value));
+            return true;
+        case LiteralExpr::LiteralKind::Bool:
+            out = ConstEvalScalar::fromBool(std::get<bool>(lit->value));
+            return true;
+        case LiteralExpr::LiteralKind::Float:
+            out = ConstEvalScalar::fromFloat(std::get<double>(lit->value));
+            return true;
+        default:
+            return false;
+        }
+    }
+    if (e->kind == ExprKind::Unary)
+    {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        ConstEvalScalar operandVal;
+        if (!evaluateConstScalar(u->operand.get(), operandVal))
+            return false;
+        switch (u->op)
+        {
+        case UnaryOp::LogicalNot:
+            out = ConstEvalScalar::fromBool(!operandVal.isTruthy());
+            return true;
+        case UnaryOp::Negate:
+            switch (operandVal.kind)
+            {
+            case ConstEvalScalar::Kind::Int:
+                out = ConstEvalScalar::fromInt(-operandVal.i);
+                return true;
+            case ConstEvalScalar::Kind::UInt:
+                out = ConstEvalScalar::fromUInt(static_cast<uint32_t>(-static_cast<int64_t>(operandVal.u & 0xFFFFFFFFULL)));
+                return true;
+            case ConstEvalScalar::Kind::Float:
+                out = ConstEvalScalar::fromFloat(-operandVal.f);
+                return true;
+            case ConstEvalScalar::Kind::Bool:
+                return false;
+            }
+            return false;
+        case UnaryOp::BitwiseNot:
+            switch (operandVal.kind)
+            {
+            case ConstEvalScalar::Kind::Int:
+                out = ConstEvalScalar::fromInt(~operandVal.i);
+                return true;
+            case ConstEvalScalar::Kind::UInt:
+                out = ConstEvalScalar::fromUInt(~operandVal.u & 0xFFFFFFFFULL);
+                return true;
+            case ConstEvalScalar::Kind::Float:
+            case ConstEvalScalar::Kind::Bool:
+                return false;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+    if (e->kind == ExprKind::Constructor)
+    {
+        const auto* ctor = static_cast<const ConstructorExpr*>(e);
+        if (ctor->arguments.size() != 1 || !ctor->constructedType)
+            return false;
+        ConstEvalScalar argVal;
+        if (!evaluateConstScalar(ctor->arguments[0].get(), argVal))
+            return false;
+        return convertScalar(argVal, ctor->constructedType->baseType, out);
+    }
+    if (e->kind == ExprKind::Cast)
+    {
+        const auto* cast = static_cast<const CastExpr*>(e);
+        if (!cast->targetType)
+            return false;
+        ConstEvalScalar argVal;
+        if (!evaluateConstScalar(cast->operand.get(), argVal))
+            return false;
+        return convertScalar(argVal, cast->targetType->baseType, out);
+    }
+    return false;
+}
+
+} // namespace
+
+bool IRBuilder::evaluateConstInitializerTyped(const ExprNode* init,
+                                             const TypeNode* declType,
+                                             std::vector<float>& floatOut,
+                                             std::vector<int64_t>& intOut)
+{
+    floatOut.clear();
+    intOut.clear();
+    if (!init)
+        return false;
+
+    // First try scalar evaluation
+    ConstEvalScalar scalarVal;
+    if (evaluateConstScalar(init, scalarVal))
+    {
+        ConstEvalScalar converted;
+        if (declType && !convertScalar(scalarVal, declType->baseType, converted))
+            return false;
+        else if (!declType)
+            converted = scalarVal;
+
+        floatOut.push_back(static_cast<float>(converted.asDouble()));
+        intOut.push_back(converted.asInt64());
+        return true;
+    }
+
+    // Vector / multi-argument constructor evaluation
     if (init->kind == ExprKind::Constructor)
     {
         const auto* ctor = static_cast<const ConstructorExpr*>(init);
-        if (ctor->arguments.empty() || ctor->arguments.size() > 4)
+        if (ctor->arguments.empty() || ctor->arguments.size() > 4 || !ctor->constructedType)
             return false;
+
+        const BaseType elemType = ctor->constructedType->baseType;
         for (const auto& a : ctor->arguments)
         {
-            float v = 0.0f;
-            if (!literalToFloat(a.get(), v))
-                return false;       // not all-literal: fold instead
-            out.push_back(v);
+            ConstEvalScalar aVal;
+            if (!evaluateConstScalar(a.get(), aVal))
+                return false;
+            ConstEvalScalar converted;
+            if (!convertScalar(aVal, elemType, converted))
+                return false;
+
+            if (declType && declType->baseType != elemType)
+            {
+                ConstEvalScalar declConverted;
+                if (!convertScalar(converted, declType->baseType, declConverted))
+                    return false;
+                converted = declConverted;
+            }
+
+            floatOut.push_back(static_cast<float>(converted.asDouble()));
+            intOut.push_back(converted.asInt64());
         }
         return true;
     }
 
     return false;
+}
+
+bool IRBuilder::evaluateConstInitializer(const ExprNode* init,
+                                         std::vector<float>& out)
+{
+    std::vector<int64_t> dummyInt;
+    return evaluateConstInitializerTyped(init, nullptr, out, dummyInt);
+}
+
+bool IRBuilder::evaluateConstIntInitializer(const ExprNode* init,
+                                            std::vector<int64_t>& out)
+{
+    std::vector<float> dummyFloat;
+    return evaluateConstInitializerTyped(init, nullptr, dummyFloat, out);
 }
 
 std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const SemanticAnalyzer& semantic)
@@ -191,6 +596,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // A uniform WITHOUT an initialiser is untouched: no compiled
             // default, blocks stay zero-filled, exactly as before.
             std::vector<float> constInit;
+            std::vector<int64_t> constIntInit;
             const bool isFileScopeConst =
                 varDecl->storage == StorageQualifier::Const;
             const bool isInitialisedUniform =
@@ -198,7 +604,10 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 varDecl->initializer != nullptr;
             if (isFileScopeConst || isInitialisedUniform)
             {
-                if (!evaluateConstInitializer(varDecl->initializer.get(), constInit))
+                if (!evaluateConstInitializerTyped(varDecl->initializer.get(),
+                                                   varDecl->type.get(),
+                                                   constInit,
+                                                   constIntInit))
                 {
                     // REFUSE rather than drop it.  Silently emitting zero for
                     // a value we could not evaluate is the defect this fix
@@ -214,6 +623,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                           "' has an initialiser this compiler cannot evaluate; "
                           "refusing rather than compiling it as zero");
                     constInit.clear();
+                    constIntInit.clear();
                 }
             }
 
@@ -267,15 +677,21 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                       "-component declaration; refusing rather than "
                       "padding it with zeros");
                 constInit.clear();
+                constIntInit.clear();
             }
 
+            if (constIntInit.size() == 1)
+            {
+                const int declared = global.type.componentCount();
+                if (declared > 1)
+                    constIntInit.assign(static_cast<size_t>(declared), constIntInit[0]);
+            }
+            global.initialIntValues = constIntInit;
             global.initialValue = constInit;
 
             module_->addGlobal(global);
 
-            // Map declaration to value.  Uniform globals are intentionally
-            // *not* inserted into nameToValue_ — buildIdentifierExpr falls
-            // through to module_->findGlobal() and emits a LoadUniform so
+            // Record the global's value id against its declaration so
             // the lowering can resolve the source const-bank slot.  Other
             // globals stay in nameToValue_ (existing behaviour).
             declToValue_[varDecl] = global.valueId;
@@ -293,9 +709,18 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // no diagnostic (t_4584aa27).  A local const never had this
             // problem because buildVarDeclStmt maps the name to
             // buildExpr(initialiser), which is a real IRConstant.
+            //
+            // File-scope `const` (including `static const` and `const static`,
+            // both mapped to StorageQualifier::Const by the parser) folds to its
+            // initializer so its value materializes as a typed IRConstant
+            // rather than an unbacked uniform load (t_65e1b7fa).
+            // Bare file-scope `static` is deliberately excluded here: static
+            // variables in Cg are mutable, and folding an initial value at
+            // every read would silently drop writes from helpers or other
+            // functions (review finding, codex).
             const bool foldableConst =
                 varDecl->storage == StorageQualifier::Const &&
-                !global.initialValue.empty();
+                (!global.initialValue.empty() || !global.initialIntValues.empty());
             if (varDecl->storage != StorageQualifier::Uniform && !foldableConst)
             {
                 nameToValue_[varDecl->name] = global.valueId;
@@ -1425,12 +1850,46 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
         // currentFunction_ exists to own the IRConstant.  This is the
         // reference site for the same reason the uniform case is: the
         // global itself is not an SSA value.
-        if (global->storage != StorageQualifier::Uniform &&
-            !global->initialValue.empty())
+        if (global->storage == StorageQualifier::Const &&
+            (!global->initialValue.empty() || !global->initialIntValues.empty()))
         {
-            if (global->initialValue.size() == 1)
-                return createConstant(global->initialValue[0]);
-            return createConstant(global->type, global->initialValue);
+            if (!global->initialIntValues.empty())
+            {
+                if (global->initialIntValues.size() == 1)
+                {
+                    const int64_t raw = global->initialIntValues[0];
+                    switch (global->type.baseType)
+                    {
+                    case IRType::Bool:
+                        return createConstant(raw != 0);
+                    case IRType::Int32:
+                        return createConstant(static_cast<int32_t>(raw));
+                    case IRType::UInt32:
+                        return createConstant(static_cast<uint32_t>(raw));
+                    default:
+                        break;
+                    }
+                }
+            }
+            if (!global->initialValue.empty())
+            {
+                if (global->initialValue.size() == 1)
+                {
+                    const float raw = global->initialValue[0];
+                    switch (global->type.baseType)
+                    {
+                    case IRType::Bool:
+                        return createConstant(raw != 0.0f);
+                    case IRType::Int32:
+                        return createConstant(static_cast<int32_t>(raw));
+                    case IRType::UInt32:
+                        return createConstant(static_cast<uint32_t>(raw));
+                    default:
+                        return createConstant(global->type, raw);
+                    }
+                }
+                return createConstant(global->type, global->initialValue, global->initialIntValues);
+            }
         }
 
         // Emit load from global
@@ -1477,19 +1936,38 @@ bool extractFloatComponents(IRFunction& fn, IRValueID id,
     return false;
 }
 
-bool extractIntScalar(IRFunction& fn, IRValueID id, int32_t& out)
+bool extractIntegerScalar(IRFunction& fn, IRValueID id, uint32_t& rawBits, bool& isUnsigned)
 {
     IRValue* v = fn.getValue(id);
     auto* c = v ? dynamic_cast<IRConstant*>(v) : nullptr;
     if (!c) return false;
+    isUnsigned = (c->type.baseType == IRType::UInt32);
     if (std::holds_alternative<int32_t>(c->value))
     {
-        out = std::get<int32_t>(c->value);
+        rawBits = static_cast<uint32_t>(std::get<int32_t>(c->value));
         return true;
     }
     if (std::holds_alternative<uint32_t>(c->value))
     {
-        out = static_cast<int32_t>(std::get<uint32_t>(c->value));
+        rawBits = std::get<uint32_t>(c->value);
+        isUnsigned = true;
+        return true;
+    }
+    if (std::holds_alternative<bool>(c->value))
+    {
+        rawBits = std::get<bool>(c->value) ? 1 : 0;
+        return true;
+    }
+    return false;
+}
+
+bool extractIntScalar(IRFunction& fn, IRValueID id, int32_t& out)
+{
+    uint32_t raw = 0;
+    bool isUnsigned = false;
+    if (extractIntegerScalar(fn, id, raw, isUnsigned))
+    {
+        out = static_cast<int32_t>(raw);
         return true;
     }
     return false;
@@ -1513,36 +1991,108 @@ bool broadcastTo(std::vector<float>& v, size_t n)
 IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
                                       IRValueID lhs, IRValueID rhs)
 {
-    int32_t ia = 0, ib = 0;
-    if (extractIntScalar(*currentFunction_, lhs, ia) &&
-        extractIntScalar(*currentFunction_, rhs, ib))
+    uint32_t rawA = 0, rawB = 0;
+    bool isUnsignedA = false, isUnsignedB = false;
+    if (extractIntegerScalar(*currentFunction_, lhs, rawA, isUnsignedA) &&
+        extractIntegerScalar(*currentFunction_, rhs, rawB, isUnsignedB))
     {
-        int32_t r = 0;
-        switch (op)
+        const bool isUnsigned = isUnsignedA || isUnsignedB || resultType.baseType == IRType::UInt32;
+        if (isUnsigned)
         {
-        case IROp::And: r = ia & ib; break;
-        case IROp::Or:  r = ia | ib; break;
-        case IROp::Xor: r = ia ^ ib; break;
-        case IROp::Shl:
-            r = static_cast<int32_t>(static_cast<uint32_t>(ia) << (ib & 31));
-            break;
-        case IROp::Shr:
-            r = ia >> (ib & 31);
-            break;
-        default:
-            break;
+            const uint32_t ua = rawA;
+            const uint32_t ub = rawB;
+            uint32_t ur = 0;
+            bool valid = true;
+            switch (op)
+            {
+            case IROp::Add: ur = ua + ub; break;
+            case IROp::Sub: ur = ua - ub; break;
+            case IROp::Mul: ur = ua * ub; break;
+            case IROp::Div:
+                if (ub == 0) return InvalidIRValue;
+                ur = ua / ub;
+                break;
+            case IROp::Mod:
+                if (ub == 0) return InvalidIRValue;
+                ur = ua % ub;
+                break;
+            case IROp::And: ur = ua & ub; break;
+            case IROp::Or:  ur = ua | ub; break;
+            case IROp::Xor: ur = ua ^ ub; break;
+            case IROp::Shl: ur = ua << (ub & 31); break;
+            case IROp::Shr:
+            case IROp::UShr: ur = ua >> (ub & 31); break;
+            default: valid = false; break;
+            }
+            if (valid)
+            {
+                if (resultType.baseType == IRType::Int32)
+                    return createConstant(static_cast<int32_t>(ur));
+                if (resultType.baseType == IRType::Bool)
+                    return createConstant(ur != 0);
+                if (resultType.baseType == IRType::Float32 || resultType.baseType == IRType::Float16)
+                    return createConstant(resultType, static_cast<float>(ur));
+                return createConstant(ur);
+            }
         }
-        if (op == IROp::And || op == IROp::Or || op == IROp::Xor ||
-            op == IROp::Shl || op == IROp::Shr)
-            return createConstant(r);
+        else
+        {
+            const int32_t ia = static_cast<int32_t>(rawA);
+            const int32_t ib = static_cast<int32_t>(rawB);
+            int32_t r = 0;
+            bool valid = true;
+            switch (op)
+            {
+            case IROp::Add: r = static_cast<int32_t>(static_cast<uint32_t>(ia) + static_cast<uint32_t>(ib)); break;
+            case IROp::Sub: r = static_cast<int32_t>(static_cast<uint32_t>(ia) - static_cast<uint32_t>(ib)); break;
+            case IROp::Mul: r = static_cast<int32_t>(static_cast<uint32_t>(ia) * static_cast<uint32_t>(ib)); break;
+            case IROp::Div:
+                if (ib == 0 || (ia == INT32_MIN && ib == -1)) return InvalidIRValue;
+                r = ia / ib;
+                break;
+            case IROp::Mod:
+                if (ib == 0 || (ia == INT32_MIN && ib == -1)) return InvalidIRValue;
+                r = ia % ib;
+                break;
+            case IROp::And: r = ia & ib; break;
+            case IROp::Or:  r = ia | ib; break;
+            case IROp::Xor: r = ia ^ ib; break;
+            case IROp::Shl:
+                r = static_cast<int32_t>(static_cast<uint32_t>(ia) << (ib & 31));
+                break;
+            case IROp::Shr:
+                r = ia >> (ib & 31);
+                break;
+            case IROp::UShr:
+                r = static_cast<int32_t>(static_cast<uint32_t>(ia) >> (ib & 31));
+                break;
+            default:
+                valid = false;
+                break;
+            }
+            if (valid)
+            {
+                if (resultType.baseType == IRType::UInt32)
+                    return createConstant(static_cast<uint32_t>(r));
+                if (resultType.baseType == IRType::Bool)
+                    return createConstant(r != 0);
+                if (resultType.baseType == IRType::Float32 || resultType.baseType == IRType::Float16)
+                    return createConstant(resultType, static_cast<float>(r));
+                return createConstant(r);
+            }
+        }
     }
 
     std::vector<float> a, b;
     if (!extractFloatComponents(*currentFunction_, lhs, a)) return InvalidIRValue;
     if (!extractFloatComponents(*currentFunction_, rhs, b)) return InvalidIRValue;
 
+    // Both operands are float constants.  Broadcasting scalar to vector
+    // allows `vec4 * scalar`, `scalar + vec2`, etc., without emitting
+    // runtime math for values already known at compile time.
     const size_t n = std::max(a.size(), b.size());
-    if (!broadcastTo(a, n) || !broadcastTo(b, n)) return InvalidIRValue;
+    if (!broadcastTo(a, n) || !broadcastTo(b, n))
+        return InvalidIRValue;
 
     std::vector<float> r(n, 0.0f);
     for (size_t i = 0; i < n; ++i)
@@ -1552,7 +2102,10 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
         case IROp::Add: r[i] = a[i] + b[i]; break;
         case IROp::Sub: r[i] = a[i] - b[i]; break;
         case IROp::Mul: r[i] = a[i] * b[i]; break;
-        case IROp::Div: r[i] = a[i] / b[i]; break;
+        case IROp::Div:
+            if (b[i] == 0.0f) return InvalidIRValue;
+            r[i] = a[i] / b[i];
+            break;
         case IROp::Min: r[i] = std::fmin(a[i], b[i]); break;
         case IROp::Max: r[i] = std::fmax(a[i], b[i]); break;
         default: return InvalidIRValue;
@@ -1570,17 +2123,53 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
 IRValueID IRBuilder::tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
                                      IRValueID operand)
 {
-    int32_t ia = 0;
-    if (extractIntScalar(*currentFunction_, operand, ia))
+    uint32_t rawA = 0;
+    bool isUnsignedA = false;
+    if (extractIntegerScalar(*currentFunction_, operand, rawA, isUnsignedA))
     {
         if (op == IROp::Not)
-            return createConstant(static_cast<int32_t>(~ia));
+        {
+            if (isUnsignedA || resultType.baseType == IRType::UInt32)
+                return createConstant(~rawA);
+            return createConstant(static_cast<int32_t>(~rawA));
+        }
         if (op == IROp::Neg)
-            return createConstant(static_cast<int32_t>(-ia));
+        {
+            if (isUnsignedA || resultType.baseType == IRType::UInt32)
+                return createConstant(static_cast<uint32_t>(-static_cast<int64_t>(rawA)));
+            return createConstant(static_cast<int32_t>(-rawA));
+        }
+        if (op == IROp::IntToFloat)
+        {
+            if (isUnsignedA)
+                return createConstant(resultType, static_cast<float>(rawA));
+            else
+                return createConstant(resultType, static_cast<float>(static_cast<int32_t>(rawA)));
+        }
     }
 
     std::vector<float> a;
     if (!extractFloatComponents(*currentFunction_, operand, a)) return InvalidIRValue;
+    if (op == IROp::FloatToInt)
+    {
+        if (a.size() == 1)
+        {
+            if (resultType.baseType == IRType::Bool)
+                return createConstant(a[0] != 0.0f);
+            if (resultType.baseType == IRType::UInt32)
+            {
+                if (std::isnan(a[0]) || std::isinf(a[0]))
+                    return createConstant(static_cast<uint32_t>(0));
+                if (a[0] < 0.0f)
+                    return createConstant(static_cast<uint32_t>(static_cast<int64_t>(a[0])));
+                return createConstant(static_cast<uint32_t>(static_cast<uint64_t>(std::fmod(a[0], 4294967296.0f))));
+            }
+            if (std::isnan(a[0]) || std::isinf(a[0]) || a[0] < -2147483648.0f || a[0] >= 2147483648.0f)
+                return createConstant(static_cast<int32_t>(-2147483648LL));
+            return createConstant(static_cast<int32_t>(a[0]));
+        }
+        return InvalidIRValue;
+    }
     std::vector<float> r(a.size(), 0.0f);
     for (size_t i = 0; i < a.size(); ++i)
     {
@@ -1596,58 +2185,139 @@ IRValueID IRBuilder::tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
             r[i] = 1.0f / std::sqrt(a[i]); break;
         case IROp::Floor: r[i] = std::floor(a[i]); break;
         case IROp::Ceil:  r[i] = std::ceil(a[i]); break;
+        case IROp::HalfToFloat:
+        case IROp::FloatToHalf:
+            r[i] = IRUtils::roundToHalf(a[i]);
+            break;
         default: return InvalidIRValue;
         }
     }
     if (a.size() == 1)
-        return createConstant(r[0]);
+        return createConstant(resultType, r[0]);
     return createConstant(resultType, r);
 }
 
 IRValueID IRBuilder::tryFoldVecConstruct(const IRTypeInfo& resultType,
-                                          const std::vector<IRValueID>& args)
+                                          const std::vector<IRValueID>& args,
+                                          std::optional<BaseType> baseTypeOverride)
 {
-    // An INTEGER literal in a float constructor converts, which is what Cg
-    // says and what the reference compiler does.  Without this the whole
-    // constructor failed to fold, `float4(1,1,1,1)` reached the back end as
-    // four separate constants, and every matcher that wants a literal vec4
-    // refused it - so the most idiomatic constant in the language did not
-    // build (t_dc1d92b0).  Deliberately local to a FLOAT constructor: the
-    // shared extractFloatComponents also serves the binary and unary
-    // folders, which would then fold integer division through floats.
     const bool floatResult = resultType.elementType == IRType::Float32 ||
                              resultType.elementType == IRType::Float16;
-    auto components = [&](IRValueID id, std::vector<float>& out) -> bool
+    const bool intResult = resultType.elementType == IRType::Int32 ||
+                           resultType.elementType == IRType::UInt32 ||
+                           resultType.elementType == IRType::Bool;
+    if (!floatResult && !intResult)
+        return InvalidIRValue;
+
+    BaseType targetBase = BaseType::Float;
+    if (baseTypeOverride.has_value())
     {
-        if (extractFloatComponents(*currentFunction_, id, out))
-            return true;
-        if (!floatResult) return false;
+        targetBase = *baseTypeOverride;
+    }
+    else
+    {
+        switch (resultType.elementType)
+        {
+        case IRType::Bool:    targetBase = BaseType::Bool; break;
+        case IRType::Int32:   targetBase = BaseType::Int; break;
+        case IRType::UInt32:  targetBase = BaseType::UInt; break;
+        case IRType::Float16: targetBase = BaseType::Half; break;
+        case IRType::Float32: targetBase = BaseType::Float; break;
+        default: return InvalidIRValue;
+        }
+    }
+
+    auto extractScalars = [&](IRValueID id, std::vector<ConstEvalScalar>& out) -> bool
+    {
         IRValue* v = currentFunction_->getValue(id);
         auto* c = v ? dynamic_cast<IRConstant*>(v) : nullptr;
         if (!c) return false;
+
         if (std::holds_alternative<int32_t>(c->value))
-            out = { static_cast<float>(std::get<int32_t>(c->value)) };
-        else if (std::holds_alternative<uint32_t>(c->value))
-            out = { static_cast<float>(std::get<uint32_t>(c->value)) };
-        else if (std::holds_alternative<bool>(c->value))
-            out = { std::get<bool>(c->value) ? 1.0f : 0.0f };
-        else
-            return false;
-        return true;
+        {
+            out.push_back(ConstEvalScalar::fromInt(std::get<int32_t>(c->value)));
+            return true;
+        }
+        if (std::holds_alternative<uint32_t>(c->value))
+        {
+            out.push_back(ConstEvalScalar::fromUInt(std::get<uint32_t>(c->value)));
+            return true;
+        }
+        if (std::holds_alternative<bool>(c->value))
+        {
+            out.push_back(ConstEvalScalar::fromBool(std::get<bool>(c->value)));
+            return true;
+        }
+        if (std::holds_alternative<float>(c->value))
+        {
+            out.push_back(ConstEvalScalar::fromFloat(std::get<float>(c->value)));
+            return true;
+        }
+        if (std::holds_alternative<std::vector<float>>(c->value))
+        {
+            const auto& vf = std::get<std::vector<float>>(c->value);
+            for (size_t i = 0; i < vf.size(); ++i)
+            {
+                if (!c->intValues.empty() && i < c->intValues.size())
+                {
+                    if (c->type.elementType == IRType::Int32)
+                        out.push_back(ConstEvalScalar::fromInt(c->intValues[i]));
+                    else if (c->type.elementType == IRType::UInt32)
+                        out.push_back(ConstEvalScalar::fromUInt(static_cast<uint64_t>(c->intValues[i])));
+                    else if (c->type.elementType == IRType::Bool)
+                        out.push_back(ConstEvalScalar::fromBool(c->intValues[i] != 0));
+                    else
+                        out.push_back(ConstEvalScalar::fromFloat(vf[i]));
+                }
+                else
+                {
+                    out.push_back(ConstEvalScalar::fromFloat(vf[i]));
+                }
+            }
+            return true;
+        }
+        return false;
     };
 
-    std::vector<float> all;
-    all.reserve(static_cast<size_t>(resultType.vectorSize));
+    std::vector<ConstEvalScalar> rawComponents;
     for (IRValueID a : args)
     {
-        std::vector<float> comps;
-        if (!components(a, comps))
+        if (!extractScalars(a, rawComponents))
             return InvalidIRValue;
-        all.insert(all.end(), comps.begin(), comps.end());
     }
-    if (all.size() != static_cast<size_t>(resultType.vectorSize))
+
+    if (rawComponents.size() == 1 && resultType.vectorSize > 1)
+    {
+        rawComponents.assign(static_cast<size_t>(resultType.vectorSize), rawComponents[0]);
+    }
+    if (rawComponents.size() != static_cast<size_t>(resultType.vectorSize))
         return InvalidIRValue;
-    return createConstant(resultType, all);
+
+    std::vector<float> all;
+    std::vector<int64_t> allInts;
+    all.reserve(rawComponents.size());
+
+    const bool isIntOrBoolTarget = (targetBase == BaseType::Int ||
+                                    targetBase == BaseType::UInt ||
+                                    targetBase == BaseType::Bool ||
+                                    targetBase == BaseType::Short ||
+                                    targetBase == BaseType::UShort ||
+                                    targetBase == BaseType::Char ||
+                                    targetBase == BaseType::UChar);
+    if (isIntOrBoolTarget)
+        allInts.reserve(rawComponents.size());
+
+    for (const auto& raw : rawComponents)
+    {
+        ConstEvalScalar converted;
+        if (!convertScalar(raw, targetBase, converted))
+            return InvalidIRValue;
+        all.push_back(static_cast<float>(converted.asDouble()));
+        if (isIntOrBoolTarget)
+            allInts.push_back(converted.asInt64());
+    }
+
+    return createConstant(resultType, all, allInts);
 }
 
 IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
@@ -2037,9 +2707,50 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
             }
             if (ok)
             {
+                IRValue* v = currentFunction_->getValue(objectValue);
+                auto* c = v ? dynamic_cast<IRConstant*>(v) : nullptr;
                 if (picked.size() == 1)
-                    return createConstant(picked[0]);
-                return createConstant(resultType, picked);
+                {
+                    const size_t lane = static_cast<size_t>(expr->swizzleIndices[0]);
+                    if (c && !c->intValues.empty() && lane < c->intValues.size())
+                    {
+                        const int64_t rawInt = c->intValues[lane];
+                        switch (resultType.baseType)
+                        {
+                        case IRType::Int32:
+                            return createConstant(static_cast<int32_t>(rawInt));
+                        case IRType::UInt32:
+                            return createConstant(static_cast<uint32_t>(rawInt));
+                        case IRType::Bool:
+                            return createConstant(rawInt != 0);
+                        default:
+                            return createConstant(resultType, picked[0]);
+                        }
+                    }
+                    switch (resultType.baseType)
+                    {
+                    case IRType::Int32:
+                        return createConstant(static_cast<int32_t>(picked[0]));
+                    case IRType::UInt32:
+                        return createConstant(static_cast<uint32_t>(picked[0]));
+                    case IRType::Bool:
+                        return createConstant(picked[0] != 0.0f);
+                    default:
+                        return createConstant(resultType, picked[0]);
+                    }
+                }
+                std::vector<int64_t> pickedInts;
+                if (c && !c->intValues.empty())
+                {
+                    pickedInts.reserve(static_cast<size_t>(expr->swizzleLength));
+                    for (int s = 0; s < expr->swizzleLength; ++s)
+                    {
+                        const size_t lane = static_cast<size_t>(expr->swizzleIndices[s]);
+                        if (lane < c->intValues.size())
+                            pickedInts.push_back(c->intValues[lane]);
+                    }
+                }
+                return createConstant(resultType, picked, pickedInts);
             }
         }
 
@@ -2483,6 +3194,38 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 
     IRTypeInfo resultType = getExprType(expr);
 
+    int32_t constIdx = 0;
+    if (extractIntScalar(*currentFunction_, indexValue, constIdx) && constIdx >= 0)
+    {
+        IRValue* av = currentFunction_->getValue(arrayValue);
+        if (auto* ac = dynamic_cast<IRConstant*>(av))
+        {
+            const size_t uIdx = static_cast<size_t>(constIdx);
+            if (!ac->intValues.empty() && uIdx < ac->intValues.size())
+            {
+                const int64_t rawInt = ac->intValues[uIdx];
+                switch (resultType.baseType)
+                {
+                case IRType::Int32:  return createConstant(static_cast<int32_t>(rawInt));
+                case IRType::UInt32: return createConstant(static_cast<uint32_t>(rawInt));
+                case IRType::Bool:   return createConstant(rawInt != 0);
+                default: break;
+                }
+            }
+            std::vector<float> comps;
+            if (extractFloatComponents(*currentFunction_, arrayValue, comps) && uIdx < comps.size())
+            {
+                switch (resultType.baseType)
+                {
+                case IRType::Int32:  return createConstant(static_cast<int32_t>(comps[uIdx]));
+                case IRType::UInt32: return createConstant(static_cast<uint32_t>(comps[uIdx]));
+                case IRType::Bool:   return createConstant(comps[uIdx] != 0.0f);
+                default:             return createConstant(resultType, comps[uIdx]);
+                }
+            }
+        }
+    }
+
     auto inst = std::make_unique<IRInstruction>(IROp::VecExtract,
         currentFunction_->allocateValueId(), resultType);
     inst->addOperand(arrayValue);
@@ -2516,26 +3259,51 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
     IRTypeInfo targetType = getIRType(expr->targetType.get());
     IRTypeInfo sourceType = getExprType(expr->operand.get());
 
+    if (sourceType.baseType == targetType.baseType &&
+        sourceType.elementType == targetType.elementType)
+    {
+        return operandValue;
+    }
+
+    if (targetType.isVector())
+    {
+        if (IRValueID folded = tryFoldVecConstruct(targetType, { operandValue },
+                expr->targetType ? std::optional<BaseType>(expr->targetType->baseType) : std::nullopt);
+            folded != InvalidIRValue)
+        {
+            return folded;
+        }
+    }
+
     // Determine conversion operation
     IROp op = IROp::Bitcast;  // Default
+    const IRType srcElem = sourceType.isVector() ? sourceType.elementType : sourceType.baseType;
+    const IRType dstElem = targetType.isVector() ? targetType.elementType : targetType.baseType;
 
-    if (sourceType.baseType == IRType::Int32 && targetType.baseType == IRType::Float32)
+    if ((srcElem == IRType::Int32 || srcElem == IRType::UInt32 || srcElem == IRType::Bool) &&
+        (dstElem == IRType::Float32 || dstElem == IRType::Float16))
     {
         op = IROp::IntToFloat;
     }
-    else if (sourceType.baseType == IRType::Float32 && targetType.baseType == IRType::Int32)
+    else if ((srcElem == IRType::Float32 || srcElem == IRType::Float16) &&
+             (dstElem == IRType::Int32 || dstElem == IRType::UInt32 || dstElem == IRType::Bool))
     {
         op = IROp::FloatToInt;
     }
-    else if (sourceType.baseType == IRType::Float32 && targetType.baseType == IRType::Float16)
+    else if (srcElem == IRType::Float32 && dstElem == IRType::Float16)
     {
         op = IROp::FloatToHalf;
     }
-    else if (sourceType.baseType == IRType::Float16 && targetType.baseType == IRType::Float32)
+    else if (srcElem == IRType::Float16 && dstElem == IRType::Float32)
     {
         op = IROp::HalfToFloat;
     }
 
+    if (IRValueID folded = tryFoldUnaryOp(op, targetType, operandValue);
+        folded != InvalidIRValue)
+    {
+        return folded;
+    }
     return emitUnaryOp(op, targetType, operandValue);
 }
 
@@ -2557,30 +3325,51 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
         if (argType.componentCount() == resultType.componentCount())
         {
             // Same type - just return it
-            if (argType.baseType == resultType.baseType)
+            if (argType.baseType == resultType.baseType &&
+                argType.elementType == resultType.elementType)
             {
                 return argValues[0];
             }
 
+            if (resultType.isVector())
+            {
+                if (IRValueID folded = tryFoldVecConstruct(resultType, argValues,
+                        expr->constructedType ? std::optional<BaseType>(expr->constructedType->baseType) : std::nullopt);
+                    folded != InvalidIRValue)
+                {
+                    return folded;
+                }
+            }
+
             // Different base type - need type conversion (e.g., half(1.0) = float->half)
             IROp convOp = IROp::Bitcast;  // Default
-            if (argType.baseType == IRType::Float32 && resultType.baseType == IRType::Float16)
+            const IRType srcElem = argType.isVector() ? argType.elementType : argType.baseType;
+            const IRType dstElem = resultType.isVector() ? resultType.elementType : resultType.baseType;
+
+            if (srcElem == IRType::Float32 && dstElem == IRType::Float16)
             {
                 convOp = IROp::FloatToHalf;
             }
-            else if (argType.baseType == IRType::Float16 && resultType.baseType == IRType::Float32)
+            else if (srcElem == IRType::Float16 && dstElem == IRType::Float32)
             {
                 convOp = IROp::HalfToFloat;
             }
-            else if (argType.baseType == IRType::Int32 && resultType.baseType == IRType::Float32)
+            else if ((srcElem == IRType::Int32 || srcElem == IRType::UInt32 || srcElem == IRType::Bool) &&
+                     (dstElem == IRType::Float32 || dstElem == IRType::Float16))
             {
                 convOp = IROp::IntToFloat;
             }
-            else if (argType.baseType == IRType::Float32 && resultType.baseType == IRType::Int32)
+            else if ((srcElem == IRType::Float32 || srcElem == IRType::Float16) &&
+                     (dstElem == IRType::Int32 || dstElem == IRType::UInt32 || dstElem == IRType::Bool))
             {
                 convOp = IROp::FloatToInt;
             }
 
+            if (IRValueID folded = tryFoldUnaryOp(convOp, resultType, argValues[0]);
+                folded != InvalidIRValue)
+            {
+                return folded;
+            }
             return emitUnaryOp(convOp, resultType, argValues[0]);
         }
     }
@@ -2588,7 +3377,8 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     // Vector construction
     if (resultType.isVector())
     {
-        if (IRValueID folded = tryFoldVecConstruct(resultType, argValues);
+        if (IRValueID folded = tryFoldVecConstruct(resultType, argValues,
+                expr->constructedType ? std::optional<BaseType>(expr->constructedType->baseType) : std::nullopt);
             folded != InvalidIRValue)
         {
             return folded;
@@ -3273,8 +4063,14 @@ IRValueID IRBuilder::createConstant(float value)
     return constant->id;
 }
 
-IRValueID IRBuilder::createConstant(const IRTypeInfo& type, const std::vector<float>& values)
+IRValueID IRBuilder::createConstant(const IRTypeInfo& type, float value)
 {
-    auto* constant = currentFunction_->createConstant(type, values);
+    auto* constant = currentFunction_->createConstant(type, value);
+    return constant->id;
+}
+
+IRValueID IRBuilder::createConstant(const IRTypeInfo& type, const std::vector<float>& values, const std::vector<int64_t>& intValues)
+{
+    auto* constant = currentFunction_->createConstant(type, values, intValues);
     return constant->id;
 }

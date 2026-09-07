@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <stack>
 #include <vector>
+#include <optional>
 
 // ============================================================================
 // IR Builder - Converts AST to IR
@@ -25,6 +26,10 @@ public:
     const std::vector<std::string>& errors() const { return errors_; }
     bool hasErrors() const { return !errors_.empty(); }
 
+    // Type conversion helpers
+    static IRTypeInfo getIRType(const CgType& cgType);
+    static IRTypeInfo getIRType(TypeNode* typeNode);
+
 private:
     std::unique_ptr<IRModule> module_;
     IRFunction* currentFunction_ = nullptr;
@@ -36,6 +41,12 @@ private:
     // than compiling as zero.
     static bool evaluateConstInitializer(const ExprNode* init,
                                          std::vector<float>& out);
+    static bool evaluateConstIntInitializer(const ExprNode* init,
+                                            std::vector<int64_t>& out);
+    static bool evaluateConstInitializerTyped(const ExprNode* init,
+                                              const TypeNode* declType,
+                                              std::vector<float>& floatOut,
+                                              std::vector<int64_t>& intOut);
 
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;
@@ -152,7 +163,8 @@ private:
     IRValueID tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
                               IRValueID operand);
     IRValueID tryFoldVecConstruct(const IRTypeInfo& resultType,
-                                   const std::vector<IRValueID>& args);
+                                   const std::vector<IRValueID>& args,
+                                   std::optional<BaseType> baseTypeOverride = std::nullopt);
     IRValueID emitCall(const std::string& funcName, const IRTypeInfo& resultType,
                        const std::vector<IRValueID>& args);
 
@@ -160,10 +172,6 @@ private:
     void emitCondBranch(IRValueID condition, IRBasicBlock* trueTarget, IRBasicBlock* falseTarget);
     void emitReturn(IRValueID value);
     void emitStore(IRValueID address, IRValueID value);
-
-    // Type conversion helpers
-    IRTypeInfo getIRType(const CgType& cgType);
-    IRTypeInfo getIRType(TypeNode* typeNode);
 
     // Get IR type for an expression
     IRTypeInfo getExprType(ExprNode* expr);
@@ -188,5 +196,6 @@ private:
     IRValueID createConstant(int32_t value);
     IRValueID createConstant(uint32_t value);
     IRValueID createConstant(float value);
-    IRValueID createConstant(const IRTypeInfo& type, const std::vector<float>& values);
+    IRValueID createConstant(const IRTypeInfo& type, float value);
+    IRValueID createConstant(const IRTypeInfo& type, const std::vector<float>& values, const std::vector<int64_t>& intValues = {});
 };
