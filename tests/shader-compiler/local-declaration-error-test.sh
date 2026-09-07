@@ -78,7 +78,13 @@ errors="$(grep -cE ': error: ' "$out.log" || true)"
     fail "one mistake produced $errors diagnostics; the contract for this shape is exactly one"
 }
 
-expected="$fixture:$want_line:$want_col: error: unknown type name 'bogusType'"
+# Anchored on the BASENAME rather than the full path: Git Bash rewrites a
+# POSIX argv path into Windows form before exec'ing a native binary, so the
+# compiler echoes 'C:/Users/FIREBI~1/...' for a '/c/Users/...' argument and
+# the directory it prints is the shell's spelling, not a compiler decision.
+# The line, the column and the message - what this guard is actually for -
+# are all still pinned.
+expected="$(basename "$fixture"):$want_line:$want_col: error: unknown type name 'bogusType'"
 grep -qF "$expected" "$out.log" || {
     head -n 3 "$out.log" >&2
     fail "expected <$expected>; the diagnostic must name the unknown TYPE at its own line and column, not the identifier after it"
