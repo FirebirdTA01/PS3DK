@@ -570,7 +570,12 @@ Token Lexer::nextToken(bool keepPreprocessor)
 
     case ';': return { TokenType::SEMICOLON, ";", startLine, startColumn };
     case ',': return { TokenType::COMMA, ",", startLine, startColumn };
-    case '.': return { TokenType::DOT, ".", startLine, startColumn };
+    case '.':
+        if (std::isdigit(peek()))
+        {
+            return scanNumber(startLine, startColumn);
+        }
+        return { TokenType::DOT, ".", startLine, startColumn };
     case '(': return { TokenType::LPAREN, "(", startLine, startColumn };
     case ')': return { TokenType::RPAREN, ")", startLine, startColumn };
     case '{': return { TokenType::LBRACE, "{", startLine, startColumn };
@@ -617,18 +622,19 @@ Token Lexer::scanIdentifierOrKeyword(int startLine, int startColumn)
 Token Lexer::scanNumber(int startLine, int startColumn) 
 {
     size_t start = currentPos - 1; // because we've already consumed the first character
-    bool hasDecimal = false;
-	bool hasExponent = false;
-	bool hasFloatSuffix = false;
+    char firstChar = source[start];
+    bool hasDecimal = (firstChar == '.');
+    bool hasExponent = false;
+    bool hasFloatSuffix = false;
 
-    // Integer part
-    while (std::isdigit(peek()) || peek() == '.') 
+    // Integer part / digits
+    while (std::isdigit(peek())) 
     {
         advance();
     }
 
-	// Decimal part
-    if(peek() == '.' && std::isdigit(peek(1)))
+    // Decimal part: at most one decimal point
+    if (!hasDecimal && peek() == '.')
     {
         hasDecimal = true;
         advance(); // consume '.'
@@ -636,27 +642,41 @@ Token Lexer::scanNumber(int startLine, int startColumn)
         {
             advance();
         }
-	}
+    }
 
-	// Scientific notation
+    // Scientific notation
     if (peek() == 'e' || peek() == 'E')
     {
-        hasExponent = true;
-        advance(); // consume 'e' or 'E'
-        if (peek() == '+' || peek() == '-') // optional sign
-            advance();
-        while (std::isdigit(peek()))
+        size_t lookahead = 1;
+        if (peek(lookahead) == '+' || peek(lookahead) == '-')
+            lookahead++;
+        if (std::isdigit(peek(lookahead)))
         {
-            advance();
+            hasExponent = true;
+            advance(); // consume 'e' or 'E'
+            if (peek() == '+' || peek() == '-') // optional sign
+                advance();
+            while (std::isdigit(peek()))
+            {
+                advance();
+            }
+        }
+        else
+        {
+            // 'e' without digits is a malformed exponent (C0124 in reference)
+            advance(); // consume 'e'
+            if (peek() == '+' || peek() == '-')
+                advance();
+            return { TokenType::UNKNOWN, source.substr(start, currentPos - start), startLine, startColumn, filename };
         }
     }
 
-	// Float suffix (f, h for half)
+    // Float suffix (f, h for half, F, H)
     if (peek() == 'f' || peek() == 'h' || peek() == 'F' || peek() == 'H')
     {
         hasFloatSuffix = true;
         advance(); // consume suffix
-	}
+    }
 
     std::string lexeme = source.substr(start, currentPos - start);
     return { TokenType::NUMBER, lexeme, startLine, startColumn, filename };

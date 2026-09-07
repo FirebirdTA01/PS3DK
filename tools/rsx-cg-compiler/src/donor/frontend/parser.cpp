@@ -1175,7 +1175,11 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
     // Check for default value
     if (match(TokenType::OP_ASSIGN))
     {
-        param->defaultValue = parseAssignmentExpression();
+        error(param->loc, "default parameter values are not supported");
+        if (check(TokenType::LBRACE))
+            param->defaultValue = parseBracedInitializerExpression(param->type);
+        else
+            param->defaultValue = parseAssignmentExpression();
     }
 
     return param;
@@ -1453,6 +1457,43 @@ std::unique_ptr<StmtNode> Parser::parseStatement()
     if (match(TokenType::SEMICOLON))
     {
         return std::make_unique<EmptyStmt>(currentLocation());
+    }
+
+    // Flow control statement attributes: [branch] or [flatten] before 'if'
+    while (check(TokenType::LBRACKET))
+    {
+        SourceLocation attrLoc = currentLocation();
+        advance(); // consume '['
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error(attrLoc, "expected attribute name after '['");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        std::string attrName = advance().lexeme;
+        if (attrName != "branch" && attrName != "flatten")
+        {
+            error(attrLoc, "unknown attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!match(TokenType::RBRACKET))
+        {
+            error(attrLoc, "expected ']' after attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!check(TokenType::KW_IF))
+        {
+            error(attrLoc, "attribute '" + attrName + "' is only supported on if statements");
+            return nullptr;
+        }
     }
 
     // Block
@@ -2043,6 +2084,12 @@ std::unique_ptr<ExprNode> Parser::parseMultiplicativeExpression()
 
 std::unique_ptr<ExprNode> Parser::parseUnaryExpression()
 {
+    // Unary plus is a no-op
+    if (match(TokenType::OP_PLUS))
+    {
+        return parseUnaryExpression();
+    }
+
     // Prefix operators
     if (match({TokenType::OP_MINUS, TokenType::OP_LOGICAL_NOT, TokenType::OP_BITWISE_NOT,
                TokenType::OP_INCREMENT, TokenType::OP_DECREMENT}))
