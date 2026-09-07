@@ -58,6 +58,20 @@ got_synthetic="$(parse_location "$synthetic")"
 [[ "$got_synthetic" == "$expected" ]] || fail \
     "parse_location is broken before the test even runs: on a drive-lettered path it returned '$got_synthetic', expected '$expected'"
 
+# The diagnostic's file is compared with `-ef` - SAME FILE - rather than as
+# a string, because the spelling the compiler prints is the one the SHELL
+# handed it.  Git Bash rewrites a POSIX argv path into Windows form before
+# exec'ing a native binary, so a '/c/Users/...' argument reaches main() as
+# 'C:/Users/...' and a string compare fails on a compiler that echoed its
+# argv perfectly.  The contract is that the diagnostic names THE FILE the
+# command line named, and `-ef` says exactly that in any spelling.
+# Self-tested both ways here, because a comparison nobody has seen refuse
+# is not a comparison.
+[[ "$shaders" -ef "$shaders" ]] || fail \
+    "-ef does not hold for a path against itself; every file assertion below would refuse a correct diagnostic"
+! [[ "$shaders" -ef "$repo_root" ]] || fail \
+    "-ef holds for two different paths; every file assertion below would accept a diagnostic naming the wrong file"
+
 # Where 'bogusType' actually sits in each fixture: the line number and the
 # 1-based column of its first character.
 locate() {
@@ -117,8 +131,8 @@ check() {
         [[ "$got_col" == "$want_col" ]] || fail \
             "$stem ($label): diagnostic names column $got_col, expected $want_col - $first"
     fi
-    [[ "$named" == "$src" ]] || fail \
-        "$stem ($label): diagnostic names '$named', expected the path as given on the command line, '$src'"
+    [[ "$named" -ef "$src" ]] || fail \
+        "$stem ($label): diagnostic names '$named', which is not the file given on the command line, '$src'"
     [[ -f "$out" ]] && fail "$stem ($label) refused but still wrote a container"
     printf '  %-28s %-12s %s:%s:%s\n' "$stem" "$label" "$(basename "$named")" "$got_line" "$got_col"
 }
@@ -235,8 +249,8 @@ for probe in "${probes[@]}"; do
     probe_rest="${probe_parsed#*|}"
     probe_line="${probe_rest%%|*}"
     if [[ "$want_file" == "-" ]]; then
-        [[ "$probe_named" == "$src" ]] || fail \
-            "probe $name: diagnostic names '$probe_named', expected the probe path '$src'"
+        [[ "$probe_named" -ef "$src" ]] || fail \
+            "probe $name: diagnostic names '$probe_named', which is not the probe file '$src'"
     else
         [[ "$probe_named" == "$want_file" ]] || fail \
             "probe $name: diagnostic names '$probe_named', expected '$want_file' - a #line marker the USER wrote must rename the region like the driver's own"

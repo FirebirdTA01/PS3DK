@@ -270,7 +270,16 @@ SHADER
             if grep -Eq 'std::bad_alloc|terminate called|Aborted|Killed' "$log"; then
                 fail "$name reported an allocation abort on $profile/$mode"
             fi
-            grep -Fq "$src:" "$log" \
+            # The BASENAME, not the whole path: the spelling the compiler
+            # prints is the one the SHELL handed it.  Git Bash rewrites a
+            # POSIX argv path into Windows form before exec'ing a native
+            # binary, so a '/tmp/x.fcg' argument reaches main() - and comes
+            # back in the diagnostic - as 'C:/Users/FIREBI~1/.../x.fcg'.
+            # Comparing the directory therefore fails on a compiler that is
+            # behaving perfectly.  What this guard is for is that the
+            # diagnostic names the USER'S FILE rather than <builtin> or the
+            # composed unit, and the file name carries that.
+            grep -Fq "$(basename "$src"):" "$log" \
                 || fail "$name diagnostic did not name the source file on $profile/$mode"
             if grep -Eq "unknown character|unexpected token|parse error|syntax error|unsupported IR op" "$log"; then
                 tail -n 10 "$log" >&2
