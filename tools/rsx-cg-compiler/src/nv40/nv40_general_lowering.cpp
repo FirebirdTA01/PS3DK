@@ -6261,12 +6261,29 @@ private:
             if (sourceWidth <= 0)
                 sourceWidth = inst.resultType.componentCount();
         }
+        // COMPOSE with the lanes resolve() already selected; do not
+        // overwrite them.  Writing {0,1,..} here discards the source's own
+        // swizzle, so `return p.z` and `o = p.z` read p.x - four programs
+        // that must differ compiled to identical bytes, and the same for
+        // `o = p.zw` and `o = p.yzw` against their .xy/.xyz spellings.  The
+        // reference composes: `o = p.zw` reads .zw, `o = p.yzw` reads .yzw.
+        // The depth branch a few lines above has always replicated
+        // swizzle[0] rather than forcing lane 0; this is that rule applied
+        // to the colour output, and it is the same idiom lowerSelect*
+        // already use for a scalar condition (t_cd76485f).
+        //
+        // Only the WRITTEN lanes are corrected here.  What the reference
+        // puts in the lanes outMask does not write is not a single rule -
+        // measured, `o = p.zw` gives .zwzz and `o = p.yzw` gives .yzww -
+        // and those bytes cannot change a rendered pixel, so they stay a
+        // named byte-parity gap rather than a guess.
+        const auto sel = vi.srcs[0].swizzle;
         if (sourceWidth == 2 && outMask == 0x3) {
-            vi.srcs[0].swizzle = {0, 1, 0, 0};
+            vi.srcs[0].swizzle = {sel[0], sel[1], sel[0], sel[0]};
         } else if (sourceWidth == 3 && outMask == 0x7) {
-            vi.srcs[0].swizzle = {0, 1, 2, 0};
+            vi.srcs[0].swizzle = {sel[0], sel[1], sel[2], sel[0]};
         } else if (sourceWidth == 1 && outMask == 0xf) {
-            vi.srcs[0].swizzle = {0, 0, 0, 0};
+            vi.srcs[0].swizzle = {sel[0], sel[0], sel[0], sel[0]};
         }
         program_.instrs.push_back(vi);
     }

@@ -277,6 +277,8 @@ jobs:
         run: bash tests/shader-compiler/vp-attr-clp-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Name the sources of a fragment instruction, and check the arity table
         run: bash tests/shader-compiler/fp-sources-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A scalar stored to the colour output must read the lane it selected
+        run: bash tests/shader-compiler/output-store-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       # LAST of the shader-compiler steps on purpose: it runs every sibling
       # script against a compiler that CRASHES instead of refusing, so it is
