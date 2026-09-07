@@ -1,0 +1,11 @@
+uniform float4 u_bones[4];
+// Rig row (t_99b29225): TEXCOORD1 is attribute 9 on the rig, x in [0.49, 0.59]
+// and y in [0.53, 0.64] across the quad, so int(x * 6) is 2 or 3 either side
+// of a diagonal and int(y * 6) is 3 - the LAST element - everywhere.  Each
+// element carries its own auto value, so a read of the wrong element paints
+// a different colour.
+void main(float4 pos : POSITION, float4 tc1 : TEXCOORD1, out float4 oPos : POSITION, out float4 oTc0 : TEXCOORD0, out float4 oTc1 : TEXCOORD1) {
+    oPos = pos;
+    oTc0 = (u_bones[1] + u_bones[int(tc1.x * 6.0)]) * 0.5;
+    oTc1 = u_bones[int(tc1.y * 6.0)];
+}

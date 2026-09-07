@@ -1,0 +1,11 @@
+uniform float4 u_bones[4];
+// The relative read heads a dependent chain long enough to earn the
+// scheduler's demand priority: without the address-register RAW edge it
+// would be picked before its ARL (t_99b29225, mutation witness).
+void main(float4 pos : POSITION, float idx : TEXCOORD1, out float4 oPos : POSITION) {
+    float4 t = u_bones[int(idx)] * pos;
+    t = t * t;
+    t = t * t;
+    t = t * t;
+    oPos = t + pos;
+}

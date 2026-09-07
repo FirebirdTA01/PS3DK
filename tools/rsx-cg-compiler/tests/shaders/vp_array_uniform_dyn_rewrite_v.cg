@@ -1,0 +1,2 @@
+uniform float4 u[4];
+float4 main(float4 p : POSITION, float2 idx : TEXCOORD0) : POSITION { float2 v = idx * 2; float4 a = u[int(v.x)]; v.x = v.y; return p + a * u[int(v.x)]; }

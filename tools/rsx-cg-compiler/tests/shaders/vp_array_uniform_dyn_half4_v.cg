@@ -1,0 +1,2 @@
+uniform half4 u_hb[4];
+void main(float4 pos : POSITION, float idx : TEXCOORD1, out float4 oPos : POSITION) { oPos = pos + u_hb[int(idx)]; }
