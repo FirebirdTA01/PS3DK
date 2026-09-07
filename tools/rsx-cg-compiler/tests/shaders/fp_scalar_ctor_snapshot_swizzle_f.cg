@@ -1,0 +1,10 @@
+struct Out { float4 c : COLOR; };
+Out main(float4 p : TEXCOORD0, float4 q : TEXCOORD1) {
+    float4 a = p * 2.0;
+    float3 saved = a.yyy;
+    a.y = q.x;
+    Out o;
+    o.c.xyz = saved;
+    o.c.w = a.y;
+    return o;
+}
