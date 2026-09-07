@@ -5,6 +5,7 @@
 #include "semantic.h"
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <stack>
 #include <vector>
 #include <optional>
@@ -51,6 +52,9 @@ private:
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;
     std::unordered_map<std::string, IRValueID> nameToValue_;
+    // Immutable, function-local identities of unwritten vector-field bases.
+    // Assignments replace nameToValue_ bindings; this set needs no branch snapshot.
+    std::unordered_set<IRValueID> undefinedFieldBases_;
     std::unordered_map<std::string, std::vector<IRValueID>> localArrayValues_;
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
