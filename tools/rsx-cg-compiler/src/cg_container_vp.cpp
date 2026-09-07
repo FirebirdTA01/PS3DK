@@ -43,6 +43,7 @@
 
 #include "cg_container_vp.h"
 #include "nv40/nv40_emit.h"
+#include "array_uniforms.h"
 
 #include "ir.h"
 
@@ -136,6 +137,9 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
+    // A `half` scalar is recorded as FLOAT by the reference (measured on
+    // the fragment side: 1045 for `half`, 1048 for `half4` elements).
+    case IRType::Float16: return kCgFloat;
     case IRType::Vec2:    return kCgFloat2;
     case IRType::Vec3:    return kCgFloat3;
     case IRType::Vec4:    return kCgFloat4;
@@ -325,6 +329,48 @@ VpContainerResult emitVertexContainerImpl(
     int nextMatrixReg = 256;
     int nextVectorReg = 467;
 
+    // Array uniforms: one record per element, and a register only for a
+    // REFERENCED element, taken from the same descending cursor in
+    // ascending element order - the walk the lowering performed, from the
+    // same classification (array_uniforms.h, t_f9ecd3ac).  An unreferenced
+    // element is declared with no resource, as the reference declares it.
+    const rsx_cg::ArrayUniformUses arrayUses =
+        rsx_cg::classifyArrayUniformUses(*entry);
+    constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
+    const auto appendArrayElements = [&](const std::string& name,
+                                         const IRTypeInfo& type,
+                                         uint32_t paramno,
+                                         uint32_t isShared) {
+        const auto useIt = arrayUses.find(name);
+        const int count = type.arraySize;
+        for (int k = 0; k < count; ++k)
+        {
+            const bool referenced = useIt != arrayUses.end() &&
+                                    useIt->second.constantElements.count(k) != 0;
+            ParamDesc e;
+            e.name      = rsx_cg::arrayElementName(name, k);
+            e.semantic  = "";
+            e.type      = cgTypeForIRType(type);
+            e.var       = kCgUniform;
+            e.direction = kCgIn;
+            e.paramno   = paramno;
+            e.isShared  = isShared;
+            if (referenced)
+            {
+                e.res          = kCgConst;
+                e.isReferenced = 1;
+                e.resIndex     = static_cast<uint32_t>(nextVectorReg--);
+            }
+            else
+            {
+                e.res          = kCgUnassignedRes;
+                e.isReferenced = 0;
+                e.resIndex     = kInvalidIndex;
+            }
+            params.push_back(e);
+        }
+    };
+
     // ----- Struct-flattened path: synthesize params from
     // LdAttr / StOut walk.  Per the reference compiler:
     //   - all input struct fields share the same paramno = 0 (they
@@ -411,6 +457,12 @@ VpContainerResult emitVertexContainerImpl(
                     }
                     continue;
                 }
+                if (p.type.isArray())
+                {
+                    appendArrayElements(p.name, p.type,
+                                        static_cast<uint32_t>(i), 0u);
+                    continue;
+                }
 
                 d.resIndex = static_cast<uint32_t>(nextVectorReg--);
             }
@@ -455,6 +507,12 @@ VpContainerResult emitVertexContainerImpl(
             else if (hasExplicit)
             {
                 semantic = "C" + std::to_string(g.explicitRegisterIndex);
+            }
+
+            if (g.type.isArray() && !hasExplicit)
+            {
+                appendArrayElements(g.name, g.type, kInvalidIndex, 1u);
+                continue;
             }
 
             ParamDesc d;
@@ -585,6 +643,12 @@ VpContainerResult emitVertexContainerImpl(
                 }
                 continue;
             }
+            else if (p.type.isArray())
+            {
+                appendArrayElements(p.name, p.type,
+                                    static_cast<uint32_t>(i), 0u);
+                continue;
+            }
             else
             {
                 const int reg = nextVectorReg--;
@@ -626,6 +690,12 @@ VpContainerResult emitVertexContainerImpl(
             semantic = "PROJECTION";
         else if (hasExplicit)
             semantic = "C" + std::to_string(g.explicitRegisterIndex);
+
+        if (g.type.isArray() && !hasExplicit)
+        {
+            appendArrayElements(g.name, g.type, kInvalidIndex, 0u);
+            continue;
+        }
 
         ParamDesc d;
         d.name      = g.name;

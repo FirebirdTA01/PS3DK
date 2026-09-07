@@ -32,6 +32,7 @@
 #include "nvfx_shader.h"
 
 #include "ir.h"
+#include "array_uniforms.h"
 
 #include <algorithm>
 #include <array>
@@ -546,6 +547,11 @@ private:
     // while the container correctly described the bindings - a two-texture
     // shader silently read one texture twice.
     std::unordered_map<IRValueID, int> samplerUnit_;
+    // Array uniforms, by name: the source of each element the lowering
+    // laid out (FP: one inline-const slot per element; VP: one constant
+    // register per REFERENCED element).  Filled in the constructor from
+    // the pre-pass classification, read by lowerLoadUniform (t_f9ecd3ac).
+    std::map<std::string, std::map<int, VSrc>> arrayElementSrcs_;
     std::unordered_map<IRValueID, VSrc> conditionToSource_;
     std::unordered_map<IRValueID, int> valueWidth_;
     // CF-1a flatten state (t_91bbd575).  Set only when the entry
@@ -1743,8 +1749,74 @@ private:
         // cg_container_fp.cpp numbers them; the two must agree or binding a
         // texture by name reaches a different unit than the ucode samples.
         int nextFpTexUnit = 0;
-        unsigned nextFpGlobalSlot =
-            static_cast<unsigned>(entry_.parameters.size());
+        // Array uniforms widen the FP slot numbering: an array parameter
+        // takes one inline-const slot per element, so every later
+        // parameter's and every file-scope uniform's slot is computed from
+        // the shared rule rather than from its index (array_uniforms.h).
+        const std::vector<unsigned> fpParamSlotBases =
+            rsx_cg::fpParameterSlotBases(entry_);
+        unsigned nextFpGlobalSlot = rsx_cg::fpFirstGlobalSlot(entry_);
+        // How the entry reaches each array uniform, classified BEFORE any
+        // resource is assigned: a run-time index anywhere on an array
+        // refuses the whole program in this slice (its contiguous block
+        // and ARL lowering are the next one), so an array can never be
+        // laid out per element here and as a block later for the same
+        // source - the container shape would change under the user.
+        const rsx_cg::ArrayUniformUses arrayUses =
+            rsx_cg::classifyArrayUniformUses(entry_);
+        const auto layoutArrayUniform = [&](const std::string& name,
+                                            const IRTypeInfo& type,
+                                            unsigned fpSlotBase,
+                                            bool isParameter) {
+            const char* where = isParameter ? "parameter" : "uniform";
+            if (!rsx_cg::arrayElementLowered(type)) {
+                program_.diagnostics.push_back(
+                    std::string("nv40-general: array ") + where + " '" + name +
+                    "' has an element type this lowering does not lay out "
+                    "(only float scalar and vector elements are; matrix, "
+                    "half and nested elements are not yet); refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            const auto useIt = arrayUses.find(name);
+            const rsx_cg::ArrayUniformUse use =
+                useIt != arrayUses.end() ? useIt->second : rsx_cg::ArrayUniformUse{};
+            if (use.dynamic) {
+                program_.diagnostics.push_back(
+                    profile_ == GeneralProfile::Fragment
+                        ? "nv40-general-fp: array " + std::string(where) + " '" +
+                          name + "' is indexed at run time; a fragment program "
+                          "has no indexed constants (the reference refuses this "
+                          "too: C6013, only arrays of texcoords may be indexed "
+                          "in this profile); refusing"
+                        : "nv40-general-vp: run-time index into array " +
+                          std::string(where) + " '" + name + "' needs a "
+                          "contiguous constant block and ARL addressing, which "
+                          "is not lowered yet; refusing the whole program "
+                          "rather than laying the array out per element");
+                program_.loweringFailed = true;
+                return;
+            }
+            const int count = type.arraySize;
+            if (profile_ == GeneralProfile::Vertex) {
+                // Referenced elements only, registers DESCENDING from
+                // c467 in ASCENDING element order (measured: u_bones[1]
+                // -> c467, u_bones[3] -> c466); unreferenced elements are
+                // declared by the container but hold no register.
+                for (int k : use.constantElements) {
+                    if (k < 0 || k >= count) continue;
+                    arrayElementSrcs_[name][k] =
+                        uniformSrc(nextVpUniformConst--, false);
+                }
+            } else {
+                // Every element has its own inline-const slot, used or
+                // not, so the container's one-record-per-element table
+                // and the emitter's slot numbering line up.
+                for (int k = 0; k < count; ++k)
+                    arrayElementSrcs_[name][k] =
+                        uniformSrc(static_cast<int>(fpSlotBase + k), true);
+            }
+        };
         std::unordered_set<std::string> seenUniformNames;
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         struct PendingMatrix {
@@ -1764,6 +1836,10 @@ private:
                 valueWidth_[p.valueId] = p.type.componentCount();
             if (p.storage == StorageQualifier::Uniform &&
                 !seenUniformNames.insert(p.name).second) {
+                continue;
+            }
+            if (p.storage == StorageQualifier::Uniform && p.type.isArray()) {
+                layoutArrayUniform(p.name, p.type, fpParamSlotBases[pi], true);
                 continue;
             }
             if (profile_ == GeneralProfile::Vertex &&
@@ -1795,8 +1871,10 @@ private:
                 samplerUnit_[p.valueId] = nextFpTexUnit++;
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform) {
+                // The slot is the parameter's index unless an earlier
+                // array parameter widened the numbering (shared rule).
                 program_.valueToSource[p.valueId] =
-                    uniformSrc(static_cast<int>(pi), true);
+                    uniformSrc(static_cast<int>(fpParamSlotBases[pi]), true);
             }
         }
 
@@ -1805,6 +1883,31 @@ private:
                 continue;
             if (!seenUniformNames.insert(g.name).second)
                 continue;
+            if (g.type.isArray()) {
+                unsigned base = 0;
+                if (profile_ == GeneralProfile::Fragment) {
+                    base = nextFpGlobalSlot;
+                    const unsigned count = rsx_cg::fpUniformSlotCount(g.type);
+                    const unsigned cols =
+                        static_cast<unsigned>(g.type.componentCount());
+                    for (unsigned k = 0; k < count; ++k) {
+                        program_.fpGlobalUniformSlots.push_back(base + k);
+                        // An initialised array carries one default per
+                        // element (measured on the reference: float4(1,2,3,4)
+                        // and float4(5,6,7,8) on their own records).
+                        if (g.initialValue.size() >= (k + 1) * cols) {
+                            program_.fpUniformDefaults[base + k] = {
+                                std::vector<float>(
+                                    g.initialValue.begin() + k * cols,
+                                    g.initialValue.begin() + (k + 1) * cols),
+                                cols};
+                        }
+                    }
+                    nextFpGlobalSlot += count;
+                }
+                layoutArrayUniform(g.name, g.type, base, false);
+                continue;
+            }
             if (profile_ == GeneralProfile::Vertex && g.type.isMatrix()) {
                 pendingMatrices.push_back(PendingMatrix{g.valueId, g.name,
                                                         g.type.matrixRows,
@@ -3726,21 +3829,69 @@ private:
     {
         if (inst.result == InvalidIRValue)
             return;
+        // An ARRAY element, parameter or file-scope alike: the builder
+        // named how it was chosen, the constructor laid the elements out
+        // (or failed the program for a run-time index), and this reads
+        // the element's own source.  Nothing here may fall through to a
+        // scalar source - that read element 0 for every index.
+        using Kind = IRInstruction::ArrayIndexKind;
+        if (inst.arrayIndexKind == Kind::Constant) {
+            const auto arrIt = arrayElementSrcs_.find(inst.targetName);
+            if (arrIt != arrayElementSrcs_.end()) {
+                const auto elIt = arrIt->second.find(inst.componentIndex);
+                if (elIt != arrIt->second.end()) {
+                    program_.valueToSource[inst.result] = elIt->second;
+                    return;
+                }
+            }
+            if (!program_.loweringFailed) {
+                program_.diagnostics.push_back(
+                    "nv40-general: element " +
+                    std::to_string(inst.componentIndex) + " of array uniform '" +
+                    inst.targetName + "' has no source; refusing rather than "
+                    "aliasing it to the base");
+                program_.loweringFailed = true;
+            }
+            return;
+        }
+        if (inst.arrayIndexKind == Kind::Dynamic) {
+            // The constructor already refused the program; keep the load
+            // from resolving to anything in case it did not see the array.
+            if (!program_.loweringFailed) {
+                program_.diagnostics.push_back(
+                    "nv40-general: run-time index into array uniform '" +
+                    inst.targetName + "' is not lowered; refusing");
+                program_.loweringFailed = true;
+            }
+            return;
+        }
         for (const auto& g : module_.globals) {
             if (g.name != inst.targetName)
                 continue;
-            // ARRAY uniforms are registered as a single const source for
-            // the whole array, so aliasing an indexed load to it would
-            // silently read element zero for every index (found in
-            // review: offsets[1] emitted reading the base).  Refuse until
-            // the array-uniform slice allocates per-element registers on
-            // both the lowering and upload sides.
-            if (g.type.isArray() || inst.componentIndex != 0) {
+            // ARRAY uniforms.  The builder says how the element was chosen
+            // (IRInstruction::arrayIndexKind), so each shape gets its own
+            // named answer rather than one refusal - and none of them may
+            // fall through to the scalar source below, which would read
+            // element zero for every index (found in review: offsets[1]
+            // emitted reading the base).  Per-element sources land with
+            // the array-uniform slice (t_f9ecd3ac); until then the constant
+            // case still refuses, by name.
+            if (g.type.isArray()) {
+                // Only the BARE array reaches here (indexed loads were
+                // answered above): passing a whole array on, or naming it
+                // without an index, has no per-element meaning.
                 program_.diagnostics.push_back(
-                    "nv40-general: ldunif of array uniform '" +
-                    inst.targetName +
-                    "' is not implemented; refusing rather than aliasing "
-                    "every index to the base");
+                    "nv40-general: array uniform '" + inst.targetName +
+                    "' is used without an index (as a whole array); refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            if (inst.componentIndex != 0) {
+                program_.diagnostics.push_back(
+                    "nv40-general: ldunif of '" + inst.targetName +
+                    "' carries component index " +
+                    std::to_string(inst.componentIndex) +
+                    " on a non-array uniform; refusing");
                 program_.loweringFailed = true;
                 return;
             }
@@ -7378,6 +7529,10 @@ static void seedFpEmbeddedUniforms(const IRFunction& entry,
     // dropped and the container advertises a parameter nothing can patch.
     for (unsigned slot : program.fpGlobalUniformSlots)
         attrs.embeddedUniforms.push_back({slot, {}});
+    // A parameter's slot is its index only until an array parameter
+    // widens the numbering; an array parameter seeds one entry per
+    // element (array_uniforms.h is the one rule for all three sites).
+    const std::vector<unsigned> slotBases = rsx_cg::fpParameterSlotBases(entry);
     for (size_t i = 0; i < entry.parameters.size(); ++i) {
         const auto& p = entry.parameters[i];
         if (p.storage != StorageQualifier::Uniform)
@@ -7386,7 +7541,10 @@ static void seedFpEmbeddedUniforms(const IRFunction& entry,
             p.type.baseType == IRType::SamplerRect ||
             p.type.baseType == IRType::SamplerCube)
             continue;
-        attrs.embeddedUniforms.push_back({static_cast<unsigned>(i), {}});
+        const unsigned count = p.type.isArray()
+            ? rsx_cg::fpUniformSlotCount(p.type) : 1u;
+        for (unsigned k = 0; k < count; ++k)
+            attrs.embeddedUniforms.push_back({slotBases[i] + k, {}});
     }
 }
 

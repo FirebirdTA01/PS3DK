@@ -313,6 +313,18 @@ public:
     // Additional data for specific instructions
     int swizzleMask = 0;            // For VecShuffle: encoded swizzle pattern
     int componentIndex = 0;          // For VecExtract/VecInsert
+
+    // LoadUniform of an ARRAY uniform: how the element was chosen.  Explicit
+    // so a lowering can never mistake element 0 for the bare array, nor a
+    // run-time index for a lane selector (t_f9ecd3ac).
+    //   None      the bare array (no index) - only meaningful to a caller
+    //             that consumes whole arrays, and refused by the lowering
+    //   Constant  componentIndex holds the element, already bounds-checked
+    //             by the builder against the declared count
+    //   Dynamic   operands[0] holds the integral index value; the element
+    //             is chosen at run time
+    enum class ArrayIndexKind { None, Constant, Dynamic };
+    ArrayIndexKind arrayIndexKind = ArrayIndexKind::None;
     IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
     // For Discard: the guard operand is the condition on the path that
     // REACHES the discard, and this flag says the kill fires where that

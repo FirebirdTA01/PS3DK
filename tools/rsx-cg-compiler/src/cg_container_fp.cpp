@@ -40,6 +40,7 @@
 
 #include "cg_container_fp.h"
 #include "nv40/nv40_emit.h"
+#include "array_uniforms.h"
 
 #include "ir.h"
 
@@ -135,6 +136,11 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
+    // A `half` scalar is recorded as FLOAT by the reference (measured:
+    // `uniform half u_w` -> CGtype 1045, `half u_w[3]` elements 1045,
+    // `half4 u_h[3]` elements 1048); this returned 0 for it, so every
+    // half scalar uniform's record carried no type at all.
+    case IRType::Float16: return kCgFloat;
     case IRType::Vec2:    return kCgFloat2;
     case IRType::Vec3:    return kCgFloat3;
     case IRType::Vec4:    return kCgFloat4;
@@ -279,6 +285,41 @@ ContainerResult emitFragmentContainerImpl(
             continue;
         }
 
+        // An ARRAY uniform parameter is one record PER ELEMENT, named
+        // `name[k]`, typed as the element, all sharing the parameter's
+        // source ordinal as paramno, declared whether used or not; a used
+        // element carries its own inline-const relocation offsets and
+        // isReferenced.  Its slots come from the shared rule, so the
+        // lowering's sources, the emitter's seeding and these records
+        // count the same way (array_uniforms.h, t_f9ecd3ac).
+        if (p.storage == StorageQualifier::Uniform && p.type.isArray())
+        {
+            const unsigned base  = rsx_cg::fpParameterSlotBases(*entry)[i];
+            const unsigned count = rsx_cg::fpUniformSlotCount(p.type);
+            for (unsigned k = 0; k < count; ++k)
+            {
+                ParamDesc e;
+                e.name      = rsx_cg::arrayElementName(p.name, static_cast<int>(k));
+                e.semantic  = std::string{};
+                e.type      = cgTypeForIRType(p.type);
+                e.paramno   = static_cast<uint32_t>(i);
+                e.res       = kCgUndefined;
+                e.var       = kCgUniform;
+                e.direction = kCgIn;
+                for (const auto& eu : attrs.embeddedUniforms)
+                {
+                    if (eu.entryParamIndex == base + k)
+                    {
+                        e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                        break;
+                    }
+                }
+                e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                params.push_back(e);
+            }
+            continue;
+        }
+
         ParamDesc d;
         d.name      = p.name;
         // Preserve original source spelling — the reference compiler stores "TEXCOORD0"
@@ -321,9 +362,12 @@ ContainerResult emitFragmentContainerImpl(
             d.direction = kCgIn;
 
             // Attach the per-use ucode offsets from the lowering pass.
+            // The slot is the parameter's index unless an earlier array
+            // parameter widened the numbering (shared rule).
+            const unsigned slot = rsx_cg::fpParameterSlotBases(*entry)[i];
             for (const auto& eu : attrs.embeddedUniforms)
             {
-                if (eu.entryParamIndex == i)
+                if (eu.entryParamIndex == slot)
                 {
                     d.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
                     break;
@@ -363,13 +407,42 @@ ContainerResult emitFragmentContainerImpl(
     // entries get paramno = 0xFFFFFFFF (synthetic) and the embedded-
     // constant ucode-offset list comes from those higher slot ids.
     {
-        const unsigned firstGlobalSlot =
-            static_cast<unsigned>(entry->parameters.size());
+        const unsigned firstGlobalSlot = rsx_cg::fpFirstGlobalSlot(*entry);
         unsigned globalSlotCursor = firstGlobalSlot;
         int      globalSamplerCursor = nextSamplerUnit;
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
+
+            // A file-scope ARRAY uniform: one record per element, each on
+            // its own slot, in the same order the lowering numbered them.
+            if (g.type.isArray() && !isSamplerIRType(g.type.baseType))
+            {
+                const unsigned count = rsx_cg::fpUniformSlotCount(g.type);
+                for (unsigned k = 0; k < count; ++k)
+                {
+                    const unsigned slot = globalSlotCursor++;
+                    ParamDesc e;
+                    e.name      = rsx_cg::arrayElementName(g.name, static_cast<int>(k));
+                    e.semantic  = std::string{};
+                    e.type      = cgTypeForIRType(g.type);
+                    e.paramno   = kInvalidIndex;
+                    e.res       = kCgUndefined;
+                    e.var       = kCgUniform;
+                    e.direction = kCgIn;
+                    for (const auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == slot)
+                        {
+                            e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                            break;
+                        }
+                    }
+                    e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                    params.push_back(e);
+                }
+                continue;
+            }
 
             ParamDesc d;
             d.name      = g.name;

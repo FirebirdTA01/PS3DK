@@ -1,0 +1,4 @@
+uniform float4 u_tint;
+uniform float4 u_colors[2];
+uniform float4 u_other[3];
+float4 main(float2 uv : TEXCOORD0) : COLOR { return u_tint * u_colors[1] + u_other[2] * uv.x; }
