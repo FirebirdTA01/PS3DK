@@ -272,6 +272,12 @@ jobs:
       - name: Test rsx-cg-compiler vertex attributes and clip planes
         run: bash tests/shader-compiler/vp-attr-clp-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      # LAST of the shader-compiler steps on purpose: it runs every sibling
+      # script against a compiler that CRASHES instead of refusing, so it is
+      # only meaningful once those scripts have been seen green normally.
+      - name: No guard may read a crash as a refusal
+        run: bash tests/shader-compiler/refusal-status-adversary-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test shader corpus fetch metadata and destination guards
         run: bash tests/shader-corpus/fetch-shader-corpus-test.sh
 
