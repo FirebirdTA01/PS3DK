@@ -1,0 +1,5 @@
+uniform float4 u_global;
+float4 main(float2 uv : TEXCOORD0, uniform float4 u_colors[3], uniform float4 u_scale, uniform float4 u_more[2]) : COLOR
+{
+    return u_colors[2] * uv.x + u_scale * u_more[1] + u_global;
+}

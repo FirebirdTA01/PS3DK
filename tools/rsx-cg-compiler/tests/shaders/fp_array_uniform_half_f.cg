@@ -1,0 +1,2 @@
+uniform half u_w[3];
+float4 main(float2 uv : TEXCOORD0) : COLOR { return u_w[1] * uv.x + u_w[2]; }

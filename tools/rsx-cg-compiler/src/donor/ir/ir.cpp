@@ -151,24 +151,32 @@ IRTypeInfo IRTypeInfo::fromCgType(const CgType& cgType)
         }
     }
 
-    // Preserve array size and set element type for arrays
+    // An array is described by its ELEMENT plus a count.  isScalar(),
+    // isVector() and isMatrix() are all false for an array, so nothing
+    // above set baseType or vectorSize; the old fallback here then took the
+    // scalar element kind and width 1, which turned `float4 x[N]` into
+    // float[N] - the container declared CGtype 1045 (float) where the
+    // reference declares 1048 (float4), and every element was allocated
+    // one lane wide.  Convert the element type through this same function
+    // and carry only the count from the array (t_f9ecd3ac).
     if (cgType.arraySize() > 0)
     {
-        info.arraySize = cgType.arraySize();
-
-        // For array types, baseType may not have been set above because
-        // CgType::isScalar()/isVector() return false for arrays.
-        // Set baseType based on the element type.
-        if (info.baseType == IRType::Void && info.elementType != IRType::Float32)
+        const CgType element = cgType.elementType();
+        if (!element.isVoid() && !element.isError())
         {
-            // Use whatever elementType was determined
+            const IRTypeInfo elementInfo = fromCgType(element);
+            info.baseType    = elementInfo.baseType;
+            info.elementType = elementInfo.elementType;
+            info.vectorSize  = elementInfo.vectorSize;
+            info.matrixRows  = elementInfo.matrixRows;
+            info.matrixCols  = elementInfo.matrixCols;
         }
-        if (info.baseType == IRType::Void)
+        else if (info.baseType == IRType::Void)
         {
-            // Array of scalars: use the element type as base type
             info.baseType = info.elementType;
             info.vectorSize = 1;
         }
+        info.arraySize = cgType.arraySize();
     }
 
     return info;

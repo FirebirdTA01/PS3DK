@@ -2,6 +2,8 @@
 #include <vector>
 #include "ir_builder.h"
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <sstream>
 #include <unordered_set>
 
@@ -2156,46 +2158,286 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
     return valueId;
 }
 
+// A uniform array's index is classified BEFORE any IR is built for it:
+//
+//   Constant   the whole expression evaluates, at compile time and with
+//              checked arithmetic, to one integer - literals, unary minus,
+//              + - * / % and parentheses over those.  `u_colors[1 + 1]` is
+//              element 2, not a run-time index: the IR-level folder does
+//              not fold integer Add, so relying on it misclassified this
+//              shape (found in design review).
+//   Runtime    something in it is not a compile-time integer (a varying, a
+//              call, a cast of one) - the element is chosen on the GPU.
+//   Invalid    it IS constant but not a valid one: a non-integer literal,
+//              a divisor of zero, or arithmetic that overflows.  Reported,
+//              never demoted to Runtime, and never allowed to reach signed
+//              overflow on the host.
+//
+// The value is kept in int64 until the bounds check so a negative index
+// and an over-wide unsigned one are both seen as what they are.
+namespace
+{
+
+enum class IndexEval { Constant, Runtime, Invalid };
+
+// Checked int64 arithmetic without compiler builtins (MSVC has none): the
+// bound is tested before the operation, so the host never overflows.
+constexpr int64_t kI64Max = std::numeric_limits<int64_t>::max();
+constexpr int64_t kI64Min = std::numeric_limits<int64_t>::min();
+bool checkedAdd(int64_t a, int64_t b, int64_t& out)
+{
+    if ((b > 0 && a > kI64Max - b) || (b < 0 && a < kI64Min - b)) return false;
+    out = a + b; return true;
+}
+bool checkedSub(int64_t a, int64_t b, int64_t& out)
+{
+    if ((b < 0 && a > kI64Max + b) || (b > 0 && a < kI64Min + b)) return false;
+    out = a - b; return true;
+}
+bool checkedMul(int64_t a, int64_t b, int64_t& out)
+{
+    if (a == 0 || b == 0) { out = 0; return true; }
+    if ((a == -1 && b == kI64Min) || (b == -1 && a == kI64Min)) return false;
+    if (a > 0) { if (b > 0 ? a > kI64Max / b : b < kI64Min / a) return false; }
+    else       { if (b > 0 ? a < kI64Min / b : b < kI64Max / a) return false; }
+    out = a * b; return true;
+}
+
+IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& why)
+{
+    if (!e) { why = "array index is missing"; return IndexEval::Invalid; }
+    switch (e->kind)
+    {
+    case ExprKind::Literal:
+    {
+        auto* lit = static_cast<const LiteralExpr*>(e);
+        if (lit->literalKind == LiteralExpr::LiteralKind::Int)
+        {
+            out = std::get<int64_t>(lit->value);
+            return IndexEval::Constant;
+        }
+        why = "array index must be an integer constant expression";
+        return IndexEval::Invalid;
+    }
+    case ExprKind::Unary:
+    {
+        auto* u = static_cast<const UnaryExpr*>(e);
+        if (u->op != UnaryOp::Negate)
+            return IndexEval::Runtime;
+        int64_t v = 0;
+        const IndexEval r = evaluateIntegralIndex(u->operand.get(), v, why);
+        if (r != IndexEval::Constant) return r;
+        if (v == kI64Min) { why = "array index constant overflows"; return IndexEval::Invalid; }
+        out = -v;
+        return IndexEval::Constant;
+    }
+    case ExprKind::Binary:
+    {
+        auto* b = static_cast<const BinaryExpr*>(e);
+        if (b->op != BinaryOp::Add && b->op != BinaryOp::Sub &&
+            b->op != BinaryOp::Mul && b->op != BinaryOp::Div &&
+            b->op != BinaryOp::Mod)
+            return IndexEval::Runtime;
+        int64_t l = 0, r = 0;
+        const IndexEval lr = evaluateIntegralIndex(b->left.get(), l, why);
+        if (lr == IndexEval::Invalid) return lr;
+        const IndexEval rr = evaluateIntegralIndex(b->right.get(), r, why);
+        if (rr == IndexEval::Invalid) return rr;
+        if (lr == IndexEval::Runtime || rr == IndexEval::Runtime)
+            return IndexEval::Runtime;
+        int64_t v = 0;
+        bool ok = true;
+        switch (b->op)
+        {
+        case BinaryOp::Add: ok = checkedAdd(l, r, v); break;
+        case BinaryOp::Sub: ok = checkedSub(l, r, v); break;
+        case BinaryOp::Mul: ok = checkedMul(l, r, v); break;
+        case BinaryOp::Div:
+        case BinaryOp::Mod:
+            if (r == 0) { why = "array index constant divides by zero"; return IndexEval::Invalid; }
+            if (l == kI64Min && r == -1) { ok = false; break; }
+            v = (b->op == BinaryOp::Div) ? l / r : l % r;
+            break;
+        default: return IndexEval::Runtime;
+        }
+        if (!ok) { why = "array index constant overflows"; return IndexEval::Invalid; }
+        out = v;
+        return IndexEval::Constant;
+    }
+    case ExprKind::Cast:
+    {
+        // A cast APPLIES ITS TARGET'S SEMANTICS to a constant operand; it
+        // is not a pass-through.  (int)(bool)2 is element 1, because
+        // (bool)2 is true - a first draft returned the operand unchanged
+        // and read element 2, byte-identical to u[2] where the reference is
+        // byte-identical to u[1] (found in review).  Integral scalar
+        // targets are evaluated with C semantics; any other target is
+        // refused by name rather than evaluated wrongly or demoted to a
+        // run-time index.  int(uv.x) is still Runtime: the operand decides.
+        auto* c = static_cast<const CastExpr*>(e);
+        const TypeNode* t = c->targetType.get();
+        if (!t || t->vectorSize != 1 || t->matrixRows != 0 || t->arraySize != 0)
+        {
+            why = "array index constant cast to a non-scalar type is not evaluated";
+            return IndexEval::Invalid;
+        }
+        int64_t v = 0;
+        // A FLOAT literal is a constant only under an integral cast, where
+        // C truncates it toward zero: the reference compiles u[(int)2.5]
+        // as element 2.  A bare float index stays Invalid (the operand
+        // rule below), and a float-typed TARGET is refused further down.
+        const ExprNode* operand = c->operand.get();
+        if (operand && operand->kind == ExprKind::Literal &&
+            static_cast<const LiteralExpr*>(operand)->literalKind ==
+                LiteralExpr::LiteralKind::Float &&
+            (t->baseType == BaseType::Bool || t->baseType == BaseType::Int ||
+             t->baseType == BaseType::UInt || t->baseType == BaseType::Short ||
+             t->baseType == BaseType::UShort || t->baseType == BaseType::Char ||
+             t->baseType == BaseType::UChar))
+        {
+            const double d = std::get<double>(static_cast<const LiteralExpr*>(operand)->value);
+            if (!(d > -9.2e18 && d < 9.2e18))
+            {
+                why = "array index constant overflows";
+                return IndexEval::Invalid;
+            }
+            v = t->baseType == BaseType::Bool ? (d != 0.0 ? 1 : 0)
+                                              : static_cast<int64_t>(d);
+        }
+        else
+        {
+            const IndexEval r = evaluateIntegralIndex(operand, v, why);
+            if (r != IndexEval::Constant) return r;
+        }
+        switch (t->baseType)
+        {
+        case BaseType::Bool:   out = (v != 0) ? 1 : 0; return IndexEval::Constant;
+        case BaseType::Int:    out = static_cast<int64_t>(static_cast<int32_t>(v));  return IndexEval::Constant;
+        case BaseType::UInt:   out = static_cast<int64_t>(static_cast<uint32_t>(v)); return IndexEval::Constant;
+        case BaseType::Short:  out = static_cast<int64_t>(static_cast<int16_t>(v));  return IndexEval::Constant;
+        case BaseType::UShort: out = static_cast<int64_t>(static_cast<uint16_t>(v)); return IndexEval::Constant;
+        case BaseType::Char:   out = static_cast<int64_t>(static_cast<int8_t>(v));   return IndexEval::Constant;
+        case BaseType::UChar:  out = static_cast<int64_t>(static_cast<uint8_t>(v));  return IndexEval::Constant;
+        default:
+            why = "array index constant cast to '" + baseTypeToString(t->baseType) +
+                  "' is not evaluated";
+            return IndexEval::Invalid;
+        }
+    }
+    default:
+        return IndexEval::Runtime;
+    }
+}
+
+} // namespace
+
 IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 {
-    // Check if this is a uniform array access (e.g., u_colors[2])
-    // For uniform arrays with constant indices, emit LoadUniform with componentIndex
-    // instead of VecExtract (which is for vector component extraction)
+    // A UNIFORM ARRAY element is a LoadUniform that names how the element
+    // was chosen (IRInstruction::arrayIndexKind), never a VecExtract: the
+    // VecExtract lowering reads its selector as a LANE and falls back to
+    // lane 0, which for an array base would silently read element 0 for
+    // every index (t_f9ecd3ac).
     if (expr->array->kind == ExprKind::Identifier)
     {
         auto* ident = static_cast<IdentifierExpr*>(expr->array.get());
-        IRGlobal* global = module_->findGlobal(ident->name);
 
-        // Debug: uniform array index access detection
-        // printf("DEBUG buildIndexExpr: ident=%s global=%p isArray=%d\n",
-        //        ident->name.c_str(), (void*)global,
-        //        global ? (int)global->type.isArray() : -1);
-        // fflush(stdout);
-
-        if (global && global->type.isArray())
+        // Provenance comes from the SCOPED binding first: an entry
+        // PARAMETER array (`uniform float4 u_colors[4]` in the signature -
+        // the SDK's usual spelling) is a name in nameToValue_, and it used
+        // to fall through to the generic VecExtract below, which read one
+        // LANE of the parameter as the element (the e88 miscompile).  A
+        // parameter that shadows a global must not inherit the global's
+        // shape either, so the binding table is consulted before findGlobal.
+        // ANY scoped binding wins over a global of the same name.  A local
+        // or a non-array parameter that shadows a global array is that
+        // local or parameter - the first draft consulted the binding only
+        // when it was itself a uniform-array parameter and otherwise fell
+        // back to findGlobal, so `float4 u = p; return u[2];` under a
+        // global `u[4]` read the GLOBAL's element (found in review: the
+        // parent refused that shape, the draft accepted it wrongly).
+        const IRParameter* arrayParam = nullptr;
+        const bool nameIsBound = nameToValue_.count(ident->name) != 0;
+        if (nameIsBound && currentFunction_)
         {
-            // Check if index is a compile-time constant
-            if (expr->index->kind == ExprKind::Literal)
+            const IRValueID boundId = nameToValue_[ident->name];
+            for (const auto& p : currentFunction_->parameters)
             {
-                auto* lit = static_cast<LiteralExpr*>(expr->index.get());
-                if (lit->literalKind == LiteralExpr::LiteralKind::Int)
+                if (p.valueId == boundId && p.type.isArray() &&
+                    p.storage == StorageQualifier::Uniform)
                 {
-                    int arrayIndex = static_cast<int>(std::get<int64_t>(lit->value));
-
-                    // Debug: uniform array LoadUniform emission
-                    // printf("DEBUG buildIndexExpr: emitting LoadUniform for %s[%d]\n",
-                    //        global->name.c_str(), arrayIndex);
-                    // fflush(stdout);
-
-                    IRTypeInfo resultType = getExprType(expr);
-                    auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
-                        currentFunction_->allocateValueId(), resultType);
-                    inst->targetName = global->name;
-                    inst->componentIndex = arrayIndex;
-                    currentBlock_->addInstruction(std::move(inst));
-                    return currentFunction_->nextValueId - 1;
+                    arrayParam = &p;
+                    break;
                 }
             }
+        }
+        IRGlobal* global = nameIsBound ? nullptr : module_->findGlobal(ident->name);
+        if (global && !global->type.isArray())
+            global = nullptr;
+
+        if (arrayParam || global)
+        {
+            const std::string& arrayName = arrayParam ? arrayParam->name : global->name;
+            const int64_t arrayCount = arrayParam ? arrayParam->type.arraySize
+                                                  : global->type.arraySize;
+            int64_t index = 0;
+            std::string why;
+            const IndexEval eval = evaluateIntegralIndex(expr->index.get(), index, why);
+            if (eval == IndexEval::Invalid)
+            {
+                error(expr->loc, why + " ('" + arrayName + "')");
+                return InvalidIRValue;
+            }
+
+            // The run-time index is built BEFORE the load's own id is
+            // allocated, and the load's id is what is returned - a first
+            // draft allocated the load first and returned "the last id",
+            // which was the index expression's; the load then had no users,
+            // was eliminated, and the shader returned the INDEX as its
+            // colour with exit 0 (caught by fp_array_uniform_dynamic's
+            // expectation of a refusal).
+            IRValueID indexValue = InvalidIRValue;
+            int elementIndex = 0;
+            if (eval == IndexEval::Constant)
+            {
+                // Bounds are checked on the evaluated int64, before it is
+                // narrowed, and out of range REFUSES - the reference does
+                // (C1068 array index out of bounds) and a clamp would
+                // silently read a different element.
+                if (index < 0 || index >= arrayCount)
+                {
+                    error(expr->loc, "array index " + std::to_string(index) +
+                          " out of bounds for '" + arrayName + "[" +
+                          std::to_string(arrayCount) + "]'");
+                    return InvalidIRValue;
+                }
+                elementIndex = static_cast<int>(index);
+            }
+            else
+            {
+                indexValue = buildExpr(expr->index.get());
+                if (indexValue == InvalidIRValue)
+                    return InvalidIRValue;
+            }
+
+            IRTypeInfo resultType = getExprType(expr);
+            const IRValueID loadId = currentFunction_->allocateValueId();
+            auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+                loadId, resultType);
+            inst->targetName = arrayName;
+            if (eval == IndexEval::Constant)
+            {
+                inst->componentIndex = elementIndex;
+                inst->arrayIndexKind = IRInstruction::ArrayIndexKind::Constant;
+            }
+            else
+            {
+                inst->addOperand(indexValue);
+                inst->componentIndex = -1;
+                inst->arrayIndexKind = IRInstruction::ArrayIndexKind::Dynamic;
+            }
+            currentBlock_->addInstruction(std::move(inst));
+            return loadId;
         }
 
         auto localIt = localArrayValues_.find(ident->name);
