@@ -825,19 +825,28 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     currentFunction_->returnType = getIRType(decl->returnType.get());
     currentFunction_->isEntryPoint = (decl->name == module_->entryPointName);
 
-    if (const auto* fields = getStructFields(decl->returnType.get())) {
+    auto collectReturnOutputs = [&](auto& self, TypeNode* sType, const std::string& pathPrefix) -> void {
+        const auto* fields = getStructFields(sType);
+        if (!fields) return;
         for (const auto& field : *fields) {
-            if (field.semantic.isEmpty()) continue;
-            IRParameter output{};
-            output.name = field.name;
-            output.type = getIRType(field.type.get());
-            output.valueId = InvalidIRValue;
-            output.storage = StorageQualifier::Out;
-            output.semanticName = field.semantic.name;
-            output.rawSemanticName = field.semantic.rawName;
-            output.semanticIndex = field.semantic.index;
-            currentFunction_->returnOutputs.push_back(std::move(output));
+            const std::string fieldPath = pathPrefix.empty() ? field.name : (pathPrefix + "." + field.name);
+            if (!field.semantic.isEmpty()) {
+                IRParameter output{};
+                output.name = fieldPath;
+                output.type = getIRType(field.type.get());
+                output.valueId = InvalidIRValue;
+                output.storage = StorageQualifier::Out;
+                output.semanticName = field.semantic.name;
+                output.rawSemanticName = field.semantic.rawName;
+                output.semanticIndex = field.semantic.index;
+                currentFunction_->returnOutputs.push_back(std::move(output));
+            } else if (getStructFields(field.type.get())) {
+                self(self, field.type.get(), fieldPath);
+            }
         }
+    };
+    if (decl->returnType) {
+        collectReturnOutputs(collectReturnOutputs, decl->returnType.get(), "");
     }
 
     // Build parameters
@@ -1615,13 +1624,27 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
 
         if (structType)
         {
-            const std::vector<StructField>* fields = getStructFields(structType);
-            if (fields)
-            {
+            auto emitStructOutputs = [&](auto& self,
+                                         const std::string& keyPrefix,
+                                         const std::string& pathPrefix,
+                                         TypeNode* sType) -> void {
+                const std::vector<StructField>* fields = getStructFields(sType);
+                if (!fields) return;
+
                 for (const auto& field : *fields)
                 {
-                    if (field.semantic.isEmpty()) continue;
-                    const std::string fieldKey = baseName + "." + field.name;
+                    const std::string fieldKey = keyPrefix + "." + field.name;
+                    const std::string fieldPath = pathPrefix.empty() ? field.name : (pathPrefix + "." + field.name);
+
+                    if (field.semantic.isEmpty())
+                    {
+                        if (field.type && field.type->baseType == BaseType::Struct)
+                        {
+                            self(self, fieldKey, fieldPath, field.type.get());
+                        }
+                        continue;
+                    }
+
                     auto it = nameToValue_.find(fieldKey);
                     IRValueID fieldValue = InvalidIRValue;
                     if (it != nameToValue_.end())
@@ -1701,10 +1724,12 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                     inst->semanticName    = field.semantic.name;
                     inst->rawSemanticName = field.semantic.rawName;
                     inst->semanticIndex   = field.semantic.index;
-                    inst->fieldName       = field.name;
+                    inst->fieldName       = fieldPath;
                     currentBlock_->addInstruction(std::move(inst));
                 }
-            }
+            };
+
+            emitStructOutputs(emitStructOutputs, baseName, "", structType);
         }
 
         emitReturn(retValue);
@@ -1781,7 +1806,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             nameToValue_[varDecl->name] = initValue;
             declToValue_[varDecl] = initValue;
         }
-        else if (const auto* fields = getStructFields(varDecl->type.get()))
+        else if (getStructFields(varDecl->type.get()))
         {
             // An uninitialised vector field is a local vector lvalue too.
             // Bind its undefined base at declaration, before either arm of
@@ -1791,13 +1816,26 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             // or instruction defines this base: unwritten lanes stay absent.
             // Return reads the whole field binding rather than guessing its
             // value from a particular pair of partial-name keys (.xyz/.w).
-            for (const auto& field : *fields)
-                if (field.type && field.type->vectorSize > 1)
+            auto bindStructBases = [&](auto& self, const std::string& prefix, TypeNode* typeNode) -> void {
+                if (const auto* fields = getStructFields(typeNode))
                 {
-                    const IRValueID base = currentFunction_->allocateValueId();
-                    nameToValue_[varDecl->name + "." + field.name] = base;
-                    undefinedFieldBases_.insert(base);
+                    for (const auto& field : *fields)
+                    {
+                        const std::string fieldName = prefix + "." + field.name;
+                        if (field.type && field.type->vectorSize > 1)
+                        {
+                            const IRValueID base = currentFunction_->allocateValueId();
+                            nameToValue_[fieldName] = base;
+                            undefinedFieldBases_.insert(base);
+                        }
+                        else if (field.type && field.type->baseType == BaseType::Struct)
+                        {
+                            self(self, fieldName, field.type.get());
+                        }
+                    }
                 }
+            };
+            bindStructBases(bindStructBases, varDecl->name, varDecl->type.get());
         }
     }
     }

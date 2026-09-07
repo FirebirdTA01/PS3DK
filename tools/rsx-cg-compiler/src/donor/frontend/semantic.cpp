@@ -818,6 +818,12 @@ CgType SemanticAnalyzer::analyzeMemberAccessExpr(MemberAccessExpr* expr)
                   objectType.structName() + "'");
             return CgType::Error();
         }
+        if (fieldType->getNode())
+        {
+            CgType resolved = resolveType(fieldType->getNode().get());
+            if (!resolved.isError())
+                return resolved;
+        }
         return *fieldType;
     }
 
@@ -1186,6 +1192,39 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
               << "' has " << entryPoint->parameters.size() << " parameters\n";
     #endif
 
+    auto flattenStructParams = [&](auto& self, const std::string& prefix, const CgType& sType, bool isOut) -> void {
+        for (const auto& field : sType.structFields())
+        {
+            std::string fullName = prefix + "." + field.name;
+            if (!field.semantic.isEmpty())
+            {
+                CgType fieldType = resolveType(field.type.get());
+                ShaderIOParam ioParam(fullName, field.semantic.name,
+                                      field.semantic.index, fieldType, isOut);
+                if (isOut)
+                {
+                    shaderInfo_.outputParams.push_back(ioParam);
+                    if (field.semantic.name == "POSITION")
+                        shaderInfo_.hasPositionOutput = true;
+                    if (field.semantic.name == "COLOR")
+                        shaderInfo_.hasColorOutput = true;
+                }
+                else
+                {
+                    shaderInfo_.inputParams.push_back(ioParam);
+                }
+            }
+            else
+            {
+                CgType fieldType = resolveType(field.type.get());
+                if (fieldType.isStruct())
+                {
+                    self(self, fullName, fieldType, isOut);
+                }
+            }
+        }
+    };
+
     // Collect input parameters (attributes for vertex, varyings for fragment)
     // and output parameters
     for (const auto& param : entryPoint->parameters)
@@ -1210,38 +1249,9 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
         // Resolve the parameter type
         CgType paramType = resolveType(param->type.get());
 
-        // Check if it's a struct type - need to flatten members
         if (paramType.isStruct())
         {
-            // Flatten struct members into individual parameters
-            // Use the resolved type's structFields(), not the TypeNode's (which may be empty)
-            std::string prefix = param->name;
-            for (const auto& field : paramType.structFields())
-            {
-                if (!field.semantic.isEmpty())
-                {
-                    CgType fieldType = resolveType(field.type.get());
-                    std::string fullName = prefix + "." + field.name;
-
-                    ShaderIOParam ioParam(fullName, field.semantic.name,
-                                          field.semantic.index, fieldType, isOutput);
-
-                    if (isOutput)
-                    {
-                        shaderInfo_.outputParams.push_back(ioParam);
-
-                        // Check for special semantics
-                        if (field.semantic.name == "POSITION")
-                            shaderInfo_.hasPositionOutput = true;
-                        if (field.semantic.name == "COLOR")
-                            shaderInfo_.hasColorOutput = true;
-                    }
-                    else
-                    {
-                        shaderInfo_.inputParams.push_back(ioParam);
-                    }
-                }
-            }
+            flattenStructParams(flattenStructParams, param->name, paramType, isOutput);
         }
         else if (!param->semantic.isEmpty())
         {
@@ -1329,21 +1339,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     if (entryPoint->returnType && entryPoint->returnType->baseType == BaseType::Struct)
     {
         CgType returnStructType = resolveType(entryPoint->returnType.get());
-        for (const auto& field : returnStructType.structFields())
-        {
-            if (!field.semantic.isEmpty())
-            {
-                CgType fieldType = resolveType(field.type.get());
-                ShaderIOParam ioParam("return." + field.name, field.semantic.name,
-                                      field.semantic.index, fieldType, true);
-                shaderInfo_.outputParams.push_back(ioParam);
-
-                if (field.semantic.name == "POSITION")
-                    shaderInfo_.hasPositionOutput = true;
-                if (field.semantic.name == "COLOR")
-                    shaderInfo_.hasColorOutput = true;
-            }
-        }
+        flattenStructParams(flattenStructParams, "return", returnStructType, true);
     }
 }
 
