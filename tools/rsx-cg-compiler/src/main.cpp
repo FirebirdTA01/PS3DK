@@ -26,6 +26,7 @@
 #include "nv40/nv40_discard_guards.h"
 #include "nv40/nv40_if_convert.h"
 #include "compile_options.h"
+#include "extensions.h"
 #include "cg_container_fp.h"
 #include "cg_container_vp.h"
 #include "version.h"
@@ -49,6 +50,11 @@ struct CompilerContext
     Profile profile = Profile::VertexRsx;
 
     rsx_cg::CompileOptions   compileOpts;       // --O0..O3 / --fastmath etc.
+
+    // --extension=<name>.  Kept apart from compileOpts on purpose: that
+    // struct is the flags that change output bytes, and an enabled
+    // extension changes none - its enabled output is the plain source's.
+    rsx_cg::ExtensionSet     extensions;
 
     // Populated by runPreprocessor — Cg pragma surface that the lexer
     // drops before it reaches the parser.
@@ -74,6 +80,11 @@ void usage()
         "                         the default (removed after one release)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
+        "  --extension=<name>     Enable a named extension to the reference\n"
+        "                         compiler's language (repeatable; none by\n"
+        "                         default, so an unflagged compile accepts and\n"
+        "                         emits what the reference does)\n"
+        "  --list-extensions      List the supported extension names and exit\n"
         "  -h, --help             Show this message\n"
         "  -V, --version          Print version and exit\n",
         RSX_CG_COMPILER_VERSION);
@@ -117,6 +128,15 @@ std::string runPreprocessor(const std::string& sourceCode,
     {
         pp.addIncludePath(dir);
     }
+    // The same admission rule the main source went through, on every
+    // #include's raw bytes.  Not installing this is the failure where the
+    // extension does not reach includes: their BOM gets the lexer's generic
+    // error with no hint, and with the flag on it is not stripped.  The
+    // include rows of extension-bom-test.sh exist to catch exactly that.
+    pp.setSourceTextHook([&ctx](std::string& text, const std::string& path)
+    {
+        rsx_cg::admitSourceText(text, path, ctx.extensions);
+    });
     std::string out = pp.process(composed.str(), ctx.inputFile);
     ctx.alphakillSamplers = pp.alphakillSamplers();
     return out;
@@ -238,6 +258,44 @@ int main(int argc, char** argv)
         {
             ctx.compileOpts.fastmath = false;
         }
+        else if (arg == rsx_cg::kListExtensionsFlag)
+        {
+            std::size_t count = 0;
+            const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
+            for (std::size_t n = 0; n < count; ++n)
+                std::printf("%s\t%s\n", table[n].name, table[n].summary);
+            return 0;
+        }
+        else if (arg.compare(0, std::strlen(rsx_cg::kExtensionFlagPrefix),
+                             rsx_cg::kExtensionFlagPrefix) == 0)
+        {
+            // Validated HERE, before any file is read: an unknown name is a
+            // refusal in its own right, not something to tolerate and then
+            // fail on later for a reason that has nothing to do with it.
+            // One name per flag, exact spelling; there is no "all".
+            const std::string name = arg.substr(std::strlen(rsx_cg::kExtensionFlagPrefix));
+            const rsx_cg::ExtensionInfo* info = rsx_cg::findExtension(name);
+            if (!info)
+            {
+                std::fprintf(stderr,
+                    "rsx-cg-compiler: unknown extension '%s'; supported:",
+                    name.c_str());
+                std::size_t count = 0;
+                const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
+                for (std::size_t n = 0; n < count; ++n)
+                    std::fprintf(stderr, " %s", table[n].name);
+                std::fprintf(stderr, " (%s)\n", rsx_cg::kListExtensionsFlag);
+                return 1;
+            }
+            ctx.extensions.enable(info->id);
+        }
+        else if (arg == "--extension")
+        {
+            std::fprintf(stderr,
+                "rsx-cg-compiler: --extension needs =<name>, as in %sbom; see %s\n",
+                rsx_cg::kExtensionFlagPrefix, rsx_cg::kListExtensionsFlag);
+            return 1;
+        }
         else if (!arg.empty() && arg[0] == '-')
         {
             std::fprintf(stderr, "rsx-cg-compiler: unknown option '%s'\n", arg.c_str());
@@ -272,10 +330,16 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const std::string sourceCode = slurpFile(ctx.inputFile);
+    std::string sourceCode = slurpFile(ctx.inputFile);
     std::string preprocessed;
     try
     {
+        // Admission runs on the main file's own bytes, before the stdlib
+        // and #line text are composed in front of them, and inside this
+        // try so a refusal is the same exit-1-no-artifact as any other
+        // preprocessor error.  slurpFile itself is unchanged: text mode,
+        // exit on open failure, as before this existed.
+        rsx_cg::admitSourceText(sourceCode, ctx.inputFile, ctx.extensions);
         preprocessed = runPreprocessor(sourceCode, ctx);
     }
     catch (const std::exception& err)

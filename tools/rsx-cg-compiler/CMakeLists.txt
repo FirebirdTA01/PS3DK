@@ -129,8 +129,9 @@ set(SRC_CONTAINER
     ${SRC_DIR}/cg_container_vp.cpp
 )
 
-# Driver / entry point.
+# Driver / entry point, and the named-extension registry it consults.
 set(SRC_MAIN
+    ${SRC_DIR}/extensions.cpp
     ${SRC_DIR}/main.cpp
 )
 

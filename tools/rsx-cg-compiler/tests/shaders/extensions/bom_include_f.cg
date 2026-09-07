@@ -1,0 +1,2 @@
+#include "inc_bom.h"
+float4 main(float4 c : COLOR0) : COLOR { return c * BOM_K; }

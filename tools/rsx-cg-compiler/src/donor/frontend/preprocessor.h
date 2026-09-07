@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lexer.h"
+#include <functional>
 #include <vector>
 #include <stack>
 #include <set>
@@ -44,6 +45,19 @@ public:
 	void setNoLineMarkers(bool value);
 	void setKeepComments(bool value);
 
+	// Source-text hook, run on the raw bytes of every file THIS OBJECT reads
+	// (each #include, nested ones included) before anything else looks at
+	// them.  The driver installs the same function it runs on the file named
+	// on the command line, so a rule about how a file may begin is one
+	// definition with two call sites rather than two copies that drift.  The
+	// hook may rewrite the text or throw a std::runtime_error carrying a
+	// located diagnostic; a throw propagates out of process() like every
+	// other preprocessor error.  Default: no hook.  The policy behind it is
+	// the driver's, not this class's: another compiler built on this
+	// frontend installs its own or none.
+	using SourceTextHook = std::function<void(std::string& text, const std::string& path)>;
+	void setSourceTextHook(SourceTextHook hook);
+
 	// Process source
 	std::string process(const std::string& source, const std::string& filename);
 
@@ -66,6 +80,7 @@ private:
 	std::string currentProcessingFile;
 	bool noLineMarkers;
 	bool keepComments;
+	SourceTextHook sourceTextHook_;  // empty = no hook
 
 	// the reference SDK Cg pragma collectors.  Populated by processPragma.
 	std::vector<std::string> alphakillSamplers_;

@@ -218,6 +218,12 @@ jobs:
         run: bash tests/shader-compiler/join-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler lowering-path flags
         run: bash tests/shader-compiler/lowering-path-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the extension flag contract (--extension=<name>, --list-extensions)
+        run: bash tests/shader-compiler/extension-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the leading UTF-8 BOM extension in both modes
+        run: bash tests/shader-compiler/extension-bom-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Census every fixture in both extension modes (the flag moves only what it names)
+        run: bash tests/shader-compiler/extension-mode-census-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler fragment registerCount invariant
         run: bash tests/shader-compiler/register-count-invariant-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler colour reaches R0
