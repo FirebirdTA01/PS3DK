@@ -1,0 +1,17 @@
+// t_80dad2dd: the colour store that does NOT come from lowerStoreOutput.
+//
+// Two returns under a condition are merged into one predicated select, and
+// lowerMergedReturnSelect builds that store itself.  It is therefore the
+// one writer the three colour folds never see, so a half stamp applied only
+// inside lowerStoreOutput misses it: the shader ACCEPTS with its colour in
+// fp32 R0 and outputFromH0 clear, which is worse than the refusal it
+// replaced, because a refusal is visible and this is not.
+//
+// Found by codex reviewing the mechanism before it had a sha.  Measured
+// against the reference: outputFromH0=1.
+half4 main(float4 t : TEXCOORD0) : COLOR
+{
+	if (t.x > 0.5)
+		return t;
+	return t.wzyx;
+}

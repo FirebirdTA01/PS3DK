@@ -30,20 +30,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
-# either one satisfies "did not exit 0" while meaning the compiler never
-# reached the decision this guard is about - so a compiler that CRASHED on a
-# shader it should have refused BY NAME was reported as correct here.  Call
-# this wherever a compile's status is captured, whichever way that compile is
-# expected to go: it is silent for 0 and for 1 and names anything else.
-# Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
-refusal_status() {   # $1 rc, $2 what was compiled
-    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
-    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
-    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
-    return 0
-}
+# The refusal_status helper that stood here (exit 1 EXACTLY - a 124 timeout
+# and a >=128 signal both satisfy "did not exit 0" while meaning the
+# compiler never reached the decision, t_fd95d1b9) went with the partial
+# half output's refusal below.  This file no longer asserts any refusal, so
+# keeping an unused copy would be dead code; the same helper is still in
+# every test that does assert one.
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -74,29 +66,16 @@ emit() {
 emit fp_half_output_f
 emit fp_float_output_f
 
-# A PARTIALLY written half output must REFUSE, and must refuse by name.  The
-# general path composes a partial store in a temp pinned to the output slot,
-# which for a half output is H0 - the low half of the R0 that pin holds - so
-# emitting it would hand the program its own scratch as its colour.  The
-# reference needs no temp for this shape (two masked MOVH writes straight to
-# o[COLH]), so the refusal is ours to lift later, not a hardware limit: when
-# it is lifted this check turns red and names the shape.  Before the half
-# output reached the container at all, this source compiled SILENTLY as an
-# ordinary fp32 program, which is the state this test exists to prevent.
-refuse_log="$work/fp_half_output_partial_f.log"
-refuse_out="$work/fp_half_output_partial_f.fpo"
-refuse_rc=0
-(
-    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler"         -p sce_fp_rsx --emit-container "$refuse_out"         "$shaders/fp_half_output_partial_f.cg"
-) >"$refuse_log" 2>&1 || refuse_rc=$?
-refusal_status "$refuse_rc" "fp_half_output_partial_f"
-[[ "$refuse_rc" -eq 1 ]] || fail "fp_half_output_partial_f compiled; a partial half output must refuse while the composition still lands in the output pin (t_80dad2dd)"
-[[ -f "$refuse_out" ]] && fail "fp_half_output_partial_f refused but still wrote a container"
-grep -q "t_80dad2dd" "$refuse_log" || {
-    tail -n 5 "$refuse_log" >&2
-    fail "fp_half_output_partial_f refused without naming t_80dad2dd; a refusal that does not say which decision made it is a dead end for the next reader"
-}
+# THE PARTIAL HALF OUTPUT'S REFUSAL IS GONE, as the version of this block
+# that stood here said it would be: "when it is lifted this check turns red
+# and names the shape".  It was lifted by deciding half-ness in the builder
+# instead of after allocation, so the lane-by-lane composition writes H0
+# directly rather than being composed in an fp32 temp pinned to the output
+# slot.  That shape's assertions now live in h0-alias-test.sh, which owns
+# it properly - per-instruction precision and lane coverage, not just a
+# status - and this file keeps the one-variable half/float pair it was
+# built around.  Nothing is asserted about fp_half_output_partial_f here,
+# so the two tests do not both claim the same property.
 
 python3 - "$work/fp_half_output_f.fpo" "$work/fp_float_output_f.fpo" <<'PY'
 import struct

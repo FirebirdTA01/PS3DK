@@ -1,0 +1,28 @@
+// t_80dad2dd: a value the half colour SHARES with another consumer.
+//
+// The two folds that pin a colour's producers to the output slot also, for
+// a half colour, stamp those producers fp16 - which changes the precision
+// of the VALUE, not just of the colour written from it.  Here the same
+// composed value is also the depth export, so stamping the producers
+// exported depth from H0.x: a full-precision output reading a half-rounded
+// number, accepted with no diagnostic.
+//
+// The reference keeps the value in fp32 and converts AT the colour store:
+//
+//     MOVR R1.xyz, f[TEX0];
+//     MOVH H0, R1.xyzz;
+//     MOVR R1.z, R1.x;
+//
+// so exactly ONE instruction is half - the colour store - and the depth
+// reads full precision.  That is the property the test asserts, and it is
+// what a shared value falling through to the explicit store produces.
+//
+// Found by codex reviewing 3618daf8; every guard fixture in place at the
+// time passed, because each of them had a colour that owned its value.
+void main(float4 p : TEXCOORD0, out half4 c : COLOR, out float d : DEPTH)
+{
+	float4 v = p;
+	v.w = p.z;
+	c = v;
+	d = v.x;
+}

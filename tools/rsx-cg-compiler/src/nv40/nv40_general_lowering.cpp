@@ -472,6 +472,57 @@ static void assignSwizzle(VSrc& src, int encoded, int count)
     }
 }
 
+// Is fragment colour output `outIndex` DECLARED half?
+//
+// The reference decides the colour register's precision from the DECLARED
+// TYPE OF THAT OUTPUT and by nothing else - half arithmetic on the way
+// there does not do it, and neither does --fastprecision.  A half COLOR0
+// lands in H0, the low half of R0, and sets the container's outputFromH0.
+//
+// There are two spellings and the parameter one WINS, because it decides
+// even when the entry also returns something: `half main(out float4
+// colour : COLOR) : DEPTH` returns half for the DEPTH export while its
+// colour stays fp32 in R0, which is what the reference emits.
+//
+//   - an out/inout PARAMETER bound to this colour index: its type decides.
+//   - otherwise the RETURN TYPE decides, and only if the program actually
+//     emits a store to this colour index, so a half return carrying some
+//     other semantic cannot claim the colour register (t_5c12df56).
+//
+// An unsemanticked fragment `out` binds COLOR0.
+//
+// Takes the index rather than assuming 0 so the MRT lane can ask the same
+// question of COLOR1..3, whose half bank the reference measures as
+// H0/H4/H6/H8 against the float targets R0/R2/R3/R4 (codex, 2026-09-07).
+// At outIndex 0 it is exactly the predicate that stood inline in
+// emitFragmentVirtual before this change.
+static bool fragmentColourOutputIsHalf(const IRFunction& entry, int outIndex)
+{
+    const auto isColour = [outIndex](const std::string& rawSem, int index) {
+        const std::string sem = toUpper(rawSem);
+        const bool named = sem == "COLOR" || (sem.empty() && outIndex == 0);
+        return named && index == outIndex;
+    };
+    for (const IRParameter& p : entry.parameters) {
+        if (p.storage != StorageQualifier::Out &&
+            p.storage != StorageQualifier::InOut)
+            continue;
+        if (isColour(p.semanticName, p.semanticIndex))
+            return p.type.elementType == IRType::Float16;
+    }
+    if (entry.returnType.elementType != IRType::Float16)
+        return false;
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& instPtr : block->instructions) {
+            if (!instPtr || instPtr->op != IROp::StoreOutput) continue;
+            if (isColour(instPtr->semanticName, instPtr->semanticIndex))
+                return true;
+        }
+    }
+    return false;
+}
+
 class GeneralBuilder
 {
 public:
@@ -479,6 +530,12 @@ public:
                    const IRModule& module)
         : profile_(profile), entry_(entry), module_(module)
     {
+        // Decided BEFORE lowering, because lowerStoreOutput has to stamp
+        // the precision on the colour's writers as it folds them; a pass
+        // that patched dst.output afterwards could not see the two folds
+        // that emit no dst.output instruction at all.
+        halfColour0_ = profile_ == GeneralProfile::Fragment &&
+                       fragmentColourOutputIsHalf(entry, 0);
         countUses();
         seedParameters();
     }
@@ -520,6 +577,9 @@ public:
 
 private:
     GeneralProfile profile_;
+    // COLOR0 is declared half, so every writer of it belongs in H0 rather
+    // than R0.  Set in the constructor; read by lowerStoreOutput.
+    bool halfColour0_ = false;
     const IRFunction& entry_;
     const IRModule& module_;
     VirtualProgram program_;
@@ -2156,6 +2216,13 @@ private:
         out.dst.output = true;
         out.dst.index = outIndex;
         out.dst.writemask = outMask;
+        // This is the ONE colour store that does not come from
+        // lowerStoreOutput - a merged conditional return builds it here -
+        // so it needs the half stamp explicitly.  Without it a
+        // `half4 main(): COLOR` whose two returns merge into a select
+        // ACCEPTS with the colour in fp32 R0 and outputFromH0 clear, which
+        // is worse than the refusal it replaced.  Found by codex in review.
+        markHalfColourDest(out, outIndex);
         out.srcs[0] = tempSrc(selected);
         program_.instrs.push_back(out);
     }
@@ -6073,6 +6140,48 @@ private:
         program_.instrs.push_back(pred);
     }
 
+    // A declared half COLOR0 puts the colour in H0, the low half of R0,
+    // so EVERY writer of it is stamped half HERE, while the allocator can
+    // still act on it - the two folds below carry "this value is the
+    // colour" in an outputPin and emit no dst.output instruction at all,
+    // so the post-allocation stamp this replaces reached neither of them
+    // and left the lane-by-lane fold writing fp32 into R0 with
+    // outputFromH0 clear (t_80dad2dd).
+    //
+    // Marking the vreg as well as the destination is what makes a reader
+    // of the colour resolve to an H source; allocatePhysicalTemps copies
+    // vregToFp16 onto every temp source it rewrites.
+    void markHalfColourDest(VInstr& vi, int outIndex)
+    {
+        if (!halfColour0_ || outIndex != 0) return;
+        // THE REGISTER BANK AND THE ARITHMETIC PRECISION ARE TWO DIFFERENT
+        // FIELDS, and only the first of them follows from the output being
+        // half.  Measured on the reference's own containers: word0 bit 7
+        // selects the H bank and bits 22..23 are the precision, and
+        //
+        //   TEXR H0, f[TEX0], TEX0      (post_copyfp.cg)
+        //
+        // writes the half colour register with the fetch at precision 0.
+        // Only the MOVs into the colour are half - MOVH - because a move
+        // into an H register IS a half move.  Forcing FLOAT16 onto every
+        // writer computed the value itself in half: `a = p * 1.003` became
+        // a half multiply where the reference keeps a full one and only
+        // the destination changes (codex's 15-shape precision matrix).
+        //
+        // The choice has to be EXPLICIT in both directions, not just
+        // omitted for the non-MOV case: the emitter defaults
+        // insn.precision to FLOAT16 for any fp16 destination and only then
+        // applies an override, so leaving the override at -1 on a TEX or a
+        // multiply still emits it half.  Setting FLOAT32 here is what
+        // actually keeps the arithmetic full (codex).  An override the
+        // lowering set for its own reasons is left alone.
+        vi.dst.fp16 = true;
+        if (vi.fpPrecisionOverride < 0)
+            vi.fpPrecisionOverride = vi.op == VOp::Mov ? FLOAT16 : FLOAT32;
+        if (!vi.dst.output && vi.dst.index >= 0)
+            program_.vregToFp16[vi.dst.index] = true;
+    }
+
     void lowerStoreOutput(const IRInstruction& inst)
     {
         if (inst.operands.empty()) return;
@@ -6133,7 +6242,34 @@ private:
                 return;
             }
         }
+        // DOES THE COLOUR OWN THIS VALUE?
+        //
+        // The two folds below pin the value's PRODUCERS to the output slot
+        // and, for a half colour, stamp them fp16 - which changes the
+        // precision of the value itself, not just of the colour written
+        // from it.  That is only sound while the colour is the value's
+        // only consumer.  Where it is not, the other reader silently gets
+        // a half-rounded value:
+        //
+        //   void main(float4 p : TEXCOORD0, out half4 c : COLOR,
+        //             out float d : DEPTH)
+        //   { float4 v = p; v.w = p.z; c = v; d = v.x; }
+        //
+        // stamped the composition into H0 and then exported depth from
+        // H0.x.  The reference keeps the value in fp32 - MOVR R1.xyz;
+        // MOVH H0, R1.xyzz; MOVR R1.z, R1.x - converting AT the colour
+        // store and reading depth at full precision.  Found by codex in
+        // review; the guard fixtures all passed, because every one of them
+        // had a colour that owned its value.
+        //
+        // A shared value therefore skips these folds and falls through to
+        // the explicit store below, which is stamped instead of the
+        // producers and so converts exactly where the reference does.
+        // Nothing changes for a float colour: the condition is only
+        // consulted when the colour is half.
+        const bool colourOwnsValue = nonTermUseCount_[value] <= 1;
         if (profile_ == GeneralProfile::Fragment && outIndex == 0 &&
+            (!halfColour0_ || colourOwnsValue) &&
             regIt != program_.valueToVReg.end() &&
             !program_.instrs.empty()) {
             VInstr& producer = program_.instrs.back();
@@ -6162,6 +6298,7 @@ private:
                     if (!vi.dst.output && vi.dst.index == regIt->second) {
                         vi.dst.preferredPhys = 0;
                         vi.dst.outputPin = true;
+                        markHalfColourDest(vi, outIndex);
                     }
                 }
                 return;
@@ -6181,6 +6318,7 @@ private:
                     if (!vi.dst.output && vi.dst.index == regIt->second) {
                         vi.dst.preferredPhys = 0;
                         vi.dst.outputPin = true;
+                        markHalfColourDest(vi, outIndex);
                     }
                 }
                 producer.dst.output = true;
@@ -6221,6 +6359,7 @@ private:
                     }) > 1;
             if (!producer.dst.output && producer.dst.index == regIt->second &&
                 producer.op != VOp::SelPred && !partialMultiwriter) {
+                markHalfColourDest(producer, outIndex);
                 producer.dst.output = true;
                 producer.dst.index = outIndex;
                 producer.dst.phys = -1;
@@ -6235,6 +6374,7 @@ private:
         vi.dst.output = true;
         vi.dst.index = outIndex;
         vi.dst.writemask = outMask;
+        markHalfColourDest(vi, outIndex);
         vi.dst.userClipOutput = isClipOutput;
         vi.dst.userClipIndex = inst.semanticIndex;
         vi.srcs[0] = resolve(value);
@@ -7141,7 +7281,7 @@ private:
                 program_.vregToFp16[vi.dst.index] = vi.dst.fp16;
             }
             if (dumpOrder) {
-                std::fprintf(stderr, "alloc[%zu] op=%d opName=%s dstOut=%d dstIdx=%d dstPhys=%d dstFp16=%d preferredPhys=%d\n",
+                std::fprintf(stderr, "alloc[%zu] op=%d opName=%s dstOut=%d dstIdx=%d dstPhys=%d dstFp16=%d preferredPhys=%d outputPin=%d\n",
                              i,
                              static_cast<int>(vi.op),
                              vOpName(vi.op),
@@ -7149,7 +7289,7 @@ private:
                              vi.dst.index,
                              vi.dst.phys,
                              vi.dst.fp16 ? 1 : 0,
-                             vi.dst.preferredPhys);
+                             vi.dst.preferredPhys, vi.dst.outputPin ? 1 : 0);
                 for (size_t s = 0; s < vi.srcs.size(); ++s) {
                     const VSrc& src = vi.srcs[s];
                     std::fprintf(stderr,
@@ -7622,89 +7762,75 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // container's outputFromH0, which the runtime reads to decide which
     // register the colour comes from - the bit values are the SDK's business
     // and have already moved once (t_96daf53b), so they are named in
-    // cell/gcm/gcm_fp_control.h and nowhere in the compiler.  Until this
-    // change, the general path dropped all three
-    // (the register, its precision and the flag), so `out half4` and
-    // `out float4` compiled to byte-identical programs.
-    // Whether the colour comes out of H0 is decided by the DECLARED TYPE
-    // OF THE COLOR0 OUTPUT, and by nothing else.  There are two spellings
-    // and only the first was read here, so `half4 main() : COLOR` kept
-    // outputFromH0 clear and emitted a full-precision MOVR.  That pair is
-    // internally consistent, so the defect is not a read of an unwritten
-    // register: the declared type is disregarded and the program does not
-    // honour the register and precision the source asked for, which is
-    // what the reference emits (t_5c12df56).
+    // cell/gcm/gcm_fp_control.h and nowhere in the compiler.
     //
-    //   - an out/inout PARAMETER bound to COLOR0: its type decides, and it
-    //     decides even when the entry also returns something.  `half
-    //     main(out float4 colour : COLOR) : DEPTH` returns half for the
-    //     DEPTH export while its colour stays fp32 in R0, which is what
-    //     the reference emits; reading "half return type AND some COLOR0
-    //     store exists" turned that shader's fp32 colour into H0.
-    //   - otherwise the RETURN TYPE decides, and only if the program
-    //     actually emits a COLOR0 store, so a half return carrying some
-    //     other semantic cannot claim the colour register.
-    //
-    // An unsemanticked fragment `out` binds COLOR0.
-    const auto isColour0 = [](const std::string& rawSem, int index) {
-        const std::string sem = toUpper(rawSem);
-        return (sem.empty() || sem == "COLOR") && index == 0;
+    // The PRECISION is stamped during lowering now, in
+    // GeneralBuilder::markHalfColourDest, not here.  This code used to
+    // stamp it after allocation, and reached only `dst.output`
+    // instructions - which two of lowerStoreOutput's three colour folds
+    // never produce, because they carry the colour in an outputPin
+    // instead.  On those the colour was composed in fp32 R0 and shipped
+    // with outputFromH0 clear: `half4` and `float4` entry points compiled
+    // to the same wrong container.  What stood here instead was a blanket
+    // refusal of any program with a temp in R0, which refused 45 of the
+    // reference SDK's fragment programs, among them the shape the
+    // reference itself emits - `TEXR R0.xyz; MOVH H0.xyz, R0` on
+    // CgTutorial/GCM/HDR/shaders/OneHalfFp.cg, where the temp's last read
+    // IS the instruction that writes the colour.
+    const bool halfColourOutput = fragmentColourOutputIsHalf(entry, 0);
+    // A WRITER OF THE COLOUR, in either spelling: an ordinary store, or a
+    // pinned temp from a fold that emits no dst.output instruction.
+    const auto writesColour = [](const VInstr& vi) {
+        if (vi.dst.none) return false;
+        if (vi.dst.output) return vi.dst.index == 0;
+        return vi.dst.outputPin && vi.dst.preferredPhys == 0;
     };
-    const IRParameter* colour0Param = nullptr;
-    for (const IRParameter& p : entry.parameters) {
-        if (p.storage != StorageQualifier::Out &&
-            p.storage != StorageQualifier::InOut)
-            continue;
-        if (isColour0(p.semanticName, p.semanticIndex)) {
-            colour0Param = &p;
-            break;
-        }
-    }
-    bool halfColourOutput = false;
-    if (colour0Param) {
-        halfColourOutput = colour0Param->type.elementType == IRType::Float16;
-    } else if (entry.returnType.elementType == IRType::Float16) {
-        for (const auto& block : entry.blocks) {
-            if (!block) continue;
-            for (const auto& instPtr : block->instructions) {
-                if (!instPtr || instPtr->op != IROp::StoreOutput) continue;
-                if (isColour0(instPtr->semanticName, instPtr->semanticIndex))
-                    halfColourOutput = true;
-            }
-        }
-    }
     if (halfColourOutput) {
-        // H0 IS THE LOW HALF OF R0.  A temp allocated there would be the
-        // output register, and the allocator placed it before this point
-        // believing the output was R0.  Rather than emit a program whose
-        // colour is overwritten by its own scratch - the silent shape this
-        // change exists to end - refuse and name it.
-        const bool tempHoldsR0 = std::any_of(
-            program.instrs.begin(), program.instrs.end(),
-            [](const VInstr& vi) {
-                return !vi.dst.none && !vi.dst.output && vi.dst.phys == 0;
-            });
-        if (tempHoldsR0) {
-            out.diagnostics.push_back(
-                "nv40-general-fp: a declared half colour output writes H0, "
-                "which is the low half of R0, and a temp was allocated to "
-                "that register; refusing rather than emitting a program "
-                "whose colour output is clobbered by its own scratch "
-                "(t_80dad2dd)");
-            return out;
+        // H0 IS THE LOW HALF OF R0, so a full-width temp write to slot 0
+        // AFTER the colour is first written destroys it.  Ordinary
+        // liveness is what keeps them apart - allocatePhysicalTemps
+        // reserves the slot from the colour's EARLIEST write through
+        // outputStorePos, so a temp whose last use precedes that write may
+        // share the register, which is exactly what the reference does.
+        // This asks the narrower question the reservation is supposed to
+        // have already answered, and names it if the answer is ever no.
+        size_t firstColourWrite = program.instrs.size();
+        for (size_t i = 0; i < program.instrs.size(); ++i) {
+            if (writesColour(program.instrs[i])) { firstColourWrite = i; break; }
         }
-        for (VInstr& vi : program.instrs) {
-            if (vi.dst.none || !vi.dst.output || vi.dst.index != 0) continue;
-            vi.dst.fp16 = true;
-            if (vi.fpPrecisionOverride < 0) vi.fpPrecisionOverride = FLOAT16;
+        for (size_t i = firstColourWrite + 1; i < program.instrs.size(); ++i) {
+            const VInstr& vi = program.instrs[i];
+            if (vi.dst.none || vi.dst.output || writesColour(vi)) continue;
+            if (vi.dst.phys < 0) continue;
+            // Slot, not H index: H0 and H1 are the two halves of R0, so a
+            // full temp in R0 and an fp16 temp in H0 both collide with the
+            // colour.  This is deliberately conservative about ONE case -
+            // an fp16 temp in H1, the HIGH half of R0, does NOT overlap an
+            // H0 colour and would be refused here anyway.  It is
+            // unreachable today because allocatePhysicalTemps hands out
+            // only EVEN H indices (slot << 1) and owns the whole R slot
+            // when it does, so no odd-H value exists to reach this.  If
+            // sub-slot packing is ever added, this is one of the places
+            // that has to learn the difference (Fable, review of 3618daf8).
+            const int slot = vi.dst.fp16 ? (vi.dst.phys >> 1) : vi.dst.phys;
+            if (slot != 0) continue;
+            out.diagnostics.push_back(
+                "nv40-general-fp: a declared half colour output holds the "
+                "colour in H0, the low half of R0, and a temp writes that "
+                "register after the colour is live; refusing rather than "
+                "emitting a program whose colour is clobbered by its own "
+                "scratch (t_80dad2dd)");
+            return out;
         }
     }
     // Derived from what was EMITTED, like depthReplace above, so the flag
     // cannot disagree with the ucode it describes.
+    // Every colour writer counts, not just `dst.output` ones: the
+    // lane-by-lane fold emits none of those, so a flag derived from them
+    // alone read 0 on exactly the programs whose colour IS in H0.
     attrs.outputFromH0 = std::any_of(program.instrs.begin(), program.instrs.end(),
-        [](const VInstr& vi) {
-            return !vi.dst.none && vi.dst.output && vi.dst.index == 0 &&
-                   vi.dst.fp16;
+        [&](const VInstr& vi) {
+            return writesColour(vi) && vi.dst.fp16;
         }) ? 1 : 0;
     populateReferencedParams(entry, attrs);
     seedFpEmbeddedUniforms(entry, program, attrs);

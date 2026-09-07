@@ -196,6 +196,8 @@ jobs:
         run: bash tests/shader-compiler/half-precision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler declared half colour output
         run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the half colour output reaches H0 through the allocator
+        run: bash tests/shader-compiler/h0-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test what a fragment entry returns reaches the ucode
         run: bash tests/shader-compiler/return-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the parser makes progress on an unknown type name
