@@ -208,6 +208,8 @@ jobs:
         run: bash tests/shader-compiler/frontend-declaration-forms-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the shared ucode decoder refuses a corrupted dump
         run: bash tests/shader-compiler/ucode-decode-selftest.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test no decoded ucode dump is captured with the streams merged
+        run: bash tests/shader-compiler/capture-separation-test.sh
       - name: Test what a fragment entry returns reaches the ucode
         run: bash tests/shader-compiler/return-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the parser makes progress on an unknown type name

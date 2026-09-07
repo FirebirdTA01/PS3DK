@@ -40,13 +40,19 @@ src="$shaders/fp_computed_lane_insert_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
 # 1. Shipping path (general lowering)
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 log_gen="$work/computed_lane_insert_general.log"
+err_gen="$work/computed_lane_insert_general.err"
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx "$src"
-) >"$log_gen" 2>&1 || {
-    tail -n 30 "$log_gen" >&2
+) >"$log_gen" 2>"$err_gen" || {
+    tail -n 30 "$err_gen" >&2
     fail "fp_computed_lane_insert_f.cg did not compile on shipping path"
 }
 
@@ -91,20 +97,22 @@ PY
 # Shelf-life: when the retired legacy matcher is removed, drop this second
 # --legacy-lowering run and its header claim in the same commit.
 log_legacy="$work/computed_lane_insert_legacy.log"
+err_legacy="$work/computed_lane_insert_legacy.err"
 legacy_rc=0
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx --legacy-lowering "$src"
-) >"$log_legacy" 2>&1 || legacy_rc=$?
+) >"$log_legacy" 2>"$err_legacy" || legacy_rc=$?
 refusal_status "$legacy_rc" "fp_computed_lane_insert_f.cg (legacy)"
 
 if [[ "$legacy_rc" -eq 0 ]]; then
     fail "fp_computed_lane_insert_f.cg compiled on legacy path; expected refusal for non-literal scalar VecInsert"
 fi
 
-grep -q "VecInsert scalar must be a float literal" "$log_legacy" || {
-    tail -n 20 "$log_legacy" >&2
+# the refusal is a DIAGNOSTIC, so it is read from stderr
+grep -q "VecInsert scalar must be a float literal" "$err_legacy" || {
+    tail -n 20 "$err_legacy" >&2
     fail "fp_computed_lane_insert_f.cg failed on legacy path for an unexpected reason"
 }
 

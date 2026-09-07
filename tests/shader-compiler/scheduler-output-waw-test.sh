@@ -26,13 +26,19 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 src="$shaders/fp_output_stored_thrice_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 log="$work/fp_output_stored_thrice.log"
+err="${log%.log}.err"
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx "$src"
-) >"$log" 2>&1 || {
-    tail -n 30 "$log" >&2
+) >"$log" 2>"$err" || {
+    tail -n 30 "$err" >&2
     fail "fp_output_stored_thrice_f.cg did not compile"
 }
 

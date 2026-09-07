@@ -89,11 +89,47 @@ class CorruptDump(Exception):
 # when a log holds several.  A gap means a row was dropped, and a line that
 # opens like a row but does not parse as four hex words IS the dropped row.
 # Both now raise instead of returning a plausible-looking short list.
+# AND THE DUMP CARRIES ITS OWN CLOSING CHECK.  One line above the rows the
+# compiler prints "NV40 ucode words: N", so the row count is knowable
+# independently of the row numbers - and a splice that damages the FINAL row
+# without leaving a "<digits>:" line behind is invisible to both rules above.
+# Fable measured that shape: a stderr fragment landing between the index
+# digits and the colon ("4 src0 kind=1 ..." then ": 8280...") leaves two
+# lines, neither of which opens like a row, and no successor index to
+# disagree with - four of five rows, silently.  Requiring 4 * rows == N per
+# program closes every final-row shape at once, including a tail lost to a
+# truncated pipe.
+WORDS = re.compile(r"NV40 ucode words:\s*(\d+)")
+
+
 def groups(path):
     out = []
     expected = 0
+    declared = None          # words the dump says this program has
+    rows_here = 0            # rows decoded since the last restart
+
+    def close(lineno):
+        if declared is None:
+            return
+        if 4 * rows_here != declared:
+            raise CorruptDump(
+                "%s:%d: the dump declares %d ucode words - %d rows - and %d "
+                "rows were decoded.  The log is not a faithful copy: a row "
+                "was lost without leaving a parseable trace, which is what a "
+                "stderr line spliced across a row boundary does, and what a "
+                "truncated pipe does to the tail.  Capture stdout and stderr "
+                "separately and join them after the process exits."
+                % (path, lineno, declared, declared // 4, rows_here))
+
     with open(path, "r", encoding="utf-8") as handle:
         for lineno, line in enumerate(handle, 1):
+            w = WORDS.search(line)
+            if w:
+                # a new program's header closes the one before it
+                close(lineno)
+                declared = int(w.group(1))
+                rows_here = 0
+                continue
             m = re.match(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$", line)
             if not m:
                 # ANY line that opens "<digits>:" is a dump row.  An
@@ -121,8 +157,15 @@ def groups(path):
                     "%s:%d: a ucode row carried %d words, not four (%r)"
                     % (path, lineno, len(words), line[:120]))
             index = int(m.group(1))
-            if index == 0:
-                expected = 0          # a second program in the same log
+            if index == 0 and expected != 0:
+                # A second program in the same log.  Its header, if it
+                # printed one, has already closed the program before it and
+                # reset the count; only close here when it did not.
+                if rows_here:
+                    close(lineno)
+                    declared = None
+                    rows_here = 0
+                expected = 0
             if index != expected:
                 raise CorruptDump(
                     "%s:%d: ucode row %d arrived where row %d was expected, so "
@@ -132,7 +175,9 @@ def groups(path):
                     "emitted.  See the merged-capture note above."
                     % (path, lineno, index, expected))
             expected = index + 1
+            rows_here += 1
             out.append(words)
+    close(lineno if out else 0)
     return out
 
 

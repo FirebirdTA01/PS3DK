@@ -63,9 +63,9 @@ emit() {   # <stem> <source text>  -> $work/<stem>.fpo
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-20s}" "$compiler" \
             -p sce_fp_rsx --emit-container "$work/$1.fpo" "$work/$1.cg"
-    ) >"$work/$1.log" 2>&1 || rc=$?
+    ) >"$work/$1.log" 2>"$work/$1.err" || rc=$?
     refusal_status "$rc" "$1"
-    [[ "$rc" -eq 0 ]] || { tail -n 3 "$work/$1.log" >&2; fail "$1 did not compile"; }
+    [[ "$rc" -eq 0 ]] || { tail -n 3 "$work/$1.err" >&2; fail "$1 did not compile"; }
     [[ -s "$work/$1.fpo" ]] || fail "$1 compiled but wrote no container"
 }
 

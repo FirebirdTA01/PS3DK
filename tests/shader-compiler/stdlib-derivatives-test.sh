@@ -42,24 +42,30 @@ compile_fp() {
     local src="$shaders/$stem.cg"
     local out="$work/$stem.fpo"
     local log="$work/$stem.log"
+    local err="$work/$stem.err"
     [[ -f "$src" ]] || fail "fixture missing: $src"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx --emit-container "$out" "$src"
-    ) >"$log" 2>&1 || {
-        tail -n 30 "$log" >&2
+    ) >"$log" 2>"$err" || {
+        tail -n 30 "$err" >&2
         fail "$stem did not compile"
     }
     [[ -s "$out" ]] || fail "$stem did not emit a container"
 
+    # stdout carries the ucode rows, stderr the diagnostics; merged, a
+    # stderr line can land inside a hex row and cost it (the false R33,
+    # 2026-09-07).  The decoder refuses such a log - this is why it does
+    # not have to.
     local ucode_log="$work/$stem.ucode.log"
+    local ucode_err="$work/$stem.ucode.err"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx "$src"
-    ) >"$ucode_log" 2>&1 || {
-        tail -n 30 "$ucode_log" >&2
+    ) >"$ucode_log" 2>"$ucode_err" || {
+        tail -n 30 "$ucode_err" >&2
         fail "$stem failed while dumping ucode"
     }
     python3 "$repo_root/tests/shader-compiler/ucode_decode.py" "$ucode_log" \
@@ -73,19 +79,22 @@ expect_refusal() {
     local src="$4"
     local out="$work/$label.bin"
     local log="$work/$label.log"
+    local err="$work/$label.err"
     local rc=0
     rm -f "$out"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p "$profile" --emit-container "$out" "$src"
-    ) >"$log" 2>&1 || rc=$?
+    ) >"$log" 2>"$err" || rc=$?
 
     refusal_status "$rc" "$label"
     [[ "$rc" -eq 1 ]] || fail "$label compiled; expected derivative refusal"
     [[ ! -e "$out" || ! -s "$out" ]] || fail "$label emitted a container after refusing"
-    grep -Eqi "$needle" "$log" \
-        || { tail -n 30 "$log" >&2; fail "$label refused for the wrong reason"; }
+    # the refusal text is on stderr; read both halves, because this asks
+    # "did the compiler say it", not "on which stream did it say it"
+    grep -Eqi "$needle" "$log" "$err" \
+        || { tail -n 30 "$err" >&2; fail "$label refused for the wrong reason"; }
 }
 
 compile_fp fp_deriv_scalar_f

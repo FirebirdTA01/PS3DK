@@ -46,7 +46,12 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 decode_fixture() {
     local stem="$1"
     local src="$shaders/$stem.cg"
+    # stdout carries the ucode rows, stderr the diagnostics; merged, a
+    # stderr line can land inside a hex row and cost it (the false R33,
+    # 2026-09-07).  The decoder refuses such a log - this is why it does
+    # not have to.
     local log="$work/$stem.dump"
+    local err="$work/$stem.err"
     local decoded="$work/$stem.decoded"
     [[ -f "$src" ]] || fail "fixture missing: $src"
 
@@ -55,10 +60,10 @@ decode_fixture() {
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx "$src"
-    ) >"$log" 2>&1 || rc=$?
+    ) >"$log" 2>"$err" || rc=$?
     if [[ "$rc" -eq 124 ]]; then fail "$stem timed out"; fi
     if [[ "$rc" -ne 0 ]]; then
-        tail -n 20 "$log" >&2
+        tail -n 20 "$err" >&2
         fail "$stem did not compile on the general path"
     fi
 

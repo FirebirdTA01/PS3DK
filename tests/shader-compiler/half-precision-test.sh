@@ -44,16 +44,21 @@ for f in fp_half_cast_f.cg fp_insert_undef_base_f.cg; do
     [[ -f "$shaders/$f" ]] || fail "fixture missing: $shaders/$f"
 done
 
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 dump() {   # $1 stem
     local rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx "$shaders/$1.cg"
-    ) >"$work/$1.dump" 2>&1 || rc=$?
+    ) >"$work/$1.dump" 2>"$work/$1.err" || rc=$?
     [[ "$rc" -eq 124 ]] && fail "$1 timed out"
     if [[ "$rc" -ne 0 ]]; then
-        tail -n 20 "$work/$1.dump" >&2
+        tail -n 20 "$work/$1.err" >&2
         fail "$1 did not compile on the general path.  Both shapes are
 what kept th06_mod and th06_add out of every sweep (t_b8bb521f)."
     fi
