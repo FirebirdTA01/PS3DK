@@ -112,6 +112,10 @@ private:
     // resolves it properly is t_cf17f501's refactor).
     std::vector<std::unordered_set<std::string>> inlineScopes_;
     static bool functionNamesIdentifier(const FunctionDecl* fn, const std::string& name);
+    // Move a file-scope variable's binding into the stash when the current
+    // function binds that name itself (a local or a parameter); no-op if
+    // the name is not a global or is already stashed.
+    void stashShadowedGlobal(const std::string& name);
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;

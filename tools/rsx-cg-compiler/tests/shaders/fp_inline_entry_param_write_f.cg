@@ -1,0 +1,5 @@
+// An inlined helper WRITES the file-scope G while the entry function's
+// parameter G is live: main still returns its parameter (t_3af598c8).
+float4 G;
+void set() { G = float4(1.0, 0.0, 0.0, 1.0); }
+float4 main(float4 G : TEXCOORD0) : COLOR { set(); return G; }

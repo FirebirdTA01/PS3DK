@@ -224,6 +224,27 @@ joined fp_local_array_if_f 'SGT|SLT|SGE|SLE'
 accept fp_global_array_if_f sce_fp_rsx "file-scope array in a fragment program, conditional store"
 joined fp_global_array_if_f 'SGT|SLT|SGE|SLE'
 
+# The ENTRY function's parameters are a scope like its locals (t_3af598c8).
+# A parameter that shadows a file-scope name: an inlined helper reading that
+# name reads the GLOBAL (reference: MOVR R0, G from the uniform, both records
+# listed), and a helper WRITING it leaves the parameter alone (reference:
+# MOVR R0, f[TEX0]).  Red on 47459167: the read rows took the varying
+# (src0=IN0 / s0=TEX0) and the write rows returned the helper's constant.
+accept vp_inline_entry_param_read_v sce_vp_rsx "main's PARAMETER G shadows the global get() reads: get() returns the uniform G"
+expect vp_inline_entry_param_read_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+\.xyzw'
+forbid vp_inline_entry_param_read_v 'src0=IN0'
+count  vp_inline_entry_param_read_v '^[0-9]+ ' 1
+accept vp_inline_entry_param_write_v sce_vp_rsx "set() writes the global G while main's PARAMETER G is live: main returns its parameter"
+expect vp_inline_entry_param_write_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
+forbid vp_inline_entry_param_write_v 'src0=C[0-9]+'
+count  vp_inline_entry_param_write_v '^[0-9]+ ' 1
+accept fp_inline_entry_param_read_f sce_fp_rsx "fragment twin: main's PARAMETER G shadows the global get() reads (the t_3af598c8 witness)"
+expect fp_inline_entry_param_read_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.'
+forbid fp_inline_entry_param_read_f 's0=TEX0'
+accept fp_inline_entry_param_write_f sce_fp_rsx "fragment twin: set() writes the global while main's PARAMETER G is live: main returns TEXCOORD0"
+expect fp_inline_entry_param_write_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.'
+forbid fp_inline_entry_param_write_f 's0=c[0-9]+'
+
 # ---------------------------------------------------------------- named gaps
 refuse "return inside a branch of the helper" fp_inline_return_in_if_f sce_fp_rsx "a return inside control flow"
 refuse "a loop inside the helper"             fp_inline_loop_f         sce_fp_rsx "a loop"

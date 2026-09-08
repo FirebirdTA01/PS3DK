@@ -1,0 +1,5 @@
+// The ENTRY function's parameter shadows a file-scope name an inlined helper
+// reads: inside get(), G is the FILE-SCOPE variable (t_3af598c8).
+float4 G;
+float4 get() { return G; }
+float4 main(float4 G : TEXCOORD0) : COLOR { return get(); }
