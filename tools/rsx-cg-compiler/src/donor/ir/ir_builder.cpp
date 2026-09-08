@@ -2997,21 +2997,17 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // the same name is the caller's binding: the callee wrote the global,
     // which the caller cannot see by that name any more, so the caller's
     // binding is kept (the flat map cannot hold both; the reverse-shadow
-    // fixtures pin it).  A caller binding is any VarDecl or ParamDecl in
-    // the caller's declaration map bound to the prior value - before
-    // parameters counted, a helper's write to the global replaced the
-    // entry function's parameter (t_3af598c8, entry_param_write).
-    auto callerBindsName = [](const DeclNode* decl, const std::string& name) -> bool
+    // fixtures pin it).  The STASH is the test: a name has a
+    // shadowedGlobals entry exactly when this function binds it itself (a
+    // local from buildDeclStmt, a parameter from buildFunction), and the
+    // entry outlives every reassignment of that binding.  The earlier
+    // test compared the name's current value with the declaration's
+    // value, which stopped matching after one `G = G * 2` (review:
+    // codex, scope-param-rebound; t_3af598c8) - a reassigned local lost
+    // the same way.
+    auto callerLocalBinding = [&](const std::string& name, IRValueID) -> bool
     {
-        return decl && (decl->kind == DeclKind::Variable || decl->kind == DeclKind::Parameter) &&
-               decl->name == name;
-    };
-    auto callerLocalBinding = [&](const std::string& name, IRValueID prior) -> bool
-    {
-        for (const auto& kv : declToValue_)
-            if (callerBindsName(kv.first, name) && kv.second == prior)
-                return true;
-        return false;
+        return shadowedGlobals_.count(name) != 0;
     };
     for (const auto& kv : bodyNames)
     {
@@ -3028,17 +3024,13 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         if (prior != nameToValue_.end() && prior->second == kv.second) continue;
         nameToValue_[kv.first] = kv.second;
     }
-    // Arrays follow the same rule, and the caller-local test is the same
-    // one: a VarDecl of that name in the caller's declaration map is the
-    // caller's own array, and the callee's write to the file-scope array of
-    // the same name must not replace it (review: codex - reverse_array.cg
-    // returned 2*p where the reference returns the caller's p).
+    // Arrays follow the same rule with their own stash: the callee's write
+    // to the file-scope array of the same name must not replace the
+    // caller's own array (review: codex - reverse_array.cg returned 2*p
+    // where the reference returns the caller's p).
     auto callerLocalArray = [&](const std::string& name) -> bool
     {
-        for (const auto& kv : declToValue_)
-            if (callerBindsName(kv.first, name))
-                return true;
-        return false;
+        return shadowedGlobalArrays_.count(name) != 0;
     };
     for (const auto& kv : bodyArrays)
     {

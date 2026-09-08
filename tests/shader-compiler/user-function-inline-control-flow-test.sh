@@ -244,6 +244,34 @@ forbid fp_inline_entry_param_read_f 's0=TEX0'
 accept fp_inline_entry_param_write_f sce_fp_rsx "fragment twin: set() writes the global while main's PARAMETER G is live: main returns TEXCOORD0"
 expect fp_inline_entry_param_write_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.'
 forbid fp_inline_entry_param_write_f 's0=c[0-9]+'
+# The caller binding survives REASSIGNMENT (review: codex, scope-param-rebound):
+# the write-back asks the stash, not whether the name still holds the value
+# its declaration was given.  Red on 47459167 AND on the first candidate
+# c0884536: both emit a bare MOV R0 <- c0 and never read TEXCOORD0.
+accept fp_inline_entry_param_rebound_f sce_fp_rsx "main's PARAMETER G reassigned (G = G*2) before set() writes the global: main returns 2*TEXCOORD0"
+expect fp_inline_entry_param_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
+count  fp_inline_entry_param_rebound_f '^[0-9]+ MUL ' 1
+has_float fp_inline_entry_param_rebound_f 40000000 "the factor 2.0 (an input read alone cannot hide a lost multiply)"
+forbid fp_inline_entry_param_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+# The reference folds 3*2 into one MULR by 6; we keep both multiplies (a
+# pre-existing fold gap, not this boundary) - so both FACTORS are pinned.
+accept fp_inline_local_rebound_f sce_fp_rsx "a caller LOCAL G reassigned (G = G*2) before set() writes the global: main returns 6*TEXCOORD0"
+expect fp_inline_local_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
+count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 2
+has_float fp_inline_local_rebound_f 40400000 "the factor 3.0"
+has_float fp_inline_local_rebound_f 40000000 "the factor 2.0"
+forbid fp_inline_local_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+accept vp_inline_entry_param_rebound_v sce_vp_rsx "vertex twin: main's PARAMETER G reassigned before set() writes the global: o0 = 2*IN0"
+expect vp_inline_entry_param_rebound_v '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw src0=IN0\.xyzw'
+count  vp_inline_entry_param_rebound_v '^[0-9]+ MUL ' 1
+has_float vp_inline_entry_param_rebound_v 40000000 "the factor 2.0"
+forbid vp_inline_entry_param_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
+accept vp_inline_local_rebound_v sce_vp_rsx "vertex twin: a caller LOCAL G reassigned before set() writes the global: o0 = 6*IN0"
+expect vp_inline_local_rebound_v '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw src0=IN0\.xyzw'
+count  vp_inline_local_rebound_v '^[0-9]+ MUL ' 2
+has_float vp_inline_local_rebound_v 40400000 "the factor 3.0"
+has_float vp_inline_local_rebound_v 40000000 "the factor 2.0"
+forbid vp_inline_local_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
 
 # ---------------------------------------------------------------- named gaps
 refuse "return inside a branch of the helper" fp_inline_return_in_if_f sce_fp_rsx "a return inside control flow"

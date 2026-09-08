@@ -1,0 +1,1 @@
+float4 G; void set() { G = float4(1, 0, 0, 1); } float4 main(float4 p : POSITION) : POSITION { float4 G = p * 3; G = G * 2; set(); return G; }
