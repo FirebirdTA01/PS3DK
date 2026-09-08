@@ -396,6 +396,28 @@ for stem in mat_uniform_44 mat_uniform_33; do
     [[ -s "$work/$stem.fpo" ]] || fail "$stem.fpo is missing or empty"
 done
 
+# The row assertions further down locate the DP4/DP3 that consumes each
+# matrix row and read its operands.  Nothing in those fields says whether
+# the instruction is PREDICATED, so a container whose colour writes carried
+# NVFX_COND_FL - writes that never execute - would satisfy every relocation
+# and association clause while the shader painted nothing.  That is the same
+# blindness codex found in t_7396e0c2's rows, in its harder form: those read
+# fp_sources' RENDERED text, which omits the condition test (hw[1] bits
+# 18..20) and the condition-code write (hw[0] bit 8) entirely.
+# predication_check.py reads those fields off the container these rows
+# already use, and each stem then flips its OWN first R0 write to COND_FL in
+# the container bytes and requires the same predicate to reject it BY REASON
+# - that checker compares the reason exactly, so a rejection for an
+# unrelated field does not satisfy the control.
+predication_checker="$repo_root/tests/shader-compiler/predication_check.py"
+[[ -f "$predication_checker" ]] || fail "predication_check.py is missing"
+for stem in mat_uniform_44 mat_uniform_33; do
+    "$PYTHON" "$predication_checker" "$work/$stem.fpo" > /dev/null ||
+        fail "$stem: a predicated or condition-forming write is present - the matrix rows below may never reach a pixel"
+    "$PYTHON" "$predication_checker" "$work/$stem.fpo" --control > /dev/null ||
+        fail "$stem: the COND_FL control was NOT rejected - the predication predicate is too weak to see a write that never executes"
+done
+
 # 6b. Dead tex2Dbias: eliminated by DCE without alphakill, preserved with #pragma alphakill
 cat > "$work/dead_txb.cg" << 'EOF'
 float4 main(float4 uv_bias : TEXCOORD0,
