@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, cg-compiler-dev]
   pull_request:
     branches: [main]
 
