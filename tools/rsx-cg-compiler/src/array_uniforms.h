@@ -157,6 +157,8 @@ inline std::vector<int> vpArrayElementRegisters(const ArrayUniformUse& use,
 // neither and are excluded by the callers, as they are today.
 inline unsigned fpUniformSlotCount(const IRTypeInfo& type)
 {
+    if (type.isMatrix())
+        return static_cast<unsigned>(std::max(1, type.matrixRows));
     return type.isArray() && type.arraySize > 0
                ? static_cast<unsigned>(type.arraySize) : 1u;
 }
@@ -174,7 +176,7 @@ inline std::vector<unsigned> fpParameterSlotBases(const IRFunction& entry)
     for (const auto& p : entry.parameters)
     {
         bases.push_back(cursor);
-        cursor += (p.storage == StorageQualifier::Uniform && p.type.isArray())
+        cursor += (p.storage == StorageQualifier::Uniform && (p.type.isArray() || p.type.isMatrix()))
                       ? fpUniformSlotCount(p.type) : 1u;
     }
     return bases;
@@ -186,7 +188,7 @@ inline unsigned fpFirstGlobalSlot(const IRFunction& entry)
     if (bases.empty()) return 0;
     const auto& last = entry.parameters.back();
     return bases.back() +
-           ((last.storage == StorageQualifier::Uniform && last.type.isArray())
+           ((last.storage == StorageQualifier::Uniform && (last.type.isArray() || last.type.isMatrix()))
                 ? fpUniformSlotCount(last.type) : 1u);
 }
 

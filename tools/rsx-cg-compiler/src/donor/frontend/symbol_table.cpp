@@ -581,9 +581,30 @@ void SymbolTable::registerVectorFunctions()
     addFunction("mul", CgType::Float2x2(), {CgType::Float2x2(), CgType::Float2x2()}, {"a", "b"}, nullptr, true);
 
     // transpose
-    addFunction("transpose", CgType::Float4x4(), {CgType::Float4x4()}, {"m"}, nullptr, true);
-    addFunction("transpose", CgType::Float3x3(), {CgType::Float3x3()}, {"m"}, nullptr, true);
-    addFunction("transpose", CgType::Float2x2(), {CgType::Float2x2()}, {"m"}, nullptr, true);
+    for (ScalarKind sk : {ScalarKind::Float, ScalarKind::Half})
+    {
+        for (int r = 2; r <= 4; ++r)
+        {
+            for (int c = 2; c <= 4; ++c)
+            {
+                addFunction("transpose", CgType::Mat(sk, c, r), {CgType::Mat(sk, r, c)}, {"m"}, nullptr, true);
+            }
+        }
+    }
+
+    // lit(NdotL, NdotH, m)
+    for (ScalarKind lSk : {ScalarKind::Float, ScalarKind::Half})
+    {
+        for (ScalarKind hSk : {ScalarKind::Float, ScalarKind::Half})
+        {
+            for (ScalarKind mSk : {ScalarKind::Float, ScalarKind::Half})
+            {
+                const bool allHalf = (lSk == ScalarKind::Half && hSk == ScalarKind::Half && mSk == ScalarKind::Half);
+                CgType retType = allHalf ? CgType::Half4() : CgType::Float4();
+                addFunction("lit", retType, {CgType::Scalar(lSk), CgType::Scalar(hSk), CgType::Scalar(mSk)}, {"NdotL", "NdotH", "m"}, nullptr, true);
+            }
+        }
+    }
 
     // determinant (3x3, 4x4)
     addFunction("determinant", CgType::Float(), {CgType::Float3x3()}, {"m"}, nullptr, true);
@@ -600,20 +621,68 @@ void SymbolTable::registerVectorFunctions()
 
 void SymbolTable::registerTextureSymbols()
 {
-    // tex1D, tex2D, tex3D, texCUBE
+    // tex1D, tex2D, tex3D, texCUBE, texRECT
     addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float4()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Half()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
     addFunction("tex3D", CgType::Float4(), {CgType::Sampler3D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex3D", CgType::Float4(), {CgType::Sampler3D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
     addFunction("texCUBE", CgType::Float4(), {CgType::SamplerCube(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("h4tex2D", CgType::Half4(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("h3tex2D", CgType::Half3(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texCUBE", CgType::Float4(), {CgType::SamplerCube(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+
     addFunction("texDepth2D", CgType::Float(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
     addFunction("texDepth2D_precise", CgType::Float(), {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+
+    // Typed texture lookup families: f1tex..f4tex and h1tex..h4tex
+    auto regTexFamily = [this](const std::string& prefix, ScalarKind sk, int retWidth) {
+        CgType retType = (retWidth == 1) ? CgType::Scalar(sk) : CgType::Vec(sk, retWidth);
+
+        // 1D: sampler1D, float/half/float2/half2
+        std::string name1D = prefix + "tex1D";
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Float()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Half()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+
+        // 2D: sampler2D, float2/half2/float3/half3
+        std::string name2D = prefix + "tex2D";
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+        // 3D: sampler3D, float3/half3
+        std::string name3D = prefix + "tex3D";
+        addFunction(name3D, retType, {CgType::Sampler3D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name3D, retType, {CgType::Sampler3D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+        // CUBE: samplerCUBE, float3/half3
+        std::string nameCUBE = prefix + "texCUBE";
+        addFunction(nameCUBE, retType, {CgType::SamplerCube(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(nameCUBE, retType, {CgType::SamplerCube(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+        // RECT: samplerRECT, float2/half2
+        std::string nameRECT = prefix + "texRECT";
+        addFunction(nameRECT, retType, {CgType::SamplerRect(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(nameRECT, retType, {CgType::SamplerRect(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    };
+
+    for (int w = 1; w <= 4; ++w) {
+        regTexFamily("f" + std::to_string(w), ScalarKind::Float, w);
+        regTexFamily("h" + std::to_string(w), ScalarKind::Half, w);
+    }
 
     // With explicit derivatives
     addFunction("tex2D", CgType::Float4(),
@@ -623,6 +692,7 @@ void SymbolTable::registerTextureSymbols()
     // tex2Dlod, tex2Dbias
     addFunction("tex2Dlod", CgType::Float4(), {CgType::Sampler2D(), CgType::Float4()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex2Dbias", CgType::Float4(), {CgType::Sampler2D(), CgType::Float4()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2Dbias", CgType::Float4(), {CgType::Sampler2D(), CgType::Half4()}, {"sampler", "coord"}, nullptr, true);
 
     // tex2Dproj
     addFunction("tex2Dproj", CgType::Float4(), {CgType::Sampler2D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);

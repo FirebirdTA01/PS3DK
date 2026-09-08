@@ -129,6 +129,8 @@ enum class VOp
     Sne,
     Tex,
     Txp,    // projective fetch (tex2Dproj), fragment-only
+    TexBias, // biased fetch (tex2Dbias), fragment-only
+    Lit,
     // VP only (t_99b29225): load a lane of an ADDRESS register from the
     // index value of a run-time array read.  dst.address names A0/A1 and
     // the lane is the writemask; srcs[0] is the index with its swizzle.
@@ -1489,6 +1491,8 @@ private:
             switch (vi.op) {
             case VOp::Tex:
             case VOp::Txp:
+            case VOp::TexBias:
+            case VOp::Lit:
                 return 4;
             case VOp::Dp4:
                 return 4;
@@ -2036,6 +2040,19 @@ private:
                 pendingMatrices.push_back(PendingMatrix{p.valueId, p.name,
                                                         p.type.matrixRows,
                                                         p.type.matrixCols});
+            } else if (profile_ == GeneralProfile::Fragment &&
+                       p.storage == StorageQualifier::Uniform &&
+                       p.type.isMatrix()) {
+                const unsigned base = fpParamSlotBases[pi];
+                const int rows = std::max(1, p.type.matrixRows);
+                const int cols = std::max(1, p.type.matrixCols);
+                MatrixValue mv;
+                mv.rows = rows;
+                mv.cols = cols;
+                for (int row = 0; row < rows; ++row) {
+                    mv.rowSrcs.push_back(uniformSrc(static_cast<int>(base + row), true));
+                }
+                matrixValues_[p.valueId] = mv;
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform) {
                 program_.valueToSource[p.valueId] =
@@ -2088,6 +2105,19 @@ private:
                 pendingMatrices.push_back(PendingMatrix{g.valueId, g.name,
                                                         g.type.matrixRows,
                                                         g.type.matrixCols});
+            } else if (profile_ == GeneralProfile::Fragment && g.type.isMatrix()) {
+                const unsigned base = nextFpGlobalSlot;
+                const int rows = std::max(1, g.type.matrixRows);
+                const int cols = std::max(1, g.type.matrixCols);
+                MatrixValue mv;
+                mv.rows = rows;
+                mv.cols = cols;
+                for (int row = 0; row < rows; ++row) {
+                    program_.fpGlobalUniformSlots.push_back(base + row);
+                    mv.rowSrcs.push_back(uniformSrc(static_cast<int>(base + row), true));
+                }
+                nextFpGlobalSlot += rows;
+                matrixValues_[g.valueId] = mv;
             } else if (profile_ == GeneralProfile::Vertex) {
                 program_.valueToSource[g.valueId] =
                     uniformSrc(nextVpUniformConst--, false);
@@ -2403,6 +2433,12 @@ private:
         case IROp::VecMatMul:
             lowerVecMatMul(inst);
             return;
+        case IROp::Transpose:
+            lowerTranspose(inst);
+            return;
+        case IROp::Lit:
+            lowerLit(inst);
+            return;
         case IROp::Sin:
             lowerUnary(inst, VOp::Sin, false);
             return;
@@ -2620,6 +2656,9 @@ private:
             return;
         case IROp::TexSampleProj:
             lowerTex(inst, VOp::Txp);
+            return;
+        case IROp::TexSampleBias:
+            lowerTex(inst, VOp::TexBias);
             return;
         case IROp::StoreOutput:
             lowerStoreOutput(inst);
@@ -3243,6 +3282,8 @@ private:
         vi.dst.index = define(inst.result);
         vi.dst.writemask = componentMask(inst.resultType);
         vi.dst.fp16 = toHalf;
+        if (!toHalf)
+            vi.fpPrecisionOverride = 1;
         program_.vregToFp16[vi.dst.index] = toHalf;
         vi.srcs[0] = resolve(inst.operands[0]);
         program_.instrs.push_back(vi);
@@ -3622,7 +3663,7 @@ private:
                 !last.dst.none && !last.dst.output &&
                 last.dst.index == vregIt->second &&
                 last.op != VOp::SelPred && last.op != VOp::Kil &&
-                last.op != VOp::Tex && last.op != VOp::Txp && last.fpScale == 0 &&
+                last.op != VOp::Tex && last.op != VOp::Txp && last.op != VOp::TexBias && last.fpScale == 0 &&
                 !last.stubFenceBefore && !last.stubFenceBrBefore;
             if (fusable && soleConsumer) {
                 kil.killFused = last.op;
@@ -4806,6 +4847,51 @@ private:
         const VSrc vec = resolve(inst.operands[0]);
         lowerRowVecMatProduct(inst.result, vec, vecWidth, mat, resultWidth,
                               result);
+    }
+
+    void lowerTranspose(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue ||
+            !matrixDimsSupported(inst.resultType)) {
+            program_.diagnostics.push_back(
+                "nv40-general: transpose shape is unsupported; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        MatrixValue inMat;
+        if (!matrixRows(inst.operands[0], inMat)) {
+            program_.diagnostics.push_back(
+                "nv40-general: transpose operand is not a matrix value; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        if (inMat.cols != inst.resultType.matrixRows ||
+            inMat.rows != inst.resultType.matrixCols ||
+            inMat.rowSrcs.size() != static_cast<size_t>(inMat.rows)) {
+            program_.diagnostics.push_back(
+                "nv40-general: transpose dimensions do not match result; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+
+        MatrixValue res;
+        res.rows = inMat.cols;
+        res.cols = inMat.rows;
+        for (int r = 0; r < res.rows; ++r) {
+            const int rowReg = newVReg();
+            for (int c = 0; c < res.cols; ++c) {
+                VInstr mov;
+                mov.op = VOp::Mov;
+                mov.dst.index = rowReg;
+                mov.dst.writemask = 1 << c;
+                mov.srcs[0] = inMat.rowSrcs[static_cast<size_t>(c)];
+                uint8_t swz = inMat.rowSrcs[static_cast<size_t>(c)].swizzle[r];
+                mov.srcs[0].swizzle = {swz, swz, swz, swz};
+                program_.instrs.push_back(mov);
+            }
+            res.rowSrcs.push_back(tempSrc(rowReg));
+        }
+        matrixValues_[inst.result] = res;
     }
 
     void lowerLength(const IRInstruction& inst)
@@ -6516,13 +6602,16 @@ private:
         VInstr vi;
         vi.op = op;
         vi.dst.index = define(inst.result);
-        // The reference writes only the lanes the program consumes (TXP
-        // R0.x for a fetch read as .x).  Applied to TXP here, where it was
-        // measured; TEX keeps its full mask until its own movers are judged
-        // (the reference trims TEX the same way - a follow-up).
         vi.dst.writemask = op == VOp::Txp
             ? consumedLanes(inst.result, componentMask(inst.resultType))
             : componentMask(inst.resultType);
+        if (profile_ == GeneralProfile::Fragment &&
+            (inst.resultType.elementType == IRType::Float16 ||
+             inst.resultType.baseType == IRType::Float16)) {
+            vi.dst.fp16 = true;
+            vi.fpPrecisionOverride = 0;
+            program_.vregToFp16[vi.dst.index] = true;
+        }
         vi.srcs[0] = resolve(inst.operands[1]);
         if (op == VOp::Txp && operandWidth(inst.operands[1]) == 3) {
             // TXP divides by source W.  A float3 coordinate in a temp or a
@@ -6576,6 +6665,164 @@ private:
         if (profile_ == GeneralProfile::Fragment)
             vi.fpPrecisionOverride = NVFX_FP_PRECISION_FP32;
         program_.instrs.push_back(vi);
+    }
+
+    void lowerLit(const IRInstruction& inst)
+    {
+        if (inst.operands.size() < 3 || inst.result == InvalidIRValue) return;
+
+        if (profile_ == GeneralProfile::Fragment) {
+            int dstReg = define(inst.result);
+            VSrc ndotl = resolve(inst.operands[0]);
+
+            if (isLiteralZero(inst.operands[2])) {
+                // Zero-exponent fast path: 3 instructions, never reads p.y (ndoth) to avoid NaN
+                VInstr mov;
+                mov.op = VOp::Mov;
+                mov.dst.index = dstReg;
+                mov.dst.writemask = 0x1; // x
+                mov.srcs[0] = ndotl;
+                program_.instrs.push_back(mov);
+
+                VInstr maxInst;
+                maxInst.op = VOp::Max;
+                maxInst.dst.index = dstReg;
+                maxInst.dst.writemask = 0x2; // y
+                VSrc s0;
+                s0.kind = VSrcKind::Temp;
+                s0.index = dstReg;
+                s0.swizzle = {0, 0, 0, 0}; // xxxx
+                maxInst.srcs[0] = s0;
+                maxInst.srcs[1] = floatLit(0.0f);
+                program_.instrs.push_back(maxInst);
+
+                VInstr litInst;
+                litInst.op = VOp::Lit;
+                litInst.dst.index = dstReg;
+                litInst.dst.writemask = componentMask(inst.resultType);
+                VSrc litSrc;
+                litSrc.kind = VSrcKind::Temp;
+                litSrc.index = dstReg;
+                litSrc.swizzle = {0, 1, 2, 2}; // xyzz
+                litInst.srcs[0] = litSrc;
+                program_.instrs.push_back(litInst);
+                return;
+            }
+
+            // General path: 6 instructions ending in LITEX2 (opcode 0x3C)
+            int tempReg = newVReg();
+            VSrc ndoth = resolve(inst.operands[1]);
+            VSrc m = resolve(inst.operands[2]);
+
+            // 1. MOV dst.x, ndotl
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = dstReg;
+            mov.dst.writemask = 0x1; // x
+            mov.srcs[0] = ndotl;
+            program_.instrs.push_back(mov);
+
+            // 2. MAX dst.y, ndotl, 0.0
+            VInstr maxL;
+            maxL.op = VOp::Max;
+            maxL.dst.index = dstReg;
+            maxL.dst.writemask = 0x2; // y
+            maxL.srcs[0] = ndotl;
+            maxL.srcs[0].swizzle = {ndotl.swizzle[0], ndotl.swizzle[0], ndotl.swizzle[0], ndotl.swizzle[0]};
+            maxL.srcs[1] = floatLit(0.0f);
+            program_.instrs.push_back(maxL);
+
+            // 3. MAX temp.x, ndoth, 0.0
+            VInstr maxH;
+            maxH.op = VOp::Max;
+            maxH.dst.index = tempReg;
+            maxH.dst.writemask = 0x1; // x
+            maxH.srcs[0] = ndoth;
+            maxH.srcs[0].swizzle = {ndoth.swizzle[0], ndoth.swizzle[0], ndoth.swizzle[0], ndoth.swizzle[0]};
+            maxH.srcs[1] = floatLit(0.0f);
+            program_.instrs.push_back(maxH);
+
+            // 4. LG2 temp.y, temp.x
+            VInstr lg2;
+            lg2.op = VOp::Lg2;
+            lg2.dst.index = tempReg;
+            lg2.dst.writemask = 0x2; // y
+            VSrc tempX;
+            tempX.kind = VSrcKind::Temp;
+            tempX.index = tempReg;
+            tempX.swizzle = {0, 0, 0, 0};
+            lg2.srcs[0] = tempX;
+            program_.instrs.push_back(lg2);
+
+            // 5. MUL dst.z, m, temp.y
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = dstReg;
+            mul.dst.writemask = 0x4; // z
+            mul.srcs[0] = m;
+            mul.srcs[0].swizzle = {m.swizzle[0], m.swizzle[0], m.swizzle[0], m.swizzle[0]};
+            VSrc tempY;
+            tempY.kind = VSrcKind::Temp;
+            tempY.index = tempReg;
+            tempY.swizzle = {1, 1, 1, 1}; // yyyy
+            mul.srcs[1] = tempY;
+            program_.instrs.push_back(mul);
+
+            // 6. LITEX2 dst, dst.xyzz
+            VInstr litInst;
+            litInst.op = VOp::Lit;
+            litInst.dst.index = dstReg;
+            litInst.dst.writemask = componentMask(inst.resultType);
+            VSrc litSrc;
+            litSrc.kind = VSrcKind::Temp;
+            litSrc.index = dstReg;
+            litSrc.swizzle = {0, 1, 2, 2}; // xyzz
+            litInst.srcs[0] = litSrc;
+            program_.instrs.push_back(litInst);
+            return;
+        }
+
+        if (profile_ == GeneralProfile::Vertex) {
+            int dstReg = define(inst.result);
+            int tempReg = newVReg();
+            VSrc ndotl = resolve(inst.operands[0]);
+            VSrc ndoth = resolve(inst.operands[1]);
+            VSrc m = resolve(inst.operands[2]);
+
+            // Pack into tempReg: x=ndotl, y=ndoth, w=m
+            VInstr movX;
+            movX.op = VOp::Mov;
+            movX.dst.index = tempReg;
+            movX.dst.writemask = 0x1;
+            movX.srcs[0] = ndotl;
+            program_.instrs.push_back(movX);
+
+            VInstr movY;
+            movY.op = VOp::Mov;
+            movY.dst.index = tempReg;
+            movY.dst.writemask = 0x2;
+            movY.srcs[0] = ndoth;
+            program_.instrs.push_back(movY);
+
+            VInstr movW;
+            movW.op = VOp::Mov;
+            movW.dst.index = tempReg;
+            movW.dst.writemask = 0x8;
+            movW.srcs[0] = m;
+            program_.instrs.push_back(movW);
+
+            VInstr litInst;
+            litInst.op = VOp::Lit;
+            litInst.dst.index = dstReg;
+            litInst.dst.writemask = componentMask(inst.resultType);
+            VSrc litSrc;
+            litSrc.kind = VSrcKind::Temp;
+            litSrc.index = tempReg;
+            litSrc.swizzle = {0, 1, 2, 3};
+            litInst.srcs[0] = litSrc;
+            program_.instrs.push_back(litInst);
+            return;
+        }
     }
 
     bool isLiteralZero(IRValueID id) const
@@ -7066,7 +7313,7 @@ private:
                 [&](const VInstr& vi) {
                     return !vi.dst.none && !vi.dst.output &&
                            vi.dst.index == regIt->second &&
-                           (vi.op == VOp::Tex || vi.op == VOp::Txp);
+                           (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias);
                 });
         if (profile_ == GeneralProfile::Vertex && !isFogOutput &&
             regIt != program_.valueToVReg.end()) {
@@ -7415,6 +7662,8 @@ private:
         case VOp::Lg2:
         case VOp::Ex2:
             return 0x1;
+        case VOp::Lit:
+            return 0xf;
         default:       return vi.dst.writemask;
         }
     }
@@ -8368,6 +8617,8 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Sne: return NVFX_FP_OP_OPCODE_SNE;
     case VOp::Tex: return NVFX_FP_OP_OPCODE_TEX;
     case VOp::Txp: return NVFX_FP_OP_OPCODE_TXP;
+    case VOp::TexBias: return NVFX_FP_OP_OPCODE_TXB;
+    case VOp::Lit: return NVFX_FP_OP_OPCODE_LITEX2_NV40;
     case VOp::Arl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Ftoi: return NVFX_FP_OP_OPCODE_MOV;
     }
@@ -8417,6 +8668,8 @@ static const char* vOpName(VOp op)
     case VOp::Sne: return "Sne";
     case VOp::Tex: return "Tex";
     case VOp::Txp: return "Txp";
+    case VOp::TexBias: return "TexBias";
+    case VOp::Lit: return "Lit";
     case VOp::Arl: return "Arl";
     case VOp::Ftoi: return "Ftoi";
     case VOp::SelPred: return "SelPred";
@@ -8450,6 +8703,7 @@ static bool tryVpOpcode(VOp op, uint8_t& opcode)
     case VOp::Sle: opcode = VP_OP(SLE); return true;
     case VOp::Seq: opcode = VP_OP(SEQ); return true;
     case VOp::Sne: opcode = VP_OP(SNE); return true;
+    case VOp::Lit: opcode = VP_SCA_OP(LIT); return true;
     case VOp::Arl: opcode = VP_OP(ARL); return true;
     default: return false;
     }
@@ -8471,6 +8725,7 @@ static bool isVpScalarOp(VOp op)
     case VOp::Cos:
     case VOp::Lg2:
     case VOp::Ex2:
+    case VOp::Lit:
         return true;
     default:
         return false;
@@ -8481,7 +8736,7 @@ static bool isVpVectorOp(VOp op)
 {
     // ARL never pairs: the reference emits it alone, and a co-issued
     // half shares the constant address the relative reads depend on.
-    return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Txp && op != VOp::Arl;
+    return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Txp && op != VOp::TexBias && op != VOp::Arl;
 }
 
 static bool sameTempRegister(const VSrc& src, const VDst& dst)
@@ -8727,6 +8982,7 @@ static bool fpProducerNeedsFenctr(VOp op)
     switch (op) {
     case VOp::Tex:
     case VOp::Txp:
+    case VOp::TexBias:
     case VOp::Rcp:
     case VOp::Rsq:
     case VOp::Sin:
@@ -8735,6 +8991,7 @@ static bool fpProducerNeedsFenctr(VOp op)
     case VOp::Ex2:
     case VOp::DivR:
     case VOp::DivSqrt:
+    case VOp::Lit:
         return true;
     default:
         return false;
@@ -8867,7 +9124,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             out.diagnostics.push_back("nv40-general-fp: " + why);
             return out;
         }
-        if (vi.op == VOp::Tex || vi.op == VOp::Txp)
+        if (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias)
             attrs.partialTexType &= ~(3u << (vi.texUnit * 2));
         for (const VSrc& src : vi.srcs) {
             if (src.kind == VSrcKind::Input) {
@@ -9154,7 +9411,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             nvfxSource(srcs[0]),
             nvfxSource(srcs[1]),
             nvfxSource(srcs[2]));
-        if (vi.dst.fp16)
+        if (vi.dst.fp16 || (vi.op == VOp::Mov && srcs[0].fp16))
             insn.precision = FLOAT16;
         if (vi.fpPrecisionOverride >= 0)
             insn.precision = static_cast<uint8_t>(vi.fpPrecisionOverride);
@@ -9381,7 +9638,7 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             out.diagnostics.push_back("nv40-general-vp: " + why);
             return out;
         }
-        if (vi.op == VOp::Tex || vi.op == VOp::Txp) {
+        if (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias) {
             out.diagnostics.push_back("nv40-general-vp: texture fetch unsupported in VP");
             return out;
         }
