@@ -27,10 +27,13 @@
 # below, against the real compiler, before the adversary is used to judge
 # anything.
 #
-# UNDER-REPORTING IS THE SAFE DIRECTION and it is deliberate: a script that
-# fails under the adversary for an unrelated reason (no host g++, say) is
-# recorded as having caught the crash rather than as a false green.  This test
-# can miss a weak guard; it cannot invent one.
+# A failed script is never called untested: entered and fired counters separate
+# failure before wrapper entry from failure without a refusal. Only a successful
+# script that exercised no refusal is untested. A failure AFTER firing can still
+# be unrelated to the crash; "caught" does not establish its diagnostic's cause.
+# Windows needs Windows PowerShell/.NET Framework to build the native launcher,
+# and an explicit Git Bash (PS3TC_ADVERSARY_BASH, default this running Bash).
+# A batch file is insufficient: cmd.exe parses the command line before its body.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -56,18 +59,52 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 # stdout and stderr are INHERITED, not captured and replayed, so their contents,
 # their interleaving and their separation are the real compiler's.
 wrap="$work/crash-on-refusal-cc"
+body="$wrap"
 fired="$work/fired"
-cat >"$wrap" <<WRAP
-#!/usr/bin/env bash
-"$compiler" "\$@"
-rc=\$?
-if [ "\$rc" -eq 1 ]; then
+entered="$work/entered"
+{
+printf '%s\n' '#!/usr/bin/env bash'
+printf 'compiler=%q\nentered=%q\nfired=%q\n' "$compiler" "$entered" "$fired"
+cat <<'WRAP'
+echo x >> "$entered"
+"$compiler" "$@"
+rc=$?
+if [ "$rc" -eq 1 ]; then
     echo x >> "$fired"
-    kill -ABRT \$\$
+    kill -ABRT $$
 fi
-exit \$rc
+exit $rc
 WRAP
+} >"$body"
 chmod +x "$wrap"
+
+case "$OSTYPE" in
+    msys*|cygwin*)
+        native_bash="${PS3TC_ADVERSARY_BASH:-$(cygpath -am "$BASH")}"
+        [[ "$native_bash" == [A-Za-z]:/* || "$native_bash" == [A-Za-z]:\\* ]] \
+            && [[ -x "$native_bash" ]] \
+            || fail "inconclusive: launcher prerequisite: explicit Git Bash not executable: $native_bash"
+        windows_root="${SYSTEMROOT:-${SystemRoot:-}}"
+        [[ -n "$windows_root" ]] || fail 'inconclusive: launcher prerequisite: Windows system root missing'
+        powershell="$(cygpath -am "$windows_root")/System32/WindowsPowerShell/v1.0/powershell.exe"
+        [[ -x "$powershell" ]] \
+            || fail "inconclusive: launcher prerequisite: Windows PowerShell/.NET Framework missing: $powershell"
+        wrap="$body.exe"
+        "$powershell" -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File "$(cygpath -am "$here/build-adversary-launcher.ps1")" \
+            -Source "$(cygpath -am "$here/adversary-launcher.cs")" \
+            -Output "$(cygpath -am "$wrap")" >"$work/launcher-build.log" 2>&1 \
+            || { cat "$work/launcher-build.log" >&2; fail 'inconclusive: launcher prerequisite: Windows PowerShell/.NET Framework compilation failed'; }
+        printf '%s\n%s\n' "$native_bash" "$(cygpath -am "$body")" >"$wrap.paths"
+        ;;
+    *) native_bash="$BASH" ;;
+esac
+
+# This checks native Python AND Bash entry, argv (including MSYS path forms),
+# binary streams, status and artifact bytes. Its corrupted controls assert the
+# reason, so a transport failure cannot masquerade as a guard verdict.
+python3 "$here/adversary_transport_check.py" "$wrap" "$native_bash" "$work" "$compiler" "$shaders" \
+    || fail 'inconclusive: launcher transport self-check failed'
 
 # ------------------------------------------------------- transparency self-check
 # Run the same invocation both ways and require the two to be indistinguishable
@@ -134,24 +171,22 @@ printf '  transparency: identical stdout, stderr, container and status except a 
 # is only judged when the adversary actually FIRED for it: "did not exercise a
 # refusal" is not a finding, and counting it as one is how this measurement was
 # first over-stated by a script that sweeps the corpus and ignores refusals.
-judge() {   # $1 script, $2 timeout -> weak | ok | hung | broke:N | untested
+judge() {   # $1 script, $2 timeout -> verdict (failures without firing are named)
     local script="$1" rc=0
     local tmo="${2:-${PS3TC_ADVERSARY_TIMEOUT:-400s}}"
     : >"$fired"
+    : >"$entered"
     timeout "$tmo" bash "$script" "$wrap" >"$work/judge.log" 2>&1 || rc=$?
-    # A script that never compiled anything that refuses is not judged at all,
-    # whatever its status: it may have failed for a reason of its own (this
-    # host has no g++ for two of them, and they exit 127) and calling that a
-    # finding is how the measurement behind this test was first overstated.
-    #
-    # With ONE exception, because otherwise an infrastructure failure vanishes
-    # into the safest-looking bucket: a script that HUNG or died on a signal
-    # BEFORE it ever reached a refusing compile has not been let off, it has
-    # not been examined, and "untested" would read as "nothing to see".
+    # No entry is evidence of where execution stopped, not why. In particular
+    # a host-toolchain failure and a wrapper launch failure must both remain
+    # inconclusive, with the script's diagnostic printed by the caller.
     if [[ ! -s "$fired" ]]; then
         case "$rc" in
             124) echo hung ;;
-            *)   if (( rc >= 128 )); then echo "broke:$rc"; else echo untested; fi ;;
+            0) echo untested ;;
+            *) if (( rc >= 128 )); then echo "broke:$rc"
+               elif [[ ! -s "$entered" ]]; then echo "failed-before-wrapper:$rc"
+               else echo "failed-without-refusal:$rc"; fi ;;
         esac
         return 0
     fi
@@ -223,22 +258,85 @@ chmod +x "$work/weak-test.sh" "$work/strong-test.sh" "$work/hang-test.sh" \
     || fail "the detector read a script that FIRED AND THEN DIED (exit 3) as a result; only a script's own fail() counts as catching the crash"
 [[ "$(judge "$work/prefire-hang-test.sh" 2s)" == hung ]] \
     || fail "the detector filed a script that HUNG BEFORE reaching any refusal under 'never compiled one'; an infrastructure failure must not vanish into the quietest bucket"
-printf '  self-check: accuses a `-ne 0` guard, clears an `-eq 1` guard, and scores neither a hang nor a crash of its own - before or after the counter fires\n'
+
+# Python launches exactly the same executable, not `bash wrapper`. Pin the crash
+# explicitly as well as accusing !=0: a broken launcher exiting 125 could
+# otherwise satisfy both the weak/strong tests without simulating the crash.
+for kind in weak strong status; do
+    cat >"$work/python-$kind-test.sh" <<PYGUARD
+#!/usr/bin/env bash
+python3 - "\$1" "$bad_src" "$kind" <<'PY'
+import os, subprocess, sys
+rc = subprocess.run([sys.argv[1], '-p', 'sce_fp_rsx', sys.argv[2]],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+crash = 134 if os.name == 'nt' else -6  # Python reports POSIX signals negatively.
+ok = rc != 0 if sys.argv[3] == 'weak' else rc == (crash if sys.argv[3] == 'status' else 1)
+sys.exit(0 if ok else 1)
+PY
+PYGUARD
+done
+[[ "$(judge "$work/python-weak-test.sh")" == weak ]] \
+    || fail 'Python control: a !=0 guard did not accept the crash'
+[[ "$(judge "$work/python-strong-test.sh")" == ok ]] \
+    || fail 'Python control: an exact-1 guard did not catch the crash'
+[[ "$(judge "$work/python-status-test.sh")" == weak ]] \
+    || fail 'Python control: SIGABRT did not arrive as 134 on Windows / -6 on POSIX'
+
+cat >"$work/launch-failed-test.sh" <<'LAUNCH'
+#!/usr/bin/env bash
+python3 - "$1.missing" <<'PY'
+import subprocess, sys
+subprocess.run([sys.argv[1]])
+PY
+LAUNCH
+cat >"$work/no-refusal-test.sh" <<'NOREFUSAL'
+#!/usr/bin/env bash
+"$1" --version >/dev/null 2>&1 || exit 3
+exit 0
+NOREFUSAL
+cat >"$work/failed-no-refusal-test.sh" <<'FAILED'
+#!/usr/bin/env bash
+"$1" --version >/dev/null 2>&1 || exit 3
+exit 2
+FAILED
+[[ "$(judge "$work/launch-failed-test.sh")" == failed-before-wrapper:1 ]] \
+    || fail 'launch-failure control: failure before entry was not named inconclusive'
+grep -q 'FileNotFoundError' "$work/judge.log" \
+    || fail 'launch-failure control: the expected launch diagnostic was absent'
+[[ "$(judge "$work/no-refusal-test.sh")" == untested ]] \
+    || fail 'no-refusal control: successful non-refusal invocation was accused'
+[[ "$(judge "$work/failed-no-refusal-test.sh")" == failed-without-refusal:2 ]] \
+    || fail 'failed-no-refusal control: failure after entry vanished into untested'
+printf '  detector controls: Bash/Python weak accused, exact-1 caught; Python SIGABRT=134 (Windows)/-6 (POSIX); launch failure=failed-before-wrapper:1; no refusal=untested; entered failure=failed-without-refusal:2; hangs=hung; crash=broke:3\n'
 
 # ------------------------------------------------------------------ the real run
 mapfile -t scripts < <(cd "$here" && ls *-test.sh | grep -v '^refusal-status-adversary-test\.sh$' | sort)
 (( ${#scripts[@]} > 20 )) || fail "only ${#scripts[@]} sibling test scripts found - the enumeration broke, so nothing was judged"
+if [[ -n "${PS3TC_ADVERSARY_ONLY:-}" ]]; then
+    read -r -a selected <<<"$PS3TC_ADVERSARY_ONLY"
+    (( ${#selected[@]} > 0 )) || fail 'empty selected guard list'
+    declare -A selected_seen=()
+    for s in "${selected[@]}"; do
+        printf '%s\n' "${scripts[@]}" | grep -Fxq "$s" || fail "unknown selected guard: $s"
+        [[ -z "${selected_seen[$s]:-}" ]] || fail "duplicate selected guard: $s"
+        selected_seen[$s]=1
+    done
+    scripts=("${selected[@]}")
+    printf '  targeted run: %d named guards (not the full inventory)\n' "${#scripts[@]}"
+fi
 
 weak=(); inconclusive=(); ok=0; untested=0
 for s in "${scripts[@]}"; do
+    started=$SECONDS
     verdict="$(judge "$here/$s")"
-    [[ -z "${PS3TC_ADVERSARY_VERBOSE:-}" ]] || printf '    %-44s %s
-' "$s" "$verdict"
+    [[ -z "${PS3TC_ADVERSARY_VERBOSE:-}" ]] || printf '    %-44s %s elapsed=%ss\n' "$s" "$verdict" "$((SECONDS - started))"
     case "$verdict" in
         weak)     weak+=("$s") ;;
         ok)       ok=$((ok + 1)) ;;
         untested) untested=$((untested + 1)) ;;
-        *)        inconclusive+=("$s ($verdict)") ;;
+        *)        inconclusive+=("$s ($verdict)")
+                  printf '  inconclusive: %s (%s)\n' "$s" "$verdict" >&2
+                  tail -n 8 "$work/judge.log" >&2 ;;
     esac
 done
 
@@ -251,20 +349,18 @@ printf '  judged %d scripts: %d assert a refusal and catch a crash, %d never com
 # timeouts kill a compile before it can refuse - every script would come back
 # untested and this test would report a clean suite having judged nothing.  The
 # count is not asserted exactly, because a legitimate new script moves it; the
-# floor is.  (One run in four here judged 32 rather than 33, which is that
-# effect in miniature: a script whose own timeout fired first is recorded as
-# untested, which is the safe direction and still worth being able to see.)
+# floor is. Explicitly selected runs identify their smaller population and
+# still fail on any weak or inconclusive row.
 judged=$(( ok + ${#weak[@]} + ${#inconclusive[@]} ))
-(( judged >= 20 )) || fail "only $judged of ${#scripts[@]} scripts compiled anything that refuses.
+[[ -n "${PS3TC_ADVERSARY_ONLY:-}" ]] || (( judged >= 20 )) || fail "only $judged of ${#scripts[@]} scripts compiled anything that refuses.
 The adversary is not reaching the suite, so a clean result here would mean
 nothing.  Check that the wrapper still fires and that the scripts' own
 timeouts are not killing compiles before they can refuse."
 
-# An inconclusive script is not a pass.  It compiled something that refuses and
-# then hung or died, so this test learned nothing about it - and a measurement
-# that cannot see a guard must say so rather than count it green.
+# An inconclusive script is not a pass, including a failed script that never
+# reached the wrapper. Its diagnostic is printed above beside its name.
 if (( ${#inconclusive[@]} > 0 )); then
-    printf 'FAIL: these scripts compiled a refusal and then hung or died under the\nadversary, so nothing was established about their guards:\n' >&2
+    printf 'FAIL: these scripts could not be judged (failure before wrapper entry,\nfailure without refusal, timeout or abnormal exit):\n' >&2
     printf '  %s\n' "${inconclusive[@]}" >&2
     exit 1
 fi
