@@ -37,11 +37,18 @@ trap 'rm -rf "$work"' EXIT
 declare -A FN=( [1D]=tex1D [2D]=tex2D [3D]=tex3D [CUBE]=texCUBE [RECT]=texRECT )
 declare -A UV=( [1D]="uv.x" [2D]="uv" [3D]="float3(uv, 0)" [CUBE]="float3(uv, 0)" [RECT]="uv" )
 
-# tex3D does not lower on the general path today (it refuses with
-# "unsupported IR op call"), so for those kinds the sampled pair is compared
-# on its REFUSAL rather than on a container.  The alias must not change
-# whether a program is accepted - only how its type is spelled.
-declare -A SAMPLED_COMPILES=( [1D]=yes [2D]=yes [3D]=no [CUBE]=yes [RECT]=yes )
+# Every sampling intrinsic in this table lowers today, so every sampled pair
+# is compared on its CONTAINER BYTES.  3D was the last entry here that was
+# not: tex3D refused with "unsupported IR op call" until bucket (c) lowered
+# it, and this row's own stale-entry check is what said so - it failed with
+# "sampler3D now COMPILES ... the pair should be compared on bytes" rather
+# than quietly going on asserting a refusal that no longer happens.
+#
+# The mechanism stays because it is not about 3D: a kind whose intrinsic
+# does not lower has both spellings compared on the REFUSAL instead, and the
+# property under test is the same either way - the alias must not change
+# whether a program is accepted, only how its type is spelled.
+declare -A SAMPLED_COMPILES=( [1D]=yes [2D]=yes [3D]=yes [CUBE]=yes [RECT]=yes )
 
 emit() {  # <path> <source-file>; echoes the exit status
     local out="$1" src="$2"
