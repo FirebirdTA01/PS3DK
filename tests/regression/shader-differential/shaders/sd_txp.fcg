@@ -1,0 +1,8 @@
+// tex2Dproj -> TXP (t_483feb71), judged on pixels.  TEXCOORD0 = (u, v,
+// 0.1 + 0.5v, 0.92 - u) from sd_pos_allch.vcg, so the projective fetch
+// samples the bound texture at (u / w, v / w) with w = 0.92 - u: a real
+// division at every pixel, not a w of one.
+float4 main(float4 t : TEXCOORD0, uniform sampler2D u_texA) : COLOR
+{
+    return tex2Dproj(u_texA, t);
+}

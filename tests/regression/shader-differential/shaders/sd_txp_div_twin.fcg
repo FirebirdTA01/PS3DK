@@ -1,0 +1,7 @@
+// The explicit-divide twin of sd_txp (t_483feb71): tex2D at t.xy / t.w.
+// Reference-compiled, it says what TXP's projection must paint; a pixel
+// where sd_txp and this row disagree is a TXP semantics defect.
+float4 main(float4 t : TEXCOORD0, uniform sampler2D u_texA) : COLOR
+{
+    return tex2D(u_texA, t.xy / t.w);
+}

@@ -1,0 +1,1 @@
+void main(float4 uv : TEXCOORD0, uniform sampler2D s, out float4 o : COLOR) { o = tex2Dproj(s, uv); }
