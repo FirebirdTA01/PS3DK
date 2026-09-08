@@ -859,7 +859,57 @@ def matrix_rows_patchable(container, name, rows, dot_opcode):
         if not any((instr[s] & 3) == 2 for s in (1, 2, 3)):   # CONST
             return ("%s's offset %d points at a block its instruction does "
                     "not name as a source" % (row_name, off))
+        # ...AND IT MUST BE THIS ROW'S OWN DOT PRODUCT (review: codex).
+        # Everything above is satisfied by an offset that lands on SOME
+        # dot product's block: he swapped M[0]'s and M[1]'s offsets in a
+        # real container, left the ucode alone, and it passed - a runtime
+        # would then patch each row into the other's multiply.  Row k of
+        # `mul(M, p)` produces lane k of the result, so the instruction
+        # that owns row k's block must be the one writing lane k of the
+        # colour output, and nothing else.
+        dst = (instr[0] >> 1) & 0x3F
+        mask = (instr[0] >> 9) & 0xF
+        half = (instr[0] >> 7) & 1
+        if dst != 0 or half:
+            return ("%s's offset %d belongs to a dot product writing %s%d, "
+                    "not the colour output"
+                    % (row_name, off, "H" if half else "R", dst))
+        if mask != (1 << k):
+            return ("%s's offset %d belongs to the dot product writing lane "
+                    "mask 0x%X, but row %d of the matrix produces lane %d "
+                    "(mask 0x%X) - patching that row would land in another "
+                    "row's multiply"
+                    % (row_name, off, mask, k, k, 1 << k))
     return None
+
+def swap_two_row_offsets(path, out_path, name):
+    """A real container with M[0]'s and M[1]'s offsets exchanged.
+
+    The UCODE IS UNTOUCHED: only the two records' relocation offsets move,
+    which is exactly the shape codex used to break the first version of
+    this check.  Every other property still holds - both offsets are in
+    range, aligned, distinct, and land on a dot product's const block -
+    and a runtime would patch each row into the other row's multiply.
+    """
+    b = bytearray(open(path, "rb").read())
+    p_arr, = struct.unpack_from(">I", b, 16)
+    where = {}
+    for i in range(struct.unpack_from(">I", b, 12)[0]):
+        rec = p_arr + 48 * i
+        nameoff, = struct.unpack_from(">I", b, rec + 16)
+        constoff, = struct.unpack_from(">I", b, rec + 24)
+        nm = b[nameoff:].split(bytes([0]))[0].decode("ascii", "replace")
+        if nm in ("%s[0]" % name, "%s[1]" % name):
+            where[nm] = constoff + 4          # past the count word
+    if len(where) != 2:
+        sys.exit("FAIL matrix swap control: could not find both row records")
+    a, c = where["%s[0]" % name], where["%s[1]" % name]
+    first, = struct.unpack_from(">I", b, a)
+    second, = struct.unpack_from(">I", b, c)
+    struct.pack_into(">I", b, a, second)
+    struct.pack_into(">I", b, c, first)
+    open(out_path, "wb").write(bytes(b))
+    return first, second
 
 DP3, DP4 = 0x05, 0x06
 for stem, rows, op in (("mat_uniform_44", 4, DP4),
@@ -868,6 +918,24 @@ for stem, rows, op in (("mat_uniform_44", 4, DP4),
                                     "M", rows, op)
     if problem:
         sys.exit(f"FAIL {stem}: {problem}")
+
+    # CONTROL: exchange two rows' relocation offsets in the real container
+    # and require the association clause to reject it BY NAME.
+    swapped_path = f"{work}/{stem}_swapped.fpo"
+    was, now = swap_two_row_offsets(f"{work}/{stem}.fpo", swapped_path, "M")
+    if was == now:
+        sys.exit(f"FAIL {stem}: self-check - the two rows already share an "
+                 "offset, so exchanging them changes nothing")
+    swapped_problem = matrix_rows_patchable(load_container(swapped_path),
+                                            "M", rows, op)
+    if not swapped_problem:
+        sys.exit(f"FAIL {stem}: self-check - a container with M[0]'s and "
+                 "M[1]'s relocation offsets exchanged was accepted; the "
+                 "check proves each offset lands on A dot product, not on "
+                 "its own row's")
+    if "another row's multiply" not in swapped_problem:
+        sys.exit(f"FAIL {stem}: self-check - the swapped container was "
+                 f"rejected, but not for the association: {swapped_problem}")
 
 # Check 7: half-texture precision boundary
 insns7 = list(decode(f"{work}/h1tex.log"))
