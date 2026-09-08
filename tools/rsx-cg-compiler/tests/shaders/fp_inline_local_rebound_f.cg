@@ -1,0 +1,6 @@
+// A caller LOCAL shadowing G is reassigned before an inlined helper writes
+// the file-scope G: main still returns its own local (p * 6).  Reference:
+// MOVR R0, f[TEX0]; MULR R0, R0, 6.  Pre-existing on 47459167.
+float4 G;
+void set() { G = float4(1.0, 0.0, 0.0, 1.0); }
+float4 main(float4 p : TEXCOORD0) : COLOR { float4 G = p * 3.0; G = G * 2.0; set(); return G; }
