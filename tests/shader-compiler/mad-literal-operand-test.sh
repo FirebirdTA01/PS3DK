@@ -67,7 +67,13 @@ def rows(path):
 HALF = 0x00003F00        # 0.5f, in the byte order the container carries
 CONST_XXXX = 0x00020000  # a source reading c[0] with an .xxxx swizzle
 ZEROS = [0, 0, 0, 0]
+# The verbatim four-lane block the shipping path emitted BEFORE the dedup
+# rule (t_642eb36e).  Nothing asserts it any more; it stays in the filter
+# below so a regression to that shape is COLLECTED and printed in the
+# failure's block list instead of being silently filtered away.
 HALF4 = [HALF, HALF, HALF, HALF]
+# The dedup rule's shape: distinct values first, zero-filled (t_642eb36e).
+HALF_PACKED = [HALF, 0, 0, 0]
 
 # --- both operands literal -------------------------------------------
 # MOVR R0, f[TEX0] ; MADR R0, R0, c.xxxx, c.xxxx ; {0.5, 0, 0, 0}
@@ -175,7 +181,7 @@ def temp_written_from_half(rs, before_idx, reg):
         if i >= before_idx:
             break
         if opcode(rs[i]) == 0x01 and dst(rs[i]) == reg and const_srcs(rs[i]):
-            if i + 1 < len(rs) and rs[i + 1] == HALF4:
+            if i + 1 < len(rs) and rs[i + 1] == HALF_PACKED:
                 return True
     return False
 
@@ -187,7 +193,7 @@ def mad_multiplier_is_half(rs, label):
         # MAD source 1 is the multiplier.  It may be an inline literal const
         # or a temp preloaded from that literal block, depending on whether
         # the addend also needs an inline const/uniform source.
-        if src_type(rs[i], 1) == 2 and i + 1 < len(rs) and rs[i + 1] == HALF4:
+        if src_type(rs[i], 1) == 2 and i + 1 < len(rs) and rs[i + 1] == HALF_PACKED:
             return
         if src_type(rs[i], 1) == 0 and temp_written_from_half(
                 rs, i, src_reg(rs[i], 1)):
@@ -200,18 +206,27 @@ def mad_multiplier_is_half(rs, label):
     )
 
 
-# Shipping general lowering preloads literals into temps.  It is not byte-
-# shaped like the reference, but it must still carry the 0.5 multiplier as
-# data.  If that block vanishes or becomes zero, the pixels collapse to the
-# old flat-colour t_a1f43b12 failure.
+# Shipping general lowering preloads literals into temps and still emits one
+# block per literal source where the reference shares a single block between
+# the MAD's two operands - that gap is t_741aef0e's fp_mad_literal_f row and
+# it is not this assertion's subject.  What IS asserted is that the 0.5
+# multiplier is carried AS DATA: if that block vanishes or becomes zero, the
+# pixels collapse to the old flat-colour t_a1f43b12 failure.
+#
+# THE PACKED SHAPE, not the verbatim one: the block is {0.5, 0, 0, 0} read
+# .xxxx, which is what the reference emits for this fixture (see the
+# fixture's own header) and what the legacy arm above already expects.  It
+# used to be {0.5, 0.5, 0.5, 0.5} here, because the shipping path wrote
+# every lane verbatim; t_642eb36e's dedup landed and this expectation moved
+# with it rather than pinning the shape the compiler no longer has.
 both_general = rows(sys.argv[3])
 blocks = const_blocks(both_general)
-if HALF4 not in blocks:
+if HALF_PACKED not in blocks:
     raise SystemExit(
         "FAIL: general fp_mad_literal_f must carry a 0.5 literal block for "
-        "the MAD multiplier; blocks were [%s].  Without that block the "
-        "shipping path multiplies by zero and paints a flat colour "
-        "(t_a1f43b12)."
+        "the MAD multiplier, packed as {0.5, 0, 0, 0}; blocks were [%s].  "
+        "Without that block the shipping path multiplies by zero and paints "
+        "a flat colour (t_a1f43b12)."
         % "; ".join(",".join("0x%08x" % w for w in b) for b in blocks)
     )
 if ZEROS in blocks:
@@ -224,7 +239,7 @@ mad_multiplier_is_half(both_general, "fp_mad_literal_f")
 
 mixed_general = rows(sys.argv[4])
 blocks = const_blocks(mixed_general)
-if ZEROS not in blocks or HALF4 not in blocks:
+if ZEROS not in blocks or HALF_PACKED not in blocks:
     raise SystemExit(
         "FAIL: general fp_mad_literal_uniform_f must carry both the zero "
         "uniform patch block and the 0.5 literal multiplier block; blocks "
