@@ -1,0 +1,1 @@
+float4 main(float4 p : POSITION, float4 n : NORMAL, out float4 c : TEXCOORD0) : POSITION { c = dot(p.xyz, n.www).xxxx; return p; }

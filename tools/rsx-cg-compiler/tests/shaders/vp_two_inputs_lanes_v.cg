@@ -1,0 +1,1 @@
+float4 main(float4 p : POSITION, float4 n : NORMAL, out float4 c : TEXCOORD0, out float4 d : TEXCOORD1) : POSITION { c = p * n.xxxx; d = p + n.wwww; return p; }

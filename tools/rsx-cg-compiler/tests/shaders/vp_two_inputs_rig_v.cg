@@ -1,0 +1,1 @@
+void main(float4 p : POSITION, float4 n : NORMAL, float4 t : TEXCOORD0, out float4 pos : POSITION, out float4 c : TEXCOORD0) { pos = p; c = p.wwww * n * 0.5 + t * 0.25; }
