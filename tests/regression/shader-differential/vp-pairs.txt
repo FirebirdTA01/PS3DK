@@ -69,3 +69,9 @@ tools/rsx-cg-compiler/tests/shaders/vp_div_reciprocal_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_div_literal_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_div_alias_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_div_vector2_v.cg|auto|general
+
+# TWO DISTINCT INPUTS IN ONE EXPRESSION (t_9d0ff137): p.wwww * n * 0.5 + t * 0.25 reads
+# POSITION, NORMAL and TEXCOORD0; the second and third are staged through
+# temps.  The rig binds every attribute with its own lane recipe, so a wrong
+# input selector paints a different gradient.
+tools/rsx-cg-compiler/tests/shaders/vp_two_inputs_rig_v.cg|auto|general

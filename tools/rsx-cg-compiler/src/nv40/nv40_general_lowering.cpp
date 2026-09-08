@@ -7165,6 +7165,18 @@ private:
         return vi.op == VOp::Kil ? vi.killFused : vi.op;
     }
 
+    // The INPUT lanes a source reads: the instruction's required result
+    // lanes pushed through the source swizzle (a DP reads all its lanes).
+    static int vpInputLanesRead(const VInstr& vi, size_t srcIndex)
+    {
+        const int req = requiredSourceMask(vi, srcIndex);
+        int lanes = 0;
+        for (int i = 0; i < 4; ++i)
+            if (req & (1 << i))
+                lanes |= 1 << (vi.srcs[srcIndex].swizzle[i] & 3);
+        return lanes ? lanes : 0xf;
+    }
+
     static int requiredSourceMask(const VInstr& vi, size_t srcIndex)
     {
         switch (effectiveOp(vi)) {
@@ -7248,10 +7260,46 @@ private:
             src.swizzle = {0, 1, 2, 0};
     }
 
+    // The VP DP3 read shape WITHOUT losing the operand's own swizzle: the
+    // three lanes it names, then its first lane again (the reference reads
+    // dot(p.xyz, n.zyx) as IN0.xyzx, R0.zyxz and dot(p.xyz, n.www) as
+    // R0.wwww).  applyDp3Swizzle assumed an identity operand and reset a
+    // swizzled one to xyz - a wrong value on every swizzled dot that went
+    // through the input staging (t_9d0ff137 review: codex).
+    // Idempotent by construction - it runs in appendPreload and again in
+    // the final VP DP3 block, and the cache-reuse path relies on that final
+    // block alone to shape a reused temp's read (review: claude).
+    static void composeDp3Swizzle(VSrc& src)
+    {
+        if (src.kind == VSrcKind::None) return;
+        const auto s = src.swizzle;
+        src.swizzle = {s[0], s[1], s[2], s[0]};
+    }
+
     void legalizeInputOperands()
     {
         std::vector<VInstr> shaped;
         shaped.reserve(program_.instrs.size());
+        // Vertex: input register -> (staged vreg, lanes it carries).
+        std::unordered_map<int, std::pair<int, int>> vpStagedInputs;
+        std::set<size_t> vpKeepSwizzle;
+        // Vertex: the UNION of lanes every non-direct read of an input
+        // needs, so the one copy per input carries them all (the reference
+        // packs n.xxxx and n.wwww into one MOV R0.xy).
+        std::unordered_map<int, int> vpNeedLanes;
+        if (profile_ == GeneralProfile::Vertex) {
+            for (const VInstr& vi : program_.instrs) {
+                if (!isArithmeticOp(effectiveOp(vi))) continue;
+                int first = -1;
+                for (size_t i = 0; i < vi.srcs.size(); ++i) {
+                    const VSrc& src = vi.srcs[i];
+                    if (src.kind != VSrcKind::Input) continue;
+                    if (first < 0) { first = src.index; continue; }
+                    if (src.index == first) continue;
+                    vpNeedLanes[src.index] |= vpInputLanesRead(vi, i);
+                }
+            }
+        }
 
         for (VInstr vi : program_.instrs) {
             const VOp effOp = effectiveOp(vi);
@@ -7284,8 +7332,15 @@ private:
             const bool forceFpInputPreload =
                 profile_ == GeneralProfile::Fragment && !inputs.empty() &&
                 (effOp == VOp::Mad || inputs.size() > 1);
+            // A VERTEX instruction has one input field too.  The reference
+            // keeps the FIRST operand's input direct and stages every other
+            // distinct input through a temp - one MOV per input, reused by
+            // later consumers (t_9d0ff137, C:/cgdev/vp2in-probe: p*n is
+            // MOV R0 <- IN2; MUL o7 <- IN0, R0; n*p stages the position).
+            const bool forceVpInputPreload =
+                profile_ == GeneralProfile::Vertex && inputs.size() > 1;
             const bool needsInlineConstPreload = inlineConstPositions.size() > 1;
-            if (!forceFpInputPreload && !needsInlineConstPreload) {
+            if (!forceFpInputPreload && !forceVpInputPreload && !needsInlineConstPreload) {
                 shaped.push_back(vi);
                 continue;
             }
@@ -7293,6 +7348,7 @@ private:
             std::set<int> directInputs;
             if (profile_ == GeneralProfile::Vertex && !inputs.empty())
                 directInputs.insert(inputs.front());
+            vpKeepSwizzle.clear();
 
             struct PendingPreload
             {
@@ -7313,6 +7369,38 @@ private:
                     isHalfPrecisionFragmentInput(src)) {
                     continue;
                 }
+                if (profile_ == GeneralProfile::Vertex) {
+                    // The staged copy carries the INPUT'S lanes with the
+                    // identity swizzle and the consumer keeps its own swizzle
+                    // on the temp (the reference's shape: MOV R0.xy <- IN2;
+                    // MUL o7 <- IN0.wzyx, R0.yyxx), so one copy per input
+                    // serves every later consumer whose lanes it holds -
+                    // the list is straight-line here, so it dominates.
+                    const int need = vpInputLanesRead(vi, srcIndex);
+                    const auto cached = vpStagedInputs.find(src.index);
+                    if (cached != vpStagedInputs.end() &&
+                        (cached->second.second & need) == need) {
+                        const bool neg = src.neg, abs = src.abs;
+                        const auto swz = src.swizzle;
+                        src = tempSrc(cached->second.first);
+                        src.swizzle = swz;
+                        src.neg = neg;
+                        src.abs = abs;
+                        continue;
+                    }
+                    VInstr mov;
+                    mov.op = VOp::Mov;
+                    mov.dst.index = newVReg();
+                    mov.dst.writemask = vpNeedLanes.count(src.index)
+                        ? (vpNeedLanes[src.index] | need) : need;
+                    mov.srcs[0] = src;
+                    mov.srcs[0].swizzle = {0, 1, 2, 3};
+                    mov.srcs[0].neg = false;
+                    mov.srcs[0].abs = false;
+                    vpKeepSwizzle.insert(srcIndex);
+                    fullPreloads.push_back(PendingPreload{srcIndex, mov});
+                    continue;
+                }
 
                 VInstr mov;
                 mov.op = VOp::Mov;
@@ -7323,7 +7411,7 @@ private:
                 program_.vregToFp16[mov.dst.index] = mov.dst.fp16;
                 mov.srcs[0] = src;
                 if (effOp == VOp::Dp3 && profile_ != GeneralProfile::Fragment)
-                    applyDp3Swizzle(mov.srcs[0]);
+                    composeDp3Swizzle(mov.srcs[0]);
                 if (effOp == VOp::Dp3 && profile_ == GeneralProfile::Fragment &&
                     srcIndex == 1) {
                     mov.dst.writemask = 0xb; // the reference compiler uses Rn.xyw for FP DP3 rhs.
@@ -7353,14 +7441,21 @@ private:
 
             auto appendPreload = [&](PendingPreload& pending) {
                 shaped.push_back(pending.mov);
+                if (profile_ == GeneralProfile::Vertex &&
+                    pending.mov.srcs[0].kind == VSrcKind::Input)
+                    vpStagedInputs[pending.mov.srcs[0].index] =
+                        {pending.mov.dst.index, pending.mov.dst.writemask};
 
                 VSrc& src = vi.srcs[pending.srcIndex];
                 const bool neg = src.neg;
                 const bool abs = src.abs;
+                const auto keptSwizzle = src.swizzle;
                 src = tempSrc(pending.mov.dst.index);
+                if (vpKeepSwizzle.count(pending.srcIndex))
+                    src.swizzle = keptSwizzle;
                 src.fp16 = pending.mov.dst.fp16;
                 if (effOp == VOp::Dp3 && profile_ != GeneralProfile::Fragment)
-                    applyDp3Swizzle(src);
+                    composeDp3Swizzle(src);
                 if (effOp == VOp::Dp3 && profile_ == GeneralProfile::Fragment &&
                     pending.srcIndex == 1)
                     src.swizzle = {0, 1, 3, 2};
@@ -7413,8 +7508,8 @@ private:
             }
 
             if (vi.op == VOp::Dp3 && profile_ != GeneralProfile::Fragment) {
-                applyDp3Swizzle(vi.srcs[0]);
-                applyDp3Swizzle(vi.srcs[1]);
+                composeDp3Swizzle(vi.srcs[0]);
+                composeDp3Swizzle(vi.srcs[1]);
             }
 
             shaped.push_back(vi);
