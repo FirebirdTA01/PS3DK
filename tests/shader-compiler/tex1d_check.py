@@ -18,7 +18,9 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def check(blob, expected_swizzle, sampler_count=1, direct_input=False):
+def check(blob, expected_swizzle, sampler_count=1, direct_input=False, expected_units=None):
+    if expected_units is None:
+        expected_units = list(range(sampler_count))
     rows = list(instructions(ucode_words(blob)))
     require(rows and rows[-1][0][0] & 1, 'missing PROGRAM_END')
     require(all(not w[0] & 1 for w, _ in rows[:-1]), 'early PROGRAM_END')
@@ -31,7 +33,7 @@ def check(blob, expected_swizzle, sampler_count=1, direct_input=False):
         if direct_input:
             require(src['type'] == 1 and src['name'] == 'TEX0' and
                     not src['negate'] and not src['abs'], 'wrong coordinate input or modifiers')
-        require((w[0] >> 17) & 15 == index, 'wrong texture unit')
+        require((w[0] >> 17) & 15 == expected_units[index], 'wrong texture unit')
         require((w[0] >> 22) & 3 == 0, 'fetch precision must be FP32')
     # Every sampler record must retain CG_SAMPLER1D, and the resource must
     # describe the same texture unit that the emitted TEX reads.
@@ -43,7 +45,7 @@ def check(blob, expected_swizzle, sampler_count=1, direct_input=False):
             samplers.append(record)
     require(len(samplers) == sampler_count, 'wrong sampler metadata count')
     require([r[0] for r in samplers] == [1065]*sampler_count, 'sampler1D reflection lost')
-    require([r[1] for r in samplers] == list(range(2048, 2048+sampler_count)), 'sampler resource mismatch')
+    require([r[1] for r in samplers] == [2048+unit for unit in expected_units], 'sampler resource mismatch')
     return rows
 
 
@@ -125,20 +127,25 @@ def main(compiler):
             require(not any((w[0] >> 24) & 63 == 0x17 for w, _ in rows), name+': dead fetch survived')
             print('PASS:', name)
         for name, text, diagnostic in [
-            ('binding_entry', 'float4 main(float2 p:TEXCOORD0,uniform sampler1D s:TEXUNIT3):COLOR {return tex1D(s,p);}', 'noncanonical explicit TEXUNIT'),
-            ('binding_global', 'uniform sampler1D s:TEXUNIT3; float4 main(float2 p:TEXCOORD0):COLOR {return tex1D(s,p);}', 'noncanonical explicit TEXUNIT'),
-            ('binding_alpha', '#pragma alphakill s\nuniform sampler1D s:TEXUNIT3; float4 main(float2 p:TEXCOORD0):COLOR {float4 dead=tex1D(s,p);return float4(p,0,1);}', 'noncanonical explicit TEXUNIT'),
-            ('binding_register_entry', 'float4 main(float2 p:TEXCOORD0,uniform sampler1D s:register(s3)):COLOR {return tex1D(s,p);}', 'noncanonical explicit TEXUNIT'),
-            ('binding_register_global', 'uniform sampler1D s:register(s3); float4 main(float2 p:TEXCOORD0):COLOR {return tex1D(s,p);}', 'noncanonical explicit TEXUNIT'),
-            ('binding_register_alpha', '#pragma alphakill s\nfloat4 main(float2 p:TEXCOORD0,uniform sampler1D s:register(s3)):COLOR {float4 dead=tex1D(s,p);return float4(p,0,1);}', 'noncanonical explicit TEXUNIT'),
+            ('binding_entry', 'float4 main(float2 p:TEXCOORD0,uniform sampler1D s:TEXUNIT3):COLOR {return tex1D(s,p);}', ''),
+            ('binding_global', 'uniform sampler1D s:TEXUNIT3; float4 main(float2 p:TEXCOORD0):COLOR {return tex1D(s,p);}', ''),
+            ('binding_alpha', '#pragma alphakill s\nuniform sampler1D s:TEXUNIT3; float4 main(float2 p:TEXCOORD0):COLOR {float4 dead=tex1D(s,p);return float4(p,0,1);}', ''),
+            ('binding_register_entry', 'float4 main(float2 p:TEXCOORD0,uniform sampler1D s:register(s3)):COLOR {return tex1D(s,p);}', ''),
+            ('binding_register_global', 'uniform sampler1D s:register(s3); float4 main(float2 p:TEXCOORD0):COLOR {return tex1D(s,p);}', ''),
+            ('binding_register_alpha', '#pragma alphakill s\nfloat4 main(float2 p:TEXCOORD0,uniform sampler1D s:register(s3)):COLOR {float4 dead=tex1D(s,p);return float4(p,0,1);}', ''),
             ('wrong_sampler', 'float4 main(float2 p:TEXCOORD0,uniform sampler2D s):COLOR {return tex1D(s,p);}', 'no matching function'),
         ]:
             src, target = work/(name+'.cg'), work/(name+'.bin')
             src.write_text(text)
             run = subprocess.run([compiler, '-p', 'sce_fp_rsx', '--emit-container', str(target), str(src)], capture_output=True, timeout=20)
-            require(run.returncode == 1 and not target.exists(), name+': must refuse with exactly 1 and no artifact')
-            require(diagnostic in run.stderr.decode(errors='replace'), name+': wrong refusal reason')
-            print('PASS:', name, 'refused')
+            if name.startswith('binding_'):
+                require(run.returncode == 0 and target.exists(), name+': explicit binding must compile')
+                check(target.read_bytes(), [0x50], direct_input=True, expected_units=[3])
+                print('PASS:', name, 'honoured')
+            else:
+                require(run.returncode == 1 and not target.exists(), name+': must refuse with exactly 1 and no artifact')
+                require(diagnostic in run.stderr.decode(errors='replace'), name+': wrong refusal reason')
+                print('PASS:', name, 'refused')
     print('PASS: tex1D packing, sampler reflection, and broadcast-x red control')
 
 

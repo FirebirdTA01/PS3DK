@@ -33,6 +33,7 @@
 
 #include "ir.h"
 #include "array_uniforms.h"
+#include "fp_sampler_bindings.h"
 
 #include <algorithm>
 #include <array>
@@ -673,8 +674,7 @@ private:
     // while the container correctly described the bindings - a two-texture
     // shader silently read one texture twice.
     std::unordered_map<IRValueID, int> samplerUnit_;
-    std::unordered_set<int> sampler1DUnits_;
-    std::unordered_set<int> unsupportedSampler1DBindings_;
+    std::unordered_map<IRValueID, IRType> samplerType_;
     // Array uniforms, by name: the source of each element the lowering
     // laid out (FP: one inline-const slot per element; VP: one constant
     // register per REFERENCED element).  Filled in the constructor from
@@ -1920,11 +1920,12 @@ private:
     {
         int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
-        // Entry-parameter samplers take the low texture units and file-scope
-        // sampler globals continue from there, which is exactly how
-        // cg_container_fp.cpp numbers them; the two must agree or binding a
-        // texture by name reaches a different unit than the ucode samples.
-        int nextFpTexUnit = 0;
+        const auto samplerLayout = rsx_cg::buildFpSamplerLayout(module_, entry_);
+        if (profile_ == GeneralProfile::Fragment && !samplerLayout.diagnostics.empty()) {
+            program_.loweringFailed = true;
+            program_.diagnostics.insert(program_.diagnostics.end(),
+                samplerLayout.diagnostics.begin(), samplerLayout.diagnostics.end());
+        }
         // Array uniforms widen the FP slot numbering: an array parameter
         // takes one inline-const slot per element, so every later
         // parameter's and every file-scope uniform's slot is computed from
@@ -2042,16 +2043,8 @@ private:
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform &&
                        isSamplerIRType(p.type.baseType)) {
-                if (p.type.baseType == IRType::Sampler1D)
-                {
-                    if ((sem == "TEXUNIT" && p.semanticIndex != nextFpTexUnit) ||
-                        (p.explicitRegisterBank == 'S' &&
-                         p.explicitRegisterIndex != nextFpTexUnit)) {
-                        unsupportedSampler1DBindings_.insert(nextFpTexUnit);
-                    }
-                    sampler1DUnits_.insert(nextFpTexUnit);
-                }
-                samplerUnit_[p.valueId] = nextFpTexUnit++;
+                samplerUnit_[p.valueId] = samplerLayout.unit(p.valueId);
+                samplerType_[p.valueId] = p.type.baseType;
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform) {
                 // The slot is the parameter's index unless an earlier
@@ -2100,17 +2093,8 @@ private:
                     uniformSrc(nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
                        isSamplerIRType(g.type.baseType)) {
-                if (g.type.baseType == IRType::Sampler1D)
-                {
-                    if ((toUpper(g.semanticName) == "TEXUNIT" &&
-                         g.semanticIndex != nextFpTexUnit) ||
-                        (g.explicitRegisterBank == 'S' &&
-                         g.explicitRegisterIndex != nextFpTexUnit)) {
-                        unsupportedSampler1DBindings_.insert(nextFpTexUnit);
-                    }
-                    sampler1DUnits_.insert(nextFpTexUnit);
-                }
-                samplerUnit_[g.valueId] = nextFpTexUnit++;
+                samplerUnit_[g.valueId] = samplerLayout.unit(g.valueId);
+                samplerType_[g.valueId] = g.type.baseType;
             } else if (profile_ == GeneralProfile::Fragment) {
                 // File-scope uniforms are numbered after every entry
                 // parameter, in declaration order - the numbering
@@ -4423,6 +4407,7 @@ private:
             if (samplerIt != samplerUnit_.end()) {
                 // A sampler is not a value with a source; it names a unit.
                 samplerUnit_[inst.result] = samplerIt->second;
+                samplerType_[inst.result] = g.type.baseType;
                 return;
             }
             const auto mIt = matrixUniformBase_.find(g.valueId);
@@ -6562,16 +6547,13 @@ private:
             return;
         }
         vi.texUnit = unitIt->second;
-        // An unused declaration does not sample the wrong unit. Refuse
-        // only a surviving fetch, preserving previously accepted shaders
-        // whose unused sampler has an explicit noncanonical binding.
-        if (unsupportedSampler1DBindings_.count(vi.texUnit)) {
+        if (vi.texUnit < 0 || vi.texUnit >= 16) {
             program_.diagnostics.push_back(
-                "nv40-general: tex1D noncanonical explicit TEXUNIT/register binding is not supported; refusing");
+                "nv40-general: surviving fetch has no valid texture unit; refusing");
             program_.loweringFailed = true;
             return;
         }
-        if (sampler1DUnits_.count(vi.texUnit) &&
+        if (samplerType_[inst.operands[0]] == IRType::Sampler1D &&
             valueWidthOf(inst.operands[1]) > 1) {
             // tex1D's two logical coordinates occupy hardware xx and yy:
             // the reference emits xxyy, including for float3/4 overloads.
