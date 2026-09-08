@@ -6818,11 +6818,23 @@ private:
     // the output is half (codex's 15-shape matrix) - and why that rule does
     // not contradict this one.
     //
-    // Applied centrally, after each IR instruction lowers, to every VInstr
-    // that wrote the instruction's own result: a lowering that expands into
-    // several instructions computes the whole expansion in half, which is
-    // what the reference does with a normalize (Gemini's dullMetalFp, 213
-    // pixels off by up to 3 because we computed the intermediates in float).
+    // EXACT SCOPE, applied centrally after each IR instruction lowers.  It
+    // stamps the instructions appended by THIS lowering that write the
+    // vreg of the instruction's own RESULT, and only those that are still
+    // eligible: an appended write whose lowering already set a precision is
+    // left alone, and a vreg an earlier writer owns takes that writer's
+    // format instead.  Intermediate vregs the expansion creates are not
+    // reached, and a result typed anything but Float16 - Float32, Bool, a
+    // matrix - is not reached either.
+    //
+    // SO THE GATE IS THE IR RESULT'S TYPE, WHICH IS NARROWER THAN "WHAT THE
+    // REFERENCE COMPUTES IN HALF".  Gemini's dullMetalFp is 213 pixels off
+    // because the reference keeps a NORMALIZE at prec=1, and normalize's
+    // result is Float32-typed in our IR whatever its inputs are - so it
+    // fails the Float16 test above and this rule never reaches it.  That
+    // shader is NOT fixed here (codex, review).  A rule that would reach it
+    // has to key on the OPERAND types rather than the result's, and does
+    // not exist yet.
     void markHalfComputation(const IRInstruction& inst, size_t firstNew)
     {
         if (profile_ != GeneralProfile::Fragment) return;
@@ -6861,8 +6873,14 @@ private:
         // destination refuses the merge on its own, measured), so the
         // relaxation belongs in the coalescer - merge when the two writers
         // agree on bank AND precision - rather than here (t_12bc176c).
-        // A REGISTER THIS LOWERING DID NOT CREATE IS SHARED, and its bank
-        // belongs to whoever wrote it first.  VecConstruct aliases its base
+        // A REGISTER THIS LOWERING DID NOT CREATE IS SHARED, and its format
+        // belongs to the writers already in it, not to this instruction -
+        // specifically to the LAST earlier writer, which is what the scan
+        // below records and what the appended writes then match.  (An
+        // earlier draft of this comment said "whoever wrote it first",
+        // which is not what the loop does and would be the wrong rule: the
+        // appended write has to agree with the view the register is
+        // currently in.)  VecConstruct aliases its base
         // vreg, so `half4(cross(p.xyz, p.zyx), p.w)` writes xyz as FLOAT
         // data through the shared register and only the w MOV is new here;
         // stamping the vreg fp16 on the strength of that one instruction

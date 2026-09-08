@@ -1,0 +1,10 @@
+// A HALF-TYPED FETCH IS AN fp32 INSTRUCTION.  h4tex2D returns half4, so the
+// value rule would stamp the fetch prec=1; the reference emits the fetch at
+// prec=0 (`TEXR H0, f[TEX0], TEX0`) and only the arithmetic that CONSUMES it
+// is half.  The fetch's format belongs to the texture unit, like the
+// pack/unpack family's belongs to the ISA.
+float4 main(float2 uv : TEXCOORD0, uniform sampler2D s) : COLOR
+{
+	half4 t = h4tex2D(s, (half2)uv);
+	return (float4)(t * (half)2.0);
+}

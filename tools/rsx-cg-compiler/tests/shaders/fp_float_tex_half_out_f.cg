@@ -1,0 +1,9 @@
+// THE CONTROL: a float fetch and float arithmetic under a half output stay
+// prec=0 throughout.  It is red on any change that reads precision off the
+// output declaration, and it keeps the fetch rule above from being satisfied
+// by simply forcing every fetch and its consumers to fp32.
+half4 main(float2 uv : TEXCOORD0, uniform sampler2D s) : COLOR
+{
+	float4 t = tex2D(s, uv);
+	return (half4)(t * 2.0);
+}

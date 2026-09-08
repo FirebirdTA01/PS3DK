@@ -5,9 +5,18 @@
 # The whole reason to use half types is performance and if we don't honor the
 # correct fp16 when declaring them then that is incorrect."  We honoured the
 # half OUTPUT - the colour reached H0 - and computed everything feeding it in
-# fp32, converting once at the store.  Gemini measured the cost on pixels:
-# dullMetalFp differs from the reference on 213 pixels by up to 3/255 because
-# the reference keeps a whole normalize at prec=1 and we did not.
+# fp32, converting once at the store.  Gemini measured that the cost is
+# visible: dullMetalFp differs from the reference on 213 pixels by up to
+# 3/255.
+#
+# WHAT THAT NUMBER IS NOT.  It is the motivation, not this test's scope.
+# dullMetalFp's divergence is a normalize the reference keeps at prec=1, and
+# normalize's result is FLOAT32-TYPED in our IR whatever its inputs are - so
+# the rule these rows pin does not reach it and that shader is NOT fixed by
+# this slice (codex, review).  What the rows below pin is narrower: the
+# instructions a lowering appends to write a FLOAT16-TYPED IR RESULT's vreg,
+# where no earlier writer already owns that vreg's format and the lowering
+# has not already claimed a precision of its own.
 #
 # THE RULE, measured on sce-cgc 475 (C:/cgdev/h0/hp, 2026-09-07):
 #
@@ -63,6 +72,9 @@ emit fp_float_value_half_out_f
 emit fp_half_ctor_float_lanes_f
 emit fp_half_insert_chain_f
 emit fp_half_computed_insert_f
+emit fp_half_tex_float_out_f
+emit fp_half_tex_half_out_f
+emit fp_float_tex_half_out_f
 
 python3 - "$work" <<'PY'
 import io
@@ -186,10 +198,56 @@ for stem in ("fp_half_insert_chain_f", "fp_half_computed_insert_f"):
             "FAIL: %s emits %s at prec=%d - a half chain computes in half "
             "throughout" % (stem, slow[0][1], slow[0][3]))
 
+# 6. A TEXTURE FETCH'S PRECISION IS THE TEXTURE UNIT'S, NOT THE VALUE'S.
+#    h4tex2D returns half4, so the value rule stamped the fetch prec=1 and we
+#    emitted TEXH where the reference emits TEXR - measured on sce-cgc under
+#    BOTH output types (codex, build/codex-half-tex-regression).  The fetch
+#    carries an explicit fp32 override in lowerTex for the same reason UP2H
+#    does: these instructions' format belongs to the unit that produces the
+#    value.  What must NOT move with it is the arithmetic that consumes the
+#    fetch - that is still half - so each row asserts the pair.
+#
+#      reference, half fetch under a float output:  TEXR H0 ; MULH R0
+#      reference, half fetch under a half output:   TEXR H0 ; MULH H0
+#      reference, float fetch under a half output:  TEXR R0 ; MULR H0
+#
+#    (The reference's H DESTINATION on the fetch is a separate rule and is
+#    deliberately not asserted here; this row is precision only.)
+for stem, mul_prec in (("fp_half_tex_float_out_f", 1),
+                       ("fp_half_tex_half_out_f", 1),
+                       ("fp_float_tex_half_out_f", 0)):
+    all_rows = rows(stem)
+    fetches = [r for r in all_rows if r[1] == "TEX"]
+    if not fetches:
+        raise SystemExit(
+            "FAIL: %s emitted no TEX at all - the fetch folded away and this "
+            "row would pass vacuously" % stem)
+    hot = [r for r in fetches if r[3] != 0]
+    if hot:
+        raise SystemExit(
+            "FAIL: %s emits the fetch at prec=%d, expected 0.  The reference "
+            "emits TEXR whatever the fetch's result type and whatever the "
+            "output's bank; reading the fetch's precision off its half4 "
+            "result type is the regression this row exists to catch."
+            % (stem, hot[0][3]))
+    muls = [r for r in all_rows if r[1] == "MUL"]
+    if not muls:
+        raise SystemExit("FAIL: %s emitted no multiply, so it does not "
+                         "constrain the consumer" % stem)
+    wrong = [r for r in muls if r[3] != mul_prec]
+    if wrong:
+        raise SystemExit(
+            "FAIL: %s multiplies at prec=%d, expected %d.  Forcing the fetch "
+            "to fp32 must not drag its half consumers down with it - that "
+            "would trade this regression for the one the whole commit "
+            "removes." % (stem, wrong[0][3], mul_prec))
+
 print("half-arithmetic: chain %d arithmetic instructions at prec=1, half "
       "value under a float output prec=1, float value under a half output "
       "prec=0, float producer under a half constructor stays float in %d "
-      "instructions, both half insert chains single-bank at prec=1"
+      "instructions, both half insert chains single-bank at prec=1, all "
+      "three texture fetches at prec=0 with their consumers at the "
+      "reference's precision"
       % (len(chain), len(computing)))
 PY
 
