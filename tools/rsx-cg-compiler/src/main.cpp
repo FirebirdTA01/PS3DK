@@ -434,7 +434,10 @@ int main(int argc, char** argv)
             if (algsimp.runOnFunction(*fn))     changed = true;
             CommonSubexprElimination cse;
             if (cse.runOnFunction(*fn))         changed = true;
-            DeadCodeElimination dce;
+            // Alpha-kill sampling can discard a fragment even if nobody
+            // consumes the sampled value. Until sampler provenance is on
+            // the IR operation, preserve all fetches in such programs.
+            DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
             if (dce.runOnFunction(*fn))         changed = true;
         }
         if (!changed) break;

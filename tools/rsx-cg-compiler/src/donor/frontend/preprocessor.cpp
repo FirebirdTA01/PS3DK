@@ -694,6 +694,9 @@ void Preprocessor::processPragma(const std::string& directive, std::string& outp
 
 	std::string content = directive.substr(pragmaPos + 6);
 	content = trim(content);
+	std::string pragmaName = content.substr(0, content.find_first_of(" \t"));
+	for (char& c : pragmaName)
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
 	// Handle specific pragmas
 	if(content == "once")
@@ -704,12 +707,12 @@ void Preprocessor::processPragma(const std::string& directive, std::string& outp
 			includeGuards.insert(currentProcessingFile);
 		}
 	}
-	else if (content.rfind("alphakill", 0) == 0)
+	else if (pragmaName == "alphakill")
 	{
 		// #pragma alphakill <samplerName>
 		// RSX Cg extension: tells the runtime to discard fragments
 		// where the named sampler returns alpha == 0.  Container-only
-		// (ucode unchanged) — recorded here so the .fpo emitter can
+		// recorded here so DCE preserves fetches and the .fpo emitter can
 		// inject one synthetic $kill_NNNN CgBinaryParameter per sampler
 		// in declaration order.
 		std::string rest = trim(content.substr(9));

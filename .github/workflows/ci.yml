@@ -234,6 +234,8 @@ jobs:
         run: bash tests/shader-compiler/pack-unpack-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler tex2Dproj -> TXP (t_483feb71)
         run: bash tests/shader-compiler/tex2dproj-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test dead texture removal preserves live fetches and discard
+        run: bash tests/shader-compiler/dead-texture-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros

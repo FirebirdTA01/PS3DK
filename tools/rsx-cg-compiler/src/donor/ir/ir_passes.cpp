@@ -257,6 +257,20 @@ void DeadCodeElimination::computeUsedValues(IRFunction& func)
 
 bool DeadCodeElimination::hasSideEffects(const IRInstruction* inst) const
 {
+    // A texture read whose result has no live consumer can be deleted.
+    // Keep the shared purity classification conservative: this permits
+    // removal, without also permitting CSE or motion across control flow.
+    switch (inst->op)
+    {
+    case IROp::TexSample:
+    case IROp::TexSampleLod:
+    case IROp::TexSampleGrad:
+    case IROp::TexSampleProj:
+    case IROp::TexFetch:
+        return m_preserveTextureReads;
+    default:
+        break;
+    }
     return !IRPassUtils::isPure(inst->op);
 }
 
