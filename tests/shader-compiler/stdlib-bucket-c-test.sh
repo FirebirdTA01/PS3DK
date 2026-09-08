@@ -295,6 +295,77 @@ reject_lanes() {                           # $1 stem, $2 a wrong expectation
 reject_lanes lanes_direct     "1,4,7;2,5,8;3,6,9"
 reject_lanes lanes_transposed "1,2,3;4,5,6;7,8,9"
 
+# TWO ARTIFACT CONTROLS (review: codex, who broke the first version of the
+# checker with both).  A wrong EXPECTATION is a weak control: it proves the
+# comparison runs, not that the walk reads the fields that decide the
+# value.  These doctor the emitted dump itself, one bit each, leaving
+# opcode, instruction count, write masks, the inline constant rows and
+# PROGRAM_END exactly as the compiler emitted them:
+#
+#   abs   - src0's ABSOLUTE-VALUE flag on the first DP3 (hw[1] bit 29).
+#           That dot product now computes abs(p) instead of p.  The bit
+#           lives in hw[1], not in the operand word, and the checker's
+#           header used to claim abs was modelled while source() never
+#           read it.
+#   input - the first DP3's INPUT SELECTOR (hw[0] bits 13..16) moved from
+#           TEXCOORD0 to TEXCOORD1 while the other two dots still read
+#           TEXCOORD0.  Each dot stays internally consistent, so a checker
+#           that judges the selector per lane sees nothing.
+#
+# Words are stored halfword-swapped, so the doctor unswaps, edits, swaps
+# back - editing the stored word directly would corrupt a different field.
+doctor_dump() {                            # $1 stem, $2 abs|input
+    "$PYTHON" - "$work/lanes_direct.log" "$work/doctored_$2.log" "$2" <<'PY'
+import re, sys
+
+src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+ROW = re.compile(r"^(\s*)(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
+
+
+def unswap(v):
+    return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
+
+
+out, done = [], False
+for line in open(src, encoding="utf-8"):
+    m = ROW.match(line)
+    if m and not done:
+        words = [unswap(int(x, 16)) for x in m.group(3).split()]
+        if len(words) == 4 and ((words[0] >> 24) & 0x3F) == 0x05:   # DP3
+            if mode == "abs":
+                words[1] |= (1 << 29)          # NVFX_FP_OP_SRC0_ABS, hw[1]
+            else:
+                sel = (words[0] >> 13) & 0xF   # NVFX_FP_OP_INPUT_SRC
+                words[0] = (words[0] & ~(0xF << 13)) | ((sel + 1) << 13)
+            line = "%s%s:%s\n" % (m.group(1), m.group(2),
+                                  "".join(" %08x" % unswap(w) for w in words))
+            done = True
+    out.append(line)
+if not done:
+    raise SystemExit("doctor: no DP3 row found in %s; the control would "
+                     "have asserted nothing" % src)
+open(dst, "w", encoding="utf-8").write("".join(out))
+PY
+}
+
+reject_doctored() {                        # $1 abs|input, $2 reason substring
+    doctor_dump lanes_direct "$1"
+    cmp -s "$work/lanes_direct.log" "$work/doctored_$1.log" &&
+        fail "self-check: the $1 control did not change the dump"
+    local rc=0
+    "$PYTHON" "$transpose_checker" "$work/doctored_$1.log" "1,2,3;4,5,6;7,8,9" \
+        > "$work/doctored_$1.out" 2>&1 || rc=$?
+    [[ "$rc" -eq 1 ]] ||
+        fail "self-check: the $1-doctored program was not rejected (exit $rc)"
+    grep -q "$2" "$work/doctored_$1.out" || {
+        cat "$work/doctored_$1.out" >&2
+        fail "self-check: the $1-doctored program was rejected, but not for $2"
+    }
+}
+
+reject_doctored abs   "expected the input's xyz dotted with"
+reject_doctored input "different input registers"
+
 # 6b. Dead tex2Dbias: eliminated by DCE without alphakill, preserved with #pragma alphakill
 cat > "$work/dead_txb.cg" << 'EOF'
 float4 main(float4 uv_bias : TEXCOORD0,
