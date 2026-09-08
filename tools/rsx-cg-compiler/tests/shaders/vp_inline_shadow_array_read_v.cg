@@ -1,0 +1,1 @@
+float4 B[1]; float4 get() { return B[0]; } float4 main(float4 p : POSITION) : POSITION { B[0] = p; float4 B[1]; B[0] = p * 3; return get(); }

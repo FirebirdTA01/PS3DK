@@ -56,6 +56,22 @@ private:
     // Assignments replace nameToValue_ bindings; this set needs no branch snapshot.
     std::unordered_set<IRValueID> undefinedFieldBases_;
     std::unordered_map<std::string, std::vector<IRValueID>> localArrayValues_;
+    // A file-scope variable a caller-local SHADOWS keeps its own binding here
+    // while the local owns the name in nameToValue_ / localArrayValues_: an
+    // inlined helper that names the global is bound to these for its body,
+    // and its writes come back here, not to the local (t_7a4e3b36 review).
+    // InvalidIRValue / an empty vector means "shadowed, never assigned" - the
+    // helper's read must then fall through to the global load.
+    std::unordered_map<std::string, IRValueID> shadowedGlobals_;
+    std::unordered_map<std::string, std::vector<IRValueID>> shadowedGlobalArrays_;
+    // One entry per inlined helper on the inline stack: the names it binds
+    // itself (parameters and locals).  A helper that names a file-scope
+    // variable while an ENCLOSING helper's parameter or local of that name
+    // is in scope is refused by name: the flat name map would hand it the
+    // enclosing binding (t_7a4e3b36 review rounds 6; the scope model that
+    // resolves it properly is t_cf17f501's refactor).
+    std::vector<std::unordered_set<std::string>> inlineScopes_;
+    static bool functionNamesIdentifier(const FunctionDecl* fn, const std::string& name);
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;

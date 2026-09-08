@@ -181,3 +181,9 @@ tools/rsx-cg-compiler/tests/shaders/refract_f.cg
 tools/rsx-cg-compiler/tests/shaders/test_02_add.fcg
 tools/rsx-cg-compiler/tests/shaders/uniform_add_literal_f.cg
 tools/rsx-cg-compiler/tests/shaders/uniform_mul_uniform_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_inline_if_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_inline_if_else_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_global_array_write_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_local_array_if_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_global_array_if_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_global_two_arrays_if_f.cg

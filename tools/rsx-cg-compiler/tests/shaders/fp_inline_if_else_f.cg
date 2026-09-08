@@ -1,0 +1,1 @@
+float pick(float a, float b) { float r = a; if (a > b) { r = b; } else { r = a * 2; } return r; } float4 main(float4 t : TEXCOORD0) : COLOR { return float4(pick(t.x, t.y), pick(t.z, t.w), 0, 1); }

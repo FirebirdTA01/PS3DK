@@ -1,0 +1,1 @@
+float3 B[2]; float4 main(float3 a : TEXCOORD0, float3 b : TEXCOORD1) : COLOR { B[0] = a * b; B[1] = a + b; return float4(B[0] + B[1], 1); }
