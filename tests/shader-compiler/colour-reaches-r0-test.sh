@@ -152,7 +152,16 @@ OUTPUT = re.compile(r"^store sem=\S+ outIdx=(\d+)\s")
 # result nothing reads.  The colour is already complete in R0 before it, so
 # the picture is right and the instruction is merely wasted.  If a lowering
 # change removes it, delete this entry - do not widen the rule.
-KNOWN = {"fp_discard_not_f.cg"}
+#
+# Two more, NAMED for the same reason (t_275b56c5): a then-only block local
+# that dies before the join leaves the arm's compare with no consumer, and
+# the general path keeps that SGT as a trailing dead write (the colour is
+# already complete in R0; the reference emits no compare at all).  When
+# t_275b56c5 removes the dead compare, this test's stale check forces these
+# two entries out - that is the point of naming them rather than skipping.
+KNOWN = {"fp_discard_not_f.cg",
+         "fp_block_then_only_global_f.cg",
+         "fp_block_then_only_param_f.cg"}
 
 
 def dst_slot(w):
