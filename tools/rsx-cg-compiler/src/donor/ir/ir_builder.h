@@ -105,14 +105,6 @@ private:
     std::unordered_map<std::string, std::vector<IRValueID>>& localArrayValues_ = scope_.arrays;
     std::unordered_map<std::string, IRValueID>& shadowedGlobals_ = scope_.shadowedGlobals;
     std::unordered_map<std::string, std::vector<IRValueID>>& shadowedGlobalArrays_ = scope_.shadowedGlobalArrays;
-    // One entry per inlined helper on the inline stack: the names it binds
-    // itself (parameters and locals).  A helper that names a file-scope
-    // variable while an ENCLOSING helper's parameter or local of that name
-    // is in scope is refused by name: the flat name map would hand it the
-    // enclosing binding (t_7a4e3b36 review rounds 6; the scope model that
-    // resolves it properly is t_cf17f501's refactor).
-    std::vector<std::unordered_set<std::string>> inlineScopes_;
-    static bool functionNamesIdentifier(const FunctionDecl* fn, const std::string& name);
     // Move a file-scope variable's binding into the stash when the current
     // function binds that name itself (a local or a parameter); no-op if
     // the name is not a global or is already stashed.

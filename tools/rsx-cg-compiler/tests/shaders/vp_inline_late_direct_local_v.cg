@@ -1,0 +1,13 @@
+float4 G;
+float4 D;
+float4 inner() {
+    D = G;
+    float4 G = float4(0, 0, 0, 0);
+    return G;
+}
+float4 outer(float4 G) { return inner(); }
+float4 main(float4 p : POSITION) : POSITION {
+    G = p;
+    outer(p * 2.0);
+    return D;
+}
