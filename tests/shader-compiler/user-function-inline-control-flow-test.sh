@@ -288,6 +288,24 @@ count  vp_inline_local_rebound_v '^[0-9]+ MUL ' 2
 factor vp_inline_local_rebound_v vp 6
 forbid vp_inline_local_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
 
+# The stash captures the global's binding ONCE (stashShadowedGlobal's
+# capture-once clause), and since t_3af598c8 that clause has a second caller:
+# the parameter loop.  With it removed, a later shadowing declaration re-stashes
+# the EARLIER local (or the parameter) as "the global" and get() returns that
+# instead of loading the uniform (review: claude - mutant emitted MUL IN0*2 then
+# MOV, never a uniform read).  Both shapes are byte-identical to the reference
+# on the candidate: FENCBR; MOVR R0, G from the uniform.
+accept fp_inline_two_block_shadow_f sce_fp_rsx "two sequential block locals named G, then get() reads the file-scope G: the uniform"
+expect fp_inline_two_block_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+forbid fp_inline_two_block_shadow_f 's0=TEX0'
+forbid fp_inline_two_block_shadow_f '^[0-9]+ MUL '
+count  fp_inline_two_block_shadow_f '^[0-9]+ ' 2
+accept fp_inline_param_then_local_shadow_f sce_fp_rsx "main's PARAMETER G, then a block local G: get() still reads the uniform (red on 47459167)"
+expect fp_inline_param_then_local_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+forbid fp_inline_param_then_local_shadow_f 's0=TEX0'
+forbid fp_inline_param_then_local_shadow_f '^[0-9]+ MUL '
+count  fp_inline_param_then_local_shadow_f '^[0-9]+ ' 2
+
 # ---------------------------------------------------------------- named gaps
 refuse "return inside a branch of the helper" fp_inline_return_in_if_f sce_fp_rsx "a return inside control flow"
 refuse "a loop inside the helper"             fp_inline_loop_f         sce_fp_rsx "a loop"
