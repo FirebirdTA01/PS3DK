@@ -34,10 +34,19 @@ IT REFUSES WHAT IT DOES NOT MODEL, in the shape insert_lane_check.py
 established: these fixtures compile to MOV and DP3, so any other opcode,
 any destination mode that changes a value (saturation, half bank, a
 non-fp32 precision, a destination scale, a predicated or
-condition-register-only write) and any operand mode outside plain
-swizzle/negate/abs raises instead of being stepped over.  A checker that
-skips an instruction it does not understand is a checker reporting a green
-about a program it did not read.
+condition-register-only write) and any operand reading the half bank
+raises instead of being stepped over.  A checker that skips an instruction
+it does not understand is a checker reporting a green about a program it
+did not read.
+
+WHAT IT MODELS RATHER THAN REFUSES, because both change the value and both
+appear in operand words this walk already has to read: per-operand NEGATE
+(the operand word's bit 17) and per-SLOT ABSOLUTE VALUE (hw[1] bit 29 for
+src0, hw[2] bit 18 for src1).  Either one wraps the term, so an abs'd or
+negated operand no longer matches the plain expectation and the row fails
+by name.  The first version of this file claimed abs in its header and
+never read the bit; codex set src0's abs on one DP3, changing that dot to
+abs(p), and the checker passed.  A header is not an implementation.
 
 Usage:  fp_transpose_check.py <ucode-dump> <row>;<row>;<row>
 
@@ -91,13 +100,23 @@ def reject_unmodelled(w, index):
         raise Unmodelled("a predicated write at instruction %d" % index)
 
 
-def source(word, lane, block, regs, input_src, index):
+def source(word, lane, block, regs, input_src, index, absolute):
     """The symbolic value this operand reads for destination lane 'lane'.
 
-    The INPUT REGISTER's identity is per-INSTRUCTION (hw[0] bits 13..16),
-    not per-operand: a fragment instruction has ONE input selector, so the
-    operand word's register field means nothing for an input read.  It is
-    read by the caller and passed in.
+    TWO FIELDS THAT ARE NOT IN THIS WORD, both found by codex in review of
+    this file - the second of them after the first version shipped:
+
+      the INPUT REGISTER's identity is per-INSTRUCTION (hw[0] bits 13..16),
+      not per-operand: a fragment instruction has ONE input selector, so
+      the operand word's register field means nothing for an input read.
+
+      the ABSOLUTE-VALUE flag lives in hw[1] bit 29 for src0 and hw[2] bit
+      18 for src1 (nv40_fp_assembler.cpp), not in the operand word at all.
+      This file's header claimed abs was modelled while source() never read
+      it: setting src0's abs on one DP3 makes that dot product compute
+      abs(p) instead of p, changes the pixel, and passed.
+
+    Both are read by the caller and passed in.
     """
     kind = word & 3
     reg = (word >> 2) & 0x3F
@@ -120,6 +139,8 @@ def source(word, lane, block, regs, input_src, index):
     else:
         raise Unmodelled("source register type %d at instruction %d"
                          % (kind, index))
+    if absolute:                               # per-SLOT, in hw[1]/hw[2]
+        term = ("abs", term)
     if (word >> 17) & 1:                       # NVFX_FP_REG_NEGATE
         term = ("neg", term)
     return term
@@ -164,12 +185,14 @@ def evaluate(path):
                 % (opcode, i))
         reject_unmodelled(w, i)
         input_src = (w[0] >> 13) & 0xF         # NVFX_FP_OP_INPUT_SRC_SHIFT
+        abs0 = (w[1] >> 29) & 1                # NVFX_FP_OP_SRC0_ABS in hw[1]
+        abs1 = (w[2] >> 18) & 1                # NVFX_FP_OP_SRC1_ABS in hw[2]
         dst = (w[0] >> 1) & 0x3F
         mask = (w[0] >> 9) & 0xF
         if opcode == DP3:
-            a = [source(w[1], lane, block, regs, input_src, i)
+            a = [source(w[1], lane, block, regs, input_src, i, abs0)
                  for lane in range(3)]
-            b = [source(w[2], lane, block, regs, input_src, i)
+            b = [source(w[2], lane, block, regs, input_src, i, abs1)
                  for lane in range(3)]
             value = dot(a, b)
             for lane in range(4):
@@ -179,7 +202,7 @@ def evaluate(path):
             for lane in range(4):
                 if mask & (1 << lane):
                     regs[(dst, lane)] = source(
-                        w[1], lane, block, regs, input_src, i)
+                        w[1], lane, block, regs, input_src, i, abs0)
         if w[0] & 1:                           # NVFX_FP_OP_PROGRAM_END
             ended_at = i
         i += 1 + (1 if block is not None else 0)
@@ -216,9 +239,40 @@ def describe(term):
     return "%s(%s)" % (term[0], ", ".join(describe(t) for t in term[1:]))
 
 
+# NVFX_FP_OP_INPUT_SRC_TC0.  These fixtures declare one varying,
+# `float3 p : TEXCOORD0`, so every dot product must read that one.
+INPUT_SRC_TC0 = 0x4
+
+
 def check(path, spec):
     expected = parse_expected(spec)
     regs = evaluate(path)
+    # ONE INPUT REGISTER ACROSS THE WHOLE OUTPUT, not per lane (review:
+    # codex).  Judging each lane's selector on its own accepts a program
+    # whose three dot products read three DIFFERENT varyings - each dot is
+    # internally consistent and the picture is wrong.  He broke the first
+    # version exactly that way: row 21's selector moved TC0 -> TC1 while
+    # the other two still read TC0, opcode, masks, constants and END all
+    # unchanged, and it passed.
+    selectors = set()
+    for lane in range(3):
+        term = regs.get((COLOUR_OUT, lane))
+        if isinstance(term, tuple) and term[0] == "dp3":
+            for operand in (term[1], term[2]):
+                for t in operand:
+                    if isinstance(t, tuple) and t[0] == "in":
+                        selectors.add(t[1])
+    if len(selectors) > 1:
+        return ("the dot products read %d different input registers (%s); "
+                "these fixtures declare ONE varying, so every one of them "
+                "must read it"
+                % (len(selectors),
+                   ", ".join("TC%d" % (s - INPUT_SRC_TC0) if s >= INPUT_SRC_TC0
+                             else "src%d" % s for s in sorted(selectors))))
+    if selectors and selectors != {INPUT_SRC_TC0}:
+        return ("the dot products read input register %d, not TEXCOORD0 "
+                "(%d), which is the only varying the fixture declares"
+                % (sorted(selectors)[0], INPUT_SRC_TC0))
     for lane in range(4):
         if (COLOUR_OUT, lane) not in regs:
             return ("the colour output's %s lane is never written"
