@@ -209,7 +209,7 @@ judge() {   # $1 script, $2 timeout -> verdict (failures without firing are name
 # guard must reach a refusal, or the targeted run has not proved its property.
 require_targeted_refusals() {
     if (( $# > 0 )); then
-        printf 'FAIL: targeted guards exercised no refusal:\n' >&2
+        printf 'FAIL: adversary observed no refusal in targeted guards:\n' >&2
         printf '  %s\n' "$@" >&2
         return 1
     fi
@@ -317,7 +317,7 @@ grep -q 'FileNotFoundError' "$work/judge.log" \
 [[ "$(judge "$work/no-refusal-test.sh")" == untested ]] \
     || fail 'no-refusal control: successful non-refusal invocation was accused'
 [[ "$(judge "$work/failed-no-refusal-test.sh")" == failed-without-refusal:2 ]] \
-    || fail 'failed-no-refusal control: failure after entry vanished into untested'
+    || fail 'failed-no-refusal control: failure after entry was not classified failed-without-refusal:2'
 
 # A swallowed launch failure exits successfully with no entry/refusal. The
 # ordinary classifier correctly has no refusal to judge; the TARGETED gate
@@ -341,7 +341,7 @@ grep -Fxq 'launcher unreachable: FileNotFoundError' "$work/judge.log" \
 if require_targeted_refusals unreachable-target-test.sh >"$work/targeted-control.log" 2>&1; then
     fail 'targeted control: a successful target with an unreachable launcher was accepted without exercising a refusal'
 fi
-grep -Fxq 'FAIL: targeted guards exercised no refusal:' "$work/targeted-control.log" \
+grep -Fxq 'FAIL: adversary observed no refusal in targeted guards:' "$work/targeted-control.log" \
     && grep -Fxq '  unreachable-target-test.sh' "$work/targeted-control.log" \
     || fail 'targeted control: rejection did not name the missing refusal and its target'
 printf '  targeted control rejected: unreachable-target-test.sh exercised no refusal\n'
