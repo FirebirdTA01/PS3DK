@@ -84,6 +84,8 @@ constexpr uint32_t kCgTex0        = 2179u;  // 0x0883 — VP TEX/TEXCOORD output
 constexpr uint32_t kCgHpos        = 2243u;  // 0x08c3 — VP POSITION output
 constexpr uint32_t kCgCol0        = 2245u;  // 0x08c5 — VP COL0 output
 constexpr uint32_t kCgClp0        = 2310u;  // 0x0906 — VP CLP0 output
+constexpr uint32_t kCgPsiz        = 2309u;
+constexpr uint32_t kCgFogCoord    = 3156u;
 
 // CGtype values (from cg_datatypes.h, base = 1024).
 constexpr uint32_t kCgFloat       = 1045u;
@@ -215,8 +217,12 @@ uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
                        });
         return (wroteTexCoord ? kCgTexCoord0 : kCgTex0) + semIndex;
     }
-    if (semUpper == "CLP" && semIndex == 0)
-        return kCgClp0;
+    if (semUpper == "CLP" && semIndex >= 0 && semIndex < 6)
+        return kCgClp0 + semIndex;
+    if (semUpper == "PSIZE" && semIndex == 0)
+        return kCgPsiz;
+    if (semUpper == "FOG" || semUpper == "FOGC")
+        return kCgFogCoord;
     return 0;
 }
 
@@ -793,6 +799,31 @@ VpContainerResult emitVertexContainerImpl(
     }
     }
 
+    // Direct scalar returns have no fieldName. Keep their special-output
+    // reflection alongside explicit out parameters, without duplicating them.
+    for (const auto& block : entry->blocks)
+        for (const auto& instruction : block->instructions)
+        {
+            const auto& in = *instruction;
+            if (in.op != IROp::StoreOutput || !in.fieldName.empty()) continue;
+            const auto sem = toUpper(in.semanticName);
+            if (sem != "PSIZE" && sem != "CLP") continue;
+            const auto resource = vpOutputResource(sem, in.semanticIndex, in.rawSemanticName);
+            bool present = false;
+            for (const auto& param : params)
+                if (param.direction == kCgOut && param.res == resource) present = true;
+            if (present) continue;
+            ParamDesc d;
+            d.name = entry->name;
+            d.semantic = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+            d.type = cgTypeForIRType(entry->returnType);
+            d.var = kCgVarying;
+            d.direction = kCgOut;
+            d.paramno = kInvalidIndex;
+            d.res = resource;
+            params.push_back(d);
+        }
+
     // ----- Append literal-pool params (one per c[N] reg the back-end
     // reserved for unique float literals).  These follow user-declared
     // params in the param table and get their own embedded 16-byte
@@ -822,11 +853,18 @@ VpContainerResult emitVertexContainerImpl(
         params.push_back(d);
     }
 
+    // Clip resource types describe the physical output prefix: CLP0/3 use
+    // y (float2), CLP1/4 z (float3), CLP2/5 w (float4), even for scalar Cg
+    // declarations. Measured with every clip alone and all six plus FOG/PSIZE.
+    for (auto& param : params)
+        if (param.direction == kCgOut && param.res >= kCgClp0 && param.res < kCgClp0 + 6)
+            param.type = kCgFloat2 + (param.res - kCgClp0) % 3;
+
     if (compactCgb)
     {
         // Compact CGB mode is the runtime-facing `the reference compiler -mcgb` container.
-        // Target 1 emits LevelA as the empty reference block; compact VP
-        // internal constants will be added when a byte-diff target needs them.
+        // LevelA carries register indices, padded to 16 bytes, followed by
+        // their float4 values. In particular PSIZE's implicit clamp needs it.
         struct CompactEntry
         {
             std::string name;
@@ -885,11 +923,13 @@ VpContainerResult emitVertexContainerImpl(
             return result;
         }
 
-        const uint32_t levelASize = 0x10u;
+        const uint32_t constantCount = static_cast<uint32_t>(attrs.literalPool.size());
+        const uint32_t constantValuesOffset = (4u + 2u * constantCount + 15u) & ~15u;
+        const uint32_t levelASize = constantValuesOffset + 16u * constantCount;
         const uint32_t levelBSize = 6u
             + static_cast<uint32_t>(entries.size() * 8u)
             + static_cast<uint32_t>(strings.size());
-        if (levelBSize > 0xFFFFu || entries.size() > 0xFFFFu)
+        if (levelASize > 0xFFFFu || levelBSize > 0xFFFFu || entries.size() > 0xFFFFu)
         {
             result.diagnostics.push_back("cg-container-vp: compact CGB LevelB too large");
             return result;
@@ -917,7 +957,18 @@ VpContainerResult emitVertexContainerImpl(
         for (uint32_t w : ucode) put32(out, w);
 
         put16(out, static_cast<uint16_t>(levelASize));
-        put16(out, 0);                                   // constant count
+        put16(out, static_cast<uint16_t>(constantCount));
+        for (const auto& slot : attrs.literalPool)
+            put16(out, static_cast<uint16_t>(slot.constReg));
+        while (out.size() < 0x20u + ucodeSize + constantValuesOffset)
+            out.push_back(0);
+        for (const auto& slot : attrs.literalPool)
+            for (float value : slot.values)
+            {
+                uint32_t bits;
+                std::memcpy(&bits, &value, sizeof(bits));
+                put32(out, bits);
+            }
         while (out.size() < 0x20u + ucodeSize + levelASize)
             out.push_back(0);
 

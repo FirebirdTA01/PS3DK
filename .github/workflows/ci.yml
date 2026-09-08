@@ -238,6 +238,8 @@ jobs:
         run: bash tests/shader-compiler/dead-texture-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler vertex instructions with two distinct inputs (t_9d0ff137)
         run: bash tests/shader-compiler/vp-two-inputs-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler VP point size and clip outputs (t_bbca6d14)
+        run: bash tests/shader-compiler/vp-special-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros

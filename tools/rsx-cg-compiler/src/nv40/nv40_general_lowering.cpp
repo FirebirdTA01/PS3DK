@@ -341,11 +341,11 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
     if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NV40_VP_INST_DEST_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
         return NV40_VP_INST_DEST_TC(semanticIndex);
-    // Measured against sce-cgc: CLP0 advertises CG_CLP0 in the container
-    // but uses the encoded FOGC destination slot.  Clip-specific metadata
-    // below distinguishes it from a real FOG output.
-    if (semanticUpper == "CLP" && semanticIndex == 0)
-        return NV40_VP_INST_DEST_FOGC;
+    // Six scalar clip distances share y/z/w of the FOGC and PSZ slots.
+    if (semanticUpper == "CLP" && semanticIndex >= 0 && semanticIndex < 6)
+        return semanticIndex < 3 ? NV40_VP_INST_DEST_FOGC : NV40_VP_INST_DEST_PSZ;
+    if (semanticUpper == "PSIZE" && semanticIndex == 0)
+        return NV40_VP_INST_DEST_PSZ;
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
         return NV40_VP_INST_DEST_FOGC;
     return -1;
@@ -354,7 +354,7 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
 static bool isVertexClipOutput(const std::string& semanticUpper,
                                int semanticIndex)
 {
-    return semanticUpper == "CLP" && semanticIndex == 0;
+    return semanticUpper == "CLP" && semanticIndex >= 0 && semanticIndex < 6;
 }
 
 static int vertexOutputPriority(int outIndex)
@@ -6802,14 +6802,51 @@ private:
             program_.diagnostics.push_back(
                 "nv40-general: unsupported output semantic " +
                 inst.semanticName);
-            if (profile_ == GeneralProfile::Fragment)
-                program_.loweringFailed = true;
+            program_.loweringFailed = true;
             return;
         }
         const IRValueID value = inst.operands[0];
         const bool isClipOutput =
             profile_ == GeneralProfile::Vertex &&
             isVertexClipOutput(sem, inst.semanticIndex);
+        const bool isFogOutput = profile_ == GeneralProfile::Vertex &&
+            (sem == "FOG" || sem == "FOGC");
+        if (profile_ == GeneralProfile::Vertex &&
+            (isClipOutput || sem == "PSIZE")) {
+            // A scalar producer computes in its logical x lane. Moving its
+            // destination to CLP's y/z/w would change its operand lanes too;
+            // use an explicit scalar export instead of the producer folds.
+            if (valueWidthOf(value) != 1) {
+                program_.diagnostics.push_back(
+                    "nv40-general: unsupported output semantic " + sem +
+                    " with a non-scalar value; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            VInstr store;
+            store.op = VOp::Mov;
+            store.dst.output = true;
+            store.dst.index = outIndex;
+            store.dst.writemask = isClipOutput ? 1 << (1 + inst.semanticIndex % 3) : 1;
+            store.dst.userClipOutput = isClipOutput;
+            store.dst.userClipIndex = inst.semanticIndex;
+            store.srcs[0] = resolve(value);
+            // Scalar CLP/PSIZE values compute in their logical x lane.
+            const uint8_t lane = store.srcs[0].swizzle[0];
+            store.srcs[0].swizzle = {lane, lane, lane, lane};
+            if (sem == "PSIZE") {
+                // Reference point size has a .125 lower bound (also for
+                // negative/zero constants); it has no 1.0 upper clamp.
+                if (store.srcs[0].kind == VSrcKind::Literal) {
+                    store.srcs[0] = floatLit(std::max(store.srcs[0].literal[lane], 0.125f));
+                } else {
+                    store.op = VOp::Max;
+                    store.srcs[1] = floatLit(0.125f);
+                }
+            }
+            program_.instrs.push_back(store);
+            return;
+        }
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         if (dumpOrder) {
             const VSrc dbg = resolve(value);
@@ -6849,7 +6886,7 @@ private:
                            vi.dst.index == regIt->second &&
                            (vi.op == VOp::Tex || vi.op == VOp::Txp);
                 });
-        if (profile_ == GeneralProfile::Vertex &&
+        if (profile_ == GeneralProfile::Vertex && !isFogOutput &&
             regIt != program_.valueToVReg.end()) {
             int producerDefs = 0;
             int producerMask = 0;
@@ -7085,6 +7122,10 @@ private:
         if (profile_ == GeneralProfile::Fragment &&
             fragmentOutputIndex(sem, inst.semanticIndex) == 1)
             return 0x4;
+        // FOG keeps the ordinary producer fold, but only owns x: its
+        // physical y/z/w lanes carry CLP0..2, even for a vector FOG value.
+        if (profile_ == GeneralProfile::Vertex && (sem == "FOG" || sem == "FOGC"))
+            return 0x1;
         for (const auto& p : entry_.parameters) {
             if (p.storage != StorageQualifier::Out &&
                 p.storage != StorageQualifier::InOut)
@@ -9207,21 +9248,29 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     attrs.registerCount = static_cast<uint32_t>(std::max(1, asm_.numTempRegs()));
     attrs.attributeInputMask = asm_.inputMask();
     attrs.attributeOutputMask = asm_.outputMask();
-    bool hasClipOutput = false;
     bool hasFogOutput = false;
+    bool hasPointSizeOutput = false;
+    bool hasClipFogSlot = false;
+    bool hasClipPointSlot = false;
     for (const VInstr& vi : program.instrs) {
         if (!vi.dst.output)
             continue;
-        if (vi.dst.userClipOutput && vi.dst.userClipIndex == 0) {
-            hasClipOutput = true;
-            attrs.attributeOutputMask |= (1u << 6);
-            attrs.userClipMask |= (1u << 1);
+        if (vi.dst.userClipOutput) {
+            const unsigned index = static_cast<unsigned>(vi.dst.userClipIndex);
+            hasClipFogSlot |= index < 3;
+            hasClipPointSlot |= index >= 3;
+            attrs.attributeOutputMask |= (1u << (6 + index));
+            attrs.userClipMask |= (2u << (4 * index));
         } else if (vi.dst.index == NV40_VP_INST_DEST_FOGC) {
             hasFogOutput = true;
+        } else if (vi.dst.index == NV40_VP_INST_DEST_PSZ) {
+            hasPointSizeOutput = true;
         }
     }
-    if (hasClipOutput && !hasFogOutput)
+    if (hasClipFogSlot && !hasFogOutput)
         attrs.attributeOutputMask &= ~(1u << 4);
+    if (hasClipPointSlot && !hasPointSizeOutput)
+        attrs.attributeOutputMask &= ~(1u << 5);
     if (attrsOut)
         *attrsOut = attrs;
     return out;
