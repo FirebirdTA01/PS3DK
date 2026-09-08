@@ -117,10 +117,15 @@ factor() {   # <stem> fp|vp <k>: the output is exactly k * the one input, lane b
     done
     pass "$stem: output = $k * input; lane, sign, no-END and early-END controls rejected"
 }
-joined_none() {   # <stem>: the program carries NO predicated select (an arm local that died never joined)
-    if grep -qE '^[0-9]+ MOV dst=none ' "$work/$1.dec"; then
-        cat "$work/$1.dec" >&2; fail "$1: a condition-register write is present - something joined at the if"
-    fi
+joined_none() {   # <stem>: NO predicated write anywhere (an arm local that died never joined).
+                  # Read from the condition-test and condition-write FIELDS, not from
+                  # fp_sources' text, which prints neither (review: codex - a container
+                  # whose output MOV carried NVFX_COND_FL decoded to the same text and
+                  # passed).  Then the row's own artifact control: the first R0 write's
+                  # condition flipped to FL must be REJECTED by the same predicate.
+    python3 "$here/predication_check.py" "$work/$1.bin"         || fail "$1: a predicated or condition-forming write is present - something joined at the if"
+    python3 "$here/predication_check.py" "$work/$1.bin" --control         || fail "$1: the COND_FL control was NOT rejected - the predication predicate is too weak"
+    pass "$1: no predicated write; COND_FL control rejected"
 }
 count() {    # <stem> <regex> <expected count>
     local n; n=$(grep -cE "$2" "$work/$1.dec" || true)
