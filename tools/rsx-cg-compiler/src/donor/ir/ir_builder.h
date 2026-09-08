@@ -51,19 +51,59 @@ private:
 
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;
-    std::unordered_map<std::string, IRValueID> nameToValue_;
+    // ================================================================
+    // PER-SCOPE STATE, in ONE place (t_4ac44f78).  Every map that binds a
+    // NAME to a value lives in ScopeState, and every scope boundary handles
+    // the whole struct - the three boundaries are the rows of this table,
+    // and a new map is wrong until it has an answer in every cell:
+    //
+    //   map                   function entry  if-join (buildIfStmt)   inline call
+    //   names                 clear()         snapshot/restore/join   save/restore + propagate
+    //   arrays                clear()         join PER ELEMENT "a[i]" save/restore + propagate
+    //   shadowedGlobals       clear()         join "G@"               save/restore + propagate
+    //   shadowedGlobalArrays  clear()         join "B@[i]"            save/restore + propagate
+    //
+    // History: nameToValue_ was joined from the start; localArrayValues_
+    // was not snapshotted, restored or joined for as long as it existed
+    // (t_cf17f501 - a conditional element store applied unconditionally);
+    // the two stash maps were added and missed the SAME way within an hour
+    // (t_7a4e3b36 review).  The aliases below keep the historical member
+    // names so the ~60 binding sites read unchanged; the struct is what the
+    // boundaries copy, so a fifth map added HERE is carried everywhere, and
+    // one added anywhere else is the bug this comment exists to prevent.
+    struct ScopeState
+    {
+        std::unordered_map<std::string, IRValueID> names;
+        std::unordered_map<std::string, std::vector<IRValueID>> arrays;
+        // A file-scope variable a caller-local SHADOWS keeps its own binding
+        // here while the local owns the name in `names` / `arrays`: an
+        // inlined helper that names the global is bound to these for its
+        // body, and its writes come back here, not to the local.
+        // InvalidIRValue / an empty vector means "shadowed, never assigned"
+        // - the helper's read must then fall through to the global load.
+        std::unordered_map<std::string, IRValueID> shadowedGlobals;
+        std::unordered_map<std::string, std::vector<IRValueID>> shadowedGlobalArrays;
+
+        void clear()
+        {
+            names.clear(); arrays.clear();
+            shadowedGlobals.clear(); shadowedGlobalArrays.clear();
+        }
+        // The if-join works over ONE flat map of join keys: a name is its
+        // own key, an array element is "a[i]", a stashed global "G@" and a
+        // stashed element "B@[i]" ('[' and '@' cannot occur in identifiers).
+        // Only bound values fold; unfold() puts the joined values back.
+        std::unordered_map<std::string, IRValueID> fold() const;
+        void unfold(std::unordered_map<std::string, IRValueID>& joined);
+    };
+    ScopeState scope_;
+    std::unordered_map<std::string, IRValueID>& nameToValue_ = scope_.names;
     // Immutable, function-local identities of unwritten vector-field bases.
     // Assignments replace nameToValue_ bindings; this set needs no branch snapshot.
     std::unordered_set<IRValueID> undefinedFieldBases_;
-    std::unordered_map<std::string, std::vector<IRValueID>> localArrayValues_;
-    // A file-scope variable a caller-local SHADOWS keeps its own binding here
-    // while the local owns the name in nameToValue_ / localArrayValues_: an
-    // inlined helper that names the global is bound to these for its body,
-    // and its writes come back here, not to the local (t_7a4e3b36 review).
-    // InvalidIRValue / an empty vector means "shadowed, never assigned" - the
-    // helper's read must then fall through to the global load.
-    std::unordered_map<std::string, IRValueID> shadowedGlobals_;
-    std::unordered_map<std::string, std::vector<IRValueID>> shadowedGlobalArrays_;
+    std::unordered_map<std::string, std::vector<IRValueID>>& localArrayValues_ = scope_.arrays;
+    std::unordered_map<std::string, IRValueID>& shadowedGlobals_ = scope_.shadowedGlobals;
+    std::unordered_map<std::string, std::vector<IRValueID>>& shadowedGlobalArrays_ = scope_.shadowedGlobalArrays;
     // One entry per inlined helper on the inline stack: the names it binds
     // itself (parameters and locals).  A helper that names a file-scope
     // variable while an ENCLOSING helper's parameter or local of that name

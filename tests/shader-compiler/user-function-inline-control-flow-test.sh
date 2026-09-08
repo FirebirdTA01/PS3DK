@@ -212,6 +212,13 @@ expect vp_inline_conditional_call_unassigned_v '^[0-9]+ MAD .* src2=C4[0-9][0-9]
 accept fp_inline_param_inner_shadow_f sce_fp_rsx "an inner block local shadows the helper's PARAMETER: D takes the inner constant"
 forbid fp_inline_param_inner_shadow_f '^[0-9]+ MOV dst=R0 .* s0=TEX0'
 expect fp_inline_param_inner_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.'
+# Per-scope state is per FUNCTION: another function's local shadowing G
+# must leave nothing behind that a helper called from main could be bound
+# to (the stash is cleared with the rest of ScopeState at function exit;
+# the two-entry-point leak witness from the t_7a4e3b36 review).
+accept vp_inline_cross_function_stash_v sce_vp_rsx "another function shadows G with a local; main's get() still reads the global p"
+expect vp_inline_cross_function_stash_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
+forbid vp_inline_cross_function_stash_v '^[0-9]+ MUL '
 accept fp_local_array_if_f sce_fp_rsx "LOCAL array: if (uv.x > 0.5) a[0] = 1.0 selects, not overwrites (t_cf17f501, red on the tip)"
 joined fp_local_array_if_f 'SGT|SLT|SGE|SLE'
 accept fp_global_array_if_f sce_fp_rsx "file-scope array in a fragment program, conditional store"
