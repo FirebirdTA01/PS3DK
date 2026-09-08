@@ -1,0 +1,7 @@
+// The entry PARAMETER G shadows the global (stashed at function entry), then
+// a block local G shadows again: the local's declaration must not re-stash
+// the PARAMETER as "the global" - get() reads the uniform (t_3af598c8, the
+// parameter path of the capture-once guard).
+float4 G;
+float4 get() { return G; }
+float4 main(float4 G : TEXCOORD0) : COLOR { { float4 G = G * 3.0; } return get(); }

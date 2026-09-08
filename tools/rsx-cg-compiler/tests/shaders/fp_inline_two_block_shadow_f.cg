@@ -1,0 +1,8 @@
+// Two sequential BLOCK locals named G, then a helper reads the file-scope G.
+// The stash captures the global's binding ONCE, at the first shadowing
+// declaration: a second declaration must not re-stash the first local as
+// "the global" (review: claude - with the capture-once guard removed, get()
+// returned the FIRST block's p*2 and never loaded the uniform).
+float4 G;
+float4 get() { return G; }
+float4 main(float4 p : TEXCOORD0) : COLOR { { float4 G = p * 2.0; } { float4 G = p * 3.0; } return get(); }
