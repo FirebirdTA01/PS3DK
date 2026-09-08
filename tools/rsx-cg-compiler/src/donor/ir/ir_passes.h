@@ -59,6 +59,8 @@ protected:
 class DeadCodeElimination : public IRPass
 {
 public:
+    explicit DeadCodeElimination(bool preserveTextureReads = true)
+        : m_preserveTextureReads(preserveTextureReads) {}
     const char* getName() const override { return "DeadCodeElimination"; }
     bool runOnFunction(IRFunction& func) override;
 
@@ -74,6 +76,7 @@ private:
 
     std::unordered_set<IRValueID> m_usedValues;
     bool m_isEntryPoint = false;
+    bool m_preserveTextureReads = true;
 };
 
 // ============================================================================
