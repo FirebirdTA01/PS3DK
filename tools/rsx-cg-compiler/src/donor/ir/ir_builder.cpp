@@ -881,6 +881,13 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
 
         currentFunction_->parameters.push_back(irParam);
 
+        // A parameter that shadows a file-scope variable is a scope like a
+        // local's (t_3af598c8): the global keeps its own binding in the
+        // stash - unassigned at entry - so an inlined helper naming it
+        // reads the global, and a helper's write to it lands in the stash,
+        // not on the parameter.  Before this the entry function's parameter
+        // was the one binding the flat map could not tell from the global.
+        stashShadowedGlobal(param->name);
         // Map parameter to value
         declToValue_[param.get()] = irParam.valueId;
         nameToValue_[param->name] = irParam.valueId;
@@ -1902,6 +1909,26 @@ void IRBuilder::buildExprStmt(ExprStmt* stmt)
     }
 }
 
+// A name the current function binds (a local, or a parameter) that is also
+// a file-scope variable: the global's own binding moves aside into the
+// stash so an inlined helper can still reach the GLOBAL by that name.
+// Captured ONCE: a second binding of the same name (a nested declaration
+// inside an inlined helper) must not replace the global's binding with the
+// outer one's (review: codex, nested_local_shadow).  InvalidIRValue / an
+// empty vector means "shadowed, never assigned": the helper's read then
+// falls through to the global load.
+void IRBuilder::stashShadowedGlobal(const std::string& name)
+{
+    if (name.empty() || !module_->findGlobal(name) || shadowedGlobals_.count(name))
+        return;
+    auto prior = nameToValue_.find(name);
+    shadowedGlobals_[name] =
+        prior != nameToValue_.end() ? prior->second : InvalidIRValue;
+    auto priorArr = localArrayValues_.find(name);
+    shadowedGlobalArrays_[name] =
+        priorArr != localArrayValues_.end() ? priorArr->second : std::vector<IRValueID>{};
+}
+
 void IRBuilder::buildDeclStmt(DeclStmt* stmt)
 {
     // Every declarator in the statement, in source order, so `float a, b;`
@@ -1918,19 +1945,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         // A local that shadows a file-scope variable takes the name; the
         // global's own binding (if the program assigned it) moves aside so
         // an inlined helper can still reach it by name.
-        if (module_->findGlobal(varDecl->name) && !shadowedGlobals_.count(varDecl->name))
-        {
-            // captured ONCE: a second local of the same name (a nested
-            // declaration inside an inlined helper) must not replace the
-            // global's binding with the outer local's (review: codex,
-            // nested_local_shadow).
-            auto prior = nameToValue_.find(varDecl->name);
-            shadowedGlobals_[varDecl->name] =
-                prior != nameToValue_.end() ? prior->second : InvalidIRValue;
-            auto priorArr = localArrayValues_.find(varDecl->name);
-            shadowedGlobalArrays_[varDecl->name] =
-                priorArr != localArrayValues_.end() ? priorArr->second : std::vector<IRValueID>{};
-        }
+        stashShadowedGlobal(varDecl->name);
         // Allocate a value for the variable
         IRValueID varId = currentFunction_->allocateValueId();
         declToValue_[varDecl] = varId;
@@ -2978,17 +2993,23 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     for (const auto& kv : bodyStashArrays) if (savedStashArrays.count(kv.first)) shadowedGlobalArrays_[kv.first] = kv.second;
     identityPrefixSwizzleBase_ = std::move(savedSwizzles);
     // Carry the callee's writes to file-scope names back to the caller.
-    // A CALLER-LOCAL that shadows a global of the same name is the caller's
-    // binding: the callee wrote the global, which the caller cannot see by
-    // that name any more, so the caller's binding is kept (the flat map
-    // cannot hold both; the reverse-shadow fixture pins it).  A caller
-    // local is any VarDecl in the caller's declaration map bound to the
-    // prior value.
+    // A CALLER-LOCAL (or the caller's PARAMETER) that shadows a global of
+    // the same name is the caller's binding: the callee wrote the global,
+    // which the caller cannot see by that name any more, so the caller's
+    // binding is kept (the flat map cannot hold both; the reverse-shadow
+    // fixtures pin it).  A caller binding is any VarDecl or ParamDecl in
+    // the caller's declaration map bound to the prior value - before
+    // parameters counted, a helper's write to the global replaced the
+    // entry function's parameter (t_3af598c8, entry_param_write).
+    auto callerBindsName = [](const DeclNode* decl, const std::string& name) -> bool
+    {
+        return decl && (decl->kind == DeclKind::Variable || decl->kind == DeclKind::Parameter) &&
+               decl->name == name;
+    };
     auto callerLocalBinding = [&](const std::string& name, IRValueID prior) -> bool
     {
         for (const auto& kv : declToValue_)
-            if (kv.first && kv.first->kind == DeclKind::Variable &&
-                kv.first->name == name && kv.second == prior)
+            if (callerBindsName(kv.first, name) && kv.second == prior)
                 return true;
         return false;
     };
@@ -3015,7 +3036,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     auto callerLocalArray = [&](const std::string& name) -> bool
     {
         for (const auto& kv : declToValue_)
-            if (kv.first && kv.first->kind == DeclKind::Variable && kv.first->name == name)
+            if (callerBindsName(kv.first, name))
                 return true;
         return false;
     };
