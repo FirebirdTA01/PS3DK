@@ -10,20 +10,34 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-compiler="${1:-${RSX_CG_COMPILER:-$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler}}"
+compiler="${1:-${RSX_CG_COMPILER:-}}"
+PYTHON="${PYTHON:-python3}"
+command -v "$PYTHON" >/dev/null 2>&1 || PYTHON=python
+
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
+
+if [[ -z "$compiler" ]]; then
+    for cand in "$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler" \
+                "$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler.exe" \
+                "$repo_root/build-win/rsx-cg-compiler.exe"; do
+        if [[ -x "$cand" ]]; then compiler="$cand"; break; fi
+    done
+fi
 if [ ! -x "$compiler" ] && [ -f "${compiler}.exe" ]; then
     compiler="${compiler}.exe"
 fi
-[[ -x "$compiler" ]] || { echo "FAIL: rsx-cg-compiler not executable: $compiler" >&2; exit 1; }
-
-PYTHON="${PYTHON:-python3}"
-command -v "$PYTHON" >/dev/null 2>&1 || PYTHON=python
+[[ -n "$compiler" && -x "$compiler" ]] || fail "rsx-cg-compiler not executable: $compiler"
 
 work="${TMPDIR:-/tmp}/ps3dk-bucket-c-test.$$"
 mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
-
-fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 # 1. f4tex2D, h2tex2D, h3texCUBE
 cat > "$work/typed_tex.cg" << 'EOF'
@@ -200,11 +214,49 @@ float4 main(float3 p : TEXCOORD0,
     float3x3 mt = transpose(m);
     return float4(mul(mt, p), 1.0);
 }
-EOF
-
 "$compiler" -p sce_fp_rsx --emit-container "$work/transpose_fp_uniform.fpo" "$work/transpose_fp_uniform.cg" > /dev/null 2>&1 ||
     fail "transpose_fp_uniform.cg failed to compile under sce_fp_rsx"
 [[ -s "$work/transpose_fp_uniform.fpo" ]] || fail "transpose_fp_uniform.fpo is missing or empty"
+
+cat > "$work/transpose_fp_double.cg" << 'EOF'
+float4 main(float3 p : TEXCOORD0,
+            uniform float3x3 m) : COLOR
+{
+    float3x3 mtt = transpose(transpose(m));
+    return float4(mul(mtt, p), 1.0);
+}
+EOF
+
+"$compiler" -p sce_fp_rsx --emit-container "$work/transpose_fp_double.fpo" "$work/transpose_fp_double.cg" > /dev/null 2>&1 ||
+    fail "transpose_fp_double.cg failed to compile under sce_fp_rsx"
+[[ -s "$work/transpose_fp_double.fpo" ]] || fail "transpose_fp_double.fpo is missing or empty"
+
+# 6b. Dead tex2Dbias: eliminated by DCE without alphakill, preserved with #pragma alphakill
+cat > "$work/dead_txb.cg" << 'EOF'
+float4 main(float4 uv_bias : TEXCOORD0,
+            uniform sampler2D s2d,
+            uniform sampler2D s_dead) : COLOR
+{
+    float4 dead = tex2Dbias(s_dead, uv_bias);
+    return tex2D(s2d, uv_bias.xy);
+}
+EOF
+
+cat > "$work/dead_txb_ak.cg" << 'EOF'
+#pragma alphakill s_dead
+float4 main(float4 uv_bias : TEXCOORD0,
+            uniform sampler2D s2d,
+            uniform sampler2D s_dead) : COLOR
+{
+    float4 dead = tex2Dbias(s_dead, uv_bias);
+    return tex2D(s2d, uv_bias.xy);
+}
+EOF
+
+"$compiler" -p sce_fp_rsx "$work/dead_txb.cg" > "$work/dead_txb.log" 2> "$work/dead_txb.err" ||
+    fail "dead_txb.cg listing compile failed"
+"$compiler" -p sce_fp_rsx "$work/dead_txb_ak.cg" > "$work/dead_txb_ak.log" 2> "$work/dead_txb_ak.err" ||
+    fail "dead_txb_ak.cg listing compile failed"
 
 # 7. Half-texture precision boundary (h1tex2D in H bank, precision cast MOV in prec=1)
 cat > "$work/h1tex.cg" << 'EOF'
