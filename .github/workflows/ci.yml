@@ -250,6 +250,8 @@ jobs:
         run: bash tests/shader-compiler/vp-special-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler user-function inlining with control flow and void helpers (t_7a4e3b36)
         run: bash tests/shader-compiler/user-function-inline-control-flow-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler stdlib overloads and texture intrinsics
+        run: bash tests/shader-compiler/stdlib-bucket-c-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros
