@@ -1,0 +1,5 @@
+// A block-local G shadows the global; a helper called INSIDE the block writes the real G.
+// After the block, G names the global again and carries the helper's write: 2*p (unstash).
+float4 G;
+void set(float4 q) { G = q * 2.0; }
+float4 main(float4 p : TEXCOORD0) : COLOR { { float4 G = p * 3.0; set(p); } return G; }

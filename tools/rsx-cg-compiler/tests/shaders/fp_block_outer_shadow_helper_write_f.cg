@@ -1,0 +1,7 @@
+// An OUTER local G shadows the global; inside an inner block a helper writes the real G.
+// That write survives the inner block's end (the pre-existing stash entry is kept, not
+// restored from the snapshot): get() after the block reads 2*p.
+float4 G;
+void set(float4 q) { G = q * 2.0; }
+float4 get() { return G; }
+float4 main(float4 p : TEXCOORD0) : COLOR { float4 G = p * 3.0; { set(p); } return get(); }

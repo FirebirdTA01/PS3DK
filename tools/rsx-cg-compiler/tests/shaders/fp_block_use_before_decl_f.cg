@@ -1,0 +1,3 @@
+// A use BEFORE the block-local's declaration names the file-scope G (no pre-scan binding).
+float4 G;
+float4 main(float4 p : TEXCOORD0) : COLOR { float4 r = G; float4 G2 = p * 2.0; { float4 s = G; float4 G = p * 2.0; r = r + s; } return r + G2; }

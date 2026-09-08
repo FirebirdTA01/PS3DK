@@ -983,9 +983,77 @@ void IRBuilder::buildStmt(StmtNode* stmt)
 
 void IRBuilder::buildBlockStmt(BlockStmt* stmt)
 {
+    // The fourth row of ScopeState's boundary table: a block's own
+    // declarations end with it.  Snapshot first; the declared set fills as
+    // the declarators are built (no pre-scan - see blockDeclared_).
+    const ScopeState pre = scope_;
+    blockDeclared_.emplace_back();
     for (auto& s : stmt->statements)
     {
         buildStmt(s.get());
+    }
+    const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
+    blockDeclared_.pop_back();
+    for (const auto& name : declared)
+        exitBlockBinding(name, pre);
+}
+
+// Undo ONE name the block declared.  The pre-block binding of the name comes
+// back (or the name is unbound); if the block's declaration is what moved a
+// file-scope variable's binding into the stash, the global comes back OUT of
+// the stash - its value as the block (or a helper the block called) left it -
+// and the stash entry goes.  A stash entry that existed before the block
+// belongs to an outer local or parameter and is left alone: restoring the
+// outer binding is all the inner shadow's end means.
+void IRBuilder::exitBlockBinding(const std::string& name, const ScopeState& pre)
+{
+    // A declared STRUCT owns qualified keys too ("s.f", "s.f.xyz", nested
+    // "s.a.b"): buildDeclStmt seeds them and field assignment rebinds them,
+    // so they end with the declaration exactly as the bare name does
+    // (review: codex - an inner `S s` left its s.f visible after the block,
+    // and the return read 3p where the reference reads the outer p).
+    const std::string prefix = name + ".";
+    auto owned = [&](const std::string& key) {
+        return key == name || key.compare(0, prefix.size(), prefix) == 0;
+    };
+    std::vector<std::string> keys;
+    for (const auto& kv : nameToValue_) if (owned(kv.first)) keys.push_back(kv.first);
+    for (const auto& kv : pre.names)   if (owned(kv.first)) keys.push_back(kv.first);
+    for (const auto& key : keys)
+    {
+        auto it = pre.names.find(key);
+        if (it != pre.names.end()) nameToValue_[key] = it->second;
+        else nameToValue_.erase(key);
+    }
+    keys.clear();
+    for (const auto& kv : localArrayValues_) if (owned(kv.first)) keys.push_back(kv.first);
+    for (const auto& kv : pre.arrays)       if (owned(kv.first)) keys.push_back(kv.first);
+    for (const auto& key : keys)
+    {
+        auto ait = pre.arrays.find(key);
+        if (ait != pre.arrays.end()) localArrayValues_[key] = ait->second;
+        else localArrayValues_.erase(key);
+    }
+
+    // UNSTASH every global key the declared name owns whose stash entry
+    // this block created (a pre-existing entry belongs to an outer shadow
+    // and keeps the value a helper gave it).
+    keys.clear();
+    for (const auto& kv : shadowedGlobals_)
+        if (owned(kv.first) && !pre.shadowedGlobals.count(kv.first)) keys.push_back(kv.first);
+    for (const auto& key : keys)
+    {
+        auto st = shadowedGlobals_.find(key);
+        if (st->second != InvalidIRValue) nameToValue_[key] = st->second;
+        else nameToValue_.erase(key);
+        shadowedGlobals_.erase(st);
+        auto sa = shadowedGlobalArrays_.find(key);
+        if (sa != shadowedGlobalArrays_.end())
+        {
+            if (!sa->second.empty()) localArrayValues_[key] = sa->second;
+            else localArrayValues_.erase(key);
+            shadowedGlobalArrays_.erase(sa);
+        }
     }
 }
 
@@ -1919,14 +1987,28 @@ void IRBuilder::buildExprStmt(ExprStmt* stmt)
 // falls through to the global load.
 void IRBuilder::stashShadowedGlobal(const std::string& name)
 {
-    if (name.empty() || !module_->findGlobal(name) || shadowedGlobals_.count(name))
-        return;
-    auto prior = nameToValue_.find(name);
-    shadowedGlobals_[name] =
-        prior != nameToValue_.end() ? prior->second : InvalidIRValue;
-    auto priorArr = localArrayValues_.find(name);
-    shadowedGlobalArrays_[name] =
-        priorArr != localArrayValues_.end() ? priorArr->second : std::vector<IRValueID>{};
+    if (name.empty()) return;
+    // A global STRUCT is flattened into globals named by its qualified keys
+    // ("s.f"), and a local `S s` shadows every one of them: each key the
+    // declared name owns gets its own stash entry, keyed by that qualified
+    // name, so a helper's write to the real global field is routed to the
+    // stash and comes back out at block exit (review: codex - the bare-name
+    // stash never fired for a struct, findGlobal("s") being null, and the
+    // helper's write was restored away).
+    const std::string prefix = name + ".";
+    auto stashKey = [&](const std::string& key)
+    {
+        if (shadowedGlobals_.count(key)) return;   // captured ONCE
+        auto prior = nameToValue_.find(key);
+        shadowedGlobals_[key] =
+            prior != nameToValue_.end() ? prior->second : InvalidIRValue;
+        auto priorArr = localArrayValues_.find(key);
+        shadowedGlobalArrays_[key] =
+            priorArr != localArrayValues_.end() ? priorArr->second : std::vector<IRValueID>{};
+    };
+    for (const auto& g : module_->globals)
+        if (g.name == name || g.name.compare(0, prefix.size(), prefix) == 0)
+            stashKey(g.name);
 }
 
 void IRBuilder::buildDeclStmt(DeclStmt* stmt)
@@ -1946,6 +2028,8 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         // global's own binding (if the program assigned it) moves aside so
         // an inlined helper can still reach it by name.
         stashShadowedGlobal(varDecl->name);
+        if (!blockDeclared_.empty())
+            blockDeclared_.back().insert(varDecl->name);   // undone at this block's exit
         // Allocate a value for the variable
         IRValueID varId = currentFunction_->allocateValueId();
         declToValue_[varDecl] = varId;
@@ -2921,6 +3005,31 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         }
     };
     for (const auto& st : callee->body->statements) collectDecls(st.get());
+    // Two sets, two jobs (t_7396e0c2).  calleeScoped walks NESTED blocks and
+    // feeds the nested-helper REFUSAL, where a superset is the safe side.
+    // calleeDirect is the parameters plus the body's own top-level
+    // declarations only: a name declared inside a nested block ends with
+    // that block (buildBlockStmt), so a write to the FILE-SCOPE name after
+    // the block is the global's and must reach the caller - the walked set
+    // used to mark it callee-scoped and drop it (`{ float4 G = q*3; }
+    // G = q*2;` left the caller reading the uniform; the reference reads 2q).
+    std::unordered_set<std::string> calleeDirect;
+    for (const auto& param : callee->parameters)
+        if (!param->name.empty()) calleeDirect.insert(param->name);
+    for (const auto& st : callee->body->statements)
+        if (st && st->kind == StmtKind::Decl)
+            for (const auto& d : static_cast<const DeclStmt*>(st.get())->declarations)
+                if (d) calleeDirect.insert(d->name);
+    // Ownership, not equality: a callee that binds `s` owns "s.f" too (review:
+    // codex - the callee's own struct field write must not be routed to the
+    // caller's stash as a write to the global struct of the same name).
+    auto calleeOwns = [&](const std::string& key) -> bool
+    {
+        for (const auto& n : calleeDirect)
+            if (key == n || (key.size() > n.size() && key[n.size()] == '.' && key.compare(0, n.size(), n) == 0))
+                return true;
+        return false;
+    };
 
     for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
@@ -2935,13 +3044,13 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // falls through to the global load when nothing ever assigned it.
     for (const auto& kv : shadowedGlobals_)
     {
-        if (calleeScoped.count(kv.first)) continue;
+        if (calleeOwns(kv.first)) continue;
         if (kv.second != InvalidIRValue) nameToValue_[kv.first] = kv.second;
         else nameToValue_.erase(kv.first);
     }
     for (const auto& kv : shadowedGlobalArrays_)
     {
-        if (calleeScoped.count(kv.first)) continue;
+        if (calleeOwns(kv.first)) continue;
         if (!kv.second.empty()) localArrayValues_[kv.first] = kv.second;
         else localArrayValues_.erase(kv.first);
     }
@@ -2971,7 +3080,9 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     const auto& savedStashArrays = savedScope.shadowedGlobalArrays;
     inlineScopes_.push_back(calleeScoped);
     inlineStack_.push_back(callee);
+    blockDeclared_.emplace_back();   // the callee's top-level locals are its own, never the caller's block's
     const bool ok = buildInlineFunctionBody(callee, result);
+    blockDeclared_.pop_back();       // discarded: scope_ = savedScope below drops them
     inlineStack_.pop_back();
     inlineScopes_.pop_back();
     // A stash entry the callee CREATED (its own local shadowing a global) is
@@ -3012,7 +3123,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     };
     for (const auto& kv : bodyNames)
     {
-        if (calleeScoped.count(kv.first)) continue;
+        if (calleeOwns(kv.first)) continue;
         if (!module_->findGlobal(kv.first)) continue;
         auto prior = nameToValue_.find(kv.first);
         if (prior != nameToValue_.end() && callerLocalBinding(kv.first, prior->second))
@@ -3035,7 +3146,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     };
     for (const auto& kv : bodyArrays)
     {
-        if (calleeScoped.count(kv.first)) continue;
+        if (calleeOwns(kv.first)) continue;
         IRGlobal* global = module_->findGlobal(kv.first);
         if (!global || !global->type.isArray()) continue;
         if (callerLocalArray(kv.first)) { shadowedGlobalArrays_[kv.first] = kv.second; continue; }
