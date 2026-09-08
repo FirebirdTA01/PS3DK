@@ -147,7 +147,12 @@ census() {
 # in the other must be caught for the unlisted flips.  Run on a short list
 # so the self-check costs seconds.
 short_list="$work/short.txt"
-{ printf '%s\n' "${expected_flips[0]}"; grep -v '/extensions/' "$list" | head -n 3; } > "$short_list"
+# One process, not `grep | head`: under `set -o pipefail` that pair returns 141
+# whenever grep is still writing when head exits after its third line - which
+# is a matter of scheduling, so it passed on a quiet host and failed 141 on a
+# loaded one (2026-09-08, native Linux under a parallel harness).  awk reads
+# the whole list and exits 0.
+{ printf '%s\n' "${expected_flips[0]}"; awk '!/\/extensions\// && ++n <= 3' "$list"; } > "$short_list"
 saved_list="$list"; list="$short_list"
 make_stub() {  # <path> <script lines...>
     local path="$1"; shift
