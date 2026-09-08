@@ -411,3 +411,12 @@ jobs:
           set -e
           tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
           file tools/sprx-linker/sprxlinker.exe
+
+      - name: Exercise Windows refusal adversary
+        env:
+          PS3TC_ADVERSARY_VERBOSE: "1"
+          PS3TC_ADVERSARY_ONLY: >-
+            float-literal-syntax-test.sh mrt-output-test.sh nested-struct-test.sh
+            sampler-binding-test.sh short-root-comparison-test.sh
+            struct-field-update-test.sh tex1d-test.sh vp-special-output-test.sh
+        run: bash tests/shader-compiler/refusal-status-adversary-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler.exe
