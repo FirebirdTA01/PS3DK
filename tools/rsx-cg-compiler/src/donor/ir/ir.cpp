@@ -24,6 +24,7 @@ std::string IRTypeInfo::toString() const
     case IRType::Mat2x2:    result = "mat2"; break;
     case IRType::Mat3x3:    result = "mat3"; break;
     case IRType::Mat4x4:    result = "mat4"; break;
+    case IRType::Sampler1D: result = "sampler1D"; break;
     case IRType::Sampler2D: result = "sampler2D"; break;
     case IRType::SamplerRect: result = "samplerRECT"; break;
     case IRType::SamplerCube: result = "samplerCube"; break;
@@ -139,6 +140,10 @@ IRTypeInfo IRTypeInfo::fromCgType(const CgType& cgType)
             typeStr.find("Cube") != std::string::npos)
         {
             info.baseType = IRType::SamplerCube;
+        }
+        else if (typeStr == "sampler1D")
+        {
+            info.baseType = IRType::Sampler1D;
         }
         else if (typeStr.find("RECT") != std::string::npos ||
                  typeStr.find("Rect") != std::string::npos)

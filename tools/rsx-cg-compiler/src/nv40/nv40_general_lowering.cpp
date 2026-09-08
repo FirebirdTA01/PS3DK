@@ -671,6 +671,8 @@ private:
     // while the container correctly described the bindings - a two-texture
     // shader silently read one texture twice.
     std::unordered_map<IRValueID, int> samplerUnit_;
+    std::unordered_set<int> sampler1DUnits_;
+    std::unordered_set<int> unsupportedSampler1DBindings_;
     // Array uniforms, by name: the source of each element the lowering
     // laid out (FP: one inline-const slot per element; VP: one constant
     // register per REFERENCED element).  Filled in the constructor from
@@ -2038,6 +2040,15 @@ private:
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform &&
                        isSamplerIRType(p.type.baseType)) {
+                if (p.type.baseType == IRType::Sampler1D)
+                {
+                    if ((sem == "TEXUNIT" && p.semanticIndex != nextFpTexUnit) ||
+                        (p.explicitRegisterBank == 'S' &&
+                         p.explicitRegisterIndex != nextFpTexUnit)) {
+                        unsupportedSampler1DBindings_.insert(nextFpTexUnit);
+                    }
+                    sampler1DUnits_.insert(nextFpTexUnit);
+                }
                 samplerUnit_[p.valueId] = nextFpTexUnit++;
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform) {
@@ -2087,6 +2098,16 @@ private:
                     uniformSrc(nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
                        isSamplerIRType(g.type.baseType)) {
+                if (g.type.baseType == IRType::Sampler1D)
+                {
+                    if ((toUpper(g.semanticName) == "TEXUNIT" &&
+                         g.semanticIndex != nextFpTexUnit) ||
+                        (g.explicitRegisterBank == 'S' &&
+                         g.explicitRegisterIndex != nextFpTexUnit)) {
+                        unsupportedSampler1DBindings_.insert(nextFpTexUnit);
+                    }
+                    sampler1DUnits_.insert(nextFpTexUnit);
+                }
                 samplerUnit_[g.valueId] = nextFpTexUnit++;
             } else if (profile_ == GeneralProfile::Fragment) {
                 // File-scope uniforms are numbered after every entry
@@ -6539,6 +6560,28 @@ private:
             return;
         }
         vi.texUnit = unitIt->second;
+        // An unused declaration does not sample the wrong unit. Refuse
+        // only a surviving fetch, preserving previously accepted shaders
+        // whose unused sampler has an explicit noncanonical binding.
+        if (unsupportedSampler1DBindings_.count(vi.texUnit)) {
+            program_.diagnostics.push_back(
+                "nv40-general: tex1D noncanonical explicit TEXUNIT/register binding is not supported; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        if (sampler1DUnits_.count(vi.texUnit) &&
+            valueWidthOf(inst.operands[1]) > 1) {
+            // tex1D's two logical coordinates occupy hardware xx and yy:
+            // the reference emits xxyy, including for float3/4 overloads.
+            // Compose with the resolved source (e.g. wz becomes wwzz),
+            // preserving both the coordinate and the depth reference.
+            const int x = vi.srcs[0].swizzle[0];
+            const int y = vi.srcs[0].swizzle[1];
+            vi.srcs[0].swizzle[0] = x;
+            vi.srcs[0].swizzle[1] = x;
+            vi.srcs[0].swizzle[2] = y;
+            vi.srcs[0].swizzle[3] = y;
+        }
         // A fetch is prec=0 whatever its result type: the reference emits
         // `TEXR H0` for a half-typed fetch (fp16 DESTINATION, fp32 fetch) -
         // measured by claude and codex on h4tex2D under float4 and half4
@@ -8519,9 +8562,7 @@ static void seedFpEmbeddedUniforms(const IRFunction& entry,
         const auto& p = entry.parameters[i];
         if (p.storage != StorageQualifier::Uniform)
             continue;
-        if (p.type.baseType == IRType::Sampler2D ||
-            p.type.baseType == IRType::SamplerRect ||
-            p.type.baseType == IRType::SamplerCube)
+        if (isSamplerIRType(p.type.baseType))
             continue;
         const unsigned count = p.type.isArray()
             ? rsx_cg::fpUniformSlotCount(p.type) : 1u;

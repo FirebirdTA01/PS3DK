@@ -85,6 +85,7 @@ constexpr uint32_t kCgFloat2      = 1046u;
 constexpr uint32_t kCgFloat3      = 1047u;
 constexpr uint32_t kCgFloat4      = 1048u;
 constexpr uint32_t kCgFloat4x4    = 1064u;
+constexpr uint32_t kCgSampler1D   = 1065u;
 constexpr uint32_t kCgSampler2D   = 1066u;
 constexpr uint32_t kCgSamplerCube = 1069u;
 
@@ -129,6 +130,7 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
 // them.
 uint32_t cgTypeForIRType(const IRTypeInfo& t)
 {
+    if (t.baseType == IRType::Sampler1D)   return kCgSampler1D;
     if (t.baseType == IRType::Sampler2D)   return kCgSampler2D;
     if (t.baseType == IRType::SamplerCube) return kCgSamplerCube;
     if (t.isMatrix() && t.matrixRows == 4 && t.matrixCols == 4)

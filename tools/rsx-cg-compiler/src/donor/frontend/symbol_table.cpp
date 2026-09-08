@@ -602,6 +602,9 @@ void SymbolTable::registerTextureSymbols()
 {
     // tex1D, tex2D, tex3D, texCUBE
     addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float4()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex3D", CgType::Float4(), {CgType::Sampler3D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
     addFunction("texCUBE", CgType::Float4(), {CgType::SamplerCube(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);

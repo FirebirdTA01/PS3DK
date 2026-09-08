@@ -234,6 +234,8 @@ jobs:
         run: bash tests/shader-compiler/pack-unpack-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler tex2Dproj -> TXP (t_483feb71)
         run: bash tests/shader-compiler/tex2dproj-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test tex1D coordinate packing and sampler metadata
+        run: bash tests/shader-compiler/tex1d-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test dead texture removal preserves live fetches and discard
         run: bash tests/shader-compiler/dead-texture-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler vertex instructions with two distinct inputs (t_9d0ff137)

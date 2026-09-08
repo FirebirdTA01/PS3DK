@@ -861,6 +861,8 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         irParam.type = getIRType(param->type.get());
         irParam.valueId = currentFunction_->allocateValueId();
         irParam.storage = param->storage;
+        irParam.explicitRegisterBank = param->semantic.explicitRegisterBank;
+        irParam.explicitRegisterIndex = param->semantic.explicitRegisterIndex;
 
         if (!param->semantic.isEmpty())
         {
@@ -4803,6 +4805,7 @@ std::optional<IROp> IRBuilder::builtinToIROp(const std::string& name)
         {"refract", IROp::Refract},
         {"faceforward", IROp::FaceForward},
         {"mul", IROp::MatVecMul},
+        {"tex1D", IROp::TexSample},
         {"tex2D", IROp::TexSample},
         {"h4tex2D", IROp::TexSample},
         {"h3tex2D", IROp::TexSample},
