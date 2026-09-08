@@ -37,11 +37,11 @@ trap 'rm -rf "$work"' EXIT
 declare -A FN=( [1D]=tex1D [2D]=tex2D [3D]=tex3D [CUBE]=texCUBE [RECT]=texRECT )
 declare -A UV=( [1D]="uv.x" [2D]="uv" [3D]="float3(uv, 0)" [CUBE]="float3(uv, 0)" [RECT]="uv" )
 
-# tex1D and tex3D do not lower on the general path today (they refuse with
+# tex3D does not lower on the general path today (it refuses with
 # "unsupported IR op call"), so for those kinds the sampled pair is compared
 # on its REFUSAL rather than on a container.  The alias must not change
 # whether a program is accepted - only how its type is spelled.
-declare -A SAMPLED_COMPILES=( [1D]=no [2D]=yes [3D]=no [CUBE]=yes [RECT]=yes )
+declare -A SAMPLED_COMPILES=( [1D]=yes [2D]=yes [3D]=no [CUBE]=yes [RECT]=yes )
 
 emit() {  # <path> <source-file>; echoes the exit status
     local out="$1" src="$2"
@@ -133,8 +133,14 @@ for kind in 1D 2D 3D CUBE RECT; do
                 printf 'void main(float3 c : COLOR0, out float3 o : COLOR, uniform %s%s t : TEXUNIT1)\n{\n    o = c;\n}\n' \
                     "$spelling" "$kind" > "$src"
             else
-                printf 'void main(float2 uv : TEXCOORD0, out float4 o : COLOR, uniform %s%s t : TEXUNIT1)\n{\n    o = %s(t, %s);\n}\n' \
-                    "$spelling" "$kind" "${FN[$kind]}" "${UV[$kind]}" > "$src"
+                # The tex1D slice refuses a surviving noncanonical binding
+                # until explicit TEXUNIT allocation is repaired.  Exercise
+                # accepted aliases on unit 0; the unused unit-1 row above
+                # continues to check that an unused binding is accepted.
+                unit=1
+                [[ "$kind" == 1D ]] && unit=0
+                printf 'void main(float2 uv : TEXCOORD0, out float4 o : COLOR, uniform %s%s t : TEXUNIT%d)\n{\n    o = %s(t, %s);\n}\n' \
+                    "$spelling" "$kind" "$unit" "${FN[$kind]}" "${UV[$kind]}" > "$src"
             fi
         done
 

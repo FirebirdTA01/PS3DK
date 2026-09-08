@@ -45,6 +45,7 @@ enum class IRType
     Mat4x4,
 
     // Sampler types
+    Sampler1D,
     Sampler2D,
     SamplerRect,
     SamplerCube,
@@ -62,7 +63,8 @@ enum class IRType
 // four sites that need it (t_f5f750ff).
 inline bool isSamplerIRType(IRType t)
 {
-    return t == IRType::Sampler2D ||
+    return t == IRType::Sampler1D ||
+           t == IRType::Sampler2D ||
            t == IRType::SamplerRect ||
            t == IRType::SamplerCube;
 }
@@ -416,6 +418,9 @@ struct IRParameter
     std::string rawSemanticName;  // original source spelling (e.g. "TEXCOORD0"); empty if absent
     int semanticIndex = 0;
     bool inferredSemantic = false;  // semantic was assigned by the unbound-input default pass
+    // Preserve entry-parameter register(sN) bindings for sampler lowering.
+    char explicitRegisterBank = 0;
+    int explicitRegisterIndex = 0;
 };
 
 class IRFunction
