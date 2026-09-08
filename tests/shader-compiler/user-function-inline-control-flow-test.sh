@@ -117,6 +117,11 @@ factor() {   # <stem> fp|vp <k>: the output is exactly k * the one input, lane b
     done
     pass "$stem: output = $k * input; lane, sign, no-END and early-END controls rejected"
 }
+joined_none() {   # <stem>: the program carries NO predicated select (an arm local that died never joined)
+    if grep -qE '^[0-9]+ MOV dst=none ' "$work/$1.dec"; then
+        cat "$work/$1.dec" >&2; fail "$1: a condition-register write is present - something joined at the if"
+    fi
+}
 count() {    # <stem> <regex> <expected count>
     local n; n=$(grep -cE "$2" "$work/$1.dec" || true)
     [[ "$n" -eq "$3" ]] || { cat "$work/$1.dec" >&2; fail "$1: $n lines match /$2/, expected $3"; }
@@ -305,6 +310,61 @@ expect fp_inline_param_then_local_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c
 forbid fp_inline_param_then_local_shadow_f 's0=TEX0'
 forbid fp_inline_param_then_local_shadow_f '^[0-9]+ MUL '
 count  fp_inline_param_then_local_shadow_f '^[0-9]+ ' 2
+
+# ------------------------------------------------- block exit (t_7396e0c2)
+# A block's own declarations end with it: ScopeState's fourth boundary row.
+# Every row below is reference-measured (C:/cgdev/block-probe); the values are
+# the reference's, the SHAPE differs only by the standing export-fold MOV, the
+# varying preload, and a dead compare left after an arm's only consumer dies.
+# Red on 4d0097af: restash read p*2, then_only_global refused, then_only_param
+# emitted a select against the parameter, loop_local returned 3p, helper_shadow
+# read the uniform (the walked callee-scoped set dropped the post-block write).
+accept fp_block_local_restash_f sce_fp_rsx "a block-local G dies at the block's end: return G reads the file-scope G (byte-identical to the reference)"
+expect fp_block_local_restash_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+forbid fp_block_local_restash_f 's0=TEX0'
+forbid fp_block_local_restash_f '^[0-9]+ MUL '
+accept fp_block_outer_write_f sce_fp_rsx "an assignment to an OUTER name inside a block SURVIVES the block (the restore is keyed on declarations, not on keys touched)"
+expect fp_block_outer_write_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
+factor fp_block_outer_write_f fp 2
+accept fp_block_helper_shadow_f sce_fp_rsx "a helper's block-local shadow dies; its post-block write to the global reaches the caller (reference 2*p)"
+expect fp_block_helper_shadow_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
+factor fp_block_helper_shadow_f fp 2
+accept fp_block_then_only_global_f sce_fp_rsx "a then-only local shadowing the global dies before the join: return G reads the uniform (refused on 4d0097af)"
+expect fp_block_then_only_global_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+forbid fp_block_then_only_global_f '^[0-9]+ MUL '
+joined_none fp_block_then_only_global_f
+accept fp_block_then_only_param_f sce_fp_rsx "a then-only local shadowing the entry PARAMETER dies before the join: main returns its parameter, no select"
+expect fp_block_then_only_param_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw'
+forbid fp_block_then_only_param_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+joined_none fp_block_then_only_param_f
+accept fp_block_use_before_decl_f sce_fp_rsx "a use BEFORE the block-local's declaration names the file-scope G (no pre-scan binding; reference 2*(p+G))"
+expect fp_block_use_before_decl_f '^[0-9]+ ADD dst=R[0-9]+ mask=xyzw .* s0=c[0-9]+\.xyzw s1=R[0-9]+\.xyzw'
+count  fp_block_use_before_decl_f '^[0-9]+ MUL ' 1
+accept fp_block_field_write_f sce_fp_rsx "an outer struct FIELD written inside a block survives (a binding site with no DeclStmt)"
+expect fp_block_field_write_f '^[0-9]+ MAD dst=R[0-9]+ mask=xyzw .* s1=c[0-9]+\.xxxx s2=R[0-9]+\.xyzw'
+accept fp_block_loop_local_f sce_fp_rsx "a per-trip loop local does not carry past the loop: the outer t is returned (byte-identical to the reference)"
+expect fp_block_loop_local_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw'
+forbid fp_block_loop_local_f '^[0-9]+ MUL '
+accept fp_block_struct_shadow_f sce_fp_rsx "an inner S s shadows an outer S s: after the block s.f is the OUTER field - a declared struct's qualified keys end with it (review: codex; byte-identical)"
+expect fp_block_struct_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw'
+forbid fp_block_struct_shadow_f '^[0-9]+ MUL '
+accept fp_block_outer_shadow_helper_write_f sce_fp_rsx "an outer local shadows G; a helper writes the real G inside an inner block; get() after the block reads 2*p (a pre-existing stash entry is kept, not restored)"
+factor fp_block_outer_shadow_helper_write_f fp 2
+accept fp_block_local_then_helper_write_f sce_fp_rsx "a block-local G shadows the global; a helper INSIDE the block writes the real G; after the block G is the global and carries 2*p (the unstash)"
+factor fp_block_local_then_helper_write_f fp 2
+# A GLOBAL struct is flattened into globals named by its qualified keys ("s.f"),
+# so a shadowing local `S s` stashes every key it owns and a helper's write to
+# the real field is routed to the stash and comes back at block exit (review:
+# codex, composed boundary - the candidate restored that write away; the parent
+# was right by accident, the local and the global sharing one flat key).
+accept fp_block_struct_global_write_f sce_fp_rsx "a block-local S s shadows the GLOBAL struct; a helper inside the block writes the real s.f; after the block s.f is the global's 2*p"
+factor fp_block_struct_global_write_f fp 2
+accept fp_block_struct_global_shadow_f sce_fp_rsx "a block-local S s shadows the GLOBAL struct, no helper: after the block s.f is the global's field, the uniform (3*p on 4d0097af)"
+expect fp_block_struct_global_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
+forbid fp_block_struct_global_shadow_f '^[0-9]+ MUL '
+accept fp_inline_struct_local_write_f sce_fp_rsx "a helper declares its OWN S s and writes s.f: the caller's global s.f is untouched - ownership in the write-back (3*p on 4d0097af)"
+expect fp_inline_struct_local_write_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw'
+forbid fp_inline_struct_local_write_f '^[0-9]+ MUL '
 
 # ---------------------------------------------------------------- named gaps
 refuse "return inside a branch of the helper" fp_inline_return_in_if_f sce_fp_rsx "a return inside control flow"

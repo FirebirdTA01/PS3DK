@@ -55,13 +55,14 @@ private:
     // PER-SCOPE STATE, in ONE place (t_4ac44f78).  Every map that binds a
     // NAME to a value lives in ScopeState, and every scope boundary handles
     // the whole struct - the three boundaries are the rows of this table,
-    // and a new map is wrong until it has an answer in every cell:
+    // and a new map is wrong until it has an answer in every cell (block exit
+    // is keyed on the names the block DECLARED, never on the keys it touched):
     //
-    //   map                   function entry  if-join (buildIfStmt)   inline call
-    //   names                 clear()         snapshot/restore/join   save/restore + propagate
-    //   arrays                clear()         join PER ELEMENT "a[i]" save/restore + propagate
-    //   shadowedGlobals       clear()         join "G@"               save/restore + propagate
-    //   shadowedGlobalArrays  clear()         join "B@[i]"            save/restore + propagate
+    //   map                   function entry  if-join (buildIfStmt)   inline call                 block exit (buildBlockStmt)
+    //   names                 clear()         snapshot/restore/join   save/restore + propagate    declared names restored/unbound
+    //   arrays                clear()         join PER ELEMENT "a[i]" save/restore + propagate    declared names restored/unbound
+    //   shadowedGlobals       clear()         join "G@"               save/restore + propagate    entries the block created UNSTASHED
+    //   shadowedGlobalArrays  clear()         join "B@[i]"            save/restore + propagate    entries the block created UNSTASHED
     //
     // History: nameToValue_ was joined from the start; localArrayValues_
     // was not snapshotted, restored or joined for as long as it existed
@@ -116,6 +117,17 @@ private:
     // function binds that name itself (a local or a parameter); no-op if
     // the name is not a global or is already stashed.
     void stashShadowedGlobal(const std::string& name);
+    // BLOCK EXIT (t_7396e0c2): the names each open block DECLARED, one set per
+    // block, pushed by buildBlockStmt and filled by buildDeclStmt as it reaches
+    // each declarator - never pre-scanned, so a use before the declaration still
+    // names the outer binding (oracle: `float4 r = G; float4 G = ...` reads the
+    // global).  At block exit exactly these names are undone; every other key
+    // the block touched (assignments to outer names, struct-field bases, loop
+    // counters, join-time loads) is the block's effect on its enclosing scope
+    // and survives.  An inlined helper pushes its own frame so its top-level
+    // locals never land in the caller's block.
+    std::vector<std::unordered_set<std::string>> blockDeclared_;
+    void exitBlockBinding(const std::string& name, const ScopeState& pre);
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;

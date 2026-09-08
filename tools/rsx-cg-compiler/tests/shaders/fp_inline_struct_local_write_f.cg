@@ -1,0 +1,6 @@
+// A helper declares its OWN S s and writes s.f: that is the helper's local, not the global struct s
+// the caller reads after the call (reference: the caller's own p). (review: codex - ownership in the write-back)
+struct S { float4 f; };
+S s;
+float4 helper(float4 q) { S s; s.f = q * 3.0; return s.f; }
+float4 main(float4 p : TEXCOORD0) : COLOR { s.f = p; float4 h = helper(p); return s.f + h * 0.0; }

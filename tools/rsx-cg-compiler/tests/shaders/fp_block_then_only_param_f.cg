@@ -1,0 +1,2 @@
+// A then-only local shadowing the entry PARAMETER dies before the join: main returns its parameter.
+float4 main(float4 G : TEXCOORD0) : COLOR { if (G.x > 0.0) { float4 G = float4(2.0, 3.0, 4.0, 5.0); } return G; }

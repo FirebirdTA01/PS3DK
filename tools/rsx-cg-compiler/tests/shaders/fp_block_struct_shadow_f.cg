@@ -1,0 +1,3 @@
+// An inner S s shadows an outer S s: after the block, s.f is the OUTER struct's field (p), not the inner's (3p).
+struct S { float4 f; };
+float4 main(float4 p : TEXCOORD0) : COLOR { S s; s.f = p; { S s; s.f = p * 3.0; } return s.f; }

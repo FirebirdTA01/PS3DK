@@ -1,0 +1,4 @@
+// A helper's BLOCK-local shadows the global it then writes outside the block: the caller reads the write.
+float4 G;
+void gen(float4 q) { { float4 G = q * 3.0; } G = q * 2.0; }
+float4 main(float4 p : TEXCOORD0) : COLOR { gen(p); return G; }
