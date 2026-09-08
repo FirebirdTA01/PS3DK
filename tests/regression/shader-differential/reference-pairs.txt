@@ -437,3 +437,8 @@ tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_control_f.cg|0|general
 # the export-fold MOV only), so a moved pixel here is a value defect.
 tests/regression/shader-differential/shaders/sd_pack_2half.fcg|0|general
 tests/regression/shader-differential/shaders/sd_pack_4ubyte.fcg|0|general
+
+# PROJECTIVE FETCH (t_483feb71): TXP decides the pixels; the explicit-divide
+# twin beside it is what the projection must paint.
+tests/regression/shader-differential/shaders/sd_txp.fcg|0|general
+tests/regression/shader-differential/shaders/sd_txp_div_twin.fcg|0|general

@@ -127,6 +127,7 @@ enum class VOp
     Seq,
     Sne,
     Tex,
+    Txp,    // projective fetch (tex2Dproj), fragment-only
     // VP only (t_99b29225): load a lane of an ADDRESS register from the
     // index value of a run-time array read.  dst.address names A0/A1 and
     // the lane is the writemask; srcs[0] is the index with its swizzle.
@@ -1483,6 +1484,7 @@ private:
         const auto latencyFor = [&](const VInstr& vi) {
             switch (vi.op) {
             case VOp::Tex:
+            case VOp::Txp:
                 return 4;
             case VOp::Dp4:
                 return 4;
@@ -2609,6 +2611,9 @@ private:
         case IROp::TexSample:
             lowerTex(inst);
             return;
+        case IROp::TexSampleProj:
+            lowerTex(inst, VOp::Txp);
+            return;
         case IROp::StoreOutput:
             lowerStoreOutput(inst);
             return;
@@ -3610,7 +3615,7 @@ private:
                 !last.dst.none && !last.dst.output &&
                 last.dst.index == vregIt->second &&
                 last.op != VOp::SelPred && last.op != VOp::Kil &&
-                last.op != VOp::Tex && last.fpScale == 0 &&
+                last.op != VOp::Tex && last.op != VOp::Txp && last.fpScale == 0 &&
                 !last.stubFenceBefore && !last.stubFenceBrBefore;
             if (fusable && soleConsumer) {
                 kil.killFused = last.op;
@@ -6492,14 +6497,35 @@ private:
         program_.instrs.push_back(blend);
     }
 
-    void lowerTex(const IRInstruction& inst)
+    // TXP (t_483feb71) is TEX with the coordinate's last lane as the
+    // divisor: the reference reads the coordinate exactly as TEX does (the
+    // varying with its swizzle, or the producing temp), writes the consumed
+    // lanes, and converts at the store for a half output.  One opcode, same
+    // body; every place that special-cases Tex treats Txp the same way.
+    void lowerTex(const IRInstruction& inst, VOp op = VOp::Tex)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
         VInstr vi;
-        vi.op = VOp::Tex;
+        vi.op = op;
         vi.dst.index = define(inst.result);
-        vi.dst.writemask = componentMask(inst.resultType);
+        // The reference writes only the lanes the program consumes (TXP
+        // R0.x for a fetch read as .x).  Applied to TXP here, where it was
+        // measured; TEX keeps its full mask until its own movers are judged
+        // (the reference trims TEX the same way - a follow-up).
+        vi.dst.writemask = op == VOp::Txp
+            ? consumedLanes(inst.result, componentMask(inst.resultType))
+            : componentMask(inst.resultType);
         vi.srcs[0] = resolve(inst.operands[1]);
+        if (op == VOp::Txp && operandWidth(inst.operands[1]) == 3) {
+            // TXP divides by source W.  A float3 coordinate in a temp or a
+            // constant has no w of its own (the temp's w is unwritten, the
+            // literal block pads it with zero), so the reference reads it
+            // as .xyzz - the divisor is the logical z (review: codex,
+            // build/codex-txp-probes).  A varying's resolve() already
+            // arrives with its last lane smeared; this makes every width-3
+            // source read the same way.
+            vi.srcs[0].swizzle[3] = vi.srcs[0].swizzle[2];
+        }
         const auto unitIt = samplerUnit_.find(inst.operands[0]);
         if (unitIt == samplerUnit_.end()) {
             // Defaulting to 0 here is what made every sampler read the first
@@ -6513,6 +6539,15 @@ private:
             return;
         }
         vi.texUnit = unitIt->second;
+        // A fetch is prec=0 whatever its result type: the reference emits
+        // `TEXR H0` for a half-typed fetch (fp16 DESTINATION, fp32 fetch) -
+        // measured by claude and codex on h4tex2D under float4 and half4
+        // outputs.  Pinned as an explicit override so a pass that stamps
+        // half-typed results with FLOAT16 (t_cde25bad) leaves the fetch
+        // alone, exactly as the pack/unpack family does.  The H destination
+        // is a separate, unmodelled rule (typed-texture follow-up).
+        if (profile_ == GeneralProfile::Fragment)
+            vi.fpPrecisionOverride = NVFX_FP_PRECISION_FP32;
         program_.instrs.push_back(vi);
     }
 
@@ -6811,7 +6846,8 @@ private:
             std::any_of(program_.instrs.begin(), program_.instrs.end(),
                 [&](const VInstr& vi) {
                     return !vi.dst.none && !vi.dst.output &&
-                           vi.dst.index == regIt->second && vi.op == VOp::Tex;
+                           vi.dst.index == regIt->second &&
+                           (vi.op == VOp::Tex || vi.op == VOp::Txp);
                 });
         if (profile_ == GeneralProfile::Vertex &&
             regIt != program_.valueToVReg.end()) {
@@ -8013,6 +8049,7 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Seq: return NVFX_FP_OP_OPCODE_SEQ;
     case VOp::Sne: return NVFX_FP_OP_OPCODE_SNE;
     case VOp::Tex: return NVFX_FP_OP_OPCODE_TEX;
+    case VOp::Txp: return NVFX_FP_OP_OPCODE_TXP;
     case VOp::Arl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Ftoi: return NVFX_FP_OP_OPCODE_MOV;
     }
@@ -8061,6 +8098,7 @@ static const char* vOpName(VOp op)
     case VOp::Seq: return "Seq";
     case VOp::Sne: return "Sne";
     case VOp::Tex: return "Tex";
+    case VOp::Txp: return "Txp";
     case VOp::Arl: return "Arl";
     case VOp::Ftoi: return "Ftoi";
     case VOp::SelPred: return "SelPred";
@@ -8125,7 +8163,7 @@ static bool isVpVectorOp(VOp op)
 {
     // ARL never pairs: the reference emits it alone, and a co-issued
     // half shares the constant address the relative reads depend on.
-    return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Arl;
+    return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Txp && op != VOp::Arl;
 }
 
 static bool sameTempRegister(const VSrc& src, const VDst& dst)
@@ -8372,6 +8410,7 @@ static bool fpProducerNeedsFenctr(VOp op)
 {
     switch (op) {
     case VOp::Tex:
+    case VOp::Txp:
     case VOp::Rcp:
     case VOp::Rsq:
     case VOp::Sin:
@@ -8512,7 +8551,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             out.diagnostics.push_back("nv40-general-fp: " + why);
             return out;
         }
-        if (vi.op == VOp::Tex)
+        if (vi.op == VOp::Tex || vi.op == VOp::Txp)
             attrs.partialTexType &= ~(3u << (vi.texUnit * 2));
         for (const VSrc& src : vi.srcs) {
             if (src.kind == VSrcKind::Input) {
@@ -9026,7 +9065,7 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             out.diagnostics.push_back("nv40-general-vp: " + why);
             return out;
         }
-        if (vi.op == VOp::Tex) {
+        if (vi.op == VOp::Tex || vi.op == VOp::Txp) {
             out.diagnostics.push_back("nv40-general-vp: texture fetch unsupported in VP");
             return out;
         }

@@ -1,0 +1,1 @@
+float4 main(float4 uv : TEXCOORD0, float4 uv2 : TEXCOORD1, uniform sampler2D s, uniform sampler2D t) : COLOR { return tex2Dproj(s, uv) + tex2Dproj(t, uv2); }

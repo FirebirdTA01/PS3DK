@@ -1,0 +1,1 @@
+float4 main(float4 p : POSITION, float4 uv : TEXCOORD0, uniform sampler2D s, out float4 c : TEXCOORD0) : POSITION { c = tex2Dproj(s, uv); return p; }

@@ -1,0 +1,1 @@
+float4 main(float4 uv : TEXCOORD0, uniform samplerCUBE s) : COLOR { return texCUBEproj(s, uv); }
