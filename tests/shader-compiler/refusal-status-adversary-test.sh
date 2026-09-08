@@ -204,6 +204,17 @@ judge() {   # $1 script, $2 timeout -> verdict (failures without firing are name
     esac
 }
 
+# ONLY names guards that are EXPECTED to exercise a refusal. Unlike the full
+# inventory (which includes success-only and host API tests), every selected
+# guard must reach a refusal, or the targeted run has not proved its property.
+require_targeted_refusals() {
+    if (( $# > 0 )); then
+        printf 'FAIL: targeted guards exercised no refusal:\n' >&2
+        printf '  %s\n' "$@" >&2
+        return 1
+    fi
+}
+
 # A detector nobody has seen accuse anything is not a detector.  Two synthetic
 # scripts, one weak and one correct, both asserting the same refusal.
 cat >"$work/weak-test.sh" <<WEAK
@@ -307,6 +318,33 @@ grep -q 'FileNotFoundError' "$work/judge.log" \
     || fail 'no-refusal control: successful non-refusal invocation was accused'
 [[ "$(judge "$work/failed-no-refusal-test.sh")" == failed-without-refusal:2 ]] \
     || fail 'failed-no-refusal control: failure after entry vanished into untested'
+
+# A swallowed launch failure exits successfully with no entry/refusal. The
+# ordinary classifier correctly has no refusal to judge; the TARGETED gate
+# must reject it because the caller promised this named guard exercises one.
+cat >"$work/unreachable-target-test.sh" <<'UNREACHABLE'
+#!/usr/bin/env bash
+python3 - "$1.missing" <<'PY'
+import subprocess, sys
+try:
+    subprocess.run([sys.argv[1]])
+except FileNotFoundError:
+    print('launcher unreachable: FileNotFoundError', file=sys.stderr)
+else:
+    sys.exit(3)
+PY
+UNREACHABLE
+[[ "$(judge "$work/unreachable-target-test.sh")" == untested ]] \
+    || fail 'targeted control: swallowed launch failure did not reach the no-refusal class'
+grep -Fxq 'launcher unreachable: FileNotFoundError' "$work/judge.log" \
+    || fail 'targeted control: the launcher was not unreachable for the expected reason'
+if require_targeted_refusals unreachable-target-test.sh >"$work/targeted-control.log" 2>&1; then
+    fail 'targeted control: a successful target with an unreachable launcher was accepted without exercising a refusal'
+fi
+grep -Fxq 'FAIL: targeted guards exercised no refusal:' "$work/targeted-control.log" \
+    && grep -Fxq '  unreachable-target-test.sh' "$work/targeted-control.log" \
+    || fail 'targeted control: rejection did not name the missing refusal and its target'
+printf '  targeted control rejected: unreachable-target-test.sh exercised no refusal\n'
 printf '  detector controls: Bash/Python weak accused, exact-1 caught; Python SIGABRT=134 (Windows)/-6 (POSIX); launch failure=failed-before-wrapper:1; no refusal=untested; entered failure=failed-without-refusal:2; hangs=hung; crash=broke:3\n'
 
 # ------------------------------------------------------------------ the real run
@@ -325,7 +363,7 @@ if [[ -n "${PS3TC_ADVERSARY_ONLY:-}" ]]; then
     printf '  targeted run: %d named guards (not the full inventory)\n' "${#scripts[@]}"
 fi
 
-weak=(); inconclusive=(); ok=0; untested=0
+weak=(); inconclusive=(); untested_names=(); ok=0; untested=0
 for s in "${scripts[@]}"; do
     started=$SECONDS
     verdict="$(judge "$here/$s")"
@@ -333,7 +371,7 @@ for s in "${scripts[@]}"; do
     case "$verdict" in
         weak)     weak+=("$s") ;;
         ok)       ok=$((ok + 1)) ;;
-        untested) untested=$((untested + 1)) ;;
+        untested) untested=$((untested + 1)); untested_names+=("$s") ;;
         *)        inconclusive+=("$s ($verdict)")
                   printf '  inconclusive: %s (%s)\n' "$s" "$verdict" >&2
                   tail -n 8 "$work/judge.log" >&2 ;;
@@ -342,6 +380,10 @@ done
 
 printf '  judged %d scripts: %d assert a refusal and catch a crash, %d never compile one, %d weak, %d inconclusive\n' \
     "${#scripts[@]}" "$ok" "$untested" "${#weak[@]}" "${#inconclusive[@]}"
+
+if [[ -n "${PS3TC_ADVERSARY_ONLY:-}" ]]; then
+    require_targeted_refusals "${untested_names[@]}" || exit 1
+fi
 
 # "untested" is the safe verdict and it is also the one that can hide a
 # systemic failure: if the adversary stopped firing - a broken wrapper, a
