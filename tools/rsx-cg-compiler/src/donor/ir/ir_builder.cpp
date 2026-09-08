@@ -2832,78 +2832,6 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     return emitCall(expr->functionName, resultType, argValues);
 }
 
-// Whether a function body mentions `name` as an identifier anywhere - the
-// predicate behind the nested-shadow refusal.  Conservative: any mention
-// counts, including one that a later pass would have removed.
-static void collectIdentifiers(const ExprNode* e, std::unordered_set<std::string>& out);
-static void collectIdentifiersStmt(const StmtNode* st, std::unordered_set<std::string>& out)
-{
-    if (!st) return;
-    switch (st->kind)
-    {
-    case StmtKind::Expr:
-        collectIdentifiers(static_cast<const ExprStmt*>(st)->expr.get(), out); break;
-    case StmtKind::Decl:
-        for (const auto& d : static_cast<const DeclStmt*>(st)->declarations)
-            if (d && d->kind == DeclKind::Variable)
-                collectIdentifiers(static_cast<const VarDecl*>(d.get())->initializer.get(), out);
-        break;
-    case StmtKind::Return:
-        collectIdentifiers(static_cast<const ReturnStmt*>(st)->value.get(), out); break;
-    case StmtKind::Block:
-        for (const auto& inner : static_cast<const BlockStmt*>(st)->statements)
-            collectIdentifiersStmt(inner.get(), out);
-        break;
-    case StmtKind::If:
-    {
-        const auto* ifs = static_cast<const IfStmt*>(st);
-        collectIdentifiers(ifs->condition.get(), out);
-        collectIdentifiersStmt(ifs->thenBranch.get(), out);
-        collectIdentifiersStmt(ifs->elseBranch.get(), out);
-        break;
-    }
-    default: break;
-    }
-}
-static void collectIdentifiers(const ExprNode* e, std::unordered_set<std::string>& out)
-{
-    if (!e) return;
-    switch (e->kind)
-    {
-    case ExprKind::Identifier:
-        out.insert(static_cast<const IdentifierExpr*>(e)->name); break;
-    case ExprKind::Binary:
-        collectIdentifiers(static_cast<const BinaryExpr*>(e)->left.get(), out);
-        collectIdentifiers(static_cast<const BinaryExpr*>(e)->right.get(), out); break;
-    case ExprKind::Unary:
-        collectIdentifiers(static_cast<const UnaryExpr*>(e)->operand.get(), out); break;
-    case ExprKind::Call:
-        for (const auto& a : static_cast<const CallExpr*>(e)->arguments) collectIdentifiers(a.get(), out);
-        break;
-    case ExprKind::MemberAccess:
-        collectIdentifiers(static_cast<const MemberAccessExpr*>(e)->object.get(), out); break;
-    case ExprKind::Index:
-        collectIdentifiers(static_cast<const IndexExpr*>(e)->array.get(), out);
-        collectIdentifiers(static_cast<const IndexExpr*>(e)->index.get(), out); break;
-    case ExprKind::Ternary:
-        collectIdentifiers(static_cast<const TernaryExpr*>(e)->condition.get(), out);
-        collectIdentifiers(static_cast<const TernaryExpr*>(e)->thenExpr.get(), out);
-        collectIdentifiers(static_cast<const TernaryExpr*>(e)->elseExpr.get(), out); break;
-    case ExprKind::Cast:
-        collectIdentifiers(static_cast<const CastExpr*>(e)->operand.get(), out); break;
-    case ExprKind::Constructor:
-        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments) collectIdentifiers(a.get(), out);
-        break;
-    default: break;
-    }
-}
-bool IRBuilder::functionNamesIdentifier(const FunctionDecl* fn, const std::string& name)
-{
-    std::unordered_set<std::string> ids;
-    if (fn && fn->body)
-        for (const auto& st : fn->body->statements) collectIdentifiersStmt(st.get(), ids);
-    return ids.count(name) != 0;
-}
 
 bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                        const std::vector<IRValueID>& args,
@@ -2971,46 +2899,10 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     const auto& savedArrays = savedScope.arrays;
     auto savedSwizzles = identityPrefixSwizzleBase_;
 
-    // The names the CALLEE declares - its parameters and every local it
-    // declares in its body - are scoped to the inlined body: they shadow
-    // for its duration and are dropped afterwards.  Every OTHER name the
-    // body binds is a file-scope variable it wrote, and that write must
-    // reach the caller (`void gen(float4 p) { G = p * 2; }` then `return G;`
-    // reads 2*p in the reference).  The first draft restored the whole map
-    // and lost such writes; and it left a callee-local array `B[1]` in the
-    // bare-name array map, where it shadowed the caller's global B after
-    // the call returned (review: codex).
-    std::unordered_set<std::string> calleeScoped;
-    for (const auto& param : callee->parameters)
-        if (!param->name.empty()) calleeScoped.insert(param->name);
-    std::function<void(const StmtNode*)> collectDecls = [&](const StmtNode* st)
-    {
-        if (!st) return;
-        switch (st->kind)
-        {
-        case StmtKind::Decl:
-            for (const auto& d : static_cast<const DeclStmt*>(st)->declarations)
-                if (d) calleeScoped.insert(d->name);
-            break;
-        case StmtKind::Block:
-            for (const auto& inner : static_cast<const BlockStmt*>(st)->statements)
-                collectDecls(inner.get());
-            break;
-        case StmtKind::If:
-            collectDecls(static_cast<const IfStmt*>(st)->thenBranch.get());
-            collectDecls(static_cast<const IfStmt*>(st)->elseBranch.get());
-            break;
-        default:
-            break;
-        }
-    };
-    for (const auto& st : callee->body->statements) collectDecls(st.get());
-    // Two sets, two jobs (t_7396e0c2).  calleeScoped walks NESTED blocks and
-    // feeds the nested-helper REFUSAL, where a superset is the safe side.
     // calleeDirect is the parameters plus the body's own top-level
     // declarations only: a name declared inside a nested block ends with
     // that block (buildBlockStmt), so a write to the FILE-SCOPE name after
-    // the block is the global's and must reach the caller - the walked set
+    // the block is the global's and must reach the caller - a walked set
     // used to mark it callee-scoped and drop it (`{ float4 G = q*3; }
     // G = q*2;` left the caller reading the uniform; the reference reads 2q).
     std::unordered_set<std::string> calleeDirect;
@@ -3035,6 +2927,12 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     {
         ParamDecl* param = callee->parameters[i].get();
         declToValue_[param] = args[i];
+        // A parameter that shadows a file-scope name moves the global's
+        // binding into the stash, exactly as the entry function's does
+        // (t_3af598c8): a helper called from this body then reads the
+        // global, and its write to the global lands in the stash and
+        // comes back out below (t_1de985bd - this used to be REFUSED).
+        stashShadowedGlobal(param->name);
         if (!param->name.empty())
             nameToValue_[param->name] = args[i];
     }
@@ -3042,56 +2940,62 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // Names the caller shadows with a local: for the body, the name means
     // the GLOBAL.  Bind its stashed value, or unbind the name so a read
     // falls through to the global load when nothing ever assigned it.
+    // Only the callee's PARAMETERS are exempt here - they were bound above
+    // and every occurrence in the body names them.  A top-level local the
+    // callee declares LATER is not: a read before that declaration names
+    // the global (review: codex - `D = G; float4 G = ...;` read the
+    // enclosing helper's parameter when the whole-body ownership set was
+    // used as the exemption; the declaration rebinds the name when it is
+    // reached, as buildDeclStmt does for any shadowing local).
+    auto calleeParamOwns = [&](const std::string& key) -> bool
+    {
+        for (const auto& param : callee->parameters)
+        {
+            const std::string& n = param->name;
+            if (n.empty()) continue;
+            if (key == n || (key.size() > n.size() && key[n.size()] == '.' && key.compare(0, n.size(), n) == 0))
+                return true;
+        }
+        return false;
+    };
     for (const auto& kv : shadowedGlobals_)
     {
-        if (calleeOwns(kv.first)) continue;
+        if (calleeParamOwns(kv.first)) continue;
         if (kv.second != InvalidIRValue) nameToValue_[kv.first] = kv.second;
         else nameToValue_.erase(kv.first);
     }
     for (const auto& kv : shadowedGlobalArrays_)
     {
-        if (calleeOwns(kv.first)) continue;
+        if (calleeParamOwns(kv.first)) continue;
         if (!kv.second.empty()) localArrayValues_[kv.first] = kv.second;
         else localArrayValues_.erase(kv.first);
     }
 
-    // Only the callee's own PARAMETERS exempt a name: they bind at entry,
-    // so every occurrence in the body names the parameter.  A local the
-    // body declares does not - a read before (or outside) that declaration
-    // names the global (review: codex - a nested block declaring G after
-    // `D = G` still read the enclosing helper's G).
-    std::unordered_set<std::string> calleeParams;
-    for (const auto& param : callee->parameters)
-        if (!param->name.empty()) calleeParams.insert(param->name);
-    for (const auto& scope : inlineScopes_)
-        for (const auto& name : scope)
-            if (!calleeParams.count(name) && module_->findGlobal(name) &&
-                functionNamesIdentifier(callee, name))
-            {
-                error(expr->loc, "cannot inline user function '" + callee->name +
-                                 "': it names file-scope '" + name +
-                                 "' while an enclosing helper's parameter or local of that name is in scope; refusing");
-                declToValue_ = std::move(savedDecls);
-                scope_ = savedScope;
-                identityPrefixSwizzleBase_ = std::move(savedSwizzles);
-                return false;
-            }
+    // The nested-helper refusal that stood here ("names file-scope X while
+    // an enclosing helper's parameter or local of that name is in scope")
+    // is gone (t_1de985bd): the enclosing helper's parameter now stashes
+    // the global at binding, its locals stash at declaration and unstash
+    // at block exit, so a nested helper reads and writes the GLOBAL by
+    // name through the stash like any other caller shadow.
     const auto& savedStash = savedScope.shadowedGlobals;
     const auto& savedStashArrays = savedScope.shadowedGlobalArrays;
-    inlineScopes_.push_back(calleeScoped);
     inlineStack_.push_back(callee);
     blockDeclared_.emplace_back();   // the callee's top-level locals are its own, never the caller's block's
     const bool ok = buildInlineFunctionBody(callee, result);
     blockDeclared_.pop_back();       // discarded: scope_ = savedScope below drops them
     inlineStack_.pop_back();
-    inlineScopes_.pop_back();
-    // A stash entry the callee CREATED (its own local shadowing a global) is
-    // the callee's scope and ends with it; an entry that existed before the
-    // call keeps the callee's update to the global.
+    // A stash entry the callee CREATED (its own parameter or local shadowing
+    // a global) is the callee's scope and ends with it - but the VALUE it
+    // holds is the global's, as a nested helper left it, and that write
+    // reaches the caller below (createdStash), exactly as block exit
+    // unstashes.  An entry that existed before the call keeps the callee's
+    // update to the global.
+    std::unordered_map<std::string, IRValueID> createdStash;
+    std::unordered_map<std::string, std::vector<IRValueID>> createdStashArrays;
     for (auto it = shadowedGlobals_.begin(); it != shadowedGlobals_.end(); )
-        if (!savedStash.count(it->first)) it = shadowedGlobals_.erase(it); else ++it;
+        if (!savedStash.count(it->first)) { createdStash[it->first] = it->second; it = shadowedGlobals_.erase(it); } else ++it;
     for (auto it = shadowedGlobalArrays_.begin(); it != shadowedGlobalArrays_.end(); )
-        if (!savedStashArrays.count(it->first)) it = shadowedGlobalArrays_.erase(it); else ++it;
+        if (!savedStashArrays.count(it->first)) { createdStashArrays[it->first] = it->second; it = shadowedGlobalArrays_.erase(it); } else ++it;
 
     auto inlineSwizzles = identityPrefixSwizzleBase_;
     const auto bodyNames = nameToValue_;
@@ -3151,6 +3055,26 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         if (!global || !global->type.isArray()) continue;
         if (callerLocalArray(kv.first)) { shadowedGlobalArrays_[kv.first] = kv.second; continue; }
         localArrayValues_[kv.first] = kv.second;
+    }
+    // Global writes that landed in a stash entry the callee CREATED (a nested
+    // helper wrote the global while this callee's parameter or local shadowed
+    // it): the callee's own binding is gone, the global's new value goes
+    // where the caller keeps the global - its stash if it shadows, its name
+    // otherwise.  Not skipped by ownership: the key is the callee's binding
+    // NAME but the value is the GLOBAL's.
+    for (const auto& kv : createdStash)
+    {
+        if (kv.second == InvalidIRValue || !module_->findGlobal(kv.first)) continue;
+        if (shadowedGlobals_.count(kv.first)) shadowedGlobals_[kv.first] = kv.second;
+        else nameToValue_[kv.first] = kv.second;
+    }
+    for (const auto& kv : createdStashArrays)
+    {
+        if (kv.second.empty()) continue;
+        IRGlobal* global = module_->findGlobal(kv.first);
+        if (!global || !global->type.isArray()) continue;
+        if (shadowedGlobalArrays_.count(kv.first)) shadowedGlobalArrays_[kv.first] = kv.second;
+        else localArrayValues_[kv.first] = kv.second;
     }
     for (const auto& kv : inlineSwizzles)
         identityPrefixSwizzleBase_.try_emplace(kv.first, kv.second);

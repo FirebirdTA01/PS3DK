@@ -127,6 +127,24 @@ joined_none() {   # <stem>: NO predicated write anywhere (an arm local that died
     python3 "$here/predication_check.py" "$work/$1.bin" --control         || fail "$1: the COND_FL control was NOT rejected - the predication predicate is too weak"
     pass "$1: no predicated write; COND_FL control rejected"
 }
+envelope() {  # <stem>: no predicated write and a sound instruction envelope, read from the
+              # container's FIELDS by predication_check.py (FP: condition test / cc-write /
+              # OUT_NONE; VP: inline_factor_check's envelope - condition test, saturate, abs,
+              # scalar slot, PROGRAM_END placement).  vp_words and fp_sources print none of
+              # those fields, so a text row cannot see them (review: claude, codex).  Then the
+              # checker's own container controls must be rejected for exactly their reasons.
+    python3 "$here/predication_check.py" "$work/$1.bin"         || fail "$1: a predicated write or a broken envelope is present"
+    python3 "$here/predication_check.py" "$work/$1.bin" --control         || fail "$1: an envelope control was NOT rejected for its own reason"
+    pass "$1: envelope sound; controls rejected"
+}
+value_is_input() {  # <stem> fp|vp: the program's output IS its one input, lane for lane, evaluated
+                    # from the decoded operands (inline_factor_check with factor 1).  An envelope
+                    # check is not a value check: a correct MOV followed by a second write of -IN0
+                    # to the same output passes the text rows and the envelope (review: codex).
+                    # No lane/sign controls here - a one-instruction MOV has no MUL to mutate.
+    python3 "$here/inline_factor_check.py" "$work/$1.bin" "$2" 1         || fail "$1: output is not the input (see the value diff above)"
+    pass "$1: output = input on every lane"
+}
 count() {    # <stem> <regex> <expected count>
     local n; n=$(grep -cE "$2" "$work/$1.dec" || true)
     [[ "$n" -eq "$3" ]] || { cat "$work/$1.dec" >&2; fail "$1: $n lines match /$2/, expected $3"; }
@@ -375,12 +393,41 @@ forbid fp_inline_struct_local_write_f '^[0-9]+ MUL '
 refuse "return inside a branch of the helper" fp_inline_return_in_if_f sce_fp_rsx "a return inside control flow"
 refuse "a loop inside the helper"             fp_inline_loop_f         sce_fp_rsx "a loop"
 refuse "out parameters on the helper"         vp_inline_void_out_v     sce_vp_rsx "out/inout parameters are not supported"
-# NESTED shadowing is refused by name until the scope model lands (t_cf17f501):
-# a helper that names a file-scope variable while an ENCLOSING helper's
-# parameter or local of that name is in scope would be handed that binding.
-refuse "a nested helper reads a global an enclosing helper's PARAMETER shadows" vp_inline_parameter_shadow_v sce_vp_rsx "enclosing helper's parameter or local of that name is in scope"
-refuse "a nested helper reads a global an enclosing helper's LOCAL shadows"     vp_inline_nested_local_shadow_v sce_vp_rsx "enclosing helper's parameter or local of that name is in scope"
-refuse "a nested helper reads the global BEFORE declaring a local of that name in a later block (only the callee's parameters exempt a name)" vp_inline_late_local_shadow_v sce_vp_rsx "enclosing helper's parameter or local of that name is in scope"
+# NESTED shadowing, formerly REFUSED by name (t_cf17f501's placeholder): an
+# enclosing helper's parameter now stashes the global at binding and its
+# locals stash at declaration / unstash at block exit, so a nested helper
+# reads and writes the GLOBAL through the stash (t_1de985bd).  Every value
+# below is the reference's (sce-cgc 450, C:/cgdev/refusal-probe): the global
+# p in the three reads, and 2*(3*p) for the nested writer under an enclosing
+# parameter shadow - a write that the old epilogue would have ERASED with the
+# enclosing helper's stash entry.  Red on bd7d5f54 (refused).
+accept vp_inline_parameter_shadow_v sce_vp_rsx "a nested helper reads a global an enclosing helper's PARAMETER shadows: the global p (was refused)"
+expect vp_inline_parameter_shadow_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
+forbid vp_inline_parameter_shadow_v '^[0-9]+ MUL '
+envelope vp_inline_parameter_shadow_v
+value_is_input vp_inline_parameter_shadow_v vp
+accept vp_inline_nested_local_shadow_v sce_vp_rsx "a nested helper reads a global an enclosing helper's LOCAL shadows: the global p (was refused)"
+expect vp_inline_nested_local_shadow_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
+forbid vp_inline_nested_local_shadow_v '^[0-9]+ MUL '
+envelope vp_inline_nested_local_shadow_v
+value_is_input vp_inline_nested_local_shadow_v vp
+accept vp_inline_late_local_shadow_v sce_vp_rsx "a nested helper reads the global BEFORE declaring a local of that name in a later block: the global p (was refused)"
+expect vp_inline_late_local_shadow_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
+forbid vp_inline_late_local_shadow_v '^[0-9]+ MUL '
+envelope vp_inline_late_local_shadow_v
+value_is_input vp_inline_late_local_shadow_v vp
+accept vp_inline_nested_writer_v sce_vp_rsx "a nested helper WRITES the global under an enclosing helper's parameter shadow: main reads 6*p (the created stash entry carries the write out)"
+factor vp_inline_nested_writer_v vp 6
+# A read BEFORE a top-level local of the same name in the SAME helper body:
+# the read names the GLOBAL, not the enclosing helper's parameter (review:
+# codex, lift-late-direct-local - only the callee's PARAMETERS exempt a name
+# from the prologue's stash rebinding; a later top-level local rebinds the
+# name when its declaration is reached).  Reference: D = the global p.
+accept vp_inline_late_direct_local_v sce_vp_rsx "D = G before a top-level local G in the same helper, under an enclosing parameter shadow: D is the global p"
+expect vp_inline_late_direct_local_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
+forbid vp_inline_late_direct_local_v '^[0-9]+ MUL '
+envelope vp_inline_late_direct_local_v
+value_is_input vp_inline_late_direct_local_v vp
 refuse "run-time index over a written file-scope array" vp_global_array_dynamic_read_v sce_vp_rsx "read with a run-time index"
 
 echo "user-function-inline-control-flow-test: PASS"

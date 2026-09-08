@@ -75,10 +75,79 @@ def mutate(blob):
     raise SystemExit("FAIL: no R0-writing instruction to mutate")
 
 
+VP_PROFILE = 7003
+
+
+def is_vp(blob):
+    return len(blob) >= 4 and struct.unpack_from(">I", blob, 0)[0] == VP_PROFILE
+
+
+def vp_problems(blob):
+    """VP: the envelope inline_factor_check already carries - it refuses a
+    condition test (hw[0] bit 13), condition update (14/29), saturate,
+    indexed input, abs, relative const, a scalar-slot write, PROGRAM_END
+    anywhere but the last row, and any vector opcode but MOV/MUL (an
+    unmodelled program is a refusal, never a pass).  vp_words prints none of
+    those fields, so a text row cannot see them (review: claude)."""
+    import inline_factor_check
+    try:
+        inline_factor_check.vp_envelope(blob)
+    except inline_factor_check.Unmodelled as exc:
+        return [str(exc)]
+    return []
+
+
+def vp_mutate(blob):
+    """Set COND_TEST_ENABLE (hw[0] bit 13) on the first o0-writing instruction."""
+    size, off = struct.unpack_from(">2I", blob, 24)
+    for n in range(size // 16):
+        w = list(struct.unpack_from(">4I", blob, off + n * 16))
+        if (w[0] >> 30) & 1 and ((w[3] >> 2) & 0x1F) == 0:
+            w[0] |= 1 << 13
+            out = bytearray(blob)
+            struct.pack_into(">4I", out, off + n * 16, *w)
+            return bytes(out), n
+    raise SystemExit("FAIL: no o0-writing VP instruction to mutate")
+
+
 def main(argv):
     if len(argv) not in (2, 3) or (len(argv) == 3 and argv[2] != "--control"):
         raise SystemExit(__doc__)
     blob = open(argv[1], "rb").read()
+    if is_vp(blob):
+        if len(argv) == 3:
+            # Two container mutations, each rejected for EXACTLY its own reason
+            # (review: codex - a text row could not see either): the first
+            # o0 write predicated, and PROGRAM_END cleared on the last row.
+            mutant, index = vp_mutate(blob)
+            open(argv[1] + ".condtest", "wb").write(mutant)
+            found = vp_problems(mutant)
+            expected = "condition test at instruction %d" % index
+            if found != [expected]:
+                sys.stderr.write("FAIL: the VP condition-test control was not rejected for its own "
+                                 "reason: expected [%s], got %r\n" % (expected, found))
+                return 1
+            print("control condtest rejected: " + expected)
+            size, off = struct.unpack_from(">2I", blob, 24)
+            last = off + size - 16
+            noend = bytearray(blob)
+            w3 = struct.unpack_from(">I", blob, last + 12)[0] & ~1
+            struct.pack_into(">I", noend, last + 12, w3)
+            open(argv[1] + ".noend", "wb").write(bytes(noend))
+            found = vp_problems(bytes(noend))
+            expected = "the final instruction does not carry PROGRAM_END"
+            if found != [expected]:
+                sys.stderr.write("FAIL: the VP no-END control was not rejected for its own reason: "
+                                 "expected [%s], got %r\n" % (expected, found))
+                return 1
+            print("control noend rejected: " + expected)
+            return 0
+        found = vp_problems(blob)
+        if found:
+            sys.stderr.write("FAIL: " + "; ".join(found) + "\n")
+            return 1
+        print("no predicated write, no condition-code write (VP envelope)")
+        return 0
     try:
         if len(argv) == 3:
             mutant, index = mutate(blob)
