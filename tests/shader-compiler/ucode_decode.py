@@ -197,6 +197,17 @@ def decode(path):
             "none": (w[0] >> 30) & 1,
             "dst": (w[0] >> 1) & 0x3F,
             "mask": (w[0] >> 9) & 0xF,
+            # NVFX_FP_OP_TEX_UNIT_SHIFT.  The header marks the mask a
+            # guess; it is not one any more - an explicit TEXUNIT3
+            # sampler decodes here as 3 and the reference container
+            # names TEX3 for the same fetch (t_750d55be probes).
+            "texunit": (w[0] >> 17) & 0xF,
+            # NVFX_FP_OP_OUT_REG_HALF.  The destination BANK, which is not
+            # the same field as the arithmetic precision in bits 22..23 and
+            # not implied by it: the reference fetches a half-typed texture
+            # read into H at prec=0.  A caller that reads only "dst" is
+            # handed R2 and H2 as the same register.
+            "dsthalf": (w[0] >> 7) & 1,
             "inputs": inputs,
             "consts": consts,
             "end": w[0] & 1,

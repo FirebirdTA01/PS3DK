@@ -72,7 +72,7 @@ inline FpSamplerLayout buildFpSamplerLayout(const IRModule& module,
             switch (inst->op) {
             case IROp::TexSample: case IROp::TexSampleProj:
             case IROp::TexSampleLod: case IROp::TexSampleGrad:
-            case IROp::TexFetch: break;
+            case IROp::TexSampleBias: case IROp::TexFetch: break;
             default: continue;
             }
             if (inst->operands.empty()) continue; // lowering diagnoses arity
