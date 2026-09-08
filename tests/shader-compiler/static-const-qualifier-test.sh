@@ -20,8 +20,15 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
-python="${PYTHON:-python}"
+python="${PYTHON:-python3}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
 
 if [[ -z "$compiler" ]]; then
     for cand in "$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler" \
@@ -98,10 +105,13 @@ void main(float4 c : TEXCOORD0, out float4 o : COLOR) {
 }
 EOF
 
+neg_fpo="$work/neg_static_const.fpo"
 neg_log="$work/neg_static_const.log"
-if "$compiler" -p sce_fp_rsx "$work/neg_static_const.cg" >"$neg_log" 2>&1; then
-    fail "reassignment to 'static const float K' compiled, expected 'expression is not assignable'"
-fi
+neg_rc=0
+"$compiler" -p sce_fp_rsx --emit-container "$neg_fpo" "$work/neg_static_const.cg" >"$neg_log" 2>&1 || neg_rc=$?
+refusal_status "$neg_rc" "reassignment to 'static const float K'"
+[[ "$neg_rc" -eq 1 ]] || fail "reassignment to 'static const float K' exited $neg_rc, expected 1"
+[[ ! -e "$neg_fpo" ]] || fail "reassignment to 'static const float K' produced a container; must be refused"
 grep -q "expression is not assignable" "$neg_log" || {
     tail -n 10 "$neg_log" >&2
     fail "'static const' reassignment failed without expected diagnostic 'expression is not assignable'"
@@ -115,10 +125,13 @@ void main(float4 c : TEXCOORD0, out float4 o : COLOR) {
 }
 EOF
 
+neg_cs_fpo="$work/neg_const_static.fpo"
 neg_cs_log="$work/neg_const_static.log"
-if "$compiler" -p sce_fp_rsx "$work/neg_const_static.cg" >"$neg_cs_log" 2>&1; then
-    fail "reassignment to 'const static float K' compiled, expected 'expression is not assignable'"
-fi
+neg_cs_rc=0
+"$compiler" -p sce_fp_rsx --emit-container "$neg_cs_fpo" "$work/neg_const_static.cg" >"$neg_cs_log" 2>&1 || neg_cs_rc=$?
+refusal_status "$neg_cs_rc" "reassignment to 'const static float K'"
+[[ "$neg_cs_rc" -eq 1 ]] || fail "reassignment to 'const static float K' exited $neg_cs_rc, expected 1"
+[[ ! -e "$neg_cs_fpo" ]] || fail "reassignment to 'const static float K' produced a container; must be refused"
 grep -q "expression is not assignable" "$neg_cs_log" || {
     tail -n 10 "$neg_cs_log" >&2
     fail "'const static' reassignment failed without expected diagnostic 'expression is not assignable'"
@@ -422,10 +435,13 @@ float4 main() : COLOR {
     return float4(float(K), 0.0, 0.0, 0.0);
 }
 EOF
+unsupp_fpo="$work/neg_unsupported_const.fpo"
 unsupp_log="$work/neg_unsupported_const.log"
-if "$compiler" -p sce_fp_rsx "$work/neg_unsupported_const.cg" >"$unsupp_log" 2>&1; then
-    fail "unsupported file-scope const expression compiled; must be refused"
-fi
+unsupp_rc=0
+"$compiler" -p sce_fp_rsx --emit-container "$unsupp_fpo" "$work/neg_unsupported_const.cg" >"$unsupp_log" 2>&1 || unsupp_rc=$?
+refusal_status "$unsupp_rc" "unsupported file-scope const expression"
+[[ "$unsupp_rc" -eq 1 ]] || fail "unsupported file-scope const expression exited $unsupp_rc, expected 1"
+[[ ! -e "$unsupp_fpo" ]] || fail "unsupported file-scope const expression produced a container; must be refused"
 grep -q "has an initialiser this compiler cannot evaluate; refusing rather than compiling it as zero" "$unsupp_log" || {
     tail -n 10 "$unsupp_log" >&2
     fail "unsupported file-scope const failed without expected refusal diagnostic"
@@ -726,10 +742,13 @@ float4 main() : COLOR {
 }
 EOF
 
+mut_fpo="$work/neg_mutable_static.fpo"
 mut_log="$work/neg_mutable_static.log"
-if "$compiler" -p sce_fp_rsx "$work/neg_mutable_static.cg" >"$mut_log" 2>&1; then
-    fail "bare mutable static helper mutation unexpectedly compiled; must be refused"
-fi
+mut_rc=0
+"$compiler" -p sce_fp_rsx --emit-container "$mut_fpo" "$work/neg_mutable_static.cg" >"$mut_log" 2>&1 || mut_rc=$?
+refusal_status "$mut_rc" "bare mutable static helper mutation"
+[[ "$mut_rc" -eq 1 ]] || fail "bare mutable static helper mutation exited $mut_rc, expected 1"
+[[ ! -e "$mut_fpo" ]] || fail "bare mutable static helper mutation produced a container; must be refused"
 grep -q "ldunif of 's' has no registered uniform source" "$mut_log" || {
     tail -n 10 "$mut_log" >&2
     fail "bare mutable static failed without expected diagnostic 'ldunif of s'"
