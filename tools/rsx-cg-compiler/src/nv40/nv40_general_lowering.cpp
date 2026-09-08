@@ -8964,7 +8964,18 @@ static void seedFpEmbeddedUniforms(const IRFunction& entry,
             continue;
         if (isSamplerIRType(p.type.baseType))
             continue;
-        const unsigned count = p.type.isArray()
+        // A MATRIX takes one slot per ROW, exactly as an array takes one
+        // per element - fpUniformSlotCount says so and fpParameterSlotBases
+        // and fpFirstGlobalSlot both already asked `isArray() ||
+        // isMatrix()`.  This loop asked only `isArray()`, so it seeded ONE
+        // entry for a `uniform float4x4 M` while the slot numbering had
+        // reserved four: recordFpUniformOffset() then found no entry for
+        // base+1.. and dropped those rows' relocation offsets on the floor.
+        // The container declared M[1..3] with no offsets and isReferenced
+        // 0, so the runtime - which patches a row by its record's offset -
+        // could never write them, and the shader sampled M[0] over three
+        // rows of permanent zero (review: Fable).
+        const unsigned count = (p.type.isArray() || p.type.isMatrix())
             ? rsx_cg::fpUniformSlotCount(p.type) : 1u;
         for (unsigned k = 0; k < count; ++k)
             attrs.embeddedUniforms.push_back({slotBases[i] + k, {}});

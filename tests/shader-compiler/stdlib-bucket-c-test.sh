@@ -366,6 +366,36 @@ reject_doctored() {                        # $1 abs|input, $2 reason substring
 reject_doctored abs   "expected the input's xyz dotted with"
 reject_doctored input "different input registers"
 
+# 6d. A uniform MATRIX entry parameter is one runtime-patchable row per
+# matrix row.  The slot numbering reserves one slot per row (matrices go
+# through fpUniformSlotCount exactly as arrays do), but the lowering's
+# embedded-uniform REGISTRATION loop used to seed one entry for the whole
+# matrix, so every row but the first lost its relocation offset: the
+# container declared M[1..] with no offsets and isReferenced 0, and since
+# the runtime patches a row by its record's offset, those rows could never
+# be written - the shader sampled M[0] over three rows of permanent zero.
+# It compiled, it looked right, and the parent refused the shader outright,
+# so nothing here caught it (review: Fable).
+cat > "$work/mat_uniform_44.cg" << 'EOF'
+float4 main(float4 p : TEXCOORD0, uniform float4x4 M) : COLOR
+{
+    return mul(M, p);
+}
+EOF
+
+cat > "$work/mat_uniform_33.cg" << 'EOF'
+float4 main(float3 p : TEXCOORD0, uniform float3x3 M) : COLOR
+{
+    return float4(mul(M, p), 1.0);
+}
+EOF
+
+for stem in mat_uniform_44 mat_uniform_33; do
+    "$compiler" -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$work/$stem.cg" > /dev/null 2>&1 ||
+        fail "$stem.cg failed to compile under sce_fp_rsx"
+    [[ -s "$work/$stem.fpo" ]] || fail "$stem.fpo is missing or empty"
+done
+
 # 6b. Dead tex2Dbias: eliminated by DCE without alphakill, preserved with #pragma alphakill
 cat > "$work/dead_txb.cg" << 'EOF'
 float4 main(float4 uv_bias : TEXCOORD0,
@@ -430,12 +460,24 @@ def load_container(path):
         typ, res, var, resIdx, nameoff, defVal, constoff, semoff, direction, paramno, isRef, isShared = struct.unpack_from(">12I", b, rec)
         name = b[nameoff:].split(bytes([0]))[0].decode("ascii", "replace") if 0 < nameoff < len(b) else ""
         sem = b[semoff:].split(bytes([0]))[0].decode("ascii", "replace") if 0 < semoff < len(b) else ""
+        offsets = []
+        if 0 < constoff < len(b) - 4:
+            n, = struct.unpack_from(">I", b, constoff)
+            if 0 <= n <= 64 and constoff + 4 + 4 * n <= len(b):
+                offsets = list(struct.unpack_from(">%dI" % n, b, constoff + 4))
         params.append({"type": typ, "res": res, "name": name, "sem": sem,
-                       "constoff": constoff, "isRef": isRef})
+                       "constoff": constoff, "isRef": isRef,
+                       "offsets": offsets})
+    def unswap(v):
+        return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
+    ucode = []
+    for k in range(ucode_size // 16):
+        ucode.append([unswap(w) for w in
+                      struct.unpack_from(">4I", b, ucode_off + 16 * k)])
     return {
         "magic": magic, "rev": rev, "total_size": total_size,
         "p_count": p_count, "params": params,
-        "ucode_size": ucode_size, "ucode_off": ucode_off
+        "ucode_size": ucode_size, "ucode_off": ucode_off, "ucode": ucode
     }
 
 # Check 1: typed_tex
@@ -766,6 +808,66 @@ if 1059 not in u_types: # CG_FLOAT3x3
     sys.exit("FAIL transpose_fp_uniform: CG_FLOAT3x3 (1059) parent not found in parameter table")
 if "m[0]" not in u_names or "m[1]" not in u_names or "m[2]" not in u_names:
     sys.exit(f"FAIL transpose_fp_uniform: row records m[0], m[1], m[2] not found: {u_names}")
+
+# Check 6d: every ROW of a uniform matrix entry parameter is patchable.
+#
+# The assertion is not "the records exist" and not "the offsets differ".
+# codex's requirement, and it is the right one: an offset is a promise to
+# the runtime that patching those bytes changes what a particular
+# instruction reads, so each one must be IN RANGE, 16-BYTE ALIGNED, and
+# must address the inline constant DATA block that the row's own dot
+# product names - the block follows its instruction, so the row before the
+# addressed one must be that dot product and must name a const source.
+# Distinct integers alone would satisfy a weaker check and prove nothing.
+def matrix_rows_patchable(container, name, rows, dot_opcode):
+    """None when every M[k] is one valid, distinct patch site."""
+    parent = [p for p in container["params"] if p["name"] == name]
+    if len(parent) != 1:
+        return "expected one parent record named %r, found %d" % (
+            name, len(parent))
+    seen = {}
+    for k in range(rows):
+        row_name = "%s[%d]" % (name, k)
+        recs = [p for p in container["params"] if p["name"] == row_name]
+        if len(recs) != 1:
+            return "expected one record named %r, found %d" % (
+                row_name, len(recs))
+        rec = recs[0]
+        if not rec["isRef"]:
+            return ("%s is marked unreferenced, so the runtime is told this "
+                    "row is unused" % row_name)
+        if len(rec["offsets"]) != 1:
+            return ("%s carries %d relocation offsets, not 1 - a row the "
+                    "runtime cannot patch reads whatever the constant block "
+                    "was compiled with, which for an unwritten row is zero"
+                    % (row_name, len(rec["offsets"])))
+        off = rec["offsets"][0]
+        if off in seen:
+            return "%s and %s share relocation offset %d" % (
+                row_name, seen[off], off)
+        seen[off] = row_name
+        if off % 16 or not 0 < off < container["ucode_size"]:
+            return ("%s has relocation offset %d, which is not a 16-byte "
+                    "aligned position inside the %d-byte ucode"
+                    % (row_name, off, container["ucode_size"]))
+        block = off // 16
+        instr = container["ucode"][block - 1]
+        if ((instr[0] >> 24) & 0x3F) != dot_opcode:
+            return ("%s's offset %d points at the block after opcode 0x%02X, "
+                    "not the 0x%02X this multiply is made of"
+                    % (row_name, off, (instr[0] >> 24) & 0x3F, dot_opcode))
+        if not any((instr[s] & 3) == 2 for s in (1, 2, 3)):   # CONST
+            return ("%s's offset %d points at a block its instruction does "
+                    "not name as a source" % (row_name, off))
+    return None
+
+DP3, DP4 = 0x05, 0x06
+for stem, rows, op in (("mat_uniform_44", 4, DP4),
+                       ("mat_uniform_33", 3, DP3)):
+    problem = matrix_rows_patchable(load_container(f"{work}/{stem}.fpo"),
+                                    "M", rows, op)
+    if problem:
+        sys.exit(f"FAIL {stem}: {problem}")
 
 # Check 7: half-texture precision boundary
 insns7 = list(decode(f"{work}/h1tex.log"))
