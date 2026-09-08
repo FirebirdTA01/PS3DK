@@ -41,6 +41,7 @@
 #include "cg_container_fp.h"
 #include "nv40/nv40_emit.h"
 #include "array_uniforms.h"
+#include "fp_sampler_bindings.h"
 
 #include "ir.h"
 
@@ -87,6 +88,7 @@ constexpr uint32_t kCgFloat4      = 1048u;
 constexpr uint32_t kCgFloat4x4    = 1064u;
 constexpr uint32_t kCgSampler1D   = 1065u;
 constexpr uint32_t kCgSampler2D   = 1066u;
+constexpr uint32_t kCgSamplerRect = 1068u;
 constexpr uint32_t kCgSamplerCube = 1069u;
 
 std::string toUpper(std::string s)
@@ -132,6 +134,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
 {
     if (t.baseType == IRType::Sampler1D)   return kCgSampler1D;
     if (t.baseType == IRType::Sampler2D)   return kCgSampler2D;
+    if (t.baseType == IRType::SamplerRect) return kCgSamplerRect;
     if (t.baseType == IRType::SamplerCube) return kCgSamplerCube;
     if (t.isMatrix() && t.matrixRows == 4 && t.matrixCols == 4)
         return kCgFloat4x4;
@@ -236,7 +239,11 @@ ContainerResult emitFragmentContainerImpl(
     std::vector<ParamDesc> params;
     params.reserve(entry->parameters.size());
 
-    int nextSamplerUnit = 0;
+    const auto samplerLayout = rsx_cg::buildFpSamplerLayout(module, *entry);
+    if (!samplerLayout.diagnostics.empty()) {
+        result.diagnostics = samplerLayout.diagnostics;
+        return result;
+    }
     for (size_t i = 0; i < entry->parameters.size(); ++i)
     {
         const auto& p = entry->parameters[i];
@@ -357,7 +364,10 @@ ContainerResult emitFragmentContainerImpl(
 
         if (p.storage == StorageQualifier::Uniform && isSampler)
         {
-            d.res       = kCgTexUnit0 + nextSamplerUnit++;
+            const int unit = samplerLayout.unit(p.valueId);
+            d.res = unit < 0 ? kCgUndefined : kCgTexUnit0 + unit;
+            if (p.explicitRegisterBank == 'S')
+                d.semantic = "TEXUNIT" + std::to_string(p.explicitRegisterIndex);
             d.var       = kCgUniform;
             d.direction = kCgIn;
         }
@@ -407,6 +417,8 @@ ContainerResult emitFragmentContainerImpl(
         // unconditionally (StoreOutput keys off semantic, not operand).
         d.isReferenced = attrs.referencedParamIndices.count(
                              static_cast<unsigned>(i)) ? 1u : 0u;
+        if (isSampler && p.storage == StorageQualifier::Uniform)
+            d.isReferenced = samplerLayout.used.count(p.valueId) ? 1u : 0u;
         params.push_back(d);
     }
 
@@ -419,7 +431,6 @@ ContainerResult emitFragmentContainerImpl(
     {
         const unsigned firstGlobalSlot = rsx_cg::fpFirstGlobalSlot(*entry);
         unsigned globalSlotCursor = firstGlobalSlot;
-        int      globalSamplerCursor = nextSamplerUnit;
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
@@ -467,7 +478,11 @@ ContainerResult emitFragmentContainerImpl(
 
             if (isSampler)
             {
-                d.res       = kCgTexUnit0 + globalSamplerCursor++;
+                const int unit = samplerLayout.unit(g.valueId);
+                d.res = unit < 0 ? kCgUndefined : kCgTexUnit0 + unit;
+                d.isReferenced = samplerLayout.used.count(g.valueId) ? 1u : 0u;
+                const int declaredUnit = rsx_cg::explicitFpSamplerUnit(g);
+                if (declaredUnit >= 0) d.semantic = "TEXUNIT" + std::to_string(declaredUnit);
                 d.var       = kCgUniform;
                 d.direction = kCgIn;
             }

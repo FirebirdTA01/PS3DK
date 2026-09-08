@@ -14,6 +14,7 @@
 #include "nvfx_shader.h"
 
 #include "ir.h"
+#include "fp_sampler_bindings.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1765,7 +1766,11 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     std::unordered_map<IRValueID, FpPowMaxDotLiteralBinding>
         valueToPowMaxDotLiteral;
 
-    int nextTexUnit = 0;
+    const auto samplerLayout = rsx_cg::buildFpSamplerLayout(module, entry);
+    if (!samplerLayout.diagnostics.empty()) {
+        out.diagnostics = samplerLayout.diagnostics;
+        return out;
+    }
 
     // Slot index for embedded-uniform globals.  Top-level uniforms
     // (Cg implicitly treats file-scope `float gFoo;` etc. as uniform)
@@ -1842,7 +1847,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         const bool isSampler = isSamplerIRType(param.type.baseType);
         if (param.storage == StorageQualifier::Uniform && isSampler)
         {
-            valueToTexUnit[param.valueId] = nextTexUnit++;
+            valueToTexUnit[param.valueId] = samplerLayout.unit(param.valueId);
             valueToTexSamplerName[param.valueId] = param.name;
             continue;
         }
@@ -1869,25 +1874,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             valueToInputSrc[param.valueId] = srcCode;
     }
 
-    // Texture units for file-scope samplers, in DECLARATION order, for
-    // exactly the reason the const slots above are: cg_container_fp.cpp
-    // assigns each file-scope sampler's parameter res from a cursor that
-    // starts after the entry-parameter samplers and walks module.globals
-    // in order.  Allocating a unit at FIRST USE instead - which is what
-    // this did - means `uniform sampler2D a; uniform sampler2D b;` used b
-    // first samples b from TEX0 while the container tells the runtime that
-    // parameter a is TEX0, so binding textures BY NAME swaps them, with a
-    // well-formed container and no diagnostic (review finding, codex).
-    //
-    // nextTexUnit is read here rather than earlier because the loop above
-    // has just finished counting the entry-parameter samplers, which take
-    // the low units on both sides.
+    // Share explicit reservations and implicit allocation with reflection.
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
         if (!isSamplerIRType(g.type.baseType)) continue;
         if (globalNameToTexUnit.count(g.name)) continue;
-        globalNameToTexUnit[g.name] = nextTexUnit++;
+        globalNameToTexUnit[g.name] = samplerLayout.unit(g.valueId);
     }
 
     // Pre-populate valueToLiteralVec4 from any IRConstant of vec4 /
