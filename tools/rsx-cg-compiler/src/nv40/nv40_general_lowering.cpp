@@ -8564,6 +8564,62 @@ static struct nvfx_reg regFromSource(const VSrc& src)
     }
 }
 
+// An inline constant block holds the DISTINCT values the instruction reads,
+// in first-appearance order, zero-filled; the source swizzle selects, so
+// swizzle[lane] is the index of that lane's value.  `float4(1,1,1,1)` is a
+// block of {1,0,0,0} read .xxxx, not {1,1,1,1} read .xyzw (t_642eb36e).
+//
+// EQUALITY IS `==`, NOT THE BIT PATTERN, and the stored representative is
+// whichever value appeared FIRST.  Both halves are measured, and the second
+// one only because the first ordering alone would have suggested a rule that
+// is not there: float4(0,-0,0,-0) packs {+0,...} and float4(-0,0,-0,0) packs
+// {-0,...}, so -0 and +0 merge like any equal pair and the reference does
+// NOT normalise the value it keeps.
+//
+// ONE RULE, NO EXCEPTION FOR NON-FINITE VALUES, and the reasoning is worth
+// keeping because the first version of this function had one.  The
+// reference's packing of a REPEATED non-finite is not characterised -
+// float4(inf,1,inf,2) comes back painting (inf,1,2,2), float4(1,inf,inf,3)
+// paints (1,1,3,3) with both infinities gone, and float4(inf,1,3,inf) paints
+// 3.0e38 in every lane (t_b737691f).  That looked like a reason to leave
+// repeated non-finites un-merged.  It is not: merging them by == packs
+// {inf,1,2,0} read .xyxz, which PAINTS THE SOURCE exactly.  Whatever loses
+// the reference's lane is a different effect, so a special case here would
+// have protected nothing and cost a rule (review: codex).  NaN needs no
+// case either - NaN != NaN, so it never merges with itself.
+static void packLiteralBlock(VSrc& src)
+{
+    if (src.kind != VSrcKind::Literal)
+        return;
+    // Read through the swizzle the source already carries: a literal that
+    // arrives pre-swizzled (a broadcast, a lane extract) must pack the
+    // values its LANES read, not the order they happen to sit in.
+    std::array<float, 4> lanes{};
+    for (int lane = 0; lane < 4; ++lane)
+        lanes[lane] = src.literal[src.swizzle[lane] & 3];
+
+    std::array<float, 4> packed = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<uint8_t, 4> swizzle{};
+    unsigned distinct = 0;
+    for (int lane = 0; lane < 4; ++lane) {
+        unsigned slot = distinct;
+        for (unsigned k = 0; k < distinct; ++k) {
+            if (packed[k] == lanes[lane]) {   // ==, not the bit pattern
+                slot = k;
+                break;
+            }
+        }
+        if (slot == distinct) {
+            packed[distinct] = lanes[lane];
+            ++distinct;                 // at most four lanes, so at most four
+        }
+        swizzle[lane] = static_cast<uint8_t>(slot);
+    }
+    src.literal = packed;
+    src.swizzle = swizzle;
+    src.literalLanes = static_cast<uint8_t>(distinct);
+}
+
 static struct nvfx_src nvfxSource(const VSrc& src)
 {
     struct nvfx_reg r = regFromSource(src);
@@ -9171,16 +9227,22 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             // colour output: the rig's `outw` decode reads the
             // destination field of the same word and sees 63, not 0.
             struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+            // One local copy the encoding and the block append below both
+            // read, so a literal cannot be packed one way and selected
+            // another (packLiteralBlock).
+            std::array<VSrc, 3> killSrcs = vi.srcs;
+            for (VSrc& src : killSrcs)
+                packLiteralBlock(src);
             struct nvfx_insn set = nvfx_insn(
                 vi.sat, 0, -1, -1, ccDst, NVFX_FP_MASK_X,
-                nvfxSource(vi.srcs[0]),
-                nvfxSource(vi.srcs[1]),
-                nvfxSource(vi.srcs[2]));
+                nvfxSource(killSrcs[0]),
+                nvfxSource(killSrcs[1]),
+                nvfxSource(killSrcs[2]));
             set.cc_update = 1;
             if (vi.fpPrecisionOverride >= 0)
                 set.precision = static_cast<uint8_t>(vi.fpPrecisionOverride);
             asm_.emit(set, fpOpcode(vi.killFused));
-            for (const VSrc& src : vi.srcs) {
+            for (const VSrc& src : killSrcs) {
                 if (src.kind != VSrcKind::Uniform &&
                     src.kind != VSrcKind::Literal)
                     continue;
@@ -9237,15 +9299,22 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
             const VSrc none{};
 
+            // Packed ONCE, here, and read by every encode and every block
+            // append below - absSrc is derived from it, so the two
+            // instructions this lowering emits agree on the block and on
+            // the swizzle that selects from it (packLiteralBlock).
+            VSrc ftoiSrc = vi.srcs[0];
+            packLiteralBlock(ftoiSrc);
+
             struct nvfx_insn movc = nvfx_insn(
                 0, 0, -1, -1, ccDst, NVFX_FP_MASK_X,
-                nvfxSource(vi.srcs[0]), nvfxSource(none),
+                nvfxSource(ftoiSrc), nvfxSource(none),
                 nvfxSource(none));
             movc.cc_update = 1;
             asm_.emit(movc, NVFX_FP_OP_OPCODE_MOV);
-            appendConstFor(vi.srcs[0]);
+            appendConstFor(ftoiSrc);
 
-            VSrc absSrc = vi.srcs[0];
+            VSrc absSrc = ftoiSrc;
             absSrc.abs = true;
             absSrc.neg = false;
             struct nvfx_insn flr = nvfx_insn(
@@ -9348,9 +9417,13 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             // condition register only (the default path's CC-set shape).
             struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
             const VSrc noneSrc{};
+            // `s` BY VALUE, and packed on entry: this lambda both encodes
+            // the operand and appends its block, so they have to be the
+            // same packing (packLiteralBlock).
             const auto emitOne = [&](const struct nvfx_reg& d, int mask,
-                                     const VSrc& s, bool ccSet,
+                                     VSrc s, bool ccSet,
                                      bool ccGated) {
+                packLiteralBlock(s);
                 struct nvfx_insn insn = nvfx_insn(
                     ccSet ? 0 : vi.sat, 0, -1, -1,
                     const_cast<struct nvfx_reg&>(d), mask,
@@ -9404,6 +9477,15 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             srcs[0].kind == VSrcKind::Uniform &&
             srcs[1].kind == VSrcKind::Temp)
             std::swap(srcs[0], srcs[1]);
+        // AFTER the operand swaps and BEFORE anything reads a source: the
+        // packed block and the swizzle that selects from it are one fact,
+        // and `srcs` is the local copy both the encoding below and the
+        // const-block append at the end of this loop read.  Putting this
+        // inside nvfxSource() would be the obvious wrong place - that
+        // returns the encoded operand and cannot touch the block appended
+        // after it, so the two would drift apart.
+        for (VSrc& src : srcs)
+            packLiteralBlock(src);
         auto isInlineConst = [](const VSrc& src) {
             return src.kind == VSrcKind::Uniform ||
                    src.kind == VSrcKind::Literal;
