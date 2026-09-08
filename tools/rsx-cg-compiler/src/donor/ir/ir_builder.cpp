@@ -6,6 +6,7 @@
 #include <limits>
 #include <sstream>
 #include <unordered_set>
+#include <functional>
 
 namespace
 {
@@ -914,6 +915,11 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     nameToValue_.clear();
     undefinedFieldBases_.clear();
     localArrayValues_.clear();
+    // per-function state, like the two maps above: a stash left over from
+    // one function would hand the next function's helpers a stale global
+    // (review: codex).
+    shadowedGlobals_.clear();
+    shadowedGlobalArrays_.clear();
     currentFunction_ = nullptr;
     currentFunctionDecl_ = nullptr;
     currentBlock_ = nullptr;
@@ -1000,6 +1006,45 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // nameToValue_["c"] pointing at the THEN-only SSA value, which is
     // undefined when the false branch is taken — invalid SSA.
     auto preIfMap = nameToValue_;
+    // ARRAYS JOIN TOO.  localArrayValues_ holds every local array and every
+    // promoted file-scope array as per-element values; it used to be neither
+    // snapshotted nor joined here, so an element store inside a branch was
+    // applied UNCONDITIONALLY and every later read took the then-value
+    // (t_cf17f501: `if (uv.x > 0.5) a[0] = 1.0;` painted 1.0 whatever uv.x
+    // was, the compare emitted and never read).  Each element joins through
+    // the same Select path as a name, under the synthetic key "a[0]" - the
+    // element's OWN reaching ids decide its place in the join order and the
+    // full element spelling breaks ties, so two elements of one array cannot
+    // settle by insertion order (the t_56ff2244 shape).
+    const auto preIfArrays = localArrayValues_;
+    auto foldArrays = [](std::unordered_map<std::string, IRValueID>& names,
+                         const std::unordered_map<std::string, std::vector<IRValueID>>& arrays)
+    {
+        for (const auto& kv : arrays)
+            for (size_t i = 0; i < kv.second.size(); ++i)
+                if (kv.second[i] != InvalidIRValue)
+                    names[kv.first + "[" + std::to_string(i) + "]"] = kv.second[i];
+    };
+    foldArrays(preIfMap, preIfArrays);
+    // The shadowed-global stashes are control-flow state too: a helper
+    // called inside a branch writes the GLOBAL through the stash, and that
+    // write must join like any other (review: codex - conditional_stash.cg
+    // took the helper's 2p on both paths).  Keys "G@" and "B@[i]" cannot
+    // collide with identifiers or with the array keys.
+    const auto preIfStash = shadowedGlobals_;
+    const auto preIfStashArrays = shadowedGlobalArrays_;
+    auto foldStash = [](std::unordered_map<std::string, IRValueID>& names,
+                        const std::unordered_map<std::string, IRValueID>& stash,
+                        const std::unordered_map<std::string, std::vector<IRValueID>>& stashArrays)
+    {
+        for (const auto& kv : stash)
+            if (kv.second != InvalidIRValue) names[kv.first + "@"] = kv.second;
+        for (const auto& kv : stashArrays)
+            for (size_t i = 0; i < kv.second.size(); ++i)
+                if (kv.second[i] != InvalidIRValue)
+                    names[kv.first + "@[" + std::to_string(i) + "]"] = kv.second[i];
+    };
+    foldStash(preIfMap, preIfStash, preIfStashArrays);
 
     // Build then block
     currentBlock_ = thenBlock;
@@ -1010,13 +1055,24 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
         emitBranch(mergeBlock);
     }
     auto postThenMap = nameToValue_;
+    foldArrays(postThenMap, localArrayValues_);
+    foldStash(postThenMap, shadowedGlobals_, shadowedGlobalArrays_);
+    const auto postThenArrays = localArrayValues_;
+    const auto postThenStash = shadowedGlobals_;
+    const auto postThenStashArrays = shadowedGlobalArrays_;
 
     // Build else block
     bool elseTerminated = false;
     decltype(nameToValue_) postElseMap;
+    auto postElseArrays = preIfArrays;
+    auto postElseStash = preIfStash;
+    auto postElseStashArrays = preIfStashArrays;
     if (stmt->elseBranch)
     {
         nameToValue_ = preIfMap;  // restore before processing else
+        localArrayValues_ = preIfArrays;
+        shadowedGlobals_ = preIfStash;
+        shadowedGlobalArrays_ = preIfStashArrays;
         currentBlock_ = elseBlock;
         buildStmt(stmt->elseBranch.get());
         elseTerminated = currentBlock_->hasTerminator();
@@ -1025,6 +1081,11 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
             emitBranch(mergeBlock);
         }
         postElseMap = nameToValue_;
+        foldArrays(postElseMap, localArrayValues_);
+        foldStash(postElseMap, shadowedGlobals_, shadowedGlobalArrays_);
+        postElseArrays = localArrayValues_;
+        postElseStash = shadowedGlobals_;
+        postElseStashArrays = shadowedGlobalArrays_;
     }
 
     // Continue from merge block.  Insert Select(cond, thenVal, elseVal)
@@ -1034,6 +1095,100 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // that side so the merge keeps the not-terminated branch's update.
     currentBlock_ = mergeBlock;
     nameToValue_ = preIfMap;
+    localArrayValues_ = preIfArrays;
+    shadowedGlobals_ = preIfStash;
+    shadowedGlobalArrays_ = preIfStashArrays;
+
+    // A PROMOTED FILE-SCOPE array element that no path wrote before this if
+    // has no pre-if SSA value: its pre-if value IS THE UNIFORM ELEMENT.  A
+    // branch that writes it must select against that load, not take the
+    // written arm unconditionally, so the load is materialised here at the
+    // merge (value-correct; the reference may place its read elsewhere, so
+    // this is a byte-identity question, not a correctness one).  A LOCAL
+    // element with no pre-if value keeps the name-join rule: the other path
+    // is undefined in Cg and the written arm is taken.
+    // The loads take SSA ids, and those ids are the pre-if values the join
+    // sorts on - so they must be allocated in an order that does not depend
+    // on the array map's hash order (two promoted arrays written in one
+    // branch would otherwise get their loads numbered by string-hash bucket,
+    // the t_56ff2244 class; review: claude).  Collect, sort by (name, index),
+    // then allocate.
+    std::vector<std::pair<std::string, size_t>> unwritten;
+    const std::unordered_map<std::string, std::vector<IRValueID>>* const branchArrays[2] =
+        {&postThenArrays, &postElseArrays};
+    for (const auto* arrays : branchArrays)
+        for (const auto& kv : *arrays)
+        {
+            IRGlobal* global = module_->findGlobal(kv.first);
+            if (!global || !global->type.isArray()) continue;
+            for (size_t i = 0; i < kv.second.size(); ++i)
+            {
+                const std::string key = kv.first + "[" + std::to_string(i) + "]";
+                if (kv.second[i] == InvalidIRValue || preIfMap.count(key)) continue;
+                unwritten.emplace_back(kv.first, i);
+            }
+        }
+    // Stashed globals written inside a branch with nothing assigned before
+    // it: same rule, the other arm is the uniform.  A scalar is index -1.
+    std::vector<std::pair<std::string, long>> unwrittenStash;
+    const std::unordered_map<std::string, IRValueID>* const branchStash[2] =
+        {&postThenStash, &postElseStash};
+    for (const auto* st : branchStash)
+        for (const auto& kv : *st)
+            if (kv.second != InvalidIRValue && !preIfMap.count(kv.first + "@") &&
+                module_->findGlobal(kv.first))
+                unwrittenStash.emplace_back(kv.first, -1L);
+    const std::unordered_map<std::string, std::vector<IRValueID>>* const branchStashArrays[2] =
+        {&postThenStashArrays, &postElseStashArrays};
+    for (const auto* st : branchStashArrays)
+        for (const auto& kv : *st)
+            for (size_t i = 0; i < kv.second.size(); ++i)
+                if (kv.second[i] != InvalidIRValue &&
+                    !preIfMap.count(kv.first + "@[" + std::to_string(i) + "]") &&
+                    module_->findGlobal(kv.first))
+                    unwrittenStash.emplace_back(kv.first, static_cast<long>(i));
+    std::sort(unwrittenStash.begin(), unwrittenStash.end());
+    unwrittenStash.erase(std::unique(unwrittenStash.begin(), unwrittenStash.end()), unwrittenStash.end());
+    for (const auto& elem : unwrittenStash)
+    {
+        IRGlobal* global = module_->findGlobal(elem.first);
+        const std::string key = elem.second < 0
+            ? elem.first + "@"
+            : elem.first + "@[" + std::to_string(elem.second) + "]";
+        IRTypeInfo ty = global->type;
+        if (elem.second >= 0) ty.arraySize = 0;
+        const IRValueID loadId = currentFunction_->allocateValueId();
+        auto load = std::make_unique<IRInstruction>(IROp::LoadUniform, loadId, ty);
+        load->targetName = elem.first;
+        if (elem.second >= 0)
+        {
+            load->componentIndex = static_cast<int>(elem.second);
+            load->arrayIndexKind = IRInstruction::ArrayIndexKind::Constant;
+        }
+        load->loc = stmt->loc;
+        currentBlock_->addInstruction(std::move(load));
+        preIfMap[key] = loadId;
+        nameToValue_[key] = loadId;
+    }
+
+    std::sort(unwritten.begin(), unwritten.end());
+    unwritten.erase(std::unique(unwritten.begin(), unwritten.end()), unwritten.end());
+    for (const auto& elem : unwritten)
+    {
+        IRGlobal* global = module_->findGlobal(elem.first);
+        const std::string key = elem.first + "[" + std::to_string(elem.second) + "]";
+        IRTypeInfo elemType = global->type;
+        elemType.arraySize = 0;
+        const IRValueID loadId = currentFunction_->allocateValueId();
+        auto load = std::make_unique<IRInstruction>(IROp::LoadUniform, loadId, elemType);
+        load->targetName = elem.first;
+        load->componentIndex = static_cast<int>(elem.second);
+        load->arrayIndexKind = IRInstruction::ArrayIndexKind::Constant;
+        load->loc = stmt->loc;
+        currentBlock_->addInstruction(std::move(load));
+        preIfMap[key] = loadId;
+        nameToValue_[key] = loadId;
+    }
 
     auto valueOrPre = [&](const std::unordered_map<std::string, IRValueID>& m,
                           const std::string& name) -> IRValueID
@@ -1197,6 +1352,45 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
         sel->addOperand(elseVal);
         currentBlock_->addInstruction(std::move(sel));
         nameToValue_[name] = selId;
+    }
+
+    // Unfold the element keys back into the arrays.  '[' cannot occur in an
+    // identifier, so every such key is one of ours.
+    for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+    {
+        const std::string& key = it->first;
+        const size_t at = key.find('@');
+        if (at != std::string::npos)
+        {
+            const std::string name = key.substr(0, at);
+            if (key.size() == at + 1)
+                shadowedGlobals_[name] = it->second;
+            else
+            {
+                const size_t idx = static_cast<size_t>(std::stoul(key.substr(at + 2)));
+                auto& vec = shadowedGlobalArrays_[name];
+                if (vec.size() <= idx) vec.resize(idx + 1, InvalidIRValue);
+                vec[idx] = it->second;
+            }
+            it = nameToValue_.erase(it);
+            continue;
+        }
+        const size_t br = key.find('[');
+        if (br == std::string::npos) { ++it; continue; }
+        const std::string arr = key.substr(0, br);
+        const size_t idx = static_cast<size_t>(std::stoul(key.substr(br + 1)));
+        auto arrIt = localArrayValues_.find(arr);
+        if (arrIt == localArrayValues_.end())
+        {
+            // promoted inside a branch: the array exists only there
+            size_t n = 0;
+            if (postThenArrays.count(arr)) n = std::max(n, postThenArrays.at(arr).size());
+            if (postElseArrays.count(arr)) n = std::max(n, postElseArrays.at(arr).size());
+            arrIt = localArrayValues_.emplace(arr, std::vector<IRValueID>(n, InvalidIRValue)).first;
+        }
+        if (idx < arrIt->second.size())
+            arrIt->second[idx] = it->second;
+        it = nameToValue_.erase(it);
     }
 }
 
@@ -1797,6 +1991,22 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
     {
         auto* varDecl = static_cast<VarDecl*>(declaration.get());
 
+        // A local that shadows a file-scope variable takes the name; the
+        // global's own binding (if the program assigned it) moves aside so
+        // an inlined helper can still reach it by name.
+        if (module_->findGlobal(varDecl->name) && !shadowedGlobals_.count(varDecl->name))
+        {
+            // captured ONCE: a second local of the same name (a nested
+            // declaration inside an inlined helper) must not replace the
+            // global's binding with the outer local's (review: codex,
+            // nested_local_shadow).
+            auto prior = nameToValue_.find(varDecl->name);
+            shadowedGlobals_[varDecl->name] =
+                prior != nameToValue_.end() ? prior->second : InvalidIRValue;
+            auto priorArr = localArrayValues_.find(varDecl->name);
+            shadowedGlobalArrays_[varDecl->name] =
+                priorArr != localArrayValues_.end() ? priorArr->second : std::vector<IRValueID>{};
+        }
         // Allocate a value for the variable
         IRValueID varId = currentFunction_->allocateValueId();
         declToValue_[varDecl] = varId;
@@ -2598,6 +2808,79 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     return emitCall(expr->functionName, resultType, argValues);
 }
 
+// Whether a function body mentions `name` as an identifier anywhere - the
+// predicate behind the nested-shadow refusal.  Conservative: any mention
+// counts, including one that a later pass would have removed.
+static void collectIdentifiers(const ExprNode* e, std::unordered_set<std::string>& out);
+static void collectIdentifiersStmt(const StmtNode* st, std::unordered_set<std::string>& out)
+{
+    if (!st) return;
+    switch (st->kind)
+    {
+    case StmtKind::Expr:
+        collectIdentifiers(static_cast<const ExprStmt*>(st)->expr.get(), out); break;
+    case StmtKind::Decl:
+        for (const auto& d : static_cast<const DeclStmt*>(st)->declarations)
+            if (d && d->kind == DeclKind::Variable)
+                collectIdentifiers(static_cast<const VarDecl*>(d.get())->initializer.get(), out);
+        break;
+    case StmtKind::Return:
+        collectIdentifiers(static_cast<const ReturnStmt*>(st)->value.get(), out); break;
+    case StmtKind::Block:
+        for (const auto& inner : static_cast<const BlockStmt*>(st)->statements)
+            collectIdentifiersStmt(inner.get(), out);
+        break;
+    case StmtKind::If:
+    {
+        const auto* ifs = static_cast<const IfStmt*>(st);
+        collectIdentifiers(ifs->condition.get(), out);
+        collectIdentifiersStmt(ifs->thenBranch.get(), out);
+        collectIdentifiersStmt(ifs->elseBranch.get(), out);
+        break;
+    }
+    default: break;
+    }
+}
+static void collectIdentifiers(const ExprNode* e, std::unordered_set<std::string>& out)
+{
+    if (!e) return;
+    switch (e->kind)
+    {
+    case ExprKind::Identifier:
+        out.insert(static_cast<const IdentifierExpr*>(e)->name); break;
+    case ExprKind::Binary:
+        collectIdentifiers(static_cast<const BinaryExpr*>(e)->left.get(), out);
+        collectIdentifiers(static_cast<const BinaryExpr*>(e)->right.get(), out); break;
+    case ExprKind::Unary:
+        collectIdentifiers(static_cast<const UnaryExpr*>(e)->operand.get(), out); break;
+    case ExprKind::Call:
+        for (const auto& a : static_cast<const CallExpr*>(e)->arguments) collectIdentifiers(a.get(), out);
+        break;
+    case ExprKind::MemberAccess:
+        collectIdentifiers(static_cast<const MemberAccessExpr*>(e)->object.get(), out); break;
+    case ExprKind::Index:
+        collectIdentifiers(static_cast<const IndexExpr*>(e)->array.get(), out);
+        collectIdentifiers(static_cast<const IndexExpr*>(e)->index.get(), out); break;
+    case ExprKind::Ternary:
+        collectIdentifiers(static_cast<const TernaryExpr*>(e)->condition.get(), out);
+        collectIdentifiers(static_cast<const TernaryExpr*>(e)->thenExpr.get(), out);
+        collectIdentifiers(static_cast<const TernaryExpr*>(e)->elseExpr.get(), out); break;
+    case ExprKind::Cast:
+        collectIdentifiers(static_cast<const CastExpr*>(e)->operand.get(), out); break;
+    case ExprKind::Constructor:
+        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments) collectIdentifiers(a.get(), out);
+        break;
+    default: break;
+    }
+}
+bool IRBuilder::functionNamesIdentifier(const FunctionDecl* fn, const std::string& name)
+{
+    std::unordered_set<std::string> ids;
+    if (fn && fn->body)
+        for (const auto& st : fn->body->statements) collectIdentifiersStmt(st.get(), ids);
+    return ids.count(name) != 0;
+}
+
 bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                        const std::vector<IRValueID>& args,
                                        IRValueID& result)
@@ -2660,7 +2943,43 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
 
     auto savedDecls = declToValue_;
     auto savedNames = nameToValue_;
+    auto savedArrays = localArrayValues_;
     auto savedSwizzles = identityPrefixSwizzleBase_;
+
+    // The names the CALLEE declares - its parameters and every local it
+    // declares in its body - are scoped to the inlined body: they shadow
+    // for its duration and are dropped afterwards.  Every OTHER name the
+    // body binds is a file-scope variable it wrote, and that write must
+    // reach the caller (`void gen(float4 p) { G = p * 2; }` then `return G;`
+    // reads 2*p in the reference).  The first draft restored the whole map
+    // and lost such writes; and it left a callee-local array `B[1]` in the
+    // bare-name array map, where it shadowed the caller's global B after
+    // the call returned (review: codex).
+    std::unordered_set<std::string> calleeScoped;
+    for (const auto& param : callee->parameters)
+        if (!param->name.empty()) calleeScoped.insert(param->name);
+    std::function<void(const StmtNode*)> collectDecls = [&](const StmtNode* st)
+    {
+        if (!st) return;
+        switch (st->kind)
+        {
+        case StmtKind::Decl:
+            for (const auto& d : static_cast<const DeclStmt*>(st)->declarations)
+                if (d) calleeScoped.insert(d->name);
+            break;
+        case StmtKind::Block:
+            for (const auto& inner : static_cast<const BlockStmt*>(st)->statements)
+                collectDecls(inner.get());
+            break;
+        case StmtKind::If:
+            collectDecls(static_cast<const IfStmt*>(st)->thenBranch.get());
+            collectDecls(static_cast<const IfStmt*>(st)->elseBranch.get());
+            break;
+        default:
+            break;
+        }
+    };
+    for (const auto& st : callee->body->statements) collectDecls(st.get());
 
     for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
@@ -2670,23 +2989,165 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
             nameToValue_[param->name] = args[i];
     }
 
+    // Names the caller shadows with a local: for the body, the name means
+    // the GLOBAL.  Bind its stashed value, or unbind the name so a read
+    // falls through to the global load when nothing ever assigned it.
+    for (const auto& kv : shadowedGlobals_)
+    {
+        if (calleeScoped.count(kv.first)) continue;
+        if (kv.second != InvalidIRValue) nameToValue_[kv.first] = kv.second;
+        else nameToValue_.erase(kv.first);
+    }
+    for (const auto& kv : shadowedGlobalArrays_)
+    {
+        if (calleeScoped.count(kv.first)) continue;
+        if (!kv.second.empty()) localArrayValues_[kv.first] = kv.second;
+        else localArrayValues_.erase(kv.first);
+    }
+
+    // Only the callee's own PARAMETERS exempt a name: they bind at entry,
+    // so every occurrence in the body names the parameter.  A local the
+    // body declares does not - a read before (or outside) that declaration
+    // names the global (review: codex - a nested block declaring G after
+    // `D = G` still read the enclosing helper's G).
+    std::unordered_set<std::string> calleeParams;
+    for (const auto& param : callee->parameters)
+        if (!param->name.empty()) calleeParams.insert(param->name);
+    for (const auto& scope : inlineScopes_)
+        for (const auto& name : scope)
+            if (!calleeParams.count(name) && module_->findGlobal(name) &&
+                functionNamesIdentifier(callee, name))
+            {
+                error(expr->loc, "cannot inline user function '" + callee->name +
+                                 "': it names file-scope '" + name +
+                                 "' while an enclosing helper's parameter or local of that name is in scope; refusing");
+                declToValue_ = std::move(savedDecls);
+                nameToValue_ = std::move(savedNames);
+                localArrayValues_ = std::move(savedArrays);
+                identityPrefixSwizzleBase_ = std::move(savedSwizzles);
+                return false;
+            }
+    const auto savedStash = shadowedGlobals_;
+    const auto savedStashArrays = shadowedGlobalArrays_;
+    inlineScopes_.push_back(calleeScoped);
     inlineStack_.push_back(callee);
     const bool ok = buildInlineFunctionBody(callee, result);
     inlineStack_.pop_back();
+    inlineScopes_.pop_back();
+    // A stash entry the callee CREATED (its own local shadowing a global) is
+    // the callee's scope and ends with it; an entry that existed before the
+    // call keeps the callee's update to the global.
+    for (auto it = shadowedGlobals_.begin(); it != shadowedGlobals_.end(); )
+        if (!savedStash.count(it->first)) it = shadowedGlobals_.erase(it); else ++it;
+    for (auto it = shadowedGlobalArrays_.begin(); it != shadowedGlobalArrays_.end(); )
+        if (!savedStashArrays.count(it->first)) it = shadowedGlobalArrays_.erase(it); else ++it;
 
     auto inlineSwizzles = identityPrefixSwizzleBase_;
+    const auto bodyNames = nameToValue_;
+    const auto bodyArrays = localArrayValues_;
     declToValue_ = std::move(savedDecls);
     nameToValue_ = std::move(savedNames);
+    localArrayValues_ = std::move(savedArrays);
     identityPrefixSwizzleBase_ = std::move(savedSwizzles);
+    // Carry the callee's writes to file-scope names back to the caller.
+    // A CALLER-LOCAL that shadows a global of the same name is the caller's
+    // binding: the callee wrote the global, which the caller cannot see by
+    // that name any more, so the caller's binding is kept (the flat map
+    // cannot hold both; the reverse-shadow fixture pins it).  A caller
+    // local is any VarDecl in the caller's declaration map bound to the
+    // prior value.
+    auto callerLocalBinding = [&](const std::string& name, IRValueID prior) -> bool
+    {
+        for (const auto& kv : declToValue_)
+            if (kv.first && kv.first->kind == DeclKind::Variable &&
+                kv.first->name == name && kv.second == prior)
+                return true;
+        return false;
+    };
+    for (const auto& kv : bodyNames)
+    {
+        if (calleeScoped.count(kv.first)) continue;
+        if (!module_->findGlobal(kv.first)) continue;
+        auto prior = nameToValue_.find(kv.first);
+        if (prior != nameToValue_.end() && callerLocalBinding(kv.first, prior->second))
+        {
+            // the caller's local keeps the name; the global's new value
+            // lives in the stash for the next helper that names it
+            shadowedGlobals_[kv.first] = kv.second;
+            continue;
+        }
+        if (prior != nameToValue_.end() && prior->second == kv.second) continue;
+        nameToValue_[kv.first] = kv.second;
+    }
+    // Arrays follow the same rule, and the caller-local test is the same
+    // one: a VarDecl of that name in the caller's declaration map is the
+    // caller's own array, and the callee's write to the file-scope array of
+    // the same name must not replace it (review: codex - reverse_array.cg
+    // returned 2*p where the reference returns the caller's p).
+    auto callerLocalArray = [&](const std::string& name) -> bool
+    {
+        for (const auto& kv : declToValue_)
+            if (kv.first && kv.first->kind == DeclKind::Variable && kv.first->name == name)
+                return true;
+        return false;
+    };
+    for (const auto& kv : bodyArrays)
+    {
+        if (calleeScoped.count(kv.first)) continue;
+        IRGlobal* global = module_->findGlobal(kv.first);
+        if (!global || !global->type.isArray()) continue;
+        if (callerLocalArray(kv.first)) { shadowedGlobalArrays_[kv.first] = kv.second; continue; }
+        localArrayValues_[kv.first] = kv.second;
+    }
     for (const auto& kv : inlineSwizzles)
         identityPrefixSwizzleBase_.try_emplace(kv.first, kv.second);
-    return ok && result != InvalidIRValue;
+    // A void helper (a statement-position call that writes globals or
+    // nothing) has no result value; its inlined body is the whole effect.
+    const bool returnsVoid =
+        getIRType(callee->returnType.get()).baseType == IRType::Void;
+    return ok && (returnsVoid || result != InvalidIRValue);
+}
+
+// The shapes an inlined control-flow statement may NOT contain yet: a
+// return inside a branch would need the function's value merged across the
+// join (a predicated result), and loops/switch need the general path's
+// control-flow milestone.  Each is refused BY NAME so the row stays a named
+// gap rather than a silent drop (the reference accepts all of them).
+static bool inlineBlockedShape(const StmtNode* stmt, std::string& why)
+{
+    if (!stmt) return false;
+    switch (stmt->kind)
+    {
+    case StmtKind::Return:   why = "a return inside control flow"; return true;
+    case StmtKind::For:
+    case StmtKind::While:
+    case StmtKind::DoWhile:  why = "a loop"; return true;
+    case StmtKind::Switch:
+    case StmtKind::Case:
+    case StmtKind::Default:  why = "a switch"; return true;
+    case StmtKind::Break:
+    case StmtKind::Continue: why = "break/continue"; return true;
+    case StmtKind::Block:
+        for (const auto& inner : static_cast<const BlockStmt*>(stmt)->statements)
+            if (inlineBlockedShape(inner.get(), why)) return true;
+        return false;
+    case StmtKind::If:
+    {
+        const auto* ifs = static_cast<const IfStmt*>(stmt);
+        return inlineBlockedShape(ifs->thenBranch.get(), why) ||
+               inlineBlockedShape(ifs->elseBranch.get(), why);
+    }
+    default:
+        return false;
+    }
 }
 
 bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
 {
     result = InvalidIRValue;
     bool sawReturn = false;
+    const bool returnsVoid =
+        getIRType(callee->returnType.get()).baseType == IRType::Void;
 
     for (size_t i = 0; i < callee->body->statements.size(); ++i)
     {
@@ -2705,17 +3166,39 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
             auto* ret = static_cast<ReturnStmt*>(stmt);
             if (!ret->value)
             {
-                error(stmt->loc, "cannot inline user function '" + callee->name +
-                                 "': void return");
-                return false;
+                if (!returnsVoid)
+                {
+                    error(stmt->loc, "cannot inline user function '" + callee->name +
+                                     "': void return");
+                    return false;
+                }
+                sawReturn = true;   // `return;` ends a void body
+                continue;
             }
             result = buildExpr(ret->value.get());
             sawReturn = true;
             continue;
         }
 
-        if (stmt->kind == StmtKind::Decl || stmt->kind == StmtKind::Expr)
+        if (stmt->kind == StmtKind::Empty)
+            continue;
+
+        // if/else and nested blocks inline through the ordinary statement
+        // builder: the if-join merges the callee's locals (and its
+        // parameters, which are plain names here) exactly as it merges the
+        // entry function's, so `if (mag > 1) { mv /= mag; }` inside a
+        // helper lowers to the same select/predicate shape it would at the
+        // call site.  The shapes the join cannot carry are refused by name.
+        if (stmt->kind == StmtKind::Decl || stmt->kind == StmtKind::Expr ||
+            stmt->kind == StmtKind::If || stmt->kind == StmtKind::Block)
         {
+            std::string why;
+            if (inlineBlockedShape(stmt, why))
+            {
+                error(stmt->loc, "cannot inline user function '" + callee->name +
+                                 "': " + why + " inside its body is not supported");
+                return false;
+            }
             buildStmt(stmt);
             if (currentBlock_->hasTerminator())
             {
@@ -2726,18 +3209,21 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
             continue;
         }
 
+        std::string why;
+        if (!inlineBlockedShape(stmt, why))
+            why = "unsupported control flow";
         error(stmt->loc, "cannot inline user function '" + callee->name +
-                         "': body contains unsupported control flow");
+                         "': " + why + " inside its body is not supported");
         return false;
     }
 
-    if (!sawReturn)
+    if (!sawReturn && !returnsVoid)
     {
         error(callee->loc, "cannot inline user function '" + callee->name +
                            "': no return expression");
         return false;
     }
-    return result != InvalidIRValue;
+    return returnsVoid || result != InvalidIRValue;
 }
 
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
@@ -3323,6 +3809,40 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
         IRGlobal* global = nameIsBound ? nullptr : module_->findGlobal(ident->name);
         if (global && !global->type.isArray())
             global = nullptr;
+
+        // A file-scope array (implicitly uniform in Cg) that the program has
+        // ASSIGNED is promoted to a value array by the store (t_7a4e3b36):
+        // an element written earlier reads the written value, exactly as
+        // the reference does (it lists the array as UNDEFINED params and
+        // computes from the stores).  Before this, the store was dropped
+        // and every read came from the uniform slot - a silent wrong
+        // picture on both profiles (GpuBezierTessellation's B[10]).  An
+        // element never written falls through to the uniform load below;
+        // a run-time index over a written array is refused by name.
+        if (global && !arrayParam)
+        {
+            auto promoted = localArrayValues_.find(ident->name);
+            if (promoted != localArrayValues_.end())
+            {
+                int64_t index = 0;
+                std::string why;
+                const IndexEval eval = evaluateIntegralIndex(expr->index.get(), index, why);
+                if (eval == IndexEval::Invalid)
+                {
+                    error(expr->loc, why + " ('" + ident->name + "')");
+                    return InvalidIRValue;
+                }
+                if (eval != IndexEval::Constant)
+                {
+                    error(expr->loc, "file-scope array '" + ident->name +
+                                     "' is assigned at run time and read with a run-time index; refusing");
+                    return InvalidIRValue;
+                }
+                if (index >= 0 && index < static_cast<int64_t>(promoted->second.size()) &&
+                    promoted->second[static_cast<size_t>(index)] != InvalidIRValue)
+                    return promoted->second[static_cast<size_t>(index)];
+            }
+        }
 
         if (arrayParam || global)
         {
@@ -3947,6 +4467,19 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                 static_cast<IdentifierExpr*>(indexExpr->array.get());
             auto* lit = static_cast<LiteralExpr*>(indexExpr->index.get());
             auto arrIt = localArrayValues_.find(ident->name);
+            if (arrIt == localArrayValues_.end() && !nameToValue_.count(ident->name))
+            {
+                // First store into a file-scope array: promote it (see the
+                // read side in buildIndexExpr).  Elements stay unwritten
+                // until stored, so a later read of an untouched element
+                // still takes the uniform.
+                IRGlobal* global = module_->findGlobal(ident->name);
+                if (global && global->type.isArray() && global->type.arraySize > 0)
+                    arrIt = localArrayValues_.emplace(
+                        ident->name,
+                        std::vector<IRValueID>(static_cast<size_t>(global->type.arraySize),
+                                               InvalidIRValue)).first;
+            }
             if (arrIt != localArrayValues_.end() &&
                 lit->literalKind == LiteralExpr::LiteralKind::Int)
             {
@@ -3956,8 +4489,14 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                     arrIt->second[static_cast<size_t>(rawIndex)] = value;
                 else
                     error(target->loc, "array index out of bounds");
+                return value;
             }
         }
+        // Any other element store used to fall out of this function with
+        // the value discarded and no diagnostic - the program compiled
+        // and read whatever the array held before.  Refuse by name.
+        error(target->loc, "assignment to an array element this compiler cannot "
+                           "track (non-local array or non-literal index); refusing");
         return value;
     }
 

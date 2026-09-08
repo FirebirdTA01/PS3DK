@@ -1,0 +1,1 @@
+float4 G; void gen(float4 p) { G = p * 2; } float4 get() { return G; } float4 main(float4 p : POSITION) : POSITION { float4 G = p * 3; if (p.x > 0) gen(p); return get(); }

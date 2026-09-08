@@ -1,0 +1,1 @@
+float3 B[3]; void gen(float3 p0, float3 p1) { B[0] = p0; B[1] = p1; B[2] = p0 * (2.0/3.0) + p1 * (1.0/3.0); } void main(float4 p : POSITION, float3 n : NORMAL, out float4 o : POSITION) { gen(p.xyz, n); o = float4(B[2] + B[0] * B[1].x, 1); }

@@ -1,0 +1,1 @@
+float4 G; float4 D; float4 get(){return G;} void gen(){float4 G=float4(9,8,7,6);D=get();} float4 main(float4 p:POSITION):POSITION {G=p;float4 G=p*3;gen();return D;}

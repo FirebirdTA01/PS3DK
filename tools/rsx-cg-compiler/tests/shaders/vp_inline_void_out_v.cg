@@ -1,0 +1,1 @@
+void split(float4 p, out float3 a, out float w) { a = p.xyz; w = p.w; } void main(float4 p : POSITION, out float4 o : POSITION) { float3 a; float w; split(p, a, w); o = float4(a * w, w); }

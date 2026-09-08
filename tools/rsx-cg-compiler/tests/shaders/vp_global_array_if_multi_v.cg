@@ -1,0 +1,1 @@
+float4 B[3]; float4 main(float4 p : POSITION) : POSITION { B[0] = p; B[1] = p * 2; B[2] = p * 3; if (p.x > 0) { B[0] = p * 4; B[1] = p * 5; B[2] = p * 6; } return B[0] + B[1] + B[2]; }

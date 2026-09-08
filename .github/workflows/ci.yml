@@ -240,6 +240,8 @@ jobs:
         run: bash tests/shader-compiler/vp-two-inputs-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler VP point size and clip outputs (t_bbca6d14)
         run: bash tests/shader-compiler/vp-special-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler user-function inlining with control flow and void helpers (t_7a4e3b36)
+        run: bash tests/shader-compiler/user-function-inline-control-flow-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros

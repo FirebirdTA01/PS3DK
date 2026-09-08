@@ -1,0 +1,7 @@
+float B[2];
+
+float4 main(float2 uv : TEXCOORD0) : COLOR
+{
+    if (uv.x > 0.5) { B[0] = 1.0; }
+    return float4(B[0], B[1], 0.0, 1.0);
+}
