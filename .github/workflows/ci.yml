@@ -232,6 +232,8 @@ jobs:
         run: bash tests/shader-compiler/float-literal-syntax-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler pack/unpack family (t_23f9d1a6)
         run: bash tests/shader-compiler/pack-unpack-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler stdlib overloads and texture intrinsics
+        run: bash tests/shader-compiler/stdlib-bucket-c-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test inline is a no-op function qualifier and refused elsewhere
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros

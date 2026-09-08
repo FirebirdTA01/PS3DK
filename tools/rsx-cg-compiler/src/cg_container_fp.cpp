@@ -84,8 +84,13 @@ constexpr uint32_t kCgFloat       = 1045u;
 constexpr uint32_t kCgFloat2      = 1046u;
 constexpr uint32_t kCgFloat3      = 1047u;
 constexpr uint32_t kCgFloat4      = 1048u;
+constexpr uint32_t kCgFloat2x2    = 1054u;
+constexpr uint32_t kCgFloat3x3    = 1059u;
 constexpr uint32_t kCgFloat4x4    = 1064u;
+constexpr uint32_t kCgSampler1D   = 1065u;
 constexpr uint32_t kCgSampler2D   = 1066u;
+constexpr uint32_t kCgSampler3D   = 1067u;
+constexpr uint32_t kCgSamplerRect = 1068u;
 constexpr uint32_t kCgSamplerCube = 1069u;
 
 std::string toUpper(std::string s)
@@ -129,10 +134,16 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
 // them.
 uint32_t cgTypeForIRType(const IRTypeInfo& t)
 {
+    if (t.baseType == IRType::Sampler1D)   return kCgSampler1D;
     if (t.baseType == IRType::Sampler2D)   return kCgSampler2D;
+    if (t.baseType == IRType::Sampler3D)   return kCgSampler3D;
+    if (t.baseType == IRType::SamplerRect) return kCgSamplerRect;
     if (t.baseType == IRType::SamplerCube) return kCgSamplerCube;
-    if (t.isMatrix() && t.matrixRows == 4 && t.matrixCols == 4)
-        return kCgFloat4x4;
+    if (t.isMatrix()) {
+        if (t.matrixRows == 2 && t.matrixCols == 2) return kCgFloat2x2;
+        if (t.matrixRows == 3 && t.matrixCols == 3) return kCgFloat3x3;
+        if (t.matrixRows == 4 && t.matrixCols == 4) return kCgFloat4x4;
+    }
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
@@ -328,6 +339,49 @@ ContainerResult emitFragmentContainerImpl(
             continue;
         }
 
+        if (p.storage == StorageQualifier::Uniform && p.type.isMatrix())
+        {
+            const unsigned base = rsx_cg::fpParameterSlotBases(*entry)[i];
+            const int rows = std::max(1, p.type.matrixRows);
+            const int cols = std::max(1, p.type.matrixCols);
+            IRTypeInfo rowType = (cols == 2) ? IRTypeInfo::Float2() :
+                                 (cols == 3) ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+
+            ParamDesc parent;
+            parent.name = p.name;
+            parent.semantic = std::string{};
+            parent.type = cgTypeForIRType(p.type);
+            parent.paramno = static_cast<uint32_t>(i);
+            parent.res = kCgUndefined;
+            parent.var = kCgUniform;
+            parent.direction = kCgIn;
+            parent.isReferenced = 1;
+            params.push_back(parent);
+
+            for (int k = 0; k < rows; ++k)
+            {
+                ParamDesc e;
+                e.name = rsx_cg::arrayElementName(p.name, k);
+                e.semantic = std::string{};
+                e.type = cgTypeForIRType(rowType);
+                e.paramno = static_cast<uint32_t>(i);
+                e.res = kCgUndefined;
+                e.var = kCgUniform;
+                e.direction = kCgIn;
+                for (const auto& eu : attrs.embeddedUniforms)
+                {
+                    if (eu.entryParamIndex == base + static_cast<unsigned>(k))
+                    {
+                        e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                        break;
+                    }
+                }
+                e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                params.push_back(e);
+            }
+            continue;
+        }
+
         ParamDesc d;
         d.name      = p.name;
         // Preserve original source spelling — the reference compiler stores "TEXCOORD0"
@@ -434,6 +488,49 @@ ContainerResult emitFragmentContainerImpl(
                     e.name      = rsx_cg::arrayElementName(g.name, static_cast<int>(k));
                     e.semantic  = std::string{};
                     e.type      = cgTypeForIRType(g.type);
+                    e.paramno   = kInvalidIndex;
+                    e.res       = kCgUndefined;
+                    e.var       = kCgUniform;
+                    e.direction = kCgIn;
+                    for (const auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == slot)
+                        {
+                            e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                            break;
+                        }
+                    }
+                    e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                    params.push_back(e);
+                }
+                continue;
+            }
+
+            if (g.type.isMatrix() && !isSamplerIRType(g.type.baseType))
+            {
+                const int rows = std::max(1, g.type.matrixRows);
+                const int cols = std::max(1, g.type.matrixCols);
+                IRTypeInfo rowType = (cols == 2) ? IRTypeInfo::Float2() :
+                                     (cols == 3) ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+
+                ParamDesc parent;
+                parent.name      = g.name;
+                parent.semantic  = std::string{};
+                parent.type      = cgTypeForIRType(g.type);
+                parent.paramno   = kInvalidIndex;
+                parent.res       = kCgUndefined;
+                parent.var       = kCgUniform;
+                parent.direction = kCgIn;
+                parent.isReferenced = 1;
+                params.push_back(parent);
+
+                for (int k = 0; k < rows; ++k)
+                {
+                    const unsigned slot = globalSlotCursor++;
+                    ParamDesc e;
+                    e.name      = rsx_cg::arrayElementName(g.name, static_cast<int>(k));
+                    e.semantic  = std::string{};
+                    e.type      = cgTypeForIRType(rowType);
                     e.paramno   = kInvalidIndex;
                     e.res       = kCgUndefined;
                     e.var       = kCgUniform;

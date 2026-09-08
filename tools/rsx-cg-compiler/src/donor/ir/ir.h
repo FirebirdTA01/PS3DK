@@ -45,7 +45,9 @@ enum class IRType
     Mat4x4,
 
     // Sampler types
+    Sampler1D,
     Sampler2D,
+    Sampler3D,
     SamplerRect,
     SamplerCube,
 
@@ -62,7 +64,9 @@ enum class IRType
 // four sites that need it (t_f5f750ff).
 inline bool isSamplerIRType(IRType t)
 {
-    return t == IRType::Sampler2D ||
+    return t == IRType::Sampler1D ||
+           t == IRType::Sampler2D ||
+           t == IRType::Sampler3D ||
            t == IRType::SamplerRect ||
            t == IRType::SamplerCube;
 }
@@ -183,6 +187,7 @@ enum class IROp
     Lerp,
     Step,
     SmoothStep,
+    Lit,
 
     // Trigonometric
     Sin,
@@ -244,6 +249,7 @@ enum class IROp
     TexSampleLod,   // tex2Dlod
     TexSampleGrad,  // tex2Dgrad
     TexSampleProj,  // tex2Dproj
+    TexSampleBias,  // tex2Dbias
     TexFetch,       // texelFetch
 
     // Function calls

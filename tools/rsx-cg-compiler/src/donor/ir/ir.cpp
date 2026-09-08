@@ -145,6 +145,16 @@ IRTypeInfo IRTypeInfo::fromCgType(const CgType& cgType)
         {
             info.baseType = IRType::SamplerRect;
         }
+        else if (typeStr.find("3D") != std::string::npos ||
+                 typeStr.find("3d") != std::string::npos)
+        {
+            info.baseType = IRType::Sampler3D;
+        }
+        else if (typeStr.find("1D") != std::string::npos ||
+                 typeStr.find("1d") != std::string::npos)
+        {
+            info.baseType = IRType::Sampler1D;
+        }
         else
         {
             info.baseType = IRType::Sampler2D;
@@ -248,6 +258,7 @@ const char* irOpToString(IROp op)
     case IROp::Lerp:         return "lerp";
     case IROp::Step:         return "step";
     case IROp::SmoothStep:   return "smoothstep";
+    case IROp::Lit:          return "lit";
     case IROp::Sin:          return "sin";
     case IROp::Cos:          return "cos";
     case IROp::Tan:          return "tan";
@@ -293,6 +304,7 @@ const char* irOpToString(IROp op)
     case IROp::TexSampleLod: return "samplelod";
     case IROp::TexSampleGrad: return "samplegrad";
     case IROp::TexSampleProj: return "sampleproj";
+    case IROp::TexSampleBias: return "samplebias";
     case IROp::TexFetch:     return "texfetch";
     case IROp::Call:         return "call";
     case IROp::Nop:          return "nop";
@@ -818,6 +830,7 @@ int getOperandCount(IROp op)
     case IROp::StoreOutput:
     case IROp::StoreVarying:
     case IROp::TexSample:
+    case IROp::TexSampleBias:
         return 2;
 
     // Ternary
@@ -825,6 +838,7 @@ int getOperandCount(IROp op)
     case IROp::Clamp:
     case IROp::Lerp:
     case IROp::SmoothStep:
+    case IROp::Lit:
     case IROp::Refract:
     case IROp::FaceForward:
     case IROp::VecInsert:

@@ -2497,6 +2497,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         return emitBinaryOp(IROp::Mul, resultType, argValues[0], scaleValue);
     }
 
+
     if (builtinOp && expr->resolvedFunction == nullptr)
     {
         if ((expr->functionName == "texDepth2D" ||
@@ -4240,6 +4241,7 @@ std::optional<IROp> IRBuilder::builtinToIROp(const std::string& name)
         {"lerp", IROp::Lerp},
         {"step", IROp::Step},
         {"smoothstep", IROp::SmoothStep},
+        {"lit", IROp::Lit},
         {"sin", IROp::Sin},
         {"cos", IROp::Cos},
         {"tan", IROp::Tan},
@@ -4264,15 +4266,27 @@ std::optional<IROp> IRBuilder::builtinToIROp(const std::string& name)
         {"refract", IROp::Refract},
         {"faceforward", IROp::FaceForward},
         {"mul", IROp::MatVecMul},
+        {"transpose", IROp::Transpose},
+        {"tex1D", IROp::TexSample},
         {"tex2D", IROp::TexSample},
-        {"h4tex2D", IROp::TexSample},
-        {"h3tex2D", IROp::TexSample},
-        {"texDepth2D", IROp::TexSample},
-        {"texDepth2D_precise", IROp::TexSample},
+        {"tex3D", IROp::TexSample},
+        {"texCUBE", IROp::TexSample},
         {"texRECT", IROp::TexSample},
+        {"tex2Dbias", IROp::TexSampleBias},
         {"tex2Dlod", IROp::TexSampleLod},
         {"tex2Dproj", IROp::TexSampleProj},
-        {"texCUBE", IROp::TexSample},
+        {"texDepth2D", IROp::TexSample},
+        {"texDepth2D_precise", IROp::TexSample},
+        {"f1tex1D", IROp::TexSample}, {"f2tex1D", IROp::TexSample}, {"f3tex1D", IROp::TexSample}, {"f4tex1D", IROp::TexSample},
+        {"h1tex1D", IROp::TexSample}, {"h2tex1D", IROp::TexSample}, {"h3tex1D", IROp::TexSample}, {"h4tex1D", IROp::TexSample},
+        {"f1tex2D", IROp::TexSample}, {"f2tex2D", IROp::TexSample}, {"f3tex2D", IROp::TexSample}, {"f4tex2D", IROp::TexSample},
+        {"h1tex2D", IROp::TexSample}, {"h2tex2D", IROp::TexSample}, {"h3tex2D", IROp::TexSample}, {"h4tex2D", IROp::TexSample},
+        {"f1tex3D", IROp::TexSample}, {"f2tex3D", IROp::TexSample}, {"f3tex3D", IROp::TexSample}, {"f4tex3D", IROp::TexSample},
+        {"h1tex3D", IROp::TexSample}, {"h2tex3D", IROp::TexSample}, {"h3tex3D", IROp::TexSample}, {"h4tex3D", IROp::TexSample},
+        {"f1texCUBE", IROp::TexSample}, {"f2texCUBE", IROp::TexSample}, {"f3texCUBE", IROp::TexSample}, {"f4texCUBE", IROp::TexSample},
+        {"h1texCUBE", IROp::TexSample}, {"h2texCUBE", IROp::TexSample}, {"h3texCUBE", IROp::TexSample}, {"h4texCUBE", IROp::TexSample},
+        {"f1texRECT", IROp::TexSample}, {"f2texRECT", IROp::TexSample}, {"f3texRECT", IROp::TexSample}, {"f4texRECT", IROp::TexSample},
+        {"h1texRECT", IROp::TexSample}, {"h2texRECT", IROp::TexSample}, {"h3texRECT", IROp::TexSample}, {"h4texRECT", IROp::TexSample},
     };
 
     auto it = builtins.find(name);

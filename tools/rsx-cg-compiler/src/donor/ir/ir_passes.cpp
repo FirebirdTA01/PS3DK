@@ -41,6 +41,7 @@ bool isPure(IROp op)
     case IROp::TexSampleLod:
     case IROp::TexSampleGrad:
     case IROp::TexSampleProj:
+    case IROp::TexSampleBias:
     case IROp::TexFetch:
         return false;
     default:
