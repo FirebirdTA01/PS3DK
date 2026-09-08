@@ -102,6 +102,21 @@ data = open(sys.argv[1], 'rb').read(); want = bytes.fromhex(sys.argv[2])
 sys.exit(0 if (want in data or want[::-1] in data) else 1)
 PYEOF
 }
+factor() {   # <stem> fp|vp <k>: the output is exactly k * the one input, lane by lane,
+             # evaluated from the decoded operands (inline_factor_check.py); then the
+             # four artifact controls - the MUL's const lane flipped, its sign flipped,
+             # PROGRAM_END cleared on the last row, PROGRAM_END set on the first -
+             # must be REJECTED by the same predicate, or the row is too weak to trust.
+    local stem="$1" profile="$2" k="$3"
+    python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" \
+        || fail "$stem: output is not $k * input (see the value diff above)"
+    local control
+    for control in lane negate no-end early-end; do
+        python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" --control "$control" \
+            || fail "$stem: the $control control was NOT rejected - the value predicate is too weak"
+    done
+    pass "$stem: output = $k * input; lane, sign, no-END and early-END controls rejected"
+}
 count() {    # <stem> <regex> <expected count>
     local n; n=$(grep -cE "$2" "$work/$1.dec" || true)
     [[ "$n" -eq "$3" ]] || { cat "$work/$1.dec" >&2; fail "$1: $n lines match /$2/, expected $3"; }
@@ -251,26 +266,26 @@ forbid fp_inline_entry_param_write_f 's0=c[0-9]+'
 accept fp_inline_entry_param_rebound_f sce_fp_rsx "main's PARAMETER G reassigned (G = G*2) before set() writes the global: main returns 2*TEXCOORD0"
 expect fp_inline_entry_param_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
 count  fp_inline_entry_param_rebound_f '^[0-9]+ MUL ' 1
-has_float fp_inline_entry_param_rebound_f 40000000 "the factor 2.0 (an input read alone cannot hide a lost multiply)"
+factor fp_inline_entry_param_rebound_f fp 2
 forbid fp_inline_entry_param_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 # The reference folds 3*2 into one MULR by 6; we keep both multiplies (a
-# pre-existing fold gap, not this boundary) - so both FACTORS are pinned.
+# pre-existing fold gap, not this boundary).  The VALUE is what is pinned:
+# has_float presence was measured insufficient - a container reading the
+# const block's zero lane, or negating the factor, passed it (review: codex).
 accept fp_inline_local_rebound_f sce_fp_rsx "a caller LOCAL G reassigned (G = G*2) before set() writes the global: main returns 6*TEXCOORD0"
 expect fp_inline_local_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
 count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 2
-has_float fp_inline_local_rebound_f 40400000 "the factor 3.0"
-has_float fp_inline_local_rebound_f 40000000 "the factor 2.0"
+factor fp_inline_local_rebound_f fp 6
 forbid fp_inline_local_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 accept vp_inline_entry_param_rebound_v sce_vp_rsx "vertex twin: main's PARAMETER G reassigned before set() writes the global: o0 = 2*IN0"
 expect vp_inline_entry_param_rebound_v '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw src0=IN0\.xyzw'
 count  vp_inline_entry_param_rebound_v '^[0-9]+ MUL ' 1
-has_float vp_inline_entry_param_rebound_v 40000000 "the factor 2.0"
+factor vp_inline_entry_param_rebound_v vp 2
 forbid vp_inline_entry_param_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
 accept vp_inline_local_rebound_v sce_vp_rsx "vertex twin: a caller LOCAL G reassigned before set() writes the global: o0 = 6*IN0"
 expect vp_inline_local_rebound_v '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw src0=IN0\.xyzw'
 count  vp_inline_local_rebound_v '^[0-9]+ MUL ' 2
-has_float vp_inline_local_rebound_v 40400000 "the factor 3.0"
-has_float vp_inline_local_rebound_v 40000000 "the factor 2.0"
+factor vp_inline_local_rebound_v vp 6
 forbid vp_inline_local_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
 
 # ---------------------------------------------------------------- named gaps
