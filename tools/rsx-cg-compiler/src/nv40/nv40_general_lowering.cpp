@@ -6599,6 +6599,12 @@ private:
     void lowerTex(const IRInstruction& inst, VOp op = VOp::Tex)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
+        if (op == VOp::TexBias && profile_ == GeneralProfile::Vertex) {
+            program_.diagnostics.push_back(
+                "nv40-general: vertex texture fetch (tex2Dbias) is not supported in VP; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
         VInstr vi;
         vi.op = op;
         vi.dst.index = define(inst.result);
