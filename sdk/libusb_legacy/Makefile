@@ -20,6 +20,14 @@ CFLAGS   := -O2 -Wall -Wextra -Wno-unused-parameter \
             -I$(PS3_TOOLCHAIN_ROOT)/sdk/include \
             -I$(PS3DK)/ppu/include \
             -I$(PS3DEV)/psl1ght/ppu/include
+
+# ABI flags (-mlp64 for the LP64 multilib) arrive from
+# scripts/build-cell-stub-archives.sh, which builds this object once per ABI.
+# They must NOT be passed as CFLAGS: a CFLAGS := assignment in a makefile
+# overrides the environment value, so an incoming -mlp64 was silently dropped
+# and the lp64 archive shipped an ILP32-compiled object.
+CFLAGS += $(ABI_CFLAGS)
+
 DEPFLAGS := -MMD -MP
 
 SRC_DIR  := src

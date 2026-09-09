@@ -21,6 +21,21 @@
 #include <rsx/gcm_sys.h>
 #include <sys/lv2_types.h>
 
+/* ABI witness.  This object is compiled twice — once per ABI — and filed
+ * into the ilp32 and lp64 copies of libgcm_sys.a.  Nothing in an ELF64
+ * PPC64 object records which of the two it was: the class is ELF64 and
+ * e_flags is 0 either way, so a build that silently dropped -mlp64 filed
+ * an ILP32 object under lp64/ and nobody noticed until an LP64 caller got
+ * a 4-byte stw into an 8-byte pointer output.
+ *
+ * The array's SIZE is the pointer width the compiler actually used, and
+ * `nm -S` reads it straight out of the symbol table, so the check needs
+ * no predefined macro and no disassembly.  Static, so a second TU in the
+ * same archive cannot collide with it.
+ * Read by tests/sdk/gcm-legacy-symbol-coverage-test.sh. */
+static const char ps3tc_abi_witness_ptr[sizeof(void *)]
+    __attribute__((used)) = { 0 };
+
 /* ====================================================================
  * cellGcm* NID-bound externs — provided by libgcm_sys_stub's
  * sceStub.text / .opd.  These are the real entry points for the
@@ -38,16 +53,48 @@ extern int32_t  cellGcmBindZcull(uint8_t index, uint32_t offset,
 extern int32_t  cellGcmDumpGraphicsError(void);
 extern void     cellGcmGetConfiguration(void *config);
 extern void    *cellGcmGetControlRegister(void);
+extern int32_t  cellGcmGetCurrentDisplayBufferId(uint8_t *id);
 extern uint32_t cellGcmGetCurrentField(void);
+extern int32_t  cellGcmGetDisplayBufferByFlipIndex(const uint32_t qid);
+/* Pointer-returning system calls hand back a 32-bit effective address, so
+ * they are declared as lv2_ea32_t and widened through lv2_ea32_expand.
+ * This is type discipline, not a codegen difference: at -O2 GCC emits the
+ * same call and return sequence as the older `void *` spelling used by
+ * gcmGetControlRegister and gcmGetLabelAddress, because it takes the
+ * declared 32-bit return type as already ABI-extended.  What the
+ * lv2_ea32_t spelling buys is that the EA-ness is stated where the value
+ * crosses, and that the -mlp64 widening is written down rather than
+ * implied by a cast - measured, it does not add a clear of r3's upper
+ * half, and it should not be read as protecting against one. */
+extern lv2_ea32_t cellGcmGetDisplayInfo(void);
 extern uint32_t cellGcmGetFlipStatus(void);
 extern uint32_t *cellGcmGetLabelAddress(uint8_t index);
+extern int64_t  cellGcmGetLastFlipTime(void);
+extern int64_t  cellGcmGetLastSecondVTime(void);
 extern uint32_t cellGcmGetMaxIoMapSize(void);
+extern lv2_ea32_t cellGcmGetNotifyDataAddress(const uint32_t index);
+/* Fills two 32-bit EAs - 8 bytes - because the reference SDK's
+ * CellGcmOffsetTable is a pair of 32-bit pointers.  Typed void * here so
+ * the LP64 widening happens in the wrapper, not at this boundary. */
+extern void     cellGcmGetOffsetTable(void *table);
+extern uint32_t cellGcmGetReport(const uint32_t type, const uint32_t index);
+extern lv2_ea32_t cellGcmGetReportDataAddress(const uint32_t index);
+extern lv2_ea32_t cellGcmGetReportDataAddressLocation(const uint32_t index,
+                                                      const uint32_t location);
+extern uint32_t cellGcmGetReportDataLocation(const uint32_t index,
+                                             const uint32_t location);
+extern lv2_ea32_t cellGcmGetTileInfo(void);
 extern uint32_t cellGcmGetTiledPitchSize(uint32_t size);
+extern uint64_t cellGcmGetTimeStamp(const uint32_t index);
+extern uint64_t cellGcmGetTimeStampLocation(const uint32_t index,
+                                            const uint32_t location);
 extern uint32_t cellGcmGetVBlankCount(void);
+extern lv2_ea32_t cellGcmGetZcullInfo(void);
 extern int32_t  _cellGcmInitBody(void *ATTRIBUTE_PRXPTR *ctx,
                                  uint32_t cmdSize, uint32_t ioSize,
                                  const void *ioAddress);
 extern int32_t  cellGcmInitCursor(void);
+extern int32_t  cellGcmInitDefaultFifoMode(int32_t mode);
 extern int32_t  cellGcmInitSystemMode(uint64_t mode);
 extern int32_t  cellGcmIoOffsetToAddress(uint32_t offset,
                                          void *ATTRIBUTE_PRXPTR *address);
@@ -58,6 +105,7 @@ extern int32_t  cellGcmMapLocalMemory(void *ATTRIBUTE_PRXPTR *address,
                                       uint32_t *size);
 extern int32_t  cellGcmMapMainMemory(const void *address, uint32_t size,
                                      uint32_t *offset);
+extern int32_t  cellGcmReserveIoMapSize(const uint32_t size);
 extern int32_t  cellGcmResetFlipStatus(void);
 extern int32_t  cellGcmSetCursorDisable(void);
 extern int32_t  cellGcmSetCursorEnable(void);
@@ -77,19 +125,38 @@ extern int32_t  cellGcmSetFlip(void *ctx, uint8_t id);
 extern void     cellGcmSetWaitFlip(void *ctx);
 extern void     cellGcmSetFlipHandler(void *handler_opd32);
 extern int32_t  cellGcmSetFlipImmediate(uint8_t id);
+extern void     cellGcmSetFlipStatus(void);
 extern void     cellGcmSetFlipMode(uint32_t mode);
 extern void     cellGcmSetGraphicsHandler(void *handler_opd32);
+extern void     cellGcmSetInvalidateTile(const uint8_t index);
 extern uint32_t cellGcmSetPrepareFlip(void *ctx, uint8_t id);
 extern void     cellGcmSetQueueHandler(void *handler_opd32);
+extern void     cellGcmSetSecondVFrequency(const uint32_t freq);
 extern void     cellGcmSetSecondVHandler(void *handler_opd32);
+extern void     cellGcmSetTile(const uint8_t index, const uint8_t location,
+                               const uint32_t offset, const uint32_t size,
+                               const uint32_t pitch, const uint8_t comp,
+                               const uint16_t base, const uint8_t bank);
 extern int32_t  cellGcmSetTileInfo(uint8_t index, uint8_t location,
                                    uint32_t offset, uint32_t size,
                                    uint32_t pitch, uint8_t comp,
                                    uint16_t base, uint8_t bank);
 extern void     cellGcmSetUserHandler(void *handler_opd32);
+extern void     cellGcmSetVBlankFrequency(const uint32_t freq);
 extern void     cellGcmSetVBlankHandler(void *handler_opd32);
+extern void     cellGcmSetZcull(const uint8_t index, const uint32_t offset,
+                                const uint32_t width, const uint32_t height,
+                                const uint32_t cullStart,
+                                const uint32_t zFormat, const uint32_t aaFormat,
+                                const uint32_t zCullDir,
+                                const uint32_t zCullFormat, const uint32_t sFunc,
+                                const uint32_t sRef, const uint32_t sMask);
+extern int32_t  cellGcmSortRemapEaIoAddress(void);
+extern int32_t  cellGcmUnbindTile(const uint8_t index);
+extern int32_t  cellGcmUnbindZcull(const uint8_t index);
 extern int32_t  cellGcmUnmapEaIoAddress(const void *ea);
 extern int32_t  cellGcmUnmapIoAddress(uint32_t io);
+extern int32_t  cellGcmUnreserveIoMapSize(const uint32_t size);
 extern int32_t  cellGcmUpdateCursor(void);
 
 /* ====================================================================
@@ -157,9 +224,24 @@ gcmControlRegister *gcmGetControlRegister(void)
     return (gcmControlRegister *)cellGcmGetControlRegister();
 }
 
+s32 gcmGetCurrentDisplayBufferId(u8 *id)
+{
+    return (s32)cellGcmGetCurrentDisplayBufferId(id);
+}
+
 u32 gcmGetCurrentField(void)
 {
     return cellGcmGetCurrentField();
+}
+
+s32 gcmGetDisplayBufferByFlipIndex(const u32 qid)
+{
+    return (s32)cellGcmGetDisplayBufferByFlipIndex(qid);
+}
+
+const gcmDisplayInfo *gcmGetDisplayInfo(void)
+{
+    return (const gcmDisplayInfo *)lv2_ea32_expand(cellGcmGetDisplayInfo());
 }
 
 u32 gcmGetFlipStatus(void)
@@ -172,9 +254,67 @@ u32 *gcmGetLabelAddress(u8 index)
     return cellGcmGetLabelAddress(index);
 }
 
+s64 gcmGetLastFlipTime(void)
+{
+    return (s64)cellGcmGetLastFlipTime();
+}
+
+s64 gcmGetLastSecondVTime(void)
+{
+    return (s64)cellGcmGetLastSecondVTime();
+}
+
 u32 gcmGetMaxIoMapSize(void)
 {
     return cellGcmGetMaxIoMapSize();
+}
+
+gcmNotifyData *gcmGetNotifyDataAddress(const u32 index)
+{
+    return (gcmNotifyData *)lv2_ea32_expand(cellGcmGetNotifyDataAddress(index));
+}
+
+/* The kernel writes two 32-bit EAs - 8 bytes - because the reference SDK's
+ * CellGcmOffsetTable is a pair of 32-bit pointers.  Under -mlp64 our
+ * gcmOffsetTable is 16 bytes with 8-byte members, so the raw pair is
+ * received into a fixed-width local and widened field by field.  Under
+ * ILP32 the widening is the identity and the local costs one copy. */
+void gcmGetOffsetTable(gcmOffsetTable *table)
+{
+    struct { lv2_ea32_t io; lv2_ea32_t ea; } raw = { 0, 0 };
+
+    if (table == NULL) return;
+
+    cellGcmGetOffsetTable(&raw);
+    table->io = (u16 *)lv2_ea32_expand(raw.io);
+    table->ea = (u16 *)lv2_ea32_expand(raw.ea);
+}
+
+u32 gcmGetReport(const u32 type, const u32 index)
+{
+    return cellGcmGetReport(type, index);
+}
+
+gcmReportData *gcmGetReportDataAddress(const u32 index)
+{
+    return (gcmReportData *)lv2_ea32_expand(cellGcmGetReportDataAddress(index));
+}
+
+gcmReportData *gcmGetReportDataAddressLocation(const u32 index,
+                                               const u32 location)
+{
+    return (gcmReportData *)
+        lv2_ea32_expand(cellGcmGetReportDataAddressLocation(index, location));
+}
+
+u32 gcmGetReportDataLocation(const u32 index, const u32 location)
+{
+    return cellGcmGetReportDataLocation(index, location);
+}
+
+const gcmTileInfo *gcmGetTileInfo(void)
+{
+    return (const gcmTileInfo *)lv2_ea32_expand(cellGcmGetTileInfo());
 }
 
 u32 gcmGetTiledPitchSize(u32 size)
@@ -182,11 +322,26 @@ u32 gcmGetTiledPitchSize(u32 size)
     return cellGcmGetTiledPitchSize(size);
 }
 
+u64 gcmGetTimeStamp(const u32 index)
+{
+    return cellGcmGetTimeStamp(index);
+}
+
+u64 gcmGetTimeStampLocation(const u32 index, const u32 location)
+{
+    return cellGcmGetTimeStampLocation(index, location);
+}
+
 u64 gcmGetVBlankCount(void)
 {
     /* The NID stub returns uint32_t; PSL1GHT widens to u64 in the
      * public header.  Zero-extend to match PSL1GHT's signature. */
     return (u64)cellGcmGetVBlankCount();
+}
+
+const gcmZcullInfo *gcmGetZcullInfo(void)
+{
+    return (const gcmZcullInfo *)lv2_ea32_expand(cellGcmGetZcullInfo());
 }
 
 /* gcmInitBodyEx/gcmInitBody — same NID as _cellGcmInitBody.  The PSL1GHT
@@ -218,6 +373,11 @@ s32 gcmInitBody(gcmContextData **ctx, const u32 cmdSize,
 s32 gcmInitCursor(void)
 {
     return (s32)cellGcmInitCursor();
+}
+
+s32 gcmInitDefaultFifoMode(s32 mode)
+{
+    return (s32)cellGcmInitDefaultFifoMode((int32_t)mode);
 }
 
 s32 gcmInitSystemMode(u64 mode)
@@ -270,6 +430,11 @@ s32 gcmMapLocalMemory(void **address, u32 *size)
 s32 gcmMapMainMemory(const void *address, u32 size, u32 *offset)
 {
     return (s32)cellGcmMapMainMemory(address, size, offset);
+}
+
+s32 gcmReserveIoMapSize(const u32 size)
+{
+    return (s32)cellGcmReserveIoMapSize(size);
 }
 
 void gcmResetFlipStatus(void)
@@ -326,6 +491,16 @@ void gcmSetFlipMode(const u32 mode)
     cellGcmSetFlipMode(mode);
 }
 
+void gcmSetFlipStatus(void)
+{
+    cellGcmSetFlipStatus();
+}
+
+void gcmSetInvalidateTile(const u8 index)
+{
+    cellGcmSetInvalidateTile(index);
+}
+
 void gcmSetGraphicsHandler(void (*handler)(const u32 val))
 {
     cellGcmSetGraphicsHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
@@ -346,6 +521,18 @@ void gcmSetSecondVHandler(void (*handler)(const u32 head))
     cellGcmSetSecondVHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
 }
 
+void gcmSetSecondVFrequency(const u32 freq)
+{
+    cellGcmSetSecondVFrequency(freq);
+}
+
+void gcmSetTile(const u8 index, const u8 location, const u32 offset,
+                const u32 size, const u32 pitch, const u8 comp,
+                const u16 base, const u8 bank)
+{
+    cellGcmSetTile(index, location, offset, size, pitch, comp, base, bank);
+}
+
 s32 gcmSetTileInfo(const u8 index, const u8 location,
                    const u32 offset, const u32 size, const u32 pitch,
                    const u8 comp, const u16 base, const u8 bank)
@@ -357,6 +544,11 @@ s32 gcmSetTileInfo(const u8 index, const u8 location,
 void gcmSetUserHandler(void (*handler)(const u32 cause))
 {
     cellGcmSetUserHandler((void *)(uintptr_t)lv2_fn_to_callback_ea(handler));
+}
+
+void gcmSetVBlankFrequency(const u32 freq)
+{
+    cellGcmSetVBlankFrequency(freq);
 }
 
 void gcmSetVBlankHandler(void (*handler)(const u32 head))
@@ -372,6 +564,31 @@ void gcmSetWaitFlip(gcmContextData *context)
     cellGcmSetWaitFlip((void *)context);
 }
 
+void gcmSetZcull(const u8 index, const u32 offset, const u32 width,
+                 const u32 height, const u32 cullStart, const u32 zFormat,
+                 const u32 aaFormat, const u32 zCullDir,
+                 const u32 zCullFormat, const u32 sFunc, const u32 sRef,
+                 const u32 sMask)
+{
+    cellGcmSetZcull(index, offset, width, height, cullStart, zFormat,
+                    aaFormat, zCullDir, zCullFormat, sFunc, sRef, sMask);
+}
+
+s32 gcmSortRemapEaIoAddress(void)
+{
+    return (s32)cellGcmSortRemapEaIoAddress();
+}
+
+s32 gcmUnbindTile(const u8 index)
+{
+    return (s32)cellGcmUnbindTile(index);
+}
+
+s32 gcmUnbindZcull(const u8 index)
+{
+    return (s32)cellGcmUnbindZcull(index);
+}
+
 s32 gcmUnmapEaIoAddress(const void *ea)
 {
     return (s32)cellGcmUnmapEaIoAddress(ea);
@@ -380,6 +597,11 @@ s32 gcmUnmapEaIoAddress(const void *ea)
 s32 gcmUnmapIoAddress(u32 io)
 {
     return (s32)cellGcmUnmapIoAddress(io);
+}
+
+s32 gcmUnreserveIoMapSize(const u32 size)
+{
+    return (s32)cellGcmUnreserveIoMapSize(size);
 }
 
 s32 gcmUpdateCursor(void)

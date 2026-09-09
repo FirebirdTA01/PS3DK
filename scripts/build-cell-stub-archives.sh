@@ -184,7 +184,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     if [[ "$name" == "libgcm_sys_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libgcm_sys_legacy"
         say "building legacy-name wrappers (libgcm_sys_legacy, $abi)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" CFLAGS="$cc_flags" \
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" ABI_CFLAGS="$cc_flags" \
             make -C "$legacy_dir" clean all >/dev/null
         legacy_obj="$legacy_dir/build/gcm_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
@@ -199,7 +199,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     elif [[ "$name" == "libio_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libio_legacy"
         say "building legacy-name wrappers (libio_legacy, $abi)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" CFLAGS="$cc_flags" \
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" ABI_CFLAGS="$cc_flags" \
             make -C "$legacy_dir" clean all >/dev/null
         legacy_obj="$legacy_dir/build/io_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
@@ -214,7 +214,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     elif [[ "$name" == "libc_stub" ]]; then
         extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libc_stub_extras"
         say "building libc_stub_extras (real spu_printf_*, $abi)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" CFLAGS="$cc_flags" \
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" ABI_CFLAGS="$cc_flags" \
             make -C "$extras_dir" clean all >/dev/null
         for extras_obj in "$extras_dir/build/"*.o; do
             [[ -f "$extras_obj" ]] || continue
@@ -228,7 +228,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libfiber_stub_extras"
         say "building libfiber_stub_extras (pub init + TLS area, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
-            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" CFLAGS="$cc_flags" \
+            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
             make -C "$extras_dir" clean all >/dev/null
         for extras_obj in "$extras_dir/build/"*.o; do
             [[ -f "$extras_obj" ]] || continue
@@ -242,7 +242,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libusb_legacy"
         say "building legacy-name wrappers (libusb_legacy, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
-            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" CFLAGS="$cc_flags" \
+            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
             make -C "$legacy_dir" clean all >/dev/null
         legacy_obj="$legacy_dir/build/usb_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
@@ -261,3 +261,16 @@ for yaml in "${STUB_YAMLS[@]}"; do
 done
 
 done   # close outer abi loop
+
+# Verify what we just installed.  The guard's archive checks (B and C) need
+# a built tree, which is exactly what exists at this point and never exists
+# on the CI runner, so this is the only place they can actually run: every
+# gcm* name <rsx/gcm_sys.h> declares resolves as an external symbol in both
+# ABIs, and the gcm legacy wrapper object - the only one carrying the ABI
+# witness, not every merged object - reports the pointer width its ABI calls
+# for.  Both of those were silently false in shipped releases before this
+# check existed - see tests/sdk/gcm-legacy-symbol-coverage-test.sh.
+say "verifying the installed legacy gcm* surface"
+PS3DK="$PS3DK" PS3DEV="$PS3DEV" \
+    bash "$PS3_TOOLCHAIN_ROOT/tests/sdk/gcm-legacy-symbol-coverage-test.sh" \
+    || die "installed archives failed tests/sdk/gcm-legacy-symbol-coverage-test.sh"

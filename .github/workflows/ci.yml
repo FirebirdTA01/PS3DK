@@ -86,6 +86,13 @@ jobs:
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
 
+      # No PPU toolchain on this runner, so only the host-only checks (A and
+      # D) run here; the archive checks (B and C) skip themselves and are
+      # run by scripts/build-cell-stub-archives.sh against the tree it has
+      # just installed, which is the only context where they can execute.
+      - name: Test the legacy gcm* surface is fully defined
+        run: bash tests/sdk/gcm-legacy-symbol-coverage-test.sh
+
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
