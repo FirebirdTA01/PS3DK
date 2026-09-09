@@ -16,6 +16,157 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.13.0] — 2026-09-09
+
+Minor release, driven by an external bug report.  It describes what is on
+`main`; the shader-compiler work still on `cg-compiler-dev` is not in it.  The
+shader compiler remains under active development — everything listed below
+describes cases that are now supported, not complete Cg or standard-library
+coverage.
+
+The report is worth reading before the list.  Before this fix,
+`<rsx/gcm_sys.h>` declared 75 `gcm*` functions, but 28 lacked definitions in
+the installed libraries.  For 27, the canonical `cellGcm*` firmware stub
+existed and only the legacy-name shim was missing.  `<cell/gcm.h>`'s inlines
+forward to those names, so calling one compiled clean and failed at link,
+naming the `gcm*` spelling the caller never typed.  That is the shape worth
+naming: nothing in the build ever compared the header against the archive, so
+a declaration with nothing behind it was indistinguishable from a working API
+until somebody called it.  A guard now makes that comparison.  The
+investigation also exposed missing LP64 flags in the five wrapper builds
+merged into the stub archives.
+
+### Added
+
+- **The 27 missing `gcm*` definitions.**  `gcmInitDefaultFifoMode`,
+  `gcmGetOffsetTable`, `gcmGetTileInfo`, `gcmGetZcullInfo`, `gcmGetDisplayInfo`,
+  `gcmSetTile`, `gcmSetZcull`, the tile and zcull unbinds, the report and
+  timestamp getters, the report and notify address getters, and the IO-map
+  reservation pair.  Each already had its `cellGcm*` firmware stub; only the
+  legacy-name shim was missing.  The six that return a pointer declare the
+  stub's result as a 32-bit effective address and convert it to a native
+  pointer, and `gcmGetOffsetTable` receives the firmware's two 32-bit EAs into
+  a fixed-width local and expands them field by field — the caller's structure
+  is 16 bytes under `-mlp64` where the firmware writes 8.
+
+  The 28th, `gcmSetUserCommand`, is deliberately still undefined and is an
+  explicit, documented exception in the coverage guard.  Our header declares it
+  taking a callback pointer; the reference headers and RPCS3 both implement
+  `cellGcmSetUserCommand` as a command-buffer emitter taking `(context, cause)`.
+  Leaving it unlinkable is better than guessing which contract is real.
+- **`tests/sdk/gcm-legacy-symbol-coverage-test.sh`.**  It fails when the header
+  declares a `gcm*` no source defines, when a declared name does not resolve as
+  an *external* symbol in an installed archive, when the ABI flag stops
+  reaching any of the five merged-object builds, or when the GCM wrapper
+  object reports the wrong pointer width for its ABI.  CI runs the source and
+  build-plumbing halves; `build-cell-stub-archives.sh` runs the archive halves
+  against the tree it has just installed, and the guard can be pointed at any
+  installed prefix by hand.  It carries self-tests: a removed definition and a
+  definition demoted to a bare prototype must both be rejected, because a
+  coverage check that cannot fail proves nothing.
+- **`samples/gcm/hello-ppu-cellgcm-sysinfo`.**  It calls all 27 restored
+  functions and makes 12 value checks across them — the display info must
+  report the mode the sample just configured, `cellGcmSetFlipStatus` must
+  round-trip through its getter, `cellGcmGetReportDataAddress` must stride by
+  exactly one report, `cellGcmGetLastFlipTime` must advance across real flips.
+  Calls whose results it cannot predict are made and logged but explicitly not
+  counted, and the verdict requires all 12 checks to have *run*, so an early
+  exit cannot read as a pass.
+- **More of the general fragment path's standard library**: `asin`, `acos`,
+  `atan`, `atan2`, `smoothstep`, `tan`, `cross`, `faceforward`, `log10`, and
+  the `exp`/`exp2`/`log`/`log2` family.  `ddx` and `ddy` cover `float` and
+  `float2`; wider derivatives and the vertex profile are still refused.  Direct
+  `sqrt` lowers to a single native root rather than a reciprocal of a
+  reciprocal square root.  A divide by a dynamic scalar denominator uses `DIVR`
+  with scalar or vector numerators; literal reciprocals and constant divisors
+  keep their existing folds, and a vector denominator still lowers to per-lane
+  reciprocal and multiply.
+- **Control flow on the general path.**  Supported forward-only branches
+  flatten; join arms that are not provably finite lower to predicated selects
+  rather than blends; a guarded `discard` reaches the ucode as `KIL` with its
+  path condition as the guard.  Static loops unroll, including negative-step
+  ones.  Shapes that are not supported — including a loop still standing after
+  unrolling — produce a diagnostic instead of a quiet miscompile.
+- **Fragment container metadata the SDK was not carrying.**  A declared
+  half-precision `COLOR0` selects H0 through `outputFromH0`, and a half output
+  composed in a way that would alias a temporary in R0 is refused rather than
+  bound wrongly.  Depth exports through `R1.z` with replacement enabled.
+  `TEXCOORD8` and `TEXCOORD9` carry the mask bits the reference emits.
+- **Wider shader-differential coverage.**  The rig compares every declared
+  fragment output including `COLOR1..3` and depth, though MRT and depth
+  verdicts stay withheld until their proving controls pass — the gates exist
+  and are closed by default, which is not the same as a run having passed
+  them.  Vertex programs can be judged on rendered pixels, and a fragment row
+  can name its own vertex program.  Automatic binding supplies `sampler2D`
+  inputs and float or half scalar and vector fragment uniforms; a type it does
+  not support is reported rather than silently left unbound.
+- **CI enforces its own test inventory.**  Every tracked `*-test.sh` and
+  `*-test.ps1`, and the inventory check itself, must be invoked by a workflow
+  or carry a documented exclusion.
+
+### Fixed
+
+- **The five wrapper builds merged into the stub archives were compiled
+  without the LP64 flag.**  `build-cell-stub-archives.sh` builds the GCM, IO,
+  USB, C-stub and Fiber-stub wrapper objects once per ABI and passed `-mlp64`
+  as `CFLAGS` in the environment, which a `CFLAGS :=` assignment in a makefile
+  overrides.
+  All six resulting objects came out byte-identical to their 32-bit twins while
+  every generated object differed — though byte identity on its own does not
+  establish a defect in each of them, and an ABI-independent object could
+  legitimately be identical.  The GCM one was demonstrated directly: the
+  released `gcmInitBody` writes the caller's context pointer with a four-byte
+  store into an eight-byte LP64 slot.  The flag now travels as `ABI_CFLAGS`,
+  which each makefile folds in explicitly.  Because an object's ELF class and
+  `e_flags` do not distinguish the two ABIs, the guard reads the size of a
+  `sizeof(void *)` witness array in the GCM wrapper object rather than trying
+  to infer the ABI from the container.
+- **`rsxInlineTransfer` rebinds the 2D DMA destination per transfer**, so a
+  local-to-main blit can no longer leave a later transfer pointing at the
+  wrong destination.
+- **The fragment-program control word forwards the container's `depthReplace`**
+  and uses the reference's half-output bind bits rather than PSL1GHT's `0x0e`,
+  both through one shared builder with one set of callers.
+- **Fragment register allocation follows liveness.**  An ordinary preferred
+  register yields to a live occupant; an *output* pin does not, because the
+  register the hardware reads as that output is a contract rather than a
+  preference — a conflicting allocation is refused by name instead of quietly
+  computing the right colour into a register nothing reads.  The register bank
+  is numbered from what is live rather than from how much the program defines.
+- **A family of incorrect-code-generation and missing-validation defects**:
+  two different varyings riding in one fragment instruction, which
+  the hardware cannot do because it has one input selector; a per-lane write
+  from a vector reading lane 0 instead of its own lane; a scalar literal
+  reading the constant block instead of broadcasting; file-scope globals and
+  function values sharing value ids; a matrix row index unbounded by the rows
+  the matrix owns; repeated stores to one output losing program order.  A
+  vertex instruction needing two distinct input registers is now refused;
+  materialising one of them in a temporary is follow-up work, not something
+  this release does.
+- **Diagnostics where the compiler used to continue quietly**: an ambiguous
+  `normalize` binding, previously resolved by hash order; unknown vertex
+  opcodes; out-of-range vector subscripts; live bitwise operations at profile
+  lowering.  The retired shape matcher additionally refuses a `discard` under
+  an enclosing guard, an output stored more than once, and work feeding an
+  output it would otherwise have omitted.
+
+### Changed
+
+- **The general lowering path is the default**, and the naming follows it.
+  `--general-lowering` is accepted and ignored for compatibility and will be
+  removed after one release; the NV40 shape matcher that used to be the default
+  is retired behind `--legacy-lowering` and kept for comparison.
+- **`lowerFragmentProgram` is being decomposed**, moving shape types, matchers
+  and helpers into named units behind a read-only view of the shape context,
+  with no intended change to emitted bytes.
+- **`rsx-cg-compiler` builds under MSVC**, alongside the existing GCC and MinGW
+  hosts.  This is the compiler specifically, not a claim about every host tool.
+- **Release publishing checks CI for the tagged commit** rather than for the
+  latest commit on main, since main can move underneath a tag.  An explicit
+  `[ci-override: reason]` marker in the annotated tag message bypasses the
+  gate, warning and recording the reason; a malformed marker leaves the gate
+  enforced rather than buying a free pass.
+
 ## [v0.12.65] — 2026-09-01
 
 Patch release.  Supersedes the v0.12.43, v0.12.46 and v0.12.54 tags, none of
