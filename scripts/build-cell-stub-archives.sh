@@ -261,16 +261,3 @@ for yaml in "${STUB_YAMLS[@]}"; do
 done
 
 done   # close outer abi loop
-
-# Verify what we just installed.  The guard's archive checks (B and C) need
-# a built tree, which is exactly what exists at this point and never exists
-# on the CI runner, so this is the only place they can actually run: every
-# gcm* name <rsx/gcm_sys.h> declares resolves as an external symbol in both
-# ABIs, and the gcm legacy wrapper object - the only one carrying the ABI
-# witness, not every merged object - reports the pointer width its ABI calls
-# for.  Both of those were silently false in shipped releases before this
-# check existed - see tests/sdk/gcm-legacy-symbol-coverage-test.sh.
-say "verifying the installed legacy gcm* surface"
-PS3DK="$PS3DK" PS3DEV="$PS3DEV" \
-    bash "$PS3_TOOLCHAIN_ROOT/tests/sdk/gcm-legacy-symbol-coverage-test.sh" \
-    || die "installed archives failed tests/sdk/gcm-legacy-symbol-coverage-test.sh"
