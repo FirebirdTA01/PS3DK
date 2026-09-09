@@ -2395,6 +2395,50 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
     if (!broadcastTo(a, n) || !broadcastTo(b, n))
         return InvalidIRValue;
 
+    // A CONSTANT DIVISION BY ZERO IS NOT ONE CASE BUT THREE, and the
+    // reference distinguishes them (t_3ff60769, measured on sce-cgc 475 by
+    // reading every instruction and every const block of its container):
+    //
+    //   every denominator non-zero            fold per lane, like any op
+    //   every denominator zero AND every       fold each lane to its
+    //     numerator zero                       NUMERATOR, sign preserved
+    //   anything else                          DO NOT FOLD - the reference
+    //                                          emits a runtime reciprocal
+    //
+    // 0/0 folding to the NUMERATOR rather than to +0 is measured, not
+    // assumed: -0.0/0.0 gives -0.0 and 0.0/-0.0 gives +0.0.  (At vector
+    // width the +0 and -0 lanes are then merged by the const-block packing
+    // rule, since they compare equal - that is t_642eb36e's job, not this
+    // one's.)
+    //
+    // The third case is why this cannot be "drop the guard": the reference
+    // leaves x/0 as a runtime RCP, and it leaves a MIXED denominator vector
+    // alone even when every zero-denominator lane has a zero numerator -
+    // float4(0,0,2,3) / float4(0,0,2,1) is emitted as RCP/MUL, not folded.
+    if (op == IROp::Div)
+    {
+        bool everyDenominatorZero = true;
+        bool everyZeroDenominatorHasZeroNumerator = true;
+        bool anyDenominatorZero = false;
+        for (size_t i = 0; i < n; ++i)
+        {
+            if (b[i] == 0.0f)
+            {
+                anyDenominatorZero = true;
+                if (a[i] != 0.0f) everyZeroDenominatorHasZeroNumerator = false;
+            }
+            else
+            {
+                everyDenominatorZero = false;
+            }
+        }
+        if (anyDenominatorZero &&
+            !(everyDenominatorZero && everyZeroDenominatorHasZeroNumerator))
+        {
+            return InvalidIRValue;
+        }
+    }
+
     std::vector<float> r(n, 0.0f);
     for (size_t i = 0; i < n; ++i)
     {
@@ -2404,7 +2448,10 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
         case IROp::Sub: r[i] = a[i] - b[i]; break;
         case IROp::Mul: r[i] = a[i] * b[i]; break;
         case IROp::Div:
-            if (b[i] == 0.0f) return InvalidIRValue;
+            // Reaching here with a zero denominator means the whole
+            // expression is 0/0 in every lane, checked above; the result is
+            // the numerator itself so that -0 survives as -0.
+            if (b[i] == 0.0f) { r[i] = a[i]; break; }
             r[i] = a[i] / b[i];
             break;
         case IROp::Min: r[i] = std::fmin(a[i], b[i]); break;
