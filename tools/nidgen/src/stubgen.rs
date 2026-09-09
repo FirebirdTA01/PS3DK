@@ -88,12 +88,12 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     //    matches `libexport.c`'s `prx_header` exactly (u32, u16, u16, u32,
     //    u32, name*, fnid*, fstub*, u32, u32, u32, u32).
     //
-    //    header2 = number of exports per PSL1GHT convention; sprxlinker
-    //    recomputes this from the fnid spacing, so either value is fine on
-    //    well-formed inputs.  We use the reference-observed 0x0009 family (count
-    //    of exports); dumps across all 97 stub archives show variations in
-    //    the low byte that correspond to export counts, so this is indeed
-    //    an export count.
+    //    The halfword at +4 is import attributes, not a symbol count.
+    //    Use PSL1GHT's 0x0009 attributes independently of the library size.
+    //    The function-import count belongs at +6; sprxlinker recomputes
+    //    that field from the FNID table and leaves attributes untouched.
+    //    Unlike a split header object, this object already contains the
+    //    complete FNID table, so its count is valid even before that pass.
     let header_sym = format!("__nidgen_{}_header", lib.library);
     let fnid_anchor_ref = format!("__nidgen_{}_fnid_anchor", lib.library);
     writeln!(out, "\t.section \".lib.stub\",\"aw\"").ok();
@@ -102,13 +102,13 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     writeln!(out, "\t.size {}, 44", header_sym).ok();
     writeln!(out, "{}:", header_sym).ok();
     writeln!(out, "\t.4byte 0x2c000001       # size=44, version=1").ok();
+    writeln!(out, "\t.2byte 0x0009         # import attributes").ok();
     writeln!(
         out,
-        "\t.2byte {}              # export count",
+        "\t.2byte {}              # function import count",
         lib.exports.len()
     )
     .ok();
-    writeln!(out, "\t.2byte 0").ok();
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte {}", name_sym).ok();
@@ -315,6 +315,57 @@ mod tests {
     }
 
     #[test]
+    fn import_header_attributes_do_not_depend_on_function_count() {
+        // The 44-byte PRX import header stores attributes at +4 and
+        // num_func at +6. An export count of nine can hide a field mix-up.
+        for count in [0, 1, 2, 9, 86] {
+            let mut lib = sample();
+            let export = lib.exports[0].clone();
+            lib.exports = (0..count)
+                .map(|index| {
+                    let mut entry = export.clone();
+                    entry.name = format!("function_{index}");
+                    entry.nid = index as u32 + 1;
+                    entry.aliases.clear();
+                    entry
+                })
+                .collect();
+            for abi in [AbiMode::Ilp32, AbiMode::Lp64] {
+                let asm = render_library(&lib, abi);
+                let header = asm.split_once("__nidgen_cellPad_header:\n").unwrap().1;
+                let mut bytes = Vec::new();
+                for line in header
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| line.starts_with(".4byte ") || line.starts_with(".2byte "))
+                    .take(3)
+                {
+                    let mut words = line.split_whitespace();
+                    let directive = words.next().unwrap();
+                    let literal = words.next().unwrap();
+                    let value = if let Some(hex) = literal.strip_prefix("0x") {
+                        u32::from_str_radix(hex, 16).unwrap()
+                    } else {
+                        literal.parse::<u32>().unwrap()
+                    };
+                    match directive {
+                        ".4byte" => bytes.extend(value.to_be_bytes()),
+                        ".2byte" => bytes.extend((value as u16).to_be_bytes()),
+                        _ => unreachable!(),
+                    }
+                }
+                assert_eq!(&bytes[..4], &[44, 0, 0, 1]);
+                assert_eq!(
+                    &bytes[4..6],
+                    &[0, 9],
+                    "attributes changed with {count} functions ({abi:?})"
+                );
+                assert_eq!(u16::from_be_bytes([bytes[6], bytes[7]]) as usize, count);
+            }
+        }
+    }
+
+    #[test]
     fn emits_cell_sdk_compatible_sections() {
         let s = render_library(&sample(), AbiMode::Ilp32);
         // Header preamble.
@@ -456,7 +507,7 @@ mod tests {
             imports: vec![],
         };
         let s = render_library(&lib, AbiMode::Ilp32);
-        // No crash; still emits a header with export count 0 and fnid=0.
-        assert!(s.contains(".2byte 0              # export count"));
+        // No crash; still emits a header with zero function imports.
+        assert!(s.contains(".2byte 0              # function import count"));
     }
 }
