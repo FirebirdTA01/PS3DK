@@ -93,6 +93,12 @@ jobs:
       - name: Test the legacy gcm* surface is fully defined
         run: bash tests/sdk/gcm-legacy-symbol-coverage-test.sh
 
+      # A render target's type field takes the SURFACE family, never the
+      # texture-filter family. The mixup compiled, passed RPCS3, and hung a
+      # real PS3 on a black screen; 23 samples and our own PSGL carried it.
+      - name: Test render-target surface types use the surface enum family
+        run: bash tests/sdk/surface-type-enum-test.sh
+
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

@@ -968,7 +968,7 @@ static void psgl_fill_surface(PSGLcontext *context, CellGcmSurface *surface)
         surface->colorPitch[1] = 64u;
         surface->colorPitch[2] = 64u;
         surface->colorPitch[3] = 64u;
-        surface->type      = GCM_TEXTURE_LINEAR;
+        surface->type      = GCM_SURFACE_TYPE_LINEAR;
         surface->antiAlias = psgl_msaa_antialias(msaa);
         return;
     }
@@ -992,7 +992,7 @@ static void psgl_fill_surface(PSGLcontext *context, CellGcmSurface *surface)
     surface->depthLocation = GCM_LOCATION_RSX;
     surface->depthOffset = device->depth_offset;
     surface->depthPitch = device->depth_pitch;
-    surface->type = GCM_TEXTURE_LINEAR;
+    surface->type = GCM_SURFACE_TYPE_LINEAR;
     surface->antiAlias = psgl_msaa_antialias(msaa);
     surface->width = frame->width;
     surface->height = frame->height;
