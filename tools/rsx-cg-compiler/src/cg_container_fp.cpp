@@ -69,6 +69,7 @@ constexpr uint32_t kInvalidIndex           = 0xFFFFFFFFu;
 
 // CGresource bind locations.
 constexpr uint32_t kCgTexUnit0   = 2048u;  // 0x0800
+constexpr uint32_t kCgWPos       = 2373u;  // 0x0945  (FP WPOS semantic, CG_WPOS, sdk/include/Cg/NV/cg_bindlocations.h:69)
 constexpr uint32_t kCgColor0     = 2757u;  // 0x0ac5  (FP COLOR semantic)
 constexpr uint32_t kCgDepth0     = 2933u;  // 0x0b75  (FP DEPTH semantic)
 constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
@@ -172,10 +173,23 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
 // map (uniform parameters, etc.).
 uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
 {
+    // The reference canonicalises COL to COLOR (2757..2760 family), confirmed
+    // on sce-cgc for both inputs and outputs.  Fragment MRT supports up to 4 targets
+    // (indices 0..3: 2757..2760, t_cb6013f5).  Indices > 3 are refused by the
+    // reference (error C5102) and by our lowering only on the output side
+    // (nv40_general_lowering.cpp:742); our compiler accepts them as inputs.
+    // 0 is the deliberate choice for an out-of-range index with no
+    // reference-defined bind location.
     if (semUpper == "COLOR" || semUpper == "COL")
-        return kCgColor0 + (semIndex == 1 ? 1 : 0);
-    // Index-less aliases of COLOR0/COLOR1 (mirrors the lowering's
-    // semantic tables; an indexed DIFFUSE1 stays unmapped).
+    {
+        if (semIndex >= 0 && semIndex <= 3)
+            return kCgColor0 + static_cast<uint32_t>(semIndex);
+        return 0;
+    }
+    // DIFFUSE and SPECULAR are accepted by our frontend as legacy aliases mapping
+    // to COLOR0/COLOR1 (2757/2758); the reference refuses them in fragment profile
+    // (error C5108: unknown semantics).  Tracked under leniency card t_e2666eed.
+    // An indexed DIFFUSE1 stays unmapped (0).
     if (semUpper == "DIFFUSE"  && semIndex == 0) return kCgColor0;
     if (semUpper == "SPECULAR" && semIndex == 0) return kCgColor0 + 1;
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
@@ -186,6 +200,12 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     // (t_1722b8bc).  Only DEPTH0 exists — there is one depth output.
     if ((semUpper == "DEPTH" || semUpper == "DEPTH0") && semIndex == 0)
         return kCgDepth0;
+    // Fragment WPOS varying input (t_9f843922).  Matches CG_WPOS = 2373
+    // per sdk/include/Cg/NV/cg_bindlocations.h:69 and confirmed against
+    // reference ShowDepth_frag.reference.bin inputs.wPos.
+    // Index 0 only (WPOS is unindexed).
+    if (semUpper == "WPOS" && semIndex == 0)
+        return kCgWPos;
     return 0;
 }
 

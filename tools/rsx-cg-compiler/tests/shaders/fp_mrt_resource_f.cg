@@ -1,0 +1,20 @@
+// t_cb6013f5: COLOR0..3 output reflection resources must be 2757..2760.
+// Reference oracle (sce-cgc PS3_450) and sdk_fpshader_flat_notex_8658d8_ref.fpo,
+// sdk_fpclearfloat4_b35acb_ref.fpo record COLOR0=2757, COLOR1=2758, COLOR2=2759, COLOR3=2760.
+struct MrtOut
+{
+    float4 col0 : COLOR0;
+    float4 col1 : COLOR1;
+    float4 col2 : COLOR2;
+    float4 col3 : COLOR3;
+};
+
+MrtOut main(float4 c : COLOR)
+{
+    MrtOut o;
+    o.col0 = c;
+    o.col1 = c * 0.5;
+    o.col2 = c * 0.25;
+    o.col3 = c * 0.125;
+    return o;
+}
