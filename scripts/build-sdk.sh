@@ -99,4 +99,16 @@ else
     say "skipping host tools (--no-host-tools)"
 fi
 
+# Verify the installed GCM surface, now that BOTH halves of it exist.  The
+# archive checks need libgcm_sys.a (built by build-cell-stub-archives.sh) AND
+# libgcm_cmd.a (built above, in SUBLIBS), so this is the earliest point where
+# the tree is complete enough to check.  Running it from the stub-archive
+# script instead - where it lived first - reported the four default-FIFO
+# functions in libgcm_cmd.a as missing, because that archive genuinely does
+# not exist yet at that point, and it failed a release build.
+say "verifying the installed legacy gcm* surface"
+PS3DK="$PS3DK" PS3DEV="$PS3DEV" \
+    bash "$PS3_TOOLCHAIN_ROOT/tests/sdk/gcm-legacy-symbol-coverage-test.sh" \
+    || die "installed archives failed tests/sdk/gcm-legacy-symbol-coverage-test.sh"
+
 say "done"

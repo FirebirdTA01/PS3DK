@@ -81,7 +81,7 @@ void fwgcmSetRenderTarget(CellGcmContextData *ctx, FWGCMDisplayBuffer *buffer, u
 	surface.depthLocation = GCM_LOCATION_RSX;
 	surface.depthOffset = depthOffset;
 	surface.depthPitch = depthPitch;
-	surface.type = GCM_TEXTURE_LINEAR;
+	surface.type = GCM_SURFACE_TYPE_LINEAR;
 	surface.antiAlias = GCM_SURFACE_CENTER_1;
 	surface.width = buffer->width;
 	surface.height = buffer->height;

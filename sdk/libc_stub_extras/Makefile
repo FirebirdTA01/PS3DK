@@ -23,6 +23,13 @@ AR      := powerpc64-ps3-elf-ar
 CFLAGS  := -O2 -Wall -Wextra -mcpu=cell -fno-strict-aliasing \
            -I$(PS3DK)/ppu/include -I$(PSL1GHT)/ppu/include
 
+# ABI flags (-mlp64 for the LP64 multilib) arrive from
+# scripts/build-cell-stub-archives.sh, which builds this object once per ABI.
+# They must NOT be passed as CFLAGS: a CFLAGS := assignment in a makefile
+# overrides the environment value, so an incoming -mlp64 was silently dropped
+# and the lp64 archive shipped an ILP32-compiled object.
+CFLAGS += $(ABI_CFLAGS)
+
 BUILD   := build
 OBJS    := $(BUILD)/spu_printf.o
 

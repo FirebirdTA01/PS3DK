@@ -168,7 +168,7 @@ static void set_render_target(gcmContextData *ctx, rsxBuffer *b)
 	sf.depthLocation    = GCM_LOCATION_RSX;
 	sf.depthOffset      = depth_offset;
 	sf.depthPitch       = depth_pitch;
-	sf.type             = GCM_TEXTURE_LINEAR;
+	sf.type             = GCM_SURFACE_TYPE_LINEAR;
 	sf.antiAlias        = GCM_SURFACE_CENTER_1;
 	sf.width            = b->width;
 	sf.height           = b->height;

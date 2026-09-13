@@ -40,6 +40,10 @@ MUST_PASS_SAMPLES=(
     "sysutil/hello-ppu-osk"
     "sysutil/hello-ppu-storagedata"
     "sysutil/hello-ppu-sysconf"
+    # Calls every gcm* name the legacy header declares and the archives
+    # were missing before issue #7.  If any of those shims goes away again
+    # this sample stops LINKING, which is the failure the report described.
+    "gcm/hello-ppu-cellgcm-sysinfo"
 )
 
 SAMPLES_ROOT="$PS3_TOOLCHAIN_ROOT/samples"
