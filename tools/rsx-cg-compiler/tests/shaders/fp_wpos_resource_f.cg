@@ -1,0 +1,6 @@
+// t_9f843922: WPOS varying reflection resource must carry CG_WPOS (2373 / 0x0945).
+// Reference oracle (sce-cgc PS3_450) and ShowDepth_frag.reference.bin record res=2373.
+float4 main(float4 wp : WPOS) : COLOR
+{
+    return wp * 0.5;
+}
