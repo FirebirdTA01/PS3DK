@@ -1551,22 +1551,123 @@ bool stmtContainsBreakOrContinue(StmtNode* stmt)
     }
 }
 
-bool exprIsIntLiteral(ExprNode* e, int32_t* out)
+// The body proof is keyed by resolved declaration, not spelling: an inner
+// local named i must not invalidate a loop over an outer i.
+bool loopBodyChanges(StmtNode* body, const std::unordered_set<DeclNode*>& dependencies,
+                     bool watchesGlobal)
 {
-    bool negate = false;
-    while (e && e->kind == ExprKind::Unary)
-    {
-        auto* u = static_cast<UnaryExpr*>(e);
-        if (u->op != UnaryOp::Negate) return false;
-        negate = !negate;
-        e = u->operand.get();
-    }
-    if (!e || e->kind != ExprKind::Literal) return false;
-    auto* lit = static_cast<LiteralExpr*>(e);
-    if (lit->literalKind != LiteralExpr::LiteralKind::Int) return false;
-    int64_t v = std::get<int64_t>(lit->value);
-    *out = static_cast<int32_t>(negate ? -v : v);
-    return true;
+    auto writesDependency = [&](ExprNode* e) {
+        while (e && (e->kind == ExprKind::MemberAccess || e->kind == ExprKind::Index))
+            e = e->kind == ExprKind::MemberAccess
+                ? static_cast<MemberAccessExpr*>(e)->object.get()
+                : static_cast<IndexExpr*>(e)->array.get();
+        return e && e->kind == ExprKind::Identifier &&
+            dependencies.count(static_cast<IdentifierExpr*>(e)->resolvedDecl) != 0;
+    };
+    std::function<bool(ExprNode*)> expr;
+    expr = [&](ExprNode* e) -> bool {
+        if (!e) return false;
+        switch (e->kind) {
+        case ExprKind::Binary: {
+            auto* b = static_cast<BinaryExpr*>(e);
+            const bool assignment = b->op == BinaryOp::Assign || b->op == BinaryOp::AddAssign ||
+                b->op == BinaryOp::SubAssign || b->op == BinaryOp::MulAssign ||
+                b->op == BinaryOp::DivAssign || b->op == BinaryOp::ModAssign;
+            return (assignment && writesDependency(b->left.get())) ||
+                expr(b->left.get()) || expr(b->right.get());
+        }
+        case ExprKind::Unary: {
+            auto* u = static_cast<UnaryExpr*>(e);
+            const bool changes = u->op == UnaryOp::PreIncrement || u->op == UnaryOp::PostIncrement ||
+                u->op == UnaryOp::PreDecrement || u->op == UnaryOp::PostDecrement;
+            return (changes && writesDependency(u->operand.get())) || expr(u->operand.get());
+        }
+        case ExprKind::Call: {
+            auto* c = static_cast<CallExpr*>(e);
+            if (c->resolvedFunction && c->resolvedFunction->kind == DeclKind::Function) {
+                // A source callee can modify a watched global without an argument.
+                if (watchesGlobal) return true;
+                auto* f = static_cast<FunctionDecl*>(c->resolvedFunction);
+                for (size_t i = 0; i < c->arguments.size() && i < f->parameters.size(); ++i)
+                    if ((f->parameters[i]->storage == StorageQualifier::Out ||
+                         f->parameters[i]->storage == StorageQualifier::InOut) &&
+                        writesDependency(c->arguments[i].get())) return true;
+            }
+            // The supported ordinary math/texture builtins have no global side
+            // effects. These output-argument forms must not bypass the proof.
+            if (c->functionName == "sincos" || c->functionName == "modf" ||
+                c->functionName == "frexp")
+                for (const auto& a : c->arguments) if (writesDependency(a.get())) return true;
+            for (const auto& a : c->arguments) if (expr(a.get())) return true;
+            return false;
+        }
+        case ExprKind::Constructor:
+            for (const auto& a : static_cast<ConstructorExpr*>(e)->arguments)
+                if (expr(a.get())) return true;
+            return false;
+        case ExprKind::Cast: return expr(static_cast<CastExpr*>(e)->operand.get());
+        case ExprKind::MemberAccess: return expr(static_cast<MemberAccessExpr*>(e)->object.get());
+        case ExprKind::Index: {
+            auto* i = static_cast<IndexExpr*>(e);
+            return expr(i->array.get()) || expr(i->index.get());
+        }
+        case ExprKind::Ternary: {
+            auto* t = static_cast<TernaryExpr*>(e);
+            return expr(t->condition.get()) || expr(t->thenExpr.get()) || expr(t->elseExpr.get());
+        }
+        case ExprKind::Identifier:
+        case ExprKind::Literal:
+        case ExprKind::Sizeof: return false;
+        default: return true; // Unknown side effects: do not speculate.
+        }
+    };
+    std::function<bool(StmtNode*)> stmt;
+    stmt = [&](StmtNode* node) -> bool {
+        if (!node) return false;
+        switch (node->kind) {
+        case StmtKind::Expr: return expr(static_cast<ExprStmt*>(node)->expr.get());
+        case StmtKind::Decl:
+            for (const auto& d : static_cast<DeclStmt*>(node)->declarations) {
+                if (!d || d->kind != DeclKind::Variable) return true;
+                if (expr(static_cast<VarDecl*>(d.get())->initializer.get())) return true;
+            }
+            return false;
+        case StmtKind::Block:
+            for (const auto& child : static_cast<BlockStmt*>(node)->statements)
+                if (stmt(child.get())) return true;
+            return false;
+        case StmtKind::If: {
+            auto* i = static_cast<IfStmt*>(node);
+            return expr(i->condition.get()) || stmt(i->thenBranch.get()) || stmt(i->elseBranch.get());
+        }
+        case StmtKind::For: {
+            auto* f = static_cast<ForStmt*>(node);
+            return stmt(f->init.get()) || expr(f->condition.get()) ||
+                expr(f->increment.get()) || stmt(f->body.get());
+        }
+        case StmtKind::While: {
+            auto* w = static_cast<WhileStmt*>(node);
+            return expr(w->condition.get()) || stmt(w->body.get());
+        }
+        case StmtKind::DoWhile: {
+            auto* w = static_cast<DoWhileStmt*>(node);
+            return stmt(w->body.get()) || expr(w->condition.get());
+        }
+        case StmtKind::Switch: {
+            auto* sw = static_cast<SwitchStmt*>(node);
+            return expr(sw->expr.get()) || stmt(sw->body.get());
+        }
+        case StmtKind::Case: return expr(static_cast<CaseStmt*>(node)->value.get());
+        case StmtKind::Return: return expr(static_cast<ReturnStmt*>(node)->value.get());
+        case StmtKind::Default:
+        case StmtKind::Break:
+        case StmtKind::Continue:
+        case StmtKind::Discard:
+        case StmtKind::Empty: return false;
+        default: return true;
+        }
+    };
+    return stmt(body);
 }
 
 }  // namespace
@@ -1576,135 +1677,183 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
     if (!stmt->init || !stmt->condition || !stmt->increment || !stmt->body)
         return false;
 
-    std::string varName;
-    int32_t curVal = 0;
-
-    // Init: `int i = K` (DeclStmt) or `i = K` (ExprStmt assignment).
-    if (stmt->init->kind == StmtKind::Decl)
-    {
-        auto* declStmt = static_cast<DeclStmt*>(stmt->init.get());
-        // The unrolled form reasons about ONE induction variable; a
-        // multi-declarator init (`for (int i = 0, n = 4; ...)`) is declined
-        // here rather than silently unrolled on the first of them.
-        if (declStmt->declarations.size() != 1)
-            return false;
-        const auto& initDecl = declStmt->declarations.front();
-        if (!initDecl || initDecl->kind != DeclKind::Variable)
-            return false;
-        auto* var = static_cast<VarDecl*>(initDecl.get());
-        if (!var->initializer) return false;
-        if (!exprIsIntLiteral(var->initializer.get(), &curVal)) return false;
-        varName = var->name;
-    }
-    else if (stmt->init->kind == StmtKind::Expr)
-    {
-        auto* exprStmt = static_cast<ExprStmt*>(stmt->init.get());
-        if (!exprStmt->expr || exprStmt->expr->kind != ExprKind::Binary)
-            return false;
-        auto* be = static_cast<BinaryExpr*>(exprStmt->expr.get());
-        if (be->op != BinaryOp::Assign) return false;
-        if (be->left->kind != ExprKind::Identifier) return false;
-        varName = static_cast<IdentifierExpr*>(be->left.get())->name;
-        if (!exprIsIntLiteral(be->right.get(), &curVal)) return false;
-    }
-    else
-    {
-        return false;
-    }
-
-    // Condition: `varName CMP int_literal`.
-    if (stmt->condition->kind != ExprKind::Binary) return false;
-    auto* cond = static_cast<BinaryExpr*>(stmt->condition.get());
-    BinaryOp cmpOp = cond->op;
-    if (cmpOp != BinaryOp::Less && cmpOp != BinaryOp::LessEqual &&
-        cmpOp != BinaryOp::Greater && cmpOp != BinaryOp::GreaterEqual &&
-        cmpOp != BinaryOp::Equal && cmpOp != BinaryOp::NotEqual)
-        return false;
-    if (cond->left->kind != ExprKind::Identifier) return false;
-    if (static_cast<IdentifierExpr*>(cond->left.get())->name != varName)
-        return false;
-    int32_t cmpVal = 0;
-    if (!exprIsIntLiteral(cond->right.get(), &cmpVal)) return false;
-
-    // Increment: `i++`, `++i`, `i--`, `--i`, `i += K`, `i -= K`.
-    int32_t incDelta = 0;
-    auto* incExpr = stmt->increment.get();
-    if (incExpr->kind == ExprKind::Unary)
-    {
-        auto* un = static_cast<UnaryExpr*>(incExpr);
-        if (un->operand->kind != ExprKind::Identifier) return false;
-        if (static_cast<IdentifierExpr*>(un->operand.get())->name != varName)
-            return false;
-        switch (un->op)
-        {
-        case UnaryOp::PreIncrement:
-        case UnaryOp::PostIncrement: incDelta = 1; break;
-        case UnaryOp::PreDecrement:
-        case UnaryOp::PostDecrement: incDelta = -1; break;
-        default: return false;
+    std::unordered_set<DeclNode*> dependencies;
+    bool watchesGlobal = false;
+    bool unsignedInduction = false;
+    DeclNode* induction = nullptr;
+    // Read only constants already known at this point. Never build an expression
+    // speculatively: failing recognition must leave the ordinary CFG path intact.
+    std::function<bool(ExprNode*, int64_t&)> constant;
+    constant = [&](ExprNode* e, int64_t& value) -> bool {
+        if (!e) return false;
+        // The initializer's IR payload may not carry a variable's declared
+        // type. In particular, negating uint(1) is not signed -1.
+        const IRTypeInfo scalarType = getExprType(e);
+        if (!scalarType.isScalar() || (scalarType.baseType != IRType::Int32 &&
+            scalarType.baseType != IRType::Float32 &&
+            !(unsignedInduction && scalarType.baseType == IRType::UInt32))) return false;
+        double number;
+        if (e->kind == ExprKind::Unary) {
+            auto* u = static_cast<UnaryExpr*>(e);
+            // Unsigned support is deliberately non-negating and non-wrapping.
+            if (unsignedInduction) return false;
+            if (u->op != UnaryOp::Negate) return false;
+            if (!constant(u->operand.get(), value)) return false;
+            // Integer simulation cannot retain a floating negative-zero sign.
+            // It is observable in the body (e.g. division by the induction value).
+            if (value == 0 && scalarType.baseType == IRType::Float32) return false;
+            if (u->op == UnaryOp::Negate) value = -value;
+            return true;
         }
-    }
-    else if (incExpr->kind == ExprKind::Binary)
-    {
-        auto* be = static_cast<BinaryExpr*>(incExpr);
-        if (be->left->kind != ExprKind::Identifier) return false;
-        if (static_cast<IdentifierExpr*>(be->left.get())->name != varName)
-            return false;
-        int32_t k = 0;
-        if (!exprIsIntLiteral(be->right.get(), &k)) return false;
-        if (be->op == BinaryOp::AddAssign) incDelta = k;
-        else if (be->op == BinaryOp::SubAssign) incDelta = -k;
-        else return false;
-    }
-    else
-    {
-        return false;
-    }
-    if (incDelta == 0) return false;
-
-    // Body must not break/continue out of this loop level.
-    if (stmtContainsBreakOrContinue(stmt->body.get())) return false;
-
-    auto evalCmp = [&](int32_t lhs, int32_t rhs) -> bool {
-        switch (cmpOp)
-        {
-        case BinaryOp::Less:         return lhs <  rhs;
-        case BinaryOp::LessEqual:    return lhs <= rhs;
-        case BinaryOp::Greater:      return lhs >  rhs;
-        case BinaryOp::GreaterEqual: return lhs >= rhs;
-        case BinaryOp::Equal:        return lhs == rhs;
-        case BinaryOp::NotEqual:     return lhs != rhs;
-        default:                     return false;
-        }
+        if (e->kind == ExprKind::Literal) {
+            auto* l = static_cast<LiteralExpr*>(e);
+            if (l->literalKind == LiteralExpr::LiteralKind::Int)
+                number = static_cast<double>(std::get<int64_t>(l->value));
+            else if (l->literalKind == LiteralExpr::LiteralKind::Float)
+            {
+                number = std::get<double>(l->value);
+                // Do not treat a rounded float literal as an exact uint input.
+                if (unsignedInduction && double(static_cast<float>(number)) != number) return false;
+            }
+            else return false;
+        } else if (e->kind == ExprKind::Identifier) {
+            auto* id = static_cast<IdentifierExpr*>(e);
+            if (!id->resolvedDecl || id->resolvedDecl == induction) return false;
+            auto it = nameToValue_.find(id->name);
+            if (it == nameToValue_.end()) return false;
+            auto* c = dynamic_cast<IRConstant*>(currentFunction_->getValue(it->second));
+            if (!c || !c->type.isScalar()) return false;
+            if (std::holds_alternative<int32_t>(c->value)) number = std::get<int32_t>(c->value);
+            else if (unsignedInduction && std::holds_alternative<uint32_t>(c->value)) number = std::get<uint32_t>(c->value);
+            else if (std::holds_alternative<float>(c->value)) number = std::get<float>(c->value);
+            else return false;
+            dependencies.insert(id->resolvedDecl);
+            watchesGlobal |= module_->findGlobal(id->name) != nullptr;
+        } else return false;
+        if (!std::isfinite(number) || (number == 0 && std::signbit(number)) ||
+            std::trunc(number) != number ||
+            number < (unsignedInduction ? 0.0 : double(INT32_MIN)) ||
+            number > (unsignedInduction ? double(UINT32_MAX) : double(INT32_MAX))) return false;
+        value = static_cast<int64_t>(number);
+        return true;
     };
 
-    constexpr int kMaxUnroll = 64;
-    int32_t simulated = curVal;
-    int trip = 0;
-    while (evalCmp(simulated, cmpVal))
-    {
-        ++trip;
-        if (trip > kMaxUnroll) return false;
-        simulated += incDelta;
+    std::string varName;
+    ExprNode* initial = nullptr;
+    IRTypeInfo type;
+    const bool declares = stmt->init->kind == StmtKind::Decl;
+    if (declares) {
+        auto* d = static_cast<DeclStmt*>(stmt->init.get());
+        if (d->declarations.size() != 1 || !d->declarations[0] ||
+            d->declarations[0]->kind != DeclKind::Variable) return false;
+        auto* v = static_cast<VarDecl*>(d->declarations[0].get());
+        varName = v->name; induction = v; initial = v->initializer.get();
+        type = getIRType(v->type.get());
+    } else if (stmt->init->kind == StmtKind::Expr) {
+        auto* e = static_cast<ExprStmt*>(stmt->init.get())->expr.get();
+        if (!e || e->kind != ExprKind::Binary) return false;
+        auto* b = static_cast<BinaryExpr*>(e);
+        if (b->op != BinaryOp::Assign || b->left->kind != ExprKind::Identifier) return false;
+        auto* id = static_cast<IdentifierExpr*>(b->left.get());
+        varName = id->name; induction = id->resolvedDecl; initial = b->right.get();
+        type = getExprType(id);
+    } else return false;
+    if (!induction || !type.isScalar() ||
+        (type.baseType != IRType::Int32 && type.baseType != IRType::Float32 &&
+         type.baseType != IRType::UInt32)) return false;
+    unsignedInduction = type.baseType == IRType::UInt32;
+    const bool floating = type.baseType == IRType::Float32;
+    auto isInduction = [&](ExprNode* e) {
+        return e && e->kind == ExprKind::Identifier &&
+            static_cast<IdentifierExpr*>(e)->resolvedDecl == induction;
+    };
+    int64_t first, bound, step;
+    if (!constant(initial, first)) return false;
+    if (stmt->condition->kind != ExprKind::Binary) return false;
+    auto* cond = static_cast<BinaryExpr*>(stmt->condition.get());
+    const BinaryOp cmp = cond->op;
+    if (cmp != BinaryOp::Less && cmp != BinaryOp::LessEqual && cmp != BinaryOp::Greater &&
+        cmp != BinaryOp::GreaterEqual && cmp != BinaryOp::Equal && cmp != BinaryOp::NotEqual) return false;
+    if (!isInduction(cond->left.get()) || !constant(cond->right.get(), bound)) return false;
+    auto* inc = stmt->increment.get();
+    if (inc->kind == ExprKind::Unary) {
+        auto* u = static_cast<UnaryExpr*>(inc);
+        if (!isInduction(u->operand.get())) return false;
+        if (u->op == UnaryOp::PreIncrement || u->op == UnaryOp::PostIncrement) step = 1;
+        else if (u->op == UnaryOp::PreDecrement || u->op == UnaryOp::PostDecrement) step = -1;
+        else return false;
+    } else if (inc->kind == ExprKind::Binary) {
+        auto* b = static_cast<BinaryExpr*>(inc);
+        if (!isInduction(b->left.get()) || !constant(b->right.get(), step)) return false;
+        if (b->op == BinaryOp::SubAssign) step = -step;
+        else if (b->op != BinaryOp::AddAssign) return false;
+    } else return false;
+    if (unsignedInduction && step < 0) return false;
+    if (step == 0 || stmtContainsBreakOrContinue(stmt->body.get())) return false;
+    dependencies.insert(induction);
+    // A global induction target can also be changed by an otherwise unrelated call.
+    watchesGlobal |= !declares && module_->findGlobal(varName) != nullptr;
+    if (loopBodyChanges(stmt->body.get(), dependencies, watchesGlobal)) return false;
+
+    const bool floatComparison = floating || getExprType(cond->right.get()).baseType == IRType::Float32;
+    auto exact = [&](int64_t value) {
+        return value >= (unsignedInduction ? int64_t(0) : int64_t(INT32_MIN)) &&
+            value <= (unsignedInduction ? int64_t(UINT32_MAX) : int64_t(INT32_MAX)) &&
+            (!floatComparison || static_cast<double>(static_cast<float>(value)) == static_cast<double>(value));
+    };
+    if (!exact(first) || !exact(bound) || (floating && !exact(step))) return false;
+    auto test = [&](int64_t value) {
+        switch (cmp) {
+        case BinaryOp::Less: return value < bound;
+        case BinaryOp::LessEqual: return value <= bound;
+        case BinaryOp::Greater: return value > bound;
+        case BinaryOp::GreaterEqual: return value >= bound;
+        case BinaryOp::Equal: return value == bound;
+        case BinaryOp::NotEqual: return value != bound;
+        default: return false;
+        }
+    };
+    // OUR resource bound, not the reference compiler's body/type-dependent
+    // unroll heuristic (t_bc4fa4e5). Complete the proof before emitting IR.
+    constexpr size_t kMaxUnroll = 64;
+    std::vector<int64_t> iterations;
+    int64_t final = first;
+    while (test(final)) {
+        if (iterations.size() == kMaxUnroll) {
+            error(stmt->loc, "static loop expansion exceeds 64 iterations; hardware-loop lowering required (t_a290c3c8)");
+            return true;
+        }
+        iterations.push_back(final);
+        final += step; // 32-bit operands, so the int64 simulation cannot overflow.
+        if (!exact(final)) return false;
     }
 
-    for (int iter = 0; iter < trip; ++iter)
-    {
-        nameToValue_[varName] = createConstant(curVal);
+    const ScopeState pre = scope_;
+    // The for initializer has its own lexical scope, rather than declaring its
+    // name in the enclosing block's declaration set.
+    blockDeclared_.emplace_back();
+    buildStmt(stmt->init.get());
+    auto bind = [&](int64_t value) {
+        nameToValue_[varName] = floating ? createConstant(static_cast<float>(value))
+            : unsignedInduction ? createConstant(static_cast<uint32_t>(value))
+                                : createConstant(static_cast<int32_t>(value));
+    };
+    for (int64_t value : iterations) {
+        bind(value);
         buildStmt(stmt->body.get());
-        if (currentBlock_->hasTerminator()) return true;
-        curVal += incDelta;
+        if (currentBlock_->hasTerminator()) break;
     }
-    nameToValue_[varName] = createConstant(curVal);
+    if (!currentBlock_->hasTerminator()) bind(final);
+    blockDeclared_.pop_back();
+    if (declares) exitBlockBinding(varName, pre);
     return true;
 }
 
 void IRBuilder::buildForStmt(ForStmt* stmt)
 {
-    // Static-count loops with literal init/condition/increment and no
-    // break/continue are fully unrolled into straight-line IR. This
-    // matches the reference compiler's lowering and lets the existing emit pipeline
-    // handle each iteration as ordinary scalar code.
+    // Proven static loops expand within our resource bound. The reference's
+    // choice between expansion and a hardware loop also depends on body cost;
+    // we preserve values without claiming the same instruction shape.
     if (tryUnrollStaticFor(stmt)) return;
 
     // Build initializer

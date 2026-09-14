@@ -946,6 +946,10 @@ bool AlgebraicSimplification::isZero(IRFunction& func, IRValueID id) const
         {
             return std::get<int32_t>(c->value) == 0;
         }
+        if (std::holds_alternative<uint32_t>(c->value))
+        {
+            return std::get<uint32_t>(c->value) == 0;
+        }
     }
     return false;
 }
@@ -962,6 +966,10 @@ bool AlgebraicSimplification::isOne(IRFunction& func, IRValueID id) const
         if (std::holds_alternative<int32_t>(c->value))
         {
             return std::get<int32_t>(c->value) == 1;
+        }
+        if (std::holds_alternative<uint32_t>(c->value))
+        {
+            return std::get<uint32_t>(c->value) == 1;
         }
     }
     return false;
