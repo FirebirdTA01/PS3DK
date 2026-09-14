@@ -1,0 +1,29 @@
+// FP half subnormal flush, boundary, and non-flush controls (t_30825aaa)
+//
+// Reference compiler sce-cgc oracle measurement across regions:
+// 1. he in [-4, 0] (2^-19 <= |x| < 2^-14), positives & h-literals: flushes to 0.0f (0x00000000).
+// 2. he in [-4, 0], negatives via constructor/default: reference emits 0xc0800000 (-4.0, defect);
+//    we emit 0x00000000 by deliberate divergence (rendering-correct over defect-compatible).
+// 3. he in [-9, -5] (2^-24 <= |x| < 2^-19): reference retains float32 exponent and truncates mantissa.
+//    We flush to 0x00000000 by deliberate decision.
+// 4. he <= -10 (|x| < 2^-24): reference emits 0x00000000 (pos) / 0x80000000 (-0.0 neg).
+//    We flush to 0x00000000 by deliberate decision.
+// Boundary values >= 2^-14 (he >= 1) preserve normal half words, and large/inf values are preserved.
+
+uniform half4 sub_pos = half4(1e-5, 3e-5, 6e-5, 6.103515e-5);
+
+// Reference emits c0800000 (-4.0) here (upstream converter defect); we emit 0 by decision
+uniform half4 sub_neg = half4(-1e-5, -3e-5, -6e-5, -0.0);
+
+// Region 3 & 4 controls:
+// Region 3 (2^-24 <= |x| < 2^-19): +1.3*2^-22 (ref 0x34a60000), -1.3*2^-22 (ref 0xb4a68000); we emit 0
+// Region 4 (|x| < 2^-24): +1.3*2^-30 (ref 0x00000000), -1.3*2^-30 (ref 0x80000000); we emit 0
+uniform half4 sub_reg34 = half4(3.0994415e-7, -3.0994415e-7, 1.2107193e-9, -1.2107193e-9);
+
+uniform half4 boundary = half4(6.103515625e-5, 6.2e-5, -6.103515625e-5, -6.2e-5);
+uniform half4 ctrl = half4(1.0, 65504.0, 131072.0, -131072.0);
+
+float4 main() : COLOR
+{
+    return float4(sub_pos) + float4(sub_neg) + float4(sub_reg34) + float4(boundary) + float4(ctrl);
+}

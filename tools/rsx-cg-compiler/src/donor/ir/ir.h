@@ -597,39 +597,7 @@ namespace IRUtils
         }
         else if (exp <= 0)
         {
-            if (exp < -10)
-            {
-                u_out = sign;
-            }
-            else
-            {
-                int32_t shift = 1 - exp;
-                uint32_t val = mant | 0x800000u;
-                int32_t totalShift = shift + 13;
-                uint32_t halfUlp = 1u << (totalShift - 1);
-                uint32_t rem = val & ((1u << totalShift) - 1u);
-                bool roundUp = (rem > halfUlp) || (rem == halfUlp && sign == 0);
-                uint32_t kept = val >> totalShift;
-                if (roundUp)
-                    kept++;
-                if (kept == 0)
-                {
-                    u_out = sign;
-                }
-                else
-                {
-                    int32_t h_exp = 0;
-                    uint32_t h_mant = kept;
-                    while ((h_mant & 0x400u) == 0)
-                    {
-                        h_mant <<= 1;
-                        h_exp--;
-                    }
-                    h_exp++;
-                    h_mant &= 0x3FFu;
-                    u_out = sign | ((h_exp + 127 - 15) << 23) | (h_mant << 13);
-                }
-            }
+            u_out = 0;
         }
         else
         {
