@@ -177,8 +177,8 @@ def main(compiler):
                 for swizzle in ('xyzw'[:width], 'wzyx'[:width]):
                     vector = 't.'+swizzle
                     broadcasts = [f'v.{"xyzw"[r]*width}' for r in range(width)]
-                    # Static matrix indexing has a separate pre-existing wrong
-                    # scalar fold (t_a3f93c78). Spell those rows literally.
+                    # Keep this twin independent of matrix indexing: the
+                    # separate t_a3f93c78 guard checks M[row].
                     rows = [f'M[{r}]' if storage != 'const' else
                             f'float{width}('+','.join(str(x) for x in matrix[r])+')'
                             for r in range(width)]

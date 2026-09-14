@@ -9,13 +9,12 @@
 // Measured on the reference: the container is TWO records - the entry
 // parameter and the output - and M appears nowhere.  The record COUNT is the
 // assertion that matters: if a future change starts emitting parent/row
-// records for a const matrix it will still produce correct values and the
-// count is the only thing that catches it.
+// records for a const matrix, the record-count check catches it. Value checks
+// are separate: constant-matrix-row-test.sh pins the complete row payloads.
 //
-// The rows are read through M[i] rather than mul(M, v) ON PURPOSE: mul with a
-// matrix operand is a separate, still-open refusal in the fragment profile
-// (matvecmul, t_741ac502; vecmatmul, t_f16cb660), and a fixture that tripped
-// over those would be testing somebody else's gap instead of this one.
+// Read rows through M[i] to exercise indexing independently of matrix-product
+// lowering. t_a3f93c78 found that this folded one flattened scalar per index:
+// uv=(0.5,0.25) produced [1,0,0,1] instead of [-0.5,-1.125,-2.75,1].
 // ASYMMETRIC values, so a transposed or mis-ordered fold cannot pass.
 const static float3x3 M = float3x3
 	(

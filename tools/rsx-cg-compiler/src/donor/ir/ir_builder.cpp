@@ -4219,7 +4219,64 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
     IRTypeInfo resultType = getExprType(expr);
 
     int32_t constIdx = 0;
-    if (extractIntScalar(*currentFunction_, indexValue, constIdx) && constIdx >= 0)
+    bool constantIndex = extractIntScalar(*currentFunction_, indexValue, constIdx);
+    auto* matrix = dynamic_cast<IRConstant*>(currentFunction_->getValue(arrayValue));
+    if (matrix && matrix->type.isMatrix() && !constantIndex)
+    {
+        auto* index = dynamic_cast<IRConstant*>(currentFunction_->getValue(indexValue));
+        std::vector<float> components;
+        if (index && index->type.isScalar() &&
+            extractFloatComponents(*currentFunction_, indexValue, components) &&
+            components.size() == 1)
+        {
+            // The reference truncates the evaluated index once: M[1.9]
+            // reads row1, M[-0.9] row0, M[1.7*1.2] row2. Check before an
+            // integer conversion, including nonfinite/overflowing values.
+            const double row = std::trunc(static_cast<double>(components[0]));
+            if (!std::isfinite(row) || row < 0 || row >= matrix->type.matrixRows)
+            {
+                error(expr->index->loc, "matrix row index out of bounds");
+                return InvalidIRValue;
+            }
+            constIdx = static_cast<int32_t>(row);
+            constantIndex = true;
+        }
+    }
+    if (constantIndex)
+    {
+        if (matrix && matrix->type.isMatrix())
+        {
+            // Matrix constants are flat row-major payloads. M[r] selects a
+            // complete vector, whereas the scalar fallback below selects one
+            // component. Check signed bounds before converting to size_t.
+            const int rows = matrix->type.matrixRows;
+            const int cols = matrix->type.matrixCols;
+            if (constIdx < 0 || constIdx >= rows)
+            {
+                error(expr->index->loc, "matrix row index out of bounds");
+                return InvalidIRValue;
+            }
+            std::vector<float> components;
+            if (cols <= 0 || resultType.isMatrix() ||
+                resultType.componentCount() != cols ||
+                !extractFloatComponents(*currentFunction_, arrayValue, components) ||
+                components.size() != static_cast<size_t>(rows * cols) ||
+                (!matrix->intValues.empty() && matrix->intValues.size() != components.size()))
+            {
+                error(expr->loc, "constant matrix row has an inconsistent payload");
+                return InvalidIRValue;
+            }
+            const size_t begin = static_cast<size_t>(constIdx * cols);
+            std::vector<float> row(components.begin() + begin,
+                                   components.begin() + begin + cols);
+            std::vector<int64_t> integers;
+            if (!matrix->intValues.empty())
+                integers.assign(matrix->intValues.begin() + begin,
+                                matrix->intValues.begin() + begin + cols);
+            return createConstant(resultType, row, integers);
+        }
+    }
+    if (constantIndex && constIdx >= 0)
     {
         IRValue* av = currentFunction_->getValue(arrayValue);
         if (auto* ac = dynamic_cast<IRConstant*>(av))
