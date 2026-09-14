@@ -561,7 +561,18 @@ std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const Semantic
             functionDefinitionsByName_[funcDecl->name].push_back(funcDecl);
     }
 
-    // Build functions
+    // LOWER ONLY WHAT THE ENTRY CAN REACH.  The reference emits no code for an
+    // unreachable function and reports no name error from inside one - the
+    // semantic pass already holds those back (t_36492ad8), and lowering one
+    // anyway would re-raise them here as "IR generation error: Unknown
+    // identifier".  Type and arity errors are NOT affected: pass 2 analyses
+    // every body, reachable or not, which is what the reference does too.
+    //
+    // functionDefinitionsByName_ above stays COMPLETE on purpose - it is the
+    // inlining lookup, and narrowing it would change which definition a
+    // reachable call resolves to.
+    const std::unordered_set<const FunctionDecl*> reachable =
+        semantic.entryReachableDefinitions();
     for (auto& decl : unit.declarations)
     {
         if (decl->kind == DeclKind::Function)
@@ -569,6 +580,13 @@ std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const Semantic
             auto* funcDecl = static_cast<FunctionDecl*>(decl.get());
             if (!funcDecl->isPrototype() && !funcDecl->isIntrinsic)
             {
+                // An empty set means there is no entry at all, which the
+                // semantic pass has already refused; lower everything then
+                // rather than silently emitting nothing.
+                if (!reachable.empty() && reachable.find(funcDecl) == reachable.end())
+                {
+                    continue;
+                }
                 buildFunction(funcDecl);
             }
         }

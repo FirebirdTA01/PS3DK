@@ -1,0 +1,19 @@
+// t_36492ad8 commit 1.  THE C1008 "NAME NOT FOUND" CLASS IS REPORTED ONLY
+// INSIDE FUNCTIONS REACHABLE FROM THE SELECTED ENTRY.  Measured against
+// sce-cgc 475, sce_fp_rsx, helper never called from main:
+//
+//     undeclared identifier / undeclared function / forward call   ACCEPT
+//     a type error (C1056) / a wrong arity (C1103)                 REFUSE
+//
+// So an unreachable body IS analysed - only this one class is gated.
+//
+// REFUSE: the discriminator codex measured.  The name HAS a visible
+// declaration - f(float4,float) - so the wrong arity is C1103 and
+// unconditional, EVEN THOUGH a later exact f(float4) exists and even
+// though the body is unreachable.  A gate keyed on "resolution would have
+// succeeded over the whole unit" instead of "the NAME has no visible
+// declaration" would wrongly accept this.
+float4 f(float4 a, float b) { return a * b; }
+float4 unused(float4 t) { return f(t); }
+float4 f(float4 t) { return t * 2.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

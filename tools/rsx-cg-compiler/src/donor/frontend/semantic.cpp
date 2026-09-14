@@ -157,8 +157,15 @@ void SemanticAnalyzer::note(const SourceLocation& loc, const std::string& messag
 
 void SemanticAnalyzer::collectDeclarations(TranslationUnit& unit)
 {
+    // ONE INDEX PER TOP-LEVEL DECLARATION, in parser order.  Pass 2 replays
+    // the same order, so a call inside declaration #N sees exactly #0..#N -
+    // its own index included, which is what makes direct recursion resolve.
+    // Indices start at 1 so that 0 stays the builtins' "always visible"
+    // (t_36492ad8).
+    size_t declIndex = 0;
     for (auto& decl : unit.declarations)
     {
+        symbols_.setDeclIndex(++declIndex);
         switch (decl->kind)
         {
         case DeclKind::Struct:
@@ -177,6 +184,9 @@ void SemanticAnalyzer::collectDeclarations(TranslationUnit& unit)
             break;
         }
     }
+    // Pass 2 must walk exactly this many; see analyzeDeclarations.
+    declCountPass1_ = declIndex;
+
 }
 
 void SemanticAnalyzer::collectStructDecl(StructDecl* decl)
@@ -327,6 +337,8 @@ void SemanticAnalyzer::checkParameterDefaultShape(ParamDecl* p)
 
 void SemanticAnalyzer::collectVarDecl(VarDecl* decl)
 {
+    allGlobalVars_.push_back(decl);
+
     auto sym = SymbolUtils::symbolFromVarDecl(decl);
     if (!sym) return;
 
@@ -383,8 +395,11 @@ void SemanticAnalyzer::collectBufferDecl(BufferDecl* decl)
 
 void SemanticAnalyzer::analyzeDeclarations(TranslationUnit& unit)
 {
+    // The same walk as pass 1, so the counter reproduces the same indices.
+    size_t declIndex = 0;
     for (auto& decl : unit.declarations)
     {
+        visibleThrough_ = ++declIndex;
         switch (decl->kind)
         {
         case DeclKind::Struct:
@@ -400,6 +415,22 @@ void SemanticAnalyzer::analyzeDeclarations(TranslationUnit& unit)
             break;
         }
     }
+    // WALK PARITY.  Pass 1 stamps a declIndex per top-level declaration and
+    // pass 2 reproduces it by walking the same list the same way.  If the two
+    // ever diverge - one loop filtering a declaration kind the other does not -
+    // every index after the divergence is wrong and calls silently resolve
+    // against the wrong set, with nothing to see.  Cheap to assert, impossible
+    // to notice otherwise (review: Fable).
+    if (declIndex != declCountPass1_)
+    {
+        SourceLocation unitLoc;
+        error(unitLoc, "internal error: declaration walk parity - pass 1 "
+                       "numbered " + std::to_string(declCountPass1_) +
+                       " top-level declarations, pass 2 walked " +
+                       std::to_string(declIndex) +
+                       "; call visibility would be wrong (t_36492ad8)");
+    }
+
 }
 
 void SemanticAnalyzer::analyzeStructDecl(StructDecl* decl)
@@ -736,6 +767,18 @@ void SemanticAnalyzer::analyzeDeclStmt(DeclStmt* stmt)
         sym->semantic = varDecl->semantic;
         sym->isConst = (varDecl->storage == StorageQualifier::Const);
 
+        // USED EARLIER IN THIS SCOPE, DECLARED HERE.  The reference refuses
+        // that outright - "error C1002: the name X is already defined" - and
+        // it does so whether or not the function is reachable, so it is not
+        // the deferred C1008 class.  Keyed by the SCOPE INSTANCE: use outer /
+        // declare inner, use inner / declare outer, two sibling blocks and
+        // file-scope-later are all LEGAL and must stay accepted (t_17071b54).
+        if (symbols_.currentScopeHadUnresolvedUse(varDecl->name))
+        {
+            error(varDecl->loc, "the name '" + varDecl->name +
+                                "' is already defined");
+        }
+
         if (!symbols_.addSymbol(std::move(sym)))
         {
             error(varDecl->loc, "redefinition of variable '" + varDecl->name + "'");
@@ -825,7 +868,9 @@ CgType SemanticAnalyzer::analyzeIdentifierExpr(IdentifierExpr* expr)
     Symbol* sym = symbols_.lookup(expr->name);
     if (!sym)
     {
-        error(expr->loc, "use of undeclared identifier '" + expr->name + "'");
+        deferOrEmitNameError(expr->loc,
+                             "use of undeclared identifier '" + expr->name + "'",
+                             expr->name);
         return CgType::Error();
     }
 
@@ -911,17 +956,103 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         argTypes.push_back(argType);
     }
 
+    // RECORD THE UNRESOLVED CALLEE NAME BEFORE THE ERROR-ARGUMENT RETURN.
+    // Recording is not diagnosing.  `f(missing(t)); float f;` is C1002 on the
+    // reference - the later `float f` collides with the earlier use of the
+    // name f - but the inner call makes the argument error-typed, and the
+    // early return below skipped the outer call entirely, so the use of f was
+    // never recorded and the collision could not be seen (review: codex).
+    //
+    // THE FIX IS NOT TO MOVE THE C1105 CHECK ABOVE THAT RETURN.  An
+    // error-typed argument SUPPRESSES the diagnostics on its call, measured
+    // both ways: `f(missing(t))` with no later declaration is ACCEPTED, and so
+    // is a local f shadowing a visible function when the call's argument is
+    // error-typed.  So the name is recorded here and nothing is emitted.
+    // VISIBLE BINDING IDENTITY, NOT WHOLE-UNIT LOOKUP SUCCESS.  symbols_.lookup
+    // has no visibility cutoff: pass 1 put every function in the table, so a
+    // function declared AFTER this call is still "found" and the use went
+    // unrecorded - `f(missing); float f;` with `float4 f(...)` later lost its
+    // C1002 the same way the error-argument return did (review: codex, twice,
+    // on two different lookups).
+    //
+    // A NON-FUNCTION binding still counts as visible here.  A file-scope
+    // variable declared later is the separately carded t_17071b54 case, and
+    // treating it as invisible would change that behaviour inside this commit
+    // rather than on its own card.
+    {
+        Symbol* bound = symbols_.lookup(expr->functionName);
+        const bool visibleHere =
+            symbols_.hasVisibleFunction(expr->functionName, visibleThrough_) ||
+            (bound && bound->kind != SymbolKind::Function &&
+                      bound->kind != SymbolKind::Builtin);
+        if (!visibleHere) symbols_.noteUnresolvedUse(expr->functionName);
+    }
+
     // Check for any error types in arguments
     for (const auto& t : argTypes)
     {
         if (t.isError()) return CgType::Error();
     }
 
+    // A NEARER BINDING WINS OVER THE FUNCTION OF THE SAME NAME.
+    // `float4 f(float4 t){...}  float4 g(float4 t){ float f = 1; return f(t); }`
+    // is C1105 "cannot call a non-function" on the reference: the LOCAL
+    // shadows the function, so the call is a call on a float.
+    //
+    // This has to be asked BEFORE the overload set is consulted, not in the
+    // failure path below - functionOverloads is keyed by NAME and knows
+    // nothing about scopes, so resolveOverload SUCCEEDS here and a check
+    // inside `if (!candidate)` is never reached (review: codex read the
+    // ordering out of the source; Fable measured the cell).  Scope::lookup
+    // already walks innermost-first, so the nearest binding is exactly what
+    // symbols_.lookup returns and no scope-chain rewrite is needed.
+    if (Symbol* nearest = symbols_.lookup(expr->functionName))
+    {
+        if (nearest->kind != SymbolKind::Function &&
+            nearest->kind != SymbolKind::Builtin)
+        {
+            error(expr->loc, "cannot call '" + expr->functionName +
+                             "': it is not a function");
+            return CgType::Error();
+        }
+    }
+
     // Resolve overload
-    auto candidate = symbols_.resolveOverload(expr->functionName, argTypes);
+    auto candidate = symbols_.resolveOverload(expr->functionName, argTypes,
+                                              visibleThrough_);
     if (!candidate)
     {
+        // NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  Only the first is the
+        // reference's C1008 class and only it is reachability-gated.  A name
+        // with at least one VISIBLE declaration but no overload that fits is
+        // C1103 and is reported everywhere - measured, and it holds even when
+        // a later exact overload exists, which is why this asks about
+        // visibility of the NAME and never about whole-unit resolvability
+        // (review: codex).
         std::string sig = SymbolUtils::formatFunctionSignature(expr->functionName, argTypes);
+        if (!symbols_.hasVisibleFunction(expr->functionName, visibleThrough_))
+        {
+            // THE NAME MAY EXIST AND SIMPLY NOT BE A FUNCTION.  `float missing
+            // = 1; return missing(t);` is C1105 "cannot call a non-function"
+            // on the reference and is NOT the C1008 class, so it is reported
+            // unconditionally - deferring it let an unreachable body call an
+            // int (review: codex).  A function declared LATER still resolves
+            // to a Function symbol here, so it falls through to the deferral
+            // and this does not swallow the forward-call case.
+            Symbol* named = symbols_.lookup(expr->functionName);
+            if (named && named->kind != SymbolKind::Function &&
+                named->kind != SymbolKind::Builtin)
+            {
+                error(expr->loc, "cannot call '" + expr->functionName +
+                                 "': it is not a function");
+                return CgType::Error();
+            }
+            deferOrEmitNameError(expr->loc,
+                                 "use of undeclared identifier '" +
+                                 expr->functionName + "'",
+                                 expr->functionName);
+            return CgType::Error();
+        }
         error(expr->loc, "no matching function for call to '" + sig + "'");
         return CgType::Error();
     }
@@ -1385,6 +1516,12 @@ void SemanticAnalyzer::validateShader()
 {
     validateEntryPoint();
 
+    // Held C1008-class findings, now that the entry is known and the call
+    // graph is fully resolved.  Before checkNonEntrySemantics only so that a
+    // name error inside a function reads before that function's semantic
+    // error, which is the reference's order.
+    emitDeferredNameFindings();
+
     checkNonEntrySemantics();
 
     if (shaderInfo_.stage == ShaderStage::Vertex)
@@ -1426,18 +1563,50 @@ void SemanticAnalyzer::validateShader()
 //    switches below therefore carry NO `default:` label, so an enum addition
 //    is a compiler warning rather than a silent hole, and twelve container
 //    fixtures cover it behaviourally.
-void SemanticAnalyzer::checkNonEntrySemantics()
+// THE ONE REACHABILITY WALK.  Transitive and syntactic from the selected
+// entry, with no branch pruning - a call inside `if (false)` still reaches,
+// measured on the reference (t_61109061, and again for the C1008 class here).
+// It runs AFTER pass 2 so CallExpr::resolvedFunction is fully populated;
+// deciding reachability from a partly-resolved graph would under-approximate
+// the reached set, and under-approximating means SUPPRESSING a diagnostic the
+// reference emits (review: codex).
+std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() const
 {
-    FunctionDecl* entry = shaderInfo_.entryPoint;
-    if (!entry) return;   // already diagnosed by validateEntryPoint
-
-    // Reached set holds the FIRST declaration of each function, because that
-    // is the one the reference judges and the one a call resolves to.
     std::unordered_set<const FunctionDecl*> reached;
+    FunctionDecl* entry = shaderInfo_.entryPoint;
+    if (!entry) return reached;
+
+    // The reached set holds the FIRST declaration of each function, because
+    // that is the one the reference judges and the one a call resolves to.
     std::vector<FunctionDecl*> work;
-    FunctionDecl* entryFirst = firstDeclarationOf(entry);
-    work.push_back(entryFirst ? entryFirst : entry);
-    reached.insert(work.back());
+    auto seed = [&](FunctionDecl* fn)
+    {
+        if (!fn) return;
+        FunctionDecl* first = firstDeclarationOf(fn);
+        if (!first) first = fn;
+        if (reached.insert(first).second) work.push_back(first);
+    };
+
+    seed(entry);
+
+    // A FILE-SCOPE INITIALISER IS A ROOT TOO.  `static float g = f(0.25);`
+    // reaches f's body even though the entry never mentions f, and the
+    // reference name-checks it there: that program is C1008 when f's body has
+    // an undeclared name, where rooting only at the entry dropped the finding
+    // AND skipped lowering f (review: codex).
+    //
+    // C5122 SHARES THIS ROOT SET - measured, not assumed, because widening a
+    // separately-measured graph on a hunch is how the prototype hole got into
+    // t_61109061.  A helper carrying a return semantic and called ONLY from a
+    // static initialiser is refused C5122 by the reference, while the same
+    // helper never called at all is accepted.  So one walk serves both.
+    for (VarDecl* global : allGlobalVars_)
+    {
+        if (!global || !global->initializer) continue;
+        std::vector<FunctionDecl*> callees;
+        collectCallEdges(global->initializer.get(), callees);
+        for (FunctionDecl* callee : callees) seed(callee);
+    }
 
     while (!work.empty())
     {
@@ -1446,22 +1615,87 @@ void SemanticAnalyzer::checkNonEntrySemantics()
 
         // WALK THE DEFINITION'S BODY, not this declaration's.  A call resolves
         // to the first declaration, which is usually a bodyless prototype;
-        // stopping there under-approximates reachability and ACCEPTS programs
-        // the reference refuses - measured, entry -> prototype delta ->
-        // definition delta -> gamma:COLOR is C5122 and we accepted it.
+        // stopping there under-approximates reachability.
         FunctionDecl* def = definitionOf(fn);
         if (!def || !def->body) continue;
 
         std::vector<FunctionDecl*> callees;
         collectCallEdges(def->body.get(), callees);
-        for (FunctionDecl* callee : callees)
-        {
-            if (!callee) continue;
-            FunctionDecl* first = firstDeclarationOf(callee);
-            if (!first) first = callee;
-            if (reached.insert(first).second) work.push_back(first);
-        }
+        for (FunctionDecl* callee : callees) seed(callee);
     }
+    return reached;
+}
+
+// A NAME THE UNIT DOES NOT DECLARE AT THIS POINT.  The reference reports this
+// class - C1008, covering an undeclared identifier, an undeclared function and
+// a forward call - ONLY inside functions reachable from the selected entry.
+// Measured, helper never called from main:
+//
+//     undeclared identifier / function / forward call   reference ACCEPTS
+//     a type error (C1056) / a wrong arity (C1103)      reference REFUSES
+//
+// so the body IS analysed and only this class is gated.  Outside a function
+// body there is nothing to be unreachable: a file-scope initialiser and an
+// entry-parameter default are checked unconditionally, which the reference
+// agrees with (it refuses a later name in both, C1002).
+void SemanticAnalyzer::deferOrEmitNameError(const SourceLocation& loc,
+                                            const std::string& message,
+                                            const std::string& name)
+{
+    // Remember it against THIS scope instance: if the same scope later
+    // declares the name, the reference calls that C1002 and refuses
+    // regardless of reachability, so the deferral must not swallow it.
+    if (!name.empty()) symbols_.noteUnresolvedUse(name);
+
+    if (!currentFunction_)
+    {
+        error(loc, message);
+        return;
+    }
+    deferredNameFindings_.push_back({currentFunction_, loc, message});
+}
+
+void SemanticAnalyzer::emitDeferredNameFindings()
+{
+    if (deferredNameFindings_.empty()) return;
+
+    // No entry means validateEntryPoint has already refused; emitting every
+    // held finding there would bury that diagnostic under a cascade.
+    if (!shaderInfo_.entryPoint)
+    {
+        deferredNameFindings_.clear();
+        return;
+    }
+
+    std::unordered_set<const FunctionDecl*> reached = reachedFunctions();
+    for (const DeferredNameFinding& finding : deferredNameFindings_)
+    {
+        FunctionDecl* first = firstDeclarationOf(finding.function);
+        if (!first) first = finding.function;
+        if (reached.find(first) == reached.end()) continue;
+        error(finding.loc, finding.message);
+    }
+    deferredNameFindings_.clear();
+}
+
+std::unordered_set<const FunctionDecl*>
+SemanticAnalyzer::entryReachableDefinitions() const
+{
+    std::unordered_set<const FunctionDecl*> defs;
+    for (const FunctionDecl* fn : reachedFunctions())
+    {
+        FunctionDecl* def = definitionOf(const_cast<FunctionDecl*>(fn));
+        if (def) defs.insert(def);
+    }
+    return defs;
+}
+
+void SemanticAnalyzer::checkNonEntrySemantics()
+{
+    FunctionDecl* entry = shaderInfo_.entryPoint;
+    if (!entry) return;   // already diagnosed by validateEntryPoint
+
+    std::unordered_set<const FunctionDecl*> reached = reachedFunctions();
 
     // Source order, not hash order: deterministic diagnostics.
     for (FunctionDecl* fn : allFunctions_)

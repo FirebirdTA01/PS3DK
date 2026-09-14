@@ -1,0 +1,5 @@
+// t_36492ad8 commit 1.  ACCEPT: the control.  Same shape, f's body valid.  Without it the two rows
+// above are satisfied by refusing every program with a static initialiser.
+float f(float t) { return t * 2.0; }
+static float g = f(0.25);
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

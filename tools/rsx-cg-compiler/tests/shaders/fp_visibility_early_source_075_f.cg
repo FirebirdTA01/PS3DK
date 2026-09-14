@@ -1,0 +1,12 @@
+// t_36492ad8 commit 1.  THE REFERENCE RESOLVES A CALL AGAINST THE
+// DECLARATIONS VISIBLE AT THAT CALL.  Our frontend is two-pass, so before
+// this every declaration in the unit was visible from everywhere.  Measured
+// against sce-cgc 475, sce_fp_rsx.  No defaults appear in any of these - the
+// rule is observable without them.
+//
+// THE MIRROR: the same source declared BEFORE the call DOES hide the builtin,
+// so this pair must DIFFER.  Without it, a compiler that ignored source
+// overloads of builtin names entirely would satisfy the pair above.
+
+float sin(float a) { return 0.75; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(sin(t.x), 0, 0, 1); }

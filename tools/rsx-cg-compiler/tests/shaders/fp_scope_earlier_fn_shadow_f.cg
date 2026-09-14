@@ -1,0 +1,16 @@
+// t_36492ad8 commit 1.  VISIBLE BINDING IDENTITY, NOT LOOKUP SUCCESS.
+//
+// The symbol table has no visibility cutoff for lookup: pass 1 puts every
+// function in it, so a function declared AFTER a call is still "found".  The
+// bookkeeping that records an unresolved callee has to ask whether a binding
+// is VISIBLE AT THE CALL, not whether the name exists anywhere in the unit
+// (review: codex, who found this on two different lookups in a row).
+//
+// ACCEPT: THE CONTROL THAT STOPS THE FIX FROM OVER-RECORDING.  The same body
+// with f defined BEFORE it - f IS a visible binding at the call, the
+// error-typed argument suppresses the call's diagnostics, and the later
+// local is a legal shadow.  A fix that recorded every callee name
+// regardless of visibility would refuse this (Fable).
+float4 f(float4 t) { return t; }
+float4 unused(float4 t) { f(missing); float f; return t; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

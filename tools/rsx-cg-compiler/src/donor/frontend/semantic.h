@@ -7,6 +7,7 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <unordered_set>
 
 // ============================================================================
 // Semantic Error/Warning
@@ -118,6 +119,21 @@ public:
 
 private:
     SymbolTable symbols_;
+    // The top-level declaration pass 2 is currently inside.  Calls resolve
+    // only against declarations with declIndex <= this, which is how "visible
+    // at the call" survives a two-pass frontend (t_36492ad8).
+    //
+    // IT IS SIZE_MAX OUTSIDE analyzeDeclarations, ON PURPOSE: anything
+    // resolving from another pass - shader validation, pass 1 itself - keeps
+    // the old whole-unit view.  Nothing resolves a CALL from there today
+    // (review: Fable), so the value is unobservable; if something ever does,
+    // it will see the pre-t_36492ad8 behaviour and this comment is the reason
+    // why.
+    size_t visibleThrough_ = SIZE_MAX;
+    // Pass 1's declaration count, checked against pass 2's at the end.  The
+    // two walks must enumerate identically or every index is off and
+    // resolution silently shifts; see analyzeDeclarations (review: Fable).
+    size_t declCountPass1_ = 0;
     std::vector<SemanticDiagnostic> diagnostics_;
     ShaderInfo shaderInfo_;
     std::vector<std::unique_ptr<BufferDecl>> bufferDeclOwners_;  // Owns BufferDecl created from VarDecl+BUFFER semantic
@@ -133,6 +149,10 @@ private:
     // declaration, which is frequently a prototype, and because a call resolves
     // to the prototype - walking stops there unless the definition is found.
     std::vector<FunctionDecl*> allFunctions_;
+    // File-scope variables, in declaration order.  Their INITIALISERS are
+    // reachability roots: a call from one reaches its callee's body even
+    // though the entry never mentions it (review: codex).
+    std::vector<VarDecl*> allGlobalVars_;
     bool inLoop_ = false;
     bool inSwitch_ = false;
 
@@ -156,6 +176,37 @@ private:
     // A function REACHED from the selected entry may not carry a return
     // semantic (t_61109061).  Runs in pass 3, after every call has resolved.
     void checkNonEntrySemantics();
+public:
+    // The entry-reachable set, for the IR builder: the reference emits no code
+    // for a function the entry cannot reach and reports no name error from
+    // inside one, so lowering skips them (t_36492ad8).
+    // Returns DEFINITIONS, not first declarations: the IR builder walks
+    // definitions, and reachedFunctions() keys on the first declaration
+    // because that is what a call resolves to.
+    std::unordered_set<const FunctionDecl*> entryReachableDefinitions() const;
+private:
+    // The entry-reachable function set: transitive, syntactic, no branch
+    // pruning.  One walk, shared by checkNonEntrySemantics (t_61109061) and
+    // the deferred name findings, so there is a single notion of reachable
+    // and a single place it can be wrong.
+    std::unordered_set<const FunctionDecl*> reachedFunctions() const;
+    // A NAME-NOT-FOUND diagnostic held back until reachability is known.  The
+    // reference reports the C1008 class only inside functions reachable from
+    // the selected entry; it reports C1056 type errors and C1103 arity errors
+    // everywhere, so only this class is deferred.
+    struct DeferredNameFinding
+    {
+        FunctionDecl* function;
+        SourceLocation loc;
+        std::string message;
+    };
+    std::vector<DeferredNameFinding> deferredNameFindings_;
+    // Record it against the enclosing function, or emit now when there is no
+    // enclosing function - a file-scope initialiser or an entry-parameter
+    // default is not a body and keeps the check unconditionally.
+    void deferOrEmitNameError(const SourceLocation& loc, const std::string& message,
+                              const std::string& name = std::string());
+    void emitDeferredNameFindings();
     void collectCallEdges(const StmtNode* stmt, std::vector<FunctionDecl*>& out) const;
     void collectCallEdges(const ExprNode* expr, std::vector<FunctionDecl*>& out) const;
     // Same name AND same parameter signature - never name alone, overloads.

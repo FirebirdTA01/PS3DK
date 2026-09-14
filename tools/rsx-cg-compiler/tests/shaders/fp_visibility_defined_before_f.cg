@@ -1,0 +1,10 @@
+// t_36492ad8 commit 1.  THE REFERENCE RESOLVES A CALL AGAINST THE
+// DECLARATIONS VISIBLE AT THAT CALL.  Our frontend is two-pass, so before
+// this every declaration in the unit was visible from everywhere.  Measured
+// against sce-cgc 475, sce_fp_rsx.  No defaults appear in any of these - the
+// rule is observable without them.
+//
+// CONTROL: defined before the call, the ordinary shape.
+
+float4 helper(float4 c) { return c * 2.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return helper(t); }
