@@ -2158,6 +2158,26 @@ private:
                 for (int row = 0; row < rows; ++row) {
                     program_.fpGlobalUniformSlots.push_back(base + row);
                     mv.rowSrcs.push_back(uniformSrc(static_cast<int>(base + row), true));
+                    // An INITIALISED matrix carries one default per ROW, the
+                    // same shape the array branch above uses per element.
+                    // Without this the inline const block for every row is
+                    // zero-filled and an unpatched shader computes with a zero
+                    // matrix while the reflection table says otherwise - the
+                    // reference puts [0.25,0.5,0.75,0] and so on into the
+                    // ucode (measured, t_4b54f26b A3; predicted from this
+                    // site by codex before it was reproduced).
+                    const size_t rowBase =
+                        static_cast<size_t>(row) * static_cast<size_t>(cols);
+                    if (g.initialValue.size() >= rowBase + static_cast<size_t>(cols)) {
+                        program_.fpUniformDefaults[base + row] = {
+                            std::vector<float>(
+                                g.initialValue.begin() +
+                                    static_cast<std::ptrdiff_t>(rowBase),
+                                g.initialValue.begin() +
+                                    static_cast<std::ptrdiff_t>(rowBase +
+                                        static_cast<size_t>(cols))),
+                            static_cast<unsigned>(cols)};
+                    }
                 }
                 nextFpGlobalSlot += rows;
                 matrixValues_[g.valueId] = mv;

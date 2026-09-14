@@ -1,0 +1,31 @@
+// Matrix reflection AND compiled defaults in the fragment container
+// (t_4b54f26b A3), reachable only since t_741ac502 taught lowerLoadUniform
+// to keep a global matrix's row sources.
+//
+// TWO PLACES, and they were independent:
+//   the parameter table's per-row defaultValue blocks - what
+//   cgGetParameterDefaultValue returns;
+//   the ucode's INLINE CONSTANT block for each row - what an UNPATCHED shader
+//   actually computes with.
+// The FP matrix registration pushed slots and row sources but never seeded
+// program_.fpUniformDefaults, so every row's inline block was zero-filled.
+// The reflection can be perfect while the shader renders black; the guard
+// reads both (predicted from the registration site by codex, then measured).
+//
+//   M  initialised, ASYMMETRIC values so a transposed or row-shifted fold is
+//      visible - 0.25/0.5/0.75 then 1.5/2.5/3.5 then -1/-2/-4, including
+//      negatives so a sign drop shows.
+//   N  the same type with NO initialiser: its rows must carry no block and
+//      its inline constants must stay zero on both sides.
+float3x3 M = float3x3
+	(
+	   0.25, 0.5, 0.75,
+	   1.5, 2.5, 3.5,
+	   -1.0, -2.0, -4.0
+	);
+uniform float3x3 N;
+
+float4 main(float3 c : TEXCOORD0) : COLOR
+{
+	return float4(mul(M, c) + mul(N, c), 1.0);
+}

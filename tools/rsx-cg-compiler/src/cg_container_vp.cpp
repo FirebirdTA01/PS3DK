@@ -92,6 +92,8 @@ constexpr uint32_t kCgFloat       = 1045u;
 constexpr uint32_t kCgFloat2      = 1046u;
 constexpr uint32_t kCgFloat3      = 1047u;
 constexpr uint32_t kCgFloat4      = 1048u;
+constexpr uint32_t kCgFloat1x1    = 1049u;  // first of the contiguous
+                                            // float-matrix block
 constexpr uint32_t kCgFloat4x4    = 1064u;
 // Vector types of width 1 (`float1`, declared as separate enumerants
 // from CG_FLOAT scalar later in cg_datatypes.h).  The reference compiler
@@ -132,10 +134,70 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
     while (out.size() % alignment) out.push_back(0);
 }
 
+// CGtype for a matrix of the given shape.  The reference's own datatype
+// table (sdk/include/Cg/NV/cg_datatypes.h) lists the float matrices in a
+// contiguous block ordered rows-major-then-cols, starting at CG_FLOAT1x1,
+// so the code is kCgFloat1x1 + (rows-1)*4 + (cols-1).  Measured against
+// sce-cgc on six shapes rather than derived from the table alone:
+//   2x2 -> 1054   3x3 -> 1059   3x4 -> 1060   4x3 -> 1063   4x4 -> 1064
+//   2x4 -> 1056
+// Before this, only 4x4 was mapped and every other shape fell through to
+// 0, so a `uniform float3x3` parent record carried NO TYPE at all
+// (t_d90dbaed).
+uint32_t cgMatrixType(int rows, int cols)
+{
+    if (rows < 1 || rows > 4 || cols < 1 || cols > 4) return 0;
+    return kCgFloat1x1 + static_cast<uint32_t>((rows - 1) * 4 + (cols - 1));
+}
+
+// A matrix ROW is recorded as the float vector of the COLUMN width, not
+// always FLOAT4: the reference gives 1047 (CG_FLOAT3) for a 3x3's rows and
+// 1048 for a 4x4's.  Five sites here hard-coded kCgFloat4 (t_d90dbaed).
+uint32_t cgMatrixRowType(int cols)
+{
+    if (cols < 1 || cols > 4) return kCgFloat4;
+    return kCgFloat + static_cast<uint32_t>(cols - 1);
+}
+
+// A file-scope uniform's compiled default, as a slice of the value
+// ir_builder evaluated onto IRGlobal (ir.h:501-502).  `first`/`count` pick a
+// matrix ROW out of the row-major flattening; a scalar or vector passes
+// first=0 and its component count.  Returns empty when the global has no
+// initialiser, which is what keeps an uninitialised uniform's block absent.
+//
+// This exists as a helper because the same assignment is needed at FOUR
+// sites - the plain file-scope loop and the STRUCT-FLATTENED one, each with a
+// scalar/vector and a matrix branch.  t_4b54f26b A2 wrote it at one of them
+// and the struct-flattened path silently dropped every default until a
+// review probe found it (codex).  One helper, four call sites, no drift.
+std::vector<float> uniformDefaultSlice(const IRGlobal& g, size_t first, size_t count)
+{
+    if (!g.initialValue.empty())
+    {
+        if (g.initialValue.size() < first + count) return {};
+        return std::vector<float>(
+            g.initialValue.begin() + static_cast<std::ptrdiff_t>(first),
+            g.initialValue.begin() + static_cast<std::ptrdiff_t>(first + count));
+    }
+    if (!g.initialIntValues.empty())
+    {
+        if (g.initialIntValues.size() < first + count) return {};
+        std::vector<float> out;
+        out.reserve(count);
+        for (size_t k = first; k < first + count; ++k)
+            out.push_back(static_cast<float>(g.initialIntValues[k]));
+        return out;
+    }
+    return {};
+}
+
 uint32_t cgTypeForIRType(const IRTypeInfo& t)
 {
-    if (t.isMatrix() && t.matrixRows == 4 && t.matrixCols == 4)
-        return kCgFloat4x4;
+    if (t.isMatrix())
+    {
+        const uint32_t m = cgMatrixType(t.matrixRows, t.matrixCols);
+        if (m) return m;
+    }
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
@@ -335,6 +397,11 @@ VpContainerResult emitVertexContainerImpl(
                 ParamDesc r;
                 r.name      = d.name + "[" + std::to_string(row) + "]";
                 r.semantic  = "";
+                // LITERAL kCgFloat4 on purpose: a blend-matrix palette
+                // element is a 4x4, so its rows really are FLOAT4.  The
+                // other four row sites are column-sized via
+                // cgMatrixRowType (t_d90dbaed); this one is not an
+                // oversight.
                 r.type      = kCgFloat4;
                 r.var       = kCgUniform;
                 r.direction = kCgIn;
@@ -475,7 +542,7 @@ VpContainerResult emitVertexContainerImpl(
                         ParamDesc r;
                         r.name      = p.name + "[" + std::to_string(row) + "]";
                         r.semantic  = d.semantic;
-                        r.type      = kCgFloat4;
+                        r.type      = cgMatrixRowType(p.type.matrixCols);
                         r.var       = kCgUniform;
                         r.direction = kCgIn;
                         r.res       = kCgConst;
@@ -574,7 +641,7 @@ VpContainerResult emitVertexContainerImpl(
                     ParamDesc r;
                     r.name      = g.name + "[" + std::to_string(row) + "]";
                     r.semantic  = semantic;
-                    r.type      = kCgFloat4;
+                    r.type      = cgMatrixRowType(g.type.matrixCols);
                     r.var       = kCgUniform;
                     r.direction = kCgIn;
                     r.res       = kCgConst;
@@ -582,6 +649,10 @@ VpContainerResult emitVertexContainerImpl(
                     r.isReferenced = 1;
                     r.isShared     = 1;
                     r.resIndex     = static_cast<uint32_t>(base + row);
+                    r.defaultValue = uniformDefaultSlice(
+                        g, static_cast<size_t>(row) *
+                               static_cast<size_t>(g.type.matrixCols),
+                        static_cast<size_t>(g.type.matrixCols));
                     params.push_back(r);
                 }
             }
@@ -597,6 +668,8 @@ VpContainerResult emitVertexContainerImpl(
                     reg = nextVectorReg--;
                 }
                 d.resIndex = static_cast<uint32_t>(reg);
+                d.defaultValue = uniformDefaultSlice(
+                    g, 0u, static_cast<size_t>(g.type.componentCount()));
                 params.push_back(d);
             }
         }
@@ -662,7 +735,7 @@ VpContainerResult emitVertexContainerImpl(
                     ParamDesc r;
                     r.name      = p.name + "[" + std::to_string(row) + "]";
                     r.semantic  = "";
-                    r.type      = kCgFloat4;
+                    r.type      = cgMatrixRowType(p.type.matrixCols);
                     r.res       = kCgConst;
                     r.var       = kCgUniform;
                     r.direction = kCgIn;
@@ -754,7 +827,7 @@ VpContainerResult emitVertexContainerImpl(
                 ParamDesc r;
                 r.name      = g.name + "[" + std::to_string(row) + "]";
                 r.semantic  = semantic;
-                r.type      = kCgFloat4;
+                r.type      = cgMatrixRowType(g.type.matrixCols);
                 r.var       = kCgUniform;
                 r.direction = kCgIn;
                 r.res       = kCgConst;
@@ -762,6 +835,17 @@ VpContainerResult emitVertexContainerImpl(
                 r.isReferenced = 1;
                 r.isShared     = hasExplicit ? 1u : 0u;
                 r.resIndex     = static_cast<uint32_t>(base + row);
+                // An initialised matrix uniform's compiled default lives on
+                // the ROWS, never on the parent: the reference leaves the
+                // parent record's defaultValue at 0 and gives each row its
+                // own 16-byte block holding that row's columns, zero-padded.
+                // Measured on `float3x3 M = float3x3(nine scalars)`:
+                // M[0] [0.2209,0.339,0.4184,0], M[1] [0.1138,0.678,0.7319,0],
+                // M[2] [0.0102,0.113,0.2969,0] (t_4b54f26b A3).
+                r.defaultValue = uniformDefaultSlice(
+                    g, static_cast<size_t>(row) *
+                           static_cast<size_t>(g.type.matrixCols),
+                    static_cast<size_t>(g.type.matrixCols));
                 params.push_back(r);
             }
         }
@@ -773,29 +857,13 @@ VpContainerResult emitVertexContainerImpl(
             else
                 reg = nextVectorReg--;
             d.resIndex = static_cast<uint32_t>(reg);
-            // An initialised file-scope uniform carries a compiled default.
-            // ir_builder already evaluated it onto IRGlobal (ir.h:501-502);
-            // we were writing zero over it (t_4b54f26b).  Scalar and vector
-            // only: for a MATRIX the reference leaves the parent record's
-            // defaultValue at 0 and gives each row its own block, which is
-            // measured but has no corpus witness, so it is deliberately not
-            // implemented here rather than guessed at.
-            if (!g.initialValue.empty())
-            {
-                d.defaultValue.assign(
-                    g.initialValue.begin(),
-                    g.initialValue.begin() +
-                        static_cast<std::ptrdiff_t>(
-                            std::min<size_t>(4u, g.initialValue.size())));
-            }
-            else if (!g.initialIntValues.empty())
-            {
-                const size_t n = std::min<size_t>(4u, g.initialIntValues.size());
-                d.defaultValue.reserve(n);
-                for (size_t k = 0; k < n; ++k)
-                    d.defaultValue.push_back(
-                        static_cast<float>(g.initialIntValues[k]));
-            }
+            // An initialised file-scope uniform carries a compiled
+            // default.  ir_builder evaluates the initialiser onto IRGlobal
+            // (ir.h:501-502) and refuses rather than dropping it when it
+            // cannot, so the value is already in hand here; we wrote zero
+            // over it (t_4b54f26b A2).
+            d.defaultValue = uniformDefaultSlice(
+                g, 0u, static_cast<size_t>(g.type.componentCount()));
             params.push_back(d);
         }
     }

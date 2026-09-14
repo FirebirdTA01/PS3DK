@@ -157,6 +157,9 @@ jobs:
       - name: Test file-scope uniform defaults reach the container parameter table
         run: bash tests/shader-compiler/uniform-default-reflection-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test matrix reflection - const fold, parent and row types, row defaults
+        run: bash tests/shader-compiler/matrix-reflection-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test rsx-cg-compiler texcoord 2D flags
         run: bash tests/shader-compiler/texcoord-2d-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
