@@ -1,0 +1,8 @@
+// Distinct rows/columns; also a reference-vs-ours pixel witness under set 0.
+static const float3x3 M = float3x3(0.03125,0.0625,0.09375,
+                                  0.125,0.15625,0.1875,
+                                  0.21875,0.25,0.28125);
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    return float4(mul(t.xyz, M), 1.0);
+}
