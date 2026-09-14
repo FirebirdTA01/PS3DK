@@ -33,6 +33,7 @@
 
 #include "ir.h"
 #include "array_uniforms.h"
+#include "uniform_bindings.h"
 #include "fp_sampler_bindings.h"
 
 #include <algorithm>
@@ -724,7 +725,7 @@ private:
     // laid out (FP: one inline-const slot per element; VP: one constant
     // register per REFERENCED element).  Filled in the constructor from
     // the pre-pass classification, read by lowerLoadUniform (t_f9ecd3ac).
-    std::map<std::string, std::map<int, VSrc>> arrayElementSrcs_;
+    std::map<IRValueID, std::map<int, VSrc>> arrayElementSrcs_;
     // Run-time array indexing (t_99b29225, VP only).  dynamicIndexUses_:
     // how many run-time array reads each value indexes, counted with the
     // other uses so a float-to-int consumed ONLY as an index can become
@@ -1990,48 +1991,36 @@ private:
         // program has no indexed constants and refuses by name.
         const rsx_cg::ArrayUniformUses arrayUses =
             rsx_cg::classifyArrayUniformUses(entry_);
-        // The general VP allocator does not yet honour explicit C bindings
-        // on ordinary uniforms either. A new matrix-array program containing
-        // N:register(C9) would otherwise declare N at c9 but read c256, and
-        // shift the array's reads away from its declared base (t_49f3cc72).
-        const bool hasExplicitUniformBinding =
-            std::any_of(entry_.parameters.begin(), entry_.parameters.end(),
-                [](const IRParameter& p) {
-                    return p.storage == StorageQualifier::Uniform &&
-                           p.explicitRegisterBank == 'C';
-                }) ||
-            std::any_of(module_.globals.begin(), module_.globals.end(),
-                [](const IRGlobal& g) {
-                    return g.storage == StorageQualifier::Uniform &&
-                           g.explicitRegisterBank == 'C';
-                });
+        const auto explicitBindings = profile_ == GeneralProfile::Vertex
+            ? rsx_cg::resolveVpExplicitUniformBindings(entry_, module_)
+            : rsx_cg::VpExplicitUniformBindings{};
         struct PendingMatrix {
             IRValueID valueId;
             std::string name;
             int rows = 0;
             int cols = 0;
             int arraySize = 0;
+            int fixedBase = -1;
         };
         std::vector<PendingMatrix> pendingMatrices;
-        const auto layoutArrayUniform = [&](const std::string& name,
+        const auto layoutArrayUniform = [&](IRValueID owner, const std::string& name,
                                             const IRTypeInfo& type,
                                             unsigned fpSlotBase,
                                             bool isParameter,
-                                            char registerBank) {
+                                            const rsx_cg::ExplicitUniformBinding* binding) {
             const char* where = isParameter ? "parameter" : "uniform";
             if (profile_ == GeneralProfile::Vertex && type.isMatrix() &&
                 matrixDimsSupported(type) &&
                 (type.elementType == IRType::Float32 ||
                  type.elementType == IRType::Float16)) {
-                if (registerBank || hasExplicitUniformBinding) {
-                    program_.diagnostics.push_back(
-                        "nv40-general-vp: explicit matrix-array register binding layout for '" +
-                        name + "' (including other bound uniforms) is not yet lowered "
-                        "(t_49f3cc72); refusing");
-                    program_.loweringFailed = true;
+                if (binding) {
+                    for (size_t k = 0; k < binding->registers.size(); ++k)
+                        if (binding->registers[k] >= 0)
+                            arrayElementSrcs_[owner][static_cast<int>(k)] =
+                                uniformSrc(binding->registers[k], false);
                     return;
                 }
-                pendingMatrices.push_back(PendingMatrix{InvalidIRValue, name,
+                pendingMatrices.push_back(PendingMatrix{owner, name,
                     type.matrixRows, type.matrixCols, type.arraySize});
                 return;
             }
@@ -2064,11 +2053,11 @@ private:
                 // array as one contiguous block under a run-time index.
                 // A run-time read resolves against the block's base
                 // (element 0) with the address register added.
-                const std::vector<int> regs = rsx_cg::vpArrayElementRegisters(
-                    use, count, nextVpUniformConst);
+                const std::vector<int> regs = binding ? binding->registers :
+                    rsx_cg::vpArrayElementRegisters(use, count, nextVpUniformConst);
                 for (int k = 0; k < count; ++k) {
                     if (regs[static_cast<size_t>(k)] >= 0)
-                        arrayElementSrcs_[name][k] =
+                        arrayElementSrcs_[owner][k] =
                             uniformSrc(regs[static_cast<size_t>(k)], false);
                 }
             } else {
@@ -2076,7 +2065,7 @@ private:
                 // not, so the container's one-record-per-element table
                 // and the emitter's slot numbering line up.
                 for (int k = 0; k < count; ++k)
-                    arrayElementSrcs_[name][k] =
+                    arrayElementSrcs_[owner][k] =
                         uniformSrc(static_cast<int>(fpSlotBase + k), true);
             }
         };
@@ -2094,9 +2083,12 @@ private:
                 !seenUniformNames.insert(p.name).second) {
                 continue;
             }
+            const auto* binding = explicitBindings.find(p.valueId);
+            if (binding && !p.type.isArray() && binding->registers[0] < 0)
+                continue;
             if (p.storage == StorageQualifier::Uniform && p.type.isArray()) {
-                layoutArrayUniform(p.name, p.type, fpParamSlotBases[pi], true,
-                                   p.explicitRegisterBank);
+                layoutArrayUniform(p.valueId, p.name, p.type, fpParamSlotBases[pi], true,
+                                   binding);
                 continue;
             }
             if (profile_ == GeneralProfile::Vertex &&
@@ -2117,7 +2109,8 @@ private:
                        p.type.isMatrix()) {
                 pendingMatrices.push_back(PendingMatrix{p.valueId, p.name,
                                                         p.type.matrixRows,
-                                                        p.type.matrixCols});
+                                                        p.type.matrixCols, 0,
+                                                        binding ? binding->registers[0] : -1});
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform &&
                        p.type.isMatrix()) {
@@ -2134,7 +2127,7 @@ private:
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform) {
                 program_.valueToSource[p.valueId] =
-                    uniformSrc(nextVpUniformConst--, false);
+                    uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
                        p.storage == StorageQualifier::Uniform &&
                        isSamplerIRType(p.type.baseType)) {
@@ -2152,7 +2145,12 @@ private:
         for (const auto& g : module_.globals) {
             if (g.storage != StorageQualifier::Uniform)
                 continue;
-            if (!seenUniformNames.insert(g.name).second)
+            const auto* binding = explicitBindings.find(g.valueId);
+            // A pinned global can still be read by an inlined helper when
+            // an entry uniform shadows its name. It owns a separate source.
+            if (!seenUniformNames.insert(g.name).second && !binding)
+                continue;
+            if (binding && !g.type.isArray() && binding->registers[0] < 0)
                 continue;
             if (g.type.isArray()) {
                 unsigned base = 0;
@@ -2176,13 +2174,14 @@ private:
                     }
                     nextFpGlobalSlot += count;
                 }
-                layoutArrayUniform(g.name, g.type, base, false, g.explicitRegisterBank);
+                layoutArrayUniform(g.valueId, g.name, g.type, base, false, binding);
                 continue;
             }
             if (profile_ == GeneralProfile::Vertex && g.type.isMatrix()) {
                 pendingMatrices.push_back(PendingMatrix{g.valueId, g.name,
                                                         g.type.matrixRows,
-                                                        g.type.matrixCols});
+                                                        g.type.matrixCols, 0,
+                                                        binding ? binding->registers[0] : -1});
             } else if (profile_ == GeneralProfile::Fragment && g.type.isMatrix()) {
                 const unsigned base = nextFpGlobalSlot;
                 const int rows = std::max(1, g.type.matrixRows);
@@ -2218,7 +2217,7 @@ private:
                 matrixValues_[g.valueId] = mv;
             } else if (profile_ == GeneralProfile::Vertex) {
                 program_.valueToSource[g.valueId] =
-                    uniformSrc(nextVpUniformConst--, false);
+                    uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
                        isSamplerIRType(g.type.baseType)) {
                 samplerUnit_[g.valueId] = samplerLayout.unit(g.valueId);
@@ -2249,23 +2248,24 @@ private:
                     it->arraySize, it->rows, nextVpMatrixConst);
                 for (int k = 0; k < it->arraySize; ++k)
                     if (regs[static_cast<size_t>(k)] >= 0)
-                        arrayElementSrcs_[it->name][k] =
+                        arrayElementSrcs_[it->valueId][k] =
                             uniformSrc(regs[static_cast<size_t>(k)], false);
                 continue;
             }
-            matrixUniformBase_[it->valueId] = nextVpMatrixConst;
+            const int base = it->fixedBase >= 0 ? it->fixedBase : nextVpMatrixConst;
+            matrixUniformBase_[it->valueId] = base;
             matrixUniformRows_[it->valueId] = std::max(1, it->rows);
             MatrixValue mv;
             mv.rows = std::max(1, it->rows);
             mv.cols = std::max(1, it->cols);
             for (int row = 0; row < mv.rows; ++row)
-                mv.rowSrcs.push_back(uniformSrc(nextVpMatrixConst + row, false));
+                mv.rowSrcs.push_back(uniformSrc(base + row, false));
             matrixValues_[it->valueId] = mv;
             if (dumpOrder) {
                 std::fprintf(stderr, "matrix %s -> c[%d]\n",
-                             it->name.c_str(), nextVpMatrixConst);
+                             it->name.c_str(), base);
             }
-            nextVpMatrixConst += it->rows;
+            if (it->fixedBase < 0) nextVpMatrixConst += it->rows;
         }
         program_.nextVpLiteralConst = nextVpUniformConst;
         program_.vpConstFloor = nextVpMatrixConst;
@@ -4499,7 +4499,7 @@ private:
         // scalar source - that read element 0 for every index.
         using Kind = IRInstruction::ArrayIndexKind;
         if (inst.arrayIndexKind == Kind::Constant) {
-            const auto arrIt = arrayElementSrcs_.find(inst.targetName);
+            const auto arrIt = arrayElementSrcs_.find(inst.uniformSource);
             if (arrIt != arrayElementSrcs_.end()) {
                 const auto elIt = arrIt->second.find(inst.componentIndex);
                 if (elIt != arrIt->second.end()) {
@@ -4524,7 +4524,7 @@ private:
             int folded = 0;
             if (!inst.operands.empty() &&
                 rsx_cg::foldConstantIndex(entry_, inst.operands[0], folded)) {
-                const auto arrIt = arrayElementSrcs_.find(inst.targetName);
+                const auto arrIt = arrayElementSrcs_.find(inst.uniformSource);
                 if (arrIt != arrayElementSrcs_.end()) {
                     const auto elIt = arrIt->second.find(folded);
                     if (elIt != arrIt->second.end()) {
@@ -4554,7 +4554,7 @@ private:
             return;
         }
         for (const auto& g : module_.globals) {
-            if (g.name != inst.targetName)
+            if (g.valueId != inst.uniformSource)
                 continue;
             // ARRAY uniforms.  The builder says how the element was chosen
             // (IRInstruction::arrayIndexKind), so each shape gets its own
@@ -4641,7 +4641,7 @@ private:
     //     whose value is dead, and that allocation is not lowered here.
     void lowerDynamicArrayRead(const IRInstruction& inst)
     {
-        const auto arrIt = arrayElementSrcs_.find(inst.targetName);
+        const auto arrIt = arrayElementSrcs_.find(inst.uniformSource);
         if (arrIt == arrayElementSrcs_.end() ||
             arrIt->second.find(0) == arrIt->second.end()) {
             if (!program_.loweringFailed) {
@@ -10021,25 +10021,16 @@ UcodeOutput lowerVertexProgramGeneral(const IRModule& module,
                                       const rsx_cg::CompileOptions&,
                                       VpAttributes* attrsOut)
 {
-    // The container honors a file-scope C pin; this allocator does not yet.
-    // Check declarations, including unused pins: skipping a pin in the
-    // container but consuming its automatic slot here shifts later uniforms.
-    // Legacy lowering honors the pin and must remain available as a control.
-    for (const auto& global : module.globals) {
-        if (global.storage == StorageQualifier::Uniform &&
-            global.explicitRegisterBank == 'C') {
-            UcodeOutput out;
-            out.diagnostics.push_back(
-                "nv40-general-vp: explicit file-scope register(C" +
-                std::to_string(global.explicitRegisterIndex) + ") on '" +
-                global.name + "' is not yet lowered consistently with reflection "
-                "(t_49f3cc72); refusing");
-            return out;
-        }
+    const auto bindings = rsx_cg::resolveVpExplicitUniformBindings(entry, module);
+    if (!bindings.diagnostics.empty()) {
+        UcodeOutput out;
+        out.diagnostics = bindings.diagnostics;
+        return out;
     }
     GeneralBuilder builder(GeneralProfile::Vertex, entry, module);
     VirtualProgram program = builder.run();
     UcodeOutput out = emitVertexVirtual(program, attrsOut);
+    if (out.ok && attrsOut) attrsOut->resolvedExplicitBindings = true;
     appendBuilderDiagnostics(program, out);
     return out;
 }

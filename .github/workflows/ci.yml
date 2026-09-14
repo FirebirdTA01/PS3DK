@@ -150,8 +150,8 @@ jobs:
         run: bash tests/shader-compiler/vp-array-dynamic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test vertex matrix-array records and indexed row reads
         run: bash tests/shader-compiler/vp-matrix-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test inconsistent general vertex register bindings refuse
-        run: bash tests/shader-compiler/vp-explicit-binding-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test explicit vertex bindings match decoded register reads
+        run: bash tests/shader-compiler/vp-explicit-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler uniform patch lanes
         run: bash tests/shader-compiler/uniform-patch-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

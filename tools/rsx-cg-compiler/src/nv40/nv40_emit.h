@@ -95,6 +95,10 @@ struct VpLiteralPoolSlot
 // emission and surfaced via emitVertexProgramEx.
 struct VpAttributes
 {
+    // General lowering implements both explicit C binding spellings, including
+    // entry parameters/arrays. Legacy uses its older allocation contract. The
+    // shared container must describe the contract used by the emitted ucode.
+    bool resolvedExplicitBindings = false;
     uint32_t instructionSlot     = 0;        // load address; non-zero enables indexed reads
     uint32_t registerCount       = 1;        // R registers used; the reference compiler minimum is 1
     uint32_t attributeInputMask  = 0;        // bit n iff v[n] is read

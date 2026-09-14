@@ -689,6 +689,7 @@ size_t CommonSubexprElimination::InstrHash::operator()(const IRInstruction* inst
     }
     hash ^= std::hash<int>()(inst->swizzleMask);
     hash ^= std::hash<int>()(inst->componentIndex) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<IRValueID>()(inst->uniformSource) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
 
     // Include targetName in hash for LoadUniform/Call instructions
     if (!inst->targetName.empty())
@@ -711,6 +712,9 @@ bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
     if (a->operands.size() != b->operands.size()) return false;
     if (a->swizzleMask != b->swizzleMask) return false;
     if (a->componentIndex != b->componentIndex) return false;
+    // A helper may read the global hidden by an entry parameter of the
+    // same name. Equal element indices do not make those loads equal.
+    if (a->uniformSource != b->uniformSource) return false;
 
     // Compare targetName for LoadUniform/Call instructions
     if (a->targetName != b->targetName) return false;

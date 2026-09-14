@@ -348,6 +348,9 @@ public:
     //             is chosen at run time
     enum class ArrayIndexKind { None, Constant, Dynamic };
     ArrayIndexKind arrayIndexKind = ArrayIndexKind::None;
+    // Owner of a uniform load. A global and an entry parameter may have the
+    // same name; binding/use classification must not merge those declarations.
+    IRValueID uniformSource = InvalidIRValue;
     IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
     // For Discard: the guard operand is the condition on the path that
     // REACHES the discard, and this flag says the kill fires where that
