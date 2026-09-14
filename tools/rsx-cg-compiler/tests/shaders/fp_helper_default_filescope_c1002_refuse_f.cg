@@ -1,0 +1,8 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A FILE-SCOPE VARIABLE MAY NOT REUSE A FUNCTION'S NAME, even one declared
+// earlier: "error C1002: the name \"h\" is already defined".  Pinned by
+// diagnostic because exit 1 alone would also be satisfied by the call failing
+// to resolve, which is a different refusal.
+float4 h(float4 c, float k = 0.5) { return c * k; }
+float h = 1.0;
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t); }

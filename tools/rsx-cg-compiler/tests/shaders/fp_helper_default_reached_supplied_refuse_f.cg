@@ -1,0 +1,9 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// CELL 2 OF 3, AND THE ONLY ONE THIS SLICE FIXES.  The helper IS reached and
+// the call SUPPLIES the argument, so the default is never used - and the
+// reference still refuses: "error C1008: undefined variable".  Analysis is
+// gated on REACHABILITY, not on use.  Before this slice we analysed a default
+// only where it was materialised, accepted this, and it was the single new
+// gap commit 2 opened.  The mutant is this check removed.
+float4 h(float4 c, float k = nosuch) { return c * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t, 0.5); }

@@ -1,0 +1,10 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// GAP ROW, card t_084fba44.  The reference ACCEPTS a braced aggregate
+// initialiser as a parameter default; we refuse it, and the refusal is
+// PRE-EXISTING - a plain local `S s = {1.0, 2.0};` with no default anywhere
+// fails identically.  Defaults only expose it.  The row pins the refusal so
+// that when t_084fba44 lands this test goes red and someone converts it into
+// an accept-and-twin row.
+struct S { float a; float b; };
+float4 h(float4 c, S s = {1.0, 2.0}) { return c * s.a; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t); }

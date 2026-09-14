@@ -1,0 +1,11 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// OVERLOAD RANKING PUTS NARROWING LAST, and this is the shape that proved it.
+// `clamp(f, 0, 1)` with a float f appears verbatim in five SDK shaders
+// (MachoQHDR x4 and stereo3D/fp_anaglyph).  Two candidates are viable:
+// clamp(float,float,float) needs two WIDENINGS, clamp(int,int,int) needs one
+// NARROWING.  Under a single additive cost with "a demotion costs twice a
+// promotion" those come to the same number, the call ties, and a tie is
+// C1101 - which refused all five shaders that both the reference and our own
+// parent compiled.  Counting narrowings separately and comparing them FIRST
+// is what the reference does.
+float4 main(float4 t : TEXCOORD0) : COLOR { float f = t.x; return clamp(f, 0, 1); }

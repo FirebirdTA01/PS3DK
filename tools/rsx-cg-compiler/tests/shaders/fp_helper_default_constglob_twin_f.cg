@@ -1,0 +1,5 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// K passed explicitly.  Twin of fp_helper_default_constglob_f.
+static const float K = 0.5;
+float4 h(float4 c, float k = K) { return c * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t, K); }

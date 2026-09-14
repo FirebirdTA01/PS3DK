@@ -1,0 +1,9 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE CONTROL THAT STOPS THE OVER-FIX, and it is the whole reason the edge
+// belongs to the CALL SITE rather than to the declaration.  Identical program
+// except the argument is SUPPLIED, so the default is never substituted, inner
+// is never reached, and the reference ACCEPTS.  Rooting every call named in
+// every default of every reached helper would refuse this.
+float inner(float x) : COLOR { return x; }
+float outer(float x, float k = inner(1.0)) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(outer(t.x, 2.0), 0, 0, 1); }

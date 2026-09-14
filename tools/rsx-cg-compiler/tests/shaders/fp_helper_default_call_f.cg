@@ -1,0 +1,8 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A CALL IN A HELPER DEFAULT.  Substituted at the call site like any other
+// default expression, so it is a byte twin of writing the call out - which is
+// what fp_helper_default_call_twin_f asserts.  The entry-uniform spelling of
+// the same thing is still a gap; see fp_helper_default_entrycall_gap_f.
+float4 g() { return float4(0.5, 0.5, 0.5, 0.5); }
+float4 h(float4 c, float4 k = g()) { return c * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t); }

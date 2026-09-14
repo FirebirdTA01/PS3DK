@@ -1,0 +1,10 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A PROTOTYPE'S DEFAULT IS THE ONE THAT GETS SUBSTITUTED when the prototype is
+// the latest declaration visible at the call.  The definition below the call
+// carries no default, and the reference still accepts - byte-identically to
+// passing inner(0.5) explicitly, which is the twin.  Skipping prototypes in
+// analysis left this expression unresolved and the IR builder failed on it.
+float inner(float x) { return x; }
+float outer(float x, float k = inner(0.5));
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(outer(t.x), 0, 0, 1); }
+float outer(float x, float k) { return x * k; }

@@ -1,0 +1,8 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A FUNCTION'S NAME IS NOT VISIBLE INSIDE ITS OWN DEFAULT.  The reference
+// refuses this C1002 - the declaration is not complete while its own default
+// is being read.  It is also what stops the call-edge walk: without the rule
+// the walk expands this default forever and the compiler dies on the stack
+// rather than diagnosing anything (found by codex).
+float f(float x = f()) { return x; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(), 0, 0, 1); }

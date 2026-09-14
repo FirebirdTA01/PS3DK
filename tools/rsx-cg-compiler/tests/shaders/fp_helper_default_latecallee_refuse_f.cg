@@ -1,0 +1,9 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE CALLEE NAME IS A NAME.  inner is declared AFTER outer, so it is not a
+// binding for outer's default - the reference refuses C1002, exactly as it
+// does for a variable.  This only showed with the helper NEVER CALLED: a
+// reached one is caught later by ordinary resolution, which is why walking
+// only the call ARGUMENTS looked correct (found by codex).
+float outer(float x, float k = inner(0.5)) { return x * k; }
+float inner(float x) { return x; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(t.x, 0, 0, 1); }

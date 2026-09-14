@@ -1,0 +1,4 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// Both arguments written out.  Twin of fp_helper_default_mixed_f.
+float4 h(float4 c, float a = 0.25, float b = 0.5) { return c * a * b; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t, 0.25, 0.5); }

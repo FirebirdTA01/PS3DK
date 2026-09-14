@@ -1,0 +1,6 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// TWO CALL SITES, one omitting the default and one supplying the same value.
+// Substitution happens per call site, so the two must produce the same code;
+// a single shared materialisation would be observable here.
+float4 h(float4 c, float k = 0.5) { return c * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t) + h(t, 0.5); }

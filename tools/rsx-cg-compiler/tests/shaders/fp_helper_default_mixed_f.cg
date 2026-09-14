@@ -1,0 +1,5 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// SOME ARGUMENTS SUPPLIED, THE REST FILLED.  Only the trailing default is
+// substituted; the supplied one is not re-defaulted.
+float4 h(float4 c, float a = 0.25, float b = 0.5) { return c * a * b; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t, 0.25); }

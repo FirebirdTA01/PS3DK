@@ -1,0 +1,5 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A MATRIX-TYPED DEFAULT.  Nothing about the rule is scalar-specific, and a
+// matrix default is the largest expression that reaches the substitution path.
+float4 h(float4 c, float4x4 m = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1)) { return mul(m, c); }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t); }

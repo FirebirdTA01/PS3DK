@@ -1,0 +1,6 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// bump() passed explicitly.  Twin of fp_helper_default_globalwrite_f.
+static float G = 1.0;
+float bump() { G = 2.0; return 0.5; }
+float outer(float x, float k) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(outer(t.x, bump()) + G, 0, 0, 1); }

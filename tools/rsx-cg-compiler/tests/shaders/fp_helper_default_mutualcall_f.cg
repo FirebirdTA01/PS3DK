@@ -1,0 +1,10 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE CONTROL THAT KEEPS THE CYCLE GUARD FROM OVER-REFUSING.  Two defaults
+// that name each other TERMINATE, and the reference ACCEPTS this program - so
+// the guard has to be an active set, not a depth limit and not a
+// "seen once" set.  Each default names the other, whose first declaration
+// has a strictly smaller index, so neither is its own name.
+float g(float x);
+float f(float x = g(1.0)) { return x; }
+float g(float x = f(1.0)) { return x; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(), 0, 0, 1); }

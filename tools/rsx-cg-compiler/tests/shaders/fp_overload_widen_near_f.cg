@@ -1,0 +1,5 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// The INT overload, forced.  Must MOVE the container: without it the twin
+// above would be satisfied by a compiler that picked the int overload for
+// both spellings.
+float4 main(float4 t : TEXCOORD0) : COLOR { float f = t.x; return clamp((int)f, 0, 1); }

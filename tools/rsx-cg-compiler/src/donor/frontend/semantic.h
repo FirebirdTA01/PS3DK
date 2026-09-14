@@ -153,6 +153,25 @@ private:
     // reachability roots: a call from one reaches its callee's body even
     // though the entry never mentions it (review: codex).
     std::vector<VarDecl*> allGlobalVars_;
+
+    // WHERE each file-scope name was declared, in the same one-per-top-level
+    // declaration counting the call-visibility index uses.  A default
+    // expression's names bind at the HELPER'S DECLARATION, so a global
+    // declared after it is not a binding - it is a collision.
+    std::unordered_map<std::string, size_t> globalDeclIndex_;
+
+    // The same, for FUNCTION names: a default may call one, and a callee
+    // declared after the helper is the same collision.
+    std::unordered_map<std::string, size_t> functionDeclIndex_;
+
+    void checkDefaultNamesBindAtDeclaration(FunctionDecl* decl);
+    void analyzePrototypeDefaults(FunctionDecl* decl);
+
+    // The defaults currently being expanded by collectCallEdges.  A default
+    // may call the function that declares it; without this the walk recurses
+    // on the same CallExpr forever.
+    mutable std::unordered_set<const ExprNode*> defaultsBeingWalked_;
+    void checkDuplicateDefinition(FunctionDecl* decl);
     bool inLoop_ = false;
     bool inSwitch_ = false;
 

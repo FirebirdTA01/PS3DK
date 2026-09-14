@@ -1,0 +1,8 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE CONTROL THAT KEEPS THE C1111 ROWS HONEST.  Same omitted out parameter,
+// no default: the reference refuses with "error C1103: too few parameters in
+// function call", a different code and a different rule.  Ours must refuse
+// here WITHOUT the C1111 text, or the two rows above are pinning exit 1 and
+// nothing more.
+void shade(float4 c, out float4 o) { o = c; }
+float4 main(float4 t : TEXCOORD0) : COLOR { shade(t); return t; }

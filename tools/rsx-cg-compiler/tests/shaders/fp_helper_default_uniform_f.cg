@@ -1,0 +1,19 @@
+// t_36492ad8.  A DEFAULT ON A HELPER PARAMETER is legal, and the omitted
+// argument is the default EXPRESSION substituted at the call site - not a
+// folded constant.  Measured against sce-cgc 475:
+//
+//     shade(t)  with `float k = 0.5`   is BYTE-IDENTICAL to shade(t, 0.5)
+//     `uniform float g; float k = g`   is BYTE-IDENTICAL to shade(t, g),
+//                                      and the container carries g as a real
+//                                      uniform record
+//
+// The second is the only shape that separates substitution from folding; every
+// literal default passes either way.
+//
+// The default is a UNIFORM, not a literal.  Twin of
+// fp_helper_default_uniform_twin_f.  THIS IS THE ROW THAT MATTERS: an
+// implementation that evaluated the default to a constant would be correct
+// on every literal row above and wrong here.
+uniform float g;
+float4 shade(float4 c, float k = g) { return c * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return shade(t); }

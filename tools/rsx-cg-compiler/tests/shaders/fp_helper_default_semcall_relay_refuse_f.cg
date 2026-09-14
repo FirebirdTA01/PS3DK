@@ -1,0 +1,8 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// TRANSITIVE.  The default calls inner, which carries no semantic, but inner
+// calls leaf, which does.  The reference refuses, so the walk must follow the
+// edge through the default and then through the ordinary body.
+float leaf(float x) : COLOR { return x; }
+float inner(float x) { return leaf(x); }
+float outer(float x, float k = inner(1.0)) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(outer(t.x), 0, 0, 1); }

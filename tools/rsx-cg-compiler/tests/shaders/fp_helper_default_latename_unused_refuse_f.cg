@@ -1,0 +1,7 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE SAME REFUSAL WITH THE DEFAULT NEVER USED - every call supplies the
+// argument.  That is what makes this a BINDING rule rather than a
+// materialisation rule, and it is why the check lives at the declaration.
+float f(float x, float k = K) { return x * k; }
+static const float K = 0.75;
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.x, 2.0), 0, 0, 1); }

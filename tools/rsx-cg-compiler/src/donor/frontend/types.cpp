@@ -925,6 +925,15 @@ bool canExplicitlyConvert(const CgType& from, const CgType& to)
     return false;
 }
 
+int narrowingSteps(const CgType& from, const CgType& to)
+{
+    if (from.equals(to)) return 0;
+    if (!from.isNumeric() || !to.isNumeric()) return 0;
+    const int rankFrom = scalarRank(from.scalarKind());
+    const int rankTo = scalarRank(to.scalarKind());
+    return rankTo < rankFrom ? rankFrom - rankTo : 0;
+}
+
 int conversionCost(const CgType& from, const CgType& to)
 {
     if (from.equals(to)) return 0;

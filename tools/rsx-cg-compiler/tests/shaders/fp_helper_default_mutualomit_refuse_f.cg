@@ -1,0 +1,13 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE OTHER DOOR TO AN INFINITE EXPANSION, and it is shut by ARITY rather
+// than by the name rule.  Two defaults that name each other with NO argument
+// would materialise forever; the reference refuses first, C1103 "too few
+// parameters in function call", because at each declaration the OTHER
+// function’s own default is not yet visible so the call is short an argument.
+// A three-way cycle refuses the same way.  Pinned so the protection is not
+// accidental: the name rule alone does not cover this shape (neither name is
+// its own), and the IR materialiser has no cycle guard of its own.
+float g(float x);
+float f(float x = g()) { return x; }
+float g(float x = f()) { return x; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(), 0, 0, 1); }

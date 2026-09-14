@@ -1,0 +1,6 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// The same program with K declared BEFORE f: accepted, which is the control
+// that keeps the two rows above from passing on the mere presence of a global.
+static const float K = 0.75;
+float f(float x, float k = K) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.x), 0, 0, 1); }

@@ -1,0 +1,7 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A DEFAULT'S NAMES BIND AT THE HELPER'S DECLARATION.  K is declared AFTER f,
+// so it is not a binding for f's default - it is a collision, and the
+// reference says so at f: error C1002: the name "K" is already defined.
+float f(float x, float k = K) { return x * k; }
+static const float K = 0.75;
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.x), 0, 0, 1); }

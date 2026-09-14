@@ -1,0 +1,18 @@
+// t_36492ad8.  A DEFAULT ON A HELPER PARAMETER, which the reference accepts
+// and which this file used to pin as an interim REFUSAL - the refusal that
+// commit 2 removes.  Renamed rather than left with a _refuse_ name, because a
+// fixture whose name contradicts its row is exactly what goes unread.
+// Twin: fp_helper_param_default_twin_f, the same call with the argument
+// written out.
+
+float3 shade(float3 base, const bool boost = true)
+{
+	return boost ? base * 2.0 : base;
+}
+
+void main(
+	float2 texcoord : TEXCOORD0,
+	out float4 color_out : COLOR)
+{
+	color_out = float4(shade(float3(texcoord, 0.5)), 1.0);
+}

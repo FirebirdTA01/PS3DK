@@ -1,0 +1,20 @@
+// t_36492ad8.  A DEFAULT ON A HELPER PARAMETER is legal, and the omitted
+// argument is the default EXPRESSION substituted at the call site - not a
+// folded constant.  Measured against sce-cgc 475:
+//
+//     shade(t)  with `float k = 0.5`   is BYTE-IDENTICAL to shade(t, 0.5)
+//     `uniform float g; float k = g`   is BYTE-IDENTICAL to shade(t, g),
+//                                      and the container carries g as a real
+//                                      uniform record
+//
+// The second is the only shape that separates substitution from folding; every
+// literal default passes either way.
+//
+// An exact type match with a DEFAULT FILL beats a narrowing conversion: the
+// reference picks the float4 overload, not f(float3).  Twin of
+// fp_helper_default_prefer_twin_f, which declares only the chosen one -
+// comparing containers is what identifies WHICH BODY RAN, since acceptance
+// alone cannot.
+float4 f(float3 v) { return float4(v, 1) * 2.0; }
+float4 f(float4 v, float k = 1.0) { return v * k * 3.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }

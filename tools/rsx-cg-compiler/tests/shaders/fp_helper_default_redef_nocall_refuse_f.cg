@@ -1,0 +1,6 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// No call to f at all, and it is still C1106.  A second BODY is what is
+// refused, not a second default and not anything about the call.
+float f(float x, float k = 0.25) { return x * k; }
+float f(float x, float k) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(t.x, 0, 0, 1); }

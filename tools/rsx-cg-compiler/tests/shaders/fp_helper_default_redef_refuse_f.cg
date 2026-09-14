@@ -1,0 +1,8 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// TWO DEFINITIONS OF ONE SIGNATURE IS C1106 - "overloaded function
+// declaration differs only in parameter qualifiers" - and it is not a
+// defaults rule: see the two rows below, which refuse with no second default
+// and with no call at all.
+float f(float x, float k = 0.25) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.x), 0, 0, 1); }
+float f(float x, float k = 0.5) { return x * k; }

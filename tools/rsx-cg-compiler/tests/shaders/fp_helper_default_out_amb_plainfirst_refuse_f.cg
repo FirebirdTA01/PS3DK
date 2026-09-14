@@ -1,0 +1,6 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// The reversed declaration order of fp_helper_default_out_amb_deffirst_refuse_f.
+// The reference refuses identically, so the tie is not an ordering artefact.
+void f(float4 c) { }
+void f(float4 c, out float4 o = float4(0,0,0,1)) { o = c; }
+float4 main(float4 t : TEXCOORD0) : COLOR { f(t); return t; }
