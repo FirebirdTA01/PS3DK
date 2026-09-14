@@ -1227,6 +1227,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
         if (index >= 0) ty.arraySize = 0;
         const IRValueID loadId = currentFunction_->allocateValueId();
         auto load = std::make_unique<IRInstruction>(IROp::LoadUniform, loadId, ty);
+        load->uniformSource = global->valueId;
         load->targetName = base;
         if (index >= 0)
         {
@@ -2212,6 +2213,7 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
         auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
             currentFunction_->allocateValueId(), global->type);
         inst->targetName = global->name;  // Use targetName for uniform name
+        inst->uniformSource = global->valueId;
         currentBlock_->addInstruction(std::move(inst));
         return currentFunction_->nextValueId - 1;
     }
@@ -2841,6 +2843,8 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             const IRValueID factorId = currentFunction_->allocateValueId();
             auto load = std::make_unique<IRInstruction>(IROp::LoadUniform, factorId, vectorType);
             load->targetName = factorName;
+            if (const auto* global = module_->findGlobal(factorName))
+                load->uniformSource = global->valueId;
             currentBlock_->addInstruction(std::move(load));
             return emitBinaryOp(IROp::Dot, resultType, sampled, factorId);
         }
@@ -3419,6 +3423,8 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
             auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
                 valueId, memberType);
             inst->targetName = compositeName;  // Use qualified name e.g. "u_data.color"
+            if (const auto* memberGlobal = module_->findGlobal(compositeName))
+                inst->uniformSource = memberGlobal->valueId;
             currentBlock_->addInstruction(std::move(inst));
             return valueId;
         }
@@ -3950,6 +3956,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
             auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
                 loadId, resultType);
             inst->targetName = arrayName;
+            inst->uniformSource = arrayParam ? arrayParam->valueId : global->valueId;
             if (eval == IndexEval::Constant)
             {
                 inst->componentIndex = elementIndex;

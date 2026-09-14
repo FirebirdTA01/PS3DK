@@ -193,17 +193,17 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-matrix-array-') as temp:
                  '{return mul(0.5*M[0]+M[1],p);}', 'matrix arithmetic is not yet lowered')
     compile_case('binding','uniform float4x4 M[2]:register(C9); '
                  'float4 main(float4 p:POSITION,float i:TEXCOORD0):POSITION '
-                 '{return mul(M[int(i)],p);}', 'explicit file-scope register(C9)')
+                 '{return mul(M[int(i)],p);}')
     compile_case('bound-matrix-beside-array','uniform float4x4 N:register(C9); '
                  'uniform float4x4 M[2]; float4 main(float4 p:POSITION,float i:TEXCOORD0):POSITION '
-                 '{return mul(N,mul(M[int(i)],p));}', 'explicit file-scope register(C9)')
+                 '{return mul(N,mul(M[int(i)],p));}')
     compile_case('bound-vector-beside-array','uniform float4 scale:register(C9); '
                  'uniform float4x4 M[2]; float4 main(float4 p:POSITION,float i:TEXCOORD0):POSITION '
-                 '{return scale*mul(M[int(i)],p);}', 'explicit file-scope register(C9)')
+                 '{return scale*mul(M[int(i)],p);}')
     compile_case('bound-entry-beside-array','uniform float4x4 M[2]; '
                  'float4 main(float4 p:POSITION,float i:TEXCOORD0,'
                  'uniform float4 scale:register(C9)):POSITION '
-                 '{return scale*mul(M[int(i)],p);}', 'explicit matrix-array register binding')
+                 '{return scale*mul(M[int(i)],p);}')
 
 if failures:
     for failure in failures: print('FAIL: '+failure,file=sys.stderr)

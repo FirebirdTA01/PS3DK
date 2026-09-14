@@ -44,6 +44,7 @@
 #include "cg_container_vp.h"
 #include "nv40/nv40_emit.h"
 #include "array_uniforms.h"
+#include "uniform_bindings.h"
 
 #include "ir.h"
 
@@ -375,6 +376,13 @@ VpContainerResult emitVertexContainerImpl(
     // from c[467] downward.  Same algorithm runs inside lowerVertexProgram.
     int nextMatrixReg = 256;
     int nextVectorReg = 467;
+    const auto explicitBindings = attrs.resolvedExplicitBindings
+        ? rsx_cg::resolveVpExplicitUniformBindings(*entry, module)
+        : rsx_cg::VpExplicitUniformBindings{};
+    if (!explicitBindings.diagnostics.empty()) {
+        result.diagnostics = explicitBindings.diagnostics;
+        return result;
+    }
 
     // Array uniforms share the lowering's use classification and cursors:
     // matrices grow upward by rows, scalar/vector elements downward by one.
@@ -387,11 +395,12 @@ VpContainerResult emitVertexContainerImpl(
     const auto appendArrayElements = [&](const std::string& name,
                                          const IRTypeInfo& type,
                                          uint32_t paramno,
-                                         uint32_t isShared) {
+                                         uint32_t isShared,
+                                         const rsx_cg::ExplicitUniformBinding* binding) {
         const auto useIt = arrayUses.find(name);
         const int count = type.arraySize;
         const auto use = useIt != arrayUses.end() ? useIt->second : rsx_cg::ArrayUniformUse{};
-        const std::vector<int> regs = type.isMatrix()
+        const std::vector<int> regs = binding ? binding->registers : type.isMatrix()
             ? rsx_cg::vpMatrixArrayElementRegisters(use, count, type.matrixRows, nextMatrixReg)
             : rsx_cg::vpArrayElementRegisters(use, count, nextVectorReg);
         for (int k = 0; k < count; ++k)
@@ -400,13 +409,13 @@ VpContainerResult emitVertexContainerImpl(
             const bool referenced = reg >= 0;
             ParamDesc e;
             e.name      = rsx_cg::arrayElementName(name, k);
-            e.semantic  = "";
+            e.semantic  = binding ? binding->semantic : "";
             e.type      = type.isMatrix()
                 ? cgMatrixType(type.matrixRows, type.matrixCols) : cgTypeForIRType(type);
             e.var       = kCgUniform;
             e.direction = kCgIn;
             e.paramno   = paramno;
-            e.isShared  = isShared;
+            e.isShared  = binding ? static_cast<uint32_t>(referenced) : isShared;
             if (referenced)
             {
                 e.res          = kCgConst;
@@ -483,6 +492,7 @@ VpContainerResult emitVertexContainerImpl(
         for (size_t i = 0; i < entry->parameters.size(); ++i)
         {
             const auto& p = entry->parameters[i];
+            const auto* binding = explicitBindings.find(p.valueId);
             if (p.type.baseType == IRType::Void)
                 continue;
 
@@ -500,8 +510,8 @@ VpContainerResult emitVertexContainerImpl(
                 d.res       = kCgConst;
                 if (p.type.isMatrix() && !p.type.isArray())
                 {
-                    const int base = nextMatrixReg;
-                    nextMatrixReg += p.type.matrixRows;
+                    const int base = binding ? binding->registers[0] : nextMatrixReg;
+                    if (!binding) nextMatrixReg += p.type.matrixRows;
                     d.resIndex = static_cast<uint32_t>(base);
                     params.push_back(d);
                     for (int row = 0; row < p.type.matrixRows; ++row)
@@ -523,11 +533,11 @@ VpContainerResult emitVertexContainerImpl(
                 if (p.type.isArray())
                 {
                     appendArrayElements(p.name, p.type,
-                                        static_cast<uint32_t>(i), 0u);
+                                        static_cast<uint32_t>(i), 0u, binding);
                     continue;
                 }
 
-                d.resIndex = static_cast<uint32_t>(nextVectorReg--);
+                d.resIndex = static_cast<uint32_t>(binding ? binding->registers[0] : nextVectorReg--);
             }
             else
             {
@@ -554,6 +564,7 @@ VpContainerResult emitVertexContainerImpl(
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
+            const auto* binding = explicitBindings.find(g.valueId);
 
             const bool hasExplicit = (g.explicitRegisterBank == 'C');
             std::string semantic;
@@ -566,9 +577,9 @@ VpContainerResult emitVertexContainerImpl(
                 semantic = "C" + std::to_string(g.explicitRegisterIndex);
             }
 
-            if (g.type.isArray() && !hasExplicit)
+            if (g.type.isArray() && (binding || !hasExplicit))
             {
-                appendArrayElements(g.name, g.type, kInvalidIndex, 1u);
+                appendArrayElements(g.name, g.type, kInvalidIndex, 1u, binding);
                 continue;
             }
 
@@ -586,7 +597,11 @@ VpContainerResult emitVertexContainerImpl(
             if (g.type.isMatrix())
             {
                 int base;
-                if (hasExplicit)
+                if (binding)
+                {
+                    base = binding->registers[0];
+                }
+                else if (hasExplicit)
                 {
                     base = g.explicitRegisterIndex;
                 }
@@ -620,7 +635,11 @@ VpContainerResult emitVertexContainerImpl(
             else
             {
                 int reg;
-                if (hasExplicit)
+                if (binding)
+                {
+                    reg = binding->registers[0];
+                }
+                else if (hasExplicit)
                 {
                     reg = g.explicitRegisterIndex;
                 }
@@ -670,6 +689,7 @@ VpContainerResult emitVertexContainerImpl(
     for (size_t i = 0; i < entry->parameters.size(); ++i)
     {
         const auto& p = entry->parameters[i];
+        const auto* binding = explicitBindings.find(p.valueId);
         ParamDesc d;
         d.name      = p.name;
         d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
@@ -684,8 +704,8 @@ VpContainerResult emitVertexContainerImpl(
             d.res       = kCgConst;
             if (p.type.isMatrix() && !p.type.isArray())
             {
-                const int base = nextMatrixReg;
-                nextMatrixReg += p.type.matrixRows;
+                const int base = binding ? binding->registers[0] : nextMatrixReg;
+                if (!binding) nextMatrixReg += p.type.matrixRows;
                 d.resIndex = static_cast<uint32_t>(base);
                 params.push_back(d);
                 // Expand into per-row entries.  Each child shares the
@@ -709,12 +729,12 @@ VpContainerResult emitVertexContainerImpl(
             else if (p.type.isArray())
             {
                 appendArrayElements(p.name, p.type,
-                                    static_cast<uint32_t>(i), 0u);
+                                    static_cast<uint32_t>(i), 0u, binding);
                 continue;
             }
             else
             {
-                const int reg = nextVectorReg--;
+                const int reg = binding ? binding->registers[0] : nextVectorReg--;
                 d.resIndex = static_cast<uint32_t>(reg);
             }
         }
@@ -740,6 +760,7 @@ VpContainerResult emitVertexContainerImpl(
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
+        const auto* binding = explicitBindings.find(g.valueId);
 
         const bool hasExplicit = (g.explicitRegisterBank == 'C');
         std::string semantic;
@@ -748,9 +769,9 @@ VpContainerResult emitVertexContainerImpl(
         else if (hasExplicit)
             semantic = "C" + std::to_string(g.explicitRegisterIndex);
 
-        if (g.type.isArray() && !hasExplicit)
+        if (g.type.isArray() && (binding || !hasExplicit))
         {
-            appendArrayElements(g.name, g.type, kInvalidIndex, 0u);
+            appendArrayElements(g.name, g.type, kInvalidIndex, 0u, binding);
             continue;
         }
 
@@ -768,7 +789,9 @@ VpContainerResult emitVertexContainerImpl(
         if (g.type.isMatrix())
         {
             int base;
-            if (hasExplicit)
+            if (binding)
+                base = binding->registers[0];
+            else if (hasExplicit)
                 base = g.explicitRegisterIndex;
             else
             {
@@ -807,7 +830,9 @@ VpContainerResult emitVertexContainerImpl(
         else
         {
             int reg;
-            if (hasExplicit)
+            if (binding)
+                reg = binding->registers[0];
+            else if (hasExplicit)
                 reg = g.explicitRegisterIndex;
             else
                 reg = nextVectorReg--;
@@ -879,6 +904,64 @@ VpContainerResult emitVertexContainerImpl(
             d.res = resource;
             params.push_back(d);
         }
+
+    // The active backend owns the binding contract. Apply general's shared
+    // resolver to every synthesized record after both entry-table paths have
+    // built their names/types/defaults. Legacy keeps its existing contract.
+    if (attrs.resolvedExplicitBindings) {
+        // Names may be shadowed by entry parameters. The parameter number
+        // distinguishes those records from the file-scope declaration.
+        std::map<std::pair<std::string, uint32_t>, std::pair<std::string, int>> recordBindings;
+        const auto addRecords = [&](const auto& uniform, uint32_t paramno) {
+            const auto* binding = explicitBindings.find(uniform.valueId);
+            if (!binding) return;
+            for (size_t element = 0; element < binding->registers.size(); ++element) {
+                const int base = binding->registers[element];
+                const std::string name = uniform.type.isArray()
+                    ? rsx_cg::arrayElementName(uniform.name, static_cast<int>(element))
+                    : uniform.name;
+                recordBindings[{name, paramno}] = {binding->semantic, base};
+                if (uniform.type.isMatrix())
+                    for (int row = 0; row < uniform.type.matrixRows; ++row)
+                        recordBindings[{name + "[" + std::to_string(row) + "]", paramno}] =
+                            {binding->semantic, base >= 0 ? base + row : -1};
+            }
+        };
+        for (size_t i = 0; i < entry->parameters.size(); ++i)
+            addRecords(entry->parameters[i], static_cast<uint32_t>(i));
+        for (const auto& global : module.globals) addRecords(global, kInvalidIndex);
+        for (auto& param : params) {
+            if (param.var != kCgUniform) continue;
+            // PS3_475: shared 1 only for a referenced explicit binding, also
+            // on struct-flattened entries (t_c304d08a). Unused pins keep C<N>
+            // but have UNDEFINED/no index/isRef0/isShared0.
+            param.isShared = 0;
+            const auto it = recordBindings.find({param.name, param.paramno});
+            if (it == recordBindings.end()) continue;
+            const int reg = it->second.second;
+            param.semantic = it->second.first;
+            param.resIndex = reg >= 0 ? static_cast<uint32_t>(reg) : kInvalidIndex;
+            param.res = reg >= 0 ? kCgConst : kCgUnassignedRes;
+            param.isReferenced = param.isShared = reg >= 0 ? 1u : 0u;
+        }
+        // Newly supported pinned arrays must retain their compiled defaults
+        // too. Ordinary scalar/matrix records already carry A2/A3's slices.
+        for (const auto& global : module.globals) {
+            if (!global.type.isArray() || !explicitBindings.find(global.valueId)) continue;
+            const size_t cols = static_cast<size_t>(global.type.isMatrix()
+                ? global.type.matrixCols : global.type.componentCount());
+            const int rows = global.type.isMatrix() ? global.type.matrixRows : 1;
+            for (int element = 0; element < global.type.arraySize; ++element)
+                for (int row = 0; row < rows; ++row) {
+                    std::string name = rsx_cg::arrayElementName(global.name, element);
+                    if (global.type.isMatrix()) name += "[" + std::to_string(row) + "]";
+                    for (auto& param : params)
+                        if (param.name == name && param.paramno == kInvalidIndex)
+                            param.defaultValue = uniformDefaultSlice(global,
+                                (static_cast<size_t>(element) * rows + row) * cols, cols);
+                }
+        }
+    }
 
     // ----- Append literal-pool params (one per c[N] reg the back-end
     // reserved for unique float literals).  These follow user-declared
