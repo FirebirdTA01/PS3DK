@@ -103,8 +103,6 @@ float4 main(float4 a : TEXCOORD0) : COLOR {
             ("float4 main(float4 a : TEXCOORD0) : COLOR { return a * 1.xxxx; }", "refuse_int_swizzle", "integer literal with swizzle"),
             ("float4 main(float4 a : TEXCOORD0) : COLOR { return a * 1.e; }", "refuse_exp_no_digits", "exponent with no digits (C0124)"),
             ("float4 main(float4 a : TEXCOORD0) : COLOR { return a * 1..5; }", "refuse_double_dot", "multiple decimal points"),
-            ("float4 main(float4 a : TEXCOORD0, uniform float3 light = { 10.0f, 20.0f, 30.0f }) : COLOR { return a * light.x; }", "refuse_param_default_braced", "default parameter value (braced)"),
-            ("float4 main(float4 a : TEXCOORD0, uniform float x = 1.0f) : COLOR { return a * x; }", "refuse_param_default_scalar", "default parameter value (scalar)"),
             ("float4 main(float4 a : TEXCOORD0) : COLOR { [frobnicate] if (a.x > 0.0) return a; return a; }", "refuse_frobnicate", "unknown statement attribute"),
             ("float4 main(float4 a : TEXCOORD0) : COLOR { [branch(] if (a.x > 0.0) return a; return a; }", "refuse_branch_paren", "malformed attribute syntax"),
             ("float4 main(float4 a : TEXCOORD0) : COLOR { float4 r = a; [unroll(2)] for (int i=0; i<2; ++i) r += a; return r; }", "refuse_unroll_arg", "attribute with argument"),
@@ -120,6 +118,38 @@ float4 main(float4 a : TEXCOORD0) : COLOR {
             assert p_bad.returncode == 1, f"{bad_name} ({expected_reason}) expected rc=1, got {p_bad.returncode}: {p_bad.stderr}"
             assert not out_bad.exists(), f"{bad_name} ({expected_reason}) emitted unexpected container on refusal"
         print("PASS: all negative controls cleanly refuse (rc=1, no container)", flush=True)
+
+        # 5b. Parameter DEFAULTS are ACCEPTED, and the `f` suffix survives into
+        # the recorded value.  These two spellings sat in the negative controls
+        # above asserting rc=1, written when the parser refused every parameter
+        # default; d5cb0e5b (t_4b54f26b A1) makes them legal and the REFERENCE
+        # accepts both - measured against sce-cgc, `light` records [10,20,30] and
+        # `x` records [1.0], byte-identical to ours.  The rows were a pinned
+        # REFUSAL, not a property, so they are converted rather than deleted:
+        # what this file actually cares about is that the suffix parses, and the
+        # twin comparison says so without a container parser.  The NEAR-MISS row
+        # is the half that matters - a dropped default would make the suffixed
+        # and unsuffixed spellings equal for the wrong reason, and only a changed
+        # VALUE moving the container proves the default reached it.  Both
+        # surfaces and the exact reference values are pinned separately by
+        # tests/shader-compiler/entry-param-default-test.sh.
+        braced_f     = "float4 main(float4 a : TEXCOORD0, uniform float3 light = { 10.0f, 20.0f, 30.0f }) : COLOR { return a * light.x; }"
+        braced_plain = "float4 main(float4 a : TEXCOORD0, uniform float3 light = { 10.0, 20.0, 30.0 }) : COLOR { return a * light.x; }"
+        braced_near  = "float4 main(float4 a : TEXCOORD0, uniform float3 light = { 10.0f, 20.0f, 31.0f }) : COLOR { return a * light.x; }"
+        scalar_f     = "float4 main(float4 a : TEXCOORD0, uniform float x = 1.0f) : COLOR { return a * x; }"
+        scalar_plain = "float4 main(float4 a : TEXCOORD0, uniform float x = 1.0) : COLOR { return a * x; }"
+        scalar_near  = "float4 main(float4 a : TEXCOORD0, uniform float x = 2.0f) : COLOR { return a * x; }"
+        blob_bf, _ = compile_shader(compiler, work, 'param_default_braced_f', 'sce_fp_rsx', braced_f)
+        blob_bp, _ = compile_shader(compiler, work, 'param_default_braced_plain', 'sce_fp_rsx', braced_plain)
+        blob_bn, _ = compile_shader(compiler, work, 'param_default_braced_near', 'sce_fp_rsx', braced_near)
+        assert blob_bf == blob_bp, "braced default: f-suffixed literals differ from the unsuffixed twin"
+        assert blob_bf != blob_bn, "braced default: a changed component never reached the container"
+        blob_sf, _ = compile_shader(compiler, work, 'param_default_scalar_f', 'sce_fp_rsx', scalar_f)
+        blob_sp, _ = compile_shader(compiler, work, 'param_default_scalar_plain', 'sce_fp_rsx', scalar_plain)
+        blob_sn, _ = compile_shader(compiler, work, 'param_default_scalar_near', 'sce_fp_rsx', scalar_near)
+        assert blob_sf == blob_sp, "scalar default: 1.0f differs from the 1.0 twin"
+        assert blob_sf != blob_sn, "scalar default: a changed value never reached the container"
+        print("PASS: parameter defaults accepted; f suffix byte-equals its twin and a changed value moves the container", flush=True)
 
         # 6. Valid scalar swizzles on int, uint, bool, and parenthesized scalar
         code_scalar_swizzles = """
@@ -185,23 +215,18 @@ float4 main(float4 a : TEXCOORD0) : COLOR {
         # 9. Real SDK samples regression if SDK available
         sdk_root = Path("C:/SDKs/Sony/SCE/PS3/475")
         if sdk_root.exists():
-            sdk_refuse_tests = [
+            # These three SDK shaders were pinned here as REFUSALS while the
+            # parser rejected every parameter default.  d5cb0e5b (t_4b54f26b A1)
+            # compiles all three, and the reference compiles them too - they are
+            # three of the six reference-SDK rows that flipped refused->accepted
+            # in the 920-row sweep for that slice.  A pinned refusal is not a
+            # property, so they move to the accept list rather than being
+            # deleted: the shaders are still real coverage, now of the behaviour
+            # we actually want.
+            sdk_accept_tests = [
                 ('duck_fp', 'sce_fp_rsx', 'samples/sdk/graphics/gcm/duck/fpshader.cg'),
                 ('duck_vp', 'sce_vp_rsx', 'samples/sdk/graphics/gcm/duck/vpshader.cg'),
                 ('report_main_mem', 'sce_fp_rsx', 'samples/sdk/graphics/gcm/report_to_main_memory/fpshader.cg'),
-            ]
-            for tname, prof, relpath in sdk_refuse_tests:
-                fpath = sdk_root / relpath
-                if fpath.exists():
-                    out_bin = work / f'{tname}.bin'
-                    cmd = [compiler, '-p', prof, '--emit-container', str(out_bin), str(fpath)]
-                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-                    assert p.returncode == 1, f"expected rc=1 for {relpath} (default param value refusal), got {p.returncode}"
-                    assert not out_bin.exists(), f"unexpected container emitted for {relpath}"
-                    assert "default parameter values are not supported" in p.stderr, f"expected diagnostic for {relpath}: {p.stderr}"
-                    print(f"PASS: SDK shader honest refusal (parameter defaults) {relpath}", flush=True)
-
-            sdk_accept_tests = [
                 ('fpclear', 'sce_fp_rsx', 'samples/edge/dxt-sample/fpclear.cg'),
                 ('gauss1x7', 'sce_fp_rsx', 'samples/edge/post-sample/shaders/post_gauss1x7fp.cg'),
                 ('gauss7x1', 'sce_fp_rsx', 'samples/edge/post-sample/shaders/post_gauss7x1fp.cg'),
