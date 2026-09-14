@@ -1,0 +1,10 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A DEFAULT'S WRITES TO A GLOBAL ARE REAL AND THE CALLER SEES THEM.  bump()
+// sets G, and the caller reads G on the next line: the reference makes this
+// byte-identical to passing bump() explicitly (the twin).  The default is
+// built under a file-scope-only scope so it cannot READ a caller local - but
+// restoring that scope afterwards must not also undo what it WROTE.
+static float G = 1.0;
+float bump() { G = 2.0; return 0.5; }
+float outer(float x, float k = bump()) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(outer(t.x) + G, 0, 0, 1); }

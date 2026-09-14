@@ -1,0 +1,12 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A DEFAULTED out PARAMETER STILL RANKS.  Beside a plain one-parameter
+// overload, the one-argument call TIES and the reference refuses:
+//     error C1101: ambiguous overloaded function reference "f"
+// in BOTH declaration orders, exactly as a plain `float k=.5` second
+// parameter does.  This is the row that refutes an arity-exclusion model:
+// excluding the defaulted out candidate would leave f(float4) the unique
+// winner and ACCEPT a program the reference refuses.  (Fable's ruling,
+// codex's six cells; a build that did exclude it accepted all four.)
+void f(float4 c, out float4 o = float4(0,0,0,1)) { o = c; }
+void f(float4 c) { }
+float4 main(float4 t : TEXCOORD0) : COLOR { f(t); return t; }

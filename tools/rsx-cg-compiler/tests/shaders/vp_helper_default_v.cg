@@ -1,0 +1,9 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE SAME RULE IN THE VERTEX PROFILE.  Defaults are a frontend rule and must
+// not be fragment-specific; measured on the reference as a byte twin there
+// too, with the near-miss moving the container.
+float4 h(float4 c, float k = 0.5) { return c * k; }
+void main(float4 in_position : POSITION,
+          out float4 out_position : POSITION,
+          out float4 out_color : COLOR)
+{ out_position = in_position; out_color = h(in_position); }

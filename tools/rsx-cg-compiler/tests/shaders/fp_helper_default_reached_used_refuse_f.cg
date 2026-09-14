@@ -1,0 +1,7 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// CELL 3 OF 3.  Reached AND used.  The reference reports this one as
+// "error C1102: incompatible type for parameter" - it describes a scope
+// failure as a type error - so the row pins OUR diagnostic and the header
+// quotes the reference's, rather than encoding its confusion.
+float4 h(float4 c, float k = nosuch) { return c * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return h(t); }

@@ -1,0 +1,9 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE CONTROL THAT KEEPS C1106 FROM SWALLOWING THE LEGAL SHAPE.  A PROTOTYPE
+// and its definition are not two definitions: the reference does not say
+// C1106 here.  It refuses for a different reason - the latest declaration
+// visible at the call is the definition, which has no default, so the call is
+// short an argument (C1103).  That is rule 1, not a redefinition.
+float f(float x, float k = 0.25);
+float f(float x, float k) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.x), 0, 0, 1); }

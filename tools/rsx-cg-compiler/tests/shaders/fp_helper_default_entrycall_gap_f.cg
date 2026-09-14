@@ -1,0 +1,12 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// GAP ROW, card t_d60fbc59, NARROWED BY THIS SLICE.  A call in a default has
+// two separate mechanisms and only ONE of them is still a gap:
+//   HELPER parameter - substituted at the call site.  WORKS now; see
+//                      fp_helper_default_call_f, which is a byte twin of
+//                      writing the call out.
+//   ENTRY uniform    - the reference records a defaultValue block, so the
+//                      value must be CONSTANT-FOLDED.  We cannot evaluate a
+//                      call and refuse rather than emit zero.
+// This fixture is the entry form.  The card is now only about this half.
+float g() { return 0.5; }
+float4 main(float4 t : TEXCOORD0, uniform float k = g()) : COLOR { return t * k; }

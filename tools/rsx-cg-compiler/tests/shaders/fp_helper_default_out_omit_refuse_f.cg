@@ -1,0 +1,9 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// A DEFAULTED out PARAMETER IS VIABLE, and the call that OMITS it is refused
+// on the ARGUMENT, not on arity:
+//     error C1111: non-lvalue actual parameter #2 cannot be out parameter ("o")
+// The default expression is not an lvalue, so it cannot bind to an out
+// parameter.  Contrast fp_helper_default_outnodef_refuse_f, which has no
+// default at all and is C1103 "too few parameters" - a different rule.
+void shade(float4 c, out float4 o = float4(0,0,0,1)) { o = c; }
+float4 main(float4 t : TEXCOORD0) : COLOR { shade(t); return t; }

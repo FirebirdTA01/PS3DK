@@ -1,0 +1,11 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// THE ROW THAT SETTLES THE RULE, because no exchange rate reproduces it.
+// Here the all-widening candidate needs FEWER conversions than the narrowing
+// one: clamp(float,float,float) widens one argument, clamp(int,int,int)
+// narrows two.  The reference still picks float.  So narrowing is not
+// expensive - it is disqualifying, and cost only separates candidates that
+// narrow equally.
+//
+// Measured by VALUE rather than by name: clamp(0, 0.5, 1.5) is 0.5 under the
+// float overload and clamp(0,0,1) = 0 under the int one.
+float4 main(float4 t : TEXCOORD0) : COLOR { return clamp(0, 0.5, 1.5) * t; }

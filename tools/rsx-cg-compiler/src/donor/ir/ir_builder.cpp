@@ -3643,6 +3643,133 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         argValues.push_back(buildExpr(arg.get()));
     }
 
+    // AN OMITTED ARGUMENT IS THE DEFAULT EXPRESSION, BUILT HERE AT THE CALL
+    // SITE (t_36492ad8).  Measured against the reference: `shade(t)` where
+    // `float k = 0.5` produces a container BYTE-IDENTICAL to `shade(t, 0.5)`
+    // written out, so the default is a call-site substitution and not a
+    // property of the callee's body.
+    //
+    // IT IS THE EXPRESSION, NOT A FOLDED CONSTANT.  `uniform float g; float4
+    // shade(float4 c, float k = g)` is accepted by the reference and its
+    // container carries `g` as a real uniform record - shade(t) is
+    // byte-identical to shade(t, g).  So this builds the default the same way
+    // it builds any other argument; evaluating it to a constant would be
+    // correct on every literal default and wrong on that one.
+    //
+    // A DEFAULT EXPRESSION BINDS ITS NAMES AT ITS DECLARATION, NOT AT THE CALL.
+    // It is materialised here, so the instructions land in the caller's block -
+    // but name resolution must not see the caller's locals.  Measured (codex,
+    // t_36492ad8 review):
+    //
+    //     uniform float g = 2;
+    //     float4 shade(float4 t, float k = g) { return t * k; }
+    //     ... main declares a LOCAL float g = 7, then calls shade(t)
+    //
+    // the reference reads the GLOBAL 2 - byte-identical to passing the saved
+    // global explicitly - and we read the local 7.  A WRONG VALUE, silently.
+    //
+    // An earlier revision of this comment argued the caller's scope was safe
+    // "because a default may not name another parameter of its own function
+    // (C1102)".  That reasons about the wrong shadowing source entirely:
+    // excluding the callee's PARAMETERS says nothing about the caller's LOCALS,
+    // and buildIdentifierExpr consults nameToValue_ before the global lookup.
+    //
+    // So the default is built under a scope holding file-scope bindings ONLY.
+    // A global the caller shadows is restored from the stash that
+    // stashShadowedGlobal (t_3af598c8) already keeps for exactly this shape -
+    // an inlined helper naming a shadowed global reads the global - rather than
+    // inventing a second mechanism for the same question.  A stash entry of
+    // InvalidIRValue means "shadowed, never assigned", and leaving that name
+    // unbound is what makes buildIdentifierExpr fall through to the global
+    // load; that is also how a shadowed UNIFORM resolves, since uniforms are
+    // deliberately kept out of nameToValue_.
+    if (expr->resolvedFunction && expr->resolvedFunction->kind == DeclKind::Function)
+    {
+        auto* decl = static_cast<FunctionDecl*>(expr->resolvedFunction);
+        if (argValues.size() < decl->parameters.size() &&
+            decl->parameters[argValues.size()] &&
+            decl->parameters[argValues.size()]->defaultValue)
+        {
+            ScopeState callerScope = scope_;
+            scope_.names.clear();
+            scope_.arrays.clear();
+            scope_.shadowedGlobals.clear();
+            scope_.shadowedGlobalArrays.clear();
+            for (const auto& g : module_->globals)
+            {
+                auto stashed = callerScope.shadowedGlobals.find(g.name);
+                if (stashed != callerScope.shadowedGlobals.end())
+                {
+                    if (stashed->second != InvalidIRValue)
+                        scope_.names[g.name] = stashed->second;
+                }
+                else if (auto it = callerScope.names.find(g.name);
+                         it != callerScope.names.end())
+                {
+                    scope_.names[g.name] = it->second;
+                }
+
+                auto stashedArr = callerScope.shadowedGlobalArrays.find(g.name);
+                if (stashedArr != callerScope.shadowedGlobalArrays.end())
+                {
+                    if (!stashedArr->second.empty())
+                        scope_.arrays[g.name] = stashedArr->second;
+                }
+                else if (auto ia = callerScope.arrays.find(g.name);
+                         ia != callerScope.arrays.end())
+                {
+                    scope_.arrays[g.name] = ia->second;
+                }
+            }
+
+            for (size_t i = argValues.size(); i < decl->parameters.size(); ++i)
+            {
+                const auto& param = decl->parameters[i];
+                if (!param || !param->defaultValue) break;   // leave the arity
+                                                            // error to the caller
+                argValues.push_back(buildExpr(param->defaultValue.get()));
+            }
+
+            // RESTORING THE CALLER'S SCOPE MUST NOT UNDO THE DEFAULT'S WRITES.
+            // The default is built under a file-scope-only scope so it cannot
+            // READ a caller local; but anything it writes to a GLOBAL is a
+            // real side effect that the caller can observe on the next line.
+            // Dropping it wholesale left `static float G; float bump(){G=2;}
+            // ... outer(x, k = bump()) ... return r + G;` reading the old G -
+            // the reference makes that form byte-identical to passing bump()
+            // explicitly (found by codex; on this base it surfaces as a
+            // refusal, "ldunif of 'G' has no registered uniform source",
+            // because the binding vanished rather than going stale).
+            //
+            // So: take the caller's scope back, then carry the global
+            // bindings FORWARD from the default's scope - into the caller's
+            // stash where the caller shadows that global, and into its names
+            // where it does not.
+            ScopeState afterDefault = scope_;
+            scope_ = callerScope;
+            for (const auto& g : module_->globals)
+            {
+                auto produced = afterDefault.names.find(g.name);
+                if (produced == afterDefault.names.end()) continue;
+                auto stashed = scope_.shadowedGlobals.find(g.name);
+                if (stashed != scope_.shadowedGlobals.end())
+                    stashed->second = produced->second;
+                else
+                    scope_.names[g.name] = produced->second;
+            }
+            for (const auto& g : module_->globals)
+            {
+                auto produced = afterDefault.arrays.find(g.name);
+                if (produced == afterDefault.arrays.end()) continue;
+                auto stashed = scope_.shadowedGlobalArrays.find(g.name);
+                if (stashed != scope_.shadowedGlobalArrays.end())
+                    stashed->second = produced->second;
+                else
+                    scope_.arrays[g.name] = produced->second;
+            }
+        }
+    }
+
     IRTypeInfo resultType = getExprType(expr);
 
     if (expr->functionName == "any" && expr->resolvedFunction == nullptr &&

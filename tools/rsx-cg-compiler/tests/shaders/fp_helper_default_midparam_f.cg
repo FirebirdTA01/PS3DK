@@ -1,0 +1,17 @@
+// t_36492ad8.  A DEFAULT ON A HELPER PARAMETER is legal, and the omitted
+// argument is the default EXPRESSION substituted at the call site - not a
+// folded constant.  Measured against sce-cgc 475:
+//
+//     shade(t)  with `float k = 0.5`   is BYTE-IDENTICAL to shade(t, 0.5)
+//     `uniform float g; float k = g`   is BYTE-IDENTICAL to shade(t, g),
+//                                      and the container carries g as a real
+//                                      uniform record
+//
+// The second is the only shape that separates substitution from folding; every
+// literal default passes either way.
+//
+// A default on a NON-TRAILING parameter, every argument supplied.  Cg cannot
+// skip a middle parameter, so this constrains nothing and the reference
+// accepts it - which is why requiredParameterCount counts back from the END.
+float4 shade(float4 c, float k = 0.5, float j) { return c * k * j; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return shade(t, 1.0, 2.0); }

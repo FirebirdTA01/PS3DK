@@ -4,14 +4,12 @@
 
 namespace
 {
-bool preferOverload(Symbol* candidate, Symbol* currentBest)
-{
-    if (!currentBest) return true;
-
-    // Builtins are registered before source declarations.  For an exact
-    // signature tie, a real source declaration shadows the registered fallback.
-    return currentBest->declaration == nullptr && candidate->declaration != nullptr;
-}
+// preferOverload used to live here: for an exact signature tie it let a source
+// declaration shadow a registered builtin.  PARTITION BY NAME subsumes it -
+// when any source declaration of the name is visible the builtins are not
+// candidates at all, so a source-versus-builtin tie can no longer be reached,
+// and every remaining tie is source-versus-source, which the reference calls
+// C1101 rather than resolving by preference (t_36492ad8).
 }
 
 // ============================================================================
@@ -167,6 +165,41 @@ bool SymbolTable::addFunction(const std::string& name,
     auto symbol = std::make_unique<Symbol>(SymbolKind::Function, name, returnType);
     symbol->parameterTypes = paramTypes;
     symbol->parameterNames = paramNames;
+    // ASK THE DECLARATION, never assume.  This path registers builtins (decl
+    // null, no defaults) and source functions alike.  Getting it wrong failed
+    // in both directions during this slice: left at its zero initialiser it
+    // made every BUILTIN viable for a call with too few arguments and turned
+    // the whole builtin header ambiguous; hardcoded to paramTypes.size() it
+    // refused every legitimate defaulted call.
+    symbol->requiredParameterCount = paramTypes.size();
+    if (decl)
+    {
+        // COUNT BACK OVER TRAILING DEFAULTS - and over ALL of them.
+        //
+        // An out/inout parameter that carries a default is NOT excluded here.
+        // Measured on sce-cgc 475: such a candidate still takes part in
+        // ranking.  `void f(float4)` beside `void f(float4, out float k=.5)`,
+        // called `f(t)`, is "error C1101: ambiguous overloaded function
+        // reference" in BOTH declaration orders, and a plain `float k=.5`
+        // second parameter behaves identically - so the default-filled
+        // candidate is viable and ties, and this is not an out/inout rule at
+        // all.  Excluding it here would leave `f(float4)` the unique winner
+        // and ACCEPT a program the reference refuses (verified: all four
+        // out/inout ambiguity cells emitted a container).
+        //
+        // The out/inout restriction is real but applies AFTER a unique winner
+        // is picked: the omitted argument is not an lvalue, which the semantic
+        // analyser reports as "error C1111: non-lvalue actual parameter #N
+        // cannot be out parameter".  Ruling: Fable, retracting the viability
+        // exclusion on codex's six cells.
+        size_t required = decl->parameters.size();
+        while (required > 0 && decl->parameters[required - 1] &&
+               decl->parameters[required - 1]->defaultValue != nullptr)
+        {
+            --required;
+        }
+        symbol->requiredParameterCount = required;
+    }
     symbol->declIndex = declIndexCursor_;
     symbol->declaration = decl;
     symbol->isIntrinsic = isIntrinsic;
@@ -209,8 +242,11 @@ bool SymbolTable::hasVisibleFunction(const std::string& name,
 std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
     const std::string& name,
     const std::vector<CgType>& argumentTypes,
+    bool* ambiguous,
     size_t visibleThrough) const
 {
+    if (ambiguous) *ambiguous = false;
+    int bestNarrowing = 0;
     auto it = functionOverloads.find(name);
     if (it == functionOverloads.end())
     {
@@ -223,33 +259,120 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
         return std::nullopt;
     }
 
+    // STEP 2 needs one look ahead: does the name have ANY visible source
+    // declaration?  If it does, the builtins of that name are out of
+    // consideration entirely, viable or not.
+    bool haveVisibleSource = false;
+    for (Symbol* sym : overloads)
+    {
+        if (sym->declIndex <= visibleThrough && sym->declaration != nullptr)
+        {
+            haveVisibleSource = true;
+            break;
+        }
+    }
+
+    // STEP 1, AND THE REASON IT HAS TO HAPPEN HERE.  Every declaration gets
+    // its own entry in functionOverloads - a prototype and its definition are
+    // two entries with ONE signature.  They are one function, so they are
+    // collapsed to the LATEST VISIBLE declaration before anything is ranked.
+    //
+    // Without this collapse the tie rule below would call every prototyped
+    // program ambiguous, since the prototype and the definition are both
+    // viable at the same cost.
+    //
+    // Collapsing to the LATEST is also rule 1 itself: the reference takes a
+    // default from the declaration visible at the call, so
+    //     proto k=.25 ; def k=.5 ; call        -> .5      (definition later)
+    //     proto k=.25 ; call ; def k=.5        -> .25     (definition unseen)
+    //     proto k=.25 ; def with NO default    -> C1103   (the default is gone)
+    // all fall out of "keep the one with the greatest declIndex <=
+    // visibleThrough", because requiredParameterCount travels with the
+    // declaration that set it.
+    auto sameSignature = [](const Symbol* a, const Symbol* b)
+    {
+        if (a->parameterTypes.size() != b->parameterTypes.size()) return false;
+        for (size_t i = 0; i < a->parameterTypes.size(); ++i)
+        {
+            if (!a->parameterTypes[i].equals(b->parameterTypes[i])) return false;
+        }
+        return true;
+    };
+
+    std::vector<Symbol*> visible;
+    for (Symbol* sym : overloads)
+    {
+        // A DECLARATION WRITTEN AFTER THIS CALL IS NOT A CANDIDATE: the
+        // reference refuses a forward call with no prior prototype ("error
+        // C1008: undefined variable") and does not let a source overload
+        // written later hide a builtin.  Builtins carry index 0 and so are
+        // never filtered here.
+        if (sym->declIndex > visibleThrough) continue;
+        bool merged = false;
+        for (Symbol*& kept : visible)
+        {
+            if (!sameSignature(kept, sym)) continue;
+            if (sym->declIndex >= kept->declIndex) kept = sym;
+            merged = true;
+            break;
+        }
+        if (!merged) visible.push_back(sym);
+    }
+
     OverloadCandidate best;
     best.symbol = nullptr;
     best.conversionCost = std::numeric_limits<int>::max();
     best.exactMatch = false;
+    bool tied = false;
 
-    for (Symbol* sym : overloads)
+    for (Symbol* sym : visible)
     {
-        // A DECLARATION WRITTEN AFTER THIS CALL IS NOT A CANDIDATE.  The
-        // reference resolves against what is visible at the call and refuses
-        // a forward call with no prior prototype ("error C1008: undefined
-        // variable"), where we used to reach forward and compile it
-        // (t_36492ad8).  Builtins carry index 0 and are never filtered here.
-        if (sym->declIndex > visibleThrough)
+        // STEP 2, PARTITION BY NAME.  A visible source declaration hides the
+        // builtins of that name even when it is NOT VIABLE: measured, a source
+        // `float sin(float, float)` with two required parameters makes
+        // `sin(t.x)` C1103 "too few parameters", never the builtin sine.
+        if (haveVisibleSource && sym->declaration == nullptr)
         {
             continue;
         }
 
-        // Check argument count
-        if (sym->parameterTypes.size() != argumentTypes.size())
+        // STEP 3, ARITY.  A call may omit TRAILING parameters that carry
+        // defaults; requiredParameterCount equals the parameter count for
+        // every function without them, so this is exact equality for those.
+        if (argumentTypes.size() > sym->parameterTypes.size() ||
+            argumentTypes.size() < sym->requiredParameterCount)
         {
-            continue;  // Arity mismatch
+            continue;
         }
 
-        // Calculate conversion cost
+        // STEP 4, COST over the SUPPLIED arguments only.  Filling a default
+        // costs nothing and so cannot break a tie - which is why
+        // `f(float4)` beside `f(float4, float k = 1.0)` called f(t) is
+        // ambiguous rather than resolved in favour of the exact arity.
+        //
+        // NARROWING IS COUNTED SEPARATELY AND COMPARED FIRST.  A single
+        // scalar-cost total cannot express the reference's rule, and the
+        // arithmetic collides in practice: with "a promotion costs its rank
+        // distance, a demotion costs twice it", clamp(float,float,float) for
+        // clamp(f, 0, 1) costs two promotions = 2, and clamp(int,int,int)
+        // costs one demotion = 2.  They tie, and a tie is C1101 - which
+        // refused five SDK shaders that the reference and our own parent both
+        // compiled (MachoQHDR x4, stereo3D fp_anaglyph).
+        //
+        // Measured on sce-cgc 475, in both directions and with named
+        // variables rather than literals, so this is a TYPE rule and not a
+        // literal rule:
+        //     clamp(float, int,   int  )  -> the float overload  (2 up)
+        //     clamp(int,   float, float)  -> the float overload  (1 up)
+        //     clamp(float, half,  half )  -> the float overload  (2 up)
+        // The second is the one that settles it: the all-widening candidate
+        // wins even when it needs FEWER conversions than the narrowing one
+        // needs, so no exchange rate reproduces it.  Any narrowing loses to a
+        // sequence of widenings, whatever the counts, and cost only separates
+        // candidates that narrow equally.
         int totalCost = 0;
+        int totalNarrowing = 0;
         bool viable = true;
-        bool exact = true;
 
         for (size_t i = 0; i < argumentTypes.size(); ++i)
         {
@@ -258,11 +381,8 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
 
             if (argType.equals(paramType))
             {
-                // Exact match for this parameter
                 continue;
             }
-
-            exact = false;
 
             int cost = TypeConversion::conversionCost(argType, paramType);
             if (cost < 0)
@@ -273,27 +393,42 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
             }
 
             totalCost += cost;
+            totalNarrowing += TypeConversion::narrowingSteps(argType, paramType);
         }
 
         if (!viable) continue;
 
-        // Check if this is a better match
-        if (exact)
-        {
-            // Exact match beats everything
-            if (!best.exactMatch || preferOverload(sym, best.symbol))
-            {
-                best.symbol = sym;
-                best.conversionCost = 0;
-                best.exactMatch = true;
-            }
-        }
-        else if (!best.exactMatch && totalCost < best.conversionCost)
+        const bool better = !best.symbol ||
+            totalNarrowing < bestNarrowing ||
+            (totalNarrowing == bestNarrowing && totalCost < best.conversionCost);
+        const bool equal = best.symbol &&
+            totalNarrowing == bestNarrowing && totalCost == best.conversionCost;
+
+        if (better)
         {
             best.symbol = sym;
             best.conversionCost = totalCost;
-            best.exactMatch = false;
+            bestNarrowing = totalNarrowing;
+            best.exactMatch = (totalCost == 0);
+            tied = false;
         }
+        else if (equal)
+        {
+            // TWO CANDIDATES AT THE BEST COST IS C1101, whatever distinguishes
+            // them.  Arity does not break it, exactness does not break it, and
+            // declaration order must not - measured on three shapes the
+            // reference refuses and we used to accept:
+            //     f(float4, float = .25) beside f(float4, int = 2)
+            //     f(half4)               beside f(half4, float = .25)
+            //     f(float4)              beside f(float4, float k = 1.0)
+            tied = true;
+        }
+    }
+
+    if (tied)
+    {
+        if (ambiguous) *ambiguous = true;
+        return std::nullopt;
     }
 
     if (best.symbol)
@@ -574,6 +709,15 @@ void SymbolTable::registerVectorFunctions()
         addFunction("distance", CgType::Float(), {vec, vec}, {"a", "b"}, nullptr, true);
     }
     addFunction("length", CgType::Float(), {CgType::Float()}, {"v"}, nullptr, true);
+    // THE SCALAR distance, which the reference has and this table did not.
+    // `distance(p.x, p.y)` has no exact candidate without it, so every
+    // vector overload becomes viable by broadcasting BOTH arguments - three
+    // candidates at one broadcast each, all tying.  The parent hid that by
+    // taking the first viable one (and emitted 336 bytes where the reference
+    // emits 288); once ties are C1101 it surfaced as a refusal.  The
+    // reference lowers it to ADDR + |abs|, i.e. abs(a-b), and it is the
+    // exact-match partner of the scalar `length` registered directly above.
+    addFunction("distance", CgType::Float(), {CgType::Float(), CgType::Float()}, {"a", "b"}, nullptr, true);
 
     // normalize
     for (int size = 2; size <= 4; ++size)

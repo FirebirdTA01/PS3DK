@@ -1,0 +1,6 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// inner(0.5) passed explicitly.  Twin of fp_helper_default_proto_f.
+float inner(float x) { return x; }
+float outer(float x, float k);
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(outer(t.x, inner(0.5)), 0, 0, 1); }
+float outer(float x, float k) { return x * k; }

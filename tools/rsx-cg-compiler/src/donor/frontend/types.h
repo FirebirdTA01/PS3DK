@@ -220,6 +220,12 @@ namespace TypeConversion
     // Lower cost = better match. -1 = no conversion possible
     int conversionCost(const CgType& from, const CgType& to);
 
+    // HOW MANY SCALAR RANKS THE CONVERSION GOES DOWN, 0 when it goes up or
+    // stays level.  Ranking needs this SEPARATELY from the cost, because the
+    // reference does not trade narrowings against widenings at any exchange
+    // rate - see resolveOverload.
+    int narrowingSteps(const CgType& from, const CgType& to);
+
     // Scalar promotion rank (for type promotion rules)
     int scalarRank(ScalarKind kind);
 }

@@ -117,20 +117,42 @@ run sce_fp_rsx "$shaders/fp_entry_param_default_refuse_f.cg" nonuniform > "$work
 expect_refusal nonuniform "only uniform parameters to the entry function" \
     "a default on a non-uniform ENTRY parameter (permanent, C1114)"
 
-run sce_fp_rsx "$shaders/fp_helper_param_default_refuse_f.cg" helper > "$work/helper.rc"
-expect_refusal helper "is not the entry function" \
-    "a default on a HELPER parameter (interim, t_36492ad8)"
+# A DEFAULT ON A HELPER PARAMETER.  This row pinned the INTERIM REFUSAL until
+# t_36492ad8 commit 2; the reference always accepted it, so the row becomes the
+# accept and its byte twin rather than a deleted line - a removed row is a rule
+# nobody checks, and the twin is what says the default was SUBSTITUTED and not
+# dropped.
+rc=$(run sce_fp_rsx "$shaders/fp_helper_param_default_f.cg" helper)
+[[ "$rc" -eq 0 ]] || { tail -n 5 "$work/helper.log" >&2; \
+    fail "a default on a HELPER parameter should compile (exit $rc)"; }
+rc=$(run sce_fp_rsx "$shaders/fp_helper_param_default_twin_f.cg" helper_twin)
+[[ "$rc" -eq 0 ]] || { tail -n 5 "$work/helper_twin.log" >&2; \
+    fail "the explicit-argument twin should compile (exit $rc)"; }
+cmp -s "$work/helper.bin" "$work/helper_twin.bin" \
+    || fail "a helper default must equal writing the argument out"
 
 # ---- 3. THE ENTRY-SWAP CONTROL: one source, two entries, two classes. ----
 run sce_fp_rsx "$shaders/fp_entry_swap_default_f.cg" swapalpha alpha > "$work/swapalpha.rc"
 expect_refusal swapalpha "only uniform parameters to the entry function" \
     "-e alpha: alpha is the ENTRY, so C1114 applies"
 
+# -e beta: A NAMED GAP, and NOT a defaults gap.  The reference accepts this
+# program (43 lines).  We refuse it in the BACKEND - "no instructions emitted"
+# - and the refusal has nothing to do with the default: the same source with
+# `float2 bias` and no default at all is refused identically, on this build AND
+# on the pristine parent.  What changed is only that the interim helper-default
+# refusal used to fire first and hide it.  Card t_5f2a7c91.
+#
+# READ THE PAIR BELOW HONESTLY.  While this row is a backend gap it no longer
+# demonstrates the entry-keyed DEFAULT rule - it only shows the two entries
+# take different paths.  The entry-keyed rule is carried by the -e alpha row
+# above (C1114, reference-measured).  When t_5f2a7c91 lands this becomes an
+# accept row and the pair means what it used to again.
 run sce_fp_rsx "$shaders/fp_entry_swap_default_f.cg" swapbeta beta > "$work/swapbeta.rc"
-expect_refusal swapbeta "is not the entry function" \
-    "-e beta: alpha is a HELPER, so the interim refusal applies instead"
-# If those two ever produce the SAME diagnostic, the check has stopped keying
-# on the selected entry - that is the whole point of this pair.
+expect_refusal swapbeta "no instructions emitted" \
+    "-e beta: reference ACCEPTS; we stop in the backend (t_5f2a7c91, pre-existing)"
+# If those two ever produce the SAME diagnostic, the two entries have stopped
+# taking different paths.
 if cmp -s <(grep -o "error: [a-z ]*" "$work/swapalpha.log" | head -1) \
           <(grep -o "error: [a-z ]*" "$work/swapbeta.log" | head -1); then
     fail "entry swap produced the same diagnostic class for both entries; "\
@@ -248,4 +270,4 @@ shape_case "float4 u = float2(1,2,3,4)"  "u*uv.x"             refuse s10
 # expectation flips to accept WITH the per-element blocks checked.
 shape_case "float4 a[2] = { float4(1,2,3,4), float4(5,6,7,8) }"            "a[0]*uv.x + a[1]*uv.y"                             refuse s11
 
-echo "PASS: entry-param-default: four spellings in table and ucode; vertex ""entry defaults and matrix entry rows correct on both surfaces; ten measured ""shapes agree with the reference; non-uniform entry default refused ""(permanent); helper default refused (interim, t_36492ad8); entry swap gives ""different classes from one source"
+echo "PASS: entry-param-default: four spellings in table and ucode; vertex ""entry defaults and matrix entry rows correct on both surfaces; ten measured ""shapes agree with the reference; non-uniform entry default refused ""(permanent); helper default equals its explicit twin; entry swap gives ""different classes from one source"

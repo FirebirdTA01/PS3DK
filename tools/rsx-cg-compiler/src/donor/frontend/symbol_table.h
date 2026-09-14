@@ -39,6 +39,13 @@ struct Symbol
     // For functions
     std::vector<CgType> parameterTypes;
     std::vector<std::string> parameterNames;
+    // HOW FEW ARGUMENTS A CALL MAY SUPPLY.  Equals parameterTypes.size()
+    // unless TRAILING parameters carry defaults, which the reference
+    // materialises at the call site (t_36492ad8).  Counted back from the end
+    // and stopping at the first parameter without a default, because Cg
+    // cannot skip a middle argument: a default on a non-trailing parameter
+    // constrains nothing and the reference still requires all of them.
+    size_t requiredParameterCount = 0;
     // WHERE THIS DECLARATION SITS IN THE UNIT, in parser order over top-level
     // declarations.  The reference resolves every call against the
     // declarations VISIBLE AT THAT CALL; our frontend is two-pass, so without
@@ -159,6 +166,10 @@ public:
     std::optional<OverloadCandidate> resolveOverload(
         const std::string& name,
         const std::vector<CgType>& argumentTypes,
+        // Set when two candidates tie at the best conversion cost.  The
+        // reference calls that C1101; a preference rule here would silently
+        // pick one where it refuses.
+        bool* ambiguous = nullptr,
         size_t visibleThrough = SIZE_MAX) const;
 
     // Add a function and handle overloading
@@ -191,6 +202,7 @@ public:
     // cursor rather than an addFunction parameter, because every builtin
     // registration would otherwise have to thread it through.
     void setDeclIndex(size_t index) { declIndexCursor_ = index; }
+    size_t currentDeclIndex() const { return declIndexCursor_; }
 
     // Register built-in functions and types
     void registerBuiltins();

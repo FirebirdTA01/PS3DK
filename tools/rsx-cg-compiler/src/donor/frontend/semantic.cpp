@@ -208,6 +208,10 @@ void SemanticAnalyzer::collectStructDecl(StructDecl* decl)
 
 void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
 {
+    // Where this NAME was first declared, for the same declaration-scope
+    // binding rule the globals get.
+    functionDeclIndex_.emplace(decl->name, symbols_.currentDeclIndex());
+
     // Get parameter types
     std::vector<CgType> paramTypes;
     std::vector<std::string> paramNames;
@@ -277,22 +281,10 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
                       "default values: \"" + p->name + "\"");
             }
         }
-        else
-        {
-            // INTERIM, not a rule we are matching: the reference ACCEPTS a
-            // default on a helper's parameter and materialises the omitted
-            // argument at the call site.  We do not lower that yet
-            // (t_36492ad8, 16 reference-SDK rows, the whole Metallic
-            // family), and letting it parse silently would compile the
-            // omitted argument as nothing.  Refusing by name is the safe
-            // interim.  DELETE THIS BRANCH AND ITS FIXTURE when t_36492ad8
-            // lands - that card's acceptance says so.
-            error(p->loc,
-                  "default value on a parameter of '" + decl->name +
-                  "', which is not the entry function, is not supported yet "
-                  "(the reference accepts it; call-site materialisation is "
-                  "t_36492ad8): \"" + p->name + "\"");
-        }
+        // A default on a HELPER parameter is legal and its omitted argument
+        // is materialised at the call site (t_36492ad8).  There is no else
+        // branch: the interim refusal that used to live here is what this
+        // slice removes.
     }
 }
 
@@ -338,6 +330,9 @@ void SemanticAnalyzer::checkParameterDefaultShape(ParamDecl* p)
 void SemanticAnalyzer::collectVarDecl(VarDecl* decl)
 {
     allGlobalVars_.push_back(decl);
+    // The FIRST declaration of the name wins the index; a redefinition is
+    // already reported below and must not move the boundary.
+    globalDeclIndex_.emplace(decl->name, symbols_.currentDeclIndex());
 
     auto sym = SymbolUtils::symbolFromVarDecl(decl);
     if (!sym) return;
@@ -450,10 +445,76 @@ void SemanticAnalyzer::analyzeStructDecl(StructDecl* decl)
     }
 }
 
+// A PROTOTYPE'S DEFAULTS ARE REAL AND HAVE TO BE RESOLVED.  Measured:
+//
+//     float inner(float x) { return x; }
+//     float outer(float x, float k = inner(0.5));   // prototype
+//     ... outer(t.x) ...                            // call
+//     float outer(float x, float k) { ... }         // definition, no default
+//
+// the reference ACCEPTS this and emits the same container as passing
+// inner(0.5) explicitly.  Rule 1 picks the default from the latest
+// declaration VISIBLE AT THE CALL, which here is the prototype - so the
+// prototype's expression is the one that gets substituted.  Skipping
+// prototypes outright left that AST unanalysed and unresolved, and the IR
+// builder then failed on an unresolved operand rather than diagnosing
+// anything (found by codex).  Only the BODY is skipped now; the parameter
+// scope and the default analysis are the same code the definition runs.
+void SemanticAnalyzer::analyzePrototypeDefaults(FunctionDecl* decl)
+{
+    bool any = false;
+    for (const auto& param : decl->parameters)
+        if (param && param->defaultValue) { any = true; break; }
+    if (!any) return;
+
+    FunctionDecl* saved = currentFunction_;
+    currentFunction_ = decl;
+    symbols_.pushScope(Scope::Kind::Function);
+    for (const auto& param : decl->parameters)
+    {
+        if (!param) continue;
+        CgType resolvedType = resolveType(param->type.get());
+        if (resolvedType.isError()) continue;
+        auto sym = std::make_unique<Symbol>();
+        sym->kind = SymbolKind::Parameter;
+        sym->name = param->name;
+        sym->type = resolvedType;
+        sym->declaration = param.get();
+        sym->loc = param->loc;
+        sym->storage = param->storage;
+        sym->semantic = param->semantic;
+        symbols_.addSymbol(std::move(sym));
+    }
+    for (const auto& param : decl->parameters)
+    {
+        if (!param || !param->defaultValue) continue;
+        const CgType resolvedType = resolveType(param->type.get());
+        if (resolvedType.isError()) continue;
+        const CgType defType = analyzeExpr(param->defaultValue.get());
+        if (!defType.isError())
+            checkAssignment(resolvedType, defType, param->defaultValue->loc);
+        checkParameterDefaultShape(param.get());
+    }
+    symbols_.popScope();
+    currentFunction_ = saved;
+}
+
 void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
 {
-    // Skip prototypes and intrinsics
-    if (decl->isPrototype() || decl->isIntrinsic) return;
+    if (decl->isIntrinsic) return;
+
+    // A DECLARATION RULE, so it applies to a prototype as much as a body.
+    checkDefaultNamesBindAtDeclaration(decl);
+
+    if (decl->isPrototype())
+    {
+        analyzePrototypeDefaults(decl);
+        return;
+    }
+
+    // Neither of these depends on a call, and both fire on programs that
+    // never use the default at all.
+    checkDuplicateDefinition(decl);
 
     currentFunction_ = decl;
 
@@ -503,9 +564,24 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         // BOTH because the CATEGORY differs.  The existing checker already
         // models category and dimensions; it just was never reached, because
         // parameters with defaults used to be refused in the parser.
-        if (param->defaultValue &&
-            param->storage == StorageQualifier::Uniform &&
-            !resolvedType.isError())
+        // EVERY parameter's default is analysed, not only an entry uniform's.
+        // The reference checks a default expression when the FUNCTION IS
+        // REACHED, not when the default is used - measured, three cells:
+        //
+        //   helper unreached, default names an undeclared id   ACCEPT
+        //   helper REACHED, call supplies the argument         REFUSE C1008
+        //   helper REACHED, default actually materialised      REFUSE C1102
+        //
+        // The middle one is the whole point: the call never uses the default
+        // and the reference still refuses.  Analysing only on materialisation
+        // (which is what the ir_builder does) accepts it, and analysing only
+        // uniforms - as this did - never looked at a helper's default at all.
+        //
+        // The reachability gate comes free: an undeclared name in here routes
+        // through deferOrEmitNameError, which holds C1008-class findings until
+        // the reached set is known (t_36492ad8 commit 1).  currentFunction_ is
+        // already this declaration, so the finding is attributed correctly.
+        if (param->defaultValue && !resolvedType.isError())
         {
             const CgType defType = analyzeExpr(param->defaultValue.get());
             if (!defType.isError())
@@ -1018,17 +1094,30 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     }
 
     // Resolve overload
+    bool ambiguousOverload = false;
     auto candidate = symbols_.resolveOverload(expr->functionName, argTypes,
-                                              visibleThrough_);
+                                              &ambiguousOverload, visibleThrough_);
     if (!candidate)
     {
-        // NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  Only the first is the
-        // reference's C1008 class and only it is reachability-gated.  A name
-        // with at least one VISIBLE declaration but no overload that fits is
-        // C1103 and is reported everywhere - measured, and it holds even when
-        // a later exact overload exists, which is why this asks about
+        // THE THREE FAILURES ARE DIFFERENT THINGS AND THE ORDER MATTERS.
+        //
+        // AMBIGUOUS first: the call DID match, twice, so the name is plainly
+        // visible and neither test below applies.  The reference calls this
+        // C1101.
+        //
+        // Then NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  Only the first is
+        // the reference's C1008 class and only it is reachability-gated.  A
+        // name with at least one VISIBLE declaration but no overload that fits
+        // is C1103 and is reported everywhere - measured, and it holds even
+        // when a later exact overload exists, which is why this asks about
         // visibility of the NAME and never about whole-unit resolvability
         // (review: codex).
+        if (ambiguousOverload)
+        {
+            error(expr->loc, "ambiguous overloaded function reference '" +
+                             expr->functionName + "'");
+            return CgType::Error();
+        }
         std::string sig = SymbolUtils::formatFunctionSignature(expr->functionName, argTypes);
         if (!symbols_.hasVisibleFunction(expr->functionName, visibleThrough_))
         {
@@ -1059,6 +1148,49 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
 
     // Link to resolved function
     expr->resolvedFunction = candidate->symbol->declaration;
+
+    // AN OMITTED out/inout ARGUMENT IS REFUSED AFTER RANKING, NOT BEFORE IT.
+    //
+    // Measured on sce-cgc 475 (codex's six cells; Fable retracted the
+    // viability exclusion on them; reproduced here): a defaulted out/inout
+    // parameter does NOT make its candidate non-viable.  It ranks normally and
+    // ties with a plain overload of the supplied arity - `void f(float4)`
+    // beside `void f(float4, out float k=.5)` called `f(t)` is C1101 in BOTH
+    // declaration orders, exactly as a plain `float k=.5` second parameter is.
+    // So the restriction cannot live in viability: excluding the candidate
+    // there leaves `f(float4)` the unique winner and ACCEPTS four programs the
+    // reference refuses (measured on the interim build that did exclude it).
+    //
+    // What the reference objects to is the ARGUMENT, not the arity: the
+    // default expression it would substitute is not an lvalue, so it cannot
+    // bind to an out parameter.  Its wording is reproduced verbatim, as the
+    // two C1033 sites already do:
+    //
+    //     error C1111: non-lvalue actual parameter #2 cannot be out parameter ("o")
+    //
+    // That is a DIFFERENT refusal from C1103 "too few parameters" - a call
+    // omitting an out parameter with no default fails arity above and never
+    // reaches here - which is what lets the two rows tell each other apart.
+    if (expr->resolvedFunction &&
+        expr->resolvedFunction->kind == DeclKind::Function)
+    {
+        auto* resolved = static_cast<FunctionDecl*>(expr->resolvedFunction);
+        for (size_t i = argTypes.size(); i < resolved->parameters.size(); ++i)
+        {
+            const auto& param = resolved->parameters[i];
+            if (!param) continue;
+            if (param->storage != StorageQualifier::Out &&
+                param->storage != StorageQualifier::InOut)
+            {
+                continue;
+            }
+            error(expr->loc,
+                  "error C1111: non-lvalue actual parameter #" +
+                  std::to_string(i + 1) + " cannot be out parameter (\"" +
+                  param->name + "\")");
+            return CgType::Error();
+        }
+    }
 
     return candidate->symbol->type;
 }
@@ -1780,6 +1912,135 @@ bool SemanticAnalyzer::sameSignature(const FunctionDecl* a,
     return true;
 }
 
+// TWO DEFINITIONS OF ONE SIGNATURE IS C1106, and it has nothing to do with
+// defaults or with where the call sits.  Measured on sce-cgc 475:
+//
+//     def(k=.25) ; call ; def(k=.5)      C1106
+//     def(k=.25) ; def(k=.5) ; call      C1106
+//     def(k=.25) ; def(no default)       C1106, even with no call at all
+//     PROTOTYPE(k=.25) ; def(no default) ; call(one argument)   C1103
+//
+// so it is the second BODY that is refused, not the second default, and a
+// prototype/definition pair stays legal - the last cell is rule 1 doing its
+// job (the latest visible declaration has no default, so the call is short an
+// argument).  The reference reports it at the FIRST definition, which is what
+// the location below reproduces.  Its wording is kept verbatim, as the C1033
+// and C1111 sites already do.
+void SemanticAnalyzer::checkDuplicateDefinition(FunctionDecl* decl)
+{
+    if (!decl || !decl->body) return;
+    FunctionDecl* first = definitionOf(decl);
+    if (!first || first == decl) return;
+    error(first->loc, "error C1106: overloaded function declaration \"" +
+                      decl->name + "\" differs only in parameter qualifiers");
+}
+
+// A DEFAULT'S NAMES BIND AT THE HELPER'S DECLARATION, not at the call and not
+// at the end of the unit.  Measured:
+//
+//     f(x, k = K) {...}  then  static const float K = .75;  ->  C1002
+//                              "the name K is already defined", reported at f
+//     static const float K = .75;  then  f(x, k = K) {...}  ->  ACCEPT
+//
+// and the refusal does NOT depend on the default ever being used: supplying
+// the argument at every call site still refuses, and a plain (non-const)
+// global collides the same way.  So this is a binding rule, not a
+// materialisation rule - which is why it is checked here, at the declaration,
+// rather than anywhere near a call.
+void SemanticAnalyzer::checkDefaultNamesBindAtDeclaration(FunctionDecl* decl)
+{
+    if (!decl) return;
+    auto checkName = [&](const std::string& name, const SourceLocation&)
+    {
+        auto it = globalDeclIndex_.find(name);
+        if (it != globalDeclIndex_.end() && it->second > visibleThrough_)
+        {
+            error(decl->loc, "error C1002: the name \"" + name +
+                             "\" is already defined");
+            return;
+        }
+        // A FUNCTION NAME IS NOT VISIBLE INSIDE ITS OWN DECLARATION, hence
+        // >= rather than >.  `float f(float x = f()) {...}` is C1002 on the
+        // reference - the declaration is not complete while its own default
+        // is being read - and without this the call-edge walk expands that
+        // default forever.  A MUTUAL pair still resolves: each names the
+        // other, whose first declaration has a strictly smaller index.
+        auto fn = functionDeclIndex_.find(name);
+        if (fn != functionDeclIndex_.end() && fn->second >= visibleThrough_)
+        {
+            error(decl->loc, "error C1002: the name \"" + name +
+                             "\" is already defined");
+        }
+    };
+    std::function<void(const ExprNode*)> walk = [&](const ExprNode* expr)
+    {
+        if (!expr) return;
+        if (expr->kind == ExprKind::Identifier)
+        {
+            checkName(static_cast<const IdentifierExpr*>(expr)->name, expr->loc);
+            return;
+        }
+        switch (expr->kind)
+        {
+        case ExprKind::Binary:
+        {
+            const auto* b = static_cast<const BinaryExpr*>(expr);
+            walk(b->left.get()); walk(b->right.get());
+            break;
+        }
+        case ExprKind::Unary:
+            walk(static_cast<const UnaryExpr*>(expr)->operand.get());
+            break;
+        case ExprKind::Call:
+        {
+            // THE CALLEE NAME IS A NAME TOO.  Walking only the arguments let
+            // `f(x, k = inner(.5))` with inner declared LATER through, which
+            // the reference refuses C1002 - and it only showed when the helper
+            // was never reached, because a reached one is caught later by the
+            // ordinary resolution path (found by codex).
+            const auto* call = static_cast<const CallExpr*>(expr);
+            checkName(call->functionName, expr->loc);
+            for (const auto& a : call->arguments) walk(a.get());
+            break;
+        }
+        case ExprKind::MemberAccess:
+            walk(static_cast<const MemberAccessExpr*>(expr)->object.get());
+            break;
+        case ExprKind::Index:
+        {
+            const auto* i = static_cast<const IndexExpr*>(expr);
+            walk(i->array.get()); walk(i->index.get());
+            break;
+        }
+        case ExprKind::Ternary:
+        {
+            const auto* t = static_cast<const TernaryExpr*>(expr);
+            walk(t->condition.get()); walk(t->thenExpr.get()); walk(t->elseExpr.get());
+            break;
+        }
+        case ExprKind::Cast:
+            walk(static_cast<const CastExpr*>(expr)->operand.get());
+            break;
+        case ExprKind::Constructor:
+            for (const auto& a : static_cast<const ConstructorExpr*>(expr)->arguments)
+                walk(a.get());
+            break;
+        case ExprKind::Literal:
+        case ExprKind::Identifier:
+        case ExprKind::Sizeof:
+            break;
+        // NO SILENT ARM.  A kind this switch does not list would simply not be
+        // walked, and the rule would go unchecked inside it with nothing to
+        // see (review: Fable).  ExprKind has exactly the eleven members above;
+        // if one is added, this stops compiling rather than quietly skipping.
+        }
+    };
+    for (const auto& param : decl->parameters)
+    {
+        if (param && param->defaultValue) walk(param->defaultValue.get());
+    }
+}
+
 FunctionDecl* SemanticAnalyzer::firstDeclarationOf(const FunctionDecl* fn) const
 {
     for (FunctionDecl* cand : allFunctions_)
@@ -1883,7 +2144,52 @@ void SemanticAnalyzer::collectCallEdges(const ExprNode* expr,
         if (node->resolvedFunction)
         {
             auto* fn = dynamic_cast<FunctionDecl*>(node->resolvedFunction);
-            if (fn) out.push_back(fn);
+            if (fn)
+            {
+                out.push_back(fn);
+                // A MATERIALISED DEFAULT IS CODE AT THIS CALL SITE, so the
+                // calls inside it are call edges OF THIS CALL - and only when
+                // the argument is actually OMITTED.  Measured (codex's cells,
+                // reproduced here):
+                //
+                //   float inner(float x) : COLOR { return x; }
+                //   float outer(float x, float k = inner(1.0)) { return x*k; }
+                //   outer(t.x)        reference REFUSES C5122 - inner is
+                //                     reached, and a reached helper may not
+                //                     carry a return semantic
+                //   outer(t.x, 2.0)   reference ACCEPTS - the default is never
+                //                     substituted, so inner is never reached
+                //
+                // That second cell is what stops the obvious over-fix: rooting
+                // every call named in every default of every reached helper
+                // would refuse a program the reference compiles.  The edge
+                // belongs to the CALL SITE, not to the declaration.
+                //
+                // Transitive without extra machinery: the recursion below
+                // walks the default expression, so a call inside it seeds its
+                // own callee and omits its own defaults in turn, and the
+                // seeded function's body is walked by the caller's work list -
+                // which is how the relay cell (inner has no semantic, but
+                // calls a leaf that does) is refused.
+                // AND IT CAN BE CYCLIC.  `float f(float x = f()) {...}`
+                // expands its own default forever; the reference refuses that
+                // program outright (C1002/C1014) but we must not blow the
+                // stack deciding so - and MUTUAL defaults that do terminate
+                // (`f(x = g(1))` beside `g(x = f(1))`, called with an
+                // argument) are ACCEPTED by the reference, so the guard has
+                // to be an active set and not a depth limit or a
+                // "seen once" set.
+                for (size_t i = node->arguments.size();
+                     i < fn->parameters.size(); ++i)
+                {
+                    const auto& param = fn->parameters[i];
+                    if (!param || !param->defaultValue) continue;
+                    const ExprNode* d = param->defaultValue.get();
+                    if (!defaultsBeingWalked_.insert(d).second) continue;
+                    collectCallEdges(d, out);
+                    defaultsBeingWalked_.erase(d);
+                }
+            }
         }
         for (const auto& a : node->arguments) collectCallEdges(a.get(), out);
         break;

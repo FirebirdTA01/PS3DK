@@ -1,0 +1,6 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// The same shape with no semantic anywhere: accepted, so the rows above are
+// pinning the SEMANTIC and not merely the presence of a call in a default.
+float inner(float x) { return x; }
+float outer(float x, float k = inner(1.0)) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(outer(t.x), 0, 0, 1); }

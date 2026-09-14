@@ -1,0 +1,5 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// The inout mirror of fp_helper_default_out_omit_refuse_f.  The reference
+// reports the SAME C1111 text - it says "out parameter" for inout too.
+void shade(float4 c, inout float4 o = float4(0,0,0,1)) { o = o + c; }
+float4 main(float4 t : TEXCOORD0) : COLOR { shade(t); return t; }

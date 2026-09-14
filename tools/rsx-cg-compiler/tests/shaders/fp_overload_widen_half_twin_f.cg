@@ -1,0 +1,3 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// The float overload spelled out.  Twin of fp_overload_widen_half_f.
+float4 main(float4 t : TEXCOORD0) : COLOR { float f = t.x; half a = 0.0, b = 1.0; return clamp(f, (float)a, (float)b); }

@@ -1,0 +1,12 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// GAP ROW, card t_3aa92146 - AND THE ROW THAT MAKES fp_helper_default_prefer_f
+// HONEST.  The reference accepts a float4 argument for a float3 parameter with
+// "warning C7011: implicit cast"; we have no such conversion and refuse.
+//
+// That is why the prefer row passes for us today: f(float3) is not viable at
+// all, so the defaulted float4 overload wins by ELIMINATION, not because we
+// rank a default fill above a narrowing conversion.  When t_3aa92146 lands,
+// this row goes red - and whoever fixes it must then re-examine prefer, which
+// only becomes a real preference test at that moment.
+float4 f(float3 v) { return float4(v, 1) * 2.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }

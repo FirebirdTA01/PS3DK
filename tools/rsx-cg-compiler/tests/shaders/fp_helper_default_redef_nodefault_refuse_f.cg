@@ -1,0 +1,5 @@
+// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// The second definition carries NO default and it is still C1106.
+float f(float x, float k = 0.25) { return x * k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.x), 0, 0, 1); }
+float f(float x, float k) { return x * k; }
