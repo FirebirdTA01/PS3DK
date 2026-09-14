@@ -4238,8 +4238,12 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 
     int32_t constIdx = 0;
     bool constantIndex = extractIntScalar(*currentFunction_, indexValue, constIdx);
-    auto* matrix = dynamic_cast<IRConstant*>(currentFunction_->getValue(arrayValue));
-    if (matrix && (matrix->type.isMatrix() || matrix->type.isVector()) && !constantIndex)
+    const IRTypeInfo aggregateType = getExprType(expr->array.get());
+    auto* constantAggregate = dynamic_cast<IRConstant*>(currentFunction_->getValue(arrayValue));
+    // Instruction results are not entries in the function's constant/value
+    // table. The expression type also covers varying loads and local temps.
+    if ((aggregateType.isVector() ||
+        (constantAggregate && aggregateType.isMatrix())) && !constantIndex)
     {
         auto* index = dynamic_cast<IRConstant*>(currentFunction_->getValue(indexValue));
         std::vector<float> components;
@@ -4252,28 +4256,34 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
             // 0, [1.7*1.2] selects 2. Check before integer conversion,
             // including nonfinite/overflowing values. Keep the aggregate's
             // payload untouched: integer lane extraction below stays exact.
+            // Runtime vector operands use this same selector rule; matrix
+            // normalization remains limited to constant matrix operands.
             const double element = std::trunc(static_cast<double>(components[0]));
-            const int count = matrix->type.isMatrix()
-                ? matrix->type.matrixRows : matrix->type.vectorSize;
+            const int count = aggregateType.isMatrix()
+                ? aggregateType.matrixRows : aggregateType.vectorSize;
             if (!std::isfinite(element) || element < 0 || element >= count)
             {
-                error(expr->index->loc, matrix->type.isMatrix()
+                error(expr->index->loc, aggregateType.isMatrix()
                     ? "matrix row index out of bounds" : "vector index out of bounds");
                 return InvalidIRValue;
             }
             constIdx = static_cast<int32_t>(element);
             constantIndex = true;
+            // VecExtract consumes indexValue, not constIdx. A float operand
+            // would otherwise survive this check and still lower as lane 0.
+            if (aggregateType.isVector())
+                indexValue = createConstant(constIdx);
         }
     }
     if (constantIndex)
     {
-        if (matrix && matrix->type.isMatrix())
+        if (constantAggregate && constantAggregate->type.isMatrix())
         {
             // Matrix constants are flat row-major payloads. M[r] selects a
             // complete vector, whereas the scalar fallback below selects one
             // component. Check signed bounds before converting to size_t.
-            const int rows = matrix->type.matrixRows;
-            const int cols = matrix->type.matrixCols;
+            const int rows = constantAggregate->type.matrixRows;
+            const int cols = constantAggregate->type.matrixCols;
             if (constIdx < 0 || constIdx >= rows)
             {
                 error(expr->index->loc, "matrix row index out of bounds");
@@ -4284,7 +4294,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 resultType.componentCount() != cols ||
                 !extractFloatComponents(*currentFunction_, arrayValue, components) ||
                 components.size() != static_cast<size_t>(rows * cols) ||
-                (!matrix->intValues.empty() && matrix->intValues.size() != components.size()))
+                (!constantAggregate->intValues.empty() && constantAggregate->intValues.size() != components.size()))
             {
                 error(expr->loc, "constant matrix row has an inconsistent payload");
                 return InvalidIRValue;
@@ -4293,9 +4303,9 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
             std::vector<float> row(components.begin() + begin,
                                    components.begin() + begin + cols);
             std::vector<int64_t> integers;
-            if (!matrix->intValues.empty())
-                integers.assign(matrix->intValues.begin() + begin,
-                                matrix->intValues.begin() + begin + cols);
+            if (!constantAggregate->intValues.empty())
+                integers.assign(constantAggregate->intValues.begin() + begin,
+                                constantAggregate->intValues.begin() + begin + cols);
             return createConstant(resultType, row, integers);
         }
     }
