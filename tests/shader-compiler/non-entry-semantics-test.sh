@@ -135,8 +135,14 @@ accept fp_c5122_proto_bare_def_sem_f "prototype bare + definition :COLOR"
 # TypeNode field; only elementType separates them.  A shallow comparison merged
 # them and produced an over-refusal in one direction and a missed refusal in the
 # other, so both directions are rows.
+# The STRUCT pair beside it is the same argument one type category over: array
+# identity hides in TypeNode::elementType, struct identity in structName and
+# structFields.  CgType::equals reaches both today, so one comparator serves
+# them - and a future struct-specific narrowing would pass every array row.
 accept fp_c5122_overload_array_bare_f "overload: the UNCALLED one carries the semantic"
 refuse fp_c5122_overload_array_sem_f  "overload: the CALLED one carries the semantic"
+accept fp_c5122_overload_struct_bare_f "overload: struct, the UNCALLED one carries it"
+refuse fp_c5122_overload_struct_sem_f  "overload: struct, the CALLED one carries it"
 
 # ---- the accepts: each one the diagnostic's literal text would forbid ----
 accept fp_c5122_param_only_f          "PARAMETER semantic on a called helper"
