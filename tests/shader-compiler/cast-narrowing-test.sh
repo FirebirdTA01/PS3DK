@@ -19,6 +19,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
+
 [[ -n "$compiler" ]] || compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
 [[ -x "$compiler" ]] || fail "rsx-cg-compiler not executable: $compiler"
 
@@ -117,8 +124,9 @@ refuse_widen() {   # <stem> <what>
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_vp_rsx "$shaders/$stem.cg"
     ) >"$work/$stem.log" 2>"$work/$stem.err" || rc=$?
-    if [[ "$rc" -eq 0 ]]; then
-        fail "$2: widening unexpectedly compiled with exit code 0"
+    refusal_status "$rc" "$2"
+    if [[ "$rc" -ne 1 ]]; then
+        fail "$2: widening unexpectedly compiled with exit code $rc, expected 1"
     fi
     local combined
     combined="$(cat "$work/$stem.log" "$work/$stem.err")"
