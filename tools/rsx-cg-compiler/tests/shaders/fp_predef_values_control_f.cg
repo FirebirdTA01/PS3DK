@@ -1,0 +1,2 @@
+// t_1704e79e: hand-expanded twin of fp_predef_values_f.cg.
+float4 main() : COLOR { return float4(20000, 20000, 0, 1); }

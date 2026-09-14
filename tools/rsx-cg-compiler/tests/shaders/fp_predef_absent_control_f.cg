@@ -1,0 +1,5 @@
+// t_1704e79e: hand-expanded twin of fp_predef_absent_f.cg on the reference.
+float4 main() : COLOR {
+  float v = 0;
+  return float4(v, 0, 0, 1);
+}

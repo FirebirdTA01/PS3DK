@@ -1,0 +1,2 @@
+// t_1704e79e: the reference predefines __CGC__ and __SCE_CGC__, value 20000 each.
+float4 main() : COLOR { return float4(__CGC__, __SCE_CGC__, 0, 1); }
