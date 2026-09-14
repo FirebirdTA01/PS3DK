@@ -697,6 +697,9 @@ private:
     int nextVReg_ = 0;
     std::unordered_map<IRValueID, unsigned> useCount_;
     std::unordered_map<IRValueID, unsigned> nonTermUseCount_;
+    // Accumulators created inside FP VecMatMul have no IR value ID, but
+    // have the same single-use provenance as an explicit row-sum chain.
+    std::unordered_set<int> singleUseProductTemps_;
     // Every value some instruction PRODUCES.  A value that is neither
     // produced nor a parameter is an uninitialised declaration - `half4 c;`
     // - and an insert into it has nothing to copy.
@@ -1775,6 +1778,7 @@ private:
                 if (useCount_[value] == 1)
                     singleUse.insert(reg);
             }
+            singleUse.insert(singleUseProductTemps_.begin(), singleUseProductTemps_.end());
             const auto accumulator = [](const VInstr& vi) -> const VSrc* {
                 if (vi.op == VOp::Add) return &vi.srcs[0];
                 if (vi.op == VOp::Mad) return &vi.srcs[2];
@@ -4940,20 +4944,29 @@ private:
                                int vecWidth,
                                const MatrixValue& mat,
                                int resultWidth,
-                               int resultReg)
+                               int resultReg,
+                               bool fpVectorProduct = false)
     {
         const int mask = componentMaskForWidth(resultWidth);
+        int accumulator = resultReg;
         for (int j = 0; j < vecWidth; ++j) {
+            // FP mul(v,M), measured on 2x2/3x3/4x4: start with row 1,
+            // add row 0, then rows 2/3. Keep VP and matrix products intact.
+            const int row = fpVectorProduct && j < 2 ? 1 - j : j;
             VInstr vi;
             vi.op = (j == 0) ? VOp::Mul : VOp::Mad;
-            vi.dst.index = resultReg;
+            vi.dst.index = fpVectorProduct && j + 1 < vecWidth
+                ? newVReg() : resultReg;
+            if (fpVectorProduct && j + 1 < vecWidth)
+                singleUseProductTemps_.insert(vi.dst.index);
             vi.dst.writemask = mask;
             vi.srcs[0] = vec;
-            const uint8_t c = vec.swizzle[j];
+            const uint8_t c = vec.swizzle[row];
             vi.srcs[0].swizzle = {c, c, c, c};
-            vi.srcs[1] = mat.rowSrcs[static_cast<size_t>(j)];
+            vi.srcs[1] = mat.rowSrcs[static_cast<size_t>(row)];
             if (j != 0)
-                vi.srcs[2] = tempSrc(resultReg);
+                vi.srcs[2] = tempSrc(accumulator);
+            accumulator = vi.dst.index;
             program_.instrs.push_back(vi);
         }
         if (resultValue != InvalidIRValue)
@@ -5062,13 +5075,33 @@ private:
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue)
             return;
-        if (profile_ != GeneralProfile::Vertex) {
-            program_.diagnostics.push_back(
-                "nv40-general: FP vecmatmul lowering is not implemented; refusing");
-            program_.loweringFailed = true;
-            return;
-        }
         MatrixValue mat;
+        // A folded static-const matrix is an IRConstant, not a registered
+        // uniform. Preserve every row instead of resolving it as one vector
+        // (literalSrc is deliberately limited to four components).
+        if (profile_ == GeneralProfile::Fragment &&
+            matrixValues_.find(inst.operands[1]) == matrixValues_.end()) {
+            const auto* constant = dynamic_cast<const IRConstant*>(
+                entry_.getValue(inst.operands[1]));
+            if (constant && matrixDimsSupported(constant->type) &&
+                std::holds_alternative<std::vector<float>>(constant->value)) {
+                const auto& values = std::get<std::vector<float>>(constant->value);
+                if (values.size() == static_cast<size_t>(constant->type.componentCount())) {
+                    MatrixValue folded;
+                    folded.rows = constant->type.matrixRows;
+                    folded.cols = constant->type.matrixCols;
+                    for (int row = 0; row < folded.rows; ++row) {
+                        VSrc src;
+                        src.kind = VSrcKind::Literal;
+                        src.literalLanes = static_cast<uint8_t>(folded.cols);
+                        for (int col = 0; col < folded.cols; ++col)
+                            src.literal[col] = values[row * folded.cols + col];
+                        folded.rowSrcs.push_back(src);
+                    }
+                    matrixValues_[inst.operands[1]] = folded;
+                }
+            }
+        }
         if (!matrixRows(inst.operands[1], mat)) {
             program_.diagnostics.push_back(
                 "nv40-general: vecmatmul matrix source is not a matrix value; refusing");
@@ -5089,7 +5122,7 @@ private:
         const int result = define(inst.result);
         const VSrc vec = resolve(inst.operands[0]);
         lowerRowVecMatProduct(inst.result, vec, vecWidth, mat, resultWidth,
-                              result);
+                              result, profile_ == GeneralProfile::Fragment);
     }
 
     void lowerTranspose(const IRInstruction& inst)
