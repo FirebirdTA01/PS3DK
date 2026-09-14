@@ -748,6 +748,7 @@ private:
         // reads (`v.x = v.y`) is a different index value with the same
         // vreg and component (review: codex's rewrite twin).
         unsigned version = 0;
+        int stride = 1;       // the same index into vectors and matrices differs
         size_t   arlAt = 0;     // position in program_.instrs
     };
     std::vector<AddressLane> addressLanes_;
@@ -1989,11 +1990,51 @@ private:
         // program has no indexed constants and refuses by name.
         const rsx_cg::ArrayUniformUses arrayUses =
             rsx_cg::classifyArrayUniformUses(entry_);
+        // The general VP allocator does not yet honour explicit C bindings
+        // on ordinary uniforms either. A new matrix-array program containing
+        // N:register(C9) would otherwise declare N at c9 but read c256, and
+        // shift the array's reads away from its declared base (t_49f3cc72).
+        const bool hasExplicitUniformBinding =
+            std::any_of(entry_.parameters.begin(), entry_.parameters.end(),
+                [](const IRParameter& p) {
+                    return p.storage == StorageQualifier::Uniform &&
+                           p.explicitRegisterBank == 'C';
+                }) ||
+            std::any_of(module_.globals.begin(), module_.globals.end(),
+                [](const IRGlobal& g) {
+                    return g.storage == StorageQualifier::Uniform &&
+                           g.explicitRegisterBank == 'C';
+                });
+        struct PendingMatrix {
+            IRValueID valueId;
+            std::string name;
+            int rows = 0;
+            int cols = 0;
+            int arraySize = 0;
+        };
+        std::vector<PendingMatrix> pendingMatrices;
         const auto layoutArrayUniform = [&](const std::string& name,
                                             const IRTypeInfo& type,
                                             unsigned fpSlotBase,
-                                            bool isParameter) {
+                                            bool isParameter,
+                                            char registerBank) {
             const char* where = isParameter ? "parameter" : "uniform";
+            if (profile_ == GeneralProfile::Vertex && type.isMatrix() &&
+                matrixDimsSupported(type) &&
+                (type.elementType == IRType::Float32 ||
+                 type.elementType == IRType::Float16)) {
+                if (registerBank || hasExplicitUniformBinding) {
+                    program_.diagnostics.push_back(
+                        "nv40-general-vp: explicit matrix-array register binding layout for '" +
+                        name + "' (including other bound uniforms) is not yet lowered "
+                        "(t_49f3cc72); refusing");
+                    program_.loweringFailed = true;
+                    return;
+                }
+                pendingMatrices.push_back(PendingMatrix{InvalidIRValue, name,
+                    type.matrixRows, type.matrixCols, type.arraySize});
+                return;
+            }
             if (!rsx_cg::arrayElementLowered(type)) {
                 program_.diagnostics.push_back(
                     std::string("nv40-general: array ") + where + " '" + name +
@@ -2041,13 +2082,6 @@ private:
         };
         std::unordered_set<std::string> seenUniformNames;
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
-        struct PendingMatrix {
-            IRValueID valueId;
-            std::string name;
-            int rows = 0;
-            int cols = 0;
-        };
-        std::vector<PendingMatrix> pendingMatrices;
         for (size_t pi = 0; pi < entry_.parameters.size(); ++pi) {
             const auto& p = entry_.parameters[pi];
             const std::string sem = toUpper(p.semanticName);
@@ -2061,7 +2095,8 @@ private:
                 continue;
             }
             if (p.storage == StorageQualifier::Uniform && p.type.isArray()) {
-                layoutArrayUniform(p.name, p.type, fpParamSlotBases[pi], true);
+                layoutArrayUniform(p.name, p.type, fpParamSlotBases[pi], true,
+                                   p.explicitRegisterBank);
                 continue;
             }
             if (profile_ == GeneralProfile::Vertex &&
@@ -2141,7 +2176,7 @@ private:
                     }
                     nextFpGlobalSlot += count;
                 }
-                layoutArrayUniform(g.name, g.type, base, false);
+                layoutArrayUniform(g.name, g.type, base, false, g.explicitRegisterBank);
                 continue;
             }
             if (profile_ == GeneralProfile::Vertex && g.type.isMatrix()) {
@@ -2207,6 +2242,17 @@ private:
             }
         }
         for (auto it = pendingMatrices.begin(); it != pendingMatrices.end(); ++it) {
+            if (it->arraySize > 0) {
+                const auto use = arrayUses.find(it->name);
+                const auto regs = rsx_cg::vpMatrixArrayElementRegisters(
+                    use == arrayUses.end() ? rsx_cg::ArrayUniformUse{} : use->second,
+                    it->arraySize, it->rows, nextVpMatrixConst);
+                for (int k = 0; k < it->arraySize; ++k)
+                    if (regs[static_cast<size_t>(k)] >= 0)
+                        arrayElementSrcs_[it->name][k] =
+                            uniformSrc(regs[static_cast<size_t>(k)], false);
+                continue;
+            }
             matrixUniformBase_[it->valueId] = nextVpMatrixConst;
             matrixUniformRows_[it->valueId] = std::max(1, it->rows);
             MatrixValue mv;
@@ -4230,6 +4276,13 @@ private:
     void lowerBinary(const IRInstruction& inst, VOp op, bool negateRhs = false)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
+        if (inst.resultType.isMatrix()) {
+            program_.diagnostics.push_back(
+                "nv40-general: matrix arithmetic is not yet lowered "
+                "(t_ef0cb2e0 arithmetic slice); refusing");
+            program_.loweringFailed = true;
+            return;
+        }
         if (profile_ == GeneralProfile::Fragment &&
             op == VOp::Max && tryFoldDotMax(inst))
             return;
@@ -4415,6 +4468,26 @@ private:
         program_.instrs.push_back(vi);
     }
 
+    // The element's source is its first ROW when its type is a matrix.
+    // Preserve that shape for static, folded and relative indexed loads.
+    void bindArrayElement(const IRInstruction& inst, const VSrc& base)
+    {
+        if (inst.resultType.isMatrix()) {
+            MatrixValue mv;
+            mv.rows = inst.resultType.matrixRows;
+            mv.cols = inst.resultType.matrixCols;
+            for (int row = 0; row < mv.rows; ++row) {
+                VSrc source = base;
+                source.index += row;
+                mv.rowSrcs.push_back(source);
+            }
+            matrixValues_[inst.result] = mv;
+        } else {
+            program_.valueToSource[inst.result] = base;
+            valueWidth_[inst.result] = inst.resultType.componentCount();
+        }
+    }
+
     void lowerLoadUniform(const IRInstruction& inst)
     {
         if (inst.result == InvalidIRValue)
@@ -4430,7 +4503,7 @@ private:
             if (arrIt != arrayElementSrcs_.end()) {
                 const auto elIt = arrIt->second.find(inst.componentIndex);
                 if (elIt != arrIt->second.end()) {
-                    program_.valueToSource[inst.result] = elIt->second;
+                    bindArrayElement(inst, elIt->second);
                     return;
                 }
             }
@@ -4455,8 +4528,7 @@ private:
                 if (arrIt != arrayElementSrcs_.end()) {
                     const auto elIt = arrIt->second.find(folded);
                     if (elIt != arrIt->second.end()) {
-                        program_.valueToSource[inst.result] = elIt->second;
-                        valueWidth_[inst.result] = inst.resultType.componentCount();
+                        bindArrayElement(inst, elIt->second);
                         return;
                     }
                 }
@@ -4582,6 +4654,7 @@ private:
             return;
         }
         const VSrc base = arrIt->second.at(0);
+        const int stride = inst.resultType.isMatrix() ? inst.resultType.matrixRows : 1;
 
         // The index: through a cast the index alone consumed, to the
         // float the reference feeds the ARL.
@@ -4627,7 +4700,7 @@ private:
             const AddressLane& al = addressLanes_[i];
             if (al.kind == index.kind && al.index == index.index &&
                 al.component == component && al.neg == index.neg &&
-                al.abs == index.abs && al.version == version) {
+                al.abs == index.abs && al.version == version && al.stride == stride) {
                 lane = static_cast<int>(i);
                 break;
             }
@@ -4652,12 +4725,13 @@ private:
             al.neg = index.neg;
             al.abs = index.abs;
             al.version = version;
+            al.stride = stride;
             // Join the ARL already loading this register, if there is one
             // and it targets the same address register.
             size_t joinAt = program_.instrs.size();
-            if (index.kind != VSrcKind::Temp) {
+            if (stride == 1 && index.kind != VSrcKind::Temp) {
                 for (const AddressLane& prev : addressLanes_) {
-                    if (prev.kind == index.kind && prev.index == index.index &&
+                    if (prev.stride == 1 && prev.kind == index.kind && prev.index == index.index &&
                         prev.neg == index.neg && prev.abs == index.abs &&
                         prev.arlAt < program_.instrs.size() &&
                         program_.instrs[prev.arlAt].op == VOp::Arl &&
@@ -4680,6 +4754,27 @@ private:
                 arl.dst.writemask = 1 << addrLane;
                 arl.srcs[0] = index;
                 arl.srcs[0].swizzle = {component, component, component, component};
+                if (stride != 1) {
+                    // PS3_475 emits FLR(index), MUL(rowCount), ARL.
+                    // Flooring AFTER scaling selects the wrong row for
+                    // fractional indices (1.75 * 4 -> row 7, not row 4).
+                    VInstr floor;
+                    floor.op = VOp::Flr;
+                    floor.dst.index = newVReg();
+                    floor.dst.writemask = 1;
+                    floor.srcs[0] = arl.srcs[0];
+                    program_.instrs.push_back(floor);
+                    VInstr scale;
+                    scale.op = VOp::Mul;
+                    scale.dst.index = newVReg();
+                    scale.dst.writemask = 1;
+                    scale.srcs[0] = tempSrc(floor.dst.index);
+                    scale.srcs[0].swizzle = {0,0,0,0};
+                    scale.srcs[1] = floatLit(static_cast<float>(stride));
+                    program_.instrs.push_back(scale);
+                    arl.srcs[0] = tempSrc(scale.dst.index);
+                    arl.srcs[0].swizzle = {0,0,0,0};
+                }
                 al.arlAt = program_.instrs.size();
                 program_.instrs.push_back(arl);
             }
@@ -4690,8 +4785,7 @@ private:
         read.relative = true;
         read.addrReg = static_cast<uint8_t>(lane / 4);
         read.addrLane = static_cast<uint8_t>(lane % 4);
-        program_.valueToSource[inst.result] = read;
-        valueWidth_[inst.result] = inst.resultType.componentCount();
+        bindArrayElement(inst, read);
     }
 
     bool matrixDimsSupported(const IRTypeInfo& type) const

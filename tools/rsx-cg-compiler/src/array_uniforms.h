@@ -151,6 +151,24 @@ inline std::vector<int> vpArrayElementRegisters(const ArrayUniformUse& use,
     return regs;
 }
 
+// Matrix ELEMENTS use the ascending matrix walk, not the vector-array
+// c467 walk above. PS3_475: float4x4 M[2], dynamic -> bases 256/260;
+// only M[1] used -> -1/256. A float3x3 element takes three rows (256/259).
+// Unused elements still have parent/row records, with no allocated slots.
+inline std::vector<int> vpMatrixArrayElementRegisters(const ArrayUniformUse& use,
+                                                       int count, int rows,
+                                                       int& cursor)
+{
+    std::vector<int> regs(static_cast<size_t>(std::max(0, count)), -1);
+    for (int k = 0; k < count; ++k) {
+        if (use.dynamic || use.constantElements.count(k)) {
+            regs[static_cast<size_t>(k)] = cursor;
+            cursor += rows;
+        }
+    }
+    return regs;
+}
+
 // An FP uniform takes one inline-const slot per element; a VP uniform one
 // constant register per REFERENCED element, or a contiguous block of all
 // of them under a run-time index (vpArrayElementRegisters).  Samplers take
