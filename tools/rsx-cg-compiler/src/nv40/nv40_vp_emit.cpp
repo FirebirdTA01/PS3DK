@@ -90,6 +90,10 @@ int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
         return NVFX_VP_INST_IN_WEIGHT;
     if (semanticUpper == "BLENDINDICES" || semanticUpper == "INDICES")
         return 7;
+    if (semanticUpper == "TANGENT" && semanticIndex == 0)
+        return 14;
+    if (semanticUpper == "BINORMAL" && semanticIndex == 0)
+        return 15;
     return -1;
 }
 

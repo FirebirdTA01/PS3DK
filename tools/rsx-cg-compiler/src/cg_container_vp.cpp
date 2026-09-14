@@ -259,6 +259,10 @@ uint32_t vpInputResource(const std::string& semUpper, int semIndex)
         return kCgAttr0 + 7;                                  // ATTR7
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
         return kCgAttr8 + semIndex;                          // ATTR8..15
+    if (semUpper == "TANGENT" && semIndex == 0)
+        return kCgAttr0 + 14;                                // ATTR14
+    if (semUpper == "BINORMAL" && semIndex == 0)
+        return kCgAttr0 + 15;                                // ATTR15
     return 0;
 }
 

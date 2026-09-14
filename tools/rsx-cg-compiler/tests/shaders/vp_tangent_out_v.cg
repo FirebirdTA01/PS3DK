@@ -1,0 +1,7 @@
+void main(float4 in_position : POSITION,
+          out float4 out_position : POSITION,
+          out float3 out_tangent  : TANGENT)
+{
+    out_position = in_position;
+    out_tangent  = in_position.xyz;
+}
