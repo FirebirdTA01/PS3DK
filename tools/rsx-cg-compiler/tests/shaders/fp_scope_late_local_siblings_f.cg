@@ -1,0 +1,15 @@
+// t_36492ad8 commit 1.  A NAME USED AND THEN DECLARED LATER IN THE SAME
+// LEXICAL SCOPE is refused - "error C1002: the name X is already defined" -
+// and the refusal does NOT depend on reachability, so it is not the deferred
+// C1008 class.  Every other arrangement is legal, measured over nine probes
+// on sce-cgc 475 (codex): use outer / declare inner, use inner / declare
+// outer, two sibling blocks, and file-scope-later all compile.
+//
+// THE KEY IS THE SCOPE INSTANCE.  Recording the unresolved use against the
+// FUNCTION would refuse three of those legal shapes; recording it against the
+// scope DEPTH cannot tell two sibling blocks apart.
+//
+// ACCEPT: two SIBLING blocks.  Legal - and the row that rules out keying the
+// record on scope DEPTH, since siblings share a depth.
+float4 unused(float4 t) { { float4 q = missing(t); } { float missing; } return t; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

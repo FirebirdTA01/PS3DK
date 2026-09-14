@@ -1,0 +1,14 @@
+// t_36492ad8 commit 1.  THE C1008 "NAME NOT FOUND" CLASS IS REPORTED ONLY
+// INSIDE FUNCTIONS REACHABLE FROM THE SELECTED ENTRY.  Measured against
+// sce-cgc 475, sce_fp_rsx, helper never called from main:
+//
+//     undeclared identifier / undeclared function / forward call   ACCEPT
+//     a type error (C1056) / a wrong arity (C1103)                 REFUSE
+//
+// So an unreachable body IS analysed - only this one class is gated.
+//
+// REFUSE: a TYPE error is NOT gated - C1056 fires in an unreachable body.
+// This row is why "unreachable functions are not analysed" is the wrong
+// reading of the three ACCEPTs above.
+float4 unused(float4 t) { float4 x = t.xyz; return x; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

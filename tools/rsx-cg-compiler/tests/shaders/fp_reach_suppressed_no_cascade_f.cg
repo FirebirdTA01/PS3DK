@@ -1,0 +1,16 @@
+// t_36492ad8 commit 1.  THE C1008 "NAME NOT FOUND" CLASS IS REPORTED ONLY
+// INSIDE FUNCTIONS REACHABLE FROM THE SELECTED ENTRY.  Measured against
+// sce-cgc 475, sce_fp_rsx, helper never called from main:
+//
+//     undeclared identifier / undeclared function / forward call   ACCEPT
+//     a type error (C1056) / a wrong arity (C1103)                 REFUSE
+//
+// So an unreachable body IS analysed - only this one class is gated.
+//
+// ACCEPT: a suppressed missing name must not CASCADE.  f takes two arguments
+// and gets one error-typed argument from the held finding; fabricating an
+// arity error from it would refuse a program the reference accepts
+// (review: codex).
+float4 f(float4 a, float b) { return a * b; }
+float4 unused(float4 t) { return f(missing(t)); }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

@@ -1,0 +1,15 @@
+// t_36492ad8 commit 1.  THE MIRROR OF fp_reach_unreached_undecl_id_f, and
+// together they are the row for the SECOND mechanism this commit adds.
+//
+// Deferring the SEMANTIC diagnostic was not enough on its own: the IR builder
+// lowered every non-prototype function, so an undeclared identifier in an
+// unreachable body came back as "IR generation error: Unknown identifier" from
+// a function the reference never compiles.  Lowering now skips functions the
+// entry cannot reach.
+//
+// Unreachable, this exact body must compile CLEAN; reachable, as here, it must
+// refuse.  One of the pair without the other proves nothing: suppressing the
+// class everywhere satisfies the first, and lowering everything satisfies the
+// second.
+float4 unused(float4 t) { return t * zzz; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return unused(t); }

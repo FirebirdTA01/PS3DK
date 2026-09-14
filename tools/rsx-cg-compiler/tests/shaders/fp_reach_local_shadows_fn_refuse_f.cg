@@ -1,0 +1,12 @@
+// t_36492ad8 commit 1.  REFUSE: A NEARER BINDING WINS OVER THE FUNCTION OF THE SAME NAME.  The local
+// `float f` shadows `f(float4)`, so `f(t)` is a call on a float - C1105 on
+// the reference.  The parent ACCEPTED it (it called the function).
+//
+// The body is UNREACHABLE, which is the point: C1105 is not the deferred
+// class, so it must be reported here anyway.  And the check has to run
+// BEFORE the overload set is consulted - functionOverloads is keyed by name
+// and knows nothing about scopes, so resolution SUCCEEDS and a check in the
+// failure path never runs.
+float4 f(float4 t) { return t * 2.0; }
+float4 unused(float4 t) { float f = 1; return f(t); }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

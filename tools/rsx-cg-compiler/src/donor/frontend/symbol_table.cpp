@@ -167,6 +167,7 @@ bool SymbolTable::addFunction(const std::string& name,
     auto symbol = std::make_unique<Symbol>(SymbolKind::Function, name, returnType);
     symbol->parameterTypes = paramTypes;
     symbol->parameterNames = paramNames;
+    symbol->declIndex = declIndexCursor_;
     symbol->declaration = decl;
     symbol->isIntrinsic = isIntrinsic;
     symbol->intrinsicOpcode = opcode;
@@ -193,9 +194,22 @@ bool SymbolTable::addFunction(const std::string& name,
     return true;
 }
 
+bool SymbolTable::hasVisibleFunction(const std::string& name,
+                                     size_t visibleThrough) const
+{
+    auto it = functionOverloads.find(name);
+    if (it == functionOverloads.end()) return false;
+    for (Symbol* sym : it->second)
+    {
+        if (sym->declIndex <= visibleThrough) return true;
+    }
+    return false;
+}
+
 std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
     const std::string& name,
-    const std::vector<CgType>& argumentTypes) const
+    const std::vector<CgType>& argumentTypes,
+    size_t visibleThrough) const
 {
     auto it = functionOverloads.find(name);
     if (it == functionOverloads.end())
@@ -216,6 +230,16 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
 
     for (Symbol* sym : overloads)
     {
+        // A DECLARATION WRITTEN AFTER THIS CALL IS NOT A CANDIDATE.  The
+        // reference resolves against what is visible at the call and refuses
+        // a forward call with no prior prototype ("error C1008: undefined
+        // variable"), where we used to reach forward and compile it
+        // (t_36492ad8).  Builtins carry index 0 and are never filtered here.
+        if (sym->declIndex > visibleThrough)
+        {
+            continue;
+        }
+
         // Check argument count
         if (sym->parameterTypes.size() != argumentTypes.size())
         {

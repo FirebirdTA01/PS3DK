@@ -1,0 +1,6 @@
+// t_36492ad8 commit 1.  ACCEPT: the control with NO shadow - the same call reaches the function.
+// Without it, refusing every call named like a variable would pass both
+// rows above.
+float4 f(float4 t) { return t * 2.0; }
+float4 unused(float4 t) { return f(t); }
+float4 main(float4 t : TEXCOORD0) : COLOR { return unused(t); }

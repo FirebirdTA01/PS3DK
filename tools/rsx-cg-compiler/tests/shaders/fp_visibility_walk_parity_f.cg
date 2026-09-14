@@ -1,0 +1,37 @@
+// t_36492ad8 commit 1.  WALK PARITY SELF-CHECK (review: Fable).
+//
+// Every top-level declaration KIND in one unit: struct, file-scope uniform,
+// file-scope const, a prototype, a helper definition, and the entry.  Call
+// visibility is carried by a declIndex that pass 1 stamps and pass 2
+// reproduces, so the two walks must enumerate this list identically.
+//
+// HONEST ABOUT WHAT THIS ROW CAN AND CANNOT DO.  It cannot fail today: both
+// passes are the same `for` over unit.declarations with the counter bumped
+// BEFORE the switch, so a kind handled in one switch and not the other still
+// counts in both and parity holds by construction.  The row exists so that
+// the day someone adds a filter or a `continue` to one loop - the only way to
+// break it - this unit stops compiling and names the parity error instead of
+// silently shifting every index after the divergence.
+struct Material
+{
+    float4 tint;
+    float  gloss;
+};
+
+uniform float4 u_tint;
+static const float k_scale = 0.5;
+
+float4 shade(float4 c, Material m);
+
+float4 shade(float4 c, Material m)
+{
+    return c * m.tint * m.gloss * k_scale;
+}
+
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    Material m;
+    m.tint  = u_tint;
+    m.gloss = 2.0;
+    return shade(t, m);
+}

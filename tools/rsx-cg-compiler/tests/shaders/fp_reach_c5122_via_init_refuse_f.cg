@@ -1,0 +1,14 @@
+// t_36492ad8 commit 1.  REFUSE, AND THE DIAGNOSTIC IS THE POINT.  C5122 SHARES THE ROOT SET:
+// measured, a helper carrying a return semantic reached ONLY from a static
+// initialiser is refused C5122 by the reference, while the same helper
+// never called at all is accepted - so the widened roots serve both walks
+// and t_61109061 does not need a second graph.
+//
+// THIS ROW IS CHECKED BY DIAGNOSTIC, NOT BY VERDICT.  The pristine parent
+// also refuses this program, but for an unrelated reason - "ldunif of 'g'
+// has no registered uniform source", the file-scope-initialiser lowering
+// gap - so a verdict-only assertion would pass on a compiler that has
+// never heard of C5122.
+float helper() : COLOR { return 0.5; }
+static float g = helper();
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * g; }

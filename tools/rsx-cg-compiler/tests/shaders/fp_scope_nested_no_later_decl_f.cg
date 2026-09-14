@@ -1,0 +1,12 @@
+// t_36492ad8 commit 1.  RECORDING A NAME IS NOT DIAGNOSING IT.
+//
+// An error-typed argument SUPPRESSES the diagnostics on its call - measured
+// both ways on sce-cgc 475 - but it must NOT suppress the record that the
+// callee's NAME was used unresolved, because a later declaration of that name
+// in the same scope is C1002 and the reference refuses it (review: codex).
+//
+// ACCEPT: the same unresolved callee with NO later declaration.  This is the
+// row that stops the fix from being "emit C1105 before the error-argument
+// check" - the reference accepts this, so recording must stay silent.
+float4 unused(float4 t) { f(missing(t)); return t; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

@@ -1,0 +1,13 @@
+// t_36492ad8 commit 1.  THE REFERENCE RESOLVES A CALL AGAINST THE
+// DECLARATIONS VISIBLE AT THAT CALL.  Our frontend is two-pass, so before
+// this every declaration in the unit was visible from everywhere.  Measured
+// against sce-cgc 475, sce_fp_rsx.  No defaults appear in any of these - the
+// rule is observable without them.
+//
+// PARTITION, POSITIONAL.  A source overload of a BUILTIN name declared AFTER
+// the call does not hide the builtin.  This pair differs only in the source
+// body's constant (0.75); the two containers must be IDENTICAL, which is what
+// proves the builtin ran and the late source was never consulted.
+
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(sin(t.x), 0, 0, 1); }
+float sin(float a) { return 0.75; }

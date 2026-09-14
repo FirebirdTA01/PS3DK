@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <optional>
 
@@ -38,6 +39,14 @@ struct Symbol
     // For functions
     std::vector<CgType> parameterTypes;
     std::vector<std::string> parameterNames;
+    // WHERE THIS DECLARATION SITS IN THE UNIT, in parser order over top-level
+    // declarations.  The reference resolves every call against the
+    // declarations VISIBLE AT THAT CALL; our frontend is two-pass, so without
+    // this the whole unit is visible from everywhere and a call resolves to
+    // things written after it.  A source location cannot serve as the order -
+    // an #included file's line numbers are not comparable to the includer's -
+    // so this is a monotonic counter, not a position (t_36492ad8).
+    size_t declIndex = 0;
     bool isIntrinsic = false;
     std::string intrinsicOpcode;
 
@@ -68,6 +77,18 @@ public:
     Kind kind() const { return scopeKind; }
     Scope* parent() const { return parentScope; }
 
+    // A NAME USED HERE AND NOT FOUND.  The reference refuses a name that is
+    // used and then DECLARED LATER IN THE SAME LEXICAL SCOPE ("error C1002:
+    // the name X is already defined"), and accepts every other arrangement:
+    // use outer then declare inner, use inner then declare outer, two sibling
+    // blocks, and file-scope-later are all legal (measured by codex over nine
+    // probes; t_17071b54).  So the record belongs to the SCOPE INSTANCE - not
+    // to the function, which would over-refuse three legal shapes, and not to
+    // the depth, which cannot tell siblings apart.
+    void noteUnresolvedUse(const std::string& name) { unresolvedUses.insert(name); }
+    bool hadUnresolvedUse(const std::string& name) const
+    { return unresolvedUses.count(name) != 0; }
+
     // Symbol management
     bool addSymbol(std::unique_ptr<Symbol> symbol);
     Symbol* lookupLocal(const std::string& name) const;
@@ -90,6 +111,7 @@ public:
     }
 
 private:
+    std::unordered_set<std::string> unresolvedUses;
     Kind scopeKind;
     Scope* parentScope;
     std::unordered_map<std::string, std::unique_ptr<Symbol>> symbolTable;
@@ -131,9 +153,13 @@ public:
     };
 
     // Find the best matching overload for a function call
+    // VISIBILITY IS PART OF RESOLUTION.  Only declarations with
+    // declIndex <= visibleThrough take part; SIZE_MAX means "the whole unit",
+    // for callers with no position to give.
     std::optional<OverloadCandidate> resolveOverload(
         const std::string& name,
-        const std::vector<CgType>& argumentTypes) const;
+        const std::vector<CgType>& argumentTypes,
+        size_t visibleThrough = SIZE_MAX) const;
 
     // Add a function and handle overloading
     bool addFunction(const std::string& name,
@@ -144,6 +170,28 @@ public:
                      bool isIntrinsic = false,
                      const std::string& opcode = "");
 
+    // Does this NAME have any declaration visible at that point - a source
+    // declaration with declIndex <= visibleThrough, or a builtin?  Asked to
+    // separate "no such name" (the reference's C1008 class, which it reports
+    // only inside entry-reachable functions) from "that name exists but no
+    // overload of it fits this call" (C1103, unconditional).
+    bool hasVisibleFunction(const std::string& name, size_t visibleThrough) const;
+
+    // Record / query an unresolved use in the CURRENT scope instance; see
+    // Scope::noteUnresolvedUse for why the scope and not the function.
+    void noteUnresolvedUse(const std::string& name)
+    { if (currentScope()) currentScope()->noteUnresolvedUse(name); }
+    bool currentScopeHadUnresolvedUse(const std::string& name) const
+    { return currentScope() && currentScope()->hadUnresolvedUse(name); }
+
+    // THE DECLARATION CURSOR.  Every function registered from here on carries
+    // this index.  Builtins are registered before any source declaration and
+    // keep index 0, so they stay visible to every call; the semantic analyser
+    // bumps this once per top-level source declaration, in parser order.  A
+    // cursor rather than an addFunction parameter, because every builtin
+    // registration would otherwise have to thread it through.
+    void setDeclIndex(size_t index) { declIndexCursor_ = index; }
+
     // Register built-in functions and types
     void registerBuiltins();
 
@@ -151,6 +199,7 @@ public:
     size_t depth() const { return scopeStack.size(); }
 
 private:
+    size_t declIndexCursor_ = 0;
     std::vector<std::unique_ptr<Scope>> scopeStack;
     Scope* globalScopePtr = nullptr;
 
