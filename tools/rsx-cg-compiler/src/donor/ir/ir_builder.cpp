@@ -4221,7 +4221,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
     int32_t constIdx = 0;
     bool constantIndex = extractIntScalar(*currentFunction_, indexValue, constIdx);
     auto* matrix = dynamic_cast<IRConstant*>(currentFunction_->getValue(arrayValue));
-    if (matrix && matrix->type.isMatrix() && !constantIndex)
+    if (matrix && (matrix->type.isMatrix() || matrix->type.isVector()) && !constantIndex)
     {
         auto* index = dynamic_cast<IRConstant*>(currentFunction_->getValue(indexValue));
         std::vector<float> components;
@@ -4229,16 +4229,21 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
             extractFloatComponents(*currentFunction_, indexValue, components) &&
             components.size() == 1)
         {
-            // The reference truncates the evaluated index once: M[1.9]
-            // reads row1, M[-0.9] row0, M[1.7*1.2] row2. Check before an
-            // integer conversion, including nonfinite/overflowing values.
-            const double row = std::trunc(static_cast<double>(components[0]));
-            if (!std::isfinite(row) || row < 0 || row >= matrix->type.matrixRows)
+            // The reference truncates the evaluated index once, for both
+            // matrix rows and vector lanes: [1.9] selects 1, [-0.9] selects
+            // 0, [1.7*1.2] selects 2. Check before integer conversion,
+            // including nonfinite/overflowing values. Keep the aggregate's
+            // payload untouched: integer lane extraction below stays exact.
+            const double element = std::trunc(static_cast<double>(components[0]));
+            const int count = matrix->type.isMatrix()
+                ? matrix->type.matrixRows : matrix->type.vectorSize;
+            if (!std::isfinite(element) || element < 0 || element >= count)
             {
-                error(expr->index->loc, "matrix row index out of bounds");
+                error(expr->index->loc, matrix->type.isMatrix()
+                    ? "matrix row index out of bounds" : "vector index out of bounds");
                 return InvalidIRValue;
             }
-            constIdx = static_cast<int32_t>(row);
+            constIdx = static_cast<int32_t>(element);
             constantIndex = true;
         }
     }
