@@ -174,6 +174,29 @@ WALL_CEILING_OVERRIDES = {
 }
 
 
+SCRATCH_ROOT_ENV = "PS3DK_SCRATCH_ROOT"
+_scratch_root_override: "Path | None" = None
+
+
+def scratch_root() -> Path:
+    """Directory every per-test scratch directory is created under.
+
+    Defaults to <repo>/.local/tmp (gitignored), never the host's shared Temp:
+    on 2026-09-14 something outside this repo deleted the shared box's %TEMP%
+    wholesale twice and took four rows' scratch with it mid-run. Override with
+    --scratch-root or PS3DK_SCRATCH_ROOT (the flag wins over the variable).
+    The directory is created on demand; each test's own subdirectory is
+    removed when the test finishes.
+    """
+    root = _scratch_root_override
+    if root is None:
+        env_root = os.environ.get(SCRATCH_ROOT_ENV)
+        root = Path(env_root) if env_root else Path(__file__).resolve().parents[2] / ".local" / "tmp"
+    root = Path(root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 class Outcome(enum.Enum):
     PASS = "PASS"
     FAIL = "FAIL"
@@ -440,7 +463,8 @@ def execute_test(inv: TestInvocation, repo_root: Path, elapsed_so_far: float) ->
         start_new_session = True
 
     # Assign distinct temp directory per invocation to prevent cross-talk
-    test_tmp_dir = tempfile.mkdtemp(prefix=f"ps3dk_run_{os.getpid()}_{int(t0 * 1000 % 100000)}_")
+    test_tmp_dir = tempfile.mkdtemp(prefix=f"ps3dk_run_{os.getpid()}_{int(t0 * 1000 % 100000)}_",
+                                    dir=str(scratch_root()))
     env = dict(os.environ)
     env["TMPDIR"] = test_tmp_dir
     env["TEMP"] = test_tmp_dir
@@ -892,10 +916,59 @@ jobs:
     res_mixed6 = execute_test(dummy_mixed6, Path("."), 0.0)
     assert res_mixed6.outcome == Outcome.FAIL, f"Expected FAIL for indented FAIL with prerequisite, got {res_mixed6.outcome}"
 
+    # Scratch-root row: every per-test scratch directory is created under scratch_root()
+    # (repo-local by default), handed to the child as TMPDIR/TEMP/TMP, and removed afterwards.
+    # Guards the 2026-09-14 rule that no run depends on the shared host Temp.
+    global _scratch_root_override
+    probe_root = Path(tempfile.mkdtemp(prefix="ps3dk_selfcheck_root_", dir=str(scratch_root())))
+    saved_override = _scratch_root_override
+    _scratch_root_override = probe_root
+    try:
+        dummy_scratch = TestInvocation("tests/mock/scratch-test.sh", "", [sys.executable, "-c",
+            "import os; print(os.environ['TMPDIR']); print(os.environ['TEMP']); print(os.environ['TMP'])"],
+            "Scratch", 5.0, 5.0)
+        res_scratch = execute_test(dummy_scratch, Path("."), 0.0)
+        assert res_scratch.outcome == Outcome.PASS, f"Scratch-root probe must PASS, got {res_scratch.outcome}"
+        scratch_lines = [ln.strip() for ln in res_scratch.stdout.splitlines() if ln.strip()]
+        assert len(scratch_lines) == 3 and len(set(scratch_lines)) == 1, f"TMPDIR/TEMP/TMP must agree: {scratch_lines}"
+        child_scratch = Path(scratch_lines[0]).resolve()
+        assert child_scratch.parent == probe_root.resolve(),             f"per-test scratch {child_scratch} must sit directly under the scratch root {probe_root}"
+        assert child_scratch.name.startswith("ps3dk_run_"), f"unexpected scratch name {child_scratch.name}"
+        assert not child_scratch.exists(), f"per-test scratch {child_scratch} must be removed after the run"
+        # Default placement is exact: no flag, no variable -> <repo>/.local/tmp.
+        _scratch_root_override = None
+        saved_env = {k: os.environ.pop(k, None) for k in (SCRATCH_ROOT_ENV, "TMPDIR", "TEMP", "TMP")}
+        try:
+            default_root = scratch_root()
+            expected_default = (Path(__file__).resolve().parents[2] / ".local" / "tmp").resolve()
+            assert default_root == expected_default, f"default scratch root {default_root} != {expected_default}"
+            # Control: the supported repo-local launch, where the caller already
+            # exported TMPDIR/TEMP/TMP=<repo>/.local/tmp before Python started, must
+            # place the per-test directory directly under that same root and clean it.
+            for k in ("TMPDIR", "TEMP", "TMP"):
+                os.environ[k] = str(default_root)
+            assert scratch_root() == default_root, "scratch root must not move when the environment already points at it"
+            res_env = execute_test(dummy_scratch, Path("."), 0.0)
+            assert res_env.outcome == Outcome.PASS, f"Scratch-root env control must PASS, got {res_env.outcome}"
+            env_lines = [ln.strip() for ln in res_env.stdout.splitlines() if ln.strip()]
+            env_child = Path(env_lines[0]).resolve()
+            assert env_child.parent == default_root,                 f"env-launched per-test scratch {env_child} must sit directly under {default_root}"
+            assert not env_child.exists(), f"env-launched per-test scratch {env_child} must be removed after the run"
+        finally:
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    finally:
+        _scratch_root_override = saved_override
+        shutil.rmtree(probe_root, ignore_errors=True)
+    print("  [PASS] Scratch root: per-test dirs directly under the scratch root, cleaned; default = <repo>/.local/tmp; env-launch control")
+
     # Grandchild process tree termination test:
     # Parent process spawns a background grandchild sleeping 6s and exits immediately.
     # Runner must time out after 0.3s, terminate the grandchild process tree, and not hang.
-    grandchild_tmp = tempfile.mkdtemp(prefix="ps3dk_selfcheck_gc_")
+    grandchild_tmp = tempfile.mkdtemp(prefix="ps3dk_selfcheck_gc_", dir=str(scratch_root()))
     grandchild_pid_file = Path(grandchild_tmp) / "child_pid.txt"
     child_code = (
         f"import os, pathlib, time\n"
@@ -1026,7 +1099,7 @@ jobs:
     assert res_future.duration >= 0.50, f"Future-sentinel test finished too fast: {res_future.duration:.2f}s"
 
     # Row 5: Discriminator test: unrelated file writes in another directory do NOT reset the idle timer
-    unrelated_dir = tempfile.mkdtemp(prefix="ps3dk_unrelated_")
+    unrelated_dir = tempfile.mkdtemp(prefix="ps3dk_unrelated_", dir=str(scratch_root()))
     def unrelated_writer():
         for i in range(5):
             time.sleep(0.1)
@@ -1114,8 +1187,15 @@ def main() -> int:
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure or timeout")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose test output")
     parser.add_argument("--self-check", action="store_true", help="Run internal self-checks and exit")
+    parser.add_argument("--scratch-root", type=Path, default=None,
+                        help="Directory to create per-test scratch under (default: <repo>/.local/tmp, "
+                             f"or ${SCRATCH_ROOT_ENV}); never the shared host Temp")
 
     args = parser.parse_args()
+
+    global _scratch_root_override
+    if args.scratch_root is not None:
+        _scratch_root_override = args.scratch_root
 
     if args.self_check:
         return run_self_check()
