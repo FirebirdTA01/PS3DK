@@ -75,3 +75,8 @@ tools/rsx-cg-compiler/tests/shaders/vp_div_vector2_v.cg|auto|general
 # temps.  The rig binds every attribute with its own lane recipe, so a wrong
 # input selector paints a different gradient.
 tools/rsx-cg-compiler/tests/shaders/vp_two_inputs_rig_v.cg|auto|general
+
+# VP scalar intrinsics witnesses: sin/cos and clamp on hardware, pixel-judged (t_542450b2)
+tools/rsx-cg-compiler/tests/shaders/vp_scalar_sin_cos_v.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/vp_scalar_clamp_sat_v.cg|0|general
+tools/rsx-cg-compiler/tests/shaders/vp_scalar_clamp_bounds_v.cg|auto|general

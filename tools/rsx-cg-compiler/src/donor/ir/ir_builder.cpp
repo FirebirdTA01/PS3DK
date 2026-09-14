@@ -2928,8 +2928,17 @@ IRValueID IRBuilder::tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
         case IROp::Neg:  r[i] = -a[i]; break;
         case IROp::Abs:  r[i] = std::fabs(a[i]); break;
         case IROp::Sqrt:
-            if (a[i] < 0.0f) return InvalidIRValue;  // leave NaN to runtime
+            // The reference compiler folds sqrt of any POSITIVE literal (including
+            // denormals) and refuses to fold zero, negative zero, or any negative — those
+            // are emitted as runtime RSQ + RCP.
+            if (a[i] <= 0.0f) return InvalidIRValue;
             r[i] = std::sqrt(a[i]); break;
+        case IROp::Sin:
+            r[i] = std::sin(a[i]); break;
+        case IROp::Cos:
+            r[i] = std::cos(a[i]); break;
+        case IROp::Tan:
+            r[i] = std::tan(a[i]); break;
         case IROp::RSqrt:
             if (a[i] <= 0.0f) return InvalidIRValue;
             r[i] = 1.0f / std::sqrt(a[i]); break;
@@ -3323,6 +3332,23 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             }
 
             return emitInstruction(mulOp, resultType, argValues);
+        }
+
+        if (argValues.size() == 1)
+        {
+            if (IRValueID folded = tryFoldUnaryOp(*builtinOp, resultType, argValues[0]);
+                folded != InvalidIRValue)
+            {
+                return folded;
+            }
+        }
+        else if (argValues.size() == 2)
+        {
+            if (IRValueID folded = tryFoldBinaryOp(*builtinOp, resultType, argValues[0], argValues[1]);
+                folded != InvalidIRValue)
+            {
+                return folded;
+            }
         }
 
         // Emit built-in operation

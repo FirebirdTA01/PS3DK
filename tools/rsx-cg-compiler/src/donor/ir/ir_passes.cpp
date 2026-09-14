@@ -386,6 +386,7 @@ bool ConstantFolding::tryFoldInstruction(IRFunction& func, IRInstruction* inst)
 
     case IROp::Sin:
     case IROp::Cos:
+    case IROp::Tan:
     case IROp::Sqrt:
     case IROp::RSqrt:
     case IROp::Abs:
@@ -575,7 +576,10 @@ IRConstant* ConstantFolding::foldMathOp(IRFunction& func, IROp op,
     {
     case IROp::Sin: result = std::sin(a); break;
     case IROp::Cos: result = std::cos(a); break;
-    case IROp::Sqrt: result = (a >= 0.0f) ? std::sqrt(a) : 0.0f; break;
+    case IROp::Tan: result = std::tan(a); break;
+    case IROp::Sqrt:
+        if (a <= 0.0f) return nullptr;
+        result = std::sqrt(a); break;
     case IROp::RSqrt: result = (a > 0.0f) ? 1.0f / std::sqrt(a) : 0.0f; break;
     case IROp::Abs: result = std::abs(a); break;
     case IROp::Floor: result = std::floor(a); break;
