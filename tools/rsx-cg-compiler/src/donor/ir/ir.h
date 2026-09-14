@@ -578,7 +578,8 @@ namespace IRUtils
     // Get number of operands for an operation
     int getOperandCount(IROp op);
 
-    // Round float to 16-bit half precision (binary16, ties round toward +infinity to match Cg hardware target semantics)
+    // Round float to 16-bit half precision (ties round toward +infinity to match Cg hardware target semantics;
+    // NV40 half supports normal exponent range up to 2^16, overflowing to infinity at 2^17 / exp >= 32)
     inline float roundToHalf(float f)
     {
         if (std::isnan(f) || std::isinf(f)) return f;
@@ -589,16 +590,16 @@ namespace IRUtils
         int32_t exp = static_cast<int32_t>((u >> 23) & 0xFFu) - 127 + 15;
         uint32_t mant = u & 0x7FFFFFu;
 
-        uint16_t h;
-        if (exp >= 31)
+        uint32_t u_out;
+        if (exp >= 32)
         {
-            h = static_cast<uint16_t>((sign >> 16) | 0x7C00u);
+            u_out = sign | 0x7F800000u;
         }
         else if (exp <= 0)
         {
             if (exp < -10)
             {
-                h = static_cast<uint16_t>(sign >> 16);
+                u_out = sign;
             }
             else
             {
@@ -611,10 +612,23 @@ namespace IRUtils
                 uint32_t kept = val >> totalShift;
                 if (roundUp)
                     kept++;
-                if (kept > 0x3FFu)
-                    h = static_cast<uint16_t>((sign >> 16) | (1u << 10) | (kept & 0x3FFu));
+                if (kept == 0)
+                {
+                    u_out = sign;
+                }
                 else
-                    h = static_cast<uint16_t>((sign >> 16) | kept);
+                {
+                    int32_t h_exp = 0;
+                    uint32_t h_mant = kept;
+                    while ((h_mant & 0x400u) == 0)
+                    {
+                        h_mant <<= 1;
+                        h_exp--;
+                    }
+                    h_exp++;
+                    h_mant &= 0x3FFu;
+                    u_out = sign | ((h_exp + 127 - 15) << 23) | (h_mant << 13);
+                }
             }
         }
         else
@@ -631,51 +645,17 @@ namespace IRUtils
                 {
                     mant = 0;
                     exp++;
-                    if (exp >= 31)
-                        h = static_cast<uint16_t>((sign >> 16) | 0x7C00u);
-                    else
-                        h = static_cast<uint16_t>((sign >> 16) | (exp << 10) | (mant >> 13));
                 }
-                else
-                {
-                    h = static_cast<uint16_t>((sign >> 16) | (exp << 10) | (mant >> 13));
-                }
+            }
+            if (exp >= 32)
+            {
+                u_out = sign | 0x7F800000u;
             }
             else
             {
-                h = static_cast<uint16_t>((sign >> 16) | (exp << 10) | (mant >> 13));
+                uint32_t h_mant = (mant >> 13) & 0x3FFu;
+                u_out = sign | ((static_cast<uint32_t>(exp) + 127 - 15) << 23) | (h_mant << 13);
             }
-        }
-
-        uint32_t h_sign = (h & 0x8000u) << 16;
-        uint32_t h_exp = (h >> 10) & 0x1Fu;
-        uint32_t h_mant = h & 0x3FFu;
-        uint32_t u_out;
-        if (h_exp == 31)
-        {
-            u_out = h_sign | 0x7F800000u | (h_mant << 13);
-        }
-        else if (h_exp == 0)
-        {
-            if (h_mant == 0)
-            {
-                u_out = h_sign;
-            }
-            else
-            {
-                while ((h_mant & 0x400u) == 0)
-                {
-                    h_mant <<= 1;
-                    h_exp--;
-                }
-                h_exp++;
-                h_mant &= 0x3FFu;
-                u_out = h_sign | ((h_exp + 127 - 15) << 23) | (h_mant << 13);
-            }
-        }
-        else
-        {
-            u_out = h_sign | ((h_exp + 127 - 15) << 23) | (h_mant << 13);
         }
 
         float res;

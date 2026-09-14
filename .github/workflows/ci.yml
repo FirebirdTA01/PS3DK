@@ -239,6 +239,8 @@ jobs:
         run: bash tests/shader-compiler/half-arithmetic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test a scalar-to-vector cast is a broadcast
         run: bash tests/shader-compiler/cast-splat-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test C-style narrowing casts on vectors and matrices
+        run: bash tests/shader-compiler/cast-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler declared half colour output
         run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the half colour output reaches H0 through the allocator

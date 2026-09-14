@@ -1,0 +1,5 @@
+void main(float4 position : POSITION, float3 normal : NORMAL, uniform float4x4 mvp, uniform float4x4 model, out float4 oPos : POSITION, out float3 oN : TEXCOORD0)
+{
+    oPos = mul(mvp, position);
+    oN = mul(float3x3(model[0].xyw, model[1].xyw, model[2].xyw), normal);
+}

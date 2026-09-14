@@ -1,0 +1,7 @@
+struct VOut { float4 pos : POSITION; int2 col : COLOR; };
+VOut main(float4 p : POSITION) {
+    VOut o;
+    o.pos = p;
+    o.col = (short2)int4(65537, -32769, 0, 0);
+    return o;
+}
