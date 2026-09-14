@@ -371,62 +371,16 @@ VpContainerResult emitVertexContainerImpl(
         std::any_of(module.globals.begin(), module.globals.end(),
                     [](const IRGlobal& g) { return g.name == "gBlendMatrices"; });
 
-    auto appendBlendMatrixPalette =
-        [&](uint32_t paramno, uint32_t isShared, int& nextMatrixReg)
-    {
-        const int base = nextMatrixReg;
-        nextMatrixReg += 32 * 4;
-        for (int elem = 0; elem < 32; ++elem)
-        {
-            const int elemBase = base + elem * 4;
-            ParamDesc d;
-            d.name      = "gBlendMatrices[" + std::to_string(elem) + "]";
-            d.semantic  = "";
-            d.type      = kCgFloat4x4;
-            d.var       = kCgUniform;
-            d.direction = kCgIn;
-            d.res       = kCgConst;
-            d.paramno   = paramno;
-            d.isReferenced = 1;
-            d.isShared     = isShared;
-            d.resIndex     = static_cast<uint32_t>(elemBase);
-            params.push_back(d);
-
-            for (int row = 0; row < 4; ++row)
-            {
-                ParamDesc r;
-                r.name      = d.name + "[" + std::to_string(row) + "]";
-                r.semantic  = "";
-                // LITERAL kCgFloat4 on purpose: a blend-matrix palette
-                // element is a 4x4, so its rows really are FLOAT4.  The
-                // other four row sites are column-sized via
-                // cgMatrixRowType (t_d90dbaed); this one is not an
-                // oversight.
-                r.type      = kCgFloat4;
-                r.var       = kCgUniform;
-                r.direction = kCgIn;
-                r.res       = kCgConst;
-                r.paramno   = paramno;
-                r.isReferenced = 1;
-                r.isShared     = isShared;
-                r.resIndex     = static_cast<uint32_t>(elemBase + row);
-                params.push_back(r);
-            }
-        }
-    };
-
     // Mirror VP allocator: matrices grow from c[256] upward, scalars
     // from c[467] downward.  Same algorithm runs inside lowerVertexProgram.
     int nextMatrixReg = 256;
     int nextVectorReg = 467;
 
-    // Array uniforms: one record per element, registers from the same
-    // descending cursor the lowering walked, by the same rule and from the
-    // same classification (array_uniforms.h): a REFERENCED element's own
-    // register under constant indices (t_f9ecd3ac), or a contiguous block
-    // of every element under a run-time index (t_99b29225).  An element
-    // without a register is declared with no resource, as the reference
-    // declares it.
+    // Array uniforms share the lowering's use classification and cursors:
+    // matrices grow upward by rows, scalar/vector elements downward by one.
+    // Constant indexing assigns only referenced elements; dynamic indexing
+    // assigns every element contiguously. Unreferenced elements and their
+    // matrix rows are still declared, with no resource (t_ef0cb2e0).
     const rsx_cg::ArrayUniformUses arrayUses =
         rsx_cg::classifyArrayUniformUses(*entry);
     constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
@@ -436,9 +390,10 @@ VpContainerResult emitVertexContainerImpl(
                                          uint32_t isShared) {
         const auto useIt = arrayUses.find(name);
         const int count = type.arraySize;
-        const std::vector<int> regs = rsx_cg::vpArrayElementRegisters(
-            useIt != arrayUses.end() ? useIt->second : rsx_cg::ArrayUniformUse{},
-            count, nextVectorReg);
+        const auto use = useIt != arrayUses.end() ? useIt->second : rsx_cg::ArrayUniformUse{};
+        const std::vector<int> regs = type.isMatrix()
+            ? rsx_cg::vpMatrixArrayElementRegisters(use, count, type.matrixRows, nextMatrixReg)
+            : rsx_cg::vpArrayElementRegisters(use, count, nextVectorReg);
         for (int k = 0; k < count; ++k)
         {
             const int reg = regs[static_cast<size_t>(k)];
@@ -446,7 +401,8 @@ VpContainerResult emitVertexContainerImpl(
             ParamDesc e;
             e.name      = rsx_cg::arrayElementName(name, k);
             e.semantic  = "";
-            e.type      = cgTypeForIRType(type);
+            e.type      = type.isMatrix()
+                ? cgMatrixType(type.matrixRows, type.matrixCols) : cgTypeForIRType(type);
             e.var       = kCgUniform;
             e.direction = kCgIn;
             e.paramno   = paramno;
@@ -464,6 +420,17 @@ VpContainerResult emitVertexContainerImpl(
                 e.resIndex     = kInvalidIndex;
             }
             params.push_back(e);
+            if (type.isMatrix()) {
+                for (int row = 0; row < type.matrixRows; ++row) {
+                    ParamDesc r = e;
+                    r.name += "[" + std::to_string(row) + "]";
+                    // Row width is the COLUMN count, not the row count.
+                    r.type = cgMatrixRowType(type.matrixCols);
+                    if (referenced)
+                        r.resIndex += row;
+                    params.push_back(r);
+                }
+            }
         }
     };
 
@@ -531,7 +498,7 @@ VpContainerResult emitVertexContainerImpl(
                 d.var       = kCgUniform;
                 d.direction = kCgIn;
                 d.res       = kCgConst;
-                if (p.type.isMatrix())
+                if (p.type.isMatrix() && !p.type.isArray())
                 {
                     const int base = nextMatrixReg;
                     nextMatrixReg += p.type.matrixRows;
@@ -587,12 +554,6 @@ VpContainerResult emitVertexContainerImpl(
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
-
-            if (g.name == "gBlendMatrices")
-            {
-                appendBlendMatrixPalette(kInvalidIndex, 1u, nextMatrixReg);
-                continue;
-            }
 
             const bool hasExplicit = (g.explicitRegisterBank == 'C');
             std::string semantic;
@@ -721,7 +682,7 @@ VpContainerResult emitVertexContainerImpl(
             d.var       = kCgUniform;
             d.direction = kCgIn;
             d.res       = kCgConst;
-            if (p.type.isMatrix())
+            if (p.type.isMatrix() && !p.type.isArray())
             {
                 const int base = nextMatrixReg;
                 nextMatrixReg += p.type.matrixRows;
@@ -779,12 +740,6 @@ VpContainerResult emitVertexContainerImpl(
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
-
-        if (g.name == "gBlendMatrices")
-        {
-            appendBlendMatrixPalette(kInvalidIndex, 0u, nextMatrixReg);
-            continue;
-        }
 
         const bool hasExplicit = (g.explicitRegisterBank == 'C');
         std::string semantic;

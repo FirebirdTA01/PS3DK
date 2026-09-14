@@ -148,6 +148,8 @@ jobs:
 
       - name: Test vertex array uniforms indexed at run time
         run: bash tests/shader-compiler/vp-array-dynamic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test vertex matrix-array records and indexed row reads
+        run: bash tests/shader-compiler/vp-matrix-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler uniform patch lanes
         run: bash tests/shader-compiler/uniform-patch-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
