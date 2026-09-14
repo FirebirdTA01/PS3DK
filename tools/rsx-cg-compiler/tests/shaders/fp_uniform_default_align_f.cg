@@ -1,0 +1,21 @@
+// ALIGNMENT witness for the container's defaultValue block (t_4b54f26b).
+//
+// fp_uniform_default_f.cg proves the VALUES.  It cannot prove the 16-byte
+// ALIGNMENT, because the strings that precede its first default block happen
+// to leave the blob already 16-aligned - so a writer padding to 4 instead of
+// 16 produces byte-identical output there and the alignment assertion never
+// fires (found by mutation, review: Fable).
+//
+// This fixture forces the padding to matter.  The entry parameter contributes
+// "TEXCOORD0\0" + "t\0" = 12 bytes before the first file-scope uniform's block
+// is written, so the blob is at offset 12 mod 16 at that moment: a correct
+// writer pads 4 bytes and lands the block on a 16-byte boundary, a writer
+// padding to 4 leaves it where it is.  Keep the parameter name ONE character
+// and the semantic TEXCOORD0 - lengthening either changes the residue and
+// silently disarms the witness.
+uniform float4 gB = float4(1.0, 2.0, 3.0, 4.0);
+
+float4 main(float2 t : TEXCOORD0) : COLOR
+{
+    return gB * t.x;
+}

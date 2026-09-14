@@ -261,6 +261,16 @@ ContainerResult emitFragmentContainerImpl(
         // param's slot if no semantic) and writes its offset into
         // the param entry's embeddedConst field.
         std::vector<uint32_t> embeddedConstUcodeOffsets;
+        // Compiled default value of an initialised file-scope uniform.
+        // When non-empty the string-region layout emits a 16-byte
+        // float[4] block (zero-padded above the declared component
+        // count) between the semantic string and the embedded-constant
+        // record, and writes its offset into the param entry's
+        // defaultValue field.  Measured against the reference on
+        // `uniform float4 light : C3 = {1,2,3,4}`: semantic 'C3' at
+        // 0xc3, default block at 0xd0, embeddedConst at 0xe0, name
+        // 'light' at 0xe8 (t_4b54f26b).
+        std::vector<float> defaultValue;
     };
 
     std::vector<ParamDesc> params;
@@ -605,6 +615,36 @@ ContainerResult emitFragmentContainerImpl(
                 d.var       = kCgUniform;
                 d.direction = kCgIn;
 
+                // An initialised file-scope uniform carries a COMPILED
+                // DEFAULT.  ir_builder evaluates the initialiser into
+                // IRGlobal::initialValue / initialIntValues (ir.h:501-502)
+                // and refuses rather than dropping it when it cannot be
+                // evaluated, so by the time the container is built the
+                // value is already in hand - we were writing zero over it.
+                // The reference records it in the parameter table and its
+                // runtime returns it from cgGetParameterDefaultValue
+                // (t_4b54f26b).  Measured: `uniform float4 gTint =
+                // float4(1,2,3,4)` -> [1,2,3,4]; `uniform float gK = 0.75`
+                // -> [0.75,0,0,0]; a half4 default is recorded as four
+                // FLOATS, matching the half=float rule the array-uniform
+                // records already follow.
+                if (!g.initialValue.empty())
+                {
+                    d.defaultValue.assign(
+                        g.initialValue.begin(),
+                        g.initialValue.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                std::min<size_t>(4u, g.initialValue.size())));
+                }
+                else if (!g.initialIntValues.empty())
+                {
+                    const size_t n = std::min<size_t>(4u, g.initialIntValues.size());
+                    d.defaultValue.reserve(n);
+                    for (size_t k = 0; k < n; ++k)
+                        d.defaultValue.push_back(
+                            static_cast<float>(g.initialIntValues[k]));
+                }
+
                 const unsigned slot = globalSlotCursor++;
                 for (const auto& eu : attrs.embeddedUniforms)
                 {
@@ -892,16 +932,30 @@ ContainerResult emitFragmentContainerImpl(
         uint32_t semanticOffset = 0;
         uint32_t nameOffset     = 0;
         uint32_t embeddedConstOffset = 0;
+        uint32_t defaultValueOffset  = 0;
     };
     std::vector<StringSlots> slots(params.size());
 
-    // Per-param the reference compiler layout order (verified 2026-04-18):
+    // Per-param the reference compiler layout order (verified 2026-04-18,
+    // step 2 added 2026-09-13 for t_4b54f26b):
     //   1. Semantic string (if any)
-    //   2. CgBinaryEmbeddedConstant record (if any) — 8-byte aligned
+    //   2. Compiled default value block (if any) - 16-byte aligned,
+    //      exactly 16 bytes, four big-endian floats zero-padded above
+    //      the declared component count
+    //   3. CgBinaryEmbeddedConstant record (if any) - 16-byte aligned
     //      { u32 ucodeCount; u32 ucodeOffset[ucodeCount]; }
-    //   3. Name string
+    //   4. Name string
     // Strings region as a whole is padded to a 16-byte boundary at the
     // end (see padTo(out, 16) below).
+    //
+    // Step 2's position is measured, not assumed.  Reference fixture
+    // `uniform float4 light : C3 = {1.0,2.0,3.0,4.0}` compiled with
+    // sce-cgc -p sce_fp_rsx lays the region out as: semantic 'C3' at
+    // 0xc3, pad, DEFAULT BLOCK at 0xd0, embeddedConst at 0xe0, name
+    // 'light' at 0xe8.  The same block appears with no semantic at
+    // 0xd0 in the braced-default fixture and at 0x270/0x290 on the
+    // vertex profile, always 16-byte aligned and always immediately
+    // before the param's own embedded-constant record and name.
     for (size_t i = 0; i < params.size(); ++i)
     {
         if (!params[i].semantic.empty())
@@ -909,6 +963,21 @@ ContainerResult emitFragmentContainerImpl(
             slots[i].semanticOffset =
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             putString(stringsBlob, params[i].semantic);
+        }
+        if (!params[i].defaultValue.empty())
+        {
+            while (stringsBlob.size() % 16) stringsBlob.push_back(0);
+            slots[i].defaultValueOffset =
+                stringsStart + static_cast<uint32_t>(stringsBlob.size());
+            for (int j = 0; j < 4; ++j)
+            {
+                const float v = (static_cast<size_t>(j) < params[i].defaultValue.size())
+                                    ? params[i].defaultValue[static_cast<size_t>(j)]
+                                    : 0.0f;
+                uint32_t bits = 0;
+                std::memcpy(&bits, &v, sizeof(bits));
+                put32(stringsBlob, bits);
+            }
         }
         if (!params[i].embeddedConstUcodeOffsets.empty())
         {
@@ -973,7 +1042,7 @@ ContainerResult emitFragmentContainerImpl(
         put32(out, d.var);
         put32(out, kInvalidIndex);              // resIndex (-1: not allocated by compiler)
         put32(out, slots[i].nameOffset);        // 0 if no name
-        put32(out, 0);                          // defaultValue
+        put32(out, slots[i].defaultValueOffset); // 0 unless the param carries a compiled default
         put32(out, slots[i].embeddedConstOffset);
         put32(out, slots[i].semanticOffset);    // 0 if no semantic
         put32(out, d.direction);
