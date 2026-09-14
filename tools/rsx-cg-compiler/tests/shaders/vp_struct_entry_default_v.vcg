@@ -1,0 +1,42 @@
+// File-scope defaults on the STRUCT-FLATTENED vertex path (t_4b54f26b).
+//
+// cg_container_vp.cpp has TWO file-scope-uniform loops - one for an ordinary
+// entry, one for an entry that takes a STRUCT parameter.  A2 added the
+// default-value assignment to the first and shipped (a208a73d) with the
+// second still dropping every default; A3's row-TYPE fix covered both loops,
+// which is what made it look right while the values were missing.  Found by a
+// review probe (codex), not by any fixture - vp_matrix_default_v.vcg and
+// fp_uniform_default_f.cg both take ordinary entry parameters and cannot see
+// this path at all.
+//
+// So the entry MUST take a struct: change `main(VIN i)` to a flat parameter
+// list and this fixture silently stops testing anything.  It covers both
+// branches of that loop - a scalar/vector uniform and a matrix's rows -
+// because they were dropped by the same omission.
+//
+// Measured on the reference: gTint's block at 800, gM's rows at 832/864/896.
+// KNOWN DIVERGENCE, not this fixture's business and carded as t_c304d08a:
+// on this path we emit isShared=1 where the reference gives 0, on every
+// file-scope record.  When that lands, this container becomes 15/15
+// field-for-field against the reference; today it is 5/15, the other ten
+// differing in isShared alone.
+struct VIN {
+	float4 position : POSITION;
+	float3 normal   : NORMAL;
+};
+struct VOUT {
+	float4 position : POSITION;
+	float4 colour   : COLOR0;
+};
+
+uniform float4 gTint = float4(0.25, 0.5, 0.75, 1.0);
+float3x3 gM = float3x3(0.25, 0.5, 0.75, 1.5, 2.5, 3.5, -1.0, -2.0, -4.0);
+uniform float4x4 mvp;
+
+VOUT main(VIN i)
+{
+	VOUT o;
+	o.position = mul(mvp, i.position);
+	o.colour = gTint * float4(mul(gM, i.normal), 1.0);
+	return o;
+}

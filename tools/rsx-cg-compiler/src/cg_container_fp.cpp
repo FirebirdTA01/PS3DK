@@ -583,6 +583,26 @@ ContainerResult emitFragmentContainerImpl(
                         }
                     }
                     e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                    // An initialised matrix uniform's compiled default lives
+                    // on the ROWS, never on the parent - the reference leaves
+                    // the parent's defaultValue at 0 and gives each row its
+                    // own 16-byte block holding that row's columns,
+                    // zero-padded.  Measured on `float3x3 M = float3x3(0.25,
+                    // 0.5, 0.75, 1.5, 2.5, 3.5, -1, -2, -4)`: M[0] at 528
+                    // [0.25,0.5,0.75,0], M[1] at 560 [1.5,2.5,3.5,0], M[2] at
+                    // 592 [-1,-2,-4,0] (t_4b54f26b A3).  ir_builder hands the
+                    // value over flattened row-major.
+                    const size_t rowBase =
+                        static_cast<size_t>(k) * static_cast<size_t>(cols);
+                    if (g.initialValue.size() >= rowBase + static_cast<size_t>(cols))
+                    {
+                        e.defaultValue.assign(
+                            g.initialValue.begin() +
+                                static_cast<std::ptrdiff_t>(rowBase),
+                            g.initialValue.begin() +
+                                static_cast<std::ptrdiff_t>(
+                                    rowBase + static_cast<size_t>(cols)));
+                    }
                     params.push_back(e);
                 }
                 continue;

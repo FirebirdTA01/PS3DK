@@ -479,7 +479,22 @@ bool IRBuilder::evaluateConstInitializerTyped(const ExprNode* init,
     if (init->kind == ExprKind::Constructor)
     {
         const auto* ctor = static_cast<const ConstructorExpr*>(init);
-        if (ctor->arguments.empty() || ctor->arguments.size() > 4 || !ctor->constructedType)
+        if (ctor->arguments.empty() || !ctor->constructedType)
+            return false;
+
+        // A MATRIX constructor takes rows*cols scalars, not at most four.
+        // The reference folds `const static float3x3 M = float3x3(nine
+        // scalars)` entirely into the ucode and emits no record for it, and
+        // the eight reference-SDK rows that refused here were all that one
+        // shape, from a single shared logluv.cg (t_4b54f26b A3).  The cap
+        // stays at four for everything else, so a five-component vector
+        // constructor is still the error it always was.
+        const TypeNode* ctorType = ctor->constructedType.get();
+        size_t maxArgs = 4u;
+        if (ctorType && ctorType->matrixRows > 0 && ctorType->matrixCols > 0)
+            maxArgs = static_cast<size_t>(ctorType->matrixRows) *
+                      static_cast<size_t>(ctorType->matrixCols);
+        if (ctor->arguments.size() > maxArgs)
             return false;
 
         const BaseType elemType = ctor->constructedType->baseType;
