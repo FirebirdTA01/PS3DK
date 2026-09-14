@@ -1,0 +1,5 @@
+// t_10dc2936: arithmetic in a file-scope initialiser folds the way the reference folds it.
+// NAMED GAP: the reference ACCEPTS a static const initialised from a uniform (it evaluates it at
+// run time); we refuse it. The row pins the refusal so the day it flips it flips on purpose.
+uniform float W = 1280.0f; static const float2 D = {1.0f / W, 2.0f / W};
+float4 main(float2 t : TEXCOORD0) : COLOR { return float4(t * D, 0, 1); }

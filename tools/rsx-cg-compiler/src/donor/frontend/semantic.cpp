@@ -1315,8 +1315,15 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 
     if (hasError) return CgType::Error();
 
-    // Check component count
+    // Check component count.  A brace list initialising an ARRAY constructs
+    // arraySize elements of the element type: `static const float2 taps[2] =
+    // { float2(1,2), float2(3,4) }` needs 4 components, not 2, and the
+    // reference accepts the constructor, nested and flat spellings
+    // byte-identically (t_6a929b40, measured; nested braces are still the
+    // parser's gap).
     int requiredComponents = constructedType.componentCount();
+    if (constructedType.isArray())
+        requiredComponents = constructedType.elementType().componentCount() * constructedType.arraySize();
 
     // Single-argument constructors in Cg are casts: narrowing is accepted,
     // widening is refused with "error C1033: cast not allowed" (t_d03921c3).

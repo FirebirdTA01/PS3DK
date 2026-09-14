@@ -450,78 +450,519 @@ static bool evaluateConstScalar(const ExprNode* e, ConstEvalScalar& out)
 
 } // namespace
 
+
+// ---------------------------------------------------------------------------
+// Constant VALUE evaluation for file-scope initialisers (t_10dc2936).
+//
+// The reference folds an initialiser expression before it becomes a default
+// or an inline constant.  Measured on sce-cgc 475 (.local/probe-init, byte
+// twins against hand-folded literals):
+//   - int op int is integer arithmetic: 7/2 is 3, -7/2 is -3, 7%3 is 1;
+//   - any float operand makes it FLOAT arithmetic, each operation rounded to
+//     single precision: (16777216.0f + 1.0f + 1.0f) - 16777216.0f is 0, so
+//     folding in double and rounding once would be WRONG;
+//   - comparisons and the ternary fold (1 < 2 ? 0.5f : 0.25f is 0.5);
+//   - a vector and a scalar combine by broadcast (float2(1,2) * 0.5f);
+//   - a constructor flattens its arguments (float2(1.0f/1280.0f, ...) and
+//     the brace spelling are byte-identical);
+//   - an identifier naming a file-scope const that is itself folded is a
+//     constant; a uniform is not (it stays refused here, with the reference's
+//     runtime evaluation of that shape recorded as a separate gap).
+// A zero divisor, an assignment operator, a bitwise operator on a float and
+// anything not listed make the expression NOT a constant: the caller refuses
+// rather than compiling a guess.
+// ---------------------------------------------------------------------------
+namespace
+{
+
+using ConstLanes = std::vector<ConstEvalScalar>;
+
+// The shape of a constant value: a scalar (all zero), a vector (width), a
+// matrix (rows x cols) or an array of `elems` elements of `elemLanes` lanes.
+// Index needs it to select a matrix ROW, an array ELEMENT or a vector LANE
+// from the flat lane list; a flat list alone selected M[1] as lane 1.
+struct ConstShape
+{
+    int width = 1;     // vector width of one element (1 for scalar)
+    int rows = 0;      // matrix rows (0 = not a matrix)
+    int cols = 0;
+    int elems = 0;     // array element count (0 = not an array)
+    int laneCount() const
+    {
+        const int per = rows > 0 ? rows * cols : width;
+        return (elems > 0 ? elems : 1) * per;
+    }
+    bool isScalar() const { return elems == 0 && rows == 0 && width == 1; }
+};
+
+// An array type node is `BaseType::Array` with the element in `elementType`;
+// the scalar kind and the vector/matrix shape both live on the element.
+const TypeNode* elementOf(const TypeNode* t)
+{
+    while (t && t->baseType == BaseType::Array && t->elementType)
+        t = t->elementType.get();
+    return t;
+}
+
+BaseType scalarBaseOf(const TypeNode* t)
+{
+    const TypeNode* e = elementOf(t);
+    return e ? e->baseType : BaseType::Void;
+}
+
+ConstShape shapeOfType(const TypeNode* t)
+{
+    ConstShape sh;
+    if (!t) return sh;
+    int elems = 0;
+    const TypeNode* e = t;
+    while (e && e->baseType == BaseType::Array && e->elementType)
+    {
+        elems = elems > 0 ? elems * e->arraySize : e->arraySize;
+        e = e->elementType.get();
+    }
+    if (e->matrixRows > 0 && e->matrixCols > 0) { sh.rows = e->matrixRows; sh.cols = e->matrixCols; }
+    else sh.width = e->vectorSize > 0 ? e->vectorSize : 1;
+    if (elems > 0) sh.elems = elems;
+    else if (t->arraySize > 0) sh.elems = t->arraySize;
+    return sh;
+}
+
+ConstShape shapeOfIRType(const IRTypeInfo& t)
+{
+    ConstShape sh;
+    if (t.matrixRows > 0 && t.matrixCols > 0) { sh.rows = t.matrixRows; sh.cols = t.matrixCols; }
+    else sh.width = t.vectorSize > 0 ? t.vectorSize : 1;
+    if (t.arraySize > 0) sh.elems = t.arraySize;
+    return sh;
+}
+
+// The shape two elementwise operands combine to: equal shapes, or a scalar
+// broadcast against anything.
+bool combineShapes(const ConstShape& a, const ConstShape& b, ConstShape& out)
+{
+    if (a.isScalar()) { out = b; return true; }
+    if (b.isScalar()) { out = a; return true; }
+    if (a.laneCount() == b.laneCount()) { out = a; return true; }
+    return false;
+}
+
+ConstEvalScalar::Kind promotedKind(const ConstEvalScalar& a, const ConstEvalScalar& b)
+{
+    using K = ConstEvalScalar::Kind;
+    if (a.kind == K::Float || b.kind == K::Float) return K::Float;
+    if (a.kind == K::UInt || b.kind == K::UInt) return K::UInt;
+    return K::Int;
+}
+
+int64_t wrapInt32(int64_t v)
+{
+    return static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>(v))));
+}
+
+bool foldBinaryScalar(BinaryOp op, const ConstEvalScalar& a, const ConstEvalScalar& b, ConstEvalScalar& out)
+{
+    using K = ConstEvalScalar::Kind;
+    switch (op)
+    {
+    case BinaryOp::Comma:      out = b; return true;
+    case BinaryOp::LogicalAnd: out = ConstEvalScalar::fromBool(a.isTruthy() && b.isTruthy()); return true;
+    case BinaryOp::LogicalOr:  out = ConstEvalScalar::fromBool(a.isTruthy() || b.isTruthy()); return true;
+    default: break;
+    }
+    const K kind = promotedKind(a, b);
+    if (kind == K::Float)
+    {
+        const float x = static_cast<float>(a.asDouble());
+        const float y = static_cast<float>(b.asDouble());
+        float r = 0.0f;
+        switch (op)
+        {
+        case BinaryOp::Add: r = x + y; break;
+        case BinaryOp::Sub: r = x - y; break;
+        case BinaryOp::Mul: r = x * y; break;
+        case BinaryOp::Div:
+            if (y == 0.0f) return false;   // the reference's value for x/0 is unmeasured
+            r = x / y; break;
+        case BinaryOp::Mod:
+            if (y == 0.0f) return false;
+            r = std::fmod(x, y); break;
+        case BinaryOp::Equal:        out = ConstEvalScalar::fromBool(x == y); return true;
+        case BinaryOp::NotEqual:     out = ConstEvalScalar::fromBool(x != y); return true;
+        case BinaryOp::Less:         out = ConstEvalScalar::fromBool(x <  y); return true;
+        case BinaryOp::LessEqual:    out = ConstEvalScalar::fromBool(x <= y); return true;
+        case BinaryOp::Greater:      out = ConstEvalScalar::fromBool(x >  y); return true;
+        case BinaryOp::GreaterEqual: out = ConstEvalScalar::fromBool(x >= y); return true;
+        default: return false;       // bitwise, shifts, assignments
+        }
+        if (!std::isfinite(r)) return false;
+        out = ConstEvalScalar::fromFloat(static_cast<double>(r));
+        return true;
+    }
+    if (kind == K::UInt)
+    {
+        const uint64_t x = static_cast<uint64_t>(a.asInt64()) & 0xFFFFFFFFULL;
+        const uint64_t y = static_cast<uint64_t>(b.asInt64()) & 0xFFFFFFFFULL;
+        uint64_t r = 0;
+        switch (op)
+        {
+        case BinaryOp::Add: r = x + y; break;
+        case BinaryOp::Sub: r = x - y; break;
+        case BinaryOp::Mul: r = x * y; break;
+        case BinaryOp::Div: if (y == 0) return false; r = x / y; break;
+        case BinaryOp::Mod: if (y == 0) return false; r = x % y; break;
+        case BinaryOp::BitwiseAnd: r = x & y; break;
+        case BinaryOp::BitwiseOr:  r = x | y; break;
+        case BinaryOp::BitwiseXor: r = x ^ y; break;
+        case BinaryOp::ShiftLeft:  if (y > 31) return false; r = x << y; break;
+        case BinaryOp::ShiftRight: if (y > 31) return false; r = x >> y; break;
+        case BinaryOp::Equal:        out = ConstEvalScalar::fromBool(x == y); return true;
+        case BinaryOp::NotEqual:     out = ConstEvalScalar::fromBool(x != y); return true;
+        case BinaryOp::Less:         out = ConstEvalScalar::fromBool(x <  y); return true;
+        case BinaryOp::LessEqual:    out = ConstEvalScalar::fromBool(x <= y); return true;
+        case BinaryOp::Greater:      out = ConstEvalScalar::fromBool(x >  y); return true;
+        case BinaryOp::GreaterEqual: out = ConstEvalScalar::fromBool(x >= y); return true;
+        default: return false;
+        }
+        out = ConstEvalScalar::fromUInt(r & 0xFFFFFFFFULL);
+        return true;
+    }
+    // Int (bool operands promote to 0/1)
+    const int64_t x = a.asInt64();
+    const int64_t y = b.asInt64();
+    int64_t r = 0;
+    switch (op)
+    {
+    case BinaryOp::Add: r = x + y; break;
+    case BinaryOp::Sub: r = x - y; break;
+    case BinaryOp::Mul: r = x * y; break;
+    case BinaryOp::Div: if (y == 0) return false; r = x / y; break;   // truncates toward zero, as measured
+    case BinaryOp::Mod: if (y == 0) return false; r = x % y; break;
+    case BinaryOp::BitwiseAnd: r = x & y; break;
+    case BinaryOp::BitwiseOr:  r = x | y; break;
+    case BinaryOp::BitwiseXor: r = x ^ y; break;
+    case BinaryOp::ShiftLeft:  if (y < 0 || y > 31) return false; r = static_cast<int64_t>(static_cast<uint64_t>(x) << y); break;
+    case BinaryOp::ShiftRight: if (y < 0 || y > 31) return false; r = x >> y; break;
+    case BinaryOp::Equal:        out = ConstEvalScalar::fromBool(x == y); return true;
+    case BinaryOp::NotEqual:     out = ConstEvalScalar::fromBool(x != y); return true;
+    case BinaryOp::Less:         out = ConstEvalScalar::fromBool(x <  y); return true;
+    case BinaryOp::LessEqual:    out = ConstEvalScalar::fromBool(x <= y); return true;
+    case BinaryOp::Greater:      out = ConstEvalScalar::fromBool(x >  y); return true;
+    case BinaryOp::GreaterEqual: out = ConstEvalScalar::fromBool(x >= y); return true;
+    default: return false;
+    }
+    out = ConstEvalScalar::fromInt(wrapInt32(r));
+    return true;
+}
+
+// The type both branches of a ternary convert to before anything uses the
+// result: (true ? 7 : 2.0f) / 2 is 3.5 on the reference, not 3 (codex's cell).
+BaseType commonBaseType(const ConstEvalScalar& a, const ConstEvalScalar& b)
+{
+    using K = ConstEvalScalar::Kind;
+    if (a.kind == K::Float || b.kind == K::Float) return BaseType::Float;
+    if (a.kind == K::UInt || b.kind == K::UInt) return BaseType::UInt;
+    if (a.kind == K::Bool && b.kind == K::Bool) return BaseType::Bool;
+    return BaseType::Int;
+}
+
+bool foldUnaryScalar(UnaryOp op, const ConstEvalScalar& v, ConstEvalScalar& out)
+{
+    using K = ConstEvalScalar::Kind;
+    switch (op)
+    {
+    case UnaryOp::LogicalNot:
+        out = ConstEvalScalar::fromBool(!v.isTruthy()); return true;
+    case UnaryOp::Negate:
+        switch (v.kind)
+        {
+        case K::Int:   out = ConstEvalScalar::fromInt(wrapInt32(-v.i)); return true;
+        case K::UInt:  out = ConstEvalScalar::fromUInt(static_cast<uint64_t>(-static_cast<int64_t>(v.u & 0xFFFFFFFFULL)) & 0xFFFFFFFFULL); return true;
+        case K::Float: out = ConstEvalScalar::fromFloat(-v.f); return true;
+        case K::Bool:  return false;
+        }
+        return false;
+    case UnaryOp::BitwiseNot:
+        switch (v.kind)
+        {
+        case K::Int:  out = ConstEvalScalar::fromInt(wrapInt32(~v.i)); return true;
+        case K::UInt: out = ConstEvalScalar::fromUInt(~v.u & 0xFFFFFFFFULL); return true;
+        default: return false;
+        }
+    default:
+        return false;
+    }
+}
+
+int laneOfSwizzleLetter(char ch)
+{
+    switch (ch)
+    {
+    case 'x': case 'r': return 0;
+    case 'y': case 'g': return 1;
+    case 'z': case 'b': return 2;
+    case 'w': case 'a': return 3;
+    default: return -1;
+    }
+}
+
+int componentCountOf(const TypeNode* t)
+{
+    if (!t) return 1;
+    if (t->matrixRows > 0 && t->matrixCols > 0) return t->matrixRows * t->matrixCols;
+    return t->vectorSize > 0 ? t->vectorSize : 1;
+}
+
+bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, IRModule* module);
+
+bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, IRModule* module)
+{
+    out.clear();
+    shape = ConstShape();
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Literal:
+    {
+        ConstEvalScalar v;
+        if (!evaluateConstScalar(e, v)) return false;
+        out.push_back(v);
+        return true;
+    }
+    case ExprKind::Unary:
+    {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        ConstLanes v; ConstShape sh;
+        if (!evaluateConstValue(u->operand.get(), v, sh, module)) return false;
+        for (const auto& lane : v)
+        {
+            ConstEvalScalar r;
+            if (!foldUnaryScalar(u->op, lane, r)) return false;
+            out.push_back(r);
+        }
+        shape = sh;
+        return !out.empty();
+    }
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        ConstLanes l, r; ConstShape ls, rs;
+        if (!evaluateConstValue(b->left.get(), l, ls, module)) return false;
+        if (!evaluateConstValue(b->right.get(), r, rs, module)) return false;
+        if (l.empty() || r.empty()) return false;
+        if (!combineShapes(ls, rs, shape)) return false;
+        const size_t n = std::max(l.size(), r.size());
+        for (size_t i = 0; i < n; ++i)
+        {
+            const ConstEvalScalar& a = l[l.size() == 1 ? 0 : i];
+            const ConstEvalScalar& c = r[r.size() == 1 ? 0 : i];
+            ConstEvalScalar v;
+            if (!foldBinaryScalar(b->op, a, c, v)) return false;
+            out.push_back(v);
+        }
+        return true;
+    }
+    case ExprKind::Ternary:
+    {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        ConstLanes cond, a, c; ConstShape cs, as, bs;
+        if (!evaluateConstValue(t->condition.get(), cond, cs, module) || cond.size() != 1) return false;
+        // Both branches are evaluated: the result takes their COMMON type and
+        // the common shape, whichever branch is selected.
+        if (!evaluateConstValue(t->thenExpr.get(), a, as, module)) return false;
+        if (!evaluateConstValue(t->elseExpr.get(), c, bs, module)) return false;
+        if (a.empty() || c.empty() || !combineShapes(as, bs, shape)) return false;
+        const BaseType common = commonBaseType(a[0], c[0]);
+        const ConstLanes& chosen = cond[0].isTruthy() ? a : c;
+        const size_t n = static_cast<size_t>(shape.laneCount());
+        for (size_t i = 0; i < n; ++i)
+        {
+            ConstEvalScalar v;
+            if (!convertScalar(chosen[chosen.size() == 1 ? 0 : i], common, v)) return false;
+            out.push_back(v);
+        }
+        return true;
+    }
+    case ExprKind::Cast:
+    {
+        const auto* cast = static_cast<const CastExpr*>(e);
+        if (!cast->targetType) return false;
+        ConstLanes v; ConstShape sh;
+        if (!evaluateConstValue(cast->operand.get(), v, sh, module)) return false;
+        shape = shapeOfType(cast->targetType.get());
+        const int n = shape.laneCount();
+        if (v.size() == 1 && n > 1) v.assign(static_cast<size_t>(n), v[0]);
+        if (static_cast<int>(v.size()) != n) return false;
+        for (const auto& lane : v)
+        {
+            ConstEvalScalar c;
+            if (!convertScalar(lane, scalarBaseOf(cast->targetType.get()), c)) return false;
+            out.push_back(c);
+        }
+        return true;
+    }
+    case ExprKind::Constructor:
+    {
+        const auto* ctor = static_cast<const ConstructorExpr*>(e);
+        if (ctor->arguments.empty() || !ctor->constructedType) return false;
+        const TypeNode* ctorType = ctor->constructedType.get();
+        const BaseType elemType = scalarBaseOf(ctorType);   // an array's scalar kind is its element's
+        ConstLanes flat;
+        for (const auto& a : ctor->arguments)
+        {
+            ConstLanes v; ConstShape sh;
+            if (!evaluateConstValue(a.get(), v, sh, module)) return false;
+            for (const auto& lane : v)
+            {
+                ConstEvalScalar c;
+                if (!convertScalar(lane, elemType, c)) return false;
+                flat.push_back(c);
+            }
+        }
+        shape = shapeOfType(ctorType);
+        const int n = shape.laneCount();
+        if (flat.size() == 1 && n > 1) flat.assign(static_cast<size_t>(n), flat[0]);
+        // The constructed value has exactly its type's lanes: a brace list or
+        // constructor with more data than the type holds is C1058 "too much
+        // data" on the reference (measured, s6 in .local/probe-init) and is
+        // not a constant here either.
+        if (static_cast<int>(flat.size()) != n) return false;
+        out = flat;
+        return true;
+    }
+    case ExprKind::Identifier:
+    {
+        if (!module) return false;
+        const auto* id = static_cast<const IdentifierExpr*>(e);
+        IRGlobal* g = module->findGlobal(id->name);
+        // Only a STATIC const is a constant here: the reference treats a
+        // non-static file-scope const as a uniform with a default, and an
+        // initialiser that reads one is C1059 there (measured, c6 in
+        // .local/probe-init), so it must not fold.
+        if (!g || g->storage != StorageQualifier::Const || !g->declaredStatic) return false;
+        if (g->initialValue.empty() && g->initialIntValues.empty()) return false;
+        const IRType bt = g->type.baseType;
+        const bool useInts = !g->initialIntValues.empty() &&
+                             (bt == IRType::Int32 || bt == IRType::UInt32 || bt == IRType::Bool);
+        if (useInts)
+        {
+            for (int64_t v : g->initialIntValues)
+                out.push_back(bt == IRType::UInt32 ? ConstEvalScalar::fromUInt(static_cast<uint64_t>(v) & 0xFFFFFFFFULL)
+                            : bt == IRType::Bool ? ConstEvalScalar::fromBool(v != 0)
+                            : ConstEvalScalar::fromInt(v));
+        }
+        else
+        {
+            for (float v : g->initialValue)
+                out.push_back(ConstEvalScalar::fromFloat(static_cast<double>(v)));
+        }
+        shape = shapeOfIRType(g->type);
+        if (static_cast<int>(out.size()) != shape.laneCount()) return false;
+        return !out.empty();
+    }
+    case ExprKind::MemberAccess:
+    {
+        const auto* m = static_cast<const MemberAccessExpr*>(e);
+        if (!m->isSwizzle || m->member.empty() || m->member.size() > 4) return false;
+        ConstLanes v; ConstShape sh;
+        if (!evaluateConstValue(m->object.get(), v, sh, module)) return false;
+        if (sh.rows > 0 || sh.elems > 0) return false;   // a swizzle reads a vector
+        for (char ch : m->member)
+        {
+            const int lane = laneOfSwizzleLetter(ch);
+            if (lane < 0 || lane >= sh.width) return false;
+            out.push_back(v[static_cast<size_t>(lane)]);
+        }
+        shape.width = static_cast<int>(m->member.size());
+        return true;
+    }
+    case ExprKind::Index:
+    {
+        const auto* ix = static_cast<const IndexExpr*>(e);
+        ConstLanes v, idx; ConstShape sh, is;
+        if (!evaluateConstValue(ix->array.get(), v, sh, module)) return false;
+        if (!evaluateConstValue(ix->index.get(), idx, is, module) || idx.size() != 1) return false;
+        if (idx[0].kind == ConstEvalScalar::Kind::Float) return false;   // float selectors are the IR path's rule, not this one's
+        const int64_t i = idx[0].asInt64();
+        int count = 0, stride = 0;
+        ConstShape elem;
+        if (sh.elems > 0)            // array: element i
+        {
+            count = sh.elems; elem = sh; elem.elems = 0; stride = elem.laneCount();
+        }
+        else if (sh.rows > 0)        // matrix: row i, a vector of cols lanes
+        {
+            count = sh.rows; elem.width = sh.cols; stride = sh.cols;
+        }
+        else if (sh.width > 1)       // vector: lane i
+        {
+            count = sh.width; stride = 1;
+        }
+        else return false;
+        if (i < 0 || i >= count) return false;
+        const size_t begin = static_cast<size_t>(i) * static_cast<size_t>(stride);
+        if (begin + static_cast<size_t>(stride) > v.size()) return false;
+        out.assign(v.begin() + begin, v.begin() + begin + stride);
+        shape = elem;
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+} // namespace
+
 bool IRBuilder::evaluateConstInitializerTyped(const ExprNode* init,
                                              const TypeNode* declType,
                                              std::vector<float>& floatOut,
-                                             std::vector<int64_t>& intOut)
+                                             std::vector<int64_t>& intOut,
+                                             IRModule* module)
 {
     floatOut.clear();
     intOut.clear();
     if (!init)
         return false;
 
-    // First try scalar evaluation
-    ConstEvalScalar scalarVal;
-    if (evaluateConstScalar(init, scalarVal))
-    {
-        ConstEvalScalar converted;
-        if (declType && !convertScalar(scalarVal, declType->baseType, converted))
-            return false;
-        else if (!declType)
-            converted = scalarVal;
+    ConstLanes lanes;
+    ConstShape shape;
+    if (!evaluateConstValue(init, lanes, shape, module) || lanes.empty())
+        return false;
 
+    if (declType)
+    {
+        // A scalar initialiser broadcasts to a vector (float2 d = 1.0f is
+        // (1,1)).  A WIDER vector narrows to the declared type's leading
+        // lanes: `float2 u = float4(1,2,3,4)` is byte-identical to
+        // `float2(1,2)` on the reference (measured, s5 in .local/probe-init).
+        // Too much data inside one constructor is refused above, not here.
+        // A declared ARRAY has arraySize * element lanes and is never
+        // narrowed: it must be initialised by a value of the same shape.
+        const ConstShape declared = shapeOfType(declType);
+        const int n = declared.laneCount();
+        if (declared.elems > 0 || declared.rows > 0)
+        {
+            if (static_cast<int>(lanes.size()) != n) return false;
+        }
+        else
+        {
+            if (lanes.size() == 1 && n > 1)
+                lanes.assign(static_cast<size_t>(n), lanes[0]);
+            if (shape.rows > 0 || shape.elems > 0) return false;   // a matrix or array is not a vector
+            if (static_cast<int>(lanes.size()) > n)
+                lanes.resize(static_cast<size_t>(n));
+        }
+    }
+
+    for (const auto& lane : lanes)
+    {
+        ConstEvalScalar converted = lane;
+        if (declType && !convertScalar(lane, scalarBaseOf(declType), converted))
+            return false;
         floatOut.push_back(static_cast<float>(converted.asDouble()));
         intOut.push_back(converted.asInt64());
-        return true;
     }
-
-    // Vector / multi-argument constructor evaluation
-    if (init->kind == ExprKind::Constructor)
-    {
-        const auto* ctor = static_cast<const ConstructorExpr*>(init);
-        if (ctor->arguments.empty() || !ctor->constructedType)
-            return false;
-
-        // A MATRIX constructor takes rows*cols scalars, not at most four.
-        // The reference folds `const static float3x3 M = float3x3(nine
-        // scalars)` entirely into the ucode and emits no record for it, and
-        // the eight reference-SDK rows that refused here were all that one
-        // shape, from a single shared logluv.cg (t_4b54f26b A3).  The cap
-        // stays at four for everything else, so a five-component vector
-        // constructor is still the error it always was.
-        const TypeNode* ctorType = ctor->constructedType.get();
-        size_t maxArgs = 4u;
-        if (ctorType && ctorType->matrixRows > 0 && ctorType->matrixCols > 0)
-            maxArgs = static_cast<size_t>(ctorType->matrixRows) *
-                      static_cast<size_t>(ctorType->matrixCols);
-        if (ctor->arguments.size() > maxArgs)
-            return false;
-
-        const BaseType elemType = ctor->constructedType->baseType;
-        for (const auto& a : ctor->arguments)
-        {
-            ConstEvalScalar aVal;
-            if (!evaluateConstScalar(a.get(), aVal))
-                return false;
-            ConstEvalScalar converted;
-            if (!convertScalar(aVal, elemType, converted))
-                return false;
-
-            if (declType && declType->baseType != elemType)
-            {
-                ConstEvalScalar declConverted;
-                if (!convertScalar(converted, declType->baseType, declConverted))
-                    return false;
-                converted = declConverted;
-            }
-
-            floatOut.push_back(static_cast<float>(converted.asDouble()));
-            intOut.push_back(converted.asInt64());
-        }
-        return true;
-    }
-
-    return false;
+    return true;
 }
 
 bool IRBuilder::evaluateConstInitializer(const ExprNode* init,
@@ -641,7 +1082,8 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 if (!evaluateConstInitializerTyped(varDecl->initializer.get(),
                                                    varDecl->type.get(),
                                                    constInit,
-                                                   constIntInit))
+                                                   constIntInit,
+                                                   module_.get()))
                 {
                     // REFUSE rather than drop it.  Silently emitting zero for
                     // a value we could not evaluate is the defect this fix
@@ -666,6 +1108,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             global.type = getIRType(varDecl->type.get());
             global.valueId = module_->allocateGlobalId();
             global.storage = varDecl->storage;
+            global.declaredStatic = varDecl->isStatic;
 
             if (!varDecl->semantic.isEmpty())
             {
@@ -693,13 +1136,18 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // of this parameter writes and the width the fold needs.
             if (constInit.size() == 1)
             {
-                const int declared = global.type.componentCount();
+                // An array declaration holds arraySize elements of its
+                // component count (t_10dc2936: `static const float A[3]`
+                // is three lanes, not one).
+                const int declared = global.type.componentCount() *
+                                     (global.type.arraySize > 0 ? global.type.arraySize : 1);
                 if (declared > 1)
                     constInit.assign(static_cast<size_t>(declared), constInit[0]);
             }
             else if (!constInit.empty() &&
                      constInit.size() !=
-                         static_cast<size_t>(global.type.componentCount()))
+                         static_cast<size_t>(global.type.componentCount() *
+                                             (global.type.arraySize > 0 ? global.type.arraySize : 1)))
             {
                 // Any other count mismatch is a form this narrow evaluator
                 // does not understand well enough to widen.  Refuse rather
@@ -708,7 +1156,8 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                       "file-scope '" + varDecl->name + "' has a " +
                       std::to_string(constInit.size()) +
                       "-component initialiser for a " +
-                      std::to_string(global.type.componentCount()) +
+                      std::to_string(global.type.componentCount() *
+                                     (global.type.arraySize > 0 ? global.type.arraySize : 1)) +
                       "-component declaration; refusing rather than "
                       "padding it with zeros");
                 constInit.clear();
@@ -926,9 +1375,24 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         {
             std::vector<float>   pInit;
             std::vector<int64_t> pIntInit;
-            if (!evaluateConstInitializerTyped(param->defaultValue.get(),
+            // NAMED GAP: the reference ACCEPTS a default on an array-typed
+            // entry parameter and records one default block per element
+            // (measured 2026-09-14, entry-param-default-test row s11 and
+            // .local/probe-init/s11_uniform). We do not emit per-element
+            // default records yet (t_2b592fc7), so this stays a refusal that
+            // names the gap; the array-aware evaluator (t_10dc2936) must not
+            // silently turn it into an acceptance without those records.
+            if (param->type && param->type->isArray())
+            {
+                error(param->loc,
+                      "uniform entry parameter '" + param->name +
+                      "' is an array with a default value; per-element default records are not emitted yet (t_2b592fc7), refusing rather than dropping the default");
+                pInit.clear();
+                pIntInit.clear();
+            }
+            else if (!evaluateConstInitializerTyped(param->defaultValue.get(),
                                                param->type.get(),
-                                               pInit, pIntInit))
+                                               pInit, pIntInit, module_.get()))
             {
                 error(param->loc,
                       "uniform entry parameter '" + param->name +

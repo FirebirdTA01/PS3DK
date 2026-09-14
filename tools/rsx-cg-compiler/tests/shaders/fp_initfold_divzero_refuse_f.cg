@@ -1,0 +1,5 @@
+// t_10dc2936: arithmetic in a file-scope initialiser folds the way the reference folds it.
+// NAMED GAP: the reference ACCEPTS 1.0f / 0.0f (it folds it to a value we have not pinned yet); we
+// refuse a zero divisor rather than guess the value. The row pins the refusal so a later fold flips it on purpose.
+static const float K = 1.0f / 0.0f;
+float4 main(float2 t : TEXCOORD0) : COLOR { return float4(t * K, 0, 1); }

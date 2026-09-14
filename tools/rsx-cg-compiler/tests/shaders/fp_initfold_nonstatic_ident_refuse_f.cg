@@ -1,0 +1,6 @@
+// t_10dc2936: arithmetic in a file-scope initialiser folds the way the reference folds it.
+// REFUSAL: a non-static file-scope const is a uniform with a default on the reference, so an
+// initialiser that reads one is not constant: C1059 there, a refusal here.
+const float W = 1280.0f; const float H = 720.0f;
+const float2 D = {1.0f / W, 1.0f / H};
+float4 main(float2 t : TEXCOORD0) : COLOR { return float4(t * D, 0, 1); }

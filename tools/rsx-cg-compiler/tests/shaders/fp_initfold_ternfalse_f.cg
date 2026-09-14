@@ -1,0 +1,3 @@
+// t_10dc2936: arithmetic in a file-scope initialiser folds the way the reference folds it.
+static const float K = (false ? 7 : 2.0f) / 2;
+float4 main(float2 t : TEXCOORD0) : COLOR { return float4(t * K, 0, 1); }
