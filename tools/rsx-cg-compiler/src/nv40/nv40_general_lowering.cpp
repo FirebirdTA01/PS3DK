@@ -4509,6 +4509,15 @@ private:
                     matrixValues_[inst.result] = mvIt->second;
                 return;
             }
+            // FP global matrices have registered row sources but no VP
+            // constant-register base. Preserve those rows on the loaded
+            // value instead of falling through to the scalar source map.
+            // Every VP matrix global also has a base and returns above.
+            const auto mvIt = matrixValues_.find(g.valueId);
+            if (mvIt != matrixValues_.end()) {
+                matrixValues_[inst.result] = mvIt->second;
+                return;
+            }
             const auto sIt = program_.valueToSource.find(g.valueId);
             if (sIt != program_.valueToSource.end()) {
                 program_.valueToSource[inst.result] = sIt->second;
