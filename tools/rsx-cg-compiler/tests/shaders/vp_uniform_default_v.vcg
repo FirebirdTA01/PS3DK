@@ -1,0 +1,33 @@
+// VERTEX-profile twin of fp_uniform_default_f.cg, for the container's
+// defaultValue FIELD (t_4b54f26b).
+//
+// The two profiles build their parameter tables in different files
+// (cg_container_fp.cpp and cg_container_vp.cpp), so a fix applied to one
+// leaves the other reporting zero.  The fragment fixture cannot see that.
+//
+// Four uniforms, each covering something the others cannot:
+//
+//   tint     an explicit four-component initialiser
+//   splat    a SCALAR initialiser for a vector - Cg broadcasts it, so the
+//            block must read (0.5,0.5,0.5,0.5), not (0.5,0,0,0)
+//   implicit NO `uniform` keyword.  Cg treats a file-scope variable as
+//            uniform, and the reference records its initialiser the same
+//            way.  Every one of the four SDK sources this change moved is
+//            this spelling, not the explicit one - a fix keyed on the
+//            keyword passes the other rows and misses the whole corpus.
+//   plain    NO initialiser, so its block must stay ZERO.  A fix that
+//            wrote a block for every uniform passes the other three.
+uniform float4 tint  = float4(0.25, 0.5, 0.75, 1.0);
+uniform float4 splat = 0.5;
+float3 implicit      = float3(1.0, 2.0, 3.0);
+uniform float4 plain;
+
+void main(
+    float4 position : POSITION,
+    uniform float4x4 mvp,
+    out float4 oPos : POSITION,
+    out float4 oCol : COLOR0)
+{
+    oPos = mul(mvp, position);
+    oCol = tint * splat * plain * float4(implicit, 1.0);
+}

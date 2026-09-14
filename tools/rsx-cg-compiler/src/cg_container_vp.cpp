@@ -290,6 +290,16 @@ VpContainerResult emitVertexContainerImpl(
         bool        isLiteralPool = false;
         float       litValues[4]   = {0, 0, 0, 0};
         uint32_t    defaultValueOffset = 0;
+        // Compiled default of an initialised file-scope uniform - the same
+        // 16-byte float[4] block the literal pool uses, on an ordinary
+        // user-visible parameter (t_4b54f26b).  Measured placement, VP
+        // fixture `uniform float4 gTint : C3 = float4(1,2,3,4)`: semantic
+        // 'C3' at 540, block at 544, name at 560 - semantic, then block,
+        // then name, the same order as the fragment container.  The
+        // literal-pool path above emits its block BEFORE the semantic;
+        // that is untested rather than contradictory, because an
+        // `internal-constant-N` param never carries one.
+        std::vector<float> defaultValue;
     };
 
     std::vector<ParamDesc> params;
@@ -763,6 +773,29 @@ VpContainerResult emitVertexContainerImpl(
             else
                 reg = nextVectorReg--;
             d.resIndex = static_cast<uint32_t>(reg);
+            // An initialised file-scope uniform carries a compiled default.
+            // ir_builder already evaluated it onto IRGlobal (ir.h:501-502);
+            // we were writing zero over it (t_4b54f26b).  Scalar and vector
+            // only: for a MATRIX the reference leaves the parent record's
+            // defaultValue at 0 and gives each row its own block, which is
+            // measured but has no corpus witness, so it is deliberately not
+            // implemented here rather than guessed at.
+            if (!g.initialValue.empty())
+            {
+                d.defaultValue.assign(
+                    g.initialValue.begin(),
+                    g.initialValue.begin() +
+                        static_cast<std::ptrdiff_t>(
+                            std::min<size_t>(4u, g.initialValue.size())));
+            }
+            else if (!g.initialIntValues.empty())
+            {
+                const size_t n = std::min<size_t>(4u, g.initialIntValues.size());
+                d.defaultValue.reserve(n);
+                for (size_t k = 0; k < n; ++k)
+                    d.defaultValue.push_back(
+                        static_cast<float>(g.initialIntValues[k]));
+            }
             params.push_back(d);
         }
     }
@@ -1031,6 +1064,29 @@ VpContainerResult emitVertexContainerImpl(
             slots[i].semanticOffset =
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             putString(stringsBlob, params[i].semantic);
+        }
+        if (!params[i].isLiteralPool && !params[i].defaultValue.empty())
+        {
+            // Same 16-byte float[4] block as the literal pool, after the
+            // semantic and before the name - see the measurement on
+            // ParamDesc::defaultValue.  Four floats always, zero-padded
+            // above the declared component count.
+            padBlobTo(16);
+            params[i].defaultValueOffset =
+                stringsStart + static_cast<uint32_t>(stringsBlob.size());
+            for (int j = 0; j < 4; ++j)
+            {
+                const float v =
+                    (static_cast<size_t>(j) < params[i].defaultValue.size())
+                        ? params[i].defaultValue[static_cast<size_t>(j)]
+                        : 0.0f;
+                uint32_t bits = 0;
+                std::memcpy(&bits, &v, sizeof(bits));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >> 24) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >> 16) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >>  8) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >>  0) & 0xFF));
+            }
         }
         if (!params[i].name.empty())
         {
