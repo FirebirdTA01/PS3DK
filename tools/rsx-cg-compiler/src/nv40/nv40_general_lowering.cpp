@@ -2122,6 +2122,25 @@ private:
                 mv.cols = cols;
                 for (int row = 0; row < rows; ++row) {
                     mv.rowSrcs.push_back(uniformSrc(static_cast<int>(base + row), true));
+                    // A matrix entry parameter's DEFAULT lives on the rows,
+                    // one slot each, the same as a file-scope matrix
+                    // (t_4b54f26b A1).  Without this the reflection table is
+                    // right and every row's inline constant is zero, so an
+                    // unpatched shader multiplies by a zero matrix - the
+                    // exact failure A3 fixed for file-scope matrices, which
+                    // this branch did not inherit.  Seeding at the base slot
+                    // instead would put row 0's columns in every row.
+                    const size_t first =
+                        static_cast<size_t>(row) * static_cast<size_t>(cols);
+                    if (p.initialValue.size() >= first + static_cast<size_t>(cols)) {
+                        program_.fpUniformDefaults[base + row] = {
+                            std::vector<float>(
+                                p.initialValue.begin() +
+                                    static_cast<std::ptrdiff_t>(first),
+                                p.initialValue.begin() +
+                                    static_cast<std::ptrdiff_t>(first + cols)),
+                            static_cast<unsigned>(cols)};
+                    }
                 }
                 matrixValues_[p.valueId] = mv;
             } else if (profile_ == GeneralProfile::Vertex &&
@@ -2139,6 +2158,20 @@ private:
                 // array parameter widened the numbering (shared rule).
                 program_.valueToSource[p.valueId] =
                     uniformSrc(static_cast<int>(fpParamSlotBases[pi]), true);
+                // A uniform entry parameter declared with a DEFAULT carries
+                // it into the inline const block, exactly as an initialised
+                // file-scope uniform does (t_4b54f26b A1).  Both places
+                // matter and they are independent: the parameter table is
+                // what cgGetParameterDefaultValue returns, this is what an
+                // UNPATCHED shader computes with.  Getting only the first
+                // right renders black while the reflection reads correctly -
+                // the failure the matrix rows had in A3.
+                // A matrix entry parameter never reaches this branch - it
+                // is handled above, where its rows are seeded individually.
+                if (!p.initialValue.empty())
+                    program_.fpUniformDefaults[fpParamSlotBases[pi]] = {
+                        p.initialValue,
+                        static_cast<unsigned>(p.type.componentCount())};
             }
         }
 

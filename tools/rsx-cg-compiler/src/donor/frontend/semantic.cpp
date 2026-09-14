@@ -227,6 +227,95 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
             shaderInfo_.entryPoint = decl;
         }
     }
+
+    // WHERE A DEFAULT VALUE IS LEGAL (t_4b54f26b A1).  Measured on the
+    // reference, which has a named diagnostic for exactly this question:
+    //
+    //   float2 texcoord : TEXCOORD0 = {0.5, 0.25}   -> refused, C1114
+    //   out float4 c : COLOR = {1,0,0,1}            -> refused, C1114
+    //   float3 shade(float3 base, const bool b = true)  -> ACCEPTED
+    //
+    //     error C1114: only uniform parameters to the entry function can
+    //     have default values: "texcoord"
+    //
+    // So a default is legal on a UNIFORM parameter of the ENTRY, and on any
+    // parameter of a helper, and nowhere else.  This check lives here and
+    // not in the parser because the parser does not know which function was
+    // SELECTED - with -e the entry can be any function, and a check keyed on
+    // the name "main" would refuse a legal default in the selected entry and
+    // accept an illegal one in a function that merely happens to be called
+    // main.  Measured control, one source compiled twice: a non-uniform
+    // default on `alpha` is refused under -e alpha and accepted under
+    // -e beta, where alpha is a helper.
+    const bool isEntry = (decl->name == shaderInfo_.entryPointName);
+    for (const auto& p : decl->parameters)
+    {
+        if (!p || !p->defaultValue) continue;
+        if (isEntry)
+        {
+            if (p->storage != StorageQualifier::Uniform)
+            {
+                error(p->loc,
+                      "only uniform parameters to the entry function can have "
+                      "default values: \"" + p->name + "\"");
+            }
+        }
+        else
+        {
+            // INTERIM, not a rule we are matching: the reference ACCEPTS a
+            // default on a helper's parameter and materialises the omitted
+            // argument at the call site.  We do not lower that yet
+            // (t_36492ad8, 16 reference-SDK rows, the whole Metallic
+            // family), and letting it parse silently would compile the
+            // omitted argument as nothing.  Refusing by name is the safe
+            // interim.  DELETE THIS BRANCH AND ITS FIXTURE when t_36492ad8
+            // lands - that card's acceptance says so.
+            error(p->loc,
+                  "default value on a parameter of '" + decl->name +
+                  "', which is not the entry function, is not supported yet "
+                  "(the reference accepts it; call-site materialisation is "
+                  "t_36492ad8): \"" + p->name + "\"");
+        }
+    }
+}
+
+// The one default-value rule the general type checker cannot see
+// (t_4b54f26b A1): a BRACED initialiser must supply exactly the declared
+// component count and never broadcasts, while the parenthesised constructor
+// it parses into DOES broadcast from a single argument.  Measured:
+//     float4 u = float4(2)   ACCEPT [2,2,2,2]
+//     float4 u = {2}         REFUSE  too little data
+//     float3 u = {1,2}       REFUSE  too little data
+//     float4 u = {1,2,3,4,5} REFUSE  too much data
+// Braces and parentheses build the SAME ConstructorExpr, so the parser marks
+// which was written and only that flag distinguishes them here.
+//
+// Everything else - category, dimensions, nesting, narrowing - is
+// analyzeExpr + checkAssignment's job, called beside this one.  An earlier
+// version of this function tried to do it all with component counts and was
+// wrong in both directions across three review rounds.
+void SemanticAnalyzer::checkParameterDefaultShape(ParamDecl* p)
+{
+    if (!p || !p->defaultValue || !p->type) return;
+    // ARRAYS have their own initialiser rules - one ELEMENT per array slot -
+    // and componentCount() describes the ELEMENT.  The reference ACCEPTS
+    // `uniform float4 a[2] = { float4(1,2,3,4), float4(5,6,7,8) }`; an
+    // earlier version of this check refused it, which is worse than the gap.
+    // Array defaults are not measured yet (t_2b592fc7).
+    if (p->type->arraySize > 0) return;
+    if (p->defaultValue->kind != ExprKind::Constructor) return;
+    const auto* ctor = static_cast<const ConstructorExpr*>(p->defaultValue.get());
+    if (!ctor->bracedInitializer) return;
+
+    const int declared = p->type->componentCount();
+    const int args = static_cast<int>(ctor->arguments.size());
+    if (declared <= 0 || args == declared) return;
+    error(p->loc, std::string(args < declared ? "too little data in the "
+                                                "default value for '"
+                                              : "too much data in the "
+                                                "default value for '") +
+                  p->name + "': " + std::to_string(args) + " for a " +
+                  std::to_string(declared) + "-component type");
 }
 
 void SemanticAnalyzer::collectVarDecl(VarDecl* decl)
@@ -362,6 +451,34 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         if (!symbols_.addSymbol(std::move(sym)))
         {
             error(param->loc, "duplicate parameter name '" + param->name + "'");
+        }
+
+        // A uniform entry parameter's DEFAULT is type-checked exactly like a
+        // variable's initialiser (t_4b54f26b A1).  This is the same
+        // analyzeExpr + checkAssignment pair analyzeVarDecl uses, and using
+        // it rather than hand-rolled arithmetic is the whole point: three
+        // rounds of review found width-only rules wrong in both directions -
+        // `float4 u = float(2)` and `float4 u = float4(float2(1,2),
+        // float2(3,4))` are legal broadcasts/nestings that a component count
+        // refuses, while `float4 u = float2x2(1,2,3,4)` and `float2x2 u =
+        // float4(1,2,3,4)` are four components each and the reference refuses
+        // BOTH because the CATEGORY differs.  The existing checker already
+        // models category and dimensions; it just was never reached, because
+        // parameters with defaults used to be refused in the parser.
+        if (param->defaultValue &&
+            param->storage == StorageQualifier::Uniform &&
+            !resolvedType.isError())
+        {
+            const CgType defType = analyzeExpr(param->defaultValue.get());
+            if (!defType.isError())
+                checkAssignment(resolvedType, defType, param->defaultValue->loc);
+            // The ONE rule the general checker cannot know: a BRACED
+            // initialiser must supply exactly the declared component count
+            // and never broadcasts, while the parenthesised constructor it
+            // parses into does broadcast from one argument.  `float4 u = {2}`
+            // is refused (too little data) and `float4 u = float4(2)` is
+            // accepted, and the two are the same AST node apart from the flag.
+            checkParameterDefaultShape(param.get());
         }
     }
 

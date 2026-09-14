@@ -330,6 +330,15 @@ struct CastExpr : ExprNode
 // Type constructor: float4(1, 2, 3, 4)
 struct ConstructorExpr : ExprNode
 {
+    // True when the source wrote BRACES - `float4 u = {1,2,3,4}` - rather
+    // than a parenthesised constructor.  The parser builds the same node for
+    // both, but the reference applies DIFFERENT rules: a braced initialiser
+    // must supply exactly the declared component count (C1057 too little /
+    // C1058 too much), while a parenthesised constructor with ONE argument
+    // broadcasts.  `float4 u = {2}` is refused and `float4 u = float4(2)` is
+    // accepted, so the two cannot share a check (t_4b54f26b A1).
+    bool bracedInitializer = false;
+
     std::shared_ptr<TypeNode> constructedType;
     std::vector<std::unique_ptr<ExprNode>> arguments;
 

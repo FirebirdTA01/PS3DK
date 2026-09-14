@@ -141,6 +141,9 @@ private:
     void collectStructDecl(StructDecl* decl);
     void collectFunctionDecl(FunctionDecl* decl);
     void collectVarDecl(VarDecl* decl);
+    // Validates the SHAPE of a uniform entry parameter's default value
+    // against the reference's rules (t_4b54f26b A1).
+    void checkParameterDefaultShape(ParamDecl* p);
     void collectBufferDecl(BufferDecl* decl);
 
     void analyzeStructDecl(StructDecl* decl);

@@ -1,0 +1,17 @@
+// A MATRIX entry parameter's default, on BOTH surfaces (t_4b54f26b A1).
+//
+// A1's first version accepted this shape and discarded the value: the
+// parameter table read correctly and every row's ucode INLINE CONSTANT was
+// zero, so an unpatched shader multiplied by a zero matrix. That is the same
+// failure A3 fixed for FILE-SCOPE matrices, reproduced one branch over -
+// the seeding sat in the general uniform branch, which a matrix entry
+// parameter never reaches because an earlier branch builds its MatrixValue.
+// Found by codex building the tree rather than reading the diff.
+//
+// Measured on the reference: rows at 336/368/400 in the table AND
+// [1,2,3,0] / [4,5,6,0] / [7,8,9,0] in the ucode. The parent keeps defOff 0.
+float4 main(float3 n : TEXCOORD0,
+            uniform float3x3 M = float3x3(1,2,3, 4,5,6, 7,8,9)) : COLOR
+{
+	return float4(mul(M, n), 1.0);
+}
