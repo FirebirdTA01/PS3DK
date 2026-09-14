@@ -341,8 +341,39 @@ def verify_arity(paths):
 
 
 def main(argv):
-    if len(argv) >= 2 and argv[1] == "--verify-arity":
-        contradicted, unused, seen = verify_arity(argv[2:])
+    if len(argv) >= 2 and argv[1] in ("--verify-arity", "--verify-arity-manifest"):
+        print("arity checker: started", flush=True)
+        paths = argv[2:]
+        if argv[1] == "--verify-arity-manifest":
+            # Basenames are relative to the manifest, not the caller's cwd.
+            # A NUL delimiter preserves spaces/newlines without shell quoting;
+            # keeping POSIX /tmp paths out of the file also works with native
+            # Windows Python, whose argv (but not file contents) MSYS converts.
+            import os
+            from pathlib import Path
+            if len(paths) != 1:
+                print("UNREADABLE manifest: expected one manifest path")
+                return 2
+            manifest = Path(paths[0])
+            try:
+                names = manifest.read_bytes().split(b"\0")
+                if names[-1] != b"" or len(names) == 1:
+                    raise ValueError("empty or unterminated file list")
+                names = [os.fsdecode(name) for name in names[:-1]]
+                if any(not name or name in (".", "..") or "/" in name or "\\" in name
+                       for name in names):
+                    raise ValueError("file list must contain basenames")
+                if len(set(names)) != len(names):
+                    raise ValueError("duplicate filename in file list")
+                paths = [str(manifest.parent / name) for name in names]
+            except (OSError, ValueError) as err:
+                print("UNREADABLE manifest: %s" % err)
+                return 2
+        if not paths:
+            print("UNREADABLE file list: no containers selected")
+            return 2
+        print("arity checker: %d containers" % len(paths), flush=True)
+        contradicted, unused, seen = verify_arity(paths)
         for path, op, slot, err in contradicted:
             if err is not None:
                 print("UNREADABLE %s: %s" % (path, err))
