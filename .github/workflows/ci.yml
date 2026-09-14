@@ -250,6 +250,8 @@ jobs:
         run: bash tests/shader-compiler/half-subnormal-flush-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test FP vector times matrix products
         run: bash tests/shader-compiler/fp-vecmatmul-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test constant matrix row extraction and bounds
+        run: bash tests/shader-compiler/constant-matrix-row-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler declared half colour output
         run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the half colour output reaches H0 through the allocator
