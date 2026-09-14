@@ -1,0 +1,3 @@
+// t_1704e79e: hand-expanded twin of fp_predef_branch_f.cg.
+uniform float4 K_d = { 0.5, 0.25, 0.125, 1.0 };
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K_d; }

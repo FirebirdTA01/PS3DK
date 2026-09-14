@@ -232,11 +232,17 @@ void Preprocessor::initBuiltinMacros()
 	defineMacro("__DATE__", "\"" __DATE__ "\"");
 	defineMacro("__TIME__", "\"" __TIME__ "\"");
 	
-	// PSVita specific macros
-	defineMacro("__psp2__", "1");
-	defineMacro("__SCE__", "1");
-	defineMacro("__STDC__", "1");
-	defineMacro("__STDC_VERSION__", "199901L"); // C99
+	// Target-identification macros. Beyond the standard __LINE__/__FILE__/
+	// __DATE__/__TIME__ above, sce-cgc 475 predefines __CGC__ and __SCE_CGC__,
+	// both 20000 (measured 2026-09-14 on the reference); of the names checked,
+	// __CG__, _CG_, _CGC_, CGC, __psp2__, __SCE__, __STDC__ and
+	// __STDC_VERSION__ are NOT defined.
+	// The PSVita donor's set is gone on purpose: a shader that tests one of
+	// those names must take the same branch it takes on the reference. The
+	// SDK's SpuRender shaders test __CGC__ and fall into their PPU/SPU enum
+	// branch without it (t_1704e79e).
+	defineMacro("__CGC__", "20000");
+	defineMacro("__SCE_CGC__", "20000");
 }
 
 void Preprocessor::processDirective(const std::string& directive, std::string& output, const std::string& currentFile, int lineNum)

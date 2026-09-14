@@ -1,0 +1,34 @@
+// t_1704e79e: none of these names is defined by the reference; each would add
+// its own power of two, so the result must stay 0.  The first four were the
+// PSVita donor's predefinitions and are the ones a port is most likely to test.
+float4 main() : COLOR {
+  float v = 0;
+#ifdef __psp2__
+  v += 1;
+#endif
+#ifdef __SCE__
+  v += 2;
+#endif
+#ifdef __STDC__
+  v += 4;
+#endif
+#ifdef __STDC_VERSION__
+  v += 8;
+#endif
+#ifdef __CG__
+  v += 16;
+#endif
+#ifdef _CG_
+  v += 32;
+#endif
+#ifdef _CGC_
+  v += 64;
+#endif
+#ifdef CGC
+  v += 128;
+#endif
+#if defined(__CGC__) && (__CGC__ == 1)
+  v += 256;
+#endif
+  return float4(v, 0, 0, 1);
+}

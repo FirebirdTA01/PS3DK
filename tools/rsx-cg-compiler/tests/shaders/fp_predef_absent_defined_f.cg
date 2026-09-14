@@ -1,0 +1,14 @@
+// t_1704e79e: self-check twin of fp_predef_absent_f.cg with one absent name
+// defined in the source. It must DIFFER from the absent control, proving the
+// absent row can see a defined name at all.
+#define __psp2__ 1
+float4 main() : COLOR {
+  float v = 0;
+#ifdef __psp2__
+  v += 1;
+#endif
+#ifdef __SCE__
+  v += 2;
+#endif
+  return float4(v, 0, 0, 1);
+}
