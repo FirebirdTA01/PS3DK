@@ -1,0 +1,9 @@
+// t_61109061.  A function REACHED from the SELECTED ENTRY may not carry a
+// RETURN semantic.  One row per AST container that can hold a call - a walker
+// that misses a kind under-approximates reachability and ACCEPTS a program the
+// reference refuses.
+//
+// reached through a BARE EXPRESSION STATEMENT (result discarded)
+// Compile with -e beta.  Reference verdict: REFUSE
+float4 gamma(float4 t) : COLOR { return t*2.0; }
+float4 beta(float4 t : TEXCOORD0) : COLOR { gamma(t); return t; }

@@ -1,0 +1,14 @@
+// t_61109061 OVERLOAD IDENTITY.  The semantic belongs to the declaration a
+// call RESOLVED TO, so overload identity must be exact.  A field-by-field
+// TypeNode comparison merges `float[2]` with `float4[2]` - an ARRAY carries its
+// real type in elementType, and the two agree on baseType, vectorSize,
+// matrixRows/Cols and arraySize, differing only underneath.  That merge made
+// the semantic of one overload apply to a call that resolved to the other,
+// measured as BOTH a new over-refusal and a missed refusal.  CgType::equals is
+// the tree-walking identity the analyser already uses.
+//
+// the CALLED overload carries the semantic
+// Compile with -e beta.  Reference verdict: REFUSE
+float4 f(float a[2]) { return float4(a[0],a[1],0,1); }
+float4 f(float4 a[2]) : COLOR { return a[0]+a[1]; }
+float4 beta(float4 t : TEXCOORD0) : COLOR { float4 a[2]; a[0]=t; a[1]=t; return f(a); }

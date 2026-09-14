@@ -6,6 +6,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <unordered_set>
 #include <iostream>  // For debug output
 
 namespace
@@ -228,6 +229,11 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
             shaderInfo_.entryPoint = decl;
         }
     }
+
+    // Every declaration, prototypes INCLUDED, in source order, for the C5122
+    // walk in pass 3 (t_61109061).  A prototype carries no body, but it can
+    // carry the SEMANTIC that is judged and it is what a call resolves to.
+    allFunctions_.push_back(decl);
 
     // WHERE A DEFAULT VALUE IS LEGAL (t_4b54f26b A1).  Measured on the
     // reference, which has a named diagnostic for exactly this question:
@@ -1379,6 +1385,8 @@ void SemanticAnalyzer::validateShader()
 {
     validateEntryPoint();
 
+    checkNonEntrySemantics();
+
     if (shaderInfo_.stage == ShaderStage::Vertex)
     {
         validateVertexShader();
@@ -1386,6 +1394,265 @@ void SemanticAnalyzer::validateShader()
     else
     {
         validateFragmentShader();
+    }
+}
+
+// A function REACHED FROM THE SELECTED ENTRY may not carry a RETURN semantic
+// (t_61109061).  MEASURED, because the diagnostic's own text is wrong about its
+// rule - it says "semantics not allowed on functions other than the entry
+// function", and the reference accepts two shapes that sentence forbids:
+//
+//   called helper, RETURN semantic                    REFUSE  C5122
+//   called helper, RETURN + PARAMETER semantics       REFUSE  C5122
+//   called helper, PARAMETER semantic only            ACCEPT
+//   declared but never called, full semantics         ACCEPT
+//   called only by a function the entry never calls   ACCEPT
+//   transitively reachable through an intermediate    REFUSE  C5122
+//   called only inside `if (false) ...`               REFUSE  C5122
+//   called from a default-argument expression         ACCEPT
+//
+// So the rule is transitive reachability from the SELECTED entry, over the
+// SYNTACTIC call graph, WITHOUT branch pruning - and default-argument
+// expressions do not create edges.  Two consequences for the implementation:
+//
+//  - it cannot reuse a reachability pass that runs after constant folding.
+//    The `if (false)` row is REFUSED by the reference, so the edge has to be
+//    seen in the AST before anything prunes it.  ir_passes' m_reachableBlocks
+//    is a different notion entirely: basic blocks within one function.
+//  - it must walk EVERY container.  A missed node kind under-approximates
+//    reachability, and under-approximating means ACCEPTING a program the
+//    reference refuses - this check's own defect, reintroduced by its fix and
+//    invisible to any fixture that happens to use a handled kind.  The
+//    switches below therefore carry NO `default:` label, so an enum addition
+//    is a compiler warning rather than a silent hole, and twelve container
+//    fixtures cover it behaviourally.
+void SemanticAnalyzer::checkNonEntrySemantics()
+{
+    FunctionDecl* entry = shaderInfo_.entryPoint;
+    if (!entry) return;   // already diagnosed by validateEntryPoint
+
+    // Reached set holds the FIRST declaration of each function, because that
+    // is the one the reference judges and the one a call resolves to.
+    std::unordered_set<const FunctionDecl*> reached;
+    std::vector<FunctionDecl*> work;
+    FunctionDecl* entryFirst = firstDeclarationOf(entry);
+    work.push_back(entryFirst ? entryFirst : entry);
+    reached.insert(work.back());
+
+    while (!work.empty())
+    {
+        FunctionDecl* fn = work.back();
+        work.pop_back();
+
+        // WALK THE DEFINITION'S BODY, not this declaration's.  A call resolves
+        // to the first declaration, which is usually a bodyless prototype;
+        // stopping there under-approximates reachability and ACCEPTS programs
+        // the reference refuses - measured, entry -> prototype delta ->
+        // definition delta -> gamma:COLOR is C5122 and we accepted it.
+        FunctionDecl* def = definitionOf(fn);
+        if (!def || !def->body) continue;
+
+        std::vector<FunctionDecl*> callees;
+        collectCallEdges(def->body.get(), callees);
+        for (FunctionDecl* callee : callees)
+        {
+            if (!callee) continue;
+            FunctionDecl* first = firstDeclarationOf(callee);
+            if (!first) first = callee;
+            if (reached.insert(first).second) work.push_back(first);
+        }
+    }
+
+    // Source order, not hash order: deterministic diagnostics.
+    for (FunctionDecl* fn : allFunctions_)
+    {
+        if (reached.find(fn) == reached.end()) continue;
+        if (!fn || fn == entry) continue;
+        if (fn->isIntrinsic) continue;          // builtin header, not user source
+        if (fn->name == shaderInfo_.entryPointName) continue;
+        if (fn->returnSemantic.name.empty()) continue;
+        error(fn->loc,
+              "semantics not allowed on functions other than the entry "
+              "function: '" + fn->name + "'");
+    }
+}
+
+bool SemanticAnalyzer::sameSignature(const FunctionDecl* a,
+                                     const FunctionDecl* b) const
+{
+    if (!a || !b) return false;
+    if (a->name != b->name) return false;
+    if (a->parameters.size() != b->parameters.size()) return false;
+    for (size_t i = 0; i < a->parameters.size(); ++i)
+    {
+        const auto& pa = a->parameters[i];
+        const auto& pb = b->parameters[i];
+        if (!pa || !pb) return false;
+        if (!pa->type || !pb->type) return false;
+        // RESOLVE AND COMPARE WHOLE TYPES.  A field-by-field comparison of the
+        // TypeNode is a trap: an ARRAY carries its real type in elementType,
+        // so `float[2]` and `float4[2]` agree on baseType, vectorSize,
+        // matrixRows/Cols and arraySize and differ only underneath.  Comparing
+        // the flat fields merged those two overloads, which made the semantic
+        // of one apply to a call that resolved to the other - measured as BOTH
+        // a new over-refusal and a missed refusal (t_61109061, found in review).
+        // CgType::equals is the tree-walking identity the rest of the analyser
+        // already uses; a second, shallower notion of "same type" living only
+        // in this check is exactly how the two drift apart.
+        const CgType ta = resolveType(pa->type.get());
+        const CgType tb = resolveType(pb->type.get());
+        if (!ta.equals(tb)) return false;
+    }
+    return true;
+}
+
+FunctionDecl* SemanticAnalyzer::firstDeclarationOf(const FunctionDecl* fn) const
+{
+    for (FunctionDecl* cand : allFunctions_)
+        if (sameSignature(cand, fn)) return cand;
+    return nullptr;
+}
+
+FunctionDecl* SemanticAnalyzer::definitionOf(const FunctionDecl* fn) const
+{
+    for (FunctionDecl* cand : allFunctions_)
+        if (sameSignature(cand, fn) && cand->body) return cand;
+    return nullptr;
+}
+
+// The two halves of the SYNTACTIC walk.  Deliberately exhaustive and
+// deliberately without a `default:` - see checkNonEntrySemantics.
+void SemanticAnalyzer::collectCallEdges(const StmtNode* stmt,
+                                        std::vector<FunctionDecl*>& out) const
+{
+    if (!stmt) return;
+    switch (stmt->kind)
+    {
+    case StmtKind::Expr:
+        collectCallEdges(static_cast<const ExprStmt*>(stmt)->expr.get(), out);
+        break;
+    case StmtKind::Decl:
+        for (const auto& d : static_cast<const DeclStmt*>(stmt)->declarations)
+        {
+            const auto* v = dynamic_cast<const VarDecl*>(d.get());
+            if (v) collectCallEdges(v->initializer.get(), out);
+        }
+        break;
+    case StmtKind::Block:
+        for (const auto& st : static_cast<const BlockStmt*>(stmt)->statements)
+            collectCallEdges(st.get(), out);
+        break;
+    case StmtKind::If:
+    {
+        const auto* node = static_cast<const IfStmt*>(stmt);
+        collectCallEdges(node->condition.get(), out);
+        collectCallEdges(node->thenBranch.get(), out);
+        collectCallEdges(node->elseBranch.get(), out);
+        break;
+    }
+    case StmtKind::For:
+    {
+        const auto* node = static_cast<const ForStmt*>(stmt);
+        collectCallEdges(node->init.get(), out);
+        collectCallEdges(node->condition.get(), out);
+        collectCallEdges(node->increment.get(), out);
+        collectCallEdges(node->body.get(), out);
+        break;
+    }
+    case StmtKind::While:
+    {
+        const auto* node = static_cast<const WhileStmt*>(stmt);
+        collectCallEdges(node->condition.get(), out);
+        collectCallEdges(node->body.get(), out);
+        break;
+    }
+    case StmtKind::DoWhile:
+    {
+        const auto* node = static_cast<const DoWhileStmt*>(stmt);
+        collectCallEdges(node->body.get(), out);
+        collectCallEdges(node->condition.get(), out);
+        break;
+    }
+    case StmtKind::Switch:
+    {
+        const auto* node = static_cast<const SwitchStmt*>(stmt);
+        collectCallEdges(node->expr.get(), out);
+        collectCallEdges(node->body.get(), out);
+        break;
+    }
+    case StmtKind::Case:
+        collectCallEdges(static_cast<const CaseStmt*>(stmt)->value.get(), out);
+        break;
+    case StmtKind::Return:
+        collectCallEdges(static_cast<const ReturnStmt*>(stmt)->value.get(), out);
+        break;
+    case StmtKind::Default:
+    case StmtKind::Break:
+    case StmtKind::Continue:
+    case StmtKind::Discard:
+    case StmtKind::Empty:
+        break;   // carry no sub-statement and no sub-expression
+    }
+}
+
+void SemanticAnalyzer::collectCallEdges(const ExprNode* expr,
+                                        std::vector<FunctionDecl*>& out) const
+{
+    if (!expr) return;
+    switch (expr->kind)
+    {
+    case ExprKind::Call:
+    {
+        const auto* node = static_cast<const CallExpr*>(expr);
+        // Resolved by pass 2.  Keyed on the DECLARATION, never the spelling:
+        // overloads share a name.
+        if (node->resolvedFunction)
+        {
+            auto* fn = dynamic_cast<FunctionDecl*>(node->resolvedFunction);
+            if (fn) out.push_back(fn);
+        }
+        for (const auto& a : node->arguments) collectCallEdges(a.get(), out);
+        break;
+    }
+    case ExprKind::Binary:
+    {
+        const auto* node = static_cast<const BinaryExpr*>(expr);
+        collectCallEdges(node->left.get(), out);
+        collectCallEdges(node->right.get(), out);
+        break;
+    }
+    case ExprKind::Unary:
+        collectCallEdges(static_cast<const UnaryExpr*>(expr)->operand.get(), out);
+        break;
+    case ExprKind::MemberAccess:
+        collectCallEdges(static_cast<const MemberAccessExpr*>(expr)->object.get(), out);
+        break;
+    case ExprKind::Index:
+    {
+        const auto* node = static_cast<const IndexExpr*>(expr);
+        collectCallEdges(node->array.get(), out);
+        collectCallEdges(node->index.get(), out);
+        break;
+    }
+    case ExprKind::Ternary:
+    {
+        const auto* node = static_cast<const TernaryExpr*>(expr);
+        collectCallEdges(node->condition.get(), out);
+        collectCallEdges(node->thenExpr.get(), out);
+        collectCallEdges(node->elseExpr.get(), out);
+        break;
+    }
+    case ExprKind::Cast:
+        collectCallEdges(static_cast<const CastExpr*>(expr)->operand.get(), out);
+        break;
+    case ExprKind::Constructor:
+        for (const auto& a : static_cast<const ConstructorExpr*>(expr)->arguments)
+            collectCallEdges(a.get(), out);
+        break;
+    case ExprKind::Literal:
+    case ExprKind::Identifier:
+    case ExprKind::Sizeof:
+        break;   // carry no sub-expression
     }
 }
 

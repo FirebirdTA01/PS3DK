@@ -1,0 +1,12 @@
+// t_61109061 EXCLUSION CONTROL.  A call inside a DEFAULT-ARGUMENT expression
+// creates NO reachability edge - the reference ACCEPTS this even though gamma
+// carries a return semantic, unlike all twelve other call containers.
+//
+// This file and its twin differ ONLY in whether gamma carries the semantic.
+// Both are refused TODAY by the constant evaluator (t_d60fbc59: the reference
+// folds gamma(...) to 2.0 and records it; we cannot fold a user function
+// call).  The guard asserts the two produce the SAME diagnostic - if the
+// reachability walk ever descends into a default argument, the semantic one
+// changes and the pair separates.  This file: gamma HAS the semantic.
+float4 gamma(float4 t) : COLOR { return t*2.0; }
+float4 beta(float4 t : TEXCOORD0, uniform float k = gamma(float4(1,1,1,1)).x) : COLOR { return t*k; }

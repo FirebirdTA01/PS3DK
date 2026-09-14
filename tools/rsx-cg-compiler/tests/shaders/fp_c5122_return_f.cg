@@ -1,0 +1,10 @@
+// t_61109061.  A function REACHED from the SELECTED ENTRY may not carry a
+// RETURN semantic.  MEASURED against sce-cgc 475 - the C5122 diagnostic's own
+// text ("semantics not allowed on functions other than the entry function") is
+// WRONG about its rule: the reference accepts a parameter semantic on a called
+// helper, and accepts full semantics on a function nothing calls.
+//
+// reached through a RETURN expression
+// Compile with -e beta.  Reference verdict: REFUSE
+float4 gamma(float4 t) : COLOR { return t*2.0; }
+float4 beta(float4 t : TEXCOORD0) : COLOR { return gamma(t); }

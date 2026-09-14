@@ -1,0 +1,11 @@
+// t_61109061 PROTOTYPE CELL.  The semantic that is JUDGED is the one on the
+// FIRST DECLARATION in source order; the body that is WALKED is the
+// DEFINITION's.  Measured on sce-cgc 475 - the four cells disagree, so neither
+// "judge the definition" nor "judge either" reproduces the reference.
+//
+// entry -> bodyless PROTOTYPE delta -> definition delta -> gamma:COLOR.\n// Stopping the walk at the prototype under-approximates reachability and\n// ACCEPTS this, which is what the first draft of this check did.
+// Compile with -e beta.  Reference verdict: REFUSE
+float4 delta(float4 t);
+float4 gamma(float4 t) : COLOR { return t*2.0; }
+float4 delta(float4 t) { return gamma(t); }
+float4 beta(float4 t : TEXCOORD0) : COLOR { return delta(t)*0.5; }
