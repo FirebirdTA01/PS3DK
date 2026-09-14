@@ -4277,6 +4277,46 @@ private:
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
         if (inst.resultType.isMatrix()) {
+            MatrixValue left, right;
+            const bool leftMatrix = matrixRows(inst.operands[0], left);
+            const bool rightMatrix = matrixRows(inst.operands[1], right);
+            const auto matchesResult = [&](const MatrixValue& matrix) {
+                return matrix.rows == inst.resultType.matrixRows &&
+                       matrix.cols == inst.resultType.matrixCols &&
+                       matrix.rowSrcs.size() == static_cast<size_t>(matrix.rows);
+            };
+            const bool addRows = op == VOp::Add && !negateRhs &&
+                leftMatrix && rightMatrix && matchesResult(left) && matchesResult(right);
+            const bool scaleRows = op == VOp::Mul && !negateRhs &&
+                leftMatrix != rightMatrix &&
+                matchesResult(leftMatrix ? left : right) &&
+                valueWidthOf(inst.operands[leftMatrix ? 1 : 0]) == 1;
+            if (profile_ == GeneralProfile::Vertex &&
+                matrixDimsSupported(inst.resultType) && (addRows || scaleRows)) {
+                VSrc scalar;
+                if (scaleRows) {
+                    scalar = resolve(inst.operands[leftMatrix ? 1 : 0]);
+                    const uint8_t component = scalar.swizzle[0];
+                    scalar.swizzle = {component, component, component, component};
+                }
+                MatrixValue result;
+                result.rows = inst.resultType.matrixRows;
+                result.cols = inst.resultType.matrixCols;
+                // MatrixValue stores rows, not one vector register. Keep that
+                // representation through arithmetic for the existing matvecmul.
+                for (int row = 0; row < result.rows; ++row) {
+                    VInstr vi;
+                    vi.op = op;
+                    vi.dst.index = newVReg();
+                    vi.dst.writemask = componentMaskForWidth(result.cols);
+                    vi.srcs[0] = leftMatrix ? left.rowSrcs[row] : scalar;
+                    vi.srcs[1] = rightMatrix ? right.rowSrcs[row] : scalar;
+                    program_.instrs.push_back(vi);
+                    result.rowSrcs.push_back(tempSrc(vi.dst.index));
+                }
+                matrixValues_[inst.result] = result;
+                return;
+            }
             program_.diagnostics.push_back(
                 "nv40-general: matrix arithmetic is not yet lowered "
                 "(t_ef0cb2e0 arithmetic slice); refusing");
