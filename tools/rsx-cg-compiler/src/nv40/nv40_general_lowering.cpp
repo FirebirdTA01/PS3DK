@@ -10021,6 +10021,22 @@ UcodeOutput lowerVertexProgramGeneral(const IRModule& module,
                                       const rsx_cg::CompileOptions&,
                                       VpAttributes* attrsOut)
 {
+    // The container honors a file-scope C pin; this allocator does not yet.
+    // Check declarations, including unused pins: skipping a pin in the
+    // container but consuming its automatic slot here shifts later uniforms.
+    // Legacy lowering honors the pin and must remain available as a control.
+    for (const auto& global : module.globals) {
+        if (global.storage == StorageQualifier::Uniform &&
+            global.explicitRegisterBank == 'C') {
+            UcodeOutput out;
+            out.diagnostics.push_back(
+                "nv40-general-vp: explicit file-scope register(C" +
+                std::to_string(global.explicitRegisterIndex) + ") on '" +
+                global.name + "' is not yet lowered consistently with reflection "
+                "(t_49f3cc72); refusing");
+            return out;
+        }
+    }
     GeneralBuilder builder(GeneralProfile::Vertex, entry, module);
     VirtualProgram program = builder.run();
     UcodeOutput out = emitVertexVirtual(program, attrsOut);
