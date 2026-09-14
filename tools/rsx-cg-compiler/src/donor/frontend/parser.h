@@ -134,6 +134,7 @@ private:
     // swallowed; `inline` has no storage meaning, so the caller rules on
     // whether it is legal (a function ignores it, anything else refuses).
     StorageQualifier parseStorageQualifier(bool* sawInline = nullptr);
+    bool lastStorageWasStatic_ = false;   // set by parseStorageQualifier, read by parseVariableDeclaration
     Semantic parseSemantic();
     VitaAttributes parseVitaAttributes();
     void skipGccAttributes();  // Skip __attribute__((...)) clauses

@@ -1,0 +1,5 @@
+// t_10dc2936: arithmetic in a file-scope initialiser folds the way the reference folds it.
+// REFUSAL: a brace list with more data than the declared type holds is C1058 "too much data" on the
+// reference; it is not a constant here either (the parent accepted it with three lanes).
+const float2 D = {1, 2, 3};
+float4 main(float2 t : TEXCOORD0) : COLOR { return float4(t * D, 0, 1); }

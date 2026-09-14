@@ -488,6 +488,7 @@ struct IRGlobal
     IRValueID valueId;
 
     StorageQualifier storage = StorageQualifier::None;
+    bool declaredStatic = false;   // `static` was written: a true constant, not a defaulted uniform
     std::string semanticName;
     std::string rawSemanticName;  // Preserve :C009 for reflection, as parameters do.
     int semanticIndex = 0;

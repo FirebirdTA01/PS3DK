@@ -321,6 +321,8 @@ jobs:
         run: bash tests/shader-compiler/macro-hideset-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the preprocessor predefines exactly the reference's macros
         run: bash tests/shader-compiler/predefined-macro-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test file-scope initialiser arithmetic folds like the reference
+        run: bash tests/shader-compiler/initializer-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test included headers share the unit's macros and conditional stack
         run: bash tests/shader-compiler/include-unit-state-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test diagnostics name the source line and file

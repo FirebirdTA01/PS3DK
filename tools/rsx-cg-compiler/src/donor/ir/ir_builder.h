@@ -44,10 +44,14 @@ private:
                                          std::vector<float>& out);
     static bool evaluateConstIntInitializer(const ExprNode* init,
                                             std::vector<int64_t>& out);
+    // `module` lets an identifier in the initialiser resolve to a file-scope
+    // const that was already folded (t_10dc2936); without it identifiers are
+    // not constants.
     static bool evaluateConstInitializerTyped(const ExprNode* init,
                                               const TypeNode* declType,
                                               std::vector<float>& floatOut,
-                                              std::vector<int64_t>& intOut);
+                                              std::vector<int64_t>& intOut,
+                                              IRModule* module = nullptr);
 
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;

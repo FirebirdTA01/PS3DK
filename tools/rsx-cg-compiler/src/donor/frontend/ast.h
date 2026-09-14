@@ -569,6 +569,13 @@ struct VarDecl : DeclNode
     std::shared_ptr<TypeNode> type;
     std::unique_ptr<ExprNode> initializer;  // nullable
     StorageQualifier storage = StorageQualifier::None;
+    // "static const" / "const static" both canonicalize to Const; this keeps
+    // whether `static` was written, because the reference folds a static
+    // const as a true constant but treats a non-static file-scope const as a
+    // uniform with a default - so only a STATIC const may feed another
+    // initialiser (t_10dc2936: `const float W; const float2 D = {1/W}` is
+    // C1059 on the reference).
+    bool isStatic = false;
     Semantic semantic;
     VitaAttributes vitaAttrs;
 

@@ -1066,6 +1066,7 @@ std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
 {
     auto var = std::make_unique<VarDecl>(loc, name, type);
     var->storage = storage;
+    var->isStatic = lastStorageWasStatic_;
 
     // Check for array brackets after name
     while (check(TokenType::LBRACKET))
@@ -1230,6 +1231,7 @@ StorageQualifier Parser::parseStorageQualifier(bool* sawInline)
     // "const static" both canonicalized to StorageQualifier::Const so const
     // evaluation and immutability are preserved regardless of qualifier order.
     bool inlineSeen = false;
+    lastStorageWasStatic_ = false;
     auto swallowInline = [&]() {
         while (match(TokenType::KW_INLINE))
             inlineSeen = true;
@@ -1247,11 +1249,13 @@ StorageQualifier Parser::parseStorageQualifier(bool* sawInline)
         if (match(TokenType::KW_CONST))
         {
             // Handle "const static" combination: treat as Const
-            match(TokenType::KW_STATIC);
+            if (match(TokenType::KW_STATIC))
+                lastStorageWasStatic_ = true;
             return StorageQualifier::Const;
         }
         if (match(TokenType::KW_STATIC))
         {
+            lastStorageWasStatic_ = true;
             // Handle "static const" combination: treat as Const
             if (match(TokenType::KW_CONST))
                 return StorageQualifier::Const;
