@@ -190,7 +190,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-matrix-array-') as temp:
                         f'stride-mix i={value}: wrong decoded constant reads {reads}')
             except (KeyError,ValueError) as error: failures.append('stride-mix: '+str(error))
     compile_case('arithmetic','uniform float4x4 M[2]; float4 main(float4 p:POSITION):POSITION '
-                 '{return mul(0.5*M[0]+M[1],p);}', 'matrix arithmetic is not yet lowered')
+                 '{return mul(0.5*M[0]+M[1],p);}')
     compile_case('binding','uniform float4x4 M[2]:register(C9); '
                  'float4 main(float4 p:POSITION,float i:TEXCOORD0):POSITION '
                  '{return mul(M[int(i)],p);}')
