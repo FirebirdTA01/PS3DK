@@ -482,6 +482,7 @@ struct IRGlobal
 
     StorageQualifier storage = StorageQualifier::None;
     std::string semanticName;
+    std::string rawSemanticName;  // Preserve :C009 for reflection, as parameters do.
     int semanticIndex = 0;
 
     // For uniforms: buffer index and offset
