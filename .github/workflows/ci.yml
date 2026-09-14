@@ -217,6 +217,8 @@ jobs:
         run: bash tests/shader-compiler/vp-opcode-fallthrough-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler VP scalar intrinsics
         run: bash tests/shader-compiler/vp-scalar-intrinsic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler VP tangent and binormal semantics
+        run: bash tests/shader-compiler/vp-tangent-binormal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler int literals in float constructors
         run: bash tests/shader-compiler/int-literal-ctor-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
