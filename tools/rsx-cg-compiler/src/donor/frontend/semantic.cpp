@@ -1074,6 +1074,7 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     // Analyze all arguments
     int totalComponents = 0;
     bool hasError = false;
+    CgType singleArgType;
 
     for (auto& arg : expr->arguments)
     {
@@ -1091,6 +1092,11 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
             continue;
         }
 
+        if (expr->arguments.size() == 1)
+        {
+            singleArgType = argType;
+        }
+
         totalComponents += argType.componentCount();
     }
 
@@ -1099,9 +1105,40 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     // Check component count
     int requiredComponents = constructedType.componentCount();
 
-    // Allow single scalar to broadcast, or exact match, or any count for struct
+    // Single-argument constructors in Cg are casts: narrowing is accepted,
+    // widening is refused with "error C1033: cast not allowed" (t_d03921c3).
+    bool allowSingleArg = false;
+    if (expr->arguments.size() == 1 && !singleArgType.isError())
+    {
+        if (totalComponents == 1)
+        {
+            allowSingleArg = true;
+        }
+        else if (singleArgType.isVector() && (constructedType.isVector() || constructedType.isScalar()) &&
+                 singleArgType.vectorSize() >= constructedType.vectorSize())
+        {
+            allowSingleArg = true;
+        }
+        else if (singleArgType.isMatrix() && constructedType.isMatrix() &&
+                 singleArgType.matrixRows() >= constructedType.matrixRows() &&
+                 singleArgType.matrixCols() >= constructedType.matrixCols())
+        {
+            allowSingleArg = true;
+        }
+        else if ((singleArgType.isVector() && constructedType.isVector() &&
+                  singleArgType.vectorSize() < constructedType.vectorSize()) ||
+                 (singleArgType.isMatrix() && constructedType.isMatrix() &&
+                  (singleArgType.matrixRows() < constructedType.matrixRows() ||
+                   singleArgType.matrixCols() < constructedType.matrixCols())))
+        {
+            error(expr->loc, "error C1033: cast not allowed");
+            return CgType::Error();
+        }
+    }
+
+    // Allow single scalar to broadcast, single narrowing, exact match, or any count for struct
     if (totalComponents != requiredComponents &&
-        !(expr->arguments.size() == 1 && totalComponents == 1) &&
+        !allowSingleArg &&
         !constructedType.isStruct())
     {
         error(expr->loc, "constructor requires " + std::to_string(requiredComponents) +

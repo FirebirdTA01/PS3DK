@@ -1,0 +1,7 @@
+struct VOut { float4 pos : POSITION; half2 col : COLOR; };
+VOut main(float4 p : POSITION) {
+    VOut o;
+    o.pos = p;
+    o.col = half2(70000.0, -70000.0);
+    return o;
+}

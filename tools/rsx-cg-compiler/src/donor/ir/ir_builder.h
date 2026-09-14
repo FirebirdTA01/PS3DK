@@ -266,4 +266,8 @@ private:
     IRValueID createConstant(float value);
     IRValueID createConstant(const IRTypeInfo& type, float value);
     IRValueID createConstant(const IRTypeInfo& type, const std::vector<float>& values, const std::vector<int64_t>& intValues = {});
+
+    // Narrowing helpers for vector and matrix casts and constructors (t_d03921c3)
+    IRValueID emitVectorNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType, IRValueID operandValue, SourceLocation loc, std::optional<BaseType> baseTypeOverride = std::nullopt);
+    IRValueID emitMatrixNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType, IRValueID operandValue, SourceLocation loc);
 };

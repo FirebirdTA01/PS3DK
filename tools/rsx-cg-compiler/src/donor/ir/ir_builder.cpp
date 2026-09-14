@@ -4150,9 +4150,299 @@ IRValueID IRBuilder::buildTernaryExpr(TernaryExpr* expr)
     return currentFunction_->nextValueId - 1;
 }
 
+IRValueID IRBuilder::emitVectorNarrowing(const IRTypeInfo& sourceType,
+                                        const IRTypeInfo& targetType,
+                                        IRValueID operandValue,
+                                        SourceLocation loc,
+                                        std::optional<BaseType> baseTypeOverride)
+{
+    const int tgtWidth = targetType.isVector() ? targetType.vectorSize : (targetType.isScalar() ? 1 : 0);
+    if (tgtWidth <= 0 || tgtWidth > 4)
+        return InvalidIRValue;
+
+    BaseType targetBase = BaseType::Float;
+    if (baseTypeOverride.has_value())
+    {
+        targetBase = *baseTypeOverride;
+    }
+    else
+    {
+        switch (targetType.elementType)
+        {
+        case IRType::Bool:    targetBase = BaseType::Bool; break;
+        case IRType::Int32:   targetBase = BaseType::Int; break;
+        case IRType::UInt32:  targetBase = BaseType::UInt; break;
+        case IRType::Float16: targetBase = BaseType::Half; break;
+        case IRType::Float32: targetBase = BaseType::Float; break;
+        default: targetBase = BaseType::Float; break;
+        }
+    }
+
+    // Try constant folding first
+    IRValue* v = currentFunction_->getValue(operandValue);
+    auto* c = v ? dynamic_cast<IRConstant*>(v) : nullptr;
+    std::vector<float> objComps;
+    if (c && extractFloatComponents(*currentFunction_, operandValue, objComps) &&
+        objComps.size() >= static_cast<size_t>(tgtWidth))
+    {
+        std::vector<ConstEvalScalar> rawComponents;
+        rawComponents.reserve(tgtWidth);
+        for (size_t i = 0; i < static_cast<size_t>(tgtWidth); ++i)
+        {
+            if (!c->intValues.empty() && i < c->intValues.size())
+            {
+                if (c->type.elementType == IRType::Int32)
+                    rawComponents.push_back(ConstEvalScalar::fromInt(c->intValues[i]));
+                else if (c->type.elementType == IRType::UInt32)
+                    rawComponents.push_back(ConstEvalScalar::fromUInt(static_cast<uint64_t>(c->intValues[i])));
+                else if (c->type.elementType == IRType::Bool)
+                    rawComponents.push_back(ConstEvalScalar::fromBool(c->intValues[i] != 0));
+                else
+                    rawComponents.push_back(ConstEvalScalar::fromFloat(objComps[i]));
+            }
+            else
+            {
+                rawComponents.push_back(ConstEvalScalar::fromFloat(objComps[i]));
+            }
+        }
+
+        const bool isIntOrBoolTarget = (targetBase == BaseType::Int ||
+                                        targetBase == BaseType::UInt ||
+                                        targetBase == BaseType::Bool ||
+                                        targetBase == BaseType::Short ||
+                                        targetBase == BaseType::UShort ||
+                                        targetBase == BaseType::Char ||
+                                        targetBase == BaseType::UChar);
+
+        std::vector<float> all;
+        std::vector<int64_t> allInts;
+        all.reserve(tgtWidth);
+        if (isIntOrBoolTarget)
+            allInts.reserve(tgtWidth);
+
+        bool convertOk = true;
+        for (size_t i = 0; i < static_cast<size_t>(tgtWidth); ++i)
+        {
+            ConstEvalScalar converted;
+            if (!convertScalar(rawComponents[i], targetBase, converted))
+            {
+                convertOk = false;
+                break;
+            }
+            all.push_back(static_cast<float>(converted.asDouble()));
+            if (isIntOrBoolTarget)
+                allInts.push_back(converted.asInt64());
+        }
+
+        if (convertOk)
+        {
+            if (tgtWidth == 1)
+            {
+                if (isIntOrBoolTarget && !allInts.empty())
+                {
+                    switch (targetType.baseType)
+                    {
+                    case IRType::Int32:  return createConstant(static_cast<int32_t>(allInts[0]));
+                    case IRType::UInt32: return createConstant(static_cast<uint32_t>(allInts[0]));
+                    case IRType::Bool:   return createConstant(allInts[0] != 0);
+                    default: break;
+                    }
+                }
+                return createConstant(targetType, all[0]);
+            }
+            return createConstant(targetType, all, allInts);
+        }
+    }
+
+    static const char* const kNarrowSwizzles[] = { "", "x", "xy", "xyz", "xyzw" };
+    IRTypeInfo narrowType;
+    narrowType.elementType = sourceType.elementType;
+    narrowType.vectorSize = tgtWidth;
+    narrowType.matrixRows = 0;
+    narrowType.matrixCols = 0;
+    narrowType.arraySize = 0;
+    switch (tgtWidth)
+    {
+    case 1: narrowType.baseType = sourceType.elementType; break;
+    case 2: narrowType.baseType = IRType::Vec2; break;
+    case 3: narrowType.baseType = IRType::Vec3; break;
+    case 4: narrowType.baseType = IRType::Vec4; break;
+    default: narrowType.baseType = IRType::Vec4; break;
+    }
+
+    const IRValueID shuffleId = currentFunction_->allocateValueId();
+    auto shuffleInst = std::make_unique<IRInstruction>(
+        IROp::VecShuffle, shuffleId, narrowType);
+    shuffleInst->addOperand(operandValue);
+    shuffleInst->swizzleMask = IRUtils::encodeSwizzle(kNarrowSwizzles[tgtWidth]);
+    shuffleInst->loc = loc;
+    currentBlock_->addInstruction(std::move(shuffleInst));
+    identityPrefixSwizzleBase_[shuffleId] = operandValue;
+
+    if (sourceType.elementType == targetType.elementType)
+        return shuffleId;
+
+    IROp convOp = IROp::Bitcast;
+    const IRType srcElem = sourceType.elementType;
+    const IRType dstElem = targetType.elementType;
+
+    if ((srcElem == IRType::Int32 || srcElem == IRType::UInt32 || srcElem == IRType::Bool) &&
+        (dstElem == IRType::Float32 || dstElem == IRType::Float16))
+    {
+        convOp = IROp::IntToFloat;
+    }
+    else if ((srcElem == IRType::Float32 || srcElem == IRType::Float16) &&
+             (dstElem == IRType::Int32 || dstElem == IRType::UInt32 || dstElem == IRType::Bool))
+    {
+        convOp = IROp::FloatToInt;
+    }
+    else if (srcElem == IRType::Float32 && dstElem == IRType::Float16)
+    {
+        convOp = IROp::FloatToHalf;
+    }
+    else if (srcElem == IRType::Float16 && dstElem == IRType::Float32)
+    {
+        convOp = IROp::HalfToFloat;
+    }
+
+    if (IRValueID folded = tryFoldUnaryOp(convOp, targetType, shuffleId);
+        folded != InvalidIRValue)
+    {
+        return folded;
+    }
+    return emitUnaryOp(convOp, targetType, shuffleId);
+}
+
+IRValueID IRBuilder::emitMatrixNarrowing(const IRTypeInfo& sourceType,
+                                        const IRTypeInfo& targetType,
+                                        IRValueID operandValue,
+                                        SourceLocation loc)
+{
+    static const char* const kNarrowSwizzles[] = { "", "x", "xy", "xyz", "xyzw" };
+    const int r = targetType.matrixRows;
+    const int c = targetType.matrixCols;
+    const int C = sourceType.matrixCols;
+
+    std::vector<IRValueID> rowValues;
+    rowValues.reserve(r);
+
+    for (int i = 0; i < r; ++i)
+    {
+        IRTypeInfo srcRowType;
+        srcRowType.elementType = sourceType.elementType;
+        srcRowType.vectorSize = C;
+        srcRowType.matrixRows = 0;
+        srcRowType.matrixCols = 0;
+        srcRowType.arraySize = 0;
+        switch (C)
+        {
+        case 1: srcRowType.baseType = sourceType.elementType; break;
+        case 2: srcRowType.baseType = IRType::Vec2; break;
+        case 3: srcRowType.baseType = IRType::Vec3; break;
+        case 4: srcRowType.baseType = IRType::Vec4; break;
+        default: srcRowType.baseType = IRType::Vec4; break;
+        }
+
+        const IRValueID constIdx = createConstant(static_cast<int32_t>(i));
+        const IRValueID extractId = currentFunction_->allocateValueId();
+        auto extractInst = std::make_unique<IRInstruction>(
+            IROp::VecExtract, extractId, srcRowType);
+        extractInst->addOperand(operandValue);
+        extractInst->addOperand(constIdx);
+        extractInst->loc = loc;
+        currentBlock_->addInstruction(std::move(extractInst));
+        IRValueID rowVal = extractId;
+
+        if (c < C)
+        {
+            IRTypeInfo narrowRowType;
+            narrowRowType.elementType = sourceType.elementType;
+            narrowRowType.vectorSize = c;
+            narrowRowType.matrixRows = 0;
+            narrowRowType.matrixCols = 0;
+            narrowRowType.arraySize = 0;
+            switch (c)
+            {
+            case 1: narrowRowType.baseType = sourceType.elementType; break;
+            case 2: narrowRowType.baseType = IRType::Vec2; break;
+            case 3: narrowRowType.baseType = IRType::Vec3; break;
+            case 4: narrowRowType.baseType = IRType::Vec4; break;
+            default: narrowRowType.baseType = IRType::Vec4; break;
+            }
+
+            const IRValueID shuffleId = currentFunction_->allocateValueId();
+            auto shuffleInst = std::make_unique<IRInstruction>(
+                IROp::VecShuffle, shuffleId, narrowRowType);
+            shuffleInst->addOperand(rowVal);
+            shuffleInst->swizzleMask = IRUtils::encodeSwizzle(kNarrowSwizzles[c]);
+            shuffleInst->loc = loc;
+            currentBlock_->addInstruction(std::move(shuffleInst));
+            identityPrefixSwizzleBase_[shuffleId] = rowVal;
+            rowVal = shuffleId;
+        }
+
+        if (sourceType.elementType != targetType.elementType)
+        {
+            IRTypeInfo dstRowType;
+            dstRowType.elementType = targetType.elementType;
+            dstRowType.vectorSize = c;
+            dstRowType.matrixRows = 0;
+            dstRowType.matrixCols = 0;
+            dstRowType.arraySize = 0;
+            switch (c)
+            {
+            case 1: dstRowType.baseType = targetType.elementType; break;
+            case 2: dstRowType.baseType = IRType::Vec2; break;
+            case 3: dstRowType.baseType = IRType::Vec3; break;
+            case 4: dstRowType.baseType = IRType::Vec4; break;
+            default: dstRowType.baseType = IRType::Vec4; break;
+            }
+
+            IROp convOp = IROp::Bitcast;
+            if (sourceType.elementType == IRType::Float32 && targetType.elementType == IRType::Float16)
+                convOp = IROp::FloatToHalf;
+            else if (sourceType.elementType == IRType::Float16 && targetType.elementType == IRType::Float32)
+                convOp = IROp::HalfToFloat;
+            else if ((sourceType.elementType == IRType::Int32 || sourceType.elementType == IRType::UInt32 || sourceType.elementType == IRType::Bool) &&
+                     (targetType.elementType == IRType::Float32 || targetType.elementType == IRType::Float16))
+                convOp = IROp::IntToFloat;
+            else if ((sourceType.elementType == IRType::Float32 || sourceType.elementType == IRType::Float16) &&
+                     (targetType.elementType == IRType::Int32 || targetType.elementType == IRType::UInt32 || targetType.elementType == IRType::Bool))
+                convOp = IROp::FloatToInt;
+
+            if (convOp != IROp::Bitcast)
+            {
+                if (IRValueID folded = tryFoldUnaryOp(convOp, dstRowType, rowVal);
+                    folded != InvalidIRValue)
+                {
+                    rowVal = folded;
+                }
+                else
+                {
+                    rowVal = emitUnaryOp(convOp, dstRowType, rowVal);
+                }
+            }
+        }
+
+        rowValues.push_back(rowVal);
+    }
+
+    const IRValueID matId = currentFunction_->allocateValueId();
+    auto matInst = std::make_unique<IRInstruction>(
+        IROp::MatConstruct, matId, targetType);
+    for (IRValueID rVal : rowValues)
+        matInst->addOperand(rVal);
+    matInst->loc = loc;
+    currentBlock_->addInstruction(std::move(matInst));
+    return matId;
+}
+
 IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
 {
     IRValueID operandValue = buildExpr(expr->operand.get());
+    if (operandValue == InvalidIRValue)
+        return InvalidIRValue;
+
     IRTypeInfo targetType = getIRType(expr->targetType.get());
     IRTypeInfo sourceType = getExprType(expr->operand.get());
 
@@ -4160,6 +4450,51 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
         sourceType.elementType == targetType.elementType)
     {
         return operandValue;
+    }
+
+    // Matrix cast handling
+    if (sourceType.isMatrix() || targetType.isMatrix())
+    {
+        if (sourceType.isMatrix() && targetType.isMatrix())
+        {
+            if (targetType.matrixRows > sourceType.matrixRows ||
+                targetType.matrixCols > sourceType.matrixCols)
+            {
+                error(expr->loc, "error C1033: cast not allowed");
+                return InvalidIRValue;
+            }
+
+            return emitMatrixNarrowing(sourceType, targetType, operandValue, expr->loc);
+        }
+
+        // Casting between matrix and vector/non-scalar is refused
+        if ((sourceType.isMatrix() && !targetType.isMatrix()) ||
+            (!sourceType.isMatrix() && targetType.isMatrix() && !sourceType.isScalar()))
+        {
+            error(expr->loc, "error C1033: cast not allowed");
+            return InvalidIRValue;
+        }
+    }
+
+    // Vector / scalar cast handling
+    const int srcWidth = sourceType.isVector() ? sourceType.vectorSize : (sourceType.isScalar() ? 1 : 0);
+    const int tgtWidth = targetType.isVector() ? targetType.vectorSize : (targetType.isScalar() ? 1 : 0);
+
+    if (srcWidth > 0 && tgtWidth > 0 && !sourceType.isMatrix() && !targetType.isMatrix())
+    {
+        // Vector widening is refused
+        if (sourceType.isVector() && tgtWidth > srcWidth)
+        {
+            error(expr->loc, "error C1033: cast not allowed");
+            return InvalidIRValue;
+        }
+
+        // Vector narrowing: N -> M (M < N), including vector to scalar (M = 1)
+        if (sourceType.isVector() && tgtWidth < srcWidth)
+        {
+            return emitVectorNarrowing(sourceType, targetType, operandValue, expr->loc,
+                expr->targetType ? std::optional<BaseType>(expr->targetType->baseType) : std::nullopt);
+        }
     }
 
     if (targetType.isVector())
@@ -4252,7 +4587,60 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     // Single argument handling
     if (argValues.size() == 1)
     {
+        if (argValues[0] == InvalidIRValue)
+            return InvalidIRValue;
+
         IRTypeInfo argType = getExprType(expr->arguments[0].get());
+
+        // Matrix single argument constructor
+        if (resultType.isMatrix() || argType.isMatrix())
+        {
+            if (resultType.isMatrix() && argType.isMatrix())
+            {
+                if (resultType.matrixRows > argType.matrixRows ||
+                    resultType.matrixCols > argType.matrixCols)
+                {
+                    error(expr->loc, "error C1033: cast not allowed");
+                    return InvalidIRValue;
+                }
+
+                if (resultType.matrixRows == argType.matrixRows &&
+                    resultType.matrixCols == argType.matrixCols &&
+                    resultType.elementType == argType.elementType)
+                {
+                    return argValues[0];
+                }
+
+                return emitMatrixNarrowing(argType, resultType, argValues[0], expr->loc);
+            }
+
+            if ((argType.isMatrix() && !resultType.isMatrix()) ||
+                (!argType.isMatrix() && resultType.isMatrix() && !argType.isScalar()))
+            {
+                error(expr->loc, "error C1033: cast not allowed");
+                return InvalidIRValue;
+            }
+        }
+
+        // Vector / scalar single argument constructor
+        const int srcWidth = argType.isVector() ? argType.vectorSize : (argType.isScalar() ? 1 : 0);
+        const int tgtWidth = resultType.isVector() ? resultType.vectorSize : (resultType.isScalar() ? 1 : 0);
+
+        if (srcWidth > 0 && tgtWidth > 0 && !resultType.isMatrix() && !argType.isMatrix())
+        {
+            if (argType.isVector() && tgtWidth > srcWidth)
+            {
+                error(expr->loc, "error C1033: cast not allowed");
+                return InvalidIRValue;
+            }
+
+            if (argType.isVector() && tgtWidth < srcWidth)
+            {
+                return emitVectorNarrowing(argType, resultType, argValues[0], expr->loc,
+                    expr->constructedType ? std::optional<BaseType>(expr->constructedType->baseType) : std::nullopt);
+            }
+        }
+
         if (argType.componentCount() == resultType.componentCount())
         {
             // Same type - just return it
