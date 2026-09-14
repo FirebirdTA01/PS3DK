@@ -1,0 +1,28 @@
+// Uniform ENTRY PARAMETER defaults on the VERTEX profile (t_4b54f26b A1).
+//
+// A1's first version wrote the entry-parameter block into cg_container_fp.cpp
+// only, and every fixture it shipped with was a FRAGMENT program - so the
+// vertex side silently dropped every entry default and nothing could see it.
+// Found in review by codex and Fable independently, both by probing the
+// profile the fixtures did not cover. This row exists so that cannot recur.
+//
+// Covers both branches the vertex container has for an entry uniform:
+//   tint  a vector, through the ordinary scalar/vector path
+//   M     a matrix, whose ROWS carry the value while the parent stays 0
+//   plain NO default - the control that must keep defOff 0
+//
+// Measured on the reference: tint [0.25,0.5,0.75,1], M rows [1,2,3,0] /
+// [4,5,6,0] / [7,8,9,0], plain none. ASYMMETRIC values so a transposed or
+// row-shifted fold cannot pass.
+void main(
+	float4 position : POSITION,
+	uniform float4x4 mvp,
+	uniform float4 tint  = {0.25, 0.5, 0.75, 1.0},
+	uniform float3x3 M   = float3x3(1,2,3, 4,5,6, 7,8,9),
+	uniform float4 plain,
+	out float4 oPos : POSITION,
+	out float4 oCol : COLOR0)
+{
+	oPos = mul(mvp, position);
+	oCol = tint * plain * float4(mul(M, position.xyz), 1.0);
+}

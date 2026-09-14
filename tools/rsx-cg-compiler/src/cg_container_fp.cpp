@@ -416,6 +416,25 @@ ContainerResult emitFragmentContainerImpl(
                     }
                 }
                 e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                // A matrix ENTRY PARAMETER's default lives on the rows, the
+                // same rule a file-scope matrix follows: the parent's block
+                // stays 0 and each row carries its own columns, zero-padded.
+                // Measured on `uniform float3x3 M = float3x3(1..9)`: rows at
+                // 336/368/400 holding [1,2,3,0] [4,5,6,0] [7,8,9,0]
+                // (t_4b54f26b A1; found by codex, who also found that we
+                // accepted this shape and computed with ZERO rows).
+                if (!p.initialValue.empty() &&
+                    p.initialValue.size() >=
+                        static_cast<size_t>(k + 1) * static_cast<size_t>(cols))
+                {
+                    e.defaultValue.assign(
+                        p.initialValue.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                static_cast<size_t>(k) * static_cast<size_t>(cols)),
+                        p.initialValue.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                static_cast<size_t>(k + 1) * static_cast<size_t>(cols)));
+                }
                 params.push_back(e);
             }
             continue;
@@ -464,6 +483,31 @@ ContainerResult emitFragmentContainerImpl(
             d.res       = kCgUndefined;
             d.var       = kCgUniform;
             d.direction = kCgIn;
+
+            // A uniform ENTRY PARAMETER's default is recorded exactly like a
+            // file-scope uniform's initialiser - same 16-byte block, same
+            // placement (t_4b54f26b A1).  Measured on the reference:
+            // `uniform float4 light = {1,2,3,4}` -> defOff 208 [1,2,3,4];
+            // `uniform float3 Ka = 0.6f` -> [0.6,0.6,0.6,0], broadcast;
+            // `uniform float s = 2.5` -> [2.5,0,0,0].  isReferenced does not
+            // gate it: an UNREFERENCED defaulted uniform still gets its block,
+            // with isRef 0.
+            if (!p.initialValue.empty())
+            {
+                d.defaultValue.assign(
+                    p.initialValue.begin(),
+                    p.initialValue.begin() +
+                        static_cast<std::ptrdiff_t>(
+                            std::min<size_t>(4u, p.initialValue.size())));
+            }
+            else if (!p.initialIntValues.empty())
+            {
+                const size_t n = std::min<size_t>(4u, p.initialIntValues.size());
+                d.defaultValue.reserve(n);
+                for (size_t k = 0; k < n; ++k)
+                    d.defaultValue.push_back(
+                        static_cast<float>(p.initialIntValues[k]));
+            }
 
             // Attach the per-use ucode offsets from the lowering pass.
             // The slot is the parameter's index unless an earlier array

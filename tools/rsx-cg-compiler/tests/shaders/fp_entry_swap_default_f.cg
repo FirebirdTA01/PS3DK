@@ -1,0 +1,43 @@
+// THE ENTRY-SWAP CONTROL (t_4b54f26b A1, asked for by codex).
+//
+// The C1114 rule is about the SELECTED entry, not about the name "main" -
+// with -e the entry can be any function.  A check keyed on the name would
+// refuse a legal default inside the selected entry and accept an illegal one
+// in a function that merely happens to be called main.  This source is
+// compiled TWICE and the same function changes legality:
+//
+//   -e alpha -> REFUSED, C1114 class: alpha is the entry and `bias` is not
+//               uniform
+//   -e beta  -> alpha is now a HELPER, so C1114 does not apply; it hits the
+//               INTERIM helper-default refusal instead (t_36492ad8), and when
+//               that card lands this side becomes an ACCEPT
+//
+// Both sides refuse today, FOR DIFFERENT REASONS, which is why the guard
+// asserts the diagnostic CLASS and not merely the exit status.
+//
+// THE SEMANTICS MUST LIVE ON THE STRUCT MEMBERS, not on alpha itself.  Two
+// earlier shapes of this fixture failed while looking like they worked:
+// semantics on alpha's own parameters made -e beta refuse with C5122
+// ("semantics not allowed on functions other than the entry function"), and
+// no semantics at all made -e alpha refuse with C5029 ("must return a struct
+// or have a varying output semantic") so the C1114 rule was never reached.
+// A function usable as an entry must carry semantics; a function carrying
+// them at its own boundary cannot be a helper.  The struct-member spelling is
+// the only shape that lets one function be both - flatten the parameter list
+// and this fixture silently stops testing anything.
+struct PIN  { float2 uv : TEXCOORD0; };
+struct POUT { float4 colour : COLOR; };
+
+// Semantics live on the STRUCT members, not on alpha itself, so alpha can be
+// selected as the entry with -e alpha or called as a helper from beta.
+POUT alpha(PIN i, float2 bias = {0.25, 0.5})
+{
+	POUT o;
+	o.colour = float4(i.uv + bias, 0, 1);
+	return o;
+}
+
+POUT beta(PIN i)
+{
+	return alpha(i, float2(0.75, 1.0));
+}

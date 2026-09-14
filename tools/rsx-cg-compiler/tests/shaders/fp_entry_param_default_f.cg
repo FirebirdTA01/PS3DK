@@ -1,0 +1,31 @@
+// A UNIFORM ENTRY PARAMETER's default value (t_4b54f26b A1).
+//
+// parser.cpp errored on any '=' in any parameter list, which refused the
+// reference's own spelling on seven reference-SDK rows.  The reference's rule,
+// measured: a default is legal on a uniform parameter of the SELECTED entry
+// and on any parameter of a helper, and nowhere else (C1114).
+//
+// FOUR SPELLINGS, each covering something the others cannot, and all four
+// produce the SAME 16-byte block - only the parser distinguishes them:
+//   light  braced initialiser, the spelling the SDK sources actually use
+//   Ka     a SCALAR default for a VECTOR.  Cg broadcasts it, so this means
+//          (0.6,0.6,0.6).  The entry-parameter path stored what the
+//          EXPRESSION held and produced (0.6,0,0,0) until this fixture caught
+//          it - right in x, zero elsewhere, which renders as a plausible
+//          darker colour rather than as anything obviously wrong.  The
+//          file-scope path had learned the same lesson earlier.
+//   l      the constructor spelling
+//   s      a scalar default on a scalar, where no broadcast is involved
+//
+// Values measured on the reference, block AND ucode inline constant:
+//   light [1,2,3,4]  Ka [0.6,0.6,0.6,0]  l [1,2,3,0]  s [2.5,0,0,0]
+void main(
+	float2 texcoord      : TEXCOORD0,
+	uniform float4 light = {1.0, 2.0, 3.0, 4.0},
+	uniform float3 Ka    = 0.6f,
+	uniform float3 l     = float3(1.0, 2.0, 3.0),
+	uniform float  s     = 2.5,
+	out float4 color_out : COLOR)
+{
+	color_out = light * float4(Ka + l, s) * texcoord.x;
+}

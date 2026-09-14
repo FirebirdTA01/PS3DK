@@ -171,25 +171,41 @@ uint32_t cgMatrixRowType(int cols)
 // scalar/vector and a matrix branch.  t_4b54f26b A2 wrote it at one of them
 // and the struct-flattened path silently dropped every default until a
 // review probe found it (codex).  One helper, four call sites, no drift.
-std::vector<float> uniformDefaultSlice(const IRGlobal& g, size_t first, size_t count)
+std::vector<float> uniformDefaultSlice(const std::vector<float>& fv,
+                                       const std::vector<int64_t>& iv,
+                                       size_t first, size_t count)
 {
-    if (!g.initialValue.empty())
+    if (!fv.empty())
     {
-        if (g.initialValue.size() < first + count) return {};
+        if (fv.size() < first + count) return {};
         return std::vector<float>(
-            g.initialValue.begin() + static_cast<std::ptrdiff_t>(first),
-            g.initialValue.begin() + static_cast<std::ptrdiff_t>(first + count));
+            fv.begin() + static_cast<std::ptrdiff_t>(first),
+            fv.begin() + static_cast<std::ptrdiff_t>(first + count));
     }
-    if (!g.initialIntValues.empty())
+    if (!iv.empty())
     {
-        if (g.initialIntValues.size() < first + count) return {};
+        if (iv.size() < first + count) return {};
         std::vector<float> out;
         out.reserve(count);
         for (size_t k = first; k < first + count; ++k)
-            out.push_back(static_cast<float>(g.initialIntValues[k]));
+            out.push_back(static_cast<float>(iv[k]));
         return out;
     }
     return {};
+}
+
+// Same slice for a file-scope uniform and for a uniform ENTRY PARAMETER -
+// IRGlobal and IRParameter carry the evaluated default in identically named
+// fields, and both had to be routed through here.  A1 first wrote the entry
+// case into cg_container_fp.cpp only, and the VERTEX side silently dropped
+// every entry default until review caught it (codex and Fable, independently).
+std::vector<float> uniformDefaultSlice(const IRGlobal& g, size_t first, size_t count)
+{
+    return uniformDefaultSlice(g.initialValue, g.initialIntValues, first, count);
+}
+std::vector<float> uniformDefaultSlice(const IRParameter& p, size_t first, size_t count)
+{
+    return uniformDefaultSlice(p.initialValue, p.initialIntValues, first, count);
 }
 
 uint32_t cgTypeForIRType(const IRTypeInfo& t)
@@ -526,6 +542,10 @@ VpContainerResult emitVertexContainerImpl(
                         r.paramno   = static_cast<uint32_t>(i);
                         r.isReferenced = 1;
                         r.resIndex = static_cast<uint32_t>(base + row);
+                        r.defaultValue = uniformDefaultSlice(
+                            p, static_cast<size_t>(row) *
+                                   static_cast<size_t>(p.type.matrixCols),
+                            static_cast<size_t>(p.type.matrixCols));
                         params.push_back(r);
                     }
                     continue;
@@ -538,6 +558,8 @@ VpContainerResult emitVertexContainerImpl(
                 }
 
                 d.resIndex = static_cast<uint32_t>(binding ? binding->registers[0] : nextVectorReg--);
+                d.defaultValue = uniformDefaultSlice(
+                    p, 0u, static_cast<size_t>(p.type.componentCount()));
             }
             else
             {
@@ -722,6 +744,10 @@ VpContainerResult emitVertexContainerImpl(
                     r.direction = kCgIn;
                     r.paramno   = static_cast<uint32_t>(i);
                     r.resIndex  = static_cast<uint32_t>(base + row);
+                    r.defaultValue = uniformDefaultSlice(
+                        p, static_cast<size_t>(row) *
+                               static_cast<size_t>(p.type.matrixCols),
+                        static_cast<size_t>(p.type.matrixCols));
                     params.push_back(r);
                 }
                 continue;
@@ -736,6 +762,8 @@ VpContainerResult emitVertexContainerImpl(
             {
                 const int reg = binding ? binding->registers[0] : nextVectorReg--;
                 d.resIndex = static_cast<uint32_t>(reg);
+                d.defaultValue = uniformDefaultSlice(
+                    p, 0u, static_cast<size_t>(p.type.componentCount()));
             }
         }
         else

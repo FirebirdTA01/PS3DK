@@ -428,6 +428,13 @@ struct IRParameter
     // Preserve entry-parameter register(sN) bindings for sampler lowering.
     char explicitRegisterBank = 0;
     int explicitRegisterIndex = 0;
+    // Compiled DEFAULT of a uniform entry parameter, evaluated from the
+    // source's `= ...` (t_4b54f26b A1).  Same shape and meaning as
+    // IRGlobal::initialValue below: empty when the parameter has no default.
+    // The reference records it in the parameter table and writes it into the
+    // inline const block, exactly as it does for a file-scope uniform.
+    std::vector<float>   initialValue;
+    std::vector<int64_t> initialIntValues;
 };
 
 class IRFunction

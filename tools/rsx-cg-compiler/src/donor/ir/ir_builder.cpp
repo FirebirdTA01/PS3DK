@@ -895,6 +895,96 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             irParam.inferredSemantic = true;
         }
 
+        // A UNIFORM entry parameter's default value is its compiled default,
+        // the same as a file-scope uniform's initialiser (t_4b54f26b A1).
+        // Semantic analysis has already refused a default anywhere the
+        // reference refuses one - C1114, only uniform parameters of the
+        // SELECTED entry - so anything reaching here with a defaultValue is
+        // a legal one.  Refuse rather than drop when it cannot be evaluated,
+        // for the reason the file-scope path gives: a compiled default of
+        // zero where the source says otherwise is a shader that renders
+        // wrong until something patches it.
+        if (param->defaultValue && param->storage == StorageQualifier::Uniform)
+        {
+            std::vector<float>   pInit;
+            std::vector<int64_t> pIntInit;
+            if (!evaluateConstInitializerTyped(param->defaultValue.get(),
+                                               param->type.get(),
+                                               pInit, pIntInit))
+            {
+                error(param->loc,
+                      "uniform entry parameter '" + param->name +
+                      "' has a default value this compiler cannot evaluate; "
+                      "refusing rather than compiling it as zero");
+            }
+            else
+            {
+                irParam.initialValue     = std::move(pInit);
+                irParam.initialIntValues = std::move(pIntInit);
+                // Cg BROADCASTS a scalar default across a vector, the same
+                // as a file-scope initialiser: `uniform float3 Ka = 0.6f`
+                // means (0.6,0.6,0.6) and the reference records exactly
+                // that.  The evaluator reports what the EXPRESSION held -
+                // one component - so without this the block is
+                // (0.6,0,0,0): right in x and zero elsewhere, which renders
+                // as a plausible darker colour rather than as anything
+                // obviously wrong.  The file-scope path learned this the
+                // same way (review finding, codex); the fixture caught it
+                // here before the first review round.
+                if (irParam.initialValue.size() == 1)
+                {
+                    const int declared = irParam.type.componentCount();
+                    if (declared > 1)
+                    {
+                        irParam.initialValue.assign(
+                            static_cast<size_t>(declared),
+                            irParam.initialValue[0]);
+                        if (!irParam.initialIntValues.empty())
+                            irParam.initialIntValues.assign(
+                                static_cast<size_t>(declared),
+                                irParam.initialIntValues[0]);
+                    }
+                }
+                else if (irParam.initialValue.size() >
+                         static_cast<size_t>(irParam.type.componentCount()))
+                {
+                    // NARROWING is legal and the reference does it:
+                    // `uniform float2 u = float4(1,2,3,4)` is ACCEPTED and
+                    // records [1,2,0,0] - the leading components, zero
+                    // padded, the same rule a narrowing cast follows.
+                    // Measured; the first version of this refused it.
+                    irParam.initialValue.resize(
+                        static_cast<size_t>(irParam.type.componentCount()));
+                    if (!irParam.initialIntValues.empty())
+                        irParam.initialIntValues.resize(
+                            static_cast<size_t>(irParam.type.componentCount()));
+                }
+                else if (!irParam.initialValue.empty() &&
+                         irParam.initialValue.size() !=
+                             static_cast<size_t>(irParam.type.componentCount()))
+                {
+                    // Narrower than the declared type and not a single
+                    // scalar to broadcast.  checkParameterDefaultShape
+                    // refuses the source-level forms of this (a short braced
+                    // list, a too-narrow constructor), so reaching here means
+                    // a shape that check does not model.  Refuse rather than
+                    // pad with zeros: a compiled default of zero where the
+                    // source says otherwise renders wrong until something
+                    // patches it.
+                    error(param->loc,
+                          "uniform entry parameter '" + param->name +
+                          "' has a " +
+                          std::to_string(irParam.initialValue.size()) +
+                          "-component default for a " +
+                          std::to_string(irParam.type.componentCount()) +
+                          "-component type; refusing rather than padding it "
+                          "with zeros");
+                    irParam.initialValue.clear();
+                    irParam.initialIntValues.clear();
+                }
+            }
+        }
+
         currentFunction_->parameters.push_back(irParam);
 
         // A parameter that shadows a file-scope variable is a scope like a

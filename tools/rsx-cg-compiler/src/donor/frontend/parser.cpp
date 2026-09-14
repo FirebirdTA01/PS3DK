@@ -1172,10 +1172,15 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
         param->semantic = parseSemantic();
     }
 
-    // Check for default value
+    // Check for default value.  The parser only RECORDS it; whether it is
+    // legal depends on which function was SELECTED as the entry, which the
+    // parser does not know - see the C1114 check in SemanticAnalyzer's
+    // function collection (t_4b54f26b A1).  This used to error here on any
+    // '=' in any parameter list, which refused the reference's own
+    // `uniform float4 light = {1,1,1,1}` spelling on seven reference-SDK
+    // rows and a helper's default argument on sixteen more.
     if (match(TokenType::OP_ASSIGN))
     {
-        error(param->loc, "default parameter values are not supported");
         if (check(TokenType::LBRACE))
             param->defaultValue = parseBracedInitializerExpression(param->type);
         else
@@ -2326,6 +2331,7 @@ std::unique_ptr<ExprNode> Parser::parseBracedInitializerExpression(std::shared_p
 {
     SourceLocation loc = currentLocation();
     auto ctor = std::make_unique<ConstructorExpr>(loc, type);
+    ctor->bracedInitializer = true;
 
     consume(TokenType::LBRACE, "Expected '{' in initializer");
 

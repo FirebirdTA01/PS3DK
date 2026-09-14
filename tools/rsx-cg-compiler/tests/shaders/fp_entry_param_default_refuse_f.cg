@@ -1,0 +1,12 @@
+// A default on a NON-UNIFORM entry parameter is refused, permanently
+// (t_4b54f26b A1).  This is not an interim state: the reference refuses it
+// too, with a named diagnostic -
+//     error C1114: only uniform parameters to the entry function can have
+//     default values: "texcoord"
+// measured on this exact shape.  Keep this fixture for good.
+void main(
+	float2 texcoord : TEXCOORD0 = {0.5, 0.25},
+	out float4 color_out : COLOR)
+{
+	color_out = float4(texcoord, 0, 1);
+}
