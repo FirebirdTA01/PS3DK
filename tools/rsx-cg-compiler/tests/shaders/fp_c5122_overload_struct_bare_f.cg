@@ -1,0 +1,14 @@
+// t_61109061 OVERLOAD IDENTITY, STRUCT PARAMETERS.  Companion to the array
+// pair: array identity hides in TypeNode::elementType, STRUCT identity hides in
+// structName and structFields.  One comparator (CgType::equals) reaches both
+// today, so these rows exist to keep a future struct-specific narrowing from
+// passing while the array rows still do - the same argument that put the array
+// rows in, one type category over.  Probe by Claude_Fable_PS3DK_LE.
+//
+// the UNCALLED struct overload carries the semantic
+// Compile with -e beta.  Reference verdict: ACCEPT
+struct S1 { float4 a; };
+struct S2 { float4 a; float4 b; };
+float4 f(S1 s) : COLOR { return s.a; }
+float4 f(S2 s) { return s.a + s.b; }
+float4 beta(float4 t : TEXCOORD0) : COLOR { S2 s; s.a=t; s.b=t; return f(s); }
