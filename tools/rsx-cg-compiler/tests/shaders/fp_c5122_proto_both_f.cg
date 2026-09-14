@@ -1,0 +1,10 @@
+// t_61109061 PROTOTYPE CELL.  The semantic that is JUDGED is the one on the
+// FIRST DECLARATION in source order; the body that is WALKED is the
+// DEFINITION's.  Measured on sce-cgc 475 - the four cells disagree, so neither
+// "judge the definition" nor "judge either" reproduces the reference.
+//
+// prototype :COLOR and definition :COLOR
+// Compile with -e beta.  Reference verdict: REFUSE
+float4 gamma(float4 t) : COLOR;
+float4 gamma(float4 t) : COLOR { return t*2.0; }
+float4 beta(float4 t : TEXCOORD0) : COLOR { return gamma(t)*0.5; }

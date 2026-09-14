@@ -124,6 +124,15 @@ private:
 
     // Current context during analysis
     FunctionDecl* currentFunction_ = nullptr;
+
+    // EVERY function declaration seen, in source order - prototypes INCLUDED.
+    // The symbol table does not expose a name->FunctionDecl list and could not
+    // answer this anyway: overloads share a name, so the C5122 check keys on
+    // the DECLARATION a call resolved to (t_61109061).  Prototypes must be in
+    // here because the semantic that is judged is the one on the FIRST
+    // declaration, which is frequently a prototype, and because a call resolves
+    // to the prototype - walking stops there unless the definition is found.
+    std::vector<FunctionDecl*> allFunctions_;
     bool inLoop_ = false;
     bool inSwitch_ = false;
 
@@ -144,6 +153,17 @@ private:
     // Validates the SHAPE of a uniform entry parameter's default value
     // against the reference's rules (t_4b54f26b A1).
     void checkParameterDefaultShape(ParamDecl* p);
+    // A function REACHED from the selected entry may not carry a return
+    // semantic (t_61109061).  Runs in pass 3, after every call has resolved.
+    void checkNonEntrySemantics();
+    void collectCallEdges(const StmtNode* stmt, std::vector<FunctionDecl*>& out) const;
+    void collectCallEdges(const ExprNode* expr, std::vector<FunctionDecl*>& out) const;
+    // Same name AND same parameter signature - never name alone, overloads.
+    bool sameSignature(const FunctionDecl* a, const FunctionDecl* b) const;
+    // The FIRST declaration in source order: the one whose return semantic the
+    // reference judges.  The DEFINITION: the one whose body is walked.
+    FunctionDecl* firstDeclarationOf(const FunctionDecl* fn) const;
+    FunctionDecl* definitionOf(const FunctionDecl* fn) const;
     void collectBufferDecl(BufferDecl* decl);
 
     void analyzeStructDecl(StructDecl* decl);
