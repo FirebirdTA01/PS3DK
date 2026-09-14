@@ -25,6 +25,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+run_checker() {
+    local rc=0
+    python3 "$@" || rc=$?
+    [[ "$rc" -ne 126 && "$rc" -ne 127 ]] || fail "checker did not execute (exit $rc)"
+    return "$rc"
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -83,7 +89,8 @@ the reference binds an unsemanticked fragment out to COLOR0, and so must we
     fi
 done
 
-python3 - "$work"/none_*.dump <<'PY'
+run_checker - "$work" <<'PY'
+from pathlib import Path
 import re
 import sys
 
@@ -92,7 +99,9 @@ def unswap(v):
     return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
 
 
-for path in sys.argv[1:]:
+paths = [str(p) for p in sorted(Path(sys.argv[1]).glob("none_*.dump"))]
+assert paths, "no output dumps to check"
+for path in paths:
     insns = 0
     writes_output = 0
     for line in open(path, "r", encoding="utf-8"):

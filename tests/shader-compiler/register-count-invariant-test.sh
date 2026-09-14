@@ -28,6 +28,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+run_checker() {
+    local rc=0
+    python3 "$@" || rc=$?
+    [[ "$rc" -ne 126 && "$rc" -ne 127 ]] || fail "checker did not execute (exit $rc)"
+    return "$rc"
+}
 
 # A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
 # either one satisfies "did not exit 0" while meaning the compiler never
@@ -165,6 +171,7 @@ for stem in fp_normalized_phong_vecinsert_f fp_computed_color_store_f \
 done
 
 cat >"$work/check.py" <<'PY'
+from pathlib import Path
 import struct
 import sys
 
@@ -197,8 +204,12 @@ def unswap(v):
     return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
 
 
+paths = sys.argv[1:]
+if len(paths) == 2 and paths[0] == "--fixtures-in":
+    work = Path(paths[1])
+    paths = [str(work / "n16.fpo")] + [str(p) for p in sorted(work.glob("fp_*.fpo"))]
 bad = []
-for path in sys.argv[1:]:
+for path in paths:
     blob = open(path, "rb").read()
     program = be32(blob, PROGRAM_OFF)
     declared = blob[program + REGISTER_COUNT_IN_PROGRAM]
@@ -233,7 +244,7 @@ if bad:
         sys.stderr.write("FAIL: " + line + "\n")
     sys.exit(1)
 print("registerCount == highest written R slot + 1 on %d containers"
-      % (len(sys.argv) - 1))
+      % len(paths))
 PY
 
 # SELF-CONTROL, before the checker is believed about anything.
@@ -248,7 +259,7 @@ PY
 # it to object to each.  Down is the direction that paints garbage on the
 # console and reads identical on RPCS3; up is this defect's direction.
 mutate() {   # $1 source container, $2 delta, $3 output
-    python3 - "$1" "$2" "$3" <<'PY'
+    run_checker - "$1" "$2" "$3" <<'PY'
 import struct
 import sys
 
@@ -267,15 +278,19 @@ for delta in 1 -1; do
     mutate "$work/n16.fpo" "$delta" "$work/$tag.fpo" >/dev/null
     rc=0
     python3 "$work/check.py" "$work/$tag.fpo" >"$work/$tag.log" 2>&1 || rc=$?
+    if [[ "$rc" -eq 126 || "$rc" -eq 127 ]]; then
+        cat "$work/$tag.log" >&2
+        fail "checker did not execute (exit $rc)"
+    fi
     [[ "$rc" -ne 0 ]] || fail "checker accepted a registerCount mutated by $delta - it is not reading the field it claims to"
     grep -q "declared registerCount" "$work/$tag.log" \
         || fail "checker rejected the $delta mutation without naming the declared count"
 done
 
 # ... and only now on the real containers.
-python3 "$work/check.py" "$work"/n16.fpo "$work"/fp_*.fpo
+run_checker "$work/check.py" --fixtures-in "$work"
 
-python3 - "$work/fp16_promote_sparse.fpo" "$work/fp16_promote_sparse.order" <<'PY'
+run_checker - "$work/fp16_promote_sparse.fpo" "$work/fp16_promote_sparse.order" <<'PY'
 import re
 import struct
 import sys

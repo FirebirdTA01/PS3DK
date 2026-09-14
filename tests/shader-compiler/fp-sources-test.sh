@@ -326,8 +326,30 @@ done
 (( fencbr_seen > 0 )) || fail "no FENCBR was seen in $count containers - the check above examined nothing"
 printf '  %-42s %s\n' "OUT_NONE" "$fencbr_seen FENCBR, none rendering a destination"
 
-python3 "$decoder" --verify-arity "$work"/corpus_*.fpo >"$work/arity.txt" 2>&1 \
-    || { cat "$work/arity.txt" >&2; fail "the arity table is CONTRADICTED by an emitted instruction"; }
+# BEGIN corpus arity transport (executed verbatim by fp_sources_transport_check.py)
+# The population used to be native-process argv: 313 paths launched here, 315
+# exceeded Windows' command-line limit. Shell builtins write a bounded-argv
+# manifest; the decoder resolves each basename relative to that manifest.
+printf '  arity input population: %s containers\n' "$count"
+for c in "$work"/corpus_*.fpo; do
+    printf '%s\0' "${c##*/}"
+done >"$work/arity-files.nul"
+arity_rc=0
+python3 "$decoder" --verify-arity-manifest "$work/arity-files.nul" >"$work/arity.txt" 2>&1 || arity_rc=$?
+if [[ "$arity_rc" -eq 126 || "$arity_rc" -eq 127 ]]; then
+    cat "$work/arity.txt" >&2
+    fail "arity checker did not execute (exit $arity_rc)"
+fi
+if ! grep -qx 'arity checker: started' "$work/arity.txt"; then
+    cat "$work/arity.txt" >&2
+    fail "arity checker did not confirm execution (exit $arity_rc)"
+fi
+if [[ "$arity_rc" -ne 0 ]]; then
+    cat "$work/arity.txt" >&2
+    fail "arity checker failed (exit $arity_rc)"
+fi
+grep -qx "arity checker: $count containers" "$work/arity.txt" \
+    || fail "arity checker did not verify the complete input population"
 grep -q "^CONTRADICTED" "$work/arity.txt" \
     && { cat "$work/arity.txt" >&2; fail "the arity table is contradicted"; }
 grep -q "^UNREADABLE" "$work/arity.txt" \
@@ -338,6 +360,9 @@ That is not proof the entry is wrong - a genuine read of R0 is
 byte-identical to padding - but it is an entry with no evidence behind it
 and it must be measured or removed rather than left declared."; }
 printf '  %-42s %s\n' "arity vs $count containers" "$(sed -n 's/^opcodes seen: //p' "$work/arity.txt" | tr ',' '\n' | wc -l) opcodes, 0 contradicted, 0 unwitnessed"
+# END corpus arity transport
+
+python3 "$here/fp_sources_transport_check.py" "$work"
 
 # ---- and the check itself, seen accusing -----------------------------------
 # A verifier nobody has watched refuse is not a verifier.  Break the table two

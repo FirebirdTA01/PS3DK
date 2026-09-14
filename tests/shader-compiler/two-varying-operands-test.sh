@@ -25,6 +25,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+run_checker() {
+    local rc=0
+    python3 "$@" || rc=$?
+    [[ "$rc" -ne 126 && "$rc" -ne 127 ]] || fail "checker did not execute (exit $rc)"
+    return "$rc"
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -61,7 +67,8 @@ for stem in fp_two_varyings_f fp_two_varyings_mul_f; do
     compile "$stem" --legacy-lowering    "${stem}_legacy"
 done
 
-python3 - "$work"/*.log <<'PY'
+run_checker - "$work" <<'PY'
+from pathlib import Path
 import re
 import sys
 
@@ -74,7 +81,9 @@ def unswap(v):
 
 bad = []
 seen = 0
-for path in sys.argv[1:]:
+paths = [str(p) for p in sorted(Path(sys.argv[1]).glob("*.log"))]
+assert paths, "no instruction logs to check"
+for path in paths:
     for line in open(path, "r", encoding="utf-8"):
         m = re.match(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$", line)
         if not m:
