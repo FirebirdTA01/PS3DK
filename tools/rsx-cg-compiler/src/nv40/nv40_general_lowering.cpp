@@ -231,6 +231,11 @@ struct VInstr
     int  fpScale = 0;
     int  fpPrecisionOverride = -1;
     bool preservePartialOutputMask = false;
+    // Logical lanes demanded of the scalar operand before an explicit
+    // scalar-result broadcast or scalar preload. Zero means the current
+    // destination mask. This preserves legal identity-swizzle encodings
+    // whose unused source components do not describe independent work.
+    uint8_t scalarSourceDemandMask = 0;
     bool stubCoIssuePartner = false;
     bool stubFenceBefore = false;   // FENCTR
     bool stubFenceBrBefore = false; // FENCBR
@@ -281,6 +286,44 @@ struct VirtualProgram
     // shader silently missing whatever that op was supposed to do.
     bool loweringFailed = false;
 };
+
+// Unary scalar operations read src0.x after swizzling. DIVR and DIVSQR
+// have a vector numerator and read only the first component of src1.
+static int fpScalarSourceIndex(VOp op)
+{
+    switch (op) {
+    case VOp::Rcp: case VOp::Rsq: case VOp::Sin:
+    case VOp::Cos: case VOp::Lg2: case VOp::Ex2:
+        return 0;
+    case VOp::DivR: case VOp::DivSqrt:
+        return 1;
+    default:
+        return -1;
+    }
+}
+
+static bool scalarSourceLaneConflict(const VInstr& vi)
+{
+    const int slot = fpScalarSourceIndex(vi.op);
+    const int mask = vi.scalarSourceDemandMask
+        ? vi.scalarSourceDemandMask : vi.dst.writemask;
+    if (slot < 0) return false;
+    // Hardware always selects swizzle[0], even when destination x is not
+    // written. Explicit scalar demand allows placing that result elsewhere;
+    // unmarked instructions must agree for every demanded lane, including one.
+    const auto& swizzle = vi.srcs[slot].swizzle;
+    for (int lane = 0; lane < 4; ++lane)
+        if ((mask & (1 << lane)) && swizzle[lane] != swizzle[0])
+            return true;
+    return false;
+}
+
+static std::string scalarSourceDiagnostic(const VInstr& vi)
+{
+    return std::string("nv40-general-fp: ") + vOpName(vi.op) +
+        " scalar src" + std::to_string(fpScalarSourceIndex(vi.op)) +
+        " requests distinct components across result lanes; refusing";
+}
 
 static std::string toUpper(std::string s)
 {
@@ -3247,6 +3290,10 @@ private:
         foldedEx2.dst.index = powReg;
         foldedEx2.dst.writemask = 0x7;
         foldedEx2.srcs[0] = tempSrc(powReg);
+        // This fold broadcasts one computed exponent to RGB.
+        // PS3_475 fp_pow_computed_literal_f emits EX2.xyz src0.xyzw at +160
+        // after MUL.x at +128: demand is scalar, the register is not a splat.
+        foldedEx2.scalarSourceDemandMask = 0x1;
         foldedEx2.preservePartialOutputMask = true;
         rewritten.push_back(foldedEx2);
 
@@ -3312,8 +3359,7 @@ private:
     // width, and keeps per-lane RCP plus MUL for vector denominators.
     static bool isScalarUnitOp(VOp op)
     {
-        return op == VOp::Rcp || op == VOp::Rsq || op == VOp::Sin ||
-               op == VOp::Cos || op == VOp::Lg2 || op == VOp::Ex2;
+        return fpScalarSourceIndex(op) >= 0;
     }
 
     static int laneCount(int mask)
@@ -3329,28 +3375,40 @@ private:
     // through the operand's OWN swizzle - `arg.swizzle[lane]`, not `lane` -
     // so a value already arriving swizzled selects the right thing, the
     // same composition lowerDiv uses.
-    void emitScalarUnitPerLane(VOp op, int dstVreg, int mask, const VSrc& arg,
-                               bool sat)
+    void emitScalarUnitPerLane(const VInstr& instruction)
     {
+        const int mask = instruction.dst.writemask;
         const bool partial = laneCount(mask) > 1;
         for (int lane = 0; lane < 4; ++lane) {
             if (!(mask & (1 << lane)))
                 continue;
-            VInstr vi;
-            vi.op = op;
-            vi.dst.index = dstVreg;
+            VInstr vi = instruction;
             vi.dst.writemask = 1 << lane;
-            vi.srcs[0] = arg;
-            const uint8_t comp = arg.swizzle[lane];
-            vi.srcs[0].swizzle = {comp, comp, comp, comp};
-            vi.sat = sat;
+            for (VSrc& src : vi.srcs) {
+                if (src.kind == VSrcKind::None) continue;
+                const uint8_t comp = src.swizzle[lane];
+                src.swizzle = {comp, comp, comp, comp};
+            }
+            vi.scalarSourceDemandMask = 0;
             // The value is now assembled from several partial writes, so
             // the store-output fold must not take the last one and widen
             // its mask to the output's - that would put one lane's result
             // in every lane and leave the rest in a register nothing reads.
-            vi.preservePartialOutputMask = partial;
+            vi.preservePartialOutputMask |= partial;
             program_.instrs.push_back(vi);
         }
+    }
+
+    void emitScalarUnitPerLane(VOp op, int dstVreg, int mask, const VSrc& arg,
+                               bool sat)
+    {
+        VInstr vi;
+        vi.op = op;
+        vi.dst.index = dstVreg;
+        vi.dst.writemask = mask;
+        vi.srcs[0] = arg;
+        vi.sat = sat;
+        emitScalarUnitPerLane(vi);
     }
 
     void lowerUnary(const IRInstruction& inst, VOp op, bool sat)
@@ -3988,25 +4046,14 @@ private:
         const int mask = componentMask(inst.resultType);
         const int result = define(inst.result);
         const VSrc arg = resolve(inst.operands[0]);
-        // Like emitScalarUnitPerLane, but DIVSQR needs two sources with
-        // different modifiers; the unary helper cannot express this pair.
-        for (int lane = 0; lane < 4; ++lane) {
-            if (!(mask & (1 << lane))) continue;
-            VInstr root;
-            root.op = VOp::DivSqrt;
-            root.dst.index = result;
-            root.dst.writemask = 1 << lane;
-            root.srcs[0] = arg;
-            // Compose through the incoming swizzle; the scalar denominator
-            // must read this lane even when the destination is y, z or w.
-            const uint8_t comp = arg.swizzle[lane];
-            root.srcs[0].swizzle = {comp, comp, comp, comp};
-            root.srcs[1] = root.srcs[0];
-            root.srcs[0].abs = true;
-            root.srcs[0].neg = false; // abs(d), including a negated source view.
-            root.preservePartialOutputMask = laneCount(mask) > 1;
-            program_.instrs.push_back(root);
-        }
+        VInstr root;
+        root.op = VOp::DivSqrt;
+        root.dst.index = result;
+        root.dst.writemask = mask;
+        root.srcs[0] = root.srcs[1] = arg;
+        root.srcs[0].abs = true;
+        root.srcs[0].neg = false; // abs(d), including a negated source view.
+        emitScalarUnitPerLane(root);
     }
 
     // mod(x, y) = x - y * floor(x / y), scalar divisor only for now:
@@ -5554,27 +5601,13 @@ private:
             // DIVSQR(poly, delta) would divide by sqrt(delta), which is the
             // reciprocal of the required factor.
             const int sqrtDelta = newVReg();
-            const bool partial = laneCount(mask) > 1;
-            for (int lane = 0; lane < 4; ++lane) {
-                if (!(mask & (1 << lane)))
-                    continue;
-                VInstr divsqrt;
-                divsqrt.op = VOp::DivSqrt;
-                divsqrt.dst.index = sqrtDelta;
-                divsqrt.dst.writemask = 1 << lane;
-                divsqrt.srcs[0] = tempSrc(oneMinusAbs);
-                divsqrt.srcs[0].abs = true;
-                divsqrt.srcs[0].swizzle = {
-                    static_cast<uint8_t>(lane),
-                    static_cast<uint8_t>(lane),
-                    static_cast<uint8_t>(lane),
-                    static_cast<uint8_t>(lane),
-                };
-                divsqrt.srcs[1] = tempSrc(oneMinusAbs);
-                divsqrt.srcs[1].swizzle = divsqrt.srcs[0].swizzle;
-                divsqrt.preservePartialOutputMask = partial;
-                program_.instrs.push_back(divsqrt);
-            }
+            VInstr divsqrt;
+            divsqrt.op = VOp::DivSqrt;
+            divsqrt.dst.index = sqrtDelta;
+            divsqrt.dst.writemask = mask;
+            divsqrt.srcs[0] = divsqrt.srcs[1] = tempSrc(oneMinusAbs);
+            divsqrt.srcs[0].abs = true;
+            emitScalarUnitPerLane(divsqrt);
 
             VInstr mul;
             mul.op = VOp::Mul;
@@ -7471,6 +7504,9 @@ private:
                  // entry Return, which reads the already-exported value.
                  (producer.op == VOp::Mov && producer.preservePartialOutputMask &&
                   outputValueUses == 1))) {
+                if (profile_ == GeneralProfile::Fragment &&
+                    isScalarUnitOp(producer.op) && valueWidthOf(value) == 1)
+                    producer.scalarSourceDemandMask = 0x1;
                 markHalfColourDest(producer, outIndex);
                 producer.dst.output = true;
                 producer.dst.index = outIndex;
@@ -7660,6 +7696,7 @@ private:
         case VOp::Dp3: return 0x7;
         case VOp::Dp4: return 0xf;
         case VOp::DivR:
+        case VOp::DivSqrt:
             return srcIndex == 0 ? vi.dst.writemask : 0x1;
         case VOp::Rcp:
         case VOp::Rsq:
@@ -7781,6 +7818,14 @@ private:
 
         for (VInstr vi : program_.instrs) {
             const VOp effOp = effectiveOp(vi);
+            // Check before a scalar preload replaces the original swizzle
+            // with an identity temp source. Materialization must not hide
+            // an invalid lane demand from the final emission check.
+            if (profile_ == GeneralProfile::Fragment && scalarSourceLaneConflict(vi)) {
+                program_.diagnostics.push_back(scalarSourceDiagnostic(vi));
+                program_.loweringFailed = true;
+                return;
+            }
             if (!isArithmeticOp(effOp)) {
                 shaped.push_back(vi);
                 continue;
@@ -7929,6 +7974,12 @@ private:
                 const bool abs = src.abs;
                 const auto keptSwizzle = src.swizzle;
                 src = tempSrc(pending.mov.dst.index);
+                if (profile_ == GeneralProfile::Fragment &&
+                    fpScalarSourceIndex(effOp) == static_cast<int>(pending.srcIndex))
+                    // A scalar preload writes x, then reads identity. The
+                    // reference DIVR fixture instead writes w and reads wwww;
+                    // both demand just the component the hardware selects.
+                    vi.scalarSourceDemandMask = 0x1;
                 if (vpKeepSwizzle.count(pending.srcIndex))
                     src.swizzle = keptSwizzle;
                 src.fp16 = pending.mov.dst.fp16;
@@ -7983,6 +8034,9 @@ private:
                 shaped.push_back(mov);
 
                 src = tempSrc(mov.dst.index);
+                if (profile_ == GeneralProfile::Fragment &&
+                    fpScalarSourceIndex(effOp) == static_cast<int>(srcIndex))
+                    vi.scalarSourceDemandMask = 0x1;
             }
 
             if (vi.op == VOp::Dp3 && profile_ != GeneralProfile::Fragment) {
@@ -9193,6 +9247,10 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     bool emittedInstruction = false;
     for (const VInstr& vi : program.instrs) {
         std::string why;
+        if (scalarSourceLaneConflict(vi)) {
+            out.diagnostics.push_back(scalarSourceDiagnostic(vi));
+            return out;
+        }
         if (hasUnsupportedSource(vi, why)) {
             out.diagnostics.push_back("nv40-general-fp: " + why);
             return out;
