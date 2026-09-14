@@ -42,6 +42,7 @@
 #include "nv40/nv40_emit.h"
 #include "array_uniforms.h"
 #include "fp_sampler_bindings.h"
+#include "uniform_bindings.h"
 
 #include "ir.h"
 
@@ -79,6 +80,7 @@ constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
 // synthetic `$kill_NNNN` parameters emitted by #pragma alphakill.
 // The runtime distinguishes via var / direction / embeddedConst.
 constexpr uint32_t kCgUndefined  = 3256u;  // 0x0cb8
+constexpr uint32_t kCgConst      = 2178u;  // CG_C for an explicitly bound uniform
 constexpr uint32_t kCgKillMarker = kCgUndefined;  // alphakill is res=UNDEFINED too
 
 // CGtype values.
@@ -255,6 +257,8 @@ ContainerResult emitFragmentContainerImpl(
         uint32_t    direction;
         uint32_t    paramno;
         uint32_t    isReferenced = 0;
+        uint32_t    resIndex = kInvalidIndex;
+        uint32_t    isShared = 0;
         // Set by the FP-uniform pass below.  When non-empty, the
         // string-region layout emits a CgBinaryEmbeddedConstant
         // record right after the semantic (or at the start of the
@@ -798,6 +802,50 @@ ContainerResult emitFragmentContainerImpl(
         }
     }
 
+    // C<N> is reflection metadata on FP: the actual value remains in the
+    // existing inline block, patched through embeddedConst. Do not alter
+    // those slots or apply VP's c255 limit. Owners distinguish a global
+    // from a shadowing entry parameter with the same visible record name.
+    const auto bindings = rsx_cg::resolveFpExplicitUniformBindings(*entry, module);
+    if (!bindings.diagnostics.empty()) {
+        result.diagnostics = bindings.diagnostics;
+        return result;
+    }
+    struct BoundRecord { std::string semantic; int reg; bool matrixParent; };
+    std::map<std::pair<std::string, uint32_t>, BoundRecord> boundRecords;
+    const auto addBinding = [&](const auto& uniform, uint32_t paramno) {
+        const auto* binding = bindings.find(uniform.valueId);
+        if (!binding) return;
+        for (size_t element = 0; element < binding->registers.size(); ++element) {
+            const int base = binding->registers[element];
+            const std::string name = uniform.type.isArray()
+                ? rsx_cg::arrayElementName(uniform.name, static_cast<int>(element))
+                : uniform.name;
+            boundRecords[{name, paramno}] = {binding->semantic, base, uniform.type.isMatrix()};
+            if (uniform.type.isMatrix())
+                for (int row = 0; row < uniform.type.matrixRows; ++row)
+                    boundRecords[{name + "[" + std::to_string(row) + "]", paramno}] =
+                        {binding->semantic, base >= 0 ? base + row : -1, false};
+        }
+    };
+    for (size_t i = 0; i < entry->parameters.size(); ++i)
+        addBinding(entry->parameters[i], static_cast<uint32_t>(i));
+    for (const auto& global : module.globals) addBinding(global, kInvalidIndex);
+    for (auto& param : params) {
+        if (param.var != kCgUniform) continue;
+        const auto found = boundRecords.find({param.name, param.paramno});
+        if (found == boundRecords.end()) continue;
+        const auto& bound = found->second;
+        const bool used = bound.reg >= 0;
+        param.semantic = bound.semantic;
+        param.res = used && !bound.matrixParent ? kCgConst : kCgUndefined;
+        param.resIndex = used && !bound.matrixParent
+            ? static_cast<uint32_t>(bound.reg) : kInvalidIndex;
+        // These coincide only for explicit bindings: referenced means used,
+        // shared means bound AND used, not a general identity between flags.
+        param.isReferenced = param.isShared = used ? 1u : 0u;
+    }
+
     if (compactCgb)
     {
         if (!opts.alphakillSamplers.empty() || attrs.pixelKillCount > 0)
@@ -1060,7 +1108,7 @@ ContainerResult emitFragmentContainerImpl(
         put32(out, d.type);
         put32(out, d.res);
         put32(out, d.var);
-        put32(out, kInvalidIndex);              // resIndex (-1: not allocated by compiler)
+        put32(out, params[i].resIndex);         // explicit C<N>, otherwise -1
         put32(out, slots[i].nameOffset);        // 0 if no name
         put32(out, slots[i].defaultValueOffset); // 0 unless the param carries a compiled default
         put32(out, slots[i].embeddedConstOffset);
@@ -1068,7 +1116,7 @@ ContainerResult emitFragmentContainerImpl(
         put32(out, d.direction);
         put32(out, d.paramno);
         put32(out, d.isReferenced);
-        put32(out, 0);                          // isShared
+        put32(out, params[i].isShared);
     }
 
     // Strings (already absolute offsets baked into the param table).

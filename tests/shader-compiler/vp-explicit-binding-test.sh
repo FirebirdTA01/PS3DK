@@ -107,6 +107,8 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-binding-') as directory:
             expected,constants,product(matrix(selected,4),p),index=selected+0.75)
     run('unused-before-auto','uniform float4 u:C256; uniform float4 v; float4 main(float4 p:POSITION):POSITION{return p*v;}',
         {'u':(1048,-1,'C256',0xffffffff,0),'v':(1048,467,'',0xffffffff,0)}, {467:[2,3,4,5]},[2,-6,12,2.5])
+    run('leading-zero-semantic','uniform float4 u:C009; float4 main(float4 p:POSITION):POSITION{return p*u;}',
+        {'u':(1048,9,'C009',0xffffffff,1)}, {9:[2,3,4,5]},[2,-6,12,2.5])
     run('alias','uniform float4 u:C9; uniform float4 v:C9; float4 main(float4 p:POSITION):POSITION{return p*u+v;}',
         {'u':(1048,9,'C9',0xffffffff,1),'v':(1048,9,'C9',0xffffffff,1)}, {9:[2,3,4,5]},[4,-3,16,7.5])
     run('scalar255','uniform float4 u:register(C255); float4 main(float4 p:POSITION):POSITION{return p*u;}',

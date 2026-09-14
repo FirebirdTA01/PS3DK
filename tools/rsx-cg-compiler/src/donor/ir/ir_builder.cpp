@@ -652,6 +652,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             if (!varDecl->semantic.isEmpty())
             {
                 global.semanticName = varDecl->semantic.name;
+                global.rawSemanticName = varDecl->semantic.rawName;
                 global.semanticIndex = varDecl->semantic.index;
             }
 
