@@ -1,0 +1,6 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// The same on the RIGHT operand of ##.
+#define BAD (1.0)
+#define xBAD 2.0
+#define CAT(a,b) a##b
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * CAT(x, BAD); }

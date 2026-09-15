@@ -1,0 +1,7 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// The twin: the same argument bound to a parameter the body DOES name, so it
+// is expanded and refused. This is what keeps the row above from passing by
+// never expanding anything.
+#define BAD (1.0)
+#define USE(x) (x)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * USE(BAD); }

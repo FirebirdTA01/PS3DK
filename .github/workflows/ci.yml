@@ -267,6 +267,8 @@ jobs:
         run: bash tests/shader-compiler/call-visibility-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments
         run: bash tests/shader-compiler/helper-default-args-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a parenthesised object-like macro body
+        run: bash tests/shader-compiler/paren-macro-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test C-style narrowing casts on vectors and matrices
         run: bash tests/shader-compiler/cast-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test half subnormal flush to zero in constant evaluation

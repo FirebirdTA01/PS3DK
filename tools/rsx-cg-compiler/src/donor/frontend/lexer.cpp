@@ -12,6 +12,31 @@ LexerError::LexerError(const Token& token, const std::string& fallbackFilename)
 {
 }
 
+namespace
+{
+// A FORM FEED AND A VERTICAL TAB ARE NOT WHITESPACE TO sce-cgc - they are
+// invalid input. `return<FF>t*2.0;` in ordinary code is
+// "error C0000: syntax error, unexpected $undef" there, and std::isspace
+// accepts both, so skipping them silently made us accept a program the
+// reference refuses.
+//
+// Doing it HERE rather than in the preprocessor is what makes the whole
+// measured table come out right: the character only matters when it reaches
+// the token stream, so a form feed inside a comment, inside a discarded #if
+// region, inside a #pragma, or in the body of a macro that is never expanded
+// stays harmless - all four are accepted by the reference - while one in code,
+// or in a macro body that IS expanded, is refused.
+//
+// It surfaces as our ordinary "unknown character" diagnostic rather than the
+// reference's C0000 wording; both refuse and write nothing, and the guard
+// pins the class rather than the text.
+bool isSkippableSpace(char c)
+{
+	return c != '\f' && c != '\v' &&
+	       std::isspace(static_cast<unsigned char>(c));
+}
+}  // namespace
+
 std::string Lexer::formatUnknownCharacterMessage(
 	const Token& token,
 	const std::string& fallbackFilename)
@@ -370,7 +395,7 @@ void Lexer::skipWhitespace()
 {
     while (!isAtEnd()) 
     {
-        if (std::isspace(peek()))
+        if (isSkippableSpace(peek()))
         {
             advance();
         }
@@ -383,7 +408,7 @@ void Lexer::skipWhiteSpaceAndComments()
 {
     while (!isAtEnd()) 
     {
-        if (std::isspace(peek())) 
+        if (isSkippableSpace(peek())) 
         {
             advance();
         } 

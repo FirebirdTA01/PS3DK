@@ -1,0 +1,11 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// *** THE CELL THAT PROVES THE BODY CHANGED, not merely that we accept more. ***
+// With the whitespace rule this is OBJECT-like with body "(x) (2.0)".  The
+// reference expands it and only then fails, on the undefined x:
+//     error C1008: undefined variable "x"
+// We also fail INSIDE the expanded text.  What must never come back is
+// "undeclared identifier 'K'" - that was the old behaviour and it means the
+// macro was never defined at all.  The row asserts the refusal does NOT name
+// K, which is the only way to tell the two refusals apart by verdict alone.
+#define K (x) (2.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

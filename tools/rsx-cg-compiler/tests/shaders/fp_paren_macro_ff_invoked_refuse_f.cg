@@ -1,0 +1,7 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// The invoked twin of fp_paren_macro_ff_named_not_called_f: the SAME macro,
+// actually called, so the body IS substituted and the reference refuses.
+// Without this pair the accept row above would pass for a compiler that had
+// simply stopped checking.
+#define F(x) ((x)*2.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * F(1.0); }

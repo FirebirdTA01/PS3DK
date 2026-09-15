@@ -1,0 +1,6 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// The SDK's actual spelling: a TAB between the name and the body.  Not a
+// tab rule - see fp_paren_macro_f, which uses a space - but this is the form
+// that was in front of us and it belongs in the table.
+#define K		(3.14159f)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

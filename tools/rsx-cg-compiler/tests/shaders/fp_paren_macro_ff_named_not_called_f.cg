@@ -1,0 +1,8 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// A FUNCTION-LIKE NAME NOT FOLLOWED BY "(" IS NOT A USE.  F's body does not
+// tokenise, but naming F as a plain identifier never expands it, so the body
+// never reaches the token stream and the reference ACCEPTS.  My first
+// deferral raised the error when the NAME was looked up, before the
+// invocation test - found independently by codex and Fable.
+#define F(x) ((x)*2.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { float F = t.x; return float4(F, 0, 0, 1); }

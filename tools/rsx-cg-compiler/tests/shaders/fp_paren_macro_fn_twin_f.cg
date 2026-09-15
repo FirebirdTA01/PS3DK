@@ -1,0 +1,3 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// The expansion written out.  Twin of fp_paren_macro_fn_f.
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * ((0.5)*2.0); }
