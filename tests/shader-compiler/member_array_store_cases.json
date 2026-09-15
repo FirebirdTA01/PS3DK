@@ -119,14 +119,14 @@
     "name": "sce_fp_rsx-member-oob-observed",
     "profile": "sce_fp_rsx",
     "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[2]=t;return s.a[2];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
-    "refusal": "member-array index outside supported range",
+    "refusal": "outside OUR supported range",
     "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
   },
   {
     "name": "sce_fp_rsx-member-negative-observed",
     "profile": "sce_fp_rsx",
     "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[-1]=t;return s.a[-1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
-    "refusal": "member-array index outside supported range",
+    "refusal": "outside OUR supported range",
     "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
   },
   {
@@ -187,14 +187,14 @@
     "name": "sce_vp_rsx-member-oob-observed",
     "profile": "sce_vp_rsx",
     "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[2]=t;return s.a[2];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
-    "refusal": "member-array index outside supported range",
+    "refusal": "outside OUR supported range",
     "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
   },
   {
     "name": "sce_vp_rsx-member-negative-observed",
     "profile": "sce_vp_rsx",
     "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[-1]=t;return s.a[-1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
-    "refusal": "member-array index outside supported range",
+    "refusal": "outside OUR supported range",
     "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
   },
   {
