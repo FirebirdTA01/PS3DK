@@ -52,5 +52,5 @@ def check(compile_one):
         for key,expected in row['records'].items():
             assert records.get(key)==tuple(expected),f'{name}: record {key}: {records.get(key)} != {expected}'
         accepts+=1
-    assert (accepts,refusals)==(54,18),'input binding or boundary row lost'
+    assert (accepts,refusals)==(58,18),'input binding or boundary row lost'
     return accepts,refusals

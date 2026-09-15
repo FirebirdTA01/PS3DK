@@ -8312,6 +8312,7 @@ private:
             };
             std::vector<PendingPreload> fullPreloads;
             std::vector<PendingPreload> halfPreloads;
+            int directFpColor = -1;
 
             for (size_t srcIndex = 0; srcIndex < vi.srcs.size(); ++srcIndex) {
                 VSrc& src = vi.srcs[srcIndex];
@@ -8321,7 +8322,13 @@ private:
                     continue;
                 if (profile_ == GeneralProfile::Fragment &&
                     effOp == VOp::Mad &&
-                    isHalfPrecisionFragmentInput(src)) {
+                    isHalfPrecisionFragmentInput(src) &&
+                    (directFpColor < 0 || directFpColor == src.index)) {
+                    // Keep one preclamped color input direct, never two:
+                    // the instruction shares a single input selector.
+                    // A second color must use the half preload path below
+                    // (t_e89cd261), otherwise COL0 | COL1 selects FOGC.
+                    directFpColor = src.index;
                     continue;
                 }
                 if (profile_ == GeneralProfile::Vertex) {
