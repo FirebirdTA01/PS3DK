@@ -5299,14 +5299,14 @@ bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, in
         const double truncated = std::trunc(static_cast<double>(components[0]));
         if (!std::isfinite(truncated) || truncated < 0 || truncated >= type.arraySize)
         {
-            error(expr->loc, "array index out of bounds: member-array index outside supported range (t_4c95ef8b)");
+            error(expr->loc, "member-array index outside OUR supported range (t_4c95ef8b; reference accepts measured forwarding cases)");
             return false;
         }
         index = static_cast<int32_t>(truncated);
     }
     if (index < 0 || index >= type.arraySize)
     {
-        error(expr->loc, "array index out of bounds: member-array index outside supported range (t_4c95ef8b)");
+        error(expr->loc, "member-array index outside OUR supported range (t_4c95ef8b; reference accepts measured forwarding cases)");
         return false;
     }
     return true;
