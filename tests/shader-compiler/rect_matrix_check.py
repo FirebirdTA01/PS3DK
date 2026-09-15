@@ -204,7 +204,7 @@ def bone_row(element, row):
     return [(element + 1) * 10 + row * 3 + col / 4 for col in range(4)]
 
 
-def execute_vp(blob, uniforms):
+def execute_vp(blob, uniforms, *, all_outputs=False):
     recs = records(blob)
     words, error = decode(blob)
     if error is not None:
@@ -252,6 +252,8 @@ def execute_vp(blob, uniforms):
         for lane in mask:
             if lane != '-':
                 regs[dst]['xyzw'.index(lane)] = value['xyzw'.index(lane)]
+    if all_outputs:
+        return {name: value for name, value in regs.items() if name.startswith('o')}, P
     return regs.get('o1'), P
 
 

@@ -10,6 +10,7 @@
 
 namespace
 {
+bool arrayStorageKey(ExprNode* expr, std::string& key);
 constexpr float kPiDiv180 = 0.017453292519943295769f;
 constexpr float k180DivPi = 57.295779513082320876f;
 
@@ -1328,7 +1329,35 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 output.semanticName = field.semantic.name;
                 output.rawSemanticName = field.semantic.rawName;
                 output.semanticIndex = field.semantic.index;
-                currentFunction_->returnOutputs.push_back(std::move(output));
+                if (output.type.isArray() && !output.type.isMatrix())
+                {
+                    const int count = output.type.arraySize;
+                    if (currentFunction_->isEntryPoint)
+                    {
+                        std::string semantic = output.semanticName;
+                        std::transform(semantic.begin(), semantic.end(), semantic.begin(),
+                            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                        int limit = 0;
+                        const bool vertex = module_->shaderStage == ShaderStage::Vertex;
+                        if (semantic == "COLOR" || semantic == "COL") limit = vertex ? 2 : 4;
+                        if (vertex && (semantic == "TEXCOORD" || semantic == "TEX")) limit = 10;
+                        if (vertex && (semantic == "POSITION" || semantic == "HPOS" ||
+                                       semantic == "PSIZE" || semantic == "PSIZ") && count > 1)
+                            error(decl->loc, "C5121: multiple bindings to a singleton output semantic");
+                        if (limit && (output.semanticIndex < 0 ||
+                            output.semanticIndex > limit - count))
+                            error(decl->loc, "C5102: output array semantic index exceeds its resource range");
+                    }
+                    output.type.arraySize = 0;
+                    for (int i = 0; i < count; ++i)
+                    {
+                        IRParameter element = output;
+                        element.name += "[" + std::to_string(i) + "]";
+                        element.semanticIndex += i;
+                        currentFunction_->returnOutputs.push_back(std::move(element));
+                    }
+                }
+                else currentFunction_->returnOutputs.push_back(std::move(output));
             } else if (getStructFields(field.type.get())) {
                 self(self, field.type.get(), fieldPath);
             }
@@ -1481,6 +1510,28 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         // Map parameter to value
         declToValue_[param.get()] = irParam.valueId;
         nameToValue_[param->name] = irParam.valueId;
+    }
+
+    if (currentFunction_->isEntryPoint &&
+        std::any_of(currentFunction_->returnOutputs.begin(), currentFunction_->returnOutputs.end(),
+            [](const IRParameter& p) { return p.name.find('[') != std::string::npos; }))
+    {
+        std::unordered_set<std::string> slots;
+        auto occupy = [&](const IRParameter& output) {
+            std::string semantic = output.semanticName;
+            std::transform(semantic.begin(), semantic.end(), semantic.begin(),
+                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            if (semantic == "TEX") semantic = "TEXCOORD";
+            if (semantic == "COL") semantic = "COLOR";
+            if (semantic == "HPOS") semantic = "POSITION";
+            if (semantic == "PSIZ") semantic = "PSIZE";
+            if (!semantic.empty() && !slots.insert(semantic + ":" + std::to_string(output.semanticIndex)).second)
+                error(decl->loc, "C5121: multiple bindings to an output array semantic slot");
+        };
+        for (const auto& output : currentFunction_->returnOutputs) occupy(output);
+        for (const auto& parameter : currentFunction_->parameters)
+            if (parameter.storage == StorageQualifier::Out || parameter.storage == StorageQualifier::InOut)
+                occupy(parameter);
     }
 
     // Create entry block
@@ -2613,6 +2664,35 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                         continue;
                     }
 
+                    // Each written element owns one output semantic. The
+                    // declaration records remain present for unwritten
+                    // elements, but there is no write and no invented zero.
+                    if (field.type && getIRType(field.type.get()).isArray() &&
+                        localArrayValues_.count(fieldKey))
+                    {
+                        const auto& elements = localArrayValues_.at(fieldKey);
+                        IRTypeInfo elementType = getIRType(field.type.get());
+                        if (elementType.isMatrix())
+                        {
+                            error(stmt->loc, "matrix-array output emission is not supported (t_4c95ef8b)");
+                            continue;
+                        }
+                        elementType.arraySize = 0;
+                        for (size_t i = 0; i < elements.size(); ++i)
+                        {
+                            if (elements[i] == InvalidIRValue) continue;
+                            auto output = std::make_unique<IRInstruction>(IROp::StoreOutput,
+                                InvalidIRValue, elementType);
+                            output->addOperand(elements[i]);
+                            output->semanticName = field.semantic.name;
+                            output->rawSemanticName = field.semantic.rawName;
+                            output->semanticIndex = field.semantic.index + static_cast<int>(i);
+                            output->fieldName = fieldPath + "[" + std::to_string(i) + "]";
+                            currentBlock_->addInstruction(std::move(output));
+                        }
+                        continue;
+                    }
+
                     auto it = nameToValue_.find(fieldKey);
                     IRValueID fieldValue = InvalidIRValue;
                     if (it != nameToValue_.end())
@@ -2698,6 +2778,23 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
             };
 
             emitStructOutputs(emitStructOutputs, baseName, "", structType);
+            if (currentFunction_->isEntryPoint && module_->shaderStage == ShaderStage::Vertex &&
+                std::any_of(currentFunction_->returnOutputs.begin(), currentFunction_->returnOutputs.end(),
+                    [](const IRParameter& p) { return p.name.find('[') != std::string::npos; }))
+            {
+                bool positionWritten = false;
+                for (const auto& block : currentFunction_->blocks)
+                    for (const auto& instruction : block->instructions)
+                        if (instruction->op == IROp::StoreOutput)
+                        {
+                            std::string semantic = instruction->semanticName;
+                            std::transform(semantic.begin(), semantic.end(), semantic.begin(),
+                                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                            if (semantic == "POSITION" || semantic == "HPOS") positionWritten = true;
+                        }
+                if (!positionWritten)
+                    error(stmt->loc, "C6014: output array program does not write required HPOS");
+            }
         }
 
         emitReturn(retValue);
@@ -2937,6 +3034,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         if (varDecl->initializer)
         {
             IRValueID initValue = buildExpr(varDecl->initializer.get());
+            copyArrayAggregate(varDecl->name, varDecl->initializer.get(), varDecl->type.get());
             const IRTypeInfo declaredType = getIRType(varDecl->type.get());
             const IRTypeInfo initType = getExprType(varDecl->initializer.get());
             if (declaredType.arraySize == 0 && !declaredType.isMatrix() &&
@@ -2968,7 +3066,13 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                     for (const auto& field : *fields)
                     {
                         const std::string fieldName = prefix + "." + field.name;
-                        if (field.type && field.type->vectorSize > 1)
+                        if (field.type && getIRType(field.type.get()).isArray())
+                        {
+                            const auto type = getIRType(field.type.get());
+                            localArrayValues_[fieldName].assign(
+                                static_cast<size_t>(type.arraySize), InvalidIRValue);
+                        }
+                        else if (field.type && field.type->vectorSize > 1)
                         {
                             const IRValueID base = currentFunction_->allocateValueId();
                             nameToValue_[fieldName] = base;
@@ -3581,10 +3685,28 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
     {
         IRValueID rhsValue = buildExpr(expr->right.get());
 
+        if (expr->op == BinaryOp::Assign)
+        {
+            std::string destination;
+            if (arrayStorageKey(expr->left.get(), destination))
+                copyArrayAggregate(destination, expr->right.get(), expr->left->resolvedType.get());
+        }
+
         // For compound assignments, compute the new value
         if (expr->op != BinaryOp::Assign)
         {
-            IRValueID lhsValue = buildExpr(expr->left.get());
+            // Resolve an array lvalue once. Reading and then rebuilding its
+            // selector for the write would execute a[k++] twice.
+            std::string arrayKey;
+            int32_t arrayIndex = 0;
+            const bool arrayTarget = expr->left->kind == ExprKind::Index &&
+                getExprType(static_cast<IndexExpr*>(expr->left.get())->array.get()).isArray();
+            if (arrayTarget && !resolveTrackedArrayElement(
+                    static_cast<IndexExpr*>(expr->left.get()), arrayKey, arrayIndex))
+                return InvalidIRValue;
+            IRValueID lhsValue = arrayTarget
+                ? readTrackedArrayElement(static_cast<IndexExpr*>(expr->left.get()), arrayKey, arrayIndex)
+                : buildExpr(expr->left.get());
             IROp op;
             switch (expr->op)
             {
@@ -3596,6 +3718,12 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             default: op = IROp::Add; break;
             }
             rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
+            if (arrayTarget)
+            {
+                rhsValue = coerceAssignmentValue(expr->left.get(), rhsValue);
+                localArrayValues_.at(arrayKey)[static_cast<size_t>(arrayIndex)] = rhsValue;
+                return rhsValue;
+            }
         }
 
         return buildAssignment(expr->left.get(), rhsValue);
@@ -3632,7 +3760,18 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 
 IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
 {
-    IRValueID operandValue = buildExpr(expr->operand.get());
+    const bool increments = expr->op == UnaryOp::PreIncrement || expr->op == UnaryOp::PreDecrement ||
+        expr->op == UnaryOp::PostIncrement || expr->op == UnaryOp::PostDecrement;
+    const bool arrayOperand = increments && expr->operand->kind == ExprKind::Index &&
+        getExprType(static_cast<IndexExpr*>(expr->operand.get())->array.get()).isArray();
+    std::string arrayKey;
+    int32_t arrayIndex = 0;
+    if (arrayOperand && !resolveTrackedArrayElement(
+            static_cast<IndexExpr*>(expr->operand.get()), arrayKey, arrayIndex))
+        return InvalidIRValue;
+    IRValueID operandValue = arrayOperand
+        ? readTrackedArrayElement(static_cast<IndexExpr*>(expr->operand.get()), arrayKey, arrayIndex)
+        : buildExpr(expr->operand.get());
     if (expr->op == UnaryOp::LogicalNot)
         operandValue = normalizeCondition(expr->operand.get(), operandValue);
 
@@ -3641,15 +3780,22 @@ IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
         expr->op == UnaryOp::PostIncrement || expr->op == UnaryOp::PostDecrement)
     {
         IRTypeInfo type = getExprType(expr->operand.get());
-        IRValueID one = createConstant(1.0f);
+        IRValueID one = type.baseType == IRType::Int32 ? createConstant(int32_t(1)) :
+            type.baseType == IRType::UInt32 ? createConstant(uint32_t(1)) : createConstant(1.0f);
 
         IROp op = (expr->op == UnaryOp::PreIncrement || expr->op == UnaryOp::PostIncrement)
             ? IROp::Add : IROp::Sub;
 
-        IRValueID newValue = emitBinaryOp(op, type, operandValue, one);
+        IRValueID newValue = tryFoldBinaryOp(op, type, operandValue, one);
+        if (newValue == InvalidIRValue)
+            newValue = emitBinaryOp(op, type, operandValue, one);
 
         // Store back
-        buildAssignment(expr->operand.get(), newValue);
+        if (arrayOperand)
+            localArrayValues_.at(arrayKey)[static_cast<size_t>(arrayIndex)] =
+                coerceAssignmentValue(expr->operand.get(), newValue);
+        else
+            buildAssignment(expr->operand.get(), newValue);
 
         // Return old or new value based on pre/post
         if (expr->op == UnaryOp::PostIncrement || expr->op == UnaryOp::PostDecrement)
@@ -4063,6 +4209,8 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 }
 
 
+namespace { bool arrayStorageKey(ExprNode* expr, std::string& key); }
+
 bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                        const std::vector<IRValueID>& args,
                                        IRValueID& result)
@@ -4165,6 +4313,54 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         stashShadowedGlobal(param->name);
         if (!param->name.empty())
             nameToValue_[param->name] = args[i];
+
+        // Array-bearing arguments are values, not caller spelling aliases.
+        // Take the call's completed argument state (the reference's measured
+        // g(s, s.a[0]=...) cell sees that write), then rename its qualified
+        // fields into this parameter's scope. savedScope also prevents an
+        // earlier parameter binding from corrupting a later argument.
+        auto arrayFields = [&](auto& self, TypeNode* type, const std::string& key,
+                               std::vector<std::pair<std::string, int>>& fields) -> void {
+            const auto irType = getIRType(type);
+            if (irType.isArray()) { fields.emplace_back(key, irType.arraySize); return; }
+            if (const auto* members = getStructFields(type))
+                for (const auto& member : *members)
+                    if (member.type) self(self, member.type.get(), key + "." + member.name, fields);
+        };
+        std::vector<std::pair<std::string, int>> fields;
+        arrayFields(arrayFields, param->type.get(), param->name, fields);
+        // Preserve the existing entry-uniform array alias instead of
+        // intercepting it with an all-uninitialised local element map.
+        const bool uniformArrayAlias = getIRType(param->type.get()).isArray() &&
+            std::any_of(currentFunction_->parameters.begin(), currentFunction_->parameters.end(),
+                [&](const IRParameter& p) { return p.valueId == args[i] && p.type.isArray() &&
+                    p.storage == StorageQualifier::Uniform; });
+        if (uniformArrayAlias) fields.clear();
+        if (!fields.empty())
+        {
+            const std::string parameterPrefix = param->name + ".";
+            for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                if (it->first.compare(0, parameterPrefix.size(), parameterPrefix) == 0)
+                    it = nameToValue_.erase(it);
+                else ++it;
+            for (const auto& field : fields)
+                localArrayValues_[field.first].assign(static_cast<size_t>(field.second), InvalidIRValue);
+
+            std::string source;
+            if (i < expr->arguments.size() && arrayStorageKey(expr->arguments[i].get(), source))
+            {
+                const std::string prefix = source + ".";
+                auto belongs = [&](const std::string& key) {
+                    return key == source || key.compare(0, prefix.size(), prefix) == 0;
+                };
+                for (const auto& entry : savedArrays)
+                    if (belongs(entry.first))
+                        localArrayValues_[param->name + entry.first.substr(source.size())] = entry.second;
+                for (const auto& entry : savedNames)
+                    if (entry.first != source && belongs(entry.first))
+                        nameToValue_[param->name + entry.first.substr(source.size())] = entry.second;
+            }
+        }
     }
 
     // Names the caller shadows with a local: for the body, the name means
@@ -4979,8 +5175,165 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
 
 } // namespace
 
+namespace {
+bool arrayStorageKey(ExprNode* expr, std::string& key)
+{
+    if (expr->kind == ExprKind::Identifier)
+    {
+        auto* id = static_cast<IdentifierExpr*>(expr);
+        if (!id->resolvedDecl) return false;
+        key = id->name;
+        return true;
+    }
+    if (expr->kind != ExprKind::MemberAccess) return false;
+    auto* member = static_cast<MemberAccessExpr*>(expr);
+    if (member->isSwizzle || !arrayStorageKey(member->object.get(), key)) return false;
+    key += "." + member->member;
+    return true;
+}
+}
+
+bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type)
+{
+    // The standalone helper IR has no caller element bindings. Its body is
+    // rebuilt at each inline call with those bindings installed below.
+    if (!currentFunction_->isEntryPoint && inlineStack_.empty()) return false;
+    auto hasArray = [&](auto& self, TypeNode* t) -> bool {
+        if (!t) return false;
+        if (getIRType(t).isArray()) return true;
+        if (const auto* fields = getStructFields(t))
+            for (const auto& field : *fields)
+                if (self(self, field.type.get())) return true;
+        return false;
+    };
+    if (!getStructFields(type) || !hasArray(hasArray, type)) return false;
+    std::string origin;
+    // An assignment expression denotes its newly assigned destination.
+    while (source && source->kind == ExprKind::Binary &&
+           static_cast<BinaryExpr*>(source)->op == BinaryOp::Assign)
+        source = static_cast<BinaryExpr*>(source)->left.get();
+    if (!source || !arrayStorageKey(source, origin))
+    {
+        error("array-bearing struct copy requires a tracked source (t_4c95ef8b)");
+        return true;
+    }
+    const auto arrays = localArrayValues_;
+    const auto names = nameToValue_;
+    auto copy = [&](auto& self, TypeNode* t, const std::string& from, const std::string& to) -> void {
+        const auto ir = getIRType(t);
+        if (ir.isArray())
+        {
+            const auto found = arrays.find(from);
+            if (found == arrays.end())
+                error("array-bearing struct copy requires tracked elements (t_4c95ef8b)");
+            else localArrayValues_[to] = found->second;
+            return;
+        }
+        if (const auto* fields = getStructFields(t))
+        {
+            for (const auto& field : *fields)
+                if (field.type) self(self, field.type.get(), from + "." + field.name, to + "." + field.name);
+            return;
+        }
+        // An absent source leaf must not leave an older destination value.
+        for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+            if (it->first == to || it->first.compare(0, to.size() + 1, to + ".") == 0)
+                it = nameToValue_.erase(it);
+            else ++it;
+        for (const auto& entry : names)
+            if (entry.first == from || entry.first.compare(0, from.size() + 1, from + ".") == 0)
+                nameToValue_[to + entry.first.substr(from.size())] = entry.second;
+    };
+    copy(copy, type, origin, destination);
+    return true;
+}
+
+bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, int32_t& index)
+{
+    const auto type = getExprType(expr->array.get());
+    if (!type.isArray() || !arrayStorageKey(expr->array.get(), key))
+    {
+        error(expr->loc, "member-array storage path is not supported (t_4c95ef8b)");
+        return false;
+    }
+    auto found = localArrayValues_.find(key);
+    if (found == localArrayValues_.end())
+    {
+        // Preserve file-scope promotion. A scoped declaration initializes
+        // its own array map, so it cannot inherit a global's element values.
+        const auto* global = module_->findGlobal(key);
+        if (global && global->type.isArray() && !nameToValue_.count(key))
+            found = localArrayValues_.emplace(key,
+                std::vector<IRValueID>(static_cast<size_t>(type.arraySize), InvalidIRValue)).first;
+    }
+    if (found == localArrayValues_.end())
+    {
+        error(expr->loc, "member-array storage is not tracked (t_4c95ef8b)");
+        return false;
+    }
+    const IRValueID selector = buildExpr(expr->index.get());
+    if (selector == InvalidIRValue) return false;
+    if (!extractIntScalar(*currentFunction_, selector, index))
+    {
+        auto* constant = dynamic_cast<IRConstant*>(currentFunction_->getValue(selector));
+        std::vector<float> components;
+        if (!constant || !constant->type.isScalar() ||
+            !extractFloatComponents(*currentFunction_, selector, components) || components.size() != 1)
+        {
+            error(expr->loc, "member-array store requires a constant index (t_4c95ef8b)");
+            return false;
+        }
+        const double truncated = std::trunc(static_cast<double>(components[0]));
+        if (!std::isfinite(truncated) || truncated < 0 || truncated >= type.arraySize)
+        {
+            error(expr->loc, "array index out of bounds: member-array index outside supported range (t_4c95ef8b)");
+            return false;
+        }
+        index = static_cast<int32_t>(truncated);
+    }
+    if (index < 0 || index >= type.arraySize)
+    {
+        error(expr->loc, "array index out of bounds: member-array index outside supported range (t_4c95ef8b)");
+        return false;
+    }
+    return true;
+}
+
+IRValueID IRBuilder::readTrackedArrayElement(IndexExpr* expr, const std::string& key, int32_t index)
+{
+    const IRValueID value = localArrayValues_.at(key)[static_cast<size_t>(index)];
+    if (value != InvalidIRValue) return value;
+    ExprNode* root = expr->array.get();
+    while (root->kind == ExprKind::MemberAccess)
+        root = static_cast<MemberAccessExpr*>(root)->object.get();
+    const auto* global = module_->findGlobal(key);
+    if (root->kind != ExprKind::Identifier || !global ||
+        !globalDeclarations_.count(static_cast<IdentifierExpr*>(root)->resolvedDecl))
+        return InvalidIRValue;
+    // A promoted global's untouched elements still come from the uniform.
+    // Compound assignment must use this value, never an undefined local.
+    const IRValueID id = currentFunction_->allocateValueId();
+    auto load = std::make_unique<IRInstruction>(IROp::LoadUniform, id, getExprType(expr));
+    load->targetName = key;
+    load->uniformSource = global->valueId;
+    load->componentIndex = index;
+    load->arrayIndexKind = IRInstruction::ArrayIndexKind::Constant;
+    load->loc = expr->loc;
+    currentBlock_->addInstruction(std::move(load));
+    return id;
+}
+
 IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 {
+    std::string trackedKey;
+    if (getExprType(expr->array.get()).isArray() &&
+        arrayStorageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey) &&
+        (nameToValue_.count(trackedKey) || !module_->findGlobal(trackedKey)))
+    {
+        int32_t index = 0;
+        if (!resolveTrackedArrayElement(expr, trackedKey, index)) return InvalidIRValue;
+        return readTrackedArrayElement(expr, trackedKey, index);
+    }
     // A UNIFORM ARRAY element is a LoadUniform that names how the element
     // was chosen (IRInstruction::arrayIndexKind), never a VecExtract: the
     // VecExtract lowering reads its selector as a LANE and falls back to
@@ -6203,37 +6556,13 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     if (target->kind == ExprKind::Index)
     {
         auto* indexExpr = static_cast<IndexExpr*>(target);
-        if (indexExpr->array->kind == ExprKind::Identifier &&
-            indexExpr->index->kind == ExprKind::Literal)
+        if (getExprType(indexExpr->array.get()).isArray())
         {
-            auto* ident =
-                static_cast<IdentifierExpr*>(indexExpr->array.get());
-            auto* lit = static_cast<LiteralExpr*>(indexExpr->index.get());
-            auto arrIt = localArrayValues_.find(ident->name);
-            if (arrIt == localArrayValues_.end() && !nameToValue_.count(ident->name))
-            {
-                // First store into a file-scope array: promote it (see the
-                // read side in buildIndexExpr).  Elements stay unwritten
-                // until stored, so a later read of an untouched element
-                // still takes the uniform.
-                IRGlobal* global = module_->findGlobal(ident->name);
-                if (global && global->type.isArray() && global->type.arraySize > 0)
-                    arrIt = localArrayValues_.emplace(
-                        ident->name,
-                        std::vector<IRValueID>(static_cast<size_t>(global->type.arraySize),
-                                               InvalidIRValue)).first;
-            }
-            if (arrIt != localArrayValues_.end() &&
-                lit->literalKind == LiteralExpr::LiteralKind::Int)
-            {
-                int64_t rawIndex = std::get<int64_t>(lit->value);
-                if (rawIndex >= 0 &&
-                    rawIndex < static_cast<int64_t>(arrIt->second.size()))
-                    arrIt->second[static_cast<size_t>(rawIndex)] = value;
-                else
-                    error(target->loc, "array index out of bounds");
-                return value;
-            }
+            std::string key;
+            int32_t index = 0;
+            if (!resolveTrackedArrayElement(indexExpr, key, index)) return InvalidIRValue;
+            localArrayValues_.at(key)[static_cast<size_t>(index)] = value;
+            return value;
         }
         // Any other element store used to fall out of this function with
         // the value discarded and no diagnostic - the program compiled

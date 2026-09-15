@@ -1,0 +1,296 @@
+[
+  {
+    "name": "sce_fp_rsx-member-array",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;s.a[1]=t.wzyx;return s.a[0]+s.a[1]*.25;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t.wzyx*.25;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-nested-member",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};struct T{S s;};float4 f(float4 t){T q;q.s.a[0]=t;q.s.a[1]=t.wzyx;return q.s.a[0]+q.s.a[1]*.25;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};struct T{S s;};float4 f(float4 t){return t+t.wzyx*.25;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-array-loop",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];for(int i=0;i<2;i++){a[i]=t*float(i+1);}return a[0]+a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){float4 a[2];a[0]=t*1;a[1]=t*2;return a[0]+a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-array-current-index",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;int k=1;a[k]=t.wzyx;return a[0]+a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;return a[0]+a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-conditional-member",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;if(t.x>0)s.a[0]=t.wzyx;return s.a[0];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){float4 a=t;if(t.x>0)a=t.wzyx;return a;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-array-dynamic-store",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;a[int(t.x)]=t*2;return a[0]+a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "refusal": "member-array store requires a constant index",
+    "oracle": "reference refuses this dynamic local-array cell"
+  },
+  {
+    "name": "sce_vp_rsx-member-array",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;s.a[1]=t.wzyx;return s.a[0]+s.a[1]*.25;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t.wzyx*.25;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-nested-member",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};struct T{S s;};float4 f(float4 t){T q;q.s.a[0]=t;q.s.a[1]=t.wzyx;return q.s.a[0]+q.s.a[1]*.25;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};struct T{S s;};float4 f(float4 t){return t+t.wzyx*.25;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-array-loop",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];for(int i=0;i<2;i++){a[i]=t*float(i+1);}return a[0]+a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){float4 a[2];a[0]=t*1;a[1]=t*2;return a[0]+a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-array-current-index",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;int k=1;a[k]=t.wzyx;return a[0]+a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;return a[0]+a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-conditional-member",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;if(t.x>0)s.a[0]=t.wzyx;return s.a[0];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){float4 a=t;if(t.x>0)a=t.wzyx;return a;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-array-dynamic-store",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;a[int(t.x)]=t*2;return a[0]+a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "refusal": "member-array store requires a constant index",
+    "oracle": "reference refuses this dynamic local-array cell"
+  },
+  {
+    "name": "sce_fp_rsx-array-shadow",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;{float4 a[2];a[0]=t*2;a[1]=t*3;}return a[0]+a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-shadow",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;{S s;s.a[0]=t*2;}return s.a[0];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-partial-used",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[1]=t;return s.a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-conditional-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;if(t.x>0)s.a[0]=t;else s.a[0]=t.wzyx;return s.a[0];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){float4 v;if(t.x>0)v=t;else v=t.wzyx;return v;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-array-index-postinc",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];int k=0;a[k++]=t;a[k++]=t.wzyx;return a[0]+a[1]+float(k);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx+2;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-index-current",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;int k=0;s.a[k]=t;k=1;s.a[k]=t.wzyx;return s.a[0]+s.a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t.wzyx;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-array-fraction-index",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1.9]=t.wzyx;return a[0]+a[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-oob-observed",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[2]=t;return s.a[2];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "refusal": "member-array index outside supported range",
+    "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
+  },
+  {
+    "name": "sce_fp_rsx-member-negative-observed",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[-1]=t;return s.a[-1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "refusal": "member-array index outside supported range",
+    "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
+  },
+  {
+    "name": "sce_fp_rsx-array-compound",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[0]+=t.wzyx;return a[0];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-array-compound",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;s.a[0]+=t.wzyx;return s.a[0];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t.wzyx;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-array-shadow",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;{float4 a[2];a[0]=t*2;a[1]=t*3;}return a[0]+a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-shadow",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;{S s;s.a[0]=t*2;}return s.a[0];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-partial-used",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[1]=t;return s.a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-conditional-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;if(t.x>0)s.a[0]=t;else s.a[0]=t.wzyx;return s.a[0];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){float4 v;if(t.x>0)v=t;else v=t.wzyx;return v;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-array-index-postinc",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];int k=0;a[k++]=t;a[k++]=t.wzyx;return a[0]+a[1]+float(k);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx+2;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-index-current",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;int k=0;s.a[k]=t;k=1;s.a[k]=t.wzyx;return s.a[0]+s.a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t.wzyx;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-array-fraction-index",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1.9]=t.wzyx;return a[0]+a[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-oob-observed",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[2]=t;return s.a[2];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "refusal": "member-array index outside supported range",
+    "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
+  },
+  {
+    "name": "sce_vp_rsx-member-negative-observed",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[-1]=t;return s.a[-1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "refusal": "member-array index outside supported range",
+    "oracle": "reference accepts; out-of-range forwarding is an unimplemented gap, t_4c95ef8b"
+  },
+  {
+    "name": "sce_vp_rsx-array-compound",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[0]+=t.wzyx;return a[0];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){return t+t.wzyx;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-array-compound",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;s.a[0]+=t.wzyx;return s.a[0];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t.wzyx;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-compound-selector",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;int k=0;a[k++]+=t*2;return a[0]+a[1]+float(k);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){return t+t*2+t.wzyx+1;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-postincrement-element",
+    "profile": "sce_fp_rsx",
+    "source": "float4 f(float4 t){float a[2];a[0]=t.x;a[1]=t.y;int k=0;float v=a[k++]++;return float4(v,a[0],a[1],k);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "float4 f(float4 t){return float4(t.x,t.x+1,t.y,1);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-compound-selector",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;s.a[1]=t.wzyx;int k=0;s.a[k++]+=t*2;return s.a[0]+s.a[1]+float(k);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t*2+t.wzyx+1;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-global-compound",
+    "profile": "sce_fp_rsx",
+    "source": "uniform float4 A[2];float4 f(float4 t){A[0]+=t;return A[0]+A[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "uniform float4 A[2];float4 f(float4 t){float4 v=A[0]+t;return v+A[1];}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-helper-argument",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 g(S s){return s.a[0]+s.a[1];}float4 f(float4 t){S s;s.a[0]=t;s.a[1]=t.wzyx;return g(s);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 g(S s){return s.a[0]+s.a[1];}float4 f(float4 t){return t+t.wzyx;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-helper-renamed",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 g(S other){return other.a[0]+other.a[1];}float4 f(float4 t){S q;q.a[0]=t;q.a[1]=t.wzyx;return g(q);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 g(S other){return other.a[0]+other.a[1];}float4 f(float4 t){return t+t.wzyx;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_fp_rsx-member-argument-local-after",
+    "profile": "sce_fp_rsx",
+    "source": "struct S{float4 a[2];};float4 g(S other,float z){return other.a[0]+other.a[1]+z;}float4 f(float4 t){S q;q.a[0]=t;q.a[1]=t.wzyx;return g(q,(q.a[0]=float4(9)).x);}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}",
+    "twin": "struct S{float4 a[2];};float4 g(S other,float z){return other.a[0]+other.a[1]+z;}float4 f(float4 t){return (float4(9)+t.wzyx)+9;}float4 main(float4 t:TEXCOORD0):COLOR{return f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-compound-selector",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float4 a[2];a[0]=t;a[1]=t.wzyx;int k=0;a[k++]+=t*2;return a[0]+a[1]+float(k);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){return t+t*2+t.wzyx+1;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-postincrement-element",
+    "profile": "sce_vp_rsx",
+    "source": "float4 f(float4 t){float a[2];a[0]=t.x;a[1]=t.y;int k=0;float v=a[k++]++;return float4(v,a[0],a[1],k);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "float4 f(float4 t){return float4(t.x,t.x+1,t.y,1);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-compound-selector",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 f(float4 t){S s;s.a[0]=t;s.a[1]=t.wzyx;int k=0;s.a[k++]+=t*2;return s.a[0]+s.a[1]+float(k);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 f(float4 t){return t+t*2+t.wzyx+1;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-global-compound",
+    "profile": "sce_vp_rsx",
+    "source": "uniform float4 A[2];float4 f(float4 t){A[0]+=t;return A[0]+A[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "uniform float4 A[2];float4 f(float4 t){float4 v=A[0]+t;return v+A[1];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-helper-argument",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 g(S s){return s.a[0]+s.a[1];}float4 f(float4 t){S s;s.a[0]=t;s.a[1]=t.wzyx;return g(s);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 g(S s){return s.a[0]+s.a[1];}float4 f(float4 t){return t+t.wzyx;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-helper-renamed",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 g(S other){return other.a[0]+other.a[1];}float4 f(float4 t){S q;q.a[0]=t;q.a[1]=t.wzyx;return g(q);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 g(S other){return other.a[0]+other.a[1];}float4 f(float4 t){return t+t.wzyx;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  },
+  {
+    "name": "sce_vp_rsx-member-argument-local-after",
+    "profile": "sce_vp_rsx",
+    "source": "struct S{float4 a[2];};float4 g(S other,float z){return other.a[0]+other.a[1]+z;}float4 f(float4 t){S q;q.a[0]=t;q.a[1]=t.wzyx;return g(q,(q.a[0]=float4(9)).x);}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}",
+    "twin": "struct S{float4 a[2];};float4 g(S other,float z){return other.a[0]+other.a[1]+z;}float4 f(float4 t){return (float4(9)+t.wzyx)+9;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(t);}"
+  }
+]

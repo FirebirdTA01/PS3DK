@@ -1,0 +1,274 @@
+[
+  {
+    "name": "array-helper-parameter",
+    "source": "float4 f(float4 q[2]){return q[0]+q[1];}void main(float4 t:POSITION,uniform float4 A[2],out float4 p:POSITION,out float4 c:COLOR){p=t;c=f(A);}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ],
+      "o1": [
+        110,
+        220,
+        330,
+        440
+      ]
+    },
+    "uniforms": {
+      "A[0]": [
+        10,
+        20,
+        30,
+        40
+      ],
+      "A[1]": [
+        100,
+        200,
+        300,
+        400
+      ]
+    }
+  },
+  {
+    "name": "member-copy-overwrite",
+    "source": "struct S{float4 a[2];};void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;S s;S q;s.a[0]=t;q.a[0]=t*2;s=q;c=s.a[0];}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ],
+      "o1": [
+        2.0,
+        -4.0,
+        6.0,
+        1.0
+      ]
+    },
+    "uniforms": {
+      "A[0]": [
+        10,
+        20,
+        30,
+        40
+      ],
+      "A[1]": [
+        100,
+        200,
+        300,
+        400
+      ]
+    }
+  },
+  {
+    "name": "member-copy-init",
+    "source": "struct S{float4 a[2];};void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;S s;s.a[0]=t;S q=s;c=q.a[0];}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ],
+      "o1": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ]
+    },
+    "uniforms": {
+      "A[0]": [
+        10,
+        20,
+        30,
+        40
+      ],
+      "A[1]": [
+        100,
+        200,
+        300,
+        400
+      ]
+    }
+  },
+  {
+    "name": "output-copy",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;};O main(float4 t:POSITION){O o;O q;o.p=t;o.a[0]=t;q.p=t;q.a[0]=t*2;o=q;return o;}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ],
+      "o7": [
+        2.0,
+        -4.0,
+        6.0,
+        1.0
+      ]
+    },
+    "uniforms": {
+      "A[0]": [
+        10,
+        20,
+        30,
+        40
+      ],
+      "A[1]": [
+        100,
+        200,
+        300,
+        400
+      ]
+    }
+  },
+  {
+    "name": "output-collision",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;float4 b:TEXCOORD1;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t*2;o.b=t*3;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5121"
+  },
+  {
+    "name": "output-color-collision",
+    "source": "struct O{float4 a[2]:COLOR0;float4 b:COLOR1;};O main(float4 t:TEXCOORD0){O o;o.a[0]=t;o.a[1]=t*2;o.b=t*3;return o;}",
+    "profile": "sce_fp_rsx",
+    "refusal": "C5121"
+  },
+  {
+    "name": "output-fp-partial",
+    "source": "struct O{float4 a[2]:COLOR0;};O main(float4 t:TEXCOORD0){O o;o.a[1]=t;return o;}",
+    "profile": "sce_fp_rsx",
+    "records": {
+      "main.a[0]": {
+        "type": 1048,
+        "res": 2757,
+        "referenced": 0
+      },
+      "main.a[1]": {
+        "type": 1048,
+        "res": 2758,
+        "referenced": 1
+      }
+    }
+  },
+  {
+    "name": "output-vp-lowercase",
+    "source": "struct O{float4 p:position;float4 a[2]:texcoord0;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;return o;}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ],
+      "o7": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ]
+    },
+    "uniforms": {
+      "A[0]": [
+        10,
+        20,
+        30,
+        40
+      ],
+      "A[1]": [
+        100,
+        200,
+        300,
+        400
+      ]
+    }
+  },
+  {
+    "name": "helper-output-copy",
+    "source": "struct S{float4 a[2];};float4 f(S q,S r){q=r;return q.a[0];}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;S q;S r;q.a[0]=t;r.a[0]=t*2;c=f(q,r);}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ],
+      "o1": [
+        2.0,
+        -4.0,
+        6.0,
+        1.0
+      ]
+    },
+    "uniforms": {
+      "A[0]": [
+        10,
+        20,
+        30,
+        40
+      ],
+      "A[1]": [
+        100,
+        200,
+        300,
+        400
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-COLOR0",
+    "source": "struct O{float4 a[2]:COLOR0;};O main(float4 t:TEXCOORD0){O o;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_fp_rsx"
+  },
+  {
+    "name": "sce_fp_rsx-COLOR3",
+    "source": "struct O{float4 a[2]:COLOR3;};O main(float4 t:TEXCOORD0){O o;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_fp_rsx",
+    "refusal": "C5102"
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD7",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD7;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_vp_rsx"
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD9",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD9;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5102"
+  },
+  {
+    "name": "sce_vp_rsx-COLOR0",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:COLOR0;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_vp_rsx"
+  },
+  {
+    "name": "sce_vp_rsx-COLOR1",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:COLOR1;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5102"
+  },
+  {
+    "name": "sce_vp_rsx-POSITION",
+    "source": "struct O{float4 a[2]:POSITION;};O main(float4 t:POSITION){O o;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5121"
+  },
+  {
+    "name": "sce_vp_rsx-PSIZE",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:PSIZE;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5121"
+  }
+]

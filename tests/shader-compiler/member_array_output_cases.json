@@ -1,0 +1,302 @@
+[
+  {
+    "name": "both",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
+    "records": {
+      "main.p": {
+        "name": "main.p",
+        "semantic": "POSITION",
+        "type": 1048,
+        "resource": 2243,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[0]": {
+        "name": "main.a[0]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3220,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[1]": {
+        "name": "main.a[1]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3221,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      }
+    },
+    "values": {
+      "o0": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o7": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o8": [
+        0.5,
+        3,
+        -2,
+        1
+      ]
+    }
+  },
+  {
+    "name": "loop",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;};O main(float4 t:POSITION){O o;o.p=t;for(int i=0;i<2;i++)o.a[i]=t*float(i+1);return o;}",
+    "records": {
+      "main.p": {
+        "name": "main.p",
+        "semantic": "POSITION",
+        "type": 1048,
+        "resource": 2243,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[0]": {
+        "name": "main.a[0]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3220,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[1]": {
+        "name": "main.a[1]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3221,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      }
+    },
+    "values": {
+      "o0": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o7": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o8": [
+        2,
+        -4,
+        6,
+        1.0
+      ]
+    }
+  },
+  {
+    "name": "explicit",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t*2;return o;}",
+    "records": {
+      "main.p": {
+        "name": "main.p",
+        "semantic": "POSITION",
+        "type": 1048,
+        "resource": 2243,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[0]": {
+        "name": "main.a[0]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3220,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[1]": {
+        "name": "main.a[1]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3221,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      }
+    },
+    "values": {
+      "o0": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o7": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o8": [
+        2,
+        -4,
+        6,
+        1.0
+      ]
+    }
+  },
+  {
+    "name": "partial",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;};O main(float4 t:POSITION){O o;o.p=t;o.a[1]=t;return o;}",
+    "records": {
+      "main.p": {
+        "name": "main.p",
+        "semantic": "POSITION",
+        "type": 1048,
+        "resource": 2243,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[0]": {
+        "name": "main.a[0]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3220,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 0
+      },
+      "main.a[1]": {
+        "name": "main.a[1]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3221,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      }
+    },
+    "values": {
+      "o0": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o8": [
+        1,
+        -2,
+        3,
+        0.5
+      ]
+    }
+  },
+  {
+    "name": "unwritten",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;};O main(float4 t:POSITION){O o;o.p=t;return o;}",
+    "records": {
+      "main.p": {
+        "name": "main.p",
+        "semantic": "POSITION",
+        "type": 1048,
+        "resource": 2243,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[0]": {
+        "name": "main.a[0]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3220,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 0
+      },
+      "main.a[1]": {
+        "name": "main.a[1]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3221,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 0
+      }
+    },
+    "values": {
+      "o0": [
+        1,
+        -2,
+        3,
+        0.5
+      ]
+    }
+  },
+  {
+    "name": "zero-explicit",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=0;o.a[1]=0;return o;}",
+    "records": {
+      "main.p": {
+        "name": "main.p",
+        "semantic": "POSITION",
+        "type": 1048,
+        "resource": 2243,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[0]": {
+        "name": "main.a[0]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3220,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      },
+      "main.a[1]": {
+        "name": "main.a[1]",
+        "semantic": "TEXCOORD0",
+        "type": 1048,
+        "resource": 3221,
+        "index": 4294967295,
+        "direction": 4098,
+        "referenced": 1
+      }
+    },
+    "values": {
+      "o0": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o7": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "o8": [
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  }
+]

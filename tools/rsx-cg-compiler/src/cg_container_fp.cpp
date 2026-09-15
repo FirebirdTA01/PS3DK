@@ -761,7 +761,27 @@ ContainerResult emitFragmentContainerImpl(
     }
 
     // Synthetic return-value output — the entry point's return type
-    // carries a semantic (`float4 main(...) : COLOR { return ... }`)
+    // Keep declaration records for unwritten array outputs without emitting
+    // stores or filling their lanes with invented values.
+    for (const auto& output : entry->returnOutputs)
+    {
+        if (output.name.find('[') == std::string::npos) continue;
+        const std::string name = entry->name + "." + output.name;
+        if (std::any_of(params.begin(), params.end(),
+                [&](const ParamDesc& p) { return p.name == name; })) continue;
+        ParamDesc d;
+        d.name = name;
+        d.semantic = output.rawSemanticName.empty() ? output.semanticName : output.rawSemanticName;
+        d.type = cgTypeForIRType(output.type);
+        d.var = kCgVarying;
+        d.direction = kCgOut;
+        d.paramno = kInvalidIndex;
+        d.res = fpResourceFor(toUpper(output.semanticName), output.semanticIndex);
+        d.isReferenced = 0;
+        params.push_back(d);
+    }
+
+    // A scalar return carries a semantic (`float4 main(...) : COLOR { return ... }`)
     // and the IR builder emits a StoreOutput for the return value.
     // The container needs a param entry for that synthetic output
     // named `<entry>` (matching the reference compiler) with paramno =

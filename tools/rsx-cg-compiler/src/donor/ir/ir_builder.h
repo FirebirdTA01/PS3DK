@@ -204,6 +204,9 @@ private:
 
     // Assignment building (separate because it modifies lvalues)
     IRValueID buildAssignment(ExprNode* target, IRValueID value);
+    bool resolveTrackedArrayElement(IndexExpr* expr, std::string& key, int32_t& index);
+    IRValueID readTrackedArrayElement(IndexExpr* expr, const std::string& key, int32_t index);
+    bool copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type);
     IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
 
     // Helper to get address/location for lvalue expressions
