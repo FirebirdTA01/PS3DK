@@ -470,12 +470,89 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 {
 	// Extract macro definition
 	std::smatch match;
-	std::regex defineRegex(R"(#\s*define\s+(\w+)(\s*\(([^)]*)\))?\s*(.*))");
+	// A MACRO IS FUNCTION-LIKE ONLY WHEN "(" IMMEDIATELY FOLLOWS THE NAME.
+	// With any space or tab between them the parenthesis is the first
+	// character of an OBJECT-LIKE body, and this pattern used to allow
+	// \s* there - so `#define fPI		(3.14159f)` was read as a function-like
+	// macro whose one parameter is named "3.14159f", a bare fPI never
+	// expanded, and eighteen SDK shaders died on "undeclared identifier".
+	// The rule changes what the BODY IS, not merely whether we accept:
+	// `#define K (x) (2.0)` is object-like with body "(x) (2.0)" and the
+	// reference expands it and then fails on the undefined x (C1008),
+	// which is the cell that proves it (t_7cc742ed).
+	std::regex defineRegex(R"(#\s*define\s+(\w+)(\(([^)]*)\))?[ \t]*(.*))");
 
 	if (std::regex_search(directive, match, defineRegex))
 	{
 		MacroDefinition macro;
 		macro.name = match[1];
+
+		// A FORM FEED OR VERTICAL TAB IS NOT A SEPARATOR - IT IS INVALID INPUT.
+		// The whitespace rule above deliberately stopped treating everything
+		// \s matches as separating the name from the body, and \f and \v were
+		// the two characters where that mattered: `#define K<FF>(1.0)` used to
+		// be read as function-like (so a bare K refused, which happened to
+		// agree with the reference) and became object-like (so it ACCEPTED,
+		// which does not). Found by codex on the first revision.
+		//
+		// Measured: the reference refuses \f and \v ANYWHERE in a source, not
+		// only in a directive - `return<FF>t*2.0;` in ordinary code is
+		// "error C0000: syntax error, unexpected $undef" just the same. So
+		// this is not a #define rule at all, and the general form is carded;
+		// what is fixed here is the acceptance THIS slice introduced.
+		//     #define<FF>K (1.0)    C0105   (before the name)
+		//     #define K<FF>(1.0)    C0000   (between name and body)
+		//     #define K (1.0<FF>)   C0000   (inside the body)
+		// No file in either census population contains either character - 923
+		// shader sources and headers scanned, zero hits - so nothing that
+		// compiles today stops compiling.
+		{
+			// ONLY BEFORE THE NAME. A form feed there is a DIRECTIVE syntax
+			// error on the reference and is reported even when the macro is
+			// never used:
+			//     #define<FF>UNUSED (1.0)   C0105, with no use anywhere
+			// Everywhere else a form feed only matters when it reaches the
+			// TOKEN STREAM, which is the lexer's business and not this
+			// function's - my first version refused the whole directive and so
+			// refused `#define UNUSED_MACRO (1.0<FF>)`, which the reference
+			// ACCEPTS because that body is never tokenised (codex asked for
+			// exactly this qualification before I claimed "anywhere").
+			const size_t defineEnd = directive.find("define");
+			if (defineEnd != std::string::npos)
+			{
+				const size_t nameStart =
+					directive.find_first_not_of(" \t\f\v", defineEnd + 6);
+				if (nameStart != std::string::npos &&
+				    directive.find_first_of("\f\v", defineEnd + 6) < nameStart)
+				{
+					throw std::runtime_error(
+						"error C0105: Syntax error in #define");
+				}
+			}
+		}
+
+		// A PARAMETER LIST THAT DOES NOT PARSE IS AN ERROR IN THE DEFINITION,
+		// not in whatever the body turns out to say.  Measured, both no-space
+		// forms:
+		//     #define K(3.14159f)   error C0105: Syntax error in #define
+		//     #define K(            error C0105: Syntax error in #define
+		// Without this the first is a function-like macro with a parameter
+		// literally named "3.14159f" that no call can ever supply, and the
+		// second falls through to an object-like body of "(" - both then
+		// refuse for some unrelated reason further downstream, which is a
+		// worse answer than the reference's even though the verdict matches.
+		{
+			const std::string after = match.suffix().str();
+			const size_t nameEnd = static_cast<size_t>(match.position(1)) +
+			                       match[1].str().size();
+			const bool touchesParen =
+				nameEnd < directive.size() && directive[nameEnd] == '(';
+			if (touchesParen && !match[2].matched)
+			{
+				// touching '(' but the group did not match: no ')' on the line
+				throw std::runtime_error("error C0105: Syntax error in #define");
+			}
+		}
 
 		// Check for function-like macro parameters
 		if(match[2].matched)
@@ -487,6 +564,31 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 			if (!paramsStr.empty())
 			{
 				macro.parameters = tokenizeParams(paramsStr);
+
+				for (const std::string& param : macro.parameters)
+				{
+					const std::string p = trim(param);
+					if (p == "..." ) continue;
+					// A trailing "name..." is the GNU named-variadic spelling
+					// and is handled below; strip it before the check.
+					const std::string base =
+						(p.size() > 3 && p.compare(p.size() - 3, 3, "...") == 0)
+							? trim(p.substr(0, p.size() - 3)) : p;
+					bool ok = !base.empty() &&
+						(std::isalpha(static_cast<unsigned char>(base[0])) ||
+						 base[0] == '_');
+					for (size_t i = 1; ok && i < base.size(); ++i)
+					{
+						if (!std::isalnum(static_cast<unsigned char>(base[i])) &&
+						    base[i] != '_')
+							ok = false;
+					}
+					if (!ok)
+					{
+						throw std::runtime_error(
+							"error C0105: Syntax error in #define");
+					}
+				}
 
 				// Check for variadic and handle __VA_ARGS__
 				if (!macro.parameters.empty() && macro.parameters.back().find("...") != std::string::npos)
@@ -506,7 +608,22 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 		{
 			const int replacementColumn = static_cast<int>(match.position(4)) + 1;
 			Lexer lexer(replacement, currentFile, lineNum, replacementColumn);
-			macro.replacementList = lexer.tokenize();
+			try
+			{
+				macro.replacementList = lexer.tokenize();
+			}
+			catch (const std::exception& e)
+			{
+				// REMEMBERED, NOT RAISED.  A body that does not tokenise is not an
+				// error until something expands it: the reference ACCEPTS
+				// `#define UNUSED (1.0<FF>)` with no use anywhere and refuses the
+				// same body the moment it is used.  We tokenise the replacement
+				// list eagerly, which reported it at the definition - so the
+				// failure is carried on the macro and re-raised from substitute().
+				macro.bodyFailedToTokenise = true;
+				macro.bodyTokeniseError = e.what();
+				macro.replacementList.clear();
+			}
 			// Remove any trailing EOF token
 			if(!macro.replacementList.empty() && macro.replacementList.back().type == TokenType::END_OF_FILE)
 			{
@@ -1184,11 +1301,85 @@ public:
 			}
 
 			// Arguments are fully expanded before substitution (except where
-			// they meet ##, which pastes their raw spelling).
+			// they meet ##, which pastes their raw spelling) - BUT ONLY THE
+			// ONES THE REPLACEMENT LIST ACTUALLY NAMES.  An argument bound to
+			// a parameter the body never mentions is not expanded at all, so
+			// nothing in it reaches the token stream:
+			//     #define BAD  (1.0<FF>)
+			//     #define DROP(x) 2.0
+			//     DROP(BAD)          reference ACCEPTS
+			// Expanding every argument regardless made that refuse, because
+			// BAD's body does not tokenise (found by codex). Skipping the
+			// unused ones is also just what the language says.
+			// WHICH PARAMETERS NEED THE EXPANDED ARGUMENT - decided PER
+			// OCCURRENCE, not per parameter.  An occurrence that is an operand
+			// of ## takes the RAW spelling (substitute() already does that);
+			// only an occurrence it resolves through expandedArgs needs the
+			// argument expanded at all.
+			//
+			// Marking a parameter "used" because its name appears ANYWHERE was
+			// wrong and measurable: with BAD holding a form feed,
+			//     #define CAT(a,b) a##b      CAT(BAD,x)
+			// pastes BAD raw and the reference ACCEPTS, but pre-expanding the
+			// argument refused it (codex, confirmed on two independent builds;
+			// Fable measured the reference verdicts m19/m20). The mixed shape
+			//     #define BOTH(a,b) a##b + a    BOTH(BAD,x)
+			// is reference REFUSE, because the plain occurrence of `a` DOES
+			// expand - which is exactly why the decision cannot be per
+			// parameter in either direction.
+			//
+			// This walk mirrors substitute()'s: the ## right-hand run is
+			// consumed the same way, and a parameter immediately before ## is
+			// its left operand.
+			std::set<std::string> usedParams;
+			{
+				const std::vector<Token>& rl = macro.replacementList;
+				for (size_t ri = 0; ri < rl.size(); ++ri)
+				{
+					if (rl[ri].type == TokenType::OP_HASH_HASH)
+					{
+						size_t la = ri + 1;
+						TokenType prevKind = TokenType::END_OF_FILE;
+						bool first = true;
+						while (la < rl.size() &&
+						       (rl[la].type == TokenType::NUMBER ||
+						        rl[la].type == TokenType::IDENTIFIER) &&
+						       (first || rl[la].type != prevKind))
+						{
+							prevKind = rl[la].type;
+							first = false;
+							++la;   // pasted: raw, so no expansion needed
+						}
+						ri = la - 1;
+						continue;
+					}
+					if (rl[ri].type != TokenType::IDENTIFIER) continue;
+					// The left operand of ## is raw too.
+					if (ri + 1 < rl.size() &&
+					    rl[ri + 1].type == TokenType::OP_HASH_HASH) continue;
+					usedParams.insert(rl[ri].lexeme);
+				}
+			}
 			std::vector<HsTokens> expandedArgs;
 			expandedArgs.reserve(args.size());
-			for (const HsTokens& arg : args)
-				expandedArgs.push_back(expand(std::deque<HsToken>(arg.begin(), arg.end())));
+			for (size_t ai = 0; ai < args.size(); ++ai)
+			{
+				const bool named =
+					ai < macro.parameters.size()
+						? usedParams.count(macro.parameters[ai]) != 0
+						: usedParams.count("__VA_ARGS__") != 0;
+				if (named)
+				{
+					expandedArgs.push_back(
+						expand(std::deque<HsToken>(args[ai].begin(), args[ai].end())));
+				}
+				else
+				{
+					// Never substituted, so never expanded. The raw spelling is
+					// kept so ## and # still see what was written.
+					expandedArgs.push_back(args[ai]);
+				}
+			}
 
 			std::set<std::string> hs;
 			std::set_intersection(t.hs.begin(), t.hs.end(), rparenHs.begin(), rparenHs.end(),
@@ -1235,6 +1426,20 @@ private:
 	HsTokens substitute(const MacroDefinition& macro, const std::vector<HsTokens>& rawArgs,
 	                    const std::vector<HsTokens>& expandedArgs, const std::set<std::string>& hs) const
 	{
+		// THE DEFERRED BODY FAILURE, RAISED HERE AND NOWHERE ELSE.  This is the
+		// one place a replacement list actually becomes output, so it is the
+		// only place the body reaches the token stream.  Raising it where the
+		// NAME was looked up instead refused two shapes the reference accepts,
+		// found independently by codex and Fable within a minute of each other:
+		//   a FUNCTION-LIKE name not followed by "(" is not a use at all
+		//     #define F(x) ((x)<FF>*2.0)   then   float F = t.x;
+		//   and an argument the callee never substitutes is never expanded
+		//     #define DROP(x) 1.0          then   DROP(BAD)
+		// Both accept on the reference and on the parent.
+		if (macro.bodyFailedToTokenise)
+		{
+			throw std::runtime_error(macro.bodyTokeniseError);
+		}
 		const std::vector<Token>& rl = macro.replacementList;
 		HsTokens out;
 		for (size_t ri = 0; ri < rl.size(); ++ri)

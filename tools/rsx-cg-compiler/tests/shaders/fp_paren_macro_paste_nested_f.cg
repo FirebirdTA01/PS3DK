@@ -1,0 +1,7 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// Nested: the paste is itself an argument to another macro.
+#define BAD (1.0)
+#define BADx 2.0
+#define CAT(a,b) a##b
+#define ID(x) (x)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * ID(CAT(BAD, x)); }

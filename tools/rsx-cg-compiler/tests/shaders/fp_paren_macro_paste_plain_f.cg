@@ -1,0 +1,5 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// An ordinary paste with nothing untokenisable in sight: the control that says
+// the ## path still works at all.
+#define CAT(a,b) a##b
+float4 main(float4 t : TEXCOORD0) : COLOR { float ab = 2.0; return t * CAT(a, b); }

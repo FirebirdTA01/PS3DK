@@ -1,0 +1,8 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// THE CELL THAT SAYS WHERE THE RULE LIVES.  The same character in the body of
+// a macro that is NEVER EXPANDED: the reference ACCEPTS, because that body is
+// never tokenised.  We tokenise a replacement list eagerly, so a first fix
+// that refused at the definition refused this too - it is carried on the macro
+// and raised from the expansion instead (codex asked for this qualification).
+#define UNUSED_MACRO (1.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * 2.0; }

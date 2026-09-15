@@ -1,0 +1,4 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// Vertical tab, the other character in the class.
+#define K(1.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

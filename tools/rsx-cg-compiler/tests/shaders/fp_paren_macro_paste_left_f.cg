@@ -1,0 +1,10 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// A ## OPERAND TAKES THE RAW ARGUMENT, so BAD is pasted, never expanded, and
+// its form-feed body never reaches the token stream: the reference ACCEPTS.
+// Deciding per PARAMETER rather than per OCCURRENCE refused this - the name
+// "a" appears in the body, so the argument was pre-expanded (found by codex,
+// reproduced on two independent builds; reference verdicts by Fable, m19).
+#define BAD (1.0)
+#define BADx 2.0
+#define CAT(a,b) a##b
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * CAT(BAD, x); }

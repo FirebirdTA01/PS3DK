@@ -1,0 +1,9 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// AN OBJECT-LIKE MACRO WHOSE BODY STARTS WITH '(' .  A macro is
+// function-like ONLY when '(' immediately follows the name; with a space or a
+// tab between them the parenthesis is the first character of the BODY.  We
+// read this as a function-like macro with one parameter named "3.14159f", so
+// a bare K never expanded - eighteen SDK shaders died on "undeclared
+// identifier 'fPI'" for exactly this reason.
+#define K (3.14159f)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }
