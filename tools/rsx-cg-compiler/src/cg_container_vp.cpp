@@ -912,6 +912,28 @@ VpContainerResult emitVertexContainerImpl(
     }
     }
 
+    // Declared array outputs keep every element record, including unwritten
+    // ones. Their raw semantic spelling is shared; only the resource advances.
+    // The IR has no StoreOutput for an unwritten element and must not acquire
+    // one merely to make its reflection record visible.
+    for (const auto& output : entry->returnOutputs)
+    {
+        if (output.name.find('[') == std::string::npos) continue;
+        const std::string name = entry->name + "." + output.name;
+        if (std::any_of(params.begin(), params.end(),
+                [&](const ParamDesc& p) { return p.name == name; })) continue;
+        ParamDesc d;
+        d.name = name;
+        d.semantic = output.rawSemanticName.empty() ? output.semanticName : output.rawSemanticName;
+        d.type = cgTypeForIRType(output.type);
+        d.var = kCgVarying;
+        d.direction = kCgOut;
+        d.paramno = kInvalidIndex;
+        d.res = vpOutputResource(toUpper(output.semanticName), output.semanticIndex, output.rawSemanticName);
+        d.isReferenced = 0;
+        params.push_back(d);
+    }
+
     // Direct scalar returns have no fieldName. Keep their special-output
     // reflection alongside explicit out parameters, without duplicating them.
     for (const auto& block : entry->blocks)
