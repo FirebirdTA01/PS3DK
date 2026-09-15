@@ -42,7 +42,9 @@ rc=0
 refusal_status "$rc" "fp_local_array_dynamic_index_f"
 [[ "$rc" -eq 1 ]] || fail "dynamic local array index compiled; sce_fp_rsx reference rejects this profile-restricted shape"
 
-grep -q "local array dynamic indexing is not supported" "$work/general.log" || {
+# Tracked array reads and writes now share the constant-selector proof.
+# This fixture remains a reference-refused dynamic read on the FP profile.
+grep -q "member-array store requires a constant index (t_4c95ef8b)" "$work/general.log" || {
     tail -n 20 "$work/general.log" >&2
     fail "dynamic local array index refused with an unexpected diagnostic"
 }
