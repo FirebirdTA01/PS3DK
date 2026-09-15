@@ -2111,5 +2111,149 @@
       0
     ],
     "records": {}
+  },
+  {
+    "name": "review-scaled-sce_vp_rsx-COLOR0-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COLOR0;};float4 main(I i):POSITION{return i.a[0]+2*i.a[1];}",
+    "inputs": {
+      "IN3": [
+        0.125,
+        0.25,
+        0.375,
+        0.5
+      ],
+      "IN4": [
+        0.625,
+        0.75,
+        0.875,
+        1
+      ]
+    },
+    "attributes": [
+      "IN3",
+      "IN4"
+    ],
+    "expected": [
+      1.375,
+      1.75,
+      2.125,
+      2.5
+    ],
+    "wrong": [
+      0.375,
+      0.75,
+      1.125,
+      1.5
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-scaled-sce_vp_rsx-TEXCOORD0-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):POSITION{return i.a[0]+2*i.a[1];}",
+    "inputs": {
+      "IN8": [
+        0.125,
+        0.25,
+        0.375,
+        0.5
+      ],
+      "IN9": [
+        0.625,
+        0.75,
+        0.875,
+        1
+      ]
+    },
+    "attributes": [
+      "IN8",
+      "IN9"
+    ],
+    "expected": [
+      1.375,
+      1.75,
+      2.125,
+      2.5
+    ],
+    "wrong": [
+      0.375,
+      0.75,
+      1.125,
+      1.5
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-scaled-sce_fp_rsx-COLOR0-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COLOR0;};float4 main(I i):COLOR{return i.a[0]+2*i.a[1];}",
+    "inputs": {
+      "COL0": [
+        0.125,
+        0.25,
+        0.375,
+        0.5
+      ],
+      "COL1": [
+        0.625,
+        0.75,
+        0.875,
+        1
+      ]
+    },
+    "attributes": [
+      "COL0",
+      "COL1"
+    ],
+    "expected": [
+      1.375,
+      1.75,
+      2.125,
+      2.5
+    ],
+    "wrong": [
+      0.375,
+      0.75,
+      1.125,
+      1.5
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-scaled-sce_fp_rsx-TEXCOORD0-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return i.a[0]+2*i.a[1];}",
+    "inputs": {
+      "TEX0": [
+        0.125,
+        0.25,
+        0.375,
+        0.5
+      ],
+      "TEX1": [
+        0.625,
+        0.75,
+        0.875,
+        1
+      ]
+    },
+    "attributes": [
+      "TEX0",
+      "TEX1"
+    ],
+    "expected": [
+      1.375,
+      1.75,
+      2.125,
+      2.5
+    ],
+    "wrong": [
+      0.375,
+      0.75,
+      1.125,
+      1.5
+    ],
+    "records": {}
   }
 ]
