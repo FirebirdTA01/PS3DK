@@ -80,10 +80,10 @@ def main():
                     records[key]={'type':v[0],'res':v[1],'referenced':v[10]}
                 for key,expected in row['records'].items():
                     assert records.get(key)==expected,f'{name}: record {key}: {records.get(key)} != {expected}'
-        # Entry array provenance regression. This first layer preserves the
-        # parent's instruction spelling; it does not yet prove that array
-        # elements read distinct attributes. Element seeding supplies that
-        # separate value/binding fix in the following commit.
+        # Helper aliases must retain the entry input's element state. These
+        # paired instruction spellings are supplemented below by independent
+        # attribute-set, reflection, and decoded-value assertions: agreement
+        # between two spellings alone hid the parent's lane/element bug.
         aliases=json.loads(Path(__file__).with_name('entry_array_alias_cases.json').read_text())
         assert len(aliases)==12,'entry alias row lost'
         for row in aliases:
@@ -93,6 +93,8 @@ def main():
                 h=struct.unpack_from('>8I',blob)
                 return blob[h[7]:h[7]+h[6]]
             assert ucode(a)==ucode(b),row['name']+': instruction twin differs'
+        from entry_array_value_check import check
+        element_counts=check(compile_one)
         # Prove absence, including an empty leaked file, and prove that an
         # exit-zero compiler cannot borrow a prior row's artifact.
         stub=Path(tmp)/'stub.py'
@@ -108,7 +110,7 @@ def main():
             else:
                 raise AssertionError(name+': broken compiler passed guard')
     assert (twins,refusals)==(42,6),(twins,refusals)
-    print(f'PASS ({twins} strict twins, {refusals} named array-store refusals/gaps, 6 output record/value rows, 24 copy/alias/semantic controls, 12 entry-array instruction twins)')
+    print(f'PASS ({twins} strict twins, {refusals} named array-store refusals/gaps, 6 output record/value rows, 24 copy/alias/semantic controls, 12 entry-array instruction twins, {element_counts} entry element values/refusals)')
 
 if __name__=='__main__':
     try:main()
