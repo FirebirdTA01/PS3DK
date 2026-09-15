@@ -3170,6 +3170,66 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 
     IRTypeInfo resultType = getExprType(expr);
 
+    if (expr->functionName == "any" && expr->resolvedFunction == nullptr &&
+        argValues.size() == 1)
+    {
+        // Arguments were evaluated once above. Reduce that value, never the
+        // argument AST: any(v++) must update v once regardless of its width.
+        const IRTypeInfo argumentType = getExprType(expr->arguments[0].get());
+        if (argumentType.isArray() ||
+            (!argumentType.isScalar() && !argumentType.isVector()))
+            return emitCall(expr->functionName, resultType, argValues);
+        IRTypeInfo laneType = argumentType;
+        if (argumentType.isVector())
+        {
+            laneType.baseType = argumentType.elementType;
+            laneType.vectorSize = 1;
+        }
+        std::vector<float> constantLanes;
+        const bool constantVector = argumentType.isVector() &&
+            extractFloatComponents(*currentFunction_, argValues[0], constantLanes) &&
+            constantLanes.size() == static_cast<size_t>(argumentType.vectorSize);
+        const auto* constant = dynamic_cast<const IRConstant*>(
+            currentFunction_->getValue(argValues[0]));
+        IRValueID reduced = InvalidIRValue;
+        for (int lane = 0; lane < argumentType.vectorSize; ++lane)
+        {
+            IRValueID value = argValues[0];
+            if (constantVector && constant &&
+                constant->intValues.size() == constantLanes.size())
+            {
+                const int64_t raw = constant->intValues[lane];
+                switch (laneType.baseType)
+                {
+                case IRType::Int32: value = createConstant(static_cast<int32_t>(raw)); break;
+                case IRType::UInt32: value = createConstant(static_cast<uint32_t>(raw)); break;
+                case IRType::Bool: value = createConstant(raw != 0); break;
+                default: value = createConstant(laneType, constantLanes[lane]); break;
+                }
+            }
+            else if (constantVector &&
+                (laneType.baseType == IRType::Float32 || laneType.baseType == IRType::Float16))
+                value = createConstant(laneType, constantLanes[lane]);
+            else if (argumentType.isVector())
+                value = emitInstruction(IROp::VecExtract, laneType,
+                    {value, createConstant(static_cast<int32_t>(lane))}, expr->loc);
+            // Bool lanes are already normalized. Numeric lanes are true for
+            // either sign of nonzero, not just for positive values.
+            if (laneType.baseType != IRType::Bool)
+            {
+                const IRValueID zero = laneType.baseType == IRType::Int32
+                    ? createConstant(int32_t{0})
+                    : laneType.baseType == IRType::UInt32
+                        ? createConstant(uint32_t{0})
+                        : createConstant(laneType, 0.0f);
+                value = emitBinaryOp(IROp::CmpNe, IRTypeInfo::Bool(), value, zero, expr->loc);
+            }
+            reduced = reduced == InvalidIRValue ? value
+                : emitBinaryOp(IROp::LogicalOr, IRTypeInfo::Bool(), reduced, value, expr->loc);
+        }
+        return reduced;
+    }
+
     if (auto scale = angleConversionScale(expr->functionName);
         scale && argValues.size() == 1 && expr->resolvedFunction == nullptr)
     {

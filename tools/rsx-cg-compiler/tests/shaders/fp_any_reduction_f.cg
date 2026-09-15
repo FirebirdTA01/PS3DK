@@ -1,0 +1,5 @@
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    float4 v = float4(0.0, 0.0, 0.0, t.x < 0.5 ? 0.0 : -1.0);
+    return float4(any(v), any(v.xy), any(v.zw), 1.0);
+}
