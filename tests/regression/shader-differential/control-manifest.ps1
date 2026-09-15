@@ -86,3 +86,32 @@ function Get-ControlManifestProblems([string[]]$Manifest) {
     }
     return ,$problems.ToArray()
 }
+
+# Optional for legacy manifests; if any extended binder control is supplied,
+# the complete named set must precede every ordinary row. The guest also
+# checks actual execution before granting a kind its verdict gate.
+function Get-BinderManifestProblems([string[]]$Manifest) {
+    $expected = @{}
+    foreach ($spec in @(@('rect',2),@('cube',6),@('volume',8),@('matrix',4))) {
+        for ($i=0; $i -lt $spec[1]; $i++) { $expected["binder_$($spec[0])_$i"] = "control-binder-$($spec[0])" }
+    }
+    $problems = New-Object 'System.Collections.Generic.List[string]'
+    $seen = @{}; $firstOpen = -1; $any = $false
+    for ($i=0; $i -lt $Manifest.Count; $i++) {
+        $fields = $Manifest[$i].Split('|')
+        if ($fields.Count -lt 3 -or $fields[0] -ne 'B') { continue }
+        $role,$name = $fields[1],$fields[2]
+        if (-not $role.StartsWith('control-') -and $firstOpen -lt 0) { $firstOpen = $i }
+        if (-not $role.StartsWith('control-binder-')) { continue }
+        $any = $true
+        if (-not $expected.ContainsKey($name) -or $expected[$name] -ne $role) { $problems.Add("unexpected binder control $role/$name"); continue }
+        if ($seen.ContainsKey($name)) { $problems.Add("duplicate binder control $name") } else { $seen[$name] = $i }
+    }
+    if ($any) {
+        foreach ($name in $expected.Keys) {
+            if (-not $seen.ContainsKey($name)) { $problems.Add("missing binder control $name") }
+            elseif ($firstOpen -ge 0 -and $seen[$name] -gt $firstOpen) { $problems.Add("binder control $name follows a corpus row") }
+        }
+    }
+    return ,$problems.ToArray()
+}

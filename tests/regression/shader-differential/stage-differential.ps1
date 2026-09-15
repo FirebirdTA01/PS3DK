@@ -30,7 +30,7 @@ param(
     [switch]$LegacyLowering,
     # -Corpus: also stage the ours-vs-ours fast/nofast corpus sweep
     # (increment 2).  The corpus compile loop runs in WSL via
-    # stage-corpus.sh, because dev builds of the compiler live there —
+    # stage-corpus.sh, because dev builds of the compiler live there â€”
     # pass the compiler's WSL path in -WslCompiler.  Refused shaders
     # land in the ours-refused.txt sidecar; only byte-differing pairs
     # are staged (byte-identical implies pixel-identical).
@@ -203,7 +203,7 @@ function To-WslPath([string]$p) {
 # Compiler resolution, explicit before discovered.  Dev builds of the
 # compiler live in WSL on this host, so an EXPLICIT -WslCompiler
 # routes every compile (controls included) through `wsl --` and beats
-# the discovery fallbacks — the %PS3DK% release extract in particular
+# the discovery fallbacks â€” the %PS3DK% release extract in particular
 # must never silently outrank a dev compiler the caller named (it did,
 # in this script's first -Corpus run: the release refused the MAD
 # probe and the run judged the wrong compiler).  Judging the compiler
@@ -1612,8 +1612,20 @@ if ($metricsGate.ShouldFail) {
 # the manifest is refused if the set is incomplete, duplicated or out of
 # order - the guest's gates could not open and every MRT/depth row would be
 # withheld.  Refusing here says so before a boot is wasted.
+# These controls must run before a corpus row can use a new binder kind.
+. (Join-Path $here "binder-controls.ps1")
+$binderScratch = Join-Path $autoScratch "binder-controls"
+$binderRows = New-BinderControls $binderScratch $controls {
+    param($src, $dst)
+    if ($ReferenceCompiler) {
+        if (-not (Compile-Reference $src $dst)) { throw "binder control failed to compile: $src" }
+    } else {
+        Compile-Shader $src $dst @("--general-lowering") -Absolute
+    }
+}
+$manifest = Add-ProvingControls $manifest $binderRows
 if ($provingRows) { $manifest = Add-ProvingControls $manifest ($provingRows + $h0Rows) }
-$controlProblems = Get-ControlManifestProblems $manifest
+$controlProblems = (Get-ControlManifestProblems $manifest) + (Get-BinderManifestProblems $manifest)
 if ($controlProblems.Count -gt 0) {
     throw "manifest: proving controls invalid - $($controlProblems -join '; ')"
 }
