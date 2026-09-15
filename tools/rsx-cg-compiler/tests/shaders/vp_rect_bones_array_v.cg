@@ -1,0 +1,1 @@
+uniform float3x4 bones[3]; void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { o = p; c = float4(mul(bones[1], p), 1); }

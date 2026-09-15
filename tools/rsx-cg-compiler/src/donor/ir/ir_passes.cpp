@@ -688,6 +688,15 @@ size_t CommonSubexprElimination::InstrHash::operator()(const IRInstruction* inst
         hash ^= std::hash<IRValueID>()(op) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     }
     hash ^= std::hash<int>()(inst->swizzleMask);
+    // The result SHAPE is part of the value: a vec3 shuffle "yzw" and a vec4
+    // shuffle "yzwx" share operands and mask (the encoder pads lane 3 with x)
+    // and are different values (t_bc130064: merging them handed a float4 to a
+    // 3-wide matrix row and refused; on plain vectors it refused
+    // float4(t.yzw, 1) + t.yzwx, which the reference accepts).
+    hash ^= std::hash<int>()(static_cast<int>(inst->resultType.baseType) * 131 +
+                             inst->resultType.vectorSize * 17 +
+                             inst->resultType.matrixRows * 5 + inst->resultType.matrixCols) +
+            0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<int>()(inst->componentIndex) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<IRValueID>()(inst->uniformSource) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
 
@@ -711,6 +720,12 @@ bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
     if (a->op != b->op) return false;
     if (a->operands.size() != b->operands.size()) return false;
     if (a->swizzleMask != b->swizzleMask) return false;
+    if (a->resultType.baseType != b->resultType.baseType ||
+        a->resultType.elementType != b->resultType.elementType ||
+        a->resultType.vectorSize != b->resultType.vectorSize ||
+        a->resultType.matrixRows != b->resultType.matrixRows ||
+        a->resultType.matrixCols != b->resultType.matrixCols ||
+        a->resultType.arraySize != b->resultType.arraySize) return false;
     if (a->componentIndex != b->componentIndex) return false;
     // A helper may read the global hidden by an entry parameter of the
     // same name. Equal element indices do not make those loads equal.

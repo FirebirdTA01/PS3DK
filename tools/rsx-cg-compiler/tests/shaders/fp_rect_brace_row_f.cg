@@ -1,0 +1,1 @@
+void main(float4 t : TEXCOORD0, out float4 c : COLOR) { float3 a = t.xyz; float3 b = t.yzw; float4x3 P = { a, b, a, b }; c = float4(P[1], 1); }

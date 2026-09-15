@@ -144,9 +144,12 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     if (t.baseType == IRType::SamplerRect) return kCgSamplerRect;
     if (t.baseType == IRType::SamplerCube) return kCgSamplerCube;
     if (t.isMatrix()) {
-        if (t.matrixRows == 2 && t.matrixCols == 2) return kCgFloat2x2;
-        if (t.matrixRows == 3 && t.matrixCols == 3) return kCgFloat3x3;
-        if (t.matrixRows == 4 && t.matrixCols == 4) return kCgFloat4x4;
+        // CGtype packs every RxC shape as kCgFloat1x1 + (rows-1)*4 + (cols-1)
+        // (2x2 = 1054, 3x3 = 1059, 3x4 = 1060, 4x3 = 1063, 4x4 = 1064); the
+        // reference records half matrices with the float codes in FP
+        // (measured 2026-09-15, t_bc130064: half3x4 B -> 1060, rows 1048).
+        if (t.matrixRows >= 1 && t.matrixRows <= 4 && t.matrixCols >= 1 && t.matrixCols <= 4)
+            return kCgFloat4x4 - 15u + (t.matrixRows - 1) * 4u + (t.matrixCols - 1);
     }
     switch (t.baseType)
     {

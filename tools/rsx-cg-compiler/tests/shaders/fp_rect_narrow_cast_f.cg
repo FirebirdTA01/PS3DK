@@ -1,0 +1,1 @@
+void main(float4 t : TEXCOORD0, out float4 c : COLOR) { float4x4 W = float4x4(t, t.yzwx, t.zwxy, t.wxyz); float3x4 M = (float3x4)W; c = float4(mul(M, t), 1); }

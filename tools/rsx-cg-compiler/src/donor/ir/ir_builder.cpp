@@ -5434,8 +5434,14 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
     IRTypeInfo targetType = getIRType(expr->targetType.get());
     IRTypeInfo sourceType = getExprType(expr->operand.get());
 
+    // Same base and element type is not the same SHAPE for matrices: every
+    // non-square matrix shares the Mat4x4 base tag, so (float3x4)float4x4
+    // must still narrow (t_bc130064).
     if (sourceType.baseType == targetType.baseType &&
-        sourceType.elementType == targetType.elementType)
+        sourceType.elementType == targetType.elementType &&
+        sourceType.matrixRows == targetType.matrixRows &&
+        sourceType.matrixCols == targetType.matrixCols &&
+        sourceType.vectorSize == targetType.vectorSize)
     {
         return operandValue;
     }

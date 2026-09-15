@@ -1,0 +1,1 @@
+uniform float3x4 M; void main(float4 t : TEXCOORD0, out float4 c : COLOR) { c = M[1] + float4(M[2].z, M[0][1], 0, 0); }
