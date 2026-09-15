@@ -396,9 +396,9 @@ PY
 
 python3 "$root/tests/shader-compiler/vp_scalar_literal_check.py" "$compiler"
 
-# Verify the 7 SDK shaders if SDK root is available
-sdk_root="${PS3_SDK_ROOT:-/c/SDKs/Sony/SCE/PS3/475}"
-if [[ -d "$sdk_root" ]]; then
+# Verify the 7 SDK shaders only when the caller supplies its private SDK root.
+sdk_root="${PS3_SDK_ROOT:-}"
+if [[ -n "$sdk_root" && -d "$sdk_root" ]]; then
     sdk_rows=(
         "sample_data/graphics/shaders/Tutorial/vs_procAnim.cg"
         "samples/tutorial/ParticleSimulator/05_spu_particles_with_shader/point_sprite_shader_vertex.cg"
@@ -449,7 +449,7 @@ VAL_PY
     printf 'All 7 SDK rows compiled and validated successfully (%d rows verified)
 ' "$count"
 else
-    printf 'SKIPPED SDK corpus: %s not found\n' "$sdk_root"
+    printf 'SKIPPED SDK corpus: PS3_SDK_ROOT is unset or does not name a directory\n'
 fi
 
 printf 'PASS: vp-scalar-intrinsic-test
