@@ -65,7 +65,7 @@ def main():
             assert actual!={'o0':[0]*4},name+': wrong-expectation control failed'
         assert containers['loop']==containers['explicit'],'output loop differs from explicit stores'
         review_rows=json.loads(Path(__file__).with_name('member_array_review_cases.json').read_text(encoding='utf-8'))
-        assert len(review_rows)==18,'review row lost'
+        assert len(review_rows)==24,'review row lost'
         for row in review_rows:
             name='review-'+row['name']
             data=compile_one(name,row['source'],row['profile'],row.get('refusal'))
@@ -95,7 +95,7 @@ def main():
             else:
                 raise AssertionError(name+': broken compiler passed guard')
     assert (twins,refusals)==(42,6),(twins,refusals)
-    print(f'PASS ({twins} strict twins, {refusals} named array-store refusals/gaps, 6 output record/value rows, 18 copy/alias/semantic controls)')
+    print(f'PASS ({twins} strict twins, {refusals} named array-store refusals/gaps, 6 output record/value rows, 24 copy/alias/semantic controls)')
 
 if __name__=='__main__':
     try:main()
