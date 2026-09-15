@@ -1,0 +1,2115 @@
+[
+  {
+    "name": "sce_fp_rsx-TEXCOORD0-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "TEX0": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "TEX1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX0",
+      "TEX1"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3220,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1048,
+        3221,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD0-float4-both-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "TEX0": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "TEX1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX0",
+      "TEX1"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3220,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1048,
+        3221,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD8-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD8;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "input12": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "input13": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "input12",
+      "input13"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3228,
+        "TEXCOORD8"
+      ],
+      "i.a[1]": [
+        1048,
+        3229,
+        "TEXCOORD8"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD8-float4-both-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD8;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "input12": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "input13": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "input12",
+      "input13"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3228,
+        "TEXCOORD8"
+      ],
+      "i.a[1]": [
+        1048,
+        3229,
+        "TEXCOORD8"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD9-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD9;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD10-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD10;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_fp_rsx-COLOR0-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COLOR0;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "COL0": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "COL1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "COL0",
+      "COL1"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2757,
+        "COLOR0"
+      ],
+      "i.a[1]": [
+        1048,
+        2758,
+        "COLOR0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-COLOR0-float4-both-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COLOR0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "COL0": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "COL1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "COL0",
+      "COL1"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2757,
+        "COLOR0"
+      ],
+      "i.a[1]": [
+        1048,
+        2758,
+        "COLOR0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-COLOR1-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COLOR1;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_fp_rsx-FOG-float-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float a[2]:FOG;};float4 main(I i):COLOR{return float4(i.a[0]+i.a[1]);}",
+    "inputs": {
+      "FOGC": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "FOGC"
+    ],
+    "expected": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1045,
+        0,
+        "FOG"
+      ]
+    },
+    "reference_records": {
+      "i.a[0]": [
+        1045,
+        3156,
+        "FOG"
+      ]
+    },
+    "gap": "t_fb21bd39: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
+  },
+  {
+    "name": "sce_fp_rsx-FOG-float-both-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float a[2]:FOG;};float4 f(I s){return float4(s.a[0]+s.a[1]);}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "FOGC": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "FOGC"
+    ],
+    "expected": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1045,
+        0,
+        "FOG"
+      ]
+    },
+    "reference_records": {
+      "i.a[0]": [
+        1045,
+        3156,
+        "FOG"
+      ]
+    },
+    "gap": "t_fb21bd39: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD0-float2-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float2 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return float4(i.a[0]+i.a[1],0,1);}",
+    "inputs": {
+      "TEX0": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "TEX1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX0",
+      "TEX1"
+    ],
+    "expected": [
+      6,
+      8,
+      0,
+      1
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1046,
+        3220,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1046,
+        3221,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD0-float2-both-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float2 a[2]:TEXCOORD0;};float4 f(I s){return float4(s.a[0]+s.a[1],0,1);}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "TEX0": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "TEX1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX0",
+      "TEX1"
+    ],
+    "expected": [
+      6,
+      8,
+      0,
+      1
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1046,
+        3220,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1046,
+        3221,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD0-float4-one",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return i.a[1];}",
+    "inputs": {
+      "TEX1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX1"
+    ],
+    "expected": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[1]": [
+        1048,
+        3221,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD0-float4-one-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "TEX1": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX1"
+    ],
+    "expected": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[1]": [
+        1048,
+        3221,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD6-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD6;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "TEX6": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "TEX7": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX6",
+      "TEX7"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3226,
+        "TEXCOORD6"
+      ],
+      "i.a[1]": [
+        1048,
+        3227,
+        "TEXCOORD6"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD6-float4-both-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD6;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "TEX6": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "TEX7": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX6",
+      "TEX7"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3226,
+        "TEXCOORD6"
+      ],
+      "i.a[1]": [
+        1048,
+        3227,
+        "TEXCOORD6"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD7-float4-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD7;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "TEX7": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "input12": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX7",
+      "input12"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3227,
+        "TEXCOORD7"
+      ],
+      "i.a[1]": [
+        1048,
+        3228,
+        "TEXCOORD7"
+      ]
+    }
+  },
+  {
+    "name": "sce_fp_rsx-TEXCOORD7-float4-both-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD7;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "inputs": {
+      "TEX7": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "input12": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "TEX7",
+      "input12"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        3227,
+        "TEXCOORD7"
+      ],
+      "i.a[1]": [
+        1048,
+        3228,
+        "TEXCOORD7"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD0-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN8": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN9": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN8",
+      "IN9"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2121,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1048,
+        2122,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD0-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN8": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN9": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN8",
+      "IN9"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2121,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1048,
+        2122,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD8-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD8;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD9-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD9;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD10-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD10;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_vp_rsx-COLOR0-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COLOR0;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN3": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN4": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN3",
+      "IN4"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2116,
+        "COLOR0"
+      ],
+      "i.a[1]": [
+        1048,
+        2117,
+        "COLOR0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-COLOR0-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COLOR0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN3": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN4": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN3",
+      "IN4"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2116,
+        "COLOR0"
+      ],
+      "i.a[1]": [
+        1048,
+        2117,
+        "COLOR0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-COLOR1-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COLOR1;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_vp_rsx-FOG-float-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float a[2]:FOG;};float4 main(I i):POSITION{return float4(i.a[0]+i.a[1]);}",
+    "refusal": "input array semantic 'FOG' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT: automatic allocation is outside this bounded slice."
+  },
+  {
+    "name": "sce_vp_rsx-ATTR14-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:ATTR14;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN14": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN15": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN14",
+      "IN15"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2127,
+        "ATTR14"
+      ],
+      "i.a[1]": [
+        1048,
+        2128,
+        "ATTR14"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-ATTR14-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:ATTR14;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN14": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN15": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN14",
+      "IN15"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2127,
+        "ATTR14"
+      ],
+      "i.a[1]": [
+        1048,
+        2128,
+        "ATTR14"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-ATTR15-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:ATTR15;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD0-float2-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float2 a[2]:TEXCOORD0;};float4 main(I i):POSITION{return float4(i.a[0]+i.a[1],0,1);}",
+    "inputs": {
+      "IN8": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN9": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN8",
+      "IN9"
+    ],
+    "expected": [
+      6,
+      8,
+      0,
+      1
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1046,
+        2121,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1046,
+        2122,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD0-float2-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float2 a[2]:TEXCOORD0;};float4 f(I s){return float4(s.a[0]+s.a[1],0,1);}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN8": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN9": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN8",
+      "IN9"
+    ],
+    "expected": [
+      6,
+      8,
+      0,
+      1
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1046,
+        2121,
+        "TEXCOORD0"
+      ],
+      "i.a[1]": [
+        1046,
+        2122,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD0-float4-one",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):POSITION{return i.a[1];}",
+    "inputs": {
+      "IN9": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN9"
+    ],
+    "expected": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[1]": [
+        1048,
+        2122,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD0-float4-one-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN9": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN9"
+    ],
+    "expected": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[1]": [
+        1048,
+        2122,
+        "TEXCOORD0"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD6-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD6;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN14": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN15": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN14",
+      "IN15"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2127,
+        "TEXCOORD6"
+      ],
+      "i.a[1]": [
+        1048,
+        2128,
+        "TEXCOORD6"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD6-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD6;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN14": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "IN15": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "attributes": [
+      "IN14",
+      "IN15"
+    ],
+    "expected": [
+      6,
+      8,
+      10,
+      12
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2127,
+        "TEXCOORD6"
+      ],
+      "i.a[1]": [
+        1048,
+        2128,
+        "TEXCOORD6"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TEXCOORD7-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD7;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "refusal": "C5102: input array semantic index exceeds its resource range"
+  },
+  {
+    "name": "sce_vp_rsx-POSITION-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:POSITION;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN0": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN0"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2113,
+        "POSITION"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-POSITION-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:POSITION;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN0": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN0"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2113,
+        "POSITION"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-NORMAL-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:NORMAL;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN2": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN2"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2115,
+        "NORMAL"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-NORMAL-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:NORMAL;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN2": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN2"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2115,
+        "NORMAL"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TANGENT-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TANGENT;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN14": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN14"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2127,
+        "TANGENT"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-TANGENT-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TANGENT;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN14": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN14"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2127,
+        "TANGENT"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-BINORMAL-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:BINORMAL;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN15": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN15"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2128,
+        "BINORMAL"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-BINORMAL-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:BINORMAL;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN15": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN15"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2128,
+        "BINORMAL"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-DIFFUSE-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:DIFFUSE;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN3": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN3"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2116,
+        "DIFFUSE"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-DIFFUSE-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:DIFFUSE;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN3": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN3"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2116,
+        "DIFFUSE"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-SPECULAR-float4-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:SPECULAR;};float4 main(I i):POSITION{return i.a[0]+i.a[1];}",
+    "inputs": {
+      "IN4": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN4"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2117,
+        "SPECULAR"
+      ]
+    }
+  },
+  {
+    "name": "sce_vp_rsx-SPECULAR-float4-both-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:SPECULAR;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):POSITION{return f(i);}",
+    "inputs": {
+      "IN4": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN4"
+    ],
+    "expected": [
+      2,
+      4,
+      6,
+      8
+    ],
+    "wrong": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "records": {
+      "i.a[0]": [
+        1048,
+        2117,
+        "SPECULAR"
+      ]
+    }
+  },
+  {
+    "name": "review-sce_vp_rsx-TEX0-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):POSITION{return i.a[0]+2*i.a[1];}",
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_vp_rsx-TEX0-first",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):POSITION{return i.a[0];}",
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_vp_rsx-TEX0-unused",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):POSITION{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_vp_rsx-COL0-both",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COL0;};float4 main(I i):POSITION{return i.a[0]+2*i.a[1];}",
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_vp_rsx-COL0-first",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COL0;};float4 main(I i):POSITION{return i.a[0];}",
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_vp_rsx-COL0-unused",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COL0;};float4 main(I i):POSITION{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_vp_rsx-FOGC-unused",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:FOGC;};float4 main(I i):POSITION{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_vp_rsx-TEXCOORD7-first",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD7;};float4 main(I i):POSITION{return i.a[0];}",
+    "inputs": {
+      "IN15": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN15"
+    ],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_vp_rsx-TEXCOORD7-unused",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD7;};float4 main(I i):POSITION{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_vp_rsx-COLOR1-first",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COLOR1;};float4 main(I i):POSITION{return i.a[0];}",
+    "inputs": {
+      "IN4": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "IN4"
+    ],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_vp_rsx-COLOR1-unused",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:COLOR1;};float4 main(I i):POSITION{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_fp_rsx-TEX0-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):COLOR{return i.a[0]+2*i.a[1];}",
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_fp_rsx-TEX0-first",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):COLOR{return i.a[0];}",
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_fp_rsx-TEX0-unused",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):COLOR{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_fp_rsx-COL0-both",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COL0;};float4 main(I i):COLOR{return i.a[0]+2*i.a[1];}",
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_fp_rsx-COL0-first",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COL0;};float4 main(I i):COLOR{return i.a[0];}",
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+  },
+  {
+    "name": "review-sce_fp_rsx-COL0-unused",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COL0;};float4 main(I i):COLOR{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_fp_rsx-FOGC-unused",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:FOGC;};float4 main(I i):COLOR{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_fp_rsx-TEXCOORD9-first",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD9;};float4 main(I i):COLOR{return i.a[0];}",
+    "inputs": {
+      "input13": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "input13"
+    ],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_fp_rsx-TEXCOORD9-unused",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD9;};float4 main(I i):COLOR{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_fp_rsx-COLOR1-first",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COLOR1;};float4 main(I i):COLOR{return i.a[0];}",
+    "inputs": {
+      "COL1": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "attributes": [
+      "COL1"
+    ],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  },
+  {
+    "name": "review-sce_fp_rsx-COLOR1-unused",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:COLOR1;};float4 main(I i):COLOR{return float4(1,2,3,4);}",
+    "inputs": {},
+    "attributes": [],
+    "expected": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "wrong": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "records": {}
+  }
+]
