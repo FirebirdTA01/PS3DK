@@ -1,0 +1,1 @@
+static const float4x3 M = float4x3(float2(1,2), float2(3,4), 5, 6, float3(7,8,9), float3(10,11,12)); void main(float4 t : TEXCOORD0, out float4 c : COLOR) { c = float4(M[1], 1); }

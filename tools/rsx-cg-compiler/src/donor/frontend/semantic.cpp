@@ -1360,30 +1360,32 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
         }
     }
 
-    // A matrix built from VECTORS takes exactly one vector per ROW, each as
-    // wide as the matrix has COLUMNS.  The reference refuses
-    // float3x4(f3,f3,f3,f3) and float4x3(f4,f4,f4) with C5204 even though the
-    // component totals match; only the all-scalar spelling is free-form
-    // (measured 2026-09-15, t_bc130064).
+    // A matrix constructor packs its arguments ROW-MAJOR, and a VECTOR
+    // argument may not straddle a row boundary.  Measured on the reference
+    // (2026-09-15, t_bc130064, .local/probe-rect m1-m11): float2x2(float2, s, s),
+    // float2x2(s, s, float2), float3x3(float3, s, s, s, float3),
+    // float3x4(float2, float2, float4, float4) and float4x4(eight float2) all
+    // ACCEPT; float2x2(s, float2, s), float4x3(float2, float2, ...) and
+    // float3x4(float3, float4, ...) are C5204, as are float3x4(f3,f3,f3,f3) and
+    // float4x3(f4,f4,f4).  Mixed spellings are common in the SDK's static
+    // const globals, so the rule is the cursor, not "one vector per row".
     if (constructedType.isMatrix() && expr->arguments.size() > 1)
     {
-        bool anyVector = false;
-        bool shapeOk = expr->arguments.size() == (size_t)constructedType.matrixRows();
+        const int cols = constructedType.matrixCols();
+        int cursor = 0;
         for (const CgType& argType : argTypes)
         {
-            if (argType.isScalar()) { shapeOk = false; continue; }
-            anyVector = true;
-            if (!argType.isVector() || argType.vectorSize() != constructedType.matrixCols())
-                shapeOk = false;
-        }
-        if (anyVector && !shapeOk)
-        {
-            error(expr->loc, "error C5204: expression cannot be used to construct a " +
-                  std::to_string(constructedType.matrixRows()) + "x" +
-                  std::to_string(constructedType.matrixCols()) +
-                  " matrix: give one row vector of width " +
-                  std::to_string(constructedType.matrixCols()) + " per row, or all scalars");
-            return CgType::Error();
+            const int width = argType.isVector() ? argType.vectorSize() : 1;
+            if (width > 1 && (cursor % cols) + width > cols)
+            {
+                error(expr->loc, "error C5204: expression cannot be used to construct a " +
+                      std::to_string(constructedType.matrixRows()) + "x" +
+                      std::to_string(cols) + " matrix: a " + std::to_string(width) +
+                      "-wide argument at component " + std::to_string(cursor) +
+                      " would straddle a row of " + std::to_string(cols));
+                return CgType::Error();
+            }
+            cursor += width;
         }
     }
 
