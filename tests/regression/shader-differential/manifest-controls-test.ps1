@@ -88,6 +88,22 @@ Check "stager dot-sources control-manifest.ps1" ($stager -match 'control-manifes
 Check "stager calls Add-ProvingControls" ($stager -match 'Add-ProvingControls') ""
 Check "stager throws on Get-ControlManifestProblems" ($stager -match 'Get-ControlManifestProblems' -and $stager -match 'throw "manifest: proving controls') ""
 
+# Every individual missing/duplicate binder witness closes the host gate.
+$binder = @()
+foreach ($shape in @(@('rect',2),@('cube',6),@('volume',8),@('matrix',4))) {
+    foreach ($n in 0..($shape[1]-1)) { $binder += "B|control-binder-$($shape[0])|binder_$($shape[0])_$n|controls/a|controls/b|0" }
+}
+$complete = $head + $binder + $corpus
+Check "complete binder proving set" ((Get-BinderManifestProblems $complete).Count -eq 0) ""
+Check "legacy manifest has no new-type authorization" ((Get-BinderManifestProblems ($head+$corpus)).Count -eq 0) "guest kind gates stay closed"
+foreach ($row in $binder) {
+    $name = $row.Split('|')[2]
+    Check "missing $name" ((Get-BinderManifestProblems @($complete | Where-Object { $_ -ne $row })).Count -gt 0) ""
+    Check "duplicate $name" ((Get-BinderManifestProblems ($head+$binder+@($row)+$corpus)).Count -gt 0) ""
+    Check "late $name" ((Get-BinderManifestProblems ($head+@($binder | Where-Object { $_ -ne $row })+$corpus+@($row))).Count -gt 0) ""
+}
+Check "wrong binder role" ((Get-BinderManifestProblems ($head+@($binder -replace 'control-binder-cube','control-binder-volume')+$corpus)).Count -gt 0) ""
+
 if ($failures -gt 0) { Write-Host "manifest-controls-test: $failures failure(s)"; exit 1 }
 Write-Host "manifest-controls-test: PASS"
 exit 0
