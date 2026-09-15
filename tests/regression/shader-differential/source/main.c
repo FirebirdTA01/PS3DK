@@ -1963,6 +1963,14 @@ static int load_manifest(void)
 					}
 					if (!comma) break;
 					list = comma + 1;
+					if (!*list) {
+						/* A trailing comma is not "one member fewer": it
+						 * is a member the writer meant and did not type. */
+						printf("shader-differential: manifest line %d: judge= ends in a comma with no member after it\n",
+						       lineno);
+						fclose(f);
+						return 0;
+					}
 				}
 			} else {
 				printf("shader-differential: manifest line %d: unknown optional field '%s' (blind-ok, vp=<path> and judge=<list> are defined)\n",
@@ -2817,13 +2825,18 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 				if (a != DEPTH_CLEAR_MARK) { a >>= 8; if (a < zmin_a) zmin_a = a; if (a > zmax_a) zmax_a = a; }
 				if (b != DEPTH_CLEAR_MARK) { b >>= 8; if (b < zmin_b) zmin_b = b; if (b > zmax_b) zmax_b = b; }
 			}
+			/* A side that painted nothing has no range: print '-' rather
+			 * than the sentinel pair 16777215..0, which reads as a number. */
+			char zr_a[24], zr_b[24];
+			if (za) snprintf(zr_a, sizeof(zr_a), "%u..%u", zmin_a, zmax_a); else snprintf(zr_a, sizeof(zr_a), "-");
+			if (zb) snprintf(zr_b, sizeof(zr_b), "%u..%u", zmin_b, zmax_b); else snprintf(zr_b, sizeof(zr_b), "-");
 			len = strlen(r->diagnostic);
 			snprintf(r->diagnostic + len, sizeof(r->diagnostic) - len,
-			         " zpaint a=%d b=%d z0 a=%08x b=%08x zmid a=%08x b=%08x zrange a=%u..%u b=%u..%u zrow1 a=%u b=%u",
+			         " zpaint a=%d b=%d z0 a=%08x b=%08x zmid a=%08x b=%08x zrange a=%s b=%s zrow1 a=%u b=%u",
 			         za, zb, save_a[SD_OUT_Z][0], save_b[SD_OUT_Z][0],
 			         save_a[SD_OUT_Z][RT_W * (RT_H / 2) + RT_W / 2],
 			         save_b[SD_OUT_Z][RT_W * (RT_H / 2) + RT_W / 2],
-			         zmin_a, zmax_a, zmin_b, zmax_b,
+			         zr_a, zr_b,
 			         save_a[SD_OUT_Z][RT_W] >> 8, save_b[SD_OUT_Z][RT_W] >> 8);
 		}
 		if (p->judge_mask_extra || p->judge_depth_extra) {
