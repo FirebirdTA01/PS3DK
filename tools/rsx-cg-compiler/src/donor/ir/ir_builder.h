@@ -225,6 +225,8 @@ private:
                            const SourceLocation& loc = {});
     IRValueID emitUnaryOp(IROp op, const IRTypeInfo& resultType, IRValueID operand,
                           const SourceLocation& loc = {});
+    IRValueID emitNumericToBool(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                               IRValueID operand, const SourceLocation& loc);
 
     // Constant-folding helpers — return a fresh IRConstant id when
     // both operands are IRConstants, else InvalidIRValue.  Handle

@@ -104,21 +104,28 @@ def main(compiler):
         b=compile_one(compiler,root,'spatial-twin',(fixtures/'fp_any_reduction_twin_f.cg').read_text(),'sce_fp_rsx')
         require(a==b,'spatial-any: explicit reduction twin differs')
         twins+=1
-        # t_158a8918, inherited: bool(float) currently lowers as integer
-        # truncation. Parent explicit bool and our any(bool) have the same
-        # wrong bytes/pixels. Pin int(t.x), an independent spelling, so fixing
-        # the constructor deliberately breaks this named-gap row. Comparing
-        # any(b) only with b would silently follow the same bug or its fix.
+        # t_158a8918: the constructor now compares against zero. Retain the
+        # independent truncation spelling as a near-miss control.
         setup='bool b=bool(t.x);'
         gap=compile_one(compiler,root,'bool-cast-gap',program('sce_fp_rsx',setup,'any(b)'),'sce_fp_rsx')
         wrong=compile_one(compiler,root,'bool-cast-gap-int',program('sce_fp_rsx',setup,'int(t.x)'),'sce_fp_rsx')
         correct=compile_one(compiler,root,'bool-cast-gap-correct',program('sce_fp_rsx',setup,'t.x!=0'),'sce_fp_rsx')
-        require(gap==wrong and gap!=correct,'t_158a8918: inherited bool-cast gap changed; replace with the correct nonzero twin')
+        require(gap==correct and gap!=wrong,'t_158a8918: bool cast must match nonzero and differ from truncation')
         for profile in ('sce_fp_rsx','sce_vp_rsx'):
             for label,expr in [('no-args','any()'),('two-args','any(t.x,t.y)')]:
                 compile_one(compiler,root,profile+'-'+label,program(profile,'',expr),profile,refuse=True)
                 refusals+=1
-        for base in ('half','int','bool'):
+        for width in range(1,5):
+            typ='bool'+(str(width) if width>1 else '')
+            numeric='float'+(str(width) if width>1 else '')
+            arg='t.'+'xyzw'[:width]
+            a=compile_one(compiler,root,'vp-bool-conversion-'+typ,
+                          program('sce_vp_rsx',f'{typ} v={typ}({arg});','any(v)'), 'sce_vp_rsx')
+            b=compile_one(compiler,root,'vp-bool-conversion-'+typ+'-twin',
+                          program('sce_vp_rsx',f'{typ} v={arg}!={numeric}(0);','any(v)'), 'sce_vp_rsx')
+            require(a==b,'VP bool conversion: explicit comparison twin differs')
+            twins+=1
+        for base in ('half','int'):
             for width in range(1,5):
                 typ=base+(str(width) if width>1 else '')
                 setup=f'{typ} v={typ}(t.'+'xyzw'[:width]+');'
@@ -127,8 +134,8 @@ def main(compiler):
                             program('sce_vp_rsx',setup,'any(v)'), 'sce_vp_rsx',
                             refuse=True,diagnostic=diagnostic)
                 refusals+=1
-    require((twins,refusals)==(47,16),f'incomplete table: {twins}/{refusals}')
-    print(f'any-reduction: PASS ({twins} strict twins, 4 arity refusals, 12 inherited VP conversion gaps, 1 named bool-cast value gap t_158a8918)')
+    require((twins,refusals)==(51,12),f'incomplete table: {twins}/{refusals}')
+    print(f'any-reduction: PASS ({twins} strict twins, 4 arity refusals, 8 inherited VP conversion gaps, bool-cast nonzero control)')
 
 
 if __name__=='__main__':
