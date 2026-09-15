@@ -28,7 +28,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from fp_sources import ARITY, CONST, INPUT, TEMP, instructions, source, ucode_words  # noqa: E402
 from vp_words import decode  # noqa: E402
-from uniform_container_check import Container  # noqa: E402
+from uniform_container_check import Container, check_container  # noqa: E402
+from fp_sources import unswap  # noqa: E402
 
 failures = []
 
@@ -281,12 +282,44 @@ def check_vp(work):
     same([f32(v) if not math.isnan(v) else v for v in got], [2.25, -8.0, 0.0, 4.0], 'vp_pow_mul_v')
 
 
+def patch_uniform(blob, name, values):
+    """Apply the container's relocations for one uniform the way the runtime does."""
+    container = Container(blob)
+    patched = bytearray(blob)
+    for record in container.records:
+        if record['name'] != name:
+            continue
+        for off in record['offsets']:
+            for lane, value in enumerate(values):
+                word = struct.unpack('>I', struct.pack('>f', value))[0]
+                struct.pack_into('>I', patched, container.ucode + off + 4 * lane, unswap(word))
+    return bytes(patched)
+
+
+def check_relocations(work):
+    # STRUCTURAL: every fragment container this guard compiles must have every
+    # uniform relocation pointing at a decoded inline block (codex's finding:
+    # one DIVSQR reading |u.y| and u.y carried TWO blocks, offsets {32, 16},
+    # and the second was the next instruction).
+    for path in sorted(work.glob('*.fpo')):
+        issues = check_container(path.read_bytes())['issues']
+        require(not issues, f'{path.name}: container/ucode disagreement {issues}')
+    # UPLOAD WITNESS: patch u through its relocations and execute; with the
+    # old two-block emission the patch lands in an instruction and the
+    # decode fails or the value is wrong.
+    U = [0.0, 4.0, -9.0, 0.0]
+    got = execute_fp(patch_uniform((work / 'fp_pow_uniform_root_f.fpo').read_bytes(), 'u', U), T)
+    same(got, [f32(2.0), f32(3.0), 0.0, 1.0], 'fp_pow_uniform_root_f (u patched through its relocations)')
+    got = execute_fp(patch_uniform((work / 'fp_sqrt_uniform_f.fpo').read_bytes(), 'u', U), T)
+    same(got, [f32(2.0), 0.0, 0.0, 1.0], 'fp_sqrt_uniform_f (u patched through its relocations)')
+
+
 def main():
     work = Path(sys.argv[1])
     # Each section records its own failure instead of aborting the run, so a
     # parent binary that still emits the log chain reports the VALUE row it
     # fails (NaN on a negative base) rather than a decoder exception.
-    for section in (check_values, check_shapes, check_vp):
+    for section in (check_values, check_shapes, check_vp, check_relocations):
         try:
             section(work)
         except Exception as error:  # noqa: BLE001 - any decoder/executor failure is this section's finding
@@ -295,7 +328,7 @@ def main():
         for f in failures:
             print('FAIL:', f)
         sys.exit(1)
-    print('PASS: pow_constant_check: 5 FP value rows on a negative base (+ NaN control), 5 shape rows, 1 VP value row on lanes y and w')
+    print('PASS: pow_constant_check: 5 FP value rows on a negative base (+ NaN control), 5 shape rows, 1 VP value row on lanes y and w, relocation structure on every FP container + 2 upload witnesses')
 
 
 if __name__ == '__main__':

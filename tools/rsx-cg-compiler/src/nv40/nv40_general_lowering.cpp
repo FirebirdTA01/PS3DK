@@ -9993,18 +9993,49 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         }
         asm_.emit(insn, fpOpcode(vi.op));
         emittedInstruction = true;
+        // ONE inline constant block per instruction: every CONST-kind source
+        // of an NV40 fragment instruction reads the same 16 bytes that
+        // follow it.  Appending a block per source put a SECOND block after
+        // an instruction whose two slots read the same uniform with
+        // different modifiers (DIVSQR |u.y|, u.y - sqrt of a uniform, and
+        // pow(u, 0.5) after t_0f3b232e): the hardware decoded that block as
+        // the next instruction, and the container's relocation list sent
+        // the runtime's uniform patch into it (found by codex, offsets
+        // {32, 16} for one DIVSQR).  Two DIFFERENT constants in one
+        // instruction cannot be encoded at all, so that is a named refusal
+        // rather than a silently corrupt program.
+        bool blockAppended = false;
+        bool blockIsUniform = false;
+        int blockUniform = -1;
+        std::array<float, 4> blockLiteral = {0.0f, 0.0f, 0.0f, 0.0f};
         for (const VSrc& src : srcs) {
             if (src.kind != VSrcKind::Uniform &&
                 src.kind != VSrcKind::Literal)
                 continue;
+            if (blockAppended) {
+                const bool sameBlock = src.kind == VSrcKind::Uniform
+                    ? (blockIsUniform && blockUniform == src.index)
+                    : (!blockIsUniform && blockLiteral == src.literal);
+                if (sameBlock)
+                    continue;
+                out.diagnostics.push_back(
+                    "nv40-general-fp: an instruction reads two different inline "
+                    "constants and a fragment instruction carries one block; refusing");
+                out.ok = false;
+                return out;
+            }
             const uint32_t offset = asm_.currentByteSize();
             if (src.kind == VSrcKind::Uniform) {
                 recordFpUniformOffset(attrs, static_cast<unsigned>(src.index), offset);
                 static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
                 asm_.appendConstBlock(zeros);
+                blockIsUniform = true;
+                blockUniform = src.index;
             } else {
                 asm_.appendConstBlock(src.literal.data());
+                blockLiteral = src.literal;
             }
+            blockAppended = true;
         }
     }
     if (asm_.empty()) {

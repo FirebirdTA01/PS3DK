@@ -83,6 +83,9 @@ accept fp_pow_scaled_neg_two_f     "pow(z,-2) uses the x2 scale and a negated EX
 accept fp_pow_chain_five_f         "pow(z,5) keeps the LG2 / MUL / EX2 chain"
 accept fp_pow_variable_f           "pow(z,w) keeps the chain"
 accept fp_pow_uniform_exponent_f   "pow(t.z, u.w) and pow(t.xyz, u.w): a uniform exponent reads ITS lane, w, not x"
+accept fp_pow_uniform_root_f       "pow(u.y, 0.5) and pow(-u.z, 0.5): a uniform base in both DIVSQR slots, ONE inline block"
+accept fp_pow_uniform_root_twin_f  "sqrt(u.y) spelling of the first lane"
+accept fp_sqrt_uniform_f           "sqrt(u.y) alone: the pre-existing two-block emission"
 accept vp_pow_mul_v                "vertex profile: pow(u.x,2) pow(u.y,3) pow(u.w,1) - lanes y and w, not x (the old path read lane x for every base)"
 accept vp_pow_mul_twin_v           "u.x*u.x, u.y*(u.y*u.y), u.w"
 accept vp_pow_rcp_root_v           "vertex profile: pow(u.z,-1) is RCP, pow(u.z,0.5) is RSQ + RCP"
@@ -94,6 +97,7 @@ python3 "$script_dir/pow_constant_check.py" "$work" || fail "pow_constant_check 
 twin fp_pow_int_exponents_f fp_pow_int_exponents_twin_f "integer exponents are the multiply / reciprocal spellings"
 twin fp_pow_vec_two_f       fp_pow_vec_two_twin_f       "a vector squared is one MUL"
 twin fp_pow_roots_f         fp_pow_roots_twin_f         "half exponents are sqrt / rsqrt"
+twin fp_pow_uniform_root_f  fp_pow_uniform_root_twin_f  "pow(u, 0.5) is sqrt(u) on a uniform base too"
 twin vp_pow_mul_v           vp_pow_mul_twin_v           "vertex integer exponents"
 twin vp_pow_rcp_root_v      vp_pow_rcp_root_twin_v      "vertex reciprocal and root exponents"
 
