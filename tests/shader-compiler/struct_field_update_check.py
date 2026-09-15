@@ -61,13 +61,15 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-struct-field-update-') as temp:
     assert operand['type'] == 1 and operand['name'] == 'FACING' and operand['swizzle'] == 0, operand
     print('PASS: FACE broadcasts the facing input', flush=True)
     clamped = compile_shader(sys.argv[1], work, 'clamped_pow',
-        'float4 main(float4 p : TEXCOORD0) : COLOR { return pow(saturate(p.x*2-1),3); }')
+        'float4 main(float4 p : TEXCOORD0) : COLOR { return pow(saturate(p.x*2-1),2.5); }')
     unclamped = compile_shader(sys.argv[1], work, 'unclamped_pow',
-        'float4 main(float4 p : TEXCOORD0) : COLOR { return pow(p.x*2-1,3); }')
+        'float4 main(float4 p : TEXCOORD0) : COLOR { return pow(p.x*2-1,2.5); }')
     assert clamped != unclamped, 'pow discarded saturation of its base'
     decoded = [w for w, _ in instructions(clamped)]
     log_index = next(i for i,w in enumerate(decoded) if ((w[0] >> 24) & 63) == 29)
     assert any(w[0] & (1 << 31) for w in decoded[:log_index]), 'pow has no clamp before LG2'
+    # 2.5 keeps this witness on the LG2 route: integer and half exponents now take
+    # the reference's multiply / reciprocal / root table and never emit LG2.
     print('PASS: pow preserves saturation before taking the logarithm', flush=True)
     # Out-struct parameters currently emit no StoreOutput on either parent
     # or candidate. Keep that gap an exact refusal, never a stale first store.
