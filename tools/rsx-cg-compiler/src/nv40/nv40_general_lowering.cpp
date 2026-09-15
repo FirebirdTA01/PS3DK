@@ -3517,20 +3517,12 @@ private:
     void lowerUnary(const IRInstruction& inst, VOp op, bool sat)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment &&
-            (op == VOp::Rcp || op == VOp::Rsq ||
-             op == VOp::Sin || op == VOp::Cos)) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP scalar intrinsic lowering deferred");
-            return;
-        }
         const int mask = componentMask(inst.resultType);
         VSrc arg = resolve(inst.operands[0]);
         const bool clamp = sat && !isPreclampedFragmentColor(arg);
         // A SINGLE-LANE result keeps its exact previous shape, so nothing
         // that uses these ops on a float moves a byte.
-        if (profile_ == GeneralProfile::Fragment && isScalarUnitOp(op) &&
-            laneCount(mask) > 1) {
+        if (isScalarUnitOp(op) && laneCount(mask) > 1) {
             emitScalarUnitPerLane(op, define(inst.result), mask, arg, clamp);
             return;
         }
@@ -4141,14 +4133,33 @@ private:
     void lowerSqrt(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP scalar intrinsic lowering deferred");
-            return;
-        }
         const int mask = componentMask(inst.resultType);
         const int result = define(inst.result);
         const VSrc arg = resolve(inst.operands[0]);
+        if (profile_ != GeneralProfile::Fragment) {
+            const int rsqTemp = newVReg();
+            for (int lane = 0; lane < 4; ++lane) {
+                if (!(mask & (1 << lane))) continue;
+                VInstr rsq;
+                rsq.op = VOp::Rsq;
+                rsq.dst.index = rsqTemp;
+                rsq.dst.writemask = 1 << lane;
+                rsq.srcs[0] = arg;
+                const uint8_t comp = rsq.srcs[0].swizzle[lane];
+                rsq.srcs[0].swizzle = {comp, comp, comp, comp};
+                program_.instrs.push_back(rsq);
+
+                VInstr rcp;
+                rcp.op = VOp::Rcp;
+                rcp.dst.index = result;
+                rcp.dst.writemask = 1 << lane;
+                rcp.srcs[0] = tempSrc(rsqTemp);
+                rcp.srcs[0].swizzle = {static_cast<uint8_t>(lane), static_cast<uint8_t>(lane),
+                                       static_cast<uint8_t>(lane), static_cast<uint8_t>(lane)};
+                program_.instrs.push_back(rcp);
+            }
+            return;
+        }
         VInstr root;
         root.op = VOp::DivSqrt;
         root.dst.index = result;
@@ -5568,12 +5579,6 @@ private:
     void lowerTan(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP scalar intrinsic lowering deferred");
-            program_.loweringFailed = true;
-            return;
-        }
         const int mask = componentMask(inst.resultType);
         const VSrc arg = resolve(inst.operands[0]);
 
@@ -5582,7 +5587,7 @@ private:
         emitScalarUnitPerLane(VOp::Sin, sinReg, mask, arg, false);
         emitScalarUnitPerLane(VOp::Cos, cosReg, mask, arg, false);
 
-        if (laneCount(mask) > 1) {
+        if (profile_ == GeneralProfile::Vertex || laneCount(mask) > 1) {
             const int rcpReg = newVReg();
             emitScalarUnitPerLane(VOp::Rcp, rcpReg, mask,
                                   tempSrc(cosReg), false);
@@ -6222,10 +6227,29 @@ private:
 
     void lowerClamp(const IRInstruction& inst)
     {
-        if (profile_ != GeneralProfile::Fragment ||
-            inst.operands.size() < 3 || inst.result == InvalidIRValue) {
-            program_.diagnostics.push_back(
-                "nv40-general: only FP clamp lowering is supported");
+        if (inst.operands.size() < 3 || inst.result == InvalidIRValue) return;
+
+        if (profile_ == GeneralProfile::Vertex) {
+            if (isLiteralZero(inst.operands[1]) && isLiteralOne(inst.operands[2])) {
+                lowerUnary(inst, VOp::Mov, true);
+                return;
+            }
+            const int minReg = newVReg();
+            VInstr minv;
+            minv.op = VOp::Min;
+            minv.dst.index = minReg;
+            minv.dst.writemask = componentMask(inst.resultType);
+            minv.srcs[0] = resolve(inst.operands[0]);
+            minv.srcs[1] = resolve(inst.operands[2]);
+            program_.instrs.push_back(minv);
+
+            VInstr maxv;
+            maxv.op = VOp::Max;
+            maxv.dst.index = define(inst.result);
+            maxv.dst.writemask = componentMask(inst.resultType);
+            maxv.srcs[0] = tempSrc(minReg);
+            maxv.srcs[1] = resolve(inst.operands[1]);
+            program_.instrs.push_back(maxv);
             return;
         }
 
