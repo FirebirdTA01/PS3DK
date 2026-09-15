@@ -5348,9 +5348,28 @@ private:
             }
         }
 
+        // pow(x, 1) is x and pow(x, 0) is 1 on the reference (t_0f3b232e):
+        // no instruction at all, so the value is an ALIAS of its source and
+        // the consumer reads x (or the literal) directly - a MOV through a
+        // temporary would be a byte the reference does not emit.
+        float aliasExponent = 0.0f;
+        if (literalFloatOf(inst.operands[1], aliasExponent) &&
+            (aliasExponent == 0.0f || aliasExponent == 1.0f)) {
+            program_.valueToSource[inst.result] =
+                aliasExponent == 0.0f ? floatLit(1.0f) : resolve(inst.operands[0]);
+            if (hasDelayedPositionMov)
+                program_.instrs.push_back(delayedPositionMov);
+            return;
+        }
+
         const int temp = define(inst.result);
         VSrc base = resolve(inst.operands[0]);
-        if (profile_ == GeneralProfile::Vertex)
+        // resolve() already broadcasts a SCALAR base's own lane; forcing .x
+        // here made every vertex pow read lane x of its source, so
+        // pow(u.y, e) computed pow(u.x, e) (measured on the 8d538fc5 parent,
+        // t_0f3b232e).  A VECTOR base in VP keeps the old lane-x form for now
+        // (its own gap, carded).
+        if (profile_ == GeneralProfile::Vertex && valueWidthOf(inst.operands[0]) > 1)
             base.swizzle = {0, 0, 0, 0};
         const auto baseRegIt = program_.valueToVReg.find(inst.operands[0]);
         if (baseRegIt != program_.valueToVReg.end() &&
@@ -5371,6 +5390,115 @@ private:
                 program_.instrs.pop_back();
             }
         }
+        // A CONSTANT exponent follows the reference's table, measured on
+        // sce-cgc 475 (t_0f3b232e, 2026-09-15, .local/probe-boyhair; FP and
+        // VP): 0 and 1 are aliases (above); 2 -> MUL x, x (vectors
+        // too); 3 -> MUL, MUL; -1 -> RCP; -0.5 -> RSQ; 0.5 -> DIVSQR |x|, x in
+        // FP and RSQ + RCP in VP; in FP 4 / 8 / 0.25 / 0.125 and -2 / -4 / -8
+        // / -0.25 fold the multiply into LG2's output scale (M2 M4 M8 D4 D8)
+        // with EX2 reading the negated log for a negative exponent; every
+        // other exponent (5, 6, 16, 32, 1.5, 0.75, -3, a variable) is the
+        // LG2 / MUL / EX2 chain below.  The first six rows carry VALUE, not
+        // shape: LG2 of a NEGATIVE base is NaN, so pow(dot(t, h), 2) painted
+        // NaN where the reference's MUL paints a number (Boy_HairFp, 1369
+        // pixels).  A vertex-program vector base keeps the chain below.
+        float exponent = 0.0f;
+        if (literalFloatOf(inst.operands[1], exponent) &&
+            (profile_ == GeneralProfile::Fragment ||
+             laneCount(componentMask(inst.resultType)) == 1)) {
+            const int mask = componentMask(inst.resultType);
+            const bool fragment = profile_ == GeneralProfile::Fragment;
+            auto finish = [&]() {
+                if (hasDelayedPositionMov)
+                    program_.instrs.push_back(delayedPositionMov);
+            };
+            auto emitVec = [&](VOp op, int dst, const VSrc& a, const VSrc* b) {
+                VInstr vi;
+                vi.op = op;
+                vi.dst.index = dst;
+                vi.dst.writemask = mask;
+                vi.srcs[0] = a;
+                if (b) vi.srcs[1] = *b;
+                program_.instrs.push_back(vi);
+            };
+            if (exponent == 2.0f) {
+                emitVec(VOp::Mul, temp, base, &base);
+                finish();
+                return;
+            }
+            if (exponent == 3.0f) {
+                const int square = newVReg();
+                emitVec(VOp::Mul, square, base, &base);
+                VSrc squareSrc = tempSrc(square);
+                if (laneCount(mask) == 1) {
+                    // The reference reads the square as a scalar (.x), the
+                    // same source view its x*(x*x) spelling produces.
+                    uint8_t lane = 0;
+                    while (lane < 4 && !(mask & (1 << lane))) ++lane;
+                    squareSrc.swizzle = {lane, lane, lane, lane};
+                }
+                emitVec(VOp::Mul, temp, base, &squareSrc);
+                finish();
+                return;
+            }
+            if (exponent == -1.0f) {
+                emitScalarUnitPerLane(VOp::Rcp, temp, mask, base, false);
+                finish();
+                return;
+            }
+            if (exponent == -0.5f) {
+                emitScalarUnitPerLane(VOp::Rsq, temp, mask, base, false);
+                finish();
+                return;
+            }
+            if (exponent == 0.5f) {
+                if (fragment) {
+                    VInstr root;
+                    root.op = VOp::DivSqrt;
+                    root.dst.index = temp;
+                    root.dst.writemask = mask;
+                    root.srcs[0] = root.srcs[1] = base;
+                    root.srcs[0].abs = true;
+                    root.srcs[0].neg = false;
+                    emitScalarUnitPerLane(root);
+                } else {
+                    const int rsq = newVReg();
+                    emitScalarUnitPerLane(VOp::Rsq, rsq, mask, base, false);
+                    const VSrc rsqSrc = tempSrc(rsq);
+                    emitScalarUnitPerLane(VOp::Rcp, temp, mask, rsqSrc, false);
+                }
+                finish();
+                return;
+            }
+            if (fragment && laneCount(mask) == 1) {
+                const float magnitude = std::fabs(exponent);
+                int scale = -1;
+                if (magnitude == 2.0f) scale = NVFX_FP_OP_DST_SCALE_2X;
+                else if (magnitude == 4.0f) scale = NVFX_FP_OP_DST_SCALE_4X;
+                else if (magnitude == 8.0f) scale = NVFX_FP_OP_DST_SCALE_8X;
+                else if (magnitude == 0.25f) scale = NVFX_FP_OP_DST_SCALE_INV_4X;
+                else if (magnitude == 0.125f) scale = NVFX_FP_OP_DST_SCALE_INV_8X;
+                if (scale >= 0) {
+                    VInstr scaledLg2;
+                    scaledLg2.op = VOp::Lg2;
+                    scaledLg2.dst.index = temp;
+                    scaledLg2.dst.writemask = mask;
+                    scaledLg2.srcs[0] = base;
+                    scaledLg2.fpScale = scale;
+                    program_.instrs.push_back(scaledLg2);
+                    VInstr ex2;
+                    ex2.op = VOp::Ex2;
+                    ex2.dst.index = temp;
+                    ex2.dst.writemask = mask;
+                    ex2.srcs[0] = tempSrc(temp);
+                    ex2.srcs[0].neg = exponent < 0.0f;
+                    program_.instrs.push_back(ex2);
+                    finish();
+                    return;
+                }
+            }
+        }
+
         // A VECTOR pow is one chain PER LANE (t_249b8088): both LG2 and
         // EX2 are scalar-unit instructions that read a single source
         // component, so the full-mask form computed pow(base.x, e) and
@@ -7980,6 +8108,22 @@ private:
         if (std::holds_alternative<uint32_t>(constant->value))
             return std::get<uint32_t>(constant->value) == 1u;
         return false;
+    }
+
+    bool literalFloatOf(IRValueID id, float& out) const
+    {
+        const IRValue* value = entry_.getValue(id);
+        auto* constant = dynamic_cast<const IRConstant*>(value);
+        if (!constant) return false;
+        if (std::holds_alternative<float>(constant->value))
+            out = std::get<float>(constant->value);
+        else if (std::holds_alternative<int32_t>(constant->value))
+            out = static_cast<float>(std::get<int32_t>(constant->value));
+        else if (std::holds_alternative<uint32_t>(constant->value))
+            out = static_cast<float>(std::get<uint32_t>(constant->value));
+        else
+            return false;
+        return true;
     }
 
     int valueComponentMask(IRValueID id) const

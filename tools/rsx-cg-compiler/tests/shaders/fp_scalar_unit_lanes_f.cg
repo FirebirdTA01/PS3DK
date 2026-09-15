@@ -9,6 +9,9 @@ void main(float4 c : TEXCOORD0, out float4 o : COLOR)
     float4 v = float4(c.x, c.y, c.x * 0.5 + 0.25, c.y * 0.5 + 0.25) * 3.0 + 0.5;
     float4 s = sin(v) * 0.5 + 0.5;
     float4 r = rsqrt(v + 1.0);
-    float4 p = pow(v, 2.0) * 0.1;
+    // 2.5, not 2.0: a constant exponent of 2 is a single MUL on the
+    // reference and on us (t_0f3b232e), so it would put nothing through the
+    // scalar unit and this fixture would stop testing pow's lanes.
+    float4 p = pow(v, 2.5) * 0.1;
     o = float4(s.y, r.z, p.w, 1.0);
 }
