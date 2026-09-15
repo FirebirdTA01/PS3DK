@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 # vp-tangent-binormal-test.sh -- regression test for VP TANGENT and BINORMAL semantic attributes (t_cba15ecc).
+#
+# Reference contract (sce-cgc 475, measured 2026-09-14/15): TANGENT and TANGENT0
+# bind ATTR14, BINORMAL and BINORMAL0 bind ATTR15; the container records the
+# semantic string AS WRITTEN (so the three spellings are three different
+# containers on the reference too) and the ucode is the same for all three.
+# TANGENT1 / BINORMAL1 are refused C5102 (index too big); TANGENT / BINORMAL on
+# an OUTPUT are refused C5109 (domain conflict).  Our ucode for these programs
+# differs from the reference only in instruction order (the pre-existing VP
+# general-path ordering gap), which is why the twin rows compare ucode between
+# our own spellings and the refusal rows compare exit status, not bytes.
+# The SDK rows this closes are judged by the census, not here: the tracked test
+# tree stays free of reference-SDK paths.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,12 +66,15 @@ refusals=(
 
 for name in "${refusals[@]}"; do
     rc=0
+    rm -f "$work/$name.vpo"
     (
         "$compiler" -p sce_vp_rsx --emit-container "$work/$name.vpo" "$shaders_dir/$name.cg"
     ) >"$work/$name.log" 2>&1 || rc=$?
     if [[ "$rc" == 0 ]]; then
         fail "$name: compiler accepted invalid tangent/binormal usage (expected refusal)"
     fi
+    [[ "$rc" == 1 ]] || fail "$name: exited $rc, not the refusal status 1"
+    [[ ! -e "$work/$name.vpo" ]] || fail "$name: refused but left an output file (even an empty one is a leak)"
 done
 
 # 3. Python structural, parameter resource, and byte-identity verification
@@ -123,7 +138,7 @@ if not found_bin:
 # Verify container parameter resource codes:
 # TANGENT  -> 0x084f (2127 = kCgAttr0 + 14)
 # BINORMAL -> 0x0850 (2128 = kCgAttr0 + 15)
-def check_resources(data, name):
+def check_resources(data, name, sem_tangent, sem_binormal):
     prof, rev, total_size, p_count, hdr_size, prog_off, ucode_size, ucode_off = struct.unpack_from(">8I", data, 0)
     res_map = {}
     for i in range(p_count):
@@ -143,71 +158,16 @@ def check_resources(data, name):
         raise SystemExit(f"FAIL: {name} in_tangent resource is not 0x084f: {res_map.get('in_tangent')}")
     if "in_binormal" not in res_map or res_map["in_binormal"][1] != 0x0850:
         raise SystemExit(f"FAIL: {name} in_binormal resource is not 0x0850: {res_map.get('in_binormal')}")
+    # The reference records the semantic AS WRITTEN, not the resolved ATTRn.
+    if res_map["in_tangent"][0] != sem_tangent or res_map["in_binormal"][0] != sem_binormal:
+        raise SystemExit(f"FAIL: {name} semantic strings are not recorded as written: "
+                         f"{res_map['in_tangent'][0]!r}, {res_map['in_binormal'][0]!r}")
 
-check_resources(c_named, "vp_tangent_binormal_v")
-check_resources(c_indexed, "vp_tangent0_binormal0_v")
+check_resources(c_named, "vp_tangent_binormal_v", "TANGENT", "BINORMAL")
+check_resources(c_indexed, "vp_tangent0_binormal0_v", "TANGENT0", "BINORMAL0")
+check_resources(c_twin, "vp_tangent_attr_twin_v", "ATTR14", "ATTR15")
 
 print("PASS: ucode twins, sources (ATTR14, ATTR15), and container resources (0x084f, 0x0850) verified")
 PY
-
-# 4. Optional SDK target rows validation
-sdk_root="${PS3_REF_SDK:-/c/SDKs/Sony/SCE/PS3/475}"
-if [[ ! -d "$sdk_root" && -d "C:/SDKs/Sony/SCE/PS3/475" ]]; then
-    sdk_root="C:/SDKs/Sony/SCE/PS3/475"
-fi
-
-if [[ -d "$sdk_root" ]]; then
-    sdk_rows=(
-        "samples/tutorial/CgTutorial/GCM/Hair/shaders/Boy_HairVp.cg"
-        "samples/tutorial/CgTutorial/PSGL/Hair/shaders/Boy_HairVp.cg"
-        "samples/tutorial/CgTutorial/GCM/MachoHDR/shaders/dullMetalVp.cg"
-        "samples/tutorial/CgTutorial/GCM/MachoQHDR/shaders/dullMetalVp.cg"
-        "samples/tutorial/CgTutorial/GCM/MachoHDR/shaders/reflectionMetalVp.cg"
-        "samples/tutorial/CgTutorial/GCM/MachoQHDR/shaders/reflectionMetalVp.cg"
-        "samples/tutorial/CgTutorial/GCM/ParallaxMap/shaders/Box_ParallaxVp.cg"
-        "samples/tutorial/CgTutorial/PSGL/ParallaxMap/shaders/Box_ParallaxVp.cg"
-        "samples/tutorial/SpuGeometricProcess/src/shaders/SimpleDrawing_vert.cg"
-    )
-
-    count=0
-    for i in "${!sdk_rows[@]}"; do
-        rel="${sdk_rows[$i]}"
-        src="$sdk_root/$rel"
-        [[ -f "$src" ]] || fail "SDK row not found: $src"
-        stem="$(basename "$rel" .cg)"
-        dir="$(dirname "$src")"
-        out_vpo="$work/${stem}_row${i}.vpo"
-        rm -f "$out_vpo"
-        rc=0
-        (
-            "$compiler" -p sce_vp_rsx -I "$dir" -I "$sdk_root/samples/tutorial/SpuGeometricProcess/src/shaders" --emit-container "$out_vpo" "$src"
-        ) >"$work/${stem}_row${i}.log" 2>&1 || rc=$?
-        if [[ "$rc" != 0 || ! -s "$out_vpo" ]]; then
-            tail -n 10 "$work/${stem}_row${i}.log" >&2
-            fail "SDK row $rel did not compile (exit $rc)"
-        fi
-
-        python3 - "$out_vpo" "$rel" <<'VAL_PY'
-import sys, struct, pathlib
-path = pathlib.Path(sys.argv[1])
-rel = sys.argv[2]
-data = path.read_bytes()
-if len(data) < 32:
-    raise SystemExit(f"FAIL: {rel} container shorter than 32-byte header")
-magic, rev, total, nparams, param_off, prog_off, ucode_sz, ucode_off = struct.unpack_from(">8I", data, 0)
-if total != len(data):
-    raise SystemExit(f"FAIL: {rel} declared total {total} != file size {len(data)}")
-if ucode_sz == 0 or ucode_sz % 16 != 0:
-    raise SystemExit(f"FAIL: {rel} invalid ucode size {ucode_sz}")
-if ucode_off + ucode_sz > total:
-    raise SystemExit(f"FAIL: {rel} ucode extent exceeds container size")
-VAL_PY
-        count=$((count + 1))
-    done
-    [[ "$count" -eq 9 ]] || fail "Expected 9 SDK rows, tested $count"
-    printf 'All 9 SDK rows compiled and validated successfully (%d rows verified)\n' "$count"
-else
-    printf 'SKIPPED SDK corpus: %s not found\n' "$sdk_root"
-fi
 
 printf 'PASS: vp-tangent-binormal-test completed successfully\n'
