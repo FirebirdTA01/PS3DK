@@ -1,4 +1,5 @@
-"""Numerical FP vecmatmul guard; square types only (rectangular: t_a5dbcca2).
+"""Numerical FP vecmatmul guard; square types, plus one rectangular accept row
+(rectangular values and records are judged by rect-matrix-test.sh, t_bc130064).
 
 Reference475 uniform/default/constant probes all use row order 1,0,2,3.
 The explicit twin uses vector broadcasts and MADs in that measured order.
@@ -199,8 +200,13 @@ def main(compiler):
                     if storage == 'default' and width == 3 and swizzle == 'xyz':
                         mutation_controls(blob, matrix, swizzle, t)
                     count += 1
-        compile_blob(compiler, root, 'rectangular', 'uniform float3x4 M; float4 main(float3 t:TEXCOORD0):COLOR{return mul(t,M);}', refuse=True)
-    print(f'fp-vecmatmul: PASS ({count} twins and decoded numerical cases; rectangular refusal)')
+        # A vector times a RECTANGULAR matrix is accepted since t_bc130064 (the
+        # reference always did: mul(float3, float3x4) is a float4 built from
+        # the three rows).  Its values are executed in rect-matrix-test.sh; here
+        # it must compile and its container must agree with its ucode.
+        rect = compile_blob(compiler, root, 'rectangular', 'uniform float3x4 M; float4 main(float3 t:TEXCOORD0):COLOR{return mul(t,M);}')
+        require(not check_container(rect)['issues'], 'rectangular: container/ucode disagreement')
+    print(f'fp-vecmatmul: PASS ({count} twins and decoded numerical cases; rectangular accept)')
 
 
 if __name__ == '__main__':
