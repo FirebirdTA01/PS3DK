@@ -2860,6 +2860,32 @@ private:
     void lowerInputLoad(const IRInstruction& inst)
     {
         const std::string sem = toUpper(inst.semanticName);
+        if (!inst.structParamName.empty() && inst.fieldName.find('[') != std::string::npos)
+        {
+            // Array element validity is a LIVE-input rule. An unused tail
+            // outside the semantic range must not reject a valid first read.
+            const bool vertex = profile_ == GeneralProfile::Vertex;
+            int limit = 0;
+            if (sem == "TEXCOORD") limit = vertex ? 8 : 10;
+            else if (sem == "COLOR") limit = 2;
+            else if (vertex && sem == "ATTR") limit = 16;
+            else if (!(vertex && (sem == "POSITION" || sem == "NORMAL" ||
+                       sem == "TANGENT" || sem == "BINORMAL" ||
+                       sem == "DIFFUSE" || sem == "SPECULAR")) &&
+                     !(!vertex && (sem == "FOG" || sem == "FOGC")))
+            {
+                program_.diagnostics.push_back("input array semantic '" + sem +
+                    "' has no modelled array binding in our compiler (t_dddf962d)");
+                program_.loweringFailed = true;
+                return;
+            }
+            if (inst.semanticIndex < 0 || (limit && inst.semanticIndex >= limit))
+            {
+                program_.diagnostics.push_back("C5102: input array semantic index exceeds its resource range");
+                program_.loweringFailed = true;
+                return;
+            }
+        }
         const int idx = profile_ == GeneralProfile::Vertex
             ? vertexInputIndex(sem, inst.semanticIndex)
             : fragmentInputSrc(sem, inst.semanticIndex);

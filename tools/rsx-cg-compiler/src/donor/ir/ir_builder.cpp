@@ -1557,6 +1557,66 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     // Create entry block
     currentBlock_ = currentFunction_->createBlock("entry");
 
+    // A semantic array is an array of input values, not a vector whose
+    // lanes are its elements. Seed the same array state used by locals and
+    // helper argument snapshots, with an element-typed load for each slot.
+    // Only the entry owns attributes: helper parameter names must retain
+    // the entry loads (and their reflection provenance) when renamed.
+    if (currentFunction_->isEntryPoint)
+    {
+        const bool vertex = module_->shaderStage == ShaderStage::Vertex;
+        auto seedInputs = [&](auto& self, TypeNode* type, const std::string& root,
+                              const std::string& prefix) -> void {
+            const auto* fields = getStructFields(type);
+            if (!fields) return;
+            for (const auto& field : *fields)
+            {
+                const std::string path = prefix.empty() ? field.name : prefix + "." + field.name;
+                if (getStructFields(field.type.get()))
+                {
+                    self(self, field.type.get(), root, path);
+                    continue;
+                }
+                IRTypeInfo elementType = getIRType(field.type.get());
+                if (!elementType.isArray() || elementType.isMatrix()) continue;
+                const int count = elementType.arraySize;
+                elementType.arraySize = 0;
+                std::string semantic = field.semantic.name;
+                std::transform(semantic.begin(), semantic.end(), semantic.begin(),
+                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                int base = field.semantic.index;
+                bool repeated = false;
+                if (vertex && (semantic == "POSITION" || semantic == "NORMAL" ||
+                         semantic == "TANGENT" || semantic == "BINORMAL" ||
+                         semantic == "DIFFUSE" || semantic == "SPECULAR"))
+                    repeated = true;
+                else if (!vertex && (semantic == "FOG" || semantic == "FOGC"))
+                    repeated = true;
+                // Diagnose unmodelled semantics and range overflow only for
+                // loads that survive DCE. The reference accepts an unused
+                // overflowing tail, and a read of its valid first element.
+                auto& values = localArrayValues_[root + "." + path];
+                values.clear();
+                for (int i = 0; i < count; ++i)
+                {
+                    const IRValueID value = currentFunction_->allocateValueId();
+                    auto load = std::make_unique<IRInstruction>(IROp::LoadAttribute, value, elementType);
+                    load->semanticName = semantic;
+                    load->rawSemanticName = field.semantic.rawName;
+                    load->semanticIndex = base + (repeated ? 0 : i);
+                    load->structParamName = root;
+                    load->fieldName = path + "[" + std::to_string(i) + "]";
+                    currentBlock_->addInstruction(std::move(load));
+                    values.push_back(value);
+                }
+            }
+        };
+        for (const auto& param : decl->parameters)
+            if (param->storage != StorageQualifier::Uniform &&
+                param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
+                seedInputs(seedInputs, param->type.get(), param->name, "");
+    }
+
     // Build function body
     if (decl->body)
     {

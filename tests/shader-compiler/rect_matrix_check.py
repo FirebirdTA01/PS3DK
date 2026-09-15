@@ -79,7 +79,7 @@ def check_fp_matrix_records(tag, blob, name, rows, cols):
 
 # --------------------------------------------------------------------------
 # fragment numeric executor: MOV MUL ADD MAD DP3 DP4 over TEX0 and inline constants
-def execute_fp(blob, vector):
+def execute_fp(blob, vector, *, inputs=None):
     regs = {}
     ended = False
     for w, const in instructions(ucode_words(blob)):
@@ -97,9 +97,14 @@ def execute_fp(blob, vector):
         for slot in range(1, ARITY[op] + 1):
             s = source(w, slot)
             if s['type'] == INPUT:
-                if s['name'] != 'TEX0':
+                if inputs is not None:
+                    if s['name'] not in inputs:
+                        raise AssertionError('unexpected input ' + str(s['name']))
+                    data = inputs[s['name']]
+                elif s['name'] != 'TEX0':
                     raise AssertionError('unexpected input ' + str(s['name']))
-                data = vector
+                else:
+                    data = vector
             elif s['type'] == CONST:
                 if const is None:
                     raise AssertionError('missing inline block')
