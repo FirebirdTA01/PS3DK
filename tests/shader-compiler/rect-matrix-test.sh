@@ -128,7 +128,21 @@ accept fp_rect_narrow_cast_f       "(float3x4)float4x4 keeps the first three row
 accept fp_rect_matmul_f            "mul(float3x4, float4x3) is a float3x3"
 accept fp_rect_prefix_shuffle_cse_f "float4(t.yzw, 1) + t.yzwx: a vec3 and a vec4 shuffle with one mask stay distinct (reference accepts)"
 
+# 2b. Mixed vector/scalar constructors pack ROW-MAJOR; a vector may not straddle
+# a row (reference m1-m11).  The square globals here are a regression control:
+# the first revision refused them (found by codex).  All four accept cells are
+# byte-identical to the reference as well as to their twins.
+accept fp_rect_ctor_mixed_g22_f       "static const float2x2(float2, s, s)"
+accept fp_rect_ctor_mixed_g22_twin_f  "the literal row it folds to"
+accept fp_rect_ctor_mixed_g33_f       "static const float3x3(float3, s, s, s, float3)"
+accept fp_rect_ctor_mixed_g33_twin_f  "the literal row it folds to"
+accept fp_rect_ctor_mixed_g34_f       "static const float3x4(float2, float2, float4, float4)"
+accept fp_rect_ctor_mixed_g34_twin_f  "the same rows as float3x4(float3, s, float4, float4)"
+
 # 3. Byte twins the reference also emits identically
+twin fp_rect_ctor_mixed_g22_f fp_rect_ctor_mixed_g22_twin_f "a mixed 2x2 folds to its second row"
+twin fp_rect_ctor_mixed_g33_f fp_rect_ctor_mixed_g33_twin_f "a mixed 3x3 folds to its second row"
+twin fp_rect_ctor_mixed_g34_f fp_rect_ctor_mixed_g34_twin_f "two mixed packings of one 3x4"
 twin fp_rect_ctor_index_f  fp_rect_ctor_index_twin_f "M[1].z, M[2][0], M[0].w are the row swizzles"
 twin fp_rect_brace_m43_f   fp_rect_ctor_m43_twin_f   "brace and constructor spellings of a 4x3"
 twin fp_rect_brace_row_f   fp_rect_brace_row_twin_f  "P[1] is the row expression"
@@ -136,6 +150,9 @@ twin fp_rect_brace_row_f   fp_rect_brace_row_twin_f  "P[1] is the row expression
 # 4. Constructor shapes the reference refuses (C5204): a row vector per ROW
 refuse fp_rect_ctor43_3xf4_refuse_f "C5204" "float4x3 from three float4 (12 components, wrong shape)"
 refuse fp_rect_ctor34_4xf3_refuse_f "C5204" "float3x4 from four float3 (12 components, wrong shape)"
+refuse fp_rect_ctor_straddle_g22_refuse_f "C5204" "float2x2(s, float2, s): the float2 straddles rows 0 and 1"
+refuse fp_rect_ctor_straddle_g43_refuse_f "C5204" "float4x3(float2, float2, ...): the second float2 straddles rows 0 and 1"
+refuse fp_rect_ctor_straddle_l22_refuse_f "C5204" "a local float2x2(s, float2, s) straddles the same way"
 
 # 5. Values and container records
 python3 "$script_dir/rect_matrix_check.py" "$work" || fail "rect_matrix_check reported a defect"
