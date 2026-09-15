@@ -250,5 +250,17 @@
     "profile": "sce_vp_rsx",
     "source": "float f(float x,int n){float a=0;for(int i=0;i<n;i++){a=a*x+float(i+1);}return a;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;float x=t.x;float v=f(x++,2);c=float4(v+x);}",
     "twin": "float f(float x){float a=0;a=a*x+1;a=a*x+2;return a;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;float x=t.x;float old=x;x=x+1;float v=f(old);c=float4(v+x);}"
+  },
+  {
+    "name": "sce_fp_rsx-mutable-current",
+    "profile": "sce_fp_rsx",
+    "source": "static int N=4;float f(float x){float a=0;for(int i=0;i<N;i++){a=a*x+float(i+1);}return a;}void main(float4 t:TEXCOORD0,out float4 c:COLOR){N=2;c=float4(f(t.x));}",
+    "twin": "float f(float x){float a=0;a=a*x+1;a=a*x+2;return a;}void main(float4 t:TEXCOORD0,out float4 c:COLOR){c=float4(f(t.x));}"
+  },
+  {
+    "name": "sce_vp_rsx-mutable-current",
+    "profile": "sce_vp_rsx",
+    "source": "static int N=4;float f(float x){float a=0;for(int i=0;i<N;i++){a=a*x+float(i+1);}return a;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;N=2;c=float4(f(t.x));}",
+    "twin": "float f(float x){float a=0;a=a*x+1;a=a*x+2;return a;}void main(float4 t:POSITION,out float4 p:POSITION,out float4 c:COLOR){p=t;c=float4(f(t.x));}"
   }
 ]

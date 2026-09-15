@@ -15,8 +15,8 @@
 #     non-uniform globals it writes are plain values afterwards (the
 #     reference lists them as UNDEFINED params, B[0..2]).
 #   * the reference ALSO accepts a return inside a branch, loops inside a
-#     helper, and out/inout parameters - all three stay REFUSED here BY
-#     NAME, measured as gaps rather than dropped.
+#     helper, and out/inout parameters. Proven static for-loops now expand;
+#     returns inside branches and out/inout remain named gaps.
 #
 # CONTROL: every accept row is refused on a compiler before this change
 # ("body contains unsupported control flow" / "no return expression"), the
@@ -391,7 +391,9 @@ forbid fp_inline_struct_local_write_f '^[0-9]+ MUL '
 
 # ---------------------------------------------------------------- named gaps
 refuse "return inside a branch of the helper" fp_inline_return_in_if_f sce_fp_rsx "a return inside control flow"
-refuse "a loop inside the helper"             fp_inline_loop_f         sce_fp_rsx "a loop"
+accept fp_inline_loop_f sce_fp_rsx "a proven three-trip helper loop expands"
+accept fp_inline_loop_explicit_f sce_fp_rsx "the reference-identical explicit expansion"
+cmp -s "$work/fp_inline_loop_f.bin" "$work/fp_inline_loop_explicit_f.bin" || fail "helper loop differs from explicit expansion"
 refuse "out parameters on the helper"         vp_inline_void_out_v     sce_vp_rsx "out/inout parameters are not supported"
 # NESTED shadowing, formerly REFUSED by name (t_cf17f501's placeholder): an
 # enclosing helper's parameter now stashes the global at binding and its

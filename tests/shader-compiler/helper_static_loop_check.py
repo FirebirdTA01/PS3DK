@@ -46,7 +46,7 @@ def main():
                 twins+=1
             else:
                 compile_one(name,row['source'],row['profile'],row['refusal']);refusals+=1
-    assert (twins,refusals)==(26,16),(twins,refusals)
+    assert (twins,refusals)==(28,16),(twins,refusals)
     print(f'PASS ({twins} strict twins, {refusals} named helper-loop gaps)')
 
 if __name__=='__main__':
