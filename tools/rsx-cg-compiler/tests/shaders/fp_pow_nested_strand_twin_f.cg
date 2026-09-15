@@ -1,0 +1,1 @@
+void main(float4 t : TEXCOORD0, out float4 c : COLOR) { float d = dot(normalize(t.xyz), normalize(t.wzy)); float s = 1 - d * d; c = float4(s * s, 0, 0, 1); }

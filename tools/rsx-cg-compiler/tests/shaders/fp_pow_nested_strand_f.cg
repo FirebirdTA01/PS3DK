@@ -1,0 +1,1 @@
+void main(float4 t : TEXCOORD0, out float4 c : COLOR) { float d = dot(normalize(t.xyz), normalize(t.wzy)); c = float4(pow(1 - pow(d, 2), 2), 0, 0, 1); }
