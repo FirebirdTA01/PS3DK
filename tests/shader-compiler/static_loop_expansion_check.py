@@ -88,6 +88,10 @@ def main():
             uint_body = 'a=a*t.x+i;'
             twin('uint-ascending', 'for(unsigned int i=0;i<3;i++){' + uint_body + '}',
                  'for(int i=0;i<3;i++){' + uint_body + '}', profile)
+            # Reference uses FP LOOP / VP backward BRA for this spelling;
+            # our expansion is a named shape divergence (t_bc4fa4e5).
+            twin('uint-descending-shape-divergence', 'for(unsigned int i=3;i>0;i--){' + uint_body + '}',
+                 ''.join('{int i=' + str(i) + ';' + uint_body + '}' for i in (3,2,1)), profile)
             uint_locals = 'unsigned int start=0;unsigned int bound=3;unsigned int step=1;'
             twin('uint-local-bounds', uint_locals + 'for(unsigned int i=start;i<bound;i+=step){' + uint_body + '}',
                  uint_locals + ''.join('{int i=' + str(i) + ';' + uint_body + '}' for i in range(3)), profile)
@@ -101,6 +105,7 @@ def main():
                 ('unsigned-bound-gap', 'unsigned int start=1;for(float i=-start;i<2;i+=1.0){a+=t;}', 'back-edge'),
                 ('uint-negated-gap', 'unsigned int start=1;for(unsigned int i=-start;i<2;i++){a+=t;}', 'back-edge'),
                 ('uint-wrapping-gap', 'for(unsigned int i=4294967295;i>=4294967295;i++){a+=t;}', 'back-edge'),
+                ('uint-underflow-gap', 'for(unsigned int i=0;i>=0;i--){a+=t;}', 'back-edge'),
                 ('negative-zero-gap', 'for(float i=-0.0;i<1;i+=1.0){a=t/i;}', 'back-edge'),
                 ('negative-zero-local-gap', 'float start=-0.0;for(float i=start;i<1;i+=1.0){a=t/i;}', 'back-edge'),
                 ('resource-cap', 'for(float i=0.0;i<65.0;i+=1.0){a+=t;}', 'hardware-loop'),
@@ -115,7 +120,7 @@ def main():
             body = f'{ty} size=4;{ty} i;for(i=-size;i<=size;i+=2){{{fetch}}}'
             explicit = ''.join('{' + ty + ' i=' + str(i) + ('.0;' if ty == 'float' else ';') + fetch + '}' for i in values)
             twin('texture-local-' + ty, body, explicit, 'sce_fp_rsx', prefix='uniform sampler2D tex;')
-    assert (count, refusals) == (34, 20), (count, refusals)
+    assert (count, refusals) == (36, 22), (count, refusals)
     print(f'static-loop-expansion: PASS ({count} strict twins, {refusals} named refusals)')
 
 

@@ -1788,7 +1788,6 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         if (b->op == BinaryOp::SubAssign) step = -step;
         else if (b->op != BinaryOp::AddAssign) return false;
     } else return false;
-    if (unsignedInduction && step < 0) return false;
     if (step == 0 || stmtContainsBreakOrContinue(stmt->body.get())) return false;
     dependencies.insert(induction);
     // A global induction target can also be changed by an otherwise unrelated call.
@@ -1825,6 +1824,7 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         }
         iterations.push_back(final);
         final += step; // 32-bit operands, so the int64 simulation cannot overflow.
+        // Descending unsigned loops are valid until a simulated value underflows.
         if (!exact(final)) return false;
     }
 
