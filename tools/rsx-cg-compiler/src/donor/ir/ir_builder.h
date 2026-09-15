@@ -127,6 +127,8 @@ private:
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;
+    // Declaration identity prevents a local shadow from using a global's initializer.
+    std::unordered_set<const DeclNode*> globalDeclarations_;
     std::vector<std::string> depthDecodeUniforms_;
     // Source text is the wrong boundary for short-circuit hazards:
     // a precomputed sqrt predicate is already eager, while an inlined

@@ -983,6 +983,7 @@ std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const Semantic
 {
     semantic_ = &semantic;
     module_ = std::make_unique<IRModule>(unit.filename);
+    globalDeclarations_.clear();
     depthDecodeUniforms_.clear();
 
     // Set shader stage
@@ -1104,6 +1105,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             }
 
             IRGlobal global;
+            globalDeclarations_.insert(varDecl);
             global.name = varDecl->name;
             global.type = getIRType(varDecl->type.get());
             global.valueId = module_->allocateGlobalId();
@@ -2185,13 +2187,28 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
             auto* id = static_cast<IdentifierExpr*>(e);
             if (!id->resolvedDecl || id->resolvedDecl == induction) return false;
             auto it = nameToValue_.find(id->name);
-            if (it == nameToValue_.end()) return false;
-            auto* c = dynamic_cast<IRConstant*>(currentFunction_->getValue(it->second));
-            if (!c || !c->type.isScalar()) return false;
-            if (std::holds_alternative<int32_t>(c->value)) number = std::get<int32_t>(c->value);
-            else if (unsignedInduction && std::holds_alternative<uint32_t>(c->value)) number = std::get<uint32_t>(c->value);
-            else if (std::holds_alternative<float>(c->value)) number = std::get<float>(c->value);
-            else return false;
+            if (it != nameToValue_.end()) {
+                auto* c = dynamic_cast<IRConstant*>(currentFunction_->getValue(it->second));
+                if (!c || !c->type.isScalar()) return false;
+                if (std::holds_alternative<int32_t>(c->value)) number = std::get<int32_t>(c->value);
+                else if (unsignedInduction && std::holds_alternative<uint32_t>(c->value)) number = std::get<uint32_t>(c->value);
+                else if (std::holds_alternative<float>(c->value)) number = std::get<float>(c->value);
+                else return false;
+            } else {
+                // An absent local SSA binding is not permission to fall back by
+                // spelling. Only this resolved file-scope declaration qualifies.
+                if (!globalDeclarations_.count(id->resolvedDecl)) return false;
+                const auto* g = module_->findGlobal(id->name);
+                if (!g || g->storage != StorageQualifier::Const || !g->declaredStatic ||
+                    !g->type.isScalar()) return false;
+                if (scalarType.baseType == IRType::Int32 || scalarType.baseType == IRType::UInt32) {
+                    if (g->initialIntValues.size() != 1) return false;
+                    number = static_cast<double>(g->initialIntValues[0]);
+                } else {
+                    if (g->initialValue.size() != 1) return false;
+                    number = g->initialValue[0];
+                }
+            }
             dependencies.insert(id->resolvedDecl);
             watchesGlobal |= module_->findGlobal(id->name) != nullptr;
         } else return false;
@@ -2320,6 +2337,14 @@ void IRBuilder::buildForStmt(ForStmt* stmt)
     // choice between expansion and a hardware loop also depends on body cost;
     // we preserve values without claiming the same instruction shape.
     if (tryUnrollStaticFor(stmt)) return;
+
+    // Inlining supports proven expansion only. Falling through to a CFG here
+    // would admit loop-carried bindings the inliner cannot yet preserve.
+    if (!inlineStack_.empty()) {
+        error(stmt->loc, "cannot inline user function '" + inlineStack_.back()->name +
+              "': unproven for-loop; hardware-loop lowering required (t_a290c3c8)");
+        return;
+    }
 
     // Build initializer
     if (stmt->init)
@@ -4302,6 +4327,9 @@ static bool inlineBlockedShape(const StmtNode* stmt, std::string& why)
     {
     case StmtKind::Return:   why = "a return inside control flow"; return true;
     case StmtKind::For:
+        // The statement builder will prove the trip sequence at the call site.
+        // Continue rejecting exits nested anywhere in the loop body beforehand.
+        return inlineBlockedShape(static_cast<const ForStmt*>(stmt)->body.get(), why);
     case StmtKind::While:
     case StmtKind::DoWhile:  why = "a loop"; return true;
     case StmtKind::Switch:
@@ -4372,7 +4400,8 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
         // helper lowers to the same select/predicate shape it would at the
         // call site.  The shapes the join cannot carry are refused by name.
         if (stmt->kind == StmtKind::Decl || stmt->kind == StmtKind::Expr ||
-            stmt->kind == StmtKind::If || stmt->kind == StmtKind::Block)
+            stmt->kind == StmtKind::If || stmt->kind == StmtKind::Block ||
+            stmt->kind == StmtKind::For)
         {
             std::string why;
             if (inlineBlockedShape(stmt, why))
