@@ -1,0 +1,1 @@
+float f(float a) { float s = 0; s += a; s += a; s += a; return s; } float4 main(float4 t : TEXCOORD0) : COLOR { return f(t.x).xxxx; }
