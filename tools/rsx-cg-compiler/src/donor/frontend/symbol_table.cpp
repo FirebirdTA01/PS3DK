@@ -344,6 +344,15 @@ void SymbolTable::registerBuiltinTypes()
     addType("float3x3", CgType::Float3x3());
     addType("float4x4", CgType::Float4x4());
     addType("matrix", CgType::Float4x4());
+    // Non-square matrices are real types on the reference: RxC = R rows of
+    // C-wide vectors (t_bc130064 / t_69aeaa84).
+    for (int r = 2; r <= 4; ++r)
+        for (int c = 2; c <= 4; ++c)
+        {
+            if (r == c) continue;
+            addType("float" + std::to_string(r) + "x" + std::to_string(c), CgType::Mat(ScalarKind::Float, r, c));
+            addType("half" + std::to_string(r) + "x" + std::to_string(c), CgType::Mat(ScalarKind::Half, r, c));
+        }
 
     // Sampler types
     addType("sampler1D", CgType::Sampler1D());
@@ -588,21 +597,29 @@ void SymbolTable::registerVectorFunctions()
         addFunction("faceforward", vec, {vec, vec, vec}, {"n", "i", "nref"}, nullptr, true);
     }
 
-    // mul - matrix multiplication
-    // Matrix * vector
-    addFunction("mul", CgType::Float4(), {CgType::Float4x4(), CgType::Float4()}, {"m", "v"}, nullptr, true);
-    addFunction("mul", CgType::Float3(), {CgType::Float3x3(), CgType::Float3()}, {"m", "v"}, nullptr, true);
-    addFunction("mul", CgType::Float2(), {CgType::Float2x2(), CgType::Float2()}, {"m", "v"}, nullptr, true);
-
-    // Vector * matrix (for row-major)
-    addFunction("mul", CgType::Float4(), {CgType::Float4(), CgType::Float4x4()}, {"v", "m"}, nullptr, true);
-    addFunction("mul", CgType::Float3(), {CgType::Float3(), CgType::Float3x3()}, {"v", "m"}, nullptr, true);
-    addFunction("mul", CgType::Float2(), {CgType::Float2(), CgType::Float2x2()}, {"v", "m"}, nullptr, true);
-
+    // mul - matrix multiplication, over every RxC shape (t_bc130064).
+    // Measured on the reference: mul(M[RxC], v[C]) -> v[R] (one DP(C) per
+    // row), mul(v[R], M[RxC]) -> v[C] (a MUL/MAD chain over the rows), and
+    // mul(A[RxK], B[KxC]) -> M[RxC].  The square entries below are the same
+    // ones this table always had; the loops add the rectangular shapes.
+    for (int r = 2; r <= 4; ++r)
+    {
+        for (int c = 2; c <= 4; ++c)
+        {
+            const CgType m = CgType::Mat(ScalarKind::Float, r, c);
+            // Matrix * vector
+            addFunction("mul", CgType::Vec(ScalarKind::Float, r), {m, CgType::Vec(ScalarKind::Float, c)}, {"m", "v"}, nullptr, true);
+            // Vector * matrix (row-major)
+            addFunction("mul", CgType::Vec(ScalarKind::Float, c), {CgType::Vec(ScalarKind::Float, r), m}, {"v", "m"}, nullptr, true);
+        }
+    }
     // Matrix * matrix
-    addFunction("mul", CgType::Float4x4(), {CgType::Float4x4(), CgType::Float4x4()}, {"a", "b"}, nullptr, true);
-    addFunction("mul", CgType::Float3x3(), {CgType::Float3x3(), CgType::Float3x3()}, {"a", "b"}, nullptr, true);
-    addFunction("mul", CgType::Float2x2(), {CgType::Float2x2(), CgType::Float2x2()}, {"a", "b"}, nullptr, true);
+    for (int r = 2; r <= 4; ++r)
+        for (int k = 2; k <= 4; ++k)
+            for (int c = 2; c <= 4; ++c)
+                addFunction("mul", CgType::Mat(ScalarKind::Float, r, c),
+                            {CgType::Mat(ScalarKind::Float, r, k), CgType::Mat(ScalarKind::Float, k, c)},
+                            {"a", "b"}, nullptr, true);
 
     // transpose
     for (ScalarKind sk : {ScalarKind::Float, ScalarKind::Half})

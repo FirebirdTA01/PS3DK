@@ -219,6 +219,8 @@ jobs:
         run: bash tests/shader-compiler/vp-scalar-intrinsic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler VP tangent and binormal semantics
         run: bash tests/shader-compiler/vp-tangent-binormal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler rectangular matrix types
+        run: bash tests/shader-compiler/rect-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler int literals in float constructors
         run: bash tests/shader-compiler/int-literal-ctor-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

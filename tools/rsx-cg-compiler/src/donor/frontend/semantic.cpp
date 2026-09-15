@@ -1150,7 +1150,9 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
     else if (arrayType.isMatrix())
     {
         // Indexing a matrix returns a column vector
-        return CgType::Vec(arrayType.scalarKind(), arrayType.matrixRows());
+        // M[i] is a ROW: a vector as wide as the matrix has COLUMNS.  Rows
+        // and columns only coincide for square matrices (t_bc130064).
+        return CgType::Vec(arrayType.scalarKind(), arrayType.matrixCols());
     }
 
     error(expr->array->loc, "subscripted value is not an array, vector, or matrix");
@@ -1288,10 +1290,12 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     int totalComponents = 0;
     bool hasError = false;
     CgType singleArgType;
+    std::vector<CgType> argTypes;
 
     for (auto& arg : expr->arguments)
     {
         CgType argType = analyzeExpr(arg.get());
+        argTypes.push_back(argType);
         if (argType.isError())
         {
             hasError = true;
@@ -1352,6 +1356,33 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
                    singleArgType.matrixCols() < constructedType.matrixCols())))
         {
             error(expr->loc, "error C1033: cast not allowed");
+            return CgType::Error();
+        }
+    }
+
+    // A matrix built from VECTORS takes exactly one vector per ROW, each as
+    // wide as the matrix has COLUMNS.  The reference refuses
+    // float3x4(f3,f3,f3,f3) and float4x3(f4,f4,f4) with C5204 even though the
+    // component totals match; only the all-scalar spelling is free-form
+    // (measured 2026-09-15, t_bc130064).
+    if (constructedType.isMatrix() && expr->arguments.size() > 1)
+    {
+        bool anyVector = false;
+        bool shapeOk = expr->arguments.size() == (size_t)constructedType.matrixRows();
+        for (const CgType& argType : argTypes)
+        {
+            if (argType.isScalar()) { shapeOk = false; continue; }
+            anyVector = true;
+            if (!argType.isVector() || argType.vectorSize() != constructedType.matrixCols())
+                shapeOk = false;
+        }
+        if (anyVector && !shapeOk)
+        {
+            error(expr->loc, "error C5204: expression cannot be used to construct a " +
+                  std::to_string(constructedType.matrixRows()) + "x" +
+                  std::to_string(constructedType.matrixCols()) +
+                  " matrix: give one row vector of width " +
+                  std::to_string(constructedType.matrixCols()) + " per row, or all scalars");
             return CgType::Error();
         }
     }

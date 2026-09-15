@@ -1,0 +1,1 @@
+uniform float2x4 A; uniform half3x4 B; void main(float4 t : TEXCOORD0, out float4 c : COLOR) { c = float4(mul(A, t), mul(B, t).x, 1); }

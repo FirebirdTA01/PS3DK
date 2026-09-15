@@ -35,6 +35,7 @@ void Parser::initBuiltinTypes()
         "float2x3", "float2x4", "float3x2", "float3x4", "float4x2", "float4x3",
         "matrix",
         "half2x2", "half3x3", "half4x4",
+        "half2x3", "half2x4", "half3x2", "half3x4", "half4x2", "half4x3",
         "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "samplerRECT",
         "isampler1D", "isampler2D", "isampler3D", "isamplerCUBE", "isamplerRECT",
         "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT",
@@ -450,6 +451,30 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
         type->matrixRows = 4;
         type->matrixCols = 4;
         return type;
+    }
+
+    // NON-SQUARE matrix type names (float3x4, half4x3 ...) are not lexer
+    // keywords; they arrive as identifiers listed in typeNames.  Build the
+    // matrix node from the name so they do not fall through to the struct
+    // path below as an unknown struct (t_69aeaa84 / t_bc130064).  The
+    // reference lays an RxC matrix out as R rows of C-wide vectors.
+    if (tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 7 &&
+        tok.lexeme.size() <= 8 && typeNames.count(tok.lexeme) > 0)
+    {
+        const std::string& n = tok.lexeme;
+        const size_t len = n.size();
+        const bool isFloat = n.compare(0, 5, "float") == 0 && len == 8;
+        const bool isHalf = n.compare(0, 4, "half") == 0 && len == 7;
+        if ((isFloat || isHalf) && n[len - 2] == 'x' &&
+            n[len - 3] >= '2' && n[len - 3] <= '4' &&
+            n[len - 1] >= '2' && n[len - 1] <= '4')
+        {
+            advance();
+            type->baseType = isFloat ? BaseType::Float : BaseType::Half;
+            type->matrixRows = n[len - 3] - '0';
+            type->matrixCols = n[len - 1] - '0';
+            return type;
+        }
     }
 
     // Check for struct type reference (user-defined type name)
