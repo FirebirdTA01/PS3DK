@@ -4351,13 +4351,22 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         }
         if (!fields.empty())
         {
+            // Entry struct inputs carry semantic/uniform provenance in their
+            // original parameter value, not in local element storage. An
+            // invented all-undefined array map hides that existing load path.
+            // Still overlay any real tracked fields from the completed call
+            // state below; local aggregates keep their normal undefined rows.
+            const bool entryStructAlias = getStructFields(param->type.get()) &&
+                std::any_of(currentFunction_->parameters.begin(), currentFunction_->parameters.end(),
+                    [&](const IRParameter& p) { return p.valueId == args[i]; });
             const std::string parameterPrefix = param->name + ".";
             for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
                 if (it->first.compare(0, parameterPrefix.size(), parameterPrefix) == 0)
                     it = nameToValue_.erase(it);
                 else ++it;
             for (const auto& field : fields)
-                localArrayValues_[field.first].assign(static_cast<size_t>(field.second), InvalidIRValue);
+                if (entryStructAlias) localArrayValues_.erase(field.first);
+                else localArrayValues_[field.first].assign(static_cast<size_t>(field.second), InvalidIRValue);
 
             std::string source;
             if (i < expr->arguments.size() && arrayStorageKey(expr->arguments[i].get(), source))

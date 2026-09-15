@@ -1,0 +1,74 @@
+[
+  {
+    "name": "entry-array-sce_fp_rsx-helper",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}"
+  },
+  {
+    "name": "entry-array-sce_fp_rsx-same-name",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I i){return i.a[0]+i.a[1];}float4 main(I i):COLOR{return f(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}"
+  },
+  {
+    "name": "entry-array-sce_fp_rsx-nested",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 relay(I q){return f(q);}float4 main(I i):COLOR{return relay(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return i.a[0]+i.a[1];}"
+  },
+  {
+    "name": "entry-array-sce_fp_rsx-caller-collision",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{I s;s.a[0]=float4(.25);s.a[1]=float4(.5);float4 x=f(i);return x+s.a[0]+s.a[1];}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return (i.a[0]+i.a[1])+float4(.25)+float4(.5);}"
+  },
+  {
+    "name": "entry-array-sce_fp_rsx-local-then-input",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{I q;q.a[0]=float4(.25);q.a[1]=float4(.5);float4 x=f(q);return x+f(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return float4(.75)+(i.a[0]+i.a[1]);}"
+  },
+  {
+    "name": "entry-array-sce_fp_rsx-input-then-local",
+    "profile": "sce_fp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 main(I i):COLOR{I q;q.a[0]=float4(.25);q.a[1]=float4(.5);float4 x=f(i);return x+f(q);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 main(I i):COLOR{return (i.a[0]+i.a[1])+float4(.75);}"
+  },
+  {
+    "name": "entry-array-sce_vp_rsx-helper",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 calc(I i){return f(i);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 calc(I i){return i.a[0]+i.a[1];}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}"
+  },
+  {
+    "name": "entry-array-sce_vp_rsx-same-name",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I i){return i.a[0]+i.a[1];}float4 calc(I i){return f(i);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 calc(I i){return i.a[0]+i.a[1];}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}"
+  },
+  {
+    "name": "entry-array-sce_vp_rsx-nested",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 relay(I q){return f(q);}float4 calc(I i){return relay(i);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 calc(I i){return i.a[0]+i.a[1];}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}"
+  },
+  {
+    "name": "entry-array-sce_vp_rsx-caller-collision",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 calc(I i){I s;s.a[0]=float4(.25);s.a[1]=float4(.5);float4 x=f(i);return x+s.a[0]+s.a[1];}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 calc(I i){return (i.a[0]+i.a[1])+float4(.25)+float4(.5);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}"
+  },
+  {
+    "name": "entry-array-sce_vp_rsx-local-then-input",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 calc(I i){I q;q.a[0]=float4(.25);q.a[1]=float4(.5);float4 x=f(q);return x+f(i);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 calc(I i){return float4(.75)+(i.a[0]+i.a[1]);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}"
+  },
+  {
+    "name": "entry-array-sce_vp_rsx-input-then-local",
+    "profile": "sce_vp_rsx",
+    "source": "struct I{float4 a[2]:TEXCOORD0;};float4 f(I s){return s.a[0]+s.a[1];}float4 calc(I i){I q;q.a[0]=float4(.25);q.a[1]=float4(.5);float4 x=f(i);return x+f(q);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}",
+    "twin": "struct I{float4 a[2]:TEXCOORD0;};float4 calc(I i){return (i.a[0]+i.a[1])+float4(.75);}void main(I i,out float4 p:POSITION,out float4 c:COLOR){p=float4(0,0,0,1);c=calc(i);}"
+  }
+]
