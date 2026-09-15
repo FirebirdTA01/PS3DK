@@ -270,5 +270,38 @@
     "source": "struct O{float4 p:POSITION;float4 a[2]:PSIZE;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t;o.a[1]=t.wzyx;return o;}",
     "profile": "sce_vp_rsx",
     "refusal": "C5121"
+  },
+  {
+    "name": "uniform-alias-local-collision-revised",
+    "source": "float4 f(float4 q[2]){return q[0]+q[1];}void main(float4 t:POSITION,uniform float4 A[2],out float4 p:POSITION,out float4 c:COLOR){p=t;float4 q[2];q[0]=t;q[1]=t*2;c=f(A);}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1.0,
+        -2.0,
+        3.0,
+        0.5
+      ],
+      "o1": [
+        110,
+        220,
+        330,
+        440
+      ]
+    },
+    "uniforms": {
+      "A[0]": [
+        10,
+        20,
+        30,
+        40
+      ],
+      "A[1]": [
+        100,
+        200,
+        300,
+        400
+      ]
+    }
   }
 ]

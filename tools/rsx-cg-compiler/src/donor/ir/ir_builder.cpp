@@ -4335,7 +4335,14 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
             std::any_of(currentFunction_->parameters.begin(), currentFunction_->parameters.end(),
                 [&](const IRParameter& p) { return p.valueId == args[i] && p.type.isArray() &&
                     p.storage == StorageQualifier::Uniform; });
-        if (uniformArrayAlias) fields.clear();
+        if (uniformArrayAlias)
+        {
+            // The caller can have a local array with this parameter's name.
+            // Its snapshot is restored after the call; it must not intercept
+            // reads through the uniform parameter while the helper executes.
+            localArrayValues_.erase(param->name);
+            fields.clear();
+        }
         if (!fields.empty())
         {
             const std::string parameterPrefix = param->name + ".";
