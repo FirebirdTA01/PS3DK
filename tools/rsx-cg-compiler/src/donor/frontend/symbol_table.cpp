@@ -634,6 +634,9 @@ void SymbolTable::registerVectorFunctions()
     addFunction("determinant", CgType::Float(), {CgType::Float3x3()}, {"m"}, nullptr, true);
     addFunction("determinant", CgType::Float(), {CgType::Float4x4()}, {"m"}, nullptr, true);
 
+    // any accepts a scalar too; register it explicitly rather than relying
+    // on scalar-to-vector broadcasting during overload resolution.
+    addFunction("any", CgType::Bool(), {CgType::Bool()}, {"v"}, nullptr, true);
     // any, all (for bool vectors)
     for (int size = 2; size <= 4; ++size)
     {
