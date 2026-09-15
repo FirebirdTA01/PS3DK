@@ -1,0 +1,10 @@
+void main(float4 position : POSITION,
+          float counter : TEXCOORD0,
+          out float4 oPosition : POSITION,
+          out float4 oSinCos : TEXCOORD0)
+{
+    oPosition = position;
+    float s = sin(counter);
+    float c = cos(counter);
+    oSinCos = float4(s, c, -s, -c);
+}

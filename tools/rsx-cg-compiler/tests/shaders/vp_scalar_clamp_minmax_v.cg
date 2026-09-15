@@ -1,0 +1,9 @@
+void main(float4 position : POSITION,
+          float4 val : TEXCOORD0,
+          uniform float4 u_bounds,
+          out float4 oPosition : POSITION,
+          out float4 oResult : TEXCOORD0)
+{
+    oPosition = position;
+    oResult = max(min(val, u_bounds.y), u_bounds.x);
+}

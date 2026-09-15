@@ -3800,6 +3800,83 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             return emitInstruction(mulOp, resultType, argValues);
         }
 
+        // VP literal math has profile-specific rounding. Keep this hook confined
+        // to the four measured operations; other builtins and FP are unchanged.
+        const bool trig = *builtinOp == IROp::Sin || *builtinOp == IROp::Cos ||
+                          *builtinOp == IROp::Tan;
+        if (module_->shaderStage == ShaderStage::Vertex && argValues.size() == 1 &&
+            (trig || *builtinOp == IROp::Sqrt) &&
+            (resultType.isScalar() || resultType.isVector()))
+        {
+            std::vector<float> values;
+            bool constant = extractFloatComponents(*currentFunction_, argValues[0], values);
+            if (!constant)
+            {
+                // Overload resolution permits numeric arguments without an IR
+                // cast. Integer/bool literals must use the same fold and bound.
+                uint32_t raw = 0;
+                bool isUnsigned = false;
+                if (extractIntegerScalar(*currentFunction_, argValues[0], raw, isUnsigned))
+                {
+                    values = {isUnsigned ? static_cast<float>(raw)
+                                         : static_cast<float>(static_cast<int32_t>(raw))};
+                    constant = true;
+                }
+            }
+            if (constant && !values.empty())
+            {
+                for (float value : values)
+                {
+                    if (!std::isfinite(value) || (trig && std::fabs(value) > 65536.0f))
+                    {
+                        error(expr->loc, "our VP constant trig reduction bound is finite |x| <= 65536; "
+                            "nonfinite constant math is also unsupported (t_b939dc41)");
+                        return InvalidIRValue;
+                    }
+                }
+                std::vector<float> folded;
+                std::vector<IRValueID> lanes;
+                const IRType element = resultType.isVector() ? resultType.elementType : resultType.baseType;
+                const IRTypeInfo scalarType = element == IRType::Float16 ? IRTypeInfo::Half() : IRTypeInfo::Float();
+                bool allConstant = true;
+                for (float value : values)
+                {
+                    if (*builtinOp == IROp::Sqrt && value <= 0.0f)
+                    {
+                        // Reference VP leaves these lanes as RSQ + RCP, even
+                        // when adjacent positive lanes fold to constants.
+                        allConstant = false;
+                        folded.push_back(0.0f);
+                        lanes.push_back(emitInstruction(IROp::Sqrt, scalarType,
+                            {createConstant(scalarType, value)}));
+                        continue;
+                    }
+                    float result = 0.0f;
+                    const double input = static_cast<double>(value);
+                    if (*builtinOp == IROp::Sqrt)
+                    {
+                        const float reciprocalSqrt = static_cast<float>(1.0 / std::sqrt(input));
+                        result = static_cast<float>(1.0 / static_cast<double>(reciprocalSqrt));
+                    }
+                    else if (*builtinOp == IROp::Sin)
+                        result = static_cast<float>(std::sin(input));
+                    else if (*builtinOp == IROp::Cos)
+                        result = static_cast<float>(std::cos(input));
+                    else
+                    {
+                        const float sine = static_cast<float>(std::sin(input));
+                        const float cosine = static_cast<float>(std::cos(input));
+                        result = static_cast<float>(static_cast<double>(sine) / static_cast<double>(cosine));
+                    }
+                    folded.push_back(result);
+                    lanes.push_back(createConstant(scalarType, result));
+                }
+                if (allConstant)
+                    return folded.size() == 1 ? createConstant(resultType, folded[0]) : createConstant(resultType, folded);
+                return lanes.size() == 1 ? lanes[0] : emitInstruction(IROp::VecConstruct, resultType, lanes);
+            }
+        }
+
         // Emit built-in operation
         return emitInstruction(*builtinOp, resultType, argValues);
     }
