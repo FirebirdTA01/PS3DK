@@ -5509,9 +5509,11 @@ private:
         const int powMask = componentMask(inst.resultType);
         if (profile_ == GeneralProfile::Fragment && laneCount(powMask) > 1) {
             VSrc exponent = resolve(inst.operands[1]);
+            // A scalar exponent keeps the lane resolve() broadcast (a uniform
+            // scalar such as colorShine.w is NOT lane x); only a literal's
+            // value sits in lane x by construction.
             const bool exponentIsScalar =
                 exponent.kind == VSrcKind::Literal ||
-                exponent.kind == VSrcKind::Uniform ||
                 valueWidthOf(inst.operands[1]) == 1;
             const int scratch = newVReg();
             for (int lane = 0; lane < 4; ++lane) {
@@ -5536,7 +5538,8 @@ private:
                 laneMul.srcs[0].swizzle = {0, 0, 0, 0};
                 laneMul.srcs[1] = exponent;
                 if (exponentIsScalar) {
-                    laneMul.srcs[1].swizzle = {0, 0, 0, 0};
+                    if (exponent.kind == VSrcKind::Literal)
+                        laneMul.srcs[1].swizzle = {0, 0, 0, 0};
                 } else {
                     const uint8_t e = exponent.swizzle[lane];
                     laneMul.srcs[1].swizzle = {e, e, e, e};
@@ -5575,8 +5578,11 @@ private:
         if (profile_ == GeneralProfile::Vertex)
             mul.srcs[0].swizzle = {0, 0, 0, 0};
         mul.srcs[1] = resolve(inst.operands[1]);
-        if (mul.srcs[1].kind == VSrcKind::Literal ||
-            mul.srcs[1].kind == VSrcKind::Uniform)
+        // resolve() already broadcasts a scalar exponent's OWN lane.  Forcing
+        // .x here read colorShine.x where the source said colorShine.w
+        // (gcm multiple_context fpshader, 621 pixels off on the rig -
+        // t_f17de26c); a literal has its value in lane x already.
+        if (mul.srcs[1].kind == VSrcKind::Literal)
             mul.srcs[1].swizzle = {0, 0, 0, 0};
         program_.instrs.push_back(mul);
 

@@ -28,6 +28,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from fp_sources import ARITY, CONST, INPUT, TEMP, instructions, source, ucode_words  # noqa: E402
 from vp_words import decode  # noqa: E402
+from uniform_container_check import Container  # noqa: E402
 
 failures = []
 
@@ -179,6 +180,34 @@ def check_shapes(work):
         ops = [i['op'] for i in ins]
         require(OP_LG2 in ops and OP_MUL in ops and OP_EX2 in ops, f'{tag}: expected LG2, MUL, EX2 chain, got {[hex(o) for o in ops]}')
         require(all(i['scale'] == 0 for i in ins if i['op'] == OP_LG2), f'{tag}: LG2 must not carry an output scale here')
+    # A UNIFORM exponent keeps its own lane: pow(t.z, u.w) must multiply the
+    # log by u.w, not u.x (the old chain forced every uniform exponent to
+    # lane x - gcm multiple_context's shininess = colorShine.w read the red
+    # channel instead, t_f17de26c).  A fragment uniform is an inline constant
+    # block the runtime patches, so the reads are found through the
+    # container's relocation offsets for 'u', not by source kind.
+    blob = (work / 'fp_pow_uniform_exponent_f.fpo').read_bytes()
+    container = Container(blob)
+    offsets = set()
+    for record in container.records:
+        if record['name'] == 'u':
+            offsets.update(container.ucode + o for o in record['offsets'])
+    require(offsets, 'fp_pow_uniform_exponent_f: no relocation offsets recorded for u')
+    at = container.ucode
+    reads = 0
+    for w, const in instructions(ucode_words(blob)):
+        op = (w[0] >> 24) & 63
+        if const is not None and (at + 16) in offsets:
+            reads += 1
+            require(op == OP_MUL, f'fp_pow_uniform_exponent_f: the uniform is read by opcode {op:#x}, expected the MUL of the log')
+            for slot in range(1, ARITY.get(op, 0) + 1):
+                s = source(w, slot)
+                if s['type'] == CONST:
+                    require(s['swizzle'] == 0xFF, f'fp_pow_uniform_exponent_f: the uniform exponent is read with swizzle {s["swizzle"]:#x}, expected wwww (0xff)')
+        at += 32 if const is not None else 16
+        if w[0] & 1:
+            break
+    require(reads >= 2, f'fp_pow_uniform_exponent_f: expected the scalar and per-lane chains to read u, found {reads}')
     # the value rows must contain no LG2 at all: that is the whole fix
     for tag in ('fp_pow_int_exponents_f', 'fp_pow_vec_two_f', 'fp_pow_roots_f', 'fp_pow_zero_exponent_f'):
         ins = decode_fp((work / f'{tag}.fpo').read_bytes())
