@@ -1341,8 +1341,12 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                         const bool vertex = module_->shaderStage == ShaderStage::Vertex;
                         if (semantic == "COLOR" || semantic == "COL") limit = vertex ? 2 : 4;
                         if (vertex && (semantic == "TEXCOORD" || semantic == "TEX")) limit = 10;
-                        if (vertex && (semantic == "POSITION" || semantic == "HPOS" ||
-                                       semantic == "PSIZE" || semantic == "PSIZ") && count > 1)
+                        const bool singleton = vertex
+                            ? (semantic == "POSITION" || semantic == "HPOS" ||
+                               semantic == "PSIZE" || semantic == "PSIZ" ||
+                               semantic == "FOG" || semantic == "FOGC")
+                            : (semantic == "DEPTH" || semantic == "DEPR");
+                        if (singleton && count > 1)
                             error(decl->loc, "C5121: multiple bindings to a singleton output semantic");
                         if (limit && (output.semanticIndex < 0 ||
                             output.semanticIndex > limit - count))
@@ -1525,6 +1529,8 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             if (semantic == "COL") semantic = "COLOR";
             if (semantic == "HPOS") semantic = "POSITION";
             if (semantic == "PSIZ") semantic = "PSIZE";
+            if (semantic == "FOGC") semantic = "FOG";
+            if (semantic == "DEPR") semantic = "DEPTH";
             if (!semantic.empty() && !slots.insert(semantic + ":" + std::to_string(output.semanticIndex)).second)
                 error(decl->loc, "C5121: multiple bindings to an output array semantic slot");
         };

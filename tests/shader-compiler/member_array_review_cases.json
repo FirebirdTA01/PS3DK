@@ -303,5 +303,54 @@
         400
       ]
     }
+  },
+  {
+    "name": "sce_fp_rsx-DEPTH",
+    "source": "struct O{float a[2]:DEPTH;};O main(float4 t:TEXCOORD0){O o;o.a[0]=t.x;o.a[1]=t.y;return o;}",
+    "profile": "sce_fp_rsx",
+    "refusal": "C5121"
+  },
+  {
+    "name": "sce_vp_rsx-FOG",
+    "source": "struct O{float4 p:POSITION;float a[2]:FOG;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t.x;o.a[1]=t.y;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5121"
+  },
+  {
+    "name": "sce_vp_rsx-FOGC",
+    "source": "struct O{float4 p:POSITION;float a[2]:FOGC;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t.x;o.a[1]=t.y;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5121"
+  },
+  {
+    "name": "sce_vp_rsx-CLP0",
+    "source": "struct O{float4 p:POSITION;float a[2]:CLP0;};O main(float4 t:POSITION){O o;o.p=t;o.a[0]=t.x;o.a[1]=t.y;return o;}",
+    "profile": "sce_vp_rsx",
+    "values": {
+      "o0": [
+        1,
+        -2,
+        3,
+        0.5
+      ],
+      "o5": [
+        0,
+        1,
+        -2,
+        0
+      ]
+    }
+  },
+  {
+    "name": "overlap-none",
+    "source": "struct O{float4 p:POSITION;float4 a[2]:TEXCOORD0;float4 b:TEXCOORD1;};O main(float4 t:POSITION){O o;o.p=t;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5121"
+  },
+  {
+    "name": "fog-none",
+    "source": "struct O{float4 p:POSITION;float a[2]:FOG;};O main(float4 t:POSITION){O o;o.p=t;return o;}",
+    "profile": "sce_vp_rsx",
+    "refusal": "C5121"
   }
 ]
