@@ -1,0 +1,9 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// AN ARGUMENT BOUND TO A PARAMETER THE BODY NEVER NAMES IS NEVER EXPANDED.
+// DROP ignores x, so BAD is not expanded and its untokenisable body never
+// reaches the token stream - the reference ACCEPTS. We expanded every
+// argument regardless, which refused it (codex's second cell). Skipping the
+// unused ones is also what the language specifies.
+#define BAD (1.0)
+#define DROP(x) 2.0
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * DROP(BAD); }

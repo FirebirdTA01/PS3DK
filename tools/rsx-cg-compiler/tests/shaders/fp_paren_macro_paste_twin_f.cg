@@ -1,0 +1,11 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// The hand-expanded spelling that ALL FIVE paste rows must equal.  Measured,
+// not assumed: left, right, both, the nested ID(CAT(...)) and the ordinary
+// local-variable paste all produce one container on the reference
+// (43a4ac87280b) and one here (29a658971f7e), so the parenthesisation of the
+// nested row and the local of the plain row both fold away and this single
+// literal is the control for every one of them.  The rows are byte-compared
+// against it so they pin the VALUE the macro expands to and not merely that
+// the file was accepted - an accept-only row is what let the pre-revision-4
+// per-parameter rule look right (codex's condition, endorsed by Fable).
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * 2.0; }

@@ -1,0 +1,6 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// And inside a COMMENT, where it never becomes a token at all.  Accepted by
+// the reference and by us.  With the two rows above this is the whole rule:
+// the character is an error where it is TOKENISED, nowhere else.
+// a comment containing aform feed
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * 2.0; }

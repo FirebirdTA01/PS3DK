@@ -1,0 +1,5 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// The same character BEFORE the name, where the reference reports the other
+// code: error C0105: Syntax error in #define.
+#defineK (1.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

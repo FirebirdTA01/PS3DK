@@ -1,0 +1,8 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// NO SPACE, so this IS a function-like definition - and "3.14159f" is not a
+// parameter name.  The reference rejects the DEFINITION:
+//     error C0105: Syntax error in #define
+// Before this slice we said "undeclared identifier 'K'", i.e. we refused for
+// a reason that had nothing to do with what is wrong.
+#define K(3.14159f)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

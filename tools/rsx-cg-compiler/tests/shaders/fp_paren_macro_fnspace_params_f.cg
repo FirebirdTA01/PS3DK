@@ -1,0 +1,4 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// Spaces INSIDE the parameter list are fine.  Must equal fp_paren_macro_fn_f.
+#define K( x ) ((x)*2.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K(0.5); }

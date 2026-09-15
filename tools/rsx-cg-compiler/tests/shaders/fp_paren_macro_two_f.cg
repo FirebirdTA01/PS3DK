@@ -1,0 +1,4 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// A body that starts with '(' and does not END with the matching ')'.
+#define K (1.0)*(0.5)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

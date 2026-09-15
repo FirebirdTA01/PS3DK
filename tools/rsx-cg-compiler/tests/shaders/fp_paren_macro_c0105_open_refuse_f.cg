@@ -1,0 +1,7 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// An unterminated parameter list, same C0105 on the reference.  It is a
+// separate code path from the row above: the optional group does not match at
+// all here, so without an explicit check it would fall through to an
+// object-like body of "(".
+#define K(
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

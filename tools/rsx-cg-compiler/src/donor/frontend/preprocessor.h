@@ -12,6 +12,15 @@ struct MacroDefinition
 	std::vector<std::string> parameters; // empty if not function-like
 	std::vector<Token> replacementList;
 	bool isFunctionLike = false;
+	// A REPLACEMENT LIST THAT DOES NOT TOKENISE IS NOT AN ERROR UNTIL IT IS
+	// USED.  The reference ACCEPTS `#define UNUSED (1.0<FF>)` when nothing
+	// expands it and refuses the same body the moment it does, so the error
+	// belongs to the expansion and not to the definition - we tokenise the
+	// body eagerly, which reported it too soon (codex asked for the cell that
+	// shows the difference).
+	bool bodyFailedToTokenise = false;
+	std::string bodyTokeniseError;
+
 	bool isVariadic = false; // read by the expander for EVERY function-like
 	                         // macro, but processDefine set it only when a
 	                         // variadic tail was present - an uninitialized

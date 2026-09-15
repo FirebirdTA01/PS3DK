@@ -1,0 +1,14 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// A FORM FEED IS NOT A SEPARATOR, IT IS INVALID INPUT.  The whitespace rule
+// this slice introduces stopped treating everything \s matches as separating
+// the name from the body; form feed and vertical tab are the two characters
+// where that is observable.  Read as function-like the bare K refused (which
+// agreed with the reference by accident); read as object-like it ACCEPTED,
+// which does not.  Found by codex on the first revision.
+//
+// The reference refuses these characters ANYWHERE in a source - even
+// `return<FF>t*2.0;` in ordinary code - so this is not a #define rule; the
+// general form is carded and what is pinned here is the acceptance this slice
+// introduced.  Reference: error C0000: syntax error, unexpected $undef.
+#define K(1.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

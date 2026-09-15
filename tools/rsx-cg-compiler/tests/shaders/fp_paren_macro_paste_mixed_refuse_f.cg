@@ -1,0 +1,11 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// *** THE CELL THAT FORCES PER-OCCURRENCE. *** The SAME parameter appears both
+// pasted and plain. The pasted occurrence takes the raw argument; the plain
+// one expands it, and that expansion puts the form feed into the token
+// stream - so the reference REFUSES this while accepting the paste-only
+// shapes above. A per-parameter rule cannot produce both answers, in either
+// direction (Fable, m20).
+#define BAD (1.0)
+#define BADx 2.0
+#define BOTH(a,b) a##b + a
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * (BOTH(BAD, x)); }

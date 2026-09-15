@@ -1,0 +1,5 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// Nested parentheses in the body.  The old pattern captured [^)]* and would
+// have mis-split this even where it matched at all.
+#define K ((1.0+2.0)*0.25)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

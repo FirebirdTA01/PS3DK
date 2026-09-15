@@ -1,0 +1,5 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// Body "()" - object-like, expands, then the parser refuses.  Reference
+// C0000 "syntax error, unexpected ')'".
+#define K ()
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K; }

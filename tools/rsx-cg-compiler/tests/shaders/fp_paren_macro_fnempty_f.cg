@@ -1,0 +1,5 @@
+// t_7cc742ed.  Measured against sce-cgc 475.
+// A function-like macro with NO parameters, called with none.  Control: the
+// parameter-list check must not refuse an empty list.
+#define K() (2.0)
+float4 main(float4 t : TEXCOORD0) : COLOR { return t * K(); }
