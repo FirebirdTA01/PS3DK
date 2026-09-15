@@ -1,0 +1,5 @@
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    bool b = bool(t.x);
+    return float4(b, 0, 0, 1);
+}

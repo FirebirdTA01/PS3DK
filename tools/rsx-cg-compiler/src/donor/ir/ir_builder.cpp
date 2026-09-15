@@ -2908,6 +2908,17 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         if (varDecl->initializer)
         {
             IRValueID initValue = buildExpr(varDecl->initializer.get());
+            const IRTypeInfo declaredType = getIRType(varDecl->type.get());
+            const IRTypeInfo initType = getExprType(varDecl->initializer.get());
+            if (declaredType.arraySize == 0 && !declaredType.isMatrix() &&
+                initType.arraySize == 0 && !initType.isMatrix() &&
+                (declaredType.isVector() ? declaredType.elementType : declaredType.baseType) == IRType::Bool)
+            {
+                if (initType.isVector() && initType.componentCount() > declaredType.componentCount())
+                    initValue = emitVectorNarrowing(initType, declaredType, initValue, varDecl->loc);
+                else
+                    initValue = emitNumericToBool(initType, declaredType, initValue, varDecl->loc);
+            }
             // For now, just use the initializer value as the variable value
             nameToValue_[varDecl->name] = initValue;
             declToValue_[varDecl] = initValue;
@@ -5050,6 +5061,16 @@ IRValueID IRBuilder::emitVectorNarrowing(const IRTypeInfo& sourceType,
     if (tgtWidth <= 0 || tgtWidth > 4)
         return InvalidIRValue;
 
+    if ((targetType.isVector() ? targetType.elementType : targetType.baseType) == IRType::Bool &&
+        sourceType.elementType != IRType::Bool)
+    {
+        IRTypeInfo numericType = targetType;
+        if (tgtWidth == 1) numericType.baseType = sourceType.elementType;
+        numericType.elementType = sourceType.elementType;
+        IRValueID narrowed = emitVectorNarrowing(sourceType, numericType, operandValue, loc);
+        return emitNumericToBool(numericType, targetType, narrowed, loc);
+    }
+
     BaseType targetBase = BaseType::Float;
     if (baseTypeOverride.has_value())
     {
@@ -5387,6 +5408,10 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
         }
     }
 
+    if (targetType.arraySize == 0 && !targetType.isMatrix() &&
+        (targetType.isVector() ? targetType.elementType : targetType.baseType) == IRType::Bool)
+        return emitNumericToBool(sourceType, targetType, operandValue, expr->loc);
+
     if (targetType.isVector())
     {
         if (IRValueID folded = tryFoldVecConstruct(targetType, { operandValue },
@@ -5533,6 +5558,9 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
 
         if (argType.componentCount() == resultType.componentCount())
         {
+            if (resultType.arraySize == 0 && !resultType.isMatrix() &&
+                (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Bool)
+                return emitNumericToBool(argType, resultType, argValues[0], expr->loc);
             // Same type - just return it
             if (argType.baseType == resultType.baseType &&
                 argType.elementType == resultType.elementType)
@@ -5586,6 +5614,17 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     // Vector construction
     if (resultType.isVector())
     {
+        if (resultType.arraySize == 0 && resultType.elementType == IRType::Bool)
+        {
+            for (size_t i = 0; i < argValues.size(); ++i)
+            {
+                const IRTypeInfo sourceType = getExprType(expr->arguments[i].get());
+                IRTypeInfo boolType = sourceType;
+                if (sourceType.isVector()) boolType.elementType = IRType::Bool;
+                else boolType = IRTypeInfo::Bool();
+                argValues[i] = emitNumericToBool(sourceType, boolType, argValues[i], expr->loc);
+            }
+        }
         if (IRValueID folded = tryFoldVecConstruct(resultType, argValues,
                 expr->constructedType ? std::optional<BaseType>(expr->constructedType->baseType) : std::nullopt);
             folded != InvalidIRValue)
@@ -5960,6 +5999,24 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 
     const IRTypeInfo targetType = getExprType(target);
     IRValue* srcValue = currentFunction_->getValue(value);
+    if (targetType.arraySize == 0 && !targetType.isMatrix() &&
+        (targetType.isVector() ? targetType.elementType : targetType.baseType) == IRType::Bool)
+    {
+        // The value map holds constants; inputs and instruction results have
+        // their types on parameters and instructions instead.
+        IRTypeInfo sourceType = srcValue ? srcValue->type : IRTypeInfo::Void();
+        for (const auto& parameter : currentFunction_->parameters)
+            if (parameter.valueId == value) sourceType = parameter.type;
+        for (const auto& block : currentFunction_->blocks)
+            for (const auto& instruction : block->instructions)
+                if (instruction->result == value) sourceType = instruction->resultType;
+        if (sourceType.baseType != IRType::Void && sourceType.arraySize == 0 && !sourceType.isMatrix())
+        {
+            if (sourceType.isVector() && sourceType.componentCount() > targetType.componentCount())
+                return emitVectorNarrowing(sourceType, targetType, value, target->loc);
+            return emitNumericToBool(sourceType, targetType, value, target->loc);
+        }
+    }
     if (!srcValue) return value;
 
     if (!targetType.isVector() || !srcValue->type.isVector())
@@ -5986,6 +6043,82 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 // ============================================================================
 // Instruction Emission
 // ============================================================================
+
+IRValueID IRBuilder::emitNumericToBool(const IRTypeInfo& sourceType,
+                                      const IRTypeInfo& targetType,
+                                      IRValueID operand, const SourceLocation& loc)
+{
+    if (operand == InvalidIRValue) return operand;
+    if (sourceType.arraySize != 0 || targetType.arraySize != 0 ||
+        sourceType.isMatrix() || targetType.isMatrix())
+    {
+        error(loc, "numeric-to-bool matrix/array conversion is not implemented");
+        return InvalidIRValue;
+    }
+    const IRType element = sourceType.isVector() ? sourceType.elementType : sourceType.baseType;
+    if (element != IRType::Bool && element != IRType::Float32 &&
+        element != IRType::Float16 && element != IRType::Int32 && element != IRType::UInt32)
+    {
+        error(loc, "numeric-to-bool conversion requires a numeric scalar or vector");
+        return InvalidIRValue;
+    }
+    const int width = sourceType.isVector() ? sourceType.vectorSize : 1;
+    const int targetWidth = targetType.isVector() ? targetType.vectorSize : 1;
+    if (width != targetWidth && width != 1)
+    {
+        error(loc, "numeric-to-bool conversion requires matching vector widths");
+        return InvalidIRValue;
+    }
+    // Preserve eager constants, including vectors and splats: later indexing
+    // and loop recognition need their values before optimization passes run.
+    auto* constant = dynamic_cast<IRConstant*>(currentFunction_->getValue(operand));
+    if (constant)
+    {
+        std::vector<int64_t> lanes;
+        if (auto* raw = std::get_if<bool>(&constant->value)) lanes = {*raw ? 1 : 0};
+        else if (auto* raw = std::get_if<float>(&constant->value)) lanes = {*raw != 0.0f ? 1 : 0};
+        else if (auto* raw = std::get_if<int32_t>(&constant->value)) lanes = {*raw != 0 ? 1 : 0};
+        else if (auto* raw = std::get_if<uint32_t>(&constant->value)) lanes = {*raw != 0 ? 1 : 0};
+        else if (auto* raw = std::get_if<std::vector<float>>(&constant->value))
+        {
+            for (size_t i = 0; i < raw->size(); ++i)
+            {
+                const bool nonzero = i < constant->intValues.size()
+                    ? constant->intValues[i] != 0 : (*raw)[i] != 0.0f;
+                lanes.push_back(nonzero ? 1 : 0);
+            }
+        }
+        if (lanes.size() == static_cast<size_t>(width))
+        {
+            if (targetWidth == 1) return createConstant(lanes[0] != 0);
+            if (width == 1) lanes.resize(targetWidth, lanes[0]);
+            std::vector<float> values(lanes.begin(), lanes.end());
+            return createConstant(targetType, values, lanes);
+        }
+    }
+    IRValueID value = operand;
+    if (element != IRType::Bool)
+    {
+        IRValueID zero;
+        if (element == IRType::UInt32) zero = createConstant(uint32_t(0));
+        else if (sourceType.isVector())
+        {
+            const bool integer = element == IRType::Int32 || element == IRType::UInt32;
+            zero = createConstant(sourceType, std::vector<float>(width, 0.0f),
+                                  integer ? std::vector<int64_t>(width, 0) : std::vector<int64_t>());
+        }
+        else if (element == IRType::Int32) zero = createConstant(int32_t(0));
+        else zero = createConstant(sourceType, 0.0f);
+        IRTypeInfo compareType = width == targetWidth ? targetType : IRTypeInfo::Bool();
+        // CmpNe compares every lane, including negative and fractional values.
+        // Keep the already-evaluated operand: repeating the source expression
+        // here would duplicate side effects and texture fetches.
+        value = emitBinaryOp(IROp::CmpNe, compareType, operand, zero, loc);
+    }
+    if (width == targetWidth) return value;
+    return emitInstruction(IROp::VecConstruct, targetType,
+                           std::vector<IRValueID>(targetWidth, value), loc);
+}
 
 IRValueID IRBuilder::emitInstruction(IROp op, const IRTypeInfo& resultType,
                                       const std::vector<IRValueID>& operands,
