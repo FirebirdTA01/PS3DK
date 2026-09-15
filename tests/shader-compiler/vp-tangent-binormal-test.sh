@@ -28,8 +28,12 @@ if [[ ! -x "$compiler" ]]; then
     fi
 fi
 
-work="${TMPDIR:-$repo_root/.local/tmp}/vp-tangent-binormal-test-$$"
-mkdir -p "$work"
+# A FRESH scratch directory every run, never a reusable PID-named one: a stale
+# directory seeded with yesterday's containers would let a compiler that writes
+# nothing pass every accept row (found by codex on the first revision).
+scratch_root="${TMPDIR:-$repo_root/.local/tmp}"
+mkdir -p "$scratch_root"
+work="$(mktemp -d "$scratch_root/vp-tangent-binormal-test.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 fail() {
@@ -46,6 +50,7 @@ fixtures=(
 
 for name in "${fixtures[@]}"; do
     rc=0
+    rm -f "$work/$name.vpo"
     (
         "$compiler" -p sce_vp_rsx --emit-container "$work/$name.vpo" "$shaders_dir/$name.cg"
     ) >"$work/$name.log" 2>&1 || rc=$?
@@ -169,5 +174,31 @@ check_resources(c_twin, "vp_tangent_attr_twin_v", "ATTR14", "ATTR15")
 
 print("PASS: ucode twins, sources (ATTR14, ATTR15), and container resources (0x084f, 0x0850) verified")
 PY
+
+# 4. Self-check: this guard must not be satisfiable by a compiler that never
+# writes, even when the scratch root already holds valid containers from an
+# earlier run.  Seed a scratch root with this run's accept containers under the
+# guard's own directory name pattern, then re-run the guard against a stub that
+# exits 0 for accepts and 1 for refusals and never touches the output path; it
+# must fail on the wrote-no-container row.
+if [[ -z "${VP_TANGENT_BINORMAL_SELFCHECK:-}" ]]; then
+    stub="$work/never-writes.sh"
+    cat >"$stub" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in *invalid_index*|*_out_v*) echo "stub refusal" >&2; exit 1;; *) exit 0;; esac
+STUB
+    chmod +x "$stub"
+    seeded_root="$(mktemp -d "$scratch_root/vp-tangent-binormal-seed.XXXXXX")"
+    for name in "${fixtures[@]}"; do
+        seeded="$(mktemp -d "$seeded_root/vp-tangent-binormal-test.XXXXXX")"
+        cp "$work/$name.vpo" "$seeded/$name.vpo"
+    done
+    control_rc=0
+    VP_TANGENT_BINORMAL_SELFCHECK=1 TMPDIR="$seeded_root" bash "$0" "$stub" >"$work/never-writes.log" 2>&1 || control_rc=$?
+    rm -rf "$seeded_root"
+    [[ $control_rc -eq 1 ]] || { cat "$work/never-writes.log" >&2; fail "self-check: the never-writes stub exited $control_rc, not the guard's own failure status 1"; }
+    grep -q "compiler wrote no container" "$work/never-writes.log" || { cat "$work/never-writes.log" >&2; fail "self-check: the never-writes stub failed for another reason than the wrote-no-container assertion"; }
+    printf 'PASS: self-check: a compiler that never writes fails the accept rows even beside seeded scratch directories\n'
+fi
 
 printf 'PASS: vp-tangent-binormal-test completed successfully\n'
