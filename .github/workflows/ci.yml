@@ -277,6 +277,8 @@ jobs:
         run: bash tests/shader-compiler/any-reduction-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Numeric bool conversion twins
         run: bash tests/shader-compiler/numeric-bool-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Implicit numeric condition normalization
+        run: bash tests/shader-compiler/implicit-condition-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler declared half colour output
         run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the half colour output reaches H0 through the allocator

@@ -227,6 +227,7 @@ private:
                           const SourceLocation& loc = {});
     IRValueID emitNumericToBool(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
                                IRValueID operand, const SourceLocation& loc);
+    IRValueID normalizeCondition(ExprNode* expr, IRValueID value);
 
     // Constant-folding helpers — return a fresh IRConstant id when
     // both operands are IRConstants, else InvalidIRValue.  Handle

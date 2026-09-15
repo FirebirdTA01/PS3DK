@@ -1702,6 +1702,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
 {
     // Evaluate condition
     IRValueID condValue = buildExpr(stmt->condition.get());
+    condValue = normalizeCondition(stmt->condition.get(), condValue);
 
     // Create blocks
     IRBasicBlock* thenBlock = currentFunction_->createBlock(makeLabel("if.then"));
@@ -2343,6 +2344,7 @@ void IRBuilder::buildForStmt(ForStmt* stmt)
     if (stmt->condition)
     {
         IRValueID condValue = buildExpr(stmt->condition.get());
+        condValue = normalizeCondition(stmt->condition.get(), condValue);
         emitCondBranch(condValue, bodyBlock, endBlock);
     }
     else
@@ -2390,6 +2392,7 @@ void IRBuilder::buildWhileStmt(WhileStmt* stmt)
     // Build condition
     currentBlock_ = condBlock;
     IRValueID condValue = buildExpr(stmt->condition.get());
+    condValue = normalizeCondition(stmt->condition.get(), condValue);
     emitCondBranch(condValue, bodyBlock, endBlock);
 
     // Build body
@@ -2431,6 +2434,7 @@ void IRBuilder::buildDoWhileStmt(DoWhileStmt* stmt)
     // Build condition
     currentBlock_ = condBlock;
     IRValueID condValue = buildExpr(stmt->condition.get());
+    condValue = normalizeCondition(stmt->condition.get(), condValue);
     emitCondBranch(condValue, bodyBlock, endBlock);
 
     // Pop loop context
@@ -3573,12 +3577,21 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
     }
 
     // Regular binary expression
+    const bool logical = expr->op == BinaryOp::LogicalAnd || expr->op == BinaryOp::LogicalOr;
     IRValueID leftValue = buildExpr(expr->left.get());
-    if (expr->op == BinaryOp::LogicalAnd || expr->op == BinaryOp::LogicalOr)
+    if (logical)
+    {
+        leftValue = normalizeCondition(expr->left.get(), leftValue);
         ++shortCircuitRhsDepth_;
+    }
     IRValueID rightValue = buildExpr(expr->right.get());
-    if (expr->op == BinaryOp::LogicalAnd || expr->op == BinaryOp::LogicalOr)
+    if (logical)
+    {
+        // The comparison belongs to the RHS as well. Preserve its existing
+        // short-circuit provenance and never evaluate either expression twice.
+        rightValue = normalizeCondition(expr->right.get(), rightValue);
         --shortCircuitRhsDepth_;
+    }
 
     IROp op = binaryOpToIROp(expr->op);
     IRTypeInfo resultType = getExprType(expr);
@@ -3595,6 +3608,8 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
 {
     IRValueID operandValue = buildExpr(expr->operand.get());
+    if (expr->op == UnaryOp::LogicalNot)
+        operandValue = normalizeCondition(expr->operand.get(), operandValue);
 
     // Handle increment/decrement specially
     if (expr->op == UnaryOp::PreIncrement || expr->op == UnaryOp::PreDecrement ||
@@ -5240,6 +5255,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 IRValueID IRBuilder::buildTernaryExpr(TernaryExpr* expr)
 {
     IRValueID condValue = buildExpr(expr->condition.get());
+    condValue = normalizeCondition(expr->condition.get(), condValue);
     IRValueID thenValue = buildExpr(expr->thenExpr.get());
     IRValueID elseValue = buildExpr(expr->elseExpr.get());
 
@@ -6253,6 +6269,20 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 // ============================================================================
 // Instruction Emission
 // ============================================================================
+
+IRValueID IRBuilder::normalizeCondition(ExprNode* expr, IRValueID value)
+{
+    const IRTypeInfo sourceType = getExprType(expr);
+    if (sourceType.arraySize == 0 && !sourceType.isMatrix() &&
+        (sourceType.isVector() ? sourceType.elementType : sourceType.baseType) == IRType::Bool)
+        return value;
+    IRTypeInfo boolType = sourceType;
+    if (sourceType.isVector()) boolType.elementType = IRType::Bool;
+    else boolType = IRTypeInfo::Bool();
+    // Reuse the conversion's eager constants and typed zero. A raw float is
+    // neither a blend weight nor 1-x when used as a logical condition.
+    return emitNumericToBool(sourceType, boolType, value, expr->loc);
+}
 
 IRValueID IRBuilder::emitNumericToBool(const IRTypeInfo& sourceType,
                                       const IRTypeInfo& targetType,
