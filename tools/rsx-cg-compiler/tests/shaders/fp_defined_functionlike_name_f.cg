@@ -1,0 +1,10 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// The one shape the old code got right, and for the right reason: the "("
+// belongs to the operator, so F is never invoked and its NAME survives.
+#define F(a) a
+#if defined(F)
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

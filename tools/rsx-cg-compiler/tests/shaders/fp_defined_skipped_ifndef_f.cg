@@ -1,0 +1,17 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// EVERY DOOR INTO A GROUP HAS TO SUPPRESS IT, not just #if.  My first
+// skip fix covered processIf and left processIfdef taking everActive
+// from its own predicate and processElif evaluating before it read the
+// parent, so this shape walked straight into the #elif expression and
+// refused where the reference accepts (found by codex on the first
+// review build, not by me).
+// The #ifndef door, with the name defined so the predicate would have
+// said "inactive" on its own and hidden the bug.
+#define V 1.0
+#define X 1
+#if 0
+#ifndef X
+#elif defined(
+#endif
+#endif
+float4 main() : COLOR { return V; }

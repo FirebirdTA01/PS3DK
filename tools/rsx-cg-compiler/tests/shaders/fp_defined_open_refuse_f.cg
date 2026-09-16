@@ -1,0 +1,10 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// An operand that is not one of the two forms is an error in the
+// directive. The old regex pair matched only the WELL-FORMED shapes and
+// handed everything else to the expression parser, which evaluated it.
+#if defined(
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

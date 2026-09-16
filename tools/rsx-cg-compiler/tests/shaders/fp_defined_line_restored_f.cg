@@ -1,0 +1,8 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// THE REINSERTION ROW.  #undef does not stop a driver-owned name
+// expanding - it only stops it counting as defined.  After a source
+// #define and a #undef, __LINE__ is back to the line number, and the
+// use below sits on line 8.
+#define __LINE__ 7
+#undef __LINE__
+float4 main() : COLOR { return __LINE__; }

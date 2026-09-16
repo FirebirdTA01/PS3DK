@@ -1,0 +1,11 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// The control that passed all along: the same shape whose inner door is
+// #if rather than #ifdef.  It is why the defect was invisible - one of
+// the three doors was already shut.
+#define V 1.0
+#if 0
+#if 0
+#elif defined(
+#endif
+#endif
+float4 main() : COLOR { return V; }

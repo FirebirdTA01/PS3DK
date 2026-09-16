@@ -1,0 +1,12 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// THE DEFECT. The operand is the NAME AS WRITTEN. Resolving it after the
+// line was macro-expanded turned defined(X) into defined(1), looked up "1",
+// found nothing and answered FALSE - so the operator reported false exactly
+// when the macro WAS defined, silently, on the branch.
+#define X 1
+#if defined(X)
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

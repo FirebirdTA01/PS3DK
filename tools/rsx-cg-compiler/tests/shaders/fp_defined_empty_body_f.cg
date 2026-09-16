@@ -1,0 +1,14 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// THE SHAPE THE SDK ACTUALLY USES: a configuration macro with an EMPTY
+// body. mrt_configuration.h spells it `#define EYE_SPACE_NORMALS` and
+// normal_transformation.cgh tests it with #elif defined (...). Expanding
+// first turned that into `defined ()`, which matched neither old regex, so
+// every arm of the chain was false and eyeNrmToViewSpace never existed.
+#define X
+#define D defined
+#if D(X)
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

@@ -1,0 +1,4 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// The literal every FALSE-branch row must equal.
+#define V 2.0
+float4 main() : COLOR { return V; }

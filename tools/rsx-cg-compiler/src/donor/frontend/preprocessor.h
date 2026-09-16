@@ -21,6 +21,26 @@ struct MacroDefinition
 	bool bodyFailedToTokenise = false;
 	std::string bodyTokeniseError;
 
+	// EXPANDING AND BEING "DEFINED" ARE DIFFERENT THINGS.  Measured on
+	// sce-cgc 475, both spellings (#ifdef and #if defined):
+	//     pristine __LINE__/__FILE__/__DATE__/__TIME__   NOT defined, but
+	//                                                    they still expand
+	//     __CGC__ / __SCE_CGC__                          defined
+	//     #define __LINE__ 7                             defined, and it
+	//                                                    expands to 7 on
+	//                                                    every later line
+	//     #undef __LINE__                                not defined, and it
+	//                                                    goes back to
+	//                                                    expanding the line
+	//     #define __LINE__ 7 then #undef __LINE__        not defined, and it
+	//                                                    expands the line
+	// So the answer is a property of the BINDING - how it got there - and not
+	// of the spelling.  A list of special names would have got the pristine
+	// rows right and every source-#defined row wrong (codex found it; ruling
+	// by Fable, t_9e90fb38).  Default true, so an ordinary #define needs no
+	// code; the driver clears it on the four it rebinds per line and file.
+	bool countsAsDefined = true;
+
 	bool isVariadic = false; // read by the expander for EVERY function-like
 	                         // macro, but processDefine set it only when a
 	                         // variadic tail was present - an uninitialized
@@ -110,12 +130,19 @@ private:
 	void processPragma(const std::string& directive, std::string& output);
 
 	// Macros
+	// `conditional` is the #if / #elif expression mode: the `defined` operator
+	// is recognised DURING expansion and its operand is taken raw.  It is a
+	// parameter and not a member on purpose - there is then no state to
+	// restore on the exception path when argument pre-expansion turns it off.
 	std::string expandMacros(
 		const std::string& text,
 		const std::string& currentFile = "<input>",
 		int lineNum = 1,
-		int startColumn = 1);
+		int startColumn = 1,
+		bool conditional = false);
 	bool evaluateExpression(const std::string& expr);
+	void setDriverMacro(const std::string& name, const Token& value);
+	bool enclosingInactive(size_t skipTop) const;
 
 	// File handling
 	std::string findIncludeFile(const std::string& filename, bool isSystem, const std::string& currentFile);
