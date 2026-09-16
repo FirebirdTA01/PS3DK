@@ -1,0 +1,10 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// __LINE__, __FILE__, __DATE__ and __TIME__ EXPAND but are not
+// "defined" on the reference; __CGC__ and __SCE_CGC__ are ordinary
+// macros and are. One predicate serves this and #ifdef.
+#if defined(__LINE__)
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

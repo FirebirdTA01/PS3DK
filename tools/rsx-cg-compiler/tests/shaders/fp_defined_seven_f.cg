@@ -1,0 +1,3 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// The literal an explicitly defined builtin must equal.
+float4 main() : COLOR { return 7; }

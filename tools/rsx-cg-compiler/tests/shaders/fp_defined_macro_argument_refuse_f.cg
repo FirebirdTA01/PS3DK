@@ -1,0 +1,13 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// A MACRO ARGUMENT IS NOT PROTECTED. The argument X is pre-expanded to 1
+// like any other text, the operator then sees defined(1), and the
+// reference REFUSES. Inheriting the conditional mode into argument
+// pre-expansion would wrong-ACCEPT this and look like a fix.
+#define X 1
+#define HAS(x) defined(x)
+#if HAS(X)
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

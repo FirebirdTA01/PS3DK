@@ -1,0 +1,6 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// The expansion-value control: an explicitly defined builtin
+// expands to the SOURCE value, not the driver one, and goes on
+// doing so on every later line.
+#define __DATE__ 7
+float4 main() : COLOR { return __DATE__; }

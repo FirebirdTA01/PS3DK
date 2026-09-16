@@ -22,6 +22,26 @@ void Preprocessor::addIncludePath(const std::string& path)
 	includePaths.push_back(path);
 }
 
+// Write (or rewrite) one of the bindings the DRIVER owns, unless the source
+// has taken the name over.  Called per file for __FILE__ and per line for
+// __LINE__, so it is also what restores the binding after a #undef - which is
+// exactly the reference's behaviour: `#undef __LINE__` stops the name being
+// "defined" and does NOT stop it expanding.
+void Preprocessor::setDriverMacro(const std::string& name, const Token& value)
+{
+	auto it = macros.find(name);
+	if (it != macros.end() && it->second.countsAsDefined)
+		return;   // the SOURCE defined this name; its binding wins outright
+	MacroDefinition& macro = macros[name];
+	macro.name = name;
+	macro.isFunctionLike = false;
+	macro.isVariadic = false;
+	macro.countsAsDefined = false;
+	macro.bodyFailedToTokenise = false;
+	macro.replacementList.clear();
+	macro.replacementList.push_back(value);
+}
+
 void Preprocessor::defineMacro(const std::string& name, const std::string& value)
 {
 	MacroDefinition macro;
@@ -97,8 +117,8 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 	currentProcessingFile = filename;
 
 	// Update __FILE__ macro
-	macros["__FILE__"].replacementList.clear();
-	macros["__FILE__"].replacementList.push_back({ TokenType::STRING, "\"" + filename + "\"", 0, 0, filename });
+	setDriverMacro("__FILE__",
+		{ TokenType::STRING, "\"" + filename + "\"", 0, 0, filename });
 
 	// Add to included files for dependency tracking
 	includedFiles.insert(filename);
@@ -125,8 +145,8 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 	while (std::getline(input, line))
 	{
 		// Update __LINE__ macro
-		macros["__LINE__"].replacementList.clear();
-		macros["__LINE__"].replacementList.push_back({ TokenType::NUMBER, std::to_string(logicalLine), logicalLine, 0, logicalFile });
+		setDriverMacro("__LINE__",
+			{ TokenType::NUMBER, std::to_string(logicalLine), logicalLine, 0, logicalFile });
 
 		// Check if we're in an active conditional block
 		bool active = true;
@@ -231,6 +251,11 @@ void Preprocessor::initBuiltinMacros()
 	// Define __DATE__ and __TIME__
 	defineMacro("__DATE__", "\"" __DATE__ "\"");
 	defineMacro("__TIME__", "\"" __TIME__ "\"");
+
+	// These four EXPAND but do not count as defined - see countsAsDefined.
+	// __CGC__ and __SCE_CGC__ below are ordinary macros and keep the default.
+	for (const char* driverOwned : { "__LINE__", "__FILE__", "__DATE__", "__TIME__" })
+		macros[driverOwned].countsAsDefined = false;
 	
 	// Target-identification macros. Beyond the standard __LINE__/__FILE__/
 	// __DATE__/__TIME__ above, sce-cgc 475 predefines __CGC__ and __SCE_CGC__,
@@ -243,6 +268,17 @@ void Preprocessor::initBuiltinMacros()
 	// branch without it (t_1704e79e).
 	defineMacro("__CGC__", "20000");
 	defineMacro("__SCE_CGC__", "20000");
+}
+
+// ONE predicate for both spellings, because the reference has #ifdef and
+// #if defined agree on every cell, and two nearly-identical predicates is how
+// they stop agreeing (t_9e90fb38).  It asks the BINDING, never the name - see
+// MacroDefinition::countsAsDefined for the measured table.
+template <class Map>
+bool isDefinedMacro(const Map& macros, const std::string& name)
+{
+	const auto it = macros.find(name);
+	return it != macros.end() && it->second.countsAsDefined;
 }
 
 void Preprocessor::processDirective(const std::string& directive, std::string& output, const std::string& currentFile, int lineNum)
@@ -663,18 +699,23 @@ void Preprocessor::processIfdef(const std::string& directive, bool isIfndef)
 
 	if (std::regex_search(directive, match, ifdefRegex))
 	{
-		std::string name = match[1];
-		bool defined = (macros.find(name) != macros.end());
-
 		ConditionalState state;
-		state.active = isIfndef ? !defined : defined;
 		state.hasElse = false;
-		state.everActive = state.active;
 
-		// If parent block is inactive, this block is also inactive
-		if(!conditionalStack.empty() && !conditionalStack.top().active)
+		// Same rule as processIf: a group inside a skipped one is inert, and
+		// everActive has to say so or its #elif and #else arms will be
+		// evaluated.  Setting only `active` left everActive false, which is
+		// exactly the door codex's cell walked through.
+		if (enclosingInactive(0))
 		{
 			state.active = false;
+			state.everActive = true;
+		}
+		else
+		{
+			const bool defined = isDefinedMacro(macros, match[1]);
+			state.active = isIfndef ? !defined : defined;
+			state.everActive = state.active;
 		}
 
 		conditionalStack.push(state);
@@ -683,6 +724,30 @@ void Preprocessor::processIfdef(const std::string& directive, bool isIfndef)
 	{
 		throw std::runtime_error("Malformed #ifdef/#ifndef directive: " + directive);
 	}
+}
+
+// Is the group ENCLOSING the one we are dealing with inactive?  skipTop is 0
+// when a new group is about to be pushed (the top of the stack IS the parent)
+// and 1 when we are inside a group and looking past our own entry (#elif).
+//
+// ONE test, because the three directives that open or continue a group must
+// agree.  They did not: processIf suppressed a skipped group correctly while
+// processIfdef still took everActive from its own predicate and processElif
+// evaluated before looking at the parent, so
+//     #if 0 / #ifdef NEVER / #elif defined( / #endif / #endif
+// reached the #elif expression and refused where the reference accepts
+// (codex, on the first review build - my own skip fix had covered one of the
+// three doors).
+bool Preprocessor::enclosingInactive(size_t skipTop) const
+{
+	std::stack<ConditionalState> temp = conditionalStack;
+	for (size_t i = 0; i < skipTop; ++i)
+	{
+		if (temp.empty())
+			return false;
+		temp.pop();
+	}
+	return !temp.empty() && !temp.top().active;
 }
 
 void Preprocessor::processIf(const std::string& directive)
@@ -698,14 +763,28 @@ void Preprocessor::processIf(const std::string& directive)
 	expr = trim(expr);
 
 	ConditionalState state;
-	state.active = evaluateExpression(expr);
 	state.hasElse = false;
-	state.everActive = state.active;
 
-	// If parent block is inactive, this block is also inactive
-	if(!conditionalStack.empty() && !conditionalStack.top().active)
+	// A GROUP THAT IS BEING SKIPPED HAS ITS CONDITION READ, NEVER EVALUATED.
+	// This used to evaluate first and zero the result afterwards, which was
+	// invisible while a malformed condition could not fail - and stopped being
+	// invisible the moment `defined` started diagnosing one:
+	//     #if 0
+	//     #if defined(          the reference ACCEPTS the file
+	//     #endif
+	//     #endif
+	// everActive is set so that no #elif or #else arm of the skipped group can
+	// activate either, and so that processElif's own guard keeps it from
+	// evaluating those arms' expressions.
+	if (enclosingInactive(0))
 	{
 		state.active = false;
+		state.everActive = true;
+	}
+	else
+	{
+		state.active = evaluateExpression(expr);
+		state.everActive = state.active;
 	}
 
 	conditionalStack.push(state);
@@ -724,7 +803,14 @@ void Preprocessor::processElif(const std::string& directive)
 		throw std::runtime_error("#elif after #else is not allowed");
 	}
 
-	if(!state.everActive) // Only evaluate if no previous branch was active
+	// The parent is read BEFORE anything is evaluated, not after.  Evaluating
+	// first and zeroing the result afterwards is only invisible while nothing
+	// in an expression can fail.
+	if (enclosingInactive(1))
+	{
+		state.active = false;
+	}
+	else if(!state.everActive) // Only evaluate if no previous branch was active
 	{
 		// Extract expression after #elif
 		size_t elifPos = directive.find("elif");
@@ -737,17 +823,6 @@ void Preprocessor::processElif(const std::string& directive)
 		expr = trim(expr);
 
 		state.active = evaluateExpression(expr);
-
-		// Check parent
-		if (conditionalStack.size() > 1)
-		{
-			std::stack<ConditionalState> temp = conditionalStack;
-			temp.pop();
-			if (!temp.top().active)
-			{
-				state.active = false;
-			}
-		}
 
 		if(state.active)
 		{
@@ -1225,13 +1300,37 @@ public:
 	explicit HideSetExpander(const std::unordered_map<std::string, MacroDefinition>& macros)
 		: macros_(macros) {}
 
-	HsTokens expand(std::deque<HsToken> in)
+	// `conditional`: #if / #elif expression text.  See takeDefinedOperand.
+	HsTokens expand(std::deque<HsToken> in, bool conditional = false)
 	{
 		HsTokens out;
 		while (!in.empty())
 		{
 			HsToken t = std::move(in.front());
 			in.pop_front();
+			// THE `defined` OPERATOR IS RECOGNISED HERE, INSIDE THE EXPANSION,
+			// and before both the hide-set test and the macro lookup.
+			//
+			// Not before expansion and not after it.  Before is not enough:
+			//     #define D defined
+			//     #if D(X)                       reference TRUE
+			// only produces the operator once D has been replaced.  After is
+			// worse: this expander pushes a replacement onto the FRONT of the
+			// queue and rescans it, so by the time any later pass could look,
+			// D(X) has already become defined(1) and the operand name is gone.
+			// Sitting in the loop is the only place that sees the operator the
+			// moment it appears with its operand still unexpanded behind it.
+			//
+			// Before macros_.find, because the operator outranks a macro of
+			// the same name:
+			//     #define defined 9
+			//     #if defined(X)                 reference FALSE, not 9(X)
+			if (conditional && t.tok.type == TokenType::IDENTIFIER &&
+			    t.tok.lexeme == "defined")
+			{
+				out.push_back(takeDefinedOperand(in, t));
+				continue;
+			}
 			if (t.tok.type != TokenType::IDENTIFIER || t.hs.count(t.tok.lexeme))
 			{
 				out.push_back(std::move(t));
@@ -1370,8 +1469,18 @@ public:
 						: usedParams.count("__VA_ARGS__") != 0;
 				if (named)
 				{
+					// EXPLICITLY NOT conditional.  A macro argument is
+					// pre-expanded like any other text, and the reference
+					// refuses what that produces rather than protecting it:
+					//     #define X 1
+					//     #define HAS(x) defined(x)
+					//     #if HAS(X)            C0105 - the argument became 1
+					//     #define ID(x) x
+					//     #if ID(defined(X))    C0105 - the same, from inside
+					// Inheriting the mode here would wrong-ACCEPT both and
+					// look like a fix (codex; cells f5 and g1).
 					expandedArgs.push_back(
-						expand(std::deque<HsToken>(args[ai].begin(), args[ai].end())));
+						expand(std::deque<HsToken>(args[ai].begin(), args[ai].end()), false));
 				}
 				else
 				{
@@ -1393,6 +1502,50 @@ public:
 
 private:
 	const std::unordered_map<std::string, MacroDefinition>& macros_;
+
+	// Consume `( IDENT )` or a bare `IDENT` from the front of `in` WITHOUT
+	// expanding it, and answer 1 or 0.  The operand is the name as written:
+	//     #define X 1
+	//     #define A X
+	//     #if defined(A)        TRUE - A is a macro; what it expands to is
+	//                           never asked, and 1 is not a macro name.
+	// Anything that is not one of the two forms is an error in the directive,
+	// which is how the reference reads `defined(`, `defined()` and
+	// `defined(1)`.  A form that merely LOOKS well formed is not enough: the
+	// old regex pair matched only the good shapes and left the bad ones to the
+	// expression parser, which evaluated them happily.
+	HsToken takeDefinedOperand(std::deque<HsToken>& in, const HsToken& op) const
+	{
+		auto bad = []() {
+			throw std::runtime_error("error C0105: Syntax error in #if");
+		};
+		bool parenthesised = false;
+		if (!in.empty() && in.front().tok.type == TokenType::LPAREN)
+		{
+			parenthesised = true;
+			in.pop_front();
+		}
+		if (in.empty() || in.front().tok.type != TokenType::IDENTIFIER)
+			bad();
+		const std::string name = in.front().tok.lexeme;
+		in.pop_front();
+		if (parenthesised)
+		{
+			if (in.empty() || in.front().tok.type != TokenType::RPAREN)
+				bad();
+			in.pop_front();
+		}
+		// isDefinedMacro is the SAME predicate #ifdef uses, so the two
+		// spellings cannot drift apart.  defined(defined) is false because
+		// `defined` is not a macro; defined(__LINE__) is false because the
+		// binding the driver owns says so even though __LINE__ expands - and
+		// it becomes TRUE the moment the source writes its own #define.
+		HsToken answer = op;
+		answer.tok.type = TokenType::NUMBER;
+		answer.tok.lexeme = isDefinedMacro(macros_, name) ? "1" : "0";
+		answer.hs.clear();
+		return answer;
+	}
 
 	// The argument bound to `name`, raw or expanded; a variadic tail is the
 	// remaining arguments joined with commas.  Returns false for a
@@ -1501,7 +1654,8 @@ std::string Preprocessor::expandMacros(
 	const std::string& text,
 	const std::string& currentFile,
 	int lineNum,
-	int startColumn)
+	int startColumn,
+	bool conditional)
 {
 	Lexer lexer(text, currentFile, lineNum, startColumn);
 	std::deque<HsToken> in;
@@ -1515,10 +1669,15 @@ std::string Preprocessor::expandMacros(
 		in.push_back({ t, {} });
 	}
 	// No macro name on the line: keep the original spacing and text.
-	if (!anyMacroName)
+	// NOT in conditional mode, where the work is the `defined` operator rather
+	// than any macro.  `#if defined(NEVER)`, `#if defined(__LINE__)` and every
+	// malformed `defined(` line contain no macro name at all, so this return
+	// would hand them straight to the expression parser and the operator would
+	// never be seen (codex - found by reading the function, not by a cell).
+	if (!anyMacroName && !conditional)
 		return text;
 	HideSetExpander expander(macros);
-	return spell(expander.expand(std::move(in)));
+	return spell(expander.expand(std::move(in), conditional));
 }
 
 // Recursive descent parser for C preprocessor #if expressions.
@@ -1854,29 +2013,22 @@ struct ExprParser
 
 bool Preprocessor::evaluateExpression(const std::string& expr)
 {
-	std::string expanded = expandMacros(expr);
-	expanded = trim(expanded);
+	// `defined` is resolved INSIDE this expansion, not before or after it -
+	// see HideSetExpander::expand.  The two regexes that used to sit here ran
+	// AFTER expandMacros, so the operand they captured was the EXPANDED token:
+	// `#define X 1` turned defined(X) into defined(1), the lookup of "1"
+	// failed, and the answer was 0.  The operator was therefore INVERTED for
+	// every object-like macro - it reported false exactly when the macro was
+	// defined, silently, on the branch, with no diagnostic.  The one shape it
+	// got right was a FUNCTION-LIKE macro, whose name survives `defined(F)`
+	// untouched because the "(" belongs to the operator (t_9e90fb38).
+	std::string processedExpr = trim(expandMacros(expr, "<expr>", 1, 1, true));
 
-	// Handle defined() operator before expression parsing
-	std::regex definedRegex(R"(defined\s*\(\s*(\w+)\s*\))");
-	std::smatch match;
-	std::string processedExpr = expanded;
-
-	while (std::regex_search(processedExpr, match, definedRegex))
-	{
-		std::string macroName = match[1];
-		bool isDefined = (macros.find(macroName) != macros.end());
-		processedExpr.replace(match.position(0), match.length(0), isDefined ? "1" : "0");
-	}
-
-	// Handle defined without parentheses
-	std::regex definedNoParenRegex(R"(defined\s+(\w+))");
-	while (std::regex_search(processedExpr, match, definedNoParenRegex))
-	{
-		std::string macroName = match[1];
-		bool isDefined = (macros.find(macroName) != macros.end());
-		processedExpr.replace(match.position(0), match.length(0), isDefined ? "1" : "0");
-	}
+	// An empty condition is an error in the directive, not false:
+	//     #define P
+	//     #if P                 reference C0105
+	if (processedExpr.empty())
+		throw std::runtime_error("error C0105: Syntax error in #if");
 
 	try
 	{
