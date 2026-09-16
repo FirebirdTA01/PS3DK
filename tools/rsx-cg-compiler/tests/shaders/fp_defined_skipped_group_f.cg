@@ -1,0 +1,11 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// A SKIPPED GROUP'S CONDITION IS NEVER EVALUATED, so a malformed one is
+// not an error. processIf used to evaluate first and zero the result
+// afterwards, which was invisible only while nothing in a condition could
+// fail - and stopped being invisible the moment `defined` could diagnose.
+#define V 1.0
+#if 0
+#if defined(
+#endif
+#endif
+float4 main() : COLOR { return V; }

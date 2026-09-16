@@ -1,0 +1,10 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// Operator and operand both arrive from one object-like macro.
+#define X 1
+#define HAS defined(X)
+#if HAS
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

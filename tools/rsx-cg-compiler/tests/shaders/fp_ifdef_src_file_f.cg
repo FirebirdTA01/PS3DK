@@ -1,0 +1,13 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// DEFINEDNESS IS A PROPERTY OF THE BINDING, NOT OF THE NAME.  A list of
+// special names gets the pristine rows right and every one of these
+// wrong: the moment the SOURCE writes its own #define, the name counts
+// as defined in both spellings, #undef takes it away again, and a
+// re-#define brings it back (codex; ruling by Fable).
+#define __FILE__ 7
+#ifdef __FILE__
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

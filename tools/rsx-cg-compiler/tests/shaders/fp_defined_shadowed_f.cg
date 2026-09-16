@@ -1,0 +1,11 @@
+// t_9e90fb38.  Measured against sce-cgc 475.
+// ...and recognising it only AFTER expansion is not enough either: the
+// operator outranks a macro of the same name, so the interception has to
+// sit before the macro lookup.
+#define defined 9
+#if defined(X)
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }
