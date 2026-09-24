@@ -1,0 +1,5 @@
+// t_7cc742ed follow-up. Measured against sce-cgc 475 (2026-09-24).
+// Nested: the inner unused argument is scanned too (reference C0107).
+#define ONE(x) x
+#define DROP(x) 1.0
+float4 main() : COLOR { return float4(DROP(DROP(ONE(1,2))), 0, 0, 1); }

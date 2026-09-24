@@ -157,6 +157,16 @@ refuse_saying ${P}_ff_invoked_refuse_f   "unknown character" "the same macro act
 accept        ${P}_ff_unused_arg_f       "an argument bound to a parameter the body never names"
 refuse_saying ${P}_ff_used_arg_refuse_f  "unknown character" "the same argument where the body DOES name it"
 
+# "Never expanded" was too strong, and it shipped a WRONG ACCEPT (CI on
+# 14efd398, preprocessor-harness-test).  An argument the body never names is
+# never OUTPUT, but the reference still SCANS it for macro calls: a wrong
+# argument count inside it is C0107.  Only a body that does not tokenise is
+# held back, because a scan never reaches the token stream.
+refuse_saying ${P}_unused_arg_arity_refuse_f        "incorrect number of arguments" "a wrong-arity call inside an argument the body never names"
+refuse_saying ${P}_unused_arg_nested_arity_refuse_f "incorrect number of arguments" "the same, one unused argument deeper"
+accept        ${P}_unused_arg_arity_ok_f            "the right argument count inside an unused argument"
+accept        ${P}_unused_arg_nested_ff_f           "an untokenisable body reached through an unused argument is scanned, never output"
+
 # A ## OPERAND TAKES THE RAW ARGUMENT - decided per OCCURRENCE, not per
 # parameter. The mixed row is the one that forces it: the same parameter
 # pasted AND plain, which the reference refuses while accepting every

@@ -1,0 +1,8 @@
+// t_7cc742ed follow-up. Measured against sce-cgc 475 (2026-09-24).
+// The scan never OUTPUTS, so an untokenisable body met through a used
+// parameter inside an unused argument still does not reach the stream:
+// reference ACCEPTS.
+#define BAD (1.0)
+#define KEEP(x) x
+#define DROP(x) 1.0
+float4 main() : COLOR { return float4(DROP(KEEP(BAD)), 0, 0, 1); }
