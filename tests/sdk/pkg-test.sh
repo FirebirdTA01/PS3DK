@@ -34,14 +34,21 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 # Resolve or build the pkg binary
+CC="${CC:-gcc}"
+if ! command -v "$CC" >/dev/null 2>&1; then
+    CC="cc"
+fi
+
+SAN_FLAGS=""
+if "$CC" -fsanitize=address,undefined -x c /dev/null -c -o "$tmp/san_test.o" >/dev/null 2>&1; then
+    SAN_FLAGS="-fsanitize=address,undefined"
+    note "compiler supports ASan/UBSan: enabling $SAN_FLAGS"
+fi
+
 pkg="${1:-${PKG_BIN:-}}"
 if [ -z "$pkg" ]; then
-    CC="${CC:-gcc}"
-    if ! command -v "$CC" >/dev/null 2>&1; then
-        CC="cc"
-    fi
-    note "building pkg with $CC"
-    "$CC" -O2 -Wall -Wextra \
+    note "building pkg with $CC $SAN_FLAGS"
+    "$CC" -O2 -Wall -Wextra $SAN_FLAGS \
         "$repo_root/tools/sfo-pkg/pkg.c" \
         "$repo_root/tools/sfo-pkg/sha1.c" \
         -o "$tmp/pkg"
@@ -146,6 +153,72 @@ if [ -f "$tmp/out_nonexistent.pkg" ]; then
 fi
 if [ "$rc_nonexistent" -ne 0 ] && [ ! -f "$tmp/out_nonexistent.pkg" ]; then
     note "Row (b2) PASS: nonexistent directory exited non-zero ($rc_nonexistent) with no output package"
+fi
+
+# (b3) Buffered write failure test (symlink to /dev/full on POSIX)
+if [ -c /dev/full ]; then
+    mkdir -p "$tmp/in_full"
+    printf 'full test' > "$tmp/in_full/test.txt"
+    rc_full=0
+    ln -sf /dev/full "$tmp/out_full.pkg"
+    "$pkg" --contentid=UP0001-TEST12345_00-0000000000000001 "$tmp/in_full" "$tmp/out_full.pkg" > "$tmp/pack_full.log" 2>&1 || rc_full=$?
+    if [ "$rc_full" -eq 0 ]; then
+        row_fail "Row (b)" "pkg exited 0 on /dev/full write failure (unchecked fclose/fflush)"
+        row_b_ok=0
+    fi
+    if [ -e "$tmp/out_full.pkg" ] || [ -L "$tmp/out_full.pkg" ]; then
+        row_fail "Row (b)" "pkg left output file/symlink after write failure"
+        row_b_ok=0
+    fi
+    if [ "$rc_full" -ne 0 ] && [ ! -e "$tmp/out_full.pkg" ] && [ ! -L "$tmp/out_full.pkg" ]; then
+        note "Row (b3) PASS: /dev/full write failure exited non-zero ($rc_full) and removed output"
+    fi
+else
+    note "Row (b3) SKIP: /dev/full not available on this host"
+fi
+
+# (b4) Stat failure after first file under ASan (--wrap=stat)
+wrap_c="$tmp/wrap_stat.c"
+cat > "$wrap_c" <<'EOF'
+#include <sys/stat.h>
+#include <string.h>
+#include <errno.h>
+int __real_stat(const char *, struct stat *);
+int __wrap_stat(const char *path, struct stat *st) {
+    static int b_calls = 0;
+    if (strstr(path, "b_stat_fail.txt") && ++b_calls == 2) {
+        errno = ENOENT;
+        return -1;
+    }
+    return __real_stat(path, st);
+}
+EOF
+if [ -n "$SAN_FLAGS" ] && "${CC:-gcc}" -O0 $SAN_FLAGS \
+    "$repo_root/tools/sfo-pkg/pkg.c" \
+    "$repo_root/tools/sfo-pkg/sha1.c" \
+    "$wrap_c" \
+    -Wl,--wrap=stat \
+    -o "$tmp/pkg_stat_fail" >/dev/null 2>&1; then
+    stat_in="$tmp/in_stat_fail"
+    mkdir -p "$stat_in"
+    printf 'first file' > "$stat_in/a_first.txt"
+    printf 'second file' > "$stat_in/b_stat_fail.txt"
+    rc_stat=0
+    ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" \
+    "$tmp/pkg_stat_fail" --contentid=UP0001-TEST12345_00-0000000000000001 "$stat_in" "$tmp/out_stat_fail.pkg" > "$tmp/stat_fail.log" 2>&1 || rc_stat=$?
+    if [ "$rc_stat" -eq 0 ]; then
+        row_fail "Row (b)" "pkg exited 0 on second-file stat failure"
+        row_b_ok=0
+    fi
+    if grep -q "AddressSanitizer" "$tmp/stat_fail.log"; then
+        row_fail "Row (b)" "AddressSanitizer detected double-free on stat failure cleanup"
+        row_b_ok=0
+    fi
+    if [ "$rc_stat" -ne 0 ] && ! grep -q "AddressSanitizer" "$tmp/stat_fail.log"; then
+        note "Row (b4) PASS: stat failure on second file exited non-zero ($rc_stat) with 0 ASan errors"
+    fi
+else
+    note "Row (b4) SKIP: -Wl,--wrap=stat or ASan not supported on this host"
 fi
 
 # ---------------------------------------------------------------------------

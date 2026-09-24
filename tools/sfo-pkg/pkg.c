@@ -566,6 +566,7 @@ static int get_files_win32(const wchar_t *wfolder, const wchar_t *woriginal)
             e->flags = TYPE_OVERWRITE_ALLOWED | TYPE_RAW;
         }
         free(files_list[i]);
+        files_list[i] = NULL;
     }
     free(files_list);
     files_list = NULL;
@@ -593,23 +594,31 @@ static int get_files_win32(const wchar_t *wfolder, const wchar_t *woriginal)
 
         int rc = get_files_win32(dirs_list[i], woriginal);
         free(dirs_list[i]);
+        dirs_list[i] = NULL;
         if (rc != 0) {
-            for (int k = i + 1; k < ndirs; k++) free(dirs_list[k]);
-            free(dirs_list);
-            return rc;
+            goto err_cleanup;
         }
     }
     free(dirs_list);
+    dirs_list = NULL;
     return 0;
 
 err_cleanup:
     if (files_list) {
-        for (int i = 0; i < nfiles; i++) free(files_list[i]);
+        for (int i = 0; i < nfiles; i++) {
+            free(files_list[i]);
+            files_list[i] = NULL;
+        }
         free(files_list);
+        files_list = NULL;
     }
     if (dirs_list) {
-        for (int i = 0; i < ndirs; i++) free(dirs_list[i]);
+        for (int i = 0; i < ndirs; i++) {
+            free(dirs_list[i]);
+            dirs_list[i] = NULL;
+        }
         free(dirs_list);
+        dirs_list = NULL;
     }
     return -1;
 }
@@ -757,6 +766,7 @@ static int collect_dir(const char *folder, const char *original)
             e->flags = TYPE_OVERWRITE_ALLOWED | TYPE_RAW;
         }
         free(files_list[i]);
+        files_list[i] = NULL;
     }
     free(files_list);
     files_list = NULL;
@@ -784,23 +794,31 @@ static int collect_dir(const char *folder, const char *original)
 
         int rc = collect_dir(dirs_list[i], original);
         free(dirs_list[i]);
+        dirs_list[i] = NULL;
         if (rc != 0) {
-            for (int k = i + 1; k < ndirs; k++) free(dirs_list[k]);
-            free(dirs_list);
-            return rc;
+            goto err_cleanup;
         }
     }
     free(dirs_list);
+    dirs_list = NULL;
     return 0;
 
 err_cleanup:
     if (files_list) {
-        for (int i = 0; i < nfiles; i++) free(files_list[i]);
+        for (int i = 0; i < nfiles; i++) {
+            free(files_list[i]);
+            files_list[i] = NULL;
+        }
         free(files_list);
+        files_list = NULL;
     }
     if (dirs_list) {
-        for (int i = 0; i < ndirs; i++) free(dirs_list[i]);
+        for (int i = 0; i < ndirs; i++) {
+            free(dirs_list[i]);
+            dirs_list[i] = NULL;
+        }
         free(dirs_list);
+        dirs_list = NULL;
     }
     return -1;
 }
@@ -1093,6 +1111,7 @@ static int unpack_pkg(const char *filename)
                 if (wr != (size_t)fsize) {
                     perror("fwrite");
                     fclose(fp);
+                    delete_file(outpath);
                     free(name);
                     free(outpath);
                     free(dec_data);
@@ -1100,7 +1119,15 @@ static int unpack_pkg(const char *filename)
                     return 1;
                 }
             }
-            fclose(fp);
+            if (fflush(fp) != 0 || fclose(fp) != 0) {
+                perror(outpath);
+                delete_file(outpath);
+                free(name);
+                free(outpath);
+                free(dec_data);
+                free(data);
+                return 1;
+            }
         }
 
         if (g_debug) {
@@ -1475,7 +1502,14 @@ static int pack_pkg(const char *folder, const char *contentid,
     memset(trail, 0, 0x60);
     WRITE_OUT(trail, 1, 0x60);
 
-    fclose(out);
+    if (fflush(out) != 0 || fclose(out) != 0) {
+        perror(final_outname);
+        delete_file(final_outname);
+        free(final_outname);
+        dynbuf_free(&buf);
+        free_file_entries();
+        return 1;
+    }
 #undef WRITE_OUT
 
     uint64_t data_size_saved = (uint64_t)buf.size;
