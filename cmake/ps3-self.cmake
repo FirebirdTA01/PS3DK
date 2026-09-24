@@ -303,14 +303,26 @@ function(ps3_add_self target)
     set(_self      "${_self_out_dir}/${target}.self")
     set(_fake_self "${_self_out_dir}/${target}.fake.self")
 
+    # An LP64 executable needs `sprxlinker --lp64` so import call sites get
+    # their TOC restore. The LP64 toolchain file sets that globally; a target
+    # that opts into LP64 itself (-mlp64 in its link options, under the ILP32
+    # toolchain file) gets it here.
+    set(_sprx_lp64 "")
+    if(NOT "--lp64" IN_LIST PS3_SPRXLINKER_FLAGS)
+        set(_sprx_lp64 "$<$<IN_LIST:-mlp64,$<TARGET_PROPERTY:${target},LINK_OPTIONS>>:--lp64>")
+    endif()
+
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_self_out_dir}"
         COMMAND "${CMAKE_STRIP}" "${_elf}" -o "${_stripped}"
-        COMMAND "${PS3_TOOL_sprxlinker}" ${PS3_SPRXLINKER_FLAGS} "${_stripped}"
+        COMMAND "${PS3_TOOL_sprxlinker}" ${PS3_SPRXLINKER_FLAGS} ${_sprx_lp64} "${_stripped}"
         COMMAND "${PS3_TOOL_make_self}"  "${_stripped}" "${_self}"
         COMMAND "${PS3_TOOL_fself}"      "${_stripped}" "${_fake_self}"
         BYPRODUCTS "${_stripped}" "${_self}" "${_fake_self}"
         COMMENT "ps3-self: ${target}.{self,fake.self}"
+        # Drops the empty result of the --lp64 expression for ILP32 targets;
+        # without it sprxlinker receives a literal "" argument.
+        COMMAND_EXPAND_LISTS
         VERBATIM)
 
     set_property(TARGET ${target} PROPERTY PS3_SELF_OUTPUT_DIRECTORY "${_self_out_dir}")

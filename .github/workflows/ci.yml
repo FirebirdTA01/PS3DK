@@ -125,6 +125,11 @@ jobs:
       - name: Test ps3_add_self output directory override
         run: bash tests/sdk/cmake-self-output-dir-test.sh
 
+      # A target that opts into LP64 with -mlp64 must be post-linked with
+      # sprxlinker --lp64, as the LP64 toolchain file does for whole projects.
+      - name: Test ps3_add_self post-links -mlp64 targets for LP64
+        run: bash tests/sdk/cmake-self-lp64-postlink-test.sh
+
       - name: Test librt pathname limits and error propagation
         run: bash tests/sdk/librt-pathconf-test.sh
 

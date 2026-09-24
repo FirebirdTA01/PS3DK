@@ -19,3 +19,8 @@ shader-readback,tests/regression/shader-readback/shader-readback.fake.self,90,RA
 # Failure condition is sameness across two draws differing only in uniform value.
 uniform-readback,tests/regression/uniform-readback/uniform-readback.fake.self,30,RAN-CLEAN,UNIFORM_READBACK_OK,UNIFORM_READBACK_FAIL
 
+# cxx-eh guards PPU C++ exception handling in both ABIs: static-constructor
+# throw, typed catch, RAII destructors plus rethrow, and per-thread
+# exception state on two PPU threads (GCC patches 0037 and 0038).
+cxx-eh-ilp32,tests/regression/cxx-eh/cxx-eh-ilp32.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
+cxx-eh-lp64,tests/regression/cxx-eh/cxx-eh-lp64.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
