@@ -32,44 +32,31 @@ difference; then add a regression check for kernel-target output.
 
 ## C++ exceptions are not caught on the PPU in the default ILP32 ABI
 
-**Status:** open; failing stage localized, fix planned in the PPU GCC.
-Measured against an installed v0.12.65 SDK; not yet re-run against
-v0.14.0.
+**Status:** fixed on main (GCC patch 0037 and the matching CRT change);
+affects v0.14.0 and earlier releases.
 
-**Symptom.** In the default ILP32 ABI, a C++ throw never reaches its
-handler: the program prints `terminate called after throwing an instance
-of '<type>'`, then `terminate called recursively`, and aborts.  Observed
-for `throw 42` / `catch (int)` from `main`, and for `std::bad_alloc`
-thrown and caught inside a static constructor.  In LP64 (`-mlp64`), the
-`throw 42` / `catch (int)` probe from `main` is caught correctly; the
-other LP64 combinations have not yet been tested.
+**Symptom (affected releases).** In the default ILP32 ABI, a C++ throw
+never reaches its handler: the program prints `terminate called after
+throwing an instance of '<type>'`, then `terminate called recursively`,
+and aborts.  LP64 (`-mlp64`) is not affected.
 
-**Cause (localized).** For the probed frame, the unwinder finds the
-frame's FDE, but its first step to the caller returns a garbage address.
-ILP32 code saves the link register with a 4-byte store (`stw
-r0,16(r1)`), while the ILP32 `libgcc` unwinder records the link register
-as an 8-byte register and loads that slot as 8 bytes before narrowing it
-to a 32-bit address.  On a big-endian target that keeps the four bytes
-after the saved address, which is consistent with the garbage address
-observed.  This explanation is inferred from the code and the observed
-value; the saved stack bytes have not yet been dumped.
+**Cause.** The ILP32 unwinder treats the link register and the EH data
+registers r3-r6 as 8-byte registers, but ILP32 code saved the link
+register with a 4-byte store and reloaded r3-r6 with 4-byte loads.  The
+unwinder therefore read a wrong return address for every caller, and
+the landing pad received the wrong halves of the exception pointer and
+selector.  The fix saves and restores both as 64-bit values, as the
+reference toolchain does.
 
-**Workaround.** For code that needs C++ exceptions, build for LP64:
-`-mlp64`, link against `$PS3DK/ppu/lib/lp64`, and run `sprxlinker
---lp64` on the ELF before `make_self`.  Otherwise report errors through
-return values and build with `-fno-exceptions`.
+**Workaround (affected releases).** Build code that needs C++ exceptions
+for LP64: `-mlp64`, link against `$PS3DK/ppu/lib/lp64`, and run
+`sprxlinker --lp64` on the ELF before `make_self`.
 
-**Planned fix.** Make the link-register save and restore widths match
-the unwinder: save and restore it as a 64-bit value (`std` / `ld`), as
-the reference toolchain's ILP32 code does, everywhere that slot is
-touched (compiler prologues and epilogues, shrink-wrapped and
-out-of-line save/restore routines, and the hand-written CRT start and
-end files).  Pointer width stays 32-bit.  Widening the stack back chain
-is a separate change that needs its own audit of every back-chain reader.
-Before the full rebuild, a controlled probe will dump the saved
-link-register bytes and compare an LR-only change against LR plus back
-chain.  The fix adds a throw/catch probe for both ABIs to the target
-regression suite.
+**Remaining limits.** Objects built with an affected toolchain still
+save the link register in 4 bytes and cannot be unwound through; rebuild
+any C++ library that exceptions must pass through.  Exceptions cannot
+propagate across PRX/import calls: firmware PRX frames have no unwind
+information.
 
 ---
 
@@ -89,16 +76,13 @@ the same time shares that state between the threads, so one thread's
 throw or catch can change what another thread's handlers,
 `std::uncaught_exceptions()` or `std::current_exception()` see.
 
-**Mitigation.** Once exceptions work (see the entry above), keeping all
-exception handling on one PPU thread, or never letting two threads be
-inside exception handling at once, avoids the shared state.  Until then
-there is no working exception path to serialize.
+**Mitigation.** Keep all exception handling on one PPU thread, or never
+let two threads be inside exception handling at once.
 
 **Planned fix.** Give the PPU GCC a real thread model backed by the lv2
 threading primitives already used by librt's pthread layer, so that
 libstdc++ keeps per-thread exception globals, and add a two-thread
-throw/catch regression.  This depends on the entry above being fixed
-first.
+throw/catch regression.
 
 ---
 
