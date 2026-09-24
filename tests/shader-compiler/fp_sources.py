@@ -168,7 +168,12 @@ def ucode_words(blob):
     # (codex).  The table's extent has to be computed, and computing it also
     # bounds the parameter count: an nparams of 0xffffffff runs the end past
     # any real file.
-    if header_size < HEADER_BYTES:
+    # A container with NO parameters has parameterArray = 0 on the reference
+    # (sce-cgc 475, SDK fnop.cg: 'void main() {}'), so 0 is the one legal
+    # value below the header - and only with a zero count.
+    if nparams == 0 and header_size == 0:
+        header_size = HEADER_BYTES
+    elif header_size < HEADER_BYTES:
         raise ContainerError("parameterArray starts at %d, inside the %d-byte header"
                              % (header_size, HEADER_BYTES))
     table_end = header_size + nparams * PARAM_RECORD_BYTES
@@ -332,6 +337,13 @@ def verify_arity(paths):
             seen[op] = seen.get(op, 0) + 1
             for slot in (1, 2, 3):
                 real = not looks_like_padding(w, slot)
+                # The reference's no-effect program is ONE all-zero NOP
+                # (sce-cgc 475, 'void main() {}'): its unused slots are zero
+                # words, not the padding signature.  Zero is also a genuine
+                # R0.xxxx read, so this is excused only on NOP, whose arity
+                # is 0 - never as a padding rule for anything else.
+                if op == 0x00 and w[slot] == 0:
+                    real = False
                 if slot > arity and real:
                     contradicted.append((path, op, slot - 1, None))
                 if slot <= arity:

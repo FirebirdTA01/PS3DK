@@ -1163,7 +1163,9 @@ ContainerResult emitFragmentContainerImpl(
     put32(out, kBinaryFormatRevision);
     put32(out, totalSize);
     put32(out, static_cast<uint32_t>(params.size()));
-    put32(out, headerSize);              // parameterArray
+    // parameterArray: the reference writes 0, not the header size, when
+    // there is no parameter table at all (SDK fnop.cg, 'void main() {}').
+    put32(out, params.empty() ? 0u : headerSize);
     put32(out, programOffset);
     put32(out, ucodeSize);
     put32(out, ucodeOffset);
