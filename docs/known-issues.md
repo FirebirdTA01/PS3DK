@@ -7,35 +7,35 @@ next surface.
 
 ---
 
-## C++ exceptions are not caught on the PPU
+## C++ exceptions are not caught on the PPU in the default ILP32 ABI
 
-**Status:** open, under investigation.  Reproduced with a standalone
-probe built against an installed v0.12.65 SDK; not yet re-run against
-v0.14.0.  The failing stage is not yet localized.
+**Status:** open; cause localized, fix planned in the PPU GCC.  Measured
+against an installed v0.12.65 SDK; not yet re-run against v0.14.0.
 
-**Symptom.** The probe's first `try { throw std::bad_alloc(); } catch
-(const std::bad_alloc &) {}` runs in a static constructor.  Built for the
-default ILP32 ABI, it prints its before-throw marker, then `terminate
-called after throwing an instance of 'std::bad_alloc'` and `terminate
-called recursively`, and aborts; the handler is never reached, so the
-probe's later throw sites in `main` and in a called function never run.
-The same probe built `-mlp64` produced no TTY output at all, not even the
-before-throw marker, so that build has not yet been shown to reach the
-throw.
+**Symptom.** In the default ILP32 ABI, the first C++ throw in a program
+never reaches its handler: the program prints `terminate called after
+throwing an instance of '<type>'`, then `terminate called recursively`,
+and aborts.  Seen with every type tried (`int`, `std::bad_alloc`) and
+from `main` as well as from a static constructor.  The same code
+built for LP64 (`-mlp64`) catches the exception correctly.
 
-**What has been checked.** Startup registration is present: `_init` calls
-`frame_dummy` (which registers `.eh_frame`) before running `.ctors`, and
-`.eh_frame` begins with a valid CIE at `__EH_FRAME_BEGIN__`.  This does
-not rule out defects in individual FDEs, the unwinder, or the
-personality routine; those are the next investigation targets.
+**Cause.** The unwinder cannot step from a frame to its caller.  ILP32
+code saves the link register with a 4-byte store (`stw r0,16(r1)`) and
+the back chain with `stwu`, while the ILP32 `libgcc` unwinder treats the
+saved link register as an 8-byte value.  It therefore reads the saved
+return address together with four bytes of stale stack and keeps the
+wrong half, so the first frame step yields a garbage address and the
+search for a handler fails.  Frame registration and FDE lookup work.
 
-**Workaround.** None inside C++ exception handling.  Code that must run
-on the PPU today should report errors through return values; build with
-`-fno-exceptions` where the libraries in use allow it.
+**Workaround.** Build code that needs C++ exceptions for LP64:
+`-mlp64`, link against `$PS3DK/ppu/lib/lp64`, and run `sprxlinker
+--lp64` on the ELF before `make_self`.  Otherwise report errors through
+return values and build with `-fno-exceptions`.
 
-**Planned fix.** Localize the failure with one probe per throw site, an
-LP64 no-throw control, and markers on handler entry and after the catch;
-then fix the failing stage for both ABIs and add the probe to the target
+**Planned fix.** Make ILP32 prologues and epilogues save the link
+register and back chain as 64-bit values (`std` / `stdu`), which is also
+what the reference toolchain's ILP32 code does, then rebuild the PPU
+toolchain and add a throw/catch probe for both ABIs to the target
 regression suite.
 
 ---
