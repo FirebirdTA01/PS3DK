@@ -1332,6 +1332,11 @@ public:
 			// consumed the same way, and a parameter immediately before ## is
 			// its left operand.
 			std::set<std::string> usedParams;
+			// Every identifier the replacement list spells, whatever its role.
+			std::set<std::string> mentionedParams;
+			for (const Token& rt : macro.replacementList)
+				if (rt.type == TokenType::IDENTIFIER)
+					mentionedParams.insert(rt.lexeme);
 			{
 				const std::vector<Token>& rl = macro.replacementList;
 				for (size_t ri = 0; ri < rl.size(); ++ri)
@@ -1375,8 +1380,41 @@ public:
 				}
 				else
 				{
-					// Never substituted, so never expanded. The raw spelling is
-					// kept so ## and # still see what was written.
+					// Never substituted through expandedArgs, so its expansion
+					// is never OUTPUT.  The raw spelling is kept so ## and #
+					// still see what was written.
+					//
+					// But an argument whose parameter the body does not mention
+					// AT ALL is still SCANNED: the reference checks the macro
+					// calls inside it (sce-cgc 475, C0107):
+					//     #define ONE(x) x      #define DROP(x) 1.0
+					//     DROP(ONE(1,2))          reference REFUSES
+					//     DROP(DROP(ONE(1,2)))    reference REFUSES
+					// while a body that does not tokenise is still only raised
+					// where it reaches the token stream, which a dry scan never
+					// does:
+					//     DROP(BAD)  DROP(KEEP(BAD))   reference ACCEPTS
+					// An argument used only as a # or ## operand is NOT scanned:
+					// CAT(ONE(1,2),1) and STR(ONE(1,2)) fail on the reference for
+					// the paste / the cast, never for ONE's arity.
+					const bool mentioned =
+						ai < macro.parameters.size()
+							? mentionedParams.count(macro.parameters[ai]) != 0
+							: mentionedParams.count("__VA_ARGS__") != 0;
+					if (!mentioned)
+					{
+						++dryScanDepth_;
+						try
+						{
+							(void)expand(std::deque<HsToken>(args[ai].begin(), args[ai].end()));
+						}
+						catch (...)
+						{
+							--dryScanDepth_;
+							throw;
+						}
+						--dryScanDepth_;
+					}
 					expandedArgs.push_back(args[ai]);
 				}
 			}
@@ -1393,6 +1431,9 @@ public:
 
 private:
 	const std::unordered_map<std::string, MacroDefinition>& macros_;
+	// > 0 while scanning an argument whose expansion is discarded; see the
+	// argument loop in expand().
+	mutable int dryScanDepth_ = 0;
 
 	// The argument bound to `name`, raw or expanded; a variadic tail is the
 	// remaining arguments joined with commas.  Returns false for a
@@ -1436,7 +1477,9 @@ private:
 		//   and an argument the callee never substitutes is never expanded
 		//     #define DROP(x) 1.0          then   DROP(BAD)
 		// Both accept on the reference and on the parent.
-		if (macro.bodyFailedToTokenise)
+		// A DRY SCAN of an argument no parameter names never produces output,
+		// so it never reaches the token stream either (DROP(BAD) accepts).
+		if (macro.bodyFailedToTokenise && dryScanDepth_ == 0)
 		{
 			throw std::runtime_error(macro.bodyTokeniseError);
 		}

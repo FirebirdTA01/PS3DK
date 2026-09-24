@@ -1,0 +1,6 @@
+// t_7cc742ed follow-up. Measured against sce-cgc 475 (2026-09-24).
+// An argument the body never names is still SCANNED for macro calls:
+// the reference refuses C0107, too many arguments to macro ONE.
+#define ONE(x) x
+#define DROP(x) 1.0
+float4 main() : COLOR { return float4(DROP(ONE(1,2)), 0, 0, 1); }
