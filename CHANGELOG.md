@@ -16,6 +16,95 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.14.0] — 2026-09-24
+
+### Fixed
+
+- **GCM FIFO wrap lost commands.**  The wrap callback `cellGcmInit` installs
+  wrote the tail JUMP, set `PUT = begin` and waited for `GET == begin`.  When
+  the application had not flushed since the ring last wrapped, `PUT` and `GET`
+  both already sat at begin - the idle state - so the wait returned at once and
+  a whole lap of commands was overwritten before the GPU fetched it.  A flushed
+  lap the GPU had not yet started was lost the same way.  The wrap is now two
+  phases: publish the lap up to the JUMP and wait for `GET` to reach it, then
+  release the JUMP and wait for `GET` to park at begin.  The waits stay
+  unbounded, because a failing return makes the reserve drop the packet
+  silently; a reserve larger than the whole ring, which used to be written past
+  its end, now halts.  Host model test `tests/sdk/fifo-wrap-protocol-test.sh`
+  runs the protocol against a simulated fetcher, with the old protocol as its
+  failing control.  On RPCS3, in one scene linked against an isolated overlay
+  of this fix, a run that faulted after about 21 s ran about 410 s through at
+  least 60 wraps (the log capped at 60).  `docs/known-issues.md` had called the old wrap
+  correct; that entry is corrected.
+- **A render target's type took the texture-filter enum.**
+  `sf.type = GCM_TEXTURE_LINEAR` (value 2) told the RSX the render target was
+  swizzled.  RPCS3 tolerates the contradiction; a real PS3 hung on a black
+  screen at the first flip.  Surfaces now take `GCM_SURFACE_TYPE_LINEAR` /
+  `_SWIZZLE`, verified on a CECH-3001B.
+- **PRX import headers carried the function count in the attributes field.**
+  `nidgen` now emits the default import attributes (`0x0009`) at offset 4 and
+  the function count at offset 6, in both ABIs.
+- **`std::filesystem` did not link.**  `directory_iterator` and friends pulled
+  in `openat`, `fdopendir`, `unlinkat`, `fchmodat`, `symlink`, `readlink`,
+  `fchmod` and `pathconf`, none of which the libc defines.  GCC 12's feature
+  checks can be compile-only (`gcc_no_link=yes`), and newlib declares all of
+  them, so they came out enabled; with `--with-newlib` our crossconfig patch
+  never ran.  GCC patch 0036 turns the
+  seven unsupported facilities off, so libstdc++ uses path-based fallbacks
+  onto calls Lv-2 has, and reports symlinks as `errc::function_not_supported`
+  through the `error_code`.  `librt` gains a real `pathconf` (Lv-2 limits,
+  pathname lookup, relative paths resolved against `getcwd`, because Lv-2
+  `stat` rejects relative paths).  On RPCS3 the filesystem probe passes in
+  ILP32 and LP64, built against an isolated rebuilt libstdc++ and `librt` plus
+  the patched `remove` object; the full release toolchain build is this
+  release's own run.  LP64 images need `sprxlinker --lp64`, which
+  `ps3_add_self` already passes.
+- **`remove()` never removed a directory.**  newlib's `remove` is unlink-only
+  and Lv-2 unlink refuses directories (`EISDIR`).  Newlib patch 0016 falls back
+  to `rmdir` on `EISDIR`, on the caller's reent; `ENOTEMPTY` and every other
+  error are preserved.  `std::filesystem::remove` inherits the fix.
+- **`pkg` truncated long paths and reported success on failure.**  Windows
+  paths were stored in 260-byte tables and silently cut to 259 characters, and
+  a payload file that could not be opened printed `Cannot open` but still exited
+  0 with no package.  Paths are now allocated per entry with no file-count cap,
+  Windows uses the wide APIs with extended-length paths, and a payload that
+  cannot be opened or stat'ed, or an output write, flush or close failure,
+  exits 1 and removes the partial package.  Ordinary packages are
+  byte-identical to before.  `tests/sdk/pkg-test.sh` builds `pkg` under
+  ASan/UBSan when the compiler supports them.
+- **`<sys/lv2_types.h>` shifted a 32-bit value by 32.**  `lv2_ea32_pack`
+  checked a pointer's upper half with `(u >> 32)`; with ILP32's 32-bit
+  `uintptr_t` that is undefined behaviour, a warning in every unit including the
+  header (`<cell/gcm.h>` pulls it in) and an error under
+  `-Werror=shift-count-overflow`.  The check now shifts a `uint64_t`, and the
+  header's prose describes both data models.  `tests/sdk/lv2-ea32-test.sh`
+  covers C11/C++17, ILP32/LP64 and debug/release.
+- **The RPCS3 regression harness aborted on an empty TTY log**, losing the
+  verdict of any program that died before printing; such a row is now recorded
+  as a failure.
+
+### Added
+
+- **`ps3_add_self(... OUTPUT_DIRECTORY dir)` and `PS3_SELF_OUTPUT_DIRECTORY`.**
+  The `.elf`, `.self` and `.fake.self` (and `ps3_add_pkg`'s packages) can be
+  written outside the source tree; a relative directory resolves under the build
+  directory.  The default is unchanged: next to the sample's `CMakeLists.txt`.
+
+### Changed
+
+- **Documentation.**  `hello-spu-job` no longer claims the MEMORY_SIZE
+  dispatcher gate still fires (the sample has run end-to-end since the BINARY2
+  descriptor fix).  `docs/coverage.md` is regenerated: 4092 of 4796 reference
+  SPRX exports (85.3%), up from a stale 72%.  `docs/known-issues.md` records
+  PSGL as shipped, naming what is still stubbed (CgFX, the runtime Cg compiler,
+  `cgCombinePrograms`, the hardware cursor).
+
+### Known issues
+
+- The active GCM FIFO ring is still the firmware's initial ~28 KB segment
+  whatever `cmdSize` `cellGcmInit` receives; with the wrap fixed this costs
+  drains, not correctness.
+
 ## [v0.13.0] — 2026-09-09
 
 Minor release, driven by an external bug report.  It describes what is on
@@ -431,7 +520,7 @@ patches — backed by a pthread shim in `librt.a` over the Lv-2 primitives.
 
 ### Added
 
-- **POSIX threads shim in `librt.a`** (`t_44391d9c`): `pthread_mutex_*`
+- **POSIX threads shim in `librt.a`**: `pthread_mutex_*`
   (normal + recursive, `trylock`, `timedlock`), `pthread_cond_*`,
   `pthread_once`, thread-specific data (`pthread_key_*`,
   `get/setspecific`), `pthread_create/join/detach/exit/self/equal`, thread
@@ -485,8 +574,8 @@ patches — backed by a pthread shim in `librt.a` over the Lv-2 primitives.
 
 ### Known issues
 
-- `crtend.o` carries an FDE after its `.eh_frame` zero terminator
-  (`t_376721dc`), so every link emits one benign `ld` diagnostic; the cairo
+- `crtend.o` carries an FDE after its `.eh_frame` zero terminator,
+  so every link emits one benign `ld` diagnostic; the cairo
   recipe filters exactly that line until the toolchain respin. POSIX
   divergences of the shim (trylock's `EDEADLK` fold, bind-at-first-wait
   condition variables, no cancellation, bounded thread/key tables) are
@@ -500,7 +589,7 @@ battery.
 
 ### Added
 
-- **PRX export round-trip** (`t_fe7c705a`): `prx-gen exports` reads a built
+- **PRX export round-trip**: `prx-gen exports` reads a built
   module's export table back to YAML; `nidgen entgen` renders a YAML into the
   `<sys/prx_module.h>` macros; `ps3_prx_export_roundtrip(<target>)` compares
   the two canonical forms as a build step and fails with both tables printed
@@ -556,7 +645,7 @@ battery.
 
 ### Added
 
-- **PRX export round-trip** (`t_fe7c705a`): `prx-gen exports` reads a built
+- **PRX export round-trip**: `prx-gen exports` reads a built
   module's export table back to YAML; `nidgen entgen` renders a YAML into the
   `<sys/prx_module.h>` macros; `ps3_prx_export_roundtrip(<target>)` compares
   the two canonical forms as a build step and fails with both tables printed
