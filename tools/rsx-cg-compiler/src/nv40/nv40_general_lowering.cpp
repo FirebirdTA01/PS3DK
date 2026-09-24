@@ -9564,6 +9564,33 @@ static bool fpProducerNeedsFenctr(VOp op)
     }
 }
 
+// True iff the entry can have no observable effect, read off the
+// DECLARATION as well as the IR, not off the emitted code: it returns void,
+// has no out or inout parameter, stores to no output and contains no
+// discard.  The declaration half is not redundant.  An out-STRUCT
+// parameter's member stores produce no StoreOutput today, and a missing
+// return leaves no store either, so an IR-only test called both of those
+// "no effect" and turned a program that should draw into a NOP.  An
+// unwritten plain out param (which the reference also emits as the NOP
+// program) is refused here rather than risk that.
+static bool fpEntryHasNoEffect(const IRFunction& entry)
+{
+    if (entry.returnType.baseType != IRType::Void || !entry.returnOutputs.empty())
+        return false;
+    for (const auto& p : entry.parameters)
+        if (p.storage == StorageQualifier::Out || p.storage == StorageQualifier::InOut)
+            return false;
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& instPtr : block->instructions) {
+            if (instPtr && (instPtr->op == IROp::StoreOutput ||
+                            instPtr->op == IROp::Discard))
+                return false;
+        }
+    }
+    return true;
+}
+
 static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                                        const IRFunction& entry,
                                        FpAttributes* attrsOut)
@@ -10070,6 +10097,14 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             blockAppended = true;
         }
     }
+    // A program with NO EFFECT - it writes no output and kills no
+    // fragment - is legal, and the reference emits exactly one all-zero
+    // NOP carrying PROGRAM_END (SDK fnop.cg: 'void main() {}').  Its
+    // parameters are still recorded, unreferenced.  Anything else that
+    // reaches here empty lost its code somewhere and stays refused.
+    const bool noEffectProgram = asm_.empty() && fpEntryHasNoEffect(entry);
+    if (noEffectProgram)
+        asm_.emitNop();
     if (asm_.empty()) {
         out.diagnostics.push_back("nv40-general-fp: no instructions emitted");
         return out;
@@ -10169,7 +10204,9 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // keeps N R slots live for N = 40..60 would turn this citation into a
     // measurement; until then it is a citation.
     static constexpr int kFpTempRegisterBudget = 48;
-    const int tempRegs = std::max(2, asm_.numTempRegs());
+    // Every program the reference emits declares at least two R slots,
+    // except the no-effect NOP program, which declares one.
+    const int tempRegs = noEffectProgram ? 1 : std::max(2, asm_.numTempRegs());
     if (tempRegs >= kFpTempRegisterBudget) {
         out.diagnostics.push_back(
             "nv40-general-fp: program needs " + std::to_string(tempRegs) +

@@ -251,7 +251,11 @@ malformed huge_nparams "parameters starting at"
 # And the table cannot start inside the eight-word header either.
 poke table_in_header 16 8
 malformed table_in_header "inside the .*-byte header"
-printf '  %-42s %s\n' "malformed input" "12 shapes refused with a reason, none a traceback"
+# parameterArray = 0 is legal ONLY with no parameters (the reference writes
+# it for 'void main() {}'); with a table to find it is still a bad locator.
+poke table_zero_with_params 16 0
+malformed table_zero_with_params "inside the .*-byte header"
+printf '  %-42s %s\n' "malformed input" "13 shapes refused with a reason, none a traceback"
 
 # ---- an instruction that writes NOTHING must not render a destination ------
 # FENCBR sets OUT_NONE and then puts register 0x3F and mask 0xF into fields

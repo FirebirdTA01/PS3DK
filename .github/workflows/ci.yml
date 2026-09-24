@@ -350,6 +350,8 @@ jobs:
         run: bash tests/shader-compiler/paren-macro-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the defined operator and what counts as defined
         run: bash tests/shader-compiler/defined-operator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a fragment program with no effect is the one-NOP program
+        run: bash tests/shader-compiler/empty-entry-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test C-style narrowing casts on vectors and matrices
         run: bash tests/shader-compiler/cast-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test half subnormal flush to zero in constant evaluation

@@ -126,6 +126,14 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
     hw[0] |= (static_cast<uint32_t>(index) << NVFX_FP_OP_OUT_REG_SHIFT);
 }
 
+void FpAssembler::emitNop()
+{
+    const size_t base = logicalWords_.size();
+    logicalWords_.resize(base + 4, 0u);
+    lastInstrOffset_ = base;
+    hasInstruction_  = true;
+}
+
 void FpAssembler::emitFencbr()
 {
     const size_t base = logicalWords_.size();
