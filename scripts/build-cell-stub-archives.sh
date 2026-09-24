@@ -260,6 +260,26 @@ for yaml in "${STUB_YAMLS[@]}"; do
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
         install -m 0644 "${produced[0]}" "$install_dir/"
         say "installed libfiber_stub.a -> $install_dir/ (nidgen + extras)"
+    elif [[ "$name" == "libspurs_stub" ]]; then
+        # PSL1GHT libspurs replacement: every PSL1GHT spurs* export is a
+        # nidgen alias (libspurs_stub.yaml); spursAttributeInitialize was C
+        # in PSL1GHT and comes from sdk/libspurs_legacy. The combined
+        # archive keeps the canonical name, with libspurs.a aliasing it.
+        legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libspurs_legacy"
+        say "building legacy-name wrappers (libspurs_legacy, $abi)"
+        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
+            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
+            make -C "$legacy_dir" clean all >/dev/null
+        legacy_obj="$legacy_dir/build/spurs_legacy.o"
+        [[ -f "$legacy_obj" ]] \
+            || die "legacy wrappers object missing after build: $legacy_obj"
+
+        target="$install_dir/libspurs_stub.a"
+        install -m 0644 "${produced[0]}" "$target"
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
+        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
+        ln -sf libspurs_stub.a "$install_dir/libspurs.a"
+        say "installed libspurs_stub.a + libspurs.a symlink -> $install_dir/ (replaces PSL1GHT's)"
     elif [[ "$name" == "libusbd_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libusb_legacy"
         say "building legacy-name wrappers (libusb_legacy, $abi)"

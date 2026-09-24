@@ -5,434 +5,650 @@ archive_name: spurs
 exports:
 - name: _cellSpursAttributeInitialize
   nid: '0x95180230'
+  aliases:
+    - spursAttributeInitializeEx
   signature: ''
   notes: extracted from _cellSpurs_0001_90.o
 - name: _cellSpursEventFlagInitialize
   nid: '0x5ef96465'
+  aliases:
+    - spursEventFlagInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_54.o
 - name: _cellSpursJobChainAttributeInitialize
   nid: '0x3548f483'
+  aliases:
+    - spursJobChainAttributeInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_29.o
 - name: _cellSpursLFQueueInitialize
   nid: '0x011ee38b'
+  aliases:
+    - spursLFQueueInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_2.o
 - name: _cellSpursLFQueuePopBody
   nid: '0x35dae22b'
+  aliases:
+    - spursLFQueuePopBody
   signature: ''
   notes: extracted from _cellSpurs_0001_30.o
 - name: _cellSpursLFQueuePushBody
   nid: '0x8a85674d'
+  aliases:
+    - spursLFQueuePushBody
   signature: ''
   notes: extracted from _cellSpurs_0001_80.o
 - name: _cellSpursQueueInitialize
   nid: '0x082bfb09'
+  aliases:
+    - spursQueueInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_5.o
 - name: _cellSpursSemaphoreInitialize
   nid: '0x77cdac0c'
+  aliases:
+    - spursSemaphoreInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_67.o
 - name: _cellSpursSendSignal
   nid: '0xe0a6dbe4'
+  aliases:
+    - spursSendSignal
   signature: ''
   notes: extracted from _cellSpurs_0001_125.o
 - name: _cellSpursTaskAttribute2Initialize
   nid: '0x8adadf65'
+  aliases:
+    - spursTaskAttribute2Initialize
   signature: ''
   notes: extracted from _cellSpurs_0001_81.o
 - name: _cellSpursTaskAttributeInitialize
   nid: '0xb8474eff'
+  aliases:
+    - spursTaskAttributeInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_109.o
 - name: _cellSpursTasksetAttribute2Initialize
   nid: '0xc2acdf43'
+  aliases:
+    - spursTasksetAttribute2Initialize
   signature: ''
   notes: extracted from _cellSpurs_0001_115.o
 - name: _cellSpursTasksetAttributeInitialize
   nid: '0x16394a4e'
+  aliases:
+    - spursTasksetAttributeInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_10.o
 - name: _cellSpursWorkloadAttributeInitialize
   nid: '0xefeb2679'
+  aliases:
+    - spursWorkloadAttributeInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_133.o
 - name: _cellSpursWorkloadFlagReceiver
   nid: '0xa73bf47e'
+  aliases:
+    - spursWorkloadFlagReceiver
   signature: ''
   notes: extracted from _cellSpurs_0001_99.o
 - name: _cellSpursWorkloadFlagReceiver2
   nid: '0x2ddbcc0a'
+  aliases:
+    - spursWorkloadFlagReceiver2
   signature: ''
   notes: extracted from _cellSpurs_0001_23.o
 - name: cellSpursAddUrgentCall
   nid: '0x8fdf50b2'
+  aliases:
+    - spursAddUrgentCall
   signature: ''
   notes: extracted from _cellSpurs_0001_83.o
 - name: cellSpursAddUrgentCommand
   nid: '0x17001000'
+  aliases:
+    - spursAddUrgentCommand
   signature: ''
   notes: extracted from _cellSpurs_0001_12.o
 - name: cellSpursAddWorkload
   nid: '0x69726aa2'
+  aliases:
+    - spursAddWorkload
   signature: ''
   notes: extracted from _cellSpurs_0001_58.o
 - name: cellSpursAddWorkloadWithAttribute
   nid: '0xc0158d8b'
+  aliases:
+    - spursAddWorkloadWithAttribute
   signature: ''
   notes: extracted from _cellSpurs_0001_113.o
 - name: cellSpursAttachLv2EventQueue
   nid: '0xb9bc6207'
+  aliases:
+    - spursAttachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_110.o
 - name: cellSpursAttributeEnableSpuPrintfIfAvailable
   nid: '0x1051d134'
+  aliases:
+    - spursAttributeEnableSpuPrintfIfAvailable
   signature: ''
   notes: extracted from _cellSpurs_0001_7.o
 - name: cellSpursAttributeEnableSystemWorkload
   nid: '0x9dcbcb5d'
+  aliases:
+    - spursAttributeEnableSystemWorkload
   signature: ''
   notes: extracted from _cellSpurs_0001_94.o
 - name: cellSpursAttributeSetMemoryContainerForSpuThread
   nid: '0x82275c1c'
+  aliases:
+    - spursAttributeSetMemoryContainerForSpuThread
   signature: ''
   notes: extracted from _cellSpurs_0001_73.o
 - name: cellSpursAttributeSetNamePrefix
   nid: '0x07529113'
+  aliases:
+    - spursAttributeSetNamePrefix
   signature: ''
   notes: extracted from _cellSpurs_0001_4.o
 - name: cellSpursAttributeSetSpuThreadGroupType
   nid: '0xa839a4d9'
+  aliases:
+    - spursAttributeSetSpuThreadGroupType
   signature: ''
   notes: extracted from _cellSpurs_0001_104.o
 - name: cellSpursBarrierGetTasksetAddress
   nid: '0x9aeb5432'
+  aliases:
+    - spursBarrierGetTasksetAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_93.o
 - name: cellSpursBarrierInitialize
   nid: '0x7fdf4fef'
+  aliases:
+    - spursBarrierInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_71.o
 - name: cellSpursCreateJobChainWithAttribute
   nid: '0x303c19cd'
+  aliases:
+    - spursCreateJobChainWithAttribute
   signature: ''
   notes: extracted from _cellSpurs_0001_25.o
 - name: cellSpursCreateTask
   nid: '0xbeb600ac'
+  aliases:
+    - spursCreateTask
   signature: ''
   notes: extracted from _cellSpurs_0001_112.o
 - name: cellSpursCreateTask2
   nid: '0xe14ca62d'
+  aliases:
+    - spursCreateTask2
   signature: ''
   notes: extracted from _cellSpurs_0001_126.o
 - name: cellSpursCreateTask2WithBinInfo
   nid: '0xe4944a1c'
+  aliases:
+    - spursCreateTask2WithBinInfo
   signature: ''
   notes: extracted from _cellSpurs_0001_127.o
 - name: cellSpursCreateTaskWithAttribute
   nid: '0x1d46fedf'
+  aliases:
+    - spursCreateTaskWithAttribute
   signature: ''
   notes: extracted from _cellSpurs_0001_16.o
 - name: cellSpursCreateTaskset
   nid: '0x52cc6c82'
+  aliases:
+    - spursCreateTaskset
   signature: ''
   notes: extracted from _cellSpurs_0001_48.o
 - name: cellSpursCreateTaskset2
   nid: '0x4a6465e3'
+  aliases:
+    - spursCreateTaskset2
   signature: ''
   notes: extracted from _cellSpurs_0001_38.o
 - name: cellSpursCreateTasksetWithAttribute
   nid: '0xc10931cb'
+  aliases:
+    - spursCreateTasksetWithAttribute
   signature: ''
   notes: extracted from _cellSpurs_0001_114.o
 - name: cellSpursDestroyTaskset2
   nid: '0x1ebcf459'
+  aliases:
+    - spursDestroyTaskset2
   signature: ''
   notes: extracted from _cellSpurs_0001_17.o
 - name: cellSpursDetachLv2EventQueue
   nid: '0x4e66d483'
+  aliases:
+    - spursDetachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_46.o
 - name: cellSpursEnableExceptionEventHandler
   nid: '0x32b94add'
+  aliases:
+    - spursEnableExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_27.o
 - name: cellSpursEventFlagAttachLv2EventQueue
   nid: '0x87630976'
+  aliases:
+    - spursEventFlagAttachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_78.o
 - name: cellSpursEventFlagClear
   nid: '0x4ac7bae4'
+  aliases:
+    - spursEventFlagClear
   signature: ''
   notes: extracted from _cellSpurs_0001_39.o
 - name: cellSpursEventFlagDetachLv2EventQueue
   nid: '0x22aab31d'
+  aliases:
+    - spursEventFlagDetachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_20.o
 - name: cellSpursEventFlagGetClearMode
   nid: '0x4d1e9373'
+  aliases:
+    - spursEventFlagGetClearMode
   signature: ''
   notes: extracted from _cellSpurs_0001_43.o
 - name: cellSpursEventFlagGetDirection
   nid: '0x890f9e5a'
+  aliases:
+    - spursEventFlagGetDirection
   signature: ''
   notes: extracted from _cellSpurs_0001_79.o
 - name: cellSpursEventFlagGetTasksetAddress
   nid: '0x947efb0b'
+  aliases:
+    - spursEventFlagGetTasksetAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_89.o
 - name: cellSpursEventFlagSet
   nid: '0xf5507729'
+  aliases:
+    - spursEventFlagSet
   signature: ''
   notes: extracted from _cellSpurs_0001_136.o
 - name: cellSpursEventFlagTryWait
   nid: '0x6d2d9339'
+  aliases:
+    - spursEventFlagTryWait
   signature: ''
   notes: extracted from _cellSpurs_0001_61.o
 - name: cellSpursEventFlagWait
   nid: '0x373523d4'
+  aliases:
+    - spursEventFlagWait
   signature: ''
   notes: extracted from _cellSpurs_0001_33.o
 - name: cellSpursFinalize
   nid: '0xca4c4600'
+  aliases:
+    - spursFinalize
   signature: ''
   notes: extracted from _cellSpurs_0001_118.o
 - name: cellSpursGetInfo
   nid: '0x1f402f8f'
+  aliases:
+    - spursGetInfo
   signature: ''
   notes: extracted from _cellSpurs_0001_18.o
 - name: cellSpursGetJobChainId
   nid: '0x86c864a2'
+  aliases:
+    - spursGetJobChainId
   signature: ''
   notes: extracted from _cellSpurs_0001_77.o
 - name: cellSpursGetJobChainInfo
   nid: '0x4ceb9694'
+  aliases:
+    - spursGetJobChainInfo
   signature: ''
   notes: extracted from _cellSpurs_0001_42.o
 - name: cellSpursGetJobPipelineInfo
   nid: '0xd86380d8'
+  aliases:
+    - spursGetJobPipelineInfo
   signature: ''
   notes: extracted from _cellSpurs_0001_122.o
 - name: cellSpursGetNumSpuThread
   nid: '0xc56defb5'
+  aliases:
+    - spursGetNumSpuThread
   signature: ''
   notes: extracted from _cellSpurs_0001_116.o
 - name: cellSpursGetSpuGuid
   nid: '0x6fcdf6e3'
+  aliases:
+    - spursGetSpuGuid
   signature: ''
   notes: extracted from _cellSpurs_0001_62.o
 - name: cellSpursGetSpuThreadGroupId
   nid: '0x39c173fb'
+  aliases:
+    - spursGetSpuThreadGroupId
   signature: ''
   notes: extracted from _cellSpurs_0001_34.o
 - name: cellSpursGetSpuThreadId
   nid: '0x6c960f6d'
+  aliases:
+    - spursGetSpuThreadId
   signature: ''
   notes: extracted from _cellSpurs_0001_60.o
 - name: cellSpursGetTasksetId
   nid: '0xe7dd87e1'
+  aliases:
+    - spursGetTasksetId
   signature: ''
   notes: extracted from _cellSpurs_0001_131.o
 - name: cellSpursGetTasksetInfo
   nid: '0x9fcb567b'
+  aliases:
+    - spursGetTasksetInfo
   signature: ''
   notes: extracted from _cellSpurs_0001_96.o
 - name: cellSpursGetWorkloadData
   nid: '0xa7f9e716'
+  aliases:
+    - spursGetWorkloadData
   signature: ''
   notes: extracted from _cellSpurs_0001_103.o
 - name: cellSpursGetWorkloadFlag
   nid: '0xc765b995'
+  aliases:
+    - spursGetWorkloadFlag
   signature: ''
   notes: extracted from _cellSpurs_0001_117.o
 - name: cellSpursGetWorkloadInfo
   nid: '0x4e153e3e'
+  aliases:
+    - spursGetWorkloadInfo
   signature: ''
   notes: extracted from _cellSpurs_0001_45.o
 - name: cellSpursInitialize
   nid: '0xacfc8dbc'
+  aliases:
+    - spursInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_106.o
 - name: cellSpursInitializeWithAttribute
   nid: '0xaa6269a8'
+  aliases:
+    - spursInitializeWithAttribute
   signature: ''
   notes: extracted from _cellSpurs_0001_105.o
 - name: cellSpursInitializeWithAttribute2
   nid: '0x30aa96c4'
+  aliases:
+    - spursInitializeWithAttribute2
   signature: ''
   notes: extracted from _cellSpurs_0001_26.o
 - name: cellSpursJobChainAttributeSetHaltOnError
   nid: '0xbb68d76e'
+  aliases:
+    - spursJobChainAttributeSetHaltOnError
   signature: ''
   notes: extracted from _cellSpurs_0001_111.o
 - name: cellSpursJobChainAttributeSetJobTypeMemoryCheck
   nid: '0x2cfccb99'
+  aliases:
+    - spursJobChainAttributeSetJobTypeMemoryCheck
   signature: ''
   notes: extracted from _cellSpurs_0001_22.o
 - name: cellSpursJobChainAttributeSetName
   nid: '0x9fef70c2'
+  aliases:
+    - spursJobChainAttributeSetName
   signature: ''
   notes: extracted from _cellSpurs_0001_97.o
 - name: cellSpursJobChainGetError
   nid: '0x161da6a7'
+  aliases:
+    - spursJobChainGetError
   signature: ''
   notes: extracted from _cellSpurs_0001_9.o
 - name: cellSpursJobChainGetSpursAddress
   nid: '0x494613c7'
+  aliases:
+    - spursJobChainGetSpursAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_35.o
 - name: cellSpursJobChainSetExceptionEventHandler
   nid: '0x5202e53b'
+  aliases:
+    - spursJobChainSetExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_47.o
 - name: cellSpursJobChainUnsetExceptionEventHandler
   nid: '0x6aa76999'
+  aliases:
+    - spursJobChainUnsetExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_59.o
 - name: cellSpursJobGuardInitialize
   nid: '0x68aaeba9'
+  aliases:
+    - spursJobGuardInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_57.o
 - name: cellSpursJobGuardNotify
   nid: '0xd5d0b256'
+  aliases:
+    - spursJobGuardNotify
   signature: ''
   notes: extracted from _cellSpurs_0001_121.o
 - name: cellSpursJobGuardReset
   nid: '0x00af2519'
+  aliases:
+    - spursJobGuardReset
   signature: ''
   notes: extracted from _cellSpurs_0001_1.o
 - name: cellSpursJobHeaderSetJobbin2Param
   nid: '0x97a2f6c8'
+  aliases:
+    - spursJobHeaderSetJobbin2Param
   signature: ''
   notes: extracted from _cellSpurs_0001_91.o
 - name: cellSpursJobSetMaxGrab
   nid: '0xe7b0e69a'
+  aliases:
+    - spursJobSetMaxGrab
   signature: ''
   notes: extracted from _cellSpurs_0001_130.o
 - name: cellSpursJoinJobChain
   nid: '0xa7c066de'
+  aliases:
+    - spursJoinJobChain
   signature: ''
   notes: extracted from _cellSpurs_0001_102.o
 - name: cellSpursJoinTask2
   nid: '0xa7a94892'
+  aliases:
+    - spursJoinTask2
   signature: ''
   notes: extracted from _cellSpurs_0001_101.o
 - name: cellSpursJoinTaskset
   nid: '0x9f72add3'
+  aliases:
+    - spursJoinTaskset
   signature: ''
   notes: extracted from _cellSpurs_0001_95.o
 - name: cellSpursLFQueueAttachLv2EventQueue
   nid: '0x1656d49f'
+  aliases:
+    - spursLFQueueAttachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_11.o
 - name: cellSpursLFQueueDetachLv2EventQueue
   nid: '0x73e06f91'
+  aliases:
+    - spursLFQueueDetachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_64.o
 - name: cellSpursLFQueueGetTasksetAddress
   nid: '0xb792ca1a'
+  aliases:
+    - spursLFQueueGetTasksetAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_108.o
 - name: cellSpursLookUpTasksetAddress
   nid: '0x4cce88a9'
+  aliases:
+    - spursLookUpTasksetAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_41.o
 - name: cellSpursQueueAttachLv2EventQueue
   nid: '0xe5443be7'
+  aliases:
+    - spursQueueAttachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_128.o
 - name: cellSpursQueueClear
   nid: '0x247414d0'
+  aliases:
+    - spursQueueClear
   signature: ''
   notes: extracted from _cellSpurs_0001_21.o
 - name: cellSpursQueueDepth
   nid: '0x35f02287'
+  aliases:
+    - spursQueueDepth
   signature: ''
   notes: extracted from _cellSpurs_0001_31.o
 - name: cellSpursQueueDetachLv2EventQueue
   nid: '0x039d70b7'
+  aliases:
+    - spursQueueDetachLv2EventQueue
   signature: ''
   notes: extracted from _cellSpurs_0001_3.o
 - name: cellSpursQueueGetDirection
   nid: '0xec68442c'
+  aliases:
+    - spursQueueGetDirection
   signature: ''
   notes: extracted from _cellSpurs_0001_132.o
 - name: cellSpursQueueGetEntrySize
   nid: '0x369fe03d'
+  aliases:
+    - spursQueueGetEntrySize
   signature: ''
   notes: extracted from _cellSpurs_0001_32.o
 - name: cellSpursQueueGetTasksetAddress
   nid: '0x2093252b'
+  aliases:
+    - spursQueueGetTasksetAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_19.o
 - name: cellSpursQueuePopBody
   nid: '0x91066667'
+  aliases:
+    - spursQueuePopBody
   signature: ''
   notes: extracted from _cellSpurs_0001_85.o
 - name: cellSpursQueuePushBody
   nid: '0x92cff6ed'
+  aliases:
+    - spursQueuePushBody
   signature: ''
   notes: extracted from _cellSpurs_0001_87.o
 - name: cellSpursQueueSize
   nid: '0x54876603'
+  aliases:
+    - spursQueueSize
   signature: ''
   notes: extracted from _cellSpurs_0001_49.o
 - name: cellSpursReadyCountAdd
   nid: '0x75211196'
+  aliases:
+    - spursReadyCountAdd
   signature: ''
   notes: extracted from _cellSpurs_0001_66.o
 - name: cellSpursReadyCountCompareAndSwap
   nid: '0xf1d3552d'
+  aliases:
+    - spursReadyCountCompareAndSwap
   signature: ''
   notes: extracted from _cellSpurs_0001_134.o
 - name: cellSpursReadyCountStore
   nid: '0xf843818d'
+  aliases:
+    - spursReadyCountStore
   signature: ''
   notes: extracted from _cellSpurs_0001_137.o
 - name: cellSpursReadyCountSwap
   nid: '0x49a3426d'
+  aliases:
+    - spursReadyCountSwap
   signature: ''
   notes: extracted from _cellSpurs_0001_36.o
 - name: cellSpursRemoveWorkload
   nid: '0x57e4dec3'
+  aliases:
+    - spursRemoveWorkload
   signature: ''
   notes: extracted from _cellSpurs_0001_52.o
 - name: cellSpursRequestIdleSpu
   nid: '0x182d9890'
+  aliases:
+    - spursRequestIdleSpu
   signature: ''
   notes: extracted from _cellSpurs_0001_13.o
 - name: cellSpursRunJobChain
   nid: '0xf31731bb'
+  aliases:
+    - spursRunJobChain
   signature: ''
   notes: extracted from _cellSpurs_0001_135.o
 - name: cellSpursSemaphoreGetTasksetAddress
   nid: '0x568b2352'
+  aliases:
+    - spursSemaphoreGetTasksetAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_50.o
 - name: cellSpursSendWorkloadSignal
   nid: '0x1d2bca4b'
+  aliases:
+    - spursSendWorkloadSignal
   signature: ''
   notes: extracted from _cellSpurs_0001_14.o
 - name: cellSpursSetExceptionEventHandler
   nid: '0xd2e23fa9'
+  aliases:
+    - spursSetExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_120.o
 - name: cellSpursSetGlobalExceptionEventHandler
   nid: '0x7517724a'
+  aliases:
+    - spursSetGlobalExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_65.o
 - name: cellSpursSetMaxContention
   nid: '0x84d2f6d5'
+  aliases:
+    - spursSetMaxContention
   signature: ''
   notes: extracted from _cellSpurs_0001_75.o
 - name: cellSpursSetPreemptionVictimHints
   nid: '0x4de203e2'
+  aliases:
+    - spursSetPreemptionVictimHints
   signature: ''
   notes: extracted from _cellSpurs_0001_44.o
 - name: cellSpursSetPriorities
   nid: '0x80a29e27'
+  aliases:
+    - spursSetPriorities
   signature: ''
   notes: extracted from _cellSpurs_0001_72.o
 - name: cellSpursSetPriority
@@ -441,114 +657,170 @@ exports:
   notes: extracted from _cellSpurs_0001_107.o
 - name: cellSpursShutdownJobChain
   nid: '0x738e40e6'
+  aliases:
+    - spursShutdownJobChain
   signature: ''
   notes: extracted from _cellSpurs_0001_63.o
 - name: cellSpursShutdownTaskset
   nid: '0xa789e631'
+  aliases:
+    - spursShutdownTaskset
   signature: ''
   notes: extracted from _cellSpurs_0001_100.o
 - name: cellSpursShutdownWorkload
   nid: '0x98d5b343'
+  aliases:
+    - spursShutdownWorkload
   signature: ''
   notes: extracted from _cellSpurs_0001_92.o
 - name: cellSpursTaskAttributeSetExitCodeContainer
   nid: '0xa121a224'
+  aliases:
+    - spursTaskAttributeSetExitCodeContainer
   signature: ''
   notes: extracted from _cellSpurs_0001_98.o
 - name: cellSpursTaskExitCodeGet
   nid: '0x13ae18f3'
+  aliases:
+    - spursTaskExitCodeGet
   signature: ''
   notes: extracted from _cellSpurs_0001_8.o
 - name: cellSpursTaskExitCodeInitialize
   nid: '0x34552fa6'
+  aliases:
+    - spursTaskExitCodeInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_28.o
 - name: cellSpursTaskExitCodeTryGet
   nid: '0xe717ac73'
+  aliases:
+    - spursTaskExitCodeTryGet
   signature: ''
   notes: extracted from _cellSpurs_0001_129.o
 - name: cellSpursTaskGenerateLsPattern
   nid: '0x9197915f'
+  aliases:
+    - spursTaskGenerateLsPattern
   signature: ''
   notes: extracted from _cellSpurs_0001_86.o
 - name: cellSpursTaskGetContextSaveAreaSize
   nid: '0x9034e538'
+  aliases:
+    - spursTaskGetContextSaveAreaSize
   signature: ''
   notes: extracted from _cellSpurs_0001_84.o
 - name: cellSpursTaskGetLoadableSegmentPattern
   nid: '0x1d344406'
+  aliases:
+    - spursTaskGetLoadableSegmentPattern
   signature: ''
   notes: extracted from _cellSpurs_0001_15.o
 - name: cellSpursTaskGetReadOnlyAreaPattern
   nid: '0x7cb33c2e'
+  aliases:
+    - spursTaskGetReadOnlyAreaPattern
   signature: ''
   notes: extracted from _cellSpurs_0001_69.o
 - name: cellSpursTasksetAttributeEnableClearLS
   nid: '0xdca13593'
+  aliases:
+    - spursTasksetAttributeEnableClearLS
   signature: ''
   notes: extracted from _cellSpurs_0001_123.o
 - name: cellSpursTasksetAttributeSetName
   nid: '0x652b70e2'
+  aliases:
+    - spursTasksetAttributeSetName
   signature: ''
   notes: extracted from _cellSpurs_0001_56.o
 - name: cellSpursTasksetAttributeSetTasksetSize
   nid: '0x8f122ef8'
+  aliases:
+    - spursTasksetAttributeSetTasksetSize
   signature: ''
   notes: extracted from _cellSpurs_0001_82.o
 - name: cellSpursTasksetGetSpursAddress
   nid: '0x58d58fcf'
+  aliases:
+    - spursTasksetGetSpursAddress
   signature: ''
   notes: extracted from _cellSpurs_0001_53.o
 - name: cellSpursTasksetSetExceptionEventHandler
   nid: '0x2edcff92'
+  aliases:
+    - spursTasksetSetExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_24.o
 - name: cellSpursTasksetUnsetExceptionEventHandler
   nid: '0x94034c95'
+  aliases:
+    - spursTasksetUnsetExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_88.o
 - name: cellSpursTraceFinalize
   nid: '0x7b9cbb74'
+  aliases:
+    - spursTraceFinalize
   signature: ''
   notes: extracted from _cellSpurs_0001_68.o
 - name: cellSpursTraceInitialize
   nid: '0x569674e3'
+  aliases:
+    - spursTraceInitialize
   signature: ''
   notes: extracted from _cellSpurs_0001_51.o
 - name: cellSpursTraceStart
   nid: '0xce853fbf'
+  aliases:
+    - spursTraceStart
   signature: ''
   notes: extracted from _cellSpurs_0001_119.o
 - name: cellSpursTraceStop
   nid: '0xddc81b5a'
+  aliases:
+    - spursTraceStop
   signature: ''
   notes: extracted from _cellSpurs_0001_124.o
 - name: cellSpursTryJoinTask2
   nid: '0x838fa4f0'
+  aliases:
+    - spursTryJoinTask2
   signature: ''
   notes: extracted from _cellSpurs_0001_74.o
 - name: cellSpursUnsetExceptionEventHandler
   nid: '0x4c75deb8'
+  aliases:
+    - spursUnsetExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_40.o
 - name: cellSpursUnsetGlobalExceptionEventHandler
   nid: '0x861237f8'
+  aliases:
+    - spursUnsetGlobalExceptionEventHandler
   signature: ''
   notes: extracted from _cellSpurs_0001_76.o
 - name: cellSpursWaitForWorkloadShutdown
   nid: '0x5fd43fe4'
+  aliases:
+    - spursWaitForWorkloadShutdown
   signature: ''
   notes: extracted from _cellSpurs_0001_55.o
 - name: cellSpursWakeUp
   nid: '0x7e4ea023'
+  aliases:
+    - spursWakeUp
   signature: ''
   notes: extracted from _cellSpurs_0001_70.o
 - name: cellSpursWorkloadAttributeSetName
   nid: '0x4a5eab63'
+  aliases:
+    - spursWorkloadAttributeSetName
   signature: ''
   notes: extracted from _cellSpurs_0001_37.o
 - name: cellSpursWorkloadAttributeSetShutdownCompletionEventHook
   nid: '0x0eb4bc38'
+  aliases:
+    - spursWorkloadAttributeSetShutdownCompletionEventHook
   signature: ''
   notes: extracted from _cellSpurs_0001_6.o
 imports: []

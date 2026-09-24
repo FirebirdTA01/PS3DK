@@ -156,7 +156,6 @@ ppu_stub  ppu/lib/libsheap_stub.a
 ppu_stub  ppu/lib/libsimdmath.a
 ppu_stub  ppu/lib/libspumars.a
 ppu_stub  ppu/lib/libspumarstask.a
-ppu_stub  ppu/lib/libspurs.a
 ppu_stub  ppu/lib/libspurs_jq_stub.a
 ppu_stub  ppu/lib/libspurs_stub.a
 ppu_stub  ppu/lib/libsscgpu.a
@@ -247,6 +246,7 @@ alias     ppu/lib/libvdec.a                libvdec_stub.a
 alias     ppu/lib/libhttp.a                libhttp_stub.a
 alias     ppu/lib/libresc.a                libresc_stub.a
 alias     ppu/lib/libsysfs.a               libfs_stub.a
+alias     ppu/lib/libspurs.a               libspurs_stub.a
 alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
 alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
@@ -264,6 +264,7 @@ alias     ppu/lib/lp64/libvdec.a           libvdec_stub.a
 alias     ppu/lib/lp64/libhttp.a           libhttp_stub.a
 alias     ppu/lib/lp64/libresc.a           libresc_stub.a
 alias     ppu/lib/lp64/libsysfs.a          libfs_stub.a
+alias     ppu/lib/lp64/libspurs.a          libspurs_stub.a
 
 # --- Shipped but not required ----------------------------------------------
 # The two-sided check requires every shipped archive to be either promised above
