@@ -125,16 +125,16 @@ out_unreadable="$tmp/out_unreadable.pkg"
 if ! cat "$unreadable_in/unreadable.txt" >/dev/null 2>&1; then
     rc=0
     "$pkg" --contentid=UP0001-TEST12345_00-0000000000000001 "$unreadable_in" "$out_unreadable" > "$tmp/pack_unreadable.log" 2>&1 || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        row_fail "Row (b)" "pkg exited 0 on unreadable payload file (silent success defect)"
+    if [ "$rc" -ne 1 ]; then
+        row_fail "Row (b)" "pkg exited with code $rc on unreadable payload file, expected exactly 1"
         row_b_ok=0
     fi
-    if [ -f "$out_unreadable" ]; then
+    if [ -e "$out_unreadable" ]; then
         row_fail "Row (b)" "pkg created output package despite unreadable payload file"
         row_b_ok=0
     fi
-    if [ "$row_b_ok" -eq 1 ]; then
-        note "Row (b1) PASS: unreadable payload exited non-zero ($rc) with no output package"
+    if [ "$rc" -eq 1 ] && [ ! -e "$out_unreadable" ]; then
+        note "Row (b1) PASS: unreadable payload exited exactly 1 with no output package"
     fi
 else
     note "Row (b1) SKIP: runner environment permits reading chmod 000 files (e.g. running as root)"
@@ -143,16 +143,16 @@ fi
 # Nonexistent directory test: must fail non-zero with no package output
 rc_nonexistent=0
 "$pkg" --contentid=UP0001-TEST12345_00-0000000000000001 "$tmp/nonexistent_folder" "$tmp/out_nonexistent.pkg" >/dev/null 2>&1 || rc_nonexistent=$?
-if [ "$rc_nonexistent" -eq 0 ]; then
-    row_fail "Row (b)" "pkg exited 0 on nonexistent input directory"
+if [ "$rc_nonexistent" -ne 1 ]; then
+    row_fail "Row (b)" "pkg exited with code $rc_nonexistent on nonexistent input directory, expected exactly 1"
     row_b_ok=0
 fi
-if [ -f "$tmp/out_nonexistent.pkg" ]; then
+if [ -e "$tmp/out_nonexistent.pkg" ]; then
     row_fail "Row (b)" "pkg created output package for nonexistent input directory"
     row_b_ok=0
 fi
-if [ "$rc_nonexistent" -ne 0 ] && [ ! -f "$tmp/out_nonexistent.pkg" ]; then
-    note "Row (b2) PASS: nonexistent directory exited non-zero ($rc_nonexistent) with no output package"
+if [ "$rc_nonexistent" -eq 1 ] && [ ! -e "$tmp/out_nonexistent.pkg" ]; then
+    note "Row (b2) PASS: nonexistent directory exited exactly 1 with no output package"
 fi
 
 # (b3) Buffered write failure test (symlink to /dev/full on POSIX)
@@ -162,16 +162,16 @@ if [ -c /dev/full ]; then
     rc_full=0
     ln -sf /dev/full "$tmp/out_full.pkg"
     "$pkg" --contentid=UP0001-TEST12345_00-0000000000000001 "$tmp/in_full" "$tmp/out_full.pkg" > "$tmp/pack_full.log" 2>&1 || rc_full=$?
-    if [ "$rc_full" -eq 0 ]; then
-        row_fail "Row (b)" "pkg exited 0 on /dev/full write failure (unchecked fclose/fflush)"
+    if [ "$rc_full" -ne 1 ]; then
+        row_fail "Row (b)" "pkg exited with code $rc_full on /dev/full write failure, expected exactly 1"
         row_b_ok=0
     fi
     if [ -e "$tmp/out_full.pkg" ] || [ -L "$tmp/out_full.pkg" ]; then
         row_fail "Row (b)" "pkg left output file/symlink after write failure"
         row_b_ok=0
     fi
-    if [ "$rc_full" -ne 0 ] && [ ! -e "$tmp/out_full.pkg" ] && [ ! -L "$tmp/out_full.pkg" ]; then
-        note "Row (b3) PASS: /dev/full write failure exited non-zero ($rc_full) and removed output"
+    if [ "$rc_full" -eq 1 ] && [ ! -e "$tmp/out_full.pkg" ] && [ ! -L "$tmp/out_full.pkg" ]; then
+        note "Row (b3) PASS: /dev/full write failure exited exactly 1 and removed output"
     fi
 else
     note "Row (b3) SKIP: /dev/full not available on this host"
@@ -206,16 +206,20 @@ if [ -n "$SAN_FLAGS" ] && "${CC:-gcc}" -O0 $SAN_FLAGS \
     rc_stat=0
     ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" \
     "$tmp/pkg_stat_fail" --contentid=UP0001-TEST12345_00-0000000000000001 "$stat_in" "$tmp/out_stat_fail.pkg" > "$tmp/stat_fail.log" 2>&1 || rc_stat=$?
-    if [ "$rc_stat" -eq 0 ]; then
-        row_fail "Row (b)" "pkg exited 0 on second-file stat failure"
+    if [ "$rc_stat" -ne 1 ]; then
+        row_fail "Row (b)" "pkg exited with code $rc_stat on second-file stat failure, expected exactly 1"
+        row_b_ok=0
+    fi
+    if [ -e "$tmp/out_stat_fail.pkg" ]; then
+        row_fail "Row (b)" "pkg created output package despite stat failure"
         row_b_ok=0
     fi
     if grep -q "AddressSanitizer" "$tmp/stat_fail.log"; then
         row_fail "Row (b)" "AddressSanitizer detected double-free on stat failure cleanup"
         row_b_ok=0
     fi
-    if [ "$rc_stat" -ne 0 ] && ! grep -q "AddressSanitizer" "$tmp/stat_fail.log"; then
-        note "Row (b4) PASS: stat failure on second file exited non-zero ($rc_stat) with 0 ASan errors"
+    if [ "$rc_stat" -eq 1 ] && [ ! -e "$tmp/out_stat_fail.pkg" ] && ! grep -q "AddressSanitizer" "$tmp/stat_fail.log"; then
+        note "Row (b4) PASS: stat failure on second file exited exactly 1 with no output package and 0 ASan errors"
     fi
 else
     note "Row (b4) SKIP: -Wl,--wrap=stat or ASan not supported on this host"
