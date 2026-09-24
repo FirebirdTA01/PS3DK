@@ -86,6 +86,12 @@ jobs:
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
 
+      # The GCM FIFO wrap must retire a lap the application never published
+      # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
+      # the one-phase protocol it replaced must fail the idle-lap scenario.
+      - name: Test the GCM FIFO wrap never loses an unpublished lap
+        run: bash tests/sdk/fifo-wrap-protocol-test.sh
+
       # No PPU toolchain on this runner, so only the host-only checks (A and
       # D) run here; the archive checks (B and C) skip themselves and are
       # run by scripts/build-cell-stub-archives.sh against the tree it has

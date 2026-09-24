@@ -54,8 +54,17 @@ been updated to reflect the achieved state.
 
 ## FIFO wrap drain-wait causes occasional frame flicker
 
-**Status:** works correctly (no hangs, no desync), but drops the
-occasional frame on a wrap.
+**Status:** the claim below that the single-buffer wrap "works correctly"
+was WRONG, and is corrected here rather than rewritten.  The one-phase wrap
+(JUMP at the tail, `PUT = begin`, wait `GET == begin`) LOSES A WHOLE LAP when
+the application has not flushed since the previous wrap: `PUT` and `GET` both
+sit at begin, `GET == begin` is already true (it is the idle state), the wait
+returns at once and the lap is overwritten unexecuted.  It also loses a
+flushed lap the GPU has not started fetching.  Found by the EMP team
+(2026-09-24, E5 log); fixed by the two-phase wrap in
+`sdk/libgcm_cmd/src/ps3tc_fifo_wrap_protocol.h` (t_38e8bf5a), guarded by
+`tests/sdk/fifo-wrap-protocol-test.sh`.  Whether the "flicker" below was
+this command loss rather than drain time has NOT been verified.
 
 **Symptom.** All ported samples that exercise the FIFO wrap path
 (`spinning-cube`, the textured-quad port, every other
@@ -69,10 +78,12 @@ any draw-loop that issues enough FIFO commands to wrap the ring
 triggers the drain-wait spin.
 
 **Where it is.** `sdk/libgcm_cmd/src/ps3tc_fifo_wrap.c` —
-`ps3tc_fifo_wrap_callback`. It's a single-buffer in-place wrap:
-writes the JUMP-to-begin command, sets `ctrl->put = begin_off`, then
-spins on `ctrl->get != begin_off` via `sys_timer_usleep(30)` until
-the GPU follows the JUMP. That spin **is the drain** — PPU is
+`ps3tc_fifo_wrap_callback`. It's a single-buffer in-place wrap.  As
+first written it wrote the JUMP-to-begin command, set
+`ctrl->put = begin_off`, then spun on `ctrl->get != begin_off` via
+`sys_timer_usleep(30)` until the GPU followed the JUMP (see the Status
+correction: that loses unpublished laps).  It now publishes the lap to the
+JUMP and waits for GET there first, then releases the JUMP. That spin **is the drain** — PPU is
 blocked until the GPU has processed every command ahead of it. If
 the wait lands mid-frame, the frame's budget blows past VSYNC and
 you see a visible stutter.

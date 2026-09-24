@@ -3,7 +3,9 @@
  *
  * Native FIFO-wrap callback — replaces the firmware default installed by
  * cellGcmInit / gcmInitBodyEx.  The callback writes a tail JUMP-to-begin,
- * publishes PUT at begin, and drains until GET reaches begin.
+ * publishes the lap up to that JUMP and waits for GET to reach it, then
+ * releases the JUMP and waits for GET to park at begin (two phases; see
+ * src/ps3tc_fifo_wrap_protocol.h, t_38e8bf5a).
  */
 
 #ifndef PS3TC_CELL_GCM_FIFO_WRAP_H
