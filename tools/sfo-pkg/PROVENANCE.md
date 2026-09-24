@@ -97,8 +97,36 @@ given with and without a trailing separator. `PARAM.SFO` matches at
 length-field padding cases and multi-call streaming; the padding digests were
 computed independently with coreutils `sha1sum`.
 
-## Known upstream warnings
+### 3. Path truncation, silent success on open failure, dynamic table growth (t_6858d853)
 
-`pkg.c` produces `-Wstringop-truncation` and `-Wformat-truncation` warnings
-under `-Wall -Wextra`, all from upstream's fixed-size path buffers. Left alone
-to keep the diff against upstream small and reviewable.
+Reported by EMP Static relay (2026-09-24):
+* **Silent success defect**: When `read_file_alloc` failed to open a payload file,
+  it printed `Cannot open: <path>` to `stderr`, freed buffers, and returned from
+  `pack_pkg` (which had return type `void`). `main()` then proceeded to `return 0;`,
+  exiting with success even though no package was produced.
+  Fixed by making `pack_pkg`, `unpack_pkg`, and `list_pkg` return non-zero (`1`)
+  on error, propagating the exit code through `main()`, and deleting any partially
+  written output file via `delete_file` if writing fails.
+* **Path length truncation on Windows**: Upstream used `char files_list[1024][260]`
+  and ANSI `FindFirstFileA` / `fopen`. Paths exceeding 259 characters were silently
+  truncated, causing `fopen` to fail on non-existent truncated paths and triggering
+  the silent exit 0 defect.
+  Fixed by switching Windows path operations to wide APIs end-to-end
+  (`FindFirstFileW`, `FindNextFileW`, `CreateFileW`, `CreateDirectoryW`, `_wfopen`)
+  with `\\?\` extended-path prefixing via `GetFullPathNameW` and normalized `\`
+  separators, converting to/from UTF-8 dynamically.
+* **Dynamic allocation per entry**: Replaced fixed 260-byte (Windows) and 512-byte
+  (POSIX) file and directory buffers in `get_files` / `collect_dir` with heap-allocated
+  `char *filename` and `char *src_path` per `pkg_file_entry_t`.
+* **Dynamic file table growth**: Replaced fixed `MAX_FILES` (1024) array limit
+  with dynamically growing `g_files` via `realloc`.
+* **`--list` and `unpack_pkg` buffer audit**: Replaced fixed 600-byte buffers
+  (`outpath`, `parent`) and fixed 256-byte name buffers with dynamically allocated
+  strings and wide-path creation on Windows.
+
+## Upstream warnings status
+
+The `-Wstringop-truncation` and `-Wformat-truncation` warnings originally present
+under `-Wall -Wextra` were eliminated by Local Fix 3 when fixed-size path buffers
+were replaced with dynamic allocation. `pkg.c` now compiles cleanly under
+`-Wall -Wextra`.
