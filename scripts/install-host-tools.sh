@@ -95,11 +95,18 @@ build_sprx_linker() {
     make -C "$TOOLS_DIR/sprx-linker" install PS3DEV="$PS3DEV" PS3DK="$PS3DK"
 }
 
+build_pkg() {
+    local build="$PS3_BUILD_ROOT/host-tools-linux/sfo-pkg"
+    bash "$script_dir/build-pkg-host.sh" "$build"
+    install_tool "$build/pkg" "pkg"
+}
+
 [[ -d "$PS3DEV" ]] || die "PS3DEV does not exist: $PS3DEV (run scripts/bootstrap.sh first)"
 [[ -d "$PS3DK" ]] || install -d "$PS3DK"
 
 build_rust_workspace
 build_rsx_cg_compiler
 build_sprx_linker
+build_pkg
 
 say "done"

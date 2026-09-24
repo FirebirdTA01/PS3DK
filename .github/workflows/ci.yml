@@ -150,6 +150,9 @@ jobs:
       - name: Test pkg host tool long paths and error handling
         run: bash tests/sdk/pkg-test.sh
 
+      - name: Test Linux pkg installation and release staging
+        run: bash tests/sdk/linux-pkg-install-test.sh
+
       - name: Test newlib remove directory fallback
         run: bash tests/sdk/newlib-remove-test.sh
 

@@ -113,6 +113,10 @@ jobs:
       - name: Build sprx-linker
         run: make -C tools/sprx-linker
 
+      - name: Build pkg
+        run: |
+          bash scripts/build-pkg-host.sh build/host-tools-linux/sfo-pkg
+
       - name: Build rsx-cg-compiler
         run: |
           cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
@@ -159,6 +163,7 @@ jobs:
           # C/C++ binaries.
           cp tools/sprx-linker/sprxlinker "$stage/bin/"
           cp tools/rsx-cg-compiler/build/rsx-cg-compiler "$stage/bin/"
+          cp build/host-tools-linux/sfo-pkg/pkg "$stage/bin/"
           # Strip everything (best-effort).
           strip "$stage/bin/"* || true
           # Bundle a tiny README that lists runtime deps.
@@ -181,6 +186,7 @@ jobs:
           Runtime dependencies (dynamic):
             * sprxlinker         — libelf, libz, libzstd
             * rsx-cg-compiler    — libstdc++ (system)
+            * pkg                - glibc
             * sfo-gui            - Linux desktop OpenGL/display libraries
                                    loaded by the user's GUI session (for
                                    example libX11/libxcb/libxkbcommon/
