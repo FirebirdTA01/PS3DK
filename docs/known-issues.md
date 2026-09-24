@@ -436,54 +436,42 @@ after `cellGcmInit` to dodge this entirely.
 
 ---
 
-## PSGL bindings — not shipped (maybe later)
+## PSGL runtime — shipped with known stubbed sub-surfaces
 
-**Status:** open question; intentionally deferred.
+**Status:** shipped. Core PSGL, GLU, and SPU drawing acceleration are
+shipped; 21 samples build against it. Selected sub-surfaces (CgFX
+effects framework, runtime Cg compiler, program combination, and
+hardware cursor) remain stubbed.
 
-The original PS3 runtime offered two graphics paths: low-level GCM
-(direct command-buffer construction, what our SDK targets) and PSGL
-(an OpenGL-ES-1.1-flavoured wrapper sitting on top of GCM, with its
-own header tree, runtime library, and shader-build pipeline via
-`psgl_shader_builder`).  Our SDK ships the GCM surface only.  Code
-written for older SDKs that imports `<PSGL/psgl.h>`, calls
-`psglInit` / `psglGetDeviceDimensions`, or expects `glActiveTexture`
-/ `glClientActiveTexture` / `GLuint` against an OpenGL-ES symbol set
-won't link.
+The SDK ships the OpenGL-ES-flavoured PSGL runtime sitting on top of GCM:
+- **PPU libraries and headers:** `ppu/lib/libPSGL.a` (and `lp64/libPSGL.a`),
+  `ppu/lib/libPSGLU.a`, `<PSGL/psgl.h>`, and `<PSGL/psglu.h>`.
+- **SPU libraries and tools:** `spu/lib/libspuPSGL.a`, `<PSGL/spu_psgl.h>`
+  (installed at `spu/include/PSGL/spu_psgl.h`), `tools/psgl`, and
+  `spu-elf-to-ppu-obj.exe` (as recorded in `CHANGELOG.md`).
+- **Sample suite:** 21 samples under `samples/toolchain/`
+  (`hello-psgl-*` and `hello-psglu`) build against it, covering basic
+  clear, textured and rotating quads, fixed-function pipeline, VBOs, MSAA,
+  blend, fog, lighting, shaders, and SPU draw pipelines.
 
-Symptoms when porting such code:
+**Stubbed / unimplemented sub-surfaces:**
 
-```
-error: 'glActiveTexture' was not declared in this scope
-error: 'psglGetDeviceDimensions' was not declared in this scope
-error: 'GLuint' was not declared in this scope
-```
-
-Reproduces today on framework code that includes both a GCM-shape
-window class (`FWCellGCMWindow`) and a PSGL-shape one
-(`FWCellGLWindow`); the framework's own Makefile builds both
-unconditionally.  Workaround for a sample build is to drop the GL
-window source from the framework's source list — the GCM window
-covers everything most samples actually use at runtime.
-
-**Why it's a maybe rather than a no.**  Some older code paths
-(particularly UI overlays, font rendering helpers, and a handful of
-graphics-tutorial samples) lean on PSGL's higher-level API surface.
-A future PSGL implementation could either:
-
-1. Author a thin PSGL-on-GCM shim that maps the PSGL entry points
-   onto our existing GCM surface (the original PSGL was implemented
-   roughly this way; the OpenGL-ES-style state machine is a thin
-   layer over the underlying RSX command stream).  Practical scope:
-   roughly the same order of magnitude as our current `libgcm_cmd`
-   plus the `cellGcmCg*` helpers.
-2. Skip PSGL entirely and migrate any code that needs it to direct
-   GCM, treating the PSGL absence as a permanent deprecation.
-
-We haven't decided.  Today's stance: build samples that need PSGL
-fail at link with a clear "no PSGL" indicator; if a real port shows
-up needing the bindings, we'll re-evaluate based on its scope.
-
-**For homebrew/sample porting today:** if the sample only uses
-PSGL for the window-and-input scaffolding (the common case for the
-graphics tutorials), drop the GL framework files and switch to the
-GCM window class — the rendering inside still uses GCM regardless.
+1. **`libPSGLFX.a` (empty archive placeholder):** `ppu/lib/libPSGLFX.a`
+   is an 8-byte empty archive (`!<arch>\n` produced by
+   `sdk/libPSGLFX_stub/Makefile`) provided as a build-unblock placeholder
+   to satisfy linker flags (`-lPSGLFX`) in samples and templates. The
+   CgFX Effects Framework runtime (`cgCreateEffect`, `cgCreateTechnique`,
+   etc.) is not implemented.
+2. **Runtime Cg compiler (`sceCgc*`):** `sceCgcNewContext` (and related
+   functions in `sdk/libPSGL/src/cgc_compiler.c`) returns `NULL`. PSGL
+   requires precompiled shader binaries or bytecode; on-device string
+   compilation via `sceCgc` is not functional.
+3. **Cg program combination:** `cgCombinePrograms`, `cgCombinePrograms2`,
+   and `cgCombinePrograms3` (in `sdk/libPSGL/src/cg_runtime.c:1002-1010`)
+   return `NULL`.
+4. **Hardware cursor:** Hardware cursor control functions in
+   `sdk/libPSGL/src/psgl_bootstrap.c:402-435` (`psglInitCursor`,
+   `psglSetCursorEnable`, `psglSetCursorDisable`,
+   `psglSetCursorImageOffset`, `psglSetCursorPosition`,
+   `psglUpdateCursor`) unconditionally return
+   `PSGL_HW_CURSOR_ERROR_FAILURE` (`-1`).
