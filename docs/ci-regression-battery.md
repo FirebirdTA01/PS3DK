@@ -139,6 +139,11 @@ exists, even when no emulator process is currently running. Human runs use the
 same lock through `scripts/rpcs3-claim.ps1` and `scripts/rpcs3-release.ps1`, so
 the room announcement and the machine-readable ownership state agree.
 
+Before force-releasing a stale lock, confirm that its holder is gone and
+announce the force-release in every room sharing RPCS3. An idle emulator alone
+does not establish a stale lock: the holder may be between boots. Automated
+cleanup must not force-release another holder's lock.
+
 ## CI Runner Question
 
 There are two useful CI layers, and they should be separated:
