@@ -9,38 +9,44 @@ next surface.
 
 ## C++ exceptions are not caught on the PPU in the default ILP32 ABI
 
-**Status:** open; cause localized, fix planned in the PPU GCC.  Measured
-against an installed v0.12.65 SDK; not yet re-run against v0.14.0.
+**Status:** open; failing stage localized, fix planned in the PPU GCC.
+Measured against an installed v0.12.65 SDK; not yet re-run against
+v0.14.0.
 
-**Symptom.** In the default ILP32 ABI, the first C++ throw in a program
-never reaches its handler: the program prints `terminate called after
-throwing an instance of '<type>'`, then `terminate called recursively`,
-and aborts.  Seen with every type tried (`int`, `std::bad_alloc`) and
-from `main` as well as from a static constructor.  The same code
-built for LP64 (`-mlp64`) catches the exception correctly.
+**Symptom.** In the default ILP32 ABI, a C++ throw never reaches its
+handler: the program prints `terminate called after throwing an instance
+of '<type>'`, then `terminate called recursively`, and aborts.  Observed
+for `throw 42` / `catch (int)` from `main`, and for `std::bad_alloc`
+thrown and caught inside a static constructor.  In LP64 (`-mlp64`), the
+`throw 42` / `catch (int)` probe from `main` is caught correctly; the
+other LP64 combinations have not yet been tested.
 
-**Cause.** The unwinder cannot step from a frame to its caller.  ILP32
-code saves the link register with a 4-byte store (`stw r0,16(r1)`) and
-the back chain with `stwu`, while the ILP32 `libgcc` unwinder treats the
-saved link register as an 8-byte value.  It therefore reads the saved
-return address together with four bytes of stale stack and keeps the
-wrong half, so the first frame step yields a garbage address and the
-search for a handler fails.  Frame registration and FDE lookup work.
+**Cause (localized).** For the probed frame, the unwinder finds the
+frame's FDE, but its first step to the caller returns a garbage address.
+ILP32 code saves the link register with a 4-byte store (`stw
+r0,16(r1)`), while the ILP32 `libgcc` unwinder records the link register
+as an 8-byte register and loads that slot as 8 bytes before narrowing it
+to a 32-bit address.  On a big-endian target that keeps the four bytes
+after the saved address, which is consistent with the garbage address
+observed.  This explanation is inferred from the code and the observed
+value; the saved stack bytes have not yet been dumped.
 
-**Workaround.** Build code that needs C++ exceptions for LP64:
+**Workaround.** For code that needs C++ exceptions, build for LP64:
 `-mlp64`, link against `$PS3DK/ppu/lib/lp64`, and run `sprxlinker
 --lp64` on the ELF before `make_self`.  Otherwise report errors through
 return values and build with `-fno-exceptions`.
 
-**Planned fix.** Make ILP32 code save and restore the link register as
-a 64-bit value (`std` / `ld`), which is what the reference toolchain's
-ILP32 code does and what the unwinder expects, in every place that
-touches that slot: compiler prologues and epilogues, shrink-wrapped and
+**Planned fix.** Make the link-register save and restore widths match
+the unwinder: save and restore it as a 64-bit value (`std` / `ld`), as
+the reference toolchain's ILP32 code does, everywhere that slot is
+touched (compiler prologues and epilogues, shrink-wrapped and
 out-of-line save/restore routines, and the hand-written CRT start and
-end files.  Pointer width stays 32-bit.  Whether the stack back chain
-should also become 64-bit is a separate ABI question with its own
-readers to audit.  Then rebuild the PPU toolchain and add a throw/catch
-probe for both ABIs to the target regression suite.
+end files).  Pointer width stays 32-bit.  Widening the stack back chain
+is a separate change that needs its own audit of every back-chain reader.
+Before the full rebuild, a controlled probe will dump the saved
+link-register bytes and compare an LR-only change against LR plus back
+chain.  The fix adds a throw/catch probe for both ABIs to the target
+regression suite.
 
 ---
 
