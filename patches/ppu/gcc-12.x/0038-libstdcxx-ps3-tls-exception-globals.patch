@@ -1,0 +1,58 @@
+PS3: keep libsupc++'s exception state in thread-local storage.
+
+libstdc++ checks for TLS support (GCC_CHECK_TLS) only in its native
+configuration.  The --with-newlib cross branch used for the PS3 skips the
+check, so _GLIBCXX_HAVE_TLS stayed undefined and eh_globals.cc fell back
+to one static __cxa_eh_globals object (the caught-exception stack and the
+uncaught count) shared by every PPU thread.  Two threads inside exception
+handling at once then saw each other's exceptions.
+
+Lv-2 gives each PPU thread its own TLS block (r13), and PPU __thread
+storage is already used by the SDK, so define HAVE_TLS for
+powerpc64-ps3-elf in the newlib branch.  eh_globals.cc then keeps
+__cxa_eh_globals in __thread storage, one per thread.  The thread model
+stays single; the other libgcc/libstdc++ locks are unchanged.
+
+The generated configure is edited by hand in the same place, as in patch
+0036.  Checked against Autoconf 2.69 (the version GCC 12.4 pins): the lines
+autoconf adds to configure for this configure.ac change are byte-identical
+to the hand edit.  A full regeneration does not reproduce the shipped
+configure even without this change, because patch 0006's PS3 case in
+crossconfig.m4 was never regenerated into configure; that branch only runs
+without --with-newlib, which the PS3 build always passes.
+
+--- a/libstdc++-v3/configure.ac
++++ b/libstdc++-v3/configure.ac
+@@ -330,6 +330,14 @@
+   # on a hosted environment.
+   if test "x${with_newlib}" = "xyes"; then
+     os_include_dir="os/newlib"
++    # PS3: each PPU thread gets its own TLS block from Lv-2, so keep
++    # libsupc++'s exception state (eh_globals) in __thread storage.
++    # This branch skips GCC_CHECK_TLS, which only runs natively.
++    case "${host}" in
++      powerpc64-ps3-elf*)
++        AC_DEFINE(HAVE_TLS)
++        ;;
++    esac
+     AC_DEFINE(HAVE_HYPOT)
+ 
+     # GLIBCXX_CHECK_STDLIB_SUPPORT
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -29197,6 +29197,15 @@
+   # on a hosted environment.
+   if test "x${with_newlib}" = "xyes"; then
+     os_include_dir="os/newlib"
++    # PS3: each PPU thread gets its own TLS block from Lv-2, so keep
++    # libsupc++'s exception state (eh_globals) in __thread storage.
++    # This branch skips GCC_CHECK_TLS, which only runs natively.
++    case "${host}" in
++      powerpc64-ps3-elf*)
++        $as_echo "#define HAVE_TLS 1" >>confdefs.h
++
++        ;;
++    esac
+     $as_echo "#define HAVE_HYPOT 1" >>confdefs.h
+ 
+ 

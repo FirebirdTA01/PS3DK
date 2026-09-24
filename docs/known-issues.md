@@ -62,29 +62,46 @@ information.
 
 ---
 
-## PPU C++ exception state is not per-thread
+## PPU C++ runtime is built for a single-threaded model
 
-**Status:** open.  Inferred risk from the toolchain configuration; not
-yet observed in a running program.
+**Status:** open.  The part that affected exception handling is fixed on
+main (GCC patch 0038: per-thread exception state); the rest of the
+single-threaded configuration remains.
 
-**Cause.** The PPU GCC is configured with `--enable-threads=single`, and
-the shipped `libsupc++.a` keeps libstdc++'s exception globals (the object
-returned by `__cxa_get_globals`: the caught-exception stack and the
-uncaught count) in one `.bss` object shared by every thread, not in
-thread-local storage.
+**Fixed: exception state.** Up to v0.14.0, libsupc++ kept its exception
+globals (the caught-exception stack and uncaught count behind
+`std::current_exception()` and `std::uncaught_exceptions()`) in one
+object shared by every PPU thread, so two threads inside exception
+handling at once saw each other's exceptions (reproduced on RPCS3).  They
+are now thread-local, one per PPU thread.  This isolates the exception
+globals only; the items below still apply to exception handling on
+several threads.
 
-**Risk.** A program that handles exceptions on more than one PPU thread at
-the same time shares that state between the threads, so one thread's
-throw or catch can change what another thread's handlers,
-`std::uncaught_exceptions()` or `std::current_exception()` see.
+**Remaining.** The PPU GCC is still configured with
+`--enable-threads=single`, so libstdc++ is built without its thread
+layer (`_GLIBCXX_HAS_GTHREADS` is undefined):
 
-**Mitigation.** Keep all exception handling on one PPU thread, or never
-let two threads be inside exception handling at once.
+- Creating threads through `std::thread` is not available (the
+  launching constructor is compiled out; `join`/`detach` throw and
+  `hardware_concurrency()` returns 0), and `std::mutex` is not provided.
+- `std::shared_ptr` reference counts use the non-atomic single-thread
+  policy, so owners on different threads that share one control block
+  can corrupt its counts.
+- The first initialization of a function-local static is not guarded
+  against two threads reaching it at once.
+- The emergency pool libsupc++ uses to allocate exceptions when `malloc`
+  fails is guarded by a mutex that is a no-op in this configuration, so
+  two threads throwing under memory exhaustion can collide (established
+  from the source, not reproduced).
+
+**Mitigation.** Use the lv2 or pthread primitives from librt for
+threading and locking; initialize function-local statics before starting
+other threads; when `shared_ptr` owners on different threads share a
+control block, hold one lock around every copy, reset and destruction
+that changes its counts.
 
 **Planned fix.** Give the PPU GCC a real thread model backed by the lv2
-threading primitives already used by librt's pthread layer, so that
-libstdc++ keeps per-thread exception globals, and add a two-thread
-throw/catch regression.
+threading primitives already used by librt's pthread layer.
 
 ---
 

@@ -36,3 +36,4 @@
 0035-libgcc-t-ps3-crtstuff-no-unwind-tables.patch
 0036-libstdcxx-ps3-filesystem-deps.patch
 0037-rs6000-logue-lr-and-eh-data-save-dimode.patch
+0038-libstdcxx-ps3-tls-exception-globals.patch
