@@ -111,6 +111,9 @@ jobs:
       - name: Test ps3_add_self output directory override
         run: bash tests/sdk/cmake-self-output-dir-test.sh
 
+      - name: Test librt pathname limits and error propagation
+        run: bash tests/sdk/librt-pathconf-test.sh
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.
