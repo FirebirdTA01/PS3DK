@@ -17,25 +17,35 @@ exports:
   # ---- File I/O ----
   - name: cellFsOpen
     nid: '0x718bf5f8'
+    aliases:
+      - sysFsOpen
     signature: |
       CellFsErrno cellFsOpen(const char *path, int flags, int *fd,
                              const void *arg, uint64_t size);
     notes: extracted from _sys_fs_0001_44.o
   - name: cellFsRead
     nid: '0x4d5ff8e2'
+    aliases:
+      - sysFsRead
     signature: |
       CellFsErrno cellFsRead(int fd, void *buf, uint64_t nbytes,
                              uint64_t *nread);
   - name: cellFsWrite
     nid: '0xecdcf2ab'
+    aliases:
+      - sysFsWrite
     signature: |
       CellFsErrno cellFsWrite(int fd, const void *buf, uint64_t nbytes,
                               uint64_t *nwrite);
   - name: cellFsClose
     nid: '0x2cb51f0d'
+    aliases:
+      - sysFsClose
     signature: 'CellFsErrno cellFsClose(int fd);'
   - name: cellFsLseek
     nid: '0xa397d042'
+    aliases:
+      - sysFsLseek
     signature: |
       CellFsErrno cellFsLseek(int fd, int64_t offset, int whence,
                               uint64_t *pos);
@@ -46,16 +56,24 @@ exports:
   # ---- Directory I/O ----
   - name: cellFsOpendir
     nid: '0x3f61245c'
+    aliases:
+      - sysFsOpendir
     signature: 'CellFsErrno cellFsOpendir(const char *path, int *fd);'
   - name: cellFsReaddir
     nid: '0x5c74903d'
+    aliases:
+      - sysFsReaddir
     signature: |
       CellFsErrno cellFsReaddir(int fd, CellFsDirent *dir, uint64_t *nread);
   - name: cellFsClosedir
     nid: '0xff42dcc3'
+    aliases:
+      - sysFsClosedir
     signature: 'CellFsErrno cellFsClosedir(int fd);'
   - name: cellFsGetDirectoryEntries
     nid: '0x9b882495'
+    aliases:
+      - sysFsGetDirectoryEntries
     signature: |
       CellFsErrno cellFsGetDirectoryEntries(int fd,
                                             CellFsDirectoryEntry *entries,
@@ -65,31 +83,50 @@ exports:
   # ---- Stat / metadata ----
   - name: cellFsStat
     nid: '0x7de6dced'
+    aliases:
+      - sysFsStat
     signature: 'CellFsErrno cellFsStat(const char *path, CellFsStat *sb);'
   - name: cellFsFstat
     nid: '0xef3efa34'
+    aliases:
+      - sysFsFstat
     signature: 'CellFsErrno cellFsFstat(int fd, CellFsStat *sb);'
   - name: cellFsChmod
     nid: '0x99406d0b'
+    aliases:
+      - sysFsChmod
     signature: 'CellFsErrno cellFsChmod(const char *path, CellFsMode mode);'
   - name: cellFsUtime
     nid: '0xbef554a4'
+    aliases:
+      - sysFsUtime
     signature: |
       CellFsErrno cellFsUtime(const char *path, const CellFsUtimbuf *timep);
 
   # ---- Path operations ----
   - name: cellFsMkdir
     nid: '0xba901fe6'
+    aliases:
+      - sysFsMkdir
     signature: 'CellFsErrno cellFsMkdir(const char *path, CellFsMode mode);'
   - name: cellFsRmdir
     nid: '0x2796fdf3'
+    aliases:
+      - sysFsRmdir
     signature: 'CellFsErrno cellFsRmdir(const char *path);'
   - name: cellFsRename
     nid: '0xf12eecc8'
     signature: 'CellFsErrno cellFsRename(const char *from, const char *to);'
   - name: cellFsUnlink
     nid: '0x7f4677a8'
+    aliases:
+      - sysFsUnlink
     signature: 'CellFsErrno cellFsUnlink(const char *path);'
+  - name: cellFsAccess
+    nid: '0x06e681ed'
+    aliases:
+      - sysFsAccess
+    signature: 'CellFsErrno cellFsAccess(const char *path, int amode);'
 
   # ---- Block / size queries ----
   - name: cellFsGetBlockSize
@@ -105,6 +142,8 @@ exports:
                                       uint64_t *block_size);
   - name: cellFsGetFreeSize
     nid: '0xaa3b4bcd'
+    aliases:
+      - sysFsGetFreeSize
     signature: |
       CellFsErrno cellFsGetFreeSize(const char *directory_path,
                                     uint32_t *fs_block_size,
@@ -128,17 +167,23 @@ exports:
   # ---- IO buffers (SDK 220 surface) ----
   - name: cellFsSetIoBuffer
     nid: '0x3140f6e1'
+    aliases:
+      - sysFsSetIoBuffer
     signature: |
       CellFsErrno cellFsSetIoBuffer(int fd, size_t buffer_size_limit,
                                     int page_type,
                                     sys_memory_container_t container);
   - name: cellFsSetDefaultContainer
     nid: '0x02671310'
+    aliases:
+      - sysFsSetDefaultContainer
     signature: |
       CellFsErrno cellFsSetDefaultContainer(sys_memory_container_t container,
                                             size_t total_limit);
   - name: cellFsSetIoBufferFromDefaultContainer
     nid: '0x75f16dc5'
+    aliases:
+      - sysFsSetIoBufferFromDefaultContainer
     signature: |
       CellFsErrno cellFsSetIoBufferFromDefaultContainer(int fd,
                                                         size_t buffer_size_limit,
@@ -228,24 +273,36 @@ exports:
   # ---- Async I/O ----
   - name: cellFsAioInit
     nid: '0xdb869f20'
+    aliases:
+      - sysFsAioInit
     signature: 'CellFsErrno cellFsAioInit(const char *mount_point);'
   - name: cellFsAioFinish
     nid: '0x9f951810'
+    aliases:
+      - sysFsAioFinish
     signature: 'CellFsErrno cellFsAioFinish(const char *mount_point);'
   - name: cellFsAioRead
     nid: '0xc1c507e7'
+    aliases:
+      - sysFsAioReadEx
+      - sysFsAioRead
     signature: |
       CellFsErrno cellFsAioRead(CellFsAio *aio, int *id,
                                 void (*func)(CellFsAio *aio, CellFsErrno err,
                                              int id, uint64_t size));
   - name: cellFsAioWrite
     nid: '0x4cef342e'
+    aliases:
+      - sysFsAioWriteEx
+      - sysFsAioWrite
     signature: |
       CellFsErrno cellFsAioWrite(CellFsAio *aio, int *id,
                                  void (*func)(CellFsAio *aio, CellFsErrno err,
                                               int id, uint64_t size));
   - name: cellFsAioCancel
     nid: '0x7f13fc8c'
+    aliases:
+      - sysFsAioCancel
     signature: 'CellFsErrno cellFsAioCancel(int id);'
 
   # ---- Stripped from 475 public headers, still exported by SPRX ----

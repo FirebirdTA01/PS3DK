@@ -137,6 +137,9 @@ declare -A PSL1GHT_IMPORT_ALIAS=(
     [libssl_stub]=libssl.a
     [libsysmodule_stub]=libsysmodule.a
     [libvdec_stub]=libvdec.a
+    [libresc_stub]=libresc.a
+    [cellFs]=libsysfs.a
+    [libhttp_stub]=libhttp.a
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"

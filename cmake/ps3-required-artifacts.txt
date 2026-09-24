@@ -122,7 +122,6 @@ ppu_stub  ppu/lib/libfs_stub.a
 ppu_stub  ppu/lib/libgcm_cmd.a
 ppu_stub  ppu/lib/libgcm_sys_stub.a
 ppu_stub  ppu/lib/libgifdec_stub.a
-ppu_stub  ppu/lib/libhttp.a
 ppu_stub  ppu/lib/libhttp_stub.a
 ppu_stub  ppu/lib/libhttp_util_stub.a
 ppu_stub  ppu/lib/libio_stub.a
@@ -245,6 +244,9 @@ alias     ppu/lib/libnetctl.a              libnetctl_stub.a
 alias     ppu/lib/libssl.a                 libssl_stub.a
 alias     ppu/lib/libsysmodule.a           libsysmodule_stub.a
 alias     ppu/lib/libvdec.a                libvdec_stub.a
+alias     ppu/lib/libhttp.a                libhttp_stub.a
+alias     ppu/lib/libresc.a                libresc_stub.a
+alias     ppu/lib/libsysfs.a               libfs_stub.a
 alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
 alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
@@ -259,6 +261,9 @@ alias     ppu/lib/lp64/libnetctl.a         libnetctl_stub.a
 alias     ppu/lib/lp64/libssl.a            libssl_stub.a
 alias     ppu/lib/lp64/libsysmodule.a      libsysmodule_stub.a
 alias     ppu/lib/lp64/libvdec.a           libvdec_stub.a
+alias     ppu/lib/lp64/libhttp.a           libhttp_stub.a
+alias     ppu/lib/lp64/libresc.a           libresc_stub.a
+alias     ppu/lib/lp64/libsysfs.a          libfs_stub.a
 
 # --- Shipped but not required ----------------------------------------------
 # The two-sided check requires every shipped archive to be either promised above
@@ -280,9 +285,7 @@ optional  ppu/lib/libfont.a                      shipped-for-user-code
 optional  ppu/lib/libfontFT.a                    shipped-for-user-code
 optional  ppu/lib/libmixer.a                     shipped-for-user-code
 optional  ppu/lib/libpngdec.a                    shipped-for-user-code
-optional  ppu/lib/libresc.a                      shipped-for-user-code
 optional  ppu/lib/libspumarsjq.a                 shipped-for-user-code
-optional  ppu/lib/libsysfs.a                     shipped-for-user-code
 optional  ppu/lib/libsysutil_avconf_ext_stub.a   shipped-for-user-code
 optional  ppu/lib/libsysutil_bgdl_stub.a         shipped-for-user-code
 optional  ppu/lib/libsysutil_userinfo_stub.a     shipped-for-user-code
