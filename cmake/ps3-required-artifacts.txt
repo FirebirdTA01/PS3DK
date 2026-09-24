@@ -103,10 +103,8 @@ ppu_stub  ppu/lib/libPSGLU.a
 ppu_stub  ppu/lib/libadec_stub.a
 ppu_stub  ppu/lib/libatrac3multi_stub.a
 ppu_stub  ppu/lib/libatrac3plus_stub.a
-ppu_stub  ppu/lib/libaudio.a
 ppu_stub  ppu/lib/libaudio_stub.a
 ppu_stub  ppu/lib/libc_stub.a
-ppu_stub  ppu/lib/libcamera.a
 ppu_stub  ppu/lib/libcamera_stub.a
 ppu_stub  ppu/lib/libcellFont_stub.a
 ppu_stub  ppu/lib/libcellGame_stub.a
@@ -123,12 +121,10 @@ ppu_stub  ppu/lib/libfontGcm.a
 ppu_stub  ppu/lib/libfs_stub.a
 ppu_stub  ppu/lib/libgcm_cmd.a
 ppu_stub  ppu/lib/libgcm_sys_stub.a
-ppu_stub  ppu/lib/libgem.a
 ppu_stub  ppu/lib/libgifdec_stub.a
 ppu_stub  ppu/lib/libhttp.a
 ppu_stub  ppu/lib/libhttp_stub.a
 ppu_stub  ppu/lib/libhttp_util_stub.a
-ppu_stub  ppu/lib/libhttputil.a
 ppu_stub  ppu/lib/libio_stub.a
 ppu_stub  ppu/lib/libjpgdec.a
 ppu_stub  ppu/lib/libjpgdec_stub.a
@@ -165,12 +161,10 @@ ppu_stub  ppu/lib/libspurs.a
 ppu_stub  ppu/lib/libspurs_jq_stub.a
 ppu_stub  ppu/lib/libspurs_stub.a
 ppu_stub  ppu/lib/libsscgpu.a
-ppu_stub  ppu/lib/libssl.a
 ppu_stub  ppu/lib/libssl_stub.a
 ppu_stub  ppu/lib/libsync2_stub.a
 ppu_stub  ppu/lib/libsync_stub.a
 ppu_stub  ppu/lib/libsys_crashdump_stub.a
-ppu_stub  ppu/lib/libsysmodule.a
 ppu_stub  ppu/lib/libsysmodule_stub.a
 ppu_stub  ppu/lib/libsysutil_ap_stub.a
 ppu_stub  ppu/lib/libsysutil_audio_out_stub.a
@@ -242,11 +236,29 @@ alias     ppu/lib/libgcm_sys.a             libgcm_sys_stub.a
 alias     ppu/lib/libio.a                  libio_stub.a
 alias     ppu/lib/libsysutil.a             libsysutil_stub.a
 alias     ppu/lib/libusb.a                 libusbd_stub.a
+alias     ppu/lib/libaudio.a               libaudio_stub.a
+alias     ppu/lib/libcamera.a              libcamera_stub.a
+alias     ppu/lib/libgem.a                 libgem_stub.a
+alias     ppu/lib/libhttputil.a            libhttp_util_stub.a
+alias     ppu/lib/liblv2dbg.a              liblv2dbg_stub.a
+alias     ppu/lib/libnetctl.a              libnetctl_stub.a
+alias     ppu/lib/libssl.a                 libssl_stub.a
+alias     ppu/lib/libsysmodule.a           libsysmodule_stub.a
+alias     ppu/lib/libvdec.a                libvdec_stub.a
 alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
 alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
 alias     ppu/lib/lp64/libsysutil.a        libsysutil_stub.a
 alias     ppu/lib/lp64/libusb.a            libusbd_stub.a
+alias     ppu/lib/lp64/libaudio.a          libaudio_stub.a
+alias     ppu/lib/lp64/libcamera.a         libcamera_stub.a
+alias     ppu/lib/lp64/libgem.a            libgem_stub.a
+alias     ppu/lib/lp64/libhttputil.a       libhttp_util_stub.a
+alias     ppu/lib/lp64/liblv2dbg.a         liblv2dbg_stub.a
+alias     ppu/lib/lp64/libnetctl.a         libnetctl_stub.a
+alias     ppu/lib/lp64/libssl.a            libssl_stub.a
+alias     ppu/lib/lp64/libsysmodule.a      libsysmodule_stub.a
+alias     ppu/lib/lp64/libvdec.a           libvdec_stub.a
 
 # --- Shipped but not required ----------------------------------------------
 # The two-sided check requires every shipped archive to be either promised above
@@ -263,11 +275,10 @@ optional  ppu/lib/libPSGLFX.a                    shipped-for-user-code
 optional  ppu/lib/libcellFontFT_stub.a           shipped-for-user-code
 optional  ppu/lib/libcellGameExec_stub.a         shipped-for-user-code
 optional  ppu/lib/libcgbLevelC.a                 shipped-for-user-code
+optional  ppu/lib/libgem_stub.a                  shipped-for-user-code
 optional  ppu/lib/libfont.a                      shipped-for-user-code
 optional  ppu/lib/libfontFT.a                    shipped-for-user-code
-optional  ppu/lib/liblv2dbg.a                    shipped-for-user-code
 optional  ppu/lib/libmixer.a                     shipped-for-user-code
-optional  ppu/lib/libnetctl.a                    shipped-for-user-code
 optional  ppu/lib/libpngdec.a                    shipped-for-user-code
 optional  ppu/lib/libresc.a                      shipped-for-user-code
 optional  ppu/lib/libspumarsjq.a                 shipped-for-user-code
@@ -275,7 +286,7 @@ optional  ppu/lib/libsysfs.a                     shipped-for-user-code
 optional  ppu/lib/libsysutil_avconf_ext_stub.a   shipped-for-user-code
 optional  ppu/lib/libsysutil_bgdl_stub.a         shipped-for-user-code
 optional  ppu/lib/libsysutil_userinfo_stub.a     shipped-for-user-code
-optional  ppu/lib/libvdec.a                      shipped-for-user-code
+optional  ppu/lib/libvdec_stub.a                 shipped-for-user-code
 optional  spu/lib/libdma.a                       shipped-for-user-code
 optional  spu/lib/libfiber.a                     shipped-for-user-code
 optional  spu/lib/libspuatomic.a                 shipped-for-user-code

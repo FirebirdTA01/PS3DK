@@ -1,121 +1,180 @@
 library: libgem
 version: 1
 module: libgem
+archive_name: gem
 exports:
 - name: cellGemCalibrate
   nid: '0xafa99ead'
+  aliases:
+    - gemCalibrate
   signature: ''
   notes: extracted from _libgem_0002_27.o
 - name: cellGemClearStatusFlags
   nid: '0x9b9714a4'
+  aliases:
+    - gemClearStatusFlags
   signature: ''
   notes: extracted from _libgem_0002_24.o
 - name: cellGemConvertVideoFinish
   nid: '0x1a13d010'
+  aliases:
+    - gemConvertVideoFinish
   signature: ''
   notes: extracted from _libgem_0002_6.o
 - name: cellGemConvertVideoStart
   nid: '0x6dce048c'
+  aliases:
+    - gemConvertVideoStart
   signature: ''
   notes: extracted from _libgem_0002_18.o
 - name: cellGemEnableCameraPitchAngleCorrection
   nid: '0x4219de31'
+  aliases:
+    - gemEnableCameraPitchAngleCorrection
   signature: ''
   notes: extracted from _libgem_0002_13.o
 - name: cellGemEnableMagnetometer
   nid: '0x1a2518a2'
+  aliases:
+    - gemEnableMagnetometer
   signature: ''
   notes: extracted from _libgem_0002_7.o
 - name: cellGemEnd
   nid: '0xe1f85a80'
+  aliases:
+    - gemEnd
   signature: ''
   notes: extracted from _libgem_0002_34.o
 - name: cellGemFilterState
   nid: '0x6fc4c791'
+  aliases:
+    - gemFilterState
   signature: ''
   notes: extracted from _libgem_0002_19.o
 - name: cellGemForceRGB
   nid: '0xce6d7791'
+  aliases:
+    - gemForceRGB
   signature: ''
   notes: extracted from _libgem_0002_31.o
 - name: cellGemGetAccelerometerPositionInDevice
   nid: '0x6a5b7048'
+  aliases:
+    - gemGetAccelerometerPositionInDevice
   signature: ''
   notes: extracted from _libgem_0002_16.o
 - name: cellGemGetAllTrackableHues
   nid: '0x2d2c2764'
+  aliases:
+    - gemGetAllTrackableHues
   signature: ''
   notes: extracted from _libgem_0002_10.o
 - name: cellGemGetCameraState
   nid: '0x8befac67'
+  aliases:
+    - gemGetCameraState
   signature: ''
   notes: extracted from _libgem_0002_21.o
 - name: cellGemGetEnvironmentLightingColor
   nid: '0x02eb41bb'
+  aliases:
+    - gemGetEnvironmentLightingColor
   signature: ''
   notes: extracted from _libgem_0002_1.o
 - name: cellGemGetHuePixels
   nid: '0xb8ef56a6'
+  aliases:
+    - gemGetHuePixels
   signature: ''
   notes: extracted from _libgem_0002_28.o
 - name: cellGemGetImageState
   nid: '0x92cc4b34'
+  aliases:
+    - gemGetImageState
   signature: ''
   notes: extracted from _libgem_0002_23.o
 - name: cellGemGetInertialState
   nid: '0xd37b127a'
+  aliases:
+    - gemGetInertialState
   signature: ''
   notes: extracted from _libgem_0002_32.o
 - name: cellGemGetInfo
   nid: '0x9e1dff96'
+  aliases:
+    - gemGetInfo
   signature: ''
   notes: extracted from _libgem_0002_25.o
 - name: cellGemGetMemorySize
   nid: '0x2e0a170d'
+  aliases:
+    - gemGetMemorySize
   signature: ''
   notes: extracted from _libgem_0002_11.o
 - name: cellGemGetRGB
   nid: '0x1b30cc22'
+  aliases:
+    - gemGetRGB
   signature: ''
   notes: extracted from _libgem_0002_8.o
 - name: cellGemGetRumble
   nid: '0x6db6b007'
+  aliases:
+    - gemGetRumble
   signature: ''
   notes: extracted from _libgem_0002_17.o
 - name: cellGemGetState
   nid: '0x6441d38d'
+  aliases:
+    - gemGetState
   signature: ''
   notes: extracted from _libgem_0002_15.o
 - name: cellGemGetStatusFlags
   nid: '0xfee33481'
+  aliases:
+    - gemGetStatusFlags
   signature: ''
   notes: extracted from _libgem_0002_37.o
 - name: cellGemGetTrackerHue
   nid: '0x18ea899a'
+  aliases:
+    - gemGetTrackerHue
   signature: ''
   notes: extracted from _libgem_0002_5.o
 - name: cellGemHSVtoRGB
   nid: '0xc7622586'
+  aliases:
+    - gemHSVtoRGB
   signature: ''
   notes: extracted from _libgem_0002_30.o
 - name: cellGemInit
   nid: '0x13ea7c64'
+  aliases:
+    - gemInit
   signature: ''
   notes: extracted from _libgem_0002_4.o
 - name: cellGemInvalidateCalibration
   nid: '0xe3e4f0d6'
+  aliases:
+    - gemInvalidateCalibration
   signature: ''
   notes: extracted from _libgem_0002_35.o
 - name: cellGemIsTrackableHue
   nid: '0xfb5887f9'
+  aliases:
+    - gemIsTrackableHue
   signature: ''
   notes: extracted from _libgem_0002_36.o
 - name: cellGemPrepareCamera
   nid: '0xa03ef587'
+  aliases:
+    - gemPrepareCamera
   signature: ''
   notes: extracted from _libgem_0002_26.o
 - name: cellGemPrepareVideoConvert
   nid: '0xc07896f9'
+  aliases:
+    - gemPrepareVideoConvert
   signature: ''
   notes: extracted from _libgem_0002_29.o
 - name: cellGemReadExternalPortDeviceInfo
@@ -124,30 +183,44 @@ exports:
   notes: extracted from _libgem_0002_3.o
 - name: cellGemReset
   nid: '0xde54e2fc'
+  aliases:
+    - gemReset
   signature: ''
   notes: extracted from _libgem_0002_33.o
 - name: cellGemSetRumble
   nid: '0x49609306'
+  aliases:
+    - gemSetRumble
   signature: ''
   notes: extracted from _libgem_0002_14.o
 - name: cellGemSetYaw
   nid: '0x77e08704'
+  aliases:
+    - gemSetYaw
   signature: ''
   notes: extracted from _libgem_0002_20.o
 - name: cellGemTrackHues
   nid: '0x928ac5f8'
+  aliases:
+    - gemTrackHues
   signature: ''
   notes: extracted from _libgem_0002_22.o
 - name: cellGemUpdateFinish
   nid: '0x41ae9c31'
+  aliases:
+    - gemUpdateFinish
   signature: ''
   notes: extracted from _libgem_0002_12.o
 - name: cellGemUpdateStart
   nid: '0x0ecd2261'
+  aliases:
+    - gemUpdateStart
   signature: ''
   notes: extracted from _libgem_0002_2.o
 - name: cellGemWriteExternalPort
   nid: '0x1f6328d8'
+  aliases:
+    - gemWriteExternalPort
   signature: ''
   notes: extracted from _libgem_0002_9.o
 imports: []

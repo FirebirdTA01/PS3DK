@@ -117,7 +117,26 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libpngenc_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libjpgenc_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgifdec_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgem_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libvdec_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/cellFs.yaml"
+)
+
+# PSL1GHT libraries that were pure import wrappers (one sprx.o of
+# trampolines, no C code) are replaced by the nidgen archive: the
+# PSL1GHT names are nidgen aliases (matched by FNID) of the reference
+# exports, and the PSL1GHT archive name is installed as an alias of the
+# _stub archive, as libusb.a / libsysutil.a already are.
+declare -A PSL1GHT_IMPORT_ALIAS=(
+    [libaudio_stub]=libaudio.a
+    [libcamera_stub]=libcamera.a
+    [libgem_stub]=libgem.a
+    [libhttp_util_stub]=libhttputil.a
+    [liblv2dbg_stub]=liblv2dbg.a
+    [libnetctl_stub]=libnetctl.a
+    [libssl_stub]=libssl.a
+    [libsysmodule_stub]=libsysmodule.a
+    [libvdec_stub]=libvdec.a
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
@@ -257,6 +276,11 @@ for yaml in "${STUB_YAMLS[@]}"; do
     else
         install -m 0644 "${produced[0]}" "$install_dir/"
         say "installed $(basename "${produced[0]}") -> $install_dir/"
+        psl1ght_name="${PSL1GHT_IMPORT_ALIAS[$name]:-}"
+        if [[ -n "$psl1ght_name" ]]; then
+            ln -sf "$(basename "${produced[0]}")" "$install_dir/$psl1ght_name"
+            say "installed $psl1ght_name symlink -> $(basename "${produced[0]}") (replaces PSL1GHT's)"
+        fi
     fi
 done
 

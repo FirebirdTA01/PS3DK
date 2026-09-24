@@ -1,29 +1,42 @@
 library: libvdec
 version: 1
 module: libvdec
+archive_name: vdec
 exports:
 - name: cellVdecClose
   nid: '0x16698e83'
+  aliases:
+    - vdecClose
   signature: ''
   notes: extracted from _libvdec_0001_2.o
 - name: cellVdecDecodeAu
   nid: '0x2bf4ddd2'
+  aliases:
+    - vdecDecodeAu
   signature: ''
   notes: extracted from _libvdec_0001_4.o
 - name: cellVdecEndSeq
   nid: '0x824433f0'
+  aliases:
+    - vdecEndSequence
   signature: ''
   notes: extracted from _libvdec_0001_6.o
 - name: cellVdecGetPicItem
   nid: '0x17c702b9'
+  aliases:
+    - vdecGetPicItem
   signature: ''
   notes: extracted from _libvdec_0001_3.o
 - name: cellVdecGetPicture
   nid: '0x807c861a'
+  aliases:
+    - vdecGetPicture
   signature: ''
   notes: extracted from _libvdec_0001_5.o
 - name: cellVdecOpen
   nid: '0xb6bbcd5d'
+  aliases:
+    - vdecOpen
   signature: ''
   notes: extracted from _libvdec_0001_7.o
 - name: cellVdecOpenEx
@@ -32,6 +45,8 @@ exports:
   notes: extracted from _libvdec_0001_1.o
 - name: cellVdecQueryAttr
   nid: '0xff6f6ebe'
+  aliases:
+    - vdecQueryAttr
   signature: ''
   notes: extracted from _libvdec_0001_11.o
 - name: cellVdecQueryAttrEx
@@ -44,6 +59,8 @@ exports:
   notes: extracted from _libvdec_0001_10.o
 - name: cellVdecStartSeq
   nid: '0xc757c2aa'
+  aliases:
+    - vdecStartSequence
   signature: ''
   notes: extracted from _libvdec_0001_8.o
 imports: []
