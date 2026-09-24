@@ -10,57 +10,62 @@ next surface.
 ## C++ exceptions are not caught on the PPU
 
 **Status:** open, under investigation.  Reproduced on v0.14.0 with a
-standalone probe built against the installed SDK.
+standalone probe built against the installed SDK; the failing stage is
+not yet localized.
 
-**Symptom.** A minimal `try { throw std::bad_alloc(); } catch (const
-std::bad_alloc &) {}` never reaches its handler.  An ILP32 (default ABI)
-SELF prints `terminate called after throwing an instance of
-'std::bad_alloc'` followed by `terminate called recursively` and aborts.
-The same probe built `-mlp64` prints nothing at all.  Throwing from a
-static constructor, from `main`, and from a called function are all
-affected; the first throw in the program terminates it.
+**Symptom.** The probe's first `try { throw std::bad_alloc(); } catch
+(const std::bad_alloc &) {}` runs in a static constructor.  Built for the
+default ILP32 ABI, it prints its before-throw marker, then `terminate
+called after throwing an instance of 'std::bad_alloc'` and `terminate
+called recursively`, and aborts; the handler is never reached, so the
+probe's later throw sites in `main` and in a called function never run.
+The same probe built `-mlp64` produced no TTY output at all, not even the
+before-throw marker, so that build has not yet been shown to reach the
+throw.
 
-**What has been ruled out.** Frame registration: `_init` calls
+**What has been checked.** Startup registration is present: `_init` calls
 `frame_dummy` (which registers `.eh_frame`) before running `.ctors`, and
-`.eh_frame` begins with a valid CIE at `__EH_FRAME_BEGIN__`.  The fault
-is further along — in the unwinder or the personality routine.
+`.eh_frame` begins with a valid CIE at `__EH_FRAME_BEGIN__`.  This does
+not rule out defects in individual FDEs, the unwinder, or the
+personality routine; those are the next investigation targets.
 
 **Workaround.** None inside C++ exception handling.  Code that must run
 on the PPU today should report errors through return values; build with
 `-fno-exceptions` where the libraries in use allow it.
 
-**Planned fix.** Isolate the failing stage with one probe per throw site,
-an LP64 no-throw control, and markers on handler entry and after the
-catch; then fix the unwinder or personality path for both ABIs and add
-the probe to the target regression suite.
+**Planned fix.** Localize the failure with one probe per throw site, an
+LP64 no-throw control, and markers on handler entry and after the catch;
+then fix the failing stage for both ABIs and add the probe to the target
+regression suite.
 
 ---
 
 ## PPU C++ exception state is not per-thread
 
-**Status:** open, limitation of the current toolchain configuration.
+**Status:** open.  Inferred risk from the toolchain configuration; not
+yet observed in a running program.
 
-**Symptom.** None in a single-threaded program.  In a program that
-throws on more than one PPU thread at once, the exception state can be
-corrupted: a `catch` may see another thread's exception, and
-`std::uncaught_exceptions()` / `std::current_exception()` can report
-the wrong value.
+**Cause.** The PPU GCC is configured with `--enable-threads=single`, and
+the shipped `libsupc++.a` keeps libstdc++'s exception globals (the object
+returned by `__cxa_get_globals`: the caught-exception stack and the
+uncaught count) in one `.bss` object shared by every thread, not in
+thread-local storage.
 
-**Cause.** The PPU GCC is configured with `--enable-threads=single`.
-libstdc++ therefore keeps its exception globals (`__cxa_get_globals`,
-the caught-exception stack and uncaught count) in one static object
-shared by every thread, rather than in thread-local storage.  The same
-setting makes the libgcc unwinder's frame-registration lock and
-libstdc++'s other internal locks no-ops.
+**Risk.** A program that handles exceptions on more than one PPU thread at
+the same time shares that state between the threads, so one thread's
+throw or catch can change what another thread's handlers,
+`std::uncaught_exceptions()` or `std::current_exception()` see.
 
-**Workaround.** Throw and catch on one PPU thread only, or make sure no
-two threads are inside exception handling at the same time.
+**Mitigation.** Once exceptions work (see the entry above), keeping all
+exception handling on one PPU thread, or never letting two threads be
+inside exception handling at once, avoids the shared state.  Until then
+there is no working exception path to serialize.
 
 **Planned fix.** Give the PPU GCC a real thread model backed by the lv2
 threading primitives already used by librt's pthread layer, so that
-libgcc and libstdc++ use per-thread exception globals and working
-locks, and add a two-thread throw/catch regression.  This depends on the
-entry above being fixed first.
+libstdc++ keeps per-thread exception globals, and add a two-thread
+throw/catch regression.  This depends on the entry above being fixed
+first.
 
 ---
 
