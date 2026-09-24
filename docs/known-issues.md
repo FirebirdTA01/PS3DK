@@ -7,6 +7,28 @@ next surface.
 
 ---
 
+## Kernel toolchain output is not fully functional on hardware
+
+**Status:** open, cause not yet investigated.
+
+**Symptom.** Binaries built with the kernel-side toolchain
+(`powerpc64-ps3-kernel-elf`, built by
+`scripts/build-ppu-kernel-toolchain.sh`, full 64-bit ABI) are not fully
+functional.  A build of lv2 made with it crashes on real devkit hardware.
+
+**Scope.** This affects only the kernel toolchain.  The application
+toolchain (`powerpc64-ps3-elf`, ILP32 by default and `-mlp64`) is a
+separate target and is not affected by this entry.
+
+**Workaround.** None.  Do not rely on kernel-toolchain output running
+correctly on hardware.
+
+**Planned fix.** Reproduce the crash, compare the kernel toolchain's code
+generation and link layout against a known-good build, and fix the
+difference; then add a regression check for kernel-target output.
+
+---
+
 ## C++ exceptions are not caught on the PPU in the default ILP32 ABI
 
 **Status:** open; failing stage localized, fix planned in the PPU GCC.
