@@ -95,6 +95,11 @@ jobs:
           g++ -m32 -ffreestanding -std=c++17 -Wall -Wextra -Werror -DEXPECT_POINTER_SIZE=4 -Isdk/include -fsyntax-only tests/sdk/lv2-ea32-test.c
           bash tests/sdk/lv2-ea32-test.sh
 
+      # Including <sys/process.h> and <sys/sys_time.h> in either order must not
+      # trigger lv2syscall0..8 or register_passing_1..7 redefinitions (t_38a797a0).
+      - name: Test lv2syscall macro definition compatibility across header orders
+        run: bash tests/sdk/lv2syscall-redefined-test.sh
+
       # The GCM FIFO wrap must retire a lap the application never published
       # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
       # the one-phase protocol it replaced must fail the idle-lap scenario.

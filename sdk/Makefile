@@ -26,6 +26,7 @@ TOOLCHAIN_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 HEADERS := \
     include/ppu-types.h \
     include/ppu-asm.h \
+    include/ppu-lv2.h \
     include/stdarg.h \
     include/stdio.h \
     include/stdlib.h \
