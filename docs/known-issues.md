@@ -32,11 +32,15 @@ search for a handler fails.  Frame registration and FDE lookup work.
 --lp64` on the ELF before `make_self`.  Otherwise report errors through
 return values and build with `-fno-exceptions`.
 
-**Planned fix.** Make ILP32 prologues and epilogues save the link
-register and back chain as 64-bit values (`std` / `stdu`), which is also
-what the reference toolchain's ILP32 code does, then rebuild the PPU
-toolchain and add a throw/catch probe for both ABIs to the target
-regression suite.
+**Planned fix.** Make ILP32 code save and restore the link register as
+a 64-bit value (`std` / `ld`), which is what the reference toolchain's
+ILP32 code does and what the unwinder expects, in every place that
+touches that slot: compiler prologues and epilogues, shrink-wrapped and
+out-of-line save/restore routines, and the hand-written CRT start and
+end files.  Pointer width stays 32-bit.  Whether the stack back chain
+should also become 64-bit is a separate ABI question with its own
+readers to audit.  Then rebuild the PPU toolchain and add a throw/catch
+probe for both ABIs to the target regression suite.
 
 ---
 
