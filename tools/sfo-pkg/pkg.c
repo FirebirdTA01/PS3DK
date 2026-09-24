@@ -1119,7 +1119,9 @@ static int unpack_pkg(const char *filename)
                     return 1;
                 }
             }
-            if (fflush(fp) != 0 || fclose(fp) != 0) {
+            int flush_rc = fflush(fp);
+            int close_rc = fclose(fp);
+            if (flush_rc != 0 || close_rc != 0) {
                 perror(outpath);
                 delete_file(outpath);
                 free(name);
@@ -1502,7 +1504,9 @@ static int pack_pkg(const char *folder, const char *contentid,
     memset(trail, 0, 0x60);
     WRITE_OUT(trail, 1, 0x60);
 
-    if (fflush(out) != 0 || fclose(out) != 0) {
+    int flush_rc = fflush(out);
+    int close_rc = fclose(out);
+    if (flush_rc != 0 || close_rc != 0) {
         perror(final_outname);
         delete_file(final_outname);
         free(final_outname);
