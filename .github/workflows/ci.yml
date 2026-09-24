@@ -117,6 +117,9 @@ jobs:
       - name: Test pkg host tool long paths and error handling
         run: bash tests/sdk/pkg-test.sh
 
+      - name: Test newlib remove directory fallback
+        run: bash tests/sdk/newlib-remove-test.sh
+
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
