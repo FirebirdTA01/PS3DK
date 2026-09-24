@@ -86,6 +86,15 @@ jobs:
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
 
+      # Freestanding 32-bit compilation catches the original ILP32 shift
+      # without requiring a PPU toolchain or host multilib runtime libraries.
+      # Native host execution also verifies the wide-pointer debug trap.
+      - name: Test LV2 effective-address conversions
+        run: |
+          gcc -m32 -ffreestanding -std=c11 -Wall -Wextra -Werror -DEXPECT_POINTER_SIZE=4 -Isdk/include -fsyntax-only tests/sdk/lv2-ea32-test.c
+          g++ -m32 -ffreestanding -std=c++17 -Wall -Wextra -Werror -DEXPECT_POINTER_SIZE=4 -Isdk/include -fsyntax-only tests/sdk/lv2-ea32-test.c
+          bash tests/sdk/lv2-ea32-test.sh
+
       # The GCM FIFO wrap must retire a lap the application never published
       # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
       # the one-phase protocol it replaced must fail the idle-lap scenario.
