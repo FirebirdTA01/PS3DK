@@ -9,9 +9,9 @@ next surface.
 
 ## C++ exceptions are not caught on the PPU
 
-**Status:** open, under investigation.  Reproduced on v0.14.0 with a
-standalone probe built against the installed SDK; the failing stage is
-not yet localized.
+**Status:** open, under investigation.  Reproduced with a standalone
+probe built against an installed v0.12.65 SDK; not yet re-run against
+v0.14.0.  The failing stage is not yet localized.
 
 **Symptom.** The probe's first `try { throw std::bad_alloc(); } catch
 (const std::bad_alloc &) {}` runs in a static constructor.  Built for the
