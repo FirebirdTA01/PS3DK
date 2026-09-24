@@ -43,10 +43,12 @@ and aborts.  LP64 (`-mlp64`) is not affected.
 **Cause.** The ILP32 unwinder treats the link register and the EH data
 registers r3-r6 as 8-byte registers, but ILP32 code saved the link
 register with a 4-byte store and reloaded r3-r6 with 4-byte loads.  The
-unwinder therefore read a wrong return address for every caller, and
-the landing pad received the wrong halves of the exception pointer and
-selector.  The fix saves and restores both as 64-bit values, as the
-reference toolchain does.
+saved link-register bytes and the resulting wrong return address were
+measured on RPCS3 (v0.12.65 SDK probe).  The EH data register reload
+mismatch was established from the disassembly; the register values on
+handler entry were not captured.  The fix saves and restores the link
+register and r3-r6 as 64-bit values.  The reference toolchain also uses
+a 64-bit link-register save.
 
 **Workaround (affected releases).** Build code that needs C++ exceptions
 for LP64: `-mlp64`, link against `$PS3DK/ppu/lib/lp64`, and run
