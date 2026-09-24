@@ -13,9 +13,20 @@
 
 extern void _fini(void);
 
+/* Called by CRT constructor 106, after the heap, syscall table and
+ * newlib recursive-lock setup. User atexit registrations follow this one,
+ * so normal exit runs them before the legacy .fini work. */
+void
+__librt_register_fini(void)
+{
+	if (atexit(_fini) != 0)
+		sysProcessExit(1);
+}
+
 void
 __librt_exit(int rc)
 {
-	_fini();
+	/* This is newlib's low-level _exit hook, also reached by abort.
+	 * Only exit() runs atexit callbacks and flushes stdio. */
 	sysProcessExit(rc);
 }

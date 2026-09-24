@@ -17,6 +17,7 @@ extern void _init(void);
  * __syscalls function-pointer table that newlib's libsysbase calls
  * through for every POSIX-level syscall. */
 extern void       __librt_exit(int rc);
+extern void       __librt_register_fini(void);
 extern int        __librt_close_r(struct _reent *r, int fd);
 extern int        __librt_open_r(struct _reent *r, const char *file,
                                  int flags, int mode);
@@ -155,6 +156,13 @@ static void __syscalls_init(void)
 	__syscalls.sys_lwmutex_lock_r    = __librt_sys_lwmutex_lock_r;
 	__syscalls.sys_lwmutex_trylock_r = __librt_sys_lwmutex_trylock_r;
 	__syscalls.sys_lwmutex_unlock_r  = __librt_sys_lwmutex_unlock_r;
+}
+
+/* Priority 105 initializes newlib's recursive lock; atexit needs it. */
+static void __finalization_init(void) __attribute__((constructor(106)));
+static void __finalization_init(void)
+{
+	__librt_register_fini();
 }
 
 void _initialize(int argc, const char *argv[])

@@ -151,19 +151,9 @@ sbrk_init(void)
 	__sbrk_ready = 1;
 }
 
-/*
- * sbrk_deinit() runs in .fini so it executes after
- * __deregister_frame_info / __do_global_dtors_aux.
- */
-asm ("\t.section\t.fini\n\tbl sbrk_deinit\n\tnop\n\t.previous");
-
-static void __attribute__((used))
-sbrk_deinit(void)
-{
-	if (__sbrk_ready)
-		sys_memory_free((sys_mem_addr_t)(uintptr_t)__sbrk_base);
-	__sbrk_ready = 0;
-}
+/* Other PPU threads can still use malloc storage while the exiting thread
+ * runs finalizers. Keep the process-owned arena mapped until Lv-2 tears
+ * down the process; no .fini callback may free it early. */
 
 /* ------------------------------------------------------------------ *
  * sbrk — newlib backing store (pure bump pointer)
