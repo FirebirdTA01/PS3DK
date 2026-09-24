@@ -1,0 +1,4 @@
+void main(float4 t : TEXCOORD0)
+{
+  if (t.x < 0) discard;
+}

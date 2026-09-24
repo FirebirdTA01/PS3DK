@@ -1,0 +1,3 @@
+void main(out float4 c : COLOR)
+{
+}

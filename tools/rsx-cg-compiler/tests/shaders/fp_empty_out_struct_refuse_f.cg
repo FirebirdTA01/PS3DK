@@ -1,0 +1,5 @@
+struct R { float4 color : COLOR; };
+void main(float4 p : TEXCOORD0, out R o)
+{
+  o.color = p;
+}

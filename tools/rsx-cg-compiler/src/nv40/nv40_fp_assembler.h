@@ -44,6 +44,11 @@ public:
     // header — verified from reference-compiler output.
     void emitFencbr();
 
+    // An all-zero instruction (opcode NOP, every field zero).  The
+    // reference emits exactly one of these, with PROGRAM_END stamped by
+    // markEnd(), for a fragment program that has no effect at all.
+    void emitNop();
+
     // FENCTR is the sibling fence form used before temp-register reads
     // in some scalar-function sequences.  It matches FENCBR's operand
     // fields but uses opcode 0x3D instead of 0x3E.

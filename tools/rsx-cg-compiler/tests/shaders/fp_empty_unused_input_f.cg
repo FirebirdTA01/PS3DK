@@ -1,0 +1,3 @@
+void main(float4 t : TEXCOORD0)
+{
+}
