@@ -99,6 +99,12 @@ jobs:
       - name: Test render-target surface types use the surface enum family
         run: bash tests/sdk/surface-type-enum-test.sh
 
+      # ps3_add_self must respect OUTPUT_DIRECTORY keyword and PS3_SELF_OUTPUT_DIRECTORY
+      # variable, falling back to CMAKE_CURRENT_SOURCE_DIR by default. ps3_add_pkg
+      # must follow the same resolved directory.
+      - name: Test ps3_add_self output directory override
+        run: bash tests/sdk/cmake-self-output-dir-test.sh
+
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

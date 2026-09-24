@@ -11,17 +11,24 @@
 #     ps3_add_self(my_app)
 #
 # Produces:
-#     <build>/my_app          # raw unstripped .elf  (CMake's executable target)
-#     <source>/my_app.elf     # stripped + sprxlinker-rewritten .elf
-#     <source>/my_app.self    # CEX-signed (boots in RPCS3 / signed HW)
-#     <source>/my_app.fake.self  # fake-signed (boots in CFW / ps3load)
+#     <build>/my_app             # raw unstripped .elf  (CMake's executable target)
+#     <out-dir>/my_app.elf       # stripped + sprxlinker-rewritten .elf
+#     <out-dir>/my_app.self      # CEX-signed (boots in RPCS3 / signed HW)
+#     <out-dir>/my_app.fake.self # fake-signed (boots in CFW / ps3load)
 #
-# Final artefacts (.elf, .self, .fake.self) land at the sample source
-# directory — matching the legacy `make`-driven convention where the
-# stripped .elf and signed .self / .fake.self sat next to the
-# Makefile.  The unstripped CMake-target binary stays in the build
-# dir as an intermediate (and isn't useful on its own — it lacks the
-# sprxlinker post-link rewrite that LV2 expects).
+# By default, <out-dir> is the sample source directory (CMAKE_CURRENT_SOURCE_DIR)
+# — matching the legacy `make`-driven convention where the stripped .elf and
+# signed .self / .fake.self sat next to the Makefile.  The unstripped CMake-target
+# binary stays in the build dir as an intermediate (and isn't useful on its own —
+# it lacks the sprxlinker post-link rewrite that LV2 expects).
+#
+# Output directory override:
+#   Callers can redirect post-build artefacts away from the source tree:
+#     - Per-target:   ps3_add_self(my_app OUTPUT_DIRECTORY <dir>)
+#     - Project-wide: set(PS3_SELF_OUTPUT_DIRECTORY <dir>)
+#   Relative paths resolve against CMAKE_CURRENT_BINARY_DIR.
+#   When overridden, ps3_add_pkg automatically places .pkg and .gnpdrm.pkg
+#   in the same output directory and reads the stripped .elf from there.
 #
 # Sample dirs already gitignore *.elf / *.self / *.fake.self so the
 # generated files never show up in `git status`.
@@ -256,14 +263,19 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
 endif()
 
 # -----------------------------------------------------------------------------
-# ps3_add_self(target [TITLE str] [APPID str] [CONTENTID str])
+# ps3_add_self(target [OUTPUT_DIRECTORY dir] [TITLE str] [APPID str] [CONTENTID str])
 # -----------------------------------------------------------------------------
 # TITLE / APPID / CONTENTID are reserved for the .pkg target which a
 # subsequent phase (7c+) will wire up via make_self_npdrm + sfo +
 # pkg + package_finalize.  For the MVP the function only emits
 # the .self / .fake.self post-build chain.
+#
+# OUTPUT_DIRECTORY overrides the destination directory for the post-build
+# artefacts (.elf, .self, .fake.self). Default: CMAKE_CURRENT_SOURCE_DIR.
+# Relative paths resolve against CMAKE_CURRENT_BINARY_DIR.
+# Project-wide default can be set via PS3_SELF_OUTPUT_DIRECTORY.
 function(ps3_add_self target)
-    cmake_parse_arguments(_PSA "" "TITLE;APPID;CONTENTID" "" ${ARGN})
+    cmake_parse_arguments(_PSA "" "TITLE;APPID;CONTENTID;OUTPUT_DIRECTORY" "" ${ARGN})
 
     if(_PSA_UNPARSED_ARGUMENTS)
         message(WARNING "ps3_add_self: unrecognised arguments ignored: ${_PSA_UNPARSED_ARGUMENTS}")
@@ -273,19 +285,26 @@ function(ps3_add_self target)
         message(FATAL_ERROR "ps3_add_self: target '${target}' does not exist")
     endif()
 
+    if(_PSA_OUTPUT_DIRECTORY)
+        set(_self_out_dir "${_PSA_OUTPUT_DIRECTORY}")
+    elseif(PS3_SELF_OUTPUT_DIRECTORY)
+        set(_self_out_dir "${PS3_SELF_OUTPUT_DIRECTORY}")
+    else()
+        set(_self_out_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
+    get_filename_component(_self_out_dir "${_self_out_dir}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+
     # The unstripped .elf comes from CMake's add_executable target and
     # lives in the build dir; only the post-build artefacts move out
-    # to the sample source dir (next to CMakeLists.txt) so they sit
-    # exactly where the legacy Makefile placed `${TARGET}.{elf,self}`.
-    # CMAKE_CURRENT_SOURCE_DIR is the dir containing the calling
-    # CMakeLists, which is what we want for samples invoked via
-    # `cmake -S <sample-dir>`.
+    # to the destination directory (default CMAKE_CURRENT_SOURCE_DIR
+    # next to CMakeLists.txt matching legacy Makefile convention).
     set(_elf       "$<TARGET_FILE:${target}>")
-    set(_stripped  "${CMAKE_CURRENT_SOURCE_DIR}/${target}.elf")
-    set(_self      "${CMAKE_CURRENT_SOURCE_DIR}/${target}.self")
-    set(_fake_self "${CMAKE_CURRENT_SOURCE_DIR}/${target}.fake.self")
+    set(_stripped  "${_self_out_dir}/${target}.elf")
+    set(_self      "${_self_out_dir}/${target}.self")
+    set(_fake_self "${_self_out_dir}/${target}.fake.self")
 
     add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_self_out_dir}"
         COMMAND "${CMAKE_STRIP}" "${_elf}" -o "${_stripped}"
         COMMAND "${PS3_TOOL_sprxlinker}" ${PS3_SPRXLINKER_FLAGS} "${_stripped}"
         COMMAND "${PS3_TOOL_make_self}"  "${_stripped}" "${_self}"
@@ -293,6 +312,8 @@ function(ps3_add_self target)
         BYPRODUCTS "${_stripped}" "${_self}" "${_fake_self}"
         COMMENT "ps3-self: ${target}.{self,fake.self}"
         VERBATIM)
+
+    set_property(TARGET ${target} PROPERTY PS3_SELF_OUTPUT_DIRECTORY "${_self_out_dir}")
 endfunction()
 
 # -----------------------------------------------------------------------------
@@ -1184,11 +1205,18 @@ function(ps3_add_pkg target)
     endif()
 
     # The .self post-build chain lands a stripped .elf at
-    # <src>/<target>.elf — that's what make_self_npdrm signs.
-    set(_stripped  "${CMAKE_CURRENT_SOURCE_DIR}/${target}.elf")
+    # <out-dir>/<target>.elf (default <src>/<target>.elf) — that's what
+    # make_self_npdrm signs.  Packages (.pkg and .gnpdrm.pkg) follow the
+    # same output directory.
+    get_property(_self_out_dir TARGET ${target} PROPERTY PS3_SELF_OUTPUT_DIRECTORY)
+    if(NOT _self_out_dir)
+        set(_self_out_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
+
+    set(_stripped  "${_self_out_dir}/${target}.elf")
     set(_pkg_dir   "${CMAKE_CURRENT_BINARY_DIR}/pkg")
-    set(_pkg_out   "${CMAKE_CURRENT_SOURCE_DIR}/${target}.pkg")
-    set(_pkg_npdrm "${CMAKE_CURRENT_SOURCE_DIR}/${target}.gnpdrm.pkg")
+    set(_pkg_out   "${_self_out_dir}/${target}.pkg")
+    set(_pkg_npdrm "${_self_out_dir}/${target}.gnpdrm.pkg")
 
     # Optional pkg_files/ overlay (e.g. hello-ppu-png uses this).
     if(NOT _PSP_PKGFILES)
@@ -1206,6 +1234,7 @@ function(ps3_add_pkg target)
         OUTPUT "${_pkg_out}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_pkg_dir}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_pkg_dir}/USRDIR"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_self_out_dir}"
         COMMAND "${PS3_TOOL_make_self_npdrm}" "${_stripped}"
                 "${_pkg_dir}/USRDIR/EBOOT.BIN" "${_PSP_CONTENTID}"
         COMMAND "${PS3_TOOL_sfo}"
