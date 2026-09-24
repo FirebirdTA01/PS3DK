@@ -101,6 +101,11 @@ jobs:
       - name: Test the GCM FIFO wrap never loses an unpublished lap
         run: bash tests/sdk/fifo-wrap-protocol-test.sh
 
+      # install-headers copies an explicit list; a header missing from it is
+      # left out of the installed SDK and breaks the full SDK build.
+      - name: Test every tracked SDK header is installed
+        run: bash tests/sdk/sdk-header-list-test.sh
+
       # No PPU toolchain on this runner, so only the host-only checks (A and
       # D) run here; the archive checks (B and C) skip themselves and are
       # run by scripts/build-cell-stub-archives.sh against the tree it has

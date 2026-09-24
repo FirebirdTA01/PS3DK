@@ -62,6 +62,7 @@ HEADERS := \
     include/sys/fs_external.h \
     include/sys/fsw.h \
     include/sys/process.h \
+    include/sys/heap_config.h \
     include/sys/memory.h \
     include/sys/dbg.h \
     include/sys/socket.h \
