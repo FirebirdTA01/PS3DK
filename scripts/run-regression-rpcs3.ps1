@@ -151,7 +151,13 @@ try {
         Copy-Item -LiteralPath $ttyLog -Destination $copiedTtyLog -Force
 
         $ttyText = Get-Content -Raw -LiteralPath $copiedTtyLog -ErrorAction SilentlyContinue
+        if ($null -eq $ttyText) {
+            $ttyText = ""
+        }
         $rpcs3Text = Get-Content -Raw -LiteralPath $copiedRpcs3Log -ErrorAction SilentlyContinue
+        if ($null -eq $rpcs3Text) {
+            $rpcs3Text = ""
+        }
         $ttyLines = @($ttyText -split "`r?`n" | Where-Object { $_.Length -gt 0 }).Count
 
         if ((Get-Command Parse-SdiffRows -ErrorAction SilentlyContinue) -and
