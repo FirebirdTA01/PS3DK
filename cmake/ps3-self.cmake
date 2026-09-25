@@ -826,10 +826,14 @@ function(ps3_add_spu_image target)
     # extend via CFLAGS or replace the freestanding/-fpic posture
     # entirely with FREESTANDING.
     set(_spu_cflags -Os -Wall -ffunction-sections -fdata-sections)
+    set(_spu_cxx_only_flags)
     if(_PSI_FREESTANDING)
         list(APPEND _spu_cflags -ffreestanding -fno-exceptions)
     else()
-        list(APPEND _spu_cflags -fpic -fno-exceptions -fno-rtti)
+        list(APPEND _spu_cflags -fpic -fno-exceptions)
+        # -fno-rtti is C++-only; GCC warns when it reaches a C compile, and
+        # -Werror images failed on that warning.  Added per source below.
+        set(_spu_cxx_only_flags -fno-rtti)
     endif()
     list(APPEND _spu_cflags "-I${PS3DK}/spu/include" ${_PSI_CFLAGS})
 
@@ -842,10 +846,15 @@ function(ps3_add_spu_image target)
             set(_in "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
         endif()
         get_filename_component(_in_name "${src}" NAME)
+        get_filename_component(_in_ext "${src}" LAST_EXT)
+        set(_spu_src_extra)
+        if(_in_ext MATCHES "^\\.(cpp|cc|cxx|C)$")
+            set(_spu_src_extra ${_spu_cxx_only_flags})
+        endif()
         set(_out "${_spu_dir}/${_in_name}.o")
         add_custom_command(
             OUTPUT "${_out}"
-            COMMAND "${PS3_SPU_GCC}" ${_spu_cflags} -c "${_in}" -o "${_out}"
+            COMMAND "${PS3_SPU_GCC}" ${_spu_cflags} ${_spu_src_extra} -c "${_in}" -o "${_out}"
             DEPENDS "${_in}"
             COMMENT "ps3-spu: ${_PSI_NAME}/${_in_name}"
             VERBATIM)

@@ -49,3 +49,6 @@ libnet-ilp32,tests/regression/libnet/libnet-ilp32.fake.self,60,RAN-CLEAN,LIBNET_
 libnet-lp64,tests/regression/libnet/libnet-lp64.fake.self,60,RAN-CLEAN,LIBNET_OK,LIBNET_FAIL
 posix-time-ilp32,tests/regression/posix-time/posix-time-ilp32.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
 posix-time-lp64,tests/regression/posix-time/posix-time-lp64.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
+# spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
+# registers across switches, Self(), argument errors; SPU exit status 0 = pass.
+spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL

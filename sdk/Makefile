@@ -319,6 +319,7 @@ HEADERS := \
     include/cell/fiber.h \
     include/cell/fiber/error.h \
     include/cell/fiber/version.h \
+    include/cell/fiber/spu_context_types.h \
     include/cell/fiber/ppu_context_types.h \
     include/cell/fiber/ppu_fiber_types.h \
     include/cell/fiber/ppu_fiber_trace_types.h \
@@ -452,6 +453,8 @@ SHARED_SPURS_SPU_HEADERS := \
     include/simdmath.h \
     include/mt19937.h \
     include/cell/error.h \
+    include/cell/fiber/error.h \
+    include/cell/fiber/spu_context_types.h \
     include/cell/jdl.h \
     include/cell/face.h \
     include/cell/face/error.h \
@@ -538,7 +541,8 @@ SPU_HEADERS := \
     include-spu/cell/sync/rwm.h \
     include-spu/cell/sync/lfqueue.h \
     include-spu/cell/sync2.h \
-    include-spu/cell/fiber.h
+    include-spu/cell/fiber.h \
+    include-spu/cell/fiber/spu_context.h
 
 .PHONY: all install clean version-header $(SUBLIBS) \
 	install-stub-archives install-native-aliases install-manifest verify-install \
