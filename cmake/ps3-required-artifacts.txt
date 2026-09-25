@@ -202,6 +202,8 @@ spu_lib   spu/lib/libsputhread.a
 
 # --- Core SDK artifacts (cmake freshness probe requires these) ----------
 sdk_core  ppu/include/cell/sdk_version.h
+sdk_core  spu/include/sdk_version.h
+sdk_core  spu/include/cell/sdk_version.h
 sdk_core  ppu/lib/libsysutil_stub.a
 sdk_core  ppu/lib/lp64/libsysutil_stub.a
 sdk_core  ppu/lib/liblv2.a

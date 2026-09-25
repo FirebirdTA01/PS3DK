@@ -447,6 +447,7 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
     include/cellstatus.h \
+    include/sdk_version.h \
     include/mt19937.h \
     include/cell/error.h \
     include/cell/jdl.h \
@@ -606,7 +607,9 @@ clean-stale-spu-spurs:
 install-version:
 	@install -d "$(INSTALL_INC)/cell"
 	@"$(VERSION_SH)" --format=header > "$(INSTALL_INC)/cell/sdk_version.h"
-	@echo "  header  cell/sdk_version.h (generated)"
+	@install -d "$(INSTALL_INC_SPU)/cell"
+	@install -m 0644 "$(INSTALL_INC)/cell/sdk_version.h" "$(INSTALL_INC_SPU)/cell/sdk_version.h"
+	@echo "  header  cell/sdk_version.h (generated; ppu + spu)"
 	@install -d "$(PS3DK)"
 	@"$(VERSION_SH)" --format=plain > "$(PS3DK)/VERSION"
 	@echo "  marker  $(PS3DK)/VERSION ($$(cat $(PS3DK)/VERSION))"
