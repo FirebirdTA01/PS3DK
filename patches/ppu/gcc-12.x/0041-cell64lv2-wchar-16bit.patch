@@ -1,0 +1,42 @@
+cell64lv2: make wchar_t 16-bit and wint_t int under ILP32, as in the reference.
+
+The reference toolchain's wchar_t is a 16-bit unsigned short and its
+wint_t is int.  Ours was a 32-bit long int and unsigned int.  This is a
+layout difference, not only a naming one: sizeof(wchar_t) was 4 instead
+of 2, L"" literals were UTF-32 instead of UTF-16, structs holding wchar_t
+had a different size and offsets, and code passing L"" to interfaces
+that take UTF-16 misread the text.
+
+Under ILP32, set WCHAR_TYPE to "short unsigned int", WCHAR_TYPE_SIZE to
+16 and WINT_TYPE to "int".  newlib's wide-character code supports a
+16-bit wchar_t, so it needs a rebuild, not a patch; so does libstdc++.
+(This newlib is built without multibyte support, so its conversions map
+one byte to one wchar_t either way.)  The LP64 data model has no
+reference counterpart and keeps a 32-bit wchar_t.
+
+This changes the size of wchar_t: C and C++ objects built with an earlier
+PS3DK that use wchar_t must be rebuilt.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -362,10 +362,18 @@
+ #undef	PTRDIFF_TYPE
+ #define	PTRDIFF_TYPE (TARGET_LP64 ? "long int" : "int")
+ 
++/* wchar_t and wint_t under ILP32 match the reference toolchain: wchar_t
++   is a 16-bit unsigned short (UTF-16 code units, so L"" literals and
++   structs holding wchar_t have the reference layout) and wint_t is int.
++   newlib's wide-character code supports a 16-bit wchar_t (this newlib
++   has no multibyte support).  The LP64 data model has no reference
++   counterpart and keeps a 32-bit wchar_t.  */
+ #undef	WCHAR_TYPE
+-#define	WCHAR_TYPE (TARGET_LP64 ? "int" : "long int")
++#define	WCHAR_TYPE (TARGET_LP64 ? "int" : "short unsigned int")
+ #undef  WCHAR_TYPE_SIZE
+-#define WCHAR_TYPE_SIZE 32
++#define WCHAR_TYPE_SIZE (TARGET_LP64 ? 32 : 16)
++#undef	WINT_TYPE
++#define	WINT_TYPE (TARGET_LP64 ? "unsigned int" : "int")
+ 
+ /* The 64-bit ISA always defines TARGET_64BIT, so the rs6000.h
+    (TARGET_32BIT ? 32 : 64) gate would lock long at 64. The data
