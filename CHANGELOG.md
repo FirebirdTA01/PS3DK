@@ -16,6 +16,148 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.15.0] — 2026-09-25
+
+### Changed
+
+- **C/C++ ABI break: rebuild everything built with an earlier PS3DK.**  Under
+  ILP32, the default PPU ABI, the fundamental types now match the reference
+  SDK:
+  - `<stdint.h>` `int32_t`/`uint32_t` (and the `least32` types) change from
+    `long`/`unsigned long` to `int`/`unsigned int` (GCC patch 0040).  C++
+    mangling changes: `void h(uint32_t)` was `_Z1hm`, now `_Z1hj`.  `%u`
+    matches `uint32_t`; newlib's `PRI*32` macros follow.
+  - `wchar_t` changes from 32-bit `long` to 16-bit `unsigned short`, so
+    `L""` literals are UTF-16, and `wint_t` from `unsigned int` to `int`
+    (GCC patch 0041).  LP64 keeps its 32-bit `wchar_t`.
+  - `__CHAR32_TYPE__` (`char32_t`) changes from `unsigned long` to
+    `unsigned int`, following `uint_least32_t`.
+  - LR and the EH data registers are saved as 64-bit values (see Fixed);
+    the unwinder cannot step through frames built by an older toolchain.
+
+  Every C and C++ object, library and portlib built with an older PS3DK must
+  be rebuilt; mixing is not supported.  `tests/regression/abi-types` pins the
+  type choices in both ABIs.
+- **PSL1GHT import libraries are nidgen stub archives under reference
+  names.**  `libaudio`, `libcamera`, `libgem`, `libhttputil`, `liblv2dbg`,
+  `libnetctl`, `libssl`, `libsysmodule`, `libvdec`, `libresc`, `libsysfs`,
+  `libhttp`, `libspurs`, `libfont` and `libfontFT` now come from the
+  reference-shaped stub archives.  Each PSL1GHT function name is an FNID alias
+  of the reference export it called, and each PSL1GHT archive name is an alias
+  of the `_stub` archive in both ABIs, so LP64 links no longer fall back to
+  ILP32 PSL1GHT archives.  PSL1GHT's C wrappers are replaced by aliases or
+  small shims (`spursAttributeInitialize`, the font wrappers, which now widen
+  PRX-written 32-bit addresses correctly under LP64).  `libgem_stub` and
+  `libvdec_stub` are built for the first time; `cellFsAccess` is added.
+- **Every reference stub archive is installed under its reference name.**
+  `libcrashdump_stub`, `libkey2char_stub`, `libsysutil_game_stub` and
+  `libsysutil_game_exec_stub` replace `libsys_crashdump_stub`,
+  `libcellKey2char_stub`, `libcellGame_stub` and `libcellGameExec_stub`,
+  which remain as aliases.  21 archives are new: `daisy`, `dbg_libio`,
+  `freetype`, `freetypeTT`, `gcm_gpad`, `medi`, `prof`, `spudll`,
+  `usbpspcm`, and the `sysutil` `cross_controller`, `licensearea`, `photo`,
+  `photo_decode`, `photo_export`, `photo_import`, `print`, `rec`,
+  `remoteplay`, `sysconf_ext`, `video_export` and `video_upload` libraries.
+  `-lm_stub` links the toolchain `libm` and `-lstdc++_stub` resolves to an
+  empty archive; the C maths and C++ runtimes stay the toolchain's own rather
+  than importing the system's.
+- **`libjpgdec` and `libpngdec` are stub archives under reference names.**
+  PSL1GHT's `jpgDec*`/`pngDec*` names are FNID aliases of the `cellJpgDec*`/
+  `cellPngDec*` exports, and `jpgLoadFromFile`, `jpgLoadFromBuffer`,
+  `pngLoadFromFile` and `pngLoadFromBuffer` are reimplemented over them.
+  `libjpgdec.a` and `libpngdec.a` are aliases of `libjpgdec_stub.a` and
+  `libpngdec_stub.a` in both ABIs.
+- **`libnet` is SDK-owned.**  The BSD socket calls in `librt` are Lv-2
+  syscalls; select/poll sets, timeouts, message layouts, network errors and
+  resolver results are translated explicitly in both ABIs, and the BSD names
+  stay weak so an application can override them.  PSL1GHT's `net*` names keep
+  their behaviour, including `netInitialize` loading the network module and
+  being idempotent, and `h_errno` stays a real symbol.  `libnet.a` is an alias
+  of `libnet_stub.a` in both ABIs.  New headers: `<poll.h>`, `<sys/poll.h>`,
+  `<sys/select.h>` and `<net/{net,netdb,errno,poll,select}.h>`.
+- **Process exit.**  `_exit` and `abort` no longer run normal finalization;
+  `_fini` is registered with `atexit` and runs only on return from `main` or
+  `exit`.  The heap arena is no longer released at `.fini`, since other PPU
+  threads may still use it; Lv-2 reclaims it at process teardown.
+- **RPCS3 regression harness.**  Every emulator launch first checks for a
+  running `rpcs3.exe` and aborts if one exists; `rpcs3-release.ps1` refuses,
+  without `-Force`, to release a lock it does not own.
+
+### Added
+
+- **Configurable heap size.**  `PS3TC_HEAP_SIZE(bytes)` from
+  `<sys/heap_config.h>` (also pulled in by `<sys/process.h>`) replaces the
+  fixed 64 MiB `malloc` arena; the size rounds up to 1 MiB.  An invalid or
+  unsatisfiable request prints one TTY line and exits 1 before `main`; the
+  first refused `sbrk` prints one diagnostic line.  A definition in a static
+  archive needs `-Wl,-u,__ps3tc_heap_config_anchor`.  See
+  `docs/abi/newlib-heap.md`.
+- **`samples/font/hello-ppu-font-render`.**  Draws a line with the system font
+  through `cellFont` and one through PSL1GHT's `font*` names, checks the ink of
+  each in the guest, and fails on any glyph, layout or flip error.
+- **`CellFontLibraryConfigFT_initialize`** in `<cell/font/libfontFT.h>`.
+- **Regression probes** `tests/regression/cxx-eh` (throw/catch in a static
+  constructor, typed catch, RAII unwinding with rethrow, per-thread exception
+  state) and `tests/regression/abi-types`, both ABIs.
+
+### Fixed
+
+- **C++ exceptions were never caught in ILP32.**  The unwinder reads the link
+  register as 8 bytes, but ILP32 code saved it with a 4-byte `stw`; the wrong
+  return address this produced was measured on RPCS3, and a throw terminated.
+  The EH data registers r3-r6 were likewise reloaded with 4-byte `lwz`, an
+  inference from the disassembly (their values on handler entry were not
+  captured).  GCC patch 0037 saves and restores the link register and r3-r6
+  as 64-bit values, as the reference toolchain does for the link register;
+  the `.init`/`.fini` CRT frames match.  Exceptions still do not propagate
+  across PRX import calls.
+- **C++ exception state was shared by every PPU thread.**
+  `std::current_exception` and `std::uncaught_exceptions` saw other threads'
+  exceptions.  GCC patch 0038 makes libsupc++'s exception globals
+  thread-local.
+- **`-mlp64` links took the ILP32 SDK archives.**  The link spec searched only
+  `$PS3DK/ppu/lib`, so plain `-mlp64` links (and CMake targets opting into
+  `-mlp64` under the ILP32 toolchain file) got ILP32 `liblv2`, `liblv2_stub`
+  and `libc_stub`.  GCC patch 0039 searches `$PS3DK/ppu/lib/lp64` first.
+- **`ps3_add_self` omitted `sprxlinker --lp64` for per-target `-mlp64`.**
+  Only whole-LP64 projects got it, leaving import call sites without their
+  TOC restore.
+- **`cellFontInit` and `cellFontInitLibraryFreeType` could not link.**
+  `cellFontGetStubRevisionFlags` and `cellFontFTGetStubRevisionFlags` were
+  declared and called but defined nowhere; they are now defined.
+- **`-lfont_stub` and `-lfontFT_stub` did not resolve.**  The archives were
+  installed as `libcellFont_stub.a` and `libcellFontFT_stub.a`; they are now
+  `libfont_stub.a` and `libfontFT_stub.a`, with the old names and PSL1GHT's
+  `libfont.a`/`libfontFT.a` as aliases.
+- **`lv2syscall*` redefinition errors.**  Including `<sys/process.h>` together
+  with legacy PSL1GHT headers that pull in `<ppu-lv2.h>` gave 16 macro
+  redefinitions under `-Werror`.  The SDK now ships `<ppu-lv2.h>` as a shim
+  over `<sys/lv2_syscall.h>`.
+- **Linux host tools lacked `pkg`**, so samples using `ps3_add_pkg` could not
+  configure.  Source installs and the Linux release tarball now ship it.
+- **`build-all-samples.sh` stopped at `libmixer`** before building any sample;
+  it now refreshes the SDK with `build-sdk.sh`.
+- **Renaming a stub archive broke an existing build tree**; each library's
+  output directory is cleared before generation.
+
+### Known issues
+
+- Kernel-toolchain (`powerpc64-ps3-kernel-elf`) output crashes on devkit
+  hardware (an lv2 build); cause not yet investigated.  The application
+  toolchain (`powerpc64-ps3-elf`) was not assessed by this report.
+- The PPU C++ runtime is still built `--enable-threads=single`: no
+  `std::thread`/`std::mutex`, non-atomic `shared_ptr` counts, unguarded
+  function-local static initialization, and a no-op mutex on the exception
+  emergency pool.
+- `-Os` ILP32 code with out-of-line GPR saves fails to assemble.
+- The PPU `libjpgdec`/`libpngdec` legacy loaders and the pointer-bearing
+  firmware decoder structures are not validated under `-mlp64`.
+- On RPCS3 for Windows, `SO_RCVTIMEO`/`SO_SNDTIMEO` read back in milliseconds
+  in the seconds field, `getsockopt(SO_TYPE)` fails with `EINVAL`, and
+  `recv(MSG_WAITALL)` fails with `EOPNOTSUPP`; these are emulator limitations.
+  `recvmsg`, DNS resolution and `sys_net_get_sockinfo` are not tested at run
+  time.
+
 ## [v0.14.0] — 2026-09-24
 
 ### Fixed
