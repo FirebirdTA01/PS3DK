@@ -5364,13 +5364,10 @@ private:
 
         const int temp = define(inst.result);
         VSrc base = resolve(inst.operands[0]);
-        // resolve() already broadcasts a SCALAR base's own lane; forcing .x
-        // here made every vertex pow read lane x of its source, so
-        // pow(u.y, e) computed pow(u.x, e) (measured on the 8d538fc5 parent,
-        // t_0f3b232e).  A VECTOR base in VP keeps the old lane-x form for now
-        // (its own gap, carded).
-        if (profile_ == GeneralProfile::Vertex && valueWidthOf(inst.operands[0]) > 1)
-            base.swizzle = {0, 0, 0, 0};
+        // resolve() already broadcasts a SCALAR base's own lane, and a VECTOR
+        // base keeps its lanes: every path below reads each lane explicitly.
+        // Vertex programs used to force .xxxx on a vector base, so
+        // pow(u, 2.5) wrote pow(u.x, 2.5) into every lane (t_07866923).
         const auto baseRegIt = program_.valueToVReg.find(inst.operands[0]);
         if (baseRegIt != program_.valueToVReg.end() &&
             useCount_[inst.operands[0]] == 1 &&
@@ -5401,11 +5398,11 @@ private:
         // LG2 / MUL / EX2 chain below.  The first six rows carry VALUE, not
         // shape: LG2 of a NEGATIVE base is NaN, so pow(dot(t, h), 2) painted
         // NaN where the reference's MUL paints a number (Boy_HairFp, 1369
-        // pixels).  A vertex-program vector base keeps the chain below.
+        // pixels).  Vertex vectors follow the same table, per lane where the
+        // unit is scalar (sce-cgc 475, 2026-09-25: VP float4 pow 2 -> 1 MUL,
+        // 3 -> 2 MUL, -1 -> 4 RCP, 0.5 -> 4 RSQ + 4 RCP, -0.5 -> 4 RSQ).
         float exponent = 0.0f;
-        if (literalFloatOf(inst.operands[1], exponent) &&
-            (profile_ == GeneralProfile::Fragment ||
-             laneCount(componentMask(inst.resultType)) == 1)) {
+        if (literalFloatOf(inst.operands[1], exponent)) {
             const int mask = componentMask(inst.resultType);
             const bool fragment = profile_ == GeneralProfile::Fragment;
             auto finish = [&]() {
@@ -5506,8 +5503,10 @@ private:
         // shape - LG2, a scalar MUL into a scratch, then EX2 writing that
         // one lane.  A scalar pow keeps its previous three-instruction
         // form exactly, so nothing that raises a float moves a byte.
+        // Vertex programs too: the reference emits LG2 / MUL / EX2 per lane
+        // for a VP float4 pow(u, 2.5) (sce-cgc 475, 2026-09-25).
         const int powMask = componentMask(inst.resultType);
-        if (profile_ == GeneralProfile::Fragment && laneCount(powMask) > 1) {
+        if (laneCount(powMask) > 1) {
             VSrc exponent = resolve(inst.operands[1]);
             // A scalar exponent keeps the lane resolve() broadcast (a uniform
             // scalar such as colorShine.w is NOT lane x); only a literal's
