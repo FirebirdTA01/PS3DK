@@ -99,6 +99,9 @@ jobs:
       - name: Test a vertex-program pow() of a vector computes every lane
         run: bash tests/shader-compiler/vp-pow-vector-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test a run-time index into a vector is refused like the reference
+        run: bash tests/shader-compiler/runtime-vector-selector-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
 
