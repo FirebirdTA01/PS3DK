@@ -43,7 +43,9 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-net-') as temp:
         macros.append(f'#define lv2syscall{n}(nr,{",".join(names)}) int test_result = test_syscall(nr, (uint64_t[]){{' + ','.join(f'(uint64_t)({x})' for x in names) + f'}}, {n})')
     put('sys/lv2_syscall.h', '\n'.join(macros) + '\n')
     symbols = 'socket accept bind connect listen send sendto recv recvfrom shutdown socketclose closesocket getpeername getsockname select socketselect poll socketpoll getsockopt setsockopt sendmsg recvmsg inet_aton inet_pton'.split()
-    cmd = [os.environ.get('CC', 'cc'), '-std=c11', '-D_DEFAULT_SOURCE', '-O1',
+    # Select the PPU socket layout deliberately; only syscall/PRX boundaries
+    # and newlib-only prerequisites are supplied by the host overlay.
+    cmd = [os.environ.get('CC', 'cc'), '-std=c11', '-D_DEFAULT_SOURCE', '-D__lv2ppu__', '-O1',
            '-g', '-no-pie', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-Wno-address',
            '-I' + str(inc), *['-D' + s + '=ps3test_' + s for s in symbols],
            str(ROOT / 'tests/sdk/libnet-host-test.c'),
@@ -58,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-net-') as temp:
     resolver = ROOT / 'sdk/libnet/src/resolver.c'
     init = ROOT / 'sdk/libnet/src/init.c'
     put('weak-diagnostics.h', '#pragma weak sys_net_abort_socket\n#pragma weak sys_net_get_sockinfo\n#pragma weak sys_net_get_sockinfo_ex\n#pragma weak netGetSockInfo\n')
-    resolver_cmd = [os.environ.get('CC', 'cc'), '-std=c11', '-D_DEFAULT_SOURCE',
+    resolver_cmd = [os.environ.get('CC', 'cc'), '-std=c11', '-D_DEFAULT_SOURCE', '-D__lv2ppu__',
                     '-no-pie', '-pthread', '-Wall', '-Wextra', '-Wno-address', '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
                     '-I' + str(inc), '-include', str(inc / 'weak-diagnostics.h'),
                     *['-D' + s + '=ps3test_' + s for s in ('gethostbyname', 'gethostbyaddr', 'getservbyport', 'getservbyname', 'sys_net_initialize_network_ex')],

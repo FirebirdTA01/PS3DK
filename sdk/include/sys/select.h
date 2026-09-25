@@ -5,6 +5,10 @@
  */
 #ifndef __PS3DK_SYS_SELECT_H__
 #define __PS3DK_SYS_SELECT_H__
+#if !defined(__lv2ppu__)
+/* Host/IDE builds need their libc layout and dependencies, not newlib's. */
+#include_next <sys/select.h>
+#else
 #define _SYS_SELECT_H
 #include <stdint.h>
 #include <sys/_timeval.h>
@@ -50,4 +54,5 @@ int select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 #ifdef __cplusplus
 }
 #endif
+#endif /* __lv2ppu__ */
 #endif
