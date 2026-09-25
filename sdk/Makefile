@@ -65,6 +65,7 @@ HEADERS := \
     include/sys/ppu_thread.h \
     include/sys/interrupt.h \
     include/sys/tty.h \
+    include/sys/event_queue.h \
     include/sys/fs.h \
     include/sys/fs_external.h \
     include/sys/fsw.h \

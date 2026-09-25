@@ -44,67 +44,7 @@
 extern "C" {
 #endif
 
-/* ---- type aliases ------------------------------------------------ */
-typedef sys_event_queue_attr_t  sys_event_queue_attribute_t;
 
-/* ---- constants -------------------------------------------------- */
-#ifndef SYS_EVENT_QUEUE_LOCAL
-# define SYS_EVENT_QUEUE_LOCAL  SYS_EVENT_QUEUE_PPU
-#endif
-
-/* ---- snake_case forwarders -------------------------------------- */
-static inline int sys_event_queue_create(sys_event_queue_t *eventQ,
-                                         sys_event_queue_attribute_t *attr,
-                                         sys_ipc_key_t key, int32_t size)
-{
-    return (int)sysEventQueueCreate(eventQ, attr, key, (s32)size);
-}
-
-static inline int sys_event_queue_destroy(sys_event_queue_t eventQ, int32_t mode)
-{
-    return (int)sysEventQueueDestroy(eventQ, (s32)mode);
-}
-
-static inline int sys_event_queue_receive(sys_event_queue_t eventQ,
-                                          sys_event_t *event,
-                                          uint64_t timeout_usec)
-{
-    return (int)sysEventQueueReceive(eventQ, event, timeout_usec);
-}
-
-static inline int sys_event_queue_drain(sys_event_queue_t eventQ)
-{
-    return (int)sysEventQueueDrain(eventQ);
-}
-
-static inline int sys_event_port_create(sys_event_port_t *portId,
-                                        int portType, uint64_t name)
-{
-    return (int)sysEventPortCreate(portId, portType, name);
-}
-
-static inline int sys_event_port_destroy(sys_event_port_t portId)
-{
-    return (int)sysEventPortDestroy(portId);
-}
-
-static inline int sys_event_port_send(sys_event_port_t portId,
-                                      uint64_t data0, uint64_t data1,
-                                      uint64_t data2)
-{
-    return (int)sysEventPortSend(portId, data0, data1, data2);
-}
-
-static inline int sys_event_port_connect_local(sys_event_port_t portId,
-                                               sys_event_queue_t eventQ)
-{
-    return (int)sysEventPortConnectLocal(portId, eventQ);
-}
-
-static inline int sys_event_port_disconnect(sys_event_port_t portId)
-{
-    return (int)sysEventPortDisconnect(portId);
-}
 
 /* sys_event_queue_attribute_initialize: macro form matching the
  * reference SDK's <sys/event.h> shape — takes the struct by value
@@ -115,6 +55,9 @@ static inline int sys_event_port_disconnect(sys_event_port_t portId)
 #endif
 #ifndef SYS_PPU_QUEUE
 # define SYS_PPU_QUEUE      SYS_EVENT_QUEUE_PPU
+#endif
+#ifndef SYS_SPU_QUEUE
+# define SYS_SPU_QUEUE      SYS_EVENT_QUEUE_SPU
 #endif
 
 #define sys_event_queue_attribute_initialize(x)        \
