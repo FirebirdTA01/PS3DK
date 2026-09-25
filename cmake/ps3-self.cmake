@@ -263,6 +263,77 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
 endif()
 
 # -----------------------------------------------------------------------------
+# Rebuild everything once when the installed SDK changes
+# -----------------------------------------------------------------------------
+# The release packager stamps every SDK file with the commit time minus a day,
+# so after an upgrade the new headers are OLDER than the objects already built:
+# ninja/make kept objects compiled against the previous SDK and the link mixed
+# ABIs (v0.15.0 changed uint32_t's C++ mangling).  No timestamp can signal an
+# upgrade, $PS3DK/VERSION included, so compare CONTENT instead: every build
+# rewrites ps3dk_sdk_stamp.h from $PS3DK/VERSION with copy_if_different, and
+# every C/C++ compile force-includes it.  The header's timestamp changes only
+# when the SDK version text does, and the compilers' own dependency files then
+# rebuild every object exactly once.  (A tree configured before this existed
+# still needs one clean build.)
+if(NOT _PS3_SDK_STAMP_DONE AND DEFINED PS3DK AND EXISTS "${PS3DK}/VERSION")
+    set(_PS3_SDK_STAMP_DONE TRUE)
+    set(_ps3_stamp        "${CMAKE_BINARY_DIR}/ps3dk_sdk_stamp.h")
+    set(_ps3_stamp_script "${CMAKE_BINARY_DIR}/ps3dk_sdk_stamp.cmake")
+    file(WRITE "${_ps3_stamp_script}"
+        "file(READ \"${PS3DK}/VERSION\" v)\n"
+        "string(STRIP \"\${v}\" v)\n"
+        "file(WRITE \"${_ps3_stamp}.tmp\" \"/* generated: the PS3DK this tree was built against */\\n#define __PS3DK_BUILT_AGAINST__ \\\"\${v}\\\"\\n\")\n"
+        "execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E copy_if_different \"${_ps3_stamp}.tmp\" \"${_ps3_stamp}\" RESULT_VARIABLE rc)\n"
+        "file(REMOVE \"${_ps3_stamp}.tmp\")\n"
+        "if(NOT rc EQUAL 0)\n"
+        "  message(FATAL_ERROR \"ps3-self: could not update ${_ps3_stamp} (\${rc}); a stale stamp would keep objects built against another SDK\")\n"
+        "endif()\n")
+    # Exists before the first compile, and is refreshed before every build.
+    # Fail closed: a stamp that could not be written must stop the build.
+    execute_process(COMMAND "${CMAKE_COMMAND}" -P "${_ps3_stamp_script}"
+        RESULT_VARIABLE _ps3_stamp_rc)
+    if(NOT _ps3_stamp_rc EQUAL 0 OR NOT EXISTS "${_ps3_stamp}")
+        message(FATAL_ERROR "ps3-self: could not create ${_ps3_stamp}")
+    endif()
+    add_custom_target(ps3dk_sdk_stamp
+        COMMAND "${CMAKE_COMMAND}" -P "${_ps3_stamp_script}"
+        BYPRODUCTS "${_ps3_stamp}"
+        COMMENT "Checking the installed PS3DK version")
+    # Every target that compiles force-includes the stamp and refreshes it
+    # first.  Done per TARGET, walking the whole tree at the end of the
+    # top-level directory: directory-scoped flags would miss the parent and
+    # sibling directories whenever this file is first included from a
+    # subdirectory (include_guard makes that first include the only one).
+    # The joined -include<path> form is one argument, so CMake's option
+    # de-duplication cannot merge it with a project's own -include.
+    # Assembly is not stamped: gcc applies -include only to preprocessed C
+    # and C++.  A target created by a DIFFERENT deferred call scheduled after
+    # this one is not covered.
+    function(_ps3_sdk_stamp_attach dir stamp)
+        get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+        foreach(_t IN LISTS _targets)
+            get_target_property(_type ${_t} TYPE)
+            if(_type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
+                target_compile_options(${_t} PRIVATE
+                    "$<$<COMPILE_LANGUAGE:C,CXX>:-include${stamp}>")
+                add_dependencies(${_t} ps3dk_sdk_stamp)
+            endif()
+        endforeach()
+        get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+        foreach(_d IN LISTS _subdirs)
+            _ps3_sdk_stamp_attach("${_d}" "${stamp}")
+        endforeach()
+    endfunction()
+    # EVAL, because a deferred call expands its arguments when it RUNS, at the
+    # end of the top-level directory, where a _ps3_stamp set in a
+    # subdirectory's scope no longer exists.  Bake the path in now.
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.19)
+        cmake_language(EVAL CODE
+            "cmake_language(DEFER DIRECTORY \"${CMAKE_SOURCE_DIR}\" CALL _ps3_sdk_stamp_attach \"${CMAKE_SOURCE_DIR}\" \"${_ps3_stamp}\")")
+    endif()
+endif()
+
+# -----------------------------------------------------------------------------
 # ps3_add_self(target [OUTPUT_DIRECTORY dir] [TITLE str] [APPID str] [CONTENTID str])
 # -----------------------------------------------------------------------------
 # TITLE / APPID / CONTENTID are reserved for the .pkg target which a
