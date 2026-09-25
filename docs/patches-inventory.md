@@ -64,7 +64,7 @@ Binutils 2.22 dates from 2012. A 2012→2024 rebase across 20+ major binutils re
 
 **Rebase plan:** Start from scratch with binutils 2.42. Read the 2.22 patch only as a clue to what the original authors found necessary. Expected new patch size: ≤50 lines, possibly zero (binutils 2.42 likely supports `powerpc64-ps3-elf` via the existing `powerpc64-*-elf` catch-all with appropriate `--with-cpu=cell`). Confirm with a dry build.
 
-For SPU, binutils 2.42 ships `spu-elf` target intact — no patch required unless we need custom default linker script embedding (preferred alternative: ship `spu_ps3.ld` externally).
+For SPU, binutils 2.42 recognizes `spu-elf` upstream. Our independent series in `patches/spu/binutils-2.42/series` adds SPURS ELF program-type flags (`0001`), opt-in final-content GUID generation (`0002`), and rejection of incompatible SPURS link modes (`0003`). The GUID hook requires a defined `__SPU_GUID`; ordinary links retain upstream behavior. Linker scripts remain external. GCC patch `patches/spu/gcc-9.5.0/0006-spu-spurs-startup-selection.patch` selects the mode-specific startup objects, internal service archives and default scripts. These extensions are separate from the obsolete ps3dev 2.22 SPU-PIE patch.
 
 ---
 

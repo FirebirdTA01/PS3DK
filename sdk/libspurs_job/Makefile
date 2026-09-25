@@ -36,14 +36,20 @@ SFLAGS := -Wall -fpic
 BUILD := build
 OBJS  := $(BUILD)/job_start.o $(BUILD)/job_initialize.o
 LIB   := $(BUILD)/libspurs_job.a
+RUNTIME_LIB := $(BUILD)/libspurs_job_runtime.a
+RUNTIME_OBJS := $(BUILD)/job_initialize.o
 
 .PHONY: all install clean
 
-all: $(LIB)
+all: $(LIB) $(RUNTIME_LIB)
 
 $(LIB): $(OBJS)
 	@echo "  AR    $(notdir $@)"
 	@$(AR) rcs $@ $(OBJS)
+
+$(RUNTIME_LIB): $(RUNTIME_OBJS)
+	@echo "  AR    $(notdir $@)"
+	@$(AR) rcs $@ $(RUNTIME_OBJS)
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	@echo "  CC    $(notdir $<)"
@@ -56,12 +62,17 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 $(BUILD):
 	@mkdir -p $@
 
-install: $(LIB)
+install: $(LIB) $(RUNTIME_LIB)
 	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR) $(INSTALL_LDS) $(INSTALL_INC)/cell/spurs
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libspurs_job.a
 	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libspurs_job.a
+	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB)/libspurs_job_runtime.a
+	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB_MIRROR)/libspurs_job_runtime.a
+	@install -m 0644 $(BUILD)/job_start.o $(INSTALL_LIB)/job_start.o
+	@install -m 0644 $(BUILD)/job_start.o $(INSTALL_LIB_MIRROR)/job_start.o
 	@echo "  lib    libspurs_job.a"
 	@install -m 0644 scripts/spurs_job.ld $(INSTALL_LDS)/spurs_job.ld
+	@install -m 0644 scripts/spurs_job.ld $(INSTALL_LIB)/spurs_job.ld
 	@echo "  ld     spurs_job.ld"
 	@install -m 0644 include/cell/spurs/job_context.h $(INSTALL_INC)/cell/spurs/job_context.h
 	@echo "  header cell/spurs/job_context.h"

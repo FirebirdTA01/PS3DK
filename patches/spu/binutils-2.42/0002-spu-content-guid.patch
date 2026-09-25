@@ -1,0 +1,146 @@
+SPU ELF: opt-in deterministic content identity for __SPU_GUID
+
+Independent SHA-1/64 identity in the documented indexed ILA format.
+Only final links defining __SPU_GUID opt in; ordinary links are unchanged.
+
+--- a/bfd/elf32-spu.c
++++ b/bfd/elf32-spu.c
+@@ -20,6 +20,7 @@
+ 
+ #include "sysdep.h"
+ #include "libiberty.h"
++#include "sha1.h"
+ #include "bfd.h"
+ #include "bfdlink.h"
+ #include "libbfd.h"
+@@ -5528,6 +5529,122 @@
+   return true;
+ }
+ 
++/* Independently defined PS3DK identity format.  This is not Sony's digest. */
++static int
++spu_guid_section_order (const void *left, const void *right)
++{
++  const asection *a = *(const asection *const *) left;
++  const asection *b = *(const asection *const *) right;
++  if (a->vma != b->vma)
++    return a->vma < b->vma ? -1 : 1;
++  return strcmp (a->name, b->name);
++}
++
++static bool
++spu_guid_final_write_processing (bfd *abfd)
++{
++  struct bfd_link_info *info;
++  struct bfd_link_hash_entry *symbol;
++  asection *guid, *section, **sections;
++  Elf_Internal_Shdr *header;
++  struct sha1_ctx digest;
++  bfd_byte buffer[4096], result[20], encoded[16], record[20];
++  static const unsigned char domain[] = "PS3DK-SPU-GUID\0\1";
++  unsigned int count, i;
++  bool ok = false;
++
++  /* Preserve the generic hook, and do nothing to non-linker BFD operations,
++     partial links, or links without an explicit definition of __SPU_GUID. */
++  if (!_bfd_elf_final_write_processing (abfd))
++    return false;
++  info = elf_tdata (abfd)->o->link_info;
++  if (info == NULL || bfd_link_relocatable (info))
++    return true;
++  symbol = bfd_link_hash_lookup (info->hash, "__SPU_GUID", false, false, true);
++  if (symbol == NULL
++      || (symbol->type != bfd_link_hash_defined
++          && symbol->type != bfd_link_hash_defweak))
++    return true;
++
++  guid = bfd_get_section_by_name (abfd, ".SpuGUID");
++  if (guid == NULL || guid->size != 16
++      || symbol->u.def.section->output_section != guid
++      || symbol->u.def.value + symbol->u.def.section->output_offset != 0)
++    {
++      _bfd_error_handler (_("%pB: __SPU_GUID must define the start of a 16-byte .SpuGUID section"), abfd);
++      bfd_set_error (bfd_error_bad_value);
++      return false;
++    }
++  header = &elf_section_data (guid)->this_hdr;
++  if (header->sh_type != SHT_PROGBITS
++      || header->sh_flags != (SHF_ALLOC | SHF_EXECINSTR))
++    {
++      _bfd_error_handler (_("%pB: .SpuGUID must be allocated executable PROGBITS"), abfd);
++      bfd_set_error (bfd_error_bad_value);
++      return false;
++    }
++
++  sections = bfd_malloc (abfd->section_count * sizeof (*sections));
++  if (sections == NULL)
++    return false;
++  count = 0;
++  for (section = abfd->sections; section != NULL; section = section->next)
++    {
++      Elf_Internal_Shdr *sh = &elf_section_data (section)->this_hdr;
++      if (section != guid && (sh->sh_flags & SHF_ALLOC) != 0
++          && sh->sh_type != SHT_NOTE)
++        sections[count++] = section;
++    }
++  qsort (sections, count, sizeof (*sections), spu_guid_section_order);
++  sha1_init_ctx (&digest);
++  sha1_process_bytes (domain, sizeof (domain) - 1, &digest);
++  bfd_putb32 (elf_elfheader (abfd)->e_entry, record);
++  bfd_putb32 (elf_elfheader (abfd)->e_flags, record + 4);
++  bfd_putb32 (count, record + 8);
++  sha1_process_bytes (record, 12, &digest);
++  for (i = 0; i < count; ++i)
++    {
++      Elf_Internal_Shdr *sh = &elf_section_data (sections[i])->this_hdr;
++      size_t name_length = strlen (sections[i]->name);
++      bfd_size_type remaining = sh->sh_size;
++      bfd_putb32 (sh->sh_addr, record);
++      bfd_putb32 (sh->sh_type, record + 4);
++      bfd_putb32 (sh->sh_flags, record + 8);
++      bfd_putb32 (sh->sh_size, record + 12);
++      bfd_putb32 (name_length, record + 16);
++      sha1_process_bytes (record, sizeof (record), &digest);
++      sha1_process_bytes (sections[i]->name, name_length, &digest);
++      if (sh->sh_type == SHT_NOBITS || remaining == 0)
++        continue;
++      if (bfd_seek (abfd, sh->sh_offset, SEEK_SET) != 0)
++        goto done;
++      while (remaining != 0)
++        {
++          bfd_size_type size = remaining < sizeof (buffer)
++                               ? remaining : sizeof (buffer);
++          if (bfd_read (buffer, size, abfd) != size)
++            goto done;
++          sha1_process_bytes (buffer, size, &digest);
++          remaining -= size;
++        }
++    }
++  sha1_finish_ctx (&digest, result);
++  for (i = 0; i < 4; ++i)
++    bfd_putb32 (0x42000002 | (bfd_getb16 (result + i * 2) << 9) | (i << 7),
++                encoded + i * 4);
++  if (bfd_seek (abfd, header->sh_offset, SEEK_SET) != 0
++      || bfd_write (encoded, sizeof (encoded), abfd) != sizeof (encoded))
++    goto done;
++  if (header->contents != NULL)
++    memcpy (header->contents, encoded, sizeof (encoded));
++  if (guid->contents != NULL && guid->contents != header->contents)
++    memcpy (guid->contents, encoded, sizeof (encoded));
++  ok = true;
++ done:
++  free (sections);
++  return ok;
++}
++
+ #define TARGET_BIG_SYM		spu_elf32_vec
+ #define TARGET_BIG_NAME		"elf32-spu"
+ #define ELF_ARCH		bfd_arch_spu
+@@ -5553,6 +5670,7 @@
+ #define elf_backend_additional_program_headers	spu_elf_additional_program_headers
+ #define elf_backend_modify_segment_map		spu_elf_modify_segment_map
+ #define elf_backend_modify_headers		spu_elf_modify_headers
++#define elf_backend_final_write_processing spu_guid_final_write_processing
+ #define elf_backend_init_file_header		spu_elf_init_file_header
+ #define elf_backend_fake_sections		spu_elf_fake_sections
+ #define elf_backend_special_sections		spu_elf_special_sections

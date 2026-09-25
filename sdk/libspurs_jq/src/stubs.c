@@ -8,10 +8,9 @@
  * is staged in incrementally over later changes.
  *
  * House rule: every stub returning CELL_SPURS_JOB_ERROR_INVAL marks
- * an unimplemented path the SPU runtime work will fill in.  The two
- * scheduler entry points (cellSpursJobMain2 + cellSpursJobQueueMain)
- * return CELL_OK so a stub-linked SPU job exits cleanly when the
- * dispatcher invokes it.
+ * an unimplemented path the SPU runtime work will fill in. The default
+ * entry adapter lives separately in job_queue_main.c and requires an
+ * application-defined cellSpursJobQueueMain; it supplies no dummy job.
  */
 
 #include <stdint.h>
@@ -31,27 +30,9 @@
 
 #define _UNUSED(x) ((void)(x))
 
-/* -- JQ entry-point framework wrapper ------------------------------- */
-/* JQ binaries follow a per-invocation init/run/finalize convention:
- * the dispatcher jumps to _start (in libspurs_job's job_start.o),
- * which tail-calls cellSpursJobMain2 (defined here, in libspurs_jq).
- * We initialise the per-job context, dispatch the user's
- * cellSpursJobQueueMain, then finalise on the way out.  The user MUST
- * define cellSpursJobQueueMain in their job source - it carries the
- * per-job logic (pull data via DMA, run, write results back). */
-extern int  _spurs_jq_syscall_initialize(CellSpursJobContext2 *ctx,
-                                         CellSpursJob256 *job);
-extern void _spurs_jq_syscall_finalize  (CellSpursJobContext2 *ctx);
-extern void  cellSpursJobQueueMain      (CellSpursJobContext2 *ctx,
-                                         CellSpursJob256 *job);
-
-void cellSpursJobMain2(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
-{
-    if (_spurs_jq_syscall_initialize(ctx, job) != 0)
-        return;
-    cellSpursJobQueueMain(ctx, job);
-    _spurs_jq_syscall_finalize(ctx);
-}
+/* The default Main2-to-QueueMain adapter is a separate archive member in
+ * job_queue_main.c. Direct Main2 clients can use these helpers without
+ * pulling in a competing entry definition or a QueueMain dependency. */
 
 /* CRT-Aux init/finalize - the outer CRT-layer wrappers __job_start
  * (in job_crt.S) calls before/after the SysCall layer.  Reference

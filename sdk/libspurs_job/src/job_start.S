@@ -10,6 +10,14 @@
  * accepting the image; see docs/abi/spurs-job-entry-point.md § 3.1.
  */
 
+	/* Opt in to the linker's final-content GUID generation. */
+	.section	.SpuGUID, "ax", @progbits
+	.global	__SPU_GUID
+	.type	__SPU_GUID, @object
+__SPU_GUID:
+	.zero	16
+	.size	__SPU_GUID, . - __SPU_GUID
+
 	.section	.before_text, "ax", @progbits
 	.global	_start
 	.type	_start, @function

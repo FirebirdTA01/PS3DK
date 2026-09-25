@@ -165,6 +165,14 @@ jobs:
       - name: Test SPURS task entry links when cross SDK is available
         run: python3 tests/sdk/spurs-task-entry-cross-test.py
 
+      - name: Test SPURS driver selection and startup ownership
+        run: |
+          python3 tests/sdk/spurs-driver-trace-test.py
+          python3 tests/sdk/spurs-startup-ownership-test.py
+          python3 tests/sdk/spurs-driver-link-test.py
+          python3 tests/sdk/spurs-linker-mode-test.py
+          python3 tests/sdk/spurs-guid-reservation-test.py
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.

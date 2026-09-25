@@ -1,0 +1,72 @@
+Select SPURS task/job startup and service archives in the SPU driver.
+
+Keep ordinary startup and libraries unchanged. Respect outer GCC suppression
+options and explicit user scripts. Reject conflicting SPURS modes and SPURS
+shared/relocatable driver modes. Runtime and constructor semantics are not added.
+
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -44,12 +44,22 @@
+    object constructed before entering `main'.  */
+ 
+ #undef  STARTFILE_SPEC 
+-#define STARTFILE_SPEC "%{mstdmain: %{pg|p:gcrt2.o%s;:crt2.o%s}}\
++#define SPU_ORDINARY_STARTFILE_SPEC "%{mstdmain: %{pg|p:gcrt2.o%s;:crt2.o%s}}\
+                         %{!mstdmain: %{pg|p:gcrt1.o%s;:crt1.o%s}}\
+                         crti.o%s crtbegin.o%s"
+ 
++/* Driver suppression options are handled by GCC's outer link spec.
++   The service archives intentionally contain no startup objects.  */
++#define STARTFILE_SPEC \
++  "%{mspurs-task:spurs_task.o%s; " \
++  "mspurs-job:job_start.o%s; " \
++  "mspurs-job-initialize:job_start_w_crt.o%s job_crt.o%s; :" \
++  SPU_ORDINARY_STARTFILE_SPEC "}"
++
+ #undef  ENDFILE_SPEC
+-#define ENDFILE_SPEC   "crtend.o%s crtn.o%s"
++#define ENDFILE_SPEC \
++  "%{!mspurs-task:%{!mspurs-job:%{!mspurs-job-initialize:" \
++  "crtend.o%s crtn.o%s}}}"
+ 
+ #define PREFERRED_DEBUGGING_TYPE DWARF2_DEBUG
+ 
+@@ -63,13 +73,19 @@
+ 
+ #define EH_FRAME_THROUGH_COLLECT2 1
+ 
+-#define LINK_SPEC "%{mlarge-mem: --defsym __stack=0xfffffff0 }\
+- %{mspurs-job: --spurs-job}\
+- %{mspurs-job-initialize: --spurs-job-initialize}\
+- %{mspurs-task: --spurs-task}\
+-"
++/* -dT is a default script: an explicit -T (including a forwarded
++   -Wl,-T) wins regardless of the order in which the driver emits it.  */
++#define LINK_SPEC \
++  "%{mspurs-task:%{mspurs-job|mspurs-job-initialize:%econflicting SPURS modes}} " \
++  "%{mspurs-job:%{mspurs-job-initialize:%econflicting SPURS modes}} " \
++  "%{mspurs-task|mspurs-job|mspurs-job-initialize:" \
++  "%{shared|r:%eSPURS mode does not support shared or relocatable links}} " \
++  "%{mlarge-mem: --defsym __stack=0xfffffff0 } " \
++  "%{mspurs-job: --spurs-job -dT spurs_job.ld%s} " \
++  "%{mspurs-job-initialize: --spurs-job-initialize -dT spurs_job.ld%s} " \
++  "%{mspurs-task: --spurs-task -dT spurs_task.ld%s}"
+ 
+-#define LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -lsputhread -) \
++#define SPU_ORDINARY_LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -lsputhread -) \
+     %{mno-atomic-updates:-lgcc_cachemgr_nonatomic; :-lgcc_cachemgr} \
+     %{mcache-size=128:-lgcc_cache128k; \
+       mcache-size=64 :-lgcc_cache64k; \
+@@ -77,3 +93,12 @@
+       mcache-size=16 :-lgcc_cache16k; \
+       mcache-size=8  :-lgcc_cache8k; \
+                      :-lgcc_cache64k}"
++
++/* Keep the existing ordinary libraries and their order.  The outer group
++   also resolves references from the SPURS services back into those libraries. */
++#define LIB_SPEC \
++  "%{mspurs-task|mspurs-job|mspurs-job-initialize:--start-group " \
++  "%{mspurs-task:-lspurs_task_runtime} " \
++  "%{mspurs-job:-lspurs_job_runtime} " \
++  "%{mspurs-job-initialize:-lspurs_jq_runtime} " \
++  SPU_ORDINARY_LIB_SPEC " -lsync --end-group; :" SPU_ORDINARY_LIB_SPEC "}"

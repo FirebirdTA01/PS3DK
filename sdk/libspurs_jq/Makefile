@@ -30,16 +30,22 @@ CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -fpic \
 SFLAGS := -fpic
 
 BUILD := build
-OBJS  := $(BUILD)/stubs.o $(BUILD)/job_start_w_crt.o $(BUILD)/job_crt.o
+OBJS  := $(BUILD)/stubs.o $(BUILD)/job_queue_main.o $(BUILD)/job_start_w_crt.o $(BUILD)/job_crt.o
 LIB   := $(BUILD)/libspurs_jq.a
+RUNTIME_LIB := $(BUILD)/libspurs_jq_runtime.a
+RUNTIME_OBJS := $(BUILD)/stubs.o $(BUILD)/job_queue_main.o
 
 .PHONY: all install clean
 
-all: $(LIB)
+all: $(LIB) $(RUNTIME_LIB)
 
 $(LIB): $(OBJS)
 	@echo "  AR    $(notdir $@)"
 	@$(AR) rcs $@ $(OBJS)
+
+$(RUNTIME_LIB): $(RUNTIME_OBJS)
+	@echo "  AR    $(notdir $@)"
+	@$(AR) rcs $@ $(RUNTIME_OBJS)
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	@echo "  CC    $(notdir $<)"
@@ -52,10 +58,16 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 $(BUILD):
 	@mkdir -p $@
 
-install: $(LIB)
+install: $(LIB) $(RUNTIME_LIB)
 	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR)
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libspurs_jq.a
 	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libspurs_jq.a
+	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB)/libspurs_jq_runtime.a
+	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB_MIRROR)/libspurs_jq_runtime.a
+	@install -m 0644 $(BUILD)/job_start_w_crt.o $(INSTALL_LIB)/job_start_w_crt.o
+	@install -m 0644 $(BUILD)/job_start_w_crt.o $(INSTALL_LIB_MIRROR)/job_start_w_crt.o
+	@install -m 0644 $(BUILD)/job_crt.o $(INSTALL_LIB)/job_crt.o
+	@install -m 0644 $(BUILD)/job_crt.o $(INSTALL_LIB_MIRROR)/job_crt.o
 	@echo "  lib    libspurs_jq.a"
 
 clean:

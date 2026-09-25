@@ -13,13 +13,17 @@
  * .SpuGUID prefix lands at LS 0x10..0x1f and .before_text follows).
  * Without it the kernel rejects the binary as a non-CRT job.
  *
- * .SpuGUID is also emitted here so JQ jobs that link libspurs_jq pick
- * up a valid GUID without separately linking libspurs_job.
+ * __SPU_GUID opts this binary into the linker's final-content GUID
+ * generation. The reserved bytes are filled after relocation.
  */
 
 	.section	.SpuGUID, "ax", @progbits
 	.balign	1
-	.long	0x436e8402, 0x42569682, 0x43d9e302, 0x43f75f82
+	.global	__SPU_GUID
+	.type	__SPU_GUID, @object
+__SPU_GUID:
+	.zero	16
+	.size	__SPU_GUID, . - __SPU_GUID
 
 	.section	.before_text, "ax", @progbits
 	.global	_start

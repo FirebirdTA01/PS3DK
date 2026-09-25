@@ -42,21 +42,8 @@ __asm__(
     ".popsection\n"
 );
 
-/* .SpuGUID - 16-byte GUID-like blob the jobbin2-wrapper tool expects
- * to find as a named section in the ELF.  The reference dispatcher
- * places this immediately before the entry point (vaddr 0xa00 with
- * entry at 0xa10).  For a user job binary the placement isn't
- * load-critical; we emit it as an allocatable readonly section that
- * the linker script anchors before .text but after .before_text.  The
- * 16 bytes are arbitrary placeholder content; the tool reads but
- * doesn't validate the value (the *presence* of the section is what
- * gates "valid Job ELF" acceptance). */
-__asm__(
-    ".pushsection .SpuGUID, \"ax\", @progbits\n"
-    ".balign 1\n"
-    ".long 0x436e8402, 0x42569682, 0x43d9e302, 0x43f75f82\n"
-    ".popsection\n"
-);
+/* The job startup reserves .SpuGUID; the linker derives its identity from
+ * the final code and data. No sample-owned constant GUID is needed. */
 
 /* .note.spu_name - PT_NOTE segment with type=1, name="SPUNAME",
  * desc=basename of the SPU image.  Standard ELF NOTE structure

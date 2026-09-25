@@ -26,7 +26,7 @@ Building a modern, feature-complete open-source PlayStation 3 SDK that supports 
 | PPU compiler | GCC 12.4.0 (`powerpc64-ps3-elf`) |
 | SPU compiler | GCC 9.5.0 (`spu-elf`) — last with intact SPU backend; binutils 2.42 spu-elf still upstream |
 | Long-lead | Phase 2b: forward-port SPU backend to GCC 12+ (separate worktree, parallel) |
-| binutils | 2.42 (both PPU and SPU). **No patches needed** — modern binutils handles both targets via existing catchalls (verified). |
+| binutils | 2.42 (both PPU and SPU). Upstream recognizes both targets. Independent SPU patches add SPURS ELF flags, opt-in content GUIDs and incompatible-mode rejection; see patches/spu/binutils-2.42/series. |
 | newlib | 4.4.0.20231231 with PS3 libsysbase glue ported forward |
 | GDB | 14.2 (PPU only; SPU combined-debug orphaned post-2019) |
 | PSL1GHT | v3 RFC: Cell-style naming (`cellXxx`, `CELL_XXX_*`, `CellXxx`); ships `psl1ght-compat.h` shim for legacy homebrew |
@@ -72,7 +72,7 @@ Both build scripts accept `--only <step>` (binutils | gcc-newlib | gdb | symlink
 
 | Component | Old patch lines | New target | Difficulty |
 |---|---:|---|---|
-| binutils 2.22 | 90 | binutils 2.42 | **Done — empty.** Old patch was SPU-PIE workaround; mechanism rewritten upstream and PS3 homebrew doesn't need it. |
+| binutils 2.22 | 90 | binutils 2.42 | Old SPU-PIE workaround is obsolete. Independent SPURS ELF-flag and content-GUID patches are maintained. |
 | GCC 7.2.0 | 727 | GCC 12.4.0 (PPU) | Medium. Touches 7 files; main friction is `rs6000.c` → `rs6000.cc` rename + libstdc++ crossconfig.m4 rewritten in GCC 10. |
 | GCC 7.2.0 | (shared) | GCC 9.5.0 (SPU) | Low. ~50 lines for spec file + libgcc tweaks. |
 | newlib 1.20.0 | 13,180 | newlib 4.4.0 | Medium-High. Mostly new-file additions for libgloss/libsysbase PS3 glue; many obsoleted by upstream POSIX additions. Expected ~6,000 lines after rebase. |
@@ -82,7 +82,7 @@ Both build scripts accept `--only <step>` (binutils | gcc-newlib | gdb | symlink
 
 1. **Verify CachyOS host:** `pacman -S base-devel gcc gmp mpfr libmpc isl python rust git wget bison flex texinfo cmake ninja patch` then `gcc --version`.
 2. **Re-bootstrap:** `./scripts/bootstrap.sh` to re-clone upstream + ps3dev + forks (~600 MB total).
-3. **Phase 1a binutils dry-build:** `./scripts/build-ppu-toolchain.sh --only binutils` then `./scripts/build-spu-toolchain.sh --only binutils`. Validates the empty-patch claim end-to-end. Should produce `$PS3DEV/ppu/bin/powerpc64-ps3-elf-{as,ld,ar,objcopy}` and `$PS3DEV/spu/bin/spu-elf-{as,ld,ar,objcopy}`.
+3. **Phase 1a binutils dry-build:** `./scripts/build-ppu-toolchain.sh --only binutils` then `./scripts/build-spu-toolchain.sh --only binutils`. Validates target support and the current per-target patch series. Should produce `$PS3DEV/ppu/bin/powerpc64-ps3-elf-{as,ld,ar,objcopy}` and `$PS3DEV/spu/bin/spu-elf-{as,ld,ar,objcopy}`.
 4. **Phase 1b GCC patch rebase:** start with `gcc/config.gcc` and `gcc/config/rs6000/cell64lv2.h` (the new-file part applies cleanly), then port the `rs6000.c` hunks into GCC 12's split `rs6000.cc` files.
 5. **Phase 1c newlib port:** PS3 host case in `configure.host`, libgloss/libsysbase syscall glue, CRT0.
 

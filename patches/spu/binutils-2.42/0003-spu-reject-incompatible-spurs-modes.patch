@@ -1,0 +1,57 @@
+Reject incompatible SPURS linker modes even when passed through a driver.
+
+Ordinary SPU links retain their existing behavior. Repeating the same SPURS
+mode is harmless; selecting distinct modes is an error. A SPURS final-program
+mode cannot be combined with relocatable or shared linking.
+
+--- a/ld/emultempl/spuelf.em
++++ b/ld/emultempl/spuelf.em
+@@ -42,6 +42,19 @@
+   1, 0, 16, 0, 0, 2000
+ };
+ 
++/* Reject incompatible SPURS options here as well as in the GCC specs:
++   -Wl and -Xlinker must not bypass the final-link contract.  */
++static int spurs_program_type = 0;
++
++static void
++spu_set_spurs_program_type (int type)
++{
++  if (spurs_program_type != 0 && spurs_program_type != type)
++    einfo (_("%F%P: conflicting SPURS modes\n"));
++  spurs_program_type = type;
++  spu_elf_set_spurs_job_type (type);
++}
++
+ static unsigned int no_overlays = 0;
+ static unsigned int num_lines_set = 0;
+ static unsigned int line_size_set = 0;
+@@ -99,6 +112,9 @@
+ static void
+ spu_after_open (void)
+ {
++  if (spurs_program_type != 0
++      && (bfd_link_relocatable (&link_info) || bfd_link_dll (&link_info)))
++    einfo (_("%F%P: SPURS mode does not support shared or relocatable links\n"));
+   if (is_spu_target ())
+     {
+       /* Pass params to backend.  */
+@@ -706,15 +722,15 @@
+       break;
+ 
+     case OPTION_SPU_SPURS_JOB:
+-      spu_elf_set_spurs_job_type (1);
++      spu_set_spurs_program_type (1);
+       break;
+ 
+     case OPTION_SPU_SPURS_JOB_INIT:
+-      spu_elf_set_spurs_job_type (2);
++      spu_set_spurs_program_type (2);
+       break;
+ 
+     case OPTION_SPU_SPURS_TASK:
+-      spu_elf_set_spurs_job_type (3);
++      spu_set_spurs_program_type (3);
+       break;
+ 
+     case OPTION_SPU_NO_OVERLAYS:

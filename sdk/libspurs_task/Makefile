@@ -49,14 +49,20 @@ OBJS    := $(BUILD)/crt_spurs_task.o \
            $(BUILD)/spurs_semaphore_v.o
 
 LIB     := $(BUILD)/libspurs_task.a
+RUNTIME_LIB := $(BUILD)/libspurs_task_runtime.a
+RUNTIME_OBJS := $(filter-out $(BUILD)/crt_spurs_task.o,$(OBJS))
 
 .PHONY: all install clean
 
-all: $(LIB)
+all: $(LIB) $(RUNTIME_LIB)
 
 $(LIB): $(OBJS)
 	@echo "  AR    $(notdir $@)"
 	@$(AR) rcs $@ $(OBJS)
+
+$(RUNTIME_LIB): $(RUNTIME_OBJS)
+	@echo "  AR    $(notdir $@)"
+	@$(AR) rcs $@ $(RUNTIME_OBJS)
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	@echo "  CC    $(notdir $<)"
@@ -69,12 +75,17 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 $(BUILD):
 	@mkdir -p $@
 
-install: $(LIB)
+install: $(LIB) $(RUNTIME_LIB)
 	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR) $(INSTALL_LDS) $(INSTALL_INC)/cell/spurs
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libspurs_task.a
 	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libspurs_task.a
+	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB)/libspurs_task_runtime.a
+	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB_MIRROR)/libspurs_task_runtime.a
+	@install -m 0644 $(BUILD)/crt_spurs_task.o $(INSTALL_LIB)/spurs_task.o
+	@install -m 0644 $(BUILD)/crt_spurs_task.o $(INSTALL_LIB_MIRROR)/spurs_task.o
 	@echo "  lib   libspurs_task.a"
 	@install -m 0644 scripts/spurs_task.ld $(INSTALL_LDS)/spurs_task.ld
+	@install -m 0644 scripts/spurs_task.ld $(INSTALL_LIB)/spurs_task.ld
 	@echo "  ld    spurs_task.ld"
 	@install -m 0644 include/cell/spurs/spu_task.h $(INSTALL_INC)/cell/spurs/spu_task.h
 	@echo "  header cell/spurs/spu_task.h (forwarder)"
