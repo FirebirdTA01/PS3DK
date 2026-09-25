@@ -233,7 +233,11 @@ for yaml in "${STUB_YAMLS[@]}"; do
     # that <cell/gcm.h>'s static-inline forwarders still emit - until the
     # the reference SDK-primary surface reaches everywhere and those forwarders go
     # away.
-    if [[ "$name" == "libgcm_sys_stub" ]]; then
+    if [[ "$name" == "libnet_stub" ]]; then
+        bash "$script_dir/build-libnet-archive.sh" "${produced[0]}" "$install_dir/libnet_stub.a" "$abi"
+        ln -sf libnet_stub.a "$install_dir/libnet.a"
+        say "installed SDK-owned libnet_stub.a + libnet.a ($abi)"
+    elif [[ "$name" == "libgcm_sys_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libgcm_sys_legacy"
         say "building legacy-name wrappers (libgcm_sys_legacy, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" ABI_CFLAGS="$cc_flags" \

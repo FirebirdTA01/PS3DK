@@ -33,3 +33,7 @@ abi-types-lp64,tests/regression/abi-types/abi-types-lp64.fake.self,60,RAN-CLEAN,
 # legacy-image-dec guards PSL1GHT legacy image loaders (jpgLoadFromFile,
 # jpgLoadFromBuffer, pngLoadFromFile, pngLoadFromBuffer).
 legacy-image-dec,tests/regression/legacy-image-dec/legacy-image-dec.fake.self,25,RAN-CLEAN,LEGACY_IMAGE_DEC_OK,LEGACY_IMAGE_DEC_FAIL
+
+# Real syscall loopback; DNS/recvmsg are separate host-boundary controls.
+libnet-ilp32,tests/regression/libnet/libnet-ilp32.fake.self,60,RAN-CLEAN,LIBNET_OK,LIBNET_FAIL
+libnet-lp64,tests/regression/libnet/libnet-lp64.fake.self,60,RAN-CLEAN,LIBNET_OK,LIBNET_FAIL

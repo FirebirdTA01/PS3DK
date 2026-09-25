@@ -10,27 +10,24 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <limits.h>
+#include <poll.h>
 #include <sys/reent.h>
 #include <sys/lv2_syscall.h>
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
-#include <sys/lv2errno.h>
+#include "net_errno.h"
+#include "net_wire.h"
 
 #define FD(socket) ((socket) & ~SOCKET_FD_MASK)
+static int valid_socket(int s)
+{ return s >= 0 && (s & SOCKET_FD_MASK) && FD(s) < 1024; }
 
-/*
- * Lv-2's select() takes its own descriptor set, and it is NOT newlib's
- * fd_set.  Lv-2 uses 32 big-endian 32-bit words (1024 bits), indexed as
- * word (s >> 5) & 31, bit (s & 31).  newlib's fd_set is an array of
- * `unsigned long`, which is 32-bit under our default ILP32 hybrid but
- * 64-bit under the lp64 multilib -- so a cast would happen to work on one
- * ABI and silently address the wrong bits on the other.
- *
- * The descriptors differ too: a POSIX socket fd here carries
- * SOCKET_FD_MASK, which Lv-2 knows nothing about.
- *
- * Both reasons mean the sets have to be rebuilt rather than passed through.
+/* SDK fd_set and Lv-2 both use 32-bit words in either ABI. Rebuild only
+ * the requested range, normalizing tagged descriptors and clearing padding.
  */
 #define LV2_FD_WORDS   32
 #define LV2_FD_SETSIZE (LV2_FD_WORDS * 32)
@@ -227,6 +224,8 @@ sysNetSelect(int nfds, lv2_fd_set *readfds, lv2_fd_set *writefds,
 int __attribute__((weak))
 accept(int s, struct sockaddr *addr, socklen_t *addrlen)
 {
+    if (addr && !addrlen) { errno = EFAULT; return -1; }
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
 	s32 ret;
 	socklen_t len;
 	socklen_t *lenp = (addr && addrlen) ? &len : NULL;
@@ -236,7 +235,7 @@ accept(int s, struct sockaddr *addr, socklen_t *addrlen)
 
 	ret = sysNetAccept(FD(s), addr, lenp);
 	if (ret < 0)
-		return lv2errno(ret);
+		return net_result(ret);
 
 	if (lenp)
 		*addrlen = len;
@@ -247,19 +246,22 @@ accept(int s, struct sockaddr *addr, socklen_t *addrlen)
 int __attribute__((weak))
 bind(int s, const struct sockaddr *addr, socklen_t addrlen)
 {
-	return lv2errno(sysNetBind(FD(s), addr, addrlen));
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return net_result(sysNetBind(FD(s), addr, addrlen));
 }
 
 int __attribute__((weak))
 connect(int s, const struct sockaddr *addr, socklen_t addrlen)
 {
-	return lv2errno(sysNetConnect(FD(s), addr, addrlen));
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return net_result(sysNetConnect(FD(s), addr, addrlen));
 }
 
 int __attribute__((weak))
 listen(int s, int backlog)
 {
-	return lv2errno(sysNetListen(FD(s), backlog));
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return net_result(sysNetListen(FD(s), backlog));
 }
 
 int __attribute__((weak))
@@ -267,7 +269,7 @@ socket(int domain, int type, int protocol)
 {
 	s32 ret = sysNetSocket(domain, type, protocol);
 	if (ret < 0)
-		return lv2errno(ret);
+		return net_result(ret);
 
 	return ret | SOCKET_FD_MASK;
 }
@@ -275,21 +277,27 @@ socket(int domain, int type, int protocol)
 ssize_t __attribute__((weak))
 send(int s, const void *buf, size_t len, int flags)
 {
-	return (ssize_t)lv2errno(sysNetSendto(FD(s), buf, len, flags, NULL, 0));
+    if (len > INT_MAX) { errno = EMSGSIZE; return -1; }
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return (ssize_t)net_result(sysNetSendto(FD(s), buf, len, flags, NULL, 0));
 }
 
 ssize_t __attribute__((weak))
 sendto(int s, const void *buf, size_t len, int flags,
        const struct sockaddr *addr, socklen_t addrlen)
 {
-	return (ssize_t)lv2errno(sysNetSendto(FD(s), buf, len, flags, addr,
+    if (len > INT_MAX) { errno = EMSGSIZE; return -1; }
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return (ssize_t)net_result(sysNetSendto(FD(s), buf, len, flags, addr,
 	                                      addrlen));
 }
 
 ssize_t __attribute__((weak))
 recv(int s, void *buf, size_t len, int flags)
 {
-	return (ssize_t)lv2errno(sysNetRecvfrom(FD(s), buf, len, flags, NULL,
+    if (len > INT_MAX) { errno = EMSGSIZE; return -1; }
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return (ssize_t)net_result(sysNetRecvfrom(FD(s), buf, len, flags, NULL,
 	                                        NULL));
 }
 
@@ -297,6 +305,9 @@ ssize_t __attribute__((weak))
 recvfrom(int s, void *buf, size_t len, int flags, struct sockaddr *from,
          socklen_t *fromlen)
 {
+    if (from && !fromlen) { errno = EFAULT; return -1; }
+    if (len > INT_MAX) { errno = EMSGSIZE; return -1; }
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
 	s32 ret;
 	socklen_t len_out;
 	socklen_t *lenp = NULL;
@@ -308,7 +319,7 @@ recvfrom(int s, void *buf, size_t len, int flags, struct sockaddr *from,
 
 	ret = sysNetRecvfrom(FD(s), buf, len, flags, from, lenp);
 	if (ret < 0)
-		return (ssize_t)lv2errno(ret);
+		return (ssize_t)net_result(ret);
 
 	if (lenp)
 		*fromlen = len_out;
@@ -319,13 +330,15 @@ recvfrom(int s, void *buf, size_t len, int flags, struct sockaddr *from,
 int __attribute__((weak))
 shutdown(int s, int how)
 {
-	return lv2errno(sysNetShutdown(FD(s), how));
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return net_result(sysNetShutdown(FD(s), how));
 }
 
 int __attribute__((weak))
 socketclose(int s)
 {
-	return lv2errno(sysNetClose(FD(s)));
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+	return net_result(sysNetClose(FD(s)));
 }
 
 int __attribute__((weak))
@@ -337,7 +350,8 @@ closesocket(int s)
 int
 __librt_socketclose_r(struct _reent *r, int s)
 {
-	return lv2errno_r(r, sysNetClose(FD(s)));
+	if (!valid_socket(s)) { r->_errno = EBADF; return -1; }
+	return net_result_r(r, sysNetClose(FD(s)));
 }
 
 int __attribute__((weak))
@@ -366,30 +380,11 @@ inet_pton(int af, const char *src, void *dst)
 	return -1;
 }
 
-/*
- * getpeername/getsockname are declared in <sys/socket.h>, but librt.a alone
- * defined neither: a program linking -lrt without -lnet got an undefined
- * reference.  libnet.a has always defined them, through PSL1GHT's
- * netGetPeerName/netGetSockName imports, but only once netInitialize() has
- * run -- before that they return ENOSYS.
- *
- * These go straight to Lv-2 syscalls 703/704, so they work with neither
- * libnet on the link line nor netInitialize() called.
- *
- * On link order: both libraries define these weakly, and the linker takes
- * the first weak definition it meets.  cmake/ps3-ppu-toolchain.cmake calls
- * link_libraries(rt), which puts -lrt ahead of the user's libraries for a
- * separate constructor-ordering reason -- so in every CMake-built program
- * it is THESE that get bound, not libnet's, whether or not -lnet is on the
- * line.
- *
- * addr_len is in/out, so it takes the same bounce-buffer treatment as
- * accept(): Lv-2 writes through the pointer and we only publish the result
- * once the call has succeeded.
- */
+/* Length outputs are only published after a successful syscall. */
 int __attribute__((weak))
 getpeername(int s, struct sockaddr *name, socklen_t *namelen)
 {
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
 	s32 ret;
 	socklen_t len;
 
@@ -401,7 +396,7 @@ getpeername(int s, struct sockaddr *name, socklen_t *namelen)
 	len = *namelen;
 	ret = sysNetGetPeerName(FD(s), name, &len);
 	if (ret < 0)
-		return lv2errno(ret);
+		return net_result(ret);
 
 	*namelen = len;
 	return 0;
@@ -410,6 +405,7 @@ getpeername(int s, struct sockaddr *name, socklen_t *namelen)
 int __attribute__((weak))
 getsockname(int s, struct sockaddr *name, socklen_t *namelen)
 {
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
 	s32 ret;
 	socklen_t len;
 
@@ -421,24 +417,13 @@ getsockname(int s, struct sockaddr *name, socklen_t *namelen)
 	len = *namelen;
 	ret = sysNetGetSockName(FD(s), name, &len);
 	if (ret < 0)
-		return lv2errno(ret);
+		return net_result(ret);
 
 	*namelen = len;
 	return 0;
 }
 
-/*
- * This replaces a stub that returned ENOSYS.  That stub was not merely
- * dormant: libnet.a defines select() too -- weakly, routed through netSelect
- * -- but our toolchain file links -lrt ahead of the user's libraries, so the
- * linker met librt's weak stub FIRST and bound it.  select() therefore
- * returned ENOSYS in every CMake-built program even when -lnet was on the
- * line and libnet was initialised.  Lv-2 syscall 716 is the implementation.
- *
- * The descriptor sets are rebuilt rather than cast -- see the lv2_fd_set
- * notes at the top of this file for why a cast is wrong on the lp64
- * multilib and wrong for masked socket descriptors on both.
- */
+/* Translate tagged nfds and native timeval at the kernel boundary. */
 int __attribute__((weak))
 select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
        struct timeval *timeout)
@@ -448,11 +433,12 @@ select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 	int lv2_nfds = 0, n;
 	s32 ret;
 
-	if (nfds < 0) {
+	if (nfds < 0 || (nfds & ~SOCKET_FD_MASK) > FD_SETSIZE) {
 		errno = EINVAL;
 		return -1;
 	}
 
+	nfds &= ~SOCKET_FD_MASK;
 	n = lv2_fd_from_posix(&lv2_read, readfds, nfds);
 	if (n < 0)
 		goto too_large;
@@ -474,6 +460,9 @@ select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 	/* NULL means block indefinitely; only a supplied timeout is
 	 * converted. */
 	if (timeout) {
+        if (timeout->tv_sec < 0 || timeout->tv_usec < 0 || timeout->tv_usec >= 1000000) {
+            errno = EINVAL; return -1;
+        }
 		lv2_timeout.tv_sec = (s64)timeout->tv_sec;
 		lv2_timeout.tv_usec = (s64)timeout->tv_usec;
 		lv2_timeoutp = &lv2_timeout;
@@ -482,7 +471,7 @@ select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 	ret = sysNetSelect(lv2_nfds, &lv2_read, &lv2_write, &lv2_except,
 			   lv2_timeoutp);
 	if (ret < 0)
-		return lv2errno(ret);
+		return net_result(ret);
 
 	lv2_fd_to_posix(readfds, &lv2_read, nfds);
 	lv2_fd_to_posix(writefds, &lv2_write, nfds);
@@ -496,4 +485,185 @@ too_large:
 	 * descriptor would be worse. */
 	errno = EINVAL;
 	return -1;
+}
+
+int __attribute__((weak)) socketselect(int nfds, fd_set *r, fd_set *w, fd_set *e, struct timeval *t)
+{ return select(nfds, r, w, e, t); }
+
+
+LV2_SYSCALL sysNetGetSockOpt(int s, int level, int option, void *value, socklen_t *len)
+{
+    lv2syscall5(705, s, level, option, (u64)value, (u64)len);
+    return_to_user_prog(s32);
+}
+LV2_SYSCALL sysNetSetSockOpt(int s, int level, int option, const void *value, socklen_t len)
+{
+    lv2syscall5(711, s, level, option, (u64)value, len);
+    return_to_user_prog(s32);
+}
+LV2_SYSCALL sysNetPoll(struct pollfd *fds, nfds_t n, int timeout)
+{
+    lv2syscall3(715, (u64)fds, n, timeout);
+    return_to_user_prog(s32);
+}
+LV2_SYSCALL sysNetSendMsg(int s, const struct net_wire_msghdr *msg, int flags)
+{
+    lv2syscall3(709, s, (u64)msg, flags);
+    return_to_user_prog(s32);
+}
+LV2_SYSCALL sysNetRecvMsg(int s, struct net_wire_msghdr *msg, int flags)
+{
+    lv2syscall3(708, s, (u64)msg, flags);
+    return_to_user_prog(s32);
+}
+static int timeout_option(int level, int option)
+{ return level == SOL_SOCKET && (option == SO_RCVTIMEO || option == SO_SNDTIMEO); }
+static int valid_timeout(const struct timeval *t)
+{ return t->tv_sec >= 0 && t->tv_usec >= 0 && t->tv_usec < 1000000; }
+
+int __attribute__((weak)) setsockopt(int s, int level, int option, const void *value, socklen_t len)
+{
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+    lv2_timeval wire;
+    if (!value) { errno = EFAULT; return -1; }
+    if (timeout_option(level, option)) {
+        struct timeval native = {0};
+        if (len != sizeof(native)) { errno = EINVAL; return -1; }
+        memcpy(&native, value, sizeof(native));
+        if (!valid_timeout(&native)) { errno = EINVAL; return -1; }
+        wire.tv_sec = native.tv_sec; wire.tv_usec = native.tv_usec;
+        value = &wire; len = sizeof(wire);
+    }
+    return net_result(sysNetSetSockOpt(FD(s), level, option, value, len));
+}
+
+int __attribute__((weak)) getsockopt(int s, int level, int option, void *value, socklen_t *len)
+{
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+    lv2_timeval wire = {0, 0};
+    socklen_t wire_len;
+    int error = 0, ret;
+    void *out = value;
+    if (!value || !len) { errno = EFAULT; return -1; }
+    wire_len = *len;
+    if (timeout_option(level, option)) {
+        if (*len < sizeof(struct timeval)) { errno = EINVAL; return -1; }
+        out = &wire; wire_len = sizeof(wire);
+    } else if (level == SOL_SOCKET && option == SO_ERROR) {
+        if (*len < sizeof(error)) { errno = EINVAL; return -1; }
+        out = &error; wire_len = sizeof(error);
+    }
+    ret = net_result(sysNetGetSockOpt(FD(s), level, option, out, &wire_len));
+    if (ret < 0) return -1;
+    if (timeout_option(level, option)) {
+        struct timeval native = {0};
+        native.tv_sec = wire.tv_sec; native.tv_usec = wire.tv_usec;
+        memcpy(value, &native, sizeof(native));
+        *len = sizeof(native);
+    } else if (out == &error) {
+        error = net_error(error);
+        memcpy(value, &error, sizeof(error)); *len = sizeof(error);
+    } else *len = wire_len;
+    return ret;
+}
+
+int __attribute__((weak)) poll(struct pollfd *fds, nfds_t n, int timeout)
+{
+    struct pollfd *wire;
+    unsigned i;
+    int ret, invalid = 0;
+    if (n > 1024) { errno = EINVAL; return -1; }
+    if (n && !fds) { errno = EFAULT; return -1; }
+    wire = n ? malloc(n * sizeof(*wire)) : NULL;
+    if (n && !wire) { errno = ENOMEM; return -1; }
+    for (i = 0; i < n; ++i) {
+        wire[i] = fds[i]; wire[i].revents = 0;
+        if (fds[i].fd < 0) wire[i].fd = -1;
+        else if (!(fds[i].fd & SOCKET_FD_MASK)) { wire[i].fd = -1; ++invalid; }
+        else wire[i].fd = FD(fds[i].fd);
+    }
+    ret = net_result(sysNetPoll(wire, n, invalid ? 0 : timeout));
+    if (ret >= 0) {
+        for (i = 0; i < n; ++i)
+            fds[i].revents = fds[i].fd < 0 ? 0 :
+                !(fds[i].fd & SOCKET_FD_MASK) ? POLLNVAL : wire[i].revents;
+        ret += invalid;
+    }
+    free(wire);
+    return ret;
+}
+int __attribute__((weak)) socketpoll(struct pollfd *fds, nfds_t n, int timeout)
+{ return poll(fds, n, timeout); }
+
+static int pointer_fits_ea(const void *p)
+{ return (uintptr_t)p <= UINT32_MAX; }
+
+static int message_to_wire(const struct msghdr *msg, struct net_wire_msghdr *wire,
+                           struct net_wire_iovec **vectors)
+{
+    int i;
+    *vectors = NULL;
+    if (!msg) { errno = EFAULT; return -1; }
+    if (msg->msg_iovlen < 0 || msg->msg_iovlen > 1024) { errno = EMSGSIZE; return -1; }
+    if ((msg->msg_iovlen && !msg->msg_iov) ||
+        !pointer_fits_ea(msg->msg_name) || !pointer_fits_ea(msg->msg_control)) {
+        errno = EFAULT; return -1;
+    }
+    memset(wire, 0, sizeof(*wire));
+    if (msg->msg_iovlen) {
+        *vectors = calloc((unsigned)msg->msg_iovlen, sizeof(**vectors));
+        if (!*vectors) { errno = ENOMEM; return -1; }
+        if (!pointer_fits_ea(*vectors)) goto bad_address;
+    }
+    for (i = 0; i < msg->msg_iovlen; ++i) {
+        if (!pointer_fits_ea(msg->msg_iov[i].iov_base)) goto bad_address;
+        (*vectors)[i].base = (uint32_t)(uintptr_t)msg->msg_iov[i].iov_base;
+        (*vectors)[i].len = msg->msg_iov[i].iov_len;
+    }
+    wire->name = (uint32_t)(uintptr_t)msg->msg_name;
+    wire->namelen = msg->msg_namelen;
+    wire->iov = (uint32_t)(uintptr_t)*vectors; wire->iovlen = msg->msg_iovlen;
+    wire->control = (uint32_t)(uintptr_t)msg->msg_control;
+    wire->controllen = msg->msg_controllen;
+    return 0;
+bad_address:
+    free(*vectors); *vectors = NULL; errno = EFAULT; return -1;
+}
+ssize_t __attribute__((weak)) sendmsg(int s, const struct msghdr *msg, int flags)
+{
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+    struct net_wire_msghdr wire;
+    struct net_wire_iovec *vectors;
+    int ret;
+    if (message_to_wire(msg, &wire, &vectors) < 0) return -1;
+    ret = net_result(sysNetSendMsg(FD(s), &wire, flags));
+    free(vectors); return ret;
+}
+ssize_t __attribute__((weak)) recvmsg(int s, struct msghdr *msg, int flags)
+{
+    if (!valid_socket(s)) { errno = EBADF; return -1; }
+    struct net_wire_msghdr wire;
+    struct net_wire_iovec *vectors;
+    int ret;
+    if (message_to_wire(msg, &wire, &vectors) < 0) return -1;
+    ret = net_result(sysNetRecvMsg(FD(s), &wire, flags));
+    free(vectors);
+    if (ret >= 0) {
+        msg->msg_namelen = wire.namelen; msg->msg_controllen = wire.controllen;
+        msg->msg_flags = wire.flags;
+    }
+    return ret;
+}
+
+ssize_t __librt_recv_r(struct _reent *r, int s, void *buf, size_t len)
+{
+    if (!valid_socket(s)) { r->_errno = EBADF; return -1; }
+    if (len > INT_MAX) { r->_errno = EMSGSIZE; return -1; }
+    return net_result_r(r, sysNetRecvfrom(FD(s), buf, len, 0, NULL, NULL));
+}
+ssize_t __librt_send_r(struct _reent *r, int s, const void *buf, size_t len)
+{
+    if (!valid_socket(s)) { r->_errno = EBADF; return -1; }
+    if (len > INT_MAX) { r->_errno = EMSGSIZE; return -1; }
+    return net_result_r(r, sysNetSendto(FD(s), buf, len, 0, NULL, 0));
 }

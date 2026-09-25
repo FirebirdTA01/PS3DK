@@ -137,7 +137,6 @@ ppu_stub  ppu/lib/liblv2_stub.a
 ppu_stub  ppu/lib/liblv2dbg_stub.a
 ppu_stub  ppu/lib/libmic_stub.a
 ppu_stub  ppu/lib/libmt19937.a
-ppu_stub  ppu/lib/libnet.a
 ppu_stub  ppu/lib/libnet_stub.a
 ppu_stub  ppu/lib/libnetctl_stub.a
 ppu_stub  ppu/lib/libovis_stub.a
@@ -239,6 +238,7 @@ alias     ppu/lib/libcamera.a              libcamera_stub.a
 alias     ppu/lib/libgem.a                 libgem_stub.a
 alias     ppu/lib/libhttputil.a            libhttp_util_stub.a
 alias     ppu/lib/liblv2dbg.a              liblv2dbg_stub.a
+alias     ppu/lib/libnet.a                 libnet_stub.a
 alias     ppu/lib/libnetctl.a              libnetctl_stub.a
 alias     ppu/lib/libssl.a                 libssl_stub.a
 alias     ppu/lib/libsysmodule.a           libsysmodule_stub.a
@@ -263,6 +263,7 @@ alias     ppu/lib/lp64/libcamera.a         libcamera_stub.a
 alias     ppu/lib/lp64/libgem.a            libgem_stub.a
 alias     ppu/lib/lp64/libhttputil.a       libhttp_util_stub.a
 alias     ppu/lib/lp64/liblv2dbg.a         liblv2dbg_stub.a
+alias     ppu/lib/lp64/libnet.a            libnet_stub.a
 alias     ppu/lib/lp64/libnetctl.a         libnetctl_stub.a
 alias     ppu/lib/lp64/libssl.a            libssl_stub.a
 alias     ppu/lib/lp64/libsysmodule.a      libsysmodule_stub.a

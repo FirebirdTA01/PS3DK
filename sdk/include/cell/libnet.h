@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <sys/select.h>
+#include <poll.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -81,25 +82,6 @@ typedef struct sys_net_sockinfo_ex {
     int32_t remote_vport;
     int32_t reserved[8];
 } sys_net_sockinfo_ex_t;
-
-typedef unsigned int nfds_t;
-
-struct pollfd {
-    int fd;
-    short events;
-    short revents;
-};
-
-#define POLLIN     0x0001
-#define POLLPRI    0x0002
-#define POLLOUT    0x0004
-#define POLLERR    0x0008
-#define POLLHUP    0x0010
-#define POLLNVAL   0x0020
-#define POLLRDNORM 0x0040
-#define POLLWRNORM POLLOUT
-#define POLLRDBAND 0x0080
-#define POLLWRBAND 0x0100
 
 #define SYS_NET_INIT_ERROR_CHECK 0x0001
 

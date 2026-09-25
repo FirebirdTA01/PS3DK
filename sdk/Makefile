@@ -51,6 +51,10 @@ HEADERS := \
     include/psl1ght/lv2/timer.h \
     include/psl1ght/lv2/net.h \
     include/net/socket.h \
+    include/net/net.h \
+    include/net/errno.h \
+    include/net/netdb.h \
+    include/sys/poll.h \
     include/sys/sys_time.h \
     include/sys/sys_types.h \
     include/sys/system_types.h \
@@ -67,6 +71,10 @@ HEADERS := \
     include/sys/memory.h \
     include/sys/dbg.h \
     include/sys/socket.h \
+    include/sys/select.h \
+    include/poll.h \
+    include/net/poll.h \
+    include/net/select.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
     include/sys/time_util.h \

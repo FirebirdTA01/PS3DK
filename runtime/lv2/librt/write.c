@@ -16,6 +16,7 @@
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/socket.h>
+extern ssize_t __librt_send_r(struct _reent *, int, const void *, size_t);
 
 _ssize_t
 __librt_write_r(struct _reent *r, int fd, const void *ptr, size_t len)
@@ -24,7 +25,7 @@ __librt_write_r(struct _reent *r, int fd, const void *ptr, size_t len)
 	s32 ret;
 
 	if (fd & SOCKET_FD_MASK)
-		return (_ssize_t)send(fd, ptr, len, 0);
+		return (_ssize_t)__librt_send_r(r, fd, ptr, len);
 
 	if (fd == 1 || fd == 2) {
 		ret = sysTtyWrite(fd, ptr, (u32)len, &nwritten);
