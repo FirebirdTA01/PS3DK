@@ -52,9 +52,14 @@ std::unique_ptr<TranslationUnit> Parser::parse()
 
     while (!isAtEnd())
     {
+        const size_t start = current;
         try
         {
             auto decl = parseTopLevelDeclaration();
+            // A declaration that fails without consuming a token would be
+            // retried at the same token forever; skip ahead instead.
+            if (!decl && current == start)
+                synchronize();
             if (decl)
             {
                 // Track struct/typedef names for type resolution
@@ -72,10 +77,12 @@ std::unique_ptr<TranslationUnit> Parser::parse()
         }
         catch (...)
         {
+            if (abandoned)
+                break;
             synchronize();
             if (static_cast<int>(errors.size()) >= config.maxErrors)
             {
-                error("Too many errors, stopping parse");
+                errors.push_back({currentLocation(), "Too many errors, stopping parse", false});
                 break;
             }
         }
@@ -195,6 +202,14 @@ void Parser::error(const SourceLocation& loc, const std::string& message)
 {
     errors.push_back({loc, message, false});
     panicMode = true;
+    // Hard cap for every recovery loop, not only the top-level one: a loop
+    // that records an error without advancing must not grow without bound.
+    if (!abandoned && static_cast<int>(errors.size()) >= config.maxErrors)
+    {
+        abandoned = true;
+        errors.push_back({loc, "Too many errors, stopping parse", false});
+        throw std::runtime_error("too many errors");
+    }
 }
 
 void Parser::warning(const std::string& message)
@@ -497,7 +512,7 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     type->baseType = tokenToBaseType(typeTok.type);
     if (type->baseType == BaseType::Void && typeTok.type != TokenType::KW_VOID)
     {
-        error("Expected type name");
+        error("Expected type name (got '" + typeTok.lexeme + "')");
         return nullptr;
     }
 
@@ -1581,6 +1596,14 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
     {
         // Reset position if we consumed Vita attributes but it's not a declaration
         current = savedPos;
+    }
+
+    // Two identifiers in a row cannot start an expression: the first is a
+    // type name nobody declared.
+    if (check(TokenType::IDENTIFIER) && peek(1).type == TokenType::IDENTIFIER)
+    {
+        error("Unknown type name '" + peek().lexeme + "'");
+        throw std::runtime_error("unknown type name");
     }
 
     // Parse as expression statement

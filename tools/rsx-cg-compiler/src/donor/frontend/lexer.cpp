@@ -99,6 +99,14 @@ void Lexer::initKeywords() {
     keywords["samplerCUBE"] = TokenType::KW_SAMPLERCUBE;
     keywords["samplerRECT"] = TokenType::KW_SAMPLERRECT;
 
+    // Legacy texture-object spellings: the reference compiles each one
+    // byte-identically to the matching sampler type, in both profiles.
+    keywords["texobj1D"] = TokenType::KW_SAMPLER1D;
+    keywords["texobj2D"] = TokenType::KW_SAMPLER2D;
+    keywords["texobj3D"] = TokenType::KW_SAMPLER3D;
+    keywords["texobjCUBE"] = TokenType::KW_SAMPLERCUBE;
+    keywords["texobjRECT"] = TokenType::KW_SAMPLERRECT;
+
     keywords["isampler1D"] = TokenType::KW_ISAMPLER1D;
     keywords["isampler2D"] = TokenType::KW_ISAMPLER2D;
     keywords["isampler3D"] = TokenType::KW_ISAMPLER3D;

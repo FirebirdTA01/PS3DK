@@ -51,6 +51,8 @@ private:
     ParserConfig config;
     std::vector<ParseError> errors;
     bool panicMode = false;
+    // Set once the error cap is reached; error() then unwinds to parse().
+    bool abandoned = false;
 
     // Known type names (built-in + user-defined structs/typedefs)
     std::unordered_set<std::string> typeNames;
