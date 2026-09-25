@@ -5,118 +5,176 @@ archive_name: pngdec
 exports:
 - name: cellPngDecClose
   nid: '0x5b3d1ff1'
+  aliases:
+    - pngDecClose
   signature: ''
   notes: extracted from _cellPngDec_0001_9.o
 - name: cellPngDecCreate
   nid: '0x157d30c5'
+  aliases:
+    - pngDecCreate
   signature: ''
   notes: extracted from _cellPngDec_0001_2.o
 - name: cellPngDecDecodeData
   nid: '0x2310f155'
+  aliases:
+    - pngDecDecodeData
   signature: ''
   notes: extracted from _cellPngDec_0001_3.o
 - name: cellPngDecDestroy
   nid: '0x820dae1a'
+  aliases:
+    - pngDecDestroy
   signature: ''
   notes: extracted from _cellPngDec_0001_14.o
 - name: cellPngDecExtCreate
   nid: '0x48436b2d'
+  aliases:
+    - pngDecExtCreate
   signature: ''
   notes: extracted from _cellPngDec_0001_8.o
 - name: cellPngDecExtDecodeData
   nid: '0x726fc1d0'
+  aliases:
+    - pngDecExtDecodeData
   signature: ''
   notes: extracted from _cellPngDec_0001_11.o
 - name: cellPngDecExtOpen
   nid: '0x0c515302'
+  aliases:
+    - pngDecExtOpen
   signature: ''
   notes: extracted from _cellPngDec_0001_1.o
 - name: cellPngDecExtReadHeader
   nid: '0x8b33f863'
+  aliases:
+    - pngDecExtReadHeader
   signature: ''
   notes: extracted from _cellPngDec_0001_15.o
 - name: cellPngDecExtSetParameter
   nid: '0x9e9d7d42'
+  aliases:
+    - pngDecExtSetParameter
   signature: ''
   notes: extracted from _cellPngDec_0001_17.o
 - name: cellPngDecGetPLTE
   nid: '0xe163977f'
+  aliases:
+    - pngDecGetPLTE
   signature: ''
   notes: extracted from _cellPngDec_0001_26.o
 - name: cellPngDecGetTextChunk
   nid: '0xb40ca175'
+  aliases:
+    - pngDecGetTextChunk
   signature: ''
   notes: extracted from _cellPngDec_0001_20.o
 - name: cellPngDecGetUnknownChunks
   nid: '0x609ec7d5'
+  aliases:
+    - pngDecUnknownChunks
   signature: ''
   notes: extracted from _cellPngDec_0001_10.o
 - name: cellPngDecGetbKGD
   nid: '0x7585a275'
+  aliases:
+    - pngDecGetbKGD
   signature: ''
   notes: extracted from _cellPngDec_0001_12.o
 - name: cellPngDecGetcHRM
   nid: '0x7a062d26'
+  aliases:
+    - pngDecGetcHRM
   signature: ''
   notes: extracted from _cellPngDec_0001_13.o
 - name: cellPngDecGetgAMA
   nid: '0xb153629c'
+  aliases:
+    - pngDecGetgAMA
   signature: ''
   notes: extracted from _cellPngDec_0001_19.o
 - name: cellPngDecGethIST
   nid: '0xb905ebb7'
+  aliases:
+    - pngDecGethIST
   signature: ''
   notes: extracted from _cellPngDec_0001_22.o
 - name: cellPngDecGetiCCP
   nid: '0xf44b6c30'
+  aliases:
+    - pngDecGetiCCP
   signature: ''
   notes: extracted from _cellPngDec_0001_29.o
 - name: cellPngDecGetoFFs
   nid: '0x27c921b5'
+  aliases:
+    - pngDecGetoFFs
   signature: ''
   notes: extracted from _cellPngDec_0001_4.o
 - name: cellPngDecGetpCAL
   nid: '0xb4fe75e1'
+  aliases:
+    - pngDecGetpCAL
   signature: ''
   notes: extracted from _cellPngDec_0001_21.o
 - name: cellPngDecGetpHYs
   nid: '0x3d50016a'
+  aliases:
+    - pngDecGetpHYs
   signature: ''
   notes: extracted from _cellPngDec_0001_7.o
 - name: cellPngDecGetsBIT
   nid: '0x30cb334a'
+  aliases:
+    - pngDecGetsBIT
   signature: ''
   notes: extracted from _cellPngDec_0001_5.o
 - name: cellPngDecGetsCAL
   nid: '0xc41e1198'
+  aliases:
+    - pngDecGetsCAL
   signature: ''
   notes: extracted from _cellPngDec_0001_24.o
 - name: cellPngDecGetsPLT
   nid: '0xa5cdf57e'
+  aliases:
+    - pngDecGetsPLT
   signature: ''
   notes: extracted from _cellPngDec_0001_18.o
 - name: cellPngDecGetsRGB
   nid: '0xe4416e82'
+  aliases:
+    - pngDecGetsRGB
   signature: ''
   notes: extracted from _cellPngDec_0001_27.o
 - name: cellPngDecGettIME
   nid: '0x35a6846c'
+  aliases:
+    - pngDecGettIME
   signature: ''
   notes: extracted from _cellPngDec_0001_6.o
 - name: cellPngDecGettRNS
   nid: '0xb96fb26e'
+  aliases:
+    - pngDecGettRNS
   signature: ''
   notes: extracted from _cellPngDec_0001_23.o
 - name: cellPngDecOpen
   nid: '0xd2bc5bfd'
+  aliases:
+    - pngDecOpen
   signature: ''
   notes: extracted from _cellPngDec_0001_25.o
 - name: cellPngDecReadHeader
   nid: '0x9ccdcc95'
+  aliases:
+    - pngDecReadHeader
   signature: ''
   notes: extracted from _cellPngDec_0001_16.o
 - name: cellPngDecSetParameter
   nid: '0xe97c9bd4'
+  aliases:
+    - pngDecSetParameter
   signature: ''
   notes: extracted from _cellPngDec_0001_28.o
 imports: []

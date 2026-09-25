@@ -302,6 +302,12 @@ for yaml in "${STUB_YAMLS[@]}"; do
             fontft_revision.o fontft_legacy.o
         # Earlier releases named this archive libcellFontFT_stub.a.
         ln -sf libfontFT_stub.a "$install_dir/libcellFontFT_stub.a"
+    elif [[ "$name" == "libjpgdec_stub" ]]; then
+        install_with_legacy libjpgdec_stub libjpgdec libjpgdec_legacy \
+            jpgdec_legacy.o
+    elif [[ "$name" == "libpngdec_stub" ]]; then
+        install_with_legacy libpngdec_stub libpngdec libpngdec_legacy \
+            pngdec_legacy.o
     elif [[ "$name" == "libusbd_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libusb_legacy"
         say "building legacy-name wrappers (libusb_legacy, $abi)"

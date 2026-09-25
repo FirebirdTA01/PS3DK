@@ -126,7 +126,6 @@ ppu_stub  ppu/lib/libgifdec_stub.a
 ppu_stub  ppu/lib/libhttp_stub.a
 ppu_stub  ppu/lib/libhttp_util_stub.a
 ppu_stub  ppu/lib/libio_stub.a
-ppu_stub  ppu/lib/libjpgdec.a
 ppu_stub  ppu/lib/libjpgdec_stub.a
 ppu_stub  ppu/lib/libjpgenc_stub.a
 ppu_stub  ppu/lib/libl10n_stub.a
@@ -252,6 +251,8 @@ alias     ppu/lib/libfont.a                libfont_stub.a
 alias     ppu/lib/libcellFont_stub.a       libfont_stub.a
 alias     ppu/lib/libfontFT.a              libfontFT_stub.a
 alias     ppu/lib/libcellFontFT_stub.a     libfontFT_stub.a
+alias     ppu/lib/libjpgdec.a              libjpgdec_stub.a
+alias     ppu/lib/libpngdec.a              libpngdec_stub.a
 alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
 alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
@@ -274,6 +275,8 @@ alias     ppu/lib/lp64/libfont.a           libfont_stub.a
 alias     ppu/lib/lp64/libcellFont_stub.a  libfont_stub.a
 alias     ppu/lib/lp64/libfontFT.a         libfontFT_stub.a
 alias     ppu/lib/lp64/libcellFontFT_stub.a libfontFT_stub.a
+alias     ppu/lib/lp64/libjpgdec.a         libjpgdec_stub.a
+alias     ppu/lib/lp64/libpngdec.a         libpngdec_stub.a
 
 # --- Shipped but not required ----------------------------------------------
 # The two-sided check requires every shipped archive to be either promised above
@@ -291,7 +294,6 @@ optional  ppu/lib/libcellGameExec_stub.a         shipped-for-user-code
 optional  ppu/lib/libcgbLevelC.a                 shipped-for-user-code
 optional  ppu/lib/libgem_stub.a                  shipped-for-user-code
 optional  ppu/lib/libmixer.a                     shipped-for-user-code
-optional  ppu/lib/libpngdec.a                    shipped-for-user-code
 optional  ppu/lib/libspumarsjq.a                 shipped-for-user-code
 optional  ppu/lib/libsysutil_avconf_ext_stub.a   shipped-for-user-code
 optional  ppu/lib/libsysutil_bgdl_stub.a         shipped-for-user-code

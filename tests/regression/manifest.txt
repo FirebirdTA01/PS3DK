@@ -30,3 +30,6 @@ cxx-eh-lp64,tests/regression/cxx-eh/cxx-eh-lp64.fake.self,90,RAN-CLEAN,CXX_EH_OK
 # libstdc++ wide-character behaviour in both ABIs.
 abi-types-ilp32,tests/regression/abi-types/abi-types-ilp32.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
 abi-types-lp64,tests/regression/abi-types/abi-types-lp64.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
+# legacy-image-dec guards PSL1GHT legacy image loaders (jpgLoadFromFile,
+# jpgLoadFromBuffer, pngLoadFromFile, pngLoadFromBuffer).
+legacy-image-dec,tests/regression/legacy-image-dec/legacy-image-dec.fake.self,25,RAN-CLEAN,LEGACY_IMAGE_DEC_OK,LEGACY_IMAGE_DEC_FAIL
