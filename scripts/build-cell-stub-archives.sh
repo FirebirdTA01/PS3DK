@@ -204,6 +204,10 @@ for yaml in "${STUB_YAMLS[@]}"; do
     mkdir -p "$out_dir"
 
     say "building $name ($abi)"
+    # Start from an empty directory: an archive left by an earlier build
+    # under a different name (archive_name changed) would make the glob
+    # below find two.
+    rm -rf "${out_subdir:?}/$name"
     "$NIDGEN_BIN" archive \
         --input "$yaml" \
         --toolchain-bin "$PS3DEV/ppu/bin" \
@@ -216,7 +220,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     produced=( "$out_subdir/$name"/lib*_stub.a )
     shopt -u nullglob
     [[ ${#produced[@]} -eq 1 ]] \
-        || die "expected exactly one archive in $out_dir, got ${#produced[@]}"
+        || die "expected exactly one archive in $out_subdir/$name, got ${#produced[@]}"
 
     # libgcm_sys_stub.a: installed under the canonical reference-SDK
     # name libgcm_sys_stub.a, with a libgcm_sys.a symlink aliasing back
