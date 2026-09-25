@@ -20,6 +20,13 @@ typedef struct CellFontLibraryConfigFT {
 	CellFontMemoryInterface MemoryIF;
 } CellFontLibraryConfigFT;
 
+static inline void CellFontLibraryConfigFT_initialize(
+	CellFontLibraryConfigFT *config)
+{
+	config->library = (void *)0;
+	CellFontMemoryInterface_initialize(&config->MemoryIF);
+}
+
 typedef CellFontRendererConfig CellFontRendererConfigFT;
 
 int cellFontInitLibraryFreeTypeWithRevision(

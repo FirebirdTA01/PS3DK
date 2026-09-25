@@ -106,6 +106,7 @@ ppu_stub  ppu/lib/libatrac3plus_stub.a
 ppu_stub  ppu/lib/libaudio_stub.a
 ppu_stub  ppu/lib/libc_stub.a
 ppu_stub  ppu/lib/libcamera_stub.a
+ppu_stub  ppu/lib/libfontFT_stub.a
 ppu_stub  ppu/lib/libfont_stub.a
 ppu_stub  ppu/lib/libcellGame_stub.a
 ppu_stub  ppu/lib/libcellKey2char_stub.a
@@ -286,7 +287,6 @@ alias     ppu/lib/lp64/libcellFontFT_stub.a libfontFT_stub.a
 # ppu_stub the moment a link failure or an ld map shows it is actually needed.
 
 optional  ppu/lib/libPSGLFX.a                    shipped-for-user-code
-optional  ppu/lib/libfontFT_stub.a               shipped-for-user-code
 optional  ppu/lib/libcellGameExec_stub.a         shipped-for-user-code
 optional  ppu/lib/libcgbLevelC.a                 shipped-for-user-code
 optional  ppu/lib/libgem_stub.a                  shipped-for-user-code
