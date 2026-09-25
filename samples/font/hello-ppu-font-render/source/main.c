@@ -430,6 +430,48 @@ static int write_bmp(const display_buffer *src)
     return ok;
 }
 
+/* Presents the buffers for SHOW_FRAMES frames (START ends early).
+ * Returns 0 as soon as a flip fails or does not complete within
+ * FLIP_TIMEOUT_US; the caller must then not touch the RSX again. */
+static int show_frames(gcmContextData *ctx, display_buffer *buffers)
+{
+    if (!do_flip(ctx, buffers[MAX_BUFFERS - 1].id) || !wait_flip()) {
+        printf("  first flip failed or timed out\n");
+        return 0;
+    }
+    int cur = 0;
+    for (int frame = 0; frame < SHOW_FRAMES; frame++) {
+        padInfo padinfo;
+        int start = 0;
+        ioPadGetInfo(&padinfo);
+        for (int i = 0; i < MAX_PADS; i++) {
+            if (padinfo.status[i]) {
+                padData paddata = {0};
+                ioPadGetData(i, &paddata);
+                start |= paddata.BTN_START;
+            }
+        }
+        if (start)
+            break;
+        if (!do_flip(ctx, buffers[cur].id) || !wait_flip()) {
+            printf("  flip failed or timed out at frame %d\n", frame);
+            return 0;
+        }
+        cur = (cur + 1) % MAX_BUFFERS;
+    }
+    return 1;
+}
+
+/* Drains the RSX and frees the display buffers.  rsxFinish waits without
+ * a bound, so this is only called once every flip has completed. */
+static void release_display(gcmContextData *ctx, display_buffer *buffers)
+{
+    gcmSetWaitFlip(ctx);
+    for (int i = 0; i < MAX_BUFFERS; i++)
+        rsxFree(buffers[i].ptr);
+    rsxFinish(ctx, 1);
+}
+
 static int fail(const char *why)
 {
     printf("  %s\nFONT_RENDER_FAIL\n", why);
@@ -453,10 +495,10 @@ int main(int argc, char **argv)
 
     font_state fs;
     memset(&fs, 0, sizeof(fs));
-    if (!font_open(&fs)) {
-        rsxFinish(ctx, 0);
+    /* Failure paths leave the RSX alone: rsxFinish waits without a bound,
+     * and process exit reclaims the context. */
+    if (!font_open(&fs))
         return fail("font set-up failed");
-    }
 
     int ok = psl1ght_check_font(&fs.font, fs.lib, &fs.renderer);
 
@@ -524,43 +566,24 @@ int main(int argc, char **argv)
             return fail("display buffer set-up failed");
         composite(&buffers[i], cov);
     }
-    int shown = do_flip(ctx, MAX_BUFFERS - 1) && wait_flip();
-    if (!shown)
-        printf("  first flip failed or timed out\n");
-
-    /* Optional artifact: it does not affect the verdict. */
+    /* Optional artifact: it does not affect the verdict.  Written before
+     * presentation, from the composited buffer contents. */
     if (write_bmp(&buffers[0]))
         printf("  BMP artifact written: %s\n", BMP_PATH);
     else
         printf("  BMP artifact NOT written (optional): %s\n", BMP_PATH);
 
     printf("  showing for %d frames (START exits early)\n", SHOW_FRAMES);
-    int cur = 0;
-    for (int frame = 0; shown && frame < SHOW_FRAMES; frame++) {
-        padInfo padinfo;
-        int start = 0;
-        ioPadGetInfo(&padinfo);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (padinfo.status[i]) {
-                padData paddata = {0};
-                ioPadGetData(i, &paddata);
-                start |= paddata.BTN_START;
-            }
-        }
-        if (start)
-            break;
-        if (!do_flip(ctx, buffers[cur].id) || !wait_flip()) {
-            printf("  flip failed or timed out at frame %d\n", frame);
-            shown = 0;
-        }
-        cur = (cur + 1) % MAX_BUFFERS;
+    if (!show_frames(ctx, buffers)) {
+        /* A flip failed or timed out, so the RSX may still hold the
+         * buffers and a drain would block without bound.  Leave the RSX
+         * state alone and let process exit reclaim it. */
+        font_close(&fs);
+        free(cov);
+        return fail("presentation failed; GPU teardown skipped");
     }
-    if (!shown)
-        ok = 0;
 
-    gcmSetWaitFlip(ctx);
-    for (int i = 0; i < MAX_BUFFERS; i++) rsxFree(buffers[i].ptr);
-    rsxFinish(ctx, 1);
+    release_display(ctx, buffers);
     ioPadEnd();
     font_close(&fs);
     free(cov);
