@@ -193,6 +193,10 @@ jobs:
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh
 
+      # Skips without PS3DEV; runs against the installed SDK headers.
+      - name: Test the SDK stdarg.h wrapper forwards on every inclusion
+        run: bash tests/sdk/stdarg-reentry-test.sh
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.
