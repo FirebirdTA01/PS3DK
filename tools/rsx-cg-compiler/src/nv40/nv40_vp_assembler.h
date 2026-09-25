@@ -16,6 +16,7 @@
  * need them.
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 

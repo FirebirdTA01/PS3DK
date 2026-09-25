@@ -21,6 +21,7 @@
  * on hw[3] for any varying-input read is one notable difference.
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
