@@ -492,6 +492,9 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
 
         PS3TC_TRACE("SetFP fp_control=0x%08x (low=0x%x num_regs=%u)\n",
                     (unsigned)fpcontrol, (unsigned)low, (unsigned)num_regs);
+        /* Read only by the trace, which compiles to nothing by default. */
+        (void)low;
+        (void)num_regs;
 
         uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
         if (!w) return;

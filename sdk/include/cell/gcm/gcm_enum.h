@@ -135,8 +135,6 @@ extern "C" {
 #define CELL_GCM_TILE_LOCAL_ALIGN_HEIGHT           GCM_TILE_LOCAL_ALIGN_HEIGHT
 #define CELL_GCM_TILE_MAIN_ALIGN_HEIGHT            GCM_TILE_MAIN_ALIGN_HEIGHT
 #define CELL_GCM_ZCULL_ALIGN_OFFSET                GCM_ZCULL_ALIGN_OFFSET
-#define CELL_GCM_ZCULL_Z16                         GCM_ZCULL_Z16
-#define CELL_GCM_ZCULL_Z24S8                       2
 #define CELL_GCM_TEXTURE_SWIZZLED_CUBEMAP_FACE_ALIGN_OFFSET \
     GCM_TEXTURE_SWIZZLED_CUBEMAP_FACE_ALIGN_OFFSET
 
@@ -229,6 +227,7 @@ extern "C" {
 
 /* Z-cull (early-depth) configuration.  The handle_systemmenu the reference SDK
  * sample binds these via cellGcmBindZcull. */
+#define CELL_GCM_ZCULL_Z16               GCM_ZCULL_Z16
 #define CELL_GCM_ZCULL_Z24S8             GCM_ZCULL_Z24S8
 #define CELL_GCM_ZCULL_LESS              GCM_ZCULL_LESS
 #define CELL_GCM_ZCULL_LONES             GCM_ZCULL_LONES
