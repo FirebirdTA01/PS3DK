@@ -1,28 +1,21 @@
 /*! \file sys/synchronization.h
  \brief Sony-SDK-source-compat synchronisation primitives.
 
-  First cut: covers the event-flag surface needed to port Sony's
-  reference samples that include <sys/synchronization.h> and use
-  sys_event_flag_create / wait / set / clear / destroy / get / cancel /
-  trywait / attribute_initialize.
-
-  Mutex / cond / sem / lwmutex / lwcond bits are intentionally NOT
-  re-exported here yet — Sony's source uses them under sys_mutex_*,
-  sys_cond_*, sys_sem_* names while PSL1GHT exposes them as
-  sysMutex* / sysCond* / sysSem* under <sys/mutex.h> / <sys/cond.h> /
-  <sys/sem.h>.  Wrappers can be added here as the next sample needs
-  them.
-
-  Syscall numbers verified against the PS3 firmware syscall table:
-    SYS_EVENT_FLAG_CREATE     82
-    SYS_EVENT_FLAG_DESTROY    83
-    SYS_EVENT_FLAG_WAIT       85
-    SYS_EVENT_FLAG_TRYWAIT    86
-    SYS_EVENT_FLAG_SET        87
-    SYS_EVENT_FLAG_CLEAR     118
-    SYS_EVENT_FLAG_CANCEL    132
-    SYS_EVENT_FLAG_GET       139
-*/
+ * Covers event flags, mutexes, condition variables, lightweight mutexes
+ * (sys_lwmutex), and lightweight condition variables (sys_lwcond) under
+ * their canonical names, matching the liblv2_stub.a exports,
+ * while preserving PSL1GHT compatibility aliases.
+ *
+ * Syscall numbers verified against the PS3 firmware syscall table:
+ *   SYS_EVENT_FLAG_CREATE     82
+ *   SYS_EVENT_FLAG_DESTROY    83
+ *   SYS_EVENT_FLAG_WAIT       85
+ *   SYS_EVENT_FLAG_TRYWAIT    86
+ *   SYS_EVENT_FLAG_SET        87
+ *   SYS_EVENT_FLAG_CLEAR     118
+ *   SYS_EVENT_FLAG_CANCEL    132
+ *   SYS_EVENT_FLAG_GET       139
+ */
 
 #ifndef __PSL1GHT_SYS_SYNCHRONIZATION_H__
 #define __PSL1GHT_SYS_SYNCHRONIZATION_H__
@@ -39,8 +32,9 @@
 #define EBUSY (-2147418102) /* 0x8001000A, lv2 CELL_EBUSY */
 #include <sys/lv2_syscall.h>
 #include <sys/return_code.h>
-#include <sys/mutex.h>    /* PSL1GHT: sys_mutex_t type + syscalls (100-104) */
-#include <sys/cond.h>     /* PSL1GHT: sys_cond_t type + syscalls (105-109)  */
+#include <sys/sys_types.h>
+#include <sys/mutex.h>
+#include <sys/cond.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -86,6 +80,8 @@ typedef u32 sys_process_shared_t;
 typedef u32 sys_recursive_t;
 typedef u32 sys_adaptive_t;
 typedef u64 sys_ipc_key_t;
+typedef u32 _sys_sleep_queue_t;
+typedef u32 _sys_lwcond_queue_t;
 
 typedef u32 sys_event_flag_t;
 
@@ -285,6 +281,167 @@ LV2_SYSCALL sys_cond_signal_all(sys_cond_t cond)
 {
 	lv2syscall1(109, cond);
 	return_to_user_prog(s32);
+}
+
+/* ------------------------------------------------------------------ *
+ * Lightweight Mutex (sys_lwmutex) and Condition Variable (sys_lwcond)
+ * ------------------------------------------------------------------ */
+
+#define SYS_LWMUTEX_ATTR_PROTOCOL		0x0002
+#define SYS_LWMUTEX_ATTR_RECURSIVE		0x0010
+
+#define SYS_LWMUTEX_PROTOCOL_FIFO		1
+#define SYS_LWMUTEX_PROTOCOL_PRIO		2
+#define SYS_LWMUTEX_PROTOCOL_PRIO_INHERIT	3
+
+#define SYS_LWMUTEX_ATTR_NOT_RECURSIVE		0x0020
+
+typedef struct sys_lwmutex_lock_info {
+	uint32_t owner;
+	uint32_t waiter;
+} sys_lwmutex_lock_info_t;
+
+typedef union sys_lwmutex_variable {
+	sys_lwmutex_lock_info_t info;
+	uint64_t all_info;
+} sys_lwmutex_variable_t;
+
+typedef struct sys_lwmutex {
+	sys_lwmutex_variable_t lock_var;
+	uint32_t               attribute;
+	uint32_t               recursive_count;
+	uint32_t               sleep_queue;
+	union {
+		uint32_t pad;
+		uint32_t _pad;
+	};
+} sys_lwmutex_t;
+
+typedef struct lwmutex_attr {
+	sys_protocol_t   attr_protocol;
+	sys_recursive_t  attr_recursive;
+	char             name[SYS_SYNC_NAME_SIZE];
+} sys_lwmutex_attribute_t;
+
+typedef struct lwmutex_attr sys_lwmutex_attribute;
+typedef struct lwmutex_attr sys_lwmutex_attr_t;
+
+typedef struct sys_lwcond {
+	sys_lwmutex_t       *lwmutex;
+	_sys_lwcond_queue_t  lwcond_queue;
+} sys_lwcond_t;
+
+typedef struct sys_lwcond_attribute {
+	char name[SYS_SYNC_NAME_SIZE];
+} sys_lwcond_attribute_t;
+
+typedef struct sys_lwcond_attribute sys_lwcond_attribute;
+typedef struct sys_lwcond_attribute sys_lwcond_attr_t;
+
+#define sys_lwmutex_attribute_initialize(_a)                    \
+	do {                                                    \
+		(_a).attr_protocol  = SYS_SYNC_PRIORITY;        \
+		(_a).attr_recursive = SYS_SYNC_NOT_RECURSIVE;   \
+		(_a).name[0]        = '\0';                     \
+	} while (0)
+
+#define sys_lwmutex_attr_initialize sys_lwmutex_attribute_initialize
+
+static inline void sys_lwmutex_attribute_name_set(char *attr_name, const char *name)
+{
+	int _i = 0;
+	if (name != NULL) {
+		for (_i = 0; _i < SYS_SYNC_NAME_SIZE - 1 && name[_i] != '\0'; _i++)
+			attr_name[_i] = name[_i];
+	}
+	attr_name[_i] = '\0';
+}
+
+int sys_lwmutex_create(sys_lwmutex_t *mutex_id, sys_lwmutex_attribute_t *attr);
+int sys_lwmutex_destroy(sys_lwmutex_t *lwmutex_id);
+int sys_lwmutex_lock(sys_lwmutex_t *lwmutex_id, usecond_t timeout);
+int sys_lwmutex_trylock(sys_lwmutex_t *lwmutex_id);
+int sys_lwmutex_unlock(sys_lwmutex_t *lwmutex_id);
+
+#define sys_lwcond_attribute_initialize(_a)                     \
+	do {                                                    \
+		(_a).name[0] = '\0';                            \
+	} while (0)
+
+#define sys_lwcond_attr_initialize sys_lwcond_attribute_initialize
+
+static inline void sys_lwcond_attribute_name_set(char *attr_name, const char *name)
+{
+	int _i = 0;
+	if (name != NULL) {
+		for (_i = 0; _i < SYS_SYNC_NAME_SIZE - 1 && name[_i] != '\0'; _i++)
+			attr_name[_i] = name[_i];
+	}
+	attr_name[_i] = '\0';
+}
+
+int sys_lwcond_create(sys_lwcond_t *lwcond, sys_lwmutex_t *lwmutex,
+                      sys_lwcond_attribute_t *attr);
+int sys_lwcond_destroy(sys_lwcond_t *lwcond);
+int sys_lwcond_wait(sys_lwcond_t *lwcond, usecond_t timeout);
+int sys_lwcond_signal(sys_lwcond_t *lwcond);
+int sys_lwcond_signal_all(sys_lwcond_t *lwcond);
+int sys_lwcond_signal_to(sys_lwcond_t *lwcond, sys_ppu_thread_t thr);
+
+/* PSL1GHT camelCase compatibility forwarders */
+static inline s32 sysLwMutexCreate(sys_lwmutex_t *mutex, const sys_lwmutex_attr_t *attr)
+{
+	return (s32)sys_lwmutex_create(mutex, (sys_lwmutex_attribute_t *)attr);
+}
+
+static inline s32 sysLwMutexDestroy(sys_lwmutex_t *mutex)
+{
+	return (s32)sys_lwmutex_destroy(mutex);
+}
+
+static inline s32 sysLwMutexLock(sys_lwmutex_t *mutex, u64 timeout)
+{
+	return (s32)sys_lwmutex_lock(mutex, (usecond_t)timeout);
+}
+
+static inline s32 sysLwMutexTryLock(sys_lwmutex_t *mutex)
+{
+	return (s32)sys_lwmutex_trylock(mutex);
+}
+
+static inline s32 sysLwMutexUnlock(sys_lwmutex_t *mutex)
+{
+	return (s32)sys_lwmutex_unlock(mutex);
+}
+
+static inline s32 sysLwCondCreate(sys_lwcond_t *cond, sys_lwmutex_t *mutex, const sys_lwcond_attr_t *attr)
+{
+	return (s32)sys_lwcond_create(cond, mutex, (sys_lwcond_attribute_t *)attr);
+}
+
+static inline s32 sysLwCondDestroy(sys_lwcond_t *cond)
+{
+	return (s32)sys_lwcond_destroy(cond);
+}
+
+static inline s32 sysLwCondWait(sys_lwcond_t *cond, u64 timeout)
+{
+	return (s32)sys_lwcond_wait(cond, (usecond_t)timeout);
+}
+
+static inline s32 sysLwCondSignal(sys_lwcond_t *cond)
+{
+	return (s32)sys_lwcond_signal(cond);
+}
+
+static inline s32 sysLwCondSignalAll(sys_lwcond_t *cond)
+{
+	return (s32)sys_lwcond_signal_all(cond);
+}
+
+static inline s32 sysLwCondSignalTo(sys_lwcond_t *cond, sys_ppu_thread_t thr)
+{
+	return (s32)sys_lwcond_signal_to(cond, thr);
 }
 
 #ifdef __cplusplus
