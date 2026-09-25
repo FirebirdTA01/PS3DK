@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -1899,8 +1900,13 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         if (!std::holds_alternative<std::vector<float>>(c->value)) continue;
         const auto& comps = std::get<std::vector<float>>(c->value);
         if (comps.empty() || comps.size() > 4) continue;
+        // Explicit memcpy rather than a partial copy loop into the zeroed
+        // array: the same shape clang 18 miscompiled in
+        // FpAssembler::setUniformConstBlock (the copy dropped, only the tail
+        // memset kept).  This instance measured correct, but only by luck of
+        // how the optimizer saw it.
         LiteralVec4 lv;
-        for (size_t i = 0; i < comps.size(); ++i) lv.vals[i] = comps[i];
+        std::memcpy(lv.vals, comps.data(), comps.size() * sizeof(float));
         valueToLiteralVec4[kv.first] = lv;
     }
 

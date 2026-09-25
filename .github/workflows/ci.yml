@@ -80,6 +80,22 @@ jobs:
       - name: Validate rsx-cg-compiler --version
         run: tools/rsx-cg-compiler/build/rsx-cg-compiler --version
 
+      # A second rsx-cg-compiler on a DIFFERENT compiler and standard library
+      # (clang + libc++).  Output that depends on unordered_* iteration order,
+      # on undefined behaviour, or on a compiler's miscompile shows up as a
+      # container difference against the gcc/libstdc++ build above.  Two
+      # libstdc++ builds would agree with each other with the defect present.
+      - name: Build rsx-cg-compiler (clang + libc++)
+        run: |
+          sudo apt-get install -y --no-install-recommends clang libc++-dev libc++abi-dev
+          cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build-libcxx \
+              -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ \
+              -DCMAKE_CXX_FLAGS=-stdlib=libc++ -DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++
+          cmake --build tools/rsx-cg-compiler/build-libcxx --target rsx-cg-compiler
+
+      - name: Test rsx-cg-compiler output is independent of the C++ toolchain
+        run: bash tests/shader-compiler/cross-stl-determinism-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler tools/rsx-cg-compiler/build-libcxx/rsx-cg-compiler
+
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
 
