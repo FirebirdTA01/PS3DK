@@ -262,7 +262,10 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         for alias in &e.aliases {
             writeln!(out, "\t.section \".opd\",\"aw\"").ok();
             writeln!(out, "\t.align 2").ok();
-            writeln!(out, "\t.globl {}", alias).ok();
+            // Only explicitly opted-in compatibility aliases are overridable.
+            // The descriptor still targets the canonical import trampoline.
+            let binding = if e.weak_aliases.contains(alias) { "weak" } else { "globl" };
+            writeln!(out, "\t.{} {}", binding, alias).ok();
             writeln!(out, "{}:", alias).ok();
             writeln!(out, "\t.long {}, .TOC.", tramp_sym).ok();
             writeln!(out, "\t.previous").ok();
@@ -280,6 +283,45 @@ mod tests {
     use super::*;
     use crate::db::{Export, Library};
 
+    #[test]
+    fn weak_aliases_are_opt_in_and_keep_the_canonical_trampoline() {
+        let lib: Library = serde_yaml::from_str(r#"
+library: test
+module: test
+exports:
+  - name: canonical
+    nid: 1
+    aliases: [legacyWeak, legacyStrong]
+    weak_aliases: [legacyWeak]
+"#).unwrap();
+        for abi in [AbiMode::Ilp32, AbiMode::Lp64] {
+            let s = render_library(&lib, abi);
+            assert!(s.contains("\t.weak legacyWeak\nlegacyWeak:\n\t.long __canonical, .TOC."));
+            assert!(s.contains("\t.globl legacyStrong\nlegacyStrong:\n\t.long __canonical, .TOC."));
+            assert!(s.contains("\t.globl canonical\ncanonical:\n\t.long __canonical, .TOC."));
+            assert!(!s.contains("\t.globl legacyWeak\n"));
+        }
+    }
+
+    #[test]
+    fn audio_only_opts_in_the_two_sample_owned_names() {
+        let lib: Library = serde_yaml::from_str(include_str!(
+            "../nids/extracted/libaudio_stub.yaml")).unwrap();
+        let weak: Vec<&str> = lib.exports.iter()
+            .flat_map(|e| e.weak_aliases.iter().map(String::as_str)).collect();
+        assert_eq!(weak, ["audioInit", "audioQuit"]);
+        for abi in [AbiMode::Ilp32, AbiMode::Lp64] {
+            let s = render_library(&lib, abi);
+            for export in &lib.exports {
+                assert!(s.contains(&format!("\t.globl {}\n", export.name)));
+                for alias in &export.aliases {
+                    let binding = if weak.contains(&alias.as_str()) { "weak" } else { "globl" };
+                    assert!(s.contains(&format!("\t.{binding} {alias}\n")));
+                }
+            }
+        }
+    }
+
     fn sample() -> Library {
         Library {
             library: "cellPad".into(),
@@ -296,6 +338,7 @@ mod tests {
                     ordinal: None,
                     notes: None,
                     aliases: vec!["padInit".into()],
+                    weak_aliases: vec![],
                     impl_status: crate::db::ImplStatus::Unknown,
                 },
                 Export {
@@ -307,6 +350,7 @@ mod tests {
                     ordinal: None,
                     notes: None,
                     aliases: vec![],
+                    weak_aliases: vec![],
                     impl_status: crate::db::ImplStatus::Unknown,
                 },
             ],

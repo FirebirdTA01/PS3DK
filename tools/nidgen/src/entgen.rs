@@ -107,6 +107,7 @@ mod tests {
             ordinal: None,
             notes: None,
             aliases: Vec::new(),
+            weak_aliases: Vec::new(),
             impl_status: Default::default(),
         }
     }

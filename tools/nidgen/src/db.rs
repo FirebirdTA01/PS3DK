@@ -86,6 +86,12 @@ pub struct Export {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
 
+    /// Compatibility aliases that may be overridden by application symbols.
+    /// Exceptional, explicit policy: canonical exports always remain strong.
+    /// Every entry must also occur in this export's aliases.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub weak_aliases: Vec<String>,
+
     /// Implementation status of this symbol in our SDK.  Hand-curated: the
     /// extractor writes `unknown` for everything, then gets bumped as
     /// libraries land.  Read by coverage-report to produce the
@@ -157,6 +163,13 @@ pub fn load_library(path: &Path) -> Result<Library> {
         .with_context(|| format!("reading {}", path.display()))?;
     let lib: Library = serde_yaml::from_str(&text)
         .with_context(|| format!("parsing {}", path.display()))?;
+    for e in lib.exports.iter().chain(lib.imports.iter()) {
+        for alias in &e.weak_aliases {
+            anyhow::ensure!(alias != &e.name && e.aliases.contains(alias),
+                "{}: weak alias {} must be a compatibility alias of {}",
+                path.display(), alias, e.name);
+        }
+    }
     Ok(lib)
 }
 
@@ -232,6 +245,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn weak_aliases_must_be_compatibility_aliases() {
+        for weak in ["missing", "canonical"] {
+            let path = std::env::temp_dir().join(format!(
+                "nidgen-weak-alias-{}-{}.yaml", std::process::id(), weak));
+            std::fs::write(&path, format!(
+                "library: test\nmodule: test\nexports:\n  - name: canonical\n    nid: 1\n    aliases: [legacy]\n    weak_aliases: [{weak}]\n")).unwrap();
+            let loaded = load_library(&path);
+            std::fs::remove_file(&path).unwrap();
+            assert!(loaded.is_err(), "accepted invalid weak alias {weak}");
+        }
+    }
+
+    #[test]
     fn roundtrip_library() {
         let lib = Library {
             library: "cellNetCtl".into(),
@@ -247,6 +273,7 @@ mod tests {
                 ordinal: None,
                 notes: None,
                 aliases: Vec::new(),
+                weak_aliases: Vec::new(),
                 impl_status: ImplStatus::Unknown,
             }],
             imports: vec![],

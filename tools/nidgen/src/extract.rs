@@ -106,6 +106,7 @@ pub fn extract_archive(archive_path: &Path) -> Result<Library> {
                 ordinal: None,
                 notes: Some(format!("extracted from {}", e.source_member)),
                 aliases: Vec::new(),
+                weak_aliases: Vec::new(),
                 impl_status: crate::db::ImplStatus::Unknown,
             }),
             None => {

@@ -51,6 +51,9 @@ exports:
   nid: '0x0b168f92'
   aliases:
     - audioInit
+  # Exception: five reference sample targets own audioInit/audioQuit locally.
+  # Keep canonical cellAudio imports strong; weak aliases are opt-in, not default.
+  weak_aliases: [audioInit]
   signature: ''
   notes: extracted from _cellAudio_0001_2.o
 - name: cellAudioMiscSetAccessoryVolume
@@ -87,6 +90,8 @@ exports:
   nid: '0xca5ac370'
   aliases:
     - audioQuit
+  # Same sample-owned-name exception as audioInit above.
+  weak_aliases: [audioQuit]
   signature: ''
   notes: extracted from _cellAudio_0001_19.o
 - name: cellAudioRemoveNotifyEventQueue
