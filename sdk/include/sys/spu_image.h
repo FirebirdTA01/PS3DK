@@ -22,6 +22,7 @@
 
 #include <stdint.h>
 #include <ppu-types.h>          /* sys_addr_t, u32, etc. */
+#include <sys/return_code.h>
 #include <sys/spu.h>            /* PSL1GHT sysSpuImage* inline syscall forwarders */
 
 #ifdef __cplusplus

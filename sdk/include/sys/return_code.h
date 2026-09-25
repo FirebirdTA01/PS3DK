@@ -25,7 +25,13 @@ extern "C" {
 #define CELL_OK 0
 #endif
 
+#ifndef SUCCEEDED
+#define SUCCEEDED 0
+#endif
+
+#ifndef EBUSY
 #define EBUSY (-2147418102) /* 0x8001000A */
+#endif
 
 typedef int32_t CellReturnCode;
 

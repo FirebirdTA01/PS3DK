@@ -8,6 +8,7 @@
 #ifndef __PS3DK_SYS_SPU_THREAD_GROUP_H__
 #define __PS3DK_SYS_SPU_THREAD_GROUP_H__
 
+#include <sys/return_code.h>
 #include <sys/spu.h>
 
 #define SYS_SPU_THREAD_GROUP_TYPE_NORMAL                              0x00

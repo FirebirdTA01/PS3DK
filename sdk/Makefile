@@ -63,6 +63,8 @@ HEADERS := \
     include/sys/return_code.h \
     include/sys/thread.h \
     include/sys/ppu_thread.h \
+    include/sys/interrupt.h \
+    include/sys/tty.h \
     include/sys/fs.h \
     include/sys/fs_external.h \
     include/sys/fsw.h \

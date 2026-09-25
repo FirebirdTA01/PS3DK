@@ -32,6 +32,7 @@
  * names stay available for libc-style use. */
 #undef EBUSY
 #define EBUSY (-2147418102) /* 0x8001000A, lv2 CELL_EBUSY */
+#include <sys/return_code.h>
 #include <sys/event_queue.h>
 #include <sys/cond.h>
 #include <sys/sem.h>

@@ -10,6 +10,7 @@
 #ifndef __PS3DK_SYS_SPU_THREAD_H__
 #define __PS3DK_SYS_SPU_THREAD_H__
 
+#include <sys/return_code.h>
 #include <sys/spu.h>
 #include <sys/spu_image.h>
 #include <sys/spu_thread_group.h>

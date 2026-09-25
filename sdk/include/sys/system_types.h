@@ -9,6 +9,7 @@
 
 #include <sys/types.h>
 #include <sys/sys_types.h>
+#include <sys/return_code.h>
 #include <ppu-types.h>
 
 #endif /* __PS3DK_SYS_SYSTEM_TYPES_H__ */

@@ -17,6 +17,7 @@
 #define PS3TC_SYS_PROCESS_H
 
 #include <sys/lv2_syscall.h>
+#include <sys/return_code.h>
 #include <ppu-types.h>
 #include <lv2/process.h>
 #include <lv2/syscalls.h>

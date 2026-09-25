@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 #include <ppu-types.h>     /* `system_time_t` already declared here */
+#include <sys/return_code.h>
 #include <sys/systime.h>
 #include <sys/sys_types.h> /* usecond_t, second_t */
 #include <sys/timer.h>

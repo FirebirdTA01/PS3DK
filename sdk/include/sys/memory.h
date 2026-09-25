@@ -17,6 +17,7 @@
 
 #include <ppu-types.h>
 #include <sys/lv2_syscall.h>
+#include <sys/return_code.h>
 
 #ifdef __cplusplus
 extern "C" {
