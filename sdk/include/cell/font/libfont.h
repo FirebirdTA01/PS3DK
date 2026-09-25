@@ -2,7 +2,7 @@
  * PS3 Custom Toolchain - cell/font/libfont.h
  *
  * cellFont library surface: font management, glyph generation,
- * rendering, and layout.  Backed by libcellFont_stub.a.
+ * rendering, and layout.  Backed by libfont_stub.a.
  */
 #ifndef _PS3DK_CELL_FONT_LIBFONT_H_
 #define _PS3DK_CELL_FONT_LIBFONT_H_

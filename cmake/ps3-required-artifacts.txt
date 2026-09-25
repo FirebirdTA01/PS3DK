@@ -106,7 +106,7 @@ ppu_stub  ppu/lib/libatrac3plus_stub.a
 ppu_stub  ppu/lib/libaudio_stub.a
 ppu_stub  ppu/lib/libc_stub.a
 ppu_stub  ppu/lib/libcamera_stub.a
-ppu_stub  ppu/lib/libcellFont_stub.a
+ppu_stub  ppu/lib/libfont_stub.a
 ppu_stub  ppu/lib/libcellGame_stub.a
 ppu_stub  ppu/lib/libcellKey2char_stub.a
 ppu_stub  ppu/lib/libcelp8enc_stub.a
@@ -247,6 +247,10 @@ alias     ppu/lib/libhttp.a                libhttp_stub.a
 alias     ppu/lib/libresc.a                libresc_stub.a
 alias     ppu/lib/libsysfs.a               libfs_stub.a
 alias     ppu/lib/libspurs.a               libspurs_stub.a
+alias     ppu/lib/libfont.a                libfont_stub.a
+alias     ppu/lib/libcellFont_stub.a       libfont_stub.a
+alias     ppu/lib/libfontFT.a              libfontFT_stub.a
+alias     ppu/lib/libcellFontFT_stub.a     libfontFT_stub.a
 alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
 alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
@@ -265,6 +269,10 @@ alias     ppu/lib/lp64/libhttp.a           libhttp_stub.a
 alias     ppu/lib/lp64/libresc.a           libresc_stub.a
 alias     ppu/lib/lp64/libsysfs.a          libfs_stub.a
 alias     ppu/lib/lp64/libspurs.a          libspurs_stub.a
+alias     ppu/lib/lp64/libfont.a           libfont_stub.a
+alias     ppu/lib/lp64/libcellFont_stub.a  libfont_stub.a
+alias     ppu/lib/lp64/libfontFT.a         libfontFT_stub.a
+alias     ppu/lib/lp64/libcellFontFT_stub.a libfontFT_stub.a
 
 # --- Shipped but not required ----------------------------------------------
 # The two-sided check requires every shipped archive to be either promised above
@@ -278,12 +286,10 @@ alias     ppu/lib/lp64/libspurs.a          libspurs_stub.a
 # ppu_stub the moment a link failure or an ld map shows it is actually needed.
 
 optional  ppu/lib/libPSGLFX.a                    shipped-for-user-code
-optional  ppu/lib/libcellFontFT_stub.a           shipped-for-user-code
+optional  ppu/lib/libfontFT_stub.a               shipped-for-user-code
 optional  ppu/lib/libcellGameExec_stub.a         shipped-for-user-code
 optional  ppu/lib/libcgbLevelC.a                 shipped-for-user-code
 optional  ppu/lib/libgem_stub.a                  shipped-for-user-code
-optional  ppu/lib/libfont.a                      shipped-for-user-code
-optional  ppu/lib/libfontFT.a                    shipped-for-user-code
 optional  ppu/lib/libmixer.a                     shipped-for-user-code
 optional  ppu/lib/libpngdec.a                    shipped-for-user-code
 optional  ppu/lib/libspumarsjq.a                 shipped-for-user-code

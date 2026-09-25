@@ -32,6 +32,32 @@ source "$script_dir/env.sh"
 say() { printf "[stub-archives] %s\n" "$*"; }
 die() { printf "[stub-archives] ERROR: %s\n" "$*" >&2; exit 1; }
 
+# install_with_legacy <stub> <alias> <legacy dir> <object>... -- replace a
+# PSL1GHT library. The PSL1GHT names that were import trampolines are nidgen
+# aliases in the stub YAML; the ones that were C come from sdk/<legacy dir>,
+# built for this ABI and appended to the stub archive. The archive keeps the
+# canonical <stub>.a name and <alias>.a links to it.
+install_with_legacy() {
+    local stub="$1" alias="$2" legacy="$3"; shift 3
+    local legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/$legacy" obj objs=()
+    say "building legacy-name wrappers ($legacy, $abi)"
+    PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
+        PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
+        make -C "$legacy_dir" clean all >/dev/null
+    for obj in "$@"; do
+        obj="$legacy_dir/build/$obj"
+        [[ -f "$obj" ]] || die "legacy wrappers object missing after build: $obj"
+        objs+=("$obj")
+    done
+
+    local target="$install_dir/$stub.a"
+    install -m 0644 "${produced[0]}" "$target"
+    "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "${objs[@]}" 2>/dev/null
+    "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
+    ln -sf "$stub.a" "$install_dir/$alias.a"
+    say "installed $stub.a + $alias.a symlink -> $install_dir/ (replaces PSL1GHT's)"
+}
+
 [[ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-as" ]] \
     || die "PPU toolchain not installed. Run scripts/build-ppu-toolchain.sh first."
 [[ -d "$PS3DK/ppu/lib" ]] \
@@ -261,25 +287,17 @@ for yaml in "${STUB_YAMLS[@]}"; do
         install -m 0644 "${produced[0]}" "$install_dir/"
         say "installed libfiber_stub.a -> $install_dir/ (nidgen + extras)"
     elif [[ "$name" == "libspurs_stub" ]]; then
-        # PSL1GHT libspurs replacement: every PSL1GHT spurs* export is a
-        # nidgen alias (libspurs_stub.yaml); spursAttributeInitialize was C
-        # in PSL1GHT and comes from sdk/libspurs_legacy. The combined
-        # archive keeps the canonical name, with libspurs.a aliasing it.
-        legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libspurs_legacy"
-        say "building legacy-name wrappers (libspurs_legacy, $abi)"
-        PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
-            PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
-            make -C "$legacy_dir" clean all >/dev/null
-        legacy_obj="$legacy_dir/build/spurs_legacy.o"
-        [[ -f "$legacy_obj" ]] \
-            || die "legacy wrappers object missing after build: $legacy_obj"
-
-        target="$install_dir/libspurs_stub.a"
-        install -m 0644 "${produced[0]}" "$target"
-        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "$legacy_obj" 2>/dev/null
-        "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
-        ln -sf libspurs_stub.a "$install_dir/libspurs.a"
-        say "installed libspurs_stub.a + libspurs.a symlink -> $install_dir/ (replaces PSL1GHT's)"
+        install_with_legacy libspurs_stub libspurs libspurs_legacy spurs_legacy.o
+    elif [[ "$name" == "libfont_stub" ]]; then
+        install_with_legacy libfont_stub libfont libfont_legacy \
+            font_revision.o font_legacy.o
+        # Earlier releases named this archive libcellFont_stub.a.
+        ln -sf libfont_stub.a "$install_dir/libcellFont_stub.a"
+    elif [[ "$name" == "libfontFT_stub" ]]; then
+        install_with_legacy libfontFT_stub libfontFT libfontFT_legacy \
+            fontft_revision.o fontft_legacy.o
+        # Earlier releases named this archive libcellFontFT_stub.a.
+        ln -sf libfontFT_stub.a "$install_dir/libcellFontFT_stub.a"
     elif [[ "$name" == "libusbd_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libusb_legacy"
         say "building legacy-name wrappers (libusb_legacy, $abi)"
