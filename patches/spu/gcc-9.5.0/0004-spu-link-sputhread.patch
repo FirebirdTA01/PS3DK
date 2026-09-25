@@ -10,7 +10,7 @@ references between newlib and sputhread resolve.
 
 --- a/gcc/config/spu/spu-elf.h
 +++ b/gcc/config/spu/spu-elf.h
-@@ -68,7 +68,7 @@
+@@ -69,7 +69,7 @@
   %{mspurs-task: --spurs-task}\
  "
 
@@ -18,4 +18,4 @@ references between newlib and sputhread resolve.
 +#define LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -lsputhread -) \
      %{mno-atomic-updates:-lgcc_cachemgr_nonatomic; :-lgcc_cachemgr} \
      %{mcache-size=128:-lgcc_cache128k; \
-      %{mcache-size=64:-lgcc_cache64k; \
+       mcache-size=64 :-lgcc_cache64k; \
