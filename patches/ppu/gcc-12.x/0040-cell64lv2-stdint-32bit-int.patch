@@ -1,0 +1,47 @@
+cell64lv2: make the <stdint.h> 32-bit types int, as in the reference.
+
+newlib-stdint.h defines INT32_TYPE and UINT32_TYPE as "long int" and
+"long unsigned int" whenever long is 32 bits (STDINT_LONG32), and the
+least32 types follow them.  Under the ILP32 data model long is 32 bits,
+so int32_t and uint32_t were long and unsigned long.  The reference
+toolchain uses int and unsigned int.
+
+Size and alignment are the same, so C was unaffected, but the type is
+part of the C++ ABI: void h(uint32_t) mangles as _Z1hj with the
+reference compiler and as _Z1hm here, so C++ objects built against the
+reference headers do not link with ours, a uint32_t& does not bind to
+an unsigned int, and printf's %u warns for uint32_t.
+
+Override STDINT_LONG32 to 0.  The newlib-stdint.h macros are expanded
+where they are used, so the override takes effect although that header
+is included earlier in tm_file.  Under LP64, long is 64 bits and the
+32-bit types were already int.  newlib's __int32_t and its PRI*32
+macros follow __INT32_TYPE__, so they change with the compiler.  The
+64-bit, least/fast, pointer-sized and max types already match the
+reference and do not change.
+
+This changes the mangled names of C++ functions that take these types:
+C++ objects built with an earlier PS3DK must be rebuilt.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -373,6 +373,19 @@
+ #undef  LONG_TYPE_SIZE
+ #define LONG_TYPE_SIZE (TARGET_LP64 ? 64 : 32)
+ 
++/* <stdint.h> 32-bit types.  newlib-stdint.h picks "long int" for
++   int32_t/uint32_t (and the least32 types built on them) whenever long
++   is 32 bits, which it is under ILP32.  The reference toolchain uses int
++   and unsigned int, and the choice is part of the C++ ABI: a function
++   taking uint32_t mangles as ...j there and ...m with long, so C++ code
++   built against the reference headers would not link, and uint32_t&
++   would not bind to unsigned int.  Use int for the 32-bit types in both
++   data models (under LP64, long is 64 bits and newlib-stdint.h already
++   chooses int).  The macros are expanded where they are used, so this
++   override takes effect although newlib-stdint.h is included first.  */
++#undef  STDINT_LONG32
++#define STDINT_LONG32 0
++
+ /* -----------------------------------------------------------------------
+    Mcount / CRT / FP save-restore.
+    ----------------------------------------------------------------------- */
