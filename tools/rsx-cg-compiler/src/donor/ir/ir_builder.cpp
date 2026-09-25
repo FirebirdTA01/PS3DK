@@ -20,6 +20,20 @@ std::optional<float> angleConversionScale(const std::string& name)
     if (name == "degrees") return k180DivPi;
     return std::nullopt;
 }
+
+// Broadcast a one-element vector to n copies of that element.  Written as
+// v.assign(n, v[0]) this is undefined behaviour - assign's value may not be a
+// reference into the container - and the result depends on the standard
+// library: libstdc++ copies the value first, libc++ reads it after clearing
+// the storage and broadcasts garbage, which made a libc++-built compiler
+// refuse `uniform float4 c = 0.5;` (tests/shader-compiler/
+// cross-stl-determinism-test.sh).  Copy the element first.
+template <class V>
+void broadcastFirst(V& v, size_t n)
+{
+    const typename V::value_type first = v[0];
+    v.assign(n, first);
+}
 }
 
 // ============================================================================
@@ -792,7 +806,7 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
         if (!evaluateConstValue(cast->operand.get(), v, sh, module)) return false;
         shape = shapeOfType(cast->targetType.get());
         const int n = shape.laneCount();
-        if (v.size() == 1 && n > 1) v.assign(static_cast<size_t>(n), v[0]);
+        if (v.size() == 1 && n > 1) broadcastFirst(v, static_cast<size_t>(n));
         if (static_cast<int>(v.size()) != n) return false;
         for (const auto& lane : v)
         {
@@ -822,7 +836,7 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
         }
         shape = shapeOfType(ctorType);
         const int n = shape.laneCount();
-        if (flat.size() == 1 && n > 1) flat.assign(static_cast<size_t>(n), flat[0]);
+        if (flat.size() == 1 && n > 1) broadcastFirst(flat, static_cast<size_t>(n));
         // The constructed value has exactly its type's lanes: a brace list or
         // constructor with more data than the type holds is C1058 "too much
         // data" on the reference (measured, s6 in .local/probe-init) and is
@@ -948,7 +962,7 @@ bool IRBuilder::evaluateConstInitializerTyped(const ExprNode* init,
         else
         {
             if (lanes.size() == 1 && n > 1)
-                lanes.assign(static_cast<size_t>(n), lanes[0]);
+                broadcastFirst(lanes, static_cast<size_t>(n));
             if (shape.rows > 0 || shape.elems > 0) return false;   // a matrix or array is not a vector
             if (static_cast<int>(lanes.size()) > n)
                 lanes.resize(static_cast<size_t>(n));
@@ -1145,7 +1159,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 const int declared = global.type.componentCount() *
                                      (global.type.arraySize > 0 ? global.type.arraySize : 1);
                 if (declared > 1)
-                    constInit.assign(static_cast<size_t>(declared), constInit[0]);
+                    broadcastFirst(constInit, static_cast<size_t>(declared));
             }
             else if (!constInit.empty() &&
                      constInit.size() !=
@@ -1171,7 +1185,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             {
                 const int declared = global.type.componentCount();
                 if (declared > 1)
-                    constIntInit.assign(static_cast<size_t>(declared), constIntInit[0]);
+                    broadcastFirst(constIntInit, static_cast<size_t>(declared));
             }
             global.initialIntValues = constIntInit;
             global.initialValue = constInit;
@@ -3652,7 +3666,7 @@ IRValueID IRBuilder::tryFoldVecConstruct(const IRTypeInfo& resultType,
 
     if (rawComponents.size() == 1 && resultType.vectorSize > 1)
     {
-        rawComponents.assign(static_cast<size_t>(resultType.vectorSize), rawComponents[0]);
+        broadcastFirst(rawComponents, static_cast<size_t>(resultType.vectorSize));
     }
     if (rawComponents.size() != static_cast<size_t>(resultType.vectorSize))
         return InvalidIRValue;

@@ -199,8 +199,15 @@ void FpAssembler::setUniformConstBlock(uint32_t constBlockByteOffset,
 
     // Same layout appendConstBlock writes: four fp32 in the caller's
     // natural order, with the on-disk halfword swap applied at words().
+    // An explicit memcpy, NOT `for (i < count) lanes[i] = values[i]`: clang 18
+    // (-O1 and up, loop-idiom recognition) turns that loop plus the
+    // zero-initialiser into a memset of the tail and drops the copy, so the
+    // block kept whatever was on the stack - garbage defaults in every
+    // clang-built compiler.  Well-defined code; a compiler bug, reproduced
+    // standalone.  tests/shader-compiler/cross-stl-determinism-test.sh
+    // catches it (clang/libc++ build vs gcc/libstdc++ build).
     float lanes[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-    for (unsigned i = 0; i < count; ++i) lanes[i] = values[i];
+    std::memcpy(lanes, values, count * sizeof(float));
     uint32_t raw[4];
     std::memcpy(raw, lanes, 16);
     for (int i = 0; i < 4; ++i) logicalWords_[w + i] = raw[i];
