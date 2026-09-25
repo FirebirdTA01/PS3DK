@@ -120,6 +120,13 @@ extern "C" {
 int pthread_mutexattr_settype (pthread_mutexattr_t *__attr, int __kind);
 int pthread_mutexattr_gettype (const pthread_mutexattr_t *__attr, int *__kind);
 
+/* newlib hides these behind _POSIX_THREAD_PRIORITY_SCHEDULING. librt
+ * accepts only its existing SCHED_OTHER / PTHREAD_INHERIT_SCHED mode. */
+#if defined(__lv2ppu__)
+int pthread_attr_setschedpolicy (pthread_attr_t *__attr, int __policy);
+int pthread_attr_setinheritsched (pthread_attr_t *__attr, int __inherit);
+#endif
+
 /* Declared by newlib only under _POSIX_TIMEOUTS, which is off here. */
 int pthread_mutex_timedlock (pthread_mutex_t *__mutex,
                              const struct timespec *__timeout);

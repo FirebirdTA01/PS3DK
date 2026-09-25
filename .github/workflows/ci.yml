@@ -150,6 +150,12 @@ jobs:
       - name: Test librt low-level exit and finalizer registration
         run: bash tests/sdk/librt-exit-test.sh
 
+      - name: Test POSIX clocks sleep and scheduling attributes
+        run: python3 tests/sdk/posix-time-host-test.py
+
+      - name: Test POSIX time declarations and links when cross SDK is available
+        run: python3 tests/sdk/posix-time-cross-test.py
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.

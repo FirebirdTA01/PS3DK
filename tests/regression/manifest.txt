@@ -37,3 +37,5 @@ legacy-image-dec,tests/regression/legacy-image-dec/legacy-image-dec.fake.self,25
 # Real syscall loopback; DNS/recvmsg are separate host-boundary controls.
 libnet-ilp32,tests/regression/libnet/libnet-ilp32.fake.self,60,RAN-CLEAN,LIBNET_OK,LIBNET_FAIL
 libnet-lp64,tests/regression/libnet/libnet-lp64.fake.self,60,RAN-CLEAN,LIBNET_OK,LIBNET_FAIL
+posix-time-ilp32,tests/regression/posix-time/posix-time-ilp32.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
+posix-time-lp64,tests/regression/posix-time/posix-time-lp64.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
