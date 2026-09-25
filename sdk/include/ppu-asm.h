@@ -1,7 +1,9 @@
 #ifndef __PPU_ASM_H__
 #define __PPU_ASM_H__
 
+#if defined(__powerpc__) || defined(__ppc__) || defined(__PPC__)
 #include <ppu_intrinsics.h>
+#endif
 
 #define PPU_ALIGNMENT			8
 

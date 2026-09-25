@@ -23,7 +23,15 @@
 extern "C" {
 #endif
 
+/* On host glibc, <stdlib.h> declares memalign with throw() / __THROW in C++.
+ * Match glibc's throw specification when __THROW is defined on non-PowerPC host builds
+ * to avoid conflicting declaration errors during host syntax checks.
+ * For target PowerPC builds, keep the standard newlib declaration. */
+#if !defined(__powerpc__) && !defined(__ppc__) && !defined(__PPC__) && defined(__THROW)
+void *memalign(size_t, size_t) __THROW;
+#else
 void *memalign(size_t, size_t);
+#endif
 
 #ifdef __cplusplus
 }

@@ -121,7 +121,11 @@ typedef union _ieee64
 #define SPU_ALIGNMENT				128
 #define SPU_ALIGNSIZE(x)			(((x) + 127)&~127)
 
+#if defined(__GNUC__) && (defined(__powerpc__) || defined(__ppc__) || defined(__PPC__))
 #define ATTRIBUTE_PRXPTR			__attribute__((mode(SI)))
+#else
+#define ATTRIBUTE_PRXPTR
+#endif
 
 // courtesy of Marcan
 #define STACK_ALIGN(type, name, cnt, alignment)		u8 _al__##name[((sizeof(type)*(cnt)) + (alignment) + (((sizeof(type)*(cnt))%(alignment)) > 0 ? ((alignment) - ((sizeof(type)*(cnt))%(alignment))) : 0))]; \

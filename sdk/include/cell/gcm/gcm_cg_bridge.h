@@ -487,8 +487,8 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
         const uint32_t fpcontrol = ps3tc_fp_control_word(
             fp->outputFromH0, fp->depthReplace, fp->pixelKill,
             fp->registerCount);
-        const uint32_t low = fpcontrol & 0xffu;
-        const uint32_t num_regs = fpcontrol >> PS3TC_FP_CONTROL_REGS_SHIFT;
+        const uint32_t low __attribute__((unused)) = fpcontrol & 0xffu;
+        const uint32_t num_regs __attribute__((unused)) = fpcontrol >> PS3TC_FP_CONTROL_REGS_SHIFT;
 
         PS3TC_TRACE("SetFP fp_control=0x%08x (low=0x%x num_regs=%u)\n",
                     (unsigned)fpcontrol, (unsigned)low, (unsigned)num_regs);
