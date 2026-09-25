@@ -21,9 +21,12 @@ typedef uint16_t in_port_t;
 #define IPPROTO_UDP    17
 #define IPPROTO_ICMPV6 58
 
+#ifndef _STRUCT_IN_ADDR_DECLARED
+#define _STRUCT_IN_ADDR_DECLARED
 struct in_addr {
     in_addr_t s_addr;
 };
+#endif
 
 struct in6_addr {
     uint8_t s6_addr[16];

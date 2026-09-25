@@ -12,7 +12,9 @@
 #ifndef __PS3DK_SYS_SPU_EVENT_H__
 #define __PS3DK_SYS_SPU_EVENT_H__
 
+#include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {

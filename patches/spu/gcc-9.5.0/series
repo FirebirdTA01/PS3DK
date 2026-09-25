@@ -2,3 +2,4 @@
 0002-system-h-no-abort-macro-on-mingw.patch
 0003-spu-spurs-job-driver-flags.patch
 0004-spu-link-sputhread.patch
+0005-spu-vmx2spu-macro-arity.patch

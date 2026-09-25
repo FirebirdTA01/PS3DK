@@ -17,6 +17,7 @@
 #include <cell/spurs/event_flag.h>
 #include <cell/spurs/queue.h>
 #include <cell/spurs/semaphore.h>
+#include <cell/spurs/lv2_event_queue.h>
 #include <cell/spurs/exception_types.h>
 #include <cell/spurs/version.h>
 #include <cell/spurs/error.h>

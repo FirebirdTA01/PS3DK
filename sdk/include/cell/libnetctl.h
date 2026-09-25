@@ -11,6 +11,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <netinet/in.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -141,11 +142,6 @@ extern "C" {
 #define CELL_NET_CTL_HOSTNAME_LEN             256
 #define CELL_NET_CTL_IPV4_ADDR_STR_LEN        16
 
-#if !defined(__IN_H__) && !defined(__PS3DK_NETINET_IN_H__)
-struct in_addr {
-    uint32_t s_addr;
-};
-#endif
 
 struct CellNetCtlEtherAddr {
     uint8_t data[CELL_NET_CTL_ETHER_ADDR_LEN];

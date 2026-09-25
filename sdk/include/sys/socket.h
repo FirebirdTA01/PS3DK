@@ -3,7 +3,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#if defined(__has_include)
+#if __has_include(<sys/_types.h>)
 #include <sys/_types.h>
+#else
+#include <sys/types.h>
+#endif
+#else
+#include <sys/_types.h>
+#endif
 #include <ppu-types.h>
 
 #ifndef ATTRIBUTE_PRXPTR
@@ -11,7 +19,9 @@
 #endif
 
 #ifndef _SSIZE_T_DECLARED
+#if defined(__NEWLIB__) || defined(__PS3DK_SDK_SELFBUILD__)
 typedef _ssize_t ssize_t;
+#endif
 #define _SSIZE_T_DECLARED
 #endif
 

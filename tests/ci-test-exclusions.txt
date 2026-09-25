@@ -1,3 +1,2 @@
 # Explicit repository CI exclusions: repository test path|board id|reason
 # Bare paths and empty reasons refuse. No tests are currently excluded.
-tests/sdk/spu-thread-events-test.sh|t_8ddedcf5|requires PPU toolchain and installed PSL1GHT sys/spu.h

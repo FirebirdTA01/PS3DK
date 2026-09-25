@@ -36,18 +36,6 @@
 #ifndef _PS3DK_PTHREAD_WRAPPER_H
 #define _PS3DK_PTHREAD_WRAPPER_H
 
-/* <sys/_pthreadtypes.h> publishes pthread_mutex_t and friends under
- * `defined(_POSIX_THREADS) || __POSIX_VISIBLE >= 199506`, and sets its own
- * include guard either way.  A strict-ISO dialect (-std=c99, -std=c11)
- * leaves __POSIX_VISIBLE below that bar, so a <sys/types.h> that was
- * already included in such a translation unit has consumed the header
- * without defining the types, and no later include can recover them.
- * Say so plainly rather than erroring out on a hundred unknown type
- * names.  -std=gnu99 and later are unaffected. */
-#if defined(_SYS__PTHREADTYPES_H_) && !defined(_POSIX_THREADS) \
-    && defined(__POSIX_VISIBLE) && (__POSIX_VISIBLE < 199506)
-# error "PS3DK <pthread.h>: the pthread types were dropped by a strict-ISO <sys/types.h> included earlier in this file; build with -std=gnu99 (or later), or include <pthread.h> before <sys/types.h>."
-#endif
 
 #ifdef _POSIX_THREADS
 # include_next <pthread.h>

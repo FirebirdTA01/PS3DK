@@ -61,6 +61,7 @@ HEADERS := \
     include/sys/system_types.h \
     include/sys/integertypes.h \
     include/sys/types.h \
+    include/sys/_pthreadtypes.h \
     include/sys/return_code.h \
     include/sys/thread.h \
     include/sys/ppu_thread.h \

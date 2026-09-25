@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <ppu-types.h>
 #include <sys/spu_thread_group.h>
+#include <sys/process.h>
 
 #ifdef __cplusplus
 extern "C" {

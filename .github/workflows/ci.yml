@@ -146,6 +146,26 @@ jobs:
       - name: Test sys/vm.h virtual memory syscall definitions and struct layout
         run: bash tests/sdk/sys-vm-test.sh
 
+      # struct in_addr header visibility and include ordering compatibility.
+      - name: Test struct in_addr header visibility and include ordering
+        run: bash tests/sdk/in-addr-redefinition-test.sh
+
+      # pthread types visibility under strict-ISO and GNU modes.
+      - name: Test pthread types visibility across ISO and GNU language modes
+        run: bash tests/sdk/pthread-iso-types-test.sh
+
+      # SPU thread event constants and syscall signatures across ABIs.
+      - name: Test SPU thread event constants and syscall wrappers
+        run: bash tests/sdk/spu-thread-events-test.sh
+
+      # SYS_PROCESS_PARAM visibility via cell/spurs.h and sys/dbg.h.
+      - name: Test SYS_PROCESS_PARAM visibility without explicit sys/process.h
+        run: bash tests/sdk/sys-process-param-visibility-test.sh
+
+      # SPU header visibility and C++ compatibility.
+      - name: Test SPU header visibility and C++ compatibility
+        run: bash tests/sdk/spu-header-visibility-test.sh
+
       # ps3_add_self must respect OUTPUT_DIRECTORY keyword and PS3_SELF_OUTPUT_DIRECTORY
       # variable, falling back to CMAKE_CURRENT_SOURCE_DIR by default. ps3_add_pkg
       # must follow the same resolved directory.

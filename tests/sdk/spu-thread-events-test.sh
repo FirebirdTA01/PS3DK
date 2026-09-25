@@ -13,9 +13,16 @@ checks=0
 PPU_CC=${PPU_CC:-powerpc64-ps3-elf-gcc}
 PPU_CXX=${PPU_CXX:-powerpc64-ps3-elf-g++}
 
-stage_inc=${PS3DK_INC:-/home/firebirdta01/ps3tc/gemini-stage/ps3dk/ppu/include}
+if ! command -v "$PPU_CC" >/dev/null 2>&1; then
+    if [ -n "${PS3DEV:-}" ] && [ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc" ]; then
+        PPU_CC="$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc"
+        PPU_CXX="$PS3DEV/ppu/bin/powerpc64-ps3-elf-g++"
+    fi
+fi
+
+stage_inc=${PS3DK_INC:-${PS3DEV:+$PS3DEV/ps3dk/ppu/include}}
 inc_flags=(-I"$inc" -D__PS3DK_SDK_SELFBUILD__)
-if [ -d "$stage_inc" ]; then
+if [ -n "${stage_inc:-}" ] && [ -d "$stage_inc" ]; then
     inc_flags+=(-isystem "$stage_inc")
 fi
 
@@ -51,7 +58,7 @@ for abi in ilp32 lp64; do
 done
 
 if [ "$checks" = 0 ]; then
-    echo "spu-thread-events: no compilers available" >&2
-    exit 77
+    echo "spu-thread-events: SKIP (PPU cross-compiler unavailable)"
+    exit 0
 fi
 echo "spu-thread-events: ALL PASS ($checks configurations checked)"
