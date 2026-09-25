@@ -477,7 +477,10 @@ int main(int argc, char **argv)
     if (!cov)
         return fail("coverage allocation failed");
     line_ink ink[LINE_COUNT];
-    int band = (int)(layout.lineHeight + 0.5f);
+    /* A band is every pixel row the line box [top, top + lineHeight)
+     * overlaps. Rounding to nearest would drop the last, partly covered
+     * row, where descender anti-aliasing legitimately lands. */
+    int band = (int)ceilf(layout.lineHeight);
     int first_top = fb_h / 3;
     if (first_top + (2 * LINE_COUNT - 1) * band > fb_h)
         return fail("text bands do not fit the framebuffer");
