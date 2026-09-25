@@ -1,6 +1,7 @@
 library: cellCrossController
 version: 1
 module: cellCrossController
+archive_name: sysutil_cross_controller
 exports:
 - name: cellCrossControllerInitialize
   nid: '0x37e1f502'

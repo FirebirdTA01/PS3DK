@@ -1,6 +1,7 @@
 library: cellGameExec
 version: 1
 module: cellGameExec
+archive_name: sysutil_game_exec
 exports:
 - name: cellGameGetBootGameInfo
   nid: '0xf6acd0bc'

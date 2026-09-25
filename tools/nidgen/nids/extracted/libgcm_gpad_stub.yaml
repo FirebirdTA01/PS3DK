@@ -1,6 +1,7 @@
 library: gcm_gpad
 version: 1
 module: gcm_gpad
+archive_name: gcm_gpad
 exports:
 - name: cellGcmGpadCaptureSnapshot
   nid: '0xb5955e77'

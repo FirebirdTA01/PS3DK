@@ -118,6 +118,12 @@ jobs:
       - name: Test the legacy gcm* surface is fully defined
         run: bash tests/sdk/gcm-legacy-symbol-coverage-test.sh
 
+      # Every reference stub-archive database is built under its reference
+      # name.  Only the host check (A) runs here; the installed-archive check
+      # (B) needs a built tree and runs from build-cell-stub-archives.sh.
+      - name: Test every reference stub archive name is built
+        run: bash tests/sdk/reference-stub-archive-names-test.sh
+
       # A render target's type field takes the SURFACE family, never the
       # texture-filter family. The mixup compiled, passed RPCS3, and hung a
       # real PS3 on a black screen; 23 samples and our own PSGL carried it.

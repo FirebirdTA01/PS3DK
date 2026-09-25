@@ -145,7 +145,38 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgifdec_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgem_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libvdec_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libdaisy_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libdbg_libio_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libfreetype_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libfreetypeTT_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgcm_gpad_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libmedi_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libprof_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libspudll_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_cross_controller_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_licensearea_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_photo_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_photo_decode_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_photo_export_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_photo_import_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_print_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_rec_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_remoteplay_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_sysconf_ext_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_video_export_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libsysutil_video_upload_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libusbpspcm_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/cellFs.yaml"
+)
+
+# Archives that earlier releases installed under a name the reference SDK
+# does not use.  The archive now carries the reference name; the old name
+# stays as an alias so existing Makefiles keep linking.
+declare -A PREVIOUS_ARCHIVE_NAME=(
+    [libcrashdump_stub]=libsys_crashdump_stub.a
+    [libkey2char_stub]=libcellKey2char_stub.a
+    [libsysutil_game_stub]=libcellGame_stub.a
+    [libsysutil_game_exec_stub]=libcellGameExec_stub.a
 )
 
 # PSL1GHT libraries that were pure import wrappers (one sprx.o of
@@ -336,7 +367,32 @@ for yaml in "${STUB_YAMLS[@]}"; do
             ln -sf "$(basename "${produced[0]}")" "$install_dir/$psl1ght_name"
             say "installed $psl1ght_name symlink -> $(basename "${produced[0]}") (replaces PSL1GHT's)"
         fi
+        previous_name="${PREVIOUS_ARCHIVE_NAME[$name]:-}"
+        if [[ -n "$previous_name" ]]; then
+            ln -sf "$(basename "${produced[0]}")" "$install_dir/$previous_name"
+            say "installed $previous_name symlink -> $(basename "${produced[0]}") (earlier releases' name)"
+        fi
     fi
 done
 
+# The reference SDK links its C maths and C++ runtimes from PRX modules
+# (sys_libm, sys_libstdcxx) through libm_stub.a and libstdc++_stub.a.  Ours are
+# the toolchain's static newlib libm and GCC libstdc++, so no import
+# trampolines are generated for either: sys_libstdcxx is a different C++
+# library whose std::string members share mangled names with GCC's old-ABI
+# ones, and binding those names to it would corrupt memory silently.  The two
+# link names still resolve, so a reference Makefile's -lm_stub -lstdc++_stub
+# links: libm_stub.a is a linker script pulling in the toolchain libm of the
+# same ABI (the driver does not link libm for C), and libstdc++_stub.a is an
+# empty archive because g++ already links libstdc++.
+printf '/* Reference link name for the C maths library: the toolchain libm. */\nINPUT(-lm)\n' \
+    > "$install_dir/libm_stub.a"
+printf '!<arch>\n' > "$install_dir/libstdc++_stub.a"
+say "installed libm_stub.a (INPUT(-lm)) + empty libstdc++_stub.a -> $install_dir/"
+
 done   # close outer abi loop
+
+say "verifying every reference stub archive name is installed"
+PS3DK="$PS3DK" PS3DEV="$PS3DEV" \
+    bash "$PS3_TOOLCHAIN_ROOT/tests/sdk/reference-stub-archive-names-test.sh" \
+    || die "installed archives failed tests/sdk/reference-stub-archive-names-test.sh"

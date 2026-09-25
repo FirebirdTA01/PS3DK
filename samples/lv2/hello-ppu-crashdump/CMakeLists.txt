@@ -7,7 +7,7 @@ add_executable(hello-ppu-crashdump source/main.cpp)
 target_compile_features(hello-ppu-crashdump PRIVATE cxx_std_17)
 
 target_link_libraries(hello-ppu-crashdump PRIVATE
-    sys_crashdump_stub c_stub rt lv2 m
+    crashdump_stub c_stub rt lv2 m
 )
 
 ps3_add_self(hello-ppu-crashdump)

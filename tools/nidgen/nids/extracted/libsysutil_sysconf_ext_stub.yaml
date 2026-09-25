@@ -1,6 +1,7 @@
 library: cellSysconfExtUtility
 version: 1
 module: cellSysconfExtUtility
+archive_name: sysutil_sysconf_ext
 exports:
 - name: cellSysconfBtGetDeviceList
   nid: '0x08db2adf'

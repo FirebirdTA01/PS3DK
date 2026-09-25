@@ -1,6 +1,7 @@
 library: cellRec
 version: 1
 module: cellRec
+archive_name: sysutil_rec
 exports:
 - name: cellRecClose
   nid: '0x4ac76585'

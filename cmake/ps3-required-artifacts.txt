@@ -108,8 +108,8 @@ ppu_stub  ppu/lib/libc_stub.a
 ppu_stub  ppu/lib/libcamera_stub.a
 ppu_stub  ppu/lib/libfontFT_stub.a
 ppu_stub  ppu/lib/libfont_stub.a
-ppu_stub  ppu/lib/libcellGame_stub.a
-ppu_stub  ppu/lib/libcellKey2char_stub.a
+ppu_stub  ppu/lib/libsysutil_game_stub.a
+ppu_stub  ppu/lib/libkey2char_stub.a
 ppu_stub  ppu/lib/libcelp8enc_stub.a
 ppu_stub  ppu/lib/libcelpenc_stub.a
 ppu_stub  ppu/lib/libcgb.a
@@ -161,7 +161,7 @@ ppu_stub  ppu/lib/libsscgpu.a
 ppu_stub  ppu/lib/libssl_stub.a
 ppu_stub  ppu/lib/libsync2_stub.a
 ppu_stub  ppu/lib/libsync_stub.a
-ppu_stub  ppu/lib/libsys_crashdump_stub.a
+ppu_stub  ppu/lib/libcrashdump_stub.a
 ppu_stub  ppu/lib/libsysmodule_stub.a
 ppu_stub  ppu/lib/libsysutil_ap_stub.a
 ppu_stub  ppu/lib/libsysutil_audio_out_stub.a
@@ -253,6 +253,10 @@ alias     ppu/lib/libfontFT.a              libfontFT_stub.a
 alias     ppu/lib/libcellFontFT_stub.a     libfontFT_stub.a
 alias     ppu/lib/libjpgdec.a              libjpgdec_stub.a
 alias     ppu/lib/libpngdec.a              libpngdec_stub.a
+alias     ppu/lib/libsys_crashdump_stub.a  libcrashdump_stub.a
+alias     ppu/lib/libcellKey2char_stub.a   libkey2char_stub.a
+alias     ppu/lib/libcellGame_stub.a       libsysutil_game_stub.a
+alias     ppu/lib/libcellGameExec_stub.a   libsysutil_game_exec_stub.a
 alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
 alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
@@ -278,6 +282,10 @@ alias     ppu/lib/lp64/libfontFT.a         libfontFT_stub.a
 alias     ppu/lib/lp64/libcellFontFT_stub.a libfontFT_stub.a
 alias     ppu/lib/lp64/libjpgdec.a         libjpgdec_stub.a
 alias     ppu/lib/lp64/libpngdec.a         libpngdec_stub.a
+alias     ppu/lib/lp64/libsys_crashdump_stub.a libcrashdump_stub.a
+alias     ppu/lib/lp64/libcellKey2char_stub.a libkey2char_stub.a
+alias     ppu/lib/lp64/libcellGame_stub.a  libsysutil_game_stub.a
+alias     ppu/lib/lp64/libcellGameExec_stub.a libsysutil_game_exec_stub.a
 
 # --- Shipped but not required ----------------------------------------------
 # The two-sided check requires every shipped archive to be either promised above
@@ -291,7 +299,7 @@ alias     ppu/lib/lp64/libpngdec.a         libpngdec_stub.a
 # ppu_stub the moment a link failure or an ld map shows it is actually needed.
 
 optional  ppu/lib/libPSGLFX.a                    shipped-for-user-code
-optional  ppu/lib/libcellGameExec_stub.a         shipped-for-user-code
+optional  ppu/lib/libsysutil_game_exec_stub.a    shipped-for-user-code
 optional  ppu/lib/libcgbLevelC.a                 shipped-for-user-code
 optional  ppu/lib/libgem_stub.a                  shipped-for-user-code
 optional  ppu/lib/libmixer.a                     shipped-for-user-code
@@ -300,6 +308,32 @@ optional  ppu/lib/libsysutil_avconf_ext_stub.a   shipped-for-user-code
 optional  ppu/lib/libsysutil_bgdl_stub.a         shipped-for-user-code
 optional  ppu/lib/libsysutil_userinfo_stub.a     shipped-for-user-code
 optional  ppu/lib/libvdec_stub.a                 shipped-for-user-code
+optional  ppu/lib/libdaisy_stub.a                shipped-for-user-code
+optional  ppu/lib/libdbg_libio_stub.a            shipped-for-user-code
+optional  ppu/lib/libfreetype_stub.a             shipped-for-user-code
+optional  ppu/lib/libfreetypeTT_stub.a           shipped-for-user-code
+optional  ppu/lib/libgcm_gpad_stub.a             shipped-for-user-code
+optional  ppu/lib/libmedi_stub.a                 shipped-for-user-code
+optional  ppu/lib/libprof_stub.a                 shipped-for-user-code
+optional  ppu/lib/libspudll_stub.a               shipped-for-user-code
+optional  ppu/lib/libsysutil_cross_controller_stub.a shipped-for-user-code
+optional  ppu/lib/libsysutil_licensearea_stub.a  shipped-for-user-code
+optional  ppu/lib/libsysutil_photo_stub.a        shipped-for-user-code
+optional  ppu/lib/libsysutil_photo_decode_stub.a shipped-for-user-code
+optional  ppu/lib/libsysutil_photo_export_stub.a shipped-for-user-code
+optional  ppu/lib/libsysutil_photo_import_stub.a shipped-for-user-code
+optional  ppu/lib/libsysutil_print_stub.a        shipped-for-user-code
+optional  ppu/lib/libsysutil_rec_stub.a          shipped-for-user-code
+optional  ppu/lib/libsysutil_remoteplay_stub.a   shipped-for-user-code
+optional  ppu/lib/libsysutil_sysconf_ext_stub.a  shipped-for-user-code
+optional  ppu/lib/libsysutil_video_export_stub.a shipped-for-user-code
+optional  ppu/lib/libsysutil_video_upload_stub.a shipped-for-user-code
+optional  ppu/lib/libusbpspcm_stub.a             shipped-for-user-code
+# Reference link names for the toolchain's own runtimes, not import stubs:
+# libm_stub.a is the linker script INPUT(-lm), libstdc++_stub.a an empty
+# archive (see scripts/build-cell-stub-archives.sh).
+optional  ppu/lib/libm_stub.a                    reference-link-name
+optional  ppu/lib/libstdc++_stub.a               reference-link-name
 optional  spu/lib/libdma.a                       shipped-for-user-code
 optional  spu/lib/libfiber.a                     shipped-for-user-code
 optional  spu/lib/libspuatomic.a                 shipped-for-user-code

@@ -1,6 +1,7 @@
 library: cellVideoUpload
 version: 1
 module: cellVideoUpload
+archive_name: sysutil_video_upload
 exports:
 - name: cellVideoUploadInitialize
   nid: '0x122e0d0f'

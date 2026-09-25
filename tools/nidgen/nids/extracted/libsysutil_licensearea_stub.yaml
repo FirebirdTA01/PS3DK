@@ -1,6 +1,7 @@
 library: cellSysutilMisc
 version: 1
 module: cellSysutilMisc
+archive_name: sysutil_licensearea
 exports:
 - name: cellSysutilGetLicenseArea
   nid: '0x571dc686'

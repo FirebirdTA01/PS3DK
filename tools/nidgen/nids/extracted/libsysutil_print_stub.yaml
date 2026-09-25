@@ -1,6 +1,7 @@
 library: cellPrintUtility
 version: 1
 module: cellPrintUtility
+archive_name: sysutil_print
 exports:
 - name: cellPrintCancelJob
   nid: '0x293d9e9c'

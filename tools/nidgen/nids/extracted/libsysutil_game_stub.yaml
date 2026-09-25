@@ -1,6 +1,7 @@
 library: cellGame
 version: 1
 module: cellGame
+archive_name: sysutil_game
 exports:
 - name: cellGameBootCheck
   nid: '0xf52639ea'

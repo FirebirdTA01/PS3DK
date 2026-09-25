@@ -1,6 +1,7 @@
 library: cellPhotoImportUtil
 version: 1
 module: cellPhotoImportUtil
+archive_name: sysutil_photo_import
 exports:
 - name: cellPhotoImport
   nid: '0x0783bce0'

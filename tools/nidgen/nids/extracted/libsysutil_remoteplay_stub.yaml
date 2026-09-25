@@ -1,6 +1,7 @@
 library: cellRemotePlay
 version: 1
 module: cellRemotePlay
+archive_name: sysutil_remoteplay
 exports:
 - name: cellRemotePlayBreak
   nid: '0xfb793f27'
