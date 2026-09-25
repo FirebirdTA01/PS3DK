@@ -200,6 +200,10 @@ jobs:
       - name: Test the SDK stdarg.h wrapper forwards on every inclusion
         run: bash tests/sdk/stdarg-reentry-test.sh
 
+      # Skips without PS3DEV; runs against the installed SDK headers.
+      - name: Test SPU code can include the C++ vector math headers
+        run: bash tests/sdk/spu-vectormath-include-test.sh
+
       # Skips without PS3DEV; compiles this tree's GCM headers under -Werror.
       - name: Test the GCM headers define each macro once
         run: bash tests/sdk/gcm-redefinition-test.sh

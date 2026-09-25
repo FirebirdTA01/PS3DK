@@ -448,6 +448,7 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 SHARED_SPURS_SPU_HEADERS := \
     include/cellstatus.h \
     include/sdk_version.h \
+    include/simdmath.h \
     include/mt19937.h \
     include/cell/error.h \
     include/cell/jdl.h \
