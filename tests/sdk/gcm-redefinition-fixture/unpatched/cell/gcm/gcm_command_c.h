@@ -43,7 +43,6 @@
 #include <rsx/gcm_sys.h>
 #include <rsx/rsx.h>
 #include <rsx/commands.h>
-#include <cell/gcm/gcm_enum.h>
 
 /* Native NV40 emitters for the texture-family cellGcmSet* functions —
  * replaces the rsx* forwarders we shipped while librsx was still the
@@ -366,6 +365,13 @@ static inline uint64_t cellGcmGetTimeStamp(uint32_t index)
 {
 	return (uint64_t)gcmGetTimeStamp(index);
 }
+
+/* Debug output verbosity level enum values — the function itself
+ * is declared in <cell/gcm.h> next to the other gcm-system
+ * (non-FIFO) calls it forwards to. */
+#define CELL_GCM_DEBUG_LEVEL0  0
+#define CELL_GCM_DEBUG_LEVEL1  1
+#define CELL_GCM_DEBUG_LEVEL2  2
 
 static inline void cellGcmSetFrontPolygonMode(CellGcmContextData *thisContext, uint32_t mode)
 {
