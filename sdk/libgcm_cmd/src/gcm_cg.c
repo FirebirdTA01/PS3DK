@@ -224,11 +224,11 @@ uint32_t cellGcmCgGetParameterType(CGprogram prog, CGparameter param)
     return pp ? pp->type : 0u;
 }
 
-uint32_t cellGcmCgGetParameterResource(CGprogram prog, CGparameter param)
+CGresource cellGcmCgGetParameterResource(CGprogram prog, CGparameter param)
 {
     (void)prog;
     const CgBinaryParameter *pp = as_parameter(param);
-    return pp ? pp->res : 0u;
+    return pp ? pp->res : (CGresource)0;
 }
 
 int32_t cellGcmCgGetParameterResourceIndex(CGprogram prog, CGparameter param)

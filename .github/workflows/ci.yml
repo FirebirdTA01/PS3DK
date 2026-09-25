@@ -86,6 +86,9 @@ jobs:
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
 
+      - name: Test Cg resource enum consumers and runtime values
+        run: bash tests/sdk/gcm-cg-resource-test.sh
+
       # Freestanding 32-bit compilation catches the original ILP32 shift
       # without requiring a PPU toolchain or host multilib runtime libraries.
       # Native host execution also verifies the wide-pointer debug trap.

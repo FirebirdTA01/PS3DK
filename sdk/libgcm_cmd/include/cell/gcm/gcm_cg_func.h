@@ -63,7 +63,7 @@ CGparameter cellGcmCgGetNextLeafParameter(CGprogram prog, CGparameter param);
 
 /* Per-parameter accessors. */
 uint32_t    cellGcmCgGetParameterType         (CGprogram prog, CGparameter param);
-uint32_t    cellGcmCgGetParameterResource     (CGprogram prog, CGparameter param);
+CGresource  cellGcmCgGetParameterResource     (CGprogram prog, CGparameter param);
 int32_t     cellGcmCgGetParameterResourceIndex(CGprogram prog, CGparameter param);
 uint32_t    cellGcmCgGetParameterVariability  (CGprogram prog, CGparameter param);
 uint32_t    cellGcmCgGetParameterDirection    (CGprogram prog, CGparameter param);
