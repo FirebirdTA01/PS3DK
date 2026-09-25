@@ -100,6 +100,11 @@ jobs:
       - name: Test lv2syscall macro definition compatibility across header orders
         run: bash tests/sdk/lv2syscall-redefined-test.sh
 
+      # sys_spu_thread_argument_t must use canonical arg1..arg4 matching SPU
+      # registers $3..$6 while preserving sysSpuThreadArgument arg0..arg3.
+      - name: Test SPU thread argument structure layout and compatibility
+        run: bash tests/sdk/spu-thread-argument-test.sh
+
       # The GCM FIFO wrap must retire a lap the application never published
       # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
       # the one-phase protocol it replaced must fail the idle-lap scenario.

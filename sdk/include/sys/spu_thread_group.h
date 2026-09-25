@@ -8,6 +8,10 @@
 #ifndef __PS3DK_SYS_SPU_THREAD_GROUP_H__
 #define __PS3DK_SYS_SPU_THREAD_GROUP_H__
 
+#include <stdint.h>
+#include <stddef.h>
+#include <sys/return_code.h>
+
 #include <sys/spu.h>
 
 #define SYS_SPU_THREAD_GROUP_TYPE_NORMAL                              0x00
@@ -23,17 +27,33 @@
 #define SYS_SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT  0x0002
 #define SYS_SPU_THREAD_GROUP_JOIN_TERMINATED        0x0004
 
+#ifndef _SYS_MEMORY_CONTAINER_T_DEFINED
+#define _SYS_MEMORY_CONTAINER_T_DEFINED
 typedef uint32_t sys_memory_container_t;
+#endif
 
 /* Reference-SDK snake_case typedef aliases.  PSL1GHT spells the
- * group handle `sys_spu_group_t` and the attribute / argument
+ * group handle `sys_spu_group_t` and the attribute
  * structs in camelCase; reference samples use _t-suffixed snake_case
- * throughout.  All four aliases are layout-identical to the PSL1GHT
- * spellings so a sample can mix either name without casts. */
+ * throughout.  These typedef aliases are layout-identical to the PSL1GHT
+ * spellings.  (Note: the canonical thread argument type sys_spu_thread_argument_t
+ * is defined below with Sony-standard arg1..arg4 member naming, distinct from
+ * PSL1GHT's sysSpuThreadArgument arg0..arg3). */
 typedef sys_spu_group_t            sys_spu_thread_group_t;
-typedef sysSpuThreadArgument       sys_spu_thread_argument_t;
 typedef sysSpuThreadAttribute      sys_spu_thread_attribute_t;
 typedef sysSpuThreadGroupAttribute sys_spu_thread_group_attribute_t;
+
+/* Canonical reference-SDK sys_spu_thread_argument_t (arg1..arg4).
+ * Distinct from legacy PSL1GHT sysSpuThreadArgument (arg0..arg3). */
+#ifndef _SYS_SPU_THREAD_ARGUMENT_T_DEFINED
+#define _SYS_SPU_THREAD_ARGUMENT_T_DEFINED
+typedef struct sys_spu_thread_argument {
+    uint64_t arg1;
+    uint64_t arg2;
+    uint64_t arg3;
+    uint64_t arg4;
+} sys_spu_thread_argument_t;
+#endif
 
 /* SPU thread option constants (reference-SDK names). */
 #ifndef SYS_SPU_THREAD_OPTION_NONE
@@ -83,8 +103,15 @@ typedef sysSpuThreadGroupAttribute sys_spu_thread_group_attribute_t;
 
 #define sys_spu_thread_argument_initialize(x)  \
     do {                                       \
+        (x).arg1 = (x).arg2 = (x).arg3 = (x).arg4 = 0; \
+    } while (0)
+
+#ifndef sysSpuThreadArgumentInitialize
+#define sysSpuThreadArgumentInitialize(x)      \
+    do {                                       \
         (x).arg0 = (x).arg1 = (x).arg2 = (x).arg3 = 0; \
     } while (0)
+#endif
 
 #define sys_spu_thread_group_attribute_initialize(x) \
     do {                                             \

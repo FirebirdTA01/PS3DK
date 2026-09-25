@@ -75,7 +75,7 @@ static inline int sys_spu_thread_initialize(sys_spu_thread_t *thread,
 {
     return (int)sysSpuThreadInitialize(thread, group, spu_num,
                                        (sysSpuImage *)img,
-                                       attr, arg);
+                                       attr, (sysSpuThreadArgument *)arg);
 }
 
 static inline int sys_spu_thread_get_exit_status(sys_spu_thread_t id, int *status)
