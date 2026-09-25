@@ -255,6 +255,7 @@ HEADERS := \
     include/cell/sysutil_imejp.h \
     include/cell/codec.h \
     include/cell/codec/jpgdec.h \
+    include/cell/codec/pngdec.h \
     include/cell/cgb.h \
     include/cell/spurs.h \
     include/cell/spurs/types.h \
