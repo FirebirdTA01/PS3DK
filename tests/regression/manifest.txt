@@ -24,3 +24,9 @@ uniform-readback,tests/regression/uniform-readback/uniform-readback.fake.self,30
 # exception state on two PPU threads (GCC patches 0037 and 0038).
 cxx-eh-ilp32,tests/regression/cxx-eh/cxx-eh-ilp32.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
 cxx-eh-lp64,tests/regression/cxx-eh/cxx-eh-lp64.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
+# abi-types guards the reference toolchain's type choices (int32_t = int,
+# uint32_t = unsigned int, ILP32 wchar_t = 16-bit unsigned short, wint_t
+# = int): static_asserts fail the build, the run checks newlib and
+# libstdc++ wide-character behaviour in both ABIs.
+abi-types-ilp32,tests/regression/abi-types/abi-types-ilp32.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
+abi-types-lp64,tests/regression/abi-types/abi-types-lp64.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
