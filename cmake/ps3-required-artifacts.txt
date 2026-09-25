@@ -46,6 +46,7 @@
 host_bin  bin/abi-verify.exe
 host_bin  bin/bin2s.exe
 host_bin  bin/cgcomp.exe
+host_bin  bin/cgnv2elf.exe
 host_bin  bin/coverage-report.exe
 host_bin  bin/fself.exe
 host_bin  bin/make_self.exe

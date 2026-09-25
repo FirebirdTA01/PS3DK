@@ -522,14 +522,17 @@ EOF
     cmake -S "$src" -B "$obj" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$tc" \
         -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$obj" --target rsx-cg-compiler
+    cmake --build "$obj" --target rsx-cg-compiler cgnv2elf
 
-    if [[ -f "$obj/rsx-cg-compiler.exe" ]]; then
-        install -m 0755 "$obj/rsx-cg-compiler.exe" "$STAGE_BIN/"
-        say "  staged rsx-cg-compiler.exe"
-    else
-        warn "rsx-cg-compiler.exe not produced"
-    fi
+    local exe
+    for exe in rsx-cg-compiler cgnv2elf; do
+        if [[ -f "$obj/$exe.exe" ]]; then
+            install -m 0755 "$obj/$exe.exe" "$STAGE_BIN/"
+            say "  staged $exe.exe"
+        else
+            warn "$exe.exe not produced"
+        fi
+    done
 }
 
 # -----------------------------------------------------------------------------

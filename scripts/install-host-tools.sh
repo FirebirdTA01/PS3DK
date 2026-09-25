@@ -85,9 +85,10 @@ build_rsx_cg_compiler() {
     local build="$PS3_BUILD_ROOT/host-tools-linux/rsx-cg-compiler"
 
     cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$build" --target rsx-cg-compiler -j "$JOBS"
+    cmake --build "$build" --target rsx-cg-compiler cgnv2elf -j "$JOBS"
 
     install_tool "$build/rsx-cg-compiler" "rsx-cg-compiler"
+    install_tool "$build/cgnv2elf" "cgnv2elf"
 }
 
 build_sprx_linker() {

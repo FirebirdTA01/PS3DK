@@ -152,3 +152,16 @@ target_include_directories(rsx-cg-compiler PRIVATE
     ${SRC_DIR}
     ${NV40_DIR}
 )
+
+# ----------------------------------------------------------------------------
+# cgnv2elf — standalone converter that packs .vpo / .fpo containers into an
+# ELF shader archive.  Plain C++17; shares only the generated version.h.
+# ----------------------------------------------------------------------------
+
+add_executable(cgnv2elf
+    ${SRC_DIR}/cgnv2elf/cgnv2elf.cpp
+)
+
+target_include_directories(cgnv2elf PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}    # generated version.h
+)

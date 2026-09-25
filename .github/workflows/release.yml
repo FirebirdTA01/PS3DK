@@ -121,7 +121,7 @@ jobs:
         run: |
           cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
               -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler cgnv2elf
 
       - name: Validate --version flags
         run: |
@@ -142,6 +142,7 @@ jobs:
             "tools/target/release/$bin" --version
           done
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
+          tools/rsx-cg-compiler/build/cgnv2elf --version
           # sprx-linker has no --version yet; just confirm it's a runnable ELF.
           file tools/sprx-linker/sprxlinker
 
@@ -163,6 +164,7 @@ jobs:
           # C/C++ binaries.
           cp tools/sprx-linker/sprxlinker "$stage/bin/"
           cp tools/rsx-cg-compiler/build/rsx-cg-compiler "$stage/bin/"
+          cp tools/rsx-cg-compiler/build/cgnv2elf "$stage/bin/"
           cp build/host-tools-linux/sfo-pkg/pkg "$stage/bin/"
           # Strip everything (best-effort).
           strip "$stage/bin/"* || true
@@ -186,6 +188,7 @@ jobs:
           Runtime dependencies (dynamic):
             * sprxlinker         — libelf, libz, libzstd
             * rsx-cg-compiler    — libstdc++ (system)
+            * cgnv2elf           — libstdc++ (system)
             * pkg                - glibc
             * sfo-gui            - Linux desktop OpenGL/display libraries
                                    loaded by the user's GUI session (for
