@@ -130,6 +130,22 @@ jobs:
       - name: Test render-target surface types use the surface enum family
         run: bash tests/sdk/surface-type-enum-test.sh
 
+      # GCM enum members must not redefine macros across include orders.
+      - name: Test GCM header macro redefinition compatibility across include orders
+        run: bash tests/sdk/gcm-redefinition-test.sh
+
+      # sys/event.h anonymous union compatibility across C and C++17.
+      - name: Test sys/event.h anonymous union compatibility across ABIs
+        run: bash tests/sdk/sys-event-compat-test.sh
+
+      # sys/prx.h canonical types, loader declarations, and PSL1GHT compatibility.
+      - name: Test sys/prx.h canonical types and PSL1GHT compatibility
+        run: bash tests/sdk/sys-prx-test.sh
+
+      # sys/vm.h virtual memory syscall wrappers and statistics layout.
+      - name: Test sys/vm.h virtual memory syscall definitions and struct layout
+        run: bash tests/sdk/sys-vm-test.sh
+
       # ps3_add_self must respect OUTPUT_DIRECTORY keyword and PS3_SELF_OUTPUT_DIRECTORY
       # variable, falling back to CMAKE_CURRENT_SOURCE_DIR by default. ps3_add_pkg
       # must follow the same resolved directory.

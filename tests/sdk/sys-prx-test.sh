@@ -5,7 +5,7 @@
 set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 inc=${LV2_INCLUDE_DIR:-"$root/sdk/include"}
-stage_inc=${STAGE_INCLUDE_DIR:-"/home/firebirdta01/ps3tc/gemini-stage/ps3dk/ppu/include"}
+stage_inc=${STAGE_INCLUDE_DIR:-${PS3DK_INC:-${PS3DEV:+$PS3DEV/ps3dk/ppu/include}}}
 src="$root/tests/sdk/sys-prx-test.c"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -14,6 +14,17 @@ checks=0
 
 PPU_CC=${PPU_CC:-powerpc64-ps3-elf-gcc}
 PPU_CXX=${PPU_CXX:-powerpc64-ps3-elf-g++}
+
+if ! command -v "$PPU_CC" >/dev/null 2>&1; then
+    if [ -n "${PS3DEV:-}" ] && [ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc" ]; then
+        PPU_CC="$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc"
+    fi
+fi
+if ! command -v "$PPU_CXX" >/dev/null 2>&1; then
+    if [ -n "${PS3DEV:-}" ] && [ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-g++" ]; then
+        PPU_CXX="$PS3DEV/ppu/bin/powerpc64-ps3-elf-g++"
+    fi
+fi
 
 # 1. Cross compiler checks for both ABIs
 for abi in ilp32 lp64; do
