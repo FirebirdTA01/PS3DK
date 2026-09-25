@@ -43,6 +43,34 @@ rebuilt compiler integration, and runtime execution. A private specs overlay
 only demonstrates candidate selection behavior; it does not update an installed
 compiler or establish runtime correctness.
 
+## Canonical SPU service archive
+
+SPU `-lspurs` selects the canonical `libspurs.a` in the SPU target library
+directory (also installed to the SDK's `spu/lib`). It contains existing module
+and task services, semaphore operations and their signalling dependencies.
+It contains no startup object and no `cellSpursMain` entry adapter. The full
+`libspurs_task.a` and internal `libspurs_task_runtime.a` retain their existing
+members; the job and initialized-job archives are unchanged. PPU `libspurs.a`
+continues to name the separate PPU import archive.
+
+The reference SPU `libspurs.a` includes startup members, including `main.o`.
+PS3DK deliberately differs: driver patch 0006 selects the mode-specific startup
+object and specialized service archive explicitly. Adding task startup back to
+the canonical archive would blur that ownership and can conflict with job
+startup. Use the selected driver mode or the documented manual startup path.
+
+Archive order follows ordinary static linking. When both common and task
+runtime archives provide a service, the first archive that satisfies its
+unresolved reference supplies it; the other archive does not extract another
+definition. Task entry adaptation remains in the specialized task runtime.
+
+These are existing implementations with existing context requirements, not new
+runtime capabilities. Task getters, task exit and blocking waits require the
+task control state; module getters and dispatch require a SPURS workload.
+An ordinary SPU program can link the archive for ownership tests but cannot
+call those services safely without their required SPURS environment. Compile
+and link gates do not establish runtime, constructor or firmware behavior.
+
 ## Job content identity
 
 Both job startups define the global `__SPU_GUID` symbol at the start of a

@@ -51,10 +51,22 @@ OBJS    := $(BUILD)/crt_spurs_task.o \
 LIB     := $(BUILD)/libspurs_task.a
 RUNTIME_LIB := $(BUILD)/libspurs_task_runtime.a
 RUNTIME_OBJS := $(filter-out $(BUILD)/crt_spurs_task.o,$(OBJS))
+COMMON_LIB := $(BUILD)/libspurs.a
+# Canonical services only. GCC selects startup and the task entry adapter
+# through the specialized runtime; neither belongs in this archive.
+COMMON_OBJS := $(BUILD)/spurs_task_exit.o \
+               $(BUILD)/spurs_task_runtime.o \
+               $(BUILD)/spurs_module_runtime.o \
+               $(BUILD)/spurs_can_call_block_wait.o \
+               $(BUILD)/spurs_get_workload_flag.o \
+               $(BUILD)/spurs_send_workload_signal.o \
+               $(BUILD)/spurs_send_signal.o \
+               $(BUILD)/spurs_semaphore_p.o \
+               $(BUILD)/spurs_semaphore_v.o
 
 .PHONY: all install clean
 
-all: $(LIB) $(RUNTIME_LIB)
+all: $(LIB) $(RUNTIME_LIB) $(COMMON_LIB)
 
 $(LIB): $(OBJS)
 	@echo "  AR    $(notdir $@)"
@@ -63,6 +75,10 @@ $(LIB): $(OBJS)
 $(RUNTIME_LIB): $(RUNTIME_OBJS)
 	@echo "  AR    $(notdir $@)"
 	@$(AR) rcs $@ $(RUNTIME_OBJS)
+
+$(COMMON_LIB): $(COMMON_OBJS)
+	@echo "  AR    $(notdir $@)"
+	@$(AR) rcs $@ $(COMMON_OBJS)
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	@echo "  CC    $(notdir $<)"
@@ -75,12 +91,14 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 $(BUILD):
 	@mkdir -p $@
 
-install: $(LIB) $(RUNTIME_LIB)
+install: $(LIB) $(RUNTIME_LIB) $(COMMON_LIB)
 	@install -d $(INSTALL_LIB) $(INSTALL_LIB_MIRROR) $(INSTALL_LDS) $(INSTALL_INC)/cell/spurs
 	@install -m 0644 $(LIB) $(INSTALL_LIB)/libspurs_task.a
 	@install -m 0644 $(LIB) $(INSTALL_LIB_MIRROR)/libspurs_task.a
 	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB)/libspurs_task_runtime.a
 	@install -m 0644 $(RUNTIME_LIB) $(INSTALL_LIB_MIRROR)/libspurs_task_runtime.a
+	@install -m 0644 $(COMMON_LIB) $(INSTALL_LIB)/libspurs.a
+	@install -m 0644 $(COMMON_LIB) $(INSTALL_LIB_MIRROR)/libspurs.a
 	@install -m 0644 $(BUILD)/crt_spurs_task.o $(INSTALL_LIB)/spurs_task.o
 	@install -m 0644 $(BUILD)/crt_spurs_task.o $(INSTALL_LIB_MIRROR)/spurs_task.o
 	@echo "  lib   libspurs_task.a"

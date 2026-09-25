@@ -339,6 +339,7 @@ optional  spu/lib/libfiber.a                     shipped-for-user-code
 optional  spu/lib/libspuatomic.a                 shipped-for-user-code
 optional  spu/lib/libspudma.a                    shipped-for-user-code
 optional  spu/lib/libspurs_job.a                 shipped-for-user-code
+optional  spu/lib/libspurs.a                     canonical-spurs-services
 # Internal SPURS driver services omit startup; explicit startfiles are separate.
 optional  spu/lib/libspurs_task_runtime.a        spurs-driver-runtime
 optional  spu/lib/libspurs_job_runtime.a         spurs-driver-runtime

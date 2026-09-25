@@ -4,12 +4,13 @@
  * the SPU calls to discover its execution context.  These are
  * SPU-only (PPU code uses different APIs to read the same fields
  * via the CellSpurs PPU object).  Implementations live in
- * libspurs_task.a (sdk/libspurs_task/src/spurs_module_runtime.c).
+ * canonical SPU libspurs.a and the specialized task archives
+ * (sdk/libspurs_task/src/spurs_module_runtime.c).
  *
  * cellSpursPoll() / cellSpursModulePoll() / cellSpursModulePollStatus()
  * cooperative-yield helpers are declared here too but live in
- * sdk/libspurs_task/src/spurs_module_runtime.c when implemented; the
- * current shipped subset is the four context getters below.
+ * sdk/libspurs_task/src/spurs_module_runtime.c. Packaging these services
+ * does not change their required SPURS module or task context.
  */
 #ifndef __PS3DK_CELL_SPURS_COMMON_H__
 #define __PS3DK_CELL_SPURS_COMMON_H__
@@ -36,7 +37,7 @@ extern uint32_t            cellSpursGetSpuCount(void);
  * in sdk/libspurs_task/src/spurs_module_runtime.c. */
 
 /* Per-task ELF address (uint64_t EA in main memory) - populated by
- * the kernel at task dispatch.  Returns 0 outside a task context. */
+ * the kernel at task dispatch. Requires a valid task context. */
 extern uint64_t            cellSpursGetElfAddress(void);
 
 /* In-Workload (IWL) packed task identifier:

@@ -172,6 +172,7 @@ jobs:
           python3 tests/sdk/spurs-driver-link-test.py
           python3 tests/sdk/spurs-linker-mode-test.py
           python3 tests/sdk/spurs-guid-reservation-test.py
+          python3 tests/sdk/spurs-common-archive-test.py
 
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
