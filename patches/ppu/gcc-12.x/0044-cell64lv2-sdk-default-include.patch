@@ -1,0 +1,137 @@
+rs6000: search the PS3DK headers by default on cell64lv2
+
+The reference PS3 compiler finds its SDK headers with no -I; ours found
+only newlib, so a translation unit built without the SDK include flags
+saw implicit declarations for <pthread.h> and friends.  Put the SDK
+header directory first on the default search list (both the installed
+and the development-stage layouts, relative to the compiler prefix), in
+the position an explicit -I has always given it, and mirror the rest of
+cppdefault.cc's list unchanged.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -524,3 +524,124 @@
+ /* IEEE 128-bit emulator type handling.  */
+ #undef	TARGET_FLOAT128_ENABLE_TYPE
+ #define TARGET_FLOAT128_ENABLE_TYPE 1
++
++/* The SDK headers are on the compiler's default search path, as the
++   reference driver's are: a translation unit compiled with no -I still
++   finds <pthread.h>, <cell/...> and the libc wrappers.  They come first,
++   ahead of libstdc++ and GCC's own headers - where an explicit
++   -I$PS3DK/ppu/include has always put them - so the wrappers'
++   #include_next chains resolve exactly as before.  An explicit -I of the
++   same directory is then ignored in favour of this entry (GCC keeps a
++   directory once, as a system directory).
++
++   Two layouts: an installed SDK keeps its headers in the compiler
++   prefix's include directory; a development stage keeps them in
++   ps3dk/ppu/include beside the compiler prefix.  A layout's missing
++   directory is skipped.  The entries are spelled relative to
++   GCC_INCLUDE_DIR (the compiler's version directory under
++   $prefix/lib/gcc) like the tool include directory, so they relocate
++   with the compiler and take part in the -iprefix pass that adds
++   those directories ahead of everything spelled from PREFIX.
++
++   The rest is equivalent, for this target, to the default list in
++   cppdefault.cc for this GCC: the same directories in the same order
++   under the same cross-compiler conditions, built the way the musl
++   include order in sysv4.h is.  It is not a line-for-line copy (the
++   G++ entries share one guard; this target defines no
++   SYSROOT_HEADERS_SUFFIX_SPEC and no NATIVE_SYSTEM_HEADER_COMPONENT).
++   The entries are not sysroot-relative: --sysroot does not move the
++   SDK headers, which belong to the compiler.  */
++#define PS3DK_INCLUDE_DEFAULTS_SDK					\
++    { GCC_INCLUDE_DIR "/../../../../../include", 0, 0, 1, 0, 0 },	\
++    { GCC_INCLUDE_DIR "/../../../../../../ps3dk/ppu/include",	\
++      0, 0, 1, 0, 0 },
++
++#ifdef GPLUSPLUS_INCLUDE_DIR
++#define PS3DK_INCLUDE_DEFAULTS_GPP			\
++    { GPLUSPLUS_INCLUDE_DIR, "G++", 1, 1,		\
++      GPLUSPLUS_INCLUDE_DIR_ADD_SYSROOT, 0 },		\
++    { GPLUSPLUS_TOOL_INCLUDE_DIR, "G++", 1, 1,		\
++      GPLUSPLUS_INCLUDE_DIR_ADD_SYSROOT, 1 },		\
++    { GPLUSPLUS_BACKWARD_INCLUDE_DIR, "G++", 1, 1,	\
++      GPLUSPLUS_INCLUDE_DIR_ADD_SYSROOT, 0 },		\
++    { GPLUSPLUS_LIBCXX_INCLUDE_DIR, "G++", 2, 1,	\
++      GPLUSPLUS_LIBCXX_INCLUDE_DIR_ADD_SYSROOT, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_GPP
++#endif
++
++#ifdef GCC_INCLUDE_DIR
++#define PS3DK_INCLUDE_DEFAULTS_GCC			\
++    { GCC_INCLUDE_DIR, "GCC", 0, 0, 0, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_GCC
++#endif
++
++#ifdef LOCAL_INCLUDE_DIR
++#define PS3DK_INCLUDE_DEFAULTS_LOCAL			\
++    { LOCAL_INCLUDE_DIR, 0, 0, 1, 1, 2 },		\
++    { LOCAL_INCLUDE_DIR, 0, 0, 1, 1, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_LOCAL
++#endif
++
++#ifdef PREFIX_INCLUDE_DIR
++#define PS3DK_INCLUDE_DEFAULTS_PREFIX			\
++    { PREFIX_INCLUDE_DIR, 0, 0, 1, 0, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_PREFIX
++#endif
++
++#ifdef FIXED_INCLUDE_DIR
++#define PS3DK_INCLUDE_DEFAULTS_FIXED			\
++    { FIXED_INCLUDE_DIR, "GCC", 0, 0, 0, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_FIXED
++#endif
++
++#ifdef CROSS_INCLUDE_DIR
++#define PS3DK_INCLUDE_DEFAULTS_CROSS			\
++    { CROSS_INCLUDE_DIR, "GCC", 0, 0, 0, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_CROSS
++#endif
++
++#ifdef TOOL_INCLUDE_DIR
++#define PS3DK_INCLUDE_DEFAULTS_TOOL			\
++    { TOOL_INCLUDE_DIR, "BINUTILS", 0, 1, 0, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_TOOL
++#endif
++
++#ifdef NATIVE_SYSTEM_HEADER_DIR
++#define PS3DK_INCLUDE_DEFAULTS_NATIVE			\
++    { NATIVE_SYSTEM_HEADER_DIR, 0, 0, 0, 1, 2 },	\
++    { NATIVE_SYSTEM_HEADER_DIR, 0, 0, 0, 1, 0 },
++#else
++#define PS3DK_INCLUDE_DEFAULTS_NATIVE
++#endif
++
++#if defined (CROSS_DIRECTORY_STRUCTURE) && !defined (TARGET_SYSTEM_ROOT)
++# undef PS3DK_INCLUDE_DEFAULTS_LOCAL
++# define PS3DK_INCLUDE_DEFAULTS_LOCAL
++# undef PS3DK_INCLUDE_DEFAULTS_NATIVE
++# define PS3DK_INCLUDE_DEFAULTS_NATIVE
++#else
++# undef PS3DK_INCLUDE_DEFAULTS_CROSS
++# define PS3DK_INCLUDE_DEFAULTS_CROSS
++#endif
++
++#undef INCLUDE_DEFAULTS
++#define INCLUDE_DEFAULTS				\
++  {							\
++    PS3DK_INCLUDE_DEFAULTS_SDK				\
++    PS3DK_INCLUDE_DEFAULTS_GPP				\
++    PS3DK_INCLUDE_DEFAULTS_GCC				\
++    PS3DK_INCLUDE_DEFAULTS_LOCAL			\
++    PS3DK_INCLUDE_DEFAULTS_PREFIX			\
++    PS3DK_INCLUDE_DEFAULTS_FIXED			\
++    PS3DK_INCLUDE_DEFAULTS_CROSS			\
++    PS3DK_INCLUDE_DEFAULTS_TOOL				\
++    PS3DK_INCLUDE_DEFAULTS_NATIVE			\
++    { 0, 0, 0, 0, 0, 0 }				\
++  }

@@ -42,3 +42,4 @@
 0041-cell64lv2-wchar-16bit.patch
 0042-cell64lv2-altivec-keywords-strict-std.patch
 0043-cell64lv2-minimal-toc-ilp32.patch
+0044-cell64lv2-sdk-default-include.patch
