@@ -26,6 +26,13 @@ extern "C" {
  * registers (e.g. the spuchain sample).  Matches the reference layout:
  * each SPU thread's problem-state area is SPU_THREAD_BASE + n*OFFSET, and
  * the two signal-notify registers sit at the fixed local offsets below. */
+#define SYS_SPU_THREAD_BASE_HIGH 0x00000000U
+#define SYS_SPU_THREAD_BASE_LOW  0xF0000000U
+#define SYS_SPU_THREAD_OFFSET    0x00100000U
+#define SYS_SPU_THREAD_LS_BASE   0x00000000U
+#define SYS_SPU_THREAD_SNR1      0x0005400CU
+#define SYS_SPU_THREAD_SNR2      0x0005C00CU
+
 #ifndef SPU_THREAD_BASE
 #define SPU_THREAD_BASE          0xF0000000ULL
 #endif

@@ -14,5 +14,6 @@
 
 typedef uint64_t usecond_t;
 typedef uint64_t second_t;
+typedef uint32_t sys_event_type_t;
 
 #endif  /* _PS3DK_SYS_SYS_TYPES_H */
