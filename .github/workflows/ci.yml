@@ -185,6 +185,14 @@ jobs:
           python3 tests/sdk/spurs-common-archive-test.py
           python3 tests/sdk/spu-shared-refusal-test.py
 
+      # Skips without PS3DEV; runs against an installed or candidate compiler.
+      - name: Test AltiVec keywords under a strict -std=
+        run: bash tests/sdk/altivec-strict-std-test.sh
+
+      # Skips without PS3DEV; runs against an installed or candidate compiler.
+      - name: Test -mminimal-toc in both PPU ABIs
+        run: bash tests/sdk/minimal-toc-ilp32-test.sh
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.

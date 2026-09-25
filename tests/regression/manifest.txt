@@ -30,6 +30,16 @@ cxx-eh-lp64,tests/regression/cxx-eh/cxx-eh-lp64.fake.self,90,RAN-CLEAN,CXX_EH_OK
 # libstdc++ wide-character behaviour in both ABIs.
 abi-types-ilp32,tests/regression/abi-types/abi-types-ilp32.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
 abi-types-lp64,tests/regression/abi-types/abi-types-lp64.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
+# altivec-strict-std guards AltiVec vector types, simdmath and vectormath
+# under a strict -std=c++17 (GCC patch 0042), and that std::vector and
+# bool keep their meaning beside the context-sensitive keywords.
+altivec-strict-std-ilp32,tests/regression/altivec-strict-std/altivec-strict-std-ilp32.fake.self,60,RAN-CLEAN,ALTIVEC_STRICT_OK,ALTIVEC_STRICT_FAIL
+altivec-strict-std-lp64,tests/regression/altivec-strict-std/altivec-strict-std-lp64.fake.self,60,RAN-CLEAN,ALTIVEC_STRICT_OK,ALTIVEC_STRICT_FAIL
+# minimal-toc guards -mminimal-toc in both ABIs (GCC patch 0043): globals,
+# arrays, strings and a function pointer across two units reached through
+# the minimal TOC base.
+minimal-toc-ilp32,tests/regression/minimal-toc/minimal-toc-ilp32.fake.self,60,RAN-CLEAN,MINIMAL_TOC_OK,MINIMAL_TOC_FAIL
+minimal-toc-lp64,tests/regression/minimal-toc/minimal-toc-lp64.fake.self,60,RAN-CLEAN,MINIMAL_TOC_OK,MINIMAL_TOC_FAIL
 # legacy-image-dec guards PSL1GHT legacy image loaders (jpgLoadFromFile,
 # jpgLoadFromBuffer, pngLoadFromFile, pngLoadFromBuffer).
 legacy-image-dec,tests/regression/legacy-image-dec/legacy-image-dec.fake.self,25,RAN-CLEAN,LEGACY_IMAGE_DEC_OK,LEGACY_IMAGE_DEC_FAIL

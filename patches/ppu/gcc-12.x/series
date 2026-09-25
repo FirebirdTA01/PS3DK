@@ -40,3 +40,5 @@
 0039-cell64lv2-lp64-sdk-library-path.patch
 0040-cell64lv2-stdint-32bit-int.patch
 0041-cell64lv2-wchar-16bit.patch
+0042-cell64lv2-altivec-keywords-strict-std.patch
+0043-cell64lv2-minimal-toc-ilp32.patch

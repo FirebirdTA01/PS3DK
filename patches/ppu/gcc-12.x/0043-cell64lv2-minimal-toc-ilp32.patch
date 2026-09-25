@@ -1,0 +1,56 @@
+rs6000: -mminimal-toc in the cell64lv2 hybrid ILP32 ABI
+
+Under ILP32 (64-bit registers, SImode pointers) -mminimal-toc emitted
+load_toc_aix_si, whose condition required TARGET_32BIT, so every function
+that touched the TOC died with "unrecognizable insn" in extract_insn.
+Accept the pattern when Pmode is SImode, load the minimal TOC base with
+lwz from .LCTOC0@toc as the DI pattern does with ld, and make that base
+slot a 4-byte .long like every other ILP32 TOC entry.  The reference
+compiler emits the same lwz of a 4-byte slot.  Other targets unchanged.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -20331,8 +20331,15 @@
+ 	  fprintf (asm_out_file, "%s\n", TOC_SECTION_ASM_OP);
+ 	  ASM_OUTPUT_ALIGN (asm_out_file, TARGET_64BIT ? 3 : 2);
+ 	  (*targetm.asm_out.internal_label) (asm_out_file, "LCTOC", 0);
+-	  fprintf (asm_out_file, "\t.tc ");
+-	  ASM_OUTPUT_INTERNAL_LABEL_PREFIX (asm_out_file, "LCTOC1[TC],");
++	  /* CellOS Lv-2 hybrid ILP32: a TOC slot is one 32-bit address word
++	     (see output_toc), and load_toc_aix_si reads it with lwz.  */
++	  if (TARGET_64BIT && Pmode == SImode)
++	    fprintf (asm_out_file, "\t.long ");
++	  else
++	    {
++	      fprintf (asm_out_file, "\t.tc ");
++	      ASM_OUTPUT_INTERNAL_LABEL_PREFIX (asm_out_file, "LCTOC1[TC],");
++	    }
+ 	  ASM_OUTPUT_INTERNAL_LABEL_PREFIX (asm_out_file, "LCTOC1");
+ 	  fprintf (asm_out_file, "\n");
+ 
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -10850,12 +10850,21 @@
+   [(parallel [(set (match_operand:SI 0 "gpc_reg_operand" "=r")
+ 		   (unspec:SI [(const_int 0)] UNSPEC_TOC))
+ 	      (use (reg:SI 2))])]
+-  "(DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2) && TARGET_32BIT"
++  "(DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2)
++   && (TARGET_32BIT || Pmode == SImode)"
+ {
+   char buf[30];
+   extern int need_toc_init;
++  /* CellOS Lv-2 hybrid ILP32 (64-bit registers, SImode pointers) reaches
++     this pattern for -mminimal-toc: load the minimal TOC's base from its
++     4-byte slot in the ELF TOC, the way load_toc_aix_di does with an
++     8-byte one.  */
++  bool hybrid_elf = TARGET_64BIT && TARGET_ELF;
+   need_toc_init = 1;
+-  ASM_GENERATE_INTERNAL_LABEL (buf, "LCTOC", 1);
++  ASM_GENERATE_INTERNAL_LABEL (buf, "LCTOC",
++			       !hybrid_elf || !TARGET_MINIMAL_TOC);
++  if (hybrid_elf)
++    strcat (buf, "@toc");
+   operands[1] = gen_rtx_SYMBOL_REF (Pmode, ggc_strdup (buf));
+   operands[2] = gen_rtx_REG (Pmode, 2);
+   return "lwz %0,%1(%2)";

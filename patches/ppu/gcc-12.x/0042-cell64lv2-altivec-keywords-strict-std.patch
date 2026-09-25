@@ -1,0 +1,57 @@
+rs6000: treat vector/pixel/bool as AltiVec keywords under strict -std= on cell64lv2
+
+The reference PS3 compiler defines the context-sensitive AltiVec keywords
+(and so accepts `vector float`) in every language mode; upstream GCC drops
+them when flag_iso is set, so strict -std=c99/c++98/c++17 code that uses
+the SDK vector headers fails with "vector does not name a type".
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -75,6 +75,12 @@
+ 
+ /* Enable the shared linux64-style override_options function in rs6000.cc.  */
+ #define TARGET_USES_LINUX64_OPT 1
++
++/* The PS3 reference compiler recognises vector, pixel and bool as
++   context-sensitive AltiVec keywords even under a strict -std=, and its
++   SDK headers and samples rely on it (e.g. vector types in simdmath.h
++   compiled with -std=c++98).  */
++#define RS6000_ALTIVEC_KEYWORDS_ALWAYS 1
+ #ifdef HAVE_LD_LARGE_TOC
+ #undef TARGET_CMODEL
+ #define TARGET_CMODEL rs6000_current_cmodel
+--- a/gcc/config/rs6000/rs6000-c.cc
++++ b/gcc/config/rs6000/rs6000-c.cc
+@@ -37,6 +37,14 @@
+ 
+ #include "rs6000-internal.h"
+ 
++/* A target whose reference compiler treats vector, pixel and bool as
++   context-sensitive AltiVec keywords in every language mode (not only the
++   GNU dialects) sets this, so strict -std= code written against that
++   compiler's headers keeps compiling.  */
++#ifndef RS6000_ALTIVEC_KEYWORDS_ALWAYS
++#define RS6000_ALTIVEC_KEYWORDS_ALWAYS 0
++#endif
++
+ /* Handle the machine specific pragma longcall.  Its syntax is
+ 
+    # pragma longcall ( TOGGLE )
+@@ -469,7 +477,7 @@
+       rs6000_define_or_undefine_macro (define_p, vec_str);
+ 
+ 	  /* Define this when supporting context-sensitive keywords.  */
+-      if (!flag_iso)
++      if (!flag_iso || RS6000_ALTIVEC_KEYWORDS_ALWAYS)
+ 	rs6000_define_or_undefine_macro (define_p, "__APPLE_ALTIVEC__");
+       if (rs6000_aix_extabi)
+ 	rs6000_define_or_undefine_macro (define_p, "__EXTABI__");
+@@ -631,7 +639,7 @@
+       builtin_define ("__pixel=__attribute__((altivec(pixel__))) unsigned short");
+       builtin_define ("__bool=__attribute__((altivec(bool__))) unsigned");
+ 
+-      if (!flag_iso)
++      if (!flag_iso || RS6000_ALTIVEC_KEYWORDS_ALWAYS)
+ 	{
+ 	  builtin_define ("vector=vector");
+ 	  builtin_define ("pixel=pixel");
