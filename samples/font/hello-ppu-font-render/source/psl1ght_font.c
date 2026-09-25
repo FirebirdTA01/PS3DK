@@ -64,24 +64,32 @@ int psl1ght_check_font(void *font_obj, const void *expect_lib,
     return ok;
 }
 
-float psl1ght_render_text(void *font_obj, uint8_t *surface_buf, int width,
-                          int height, float x, float y, const char *text)
+int psl1ght_render_text(void *font_obj, uint8_t *surface_buf, int width,
+                        int height, float x, float y, const char *text,
+                        float *pen_end)
 {
     font *f = (font *)font_obj;
     fontRenderSurface surf;
     fontGlyphMetrics metrics;
     fontImageTransInfo trans;
+    int failed = 0;
 
     fontRenderSurfaceInit(&surf, surface_buf, width, 1, width, height);
     fontRenderSurfaceSetScissor(&surf, 0, 0, width, height);
     for (const char *p = text; *p; p++) {
-        if (fontRenderCharGlyphImage(f, (u8)*p, &surf, x, y, &metrics,
-                                     &trans) != 0)
+        s32 rc = fontRenderCharGlyphImage(f, (u8)*p, &surf, x, y, &metrics,
+                                          &trans);
+        if (rc != 0) {
+            printf("  PSL1GHT fontRenderCharGlyphImage('%c' U+%04X) -> 0x%08x\n",
+                   *p, (unsigned)(u8)*p, (unsigned)rc);
+            failed++;
             continue;
+        }
         copy_glyph(trans.image, trans.imageWidthByte, trans.imageWidth,
                    trans.imageHeight, (uint8_t *)trans.surface,
                    trans.surfWidthByte);
         x += metrics.horizontal.advance;
     }
-    return x;
+    *pen_end = x;
+    return failed;
 }

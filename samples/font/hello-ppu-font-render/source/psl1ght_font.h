@@ -8,10 +8,12 @@
 int psl1ght_check_font(void *font_obj, const void *expect_lib,
                        const void *expect_renderer);
 
-/* Renders text through PSL1GHT names into an 8-bit surface; returns the
- * pen position after the last glyph. */
-float psl1ght_render_text(void *font_obj, uint8_t *surface_buf, int width,
-                          int height, float x, float y, const char *text);
+/* Renders text through PSL1GHT names into an 8-bit surface and stores the
+ * pen position after the last glyph in *pen_end. Returns the number of
+ * glyph calls that failed (each is reported); a caller requires zero. */
+int psl1ght_render_text(void *font_obj, uint8_t *surface_buf, int width,
+                        int height, float x, float y, const char *text,
+                        float *pen_end);
 
 /* Copies a rendered glyph image into the surface position the font
  * library reported (main.c). */

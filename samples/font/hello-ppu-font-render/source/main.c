@@ -12,9 +12,12 @@
  *
  * Glyphs are rendered into an 8-bit coverage surface, composited white on
  * blue into both display buffers, and shown for about three seconds (or
- * until START). The guest checks that every line has ink inside its band
- * and none outside, prints FONT_RENDER_OK or FONT_RENDER_FAIL, and writes
- * the displayed buffer to /dev_hdd0/tmp/hello-ppu-font-render.bmp so the
+ * until START). FONT_RENDER_OK requires every glyph call to succeed (a
+ * failure is printed with its character), each line to have ink inside
+ * its band (a smoke check, not a text oracle), no coverage at all outside
+ * the bands, and every flip to complete; the verdict is printed last.
+ * As an optional artifact that does not affect the verdict, the displayed
+ * buffer is written to /dev_hdd0/tmp/hello-ppu-font-render.bmp so the
  * picture can be inspected on the host.
  *
  * libfont hands back each glyph as an image plus a surface position
@@ -33,6 +36,7 @@
 #include <string.h>
 #include <malloc.h>
 #include <unistd.h>
+#include <math.h>
 
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -90,10 +94,21 @@ static void wait_rsx_idle(gcmContextData *ctx)
         usleep(30);
 }
 
-static void wait_flip(void)
+/* Waits for the queued flip to complete, for at most FLIP_TIMEOUT_US.
+ * Returns 0 on timeout, so a presentation failure cannot hang the sample
+ * or be reported as success. */
+#define FLIP_TIMEOUT_US 2000000
+static int wait_flip(void)
 {
-    while (gcmGetFlipStatus() != 0) usleep(200);
+    int waited = 0;
+    while (gcmGetFlipStatus() != 0) {
+        if (waited >= FLIP_TIMEOUT_US)
+            return 0;
+        usleep(200);
+        waited += 200;
+    }
     gcmResetFlipStatus();
+    return 1;
 }
 
 static int do_flip(gcmContextData *ctx, s32 id)
@@ -214,6 +229,10 @@ static int font_open(font_state *fs)
            (unsigned long long)revision);
 
     fs->file_cache = (uint32_t *)memalign(128, 1024 * 1024);
+    if (!fs->file_cache) {
+        printf("  file cache allocation failed\n");
+        return 0;
+    }
     CellFontConfig_initialize(&config);
     config.FileCache.buffer = fs->file_cache;
     config.FileCache.size   = 1024 * 1024;
@@ -274,20 +293,29 @@ void copy_glyph(const uint8_t *image, uint32_t image_stride, uint32_t w,
         }
 }
 
-static float canonical_render_text(CellFont *font, uint8_t *buf, int width,
-                                   int height, float x, float y,
-                                   const char *text)
+/* Renders text and stores the final pen position in *pen_end. Every
+ * glyph call must succeed, including the ones for spaces (which draw no
+ * ink); returns the number of calls that failed, each reported. */
+static int canonical_render_text(CellFont *font, uint8_t *buf, int width,
+                                 int height, float x, float y,
+                                 const char *text, float *pen_end)
 {
     CellFontRenderSurface surf;
     CellFontGlyphMetrics metrics;
     CellFontImageTransInfo trans;
+    int failed = 0;
 
     cellFontRenderSurfaceInit(&surf, buf, width, 1, width, height);
     cellFontRenderSurfaceSetScissor(&surf, 0, 0, width, height);
     for (const char *p = text; *p; p++) {
-        if (cellFontRenderCharGlyphImage(font, (uint8_t)*p, &surf, x, y,
-                                         &metrics, &trans) != CELL_OK)
+        int rc = cellFontRenderCharGlyphImage(font, (uint8_t)*p, &surf, x, y,
+                                              &metrics, &trans);
+        if (rc != CELL_OK) {
+            printf("  cellFontRenderCharGlyphImage('%c' U+%04X) -> 0x%08x\n",
+                   *p, (unsigned)(uint8_t)*p, (unsigned)rc);
+            failed++;
             continue;
+        }
         /* The glyph is rasterised into the renderer's buffer; TransInfo
          * says where it is and where in the surface it belongs. Copying it
          * across is the caller's job. */
@@ -296,7 +324,8 @@ static float canonical_render_text(CellFont *font, uint8_t *buf, int width,
                    trans.surfWidthByte);
         x += metrics.Horizontal.advance;
     }
-    return x;
+    *pen_end = x;
+    return failed;
 }
 
 /* ------------------------------------------------------------------ *
@@ -323,12 +352,15 @@ static void measure_band(const uint8_t *cov, int width, line_ink *li)
             }
 }
 
-static int count_lit(const uint8_t *cov, int width, int y0, int y1)
+/* Counts every pixel with any coverage at all: even faint coverage
+ * changes the composited colour, so "nothing outside the bands" has to
+ * mean nonzero, not merely below the lit threshold. */
+static int count_inked(const uint8_t *cov, int width, int y0, int y1)
 {
     int n = 0;
     for (int y = y0; y < y1; y++)
         for (int x = 0; x < width; x++)
-            n += cov[y * width + x] >= 128;
+            n += cov[y * width + x] != 0;
     return n;
 }
 
@@ -351,14 +383,21 @@ static void put_le32(uint8_t *p, uint32_t v)
     p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24;
 }
 
-/* Writes the display buffer as a 24-bit bottom-up BMP. */
+static int write_all(int fd, const void *buf, uint64_t size)
+{
+    uint64_t written = 0;
+    return cellFsWrite(fd, buf, size, &written) == CELL_FS_SUCCEEDED
+        && written == size;
+}
+
+/* Writes the display buffer as a 24-bit bottom-up BMP. Returns 1 only if
+ * every write stored the full requested size and the file closed. */
 static int write_bmp(const display_buffer *src)
 {
     uint32_t row = ((uint32_t)src->width * 3 + 3) & ~3u;
     uint32_t data = row * src->height;
     uint8_t header[54] = { 'B', 'M' };
     uint8_t *line = (uint8_t *)calloc(1, row);
-    uint64_t written;
     int fd, ok = 1;
 
     put_le32(header + 2, 54 + data);
@@ -375,7 +414,7 @@ static int write_bmp(const display_buffer *src)
         free(line);
         return 0;
     }
-    ok = cellFsWrite(fd, header, sizeof(header), &written) == CELL_FS_SUCCEEDED;
+    ok = write_all(fd, header, sizeof(header));
     for (int y = src->height - 1; ok && y >= 0; y--) {
         const uint32_t *px = src->ptr + y * src->width;
         for (int x = 0; x < src->width; x++) {
@@ -383,11 +422,18 @@ static int write_bmp(const display_buffer *src)
             line[x * 3 + 1] = px[x] >> 8;
             line[x * 3 + 2] = px[x] >> 16;
         }
-        ok = cellFsWrite(fd, line, row, &written) == CELL_FS_SUCCEEDED;
+        ok = write_all(fd, line, row);
     }
-    cellFsClose(fd);
+    if (cellFsClose(fd) != CELL_FS_SUCCEEDED)
+        ok = 0;
     free(line);
     return ok;
+}
+
+static int fail(const char *why)
+{
+    printf("  %s\nFONT_RENDER_FAIL\n", why);
+    return 1;
 }
 
 int main(int argc, char **argv)
@@ -397,81 +443,97 @@ int main(int argc, char **argv)
     printf("hello-ppu-font-render: system font through cellFont and PSL1GHT names\n");
 
     void *host_addr = memalign(1024 * 1024, HOST_SIZE);
+    if (!host_addr)
+        return fail("host memory allocation failed");
     u16   fb_w = 0, fb_h = 0;
     gcmContextData *ctx = init_screen(host_addr, HOST_SIZE, &fb_w, &fb_h);
-    if (!ctx) {
-        printf("  init_screen failed\nFONT_RENDER_FAIL\n");
-        return 1;
-    }
+    if (!ctx)
+        return fail("init_screen failed");
     printf("  RSX up at %ux%u\n", (unsigned)fb_w, (unsigned)fb_h);
 
     font_state fs;
     memset(&fs, 0, sizeof(fs));
     if (!font_open(&fs)) {
-        printf("FONT_RENDER_FAIL\n");
         rsxFinish(ctx, 0);
-        return 1;
+        return fail("font set-up failed");
     }
 
     int ok = psl1ght_check_font(&fs.font, fs.lib, &fs.renderer);
 
     CellFontHorizontalLayout layout;
-    check("cellFontGetHorizontalLayout", cellFontGetHorizontalLayout(&fs.font, &layout));
+    if (!check("cellFontGetHorizontalLayout",
+               cellFontGetHorizontalLayout(&fs.font, &layout)))
+        return fail("layout query failed");
     printf("  layout: baseLineY=%.1f lineHeight=%.1f\n",
            layout.baseLineY, layout.lineHeight);
+    /* The bands are built from the layout, so it must be sane before any
+     * index is derived from it. */
+    if (!isfinite(layout.lineHeight) || !isfinite(layout.baseLineY)
+        || layout.lineHeight <= 0.0f || layout.lineHeight > fb_h / 4
+        || layout.baseLineY <= 0.0f || layout.baseLineY > layout.lineHeight)
+        return fail("layout values out of range");
 
     uint8_t *cov = (uint8_t *)calloc(1, (size_t)fb_w * fb_h);
+    if (!cov)
+        return fail("coverage allocation failed");
     line_ink ink[LINE_COUNT];
     int band = (int)(layout.lineHeight + 0.5f);
     int first_top = fb_h / 3;
+    if (first_top + (2 * LINE_COUNT - 1) * band > fb_h)
+        return fail("text bands do not fit the framebuffer");
     for (int i = 0; i < LINE_COUNT; i++) {
         ink[i].top    = first_top + i * band * 2;
         ink[i].bottom = ink[i].top + band;
-        float end;
+        float end = 0.0f;
+        int failed;
         if (i == 0)
-            end = canonical_render_text(&fs.font, cov, fb_w, fb_h, 64.0f,
-                                        (float)ink[i].top, line_text[i]);
+            failed = canonical_render_text(&fs.font, cov, fb_w, fb_h, 64.0f,
+                                           (float)ink[i].top, line_text[i], &end);
         else
-            end = psl1ght_render_text(&fs.font, cov, fb_w, fb_h, 64.0f,
-                                      (float)ink[i].top, line_text[i]);
+            failed = psl1ght_render_text(&fs.font, cov, fb_w, fb_h, 64.0f,
+                                         (float)ink[i].top, line_text[i], &end);
         measure_band(cov, fb_w, &ink[i]);
-        printf("  line %d \"%s\": pen end x=%.1f, %d lit pixels in rows %d..%d cols %d..%d\n",
-               i + 1, line_text[i], end, ink[i].lit, ink[i].y0, ink[i].y1,
-               ink[i].x0, ink[i].x1);
-        /* A line of ~40 glyphs at 48 px lights thousands of pixels and
-         * spans most of its pen advance. */
+        printf("  line %d \"%s\": %d failed glyph calls, pen end x=%.1f, "
+               "%d lit pixels in rows %d..%d cols %d..%d\n",
+               i + 1, line_text[i], failed, end, ink[i].lit, ink[i].y0,
+               ink[i].y1, ink[i].x0, ink[i].x1);
+        /* Every glyph must render; the ink thresholds below are only a
+         * smoke check that the images landed in the surface, not a text
+         * oracle. A line of ~40 glyphs at 48 px lights thousands of pixels
+         * and spans most of its pen advance. */
+        if (failed != 0)
+            ok = 0;
         if (ink[i].lit < 2000 || ink[i].x1 - ink[i].x0 < (int)((end - 64.0f) * 0.8f))
             ok = 0;
     }
-    /* Nothing may land outside the two bands. */
-    int stray = count_lit(cov, fb_w, 0, ink[0].top)
-              + count_lit(cov, fb_w, ink[0].bottom, ink[1].top)
-              + count_lit(cov, fb_w, ink[1].bottom, fb_h);
-    printf("  lit pixels outside the text bands: %d\n", stray);
+    /* No coverage at all may land outside the two bands. */
+    int stray = count_inked(cov, fb_w, 0, ink[0].top)
+              + count_inked(cov, fb_w, ink[0].bottom, ink[1].top)
+              + count_inked(cov, fb_w, ink[1].bottom, fb_h);
+    printf("  inked pixels outside the text bands: %d\n", stray);
     if (stray != 0)
         ok = 0;
 
     ioPadInit(7);
     display_buffer buffers[MAX_BUFFERS];
     for (int i = 0; i < MAX_BUFFERS; i++) {
-        if (!make_buffer(&buffers[i], fb_w, fb_h, i)) {
-            printf("  make_buffer[%d] failed\nFONT_RENDER_FAIL\n", i);
-            return 1;
-        }
+        if (!make_buffer(&buffers[i], fb_w, fb_h, i))
+            return fail("display buffer set-up failed");
         composite(&buffers[i], cov);
     }
-    do_flip(ctx, MAX_BUFFERS - 1);
+    int shown = do_flip(ctx, MAX_BUFFERS - 1) && wait_flip();
+    if (!shown)
+        printf("  first flip failed or timed out\n");
 
+    /* Optional artifact: it does not affect the verdict. */
     if (write_bmp(&buffers[0]))
-        printf("  wrote %s\n", BMP_PATH);
+        printf("  BMP artifact written: %s\n", BMP_PATH);
     else
-        printf("  could not write %s\n", BMP_PATH);
+        printf("  BMP artifact NOT written (optional): %s\n", BMP_PATH);
 
-    printf(ok ? "FONT_RENDER_OK\n" : "FONT_RENDER_FAIL\n");
     printf("  showing for %d frames (START exits early)\n", SHOW_FRAMES);
-
     int cur = 0;
-    for (int frame = 0; frame < SHOW_FRAMES; frame++) {
+    for (int frame = 0; shown && frame < SHOW_FRAMES; frame++) {
         padInfo padinfo;
         int start = 0;
         ioPadGetInfo(&padinfo);
@@ -484,10 +546,14 @@ int main(int argc, char **argv)
         }
         if (start)
             break;
-        wait_flip();
-        do_flip(ctx, buffers[cur].id);
+        if (!do_flip(ctx, buffers[cur].id) || !wait_flip()) {
+            printf("  flip failed or timed out at frame %d\n", frame);
+            shown = 0;
+        }
         cur = (cur + 1) % MAX_BUFFERS;
     }
+    if (!shown)
+        ok = 0;
 
     gcmSetWaitFlip(ctx);
     for (int i = 0; i < MAX_BUFFERS; i++) rsxFree(buffers[i].ptr);
@@ -497,6 +563,9 @@ int main(int argc, char **argv)
     free(cov);
     free(host_addr);
 
+    /* The verdict comes last, after rendering, the checks and the display
+     * loop have all completed. */
+    printf(ok ? "FONT_RENDER_OK\n" : "FONT_RENDER_FAIL\n");
     printf("hello-ppu-font-render: done\n");
     return ok ? 0 : 1;
 }
