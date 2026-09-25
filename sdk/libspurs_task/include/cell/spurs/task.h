@@ -1,7 +1,8 @@
 /* cell/spurs/task.h - SPU-side Spurs task runtime surface.
  *
  * Canonical include for SPU ELFs that ship as Spurs tasks.  Declares
- * the user-side entry point (cellSpursMain) the crt calls, plus
+ * the canonical task entry (cellSpursTaskMain), the legacy entry the CRT
+ * calls (cellSpursMain), and
  * the runtime helpers implemented in libspurs_task.a.
  *
  * Build expectations:
@@ -9,7 +10,10 @@
  *               -lspurs_task
  *
  * The user provides:
- *   void cellSpursMain(qword argTask, uint64_t argTaskset);
+ *   int cellSpursTaskMain(qword argTask, uint64_t argTaskset);
+ * Its result is passed to cellSpursTaskExit. A user-provided legacy
+ * cellSpursMain overrides the archive bridge, including when both entries
+ * are defined. Link application objects before libspurs_task.a.
  *
  * argTask arrives in r3 (full 16-byte vector),
  * argTaskset arrives in r4 preferred slot (64-bit EA).
@@ -28,7 +32,9 @@
 extern "C" {
 #endif
 
-/* User-provided entry; crt branches here on task start. */
+/* Canonical entry: return the task exit code. Both entries have C linkage. */
+int cellSpursTaskMain(qword argTask, uint64_t argTaskset);
+/* Legacy override; crt branches here on task start. */
 void cellSpursMain(qword argTask, uint64_t argTaskset);
 
 /* Runtime dispatch -- all implemented in libspurs_task.a via the

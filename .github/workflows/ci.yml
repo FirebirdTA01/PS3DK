@@ -159,6 +159,12 @@ jobs:
       - name: Test audio compatibility alias ownership when cross SDK is available
         run: python3 tests/sdk/audio-alias-link-test.py
 
+      - name: Test SPURS task entry argument and exit-code forwarding
+        run: python3 tests/sdk/spurs-task-entry-host-test.py
+
+      - name: Test SPURS task entry links when cross SDK is available
+        run: python3 tests/sdk/spurs-task-entry-cross-test.py
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.

@@ -23,7 +23,7 @@ AR      := spu-elf-ar
 CFLAGS  := -O2 -Wall -Wextra -fno-exceptions -ffreestanding \
            -falign-functions=8 -mno-branch-hints \
            -fno-schedule-insns2 \
-           -I../include
+           -Iinclude -I../include
 SFLAGS  := -Wall
 
 # -fno-schedule-insns2 disables GCC's post-RA instruction scheduler.
@@ -37,6 +37,7 @@ SFLAGS  := -Wall
 
 BUILD   := build
 OBJS    := $(BUILD)/crt_spurs_task.o \
+           $(BUILD)/spurs_task_main.o \
            $(BUILD)/spurs_task_exit.o \
            $(BUILD)/spurs_task_runtime.o \
            $(BUILD)/spurs_module_runtime.o \
