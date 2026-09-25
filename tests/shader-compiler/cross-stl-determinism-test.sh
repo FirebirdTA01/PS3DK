@@ -19,11 +19,14 @@
 # compilers that exit like a crash, a timeout, a timeout(1) error, or exit 0
 # without writing a container; all must be rejected.
 #
-# Usage: cross-stl-determinism-test.sh <compiler-A> <compiler-B> [shader-dir]
+# Usage: cross-stl-determinism-test.sh <compiler-A> [compiler-B] [shader-dir]
+# With one compiler (the form every script in this directory is run with by
+# refusal-status-adversary-test.sh) B defaults to A: two runs of one build must
+# agree, which still catches run-to-run nondeterminism.  CI passes both builds.
 set -u
 
-A="${1:?usage: $0 <compiler-A> <compiler-B> [shader-dir]}"
-B="${2:?usage: $0 <compiler-A> <compiler-B> [shader-dir]}"
+A="${1:?usage: $0 <compiler-A> [compiler-B] [shader-dir]}"
+B="${2:-$A}"
 root=$(cd "$(dirname "$0")/../.." && pwd)
 corpus="${3:-$root/tools/rsx-cg-compiler/tests/shaders}"
 status=0
