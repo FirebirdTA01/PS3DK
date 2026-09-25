@@ -3,3 +3,4 @@
 0003-spu-spurs-job-driver-flags.patch
 0004-spu-link-sputhread.patch
 0006-spu-spurs-startup-selection.patch
+0007-spu-reject-unsupported-shared-links.patch

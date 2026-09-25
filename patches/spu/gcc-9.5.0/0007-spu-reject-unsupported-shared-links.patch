@@ -1,0 +1,17 @@
+Reject SPUDLL shared links instead of silently linking an ordinary executable.
+
+The SPU linker has no shared-library support. GCC previously consumed -shared
+without forwarding it, then selected ordinary startup and libraries. Diagnose
+the unsupported mode in LINK_SPEC, including links that suppress startup or
+default libraries. Compile-only PIC and backend relocation checks are unchanged.
+
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -76,6 +76,7 @@
+ /* -dT is a default script: an explicit -T (including a forwarded
+    -Wl,-T) wins regardless of the order in which the driver emits it.  */
+ #define LINK_SPEC \
++  "%{shared:%eSPUDLL shared links are not supported by this toolchain} " \
+   "%{mspurs-task:%{mspurs-job|mspurs-job-initialize:%econflicting SPURS modes}} " \
+   "%{mspurs-job:%{mspurs-job-initialize:%econflicting SPURS modes}} " \
+   "%{mspurs-task|mspurs-job|mspurs-job-initialize:" \

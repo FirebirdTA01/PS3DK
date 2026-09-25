@@ -108,3 +108,22 @@ diagnostics and tracing. This change does not establish firmware cache lookup
 behavior. Tests distinguish identical rebuilds, one-instruction changes and
 one-data-byte changes, and reject a stale or malformed identity. A 64-bit
 identity is probabilistic and is not an authentication value.
+
+## SPUDLL shared objects
+
+SPU final links with `-shared` fail with an explicit unsupported-SPUDLL
+diagnostic, including `-nostartfiles`, `-nodefaultlibs` and `-nostdlib` links.
+Previously the driver consumed `-shared` and selected ordinary executable
+startup instead. Forwarding `-Wl,-shared` or `-Xlinker -shared` reaches the
+linker's existing `-shared not supported` error. Neither spelling produces
+a supported SPUDLL image.
+
+Compile-only `-c`, `-S` and `-E` operations retain their normal behavior.
+PIC compilation remains available, with the existing diagnostic for
+static-initializer addresses that require unsupported runtime relocation.
+Disabling that diagnostic with `-mno-error-reloc`, or using the linker's
+`--plugin` ELF type marker, does not provide a SPUDLL loader.
+
+SPUDLL support needs a separate object-format, symbol-export, relocation and
+constructor/destructor contract plus a loader that implements it. SPURS
+task/job startup and the PPU import archive do not supply that SPU runtime.
