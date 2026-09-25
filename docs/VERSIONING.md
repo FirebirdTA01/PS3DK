@@ -57,6 +57,10 @@ Logic:
 1. **Update the changelog.**  Move items from `## [Unreleased]` into a
    new `## [vX.Y.Z] — YYYY-MM-DD` section in `CHANGELOG.md`.  Follow
    [Keep a Changelog](https://keepachangelog.com/) conventions.
+   A version section lists only what changed - `### Added`, `### Fixed`,
+   `### Changed`, `### Known issues` and their entries.  No introduction:
+   do not explain why the release was cut or defend its version number.
+   The section body becomes the GitHub release notes verbatim.
 
 2. **Sync the Rust workspace version.**
 

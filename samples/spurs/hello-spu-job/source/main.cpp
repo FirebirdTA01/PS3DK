@@ -1,28 +1,25 @@
 /*
- * hello-spu-job - PPU side.
+ * hello-spu-job - SPURS JobChain + SPU job end-to-end sample.
  *
- * STATUS: two of three known dispatcher gates cleared.
- *   - JOB_DESCRIPTOR (0x80410a0b) gate: cleared by setting
- *     binaryInfo[0..3] = "bin2" magic.
- *   - SPU ELF acceptance gate: the SPU ELF passes the reference
- *     wrapping tool cleanly (see sdk/libspurs_job linker script).
- *   - MEMORY_SIZE (0x80410a17) gate: STILL FIRING.  Reported value
- *     at jobChain+0x84 is constant 0x0003F700 across every
- *     descriptor variation we've tried.  The dispatcher rejects
- *     ANY non-zero binaryInfo[4..7] regardless of binary content
- *     (flat raw / ELF / jobbin2-wrapped), sizeBinary, or the other
- *     descriptor size fields.  See docs/spurs-job-binary2-re.md
- *     Sessions 5 + 6 for the full probe matrix and decoded
- *     dispatcher disassembly; next-session approaches need either
- *     a memory-write watchpoint at &jobChain.error via RPCS3's GDB
- *     stub, or SPU instruction trace logging to capture which of
- *     the four 0xa17 sites fires and what register state preceded
- *     it.
+ * Drives the SPURS JobChain machinery with an embedded BINARY2 job:
+ *   1. Spurs2 bring-up: 4 SPUs, SPU priority 100, PPU priority 2,
+ *      SYS_SPU_THREAD_GROUP_TYPE_EXCLUSIVE_NON_CONTEXT.
+ *   2. JobChain creation and initialization with cellSpursJobChainAttribute
+ *      (sizeJobDescriptor=256, maxGrabbedJob=16, maxContention=4).
+ *   3. Embedded BINARY2 job descriptor setup (cellSpursJobMain2 entry):
+ *      eaBinary, sizeBinary, and workArea arguments {s_out, kMagic}.
+ *      Stack/scratch size fields are set to 0 (the dispatcher provisions
+ *      working buffers automatically; sizeStack=256 was observed to
+ *      reproduce MEMORY_SIZE 0x80410a17).
+ *   4. Run job chain; SPU job executes cellSpursJobMain2, DMA-puts
+ *      sentinel magic 0xC0FFEE99 back to PPU memory, and completes.
+ *   5. Polls on s_out[0] for sentinel (with cellSpursGetJobChainInfo diagnostic
+ *      logging). cellSpursShutdownJobChain runs unconditionally after polling
+ *      (to ensure Join unblocks even if halted); on timeout without sentinel,
+ *      it force-exits via sys_process_exit(1) before Join. Otherwise joins the
+ *      chain and finalizes Spurs.
  *
- * Sample drives the JobChain machinery end-to-end and prints a
- * halt diagnostic + the full job-descriptor + chain-info bytes so
- * it stays useful as a reproducer until the dispatcher's
- * MEMORY_SIZE trigger is decoded.
+ * STATUS: Runs end-to-end under RPCS3 (verified since commit 2a67bbe6).
  */
 
 #include <cstdio>
@@ -144,13 +141,10 @@ int main(void)
     s_job.workArea.userData[0] = (uint64_t)(uintptr_t)&s_out[0];
     s_job.workArea.userData[1] = kMagic;
 
-    /* Job stack / scratch: the dispatcher allocates per-job, but the
-     * descriptor needs minimum quadword counts.  4 KB stack + no
-     * scratch is plenty for our 4-instruction job. */
-    /* Reference job_hello descriptor leaves these all at zero (the
-     * dispatcher provisions stack/scratch from the job buffer it
-     * already sized).  Setting sizeStack=256 above pushed the
-     * dispatcher past its budget and reproduced as MEMORY_SIZE. */
+    /* Job stack / scratch: reference job_hello descriptor leaves these
+     * all at zero (the dispatcher provisions stack/scratch from the job
+     * buffer it already sized). Setting sizeStack=256 was observed to
+     * reproduce MEMORY_SIZE (0x80410a17). */
     s_job.header.sizeStack   = 0;
     s_job.header.sizeScratch = 0;
     s_job.header.useInOutBuffer = 0;

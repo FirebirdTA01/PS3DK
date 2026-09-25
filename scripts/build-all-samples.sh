@@ -57,7 +57,10 @@ fi
 [[ -f "$TOOLCHAIN_FILE" ]] || die "toolchain file not found: $TOOLCHAIN_FILE"
 
 say "refreshing SDK install"
-PS3DEV="$PS3DEV" PS3DK="$PS3DK" make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
+# build-sdk.sh, not a bare `make -C sdk install`: the SDK sublibs see both the
+# source and the installed wrapper headers, and only build-sdk.sh passes the
+# -D__PS3DK_SDK_SELFBUILD__ that suppresses the duplicate-wrapper #error.
+PS3DEV="$PS3DEV" PS3DK="$PS3DK" "$PS3_TOOLCHAIN_ROOT/scripts/build-sdk.sh"
 
 FAILED=()
 PASSED=0

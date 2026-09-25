@@ -7,7 +7,7 @@ add_executable(hello-ppu-fontgcm source/main.c)
 target_compile_features(hello-ppu-fontgcm PRIVATE c_std_11)
 
 target_link_libraries(hello-ppu-fontgcm PRIVATE
-    fontGcm cellFont_stub gcm_sys_stub c_stub sysutil rt lv2
+    fontGcm font_stub gcm_sys_stub c_stub sysutil rt lv2
 )
 
 ps3_add_self(hello-ppu-fontgcm)

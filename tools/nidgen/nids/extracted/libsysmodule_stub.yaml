@@ -5,34 +5,50 @@ archive_name: sysmodule
 exports:
 - name: cellSysmoduleFetchImage
   nid: '0x3c92be09'
+  aliases:
+    - sysModuleFetchImage
   signature: ''
   notes: extracted from _cellSysmodule_0001_4.o
 - name: cellSysmoduleFinalize
   nid: '0x96c07adf'
+  aliases:
+    - sysModuleFinalize
   signature: ''
   notes: extracted from _cellSysmodule_0001_7.o
 - name: cellSysmoduleGetImagesize
   nid: '0x1ef115ef'
+  aliases:
+    - sysModuleGetImagesize
   signature: ''
   notes: extracted from _cellSysmodule_0001_2.o
 - name: cellSysmoduleInitialize
   nid: '0x63ff6ff9'
+  aliases:
+    - sysModuleInitialize
   signature: ''
   notes: extracted from _cellSysmodule_0001_6.o
 - name: cellSysmoduleIsLoaded
   nid: '0x5a59e258'
+  aliases:
+    - sysModuleIsLoaded
   signature: ''
   notes: extracted from _cellSysmodule_0001_5.o
 - name: cellSysmoduleLoadModule
   nid: '0x32267a31'
+  aliases:
+    - sysModuleLoad
   signature: ''
   notes: extracted from _cellSysmodule_0001_3.o
 - name: cellSysmoduleSetMemcontainer
   nid: '0xa193143c'
+  aliases:
+    - sysModuleSetMemcontainer
   signature: ''
   notes: extracted from _cellSysmodule_0001_8.o
 - name: cellSysmoduleUnloadModule
   nid: '0x112a5ee9'
+  aliases:
+    - sysModuleUnload
   signature: ''
   notes: extracted from _cellSysmodule_0001_1.o
 imports: []

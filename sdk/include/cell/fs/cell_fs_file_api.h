@@ -353,6 +353,7 @@ CellFsErrno cellFsChmod(const char *path, CellFsMode mode);
 CellFsErrno cellFsUtime(const char *path, const CellFsUtimbuf *timep);
 
 /* ---- Path operations ---- */
+CellFsErrno cellFsAccess(const char *path, int amode);
 CellFsErrno cellFsMkdir(const char *path, CellFsMode mode);
 CellFsErrno cellFsRmdir(const char *path);
 CellFsErrno cellFsRename(const char *from, const char *to);

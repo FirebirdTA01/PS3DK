@@ -7,6 +7,104 @@ next surface.
 
 ---
 
+## Kernel toolchain output is not fully functional on hardware
+
+**Status:** open, cause not yet investigated.
+
+**Symptom.** Binaries built with the kernel-side toolchain
+(`powerpc64-ps3-kernel-elf`, built by
+`scripts/build-ppu-kernel-toolchain.sh`, full 64-bit ABI) are not fully
+functional: in a hardware report from the project director, a build of
+lv2 made with it crashes on real devkit hardware.
+
+**Scope.** This report concerns the kernel toolchain.  The application
+toolchain (`powerpc64-ps3-elf`, ILP32 by default and `-mlp64`) is a
+separate target; its behavior was not assessed by this report.
+
+**Workaround.** No known workaround.  Do not rely on kernel-toolchain output running
+correctly on hardware.
+
+**Planned fix.** Reproduce the crash, compare the kernel toolchain's code
+generation and link layout against a known-good build, and fix the
+difference; then add a regression check for kernel-target output.
+
+---
+
+## C++ exceptions are not caught on the PPU in the default ILP32 ABI
+
+**Status:** fixed on main (GCC patch 0037 and the matching CRT change);
+affects v0.14.0 and earlier releases.
+
+**Symptom (affected releases).** In the default ILP32 ABI, a C++ throw
+never reaches its handler: the program prints `terminate called after
+throwing an instance of '<type>'`, then `terminate called recursively`,
+and aborts.  LP64 (`-mlp64`) is not affected.
+
+**Cause.** The ILP32 unwinder treats the link register and the EH data
+registers r3-r6 as 8-byte registers, but ILP32 code saved the link
+register with a 4-byte store and reloaded r3-r6 with 4-byte loads.  The
+saved link-register bytes and the resulting wrong return address were
+measured on RPCS3 (v0.12.65 SDK probe).  The EH data register reload
+mismatch was established from the disassembly; the register values on
+handler entry were not captured.  The fix saves and restores the link
+register and r3-r6 as 64-bit values.  The reference toolchain also uses
+a 64-bit link-register save.
+
+**Workaround (affected releases).** Build code that needs C++ exceptions
+for LP64: `-mlp64`, link against `$PS3DK/ppu/lib/lp64`, and run
+`sprxlinker --lp64` on the ELF before `make_self`.
+
+**Remaining limits.** Objects built with an affected toolchain still
+save the link register in 4 bytes and cannot be unwound through; rebuild
+any C++ library that exceptions must pass through.  Exceptions cannot
+propagate across PRX/import calls: firmware PRX frames have no unwind
+information.
+
+---
+
+## PPU C++ runtime is built for a single-threaded model
+
+**Status:** open.  The part that affected exception handling is fixed on
+main (GCC patch 0038: per-thread exception state); the rest of the
+single-threaded configuration remains.
+
+**Fixed: exception state.** Up to v0.14.0, libsupc++ kept its exception
+globals (the caught-exception stack and uncaught count behind
+`std::current_exception()` and `std::uncaught_exceptions()`) in one
+object shared by every PPU thread, so two threads inside exception
+handling at once saw each other's exceptions (reproduced on RPCS3).  They
+are now thread-local, one per PPU thread.  This isolates the exception
+globals only; the items below still apply to exception handling on
+several threads.
+
+**Remaining.** The PPU GCC is still configured with
+`--enable-threads=single`, so libstdc++ is built without its thread
+layer (`_GLIBCXX_HAS_GTHREADS` is undefined):
+
+- Creating threads through `std::thread` is not available (the
+  launching constructor is compiled out; `join`/`detach` throw and
+  `hardware_concurrency()` returns 0), and `std::mutex` is not provided.
+- `std::shared_ptr` reference counts use the non-atomic single-thread
+  policy, so owners on different threads that share one control block
+  can corrupt its counts.
+- The first initialization of a function-local static is not guarded
+  against two threads reaching it at once.
+- The emergency pool libsupc++ uses to allocate exceptions when `malloc`
+  fails is guarded by a mutex that is a no-op in this configuration, so
+  two threads throwing under memory exhaustion can collide (established
+  from the source, not reproduced).
+
+**Mitigation.** Use the lv2 or pthread primitives from librt for
+threading and locking; initialize function-local statics before starting
+other threads; when `shared_ptr` owners on different threads share a
+control block, hold one lock around every copy, reset and destruction
+that changes its counts.
+
+**Planned fix.** Give the PPU GCC a real thread model backed by the lv2
+threading primitives already used by librt's pthread layer.
+
+---
+
 ## `CELL_SYSMODULE_SNS` (0xf043) refused by current firmware
 
 **Status:** stub archive + header surface ship correctly; runtime
@@ -54,8 +152,17 @@ been updated to reflect the achieved state.
 
 ## FIFO wrap drain-wait causes occasional frame flicker
 
-**Status:** works correctly (no hangs, no desync), but drops the
-occasional frame on a wrap.
+**Status:** the claim below that the single-buffer wrap "works correctly"
+was WRONG, and is corrected here rather than rewritten.  The one-phase wrap
+(JUMP at the tail, `PUT = begin`, wait `GET == begin`) LOSES A WHOLE LAP when
+the application has not flushed since the previous wrap: `PUT` and `GET` both
+sit at begin, `GET == begin` is already true (it is the idle state), the wait
+returns at once and the lap is overwritten unexecuted.  It also loses a
+flushed lap the GPU has not started fetching.  Found by the EMP team
+(2026-09-24, E5 log); fixed by the two-phase wrap in
+`sdk/libgcm_cmd/src/ps3tc_fifo_wrap_protocol.h` (t_38e8bf5a), guarded by
+`tests/sdk/fifo-wrap-protocol-test.sh`.  Whether the "flicker" below was
+this command loss rather than drain time has NOT been verified.
 
 **Symptom.** All ported samples that exercise the FIFO wrap path
 (`spinning-cube`, the textured-quad port, every other
@@ -69,10 +176,12 @@ any draw-loop that issues enough FIFO commands to wrap the ring
 triggers the drain-wait spin.
 
 **Where it is.** `sdk/libgcm_cmd/src/ps3tc_fifo_wrap.c` —
-`ps3tc_fifo_wrap_callback`. It's a single-buffer in-place wrap:
-writes the JUMP-to-begin command, sets `ctrl->put = begin_off`, then
-spins on `ctrl->get != begin_off` via `sys_timer_usleep(30)` until
-the GPU follows the JUMP. That spin **is the drain** — PPU is
+`ps3tc_fifo_wrap_callback`. It's a single-buffer in-place wrap.  As
+first written it wrote the JUMP-to-begin command, set
+`ctrl->put = begin_off`, then spun on `ctrl->get != begin_off` via
+`sys_timer_usleep(30)` until the GPU followed the JUMP (see the Status
+correction: that loses unpublished laps).  It now publishes the lap to the
+JUMP and waits for GET there first, then releases the JUMP. That spin **is the drain** — PPU is
 blocked until the GPU has processed every command ahead of it. If
 the wait lands mid-frame, the frame's budget blows past VSYNC and
 you see a visible stutter.
@@ -436,54 +545,42 @@ after `cellGcmInit` to dodge this entirely.
 
 ---
 
-## PSGL bindings — not shipped (maybe later)
+## PSGL runtime — shipped with known stubbed sub-surfaces
 
-**Status:** open question; intentionally deferred.
+**Status:** shipped. Core PSGL, GLU, and SPU drawing acceleration are
+shipped; 21 samples build against it. Selected sub-surfaces (CgFX
+effects framework, runtime Cg compiler, program combination, and
+hardware cursor) remain stubbed.
 
-The original PS3 runtime offered two graphics paths: low-level GCM
-(direct command-buffer construction, what our SDK targets) and PSGL
-(an OpenGL-ES-1.1-flavoured wrapper sitting on top of GCM, with its
-own header tree, runtime library, and shader-build pipeline via
-`psgl_shader_builder`).  Our SDK ships the GCM surface only.  Code
-written for older SDKs that imports `<PSGL/psgl.h>`, calls
-`psglInit` / `psglGetDeviceDimensions`, or expects `glActiveTexture`
-/ `glClientActiveTexture` / `GLuint` against an OpenGL-ES symbol set
-won't link.
+The SDK ships the OpenGL-ES-flavoured PSGL runtime sitting on top of GCM:
+- **PPU libraries and headers:** `ppu/lib/libPSGL.a` (and `lp64/libPSGL.a`),
+  `ppu/lib/libPSGLU.a`, `<PSGL/psgl.h>`, and `<PSGL/psglu.h>`.
+- **SPU libraries and tools:** `spu/lib/libspuPSGL.a`, `<PSGL/spu_psgl.h>`
+  (installed at `spu/include/PSGL/spu_psgl.h`), `tools/psgl`, and
+  `spu-elf-to-ppu-obj.exe` (as recorded in `CHANGELOG.md`).
+- **Sample suite:** 21 samples under `samples/toolchain/`
+  (`hello-psgl-*` and `hello-psglu`) build against it, covering basic
+  clear, textured and rotating quads, fixed-function pipeline, VBOs, MSAA,
+  blend, fog, lighting, shaders, and SPU draw pipelines.
 
-Symptoms when porting such code:
+**Stubbed / unimplemented sub-surfaces:**
 
-```
-error: 'glActiveTexture' was not declared in this scope
-error: 'psglGetDeviceDimensions' was not declared in this scope
-error: 'GLuint' was not declared in this scope
-```
-
-Reproduces today on framework code that includes both a GCM-shape
-window class (`FWCellGCMWindow`) and a PSGL-shape one
-(`FWCellGLWindow`); the framework's own Makefile builds both
-unconditionally.  Workaround for a sample build is to drop the GL
-window source from the framework's source list — the GCM window
-covers everything most samples actually use at runtime.
-
-**Why it's a maybe rather than a no.**  Some older code paths
-(particularly UI overlays, font rendering helpers, and a handful of
-graphics-tutorial samples) lean on PSGL's higher-level API surface.
-A future PSGL implementation could either:
-
-1. Author a thin PSGL-on-GCM shim that maps the PSGL entry points
-   onto our existing GCM surface (the original PSGL was implemented
-   roughly this way; the OpenGL-ES-style state machine is a thin
-   layer over the underlying RSX command stream).  Practical scope:
-   roughly the same order of magnitude as our current `libgcm_cmd`
-   plus the `cellGcmCg*` helpers.
-2. Skip PSGL entirely and migrate any code that needs it to direct
-   GCM, treating the PSGL absence as a permanent deprecation.
-
-We haven't decided.  Today's stance: build samples that need PSGL
-fail at link with a clear "no PSGL" indicator; if a real port shows
-up needing the bindings, we'll re-evaluate based on its scope.
-
-**For homebrew/sample porting today:** if the sample only uses
-PSGL for the window-and-input scaffolding (the common case for the
-graphics tutorials), drop the GL framework files and switch to the
-GCM window class — the rendering inside still uses GCM regardless.
+1. **`libPSGLFX.a` (empty archive placeholder):** `ppu/lib/libPSGLFX.a`
+   is an 8-byte empty archive (`!<arch>\n` produced by
+   `sdk/libPSGLFX_stub/Makefile`) provided as a build-unblock placeholder
+   to satisfy linker flags (`-lPSGLFX`) in samples and templates. The
+   CgFX Effects Framework runtime (`cgCreateEffect`, `cgCreateTechnique`,
+   etc.) is not implemented.
+2. **Runtime Cg compiler (`sceCgc*`):** `sceCgcNewContext` (and related
+   functions in `sdk/libPSGL/src/cgc_compiler.c`) returns `NULL`. PSGL
+   requires precompiled shader binaries or bytecode; on-device string
+   compilation via `sceCgc` is not functional.
+3. **Cg program combination:** `cgCombinePrograms`, `cgCombinePrograms2`,
+   and `cgCombinePrograms3` (in `sdk/libPSGL/src/cg_runtime.c:1002-1010`)
+   return `NULL`.
+4. **Hardware cursor:** Hardware cursor control functions in
+   `sdk/libPSGL/src/psgl_bootstrap.c:402-435` (`psglInitCursor`,
+   `psglSetCursorEnable`, `psglSetCursorDisable`,
+   `psglSetCursorImageOffset`, `psglSetCursorPosition`,
+   `psglUpdateCursor`) unconditionally return
+   `PSGL_HW_CURSOR_ERROR_FAILURE` (`-1`).

@@ -32,6 +32,32 @@ source "$script_dir/env.sh"
 say() { printf "[stub-archives] %s\n" "$*"; }
 die() { printf "[stub-archives] ERROR: %s\n" "$*" >&2; exit 1; }
 
+# install_with_legacy <stub> <alias> <legacy dir> <object>... -- replace a
+# PSL1GHT library. The PSL1GHT names that were import trampolines are nidgen
+# aliases in the stub YAML; the ones that were C come from sdk/<legacy dir>,
+# built for this ABI and appended to the stub archive. The archive keeps the
+# canonical <stub>.a name and <alias>.a links to it.
+install_with_legacy() {
+    local stub="$1" alias="$2" legacy="$3"; shift 3
+    local legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/$legacy" obj objs=()
+    say "building legacy-name wrappers ($legacy, $abi)"
+    PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
+        PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
+        make -C "$legacy_dir" clean all >/dev/null
+    for obj in "$@"; do
+        obj="$legacy_dir/build/$obj"
+        [[ -f "$obj" ]] || die "legacy wrappers object missing after build: $obj"
+        objs+=("$obj")
+    done
+
+    local target="$install_dir/$stub.a"
+    install -m 0644 "${produced[0]}" "$target"
+    "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "$target" "${objs[@]}" 2>/dev/null
+    "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "$target"
+    ln -sf "$stub.a" "$install_dir/$alias.a"
+    say "installed $stub.a + $alias.a symlink -> $install_dir/ (replaces PSL1GHT's)"
+}
+
 [[ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-as" ]] \
     || die "PPU toolchain not installed. Run scripts/build-ppu-toolchain.sh first."
 [[ -d "$PS3DK/ppu/lib" ]] \
@@ -117,7 +143,29 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libpngenc_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libjpgenc_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgifdec_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libgem_stub.yaml"
+    "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/extracted/libvdec_stub.yaml"
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/cellFs.yaml"
+)
+
+# PSL1GHT libraries that were pure import wrappers (one sprx.o of
+# trampolines, no C code) are replaced by the nidgen archive: the
+# PSL1GHT names are nidgen aliases (matched by FNID) of the reference
+# exports, and the PSL1GHT archive name is installed as an alias of the
+# _stub archive, as libusb.a / libsysutil.a already are.
+declare -A PSL1GHT_IMPORT_ALIAS=(
+    [libaudio_stub]=libaudio.a
+    [libcamera_stub]=libcamera.a
+    [libgem_stub]=libgem.a
+    [libhttp_util_stub]=libhttputil.a
+    [liblv2dbg_stub]=liblv2dbg.a
+    [libnetctl_stub]=libnetctl.a
+    [libssl_stub]=libssl.a
+    [libsysmodule_stub]=libsysmodule.a
+    [libvdec_stub]=libvdec.a
+    [libresc_stub]=libresc.a
+    [cellFs]=libsysfs.a
+    [libhttp_stub]=libhttp.a
 )
 
 OUT_ROOT="$PS3_TOOLCHAIN_ROOT/build/stub-archives"
@@ -156,6 +204,10 @@ for yaml in "${STUB_YAMLS[@]}"; do
     mkdir -p "$out_dir"
 
     say "building $name ($abi)"
+    # Start from an empty directory: an archive left by an earlier build
+    # under a different name (archive_name changed) would make the glob
+    # below find two.
+    rm -rf "${out_subdir:?}/$name"
     "$NIDGEN_BIN" archive \
         --input "$yaml" \
         --toolchain-bin "$PS3DEV/ppu/bin" \
@@ -168,7 +220,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     produced=( "$out_subdir/$name"/lib*_stub.a )
     shopt -u nullglob
     [[ ${#produced[@]} -eq 1 ]] \
-        || die "expected exactly one archive in $out_dir, got ${#produced[@]}"
+        || die "expected exactly one archive in $out_subdir/$name, got ${#produced[@]}"
 
     # libgcm_sys_stub.a: installed under the canonical reference-SDK
     # name libgcm_sys_stub.a, with a libgcm_sys.a symlink aliasing back
@@ -238,6 +290,18 @@ for yaml in "${STUB_YAMLS[@]}"; do
         "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ranlib" "${produced[0]}"
         install -m 0644 "${produced[0]}" "$install_dir/"
         say "installed libfiber_stub.a -> $install_dir/ (nidgen + extras)"
+    elif [[ "$name" == "libspurs_stub" ]]; then
+        install_with_legacy libspurs_stub libspurs libspurs_legacy spurs_legacy.o
+    elif [[ "$name" == "libfont_stub" ]]; then
+        install_with_legacy libfont_stub libfont libfont_legacy \
+            font_revision.o font_legacy.o
+        # Earlier releases named this archive libcellFont_stub.a.
+        ln -sf libfont_stub.a "$install_dir/libcellFont_stub.a"
+    elif [[ "$name" == "libfontFT_stub" ]]; then
+        install_with_legacy libfontFT_stub libfontFT libfontFT_legacy \
+            fontft_revision.o fontft_legacy.o
+        # Earlier releases named this archive libcellFontFT_stub.a.
+        ln -sf libfontFT_stub.a "$install_dir/libcellFontFT_stub.a"
     elif [[ "$name" == "libusbd_stub" ]]; then
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libusb_legacy"
         say "building legacy-name wrappers (libusb_legacy, $abi)"
@@ -257,6 +321,11 @@ for yaml in "${STUB_YAMLS[@]}"; do
     else
         install -m 0644 "${produced[0]}" "$install_dir/"
         say "installed $(basename "${produced[0]}") -> $install_dir/"
+        psl1ght_name="${PSL1GHT_IMPORT_ALIAS[$name]:-}"
+        if [[ -n "$psl1ght_name" ]]; then
+            ln -sf "$(basename "${produced[0]}")" "$install_dir/$psl1ght_name"
+            say "installed $psl1ght_name symlink -> $(basename "${produced[0]}") (replaces PSL1GHT's)"
+        fi
     fi
 done
 

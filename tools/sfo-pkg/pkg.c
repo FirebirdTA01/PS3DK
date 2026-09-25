@@ -23,6 +23,7 @@
 # include <windows.h>
 # include <direct.h>
 # include <io.h>
+# include <wchar.h>
 # define PATH_SEP '\\'
 # define MKDIR(p) _mkdir(p)
 #else
@@ -118,7 +119,7 @@ static void key_to_context(const uint8_t *key, uint8_t ctx[64])
     memcpy(ctx + 8,  key,     8);
     memcpy(ctx + 16, key + 8, 8);
     memcpy(ctx + 24, key + 8, 8);
-    memset(ctx + 32, 0, 32);
+    memset(ctx + 32, 0,       32);
 }
 
 static void set_context_num(uint8_t ctx[64], uint64_t num)
@@ -149,7 +150,7 @@ static void manipulate_context(uint8_t ctx[64])
  * Returns a newly allocated buffer (caller must free), or NULL on OOM. */
 static uint8_t *pkg_crypt(uint8_t ctx[64], const uint8_t *input, size_t len)
 {
-    uint8_t *out = (uint8_t *)malloc(len);
+    uint8_t *out = (uint8_t *)malloc(len ? len : 1);
     if (!out) return NULL;
 
     size_t offset = 0, remaining = len;
@@ -177,6 +178,7 @@ typedef struct {
 
 static int dynbuf_append(dynbuf_t *b, const void *src, size_t n)
 {
+    if (n == 0) return 0;
     if (b->size + n > b->cap) {
         size_t newcap = b->cap ? b->cap * 2 : 65536;
         while (newcap < b->size + n) newcap *= 2;
@@ -216,30 +218,146 @@ static void dynbuf_free(dynbuf_t *b)
 /* ------------------------------------------------------------------ */
 /* File header entry (in-memory, not the on-disk layout)               */
 /* ------------------------------------------------------------------ */
-#define FH_MAX_NAME 256
-
+/* LOCAL FIX 3 (PS3 Custom Toolchain, 2026-09-24, t_6858d853):
+   Paths are dynamically allocated per entry rather than fixed buffers.
+   This removes the FH_MAX_NAME (256) and src_path[512] truncation bugs
+   reported in EMP Static relay. */
 typedef struct pkg_file_entry {
-    char     filename[FH_MAX_NAME]; /* relative path, forward slashes */
+    char     *filename;     /* relative path, forward slashes (heap-allocated) */
     uint32_t filename_len;
-    uint64_t file_off;    /* filled during pack */
-    uint64_t file_size;   /* reported size (may differ for NPDRM SELF) */
+    uint64_t file_off;     /* filled during pack */
+    uint64_t file_size;    /* reported size (may differ for NPDRM SELF) */
     uint32_t flags;
     uint32_t file_name_off; /* relative to start of data area */
-    /* Path relative to source folder (for reading) */
-    char     src_path[512];
+    char     *src_path;     /* host path for reading (heap-allocated) */
 } pkg_file_entry_t;
+
+/* Dynamic file table (grows as needed, no silent 1024 cap) */
+static pkg_file_entry_t *g_files = NULL;
+static int g_file_count = 0;
+static int g_file_cap = 0;
+
+static void free_file_entries(void)
+{
+    if (g_files) {
+        for (int i = 0; i < g_file_count; i++) {
+            free(g_files[i].filename);
+            free(g_files[i].src_path);
+        }
+        free(g_files);
+        g_files = NULL;
+    }
+    g_file_count = 0;
+    g_file_cap = 0;
+}
+
+static int add_file_entry(pkg_file_entry_t **out_entry)
+{
+    if (g_file_count >= g_file_cap) {
+        int new_cap = g_file_cap == 0 ? 1024 : g_file_cap * 2;
+        pkg_file_entry_t *new_files = (pkg_file_entry_t *)realloc(g_files, (size_t)new_cap * sizeof(pkg_file_entry_t));
+        if (!new_files) {
+            fprintf(stderr, "pkg: out of memory allocating file table (capacity %d)\n", new_cap);
+            return -1;
+        }
+        g_files = new_files;
+        g_file_cap = new_cap;
+    }
+    *out_entry = &g_files[g_file_count++];
+    memset(*out_entry, 0, sizeof(pkg_file_entry_t));
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Windows extended-length path helpers                               */
+/* ------------------------------------------------------------------ */
+#ifdef _WIN32
+static wchar_t *win32_to_extended_wpath(const char *path)
+{
+    if (!path || !*path) return NULL;
+
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+    if (wlen <= 0) {
+        wlen = MultiByteToWideChar(CP_ACP, 0, path, -1, NULL, 0);
+        if (wlen <= 0) return NULL;
+    }
+    wchar_t *wpath = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+    if (!wpath) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, wlen) <= 0) {
+        MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, wlen);
+    }
+
+    for (wchar_t *p = wpath; *p; p++) {
+        if (*p == L'/') *p = L'\\';
+    }
+
+    if (wcsncmp(wpath, L"\\\\?\\", 4) == 0 || wcsncmp(wpath, L"\\??\\", 4) == 0) {
+        return wpath;
+    }
+
+    DWORD full_len = GetFullPathNameW(wpath, 0, NULL, NULL);
+    if (full_len == 0) {
+        free(wpath);
+        return NULL;
+    }
+
+    wchar_t *full = (wchar_t *)malloc(((size_t)full_len + 8) * sizeof(wchar_t));
+    if (!full) {
+        free(wpath);
+        return NULL;
+    }
+    GetFullPathNameW(wpath, full_len, full, NULL);
+    free(wpath);
+
+    if (wcsncmp(full, L"\\\\?\\", 4) == 0) {
+        return full;
+    }
+
+    if (full[0] == L'\\' && full[1] == L'\\') {
+        size_t elen = wcslen(full) + 8;
+        wchar_t *unc = (wchar_t *)malloc(elen * sizeof(wchar_t));
+        if (unc) swprintf(unc, elen, L"\\\\?\\UNC%ls", full + 1);
+        free(full);
+        return unc;
+    } else {
+        size_t elen = wcslen(full) + 5;
+        wchar_t *drv = (wchar_t *)malloc(elen * sizeof(wchar_t));
+        if (drv) swprintf(drv, elen, L"\\\\?\\%ls", full);
+        free(full);
+        return drv;
+    }
+}
+
+static char *win32_wide_to_utf8(const wchar_t *wstr)
+{
+    if (!wstr) return NULL;
+    int len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
+    if (len <= 0) return NULL;
+    char *str = (char *)malloc((size_t)len);
+    if (!str) return NULL;
+    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, str, len, NULL, NULL);
+    return str;
+}
+#endif
 
 /* ------------------------------------------------------------------ */
 /* File I/O helpers                                                    */
 /* ------------------------------------------------------------------ */
 static uint8_t *read_file_alloc(const char *path, size_t *out_len)
 {
+    *out_len = 0;
+#ifdef _WIN32
+    wchar_t *wpath = win32_to_extended_wpath(path);
+    FILE *fp = wpath ? _wfopen(wpath, L"rb") : NULL;
+    free(wpath);
+#else
     FILE *fp = fopen(path, "rb");
+#endif
     if (!fp) { perror(path); return NULL; }
-    fseek(fp, 0, SEEK_END);
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return NULL; }
     long len = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
     if (len < 0) { fclose(fp); return NULL; }
+    fseek(fp, 0, SEEK_SET);
     uint8_t *buf = (uint8_t *)malloc((size_t)len + 1);
     if (!buf) { fclose(fp); return NULL; }
     size_t rd = fread(buf, 1, (size_t)len, fp);
@@ -250,37 +368,72 @@ static uint8_t *read_file_alloc(const char *path, size_t *out_len)
     return buf;
 }
 
-/* Create all intermediate directories */
-static void make_dirs(const char *path)
+static void delete_file(const char *path)
 {
-    char tmp[512];
-    size_t len = strlen(path);
-    if (len >= sizeof(tmp)) return;
-    memcpy(tmp, path, len + 1);
-    for (size_t i = 1; i < len; i++) {
-        if (tmp[i] == '/' || tmp[i] == '\\') {
+    if (!path || !*path) return;
+#ifdef _WIN32
+    wchar_t *w = win32_to_extended_wpath(path);
+    if (w) {
+        DeleteFileW(w);
+        free(w);
+    }
+#else
+    remove(path);
+#endif
+}
+
+/* Create all intermediate directories (no fixed 512 buffer) */
+static int make_dirs(const char *path)
+{
+    if (!path || !*path) return 0;
+    char *tmp = strdup(path);
+    if (!tmp) return -1;
+    size_t len = strlen(tmp);
+
+    for (size_t i = 0; i < len; i++) {
+        if (tmp[i] == '\\') tmp[i] = '/';
+    }
+
+    size_t start = 1;
+    if (len >= 3 && tmp[1] == ':' && tmp[2] == '/')
+        start = 3;
+    else if (strncmp(tmp, "//?/", 4) == 0)
+        start = 4;
+
+    for (size_t i = start; i < len; i++) {
+        if (tmp[i] == '/') {
             tmp[i] = '\0';
-            MKDIR(tmp);
+#ifdef _WIN32
+            wchar_t *w = win32_to_extended_wpath(tmp);
+            if (w) {
+                CreateDirectoryW(w, NULL);
+                free(w);
+            }
+#else
+            mkdir(tmp, 0755);
+#endif
             tmp[i] = '/';
         }
     }
-    MKDIR(tmp);
+#ifdef _WIN32
+    wchar_t *w = win32_to_extended_wpath(tmp);
+    if (w) {
+        CreateDirectoryW(w, NULL);
+        free(w);
+    }
+#else
+    mkdir(tmp, 0755);
+#endif
+    free(tmp);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* Directory traversal (for pack)                                      */
 /* ------------------------------------------------------------------ */
 
-/* Maximum number of entries in a PKG */
-#define MAX_FILES 1024
-
-static pkg_file_entry_t g_files[MAX_FILES];
-static int              g_file_count = 0;
-
-static void get_files(const char *folder, const char *original);
-
 #ifdef _WIN32
-static void get_files(const char *folder, const char *original)
+static int get_files_win32(const wchar_t *wfolder, const wchar_t *woriginal)
 {
     /* LOCAL FIX (PS3 Custom Toolchain): the POSIX branch below guards against
        a folder argument that already ends in a separator; this one did not,
@@ -293,19 +446,29 @@ static void get_files(const char *folder, const char *original)
        so every .pkg built on Windows hit this; the Linux build did not.
        Candidate for an upstream PR (none filed yet); see
        tools/sfo-pkg/PROVENANCE.md. */
-    size_t foldlen = strlen(folder);
-    int folder_has_sep = foldlen > 0 &&
-        (folder[foldlen - 1] == '/' || folder[foldlen - 1] == '\\');
+    size_t wlen = wcslen(wfolder);
+    int folder_has_sep = wlen > 0 &&
+        (wfolder[wlen - 1] == L'/' || wfolder[wlen - 1] == L'\\');
 
-    char pattern[512];
+    wchar_t *pattern = (wchar_t *)malloc((wlen + 3) * sizeof(wchar_t));
+    if (!pattern) return -1;
     if (folder_has_sep)
-        snprintf(pattern, sizeof(pattern), "%s*", folder);
+        swprintf(pattern, wlen + 3, L"%ls*", wfolder);
     else
-        snprintf(pattern, sizeof(pattern), "%s\\*", folder);
+        swprintf(pattern, wlen + 3, L"%ls\\*", wfolder);
 
-    WIN32_FIND_DATA fd;
-    HANDLE h = FindFirstFile(pattern, &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(pattern, &fd);
+    free(pattern);
+    if (h == INVALID_HANDLE_VALUE) {
+        DWORD err = GetLastError();
+        if (err == ERROR_FILE_NOT_FOUND) return 0;
+        char *utf8_folder = win32_wide_to_utf8(wfolder);
+        fprintf(stderr, "pkg: cannot open directory %s (error %lu)\n",
+                utf8_folder ? utf8_folder : "?", (unsigned long)err);
+        free(utf8_folder);
+        return -1;
+    }
 
     /* Collect entries: files first, then directories.
        LOCAL FIX (PS3 Custom Toolchain): heap-allocated, NOT stack arrays.
@@ -318,94 +481,168 @@ static void get_files(const char *folder, const char *original)
        producing any output; found by the first external consumer
        packaging USRDIR/Data/SkyBox; upstream carries the same frames.
        They stay live across the recursion below, so they are freed
-       only at the end of this call. */
-    char (*files_list)[260] = malloc(sizeof(char[MAX_FILES][260]));
-    char (*dirs_list)[260]  = malloc(sizeof(char[MAX_FILES][260]));
-    if (!files_list || !dirs_list) {
-        fprintf(stderr, "pkg: out of memory walking %s\n", folder);
-        free(files_list);
-        free(dirs_list);
-        FindClose(h);
-        return;
-    }
-    int  nfiles = 0, ndirs = 0;
+       only at the end of this call.
+       LOCAL FIX 3: wide character strings and dynamic reallocation per entry. */
+    wchar_t **files_list = NULL;
+    int nfiles = 0, cap_files = 0;
+    wchar_t **dirs_list = NULL;
+    int ndirs = 0, cap_dirs = 0;
 
     do {
-        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
             continue;
-        char full[512];
+        size_t namelen = wcslen(fd.cFileName);
+        size_t fulllen = wlen + 1 + namelen + 1;
+        wchar_t *full = (wchar_t *)malloc(fulllen * sizeof(wchar_t));
+        if (!full) {
+            FindClose(h);
+            goto err_cleanup;
+        }
         if (folder_has_sep)
-            snprintf(full, sizeof(full), "%s%s", folder, fd.cFileName);
+            swprintf(full, fulllen, L"%ls%ls", wfolder, fd.cFileName);
         else
-            snprintf(full, sizeof(full), "%s\\%s", folder, fd.cFileName);
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-            snprintf(dirs_list[ndirs++], 260, "%s", full);
-        else
-            snprintf(files_list[nfiles++], 260, "%s", full);
-    } while (FindNextFile(h, &fd));
+            swprintf(full, fulllen, L"%ls\\%ls", wfolder, fd.cFileName);
+
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (ndirs >= cap_dirs) {
+                int ncap = cap_dirs == 0 ? 128 : cap_dirs * 2;
+                wchar_t **nd = (wchar_t **)realloc(dirs_list, (size_t)ncap * sizeof(wchar_t *));
+                if (!nd) { free(full); FindClose(h); goto err_cleanup; }
+                dirs_list = nd;
+                cap_dirs = ncap;
+            }
+            dirs_list[ndirs++] = full;
+        } else {
+            if (nfiles >= cap_files) {
+                int ncap = cap_files == 0 ? 128 : cap_files * 2;
+                wchar_t **nf = (wchar_t **)realloc(files_list, (size_t)ncap * sizeof(wchar_t *));
+                if (!nf) { free(full); FindClose(h); goto err_cleanup; }
+                files_list = nf;
+                cap_files = ncap;
+            }
+            files_list[nfiles++] = full;
+        }
+    } while (FindNextFileW(h, &fd));
     FindClose(h);
 
     /* Process files */
-    for (int i = 0; i < nfiles && g_file_count < MAX_FILES; i++) {
-        char newpath[512];
-        /* Strip original prefix and normalise slashes */
-        const char *rel = files_list[i] + strlen(original);
-        while (*rel == '/' || *rel == '\\') rel++; /* see LOCAL FIX note in collect_dir */
-        size_t j = 0;
-        for (size_t k = 0; rel[k] && j < sizeof(newpath) - 1; k++, j++)
-            newpath[j] = (rel[k] == '\\') ? '/' : rel[k];
-        newpath[j] = '\0';
-
-        pkg_file_entry_t *e = &g_files[g_file_count++];
-        strncpy(e->filename, newpath, FH_MAX_NAME - 1);
-        e->filename[FH_MAX_NAME - 1] = '\0';
-        e->filename_len = (uint32_t)strlen(e->filename);
+    size_t orig_len = wcslen(woriginal);
+    for (int i = 0; i < nfiles; i++) {
+        const wchar_t *wrel = files_list[i] + orig_len;
+        while (*wrel == L'/' || *wrel == L'\\') wrel++;
+        char *rel = win32_wide_to_utf8(wrel);
+        if (!rel) goto err_cleanup;
+        for (char *p = rel; *p; p++) {
+            if (*p == '\\') *p = '/';
+        }
 
         LARGE_INTEGER fsz;
-        HANDLE fh = CreateFile(files_list[i], GENERIC_READ, FILE_SHARE_READ,
+        HANDLE fh = CreateFileW(files_list[i], GENERIC_READ, FILE_SHARE_READ,
                                NULL, OPEN_EXISTING, 0, NULL);
+        if (fh == INVALID_HANDLE_VALUE) {
+            char *full_utf8 = win32_wide_to_utf8(files_list[i]);
+            fprintf(stderr, "Cannot open: %s\n", full_utf8 ? full_utf8 : rel);
+            free(full_utf8);
+            free(rel);
+            goto err_cleanup;
+        }
         GetFileSizeEx(fh, &fsz);
         CloseHandle(fh);
-        e->file_size = (uint64_t)fsz.QuadPart;
 
-        if (strcmp(newpath, "USRDIR/EBOOT.BIN") == 0) {
+        pkg_file_entry_t *e = NULL;
+        if (add_file_entry(&e) != 0) {
+            free(rel);
+            goto err_cleanup;
+        }
+        e->filename = rel;
+        e->filename_len = (uint32_t)strlen(rel);
+        e->file_size = (uint64_t)fsz.QuadPart;
+        e->src_path = win32_wide_to_utf8(files_list[i]);
+
+        if (strcmp(rel, "USRDIR/EBOOT.BIN") == 0) {
             e->file_size = ((e->file_size - 0x30 + 63) & ~(uint64_t)63) + 0x30;
             e->flags = TYPE_OVERWRITE_ALLOWED | TYPE_NPDRMSELF;
         } else {
             e->flags = TYPE_OVERWRITE_ALLOWED | TYPE_RAW;
         }
-        strncpy(e->src_path, files_list[i], sizeof(e->src_path) - 1);
+        free(files_list[i]);
+        files_list[i] = NULL;
     }
+    free(files_list);
+    files_list = NULL;
 
     /* Process directories */
-    for (int i = 0; i < ndirs && g_file_count < MAX_FILES; i++) {
-        char newpath[512];
-        const char *rel = dirs_list[i] + strlen(original);
-        while (*rel == '/' || *rel == '\\') rel++; /* see LOCAL FIX note in collect_dir */
-        size_t j = 0;
-        for (size_t k = 0; rel[k] && j < sizeof(newpath) - 1; k++, j++)
-            newpath[j] = (rel[k] == '\\') ? '/' : rel[k];
-        newpath[j] = '\0';
+    for (int i = 0; i < ndirs; i++) {
+        const wchar_t *wrel = dirs_list[i] + orig_len;
+        while (*wrel == L'/' || *wrel == L'\\') wrel++;
+        char *rel = win32_wide_to_utf8(wrel);
+        if (!rel) goto err_cleanup;
+        for (char *p = rel; *p; p++) {
+            if (*p == '\\') *p = '/';
+        }
 
-        pkg_file_entry_t *e = &g_files[g_file_count++];
-        strncpy(e->filename, newpath, FH_MAX_NAME - 1);
-        e->filename[FH_MAX_NAME - 1] = '\0';
-        e->filename_len = (uint32_t)strlen(e->filename);
-        e->file_size    = 0;
-        e->flags        = TYPE_OVERWRITE_ALLOWED | TYPE_DIRECTORY;
-        e->src_path[0]  = '\0';
+        pkg_file_entry_t *e = NULL;
+        if (add_file_entry(&e) != 0) {
+            free(rel);
+            goto err_cleanup;
+        }
+        e->filename = rel;
+        e->filename_len = (uint32_t)strlen(rel);
+        e->file_size = 0;
+        e->flags = TYPE_OVERWRITE_ALLOWED | TYPE_DIRECTORY;
+        e->src_path = NULL;
 
-        get_files(dirs_list[i], original);
+        int rc = get_files_win32(dirs_list[i], woriginal);
+        free(dirs_list[i]);
+        dirs_list[i] = NULL;
+        if (rc != 0) {
+            goto err_cleanup;
+        }
     }
-
-    free(files_list);
     free(dirs_list);
+    dirs_list = NULL;
+    return 0;
+
+err_cleanup:
+    if (files_list) {
+        for (int i = 0; i < nfiles; i++) {
+            free(files_list[i]);
+            files_list[i] = NULL;
+        }
+        free(files_list);
+        files_list = NULL;
+    }
+    if (dirs_list) {
+        for (int i = 0; i < ndirs; i++) {
+            free(dirs_list[i]);
+            dirs_list[i] = NULL;
+        }
+        free(dirs_list);
+        dirs_list = NULL;
+    }
+    return -1;
+}
+
+static int get_files(const char *folder, const char *original)
+{
+    (void)original;
+    wchar_t *wfolder = win32_to_extended_wpath(folder);
+    if (!wfolder) {
+        fprintf(stderr, "pkg: cannot resolve folder %s\n", folder);
+        return -1;
+    }
+    int rc = get_files_win32(wfolder, wfolder);
+    free(wfolder);
+    return rc;
 }
 #else  /* POSIX */
-static void collect_dir(const char *folder, const char *original)
+static int collect_dir(const char *folder, const char *original)
 {
     DIR *dp = opendir(folder);
-    if (!dp) { perror(folder); return; }
+    if (!dp) {
+        perror(folder);
+        return -1;
+    }
 
     /* Collect names.
        LOCAL FIX (PS3 Custom Toolchain): heap-allocated, NOT stack arrays —
@@ -413,17 +650,12 @@ static void collect_dir(const char *folder, const char *original)
        level; see the Win32 branch's note for the depth-3 stack-overflow
        this caused there.  Linux's larger default stack merely hid the same
        bug to greater depth.  Freed at the end of this call, after the
-       recursion that keeps them live. */
-    char (*files_list)[512] = malloc(sizeof(char[MAX_FILES][512]));
-    char (*dirs_list)[512]  = malloc(sizeof(char[MAX_FILES][512]));
-    if (!files_list || !dirs_list) {
-        fprintf(stderr, "pkg: out of memory walking %s\n", folder);
-        free(files_list);
-        free(dirs_list);
-        closedir(dp);
-        return;
-    }
-    int  nfiles = 0, ndirs = 0;
+       recursion that keeps them live.
+       LOCAL FIX 3: dynamic array growth and heap paths removing 512-byte limit. */
+    char **files_list = NULL;
+    int nfiles = 0, cap_files = 0;
+    char **dirs_list = NULL;
+    int ndirs = 0, cap_dirs = 0;
 
     size_t foldlen = strlen(folder);
     int folder_has_sep = foldlen > 0 &&
@@ -431,60 +663,101 @@ static void collect_dir(const char *folder, const char *original)
 
     struct dirent *de;
     while ((de = readdir(dp)) != NULL) {
-        if (de->d_name[0] == '.') continue; /* skip . and .. */
-        char full[512];
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+
+        size_t dlen = strlen(de->d_name);
+        size_t fulllen = foldlen + 1 + dlen + 1;
+        char *full = (char *)malloc(fulllen);
+        if (!full) {
+            fprintf(stderr, "pkg: out of memory allocating path\n");
+            closedir(dp);
+            goto err_cleanup;
+        }
         if (folder_has_sep)
-            snprintf(full, sizeof(full), "%s%s", folder, de->d_name);
+            snprintf(full, fulllen, "%s%s", folder, de->d_name);
         else
-            snprintf(full, sizeof(full), "%s/%s", folder, de->d_name);
+            snprintf(full, fulllen, "%s/%s", folder, de->d_name);
 
         struct stat st;
-        if (stat(full, &st) != 0) continue;
+        if (stat(full, &st) != 0) {
+            fprintf(stderr, "Cannot open: %s\n", full);
+            free(full);
+            closedir(dp);
+            goto err_cleanup;
+        }
 
-        if (S_ISDIR(st.st_mode))
-            snprintf(dirs_list[ndirs++], 512, "%s", full);
-        else
-            snprintf(files_list[nfiles++], 512, "%s", full);
+        if (S_ISDIR(st.st_mode)) {
+            if (ndirs >= cap_dirs) {
+                int ncap = cap_dirs == 0 ? 128 : cap_dirs * 2;
+                char **nd = (char **)realloc(dirs_list, (size_t)ncap * sizeof(char *));
+                if (!nd) { free(full); closedir(dp); goto err_cleanup; }
+                dirs_list = nd;
+                cap_dirs = ncap;
+            }
+            dirs_list[ndirs++] = full;
+        } else {
+            if (nfiles >= cap_files) {
+                int ncap = cap_files == 0 ? 128 : cap_files * 2;
+                char **nf = (char **)realloc(files_list, (size_t)ncap * sizeof(char *));
+                if (!nf) { free(full); closedir(dp); goto err_cleanup; }
+                files_list = nf;
+                cap_files = ncap;
+            }
+            files_list[nfiles++] = full;
+        }
     }
     closedir(dp);
 
     /* Sort files and dirs alphabetically (to match glob.glob behavior) */
-    for (int i = 0; i < nfiles - 1; i++)
-        for (int j = i + 1; j < nfiles; j++)
+    for (int i = 0; i < nfiles - 1; i++) {
+        for (int j = i + 1; j < nfiles; j++) {
             if (strcmp(files_list[i], files_list[j]) > 0) {
-                char tmp[512];
-                memcpy(tmp, files_list[i], 512);
-                memcpy(files_list[i], files_list[j], 512);
-                memcpy(files_list[j], tmp, 512);
+                char *tmp = files_list[i];
+                files_list[i] = files_list[j];
+                files_list[j] = tmp;
             }
-    for (int i = 0; i < ndirs - 1; i++)
-        for (int j = i + 1; j < ndirs; j++)
+        }
+    }
+    for (int i = 0; i < ndirs - 1; i++) {
+        for (int j = i + 1; j < ndirs; j++) {
             if (strcmp(dirs_list[i], dirs_list[j]) > 0) {
-                char tmp[512];
-                memcpy(tmp, dirs_list[i], 512);
-                memcpy(dirs_list[i], dirs_list[j], 512);
-                memcpy(dirs_list[j], tmp, 512);
+                char *tmp = dirs_list[i];
+                dirs_list[i] = dirs_list[j];
+                dirs_list[j] = tmp;
             }
+        }
+    }
 
     /* Files first */
-    for (int i = 0; i < nfiles && g_file_count < MAX_FILES; i++) {
+    size_t orig_len = strlen(original);
+    for (int i = 0; i < nfiles; i++) {
         /* Build relative path (strip original prefix, normalise slashes) */
-        const char *rel = files_list[i] + strlen(original);
-        while (*rel == '/' || *rel == '\\') rel++; /* see LOCAL FIX note in collect_dir */
-        char newpath[512];
-        size_t j = 0;
-        for (size_t k = 0; rel[k] && j < sizeof(newpath) - 1; k++, j++)
-            newpath[j] = (rel[k] == '\\') ? '/' : rel[k];
-        newpath[j] = '\0';
+        const char *rel_start = files_list[i] + orig_len;
+        while (*rel_start == '/' || *rel_start == '\\') rel_start++;
+        char *newpath = strdup(rel_start);
+        if (!newpath) goto err_cleanup;
+        for (size_t k = 0; newpath[k]; k++) {
+            if (newpath[k] == '\\') newpath[k] = '/';
+        }
 
         struct stat st;
-        stat(files_list[i], &st);
+        if (stat(files_list[i], &st) != 0) {
+            fprintf(stderr, "Cannot open: %s\n", files_list[i]);
+            free(newpath);
+            goto err_cleanup;
+        }
 
-        pkg_file_entry_t *e = &g_files[g_file_count++];
-        strncpy(e->filename, newpath, FH_MAX_NAME - 1);
-        e->filename[FH_MAX_NAME - 1] = '\0';
-        e->filename_len = (uint32_t)strlen(e->filename);
-        e->file_size    = (uint64_t)st.st_size;
+        pkg_file_entry_t *e = NULL;
+        if (add_file_entry(&e) != 0) {
+            free(newpath);
+            goto err_cleanup;
+        }
+        e->filename = newpath;
+        e->filename_len = (uint32_t)strlen(newpath);
+        e->file_size = (uint64_t)st.st_size;
+        e->src_path = strdup(files_list[i]);
+        if (!e->src_path) goto err_cleanup;
 
         if (strcmp(newpath, "USRDIR/EBOOT.BIN") == 0) {
             e->file_size = ((e->file_size - 0x30 + 63) & ~(uint64_t)63) + 0x30;
@@ -492,36 +765,67 @@ static void collect_dir(const char *folder, const char *original)
         } else {
             e->flags = TYPE_OVERWRITE_ALLOWED | TYPE_RAW;
         }
-        strncpy(e->src_path, files_list[i], sizeof(e->src_path) - 1);
+        free(files_list[i]);
+        files_list[i] = NULL;
     }
+    free(files_list);
+    files_list = NULL;
 
     /* Directories second */
-    for (int i = 0; i < ndirs && g_file_count < MAX_FILES; i++) {
-        const char *rel = dirs_list[i] + strlen(original);
-        while (*rel == '/' || *rel == '\\') rel++; /* see LOCAL FIX note in collect_dir */
-        char newpath[512];
-        size_t j = 0;
-        for (size_t k = 0; rel[k] && j < sizeof(newpath) - 1; k++, j++)
-            newpath[j] = (rel[k] == '\\') ? '/' : rel[k];
-        newpath[j] = '\0';
+    for (int i = 0; i < ndirs; i++) {
+        const char *rel_start = dirs_list[i] + orig_len;
+        while (*rel_start == '/' || *rel_start == '\\') rel_start++;
+        char *newpath = strdup(rel_start);
+        if (!newpath) goto err_cleanup;
+        for (size_t k = 0; newpath[k]; k++) {
+            if (newpath[k] == '\\') newpath[k] = '/';
+        }
 
-        pkg_file_entry_t *e = &g_files[g_file_count++];
-        strncpy(e->filename, newpath, FH_MAX_NAME - 1);
-        e->filename[FH_MAX_NAME - 1] = '\0';
-        e->filename_len = (uint32_t)strlen(e->filename);
-        e->file_size    = 0;
-        e->flags        = TYPE_OVERWRITE_ALLOWED | TYPE_DIRECTORY;
-        e->src_path[0]  = '\0';
+        pkg_file_entry_t *e = NULL;
+        if (add_file_entry(&e) != 0) {
+            free(newpath);
+            goto err_cleanup;
+        }
+        e->filename = newpath;
+        e->filename_len = (uint32_t)strlen(newpath);
+        e->file_size = 0;
+        e->flags = TYPE_OVERWRITE_ALLOWED | TYPE_DIRECTORY;
+        e->src_path = NULL;
 
-        collect_dir(dirs_list[i], original);
+        int rc = collect_dir(dirs_list[i], original);
+        free(dirs_list[i]);
+        dirs_list[i] = NULL;
+        if (rc != 0) {
+            goto err_cleanup;
+        }
     }
-
-    free(files_list);
     free(dirs_list);
+    dirs_list = NULL;
+    return 0;
+
+err_cleanup:
+    if (files_list) {
+        for (int i = 0; i < nfiles; i++) {
+            free(files_list[i]);
+            files_list[i] = NULL;
+        }
+        free(files_list);
+        files_list = NULL;
+    }
+    if (dirs_list) {
+        for (int i = 0; i < ndirs; i++) {
+            free(dirs_list[i]);
+            dirs_list[i] = NULL;
+        }
+        free(dirs_list);
+        dirs_list = NULL;
+    }
+    return -1;
 }
-static void get_files(const char *folder, const char *original)
+
+static int get_files(const char *folder, const char *original)
 {
-    collect_dir(folder, original);
+    return collect_dir(folder, original);
 }
 #endif
 
@@ -542,16 +846,16 @@ static void write_file_hdr(uint8_t out[PKG_FILE_HDR_SIZE],
 /* ------------------------------------------------------------------ */
 /* list_pkg                                                            */
 /* ------------------------------------------------------------------ */
-static void list_pkg(const char *filename)
+static int list_pkg(const char *filename)
 {
     size_t data_len;
     uint8_t *data = read_file_alloc(filename, &data_len);
-    if (!data) return;
+    if (!data) return 1;
 
     if (data_len < PKG_HDR_SIZE) {
         fprintf(stderr, "PKG: file too small\n");
         free(data);
-        return;
+        return 1;
     }
 
     uint32_t magic       = rd_be32(data);
@@ -577,18 +881,15 @@ static void list_pkg(const char *filename)
     /* QA_Digest: each byte as uppercase hex without zero-pad (Python %X) */
     char qa_str[33] = {0};
     for (int i = 0; i < 0x10 && i * 2 < 32; i++) {
-        /* Stop at first zero byte (nullterm behaviour) */
         if (qa_digest[i] == 0) break;
         char tmp[4];
         snprintf(tmp, sizeof(tmp), "%X", qa_digest[i]);
         strcat(qa_str, tmp);
     }
 
-    /* Content ID: null-terminated string */
     char cid[0x31] = {0};
     memcpy(cid, content_id, 0x30);
     cid[0x30] = '\0';
-    /* Null-terminate at first zero */
     for (int i = 0; i < 0x30; i++) { if (!cid[i]) break; }
 
     printf("[X] Magic: %08x\n", magic);
@@ -613,10 +914,10 @@ static void list_pkg(const char *filename)
     if (type != 0x00000001) {
         fprintf(stderr, "Unsupported Type\n");
         free(data);
-        return;
+        return 1;
     }
 
-    if (item_count == 0) { free(data); return; }
+    if (item_count == 0) { free(data); return 0; }
 
     printf("Listing: \"%s\"\n", filename);
     puts("+) overwrite, -) no overwrite");
@@ -626,7 +927,7 @@ static void list_pkg(const char *filename)
     if (data_off + (uint64_t)PKG_FILE_HDR_SIZE * item_count > data_len) {
         fprintf(stderr, "PKG: data area truncated\n");
         free(data);
-        return;
+        return 1;
     }
 
     /* Decrypt file descriptors */
@@ -634,7 +935,7 @@ static void list_pkg(const char *filename)
     key_to_context(qa_digest, ctx2);
     size_t desc_bytes = (size_t)PKG_FILE_HDR_SIZE * item_count;
     uint8_t *dec_descs = pkg_crypt(ctx2, data_enc, desc_bytes);
-    if (!dec_descs) { free(data); return; }
+    if (!dec_descs) { free(data); return 1; }
 
     for (uint32_t i = 0; i < item_count; i++) {
         const uint8_t *fh = dec_descs + i * PKG_FILE_HDR_SIZE;
@@ -643,82 +944,82 @@ static void list_pkg(const char *filename)
         uint64_t fsize   = rd_be64(fh + 16);
         uint32_t flags   = rd_be32(fh + 24);
 
-        /* Decrypt file name from encrypted data with continuing ctx */
-        uint8_t *name_dec = pkg_crypt(ctx2, data_enc + fn_off, fn_len);
-        char name[FH_MAX_NAME] = {0};
-        if (name_dec) {
-            size_t nlen = fn_len < FH_MAX_NAME - 1 ? fn_len : FH_MAX_NAME - 1;
-            memcpy(name, name_dec, nlen);
-            /* Null-terminate at first \0 */
-            for (size_t k = 0; k < nlen; k++) {
-                if (name[k] == '\0') { name[k] = '\0'; break; }
-            }
-            name[nlen] = '\0';
-            free(name_dec);
+        if ((uint64_t)data_off + fn_off + fn_len > data_len) {
+            fprintf(stderr, "PKG: filename data out of bounds\n");
+            free(dec_descs);
+            free(data);
+            return 1;
         }
 
-        char line[64];
-        if ((flags & 0xFF) == TYPE_NPDRMSELF)
-            strcpy(line, " NPDRM SELF:");
-        else if ((flags & 0xFF) == TYPE_DIRECTORY)
-            strcpy(line, "  directory:");
-        else if ((flags & 0xFF) == TYPE_RAW)
-            strcpy(line, "   raw data:");
-        else
-            strcpy(line, "    unknown:");
+        uint8_t *name_dec = pkg_crypt(ctx2, data_enc + fn_off, fn_len);
+        if (name_dec) {
+            char *name = (char *)malloc((size_t)fn_len + 1);
+            if (name) {
+                memcpy(name, name_dec, fn_len);
+                name[fn_len] = '\0';
 
-        printf("%s%c%11llu: %s\n",
-               line,
-               (flags & TYPE_OVERWRITE_ALLOWED) ? '+' : '-',
-               (unsigned long long)fsize,
-               name);
+                char line[64];
+                if ((flags & 0xFF) == TYPE_NPDRMSELF)
+                    strcpy(line, " NPDRM SELF:");
+                else if ((flags & 0xFF) == TYPE_DIRECTORY)
+                    strcpy(line, "  directory:");
+                else if ((flags & 0xFF) == TYPE_RAW)
+                    strcpy(line, "   raw data:");
+                else
+                    strcpy(line, "    unknown:");
+
+                printf("%s%c%11llu: %s\n",
+                       line,
+                       (flags & TYPE_OVERWRITE_ALLOWED) ? '+' : '-',
+                       (unsigned long long)fsize,
+                       name);
+                free(name);
+            }
+            free(name_dec);
+        }
     }
 
     free(dec_descs);
     free(data);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* unpack (extract)                                                    */
 /* ------------------------------------------------------------------ */
-static void unpack_pkg(const char *filename)
+static int unpack_pkg(const char *filename)
 {
     size_t data_len;
     uint8_t *data = read_file_alloc(filename, &data_len);
-    if (!data) return;
+    if (!data) return 1;
 
     if (data_len < PKG_HDR_SIZE) {
         fprintf(stderr, "PKG: file too small\n");
         free(data);
-        return;
+        return 1;
     }
 
     uint32_t type        = rd_be32(data + 4);
     uint32_t item_count  = rd_be32(data + 20);
     uint64_t data_off    = rd_be64(data + 32);
     uint64_t data_size   = rd_be64(data + 40);
-    const uint8_t *content_id = data + 48;
-    const uint8_t *qa_digest  = data + 48 + 0x30;
+    const uint8_t *content_id = data + 48;          /* 0x30 bytes */
+    const uint8_t *qa_digest  = data + 48 + 0x30;   /* 0x10 bytes */
 
     if (type != 0x00000001) {
         fprintf(stderr, "Unsupported Type\n");
         free(data);
-        return;
+        return 1;
     }
-    if (item_count == 0) { free(data); return; }
+    if (item_count == 0) { free(data); return 0; }
 
     if (g_debug) {
-        /* Print header (same as list_pkg header section) */
         uint32_t magic       = rd_be32(data);
         uint32_t type        = rd_be32(data + 4);
         uint32_t pkg_info_off = rd_be32(data + 8);
         uint32_t unk1        = rd_be32(data + 12);
         uint32_t head_size   = rd_be32(data + 16);
-        uint32_t item_count  = rd_be32(data + 20);
         uint64_t package_size = rd_be64(data + 24);
-        uint64_t data_off    = rd_be64(data + 32);
-        uint64_t data_size   = rd_be64(data + 40);
-        const uint8_t *content_id = data + 48;          /* 0x30 bytes */
 
         printf("[X] Magic: %08x\n", magic);
         printf("[X] Type: %08x\n", type);
@@ -732,22 +1033,22 @@ static void unpack_pkg(const char *filename)
         printf("[X] ContentID: '%.48s'\n\n", content_id);
     }
 
-    /* Create output directory from content ID */
     char dir[0x31] = {0};
     memcpy(dir, content_id, 0x30);
-    make_dirs(dir);
+    if (make_dirs(dir) != 0) {
+        free(data);
+        return 1;
+    }
 
     const uint8_t *data_enc = data + data_off;
     size_t enc_len = (size_t)data_size;
     if (data_off + data_size > data_len) enc_len = data_len - (size_t)data_off;
 
-    /* Decrypt all data */
     uint8_t ctx[64];
     key_to_context(qa_digest, ctx);
     uint8_t *dec_data = pkg_crypt(ctx, data_enc, enc_len);
-    if (!dec_data) { free(data); return; }
+    if (!dec_data) { free(data); return 1; }
 
-    /* Parse file descriptors */
     for (uint32_t i = 0; i < item_count; i++) {
         const uint8_t *fh = dec_data + i * PKG_FILE_HDR_SIZE;
         uint32_t fn_off  = rd_be32(fh);
@@ -756,33 +1057,78 @@ static void unpack_pkg(const char *filename)
         uint64_t fsize   = rd_be64(fh + 16);
         uint32_t flags   = rd_be32(fh + 24);
 
-        /* Extract file name from decrypted data */
-        char name[FH_MAX_NAME] = {0};
-        if (fn_off + fn_len <= enc_len) {
-            size_t nlen = fn_len < FH_MAX_NAME - 1 ? fn_len : FH_MAX_NAME - 1;
-            memcpy(name, dec_data + fn_off, nlen);
-            name[nlen] = '\0';
+        if (fn_off + fn_len > enc_len) {
+            fprintf(stderr, "PKG: filename offset out of range\n");
+            free(dec_data);
+            free(data);
+            return 1;
         }
 
-        char outpath[600];
-        snprintf(outpath, sizeof(outpath), "%s/%s", dir, name);
+        char *name = (char *)malloc((size_t)fn_len + 1);
+        if (!name) {
+            free(dec_data);
+            free(data);
+            return 1;
+        }
+        memcpy(name, dec_data + fn_off, fn_len);
+        name[fn_len] = '\0';
+
+        size_t outpath_len = strlen(dir) + 1 + fn_len + 1;
+        char *outpath = (char *)malloc(outpath_len);
+        if (!outpath) {
+            free(name);
+            free(dec_data);
+            free(data);
+            return 1;
+        }
+        snprintf(outpath, outpath_len, "%s/%s", dir, name);
 
         if ((flags & 0xFF) == TYPE_DIRECTORY) {
             make_dirs(outpath);
         } else {
-            /* Ensure parent directories exist */
-            char parent[600];
-            strncpy(parent, outpath, sizeof(parent) - 1);
+            char *parent = strdup(outpath);
             char *last_sep = strrchr(parent, '/');
             if (last_sep) { *last_sep = '\0'; make_dirs(parent); }
+            free(parent);
 
+#ifdef _WIN32
+            wchar_t *wout = win32_to_extended_wpath(outpath);
+            FILE *fp = wout ? _wfopen(wout, L"wb") : NULL;
+            free(wout);
+#else
             FILE *fp = fopen(outpath, "wb");
+#endif
             if (!fp) {
                 perror(outpath);
-            } else {
-                if (foff + fsize <= enc_len)
-                    fwrite(dec_data + foff, 1, (size_t)fsize, fp);
-                fclose(fp);
+                free(name);
+                free(outpath);
+                free(dec_data);
+                free(data);
+                return 1;
+            }
+            if (foff + fsize <= enc_len) {
+                size_t wr = fwrite(dec_data + foff, 1, (size_t)fsize, fp);
+                if (wr != (size_t)fsize) {
+                    perror("fwrite");
+                    fclose(fp);
+                    delete_file(outpath);
+                    free(name);
+                    free(outpath);
+                    free(dec_data);
+                    free(data);
+                    return 1;
+                }
+            }
+            int flush_rc = fflush(fp);
+            int close_rc = fclose(fp);
+            if (flush_rc != 0 || close_rc != 0) {
+                perror(outpath);
+                delete_file(outpath);
+                free(name);
+                free(outpath);
+                free(dec_data);
+                free(data);
+                return 1;
             }
         }
 
@@ -801,10 +1147,14 @@ static void unpack_pkg(const char *filename)
             printf("[X] File Size: %016llx\n", (unsigned long long)fsize);
             printf("[X] Flags: %08x\n\n", flags);
         }
+
+        free(name);
+        free(outpath);
     }
 
     free(dec_data);
     free(data);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -818,14 +1168,18 @@ static const uint8_t SELF_MAGIC[9] = {
     0x80                       /* first byte of flags = 0x8000 BE */
 };
 
-static void pack_pkg(const char *folder, const char *contentid,
-                      const char *outname)
+static int pack_pkg(const char *folder, const char *contentid,
+                    const char *outname)
 {
     /* -------------------------------------------------------------- */
     /* Gather files                                                     */
     /* -------------------------------------------------------------- */
-    g_file_count = 0;
-    get_files(folder, folder);
+    free_file_entries();
+    int rc = get_files(folder, folder);
+    if (rc != 0) {
+        free_file_entries();
+        return 1;
+    }
 
     int item_count = g_file_count;
 
@@ -859,14 +1213,24 @@ static void pack_pkg(const char *folder, const char *contentid,
     for (int i = 0; i < item_count; i++) {
         uint8_t fh[PKG_FILE_HDR_SIZE];
         write_file_hdr(fh, &g_files[i]);
-        dynbuf_append(&buf, fh, PKG_FILE_HDR_SIZE);
+        if (dynbuf_append(&buf, fh, PKG_FILE_HDR_SIZE) != 0) {
+            fprintf(stderr, "pkg: out of memory building header\n");
+            dynbuf_free(&buf);
+            free_file_entries();
+            return 1;
+        }
     }
 
     /* Step 4: write file names (0x10-aligned each) */
     for (int i = 0; i < item_count; i++) {
         uint32_t aligned = (g_files[i].filename_len + 0x0f) & ~0x0fu;
-        dynbuf_append(&buf, g_files[i].filename, g_files[i].filename_len);
-        dynbuf_append_zeros(&buf, aligned - g_files[i].filename_len);
+        if (dynbuf_append(&buf, (const uint8_t *)g_files[i].filename, g_files[i].filename_len) != 0 ||
+            dynbuf_append_zeros(&buf, aligned - g_files[i].filename_len) != 0) {
+            fprintf(stderr, "pkg: out of memory building file names\n");
+            dynbuf_free(&buf);
+            free_file_entries();
+            return 1;
+        }
     }
 
     size_t file_desc_length = buf.size; /* size of header area */
@@ -876,25 +1240,13 @@ static void pack_pkg(const char *folder, const char *contentid,
         if ((g_files[i].flags & 0xff) == TYPE_DIRECTORY)
             continue;
 
-        /* Build the source path */
-        char src_path[512];
-        const char *fn = g_files[i].filename;
-        /* Strip leading slash if present */
-        if (fn[0] == '/') fn++;
-        /* Build: folder + "/" + filename */
-        size_t flen = strlen(folder);
-        int has_sep = flen > 0 && (folder[flen-1] == '/' || folder[flen-1] == '\\');
-        if (has_sep)
-            snprintf(src_path, sizeof(src_path), "%s%s", folder, fn);
-        else
-            snprintf(src_path, sizeof(src_path), "%s/%s", folder, fn);
-
-        size_t file_data_len;
-        uint8_t *file_data = read_file_alloc(src_path, &file_data_len);
+        size_t file_data_len = 0;
+        uint8_t *file_data = read_file_alloc(g_files[i].src_path, &file_data_len);
         if (!file_data) {
-            fprintf(stderr, "Cannot open: %s\n", src_path);
+            fprintf(stderr, "Cannot open: %s\n", g_files[i].src_path);
             dynbuf_free(&buf);
-            return;
+            free_file_entries();
+            return 1;
         }
 
         /* SHA1 of this file for EbootMeta */
@@ -907,7 +1259,6 @@ static void pack_pkg(const char *folder, const char *contentid,
 
         if (file_data_len >= 9 && memcmp(file_data, SELF_MAGIC, 9) == 0 &&
             file_data_len >= SELF_HDR_SIZE) {
-            /* Parse SELF header (big-endian) */
             uint64_t app_info_off  = rd_be64(file_data + 40);
             uint64_t digest_off_hdr = rd_be64(file_data + 88);
 
@@ -915,7 +1266,6 @@ static void pack_pkg(const char *folder, const char *contentid,
             if (app_info_off + SELF_APPINFO_SIZE <= file_data_len)
                 app_type = rd_be32(file_data + (size_t)app_info_off + 12);
 
-            /* Walk digest blocks to find type 3 */
             int found = 0;
             size_t doff = (size_t)digest_off_hdr;
             while (doff + PKG_DIGEST_SIZE <= file_data_len) {
@@ -926,7 +1276,7 @@ static void pack_pkg(const char *folder, const char *contentid,
                 doff += dsize;
                 if (is_next != 1) break;
             }
-            doff += PKG_DIGEST_SIZE; /* past the digest block header */
+            doff += PKG_DIGEST_SIZE;
 
             if (app_type == 8 && found) {
                 is_npdrm_self = 1;
@@ -935,21 +1285,17 @@ static void pack_pkg(const char *folder, const char *contentid,
         }
 
         if (is_npdrm_self) {
-            /* Copy up to digest_off */
             dynbuf_append(&buf, file_data, digest_off_in_file);
 
-            /* Build EbootMeta (0x80 bytes) */
             uint8_t meta[EBOOT_META_SIZE];
             memset(meta, 0, EBOOT_META_SIZE);
             wr_be32(meta,     0x4E504400U); /* magic "NPD\0" */
             wr_be32(meta + 4, 1);           /* unk1 */
             wr_be32(meta + 8, 3);           /* drmType = 3 (Free) */
             wr_be32(meta + 12, 1);          /* unk2 */
-            /* contentID */
             size_t cid_len = strlen(contentid);
             if (cid_len > 0x30) cid_len = 0x30;
             memcpy(meta + 16, contentid, cid_len);
-            /* fileSHA1, notSHA1, notXORKLSHA1 */
             for (int j = 0; j < 0x10; j++) {
                 meta[0x40 + j] = file_sha1[j];
                 meta[0x50 + j] = (~file_sha1[j]) & 0xff;
@@ -958,7 +1304,6 @@ static void pack_pkg(const char *folder, const char *contentid,
                     meta[0x60 + j] = (1 ^ ns ^ 0xaa) & 0xff;
                 else
                     meta[0x60 + j] = (0 ^ ns ^ 0xaa) & 0xff;
-                meta[0x70 + j] = 0;
             }
             dynbuf_append(&buf, meta, EBOOT_META_SIZE);
 
@@ -1006,25 +1351,18 @@ static void pack_pkg(const char *folder, const char *contentid,
     for (int i = 0; i < item_count; i++) {
         if ((g_files[i].flags & 0xff) == TYPE_DIRECTORY) continue;
 
-        const char *fn = g_files[i].filename;
-        if (fn[0] == '/') fn++;
-        char src_path[512];
-        size_t flen = strlen(folder);
-        int has_sep = flen > 0 && (folder[flen-1] == '/' || folder[flen-1] == '\\');
-        if (has_sep)
-            snprintf(src_path, sizeof(src_path), "%s%s", folder, fn);
-        else
-            snprintf(src_path, sizeof(src_path), "%s/%s", folder, fn);
-
-        size_t fsize;
-        uint8_t *fd = read_file_alloc(src_path, &fsize);
-        if (fd) {
-            ps3_sha1_update(&qa_ctx, fd, fsize);
-            free(fd);
+        size_t fsize = 0;
+        uint8_t *fd = read_file_alloc(g_files[i].src_path, &fsize);
+        if (!fd) {
+            fprintf(stderr, "Cannot open: %s\n", g_files[i].src_path);
+            dynbuf_free(&buf);
+            free_file_entries();
+            return 1;
         }
+        ps3_sha1_update(&qa_ctx, fd, fsize);
+        free(fd);
     }
 
-    //ps3_sha1_update(&qa_ctx, hdr, PKG_HDR_SIZE);
     /* to match pkg.py behavior, uses zeroed contentID */
     ps3_sha1_update(&qa_ctx, hdr, 0x30);
     ps3_sha1_update(&qa_ctx, hdr + 0x60, 0x20);
@@ -1076,21 +1414,54 @@ static void pack_pkg(const char *folder, const char *contentid,
     /* -------------------------------------------------------------- */
     /* Open output file                                                 */
     /* -------------------------------------------------------------- */
-    char default_name[256];
-    if (!outname) {
-        snprintf(default_name, sizeof(default_name), "%s.pkg", contentid);
-        outname = default_name;
+    char *final_outname = NULL;
+    if (outname) {
+        final_outname = strdup(outname);
+    } else {
+        size_t default_len = strlen(contentid) + 5;
+        final_outname = (char *)malloc(default_len);
+        if (final_outname) snprintf(final_outname, default_len, "%s.pkg", contentid);
     }
-    FILE *out = fopen(outname, "wb");
-    if (!out) { perror(outname); dynbuf_free(&buf); return; }
+    if (!final_outname) {
+        dynbuf_free(&buf);
+        free_file_entries();
+        return 1;
+    }
+
+#ifdef _WIN32
+    wchar_t *wout = win32_to_extended_wpath(final_outname);
+    FILE *out = wout ? _wfopen(wout, L"wb") : NULL;
+    free(wout);
+#else
+    FILE *out = fopen(final_outname, "wb");
+#endif
+    if (!out) {
+        perror(final_outname);
+        free(final_outname);
+        dynbuf_free(&buf);
+        free_file_entries();
+        return 1;
+    }
+
+#define WRITE_OUT(ptr, sz, cnt) do { \
+    if (fwrite((ptr), (sz), (cnt), out) != (cnt)) { \
+        perror("fwrite"); \
+        fclose(out); \
+        delete_file(final_outname); \
+        free(final_outname); \
+        dynbuf_free(&buf); \
+        free_file_entries(); \
+        return 1; \
+    } \
+} while (0)
 
     /* Write header (0x80 bytes) */
-    fwrite(hdr, 1, PKG_HDR_SIZE, out);
+    WRITE_OUT(hdr, 1, PKG_HDR_SIZE);
 
     /* Header SHA1[3:19] = 16 bytes */
     uint8_t hdr_sha[20];
     sha1_hash(hdr, PKG_HDR_SIZE, hdr_sha);
-    fwrite(hdr_sha + 3, 1, 16, out);
+    WRITE_OUT(hdr_sha + 3, 1, 16);
 
     /* MetaBlock SHA1[3:19] + padding + various encrypted pads */
     uint8_t meta_sha[20];
@@ -1111,10 +1482,10 @@ static void pack_pkg(const char *folder, const char *contentid,
     key_to_context(hdr_sha + 3, hs_ctx);
     uint8_t *enc2 = enc1 ? pkg_crypt(hs_ctx, enc1, 0x30) : NULL;
 
-    if (enc2) fwrite(enc2, 1, 0x30, out);
-    fwrite(meta_hdr, 1, PKG_META_SIZE, out);
-    fwrite(metasha16, 1, 16, out);
-    if (enc1) fwrite(enc1, 1, 0x30, out);
+    if (enc2) WRITE_OUT(enc2, 1, 0x30);
+    WRITE_OUT(meta_hdr, 1, PKG_META_SIZE);
+    WRITE_OUT(metasha16, 1, 16);
+    if (enc1) WRITE_OUT(enc1, 1, 0x30);
 
     free(enc1);
     free(enc2);
@@ -1124,16 +1495,26 @@ static void pack_pkg(const char *folder, const char *contentid,
     key_to_context(hdr + 48 + 0x30, enc_ctx);
     uint8_t *enc_data = pkg_crypt(enc_ctx, buf.data, buf.size);
     if (enc_data) {
-        fwrite(enc_data, 1, buf.size, out);
+        WRITE_OUT(enc_data, 1, buf.size);
         free(enc_data);
     }
 
     /* 0x60 trailing zero bytes */
     uint8_t trail[0x60];
     memset(trail, 0, 0x60);
-    fwrite(trail, 1, 0x60, out);
+    WRITE_OUT(trail, 1, 0x60);
 
-    fclose(out);
+    int flush_rc = fflush(out);
+    int close_rc = fclose(out);
+    if (flush_rc != 0 || close_rc != 0) {
+        perror(final_outname);
+        delete_file(final_outname);
+        free(final_outname);
+        dynbuf_free(&buf);
+        free_file_entries();
+        return 1;
+    }
+#undef WRITE_OUT
 
     uint64_t data_size_saved = (uint64_t)buf.size;
     dynbuf_free(&buf);
@@ -1174,6 +1555,10 @@ static void pack_pkg(const char *folder, const char *contentid,
             free(lic2);
         }
     }
+
+    free(final_outname);
+    free_file_entries();
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1237,16 +1622,16 @@ int main(int argc, char *argv[])
     }
 
     if (do_extract) {
-        unpack_pkg(extract_file);
+        return unpack_pkg(extract_file);
     } else if (do_list) {
-        list_pkg(list_file);
+        return list_pkg(list_file);
     } else {
         /* Pack mode: need contentid and 1 or 2 positional args */
         int remaining = argc - optind;
         if (remaining == 1 && contentid) {
-            pack_pkg(argv[optind], contentid, NULL);
+            return pack_pkg(argv[optind], contentid, NULL);
         } else if (remaining == 2 && contentid) {
-            pack_pkg(argv[optind], contentid, argv[optind + 1]);
+            return pack_pkg(argv[optind], contentid, argv[optind + 1]);
         } else {
             usage();
             return 2;

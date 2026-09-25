@@ -1,7 +1,7 @@
 PSL1GHT runtime: switch startfile asm + sprx OPD descriptors + lv2.ld
 to ELF64 + ILP32 + compact 8-byte OPD.
 
-The hand-written PSL1GHT startfiles (crt0.S, lv2-crti.S, lv2-crtn.S)
+The hand-written PSL1GHT startfiles (crt0.S, lv2-crti.S)
 and the sprx export-trampoline macro (sprx/common/exports.S) targeted
 the legacy LP64 + 24-byte ELFv1 ABI:
 
@@ -16,7 +16,10 @@ Under the ELF64 + ILP32 hybrid ABI:
 
   - addresses fit in 32 bits; a single lis/addi pair replaces the
     5-instruction LOAD_DWORD;
-  - stack/LR/TOC live in 4 bytes — std → stw, ld → lwz, stdu → stwu;
+  - stack/TOC live in 4 bytes — std → stw, ld → lwz, stdu → stwu;
+    the link-register save slot stays 8 bytes (std/ld), because the
+    DWARF unwinder sizes LR as a 64-bit register, so lv2-crtn.S keeps
+    upstream's `ld r0,16(r1)' unchanged;
   - .opd descriptors are 8-byte compact: `.long ea, .TOC.` (4-byte
     R_PPC64_ADDR32 each, no env field), matching what GCC's own
     crtbegin/crtend emit;
@@ -127,27 +130,6 @@ index 86900f3..cbfe0e2 100644
  	
  	.section ".fini","ax"
  	.globl ._fini
-diff --git a/ppu/crt/lv2-crtn.S b/ppu/crt/lv2-crtn.S
-index 958731a..8bd33b3 100644
---- a/ppu/crt/lv2-crtn.S
-+++ b/ppu/crt/lv2-crtn.S
-@@ -2,13 +2,13 @@
- 
- 	.section ".init","ax"
- 	addi	r1,r1,128
--	ld		r0,16(r1)
-+	lwz		r0,16(r1)
- 	mtlr	r0
- 	blr
- 	
- 	.section ".fini","ax"
- 	addi	r1,r1,128
--	ld		r0,16(r1)
-+	lwz		r0,16(r1)
- 	mtlr	r0
- 	blr
- 	
-\ No newline at end of file
 diff --git a/ppu/crt/lv2.ld b/ppu/crt/lv2.ld
 index d40801a..a87b2d4 100644
 --- a/ppu/crt/lv2.ld

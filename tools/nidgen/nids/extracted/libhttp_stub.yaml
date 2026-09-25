@@ -5,42 +5,62 @@ module: cellHttp
 exports:
 - name: cellHttpAddCookieWithClientId
   nid: '0x1b5bdcc6'
+  aliases:
+    - httpAddCookieWithClientId
   signature: ''
   notes: extracted from _cellHttp_0001_15.o
 - name: cellHttpClientAddHeader
   nid: '0x4b33942a'
+  aliases:
+    - httpClientAddHeader
   signature: ''
   notes: extracted from _cellHttp_0001_39.o
 - name: cellHttpClientCloseAllConnections
   nid: '0x2033b878'
+  aliases:
+    - httpClientCloseAllConnections
   signature: ''
   notes: extracted from _cellHttp_0001_16.o
 - name: cellHttpClientCloseConnections
   nid: '0x27f86d70'
+  aliases:
+    - httpClientCloseConnections
   signature: ''
   notes: extracted from _cellHttp_0001_21.o
 - name: cellHttpClientDeleteHeader
   nid: '0x617eec02'
+  aliases:
+    - httpClientDeleteHeader
   signature: ''
   notes: extracted from _cellHttp_0001_50.o
 - name: cellHttpClientGetAllHeaders
   nid: '0x0d9c65be'
+  aliases:
+    - httpClientGetAllHeaders
   signature: ''
   notes: extracted from _cellHttp_0001_6.o
 - name: cellHttpClientGetAuthenticationCacheStatus
   nid: '0xfce39343'
+  aliases:
+    - httpClientGetAuthenticationCacheStatus
   signature: ''
   notes: extracted from _cellHttp_0001_104.o
 - name: cellHttpClientGetAutoAuthentication
   nid: '0x5980a293'
+  aliases:
+    - httpClientGetAutoAuthentication
   signature: ''
   notes: extracted from _cellHttp_0001_48.o
 - name: cellHttpClientGetAutoRedirect
   nid: '0x2960e309'
+  aliases:
+    - httpClientGetAutoRedirect
   signature: ''
   notes: extracted from _cellHttp_0001_22.o
 - name: cellHttpClientGetConnTimeout
   nid: '0x14bfc765'
+  aliases:
+    - httpClientGetConnTimeout
   signature: ''
   notes: extracted from _cellHttp_0001_13.o
 - name: cellHttpClientGetConnectionWaitStatus
@@ -53,14 +73,20 @@ exports:
   notes: extracted from _cellHttp_0001_9.o
 - name: cellHttpClientGetCookieStatus
   nid: '0xeb9c1e5e'
+  aliases:
+    - httpClientGetCookieStatus
   signature: ''
   notes: extracted from _cellHttp_0001_100.o
 - name: cellHttpClientGetHeader
   nid: '0xd1ec0b25'
+  aliases:
+    - httpClientGetHeader
   signature: ''
   notes: extracted from _cellHttp_0001_88.o
 - name: cellHttpClientGetKeepAlive
   nid: '0x591c21a8'
+  aliases:
+    - httpClientGetKeepAlive
   signature: ''
   notes: extracted from _cellHttp_0001_46.o
 - name: cellHttpClientGetMinSslVersion
@@ -69,34 +95,50 @@ exports:
   notes: extracted from _cellHttp_0001_69.o
 - name: cellHttpClientGetPerHostKeepAliveMax
   nid: '0x46bcc9ff'
+  aliases:
+    - httpClientGetPerHostKeepAliveMax
   signature: ''
   notes: extracted from _cellHttp_0001_37.o
 - name: cellHttpClientGetPerHostPoolSize
   nid: '0xffc74003'
+  aliases:
+    - httpClientGetPerHostPoolSize
   signature: ''
   notes: extracted from _cellHttp_0001_105.o
 - name: cellHttpClientGetPerPipelineMax
   nid: '0xd06c90a4'
+  aliases:
+    - httpClientGetPerPipelineMax
   signature: ''
   notes: extracted from _cellHttp_0001_87.o
 - name: cellHttpClientGetPipeline
   nid: '0x2a1f28f6'
+  aliases:
+    - httpClientGetPipeline
   signature: ''
   notes: extracted from _cellHttp_0001_24.o
 - name: cellHttpClientGetProxy
   nid: '0x4d40cf98'
+  aliases:
+    - httpClientGetProxy
   signature: ''
   notes: extracted from _cellHttp_0001_40.o
 - name: cellHttpClientGetRecvBufferSize
   nid: '0x130150ea'
+  aliases:
+    - httpClientGetRecvBufferSize
   signature: ''
   notes: extracted from _cellHttp_0001_10.o
 - name: cellHttpClientGetRecvTimeout
   nid: '0xba78e51f'
+  aliases:
+    - httpClientGetRecvTimeout
   signature: ''
   notes: extracted from _cellHttp_0001_81.o
 - name: cellHttpClientGetResponseBufferMax
   nid: '0x6884cdb7'
+  aliases:
+    - httpClientGetResponseBufferMax
   signature: ''
   notes: extracted from _cellHttp_0001_55.o
 - name: cellHttpClientGetSendBufferSize
@@ -105,46 +147,69 @@ exports:
   notes: extracted from _cellHttp_0001_90.o
 - name: cellHttpClientGetSendTimeout
   nid: '0x271a0b06'
+  aliases:
+    - httpClientGetSendTimeout
   signature: ''
   notes: extracted from _cellHttp_0001_20.o
 - name: cellHttpClientGetSslVersion
   nid: '0xccf57336'
+  aliases:
+    - httpClientGetSslVersion
   signature: ''
   notes: extracted from _cellHttp_0001_86.o
 - name: cellHttpClientGetTotalPoolSize
   nid: '0x070f1020'
+  aliases:
+    - httpClientGetTotalPoolSize
   signature: ''
   notes: extracted from _cellHttp_0001_2.o
 - name: cellHttpClientGetUserAgent
   nid: '0xee05b0c1'
+  aliases:
+    - httpClientGetUserAgent
   signature: ''
   notes: extracted from _cellHttp_0001_102.o
 - name: cellHttpClientGetVersion
   nid: '0xdc405507'
+  aliases:
+    - httpClientGetVersion
   signature: ''
   notes: extracted from _cellHttp_0001_95.o
 - name: cellHttpClientPollConnections
   nid: '0xadc0a4b2'
+  aliases:
+    - httpClientPollConnections
   signature: ''
   notes: extracted from _cellHttp_0001_76.o
 - name: cellHttpClientSetAuthenticationCacheStatus
   nid: '0x6eed4999'
+  aliases:
+    - httpClientSetAuthenticationCacheStatus
   signature: ''
   notes: extracted from _cellHttp_0001_57.o
 - name: cellHttpClientSetAuthenticationCallback
   nid: '0x660d42a9'
+  aliases:
+    - httpClientSetAuthenticationCallbackEx
+    - httpClientSetAuthenticationCallback
   signature: ''
   notes: extracted from _cellHttp_0001_54.o
 - name: cellHttpClientSetAutoAuthentication
   nid: '0x8eaf47a3'
+  aliases:
+    - httpClientSetAutoAuthentication
   signature: ''
   notes: extracted from _cellHttp_0001_64.o
 - name: cellHttpClientSetAutoRedirect
   nid: '0x211d8ba3'
+  aliases:
+    - httpClientSetAutoRedirect
   signature: ''
   notes: extracted from _cellHttp_0001_17.o
 - name: cellHttpClientSetConnTimeout
   nid: '0xd7471088'
+  aliases:
+    - httpClientSetConnTimeout
   signature: ''
   notes: extracted from _cellHttp_0001_92.o
 - name: cellHttpClientSetConnectionWaitStatus
@@ -157,22 +222,34 @@ exports:
   notes: extracted from _cellHttp_0001_80.o
 - name: cellHttpClientSetCookieRecvCallback
   nid: '0x13fe767b'
+  aliases:
+    - httpClientSetCookieRecvCallbackEx
+    - httpClientSetCookieRecvCallback
   signature: ''
   notes: extracted from _cellHttp_0001_12.o
 - name: cellHttpClientSetCookieSendCallback
   nid: '0x4d915204'
+  aliases:
+    - httpClientSetCookieSendCallbackEx
+    - httpClientSetCookieSendCallback
   signature: ''
   notes: extracted from _cellHttp_0001_41.o
 - name: cellHttpClientSetCookieStatus
   nid: '0x434419c8'
+  aliases:
+    - httpClientSetCookieStatus
   signature: ''
   notes: extracted from _cellHttp_0001_35.o
 - name: cellHttpClientSetHeader
   nid: '0xa34c4b6f'
+  aliases:
+    - httpClientSetHeader
   signature: ''
   notes: extracted from _cellHttp_0001_71.o
 - name: cellHttpClientSetKeepAlive
   nid: '0x5d473170'
+  aliases:
+    - httpClientSetKeepAlive
   signature: ''
   notes: extracted from _cellHttp_0001_49.o
 - name: cellHttpClientSetMinSslVersion
@@ -181,38 +258,57 @@ exports:
   notes: extracted from _cellHttp_0001_98.o
 - name: cellHttpClientSetPerHostKeepAliveMax
   nid: '0x595adee9'
+  aliases:
+    - httpClientSetPerHostKeepAliveMax
   signature: ''
   notes: extracted from _cellHttp_0001_47.o
 - name: cellHttpClientSetPerHostPoolSize
   nid: '0xab1c55ab'
+  aliases:
+    - httpClientSetPerHostPoolSize
   signature: ''
   notes: extracted from _cellHttp_0001_73.o
 - name: cellHttpClientSetPerPipelineMax
   nid: '0xdc7ed599'
+  aliases:
+    - httpClientSetPerPipelineMax
   signature: ''
   notes: extracted from _cellHttp_0001_96.o
 - name: cellHttpClientSetPipeline
   nid: '0x296a46cf'
+  aliases:
+    - httpClientSetPipeline
   signature: ''
   notes: extracted from _cellHttp_0001_23.o
 - name: cellHttpClientSetProxy
   nid: '0xd7d3cd5d'
+  aliases:
+    - httpClientSetProxy
   signature: ''
   notes: extracted from _cellHttp_0001_93.o
 - name: cellHttpClientSetRecvBufferSize
   nid: '0xbf6e3659'
+  aliases:
+    - httpClientSetRecvBufferSize
   signature: ''
   notes: extracted from _cellHttp_0001_84.o
 - name: cellHttpClientSetRecvTimeout
   nid: '0x224e1610'
+  aliases:
+    - httpClientSetRecvTimeout
   signature: ''
   notes: extracted from _cellHttp_0001_18.o
 - name: cellHttpClientSetRedirectCallback
   nid: '0x473cd9f1'
+  aliases:
+    - httpClientSetRedirectCallbackEx
+    - httpClientSetRedirectCallback
   signature: ''
   notes: extracted from _cellHttp_0001_38.o
 - name: cellHttpClientSetResponseBufferMax
   nid: '0xadd66b5c'
+  aliases:
+    - httpClientSetResponseBufferMax
   signature: ''
   notes: extracted from _cellHttp_0001_77.o
 - name: cellHttpClientSetSendBufferSize
@@ -221,206 +317,310 @@ exports:
   notes: extracted from _cellHttp_0001_82.o
 - name: cellHttpClientSetSendTimeout
   nid: '0x71714cdc'
+  aliases:
+    - httpClientSetSendTimeout
   signature: ''
   notes: extracted from _cellHttp_0001_58.o
 - name: cellHttpClientSetSslCallback
   nid: '0x1395d8d1'
+  aliases:
+    - httpClientSetSslCallbackEx
+    - httpClientSetSslCallback
   signature: ''
   notes: extracted from _cellHttp_0001_11.o
 - name: cellHttpClientSetSslClientCertificate
   nid: '0xd8352a40'
+  aliases:
+    - httpClientSetSslClientCertificate
   signature: ''
   notes: extracted from _cellHttp_0001_94.o
 - name: cellHttpClientSetSslIdDestroyCallback
   nid: '0x7313c78d'
+  aliases:
+    - httpClientSetSslIdDestroyCallbackEx
   signature: ''
   notes: extracted from _cellHttp_0001_59.o
 - name: cellHttpClientSetSslVersion
   nid: '0x65691795'
+  aliases:
+    - httpClientSetSslVersion
   signature: ''
   notes: extracted from _cellHttp_0001_53.o
 - name: cellHttpClientSetTotalPoolSize
   nid: '0x8aa5fcd3'
+  aliases:
+    - httpClientSetTotalPoolSize
   signature: ''
   notes: extracted from _cellHttp_0001_62.o
 - name: cellHttpClientSetTransactionStateCallback
   nid: '0xb6feb84b'
+  aliases:
+    - httpClientSetTransactionStateCallbackEx
+    - httpClientSetTransactionStateCallback
   signature: ''
   notes: extracted from _cellHttp_0001_79.o
 - name: cellHttpClientSetUserAgent
   nid: '0xcac9fc34'
+  aliases:
+    - httpClientSetUserAgent
   signature: ''
   notes: extracted from _cellHttp_0001_85.o
 - name: cellHttpClientSetVersion
   nid: '0x40547d8b'
+  aliases:
+    - httpClientSetVersion
   signature: ''
   notes: extracted from _cellHttp_0001_31.o
 - name: cellHttpCookieExportWithClientId
   nid: '0xf972c733'
+  aliases:
+    - httpCookieExportWithClientId
   signature: ''
   notes: extracted from _cellHttp_0001_103.o
 - name: cellHttpCookieImportWithClientId
   nid: '0x0d846d63'
+  aliases:
+    - httpCookieImportWithClientId
   signature: ''
   notes: extracted from _cellHttp_0001_4.o
 - name: cellHttpCreateClient
   nid: '0x4e4ee53a'
+  aliases:
+    - httpCreateClient
   signature: ''
   notes: extracted from _cellHttp_0001_42.o
 - name: cellHttpCreateTransaction
   nid: '0x052a80d9'
+  aliases:
+    - httpCreateTransaction
   signature: ''
   notes: extracted from _cellHttp_0001_1.o
 - name: cellHttpDestroyClient
   nid: '0x980855ac'
+  aliases:
+    - httpDestroyClient
   signature: ''
   notes: extracted from _cellHttp_0001_68.o
 - name: cellHttpDestroyTransaction
   nid: '0x32f5cae2'
+  aliases:
+    - httpDestroyTransaction
   signature: ''
   notes: extracted from _cellHttp_0001_28.o
 - name: cellHttpEnd
   nid: '0xd276ff1f'
+  aliases:
+    - httpEnd
   signature: ''
   notes: extracted from _cellHttp_0001_89.o
 - name: cellHttpEndCookie
   nid: '0x61b2bade'
+  aliases:
+    - httpEndCookie
   signature: ''
   notes: extracted from _cellHttp_0001_51.o
 - name: cellHttpGetProxy
   nid: '0x2a87603a'
+  aliases:
+    - httpGetProxy
   signature: ''
   notes: extracted from _cellHttp_0001_26.o
 - name: cellHttpInit
   nid: '0x250c386c'
+  aliases:
+    - httpInit
   signature: ''
   notes: extracted from _cellHttp_0001_19.o
 - name: cellHttpInitCookie
   nid: '0x9638f766'
+  aliases:
+    - httpInitCookie
   signature: ''
   notes: extracted from _cellHttp_0001_67.o
 - name: cellHttpRecvResponse
   nid: '0x61c90691'
+  aliases:
+    - httpRecvResponse
   signature: ''
   notes: extracted from _cellHttp_0001_52.o
 - name: cellHttpRequestAddHeader
   nid: '0xed993147'
+  aliases:
+    - httpRequestAddHeader
   signature: ''
   notes: extracted from _cellHttp_0001_101.o
 - name: cellHttpRequestDeleteHeader
   nid: '0x16214411'
+  aliases:
+    - httpRequestDeleteHeader
   signature: ''
   notes: extracted from _cellHttp_0001_14.o
 - name: cellHttpRequestGetAllHeaders
   nid: '0x42205fe0'
+  aliases:
+    - httpRequestGetAllHeaders
   signature: ''
   notes: extracted from _cellHttp_0001_33.o
 - name: cellHttpRequestGetChunkedTransferStatus
   nid: '0x4137a1f6'
+  aliases:
+    - httpRequestGetChunkedTransferStatus
   signature: ''
   notes: extracted from _cellHttp_0001_32.o
 - name: cellHttpRequestGetContentLength
   nid: '0x958323cf'
+  aliases:
+    - httpRequestGetContentLength
   signature: ''
   notes: extracted from _cellHttp_0001_66.o
 - name: cellHttpRequestGetHeader
   nid: '0x0b9fea5f'
+  aliases:
+    - httpRequestGetHeader
   signature: ''
   notes: extracted from _cellHttp_0001_3.o
 - name: cellHttpRequestSetChunkedTransferStatus
   nid: '0x8e3f7ee1'
+  aliases:
+    - httpRequestSetChunkedTransferStatus
   signature: ''
   notes: extracted from _cellHttp_0001_63.o
 - name: cellHttpRequestSetContentLength
   nid: '0xaf73a64e'
+  aliases:
+    - httpRequestSetContentLength
   signature: ''
   notes: extracted from _cellHttp_0001_78.o
 - name: cellHttpRequestSetHeader
   nid: '0x54f2a4de'
+  aliases:
+    - httpRequestSetHeader
   signature: ''
   notes: extracted from _cellHttp_0001_45.o
 - name: cellHttpResponseGetAllHeaders
   nid: '0xbea17389'
+  aliases:
+    - httpResponseGetAllHeaders
   signature: ''
   notes: extracted from _cellHttp_0001_83.o
 - name: cellHttpResponseGetContentLength
   nid: '0x464ff889'
+  aliases:
+    - httpResponseGetContentLength
   signature: ''
   notes: extracted from _cellHttp_0001_36.o
 - name: cellHttpResponseGetHeader
   nid: '0x4f5d8d20'
+  aliases:
+    - httpResponseGetHeader
   signature: ''
   notes: extracted from _cellHttp_0001_43.o
 - name: cellHttpResponseGetStatusCode
   nid: '0x10d0d7fc'
+  aliases:
+    - httpResponseGetStatusCode
   signature: ''
   notes: extracted from _cellHttp_0001_8.o
 - name: cellHttpResponseGetStatusLine
   nid: '0x6a81b5e4'
+  aliases:
+    - httpResponseGetStatusLine
   signature: ''
   notes: extracted from _cellHttp_0001_56.o
 - name: cellHttpSendRequest
   nid: '0xa755b005'
+  aliases:
+    - httpSendRequest
   signature: ''
   notes: extracted from _cellHttp_0001_72.o
 - name: cellHttpSessionCookieFlush
   nid: '0xad6a2e5b'
+  aliases:
+    - httpSessionCookieFlush
   signature: ''
   notes: extracted from _cellHttp_0001_75.o
 - name: cellHttpSetProxy
   nid: '0x0d896b97'
+  aliases:
+    - httpSetProxy
   signature: ''
   notes: extracted from _cellHttp_0001_5.o
 - name: cellHttpTransactionAbortConnection
   nid: '0x2d52848b'
+  aliases:
+    - httpTransactionAbortConnection
   signature: ''
   notes: extracted from _cellHttp_0001_27.o
 - name: cellHttpTransactionCloseConnection
   nid: '0xa0d9223c'
+  aliases:
+    - httpTransactionCloseConnection
   signature: ''
   notes: extracted from _cellHttp_0001_70.o
 - name: cellHttpTransactionGetSslCipherBits
   nid: '0x38954133'
+  aliases:
+    - httpTransactionGetSslCipherBits
   signature: ''
   notes: extracted from _cellHttp_0001_30.o
 - name: cellHttpTransactionGetSslCipherId
   nid: '0x34061e49'
+  aliases:
+    - httpTransactionGetSslCipherId
   signature: ''
   notes: extracted from _cellHttp_0001_29.o
 - name: cellHttpTransactionGetSslCipherName
   nid: '0x895c604c'
+  aliases:
+    - httpTransactionGetSslCipherName
   signature: ''
   notes: extracted from _cellHttp_0001_61.o
 - name: cellHttpTransactionGetSslCipherString
   nid: '0xe3c424b3'
+  aliases:
+    - httpTransactionGetSslCipherString
   signature: ''
   notes: extracted from _cellHttp_0001_97.o
 - name: cellHttpTransactionGetSslCipherVersion
   nid: '0x93e938e5'
+  aliases:
+    - httpTransactionGetSslCipherVersion
   signature: ''
   notes: extracted from _cellHttp_0001_65.o
 - name: cellHttpTransactionGetSslId
   nid: '0x2a78ff04'
+  aliases:
+    - httpTransactionGetSslId
   signature: ''
   notes: extracted from _cellHttp_0001_25.o
 - name: cellHttpTransactionGetSslVersion
   nid: '0xad1c6f02'
+  aliases:
+    - httpTransactionGetSslVersion
   signature: ''
   notes: extracted from _cellHttp_0001_74.o
 - name: cellHttpTransactionGetUri
   nid: '0x0ef17399'
+  aliases:
+    - httpTransactionGetUri
   signature: ''
   notes: extracted from _cellHttp_0001_7.o
 - name: cellHttpTransactionReleaseConnection
   nid: '0xd47cc666'
+  aliases:
+    - httpTransactionReleaseConnection
   signature: ''
   notes: extracted from _cellHttp_0001_91.o
 - name: cellHttpsEnd
   nid: '0xe6d4202f'
+  aliases:
+    - httpsEnd
   signature: ''
   notes: extracted from _cellHttp_0001_99.o
 - name: cellHttpsInit
   nid: '0x522180bc'
+  aliases:
+    - httpsInit
   signature: ''
   notes: extracted from _cellHttp_0001_44.o
 imports: []

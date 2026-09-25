@@ -15,7 +15,7 @@
  *   GetResolutionDpi(NULL):        0x80540002  (INVALID_PARAMETER)
  *   cellFontEnd():                 0x00000000  (CELL_OK)
  *
- * Link: cellFont_stub rt lv2.  No sysmodule/io needed (sample does
+ * Link: font_stub rt lv2.  No sysmodule/io needed (sample does
  * not call cellSysmoduleLoadModule).
  */
 #include <stdint.h>

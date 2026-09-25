@@ -31,7 +31,7 @@ _init:
 	.type ._init, @function
 ._init:
 	mflr	r0
-	stw	r0, 16(r1)
+	std	r0, 16(r1)
 	stwu	r1, -128(r1)
 
 	.section ".opd","aw"
@@ -47,5 +47,5 @@ _fini:
 	.type ._fini, @function
 ._fini:
 	mflr	r0
-	stw	r0, 16(r1)
+	std	r0, 16(r1)
 	stwu	r1, -128(r1)

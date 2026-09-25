@@ -195,8 +195,13 @@ scripts/install-shim-wrappers.sh
 tests/regression/shader-readback/build/
 tests/regression/shader-differential/build/
 
+
 # Per-agent worktrees live inside the repo (director 2026-09-13); never tracked.
 /.worktrees/
 # Local rigs and harness evidence (RPCS3 boot trees, TTY logs, probe dirs) live
 # inside the repo too (director 2026-09-14); never tracked.
 /.local/
+# Census scratch and the red-control VS build dir live beside the repo root
+# (disk audit 2026-09-14); never tracked.
+/temp_census/
+/tools/rsx-cg-compiler/build-vs-red/

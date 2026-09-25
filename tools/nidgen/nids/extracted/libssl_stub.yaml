@@ -5,58 +5,86 @@ module: cellSsl
 exports:
 - name: cellSslCertGetIssuerName
   nid: '0xae6eb491'
+  aliases:
+    - sslCertGetIssuerName
   signature: ''
   notes: extracted from _cellSsl_0001_12.o
 - name: cellSslCertGetMd5Fingerprint
   nid: '0x5e9253ca'
+  aliases:
+    - sslCertGetMd5Fingerprint
   signature: ''
   notes: extracted from _cellSsl_0001_8.o
 - name: cellSslCertGetNameEntryCount
   nid: '0x766d3ca1'
+  aliases:
+    - sslCertGetNameEntryCount
   signature: ''
   notes: extracted from _cellSsl_0001_9.o
 - name: cellSslCertGetNameEntryInfo
   nid: '0x006c4900'
+  aliases:
+    - sslCertGetNameEntryInfo
   signature: ''
   notes: extracted from _cellSsl_0001_1.o
 - name: cellSslCertGetNotAfter
   nid: '0x218b64da'
+  aliases:
+    - sslCertGetNotAfter
   signature: ''
   notes: extracted from _cellSsl_0001_4.o
 - name: cellSslCertGetNotBefore
   nid: '0x31d9ba8d'
+  aliases:
+    - sslCertGetNotBefore
   signature: ''
   notes: extracted from _cellSsl_0001_5.o
 - name: cellSslCertGetPublicKey
   nid: '0xf8206492'
+  aliases:
+    - sslCertGetPublicKey
   signature: ''
   notes: extracted from _cellSsl_0001_13.o
 - name: cellSslCertGetRsaPublicKeyExponent
   nid: '0x033c4905'
+  aliases:
+    - sslCertGetRsaPublicKeyExponent
   signature: ''
   notes: extracted from _cellSsl_0001_2.o
 - name: cellSslCertGetRsaPublicKeyModulus
   nid: '0x8e505175'
+  aliases:
+    - sslCertGetRsaPublicKeyModulus
   signature: ''
   notes: extracted from _cellSsl_0001_11.o
 - name: cellSslCertGetSerialNumber
   nid: '0x7b689ebc'
+  aliases:
+    - sslCertGetSerialNumber
   signature: ''
   notes: extracted from _cellSsl_0001_10.o
 - name: cellSslCertGetSubjectName
   nid: '0x32c61bdf'
+  aliases:
+    - sslCertGetSubjectName
   signature: ''
   notes: extracted from _cellSsl_0001_6.o
 - name: cellSslCertificateLoader
   nid: '0x571afaca'
+  aliases:
+    - sslCertificateLoader
   signature: ''
   notes: extracted from _cellSsl_0001_7.o
 - name: cellSslEnd
   nid: '0x1650aea4'
+  aliases:
+    - sslEnd
   signature: ''
   notes: extracted from _cellSsl_0001_3.o
 - name: cellSslInit
   nid: '0xfb02c9d2'
+  aliases:
+    - sslInit
   signature: ''
   notes: extracted from _cellSsl_0001_14.o
 imports: []

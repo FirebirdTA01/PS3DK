@@ -5,6 +5,8 @@ archive_name: audio
 exports:
 - name: cellAudioAdd2chData
   nid: '0x9e4b1db8'
+  aliases:
+    - audioAdd2chData
   signature: ''
   notes: extracted from _cellAudio_0001_16.o
 - name: cellAudioAdd6chData
@@ -13,10 +15,14 @@ exports:
   notes: extracted from _cellAudio_0001_14.o
 - name: cellAudioAddData
   nid: '0xdab029aa'
+  aliases:
+    - audioAddData
   signature: ''
   notes: extracted from _cellAudio_0001_21.o
 - name: cellAudioCreateNotifyEventQueue
   nid: '0x04af134e'
+  aliases:
+    - audioCreateNotifyEventQueue
   signature: ''
   notes: extracted from _cellAudio_0001_1.o
 - name: cellAudioCreateNotifyEventQueueEx
@@ -25,46 +31,68 @@ exports:
   notes: extracted from _cellAudio_0001_17.o
 - name: cellAudioGetPortBlockTag
   nid: '0xe4046afe'
+  aliases:
+    - audioGetPortBlockTag
   signature: ''
   notes: extracted from _cellAudio_0001_22.o
 - name: cellAudioGetPortConfig
   nid: '0x74a66af0'
+  aliases:
+    - audioGetPortConfig
   signature: ''
   notes: extracted from _cellAudio_0001_13.o
 - name: cellAudioGetPortTimestamp
   nid: '0x4109d08c'
+  aliases:
+    - audioGetPortTimestamp
   signature: ''
   notes: extracted from _cellAudio_0001_8.o
 - name: cellAudioInit
   nid: '0x0b168f92'
+  aliases:
+    - audioInit
   signature: ''
   notes: extracted from _cellAudio_0001_2.o
 - name: cellAudioMiscSetAccessoryVolume
   nid: '0x31211f6b'
+  aliases:
+    - audioMiscSetAccessoryVolume
   signature: ''
   notes: extracted from _cellAudio_0001_6.o
 - name: cellAudioPortClose
   nid: '0x4129fe2d'
+  aliases:
+    - audioPortClose
   signature: ''
   notes: extracted from _cellAudio_0001_9.o
 - name: cellAudioPortOpen
   nid: '0xcd7bc431'
+  aliases:
+    - audioPortOpen
   signature: ''
   notes: extracted from _cellAudio_0001_20.o
 - name: cellAudioPortStart
   nid: '0x89be28f2'
+  aliases:
+    - audioPortStart
   signature: ''
   notes: extracted from _cellAudio_0001_15.o
 - name: cellAudioPortStop
   nid: '0x5b1e2c73'
+  aliases:
+    - audioPortStop
   signature: ''
   notes: extracted from _cellAudio_0001_12.o
 - name: cellAudioQuit
   nid: '0xca5ac370'
+  aliases:
+    - audioQuit
   signature: ''
   notes: extracted from _cellAudio_0001_19.o
 - name: cellAudioRemoveNotifyEventQueue
   nid: '0xff3626fd'
+  aliases:
+    - audioRemoveNotifyEventQueue
   signature: ''
   notes: extracted from _cellAudio_0001_23.o
 - name: cellAudioRemoveNotifyEventQueueEx
@@ -77,6 +105,8 @@ exports:
   notes: extracted from _cellAudio_0001_3.o
 - name: cellAudioSetNotifyEventQueue
   nid: '0x377e0cd9'
+  aliases:
+    - audioSetNotifyEventQueue
   signature: ''
   notes: extracted from _cellAudio_0001_7.o
 - name: cellAudioSetNotifyEventQueueEx
@@ -89,6 +119,8 @@ exports:
   notes: extracted from _cellAudio_0001_10.o
 - name: cellAudioSetPortLevel
   nid: '0x56dfe179'
+  aliases:
+    - audioSetPortLevel
   signature: ''
   notes: extracted from _cellAudio_0001_11.o
 - name: cellAudioUnsetPersonalDevice

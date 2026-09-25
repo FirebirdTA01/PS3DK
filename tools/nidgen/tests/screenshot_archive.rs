@@ -82,11 +82,19 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
         "trampoline missing stub-slot load",
     );
 
-    // 44-byte prx_header magic with the screenshot library's export count.
-    assert!(asm.contains("0x2c000001"), "prx_header magic missing");
+    // Import attributes precede the function count in the 44-byte header.
+    let header = asm
+        .split_once("__nidgen_cellScreenShotUtility_header:\n")
+        .unwrap()
+        .1;
+    let fields: Vec<_> = header
+        .lines()
+        .take(3)
+        .map(|line| line.split('#').next().unwrap().trim())
+        .collect();
     assert!(
-        asm.contains(".2byte 4              # export count"),
-        "expected export count of 4 in prx_header",
+        fields == [".4byte 0x2c000001", ".2byte 0x0009", ".2byte 4"],
+        "expected size/version, import attributes, then four function imports: {fields:?}",
     );
 }
 

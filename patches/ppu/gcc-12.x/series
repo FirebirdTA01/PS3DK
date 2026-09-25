@@ -34,3 +34,7 @@
 0033-gcc-expr-canonicalize-pointer-member-extract-hybrid.patch
 0034-cell64lv2-link-c-stub.patch
 0035-libgcc-t-ps3-crtstuff-no-unwind-tables.patch
+0036-libstdcxx-ps3-filesystem-deps.patch
+0037-rs6000-logue-lr-and-eh-data-save-dimode.patch
+0038-libstdcxx-ps3-tls-exception-globals.patch
+0039-cell64lv2-lp64-sdk-library-path.patch

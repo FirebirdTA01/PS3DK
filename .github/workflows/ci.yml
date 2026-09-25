@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, cg-compiler-dev]
+    branches: [main, feat/rsx-cg-compiler, cg-compiler-dev]
   pull_request:
     branches: [main]
 
@@ -89,6 +89,31 @@ jobs:
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
 
+      # Freestanding 32-bit compilation catches the original ILP32 shift
+      # without requiring a PPU toolchain or host multilib runtime libraries.
+      # Native host execution also verifies the wide-pointer debug trap.
+      - name: Test LV2 effective-address conversions
+        run: |
+          gcc -m32 -ffreestanding -std=c11 -Wall -Wextra -Werror -DEXPECT_POINTER_SIZE=4 -Isdk/include -fsyntax-only tests/sdk/lv2-ea32-test.c
+          g++ -m32 -ffreestanding -std=c++17 -Wall -Wextra -Werror -DEXPECT_POINTER_SIZE=4 -Isdk/include -fsyntax-only tests/sdk/lv2-ea32-test.c
+          bash tests/sdk/lv2-ea32-test.sh
+
+      # Including <sys/process.h> and <sys/sys_time.h> in either order must not
+      # trigger lv2syscall0..8 or register_passing_1..7 redefinitions (t_38a797a0).
+      - name: Test lv2syscall macro definition compatibility across header orders
+        run: bash tests/sdk/lv2syscall-redefined-test.sh
+
+      # The GCM FIFO wrap must retire a lap the application never published
+      # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
+      # the one-phase protocol it replaced must fail the idle-lap scenario.
+      - name: Test the GCM FIFO wrap never loses an unpublished lap
+        run: bash tests/sdk/fifo-wrap-protocol-test.sh
+
+      # install-headers copies an explicit list; a header missing from it is
+      # left out of the installed SDK and breaks the full SDK build.
+      - name: Test every tracked SDK header is installed
+        run: bash tests/sdk/sdk-header-list-test.sh
+
       # No PPU toolchain on this runner, so only the host-only checks (A and
       # D) run here; the archive checks (B and C) skip themselves and are
       # run by scripts/build-cell-stub-archives.sh against the tree it has
@@ -101,6 +126,38 @@ jobs:
       # real PS3 on a black screen; 23 samples and our own PSGL carried it.
       - name: Test render-target surface types use the surface enum family
         run: bash tests/sdk/surface-type-enum-test.sh
+
+      # ps3_add_self must respect OUTPUT_DIRECTORY keyword and PS3_SELF_OUTPUT_DIRECTORY
+      # variable, falling back to CMAKE_CURRENT_SOURCE_DIR by default. ps3_add_pkg
+      # must follow the same resolved directory.
+      - name: Test ps3_add_self output directory override
+        run: bash tests/sdk/cmake-self-output-dir-test.sh
+
+      # A target that opts into LP64 with -mlp64 must be post-linked with
+      # sprxlinker --lp64, as the LP64 toolchain file does for whole projects.
+      - name: Test ps3_add_self post-links -mlp64 targets for LP64
+        run: bash tests/sdk/cmake-self-lp64-postlink-test.sh
+
+      - name: Test librt pathname limits and error propagation
+        run: bash tests/sdk/librt-pathconf-test.sh
+
+      - name: Test librt heap configuration and failure diagnostics
+        run: bash tests/sdk/librt-heap-test.sh
+
+      - name: Test librt low-level exit and finalizer registration
+        run: bash tests/sdk/librt-exit-test.sh
+
+      # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
+      # fail non-zero without writing packages when files cannot be read, and
+      # produce byte-identical packages for standard payloads.
+      - name: Test pkg host tool long paths and error handling
+        run: bash tests/sdk/pkg-test.sh
+
+      - name: Test Linux pkg installation and release staging
+        run: bash tests/sdk/linux-pkg-install-test.sh
+
+      - name: Test newlib remove directory fallback
+        run: bash tests/sdk/newlib-remove-test.sh
 
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -456,6 +513,10 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\shipped-coverage-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\path-pair-corpus-inputs-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\rpcs3-process-guard-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\rpcs3-claim-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Set up MSYS2 / mingw64

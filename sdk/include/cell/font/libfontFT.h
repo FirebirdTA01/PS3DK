@@ -1,7 +1,7 @@
 /*
  * PS3 Custom Toolchain - cell/font/libfontFT.h
  *
- * cellFont FreeType surface: 3 exports backed by libcellFontFT_stub.a.
+ * cellFont FreeType surface: 3 exports backed by libfontFT_stub.a.
  */
 #ifndef _PS3DK_CELL_FONT_LIBFONTFT_H_
 #define _PS3DK_CELL_FONT_LIBFONTFT_H_

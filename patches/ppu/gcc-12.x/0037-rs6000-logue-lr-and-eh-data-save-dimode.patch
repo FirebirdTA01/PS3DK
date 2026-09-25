@@ -1,0 +1,185 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000-logue: save LR and EH data registers in DImode under TARGET_64BIT
+
+In the PS3 ELF64/ILP32 hybrid (TARGET_64BIT with a 32-bit Pmode) the
+link-register save slot and the EH data register slots are 8 bytes, and
+the DWARF unwinder sizes LR and r3-r6 as 64-bit registers
+(dwarf_reg_size_table entries of 8).  The prologue and epilogue still
+moved these values in Pmode, so LR was saved with `stw r0,16(r1)' and the
+EH data registers were restored with `lwz'.  On big-endian a 4-byte LR
+store fills the high word of the 8-byte slot; the unwinder read the
+whole slot and kept the stale low word, so its first step to a caller
+went to a garbage address (slot bytes measured on RPCS3).  The EH data
+registers had the opposite problem: the unwinder wrote them as 8-byte
+values and the eh_return epilogue reloaded only their high words, which
+by the same width arithmetic hands the landing pad a zero exception
+pointer and selector (inferred from the disassembly; the register
+values were not captured).  C++ exceptions never reached their handler
+in ILP32 (LP64 was unaffected).
+
+Patch 0031 already moved callee-saved GPRs to DImode for the same reason.
+This does the same for the link-register slot (the ordinary prologue and
+epilogue, the shrink-wrap LR component, the out-of-line savres RTL
+description, __builtin_return_address through the slot, and the
+__builtin_eh_return handler store) and for the EH_RETURN_DATA_REGNO save
+and restore loops.  The reference toolchain's ILP32 code also saves LR
+with std.
+
+eh_return runs after reload and may not create pseudos, and eh_set_lr
+only declares the handler register as an input.  The prologue has
+already stored the full 64-bit LR in the slot (code addresses fit in 32
+bits, so its high word is zero), so only the slot's low word is replaced
+with the handler address.
+
+Pointer width, the stack back chain and all other save paths are
+unchanged.
+
+--- a/gcc/config/rs6000/rs6000-logue.cc
++++ b/gcc/config/rs6000/rs6000-logue.cc
+@@ -47,6 +47,13 @@
+ #include "diagnostic-core.h"
+ #include "alias.h"
+ #include "rs6000-internal.h"
++
++/* Mode of the link-register save slot.  The PS3 ELF64/ILP32 hybrid has
++   TARGET_64BIT with a 32-bit Pmode: the slot is 8 bytes and the DWARF
++   unwinder sizes the link register as 64 bits, so the slot must be
++   written and read in DImode (std/ld), as the reference toolchain does.
++   Everywhere else this is Pmode, unchanged.  */
++#define LR_SAVE_MODE (TARGET_64BIT ? DImode : Pmode)
+ #if TARGET_MACHO
+ #include "gstab.h"  /* for N_SLINE */
+ #include "dbxout.h" /* dbxout_ */
+@@ -1090,6 +1097,10 @@
+       rtx lr_save_off = plus_constant (Pmode,
+ 				       prev_frame, RETURN_ADDRESS_OFFSET);
+       rtx lr_save_addr = memory_address (Pmode, lr_save_off);
++      if (LR_SAVE_MODE != Pmode)
++	return gen_lowpart (Pmode,
++			    copy_to_reg (gen_rtx_MEM (LR_SAVE_MODE,
++						      lr_save_addr)));
+       return gen_rtx_MEM (Pmode, lr_save_addr);
+     }
+ 
+@@ -1379,10 +1390,26 @@
+       else if (info->push_p)
+ 	sp_offset = info->total_size;
+ 
+-      tmp = plus_constant (Pmode, frame_rtx,
+-			   info->lr_save_offset + sp_offset);
+-      tmp = gen_frame_mem (Pmode, tmp);
+-      emit_move_insn (tmp, operands[0]);
++      if (LR_SAVE_MODE != Pmode)
++	{
++	  /* The prologue saved the full 64-bit link register here (std),
++	     and code addresses fit in 32 bits, so the slot's high word is
++	     already zero.  Replace only the low word with the handler
++	     address: no new pseudo after reload, and no write to the upper
++	     half of SOURCE, which eh_set_lr only declares as an input.  */
++	  tmp = plus_constant (Pmode, frame_rtx,
++			       info->lr_save_offset + sp_offset
++			       + GET_MODE_SIZE (LR_SAVE_MODE)
++			       - GET_MODE_SIZE (Pmode));
++	  emit_move_insn (gen_frame_mem (Pmode, tmp), operands[0]);
++	}
++      else
++	{
++	  tmp = plus_constant (Pmode, frame_rtx,
++			       info->lr_save_offset + sp_offset);
++	  tmp = gen_frame_mem (Pmode, tmp);
++	  emit_move_insn (tmp, operands[0]);
++	}
+     }
+   else
+     emit_move_insn (gen_rtx_REG (Pmode, LR_REGNO), operands[0]);
+@@ -2481,7 +2508,8 @@
+ 
+   if ((sel & SAVRES_SAVE) && (sel & SAVRES_LR))
+     RTVEC_ELT (p, i + offset)
+-      = gen_frame_store (gen_rtx_REG (Pmode, 0), frame_reg_rtx, lr_offset);
++      = gen_frame_store (gen_rtx_REG (LR_SAVE_MODE, 0), frame_reg_rtx,
++			 lr_offset);
+ 
+   par = gen_rtx_PARALLEL (VOIDmode, p);
+ 
+@@ -2780,8 +2808,8 @@
+   /* Prologue for LR.  */
+   if (bitmap_bit_p (components, 0))
+     {
+-      rtx lr = gen_rtx_REG (reg_mode, LR_REGNO);
+-      rtx reg = gen_rtx_REG (reg_mode, 0);
++      rtx lr = gen_rtx_REG (LR_SAVE_MODE, LR_REGNO);
++      rtx reg = gen_rtx_REG (LR_SAVE_MODE, 0);
+       rtx_insn *insn = emit_move_insn (reg, lr);
+       RTX_FRAME_RELATED_P (insn) = 1;
+       add_reg_note (insn, REG_CFA_REGISTER, gen_rtx_SET (reg, lr));
+@@ -2902,10 +2930,10 @@
+       if (info->push_p)
+ 	offset += info->total_size;
+ 
+-      rtx reg = gen_rtx_REG (reg_mode, 0);
++      rtx reg = gen_rtx_REG (LR_SAVE_MODE, 0);
+       rtx_insn *insn = emit_insn (gen_frame_load (reg, ptr_reg, offset));
+ 
+-      rtx lr = gen_rtx_REG (Pmode, LR_REGNO);
++      rtx lr = gen_rtx_REG (LR_SAVE_MODE, LR_REGNO);
+       insn = emit_move_insn (lr, reg);
+       RTX_FRAME_RELATED_P (insn) = 1;
+       add_reg_note (insn, REG_CFA_RESTORE, lr);
+@@ -3264,9 +3292,9 @@
+     {
+       rtx reg;
+ 
+-      reg = gen_rtx_REG (Pmode, 0);
++      reg = gen_rtx_REG (LR_SAVE_MODE, 0);
+       START_USE (0);
+-      insn = emit_move_insn (reg, gen_rtx_REG (Pmode, LR_REGNO));
++      insn = emit_move_insn (reg, gen_rtx_REG (LR_SAVE_MODE, LR_REGNO));
+       RTX_FRAME_RELATED_P (insn) = 1;
+ 
+       if (!(strategy & (SAVE_NOINLINE_GPRS_SAVES_LR
+@@ -3449,7 +3477,7 @@
+ 	    break;
+ 
+ 	  rtx set
+-	    = gen_frame_store (gen_rtx_REG (reg_mode, regno),
++	    = gen_frame_store (gen_rtx_REG (gp_reg_mode, regno),
+ 			       sp_reg_rtx,
+ 			       info->ehrd_offset + sp_off + reg_size * (int) i);
+ 	  RTVEC_ELT (p, i) = set;
+@@ -4196,8 +4224,8 @@
+ static void
+ load_lr_save (int regno, rtx frame_reg_rtx, int offset)
+ {
+-  rtx mem = gen_frame_mem_offset (Pmode, frame_reg_rtx, offset);
+-  rtx reg = gen_rtx_REG (Pmode, regno);
++  rtx mem = gen_frame_mem_offset (LR_SAVE_MODE, frame_reg_rtx, offset);
++  rtx reg = gen_rtx_REG (LR_SAVE_MODE, regno);
+ 
+   emit_move_insn (reg, mem);
+ }
+@@ -4205,8 +4233,8 @@
+ static void
+ restore_saved_lr (int regno, bool exit_func)
+ {
+-  rtx reg = gen_rtx_REG (Pmode, regno);
+-  rtx lr = gen_rtx_REG (Pmode, LR_REGNO);
++  rtx reg = gen_rtx_REG (LR_SAVE_MODE, regno);
++  rtx lr = gen_rtx_REG (LR_SAVE_MODE, LR_REGNO);
+   rtx_insn *insn = emit_move_insn (lr, reg);
+ 
+   if (!exit_func && flag_shrink_wrap)
+@@ -4854,11 +4882,11 @@
+ 	  if (regno == INVALID_REGNUM)
+ 	    break;
+ 
+-	  mem = gen_frame_mem_offset (reg_mode, frame_reg_rtx,
++	  mem = gen_frame_mem_offset (gp_reg_mode, frame_reg_rtx,
+ 				      info->ehrd_offset + frame_off
+ 				      + reg_size * (int) i);
+ 
+-	  emit_move_insn (gen_rtx_REG (reg_mode, regno), mem);
++	  emit_move_insn (gen_rtx_REG (gp_reg_mode, regno), mem);
+ 	}
+     }
+ 

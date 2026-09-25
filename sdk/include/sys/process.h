@@ -66,6 +66,9 @@
 #define SYS_PROCESS_PRIMARY_STACK_SIZE_1M        SYS_PROCESS_SPAWN_STACK_SIZE_1M
 
 /* ---- .sys_proc_param section emitter -------------------------------- */
+/* Optional process malloc-arena size: PS3TC_HEAP_SIZE(bytes), once per app. */
+#include <sys/heap_config.h>
+
 /*
  * We build the 36-byte .sys_proc_param record via inline asm so the
  * trailing crash_dump_param_addr word can be an R_PPC64_ADDR32

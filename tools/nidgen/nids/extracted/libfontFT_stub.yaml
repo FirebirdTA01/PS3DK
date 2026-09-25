@@ -1,17 +1,24 @@
 library: cellFontFT
 version: 1
 module: cellFontFT
+archive_name: fontFT
 exports:
 - name: cellFontFTGetInitializedRevisionFlags
   nid: '0xfa0c2de0'
+  aliases:
+    - fontFTGetInitializedRevisionFlags
   signature: ''
   notes: extracted from _cellFontFT_0001_3.o
 - name: cellFontFTGetRevisionFlags
   nid: '0xec89a187'
+  aliases:
+    - fontFTGetRevisionFlags
   signature: ''
   notes: extracted from _cellFontFT_0001_2.o
 - name: cellFontInitLibraryFreeTypeWithRevision
   nid: '0x7a0a83c4'
+  aliases:
+    - fontInitLibraryFreeTypeWithRevision
   signature: ''
   notes: extracted from _cellFontFT_0001_1.o
 imports: []
