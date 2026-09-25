@@ -5587,6 +5587,18 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 indexValue = createConstant(constIdx);
         }
     }
+    // A RUN-TIME index into a VECTOR (not an array, not a matrix row) is
+    // refused, as the reference does (C1011 "cannot index a non-array value",
+    // measured on sce-cgc 475 2026-09-25 for float, int and varying indices,
+    // both profiles, and for m[0][s]; m[s] and a[s] are accepted there).
+    // Accepting it lowered the VecExtract's selector as lane 0, so t[s]
+    // silently returned t.x whatever s was.
+    if (aggregateType.isVector() && !constantIndex)
+    {
+        error(expr->loc, "cannot index a non-array value with a run-time index "
+                         "(the reference refuses this too: C1011)");
+        return InvalidIRValue;
+    }
     if (constantIndex)
     {
         if (constantAggregate && constantAggregate->type.isMatrix())
