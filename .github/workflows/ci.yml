@@ -96,6 +96,9 @@ jobs:
       - name: Test rsx-cg-compiler output is independent of the C++ toolchain
         run: bash tests/shader-compiler/cross-stl-determinism-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler tools/rsx-cg-compiler/build-libcxx/rsx-cg-compiler
 
+      - name: Test a vertex-program pow() of a vector computes every lane
+        run: bash tests/shader-compiler/vp-pow-vector-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
 
