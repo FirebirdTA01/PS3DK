@@ -70,7 +70,8 @@ int main(void)
     char buf[PATH_MAX];
     const char *p;
 
-    check("absolute passes through", __librt_resolve_path(&r, "/dev_hdd0/x", buf) != buf);
+    p = "/dev_hdd0/x";
+    check("absolute passes through", __librt_resolve_path(&r, p, buf) == p);
     p = "";
     check("empty passes through", __librt_resolve_path(&r, p, buf) == p);
     r._errno = 0;
