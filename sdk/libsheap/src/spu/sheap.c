@@ -13,46 +13,43 @@
 static sheap_header header;
 
 /* Fill the allocator part of *h for a heap at `ea` whose tree starts at
- * ea_tree and whose tree-plus-heap span is `span`, and build the tree. */
-static int core_initialize(sheap_header *h, uint64_t ea, uint64_t ea_tree,
-                           uint64_t span, uint32_t tag)
+ * ea_tree, and build the tree.  The geometry has already been validated,
+ * so every byte written lies inside the caller's region. */
+static void core_initialize(sheap_header *h, uint64_t ea, uint64_t ea_tree,
+                            const sheap_geometry *geo, uint32_t tag)
 {
-    sheap_geometry geo;
-
     h->lock = 0;
     h->ea_self = ea;
     h->spu_tag1 = tag;
     h->spu_tag2 = tag;
-    if (__sheap_geometry(span, &geo) != 0)
-        return (int)CELL_SHEAP_ERROR_INVAL;
-
     h->ea_tree = ea_tree;
-    h->s_tree = geo.s_tree;
-    h->n_nodes = geo.n_nodes;
-    h->ea_heap = ea_tree + geo.s_tree;
-    h->s_root = geo.s_root;
-    h->s_buffer = geo.s_buffer;
+    h->s_tree = geo->s_tree;
+    h->n_nodes = geo->n_nodes;
+    h->ea_heap = ea_tree + geo->s_tree;
+    h->s_root = geo->s_root;
+    h->s_buffer = geo->s_buffer;
 
     /* An all-zero tree is all FREE; then fence off the part of the root
      * block that lies past the end of the heap. */
-    __sheap_dma_zero(ea_tree, geo.s_tree, tag);
+    __sheap_dma_zero(ea_tree, geo->s_tree, tag);
     __sheap_cache_begin(ea_tree, tag);
-    __sheap_tree_fence(&__sheap_cache_access, geo.n_nodes);
+    __sheap_tree_fence(&__sheap_cache_access, geo->n_nodes);
     __sheap_cache_flush();
-    return CELL_OK;
 }
 
 int cellSheapInitialize(uint64_t ea_sheap, uint64_t size, uint32_t spu_dma_tag)
 {
+    sheap_geometry geo;
     int rc = __sheap_check_init_args(ea_sheap, size, spu_dma_tag);
 
     if (rc != CELL_OK)
         return rc;
+    /* Validate everything before the first DMA. */
+    if (__sheap_init_geometry(0, size, &geo) != 0)
+        return (int)CELL_SHEAP_ERROR_INVAL;
     memset(&header, 0, sizeof(header));
-    rc = core_initialize(&header, ea_sheap, ea_sheap + SHEAP_HEADER_BYTES,
-                         __sheap_plain_span(size), spu_dma_tag);
-    if (rc != CELL_OK)
-        return rc;
+    core_initialize(&header, ea_sheap, ea_sheap + SHEAP_HEADER_BYTES, &geo,
+                    spu_dma_tag);
     __sheap_publish(ea_sheap, &header);
     return CELL_OK;
 }
@@ -60,20 +57,25 @@ int cellSheapInitialize(uint64_t ea_sheap, uint64_t size, uint32_t spu_dma_tag)
 int cellKeySheapInitialize(uint64_t ea_ksheap, uint64_t size, uint32_t spu_dma_tag)
 {
     uint64_t ea_table = ea_ksheap + SHEAP_HEADER_BYTES;
+    sheap_geometry geo;
     int rc = __sheap_check_init_args(ea_ksheap, size, spu_dma_tag);
 
     if (rc != CELL_OK)
         return rc;
+    /* Validate everything before the first DMA: the header and key table
+     * alone are 2176 bytes, more than the 2048-byte minimum a plain heap
+     * accepts, and the rest must still hold a tree and a heap.  A refused
+     * call writes nothing. */
+    if (__sheap_init_geometry(1, size, &geo) != 0)
+        return (int)CELL_SHEAP_ERROR_INVAL;
     memset(&header, 0, sizeof(header));
     header.ea_keytable = ea_table;
     header.s_keytable = SHEAP_KEYTABLE_BYTES;
     __sheap_dma_zero(ea_table, SHEAP_KEYTABLE_BYTES, spu_dma_tag);
-    rc = core_initialize(&header, ea_ksheap, ea_table + SHEAP_KEYTABLE_BYTES,
-                         __sheap_keyed_span(size), spu_dma_tag);
-    if (rc != CELL_OK)
-        header.ea_keytable = 0;     /* marks the heap unusable for keys */
+    core_initialize(&header, ea_ksheap, ea_table + SHEAP_KEYTABLE_BYTES, &geo,
+                    spu_dma_tag);
     __sheap_publish(ea_ksheap, &header);
-    return rc;
+    return CELL_OK;
 }
 
 static void begin(uint64_t ea_sheap)

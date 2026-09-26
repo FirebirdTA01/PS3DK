@@ -60,6 +60,11 @@ int __sheap_geometry(uint64_t tree_and_heap, sheap_geometry *geo);
 uint64_t __sheap_plain_span(uint64_t size);
 uint64_t __sheap_keyed_span(uint64_t size);
 
+/* Geometry for a whole plain (keyed = 0) or keyed heap of `size` bytes:
+ * 0, or -1 when the size cannot hold the header, key table, tree and a
+ * heap.  Initialize calls this before writing anything. */
+int __sheap_init_geometry(int keyed, uint64_t size, sheap_geometry *geo);
+
 /* Argument checks shared by both Initialize functions: 0, or a
  * CELL_SHEAP_ERROR_* code. */
 int __sheap_check_init_args(uint64_t ea, uint64_t size, uint32_t tag);

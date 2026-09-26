@@ -74,6 +74,16 @@ int __sheap_geometry(uint64_t tree_and_heap, sheap_geometry *geo)
     return 0;
 }
 
+int __sheap_init_geometry(int keyed, uint64_t size, sheap_geometry *geo)
+{
+    uint64_t prefix = SHEAP_HEADER_BYTES + (keyed ? SHEAP_KEYTABLE_BYTES : 0);
+
+    if (size < prefix)
+        return -1;
+    return __sheap_geometry(keyed ? __sheap_keyed_span(size)
+                                  : __sheap_plain_span(size), geo);
+}
+
 int __sheap_size_to_row(uint64_t size, uint64_t s_root)
 {
     if (size == 0)
