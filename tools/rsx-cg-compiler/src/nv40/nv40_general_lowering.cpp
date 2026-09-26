@@ -374,6 +374,10 @@ static int vertexInputIndex(const std::string& semanticUpper, int semanticIndex)
         return NVFX_VP_INST_IN_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
         return NVFX_VP_INST_IN_FOGC;
+    if (semanticUpper == "BLENDWEIGHT" && semanticIndex == 0)
+        return 1;
+    if (semanticUpper == "BLENDINDICES" && semanticIndex == 0)
+        return 7;
     if (semanticUpper == "TANGENT" && semanticIndex == 0)
         return 14;
     if (semanticUpper == "BINORMAL" && semanticIndex == 0)

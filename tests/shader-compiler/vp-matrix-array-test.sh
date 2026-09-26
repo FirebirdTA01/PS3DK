@@ -42,7 +42,7 @@ def matrix(element, width):
 def product(m, p):
     return [sum(a*b for a,b in zip(row,p)) for row in m]
 
-def execute(b, records, words, index, address_only=False):
+def execute(b, records, words, index, address_only=False, blend_weights=None):
     constants = {}
     for name, r in records.items():
         if name.startswith('internal-constant-'):
@@ -58,6 +58,9 @@ def execute(b, records, words, index, address_only=False):
         if name == 'V[1]': constants[r[3]] = [3,5,7,9]
     indices = list(index) if isinstance(index, (list,tuple)) else [index]*4
     regs = {'IN0':[1,-2,3,0.5], 'IN8':indices, 'A0':[math.nan]*4, 'A1':[math.nan]*4}
+    if blend_weights is not None:
+        regs['IN7'] = indices
+        regs['IN1'] = list(blend_weights)
     trace = []
     def source(text):
         neg = text.startswith('-'); text = text.lstrip('-')
@@ -108,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-matrix-array-') as temp:
             require(not out.exists(),f'{tag}: refusal left an output')
             return None
         if refusal:
+            require(not out.exists(),f'{tag}: refusal left an output')
             require(run.returncode == 1 and refusal in run.stderr,
                     f'{tag}: expected exit 1 naming {refusal!r}, got {run.returncode}: {run.stderr}')
             return None
@@ -206,6 +210,45 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-matrix-array-') as temp:
                     require(set(reads) == expected_reads,
                             f'{tag}: negative fraction addresses {reads} != {sorted(expected_reads)}')
                 except (KeyError,ValueError) as error: failures.append(tag+': '+str(error))
+
+    # Independently authored reference probes bind BLENDINDICES to ATTR7
+    # (resource 2120) and BLENDWEIGHT to ATTR1 (2114). Their explicit-zero
+    # spellings have identical instructions; either indexed-one spelling
+    # is refused. Keep encoded reads, parameter records and values aligned.
+    blend_twins = {}
+    for label,index_sem,weight_sem in (
+        ('named','BLENDINDICES','BLENDWEIGHT'),
+        ('zero','BLENDINDICES0','BLENDWEIGHT0'),
+        ('attr','ATTR7','ATTR1'),
+    ):
+        tag = 'blend-'+label
+        data = compile_case(tag,'uniform float4x4 M[8]; '
+                f'float4 main(float4 p:POSITION,float4 bi:{index_sem},float4 bw:{weight_sem}):POSITION {{'
+                'int4 ix=int4(bi); return bw.x*mul(M[ix.y],p)+bw.y*mul(M[ix.x],p);}')
+        if data:
+            blob,records,_ = data
+            for name,resource in (('bi',2120),('bw',2114)):
+                require(name in records and records[name][1] == resource,
+                        f'{tag}: wrong input resource for {name}')
+            size,offset = struct.unpack_from('>2I',blob,24)
+            blend_twins[label] = blob[offset:offset+size]
+            for indices,weights in (([1.75,2.25,4.125,6.875],[0.25,0.75,2,3]),
+                                    ([3.125,0.875,5.25,7.25],[2,-0.5,4,5])):
+                try:
+                    got,_ = execute(*data,indices,blend_weights=weights)
+                    a = product(matrix(math.floor(indices[1]),4),[1,-2,3,0.5])
+                    b = product(matrix(math.floor(indices[0]),4),[1,-2,3,0.5])
+                    expected = [weights[0]*x+weights[1]*y for x,y in zip(a,b)]
+                    require(got == expected,f'{tag}: {got} != {expected}')
+                except (KeyError,ValueError) as error: failures.append(tag+': '+str(error))
+    require(len(blend_twins) == 3 and len(set(blend_twins.values())) == 1,
+            'blend semantics: named/zero/ATTR instruction twins differ or are missing')
+    for index_sem,weight_sem in (('BLENDINDICES1','BLENDWEIGHT'),
+                                  ('BLENDINDICES','BLENDWEIGHT1')):
+        compile_case('blend-refuse-'+index_sem+'-'+weight_sem,'uniform float4x4 M[8]; '
+                f'float4 main(float4 p:POSITION,float4 bi:{index_sem},float4 bw:{weight_sem}):POSITION {{'
+                'int4 ix=int4(bi); return bw.x*mul(M[ix.y],p)+bw.y*mul(M[ix.x],p);}',
+                refusal='could not be resolved')
 
     # A vector made from cast lanes and independent integer constants must
     # never be aliased wholesale to i. Either preserve lane provenance or
