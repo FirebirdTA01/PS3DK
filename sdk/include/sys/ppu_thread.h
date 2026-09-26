@@ -47,8 +47,10 @@ static inline int sys_ppu_thread_create(sys_ppu_thread_t *thread_id,
 {
     /* Reference ABI JOINABLE bit == PSL1GHT THREAD_JOINABLE bit (both 1). */
     (void)flags;
+    /* The kernel starts the thread with the argument in r3 either way; the
+     * cast through void (*)(void) marks the type pun as intended. */
     return (int)sysThreadCreate(thread_id,
-                                (void (*)(void *))entry,
+                                (void (*)(void *))(void (*)(void))entry,
                                 (void *)(uintptr_t)arg,
                                 (s32)prio,
                                 (u64)stacksize,

@@ -1,0 +1,326 @@
+[
+  {
+    "header": "cell/np/np2.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "ppu-types.h:124: error: \"ATTRIBUTE_PRXPTR\" redefined [-Werror]"
+  },
+  {
+    "header": "cell/np/np2.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "ppu-types.h:124: error: \"ATTRIBUTE_PRXPTR\" redefined [-Werror]"
+  },
+  {
+    "header": "cell/np/np2.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "ppu-types.h:124: error: \"ATTRIBUTE_PRXPTR\" redefined [-Werror]"
+  },
+  {
+    "header": "cell/np/np2.h",
+    "standard": "c11",
+    "abi": "lp64",
+    "diagnostic": "ppu-types.h:124: error: \"ATTRIBUTE_PRXPTR\" redefined [-Werror]"
+  },
+  {
+    "header": "cell/np/np2.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "ppu-types.h:124: error: \"ATTRIBUTE_PRXPTR\" redefined [-Werror]"
+  },
+  {
+    "header": "cell/np/np2.h",
+    "standard": "gnu99",
+    "abi": "lp64",
+    "diagnostic": "ppu-types.h:124: error: \"ATTRIBUTE_PRXPTR\" redefined [-Werror]"
+  },
+  {
+    "header": "cell/sail/player.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "cell/sail/player.h:34:45: error: 'CellSailSource' has not been declared"
+  },
+  {
+    "header": "cell/sail/player.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "cell/sail/player.h:34:45: error: 'CellSailSource' has not been declared"
+  },
+  {
+    "header": "cell/sail/player.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "cell/sail/player.h:34:45: error: unknown type name 'CellSailSource'"
+  },
+  {
+    "header": "cell/sail/player.h",
+    "standard": "c11",
+    "abi": "lp64",
+    "diagnostic": "cell/sail/player.h:34:45: error: unknown type name 'CellSailSource'"
+  },
+  {
+    "header": "cell/sail/player.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "cell/sail/player.h:34:45: error: unknown type name 'CellSailSource'"
+  },
+  {
+    "header": "cell/sail/player.h",
+    "standard": "gnu99",
+    "abi": "lp64",
+    "diagnostic": "cell/sail/player.h:34:45: error: unknown type name 'CellSailSource'"
+  },
+  {
+    "header": "cell/spurs/job_queue_cpp_types.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "cell/spurs/job_queue_cpp_types.h:26:1: error: '__CELL_SPURS_JOBQUEUE_BEGIN' does not name a type; did you mean 'CELL_SPURS_JOBQUEUE_ALIGN'?"
+  },
+  {
+    "header": "cell/spurs/job_queue_cpp_types.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "cell/spurs/job_queue_cpp_types.h:26:1: error: '__CELL_SPURS_JOBQUEUE_BEGIN' does not name a type; did you mean 'CELL_SPURS_JOBQUEUE_ALIGN'?"
+  },
+  {
+    "header": "cell/spurs/job_queue_port2_cpp_types.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "cell/spurs/job_queue_port2_cpp_types.h:12:1: error: '__CELL_SPURS_JOBQUEUE_BEGIN' does not name a type; did you mean 'CELL_SPURS_JOBQUEUE_ALIGN'?"
+  },
+  {
+    "header": "cell/spurs/job_queue_port2_cpp_types.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "cell/spurs/job_queue_port2_cpp_types.h:12:1: error: '__CELL_SPURS_JOBQUEUE_BEGIN' does not name a type; did you mean 'CELL_SPURS_JOBQUEUE_ALIGN'?"
+  },
+  {
+    "header": "cell/spurs/job_queue_port_cpp_types.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "cell/spurs/job_queue_port_cpp_types.h:17:1: error: '__CELL_SPURS_JOBQUEUE_BEGIN' does not name a type; did you mean 'CELL_SPURS_JOBQUEUE_ALIGN'?"
+  },
+  {
+    "header": "cell/spurs/job_queue_port_cpp_types.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "cell/spurs/job_queue_port_cpp_types.h:17:1: error: '__CELL_SPURS_JOBQUEUE_BEGIN' does not name a type; did you mean 'CELL_SPURS_JOBQUEUE_ALIGN'?"
+  },
+  {
+    "header": "mars/base.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "mars/base.h:243:26: error: type qualifiers ignored on cast result type [-Werror=ignored-qualifiers]"
+  },
+  {
+    "header": "mars/base.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "mars/base.h:243:26: error: type qualifiers ignored on cast result type [-Werror=ignored-qualifiers]"
+  },
+  {
+    "header": "mars/jq.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "mars/base.h:243:26: error: type qualifiers ignored on cast result type [-Werror=ignored-qualifiers]"
+  },
+  {
+    "header": "mars/jq.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "mars/base.h:243:26: error: type qualifiers ignored on cast result type [-Werror=ignored-qualifiers]"
+  },
+  {
+    "header": "mars/task.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "mars/base.h:243:26: error: type qualifiers ignored on cast result type [-Werror=ignored-qualifiers]"
+  },
+  {
+    "header": "mars/task.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "mars/base.h:243:26: error: type qualifiers ignored on cast result type [-Werror=ignored-qualifiers]"
+  },
+  {
+    "header": "psl1ght/lv2/net.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "psl1ght/lv2/net.h:16:2: error: #warning \"<psl1ght/lv2/net.h> is a PSL1GHT-compat path; update the include to <net/net.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/net.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "psl1ght/lv2/net.h:16:2: error: #warning \"<psl1ght/lv2/net.h> is a PSL1GHT-compat path; update the include to <net/net.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/net.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "psl1ght/lv2/net.h:16:2: error: #warning \"<psl1ght/lv2/net.h> is a PSL1GHT-compat path; update the include to <net/net.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/net.h",
+    "standard": "c11",
+    "abi": "lp64",
+    "diagnostic": "psl1ght/lv2/net.h:16:2: error: #warning \"<psl1ght/lv2/net.h> is a PSL1GHT-compat path; update the include to <net/net.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/net.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "psl1ght/lv2/net.h:16:2: error: #warning \"<psl1ght/lv2/net.h> is a PSL1GHT-compat path; update the include to <net/net.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/net.h",
+    "standard": "gnu99",
+    "abi": "lp64",
+    "diagnostic": "psl1ght/lv2/net.h:16:2: error: #warning \"<psl1ght/lv2/net.h> is a PSL1GHT-compat path; update the include to <net/net.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/timer.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "psl1ght/lv2/timer.h:16:2: error: #warning \"<psl1ght/lv2/timer.h> is a PSL1GHT-compat path; update the include to <sys/timer.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/timer.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "psl1ght/lv2/timer.h:16:2: error: #warning \"<psl1ght/lv2/timer.h> is a PSL1GHT-compat path; update the include to <sys/timer.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/timer.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "psl1ght/lv2/timer.h:16:2: error: #warning \"<psl1ght/lv2/timer.h> is a PSL1GHT-compat path; update the include to <sys/timer.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/timer.h",
+    "standard": "c11",
+    "abi": "lp64",
+    "diagnostic": "psl1ght/lv2/timer.h:16:2: error: #warning \"<psl1ght/lv2/timer.h> is a PSL1GHT-compat path; update the include to <sys/timer.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/timer.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "psl1ght/lv2/timer.h:16:2: error: #warning \"<psl1ght/lv2/timer.h> is a PSL1GHT-compat path; update the include to <sys/timer.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "psl1ght/lv2/timer.h",
+    "standard": "gnu99",
+    "abi": "lp64",
+    "diagnostic": "psl1ght/lv2/timer.h:16:2: error: #warning \"<psl1ght/lv2/timer.h> is a PSL1GHT-compat path; update the include to <sys/timer.h>\" [-Werror=cpp]"
+  },
+  {
+    "header": "ssl/ssl.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "ssl/ssl.h:169:25: error: 'uint32_t' has not been declared"
+  },
+  {
+    "header": "ssl/ssl.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "ssl/ssl.h:169:25: error: 'uint32_t' has not been declared"
+  },
+  {
+    "header": "ssl/ssl.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "ssl/ssl.h:169:25: error: unknown type name 'uint32_t'"
+  },
+  {
+    "header": "ssl/ssl.h",
+    "standard": "c11",
+    "abi": "lp64",
+    "diagnostic": "ssl/ssl.h:169:25: error: unknown type name 'uint32_t'"
+  },
+  {
+    "header": "ssl/ssl.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "ssl/ssl.h:169:25: error: unknown type name 'uint32_t'"
+  },
+  {
+    "header": "ssl/ssl.h",
+    "standard": "gnu99",
+    "abi": "lp64",
+    "diagnostic": "ssl/ssl.h:169:25: error: unknown type name 'uint32_t'"
+  },
+  {
+    "header": "sys/file.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "sys/file.h:17:25: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]"
+  },
+  {
+    "header": "sys/file.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "sys/file.h:17:25: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]"
+  },
+  {
+    "header": "sys/interrupt.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "sys/interrupt.h:21:25: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]"
+  },
+  {
+    "header": "sys/interrupt.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "sys/interrupt.h:21:25: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]"
+  },
+  {
+    "header": "sys/tty.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "sys/tty.h:16:33: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]"
+  },
+  {
+    "header": "sys/tty.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "sys/tty.h:16:33: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]"
+  },
+  {
+    "header": "sys/usbd.h",
+    "standard": "c++17",
+    "abi": "ilp32",
+    "diagnostic": "sys/usbd.h:12:26: error: invalid conversion from 'u32*' {aka 'unsigned int*'} to 'u64' {aka 'long long unsigned int'} [-fpermissive]"
+  },
+  {
+    "header": "sys/usbd.h",
+    "standard": "c++17",
+    "abi": "lp64",
+    "diagnostic": "sys/usbd.h:12:26: error: invalid conversion from 'u32*' {aka 'unsigned int*'} to 'u64' {aka 'long unsigned int'} [-fpermissive]"
+  },
+  {
+    "header": "sys/usbd.h",
+    "standard": "c11",
+    "abi": "ilp32",
+    "diagnostic": "sys/lv2_syscall.h:68:40: error: initialization of 'u64' {aka 'long long unsigned int'} from 'u32 *' {aka 'unsigned int *'} makes integer from pointer without a cast [-Werror=int-conversion]"
+  },
+  {
+    "header": "sys/usbd.h",
+    "standard": "c11",
+    "abi": "lp64",
+    "diagnostic": "sys/lv2_syscall.h:68:40: error: initialization of 'u64' {aka 'long unsigned int'} from 'u32 *' {aka 'unsigned int *'} makes integer from pointer without a cast [-Werror=int-conversion]"
+  },
+  {
+    "header": "sys/usbd.h",
+    "standard": "gnu99",
+    "abi": "ilp32",
+    "diagnostic": "sys/lv2_syscall.h:68:40: error: initialization of 'u64' {aka 'long long unsigned int'} from 'u32 *' {aka 'unsigned int *'} makes integer from pointer without a cast [-Werror=int-conversion]"
+  },
+  {
+    "header": "sys/usbd.h",
+    "standard": "gnu99",
+    "abi": "lp64",
+    "diagnostic": "sys/lv2_syscall.h:68:40: error: initialization of 'u64' {aka 'long unsigned int'} from 'u32 *' {aka 'unsigned int *'} makes integer from pointer without a cast [-Werror=int-conversion]"
+  }
+]

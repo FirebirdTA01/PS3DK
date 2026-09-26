@@ -88,6 +88,17 @@ jobs:
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
 
+      - name: Test PPU header hygiene ratchet and install ownership
+        run: |
+          python3 tests/sdk/ppu-header-hygiene-test.py --self-test
+          python3 tests/sdk/psl1ght-header-install-order-test.py
+          if [ -n "${PS3DEV:-}" ] && [ -x "$PS3DEV/ppu/bin/powerpc64-ps3-elf-g++" ]; then
+            output=$(mktemp -d)/header-probes
+            python3 tests/sdk/ppu-header-hygiene-test.py --ps3dev "$PS3DEV" --output "$output"
+          else
+            echo 'SKIP target PPU header probes: PS3DEV cross toolchain unavailable; only host self-tests ran'
+          fi
+
       - name: Test Cg resource enum consumers and runtime values
         run: bash tests/sdk/gcm-cg-resource-test.sh
 

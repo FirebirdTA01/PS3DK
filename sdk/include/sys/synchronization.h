@@ -27,6 +27,7 @@
 #ifndef __PSL1GHT_SYS_SYNCHRONIZATION_H__
 #define __PSL1GHT_SYS_SYNCHRONIZATION_H__
 
+#include <stdint.h>
 #include <ppu-types.h>
 #include <errno.h>
 /* lv2 syscalls return the kernel status CELL_EBUSY (0x8001000A), not the libc
@@ -127,7 +128,7 @@ LV2_SYSCALL sys_event_flag_create(sys_event_flag_t *id,
                                   sys_event_flag_attribute_t *attr,
                                   u64 init)
 {
-	lv2syscall3(82, (u64)id, (u64)attr, init);
+	lv2syscall3(82, (u64)(uintptr_t)id, (u64)(uintptr_t)attr, init);
 	return_to_user_prog(s32);
 }
 
@@ -140,14 +141,14 @@ LV2_SYSCALL sys_event_flag_destroy(sys_event_flag_t id)
 LV2_SYSCALL sys_event_flag_wait(sys_event_flag_t id, u64 bitptn, u32 mode,
                                 u64 *result, u64 timeout_usec)
 {
-	lv2syscall5(85, id, bitptn, mode, (u64)result, timeout_usec);
+	lv2syscall5(85, id, bitptn, mode, (u64)(uintptr_t)result, timeout_usec);
 	return_to_user_prog(s32);
 }
 
 LV2_SYSCALL sys_event_flag_trywait(sys_event_flag_t id, u64 bitptn, u32 mode,
                                    u64 *result)
 {
-	lv2syscall4(86, id, bitptn, mode, (u64)result);
+	lv2syscall4(86, id, bitptn, mode, (u64)(uintptr_t)result);
 	return_to_user_prog(s32);
 }
 
@@ -165,13 +166,13 @@ LV2_SYSCALL sys_event_flag_clear(sys_event_flag_t id, u64 bitptn)
 
 LV2_SYSCALL sys_event_flag_cancel(sys_event_flag_t id, u32 *num)
 {
-	lv2syscall2(132, id, (u64)num);
+	lv2syscall2(132, id, (u64)(uintptr_t)num);
 	return_to_user_prog(s32);
 }
 
 LV2_SYSCALL sys_event_flag_get(sys_event_flag_t id, u64 *flags)
 {
-	lv2syscall2(139, id, (u64)flags);
+	lv2syscall2(139, id, (u64)(uintptr_t)flags);
 	return_to_user_prog(s32);
 }
 
@@ -206,7 +207,7 @@ typedef struct sys_mutex_attribute {
 
 LV2_SYSCALL sys_mutex_create(sys_mutex_t *mutex, sys_mutex_attribute_t *attr)
 {
-	lv2syscall2(100, (u64)mutex, (u64)attr);
+	lv2syscall2(100, (u64)(uintptr_t)mutex, (u64)(uintptr_t)attr);
 	return_to_user_prog(s32);
 }
 
@@ -258,7 +259,7 @@ typedef struct sys_cond_attribute {
 LV2_SYSCALL sys_cond_create(sys_cond_t *cond, sys_mutex_t mutex,
                             sys_cond_attribute_t *attr)
 {
-	lv2syscall3(105, (u64)cond, mutex, (u64)attr);
+	lv2syscall3(105, (u64)(uintptr_t)cond, mutex, (u64)(uintptr_t)attr);
 	return_to_user_prog(s32);
 }
 

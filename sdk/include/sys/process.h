@@ -16,6 +16,7 @@
 #ifndef PS3TC_SYS_PROCESS_H
 #define PS3TC_SYS_PROCESS_H
 
+#include <stdint.h>
 #include <sys/lv2_syscall.h>
 #include <ppu-types.h>
 #include <lv2/process.h>
@@ -173,7 +174,7 @@ LV2_SYSCALL sysProcessGetPpid(void)
 LV2_SYSCALL sysProcessGetNumberOfObject(u32 object, size_t *count_out)
 {
     lv2syscall2(SYSCALL_PROCESS_GET_NUMBER_OF_OBJECT,
-                (u32)object, (u32)(u64)count_out);
+                (u32)object, (u64)(uintptr_t)count_out);
     return_to_user_prog(s32);
 }
 

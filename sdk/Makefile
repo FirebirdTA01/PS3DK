@@ -78,6 +78,12 @@ HEADERS := \
     include/net/select.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
+    include/sys/mutex.h \
+    include/sys/cond.h \
+    include/sys/event_queue.h \
+    include/sys/sem.h \
+    include/sys/systime.h \
+    include/sys/spu.h \
     include/sys/prx.h \
     include/lv2/prx.h \
     include/sys/time_util.h \

@@ -25,6 +25,7 @@
 #ifndef __PS3DK_SYS_LV2_FS_EXT_H__
 #define __PS3DK_SYS_LV2_FS_EXT_H__
 
+#include <stdint.h>
 #include <ppu-types.h>
 #include <sys/lv2_syscall.h>
 
@@ -36,7 +37,7 @@ extern "C" {
 LV2_SYSCALL
 sysLv2FsChown(const char *path, s32 uid, s32 gid)
 {
-	lv2syscall3(835, (u64)path, (u64)uid, (u64)gid);
+	lv2syscall3(835, (u64)(uintptr_t)path, (u64)uid, (u64)gid);
 	return_to_user_prog(s32);
 }
 
@@ -51,8 +52,8 @@ LV2_SYSCALL
 sysLv2FsMount(const char *deviceName, const char *deviceFileSystem,
 	      const char *devicePath, s32 writeProt)
 {
-	lv2syscall8(837, (u64)deviceName, (u64)deviceFileSystem,
-		    (u64)devicePath, 0, (u64)writeProt, 0, 0, 0);
+	lv2syscall8(837, (u64)(uintptr_t)deviceName, (u64)(uintptr_t)deviceFileSystem,
+		    (u64)(uintptr_t)devicePath, 0, (u64)writeProt, 0, 0, 0);
 	return_to_user_prog(s32);
 }
 
@@ -60,7 +61,7 @@ sysLv2FsMount(const char *deviceName, const char *deviceFileSystem,
 LV2_SYSCALL
 sysLv2FsUnmount(const char *devicePath)
 {
-	lv2syscall3(838, (u64)devicePath, 0, 0);
+	lv2syscall3(838, (u64)(uintptr_t)devicePath, 0, 0);
 	return_to_user_prog(s32);
 }
 

@@ -78,8 +78,8 @@ make install-ctrl
 say "make (builds ppu + spu + common + tools)"
 make -j"$(nproc 2>/dev/null || echo 4)"
 
-say "make install"
-make install
+say "install PSL1GHT without overwriting SDK-owned PPU headers"
+bash "$script_dir/install-psl1ght.sh" "$SRC"
 
 # --------------------------------------------------------------------
 # make_sprx — native host build

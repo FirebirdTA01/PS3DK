@@ -95,9 +95,8 @@ public:
     // 
     inline vec_float4 get128( ) const;
 
-    // Assign one 3-D vector to another
-    // 
-    inline Vector3 & operator =( Vector3 vec );
+    // Copying is the implicit, trivial member-wise copy (a user-declared
+    // copy assignment made the implicit copy constructor deprecated).
 
     // Set the x element of a 3-D vector
     // 
@@ -498,9 +497,8 @@ public:
     // 
     inline vec_float4 get128( ) const;
 
-    // Assign one 4-D vector to another
-    // 
-    inline Vector4 & operator =( Vector4 vec );
+    // Copying is the implicit, trivial member-wise copy (a user-declared
+    // copy assignment made the implicit copy constructor deprecated).
 
     // Set the x, y, and z elements of a 4-D vector
     // NOTE: 
@@ -869,9 +867,8 @@ public:
     // 
     inline vec_float4 get128( ) const;
 
-    // Assign one 3-D point to another
-    // 
-    inline Point3 & operator =( Point3 pnt );
+    // Copying is the implicit, trivial member-wise copy (a user-declared
+    // copy assignment made the implicit copy constructor deprecated).
 
     // Set the x element of a 3-D point
     // 
@@ -1171,9 +1168,8 @@ public:
     // 
     inline vec_float4 get128( ) const;
 
-    // Assign one quaternion to another
-    // 
-    inline Quat & operator =( Quat quat );
+    // Copying is the implicit, trivial member-wise copy (a user-declared
+    // copy assignment made the implicit copy constructor deprecated).
 
     // Set the x, y, and z elements of a quaternion
     // NOTE: 

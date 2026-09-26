@@ -78,7 +78,8 @@ class boolInVec
         // operators
         //
         inline const boolInVec operator ! () const;
-        inline boolInVec& operator = (boolInVec vec);
+        // Copying is the implicit, trivial member-wise copy (a user-declared
+        // copy assignment made the implicit copy constructor deprecated).
         inline boolInVec& operator &= (boolInVec vec);
         inline boolInVec& operator ^= (boolInVec vec);
         inline boolInVec& operator |= (boolInVec vec);
@@ -180,14 +181,6 @@ const boolInVec
 boolInVec::operator ! () const
 {
     return boolInVec(vec_nor(mData, mData));
-}
-
-inline
-boolInVec&
-boolInVec::operator = (boolInVec vec)
-{
-    mData = vec.mData;
-    return *this;
 }
 
 inline

@@ -88,7 +88,8 @@ class floatInVec
         inline floatInVec& operator ++ ();
         inline floatInVec& operator -- ();
         inline const floatInVec operator - () const;
-        inline floatInVec& operator = (floatInVec vec);
+        // Copying is the implicit, trivial member-wise copy (a user-declared
+        // copy assignment made the implicit copy constructor deprecated).
         inline floatInVec& operator *= (floatInVec vec);
         inline floatInVec& operator /= (floatInVec vec);
         inline floatInVec& operator += (floatInVec vec);
@@ -237,14 +238,6 @@ const floatInVec
 floatInVec::operator - () const
 {
     return floatInVec((vec_float4)vec_xor((vec_uint4)mData, (vec_uint4){0x80000000,0x80000000,0x80000000,0x80000000}));
-}
-
-inline
-floatInVec&
-floatInVec::operator = (floatInVec vec)
-{
-    mData = vec.mData;
-    return *this;
 }
 
 inline

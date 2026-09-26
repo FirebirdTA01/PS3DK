@@ -155,12 +155,6 @@ inline vec_float4 Quat::get128( ) const
     return mVec128;
 }
 
-inline Quat & Quat::operator =( Quat quat )
-{
-    mVec128 = quat.mVec128;
-    return *this;
-}
-
 inline Quat & Quat::setXYZ( Vector3 vec )
 {
     mVec128 = vec_sel( vec.get128(), mVec128, _VECTORMATH_MASK_0x000F );

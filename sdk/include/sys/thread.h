@@ -17,6 +17,7 @@
 #ifndef PS3TC_SYS_THREAD_H
 #define PS3TC_SYS_THREAD_H
 
+#include <stdint.h>
 #include <sys/lv2_syscall.h>
 #include <lv2/thread.h>
 
@@ -53,7 +54,7 @@ s32 sysThreadCreate(sys_ppu_thread_t *threadid,
 
 LV2_SYSCALL sysThreadJoin(sys_ppu_thread_t threadid, u64 *retval)
 {
-    lv2syscall2(44, threadid, (u64)retval);
+    lv2syscall2(44, threadid, (u64)(uintptr_t)retval);
     return_to_user_prog(s32);
 }
 
@@ -71,7 +72,7 @@ LV2_SYSCALL sysThreadDetach(sys_ppu_thread_t threadid)
 
 LV2_SYSCALL sysThreadJoinState(s32 *joinable)
 {
-    lv2syscall1(46, (u64)joinable);
+    lv2syscall1(46, (u64)(uintptr_t)joinable);
     return_to_user_prog(s32);
 }
 
@@ -85,13 +86,13 @@ LV2_SYSCALL sysThreadSetPriority(sys_ppu_thread_t threadid, s32 prio)
 
 LV2_SYSCALL sysThreadGetPriority(sys_ppu_thread_t threadid, s32 *prio)
 {
-    lv2syscall2(48, threadid, (u64)prio);
+    lv2syscall2(48, threadid, (u64)(uintptr_t)prio);
     return_to_user_prog(s32);
 }
 
 LV2_SYSCALL sysThreadRename(sys_ppu_thread_t threadid, const char *name)
 {
-    lv2syscall2(56, threadid, (u64)name);
+    lv2syscall2(56, threadid, (u64)(uintptr_t)name);
     return_to_user_prog(s32);
 }
 
@@ -111,7 +112,7 @@ LV2_SYSCALL sysThreadRecoverPageFault(sys_ppu_thread_t threadid)
 LV2_SYSCALL sysThreadGetStackInformation(sys_ppu_thread_stack_t *info)
 {
     struct { u32 addr; u32 size; } raw;
-    lv2syscall1(49, (u64)(&raw));
+    lv2syscall1(49, (u64)(uintptr_t)&raw);
     info->pst_addr = (sys_addr_t)raw.addr;
     info->pst_size = (size_t)raw.size;
     return_to_user_prog(s32);

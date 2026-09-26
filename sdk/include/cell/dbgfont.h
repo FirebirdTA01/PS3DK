@@ -37,6 +37,7 @@
 #ifndef PS3TC_CELL_DBGFONT_H
 #define PS3TC_CELL_DBGFONT_H
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <ppu-types.h>        /* sys_addr_t */
 

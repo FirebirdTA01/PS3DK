@@ -426,12 +426,6 @@ inline void storeHalfFloats( Vector3 vec0, Vector3 vec1, Vector3 vec2, Vector3 v
     threeQuads[2] = _vmath2VfToHalfFloats(xyz1[1], xyz1[2]);
 }
 
-inline Vector3 & Vector3::operator =( Vector3 vec )
-{
-    mVec128 = vec.mVec128;
-    return *this;
-}
-
 inline Vector3 & Vector3::setX( float _x )
 {
     _vmathVfSetElement(mVec128, _x, 0);
@@ -881,12 +875,6 @@ inline void storeHalfFloats( Vector4 vec0, Vector4 vec1, Vector4 vec2, Vector4 v
 {
     twoQuads[0] = _vmath2VfToHalfFloats(vec0.get128(), vec1.get128());
     twoQuads[1] = _vmath2VfToHalfFloats(vec2.get128(), vec3.get128());
-}
-
-inline Vector4 & Vector4::operator =( Vector4 vec )
-{
-    mVec128 = vec.mVec128;
-    return *this;
 }
 
 inline Vector4 & Vector4::setXYZ( Vector3 vec )
@@ -1370,12 +1358,6 @@ inline void storeHalfFloats( Point3 pnt0, Point3 pnt1, Point3 pnt2, Point3 pnt3,
     threeQuads[0] = _vmath2VfToHalfFloats(xyz0[0], xyz0[1]);
     threeQuads[1] = _vmath2VfToHalfFloats(xyz0[2], xyz1[0]);
     threeQuads[2] = _vmath2VfToHalfFloats(xyz1[1], xyz1[2]);
-}
-
-inline Point3 & Point3::operator =( Point3 pnt )
-{
-    mVec128 = pnt.mVec128;
-    return *this;
 }
 
 inline Point3 & Point3::setX( float _x )

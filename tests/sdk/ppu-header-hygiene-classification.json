@@ -1,0 +1,245 @@
+{
+  "Cg/NV/cgGL_profiles.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/NV/cg_bindlocations.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/NV/cg_datatypes.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/NV/cg_enums.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/NV/cg_errors.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/NV/cg_profiles.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/cgGL_profiles.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/cg_bindlocations.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/cg_datatypes.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/cg_enums.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/cg_errors.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "Cg/cg_profiles.h": {
+    "owner": "Cg/cg_types.h",
+    "reason": "X-macro data expands inside the owning Cg enum declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "cell/gcm/gcm_cg_bridge.h": {
+    "owner": "cell/gcm.h",
+    "reason": "Command implementation layer included by cell/gcm.h after CellGcmContextData and public command types are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "cell/gcm/gcm_cmd_overloads.h": {
+    "owner": "cell/gcm.h",
+    "reason": "Command implementation layer included by cell/gcm.h after CellGcmContextData and public command types are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "cell/gcm/gcm_command_c.h": {
+    "owner": "cell/gcm.h",
+    "reason": "Command implementation layer included by cell/gcm.h after CellGcmContextData and public command types are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "cell/gcm/gcm_tex_bridge.h": {
+    "owner": "cell/gcm.h",
+    "reason": "Command implementation layer included by cell/gcm.h after CellGcmContextData and public command types are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "rsx/commands_inc.h": {
+    "owner": "rsx/commands.h",
+    "reason": "Command declaration fragment instantiated by commands.h with RSX_FUNC and RSX_CONTEXT defined.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "vectormath/c/mat_aos.h": {
+    "owner": "vectormath/c/vectormath_aos.h",
+    "reason": "Inline C Vectormath implementation fragment requires the owning vector and matrix declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "vectormath/c/quat_aos.h": {
+    "owner": "vectormath/c/vectormath_aos.h",
+    "reason": "Inline C Vectormath implementation fragment requires the owning vector and matrix declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "vectormath/c/vec_aos.h": {
+    "owner": "vectormath/c/vectormath_aos.h",
+    "reason": "Inline C Vectormath implementation fragment requires the owning vector and matrix declarations.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/boolInVec.h": {
+    "owner": "vectormath/cpp/boolInVec.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/floatInVec.h": {
+    "owner": "vectormath/cpp/floatInVec.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/mat_aos.h": {
+    "owner": "vectormath/cpp/vectormath_aos.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/quat_aos.h": {
+    "owner": "vectormath/cpp/vectormath_aos.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/vec_aos.h": {
+    "owner": "vectormath/cpp/vectormath_aos.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/vecidx_aos.h": {
+    "owner": "vectormath/cpp/vectormath_aos.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/vectormath_aos.h": {
+    "owner": "vectormath/cpp/vectormath_aos.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath/cpp/vectormath_soa.h": {
+    "owner": "vectormath/cpp/vectormath_soa.h",
+    "reason": "C++ Vectormath interface; inline class implementation fragments require the AOS owning class declarations.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "vectormath_aos.h": {
+    "owner": "vectormath_aos.h",
+    "reason": "Compatibility umbrella explicitly forwards to the C++ Vectormath AOS API.",
+    "standards": [
+      "c++17"
+    ]
+  }
+}
