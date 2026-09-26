@@ -217,6 +217,10 @@ jobs:
       - name: Test SPU code can include the C++ vector math headers
         run: bash tests/sdk/spu-vectormath-include-test.sh
 
+      # Skips without PS3DEV; checks the installed SPU libatomic.a.
+      - name: Test the SPU libatomic archive defines every operation
+        run: bash tests/sdk/spu-libatomic-test.sh
+
       # Skips without PS3DEV; compiles this tree's SPU atomic header in C/C++.
       - name: Test SPU atomic alignment predicates select integer intrinsics
         run: bash tests/sdk/spu-atomic-overload-test.sh
