@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(spu_fiber_context_regression C)
+project(spu_fiber_context_regression C ASM)
 option(PS3TC_REGRESSION_HOST_STUB "Host cannot run SPU code" OFF)
 if(PS3TC_REGRESSION_HOST_STUB)
     return()

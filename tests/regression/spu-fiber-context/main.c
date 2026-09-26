@@ -10,16 +10,22 @@
 
 #include "spu_bin.h"
 
-#define ptr2ea(x) ((u64)(uintptr_t)(x))
-
 int main(void)
 {
     sysSpuImage image;
     u32 thread_id, group_id, cause = 0, status = 0;
     s32 exit_status = -1;
     sysSpuThreadArgument arg = { 0, 0, 0, 0 };
-    sysSpuThreadGroupAttribute grpattr = { sizeof("fibergrp"), ptr2ea("fibergrp"), 0, 0 };
-    sysSpuThreadAttribute attr = { ptr2ea("fiberthr"), sizeof("fiberthr"), SPU_THREAD_ATTR_NONE };
+    sysSpuThreadGroupAttribute grpattr = {
+        .nsize = sizeof("fibergrp"),
+        .name  = "fibergrp",
+        .type  = 0,
+    };
+    sysSpuThreadAttribute attr = {
+        .name   = "fiberthr",
+        .nsize  = sizeof("fiberthr"),
+        .option = SPU_THREAD_ATTR_NONE,
+    };
 
     if (sysSpuInitialize(6, 0) != 0
             || sysSpuImageImport(&image, spu_bin, 0) != 0

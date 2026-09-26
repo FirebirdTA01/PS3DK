@@ -23,6 +23,7 @@ static volatile int b_self_ok = 1;
 static uint8_t canary_area[16 + MIN_STACK + 16] __attribute__((aligned(16)));
 static CellFiberSpuContext d_ctx;
 static volatile uintptr_t d_seen;
+static volatile uint64_t d_arg;
 
 #define CHECK(n, cond) do { if (!(cond) && !failed) failed = (n); } while (0)
 
@@ -68,7 +69,7 @@ static void fiber_b(uint64_t unused)
 /* Fiber D: a minimal non-leaf entry (one call, one 32-byte frame). */
 static void fiber_d(uint64_t unused)
 {
-    (void)unused;
+    d_arg = unused;
     d_seen = (uintptr_t)cellFiberSpuContextSelf();
 }
 
@@ -94,6 +95,17 @@ int main(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
     CHECK(6, cellFiberSpuContextInitialize(&a_ctx, fiber_a, 0, a_stack + 8, 4096)
                  == (int)CELL_FIBER_ERROR_ALIGN);
     CHECK(7, cellFiberSpuContextRun(&a_ctx, NULL) == (int)CELL_FIBER_ERROR_NULL_POINTER);
+    CHECK(25, cellFiberSpuContextInitialize(&a_ctx, NULL, 0, a_stack, sizeof a_stack)
+                  == (int)CELL_FIBER_ERROR_NULL_POINTER);
+    CHECK(26, cellFiberSpuContextInitialize(&a_ctx, fiber_a, 0, NULL, sizeof a_stack)
+                  == (int)CELL_FIBER_ERROR_NULL_POINTER);
+    CHECK(27, cellFiberSpuContextInitialize(mis, fiber_a, 0, a_stack, sizeof a_stack)
+                  == (int)CELL_FIBER_ERROR_ALIGN);
+    CHECK(28, cellFiberSpuContextInitialize(&a_ctx, fiber_a, 0, a_stack, 4096 + 8)
+                  == (int)CELL_FIBER_ERROR_ALIGN);
+    CHECK(29, cellFiberSpuContextRun(NULL, &main_ctx) == (int)CELL_FIBER_ERROR_NULL_POINTER);
+    CHECK(30, cellFiberSpuContextRun(mis, &main_ctx) == (int)CELL_FIBER_ERROR_ALIGN);
+    CHECK(31, cellFiberSpuContextRun(&a_ctx, mis) == (int)CELL_FIBER_ERROR_ALIGN);
 
     /* Ping-pong: A runs 10 rounds (+1), B answers each (+100). */
     CHECK(8, cellFiberSpuContextInitialize(&a_ctx, fiber_a, 10, a_stack, sizeof a_stack) == CELL_OK);
@@ -114,14 +126,18 @@ int main(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
         canary_area[i] = 0xa5;
     CHECK(20, cellFiberSpuContextInitialize(&d_ctx, fiber_d, 0, canary_area + 16, MIN_STACK - 16)
                   == (int)CELL_FIBER_ERROR_INVAL);
-    CHECK(21, cellFiberSpuContextInitialize(&d_ctx, fiber_d, 0, canary_area + 16, MIN_STACK) == CELL_OK);
+    /* A 64-bit argument with both halves non-zero pins the two-word
+     * argument setup in the fresh context. */
+    CHECK(21, cellFiberSpuContextInitialize(&d_ctx, fiber_d, 0x123456789abcdef0ull,
+                                            canary_area + 16, MIN_STACK) == CELL_OK);
     CHECK(21, cellFiberSpuContextRun(&d_ctx, &main_ctx) == CELL_OK);
     CHECK(22, d_seen == (uintptr_t)&d_ctx);
+    CHECK(32, d_arg == 0x123456789abcdef0ull);
     for (unsigned i = 0; i < 16; ++i) {
         CHECK(23, canary_area[i] == 0xa5);
         CHECK(24, canary_area[16 + MIN_STACK + i] == 0xa5);
     }
 
-    spu_thread_exit(failed);
+    sys_spu_thread_exit(failed);
     return 0;
 }
