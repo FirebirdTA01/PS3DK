@@ -56,3 +56,16 @@ spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self
 # sys_spu_thread_argument words ($3-$6) from crt1.o; SPU exit status is
 # the mask of wrong arguments, 0 = pass.
 spu-thread-args,tests/regression/spu-thread-args/spu-thread-args.fake.self,60,RAN-CLEAN,SPU_THREAD_ARGS_OK,SPU_THREAD_ARGS_FAIL
+# spu-sheap: SPU libsheap against the firmware cellSheap (PPU side through
+# libsheap_stub).  *_HLE lines mean the emulator's built-in cellSheap is in
+# use instead of the firmware module: a configuration failure, not a pass.
+# p0 firmware layout as the SPU reads it; p1 SPU-only heap; p2 one heap
+# shared by PPU and SPU; p3 keyed objects, six SPUs + PPU on one mutex;
+# then the allocate, key_buffer and key_mutex sample flows.
+sheap-p0-layout,tests/regression/spu-sheap/sheap-p0-layout.fake.self,60,RAN-CLEAN,SHEAP_P0_OK,SHEAP_P0_FAIL|SHEAP_P0_HLE
+sheap-p1-spu,tests/regression/spu-sheap/sheap-p1-spu.fake.self,60,RAN-CLEAN,SHEAP_P1_OK 18/18,SHEAP_P1_FAIL
+sheap-p2-shared,tests/regression/spu-sheap/sheap-p2-shared.fake.self,60,RAN-CLEAN,SHEAP_P2_OK,SHEAP_P2_FAIL|SHEAP_P2_HLE
+sheap-p3-contention,tests/regression/spu-sheap/sheap-p3-contention.fake.self,180,RAN-CLEAN,SHEAP_P3_OK,SHEAP_P3_FAIL|SHEAP_P3_HLE
+sheap-allocate,tests/regression/spu-sheap/sheap-allocate.fake.self,60,RAN-CLEAN,512 th PRIME NUMBER is 3671,FAILED|SHEAP_ALLOCATE_HLE
+sheap-key-buffer,tests/regression/spu-sheap/sheap-key-buffer.fake.self,60,RAN-CLEAN,"3613, 3617, 3623, 3631, 3637, 3643, 3659, 3671, ",FAILED|SHEAP_KEY_BUFFER_HLE
+sheap-key-mutex,tests/regression/spu-sheap/sheap-key-mutex.fake.self,120,RAN-CLEAN,ans => 4000,FAILED|SHEAP_KEY_MUTEX_HLE
