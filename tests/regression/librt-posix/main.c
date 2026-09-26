@@ -197,34 +197,52 @@ static void test_dirent(void)
     check_int("chdir root after dirent", chdir("/"), 0);
 }
 
-/* Relative paths resolve against the working directory set by chdir(),
- * in every wrapper that takes a path.  Each result is confirmed through
- * the absolute path, so a file created somewhere else cannot pass. */
+/* Relative paths behave exactly as the working directory set by chdir(),
+ * '/', and the path spelled out absolutely, in every wrapper that takes a
+ * path.  Each result is confirmed through the absolute path, so a file
+ * created somewhere else cannot pass.  The kernel walks "." and "..", so a
+ * path whose walk must fail (a trailing "/" or "/." after a regular file, a
+ * missing directory or a regular file before "..") leaves its target
+ * untouched. */
+static int same_outcome(int rel_rc, int rel_errno, int abs_rc, int abs_errno)
+{
+    return (rel_rc == 0) == (abs_rc == 0) && (rel_rc == 0 || rel_errno == abs_errno);
+}
+
+static int file_holds(const char *path, const char *text)
+{
+    char buf[16] = {0};
+    size_t len = strlen(text);
+    int fd = open(path, O_RDONLY);
+    int ok = fd >= 0 && read(fd, buf, sizeof(buf)) == (ssize_t)len && memcmp(buf, text, len) == 0;
+    if (fd >= 0)
+        close(fd);
+    return ok;
+}
+
 static void test_relative_paths(void)
 {
     const char *base = "/dev_hdd0/tmp/ps3tc_regression_librt_posix";
     const char *abs_file = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/rel_file.txt";
     const char *abs_dir = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/reldir";
     const char *abs_moved = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/reldir/moved.txt";
+    const char *abs_victim = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/victim.txt";
     char buf[16] = {0};
     struct stat st;
+    int rc, err, arc, aerr;
 
     unlink(abs_moved);
     rmdir(abs_dir);
     unlink(abs_file);
+    unlink(abs_victim);
 
     check_int("rel: chdir base", chdir(base), 0);
 
     check_int("rel: open creates in cwd",
               write_file("rel_file.txt", "hello", O_CREAT | O_WRONLY | O_TRUNC, 0644), 0);
-    int fd = open(abs_file, O_RDONLY);
-    check_true("rel: file is at the absolute path",
-               fd >= 0 && read(fd, buf, 5) == 5 && memcmp(buf, "hello", 5) == 0);
-    if (fd >= 0)
-        close(fd);
+    check_true("rel: file is at the absolute path", file_holds(abs_file, "hello"));
 
     FILE *fp = fopen("rel_file.txt", "r");
-    memset(buf, 0, sizeof(buf));
     check_true("rel: fopen reads it", fp != NULL && fread(buf, 1, 5, fp) == 5 &&
                                       memcmp(buf, "hello", 5) == 0);
     if (fp)
@@ -239,28 +257,42 @@ static void test_relative_paths(void)
     check_int("rel: mkdir", mkdir("reldir", 0777), 0);
     check_true("rel: dir is at the absolute path", stat(abs_dir, &st) == 0 && S_ISDIR(st.st_mode));
 
-    check_int("rel: chdir into subdir", chdir("reldir"), 0);
-    fd = open("../rel_file.txt", O_RDONLY);
-    check_true("rel: open with ..", fd >= 0);
-    if (fd >= 0)
-        close(fd);
-    check_true("rel: stat ./../", stat("./../rel_file.txt", &st) == 0 && st.st_size == 3);
-
-    check_int("rel: rename across ..", rename("../rel_file.txt", "moved.txt"), 0);
-    check_true("rel: renamed file at absolute path", stat(abs_moved, &st) == 0);
+    /* Both rename arguments relative, across directories. */
+    check_int("rel: rename into subdir", rename("rel_file.txt", "reldir/moved.txt"), 0);
+    check_true("rel: renamed file at absolute path", stat(abs_moved, &st) == 0 && st.st_size == 3);
     check_true("rel: old name gone", stat(abs_file, &st) != 0);
 
-    DIR *d = opendir("..");
-    check_true("rel: opendir ..", d != NULL);
+    DIR *d = opendir("reldir");
+    check_true("rel: opendir", d != NULL);
     if (d)
         closedir(d);
 
+    /* ".." is the kernel's to walk: relative and absolute spellings agree. */
+    check_int("rel: chdir into subdir", chdir("reldir"), 0);
+    errno = 0; rc = stat("../reldir/moved.txt", &st); err = errno;
+    errno = 0; arc = stat("/dev_hdd0/tmp/ps3tc_regression_librt_posix/reldir/../reldir/moved.txt", &st); aerr = errno;
+    printf("INFO rel: stat through .. rc=%d errno=%d, absolute rc=%d errno=%d\n", rc, err, arc, aerr);
+    check_true("rel: .. walks like its absolute spelling", same_outcome(rc, err, arc, aerr));
     check_int("rel: unlink", unlink("moved.txt"), 0);
     check_true("rel: unlinked absolutely", stat(abs_moved, &st) != 0);
-
-    check_int("rel: chdir ..", chdir(".."), 0);
+    check_int("rel: chdir back", chdir(base), 0);
     check_int("rel: rmdir", rmdir("reldir"), 0);
     check_true("rel: removed absolutely", stat(abs_dir, &st) != 0);
+
+    /* Paths whose walk must fail leave the victim untouched. */
+    check_int("rel: victim created", write_file(abs_victim, "keep", O_CREAT | O_WRONLY | O_TRUNC, 0644), 0);
+    check_true("rel: unlink victim/ fails", unlink("victim.txt/") != 0);
+    check_true("rel: victim survives unlink victim/", file_holds(abs_victim, "keep"));
+    check_true("rel: open victim/. O_TRUNC fails", open("victim.txt/.", O_WRONLY | O_TRUNC) < 0);
+    check_true("rel: victim survives victim/.", file_holds(abs_victim, "keep"));
+    check_true("rel: open missing/../victim fails", open("missing/../victim.txt", O_WRONLY | O_TRUNC) < 0);
+    check_true("rel: victim survives missing/..", file_holds(abs_victim, "keep"));
+    check_true("rel: open victim/../victim fails", open("victim.txt/../victim.txt", O_WRONLY | O_TRUNC) < 0);
+    check_true("rel: victim survives file/..", file_holds(abs_victim, "keep"));
+    check_true("rel: rename from missing/.. fails", rename("missing/../victim.txt", "gone.txt") != 0);
+    check_true("rel: rename to missing/.. fails", rename("victim.txt", "missing/../gone.txt") != 0);
+    check_true("rel: victim survives both renames", file_holds(abs_victim, "keep"));
+    unlink(abs_victim);
 
     check_int("rel: chdir root", chdir("/"), 0);
 }

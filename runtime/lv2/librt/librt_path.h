@@ -14,11 +14,13 @@
 #include <sys/reent.h>
 #include <sys/syslimits.h>
 
-/* A relative path is resolved against the working directory, with "."
- * and ".." applied lexically exactly as chdir() applies them, into buf.
- * An absolute or empty path is returned unchanged, so the kernel sees and
- * reports it as before.  Returns the path to hand to the kernel, or NULL
- * with r->_errno set (ENAMETOOLONG). */
+/* A relative path becomes the working directory, '/', and the path, joined
+ * verbatim into buf: "." and ".." are left for the kernel, so a relative
+ * path behaves exactly as its absolute spelling (a missing directory before
+ * "..", or a trailing "/" after a regular file, still fails).  An absolute
+ * or empty path is returned unchanged.  Returns the path to hand to the
+ * kernel, or NULL with r->_errno set (EFAULT for a NULL path,
+ * ENAMETOOLONG). */
 const char *__librt_resolve_path(struct _reent *r, const char *path,
                                  char buf[PATH_MAX]);
 

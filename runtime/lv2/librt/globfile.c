@@ -95,16 +95,29 @@ normalize_path(const char *dirname, char *resolved)
 const char *
 __librt_resolve_path(struct _reent *r, const char *path, char buf[PATH_MAX])
 {
-	int err;
+	size_t used, len;
 
-	if (!path || !*path || path[0] == '/')
-		return path;
-
-	err = normalize_path(path, buf);
-	if (err) {
-		r->_errno = err;
+	if (!path) {
+		r->_errno = EFAULT;
 		return NULL;
 	}
+	if (!*path || path[0] == '/')
+		return path;
+
+	/* Join verbatim, without collapsing "." or "..": the kernel walks
+	 * every component, so "file/", "file/." and "missing/../file" fail
+	 * exactly as their absolute spellings do.  __cwd is kept normalised
+	 * by chdir() and never ends in '/' except when it is the root. */
+	used = strlen(__cwd);
+	len = strlen(path);
+	if (used + 1 + len >= PATH_MAX) {
+		r->_errno = ENAMETOOLONG;
+		return NULL;
+	}
+	memcpy(buf, __cwd, used);
+	if (used > 1)
+		buf[used++] = '/';
+	memcpy(buf + used, path, len + 1);
 	return buf;
 }
 
