@@ -65,6 +65,11 @@ int main(void)
         return 0;
     a = (uint8_t *)(uintptr_t)result.values[0];
     b = (uint8_t *)(uintptr_t)result.values[1];
+    if (a != heap + 256 || b != heap + 768) {
+        printf("SHEAP_P2_FAIL SPU blocks +%ld/+%ld (want +256/+768)\n",
+               (long)(a - heap), (long)(b - heap));
+        return 0;
+    }
     c = cellSheapAllocate(heap, 512);
     if (c != heap + 1280) {
         printf("SHEAP_P2_FAIL PPU allocate after SPU: +%ld (want +1280)\n", (long)(c - heap));
@@ -73,10 +78,14 @@ int main(void)
     if (run_phase(&image, 2, harness_ea(a)) != 0)
         return 0;
     d = (uint8_t *)(uintptr_t)result.values[0];
-    if ((int)result.values[1] != 8832 || (int)result.values[2] != 4096
+    if (d != heap + 256) {
+        printf("SHEAP_P2_FAIL SPU block D +%ld (want +256)\n", (long)(d - heap));
+        return 0;
+    }
+    if ((int)result.values[2] != 8832 || (int)result.values[3] != 4096
             || cellSheapQueryFree(heap) != 8832 || cellSheapQueryMax(heap) != 4096) {
         printf("SHEAP_P2_FAIL queries: SPU %d/%d, PPU %d/%d (want 8832/4096)\n",
-               (int)result.values[1], (int)result.values[2],
+               (int)result.values[2], (int)result.values[3],
                cellSheapQueryFree(heap), cellSheapQueryMax(heap));
         return 0;
     }
@@ -87,9 +96,9 @@ int main(void)
     if (run_phase(&image, 3, 0) != 0)
         return 0;
     sysSpuImageClose(&image);
-    if ((int)result.values[1] != 9984 || (int)result.values[2] != 8192) {
+    if ((int)result.values[2] != 9984 || (int)result.values[3] != 8192) {
         printf("SHEAP_P2_FAIL SPU sees %d/%d after PPU frees (want 9984/8192)\n",
-               (int)result.values[1], (int)result.values[2]);
+               (int)result.values[2], (int)result.values[3]);
         return 0;
     }
     printf("SHEAP_P2_OK PPU and SPU share the heap (A/B/C/D at +256/+768/+1280/+256)\n");
