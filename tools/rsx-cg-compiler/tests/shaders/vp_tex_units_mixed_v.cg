@@ -1,0 +1,14 @@
+// Mixed vertex texture units: pinnedMap is bound to TEXUNIT0, freeMap is
+// implicit and fetched FIRST.  The implicit unit goes around the explicit
+// one, so freeMap gets unit 1 even though it is used first.
+uniform sampler2D pinnedMap : TEXUNIT0;
+uniform sampler2D freeMap;
+
+void main(float2 uv : TEXCOORD0,
+          float4 st : TEXCOORD1,
+          out float4 position : POSITION,
+          out float4 color : COLOR)
+{
+    position = tex2D(freeMap, uv);
+    color = tex2D(pinnedMap, st.zw);
+}

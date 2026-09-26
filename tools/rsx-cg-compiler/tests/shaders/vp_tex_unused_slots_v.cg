@@ -1,0 +1,14 @@
+// A sampler that is declared and never fetched still takes no c[]
+// register: `gain` stays c467 and the literal pool starts below it, at
+// c466, exactly as if the sampler were not declared.  The sampler's own
+// record says unused (0xcb8, isReferenced 0).
+uniform sampler2D unusedMap;
+uniform float gain;
+
+void main(float4 inPosition : POSITION,
+          out float4 position : POSITION,
+          out float4 color : COLOR)
+{
+    position = inPosition * gain;
+    color = inPosition + 0.25;
+}

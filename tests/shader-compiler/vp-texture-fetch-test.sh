@@ -12,8 +12,10 @@
 # fixtures.  Rows whose program is a single forced chain (one temp, one
 # output) compare the whole ucode; the rest compare the fetch words and the
 # unit each output was fetched with, because their unrelated scheduling is
-# not what this guards.  Refusals assert exit status 1 AND the named
-# diagnostic.
+# not what this guards.  Refusals assert exit status 1, the named
+# diagnostic, and the compiler's refusal contract for the output path: it
+# refuses before opening it, so an absent container stays absent and a
+# container already there is left byte-for-byte alone.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -70,6 +72,23 @@ def parse(blob):
     words = [struct.unpack_from('>4I', blob, h[7] + 16 * n)
              for n in range(h[6] // 16)]
     return records, sub, words
+
+
+def compact_levela(blob):
+    """Compact CGB LevelA: (register, float4) per literal-pool constant."""
+    usize = struct.unpack_from('>H', blob, 8)[0]
+    off = 0x20 + usize
+    _, count = struct.unpack_from('>HH', blob, off)
+    regs = struct.unpack_from('>%dH' % count, blob, off + 4)
+    values_at = off + ((4 + 2 * count + 15) & ~15)
+    return [(regs[i], struct.unpack_from('>4f', blob, values_at + 16 * i))
+            for i in range(count)]
+
+
+def const_reads(words):
+    """(opcode, CONST_SRC) of every instruction with a constant operand."""
+    return sorted((vop(x), (x[1] >> 12) & 0x1FF) for x in words
+                  if any(src(x, k)[0] == 'C' for k in range(3)))
 
 
 def compact_entries(blob):
@@ -237,6 +256,36 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-texture-fetch-') as tmp:
         require(records.get('offset', (0, 0, 0))[2] == 467,
                 'temp_coord: offset must keep c467: %s' % (records.get('offset'),))
 
+    # ---- an unused sampler leaves the c[] layout alone ---------------------
+    # Reference: MUL o0, v0, c467.xxxx; ADD o1, c466.xxxx, v0 - gain at c467,
+    # the 0.25 literal at c466, the sampler 0xcb8 / isReferenced 0.  Our
+    # instruction order and ADD operand order differ from the reference
+    # (unrelated to samplers), so the constant READS are pinned per opcode.
+    name = 'vp_tex_unused_slots_v'
+    blob = build(name)
+    if blob is not None:
+        records, sub, words = parse(blob)
+        sampler(records, 'unusedMap', (0x42a, 0xcb8, UNDEF, '', UNDEF, 0, 0))
+        require(records.get('gain') == (0x415, 0x882, 467, '', UNDEF, 1, 0),
+                '%s: gain must be c467: %s' % (name, records.get('gain')))
+        require(records.get('internal-constant-0') == (0x443, 0x882, 466, '', 0xFFFFFFFE, 1, 0),
+                '%s: the literal pool must start at c466: %s'
+                % (name, records.get('internal-constant-0')))
+        require(const_reads(words) == [(0x02, 467), (0x03, 466)],
+                '%s: MUL must read c467 and ADD c466, got %s: [%s]'
+                % (name, const_reads(words), listing(words)))
+        require(w('401f9c6c 009d300d 810000c3 6041ff80') in
+                [x[:3] + (x[3] & ~1,) for x in words],
+                '%s: MUL o0, v0, c467.xxxx expected: [%s]' % (name, listing(words)))
+        require(sub[0] == 2 and sub[2] == 1,
+                '%s: two instructions, one register expected: %s' % (name, sub))
+    compact = build(name, compact=True)
+    if compact is not None:
+        require(compact_entries(compact) == [('inPosition', 0), ('gain', 467)],
+                '%s compact CGB entries: %s' % (name, compact_entries(compact)))
+        require(compact_levela(compact) == [(466, (0.25, 0.0, 0.0, 0.0))],
+                '%s compact CGB constants: %s' % (name, compact_levela(compact)))
+
     # ---- units: first use, explicit bindings, entry parameters --------------
     cases = {
         'vp_tex_first_use_v': (
@@ -245,6 +294,14 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-texture-fetch-') as tmp:
              'secondDeclared': (0x42a, 0x800, UNDEF, '', UNDEF, 1, 0)},
             {},
             [('uv', 8), ('st', 9), ('firstDeclared', 1), ('secondDeclared', 0)]),
+        # freeMap (implicit) is fetched first but TEXUNIT0 is pinned, so it
+        # takes unit 1.  Reference TXL words: 0086c183 (unit 1), 0286c083.
+        'vp_tex_units_mixed_v': (
+            {0: 1, 1: 0},
+            {'pinnedMap': (0x42a, 0x800, UNDEF, 'TEXUNIT0', UNDEF, 1, 0),
+             'freeMap': (0x42a, 0x801, UNDEF, '', UNDEF, 1, 0)},
+            {},
+            [('uv', 8), ('st', 9), ('pinnedMap', 0), ('freeMap', 1)]),
         'vp_tex_units_explicit_v': (
             {0: 2, 1: 3},
             {'heightMap': (0x42a, 0x802, UNDEF, 'TEXUNIT2', UNDEF, 1, 0),
@@ -290,16 +347,27 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-texture-fetch-') as tmp:
         'vp_tex_tex3d_refuse_v': ['tex3D'],
         'vp_tex_shadow_refuse_v': ['shadow-compare'],
     }
+    sentinel = b'a pre-existing container, not written by this compile'
     for name, needles in refusals.items():
-        out = root / (name + '.vpo')
-        r = compile_fixture(name, out)
-        text = r.stderr + r.stdout
-        require(r.returncode == 1,
-                '%s: expected exit 1 (a refusal), got %d: %s'
-                % (name, r.returncode, text.strip()[-400:]))
-        for needle in needles:
-            require(needle in text, '%s: diagnostic must name %s: %s'
-                    % (name, needle, text.strip()[-400:]))
+        for existing in (False, True):
+            out = root / (name + ('.kept' if existing else '') + '.vpo')
+            if existing:
+                out.write_bytes(sentinel)
+            r = compile_fixture(name, out)
+            text = r.stderr + r.stdout
+            case = '%s (%s output)' % (name, 'existing' if existing else 'absent')
+            require(r.returncode == 1,
+                    '%s: expected exit 1 (a refusal), got %d: %s'
+                    % (case, r.returncode, text.strip()[-400:]))
+            for needle in needles:
+                require(needle in text, '%s: diagnostic must name %s: %s'
+                        % (case, needle, text.strip()[-400:]))
+            if existing:
+                require(out.exists() and out.read_bytes() == sentinel,
+                        '%s: a refusal must leave an existing output alone' % case)
+            else:
+                require(not out.exists(),
+                        '%s: a refusal must not create the output' % case)
 
 if failures:
     for f in failures:
