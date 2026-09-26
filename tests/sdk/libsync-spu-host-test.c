@@ -4,12 +4,16 @@
  *
  *  - Queue and Rwm Initialize leave their whole descriptor in memory (the
  *    old code staged it in the LS line and then re-read the line over it).
- *  - The mutex is the PPU's 32-bit ticket word: SPU lock/unlock and an
- *    independent PPU-side model (big-endian 16-bit current/next counters
- *    at bytes 0 and 2, updated as foreign stores) exclude each other and
- *    admit waiters in ticket order, both in a scripted sequence and in a
- *    random interleaving of several PPU and SPU agents.
+ *  - The mutex is the PPU's 32-bit ticket word.  Scripted rows run the
+ *    SPU mutex.c code over the simulated MFC against a PPU-side model
+ *    (big-endian 16-bit current/next counters at bytes 0 and 2, updated as
+ *    foreign stores).  The random interleaving steps the ticket helpers
+ *    (mutex_ticket.h) against that PPU model; it is a model of the
+ *    protocol, not a run of real MFC locks on hardware.
  *  - Barrier Initialize refuses 0 and counts above 32767.
+ *  - Reservation loss: putllc attempts are lost, with another processor
+ *    changing the line between getllar and putllc; every retry loop
+ *    re-reads, converges and writes nothing stale.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +21,7 @@
 
 #include <cell/sync.h>
 #include <cell/sync/queue_types.h>
+#include <cell/sync/barrier_types.h>
 #include "mfc_mock.h"
 #include "mutex_ticket.h"
 
@@ -260,7 +265,8 @@ static void test_mutex_interleaving(void)
     CHECK(!broken, "mutual exclusion and ticket order held");
     CHECK(finished == AGENTS && entries == AGENTS * ROUNDS, "all %d agents finished (%u entries)", AGENTS, entries);
     CHECK(ppu_current(m) == ppu_next(m) && ppu_current(m) == (AGENTS * ROUNDS) % 65536u, "word ends free");
-    printf("  mutex interleaving: %d PPU/SPU agents, %u critical sections, %u steps\n", AGENTS, entries, steps);
+    printf("  mutex ticket-helper model: %d agents (PPU model / SPU helpers), %u critical sections, "
+           "%u steps\n", AGENTS, entries, steps);
 }
 
 /* ---- barrier -------------------------------------------------------- */
@@ -283,6 +289,224 @@ static void test_barrier(void)
           && cellSyncBarrierNotify(b) == CELL_OK && cellSyncBarrierTryWait(b) == CELL_OK, "count 1 cycle");
 }
 
+/* ---- reservation loss ----------------------------------------------- */
+
+/* Scripted interference at putllc: script[i] runs on the i-th attempt
+ * since arm(); NULL entries and attempts past the end lose nothing.  Each
+ * action stores to the line as another processor, which loses the SPU's
+ * reservation. */
+typedef void (*interference)(uint64_t line);
+static interference script[8];
+static unsigned script_len, script_pos;
+static uint64_t target_ea;
+
+static int run_script(uint64_t line)
+{
+    unsigned i = script_pos++;
+
+    if (i < script_len && script[i])
+        script[i](line);
+    return 0;
+}
+
+static void arm(unsigned n, interference a, interference b, interference c)
+{
+    script[0] = a;
+    script[1] = b;
+    script[2] = c;
+    script_len = n;
+    script_pos = 0;
+    mfc_mock_putllc_attempts = mfc_mock_putllc_lost = 0;
+    mfc_mock_on_putllc = run_script;
+}
+
+static void disarm(void)
+{
+    mfc_mock_on_putllc = NULL;
+    mfc_mock_on_reserve = NULL;
+}
+
+/* Native-order (queue/rwm) foreign actions. */
+static void foreign_scribble(uint64_t line)
+{
+    static const uint64_t marker = 0x0123456789abcdefull;
+
+    mfc_mock_foreign_store(line + 64, &marker, 8);
+}
+
+static void foreign_queue_push(uint64_t line)
+{
+    uint64_t head = native64(target_ea);
+
+    (void)line;
+    head = _cellSyncQueueMakeHead(_cellSyncQueueGetRlock(head), _cellSyncQueueGetIndex(head) + 1,
+                                  _cellSyncQueueGetWlock(head), _cellSyncQueueGetSize(head) + 1);
+    mfc_mock_foreign_store(target_ea, &head, 8);
+}
+
+static void foreign_queue_pop(uint64_t line)
+{
+    uint64_t head = native64(target_ea);
+
+    (void)line;
+    head = _cellSyncQueueMakeHead(_cellSyncQueueGetRlock(head), _cellSyncQueueGetIndex(head),
+                                  _cellSyncQueueGetWlock(head), _cellSyncQueueGetSize(head) - 1);
+    mfc_mock_foreign_store(target_ea, &head, 8);
+}
+
+static void foreign_rwm_reader(uint64_t line)
+{
+    uint64_t word = native64(target_ea) + ((uint64_t)1 << 48);   /* rlock + 1 */
+
+    (void)line;
+    mfc_mock_foreign_store(target_ea, &word, 8);
+}
+
+/* Big-endian (mutex/barrier) foreign actions. */
+static void foreign_take_ticket(uint64_t line)
+{
+    (void)line;
+    (void)ppu_take_ticket(target_ea);
+}
+
+/* The barrier word as the SPU code sees it: the big-endian 32-bit value
+ * viewed through the SPU's CellSyncBarrier union (on this host the union's
+ * halves follow host order, so only the value round trip is meaningful). */
+static CellSyncBarrier barrier_word(uint64_t ea)
+{
+    CellSyncBarrier w;
+    const uint8_t *p = mfc_mock_memory + ea;
+
+    w.uint_val = (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+    return w;
+}
+
+static void foreign_barrier_notify(uint64_t line)
+{
+    CellSyncBarrier w = barrier_word(target_ea);
+    uint8_t bytes[4];
+
+    (void)line;
+    w.count--;
+    bytes[0] = (uint8_t)(w.uint_val >> 24);
+    bytes[1] = (uint8_t)(w.uint_val >> 16);
+    bytes[2] = (uint8_t)(w.uint_val >> 8);
+    bytes[3] = (uint8_t)w.uint_val;
+    mfc_mock_foreign_store(target_ea, bytes, 4);
+}
+
+static void test_reservation_loss(void)
+{
+    static uint8_t in[128] __attribute__((aligned(128)));
+    static uint8_t out[128] __attribute__((aligned(128)));
+    const uint64_t q = 0x6000, rwm = 0x7000, m = 0x8000 + 12, b = 0x9000;
+    uint64_t head, marker;
+
+    /* Queue Initialize: the first store is lost because another processor
+     * wrote elsewhere in the line.  The retry re-reads the line, so the
+     * descriptor is complete and the other bytes are the other
+     * processor's, not a stale LS copy. */
+    mfc_mock_swap32 = 0;
+    memset(mfc_mock_memory + q, 0xab, 0x800);
+    arm(1, foreign_scribble, NULL, NULL);
+    CHECK(cellSyncQueueInitialize(q, q + 128, 16, 4, 5) == CELL_OK, "queue init under loss");
+    memcpy(&marker, mfc_mock_memory + q + 64, 8);
+    CHECK(mfc_mock_putllc_lost == 1 && mfc_mock_putllc_attempts == 2, "one lost, one stored (%lu/%lu)",
+          mfc_mock_putllc_lost, mfc_mock_putllc_attempts);
+    CHECK(native64(q) == 0 && native64(q + 8) == ((uint64_t)16 << 32 | 4) && native64(q + 16) == q + 128,
+          "queue descriptor complete after a lost reservation");
+    CHECK(marker == 0x0123456789abcdefull, "other processor's bytes in the line kept");
+
+    /* Push: a foreign producer completes a push while ours takes wlock
+     * (attempt 0), and a foreign consumer pops while ours commits
+     * (attempt 2).  Our element lands in slot 1 and the head counts all
+     * three operations. */
+    target_ea = q;
+    memset(in, 0x61, 16);
+    arm(3, foreign_queue_push, NULL, foreign_queue_pop);
+    CHECK(cellSyncQueuePush(q, in, 7) == CELL_OK, "push under loss");
+    head = native64(q);
+    CHECK(_cellSyncQueueGetIndex(head) == 2 && _cellSyncQueueGetSize(head) == 1
+          && _cellSyncQueueGetWlock(head) == 0 && _cellSyncQueueGetRlock(head) == 0,
+          "head re-read each time: index %u size %u wlock %u", _cellSyncQueueGetIndex(head),
+          _cellSyncQueueGetSize(head), _cellSyncQueueGetWlock(head));
+    CHECK(mfc_mock_memory[q + 128 + 16] == 0x61 && mfc_mock_memory[q + 128] == 0xab,
+          "element in slot 1, slot 0 untouched");
+    CHECK(mfc_mock_putllc_lost == 2, "two reservations lost (%lu)", mfc_mock_putllc_lost);
+
+    /* Pop: a foreign producer pushes while ours takes rlock. */
+    arm(1, foreign_queue_push, NULL, NULL);
+    CHECK(cellSyncQueuePop(q, out, 7) == CELL_OK, "pop under loss");
+    head = native64(q);
+    CHECK(_cellSyncQueueGetSize(head) == 1 && _cellSyncQueueGetIndex(head) == 3
+          && _cellSyncQueueGetRlock(head) == 0, "pop re-read: size %u index %u",
+          _cellSyncQueueGetSize(head), _cellSyncQueueGetIndex(head));
+    disarm();
+
+    /* Rwm Initialize, then a reader arriving while ours takes rlock, and
+     * another while ours releases it. */
+    memset(mfc_mock_memory + rwm, 0xcd, 0x200);
+    arm(1, foreign_scribble, NULL, NULL);
+    CHECK(cellSyncRwmInitialize(rwm, rwm + 128, 64, 6) == CELL_OK, "rwm init under loss");
+    memcpy(&marker, mfc_mock_memory + rwm + 64, 8);
+    CHECK(native64(rwm) == 64 && native64(rwm + 8) == rwm + 128 && marker == 0x0123456789abcdefull,
+          "rwm descriptor complete, other bytes kept");
+    target_ea = rwm;
+    arm(1, foreign_rwm_reader, NULL, NULL);
+    CHECK(cellSyncRwmReadBegin(rwm, out, 6) == CELL_OK, "read begin under loss");
+    CHECK(native64(rwm) >> 48 == 2, "two readers counted (%llu)", (unsigned long long)(native64(rwm) >> 48));
+    arm(1, foreign_rwm_reader, NULL, NULL);
+    CHECK(cellSyncRwmReadEnd(rwm, 6) == CELL_OK && native64(rwm) >> 48 == 2,
+          "read end re-read: the new reader stays counted");
+    disarm();
+
+    /* Mutex: the PPU takes a ticket while the SPU's Lock stores its own.
+     * The SPU must re-read and take ticket 1, then wait for the PPU. */
+    mfc_mock_swap32 = 1;
+    CHECK(cellSyncMutexInitialize(m, 0) == CELL_OK, "mutex init");
+    target_ea = m;
+    arm(1, foreign_take_ticket, NULL, NULL);
+    hook_ea = m;
+    hook_countdown = 4;
+    hook_fired = 0;
+    mfc_mock_on_reserve = release_after_spins;
+    CHECK(cellSyncMutexLock(m) == CELL_OK && hook_fired, "SPU Lock waited for the PPU's ticket 0");
+    CHECK(ppu_current(m) == 1 && ppu_next(m) == 2, "no stale ticket: (%u,%u) want (1,2)",
+          ppu_current(m), ppu_next(m));
+    /* Unlock while the PPU queues ticket 2: current advances, the PPU's
+     * ticket is kept. */
+    mfc_mock_on_reserve = NULL;
+    arm(1, foreign_take_ticket, NULL, NULL);
+    CHECK(cellSyncMutexUnlock(m) == CELL_OK && ppu_current(m) == 2 && ppu_next(m) == 3,
+          "unlock re-read: (%u,%u) want (2,3)", ppu_current(m), ppu_next(m));
+    ppu_unlock(m);
+    /* TryLock on a free mutex while the PPU takes it: the re-read says BUSY. */
+    arm(1, foreign_take_ticket, NULL, NULL);
+    CHECK(cellSyncMutexTryLock(m) == (int)CELL_SYNC_ERROR_BUSY && ppu_current(m) == 3 && ppu_next(m) == 4,
+          "trylock re-read: BUSY, only the PPU's ticket taken (%u,%u)", ppu_current(m), ppu_next(m));
+    ppu_unlock(m);
+
+    /* Barrier: another participant notifies while ours stores. */
+    CHECK(cellSyncBarrierInitialize(b, 3, 0) == CELL_OK, "barrier init");
+    target_ea = b;
+    arm(1, foreign_barrier_notify, NULL, NULL);
+    CHECK(cellSyncBarrierNotify(b) == CELL_OK, "notify under loss");
+    CHECK(barrier_word(b).count == 1 && barrier_word(b).total_count == 3, "count 3 - 2 = 1 (%u)",
+          barrier_word(b).count);
+    disarm();
+
+    /* Every retry loop again with every other reservation lost. */
+    mfc_mock_putllc_attempts = mfc_mock_putllc_lost = 0;
+    mfc_mock_on_putllc = mfc_mock_lose_alternate;
+    test_descriptors();
+    test_barrier();
+    disarm();
+    CHECK(mfc_mock_putllc_lost > 10, "alternate-loss rerun lost %lu reservations", mfc_mock_putllc_lost);
+    printf("  reservation loss: scripted interference on queue, rwm, mutex and barrier loops;\n"
+           "       descriptor and barrier sections rerun losing %lu of %lu putllc\n",
+           mfc_mock_putllc_lost, mfc_mock_putllc_attempts);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -290,6 +514,7 @@ int main(void)
     test_mutex_script();
     test_mutex_interleaving();
     test_barrier();
+    test_reservation_loss();
     if (failures) {
         printf("libsync-spu: FAIL (%d of %d checks)\n", failures, checks);
         return 1;

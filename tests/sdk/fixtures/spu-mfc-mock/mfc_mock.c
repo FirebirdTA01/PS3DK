@@ -10,6 +10,15 @@ uint8_t mfc_mock_memory[MFC_MOCK_MEMORY] __attribute__((aligned(128)));
 int mfc_mock_swap32;
 void (*mfc_mock_on_reserve)(uint64_t line_ea);
 unsigned long mfc_mock_reserves;
+int (*mfc_mock_on_putllc)(uint64_t line_ea);
+unsigned long mfc_mock_putllc_attempts;
+unsigned long mfc_mock_putllc_lost;
+
+int mfc_mock_lose_alternate(uint64_t line_ea)
+{
+    (void)line_ea;
+    return (mfc_mock_putllc_attempts & 1) != 0;
+}
 
 static uint64_t reserved_line = UINT64_MAX;
 static uint32_t atomic_status;
@@ -94,11 +103,15 @@ void mfc_mock_command(volatile void *ls, uint64_t ea, uint32_t size,
         atomic_status = 4;          /* getllar complete */
         break;
     case MFC_PUTLLC_CMD:
+        ++mfc_mock_putllc_attempts;
+        if (mfc_mock_on_putllc && mfc_mock_on_putllc(ea))
+            reserved_line = UINT64_MAX;
         if (reserved_line == ea) {
             copy(mfc_mock_memory + ea, local, 128);
             atomic_status = 0;
         } else {
             atomic_status = MFC_PUTLLC_STATUS;
+            ++mfc_mock_putllc_lost;
         }
         reserved_line = UINT64_MAX;
         break;

@@ -11,6 +11,11 @@
  *  - Keyed objects: attach/detach counts, last-reference free, creator
  *    rollback (shortage, barrier count 0 and 32768), the queue and rwm
  *    descriptors surviving their initialisation, semaphore P/V/TryP.
+ *  - Reservation loss: another processor takes the heap lock, becomes a
+ *    key's creator, or attaches, between the SPU's getllar and putllc;
+ *    the SPU re-reads and converges without writing a stale lock word or
+ *    key entry.  The plain and keyed sections are rerun with every other
+ *    putllc lost.
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -267,6 +272,175 @@ static void test_keyed(void)
     CHECK(cellKeySheapQueryFree(ks) == 7936 && entry(ks, 1) == 0 && entry(ks, 5) == 0, "all deleted");
 }
 
+/* ---- reservation loss ----------------------------------------------- */
+
+/* Another processor working on the same heap, acting between the SPU's
+ * getllar and putllc (on_putllc) or while the SPU spins (on_reserve).
+ * It uses the portable core directly on the simulated memory, which holds
+ * the tree in the same word order the SPU layer writes. */
+static uint64_t other_heap;
+static int other_step, other_countdown;
+static uint64_t other_block;
+
+static unsigned mem_get(void *c, uint32_t n)
+{
+    uint32_t w;
+
+    (void)c;
+    memcpy(&w, MEM + H(other_heap)->ea_tree + 4 * (n >> 4), 4);
+    return (w >> SHEAP_TREE_SHIFT(n)) & 3u;
+}
+
+static void mem_set(void *c, uint32_t n, unsigned s)
+{
+    uint64_t ea = H(other_heap)->ea_tree + 4 * (n >> 4);
+    uint32_t w;
+
+    (void)c;
+    memcpy(&w, MEM + ea, 4);
+    w = (w & ~(3u << SHEAP_TREE_SHIFT(n))) | ((uint32_t)s << SHEAP_TREE_SHIFT(n));
+    mfc_mock_foreign_store(ea, &w, 4);
+}
+
+static const sheap_tree_access mem_tree = { mem_get, mem_set, 0 };
+
+static void other_store_lock(uint32_t value)
+{
+    mfc_mock_foreign_store(other_heap, &value, 4);
+}
+
+/* Heap lock: the other processor takes the lock just as the SPU tries to,
+ * allocates 2 KB while holding it, and releases after the SPU has spun. */
+static int grab_heap_lock(uint64_t line)
+{
+    if (line == other_heap && other_step == 0) {
+        other_step = 1;
+        other_store_lock(1);
+        other_block = __sheap_heap_allocate(&mem_tree, H(other_heap)->n_nodes, H(other_heap)->s_root,
+                                            H(other_heap)->ea_heap, 2048);
+    }
+    return 0;
+}
+
+static void release_heap_lock(uint64_t line)
+{
+    if (line == other_heap && other_step == 1 && --other_countdown == 0) {
+        other_store_lock(0);
+        other_step = 2;
+    }
+}
+
+/* Key entry: the other processor becomes the creator just as the SPU
+ * tries to, and publishes its block after the SPU has spun. */
+static uint64_t key_entry_ea(unsigned key)
+{
+    return H(other_heap)->ea_keytable + 8 * key;
+}
+
+static void store_entry(unsigned key, uint64_t value)
+{
+    mfc_mock_foreign_store(key_entry_ea(key), &value, 8);
+}
+
+static int become_creator(uint64_t line)
+{
+    if (line == (key_entry_ea(7) & ~(uint64_t)127) && other_step == 0) {
+        other_step = 1;
+        store_entry(7, SHEAP_KEY_ENTRY(1, 0));
+    }
+    return 0;
+}
+
+static void publish_later(uint64_t line)
+{
+    if (line == (key_entry_ea(7) & ~(uint64_t)127) && other_step == 1 && --other_countdown == 0) {
+        uint32_t nval = (uint32_t)(((other_block - H(other_heap)->ea_heap) >> 7) + 1);
+
+        store_entry(7, SHEAP_KEY_ENTRY(1, nval));
+        other_step = 2;
+    }
+}
+
+/* Key entry: the other processor attaches just as the SPU detaches. */
+static int attach_meanwhile(uint64_t line)
+{
+    if (line == (key_entry_ea(7) & ~(uint64_t)127) && other_step == 0) {
+        uint64_t e;
+
+        memcpy(&e, MEM + key_entry_ea(7), 8);
+        store_entry(7, SHEAP_KEY_ENTRY(SHEAP_KEY_COUNT(e) + 1, SHEAP_KEY_NVAL(e)));
+        other_step = 1;
+    }
+    return 0;
+}
+
+static void test_reservation_loss(void)
+{
+    const uint64_t ps = 0x40000, ks = 0x50000;
+    CellKeySheapBuffer buf;
+    uint64_t a, nval;
+    int free_before;
+
+    /* Heap lock taken by the other processor between the SPU's getllar and
+     * putllc: the SPU's store is lost, it re-reads, spins until the lock is
+     * released, and only then reads the tree, so it sees the other
+     * processor's 2 KB block and allocates the next one. */
+    CHECK(cellSheapInitialize(ps, 10240, 8) == CELL_OK, "plain init");
+    other_heap = ps;
+    other_step = 0;
+    other_countdown = 5;
+    mfc_mock_putllc_attempts = mfc_mock_putllc_lost = 0;
+    mfc_mock_on_putllc = grab_heap_lock;
+    mfc_mock_on_reserve = release_heap_lock;
+    a = cellSheapAllocate(ps, 2048);
+    mfc_mock_on_putllc = NULL;
+    mfc_mock_on_reserve = NULL;
+    CHECK(other_step == 2 && other_block == ps + 256, "other processor held the lock and took +256");
+    CHECK(a == ps + 256 + 2048, "SPU allocated after the release: +%" PRIu64 " want +2304", a - ps);
+    CHECK(H(ps)->lock == 0 && mfc_mock_putllc_lost == 1, "lock free again, one store lost");
+    CHECK(cellSheapQueryFree(ps) == 9984 - 4096, "both blocks accounted");
+
+    /* Key New racing a creator on the other processor: the SPU's
+     * reference is lost, it re-reads a NEWING entry, waits, and attaches
+     * to the published block instead of creating its own. */
+    CHECK(cellKeySheapInitialize(ks, 10240, 3) == CELL_OK, "keyed init");
+    other_heap = ks;
+    other_block = cellSheapAllocate(ks, 512);
+    free_before = cellSheapQueryFree(ks);
+    other_step = 0;
+    other_countdown = 5;
+    mfc_mock_putllc_attempts = mfc_mock_putllc_lost = 0;
+    mfc_mock_on_putllc = become_creator;
+    mfc_mock_on_reserve = publish_later;
+    CHECK(cellKeySheapBufferNew(&buf, ks, 7, 128) == CELL_OK, "BufferNew against a racing creator");
+    mfc_mock_on_putllc = NULL;
+    mfc_mock_on_reserve = NULL;
+    nval = ((other_block - H(ks)->ea_heap) >> 7) + 1;
+    CHECK(other_step == 2 && buf.ea == other_block, "attached to the other creator's block");
+    CHECK(entry(ks, 7) == SHEAP_KEY_ENTRY(2, nval), "entry (2, v): no stale (1, 0) written");
+    CHECK(cellSheapQueryFree(ks) == free_before, "the SPU allocated nothing");
+
+    /* Delete while the other processor attaches: the count is re-read, the
+     * object stays alive with both remaining references. */
+    other_step = 0;
+    mfc_mock_on_putllc = attach_meanwhile;
+    cellKeySheapBufferDelete(&buf);
+    mfc_mock_on_putllc = NULL;
+    CHECK(entry(ks, 7) == SHEAP_KEY_ENTRY(2, nval) && cellSheapQueryFree(ks) == free_before,
+          "delete re-read the count: (2, v), nothing freed");
+
+    /* Every retry loop again with every other reservation lost. */
+    mfc_mock_putllc_attempts = mfc_mock_putllc_lost = 0;
+    mfc_mock_on_putllc = mfc_mock_lose_alternate;
+    test_plain();
+    test_keyed();
+    mfc_mock_on_putllc = NULL;
+    CHECK(mfc_mock_putllc_lost > 20, "alternate-loss rerun lost %lu reservations", mfc_mock_putllc_lost);
+    printf("  reservation loss: heap lock, key New and key Delete raced by another processor;\n"
+           "       plain and keyed sections rerun losing %lu of %lu putllc\n",
+           mfc_mock_putllc_lost, mfc_mock_putllc_attempts);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -274,6 +448,7 @@ int main(void)
     test_plain();
     test_large();
     test_keyed();
+    test_reservation_loss();
     if (failures) {
         printf("sheap-spu: FAIL (%d of %d checks)\n", failures, checks);
         return 1;
