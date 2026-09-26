@@ -1,62 +1,30 @@
-Subject: [PATCH] spu: crt1 — pass the fourth lv2 SPU thread argument to main
+Subject: [PATCH] spu: crt1 - pass the fourth lv2 SPU thread argument to main
 
 An lv2 SPU thread (sys_spu_thread_initialize / sysSpuThreadInitialize)
 starts with the four 64-bit words of its sys_spu_thread_argument in $3,
-$4, $5 and $6.  libgloss's crt1.o was written for Linux libspe2, where
-$6 carries the effective address of the SPU's local store: it saves
-only $3-$5 in $80-$82, calls main with three arguments and stores $6
-into __ea_local_store.  A four-argument main therefore read whatever
-_init and atexit left in $6.
+$4, $5 and $6.  libgloss's crt1.o saves only $3-$5 in $80-$82 and calls
+main with three arguments, so a four-argument main read whatever _init
+and atexit left in $6.
 
 Save $6 in $83 (callee-saved, like $80-$82) and pass it to main as the
-fourth argument.  This matches the PS3 SDK's own SPU thread entry,
-which hands main all four registers unchanged.
+fourth argument, as the PS3 SDK's own SPU thread entry does.  Nothing
+else changes: $6 is still stored into __ea_local_store as before, and
+crt2.o (_STD_MAIN, the libspe2 spulet entry) is unchanged.
 
-__ea_local_store: the SDK's entry does not define or set it at all.
-We keep the symbol, because GCC's __ea address-space conversions and
-libgcc's __ea software cache (cachemgr.c) reference it, but crt1.o now
-stores 0 there instead of the fourth argument.  With 0, a local-store
-pointer converted to __ea is the LS offset itself, and the cache
-treats EAs in [0, 256K) as local store, so the conversion round-trips;
-storing the thread argument would instead make the cache shadow an
-arbitrary 256K window of real EA space with local store.  crt2.o
-(_STD_MAIN, the libspe2 spulet entry) is unchanged.
-
-diff --color -ruN a/libgloss/spu/crt0.S b/libgloss/spu/crt0.S
 --- a/libgloss/spu/crt0.S
 +++ b/libgloss/spu/crt0.S
-@@ -41,6 +41,11 @@
+@@ -41,6 +41,10 @@
   * The crt1.o prepares the entry for an SPU module. The main() function
   * is called with different parameter list: spu_id, param and env 
   * are passed by R3, R4 and R5 respectively.
 + *
 + * PS3 lv2: an SPU thread receives the four 64-bit arguments of its
 + * sys_spu_thread_argument in R3, R4, R5 and R6, so crt1.o passes all
-+ * four to main().  R6 is not the local store EA there, so crt1.o sets
-+ * __ea_local_store to 0 instead of storing R6 into it.
++ * four to main().
   */
  
  #ifdef _STD_MAIN
-@@ -57,8 +62,18 @@
- .type _start, @function
- 	
- _start:
-+#ifdef _STD_MAIN
- 	/* Save the local store base from $6.  */
- 	stqr $6, __ea_local_store
-+#else
-+	/* lv2 passes the fourth thread argument in $6, not the local
-+	 * store EA.  Zero __ea_local_store: LS-to-__ea conversions then
-+	 * yield the LS offset itself, which the __ea cache maps straight
-+	 * back to local store, and no real EA range is shadowed.
-+	 */
-+	il	$7, 0
-+	stqr	$7, __ea_local_store
-+#endif
- 
- #ifdef _STD_MAIN
- 	/* 
-@@ -98,13 +113,14 @@
+@@ -98,13 +102,14 @@
  #endif
  
  	/* Save parameter list of main function to the non-volatile
@@ -72,7 +40,7 @@ diff --color -ruN a/libgloss/spu/crt0.S b/libgloss/spu/crt0.S
  #endif
  
  	/* The Link Register is initialized to NULL.
-@@ -172,6 +188,7 @@
+@@ -172,6 +177,7 @@
  	ori     $4,$81,0	
  #ifndef _STD_MAIN
  	ori	$5,$82,0
