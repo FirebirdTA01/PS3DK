@@ -127,6 +127,12 @@ jobs:
       - name: Test the GCM FIFO wrap never loses an unpublished lap
         run: bash tests/sdk/fifo-wrap-protocol-test.sh
 
+      # The SPU libsheap core is portable C: the host build checks the heap
+      # layout the firmware shares, the tree bits, the allocation rules, the
+      # key-table state machine and a random run against a bitmap model.
+      - name: Test the shared-heap core layout, allocator and key table
+        run: bash tests/sdk/sheap-core-host-test.sh
+
       # install-headers copies an explicit list; a header missing from it is
       # left out of the installed SDK and breaks the full SDK build.
       - name: Test every tracked SDK header is installed
@@ -223,6 +229,11 @@ jobs:
       # Skips without PS3DEV; checks the installed SPU libatomic.a.
       - name: Test the SPU libatomic archive defines every operation
         run: bash tests/sdk/spu-libatomic-test.sh
+
+      # Skips without PS3DEV; checks the installed SPU libsheap.a and links
+      # a program calling its whole API.
+      - name: Test the SPU libsheap archive exports and links its API
+        run: bash tests/sdk/spu-sheap-link-test.sh
 
       # Skips without PS3DEV; compiles this tree's SPU atomic header in C/C++.
       - name: Test SPU atomic alignment predicates select integer intrinsics
