@@ -743,6 +743,10 @@ private:
     // it, so a second read of the same value reuses the lane and a
     // second lane of the same input register joins the same ARL.
     std::unordered_map<IRValueID, unsigned> dynamicIndexUses_;
+    // Values whose every use is a dynamic index, possibly through
+    // single-source lane selections. Keep direct-use counts separate:
+    // constant folding below must not drop a cast still read by a shuffle.
+    std::unordered_set<IRValueID> indexOnlyValues_;
     std::unordered_map<IRValueID, IRValueID> indexValueOf_;
     struct AddressLane
     {
@@ -1945,6 +1949,7 @@ private:
 
     void countUses()
     {
+        std::unordered_map<IRValueID, IRValueID> laneSelectionSource;
         for (const auto& block : entry_.blocks) {
             if (!block) continue;
             for (const auto& instPtr : block->instructions) {
@@ -1954,6 +1959,21 @@ private:
                     instPtr->op == IROp::CondBranch;
                 if (instPtr->result != InvalidIRValue)
                     definedValues_.insert(instPtr->result);
+                // Only a selection from ONE source preserves the cast's
+                // lane provenance. A constructor/multi-source shuffle or
+                // a run-time vector selector is deliberately not a link.
+                bool laneSelection = instPtr->op == IROp::VecShuffle &&
+                                     instPtr->operands.size() == 1;
+                if (instPtr->op == IROp::VecExtract &&
+                    instPtr->resultType.componentCount() == 1 &&
+                    (instPtr->operands.size() == 1 || instPtr->operands.size() == 2)) {
+                    int lane = instPtr->componentIndex;
+                    laneSelection = (instPtr->operands.size() == 1 ||
+                                     constantIndex(instPtr->operands[1], lane)) &&
+                                    lane >= 0 && lane < 4;
+                }
+                if (laneSelection && instPtr->result != InvalidIRValue)
+                    laneSelectionSource[instPtr->result] = instPtr->operands[0];
                 if (instPtr->op == IROp::LoadUniform &&
                     instPtr->arrayIndexKind ==
                         IRInstruction::ArrayIndexKind::Dynamic &&
@@ -1970,6 +1990,28 @@ private:
                         ++nonTermUseCount_[id];
                 }
             }
+        }
+
+        // Credit a selection's source only after EVERY use of its result
+        // has been proven index-only. The worklist visits each qualifying
+        // selection once; a mixed value/index consumer stops propagation.
+        auto indexUses = dynamicIndexUses_;
+        std::vector<IRValueID> pending;
+        for (const auto& entry : indexUses) {
+            const auto uses = useCount_.find(entry.first);
+            if (entry.second > 0 && uses != useCount_.end() &&
+                entry.second == uses->second && indexOnlyValues_.insert(entry.first).second)
+                pending.push_back(entry.first);
+        }
+        for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
+            const auto selection = laneSelectionSource.find(pending[cursor]);
+            if (selection == laneSelectionSource.end())
+                continue;
+            const IRValueID source = selection->second;
+            const auto uses = useCount_.find(source);
+            if (uses != useCount_.end() && ++indexUses[source] == uses->second &&
+                indexOnlyValues_.insert(source).second)
+                pending.push_back(source);
         }
     }
 
@@ -4101,11 +4143,12 @@ private:
             // consumer needs the integer value in a register, which this
             // profile does not lower - and int(idx) + 1 is the shape the
             // reference lowers as a full truncation before its ARL.
-            const auto dynIt = dynamicIndexUses_.find(inst.result);
-            const auto useIt = useCount_.find(inst.result);
-            if (dynIt != dynamicIndexUses_.end() && dynIt->second > 0 &&
-                useIt != useCount_.end() && useIt->second == dynIt->second) {
+            if (indexOnlyValues_.count(inst.result)) {
                 indexValueOf_[inst.result] = inst.operands[0];
+                // Lane selections resolve their operand before the array
+                // read. Alias the proven cast now, preserving the source's
+                // swizzle; FLR/stride/ARL still handles the index conversion.
+                program_.valueToSource[inst.result] = resolve(inst.operands[0]);
                 return;
             }
             program_.diagnostics.push_back(

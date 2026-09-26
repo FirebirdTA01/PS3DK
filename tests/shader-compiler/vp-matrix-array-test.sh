@@ -42,19 +42,22 @@ def matrix(element, width):
 def product(m, p):
     return [sum(a*b for a,b in zip(row,p)) for row in m]
 
-def execute(b, records, words, index):
+def execute(b, records, words, index, address_only=False):
     constants = {}
     for name, r in records.items():
         if name.startswith('internal-constant-'):
             constants[r[3]] = list(struct.unpack_from('>4f', b, r[5]))
-        match = re.fullmatch(r'M\[(\d+)\]\[(\d+)\]', name)
+        match = re.fullmatch(r'([MN])\[(\d+)\]\[(\d+)\]', name)
         if match and r[10]:
-            elem,row = map(int, match.groups())
+            array,elem,row = match.groups()
+            elem,row = int(elem),int(row)
+            if array == 'N': elem += 10
             width = r[0]-1044
             constants[r[3]] = matrix(elem,width)[row]+[0]*(4-width)
         if name == 'V[0]': constants[r[3]] = [2,4,6,8]
         if name == 'V[1]': constants[r[3]] = [3,5,7,9]
-    regs = {'IN0':[1,-2,3,0.5], 'IN8':[index]*4, 'A0':[0]*4, 'A1':[0]*4}
+    indices = list(index) if isinstance(index, (list,tuple)) else [index]*4
+    regs = {'IN0':[1,-2,3,0.5], 'IN8':indices, 'A0':[math.nan]*4, 'A1':[math.nan]*4}
     trace = []
     def source(text):
         neg = text.startswith('-'); text = text.lstrip('-')
@@ -64,11 +67,17 @@ def execute(b, records, words, index):
             addr,lane,offset = match.groups()
             slot = int(offset)+int(regs[addr]['xyzw'.index(lane)])
             trace.append(slot)
-            value = constants[slot]
+            # For negative-index probes only, observe the address arithmetic
+            # without claiming a defined shader value outside the array.
+            value = constants.get(slot,[0]*4) if address_only else constants[slot]
         elif base.startswith('C'): value = constants[int(base[1:])]
         else: value = regs[base]
         return [(-1 if neg else 1)*value['xyzw'.index(l)] for l in swizzle]
-    for line in words:
+    ucode_offset = struct.unpack_from('>I',b,28)[0]
+    for number,line in enumerate(words):
+        hw = struct.unpack_from('>4I',b,ucode_offset+16*number)
+        if hw[1] >> 27 or hw[0] & ((7 << 21) | (1 << 13)):
+            raise ValueError('numeric witness cannot model scalar ops, absolute sources or predication')
         match = re.fullmatch(r'\d+ (\w+) dst=(\w+) mask=([xyzw-]+) src0=(\S+) src1=(\S+) src2=(\S+)',line)
         op,dst,mask,*sources = match.groups()
         if op == 'NOP': continue
@@ -83,24 +92,30 @@ def execute(b, records, words, index):
             elif op == 'MAD': value = [x*y+z for x,y,z in zip(a,c,source(sources[2]))]
             elif op in ('DP3','DP4'): value = [sum(x*y for x,y in zip(a[:int(op[-1])],c))]*4
             else: raise ValueError('unsupported instruction in numeric witness: '+line)
-        regs.setdefault(dst,[0]*4)
+        regs.setdefault(dst,[math.nan]*4)
         for lane in mask:
             if lane != '-': regs[dst]['xyzw'.index(lane)] = value['xyzw'.index(lane)]
     return regs['o0'],trace
 
 with tempfile.TemporaryDirectory(prefix='ps3dk-vp-matrix-array-') as temp:
     root = Path(temp)
-    def compile_case(tag, source, refusal=None):
+    def compile_case(tag, source, refusal=None, optional_refusal=None):
         src,out = root/(tag+'.cg'),root/(tag+'.bin')
         src.write_text(source)
         run = subprocess.run([compiler,'-p','sce_vp_rsx','--emit-container',str(out),str(src)],
                              capture_output=True,text=True,timeout=20)
+        if optional_refusal and run.returncode == 1 and optional_refusal in run.stderr:
+            require(not out.exists(),f'{tag}: refusal left an output')
+            return None
         if refusal:
             require(run.returncode == 1 and refusal in run.stderr,
                     f'{tag}: expected exit 1 naming {refusal!r}, got {run.returncode}: {run.stderr}')
             return None
         if run.returncode:
             failures.append(f'{tag}: compiler exit {run.returncode}: {run.stderr.strip()}')
+            return None
+        if not out.is_file() or out.stat().st_size < 32:
+            failures.append(f'{tag}: compiler accepted without a container')
             return None
         return container(out)
 
@@ -145,6 +160,105 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-matrix-array-') as temp:
                         if width == 3: expected.append(1)
                         require(got == expected,f'{label}: at i={value}, {got} != {expected}')
                     except (KeyError,ValueError) as error: failures.append(label+': '+str(error))
+
+    # Distinct fractional lane inputs detect selecting x for every index,
+    # swapping first-use order, or scaling by columns instead of rows.
+    # Scalar casts are the already-supported controls for vector casts.
+    for rows in (3,4):
+        for label,declaration,left,right,lanes in (
+            ('scalar-control','', 'int(i.y)','int(i.x)',(1,0)),
+            ('vector-lanes','int4 ix=int4(i);','ix.y','ix.x',(1,0)),
+            ('swizzled-lanes','int4 ix=int4(i.wzyx);','ix.y','ix.x',(2,3)),
+            ('subscript-lanes','int4 ix=int4(i);','ix[1]','ix[0]',(1,0)),
+        ):
+            tag = f'{label}-{rows}x4'
+            expression = f'mul(M[{left}],p)+2*mul(M[{right}],p)'
+            if rows == 3: expression = f'float4({expression},1)'
+            data = compile_case(tag,f'uniform float{rows}x4 M[8]; '
+                    'float4 main(float4 p:POSITION,float4 i:TEXCOORD0):POSITION {'
+                    +declaration+'return '+expression+';}')
+            if data:
+                for indices in ([1.75,2.25,4.125,6.875],[3.125,0.875,5.25,7.25]):
+                    try:
+                        got,reads = execute(*data,indices)
+                        a,b = [math.floor(indices[lane]) for lane in lanes]
+                        va = product(matrix(a,4)[:rows],[1,-2,3,0.5])
+                        vb = product(matrix(b,4)[:rows],[1,-2,3,0.5])
+                        expected = [x+2*y for x,y in zip(va,vb)]
+                        swapped = [y+2*x for x,y in zip(va,vb)]
+                        if rows == 3:
+                            expected.append(1)
+                            swapped.append(1)
+                        require(got == expected,f'{tag} i={indices}: {got} != {expected}')
+                        require(got != swapped,f'{tag}: swapped-lane control did not discriminate')
+                        expected_reads = {256+rows*e+r for e in (a,b) for r in range(rows)}
+                        require(set(reads) == expected_reads,
+                                f'{tag} i={indices}: decoded reads {reads} != {sorted(expected_reads)}')
+                    except (KeyError,ValueError) as error: failures.append(tag+': '+str(error))
+                # The reference FLR/stride/ARL chain floors -0.5 to -1.
+                # Judge decoded addresses only: out-of-array source-level
+                # results have no defined value to compare here.
+                indices = [-0.5,1.75,-0.5,1.75]
+                try:
+                    _,reads = execute(*data,indices,address_only=True)
+                    elements = [math.floor(indices[lane]) for lane in lanes]
+                    expected_reads = {256+rows*e+r for e in elements for r in range(rows)}
+                    require(set(reads) == expected_reads,
+                            f'{tag}: negative fraction addresses {reads} != {sorted(expected_reads)}')
+                except (KeyError,ValueError) as error: failures.append(tag+': '+str(error))
+
+    # A vector made from cast lanes and independent integer constants must
+    # never be aliased wholesale to i. Either preserve lane provenance or
+    # retain the existing named refusal for the unsupported value cast.
+    data = compile_case('mixed-origin-lanes','uniform float4x4 M[8]; '
+            'float4 main(float4 p:POSITION,float4 i:TEXCOORD0):POSITION {'
+            'int4 cast=int4(i); int4 ix=int4(cast.xy,0,1); '
+            'return mul(M[ix.x],p)+2*mul(M[ix.z],p)+3*mul(M[ix.w],p);}',
+            optional_refusal='VP float-to-int lowering deferred')
+    if data:
+        for indices in ([2.75,3.25,4.5,5.5],[6.125,7.25,3.5,2.5]):
+            try:
+                got,_ = execute(*data,indices)
+                parts = [product(matrix(e,4),[1,-2,3,0.5])
+                         for e in (math.floor(indices[0]),0,1)]
+                expected = [a+2*b+3*c for a,b,c in zip(*parts)]
+                require(got == expected,f'mixed-origin-lanes: {got} != {expected}')
+            except (KeyError,ValueError) as error: failures.append('mixed-origin-lanes: '+str(error))
+
+    # Four lanes, each used with two distinct matrix row strides, occupy
+    # all eight address lanes. A repeated lane must reuse its demand.
+    terms = [f'{k+1}*(mul(M[ix.{lane}],p)+float4(mul(N[ix.{lane}],p),0))'
+             for k,lane in enumerate('xyzw')]
+    data = compile_case('two-arrays-eight-demands',
+            'uniform float4x4 M[8]; uniform float3x4 N[8]; '
+            'float4 main(float4 p:POSITION,float4 i:TEXCOORD0):POSITION {'
+            'int4 ix=int4(i); return '+'+'.join(terms)+'+mul(M[ix[0]],p.wzyx);}')
+    if data:
+        for indices in ([0.75,1.5,2.25,3.5],[7.25,5.5,3.75,1.125]):
+            try:
+                got,reads = execute(*data,indices)
+                elements = [math.floor(v) for v in indices]
+                expected = product(matrix(elements[0],4),[0.5,3,-2,1])
+                for k,e in enumerate(elements):
+                    a = product(matrix(e,4),[1,-2,3,0.5])
+                    b = product(matrix(e+10,4)[:3],[1,-2,3,0.5])+[0]
+                    expected = [x+(k+1)*(y+z) for x,y,z in zip(expected,a,b)]
+                require(got == expected,f'two-arrays-eight-demands: {got} != {expected}')
+                expected_reads = {256+4*e+r for e in elements for r in range(4)}
+                expected_reads |= {288+3*e+r for e in elements for r in range(3)}
+                require(set(reads) == expected_reads,
+                        f'two-arrays-eight-demands: wrong constant reads {reads}')
+            except (KeyError,ValueError) as error: failures.append('two-arrays-eight-demands: '+str(error))
+
+    # Index-only aliases must not leak into arithmetic or output values.
+    compile_case('mixed-value-use','uniform float4x4 M[8]; '
+            'float4 main(float4 p:POSITION,float4 i:TEXCOORD0):POSITION {'
+            'int4 ix=int4(i); return mul(M[ix.y],p)+float4(ix);}',
+            refusal='VP float-to-int lowering deferred')
+    compile_case('mixed-descendant-use','uniform float4x4 M[8]; '
+            'float4 main(float4 p:POSITION,float4 i:TEXCOORD0):POSITION {'
+            'int4 ix=int4(i); int2 iy=ix.yx; return mul(M[iy.x],p)+float(iy.y);}',
+            refusal='VP float-to-int lowering deferred')
 
     data = compile_case('parameter','float4 main(float4 p:POSITION,float i:TEXCOORD0,'
                         'uniform float4x4 M[2]):POSITION {return mul(M[int(i)],p);}')
