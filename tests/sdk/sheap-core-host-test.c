@@ -250,15 +250,34 @@ static void test_allocation(void)
     fresh_tree(15);                           /* complete tree, root FREE */
     CHECK(__sheap_tree_free(&flat, 15, 9) == ERR(CELL_SHEAP_ERROR_INVAL), "all-free walk runs past the root");
 
-    /* QueryMax ignores the FREE subtree left under an allocated block:
-     * allocate node 2 (8 KB) of the 10240 heap; ids 4 and 5 under it stay
-     * FREE, yet the largest free block is node 24's 1 KB. */
+    /* QueryMax follows the firmware (see tree.c): the size of the first
+     * FREE id in 1..n_nodes.  These rows pin where that differs from what
+     * Allocate can satisfy. */
     fresh_tree(205);
     CHECK(__sheap_tree_allocate(&flat, 205, 1) == 2, "node 2 allocated");
     CHECK(flat_get(NULL, 4) == SHEAP_NODE_FREE, "node 4 left FREE under node 2");
-    CHECK(__sheap_tree_query_max(&flat, 205, 16384) == 1024, "QueryMax %" PRIu64 " want 1024",
+    CHECK(__sheap_tree_query_max(&flat, 205, 16384) == 4096,
+          "FREE node 4 inside allocated node 2 counts: QueryMax %" PRIu64 " want 4096",
           __sheap_tree_query_max(&flat, 205, 16384));
     CHECK(__sheap_tree_query_free(&flat, 205, 16384) == 9984 - 8192, "QueryFree after node 2");
+    {
+        sheap_geometry g;
+        uint64_t heap = 0x100000;
+
+        /* Keyed 2560: 256-byte heap, root 256, nodes 1..3. */
+        CHECK(__sheap_init_geometry(1, 2560, &g) == 0 && g.n_nodes == 3 && g.s_root == 256
+              && g.s_buffer == 256, "keyed 2560 geometry");
+        fresh_tree(3);
+        CHECK(__sheap_tree_query_max(&flat, 3, 256) == 256, "keyed 2560: QueryMax 256 (root FREE)");
+        CHECK(__sheap_heap_allocate(&flat, 3, 256, heap, 256) == 0,
+              "keyed 2560: Allocate(256) fails (root never allocated)");
+        CHECK(__sheap_heap_allocate(&flat, 3, 256, heap, 128) == heap && flat_get(NULL, 2) == SHEAP_NODE_USED,
+              "keyed 2560: Allocate(128) takes node 2");
+        CHECK(__sheap_tree_query_max(&flat, 3, 256) == 128, "keyed 2560: QueryMax 128 (node 3 FREE)");
+        CHECK(__sheap_tree_query_free(&flat, 3, 256) == 128, "keyed 2560: QueryFree 128");
+        CHECK(__sheap_heap_allocate(&flat, 3, 256, heap, 128) == 0,
+              "keyed 2560: Allocate(128) fails (node 3 is the last leaf)");
+    }
 
     /* Queries on fresh heaps. */
     fresh_tree(205);
@@ -358,6 +377,38 @@ static int check_node(const struct fuzz *f, uint32_t node)
     return check_node(f, 2 * node) || check_node(f, 2 * node + 1);
 }
 
+/* The firmware QueryMax rule from the model alone: a node reads FREE iff
+ * it is neither allocated (or fenced) nor above an allocated node. */
+static uint64_t model_query_max(const struct fuzz *f)
+{
+    unsigned char *above = calloc(f->max_id + 2, 1);
+    uint32_t id, n;
+    uint64_t result = 0;
+
+    for (id = 1; id <= f->max_id; ++id)
+        if (f->expect_used[id])
+            for (n = id >> 1; n != 0 && !above[n]; n >>= 1)
+                above[n] = 1;
+    for (id = 1; id <= f->n_nodes; ++id)
+        if (!f->expect_used[id] && !above[id]) {
+            result = f->s_root >> __sheap_floor_log2(id);
+            break;
+        }
+    free(above);
+    return result;
+}
+
+/* The largest request Allocate would satisfy now. */
+static uint64_t model_allocatable(const struct fuzz *f)
+{
+    unsigned row;
+
+    for (row = 0; row <= f->leaf_row; ++row)
+        if (model_allocate(f, row))
+            return f->s_root >> row;
+    return 0;
+}
+
 static uint64_t true_max(const struct fuzz *f)
 {
     uint32_t node;
@@ -373,7 +424,7 @@ static void run_fuzz(const char *name, int keyed, uint64_t size, unsigned steps)
     struct fuzz f;
     sheap_geometry g;
     uint64_t ea_heap = UINT64_C(0x30000000), free_leaves;
-    unsigned step, allocs = 0, frees = 0, refused = 0, bad = 0;
+    unsigned step, allocs = 0, frees = 0, refused = 0, bad = 0, above_free = 0, above_alloc = 0;
     uint32_t id;
 
     if (__sheap_geometry(keyed ? __sheap_keyed_span(size) : __sheap_plain_span(size), &g)) {
@@ -466,16 +517,25 @@ static void run_fuzz(const char *name, int keyed, uint64_t size, unsigned steps)
                       free_leaves * SHEAP_LEAF_BYTES);
                 break;
             }
-            if (qm != tm) {
-                CHECK(0, "%s step %u: QueryMax %" PRIu64 " but the largest free block is %" PRIu64,
-                      name, step, qm, tm);
-                break;
+            {
+                uint64_t mq = model_query_max(&f), ma = model_allocatable(&f);
+
+                if (qm != mq || qm < tm || tm < ma) {
+                    CHECK(0, "%s step %u: QueryMax %" PRIu64 ", firmware-rule model %" PRIu64
+                          ", largest free %" PRIu64 ", largest allocatable %" PRIu64,
+                          name, step, qm, mq, tm, ma);
+                    break;
+                }
+                above_free += qm != tm;
+                above_alloc += qm != ma;
             }
         }
     }
     ++checks;
-    printf("  fuzz %-15s %u steps: %u allocs, %u frees, %u refused; QueryFree and QueryMax "
-           "exact after every step\n", name, step, allocs, frees, refused);
+    printf("  fuzz %-15s %u steps: %u allocs, %u frees, %u refused; every step QueryFree exact,\n"
+           "       QueryMax on the firmware rule; it exceeded the largest free block on %u steps\n"
+           "       and the largest allocatable request on %u\n",
+           name, step, allocs, frees, refused, above_free, above_alloc);
     free(f.leaf_used);
     free(f.expect_used);
     free(f.live);

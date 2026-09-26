@@ -120,8 +120,9 @@ static void test_plain(void)
     CHECK(cellSheapFree(ps + 64, a) == (int)CELL_SHEAP_ERROR_ALIGN, "misaligned heap");
     CHECK(cellSheapAllocate(ps + 64, 128) == 0, "misaligned heap allocate");
     CHECK(cellSheapFree(ps, a) == CELL_OK && cellSheapQueryFree(ps) == 9984, "free");
-    CHECK(cellSheapAllocate(ps, 8192) == ps + 256 && cellSheapQueryMax(ps) == 1024,
-          "QueryMax skips the free subtree of an allocated block");
+    CHECK(cellSheapAllocate(ps, 8192) == ps + 256 && cellSheapQueryMax(ps) == 4096
+          && cellSheapQueryFree(ps) == 9984 - 8192,
+          "QueryMax on the firmware rule counts FREE node 4 inside allocated node 2");
 }
 
 /* ---- large heap vs the flat core ------------------------------------ */
