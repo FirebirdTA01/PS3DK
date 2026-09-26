@@ -2,11 +2,11 @@
 # Bucket (c) stdlib test: f4tex2D, h2tex2D, h3texCUBE, tex2D(sampler2D, float3),
 # tex3D, tex2Dbias (FP), lit intrinsic hardware opcode (0x3C/LITEX2) and zero-exponent
 # edge optimization, matrix transpose in VP/FP (constructed and uniform float3x3),
-# half-texture precision boundary, and exact rc=1 refusal for VP texture fetch.
+# half-texture precision boundary, and VP tex2Dbias lowering to TXL.
 #
 # Validates nonempty containers, decoded ucode opcodes, parameter tables,
 # lit hardware opcodes and zero-exponent NaN guards, transpose element/twin checks,
-# and exact rc=1 refusal without container output for VP texture fetch.
+# and a TXL reading .xyxw for VP tex2Dbias.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -973,7 +973,11 @@ if cast_insn["opcode"] != 0x01 or cast_insn["prec"] != 1:
 
 PY
 
-# 8. tex2Dbias in VP refusal check (negative test)
+# 8. tex2Dbias in VP: a vertex fetch, TXL with the coordinate's w as the LOD.
+# This row used to assert a refusal; vertex texture fetch is lowered now and
+# vp-texture-fetch-test.sh owns its byte-level rows.  What stays here is the
+# stdlib-level fact: the intrinsic compiles to a TXL (vector opcode 0x19)
+# that reads the float4 argument in place as .xyxw.
 cat > "$work/tex2dbias_vp.cg" << 'EOF'
 float4 main(float4 pos : POSITION,
             uniform sampler2D s) : POSITION
@@ -983,37 +987,42 @@ float4 main(float4 pos : POSITION,
 }
 EOF
 
-# The refusal is checked through a function so the SAME check can be run
-# against a compiler that accepts everything.  An earlier version of this
-# script reported a missing compiler as "typed_tex.cg failed to compile",
-# which is the accept-all stub's problem in reverse: a row that cannot
-# distinguish the thing it is asserting from the harness being broken.
-check_vp_refusal() {                       # $1 compiler, $2 label
+check_vp_txl() {                           # $1 compiler, $2 label
     local cc="$1" label="$2" rc=0
     rm -f "$work/tex2dbias_vp.vpo" "$work/vp_err.log"
     "$cc" -p sce_vp_rsx --emit-container "$work/tex2dbias_vp.vpo" \
         "$work/tex2dbias_vp.cg" > /dev/null 2> "$work/vp_err.log" || rc=$?
-    refusal_status "$rc" "$label"
-    [[ "$rc" -eq 1 ]] || fail "$label: tex2dbias in VP exited $rc, expected 1"
-    [[ ! -e "$work/tex2dbias_vp.vpo" ]] ||
-        fail "$label: tex2dbias in VP created a container on refusal"
-    grep -q -E "vertex texture fetch \(tex2Dbias\) is not supported in VP; refusing" \
-        "$work/vp_err.log" ||
-        fail "$label: tex2dbias in VP refused without the named diagnostic"
+    [[ "$rc" -eq 0 ]] || fail "$label: tex2Dbias in VP exited $rc, expected 0"
+    python3 - "$work/tex2dbias_vp.vpo" <<'PY' || fail "$label: tex2Dbias in VP is not a TXL reading .xyxw"
+import struct, sys
+blob = open(sys.argv[1], 'rb').read()
+if len(blob) < 32:
+    sys.exit(1)
+h = struct.unpack_from('>8I', blob, 0)
+if h[0] != 7003 or h[6] % 16 or h[7] + h[6] > len(blob):
+    sys.exit(1)
+found = False
+for n in range(h[6] // 16):
+    w = struct.unpack_from('>4I', blob, h[7] + 16 * n)
+    if (w[1] >> 22) & 0x1F != 0x19:
+        continue
+    src0 = ((w[1] & 0xFF) << 9) | (w[2] >> 23)
+    swz = ''.join('xyzw'[(src0 >> s) & 3] for s in (14, 12, 10, 8))
+    found = found or swz == 'xyxw'
+sys.exit(0 if found else 1)
+PY
 }
 
-check_vp_refusal "$compiler" "tex2dbias_vp"
+check_vp_txl "$compiler" "tex2dbias_vp"
 
-# CONTROL: the refusal check must reject a compiler that accepts everything
-# and writes a container anyway.  Without this the row above passes on any
-# binary that refuses for any reason at all - including one that cannot run.
+# CONTROL: the row must reject a compiler that accepts everything and writes
+# a container that is not one - otherwise it passes on any binary that exits
+# 0, including one that writes nothing meaningful.
 stub="$work/accept-all.sh"
 printf '#!/usr/bin/env bash\nout=""\nwhile [[ $# -gt 0 ]]; do [[ $1 == --emit-container ]] && out=$2; shift; done\n[[ -n "$out" ]] && printf x > "$out"\nexit 0\n' > "$stub"
 chmod +x "$stub"
-if ( check_vp_refusal "$stub" "accept-all stub" ) > /dev/null 2>&1; then
-    fail "self-check: the VP refusal row passed against an accept-all stub"
+if ( check_vp_txl "$stub" "accept-all stub" ) > /dev/null 2>&1; then
+    fail "self-check: the VP TXL row passed against an accept-all stub"
 fi
-rm -f "$work/tex2dbias_vp.vpo"
-check_vp_refusal "$compiler" "tex2dbias_vp (after the stub control)"
 
 echo "stdlib-bucket-c-test: PASS"
