@@ -133,6 +133,12 @@ static void test_layout(void)
         CHECK(__sheap_geometry(__sheap_keyed_span(2048), &g) == -1, "keyed 2048 wraps");
         CHECK(__sheap_geometry(__sheap_keyed_span(2560), &g) == 0 && g.n_nodes == 3,
               "keyed 2560 is usable (n_nodes %u)", g.n_nodes);
+        /* What Initialize validates before writing anything. */
+        CHECK(__sheap_init_geometry(1, 2048, &g) == -1, "keyed 2048 refused before any write");
+        CHECK(__sheap_init_geometry(1, 2175, &g) == -1 && __sheap_init_geometry(1, 2176, &g) == -1,
+              "keyed 2175/2176 refused");
+        CHECK(__sheap_init_geometry(1, 2560, &g) == 0 && __sheap_init_geometry(0, 2048, &g) == 0
+              && __sheap_init_geometry(0, 127, &g) == -1, "init geometry edges");
     }
 
     CHECK(__sheap_size_to_row(0, 16384) == 7 && __sheap_size_to_row(1, 16384) == 7
@@ -243,6 +249,16 @@ static void test_allocation(void)
     CHECK(__sheap_tree_free(&flat, 205, 0) == ERR(CELL_SHEAP_ERROR_INVAL), "leaf 0");
     fresh_tree(15);                           /* complete tree, root FREE */
     CHECK(__sheap_tree_free(&flat, 15, 9) == ERR(CELL_SHEAP_ERROR_INVAL), "all-free walk runs past the root");
+
+    /* QueryMax ignores the FREE subtree left under an allocated block:
+     * allocate node 2 (8 KB) of the 10240 heap; ids 4 and 5 under it stay
+     * FREE, yet the largest free block is node 24's 1 KB. */
+    fresh_tree(205);
+    CHECK(__sheap_tree_allocate(&flat, 205, 1) == 2, "node 2 allocated");
+    CHECK(flat_get(NULL, 4) == SHEAP_NODE_FREE, "node 4 left FREE under node 2");
+    CHECK(__sheap_tree_query_max(&flat, 205, 16384) == 1024, "QueryMax %" PRIu64 " want 1024",
+          __sheap_tree_query_max(&flat, 205, 16384));
+    CHECK(__sheap_tree_query_free(&flat, 205, 16384) == 9984 - 8192, "QueryFree after node 2");
 
     /* Queries on fresh heaps. */
     fresh_tree(205);
@@ -357,7 +373,7 @@ static void run_fuzz(const char *name, int keyed, uint64_t size, unsigned steps)
     struct fuzz f;
     sheap_geometry g;
     uint64_t ea_heap = UINT64_C(0x30000000), free_leaves;
-    unsigned step, overstated = 0, allocs = 0, frees = 0, refused = 0, bad = 0;
+    unsigned step, allocs = 0, frees = 0, refused = 0, bad = 0;
     uint32_t id;
 
     if (__sheap_geometry(keyed ? __sheap_keyed_span(size) : __sheap_plain_span(size), &g)) {
@@ -450,18 +466,16 @@ static void run_fuzz(const char *name, int keyed, uint64_t size, unsigned steps)
                       free_leaves * SHEAP_LEAF_BYTES);
                 break;
             }
-            if (qm < tm) {
-                CHECK(0, "%s step %u: QueryMax %" PRIu64 " below the largest free block %" PRIu64,
+            if (qm != tm) {
+                CHECK(0, "%s step %u: QueryMax %" PRIu64 " but the largest free block is %" PRIu64,
                       name, step, qm, tm);
                 break;
             }
-            if (qm != tm)
-                ++overstated;
         }
     }
     ++checks;
-    printf("  fuzz %-15s %u steps: %u allocs, %u frees, %u refused; QueryMax above the true "
-           "largest block after %u steps\n", name, step, allocs, frees, refused, overstated);
+    printf("  fuzz %-15s %u steps: %u allocs, %u frees, %u refused; QueryFree and QueryMax "
+           "exact after every step\n", name, step, allocs, frees, refused);
     free(f.leaf_used);
     free(f.expect_used);
     free(f.live);

@@ -3,8 +3,10 @@
 # sdk/libsheap/src/core/*.c with the host compiler and runs
 # tests/sdk/sheap-core-host-test.c (layout, fence bits, allocation example,
 # rightmost-node rule, Free errors, key-table state machine, random run
-# against a bitmap model).  Also compiles the shared cell/sheap/sheap_types.h
-# in C and C++ so its layout checks are exercised on a 64-bit host.
+# against a bitmap model), then the SPU layer and the libsync sources it
+# calls over the simulated MFC (tests/sdk/sheap-spu-host-test.c).  Also
+# compiles the shared cell/sheap/sheap_types.h in C and C++ so its layout
+# checks are exercised on a 64-bit host.
 #
 # usage: sheap-core-host-test.sh     (CC / CXX override the host compilers)
 set -euo pipefail
@@ -33,3 +35,16 @@ echo "sheap-core: shared sheap_types.h layout checks compile (C, C++)"
     "$root/tests/sdk/sheap-core-host-test.c" \
     -o "$work/sheap-core"
 "$work/sheap-core"
+
+# The SPU layer and the libsync sources it calls, over the simulated MFC.
+mock="$root/tests/sdk/fixtures/spu-mfc-mock"
+"$cc" -std=gnu11 -O2 -Wall -Wextra -Werror -D__SPU__ \
+    -I"$mock" -I"$root/sdk/include-spu" -I"$root/sdk/libsheap/src" -I"$root/sdk/libsync/src" \
+    -idirafter "$root/sdk/include" \
+    "$root/sdk/libsheap/src/core/tree.c" "$root/sdk/libsheap/src/core/heap.c" \
+    "$root"/sdk/libsheap/src/spu/*.c \
+    "$root/sdk/libsync/src/queue.c" "$root/sdk/libsync/src/rwm.c" \
+    "$root/sdk/libsync/src/mutex.c" "$root/sdk/libsync/src/barrier.c" \
+    "$mock/mfc_mock.c" "$root/tests/sdk/sheap-spu-host-test.c" \
+    -o "$work/sheap-spu"
+"$work/sheap-spu"

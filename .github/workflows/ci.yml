@@ -133,6 +133,12 @@ jobs:
       - name: Test the shared-heap core layout, allocator and key table
         run: bash tests/sdk/sheap-core-host-test.sh
 
+      # The SPU libsync sources over a simulated MFC: queue and rwm
+      # descriptors survive Initialize, the mutex is the PPU's ticket word
+      # (checked against a PPU-side model), barrier counts are validated.
+      - name: Test the SPU libsync queue, rwm, mutex and barrier on the host
+        run: bash tests/sdk/libsync-spu-host-test.sh
+
       # install-headers copies an explicit list; a header missing from it is
       # left out of the installed SDK and breaks the full SDK build.
       - name: Test every tracked SDK header is installed
