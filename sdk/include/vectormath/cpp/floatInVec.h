@@ -35,7 +35,6 @@
 #include <vec_types.h>
 #include <stddef.h>
 #include <simdmath.h>
-#undef bool
 
 namespace Vectormath {
 
