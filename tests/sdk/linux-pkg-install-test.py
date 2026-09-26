@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
     (repo / 'tools/fixture').mkdir()
     (repo / 'tools/fixture/Cargo.toml').write_text('[[bin]]\nname = "fixture-tool"\n')
     for name in ('tools/target/release/fixture-tool', 'tools/sprx-linker/sprxlinker',
-                 'tools/rsx-cg-compiler/build/rsx-cg-compiler'):
+                 'tools/rsx-cg-compiler/build/rsx-cg-compiler', 'tools/rsx-cg-compiler/build/cgnv2elf'):
         destination = repo / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2('/bin/true', destination)
@@ -82,7 +82,8 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
     prefix.mkdir()
     build = scratch / 'build'
     (build / 'host-tools-linux/rsx-cg-compiler').mkdir(parents=True)
-    shutil.copy2('/bin/true', build / 'host-tools-linux/rsx-cg-compiler/rsx-cg-compiler')
+    for tool in ('rsx-cg-compiler', 'cgnv2elf'):
+        shutil.copy2('/bin/true', build / 'host-tools-linux/rsx-cg-compiler' / tool)
     env = dict(os.environ, PATH=str(stubs) + os.pathsep + os.environ['PATH'],
                PS3DEV=str(prefix), PS3_BUILD_ROOT=str(build))
     run(['bash', 'scripts/install-host-tools.sh'], repo, env)
