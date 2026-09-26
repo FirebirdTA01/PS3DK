@@ -42,10 +42,11 @@ inline ExplicitUniformBindings resolveExplicitUniformBindings(
     const auto add = [&](const auto& uniform) {
         if (uniform.storage != StorageQualifier::Uniform) return;
         // A sampler's C<N> is a texture-unit binding in the reference,
-        // not CG_C metadata. Its allocation belongs to FpSamplerLayout;
-        // rewriting that resource here would also corrupt compact CGB.
-        // This exclusion is FP-specific; the VP contract stays unchanged.
-        if (!vertexRegisters && isSamplerIRType(uniform.type.baseType)) return;
+        // not CG_C metadata. Its allocation belongs to the sampler layouts
+        // (fp_sampler_bindings.h) in both profiles: a vertex sampler takes
+        // a texture unit and never a c[] register either, and rewriting
+        // its resource here would also corrupt compact CGB.
+        if (isSamplerIRType(uniform.type.baseType)) return;
         const bool explicitBank = uniform.explicitRegisterBank == 'C';
         if (!explicitBank && uniform.semanticName != "C" &&
             uniform.semanticName != "c") return;

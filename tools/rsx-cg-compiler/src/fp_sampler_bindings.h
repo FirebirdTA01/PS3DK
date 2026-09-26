@@ -1,6 +1,7 @@
 #ifndef RSX_CG_FP_SAMPLER_BINDINGS_H
 #define RSX_CG_FP_SAMPLER_BINDINGS_H
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <string>
@@ -112,6 +113,100 @@ inline FpSamplerLayout buildFpSamplerLayout(const IRModule& module,
             reserved[static_cast<size_t>(n)] = true;
             layout.units[s.id] = n;
         }
+    }
+    return layout;
+}
+
+// The vertex side of the same contract, with the vertex unit's own rules
+// (measured on the reference, sce_vp_rsx):
+//   - four texture units; TXL carries the unit in two bits;
+//   - implicit units go to used samplers in FIRST-USE order, lowest free
+//     unit first, around the explicit ones (declared a-then-b, b fetched
+//     first: b gets unit 0);
+//   - a USED sampler bound to TEXUNIT4 or above is refused (C5102); an
+//     unused one is accepted and simply has no unit;
+//   - an unused sampler bound in range keeps its unit (isReferenced 0);
+//   - a fifth used sampler is refused (C6012).
+// Kept separate from the fragment layout: that one allocates in declaration
+// order, and the fragment programs that depend on it must not move.
+inline FpSamplerLayout buildVpSamplerLayout(const IRModule& module,
+                                           const IRFunction& entry) {
+    constexpr int kVpTextureUnits = 4;
+    struct Sampler { IRValueID id; std::string name; int explicitUnit; };
+    FpSamplerLayout layout;
+    std::vector<Sampler> samplers;
+    std::unordered_map<std::string, IRValueID> globals;
+    std::unordered_map<IRValueID, IRValueID> identity;
+    const auto add = [&](const auto& d) {
+        if (d.storage != StorageQualifier::Uniform ||
+            !isSamplerIRType(d.type.baseType)) return;
+        samplers.push_back({d.valueId, d.name, explicitFpSamplerUnit(d)});
+        identity[d.valueId] = d.valueId;
+    };
+    for (const auto& p : entry.parameters) add(p);
+    for (const auto& g : module.globals) {
+        add(g);
+        if (isSamplerIRType(g.type.baseType)) globals[g.name] = g.valueId;
+    }
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& inst : block->instructions) {
+            if (!inst || inst->op != IROp::LoadUniform) continue;
+            const auto g = globals.find(inst->targetName);
+            if (g != globals.end()) identity[inst->result] = g->second;
+        }
+    }
+    std::vector<IRValueID> firstUse;
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& inst : block->instructions) {
+            if (!inst) continue;
+            switch (inst->op) {
+            case IROp::TexSample: case IROp::TexSampleProj:
+            case IROp::TexSampleLod: case IROp::TexSampleGrad:
+            case IROp::TexSampleBias: case IROp::TexFetch: break;
+            default: continue;
+            }
+            if (inst->operands.empty()) continue; // lowering diagnoses arity
+            const auto sampler = identity.find(inst->operands[0]);
+            if (sampler == identity.end()) {
+                layout.diagnostics.push_back("vertex texture unit: sampler operand %" +
+                    std::to_string(inst->operands[0]) + " has no known binding; refusing");
+            } else if (layout.used.insert(sampler->second).second) {
+                firstUse.push_back(sampler->second);
+            }
+        }
+    }
+    std::array<bool, kVpTextureUnits> reserved{};
+    for (const auto& s : samplers) {
+        const bool used = layout.used.count(s.id) != 0;
+        const int n = s.explicitUnit;
+        layout.units[s.id] = n >= 0 && n < kVpTextureUnits ? n : -1;
+        if (!used || n < 0) continue;
+        if (n >= kVpTextureUnits) {
+            layout.diagnostics.push_back(
+                "vertex texture unit: error C5102: input semantic attribute "
+                "\"TEXUNIT\" has too big of a numeric index (" + std::to_string(n) +
+                ") on sampler '" + s.name + "'; the vertex unit has TEXUNIT0..3; refusing");
+        } else {
+            reserved[static_cast<size_t>(n)] = true;
+        }
+    }
+    for (IRValueID id : firstUse) {
+        const auto s = std::find_if(samplers.begin(), samplers.end(),
+            [&](const Sampler& candidate) { return candidate.id == id; });
+        if (s == samplers.end() || s->explicitUnit >= 0) continue;
+        int n = 0;
+        while (n < kVpTextureUnits && reserved[static_cast<size_t>(n)]) ++n;
+        if (n == kVpTextureUnits) {
+            layout.diagnostics.push_back(
+                "vertex texture unit: error C6012: Sampler limit exceeded; more than 4 "
+                "samplers needed to compile program (no unit left for sampler '" +
+                s->name + "'); refusing");
+            break;
+        }
+        reserved[static_cast<size_t>(n)] = true;
+        layout.units[id] = n;
     }
     return layout;
 }

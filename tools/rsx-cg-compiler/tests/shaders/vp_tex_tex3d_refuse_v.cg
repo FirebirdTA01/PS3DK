@@ -1,0 +1,7 @@
+// tex3D in a vertex program is refused by name.
+uniform sampler3D volumeMap;
+
+void main(float3 uvw : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex3D(volumeMap, uvw);
+}

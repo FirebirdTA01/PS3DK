@@ -131,6 +131,15 @@ enum class VOp
     Tex,
     Txp,    // projective fetch (tex2Dproj), fragment-only
     TexBias, // biased fetch (tex2Dbias), fragment-only
+    // VP only: the vertex texture fetch.  TXL reads its coordinate and an
+    // explicit LOD from ONE source register (srcs[0]); texUnit names the
+    // unit.  Every vertex fetch is TXL on the reference - tex2D with LOD 0,
+    // tex2Dbias and tex2Dlod with the coordinate's fourth lane as the LOD.
+    Txl,
+    // VP only: SFL ("set false") writes 0.0 to its masked lanes.  The
+    // reference zeroes a plain fetch's LOD lane with it instead of spending
+    // a literal register; its operands are read by nothing.
+    Sfl,
     Lit,
     // VP only (t_99b29225): load a lane of an ADDRESS register from the
     // index value of a run-time array read.  dst.address names A0/A1 and
@@ -776,6 +785,10 @@ private:
     bool flattened_ = false;
     std::unordered_map<IRValueID, const IRInstruction*> defMap_;
     std::unordered_set<IRValueID> comparisonLogicalValues_;
+    // VP only: float4 constructions whose one consumer is a tex2Dbias /
+    // tex2Dlod coordinate.  lowerVecConstruct leaves them unlowered and
+    // lowerVpFetch packs the lanes TXL reads (x, y and the LOD) itself.
+    std::unordered_set<IRValueID> vpLodCoordConstructs_;
 
     struct MergedReturnSelect
     {
@@ -1552,6 +1565,7 @@ private:
             case VOp::Tex:
             case VOp::Txp:
             case VOp::TexBias:
+            case VOp::Txl:
             case VOp::Lit:
                 return 4;
             case VOp::Dp4:
@@ -1583,6 +1597,7 @@ private:
             case VOp::Seq:
             case VOp::Sne:
             case VOp::SelPred:
+            case VOp::Sfl:
                 return 1;
             case VOp::Add:
                 return 4;
@@ -2023,8 +2038,12 @@ private:
     {
         int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
-        const auto samplerLayout = rsx_cg::buildFpSamplerLayout(module_, entry_);
-        if (profile_ == GeneralProfile::Fragment && !samplerLayout.diagnostics.empty()) {
+        // Each profile has its own unit rules (fp_sampler_bindings.h); the
+        // container builds the same layout, so units and records agree.
+        const auto samplerLayout = profile_ == GeneralProfile::Vertex
+            ? rsx_cg::buildVpSamplerLayout(module_, entry_)
+            : rsx_cg::buildFpSamplerLayout(module_, entry_);
+        if (!samplerLayout.diagnostics.empty()) {
             program_.loweringFailed = true;
             program_.diagnostics.insert(program_.diagnostics.end(),
                 samplerLayout.diagnostics.begin(), samplerLayout.diagnostics.end());
@@ -2198,6 +2217,15 @@ private:
                 }
                 matrixValues_[p.valueId] = mv;
             } else if (profile_ == GeneralProfile::Vertex &&
+                       p.storage == StorageQualifier::Uniform &&
+                       isSamplerIRType(p.type.baseType)) {
+                // A vertex sampler names a texture unit and takes NO c[]
+                // register: every uniform after it keeps its c467-descending
+                // slot on the reference.  Falling into the branch below
+                // handed it one and moved each later uniform down by one.
+                samplerUnit_[p.valueId] = samplerLayout.unit(p.valueId);
+                samplerType_[p.valueId] = p.type.baseType;
+            } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform) {
                 program_.valueToSource[p.valueId] =
                     uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
@@ -2302,6 +2330,12 @@ private:
                 }
                 nextFpGlobalSlot += rows;
                 matrixValues_[g.valueId] = mv;
+            } else if (profile_ == GeneralProfile::Vertex &&
+                       isSamplerIRType(g.type.baseType)) {
+                // Same rule as the entry-parameter sampler above: a unit,
+                // never a c[] register.
+                samplerUnit_[g.valueId] = samplerLayout.unit(g.valueId);
+                samplerType_[g.valueId] = g.type.baseType;
             } else if (profile_ == GeneralProfile::Vertex) {
                 program_.valueToSource[g.valueId] =
                     uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
@@ -2856,6 +2890,18 @@ private:
         case IROp::TexSampleBias:
             lowerTex(inst, VOp::TexBias);
             return;
+        case IROp::TexSampleLod:
+            // tex2Dlod is a vertex fetch here.  The fragment side keeps the
+            // refusal it had: its TXL has not been measured.
+            if (profile_ == GeneralProfile::Vertex) {
+                lowerVpFetch(inst, VOp::Txl);
+                return;
+            }
+            program_.diagnostics.push_back(
+                std::string("nv40-general: unsupported IR op ") +
+                irOpToString(inst.op));
+            program_.loweringFailed = true;
+            return;
         case IROp::StoreOutput:
             lowerStoreOutput(inst);
             return;
@@ -3202,6 +3248,8 @@ private:
     void lowerVecConstruct(const IRInstruction& inst)
     {
         if (tryFoldPowDotVecConstruct(inst))
+            return;
+        if (deferVpLodCoordConstruct(inst))
             return;
 
         if (inst.result == InvalidIRValue || inst.operands.empty() ||
@@ -7095,10 +7143,8 @@ private:
     void lowerTex(const IRInstruction& inst, VOp op = VOp::Tex)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
-        if (op == VOp::TexBias && profile_ == GeneralProfile::Vertex) {
-            program_.diagnostics.push_back(
-                "nv40-general: vertex texture fetch (tex2Dbias) is not supported in VP; refusing");
-            program_.loweringFailed = true;
+        if (profile_ == GeneralProfile::Vertex) {
+            lowerVpFetch(inst, op);
             return;
         }
         VInstr vi;
@@ -7167,6 +7213,244 @@ private:
         if (profile_ == GeneralProfile::Fragment)
             vi.fpPrecisionOverride = NVFX_FP_PRECISION_FP32;
         program_.instrs.push_back(vi);
+    }
+
+    // A float4 construction is left to lowerVpFetch only where every lane
+    // TXL reads can be named from the operands: its one consumer is the
+    // coordinate of a vertex tex2Dbias / tex2Dlod, and the operand widths
+    // are known and fill the four lanes.  Anything else lowers as usual and
+    // the fetch reads the built register in place.
+    bool deferVpLodCoordConstruct(const IRInstruction& inst)
+    {
+        if (profile_ != GeneralProfile::Vertex || inst.result == InvalidIRValue ||
+            inst.resultType.componentCount() != 4 || inst.operands.empty() ||
+            inst.operands.size() > 4)
+            return false;
+        const auto uses = useCount_.find(inst.result);
+        if (uses == useCount_.end() || uses->second != 1)
+            return false;
+        bool feedsLodFetch = false;
+        for (const auto& block : entry_.blocks) {
+            if (!block) continue;
+            for (const auto& use : block->instructions) {
+                if (use && (use->op == IROp::TexSampleBias ||
+                            use->op == IROp::TexSampleLod) &&
+                    use->operands.size() >= 2 &&
+                    use->operands[0] != inst.result &&
+                    use->operands[1] == inst.result)
+                    feedsLodFetch = true;
+            }
+        }
+        if (!feedsLodFetch)
+            return false;
+        int total = 0;
+        for (IRValueID operand : inst.operands) {
+            const int w = valueWidthOf(operand);
+            if (w < 1 || w > 4)
+                return false;
+            total += w;
+        }
+        if (total != 4)
+            return false;
+        vpLodCoordConstructs_.insert(inst.result);
+        return true;
+    }
+
+    // VERTEX TEXTURE FETCH.  The vertex unit has one fetch, TXL, which
+    // reads the coordinate AND an explicit LOD from ONE source register.
+    // Measured on the reference (sce_vp_rsx) for every shape below:
+    //
+    //   sampler      coordinate lanes   LOD lane   TXL source swizzle
+    //   1D           x                  y          xxxy
+    //   2D, RECT     xy                 z          xyxz
+    //   CUBE         xyz                w          xyzw
+    //
+    // A plain fetch (tex1D, tex2D, texRECT, texCUBE) samples LOD 0: the
+    // coordinate is copied into a temp - or used in place when it already
+    // is one, written by its own producer and read by nothing else - SFL
+    // zeroes the LOD lane, and TXL reads the temp.  SFL's operands are
+    // read by nothing; the reference names the INPUT or CONST register
+    // the coordinate came from with .xxxx (x even for a .zw coordinate),
+    // and the temp itself otherwise, and the bytes show it.
+    //
+    // tex2Dbias and tex2Dlod are the same instruction: the coordinate's
+    // fourth lane IS the LOD, there is no vertex bias.  A float4 held in
+    // one register is read in place as .xyxw.  A float4 the program
+    // constructs for the fetch is packed instead - x and y into a temp's
+    // xy, the LOD into its z, whatever the constructor put in z dropped -
+    // and read .xyxz, the shape the reference emits for both.
+    //
+    // Refused by name: tex2Dproj (the reference divides by the
+    // coordinate's x, not its w, a result we will not reproduce), tex3D
+    // (the reference has no vertex overload), and the unmeasured
+    // shadow-compare coordinates (tex2D float3, tex1D float2).
+    void lowerVpFetch(const IRInstruction& inst, VOp op)
+    {
+        const auto refuse = [&](const std::string& why) {
+            program_.diagnostics.push_back("nv40-general-vp: " + why + "; refusing");
+            program_.loweringFailed = true;
+        };
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
+        if (op == VOp::Txp) {
+            refuse("vertex texture fetch tex2Dproj is not supported");
+            return;
+        }
+        const IRValueID sampler = inst.operands[0];
+        const IRValueID coord = inst.operands[1];
+        const auto unitIt = samplerUnit_.find(sampler);
+        if (unitIt == samplerUnit_.end()) {
+            refuse("tex fetch whose sampler operand %" + std::to_string(sampler) +
+                   " does not name a known sampler");
+            return;
+        }
+        if (unitIt->second < 0 || unitIt->second > 3) {
+            refuse("surviving vertex fetch has no valid texture unit");
+            return;
+        }
+        int lanes = 0;
+        std::array<uint8_t, 4> shape = {0, 1, 0, 2};
+        switch (samplerType_[sampler]) {
+        case IRType::Sampler1D:
+            lanes = 1;
+            shape = {0, 0, 0, 1};
+            break;
+        case IRType::Sampler2D:
+        case IRType::SamplerRect:
+            lanes = 2;
+            shape = {0, 1, 0, 2};
+            break;
+        case IRType::SamplerCube:
+            lanes = 3;
+            shape = {0, 1, 2, 3};
+            break;
+        case IRType::Sampler3D:
+            refuse("vertex texture fetch from a sampler3D (tex3D) is not supported");
+            return;
+        default:
+            refuse("vertex texture fetch from an unsupported sampler type");
+            return;
+        }
+        const bool explicitLod = op == VOp::TexBias || op == VOp::Txl;
+        const int coordWidth = valueWidthOf(coord);
+        if (!explicitLod && coordWidth > lanes) {
+            refuse("vertex texture fetch with a shadow-compare coordinate (" +
+                   std::to_string(coordWidth) + " lanes for a " +
+                   std::to_string(lanes) + "-lane sampler) is not supported");
+            return;
+        }
+        if (explicitLod ? (lanes != 2 || coordWidth != 4) : coordWidth != lanes) {
+            refuse("vertex texture fetch coordinate has " +
+                   std::to_string(coordWidth) + " lanes where " +
+                   std::to_string(explicitLod ? 4 : lanes) + " are expected");
+            return;
+        }
+
+        VInstr txl;
+        txl.op = VOp::Txl;
+        txl.texUnit = unitIt->second;
+        if (!explicitLod) {
+            const VSrc c = resolve(coord);
+            if (c.kind == VSrcKind::None)
+                return;   // resolve() has refused
+            const auto regIt = program_.valueToVReg.find(coord);
+            const auto usesIt = useCount_.find(coord);
+            bool inPlace = c.kind == VSrcKind::Temp && !c.neg && !c.abs &&
+                           regIt != program_.valueToVReg.end() &&
+                           c.index == regIt->second &&
+                           usesIt != useCount_.end() && usesIt->second == 1;
+            for (int j = 0; inPlace && j < lanes; ++j)
+                inPlace = c.swizzle[j] == j;
+            const int temp = inPlace ? c.index : newVReg();
+            if (!inPlace) {
+                VInstr mov;
+                mov.op = VOp::Mov;
+                mov.dst.index = temp;
+                mov.dst.writemask = (1 << lanes) - 1;
+                mov.srcs[0] = c;
+                for (int j = lanes; j < 4; ++j)
+                    mov.srcs[0].swizzle[j] = c.swizzle[0];
+                program_.instrs.push_back(mov);
+            }
+            VSrc named = tempSrc(temp);
+            if (c.kind == VSrcKind::Input ||
+                (c.kind == VSrcKind::Uniform && !c.relative)) {
+                named = c;
+                named.neg = false;
+                named.abs = false;
+            }
+            named.swizzle = {0, 0, 0, 0};
+            VInstr sfl;
+            sfl.op = VOp::Sfl;
+            sfl.dst.index = temp;
+            sfl.dst.writemask = 1 << lanes;
+            sfl.srcs[0] = named;
+            sfl.srcs[1] = named;
+            program_.instrs.push_back(sfl);
+            txl.srcs[0] = tempSrc(temp);
+            txl.srcs[0].swizzle = shape;
+        } else if (vpLodCoordConstructs_.count(coord)) {
+            const IRInstruction* def = definitionOf(coord);
+            if (!def) {
+                refuse("vertex texture fetch coordinate construction vanished");
+                return;
+            }
+            // Which operand, and which of its components, fills each lane.
+            std::array<std::pair<IRValueID, int>, 4> lane{};
+            int off = 0;
+            for (IRValueID operand : def->operands) {
+                const int w = valueWidthOf(operand);
+                for (int j = 0; j < w && off < 4; ++j)
+                    lane[static_cast<size_t>(off++)] = {operand, j};
+            }
+            const auto laneSrc = [&](size_t l) {
+                VSrc s = resolve(lane[l].first);
+                const uint8_t pick = s.swizzle[static_cast<size_t>(lane[l].second)];
+                s.swizzle = {pick, pick, pick, pick};
+                return s;
+            };
+            const int temp = newVReg();
+            if (lane[0].first == lane[1].first) {
+                VInstr mov;
+                mov.op = VOp::Mov;
+                mov.dst.index = temp;
+                mov.dst.writemask = 0x3;
+                mov.srcs[0] = resolve(lane[0].first);
+                const std::array<uint8_t, 4> sw = mov.srcs[0].swizzle;
+                const uint8_t x = sw[static_cast<size_t>(lane[0].second)];
+                const uint8_t y = sw[static_cast<size_t>(lane[1].second)];
+                mov.srcs[0].swizzle = {x, y, x, x};
+                program_.instrs.push_back(mov);
+            } else {
+                for (size_t l = 0; l < 2; ++l) {
+                    VInstr mov;
+                    mov.op = VOp::Mov;
+                    mov.dst.index = temp;
+                    mov.dst.writemask = 1 << l;
+                    mov.srcs[0] = laneSrc(l);
+                    program_.instrs.push_back(mov);
+                }
+            }
+            VInstr lod;
+            lod.op = VOp::Mov;
+            lod.dst.index = temp;
+            lod.dst.writemask = 0x4;
+            lod.srcs[0] = laneSrc(3);
+            program_.instrs.push_back(lod);
+            txl.srcs[0] = tempSrc(temp);
+            txl.srcs[0].swizzle = shape;
+        } else {
+            VSrc c = resolve(coord);
+            if (c.kind == VSrcKind::None)
+                return;   // resolve() has refused
+            const std::array<uint8_t, 4> sw = c.swizzle;
+            c.swizzle = {sw[0], sw[1], sw[0], sw[3]};
+            txl.srcs[0] = c;
+        }
+        txl.dst.index = define(inst.result);
+        // The consumed lanes only, as the reference writes them (.yw for a
+        // fetch read as .wy).
+        txl.dst.writemask = consumedLanes(inst.result, componentMask(inst.resultType));
+        program_.instrs.push_back(txl);
     }
 
     void lowerLit(const IRInstruction& inst)
@@ -7822,15 +8106,19 @@ private:
             int producerDefs = 0;
             int producerMask = 0;
             bool disjointProducerMasks = true;
+            // TXL writes a temp in every reference program; a fetch is
+            // never retargeted to an output register.
+            bool fetchProducer = false;
             for (const VInstr& vi : program_.instrs) {
                 if (!vi.dst.output && vi.dst.index == regIt->second) {
                     ++producerDefs;
                     if (producerMask & vi.dst.writemask)
                         disjointProducerMasks = false;
                     producerMask |= vi.dst.writemask;
+                    fetchProducer |= vi.op == VOp::Txl;
                 }
             }
-            if (producerDefs > 1 && disjointProducerMasks &&
+            if (producerDefs > 1 && disjointProducerMasks && !fetchProducer &&
                 useCount_[value] == 1) {
                 for (VInstr& vi : program_.instrs) {
                     if (!vi.dst.output && vi.dst.index == regIt->second) {
@@ -7960,8 +8248,12 @@ private:
                         return !vi.dst.none && !vi.dst.output &&
                                vi.dst.index == regIt->second;
                     }) > 1;
+            // A vertex fetch keeps its temp destination: the reference
+            // stores TXL's result with a separate MOV, even when the fetch
+            // is the whole output.
             if (!producer.dst.output && producer.dst.index == regIt->second &&
-                producer.op != VOp::SelPred && !partialMultiwriter &&
+                producer.op != VOp::SelPred && producer.op != VOp::Txl &&
+                !partialMultiwriter &&
                 (useCount_[value] == 1 ||
                  // A compacted insert MOV needs no extra export for the
                  // entry Return, which reads the already-exported value.
@@ -9222,6 +9514,8 @@ static uint8_t fpOpcode(VOp op)
     case VOp::TexBias: return NVFX_FP_OP_OPCODE_TXB;
     case VOp::Lit: return NVFX_FP_OP_OPCODE_LITEX2_NV40;
     case VOp::Arl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
+    case VOp::Txl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
+    case VOp::Sfl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Ftoi: return NVFX_FP_OP_OPCODE_MOV;
     }
     return NVFX_FP_OP_OPCODE_MOV;
@@ -9271,6 +9565,8 @@ static const char* vOpName(VOp op)
     case VOp::Tex: return "Tex";
     case VOp::Txp: return "Txp";
     case VOp::TexBias: return "TexBias";
+    case VOp::Txl: return "Txl";
+    case VOp::Sfl: return "Sfl";
     case VOp::Lit: return "Lit";
     case VOp::Arl: return "Arl";
     case VOp::Ftoi: return "Ftoi";
@@ -9307,6 +9603,11 @@ static bool tryVpOpcode(VOp op, uint8_t& opcode)
     case VOp::Sne: opcode = VP_OP(SNE); return true;
     case VOp::Lit: opcode = VP_SCA_OP(LIT); return true;
     case VOp::Arl: opcode = VP_OP(ARL); return true;
+    case VOp::Sfl: opcode = VP_OP(SFL); return true;
+    // The TXL opcode is NV40-only, so its macro carries the NV40 prefix.
+    case VOp::Txl:
+        opcode = (NVFX_VP_INST_SLOT_VEC << 7) | NV40_VP_INST_VEC_OP_TXL;
+        return true;
     default: return false;
     }
 }
@@ -9338,7 +9639,11 @@ static bool isVpVectorOp(VOp op)
 {
     // ARL never pairs: the reference emits it alone, and a co-issued
     // half shares the constant address the relative reads depend on.
-    return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Txp && op != VOp::TexBias && op != VOp::Arl;
+    // Neither does a vertex fetch: TXL and the SFL that zeroes its LOD lane
+    // are never co-issued in any reference program (the one co-issued SFL
+    // measured is tex2Dproj's, which this lowering refuses).
+    return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Txp && op != VOp::TexBias &&
+           op != VOp::Arl && op != VOp::Txl && op != VOp::Sfl;
 }
 
 static bool sameTempRegister(const VSrc& src, const VDst& dst)
@@ -10324,8 +10629,10 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         std::array<VSrc, 3> srcs = vi.srcs;
         if (vi.op == VOp::Add)
             std::swap(srcs[1], srcs[2]);
+        // A vertex fetch carries its texture unit; VpAssembler::emit places
+        // it in the TXL word.  Nothing else reads the field.
         struct nvfx_insn insn = nvfx_insn(
-            vi.sat, 0, 0, 0,
+            vi.sat, 0, vi.op == VOp::Txl ? vi.texUnit : 0, 0,
             const_cast<struct nvfx_reg&>(dst),
             dstMask,
             nvfxSource(srcs[0]),
