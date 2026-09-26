@@ -1,0 +1,23 @@
+SPU GAS: keep the nop opcode distinct from the generic .nop directive.
+
+SPU accepts pseudo-ops without a leading dot. The generic nop directive
+therefore intercepts GCC's "nop 127", interpreting the register operand
+as a byte count and emitting 128 bytes rather than one 4-byte instruction.
+This inflates code, invalidates GCC's layout estimates and can overflow
+branch-hint displacements.
+
+Use the same target-local dispatch rule as set and eqv: bare nop is an
+instruction, while explicit .nop retains the generic directive behavior.
+
+--- a/gas/config/tc-spu.c
++++ b/gas/config/tc-spu.c
+@@ -96,5 +96,9 @@ const pseudo_typeS md_pseudo_table[] =
+   {"string", stringer, 8 + 1},
+   {"word", spu_cons, 4},
++  /* A nop operand is a register, not the generic directive's byte count.
++     Keep the directive available under its explicit dotted spelling.  */
++  {"nop", NULL, 0},
++  {".nop", s_nop, 0},
+   /* Force set to be treated as an instruction.  */
+   {"set", NULL, 0},
+   {".set", s_set, 0},

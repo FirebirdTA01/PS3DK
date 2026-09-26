@@ -1,3 +1,4 @@
 0001-spu-elf-spurs-job-flags.patch
 0002-spu-content-guid.patch
 0003-spu-reject-incompatible-spurs-modes.patch
+0004-spu-nop-opcode-dispatch.patch

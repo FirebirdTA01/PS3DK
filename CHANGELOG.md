@@ -16,6 +16,14 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- SPU assembler: `nop 127` now emits one four-byte instruction instead of
+  being interpreted as a padding directive that emits 128 bytes. This
+  prevents code inflation and branch-hint relocation failures in affected
+  GCC-generated code. Explicit `.nop N` directives keep their padding
+  behavior. Rebuild SPU objects and libraries to obtain the corrected code.
+
 ## [v0.15.0] — 2026-09-25
 
 ### Changed

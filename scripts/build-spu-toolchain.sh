@@ -196,6 +196,17 @@ build_binutils() {
     touch "$obj/.installed"
 }
 
+verify_binutils() {
+    if [[ -n "$HOST_TRIPLE" ]]; then
+        say "Skipping assembler execution check for cross-host binaries ($HOST_TRIPLE)"
+        return 0
+    fi
+    say "Checking installed SPU nop opcode/directive dispatch"
+    python3 "$PS3_TOOLCHAIN_ROOT/tests/sdk/spu-nop-dispatch-test.py" \
+        --as "$PREFIX/bin/$TARGET-as" \
+        --output "$BUILD/spu-nop-dispatch-evidence"
+}
+
 build_gcc_newlib() {
     local gcc_src="$BUILD/gcc-$GCC_VER-src"
     local newlib_src="$BUILD/newlib-$NEWLIB_VER-src"
@@ -360,7 +371,7 @@ run_step() {
     local step="$1"
     [[ -n "$ONLY" && "$ONLY" != "$step" ]] && return 0
     case "$step" in
-        binutils)       build_binutils ;;
+        binutils)       build_binutils; verify_binutils ;;
         gcc-newlib)     build_gcc_newlib ;;
         symlinks)       create_symlinks ;;
         linker-script)  install_linker_script ;;
