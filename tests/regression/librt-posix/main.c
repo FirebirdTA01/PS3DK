@@ -197,6 +197,74 @@ static void test_dirent(void)
     check_int("chdir root after dirent", chdir("/"), 0);
 }
 
+/* Relative paths resolve against the working directory set by chdir(),
+ * in every wrapper that takes a path.  Each result is confirmed through
+ * the absolute path, so a file created somewhere else cannot pass. */
+static void test_relative_paths(void)
+{
+    const char *base = "/dev_hdd0/tmp/ps3tc_regression_librt_posix";
+    const char *abs_file = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/rel_file.txt";
+    const char *abs_dir = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/reldir";
+    const char *abs_moved = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/reldir/moved.txt";
+    char buf[16] = {0};
+    struct stat st;
+
+    unlink(abs_moved);
+    rmdir(abs_dir);
+    unlink(abs_file);
+
+    check_int("rel: chdir base", chdir(base), 0);
+
+    check_int("rel: open creates in cwd",
+              write_file("rel_file.txt", "hello", O_CREAT | O_WRONLY | O_TRUNC, 0644), 0);
+    int fd = open(abs_file, O_RDONLY);
+    check_true("rel: file is at the absolute path",
+               fd >= 0 && read(fd, buf, 5) == 5 && memcmp(buf, "hello", 5) == 0);
+    if (fd >= 0)
+        close(fd);
+
+    FILE *fp = fopen("rel_file.txt", "r");
+    memset(buf, 0, sizeof(buf));
+    check_true("rel: fopen reads it", fp != NULL && fread(buf, 1, 5, fp) == 5 &&
+                                      memcmp(buf, "hello", 5) == 0);
+    if (fp)
+        fclose(fp);
+
+    check_true("rel: stat size", stat("rel_file.txt", &st) == 0 && st.st_size == 5);
+    check_int("rel: chmod", chmod("rel_file.txt", 0644), 0);
+    check_int("rel: truncate", truncate("rel_file.txt", 3), 0);
+    check_true("rel: truncated size seen absolutely", stat(abs_file, &st) == 0 && st.st_size == 3);
+    check_int("rel: utime", utime("rel_file.txt", NULL), 0);
+
+    check_int("rel: mkdir", mkdir("reldir", 0777), 0);
+    check_true("rel: dir is at the absolute path", stat(abs_dir, &st) == 0 && S_ISDIR(st.st_mode));
+
+    check_int("rel: chdir into subdir", chdir("reldir"), 0);
+    fd = open("../rel_file.txt", O_RDONLY);
+    check_true("rel: open with ..", fd >= 0);
+    if (fd >= 0)
+        close(fd);
+    check_true("rel: stat ./../", stat("./../rel_file.txt", &st) == 0 && st.st_size == 3);
+
+    check_int("rel: rename across ..", rename("../rel_file.txt", "moved.txt"), 0);
+    check_true("rel: renamed file at absolute path", stat(abs_moved, &st) == 0);
+    check_true("rel: old name gone", stat(abs_file, &st) != 0);
+
+    DIR *d = opendir("..");
+    check_true("rel: opendir ..", d != NULL);
+    if (d)
+        closedir(d);
+
+    check_int("rel: unlink", unlink("moved.txt"), 0);
+    check_true("rel: unlinked absolutely", stat(abs_moved, &st) != 0);
+
+    check_int("rel: chdir ..", chdir(".."), 0);
+    check_int("rel: rmdir", rmdir("reldir"), 0);
+    check_true("rel: removed absolutely", stat(abs_dir, &st) != 0);
+
+    check_int("rel: chdir root", chdir("/"), 0);
+}
+
 static void test_sbrk(void)
 {
     errno = 0;
@@ -286,6 +354,7 @@ int main(void)
     test_time();
     test_files();
     test_dirent();
+    test_relative_paths();
     test_sbrk();
     test_socket();
 

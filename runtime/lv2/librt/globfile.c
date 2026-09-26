@@ -15,6 +15,7 @@
 #include <sys/syslimits.h>
 #include <sys/lv2errno.h>
 #include <sys/file.h>
+#include "librt_path.h"
 
 static char __cwd[PATH_MAX] = "/";
 
@@ -89,6 +90,22 @@ normalize_path(const char *dirname, char *resolved)
 	}
 
 	return 0;
+}
+
+const char *
+__librt_resolve_path(struct _reent *r, const char *path, char buf[PATH_MAX])
+{
+	int err;
+
+	if (!path || !*path || path[0] == '/')
+		return path;
+
+	err = normalize_path(path, buf);
+	if (err) {
+		r->_errno = err;
+		return NULL;
+	}
+	return buf;
 }
 
 int

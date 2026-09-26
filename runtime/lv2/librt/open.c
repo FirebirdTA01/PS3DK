@@ -3,6 +3,7 @@
 #include <sys/reent.h>
 #include <sys/lv2errno.h>
 #include <sys/file.h>
+#include "librt_path.h"
 
 extern mode_t g_umask;
 
@@ -24,6 +25,12 @@ __librt_open_r(struct _reent *r, const char *file, int flags, int mode)
 		mode &= ~g_umask;
 	else
 		mode = 0;
+
+	char file_buf[PATH_MAX];
+
+	file = __librt_resolve_path(r, file, file_buf);
+	if (!file)
+		return -1;
 
 	s32 fd;
 	s32 ret = sysLv2FsOpen(file, oflag, &fd, mode, NULL, 0);

@@ -17,6 +17,7 @@
 #include <sys/lv2errno.h>
 #include <sys/file.h>
 #include <unistd.h>
+#include "librt_path.h"
 
 struct librt_dir {
 	DIR dir;
@@ -57,9 +58,6 @@ readdir_i(DIR *dirp, struct dirent *entry, struct dirent **result)
 static int
 store_dir_path(struct _reent *r, struct librt_dir *owned, const char *path)
 {
-	size_t cwd_len;
-	size_t path_len;
-
 	if (!path || !*path) {
 		r->_errno = EINVAL;
 		return -1;
@@ -74,19 +72,8 @@ store_dir_path(struct _reent *r, struct librt_dir *owned, const char *path)
 		return 0;
 	}
 
-	if (!getcwd(owned->path, sizeof(owned->path)))
+	if (!__librt_resolve_path(r, path, owned->path))
 		return -1;
-
-	cwd_len = strlen(owned->path);
-	path_len = strlen(path);
-	if (cwd_len + (cwd_len > 1 ? 1 : 0) + path_len >= PATH_MAX) {
-		r->_errno = ENAMETOOLONG;
-		return -1;
-	}
-
-	if (cwd_len > 1)
-		strcat(owned->path, "/");
-	strcat(owned->path, path);
 	return 0;
 }
 

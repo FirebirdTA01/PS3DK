@@ -15,6 +15,7 @@
 #include <utime.h>
 #include <sys/lv2errno.h>
 #include <sys/file.h>
+#include "librt_path.h"
 
 _Static_assert(sizeof(((sysFSUtimbuf *)0)->actime) ==
                sizeof(((struct utimbuf *)0)->actime),
@@ -28,7 +29,11 @@ __librt_utime_r(struct _reent *r, const char *path,
                 const struct utimbuf *times)
 {
 	sysFSUtimbuf lv2times;
+	char path_buf[PATH_MAX];
 
+	path = __librt_resolve_path(r, path, path_buf);
+	if (!path)
+		return -1;
 	if (times) {
 		lv2times.actime = times->actime;
 		lv2times.modtime = times->modtime;

@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/lv2errno.h>
 #include <sys/file.h>
+#include "librt_path.h"
 
 #undef st_atime
 #undef st_mtime
@@ -58,7 +59,11 @@ __librt_stat_r(struct _reent *r, const char *path, struct stat *st)
 {
 	s32 ret;
 	sysFSStat stat;
+	char path_buf[PATH_MAX];
 
+	path = __librt_resolve_path(r, path, path_buf);
+	if (!path)
+		return -1;
 	ret = sysLv2FsStat(path, &stat);
 	if (!ret && st)
 		convert_lv2stat(st, &stat);
