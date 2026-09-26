@@ -1,0 +1,11 @@
+// A constructed LOD coordinate is packed, not built: x and y go to a
+// temp's xy, the LOD (w) goes to its z, the constructor's z is dropped,
+// and TXL reads .xyxz.  The sampler takes no c[] register, so `level` is
+// the first uniform register, c467.
+uniform sampler2D heightMap;
+uniform float level;
+
+void main(float2 uv : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2Dlod(heightMap, float4(uv, 3.0, level));
+}

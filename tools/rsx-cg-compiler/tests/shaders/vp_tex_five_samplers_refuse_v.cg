@@ -1,0 +1,13 @@
+// The vertex unit has four texture units: a fifth fetched sampler is
+// refused (C6012), not wrapped onto a unit another sampler owns.
+uniform sampler2D mapA;
+uniform sampler2D mapB;
+uniform sampler2D mapC;
+uniform sampler2D mapD;
+uniform sampler2D mapE;
+
+void main(float2 uv : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2D(mapA, uv) + tex2D(mapB, uv) + tex2D(mapC, uv) +
+               tex2D(mapD, uv) + tex2D(mapE, uv);
+}

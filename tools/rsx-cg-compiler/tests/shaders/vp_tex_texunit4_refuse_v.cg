@@ -1,0 +1,8 @@
+// A FETCHED vertex sampler bound past TEXUNIT3 is refused (C5102); the
+// TXL word has two bits for the unit.
+uniform sampler2D heightMap : TEXUNIT4;
+
+void main(float2 uv : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2D(heightMap, uv);
+}

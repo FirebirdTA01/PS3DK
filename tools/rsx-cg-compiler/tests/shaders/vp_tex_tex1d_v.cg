@@ -1,0 +1,8 @@
+// tex1D in a vertex program: the coordinate in x, SFL zeroes y (the LOD
+// lane), TXL reads .xxxy.
+uniform sampler1D rampMap;
+
+void main(float u : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex1D(rampMap, u);
+}

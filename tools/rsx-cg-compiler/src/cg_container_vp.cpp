@@ -28,7 +28,8 @@
  *     Uniforms land in the const bank (C[0..511]):
  *       float4x4   → CG_C = 0x882, resIndex = first row's c[N]
  *       float4     → CG_C = 0x882, resIndex = scalar's c[N]
- *       sampler*   → not handled here yet (no VP sampler shader)
+ *       sampler*   → CG_TEXUNIT0 + unit = 0x800+n, never a c[] slot
+ *                    (general lowering; see samplerRecord below)
  *
  *   - Matrix uniforms expand: one "parent" CgBinaryParameter with
  *     type=CG_FLOAT4x4 + N child rows with type=CG_FLOAT4 sharing
@@ -44,6 +45,7 @@
 #include "cg_container_vp.h"
 #include "nv40/nv40_emit.h"
 #include "array_uniforms.h"
+#include "fp_sampler_bindings.h"
 #include "uniform_bindings.h"
 
 #include "ir.h"
@@ -87,6 +89,7 @@ constexpr uint32_t kCgCol0        = 2245u;  // 0x08c5 — VP COL0 output
 constexpr uint32_t kCgClp0        = 2310u;  // 0x0906 — VP CLP0 output
 constexpr uint32_t kCgPsiz        = 2309u;
 constexpr uint32_t kCgFogCoord    = 3156u;
+constexpr uint32_t kCgTexUnit0    = 2048u;  // 0x0800 — sampler on TEXUNIT0
 
 // CGtype values (from cg_datatypes.h, base = 1024).
 constexpr uint32_t kCgFloat       = 1045u;
@@ -233,6 +236,23 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     case IRType::Vec3:    return kCgFloat3;
     case IRType::Vec4:    return kCgFloat4;
     default:              return 0;
+    }
+}
+
+// CGtype of a sampler declaration, as the reference records a vertex
+// sampler: 0x429 sampler1D, 0x42a sampler2D, 0x42c samplerRECT, 0x42d
+// samplerCUBE (measured).  sampler3D has no vertex fetch and is refused by
+// the lowering before a container is written; its code is the table's.
+uint32_t cgSamplerType(IRType t)
+{
+    switch (t)
+    {
+    case IRType::Sampler1D:   return 1065u;
+    case IRType::Sampler2D:   return 1066u;
+    case IRType::Sampler3D:   return 1067u;
+    case IRType::SamplerRect: return 1068u;
+    case IRType::SamplerCube: return 1069u;
+    default:                  return 0u;
     }
 }
 
@@ -383,6 +403,9 @@ VpContainerResult emitVertexContainerImpl(
         // that is untested rather than contradictory, because an
         // `internal-constant-N` param never carries one.
         std::vector<float> defaultValue;
+        // A sampler record: res is a texture unit, and compact CGB lists it
+        // with the unit as its resource.
+        bool        isSampler = false;
     };
 
     std::vector<ParamDesc> params;
@@ -412,6 +435,39 @@ VpContainerResult emitVertexContainerImpl(
     const rsx_cg::ArrayUniformUses arrayUses =
         rsx_cg::classifyArrayUniformUses(*entry);
     constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
+
+    // Samplers take a texture unit and never a c[] register, so no cursor
+    // moves for them.  Built from the same layout the general lowering
+    // allocated from (fp_sampler_bindings.h), so the unit a record names
+    // is the unit the TXL word carries.  The legacy lowering keeps the
+    // records it always had.  Measured record: resIndex -1, var uniform,
+    // defaultValue and embeddedConst 0, isReferenced from use; the unit
+    // survives on an UNUSED sampler bound in range (TEXUNIT2, isRef 0),
+    // otherwise an unused sampler is 0xcb8; the semantic is TEXUNITn for
+    // `: TEXUNITn` and `register(sn)` alike, empty for an implicit unit.
+    const bool vpSamplers = attrs.resolvedExplicitBindings;
+    const rsx_cg::FpSamplerLayout samplerLayout = vpSamplers
+        ? rsx_cg::buildVpSamplerLayout(module, *entry)
+        : rsx_cg::FpSamplerLayout{};
+    const auto samplerRecord = [&](const auto& decl, uint32_t paramno) {
+        ParamDesc d;
+        d.name      = decl.name;
+        const int declared = rsx_cg::explicitFpSamplerUnit(decl);
+        d.semantic  = declared >= 0 ? "TEXUNIT" + std::to_string(declared)
+                                    : std::string{};
+        d.type      = cgSamplerType(decl.type.baseType);
+        const int unit = samplerLayout.unit(decl.valueId);
+        d.res       = unit < 0 ? kCgUnassignedRes
+                               : kCgTexUnit0 + static_cast<uint32_t>(unit);
+        d.var       = kCgUniform;
+        d.direction = kCgIn;
+        d.paramno   = paramno;
+        d.resIndex  = kInvalidIndex;
+        d.isReferenced = samplerLayout.used.count(decl.valueId) ? 1u : 0u;
+        d.isShared  = 0;
+        d.isSampler = true;
+        return d;
+    };
     const auto appendArrayElements = [&](const std::string& name,
                                          const IRTypeInfo& type,
                                          uint32_t paramno,
@@ -515,6 +571,12 @@ VpContainerResult emitVertexContainerImpl(
             const auto* binding = explicitBindings.find(p.valueId);
             if (p.type.baseType == IRType::Void)
                 continue;
+            if (vpSamplers && p.storage == StorageQualifier::Uniform &&
+                isSamplerIRType(p.type.baseType))
+            {
+                params.push_back(samplerRecord(p, static_cast<uint32_t>(i)));
+                continue;
+            }
 
             ParamDesc d;
             d.name      = p.name;
@@ -590,6 +652,11 @@ VpContainerResult emitVertexContainerImpl(
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
+            if (vpSamplers && isSamplerIRType(g.type.baseType))
+            {
+                params.push_back(samplerRecord(g, kInvalidIndex));
+                continue;
+            }
             const auto* binding = explicitBindings.find(g.valueId);
 
             const bool hasExplicit = (g.explicitRegisterBank == 'C');
@@ -716,6 +783,12 @@ VpContainerResult emitVertexContainerImpl(
     {
         const auto& p = entry->parameters[i];
         const auto* binding = explicitBindings.find(p.valueId);
+        if (vpSamplers && p.storage == StorageQualifier::Uniform &&
+            isSamplerIRType(p.type.baseType))
+        {
+            params.push_back(samplerRecord(p, static_cast<uint32_t>(i)));
+            continue;
+        }
         ParamDesc d;
         d.name      = p.name;
         d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
@@ -792,6 +865,11 @@ VpContainerResult emitVertexContainerImpl(
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
+        if (vpSamplers && isSamplerIRType(g.type.baseType))
+        {
+            params.push_back(samplerRecord(g, kInvalidIndex));
+            continue;
+        }
         const auto* binding = explicitBindings.find(g.valueId);
 
         const bool hasExplicit = (g.explicitRegisterBank == 'C');
@@ -1078,6 +1156,21 @@ VpContainerResult emitVertexContainerImpl(
                     CompactEntry e;
                     e.name = d.name;
                     e.resource = static_cast<uint16_t>(d.res - kCgAttr0);
+                    entries.push_back(e);
+                }
+                continue;
+            }
+
+            // A referenced sampler is listed with its UNIT as the resource
+            // (measured: hm on TEXUNIT2 -> 2); an unused one is not listed.
+            if (d.isSampler)
+            {
+                if (d.isReferenced && d.res >= kCgTexUnit0 &&
+                    d.res < kCgTexUnit0 + 4u)
+                {
+                    CompactEntry e;
+                    e.name = d.name;
+                    e.resource = static_cast<uint16_t>(d.res - kCgTexUnit0);
                     entries.push_back(e);
                 }
                 continue;

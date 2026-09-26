@@ -1,0 +1,9 @@
+// tex2Dbias in a vertex program is TXL with the coordinate's w as an
+// explicit LOD (there is no vertex bias).  A float4 varying is read in
+// place as .xyxw: one instruction, no SFL.
+uniform sampler2D heightMap;
+
+void main(float4 uvl : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2Dbias(heightMap, uvl);
+}

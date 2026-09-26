@@ -1,0 +1,9 @@
+// Vertex texture fetch: a plain tex2D of a float2 varying is TXL at LOD 0.
+// The coordinate is copied into a temp, SFL zeroes the temp's z (the LOD
+// lane), TXL reads the temp as .xyxz, and the result is stored with a MOV.
+uniform sampler2D heightMap;
+
+void main(float2 uv : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2D(heightMap, uv);
+}

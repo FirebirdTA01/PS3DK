@@ -1,0 +1,8 @@
+// texCUBE in a vertex program: the direction in xyz, SFL zeroes w (the LOD
+// lane), TXL reads .xyzw.
+uniform samplerCUBE envMap;
+
+void main(float3 dir : TEXCOORD0, out float4 position : POSITION)
+{
+    position = texCUBE(envMap, dir);
+}

@@ -1,0 +1,7 @@
+// tex2Dproj in a vertex program is refused by name.
+uniform sampler2D heightMap;
+
+void main(float4 uvq : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2Dproj(heightMap, uvq);
+}

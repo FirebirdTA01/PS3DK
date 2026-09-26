@@ -204,6 +204,13 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         hw[1] |= (op << NV40_VP_INST_VEC_OPCODE_SHIFT);
         hw[3] |= NV40_VP_INST_SCA_DEST_TEMP_MASK;
         hw[3] |= (insn.mask << NV40_VP_INST_VEC_WRITEMASK_SHIFT);
+        // TXL's texture unit lives in hw[2] bits 8..9 - the temp-index
+        // bits of the unused src1 filler, which encode as zero.  Measured
+        // on the reference for units 0..3 (0x...c083, c183, c283, c383);
+        // the bits above them are unmeasured, and the vertex unit has only
+        // four texture units.
+        if (op == NV40_VP_INST_VEC_OP_TXL)
+            hw[2] |= (static_cast<uint32_t>(insn.tex_unit) & 0x3u) << 8;
     }
     else
     {

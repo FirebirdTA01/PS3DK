@@ -1,0 +1,12 @@
+// A vertex fetch writes only the lanes the program reads: .wy here, so
+// the TXL writemask is yw.
+uniform sampler2D heightMap;
+
+void main(float4 inPosition : POSITION,
+          float2 uv : TEXCOORD0,
+          out float4 position : POSITION,
+          out float2 lookup : TEXCOORD0)
+{
+    position = inPosition;
+    lookup = tex2D(heightMap, uv).wy;
+}

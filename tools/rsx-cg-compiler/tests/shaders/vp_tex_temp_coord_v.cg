@@ -1,0 +1,10 @@
+// A coordinate that is already a temp, computed for this fetch alone, is
+// fetched in place: SFL writes the LOD lane of that temp and names the temp
+// itself as its operand.
+uniform sampler2D heightMap;
+uniform float2 offset;
+
+void main(float2 uv : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2D(heightMap, uv + offset);
+}

@@ -1,0 +1,15 @@
+// A vertex sampler takes a texture unit and never a c[] register, whether
+// it is an entry parameter or declared at file scope: the uniforms around
+// it keep the c467-descending slots they have without it.
+uniform sampler2D heightMap;
+uniform float4 tint;
+
+void main(float2 uv : TEXCOORD0,
+          uniform sampler2D detailMap,
+          uniform float4 scale,
+          out float4 position : POSITION,
+          out float4 color : COLOR)
+{
+    position = tex2D(detailMap, uv) * scale;
+    color = tex2D(heightMap, uv) + tint;
+}
