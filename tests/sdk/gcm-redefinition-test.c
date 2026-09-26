@@ -6,6 +6,7 @@
  *
  * Also verifies via compile-time assertions that CELL_GCM_DEBUG_LEVEL0..2 and
  * CELL_GCM_ZCULL_Z16 / CELL_GCM_ZCULL_Z24S8 retain their canonical values.
+ * The canonical umbrella-header marker must appear only after cell/gcm.h.
  */
 
 #include <stddef.h>
@@ -15,11 +16,17 @@
 /* RSX headers first, followed by Cell GCM headers */
 #  include <rsx/gcm_sys.h>
 #  include <rsx/rsx.h>
+#  ifdef __CELL_GCM_H__
+#    error "RSX headers must not advertise the Cell GCM umbrella"
+#  endif
 #  include <cell/gcm.h>
 #  include <cell/gcm/gcm_command_c.h>
 #elif defined(ORDER_ENUM_FIRST)
 /* GCM enum first, followed by Cell GCM and RSX headers */
 #  include <cell/gcm/gcm_enum.h>
+#  ifdef __CELL_GCM_H__
+#    error "GCM enum subheader must not advertise the Cell GCM umbrella"
+#  endif
 #  include <cell/gcm.h>
 #  include <cell/gcm/gcm_command_c.h>
 #  include <rsx/gcm_sys.h>
@@ -29,6 +36,9 @@
 #  include <cell/gcm/gcm_enum.h>
 #  include <rsx/gcm_sys.h>
 #  include <rsx/rsx.h>
+#  ifdef __CELL_GCM_H__
+#    error "GCM enum and RSX headers must not advertise the Cell GCM umbrella"
+#  endif
 #  include <cell/gcm.h>
 #  include <cell/gcm/gcm_command_c.h>
 #else
@@ -38,6 +48,26 @@
 #  include <rsx/gcm_sys.h>
 #  include <rsx/rsx.h>
 #endif
+
+#ifndef __CELL_GCM_H__
+#  error "cell/gcm.h must expose its canonical presence marker"
+#endif
+#include <cell/gcm.h> /* A second inclusion must retain the marker and types. */
+
+/* An independent consumer selects its texture member through the marker,
+ * as clients do when supporting both the SDK and standalone asset tools. */
+struct GcmMarkerConsumer {
+#ifdef __CELL_GCM_H__
+    CellGcmTexture image;
+#else
+    unsigned char image;
+#endif
+};
+
+CellGcmTexture *gcm_marker_texture(struct GcmMarkerConsumer *consumer)
+{
+    return &consumer->image;
+}
 
 /* Compile-time assertion helper compatible across C99, C11, and C++17 */
 #define GCM_GLUE2(a, b) a##b
