@@ -151,28 +151,18 @@ int __sheap_tree_free(const sheap_tree_access *t, uint32_t n_nodes,
     return 0;
 }
 
-uint64_t __sheap_tree_query_max(const sheap_tree_access *t, uint32_t n_nodes,
-                                uint64_t s_root)
+/* Visit, in pre-order, every node reachable from the root through SPLIT
+ * nodes, i.e. every node that is not inside an allocated block.  A FREE
+ * node reached this way is a maximal free block; the FREE subtree left
+ * under an allocated (USED) node is never reached.  Returns the smallest
+ * row holding a free block through *best_row and the free bytes. */
+static uint64_t walk_free(const sheap_tree_access *t, uint32_t n_nodes,
+                          uint64_t s_root, unsigned *best_row)
 {
-    /* The firmware's rule: the first FREE id in numbering order, taken as
-     * the largest free block.  It does not skip the FREE subtree left
-     * under an allocated node, so it can overstate; kept for parity. */
-    uint64_t n;
-
-    for (n = 1; n <= n_nodes; ++n)
-        if (GET(t, (uint32_t)n) == SHEAP_NODE_FREE)
-            return s_root >> __sheap_floor_log2(n);
-    return 0;
-}
-
-uint64_t __sheap_tree_query_free(const sheap_tree_access *t, uint32_t n_nodes,
-                                 uint64_t s_root)
-{
-    /* Pre-order walk without a stack: descend into SPLIT nodes, count
-     * FREE nodes whole, skip taken ones. */
     uint64_t total = 0;
     uint64_t n = 1;
 
+    *best_row = 64;
     if (n_nodes == 0)
         return 0;
     for (;;) {
@@ -182,8 +172,13 @@ uint64_t __sheap_tree_query_free(const sheap_tree_access *t, uint32_t n_nodes,
             n <<= 1;
             continue;
         }
-        if (state == SHEAP_NODE_FREE)
-            total += s_root >> __sheap_floor_log2(n);
+        if (state == SHEAP_NODE_FREE) {
+            unsigned row = __sheap_floor_log2(n);
+
+            total += s_root >> row;
+            if (row < *best_row)
+                *best_row = row;
+        }
         /* Next node: the right sibling of the nearest left child on the
          * path back up. */
         while (n & 1u)
@@ -193,4 +188,24 @@ uint64_t __sheap_tree_query_free(const sheap_tree_access *t, uint32_t n_nodes,
         n += 1;
     }
     return total;
+}
+
+uint64_t __sheap_tree_query_max(const sheap_tree_access *t, uint32_t n_nodes,
+                                uint64_t s_root)
+{
+    /* The largest free block: the highest maximal FREE node.  This counts
+     * the last real leaf, which Allocate never hands out, the same way
+     * QueryFree does. */
+    unsigned row;
+
+    (void)walk_free(t, n_nodes, s_root, &row);
+    return row < 64 ? s_root >> row : 0;
+}
+
+uint64_t __sheap_tree_query_free(const sheap_tree_access *t, uint32_t n_nodes,
+                                 uint64_t s_root)
+{
+    unsigned row;
+
+    return walk_free(t, n_nodes, s_root, &row);
 }
