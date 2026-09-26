@@ -15,7 +15,16 @@
  *    key's creator, or attaches, between the SPU's getllar and putllc;
  *    the SPU re-reads and converges without writing a stale lock word or
  *    key entry.  The plain and keyed sections are rerun with every other
- *    putllc lost.
+ *    putllc lost; that covers the heap lock under cellSheapAllocate,
+ *    Free, QueryMax and QueryFree, the header snapshot and all four
+ *    key-table steps under the six keyed New/Delete pairs, the
+ *    semaphore store in SemaphoreNew, the semaphore P/V/TryP inlines, and
+ *    the libsync Mutex/Queue/Rwm calls the keyed section makes.  Initialize
+ *    publishes with putlluc (unconditional), so it has no loop to lose.
+ *
+ * Limits of the simulation: DMA completes synchronously, so no tree-line
+ * put can still be in flight when the lock is released, and ordering
+ * between DMA and reservations is not tested.
  */
 #include <inttypes.h>
 #include <stdio.h>

@@ -11,9 +11,27 @@
  *    (mutex_ticket.h) against that PPU model; it is a model of the
  *    protocol, not a run of real MFC locks on hardware.
  *  - Barrier Initialize refuses 0 and counts above 32767.
- *  - Reservation loss: putllc attempts are lost, with another processor
- *    changing the line between getllar and putllc; every retry loop
- *    re-reads, converges and writes nothing stale.
+ *  - Reservation loss.  A putllc is lost either because another processor
+ *    changed the line between getllar and putllc (scripted) or with no
+ *    change.  Entry points exercised under loss:
+ *      with a concurrent change: QueueInitialize, QueuePush (wlock and
+ *        commit), QueuePop, RwmInitialize, RwmReadBegin, RwmReadEnd,
+ *        MutexLock, MutexUnlock, MutexTryLock, BarrierNotify;
+ *      with the first (or the commit / release) store lost: QueueTryPush,
+ *        QueuePeek, QueueTryPeek, QueueTryPop, QueueClear, RwmWrite,
+ *        RwmTryWrite, RwmTryReadBegin, BarrierTryNotify;
+ *      alternate-loss rerun (every other putllc lost) of the descriptor
+ *        and barrier sections: QueueInitialize/Push/Pop,
+ *        RwmInitialize/Write/ReadBegin/ReadEnd, BarrierInitialize/Notify.
+ *    QueueSize, BarrierWait and BarrierTryWait only read (no putllc).
+ *    Looping forms must retry and converge without a stale write; the
+ *    single-attempt Try forms must report AGAIN and change nothing.
+ *
+ * Limits of the simulation: DMA completes synchronously (no command runs
+ * concurrently with SPU code, so ordering between a put and the next
+ * reservation is not tested), and with 32-bit swapping the order of the
+ * barrier's two 16-bit halves inside its word follows the host, so the
+ * barrier rows check values, not the SPU/PPU half order.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -507,6 +525,92 @@ static void test_reservation_loss(void)
            mfc_mock_putllc_lost, mfc_mock_putllc_attempts);
 }
 
+/* Lose exactly the n-th putllc from now (1 = the next one), no change. */
+static unsigned long lose_at;
+
+static int lose_nth(uint64_t line)
+{
+    (void)line;
+    return mfc_mock_putllc_attempts == lose_at;
+}
+
+static void lose_next(unsigned long n)
+{
+    mfc_mock_putllc_attempts = mfc_mock_putllc_lost = 0;
+    lose_at = n;
+    mfc_mock_on_putllc = lose_nth;
+}
+
+/* The remaining entry points, each with its first store lost.  Looping
+ * forms must retry and succeed; the single-attempt Try forms report
+ * AGAIN and leave the object unchanged, then succeed when called again. */
+static void test_loss_entry_points(void)
+{
+    static uint8_t in[128] __attribute__((aligned(128)));
+    static uint8_t out[128] __attribute__((aligned(128)));
+    const uint64_t q = 0xa000, rwm = 0xb000, b = 0xc000;
+    uint64_t before;
+
+    mfc_mock_swap32 = 0;
+    CHECK(cellSyncQueueInitialize(q, q + 128, 16, 4, 5) == CELL_OK, "queue init");
+    memset(in, 0x33, 16);
+
+    lose_next(1);
+    before = native64(q);
+    CHECK(cellSyncQueueTryPush(q, in, 7) == CELL_SYNC_ERROR_AGAIN && native64(q) == before
+          && mfc_mock_putllc_lost == 1, "TryPush: lost wlock store -> AGAIN, head unchanged");
+    lose_next(2);                   /* the commit store */
+    CHECK(cellSyncQueueTryPush(q, in, 7) == CELL_OK && cellSyncQueueSize(q) == 1
+          && mfc_mock_putllc_lost == 1, "TryPush: lost commit store retried");
+
+    lose_next(1);
+    CHECK(cellSyncQueuePeek(q, out, 7) == CELL_OK && out[0] == 0x33 && cellSyncQueueSize(q) == 1
+          && mfc_mock_putllc_lost == 1, "Peek retried, size kept");
+    lose_next(1);
+    before = native64(q);
+    CHECK(cellSyncQueueTryPeek(q, out, 7) == CELL_SYNC_ERROR_AGAIN && native64(q) == before,
+          "TryPeek: lost store -> AGAIN, head unchanged");
+    CHECK(cellSyncQueueTryPeek(q, out, 7) == CELL_OK && out[15] == 0x33, "TryPeek again");
+    lose_next(1);
+    before = native64(q);
+    CHECK(cellSyncQueueTryPop(q, out, 7) == CELL_SYNC_ERROR_AGAIN && native64(q) == before,
+          "TryPop: lost store -> AGAIN, head unchanged");
+    CHECK(cellSyncQueueTryPop(q, out, 7) == CELL_OK && cellSyncQueueSize(q) == 0, "TryPop again");
+    CHECK(cellSyncQueuePush(q, in, 7) == CELL_OK && cellSyncQueuePush(q, in, 7) == CELL_OK, "refill");
+    lose_next(1);
+    CHECK(cellSyncQueueClear(q) == CELL_OK && native64(q) == 0 && mfc_mock_putllc_lost == 1,
+          "Clear retried, head zero");
+    CHECK(native64(q + 8) == ((uint64_t)16 << 32 | 4) && native64(q + 16) == q + 128,
+          "descriptor intact after Clear");
+
+    CHECK(cellSyncRwmInitialize(rwm, rwm + 128, 32, 6) == CELL_OK, "rwm init");
+    memset(in, 0x44, 32);
+    lose_next(1);
+    CHECK(cellSyncRwmWrite(rwm, in, 6) == CELL_OK && mfc_mock_memory[rwm + 128] == 0x44
+          && native64(rwm) == 32 && mfc_mock_putllc_lost == 1, "Write retried, lock released");
+    lose_next(1);
+    before = native64(rwm);
+    CHECK(cellSyncRwmTryWrite(rwm, in, 6) == CELL_SYNC_ERROR_AGAIN && native64(rwm) == before,
+          "TryWrite: lost store -> AGAIN, lock word unchanged");
+    lose_next(2);                   /* the release store */
+    CHECK(cellSyncRwmTryWrite(rwm, in, 6) == CELL_OK && native64(rwm) == 32 && mfc_mock_putllc_lost == 1,
+          "TryWrite: lost release store retried");
+    lose_next(1);
+    before = native64(rwm);
+    CHECK(cellSyncRwmTryReadBegin(rwm, out, 6) == CELL_SYNC_ERROR_AGAIN && native64(rwm) == before,
+          "TryReadBegin: lost store -> AGAIN, no reader counted");
+    CHECK(cellSyncRwmTryReadBegin(rwm, out, 6) == CELL_OK && out[31] == 0x44 && native64(rwm) >> 48 == 1,
+          "TryReadBegin again");
+    CHECK(cellSyncRwmReadEnd(rwm, 6) == CELL_OK && native64(rwm) >> 48 == 0, "ReadEnd");
+
+    mfc_mock_swap32 = 1;
+    CHECK(cellSyncBarrierInitialize(b, 2, 0) == CELL_OK, "barrier init");
+    lose_next(1);
+    CHECK(cellSyncBarrierTryNotify(b) == CELL_OK && barrier_word(b).count == 1 && mfc_mock_putllc_lost == 1,
+          "TryNotify retried, one arrival counted");
+    disarm();
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -515,6 +619,7 @@ int main(void)
     test_mutex_interleaving();
     test_barrier();
     test_reservation_loss();
+    test_loss_entry_points();
     if (failures) {
         printf("libsync-spu: FAIL (%d of %d checks)\n", failures, checks);
         return 1;
