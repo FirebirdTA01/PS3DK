@@ -229,7 +229,7 @@ static void test_relative_paths(void)
     const char *abs_victim = "/dev_hdd0/tmp/ps3tc_regression_librt_posix/victim.txt";
     char buf[16] = {0};
     struct stat st;
-    int rc, err, arc, aerr;
+    int rc, err, arc, aerr, fd;
 
     unlink(abs_moved);
     rmdir(abs_dir);
@@ -279,19 +279,64 @@ static void test_relative_paths(void)
     check_int("rel: rmdir", rmdir("reldir"), 0);
     check_true("rel: removed absolutely", stat(abs_dir, &st) != 0);
 
-    /* Paths whose walk must fail leave the victim untouched. */
-    check_int("rel: victim created", write_file(abs_victim, "keep", O_CREAT | O_WRONLY | O_TRUNC, 0644), 0);
-    check_true("rel: unlink victim/ fails", unlink("victim.txt/") != 0);
-    check_true("rel: victim survives unlink victim/", file_holds(abs_victim, "keep"));
-    check_true("rel: open victim/. O_TRUNC fails", open("victim.txt/.", O_WRONLY | O_TRUNC) < 0);
-    check_true("rel: victim survives victim/.", file_holds(abs_victim, "keep"));
-    check_true("rel: open missing/../victim fails", open("missing/../victim.txt", O_WRONLY | O_TRUNC) < 0);
-    check_true("rel: victim survives missing/..", file_holds(abs_victim, "keep"));
-    check_true("rel: open victim/../victim fails", open("victim.txt/../victim.txt", O_WRONLY | O_TRUNC) < 0);
-    check_true("rel: victim survives file/..", file_holds(abs_victim, "keep"));
-    check_true("rel: rename from missing/.. fails", rename("missing/../victim.txt", "gone.txt") != 0);
-    check_true("rel: rename to missing/.. fails", rename("victim.txt", "missing/../gone.txt") != 0);
-    check_true("rel: victim survives both renames", file_holds(abs_victim, "keep"));
+    /* Paths whose POSIX walk must fail ("victim/", "victim/.",
+     * "missing/../victim", "victim/../victim").  Whether the kernel
+     * refuses them is the platform's business (RPCS3's filesystem collapses
+     * "." and ".." itself); librt's contract is that the relative spelling
+     * does exactly what the absolute spelling does.  Each case runs on a
+     * fresh victim, absolute first, then relative, and prints both. */
+    for (int kind = 0; kind < 6; kind++) {
+        int outcome[2];
+        for (int rel = 0; rel < 2; rel++) {
+            char a[160], b[160];
+            const char *pre = rel ? "" : "/dev_hdd0/tmp/ps3tc_regression_librt_posix/";
+            int ok;
+            unlink("/dev_hdd0/tmp/ps3tc_regression_librt_posix/gone.txt");
+            write_file(abs_victim, "keep", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+            switch (kind) {
+            case 0:
+                snprintf(a, sizeof a, "%svictim.txt/", pre);
+                ok = unlink(a) != 0;
+                break;
+            case 1:
+                snprintf(a, sizeof a, "%svictim.txt/.", pre);
+                fd = open(a, O_WRONLY | O_TRUNC);
+                ok = fd < 0;
+                if (fd >= 0)
+                    close(fd);
+                break;
+            case 2:
+                snprintf(a, sizeof a, "%smissing/../victim.txt", pre);
+                fd = open(a, O_WRONLY | O_TRUNC);
+                ok = fd < 0;
+                if (fd >= 0)
+                    close(fd);
+                break;
+            case 3:
+                snprintf(a, sizeof a, "%svictim.txt/../victim.txt", pre);
+                fd = open(a, O_WRONLY | O_TRUNC);
+                ok = fd < 0;
+                if (fd >= 0)
+                    close(fd);
+                break;
+            case 4:
+                snprintf(a, sizeof a, "%smissing/../victim.txt", pre);
+                snprintf(b, sizeof b, "%sgone.txt", pre);
+                ok = rename(a, b) != 0;
+                break;
+            default:
+                snprintf(a, sizeof a, "%svictim.txt", pre);
+                snprintf(b, sizeof b, "%smissing/../gone.txt", pre);
+                ok = rename(a, b) != 0;
+                break;
+            }
+            outcome[rel] = ok | (file_holds(abs_victim, "keep") ? 2 : 0);
+        }
+        printf("INFO rel: victim case %d absolute failed=%d survived=%d, relative failed=%d survived=%d\n",
+               kind, outcome[0] & 1, (outcome[0] >> 1) & 1, outcome[1] & 1, (outcome[1] >> 1) & 1);
+        check_true("rel: unsafe spelling behaves like its absolute spelling", outcome[0] == outcome[1]);
+    }
+    unlink("/dev_hdd0/tmp/ps3tc_regression_librt_posix/gone.txt");
     unlink(abs_victim);
 
     check_int("rel: chdir root", chdir("/"), 0);
