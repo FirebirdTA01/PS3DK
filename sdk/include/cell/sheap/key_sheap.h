@@ -3,17 +3,7 @@
 
 #include <stdint.h>
 #include <cell/sheap/sheap_base.h>
-
-typedef uint32_t CellSheapKey;
-
-#define CELL_SHEAP_NUM_KEY_ENTRY 256
-
-typedef struct CellKeySheapBarrier { uint64_t ea_ksheap; CellSheapKey key; uint64_t ea; } CellKeySheapBarrier;
-typedef struct CellKeySheapBuffer { uint64_t ea_ksheap; CellSheapKey key; uint64_t ea; uint64_t size; } CellKeySheapBuffer;
-typedef struct CellKeySheapMutex { uint64_t ea_ksheap; CellSheapKey key; uint64_t ea; } CellKeySheapMutex;
-typedef struct CellKeySheapQueue { uint64_t ea_ksheap; CellSheapKey key; uint64_t ea; } CellKeySheapQueue;
-typedef struct CellKeySheapRwm { uint64_t ea_ksheap; CellSheapKey key; uint64_t ea; } CellKeySheapRwm;
-typedef struct CellKeySheapSemaphore { uint64_t ea_ksheap; CellSheapKey key; uint64_t ea; } CellKeySheapSemaphore;
+#include <cell/sheap/sheap_types.h>
 
 #ifdef __cplusplus
 extern "C" {

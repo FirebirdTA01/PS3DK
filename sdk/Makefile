@@ -225,6 +225,7 @@ HEADERS := \
     include/cell/sheap.h \
     include/cell/sheap/error.h \
     include/cell/sheap/sheap_base.h \
+    include/cell/sheap/sheap_types.h \
     include/cell/sheap/key_sheap.h \
     include/cell/sheap/key_sheap_barrier.h \
     include/cell/sheap/key_sheap_buffer.h \
@@ -448,7 +449,7 @@ HEADERS := \
     include/cell/cgb/cgb_struct.h \
     include/cell/sscgpu.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -463,6 +464,8 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/error.h \
     include/cell/fiber/error.h \
     include/cell/fiber/spu_context_types.h \
+    include/cell/sheap/error.h \
+    include/cell/sheap/sheap_types.h \
     include/cell/jdl.h \
     include/cell/face.h \
     include/cell/face/error.h \
@@ -550,7 +553,16 @@ SPU_HEADERS := \
     include-spu/cell/sync/lfqueue.h \
     include-spu/cell/sync2.h \
     include-spu/cell/fiber.h \
-    include-spu/cell/fiber/spu_context.h
+    include-spu/cell/fiber/spu_context.h \
+    include-spu/cell/sheap.h \
+    include-spu/cell/sheap/sheap_base.h \
+    include-spu/cell/sheap/key_sheap.h \
+    include-spu/cell/sheap/key_sheap_buffer.h \
+    include-spu/cell/sheap/key_sheap_mutex.h \
+    include-spu/cell/sheap/key_sheap_barrier.h \
+    include-spu/cell/sheap/key_sheap_queue.h \
+    include-spu/cell/sheap/key_sheap_rwm.h \
+    include-spu/cell/sheap/key_sheap_semaphore.h
 
 .PHONY: all install clean version-header $(SUBLIBS) \
 	install-stub-archives install-native-aliases install-manifest verify-install \
