@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Execute the actual task-entry bridge; only SPU intrinsics/exit are mocked."""
+"""Execute the actual task-entry bridge on the host.
+
+Only SPU intrinsics, exit and the shared SPURS headers task.h includes are
+mocked.  The real shared headers size their records for the 32-bit SPU, so
+a 64-bit host cannot compile them; the mocks give task.h just the names it
+uses, and the bridge and task.h themselves are the real sources.
+"""
 import os
 from pathlib import Path
 import subprocess
@@ -8,7 +14,23 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory(prefix='spurs-task-entry-') as temp:
     work = Path(temp)
-    (work/'spu_intrinsics.h').write_text('typedef unsigned char qword __attribute__((vector_size(16)));\n')
+    (work/'spu_intrinsics.h').write_text(
+        'typedef unsigned char qword __attribute__((vector_size(16)));\n'
+        'typedef unsigned int vec_uint4 __attribute__((vector_size(16)));\n')
+    spurs = work/'cell'/'spurs'
+    spurs.mkdir(parents=True)
+    for name in ('types.h', 'error.h', 'version.h', 'common.h'):
+        (spurs/name).write_text('')
+    (spurs/'task_types.h').write_text(
+        '#include <stdint.h>\n'
+        'typedef uint32_t CellSpursTaskId;\n'
+        'typedef struct { uint32_t u32[4]; } CellSpursTaskLsPattern;\n'
+        'typedef struct { unsigned char opaque[256]; } CellSpursTaskAttribute;\n'
+        'typedef struct { unsigned char opaque[256]; } CellSpursTaskAttribute2;\n'
+        '#define CELL_SPURS_TASK_TOP_MASK 0x0000ffffu\n'
+        '#define CELL_SPURS_CONTEXT_SIZE2BITS(size) ((size) >> 11)\n'
+        '#define CELL_SPURS_TASK2_REVISION 0\n'
+        '#define _CELL_SPURS_INTERNAL_VERSION 0\n')
     (work/'probe.c').write_text(r'''
 #include <cell/spurs/task.h>
 #include <setjmp.h>
