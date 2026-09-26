@@ -24,8 +24,10 @@
  * the link-register slot the entry function's prologue writes, at the top.
  * Everything below belongs to the entry function, as with any stack. */
 #define STACK_TOP_RESERVE 32
-/* The reserve plus one minimal (32-byte) frame for the entry function. */
-#define STACK_MIN 64
+/* The reserve plus the smallest frame a non-leaf entry function gets:
+ * GCC allocates 48 bytes (back chain, LR slot and the outgoing linkage
+ * area) even for a function whose only work is one call. */
+#define STACK_MIN 80
 
 void __ps3dk_fiber_swap(CellFiberSpuContext *save, CellFiberSpuContext *load);
 void __ps3dk_fiber_start(void);

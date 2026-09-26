@@ -19,7 +19,7 @@ static volatile int b_self_ok = 1;
 
 /* Canary check at the minimum stack size: 16 guard bytes below and above a
  * 64-byte stack, which the runtime and a minimal entry must not touch. */
-#define MIN_STACK 64
+#define MIN_STACK 80
 static uint8_t canary_area[16 + MIN_STACK + 16] __attribute__((aligned(16)));
 static CellFiberSpuContext d_ctx;
 static volatile uintptr_t d_seen;
@@ -66,7 +66,7 @@ static void fiber_b(uint64_t unused)
     }
 }
 
-/* Fiber D: a minimal non-leaf entry (one call, one 32-byte frame). */
+/* Fiber D: a minimal non-leaf entry (one call, one 48-byte frame). */
 static void fiber_d(uint64_t unused)
 {
     d_arg = unused;
