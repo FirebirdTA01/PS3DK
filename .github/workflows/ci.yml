@@ -214,6 +214,10 @@ jobs:
       - name: Test the reference PS3 platform macros are predefined
         run: bash tests/sdk/platform-predefines-test.sh
 
+      # Skips without PS3DEV; runs against the installed SDK headers.
+      - name: Test the SPU SPURS headers declare the EA API and keep the PPU API
+        run: bash tests/sdk/spurs-spu-header-surface-test.sh
+
       # Skips without PS3DEV; compiles this tree's GCM headers under -Werror.
       - name: Test the GCM headers define each macro once
         run: bash tests/sdk/gcm-redefinition-test.sh

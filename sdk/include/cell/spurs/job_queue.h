@@ -27,6 +27,14 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __SPU__
+/* SPU job code reaching the job-queue API through this header also
+ * gets the SPU intrinsics and the MFC/DMA surface (cell/dma.h brings
+ * spu_mfcio.h, e.g. spu_read_decrementer). */
+#include <spu_intrinsics.h>
+#include <cell/dma.h>
+#endif
+
 #include <cell/spurs/types.h>
 #include <cell/spurs/error.h>
 #include <cell/spurs/version.h>
@@ -416,12 +424,12 @@ extern int cellSpursJobQueueSendSignal(CellSpursJobQueueWaitingJob *job);
  * descriptor-error-check `cellDmaGet` of the candidate job (when
  * CELL_SPURS_JOBDESCRIPTOR_ERROR_CHECK is defined).
  *
- * The cooperative-yield DMA-wait helpers
- * (cellSpursJobQueueDmaWaitTagStatus{All,Any}) and the SPU-side
- * descriptor-error-check inlines are documented in the libspurs_jq
- * SPU runtime; this header carries only the entry-point declarations
- * and the trace / memcheck globals so application code can compile
- * even before that runtime is fully ported.
+ * The DMA-wait helpers (cellSpursJobQueueDmaWaitTagStatus{All,Any})
+ * are plain MFC waits for now (no job switch while waiting), and the
+ * SPU-side descriptor-error-check inlines are not provided; this
+ * header carries the entry-point declarations, the push inlines and
+ * the trace / memcheck globals so application code can compile even
+ * before that runtime is fully ported.
  * =====================================================================*/
 
 #include <cell/spurs/job_context.h>
@@ -630,6 +638,22 @@ extern unsigned int                    _gCellSpursJobQueueYieldHasAuxProc
     __attribute__((aligned(16)));
 extern void                            _cellSpursJobQueueHashCheck(void);
 extern void                            _cellSpursJobQueueRehash(void);
+
+/* -- DMA completion waits for job code -------------------------------
+ *
+ * Wait for the DMA tag groups in `dmaTagMask` and return the completed
+ * subset of that mask, like cellDmaWaitTagStatusAll / Any.  The job
+ * keeps its SPU while it waits: this runtime does not yet switch to
+ * another job during the wait, so these are plain MFC tag waits. */
+static inline uint32_t cellSpursJobQueueDmaWaitTagStatusAll(unsigned int dmaTagMask)
+{
+    return cellDmaWaitTagStatusAll(dmaTagMask) & dmaTagMask;
+}
+
+static inline uint32_t cellSpursJobQueueDmaWaitTagStatusAny(unsigned int dmaTagMask)
+{
+    return cellDmaWaitTagStatusAny(dmaTagMask) & dmaTagMask;
+}
 
 #endif /* __SPU__ */
 

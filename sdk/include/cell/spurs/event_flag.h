@@ -51,6 +51,110 @@ typedef struct CellSpursEventFlag {
     unsigned char skip[CELL_SPURS_EVENT_FLAG_SIZE];
 } __attribute__((aligned(CELL_SPURS_EVENT_FLAG_ALIGN))) CellSpursEventFlag;
 
+#ifdef __SPU__
+
+/* SPU side: the event flag lives in main memory and is named by its
+ * effective address.  Wait blocks and is valid only in a SPURS task.
+ * Declared only: the SPU runtime (libspurs.a) does not implement these
+ * yet, so callers compile and fail at link time. */
+int _cellSpursEventFlagInitialize(uint64_t ea,
+                                  CellSpursEventFlagClearMode clearMode,
+                                  CellSpursEventFlagDirection direction,
+                                  unsigned isIwl);
+int cellSpursEventFlagSet(uint64_t ea, uint16_t bits);
+int cellSpursEventFlagClear(uint64_t ea, uint16_t bits);
+int _cellSpursEventFlagWait(uint64_t ea, uint16_t *bits,
+                            CellSpursEventFlagWaitMode mode,
+                            unsigned isBlocking);
+int cellSpursEventFlagGetDirection(uint64_t ea,
+                                   CellSpursEventFlagDirection *direction);
+int cellSpursEventFlagGetClearMode(uint64_t ea,
+                                   CellSpursEventFlagClearMode *clear_mode);
+int cellSpursEventFlagGetTasksetAddress(uint64_t ea, uint64_t *pEaTaskset);
+
+#define cellSpursEventFlagInitialize(ea, mode, direction) \
+    _cellSpursEventFlagInitialize((ea), (mode), (direction), 0)
+#define cellSpursEventFlagInitializeIWL(ea, mode, direction) \
+    _cellSpursEventFlagInitialize((ea), (mode), (direction), 1)
+#define cellSpursEventFlagWait(ea, bits, mode) \
+    _cellSpursEventFlagWait((ea), (bits), (mode), 1)
+#define cellSpursEventFlagTryWait(ea, bits, mode) \
+    _cellSpursEventFlagWait((ea), (bits), (mode), 0)
+
+#ifdef __cplusplus
+}   /* extern "C" */
+
+namespace cell {
+namespace Spurs {
+
+class EventFlag : public CellSpursEventFlag {
+public:
+    static const uint32_t kAlign = CELL_SPURS_EVENT_FLAG_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_EVENT_FLAG_SIZE;
+
+    static const CellSpursEventFlagWaitMode  kOr          = CELL_SPURS_EVENT_FLAG_OR;
+    static const CellSpursEventFlagWaitMode  kAnd         = CELL_SPURS_EVENT_FLAG_AND;
+    static const CellSpursEventFlagClearMode kClearAuto   = CELL_SPURS_EVENT_FLAG_CLEAR_AUTO;
+    static const CellSpursEventFlagClearMode kClearManual = CELL_SPURS_EVENT_FLAG_CLEAR_MANUAL;
+    static const CellSpursEventFlagDirection kSpu2Spu     = CELL_SPURS_EVENT_FLAG_SPU2SPU;
+    static const CellSpursEventFlagDirection kSpu2Ppu     = CELL_SPURS_EVENT_FLAG_SPU2PPU;
+    static const CellSpursEventFlagDirection kPpu2Spu     = CELL_SPURS_EVENT_FLAG_PPU2SPU;
+    static const CellSpursEventFlagDirection kAny2Any     = CELL_SPURS_EVENT_FLAG_ANY2ANY;
+};
+
+/* SPU handle on an event flag in main memory: holds its EA and
+ * forwards to the EA-based C API above. */
+class EventFlagStub {
+protected:
+    uint64_t object_ea;
+
+public:
+    static const uint32_t kAlign = CELL_SPURS_EVENT_FLAG_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_EVENT_FLAG_SIZE;
+
+    static const CellSpursEventFlagWaitMode  kOr          = CELL_SPURS_EVENT_FLAG_OR;
+    static const CellSpursEventFlagWaitMode  kAnd         = CELL_SPURS_EVENT_FLAG_AND;
+    static const CellSpursEventFlagClearMode kClearAuto   = CELL_SPURS_EVENT_FLAG_CLEAR_AUTO;
+    static const CellSpursEventFlagClearMode kClearManual = CELL_SPURS_EVENT_FLAG_CLEAR_MANUAL;
+    static const CellSpursEventFlagDirection kSpu2Spu     = CELL_SPURS_EVENT_FLAG_SPU2SPU;
+    static const CellSpursEventFlagDirection kSpu2Ppu     = CELL_SPURS_EVENT_FLAG_SPU2PPU;
+    static const CellSpursEventFlagDirection kPpu2Spu     = CELL_SPURS_EVENT_FLAG_PPU2SPU;
+    static const CellSpursEventFlagDirection kAny2Any     = CELL_SPURS_EVENT_FLAG_ANY2ANY;
+
+    void setObject(uint64_t ea) { object_ea = ea; }
+    uint64_t getObject(void) const { return object_ea; }
+
+    int initialize(CellSpursEventFlagClearMode clearMode,
+                   CellSpursEventFlagDirection direction) const
+    { return cellSpursEventFlagInitialize(object_ea, clearMode, direction); }
+    int initializeIWL(CellSpursEventFlagClearMode clearMode,
+                      CellSpursEventFlagDirection direction) const
+    { return cellSpursEventFlagInitializeIWL(object_ea, clearMode, direction); }
+
+    int set(uint16_t bits) const
+    { return cellSpursEventFlagSet(object_ea, bits); }
+    int clear(uint16_t bits) const
+    { return cellSpursEventFlagClear(object_ea, bits); }
+    int wait(uint16_t *bits, CellSpursEventFlagWaitMode mode) const
+    { return cellSpursEventFlagWait(object_ea, bits, mode); }
+    int tryWait(uint16_t *bits, CellSpursEventFlagWaitMode mode) const
+    { return cellSpursEventFlagTryWait(object_ea, bits, mode); }
+
+    int getDirection(CellSpursEventFlagDirection *direction) const
+    { return cellSpursEventFlagGetDirection(object_ea, direction); }
+    int getClearMode(CellSpursEventFlagClearMode *clearMode) const
+    { return cellSpursEventFlagGetClearMode(object_ea, clearMode); }
+    int getTasksetAddress(uint64_t *pEaTaskset) const
+    { return cellSpursEventFlagGetTasksetAddress(object_ea, pEaTaskset); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
+#endif /* __cplusplus */
+
+#else /* PPU */
+
 /* Underlying init entry point; both Initialize wrappers below call
  * it with one of {spurs, taskset} nulled. */
 extern int _cellSpursEventFlagInitialize(CellSpurs *spurs,
@@ -158,5 +262,7 @@ public:
 }   /* namespace cell */
 
 #endif
+
+#endif /* __SPU__ */
 
 #endif /* __PS3DK_CELL_SPURS_EVENT_FLAG_H__ */

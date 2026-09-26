@@ -17,6 +17,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#ifdef __SPU__
+#include <spu_intrinsics.h>
+#endif
 
 #include <cell/spurs/types.h>
 
@@ -55,6 +58,12 @@ extern int                 cellSpursModulePollStatus(uint32_t *pStatus);
 
 /* Tear the running module down via the kernel.  Does not return. */
 extern void                cellSpursModuleExit(void) __attribute__((noreturn));
+
+#ifdef __SPU__
+/* Read the 64-bit GUID recorded in an SPU program's GUID quadword. */
+extern int                 cellSpursGetSpuGuid(const qword *pSpuGuid,
+                                               uint64_t *guid);
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -29,6 +29,74 @@ typedef struct CellSpursQueue {
     unsigned char skip[CELL_SPURS_QUEUE_SIZE];
 } __attribute__((aligned(CELL_SPURS_QUEUE_ALIGN))) CellSpursQueue;
 
+#ifdef __SPU__
+
+/* SPU side: the queue lives in main memory and is named by its
+ * effective address.  An entry moves between the caller's LS buffer and
+ * the queue by DMA on `tag`: *Begin starts the transfer and *End
+ * completes it.  Blocking forms are valid only in a SPURS task.
+ * Declared only: the SPU runtime does not implement these yet. */
+extern int _cellSpursQueueInitialize(uint64_t ea, uint64_t buffer,
+                                     unsigned int size, unsigned int depth,
+                                     CellSpursQueueDirection direction,
+                                     unsigned isIwl);
+extern int _cellSpursQueuePushBegin(uint64_t ea, const void *buffer,
+                                    unsigned int tag, unsigned isBlocking);
+extern int cellSpursQueuePushEnd(uint64_t ea, unsigned int tag);
+extern int _cellSpursQueuePopBegin(uint64_t ea, void *buffer,
+                                   unsigned int tag, unsigned isBlocking);
+extern int _cellSpursQueuePopEnd(uint64_t ea, unsigned int tag,
+                                 unsigned isPeek);
+extern int cellSpursQueueSize(uint64_t ea, unsigned int *size);
+extern int cellSpursQueueDepth(uint64_t ea, unsigned int *depth);
+extern int cellSpursQueueClear(uint64_t ea);
+extern int cellSpursQueueGetDirection(uint64_t ea,
+                                      CellSpursQueueDirection *direction);
+extern int cellSpursQueueGetEntrySize(uint64_t ea, unsigned int *entry_size);
+extern int cellSpursQueueGetTasksetAddress(uint64_t ea, uint64_t *pEaTaskset);
+
+#define cellSpursQueueInitialize(ea, buffer, size, depth, direction) \
+    _cellSpursQueueInitialize((ea), (buffer), (size), (depth), (direction), 0)
+#define cellSpursQueueInitializeIWL(ea, buffer, size, depth, direction) \
+    _cellSpursQueueInitialize((ea), (buffer), (size), (depth), (direction), 1)
+#define cellSpursQueuePushBegin(ea, buffer, tag) \
+    _cellSpursQueuePushBegin((ea), (buffer), (tag), 1)
+#define cellSpursQueueTryPushBegin(ea, buffer, tag) \
+    _cellSpursQueuePushBegin((ea), (buffer), (tag), 0)
+#define cellSpursQueuePopBegin(ea, buffer, tag) \
+    _cellSpursQueuePopBegin((ea), (buffer), (tag), 1)
+#define cellSpursQueueTryPopBegin(ea, buffer, tag) \
+    _cellSpursQueuePopBegin((ea), (buffer), (tag), 0)
+#define cellSpursQueuePeekBegin(ea, buffer, tag) \
+    _cellSpursQueuePopBegin((ea), (buffer), (tag), 1)
+#define cellSpursQueueTryPeekBegin(ea, buffer, tag) \
+    _cellSpursQueuePopBegin((ea), (buffer), (tag), 0)
+#define cellSpursQueuePopEnd(ea, tag)  _cellSpursQueuePopEnd((ea), (tag), 0)
+#define cellSpursQueuePeekEnd(ea, tag) _cellSpursQueuePopEnd((ea), (tag), 1)
+
+#ifdef __cplusplus
+}   /* extern "C" */
+
+namespace cell {
+namespace Spurs {
+
+class Queue : public CellSpursQueue {
+public:
+    static const uint32_t kAlign = CELL_SPURS_QUEUE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_QUEUE_SIZE;
+
+    static const CellSpursQueueDirection kSpu2Spu = CELL_SPURS_QUEUE_SPU2SPU;
+    static const CellSpursQueueDirection kSpu2Ppu = CELL_SPURS_QUEUE_SPU2PPU;
+    static const CellSpursQueueDirection kPpu2Spu = CELL_SPURS_QUEUE_PPU2SPU;
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
+#endif /* __cplusplus */
+
+#else /* PPU */
+
 extern int _cellSpursQueueInitialize(CellSpurs *spurs,
                                      CellSpursTaskset *taskset,
                                      CellSpursQueue *queue,
@@ -177,5 +245,7 @@ public:
 }   /* namespace cell */
 
 #endif
+
+#endif /* __SPU__ */
 
 #endif /* __PS3DK_CELL_SPURS_QUEUE_H__ */

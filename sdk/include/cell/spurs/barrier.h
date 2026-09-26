@@ -22,6 +22,42 @@ typedef struct CellSpursBarrier {
     unsigned char skip[CELL_SPURS_BARRIER_SIZE];
 } __attribute__((aligned(CELL_SPURS_BARRIER_ALIGN))) CellSpursBarrier;
 
+#ifdef __SPU__
+
+/* SPU side: the barrier lives in main memory and is named by its
+ * effective address.  A task notifies its arrival, then waits for the
+ * others; the blocking forms are valid only in a SPURS task.  Declared
+ * only: the SPU runtime does not implement these yet. */
+extern int cellSpursBarrierInitialize(uint64_t ea, unsigned int total);
+extern int _cellSpursBarrierNotify(uint64_t ea, unsigned isBlocking);
+extern int _cellSpursBarrierWait(uint64_t ea, unsigned isBlocking);
+extern int cellSpursBarrierGetTasksetAddress(uint64_t ea,
+                                             uint64_t *pEaTaskset);
+
+#define cellSpursBarrierNotify(ea)     _cellSpursBarrierNotify((ea), 1)
+#define cellSpursBarrierTryNotify(ea)  _cellSpursBarrierNotify((ea), 0)
+#define cellSpursBarrierWait(ea)       _cellSpursBarrierWait((ea), 1)
+#define cellSpursBarrierTryWait(ea)    _cellSpursBarrierWait((ea), 0)
+
+#ifdef __cplusplus
+}   /* extern "C" */
+
+namespace cell {
+namespace Spurs {
+
+class Barrier : public CellSpursBarrier {
+public:
+    static const uint32_t kAlign = CELL_SPURS_BARRIER_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_BARRIER_SIZE;
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
+#endif   /* __cplusplus */
+
+#else /* PPU */
+
 extern int cellSpursBarrierInitialize(CellSpursTaskset *taskset,
                                       CellSpursBarrier *barrier,
                                       unsigned int total);
@@ -52,5 +88,7 @@ public:
 }   /* namespace cell */
 
 #endif   /* __cplusplus */
+
+#endif   /* __SPU__ */
 
 #endif   /* __PS3DK_CELL_SPURS_BARRIER_H__ */

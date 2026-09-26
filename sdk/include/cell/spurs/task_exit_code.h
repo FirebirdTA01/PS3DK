@@ -10,17 +10,30 @@
 #ifndef __PS3DK_CELL_SPURS_TASK_EXIT_CODE_H__
 #define __PS3DK_CELL_SPURS_TASK_EXIT_CODE_H__
 
+#include <stdint.h>
 #include <cell/spurs/task_types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#ifdef __SPU__
+
+/* SPU side: the exit-code container is named by its effective address.
+ * Declared only: the SPU runtime does not implement these yet. */
+extern int cellSpursTaskExitCodeInitialize(uint64_t eaExitCode);
+extern int cellSpursTaskExitCodeGet(uint64_t eaExitCode, int *value);
+extern int cellSpursTaskExitCodeTryGet(uint64_t eaExitCode, int *value);
+
+#else /* PPU */
+
 extern int cellSpursTaskExitCodeInitialize(CellSpursTaskExitCode *exitCode);
 extern int cellSpursTaskExitCodeGet(CellSpursTaskExitCode *exitCode,
                                     int *value);
 extern int cellSpursTaskExitCodeTryGet(CellSpursTaskExitCode *exitCode,
                                        int *value);
+
+#endif /* __SPU__ */
 
 #ifdef __cplusplus
 }   /* extern "C" */

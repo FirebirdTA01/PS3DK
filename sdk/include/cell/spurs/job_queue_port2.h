@@ -199,9 +199,41 @@ extern int cellSpursJobQueuePort2AllocateJobDescriptor(
     uint64_t *eaAllocatedJobDesc);
 
 extern int cellSpursJobQueuePort2Sync(uint64_t eaPort2, unsigned flag);
-extern int cellSpursJobQueuePort2PushFlush(uint64_t eaPort2, unsigned flag);
+extern int cellSpursJobQueuePort2PushFlush(uint64_t eaPort2,
+                                           unsigned int dmaTag, unsigned flag);
 extern int cellSpursJobQueuePort2PushSync(uint64_t eaPort2,
-                                          unsigned tagMask, unsigned flag);
+                                          unsigned tagMask,
+                                          unsigned int dmaTag, unsigned flag);
+
+/* -- Push inlines over the *Body entry points ------------------------
+ * `flag` takes CELL_SPURS_JOBQUEUE_FLAG_*.  No descriptor pre-check is
+ * done on the SPU side. */
+
+static inline int cellSpursJobQueuePort2PushJob(uint64_t eaPort2, uint64_t eaJob,
+                                                size_t sizeDesc, unsigned tag,
+                                                unsigned int dmaTag, unsigned flag)
+{ return _cellSpursJobQueuePort2PushJobBody(eaPort2, eaJob, sizeDesc, tag, dmaTag, flag, 0); }
+
+static inline int cellSpursJobQueuePort2PushAndReleaseJob(uint64_t eaPort2, uint64_t eaJob,
+                                                          size_t sizeDesc, unsigned tag,
+                                                          unsigned int dmaTag, unsigned flag)
+{ return _cellSpursJobQueuePort2PushJobBody(eaPort2, eaJob, sizeDesc, tag, dmaTag, flag, 1); }
+
+static inline int cellSpursJobQueuePort2PushJobList(uint64_t eaPort2, uint64_t eaJobList,
+                                                    unsigned tag, unsigned int dmaTag,
+                                                    unsigned flag)
+{ return _cellSpursJobQueuePort2PushJobListBody(eaPort2, eaJobList, tag, dmaTag, flag); }
+
+static inline int cellSpursJobQueuePort2CopyPushJob(uint64_t eaPort2,
+                                                    const CellSpursJobHeader *pJob,
+                                                    size_t sizeDesc,
+                                                    size_t sizeDescFromPool,
+                                                    unsigned tag, unsigned int dmaTag,
+                                                    unsigned flag)
+{
+    return _cellSpursJobQueuePort2CopyPushJobBody(eaPort2, pJob, sizeDesc,
+                                                  sizeDescFromPool, tag, dmaTag, flag);
+}
 
 #endif /* __SPU__ */
 
@@ -210,5 +242,75 @@ extern int cellSpursJobQueuePort2PushSync(uint64_t eaPort2,
 #endif
 
 #include <cell/spurs/job_queue_port2_cpp_types.h>
+
+#if defined(__cplusplus) && defined(__SPU__)
+
+__CELL_SPURS_JOBQUEUE_BEGIN
+
+/* SPU handle on a Port2 in main memory: holds the port's EA (set with
+ * setObject) and forwards to the EA-based Port2 API.  Not copyable. */
+class Port2Stub {
+protected:
+    uint64_t mEaPort2;
+
+private:
+    Port2Stub(const Port2Stub &);
+    Port2Stub &operator=(const Port2Stub &);
+
+public:
+    static const unsigned kFlagSyncJob      = CELL_SPURS_JOBQUEUE_FLAG_SYNC_JOB;
+    static const unsigned kFlagExclusiveJob = CELL_SPURS_JOBQUEUE_FLAG_EXCLUSIVE_JOB;
+    static const unsigned kFlagNonBlocking  = CELL_SPURS_JOBQUEUE_FLAG_NON_BLOCKING;
+
+    Port2Stub() : mEaPort2(0) {}
+    ~Port2Stub() {}
+
+    void setObject(uint64_t eaPort2) { mEaPort2 = eaPort2; }
+    uint64_t getObject() { return mEaPort2; }
+
+    int create(uint64_t eaJobQueue, void *reserved = 0)
+    {
+        (void)reserved;
+        return cellSpursJobQueuePort2Create(mEaPort2, eaJobQueue);
+    }
+    int destroy()
+    { return cellSpursJobQueuePort2Destroy(mEaPort2); }
+    uint64_t getJobQueue()
+    { return cellSpursJobQueuePort2GetJobQueue(mEaPort2); }
+
+    int pushJob(uint64_t eaJob, size_t sizeDesc, unsigned tag,
+                unsigned int dmaTag, unsigned flag)
+    { return cellSpursJobQueuePort2PushJob(mEaPort2, eaJob, sizeDesc, tag, dmaTag, flag); }
+    int pushAndReleaseJob(uint64_t eaJob, size_t sizeDesc, unsigned tag,
+                          unsigned int dmaTag, unsigned flag)
+    { return cellSpursJobQueuePort2PushAndReleaseJob(mEaPort2, eaJob, sizeDesc, tag, dmaTag, flag); }
+    int pushJobList(uint64_t eaJobList, unsigned tag,
+                    unsigned int dmaTag, unsigned flag)
+    { return cellSpursJobQueuePort2PushJobList(mEaPort2, eaJobList, tag, dmaTag, flag); }
+    int copyPushJob(const CellSpursJobHeader *pJob, size_t sizeDesc,
+                    size_t sizeDescFromPool, unsigned tag,
+                    unsigned int dmaTag, unsigned flag)
+    {
+        return cellSpursJobQueuePort2CopyPushJob(mEaPort2, pJob, sizeDesc,
+                                                 sizeDescFromPool, tag, dmaTag, flag);
+    }
+    int allocateJobDescriptor(size_t sizeDesc, unsigned int dmaTag,
+                              unsigned flag, uint64_t *eaAllocatedJobDesc)
+    {
+        return cellSpursJobQueuePort2AllocateJobDescriptor(mEaPort2, sizeDesc, dmaTag,
+                                                           flag, eaAllocatedJobDesc);
+    }
+
+    int sync(unsigned flag)
+    { return cellSpursJobQueuePort2Sync(mEaPort2, flag); }
+    int pushFlush(unsigned int dmaTag, unsigned flag)
+    { return cellSpursJobQueuePort2PushFlush(mEaPort2, dmaTag, flag); }
+    int pushSync(unsigned tagMask, unsigned int dmaTag, unsigned flag)
+    { return cellSpursJobQueuePort2PushSync(mEaPort2, tagMask, dmaTag, flag); }
+};
+
+__CELL_SPURS_JOBQUEUE_END
+
+#endif /* __cplusplus && __SPU__ */
 
 #endif /* __PS3DK_CELL_SPURS_JOB_QUEUE_PORT2_H__ */

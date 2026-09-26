@@ -359,6 +359,108 @@ extern int _cellSpursJobQueuePortPushSync(uint64_t eaPort,
                                           unsigned int dmaTag,
                                           unsigned isBlocking);
 
+/* -- Push inlines over the *Body entry points ------------------------
+ * The Try* forms return instead of waiting for queue space.  No
+ * descriptor pre-check is done on the SPU side. */
+
+static inline int cellSpursJobQueuePortPush(uint64_t eaPort,
+                                            uint64_t eaJobDescriptor,
+                                            size_t sizeDesc,
+                                            unsigned int dmaTag,
+                                            unsigned int isSync)
+{ return _cellSpursJobQueuePortPushBody(eaPort, eaJobDescriptor, sizeDesc, dmaTag, isSync, 1); }
+
+static inline int cellSpursJobQueuePortPushJob(uint64_t eaPort,
+                                               uint64_t eaJobDescriptor,
+                                               size_t sizeDesc, unsigned tag,
+                                               unsigned int dmaTag,
+                                               unsigned int isSync)
+{ return _cellSpursJobQueuePortPushJobBody(eaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync, 0, 1); }
+
+static inline int cellSpursJobQueuePortTryPushJob(uint64_t eaPort,
+                                                  uint64_t eaJobDescriptor,
+                                                  size_t sizeDesc, unsigned tag,
+                                                  unsigned int dmaTag,
+                                                  unsigned int isSync)
+{ return _cellSpursJobQueuePortPushJobBody(eaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync, 0, 0); }
+
+static inline int cellSpursJobQueuePortPushExclusiveJob(uint64_t eaPort,
+                                                        uint64_t eaJobDescriptor,
+                                                        size_t sizeDesc, unsigned tag,
+                                                        unsigned int dmaTag,
+                                                        unsigned int isSync)
+{ return _cellSpursJobQueuePortPushJobBody(eaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync, 1, 1); }
+
+static inline int cellSpursJobQueuePortTryPushExclusiveJob(uint64_t eaPort,
+                                                           uint64_t eaJobDescriptor,
+                                                           size_t sizeDesc, unsigned tag,
+                                                           unsigned int dmaTag,
+                                                           unsigned int isSync)
+{ return _cellSpursJobQueuePortPushJobBody(eaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync, 1, 0); }
+
+static inline int cellSpursJobQueuePortCopyPush(uint64_t eaPort,
+                                                const CellSpursJobHeader *pJob,
+                                                size_t sizeDesc,
+                                                unsigned int dmaTag,
+                                                unsigned int isSync)
+{ return _cellSpursJobQueuePortCopyPushBody(eaPort, pJob, sizeDesc, dmaTag, isSync, 1); }
+
+static inline int cellSpursJobQueuePortCopyPushJob(uint64_t eaPort,
+                                                   const CellSpursJobHeader *pJob,
+                                                   size_t sizeDesc, unsigned tag,
+                                                   unsigned int dmaTag,
+                                                   unsigned int isSync)
+{ return _cellSpursJobQueuePortCopyPushJobBody(eaPort, pJob, sizeDesc, tag, dmaTag, isSync, 0, 1); }
+
+static inline int cellSpursJobQueuePortTryCopyPushJob(uint64_t eaPort,
+                                                      const CellSpursJobHeader *pJob,
+                                                      size_t sizeDesc, unsigned tag,
+                                                      unsigned int dmaTag,
+                                                      unsigned int isSync)
+{ return _cellSpursJobQueuePortCopyPushJobBody(eaPort, pJob, sizeDesc, tag, dmaTag, isSync, 0, 0); }
+
+static inline int cellSpursJobQueuePortCopyPushExclusiveJob(uint64_t eaPort,
+                                                            const CellSpursJobHeader *pJob,
+                                                            size_t sizeDesc, unsigned tag,
+                                                            unsigned int dmaTag,
+                                                            unsigned int isSync)
+{ return _cellSpursJobQueuePortCopyPushJobBody(eaPort, pJob, sizeDesc, tag, dmaTag, isSync, 1, 1); }
+
+static inline int cellSpursJobQueuePortTryCopyPushExclusiveJob(uint64_t eaPort,
+                                                               const CellSpursJobHeader *pJob,
+                                                               size_t sizeDesc, unsigned tag,
+                                                               unsigned int dmaTag,
+                                                               unsigned int isSync)
+{ return _cellSpursJobQueuePortCopyPushJobBody(eaPort, pJob, sizeDesc, tag, dmaTag, isSync, 1, 0); }
+
+static inline int cellSpursJobQueuePortPushJobList(uint64_t eaPort,
+                                                   uint64_t eaJobList,
+                                                   unsigned tag,
+                                                   unsigned int dmaTag,
+                                                   unsigned int isSync)
+{ return _cellSpursJobQueuePortPushJobListBody(eaPort, eaJobList, tag, dmaTag, isSync, 1); }
+
+static inline int cellSpursJobQueuePortTryPushJobList(uint64_t eaPort,
+                                                      uint64_t eaJobList,
+                                                      unsigned tag,
+                                                      unsigned int dmaTag,
+                                                      unsigned int isSync)
+{ return _cellSpursJobQueuePortPushJobListBody(eaPort, eaJobList, tag, dmaTag, isSync, 0); }
+
+static inline int cellSpursJobQueuePortPushFlush(uint64_t eaPort, unsigned int dmaTag)
+{ return _cellSpursJobQueuePortPushFlush(eaPort, dmaTag, 1); }
+
+static inline int cellSpursJobQueuePortTryPushFlush(uint64_t eaPort, unsigned int dmaTag)
+{ return _cellSpursJobQueuePortPushFlush(eaPort, dmaTag, 0); }
+
+static inline int cellSpursJobQueuePortPushSync(uint64_t eaPort, unsigned tagMask,
+                                                unsigned int dmaTag)
+{ return _cellSpursJobQueuePortPushSync(eaPort, tagMask, dmaTag, 1); }
+
+static inline int cellSpursJobQueuePortTryPushSync(uint64_t eaPort, unsigned tagMask,
+                                                   unsigned int dmaTag)
+{ return _cellSpursJobQueuePortPushSync(eaPort, tagMask, dmaTag, 0); }
+
 #endif /* __SPU__ */
 
 #ifdef __cplusplus
@@ -366,5 +468,111 @@ extern int _cellSpursJobQueuePortPushSync(uint64_t eaPort,
 #endif
 
 #include <cell/spurs/job_queue_port_cpp_types.h>
+
+#if defined(__cplusplus) && defined(__SPU__)
+
+__CELL_SPURS_JOBQUEUE_BEGIN
+
+/* SPU handle on a job-queue port in main memory: holds the port's EA
+ * and forwards to the EA-based port API.  Not copyable. */
+class PortContainer {
+protected:
+    uint64_t mEaPort;
+
+private:
+    PortContainer(const PortContainer &);
+    PortContainer &operator=(const PortContainer &);
+
+public:
+    PortContainer(uint64_t eaPort) : mEaPort(eaPort) {}
+    ~PortContainer() {}
+
+    int initialize(uint64_t eaJobQueue, unsigned isMTSafe = 1)
+    { return cellSpursJobQueuePortInitialize(mEaPort, eaJobQueue, isMTSafe); }
+    int finalize()
+    { return cellSpursJobQueuePortFinalize(mEaPort); }
+    uint64_t getJobQueue()
+    { return cellSpursJobQueuePortGetJobQueue(mEaPort); }
+
+    int push(uint64_t eaJobDescriptor, size_t sizeDesc,
+             unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortPush(mEaPort, eaJobDescriptor, sizeDesc, dmaTag, isSync); }
+    int pushJob(uint64_t eaJobDescriptor, size_t sizeDesc, unsigned tag,
+                unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortPushJob(mEaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync); }
+    int tryPushJob(uint64_t eaJobDescriptor, size_t sizeDesc, unsigned tag,
+                   unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortTryPushJob(mEaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync); }
+    int pushExclusiveJob(uint64_t eaJobDescriptor, size_t sizeDesc, unsigned tag,
+                         unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortPushExclusiveJob(mEaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync); }
+    int tryPushExclusiveJob(uint64_t eaJobDescriptor, size_t sizeDesc, unsigned tag,
+                            unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortTryPushExclusiveJob(mEaPort, eaJobDescriptor, sizeDesc, tag, dmaTag, isSync); }
+    int pushJobList(uint64_t eaJobList, unsigned tag,
+                    unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortPushJobList(mEaPort, eaJobList, tag, dmaTag, isSync); }
+    int tryPushJobList(uint64_t eaJobList, unsigned tag,
+                       unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortTryPushJobList(mEaPort, eaJobList, tag, dmaTag, isSync); }
+
+    int copyPush(const CellSpursJobHeader *pJob, size_t sizeJobDesc,
+                 unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortCopyPush(mEaPort, pJob, sizeJobDesc, dmaTag, isSync); }
+    int copyPushJob(const CellSpursJobHeader *pJob, size_t sizeJobDesc, unsigned tag,
+                    unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortCopyPushJob(mEaPort, pJob, sizeJobDesc, tag, dmaTag, isSync); }
+    int tryCopyPushJob(const CellSpursJobHeader *pJob, size_t sizeJobDesc, unsigned tag,
+                       unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortTryCopyPushJob(mEaPort, pJob, sizeJobDesc, tag, dmaTag, isSync); }
+    int copyPushExclusiveJob(const CellSpursJobHeader *pJob, size_t sizeJobDesc, unsigned tag,
+                             unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortCopyPushExclusiveJob(mEaPort, pJob, sizeJobDesc, tag, dmaTag, isSync); }
+    int tryCopyPushExclusiveJob(const CellSpursJobHeader *pJob, size_t sizeJobDesc, unsigned tag,
+                                unsigned int dmaTag, unsigned int isSync)
+    { return cellSpursJobQueuePortTryCopyPushExclusiveJob(mEaPort, pJob, sizeJobDesc, tag, dmaTag, isSync); }
+
+    int sync()
+    { return cellSpursJobQueuePortSync(mEaPort); }
+    int trySync()
+    { return cellSpursJobQueuePortTrySync(mEaPort); }
+    int pushFlush(unsigned int dmaTag)
+    { return cellSpursJobQueuePortPushFlush(mEaPort, dmaTag); }
+    int tryPushFlush(unsigned int dmaTag)
+    { return cellSpursJobQueuePortTryPushFlush(mEaPort, dmaTag); }
+    int pushSync(unsigned tagMask, unsigned int dmaTag)
+    { return cellSpursJobQueuePortPushSync(mEaPort, tagMask, dmaTag); }
+    int tryPushSync(unsigned tagMask, unsigned int dmaTag)
+    { return cellSpursJobQueuePortTryPushSync(mEaPort, tagMask, dmaTag); }
+};
+
+/* A port whose descriptor buffer (numEntries JobType slots) sits in
+ * main memory directly after the port object itself. */
+template <typename JobType, int numEntries>
+class PortWithDescriptorBufferContainer : public PortContainer {
+public:
+    PortWithDescriptorBufferContainer(uint64_t eaPort) : PortContainer(eaPort) {}
+    ~PortWithDescriptorBufferContainer() {}
+
+    int initialize(uint64_t eaJobQueue, unsigned isMTSafe = 1)
+    {
+        return cellSpursJobQueuePortInitializeWithDescriptorBuffer(
+            mEaPort, eaJobQueue, mEaPort + sizeof(CellSpursJobQueuePort),
+            sizeof(JobType), numEntries, isMTSafe);
+    }
+    int copyPush(const JobType *pJob, size_t sizeJobDesc,
+                 unsigned int dmaTag, unsigned int isSync)
+    { return PortContainer::copyPush(reinterpret_cast<const CellSpursJobHeader *>(pJob), sizeJobDesc, dmaTag, isSync); }
+    int copyPushJob(const JobType *pJob, size_t sizeJobDesc, unsigned tag,
+                    unsigned int dmaTag, unsigned int isSync)
+    { return PortContainer::copyPushJob(reinterpret_cast<const CellSpursJobHeader *>(pJob), sizeJobDesc, tag, dmaTag, isSync); }
+    int tryCopyPushJob(const JobType *pJob, size_t sizeJobDesc, unsigned tag,
+                       unsigned int dmaTag, unsigned int isSync)
+    { return PortContainer::tryCopyPushJob(reinterpret_cast<const CellSpursJobHeader *>(pJob), sizeJobDesc, tag, dmaTag, isSync); }
+};
+
+__CELL_SPURS_JOBQUEUE_END
+
+#endif /* __cplusplus && __SPU__ */
 
 #endif /* __PS3DK_CELL_SPURS_JOB_QUEUE_PORT_H__ */

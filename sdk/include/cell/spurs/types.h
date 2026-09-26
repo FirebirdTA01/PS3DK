@@ -39,6 +39,13 @@ extern "C" {
 #define CELL_SPURS_SIZE                    4096
 #define CELL_SPURS_SIZE2                   8192
 
+/* Fixed SPU local-storage addresses the SPURS kernel reserves in every
+ * SPU it runs on, and the MFC tag the kernel keeps for its own DMA. */
+#define CELL_SPURS_INTERRUPT_VECTOR        0x000
+#define CELL_SPURS_LOCK_LINE               0x080
+#define CELL_SPURS_KERNEL_CONTEXT          0x100
+#define CELL_SPURS_KERNEL_DMA_TAG_ID       31
+
 typedef unsigned CellSpursWorkloadId;
 typedef unsigned CellSpursTaskId;
 

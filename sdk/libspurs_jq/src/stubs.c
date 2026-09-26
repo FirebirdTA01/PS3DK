@@ -438,15 +438,17 @@ int cellSpursJobQueuePort2Sync(uint64_t eaPort2, unsigned flag)
     return _STUB_INVAL;
 }
 
-int cellSpursJobQueuePort2PushFlush(uint64_t eaPort2, unsigned flag)
+int cellSpursJobQueuePort2PushFlush(uint64_t eaPort2, unsigned int dmaTag,
+                                    unsigned flag)
 {
-    _UNUSED(eaPort2); _UNUSED(flag);
+    _UNUSED(eaPort2); _UNUSED(dmaTag); _UNUSED(flag);
     return _STUB_INVAL;
 }
 
-int cellSpursJobQueuePort2PushSync(uint64_t eaPort2, unsigned tagMask, unsigned flag)
+int cellSpursJobQueuePort2PushSync(uint64_t eaPort2, unsigned tagMask,
+                                   unsigned int dmaTag, unsigned flag)
 {
-    _UNUSED(eaPort2); _UNUSED(tagMask); _UNUSED(flag);
+    _UNUSED(eaPort2); _UNUSED(tagMask); _UNUSED(dmaTag); _UNUSED(flag);
     return _STUB_INVAL;
 }
 

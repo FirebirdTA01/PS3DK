@@ -22,6 +22,79 @@ typedef struct CellSpursSemaphore {
     unsigned char skip[CELL_SPURS_SEMAPHORE_SIZE];
 } __attribute__((aligned(CELL_SPURS_SEMAPHORE_ALIGN))) CellSpursSemaphore;
 
+#ifdef __SPU__
+
+/* SPU side: the semaphore lives in main memory and is named by its
+ * effective address.  P() blocks the calling task (valid only in a
+ * SPURS task) while the count is zero; V() increments it and wakes a
+ * waiter.  P and V are in libspurs_task.a; Initialize and
+ * GetTasksetAddress are declared only (not yet in the SPU runtime). */
+extern int _cellSpursSemaphoreInitialize(uint64_t ea, int total,
+                                         unsigned isIwl);
+extern int cellSpursSemaphoreP(uint64_t ea);
+extern int cellSpursSemaphoreV(uint64_t ea);
+extern int cellSpursSemaphoreGetTasksetAddress(uint64_t ea,
+                                               uint64_t *pEaTaskset);
+
+#define cellSpursSemaphoreInitialize(ea, total) \
+    _cellSpursSemaphoreInitialize((ea), (total), 0)
+#define cellSpursSemaphoreInitializeIWL(ea, total) \
+    _cellSpursSemaphoreInitialize((ea), (total), 1)
+
+/* Task-signal helper: wake task `idTask` of the taskset at `eaTaskset`
+ * (also declared by cell/spurs/task.h). */
+extern int cellSpursSendSignal(uint64_t eaTaskset, CellSpursTaskId idTask);
+
+/* Internal SPU runtime helpers exported for cross-object calls inside
+ * libspurs_task.a.  Not part of the public surface but declared here
+ * so user code that re-implements a wait primitive in assembly has a
+ * symbol to brsl against. */
+extern int      _cellSpursTaskCanCallBlockWait(void);
+extern uint64_t _cellSpursGetWorkloadFlag(void);
+extern int      _cellSpursSendWorkloadSignal(int signalBit);
+
+#ifdef __cplusplus
+}   /* extern "C" */
+
+namespace cell {
+namespace Spurs {
+
+class Semaphore : public CellSpursSemaphore {
+public:
+    static const uint32_t kAlign = CELL_SPURS_SEMAPHORE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_SEMAPHORE_SIZE;
+};
+
+/* SPU handle on a semaphore in main memory: holds its EA and forwards
+ * to the EA-based C API. */
+class SemaphoreStub {
+protected:
+    uint64_t object_ea;
+
+public:
+    static const uint32_t kAlign = CELL_SPURS_SEMAPHORE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_SEMAPHORE_SIZE;
+
+    void setObject(uint64_t ea) { object_ea = ea; }
+    uint64_t getObject(void) const { return object_ea; }
+
+    int initialize(int total) const
+    { return cellSpursSemaphoreInitialize(object_ea, total); }
+    int initializeIWL(int total) const
+    { return cellSpursSemaphoreInitializeIWL(object_ea, total); }
+    int p(void) const { return cellSpursSemaphoreP(object_ea); }
+    int v(void) const { return cellSpursSemaphoreV(object_ea); }
+    int getTasksetAddress(uint64_t *pEaTaskset) const
+    { return cellSpursSemaphoreGetTasksetAddress(object_ea, pEaTaskset); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
+#endif /* __cplusplus */
+
+#else /* PPU */
+
 extern int _cellSpursSemaphoreInitialize(CellSpurs *spurs,
                                          CellSpursTaskset *taskset,
                                          CellSpursSemaphore *semaphore,
@@ -41,29 +114,6 @@ cellSpursSemaphoreInitializeIWL(CellSpurs *spurs,
                                 CellSpursSemaphore *semaphore,
                                 int total)
 { return _cellSpursSemaphoreInitialize(spurs, 0, semaphore, total); }
-
-#ifdef __SPU__
-/* SPU-side counting operations.  These take a 64-bit EA pointing at
- * the CellSpursSemaphore in main memory and run an atomic GETLLAR /
- * PUTLLC retry loop on the cache line.  P() blocks the calling task
- * via the SPRX BLOCK service when the count is zero; V() wakes the
- * oldest waiter (if any) by calling the workload-signal path. */
-extern int cellSpursSemaphoreP(uint64_t eaSemaphore);
-extern int cellSpursSemaphoreV(uint64_t eaSemaphore);
-
-/* Task-signal helper: wake a specific task in a taskset by EA + index.
- * Uses GETLLAR/PUTLLC on the taskset signal line and dispatches the
- * workload-signal path if the bit transitions 0 -> 1. */
-extern int cellSpursSendSignal(uint64_t eaTaskset, int taskIndex);
-
-/* Internal SPU runtime helpers exported for cross-object calls inside
- * libspurs_task.a.  Not part of the public surface but declared here
- * so user code that re-implements a wait primitive in assembly has a
- * symbol to brsl against. */
-extern int      _cellSpursTaskCanCallBlockWait(void);
-extern uint64_t _cellSpursGetWorkloadFlag(void);
-extern int      _cellSpursSendWorkloadSignal(int signalBit);
-#endif /* __SPU__ */
 
 #ifdef __cplusplus
 }   /* extern "C" */
@@ -94,5 +144,7 @@ public:
 }   /* namespace cell */
 
 #endif
+
+#endif /* __SPU__ */
 
 #endif /* __PS3DK_CELL_SPURS_SEMAPHORE_H__ */
