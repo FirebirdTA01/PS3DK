@@ -57,14 +57,13 @@ int cellSyncRwmInitialize(uint64_t ea, uint64_t ptr_buffer,
     if (!mfc_legal_size(buffer_size))
         return CELL_SYNC_ERROR_INVAL;
 
-    lockline[0] = ((uint64_t)0 << 32) | buffer_size;
-    lockline[1] = ptr_buffer;
-
-    cellAtomicStore64(lockline, ea, lockline[0]);
-
-    mfc_put(&lockline[1], ea + 8, 8, (unsigned int)tag, 0, 0);
-    mfc_write_tag_mask(1u << (unsigned int)tag);
-    mfc_read_tag_status_all();
+    /* One reservation round trip writes the lock word, size and buffer
+     * address together; the fields go into the line after it is read. */
+    do {
+        (void)cellAtomicLockLine64(lockline, ea);
+        lockline[1] = ptr_buffer;
+    } while (!cellAtomicStoreConditional64(lockline, ea,
+                                           (uint64_t)buffer_size));
 
     return CELL_OK;
 }

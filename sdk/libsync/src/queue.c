@@ -72,21 +72,17 @@ int cellSyncQueueInitialize(uint64_t ea, uint64_t ptr_buffer,
     if (!mfc_legal_size(buffer_size))
         return CELL_SYNC_ERROR_INVAL;
 
-    /* Build the full descriptor in the lockline, then DMA the whole
-     * 32 bytes to ea (32 is an MFC-legal transfer size).  Head is
-     * atomically published via cellAtomicStore64 first so any
-     * concurrent getllar sees a coherent head; the body fields are
-     * read-only after init so no race window. */
-    lockline[0] = 0;                     /* head: all-zero */
-    lockline[1] = (uint64_t)buffer_size << 32 | depth;
-    lockline[2] = ptr_buffer;
-    lockline[3] = tag;
-
-    cellAtomicStore64(lockline, ea, 0);
-
-    mfc_put(lockline, ea, 32, (unsigned int)tag, 0, 0);
-    mfc_write_tag_mask(1u << (unsigned int)tag);
-    mfc_read_tag_status_all();
+    /* Write the whole descriptor in one reservation round trip: read the
+     * line, fill the 32 descriptor bytes, store the line conditionally.
+     * The line is read first, so the fields must be written after the
+     * read, never staged in the LS buffer before it. */
+    do {
+        (void)cellAtomicLockLine64(lockline, ea);
+        lockline[0] = 0;                 /* head: no locks, empty */
+        lockline[1] = (uint64_t)buffer_size << 32 | depth;
+        lockline[2] = ptr_buffer;
+        lockline[3] = tag;
+    } while (!cellAtomicStoreConditional64(lockline, ea, 0));
 
     return CELL_OK;
 }
