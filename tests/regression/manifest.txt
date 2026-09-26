@@ -52,3 +52,7 @@ posix-time-lp64,tests/regression/posix-time/posix-time-lp64.fake.self,60,RAN-CLE
 # spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
 # registers across switches, Self(), argument errors; SPU exit status 0 = pass.
 spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL
+# spu-thread-args: an SPU thread's main() receives all four 64-bit
+# sys_spu_thread_argument words ($3-$6) from crt1.o; SPU exit status is
+# the mask of wrong arguments, 0 = pass.
+spu-thread-args,tests/regression/spu-thread-args/spu-thread-args.fake.self,60,RAN-CLEAN,SPU_THREAD_ARGS_OK,SPU_THREAD_ARGS_FAIL
