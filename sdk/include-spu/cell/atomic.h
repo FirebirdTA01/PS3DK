@@ -28,7 +28,7 @@ static inline uint32_t
 cellAtomicLockLine32(uint32_t *ls, uint64_t ea)
 {
     unsigned int i = ((uint32_t)ea & 0x7f) >> 2;
-    spu_hcmpeq(((uintptr_t)ls & 0x7f) == 0, 0);
+    spu_hcmpeq((int)(((uintptr_t)ls & 0x7f) == 0), 0);
     ea &= ~0x7f;
     mfc_getllar(ls, ea, 0, 0);
     mfc_read_atomic_status();
@@ -39,7 +39,7 @@ static inline int
 cellAtomicStoreConditional32(uint32_t *ls, uint64_t ea, uint32_t value)
 {
     unsigned int i = ((uint32_t)ea & 0x7f) >> 2;
-    spu_hcmpeq(((uintptr_t)ls & 0x7f) == 0, 0);
+    spu_hcmpeq((int)(((uintptr_t)ls & 0x7f) == 0), 0);
     ls[i] = value;
     ea &= ~0x7f;
     mfc_putllc(ls, ea, 0, 0);
@@ -154,7 +154,7 @@ static inline uint64_t
 cellAtomicLockLine64(uint64_t *ls, uint64_t ea)
 {
     unsigned int i = ((uint32_t)ea & 0x7f) >> 3;
-    spu_hcmpeq(((uintptr_t)ls & 0x7f) == 0, 0);
+    spu_hcmpeq((int)(((uintptr_t)ls & 0x7f) == 0), 0);
     ea &= ~0x7f;
     mfc_getllar(ls, ea, 0, 0);
     mfc_read_atomic_status();
@@ -165,7 +165,7 @@ static inline int
 cellAtomicStoreConditional64(uint64_t *ls, uint64_t ea, uint64_t value)
 {
     unsigned int i = ((uint32_t)ea & 0x7f) >> 3;
-    spu_hcmpeq(((uintptr_t)ls & 0x7f) == 0, 0);
+    spu_hcmpeq((int)(((uintptr_t)ls & 0x7f) == 0), 0);
     ls[i] = value;
     ea &= ~0x7f;
     mfc_putllc(ls, ea, 0, 0);

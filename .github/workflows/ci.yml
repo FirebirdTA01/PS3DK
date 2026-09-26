@@ -204,6 +204,10 @@ jobs:
       - name: Test SPU code can include the C++ vector math headers
         run: bash tests/sdk/spu-vectormath-include-test.sh
 
+      # Skips without PS3DEV; compiles this tree's SPU atomic header in C/C++.
+      - name: Test SPU atomic alignment predicates select integer intrinsics
+        run: bash tests/sdk/spu-atomic-overload-test.sh
+
       # Skips without PS3DEV; compiles this tree's GCM headers under -Werror.
       - name: Test the GCM headers define each macro once
         run: bash tests/sdk/gcm-redefinition-test.sh
