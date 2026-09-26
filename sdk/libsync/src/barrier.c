@@ -5,7 +5,8 @@
  *
  * Algorithm:
  *   Barrier is a single 32-bit word at ea containing {count, total_count}.
- *   - Initialize sets both fields via atomic store.
+ *   - Initialize sets both fields via atomic store; the count must be
+ *     1..32767 (else CELL_SYNC_ERROR_INVAL) and ea 4-byte aligned.
  *   - Notify atomically decrements count.  Does NOT re-arm -- this is
  *     a one-shot barrier; the caller re-initializes for next use.
  *   - Wait polls count until it reaches 0.
@@ -30,6 +31,12 @@ int cellSyncBarrierInitialize(uint64_t ea, uint16_t count, unsigned int tag)
     CellSyncBarrier b;
 
     (void)tag;
+
+    /* A barrier needs between 1 and 32767 participants. */
+    if (count == 0 || count > 0x7fff)
+        return CELL_SYNC_ERROR_INVAL;
+    if (ea & 3)
+        return CELL_SYNC_ERROR_ALIGN;
 
     b.total_count = count;
     b.count = count;

@@ -147,10 +147,17 @@ int cellKeySheapBarrierNew(CellKeySheapBarrier *obj, uint64_t ea_ksheap,
 
     if (rc == CELL_OK && object == 0) {
         rc = create(ea_ksheap, key, 128, &object);
-        if (rc == CELL_OK)
-            rc = publish(ea_ksheap, key, object,
-                         cellSyncBarrierInitialize(object, count,
-                                                   key_header.spu_tag1));
+        if (rc == CELL_OK) {
+            /* A barrier takes 1..32767 participants; libsync refuses the
+             * rest too, but the creator must not depend on that to undo
+             * its allocation. */
+            int init_rc = (count == 0 || count > 0x7fff)
+                              ? (int)CELL_SYNC_ERROR_INVAL
+                              : cellSyncBarrierInitialize(object, count,
+                                                          key_header.spu_tag1);
+
+            rc = publish(ea_ksheap, key, object, init_rc);
+        }
     }
     if (rc != CELL_OK)
         return rc;
