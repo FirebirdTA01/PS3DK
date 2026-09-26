@@ -78,6 +78,8 @@ HEADERS := \
     include/net/select.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
+    include/sys/prx.h \
+    include/lv2/prx.h \
     include/sys/time_util.h \
     include/sys/paths.h \
     include/sysutil/sysutil_sysparam.h \

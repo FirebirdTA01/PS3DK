@@ -222,6 +222,10 @@ jobs:
       - name: Test the GCM headers define each macro once
         run: bash tests/sdk/gcm-redefinition-test.sh
 
+      # Skips without PS3DEV; compiles this tree's PRX headers in every order.
+      - name: Test the PRX headers work alone and in either order
+        run: bash tests/sdk/prx-headers-test.sh
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.
