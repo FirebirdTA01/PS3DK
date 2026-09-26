@@ -6,7 +6,8 @@
  * has a packed 64-bit head word: rlock(8) | index(24) | wlock(8) |
  * size(24).  Mutating operations use getllar/putllc on the full
  * 128-byte lockline; element-data DMA occurs after the head-word
- * reservation succeeds.
+ * reservation succeeds, on the DMA tag the caller passes (the tag stored
+ * in the descriptor at Initialize is not used for element transfers).
  *
  * Algorithm: Cell BE Handbook, Chapter 19 (MFC Atomic Update Commands).
  */
@@ -42,7 +43,6 @@ static int write_head(uint64_t ea_queue, uint64_t head)
 static uint32_t read_depth(void)   { return (uint32_t)lockline[1]; }
 static uint32_t read_bsize(void)   { return (uint32_t)(lockline[1] >> 32); }
 static uint64_t read_buffer_ea(void) { return lockline[2]; }
-static uint32_t read_tag(void)     { return (uint32_t)lockline[3]; }
 
 /* --- MFC size validation --- */
 /* Valid element sizes: 1, 2, 4, 8, 16, or multiples of 16 up to 128. */
@@ -91,13 +91,16 @@ int cellSyncQueueInitialize(uint64_t ea, uint64_t ptr_buffer,
     return CELL_OK;
 }
 
-int cellSyncQueuePush(uint64_t ea, const void *buf)
+int cellSyncQueuePush(uint64_t ea, const void *buf, unsigned int tag)
 {
     uint64_t head;
     uint8_t  rlock, wlock;
     uint32_t index, size;
-    uint32_t depth, buffer_size, tag;
+    uint32_t depth, buffer_size;
     uint64_t buffer_ea;
+
+    if (tag > 31)
+        return CELL_SYNC_ERROR_INVAL;
 
     for (;;) {
         head = read_head(ea);
@@ -109,7 +112,6 @@ int cellSyncQueuePush(uint64_t ea, const void *buf)
         depth       = read_depth();
         buffer_size = read_bsize();
         buffer_ea   = read_buffer_ea();
-        tag         = read_tag();
 
         if (size >= depth)   continue;   /* full -- spin */
         if (wlock != 0)      continue;   /* another writer holding lock */
@@ -141,13 +143,16 @@ int cellSyncQueuePush(uint64_t ea, const void *buf)
     }
 }
 
-int cellSyncQueueTryPush(uint64_t ea, const void *buf)
+int cellSyncQueueTryPush(uint64_t ea, const void *buf, unsigned int tag)
 {
     uint64_t head;
     uint8_t  rlock, wlock;
     uint32_t index, size;
-    uint32_t depth, buffer_size, tag;
+    uint32_t depth, buffer_size;
     uint64_t buffer_ea;
+
+    if (tag > 31)
+        return CELL_SYNC_ERROR_INVAL;
 
     for (;;) {
         head = read_head(ea);
@@ -159,7 +164,6 @@ int cellSyncQueueTryPush(uint64_t ea, const void *buf)
         depth       = read_depth();
         buffer_size = read_bsize();
         buffer_ea   = read_buffer_ea();
-        tag         = read_tag();
 
         if (size >= depth)   return CELL_SYNC_ERROR_AGAIN;
         if (wlock != 0)      return CELL_SYNC_ERROR_AGAIN;
@@ -191,13 +195,16 @@ int cellSyncQueueTryPush(uint64_t ea, const void *buf)
     }
 }
 
-int cellSyncQueuePop(uint64_t ea, void *buf)
+int cellSyncQueuePop(uint64_t ea, void *buf, unsigned int tag)
 {
     uint64_t head;
     uint8_t  rlock, wlock;
     uint32_t index, size;
-    uint32_t depth, buffer_size, tag;
+    uint32_t depth, buffer_size;
     uint64_t buffer_ea;
+
+    if (tag > 31)
+        return CELL_SYNC_ERROR_INVAL;
 
     for (;;) {
         head = read_head(ea);
@@ -209,7 +216,6 @@ int cellSyncQueuePop(uint64_t ea, void *buf)
         depth       = read_depth();
         buffer_size = read_bsize();
         buffer_ea   = read_buffer_ea();
-        tag         = read_tag();
 
         if (size == 0)       continue;   /* empty -- spin */
         if (rlock != 0)      continue;   /* another reader holding lock */
@@ -242,13 +248,16 @@ int cellSyncQueuePop(uint64_t ea, void *buf)
     }
 }
 
-int cellSyncQueueTryPop(uint64_t ea, void *buf)
+int cellSyncQueueTryPop(uint64_t ea, void *buf, unsigned int tag)
 {
     uint64_t head;
     uint8_t  rlock, wlock;
     uint32_t index, size;
-    uint32_t depth, buffer_size, tag;
+    uint32_t depth, buffer_size;
     uint64_t buffer_ea;
+
+    if (tag > 31)
+        return CELL_SYNC_ERROR_INVAL;
 
     for (;;) {
         head = read_head(ea);
@@ -260,7 +269,6 @@ int cellSyncQueueTryPop(uint64_t ea, void *buf)
         depth       = read_depth();
         buffer_size = read_bsize();
         buffer_ea   = read_buffer_ea();
-        tag         = read_tag();
 
         if (size == 0)       return CELL_SYNC_ERROR_AGAIN;
         if (rlock != 0)      return CELL_SYNC_ERROR_AGAIN;
@@ -315,13 +323,16 @@ int cellSyncQueueClear(uint64_t ea)
     }
 }
 
-int cellSyncQueuePeek(uint64_t ea, void *buf)
+int cellSyncQueuePeek(uint64_t ea, void *buf, unsigned int tag)
 {
     uint64_t head;
     uint8_t  rlock, wlock;
     uint32_t index, size;
-    uint32_t depth, buffer_size, tag;
+    uint32_t depth, buffer_size;
     uint64_t buffer_ea;
+
+    if (tag > 31)
+        return CELL_SYNC_ERROR_INVAL;
 
     for (;;) {
         head = read_head(ea);
@@ -333,7 +344,6 @@ int cellSyncQueuePeek(uint64_t ea, void *buf)
         depth       = read_depth();
         buffer_size = read_bsize();
         buffer_ea   = read_buffer_ea();
-        tag         = read_tag();
 
         if (size == 0)       continue;   /* empty -- spin */
         if (rlock != 0)      continue;   /* another reader holding lock */
@@ -366,13 +376,16 @@ int cellSyncQueuePeek(uint64_t ea, void *buf)
     }
 }
 
-int cellSyncQueueTryPeek(uint64_t ea, void *buf)
+int cellSyncQueueTryPeek(uint64_t ea, void *buf, unsigned int tag)
 {
     uint64_t head;
     uint8_t  rlock, wlock;
     uint32_t index, size;
-    uint32_t depth, buffer_size, tag;
+    uint32_t depth, buffer_size;
     uint64_t buffer_ea;
+
+    if (tag > 31)
+        return CELL_SYNC_ERROR_INVAL;
 
     for (;;) {
         head = read_head(ea);
@@ -384,7 +397,6 @@ int cellSyncQueueTryPeek(uint64_t ea, void *buf)
         depth       = read_depth();
         buffer_size = read_bsize();
         buffer_ea   = read_buffer_ea();
-        tag         = read_tag();
 
         if (size == 0)       return CELL_SYNC_ERROR_AGAIN;
         if (rlock != 0)      return CELL_SYNC_ERROR_AGAIN;

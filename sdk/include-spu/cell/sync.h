@@ -84,12 +84,18 @@ int cellSyncRwmTryWrite    (uint64_t ea_rwm, void *ls_buffer,
 int          cellSyncQueueInitialize(uint64_t ea_queue, uint64_t ptr_buffer,
                                      uint32_t buffer_size, unsigned int depth,
                                      unsigned int tag);
-int          cellSyncQueuePush   (uint64_t ea_queue, const void *ls_buffer);
-int          cellSyncQueueTryPush(uint64_t ea_queue, const void *ls_buffer);
-int          cellSyncQueuePop    (uint64_t ea_queue, void *ls_buffer);
-int          cellSyncQueueTryPop (uint64_t ea_queue, void *ls_buffer);
-int          cellSyncQueuePeek   (uint64_t ea_queue, void *ls_buffer);
-int          cellSyncQueueTryPeek(uint64_t ea_queue, void *ls_buffer);
+int          cellSyncQueuePush   (uint64_t ea_queue, const void *ls_buffer,
+                                  unsigned int tag);
+int          cellSyncQueueTryPush(uint64_t ea_queue, const void *ls_buffer,
+                                  unsigned int tag);
+int          cellSyncQueuePop    (uint64_t ea_queue, void *ls_buffer,
+                                  unsigned int tag);
+int          cellSyncQueueTryPop (uint64_t ea_queue, void *ls_buffer,
+                                  unsigned int tag);
+int          cellSyncQueuePeek   (uint64_t ea_queue, void *ls_buffer,
+                                  unsigned int tag);
+int          cellSyncQueueTryPeek(uint64_t ea_queue, void *ls_buffer,
+                                  unsigned int tag);
 int          cellSyncQueueClear  (uint64_t ea_queue);
 unsigned int cellSyncQueueSize   (uint64_t ea_queue);
 
