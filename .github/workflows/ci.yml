@@ -170,6 +170,9 @@ jobs:
       - name: Test librt pathname limits and error propagation
         run: bash tests/sdk/librt-pathconf-test.sh
 
+      - name: Test librt joins relative paths to the working directory verbatim
+        run: bash tests/sdk/librt-resolve-path-host-test.sh
+
       - name: Test librt heap configuration and failure diagnostics
         run: bash tests/sdk/librt-heap-test.sh
 

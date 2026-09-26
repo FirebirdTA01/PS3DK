@@ -95,7 +95,7 @@ normalize_path(const char *dirname, char *resolved)
 const char *
 __librt_resolve_path(struct _reent *r, const char *path, char buf[PATH_MAX])
 {
-	size_t used, len;
+	size_t used, separator, len;
 
 	if (!path) {
 		r->_errno = EFAULT;
@@ -109,13 +109,14 @@ __librt_resolve_path(struct _reent *r, const char *path, char buf[PATH_MAX])
 	 * exactly as their absolute spellings do.  __cwd is kept normalised
 	 * by chdir() and never ends in '/' except when it is the root. */
 	used = strlen(__cwd);
+	separator = used > 1;
 	len = strlen(path);
-	if (used + 1 + len >= PATH_MAX) {
+	if (used + separator + len >= PATH_MAX) {
 		r->_errno = ENAMETOOLONG;
 		return NULL;
 	}
 	memcpy(buf, __cwd, used);
-	if (used > 1)
+	if (separator)
 		buf[used++] = '/';
 	memcpy(buf + used, path, len + 1);
 	return buf;
