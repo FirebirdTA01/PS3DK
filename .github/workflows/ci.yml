@@ -414,6 +414,8 @@ jobs:
         run: bash tests/shader-compiler/vp-two-inputs-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler VP point size and clip outputs (t_bbca6d14)
         run: bash tests/shader-compiler/vp-special-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler VP texture fetch (TXL, sampler units and records)
+        run: bash tests/shader-compiler/vp-texture-fetch-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler user-function inlining with control flow and void helpers (t_7a4e3b36)
         run: bash tests/shader-compiler/user-function-inline-control-flow-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: shader compiler stdlib overloads and texture intrinsics

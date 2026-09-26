@@ -18,8 +18,8 @@
 #     instruction that reads the varying - kept REFUSED here (see the row).
 #   * Two projective fetches from two samplers are two TXPs on two units.
 #   * The reference ACCEPTS tex2Dproj in a vertex program (vertex texture
-#     fetch); this compiler refuses every VP texture fetch by name and this
-#     one keeps that refusal - measured as a divergence, not imitated.
+#     fetch, dividing by the coordinate's x); this compiler lowers VP fetches
+#     to TXL but refuses VP tex2Dproj by name - a divergence, not imitated.
 #
 # CONTROL: every accept row fails on a compiler before the TXP lowering
 # ("unsupported IR op sampleproj"), the refusal row is checked against a
@@ -150,7 +150,7 @@ expect fp_txp_two_f '^[0-9]+ ADD '
 # wrong bit.
 refuse "texCUBEproj (reference: TXP with DISABLE_PC on the varying read)" fp_txp_cube_f sce_fp_rsx "texCUBEproj"
 
-refuse "tex2Dproj under sce_vp_rsx (the reference accepts; every VP fetch refuses here by name)" vp_txp_refuse_v sce_vp_rsx "texture"
+refuse "tex2Dproj under sce_vp_rsx (the reference accepts; a VP tex2Dproj refuses here by name)" vp_txp_refuse_v sce_vp_rsx "texture"
 
 # ------------------------------------------------ reference byte identity
 BYTE_IDENTICAL="fp_txp_proj4_out_f fp_txp_half_out_f"
