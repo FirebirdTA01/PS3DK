@@ -37,8 +37,13 @@
 
 /* CELL_SPURS_PPU_SYM(sym): the 32-bit PPU address of the PPU symbol
  * `sym`, for use in SPU code.  The SPU object records a `sym@ppu`
- * reference in a data word, which the PPU-side link resolves when the
- * SPU image is embedded into the PPU executable. */
+ * reference (R_SPU_PPU32) in a data word.
+ *
+ * Limitation: the SDK's embedding paths (ps3_add_spu_image, bin2s and
+ * spu-elf-to-ppu-obj) do not yet carry that relocation into the PPU
+ * object, so the PPU link does not fill the word in.  Code using this
+ * macro compiles but reads an unresolved address until the embedding
+ * tools promote R_SPU_PPU32. */
 #define CELL_SPURS_PPU_SYM(sym)                                             \
     (__extension__({                                                        \
         extern char __ps3dk_ppu_sym_##sym[] __asm__(#sym "@ppu");           \
