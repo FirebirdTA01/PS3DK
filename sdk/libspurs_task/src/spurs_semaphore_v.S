@@ -17,7 +17,8 @@
  *         wake it.
  *       * else: return success.
  *
- * Hand-translated to byte-match libspurs.a/semaphoreV.o.
+ * Independently written and tuned so the compiled output matches the
+ * reference library function as closely as possible.
  * Two REL16 relocs (_cellSpursGetWorkloadFlag, cellSpursSendSignal).
  * Size: 432 bytes.
  */

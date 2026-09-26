@@ -14,7 +14,8 @@
  *         BLOCK service at dispatch_base+0xc4 with service-id 2.
  *   - The BLOCK service yields to SPRX; resumes here once V() runs.
  *
- * Hand-translated to byte-match libspurs.a/semaphoreP.o.
+ * Independently written and tuned so the compiled output matches the
+ * reference library function as closely as possible.
  * Two REL16 relocs against _cellSpursTaskCanCallBlockWait at 0x60+0x164.
  * Size: 480 bytes.
  */

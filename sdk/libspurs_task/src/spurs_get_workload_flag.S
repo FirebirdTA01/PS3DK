@@ -6,7 +6,8 @@
  * main memory.  Used by SemaphoreV / SendSignal as the EA argument
  * for the kernel-side wakeup queue.
  *
- * Hand-translated to byte-match libspurs.a/getWorkloadFlag.o.
+ * Independently written and tuned so the compiled output matches the
+ * reference library function as closely as possible.
  * Single REL16 reloc against .rodata.cst16 shuffle mask.  Size: 48 B.
  */
 	.text

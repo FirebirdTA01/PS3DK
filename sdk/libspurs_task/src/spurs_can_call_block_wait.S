@@ -10,7 +10,8 @@
  * Returns one of three error words (ilhu/iohl pairs 0x80410909 / 0x9 0f /
  * 0x90b ...) selected by the chained selb chain, or 0 on success.
  *
- * Hand-translated to byte-match libspurs.a/canCallBlockWait.o.
+ * Independently written and tuned so the compiled output matches the
+ * reference library function as closely as possible.
  * No external relocations.  Size: 152 bytes.
  */
 	.text

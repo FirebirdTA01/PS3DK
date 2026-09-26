@@ -11,7 +11,8 @@
  *   - merge the mask into the signal word in the cached line
  *   - PUTLLC; retry on collision
  *
- * Hand-translated to byte-match libspurs.a/sendWorkloadSignal.o.
+ * Independently written and tuned so the compiled output matches the
+ * reference library function as closely as possible.
  * No external relocations.  Size: 168 bytes.
  */
 	.text

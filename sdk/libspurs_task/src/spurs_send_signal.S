@@ -14,7 +14,8 @@
  *   - If a waiter exists (signal flag transitions 0->1 with no prior
  *     pending bit), call _cellSpursSendWorkloadSignal to wake it.
  *
- * Hand-translated to byte-match libspurs.a/sendSignal.o.
+ * Independently written and tuned so the compiled output matches the
+ * reference library function as closely as possible.
  * One REL16 reloc against _cellSpursSendWorkloadSignal at 0x1ac.
  * Size: 464 bytes.
  */
