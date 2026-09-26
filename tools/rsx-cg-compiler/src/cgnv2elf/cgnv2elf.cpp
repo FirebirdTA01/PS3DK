@@ -54,6 +54,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <vector>
@@ -102,6 +103,23 @@ constexpr size_t   kMaxPathDepth    = 32;     // name-depth: name components plu
 // per reference (parameters that share one list each count it in full).
 constexpr uint64_t kMaxEmbeddedConstants = 65536;
 constexpr uint64_t kMaxOutputBytes  = uint64_t(512) << 20;   // output-size: the archive written
+// expanded-data: everything parsed or generated and held for the whole run
+// (program headers and ucode, parameter records, names, path components,
+// semantics, defaults, embedded-constant lists, output records and tables,
+// string table and constants), across all programs.  One running counter is
+// charged before each of those is allocated or copied, so many small inputs
+// cannot add up to an unbounded amount of retained memory.
+constexpr uint64_t kMaxExpandedBytes = uint64_t(256) << 20;
+
+uint64_t g_expanded = 0;    // bytes charged against kMaxExpandedBytes this run
+
+// Charges `bytes` of retained data before it is allocated or copied.
+void charge(uint64_t bytes) {
+    if (bytes > kMaxExpandedBytes - std::min(g_expanded, kMaxExpandedBytes))
+        over_budget("expanded-data", "parsed and generated data would exceed " +
+                    std::to_string(kMaxExpandedBytes) + " bytes", kMaxExpandedBytes);
+    g_expanded += bytes;
+}
 
 constexpr uint32_t kVarVarying  = 0x1005;
 constexpr uint32_t kVarUniform  = 0x1006;
@@ -191,8 +209,10 @@ private:
 // Input container.
 // ---------------------------------------------------------------------------
 
+// One component of a parameter name: bytes [off, off + len) of the name
+// (not a copy of them) plus its array indices.
 struct Comp {
-    std::string name;
+    uint32_t off = 0, len = 0;
     std::vector<uint64_t> idx;
 };
 
@@ -227,12 +247,14 @@ std::vector<Comp> split_path(const std::string& name) {
         size_t j = i;
         while (j < name.size() && !sep(name[j])) ++j;
         Comp c;
-        c.name = name.substr(i, j - i);
+        c.off = static_cast<uint32_t>(i);
+        c.len = static_cast<uint32_t>(j - i);
         j = scan_indices(name, j, &c.idx);
         depth += 1 + c.idx.size();
         if (depth > kMaxPathDepth)
             over_budget("name-depth", "parameter name '" + name.substr(0, 64) + "...' nests deeper",
                         kMaxPathDepth);
+        charge(sizeof(Comp) + 8 * c.idx.size());
         out.push_back(std::move(c));
         i = j;
     }
@@ -299,6 +321,8 @@ std::optional<Program> read_container(const Bytes& b) {
     uint32_t ucSize  = r.u32(24);
     uint32_t ucOff   = r.u32(28);
 
+    r.need(ucOff, ucSize, "ucode");
+    charge(24 + uint64_t(ucSize) + uint64_t(count) * sizeof(Param));
     p.hdr   = r.slice(progOff, p.fragment() ? 22 : 24, "program header");
     p.ucode = r.slice(ucOff, ucSize, "ucode");
 
@@ -310,21 +334,30 @@ std::optional<Program> read_container(const Bytes& b) {
         q.res      = r.u32(o + 4);
         q.var      = r.u32(o + 8);
         q.resIndex = static_cast<int32_t>(r.u32(o + 12));
-        auto name  = r.cstr(r.u32(o + 16), "parameter name");
+        auto name  = r.cstr(r.u32(o + 16), "parameter name");   // at most kMaxNameBytes
         if (!name || name->empty())
             throw FormatError("parameter " + std::to_string(i) + " has no name");
-        q.name = *name;
+        charge(name->size() + 1);
+        q.name = std::move(*name);
         q.path = split_path(q.name);
-        if (uint32_t d = r.u32(o + 20)) q.dflt = r.slice(d, 16, "default value");
+        if (uint32_t d = r.u32(o + 20)) {
+            charge(16);
+            q.dflt = r.slice(d, 16, "default value");
+        }
         if (uint32_t e = r.u32(o + 24)) {
             uint32_t n = r.u32(e);
             if (n > 0xffff)
                 throw FormatError("embedded-constant count does not fit in 16 bits");
             r.need(uint64_t(e) + 4, uint64_t(n) * 4, "embedded-constant list");
+            charge(uint64_t(n) * 4);
+            q.ec.reserve(n);
             for (uint32_t k = 0; k < n; ++k) q.ec.push_back(r.u32(uint64_t(e) + 4 + 4 * uint64_t(k)));
         }
-        auto sem = r.cstr(r.u32(o + 28), "semantic");
-        if (sem && !sem->empty()) q.sem = sem;
+        auto sem = r.cstr(r.u32(o + 28), "semantic");   // at most kMaxNameBytes
+        if (sem && !sem->empty()) {
+            charge(sem->size() + 1);
+            q.sem = std::move(sem);
+        }
         q.dir     = r.u32(o + 32);
         q.paramno = r.u32(o + 36);
         q.ref     = r.u32(o + 40);
@@ -366,8 +399,9 @@ std::pair<std::string, std::string> array_member_key(const std::string& name) {
 
 // A parameter's path seen from one tree level: components [level, end).
 struct Item {
-    const std::vector<Comp>* path;
+    const Param* param;
     size_t leaf;
+    const std::vector<Comp>& path() const { return param->path; }
 };
 
 struct Node {
@@ -385,20 +419,24 @@ struct Node {
 std::vector<Node> build_tree(const std::vector<Item>& items, size_t level) {
     std::vector<Node> nodes;
     size_t i = 0;
-    auto comp = [level](const Item& it) -> const Comp& { return (*it.path)[level]; };
+    auto comp = [level](const Item& it) -> const Comp& { return it.path()[level]; };
+    auto compName = [&comp](const Item& it) {
+        const Comp& c = comp(it);
+        return std::string_view(it.param->name).substr(c.off, c.len);
+    };
     while (i < items.size()) {
-        if (items[i].path->size() <= level)
+        if (items[i].path().size() <= level)
             throw FormatError("parameter name has an empty component");
-        const std::string& base = comp(items[i]).name;
+        const std::string base(compName(items[i]));
         std::vector<Item> grp;
-        while (i < items.size() && items[i].path->size() > level && comp(items[i]).name == base)
+        while (i < items.size() && items[i].path().size() > level && compName(items[i]) == base)
             grp.push_back(items[i++]);
 
         const std::vector<uint64_t>& idx0 = comp(grp[0]).idx;
         Node n;
         n.name = base;
         if (idx0.empty()) {
-            if (grp[0].path->size() == level + 1) {
+            if (grp[0].path().size() == level + 1) {
                 n.kind = Node::Leaf;
                 n.leaf = grp[0].leaf;
             } else {
@@ -416,7 +454,7 @@ std::vector<Node> build_tree(const std::vector<Item>& items, size_t level) {
                     n.dims[k] = std::max(n.dims[k], comp(it).idx[k] + 1);
             }
             bool allLeaves = std::all_of(grp.begin(), grp.end(), [level](const Item& it) {
-                return it.path->size() == level + 1;
+                return it.path().size() == level + 1;
             });
             if (allLeaves) {
                 for (const Item& it : grp) n.elems.push_back(it.leaf);
@@ -505,6 +543,8 @@ public:
 
         if (b_.size() + s.size() + 1 > 0xffffffffu)
             throw FormatError("string table exceeds 4 GiB");
+        // The string itself plus, per byte, at most one trie node.
+        charge(s.size() + 1 + s.size() * kTrieNodeBytes);
         uint32_t off = static_cast<uint32_t>(b_.size());
         uint32_t end = off + static_cast<uint32_t>(s.size());
         b_ += s;
@@ -523,6 +563,7 @@ public:
     const Bytes& bytes() const { return b_; }
 
 private:
+    static constexpr uint64_t kTrieNodeBytes = 48;   // hash-map node + firstEnd_ slot
     static uint64_t key(uint32_t node, char c) {
         return (uint64_t(node) << 8) | static_cast<unsigned char>(c);
     }
@@ -559,6 +600,7 @@ public:
                 hw_[li] = fpRi_.size() / 2;
                 for (size_t qi : rows_or_self(li)) {
                     const Param& q = ps_[qi];
+                    charge(4 + 2 * uint64_t(q.ec.size()));
                     if (q.resIndex < -32768 || q.resIndex > 32767)
                         throw FormatError("resource index of '" + q.name + "' does not fit in 16 bits");
                     put16(fpRi_, static_cast<uint16_t>(q.resIndex), "resource index");
@@ -576,7 +618,7 @@ public:
                 if (ps_[li].ref) memberRef_.insert(array_member_key(ps_[li].name));
 
         std::vector<Item> items;
-        for (size_t li : lv_) items.push_back({&ps_[li].path, li});
+        for (size_t li : lv_) items.push_back({&ps_[li], li});
         std::vector<Node> roots = build_tree(items, 0);
 
         std::vector<std::pair<size_t, size_t>> defs;   // (record, const word)
@@ -588,6 +630,7 @@ public:
                 for (size_t qi : rows_or_self(li))
                     if (ps_[qi].dflt) blk += *ps_[qi].dflt;
             if (!blk.empty()) {
+                charge(blk.size() + sizeof(defs[0]));
                 defs.emplace_back(first, const_.size() / 4);
                 const_ += blk;
             }
@@ -601,6 +644,9 @@ public:
             offs.emplace_back(no, so);
         }
 
+        uint64_t typeBytes = 0;
+        for (const Record& rec : recs_) typeBytes += rec.type.size();
+        charge(typeBytes + 32 * uint64_t(recs_.size()));      // types, offsets, string offsets
         Bytes types;
         std::vector<size_t> typeOff;
         for (const Record& rec : recs_) {
@@ -615,6 +661,7 @@ public:
         size_t defOff = riOff + ri.size();
         size_t semOff = defOff + 4 * defs.size();
 
+        charge(semOff + 8 * uint64_t(semCount));             // the table written below
         Bytes out;
         put16(out, n, "record count");
         put16(out, riOff, "resource-index table offset");
@@ -667,6 +714,11 @@ private:
         return (s.rfind("COLOR", 0) == 0 || s.rfind("NORMAL", 0) == 0) ? kFlagColorNormal : 0;
     }
 
+    void add_rec(Record r) {
+        charge(sizeof(Record) + r.name.size() + r.type.size() + (r.sem ? r.sem->size() : 0));
+        recs_.push_back(std::move(r));
+    }
+
     static Bytes leaf_type(uint32_t type, uint64_t res) {
         Bytes t;
         put16(t, type, "parameter type");
@@ -684,7 +736,7 @@ private:
                 // the same member of any element of its own array is.
                 ref = memberRef_.count(array_member_key(p.name)) != 0;
             }
-            recs_.push_back({n.name, leaf_type(p.type, leaf_resource(n.leaf)),
+            add_rec({n.name, leaf_type(p.type, leaf_resource(n.leaf)),
                              base_flags(p) | (ref ? kFlagReferenced : 0) | kFlagNode | semantic_flag(p),
                              p.sem});
         } else if (n.kind == Node::Struct || n.kind == Node::StructElem) {
@@ -698,7 +750,7 @@ private:
             Bytes t;
             put16(t, n.children.size(), "struct member count");
             put16(t, 0, "pad");
-            recs_.push_back({n.name, t, fl, std::nullopt});
+            add_rec({n.name, t, fl, std::nullopt});
             for (const Node& c : n.children)
                 emit(c, n.kind == Node::Struct ? inStructArray : std::optional<uint32_t>(fl));
         } else {
@@ -711,14 +763,16 @@ private:
             put16(t, n.dims.size(), "array dimension count");
             for (uint64_t d : n.dims) put16(t, d, "array dimension");
             while (t.size() % 4) t.push_back('\0');
-            recs_.push_back({n.name, t, fl, std::nullopt});
+            add_rec({n.name, t, fl, std::nullopt});
 
             // Vertex: the array's registers, per element, member and row.
             size_t vstart = vpRi_.size() / 2;
             if (!fp_)
                 for (size_t li : ls)
-                    for (size_t qi : rows_or_self(li))
+                    for (size_t qi : rows_or_self(li)) {
+                        charge(2);
                         put16(vpRi_, static_cast<uint32_t>(ps_[qi].resIndex) & 0xffff, "register");
+                    }
 
             if (n.structElems) {
                 for (const Node& c : n.children) emit(c, fl);
@@ -727,7 +781,7 @@ private:
                 size_t e0 = n.elems[0];
                 const Param& p0 = ps_[e0];
                 uint64_t res = fp_ ? hw_[e0] : vstart;
-                recs_.push_back({"", leaf_type(p0.type, res), base_flags(p0) | referenced(ls),
+                add_rec({"", leaf_type(p0.type, res), base_flags(p0) | referenced(ls),
                                  std::nullopt});
             }
         }
@@ -823,6 +877,11 @@ Bytes write_archive(std::vector<Program>& progs, const std::vector<std::string>&
         put16(sym, 6 + 2 * uint64_t(i), "symbol section index");
     }
 
+    uint64_t sectionBytes = note.size() + st.bytes().size() + constData.size() + sym.size() +
+                            shaderTab.size() + 64 + 40 * (7 + 2 * uint64_t(progs.size()));
+    for (size_t i = 0; i < progs.size(); ++i)
+        sectionBytes += progs[i].ucode.size() + paramTabs[i].size() + 48;
+    charge(3 * sectionBytes);   // Section copies, the body, and the returned image
     Bytes shstr(1, '\0');
     std::vector<Section> secs(1);
     auto add = [&](const std::string& name, uint32_t type, uint32_t flags, Bytes data,

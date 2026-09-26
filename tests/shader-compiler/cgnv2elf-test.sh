@@ -418,6 +418,44 @@ for row in "${budget_rows[@]}"; do
     fi
 done
 
+# Directory amplification: every file passes the per-file budgets, but the
+# parsed programs a whole folder retains must stay inside the run-wide
+# expanded-data budget.  One ~400 KB container (the real fragment container
+# with 8192 parameters sharing one 1024-byte name) is linked into a folder
+# many times; a two-link folder is the control that still converts.
+"$python" - "$A" "$work/amp.fpo" <<'EOF'
+import struct, sys
+src, out = sys.argv[1], sys.argv[2]
+b = bytearray(open(src, "rb").read())
+parr = struct.unpack_from(">I", b, 16)[0]
+rec = bytearray(b[parr:parr + 48])
+name = len(b)
+b += b"a" * 1024 + b"\0"
+struct.pack_into(">4I", rec, 16, name, 0, 0, 0)     # name, no default, EC list or semantic
+new_parr = len(b)
+b += rec * 8192
+struct.pack_into(">I", b, 12, 8192)
+struct.pack_into(">I", b, 16, new_parr)
+struct.pack_into(">I", b, 8, len(b))
+open(out, "wb").write(b)
+EOF
+mkdir -p "$work/amp-ok" "$work/amp-many"
+for i in 1 2; do ln -s "$work/amp.fpo" "$work/amp-ok/p$i.fpo"; done
+for i in $(seq -w 1 40); do ln -s "$work/amp.fpo" "$work/amp-many/p$i.fpo"; done
+rm -f "$work/amp-ok.elf" "$work/amp-many.elf"
+bounded "$work/amp-ok" "$work/amp-ok.elf"; rc=$?
+if [[ $rc -eq 0 && -s "$work/amp-ok.elf" ]]; then
+    ok "folder of 2 amplified containers converts"
+else bad "folder of 2 amplified containers: exit $rc, log: $(head -1 "$work/tool.log")"; fi
+bounded "$work/amp-many" "$work/amp-many.elf"; rc=$?
+log="$(cat "$work/tool.log")"
+if [[ $rc -eq 1 && ! -e "$work/amp-many.elf" && "$log" == *"input budget exceeded: expanded-data"* \
+      && "$log" != *bad_alloc* && "$log" != *terminate* ]]; then
+    ok "folder of 40 amplified containers ($(( $(wc -c <"$work/amp.fpo") / 1024 )) KB each): exit 1, no output, 'input budget exceeded: expanded-data'"
+else
+    bad "folder of 40 amplified containers: exit $rc, output $( [[ -e "$work/amp-many.elf" ]] && echo written || echo absent), log: $(head -1 "$work/tool.log")"
+fi
+
 # Folder: case-insensitive order, readme.txt skipped.
 if convert 0 "$work/in" "$work/all.elf" \
         && check "$work/all.elf" "a_frag=$A" "B_vert=$B" "c.plain=$C"; then
