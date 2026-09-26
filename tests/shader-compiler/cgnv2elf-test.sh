@@ -338,7 +338,9 @@ done
 [[ $controls -eq 3 ]] && ok "record checker rejects a flipped byte in records, type table and .const"
 
 # Input budgets: over-budget or malformed containers are refused promptly
-# (1 GiB address space, 20 s) with exit 1 and no output.
+# (1 GiB address space, 20 s) with exit 1, no output, and the tool's own
+# diagnostic for that budget.  An allocation failure also exits 1 without
+# output, so the text is what tells a bounded refusal from a crash.
 # synth <out> <name> [name-offset]: a one-parameter fragment container.
 synth() {
     "$python" - "$@" <<'EOF'
@@ -356,6 +358,28 @@ struct.pack_into(">8I", b, 0, 7004, 6, len(b), 1, 32, 80, 16, uc)
 open(out, "wb").write(b)
 EOF
 }
+# alias <real-container> <out> <params> <entries>: the real container with
+# its parameter array replaced by <params> copies of its first parameter,
+# every copy pointing at ONE appended list of <entries> ucode offsets.
+alias_ec() {
+    "$python" - "$@" <<'EOF'
+import struct, sys
+src, out, n, entries = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+b = bytearray(open(src, "rb").read())
+parr = struct.unpack_from(">I", b, 16)[0]
+rec = bytearray(b[parr:parr + 48])
+ec = len(b)
+b += struct.pack(">I", entries) + struct.pack(">I", 0x20) * entries
+struct.pack_into(">I", rec, 24, ec)
+new_parr = len(b)
+for _ in range(n):
+    b += rec
+struct.pack_into(">I", b, 12, n)
+struct.pack_into(">I", b, 16, new_parr)
+struct.pack_into(">I", b, 8, len(b))
+open(out, "wb").write(b)
+EOF
+}
 bounded() {
     ( ulimit -c 0; ulimit -v 1048576
       exec timeout 20 "$tool" -q "$@" ) >"$work/tool.log" 2>&1
@@ -364,17 +388,33 @@ synth "$work/deep.fpo" "$("$python" -c 'print(".".join(["a"] * 10000))')"
 synth "$work/depth.fpo" "$("$python" -c 'print(".".join(["a"] * 500))')"
 synth "$work/offset.fpo" "a" 0x7ffffff0
 synth "$work/sane.fpo" "a.b"
+cp "$work/sane.fpo" "$work/count.fpo"
+"$python" -c 'import struct,sys; p=sys.argv[1]; b=bytearray(open(p,"rb").read()); struct.pack_into(">I",b,12,9000); open(p,"wb").write(b)' "$work/count.fpo"
+alias_ec "$A" "$work/alias.fpo" 8192 65535
+alias_ec "$A" "$work/alias-ok.fpo" 16 4
 if convert 0 "$work/sane.fpo" "$work/sane.elf"; then
     ok "synthetic control container converts"
 else bad "synthetic control container: $(cat "$work/check.log")"; fi
-for row in "deep:20 KB name, 10000 components" "depth:500 components" "offset:name offset past the end"; do
-    kind="${row%%:*}"
+if convert 0 "$work/alias-ok.fpo" "$work/alias-ok.elf"; then
+    ok "aliased embedded-constant control (16 parameters x 4 offsets) converts"
+else bad "aliased control: $(cat "$work/check.log")"; fi
+budget_rows=(
+    "deep|input budget exceeded: name-length|20 KB name, 10000 components"
+    "depth|input budget exceeded: name-depth|500 components"
+    "count|input budget exceeded: parameter-count|9000 parameters declared"
+    "alias|input budget exceeded: embedded-constants|8192 parameters sharing one 65535-offset list"
+    "offset|parameter name offset is past the end of the file|name offset past the end"
+)
+for row in "${budget_rows[@]}"; do
+    IFS='|' read -r kind want what <<<"$row"
     rm -f "$work/$kind.elf"
     bounded "$work/$kind.fpo" "$work/$kind.elf"; rc=$?
-    if [[ $rc -eq 1 && ! -e "$work/$kind.elf" ]]; then
-        ok "${row#*:}: exit 1, no output ($(head -1 "$work/tool.log" | sed 's/.*: //'))"
+    log="$(cat "$work/tool.log")"
+    if [[ $rc -eq 1 && ! -e "$work/$kind.elf" && "$log" == *"$want"* \
+          && "$log" != *bad_alloc* && "$log" != *terminate* ]]; then
+        ok "$what: exit 1, no output, '$want'"
     else
-        bad "${row#*:}: exit $rc, output $( [[ -e "$work/$kind.elf" ]] && echo written || echo absent)"
+        bad "$what: exit $rc, output $( [[ -e "$work/$kind.elf" ]] && echo written || echo absent), log: $(head -1 "$work/tool.log")"
     fi
 done
 

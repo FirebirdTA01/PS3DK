@@ -70,6 +70,15 @@ struct FormatError : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+std::string budget_message(const char* budget, const std::string& detail, uint64_t limit) {
+    return std::string("input budget exceeded: ") + budget + ": " + detail +
+           " (limit " + std::to_string(limit) + ")";
+}
+
+[[noreturn]] void over_budget(const char* budget, const std::string& detail, uint64_t limit) {
+    throw FormatError(budget_message(budget, detail, limit));
+}
+
 constexpr uint32_t kProfileVertex      = 7003;
 constexpr uint32_t kProfileFragment    = 7004;
 constexpr uint32_t kContainerRevision  = 6;
@@ -77,15 +86,22 @@ constexpr uint32_t kToolRevision       = 6365;   // .note descriptor
 
 // Input budgets.  Each sits far above anything a real shader produces (SDK
 // sample and rsx-cg-compiler containers hold at most a few hundred
-// parameters, with names well under 100 bytes and a handful of components)
-// and is checked before the work it bounds, so hostile input is refused
-// promptly with a clear error instead of exhausting memory or time.
-constexpr uint64_t kMaxInputBytes   = uint64_t(16) << 20;    // one container file
-constexpr uint64_t kMaxArchiveBytes = uint64_t(256) << 20;   // all inputs together
-constexpr size_t   kMaxPrograms     = 4096;   // programs per archive
-constexpr uint32_t kMaxParams       = 8192;   // parameters per program
-constexpr size_t   kMaxNameBytes    = 1024;   // one parameter name or semantic
-constexpr size_t   kMaxPathDepth    = 32;     // name components plus array indices
+// parameters, with names well under 100 bytes, a handful of components and
+// a few embedded constants each) and is checked before the work it bounds,
+// so hostile input is refused promptly with a clear error instead of
+// exhausting memory or time.  Every refusal reads
+//   input budget exceeded: <budget>: <detail> (limit <n>)
+// with <budget> one of the names below.
+constexpr uint64_t kMaxInputBytes   = uint64_t(16) << 20;    // file-size: one container file
+constexpr uint64_t kMaxArchiveBytes = uint64_t(256) << 20;   // archive-size: all inputs together
+constexpr size_t   kMaxPrograms     = 4096;   // program-count: programs per archive
+constexpr uint32_t kMaxParams       = 8192;   // parameter-count: parameters per program
+constexpr size_t   kMaxNameBytes    = 1024;   // name-length: one parameter name or semantic
+constexpr size_t   kMaxPathDepth    = 32;     // name-depth: name components plus array indices
+// embedded-constants: offsets across all parameters of one program, counted
+// per reference (parameters that share one list each count it in full).
+constexpr uint64_t kMaxEmbeddedConstants = 65536;
+constexpr uint64_t kMaxOutputBytes  = uint64_t(512) << 20;   // output-size: the archive written
 
 constexpr uint32_t kVarVarying  = 0x1005;
 constexpr uint32_t kVarUniform  = 0x1006;
@@ -160,8 +176,8 @@ public:
         const void* nul = std::memchr(start, '\0', limit);
         if (!nul) {
             if (limit > kMaxNameBytes)
-                throw FormatError(std::string(what) + " is longer than " +
-                                  std::to_string(kMaxNameBytes) + " bytes");
+                over_budget("name-length", std::string(what) + " is longer than " +
+                            std::to_string(kMaxNameBytes) + " bytes", kMaxNameBytes);
             throw FormatError(std::string(what) + " is not NUL-terminated inside the file");
         }
         return std::string(start, static_cast<const char*>(nul) - start);
@@ -215,8 +231,8 @@ std::vector<Comp> split_path(const std::string& name) {
         j = scan_indices(name, j, &c.idx);
         depth += 1 + c.idx.size();
         if (depth > kMaxPathDepth)
-            throw FormatError("parameter name '" + name.substr(0, 64) + "...' nests deeper than " +
-                              std::to_string(kMaxPathDepth) + " levels");
+            over_budget("name-depth", "parameter name '" + name.substr(0, 64) + "...' nests deeper",
+                        kMaxPathDepth);
         out.push_back(std::move(c));
         i = j;
     }
@@ -261,17 +277,30 @@ std::optional<Program> read_container(const Bytes& b) {
     p.profile = r.u32(0);
     if (r.u32(4) != kContainerRevision) return std::nullopt;
     uint32_t count   = r.u32(12);
-    if (count > kMaxParams)
-        throw FormatError("container declares " + std::to_string(count) +
-                          " parameters (limit " + std::to_string(kMaxParams) + ")");
     uint32_t parrOff = r.u32(16);
+    if (count > kMaxParams)
+        over_budget("parameter-count", "container declares " + std::to_string(count) + " parameters",
+                    kMaxParams);
+    r.need(parrOff, uint64_t(count) * 48, "parameter array");
+
+    // Embedded-constant lists are sized, per reference, before any is copied.
+    uint64_t ecTotal = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (uint32_t e = r.u32(parrOff + uint64_t(i) * 48 + 24)) {
+            ecTotal += r.u32(e);
+            if (ecTotal > kMaxEmbeddedConstants)
+                over_budget("embedded-constants",
+                            "parameters reference more than " +
+                                std::to_string(kMaxEmbeddedConstants) + " ucode offsets",
+                            kMaxEmbeddedConstants);
+        }
+    }
     uint32_t progOff = r.u32(20);
     uint32_t ucSize  = r.u32(24);
     uint32_t ucOff   = r.u32(28);
 
     p.hdr   = r.slice(progOff, p.fragment() ? 22 : 24, "program header");
     p.ucode = r.slice(ucOff, ucSize, "ucode");
-    r.need(parrOff, uint64_t(count) * 48, "parameter array");
 
     p.params.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
@@ -766,10 +795,15 @@ Bytes write_archive(std::vector<Program>& progs, const std::vector<std::string>&
     Bytes constData, shaderTab;
     std::vector<Bytes> paramTabs;
     std::vector<uint32_t> symOff;
+    uint64_t outBytes = 0;
     for (size_t i = 0; i < progs.size(); ++i) {
         paramTabs.push_back(ParamTableBuilder(progs[i], st, constData, noSem).build());
         symOff.push_back(st.add(names[i]));
         shaderTab += shader_entry(progs[i]);
+        outBytes += 0x1c + 16 + 2 * 40 + 32 + progs[i].ucode.size() + paramTabs.back().size();
+        if (outBytes + st.bytes().size() + constData.size() > kMaxOutputBytes)
+            over_budget("output-size", "the archive would exceed " +
+                        std::to_string(kMaxOutputBytes) + " bytes", kMaxOutputBytes);
     }
 
     Bytes note;
@@ -1040,8 +1074,10 @@ int run(int argc, char** argv) {
             std::ifstream in(f, std::ios::binary);
             in.read(&head[0], 8);
             if (in.gcount() == 8 && Reader(head).u32(4) == kContainerRevision) {
-                std::fprintf(stderr, "cgnv2elf: %s: container is larger than %llu bytes\n",
-                             shown.c_str(), static_cast<unsigned long long>(kMaxInputBytes));
+                std::fprintf(stderr, "cgnv2elf: %s: %s\n", shown.c_str(),
+                             budget_message("file-size", "container is larger than " +
+                                            std::to_string(kMaxInputBytes) + " bytes",
+                                            kMaxInputBytes).c_str());
                 return 1;
             }
             if (!quiet) std::printf("skipping %s: not a shader container\n", shown.c_str());
@@ -1049,8 +1085,10 @@ int run(int argc, char** argv) {
         }
         totalBytes += size;
         if (totalBytes > kMaxArchiveBytes) {
-            std::fprintf(stderr, "cgnv2elf: inputs exceed %llu bytes in total\n",
-                         static_cast<unsigned long long>(kMaxArchiveBytes));
+            std::fprintf(stderr, "cgnv2elf: %s\n",
+                         budget_message("archive-size", "inputs exceed " +
+                                        std::to_string(kMaxArchiveBytes) + " bytes in total",
+                                        kMaxArchiveBytes).c_str());
             return 1;
         }
         Bytes data;
@@ -1070,7 +1108,9 @@ int run(int argc, char** argv) {
             continue;
         }
         if (progs.size() == kMaxPrograms) {
-            std::fprintf(stderr, "cgnv2elf: more than %zu programs in one archive\n", kMaxPrograms);
+            std::fprintf(stderr, "cgnv2elf: %s\n",
+                         budget_message("program-count", "more than " + std::to_string(kMaxPrograms) +
+                                        " programs in one archive", kMaxPrograms).c_str());
             return 1;
         }
         std::string base = f.filename().u8string();
