@@ -185,6 +185,9 @@ jobs:
       - name: Test librt joins relative paths to the working directory verbatim
         run: bash tests/sdk/librt-resolve-path-host-test.sh
 
+      - name: Test libdma splits large and unaligned transfers into legal MFC commands
+        run: bash tests/sdk/libdma-split-host-test.sh
+
       - name: Test librt heap configuration and failure diagnostics
         run: bash tests/sdk/librt-heap-test.sh
 
