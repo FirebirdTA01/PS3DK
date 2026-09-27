@@ -77,6 +77,16 @@ exit $rc
 WRAP
 } >"$body"
 chmod +x "$wrap"
+# Tools that live beside the compiler must live beside the adversary too: a
+# script that finds one through the compiler's directory (cgnv2elf-test.sh uses
+# $(dirname "$compiler")/cgnv2elf) would otherwise fail before it ever reached
+# the wrapper, and be reported as unjudgeable.  Copied, not linked, so this
+# also holds under Windows Git Bash.
+for sibling in cgnv2elf cgnv2elf.exe; do
+    if [[ -f "$(dirname "$compiler")/$sibling" ]]; then
+        cp -p "$(dirname "$compiler")/$sibling" "$work/$sibling"
+    fi
+done
 
 case "$OSTYPE" in
     msys*|cygwin*)
