@@ -63,11 +63,14 @@ static bool run()
     if (m.u[0] != 0 || m.u[1] != 0 || m.u[2] != 0xffffffffu || m.u[3] != 0xffffffffu)
         return fail("vec_cmpgt mask");
 
-    /* simdmath from the SDK: fabsf4 on a vector. */
+    /* simdmath from the SDK: fabsf4 on a vector.  The header is compiled in
+     * both ABIs; libsimdmath exists for ILP32 only, so only ILP32 calls it. */
+#ifndef __LP64__
     union { vector float v; float f[4]; } ab;
     ab.v = fabsf4((vector float){-1.0f, 2.0f, -3.5f, 0.0f});
     if (ab.f[0] != 1.0f || ab.f[1] != 2.0f || ab.f[2] != 3.5f || ab.f[3] != 0.0f)
         return fail("simdmath fabsf4");
+#endif
 
     /* vectormath (C++ AoS) from the SDK. */
     const Vectormath::Aos::Vector3 x = Vectormath::Aos::Vector3::xAxis();
