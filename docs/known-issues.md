@@ -105,33 +105,22 @@ threading primitives already used by librt's pthread layer.
 
 ---
 
-## `CELL_SYSMODULE_SNS` (0xf043) refused by current firmware
+## NP SNS module load needs remeasurement after correcting its ID
 
-**Status:** stub archive + header surface ship correctly; runtime
-`cellSysmoduleLoadModule(CELL_SYSMODULE_SNS)` returns
-`CELL_SYSMODULE_ERROR_UNKNOWN` (`0x80012002`) under RPCS3's LLE
-libsysmodule.  Header and stub-archive symbol resolution are unaffected.
+**Status:** the header's former `CELL_SYSMODULE_SNS` value `0xf043` was
+incorrect. It now aliases `CELL_SYSMODULE_SYSUTIL_NP_SNS`, value `0x0059`.
+The earlier RPCS3 LLE result, `CELL_SYSMODULE_ERROR_UNKNOWN` (`0x80012002`),
+was measured using the wrong ID. It does not establish that the SNS module
+was retired or that firmware rejects the corrected ID.
 
-**Symptom.** `samples/network/hello-ppu-np-sns/` boots cleanly, the
-link is clean, the cellSysmodule call dispatches to the real firmware
-SPRX, and the firmware itself rejects the 0xf043 module id rather than
-loading sysutil_np_sns.
+The related Commerce2 alias is also corrected: `0x003e` belongs to
+`CELL_SYSMODULE_SYSUTIL_GAME`; NP Commerce2 is `0x0044`.
 
-**Cause.** The PS3 Facebook SNS shim was retired by the SNS partner
-years ago; current firmware appears to no longer register the
-`0xf043` module.  The id matches PSDevWiki for the historical SNS
-build, but no current PS3 firmware version we have access to honors
-it.  This is firmware-side behavior — not a defect in the stub
-archive or header.
-
-**Workaround.** Use the `libsysutil_np_sns_stub.a` symbols only for
-link-time validation and code-completion against the historical
-sceNpSnsFb* API.  Do not depend on the module loading at runtime.
-
-**Planned fix.** None — the firmware authoritatively rejects the
-module.  If a future RPCS3 build or a different firmware version
-re-registers `0xf043` the sample TTY will silently start printing
-`load_sns rc=0x00000000` instead.
+**Remaining validation.** Rerun `samples/network/hello-ppu-np-sns/` with
+`0x0059` and retain its module-load result and firmware/emulator provenance.
+Header constant checks and a successful sample link alone do not prove that
+this module loads or that its online services work. The corrected sample's
+runtime result is not yet measured.
 
 ---
 

@@ -16,6 +16,14 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- Correct the NP Commerce2 and NP SNS sysmodule IDs to `0x0044` and
+  `0x0059`, preserve their aliases, and add 26 missing IDs including
+  `SYSUTIL_GAME` (`0x003e`). The earlier SNS firmware-retirement diagnosis
+  was based on the incorrect `0xf043` ID; corrected-ID runtime validation
+  is still pending. C11/C++17 constant checks now also run in host-only CI.
+
 ## [v0.16.0] — 2026-09-26
 
 ### Changed
