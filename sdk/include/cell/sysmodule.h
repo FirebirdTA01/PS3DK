@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-/* PRX module IDs (subset; full list lives in the reference header). */
+/* PRX module IDs. */
 #define CELL_SYSMODULE_INVALID            0xffff
 #define CELL_SYSMODULE_NET                0x0000
 #define CELL_SYSMODULE_HTTP               0x0001
@@ -101,7 +101,7 @@ extern "C" {
 #define CELL_SYSMODULE_CLANS              CELL_SYSMODULE_SYSUTIL_NP_CLANS
 #define CELL_SYSMODULE_SYSUTIL_OSK_EXT    0x003b
 #define CELL_SYSMODULE_VDEC_DIVX          0x003c
-#define CELL_SYSMODULE_SYSUTIL_NP_COMMERCE2 0x003e
+#define CELL_SYSMODULE_SYSUTIL_NP_COMMERCE2 0x0044
 #define CELL_SYSMODULE_COMMERCE2          CELL_SYSMODULE_SYSUTIL_NP_COMMERCE2
 #define CELL_SYSMODULE_SYSUTIL_NP_TUS     0x0045
 #define CELL_SYSMODULE_TUS                CELL_SYSMODULE_SYSUTIL_NP_TUS
@@ -113,8 +113,34 @@ extern "C" {
 #define CELL_SYSMODULE_SYSUTIL_MUSIC_DECODE2  0x0053
 #define CELL_SYSMODULE_SYSUTIL_NP_TROPHY      0xf035
 #define CELL_SYSMODULE_TROPHY                 CELL_SYSMODULE_SYSUTIL_NP_TROPHY
-#define CELL_SYSMODULE_SYSUTIL_NP_SNS         0xf043
+#define CELL_SYSMODULE_SYSUTIL_NP_SNS         0x0059
 #define CELL_SYSMODULE_SNS                    CELL_SYSMODULE_SYSUTIL_NP_SNS
+#define CELL_SYSMODULE_VDEC_AL                    0x002b
+#define CELL_SYSMODULE_ADEC_AL                    0x002c
+#define CELL_SYSMODULE_USBPSPCM                   0x0030
+#define CELL_SYSMODULE_AVCONF_EXT                 0x0031
+#define CELL_SYSMODULE_SYSUTIL_GAME               0x003e
+#define CELL_SYSMODULE_BGDL                       0x003f
+#define CELL_SYSMODULE_FREETYPE_TT                0x0040
+#define CELL_SYSMODULE_SYSUTIL_VIDEO_UPLOAD       0x0041
+#define CELL_SYSMODULE_SYSUTIL_SYSCONF_EXT        0x0042
+#define CELL_SYSMODULE_SYSUTIL_LICENSEAREA        0x0049
+#define CELL_SYSMODULE_SYSUTIL_MUSIC2             0x004a
+#define CELL_SYSMODULE_SYSUTIL_NP_UTIL            0x0056
+#define CELL_SYSMODULE_GEM                        0x005a
+#define CELL_SYSMODULE_SYSUTIL_CROSS_CONTROLLER   0x005c
+#define CELL_SYSMODULE_ADEC_M2BC                  0xf01b
+#define CELL_SYSMODULE_ADEC_M4AAC                 0xf01d
+#define CELL_SYSMODULE_ADEC_MP3                   0xf01e
+#define CELL_SYSMODULE_IMEJP                      0xf023
+#define CELL_SYSMODULE_SYSUTIL_MUSIC              0xf028
+#define CELL_SYSMODULE_PHOTO_EXPORT               0xf029
+#define CELL_SYSMODULE_PRINT                      0xf02a
+#define CELL_SYSMODULE_PHOTO_IMPORT               0xf02b
+#define CELL_SYSMODULE_MUSIC_EXPORT               0xf02c
+#define CELL_SYSMODULE_PHOTO_DECODE               0xf02e
+#define CELL_SYSMODULE_SYSUTIL_SEARCH             0xf02f
+#define CELL_SYSMODULE_SYSUTIL_AVCHAT2            0xf030
 
 /* Return codes. */
 #define CELL_SYSMODULE_LOADED                          0

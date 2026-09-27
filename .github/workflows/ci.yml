@@ -260,6 +260,10 @@ jobs:
       - name: Test the GCM headers define each macro once
         run: bash tests/sdk/gcm-redefinition-test.sh
 
+      # Skips without PS3DEV; pins every corrected or added sysmodule id by value.
+      - name: Test the sysmodule ids
+        run: bash tests/sdk/sysmodule-ids-test.sh
+
       # Skips without PS3DEV; compiles this tree's PRX headers in every order.
       - name: Test the PRX headers work alone and in either order
         run: bash tests/sdk/prx-headers-test.sh
