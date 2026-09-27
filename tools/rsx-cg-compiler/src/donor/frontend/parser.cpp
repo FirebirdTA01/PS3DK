@@ -58,10 +58,12 @@ std::unique_ptr<TranslationUnit> Parser::parse()
     while (!isAtEnd())
     {
         // THE LOOP MUST MAKE PROGRESS.  error() records a diagnostic and sets
-        // panicMode; it does not throw and it does not consume a token, so a
-        // declaration that fails WITHOUT advancing leaves the cursor where it
-        // was and this loop calls it again on the same token, for ever.  The
-        // catch below never fires, because nothing here throws.
+        // panicMode; below the error cap it does not throw and it does not
+        // consume a token, so a declaration that fails WITHOUT advancing
+        // leaves the cursor where it was and this loop would call it again on
+        // the same token, for ever.  Only reaching config.maxErrors makes
+        // error() throw (and set 'abandoned'); the catch below then unwinds
+        // to the 'abandoned' break.
         //
         // That is not hypothetical: ANY unknown identifier in type position
         // hung the compiler outright - 'uniform bogusType t', or a local
