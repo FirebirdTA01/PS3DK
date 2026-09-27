@@ -16,13 +16,182 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.16.0] — 2026-09-26
+
+### Changed
+
+- **Platform macros are predefined; code that tests them may take a new
+  path.**  Both compilers now predefine `__CELLOS_LV2__` and
+  `__STRICT_ALIGNED`.  The PPU compiler also defines `__LP32__`, `_LP32` and
+  `__POINTER_32BIT__` in the default ILP32 model (not under `-mlp64`); the SPU
+  compiler defines `__LP32__`, `_LP32`, `__DOUBLE_ACCURATE__` and
+  `__FLOAT_FAST__`.  Code that selects a PS3 or a host branch on
+  `__CELLOS_LV2__` now takes the PS3 branch.  `-U` still removes any of them,
+  and the last `-mlp64`/`-mno-lp64` decides the PPU set (GCC patch 0046, SPU
+  GCC patch 0008).
+- **SPU `cellSyncQueuePush`, `TryPush`, `Pop`, `TryPop`, `Peek` and `TryPeek`
+  take a DMA tag.**  The signature is now `(ea, buffer, tag)`; the element is
+  moved on the caller's tag instead of the one stored at `Initialize`, and a
+  tag above 31 returns `CELL_SYNC_ERROR_INVAL`.  SPU code calling the
+  two-argument form must add the tag.
+- **SPU `main` receives the fourth thread argument.**  `crt1.o` now passes all
+  four 64-bit words of the SPU thread argument (`$3`-`$6`) to `main`; a
+  four-argument `main` used to read a stale register in its last parameter
+  (SPU newlib patch 0005).  `crt2.o` is unchanged.
+- **`sys_spu_thread_argument_t` is its own type with `arg1`..`arg4`
+  members.**  It was a typedef of PSL1GHT's `sysSpuThreadArgument`
+  (`arg0`..`arg3`); code using the snake_case name with `arg0` must use
+  `arg1`..`arg4`.  `sys_spu_thread_argument_initialize` zeroes it, and
+  `sys_spu_thread_initialize` accepts it.  `sysSpuThreadArgument` is
+  unchanged.
+- **Vectormath C++ types lose their user-declared copy assignment.**
+  `Vector3`, `Vector4`, `Point3`, `Quat`, `floatInVec` and `boolInVec` use the
+  implicit copy assignment and are now trivially copyable, which removes the
+  deprecated-copy warnings.  Assignment behaves as before; only code that
+  names the operator (`&T::operator=`) stops compiling.
+- **`CELL_SDK_VERSION` is defined** by `<sdk_version.h>`, so code that gates
+  features on it now sees them; `PS3SDK_VERSION_*` still names the PS3DK
+  release.  With it defined, `psglRescAdjustAspectRatio` is the inline in
+  `<PSGL/psgl.h>` that calls `cellRescAdjustAspectRatio`, rather than an empty
+  function in `libPSGL`.
+- **SPU SPURS links select their startup through the driver.**
+  `-mspurs-task`, `-mspurs-job` and `-mspurs-job-initialize` pick the startup
+  object, service archive and linker script for each mode; ordinary SPU links
+  are unchanged, and the full `libspurs_task.a`, `libspurs_job.a` and
+  `libspurs_jq.a` remain for manual links.  Job links defining `__SPU_GUID`
+  get a content-derived 64-bit program identity.  Conflicting SPURS modes,
+  and SPURS modes combined with `-shared` or `-r`, are refused (SPU GCC patch
+  0006, SPU binutils patches 0002-0003).  An initialized job may define
+  `cellSpursJobMain2` directly or `cellSpursJobQueueMain`.
+- **SPU `-shared` links fail with an explicit "SPUDLL shared links are not
+  supported" error** instead of silently producing an ordinary executable
+  (SPU GCC patch 0007).
+- **`cellGcmCgGetParameterResource` returns `CGresource`** instead of
+  `uint32_t`.
+- **`<cell/pngdec.h>` moved to `<cell/codec/pngdec.h>`**, beside the JPEG
+  decoder; the old path forwards to it.
+- **CMake projects rebuild every object once after an SDK upgrade.**  Each
+  C/C++ compile force-includes a stamp generated from `$PS3DK/VERSION`, so a
+  new SDK version recompiles objects that older headers produced instead of
+  linking them against new ones.  A build tree configured before this
+  release needs one clean build.
+- **PSL1GHT's installer no longer overwrites SDK-owned headers.**  PSL1GHT is
+  installed by `scripts/install-psl1ght.sh`, and the SDK now owns
+  `<sys/mutex.h>`, `<sys/cond.h>`, `<sys/event_queue.h>`, `<sys/sem.h>`,
+  `<sys/systime.h>`, `<sys/spu.h>`, `<sys/prx.h>` and `<lv2/prx.h>`.
+
+### Added
+
+- **SPU `libsheap`**: the shared heap (`cellSheapInitialize`, `Allocate`,
+  `Free`, `QueryMax`, `QueryFree`) and keyed objects
+  (`cellKeySheapInitialize` and `New`/`Delete` for buffer, mutex, barrier,
+  queue, rwm and semaphore), with `<cell/sheap.h>` and `<cell/sheap/*.h>` for
+  SPU.  The heap layout is shared with the PPU `cellSheap`, so one heap can be
+  used from both sides.  Link with `-lsheap -lsync -ldma -latomic`.
+- **SPU fiber contexts in `libfiber`**: `cellFiberSpuContextInitialize`,
+  `Run`, `Self` and `Switch` (checked and unchecked) from
+  `<cell/fiber/spu_context.h>`, for cooperative switching inside one SPU
+  program.  The SPU `libfiber.a` was previously empty.  The minimum stack is
+  80 bytes.
+- **SPU SPURS headers**: SPU code including `<cell/spurs.h>` and
+  `<cell/spurs/*.h>` gets the SPU forms of the task, event flag, barrier,
+  queue, semaphore, lock-free queue and job-queue port interfaces, with 64-bit
+  effective addresses, `cellSpursGetSpuGuid` and `CELL_SPURS_PPU_SYM`.  The
+  port2 flush/sync calls take a DMA tag.
+- **SPU `libspurs.a`**: `-lspurs` on SPU links the SPURS module, task,
+  semaphore and signalling services without a startup object, so it links in
+  ordinary, task and job modes.
+- **`cellSpursTaskMain` task entry.**  A SPURS task may define
+  `int cellSpursTaskMain(qword, uint64_t)`; its return value becomes the task
+  exit code.  A task defining `cellSpursMain` keeps its existing behaviour.
+- **SPU `libatomic.a`** with an external definition of each of the twenty
+  `cellAtomic*` operations, for code that declares them itself or takes their
+  addresses.
+- **`cgnv2elf`**, a host tool that converts one or more `.vpo`/`.fpo` files, or
+  a folder of them, into the ELF shader archive loaded by PSGL.  `-u` is
+  refused.  Installed with the host tools on Windows and Linux.
+- **POSIX clocks and sleep in `librt`**: `clock_gettime` (`CLOCK_REALTIME`,
+  `CLOCK_MONOTONIC`) and `nanosleep` in `<time.h>`, and
+  `pthread_attr_setschedpolicy` (`SCHED_OTHER` only) and
+  `pthread_attr_setinheritsched` (`PTHREAD_INHERIT_SCHED` only).  See
+  `docs/posix-time.md`.
+- **AltiVec keywords under strict `-std` modes.**  `vector`, `pixel` and
+  `bool` are recognised as AltiVec keywords with `-std=c++98`, `-std=c11` and
+  the other non-GNU modes, so vector math and simdmath code builds there;
+  identifiers named `vector` and `std::vector` still work (GCC patch 0042).
+- **`<simdmath.h>`, `<sdk_version.h>` and `<cell/sdk_version.h>` for SPU**, and
+  `<cell/sheap/error.h>` and `<cell/sheap/sheap_types.h>` in both trees.
+- **`__CELL_GCM_H__`** is defined by `<cell/gcm.h>`.
+- **Regression rows** `posix-time`, `altivec-strict-std`, `minimal-toc`,
+  `spu-fiber-context`, `spu-thread-args` and the seven `spu-sheap` rows.
+
 ### Fixed
 
-- SPU assembler: `nop 127` now emits one four-byte instruction instead of
-  being interpreted as a padding directive that emits 128 bytes. This
-  prevents code inflation and branch-hint relocation failures in affected
-  GCC-generated code. Explicit `.nop N` directives keep their padding
-  behavior. Rebuild SPU objects and libraries to obtain the corrected code.
+- **Applications defining their own `audioInit` or `audioQuit` failed to
+  link** against `libaudio_stub`; those names are now weak there.
+- **`-mminimal-toc` failed to compile under ILP32** for any function that
+  touched the TOC (GCC patch 0043).
+- **Relative paths ignored the working directory.**  After `chdir`, a relative
+  `open`, `fopen`, `stat`, `mkdir`, `rmdir`, `unlink`, `rename`, `link`,
+  `chmod`, `truncate`, `utime` or `opendir` (and `std::ifstream`) failed.  They
+  now join the path to the working directory and behave exactly as the
+  absolute spelling does; a `NULL` path sets `EFAULT`.
+- **SPU `cellSyncMutex` did not exclude the PPU.**  The SPU side used its own
+  flag word; it now takes tickets on the same 32-bit ticket word as the PPU.
+- **SPU `cellSyncQueueInitialize` and `cellSyncRwmInitialize` lost their
+  descriptor** (element size, depth, buffer address, tag) before storing it.
+- **SPU `cellSyncBarrierInitialize` accepted 0 or more than 32767
+  participants**; it now returns `CELL_SYNC_ERROR_INVAL` (and
+  `CELL_SYNC_ERROR_ALIGN` for a misaligned word) without writing.
+- **Code including `<wchar.h>` before `<stdarg.h>` or `<cstdarg>` did not
+  compile**; the SDK's `<stdarg.h>` now forwards on every inclusion.
+- **Header warnings under `-Werror`.**  Every installed PPU header now
+  compiles on its own in C and C++17, both ABIs, under
+  `-Wall -Wextra -Werror`: the `CELL_GCM_DEBUG_LEVEL*` and
+  `CELL_GCM_ZCULL_Z24S8` redefinitions, unused locals in
+  `<cell/gcm/gcm_cg_bridge.h>`, `register` in `<ppu-asm.h>` under C++17,
+  pointer-size casts in the syscall wrappers, and missing includes in
+  `<cell/dbgfont.h>` and `<cell/sail/player.h>` are fixed.
+- **`<sys/prx.h>` and `<lv2/prx.h>` could not be included together**, and no
+  ILP32 program could include `<sys/prx.h>`.  Each now has its own guard and
+  includes the other; `sysPrxUserPchar` is the type name, with
+  `sysPrxUser_pchar` kept as an alias.
+- **SPU `<cell/atomic.h>` failed to compile in C++** in the lock-line and
+  conditional-store operations.
+- **SPU C++ vector math failed with "simdmath.h: No such file"**, and its
+  load/store helpers lacked `<stdint.h>`.
+- **SPU samples failed with "sdk_version.h: No such file".**
+- **`rsx-cg-compiler` looped until out of memory on an unknown type name**; it
+  now reports the type and stops.  `texobj1D`, `texobj2D`, `texobj3D`,
+  `texobjCUBE` and `texobjRECT` are accepted as the matching sampler types.
+- **`rsx-cg-compiler` failed to build with GCC 12** (missing `<cstddef>`).
+- **C SPU images built with `ps3_add_spu_image` warned about `-fno-rtti`**,
+  failing `-Werror` builds; it is now passed to C++ sources only.
+- **The SPU assembler turned `nop 127` into 128 bytes of padding** instead
+  of one 4-byte instruction, inflating compiler-generated SPU code and
+  failing to assemble some code with an out-of-range branch hint.  Bare
+  `nop` is now always the instruction; `.nop N` keeps its padding meaning
+  (SPU binutils patch 0004).  Rebuild SPU objects and libraries to get the
+  smaller code.
+- **C++ code that included the vectormath headers and then used a
+  `vector bool` type failed to compile** ("two or more data types in
+  declaration"), in every language mode; the headers no longer undefine
+  the AltiVec `bool` keyword.
+
+### Known issues
+
+- `CELL_SPURS_PPU_SYM` compiles, but the SDK's SPU embedding paths
+  (`ps3_add_spu_image`, `bin2s`, `spu-elf-to-ppu-obj`) do not yet carry its
+  relocation into the PPU object, so the word reads an unresolved address.
+- The PPU compiler miscounts 32-bit inequality tests that are counted in a
+  loop against a constant with its top bit set, for example
+  `bad += (x != 0xff102030u)` or `if (x != 0xff102030u) bad++;`, at `-O1` and
+  above in both ABIs, for signed and unsigned values: equal values can be
+  counted as different.  A single comparison used directly, such as
+  `return x != K;`, is compiled correctly.  Until the fix, declare such a
+  counter `volatile`, which keeps the comparison 32-bit.
+- `libsimdmath` is installed for ILP32 only; `-mlp64` programs that call the
+  `<simdmath.h>` functions do not link.
 
 ## [v0.15.0] — 2026-09-25
 
