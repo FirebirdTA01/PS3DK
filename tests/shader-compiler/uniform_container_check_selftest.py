@@ -25,7 +25,40 @@ def codes(blob):
     return {x['code'] for x in check_container(blob)['issues']}
 
 
+def check_allowance_keys():
+    """Descriptive defect keys must not weaken exact finding accounting."""
+    entry = dict(source='fixture.cg', profile='sce_vp_rsx', record='u',
+                 paramno=0, code='unread_uniform_register', register=7,
+                 card='unused-vp-uniform-metadata', reason='fixture only', count=1)
+    findings = collections.Counter({issue_key(entry, entry): 1})
+    assert not allowance_delta(findings, [entry]), 'descriptive key must be accepted'
+    for field in ('card', 'reason'):
+        for value in (None, '', '   ', 7):
+            changed = dict(entry, **{field: value})
+            try:
+                allowance_delta(findings, [changed])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('invalid %s accepted: %r' % (field, value))
+        changed = dict(entry)
+        del changed[field]
+        try:
+            allowance_delta(findings, [changed])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('missing %s accepted' % field)
+    assert allowance_delta(collections.Counter(), [entry]), 'stale allowance must fail'
+    assert allowance_delta(findings + findings, [entry]), 'extra occurrence must fail'
+    changed = dict(entry, register=8)
+    assert allowance_delta(collections.Counter({issue_key(changed, changed): 1}), [entry]), (
+        'changed register must fail')
+    print('uniform-allowance-keys: PASS (14 checks)')
+
+
 def main(compiler):
+    check_allowance_keys()
     with tempfile.TemporaryDirectory(prefix='ps3dk-uniform-crosscheck-') as tmp:
         work = pathlib.Path(tmp)
 
@@ -104,7 +137,7 @@ def main(compiler):
         source_key = {'source': 'selftest.cg', 'profile': 'sce_vp_rsx'}
         findings = collections.Counter(issue_key(source_key, i) for i in report['issues'])
         allowances = [dict(source_key, **{k: v for k, v in i.items() if k not in ('detail', 'status')},
-                           card='t_25fa9e31', reason='self-test only', count=1) for i in report['issues']]
+                           card='uniform-container-consistency', reason='self-test only', count=1) for i in report['issues']]
         assert not allowance_delta(findings, allowances)
         struct.pack_into('>I', changed, pos + 12, 11)
         more = collections.Counter(issue_key(source_key, i) for i in check_container(changed)['issues'])

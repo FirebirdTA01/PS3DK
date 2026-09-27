@@ -63,10 +63,12 @@ The local driver can additionally take `--sdk-csv`, `--sdk-root` and another
 `uniform_container_allowlist.json` is a **day-one baseline**, not an allowance
 for growth. Each entry pins source/profile/record/parameter number, diagnostic,
 concrete register and instruction offset/source slot where available, count,
-card and reason. A new or changed finding fails, as does an obsolete allowance.
+defect key and reason. The historical `card` field name is retained for local
+allowlists; its value is a required nonblank descriptive key, independent of a
+board. A new or changed finding fails, as does an obsolete allowance.
 No default/inline mismatch or orphan read is allowed by the initial baseline.
-Unused scalar/vector metadata is tracked by t_666de9fd; unresolved indirect
-address interpretation is t_269f03d7. Updating the baseline requires review of
+Unused scalar/vector metadata is tracked by unused-vp-uniform-metadata; unresolved indirect
+address interpretation is indirect-uniform-address-analysis. Updating the baseline requires review of
 the measured entries, not regenerating it to make a failing run green.
 
 For a durable local census, select a fresh output directory:

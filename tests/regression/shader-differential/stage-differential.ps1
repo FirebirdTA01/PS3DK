@@ -78,7 +78,7 @@ param(
     # the fix it waits for (CF-2's discard shaders, 2026-09-02).
     [switch]$ReferenceProbeRefused,
     # Corpus-relative paths to leave out of the sweep, one per line with
-    # the board id that says why (default <rig>/reference-corpus-exclude.txt).
+    # the defect key that says why (default <rig>/reference-corpus-exclude.txt).
     # A shader goes here only when it poisons the run for every row after
     # it; a plain mismatch or refusal stays in and is reported.
     [string]$ReferenceCorpusExclude = "",
@@ -156,7 +156,7 @@ param(
     # branch: the stager read the shared tree's lists, found no such
     # shader, and either aborted or, worse, judged the shared tree's copy
     # of a same-named file under the branch's compiler and called that a
-    # verdict (t_b1269234; three void builds on 2026-09-02 came from the
+    # verdict (differential-stage-roots; three void builds on 2026-09-02 came from the
     # same coupling in the other direction).
     #
     # With -RepoRoot, EVERYTHING THE JUDGED TREE OWNS resolves under it:
@@ -488,7 +488,7 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     $ok = ($rc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
     if (-not $ok) {
         if ($NoThrow) { return $false }
-        # Name the flags too: a flagged curated row (t_3bf3ce95) that refuses on
+        # Name the flags too: a flagged curated row (general-lowering-default) that refuses on
         # a compiler without its flag must say WHICH flag, not just which shader.
         $allFlags = @(@($flags) + @($pathFlags)) | Where-Object { $_ }
         $flagNote = if ($allFlags.Count) { " [flags: $($allFlags -join ' ')]" } else { "" }
@@ -731,7 +731,7 @@ if ($ReferenceCompiler) {
     $manifest += "B|control-discard-blind|discard_never|controls/discard_blind.fpo|controls/discard_blind.fpo|0"
     Write-Host "stager: discard controls staged (reference-compiled; kill bands of 16 vs 32 columns, and a KIL that never fires)"
 
-    # Every declared output (t_678a4dab): the guest judges COLOR1..3 and
+    # Every declared output (differential-manifest-judging): the guest judges COLOR1..3 and
     # the exported depth, deriving each side's output set from its
     # container, and these ten reference-compiled controls are what prove
     # it can before any row leans on it.  MRT: control-mrt-mismatch
@@ -791,7 +791,7 @@ if ($ReferenceCompiler) {
         "B|control-depthonly-mismatch|depthonly_off|controls/depthonly_ctrl.fpo|controls/depthonly_twin.fpo|0"
     )
     # INSTRUMENT ROWS, not proving rows: they gate nothing, they ASK a
-    # question the declarations cannot answer (t_96daf53b).  Both sides of
+    # question the declarations cannot answer (half-colour-depth-control).  Both sides of
     # each pair are reference-compiled, and what they share is the CONTAINER
     # difference, not a source one: outputFromH0 plus the output
     # instruction's register and precision bits, and nothing else - three
@@ -834,7 +834,7 @@ if ($ReferenceCompiler) {
     # curated shader that refuses is a finding and aborts), while a
     # -GeneralLowering corpus sweep must be able to run without it -
     # discard-blend/fpshader, for one, refuses on the general path until
-    # CF-2 lands (t_91bbd575).
+    # CF-2 lands (general-path-discard).
     $ReferencePairs = Get-ReferencePairsPathForStage `
         -ReferencePairs $ReferencePairs `
         -DefaultPath (Join-Path $rig "reference-pairs.txt") `
@@ -1243,7 +1243,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     $vpChannels = @(@{ key = "cov"; src = "void main(out float4 color : COLOR) { color = float4(1.0f, 1.0f, 1.0f, 1.0f); }" })
     # Spelled v * float4(0.5..) + float4(0.5..), the fused-MAD shape, and
     # the spelling has a history: on 963018a the default path emitted the
-    # literal multiplicand of that MAD as ZERO (t_a1f43b12, found by these
+    # literal multiplicand of that MAD as ZERO (mad-literal-data, found by these
     # very rows on 2026-09-02) and the instrument moved to (v + 1) * 0.5
     # for one evening.  Measured on 6b2f010 (the fix): nine of the thirteen
     # coverage FPs are byte-identical to the reference and stage no
@@ -1284,7 +1284,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
         if (-not $okOurs) {
             # A coverage FP is an instrument, not the program under test:
             # when the default path refuses its shape (fog's
-            # `float4(v,v,v,1) * k + k` - t_45ddb7c6's family, 2026-09-02)
+            # `float4(v,v,v,1) * k + k` - legacy-fog-expression's family, 2026-09-02)
             # compile it on the general path instead, so a VP row declaring
             # the channel is judged rather than reported vp-channel-missing.
             # Both VP containers of a row draw under the SAME coverage FP, so
@@ -1348,7 +1348,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     # rig control proves the guest's synthesis and upload against the
     # host's prediction, and must not rest on the compiler under test (the
     # first version compiled both on our general path, and the row went red
-    # on two of OUR defects - t_a1f43b12's sibling in the VP pool - rather
+    # on two of OUR defects - mad-literal-data's sibling in the VP pool - rather
     # than on anything the control measures).  Our compiler's handling of
     # the same source is the curated vp-reference row sd_vp_auto_ctrl.
     if (-not (Compile-Reference (Join-Path $here "shaders\sd_vp_auto_ctrl.vcg") (Join-Path $controls "vp_auto_ctrl.vpo") -Profile sce_vp_rsx)) { throw "reference compile of sd_vp_auto_ctrl.vcg failed" }

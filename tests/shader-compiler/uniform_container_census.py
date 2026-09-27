@@ -2,7 +2,8 @@
 
 Reports refusals, timeouts and unresolved checks separately. No SDK is required
 by CI. Allowances key source/profile/record/paramno/code/register/offset/slot,
-with a card and an exact count; added findings and obsolete allowances fail.
+with a descriptive defect key and an exact count; added findings and obsolete
+allowances fail. The historical field name `card` is retained for local files.
 """
 import argparse
 import collections
@@ -24,8 +25,9 @@ def allowance_delta(findings, entries):
     """Exact evidence, not a wildcard for everything with the same diagnostic."""
     allowed = {}
     for entry in entries:
-        if not entry.get('card', '').startswith('t_') or not entry.get('reason'):
-            raise ValueError('allowance requires card and reason')
+        if any(not isinstance(entry.get(field), str) or not entry[field].strip()
+               for field in ('card', 'reason')):
+            raise ValueError('allowance requires a defect key (card) and reason')
         key = issue_key(entry, entry)
         if key in allowed or not isinstance(entry['count'], int) or entry['count'] <= 0:
             raise ValueError('duplicate or invalid allowance %r' % (key,))

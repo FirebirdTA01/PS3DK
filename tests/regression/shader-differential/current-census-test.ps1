@@ -29,8 +29,8 @@ try {
     ) -Encoding Ascii
     $exclude = Join-Path $work "reference-corpus-exclude.txt"
     Set-Content -LiteralPath $exclude -Value @(
-        "# path|board id|path|why",
-        "samples/scanlines.fcg|t_de192d41|general|general-path container poisons the sweep"
+        "# path|defect key|path|why",
+        "samples/scanlines.fcg|malformed-scanlines-container|general|general-path container poisons the sweep"
     ) -Encoding Ascii
 
     $bucketMap = Join-Path $work "buckets.csv"

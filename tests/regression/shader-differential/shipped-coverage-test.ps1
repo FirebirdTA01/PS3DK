@@ -18,7 +18,7 @@
 # failure this guards.
 #
 # A shipped shader may be left out only by a reference-corpus-exclude.txt
-# record that carries a board id AND a reason (fields path|board id|path|why).
+# record that carries a defect key AND a reason (fields path|defect key|path|why).
 # A bare path in that file exempts nothing here and is itself a failure:
 # an exclusion without a reason is the denominator shrinking by silence,
 # which is the exact thing this test exists to refuse (review finding,
@@ -34,8 +34,8 @@ function Read-ListPaths([string]$path) {
              ForEach-Object { ($_.Split("|")[0]).Trim() -replace '\\', '/' })
 }
 
-# Exclusion RECORDS, not paths: a record exempts a shader only when its board
-# id and its reason are both present.  A bare path is returned as malformed
+# Exclusion RECORDS, not paths: a record exempts a shader only when its defect
+# key and its reason are both present. A bare path is returned as malformed
 # so the caller can fail on it by name.
 function Read-Exclusions([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "exclude list missing: $path" }
@@ -57,8 +57,8 @@ try {
     Set-Content -LiteralPath $probe -Value @(
         "# comment",
         "samples/x/shaders/bare.vcg",
-        "samples/x/shaders/noreason.vcg|t_00000000|general|",
-        "samples/x/shaders/good.vcg|t_00000000|general|poisons every row after it"
+        "samples/x/shaders/noreason.vcg|synthetic-sweep-poison|general|",
+        "samples/x/shaders/good.vcg|synthetic-sweep-poison|general|poisons every row after it"
     ) -Encoding Ascii
     $r = Read-Exclusions $probe
     # Count FIRST: an array on the left of -ne filters rather than compares, so
@@ -103,7 +103,7 @@ foreach ($s in $shaders) {
 
 $problems = @()
 if ($reasonless.Count -gt 0) {
-    $problems += ("shipped shaders excluded WITHOUT a board id and reason ({0}):`n  {1}" -f $reasonless.Count, ($reasonless -join "`n  "))
+    $problems += ("shipped shaders excluded WITHOUT a defect key and reason ({0}):`n  {1}" -f $reasonless.Count, ($reasonless -join "`n  "))
 }
 if ($missing.Count -gt 0) {
     $problems += ("shipped shaders in no curated list ({0} of {1}):`n  {2}" -f $missing.Count, $shaders.Count, ($missing -join "`n  "))

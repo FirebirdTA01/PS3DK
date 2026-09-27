@@ -1,5 +1,6 @@
 # shader-differential reference-corpus exclusions (increment 3c).
-# fields: corpus-relative path|board id|path|why
+# fields: corpus-relative path|defect key|path|why
+# The defect key is a required stable descriptive name, independent of a board.
 #   path = default | general | both: the lowering path on which the
 #   shader poisons.  A general-path poisoner is NOT excluded from a
 #   default-path sweep (where it may compile fine, or refuse on its own).
@@ -14,4 +15,4 @@
 # (bc65aaa was right by accident until 137dacc refused on the budget).
 # Remove the line when that holds, prove it with a sweep staged with the
 # line lifted, and only after the refusing compiler is on origin/main.
-crystalct-psl1ght/files/samples/graphics/rsx_Basic_Wallpaper/shaders/scanlines.fcg|t_de192d41|general|general-path container is a malformed 7-instruction program; every later draw paints nothing
+crystalct-psl1ght/files/samples/graphics/rsx_Basic_Wallpaper/shaders/scanlines.fcg|malformed-scanlines-container|general|general-path container is a malformed 7-instruction program; every later draw paints nothing
