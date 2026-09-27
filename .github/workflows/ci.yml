@@ -271,6 +271,10 @@ jobs:
       - name: Test the sysmodule ids with the PPU compiler
         run: bash tests/sdk/sysmodule-ids-test.sh
 
+      # Skips without PS3DEV; compiles and links every SPU cellDma name.
+      - name: Test the SPU cellDma surface compiles and links
+        run: bash tests/sdk/spu-celldma-api-test.sh
+
       # Skips without PS3DEV; compiles this tree's PRX headers in every order.
       - name: Test the PRX headers work alone and in either order
         run: bash tests/sdk/prx-headers-test.sh
