@@ -311,6 +311,8 @@ optional  ppu/lib/libsysutil_avconf_ext_stub.a   shipped-for-user-code
 optional  ppu/lib/libsysutil_bgdl_stub.a         shipped-for-user-code
 optional  ppu/lib/libsysutil_userinfo_stub.a     shipped-for-user-code
 optional  ppu/lib/libvdec_stub.a                 shipped-for-user-code
+optional  spu/lib/libatomic.a                    shipped-for-user-code
+optional  spu/lib/libsheap.a                     shipped-for-user-code
 optional  ppu/lib/libdaisy_stub.a                shipped-for-user-code
 optional  ppu/lib/libdbg_libio_stub.a            shipped-for-user-code
 optional  ppu/lib/libfreetype_stub.a             shipped-for-user-code
